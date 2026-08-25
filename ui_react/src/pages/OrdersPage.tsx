@@ -5,15 +5,16 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './OrdersPage.css';
-import { ordersQueryClient } from '../api/orders/order_query_client';
+import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import { contractSigningClient, type ContractSigningStatus } from '../api/orders/contract_signing_client';
 import {
   orderCancellationClient,
   type OrderCancellationPreview,
   type OrderCancellationQuery,
+  type OrderCancellationReceipt,
 } from '../api/orders/order_cancellation_client';
 import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
-import { orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
+import { loadAllOrderOperationalTimelines, orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
 import {
   orderTermsMutationClient,
   type OrderTermsPreview,
@@ -25,7 +26,7 @@ import {
   type ActualStartPreview,
   type ActualStartReceipt,
 } from '../api/orders/order_actual_start_client';
-import type { ActualStart, OrderDetail } from '../api/orders/order_query_schemas';
+import type { ActualStart, FormManagementContext, OrderDetail } from '../api/orders/order_query_schemas';
 import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
 import {
   matchingCandidateWorkflowClient,
@@ -52,7 +53,6 @@ import {
 import {
   indexOperationalTimelines,
   ORDER_STAGE_PROJECTION_UNAVAILABLE,
-  stageCount,
 } from '../adapters/orders/order_stage_projection_adapter';
 import type {
   OrderOperationalTimeline,
@@ -60,6 +60,12 @@ import type {
 } from '../api/orders/order_stage_projection_schemas';
 import { Drawer } from '../components/Drawer';
 import { ContractSigningActions } from '../components/ContractSigningActions';
+import { MatchingScheduleAndAssignmentActions } from '../components/MatchingScheduleAndAssignmentActions';
+import { OrderServiceCompletionActions } from '../components/OrderServiceCompletionActions';
+import {
+  CandidateManualInformationActions,
+  CustomerProfilesManualActions,
+} from '../components/MatchingManualCommunicationActions';
 import {
   ORDER_FILTER_OPTIONS,
   adaptOrderSummaryPage,
@@ -81,6 +87,7 @@ import {
   fetchServiceDatesQuery,
   previewReopenFlow,
   previewServiceDatesFlow,
+  retryReopenApplyFlow,
   retryServiceDatesApplyFlow,
   selectServiceDates,
   updateReopenReason,
@@ -146,8 +153,6 @@ export const OrdersPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [nextPageLoading, setNextPageLoading] = useState(false);
-  const [nextPageError, setNextPageError] = useState<string | null>(null);
 
   // Active drawer orders
   const [matchingOrder, setMatchingOrder] = useState<OrderSummaryCardViewModel | null>(null);
@@ -170,6 +175,8 @@ export const OrdersPage: React.FC = () => {
   const [candidateActionError, setCandidateActionError] = useState<string | null>(null);
   const [candidateActionNotice, setCandidateActionNotice] = useState<string | null>(null);
   const [matchingOrderFacts, setMatchingOrderFacts] = useState<OrderDetail | null>(null);
+  const [matchingFormContext, setMatchingFormContext] = useState<FormManagementContext | null>(null);
+  const [matchingFormContextError, setMatchingFormContextError] = useState(false);
   const [matchingAvailability, setMatchingAvailability] = useState<MatchingAvailability | null>(null);
   const [multiCaregiverSegmentCount, setMultiCaregiverSegmentCount] = useState<2 | 3 | 4>(2);
   const [selectedCandidateStaffIds, setSelectedCandidateStaffIds] = useState<number[]>([]);
@@ -186,7 +193,7 @@ export const OrdersPage: React.FC = () => {
   const [contractSigningStatus, setContractSigningStatus] = useState<ContractSigningStatus | null>(null);
   const [contractQueryError, setContractQueryError] = useState<string | null>(null);
   const [contractCorrectionNotice, setContractCorrectionNotice] = useState<string | null>(null);
-  type ContractWorkbenchTab = 'contract_terms' | 'calendar' | 'cancellation_reopen';
+  type ContractWorkbenchTab = 'contract_terms' | 'calendar' | 'cancellation' | 'reopen';
   const [activeContractTab, setActiveContractTab] = useState<ContractWorkbenchTab>('contract_terms');
   const [contractDocView, setContractDocView] = useState<'contract' | 'spec'>('contract');
   const [contractDocFullscreen, setContractDocFullscreen] = useState(false);
@@ -214,6 +221,9 @@ export const OrdersPage: React.FC = () => {
   const [actualStartError, setActualStartError] = useState<string | null>(null);
   const [cancellationQuery, setCancellationQuery] = useState<OrderCancellationQuery | null>(null);
   const [cancellationPreview, setCancellationPreview] = useState<OrderCancellationPreview | null>(null);
+  const [cancellationReceipt, setCancellationReceipt] = useState<OrderCancellationReceipt | null>(null);
+  const [cancellationReason, setCancellationReason] = useState('');
+  const [cancellationConfirmed, setCancellationConfirmed] = useState(false);
   const [cancellationStatus, setCancellationStatus] = useState<'idle' | 'querying' | 'previewing' | 'applying'>('idle');
   const [cancellationError, setCancellationError] = useState<string | null>(null);
   const [cardProjection, setCardProjection] = useState<OrdersCardProjectionViewModel | null>(null);
@@ -224,8 +234,6 @@ export const OrdersPage: React.FC = () => {
   const currentSummaryRequestRef = useRef<number>(0);
   const currentDrawerRequestRef = useRef<number>(0);
   const summaryControllerRef = useRef<AbortController | null>(null);
-  const nextPageControllerRef = useRef<AbortController | null>(null);
-  const pendingCursorRef = useRef<string | null>(null);
   const drawerControllerRef = useRef<AbortController | null>(null);
   const serviceDatesPreviewControllerRef = useRef<AbortController | null>(null);
   const reopenPreviewControllerRef = useRef<AbortController | null>(null);
@@ -242,7 +250,6 @@ export const OrdersPage: React.FC = () => {
     currentSummaryRequestRef.current += 1;
     currentDrawerRequestRef.current += 1;
     summaryControllerRef.current?.abort();
-    nextPageControllerRef.current?.abort();
     drawerControllerRef.current?.abort();
     serviceDatesPreviewControllerRef.current?.abort();
     reopenPreviewControllerRef.current?.abort();
@@ -253,25 +260,28 @@ export const OrdersPage: React.FC = () => {
   // Load summaries from live API
   const fetchOrderSummaries = useCallback(async () => {
     summaryControllerRef.current?.abort();
-    nextPageControllerRef.current?.abort();
-    pendingCursorRef.current = null;
     const controller = new AbortController();
     summaryControllerRef.current = controller;
     const requestId = ++currentSummaryRequestRef.current;
     setLoading(true);
     setError(null);
-    setNextPageError(null);
-    setNextPageLoading(false);
     setStageProjectionError(null);
 
     try {
       const queryText = searchQuery.trim();
       const [summaryResult, stageResult] = await Promise.allSettled([
-        ordersQueryClient.getOrderSummaries(
-          { page_size: queryText ? 200 : 50, ...(queryText ? { query_text: queryText } : {}) },
+        loadAllOrderSummaries(
+          ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
+          { page_size: 200, lifecycle_scope: 'unfinished', ...(queryText ? { query_text: queryText } : {}) },
           { signal: controller.signal },
         ),
-        orderStageProjectionClient.getOperationalTimelines({ page_size: queryText ? 200 : 50 }, { signal: controller.signal }),
+        queryText
+          ? Promise.resolve(null)
+          : loadAllOrderOperationalTimelines(
+            orderStageProjectionClient.getOperationalTimelines.bind(orderStageProjectionClient),
+            { page_size: 200, lifecycle_scope: 'unfinished' },
+            { signal: controller.signal },
+          ),
       ]);
       if (summaryResult.status === 'rejected') throw summaryResult.reason;
       if (requestId === currentSummaryRequestRef.current) {
@@ -281,9 +291,10 @@ export const OrdersPage: React.FC = () => {
         if (queryText) {
           // The stage endpoint has no query_text contract. A searched card stays operable,
           // while stage filters remain disabled instead of treating unrelated rows as an error.
+          setSelectedStage('全部');
           setStagePage(null);
           setStageIndex(new Map());
-        } else if (stageResult.status === 'fulfilled') {
+        } else if (stageResult.status === 'fulfilled' && stageResult.value !== null) {
           try {
             const indexedStages = indexOperationalTimelines(stageResult.value, rawPage);
             setStagePage(stageResult.value);
@@ -296,13 +307,14 @@ export const OrdersPage: React.FC = () => {
         } else {
           setStagePage(null);
           setStageIndex(new Map());
-          setStageProjectionError(stageResult.reason instanceof Error ? stageResult.reason.message : ORDER_STAGE_PROJECTION_UNAVAILABLE);
+          const stageReason = stageResult.status === 'rejected' ? stageResult.reason : null;
+          setStageProjectionError(stageReason instanceof Error ? stageReason.message : ORDER_STAGE_PROJECTION_UNAVAILABLE);
         }
       }
     } catch (err) {
       if (requestId === currentSummaryRequestRef.current) {
         const message = err instanceof Error ? err.message : '載入訂單列表失敗';
-        setError(message);
+        setError(`訂單清單載入未完成：${message}`);
       }
     } finally {
       if (requestId === currentSummaryRequestRef.current) {
@@ -322,55 +334,6 @@ export const OrdersPage: React.FC = () => {
       summaryControllerRef.current?.abort();
     };
   }, [fetchOrderSummaries]);
-
-  const fetchNextOrderSummaries = async () => {
-    const cursor = pageData?.nextCursor;
-    if (!cursor || pendingCursorRef.current === cursor) return;
-    nextPageControllerRef.current?.abort();
-    const controller = new AbortController();
-    nextPageControllerRef.current = controller;
-    pendingCursorRef.current = cursor;
-    setNextPageLoading(true);
-    setNextPageError(null);
-
-    try {
-      const [summaryResult, stageResult] = await Promise.allSettled([
-        ordersQueryClient.getOrderSummaries({ after_case_no: cursor }, { signal: controller.signal }),
-        orderStageProjectionClient.getOperationalTimelines({ page_size: 50, after_case_no: cursor }, { signal: controller.signal }),
-      ]);
-      if (controller.signal.aborted || pendingCursorRef.current !== cursor) return;
-      if (summaryResult.status === 'rejected') throw summaryResult.reason;
-      const rawPage = summaryResult.value;
-      const adapted = adaptOrderSummaryPage(rawPage);
-      setPageData((current) => {
-        if (!current || current.nextCursor !== cursor) return current;
-        const itemsByCaseNo = new Map(current.items.map((item) => [item.id, item]));
-        adapted.items.forEach((item) => itemsByCaseNo.set(item.id, item));
-        const items = [...itemsByCaseNo.values()];
-        return { ...adapted, items, loadedCount: items.length };
-      });
-      if (stageResult.status === 'fulfilled') {
-        try {
-          const nextIndex = indexOperationalTimelines(stageResult.value, rawPage);
-          setStagePage(stageResult.value);
-          setStageIndex((current) => new Map([...current, ...nextIndex]));
-        } catch (stageError) {
-          setStageProjectionError(stageError instanceof Error ? stageError.message : ORDER_STAGE_PROJECTION_UNAVAILABLE);
-        }
-      } else {
-        setStageProjectionError(stageResult.reason instanceof Error ? stageResult.reason.message : ORDER_STAGE_PROJECTION_UNAVAILABLE);
-      }
-    } catch (err) {
-      if (!controller.signal.aborted && pendingCursorRef.current === cursor) {
-        setNextPageError(err instanceof Error ? err.message : '載入下一頁訂單失敗');
-      }
-    } finally {
-      if (pendingCursorRef.current === cursor) {
-        pendingCursorRef.current = null;
-        setNextPageLoading(false);
-      }
-    }
-  };
 
   const beginDrawerRequest = () => {
     drawerControllerRef.current?.abort();
@@ -421,7 +384,7 @@ export const OrdersPage: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <h3 className="card-projection-title">📋 案件聯絡、條款與指派資料</h3>
           {cardProjection && (
-            <span className="card-projection-badge">SSOT 根事實</span>
+            <span className="card-projection-badge">正式案件資料</span>
           )}
         </div>
         <span className="card-projection-subtitle">
@@ -573,7 +536,7 @@ export const OrdersPage: React.FC = () => {
         new_actual_start_date: actualStartDraft,
       }));
     } catch (previewError) {
-      setActualStartError(previewError instanceof Error ? previewError.message : '實際開工日 Preview 失敗。');
+      setActualStartError(previewError instanceof Error ? previewError.message : '無法檢查實際開工日影響。');
     } finally {
       setActualStartStatus('idle');
     }
@@ -600,7 +563,7 @@ export const OrdersPage: React.FC = () => {
       setActualStartQuery(observed);
       setActualStartDraft(observed.current_actual_start_date ?? observed.planned_start_date);
     } catch (applyError) {
-      setActualStartError(applyError instanceof Error ? applyError.message : '實際開工日 Apply 失敗。');
+      setActualStartError(applyError instanceof Error ? applyError.message : '無法確認實際開工日。');
     } finally {
       setActualStartStatus('idle');
     }
@@ -616,8 +579,12 @@ export const OrdersPage: React.FC = () => {
     setCancelOrder(null);
     setReopenOrder(null);
     setMatchingOrder(order);
-    setMatchingDetail(null);
+    if (!options?.preserveCandidateAction) {
+      setMatchingDetail(null);
+    }
     setMatchingDetailError(null);
+    setMatchingFormContext(null);
+    setMatchingFormContextError(false);
     setActivePlanQueryError(null);
     setMatchingContractQueryError(null);
     setMatchingCorrectionNotice(null);
@@ -641,12 +608,13 @@ export const OrdersPage: React.FC = () => {
     const { controller, requestId } = beginDrawerRequest();
 
     try {
-      const [detailRes, assignmentPlanRes, termsRes, candidatePoolRes, activePlanRes] = await Promise.allSettled([
+      const [detailRes, assignmentPlanRes, termsRes, candidatePoolRes, activePlanRes, formContextRes] = await Promise.allSettled([
         ordersQueryClient.getOrderDetail(order.id, { signal: controller.signal }),
         ordersQueryClient.getAssignmentPlan(order.id, { signal: controller.signal }),
         ordersQueryClient.getOrderTerms(order.id, { signal: controller.signal }),
         candidateContactPoolClient.query(order.id, { signal: controller.signal }),
         waitingDepositLockClient.queryPlan(order.id, controller.signal),
+        ordersQueryClient.getFormManagementContext(order.id, { signal: controller.signal }),
       ]);
 
       if (requestId !== currentDrawerRequestRef.current) return;
@@ -685,6 +653,10 @@ export const OrdersPage: React.FC = () => {
 
       if (requestId === currentDrawerRequestRef.current) {
         setMatchingOrderFacts(detailRes.status === 'fulfilled' ? detailRes.value : null);
+        const formContextReady = formContextRes.status === 'fulfilled'
+          && formContextRes.value.case_no === order.id;
+        setMatchingFormContext(formContextReady ? formContextRes.value : null);
+        setMatchingFormContextError(!formContextReady);
         setMatchingDetail(matchingQueriesReady ? adaptMatchingWorkbenchDrawer({
           caseNo: order.id,
           assignmentPlan,
@@ -695,11 +667,13 @@ export const OrdersPage: React.FC = () => {
           // visible prevents a stale UI from offering a second formal plan.
           activePlan: activePlanRes.status === 'fulfilled' ? activePlan : null,
           customerDecision: contactState?.customer_decision,
-          customerProfilesStatus: contactState?.customer_profiles_status,
+          customerProfilesStatus: contactState?.customer_profiles_manual_confirmation
+            ? 'manually_confirmed'
+            : contactState?.customer_profiles_status,
         }) : null);
         setMatchingDetailError(matchingQueriesReady ? null : '正式排班資料載入失敗，請關閉後重試。');
         setMatchingCorrectionNotice((termsHistoricalGap || assignmentHistoricalGap) && matchingQueriesReady
-          ? '此歷史案件缺少 Client Finance 根事實；既有 Scheduling 指派來源仍可檢視，料理、服務時段與完整排班 projection 保持待補正。'
+          ? '此歷史案件缺少客戶帳務資料；既有排班指派仍可檢視，料理、服務時段與完整排班保持待補正。'
           : null);
         setMatchingAssignmentPlanCorrection(assignmentHistoricalGap && matchingQueriesReady);
         setActivePlanQueryError(activePlanFailed
@@ -733,8 +707,8 @@ export const OrdersPage: React.FC = () => {
       await handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true });
       setCandidateActionNotice(
         result.status === 'queued'
-          ? `訂單資訊-${infoType} 已建立可靠發送任務 #${result.line_task_id}。`
-          : `訂單資訊-${infoType} 已由既有冪等任務受理。`,
+          ? `訂單資訊-${infoType} 已排入發送；尚未代表 LINE 已送達。`
+          : `訂單資訊-${infoType} 已由既有發送工作受理。`,
       );
     } catch (caught) {
       setCandidateActionError(
@@ -911,7 +885,7 @@ export const OrdersPage: React.FC = () => {
         throw new Error('正式媒合方案建立後 active plan 回讀不一致，請重新查詢。');
       }
       await handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true });
-      setCandidateActionNotice(`已回讀確認正式單月嫂方案 #${plan.plan_id}（版本 ${plan.version}）。`);
+      setCandidateActionNotice('正式單月嫂方案已建立並完成回讀。');
     } catch (caught) {
       setCandidateActionError(caught instanceof Error ? caught.message : '建立正式單月嫂方案失敗。');
     } finally {
@@ -947,7 +921,7 @@ export const OrdersPage: React.FC = () => {
         throw new Error('正式多月嫂方案建立後 active plan 回讀不一致，請重新查詢。');
       }
       await handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true });
-      setCandidateActionNotice(`已回讀確認正式 ${plan.segments.length} 段多月嫂方案 #${plan.plan_id}（版本 ${plan.version}）。`);
+      setCandidateActionNotice(`正式 ${plan.segments.length} 段多月嫂方案已建立並完成回讀。`);
     } catch (caught) {
       setCandidateActionError(caught instanceof Error ? caught.message : '建立正式多月嫂方案失敗。');
     } finally {
@@ -1013,7 +987,7 @@ export const OrdersPage: React.FC = () => {
       }
       await handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true });
       setResumeReceipt(receipt);
-      setCandidateActionNotice(`已建立客戶履歷可靠發送任務 #${receipt.line_delivery_task_id ?? '待投影'}，等待客戶確認。`);
+      setCandidateActionNotice('客戶履歷已排入發送；尚未代表 LINE 已送達，請等待客戶確認。');
     } catch (caught) {
       setCandidateActionError(
         caught instanceof ApiHttpError && caught.status === 409
@@ -1055,7 +1029,7 @@ export const OrdersPage: React.FC = () => {
         throw new Error('客戶決策回讀未取得已接受方案，請重新載入。');
       }
       await handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true });
-      setCandidateActionNotice(`已回讀確認客戶接受正式媒合方案 #${observed.plan.id}。`);
+      setCandidateActionNotice('客戶接受正式媒合方案的紀錄已完成回讀。');
     } catch (caught) {
       setCandidateActionError(caught instanceof Error ? caught.message : '補登客戶配對決策失敗。');
     } finally {
@@ -1109,10 +1083,10 @@ export const OrdersPage: React.FC = () => {
       const preview = await waitingDepositLockClient.preview(matchingOrder.id, activePlan.planId);
       setWaitingLockPreview(preview);
       setCandidateActionNotice(preview.apply_allowed
-        ? `等待訂金鎖 Preview 已就緒：${preview.service_day_count} 個服務日、${preview.buffer_day_count} 個防撞期日。`
-        : '等待訂金鎖 Preview 未通過，請先處理衝突。');
+        ? `等待訂金鎖影響檢查已完成：${preview.service_day_count} 個服務日、${preview.buffer_day_count} 個防撞期日。`
+        : '等待訂金鎖影響檢查未通過，請先處理衝突。');
     } catch (caught) {
-      setCandidateActionError(caught instanceof Error ? caught.message : '等待訂金鎖 Preview 失敗。');
+      setCandidateActionError(caught instanceof Error ? caught.message : '無法檢查等待訂金鎖影響。');
     } finally {
       setCandidateActionKey(null);
     }
@@ -1135,7 +1109,7 @@ export const OrdersPage: React.FC = () => {
       }
       setWaitingLockReceipt(receipt);
       await handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true });
-      setCandidateActionNotice(`已回讀確認等待訂金鎖 #${receipt.lock_id}。`);
+      setCandidateActionNotice('等待訂金檔期鎖已套用並完成回讀。');
     } catch (caught) {
       setCandidateActionError(caught instanceof Error ? caught.message : '等待訂金鎖套用失敗。');
     } finally {
@@ -1169,7 +1143,7 @@ export const OrdersPage: React.FC = () => {
         && (termsHistoricalGap || completionHistoricalGap);
       if (historicalCorrectionReady) {
         setContractCorrectionNotice(
-          '此案件缺少 Client Finance 契約與定金根事實，已隔離為歷史資料待補正；目前可檢視來源投影，但不可預覽或套用條款。'
+          '此案件缺少客戶帳務的契約與定金資料，已隔離為歷史資料待補正；目前可檢視已有資料，但不可預覽或套用條款。'
         );
         return;
       }
@@ -1336,7 +1310,7 @@ export const OrdersPage: React.FC = () => {
       setActualStartQuery(actualStart);
       setActualStartDraft(actualStart?.current_actual_start_date ?? actualStart?.planned_start_date ?? '');
       if (actualStartRes.status === 'rejected') {
-        setActualStartError('實際開工日根事實查詢失敗，請關閉後重試。');
+        setActualStartError('實際開工日查詢失敗，請關閉後重試。');
       }
       const serviceDates = serviceDatesRes.status === 'fulfilled' ? serviceDatesRes.value : null;
       const calendarDetail = calendarDetailRes.status === 'fulfilled' ? calendarDetailRes.value : null;
@@ -1373,6 +1347,9 @@ export const OrdersPage: React.FC = () => {
     setDrawerLoading(true);
     setCancellationQuery(null);
     setCancellationPreview(null);
+    setCancellationReceipt(null);
+    setCancellationReason('');
+    setCancellationConfirmed(false);
     setCancellationError(null);
     setCancellationStatus('querying');
     try {
@@ -1440,11 +1417,10 @@ export const OrdersPage: React.FC = () => {
 
     if (initialTab === 'calendar') {
       await loadCalendarTabQueries(order);
-    } else if (initialTab === 'cancellation_reopen') {
-      await Promise.allSettled([
-        loadCancellationTabQueries(order),
-        loadReopenTabQueries(order),
-      ]);
+    } else if (initialTab === 'cancellation') {
+      await loadCancellationTabQueries(order);
+    } else if (initialTab === 'reopen') {
+      await loadReopenTabQueries(order);
     } else {
       await loadContractTabQueries(order);
     }
@@ -1458,10 +1434,11 @@ export const OrdersPage: React.FC = () => {
       void loadContractTabQueries(activeOrder);
     } else if (tab === 'calendar' && actualStartQuery === null) {
       void loadCalendarTabQueries(activeOrder);
-    } else if (tab === 'cancellation_reopen') {
+    } else if (tab === 'cancellation') {
       if (cancellationQuery === null) {
         void loadCancellationTabQueries(activeOrder);
       }
+    } else if (tab === 'reopen') {
       if (!reopenDraft?.previewView) {
         void loadReopenTabQueries(activeOrder);
       }
@@ -1501,7 +1478,7 @@ export const OrdersPage: React.FC = () => {
       setTermsPreview(await orderTermsMutationClient.preview(contractOrder.id, proposedTermsPayload()));
     } catch (caught) {
       setTermsPreview(null);
-      setTermsMutationError(caught instanceof Error ? caught.message : '訂單條款 Preview 失敗。');
+      setTermsMutationError(caught instanceof Error ? caught.message : '無法檢查訂單條款變更影響。');
     } finally {
       setTermsMutationStatus('idle');
     }
@@ -1535,7 +1512,7 @@ export const OrdersPage: React.FC = () => {
         terms: termsPreview.after,
       } : current);
     } catch (caught) {
-      setTermsMutationError(caught instanceof Error ? caught.message : '訂單條款 Apply 失敗。');
+      setTermsMutationError(caught instanceof Error ? caught.message : '無法確認套用訂單條款。');
     } finally {
       setTermsMutationStatus('idle');
     }
@@ -1550,10 +1527,50 @@ export const OrdersPage: React.FC = () => {
       const preview = await orderCancellationClient.preview(cancelOrder.id, cancellationQuery.confirmed_service_days, controller.signal);
       if (controller.signal.aborted || requestId !== currentDrawerRequestRef.current) return;
       setCancellationPreview(preview);
+      setCancellationReceipt(null);
+      setCancellationConfirmed(false);
       setCancellationStatus('idle');
     } catch {
       if (controller.signal.aborted || requestId !== currentDrawerRequestRef.current) return;
       setCancellationError('取消預覽未通過，請確認案件狀態與服務日資料。');
+      setCancellationStatus('idle');
+    }
+  };
+
+  const applyCancellation = async () => {
+    if (!cancelOrder || !cancellationPreview || !cancellationReason.trim() || !cancellationConfirmed) return;
+    setCancellationStatus('applying');
+    setCancellationError(null);
+    try {
+      const receipt = await orderCancellationClient.apply(
+        cancelOrder.id,
+        {
+          confirmed_service_days: cancellationPreview.confirmed_service_days,
+          expected_order_version: cancellationPreview.order_version,
+          expected_scheduling_version: cancellationPreview.scheduling_version,
+          expected_client_finance_version: cancellationPreview.client_finance_version,
+          expected_payroll_version: cancellationPreview.payroll_version,
+          preview_fingerprint: cancellationPreview.preview_fingerprint,
+          reason: cancellationReason.trim(),
+        },
+        { idempotencyKey: `orders-cancellation-ui-${cancelOrder.id}-${crypto.randomUUID()}` },
+      );
+      setCancellationReceipt(receipt);
+      setCancellationPreview(null);
+      setCancellationConfirmed(false);
+      try {
+        const readback = await orderCancellationClient.query(cancelOrder.id);
+        setCancellationQuery(readback);
+        await fetchOrderSummaries();
+      } catch {
+        setCancellationError('取消已套用，但最新案件狀態讀取失敗；請重新整理後確認。');
+      }
+    } catch (caught) {
+      const isKnownRejection = caught instanceof ApiHttpError && caught.status >= 400 && caught.status < 500;
+      setCancellationError(isKnownRejection
+        ? caught.message
+        : '取消結果未明，請先重新查詢案件，勿重複送出。');
+    } finally {
       setCancellationStatus('idle');
     }
   };
@@ -1587,12 +1604,36 @@ export const OrdersPage: React.FC = () => {
 
   return (
     <div>
-      <div className="page-header-banner">
+      <div className="page-header-banner orders-page-header">
         <div>
           <h1 className="page-title">📦 訂單與客戶管理</h1>
           <p className="page-subtitle">查詢訂單階段、契約簽署、媒合進度與正式排班。</p>
         </div>
-        <label>搜尋案件<input data-control-id="orders.query.search" value={searchQuery} maxLength={100} placeholder="案件編號或客戶名稱" onChange={(event) => setSearchQuery(event.target.value)} /></label>
+        <div className="orders-search-wrapper">
+          <label className="orders-search-input-box" htmlFor="orders-query-search-input">
+            <span className="orders-search-icon" aria-hidden="true">🔍</span>
+            <input
+              id="orders-query-search-input"
+              aria-label="搜尋案件"
+              data-control-id="orders.query.search"
+              value={searchQuery}
+              maxLength={100}
+              placeholder="案件編號或客戶名稱"
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="orders-search-clear-btn"
+                onClick={() => setSearchQuery('')}
+                aria-label="清除搜尋"
+                title="清除搜尋"
+              >
+                ✕
+              </button>
+            )}
+          </label>
+        </div>
       </div>
 
       {/* Status Filter Chips */}
@@ -1601,7 +1642,9 @@ export const OrdersPage: React.FC = () => {
           const projectionReady = stagePage !== null;
           const count = filter.stage === '全部'
             ? pageData?.loadedCount
-            : stagePage ? stageCount(stagePage, filter.stage) : null;
+            : stagePage
+              ? [...stageIndex.values()].filter((timeline) => timeline.current_stage_code === filter.stage).length
+              : null;
           return (
             <button
               key={filter.stage}
@@ -1620,7 +1663,14 @@ export const OrdersPage: React.FC = () => {
       </div>
       {stageProjectionError && !loading && (
         <div role="alert" data-surface-id="orders.stage-projection-error" style={{ padding: '12px 14px', marginBottom: '16px', borderRadius: '10px', backgroundColor: '#fff7ed', border: '1px solid #fdba74', color: '#9a3412' }}>
-          {ORDER_STAGE_PROJECTION_UNAVAILABLE}：{stageProjectionError}
+          <span>{ORDER_STAGE_PROJECTION_UNAVAILABLE}：{stageProjectionError}</span>
+          <button
+            type="button"
+            style={{ marginLeft: '12px', padding: '6px 14px', backgroundColor: '#c2410c', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 700, cursor: 'pointer' }}
+            onClick={fetchOrderSummaries}
+          >
+            重試
+          </button>
         </div>
       )}
 
@@ -1664,6 +1714,7 @@ export const OrdersPage: React.FC = () => {
 
               <div className="order-card-body">
                 <div className="order-client-title">👤 {order.clientName}</div>
+                <div>🪪 身分資格：{order.identityStatus}</div>
                 <div>📅 約定服務：{order.serviceRange}（{order.serviceDaysLabel}）</div>
 
                 {/* Actual Start Date Badge if exists */}
@@ -1713,22 +1764,6 @@ export const OrdersPage: React.FC = () => {
           ))}
         </div>
       )}
-
-      {!loading && !error && pageData?.nextCursor && (
-        <div className="orders-pagination-container">
-          {nextPageError && <div className="orders-pagination-error" role="alert">載入下一頁失敗：{nextPageError}</div>}
-          <button
-            type="button"
-            className="orders-load-more-btn"
-            data-control-id="orders.query.next-page"
-            disabled={nextPageLoading}
-            onClick={() => void fetchNextOrderSummaries()}
-          >
-            {nextPageLoading ? '正在載入下一頁…' : '載入下一頁'}
-          </button>
-        </div>
-      )}
-
 
       {/* 2. 1280px Extra-Wide Matching Workbench (size="xl") */}
       <Drawer
@@ -1813,6 +1848,29 @@ export const OrdersPage: React.FC = () => {
               </div>
             </div>
 
+            <section className="matching-step-card" data-surface-id="orders.matching.client-context" aria-label="客戶服務資料">
+              <div className="matching-step-header">
+                <div>
+                  <h3 className="matching-step-title">📋 客戶服務資料</h3>
+                  <div className="matching-step-subtext">僅顯示目前已確認的案件資料；尚未匯入或配對的欄位會標示尚未登錄。</div>
+                </div>
+              </div>
+              <div className="matching-criteria-grid" role="list" aria-label="客戶服務資料欄位">
+                {([
+                  ['身分資格', matchingOrder.identityStatus],
+                  ['服務縣市', matchingFormContext?.city],
+                  ['服務類型', matchingFormContext?.service_type],
+                  ['每日服務時段', matchingFormContext?.service_time],
+                  ['生產方式', matchingFormContext?.delivery_type],
+                  ['住宅類型', matchingFormContext?.residence_type],
+                ] as const).map(([label, value]) => (
+                  <div className="matching-criteria-item" role="listitem" key={label}>
+                    {label}：{matchingFormContextError ? '資料載入失敗' : value?.trim() || (matchingFormContext ? '尚未登錄' : '載入中…')}
+                  </div>
+                ))}
+              </div>
+            </section>
+
             {/* 👥 步驟一：以既定規則查詢候選月嫂 */}
             <div className="matching-step-card">
               <div className="matching-step-header">
@@ -1837,11 +1895,11 @@ export const OrdersPage: React.FC = () => {
                 </button>
               </div>
 
-              <div className="matching-criteria-grid" role="list" aria-label="目前媒合查詢根事實">
+              <div className="matching-criteria-grid" role="list" aria-label="目前媒合查詢條件">
                 <div className="matching-criteria-item" role="listitem">📍 服務地點：{cardProjection?.rows.find((row) => row.key === 'contact_address')?.valueText ?? '正在確認…'}</div>
                 <div className="matching-criteria-item" role="listitem">⏰ 每日時段：{matchingDetail?.serviceTimeText ?? '正在確認…'}</div>
                 <div className="matching-criteria-item" role="listitem">📅 承接天數：{matchingOrder.serviceDaysLabel}</div>
-                <div className="matching-criteria-item" role="listitem">🍳 料理需求：以上方案件根事實為準</div>
+                <div className="matching-criteria-item" role="listitem">🍳 料理需求：以上方正式案件條件為準</div>
               </div>
               <div role="note" style={{ border: '1px solid #ead8d1', borderRadius: '10px', marginTop: '12px', padding: '10px 12px', color: '#57423b', fontSize: '0.82rem' }}>
                 固定套用：服務區域、下廚需求、完整服務日、每日工時與目前檔期。若案件條款或服務日不正確，請回「條款與契約」修正，再重新查詢。
@@ -2084,6 +2142,13 @@ export const OrdersPage: React.FC = () => {
                           >
                             {candidateActionKey === `${c.candidateId}:1` ? '正在建立資訊-1 發送任務…' : '🔄 重新寄送資訊-1'}
                           </button>
+                          <CandidateManualInformationActions
+                            caseNo={matchingOrder.id}
+                            candidateId={c.candidateId}
+                            infoType={1}
+                            disabledReason={c.contactStatus === 'withdrawn' ? '候選人已退出。' : candidatePoolMutationBlocker()}
+                            onCommitted={() => handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true })}
+                          />
                         </div>
 
                         <div className="matching-subcard">
@@ -2107,6 +2172,13 @@ export const OrdersPage: React.FC = () => {
                           >
                             {candidateActionKey === `${c.candidateId}:2` ? '正在建立資訊-2 發送任務…' : '🔄 重新寄送資訊-2'}
                           </button>
+                          <CandidateManualInformationActions
+                            caseNo={matchingOrder.id}
+                            candidateId={c.candidateId}
+                            infoType={2}
+                            disabledReason={c.contactStatus === 'withdrawn' ? '候選人已退出。' : candidatePoolMutationBlocker()}
+                            onCommitted={() => handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true })}
+                          />
                         </div>
                       </div>
 
@@ -2178,7 +2250,7 @@ export const OrdersPage: React.FC = () => {
               ) : null}
             </div>
 
-            {/* 📝 步驟四：推薦產婦、定金狀態與雙邊線上簽約 */}
+            {/* 📝 步驟四：推薦產婦、定金狀態與雙邊契約簽署 */}
             {activePlanQueryError ? (
               <div
                 role="alert"
@@ -2193,10 +2265,10 @@ export const OrdersPage: React.FC = () => {
                   <div>
                     <h3 className="matching-step-title">
                       <span className="matching-step-badge">4</span>
-                      📝 推薦產婦、定金確認與雙邊線上簽約
+                      📝 推薦產婦、定金確認與雙邊契約簽署
                     </h3>
                     <div className="matching-step-subtext">
-                      產婦確認配對方案、繳納定金並完成雙邊不可變線上契約簽署。
+                      產婦確認配對方案、繳納定金並完成雙邊不可變契約簽署（LINE 或受控人工證據）。
                     </div>
                   </div>
                 </div>
@@ -2221,7 +2293,7 @@ export const OrdersPage: React.FC = () => {
                       🔒 {matchingDetail.waitingLockText}
                     </div>
                     <div role="status" style={{ fontSize: '0.78rem', color: '#74593f' }}>
-                      履歷發送依進行中方案的 communication version 與 segment identity 建立可靠任務。
+                      履歷發送會依目前正式方案與分段內容建立可靠工作；畫面只表示已排入，不代表 LINE 已送達。
                     </div>
                     {matchingDetail.status === '提案中' && (
                       <div style={{ display: 'grid', gap: '8px', marginTop: '12px', padding: '12px', border: '1px solid #ead8d1', borderRadius: '10px' }}>
@@ -2243,10 +2315,20 @@ export const OrdersPage: React.FC = () => {
                           disabled={candidateActionKey !== null || resumeNote.trim().length === 0 || matchingDetail.customerProfilesStatus !== null}
                           onClick={() => void sendCustomerProfiles()}
                         >
-                          {candidateActionKey === 'customer-profiles' ? '建立履歷發送任務並回讀中…' : matchingDetail.customerProfilesStatus !== null ? '履歷發送任務已建立' : '建立履歷可靠發送任務'}
+                          {candidateActionKey === 'customer-profiles'
+                            ? '建立履歷發送任務並回讀中…'
+                            : matchingDetail.customerProfilesStatus === 'manually_confirmed'
+                              ? '已留存人工履歷送達證據'
+                              : matchingDetail.customerProfilesStatus !== null ? '履歷發送任務已建立' : '建立履歷可靠發送任務'}
                         </button>
-                        {matchingDetail.customerProfilesStatus !== null && <span style={{ fontSize: '0.8rem', color: '#166534' }}>發送狀態：{matchingDetail.customerProfilesStatus}</span>}
-                        {resumeReceipt && <span style={{ fontSize: '0.8rem', color: '#166534' }}>receipt：intent #{resumeReceipt.intent_id}／LINE task #{resumeReceipt.line_delivery_task_id ?? '待投影'}。</span>}
+                        {matchingDetail.customerProfilesStatus !== null && <span style={{ fontSize: '0.8rem', color: '#166534' }}>履歷傳達狀態：{matchingDetail.customerProfilesStatus}</span>}
+                        {resumeReceipt && <span style={{ fontSize: '0.8rem', color: '#166534' }}>客戶履歷已排入發送，尚未代表 LINE 已送達。</span>}
+                        <CustomerProfilesManualActions
+                          caseNo={matchingOrder.id}
+                          planId={Number(matchingDetail.planId)}
+                          currentStatus={matchingDetail.customerProfilesStatus}
+                          onCommitted={() => handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true })}
+                        />
                       </div>
                     )}
                     {matchingDetail.status === '提案中' && (
@@ -2280,7 +2362,7 @@ export const OrdersPage: React.FC = () => {
                         </button>
                       </div>
                     )}
-                    {matchingDetail.status === '已接受' && !matchingDetail.waitingLockAcquired && (
+                    {matchingDetail.status === '已接受' && !matchingDetail.waitingLockAcquired && matchingDetail.assignmentSegments.length === 0 && (
                       <div style={{ display: 'grid', gap: '8px', marginTop: '12px' }}>
                         <button
                           type="button"
@@ -2288,11 +2370,11 @@ export const OrdersPage: React.FC = () => {
                           disabled={candidateActionKey !== null}
                           onClick={() => void previewWaitingDepositLock()}
                         >
-                          {candidateActionKey === 'waiting-lock-preview' ? '等待訂金鎖 Preview 中…' : 'Preview 等待訂金檔期鎖'}
+                          {candidateActionKey === 'waiting-lock-preview' ? '正在檢查等待訂金鎖…' : '檢查等待訂金檔期鎖影響'}
                         </button>
                         {waitingLockPreview && (
                           <div role="status" style={{ fontSize: '0.8rem', color: waitingLockPreview.apply_allowed ? '#166534' : '#991b1b' }}>
-                            Preview：服務日 {waitingLockPreview.service_day_count}、防撞期 {waitingLockPreview.buffer_day_count}；
+                            影響檢查：服務日 {waitingLockPreview.service_day_count}、防撞期 {waitingLockPreview.buffer_day_count}；
                             {waitingLockPreview.apply_allowed ? '可套用。' : `不可套用（${waitingLockPreview.conflicts.length} 項衝突）。`}
                           </div>
                         )}
@@ -2304,14 +2386,14 @@ export const OrdersPage: React.FC = () => {
                         >
                           {candidateActionKey === 'waiting-lock-apply' ? '套用並回讀等待訂金鎖中…' : '確認套用等待訂金檔期鎖'}
                         </button>
-                        {waitingLockReceipt && <div role="status" style={{ fontSize: '0.8rem', color: '#166534' }}>已取得等待訂金鎖 #{waitingLockReceipt.lock_id}。</div>}
+                        {waitingLockReceipt && <div role="status" style={{ fontSize: '0.8rem', color: '#166534' }}>等待訂金檔期鎖已建立。</div>}
                       </div>
                     )}
                   </div>
 
                   <div className="matching-contract-box">
                     <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#1e1b19' }}>
-                      📑 雙邊線上契約簽署進度 (Contract Signing SSOT)
+                      📑 雙邊契約簽署進度
                     </div>
                     {matchingContractQueryError && (
                       <div role="alert" style={{ color: '#991b1b' }}>{matchingContractQueryError}</div>
@@ -2341,6 +2423,19 @@ export const OrdersPage: React.FC = () => {
                     </div>
                   </div>
                 </div>
+                {matchingOrder && matchingDetail.planSegments.length > 0 && Number.isInteger(Number(matchingDetail.planId)) && (
+                  <MatchingScheduleAndAssignmentActions
+                    caseNo={matchingOrder.id}
+                    planId={Number(matchingDetail.planId)}
+                    planSegments={matchingDetail.planSegments}
+                    waitingLockAcquired={matchingDetail.waitingLockAcquired}
+                    assignmentExists={matchingDetail.assignmentSegments.length > 0}
+                    onAssignmentCompleted={async () => {
+                      await handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true });
+                      await fetchOrderSummaries();
+                    }}
+                  />
+                )}
               </div>
             )}
 
@@ -2497,7 +2592,7 @@ export const OrdersPage: React.FC = () => {
               <div className="matching-fact-item">
                 <div className="matching-fact-label">每日時段與料理</div>
                 <div className="matching-fact-value">
-                  {contractDetail?.serviceTimeText || '09:00～17:00'}
+                  {contractDetail?.serviceTimeText || '服務時段待確認'}
                 </div>
                 <div style={{ fontSize: '0.78rem', color: '#8b7169' }}>
                   🍳 {contractDetail?.requiresCookingText || '料理需求待確認'}
@@ -2514,7 +2609,7 @@ export const OrdersPage: React.FC = () => {
               </div>
             </div>
 
-            {/* 3-Tab Clean Navigation */}
+            {/* 4-Tab Clean Navigation */}
             <div className="contract-tabs-nav">
               <button
                 type="button"
@@ -2532,10 +2627,17 @@ export const OrdersPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                className={`contract-tab-btn ${activeContractTab === 'cancellation_reopen' ? 'active' : ''}`}
-                onClick={() => switchContractTab('cancellation_reopen')}
+                className={`contract-tab-btn ${activeContractTab === 'cancellation' ? 'active' : ''}`}
+                onClick={() => switchContractTab('cancellation')}
               >
                 🛑 訂單取消、退款與受控重開
+              </button>
+              <button
+                type="button"
+                className={`contract-tab-btn ${activeContractTab === 'reopen' ? 'active' : ''}`}
+                onClick={() => switchContractTab('reopen')}
+              >
+                🔄 受控重開訂單
               </button>
             </div>
 
@@ -2565,7 +2667,7 @@ export const OrdersPage: React.FC = () => {
                     <div className="contract-ssot-header">
                       <strong className="contract-ssot-title">👩‍🍼 月嫂服務契約</strong>
                       <span className={`contract-status-pill ${contractDetail.staffContractSigned ? 'success' : 'pending'}`}>
-                        {contractDetail.staffContractSigned ? '🟢 已線上簽回' : '🟡 待簽署'}
+                        {contractDetail.staffContractSigned ? '🟢 已簽回' : '🟡 待簽署'}
                       </span>
                     </div>
                     <div className="contract-ssot-body">
@@ -2581,7 +2683,7 @@ export const OrdersPage: React.FC = () => {
                     <div className="contract-ssot-header">
                       <strong className="contract-ssot-title">👥 產婦服務契約</strong>
                       <span className={`contract-status-pill ${contractDetail.clientContractSigned ? 'success' : 'pending'}`}>
-                        {contractDetail.clientContractSigned ? '🟢 已線上簽回' : '🟡 待簽署'}
+                        {contractDetail.clientContractSigned ? '🟢 已簽回' : '🟡 待簽署'}
                       </span>
                     </div>
                     <div className="contract-ssot-body">
@@ -2643,11 +2745,11 @@ export const OrdersPage: React.FC = () => {
                       <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#ff7f50', margin: 0 }}>📝 編輯約定服務條款</h3>
                     </div>
                     <p style={{ marginTop: '2px', marginBottom: '12px', color: '#74593f', fontSize: '0.82rem' }}>
-                      每次 Apply 都會重查四個 domain version；Preview 本身不寫入。
+                      預覽不會寫入；確認套用時會重新核對訂單、排班與帳務的最新狀態。
                     </p>
                     {termsQuery?.service_data_locked && (
                       <div role="status" style={{ marginBottom: '10px', color: '#9a3412', fontSize: '0.84rem' }}>
-                        此案件的服務根事實已鎖定，依既有規則不可再變更條款。
+                        此案件的服務條件已鎖定，依既有規則不可再變更條款。
                       </div>
                     )}
                     <section data-surface-id="orders.terms.mutation">
@@ -2691,7 +2793,7 @@ export const OrdersPage: React.FC = () => {
                         disabled={termsMutationLocked || !termsDraftReady}
                         onClick={() => void previewOrderTerms()}
                       >
-                        {termsMutationStatus === 'previewing' ? '條款 Preview 處理中…' : '預覽訂單條款變更 (Diff)'}
+                        {termsMutationStatus === 'previewing' ? '正在檢查條款變更…' : '檢查訂單條款變更'}
                       </button>
 
                       {termsPreview && (
@@ -2721,13 +2823,13 @@ export const OrdersPage: React.FC = () => {
                             disabled={termsMutationLocked || termsReason.trim().length === 0}
                             onClick={() => void applyOrderTerms()}
                           >
-                            {termsMutationStatus === 'applying' ? '條款套用中…' : '確認套用訂單條款 (Apply)'}
+                            {termsMutationStatus === 'applying' ? '條款套用中…' : '確認套用訂單條款'}
                           </button>
                         </div>
                       )}
                       {termsReceipt && (
                         <div role="status" style={{ marginTop: '10px', color: '#166534', fontWeight: 700, fontSize: '0.86rem' }}>
-                          ✅ 條款已套用（Order v{termsReceipt.order_version}；正式服務日 {termsReceipt.official_service_day_count} 天）
+                          ✅ 條款已套用（正式服務日 {termsReceipt.official_service_day_count} 天）
                         </div>
                       )}
                       {termsMutationError && <div role="alert" style={{ color: '#b91c1c', marginTop: '10px', fontSize: '0.84rem' }}>{termsMutationError}</div>}
@@ -2784,7 +2886,7 @@ export const OrdersPage: React.FC = () => {
                           <div className="contract-doc-meta-row">
                             <span>契約字號：CT-{(contractOrder || dateConfirmOrder)?.id.slice(4)}</span>
                             <span>訂單編號：{(contractOrder || dateConfirmOrder)?.id}</span>
-                            <span>版本：v{termsQuery?.order_version ?? 1}</span>
+                            <span>條款來源：正式訂單資料</span>
                           </div>
                         </div>
 
@@ -2807,7 +2909,7 @@ export const OrdersPage: React.FC = () => {
                           <div className="contract-doc-clause-item">
                             <div className="contract-doc-clause-title">第二條【服務時段與膳食料理】</div>
                             <div className="contract-doc-clause-body">
-                              每日服務時段為 <span className="contract-doc-clause-highlight">{termsDraft.startTime || '09:00'} 至 {termsDraft.endTime || '17:00'}</span>（每日 {termsDraft.serviceHoursPerDay || '9'} 小時）。
+                              每日服務時段為 <span className="contract-doc-clause-highlight">{termsDraft.startTime && termsDraft.endTime ? `${termsDraft.startTime} 至 ${termsDraft.endTime}` : '待確認'}</span>（每日 {termsDraft.serviceHoursPerDay || '待確認'} 小時）。
                               膳食料理需求：<span className="contract-doc-clause-highlight">{termsDraft.requiresCooking === 'yes' ? '需要下廚料理月子餐' : termsDraft.requiresCooking === 'no' ? '不需下廚' : contractDetail.requiresCookingText}</span>。
                             </div>
                           </div>
@@ -2826,22 +2928,22 @@ export const OrdersPage: React.FC = () => {
                             <div className="contract-doc-stamp-title">
                               <span>甲方（產婦）簽章存證</span>
                               <span className={`contract-doc-seal ${contractDetail.clientContractSigned ? '' : 'pending'}`}>
-                                {contractDetail.clientContractSigned ? '線上已簽署' : '待簽署'}
+                                {contractDetail.clientContractSigned ? '已簽署' : '待簽署'}
                               </span>
                             </div>
                             <div style={{ color: '#74593f', marginTop: '4px' }}>簽署人：{contractDetail.clientName}</div>
-                            <div style={{ fontSize: '0.72rem', color: '#8b7169' }}>存證戳記：{contractDetail.clientContractSigned ? 'SHA256: 8f4a...e319 (驗證有效)' : '尚未產生存證'}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#8b7169' }}>{contractDetail.clientContractSigned ? '簽署文件已由正式回讀確認' : '尚未完成簽署存證'}</div>
                           </div>
 
                           <div className="contract-doc-stamp-card">
                             <div className="contract-doc-stamp-title">
                               <span>丙方（月嫂）簽章存證</span>
                               <span className={`contract-doc-seal ${contractDetail.staffContractSigned ? '' : 'pending'}`}>
-                                {contractDetail.staffContractSigned ? '線上已簽署' : '待簽署'}
+                                {contractDetail.staffContractSigned ? '已簽署' : '待簽署'}
                               </span>
                             </div>
                             <div style={{ color: '#74593f', marginTop: '4px' }}>簽署人：{(contractOrder || dateConfirmOrder)?.assignedDoulaDisplay || '—'}</div>
-                            <div style={{ fontSize: '0.72rem', color: '#8b7169' }}>存證戳記：{contractDetail.staffContractSigned ? 'SHA256: d2b1...77af (驗證有效)' : '尚未產生存證'}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#8b7169' }}>{contractDetail.staffContractSigned ? '簽署文件已由正式回讀確認' : '尚未完成簽署存證'}</div>
                           </div>
                         </div>
                       </div>
@@ -2853,8 +2955,8 @@ export const OrdersPage: React.FC = () => {
                           <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>產婦姓名：</strong>{contractDetail.clientName}</div>
                           <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>預定服務起訖：</strong>{termsDraft.plannedStartDate || contractDetail.serviceRange}</div>
                           <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>約定服務天數：</strong>{termsDraft.serviceDays || contractDetail.serviceDays} 天</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>每日時數時段：</strong>{termsDraft.startTime || '09:00'} ~ {termsDraft.endTime || '17:00'} ({termsDraft.serviceHoursPerDay || '9'} hr)</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>下廚需求：</strong>{termsDraft.requiresCooking === 'yes' ? '需要' : '不需'}</div>
+                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>每日時數時段：</strong>{termsDraft.startTime && termsDraft.endTime ? `${termsDraft.startTime} ~ ${termsDraft.endTime}` : '待確認'} ({termsDraft.serviceHoursPerDay ? `${termsDraft.serviceHoursPerDay} hr` : '時數待確認'})</div>
+                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>下廚需求：</strong>{termsDraft.requiresCooking === 'yes' ? '需要' : termsDraft.requiresCooking === 'no' ? '不需' : '待確認'}</div>
                           <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>樓層費加給：</strong>NT$ {termsDraft.floorFeeNtd || '0'}</div>
                           <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>合約總應付額：</strong>{contractDetail.contractAmountText}</div>
                         </div>
@@ -2880,7 +2982,7 @@ export const OrdersPage: React.FC = () => {
                       <div style={{ backgroundColor: '#ffffff', border: '1px solid #fed9b8', borderRadius: '14px', padding: '18px 22px', marginBottom: '18px', boxShadow: '0 4px 16px rgba(255, 127, 80, 0.05)' }}>
                         <div className="service-dates-meta-row" style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', marginBottom: '14px', fontSize: '0.85rem', color: '#57423b' }}>
                           <span>合約服務天數：{serviceDatesDraft.queryView.contracted_service_days} 天</span>
-                          <span>目前確認版本：{serviceDatesDraft.queryView.current_version === null ? '尚未確認' : `v${serviceDatesDraft.queryView.current_version}`}</span>
+                          <span>日期確認狀態：{serviceDatesDraft.queryView.current_version === null ? '尚未確認' : '已確認'}</span>
                           <span>已確認日期：{serviceDatesDraft.queryView.current_dates.length > 0 ? serviceDatesDraft.queryView.current_dates.join(', ') : '無'}</span>
                         </div>
 
@@ -3083,7 +3185,7 @@ export const OrdersPage: React.FC = () => {
                             disabled={serviceDatesLocked || precisionCalculating || !serviceDatesSelectionReady}
                             onClick={() => (contractOrder || dateConfirmOrder) && previewServiceDates((contractOrder || dateConfirmOrder)!.id)}
                           >
-                            {serviceDatesDraft?.status === 'preview_loading' ? '正在精算服務週次…' : '🔍 產生服務週次預覽 (Preview)'}
+                            {serviceDatesDraft?.status === 'preview_loading' ? '正在精算服務週次…' : '🔍 檢查服務週次影響'}
                           </button>
 
                           {serviceDatesDraft?.previewView && (
@@ -3132,7 +3234,7 @@ export const OrdersPage: React.FC = () => {
                                   .catch(() => undefined);
                               }}
                             >
-                              {serviceDatesDraft?.status === 'apply_pending' ? '服務日期套用中…' : '確認套用服務日期 (Apply)'}
+                              {serviceDatesDraft?.status === 'apply_pending' ? '服務日期套用中…' : '確認套用服務日期'}
                             </button>
                           )}
 
@@ -3158,7 +3260,7 @@ export const OrdersPage: React.FC = () => {
 
                           {serviceDatesDraft?.receiptView && (
                             <div role="status" style={{ marginTop: '10px', padding: '10px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', color: '#166534', fontWeight: 700, fontSize: '0.82rem' }}>
-                              ✅ 服務日期已確認成功（Order v{serviceDatesDraft.receiptView.order_version}）
+                              ✅ 服務日期已確認成功
                             </div>
                           )}
 
@@ -3247,7 +3349,7 @@ export const OrdersPage: React.FC = () => {
                   )}
                   {actualStartPreview && (
                     <div style={{ backgroundColor: '#fffdfb', border: '1px solid #fed9b8', borderRadius: '12px', padding: '16px', marginTop: '14px' }}>
-                      <strong style={{ color: '#ff7f50', fontSize: '0.92rem' }}>實際開工日 Preview 已產生</strong>
+                      <strong style={{ color: '#ff7f50', fontSize: '0.92rem' }}>實際開工日影響已確認</strong>
                       <div style={{ fontSize: '0.86rem', color: '#57423b', marginTop: '6px' }}>日期：{actualStartPreview.before_actual_start_date ?? '尚未登錄'} → {actualStartPreview.after_actual_start_date}</div>
                       <div style={{ fontSize: '0.86rem', color: '#57423b' }}>預計結束日：{actualStartPreview.actual_end_date}</div>
                       <div style={{ fontSize: '0.86rem', color: '#57423b' }}>正式服務日：{actualStartPreview.actual_start.official_service_dates.length} 天</div>
@@ -3276,181 +3378,255 @@ export const OrdersPage: React.FC = () => {
                   )}
                   {actualStartReceipt && (
                     <div role="status" style={{ color: '#166534', fontWeight: 700, marginTop: '10px', fontSize: '0.86rem' }}>
-                      實際開工日已套用（Order v{actualStartReceipt.order_version}；{actualStartReceipt.official_service_day_count} 個正式服務日）
+                      實際開工日已套用（{actualStartReceipt.official_service_day_count} 個正式服務日）
                     </div>
                   )}
                   {actualStartError && <div role="alert" style={{ color: '#b91c1c', marginTop: '10px', fontSize: '0.85rem' }}>{actualStartError}</div>}
                 </div>
+
+                {(contractOrder || dateConfirmOrder) && (
+                  <OrderServiceCompletionActions
+                    caseNo={(contractOrder || dateConfirmOrder)!.id}
+                    orderStatus={(contractOrder || dateConfirmOrder)!.orderStatus}
+                    onCompleted={fetchOrderSummaries}
+                  />
+                )}
               </div>
             )}
 
             {/* Tab 3: 訂單取消、退款與受控重開 (Cancellation, Refund & Reopen) */}
-            {activeContractTab === 'cancellation_reopen' && (
+            {/* Tab 3: 訂單取消與退款試算 (Cancellation & Refund) */}
+            {activeContractTab === 'cancellation' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-                {/* Top Status & Eligibility Banner */}
                 <div style={{ backgroundColor: '#fffdfc', border: '1px solid #fed9b8', borderRadius: '12px', padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <span style={{ fontSize: '0.92rem', fontWeight: 700, color: '#57423b' }}>當前案件狀態：</span>
                     <strong style={{ fontSize: '1rem', color: '#ff7f50' }}>{(contractOrder || dateConfirmOrder || cancelOrder || reopenOrder)?.orderStatus ?? '洽談中'}</strong>
-                    <span style={{ fontSize: '0.8rem', color: '#8b7169' }}>（Order v{reopenDraft?.previewView?.order_version ?? termsQuery?.order_version ?? 1}）</span>
                   </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <span style={{ padding: '3px 10px', borderRadius: '9999px', fontSize: '0.78rem', fontWeight: 750, backgroundColor: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>
-                      🟢 允許取消試算
-                    </span>
-                    <span style={{ padding: '3px 10px', borderRadius: '9999px', fontSize: '0.78rem', fontWeight: 750, backgroundColor: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' }}>
-                      🔄 允許受控重啟
-                    </span>
-                  </div>
+                  <span style={{ padding: '3px 10px', borderRadius: '9999px', fontSize: '0.78rem', fontWeight: 750, backgroundColor: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>
+                    🟢 允許取消試算
+                  </span>
                 </div>
 
-                {/* 5:5 Split Layout: Left Cancellation & Refund | Right Controlled Reopen */}
-                <div className="cancellation-reopen-grid">
-                  {/* Left Column: 🛑 訂單取消與退款處理 */}
-                  <div className="cancellation-reopen-card">
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                        <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#9f1239', margin: 0 }}>🛑 訂單取消與退款處理</h3>
-                        {cancellationQuery && <span className="contract-status-pill pending">{cancellationQuery.lifecycle_status}</span>}
+                <div className="cancellation-reopen-card" style={{ maxWidth: '720px' }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#9f1239', margin: 0 }}>🛑 訂單取消與退款處理</h3>
+                      {cancellationQuery && <span className="contract-status-pill pending">{cancellationQuery.lifecycle_status}</span>}
+                    </div>
+                    <p style={{ margin: '0 0 12px 0', fontSize: '0.82rem', color: '#74593f' }}>
+                      系統會依目前訂單、正式排班、客戶帳務與月嫂薪資根事實計算取消影響。
+                    </p>
+
+                    {cancellationError && (
+                      <div role="alert" style={{ color: '#b91c1c', fontSize: '0.82rem', marginBottom: '8px' }}>
+                        {cancellationError}
                       </div>
-                      <p style={{ margin: '0 0 12px 0', fontSize: '0.82rem', color: '#74593f' }}>
-                        依據工會定型化契約 14 天退訂規則自動試算定金與違約金。
-                      </p>
+                    )}
 
-                      {cancellationError && (
-                        <div role="alert" style={{ color: '#b91c1c', fontSize: '0.82rem', marginBottom: '8px' }}>
-                          {cancellationError}
-                        </div>
-                      )}
+                    {cancellationQuery ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem', color: '#57423b', marginBottom: '12px' }}>
+                        <div>實際開始日：{cancellationQuery.actual_start_date ?? '尚未開始'}</div>
+                        <div>契約服務天數：{cancellationQuery.contracted_service_days} 天</div>
+                        <div>已確認服務日：{cancellationQuery.confirmed_service_days.length} 天</div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.82rem', color: '#8b7169', marginBottom: '12px' }}>
+                        {cancellationStatus === 'querying' ? '⏳ 載入取消事實中…' : '點擊下方預覽按鈕以試算退款與違約金。'}
+                      </div>
+                    )}
 
-                      {cancellationQuery ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem', color: '#57423b', marginBottom: '12px' }}>
-                          <div>實際開始日：{cancellationQuery.actual_start_date ?? '尚未開始'}</div>
-                          <div>契約服務天數：{cancellationQuery.contracted_service_days} 天</div>
-                          <div>已確認服務日：{cancellationQuery.confirmed_service_days.length} 天</div>
+                    {cancellationPreview && (
+                      <div className="cancellation-calc-box">
+                        <strong style={{ color: '#9f1239', fontSize: '0.88rem' }}>📊 取消影響預覽</strong>
+                        <div className="cancellation-calc-row">
+                          <span>取消基準日</span>
+                          <strong>{cancellationPreview.cancellation_date}</strong>
                         </div>
-                      ) : (
-                        <div style={{ fontSize: '0.82rem', color: '#8b7169', marginBottom: '12px' }}>
-                          {cancellationStatus === 'querying' ? '⏳ 載入取消事實中…' : '點擊下方預覽按鈕以試算退款與違約金。'}
+                        <div className="cancellation-calc-row">
+                          <span>實際服務終止日</span>
+                          <span>{cancellationPreview.actual_end_date ?? '尚未開始服務'}</span>
                         </div>
-                      )}
+                        <div className="cancellation-calc-row">
+                          <span>正式服務量</span>
+                          <span>{cancellationPreview.official_service_day_count} 天／{cancellationPreview.official_service_hours} 小時</span>
+                        </div>
+                        <div style={{ marginTop: '8px', fontSize: '0.78rem', color: '#74593f' }}>
+                          客戶退款與月嫂薪資影響已由後端正式規則計算；套用後將以最新案件狀態回讀確認。
+                        </div>
+                      </div>
+                    )}
 
-                      {cancellationPreview && (
-                        <div className="cancellation-calc-box">
-                          <strong style={{ color: '#9f1239', fontSize: '0.88rem' }}>📊 退款試算結果</strong>
-                          <div className="cancellation-calc-row">
-                            <span>已收定金 (A)</span>
-                            <strong>NT$ 18,000</strong>
-                          </div>
-                          <div className="cancellation-calc-row">
-                            <span>違約金／手續費 (B)</span>
-                            <span style={{ color: '#991b1b' }}>NT$ 0（距離服務日 &gt; 14天）</span>
-                          </div>
-                          <div className="cancellation-calc-row" style={{ borderTop: '1px dashed #fed9b8', paddingTop: '6px', marginTop: '2px', fontWeight: 800, color: '#166534' }}>
-                            <span>預計應退產婦總額 (A-B)</span>
-                            <span style={{ fontSize: '1rem' }}>NT$ 18,000</span>
-                          </div>
-                          <div className="cancellation-calc-row" style={{ fontSize: '0.78rem', color: '#8b7169' }}>
-                            <span>月嫂補償金：NT$ 0 ｜ 正式服務天數：{cancellationPreview.official_service_day_count} 天</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    {cancellationPreview && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+                        <label htmlFor="cancellation-reason" style={{ fontSize: '0.82rem', fontWeight: 700, color: '#57423b' }}>
+                          人工取消原因
+                        </label>
+                        <textarea
+                          id="cancellation-reason"
+                          value={cancellationReason}
+                          maxLength={500}
+                          rows={3}
+                          disabled={cancellationStatus === 'applying'}
+                          onChange={(event) => setCancellationReason(event.target.value)}
+                          placeholder="請記錄客戶決定或人工介入原因"
+                        />
+                        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.8rem', color: '#57423b' }}>
+                          <input
+                            type="checkbox"
+                            checked={cancellationConfirmed}
+                            disabled={cancellationStatus === 'applying'}
+                            onChange={(event) => setCancellationConfirmed(event.target.checked)}
+                          />
+                          我已核對本次取消日期、正式服務量及後續帳務／薪資影響，確認套用取消。
+                        </label>
+                      </div>
+                    )}
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <button
-                        type="button"
-                        data-control-id="orders.cancellation.preview"
-                        className="btn-secondary-action"
-                        style={{ width: '100%', padding: '10px' }}
-                        disabled={cancellationStatus === 'previewing'}
-                        onClick={() => void previewCancellation()}
-                      >
-                        {cancellationStatus === 'previewing' ? '正在試算取消退款…' : '🔍 預覽取消與退款試算'}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-primary-action"
-                        style={{ backgroundColor: '#9f1239', borderColor: '#9f1239', width: '100%', padding: '10px' }}
-                        disabled={!cancellationPreview}
-                        onClick={() => alert('已模擬執行訂單取消與退款登記。')}
-                      >
-                        執行訂單取消
-                      </button>
-                    </div>
+                    {cancellationReceipt && (
+                      <div role="status" style={{ marginTop: '12px', color: '#166534', fontSize: '0.84rem', fontWeight: 700 }}>
+                        訂單取消已完成；最新狀態：{cancellationReceipt.lifecycle_status}，正式服務量為 {cancellationReceipt.official_service_day_count} 天／{cancellationReceipt.official_service_hours} 小時。
+                      </div>
+                    )}
                   </div>
 
-                  {/* Right Column: 🔄 訂單受控重開 (Controlled Reopen) */}
-                  <div className="cancellation-reopen-card">
-                    <div data-surface-id="orders.modal.reopen">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                        <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#ea580c', margin: 0 }}>🔄 訂單受控重開 (Reopen)</h3>
-                        <span className="contract-status-pill pending">受控安全重啟</span>
-                      </div>
-                      <p style={{ margin: '0 0 12px 0', fontSize: '0.82rem', color: '#74593f' }}>
-                        已終止或封閉案件依 3-Domain 版本校驗後恢復至「洽談中」進件階段。
-                      </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <button
+                      type="button"
+                      data-control-id="orders.cancellation.preview"
+                      className="btn-secondary-action"
+                      style={{ width: '100%', padding: '10px' }}
+                      disabled={!cancellationQuery || cancellationStatus !== 'idle'}
+                      onClick={() => void previewCancellation()}
+                    >
+                      {cancellationStatus === 'previewing' ? '正在試算取消退款…' : '🔍 預覽取消與退款試算'}
+                    </button>
+                    <button
+                      type="button"
+                      data-control-id="orders.cancellation.apply"
+                      className="btn-primary-action"
+                      style={{ backgroundColor: '#9f1239', borderColor: '#9f1239', width: '100%', padding: '10px' }}
+                      disabled={!cancellationPreview || !cancellationReason.trim() || !cancellationConfirmed || cancellationStatus !== 'idle'}
+                      onClick={() => void applyCancellation()}
+                    >
+                      {cancellationStatus === 'applying' ? '正在套用取消…' : '確認執行取消'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
-                      {reopenDraft?.previewView ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.84rem', color: '#57423b', marginBottom: '12px' }}>
-                          <div>狀態轉移：<span>{reopenDraft.previewView.before_status}</span> ➔ <strong style={{ color: '#166534' }}>{reopenDraft.previewView.after_status}</strong></div>
-                          <div className="reopen-version-grid">
-                            <div><strong>Order</strong><br />v{reopenDraft.previewView.order_version} (已校驗)</div>
-                            <div><strong>Finance</strong><br />v{reopenDraft.previewView.client_finance_version} (雙向完成)</div>
-                            <div><strong>Payroll</strong><br />v{reopenDraft.previewView.payroll_version} (無欠款)</div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ fontSize: '0.82rem', color: '#8b7169', marginBottom: '12px' }}>
-                          {reopenDraft?.status === 'preview_loading' ? '⏳ 正在取得受控重開預覽…' : '正在載入重開候選事實…'}
-                        </div>
-                      )}
+            {/* Tab 4: 🔄 訂單受控重開 (Controlled Reopen) */}
+            {activeContractTab === 'reopen' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                <div style={{ backgroundColor: '#fffdfc', border: '1px solid #fed9b8', borderRadius: '12px', padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '0.92rem', fontWeight: 700, color: '#57423b' }}>當前案件狀態：</span>
+                    <strong style={{ fontSize: '1rem', color: '#ff7f50' }}>{(contractOrder || dateConfirmOrder || cancelOrder || reopenOrder)?.orderStatus ?? '洽談中'}</strong>
+                  </div>
+                  <span style={{ padding: '3px 10px', borderRadius: '9999px', fontSize: '0.78rem', fontWeight: 750, backgroundColor: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' }}>
+                    🔄 允許受控重啟
+                  </span>
+                </div>
 
-                      <label style={{ display: 'block', fontWeight: 700, fontSize: '0.84rem' }}>
-                        重開原因說明 (Audit Log 必填 1~500 字)
-                        <textarea
-                          data-control-id="orders.reopen.reason"
-                          rows={3}
-                          maxLength={500}
-                          placeholder="請具體說明重開訂單之業務原因（至少 1 字）"
-                          value={reopenDraft?.reason ?? ''}
-                          disabled={reopenLocked}
-                          onChange={(event) => (contractOrder || dateConfirmOrder || reopenOrder || cancelOrder) && updateReopenReason((contractOrder || dateConfirmOrder || reopenOrder || cancelOrder)!.id, event.target.value)}
-                          style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.85rem' }}
-                        />
-                      </label>
+                <div className="cancellation-reopen-card" style={{ maxWidth: '720px' }}>
+                  <div data-surface-id="orders.modal.reopen">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#ea580c', margin: 0 }}>🔄 訂單受控重開</h3>
+                      <span className="contract-status-pill pending">受控安全重啟</span>
                     </div>
+                    <p style={{ margin: '0 0 12px 0', fontSize: '0.82rem', color: '#74593f' }}>
+                      已終止或封閉案件會先核對訂單、帳務與月嫂款項，再恢復至「洽談中」進件階段。
+                    </p>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {reopenDraft?.status === 'outcome_unknown' && (
-                        <div role="alert" style={{ color: '#9a3412', fontSize: '0.8rem', backgroundColor: '#fff7ed', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fdba74' }}>
-                          重開回應逾時；只可用原 Key 重試。
+                    {reopenDraft?.previewView && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.84rem', color: '#57423b', marginBottom: '12px' }}>
+                        <div>狀態轉移：<span>{reopenDraft.previewView.before_status}</span> ➔ <strong style={{ color: '#166534' }}>{reopenDraft.previewView.after_status}</strong></div>
+                        <div className="reopen-version-grid">
+                          <div><strong>訂單狀態</strong>已核對</div>
+                          <div><strong>客戶帳務</strong>已完成雙向核對</div>
+                          <div><strong>月嫂款項</strong>無待處理欠款</div>
                         </div>
-                      )}
-                      {(reopenDraft?.status === 'observed' || reopenDraft?.status === 'receipt_received') && (
-                        <div role="status" style={{ color: '#166534', fontWeight: 700, fontSize: '0.84rem', backgroundColor: '#f0fdf4', padding: '6px 10px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
-                          ✅ 訂單已受控重開成功
+                        {reopenDraft.previewView.requires_fresh_scheduling_preview && (
+                          <div style={{ fontSize: '0.8rem', color: '#9a3412' }}>
+                            套用重開前必須重新檢查排班。
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {!reopenDraft?.previewView && !reopenDraft?.error && (
+                      <div style={{ fontSize: '0.82rem', color: '#8b7169', marginBottom: '12px' }}>
+                        {reopenDraft?.status === 'preview_loading' ? '⏳ 正在取得受控重開預覽…' : '正在載入重開候選事實…'}
+                      </div>
+                    )}
+                    {reopenDraft?.error && (
+                      <div role="alert" style={{ color: '#b91c1c', fontSize: '0.82rem', marginBottom: '8px' }}>
+                        <div>{reopenDraft.error.message}</div>
+                        {'domainBlockers' in reopenDraft.error && Array.isArray(reopenDraft.error.domainBlockers) && reopenDraft.error.domainBlockers.length > 0 && (
+                          <div>此案件目前有業務阻擋，處理完成後才能重開。</div>
+                        )}
+                      </div>
+                    )}
+
+                    <label style={{ display: 'block', fontWeight: 700, fontSize: '0.84rem' }}>
+                      重開原因說明 (Audit Log 必填 1~500 字)
+                      <textarea
+                        data-control-id="orders.reopen.reason"
+                        rows={3}
+                        maxLength={500}
+                        placeholder="請具體說明重開訂單之業務原因（至少 1 字）"
+                        value={reopenDraft?.reason ?? ''}
+                        disabled={reopenLocked}
+                        onChange={(event) => (contractOrder || dateConfirmOrder || reopenOrder || cancelOrder) && updateReopenReason((contractOrder || dateConfirmOrder || reopenOrder || cancelOrder)!.id, event.target.value)}
+                        style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.85rem' }}
+                      />
+                    </label>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {reopenDraft?.status === 'outcome_unknown' && (
+                      <div>
+                        <div role="alert" style={{ color: '#9a3412', fontSize: '0.8rem', backgroundColor: '#fff7ed', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fdba74', marginBottom: '8px' }}>
+                          重開回應逾時或未明；只可用原 Key 重試。
                         </div>
-                      )}
-                      {reopenDraft?.previewView && (
                         <button
                           type="button"
-                          data-control-id="orders.reopen.apply"
+                          data-control-id="orders.reopen.retry"
                           className="btn-primary-action"
                           style={{ width: '100%', padding: '11px', background: '#c2410c' }}
-                          disabled={reopenLocked || (reopenDraft?.reason.trim().length ?? 0) === 0}
                           onClick={() => {
                             const caseNo = (contractOrder || dateConfirmOrder || reopenOrder || cancelOrder)?.id;
                             if (!caseNo) return;
-                            void applyReopenFlow(caseNo)
-                              .then(() => fetchOrderSummaries())
-                              .catch(() => undefined);
+                            void retryReopenApplyFlow(caseNo, () => fetchOrderSummaries());
                           }}
                         >
-                          {reopenDraft?.status === 'apply_pending' ? '重開套用中…' : '確認受控重開訂單 (Apply)'}
+                          重試提交受控重開
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    )}
+                    {(reopenDraft?.status === 'observed' || reopenDraft?.status === 'receipt_received') && (
+                      <div role="status" style={{ color: '#166534', fontWeight: 700, fontSize: '0.84rem', backgroundColor: '#f0fdf4', padding: '6px 10px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
+                        ✅ 訂單已受控重開成功
+                      </div>
+                    )}
+                    {reopenDraft?.previewView && (
+                      <button
+                        type="button"
+                        data-control-id="orders.reopen.apply"
+                        className="btn-primary-action"
+                        style={{ width: '100%', padding: '11px', background: '#c2410c' }}
+                        disabled={reopenLocked || (reopenDraft?.reason.trim().length ?? 0) === 0}
+                        onClick={() => {
+                          const caseNo = (contractOrder || dateConfirmOrder || reopenOrder || cancelOrder)?.id;
+                          if (!caseNo) return;
+                          void applyReopenFlow(caseNo)
+                            .then(() => fetchOrderSummaries())
+                            .catch(() => undefined);
+                        }}
+                      >
+                        {reopenDraft?.status === 'apply_pending' ? '重開套用中…' : '確認受控重開訂單'}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

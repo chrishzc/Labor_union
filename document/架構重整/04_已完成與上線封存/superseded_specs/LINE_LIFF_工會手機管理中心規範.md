@@ -1,7 +1,14 @@
+---
+status: superseded
+updated: 2026-08-25
+successor: ../架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md; ../架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md; ../架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md
+retention: non-authoritative-design-reference
+---
+
 # LINE LIFF 工會管理端、異常通報與客訴轉真人規範 (模組四)
 
 ## 一、 文件狀態與責任範圍
-- **文件狀態**：`approved`
+- **原文件狀態**：`approved`；2026-08-25 已由正式規格取代
 - **所屬模組**：Admin Management, Alerts & Human Escalation (模組四)
 - **核心目標**：打造「兩大管理端協同 ＋ 單一幹部群即時告警 ＋ 客訴轉真人 SOP ＋ 電腦後台代班自動拆帳」的管理閉環。
 

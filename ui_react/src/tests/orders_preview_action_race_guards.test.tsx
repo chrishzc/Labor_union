@@ -101,7 +101,7 @@ describe('Orders Preview action race guards', () => {
     });
     await waitFor(() => expect(ordersMutationClient.getServiceDates).toHaveBeenCalledTimes(1));
     await waitFor(() => {
-      const btn = screen.getByRole('button', { name: /產生服務週次預覽/ });
+      const btn = screen.getByRole('button', { name: /檢查服務週次影響/ });
       expect(btn).not.toBeDisabled();
     });
   }
@@ -111,7 +111,7 @@ describe('Orders Preview action race guards', () => {
     vi.mocked(ordersMutationClient.previewServiceDates).mockReturnValueOnce(pending.promise);
     await openServiceDates();
 
-    const previewBtn = screen.getByRole('button', { name: /產生服務週次預覽/ });
+    const previewBtn = screen.getByRole('button', { name: /檢查服務週次影響/ });
     await act(async () => {
       fireEvent.click(previewBtn);
     });
@@ -134,7 +134,7 @@ describe('Orders Preview action race guards', () => {
     vi.mocked(ordersMutationClient.previewServiceDates).mockReturnValueOnce(pending.promise);
     await openServiceDates();
 
-    const previewBtn = screen.getByRole('button', { name: /產生服務週次預覽/ });
+    const previewBtn = screen.getByRole('button', { name: /檢查服務週次影響/ });
     await act(async () => {
       fireEvent.click(previewBtn);
     });
@@ -177,7 +177,7 @@ describe('Orders Preview action race guards', () => {
     vi.mocked(ordersMutationClient.previewServiceDates).mockReturnValueOnce(pending.promise);
     await openServiceDates();
 
-    const previewBtn = screen.getByRole('button', { name: /產生服務週次預覽/ });
+    const previewBtn = screen.getByRole('button', { name: /檢查服務週次影響/ });
     await act(async () => {
       fireEvent.click(previewBtn);
     });

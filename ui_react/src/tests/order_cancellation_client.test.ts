@@ -1,6 +1,6 @@
 /**
  * File: order_cancellation_client.test.ts
- * Description: 驗證訂單取消 Query／零寫入 Preview 的路徑、typed decode 與識別防漂移。
+ * Description: 驗證訂單取消 Query／Preview／Apply 的路徑、typed decode 與識別防漂移。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
@@ -42,6 +42,22 @@ const previewFixture = {
   preview_fingerprint: 'a'.repeat(64),
 };
 
+const receiptFixture = {
+  case_no: 'CASE-1',
+  order_version: 1,
+  scheduling_version: 1,
+  scheduling_generation: 1,
+  client_finance_version: 1,
+  payroll_version: 1,
+  lifecycle_status: '訂單取消',
+  actual_end_date: null,
+  official_service_day_count: 0,
+  official_service_hours: 0,
+  cancelled_assignment_ids: [],
+  created_assignment_keys: [],
+  preview_fingerprint: 'a'.repeat(64),
+};
+
 describe('orderCancellationClient', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -70,6 +86,34 @@ describe('orderCancellationClient', () => {
       expect.objectContaining({
         token: 'token',
         headers: expect.objectContaining({ 'X-Correlation-ID': expect.stringContaining('orders-cancellation-preview-CASE-1-') }),
+      }),
+    );
+  });
+
+  it('applies with fresh versions, explicit reason, idempotency and correlation identities', async () => {
+    const post = vi.spyOn(transport, 'post').mockResolvedValue({
+      success: true, message: 'ok', data: receiptFixture, error: null,
+    });
+    const payload = {
+      confirmed_service_days: [],
+      expected_order_version: 0,
+      expected_scheduling_version: 0,
+      expected_client_finance_version: 0,
+      expected_payroll_version: 0,
+      preview_fingerprint: 'a'.repeat(64),
+      reason: '客戶電話確認取消',
+    };
+    await expect(orderCancellationClient.apply('CASE-1', payload, { idempotencyKey: 'cancel-case-1' }))
+      .resolves.toEqual(receiptFixture);
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/orders/CASE-1/cancellation/apply',
+      payload,
+      expect.objectContaining({
+        token: 'token',
+        headers: expect.objectContaining({
+          'Idempotency-Key': 'cancel-case-1',
+          'X-Correlation-ID': expect.stringContaining('orders-cancellation-apply-CASE-1-'),
+        }),
       }),
     );
   });

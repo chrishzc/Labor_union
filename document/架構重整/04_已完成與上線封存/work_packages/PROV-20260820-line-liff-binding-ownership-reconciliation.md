@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: approved
+declared_status: completed
 identity: PROV-20260820-line-liff-binding-ownership-reconciliation
 date: 2026-08-20
 owner: LINE Identity / LIFF Onboarding Integration Owner

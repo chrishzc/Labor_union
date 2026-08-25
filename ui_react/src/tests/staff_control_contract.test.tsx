@@ -59,10 +59,9 @@ describe('Staff control contract', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /服務月嫂名冊/ }));
     fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
-    await waitFor(() => expect(screen.getByText('Lifecycle')).toBeInTheDocument());
-    for (const id of ['staff.lifecycle.retirement.preview', 'staff.lifecycle.retirement.apply', 'staff.lifecycle.reactivation.preview', 'staff.lifecycle.reactivation.apply']) {
-      expect(document.querySelector(`[data-control-id="${id}"]`)).toBeInTheDocument();
-    }
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
+    await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());
+    expect(screen.getByRole('tab', { name: /接案狀態管理/ })).toHaveAttribute('aria-selected', 'true');
     expect(document.querySelector('[data-control-id="staff.master.save"]')).not.toBeInTheDocument();
   });
 

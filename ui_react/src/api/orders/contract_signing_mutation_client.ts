@@ -25,6 +25,26 @@ const EnvelopeSchema = z.strictObject({
 
 export type ContractSigningReceipt = z.infer<typeof ReceiptSchema>;
 
+const ManualAttestationPreviewSchema = z.strictObject({
+  case_no: z.string().min(1),
+  scope: z.enum(['staff_segment', 'client_contract']),
+  matching_segment_id: z.number().int().positive().nullable(),
+  confirmation_method: z.enum(['phone', 'paper', 'in_person', 'verified_other']),
+  preview_fingerprint: z.string().length(64),
+  can_apply: z.literal(true),
+  line_delivery_task_id: z.null(),
+});
+
+const PreviewEnvelopeSchema = z.strictObject({
+  success: z.boolean(),
+  message: z.string(),
+  data: ManualAttestationPreviewSchema,
+  error: z.string().nullable(),
+});
+
+export type ManualAttestationPreview = z.infer<typeof ManualAttestationPreviewSchema>;
+export type ManualConfirmationMethod = ManualAttestationPreview['confirmation_method'];
+
 export interface ContractCommandOptions {
   idempotencyKey: string;
   correlationId: string;
@@ -56,12 +76,32 @@ async function command(path: string, body: unknown, options: ContractCommandOpti
   return envelope.data;
 }
 
+async function previewCommand(path: string, body: unknown, options: ContractCommandOptions): Promise<ManualAttestationPreview> {
+  const envelope = decodePayload(PreviewEnvelopeSchema, await transport.post(path, body, commandOptions(options)));
+  if (!envelope.success) {
+    throw new ApiHttpError(400, 'CONTRACT_SIGNING_PREVIEW_FAILED', envelope.error ?? envelope.message, false, envelope);
+  }
+  return envelope.data;
+}
+
 function signedDocumentBody(document: File, expectedDocumentVersionId: number): FormData {
   if (!(expectedDocumentVersionId > 0)) throw new Error('簽回文件版本無效。');
   if (document.size <= 0) throw new Error('簽回檔案不得為空。');
   const body = new FormData();
   body.append('document', document, document.name);
   body.append('expected_document_version_id', String(expectedDocumentVersionId));
+  return body;
+}
+
+function manualAttestationBody(document: File, confirmationMethod: ManualConfirmationMethod, reason: string, previewFingerprint: string): FormData {
+  if (document.size <= 0) throw new Error('人工簽約證據檔不得為空。');
+  if (!reason.trim()) throw new Error('請填寫人工確認依據。');
+  if (!/^[a-f0-9]{64}$/i.test(previewFingerprint)) throw new Error('人工簽約證據 Preview 已失效，請重新預覽。');
+  const body = new FormData();
+  body.append('document', document, document.name);
+  body.append('confirmation_method', confirmationMethod);
+  body.append('reason', reason.trim());
+  body.append('preview_fingerprint', previewFingerprint);
   return body;
 }
 
@@ -82,6 +122,22 @@ export const contractSigningMutationClient = {
       options,
     );
   },
+  previewManualStaffAttestation(caseNo: string, segmentId: number, confirmationMethod: ManualConfirmationMethod, reason: string, options: ContractCommandOptions): Promise<ManualAttestationPreview> {
+    if (!(segmentId > 0)) throw new Error('月嫂服務分段無效。');
+    return previewCommand(
+      `/api/v1/orders/${encodeURIComponent(canonicalCaseNo(caseNo))}/contract-signing/staff-segments/${segmentId}/manual-attestation/preview`,
+      { confirmation_method: confirmationMethod, reason: reason.trim() },
+      options,
+    );
+  },
+  recordManualStaffAttestation(caseNo: string, segmentId: number, document: File, confirmationMethod: ManualConfirmationMethod, reason: string, previewFingerprint: string, options: ContractCommandOptions): Promise<ContractSigningReceipt> {
+    if (!(segmentId > 0)) throw new Error('月嫂服務分段無效。');
+    return command(
+      `/api/v1/orders/${encodeURIComponent(canonicalCaseNo(caseNo))}/contract-signing/staff-segments/${segmentId}/manual-attestation`,
+      manualAttestationBody(document, confirmationMethod, reason, previewFingerprint),
+      options,
+    );
+  },
   sendClient(caseNo: string, downloadUrl: string, options: ContractCommandOptions): Promise<ContractSigningReceipt> {
     return command(
       `/api/v1/orders/${encodeURIComponent(canonicalCaseNo(caseNo))}/contract-signing/client/send`,
@@ -93,6 +149,20 @@ export const contractSigningMutationClient = {
     return command(
       `/api/v1/orders/${encodeURIComponent(canonicalCaseNo(caseNo))}/contract-signing/client/signed-return`,
       signedDocumentBody(document, expectedDocumentVersionId),
+      options,
+    );
+  },
+  previewManualClientAttestation(caseNo: string, confirmationMethod: ManualConfirmationMethod, reason: string, options: ContractCommandOptions): Promise<ManualAttestationPreview> {
+    return previewCommand(
+      `/api/v1/orders/${encodeURIComponent(canonicalCaseNo(caseNo))}/contract-signing/client/manual-attestation/preview`,
+      { confirmation_method: confirmationMethod, reason: reason.trim() },
+      options,
+    );
+  },
+  recordManualClientAttestation(caseNo: string, document: File, confirmationMethod: ManualConfirmationMethod, reason: string, previewFingerprint: string, options: ContractCommandOptions): Promise<ContractSigningReceipt> {
+    return command(
+      `/api/v1/orders/${encodeURIComponent(canonicalCaseNo(caseNo))}/contract-signing/client/manual-attestation`,
+      manualAttestationBody(document, confirmationMethod, reason, previewFingerprint),
       options,
     );
   },

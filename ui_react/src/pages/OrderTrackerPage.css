@@ -8,6 +8,79 @@
   justify-content: space-between;
   gap: 20px;
   margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.tracker-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tracker-search-wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.tracker-search-input-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 280px;
+}
+
+.tracker-search-icon {
+  position: absolute;
+  left: 14px;
+  font-size: 1rem;
+  color: #8b7169;
+  pointer-events: none;
+}
+
+.tracker-search-input-box input {
+  width: 100%;
+  padding: 9px 36px 9px 38px;
+  border: 1.5px solid #dec0b6;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  color: #1e1b19;
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px rgba(74, 69, 67, 0.04);
+  transition: all 0.15s ease;
+}
+
+.tracker-search-input-box input:focus {
+  border-color: #ff7f50;
+  box-shadow: 0 0 0 3px rgba(255, 127, 80, 0.18);
+  outline: none;
+  background-color: #fffdfc;
+}
+
+.tracker-search-input-box input::placeholder {
+  color: #a8948d;
+}
+
+.tracker-search-clear-btn {
+  position: absolute;
+  right: 10px;
+  background: #f5ece9;
+  border: none;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  color: #795d43;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tracker-search-clear-btn:hover {
+  background: #fee2e2;
+  color: #dc2626;
 }
 
 .tracker-reload-button,

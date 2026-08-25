@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: blocked
 identity: PROV-20260817-react-admin-phase6-retirement-release-gate
 date: 2026-08-17
 owner: Integration Owner
@@ -17,7 +17,7 @@ base_branch: main
 base_head: 8615225481c8f72a9629289285516189b270cb36
 dirty_baseline: integration-owner-must-capture-before-writer
 base_drift_rule: any relevant path drift requires fresh read and re-freeze before edits
-scenario_governance: Part_00_全域測試資料治理與Scenario契約.md
+scenario_governance: ../01_規格基線/00_Global_共同契約.md
 ui_execution_mode: not-applicable
 ---
 

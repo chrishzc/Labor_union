@@ -1,19 +1,24 @@
 ---
-status: in-progress
+status: superseded
 priority: P0
 owner: global-admin-web-presentation
 domain: Global
 subsystem: admin-web-presentation-adapter
 initiative: react-admin-migration
-updated: 2026-08-20
+updated: 2026-08-25
 approval_required: 每一 production mutation／entry switch／retirement wave仍需exact Work Package核准
 approval_evidence: user-delegated-phase3-through-phase6-execution-2026-08-20
 prerequisites: Part_00_全域測試資料治理與Scenario契約.md; UI真實業務流程測試資料與驗收主計畫.md
+successor: ../架構重整/01_規格基線/15_正式規格索引與裁決總表.md; ../架構重整/02_決策與退役執行記錄/58_未實作_未落地_未上線規格總表.md
 ---
 
 # React 管理端遷移與 UI 真實業務流程驗收計畫
 
 ## 0. 人工確認與授權狀態
+
+> 2026-08-25 狀態校正：本總遷移計畫已由逐頁工作包與正式規格的 runtime 狀態承接。
+> 已完成頁面不得依本檔舊 phase gate 重測；LINE、帳務異常、資料顯示、UX、視覺與效能的
+> 剩餘範圍改由 current 代辦總表唯一列管。
 
 - 2026-08-15 使用者提出：讀取
   `C:\Users\chris\Desktop\project\Labor_union` 的 React 模板，將 Streamlit 轉移為 React，並與

@@ -1,6 +1,6 @@
 ---
 doc_type: gap-package
-declared_status: proposed
+declared_status: superseded
 identity: PROV-20260817-react-admin-phase3b1-staff-remaining-controls-gap
 date: 2026-08-17
 owner: Staff / Scheduling

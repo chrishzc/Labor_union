@@ -1,36 +1,576 @@
 /**
  * File: FinancePage.css
- * Description: 定義Finance query-only tabs、表格、masked preview與狀態樣式。
+ * Description: 定義 財務查詢與對帳工作台 Nurture Core 蜜桃珊瑚暖色系視覺樣式、KPI 網格、資料清冊與對帳流水線。
  */
-.finance-page-header { display:flex; justify-content:space-between; align-items:center; gap:var(--space-4); }
-.finance-header-actions,.finance-tab-bar,.finance-toolbar,.finance-section-heading { display:flex; align-items:center; gap:var(--space-2); flex-wrap:wrap; }
-.finance-header-actions button,.finance-section-heading button { padding:8px 12px; border:1px solid var(--md-sys-color-outline); border-radius:var(--radius-md); background:var(--md-sys-color-surface-container-high); color:var(--md-sys-color-on-surface-variant); font-weight:700; }
-.finance-header-actions button:disabled,.finance-section-heading button:disabled { cursor:not-allowed; opacity:.72; }
-.finance-tab-bar { margin: 0 0 var(--space-5) 0; padding: 12px 8px; border-bottom: 2px solid var(--md-sys-color-outline-variant); position: sticky; top: 64px; z-index: 50; background: rgba(255, 248, 246, 0.92); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-radius: 12px; }
-.finance-tab-bar button { padding:10px 18px; border:1px solid var(--md-sys-color-outline); border-radius:var(--radius-md); background:var(--md-sys-color-surface-container); color:var(--md-sys-color-on-surface-variant); font-weight:700; cursor:pointer; }
-.finance-tab-bar button.active { background:var(--md-sys-color-primary); border-color:var(--md-sys-color-primary); color:var(--md-sys-color-on-primary); }
-.finance-toolbar { justify-content:space-between; margin-bottom:var(--space-4); color:var(--md-sys-color-on-surface-variant); font-size:.82rem; }
-.finance-toolbar button { padding:7px 12px; border:1px solid var(--md-sys-color-outline); border-radius:var(--radius-md); background:#fff; cursor:pointer; font-weight:700; }
-.finance-workspace { padding:var(--space-6); border:1px solid var(--md-sys-color-outline); border-radius:var(--radius-lg); background:var(--md-sys-color-surface-container); box-shadow:var(--shadow-sm); }
-.finance-section-heading { justify-content:space-between; margin-bottom:var(--space-4); }
-.finance-section-heading h2 { font-size:1.2rem; letter-spacing:-.01em; }
-.finance-section-heading p { color:var(--md-sys-color-on-surface-variant); font-size:.84rem; }
-.finance-section-heading label,.finance-split label { display:grid; gap:3px; color:var(--md-sys-color-on-surface-variant); font-size:.78rem; font-weight:700; }
-.finance-section-heading select,.finance-section-heading input,.finance-split select { min-height:40px; padding:7px 10px; border:1px solid var(--md-sys-color-outline); border-radius:var(--radius-md); background:#fff; }
-.finance-meta { margin:var(--space-3) 0; padding:var(--space-3); border-radius:var(--radius-md); background:var(--md-sys-color-surface-container-high); color:var(--md-sys-color-on-surface-variant); font-variant-numeric:tabular-nums; }
-.finance-table { width:100%; border-collapse:collapse; margin:var(--space-3) 0 var(--space-5); font-size:.84rem; }
-.finance-table th,.finance-table td { padding:10px 12px; border-bottom:1px solid var(--md-sys-color-outline-variant); text-align:left; vertical-align:top; font-variant-numeric:tabular-nums; }
-.finance-table th { background:var(--md-sys-color-surface); color:var(--md-sys-color-on-surface-variant); }
-.finance-table td button:disabled { padding:6px 10px; border:1px solid var(--md-sys-color-outline); border-radius:var(--radius-sm); background:var(--md-sys-color-surface-container-high); cursor:not-allowed; }
-.finance-state { margin:var(--space-4) 0; padding:var(--space-4); border:1px solid var(--md-sys-color-outline); border-radius:var(--radius-md); background:var(--md-sys-color-surface-container-high); }
-.finance-state.error { border-color:var(--md-sys-color-error); background:var(--md-sys-color-error-container); color:#7f1d1d; }
-.finance-state.unavailable { border-style:dashed; color:var(--md-sys-color-on-surface-variant); }
-.finance-split { display:grid; grid-template-columns:minmax(0,3fr) minmax(260px,2fr); gap:var(--space-5); }
-.finance-detail-block { margin-top:var(--space-5); }
-.finance-detail-block h3 { margin-bottom:var(--space-3); font-size:1rem; letter-spacing:-.01em; }
-.finance-scope-note { margin:var(--space-3) 0; color:var(--md-sys-color-on-surface-variant); font-size:.78rem; font-variant-numeric:tabular-nums; }
-.finance-manifest { display:grid; grid-template-columns:auto 1fr; gap:8px 12px; padding:var(--space-4); border:1px solid var(--md-sys-color-outline); border-radius:var(--radius-md); background:var(--md-sys-color-surface); }
-.finance-manifest dt { font-weight:700; color:var(--md-sys-color-on-surface-variant); }
-.finance-manifest dd { overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
-.finance-tab-bar button:focus-visible,.finance-toolbar button:focus-visible,.finance-workspace select:focus-visible,.finance-workspace input:focus-visible { outline:3px solid var(--md-sys-color-primary); outline-offset:2px; }
-@media(max-width:800px){.finance-page-header,.finance-section-heading{align-items:stretch;flex-direction:column}.finance-split{grid-template-columns:1fr}.finance-workspace{padding:var(--space-4);overflow-x:auto}}
+
+/* ==========================================================================
+   1. 頁面標題與頂部工具列
+   ========================================================================== */
+.finance-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4, 16px);
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #fed9b8;
+}
+
+.finance-page-header .page-title {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 800;
+  color: #1e1b19;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.finance-page-header .page-subtitle {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: #74593f;
+}
+
+.finance-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.finance-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* ==========================================================================
+   2. 4 大頁籤導航列 (Tab Bar)
+   ========================================================================== */
+.finance-tab-bar {
+  margin: 0 0 22px 0;
+  padding: 8px 10px;
+  border-bottom: 2px solid #dec0b6;
+  position: sticky;
+  top: 64px;
+  z-index: 50;
+  background: rgba(255, 248, 246, 0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 14px;
+  display: flex;
+  gap: 8px;
+  box-shadow: 0 2px 10px rgba(74, 69, 67, 0.04);
+}
+
+.finance-tab-bar button {
+  flex: 1;
+  padding: 10px 16px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #74593f;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.finance-tab-bar button:hover {
+  background: #fff0eb;
+  color: #a43c12;
+}
+
+.finance-tab-bar button.active {
+  background: #ff7f50;
+  border-color: #ff7f50;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(255, 127, 80, 0.3);
+}
+
+.finance-tab-bar button:focus-visible,
+.finance-toolbar button:focus-visible,
+.finance-workspace select:focus-visible,
+.finance-workspace input:focus-visible {
+  outline: 3px solid #ff7f50;
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   3. 次級工具列 (Toolbar)
+   ========================================================================== */
+.finance-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+  font-size: 0.82rem;
+  color: #74593f;
+}
+
+.finance-toolbar button,
+.finance-reload-btn {
+  padding: 7px 14px;
+  border: 1px solid #dec0b6;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1e1b19;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.finance-toolbar button:hover,
+.finance-reload-btn:hover {
+  border-color: #ff7f50;
+  color: #a43c12;
+}
+
+/* ==========================================================================
+   4. KPI 指標卡網格 (KPI Grid)
+   ========================================================================== */
+.finance-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.finance-kpi-item {
+  background: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 12px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 2px 8px rgba(74, 69, 67, 0.04);
+}
+
+.finance-kpi-label {
+  font-size: 0.78rem;
+  color: #74593f;
+  font-weight: 700;
+}
+
+.finance-kpi-value {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #a43c12;
+  font-family: 'JetBrains Mono', 'Noto Sans TC', sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-kpi-value.green { color: #16a34a; }
+.finance-kpi-value.orange { color: #ea580c; }
+
+/* ==========================================================================
+   5. 搜尋與案件篩選列 (Search Toolbar)
+   ========================================================================== */
+.finance-filter-bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  background: #fffcfb;
+  border: 1px solid #fed9b8;
+  padding: 12px 16px;
+  border-radius: 12px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.finance-filter-bar label,
+.finance-section-heading label,
+.finance-split label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #57423b;
+}
+
+.finance-input,
+.finance-select,
+.finance-section-heading select,
+.finance-section-heading input,
+.finance-split select {
+  padding: 8px 12px;
+  border: 1px solid #dec0b6;
+  border-radius: 8px;
+  background: #ffffff;
+  font-size: 0.85rem;
+  color: #1e1b19;
+  outline: none;
+  min-height: 38px;
+  transition: border-color 0.15s ease;
+}
+
+.finance-input:focus,
+.finance-select:focus,
+.finance-section-heading select:focus,
+.finance-section-heading input:focus,
+.finance-split select:focus {
+  border-color: #ff7f50;
+  box-shadow: 0 0 0 3px rgba(255, 127, 80, 0.15);
+}
+
+/* ==========================================================================
+   6. 工作區卡片 (Workspace Card)
+   ========================================================================== */
+.finance-workspace {
+  background: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 22px;
+  box-shadow: 0 4px 16px rgba(74, 69, 67, 0.05);
+  margin-bottom: 24px;
+}
+
+.finance-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f2e2dc;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.finance-section-heading h2 {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #1e1b19;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.finance-section-heading p {
+  color: #74593f;
+  font-size: 0.82rem;
+  margin: 3px 0 0;
+}
+
+.finance-meta {
+  margin: 12px 0 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #fffaf7;
+  border: 1px solid #fed9b8;
+  color: #57423b;
+  font-size: 0.84rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ==========================================================================
+   7. 數據表格 (Data Tables)
+   ========================================================================== */
+.finance-table-container {
+  overflow-x: auto;
+  border: 1px solid #f2e2dc;
+  border-radius: 10px;
+  margin: 12px 0 20px;
+}
+
+.finance-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+  background: #ffffff;
+}
+
+.finance-table th {
+  background: #fff5ee;
+  color: #a43c12;
+  font-weight: 700;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 1px solid #fed9b8;
+  font-size: 0.82rem;
+}
+
+.finance-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid #f2e2dc;
+  color: #1e1b19;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-table tr:hover td {
+  background: #fffaf7;
+}
+
+.finance-table code {
+  font-family: 'JetBrains Mono', monospace;
+  color: #a43c12;
+  background: #fff0eb;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+/* ==========================================================================
+   8. 徽章與狀態標籤 (Badges & Pills)
+   ========================================================================== */
+.finance-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.finance-badge-paid { background: #dcfce7; color: #166534; }
+.finance-badge-unpaid { background: #ffedd5; color: #9a3412; }
+.finance-badge-partial { background: #fef9c3; color: #854d0e; }
+.finance-badge-stage { background: #fee2e2; color: #991b1b; }
+
+/* ==========================================================================
+   9. 按鈕樣式 (Action Buttons)
+   ========================================================================== */
+.finance-btn-primary {
+  padding: 8px 16px;
+  background: #ff7f50;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.finance-btn-primary:hover:not(:disabled) {
+  background: #ea580c;
+}
+
+.finance-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.finance-btn-secondary {
+  padding: 8px 16px;
+  background: #ffffff;
+  color: #57423b;
+  border: 1px solid #dec0b6;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.finance-btn-secondary:hover:not(:disabled) {
+  border-color: #ff7f50;
+  color: #a43c12;
+}
+
+.finance-btn-disabled,
+.finance-table td button:disabled,
+.finance-header-actions button:disabled,
+.finance-section-heading button:disabled {
+  padding: 6px 12px;
+  border: 1px solid #dec0b6;
+  border-radius: 6px;
+  background: #fbf2ef;
+  color: #8b7169;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: not-allowed;
+  opacity: 0.78;
+}
+
+/* ==========================================================================
+   10. 狀態與載入提示 (State Messages)
+   ========================================================================== */
+.finance-state {
+  margin: 14px 0;
+  padding: 14px 18px;
+  border: 1px solid #fed9b8;
+  border-radius: 10px;
+  background: #fffcfb;
+  color: #57423b;
+  font-size: 0.85rem;
+}
+
+.finance-state.error {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.finance-state.unavailable {
+  border-style: dashed;
+  color: #74593f;
+  background: #fffaf7;
+}
+
+/* ==========================================================================
+   11. Finance Import 3 步驟流水線 (Pipeline Stepper)
+   ========================================================================== */
+.finance-stepper {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.finance-step-item {
+  background: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.finance-step-item.active {
+  background: #fff0eb;
+  border: 2px solid #ff7f50;
+}
+
+.finance-step-num {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #fed9b8;
+  color: #a43c12;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.finance-step-item.active .finance-step-num {
+  background: #ff7f50;
+  color: #ffffff;
+}
+
+.finance-step-title {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #1e1b19;
+}
+
+.finance-step-desc {
+  font-size: 0.72rem;
+  color: #74593f;
+}
+
+/* Dropzone */
+.finance-dropzone {
+  border: 2px dashed #ff7f50;
+  background: #fffcfb;
+  border-radius: 14px;
+  padding: 26px;
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.finance-dropzone h3 {
+  font-size: 1rem;
+  color: #a43c12;
+  margin-top: 6px;
+}
+
+.finance-dropzone p {
+  font-size: 0.82rem;
+  color: #74593f;
+  margin: 4px 0 12px;
+}
+
+/* Split layout & manifest */
+.finance-split {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr);
+  gap: 20px;
+}
+
+.finance-detail-block {
+  margin-top: 16px;
+}
+
+.finance-detail-block h3 {
+  margin-bottom: 10px;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #1e1b19;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.finance-scope-note {
+  margin: 8px 0;
+  color: #74593f;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-manifest {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  padding: 14px;
+  border: 1px solid #fed9b8;
+  border-radius: 10px;
+  background: #fffaf7;
+  font-size: 0.82rem;
+}
+
+.finance-manifest dt {
+  font-weight: 700;
+  color: #57423b;
+}
+
+.finance-manifest dd {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+  font-family: 'JetBrains Mono', monospace;
+  color: #1e1b19;
+}
+
+@media (max-width: 900px) {
+  .finance-page-header,
+  .finance-section-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .finance-split {
+    grid-template-columns: 1fr;
+  }
+  .finance-stepper {
+    grid-template-columns: 1fr 1fr;
+  }
+}

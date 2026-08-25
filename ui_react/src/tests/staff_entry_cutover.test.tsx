@@ -216,7 +216,8 @@ describe('Staff #staff entry cutover candidate', () => {
     expect(requests).toHaveLength(initialRequestCount);
 
     fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
-    await waitFor(() => expect(screen.getByText('Lifecycle')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
+    await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());
     expect(countPath(requests, STAFF_LIFECYCLE_ENDPOINT)).toBe(1);
     expect(countPath(requests, STAFF_QUALIFICATION_ENDPOINT)).toBe(1);
 

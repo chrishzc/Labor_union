@@ -24,7 +24,7 @@ describe('DataImport HCM result review', () => {
     expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();
     expect(document.querySelector('[data-control-id="imports.hcm-current.apply"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="imports.hcm-current.apply-guidance"]'))
-      .toHaveTextContent('Apply 下一步：成功完成 Preview 後顯示確認與套用按鈕。');
+      .toHaveTextContent('預覽成功後才能確認匯入。');
   });
 
   it('refresh costs one GET and warning navigation is local', async () => {
@@ -40,7 +40,7 @@ describe('DataImport HCM result review', () => {
   it('shows a neutral legacy summary instead of an empty-success claim', async () => {
     vi.mocked(hcmImportResultClient.query).mockResolvedValue({ items: [{ ...detailedHcmResult, row_outcomes_available: false, legacy_summary_only: true, row_outcomes: [] }], next_cursor: null });
     render(<DataImportPage />);
-    await waitFor(() => expect(screen.getByText(/歷史摘要 receipt；本批次統計如上/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/歷史匯入摘要；本批次統計如上/)).toBeInTheDocument());
     expect(screen.queryByText('本批次沒有新增訂單。')).not.toBeInTheDocument();
   });
 });

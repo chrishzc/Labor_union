@@ -156,7 +156,7 @@ export function LineIdentityMaintenanceActions({
       if (nextController.signal.aborted) return;
       const view = adaptLineIdentityReplacementResult(result);
       setReplacementState('success');
-      setReplacementResult(`綁定對象已更正為 ${view.subjectName}；目前版本 ${view.version}。`);
+      setReplacementResult(`綁定對象已更正為 ${view.subjectName}，並已回讀確認。`);
       onBindingChanged?.(result);
     } catch (error: unknown) {
       if (nextController.signal.aborted) return;
@@ -242,7 +242,7 @@ export function LineIdentityMaintenanceActions({
                       checked={replacementConfirmed}
                       onChange={(event) => setReplacementConfirmed(event.target.checked)}
                     />
-                    我已確認目前版本與更正對象
+                    我已核對目前綁定與更正對象
                   </label>
                   <button
                     type="button"
@@ -263,14 +263,14 @@ export function LineIdentityMaintenanceActions({
       {binding.revocation_request_id && binding.revocation_status === 'pending_menu_reset' && (
         <section aria-labelledby="line-identity-pending-title">
           <h4 id="line-identity-pending-title">解除流程處理中</h4>
-          <p>Durable worker 正在回復 Rich Menu；請重新查詢狀態，不直接呼叫 LINE provider。</p>
+          <p>背景服務正在回復 LINE 選單；請重新查詢最新狀態。</p>
         </section>
       )}
 
       {binding.revocation_request_id && binding.revocation_status === 'menu_reset_failed' && (
         <section aria-labelledby="line-identity-maintenance-title">
           <h4 id="line-identity-maintenance-title">解除失敗維護</h4>
-          <p>可重新排入 durable queue；只有確認 provider 永久失敗或重試耗盡時才能人工完成。</p>
+          <p>可重新排入 LINE 選單回復；只有確認 LINE 平台永久失敗或重試已耗盡時才能人工完成。</p>
           <label htmlFor="line-identity-maintenance-reason">維護原因</label>
           <textarea
             id="line-identity-maintenance-reason"
@@ -294,7 +294,7 @@ export function LineIdentityMaintenanceActions({
                   checked={failureConfirmed}
                   onChange={(event) => setFailureConfirmed(event.target.checked)}
                 />
-                我已確認 provider 永久失敗或重試已耗盡
+                我已確認 LINE 平台永久失敗或重試已耗盡
               </label>
               <label>
                 <input
@@ -302,7 +302,7 @@ export function LineIdentityMaintenanceActions({
                   checked={overrideConfirmed}
                   onChange={(event) => setOverrideConfirmed(event.target.checked)}
                 />
-                我了解人工完成會直接完成解除並清除 owner projection
+                我了解人工完成會直接完成解除並清除授權關聯
               </label>
               <button
                 type="button"
@@ -313,7 +313,7 @@ export function LineIdentityMaintenanceActions({
               </button>
             </>
           ) : (
-            <p>人工完成只提供具 LINE 身分 override 權限的系統管理員。</p>
+            <p>人工完成只提供具 LINE 身分人工處理權限的系統管理員。</p>
           )}
           {maintenanceState === 'loading' && <p>正在提交維護操作…</p>}
           {maintenanceError && <div className="line-error" role="alert">{maintenanceError}</div>}

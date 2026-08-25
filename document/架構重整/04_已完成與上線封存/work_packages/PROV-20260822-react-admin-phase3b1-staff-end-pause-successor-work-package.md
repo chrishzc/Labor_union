@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 identity: PROV-20260822-react-admin-phase3b1-staff-end-pause-successor
 date: 2026-08-22
 owner: Scheduling Staff Availability / React Integration Owner

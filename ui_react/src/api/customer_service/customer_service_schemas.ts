@@ -111,7 +111,7 @@ export type CustomerServiceListParams = z.infer<
 
 export const CustomerServiceResolvePreviewRequestSchema = z
   .object({
-    status: z.literal('resolved'),
+    status: CustomerServiceStatusSchema,
     internal_note: z.string().max(4000).nullable(),
     expected_version: z.number().int().nonnegative(),
   })
@@ -142,7 +142,7 @@ export type CustomerServiceResolvePreview = z.infer<
 
 export const CustomerServiceResolveApplyRequestSchema = z
   .object({
-    status: z.literal('resolved'),
+    status: CustomerServiceStatusSchema,
     internal_note: z.string().max(4000).nullable(),
     expected_version: z.number().int().nonnegative(),
     preview_fingerprint: CustomerServiceFingerprintSchema,
@@ -152,29 +152,73 @@ export type CustomerServiceResolveApplyRequest = z.infer<
   typeof CustomerServiceResolveApplyRequestSchema
 >;
 
-export const CustomerServiceUpdateRequestSchema = z
+export const CustomerServiceUpdateApplySchema = z
   .object({
-    status: CustomerServiceStatusSchema,
-    internal_note: z.string().max(4000).nullable(),
-    expected_version: z.number().int().nonnegative(),
-    idempotency_key: z.string().min(1).max(191),
+    ticket_id: z.number().int(),
+    resulting_status: CustomerServiceStatusSchema,
+    resulting_version: z.number().int().positive(),
+    preview_fingerprint: CustomerServiceFingerprintSchema,
+    replayed: z.boolean(),
+    readback: CustomerServiceDetailSchema,
   })
   .strict();
-export type CustomerServiceUpdateRequest = z.infer<
-  typeof CustomerServiceUpdateRequestSchema
+export type CustomerServiceUpdateApply = z.infer<
+  typeof CustomerServiceUpdateApplySchema
 >;
 
-export const CustomerServiceReplyRequestSchema = z
+export const CustomerServiceReplyPreviewRequestSchema = z
   .object({
     reply_text: z.string().trim().min(1).max(2000),
     resolve: z.boolean(),
     internal_note: z.string().max(4000).nullable(),
     expected_version: z.number().int().nonnegative(),
-    idempotency_key: z.string().min(1).max(191),
   })
   .strict();
-export type CustomerServiceReplyRequest = z.infer<
-  typeof CustomerServiceReplyRequestSchema
+export type CustomerServiceReplyPreviewRequest = z.infer<
+  typeof CustomerServiceReplyPreviewRequestSchema
+>;
+
+export const CustomerServiceReplyApplyRequestSchema = CustomerServiceReplyPreviewRequestSchema
+  .extend({
+    idempotency_key: z.string().min(1).max(191),
+    preview_fingerprint: CustomerServiceFingerprintSchema,
+  })
+  .strict();
+export type CustomerServiceReplyApplyRequest = z.infer<
+  typeof CustomerServiceReplyApplyRequestSchema
+>;
+
+export const CustomerServiceReplyPreviewSchema = z
+  .object({
+    ticket_id: z.number().int(),
+    before_status: CustomerServiceStatusSchema,
+    after_status: CustomerServiceStatusSchema,
+    current_version: z.number().int().nonnegative(),
+    expected_version: z.number().int().nonnegative(),
+    reply_character_count: z.number().int().min(1).max(2000),
+    will_enqueue_delivery: z.literal(true),
+    preview_fingerprint: CustomerServiceFingerprintSchema,
+    apply_ready: z.literal(true),
+  })
+  .strict();
+export type CustomerServiceReplyPreview = z.infer<
+  typeof CustomerServiceReplyPreviewSchema
+>;
+
+export const CustomerServiceReplyApplySchema = z
+  .object({
+    ticket_id: z.number().int(),
+    resulting_status: CustomerServiceStatusSchema,
+    resulting_version: z.number().int().positive(),
+    preview_fingerprint: CustomerServiceFingerprintSchema,
+    delivery_enqueued: z.literal(true),
+    delivery_delivered: z.literal(false),
+    replayed: z.boolean(),
+    readback: CustomerServiceDetailSchema,
+  })
+  .strict();
+export type CustomerServiceReplyApply = z.infer<
+  typeof CustomerServiceReplyApplySchema
 >;
 
 export const CustomerServiceSummaryResponseSchema = z
@@ -224,3 +268,30 @@ export const CustomerServiceResolvePreviewResponseSchema = z
 export type CustomerServiceResolvePreviewResponse = z.infer<
   typeof CustomerServiceResolvePreviewResponseSchema
 >;
+
+export const CustomerServiceUpdateApplyResponseSchema = z
+  .object({
+    success: z.boolean(),
+    message: z.string(),
+    data: CustomerServiceUpdateApplySchema,
+    error: z.string().nullable(),
+  })
+  .strict();
+
+export const CustomerServiceReplyPreviewResponseSchema = z
+  .object({
+    success: z.boolean(),
+    message: z.string(),
+    data: CustomerServiceReplyPreviewSchema,
+    error: z.string().nullable(),
+  })
+  .strict();
+
+export const CustomerServiceReplyApplyResponseSchema = z
+  .object({
+    success: z.boolean(),
+    message: z.string(),
+    data: CustomerServiceReplyApplySchema,
+    error: z.string().nullable(),
+  })
+  .strict();

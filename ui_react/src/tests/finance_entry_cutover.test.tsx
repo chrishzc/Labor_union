@@ -1,6 +1,6 @@
 /**
  * File: finance_entry_cutover.test.tsx
- * Description: 驗證 Finance entry 的 StrictMode GET 預算、四組查詢與原生停用邊界。
+ * Description: 驗證 Finance entry 的 StrictMode GET 預算、四組查詢、正常匯入門檻與無假 mutation 入口。
  */
 import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -238,52 +238,48 @@ describe('Finance #finance entry static subgate', () => {
     expect(screen.getByText('💰 財務查詢與對帳工作台')).toBeInTheDocument();
     expect(countPath(requests, ORDERS_SUMMARY_ENDPOINT)).toBe(1);
     expect(countPath(requests, CLIENT_RECEIPT_ENDPOINT)).toBe(1);
-    for (const control of [
-      'finance.refund.approve',
-      'finance.subsidy.advance',
-      'finance.accounts-payable.export-xlsx',
-      'finance.client-receipt.settle',
-    ]) {
-      expect(document.querySelector(`[data-control-id="${control}"]`)).toBeDisabled();
-    }
+    expect(document.querySelector('[data-control-id="finance.client-receipt.settle"]')).toBeNull();
+    expect(screen.queryByText(/未開放/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="finance.refund.approve"]')).toBeNull();
+    expect(document.querySelector('[data-control-id="finance.subsidy.advance"]')).toBeNull();
+    expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '月嫂應付款' }));
     await waitFor(() => expect(screen.getByText('OBL-S-1')).toBeInTheDocument());
     expect(countPath(requests, STAFF_DIRECTORY_ENDPOINT)).toBe(1);
     expect(countPath(requests, STAFF_PAYABLE_ENDPOINT)).toBe(1);
-    expect(document.querySelector('[data-control-id="finance.staff-payable.mark-paid"]')).toBeDisabled();
-    expect(document.querySelector('[data-control-id="finance.staff-payable.adjustment"]')).toBeDisabled();
+    expect(document.querySelector('[data-control-id="finance.staff-payable.mark-paid"]')).toBeNull();
+    expect(document.querySelector('[data-control-id="finance.staff-payable.adjustment"]')).toBeNull();
+    expect(screen.queryByText(/未開放/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '應付帳款' }));
     await waitFor(() => expect(screen.getByText(/\*{8}9012/)).toBeInTheDocument());
     expect(countPath(requests, ACCOUNTS_PAYABLE_ENDPOINT)).toBe(1);
     expect(screen.queryByText('123456789012')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeDisabled();
+    expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Finance Import' }));
-    await waitFor(() => expect(screen.getByText('BATCH-FIN-021')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('ROW-FIN-301')).toBeInTheDocument());
-    expect(countPath(requests, FINANCE_BATCHES_ENDPOINT)).toBe(1);
-    expect(countPath(requests, FINANCE_MANIFEST_ENDPOINT)).toBe(1);
-    expect(countPath(requests, FINANCE_REVIEW_ENDPOINT)).toBe(1);
-    expect(countPath(requests, FINANCE_REPROCESS_ENDPOINT)).toBe(1);
-    for (const control of ['finance.finance-import.upload', 'finance.finance-import.reprocess']) {
-      expect(document.querySelector(`[data-control-id="${control}"]`)).toBeDisabled();
-    }
+    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
+    expect(screen.getByText('上傳檔案 → 預覽 → 匯入完成')).toBeInTheDocument();
+    expect(countPath(requests, FINANCE_BATCHES_ENDPOINT)).toBe(0);
+    expect(countPath(requests, FINANCE_MANIFEST_ENDPOINT)).toBe(0);
+    expect(countPath(requests, FINANCE_REVIEW_ENDPOINT)).toBe(0);
+    expect(countPath(requests, FINANCE_REPROCESS_ENDPOINT)).toBe(0);
+    expect(document.querySelector('[data-control-id="finance.finance-import.upload"]')).toBeDisabled();
+    expect(document.querySelector('[data-control-id="finance.finance-import.reprocess"]')).toBeNull();
     expect(document.querySelector('[data-control-id="finance.finance-import.preview"]')).toBeDisabled();
     expect(document.querySelector('[data-control-id="finance.finance-import.apply"]')).toBeNull();
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
   });
 
-  it('Finance Import 沒有 public batch identity 時明確 unavailable 且不發 detail GET', async () => {
+  it('正常 Finance Import 不查詢或顯示歷史批次 identity', async () => {
     authenticate();
     const requests = installFetchStub({ noPublicBatchIdentity: true });
     render(<StrictMode><App /></StrictMode>);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Finance Import' }));
-    await waitFor(() => expect(screen.getByText('無public identity')).toBeInTheDocument());
-    expect(screen.getByText('目前沒有可查詢的公開批次 identity。')).toBeInTheDocument();
-    expect(countPath(requests, FINANCE_BATCHES_ENDPOINT)).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
+    expect(screen.getByText('上傳檔案 → 預覽 → 匯入完成')).toBeInTheDocument();
+    expect(screen.queryByText('無public identity')).not.toBeInTheDocument();
+    expect(countPath(requests, FINANCE_BATCHES_ENDPOINT)).toBe(0);
     expect(countPath(requests, FINANCE_MANIFEST_ENDPOINT)).toBe(0);
     expect(countPath(requests, FINANCE_REVIEW_ENDPOINT)).toBe(0);
     expect(countPath(requests, FINANCE_REPROCESS_ENDPOINT)).toBe(0);
@@ -295,7 +291,7 @@ describe('Finance #finance entry static subgate', () => {
     const emptyRequests = installFetchStub({ emptyCases: true });
     render(<StrictMode><App /></StrictMode>);
 
-    await waitFor(() => expect(screen.getByText('目前沒有可顯示的收款根事實。')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('目前沒有可顯示的收款資料。')).toBeInTheDocument());
     expect(screen.queryByText('OBL-C-1')).not.toBeInTheDocument();
     expect(countPath(emptyRequests, ORDERS_SUMMARY_ENDPOINT)).toBe(1);
     expect(countPath(emptyRequests, CLIENT_RECEIPT_ENDPOINT)).toBe(0);

@@ -51,7 +51,7 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
     render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} />);
     fireEvent.click(screen.getByRole('button', { name: /4\. 通知規則/ }));
     await screen.findByText('目前尚未設定通知規則');
-    expect(screen.getAllByText(/Current revision：0/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Current revision|revision：0/i)).not.toBeInTheDocument();
     expect(screen.queryByText('FLOW-13')).not.toBeInTheDocument();
   });
 });

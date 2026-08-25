@@ -65,6 +65,32 @@ Orders 不擁有：
   `BusinessClock` 投影 `not_started／in_progress／completed`；不得依可過期的 assignment status count。
 - 正式服務完成後，current stage 必須前進至完工結案與請款，即使其中某個 settlement owner
   projection 仍為 `unavailable`；不得繼續把案件留在「正式服務履約／進行中」。
+- Staff Payables 結清只讀 `staff_payable_projections` 的 current status／version／updated time；
+  `staff_obligations` 是不可變義務來源，原始 `open` 不得被 Orders 誤判為付款仍未完成。
+
+### 3.1.2 未完成訂單代辦看板（2026-08-25 人工裁決）
+
+- 代辦看板的候選集合固定為所有尚未完成的訂單；canonical lifecycle 已為「訂單完成」的案件不得顯示。
+- 「所有」是 server-authoritative 完整集合，不是第一頁或任意上限。若 public Query 採 cursor／continuation，
+  React 必須自動續讀至 terminal page，合併時依 order identity 去重並維持 deterministic ordering；不得要求
+  操作者按「下一頁」才發現其他待辦。
+- 任一 continuation 失敗、timeout、abort、cursor 重複或 schema mismatch 時，頁面不得把 partial rows
+  宣稱為完整看板；必須顯示載入未完成與 retry，並取消 stale request。
+- 本看板是唯讀 Query projection，不得為了排除完成訂單而修改 Orders status、隱藏 blocked／unavailable
+  案件或在瀏覽器重算 lifecycle。
+
+### 3.1.3 訂單管理未完成清單（2026-08-25 人工裁決）
+
+- 訂單管理主清單採與代辦看板相同的候選集合、完整 continuation、identity 去重、deterministic ordering
+  與 partial-failure 規則：同頁顯示所有未完成訂單，完成訂單固定排除。
+- 分頁 cursor 可作 transport 細節，但不得成為操作者工作步驟；React 必須自動續讀至 terminal page，
+  不顯示「下一頁」按鈕，也不得只因預設 page size 而漏掉未完成案件。
+
+驗收狀態（2026-08-25）：`completed`。代辦看板與訂單管理已共用 server-owned `unfinished`
+lifecycle scope，自動讀完 continuation；Chrome 回讀兩頁皆為 94 筆、完成訂單 0 筆且無人工下一頁入口。
+React adapter 不再自行解讀中文狀態縮減集合；focused tests 與 production build 已通過。
+- 代辦看板與訂單管理可採不同 presentation，但必須消費同一 server lifecycle predicate；兩頁不得各自
+  以中文 status、日期、card lane 或 local cache 判斷是否完成。
 
 ### 3.2 Terms Preview／Apply
 

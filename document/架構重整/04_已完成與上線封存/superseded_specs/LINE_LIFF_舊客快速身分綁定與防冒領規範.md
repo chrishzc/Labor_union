@@ -1,7 +1,14 @@
+---
+status: superseded
+updated: 2026-08-25
+successor: ../架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md
+retention: non-authoritative-security-reference
+---
+
 # LINE LIFF 舊客快速身分綁定與防冒領規範 (bind.html)
 
 ## 一、 文件狀態與責任範圍
-- **文件狀態**：`approved`
+- **原文件狀態**：`approved`；2026-08-25 已由正式 binding SSOT 取代
 - **所屬模組**：LINE Ingress & LIFF Onboarding (模組一)
 - **核心目標**：以最少輸入（姓名+電話）快速關聯客戶歷史案件，並實作「防冒領/防占用」的工會後台審核轉移機制。
 

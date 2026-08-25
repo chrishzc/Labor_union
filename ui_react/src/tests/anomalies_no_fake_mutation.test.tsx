@@ -54,24 +54,14 @@ describe('Anomalies no fake root mutation verification suite', () => {
     );
   });
 
-  it('verifies claim buttons on anomaly cards are strictly disabled and trigger no side effects', async () => {
+  it('未接通的認領 mutation 不顯示假按鈕且不觸發副作用', async () => {
     render(<AnomaliesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
+      expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
     });
 
-    const claimButtons = screen.getAllByRole('button', { name: /🔵 認領此案/ });
-    expect(claimButtons.length).toBe(3);
-
-    for (const btn of claimButtons) {
-      expect(btn).toBeDisabled();
-      expect(btn).toHaveAttribute('data-control-id', 'anomalies.card.claim');
-      expect(btn).toHaveAttribute('title', expect.stringContaining('[查詢模式]'));
-
-      // Attempt click
-      fireEvent.click(btn);
-    }
+    expect(screen.queryByRole('button', { name: /認領此案/ })).not.toBeInTheDocument();
 
     expect(alertSpy).not.toHaveBeenCalled();
     expect(confirmSpy).not.toHaveBeenCalled();
@@ -82,26 +72,26 @@ describe('Anomalies no fake root mutation verification suite', () => {
     render(<AnomaliesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
+      expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
     });
 
-    const drawerButtons = screen.getAllByRole('button', { name: /排查處置抽屜 ➔/ });
+    const drawerButtons = screen.getAllByRole('button', { name: /查看處理方式 ➔/ });
     await act(async () => {
       fireEvent.click(drawerButtons[0]);
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/⚠️ 異常排查與修復處置/)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /假日排班尚未確認/ })).toBeInTheDocument();
     });
 
-    expect(screen.getByText('此異常沒有已註冊的 Finance Import correction 表單；請依 owning Domain 的 typed action 處理。')).toBeInTheDocument();
+    expect(screen.getByText(/沒有可直接使用的帳務更正表單/)).toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="anomalies.finance-correction"]')).toBeNull();
 
     // Check resolve button
     const resolveBtn = screen.getByRole('button', { name: /確認排除異常/ });
     expect(resolveBtn).toBeDisabled();
     expect(resolveBtn).toHaveAttribute('data-control-id', 'anomalies.drawer.resolve');
-    expect(resolveBtn).toHaveAttribute('title', expect.stringContaining('通用 Resolve'));
+    expect(resolveBtn).toHaveAttribute('title', expect.stringContaining('不會取代原始資料的修正'));
 
     // Attempt click
     fireEvent.click(resolveBtn);
@@ -115,7 +105,7 @@ describe('Anomalies no fake root mutation verification suite', () => {
     render(<AnomaliesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
+      expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
     });
 
     // Category click
@@ -131,7 +121,7 @@ describe('Anomalies no fake root mutation verification suite', () => {
     });
 
     // Open drawer
-    const drawerBtn = screen.getByRole('button', { name: /排查處置抽屜 ➔/ });
+    const drawerBtn = screen.getByRole('button', { name: /查看處理方式 ➔/ });
     await act(async () => {
       fireEvent.click(drawerBtn);
     });

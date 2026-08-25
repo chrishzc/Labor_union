@@ -1,6 +1,6 @@
 /**
  * File: order_tracker_adapter.test.ts
- * Description: 驗證 Tracker 不從原始狀態推導七階、SOP、LINE或結清，並保留所有 unavailable 槽位。
+ * Description: 驗證 Tracker 信任 server lifecycle scope，且不從原始狀態重算七階、SOP、LINE 或結清。
  */
 import { describe, expect, it } from 'vitest';
 import { adaptOrderTrackerPage, adaptTrackerOrderCard } from '../adapters/orders/order_tracker_adapter';
@@ -47,5 +47,30 @@ describe('Order Tracker adapter', () => {
     ]);
     expect(card.settlementSlots.every((slot) => slot.availability === 'unavailable')).toBe(true);
   });
-});
 
+  it('does not reinterpret localized statuses or shrink the server-scoped collection', () => {
+    const active = { ...realisticOrderSummaryPage.items[0], order_status: '洽談中' };
+    const completed = {
+      ...realisticOrderSummaryPage.items[1],
+      case_no: 'ORD-2026-COMPLETED',
+      order_status: '訂單完成',
+    };
+    const cancelled = {
+      ...realisticOrderSummaryPage.items[2],
+      case_no: 'ORD-2026-CANCELLED',
+      order_status: '訂單取消',
+    };
+
+    const view = adaptOrderTrackerPage({
+      ...realisticOrderSummaryPage,
+      items: [active, completed, cancelled],
+    });
+
+    expect(view.unclassifiedOrders.map((order) => order.id)).toEqual([
+      active.case_no,
+      completed.case_no,
+      cancelled.case_no,
+    ]);
+    expect(view.loadedCount).toBe(3);
+  });
+});

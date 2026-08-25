@@ -1,7 +1,14 @@
+---
+status: superseded
+updated: 2026-08-25
+successor: ../架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md; ../架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md; ../架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md
+retention: non-authoritative-flow-reference
+---
+
 # LINE LIFF 身分先行與服務登記導流規劃規範
 
 ## 一、 文件狀態與責任範圍
-- **文件狀態**：`proposed`
+- **原文件狀態**：`proposed`；2026-08-25 已由正式規格取代
 - **所屬模組**：LINE Ingress & LIFF Onboarding (模組一)
 - **核心目標**：實現「身分先行核對 ➔ 自動帶入問卷 ➔ DB 暫存待綁定 ➔ 例外自動通報」的一體化導流閉環。
 

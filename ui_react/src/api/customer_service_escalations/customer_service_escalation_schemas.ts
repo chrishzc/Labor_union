@@ -35,17 +35,26 @@ export const CustomerServiceEscalationCreateRequestSchema = z.strictObject({
   hold_scope: z.string().trim().min(1).max(191),
   ...CommandIdentityShape,
 });
+export const CustomerServiceEscalationCreateApplyRequestSchema = CustomerServiceEscalationCreateRequestSchema.extend({
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
 
 export const CustomerServiceEscalationClaimRequestSchema = z.strictObject({
   expected_escalation_version: z.number().int().nonnegative(),
   ...CommandIdentityShape,
 });
+export const CustomerServiceEscalationClaimApplyRequestSchema = CustomerServiceEscalationClaimRequestSchema.extend({
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
 
 export const CustomerServiceEscalationHandlingRequestSchema = z.strictObject({
   expected_escalation_version: z.number().int().nonnegative(),
   expected_ticket_version: z.number().int().nonnegative(),
   ...CommandIdentityShape,
 });
+export const CustomerServiceEscalationHandlingApplyRequestSchema = CustomerServiceEscalationHandlingRequestSchema.extend({
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
 
 export const CustomerServiceEscalationResolveRequestSchema = z.strictObject({
   expected_escalation_version: z.number().int().nonnegative(),
@@ -53,6 +62,22 @@ export const CustomerServiceEscalationResolveRequestSchema = z.strictObject({
   resolution_code: z.string().trim().min(1).max(64),
   resolution_evidence_digest: z.string().regex(/^[0-9a-f]{64}$/),
   ...CommandIdentityShape,
+});
+export const CustomerServiceEscalationResolveApplyRequestSchema = CustomerServiceEscalationResolveRequestSchema.extend({
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
+
+export const CustomerServiceEscalationPreviewSchema = z.strictObject({
+  operation: z.enum(['create', 'claim', 'handling_started', 'resolve']),
+  escalation_id: z.number().int().positive().nullable(),
+  before_workflow_status: z.enum(['absent', 'open', 'claimed', 'handling', 'resolved']),
+  resulting_workflow_status: EscalationWorkflowStatusSchema,
+  before_hold_state: z.enum(['absent', 'active', 'released']),
+  resulting_hold_state: EscalationHoldStateSchema,
+  current_escalation_version: z.number().int().nonnegative().nullable(),
+  current_ticket_version: z.number().int().nonnegative().nullable(),
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  apply_ready: z.literal(true),
 });
 
 export const CustomerServiceEscalationReceiptSchema = z.strictObject({
@@ -97,10 +122,16 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
 
 export const CustomerServiceEscalationReceiptResponseSchema = envelope(CustomerServiceEscalationReceiptSchema);
 export const CustomerServiceEscalationViewResponseSchema = envelope(CustomerServiceEscalationViewSchema);
+export const CustomerServiceEscalationPreviewResponseSchema = envelope(CustomerServiceEscalationPreviewSchema);
 
 export type CustomerServiceEscalationCreateRequest = z.infer<typeof CustomerServiceEscalationCreateRequestSchema>;
+export type CustomerServiceEscalationCreateApplyRequest = z.infer<typeof CustomerServiceEscalationCreateApplyRequestSchema>;
 export type CustomerServiceEscalationClaimRequest = z.infer<typeof CustomerServiceEscalationClaimRequestSchema>;
+export type CustomerServiceEscalationClaimApplyRequest = z.infer<typeof CustomerServiceEscalationClaimApplyRequestSchema>;
 export type CustomerServiceEscalationHandlingRequest = z.infer<typeof CustomerServiceEscalationHandlingRequestSchema>;
+export type CustomerServiceEscalationHandlingApplyRequest = z.infer<typeof CustomerServiceEscalationHandlingApplyRequestSchema>;
 export type CustomerServiceEscalationResolveRequest = z.infer<typeof CustomerServiceEscalationResolveRequestSchema>;
+export type CustomerServiceEscalationResolveApplyRequest = z.infer<typeof CustomerServiceEscalationResolveApplyRequestSchema>;
 export type CustomerServiceEscalationReceipt = z.infer<typeof CustomerServiceEscalationReceiptSchema>;
+export type CustomerServiceEscalationPreview = z.infer<typeof CustomerServiceEscalationPreviewSchema>;
 export type CustomerServiceEscalationView = z.infer<typeof CustomerServiceEscalationViewSchema>;

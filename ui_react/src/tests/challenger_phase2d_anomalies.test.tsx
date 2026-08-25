@@ -279,25 +279,14 @@ describe('Adversarial Challenger 1: Phase 2D Integration Deep Stress-Testing', (
       render(<AnomaliesPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
+        expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
       });
 
       // Record baseline fetch calls count
       const initialFetchCount = (globalThis.fetch as any).mock.calls.length;
 
       // Find claim buttons
-      const claimButtons = screen.getAllByRole('button', { name: /🔵 認領此案/ });
-      expect(claimButtons.length).toBe(2);
-
-      for (const btn of claimButtons) {
-        expect(btn).toBeDisabled();
-        expect(btn.hasAttribute('disabled')).toBe(true);
-
-        // Aggressively fire click and submit events
-        fireEvent.click(btn);
-        fireEvent.submit(btn);
-        fireEvent.keyDown(btn, { key: 'Enter', code: 'Enter' });
-      }
+      expect(screen.queryByRole('button', { name: /認領此案/ })).not.toBeInTheDocument();
 
       // No new fetch calls were triggered
       expect((globalThis.fetch as any).mock.calls.length).toBe(initialFetchCount);
@@ -342,17 +331,17 @@ describe('Adversarial Challenger 1: Phase 2D Integration Deep Stress-Testing', (
       render(<AnomaliesPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
+        expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
       });
 
       // Open drawer
-      const drawerBtn = screen.getByRole('button', { name: /排查處置抽屜 ➔/ });
+      const drawerBtn = screen.getByRole('button', { name: /查看處理方式 ➔/ });
       await act(async () => {
         fireEvent.click(drawerBtn);
       });
 
       await waitFor(() => {
-        expect(screen.getByText(/⚠️ 異常排查與修復處置/)).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: /假日排班尚未確認/ })).toBeInTheDocument();
       });
 
       const initialFetchCount = (globalThis.fetch as any).mock.calls.length;

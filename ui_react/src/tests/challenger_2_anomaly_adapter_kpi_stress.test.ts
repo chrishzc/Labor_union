@@ -582,11 +582,11 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
 
       const adapted = adaptAnomalySummary(dto);
 
-      expect(adapted.title).toBe('異常偵測項目');
-      expect(adapted.description).toBe('來源領域：unknown_source；來源版本：v5');
-      expect(adapted.relatedEntity).toBe('src:42');
+      expect(adapted.title).toBe('其他待處理事項');
+      expect(adapted.description).toBe('請核對其他相關資料的目前資料與可採取的處理方式。');
+      expect(adapted.relatedEntity).toBe('其他相關資料');
       expect(adapted.suggestedAction).toBe('開啟詳情查看可執行的處置。');
-      expect(adapted.rootEvidence).toBe('來源識別：src:42');
+      expect(adapted.rootEvidence).toBe('影響對象：其他相關資料');
       expect(adapted.category).toBe('其他');
       expect(adapted.status).toBe('✅ 已排除');
       expect(adapted.severity).toBe('🟡 警示待補');

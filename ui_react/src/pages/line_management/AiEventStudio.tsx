@@ -1,6 +1,6 @@
 /**
  * File: AiEventStudio.tsx
- * Description: 繁體中文 - AI 客服事件與意圖規則可視化管理工作台 (含語意標籤與實時模擬器)。
+ * Description: 保留 LINE 事件規則編輯與本機模擬設計，並將正式發布鎖在 typed Preview／Apply 契約之後。
  */
 import React, { useState } from 'react';
 import '../LineManagementPage.css';
@@ -13,10 +13,34 @@ export interface AiEventRule {
   replyTemplate: string;
   liffAction: string | null;
   escalatePriority: 'NONE' | 'NORMAL' | 'HIGH';
-  satisfactionRate: number;
-  feedbackCount: number;
+  satisfactionRate: number | null;
+  feedbackCount: number | null;
   isActive: boolean;
 }
+
+const DEFAULT_CATEGORIES = ['補助與費用', '服務異動', '爭議客訴', '服務流程', '一般諮詢'];
+
+const HUMAN_ASSISTANCE_MARKERS = [
+  '人工',
+  '真人',
+  '客服',
+  '聯絡工會',
+  '找專員',
+  '答錯',
+  '不正確',
+  '沒解決',
+  '未解決',
+];
+
+const LIFF_ACTION_LABELS: Record<string, string> = {
+  '/line-registration': '服務登記入口',
+  '/line-identity': '身分確認入口',
+  'profile_update.html': '客戶資料異動入口（正式流程待補）',
+};
+
+const getLiffActionLabel = (action: string): string => (
+  LIFF_ACTION_LABELS[action] ?? '受保護服務入口'
+);
 
 const INITIAL_RULES: AiEventRule[] = [
   {
@@ -28,8 +52,8 @@ const INITIAL_RULES: AiEventRule[] = [
       '親愛的家長您好！新竹市到宅月子補助標準為：自 115 年 1 月 1 日起，每日最高補助 4 小時、每戶最高上限 40 小時。超出部分將依工會定型化契約以自費時薪計算。服務完成後由工會協助向市府核銷退款。',
     liffAction: null,
     escalatePriority: 'NONE',
-    satisfactionRate: 96,
-    feedbackCount: 142,
+    satisfactionRate: null,
+    feedbackCount: null,
     isActive: true,
   },
   {
@@ -41,8 +65,8 @@ const INITIAL_RULES: AiEventRule[] = [
       '已為您開啟資料異動安全通道！為確保月嫂檔期與地址保險正確，請點擊下方專屬表單進行修改申請：',
     liffAction: 'profile_update.html',
     escalatePriority: 'NORMAL',
-    satisfactionRate: 92,
-    feedbackCount: 88,
+    satisfactionRate: null,
+    feedbackCount: null,
     isActive: true,
   },
   {
@@ -51,11 +75,11 @@ const INITIAL_RULES: AiEventRule[] = [
     category: '爭議客訴',
     tags: ['月嫂遲到', '服務態度很差', '我想換人', '菜煮得很難吃', '月嫂抱小孩不熟練', '客訴'],
     replyTemplate:
-      '親愛的家長您好：非常抱歉造成您的困擾！工會極度重視寶寶照護品質與您的滿意度。已為您建立【專人客訴急件工單】，督導將於最快時間內以電話或私訊主動與您聯繫協處！',
+      '親愛的家長您好：非常抱歉造成您的困擾！工會重視寶寶照護品質與您的感受。系統完成急件建案後會顯示可追蹤編號，再由督導依案件狀態與您聯繫協處。',
     liffAction: null,
     escalatePriority: 'HIGH',
-    satisfactionRate: 100,
-    feedbackCount: 35,
+    satisfactionRate: null,
+    feedbackCount: null,
     isActive: true,
   },
   {
@@ -64,11 +88,11 @@ const INITIAL_RULES: AiEventRule[] = [
     category: '服務流程',
     tags: ['月嫂請假怎麼辦', '順延是什麼意思', '可以換代班嗎', '服務會少一天嗎'],
     replyTemplate:
-      '月嫂若因事請假，系統會自動發送順延確認給產婦。若同意順延，總服務天數完全不變，結束日自動往後順延一日；若不同意順延，工會將評估指派代班月嫂！',
+      '月嫂若因事請假，須由正式請假流程建立並送出順延確認。產婦確認同意後才會依契約推進順延；不同意時由工會人工評估代班或其他處理方式。',
     liffAction: null,
     escalatePriority: 'NONE',
-    satisfactionRate: 94,
-    feedbackCount: 61,
+    satisfactionRate: null,
+    feedbackCount: null,
     isActive: true,
   },
 ];
@@ -76,7 +100,13 @@ const INITIAL_RULES: AiEventRule[] = [
 export const AiEventStudio: React.FC = () => {
   const [rules, setRules] = useState<AiEventRule[]>(INITIAL_RULES);
   const [selectedRuleId, setSelectedRuleId] = useState<string>('evt_subsidy');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
+  const [pendingDeleteRuleId, setPendingDeleteRuleId] = useState<string | null>(null);
   const [newTagInput, setNewTagInput] = useState<string>('');
+  const [draftNotice, setDraftNotice] = useState<string | null>(null);
+  const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
+  const [automationHoldPreview, setAutomationHoldPreview] = useState<boolean>(false);
   const [simInput, setSimInput] = useState<string>('請問新竹市補助可以折抵幾小時？');
   const [simMessages, setSimMessages] = useState<
     Array<{ sender: 'user' | 'bot'; text: string; liff?: string | null; high?: boolean }>
@@ -92,62 +122,104 @@ export const AiEventStudio: React.FC = () => {
       high: false,
     },
   ]);
-  const [saveToast, setSaveToast] = useState<boolean>(false);
-
   const currentRule = rules.find((r) => r.id === selectedRuleId) || rules[0];
+  const categoryOptions = Array.from(new Set([
+    ...DEFAULT_CATEGORIES,
+    ...rules.map((rule) => rule.category),
+  ]));
+  const normalizedSearch = searchTerm.trim().toLocaleLowerCase('zh-TW');
+  const filteredRules = rules.filter((rule) => {
+    const matchesCategory = categoryFilter === 'ALL' || rule.category === categoryFilter;
+    const matchesSearch = !normalizedSearch || [rule.name, rule.category, ...rule.tags]
+      .some((value) => value.toLocaleLowerCase('zh-TW').includes(normalizedSearch));
+    return matchesCategory && matchesSearch;
+  });
 
   const handleAddTag = () => {
     const trimmed = newTagInput.trim();
     if (!trimmed || currentRule.tags.includes(trimmed)) return;
-    const updated = rules.map((r) =>
-      r.id === currentRule.id ? { ...r, tags: [...r.tags, trimmed] } : r
-    );
-    setRules(updated);
+    setRules((existing) => existing.map((rule) => (
+      rule.id === currentRule.id ? { ...rule, tags: [...rule.tags, trimmed] } : rule
+    )));
     setNewTagInput('');
+    setDraftNotice(null);
   };
 
   const handleRemoveTag = (tagToRemove: string) => {
-    const updated = rules.map((r) =>
-      r.id === currentRule.id
-        ? { ...r, tags: r.tags.filter((t) => t !== tagToRemove) }
-        : r
-    );
-    setRules(updated);
+    setRules((existing) => existing.map((rule) => (
+      rule.id === currentRule.id
+        ? { ...rule, tags: rule.tags.filter((tag) => tag !== tagToRemove) }
+        : rule
+    )));
+    setDraftNotice(null);
   };
 
-  const handleUpdateCurrent = (field: keyof AiEventRule, val: any) => {
-    const updated = rules.map((r) =>
-      r.id === currentRule.id ? { ...r, [field]: val } : r
-    );
-    setRules(updated);
+  const handleUpdateCurrent = <K extends keyof AiEventRule>(field: K, value: AiEventRule[K]) => {
+    setRules((existing) => existing.map((rule) => (
+      rule.id === currentRule.id ? { ...rule, [field]: value } : rule
+    )));
+    setDraftNotice(null);
   };
 
-  const handleSavePublish = () => {
-    setSaveToast(true);
-    setTimeout(() => setSaveToast(false), 2500);
+  const handlePreviewDraft = () => {
+    setDraftNotice(
+      `已在本機預覽「${currentRule.name}」：${currentRule.tags.length} 個觸發問法；尚未寫入後端或發布至 LINE。`,
+    );
+  };
+
+  const handleDeleteDraft = () => {
+    if (rules.length === 1) {
+      setDraftNotice('至少保留一筆本機草稿，避免編輯器失去可檢視項目；此操作沒有寫入後端。');
+      return;
+    }
+    if (pendingDeleteRuleId !== currentRule.id) {
+      setPendingDeleteRuleId(currentRule.id);
+      setDraftNotice(`即將從瀏覽器記憶體移除「${currentRule.name}」；請再次確認。正式 catalog 尚未變更。`);
+      return;
+    }
+
+    const remainingRules = rules.filter((rule) => rule.id !== currentRule.id);
+    setRules(remainingRules);
+    setSelectedRuleId(remainingRules[0].id);
+    setPendingDeleteRuleId(null);
+    setDraftNotice(`已從本機草稿移除「${currentRule.name}」；重新載入頁面即恢復，後端與 LINE 均未變更。`);
+  };
+
+  const handleFeedbackPreview = (choice: 'helpful' | 'unresolved') => {
+    setFeedbackNotice(
+      choice === 'helpful'
+        ? '已在本機預覽「有幫助」回饋；正式回饋統計尚未接通，不會寫入數據。'
+        : '已在本機預覽「未解決」回饋；正式客服待辦尚未接通，不會假造工單。',
+    );
   };
 
   const handleRunSim = () => {
     if (!simInput.trim()) return;
     const userMsg = simInput.trim();
-    
-    // 簡單的模擬比對
-    let matched = rules.find((r) =>
-      r.tags.some((t) => userMsg.includes(t) || t.includes(userMsg))
-    );
+    const requestsHumanAssistance = HUMAN_ASSISTANCE_MARKERS.some((marker) => userMsg.includes(marker));
 
-    if (!matched) {
-      matched = currentRule;
-    }
+    // 僅在瀏覽器記憶體內比對目前畫面草稿，不呼叫後端或 LINE provider。
+    const matched = automationHoldPreview || requestsHumanAssistance
+      ? undefined
+      : rules.find((r) =>
+        r.isActive && r.tags.some((t) => userMsg.includes(t) || t.includes(userMsg))
+      );
+    const replyText = automationHoldPreview
+      ? '目前模擬為自動回覆暫停；正式流程必須由人工處理，不會套用自動規則。'
+      : requestsHumanAssistance
+        ? '偵測到人工協助或回覆不正確需求；正式流程必須優先轉人工，不會套用自動規則。'
+        : matched
+          ? matched.replyTemplate
+          : '目前草稿沒有符合的回覆規則；正式流程應轉入人工客服待辦，不得套用目前編輯中的規則。';
 
     setSimMessages([
       ...simMessages,
       { sender: 'user', text: userMsg },
       {
         sender: 'bot',
-        text: matched.replyTemplate,
-        liff: matched.liffAction,
-        high: matched.escalatePriority === 'HIGH',
+        text: replyText,
+        liff: matched?.liffAction ?? null,
+        high: automationHoldPreview || requestsHumanAssistance || matched?.escalatePriority === 'HIGH',
       },
     ]);
     setSimInput('');
@@ -155,22 +227,17 @@ export const AiEventStudio: React.FC = () => {
 
   return (
     <div className="ai-studio-container">
-      {saveToast && (
-        <div className="line-success" style={{ position: 'fixed', top: '20px', right: '30px', zIndex: 9999 }}>
-          ✅ 【{currentRule.name}】規則已成功儲存並同步至 AI 語意路由器！
-        </div>
-      )}
-
       {/* 左側：事件清單 */}
       <div className="ai-studio-sidebar">
         <div className="ai-sidebar-top">
           <h3>🤖 AI 客服事件規則庫</h3>
           <button
+            type="button"
             className="mock-primary-btn"
             style={{ fontSize: '0.82rem', padding: '6px 12px' }}
             onClick={() => {
-              const newId = `evt_${Date.now()}`;
-              const newEvt: AiEventRule = {
+              const newId = `draft-event-${Date.now()}`;
+              setRules((existing) => [...existing, {
                 id: newId,
                 name: '✨ 新增業務事件規則',
                 category: '一般諮詢',
@@ -178,28 +245,63 @@ export const AiEventStudio: React.FC = () => {
                 replyTemplate: '請在此輸入官方核定之標準回覆說明...',
                 liffAction: null,
                 escalatePriority: 'NONE',
-                satisfactionRate: 100,
-                feedbackCount: 0,
+                satisfactionRate: null,
+                feedbackCount: null,
                 isActive: true,
-              };
-              setRules([...rules, newEvt]);
+              }]);
               setSelectedRuleId(newId);
+              setPendingDeleteRuleId(null);
+              setDraftNotice(null);
             }}
           >
             ＋ 新增事件
           </button>
         </div>
 
+        <div className="ai-editor-form" style={{ padding: '0 16px 12px' }}>
+          <div className="form-group-row">
+            <div className="form-field-half">
+              <label htmlFor="ai-rule-category-filter">事件分類</label>
+              <select
+                id="ai-rule-category-filter"
+                aria-label="事件分類篩選"
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+              >
+                <option value="ALL">全部事件（{rules.length}）</option>
+                {categoryOptions.map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field-half">
+              <label htmlFor="ai-rule-search">搜尋規則</label>
+              <input
+                id="ai-rule-search"
+                aria-label="搜尋事件名稱或標籤"
+                type="search"
+                placeholder="搜尋事件名稱或標籤"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+              />
+            </div>
+          </div>
+          <small>目前顯示 {filteredRules.length}／{rules.length} 筆本機草稿；正式規則數量尚未接通。</small>
+        </div>
+
         <div className="ai-rule-cards-list">
-          {rules.map((rule) => (
+          {filteredRules.map((rule) => (
             <div
               key={rule.id}
               className={`ai-rule-item-card ${rule.id === selectedRuleId ? 'active' : ''}`}
-              onClick={() => setSelectedRuleId(rule.id)}
+              onClick={() => {
+                setSelectedRuleId(rule.id);
+                setPendingDeleteRuleId(null);
+              }}
             >
               <div className="ai-card-title-row">
                 <strong>{rule.name}</strong>
-                <span className="category-badge">{rule.category}</span>
+                <span className="category-badge">{rule.isActive ? '啟用' : '暫停'} · {rule.category}</span>
               </div>
               <div className="ai-card-tags-row">
                 {rule.tags.slice(0, 3).map((t, idx) => (
@@ -210,22 +312,46 @@ export const AiEventStudio: React.FC = () => {
                 {rule.tags.length > 3 && <small>+{rule.tags.length - 3}</small>}
               </div>
               <div className="ai-card-metric-row">
-                <span>👍 {rule.satisfactionRate}% 有幫助 ({rule.feedbackCount}則)</span>
+                <span>
+                  {rule.satisfactionRate === null || rule.feedbackCount === null
+                    ? '回饋統計尚未接通'
+                    : `👍 ${rule.satisfactionRate}% 有幫助 (${rule.feedbackCount}則)`}
+                </span>
                 {rule.escalatePriority === 'HIGH' && <span className="urgent-badge">🔴 急件通報</span>}
               </div>
             </div>
           ))}
+          {filteredRules.length === 0 && (
+            <div className="line-warning" role="status">
+              沒有符合目前搜尋與分類的本機草稿；請調整條件。這不代表後端 catalog 為空。
+            </div>
+          )}
         </div>
       </div>
 
       {/* 右側：可視化編輯器 ＋ 實時模擬器 */}
       <div className="ai-studio-editor-pane">
+        <div className="line-warning" role="status">
+          規則編輯、標籤管理與本機模擬均可操作。正式儲存與發布尚未接通；在完成前，本頁不會假造成功、建立工單或實際發送 LINE 訊息。
+        </div>
+        {draftNotice && <div className="line-success" role="status">{draftNotice}</div>}
         <div className="ai-editor-card">
           <div className="ai-editor-header">
             <h4>🛠️ 規則編輯器：{currentRule.name}</h4>
             <div className="ai-editor-actions">
-              <button className="line-tab-btn active" onClick={handleSavePublish}>
-                💾 儲存並即時發布
+              <button type="button" className="line-secondary-btn" onClick={handlePreviewDraft}>
+                預覽規則變更
+              </button>
+              <button type="button" className="line-secondary-btn" onClick={handleDeleteDraft}>
+                {pendingDeleteRuleId === currentRule.id ? '確認移除本機草稿' : '🗑️ 刪除本機草稿'}
+              </button>
+              <button
+                type="button"
+                className="line-tab-btn active"
+                disabled
+                title="正式儲存與發布功能接通後啟用"
+              >
+                💾 儲存並發布
               </button>
             </div>
           </div>
@@ -237,19 +363,18 @@ export const AiEventStudio: React.FC = () => {
                 <input
                   type="text"
                   value={currentRule.name}
-                  onChange={(e) => handleUpdateCurrent('name', e.target.value)}
+                  onChange={(event) => handleUpdateCurrent('name', event.target.value)}
                 />
               </div>
               <div className="form-field-half">
                 <label>業務分類</label>
                 <select
                   value={currentRule.category}
-                  onChange={(e) => handleUpdateCurrent('category', e.target.value)}
+                  onChange={(event) => handleUpdateCurrent('category', event.target.value)}
                 >
-                  <option value="補助與費用">補助與費用</option>
-                  <option value="服務異動">服務異動</option>
-                  <option value="爭議客訴">爭議客訴</option>
-                  <option value="服務流程">服務流程</option>
+                  {categoryOptions.map((category) => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -261,9 +386,7 @@ export const AiEventStudio: React.FC = () => {
                 {currentRule.tags.map((t, idx) => (
                   <span key={idx} className="tag-chip-editable">
                     {t}
-                    <button type="button" onClick={() => handleRemoveTag(t)}>
-                      ✕
-                    </button>
+                    <button type="button" onClick={() => handleRemoveTag(t)}>✕</button>
                   </span>
                 ))}
                 <div className="add-tag-inline">
@@ -271,21 +394,19 @@ export const AiEventStudio: React.FC = () => {
                     type="text"
                     placeholder="＋ 輸入代表問法按 Enter"
                     value={newTagInput}
-                    onChange={(e) => setNewTagInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
+                    onChange={(event) => setNewTagInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
                         handleAddTag();
                       }
                     }}
                   />
-                  <button type="button" onClick={handleAddTag}>
-                    新增
-                  </button>
+                  <button type="button" onClick={handleAddTag}>新增</button>
                 </div>
               </div>
               <p className="field-hint">
-                💡 專員提示：這是提供給 AI 學習的「語意例句」。AI 會自動理解同義詞、倒裝句與不同口氣，填寫 3~5 組即可精準覆蓋！
+                💡 這些問法用於判斷應套用哪一則回覆；正式發布前必須由管理員預覽並確認。
               </p>
             </div>
 
@@ -295,7 +416,7 @@ export const AiEventStudio: React.FC = () => {
               <textarea
                 rows={4}
                 value={currentRule.replyTemplate}
-                onChange={(e) => handleUpdateCurrent('replyTemplate', e.target.value)}
+                onChange={(event) => handleUpdateCurrent('replyTemplate', event.target.value)}
               />
             </div>
 
@@ -306,23 +427,30 @@ export const AiEventStudio: React.FC = () => {
                 <label className="checkbox-item">
                   <input
                     type="checkbox"
+                    checked={currentRule.isActive}
+                    onChange={(event) => handleUpdateCurrent('isActive', event.target.checked)}
+                  />
+                  本機草稿啟用；停用後不參與本頁測試比對
+                </label>
+
+                <label className="checkbox-item">
+                  <input
+                    type="checkbox"
                     checked={currentRule.liffAction !== null}
-                    onChange={(e) =>
-                      handleUpdateCurrent(
-                        'liffAction',
-                        e.target.checked ? 'profile_update.html' : null
-                      )
-                    }
+                    onChange={(event) => handleUpdateCurrent(
+                      'liffAction',
+                      event.target.checked ? '/line-registration' : null,
+                    )}
                   />
                   附帶安全 LIFF 表單按鈕：
                   {currentRule.liffAction !== null && (
                     <select
                       value={currentRule.liffAction}
-                      onChange={(e) => handleUpdateCurrent('liffAction', e.target.value)}
+                      onChange={(event) => handleUpdateCurrent('liffAction', event.target.value)}
                     >
-                      <option value="profile_update.html">profile_update.html (修改資料)</option>
-                      <option value="gateway.html">gateway.html (服務登記)</option>
-                      <option value="bind.html">bind.html (舊客綁定)</option>
+                      <option value="/line-registration">服務登記入口</option>
+                      <option value="/line-identity">身分確認入口</option>
+                      <option value="profile_update.html">客戶資料異動入口（正式流程待補）</option>
                     </select>
                   )}
                 </label>
@@ -330,24 +458,37 @@ export const AiEventStudio: React.FC = () => {
                 <label className="checkbox-item">
                   <input
                     type="checkbox"
-                    checked={currentRule.escalatePriority === 'HIGH'}
-                    onChange={(e) =>
-                      handleUpdateCurrent(
-                        'escalatePriority',
-                        e.target.checked ? 'HIGH' : 'NONE'
-                      )
-                    }
+                    checked={currentRule.escalatePriority !== 'NONE'}
+                    onChange={(event) => handleUpdateCurrent(
+                      'escalatePriority',
+                      event.target.checked ? 'NORMAL' : 'NONE',
+                    )}
                   />
-                  建立 HIGH 急件客訴工單 ＋ 秒級推播至 LINE 幹部通知群組
+                  通報真人專員介入
+                  {currentRule.escalatePriority !== 'NONE' && (
+                    <select
+                      aria-label="人工工單優先級"
+                      value={currentRule.escalatePriority}
+                      onChange={(event) => handleUpdateCurrent(
+                        'escalatePriority',
+                        event.target.value as AiEventRule['escalatePriority'],
+                      )}
+                    >
+                      <option value="NORMAL">一般待辦</option>
+                      <option value="HIGH">高優先急件</option>
+                    </select>
+                  )}
+                  （僅預覽；正式工單由客服升級流程建立）
                 </label>
               </div>
             </div>
           </div>
         </div>
 
-        {/* 實時對話模擬器 */}
+        {/* 本機草稿比對器 */}
         <div className="ai-simulator-card">
-          <h4>💬 即時對話模擬器 (Live Chat Simulator)</h4>
+          <h4>💬 本機畫面比對（不發送）</h4>
+          {feedbackNotice && <div className="line-warning" role="status">{feedbackNotice}</div>}
           <div className="sim-chat-window">
             {simMessages.map((msg, idx) => (
               <div key={idx} className={`sim-msg-row ${msg.sender}`}>
@@ -360,22 +501,32 @@ export const AiEventStudio: React.FC = () => {
                   )}
                   <p>{msg.text}</p>
                   {msg.liff && (
-                    <button className="sim-liff-btn">👉 前往填寫：{msg.liff}</button>
+                    <div className="sim-liff-btn">草稿動作：{getLiffActionLabel(msg.liff)}（本頁不開啟）</div>
                   )}
                   {msg.high && (
-                    <div className="sim-alert-chip">🚨 已為您通報工會幹部群組，專員即刻接手！</div>
+                    <div className="sim-alert-chip">🚨 草稿預期：需要人工升級並建立待寄送工作；本頁不會送出訊息。</div>
                   )}
                   {msg.sender === 'bot' && (
                     <div className="sim-feedback-row">
-                      <small>本則由 AI 智能助手回覆，是否有解答問題？</small>
-                      <button>👍 有幫助</button>
-                      <button>👎 未解決</button>
+                      <small>回覆滿意度調查：本則回覆是否有解答問題？</small>
+                      <button type="button" onClick={() => handleFeedbackPreview('helpful')}>👍 有幫助</button>
+                      <button type="button" onClick={() => handleFeedbackPreview('unresolved')}>👎 未解決</button>
                     </div>
                   )}
                 </div>
               </div>
             ))}
           </div>
+
+          <label className="checkbox-item">
+            <input
+              type="checkbox"
+              aria-label="模擬自動回覆暫停"
+              checked={automationHoldPreview}
+              onChange={(event) => setAutomationHoldPreview(event.target.checked)}
+            />
+            模擬自動回覆暫停（僅影響本頁測試）
+          </label>
 
           <div className="sim-input-bar">
             <input
@@ -391,7 +542,7 @@ export const AiEventStudio: React.FC = () => {
               }}
             />
             <button className="mock-primary-btn" onClick={handleRunSim}>
-              🧪 發送測試
+              🔎 預覽本機規則比對（不發送）
             </button>
           </div>
         </div>

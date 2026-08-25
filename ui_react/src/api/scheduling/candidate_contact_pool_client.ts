@@ -18,6 +18,7 @@ const CandidateInformationDeliverySchema = z.strictObject({
     'queued',
     'pending',
     'sent',
+    'manually_confirmed',
     'retryable_failed',
     'failed',
     'cancelled',
@@ -94,6 +95,29 @@ const CandidateWillingnessResultSchema = z.strictObject({
   event_id: z.number().int().positive(),
 });
 
+const ManualInformationPreviewSchema = z.strictObject({
+  case_no: z.string().min(1).max(50),
+  pool_id: z.number().int().positive(),
+  candidate_id: z.number().int().positive(),
+  staff_id: z.number().int().positive(),
+  info_type: z.union([z.literal(1), z.literal(2)]),
+  confirmation_method: z.enum(['phone', 'in_person', 'paper', 'other']),
+  reason: z.string().min(1).max(500),
+  actor: z.string().min(1).max(100),
+  expected_version: z.number().int().nonnegative(),
+  current_status: z.string().max(50).nullable(),
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  apply_allowed: z.literal(true),
+});
+
+const ManualInformationReceiptSchema = z.strictObject({
+  status: z.enum(['recorded', 'idempotent_replay']),
+  event_id: z.number().int().positive(),
+  pool_version: z.number().int().positive(),
+  delivery_status: z.literal('manually_confirmed'),
+  confirmation_method: z.enum(['phone', 'in_person', 'paper', 'other']),
+});
+
 const mutationEnvelope = <TSchema extends z.ZodTypeAny>(schema: TSchema) => z.strictObject({
   success: z.boolean(),
   message: z.string(),
@@ -105,6 +129,9 @@ export type CandidateContactPool = z.infer<typeof CandidateContactPoolSchema>;
 export type SendCandidateInformationResult = z.infer<typeof SendCandidateInformationResultSchema>;
 export type AddCandidatesResult = z.infer<typeof AddCandidatesResultSchema>;
 export type CandidateWillingnessResult = z.infer<typeof CandidateWillingnessResultSchema>;
+export type ManualCandidateInformationPreview = z.infer<typeof ManualInformationPreviewSchema>;
+export type ManualCandidateInformationReceipt = z.infer<typeof ManualInformationReceiptSchema>;
+export type ManualMatchingConfirmationMethod = 'phone' | 'in_person' | 'paper' | 'other';
 
 export interface CandidateContactInput {
   staff_id: number;
@@ -277,5 +304,66 @@ export const candidateContactPoolClient = {
       );
     }
     return envelope.data;
+  },
+
+  async previewManualInformation(
+    caseNo: string,
+    candidateId: number,
+    infoType: 1 | 2,
+    confirmationMethod: ManualMatchingConfirmationMethod,
+    reason: string,
+  ): Promise<ManualCandidateInformationPreview> {
+    const canonical = canonicalCaseNo(caseNo);
+    const { actor, token } = mutationIdentity();
+    const canonicalReason = reason.trim();
+    if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('候選聯繫識別必須是正整數。');
+    if (!canonicalReason || canonicalReason.length > 500) throw new Error('請填寫 1 至 500 字的人工確認依據。');
+    const decoded = decodePayload(
+      mutationEnvelope(ManualInformationPreviewSchema),
+      await transport.post(
+        `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${candidateId}/information/manual-confirmation/preview`,
+        {
+          info_type: infoType,
+          confirmation_method: confirmationMethod,
+          reason: canonicalReason,
+          actor,
+        },
+        { token },
+      ),
+    );
+    if (!decoded.success || decoded.data === null) {
+      throw new ApiHttpError(422, 'CANDIDATE_MANUAL_INFORMATION_PREVIEW_FAILED', decoded.error ?? decoded.message, false, decoded);
+    }
+    if (decoded.data.case_no !== canonical || decoded.data.candidate_id !== candidateId || decoded.data.info_type !== infoType) {
+      throw new Error('候選資訊人工確認 Preview identity 不一致。');
+    }
+    return decoded.data;
+  },
+
+  async applyManualInformation(
+    preview: ManualCandidateInformationPreview,
+  ): Promise<ManualCandidateInformationReceipt> {
+    const canonical = canonicalCaseNo(preview.case_no);
+    const { actor, token } = mutationIdentity();
+    const decoded = decodePayload(
+      mutationEnvelope(ManualInformationReceiptSchema),
+      await transport.post(
+        `/api/v1/orders/${encodeURIComponent(canonical)}/candidate-contact-pool/candidates/${preview.candidate_id}/information/manual-confirmation`,
+        {
+          info_type: preview.info_type,
+          confirmation_method: preview.confirmation_method,
+          reason: preview.reason,
+          actor,
+          event_key: `orders-candidate-manual-info-${preview.info_type}-${preview.candidate_id}-${crypto.randomUUID()}`,
+          expected_version: preview.expected_version,
+          preview_fingerprint: preview.preview_fingerprint,
+        },
+        { token },
+      ),
+    );
+    if (!decoded.success || decoded.data === null) {
+      throw new ApiHttpError(422, 'CANDIDATE_MANUAL_INFORMATION_APPLY_FAILED', decoded.error ?? decoded.message, false, decoded);
+    }
+    return decoded.data;
   },
 };

@@ -44,16 +44,16 @@ describe('Data Import case workbook Preview flows', () => {
       fireEvent.change(screen.getByLabelText(label), { target: { files: [workbook(label)] } });
       fireEvent.click(document.querySelector(`[data-control-id="${controlId}"]`) as HTMLButtonElement);
       await waitFor(() => expect(document.querySelector(`[data-surface-id="${surfaceId}"]`)).toBeInTheDocument());
-      expect(within(document.querySelector(`[data-surface-id="${surfaceId}"]`) as HTMLElement).getByText(fingerprint)).toBeInTheDocument();
+      expect(within(document.querySelector(`[data-surface-id="${surfaceId}"]`) as HTMLElement).queryByText(fingerprint)).not.toBeInTheDocument();
       const card = document.querySelector(`[data-surface-id="imports.${controlId.split('.')[1]}.workbench"]`) as HTMLElement;
       const applyButton = document.querySelector(`[data-control-id="imports.${controlId.split('.')[1]}.apply"]`) as HTMLButtonElement;
       expect(applyButton).toBeDisabled();
-      expect(within(card).getByText('Apply 暫不可用：請先勾選已核對 Preview 結果與來源摘要。')).toBeInTheDocument();
-      fireEvent.click(within(card).getByLabelText('我已核對 Preview 結果與來源摘要'));
+      expect(within(card).getByText('請先勾選已核對檔案名稱與預覽筆數。')).toBeInTheDocument();
+      fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
       expect(applyButton).toBeEnabled();
-      expect(within(card).getByText('Apply 已可執行：送出後會顯示 receipt 摘要。')).toBeInTheDocument();
+      expect(within(card).getByText('可以開始匯入；完成後會顯示結果。')).toBeInTheDocument();
       fireEvent.click(applyButton);
-      await waitFor(() => expect(within(card).getByText('Receipt 已回傳，需檢查')).toBeInTheDocument());
+      await waitFor(() => expect(within(card).getByText('匯入完成，有資料需要檢查')).toBeInTheDocument());
     }
 
     expect(clientBeClassWorkbookPreviewClient.preview).toHaveBeenCalledTimes(1);
@@ -62,13 +62,13 @@ describe('Data Import case workbook Preview flows', () => {
     await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(staffHistoricalWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(historicalOrderWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
-    expect(screen.getAllByText('Receipt 已回傳，需檢查')).toHaveLength(3);
+    expect(screen.getAllByText('匯入完成，有資料需要檢查')).toHaveLength(3);
     expect(screen.getByText(/身分阻擋 1 筆、身分衝突 1 筆、需檢查 1 筆/)).toBeInTheDocument();
     expect(screen.getByText(/未配對案件 1 筆、需檢查 1 筆、目前資料衝突 0 筆/)).toBeInTheDocument();
     for (const id of ['client-beclass', 'staff-historical', 'historic-orders']) {
       const card = document.querySelector(`[data-surface-id="imports.${id}.workbench"]`) as HTMLElement;
       expect(document.querySelector(`[data-control-id="imports.${id}.apply"]`)).toBeDisabled();
-      expect(within(card).getByText('Apply 已完成：receipt 摘要顯示於下方。')).toBeInTheDocument();
+      expect(within(card).getByText('匯入已完成，結果顯示於下方。')).toBeInTheDocument();
     }
   });
 
@@ -83,14 +83,14 @@ describe('Data Import case workbook Preview flows', () => {
     fireEvent.change(input, { target: { files: [workbook('pending')] } });
     fireEvent.click(previewButton);
     await waitFor(() => expect(clientBeClassWorkbookPreviewClient.preview).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByLabelText('我已核對 Preview 結果與來源摘要'));
+    fireEvent.click(screen.getByLabelText('我已核對檔案名稱與預覽筆數'));
     const applyButton = document.querySelector('[data-control-id="imports.client-beclass.apply"]') as HTMLButtonElement;
     fireEvent.click(applyButton);
     await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
 
     expect(input).toBeDisabled();
     expect(previewButton).toBeDisabled();
-    expect(screen.getByText(/目前已鎖定換檔、Preview、站內導覽與重新整理/)).toBeInTheDocument();
+    expect(screen.getByText(/目前已鎖定換檔、預覽、站內導覽與重新整理/)).toBeInTheDocument();
     const navigation = document.createElement('button');
     navigation.className = 'sidebar-nav-item';
     const navigate = vi.fn();
@@ -104,14 +104,14 @@ describe('Data Import case workbook Preview flows', () => {
     expect(unloadEvent.defaultPrevented).toBe(true);
 
     rejectFirstApply?.(new ClientBeClassWorkbookApplyError('client_beclass_apply_timeout', '套用逾時，請重試。', true));
-    await waitFor(() => expect(screen.getByText(/Apply 結果尚未確認/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/匯入結果尚未確認/)).toBeInTheDocument());
     expect(input).toBeDisabled();
     expect(previewButton).toBeDisabled();
     expect(applyButton).toBeEnabled();
-    expect(applyButton).toHaveTextContent('以相同識別重試／查詢結果');
+    expect(applyButton).toHaveTextContent('查詢這次匯入結果');
     fireEvent.click(applyButton);
     await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getByText('套用完成')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('匯入完成')).toBeInTheDocument());
 
     const firstOptions = vi.mocked(clientBeClassWorkbookPreviewClient.apply).mock.calls[0]?.[2];
     const secondOptions = vi.mocked(clientBeClassWorkbookPreviewClient.apply).mock.calls[1]?.[2];
@@ -135,11 +135,12 @@ describe('Data Import case workbook Preview flows', () => {
       const card = document.querySelector(`[data-surface-id="imports.${id}.workbench"]`) as HTMLElement;
       fireEvent.change(screen.getByLabelText(label), { target: { files: [workbook(label)] } });
       fireEvent.click(document.querySelector(`[data-control-id="imports.${id}.preview"]`) as HTMLButtonElement);
-      await waitFor(() => expect(within(card).getByText(fingerprint)).toBeInTheDocument());
-      fireEvent.click(within(card).getByLabelText('我已核對 Preview 結果與來源摘要'));
+      await waitFor(() => expect(within(card).getByText('預覽結果')).toBeInTheDocument());
+      expect(within(card).queryByText(fingerprint)).not.toBeInTheDocument();
+      fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
       fireEvent.click(document.querySelector(`[data-control-id="imports.${id}.apply"]`) as HTMLButtonElement);
-      await waitFor(() => expect(within(card).getByText('整份工作簿已重播／未新增寫入')).toBeInTheDocument());
-      expect(within(card).getByText(/以下為原始 receipt 統計/)).toBeInTheDocument();
+      await waitFor(() => expect(within(card).getByText('這份工作簿已處理過，未重複匯入')).toBeInTheDocument());
+      expect(within(card).getByText(/以下為上次處理結果/)).toBeInTheDocument();
     }
   });
 
@@ -149,8 +150,8 @@ describe('Data Import case workbook Preview flows', () => {
 
     for (const id of ['hcm-current', 'client-beclass', 'staff-historical', 'historic-orders']) {
       const workbench = document.querySelector(`[data-surface-id="imports.${id}.workbench"]`) as HTMLElement;
-      expect(within(workbench).getByText('Preview 暫不可用：請先選擇 .xlsx 工作簿。')).toBeInTheDocument();
-      expect(within(workbench).getByText('Apply 下一步：成功完成 Preview 後顯示確認與套用按鈕。')).toBeInTheDocument();
+      expect(within(workbench).getByText('請先選擇 .xlsx 工作簿。')).toBeInTheDocument();
+      expect(within(workbench).getByText('預覽成功後才能確認匯入。')).toBeInTheDocument();
     }
   });
 

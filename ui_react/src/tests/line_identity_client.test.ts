@@ -1,6 +1,6 @@
 /**
  * File: line_identity_client.test.ts
- * Description: 驗證 LINE 身分查詢、更正、解除與維護端點、逐次 Session、嚴格解碼及錯誤映射。
+ * Description: 驗證 LINE 身分查詢、審核、更正、解除與維護端點、逐次 Session、嚴格解碼及錯誤映射。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
@@ -8,11 +8,16 @@ import {
   applyLineIdentityRevocation,
   applyLineIdentityReplacement,
   getLineIdentityBinding,
+  getLineIdentityReview,
+  getLineIdentityReviewSummary,
   listLineIdentityBindings,
+  listLineIdentityReviews,
   manualCompleteLineIdentityRevocation,
   previewLineIdentityRevocation,
   previewLineIdentityReplacement,
+  previewLineIdentityReviewDecision,
   retryLineIdentityRevocation,
+  applyLineIdentityReviewDecision,
 } from '../api/line_identity/line_identity_client';
 import { LineIdentityClientError } from '../api/line_identity/line_identity_errors';
 import {
@@ -34,6 +39,45 @@ function jsonResponse(data: unknown, status = 200) {
     json: async () => data,
   };
 }
+
+const REVIEW_FIXTURE = {
+  request_id: 71,
+  review_type: 'staff_verification' as const,
+  status: 'pending' as const,
+  version: 3,
+  subject_type: 'staff' as const,
+  subject_reference: 'STAFF-REVIEW-071',
+  assigned_admin_id: null,
+  due_at: null,
+  line_user_id_masked: 'Urev•••7890',
+  display_name: '待審月嫂甲',
+  decision_reason: null,
+  reviewed_by_actor_id: null,
+  reviewed_at: null,
+  created_at: '2026-08-24T10:00:00+08:00',
+};
+
+const REVIEW_SUMMARY_FIXTURE = {
+  pending_total: 4,
+  staff_pending: 2,
+  rebind_pending: 1,
+  processed_today: 3,
+  stale_pending: 1,
+  stale_hours: 24,
+};
+
+const REVIEW_PREVIEW_FIXTURE = {
+  request_id: 71,
+  decision: 'approve' as const,
+  before_status: 'pending' as const,
+  after_status: 'approved' as const,
+  expected_version: 3,
+  resulting_version: 4,
+  subject_type: 'staff' as const,
+  subject_reference: 'STAFF-REVIEW-071',
+  line_user_id_masked: 'Urev•••7890',
+  preview_fingerprint: 'review-preview-fixture-071',
+};
 
 describe('LINE Identity Client（Phase 3A Lane D）', () => {
   const originalFetch = globalThis.fetch;
@@ -84,6 +128,88 @@ describe('LINE Identity Client（Phase 3A Lane D）', () => {
     const [url, options] = vi.mocked(globalThis.fetch).mock.calls[0];
     expect(url).toBe('/api/v1/line/identity-bindings/Ufixture%2Fwith%3Freserved');
     expect(options?.method).toBe('GET');
+  });
+
+  it('review list、summary 與 detail 只呼叫 frozen typed GET paths', async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(envelope({ items: [REVIEW_FIXTURE], next_cursor: null })))
+      .mockResolvedValueOnce(jsonResponse(envelope(REVIEW_SUMMARY_FIXTURE)))
+      .mockResolvedValueOnce(jsonResponse(envelope(REVIEW_FIXTURE)));
+
+    await expect(listLineIdentityReviews({
+      review_status: 'pending',
+      review_type: 'staff_verification',
+      page_size: 25,
+    })).resolves.toEqual({ items: [REVIEW_FIXTURE], next_cursor: null });
+    await expect(getLineIdentityReviewSummary()).resolves.toEqual(REVIEW_SUMMARY_FIXTURE);
+    await expect(getLineIdentityReview(71)).resolves.toEqual(REVIEW_FIXTURE);
+
+    expect(vi.mocked(globalThis.fetch).mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/line/identity/reviews?review_status=pending&review_type=staff_verification&page_size=25',
+      '/api/v1/line/identity/reviews/summary',
+      '/api/v1/line/identity/reviews/71',
+    ]);
+  });
+
+  it('review decision 固定走 Preview 再 Apply，Apply 攜帶 fingerprint 與 idempotency key', async () => {
+    const approved = {
+      ...REVIEW_FIXTURE,
+      status: 'approved' as const,
+      version: 4,
+      decision_reason: '人工確認資料無誤',
+      reviewed_by_actor_id: 'admin:1',
+      reviewed_at: '2026-08-24T10:30:00+08:00',
+      outcome: 'created' as const,
+      receipt_identity: 'line-review:71:approved',
+    };
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(envelope(REVIEW_PREVIEW_FIXTURE)))
+      .mockResolvedValueOnce(jsonResponse(envelope(approved)));
+
+    await previewLineIdentityReviewDecision(71, 'approve', {
+      expected_version: 3,
+      reason: ' 人工確認資料無誤 ',
+    });
+    await applyLineIdentityReviewDecision(71, 'approve', {
+      expected_version: 3,
+      idempotency_key: 'review-decision-071',
+      reason: ' 人工確認資料無誤 ',
+      preview_fingerprint: 'review-preview-fixture-071',
+    });
+
+    const [previewUrl, previewOptions] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const [applyUrl, applyOptions] = vi.mocked(globalThis.fetch).mock.calls[1];
+    expect(previewUrl).toBe('/api/v1/line/identity/reviews/71/approve/preview');
+    expect(applyUrl).toBe('/api/v1/line/identity/reviews/71/approve/apply');
+    expect(JSON.parse(String(previewOptions?.body))).toEqual({
+      expected_version: 3,
+      reason: '人工確認資料無誤',
+    });
+    expect(JSON.parse(String(applyOptions?.body))).toEqual({
+      expected_version: 3,
+      idempotency_key: 'review-decision-071',
+      reason: '人工確認資料無誤',
+      preview_fingerprint: 'review-preview-fixture-071',
+    });
+  });
+
+  it('review 無效 id／decision 與多餘 response 在網路前後均 fail closed', async () => {
+    globalThis.fetch = vi.fn();
+    await expect(getLineIdentityReview(0)).rejects.toMatchObject({ code: 'REQUEST_INVALID' });
+    await expect(previewLineIdentityReviewDecision(71, 'cancel' as never, {
+      expected_version: 3,
+      reason: '測試非法決定',
+    })).rejects.toMatchObject({ code: 'REQUEST_INVALID' });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(envelope({
+      ...REVIEW_PREVIEW_FIXTURE,
+      provider_delivery: 'must-not-pass',
+    })));
+    await expect(previewLineIdentityReviewDecision(71, 'approve', {
+      expected_version: 3,
+      reason: '測試嚴格契約',
+    })).rejects.toMatchObject({ code: 'CONTRACT_MISMATCH' });
   });
 
   it('detail 接受 MySQL datetime 經 Pydantic 產生的 local ISO 格式', async () => {

@@ -1,6 +1,6 @@
 /**
  * File: finance_query_page.test.tsx
- * Description: 驗證FinancePage active-tab query budget、server資料與native-disabled mutations。
+ * Description: 驗證FinancePage active-tab query budget、server資料與正常三步匯入邊界。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,9 +9,8 @@ import { staffDirectoryClient } from '../api/staff_directory/staff_directory_cli
 import { clientReceiptQueryClient } from '../api/client_finance/client_receipt_query_client';
 import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
 import { accountsPayableQueryClient } from '../api/accounts_payable/accounts_payable_query_client';
-import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { FinancePage } from '../pages/FinancePage';
-import { RECEIPT_RESPONSE, STAFF_PAYABLES_RESPONSE, ACCOUNTS_PAYABLE_RESPONSE, FINANCE_BATCH_RESPONSE, FINANCE_MANIFEST_RESPONSE } from './fixtures/finance/finance_query_contract_fixtures';
+import { RECEIPT_RESPONSE, STAFF_PAYABLES_RESPONSE, ACCOUNTS_PAYABLE_RESPONSE } from './fixtures/finance/finance_query_contract_fixtures';
 
 describe('FinancePage query and guarded import presentation', () => {
   beforeEach(() => {
@@ -21,8 +20,6 @@ describe('FinancePage query and guarded import presentation', () => {
     vi.spyOn(clientReceiptQueryClient, 'query').mockResolvedValue(RECEIPT_RESPONSE.data);
     vi.spyOn(staffPayablesQueryClient, 'query').mockResolvedValue(STAFF_PAYABLES_RESPONSE.data);
     vi.spyOn(accountsPayableQueryClient, 'query').mockResolvedValue(ACCOUNTS_PAYABLE_RESPONSE.data);
-    vi.spyOn(financeImportQueryClient, 'listBatches').mockResolvedValue(FINANCE_BATCH_RESPONSE.data);
-    vi.spyOn(financeImportQueryClient, 'getManifest').mockResolvedValue(FINANCE_MANIFEST_RESPONSE.data);
   });
 
   it('loads only the active tab and requires a selected workbook before import controls appear', async () => {
@@ -30,25 +27,27 @@ describe('FinancePage query and guarded import presentation', () => {
     await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());
     expect(ordersQueryClient.getOrderSummaries).toHaveBeenCalledTimes(1);
     expect(clientReceiptQueryClient.query).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Account Version|Account version/)).not.toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).not.toHaveBeenCalled();
-    expect(document.querySelector('[data-control-id="finance.client-receipt.settle"]')).toBeDisabled();
+    expect(screen.queryByText(/未開放/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '月嫂應付款' }));
     await waitFor(() => expect(screen.getByText('OBL-S-1')).toBeInTheDocument());
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
     expect(staffPayablesQueryClient.query).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-control-id="finance.staff-payable.mark-paid"]')).toBeDisabled();
+    expect(screen.queryByText(/^Version$|｜Version/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/未開放/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '應付帳款' }));
     await waitFor(() => expect(screen.getByText(/\*{8}9012/)).toBeInTheDocument());
     expect(accountsPayableQueryClient.query).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('123456789012')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeDisabled();
+    expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Finance Import' }));
-    await waitFor(() => expect(screen.getAllByText('BATCH-FIN-021').length).toBeGreaterThan(0));
-    expect(financeImportQueryClient.listBatches).toHaveBeenCalledTimes(1);
-    expect(financeImportQueryClient.getManifest).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
+    expect(screen.getByText('上傳檔案 → 預覽 → 匯入完成')).toBeInTheDocument();
+    expect(screen.queryByText('已載入批次')).not.toBeInTheDocument();
+    expect(screen.queryByText('歷史 Reprocess Run（loaded scope）')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="finance.finance-import.upload"]')).toBeDisabled();
     expect(document.querySelector('[data-control-id="finance.finance-import.apply"]')).toBeNull();
   });

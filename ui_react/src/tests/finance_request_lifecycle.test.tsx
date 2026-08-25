@@ -92,7 +92,7 @@ describe('Finance query request lifecycle', () => {
     });
 
     expect(clientReceiptQueryClient.query).not.toHaveBeenCalled();
-    expect(screen.getByText(/Masked Accounts Payable Preview/)).toBeInTheDocument();
+    expect(screen.getByText(/應付帳款預覽/)).toBeInTheDocument();
   });
 
   it('aborts active detail requests on unmount', async () => {

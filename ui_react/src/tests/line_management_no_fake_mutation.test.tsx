@@ -26,7 +26,13 @@ describe('LINE 管理頁禁止假 mutation', () => {
     const applyResolve = vi.fn();
     const customerCandidate = {
       getSummary: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_SUMMARY_FIXTURE),
-      listTickets: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_PAGE_FIXTURE),
+      listTickets: vi.fn().mockResolvedValue({
+        ...CUSTOMER_SERVICE_PAGE_FIXTURE,
+        items: CUSTOMER_SERVICE_PAGE_FIXTURE.items.map((item) => ({
+          ...item,
+          status: 'waiting' as const,
+        })),
+      }),
       getTicketDetail: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_DETAIL_FIXTURE),
       previewResolve,
       applyResolve,
@@ -54,25 +60,25 @@ describe('LINE 管理頁禁止假 mutation', () => {
     await waitFor(() => expect(screen.getByText('#31')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: '開啟 LINE' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '查看明細' }));
-    await screen.findByRole('button', { name: '預覽結案' });
+    fireEvent.click(screen.getAllByRole('button', { name: '查看明細' })[0]);
+    await screen.findByRole('button', { name: '檢查結案影響' });
     expect(screen.queryByRole('button', { name: /未開放/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
 
     fireEvent.click(screen.getByRole('button', { name: /2\. 多角色 Rich Menu/ }));
-    await screen.findByText('案件進度');
+    expect((await screen.findAllByText('案件進度')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /發布至 LINE|上傳圖片|刪除選單/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /3\. LINE 身分綁定/ }));
     await screen.findByText('U123••••cdef');
     expect(screen.queryByRole('button', { name: /產生綁定邀請/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看明細' }));
-    await screen.findByRole('button', { name: '預覽解除' });
+    await screen.findByRole('button', { name: '檢查解除影響' });
     expect(screen.queryByRole('button', { name: /觀察解除|改綁其他身分|重試 Rich Menu 回復|人工完成/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
 
     fireEvent.click(screen.getByRole('button', { name: /4\. 通知規則/ }));
-    const ruleWorkspace = (await screen.findByRole('heading', { name: /通知規則與發送任務/ })).closest('section');
+    const ruleWorkspace = (await screen.findByRole('heading', { name: /LINE 推播與通知規則目錄/ })).closest('section');
     expect(ruleWorkspace).not.toBeNull();
     const ruleCard = await within(ruleWorkspace as HTMLElement).findByRole('button', { name: /deposit_notice/ });
     expect(screen.queryByRole('button', { name: /建立新通知規則/ })).not.toBeInTheDocument();

@@ -89,46 +89,81 @@ describe('M4 customer-service escalation successor', () => {
   beforeEach(() => { vi.restoreAllMocks(); setSession(); });
   afterEach(() => { sessionClient.clearSession(); vi.restoreAllMocks(); });
 
-  it('create/detail/claim/handling/resolve 使用正式 paths 且 mutation 同時帶 body 與 headers command identity', async () => {
+  it('create/detail/claim/handling/resolve 使用正式 Preview／Apply paths 與 command identity', async () => {
     const receiptFixture = CustomerServiceEscalationReceiptSchema.safeParse(ESCALATION_RECEIPT_RESPONSE.data);
     expect(receiptFixture.success, receiptFixture.error?.message).toBe(true);
+    const previewFingerprint = 'c'.repeat(64);
+    const previewResponse = (operation: 'create' | 'claim' | 'handling_started' | 'resolve', before: 'absent' | 'open' | 'claimed' | 'handling', after: 'open' | 'claimed' | 'handling' | 'resolved') => ({
+      success: true,
+      message: 'Preview 已建立',
+      data: {
+        operation,
+        escalation_id: operation === 'create' ? null : 11,
+        before_workflow_status: before,
+        resulting_workflow_status: after,
+        before_hold_state: operation === 'create' ? 'absent' : 'active',
+        resulting_hold_state: operation === 'resolve' ? 'released' : 'active',
+        current_escalation_version: operation === 'create' ? null : ({ claim: 0, handling_started: 1, resolve: 2 } as const)[operation],
+        current_ticket_version: operation === 'handling_started' ? 2 : operation === 'resolve' ? 3 : null,
+        preview_fingerprint: previewFingerprint,
+        apply_ready: true,
+      },
+      error: null,
+    });
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(previewResponse('create', 'absent', 'open')))
       .mockResolvedValueOnce(response({ ...ESCALATION_RECEIPT_RESPONSE, data: { ...ESCALATION_RECEIPT_RESPONSE.data, operation: 'create', correlation_id: 'm4-correlation-1' } }))
       .mockResolvedValueOnce(response(ESCALATION_VIEW_RESPONSE))
+      .mockResolvedValueOnce(response(previewResponse('claim', 'open', 'claimed')))
       .mockResolvedValueOnce(response({ ...ESCALATION_RECEIPT_RESPONSE, data: { ...ESCALATION_RECEIPT_RESPONSE.data, operation: 'claim', correlation_id: 'm4-correlation-1' } }))
+      .mockResolvedValueOnce(response(previewResponse('handling_started', 'claimed', 'handling')))
       .mockResolvedValueOnce(response({ ...ESCALATION_RECEIPT_RESPONSE, data: { ...ESCALATION_RECEIPT_RESPONSE.data, operation: 'handling_started', correlation_id: 'm4-correlation-1' } }))
+      .mockResolvedValueOnce(response(previewResponse('resolve', 'handling', 'resolved')))
       .mockResolvedValueOnce(response({ ...ESCALATION_RECEIPT_RESPONSE, data: { ...ESCALATION_RECEIPT_RESPONSE.data, operation: 'resolve', correlation_id: 'm4-correlation-1' } }));
     globalThis.fetch = fetchMock;
     const identity = { idempotency_key: 'm4-command-1', correlation_id: 'm4-correlation-1' };
-    await customerServiceEscalationClient.create({
+    const createRequest = {
       source_event_identity: 'line-event:m4', source_kind: 'line_inbox', source_fingerprint: 'a'.repeat(64),
       trigger_code: 'complaint', trigger_policy_version: 'complaint.v1', ticket_category: 'other',
       masked_context: { summary_code: 'complaint_explicit', policy_version: 'complaint.v1', category: 'other', redaction_version: 'm4-mask.v1' },
       hold_scope: 'line:conversation:m4', ...identity,
-    });
+    } as const;
+    await customerServiceEscalationClient.previewCreate(createRequest);
+    await customerServiceEscalationClient.create({ ...createRequest, preview_fingerprint: previewFingerprint });
     await customerServiceEscalationClient.getDetail(11, { correlationId: 'm4-detail-11' });
-    await customerServiceEscalationClient.claim(11, { expected_escalation_version: 0, ...identity });
-    await customerServiceEscalationClient.startHandling(11, { expected_escalation_version: 1, expected_ticket_version: 2, ...identity });
-    await customerServiceEscalationClient.resolve(11, { expected_escalation_version: 2, expected_ticket_version: 3, resolution_code: 'handled', resolution_evidence_digest: 'b'.repeat(64), ...identity });
+    const claimRequest = { expected_escalation_version: 0, ...identity };
+    await customerServiceEscalationClient.previewClaim(11, claimRequest);
+    await customerServiceEscalationClient.claim(11, { ...claimRequest, preview_fingerprint: previewFingerprint });
+    const handlingRequest = { expected_escalation_version: 1, expected_ticket_version: 2, ...identity };
+    await customerServiceEscalationClient.previewStartHandling(11, handlingRequest);
+    await customerServiceEscalationClient.startHandling(11, { ...handlingRequest, preview_fingerprint: previewFingerprint });
+    const resolveRequest = { expected_escalation_version: 2, expected_ticket_version: 3, resolution_code: 'handled', resolution_evidence_digest: 'b'.repeat(64), ...identity };
+    await customerServiceEscalationClient.previewResolve(11, resolveRequest);
+    await customerServiceEscalationClient.resolve(11, { ...resolveRequest, preview_fingerprint: previewFingerprint });
     expect(fetchMock.mock.calls.map((call) => [call[1]?.method, call[0]])).toEqual([
+      ['POST', '/api/v1/customer-service/escalations/preview'],
       ['POST', '/api/v1/customer-service/escalations'],
       ['GET', '/api/v1/customer-service/escalations/11'],
+      ['POST', '/api/v1/customer-service/escalations/11/claim/preview'],
       ['POST', '/api/v1/customer-service/escalations/11/claim'],
+      ['POST', '/api/v1/customer-service/escalations/11/handling/preview'],
       ['POST', '/api/v1/customer-service/escalations/11/handling'],
+      ['POST', '/api/v1/customer-service/escalations/11/resolve/preview'],
       ['POST', '/api/v1/customer-service/escalations/11/resolve'],
     ]);
-    for (const call of [fetchMock.mock.calls[0], ...fetchMock.mock.calls.slice(2)]) {
+    for (const index of [1, 4, 6, 8]) {
+      const call = fetchMock.mock.calls[index];
       const headers = new Headers(call[1]?.headers);
       expect(headers.get('Idempotency-Key')).toBe('m4-command-1');
       expect(headers.get('X-Correlation-ID')).toBe('m4-correlation-1');
-      expect(JSON.parse(String(call[1]?.body))).toMatchObject(identity);
+      expect(JSON.parse(String(call[1]?.body))).toMatchObject({ ...identity, preview_fingerprint: previewFingerprint });
     }
     expect(adaptCustomerServiceEscalation(ESCALATION_VIEW_RESPONSE.data)).toMatchObject({ workflowStatusLabel: '待接手', availableActionLabels: ['接手'] });
   });
 
   it('raw context、extra response 或 mutation network failure 皆 typed fail closed', async () => {
     globalThis.fetch = vi.fn();
-    await expect(customerServiceEscalationClient.create({
+    await expect(customerServiceEscalationClient.previewCreate({
       source_event_identity: 'line-event:m4', source_kind: 'line_inbox', source_fingerprint: 'a'.repeat(64),
       trigger_code: 'complaint', trigger_policy_version: 'complaint.v1', ticket_category: 'other',
       masked_context: { summary_code: 'complaint_explicit', policy_version: 'complaint.v1', category: 'other', redaction_version: 'm4-mask.v1', raw_message: 'secret' } as never,
@@ -138,7 +173,7 @@ describe('M4 customer-service escalation successor', () => {
     globalThis.fetch = vi.fn().mockResolvedValue(response({ ...ESCALATION_VIEW_RESPONSE, data: { ...ESCALATION_VIEW_RESPONSE.data, line_user_id: 'U-secret' } }));
     await expect(customerServiceEscalationClient.getDetail(11, { correlationId: 'm4-detail' })).rejects.toMatchObject({ code: 'CUSTOMER_SERVICE_ESCALATION_CONTRACT' });
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('lost response'));
-    await expect(customerServiceEscalationClient.claim(11, { expected_escalation_version: 0, idempotency_key: 'm4-claim', correlation_id: 'm4-claim' }))
+    await expect(customerServiceEscalationClient.claim(11, { expected_escalation_version: 0, idempotency_key: 'm4-claim', correlation_id: 'm4-claim', preview_fingerprint: 'd'.repeat(64) }))
       .rejects.toMatchObject({ outcomeUnknown: true, retryable: true });
   });
 });
@@ -147,29 +182,56 @@ describe('LINE runtime alert target successor', () => {
   beforeEach(() => { vi.restoreAllMocks(); setSession(); });
   afterEach(() => { sessionClient.clearSession(); vi.restoreAllMocks(); });
 
-  it('list/candidates/add/reset/enable-disable 呼叫 current contract 並保留 command identity', async () => {
+  it('list/candidates/add/reset/enable-disable 都先 Preview 再 Apply 並保留 command identity', async () => {
     const receiptFixture = LineRuntimeTargetReceiptSchema.safeParse(RUNTIME_MUTATION_RESPONSE.data);
     expect(receiptFixture.success, receiptFixture.error?.message).toBe(true);
+    const fingerprint = 'f'.repeat(64);
+    const previewResponse = (operation: 'admin_target_add' | 'group_reset' | 'disable', targetId: number | null, previousState: 'absent' | 'active') => ({
+      success: true,
+      message: 'Preview 已建立',
+      data: {
+        operation,
+        target_id: targetId,
+        previous_state: previousState,
+        resulting_state: operation === 'group_reset' || operation === 'disable' ? 'disabled' : 'active',
+        current_version: targetId === null ? 'absent' : `version-${targetId}`,
+        preview_fingerprint: fingerprint,
+        apply_ready: true,
+      },
+      error: null,
+    });
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response(RUNTIME_TARGETS_RESPONSE))
       .mockResolvedValueOnce(response(RUNTIME_CANDIDATES_RESPONSE))
+      .mockResolvedValueOnce(response(previewResponse('admin_target_add', null, 'absent')))
       .mockResolvedValueOnce(response({ ...RUNTIME_MUTATION_RESPONSE, data: { ...RUNTIME_MUTATION_RESPONSE.data, operation: 'admin_target_add', correlation_id: 'runtime-add' } }))
+      .mockResolvedValueOnce(response(previewResponse('group_reset', 1, 'active')))
       .mockResolvedValueOnce(response({ ...RUNTIME_MUTATION_RESPONSE, data: { ...RUNTIME_MUTATION_RESPONSE.data, operation: 'group_reset', correlation_id: 'runtime-reset' } }))
+      .mockResolvedValueOnce(response(previewResponse('disable', 3, 'active')))
       .mockResolvedValueOnce(response({ ...RUNTIME_MUTATION_RESPONSE, data: { ...RUNTIME_MUTATION_RESPONSE.data, operation: 'disable', correlation_id: 'runtime-toggle' } }));
     globalThis.fetch = fetchMock;
     await lineRuntimeTargetClient.listTargets({ correlationId: 'runtime-list' });
     await lineRuntimeTargetClient.listAdminCandidates({ correlationId: 'runtime-candidates' });
-    await lineRuntimeTargetClient.addAdminTarget({ admin_user_id: 7, minimum_status: 'critical', reason: '輪值', idempotency_key: 'runtime-add', correlation_id: 'runtime-add' });
-    await lineRuntimeTargetClient.resetGroup({ expected_version: 'version-1', reason: '群組重設', idempotency_key: 'runtime-reset', correlation_id: 'runtime-reset' });
-    await lineRuntimeTargetClient.setEnabled(3, { expected_version: 'version-2', enabled: false, reason: '停用', idempotency_key: 'runtime-toggle', correlation_id: 'runtime-toggle' });
+    const addRequest = { admin_user_id: 7, minimum_status: 'critical' as const, reason: '輪值', idempotency_key: 'runtime-add', correlation_id: 'runtime-add' };
+    await lineRuntimeTargetClient.previewAddAdminTarget(addRequest);
+    await lineRuntimeTargetClient.addAdminTarget({ ...addRequest, preview_fingerprint: fingerprint });
+    const resetRequest = { expected_version: 'version-1', reason: '群組重設', idempotency_key: 'runtime-reset', correlation_id: 'runtime-reset' };
+    await lineRuntimeTargetClient.previewResetGroup(resetRequest);
+    await lineRuntimeTargetClient.resetGroup({ ...resetRequest, preview_fingerprint: fingerprint });
+    const toggleRequest = { expected_version: 'version-2', enabled: false, reason: '停用', idempotency_key: 'runtime-toggle', correlation_id: 'runtime-toggle' };
+    await lineRuntimeTargetClient.previewSetEnabled(3, toggleRequest);
+    await lineRuntimeTargetClient.setEnabled(3, { ...toggleRequest, preview_fingerprint: fingerprint });
     expect(fetchMock.mock.calls.map((call) => [call[1]?.method, call[0]])).toEqual([
       ['GET', '/api/v1/runtime/line-alert-targets'],
       ['GET', '/api/v1/runtime/line-alert-targets/admin-candidates'],
+      ['POST', '/api/v1/runtime/line-alert-targets/admin/preview'],
       ['POST', '/api/v1/runtime/line-alert-targets/admin'],
+      ['POST', '/api/v1/runtime/line-alert-targets/group/reset/preview'],
       ['POST', '/api/v1/runtime/line-alert-targets/group/reset'],
+      ['POST', '/api/v1/runtime/line-alert-targets/3/preview'],
       ['PATCH', '/api/v1/runtime/line-alert-targets/3'],
     ]);
-    const toggleHeaders = new Headers(fetchMock.mock.calls[4][1]?.headers);
+    const toggleHeaders = new Headers(fetchMock.mock.calls[7][1]?.headers);
     expect(toggleHeaders.get('Idempotency-Key')).toBe('runtime-toggle');
     expect(toggleHeaders.get('X-Correlation-ID')).toBe('runtime-toggle');
     expect(adaptLineRuntimeTarget(RUNTIME_TARGETS_RESPONSE.data[0])).toMatchObject({ stateLabel: '啟用', minimumStatusLabel: '警告以上' });
@@ -188,7 +250,7 @@ describe('LINE runtime alert target successor', () => {
       .rejects.toBeInstanceOf(LineRuntimeTargetError);
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('lost response'));
     setSession();
-    await expect(lineRuntimeTargetClient.resetGroup({ expected_version: 'version-1', reason: '重設', idempotency_key: 'runtime-reset', correlation_id: 'runtime-reset' }))
+    await expect(lineRuntimeTargetClient.resetGroup({ expected_version: 'version-1', reason: '重設', idempotency_key: 'runtime-reset', correlation_id: 'runtime-reset', preview_fingerprint: 'e'.repeat(64) }))
       .rejects.toMatchObject({ outcomeUnknown: true, retryable: true });
   });
 
@@ -204,7 +266,7 @@ describe('LINE runtime alert target successor', () => {
         retryable: false,
       } },
     }, 409));
-    await expect(lineRuntimeTargetClient.resetGroup({ expected_version: 'version-1', reason: '重設', idempotency_key: 'runtime-conflict', correlation_id: 'runtime-conflict' }))
+    await expect(lineRuntimeTargetClient.resetGroup({ expected_version: 'version-1', reason: '重設', idempotency_key: 'runtime-conflict', correlation_id: 'runtime-conflict', preview_fingerprint: 'e'.repeat(64) }))
       .rejects.toMatchObject({
         code: 'LINE_RUNTIME_TARGET_IDEMPOTENCY_MISMATCH',
         publicCode: 'line_alert_target_idempotency_mismatch',

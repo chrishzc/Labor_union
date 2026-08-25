@@ -244,6 +244,34 @@ pending → processing → published
 ```
 
 - Menu definition、image digest 與 publication snapshot 不可在 processing 後被覆寫。
+- Rich Menu 管理工作台必須允許具權限的管理員在尚未進入 `processing` 的 draft revision 調整背景圖
+  與各熱區按鈕顯示名稱。背景圖以受控 media asset／digest 參照，按鈕名稱屬 menu definition；不得把
+  base64、任意外部 URL 或 provider raw payload 寫入 definition。修改只建立新 draft revision，不得原地
+  覆寫 published／processing snapshot，也不得在儲存草稿時直接呼叫 provider。
+- 背景或按鈕名稱變更後，工作台預覽必須立即投影同一 draft revision；既有按鈕 action、熱區座標與角色
+  audience 不因改名自行變更。若操作者另行修改 action／座標／audience，必須走各自 typed contract，不能
+  由前端猜測或與名稱修改綁成隱性 mutation。
+- 2026-08-25 人工新增 action 編輯：Rich Menu 管理工作台的手機模擬器與編輯器必須讀取同一 draft
+  revision 的 typed action，不得由按鈕名稱、順序或前端 hardcode 推導。管理員可在 closed action kind
+  `uri | message | postback | richmenuswitch` 內修改各自允許欄位；LIFF URI 只接受 canonical target／runtime
+  composition，literal URI、message text、postback data 與 alias 各自驗證長度、scheme／格式及互斥欄位。
+  修改須建立新 draft revision 並走 zero-write Preview → 明確確認 → Apply → receipt/readback；processing／
+  published snapshot 唯讀，儲存草稿不得直接呼叫 provider。`configurations/{kind}/safe` 仍禁止輸出 URI／
+  action data；只有已認證 Rich Menu 管理工作台的專用 typed draft query 可取得編輯所需欄位。
+- 本機互動預覽固定保留。它以 current server draft snapshot 加上尚未 Apply 的 browser-memory edits，立即
+  重繪手機選單並模擬點擊結果；不得寫 DB、建立 receipt／delivery task／publication intent 或呼叫 LINE
+  provider。本機預覽不能取代 server `PreviewRichMenuDefinitionChange`：操作者送出前仍須由 server zero-write
+  Preview 驗證 normalized definition、revision、action 欄位與 blockers，再明確確認 Apply。Apply 成功後重新
+  Query 的 persisted draft 必須和本機預覽一致；不一致時顯示 conflict 並禁止發布。
+- `message` action 編輯器必須顯示並修改實際將由該按鈕送出的 message text；本機點擊只在手機模擬器
+  顯示同一文字，不實際送出。切換 action kind 時必須清除前一 kind 不相容欄位，不能殘留 URI、message、
+  postback data 或 alias。按鈕改名不得改 message text，message text 修改也不得改按鈕名稱；兩者只有在
+  操作者分別編輯時才改變。
+- 專用管理契約至少包含 `QueryRichMenuDraft`、`PreviewRichMenuDraftChange`、
+  `ApplyRichMenuDraftChange` 與 committed draft readback。可重用既有 LINE Configuration owner／repository，
+  但不得把 generic raw configuration endpoint 直接穿透 React；Apply 必須帶回並驗證 server Preview
+  fingerprint、expected revision、reason、idempotency 與 correlation。相同 key／payload replay 回原 receipt，
+  same key／different payload、stale revision 或 fingerprint mismatch 固定零寫入。
 - 發布採 create／upload／link／switch／cleanup 的 saga，每一步保存 receipt。
 - retry 從已確認 provider receipt 繼續，不重複建立資產。
 - Rich Menu saga 的現行 additive persistence contract 由
@@ -258,8 +286,10 @@ pending → processing → published
 - 新 Rich Menu publication 成功時，必須在記錄 published 的同一交易，依 menu audience role
   對全部 bound LINE identities fan-out 個人 binding intents。每筆 intent 以 publication ID 與
   LINE user ID 組成冪等 identity，並固定本次 provider menu ID；既有身分不需要解除或重複綁定。
-- media DB 只保存 metadata、owner、digest、size、content type 與 archive location，
-  不保存任意外部 URL 當永久根事實。
+- media／文件 bytes 依 `00` §2.2 保存於工會地端受控 NAS；DB 只保存 metadata、owner、opaque
+  object reference、digest、size、content type 與版本，不保存大型 binary 或任意外部 URL 當永久根事實。
+  LINE 只可依 owner 已提交的文件版本建立 durable delivery task；worker 發送前須重讀並核對 object
+  identity／digest，缺失或漂移固定 fail closed，掃描到檔案本身不得觸發 provider 呼叫。
 - 正式套用採單人流程：管理員先看到目前 menu snapshot 的預覽，再按「確認目前預覽」取得
   server-side preview receipt，最後勾選二次確認才可 Apply。Apply 必須鎖定同一管理員、
   同一 menu、同一 config revision 與 fingerprint；任一內容變更使舊預覽失效。沒有雙人覆核。
@@ -579,6 +609,11 @@ Client BeClass 的 `query_no` 只是來源流水號，不得作為客戶識別�
 Staff BeClass 歷史匯入以有效身分證及姓名為最低資格。後來的歷史快照覆蓋可更新 scalar，銀行帳戶與勾選
 關聯視為完整集合原子替換；姓名改變可寫入並留下已自動結束的追溯 warning。任一其他欄位缺漏或格式無效
 仍建立欄位級 warning。Staff 退役不由匯入推定或修改。
+
+2026-08-25 管理端正規化資料投影：客戶資料只讀已採納的 `identity_status`、`city`、`service_type`、
+`service_time`、`delivery_type`、`residence_type` typed facts；不得解析或顯示 raw `survey_details`、來源識別、
+銀行資料或指紋。合法空值固定顯示「尚未登錄」，不得補預設值。月嫂名冊的服務能力欄位由第 `24` 份
+正式規格 §3.3 擁有。此客戶投影已以 Chrome 驗證非空與合法空值，狀態為 `completed`。
 
 有 HCM 而無唯一 Client BeClass 對方時投影 `BECLASS-001`；對方日後唯一綁定後由 root predicate 自動解除。
 任何警示均以 `logical_code + field_path` 獨立追蹤；缺漏與格式錯誤不按欄位新增 logical code，

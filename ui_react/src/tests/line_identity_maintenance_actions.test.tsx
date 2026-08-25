@@ -74,7 +74,7 @@ describe('LINE 身分維護操作', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '更正原因' }), {
       target: { value: '先前綁定到錯誤客戶' },
     });
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認目前版本與更正對象' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '我已核對目前綁定與更正對象' }));
     fireEvent.click(applyButton);
 
     await screen.findByText(/綁定對象已更正為 更正客戶乙/);
@@ -129,9 +129,9 @@ describe('LINE 身分維護操作', () => {
     );
 
     expect(manualButton).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認 provider 永久失敗或重試已耗盡' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認 LINE 平台永久失敗或重試已耗盡' }));
     expect(manualButton).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox', { name: '我了解人工完成會直接完成解除並清除 owner projection' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '我了解人工完成會直接完成解除並清除授權關聯' }));
     fireEvent.click(manualButton);
 
     await screen.findByText('人工解除完成');
@@ -142,7 +142,7 @@ describe('LINE 身分維護操作', () => {
     );
   });
 
-  it('pending request 只顯示 durable worker 狀態，不提供 backend 不允許的維護按鈕', () => {
+  it('pending request 只顯示背景處理狀態，不提供後端不允許的維護按鈕', () => {
     const pendingBinding = {
       ...BOUND_IDENTITY_FIXTURE,
       status: 'revocation_pending' as const,
@@ -157,7 +157,7 @@ describe('LINE 身分維護操作', () => {
       />
     );
 
-    expect(screen.getByText(/Durable worker 正在回復 Rich Menu/)).toBeInTheDocument();
+    expect(screen.getByText(/背景服務正在回復 LINE 選單/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重新排入 Rich Menu 回復' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '人工完成解除' })).not.toBeInTheDocument();
   });
@@ -178,7 +178,7 @@ describe('LINE 身分維護操作', () => {
       />
     );
 
-    expect(screen.getByText(/只提供具 LINE 身分 override 權限/)).toBeInTheDocument();
+    expect(screen.getByText(/只提供具 LINE 身分人工處理權限/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '人工完成解除' })).not.toBeInTheDocument();
   });
 });

@@ -195,7 +195,7 @@ describe('G5 OrdersPage adversarial suite', () => {
       fireEvent.click(within(orderCard('ORD-2026-0801')).getByRole('button', { name: /條款與契約/ }));
     });
     await act(async () => {
-      fireEvent.click(await screen.findByRole('button', { name: /訂單取消與退款試算/ }));
+      fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
     });
     await waitFor(() => expect(orderCancellationClient.query).toHaveBeenCalledOnce());
     expect(screen.queryByText(/全額退還/)).not.toBeInTheDocument();

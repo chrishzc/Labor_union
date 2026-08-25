@@ -1,16 +1,21 @@
-# Part 00：全域測試資料治理與 Scenario 契約
-
 ---
-status: proposed
+status: superseded
 priority: P0
 owner: global-validation-governance
 domain: Global
 subsystem: validation-data-governance
 initiative: ui-real-business-flow-validation
-updated: 2026-08-12
+updated: 2026-08-25
+successor: ../架構重整/01_規格基線/00_Global_共同契約.md
 ---
 
+# Part 00：全域測試資料治理與 Scenario 契約
+
 ## 1. Authority 與目的
+
+> 2026-08-25 狀態校正：scenario identity、receipt、受控 `lu_test_*` 與驗收治理已由
+> Global 共同契約、正式規格索引及後續已核准工作包承接。本檔保留設計來源，不再形成
+> implementation blocker；真正未完成情境只列於 current 代辦總表。
 
 本文件執行已確認的
 `document/功能開發計畫/UI真實業務流程測試資料與驗收主計畫.md` Part 00，定義 Part 01～16

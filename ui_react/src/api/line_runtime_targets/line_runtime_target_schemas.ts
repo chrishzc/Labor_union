@@ -35,16 +35,35 @@ export const LineRuntimeAdminTargetRequestSchema = z.strictObject({
   minimum_status: LineRuntimeMinimumStatusSchema,
   ...CommandIdentityShape,
 });
+export const LineRuntimeAdminTargetApplyRequestSchema = LineRuntimeAdminTargetRequestSchema.extend({
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
 
 export const LineRuntimeGroupResetRequestSchema = z.strictObject({
   expected_version: z.string().trim().min(1).max(191),
   ...CommandIdentityShape,
 });
+export const LineRuntimeGroupResetApplyRequestSchema = LineRuntimeGroupResetRequestSchema.extend({
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
 
 export const LineRuntimeTargetEnabledRequestSchema = z.strictObject({
   expected_version: z.string().trim().min(1).max(191),
   enabled: z.boolean(),
   ...CommandIdentityShape,
+});
+export const LineRuntimeTargetEnabledApplyRequestSchema = LineRuntimeTargetEnabledRequestSchema.extend({
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
+
+export const LineRuntimeTargetPreviewSchema = z.strictObject({
+  operation: z.enum(['group_reset', 'enable', 'disable', 'admin_target_add']),
+  target_id: z.number().int().positive().nullable(),
+  previous_state: z.enum(['absent', 'active', 'disabled']),
+  resulting_state: LineRuntimeTargetStateSchema,
+  current_version: z.string(),
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  apply_ready: z.literal(true),
 });
 
 export const LineRuntimeTargetReceiptSchema = z.strictObject({
@@ -67,10 +86,15 @@ function envelope<T extends z.ZodTypeAny>(data: T) {
 export const LineRuntimeTargetsResponseSchema = envelope(z.array(LineRuntimeTargetSchema));
 export const LineRuntimeAdminCandidatesResponseSchema = envelope(z.array(LineRuntimeAdminCandidateSchema));
 export const LineRuntimeTargetReceiptResponseSchema = envelope(LineRuntimeTargetReceiptSchema);
+export const LineRuntimeTargetPreviewResponseSchema = envelope(LineRuntimeTargetPreviewSchema);
 
 export type LineRuntimeTarget = z.infer<typeof LineRuntimeTargetSchema>;
 export type LineRuntimeAdminCandidate = z.infer<typeof LineRuntimeAdminCandidateSchema>;
 export type LineRuntimeAdminTargetRequest = z.infer<typeof LineRuntimeAdminTargetRequestSchema>;
+export type LineRuntimeAdminTargetApplyRequest = z.infer<typeof LineRuntimeAdminTargetApplyRequestSchema>;
 export type LineRuntimeGroupResetRequest = z.infer<typeof LineRuntimeGroupResetRequestSchema>;
+export type LineRuntimeGroupResetApplyRequest = z.infer<typeof LineRuntimeGroupResetApplyRequestSchema>;
 export type LineRuntimeTargetEnabledRequest = z.infer<typeof LineRuntimeTargetEnabledRequestSchema>;
+export type LineRuntimeTargetEnabledApplyRequest = z.infer<typeof LineRuntimeTargetEnabledApplyRequestSchema>;
 export type LineRuntimeTargetReceipt = z.infer<typeof LineRuntimeTargetReceiptSchema>;
+export type LineRuntimeTargetPreview = z.infer<typeof LineRuntimeTargetPreviewSchema>;

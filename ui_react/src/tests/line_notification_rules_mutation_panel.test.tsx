@@ -63,8 +63,8 @@ describe('LINE notification rules mutation panel', () => {
     fireEvent.click(screen.getByRole('button', { name: '預覽儲存變更' }));
 
     await screen.findByText('儲存預覽已就緒');
-    expect(screen.getByText('版本 3 → 4')).toBeInTheDocument();
-    expect(screen.getByText('設定指紋摘要：01234567…cdef')).toBeInTheDocument();
+    expect(screen.queryByText('版本 3 → 4')).not.toBeInTheDocument();
+    expect(screen.queryByText(/指紋摘要/)).not.toBeInTheDocument();
     expect(screen.queryByText(FINGERPRINT)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '確認儲存通知規則' })).toBeDisabled();
 
@@ -72,11 +72,11 @@ describe('LINE notification rules mutation panel', () => {
       target: { value: '核准訂金通知模板更新' },
     });
     fireEvent.click(screen.getByRole('checkbox', {
-      name: '我已確認版本、規則數與指紋摘要',
+      name: '我已確認通知規則與影響範圍',
     }));
     fireEvent.click(screen.getByRole('button', { name: '確認儲存通知規則' }));
 
-    await screen.findByText(/通知規則已儲存；取消 1 個 intent、2 個 task/);
+    await screen.findByText(/通知規則已儲存；已取消 1 筆待發通知與 2 筆發送工作/);
     expect(save).toHaveBeenCalledTimes(1);
     expect(save.mock.calls[0][0]).toMatchObject({
       expected_revision: 3,
@@ -124,11 +124,11 @@ describe('LINE notification rules mutation panel', () => {
       target: { value: '停用已退役通知流程' },
     });
     fireEvent.click(screen.getByRole('checkbox', {
-      name: '我已確認版本、規則數與指紋摘要',
+      name: '我已確認通知規則與影響範圍',
     }));
     fireEvent.click(screen.getByRole('button', { name: '確認刪除通知規則' }));
 
-    await screen.findByText(/規則 deposit_notice 已刪除；取消 0 個 intent、1 個 task/);
+    await screen.findByText(/規則 deposit_notice 已刪除；已取消 0 筆待發通知與 1 筆發送工作/);
     expect(deleteRule).toHaveBeenCalledTimes(1);
     expect(deleteRule.mock.calls[0][0]).toBe('deposit_notice');
     expect(deleteRule.mock.calls[0][1]).toMatchObject({

@@ -1,6 +1,6 @@
 /**
  * File: scheduling_current_schemas.ts
- * Description: 定義 current Scheduling projection 與 Global error 的嚴格 Zod 契約。
+ * Description: 定義 current Scheduling 排班、檔期鎖與不可服務原因的嚴格 Zod 契約。
  */
 import { z } from 'zod';
 
@@ -49,8 +49,24 @@ export const SchedulingCurrentDayEntrySchema = z
     segment_id: z.number().int().positive().nullable(),
     availability_block_id: z.number().int().positive().nullable(),
     unavailability_kind: z.string().min(1).nullable(),
+    unavailability_reason: z.string().min(1).max(500).nullable(),
   })
-  .strict();
+  .strict()
+  .superRefine((entry, context) => {
+    if (
+      entry.occupancy_kind === 'staff_unavailability'
+      && (
+        entry.availability_block_id === null
+        || entry.unavailability_kind === null
+        || entry.unavailability_reason === null
+      )
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '不可服務占用必須包含 block identity、類別與原因。',
+      });
+    }
+  });
 
 export const SchedulingCurrentDaySchema = z
   .object({

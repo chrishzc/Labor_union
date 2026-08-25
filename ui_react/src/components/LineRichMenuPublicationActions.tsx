@@ -14,6 +14,7 @@ import {
   type LineRichMenuPublicationClient,
 } from '../api/line_rich_menu_publication/line_rich_menu_publication_client';
 import { LineRichMenuPublicationError } from '../api/line_rich_menu_publication/line_rich_menu_publication_errors';
+import { sessionClient } from '../api/auth/session_client';
 
 export interface LineRichMenuPublicationMenu {
   id: string;
@@ -36,6 +37,23 @@ export interface LineRichMenuPublicationActionsProps {
 
 type OperationState = 'idle' | 'loading' | 'success' | 'error';
 
+const RICH_MENU_PUBLISH_CAPABILITIES = new Set([
+  'line.menu.publish',
+  'line.rich_menu.publish',
+]);
+
+function publicationAccessMessage(): string | null {
+  const user = sessionClient.getUser();
+  if (!user) return null;
+  if (user.capabilities.some((capability) => RICH_MENU_PUBLISH_CAPABILITIES.has(capability))) {
+    return null;
+  }
+  if (user.id === null) {
+    return '本機免驗證模式不可發布；請改用真實已登入的管理員 Session。';
+  }
+  return '目前登入的管理員 Session 沒有 Rich Menu 發布能力；請改用具發布能力的管理員 Session。';
+}
+
 function uniqueOperationIdentity(prefix: string): string {
   const suffix = globalThis.crypto?.randomUUID?.()
     ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -44,6 +62,9 @@ function uniqueOperationIdentity(prefix: string): string {
 
 function displayError(error: unknown): string {
   if (error instanceof LineRichMenuPublicationError) {
+    if (error.category === 'forbidden') {
+      return '目前登入的管理員 Session 沒有 Rich Menu 發布能力；若目前使用本機免驗證模式，該模式不可發布，請改用真實已登入的管理員 Session。';
+    }
     return `${error.code}：${error.message}`;
   }
   return error instanceof Error ? error.message : 'Rich Menu 發布操作失敗，請重新查詢後再試。';
@@ -66,6 +87,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
   const [receipt, setReceipt] = useState<LineRichMenuPublicationReceiptModel | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
+  const publicationAccess = publicationAccessMessage();
 
   useEffect(() => {
     controllerRef.current?.abort();
@@ -177,73 +199,103 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
   const busy = previewState === 'loading' || publishState === 'loading' || retryState === 'loading';
 
   return (
-    <section className="line-action-panel" aria-label="Rich Menu 發布操作">
-      <h4>發布操作</h4>
-      {selectedMenu ? (
-        <>
-          <p>目前選單：{selectedMenu.name}（{selectedMenu.id}）</p>
-          <button type="button" disabled={busy} onClick={() => void runPreview()}>
-            預覽發布
+    <section className="richmenu-publish-card" aria-label="Rich Menu 發布操作">
+      <div className="richmenu-publish-header">
+        <div>
+          <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1e1b19', fontWeight: 700 }}>
+            🚀 Rich Menu 發布操作
+          </h4>
+          <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>
+             {selectedMenu ? `目前選單：${selectedMenu.name}` : '請先由上方選擇要發布的 Rich Menu'}
+          </p>
+        </div>
+        {selectedMenu && (
+          <button
+            type="button"
+            className="line-secondary-btn"
+            disabled={busy}
+            onClick={() => void runPreview()}
+            style={{ padding: '6px 14px', fontSize: '0.85rem' }}
+          >
+            🔍 檢查發布影響
           </button>
-        </>
-      ) : <p>請先選擇要發布的 Rich Menu。</p>}
+        )}
+      </div>
 
-      {previewState === 'loading' && <div role="status">正在建立零寫入發布預覽…</div>}
+      {previewState === 'loading' && <div className="line-loading" role="status">正在檢查發布影響…</div>}
       {preview && (
-        <div className="line-preview-result">
-          <strong>預覽已就緒</strong>
-          <p>設定版本：{preview.configurationRevision}</p>
-          <p>設定指紋摘要：{preview.fingerprintSummary}</p>
-          <label htmlFor="line-rich-menu-publish-reason">發布原因</label>
+        <div className="richmenu-preview-box">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <strong style={{ color: '#166534', fontSize: '0.9rem' }}>✅ 發布影響已確認</strong>
+          </div>
+          <p style={{ fontSize: '0.78rem', color: '#74593f', fontFamily: 'monospace', margin: '4px 0 10px', wordBreak: 'break-all' }}>
+             選單設定已通過檢查，請核對影響範圍後發布。
+          </p>
+
+          <label htmlFor="line-rich-menu-publish-reason" style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#57423b', marginBottom: '4px' }}>
+            發布原因說明
+          </label>
           <textarea
             id="line-rich-menu-publish-reason"
             value={publishReason}
-            rows={3}
+            rows={2}
             maxLength={500}
             disabled={busy}
+            placeholder="例如：更新秋季月嫂媒合方案與線上補助試算連結..."
+            style={{ width: '100%', padding: '8px', border: '1px solid #dec0b6', borderRadius: '8px', fontSize: '0.85rem', boxSizing: 'border-box' }}
             onChange={(event) => {
               setPublishReason(event.target.value);
               setPublishConfirmed(false);
               setPublishState('idle');
             }}
           />
-          <label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', color: '#57423b', margin: '10px 0' }}>
             <input
               type="checkbox"
               checked={publishConfirmed}
               disabled={busy}
               onChange={(event) => setPublishConfirmed(event.target.checked)}
             />
-            我已確認選單、設定版本與指紋摘要
+            我已確認選單內容與影響範圍，同意排入發布序列
           </label>
           <button
             type="button"
-            disabled={busy || !publishConfirmed || publishReason.trim().length === 0}
+            style={{ width: '100%', padding: '10px', background: '#ff7f50', color: '#fff', border: 0, borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
+            disabled={busy || Boolean(publicationAccess) || !publishConfirmed || publishReason.trim().length === 0}
             onClick={() => void queuePublication()}
           >
-            確認排入發布
+            🚀 確認排入異步發布
           </button>
         </div>
       )}
 
+      {publicationAccess && (
+        <div className="line-error" role="note" style={{ marginTop: '10px' }}>
+          🔒 {publicationAccess}
+        </div>
+      )}
+
       {selectedPublication?.status === 'publish_retryable_failed' && (
-        <div className="line-preview-result">
-          <strong>發布紀錄 #{selectedPublication.id} 可重新排入</strong>
-          <p>{selectedPublication.menuDefinitionId}｜{selectedPublication.statusLabel}</p>
-          <label htmlFor={`line-rich-menu-retry-reason-${selectedPublication.id}`}>重試原因</label>
+        <div className="richmenu-preview-box" style={{ borderColor: '#fecdd3', background: '#fff5f5' }}>
+          <strong style={{ color: '#991b1b' }}>⚠️ 此選單發布可重新排入</strong>
+          <p style={{ fontSize: '0.82rem', margin: '4px 0 8px' }}>目前狀態：{selectedPublication.statusLabel}</p>
+          <label htmlFor={`line-rich-menu-retry-reason-${selectedPublication.id}`} style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700 }}>
+            重試原因
+          </label>
           <textarea
             id={`line-rich-menu-retry-reason-${selectedPublication.id}`}
             value={retryReason}
-            rows={3}
+            rows={2}
             maxLength={500}
             disabled={busy}
+            style={{ width: '100%', padding: '8px', border: '1px solid #dec0b6', borderRadius: '8px', fontSize: '0.85rem', boxSizing: 'border-box' }}
             onChange={(event) => {
               setRetryReason(event.target.value);
               setRetryConfirmed(false);
               setRetryState('idle');
             }}
           />
-          <label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', margin: '8px 0' }}>
             <input
               type="checkbox"
               checked={retryConfirmed}
@@ -254,25 +306,25 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
           </label>
           <button
             type="button"
-            disabled={busy || !retryConfirmed || retryReason.trim().length === 0}
+            style={{ width: '100%', padding: '10px', background: '#ea580c', color: '#fff', border: 0, borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
+            disabled={busy || Boolean(publicationAccess) || !retryConfirmed || retryReason.trim().length === 0}
             onClick={() => void retryPublication()}
           >
-            確認重新排入
+            🔄 確認重新排入發布
           </button>
         </div>
       )}
 
       {(publishState === 'loading' || retryState === 'loading') && (
-        <div role="status">正在建立 durable 發布工作…</div>
+        <div className="line-loading" role="status">正在排入發布工作…</div>
       )}
       {receipt && (
-        <div className="line-success" role="status">
-          <strong>發布工作 #{receipt.publicationId}：{receipt.statusLabel}</strong>
-          <p>設定版本 {receipt.configurationRevision}</p>
-          <p>{receipt.durableNotice}</p>
+        <div className="line-success" role="status" style={{ marginTop: '10px' }}>
+          <strong>選單發布：{receipt.statusLabel}</strong>
+          <p style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>已排入發布工作；尚未代表 LINE 平台已完成發布。</p>
         </div>
       )}
-      {errorMessage && <div className="line-error" role="alert">{errorMessage}</div>}
+      {errorMessage && <div className="line-error" role="alert" style={{ marginTop: '10px' }}>{errorMessage}</div>}
     </section>
   );
 };

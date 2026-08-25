@@ -21,7 +21,7 @@ v1 的測試目標。雙 tunnel 是獨立可用性升級方案，未經新裁決
 
 ## 1. 來源與現行裁決
 
-- [單一 Cloud VPN 雲端部署簡報](../簡報/單一Cloud_VPN_雲端部署.pptx)：10 張投影片確認混合部署、
+- 單一 Cloud VPN 雲端部署簡報（current workspace 未保存該檔，不作 activation gate）：原提案以 10 張投影片確認混合部署、
   API-only DB access、單一 tunnel 的故障語意、成本上限與上線前隔離／復原／追溯主軸。
 - [單一 Cloud VPN 計畫書](../雲端部署/計劃書/單一Cloud VPN計畫書.md)：本計畫的 runtime、網路、
   identity 與 acceptance 基線。
@@ -29,7 +29,7 @@ v1 的測試目標。雙 tunnel 是獨立可用性升級方案，未經新裁決
   image 分離、immutable digest、non-secret runtime config 與 build evidence。
 - [Global Deployment 與治理正式規格](../架構重整/01_規格基線/18_Global_Deployment與治理正式規格.md)：
   release、recovery、private DB、OIDC 與 no-secret invariants。
-- [雙 tunnel 比較計畫](../雲端部署/計劃書/Cloud_Run_Direct_VPC_HA_VPN雙Tunnel部署計畫.md)：
+- 雙 tunnel 比較計畫（current workspace 未保存該檔，不作 activation gate）：
   僅用於未來可用性升級的差異比對，不是本測試的 PASS 條件。
 - 官方產品核對（2026-08-16）：[Cloud Run worker pools](https://cloud.google.com/run/docs/deploy-worker-pools)、
   [Direct VPC egress](https://cloud.google.com/run/docs/configuring/vpc-direct-vpc)、

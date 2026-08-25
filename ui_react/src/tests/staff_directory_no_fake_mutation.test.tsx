@@ -43,6 +43,7 @@ describe('StaffPage zero fake mutation', () => {
     }
     fireEvent.click(screen.getByRole('button', { name: /服務月嫂名冊/ }));
     fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
 
     const unsupportedIds = [
       'staff.master.save',
@@ -54,9 +55,11 @@ describe('StaffPage zero fake mutation', () => {
     for (const id of unsupportedIds) {
       expect(document.querySelector(`[data-control-id="${id}"]`)).not.toBeInTheDocument();
     }
-    for (const id of ['staff.lifecycle.retirement.preview', 'staff.lifecycle.reactivation.preview', 'staff.lifecycle.reactivation.apply']) {
-      expect(document.querySelector(`[data-control-id="${id}"]`)).toBeDisabled();
-    }
+    expect(screen.getByText('正在載入人事異動主檔…')).toBeInTheDocument();
+    expect(screen.getByText(/填寫生效時間與原因後/)).toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="staff.lifecycle.retirement.preview"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="staff.lifecycle.reactivation.preview"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="staff.lifecycle.reactivation.apply"]')).not.toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
   });
 });

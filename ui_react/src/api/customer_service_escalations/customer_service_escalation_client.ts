@@ -9,16 +9,26 @@ import { transport, type RequestOptions } from '../shared/transport';
 import { CustomerServiceEscalationError, mapCustomerServiceEscalationError, type CustomerServiceEscalationOperation } from './customer_service_escalation_errors';
 import {
   CustomerServiceEscalationClaimRequestSchema,
+  CustomerServiceEscalationClaimApplyRequestSchema,
   CustomerServiceEscalationCreateRequestSchema,
+  CustomerServiceEscalationCreateApplyRequestSchema,
   CustomerServiceEscalationHandlingRequestSchema,
+  CustomerServiceEscalationHandlingApplyRequestSchema,
+  CustomerServiceEscalationPreviewResponseSchema,
   CustomerServiceEscalationReceiptResponseSchema,
   CustomerServiceEscalationResolveRequestSchema,
+  CustomerServiceEscalationResolveApplyRequestSchema,
   CustomerServiceEscalationViewResponseSchema,
   type CustomerServiceEscalationClaimRequest,
+  type CustomerServiceEscalationClaimApplyRequest,
   type CustomerServiceEscalationCreateRequest,
+  type CustomerServiceEscalationCreateApplyRequest,
   type CustomerServiceEscalationHandlingRequest,
+  type CustomerServiceEscalationHandlingApplyRequest,
+  type CustomerServiceEscalationPreview,
   type CustomerServiceEscalationReceipt,
   type CustomerServiceEscalationResolveRequest,
+  type CustomerServiceEscalationResolveApplyRequest,
   type CustomerServiceEscalationView,
 } from './customer_service_escalation_schemas';
 
@@ -92,8 +102,29 @@ async function mutation<T>(
   }
 }
 
-export async function createCustomerServiceEscalation(request: CustomerServiceEscalationCreateRequest, source: CustomerServiceEscalationOptions = {}): Promise<CustomerServiceEscalationReceipt> {
-  return mutation('create', 'create', null, '/api/v1/customer-service/escalations', CustomerServiceEscalationCreateRequestSchema, request, source);
+async function preview<T>(
+  operation: CustomerServiceEscalationOperation,
+  path: string,
+  schema: z.ZodType<T>,
+  request: T,
+  source: CustomerServiceEscalationOptions,
+): Promise<CustomerServiceEscalationPreview> {
+  try {
+    const body = validate(schema, request);
+    const identity = body as { correlation_id: string };
+    const raw = await transport.post<unknown>(path, body, options(source, identity.correlation_id));
+    return decode(CustomerServiceEscalationPreviewResponseSchema, raw);
+  } catch (error) {
+    throw mapCustomerServiceEscalationError(error, operation);
+  }
+}
+
+export async function previewCreateCustomerServiceEscalation(request: CustomerServiceEscalationCreateRequest, source: CustomerServiceEscalationOptions = {}): Promise<CustomerServiceEscalationPreview> {
+  return preview('create', '/api/v1/customer-service/escalations/preview', CustomerServiceEscalationCreateRequestSchema, request, source);
+}
+
+export async function createCustomerServiceEscalation(request: CustomerServiceEscalationCreateApplyRequest, source: CustomerServiceEscalationOptions = {}): Promise<CustomerServiceEscalationReceipt> {
+  return mutation('create', 'create', null, '/api/v1/customer-service/escalations', CustomerServiceEscalationCreateApplyRequestSchema, request, source);
 }
 
 export async function getCustomerServiceEscalationDetail(escalationId: number, source: CustomerServiceEscalationDetailOptions): Promise<CustomerServiceEscalationView> {
@@ -108,25 +139,44 @@ export async function getCustomerServiceEscalationDetail(escalationId: number, s
   }
 }
 
-export async function claimCustomerServiceEscalation(escalationId: number, request: CustomerServiceEscalationClaimRequest, source: CustomerServiceEscalationOptions = {}): Promise<CustomerServiceEscalationReceipt> {
+export async function previewClaimCustomerServiceEscalation(escalationId: number, request: CustomerServiceEscalationClaimRequest, source: CustomerServiceEscalationOptions = {}): Promise<CustomerServiceEscalationPreview> {
   const id = requireId(escalationId);
-  return mutation('claim', 'claim', id, `/api/v1/customer-service/escalations/${id}/claim`, CustomerServiceEscalationClaimRequestSchema, request, source);
+  return preview('claim', `/api/v1/customer-service/escalations/${id}/claim/preview`, CustomerServiceEscalationClaimRequestSchema, request, source);
 }
 
-export async function startCustomerServiceEscalationHandling(escalationId: number, request: CustomerServiceEscalationHandlingRequest, source: CustomerServiceEscalationOptions = {}): Promise<CustomerServiceEscalationReceipt> {
+export async function claimCustomerServiceEscalation(escalationId: number, request: CustomerServiceEscalationClaimApplyRequest, source: CustomerServiceEscalationOptions = {}): Promise<CustomerServiceEscalationReceipt> {
   const id = requireId(escalationId);
-  return mutation('handling', 'handling_started', id, `/api/v1/customer-service/escalations/${id}/handling`, CustomerServiceEscalationHandlingRequestSchema, request, source);
+  return mutation('claim', 'claim', id, `/api/v1/customer-service/escalations/${id}/claim`, CustomerServiceEscalationClaimApplyRequestSchema, request, source);
 }
 
-export async function resolveCustomerServiceEscalation(escalationId: number, request: CustomerServiceEscalationResolveRequest, source: CustomerServiceEscalationOptions = {}): Promise<CustomerServiceEscalationReceipt> {
+export async function previewStartCustomerServiceEscalationHandling(escalationId: number, request: CustomerServiceEscalationHandlingRequest, source: CustomerServiceEscalationOptions = {}): Promise<CustomerServiceEscalationPreview> {
   const id = requireId(escalationId);
-  return mutation('resolve', 'resolve', id, `/api/v1/customer-service/escalations/${id}/resolve`, CustomerServiceEscalationResolveRequestSchema, request, source);
+  return preview('handling', `/api/v1/customer-service/escalations/${id}/handling/preview`, CustomerServiceEscalationHandlingRequestSchema, request, source);
+}
+
+export async function startCustomerServiceEscalationHandling(escalationId: number, request: CustomerServiceEscalationHandlingApplyRequest, source: CustomerServiceEscalationOptions = {}): Promise<CustomerServiceEscalationReceipt> {
+  const id = requireId(escalationId);
+  return mutation('handling', 'handling_started', id, `/api/v1/customer-service/escalations/${id}/handling`, CustomerServiceEscalationHandlingApplyRequestSchema, request, source);
+}
+
+export async function previewResolveCustomerServiceEscalation(escalationId: number, request: CustomerServiceEscalationResolveRequest, source: CustomerServiceEscalationOptions = {}): Promise<CustomerServiceEscalationPreview> {
+  const id = requireId(escalationId);
+  return preview('resolve', `/api/v1/customer-service/escalations/${id}/resolve/preview`, CustomerServiceEscalationResolveRequestSchema, request, source);
+}
+
+export async function resolveCustomerServiceEscalation(escalationId: number, request: CustomerServiceEscalationResolveApplyRequest, source: CustomerServiceEscalationOptions = {}): Promise<CustomerServiceEscalationReceipt> {
+  const id = requireId(escalationId);
+  return mutation('resolve', 'resolve', id, `/api/v1/customer-service/escalations/${id}/resolve`, CustomerServiceEscalationResolveApplyRequestSchema, request, source);
 }
 
 export const customerServiceEscalationClient = {
+  previewCreate: previewCreateCustomerServiceEscalation,
   create: createCustomerServiceEscalation,
   getDetail: getCustomerServiceEscalationDetail,
+  previewClaim: previewClaimCustomerServiceEscalation,
   claim: claimCustomerServiceEscalation,
+  previewStartHandling: previewStartCustomerServiceEscalationHandling,
   startHandling: startCustomerServiceEscalationHandling,
+  previewResolve: previewResolveCustomerServiceEscalation,
   resolve: resolveCustomerServiceEscalation,
 };

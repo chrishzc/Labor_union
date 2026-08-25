@@ -61,14 +61,14 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     expect(screen.getByText(/正在載入匯入警示追蹤數據/)).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
-      expect(screen.getByText('FINANCE-002')).toBeInTheDocument();
-      expect(screen.getByText('IMPORT-003')).toBeInTheDocument();
-      expect(screen.getByText('HCM-FIELD-001')).toBeInTheDocument();
-      expect(screen.getByText('BECLASS-CLI-002')).toBeInTheDocument();
+      expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
+      expect(screen.getByText('客戶帳務待處理事項')).toBeInTheDocument();
+      expect(screen.getByText('BeClass 身分對應待確認')).toBeInTheDocument();
+      expect(screen.getByText('缺少身分證字號')).toBeInTheDocument();
+      expect(screen.getByText('BeClass 客戶聯絡電話格式不符')).toBeInTheDocument();
     });
 
-    expect(screen.getAllByText('異常偵測項目').length).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByText(/來源識別|來源版本|問題代碼/)).not.toBeInTheDocument();
     expect(screen.queryByText(/目前 typed view 未納入/)).not.toBeInTheDocument();
     expect(anomalyQueryClient.queryAnomalies).toHaveBeenCalledWith({ activeOnly: true, limit: 200, offset: 0 });
 
@@ -90,7 +90,7 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     render(<AnomaliesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
+      expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
     });
 
     // VALID_ANOMALY_SUMMARY_1: blocking + open -> critical=1, open=1
@@ -121,7 +121,7 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '載入更多異常' })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '載入更多異常' }));
 
-    await waitFor(() => expect(screen.getByText('finance-import-row:94')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('銀行流水待人工確認')).toBeInTheDocument());
     expect(anomalyQueryClient.queryAnomalies).toHaveBeenNthCalledWith(2, { activeOnly: true, limit: 200, offset: 200 });
   });
 
@@ -129,9 +129,9 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     render(<AnomaliesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
-      expect(screen.getByText('FINANCE-002')).toBeInTheDocument();
-      expect(screen.getByText('IMPORT-003')).toBeInTheDocument();
+      expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
+      expect(screen.getByText('客戶帳務待處理事項')).toBeInTheDocument();
+      expect(screen.getByText('BeClass 身分對應待確認')).toBeInTheDocument();
     });
 
     // Filter by '排班調度'
@@ -140,9 +140,9 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
       fireEvent.click(schedTab);
     });
 
-    expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
-    expect(screen.queryByText('FINANCE-002')).not.toBeInTheDocument();
-    expect(screen.queryByText('IMPORT-003')).not.toBeInTheDocument();
+    expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
+    expect(screen.queryByText('客戶帳務待處理事項')).not.toBeInTheDocument();
+    expect(screen.queryByText('BeClass 身分對應待確認')).not.toBeInTheDocument();
 
     // Filter by '客戶帳務'
     const finTab = screen.getByRole('button', { name: '客戶帳務' });
@@ -150,9 +150,9 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
       fireEvent.click(finTab);
     });
 
-    expect(screen.queryByText('SCHEDULE-001')).not.toBeInTheDocument();
-    expect(screen.getByText('FINANCE-002')).toBeInTheDocument();
-    expect(screen.queryByText('IMPORT-003')).not.toBeInTheDocument();
+    expect(screen.queryByText('假日排班尚未確認')).not.toBeInTheDocument();
+    expect(screen.getByText('客戶帳務待處理事項')).toBeInTheDocument();
+    expect(screen.queryByText('BeClass 身分對應待確認')).not.toBeInTheDocument();
 
     // Reset to '全部 (3)'
     const allTab = screen.getByRole('button', { name: /全部 \(3\)/ });
@@ -160,16 +160,16 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
       fireEvent.click(allTab);
     });
 
-    expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
-    expect(screen.getByText('FINANCE-002')).toBeInTheDocument();
-    expect(screen.getByText('IMPORT-003')).toBeInTheDocument();
+    expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
+    expect(screen.getByText('客戶帳務待處理事項')).toBeInTheDocument();
+    expect(screen.getByText('BeClass 身分對應待確認')).toBeInTheDocument();
   });
 
   it('filters anomaly cards by status filter pills', async () => {
     render(<AnomaliesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
+      expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
     });
 
     // Filter by open
@@ -178,9 +178,9 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
       fireEvent.click(openPill);
     });
 
-    expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
-    expect(screen.queryByText('FINANCE-002')).not.toBeInTheDocument();
-    expect(screen.queryByText('IMPORT-003')).not.toBeInTheDocument();
+    expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
+    expect(screen.queryByText('客戶帳務待處理事項')).not.toBeInTheDocument();
+    expect(screen.queryByText('BeClass 身分對應待確認')).not.toBeInTheDocument();
 
     // Filter by claimed
     const claimedPill = screen.getByRole('button', { name: /🔵 已認領 \(1\)/ });
@@ -188,9 +188,9 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
       fireEvent.click(claimedPill);
     });
 
-    expect(screen.queryByText('SCHEDULE-001')).not.toBeInTheDocument();
-    expect(screen.getByText('FINANCE-002')).toBeInTheDocument();
-    expect(screen.queryByText('IMPORT-003')).not.toBeInTheDocument();
+    expect(screen.queryByText('假日排班尚未確認')).not.toBeInTheDocument();
+    expect(screen.getByText('客戶帳務待處理事項')).toBeInTheDocument();
+    expect(screen.queryByText('BeClass 身分對應待確認')).not.toBeInTheDocument();
 
     // Filter by resolved
     const resolvedPill = screen.getByRole('button', { name: /✅ 已排除/ });
@@ -198,26 +198,26 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
       fireEvent.click(resolvedPill);
     });
 
-    expect(screen.queryByText('SCHEDULE-001')).not.toBeInTheDocument();
-    expect(screen.queryByText('FINANCE-002')).not.toBeInTheDocument();
-    expect(screen.getByText('IMPORT-003')).toBeInTheDocument();
+    expect(screen.queryByText('假日排班尚未確認')).not.toBeInTheDocument();
+    expect(screen.queryByText('客戶帳務待處理事項')).not.toBeInTheDocument();
+    expect(screen.getByText('BeClass 身分對應待確認')).toBeInTheDocument();
   });
 
   it('opens Drawer and displays anomaly metadata, root evidence gap, and staff calendar navigation link', async () => {
     render(<AnomaliesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
+      expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
     });
 
-    const drawerButtons = screen.getAllByRole('button', { name: /排查處置抽屜 ➔/ });
+    const drawerButtons = screen.getAllByRole('button', { name: /查看處理方式 ➔/ });
     // Click drawer for SCHEDULE-001 (index 0)
     await act(async () => {
       fireEvent.click(drawerButtons[0]);
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/⚠️ 異常排查與修復處置/)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /假日排班尚未確認/ })).toBeInTheDocument();
     });
 
     for (const surfaceId of [
@@ -233,10 +233,10 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
       screen.queryByText(VALID_ANOMALY_SUMMARY_1.fingerprint)
     ).not.toBeInTheDocument();
 
-    expect(screen.getByText(/領域 \(Domain\)：/)).toBeInTheDocument();
-    expect(screen.getByText(/資料版本：/)).toBeInTheDocument();
-    expect(screen.getByText(/條件作用中：/)).toBeInTheDocument();
-    expect(document.querySelector('[data-surface-id="anomalies.drawer.root-evidence"]')).toHaveTextContent('finance_import_row_identity');
+    expect(screen.getByText(/目前是否仍需處理/)).toBeInTheDocument();
+    expect(screen.queryByText(/資料版本：|工作流版本：/)).not.toBeInTheDocument();
+    expect(screen.getByText(/目前是否仍需處理：/)).toBeInTheDocument();
+    expect(document.querySelector('[data-surface-id="anomalies.drawer.root-evidence"]')).not.toHaveTextContent('finance_import_row_identity');
 
     // Check staff calendar navigation link
     const navLink = screen.getByRole('link', { name: /前往排班調度 ➔/ });
@@ -250,17 +250,17 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     render(<AnomaliesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('FINANCE-002')).toBeInTheDocument();
+      expect(screen.getByText('客戶帳務待處理事項')).toBeInTheDocument();
     });
 
-    const drawerButtons = screen.getAllByRole('button', { name: /排查處置抽屜 ➔/ });
+    const drawerButtons = screen.getAllByRole('button', { name: /查看處理方式 ➔/ });
     // Click drawer for FINANCE-002 (index 1)
     await act(async () => {
       fireEvent.click(drawerButtons[1]);
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /FINANCE-002/ })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /客戶帳務待處理事項/ })).toBeInTheDocument();
     });
 
     expect(screen.queryByRole('link', { name: /前往排班調度 ➔/ })).not.toBeInTheDocument();
@@ -270,19 +270,18 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     render(<AnomaliesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('HCM-FIELD-001')).toBeInTheDocument();
-      expect(screen.getByText('BECLASS-CLI-002')).toBeInTheDocument();
-      expect(screen.getByText('HIST-ORD-003')).toBeInTheDocument();
+      expect(screen.getByText('缺少身分證字號')).toBeInTheDocument();
+      expect(screen.getByText('BeClass 客戶聯絡電話格式不符')).toBeInTheDocument();
+      expect(screen.getByText('歷史匯入金額計算差異')).toBeInTheDocument();
     });
 
     // Check HCM Task content
     const hcmBadges = screen.getAllByText('HCM 匯入');
     expect(hcmBadges.length).toBeGreaterThanOrEqual(1);
 
-    expect(screen.getByText('身分證字號')).toBeInTheDocument();
     expect(screen.getByText('A12****789')).toBeInTheDocument();
-    expect(screen.getByText('hcm_field_missing:身分證字號')).toBeInTheDocument();
     expect(screen.getByText('缺少身分證字號')).toBeInTheDocument();
+    expect(screen.queryByText(/hcm_field_missing|HCM-FIELD/)).not.toBeInTheDocument();
 
     // Check navigation link to data import
     const importNavLinks = screen.getAllByRole('link', { name: /前往匯入中心 ➔/ });
@@ -300,7 +299,7 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     });
 
     // Import warnings should still load successfully
-    expect(screen.getByText('HCM-FIELD-001')).toBeInTheDocument();
+    expect(screen.getByText('缺少身分證字號')).toBeInTheDocument();
 
     // Click retry for anomalies
     const retryBtn = screen.getByRole('button', { name: /重試/ });
@@ -309,7 +308,7 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
+      expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
     });
   });
 });

@@ -1,6 +1,6 @@
 /**
  * File: OrderTrackerPage.tsx
- * Description: 顯示訂單七階段、完整聯絡資料、SOP、結清與 LINE 通知唯讀歷程。
+ * Description: 顯示未完成訂單的七階段、聯絡資料、SOP、結清與 LINE 通知唯讀歷程。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adaptOrderTrackerPage, type OrderTrackerPageViewModel, type TrackerOrderCardViewModel } from '../adapters/orders/order_tracker_adapter';
@@ -10,13 +10,13 @@ import {
   indexOperationalTimelines,
   stageByCode,
   stageAvailabilityLabel,
-  stageCount,
   stageStatusLabel,
 } from '../adapters/orders/order_stage_projection_adapter';
-import { ordersQueryClient } from '../api/orders/order_query_client';
+import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
+import type { FormManagementContext } from '../api/orders/order_query_schemas';
 import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
 import type { OrdersCardProjection } from '../api/orders/order_card_projection_schemas';
-import { orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
+import { loadAllOrderOperationalTimelines, orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
 import type { OrderOperationalTimelinePage } from '../api/orders/order_stage_projection_schemas';
 import { lineNotificationTimelineClient, type LineNotificationTimeline } from '../api/line/notification_timeline_client';
 import { Drawer } from '../components/Drawer';
@@ -33,11 +33,6 @@ type StageProjectionQueryState =
   | { kind: 'ready'; page: OrderOperationalTimelinePage; byCaseNo: ReadonlyMap<string, OrderOperationalTimelinePage['items'][number]> }
   | { kind: 'unavailable'; message: string };
 
-type TrackerNextPageState =
-  | { kind: 'idle' }
-  | { kind: 'loading' }
-  | { kind: 'error'; message: string };
-
 type CardProjectionState =
   | { kind: 'idle' }
   | { kind: 'loading' }
@@ -49,43 +44,40 @@ type NotificationTimelineState =
   | { kind: 'ready'; data: LineNotificationTimeline }
   | { kind: 'error'; message: string };
 
-function mergeSummaryPages(
-  current: import('../api/orders/order_query_schemas').OrderSummaryPage,
-  next: import('../api/orders/order_query_schemas').OrderSummaryPage,
-): import('../api/orders/order_query_schemas').OrderSummaryPage {
-  const itemsByCaseNo = new Map(current.items.map((item) => [item.case_no, item]));
-  for (const item of next.items) itemsByCaseNo.set(item.case_no, item);
-  return {
-    items: [...itemsByCaseNo.values()],
-    next_cursor: next.next_cursor,
-    etag: next.etag,
-  };
-}
-
-function mergeStageProjectionPages(
-  current: OrderOperationalTimelinePage,
-  next: OrderOperationalTimelinePage,
-): OrderOperationalTimelinePage {
-  const itemsByCaseNo = new Map(current.items.map((item) => [item.case_no, item]));
-  for (const item of next.items) itemsByCaseNo.set(item.case_no, item);
-  return {
-    items: [...itemsByCaseNo.values()],
-    stage_counts: {
-      intake_terms: current.stage_counts.intake_terms + next.stage_counts.intake_terms,
-      matching_willingness: current.stage_counts.matching_willingness + next.stage_counts.matching_willingness,
-      client_review: current.stage_counts.client_review + next.stage_counts.client_review,
-      contract_deposit: current.stage_counts.contract_deposit + next.stage_counts.contract_deposit,
-      date_confirmation: current.stage_counts.date_confirmation + next.stage_counts.date_confirmation,
-      active_service: current.stage_counts.active_service + next.stage_counts.active_service,
-      settlement_payout: current.stage_counts.settlement_payout + next.stage_counts.settlement_payout,
-    },
-    next_cursor: next.next_cursor,
-    etag: next.etag,
-  };
-}
+type FormManagementContextState =
+  | { kind: 'idle' | 'loading' }
+  | { kind: 'ready'; data: FormManagementContext }
+  | { kind: 'error'; message: string };
 
 function controlSafeCaseNo(caseNo: string): string {
   return encodeURIComponent(caseNo);
+}
+
+const OWNER_LABELS: Readonly<Record<string, string>> = {
+  'Case Import': '資料匯入',
+  Orders: '訂單管理',
+  Assignments: '媒合與正式指派',
+  Scheduling: '排班管理',
+  'LINE Delivery': 'LINE 通知',
+  LINE: 'LINE 意願回覆',
+  'Customer Decision': '客戶決定',
+  'Contract Signing': '契約簽署',
+  'Client Finance': '客戶帳務',
+  'Staff Payables': '月嫂薪資',
+};
+
+function businessOwnerLabel(owner: string): string {
+  return owner
+    .split('/')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => OWNER_LABELS[part] ?? part)
+    .join(' / ');
+}
+
+function currentStageLabel(timeline: OrderOperationalTimelinePage['items'][number]): string {
+  if (!timeline.current_stage_code) return '待判定';
+  return stageByCode(timeline, timeline.current_stage_code)?.label ?? '待判定';
 }
 
 function currentStageSummary(
@@ -119,7 +111,7 @@ function cardProjectionValue<T>(
 ): string {
   if (field.availability !== 'available') {
     const state = field.availability === 'blocked' ? '資料受阻' : '資料待補正';
-    const reason = stageAvailabilityLabel(field.availability_reason) ?? `${field.owner} 尚無可用投影`;
+    const reason = stageAvailabilityLabel(field.availability_reason) ?? `${businessOwnerLabel(field.owner)} 尚無可用資料`;
     return `${state}：${reason}`;
   }
   return field.value === null ? emptyText : renderValue(field.value);
@@ -152,22 +144,18 @@ function formatFriendlyTimestamp(value: string | null): string {
 export const OrderTrackerPage: React.FC = () => {
   const [queryState, setQueryState] = useState<TrackerQueryState>({ kind: 'loading' });
   const [stageProjectionState, setStageProjectionState] = useState<StageProjectionQueryState>({ kind: 'loading' });
-  const [nextPageState, setNextPageState] = useState<TrackerNextPageState>({ kind: 'idle' });
   const [selectedOrder, setSelectedOrder] = useState<TrackerOrderCardViewModel | null>(null);
   const [drawerTab, setDrawerTab] = useState<'sop' | 'notifications'>('sop');
   const [cardProjectionState, setCardProjectionState] = useState<CardProjectionState>({ kind: 'idle' });
+  const [formContextState, setFormContextState] = useState<FormManagementContextState>({ kind: 'idle' });
   const [notificationTimelineState, setNotificationTimelineState] = useState<NotificationTimelineState>({ kind: 'idle' });
+  const [searchQuery, setSearchQuery] = useState('');
   const generationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
-  const nextPageAbortRef = useRef<AbortController | null>(null);
-  const pendingCursorRef = useRef<string | null>(null);
-  const summaryPageRef = useRef<import('../api/orders/order_query_schemas').OrderSummaryPage | null>(null);
   const drawerAbortRef = useRef<AbortController | null>(null);
 
   const fetchTrackerData = useCallback(async () => {
     abortRef.current?.abort();
-    nextPageAbortRef.current?.abort();
-    pendingCursorRef.current = null;
     const controller = new AbortController();
     abortRef.current = controller;
     const generation = generationRef.current + 1;
@@ -175,17 +163,23 @@ export const OrderTrackerPage: React.FC = () => {
     setSelectedOrder(null);
     setQueryState({ kind: 'loading' });
     setStageProjectionState({ kind: 'loading' });
-    setNextPageState({ kind: 'idle' });
 
     try {
       const [summaryResult, stageResult] = await Promise.allSettled([
-        ordersQueryClient.getOrderSummaries({}, { signal: controller.signal }),
-        orderStageProjectionClient.getOperationalTimelines({ page_size: 50 }, { signal: controller.signal }),
+        loadAllOrderSummaries(
+          ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
+          { page_size: 200, lifecycle_scope: 'unfinished' },
+          { signal: controller.signal },
+        ),
+        loadAllOrderOperationalTimelines(
+          orderStageProjectionClient.getOperationalTimelines.bind(orderStageProjectionClient),
+          { page_size: 200, lifecycle_scope: 'unfinished' },
+          { signal: controller.signal },
+        ),
       ]);
       if (controller.signal.aborted || generation !== generationRef.current) return;
       if (summaryResult.status === 'rejected') throw summaryResult.reason;
       const page = summaryResult.value;
-      summaryPageRef.current = page;
       const data = adaptOrderTrackerPage(page);
       setQueryState(data.loadedCount === 0 ? { kind: 'empty', data } : { kind: 'ready', data });
       if (stageResult.status === 'fulfilled') {
@@ -209,73 +203,10 @@ export const OrderTrackerPage: React.FC = () => {
       setStageProjectionState({ kind: 'unavailable', message: ORDER_STAGE_PROJECTION_UNAVAILABLE });
       setQueryState({
         kind: 'error',
-        message: error instanceof Error ? error.message : '載入訂單摘要失敗',
+        message: `訂單清單載入未完成：${error instanceof Error ? error.message : '載入訂單摘要失敗'}`,
       });
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
-    }
-  }, []);
-
-  const fetchNextTrackerPage = useCallback(async () => {
-    const cursor = summaryPageRef.current?.next_cursor;
-    if (!cursor || pendingCursorRef.current === cursor) return;
-    nextPageAbortRef.current?.abort();
-    const controller = new AbortController();
-    nextPageAbortRef.current = controller;
-    pendingCursorRef.current = cursor;
-    setNextPageState({ kind: 'loading' });
-
-    try {
-      const [summaryResult, stageResult] = await Promise.allSettled([
-        ordersQueryClient.getOrderSummaries({ after_case_no: cursor }, { signal: controller.signal }),
-        orderStageProjectionClient.getOperationalTimelines({ page_size: 50, after_case_no: cursor }, { signal: controller.signal }),
-      ]);
-      if (controller.signal.aborted || pendingCursorRef.current !== cursor) return;
-      if (summaryResult.status === 'rejected') throw summaryResult.reason;
-
-      const currentPage = summaryPageRef.current;
-      if (!currentPage || currentPage.next_cursor !== cursor) return;
-      const nextPage = summaryResult.value;
-      const mergedPage = mergeSummaryPages(currentPage, nextPage);
-      summaryPageRef.current = mergedPage;
-      const data = adaptOrderTrackerPage(mergedPage);
-      setQueryState(data.loadedCount === 0 ? { kind: 'empty', data } : { kind: 'ready', data });
-
-      if (stageResult.status === 'fulfilled') {
-        try {
-          const nextIndex = indexOperationalTimelines(stageResult.value, nextPage);
-          setStageProjectionState((current) => {
-            const byCaseNo = current.kind === 'ready'
-              ? new Map([...current.byCaseNo, ...nextIndex])
-              : new Map(nextIndex);
-            const page = current.kind === 'ready'
-              ? mergeStageProjectionPages(current.page, stageResult.value)
-              : stageResult.value;
-            return { kind: 'ready', page, byCaseNo };
-          });
-        } catch (stageError) {
-          setStageProjectionState({
-            kind: 'unavailable',
-            message: stageError instanceof Error ? stageError.message : ORDER_STAGE_PROJECTION_UNAVAILABLE,
-          });
-        }
-      } else {
-        setStageProjectionState({
-          kind: 'unavailable',
-          message: ORDER_STAGE_PROJECTION_UNAVAILABLE,
-        });
-      }
-      setNextPageState({ kind: 'idle' });
-    } catch (error) {
-      if (!controller.signal.aborted && pendingCursorRef.current === cursor) {
-        setNextPageState({ kind: 'error', message: error instanceof Error ? error.message : '載入下一頁訂單失敗' });
-      }
-    } finally {
-      if (pendingCursorRef.current === cursor) {
-        pendingCursorRef.current = null;
-        nextPageAbortRef.current = null;
-        setNextPageState((current) => current.kind === 'loading' ? { kind: 'idle' } : current);
-      }
     }
   }, []);
 
@@ -287,10 +218,8 @@ export const OrderTrackerPage: React.FC = () => {
     return () => {
       cancelled = true;
       abortRef.current?.abort();
-      nextPageAbortRef.current?.abort();
       drawerAbortRef.current?.abort();
       generationRef.current += 1;
-      pendingCursorRef.current = null;
     };
   }, [fetchTrackerData]);
 
@@ -311,6 +240,24 @@ export const OrderTrackerPage: React.FC = () => {
     });
   };
 
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const matchesSearch = useCallback(
+    (order: TrackerOrderCardViewModel) => {
+      if (!trimmedQuery) return true;
+      return (
+        order.id.toLowerCase().includes(trimmedQuery) ||
+        order.clientName.toLowerCase().includes(trimmedQuery) ||
+        order.assignedStaffDisplay.toLowerCase().includes(trimmedQuery)
+      );
+    },
+    [trimmedQuery]
+  );
+  const visibleTrackerOrders = resolvedData?.unclassifiedOrders.filter(matchesSearch) ?? [];
+  const visibleStageCount = (stageId: string): number => visibleTrackerOrders.filter(
+    (order) => stageProjectionState.kind === 'ready'
+      && stageProjectionState.byCaseNo.get(order.id)?.current_stage_code === stageId,
+  ).length;
+
   const openOrder = (order: TrackerOrderCardViewModel) => {
     drawerAbortRef.current?.abort();
     const controller = new AbortController();
@@ -318,15 +265,20 @@ export const OrderTrackerPage: React.FC = () => {
     setDrawerTab('sop');
     setSelectedOrder(order);
     setCardProjectionState({ kind: 'loading' });
+    setFormContextState({ kind: 'loading' });
     setNotificationTimelineState({ kind: 'loading' });
     void Promise.allSettled([
       orderCardProjectionClient.getCardProjection(order.id, { signal: controller.signal }),
+      ordersQueryClient.getFormManagementContext(order.id, { signal: controller.signal }),
       lineNotificationTimelineClient.query(order.id, { signal: controller.signal }),
-    ]).then(([cardResult, notificationResult]) => {
+    ]).then(([cardResult, formContextResult, notificationResult]) => {
       if (controller.signal.aborted || drawerAbortRef.current !== controller) return;
       setCardProjectionState(cardResult.status === 'fulfilled'
         ? { kind: 'ready', data: cardResult.value }
         : { kind: 'error', message: '案件聯絡與指派資料載入失敗，請重新開啟案件。' });
+      setFormContextState(formContextResult.status === 'fulfilled'
+        ? { kind: 'ready', data: formContextResult.value }
+        : { kind: 'error', message: '客戶服務資料載入失敗，請重新開啟案件。' });
       setNotificationTimelineState(notificationResult.status === 'fulfilled'
         ? { kind: 'ready', data: notificationResult.value }
         : { kind: 'error', message: 'LINE 通知歷程載入失敗，請重新開啟案件。' });
@@ -338,6 +290,7 @@ export const OrderTrackerPage: React.FC = () => {
     drawerAbortRef.current = null;
     setSelectedOrder(null);
     setCardProjectionState({ kind: 'idle' });
+    setFormContextState({ kind: 'idle' });
     setNotificationTimelineState({ kind: 'idle' });
   };
 
@@ -379,7 +332,7 @@ export const OrderTrackerPage: React.FC = () => {
           </span>
         </div>
         <dl className="tracker-card-facts">
-          <div><dt>原始訂單狀態</dt><dd>{order.rawOrderStatus}</dd></div>
+          <div><dt>目前訂單狀態</dt><dd>{order.rawOrderStatus}</dd></div>
           <div><dt>約定服務日期</dt><dd>{formatCardRange(order.plannedServiceRange)}</dd></div>
           <div><dt>實際服務日期</dt><dd>{formatCardRange(order.actualServiceRange)}</dd></div>
           <div><dt>正式指派月嫂</dt><dd>{order.assignedStaffDisplay}</dd></div>
@@ -402,14 +355,41 @@ export const OrderTrackerPage: React.FC = () => {
             依案件階段呈現待辦、作業歷程與結清狀態。
           </p>
         </div>
-        <button
-          type="button"
-          className="tracker-reload-button"
-          data-control-id="order-tracker.query.retry"
-          onClick={() => void fetchTrackerData()}
-        >
-          重新載入摘要
-        </button>
+        <div className="tracker-header-actions">
+          <div className="tracker-search-wrapper">
+            <label className="tracker-search-input-box" htmlFor="tracker-query-search-input">
+              <span className="tracker-search-icon" aria-hidden="true">🔍</span>
+              <input
+                id="tracker-query-search-input"
+                aria-label="搜尋案件"
+                data-control-id="order-tracker.query.search"
+                value={searchQuery}
+                maxLength={100}
+                placeholder="案件編號或客戶名稱"
+                onChange={(event) => setSearchQuery(event.target.value)}
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  className="tracker-search-clear-btn"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="清除搜尋"
+                  title="清除搜尋"
+                >
+                  ✕
+                </button>
+              )}
+            </label>
+          </div>
+          <button
+            type="button"
+            className="tracker-reload-button"
+            data-control-id="order-tracker.query.retry"
+            onClick={() => void fetchTrackerData()}
+          >
+            重新載入摘要
+          </button>
+        </div>
       </header>
 
       {queryState.kind === 'loading' && (
@@ -440,9 +420,9 @@ export const OrderTrackerPage: React.FC = () => {
                 <span
                   className="pipeline-step-badge"
                   data-surface-id={`order-tracker.stage-count.${slot.id}`}
-                  aria-label={`${slot.title}案件數${stageProjectionState.kind === 'ready' ? stageCount(stageProjectionState.page, slot.id) : '待重新載入'}`}
+                  aria-label={`${slot.title}案件數${stageProjectionState.kind === 'ready' ? visibleStageCount(slot.id) : '待重新載入'}`}
                 >
-                  {stageProjectionState.kind === 'ready' ? stageCount(stageProjectionState.page, slot.id) : '—'}
+                  {stageProjectionState.kind === 'ready' ? visibleStageCount(slot.id) : '—'}
                 </span>
               </button>
             ))}
@@ -450,8 +430,10 @@ export const OrderTrackerPage: React.FC = () => {
 
           <section className="pipeline-vertical-container" aria-label="七階段服務流程">
             {resolvedData.stageSlots.map((slot) => {
-              const stageOrders = resolvedData.unclassifiedOrders.filter(
-                (order) => stageProjectionState.kind === 'ready' && stageProjectionState.byCaseNo.get(order.id)?.current_stage_code === slot.id
+              const stageOrders = visibleTrackerOrders.filter(
+                (order) =>
+                  stageProjectionState.kind === 'ready' &&
+                  stageProjectionState.byCaseNo.get(order.id)?.current_stage_code === slot.id
               );
               return (
                 <article
@@ -466,7 +448,7 @@ export const OrderTrackerPage: React.FC = () => {
                       <span className="pipeline-stage-desc">{slot.description}</span>
                     </div>
                     <span className="pipeline-stage-count" style={{ backgroundColor: slot.badgeColor, color: slot.textColor }}>
-                      {stageProjectionState.kind === 'ready' ? `案件數 ${stageCount(stageProjectionState.page, slot.id)}` : '—'}
+                      {stageProjectionState.kind === 'ready' ? `案件數 ${visibleStageCount(slot.id)}` : '—'}
                     </span>
                   </div>
                   {stageProjectionState.kind === 'ready' ? (
@@ -501,30 +483,11 @@ export const OrderTrackerPage: React.FC = () => {
               <div>
                 <h2>{stageProjectionState.kind === 'ready' ? '歷史資料待補正' : '訂單摘要'}</h2>
                 <p>{stageProjectionState.kind === 'ready'
-                  ? '這不是業務階段；僅隔離缺少正式根事實、無法安全推進的歷史資料。請開啟案件查看缺失 owner，系統不會猜測分類。'
+                  ? '這不是業務階段；僅隔離缺少正式資料、無法安全推進的歷史案件。請開啟案件查看待補項目，系統不會猜測分類。'
                   : '階段資料恢復後會自動歸入對應欄位。'}</p>
               </div>
               <div>
                 <span className="tracker-loaded-count">已載入 {resolvedData.loadedCount} 筆</span>
-                {resolvedData.nextCursor && (
-                  <button
-                    type="button"
-                    className="tracker-reload-button"
-                    data-control-id="order-tracker.query.next-page"
-                    disabled={nextPageState.kind === 'loading'}
-                    onClick={() => void fetchNextTrackerPage()}
-                  >
-                    {nextPageState.kind === 'loading' ? '正在載入下一頁…' : '載入下一頁'}
-                  </button>
-                )}
-                {nextPageState.kind === 'error' && (
-                  <div role="alert">
-                    <span>載入下一頁失敗：{nextPageState.message}</span>
-                    <button type="button" data-control-id="order-tracker.query.next-page.retry" onClick={() => void fetchNextTrackerPage()}>
-                      重試下一頁
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
 
@@ -534,8 +497,12 @@ export const OrderTrackerPage: React.FC = () => {
               </div>
             ) : (
               <div className="pipeline-cards-grid">
-                {resolvedData.unclassifiedOrders
-                  .filter((order) => stageProjectionState.kind !== 'ready' || !stageProjectionState.byCaseNo.get(order.id)?.current_stage_code)
+                {visibleTrackerOrders
+                  .filter(
+                    (order) =>
+                      (stageProjectionState.kind !== 'ready' ||
+                        !stageProjectionState.byCaseNo.get(order.id)?.current_stage_code)
+                  )
                   .map(renderTrackerCard)}
               </div>
             )}
@@ -547,7 +514,7 @@ export const OrderTrackerPage: React.FC = () => {
         isOpen={selectedOrder !== null}
         onClose={closeOrder}
         size="wide"
-        title={`📋 訂單關鍵 SOP 檢核抽屜 - ${selectedOrder?.id ?? ''}`}
+        title={`📋 訂單作業進度 - ${selectedOrder?.id ?? ''}`}
         footer={(
           <div className="drawer-footer-actions">
             <button
@@ -576,7 +543,7 @@ export const OrderTrackerPage: React.FC = () => {
             <div className="drawer-header-status-row">
               <div className="drawer-title-group">
                 <div className="drawer-title-capsule">
-                  <h3 className="drawer-main-title">訂單關鍵 SOP 檢核抽屜</h3>
+                  <h3 className="drawer-main-title">訂單作業進度</h3>
                   <span className="drawer-order-status-badge">{selectedOrder.rawOrderStatus}</span>
                 </div>
                 <p className="drawer-order-id-label">{selectedOrder.id}</p>
@@ -623,7 +590,7 @@ export const OrderTrackerPage: React.FC = () => {
               <div className="card-projection-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <h3 className="card-projection-title">📝 案件基本資料與條件</h3>
-                  <span className="card-projection-badge">SSOT 根事實</span>
+                  <span className="card-projection-badge">正式案件資料</span>
                 </div>
                 <span className="panel-status-tag">{selectedOrder.rawOrderStatus}</span>
               </div>
@@ -637,7 +604,7 @@ export const OrderTrackerPage: React.FC = () => {
                   <dd className="card-projection-item-value">{selectedOrder.id}</dd>
                 </div>
                 <div className="card-projection-item">
-                  <dt className="card-projection-item-label">原始訂單狀態</dt>
+                  <dt className="card-projection-item-label">目前訂單狀態</dt>
                   <dd className="card-projection-item-value">{selectedOrder.rawOrderStatus}</dd>
                 </div>
                 <div className="card-projection-item">
@@ -647,6 +614,30 @@ export const OrderTrackerPage: React.FC = () => {
                 <div className="card-projection-item">
                   <dt className="card-projection-item-label">服務地址</dt>
                   <dd className="card-projection-item-value">{cardProjectionContactValue(cardProjectionState, 'contact_address')}</dd>
+                </div>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">身分資格</dt>
+                  <dd className="card-projection-item-value">{selectedOrder.identityStatus}</dd>
+                </div>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">服務縣市</dt>
+                  <dd className="card-projection-item-value">{formContextState.kind === 'ready' ? formContextState.data.city ?? '待確認' : formContextState.kind === 'error' ? '載入失敗' : '載入中…'}</dd>
+                </div>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">服務類型</dt>
+                  <dd className="card-projection-item-value">{formContextState.kind === 'ready' ? formContextState.data.service_type ?? '待確認' : formContextState.kind === 'error' ? '載入失敗' : '載入中…'}</dd>
+                </div>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">每日服務時段</dt>
+                  <dd className="card-projection-item-value">{formContextState.kind === 'ready' ? formContextState.data.service_time ?? '待確認' : formContextState.kind === 'error' ? '載入失敗' : '載入中…'}</dd>
+                </div>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">生產方式</dt>
+                  <dd className="card-projection-item-value">{formContextState.kind === 'ready' ? formContextState.data.delivery_type ?? '待確認' : formContextState.kind === 'error' ? '載入失敗' : '載入中…'}</dd>
+                </div>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">住宅類型</dt>
+                  <dd className="card-projection-item-value">{formContextState.kind === 'ready' ? formContextState.data.residence_type ?? '待確認' : formContextState.kind === 'error' ? '載入失敗' : '載入中…'}</dd>
                 </div>
                 <div className="card-projection-item">
                   <dt className="card-projection-item-label">約定服務日期</dt>
@@ -737,7 +728,7 @@ export const OrderTrackerPage: React.FC = () => {
                 {selectedTimeline && (
                   <div data-surface-id="order-tracker.typed-stage-projection" className="sr-only">
                     <span>七階段作業狀態</span>
-                    <span>目前階段：{selectedTimeline.current_stage_code ?? '待判定'}；資料版本：{selectedTimeline.base_revision}</span>
+                    <span>目前業務階段：{currentStageLabel(selectedTimeline)}</span>
                   </div>
                 )}
 
@@ -782,7 +773,7 @@ export const OrderTrackerPage: React.FC = () => {
                             <div className="tracker-sop-card-body">
                               <div className="tracker-sop-header-row">
                                 <div className="tracker-sop-title-wrap">
-                                  <span className="tracker-sop-step-tag">Step {step.ordinal}</span>
+                                  <span className="tracker-sop-step-tag">步驟 {step.ordinal}</span>
                                   <h4 className="tracker-sop-title">{step.label}</h4>
                                 </div>
                                 <div className="tracker-sop-status-pill-wrap">
@@ -798,7 +789,7 @@ export const OrderTrackerPage: React.FC = () => {
                               </div>
 
                               <div className="tracker-sop-meta-row">
-                                <span className="tracker-sop-owner">🏢 {step.owner}</span>
+                                <span className="tracker-sop-owner">🏢 {businessOwnerLabel(step.owner)}</span>
                                 <span className="tracker-sop-time">🕒 {formatFriendlyTimestamp(step.occurred_at)}</span>
                               </div>
 
@@ -825,8 +816,11 @@ export const OrderTrackerPage: React.FC = () => {
                                       const isSlotCompleted = slot.status === 'completed';
                                       const titleMap: Record<string, string> = {
                                         'service-completion': '服務履約：服務已完成',
+                                        service_completion: '服務履約',
                                         'client-finance': '客戶款項：尾款待銀行核銷',
+                                        client_settlement: '客戶款項',
                                         'staff-payroll': '月嫂薪資：薪資待出款核銷',
+                                        staff_payout: '月嫂薪資',
                                       };
                                       const iconMap: Record<string, string> = {
                                         'service-completion': '✅',
@@ -852,7 +846,7 @@ export const OrderTrackerPage: React.FC = () => {
                                             <p className="settlement-card-desc">
                                               {stageStatusLabel(slot.status)}
                                               {slot.availability_reason ? ` · ${stageAvailabilityLabel(slot.availability_reason)}` : ''}
-                                              {slot.source.owner ? ` (owner: ${slot.source.owner})` : ''}
+                                              {slot.source.owner ? `（負責：${businessOwnerLabel(slot.source.owner)}）` : ''}
                                             </p>
                                           </div>
                                           <span className="settlement-card-link">查看明細 →</span>
@@ -873,7 +867,7 @@ export const OrderTrackerPage: React.FC = () => {
                         ? '正在載入 11 步 SOP…'
                         : stageProjectionState.kind === 'unavailable'
                           ? stageProjectionState.message
-                          : '此案件缺少 typed 作業歷程 identity，請重新載入摘要。'}
+                          : '此案件缺少正式作業歷程資料，請重新載入摘要。'}
                     </p>
                   )}
                 </section>

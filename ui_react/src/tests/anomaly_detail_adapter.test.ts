@@ -34,7 +34,7 @@ function alignedRecovery(): AnomalyRecoveryContextView {
 }
 
 describe('Anomaly detail adapter', () => {
-  it('原樣投影 typed evidence、兩條 timeline、root facts、occurrences 與 action metadata', () => {
+  it('投影 typed evidence 的業務標籤、兩條 timeline、root facts、occurrences 與 action metadata', () => {
     const view = adaptAnomalyDetailBundle(alignedDetail(), alignedRecovery());
 
     expect(view.fingerprint).toBe(VALID_ANOMALY_RECOVERY_CONTEXT_VIEW.fingerprint);
@@ -42,11 +42,13 @@ describe('Anomaly detail adapter', () => {
     expect(view.evidence).toContainEqual({
       key: 'case_no',
       kind: 'identity',
+      label: '案件',
       value: 'CASE-SYNTH-042',
     });
     expect(view.evidence).toContainEqual({
       key: 'overdue_obligations',
       kind: 'identity_list',
+      label: '相關資料',
       value: 'obligation:SYNTH-19',
     });
 
@@ -85,11 +87,13 @@ describe('Anomaly detail adapter', () => {
     expect(view.rootFacts).toContainEqual({
       key: 'amount_delta_ntd',
       kind: 'money_ntd',
-      value: '1200',
+      label: '金額差異',
+      value: 'NT$ 1,200',
     });
     expect(view.rootFacts).toContainEqual({
       key: 'domain_blockers',
       kind: 'code_list',
+      label: '阻擋原因',
       value: 'manual_review',
     });
     expect(view.occurrences).toEqual([
@@ -101,7 +105,8 @@ describe('Anomaly detail adapter', () => {
     expect(view.occurrences[0]?.evidence).toContainEqual({
       key: 'integrity_blocker_active',
       kind: 'boolean',
-      value: 'false',
+      label: '目前阻擋作業',
+      value: '否',
     });
     expect(view.actions).toEqual([
       {
@@ -152,4 +157,3 @@ describe('Anomaly detail adapter', () => {
     expect(view.rootFacts.find((item) => item.key === 'domain_blockers')?.value).toBe('manual_review');
   });
 });
-

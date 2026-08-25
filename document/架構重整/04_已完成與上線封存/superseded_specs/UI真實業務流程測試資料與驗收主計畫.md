@@ -1,14 +1,19 @@
-# UI 真實業務流程測試資料與驗收主計畫
-
 ---
-status: approved
+status: superseded
 priority: P0-planning
 owner: product-and-domain-owners
 initiative: ui-real-business-flow-validation
-updated: 2026-08-12
+updated: 2026-08-25
+successor: ../架構重整/02_決策與退役執行記錄/58_未實作_未落地_未上線規格總表.md
 ---
 
+# UI 真實業務流程測試資料與驗收主計畫
+
 ## 0. 人工確認紀錄
+
+> 2026-08-25 狀態校正：本 umbrella 計畫的已完成情境由正式規格與各 owner runtime
+> 狀態承接；尚未完成項目集中到 current 代辦總表。本檔保留原始情境與驗收設計，
+> 不再作為逐 Part 執行順序或 current 待辦來源。
 
 - 人工確認日期：2026-08-12
 - 確認內容：本主計畫的真實業務生命週期、Part 0～16 邊界與順序、文件先行 gate、

@@ -92,6 +92,14 @@ delivery intent. The UI must show the current date table and its difference from
 table; only an explicit human resend may create a new snapshot and durable delivery task. Previous
 confirmations never satisfy the new version's Assignment Plan gate.
 
+2026-08-24 人工裁決：LINE 不是日期表確認的唯一入口。缺少 LINE identity／binding，或現場、電話、
+紙本已完成確認時，內部操作者可先對 current confirmed-service-date version 與 current matching plan
+執行人工快照 Preview，明確確認後 Apply 建立 immutable `draft` snapshot 與 customer／caregiver
+recipient snapshots；不得建立或假造 LINE delivery task。每位 recipient 再以非空 reason、actor、
+idempotency identity 記錄 `manually_confirmed`／`manually_revoked`。Assignment Plan gate 僅接受 current
+lineage 中客戶與目標月嫂全數 `confirmed` 或 `manually_confirmed`；日期、方案、segment 或 fingerprint
+異動仍使舊確認失效。若後續改走 LINE，必須保留人工歷史、明確 invalidated 後建立新的 `sent` snapshot。
+
 ### Schedule Projection
 
 由 assignment segment、排休規則及正式 leave outcome 產生完整 assignment-owned 日曆。禁止單日 CRUD、獨立 Generate 或 UI 直接切換 `is_work_day`。
@@ -161,6 +169,28 @@ Calendar 的「可進行出勤精算案件」必須先以 Scheduling 的單一�
 再與 Orders 摘要相交。不得以 `orders.staff_id`、`orders.staff_name` 或逐案
 `cases/{case_no}/assignment-schedules` fallback 作為 formal-assignment 判定；前兩者可能是投影
 漂移，後者會形成 N+1 read。此 query 只授權 Calendar 選案，不授權 Preview 或 Apply 寫入。
+
+#### Calendar presentation 與案件選擇（2026-08-25 人工裁決）
+
+- 沒有 assignment、waiting lock、buffer、不可服務期間或其他 typed occupancy 的日期，不渲染灰色
+  空白占位方塊；空白日期不是一種排班事件。月嫂姓名下方只顯示 server typed 的 current 可排班狀態
+  與必要人可讀原因，不得由灰階、cell 是否存在或瀏覽器日期自行推導 availability。
+- 真實 assignment／lock／buffer／不可服務期間仍依各自 typed kind 顯示，不能為了移除灰塊而隱藏
+  正式占用、合法唯讀歷史或 blocker。
+- 「可進行出勤精算案件」改為下拉選單。選項由上述單一批次 Scheduling read 與 Orders typed summaries
+  的 server／client adapter 組合取得，包含穩定 case identity 與人可讀 label；不得要求操作者手動輸入
+  `case_no`，也不得使用 `orders.staff_id`／`staff_name` fallback 或逐案 N+1 查詢補選項。
+- 下拉選單須有 loading、合法空、error、retry、stale request cancellation 與 identity-preserving refresh；
+  options query 失敗時不掛載 Preview／Apply，且不得保留上一位月嫂的 stale 案件。
+- 選定排查案件後，每位月嫂的月曆列須以一個連續區間顯示該案件的完整正式服務檔期；若完整檔期內
+  任一天與 assignment、lock、buffer 或不可服務期間衝突，仍顯示整段案件檔期並將整段標示為有衝突，
+  衝突天數與原因留在狀態文字／詳細排查中。不得只渲染零碎衝突日期而隱藏同案其餘服務日期。
+
+驗收狀態（2026-08-25）：`completed`。Calendar 已以 typed 下拉選案，並依同日最新人工裁決改為
+完整服務檔期連續投影；任一日期衝突時，整段檔期顯示衝突。Focused tests／React build 已通過；
+最新 Chrome 實選跨月案件 `115000008`（`2026-09-05 ～ 2026-10-13`），九月投影為 9/5～9/30、
+十月投影為 10/1～10/13；同一月嫂若任一天有 typed 衝突，兩個月的可見區段皆顯示整段受影響。
+月份切換與清除案件後無 stale 投影或 API error。
 
 #### Completed assignment historical projection（2026-08-12）
 

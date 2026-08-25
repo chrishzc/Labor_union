@@ -96,6 +96,24 @@ timeout 不等於失敗；前端以相同 idempotency key Query receipt／retry�
 Streamlit 先使用 placeholder、`session_state` 的 local draft／stable idempotency identity、
 集中 API client 與明確 loading state；未來替換前端沿用同一 server contract。
 
+### 3.4 資料中心資訊架構（2026-08-25 人工裁決）
+
+管理端以單一「資料中心」作為營運區入口，取代側邊欄分離的「資料匯入」與「數據瀏覽」。
+入口內固定提供三個同層分頁：
+
+1. `NAS 檔案`：以接近檔案總管的簡單投影顯示資料夾與其中的檔案；
+2. `資料匯入`：完整保留既有 HCM、Client BeClass、Staff historical、Historical Orders 與其他
+   owner-specific typed Preview／Apply 匯入流程；
+3. `數據瀏覽`：完整保留既有六來源去敏、唯讀 Query 與明細抽屜。
+
+分頁切換屬 local navigation，不得重送 mutation、清空尚未送出的合法草稿或讓舊 response 覆蓋新分頁。
+每個分頁使用可程式判讀的 tab／tabpanel 關聯、鍵盤焦點與明確 selected state。NAS 分頁目前只規劃
+資料夾與檔案名稱的檔案總管式投影；不在畫面另列資料夾層級、用途、所屬案件／人員、版本、大小、
+更新時間或異常狀態等管理欄位。後端為安全讀取、對帳與版本治理所需的 metadata 仍由正式 storage
+契約管理，但不因此成為 UI 顯示需求。版型、互動與視覺細節等待使用者另行提供介面設計；本次只
+固定資料中心入口、三分頁與資料夾／檔案投影概念，不授權先行實作。一般畫面不得顯示實體 NAS path、
+digest 全值、Preview fingerprint、raw cursor 或其他非業務必要雜訊。
+
 ## 4. 網路關卡：傳最少且可快取的 typed data
 
 ### 4.1 Payload contract
@@ -292,6 +310,17 @@ worker unavailable 才回 typed unavailable。UI 不得依 error message 字串�
 
 ### Global／UX
 
+- 2026-08-25 人工裁決：日常業務頁的預設資訊層級只呈現操作者需要的根事實、業務狀態、
+  阻擋原因、影響範圍與下一步。Preview 應以可理解的變更前後內容與業務影響呈現；不得把
+  `preview_fingerprint`、receipt identity／key、correlation／idempotency key、job UUID、內部
+  aggregate／domain version、source identity、raw enum／JSON 或 replay 旗標直接顯示為一般
+  成功訊息、摘要、卡片或確認條件。
+- 上述技術欄位仍必須保留在 typed contract、Apply fresh-fact 驗證、receipt／readback、稽核
+  或明確標示且受權限控管的「技術詳情／系統狀態」中；隱藏一般畫面雜訊不得刪除安全檢查、
+  交易證據或人工 recovery 能力。法律文件版本、案件編號、可供業務辨識的申請／待辦編號，
+  只有在辨識、下載、追蹤或客服溝通確實需要時才可保留。
+- 成功訊息使用「已排入／處理中／已完成並回讀」等業務語意；外部 provider 工作僅能顯示
+  「已排入，尚未代表送達／發布完成」，不得以 task／receipt 存在冒充外部成功。
 - 實際頁面驗證 first feedback、skeleton、loading、empty、stale、success、typed error。
 - 真實 MySQL 與真實格式 Excel 下量測 Query、Preview、Apply、export、projector lag、
   payload bytes、query count、lock wait 與 job latency。

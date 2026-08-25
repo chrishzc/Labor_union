@@ -1,6 +1,6 @@
 /**
  * File: line_identity_schemas.ts
- * Description: 定義 LINE 身分查詢、對象更正、解除與人工維護操作的嚴格 Zod 公開契約。
+ * Description: 定義 LINE 身分查詢、審核、對象更正、解除與人工維護操作的嚴格 Zod 公開契約。
  */
 import { z } from 'zod';
 
@@ -23,6 +23,25 @@ export const LineIdentityRevocationStatusSchema = z.enum([
   'menu_reset_failed',
   'completed',
   'manual_completed',
+]);
+
+export const LineIdentityReviewTypeSchema = z.enum([
+  'client_rebind',
+  'staff_verification',
+  'admin_binding',
+]);
+
+export const LineIdentityReviewStatusSchema = z.enum([
+  'pending',
+  'approved',
+  'rejected',
+  'cancelled',
+  'expired',
+]);
+
+export const LineIdentityReviewDecisionSchema = z.enum([
+  'approve',
+  'reject',
 ]);
 
 const NullableDateTimeSchema = z
@@ -125,6 +144,92 @@ export const LineIdentityBindingListQuerySchema = z
   })
   .strict();
 
+export const LineIdentityReviewViewSchema = z
+  .object({
+    request_id: z.number().int().positive(),
+    review_type: LineIdentityReviewTypeSchema,
+    status: LineIdentityReviewStatusSchema,
+    version: z.number().int().nonnegative(),
+    subject_type: LineBindingSubjectTypeSchema.nullable(),
+    subject_reference: z.string().nullable(),
+    assigned_admin_id: z.number().int().nullable(),
+    due_at: NullableDateTimeSchema,
+    line_user_id_masked: z.string(),
+    display_name: z.string(),
+    decision_reason: z.string().nullable(),
+    reviewed_by_actor_id: z.string().nullable(),
+    reviewed_at: NullableDateTimeSchema,
+    created_at: NullableDateTimeSchema,
+    outcome: z.enum(['created', 'existing']).nullable().optional(),
+    receipt_identity: z.string().nullable().optional(),
+  })
+  .strict();
+
+export const LineIdentityReviewPageViewSchema = z
+  .object({
+    items: z.array(LineIdentityReviewViewSchema),
+    next_cursor: z.string().nullable(),
+  })
+  .strict();
+
+export const LineIdentityReviewApplyViewSchema = LineIdentityReviewViewSchema
+  .extend({
+    outcome: z.enum(['created', 'existing']),
+    receipt_identity: z.string().min(1),
+  })
+  .strict();
+
+export const LineIdentityReviewSummaryViewSchema = z
+  .object({
+    pending_total: z.number().int().nonnegative(),
+    staff_pending: z.number().int().nonnegative(),
+    rebind_pending: z.number().int().nonnegative(),
+    processed_today: z.number().int().nonnegative(),
+    stale_pending: z.number().int().nonnegative(),
+    stale_hours: z.number().int().positive(),
+  })
+  .strict();
+
+export const LineIdentityReviewListQuerySchema = z
+  .object({
+    review_status: LineIdentityReviewStatusSchema.optional(),
+    review_type: LineIdentityReviewTypeSchema.optional(),
+    page_size: z.number().int().min(1).max(100).optional(),
+    cursor: z.string().min(1).max(191).optional(),
+  })
+  .strict();
+
+export const LineIdentityReviewPreviewRequestSchema = z
+  .object({
+    expected_version: z.number().int().nonnegative(),
+    reason: z.string().min(1).max(1000),
+  })
+  .strict();
+
+export const LineIdentityReviewPreviewViewSchema = z
+  .object({
+    request_id: z.number().int().positive(),
+    decision: LineIdentityReviewDecisionSchema,
+    before_status: LineIdentityReviewStatusSchema,
+    after_status: LineIdentityReviewStatusSchema,
+    expected_version: z.number().int().nonnegative(),
+    resulting_version: z.number().int().nonnegative(),
+    subject_type: LineBindingSubjectTypeSchema.nullable(),
+    subject_reference: z.string().nullable(),
+    line_user_id_masked: z.string(),
+    preview_fingerprint: z.string().min(1),
+  })
+  .strict();
+
+export const LineIdentityReviewApplyRequestSchema = z
+  .object({
+    expected_version: z.number().int().nonnegative(),
+    idempotency_key: z.string().min(1).max(191),
+    reason: z.string().min(1).max(1000),
+    preview_fingerprint: z.string().min(1),
+  })
+  .strict();
+
 export function createLineIdentityEnvelopeSchema<T extends z.ZodTypeAny>(
   dataSchema: T
 ) {
@@ -173,4 +278,37 @@ export type LineIdentityRevocationRequestView = z.infer<
 >;
 export type LineIdentityBindingListQuery = z.infer<
   typeof LineIdentityBindingListQuerySchema
+>;
+export type LineIdentityReviewType = z.infer<
+  typeof LineIdentityReviewTypeSchema
+>;
+export type LineIdentityReviewStatus = z.infer<
+  typeof LineIdentityReviewStatusSchema
+>;
+export type LineIdentityReviewDecision = z.infer<
+  typeof LineIdentityReviewDecisionSchema
+>;
+export type LineIdentityReviewView = z.infer<
+  typeof LineIdentityReviewViewSchema
+>;
+export type LineIdentityReviewPageView = z.infer<
+  typeof LineIdentityReviewPageViewSchema
+>;
+export type LineIdentityReviewApplyView = z.infer<
+  typeof LineIdentityReviewApplyViewSchema
+>;
+export type LineIdentityReviewSummaryView = z.infer<
+  typeof LineIdentityReviewSummaryViewSchema
+>;
+export type LineIdentityReviewListQuery = z.infer<
+  typeof LineIdentityReviewListQuerySchema
+>;
+export type LineIdentityReviewPreviewRequest = z.infer<
+  typeof LineIdentityReviewPreviewRequestSchema
+>;
+export type LineIdentityReviewPreviewView = z.infer<
+  typeof LineIdentityReviewPreviewViewSchema
+>;
+export type LineIdentityReviewApplyRequest = z.infer<
+  typeof LineIdentityReviewApplyRequestSchema
 >;

@@ -41,8 +41,12 @@ def test_stage8_manifest_hashes_are_exact() -> None:
 def test_retired_provider_and_legacy_rag_bypasses_stay_absent() -> None:
     line_bot = (ROOT / "line/line_bot.py").read_text("utf-8")
     legacy_worker = (ROOT / "line/worker.py").read_text("utf-8")
+    webhook_handlers = (ROOT / "subsystems/line/webhook_identity_handlers.py").read_text("utf-8")
 
     assert "webhook/breezysign" not in line_bot.lower()
     assert "PersistentClient" not in legacy_worker
     assert "legacy_rag_retired" in legacy_worker
     assert "actual_start_date = %s" not in line_bot
+    assert "?target=profile_update" not in line_bot
+    assert "?target=profile_update" not in webhook_handlers
+    assert "此對話不會直接變更正式資料" in webhook_handlers

@@ -39,28 +39,29 @@ describe('Anomalies lazy Drawer query flow', () => {
 
   it('does not query detail until anomaly Drawer opens', async () => {
     render(<AnomaliesPage />);
-    await waitFor(() => expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument());
     expect(anomalyDetailClient.queryAnomalyDetail).not.toHaveBeenCalled();
     expect(anomalyDetailClient.queryAnomalyRecovery).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: /排查處置抽屜 ➔/ }));
+    fireEvent.click(screen.getByRole('button', { name: /查看處理方式 ➔/ }));
     await waitFor(() => expect(anomalyDetailClient.queryAnomalyDetail).toHaveBeenCalledTimes(1));
     expect(anomalyDetailClient.queryAnomalyRecovery).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/後端異常詳情/)).toBeInTheDocument();
+    expect(screen.getByText(/問題詳情/)).toBeInTheDocument();
     await waitFor(() => {
-      expect(document.querySelector('[data-surface-id="anomalies.drawer.evidence"]')).toHaveTextContent('amount_delta_ntd');
+      expect(document.querySelector('[data-surface-id="anomalies.drawer.evidence"]')).toHaveTextContent('1200');
+      expect(document.querySelector('[data-surface-id="anomalies.drawer.evidence"]')).not.toHaveTextContent('amount_delta_ntd');
       expect(screen.getByText(/預覽財務投影修復/)).toBeInTheDocument();
     });
   });
 
   it('queries warning referral lazily and keeps root repair disabled', async () => {
     render(<AnomaliesPage />);
-    await waitFor(() => expect(screen.getByText('HCM-FIELD-001')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('缺少身分證字號')).toBeInTheDocument());
     expect(anomalyQueryClient.queryImportWarningReferral).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '查看警示詳情' }));
     await waitFor(() => expect(anomalyQueryClient.queryImportWarningReferral).toHaveBeenCalledTimes(1));
-    expect(screen.getByText('owner_preview_apply')).toBeInTheDocument();
+    expect(screen.getByText('由負責流程檢查後修正')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '請依上方轉介流程處理來源資料' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '開啟追蹤狀態變更' })).toBeEnabled();
   });
@@ -74,7 +75,7 @@ describe('Anomalies lazy Drawer query flow', () => {
       ),
     );
     render(<AnomaliesPage />);
-    await waitFor(() => expect(screen.getByText('HCM-FIELD-001')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('缺少身分證字號')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '查看警示詳情' }));
     await waitFor(() => expect(screen.getByText('此警示尚未支援來源修復；可更新追蹤狀態，但不會修改來源根事實。')).toBeInTheDocument());
   });
@@ -82,9 +83,10 @@ describe('Anomalies lazy Drawer query flow', () => {
   it('保留成功 detail，並將 recovery 404 限縮為局部錯誤', async () => {
     vi.mocked(anomalyDetailClient.queryAnomalyRecovery).mockRejectedValue(new Error('找不到異常 recovery context。'));
     render(<AnomaliesPage />);
-    await waitFor(() => expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /排查處置抽屜 ➔/ }));
-    await waitFor(() => expect(document.querySelector('[data-surface-id="anomalies.drawer.evidence"]')).toHaveTextContent('amount_delta_ntd'));
+    await waitFor(() => expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /查看處理方式 ➔/ }));
+    await waitFor(() => expect(document.querySelector('[data-surface-id="anomalies.drawer.evidence"]')).toHaveTextContent('1200'));
+    expect(document.querySelector('[data-surface-id="anomalies.drawer.evidence"]')).not.toHaveTextContent('amount_delta_ntd');
     expect(screen.getByText('找不到異常 recovery context。')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /確認排除異常/ })).toBeDisabled();
   });
@@ -95,11 +97,11 @@ describe('Anomalies lazy Drawer query flow', () => {
       () => new Promise((resolve) => { resolveDetail = resolve; })
     );
     render(<AnomaliesPage />);
-    await waitFor(() => expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /排查處置抽屜 ➔/ }));
-    expect(screen.getByText(/異常排查與修復處置/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /查看處理方式 ➔/ }));
+    expect(screen.getByRole('heading', { name: /假日排班尚未確認/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
-    expect(screen.queryByText(/異常排查與修復處置/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /假日排班尚未確認/ })).not.toBeInTheDocument();
     resolveDetail?.(VALID_ANOMALY_DETAIL_VIEW);
     await Promise.resolve();
     expect(screen.queryByText(/amount_delta_ntd/)).not.toBeInTheDocument();

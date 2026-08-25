@@ -42,4 +42,24 @@ describe('contractSigningMutationClient', () => {
     expect((body as FormData).get('document')).toBeInstanceOf(File);
     expect(vi.mocked(transport.post).mock.calls[0][0]).toBe('/api/v1/orders/CASE-1/contract-signing/client/signed-return');
   });
+
+  it('uses Preview then multipart Apply for manual staff attestation without a LINE delivery task', async () => {
+    const preview = {
+      case_no: 'CASE-1', scope: 'staff_segment', matching_segment_id: 3,
+      confirmation_method: 'phone' as const, preview_fingerprint: 'a'.repeat(64),
+      can_apply: true as const, line_delivery_task_id: null,
+    };
+    vi.mocked(transport.post).mockResolvedValueOnce({ success: true, message: 'preview', data: preview, error: null });
+    await expect(contractSigningMutationClient.previewManualStaffAttestation('CASE-1', 3, 'phone', '已電話確認簽約。', command)).resolves.toEqual(preview);
+    expect(vi.mocked(transport.post).mock.calls[0][0]).toBe('/api/v1/orders/CASE-1/contract-signing/staff-segments/3/manual-attestation/preview');
+
+    vi.mocked(transport.post).mockResolvedValueOnce({ success: true, message: 'apply', data: { ...receipt, line_delivery_task_id: null }, error: null });
+    const file = new File(['signed'], 'manual-signed.pdf', { type: 'application/pdf' });
+    await contractSigningMutationClient.recordManualStaffAttestation('CASE-1', 3, file, 'phone', '已電話確認簽約。', preview.preview_fingerprint, command);
+    const [, body] = vi.mocked(transport.post).mock.calls[1];
+    expect(vi.mocked(transport.post).mock.calls[1][0]).toBe('/api/v1/orders/CASE-1/contract-signing/staff-segments/3/manual-attestation');
+    expect((body as FormData).get('confirmation_method')).toBe('phone');
+    expect((body as FormData).get('reason')).toBe('已電話確認簽約。');
+    expect((body as FormData).get('preview_fingerprint')).toBe('a'.repeat(64));
+  });
 });

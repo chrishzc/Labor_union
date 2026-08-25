@@ -10,6 +10,15 @@ export const STAFF_QUALIFICATION_MASTER: StaffQualificationMaster = {
   as_of: '2026-08-23',
   overall_availability: 'partial',
   availability_reason: 'qualification_sources_partial',
+  service_profile: {
+    care_babies: 2,
+    service_regions: [{ value: '北區', detail: null }, { value: '其他', detail: '新竹市' }],
+    service_time_slots: [{ value: '8小時', detail: null }],
+    transportation: [{ value: '機車', detail: null }],
+    holiday_availability: [{ value: '中秋節', detail: null }],
+    weekly_rest: [{ value: '週休1日', detail: null }],
+    baby_types: [{ value: '單胞胎', detail: null }, { value: '雙胞胎', detail: null }],
+  },
   sections: [
     'skills',
     'cooking',

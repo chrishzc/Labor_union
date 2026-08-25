@@ -1,6 +1,6 @@
 /**
  * File: candidate_contact_pool_client.test.ts
- * Description: 驗證候選聯繫池查詢、加入、意願與可靠資訊發送的 closed decode 及認證邊界。
+ * Description: 驗證候選聯繫池查詢、加入、意願、可靠發送與人工資訊證據的 typed 邊界。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
@@ -120,6 +120,52 @@ describe('candidateContactPoolClient', () => {
         actor: 'operator-1',
         event_key: expect.stringMatching(/^orders-candidate-info-2-17-/),
       }),
+      { token: 'volatile-token' },
+    );
+  });
+
+  it('uses Preview then Apply for a distinct manual information confirmation fact', async () => {
+    const post = vi.spyOn(transport, 'post')
+      .mockResolvedValueOnce(successEnvelope({
+        case_no: 'CASE-POOL-001',
+        pool_id: 9,
+        candidate_id: 17,
+        staff_id: 8892,
+        info_type: 1,
+        confirmation_method: 'phone',
+        reason: '電話逐項說明粗篩案況',
+        actor: 'operator-1',
+        expected_version: 8,
+        current_status: 'queued',
+        preview_fingerprint: 'a'.repeat(64),
+        apply_allowed: true,
+      }))
+      .mockResolvedValueOnce(successEnvelope({
+        status: 'recorded',
+        event_id: 81,
+        pool_version: 81,
+        delivery_status: 'manually_confirmed',
+        confirmation_method: 'phone',
+      }));
+
+    const preview = await candidateContactPoolClient.previewManualInformation(
+      'CASE-POOL-001', 17, 1, 'phone', '電話逐項說明粗篩案況',
+    );
+    await expect(candidateContactPoolClient.applyManualInformation(preview)).resolves.toMatchObject({
+      event_id: 81,
+      delivery_status: 'manually_confirmed',
+    });
+
+    expect(post).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates/17/information/manual-confirmation/preview',
+      expect.objectContaining({ actor: 'operator-1', info_type: 1, confirmation_method: 'phone' }),
+      { token: 'volatile-token' },
+    );
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates/17/information/manual-confirmation',
+      expect.objectContaining({ expected_version: 8, preview_fingerprint: 'a'.repeat(64) }),
       { token: 'volatile-token' },
     );
   });

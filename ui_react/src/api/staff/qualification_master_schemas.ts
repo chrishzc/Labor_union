@@ -46,6 +46,21 @@ export const StaffQualificationSectionSchema = z
     items: z.array(StaffQualificationFactSchema),
   });
 
+export const StaffServiceProfileItemSchema = z.strictObject({
+  value: z.string().min(1).max(100),
+  detail: z.string().max(200).nullable(),
+});
+
+export const StaffServiceProfileSchema = z.strictObject({
+  care_babies: z.number().int().positive().nullable(),
+  service_regions: z.array(StaffServiceProfileItemSchema),
+  service_time_slots: z.array(StaffServiceProfileItemSchema),
+  transportation: z.array(StaffServiceProfileItemSchema),
+  holiday_availability: z.array(StaffServiceProfileItemSchema),
+  weekly_rest: z.array(StaffServiceProfileItemSchema),
+  baby_types: z.array(StaffServiceProfileItemSchema),
+});
+
 export const StaffQualificationMasterSchema = z
   .strictObject({
     staff_id: z.number().int().positive(),
@@ -54,6 +69,7 @@ export const StaffQualificationMasterSchema = z
     overall_availability: StaffQualificationAvailabilitySchema,
     availability_reason: z.string().min(1).max(191),
     sections: z.array(StaffQualificationSectionSchema),
+    service_profile: StaffServiceProfileSchema,
   });
 
 export const StaffQualificationMasterResponseSchema = z
@@ -68,4 +84,6 @@ export type StaffQualificationAvailability = z.infer<typeof StaffQualificationAv
 export type StaffQualificationSectionKind = z.infer<typeof StaffQualificationSectionKindSchema>;
 export type StaffQualificationFact = z.infer<typeof StaffQualificationFactSchema>;
 export type StaffQualificationSection = z.infer<typeof StaffQualificationSectionSchema>;
+export type StaffServiceProfileItem = z.infer<typeof StaffServiceProfileItemSchema>;
+export type StaffServiceProfile = z.infer<typeof StaffServiceProfileSchema>;
 export type StaffQualificationMaster = z.infer<typeof StaffQualificationMasterSchema>;

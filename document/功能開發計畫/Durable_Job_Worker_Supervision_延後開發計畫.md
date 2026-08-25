@@ -90,9 +90,9 @@ receipt 與 rollback／cleanup runbook。
 
 ## 相關設計
 
-- [單一 Cloud VPN 計畫書](../雲端部署/計劃書/單一Cloud%20VPN計畫書.md)
-- [單一 Cloud VPN 雲端部署簡報](../簡報/單一Cloud_VPN_雲端部署.pptx)
-- [Cloud Run Direct VPC HA VPN 雙 Tunnel 部署計畫](../雲端部署/計劃書/Cloud_Run_Direct_VPC_HA_VPN雙Tunnel部署計畫.md)
+- [單一 Cloud VPN 計畫書](<../雲端部署/計劃書/單一Cloud VPN計畫書.md>)
+- 單一 Cloud VPN 雲端部署簡報（current workspace 未保存，不作 activation gate）
+- Cloud Run Direct VPC HA VPN 雙 Tunnel 部署計畫（current workspace 未保存，不作 activation gate）
 
 本計畫為 deferred proposal；所有 acceptance 均為 `NOT_RUN`，直到人工建立並核准新的實作
 Work Package 為止。

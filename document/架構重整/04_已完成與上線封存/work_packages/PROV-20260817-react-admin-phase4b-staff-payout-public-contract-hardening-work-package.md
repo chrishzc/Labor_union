@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 activation_state: durable-caller-prerequisite-completed-broader-sp-h-open
 durable_job_caller_adoption_state: completed-local-validated-2026-08-22
 authority: user-approved-in-spec-auto-activation-2026-08-22

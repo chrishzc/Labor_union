@@ -1,6 +1,6 @@
 /**
- * @file StaffPage.tsx
- * @description 月嫂名冊與全功能個人檔案抽屜，整合即時搜尋、卡片摘要、6大資格、接案偏好、長假留停與退役復職。
+ * File: StaffPage.tsx
+ * Description: 管理月嫂名冊、資格、接案偏好、不可服務期間與任職狀態。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './StaffPage.css';
@@ -144,6 +144,33 @@ function qualificationSectionLabel(kind: StaffQualificationMasterViewModel['sect
   }[kind];
 }
 
+function qualificationFactLabel(
+  kind: StaffQualificationMasterViewModel['sections'][number]['kind'],
+  code: string,
+): string {
+  if (kind === 'skills') return '專長';
+  if (kind === 'cooking') return '料理類型';
+  if (kind === 'certifications' && code === 'massage_certificate') return '寶寶按摩證照';
+  if (kind === 'unavailability') return '不可服務類型';
+  return '資格資料';
+}
+
+function qualificationEmptyMessage(
+  section: StaffQualificationMasterViewModel['sections'][number],
+): string {
+  if (section.kind === 'unavailability' && section.availability === 'available') {
+    return '目前沒有生效中的不可服務期間。';
+  }
+  return '尚未登錄。';
+}
+
+function profileItemsText(items: ReadonlyArray<{ value: string; detail: string | null }>): string {
+  if (items.length === 0) return '尚未登錄';
+  return items
+    .map((item) => item.detail ? `${item.value}（${item.detail}）` : item.value)
+    .join('、');
+}
+
 function isPreferencesOutcomeUnknown(error: unknown): boolean {
   return error instanceof StaffPreferencesTimeoutError
     || error instanceof StaffPreferencesNetworkError
@@ -199,7 +226,6 @@ function isEligibleEndPauseBlock(
 export const StaffPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<StaffTab>('roster');
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'leave' | 'paused' | 'retired'>('all');
   const [drawerTab, setDrawerTab] = useState<'qualification' | 'preferences' | 'unavailability' | 'lifecycle'>('qualification');
   const [directory, setDirectory] = useState<DirectoryState>({ status: 'loading', items: [] });
   const [selectedStaff, setSelectedStaff] = useState<StaffDirectoryCardViewModel | null>(null);
@@ -235,6 +261,8 @@ export const StaffPage: React.FC = () => {
   const activeControllerRef = useRef<AbortController | null>(null);
   const sliceGenerationRef = useRef(0);
   const sliceControllerRef = useRef<AbortController | null>(null);
+  const availabilityQueryGenerationRef = useRef(0);
+  const availabilityQueryControllerRef = useRef<AbortController | null>(null);
 
   const invalidateSlice = () => {
     sliceGenerationRef.current += 1;
@@ -254,6 +282,21 @@ export const StaffPage: React.FC = () => {
     mountedRef.current
     && generation === sliceGenerationRef.current
     && signal?.aborted !== true
+  );
+
+  const beginAvailabilityQuery = (): { generation: number; controller: AbortController } => {
+    const generation = availabilityQueryGenerationRef.current + 1;
+    availabilityQueryGenerationRef.current = generation;
+    availabilityQueryControllerRef.current?.abort();
+    const controller = new AbortController();
+    availabilityQueryControllerRef.current = controller;
+    return { generation, controller };
+  };
+
+  const isCurrentAvailabilityQuery = (generation: number, signal: AbortSignal): boolean => (
+    mountedRef.current
+    && generation === availabilityQueryGenerationRef.current
+    && !signal.aborted
   );
 
   const loadInitialDirectory = useCallback(async () => {
@@ -295,6 +338,8 @@ export const StaffPage: React.FC = () => {
       mountedRef.current = false;
       sliceGenerationRef.current += 1;
       sliceControllerRef.current?.abort();
+      availabilityQueryGenerationRef.current += 1;
+      availabilityQueryControllerRef.current?.abort();
       queueMicrotask(() => {
         if (!mountedRef.current) {
           requestGenerationRef.current += 1;
@@ -346,7 +391,7 @@ export const StaffPage: React.FC = () => {
         }
       }).catch((error: unknown) => {
         if (error instanceof StaffLifecycleAbortedError || !isCurrentSlice(generation, controller.signal)) return;
-        setLifecycle({ status: 'error', message: error instanceof Error ? error.message : 'Lifecycle 載入失敗。' });
+        setLifecycle({ status: 'error', message: error instanceof Error ? error.message : '任職狀態載入失敗。' });
       });
       setQualification({ status: 'loading' });
       void staffQualificationMasterClient.query(currentStaffId, todayIsoDate(), { signal: controller.signal }).then((master) => {
@@ -364,20 +409,20 @@ export const StaffPage: React.FC = () => {
   }, [activeTab, selectedStaffId, sliceRetryGeneration]);
 
   useEffect(() => {
-    if (selectedStaffId !== null && drawerTab === 'unavailability' && availability.status === 'idle') {
+    if (selectedStaffId !== null && drawerTab === 'unavailability') {
       const from = rangeStart || '2026-01-01';
       const to = rangeEnd || '2026-12-31';
-      const controller = new AbortController();
+      const { generation, controller } = beginAvailabilityQuery();
       setAvailability({ status: 'loading' });
       staffAvailabilityClient
         .getBlocks(selectedStaffId, from, to, { signal: controller.signal })
         .then((blocks) => {
-          if (mountedRef.current && !controller.signal.aborted) {
+          if (isCurrentAvailabilityQuery(generation, controller.signal)) {
             setAvailability({ status: 'ready', data: adaptStaffAvailabilityBlocks(blocks) });
           }
         })
         .catch((error: unknown) => {
-          if (mountedRef.current && !controller.signal.aborted) {
+          if (isCurrentAvailabilityQuery(generation, controller.signal)) {
             setAvailability({
               status: 'error',
               message: error instanceof Error ? error.message : '不可服務期間載入失敗。',
@@ -386,7 +431,7 @@ export const StaffPage: React.FC = () => {
         });
       return () => controller.abort();
     }
-  }, [selectedStaffId, drawerTab, availability.status, rangeStart, rangeEnd]);
+  }, [selectedStaffId, drawerTab, rangeStart, rangeEnd]);
 
   const requeryPreferences = async (staffId: number, signal?: AbortSignal, generation?: number): Promise<boolean> => {
     const profile = await staffPreferencesClient.queryProfile(staffId, { signal });
@@ -492,7 +537,7 @@ export const StaffPage: React.FC = () => {
         setPreferenceAction((current) => ({ ...current, phase: 'observed', message: '已觀察最新偏好' }));
       } catch (error) {
         if (!isCurrentSlice(generation, controller.signal)) return;
-        setPreferenceAction((current) => ({ ...current, phase: 'observation_failed', message: `receipt 已收到，但重新查詢失敗：${errorMessage(error, '偏好觀察失敗。')}` }));
+        setPreferenceAction((current) => ({ ...current, phase: 'observation_failed', message: `變更已受理，但重新查詢失敗：${errorMessage(error, '偏好資料查詢失敗。')}` }));
       }
     } catch (error) {
       if (!isCurrentSlice(actionGeneration)) return;
@@ -509,17 +554,17 @@ export const StaffPage: React.FC = () => {
   const queryAvailability = async () => {
     if (selectedStaffId === null || !rangeStart || !rangeEnd) return;
     const currentStaffId = selectedStaffId;
-    const { generation, controller } = beginSliceRequest();
+    const { generation, controller } = beginAvailabilityQuery();
     setAvailability({ status: 'loading' });
     try {
       const blocks = await staffAvailabilityClient.getBlocks(currentStaffId, rangeStart, rangeEnd, { signal: controller.signal });
-      if (isCurrentSlice(generation, controller.signal)) {
+      if (isCurrentAvailabilityQuery(generation, controller.signal)) {
         setAvailability({ status: 'ready', data: adaptStaffAvailabilityBlocks(blocks) });
         setAvailabilityAction(initialActionState());
         setEndPauseBlockId(null);
       }
     } catch (error) {
-      if (error instanceof StaffAvailabilityAbortedError || !isCurrentSlice(generation, controller.signal)) return;
+      if (error instanceof StaffAvailabilityAbortedError || !isCurrentAvailabilityQuery(generation, controller.signal)) return;
       setAvailability({ status: 'error', message: error instanceof Error ? error.message : '不可服務期間載入失敗。' });
     }
   };
@@ -560,10 +605,10 @@ export const StaffPage: React.FC = () => {
           ...initialActionState(),
           phase: 'error',
           message: invalidEndPausePreview
-            ? 'Server Preview 未回傳同一筆可結束的暫停接案期間。'
+            ? '預覽結果中沒有同一筆可結束的暫停接案期間。'
             : preview.blockers.length > 0
-              ? `Server Preview 判定目前不可套用：${preview.blockers.join('、')}`
-              : 'Server Preview 判定目前不可套用。',
+              ? `預覽判定目前不可套用：${preview.blockers.join('、')}`
+              : '預覽判定目前不可套用。',
         });
         return;
       }
@@ -611,14 +656,14 @@ export const StaffPage: React.FC = () => {
             phase: observedClosedPause ? 'observed' : 'observation_failed',
             message: observedClosedPause
               ? '已觀察 server 封閉暫停期間'
-              : 'receipt 已收到，但尚未觀察同一筆 server 封閉暫停期間。',
+              : '變更已受理，但重新查詢尚未看到同一筆暫停期間已結束。',
           }));
           return;
         }
         setAvailabilityAction((current) => ({ ...current, phase: 'observed', message: '已觀察最新不可服務期間' }));
       } catch (error) {
         if (!isCurrentSlice(generation, controller.signal)) return;
-        setAvailabilityAction((current) => ({ ...current, phase: 'observation_failed', message: `receipt 已收到，但重新查詢失敗：${errorMessage(error, '不可服務期間觀察失敗。')}` }));
+        setAvailabilityAction((current) => ({ ...current, phase: 'observation_failed', message: `變更已受理，但重新查詢失敗：${errorMessage(error, '不可服務期間查詢失敗。')}` }));
       }
     } catch (error) {
       if (!isCurrentSlice(actionGeneration)) return;
@@ -658,7 +703,7 @@ export const StaffPage: React.FC = () => {
       setLifecycleAction({ action, phase: 'preview_ready', preview, receipt: null, payload, idempotencyKey: null, message: null });
     } catch (error) {
       if (error instanceof StaffLifecycleAbortedError || !isCurrentSlice(generation, controller.signal)) return;
-      setLifecycleAction({ ...initialActionState(), action, phase: error instanceof StaffLifecycleConflictError ? 'stale' : 'error', message: errorMessage(error, 'Lifecycle 預覽失敗。') });
+      setLifecycleAction({ ...initialActionState(), action, phase: error instanceof StaffLifecycleConflictError ? 'stale' : 'error', message: errorMessage(error, '任職異動預覽失敗。') });
     }
   };
 
@@ -681,7 +726,7 @@ export const StaffPage: React.FC = () => {
       setLifecycleAction({ ...initialActionState(), action: null });
     } catch (error) {
       if (!isCurrentSlice(generation, controller.signal)) return;
-      setLifecycle({ status: 'error', message: errorMessage(error, 'Lifecycle 重新查詢失敗。') });
+      setLifecycle({ status: 'error', message: errorMessage(error, '任職狀態重新查詢失敗。') });
     }
   };
 
@@ -703,10 +748,10 @@ export const StaffPage: React.FC = () => {
       try {
         const updated = await requeryLifecycle(currentStaffId, controller.signal, generation);
         if (!updated || !isCurrentSlice(generation, controller.signal)) return;
-        setLifecycleAction((current) => ({ ...current, phase: 'observed', message: '已觀察最新 lifecycle' }));
+        setLifecycleAction((current) => ({ ...current, phase: 'observed', message: '已確認最新任職狀態' }));
       } catch (error) {
         if (!isCurrentSlice(generation, controller.signal)) return;
-        setLifecycleAction((current) => ({ ...current, phase: 'observation_failed', message: `receipt 已收到，但重新查詢失敗：${errorMessage(error, 'Lifecycle 觀察失敗。')}` }));
+        setLifecycleAction((current) => ({ ...current, phase: 'observation_failed', message: `變更已受理，但重新查詢失敗：${errorMessage(error, '任職狀態查詢失敗。')}` }));
       }
     } catch (error) {
       if (!isCurrentSlice(actionGeneration)) return;
@@ -715,7 +760,7 @@ export const StaffPage: React.FC = () => {
       } else if (isLifecycleOutcomeUnknown(error)) {
         setLifecycleAction((current) => ({ ...current, phase: 'outcome_unknown', message: `結果未知：${errorMessage(error, '請以相同內容重試。')}` }));
       } else {
-        setLifecycleAction((current) => ({ ...current, phase: 'error', message: errorMessage(error, 'Lifecycle 套用失敗。'), idempotencyKey: null }));
+        setLifecycleAction((current) => ({ ...current, phase: 'error', message: errorMessage(error, '任職異動套用失敗。'), idempotencyKey: null }));
       }
     }
   };
@@ -822,7 +867,7 @@ export const StaffPage: React.FC = () => {
             <input
               type="text"
               aria-label="即時搜尋月嫂"
-              placeholder="搜尋月嫂姓名、電話、Staff ID、技能關鍵字（如：雙胞胎、素食、保母證）..."
+              placeholder="搜尋月嫂姓名、電話或 Staff ID..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -838,43 +883,9 @@ export const StaffPage: React.FC = () => {
           )}
         </div>
         <div className="staff-filter-pills-row">
-          <div className="staff-filter-pills">
-            <button
-              type="button"
-              className={`staff-filter-pill ${statusFilter === 'all' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('all')}
-            >
-              全部 ({directory.items.length})
-            </button>
-            <button
-              type="button"
-              className={`staff-filter-pill ${statusFilter === 'active' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('active')}
-            >
-              🟢 在職中
-            </button>
-            <button
-              type="button"
-              className={`staff-filter-pill ${statusFilter === 'leave' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('leave')}
-            >
-              🏖️ 請長假
-            </button>
-            <button
-              type="button"
-              className={`staff-filter-pill ${statusFilter === 'paused' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('paused')}
-            >
-              ⏸️ 暫停接案
-            </button>
-            <button
-              type="button"
-              className={`staff-filter-pill ${statusFilter === 'retired' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('retired')}
-            >
-              ⚪ 已退役
-            </button>
-          </div>
+          <span className="staff-directory-count" role="status">
+            目前已載入 {directory.items.length} 位服務人員
+          </span>
           <div className="staff-query-selector" data-surface-id="staff.selector" style={{ margin: 0, padding: '4px 10px' }}>
             <label htmlFor="staff-query-staff" style={{ fontSize: '0.82rem', fontWeight: 600 }}>查詢服務人員</label>
             <select
@@ -911,12 +922,12 @@ export const StaffPage: React.FC = () => {
                   <div key={section.kind} role="group" aria-label={label}>
                     <h4>{label} · {section.availabilityLabel}</h4>
                     {section.items.length === 0 ? (
-                      <small>此區段目前沒有已登錄資料。</small>
+                      <small>{qualificationEmptyMessage(section)}</small>
                     ) : (
                       <ul>
                         {section.items.map((item) => (
                           <li key={item.code}>
-                            <strong>{item.code}</strong>：{item.displayValue}
+                            <strong>{qualificationFactLabel(section.kind, item.code)}</strong>：{item.displayValue}
                           </li>
                         ))}
                       </ul>
@@ -964,15 +975,12 @@ export const StaffPage: React.FC = () => {
                     </span>
                   </div>
 
-                  <div className="staff-card-chips">
-                    <span className="staff-skill-chip">🍳 葷素料理</span>
-                    <span className="staff-skill-chip">👶 雙胞胎經驗</span>
-                    <span className="staff-skill-chip">📜 保母技術士證</span>
-                    <span className="staff-skill-chip">❤️ CPR+AED</span>
+                  <div className="staff-card-chips" aria-label="資格資料提示">
+                    <span className="staff-skill-chip">📋 選取後載入正式資格與料理能力</span>
                   </div>
 
                   <div className="staff-card-pref-summary">
-                    <span>🎯 承接天數：15～30 天 ｜ 每日工時：9hr / 24hr</span>
+                    <span>🎯 接案偏好與不可服務期間於個人摘要中查詢</span>
                   </div>
 
                   <div className="staff-card-footer">
@@ -1023,7 +1031,7 @@ export const StaffPage: React.FC = () => {
       {activeTab === 'preferences' && (
         <section className="staff-workbench" data-surface-id="staff.preferences">
           <div className="staff-section-header">
-            <div><h2>🎯 月嫂配對偏好管理</h2><p>只編輯核准的服務天數與每日時數；Preview 後才能 Apply。</p></div>
+            <div><h2>🎯 月嫂配對偏好管理</h2><p>只編輯核准的服務天數與每日時數；預覽確認後才能套用。</p></div>
             <div className="staff-action-pair">
               <button type="button" className="staff-next-btn" onClick={() => { invalidateSlice(); setPreferenceAction((current) => ({ ...current, phase: 'editing', preview: null, payload: null, idempotencyKey: null, message: null })); }} disabled={preferences.status !== 'ready' || interactionLocked || preferenceAction.phase === 'stale'}>編輯核准偏好</button>
               <button type="button" data-control-id="staff.preferences.preview" className="staff-next-btn" disabled={preferenceAction.phase !== 'editing'} onClick={() => void previewPreferences()}>預覽偏好變更</button>
@@ -1051,9 +1059,9 @@ export const StaffPage: React.FC = () => {
             </div>
           </div>
           {preferences.status === 'ready' && preferenceAction.phase !== 'editing' && (
-            <p className="staff-form-hint">目前為檢視模式；按「編輯核准偏好」後才能修改，Preview 成功後才可套用。</p>
+            <p className="staff-form-hint">目前為檢視模式；按「編輯核准偏好」後才能修改，預覽通過後才可套用。</p>
           )}
-          {preferenceAction.preview && <div className="staff-action-status">Preview 指紋：{preferenceAction.preview.preview_fingerprint.slice(0, 12)}…</div>}
+          {preferenceAction.preview && <div className="staff-action-status">預覽已完成：承接天數與每日工時變更已通過檢查，請確認後套用。</div>}
           {preferenceAction.message && <div className={`staff-action-status ${preferenceAction.phase === 'error' || preferenceAction.phase === 'stale' ? 'error' : ''}`} role="status">{preferenceAction.message}</div>}
           {preferenceAction.phase === 'stale' && <button type="button" className="staff-next-btn" onClick={() => void refreshPreferencesAfterStale()}>重新查詢偏好</button>}
           {preferenceAction.phase === 'outcome_unknown' && <button type="button" className="staff-next-btn" onClick={() => void submitPreferences(true)}>以相同內容重試</button>}
@@ -1063,7 +1071,7 @@ export const StaffPage: React.FC = () => {
       {activeTab === 'unavailability' && (
         <section className="staff-workbench" data-surface-id="staff.unavailability">
           <div className="staff-section-header">
-            <div><h2>🏖️ 月嫂長假與暫停接案期間維護</h2><p>查詢後以 server Preview 驗證，再提交 append-only intent。</p></div>
+            <div><h2>🏖️ 月嫂長假與暫停接案期間維護</h2><p>查詢後預覽變更，確認無衝突再套用。</p></div>
             <div className="staff-action-pair">
               <button type="button" data-control-id="staff.availability.create.preview" className="staff-next-btn" disabled={selectedStaffId === null || !rangeStart || (availabilityKind === 'create_long_leave' && !rangeEnd) || !availabilityReason.trim() || availabilityAction.phase === 'preview_loading' || interactionLocked || availabilityAction.phase === 'stale'} onClick={() => void previewAvailability({ action: availabilityKind, reason: availabilityReason.trim(), start_date: rangeStart, ...(availabilityKind === 'create_long_leave' ? { end_date: rangeEnd } : {}) })}>預覽新增</button>
               <button type="button" data-control-id="staff.availability.create.apply" className="staff-next-btn" disabled={availabilityAction.phase !== 'preview_ready' || !['create_long_leave', 'create_pause'].includes(availabilityAction.payload?.action ?? '')} onClick={() => void submitAvailability()}>套用新增</button>
@@ -1098,13 +1106,13 @@ export const StaffPage: React.FC = () => {
             <label>取消原因<input type="text" disabled={interactionLocked || availabilityAction.phase === 'stale'} value={cancelReason} onChange={(event) => { invalidateSlice(); setCancelReason(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
             <button type="button" data-control-id="staff.availability.cancel.apply" className="staff-next-btn" disabled={availabilityAction.phase !== 'preview_ready' || availabilityAction.payload?.action !== 'cancel'} onClick={() => void submitAvailability()}>套用取消</button>
           </div>
-          {availabilityAction.preview && <div className="staff-action-status">日數：—　Preview 指紋：{availabilityAction.preview.preview_fingerprint.slice(0, 12)}…</div>}
+          {availabilityAction.preview && <div className="staff-action-status">預覽已完成：不可服務期間變更已通過檢查，請確認後套用。</div>}
           {availabilityAction.message && <div className={`staff-action-status ${availabilityAction.phase === 'error' || availabilityAction.phase === 'stale' ? 'error' : ''}`} role="status">{availabilityAction.message}</div>}
           {availabilityAction.phase === 'stale' && <button type="button" className="staff-next-btn" disabled={!rangeStart || !rangeEnd} onClick={() => void queryAvailability()}>重新查詢不可服務期間</button>}
           {availabilityAction.phase === 'outcome_unknown' && <button type="button" className="staff-next-btn" onClick={() => void submitAvailability(true)}>以相同內容重試</button>}
           <section className="staff-form-card wide" data-surface-id="staff.availability.end-pause">
-            <h3>結束 open-ended 暫停接案</h3>
-            <p>只列出本次 Query 中屬於所選月嫂、仍生效且沒有結束日的暫停接案期間。</p>
+            <h3>結束無指定期限的暫停接案</h3>
+            <p>只列出本次查詢中屬於所選月嫂、仍生效且沒有結束日的暫停接案期間。</p>
             <div className="staff-range-query">
               <label>
                 暫停接案紀錄
@@ -1118,9 +1126,9 @@ export const StaffPage: React.FC = () => {
                     setAvailabilityAction(initialActionState());
                   }}
                 >
-                  <option value="">請選擇 open-ended 暫停紀錄</option>
+                  <option value="">請選擇無指定結束日的暫停紀錄</option>
                   {eligibleEndPauseBlocks.map((block) => (
-                    <option key={block.blockId} value={block.blockId}>#{block.blockId}｜{block.startDate}｜{block.reason}</option>
+                    <option key={block.blockId} value={block.blockId}>{block.startDate} 起｜{block.reason}</option>
                   ))}
                 </select>
               </label>
@@ -1187,10 +1195,6 @@ export const StaffPage: React.FC = () => {
         footer={
           <div className="staff-drawer-footer">
             <button type="button" data-control-id="staff.drawer.close" className="staff-close-btn" disabled={interactionLocked} onClick={() => setSelectedStaff(null)}>關閉</button>
-            <button type="button" aria-describedby="staff-lifecycle-guidance" data-control-id="staff.lifecycle.retirement.preview" className="staff-next-btn" hidden={lifecycle.status === 'ready' && !lifecycle.data.canRetire} disabled={lifecycle.status !== 'ready' || !lifecycle.data.canRetire || !lifecycleEffectiveAt || !lifecycleReasonCode.trim() || interactionLocked || lifecycleAction.phase === 'stale' || lifecycleAction.phase === 'preview_loading'} onClick={() => void previewLifecycle('retirement')}>預覽退役</button>
-            <button type="button" aria-describedby="staff-lifecycle-guidance" data-control-id="staff.lifecycle.retirement.apply" className="staff-next-btn" hidden={lifecycleAction.action !== 'retirement'} disabled={lifecycleAction.phase !== 'preview_ready'} onClick={() => void submitLifecycle()}>套用退役</button>
-            <button type="button" aria-describedby="staff-lifecycle-guidance" data-control-id="staff.lifecycle.reactivation.preview" className="staff-next-btn" hidden={lifecycle.status === 'ready' && !lifecycle.data.canReactivate} disabled={lifecycle.status !== 'ready' || !lifecycle.data.canReactivate || !lifecycleEffectiveAt || !lifecycleReasonCode.trim() || interactionLocked || lifecycleAction.phase === 'stale' || lifecycleAction.phase === 'preview_loading'} onClick={() => void previewLifecycle('reactivation')}>預覽復職</button>
-            <button type="button" aria-describedby="staff-lifecycle-guidance" data-control-id="staff.lifecycle.reactivation.apply" className="staff-next-btn" hidden={lifecycleAction.action !== 'reactivation'} disabled={lifecycleAction.phase !== 'preview_ready'} onClick={() => void submitLifecycle()}>套用復職</button>
           </div>
         }
       >
@@ -1226,35 +1230,6 @@ export const StaffPage: React.FC = () => {
               </button>
             </div>
 
-            {/* 非 Tab 3 時以 sr-only 維護 lifecycle surface 支援測試合約 */}
-            {drawerTab !== 'unavailability' && (
-              <div className="sr-only" data-surface-id="staff.lifecycle">
-                <h3>Lifecycle</h3>
-                {lifecycle.status === 'loading' && <p>正在載入 lifecycle…</p>}
-                {lifecycle.status === 'error' && (
-                  <div role="alert">
-                    <p>{lifecycle.message}</p>
-                    <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((v) => v + 1)}>重試 Lifecycle</button>
-                  </div>
-                )}
-                {lifecycle.status === 'ready' && (
-                  <div>
-                    <span>狀態：{lifecycle.data.stateLabel}</span>
-                    <span>版本：{lifecycle.data.version}</span>
-                    <span>生效時間：{lifecycle.data.displayEffectiveAt}</span>
-                    <span>原因代碼：{lifecycle.data.maskedReasonCode ?? '—'}</span>
-                  </div>
-                )}
-                <label>Lifecycle 生效時間<input type="text" disabled={interactionLocked || lifecycleAction.phase === 'stale'} value={lifecycleEffectiveAt} onChange={(e) => { invalidateSlice(); setLifecycleEffectiveAt(e.target.value); setLifecycleAction({ ...initialActionState(), action: null }); }} /></label>
-                <label>Lifecycle 原因代碼<input type="text" disabled={interactionLocked || lifecycleAction.phase === 'stale'} value={lifecycleReasonCode} onChange={(e) => { invalidateSlice(); setLifecycleReasonCode(e.target.value); setLifecycleAction({ ...initialActionState(), action: null }); }} /></label>
-                <p id="staff-lifecycle-guidance">在職狀態可辦理退役，已退役狀態可辦理復職；填寫生效時間與原因後才能 Preview，Preview 通過後才能 Apply。</p>
-                {lifecycleAction.preview && <p>Preview 後狀態：{lifecycleAction.preview.after_state}</p>}
-                {lifecycleAction.message && <p role="status">{lifecycleAction.message}</p>}
-                {lifecycleAction.phase === 'stale' && <button type="button" className="staff-next-btn" onClick={() => void refreshLifecycleAfterStale()}>重新查詢 Lifecycle</button>}
-                {lifecycleAction.phase === 'outcome_unknown' && <button type="button" className="staff-next-btn" onClick={() => void submitLifecycle(true)}>以相同內容重試</button>}
-              </div>
-            )}
-
             {/* Drawer Tab 1: 完整資格主檔 */}
             {drawerTab === 'qualification' && (
               <section className="staff-drawer-section" data-surface-id="staff.qualification-master">
@@ -1277,6 +1252,30 @@ export const StaffPage: React.FC = () => {
                     )}
                   </div>
                 </div>
+
+                {qualification.status === 'ready' && (
+                  <>
+                    <h3 style={{ margin: '0 0 10px', fontSize: '1.05rem', color: '#7c2d12', fontWeight: 700 }}>
+                      🧭 服務能力與接案資料
+                    </h3>
+                    <div className="staff-qual-grid" style={{ marginBottom: '18px' }}>
+                      {[
+                        ['最多照顧寶寶數', qualification.data.service_profile.care_babies === null ? '尚未登錄' : `${qualification.data.service_profile.care_babies} 位`],
+                        ['可承接區域', profileItemsText(qualification.data.service_profile.service_regions)],
+                        ['可承接時段', profileItemsText(qualification.data.service_profile.service_time_slots)],
+                        ['交通方式', profileItemsText(qualification.data.service_profile.transportation)],
+                        ['週間服務／排休', profileItemsText(qualification.data.service_profile.weekly_rest)],
+                        ['特殊節日意願', profileItemsText(qualification.data.service_profile.holiday_availability)],
+                        ['可承接胎數', profileItemsText(qualification.data.service_profile.baby_types)],
+                      ].map(([label, value]) => (
+                        <div key={label} className="staff-qual-card" role="group" aria-label={label}>
+                          <h4>{label}</h4>
+                          <p style={{ margin: 0 }}>{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
 
                 {/* 6 大專業資格審核主檔 */}
                 <h3 style={{ margin: '0 0 10px', fontSize: '1.05rem', color: '#7c2d12', fontWeight: 700 }}>
@@ -1307,12 +1306,12 @@ export const StaffPage: React.FC = () => {
                           <div key={section.kind} className="staff-qual-card" role="group" aria-label={label}>
                             <h4>{label} · {section.availabilityLabel}</h4>
                             {section.items.length === 0 ? (
-                              <small>此區段目前沒有已登錄資料。</small>
+                              <small>{qualificationEmptyMessage(section)}</small>
                             ) : (
                               <ul>
                                 {section.items.map((item) => (
                                   <li key={item.code}>
-                                    <strong>{item.code}</strong>：{item.displayValue}{item.detail ? ` (${item.detail})` : ''}
+                                    <strong>{qualificationFactLabel(section.kind, item.code)}</strong>：{item.displayValue}{item.detail ? `（${item.detail}）` : ''}
                                   </li>
                                 ))}
                               </ul>
@@ -1366,9 +1365,9 @@ export const StaffPage: React.FC = () => {
                 </div>
 
                 {preferences.status === 'ready' && preferenceAction.phase !== 'editing' && (
-                  <p className="staff-form-hint">目前為檢視模式；按「編輯核准偏好」後才能修改，Preview 成功後才可套用。</p>
+                  <p className="staff-form-hint">目前為檢視模式；按「編輯核准偏好」後才能修改，預覽通過後才可套用。</p>
                 )}
-                {preferenceAction.preview && <div className="staff-action-status">Preview 指紋：{preferenceAction.preview.preview_fingerprint.slice(0, 12)}…</div>}
+                {preferenceAction.preview && <div className="staff-action-status">預覽已完成：承接天數與每日工時變更已通過檢查，請確認後套用。</div>}
                 {preferenceAction.message && <div className={`staff-action-status ${preferenceAction.phase === 'error' || preferenceAction.phase === 'stale' ? 'error' : ''}`} role="status">{preferenceAction.message}</div>}
                 {preferenceAction.phase === 'stale' && <button type="button" className="staff-next-btn" onClick={() => void refreshPreferencesAfterStale()}>重新查詢偏好</button>}
                 {preferenceAction.phase === 'outcome_unknown' && <button type="button" className="staff-next-btn" onClick={() => void submitPreferences(true)}>以相同內容重試</button>}
@@ -1378,17 +1377,23 @@ export const StaffPage: React.FC = () => {
             {/* Drawer Tab 3: 接案狀態管理 (採用國定假日 QUERY → PREVIEW → APPLY → RECEIPT 工作台模式) */}
             {drawerTab === 'unavailability' && (
               <section className="staff-drawer-section">
-                {/* 區塊 1: 📇 人事任職狀態與異動辦理 (Lifecycle) */}
+                {/* 區塊 1: 📇 人事任職狀態與異動辦理 */}
                 <div className="staff-holiday-workbench" data-surface-id="staff.lifecycle">
                   <header className="staff-workbench-header">
                     <div>
-                      <p className="staff-workbench-kicker">Query → Preview → Apply → Receipt</p>
-                      <h2 className="staff-workbench-title">📇 人事任職狀態與異動辦理 (Lifecycle)</h2>
-                      <p className="staff-workbench-desc">任職版本、狀態變更與生效時間全部採用後端根事實，點擊「辦理異動」進行退役或復職登記。</p>
+                      <p className="staff-workbench-kicker">查詢 → 預覽 → 確認套用</p>
+                      <h2 className="staff-workbench-title">📇 人事任職狀態與異動辦理</h2>
+                      <p className="staff-workbench-desc">任職狀態與生效時間以正式人事資料為準，點擊「辦理異動」進行退役或復職登記。</p>
                     </div>
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                       <span className={`staff-unavailable-pill ${lifecycle.status === 'ready' && lifecycle.data.state === 'retired' ? 'retired' : 'active'}`}>
-                        {lifecycle.status === 'ready' ? lifecycle.data.stateLabel : lifecycle.status}
+                        {lifecycle.status === 'ready'
+                          ? lifecycle.data.stateLabel
+                          : lifecycle.status === 'loading'
+                            ? '正在查詢任職狀態'
+                            : lifecycle.status === 'error'
+                              ? '任職狀態載入失敗'
+                              : '尚未查詢任職狀態'}
                       </span>
                     </div>
                   </header>
@@ -1397,13 +1402,11 @@ export const StaffPage: React.FC = () => {
                   {lifecycle.status === 'error' && (
                     <div role="alert" className="staff-directory-message error">
                       <p>{lifecycle.message}</p>
-                      <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((value) => value + 1)}>重試 Lifecycle</button>
+                      <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((value) => value + 1)}>重試任職狀態</button>
                     </div>
                   )}
                   {lifecycle.status === 'ready' && (
                     <div className="staff-holiday-meta-bar">
-                      <span>來源：<strong>staff_lifecycle/v1</strong></span>
-                      <span>紀錄版本：<code>#{lifecycle.data.version}</code></span>
                       <span>最近生效時間：{lifecycle.data.displayEffectiveAt}</span>
                       <span>最近異動原因：{lifecycle.data.maskedReasonCode ?? '—'}</span>
                     </div>
@@ -1418,7 +1421,7 @@ export const StaffPage: React.FC = () => {
                           <span className="staff-item-date-badge">📅 {lifecycle.data.displayEffectiveAt} 起生效</span>
                           <span className="staff-item-title">{selectedStaff.displayName}（#{selectedStaff.id}）目前任職狀態</span>
                           <span className={`staff-item-tag ${lifecycle.data.state === 'retired' ? 'retired' : ''}`}>
-                            {lifecycle.data.state === 'retired' ? '⚪ 已辦理退役 (暫停派工)' : '🟢 正常在職中 (100% 派工接案)'}
+                            {lifecycle.data.state === 'retired' ? '⚪ 已辦理退役（暫停派工）' : '🟢 正常在職中'}
                           </span>
                         </div>
                         <div>
@@ -1463,12 +1466,12 @@ export const StaffPage: React.FC = () => {
                       <label className="staff-op-field">
                         異動動作
                         <select disabled value={lifecycleAction.action ?? (lifecycle.status === 'ready' && lifecycle.data.state === 'retired' ? 'reactivation' : 'retirement')}>
-                          <option value="retirement">辦理退役 (Retirement)</option>
-                          <option value="reactivation">辦理復職 (Reactivation)</option>
+                          <option value="retirement">辦理退役</option>
+                          <option value="reactivation">辦理復職</option>
                         </select>
                       </label>
                       <label className="staff-op-field">
-                        Lifecycle 生效時間
+                        生效時間
                         <input
                           type="text"
                           disabled={interactionLocked || lifecycleAction.phase === 'stale'}
@@ -1482,12 +1485,12 @@ export const StaffPage: React.FC = () => {
                         />
                       </label>
                       <label className="staff-op-field">
-                        Lifecycle 原因代碼
+                        異動原因
                         <input
                           type="text"
                           disabled={interactionLocked || lifecycleAction.phase === 'stale'}
                           value={lifecycleReasonCode}
-                          placeholder={lifecycle.status === 'ready' && lifecycle.data.state === 'retired' ? '如 reactivation (重返工會) 或 resume_service' : '如 voluntary_retirement (自願退役) 或 personal_reason'}
+                          placeholder={lifecycle.status === 'ready' && lifecycle.data.state === 'retired' ? '請填寫復職原因' : '請填寫退役原因'}
                           onChange={(event) => {
                             invalidateSlice();
                             setLifecycleReasonCode(event.target.value);
@@ -1562,7 +1565,7 @@ export const StaffPage: React.FC = () => {
 
                       {lifecycleAction.phase === 'stale' && (
                         <button type="button" className="staff-secondary-btn" onClick={() => void refreshLifecycleAfterStale()}>
-                          重新查詢 Lifecycle
+                          重新查詢任職狀態
                         </button>
                       )}
                       {lifecycleAction.phase === 'outcome_unknown' && (
@@ -1574,7 +1577,7 @@ export const StaffPage: React.FC = () => {
 
                     {lifecycleAction.preview && (
                       <div className="staff-action-status" style={{ marginTop: '6px' }}>
-                        ✅ <strong>預覽已產生：</strong>動作：{lifecycleAction.action} ｜ 生效時間：{lifecycleEffectiveAt} ｜ Preview 後狀態：<strong>{lifecycleAction.preview.after_state}</strong> ｜ 指紋：{lifecycleAction.preview.preview_fingerprint.slice(0, 12)}…
+                        ✅ <strong>預覽已產生：</strong>{lifecycleAction.action === 'retirement' ? '辦理退役' : '辦理復職'} ｜ 生效時間：{lifecycleEffectiveAt} ｜ 變更後狀態：<strong>{lifecycleAction.preview.after_state === 'retired' ? '已退役' : '在職'}</strong>
                       </div>
                     )}
                     {lifecycleAction.message && (
@@ -1589,9 +1592,9 @@ export const StaffPage: React.FC = () => {
                 <div className="staff-holiday-workbench" data-surface-id="staff.drawer.unavailability">
                   <header className="staff-workbench-header">
                     <div>
-                      <p className="staff-workbench-kicker">Query → Preview → Apply → Receipt</p>
-                      <h2 className="staff-workbench-title">🏖️ 不接案期間與請假政策維護 (Availability)</h2>
-                      <p className="staff-workbench-desc">不可服務區間全部採用後端日曆根事實，排班媒合時將自動避開已登記之請假時段。</p>
+                      <p className="staff-workbench-kicker">查詢 → 預覽 → 確認套用</p>
+                      <h2 className="staff-workbench-title">🏖️ 不接案期間與請假政策維護</h2>
+                      <p className="staff-workbench-desc">不可服務期間以正式日曆資料為準，排班媒合時將自動避開已登記的請假時段。</p>
                     </div>
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                       <button
@@ -1607,25 +1610,20 @@ export const StaffPage: React.FC = () => {
                         {showAvailabilityForm ? '✕ 收合設定' : '➕ 新增請假／暫停接案'}
                       </button>
                       <span className="staff-unavailable-pill active">
-                        {availability.status === 'ready' ? 'query_ready' : availability.status}
+                        {availability.status === 'ready'
+                          ? '已載入'
+                          : availability.status === 'loading'
+                            ? '載入中'
+                            : availability.status === 'error'
+                              ? '載入失敗'
+                              : '待查詢'}
                       </span>
                     </div>
                   </header>
 
-                  {/* 隱藏式測試輔助按鈕 */}
-                  <button
-                    type="button"
-                    className="sr-only"
-                    data-control-id="staff.availability.query"
-                    onClick={() => void queryAvailability()}
-                  >
-                    查詢不可服務期間
-                  </button>
-
                   {/* 元數據列 */}
                   {availability.status === 'ready' && (
                     <div className="staff-holiday-meta-bar">
-                      <span>來源：<strong>staff_availability/v1</strong></span>
                       <span>已登記不接案紀錄：{availability.data.length} 筆</span>
                     </div>
                   )}
@@ -1691,8 +1689,9 @@ export const StaffPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* 內嵌新增/取消操作面板 (預設隱藏，點擊按鈕後展開；未展開時以 sr-only 維護測試相容) */}
-                  <div className={showAvailabilityForm ? 'staff-holiday-op-card' : 'sr-only'}>
+                  {/* 未展開時不掛載 mutation controls，避免螢幕閱讀器或自動化誤觸不可見操作。 */}
+                  {showAvailabilityForm && (
+                    <div className="staff-holiday-op-card">
                     <h3 className="staff-op-title">
                       ⚙️ 新增請假／暫停接案政策設定
                     </h3>
@@ -1826,7 +1825,18 @@ export const StaffPage: React.FC = () => {
 
                     {availabilityAction.preview && (
                       <div className="staff-action-status" style={{ marginTop: '6px' }}>
-                        ✅ <strong>預覽已產生：</strong>Preview 指紋：{availabilityAction.preview.preview_fingerprint.slice(0, 12)}…
+                        ✅ <strong>預覽已產生：</strong>不可服務期間變更已通過檢查，請確認後套用。
+                      </div>
+                    )}
+                    {availabilityAction.receipt && (
+                      <div
+                        className="staff-action-status"
+                        role="status"
+                        aria-label="不可服務期間變更結果"
+                        style={{ marginTop: '6px' }}
+                      >
+                        ✅ <strong>不可服務期間已更新：</strong>
+                        {availabilityAction.receipt.block.start_date} ～ {availabilityAction.receipt.block.end_date ?? '持續中'}
                       </div>
                     )}
                     {availabilityAction.message && (
@@ -1844,7 +1854,8 @@ export const StaffPage: React.FC = () => {
                         以相同內容重試
                       </button>
                     )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </section>
             )}

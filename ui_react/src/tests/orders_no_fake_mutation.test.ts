@@ -109,6 +109,14 @@ describe('OrdersPage zero fake mutation', () => {
       payroll_version: 0, scheduling: {}, client_finance_impact: {}, payroll_impact: {},
       lifecycle_impact: {}, preview_fingerprint: 'a'.repeat(64),
     });
+    vi.spyOn(orderCancellationClient, 'apply').mockResolvedValue({
+      case_no: 'ORD-2026-0801', order_version: 1, scheduling_version: 1,
+      scheduling_generation: 1, client_finance_version: 1, payroll_version: 1,
+      lifecycle_status: '訂單取消', actual_end_date: null,
+      official_service_day_count: 0, official_service_hours: 0,
+      cancelled_assignment_ids: [], created_assignment_keys: [],
+      preview_fingerprint: 'a'.repeat(64),
+    });
   });
 
   it('removes fake new-order control and enables typed stage filters', async () => {
@@ -172,7 +180,8 @@ describe('OrdersPage zero fake mutation', () => {
     fireEvent.click(screen.getByRole('button', { name: /全部（1 位）/ }));
     fireEvent.click(screen.getByRole('button', { name: '🔄 重新寄送資訊-1' }));
 
-    await screen.findByText('訂單資訊-1 已建立可靠發送任務 #92。');
+    await screen.findByText('訂單資訊-1 已排入發送；尚未代表 LINE 已送達。');
+    expect(document.body.textContent).not.toContain('發送任務 #92');
     expect(candidateContactPoolClient.sendInformation).toHaveBeenCalledWith('ORD-2026-0801', 17, 1);
     expect(screen.queryByText('✅ 100% 完整覆蓋無空檔')).not.toBeInTheDocument();
     expect(screen.queryByText('定金狀態：已核銷（檔期鎖定）')).not.toBeInTheDocument();
@@ -182,14 +191,34 @@ describe('OrdersPage zero fake mutation', () => {
     expect(candidateContactPoolClient.query).toHaveBeenCalledTimes(2);
   });
 
-  it('does not expose an untyped cancellation Apply control', async () => {
+  it('uses the typed cancellation Preview and confirmed Apply without fake amounts or alerts', async () => {
     render(React.createElement(OrdersPage));
     await screen.findByText('ORD-2026-0801');
     await act(async () => fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]));
     await act(async () => fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ })));
     await waitFor(() => expect(orderCancellationClient.query).toHaveBeenCalledOnce());
-    expect(screen.queryByRole('button', { name: /確認執行取消/ })).not.toBeInTheDocument();
-    expect(orderCancellationClient.preview).not.toHaveBeenCalled();
+    await screen.findByText(/實際開始日：尚未開始/);
+    const previewButton = screen.getByRole('button', { name: /預覽取消與退款試算/ });
+    expect(previewButton).toBeEnabled();
+    fireEvent.click(previewButton);
+    await waitFor(() => expect(orderCancellationClient.preview).toHaveBeenCalledOnce());
+    await screen.findByText(/取消影響預覽/);
+    expect(document.body.textContent).not.toContain('NT$ 18,000');
+    expect(document.body.textContent).not.toContain('Preview 指紋');
+
+    const applyButton = screen.getByRole('button', { name: /確認執行取消/ });
+    expect(applyButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('人工取消原因'), { target: { value: '客戶電話確認取消' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /我已核對本次取消日期/ }));
+    expect(applyButton).toBeEnabled();
+    fireEvent.click(applyButton);
+
+    await screen.findByText(/訂單取消已完成/);
+    expect(orderCancellationClient.apply).toHaveBeenCalledWith(
+      'ORD-2026-0801',
+      expect.objectContaining({ reason: '客戶電話確認取消', preview_fingerprint: 'a'.repeat(64) }),
+      expect.objectContaining({ idempotencyKey: expect.stringContaining('orders-cancellation-ui-ORD-2026-0801-') }),
+    );
     expect(window.alert).not.toHaveBeenCalled();
   });
 

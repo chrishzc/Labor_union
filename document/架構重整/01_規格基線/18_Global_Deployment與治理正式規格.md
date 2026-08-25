@@ -210,6 +210,13 @@ media storage 必須由 FastAPI application composition 使用同一份 runtime 
 Monitor 以預設值或不同 mount path 產生假健康或假故障。`/health` 只代表 process liveness，DB-aware
 dependency readiness 由 authenticated Private Operations API 提供。
 
+依 `00` §2.2，受控檔案 storage 的正式 runtime target 是工會地端 NAS mount。application、watcher、
+worker 與 backup job 必須使用同一個受控 storage configuration／logical root；不得把 host 路徑、UNC
+位置或 container 內暫存路徑寫入 public metadata。readiness 至少區分 mount unavailable、read denied、
+capacity exhausted、watcher lag、digest mismatch 與 metadata/object orphan；只有實際掛載該 NAS 的地端
+作業環境可直接操作資料夾。未掛載 NAS 的 Web／LIFF consumer 只能透過 authenticated list／download／
+versioned upload contract 存取，不能退回本機預設資料夾或顯示假健康。
+
 Private Operations client 必須依 typed `retryable` 決定是否重試；HTTP status 只能作缺少 typed
 envelope 時的保守 fallback。transient retry 必須有上限、exponential backoff 與 jitter；認證、設定、
 schema 或 contract failure 不得無限重試。一次性 CLI cycle 只要未成功即回傳非零。

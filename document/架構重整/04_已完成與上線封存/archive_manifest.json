@@ -1,6 +1,6 @@
 {
   "schema": "labor-union-document-archive/v1",
-  "updated_at": "2026-08-23",
+  "updated_at": "2026-08-25",
   "entries": [
     {
       "archive_id": "ARCH-20260823-line-four-module-backend-closeout",
@@ -2353,6 +2353,1018 @@
         "security-alert outbox or schema migration audit",
         "production cutover or external security-alert activation"
       ]
+    },
+{
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-001",
+        "source_path":  "document/功能開發計畫/LINE_LIFF_工會手機管理中心規範.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/LINE_LIFF_工會手機管理中心規範.md",
+        "doc_type":  "feature-plan",
+        "final_status":  "superseded",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "c3de843f7ea98e250da8672dbab7a49124ec6514dfbd9474982634da68797b82",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-002",
+        "source_path":  "document/功能開發計畫/LINE_LIFF_身分先行與服務登記導流規劃.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/LINE_LIFF_身分先行與服務登記導流規劃.md",
+        "doc_type":  "feature-plan",
+        "final_status":  "superseded",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "c08d1d4360a98df2035d18d3ea98b5d4b38335abdda01d7603131a4c6f2216d5",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-003",
+        "source_path":  "document/功能開發計畫/LINE_LIFF_舊客快速身分綁定與防冒領規範.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/LINE_LIFF_舊客快速身分綁定與防冒領規範.md",
+        "doc_type":  "feature-plan",
+        "final_status":  "superseded",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "50cd56789b70f64632486837988b46874758bf35c514ee0ef5ebd623cd6d0b0a",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-004",
+        "source_path":  "document/功能開發計畫/LINE_運營與智能管理中心視覺化工作台規範.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/LINE_運營與智能管理中心視覺化工作台規範.md",
+        "doc_type":  "feature-plan",
+        "final_status":  "superseded",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "0f892c56848e6975c502d611d11686943865ffb08b28e60296731c6dd4c0d468",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-005",
+        "source_path":  "document/功能開發計畫/Part_00_全域測試資料治理與Scenario契約.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/Part_00_全域測試資料治理與Scenario契約.md",
+        "doc_type":  "feature-plan",
+        "final_status":  "superseded",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "6b6d29fd358a317220f3739a1ee1f3134f0f2ed468dfdff2aa2d88513b4cb588",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-006",
+        "source_path":  "document/功能開發計畫/React管理端遷移與UI真實業務流程驗收計畫.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/React管理端遷移與UI真實業務流程驗收計畫.md",
+        "doc_type":  "feature-plan",
+        "final_status":  "superseded",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "2cb173c12c863b9b830bee5170f686a1387cfbb67409a545eeafe7f87b148c60",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-007",
+        "source_path":  "document/功能開發計畫/UI真實業務流程測試資料與驗收主計畫.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/UI真實業務流程測試資料與驗收主計畫.md",
+        "doc_type":  "feature-plan",
+        "final_status":  "superseded",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "bccd65f575fed31572fb69848bbdac148f63e7c76a0eb97c34dde7762b15d79f",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-008",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/58_未實作_未落地_未上線規格總表.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/58_未實作_未落地_未上線規格總表.md",
+        "doc_type":  "gap-register",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/02_決策與退役執行記錄/96_Current_剩餘代辦任務總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "7a2c2793c637554cdb534abfdce88c4b3dd37c8c7dac25e23972270fa6210008",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-009",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-access-account-center-public-contract-hardening-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-access-account-center-public-contract-hardening-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "099e52b581e6015e97865b66aee4164c4039c6e566667762b6089ff714267d8b",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-010",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-access-audit-public-query-hardening-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-access-audit-public-query-hardening-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "665901fee4c3abb17bca5a543fbfebbc4ccc187453835e2f305c9eaa8ec917ce",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-011",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-case-import-workbook-atomicity-archive-policy-gap.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/PROV-20260817-case-import-workbook-atomicity-archive-policy-gap.md",
+        "doc_type":  "gap",
+        "final_status":  "superseded",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "132cf9422c74d5896d43369a3626cdf75311b10eff5c8486b1f7094aede0262f",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-012",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-case-import-workbook-policy-decision-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-case-import-workbook-policy-decision-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "8bc8a483d4a484fa6715ad1e75e6d1ac0911058c3c667e0d76191195752e7391",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-013",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-durable-job-assignment-plan-caller-adoption-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-durable-job-assignment-plan-caller-adoption-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "d14c5537dd57d93231274b53e76031f779f8766b30bc45a5a60d986c64766fdf",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-014",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-durable-job-caller-integration-bridge-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-durable-job-caller-integration-bridge-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "c145569003dc73d8cced436843e8fd2919ad572ddc25ba8876d68ad30947b9a8",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-015",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-durable-job-core-persistence-worker-contract-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-durable-job-core-persistence-worker-contract-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "ce9d748fc65a1f312e1e8aeb3b08ff407c42644a5a7b175ff0b6ff0b055d0d21",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-016",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-durable-job-government-subsidy-caller-adoption-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-durable-job-government-subsidy-caller-adoption-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "bbc9fd8dc72149361c0a6bed4b5b33a0424f4c0dcbb8110114e8387774d20345",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-017",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-durable-job-orders-auto-completion-caller-adoption-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-durable-job-orders-auto-completion-caller-adoption-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "73289e45ab7d6f5d41d9e577386adbef1c9ce5d2a02f245b09cd73b23dcbc444",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-018",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-durable-job-payroll-rebuild-caller-adoption-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-durable-job-payroll-rebuild-caller-adoption-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "7ca2e386d6bee5660c42b654ccf78a1807023e6132a3ccb3e4008e9a0c63231e",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-019",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-durable-job-persistence-caller-adoption-decision-gap.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/PROV-20260817-durable-job-persistence-caller-adoption-decision-gap.md",
+        "doc_type":  "gap-package",
+        "final_status":  "superseded",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "ede913eff866a01b65618e6c9dcf9cc778be621eae7cd7b100bbd9f986c7cac9",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-020",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-durable-job-public-outcome-contract-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-durable-job-public-outcome-contract-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "e7544b823a575cf0bba0aba3de2cdd66b9cff71ef8632148fe55c3c40d4d6f5b",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-021",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-hcm-workbook-source-archive-decision-gap.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/PROV-20260817-hcm-workbook-source-archive-decision-gap.md",
+        "doc_type":  "gap-package",
+        "final_status":  "superseded",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "b1b474b87ced4a536bd0b00bfb4df9b1013f23b513990ee3f497bb51f9aa92a1",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-022",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase3b1-staff-remaining-controls-gap.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/PROV-20260817-react-admin-phase3b1-staff-remaining-controls-gap.md",
+        "doc_type":  "gap-package",
+        "final_status":  "superseded",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "41b934544ee3074a3894195c631f680ea15fe4c77b7d83e48c78c668e640112f",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-023",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase3b-h-r-holiday-react-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-react-admin-phase3b-h-r-holiday-react-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "1b13b3afe8626f5b7dc864db920846cffa08b6f68c8da12a056a2c0d32f72e49",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-024",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase3c-access-audit-react-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-react-admin-phase3c-access-audit-react-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "610d84e572cbf89a493e3a10fa9d62c43c9399b7d96636b25f559ba622f4b738",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-025",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase3d-anomalies-public-detail-hardening-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-react-admin-phase3d-anomalies-public-detail-hardening-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "2308a949fd88cf1df210293e36459a2ffc20155d5e1586f0ae27b81cb04611f8",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-026",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase3d-data-browser-part-identity-decision-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-react-admin-phase3d-data-browser-part-identity-decision-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "231d632efeb341741ed2c1f58cc1e292306669dab8b69d5e0ca9b09d846cf4b5",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-027",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase3d-data-browser-part-identity-gap.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/PROV-20260817-react-admin-phase3d-data-browser-part-identity-gap.md",
+        "doc_type":  "gap-package",
+        "final_status":  "superseded",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "efd5ab36b7598a085dd4431a279a4f0b4efed5cad4798567273b9c790b06d11c",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-028",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase3d-db-query-public-contract-hardening-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-react-admin-phase3d-db-query-public-contract-hardening-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "3da7515bfaa6ff87e1f2da6622cc49771ce27f3bb279c15a3357bfc9d14d4e7b",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-029",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase3d-db-r-react-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-react-admin-phase3d-db-r-react-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "a8bbedd947e60226b311d285eee7b7e8ceb23d78d080de747e67334fb66e2f4e",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-030",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase3d-r-anomaly-detail-react-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-react-admin-phase3d-r-anomaly-detail-react-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "a9df0cf61e6f09b393d8e11dab937010312e7dbd2939f6a876009f2fb7b9c460",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-031",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase3d-warning-transition-receipt-hardening-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-react-admin-phase3d-warning-transition-receipt-hardening-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "31f50db115b8f75e1351e32b841cff2ed69b1ea54861e3bda44b659cd337c316",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-032",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase3d-w-r-warning-transition-react-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-react-admin-phase3d-w-r-warning-transition-react-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "037e3a7f857ce10d027bd6e12dedfe1afbda4b609611248e6ef455325fd8de7e",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-033",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase4a-finance-import-public-contract-hardening-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-react-admin-phase4a-finance-import-public-contract-hardening-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "fbdcddfbfd08cf91e4365fea030ad44b45df57eee4e942ab2b4297ab168668e2",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-034",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase4b-staff-payout-public-contract-hardening-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-react-admin-phase4b-staff-payout-public-contract-hardening-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "6482dc4ebbc7b2fe77f33421d8aeb0ba73bd5fdecc3c6bcd479af25d7793e6af",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-035",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase4-scenario-lineage-governance-gap.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/superseded_specs/PROV-20260817-react-admin-phase4-scenario-lineage-governance-gap.md",
+        "doc_type":  "gap-package",
+        "final_status":  "superseded",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "67b17fcb726fff76cb3d5d48b7cdd09829e3835434490200f6d0e01cdc3a6f9a",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-036",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase4-scenario-lineage-governance-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260817-react-admin-phase4-scenario-lineage-governance-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "9c5e0629fd437b182c26ac6d96acebd7d482b338f757388f0cb52d793461df37",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-037",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260820-access-control-mfa-enrollment-success-contract-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260820-access-control-mfa-enrollment-success-contract-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "4883ae870b4478e281c46e537e2bd67b0c1fcc7af054db125491d3e73650696e",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-038",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260820-line-liff-binding-ownership-reconciliation.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260820-line-liff-binding-ownership-reconciliation.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "9b6501ee6cf4c5e9ec79fc64e7f735ed6296f9c3c09c9048c01c6bb482f5c64a",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-039",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260820-react-admin-matching-recommendation-query-transport-hardening-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260820-react-admin-matching-recommendation-query-transport-hardening-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "acb0143037748f90aacc094add3522c4dde17299f8f5799f43edab40e3e4e896",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-040",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260821-line-human-escalation-closed-loop-contract.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260821-line-human-escalation-closed-loop-contract.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "af2c79f7550a81275d5009a5529264abbe8e6cf44e65623e26f22d4921b2ee4d",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-041",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260821-matching-coordination-successor-contract.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260821-matching-coordination-successor-contract.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "4eb0e774b5eeb4d3a68ca762d9c9d4aea642bef96131b0a7f1e81739bd1981a5",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-042",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260822-react-admin-orders-cursor-continuation-successor-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260822-react-admin-orders-cursor-continuation-successor-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "f1e38994ba61db83d28e5b7316fd047df0ba197aeb9adad65b15abb43180ea32",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-043",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260822-react-admin-phase3b1-staff-end-pause-successor-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260822-react-admin-phase3b1-staff-end-pause-successor-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "b51a8f1d2de8f19143615bdd337c753dac3b01cce8ba350e1242f52f5e79f011",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-044",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260822-react-admin-phase3b-h-r-holiday-mutation-scenario-lineage-successor-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260822-react-admin-phase3b-h-r-holiday-mutation-scenario-lineage-successor-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "2149e57f238221272491301cb3ea6f95aaa31a24a8214fdd2ba4d7fa2bb7e5c0",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-045",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260822-react-admin-scheduling-real-data-pagination-server-days-successor-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260822-react-admin-scheduling-real-data-pagination-server-days-successor-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "f8fbcdae09db3b23200c93135e4ddde2e44a58f4e381335edf8c0a4623d300ea",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
+    },
+    {
+        "archive_id":  "ARCH-20260825-current-doc-cleanup-046",
+        "source_path":  "document/架構重整/02_決策與退役執行記錄/PROV-20260823-react-admin-case-workbooks-preview-only-successor-work-package.md",
+        "archive_path":  "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260823-react-admin-case-workbooks-preview-only-successor-work-package.md",
+        "doc_type":  "work-package",
+        "final_status":  "completed",
+        "completed_at":  "2026-08-25",
+        "deployed_at":  null,
+        "release_identity":  null,
+        "successor_path":  "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "evidence_paths":  [
+
+                           ],
+        "content_sha256":  "dec7f2872fe6ed08bf315c55fc76679d9fda0125e9a48fd18f78aa8851524445",
+        "archived_at":  "2026-08-25",
+        "archived_by":  "Codex on user request",
+        "reason":  "Current completion facts and residual tasks are carried by the formal baseline and the 96 current task register; archived at user direction so completed work no longer appears active.",
+        "restore_triggers":  [
+                                 "successor contract regression",
+                                 "historical design or work-package audit"
+                             ]
     }
   ]
 }

@@ -1,15 +1,20 @@
 /**
  * File: SchedulingPage.tsx
- * Description: 顯示排班甘特與調度工作台，並安全解析請假代班 bounded deep-link。
+ * Description: 顯示排班甘特、請假待辦與調度工作台，以業務語意呈現確認、鎖定與結果回讀。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './SchedulingPage.css';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
+import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import { adaptStaffDirectoryPage } from '../adapters/staff/staff_directory_adapter';
 import type { StaffDirectoryCardViewModel } from '../adapters/staff/staff_directory_adapter';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
 import { SchedulingCurrentError } from '../api/scheduling/scheduling_current_errors';
 import { schedulingEligibilityCollisionClient } from '../api/scheduling/eligibility_collision_client';
+import {
+  staffAssignmentOptionsClient,
+  type StaffAssignmentOption,
+} from '../api/scheduling/staff_assignment_options_client';
 import { SchedulingEligibilityCollisionError } from '../api/scheduling/eligibility_collision_errors';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import {
@@ -189,11 +194,10 @@ function moveMonth(selection: MonthSelection, offset: number): MonthSelection {
 function renderError(error: SchedulingCurrentError | Error): string {
   if (error instanceof SchedulingCurrentError) {
     const code = error.publicCode ?? error.code;
-    const correlation = error.correlationId ? `｜Correlation: ${error.correlationId}` : '';
     if (code === 'SCHEDULING_UNAVAILABLE') {
       return '排班日曆服務暫時無法回應，請稍後重試。';
     }
-    return `[${code}] ${error.message}${correlation}`;
+    return error.message;
   }
   return error.message;
 }
@@ -212,6 +216,45 @@ function holidayPreviewRequestsMatch(
       && current.from_date === previewed.from_date
       && current.to_date === previewed.to_date,
   );
+}
+
+function flowStateLabel(state: string): string {
+  const labels: Record<string, string> = {
+    idle: '尚未查詢',
+    query_loading: '正在載入',
+    query_ready: '資料已就緒',
+    preview_loading: '正在檢查影響',
+    preview_ready: '影響已確認',
+    apply_pending: '正在套用變更',
+    receipt_received: '變更已受理',
+    requery_loading: '正在確認最新結果',
+    observed: '已完成並確認',
+    typed_error: '處理失敗',
+    stale: '資料已變更',
+    conflict: '資料有衝突',
+    outcome_unknown: '結果待確認',
+    observation_failed: '最新結果待確認',
+  };
+  return labels[state] ?? '狀態待確認';
+}
+
+function holidayActionLabel(action: HolidayAction): string {
+  return action === 'delete' ? '刪除國定假日' : '新增或更新國定假日';
+}
+
+function holidayImpactLabel(impact: string): string {
+  return impact === 'none' ? '無影響' : impact;
+}
+
+function leaveInboxStatusLabel(status: LeaveInboxStatus): string {
+  const labels: Record<LeaveInboxStatus, string> = {
+    pending: '待審核',
+    accepted_for_processing: '處理中',
+    resolved: '已完成代班',
+    rejected: '已退回',
+    cancelled: '已取消',
+  };
+  return labels[status];
 }
 
 function HolidayPolicyWorkspace() {
@@ -330,17 +373,15 @@ function HolidayPolicyWorkspace() {
   };
 
   const error = draft?.error;
-  const errorText = error
-    ? `[${error.publicCode ?? error.code}] ${error.message}${error.correlationId ? `｜Correlation: ${error.correlationId}` : ''}`
-    : null;
+  const errorText = error ? error.message : null;
 
   return (
     <section className="holiday-policy-workspace" data-surface-id="scheduling.holiday-policy">
       <header className="holiday-policy-header">
         <div>
-          <p className="holiday-policy-kicker">Query → Preview → Apply → Receipt</p>
+          <p className="holiday-policy-kicker">查詢政策 → 檢查影響 → 確認套用 → 回讀結果</p>
           <h2>🗓️ 國定假日與預設政策管理</h2>
-          <p>日曆版本、雙薪預設與變更結果全部採用後端根事實，點擊「編輯」開啟抽屜進行政策修改或刪除。</p>
+          <p>雙薪預設與變更結果採用正式政策資料，點擊「編輯」開啟抽屜進行修改或刪除。</p>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button
@@ -352,7 +393,7 @@ function HolidayPolicyWorkspace() {
           >
             ➕ 新增國定假日
           </button>
-          <span className={`holiday-policy-state state-${machine.type}`}>{machine.type}</span>
+          <span className={`holiday-policy-state state-${machine.type}`}>{flowStateLabel(machine.type)}</span>
         </div>
       </header>
 
@@ -385,8 +426,6 @@ function HolidayPolicyWorkspace() {
       {calendar && (
         <section className="holiday-policy-calendar" aria-label="國定假日日曆根事實">
           <div className="holiday-policy-meta">
-            <span>來源：<strong>{calendar.source_identity}</strong></span>
-            <span>日曆版本：<code>{calendar.calendar_version.slice(0, 12)}…</code></span>
             <span>區間：{calendar.planning_horizon.from_date} ～ {calendar.planning_horizon.to_date}</span>
           </div>
           {calendar.holidays.length === 0 ? (
@@ -480,8 +519,8 @@ function HolidayPolicyWorkspace() {
                   }}
                   style={{ padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.9rem' }}
                 >
-                  <option value="upsert">新增或更新 (Upsert)</option>
-                  <option value="delete">刪除國定假日 (Delete)</option>
+                  <option value="upsert">新增或更新</option>
+                  <option value="delete">刪除國定假日</option>
                 </select>
               </label>
 
@@ -519,7 +558,7 @@ function HolidayPolicyWorkspace() {
                 onChange={(event) => setDoublePay(event.target.checked)}
                 style={{ width: '18px', height: '18px', accentColor: '#ea580c' }}
               />
-              後端政策預設雙薪 (200% 薪資計算)
+              設為預設雙薪（200% 薪資計算）
             </label>
 
             <label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
@@ -559,11 +598,11 @@ function HolidayPolicyWorkspace() {
           </div>
 
           {calendar && !calendarMatchesHorizon && (
-            <small className="holiday-policy-notice">查詢區間已變更，請重新查詢日曆後再建立 Preview。</small>
+            <small className="holiday-policy-notice">查詢區間已變更，請重新查詢政策後再檢查變更影響。</small>
           )}
           {(previewNeedsRefresh || !calendarMatchesHorizon) && (
             <small id="scheduling-holiday-apply-guidance" className="holiday-policy-notice">
-              Preview 後的查詢區間或變更欄位已調整；請重新查詢並建立新的 Preview，才能套用。
+              查詢區間或變更內容已調整；請重新查詢並檢查最新影響，才能套用。
             </small>
           )}
 
@@ -574,10 +613,10 @@ function HolidayPolicyWorkspace() {
                 預覽已產生
               </h3>
               <p style={{ margin: '0 0 4px 0', fontSize: '0.86rem' }}>
-                <strong>動作：</strong>{draft.preview.command.action} ｜ <strong>日期：</strong>{draft.preview.command.holiday_date} ｜ <strong>指紋：</strong>{draft.preview.preview_fingerprint.slice(0, 12)}…
+                <strong>變更：</strong>{holidayActionLabel(draft.preview.command.action)} ｜ <strong>日期：</strong>{draft.preview.command.holiday_date}
               </p>
               <p style={{ margin: 0, fontSize: '0.86rem' }}>
-                <strong>排班影響：</strong>{draft.preview.schedule_impact} ｜ <strong>薪資影響：</strong>{draft.preview.payroll_impact}
+                <strong>排班影響：</strong>{holidayImpactLabel(draft.preview.schedule_impact)} ｜ <strong>薪資影響：</strong>{holidayImpactLabel(draft.preview.payroll_impact)}
               </p>
             </section>
           )}
@@ -587,7 +626,7 @@ function HolidayPolicyWorkspace() {
             <section className="holiday-policy-receipt" aria-live="polite" style={{ background: '#ecfdf5', border: '1.5px solid #6ee7b7', borderRadius: '10px', padding: '14px 16px', color: '#065f46' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                 <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#047857' }}>
-                  已收到正式 receipt
+                  國定假日政策已更新
                 </h3>
                 <button
                   type="button"
@@ -597,11 +636,8 @@ function HolidayPolicyWorkspace() {
                   關閉抽屜
                 </button>
               </div>
-              <p style={{ margin: '0 0 4px 0', fontSize: '0.84rem' }}>
-                <strong>Receipt Key：</strong>{draft.receipt.receipt_key} ｜ <strong>日曆版本：</strong>{draft.receipt.resulting_calendar_version.slice(0, 12)}…
-              </p>
               <p style={{ margin: 0, fontSize: '0.84rem' }}>
-                {machine.type === 'observed' ? '已觀察最新後端日曆版本。' : 'Receipt 已保留，正在確認最新日曆狀態。'}
+                {machine.type === 'observed' ? '已重新查詢並確認最新國定假日政策。' : '變更已受理，正在確認最新政策狀態。'}
               </p>
             </section>
           )}
@@ -609,12 +645,12 @@ function HolidayPolicyWorkspace() {
           {errorText && <p className="holiday-policy-notice error" role="alert">{errorText}</p>}
           {machine.type === 'outcome_unknown' && (
             <button type="button" onClick={() => void retryHolidayApplyFlow().catch(() => undefined)}>
-              以相同識別碼重試 Apply
+              再次確認變更結果
             </button>
           )}
           {machine.type === 'observation_failed' && (
             <button type="button" onClick={() => void retryHolidayObservationFlow().catch(() => undefined)}>
-              重試觀察後端日曆
+              重新查詢最新政策
             </button>
           )}
         </div>
@@ -630,8 +666,7 @@ function LeaveSubstitutionWorkspace({
   suggestedCaseNo: string | null;
   staffList: readonly StaffDirectoryCardViewModel[];
 }) {
-  const [caseNo, setCaseNo] = useState(() => suggestedCaseNo || IN_NEGOTIATION_CASE_PRESETS[0]?.caseNo || '115000003');
-  const [isCustomInput, setIsCustomInput] = useState(false);
+  const [caseNo, setCaseNo] = useState(() => suggestedCaseNo || '');
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
   const [scheduleId, setScheduleId] = useState<number | null>(null);
   const [resolutionType, setResolutionType] = useState<LeaveResolutionType>('substitute');
@@ -649,16 +684,26 @@ function LeaveSubstitutionWorkspace({
   const [inboxError, setInboxError] = useState<string | null>(null);
   const [inboxReceipt, setInboxReceipt] = useState<string | null>(null);
   const [inboxReasonById, setInboxReasonById] = useState<Record<number, string>>({});
+  const inboxQueryGenerationRef = useRef(0);
+  const observedInboxReceiptRef = useRef<string | null>(null);
 
   const loadInbox = useCallback(async () => {
+    const generation = ++inboxQueryGenerationRef.current;
     setInboxBusy(true);
     setInboxError(null);
     try {
-      setInboxItems(await staffLeaveInboxClient.list(inboxStatus));
+      const items = await staffLeaveInboxClient.list(inboxStatus);
+      if (generation === inboxQueryGenerationRef.current) {
+        setInboxItems(items);
+      }
     } catch (caught) {
-      setInboxError(caught instanceof Error ? caught.message : '請假待辦載入失敗。');
+      if (generation === inboxQueryGenerationRef.current) {
+        setInboxError(caught instanceof Error ? caught.message : '請假待辦載入失敗。');
+      }
     } finally {
-      setInboxBusy(false);
+      if (generation === inboxQueryGenerationRef.current) {
+        setInboxBusy(false);
+      }
     }
   }, [inboxStatus]);
 
@@ -669,13 +714,19 @@ function LeaveSubstitutionWorkspace({
     setInboxError(null);
     setInboxReceipt(null);
     try {
+      let selectedItem = item;
       if (item.request_status === 'pending') {
-        await staffLeaveInboxClient.review(item, 'accept', '調度員已受理，正在安排代班');
-        setInboxReceipt(`已受理待辦 #${item.id}（${item.staff_name}）的 LINE 請假申請，並已通知月嫂！`);
+        const receipt = await staffLeaveInboxClient.review(item, 'accept', '調度員已受理，正在安排代班');
+        selectedItem = {
+          ...item,
+          request_status: receipt.status,
+          aggregate_version: receipt.version,
+        };
+        setInboxReceipt(`已受理 ${item.staff_name} 的請假待辦；尚未完成正式排班，也尚未建立 LINE 通知工作。`);
         await loadInbox();
       }
-      setSelectedInboxItem(item);
-      setReason(`依 LINE 請假待辦 #${item.id} (${item.staff_name} ${item.leave_start_date}～${item.leave_end_date}) 安排代班`);
+      setSelectedInboxItem(selectedItem);
+      setReason(`依 LINE 請假待辦（${item.staff_name} ${item.leave_start_date}～${item.leave_end_date}）安排代班`);
       // 若當前案件指派中有該月嫂，自動選中該 assignment
       const matchedAssignment = assignments.find((a) => a.staff_id === item.staff_id);
       if (matchedAssignment) {
@@ -699,13 +750,35 @@ function LeaveSubstitutionWorkspace({
     setInboxError(null);
     try {
       await staffLeaveInboxClient.review(item, 'reject', rejectReason);
-      setInboxReceipt(`已退回 #${item.id} (${item.staff_name}) 的請假申請，已通知月嫂。`);
+      setInboxReceipt(`已退回 ${item.staff_name} 的請假待辦；待辦狀態已更新。`);
       if (selectedInboxItem?.id === item.id) {
         setSelectedInboxItem(null);
       }
       await loadInbox();
     } catch (caught) {
       setInboxError(caught instanceof Error ? caught.message : '退回申請失敗。');
+    } finally {
+      setInboxBusy(false);
+    }
+  };
+
+  const handleCancelInbox = async (item: LeaveInboxItem) => {
+    const cancelReason = inboxReasonById[item.id]?.trim();
+    if (!cancelReason) {
+      setInboxError('取消待辦請先填寫原因。');
+      return;
+    }
+    setInboxBusy(true);
+    setInboxError(null);
+    try {
+      await staffLeaveInboxClient.review(item, 'cancel', cancelReason);
+      setInboxReceipt(`已取消 ${item.staff_name} 的請假待辦；待辦狀態已更新。`);
+      if (selectedInboxItem?.id === item.id) {
+        setSelectedInboxItem(null);
+      }
+      await loadInbox();
+    } catch (caught) {
+      setInboxError(caught instanceof Error ? caught.message : '取消待辦失敗。');
     } finally {
       setInboxBusy(false);
     }
@@ -724,18 +797,9 @@ function LeaveSubstitutionWorkspace({
 
   const normalizedCaseNo = caseNo.trim();
 
-  // 進入頁面或切換訂單時，自動向後端發送 query，避免畫面留白
-  useEffect(() => {
-    if (normalizedCaseNo) {
-      const existingDraft = leaveSubstitutionFlowStore.get(normalizedCaseNo);
-      if (!existingDraft || existingDraft.status === 'idle') {
-        void queryLeaveSubstitutionFlow(normalizedCaseNo).catch(() => undefined);
-      }
-    }
-  }, [normalizedCaseNo]);
-
   const draft = normalizedCaseNo ? leaveSubstitutionFlowStore.get(normalizedCaseNo) : undefined;
   const machine = resolveLeaveSubstitutionMachineState(draft);
+  const observedReceipt = machine.type === 'observed' ? machine.receipt : null;
   const assignments = draft?.assignments ?? [];
   const selectedAssignment = assignments.find((item) => item.assignment_id === assignmentId) ?? null;
   const schedules = selectedAssignment?.official_schedules ?? [];
@@ -743,7 +807,50 @@ function LeaveSubstitutionWorkspace({
   const busy = ['query_loading', 'preview_loading', 'apply_pending', 'receipt_received', 'requery_loading', 'outcome_unknown', 'observation_failed']
     .includes(machine.type);
 
-  const activePreset = IN_NEGOTIATION_CASE_PRESETS.find((p) => p.caseNo === normalizedCaseNo);
+  useEffect(() => {
+    const linkedRequest = observedReceipt?.linked_request;
+    if (!linkedRequest || linkedRequest.status !== 'resolved' || linkedRequest.resolved_version === null) return;
+    if (observedInboxReceiptRef.current === observedReceipt.batch_key) return;
+    observedInboxReceiptRef.current = observedReceipt.batch_key;
+
+    if (linkedRequest.notification_intent !== 'enqueued') {
+      setInboxError('本次變更未建立 LINE 通知工作，請改由人工通知並確認。');
+      return;
+    }
+
+    const generation = ++inboxQueryGenerationRef.current;
+    setInboxBusy(true);
+    setInboxError(null);
+    void staffLeaveInboxClient.list('resolved', 100)
+      .then((items) => {
+        if (generation !== inboxQueryGenerationRef.current) return;
+        const resolvedItem = items.find((item) => item.id === linkedRequest.request_id);
+        if (
+          !resolvedItem
+          || resolvedItem.request_status !== 'resolved'
+          || resolvedItem.aggregate_version !== linkedRequest.resolved_version
+        ) {
+          throw new Error('請假待辦的完成狀態與本次調度結果不一致。');
+        }
+        setInboxStatus('resolved');
+        setInboxItems(items);
+        setSelectedInboxItem(null);
+        setInboxReceipt(
+          '已確認關聯的請假待辦完成，且與最新調度結果一致。',
+        );
+      })
+      .catch((caught) => {
+        if (generation === inboxQueryGenerationRef.current) {
+          const message = caught instanceof Error ? caught.message : '請假待辦完成狀態查詢失敗。';
+          setInboxError(`變更已受理，但${message}`);
+        }
+      })
+      .finally(() => {
+        if (generation === inboxQueryGenerationRef.current) {
+          setInboxBusy(false);
+        }
+      });
+  }, [observedReceipt]);
 
   useEffect(() => {
     if (assignments.length === 0) {
@@ -819,19 +926,17 @@ function LeaveSubstitutionWorkspace({
   };
 
   const error = draft?.error;
-  const errorText = error
-    ? `[${error.publicCode ?? error.code}] ${error.message}${error.correlationId ? `｜Correlation: ${error.correlationId}` : ''}`
-    : null;
+  const errorText = error ? error.message : null;
 
   return (
     <section className="leave-substitution-workspace" data-surface-id="scheduling.leave-substitution">
       <header className="leave-substitution-header">
         <div>
-          <p className="leave-substitution-kicker">Query → Preview → Apply → Receipt</p>
+          <p className="leave-substitution-kicker">查詢正式排班 → 檢查代班影響 → 人工確認 → 回讀結果</p>
           <h2>🚑 服務中請假與緊急代班調度工作台</h2>
-          <p>整合 LINE 待辦收件與電話／口頭請假調度；即時調度合格代班人員並經由 Server Projection 安全試算。</p>
+          <p>整合 LINE 待辦與電話／口頭請假；先檢查正式排班及相關影響，再由管理員確認代班安排。</p>
         </div>
-        <span className={`leave-substitution-state state-${machine.type}`}>{machine.type}</span>
+        <span className={`leave-substitution-state state-${machine.type}`}>{flowStateLabel(machine.type)}</span>
       </header>
 
       {/* Section 1: LINE 月嫂請假待辦收件匣 */}
@@ -854,7 +959,7 @@ function LeaveSubstitutionWorkspace({
                 disabled={inboxBusy}
                 style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #dec0b6', fontSize: '0.84rem' }}
               >
-                <option value="pending">待審核 (Pending)</option>
+                <option value="pending">待審核</option>
                 <option value="accepted_for_processing">已受理處理中</option>
                 <option value="resolved">已完成代班</option>
                 <option value="rejected">已退回</option>
@@ -910,10 +1015,10 @@ function LeaveSubstitutionWorkspace({
                 <div style={{ display: 'grid', gap: '4px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <strong style={{ fontSize: '0.98rem', color: '#1e1b19' }}>
-                      #{item.id} ｜ 👩‍🍼 {item.staff_name} (#{item.staff_id})
+                      👩‍🍼 {item.staff_name} ｜ 服務人員 #{item.staff_id}
                     </strong>
                     <span className={`contract-status-pill ${item.request_status === 'pending' ? 'waiting' : item.request_status === 'accepted_for_processing' ? 'active' : 'signed'}`} style={{ fontSize: '0.78rem' }}>
-                      {item.request_status === 'pending' ? '待審核' : item.request_status === 'accepted_for_processing' ? '處理中' : item.request_status}
+                      {leaveInboxStatusLabel(item.request_status)}
                     </span>
                   </div>
                   <div style={{ fontSize: '0.86rem', color: '#9a3412', fontWeight: 600 }}>
@@ -925,41 +1030,61 @@ function LeaveSubstitutionWorkspace({
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  {item.request_status === 'pending' && (
+                  {(item.request_status === 'pending' || item.request_status === 'accepted_for_processing') && (
                     <>
                       <input
-                        placeholder="退回原因說明…"
+                        placeholder="退回／取消原因說明…"
                         value={inboxReasonById[item.id] ?? ''}
                         onChange={(e) => setInboxReasonById((prev) => ({ ...prev, [item.id]: e.target.value }))}
                         style={{ padding: '6px 10px', fontSize: '0.82rem', borderRadius: '6px', border: '1px solid #dec0b6', width: '130px' }}
                       />
+                      {item.request_status === 'pending' && (
+                        <button
+                          type="button"
+                          onClick={() => void handleRejectInbox(item)}
+                          disabled={inboxBusy}
+                          style={{ padding: '6px 10px', fontSize: '0.82rem', background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+                        >
+                          退回
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => void handleRejectInbox(item)}
+                        onClick={() => void handleCancelInbox(item)}
                         disabled={inboxBusy}
-                        style={{ padding: '6px 10px', fontSize: '0.82rem', background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+                        style={{ padding: '6px 10px', fontSize: '0.82rem', background: '#f5ece9', color: '#57423b', border: '1px solid #dec0b6', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
                       >
-                        退回
+                        取消待辦
                       </button>
                     </>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => void handleAcceptAndDispatch(item)}
-                    disabled={inboxBusy}
-                    style={{
-                      padding: '7px 14px',
-                      fontSize: '0.86rem',
-                      background: selectedInboxItem?.id === item.id ? '#ea580c' : '#ffedd5',
-                      color: selectedInboxItem?.id === item.id ? '#ffffff' : '#9a3412',
-                      border: '1px solid #fdba74',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontWeight: 750,
-                    }}
-                  >
-                    {selectedInboxItem?.id === item.id ? '✓ 正在調度此案' : '📋 受理並調度代班'}
-                  </button>
+                  {(item.request_status === 'pending' || item.request_status === 'accepted_for_processing') ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleAcceptAndDispatch(item)}
+                      disabled={inboxBusy}
+                      style={{
+                        padding: '7px 14px',
+                        fontSize: '0.86rem',
+                        background: selectedInboxItem?.id === item.id ? '#ea580c' : '#ffedd5',
+                        color: selectedInboxItem?.id === item.id ? '#ffffff' : '#9a3412',
+                        border: '1px solid #fdba74',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontWeight: 750,
+                      }}
+                    >
+                      {selectedInboxItem?.id === item.id
+                        ? '✓ 正在調度此案'
+                        : item.request_status === 'pending'
+                          ? '📋 受理並調度代班'
+                          : '📋 選取並繼續調度'}
+                    </button>
+                  ) : (
+                    <span style={{ color: '#74593f', fontSize: '0.82rem', fontWeight: 700 }}>
+                      此待辦已結束，僅供回讀。
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
@@ -971,7 +1096,7 @@ function LeaveSubstitutionWorkspace({
       {selectedInboxItem && (
         <div style={{ padding: '12px 18px', background: '#ffedd5', border: '1.5px solid #fdba74', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
           <span style={{ fontSize: '0.9rem', color: '#9a3412', fontWeight: 700 }}>
-            🚨 目前已連動 LINE 請假待辦 #{selectedInboxItem.id}（{selectedInboxItem.staff_name} ｜ {selectedInboxItem.leave_start_date}～{selectedInboxItem.leave_end_date}）
+            🚨 目前已連動 LINE 請假待辦（{selectedInboxItem.staff_name} ｜ {selectedInboxItem.leave_start_date}～{selectedInboxItem.leave_end_date}）
           </span>
           <button
             type="button"
@@ -993,51 +1118,14 @@ function LeaveSubstitutionWorkspace({
             📋 選擇服務中案件／訂單編號 (支援電話／口頭／LINE 請假調度)
           </label>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-            {!isCustomInput ? (
-              <select
-                aria-label="選擇服務中訂單編號"
-                value={caseNo}
-                disabled={busy}
-                onChange={(event) => {
-                  const val = event.target.value;
-                  if (val === '__custom__') {
-                    setIsCustomInput(true);
-                  } else {
-                    setCaseNo(val);
-                    void queryLeaveSubstitutionFlow(val).catch(() => undefined);
-                  }
-                }}
-                style={{ flex: 1, minWidth: '260px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.92rem' }}
-              >
-                {IN_NEGOTIATION_CASE_PRESETS.map((preset) => (
-                  <option key={preset.caseNo} value={preset.caseNo}>
-                    #{preset.caseNo} ｜ {preset.clientName} ({preset.month}/{preset.startDay}~{preset.month}/{preset.endDay})
-                  </option>
-                ))}
-                <option value="__custom__">✍️ 自訂輸入其他訂單編號…</option>
-              </select>
-            ) : (
-              <div style={{ display: 'flex', gap: '6px', flex: 1 }}>
-                <input
-                  aria-label="請假代班訂單編號"
-                  value={caseNo}
-                  disabled={busy}
-                  onChange={(event) => setCaseNo(event.target.value)}
-                  placeholder="例如 115000003"
-                  style={{ flex: 1, padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.92rem' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsCustomInput(false);
-                    setCaseNo(IN_NEGOTIATION_CASE_PRESETS[0]?.caseNo || '115000003');
-                  }}
-                  style={{ padding: '8px 12px', fontSize: '0.82rem', background: '#f5ece9', color: '#57423b', border: '1px solid #dec0b6', borderRadius: '8px' }}
-                >
-                  切換為選單
-                </button>
-              </div>
-            )}
+            <input
+              aria-label="請假代班訂單編號"
+              value={caseNo}
+              disabled={busy}
+              onChange={(event) => setCaseNo(event.target.value)}
+              placeholder="請輸入正式訂單編號"
+              style={{ flex: 1, minWidth: '260px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.92rem' }}
+            />
 
             <button
               type="button"
@@ -1049,39 +1137,22 @@ function LeaveSubstitutionWorkspace({
               {machine.type === 'query_loading' ? '⏳ 查詢中…' : '🔍 重新整理指派'}
             </button>
           </div>
+          {!normalizedCaseNo && (
+            <small className="leave-substitution-notice" data-control-id="scheduling.leave.query-guidance">
+              請先輸入訂單編號，才能查詢正式指派並檢查代班影響。
+            </small>
+          )}
         </div>
       </div>
 
-      {/* 訂單基本資訊卡片 (Active Order Context Card) */}
-      <div style={{ padding: '16px 20px', background: '#ffffff', border: '1.5px solid #dec0b6', borderRadius: '12px', boxShadow: '0 2px 8px rgba(74, 69, 67, 0.04)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-          <strong style={{ fontSize: '1rem', color: '#9a3412', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            📋 案件詳細履約資訊：#{activePreset?.caseNo || normalizedCaseNo}
-          </strong>
-          <span className="contract-status-pill active" style={{ fontSize: '0.8rem' }}>
-            {activePreset ? '案件資料已連動' : '自訂查詢案件'}
-          </span>
+      {normalizedCaseNo && (
+        <div style={{ padding: '16px 20px', background: '#ffffff', border: '1.5px solid #dec0b6', borderRadius: '12px', boxShadow: '0 2px 8px rgba(74, 69, 67, 0.04)' }}>
+          <strong style={{ fontSize: '1rem', color: '#9a3412' }}>📋 案件 #{normalizedCaseNo} 正式排班資料</strong>
+          <p style={{ margin: '8px 0 0', color: '#74593f', fontSize: '0.86rem' }}>
+            {draft ? `查得 ${assignments.length} 筆正式指派；服務日期與人員以以下查詢結果為準。` : '尚未查詢；不顯示推測的客戶、地點或服務條件。'}
+          </p>
         </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', fontSize: '0.86rem', color: '#57423b' }}>
-          <div style={{ background: '#fffaf8', padding: '10px 14px', borderRadius: '8px', border: '1px solid #f2e2dc' }}>
-            <span style={{ color: '#9a3412', fontWeight: 700, display: 'block', marginBottom: '2px' }}>👤 客戶姓名／需求</span>
-            <strong>{activePreset?.clientName || '正式簽約客戶'}</strong>
-          </div>
-          <div style={{ background: '#fffaf8', padding: '10px 14px', borderRadius: '8px', border: '1px solid #f2e2dc' }}>
-            <span style={{ color: '#9a3412', fontWeight: 700, display: 'block', marginBottom: '2px' }}>📍 服務地點</span>
-            <span>{activePreset?.region || '台北市／新北市'}</span>
-          </div>
-          <div style={{ background: '#fffaf8', padding: '10px 14px', borderRadius: '8px', border: '1px solid #f2e2dc' }}>
-            <span style={{ color: '#9a3412', fontWeight: 700, display: 'block', marginBottom: '2px' }}>⏰ 服務模式</span>
-            <span>{activePreset?.serviceType || '24 小時住家型'}</span>
-          </div>
-          <div style={{ background: '#fffaf8', padding: '10px 14px', borderRadius: '8px', border: '1px solid #f2e2dc' }}>
-            <span style={{ color: '#9a3412', fontWeight: 700, display: 'block', marginBottom: '2px' }}>📅 服務工作日</span>
-            <span>{activePreset?.summary || '2026/08/16 ~ 08/25 (預計 8 工作日)'}</span>
-          </div>
-        </div>
-      </div>
+      )}
 
       {machine.type === 'query_loading' && (
         <div style={{ padding: '24px', textAlign: 'center', background: '#fff8f6', borderRadius: '12px', border: '1px dashed #dec0b6', color: '#ea580c', fontWeight: 700 }}>
@@ -1132,7 +1203,7 @@ function LeaveSubstitutionWorkspace({
             </select>
           </label>
           <label>
-            請假之正式服務日 (Schedule ID)
+            請假之正式服務日
             <select
               aria-label="正式服務日"
               value={scheduleId ?? ''}
@@ -1145,7 +1216,7 @@ function LeaveSubstitutionWorkspace({
               {schedules.length === 0 && <option value="">此指派目前沒有正式服務日</option>}
               {schedules.map((schedule) => (
                 <option key={schedule.schedule_id} value={schedule.schedule_id}>
-                  {schedule.work_date} ｜ Schedule #{schedule.schedule_id}
+                  {schedule.work_date}
                 </option>
               ))}
             </select>
@@ -1203,7 +1274,7 @@ function LeaveSubstitutionWorkspace({
       )}
 
       {selectedAssignment && schedules.length === 0 && (
-        <p className="leave-substitution-notice error">此指派目前沒有正式服務日，不能建立 Preview；請先完成正式排班。</p>
+        <p className="leave-substitution-notice error">此指派目前沒有正式服務日，無法檢查代班影響；請先完成正式排班。</p>
       )}
 
       {assignments.length > 0 && (
@@ -1214,11 +1285,11 @@ function LeaveSubstitutionWorkspace({
             disabled={!buildPreviewRequest() || busy}
             onClick={preview}
           >
-            {machine.type === 'preview_loading' ? '⏳ 預覽中…' : '🔍 建立安全預覽 (Server Preview)'}
+            {machine.type === 'preview_loading' ? '⏳ 正在檢查影響…' : '🔍 檢查代班影響'}
           </button>
           {!draft?.preview && (
             <small data-control-id="scheduling.leave.apply-gate" style={{ color: '#74593f' }}>
-              建立安全預覽並通過 Server 檢核後，才會顯示確認套用。
+              完成影響檢查後，才會顯示人工確認與套用按鈕。
             </small>
           )}
         </div>
@@ -1226,12 +1297,17 @@ function LeaveSubstitutionWorkspace({
 
       {draft?.preview && (
         <section className="leave-substitution-preview" aria-label="請假代班預覽">
-          <h3>後端 Preview 結果</h3>
+          <h3>代班影響檢查結果</h3>
           <dl>
-            <div><dt>狀態</dt><dd>{draft.preview.apply_readiness.status}</dd></div>
+            <div><dt>檢核結果</dt><dd>{draft.preview.apply_readiness.status === 'ready' ? '可以執行' : '目前無法執行'}</dd></div>
             <div><dt>取消指派</dt><dd>{draft.preview.cancelled_assignment_ids.join('、') || '無'}</dd></div>
             <div><dt>結果日</dt><dd>{draft.preview.outcomes.map((item) => item.resulting_service_date).join('、')}</dd></div>
-            <div><dt>指紋</dt><dd>{draft.preview.preview_fingerprint.slice(0, 12)}…</dd></div>
+            {draft.preview.linked_request && (
+              <div>
+                <dt>LINE 請假待辦</dt>
+                <dd>已關聯請假待辦｜已受理處理</dd>
+              </div>
+            )}
           </dl>
           {draft.preview.apply_readiness.blockers.length > 0 && (
             <p className="leave-substitution-notice error">{draft.preview.apply_readiness.blockers.join('、')}</p>
@@ -1248,7 +1324,7 @@ function LeaveSubstitutionWorkspace({
           </label>
           <label className="leave-substitution-check confirm">
             <input type="checkbox" checked={confirmed} disabled={busy} onChange={(event) => setConfirmed(event.target.checked)} />
-            我已核對後端 Preview，確認執行此變更
+            我已核對上述代班影響，確認執行此變更
           </label>
           <button
             type="button"
@@ -1263,21 +1339,30 @@ function LeaveSubstitutionWorkspace({
 
       {draft?.receipt && (
         <section className="leave-substitution-receipt" aria-live="polite">
-          <h3>🎉 已收到正式 Receipt</h3>
-          <p>Batch：{draft.receipt.batch_key} ｜ Scheduling v{draft.receipt.scheduling_version}</p>
-          <p>{machine.type === 'observed' ? '已重新查詢並確認最新正式指派。' : 'Receipt 已保留，正在確認最新投影。'}</p>
+          <h3>🎉 代班變更已完成</h3>
+          {draft.receipt.linked_request ? (
+            <p>
+              關聯的請假待辦已完成；
+              LINE 通知工作：{draft.receipt.linked_request.notification_intent === 'enqueued'
+                ? '已排入可靠發送佇列，尚未證明送達'
+                : '尚未建立通知工作'}。
+            </p>
+          ) : (
+            <p>本次為人工／電話調度，未關聯 LINE 請假待辦。</p>
+          )}
+          <p>{machine.type === 'observed' ? '已重新查詢並確認最新正式指派。' : '變更已受理，正在確認最新正式指派。'}</p>
         </section>
       )}
 
       {errorText && <p className="leave-substitution-notice error" role="alert">{errorText}</p>}
       {machine.type === 'outcome_unknown' && (
         <button type="button" onClick={() => void retryLeaveSubstitutionApplyFlow(normalizedCaseNo).catch(() => undefined)}>
-          以相同識別碼重試 Apply
+          再次確認變更結果
         </button>
       )}
       {machine.type === 'observation_failed' && (
         <button type="button" onClick={() => void retryLeaveSubstitutionObservationFlow(normalizedCaseNo).catch(() => undefined)}>
-          重試 Receipt 後查詢
+          重新查詢最新正式指派
         </button>
       )}
       {machine.type === 'stale' && <button type="button" onClick={query}>重新查詢最新資料</button>}
@@ -1291,6 +1376,18 @@ export type CalendarRowState =
   | { kind: 'terms_incomplete' }
   | { kind: 'error'; message: string };
 
+interface CalendarCaseOption {
+  caseNo: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+}
+
+type CalendarCaseOptionsState =
+  | { kind: 'loading' }
+  | { kind: 'ready'; options: readonly CalendarCaseOption[] }
+  | { kind: 'error'; message: string };
+
 
 
 type SchedulingDiagnosticTone = 'unavailable' | 'active' | 'waiting' | 'leave';
@@ -1300,6 +1397,19 @@ type EligibilityCollisionState =
   | { kind: 'loading'; caseNo: string }
   | { kind: 'ready'; data: SchedulingEligibilityCollisionViewModel }
   | { kind: 'error'; message: string };
+
+type CaseEligibilityRowState =
+  | { kind: 'loading' }
+  | { kind: 'ready'; data: SchedulingEligibilityCollisionViewModel }
+  | { kind: 'error'; message: string };
+
+type FullIntervalOutcome =
+  | 'available'
+  | 'hard_conflict'
+  | 'reservation_conflict'
+  | 'requires_review'
+  | 'checking'
+  | 'unknown';
 
 function eligibilityErrorMessage(error: unknown): string {
   if (!(error instanceof SchedulingEligibilityCollisionError)) {
@@ -1360,6 +1470,35 @@ function collisionSeverityLabel(severity: SchedulingEligibilityCollisionViewMode
   return severity === 'hard_block' ? '排班阻擋' : '資料待補正（需人工確認）';
 }
 
+function qualificationCheckLabel(code: string): string {
+  const labels: Record<string, string> = {
+    active_lifecycle: '目前接案狀態',
+    service_region: '服務區域',
+    cooking_requirement: '下廚需求',
+    preferred_service_days: '正式服務天數',
+    daily_service_hours: '每日工時',
+    service_qualification: '服務資格',
+  };
+  return labels[code] ?? '媒合條件';
+}
+
+function collisionKindLabel(kind: SchedulingEligibilityCollisionViewModel['collisions'][number]['kind']): string {
+  const labels: Record<SchedulingEligibilityCollisionViewModel['collisions'][number]['kind'], string> = {
+    assignment_interval: '既有指派期間',
+    official_schedule: '正式服務日',
+    waiting_deposit_lock: '待定金案件鎖定',
+    seven_day_buffer: '7 天防撞期',
+    staff_unavailability: '不可服務期間',
+    legacy_schedule: '歷史排班資料',
+    data_integrity: '排班資料完整性',
+  };
+  return labels[kind];
+}
+
+function businessSchedulingDetail(detail: string): string {
+  return detail.replace(/\blineage\b/gi, '來源關聯');
+}
+
 interface SchedulingDiagnosticBadge {
   tone: SchedulingDiagnosticTone;
   text: string;
@@ -1375,7 +1514,6 @@ const NO_OCCUPANCY_DIAGNOSTIC: SchedulingDiagnosticBadge = {
   text: '⚪ 本月無排班占用',
 };
 const NO_OCCUPANCY_SLOT_TEXT = '本月無排班占用';
-const NO_OCCUPANCY_SLOT_DETAIL = '已完成 server 查詢；接單資格與撞期請使用上方案件查詢。';
 
 // 只將 server occupancy／typed error 映射為標籤，或在 Ghost 模式下計算預留區間撞期診斷
 function getStaffDiagnosticBadge(
@@ -1389,7 +1527,7 @@ function getStaffDiagnosticBadge(
     if (ghostConfig?.active) {
       return { tone: 'active', text: '🟢 檔期完全空閒 (可接單)' };
     }
-    return { tone: 'unavailable', text: '⚪ 排班投影缺少日期' };
+    return NO_OCCUPANCY_DIAGNOSTIC;
   }
   if (state.kind === 'terms_incomplete') {
     return { tone: 'waiting', text: '🟡 ⚠️ 時段未確認 (需補齊資料)' };
@@ -1399,39 +1537,13 @@ function getStaffDiagnosticBadge(
   }
   const row = state.row;
 
-  // 🔮 幽靈投影激活時，即時診斷該月嫂在預計服務區間內的重疊情況
+  // 案件完整檔期由逐人 typed eligibility 結果決定，不由月曆回傳的稀疏日期陣列反推。
   if (ghostConfig?.active && ghostConfig.startDay && ghostConfig.endDay) {
-    const startIdx = Math.max(0, ghostConfig.startDay - 1);
-    const endIdx = Math.min(row.days.length, ghostConfig.endDay);
-    const targetDays = row.days.slice(startIdx, endIdx);
-
-    const activeOverlapCount = targetDays.filter((d) => d.tone === 'active' || d.occupancyKinds.includes('official_workday')).length;
-    const bufferOverlapCount = targetDays.filter((d) => d.tone === 'buffer' || d.occupancyKinds.includes('assignment_buffer') || d.occupancyKinds.includes('waiting_deposit_buffer')).length;
-    const waitingOverlapCount = targetDays.filter((d) => d.tone === 'waiting' || d.occupancyKinds.includes('waiting_deposit_service')).length;
-    const leaveOverlapCount = targetDays.filter((d) => d.tone === 'leave' || d.occupancyKinds.includes('staff_unavailability')).length;
-
-    if (activeOverlapCount > 0) {
-      return {
-        tone: 'leave', // tag-conflict (red)
-        text: `🔴 撞期 (預約中重複 ${activeOverlapCount} 天)`,
-      };
-    }
-    if (waitingOverlapCount > 0 || bufferOverlapCount > 0) {
-      return {
-        tone: 'waiting',
-        text: `🟡 撞期 (已有預約定金/Buffer)`,
-      };
-    }
-    if (leaveOverlapCount > 0) {
-      return {
-        tone: 'leave',
-        text: `🟣 請假留停中 (至 ${ghostConfig.endDay} 日)`,
-      };
-    }
-    return {
-      tone: 'active',
-      text: `🟢 檔期完全空閒 (Buffer已解鎖)`,
-    };
+    if (ghostConfig.outcome === 'hard_conflict') return { tone: 'leave', text: '🔴 整段檔期有衝突' };
+    if (ghostConfig.outcome === 'reservation_conflict') return { tone: 'waiting', text: '🟡 整段受預約／防撞期影響' };
+    if (ghostConfig.outcome === 'available') return { tone: 'active', text: '🟢 完整檔期可排' };
+    if (ghostConfig.outcome === 'checking') return { tone: 'unavailable', text: '⚪ 正在確認整段檔期' };
+    return { tone: 'unavailable', text: '⚪ 整段檔期待確認' };
   }
 
   const hasLeave = row.days.some((d) => d.tone === 'leave');
@@ -1460,7 +1572,7 @@ function getStaffDiagnosticBadge(
     return { tone: 'waiting', text: '🔵 待定金核銷鎖定中' };
   }
   if (hasBuffer) {
-    return { tone: 'waiting', text: '🟡 7天防撞期 Buffer 鎖定' };
+    return { tone: 'waiting', text: '🟡 7 天防撞期鎖定' };
   }
   if (hasUnknownOfficialWorkday) {
     return { tone: 'waiting', text: '⚠️ 服務狀態未知／資料待補正' };
@@ -1471,156 +1583,6 @@ function getStaffDiagnosticBadge(
   return NO_OCCUPANCY_DIAGNOSTIC;
 }
 
-export interface InNegotiationCasePreset {
-  caseNo: string;
-  clientName: string;
-  year: number;
-  month: number;
-  startDay: number;
-  endDay: number;
-  workdayCount: number;
-  summary: string;
-  region: string;
-  serviceType: string;
-  meals: string;
-  specialCare: string;
-  pets: string;
-}
-
-export const IN_NEGOTIATION_CASE_PRESETS: InNegotiationCasePreset[] = [
-  {
-    caseNo: '115000003',
-    clientName: '陳小姐 (首胎/雙胞胎需求)',
-    year: 2026,
-    month: 8,
-    startDay: 16,
-    endDay: 25,
-    workdayCount: 8,
-    summary: '2026/08/16 ~ 08/25 (扣除固定週休 8/17、8/24，共 8 工作日)',
-    region: '台北市大安區 (近忠孝復興)',
-    serviceType: '24 小時住家型 (含大夜照護)',
-    meals: '三餐藥膳現煮 (產後第一週清淡、第二週溫補)',
-    specialCare: '雙胞胎照護 / 產婦哺乳指導',
-    pets: '家有小型犬 1 隻 (親人)',
-  },
-  {
-    caseNo: '115000015',
-    clientName: '張小姐 (24hr住家型)',
-    year: 2026,
-    month: 8,
-    startDay: 20,
-    endDay: 31,
-    workdayCount: 10,
-    summary: '2026/08/20 ~ 08/31 (扣除固定週休 8/23、8/30，共 10 工作日)',
-    region: '新北市板橋區 (新板特區電梯大樓)',
-    serviceType: '24 小時住家型',
-    meals: '少油少鹽客製化月子餐、養生茶飲',
-    specialCare: '單胎新生兒照護、大寶生活協助',
-    pets: '無寵物',
-  },
-  {
-    caseNo: 'ORD-2026-0805',
-    clientName: '林小姐 (9hr精緻型)',
-    year: 2026,
-    month: 8,
-    startDay: 16,
-    endDay: 25,
-    workdayCount: 8,
-    summary: '2026/08/16 ~ 08/25 (扣除固定週休 8/17、8/24，共 8 工作日)',
-    region: '台北市內湖區 (近文德站)',
-    serviceType: '9 小時日間精緻型 (09:00 ~ 18:00)',
-    meals: '中餐與晚餐現煮、三日份高湯備餐',
-    specialCare: '初產婦哺乳指導與新生兒洗澡教學',
-    pets: '家有貓咪 2 隻 (獨立貓房)',
-  },
-];
-
-export interface CriteriaComparisonItem {
-  category: string;
-  categoryIcon: string;
-  clientRequirement: string;
-  caregiverProfile: string;
-  status: 'match' | 'partial' | 'mismatch';
-  statusLabel: string;
-}
-
-export function getMatchingCriteriaComparison(
-  caseNo: string,
-  staffName: string,
-  staffId: number
-): CriteriaComparisonItem[] {
-  const preset = IN_NEGOTIATION_CASE_PRESETS.find((p) => p.caseNo === caseNo) || {
-    caseNo,
-    clientName: '自訂案件客戶',
-    year: 2026,
-    month: 8,
-    startDay: 16,
-    endDay: 25,
-    workdayCount: 8,
-    summary: '2026/08/16 ~ 08/25 (預計 8 工作日)',
-    region: '台北市大安區 (近忠孝復興)',
-    serviceType: '24 小時住家型',
-    meals: '三餐藥膳現煮 (產後調理)',
-    specialCare: '初產婦哺乳指導 / 新生兒照護',
-    pets: '家有小型犬 (親人無攻擊性)',
-  };
-
-  const isTwinSpecialist = staffName.includes('秀梅') || staffName.includes('美惠') || staffId % 3 === 0;
-  const is24hrCapable = !staffName.includes('宜君');
-  const cookingCertified = true;
-
-  return [
-    {
-      category: '服務地區與交通',
-      categoryIcon: '📍',
-      clientRequirement: preset.region,
-      caregiverProfile: `雙北全區可配合 (${preset.region.slice(0, 3)}優先)`,
-      status: 'match',
-      statusLabel: '✅ 符合 (交通無虞)',
-    },
-    {
-      category: '服務模式與時段',
-      categoryIcon: '⏰',
-      clientRequirement: preset.serviceType,
-      caregiverProfile: is24hrCapable ? '可配合 24hr 住家或 9hr 精緻型' : '僅接 9hr 日間型 (09:00~18:00)',
-      status: is24hrCapable ? 'match' : preset.serviceType.includes('24') ? 'mismatch' : 'match',
-      statusLabel: is24hrCapable ? '✅ 符合 (時段配合)' : preset.serviceType.includes('24') ? '❌ 不符合 (時段限制)' : '✅ 符合',
-    },
-    {
-      category: '月子餐與藥膳料理',
-      categoryIcon: '🍲',
-      clientRequirement: preset.meals,
-      caregiverProfile: cookingCertified ? '具中餐丙級證照、月子藥膳研習合格證' : '具家常料理經驗',
-      status: 'match',
-      statusLabel: '✅ 完全符合 (具專業證照)',
-    },
-    {
-      category: '母嬰特殊照護技能',
-      categoryIcon: '👶',
-      clientRequirement: preset.specialCare,
-      caregiverProfile: isTwinSpecialist ? '具保母技術士證、國際泌乳研習、雙胞胎資歷 5 年' : '具保母技術士證、新生兒急救 CPR+AED 證書',
-      status: 'match',
-      statusLabel: isTwinSpecialist ? '✅ 專長匹配 (雙胞胎/泌乳)' : '✅ 基礎合格 (保母技術士)',
-    },
-    {
-      category: '寵物家庭友善度',
-      categoryIcon: '🐾',
-      clientRequirement: preset.pets,
-      caregiverProfile: '友善毛孩家庭、可接受同住貓犬照護環境',
-      status: 'match',
-      statusLabel: '✅ 符合 (友善寵物)',
-    },
-    {
-      category: '法規執照與健檢',
-      categoryIcon: '📜',
-      clientRequirement: '良民證有效、年度合格健檢、專業意外責任險',
-      caregiverProfile: '良民證無刑事紀錄、年度健檢合格、500萬責任險投保中',
-      status: 'match',
-      statusLabel: '✅ 檢核通過 (全項合格)',
-    },
-  ];
-}
-
 export interface GhostProjectionConfig {
   active: boolean;
   caseNo: string;
@@ -1628,6 +1590,44 @@ export interface GhostProjectionConfig {
   month: number;
   startDay: number;
   endDay: number;
+  fullStartDate: string;
+  fullEndDate: string;
+  outcome: FullIntervalOutcome;
+}
+
+function fullIntervalOutcome(state: CaseEligibilityRowState | undefined): FullIntervalOutcome {
+  if (!state || state.kind === 'loading') return 'checking';
+  if (state.kind === 'error') return 'unknown';
+  const hardCollisions = state.data.collisions.filter((collision) => collision.severity === 'hard_block');
+  const reservationKinds = new Set(['waiting_deposit_lock', 'seven_day_buffer']);
+  if (hardCollisions.some((collision) => !reservationKinds.has(collision.kind))) return 'hard_conflict';
+  if (hardCollisions.length > 0) return 'reservation_conflict';
+  if (state.data.availability === 'blocked') return 'hard_conflict';
+  if (
+    state.data.availability === 'requires_review'
+    || state.data.availability === 'unknown'
+    || state.data.coverage.status !== 'complete'
+  ) return 'requires_review';
+  return 'available';
+}
+
+function visibleCaseInterval(
+  option: CalendarCaseOption | undefined,
+  selection: MonthSelection,
+): Pick<GhostProjectionConfig, 'year' | 'month' | 'startDay' | 'endDay' | 'fullStartDate' | 'fullEndDate'> | null {
+  if (!option) return null;
+  const range = monthRange(selection);
+  if (option.endDate < range.rangeStart || option.startDate > range.rangeEnd) return null;
+  const visibleStart = option.startDate < range.rangeStart ? range.rangeStart : option.startDate;
+  const visibleEnd = option.endDate > range.rangeEnd ? range.rangeEnd : option.endDate;
+  return {
+    year: selection.year,
+    month: selection.month,
+    startDay: Number(visibleStart.slice(8, 10)),
+    endDay: Number(visibleEnd.slice(8, 10)),
+    fullStartDate: option.startDate,
+    fullEndDate: option.endDate,
+  };
 }
 
 // 動態將 Server 天數投影合併為連續甘特區間條塊（支援 Ghost Projection 幽靈透視）
@@ -1641,67 +1641,69 @@ interface GanttSpan {
   statusLabel?: string;
 }
 
+function ghostCaseSpan(
+  config: GhostProjectionConfig,
+  startDay: number,
+  endDay: number,
+): GanttSpan {
+  const common = { startDay, endDay };
+  if (config.outcome === 'hard_conflict') {
+    return {
+      ...common,
+      id: `ghost-conflict-${startDay}-${endDay}`,
+      tone: 'conflict',
+      icon: '⚠️',
+      caseText: '整段檔期有衝突',
+      statusLabel: `案件 ${config.caseNo} 完整檔期 ${config.fullStartDate} ～ ${config.fullEndDate} 均標示衝突`,
+    };
+  }
+  if (config.outcome === 'reservation_conflict') {
+    return {
+      ...common,
+      id: `ghost-reservation-conflict-${startDay}-${endDay}`,
+      tone: 'deposit-conflict',
+      icon: '⚠️',
+      caseText: '整段檔期受預約／防撞期影響',
+      statusLabel: `案件 ${config.caseNo} 完整檔期 ${config.fullStartDate} ～ ${config.fullEndDate} 均標示受影響`,
+    };
+  }
+  if (config.outcome === 'available') {
+    return {
+      ...common,
+      id: `ghost-free-${startDay}-${endDay}`,
+      tone: 'free',
+      icon: '✨',
+      caseText: `檔期完全空閒：預估 ${endDay - startDay + 1} 日完工`,
+      statusLabel: `案件 ${config.caseNo} 完整檔期可排`,
+    };
+  }
+  return {
+    ...common,
+    id: `ghost-unavailable-${startDay}-${endDay}`,
+    tone: 'unavailable',
+    icon: '⏳',
+    caseText: config.outcome === 'checking' ? '正在確認整段檔期' : '整段檔期待確認',
+    statusLabel: config.outcome === 'unknown'
+      ? `案件 ${config.caseNo} 完整檔期查詢失敗，未推定可排`
+      : `案件 ${config.caseNo} 完整檔期尚未能判定`,
+  };
+}
+
 function buildGanttSpans(
   state: CalendarRowState | undefined,
   totalDays: number,
   ghostConfig?: GhostProjectionConfig | null
 ): GanttSpan[] {
-  if (!state || state.kind === 'empty') {
+  if (state?.kind === 'empty') {
     if (ghostConfig?.active && ghostConfig.startDay && ghostConfig.endDay) {
       const start = Math.max(1, ghostConfig.startDay);
       const end = Math.min(totalDays, ghostConfig.endDay);
-      return [
-        {
-          id: `ghost-free-${start}-${end}`,
-          startDay: start,
-          endDay: end,
-          tone: 'free',
-          icon: '✨',
-          caseText: `✨ 檔期完全空閒：預估 ${end - start + 1} 日完工`,
-          statusLabel: `洽談案件 ${ghostConfig.caseNo} 預留無衝突`,
-        },
-      ];
+      return [ghostCaseSpan(ghostConfig, start, end)];
     }
-    return [
-      {
-        id: 'full-unavailable',
-        startDay: 1,
-        endDay: totalDays,
-        tone: 'unavailable',
-        icon: '⚪',
-        caseText: state ? '排班投影缺少日期' : '正在載入正式排班',
-        statusLabel: state ? '請重試月曆查詢。' : '正在讀取 server projection。',
-      },
-    ];
+    return [];
   }
 
-  if (state.kind === 'terms_incomplete') {
-    return [
-      {
-        id: 'full-incomplete',
-        startDay: 1,
-        endDay: totalDays,
-        tone: 'waiting',
-        icon: '⚠️',
-        caseText: '訂單時段條款不完整 (需補正)',
-        statusLabel: '包含未指定每日時段之指派，請至訂單/異常中心補齊資料',
-      },
-    ];
-  }
-
-  if (state.kind === 'error') {
-    return [
-      {
-        id: 'full-err',
-        startDay: 1,
-        endDay: totalDays,
-        tone: 'unavailable',
-        icon: '⚪',
-        caseText: '排班資料載入異常',
-        statusLabel: `${state.message}；請重試月曆查詢。`,
-      },
-    ];
-  }
+  if (!state || state.kind === 'terms_incomplete' || state.kind === 'error') return [];
 
   const row = state.row;
   const spans: GanttSpan[] = [];
@@ -1710,47 +1712,14 @@ function buildGanttSpans(
   row.days.forEach((day, index) => {
     const dayNum = index + 1;
     const isOccupied = day.occupancyKinds.length > 0;
-    const isGhostDay = Boolean(ghostConfig?.active && dayNum >= ghostConfig.startDay && dayNum <= ghostConfig.endDay);
 
     let tone: GanttSpan['tone'] = day.tone === 'rest' ? 'active' : day.tone;
     let caseText = day.caseLabels.join('、') || (isOccupied ? day.statusLabel : NO_OCCUPANCY_SLOT_TEXT);
     let statusLabel = day.caseLabels.length > 0 ? day.statusLabel : undefined;
     let icon: string | undefined = tone === 'active' ? '🟢' : tone === 'buffer' ? '🔒' : tone === 'leave' ? '🚑' : tone === 'waiting' ? '🔵' : undefined;
 
-    if (isGhostDay) {
-      if (day.tone === 'active' || day.occupancyKinds.includes('official_workday')) {
-        tone = 'conflict';
-        icon = '⚠️';
-        caseText = '⚠️ 檔期重疊無法接單 (撞)';
-        statusLabel = `與既有訂單 ${day.caseLabels.join('、') || '服務日'} 重疊`;
-      } else if (
-        day.tone === 'buffer'
-        || day.tone === 'waiting'
-        || day.occupancyKinds.includes('assignment_buffer')
-        || day.occupancyKinds.includes('waiting_deposit_buffer')
-        || day.occupancyKinds.includes('waiting_deposit_service')
-      ) {
-        tone = 'deposit-conflict';
-        icon = '⚠️';
-        caseText = `⚠️ 檔期受預約定金衝突 (${day.caseLabels.join('、') || '待核銷'})`;
-        statusLabel = '受既有 7 天緩衝或預約定金鎖定衝突';
-      } else if (day.tone === 'leave' || day.occupancyKinds.includes('staff_unavailability')) {
-        tone = 'conflict';
-        icon = '🚑';
-        caseText = '⚠️ 假別留停中 (無法接單)';
-        statusLabel = '月嫂已申請請假或留停';
-      } else {
-        tone = 'free';
-        icon = '✨';
-        caseText = `✨ 檔期完全空閒：預估 ${ghostConfig!.endDay - ghostConfig!.startDay + 1} 日完工`;
-        statusLabel = `洽談案件 ${ghostConfig!.caseNo} 可安全接單`;
-      }
-    }
-
-    const effectiveOccupied = isOccupied || isGhostDay;
-
     if (!current) {
-      if (effectiveOccupied) {
+      if (isOccupied) {
         current = { id: `span-${dayNum}`, startDay: dayNum, endDay: dayNum, tone, icon, caseText, statusLabel };
       }
     } else if (
@@ -1761,7 +1730,7 @@ function buildGanttSpans(
       current.endDay = dayNum;
     } else {
       spans.push(current);
-      if (effectiveOccupied) {
+      if (isOccupied) {
         current = { id: `span-${dayNum}`, startDay: dayNum, endDay: dayNum, tone, icon, caseText, statusLabel };
       } else {
         current = null;
@@ -1773,19 +1742,11 @@ function buildGanttSpans(
     spans.push(current);
   }
 
-  return spans.length > 0
-    ? spans
-    : [
-        {
-          id: 'full-unavailable',
-          startDay: 1,
-          endDay: totalDays,
-          tone: 'unavailable',
-          icon: '⚪',
-          caseText: NO_OCCUPANCY_SLOT_TEXT,
-          statusLabel: NO_OCCUPANCY_SLOT_DETAIL,
-        },
-      ];
+  if (ghostConfig?.active && ghostConfig.startDay && ghostConfig.endDay) {
+    spans.push(ghostCaseSpan(ghostConfig, ghostConfig.startDay, ghostConfig.endDay));
+  }
+
+  return spans;
 }
 
 export const SchedulingPage: React.FC = () => {
@@ -1818,6 +1779,9 @@ export const SchedulingPage: React.FC = () => {
   const [selectedCaseNo, setSelectedCaseNo] = useState<string>(
     () => parseSchedulingDeepLink(window.location.hash).caseNo || '',
   );
+  const [caseOptionsState, setCaseOptionsState] = useState<CalendarCaseOptionsState>({ kind: 'loading' });
+  const [caseEligibilityRows, setCaseEligibilityRows] = useState<Record<number, CaseEligibilityRowState>>({});
+  const [caseOptionsRetryGeneration, setCaseOptionsRetryGeneration] = useState(0);
   const [candidatePoolAdding, setCandidatePoolAdding] = useState<boolean>(false);
   const [candidatePoolSuccess, setCandidatePoolSuccess] = useState<string | null>(null);
   const [candidatePoolError, setCandidatePoolError] = useState<string | null>(null);
@@ -1826,9 +1790,12 @@ export const SchedulingPage: React.FC = () => {
   const directoryControllerRef = useRef<AbortController | null>(null);
   const directoryPendingCursorRef = useRef<number | null>(null);
   const calendarControllerRef = useRef<AbortController | null>(null);
+  const caseOptionsControllerRef = useRef<AbortController | null>(null);
+  const assignmentOptionsByStaffRef = useRef(new Map<number, readonly StaffAssignmentOption[]>());
   const calendarLoadedKeyRef = useRef<Map<number, string>>(new Map());
   const calendarRetryStaffIdsRef = useRef<Set<number>>(new Set());
   const eligibilityControllerRef = useRef<AbortController | null>(null);
+  const caseEligibilityControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1837,7 +1804,9 @@ export const SchedulingPage: React.FC = () => {
       directoryControllerRef.current?.abort();
       directoryPendingCursorRef.current = null;
       calendarControllerRef.current?.abort();
+      caseOptionsControllerRef.current?.abort();
       eligibilityControllerRef.current?.abort();
+      caseEligibilityControllerRef.current?.abort();
     };
   }, []);
 
@@ -1930,6 +1899,113 @@ export const SchedulingPage: React.FC = () => {
     };
   }, [loadDirectory]);
 
+  useEffect(() => {
+    caseOptionsControllerRef.current?.abort();
+    if (staffList.length === 0) {
+      setCaseOptionsState(directoryLoading ? { kind: 'loading' } : { kind: 'ready', options: [] });
+      return undefined;
+    }
+    const controller = new AbortController();
+    caseOptionsControllerRef.current = controller;
+    setCaseOptionsState({ kind: 'loading' });
+
+    const loadOptions = async () => {
+      try {
+        const [summaryPage, assignmentPages] = await Promise.all([
+          loadAllOrderSummaries(
+            ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
+            { page_size: 200, lifecycle_scope: 'unfinished' },
+            { signal: controller.signal },
+          ),
+          Promise.all(staffList.map(async (staff) => {
+            const cached = assignmentOptionsByStaffRef.current.get(staff.id);
+            if (cached) return cached;
+            const assignments = await staffAssignmentOptionsClient.getStaffAssignmentOptions(
+              staff.id,
+              { signal: controller.signal },
+            );
+            assignmentOptionsByStaffRef.current.set(staff.id, assignments);
+            return assignments;
+          })),
+        ]);
+        if (!mountedRef.current || controller.signal.aborted) return;
+        const assignedCaseNos = new Set(
+          assignmentPages.flat().map((assignment) => assignment.case_no),
+        );
+        const options = summaryPage.items
+          .filter((summary) => (
+            assignedCaseNos.has(summary.case_no)
+            && summary.start_date !== null
+            && summary.end_date !== null
+          ))
+          .map((summary) => ({
+            caseNo: summary.case_no,
+            label: `${summary.case_no}｜${summary.client_name}${summary.start_date ? `｜${summary.start_date}` : ''}`,
+            startDate: summary.start_date!,
+            endDate: summary.end_date!,
+          }));
+        setCaseOptionsState({ kind: 'ready', options });
+      } catch (error) {
+        if (!mountedRef.current || controller.signal.aborted) return;
+        setCaseOptionsState({
+          kind: 'error',
+          message: error instanceof Error ? error.message : '排查案件選項載入失敗',
+        });
+      }
+    };
+
+    queueMicrotask(() => void loadOptions());
+    return () => controller.abort();
+  }, [caseOptionsRetryGeneration, directoryLoading, staffList]);
+
+  useEffect(() => {
+    if (caseOptionsState.kind !== 'ready' || !selectedCaseNo.trim()) return;
+    if (caseOptionsState.options.some((option) => option.caseNo === selectedCaseNo.trim())) return;
+    eligibilityControllerRef.current?.abort();
+    setSelectedCaseNo('');
+    setEligibilityCaseNo('');
+    setEligibilityState({ kind: 'idle' });
+  }, [caseOptionsState, selectedCaseNo]);
+
+  useEffect(() => {
+    caseEligibilityControllerRef.current?.abort();
+    const caseNo = selectedCaseNo.trim();
+    if (!caseNo || staffList.length === 0) {
+      setCaseEligibilityRows({});
+      return undefined;
+    }
+    const controller = new AbortController();
+    caseEligibilityControllerRef.current = controller;
+    setCaseEligibilityRows(Object.fromEntries(
+      staffList.map((staff) => [staff.id, { kind: 'loading' } satisfies CaseEligibilityRowState]),
+    ));
+
+    const loadCaseEligibility = async () => {
+      const results = await Promise.all(staffList.map(async (staff) => {
+        try {
+          const projection = await schedulingEligibilityCollisionClient.query(
+            { caseNo, staffId: staff.id, asOf: todayIsoDate() },
+            { signal: controller.signal },
+          );
+          return {
+            staffId: staff.id,
+            state: { kind: 'ready', data: adaptSchedulingEligibilityCollision(projection) } satisfies CaseEligibilityRowState,
+          };
+        } catch (error) {
+          return {
+            staffId: staff.id,
+            state: { kind: 'error', message: eligibilityErrorMessage(error) } satisfies CaseEligibilityRowState,
+          };
+        }
+      }));
+      if (!mountedRef.current || controller.signal.aborted) return;
+      setCaseEligibilityRows(Object.fromEntries(results.map((result) => [result.staffId, result.state])));
+    };
+
+    queueMicrotask(() => void loadCaseEligibility());
+    return () => controller.abort();
+  }, [selectedCaseNo, staffList]);
+
   const range = useMemo(() => monthRange(month), [month]);
 
   const prevMonthRef = useRef<MonthSelection | null>(null);
@@ -2003,7 +2079,7 @@ export const SchedulingPage: React.FC = () => {
       const failed = results.filter((result) => result.error !== null);
       if (failed.length > 0) {
         setCalendarError(new Error(
-          `${failed.length} 位服務人員的排班投影載入失敗；請查看各列狀態後重試。`,
+          `${failed.length} 位服務人員的排班資料載入失敗；請查看各列狀態後重試。`,
         ));
       }
     };
@@ -2046,11 +2122,10 @@ export const SchedulingPage: React.FC = () => {
   }, [eligibilityCaseNo, selectedCaseNo, selectedStaffId]);
 
   useEffect(() => {
-    if (collisionDrawerOpen && selectedStaffId !== null) {
-      const caseToInspect = eligibilityCaseNo.trim() || selectedCaseNo.trim() || '115000003';
-      if (caseToInspect) {
-        void queryEligibility(caseToInspect, selectedStaffId);
-      }
+    if (!collisionDrawerOpen || selectedStaffId === null) return;
+    const caseToInspect = eligibilityCaseNo.trim() || selectedCaseNo.trim();
+    if (caseToInspect) {
+      void queryEligibility(caseToInspect, selectedStaffId);
     }
   }, [collisionDrawerOpen, selectedStaffId, eligibilityCaseNo, selectedCaseNo, queryEligibility]);
 
@@ -2084,57 +2159,24 @@ export const SchedulingPage: React.FC = () => {
     ? eligibilityDisplay(eligibilityState.data)
     : null;
 
-  const activePreset = IN_NEGOTIATION_CASE_PRESETS.find((p) => p.caseNo === selectedCaseNo);
-  const ghostYear = activePreset?.year ?? 2026;
-  const ghostMonth = activePreset?.month ?? 8;
-  const ghostStartDay = activePreset?.startDay ?? 16;
-  const ghostEndDay = activePreset?.endDay ?? 25;
-  const ghostSummary = activePreset?.summary ?? (selectedCaseNo ? `${ghostYear}/${String(ghostMonth).padStart(2, '0')}/${ghostStartDay} ~ ${ghostEndDay} (已扣除固定週休，共 ${Math.max(1, ghostEndDay - ghostStartDay - 1)} 工作日)` : '');
-
-  // 只有當前甘特圖檢視月份與案件服務月份一致時，才啟用幽靈投影
-  const isMatchingGhostMonth = month.year === ghostYear && month.month === ghostMonth;
-
-  const ghostConfig: GhostProjectionConfig | null = (selectedCaseNo.trim() && isMatchingGhostMonth)
-    ? {
-        active: true,
-        caseNo: selectedCaseNo.trim(),
-        year: ghostYear,
-        month: ghostMonth,
-        startDay: ghostStartDay,
-        endDay: ghostEndDay,
-      }
-    : null;
+  const activeCaseOption = caseOptionsState.kind === 'ready'
+    ? caseOptionsState.options.find((option) => option.caseNo === selectedCaseNo.trim())
+    : undefined;
+  const visibleInterval = visibleCaseInterval(activeCaseOption, month);
+  const ghostSummary = activeCaseOption
+    ? `${activeCaseOption.startDate} ～ ${activeCaseOption.endDate}`
+    : '';
+  const isMatchingGhostMonth = visibleInterval !== null;
+  const [ghostYear = 0, ghostMonth = 0, ghostStartDay = 0] = activeCaseOption?.startDate.split('-').map(Number) ?? [];
+  const ghostEndDay = Number(activeCaseOption?.endDate.slice(8, 10) ?? 0);
 
   const handleOpenStaffGhostDrawer = (staff: StaffDirectoryCardViewModel) => {
     setSelectedStaffId(staff.id);
-    const caseToInspect = selectedCaseNo.trim() || eligibilityCaseNo.trim() || '115000003';
+    const caseToInspect = selectedCaseNo.trim() || eligibilityCaseNo.trim();
     setEligibilityCaseNo(caseToInspect);
     setCandidatePoolSuccess(null);
     setCandidatePoolError(null);
     setCollisionDrawerOpen(true);
-
-    if (caseToInspect) {
-      eligibilityControllerRef.current?.abort();
-      const controller = new AbortController();
-      eligibilityControllerRef.current = controller;
-      setEligibilityState({ kind: 'loading', caseNo: caseToInspect });
-      schedulingEligibilityCollisionClient
-        .query(
-          { caseNo: caseToInspect, staffId: staff.id, asOf: todayIsoDate() },
-          { signal: controller.signal }
-        )
-        .then((projection) => {
-          if (controller.signal.aborted || !mountedRef.current) return;
-          setEligibilityState({ kind: 'ready', data: adaptSchedulingEligibilityCollision(projection) });
-        })
-        .catch((error: unknown) => {
-          if (controller.signal.aborted || !mountedRef.current) return;
-          setEligibilityState({
-            kind: 'error',
-            message: eligibilityErrorMessage(error),
-          });
-        });
-    }
   };
 
   const handleAddToCandidatePool = async () => {
@@ -2190,7 +2232,7 @@ export const SchedulingPage: React.FC = () => {
         <div>
           <h1 className="page-title">📅 多月嫂排班日曆與調度中心</h1>
           <p className="page-subtitle">
-            全景甘特檔期矩陣、接單資格／撞期判定與預約鎖定均使用 server projection。
+            全景甘特檔期矩陣、接單資格、撞期判定與預約鎖定均使用正式排班資料。
           </p>
         </div>
       </header>
@@ -2225,7 +2267,7 @@ export const SchedulingPage: React.FC = () => {
         <section
           className="gantt-hero-card"
           data-surface-id="scheduling.calendar"
-          aria-label="排班甘特月曆與服務人員 occupancy"
+          aria-label="排班甘特月曆與服務人員檔期"
         >
           {/* Top Case Selection & Ghost Projection Bar */}
           <div className="gantt-case-projection-bar">
@@ -2242,35 +2284,58 @@ export const SchedulingPage: React.FC = () => {
                   setEligibilityCaseNo(val);
                   setCandidatePoolSuccess(null);
                   setCandidatePoolError(null);
-                  const preset = IN_NEGOTIATION_CASE_PRESETS.find((p) => p.caseNo === val);
-                  if (preset) {
-                    setMonth({ year: preset.year, month: preset.month });
+                  setEligibilityState({ kind: 'idle' });
+                  const option = caseOptionsState.kind === 'ready'
+                    ? caseOptionsState.options.find((item) => item.caseNo === val)
+                    : undefined;
+                  if (option) {
+                    const [year, targetMonth] = option.startDate.split('-').map(Number);
+                    if (year !== month.year || targetMonth !== month.month) {
+                      setMonth({ year, month: targetMonth });
+                    }
                   }
                 }}
-                aria-label="選擇洽談中案件進行投影"
+                aria-label="資格查詢案件編號"
+                disabled={caseOptionsState.kind !== 'ready' || caseOptionsState.options.length === 0}
               >
-                <option value="">-- 請選擇要查看的洽談中案件 (預設無投影) --</option>
-                {IN_NEGOTIATION_CASE_PRESETS.map((preset) => (
-                  <option key={preset.caseNo} value={preset.caseNo}>
-                    #{preset.caseNo} ｜ {preset.clientName} ({preset.month}/{preset.startDay}~{preset.month}/{preset.endDay})
-                  </option>
+                <option value="">
+                  {caseOptionsState.kind === 'loading'
+                    ? '正在載入合法案件…'
+                    : caseOptionsState.kind === 'error'
+                      ? '案件選項載入失敗'
+                      : caseOptionsState.options.length === 0
+                        ? '目前沒有可排查案件'
+                        : '請選擇排查案件'}
+                </option>
+                {caseOptionsState.kind === 'ready' && caseOptionsState.options.map((option) => (
+                  <option key={option.caseNo} value={option.caseNo}>{option.label}</option>
                 ))}
               </select>
+              {caseOptionsState.kind === 'error' && (
+                <button
+                  type="button"
+                  className="btn-secondary-action"
+                  onClick={() => {
+                    assignmentOptionsByStaffRef.current.clear();
+                    setCaseOptionsRetryGeneration((generation) => generation + 1);
+                  }}
+                >
+                  重新載入案件選項
+                </button>
+              )}
             </div>
 
             {selectedCaseNo && (
               <>
-                <div className="gantt-case-info-pill">
-                  <span>📅 預計服務日期：</span>
+                {activeCaseOption ? <div className="gantt-case-info-pill">
+                  <span>📅 正式服務日期：</span>
                   <strong>{ghostSummary}</strong>
-                  {!isMatchingGhostMonth && (
-                    <span style={{ color: '#b45309', marginLeft: '6px' }}>
-                      (⚠️ 案件屬於 {ghostYear} 年 {ghostMonth} 月，當前月曆為 {month.month} 月)
-                    </span>
-                  )}
-                </div>
+                  {!isMatchingGhostMonth && <span style={{ color: '#b45309', marginLeft: '6px' }}>
+                    （案件服務月份與目前月曆不同）
+                  </span>}
+                </div> : <div className="gantt-case-info-pill">請點選月嫂列查詢正式服務日期與檔期衝突。</div>}
 
-                {!isMatchingGhostMonth && (
+                {activeCaseOption && !isMatchingGhostMonth && (
                   <button
                     type="button"
                     className="btn-secondary-action"
@@ -2291,9 +2356,9 @@ export const SchedulingPage: React.FC = () => {
                     setCandidatePoolSuccess(null);
                     setCandidatePoolError(null);
                   }}
-                  title="清除案件投影，回復純排班視圖"
+                  title="清除案件，回復純排班視圖"
                 >
-                  ✕ 清除投影
+                  ✕ 清除案件
                 </button>
               </>
             )}
@@ -2372,7 +2437,7 @@ export const SchedulingPage: React.FC = () => {
                   className={`gantt-pill ${statusFilter === 'waiting' ? 'active' : ''}`}
                   onClick={() => setStatusFilter('waiting')}
                 >
-                  🟡 待派單/Buffer
+                  🟡 待派單／防撞期
                 </button>
                 <button
                   type="button"
@@ -2386,14 +2451,14 @@ export const SchedulingPage: React.FC = () => {
           </section>
 
           {/* Full Legend Bar */}
-          <section className="gantt-legend-bar-rich" aria-label="Server occupancy 圖例">
+          <section className="gantt-legend-bar-rich" aria-label="排班檔期圖例">
             <div className="legend-item">
               <span className="legend-badge active" />
-              <span>正式服務履約 (Active)</span>
+              <span>正式服務履約</span>
             </div>
             <div className="legend-item">
               <span className="legend-badge buffer" />
-              <span>7天防撞期 Buffer 鎖定</span>
+              <span>7 天防撞期鎖定</span>
             </div>
             <div className="legend-item">
               <span className="legend-badge deposit" />
@@ -2444,14 +2509,14 @@ export const SchedulingPage: React.FC = () => {
             </button>
           )}
           {calendarLoading && (
-            <div className="scheduling-status" role="status">正在載入 current calendar…</div>
+            <div className="scheduling-status" role="status">正在載入排班月曆…</div>
           )}
           {selectedStaffId && selectedStaffRow?.kind === 'empty' && !calendarLoading && !calendarError && (
-            <div className="scheduling-status">目前範圍沒有 server projection。</div>
+            <div className="scheduling-status">目前範圍沒有排班資料。</div>
           )}
           {selectedStaffId && selectedStaffRow?.kind === 'terms_incomplete' && !calendarLoading && !calendarError && (
             <div className="scheduling-status error" role="alert" style={{ background: '#fffbeb', borderColor: '#f59e0b', color: '#b45309' }}>
-              ⚠️ 該服務人員所屬訂單之每日服務時段條款不完整（service_time_terms_incomplete），已標記為待補正異常，請至訂單或異常審核中心補齊資料。
+              ⚠️ 該服務人員所屬訂單的每日服務時段尚未完整，請至訂單或異常審核中心補齊資料。
             </div>
           )}
           {calendarError && (
@@ -2467,7 +2532,7 @@ export const SchedulingPage: React.FC = () => {
           )}
           {!directoryLoading && filteredStaff.length === 0 && (
             <div className="scheduling-status">
-              {staffList.length === 0 ? '目前沒有可顯示的服務人員摘要。' : '目前範圍沒有 server projection。'}
+              {staffList.length === 0 ? '目前沒有可顯示的服務人員摘要。' : '目前範圍沒有排班資料。'}
             </div>
           )}
 
@@ -2497,6 +2562,14 @@ export const SchedulingPage: React.FC = () => {
                 {/* Staff Rows */}
                 {filteredStaff.map((staff) => {
                   const row = calendarRows[staff.id];
+                  const ghostConfig: GhostProjectionConfig | null = visibleInterval
+                    ? {
+                        active: true,
+                        caseNo: selectedCaseNo.trim(),
+                        ...visibleInterval,
+                        outcome: fullIntervalOutcome(caseEligibilityRows[staff.id]),
+                      }
+                    : null;
                   const diagnostic = getStaffDiagnosticBadge(row ?? undefined, ghostConfig);
                   const staffCode = `STF-${String(staff.id).padStart(3, '0')}`;
                   const spans = buildGanttSpans(row ?? undefined, daysList.length, ghostConfig);
@@ -2504,6 +2577,10 @@ export const SchedulingPage: React.FC = () => {
                   return (
                     <div
                       key={staff.id}
+                      data-staff-id={staff.id}
+                      data-case-start-day={ghostConfig?.startDay}
+                      data-case-end-day={ghostConfig?.endDay}
+                      data-case-outcome={ghostConfig?.outcome}
                       className={`gantt-staff-matrix-row ${selectedStaffId === staff.id ? 'highlighted' : ''}`}
                       data-surface-id="scheduling.calendar.row"
                       onClick={() => {
@@ -2521,9 +2598,25 @@ export const SchedulingPage: React.FC = () => {
                           <strong>{staff.displayName}</strong>
                           <span className="staff-code-badge">{staffCode}</span>
                         </div>
-                        <div className={`staff-diagnostic-tag tag-${diagnostic.tone}`}>
+                        <div
+                          className={`staff-diagnostic-tag tag-${diagnostic.tone}`}
+                          title={row?.kind === 'error' ? row.message : undefined}
+                        >
                           {diagnostic.text}
                         </div>
+                        {selectedCaseNo && (
+                          <button
+                            type="button"
+                            className="btn-secondary-action"
+                            aria-label={`檢查 ${staff.displayName} 的資格與檔期`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleOpenStaffGhostDrawer(staff);
+                            }}
+                          >
+                            檢查資格與檔期
+                          </button>
+                        )}
                       </div>
 
                       {/* Right: Gantt Days Timeline Bar */}
@@ -2548,6 +2641,8 @@ export const SchedulingPage: React.FC = () => {
                               <div
                                 key={sp.id}
                                 className={`gantt-span-bar span-${sp.tone} ${selectedCaseNo ? 'span-ghost-clickable' : ''}`}
+                                data-start-day={sp.startDay}
+                                data-end-day={sp.endDay}
                                 style={{
                                   left: `${leftPercent}%`,
                                   width: `${widthPercent}%`,
@@ -2643,20 +2738,26 @@ export const SchedulingPage: React.FC = () => {
           <div className="collision-drawer-query-bar">
             <div style={{ flex: '1 1 200px' }}>
               <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#57423b', marginBottom: '4px' }}>
-                洽談中案件編號
+                排查案件
               </label>
-              <input
+              <select
                 aria-label="資格查詢案件編號"
-                data-control-id="scheduling.eligibility.case-input"
+                data-control-id="scheduling.eligibility.case-select"
                 value={eligibilityCaseNo}
                 onChange={(event) => {
                   eligibilityControllerRef.current?.abort();
                   setEligibilityCaseNo(event.target.value);
+                  setSelectedCaseNo(event.target.value);
                   setEligibilityState({ kind: 'idle' });
                 }}
-                placeholder="例如 115000003"
+                disabled={caseOptionsState.kind !== 'ready' || caseOptionsState.options.length === 0}
                 style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.9rem' }}
-              />
+              >
+                <option value="">請選擇正式案件</option>
+                {caseOptionsState.kind === 'ready' && caseOptionsState.options.map((option) => (
+                  <option key={option.caseNo} value={option.caseNo}>{option.label}</option>
+                ))}
+              </select>
             </div>
 
             <div style={{ flex: '1 1 220px' }}>
@@ -2711,37 +2812,29 @@ export const SchedulingPage: React.FC = () => {
                 依據案件登記需求（地點、時段、餐點、特殊技能、寵物）與月嫂履歷偏好即時比對。
               </p>
 
-              {selectedStaffId ? (
+              {eligibilityState.kind === 'ready' ? (
                 <div style={{ overflowX: 'auto' }}>
                   <table className="matching-criteria-table">
                     <thead>
                       <tr>
-                        <th style={{ width: '28%' }}>檢核項目</th>
-                        <th style={{ width: '36%' }}>客戶登記需求</th>
-                        <th style={{ width: '36%' }}>月嫂偏好與條件</th>
+                        <th style={{ width: '32%' }}>檢核項目</th>
+                        <th>正式查詢結果</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {getMatchingCriteriaComparison(
-                        eligibilityCaseNo || selectedCaseNo,
-                        staffList.find((s) => s.id === selectedStaffId)?.displayName ?? '',
-                        selectedStaffId
-                      ).map((item, idx) => (
-                        <tr key={idx}>
+                      {eligibilityState.data.qualificationChecks.map((check) => (
+                        <tr key={check.code}>
                           <td>
                             <div style={{ fontWeight: 700, color: '#1e1b19', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <span>{item.categoryIcon}</span>
-                              <span>{item.category}</span>
+                              <span>📋</span>
+                              <span>{qualificationCheckLabel(check.code)}</span>
                             </div>
-                            <span className={`criteria-match-pill ${item.status}`} style={{ marginTop: '4px' }}>
-                              {item.statusLabel}
+                            <span className={`criteria-match-pill ${check.status === 'pass' ? 'match' : check.status === 'fail' ? 'mismatch' : 'partial'}`} style={{ marginTop: '4px' }}>
+                              {qualificationStatusLabel(check.status)}
                             </span>
                           </td>
                           <td style={{ fontSize: '0.84rem', color: '#4b5563', lineHeight: 1.4 }}>
-                            {item.clientRequirement}
-                          </td>
-                          <td style={{ fontSize: '0.84rem', color: '#1f2937', fontWeight: 600, lineHeight: 1.4 }}>
-                            {item.caregiverProfile}
+                            {businessSchedulingDetail(check.detail)}
                           </td>
                         </tr>
                       ))}
@@ -2750,7 +2843,7 @@ export const SchedulingPage: React.FC = () => {
                 </div>
               ) : (
                 <div style={{ padding: '36px 16px', textAlign: 'center', color: '#8b7169', fontSize: '0.88rem', background: '#fffcfb', borderRadius: '10px', border: '1px dashed #dec0b6' }}>
-                  👆 請先選取服務人員進行條件比對。
+                  👆 請先選取服務人員並查詢，系統不會用樣本資料推測客戶需求或月嫂條件。
                 </div>
               )}
             </div>
@@ -2769,7 +2862,7 @@ export const SchedulingPage: React.FC = () => {
               </div>
 
               <p style={{ margin: '0 0 14px 0', fontSize: '0.84rem', color: '#74593f', lineHeight: 1.5 }}>
-                依據服務人員排班履約、請假留停、既有訂單與 7 天 Buffer 即時檢核。
+                依據服務人員排班履約、請假留停、既有訂單與 7 天防撞期即時檢核。
               </p>
 
               {eligibilityState.kind === 'idle' && (
@@ -2825,10 +2918,7 @@ export const SchedulingPage: React.FC = () => {
                       <ul style={{ margin: 0, paddingLeft: '20px', color: '#b91c1c', fontSize: '0.84rem' }}>
                         {eligibilityState.data.collisions.map((collision, index) => (
                           <li key={`${collision.source_identity}-${index}`} style={{ marginBottom: '4px' }}>
-                            <strong>[{collisionSeverityLabel(collision.severity)}] {collision.kind}</strong>：{collision.detail}
-                            <span style={{ color: '#7f1d1d', marginLeft: '6px', fontSize: '0.78rem' }}>
-                              ({collision.owner} / {collision.source_identity})
-                            </span>
+                            <strong>[{collisionSeverityLabel(collision.severity)}] {collisionKindLabel(collision.kind)}</strong>：{businessSchedulingDetail(collision.detail)}
                           </li>
                         ))}
                       </ul>
@@ -2850,7 +2940,7 @@ export const SchedulingPage: React.FC = () => {
                           .filter((c) => c.status !== 'pass')
                           .map((check) => (
                             <li key={check.code} style={{ marginBottom: '4px' }}>
-                              <strong>{check.code} ({qualificationStatusLabel(check.status)})</strong>：{check.detail}
+                              <strong>{qualificationCheckLabel(check.code)} ({qualificationStatusLabel(check.status)})</strong>：{businessSchedulingDetail(check.detail)}
                             </li>
                           ))}
                       </ul>

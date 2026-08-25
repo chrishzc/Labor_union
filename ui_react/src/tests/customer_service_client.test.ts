@@ -34,6 +34,7 @@ import {
   CUSTOMER_SERVICE_SUMMARY_FIXTURE,
   CUSTOMER_SERVICE_SUMMARY_RESPONSE_FIXTURE,
   CUSTOMER_SERVICE_TICKET_FIXTURE,
+  CUSTOMER_SERVICE_UPDATE_APPLY_RESPONSE_FIXTURE,
 } from './fixtures/customer_service/customer_service_contract_fixtures';
 
 function response(payload: object, status = 200): Response {
@@ -108,7 +109,7 @@ describe('customer service client', () => {
       .mockResolvedValueOnce(
         response(CUSTOMER_SERVICE_RESOLVE_PREVIEW_RESPONSE_FIXTURE)
       )
-      .mockResolvedValueOnce(response(CUSTOMER_SERVICE_DETAIL_RESPONSE_FIXTURE));
+      .mockResolvedValueOnce(response(CUSTOMER_SERVICE_UPDATE_APPLY_RESPONSE_FIXTURE));
     globalThis.fetch = fetchMock;
 
     await customerServiceClient.previewResolve(

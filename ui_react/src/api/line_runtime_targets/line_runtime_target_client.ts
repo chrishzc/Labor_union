@@ -10,15 +10,23 @@ import { LineRuntimeTargetError, mapLineRuntimeTargetError, type LineRuntimeTarg
 import {
   LineRuntimeAdminCandidatesResponseSchema,
   LineRuntimeAdminTargetRequestSchema,
+  LineRuntimeAdminTargetApplyRequestSchema,
   LineRuntimeGroupResetRequestSchema,
+  LineRuntimeGroupResetApplyRequestSchema,
   LineRuntimeTargetEnabledRequestSchema,
+  LineRuntimeTargetEnabledApplyRequestSchema,
+  LineRuntimeTargetPreviewResponseSchema,
   LineRuntimeTargetReceiptResponseSchema,
   LineRuntimeTargetsResponseSchema,
   type LineRuntimeAdminCandidate,
   type LineRuntimeAdminTargetRequest,
+  type LineRuntimeAdminTargetApplyRequest,
   type LineRuntimeGroupResetRequest,
+  type LineRuntimeGroupResetApplyRequest,
   type LineRuntimeTarget,
   type LineRuntimeTargetEnabledRequest,
+  type LineRuntimeTargetEnabledApplyRequest,
+  type LineRuntimeTargetPreview,
   type LineRuntimeTargetReceipt,
 } from './line_runtime_target_schemas';
 
@@ -110,22 +118,59 @@ async function mutation<T>(
   }
 }
 
-export async function addLineRuntimeAdminTarget(request: LineRuntimeAdminTargetRequest, source: LineRuntimeTargetMutationOptions = {}): Promise<LineRuntimeTargetReceipt> {
-  return mutation('add', 'admin_target_add', null, 'POST', '/api/v1/runtime/line-alert-targets/admin', LineRuntimeAdminTargetRequestSchema, request, source);
+async function preview<T>(
+  operation: LineRuntimeTargetOperation,
+  path: string,
+  schema: z.ZodType<T>,
+  request: T,
+  source: LineRuntimeTargetMutationOptions,
+): Promise<LineRuntimeTargetPreview> {
+  try {
+    const body = validate(schema, request);
+    const identity = body as { correlation_id: string };
+    const raw = await transport.post<unknown>(
+      path,
+      body,
+      requestOptions(source, identity.correlation_id),
+    );
+    return decode(LineRuntimeTargetPreviewResponseSchema, raw);
+  } catch (error) {
+    throw mapLineRuntimeTargetError(error, operation);
+  }
 }
 
-export async function resetLineRuntimeGroup(request: LineRuntimeGroupResetRequest, source: LineRuntimeTargetMutationOptions = {}): Promise<LineRuntimeTargetReceipt> {
-  return mutation('reset', 'group_reset', null, 'POST', '/api/v1/runtime/line-alert-targets/group/reset', LineRuntimeGroupResetRequestSchema, request, source);
+export async function previewAddLineRuntimeAdminTarget(request: LineRuntimeAdminTargetRequest, source: LineRuntimeTargetMutationOptions = {}): Promise<LineRuntimeTargetPreview> {
+  return preview('add', '/api/v1/runtime/line-alert-targets/admin/preview', LineRuntimeAdminTargetRequestSchema, request, source);
 }
 
-export async function setLineRuntimeTargetEnabled(targetId: number, request: LineRuntimeTargetEnabledRequest, source: LineRuntimeTargetMutationOptions = {}): Promise<LineRuntimeTargetReceipt> {
+export async function previewResetLineRuntimeGroup(request: LineRuntimeGroupResetRequest, source: LineRuntimeTargetMutationOptions = {}): Promise<LineRuntimeTargetPreview> {
+  return preview('reset', '/api/v1/runtime/line-alert-targets/group/reset/preview', LineRuntimeGroupResetRequestSchema, request, source);
+}
+
+export async function previewSetLineRuntimeTargetEnabled(targetId: number, request: LineRuntimeTargetEnabledRequest, source: LineRuntimeTargetMutationOptions = {}): Promise<LineRuntimeTargetPreview> {
   if (!Number.isInteger(targetId) || targetId < 1) throw new LineRuntimeTargetError('LINE_RUNTIME_TARGET_VALIDATION', 'target_id 必須是正整數。');
-  return mutation('toggle', request.enabled ? 'enable' : 'disable', targetId, 'PATCH', `/api/v1/runtime/line-alert-targets/${targetId}`, LineRuntimeTargetEnabledRequestSchema, request, source);
+  return preview('toggle', `/api/v1/runtime/line-alert-targets/${targetId}/preview`, LineRuntimeTargetEnabledRequestSchema, request, source);
+}
+
+export async function addLineRuntimeAdminTarget(request: LineRuntimeAdminTargetApplyRequest, source: LineRuntimeTargetMutationOptions = {}): Promise<LineRuntimeTargetReceipt> {
+  return mutation('add', 'admin_target_add', null, 'POST', '/api/v1/runtime/line-alert-targets/admin', LineRuntimeAdminTargetApplyRequestSchema, request, source);
+}
+
+export async function resetLineRuntimeGroup(request: LineRuntimeGroupResetApplyRequest, source: LineRuntimeTargetMutationOptions = {}): Promise<LineRuntimeTargetReceipt> {
+  return mutation('reset', 'group_reset', null, 'POST', '/api/v1/runtime/line-alert-targets/group/reset', LineRuntimeGroupResetApplyRequestSchema, request, source);
+}
+
+export async function setLineRuntimeTargetEnabled(targetId: number, request: LineRuntimeTargetEnabledApplyRequest, source: LineRuntimeTargetMutationOptions = {}): Promise<LineRuntimeTargetReceipt> {
+  if (!Number.isInteger(targetId) || targetId < 1) throw new LineRuntimeTargetError('LINE_RUNTIME_TARGET_VALIDATION', 'target_id 必須是正整數。');
+  return mutation('toggle', request.enabled ? 'enable' : 'disable', targetId, 'PATCH', `/api/v1/runtime/line-alert-targets/${targetId}`, LineRuntimeTargetEnabledApplyRequestSchema, request, source);
 }
 
 export const lineRuntimeTargetClient = {
   listTargets: listLineRuntimeTargets,
   listAdminCandidates: listLineRuntimeAdminCandidates,
+  previewAddAdminTarget: previewAddLineRuntimeAdminTarget,
+  previewResetGroup: previewResetLineRuntimeGroup,
+  previewSetEnabled: previewSetLineRuntimeTargetEnabled,
   addAdminTarget: addLineRuntimeAdminTarget,
   resetGroup: resetLineRuntimeGroup,
   setEnabled: setLineRuntimeTargetEnabled,

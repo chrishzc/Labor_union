@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: approved
+declared_status: completed
 identity: PROV-20260821-line-human-escalation-closed-loop-contract
 date: 2026-08-21
 owner: Customer Service / LINE Integration / Runtime Monitoring integration owner（待人工確認）

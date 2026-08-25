@@ -138,8 +138,8 @@ describe('Controlled Order Reopen Component Flow Suite', () => {
       const modal = document.querySelector('[data-surface-id="orders.modal.reopen"]')!;
       expect(modal).not.toBeNull();
       expect(modal).toHaveTextContent('訂單成立');
-      expect(modal).toHaveTextContent('Order v7');
-      expect(modal).toHaveTextContent('requires_fresh_scheduling_preview');
+      expect(modal).not.toHaveTextContent('Order v7');
+      expect(modal).toHaveTextContent('套用重開前必須重新檢查排班');
     });
 
     unmount();
@@ -162,7 +162,7 @@ describe('Controlled Order Reopen Component Flow Suite', () => {
       const modal = document.querySelector('[data-surface-id="orders.modal.reopen"]')!;
       expect(modal).not.toBeNull();
       expect(modal).toHaveTextContent('服務中');
-      expect(modal).toHaveTextContent('Order v12');
+      expect(modal).not.toHaveTextContent('Order v12');
     });
   });
 
@@ -218,7 +218,7 @@ describe('Controlled Order Reopen Component Flow Suite', () => {
     expect(summarySpy).toHaveBeenCalledTimes(2); // 初始載入 + Apply 成功後 re-query
   });
 
-  it('3. Domain Blocked 處理：訂單已有款項結清時，顯示伺服器領域阻擋訊息與 correlation id', async () => {
+  it('3. Domain Blocked 處理：訂單已有款項結清時，顯示業務阻擋且隱藏技術識別', async () => {
     vi.spyOn(ordersMutationClient, 'previewReopen').mockRejectedValue(
       new OrderMutationDomainBlockedError({
         code: 'order_reopen_financial_history_exists',
@@ -238,8 +238,9 @@ describe('Controlled Order Reopen Component Flow Suite', () => {
       expect(
         screen.getByText(/訂單已有款項結清紀錄，禁止直接重開/)
       ).toBeInTheDocument();
-      expect(screen.getByText(/ID: corr-reopen-block-001/)).toBeInTheDocument();
-      expect(screen.getByText(/order_reopen_financial_history_exists/)).toBeInTheDocument();
+      expect(screen.queryByText(/corr-reopen-block-001/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/order_reopen_financial_history_exists/)).not.toBeInTheDocument();
+      expect(screen.getByText(/目前有業務阻擋/)).toBeInTheDocument();
     });
 
     // 此時不應出現 Apply 按鈕

@@ -43,6 +43,15 @@ Global 只定義跨 Domain 不得被破壞的不變量及共用技術契約，�
     Apply 永遠鎖定 fresh facts 重算，cache unavailable 只能影響速度。
 20. 長任務可回 `202 Accepted` 與 durable job identity，但 worker 仍執行同一原子
     application command；不得把 ledger、allocation、lifecycle 或 receipt 拆成多次 commit。
+21. 自動化、外部 provider callback、排程與 worker 只能追加其實際觀察到的 immutable event、
+    durable task 或 derived projection；不得成為唯一的業務狀態推進來源。每個會影響業務
+    lifecycle 的自動化流程，owner Domain 都必須提供等價語意的受控人工入口，讓已授權人員
+    以實際確認的來源事實完成同一種 root-fact transition；人工入口必須要求 actor、非空
+    reason、依業務風險所需的 evidence／確認方式、fresh version、Preview fingerprint、
+    idempotency 與 receipt/readback。人工入口不是任意 target-status 編輯器，不能偽造
+    provider delivery、缺失文件、簽章、付款或其他根事實；只在命令驗證到足夠證據後，才可
+    追加可稽核的人工確認 event。自動化未送達、未回呼或未綁定本身不得把已有合法人工
+    確認途徑的案件永久卡住。
 
 ### 2.1 Durable Job canonical equality（2026-08-21 Option A）
 
@@ -60,6 +69,31 @@ Global 只定義跨 Domain 不得被破壞的不變量及共用技術契約，�
   `ENABLE_ADMIN_AUTH=false`的本機驗收，固定可用`system:local_bypass`；production或一般無ID principal一律拒絕。
 - terminal receipt/error必須使用closed command-type discriminator與schema version；禁止raw map穿透public view。
 - canonical repository不得hidden commit／rollback；application composition是唯一outer Unit of Work與commit owner。
+
+### 2.2 地端 NAS 受控檔案與投影契約（2026-08-25 人工裁決）
+
+既有工會 NAS 是契約、月嫂履歷／證明、寶寶日誌附件、餐食照片及其他大型檔案的實體 bytes
+來源；MySQL 只保存 Domain 關聯、opaque object reference、content digest、MIME、size、版本、狀態、
+actor 與時間等可查詢 metadata，不保存大型 binary。各 Domain 仍擁有檔案的業務關聯、可見範圍、
+完成條件與生命週期；共用檔案能力只負責受控探索、完整性核對、版本讀取與傳輸，不得藉此接管
+Staff、Orders、Scheduling、Contract Signing 或 LINE 的根事實。
+
+- 工會人員可把既有檔案移入已配置的 Domain／subject 投放區。受控 watcher／reconciliation job
+  只在檔案穩定、類型／大小／digest 驗證與唯一 subject 關聯成立後建立或更新索引；未知 subject、
+  重名歧義、檔案仍在寫入、digest 漂移、mount unavailable 或權限錯誤固定 fail closed 並進人工待辦。
+- 投放區的可變檔名不是正式 identity。每個被接受的內容版本以系統 object identity＋digest 識別；
+  同內容可 replay，同 object reference 指向不同內容固定為 conflict／anomaly，不得靜默覆寫舊版本。
+- Web／LIFF 只提供去敏檔案清單或邏輯資料夾樹投影與 authenticated download；邏輯資料夾只表達
+  已核准的 Domain／文件用途／subject 分類，不等於 NAS 實體目錄，也不得由前端任意拼接路徑。一般 UI、API、LINE payload、URL、
+  log、receipt 不得出現 drive letter、UNC path、NAS mount path、原始 storage locator 或公開下載網址。
+  檔案的實際查看／修改採「下載 → 外部工具處理 → 放回指定投放區或受控上傳形成新版本」。Web UI
+  不模擬作業系統檔案總管、實體路徑瀏覽或原地編輯；只有已實際掛載 NAS 的工會地端作業環境可在作業系統操作資料夾。
+- 系統傳送指定文件時，owner command 必須鎖定 subject、文件用途、版本與 digest，再建立 committed
+  download receipt 或 durable delivery task；worker 讀取時重新核對相同 object identity／digest。掃描到
+  檔案不等於授權發送，也不得直接呼叫 LINE 或其他 provider；檔案缺失／漂移時 delivery fail closed。
+- MySQL metadata 與 NAS bytes 必須成對備份、還原與定期對帳；health 需區分 DB、mount、read、capacity、
+  watcher lag 與 orphan／missing-object 狀態。NAS adapter、投放區配置、權限、retention、實際搬移與任何
+  schema 變更仍須各自 Work Package／deployment／DB gate；本文件同步不授權 DDL、migration 或 production 操作。
 
 ## 3. 依賴方向
 

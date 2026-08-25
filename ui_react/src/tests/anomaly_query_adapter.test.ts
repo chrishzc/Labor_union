@@ -149,11 +149,11 @@ describe('Anomaly Query Adapter Suite', () => {
       expect(adapted.rawDomain).toBe('scheduling');
       expect(adapted.category).toBe('排班調度');
 
-      expect(adapted.title).toBe('異常偵測項目');
-      expect(adapted.description).toBe('來源領域：scheduling；來源版本：v2');
-      expect(adapted.relatedEntity).toBe(dto.source_identity);
+      expect(adapted.title).toBe('假日排班尚未確認');
+      expect(adapted.description).toBe('請核對排班調度相關資料的目前資料與可採取的處理方式。');
+      expect(adapted.relatedEntity).toBe('排班調度相關資料');
       expect(adapted.suggestedAction).toBe('開啟詳情查看可執行的處置。');
-      expect(adapted.rootEvidence).toBe(`來源識別：${dto.source_identity}`);
+      expect(adapted.rootEvidence).toBe('影響對象：排班調度相關資料');
 
       // Navigation & Metadata
       expect(adapted.staffCalendarNavigation).toEqual({

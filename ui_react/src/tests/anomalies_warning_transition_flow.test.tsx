@@ -48,7 +48,7 @@ function control(id: string): HTMLElement {
 }
 
 async function openWarningTransition(): Promise<void> {
-  await waitFor(() => expect(screen.getByText('HCM-FIELD-001')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('缺少身分證字號')).toBeInTheDocument());
   fireEvent.click(screen.getByRole('button', { name: '查看警示詳情' }));
   await waitFor(() => expect(anomalyQueryClient.queryImportWarningReferral).toHaveBeenCalledTimes(1));
   fireEvent.click(control('anomalies.import-warning.transition.open'));
@@ -97,10 +97,10 @@ describe('Anomalies Import Warning transition flow', () => {
 
     await enterReason();
     fireEvent.click(control('anomalies.import-warning.transition.preview'));
-    await waitFor(() => expect(screen.getByText('Preview（零寫入）')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('狀態變更影響（尚未套用）')).toBeInTheDocument());
 
     fireEvent.click(control('anomalies.import-warning.transition.apply'));
-    await waitFor(() => expect(screen.getByText(/authenticated receipt re-query/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/已確認追蹤狀態變更完成/)).toBeInTheDocument());
 
     expect(importWarningTransitionClient.preview).toHaveBeenCalledTimes(1);
     expect(importWarningTransitionClient.apply).toHaveBeenCalledTimes(1);
@@ -117,13 +117,13 @@ describe('Anomalies Import Warning transition flow', () => {
     await openWarningTransition();
     await enterReason();
     fireEvent.click(control('anomalies.import-warning.transition.preview'));
-    await waitFor(() => expect(screen.getByText('Preview（零寫入）')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('狀態變更影響（尚未套用）')).toBeInTheDocument());
 
     fireEvent.change(control('anomalies.import-warning.transition.reason'), {
       target: { value: 'changed_reason' },
     });
 
-    expect(screen.queryByText('Preview（零寫入）')).not.toBeInTheDocument();
+    expect(screen.queryByText('狀態變更影響（尚未套用）')).not.toBeInTheDocument();
     expect(control('anomalies.import-warning.transition.apply')).toBeDisabled();
     expect(importWarningTransitionClient.apply).not.toHaveBeenCalled();
   });
@@ -142,17 +142,17 @@ describe('Anomalies Import Warning transition flow', () => {
     await openWarningTransition();
     await enterReason();
     fireEvent.click(control('anomalies.import-warning.transition.preview'));
-    await waitFor(() => expect(screen.getByText('Preview（零寫入）')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('狀態變更影響（尚未套用）')).toBeInTheDocument());
     fireEvent.click(control('anomalies.import-warning.transition.apply'));
 
-    await waitFor(() => expect(screen.getByText(/Apply 結果未明；已保留原 payload/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/變更結果尚未確認；系統已保留本次提交內容/)).toBeInTheDocument());
     expect(control('anomalies.import-warning.transition.retry')).toBeInTheDocument();
     expect(control('anomalies.import-warning.transition.action')).toBeDisabled();
     expect(control('anomalies.import-warning.transition.reason')).toBeDisabled();
     expect(document.querySelector('.drawer-close-btn')).toHaveProperty('disabled', true);
 
     fireEvent.click(control('anomalies.import-warning.transition.retry'));
-    await waitFor(() => expect(screen.getByText(/authenticated receipt re-query/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/已確認追蹤狀態變更完成/)).toBeInTheDocument());
 
     expect(apply).toHaveBeenCalledTimes(2);
     expect(apply.mock.calls[1]?.[0]).toBe(apply.mock.calls[0]?.[0]);
@@ -170,16 +170,16 @@ describe('Anomalies Import Warning transition flow', () => {
     await openWarningTransition();
     await enterReason();
     fireEvent.click(control('anomalies.import-warning.transition.preview'));
-    await waitFor(() => expect(screen.getByText('Preview（零寫入）')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('狀態變更影響（尚未套用）')).toBeInTheDocument());
     fireEvent.click(control('anomalies.import-warning.transition.apply'));
 
-    await waitFor(() => expect(screen.getByText(/Apply receipt 已收到，但觀察失敗/)).toBeInTheDocument());
-    expect(screen.getByText(RECEIPT_ID)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/狀態變更已受理，但結果查詢失敗/)).toBeInTheDocument());
+    expect(screen.queryByText(RECEIPT_ID)).not.toBeInTheDocument();
     expect(control('anomalies.import-warning.transition.observe')).toBeInTheDocument();
     expect(importWarningTransitionClient.apply).toHaveBeenCalledTimes(1);
 
     fireEvent.click(control('anomalies.import-warning.transition.observe'));
-    await waitFor(() => expect(screen.getByText(/authenticated receipt re-query/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/已確認追蹤狀態變更完成/)).toBeInTheDocument());
     expect(importWarningTransitionClient.apply).toHaveBeenCalledTimes(1);
     expect(queryReceipt).toHaveBeenCalledTimes(2);
   });
@@ -194,8 +194,8 @@ describe('Anomalies Import Warning transition flow', () => {
     await enterReason();
     fireEvent.click(control('anomalies.import-warning.transition.preview'));
 
-    await waitFor(() => expect(screen.getByText(/版本已變更；已重查清單/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/資料已更新；系統已重新查詢清單/)).toBeInTheDocument());
     expect(importWarningTransitionClient.apply).not.toHaveBeenCalled();
-    expect(screen.queryByText('Preview（零寫入）')).not.toBeInTheDocument();
+    expect(screen.queryByText('狀態變更影響（尚未套用）')).not.toBeInTheDocument();
   });
 });

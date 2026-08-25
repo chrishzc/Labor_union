@@ -158,7 +158,7 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
 
     render(<StrictMode><App /></StrictMode>);
 
-    await waitFor(() => expect(screen.getByText('Receipt #8')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText('匯入結果')).toHaveLength(2));
     expect(window.location.hash).toBe('#data-import');
     expect(hcmRequests(requests)).toHaveLength(1);
     expect(hcmRequests(requests)[0]?.method).toBe('GET');
@@ -174,16 +174,15 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
 
     render(<StrictMode><App /></StrictMode>);
 
-    await waitFor(() => expect(screen.getByText('Receipt #8')).toBeInTheDocument());
-    expect(screen.getByText('Receipt #9')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText('匯入結果')).toHaveLength(2));
     expect(screen.getByText('本次新增訂單')).toBeInTheDocument();
     expect(screen.getByText('115000001')).toBeInTheDocument();
     expect(screen.getAllByText('115000002').length).toBeGreaterThan(0);
     expect(screen.getByText(/^欄位：行動電話$/)).toBeInTheDocument();
     expect(screen.getByText(/^代碼：hcm_field_invalid:行動電話$/)).toBeInTheDocument();
     expect(screen.getByText('115000003')).toBeInTheDocument();
-    expect(screen.getByText('Exact Replay')).toBeInTheDocument();
-    expect(screen.getByText(/歷史摘要 receipt；本批次統計如上/)).toBeInTheDocument();
+    expect(screen.getByText('已存在相同資料')).toBeInTheDocument();
+    expect(screen.getByText(/歷史匯入摘要；本批次統計如上/)).toBeInTheDocument();
     expect(screen.queryByText('本批次沒有新增訂單。')).not.toBeInTheDocument();
     expect(hcmRequests(requests)).toHaveLength(1);
     expectOnlyGet(requests);
@@ -194,7 +193,7 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
     const requests = installFetchStub('ready');
 
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByText('Receipt #8')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText('匯入結果')).toHaveLength(2));
     const beforeReferral = requests.length;
 
     fireEvent.click(screen.getByRole('button', { name: '前往異常與匯入警示中心' }));
@@ -209,7 +208,7 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
     const emptyRequests = installFetchStub('empty');
     render(<StrictMode><App /></StrictMode>);
 
-    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入receipt/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入結果/)).toBeInTheDocument());
     expect(screen.queryByText(/Receipt #/)).not.toBeInTheDocument();
     expect(hcmRequests(emptyRequests)).toHaveLength(1);
     expectOnlyGet(emptyRequests);
@@ -235,7 +234,7 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
     const requests = installFetchStub('empty');
 
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入receipt/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入結果/)).toBeInTheDocument());
 
     expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();
     for (const controlId of ACTIVE_PREVIEW_CONTROL_IDS) {
@@ -246,8 +245,8 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
     for (const controlId of ACTIVE_APPLY_CONTROL_IDS) {
       expect(document.querySelector(`[data-control-id="${controlId}"]`), controlId).toBeNull();
     }
-    expect(screen.getAllByText('Preview 暫不可用：請先選擇 .xlsx 工作簿。')).toHaveLength(4);
-    expect(screen.getAllByText('Apply 下一步：成功完成 Preview 後顯示確認與套用按鈕。')).toHaveLength(4);
+    expect(screen.getAllByText('請先選擇 .xlsx 工作簿。')).toHaveLength(4);
+    expect(screen.getAllByText('預覽成功後才能確認匯入。')).toHaveLength(4);
     expect(document.querySelector('[data-control-id="imports.hcm-historical.preview"]')).toBeNull();
     expect(document.querySelector('[data-control-id="imports.bank-statements.preview"]')).toBeNull();
     expectOnlyGet(requests);

@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 identity: PROV-20260820-access-control-mfa-enrollment-success-contract
 date: 2026-08-20
 owner: Access Control / Streamlit Integration Owner

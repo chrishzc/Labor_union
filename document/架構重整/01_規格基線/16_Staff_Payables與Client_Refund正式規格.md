@@ -265,6 +265,10 @@ XLSX 是輸出快照，不是月結 entity。
 - 管理員只能從應付款 Query 選定 bank facts 與 obligations 後 Preview／Apply。
 - `PAYOUT-001`～`003` 由 root facts 投影；認領／解除不取代修正根事實。
 - 退匯／沖正成功後，既有義務重新成為 `payable`。
+- 正常且可唯一辨識帳戶、月嫂及完整義務集合的銀行支出，由 Finance Import 的
+  Upload → Preview → confirmed Apply 在 borrowed UoW 委派 Staff Payables；React 正常頁到 terminal
+  receipt／readback 即結束，不再要求第二次「標記已付」。不唯一、金額不符、退匯、沖正與差額
+  才導向本節的 typed 人工入口，不得以 disabled 假按鈕代替。
 
 ### 2.8 Legacy exit
 

@@ -1,6 +1,6 @@
 /**
  * File: customer_service_client.ts
- * Description: 以即時 Session 呼叫客服查詢、狀態更新、LINE durable 回覆與結案端點。
+ * Description: 以即時 Session 呼叫客服查詢、狀態更新、LINE durable 回覆 Preview／Apply 與結案端點。
  */
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -16,21 +16,27 @@ import {
   CustomerServiceDetailResponseSchema,
   CustomerServiceListParamsSchema,
   CustomerServicePageResponseSchema,
-  CustomerServiceReplyRequestSchema,
+  CustomerServiceReplyApplyRequestSchema,
+  CustomerServiceReplyApplyResponseSchema,
+  CustomerServiceReplyPreviewRequestSchema,
+  CustomerServiceReplyPreviewResponseSchema,
   CustomerServiceResolveApplyRequestSchema,
   CustomerServiceResolvePreviewRequestSchema,
   CustomerServiceResolvePreviewResponseSchema,
   CustomerServiceSummaryResponseSchema,
-  CustomerServiceUpdateRequestSchema,
+  CustomerServiceUpdateApplyResponseSchema,
   type CustomerServiceDetail,
   type CustomerServiceListParams,
   type CustomerServicePage,
-  type CustomerServiceReplyRequest,
+  type CustomerServiceReplyApply,
+  type CustomerServiceReplyApplyRequest,
+  type CustomerServiceReplyPreview,
+  type CustomerServiceReplyPreviewRequest,
   type CustomerServiceResolveApplyRequest,
   type CustomerServiceResolvePreview,
   type CustomerServiceResolvePreviewRequest,
   type CustomerServiceSummary,
-  type CustomerServiceUpdateRequest,
+  type CustomerServiceUpdateApply,
 } from './customer_service_schemas';
 
 export interface CustomerServiceRequestOptions {
@@ -75,16 +81,26 @@ export interface CustomerServiceClient {
 }
 
 export interface CustomerServiceActionsClient {
-  updateTicket(
+  previewUpdate(
     ticketId: number,
-    payload: CustomerServiceUpdateRequest,
-    options?: CustomerServiceRequestOptions
-  ): Promise<CustomerServiceDetail>;
-  replyTicket(
+    payload: CustomerServiceResolvePreviewRequest,
+    options: CustomerServiceMutationOptions
+  ): Promise<CustomerServiceResolvePreview>;
+  applyUpdate(
     ticketId: number,
-    payload: CustomerServiceReplyRequest,
-    options?: CustomerServiceRequestOptions
-  ): Promise<CustomerServiceDetail>;
+    payload: CustomerServiceResolveApplyRequest,
+    options: CustomerServiceApplyOptions
+  ): Promise<CustomerServiceUpdateApply>;
+  previewReply(
+    ticketId: number,
+    payload: CustomerServiceReplyPreviewRequest,
+    options: CustomerServiceMutationOptions
+  ): Promise<CustomerServiceReplyPreview>;
+  applyReply(
+    ticketId: number,
+    payload: CustomerServiceReplyApplyRequest,
+    options: CustomerServiceMutationOptions
+  ): Promise<CustomerServiceReplyApply>;
 }
 
 function validateTicketId(ticketId: number): number {
@@ -217,40 +233,39 @@ export async function getCustomerServiceTicketDetail(
   });
 }
 
-export async function updateCustomerServiceTicket(
+export async function previewCustomerServiceReply(
   ticketId: number,
-  payload: CustomerServiceUpdateRequest,
-  options?: CustomerServiceRequestOptions
-): Promise<CustomerServiceDetail> {
+  payload: CustomerServiceReplyPreviewRequest,
+  options: CustomerServiceMutationOptions
+): Promise<CustomerServiceReplyPreview> {
   return callCustomerService(async () => {
     const validTicketId = validateTicketId(ticketId);
-    const validPayload = parseRequest(CustomerServiceUpdateRequestSchema, payload);
-    const raw = await transport.request(
-      `/api/v1/customer-service/tickets/${encodeURIComponent(String(validTicketId))}`,
-      {
-        ...currentRequestOptions(options),
-        method: 'PATCH',
-        body: validPayload,
-      }
+    const validPayload = parseRequest(CustomerServiceReplyPreviewRequestSchema, payload);
+    const correlationId = validateRequiredHeader('X-Correlation-ID', options.correlationId);
+    const raw = await transport.post(
+      `/api/v1/customer-service/tickets/${encodeURIComponent(String(validTicketId))}/reply/preview`,
+      validPayload,
+      currentRequestOptions(options, { 'X-Correlation-ID': correlationId })
     );
-    return decodeSuccessfulEnvelope(CustomerServiceDetailResponseSchema, raw);
+    return decodeSuccessfulEnvelope(CustomerServiceReplyPreviewResponseSchema, raw);
   });
 }
 
-export async function replyCustomerServiceTicket(
+export async function applyCustomerServiceReply(
   ticketId: number,
-  payload: CustomerServiceReplyRequest,
-  options?: CustomerServiceRequestOptions
-): Promise<CustomerServiceDetail> {
+  payload: CustomerServiceReplyApplyRequest,
+  options: CustomerServiceMutationOptions
+): Promise<CustomerServiceReplyApply> {
   return callCustomerService(async () => {
     const validTicketId = validateTicketId(ticketId);
-    const validPayload = parseRequest(CustomerServiceReplyRequestSchema, payload);
+    const validPayload = parseRequest(CustomerServiceReplyApplyRequestSchema, payload);
+    const correlationId = validateRequiredHeader('X-Correlation-ID', options.correlationId);
     const raw = await transport.post(
-      `/api/v1/customer-service/tickets/${encodeURIComponent(String(validTicketId))}/reply`,
+      `/api/v1/customer-service/tickets/${encodeURIComponent(String(validTicketId))}/reply/apply`,
       validPayload,
-      currentRequestOptions(options)
+      currentRequestOptions(options, { 'X-Correlation-ID': correlationId })
     );
-    return decodeSuccessfulEnvelope(CustomerServiceDetailResponseSchema, raw);
+    return decodeSuccessfulEnvelope(CustomerServiceReplyApplyResponseSchema, raw);
   });
 }
 
@@ -283,11 +298,13 @@ export async function previewCustomerServiceResolve(
   });
 }
 
-export async function applyCustomerServiceResolve(
+export const previewCustomerServiceUpdate = previewCustomerServiceResolve;
+
+export async function applyCustomerServiceUpdate(
   ticketId: number,
   payload: CustomerServiceResolveApplyRequest,
   options: CustomerServiceApplyOptions
-): Promise<CustomerServiceDetail> {
+): Promise<CustomerServiceUpdateApply> {
   return callCustomerService(async () => {
     const validTicketId = validateTicketId(ticketId);
     const validPayload = parseRequest(
@@ -310,8 +327,17 @@ export async function applyCustomerServiceResolve(
         'Idempotency-Key': idempotencyKey,
       })
     );
-    return decodeSuccessfulEnvelope(CustomerServiceDetailResponseSchema, raw);
+    return decodeSuccessfulEnvelope(CustomerServiceUpdateApplyResponseSchema, raw);
   });
+}
+
+export async function applyCustomerServiceResolve(
+  ticketId: number,
+  payload: CustomerServiceResolveApplyRequest,
+  options: CustomerServiceApplyOptions
+): Promise<CustomerServiceDetail> {
+  const receipt = await applyCustomerServiceUpdate(ticketId, payload, options);
+  return receipt.readback;
 }
 
 class DefaultCustomerServiceClient
@@ -337,20 +363,36 @@ class DefaultCustomerServiceClient
     return getCustomerServiceTicketDetail(ticketId, options);
   }
 
-  public updateTicket(
+  public previewUpdate(
     ticketId: number,
-    payload: CustomerServiceUpdateRequest,
-    options?: CustomerServiceRequestOptions
-  ): Promise<CustomerServiceDetail> {
-    return updateCustomerServiceTicket(ticketId, payload, options);
+    payload: CustomerServiceResolvePreviewRequest,
+    options: CustomerServiceMutationOptions
+  ): Promise<CustomerServiceResolvePreview> {
+    return previewCustomerServiceUpdate(ticketId, payload, options);
   }
 
-  public replyTicket(
+  public applyUpdate(
     ticketId: number,
-    payload: CustomerServiceReplyRequest,
-    options?: CustomerServiceRequestOptions
-  ): Promise<CustomerServiceDetail> {
-    return replyCustomerServiceTicket(ticketId, payload, options);
+    payload: CustomerServiceResolveApplyRequest,
+    options: CustomerServiceApplyOptions
+  ): Promise<CustomerServiceUpdateApply> {
+    return applyCustomerServiceUpdate(ticketId, payload, options);
+  }
+
+  public previewReply(
+    ticketId: number,
+    payload: CustomerServiceReplyPreviewRequest,
+    options: CustomerServiceMutationOptions
+  ): Promise<CustomerServiceReplyPreview> {
+    return previewCustomerServiceReply(ticketId, payload, options);
+  }
+
+  public applyReply(
+    ticketId: number,
+    payload: CustomerServiceReplyApplyRequest,
+    options: CustomerServiceMutationOptions
+  ): Promise<CustomerServiceReplyApply> {
+    return applyCustomerServiceReply(ticketId, payload, options);
   }
 
   public previewResolve(

@@ -55,9 +55,9 @@ describe('客服工單結案 successor', () => {
     await screen.findByText('請協助確認資料更新方式');
     expect(screen.getByText(CUSTOMER_SERVICE_TICKET_FIXTURE.line_user_id_masked)).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: '結案說明' }), { target: { value: '已由工會人員確認處理完成' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽結案' }));
+    fireEvent.click(screen.getByRole('button', { name: '檢查結案影響' }));
     await screen.findByText('處理中 → 已結案');
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認結案內容與目前版本' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認結案內容與目前工單狀態' }));
     fireEvent.click(screen.getByRole('button', { name: '確認結案' }));
     await screen.findByText('結案已完成');
     expect(customer.getTicketDetail).toHaveBeenCalledTimes(1);
@@ -91,7 +91,7 @@ describe('客服工單結案 successor', () => {
     await screen.findByText('客服工單明細載入失敗');
     fireEvent.click(screen.getByRole('button', { name: '重試查詢' }));
     await screen.findByText('請協助確認資料更新方式');
-    expect(screen.getByRole('button', { name: '預覽結案' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '檢查結案影響' })).toBeEnabled();
     expect(getTicketDetail).toHaveBeenCalledTimes(2);
     expect(previewResolve).not.toHaveBeenCalled();
     expect(applyResolve).not.toHaveBeenCalled();

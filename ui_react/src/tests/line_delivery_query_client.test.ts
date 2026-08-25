@@ -62,7 +62,10 @@ describe('LINE delivery query client', () => {
     expect(fetchMock.mock.calls.every((call) => call[1]?.method === 'GET')).toBe(true);
     expect(page.items).toHaveLength(1);
     expect(detail.attempts).toHaveLength(1);
-    expect(JSON.stringify(adaptLineDeliveryItem(page.items[0]))).not.toContain('recipient');
+    const adapted = adaptLineDeliveryItem(page.items[0]);
+    expect(JSON.stringify(adapted)).not.toContain('recipient');
+    expect(adapted.statusLabel).toBe('已送出');
+    expect(adapted.statusLabel).not.toContain('已送達');
   });
 
   it('拒絕 extra/raw sensitive payload、aggregate 漂移與 request identity 漂移', async () => {

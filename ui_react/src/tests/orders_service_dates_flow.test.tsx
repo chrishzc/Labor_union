@@ -164,7 +164,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       const metaRow = document.querySelector('.service-dates-meta-row')!;
       expect(metaRow).not.toBeNull();
       expect(metaRow).toHaveTextContent('合約服務天數：3 天');
-      expect(metaRow).toHaveTextContent('目前確認版本：v1');
+      expect(metaRow).toHaveTextContent('日期確認狀態：已確認');
       expect(metaRow).toHaveTextContent('已確認日期：2026-09-01');
     });
 
@@ -192,7 +192,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       const metaRow = document.querySelector('.service-dates-meta-row')!;
       expect(metaRow).not.toBeNull();
       expect(metaRow).toHaveTextContent('合約服務天數：5 天');
-      expect(metaRow).toHaveTextContent('目前確認版本：v2');
+      expect(metaRow).toHaveTextContent('日期確認狀態：已確認');
       expect(metaRow).toHaveTextContent('已確認日期：2026-09-10, 2026-09-11');
     });
   });
@@ -218,7 +218,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     });
 
     // 預覽按鈕應為可點擊
-    const previewBtn = await screen.findByRole('button', { name: /產生服務週次預覽/ });
+    const previewBtn = await screen.findByRole('button', { name: /檢查服務週次影響/ });
     expect(previewBtn).not.toBeDisabled();
 
     // 點擊預覽

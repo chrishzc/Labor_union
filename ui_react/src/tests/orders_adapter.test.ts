@@ -29,9 +29,15 @@ describe('Orders summary adapter', () => {
   it('keeps the raw server status and does not create a workflow stage', () => {
     const card = adaptOrderSummaryItem(mockSummaryItems[6]);
     expect(card.orderStatus).toBe('已結案');
+    expect(card.identityStatus).toBe('regular');
     expect('stage' in card).toBe(false);
     expect(card.depositSettled).toBeNull();
     expect(card.depositSettledText).toContain(ORDERS_TYPED_PROJECTION_UNAVAILABLE);
+  });
+
+  it('keeps missing identity status explicit for the client card', () => {
+    const card = adaptOrderSummaryItem({ ...mockSummaryItems[0], identity_status: null });
+    expect(card.identityStatus).toBe('待確認');
   });
 
   it('does not invent zero when nullable money or service days are absent', () => {

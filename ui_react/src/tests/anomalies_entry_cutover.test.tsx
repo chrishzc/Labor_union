@@ -174,13 +174,13 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
     render(<StrictMode><App /></StrictMode>);
 
     await waitFor(() => {
-      expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
-      expect(screen.getByText('HCM-FIELD-001')).toBeInTheDocument();
+      expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
+      expect(screen.getByText('缺少身分證字號')).toBeInTheDocument();
     });
 
     expect(window.location.hash).toBe('#anomalies');
     expect(screen.getByText('🔴 嚴重阻擋')).toBeInTheDocument();
-    expect(screen.getAllByText('異常偵測項目').length).toBeGreaterThan(0);
+    expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
     expect(screen.queryByText(/目前 typed view 未納入/)).not.toBeInTheDocument();
     expect(screen.queryByText('已成功載入異常')).not.toBeInTheDocument();
     expectInitialListBudget(requests);
@@ -202,7 +202,7 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
       expect(screen.getByText('目前無待追蹤之匯入警示任務。')).toBeInTheDocument();
     });
 
-    expect(screen.queryByText('SCHEDULE-001')).not.toBeInTheDocument();
+    expect(screen.queryByText('假日排班尚未確認')).not.toBeInTheDocument();
     expect(screen.queryByText('已成功載入異常')).not.toBeInTheDocument();
     expectInitialListBudget(requests);
     expectOnlyGet(requests);
@@ -215,25 +215,23 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('SCHEDULE-001')).toBeInTheDocument();
-      expect(screen.getByText('HCM-FIELD-001')).toBeInTheDocument();
+      expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
+      expect(screen.getByText('缺少身分證字號')).toBeInTheDocument();
     });
     expectInitialListBudget(requests);
     expect(requests.some(({ path }) => path.endsWith('/referral'))).toBe(false);
     expect(requests.some(({ path }) => path.startsWith(`${ANOMALY_LIST_ENDPOINT}/`))).toBe(false);
 
-    const claimButton = screen.getAllByRole('button', { name: /🔵 認領此案/ })[0];
-    expect(claimButton).toBeDisabled();
-    fireEvent.click(claimButton);
+    expect(screen.queryByRole('button', { name: /認領此案/ })).not.toBeInTheDocument();
     expect(screen.queryByText('認領成功')).not.toBeInTheDocument();
 
     await act(async () => {
-      fireEvent.click(screen.getAllByRole('button', { name: /排查處置抽屜 ➔/ })[0]);
+      fireEvent.click(screen.getAllByRole('button', { name: /查看處理方式 ➔/ })[0]);
     });
     await waitFor(() => {
-      expect(screen.getByText(/後端異常詳情/)).toBeInTheDocument();
+      expect(screen.getByText(/問題詳情/)).toBeInTheDocument();
       expect(screen.getByText(/claim ·/)).toBeInTheDocument();
-      expect(screen.getByText(/v2 → v3/)).toBeInTheDocument();
+      expect(screen.queryByText(/v2 → v3/)).not.toBeInTheDocument();
     });
 
     expect(screen.getByRole('button', { name: /確認排除異常/ })).toBeDisabled();
@@ -246,7 +244,7 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
       fireEvent.click(screen.getAllByRole('button', { name: '查看警示詳情' })[0]);
     });
     await waitFor(() => {
-      expect(screen.getByText('owner_preview_apply')).toBeInTheDocument();
+      expect(screen.getByText('由負責流程檢查後修正')).toBeInTheDocument();
     });
 
     const transitionButton = screen.getByRole('button', { name: '請依上方轉介流程處理來源資料' });

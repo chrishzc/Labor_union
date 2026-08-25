@@ -1,6 +1,6 @@
 /**
  * File: staff_leave_inbox_client.ts
- * Description: 以 strict typed contract 查詢與審核 Scheduling 請假待辦。
+ * Description: 以 strict typed contract 查詢、審核 Scheduling 請假待辦並驗證 receipt identity。
  */
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -34,6 +34,12 @@ export type LeaveInboxItem = z.infer<typeof LeaveInboxItemSchema>;
 export type LeaveInboxReviewReceipt = z.infer<typeof ReviewReceiptSchema>;
 export type LeaveInboxReviewAction = 'accept' | 'reject' | 'cancel';
 
+const REVIEW_STATUS_BY_ACTION: Record<LeaveInboxReviewAction, LeaveInboxStatus> = {
+  accept: 'accepted_for_processing',
+  reject: 'rejected',
+  cancel: 'cancelled',
+};
+
 function options(idempotencyKey?: string): RequestOptions {
   const token = sessionClient.getToken();
   if (!token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
@@ -55,6 +61,27 @@ function decode<T>(schema: z.ZodType<T>, raw: unknown, operation: string): T {
   return parsed.data.data as T;
 }
 
+function validateReviewReceipt(
+  item: LeaveInboxItem,
+  action: LeaveInboxReviewAction,
+  receipt: LeaveInboxReviewReceipt,
+): LeaveInboxReviewReceipt {
+  const issues: Array<{ path: string; message: string; code: string }> = [];
+  if (receipt.request_id !== item.id) {
+    issues.push({ path: 'request_id', message: 'receipt request_id 與待辦不一致。', code: 'custom' });
+  }
+  if (receipt.status !== REVIEW_STATUS_BY_ACTION[action]) {
+    issues.push({ path: 'status', message: `receipt status 不符合 ${action} 動作。`, code: 'custom' });
+  }
+  if (receipt.version <= item.aggregate_version) {
+    issues.push({ path: 'version', message: 'receipt version 必須大於送出的 expected version。', code: 'custom' });
+  }
+  if (issues.length > 0) {
+    throw new ApiDecodeError('請假待辦審核 receipt 與 request 不一致。', issues, receipt);
+  }
+  return receipt;
+}
+
 export const staffLeaveInboxClient = {
   async list(status: LeaveInboxStatus = 'pending', limit = 50): Promise<readonly LeaveInboxItem[]> {
     const raw = await transport.get<unknown>('/api/v1/scheduling/staff-leave-requests', {
@@ -69,6 +96,6 @@ export const staffLeaveInboxClient = {
       { expected_version: item.aggregate_version, action, reason: reason.trim() },
       options(key),
     );
-    return decode(ReviewReceiptSchema, raw, '審核');
+    return validateReviewReceipt(item, action, decode(ReviewReceiptSchema, raw, '審核'));
   },
 };

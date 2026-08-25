@@ -256,7 +256,7 @@ export const ReportsPage: React.FC = () => {
     <section className="reports-workspace" aria-label="營運與補助報表查詢工作區">
       <div className="reports-toolbar">
         <div>
-          <h2>{reportKind === 'weekly' ? 'Weekly Operations Report' : 'Government Subsidy Reconciliation'}</h2>
+          <h2>{reportKind === 'weekly' ? '工會營運週報' : '政府補助核銷報表'}</h2>
           <p>{reportKind === 'weekly' ? '週一至週日，下載內容固定包含三個工作表。' : '保留既有季度／年度核銷查詢與 XLSX。'}</p>
         </div>
         <label>報表範圍
@@ -304,7 +304,7 @@ export const ReportsPage: React.FC = () => {
       </div>}
 
       {state.kind === 'weekly-ready' && <>
-        <div className="reports-meta">{state.data.period.week_label}｜{state.data.period.week_start}～{state.data.period.week_end}｜Source revision {state.data.revision}</div>
+        <div className="reports-meta">{state.data.period.week_label}｜{state.data.period.week_start}～{state.data.period.week_end}｜資料版本 {state.data.revision}</div>
         {weeklyTab === 'cases' && <WeeklyCasesView report={state.data} />}
         {weeklyTab === 'subsidy' && <WeeklySubsidyView report={state.data} />}
         {weeklyTab === 'service' && <WeeklyServiceView report={state.data} />}
@@ -316,9 +316,9 @@ export const ReportsPage: React.FC = () => {
           <article><span>期間</span><strong>{state.data.kind === 'quarterly' ? `${state.data.year} Q${state.data.quarter}` : `${state.data.year} 年度`}</strong></article>
           <article><span>總筆數</span><strong>{state.data.totalRows}</strong></article>
           <article><span>補助總額</span><strong>{state.data.totalAmount}</strong></article>
-          <article><span>Source revision</span><strong>{state.data.revision}</strong></article>
+          <article><span>資料版本</span><strong>{state.data.revision}</strong></article>
         </section>
-        <div className="reports-meta">Generated at {state.data.generatedAt}</div>
+        <div className="reports-meta">報表產生時間：{state.data.generatedAt}</div>
         <SubsidyPartitionsView partitions={state.data.partitions} />
       </>}
     </section>

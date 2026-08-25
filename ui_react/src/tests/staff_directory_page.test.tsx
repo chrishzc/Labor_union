@@ -29,6 +29,11 @@ describe('StaffPage directory presentation', () => {
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     expect(screen.getByText('📞 09********')).toBeInTheDocument();
     expect(screen.getByText('服務人員摘要 #12')).toBeInTheDocument();
+    expect(screen.getByText('目前已載入 2 位服務人員')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '🟢 在職中' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '🏖️ 請長假' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '⏸️ 暫停接案' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '⚪ 已退役' })).not.toBeInTheDocument();
     expect(screen.queryByText(/未開放|後端.*提供|unavailable|資料待補/)).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: '辦理退役／復職' })[0]).toBeEnabled();
     expect(document.querySelector('[data-control-id="staff.card.11"]')).toBeVisible();

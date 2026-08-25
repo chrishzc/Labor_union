@@ -1,11 +1,13 @@
 /**
  * File: staff_availability_flow.test.tsx
- * Description: 驗證不可服務期間新增、取消與 receipt 後重新觀察流程。
+ * Description: 驗證不可服務期間自動查詢、新增、取消與 receipt 後重新觀察流程。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffAvailabilityClient } from '../api/staff_availability/staff_availability_client';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
+import { staffQualificationMasterClient } from '../api/staff/qualification_master_client';
+import { staffLifecycleClient } from '../api/staff_lifecycle/staff_lifecycle_client';
 import {
   StaffAvailabilityConflictError,
   StaffAvailabilityUnavailableError,
@@ -22,11 +24,15 @@ import {
   STAFF_AVAILABILITY_SELECTED_PAUSE_BLOCK,
 } from './fixtures/staff/staff_availability_contract_fixtures';
 import { STAFF_PAGE_ONE } from './fixtures/staff/staff_directory_contract_fixtures';
+import { STAFF_LIFECYCLE_VIEW } from './fixtures/staff/staff_lifecycle_contract_fixtures';
+import { STAFF_QUALIFICATION_MASTER } from './fixtures/staff/staff_qualification_contract_fixtures';
 
 describe('Staff availability flow', () => {
   beforeEach(() => {
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue(STAFF_PAGE_ONE);
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
+    vi.spyOn(staffLifecycleClient, 'query').mockResolvedValue(STAFF_LIFECYCLE_VIEW);
+    vi.spyOn(staffQualificationMasterClient, 'query').mockResolvedValue(STAFF_QUALIFICATION_MASTER);
     vi.spyOn(staffAvailabilityClient, 'getBlocks').mockResolvedValue([STAFF_AVAILABILITY_BLOCK]);
     vi.spyOn(staffAvailabilityClient, 'previewChange').mockResolvedValue(STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!);
     vi.spyOn(staffAvailabilityClient, 'applyChange').mockResolvedValue(STAFF_AVAILABILITY_RECEIPT_RESPONSE.data!);
@@ -44,6 +50,71 @@ describe('Staff availability flow', () => {
     fireEvent.click(screen.getByRole('button', { name: '查詢不可服務期間' }));
     await waitFor(() => expect(screen.getByText(expectedRow)).toBeInTheDocument());
   }
+
+  it('Drawer 開啟時自動查詢，日期刷新中的 GET 不會阻斷 Preview POST', async () => {
+    let resolveDateRefresh: ((blocks: typeof STAFF_AVAILABILITY_BLOCK[]) => void) | undefined;
+    vi.mocked(staffAvailabilityClient.applyChange).mockResolvedValueOnce({
+      ...STAFF_AVAILABILITY_RECEIPT_RESPONSE.data!,
+      staff_id: 11,
+      block: {
+        ...STAFF_AVAILABILITY_BLOCK,
+        block_id: 93,
+        staff_id: 11,
+        kind: 'paused_service',
+        start_date: '2026-10-01',
+        end_date: null,
+        reason: '去敏日期刷新驗收',
+      },
+      idempotency_key: 'availability-drawer-11-01',
+    });
+    vi.mocked(staffAvailabilityClient.getBlocks)
+      .mockResolvedValueOnce([STAFF_AVAILABILITY_BLOCK])
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveDateRefresh = resolve;
+      }));
+
+    render(<StaffPage />);
+    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
+    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
+
+    await waitFor(() => expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText('2026-09-01 ～ 2026-09-30')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /預覽新增影響/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /新增請假／暫停接案/ }));
+    expect(screen.getByRole('button', { name: /預覽新增影響/ })).toBeVisible();
+    fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-10-01' } });
+    await waitFor(() => expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(2));
+    const refreshSignal = vi.mocked(staffAvailabilityClient.getBlocks).mock.calls[1][3]?.signal;
+
+    fireEvent.change(screen.getByLabelText('新增原因'), { target: { value: '去敏日期刷新驗收' } });
+    fireEvent.click(screen.getByRole('button', { name: /預覽新增影響/ }));
+
+    await waitFor(() => expect(staffAvailabilityClient.previewChange).toHaveBeenCalledTimes(1));
+    const previewSignal = vi.mocked(staffAvailabilityClient.previewChange).mock.calls[0][2]?.signal;
+    expect(previewSignal).not.toBe(refreshSignal);
+    expect(refreshSignal?.aborted).toBe(false);
+    expect(staffAvailabilityClient.previewChange).toHaveBeenCalledWith(
+      11,
+      {
+        action: 'create_pause',
+        reason: '去敏日期刷新驗收',
+        start_date: '2026-10-01',
+      },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+
+    await act(async () => {
+      resolveDateRefresh?.([STAFF_AVAILABILITY_BLOCK]);
+    });
+    const applyButton = screen.getByRole('button', { name: /確認套用新增/ });
+    expect(applyButton).not.toBeDisabled();
+    fireEvent.click(applyButton);
+
+    const receipt = await screen.findByRole('status', { name: '不可服務期間變更結果' });
+    expect(receipt).toHaveTextContent('2026-10-01');
+    expect(receipt).not.toHaveTextContent('Idempotency');
+  });
 
   it('shows one error state with a direct retry instead of the idle placeholder', async () => {
     vi.mocked(staffAvailabilityClient.getBlocks)
@@ -82,7 +153,7 @@ describe('Staff availability flow', () => {
       },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
-    expect(screen.getByText(/日數：—/)).toBeInTheDocument();
+    expect(screen.getAllByText(/預覽已完成|預覽已產生/).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: '套用新增' })).not.toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: '套用新增' }));
@@ -134,8 +205,7 @@ describe('Staff availability flow', () => {
       new StaffAvailabilityUnavailableError({ code: 'STAFF_AVAILABILITY_NETWORK', message: '觀察失敗', retryable: true }),
     );
     fireEvent.click(screen.getByRole('button', { name: '套用取消' }));
-    await waitFor(() => expect(screen.getByText(/receipt 已收到，但重新查詢失敗/)).toBeInTheDocument());
-    expect(screen.getByText(/receipt 已收到/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/變更已受理，但重新查詢失敗/)).toBeInTheDocument());
   });
 
   it('stale 後必須先重新查詢，才能再次建立 preview', async () => {
@@ -263,7 +333,7 @@ describe('Staff availability flow', () => {
     fireEvent.change(screen.getByLabelText('結束暫停原因'), { target: { value: '恢復接受媒合' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽結束暫停' }));
 
-    await waitFor(() => expect(screen.getByText(/未回傳同一筆可結束/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/沒有同一筆可結束/)).toBeInTheDocument());
     expect(screen.getByRole('button', { name: '套用結束暫停' })).toBeDisabled();
     expect(staffAvailabilityClient.applyChange).not.toHaveBeenCalled();
   });

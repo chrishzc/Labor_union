@@ -1,8 +1,9 @@
 /**
  * File: scheduling_current_adapter.test.ts
- * Description: 驗證 Scheduling adapter 只映射 server occupancy、日期與 lineage view。
+ * Description: 驗證 Scheduling adapter 映射 server occupancy、不可服務原因與 lineage view。
  */
 import { describe, expect, it } from 'vitest';
+import type { SchedulingCurrentProjection } from '../api/scheduling/scheduling_current_schemas';
 import { adaptStaffDirectorySummary } from '../adapters/staff/staff_directory_adapter';
 import {
   adaptSchedulingProjection,
@@ -68,5 +69,32 @@ describe('scheduling current adapter', () => {
 
     expect(row.occupancyKinds).toContain('assignment_buffer');
     expect(matchesSchedulingFilter(row, 'waiting')).toBe(true);
+  });
+
+  it('shows the typed unavailability kind and reason on calendar days', () => {
+    const staff = adaptStaffDirectorySummary({ id: 11, name: '去敏人員甲', phone: null });
+    const unavailableProjection: SchedulingCurrentProjection = {
+      ...SCHEDULING_PROJECTION_READY,
+      assignments: [],
+      days: SCHEDULING_PROJECTION_READY.days.map((day, index) => index === 0 ? {
+        ...day,
+        entries: [{
+          occupancy_kind: 'staff_unavailability' as const,
+          case_no: null,
+          assignment_id: null,
+          assignment_status: null,
+          lock_id: null,
+          segment_id: null,
+          availability_block_id: 91,
+          unavailability_kind: 'long_leave',
+          unavailability_reason: '返鄉休息',
+        }],
+      } : day),
+    };
+
+    const row = adaptSchedulingProjection(staff, unavailableProjection);
+
+    expect(row.days[0].statusLabel).toBe('長假：返鄉休息');
+    expect(row.loadedStatusLabel).toBe('長假：返鄉休息');
   });
 });

@@ -134,6 +134,14 @@ describe('OrdersPage query real-data slice', () => {
       payroll_version: 0, scheduling: {}, client_finance_impact: {}, payroll_impact: {},
       lifecycle_impact: {}, preview_fingerprint: 'a'.repeat(64),
     });
+    vi.spyOn(orderCancellationClient, 'apply').mockResolvedValue({
+      case_no: 'ORD-2026-0801', order_version: 1, scheduling_version: 1,
+      scheduling_generation: 1, client_finance_version: 1, payroll_version: 1,
+      lifecycle_status: '訂單取消', actual_end_date: null,
+      official_service_day_count: 0, official_service_hours: 0,
+      cancelled_assignment_ids: [], created_assignment_keys: [],
+      preview_fingerprint: 'a'.repeat(64),
+    });
     vi.spyOn(orderTermsMutationClient, 'preview').mockResolvedValue({
       before: realisticOrderTerms.terms,
       after: realisticOrderTerms.terms,
@@ -180,7 +188,7 @@ describe('OrdersPage query real-data slice', () => {
     expect(screen.queryByText(/合約總額：/)).not.toBeInTheDocument();
   });
 
-  it('continues from next_cursor and appends the next page without duplicating summaries', async () => {
+  it('automatically continues to terminal, deduplicates summaries and removes the manual next-page gate', async () => {
     const firstPage = {
       ...realisticOrderSummaryPage,
       items: [realisticOrderSummaryPage.items[0]],
@@ -195,21 +203,63 @@ describe('OrdersPage query real-data slice', () => {
       .mockResolvedValueOnce(firstPage)
       .mockResolvedValueOnce(secondPage);
     vi.mocked(orderStageProjectionClient.getOperationalTimelines)
-      .mockResolvedValueOnce(buildOrdersStageProjectionFixture(firstPage))
+      .mockResolvedValueOnce({ ...buildOrdersStageProjectionFixture(firstPage), next_cursor: firstPage.next_cursor })
       .mockResolvedValueOnce(buildOrdersStageProjectionFixture(secondPage));
 
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
-    fireEvent.click(screen.getByRole('button', { name: '載入下一頁' }));
-
     await screen.findByText('ORD-2026-0802');
     expect(screen.getAllByText('ORD-2026-0801')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /1\. 進件與補件 \(2\)/ })).toBeEnabled();
     expect(ordersQueryClient.getOrderSummaries).toHaveBeenNthCalledWith(
       2,
-      { after_case_no: 'ORD-2026-0801' },
+      { page_size: 200, lifecycle_scope: 'unfinished', after_case_no: 'ORD-2026-0801' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(ordersQueryClient.getOrderSummaries).toHaveBeenNthCalledWith(
+      1,
+      { page_size: 200, lifecycle_scope: 'unfinished' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(orderStageProjectionClient.getOperationalTimelines).toHaveBeenNthCalledWith(
+      1,
+      { page_size: 200, lifecycle_scope: 'unfinished' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(orderStageProjectionClient.getOperationalTimelines).toHaveBeenNthCalledWith(
+      2,
+      { page_size: 200, lifecycle_scope: 'unfinished', after_case_no: 'ORD-2026-0801' },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(screen.queryByRole('button', { name: '載入下一頁' })).not.toBeInTheDocument();
+  });
+
+  it('fails closed with retry when summary continuation cursor does not advance', async () => {
+    vi.mocked(ordersQueryClient.getOrderSummaries)
+      .mockResolvedValueOnce({ ...realisticOrderSummaryPage, items: [realisticOrderSummaryPage.items[0]], next_cursor: realisticOrderSummaryPage.items[0].case_no })
+      .mockResolvedValueOnce({ ...realisticOrderSummaryPage, items: [realisticOrderSummaryPage.items[0]], next_cursor: realisticOrderSummaryPage.items[0].case_no });
+    render(<OrdersPage />);
+    await waitFor(() => expect(screen.getByText(/載入訂單資料失敗/)).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '重試' })).toBeInTheDocument();
+  });
+
+  it('clears the old stage filter when a text search disables the stage projection', async () => {
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getByRole('button', { name: /1\. 進件與補件 \(1\)/ }));
+    expect(screen.queryByText('ORD-2026-0802')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('textbox', { name: '搜尋案件' }), {
+      target: { value: 'ORD-2026-0802' },
+    });
+
+    await waitFor(() => expect(ordersQueryClient.getOrderSummaries).toHaveBeenLastCalledWith(
+      { page_size: 200, lifecycle_scope: 'unfinished', query_text: 'ORD-2026-0802' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    expect(await screen.findByText('ORD-2026-0802')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /全部 \(7\)/ })).toHaveClass('active');
+    expect(screen.getByRole('button', { name: /1\. 進件與補件/ })).toBeDisabled();
   });
 
   it('deduplicates the StrictMode initial summary load to one transport request', async () => {
@@ -233,6 +283,15 @@ describe('OrdersPage query real-data slice', () => {
 
   it('queries typed detail, terms, candidate pool, and assignment plan once for the matching Drawer', async () => {
     useOperableSummary();
+    vi.mocked(ordersQueryClient.getFormManagementContext).mockResolvedValueOnce({
+      case_no: 'ORD-2026-0801',
+      service_time: '08:30-17:30',
+      service_type: '到府服務',
+      delivery_type: '自然產',
+      residence_type: '公寓',
+      city: '台北市',
+      identity_status: 'regular',
+    });
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
     await act(async () => fireEvent.click(screen.getAllByRole('button', { name: /媒合與正式排班/ })[0]));
@@ -240,11 +299,30 @@ describe('OrdersPage query real-data slice', () => {
     expect(ordersQueryClient.getOrderDetail).toHaveBeenCalledTimes(1);
     expect(ordersQueryClient.getAssignmentPlan).toHaveBeenCalledTimes(1);
     expect(ordersQueryClient.getOrderTerms).toHaveBeenCalledTimes(1);
+    expect(ordersQueryClient.getFormManagementContext).toHaveBeenCalledTimes(1);
     expect(candidateContactPoolClient.query).toHaveBeenCalledTimes(1);
     expect(waitingDepositLockClient.queryPlan).toHaveBeenCalledTimes(1);
     expect(screen.getByText('無進行中方案')).toBeInTheDocument();
+    expect(screen.getByText('服務縣市：台北市')).toBeInTheDocument();
+    expect(screen.getByText('服務類型：到府服務')).toBeInTheDocument();
+    expect(screen.getByText('每日服務時段：08:30-17:30')).toBeInTheDocument();
+    expect(screen.getByText('生產方式：自然產')).toBeInTheDocument();
+    expect(screen.getByText('住宅類型：公寓')).toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="orders.matching.active-plan-query-error"]')).toBeNull();
     expect(screen.queryByText(/後端.*提供|未開放|未納入/)).not.toBeInTheDocument();
+  });
+
+  it('keeps missing client context fields explicit without exposing source metadata', async () => {
+    useOperableSummary();
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    await act(async () => fireEvent.click(screen.getAllByRole('button', { name: /媒合與正式排班/ })[0]));
+    await screen.findByText('正式執行排班（非候選推薦）');
+
+    expect(screen.getByText('服務縣市：尚未登錄')).toBeInTheDocument();
+    expect(screen.getByText('服務類型：尚未登錄')).toBeInTheDocument();
+    expect(screen.getByText('每日服務時段：尚未登錄')).toBeInTheDocument();
+    expect(screen.queryByText(/query_no|survey_details|fingerprint|source_identity/i)).not.toBeInTheDocument();
   });
 
   it('completes the sanctioned candidate workflow through real UI controls and typed readbacks', async () => {
@@ -335,14 +413,14 @@ describe('OrdersPage query real-data slice', () => {
     await screen.findByText(/已回讀確認 1 位月嫂加入候選聯繫池/);
 
     fireEvent.click(screen.getByRole('button', { name: /重新寄送資訊-1/ }));
-    await screen.findByText(/訂單資訊-1 已建立可靠發送任務 #52/);
+    await screen.findByText(/訂單資訊-1 已排入發送；尚未代表 LINE 已送達/);
     fireEvent.click(screen.getByRole('button', { name: '更新候選意願' }));
     await screen.findByText(/意願為願意/);
 
     const formalPlanButton = screen.getByRole('button', { name: '建立正式單月嫂配對方案' });
     expect(formalPlanButton).toBeEnabled();
     fireEvent.click(formalPlanButton);
-    await screen.findByText(/已回讀確認正式單月嫂方案 #51/);
+    await screen.findByText('正式單月嫂方案已建立並完成回讀。');
     expect(matchingCandidateWorkflowClient.searchSingleCaregiver).toHaveBeenCalledOnce();
     expect(candidateContactPoolClient.addCandidates).toHaveBeenCalledOnce();
     expect(candidateContactPoolClient.query).toHaveBeenCalledTimes(7);
@@ -568,6 +646,28 @@ describe('OrdersPage query real-data slice', () => {
     expect(locationFact).not.toHaveTextContent('地址待確認');
   });
 
+  it('shows missing service-time and cooking roots as pending instead of inventing defaults', async () => {
+    useOperableSummary();
+    vi.mocked(ordersQueryClient.getOrderTerms).mockResolvedValueOnce({
+      ...realisticOrderTerms,
+      terms: {
+        ...realisticOrderTerms.terms,
+        service_hours_per_day: 9,
+        requires_cooking: null,
+        service_time: { start_time: null, end_time: null, end_day_offset: null },
+      },
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+
+    const serviceFact = await screen.findByText('每日時段與料理');
+    expect(serviceFact.closest('.matching-fact-item')).toHaveTextContent('資料待補正（服務時段三欄）');
+    expect(serviceFact.closest('.matching-fact-item')).toHaveTextContent('尚未登錄（下廚料理條款）');
+    expect(screen.queryByText(/09:00.*17:00/)).not.toBeInTheDocument();
+  });
+
   it.each([
     ['terms', () => vi.mocked(ordersQueryClient.getOrderTerms).mockRejectedValueOnce(new Error('terms failed'))],
     ['completion', () => vi.mocked(ordersQueryClient.getContractCompletion).mockRejectedValueOnce(new Error('completion failed'))],
@@ -584,7 +684,7 @@ describe('OrdersPage query real-data slice', () => {
     expect(document.querySelector('[data-surface-id="orders.contract.query-error"]')).toHaveAttribute('role', 'alert');
     expect(screen.queryByText('尚無月嫂契約分段')).not.toBeInTheDocument();
     expect(screen.queryByText('尚未寄送客戶契約')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '預覽訂單條款變更' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '檢查訂單條款變更' })).not.toBeInTheDocument();
   });
 
   it('routes missing historical Client Finance roots to correction isolation without a fake query failure', async () => {
@@ -600,10 +700,10 @@ describe('OrdersPage query real-data slice', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
 
     expect(await screen.findByText('歷史資料待補正')).toBeInTheDocument();
-    expect(screen.getByText(/缺少 Client Finance 契約與定金根事實/)).toBeInTheDocument();
+    expect(screen.getByText(/缺少客戶帳務的契約與定金資料/)).toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="orders.contract.historical-correction"]')).toHaveAttribute('role', 'status');
     expect(document.querySelector('[data-surface-id="orders.contract.query-error"]')).toBeNull();
-    expect(screen.queryByRole('button', { name: '預覽訂單條款變更' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '檢查訂單條款變更' })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -668,7 +768,7 @@ describe('OrdersPage query real-data slice', () => {
     await screen.findByText('ORD-2026-0801');
     fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
     await screen.findByDisplayValue('2026-09-01');
-    fireEvent.click(screen.getByRole('button', { name: /預覽訂單條款變更/ }));
+    fireEvent.click(screen.getByRole('button', { name: /檢查訂單條款變更/ }));
     await screen.findByText(/條款變更比對/);
     expect(orderTermsMutationClient.preview).toHaveBeenCalledWith(
       'ORD-2026-0801',
@@ -683,7 +783,7 @@ describe('OrdersPage query real-data slice', () => {
     expect(screen.getByRole('button', { name: /確認套用訂單條款/ })).toBeDisabled();
   });
 
-  it('queries and previews cancellation effects without exposing Apply', async () => {
+  it('queries and previews cancellation effects while gating Apply behind reason and confirmation', async () => {
     useOperableSummary();
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
@@ -692,9 +792,11 @@ describe('OrdersPage query real-data slice', () => {
     await screen.findByText(/實際開始日：尚未開始/);
     expect(orderCancellationClient.query).toHaveBeenCalledWith('ORD-2026-0801', expect.any(AbortSignal));
     fireEvent.click(screen.getByRole('button', { name: /預覽取消與退款試算/ }));
-    await screen.findByText(/退款試算結果/);
+    await screen.findByText(/取消影響預覽/);
     expect(orderCancellationClient.preview).toHaveBeenCalledWith('ORD-2026-0801', [], expect.any(AbortSignal));
-    expect(screen.queryByRole('button', { name: /確認執行取消/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /確認執行取消/ })).toBeDisabled();
+    expect(document.body.textContent).not.toContain('preview_fingerprint');
+    expect(document.body.textContent).not.toContain('NT$ 18,000');
     expect(ordersQueryClient.getAssignmentPlan).not.toHaveBeenCalled();
   });
 
@@ -718,7 +820,7 @@ describe('OrdersPage query real-data slice', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: /實質服務日曆/ })));
     await screen.findByDisplayValue('2026-09-01');
     fireEvent.click(screen.getByRole('button', { name: '預覽實際開工日變更' }));
-    await screen.findByText('實際開工日 Preview 已產生');
+    await screen.findByText('實際開工日影響已確認');
     expect(orderActualStartClient.preview).toHaveBeenCalledWith(
       'ORD-2026-0801',
       { new_actual_start_date: '2026-09-01' },
@@ -762,7 +864,7 @@ describe('OrdersPage query real-data slice', () => {
     await screen.findByText('備案 1');
     fireEvent.click(screen.getByRole('button', { name: '建立此 2 段正式多月嫂方案' }));
 
-    await screen.findByText(/已回讀確認正式 2 段多月嫂方案 #52/);
+    await screen.findByText('正式 2 段多月嫂方案已建立並完成回讀。');
     expect(matchingCandidateWorkflowClient.searchSegmentedCaregivers).toHaveBeenCalledWith(
       'ORD-2026-0801',
       2,

@@ -4,7 +4,7 @@
 
 - 狀態：`approved-by-user-2026-08-13`
 - Owner：`Scheduling Staff Matching Profile／Assignments／Matching`
-- 實作包：[72_Matching_Preferences_and_Staff_Unavailability_Work_Package.md](../02_決策與退役執行記錄/72_Matching_Preferences_and_Staff_Unavailability_Work_Package.md)
+- 已封存實作包：[72_Matching_Preferences_and_Staff_Unavailability_Work_Package.md](../04_已完成與上線封存/work_packages/72_Matching_Preferences_and_Staff_Unavailability_Work_Package.md)
 - 目的：讓公會人員維護月嫂配對偏好與不可服務期間，並由同一份 typed facts 同時服務配對中心與行事曆。
 
 ## 2. Global → Domain → Subsystem → Module
@@ -81,6 +81,21 @@ Modules 必須是純函式，不讀 DB、不取得現在時間、不 import API�
 - Query 回傳 definition identity／version、顯示名稱、target、staff value、result 與 reason code；UI 不解析中文名稱決定規則。
 - Query 結果綁定 Staff preference、Orders 與 Scheduling source versions；選擇或 Apply 前必須 fresh recheck。
 
+### 3.3 月嫂名冊的服務能力投影（2026-08-25 人工裁決）
+
+- 管理端在選定月嫂後，必須以同一份後端 typed read model 顯示已登錄的
+  最多照顧寶寶數、可承接區域、可承接時段、交通方式、週間服務／排休、
+  特殊節日意願與可承接胎數。這些值來自 Staff Historical BeClass 已正規化並採納的
+  Staff／relation facts，也是 Matching 現行消費的來源；前端不得另建假資料或自行解析問卷。
+- 這份投影只顯示正規化業務值；不顯示 raw workbook／JSON、銀行資料、身分證、
+  指紋、source identity 或冪等鍵。資料空白時明確顯示「尚未登錄」，不得以預設值補齊。
+- 月嫂名冊此區是唯讀 Query，不擁有修改上述 roots 的權限；後續修改必須交回
+  各自 owner 的專屬 Preview／Apply 工作流。
+
+驗收狀態（2026-08-25）：`completed`。Chrome 由月嫂名冊實際選取 Staff `#531` 後，已讀回並顯示
+最多照顧寶寶數、可承接區域、可承接時段、交通方式、週間服務／排休、特殊節日意願與可承接胎數；
+focused tests 與 React build 通過，畫面不含 raw workbook／JSON、來源識別或指紋。
+
 ## 4. 下廚需求
 
 - HCM 與 Client BeClass 是兩條獨立 intake lane；任一方缺少對方都不得阻擋來源資料落地。
@@ -147,8 +162,15 @@ Modules 必須是純函式，不讀 DB、不取得現在時間、不 import API�
 - Module：偏好 range、matching comparison、明確下廚 normalization、不可服務日期及 overlap。
 - Subsystem：Query 零寫入、Preview 零寫入、Apply replay／payload mismatch／stale／rollback。
 - Domain：五項預設 filter、自訂偏好加入／停用、長假與 Calendar／Matching 同源、buffer-only 仍顯示。
-- Browser：建立偏好、填月嫂值、建立不可服務期間、配對結果刷新、Calendar 顯示、取消後恢復。
+- Browser：不可服務期間 mutation controls 只有在操作者展開可見面板後才可掛載；收合時不得留下可由
+  螢幕閱讀器或自動化誤觸的隱藏控制。建立不可服務期間必須走 Preview → Apply，並顯示 typed receipt
+  的 staff、action、block、aggregate version、idempotency facts 與 fresh readback；其後驗證配對結果刷新、
+  Calendar 顯示及取消後恢復。
 - 真人 LINE 不在本 Work Package 驗收範圍。
+
+Runtime 狀態：`completed`。2026-08-25 已用 Chrome 完成不可服務期間 Preview／Apply、Matching
+fresh refresh、Calendar 同源顯示、取消 Preview／Apply 與恢復；此鏈不得因舊 handoff 或舊 Work Package
+的 `NOT_RUN` 描述重跑。真人 LINE 仍依本節明確不屬此驗收。
 
 ## 2026-08-21 M3 coordination amendment
 

@@ -1,6 +1,6 @@
 /**
  * File: matching_plan_communication_client.test.ts
- * Description: 驗證正式方案履歷可靠發送與人工客戶決策的 typed 契約。
+ * Description: 驗證正式方案履歷可靠發送、人工送達證據與人工客戶決策的 typed 契約。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
@@ -76,6 +76,60 @@ describe('matchingPlanCommunicationClient', () => {
     expect(post).toHaveBeenCalledWith(
       '/api/v1/orders/CASE-1/matching-plans/12/resumes',
       expect.objectContaining({ actor: 'operator-1', expected_version: 3 }),
+      { token: 'volatile-token' },
+    );
+  });
+
+  it('uses Preview then Apply without claiming LINE delivery for manual profile evidence', async () => {
+    const post = vi.spyOn(transport, 'post')
+      .mockResolvedValueOnce({
+        success: true,
+        message: 'preview',
+        data: {
+          case_no: 'CASE-1',
+          plan_id: 12,
+          expected_version: 3,
+          segment_ids: [21],
+          confirmation_method: 'phone',
+          reason: '電話提供履歷並逐項確認',
+          preview_fingerprint: 'b'.repeat(64),
+          apply_allowed: true,
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        message: 'applied',
+        data: {
+          case_no: 'CASE-1',
+          plan_id: 12,
+          communication_version: 3,
+          event_ids: [91],
+          confirmation_method: 'phone',
+          preview_fingerprint: 'b'.repeat(64),
+          replayed: false,
+        },
+        error: null,
+      });
+
+    const preview = await matchingPlanCommunicationClient.previewManualCustomerProfiles(
+      'CASE-1', 12, 3, 'phone', '電話提供履歷並逐項確認',
+    );
+    await expect(matchingPlanCommunicationClient.applyManualCustomerProfiles(preview)).resolves.toMatchObject({
+      event_ids: [91],
+      replayed: false,
+    });
+
+    expect(post).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/orders/CASE-1/matching-plans/12/resumes/manual-confirmation/preview',
+      expect.objectContaining({ expected_version: 3, confirmation_method: 'phone' }),
+      { token: 'volatile-token' },
+    );
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/orders/CASE-1/matching-plans/12/resumes/manual-confirmation',
+      expect.objectContaining({ preview_fingerprint: 'b'.repeat(64) }),
       { token: 'volatile-token' },
     );
   });

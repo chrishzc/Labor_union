@@ -1,6 +1,6 @@
 /**
  * File: line_identity_errors.ts
- * Description: 將 LINE 身分查詢、更正、解除及維護錯誤映射為不洩漏原始內容的前端 typed error。
+ * Description: 將 LINE 身分查詢、審核、更正、解除及維護錯誤映射為不洩漏原始內容的前端 typed error。
  */
 import {
   ApiAbortError,
@@ -25,7 +25,10 @@ export type LineIdentityDomainErrorCode =
   | 'line_identity_subject_unchanged'
   | 'line_identity_replacement_subject_not_found'
   | 'line_identity_replacement_subject_already_bound'
-  | 'line_identity_revocation_not_retryable';
+  | 'line_identity_revocation_not_retryable'
+  | 'line_review_state_conflict'
+  | 'line_review_version_conflict'
+  | 'line_review_data_conflict';
 
 export type LineIdentityClientErrorCode =
   | 'UNAUTHENTICATED'
@@ -53,6 +56,9 @@ const DOMAIN_ERROR_CODES = new Set<LineIdentityDomainErrorCode>([
   'line_identity_replacement_subject_not_found',
   'line_identity_replacement_subject_already_bound',
   'line_identity_revocation_not_retryable',
+  'line_review_state_conflict',
+  'line_review_version_conflict',
+  'line_review_data_conflict',
 ]);
 
 export class LineIdentityClientError extends Error {
@@ -151,7 +157,7 @@ export function mapLineIdentityError(
       });
     }
     if (error.status === 404) {
-      return new LineIdentityClientError('NOT_FOUND', '找不到指定的 LINE 身分綁定。', {
+      return new LineIdentityClientError('NOT_FOUND', '找不到指定的 LINE 身分或審核紀錄。', {
         status: 404,
         domainCode,
       });
@@ -159,14 +165,14 @@ export function mapLineIdentityError(
     if (error.status === 409) {
       return new LineIdentityClientError(
         'CONFLICT',
-        'LINE 身分綁定已變更或目前無法解除，請重新查詢並再次預覽。',
+        'LINE 身分或審核紀錄已變更，請重新查詢並再次預覽。',
         { status: 409, domainCode }
       );
     }
     if (error.status === 422) {
       return new LineIdentityClientError(
         'REQUEST_INVALID',
-        'LINE 身分解除請求欄位不符合契約。',
+        'LINE 身分管理請求欄位不符合契約。',
         { status: 422 }
       );
     }

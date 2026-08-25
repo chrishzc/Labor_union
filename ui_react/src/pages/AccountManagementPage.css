@@ -1,35 +1,89 @@
-/* Account Management Page CSS */
+/**
+ * File: AccountManagementPage.css
+ * Description: 系統帳號中心、權限與 TOTP 雙因子管理，含結構化命令表單、審計軌跡與背景工作看板。
+ */
 
+/* ==========================================================================
+   1. 頁面容器與頂部 Banner
+   ========================================================================== */
+.account-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.account-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: linear-gradient(135deg, #ffffff 0%, #fff8f6 100%);
+  padding: 22px 26px;
+  border-radius: 16px;
+  border: 1px solid #fed9b8;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.06);
+}
+
+.account-page-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.account-page-header h1.page-title {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 800;
+  color: #2b1f1d;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-page-header p.page-subtitle {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #74593f;
+  line-height: 1.5;
+}
+
+/* ==========================================================================
+   2. 頁籤切換列 (Tab Bar)
+   ========================================================================== */
 .account-tab-bar {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   position: sticky;
   top: 64px;
-  z-index: 50;
-  background: rgba(255, 248, 246, 0.92);
+  z-index: 40;
+  background: rgba(255, 248, 246, 0.94);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  padding: 12px 8px;
-  margin-bottom: 20px;
-  border-bottom: 2px solid #f2e2dc;
-  border-radius: 12px;
+  padding: 10px 12px;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
   overflow-x: auto;
+  box-shadow: 0 4px 14px rgba(255, 127, 80, 0.05);
 }
 
 .account-tab-btn {
-  padding: 10px 20px;
+  padding: 9px 18px;
   background-color: #ffffff;
   border: 1px solid #dec0b6;
-  border-radius: 12px;
+  border-radius: 10px;
   font-weight: 700;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   color: #57423b;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .account-tab-btn:hover {
@@ -42,87 +96,49 @@
   background-color: #ff7f50;
   border-color: #ff7f50;
   color: #ffffff;
-  box-shadow: 0 4px 12px rgba(255, 127, 80, 0.25);
+  box-shadow: 0 3px 10px rgba(255, 127, 80, 0.25);
 }
 
-.account-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 20px;
-}
-
-.account-card {
-  background-color: #ffffff;
-  border-radius: 18px;
-  padding: 24px;
-  border: 1px solid #dec0b6;
-  box-shadow: 0 4px 16px rgba(74, 69, 67, 0.05);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.account-table-container {
-  background-color: #ffffff;
-  border-radius: 18px;
-  padding: 24px 28px;
-  border: 1px solid #dec0b6;
-  box-shadow: 0 4px 20px rgba(74, 69, 67, 0.04);
-  overflow-x: auto;
-}
-
-.account-data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.88rem;
-  white-space: nowrap;
-}
-
-.account-data-table th {
-  background-color: #fff8f6;
-  padding: 12px 14px;
-  text-align: left;
-  border-bottom: 2px solid #fed9b8;
-  font-weight: 700;
-  color: #57423b;
-}
-
-.account-data-table td {
-  padding: 12px 14px;
-  border-bottom: 1px solid #f2e2dc;
-  vertical-align: middle;
-}
-
-.account-data-table tr:hover {
-  background-color: #fffdfc;
-}
-
-.account-page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-}
-
+/* ==========================================================================
+   3. 通用按鈕與狀態面板 (Buttons & Panels)
+   ========================================================================== */
 .account-primary-btn,
 .account-secondary-btn {
-  border-radius: 8px;
+  border-radius: 10px;
   font-weight: 700;
-  padding: 8px 14px;
+  padding: 9px 18px;
+  font-size: 0.88rem;
   cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .account-primary-btn {
   border: 1px solid #ff7f50;
   background: #ff7f50;
-  color: #fff;
+  color: #ffffff;
   white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(255, 127, 80, 0.25);
+}
+
+.account-primary-btn:hover:not(:disabled) {
+  background: #ff6833;
+  box-shadow: 0 4px 12px rgba(255, 127, 80, 0.35);
 }
 
 .account-secondary-btn {
   border: 1px solid #dec0b6;
-  background: #fff;
+  background: #ffffff;
   color: #7c3f2c;
+  white-space: nowrap;
+}
+
+.account-secondary-btn:hover:not(:disabled) {
+  background: #fff8f6;
+  border-color: #ff7f50;
+  color: #ff7f50;
 }
 
 .account-primary-btn:disabled,
@@ -131,35 +147,34 @@
 .account-explanation button:disabled,
 .account-data-table button:disabled {
   cursor: not-allowed;
-  opacity: 0.58;
+  opacity: 0.5;
+  background-color: #f5f5f4;
+  color: #a8a29e;
+  border-color: #e7e5e4;
+  box-shadow: none;
 }
 
 .account-query-panel,
 .account-query-state {
   border: 1px solid #fed9b8;
   border-radius: 12px;
-  background: #fff8f6;
+  background: #fffaf7;
   color: #57423b;
   line-height: 1.6;
   margin-bottom: 20px;
   padding: 14px 18px;
-}
-
-.account-query-panel {
   display: flex;
   align-items: center;
-  gap: 14px;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.88rem;
 }
 
 .account-query-error {
-  align-items: center;
   background: #fff1f2;
   border-color: #fecdd3;
   color: #9f1239;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
 }
 
 .account-unavailable {
@@ -167,20 +182,123 @@
   font-style: italic;
 }
 
-.account-card-heading,
-.account-table-toolbar,
-.account-filter-row,
-.account-pagination {
-  align-items: center;
+/* ==========================================================================
+   4. 結構化帳號命令表單網格 (Account Action Form Grid - 解決擠壓變形)
+   ========================================================================== */
+.account-form-panel {
+  background: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 20px 24px;
+  margin-bottom: 22px;
+  box-shadow: 0 4px 16px rgba(74, 69, 67, 0.04);
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.account-form-panel-header {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
+  border-bottom: 1px dashed #f2e2dc;
+  padding-bottom: 12px;
+}
+
+.account-form-panel-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #2b1f1d;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.account-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px 18px;
+  align-items: start;
+}
+
+.account-field-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.account-field-item-full {
+  grid-column: 1 / -1;
+}
+
+.account-field-item label {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #57423b;
+  white-space: nowrap;
+}
+
+.account-field-item input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border: 1px solid #dec0b6;
+  border-radius: 10px;
+  background-color: #fffdfc;
+  font-size: 0.88rem;
+  color: #2b1f1d;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.account-field-item input:focus {
+  outline: none;
+  border-color: #ff7f50;
+  background-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(255, 127, 80, 0.15);
+}
+
+/* ==========================================================================
+   5. 帳號卡片清冊 (Account Grid & Cards)
+   ========================================================================== */
+.account-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 18px;
+}
+
+.account-card {
+  background-color: #ffffff;
+  border-radius: 16px;
+  padding: 22px;
+  border: 1px solid #dec0b6;
+  box-shadow: 0 4px 16px rgba(74, 69, 67, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.account-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(74, 69, 67, 0.08);
+}
+
+.account-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid #f8eee9;
+  padding-bottom: 10px;
 }
 
 .account-card-name {
   color: #1e1b19;
-  font-size: 1.1rem;
-  font-weight: 700;
+  font-size: 1.05rem;
+  font-weight: 800;
 }
 
 .account-status-pill,
@@ -190,7 +308,7 @@
   display: inline-block;
   font-size: 0.76rem;
   font-weight: 700;
-  padding: 3px 9px;
+  padding: 3px 10px;
 }
 
 .account-status-pill.enabled,
@@ -217,7 +335,22 @@
   display: flex;
   flex-direction: column;
   font-size: 0.86rem;
-  gap: 5px;
+  gap: 6px;
+  line-height: 1.5;
+}
+
+.account-card-facts strong {
+  color: #8b7169;
+}
+
+.account-card-facts code {
+  font-family: ui-monospace, Consolas, monospace;
+  background-color: #fff0eb;
+  color: #ea580c;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #fed9b8;
+  font-size: 0.84rem;
 }
 
 .account-card-actions {
@@ -226,117 +359,212 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-top: auto;
-  padding-top: 12px;
+  padding-top: 14px;
 }
 
-.account-card-actions button,
-.account-explanation > button,
-.account-data-table button {
+.account-card-actions button {
   border: 1px solid #dec0b6;
   border-radius: 8px;
-  background: #fff;
+  background: #ffffff;
   color: #795548;
   font-size: 0.8rem;
-  padding: 7px 10px;
+  font-weight: 700;
+  padding: 7px 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
-.account-explanation {
-  background: #fff;
+.account-card-actions button:hover:not(:disabled) {
+  background: #fff8f6;
+  border-color: #ff7f50;
+  color: #ff7f50;
+}
+
+/* ==========================================================================
+   6. 審計軌跡與資料表格 (Audit Table & Filtering)
+   ========================================================================== */
+.account-table-container {
+  background-color: #ffffff;
+  border-radius: 16px;
+  padding: 22px 26px;
   border: 1px solid #dec0b6;
-  border-radius: 18px;
-  box-shadow: 0 4px 20px rgba(74, 69, 67, 0.05);
-  color: #57423b;
-  line-height: 1.6;
-  padding: 28px 32px;
-}
-
-.account-explanation h3 {
-  color: #1e1b19;
-  margin: 0 0 10px;
-}
-
-.account-step-grid {
-  display: grid;
-  gap: 20px;
-  grid-template-columns: repeat(3, 1fr);
-  margin: 24px 0;
-}
-
-.account-step-grid > div {
-  background: #fffdfc;
-  border: 1px solid #dec0b6;
-  border-radius: 14px;
+  box-shadow: 0 4px 20px rgba(74, 69, 67, 0.04);
+  overflow-x: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 20px;
+  gap: 16px;
+}
+
+.account-table-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.account-table-toolbar h3 {
+  margin: 0 0 4px;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #2b1f1d;
+}
+
+.account-table-toolbar p {
+  margin: 0;
+  color: #74593f;
+  font-size: 0.86rem;
 }
 
 .account-filter-row {
-  justify-content: flex-start;
-  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background-color: #fffaf7;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid #fed9b8;
 }
 
 .account-filter-row label {
   color: #57423b;
   font-weight: 700;
+  font-size: 0.86rem;
+  white-space: nowrap;
 }
 
 .account-filter-row input {
   border: 1px solid #dec0b6;
   border-radius: 8px;
   min-width: 260px;
-  padding: 8px 10px;
+  padding: 8px 12px;
+  font-size: 0.86rem;
+  background: #ffffff;
 }
 
-.account-table-toolbar {
-  margin-bottom: 16px;
+.account-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+  white-space: nowrap;
 }
 
-.account-table-toolbar h3,
-.account-table-toolbar p {
-  margin: 0;
+.account-data-table th {
+  background-color: #fff8f6;
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 2px solid #fed9b8;
+  font-weight: 800;
+  color: #57423b;
 }
 
-.account-table-toolbar p {
-  color: #74593f;
-  font-size: 0.85rem;
-  margin-top: 4px;
+.account-data-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f2e2dc;
+  vertical-align: middle;
+}
+
+.account-data-table tr:hover {
+  background-color: #fffdfc;
 }
 
 .account-pagination {
+  display: flex;
   justify-content: center;
-  margin-top: 16px;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 0.86rem;
+  color: #74593f;
 }
 
 .account-pagination button {
   border: 1px solid #dec0b6;
   border-radius: 8px;
-  background: #fff;
+  background: #ffffff;
   color: #795548;
-  padding: 7px 12px;
+  padding: 7px 14px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
-.account-pagination button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
+/* ==========================================================================
+   7. TOTP 說明與背景工作觀察看板 (TOTP & Jobs)
+   ========================================================================== */
+.account-explanation {
+  background: #ffffff;
+  border: 1px solid #dec0b6;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(74, 69, 67, 0.04);
+  color: #57423b;
+  line-height: 1.6;
+  padding: 26px 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.account-explanation h3 {
+  color: #2b1f1d;
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.account-step-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin: 10px 0;
+}
+
+.account-step-grid > div {
+  background: #fffdfc;
+  border: 1px solid #fed9b8;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 18px;
+}
+
+.account-step-grid strong {
+  color: #ea580c;
+  font-size: 0.9rem;
+}
+
+.account-step-grid span {
+  font-size: 0.84rem;
+  color: #57423b;
 }
 
 .account-job-observation {
   background: #fffdfc;
-  border: 1px solid #dec0b6;
-  border-radius: 12px;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 20px 0;
-  padding: 18px;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin: 16px 0;
+  padding: 20px;
 }
 
 .account-job-observation > div {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.account-job-observation strong {
+  font-size: 0.8rem;
+  color: #8b7169;
+}
+
+.account-job-observation code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.9rem;
+  color: #ea580c;
 }
 
 @media (max-width: 800px) {
@@ -351,13 +579,5 @@
   .account-job-observation {
     grid-template-columns: 1fr;
   }
-
-  .account-filter-row {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .account-filter-row input {
-    min-width: 0;
-  }
 }
+

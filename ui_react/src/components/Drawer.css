@@ -31,7 +31,7 @@
 }
 
 .drawer-container.drawer-size-wide {
-  width: min(75vw, 1400px);
+  width: min(1400px, 94vw);
 }
 
 .drawer-container.drawer-size-xl {

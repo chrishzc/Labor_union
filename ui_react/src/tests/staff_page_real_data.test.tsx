@@ -69,7 +69,65 @@ describe('StaffPage real data boundary', () => {
     for (const label of ['技能', '料理能力', '證照', '醫療／體檢', '資格有效期', '不可服務期間']) {
       await waitFor(() => expect(screen.getByRole('group', { name: label })).toBeInTheDocument());
     }
-    expect(screen.getAllByText('此區段目前沒有已登錄資料。')).toHaveLength(6);
+    expect(screen.getAllByText('尚未登錄。')).toHaveLength(6);
+  });
+
+  it('shows BeClass-adopted service capability facts in the selected staff drawer', async () => {
+    render(<StaffPage />);
+    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
+    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+
+    expect(await screen.findByRole('group', { name: '最多照顧寶寶數' })).toHaveTextContent('2 位');
+    expect(screen.getByRole('group', { name: '可承接區域' })).toHaveTextContent('北區、其他（新竹市）');
+    expect(screen.getByRole('group', { name: '可承接時段' })).toHaveTextContent('8小時');
+    expect(screen.getByRole('group', { name: '交通方式' })).toHaveTextContent('機車');
+    expect(screen.getByRole('group', { name: '週間服務／排休' })).toHaveTextContent('週休1日');
+    expect(screen.getByRole('group', { name: '特殊節日意願' })).toHaveTextContent('中秋節');
+    expect(screen.getByRole('group', { name: '可承接胎數' })).toHaveTextContent('單胞胎、雙胞胎');
+    expect(screen.queryByText(/source_identity|fingerprint|preview_fingerprint/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cooking_skill_|massage_certificate|special_skill_/)).not.toBeInTheDocument();
+  });
+
+  it('renders qualification facts with business labels instead of internal field codes', async () => {
+    vi.mocked(staffQualificationMasterClient.query).mockResolvedValue({
+      ...STAFF_QUALIFICATION_MASTER,
+      sections: STAFF_QUALIFICATION_MASTER.sections.map((section) => {
+        if (section.kind === 'cooking') {
+          return {
+            ...section,
+            availability: 'available',
+            source_identity: 'wp85-internal-test-identity',
+            items: [{
+              code: 'cooking_skill_1', value: '素食', detail: null,
+              source_identity: 'staff_cooking_skills:11:1', source_version: null,
+              valid_from: null, valid_until: null, availability: 'available',
+              availability_reason: 'staff_cooking_skill_record',
+            }],
+          };
+        }
+        if (section.kind === 'certifications') {
+          return {
+            ...section,
+            availability: 'available',
+            items: [{
+              code: 'massage_certificate', value: true, detail: null,
+              source_identity: 'staff:11:has_massage_cert', source_version: null,
+              valid_from: null, valid_until: null, availability: 'available',
+              availability_reason: 'legacy_massage_certificate_ready',
+            }],
+          };
+        }
+        return section;
+      }),
+    });
+    render(<StaffPage />);
+    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
+    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+
+    expect(await screen.findByRole('group', { name: '料理能力' })).toHaveTextContent('料理類型：素食');
+    expect(screen.getByRole('group', { name: '證照' })).toHaveTextContent('寶寶按摩證照：是');
+    expect(screen.queryByText(/cooking_skill_1|massage_certificate/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/wp85|測試資料污染/i)).not.toBeInTheDocument();
   });
 
   it('offers a direct qualification retry after a query error', async () => {
@@ -92,8 +150,9 @@ describe('StaffPage real data boundary', () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
 
-    fireEvent.click(await screen.findByRole('button', { name: '重試 Lifecycle' }));
+    fireEvent.click(await screen.findByRole('button', { name: '重試任職狀態' }));
     await waitFor(() => expect(screen.getAllByText('在職').length).toBeGreaterThan(0));
     expect(staffLifecycleClient.query).toHaveBeenCalledTimes(2);
   });

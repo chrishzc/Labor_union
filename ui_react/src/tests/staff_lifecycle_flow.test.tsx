@@ -47,7 +47,9 @@ describe('Staff lifecycle flow', () => {
     fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
     await waitFor(() => expect(screen.getAllByText(/在職|已退役/).length).toBeGreaterThan(0));
     fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
-    await waitFor(() => expect(screen.getByText('Lifecycle')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
+    await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /辦理(退役|復職)登記/ }));
   }
 
   it('退役完成 preview、apply、receipt 與重新查詢並更新 server state', async () => {
@@ -55,9 +57,9 @@ describe('Staff lifecycle flow', () => {
       .mockResolvedValueOnce(STAFF_LIFECYCLE_VIEW)
       .mockResolvedValueOnce({ ...STAFF_LIFECYCLE_VIEW, state: 'retired', version: 3, effective_at: '2026-08-15T09:00:00+08:00' });
     await openDrawer();
-    fireEvent.change(screen.getByLabelText('Lifecycle 生效時間'), { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });
-    fireEvent.change(screen.getByLabelText('Lifecycle 原因代碼'), { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.reason_code } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽退役' }));
+    fireEvent.change(screen.getAllByLabelText('生效時間').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });
+    fireEvent.change(screen.getAllByLabelText('異動原因').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.reason_code } });
+    fireEvent.click(screen.getByRole('button', { name: /預覽退役/ }));
 
     await waitFor(() => expect(staffLifecycleClient.preview).toHaveBeenCalledWith(
       11,
@@ -65,8 +67,8 @@ describe('Staff lifecycle flow', () => {
       STAFF_LIFECYCLE_PREVIEW_PAYLOAD,
       expect.anything(),
     ));
-    expect(screen.getByRole('button', { name: '套用退役' })).not.toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '套用退役' }));
+    expect(screen.getByRole('button', { name: /確認套用退役/ })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /確認套用退役/ }));
     await waitFor(() => expect(staffLifecycleClient.apply).toHaveBeenCalledTimes(1));
     expect(staffLifecycleClient.apply).toHaveBeenCalledWith(
       11,
@@ -78,7 +80,7 @@ describe('Staff lifecycle flow', () => {
       expect.objectContaining({ idempotencyKey: expect.any(String) }),
     );
     await waitFor(() => expect(staffLifecycleClient.query).toHaveBeenCalledTimes(2));
-    expect(screen.getByText('已觀察最新 lifecycle')).toBeInTheDocument();
+    expect(screen.getByText('已確認最新任職狀態')).toBeInTheDocument();
     expect(screen.getAllByText('已退役').length).toBeGreaterThan(0);
   });
 
@@ -94,12 +96,12 @@ describe('Staff lifecycle flow', () => {
       .mockRejectedValueOnce(new StaffLifecycleUnavailableError({ code: 'STAFF_LIFECYCLE_TIMEOUT', message: '請求逾時', retryable: true }))
       .mockResolvedValueOnce({ ...STAFF_LIFECYCLE_RECEIPT, state: 'active' });
     await openDrawer();
-    expect(screen.queryByRole('button', { name: '預覽退役' })).toBeNull();
-    fireEvent.change(screen.getByLabelText('Lifecycle 生效時間'), { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });
-    fireEvent.change(screen.getByLabelText('Lifecycle 原因代碼'), { target: { value: 'return_active' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽復職' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '套用復職' })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: '套用復職' }));
+    expect(screen.queryByRole('button', { name: /預覽退役/ })).toBeNull();
+    fireEvent.change(screen.getAllByLabelText('生效時間').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });
+    fireEvent.change(screen.getAllByLabelText('異動原因').at(-1)!, { target: { value: 'return_active' } });
+    fireEvent.click(screen.getByRole('button', { name: /預覽復職/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /確認套用復職/ })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: /確認套用復職/ }));
     await waitFor(() => expect(screen.getByText(/結果未知/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '以相同內容重試' }));
     await waitFor(() => expect(staffLifecycleClient.apply).toHaveBeenCalledTimes(2));
@@ -114,11 +116,11 @@ describe('Staff lifecycle flow', () => {
     const pendingApply = deferred<typeof STAFF_LIFECYCLE_RECEIPT>();
     vi.mocked(staffLifecycleClient.apply).mockReturnValueOnce(pendingApply.promise);
     await openDrawer();
-    fireEvent.change(screen.getByLabelText('Lifecycle 生效時間'), { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });
-    fireEvent.change(screen.getByLabelText('Lifecycle 原因代碼'), { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.reason_code } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽退役' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '套用退役' })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: '套用退役' }));
+    fireEvent.change(screen.getAllByLabelText('生效時間').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });
+    fireEvent.change(screen.getAllByLabelText('異動原因').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.reason_code } });
+    fireEvent.click(screen.getByRole('button', { name: /預覽退役/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /確認套用退役/ })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: /確認套用退役/ }));
     await waitFor(() => expect(staffLifecycleClient.apply).toHaveBeenCalledTimes(1));
 
     const expectLocked = () => {
@@ -127,8 +129,8 @@ describe('Staff lifecycle flow', () => {
       }
       expect(screen.getByLabelText('查詢服務人員')).toBeDisabled();
       expect(screen.getByRole('button', { name: '關閉' })).toBeDisabled();
-      expect(screen.getByLabelText('Lifecycle 生效時間')).toBeDisabled();
-      expect(screen.getByLabelText('Lifecycle 原因代碼')).toBeDisabled();
+      expect(screen.getAllByLabelText('生效時間').at(-1)).toBeDisabled();
+      expect(screen.getAllByLabelText('異動原因').at(-1)).toBeDisabled();
     };
 
     expectLocked();

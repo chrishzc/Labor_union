@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 identity: PROV-20260817-react-admin-phase4a-finance-import-public-contract-hardening
 date: 2026-08-17
 owner: Finance Import

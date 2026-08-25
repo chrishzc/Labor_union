@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: approved
+declared_status: completed
 identity: PROV-20260821-matching-coordination-successor-contract
 date: 2026-08-21
 owner: Scheduling / Matching Coordination Integration Owner

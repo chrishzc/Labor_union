@@ -10,6 +10,13 @@ import { ApiDecodeError, ApiHttpError } from '../shared/typed_errors';
 const Fingerprint = z.string().regex(/^[0-9a-f]{64}$/);
 const ActivePlanSchema = z.object({
   plan: z.object({ id: z.number().int().positive(), case_no: z.string().min(1), status: z.enum(['proposed', 'accepted']), version: z.number().int().nonnegative() }).passthrough(),
+  segments: z.array(z.object({
+    segment_id: z.number().int().positive(),
+    segment_order: z.number().int().positive(),
+    staff_id: z.number().int().positive(),
+    assigned_start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    assigned_end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  }).passthrough()).min(1).max(4),
   availability_lock: z.object({ lock_id: z.number().int().positive(), status: z.string() }).passthrough().nullable(),
 }).passthrough();
 const PreviewSchema = z.strictObject({
@@ -32,6 +39,13 @@ export interface ActiveWaitingDepositPlan {
   status: string;
   activeLockId: number | null;
   communicationVersion?: number;
+  segments?: ReadonlyArray<{
+    segmentId: number;
+    sequence: number;
+    staffId: number;
+    assignedStartDate: string;
+    assignedEndDate: string;
+  }>;
 }
 
 function options(idempotencyKey?: string): RequestOptions {
@@ -62,6 +76,13 @@ export const waitingDepositLockClient = {
       status: data.plan.status,
       activeLockId: data.availability_lock?.lock_id ?? null,
       communicationVersion: data.plan.version,
+      segments: data.segments.map((segment) => ({
+        segmentId: segment.segment_id,
+        sequence: segment.segment_order,
+        staffId: segment.staff_id,
+        assignedStartDate: segment.assigned_start_date,
+        assignedEndDate: segment.assigned_end_date,
+      })),
     };
   },
   async preview(caseNo: string, planId: number): Promise<WaitingDepositPreview> {

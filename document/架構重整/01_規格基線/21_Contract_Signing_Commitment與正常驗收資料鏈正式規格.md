@@ -81,6 +81,15 @@ draft_generated → staff_contract_sent → staff_signed_received
 commitment_ready → converted | cancelled | superseded
 ```
 
+2026-08-24 人工裁決：外部寄送不是唯一途徑。LINE 未綁定、未送達、未回呼，或已使用電話、
+紙本、現場等非 LINE 流程完成簽約時，已授權內部操作者可經由 `manual_attested` 路徑，以
+已簽回的不可變 evidence 形成 `staff_signed_received`。此路徑不是 `staff_contract_sent`、不是
+LINE delivery success，也不是 target-status 修改；必須一併保存目前核准模板／版本、實際簽回
+evidence、confirmation method、非空 reason、actor、事件時間、matching plan／segment snapshot
+與 idempotency identity。當 waiting-deposit lock 尚未建立時，現行 `proposed` plan 必須另有最新
+customer acceptance root；已取得 lock 的 `accepted` plan 可直接驗證。沒有可驗證的簽回 evidence
+或 customer acceptance 時，人工入口固定拒絕。
+
 - 全部 segment 的精確服務日不得重疊，合計必須等於 `orders.service_days`。
 - `staff_signed_received` 不建立 client receivable、execution、薪資、補助或訂單成立。
 - matching plan/version 變更使舊 commitment `superseded`；不得原地改寫日期或月嫂。
@@ -97,7 +106,13 @@ commitment_ready → client_draft_generated → client_contract_sent
 ```
 
 - 客戶不得早於全部月嫂簽回。
-- 簽回只接受與目前有效 sent document、commitment 與案件相符的不可變版本。
+- 自動寄送路徑的簽回只接受與目前有效 sent document、commitment 與案件相符的不可變版本；
+  `manual_attested` 路徑則以同交易新建的目前核准模板版本與實際簽回 evidence 對應，兩者都不得
+  接受任意未受控文件或偽造 sent event。
+- 同一裁決下，客戶可在有效 commitment 已建立後，以 `manual_attested` 路徑提供實際簽回
+  evidence，直接形成 `client_signed_received` 與 Contract Completion；必須保存核准模板／版本、
+  evidence、confirmation method、reason、actor、commitment snapshot、Preview fingerprint 與
+  receipt。此路徑不建立或宣稱 LINE delivery，也不得以口頭勾選取代必要 evidence。
 - `official_service_dates_incomplete` 保留為 stable blocker 名稱；在 conversion 前，其完整性由
   有效 commitment 的精確服務日判斷，不要求先建立 execution schedule。
 - 服務中仍須 actual start、有效 execution schedule、訂金與契約完成；不得只看 Orders label。
@@ -110,15 +125,18 @@ Commands：
 - `SendStaffContract`
 - `UploadReturnedContractDocument`
 - `RecordStaffSignedContract`
+- `PreviewManualStaffContractAttestation`／`RecordManualStaffContractAttestation`
 - `SendClientContract`
 - `RecordClientSignedContractAndCompleteContract`
+- `PreviewManualClientContractAttestation`／`RecordManualClientContractAttestation`
 - `CancelOrSupersedeCommitment`
 - `ConvertCommitmentToExecution`
 
 每個 mutation 必須包含 actor、reason、correlation id、`expected_status_version`、idempotency key
-與 canonical command fingerprint。簽回命令另必須帶目前 sent document 的
-`expected_document_version_id`；不同版本一律回 `contract_document_version_stale`。文件 bytes
-只由 upload/archive port 接受，不能穿透 Domain。
+與 canonical command fingerprint。自動寄送路徑的簽回命令另必須帶目前 sent document 的
+`expected_document_version_id`；人工補登則必須帶 Preview fingerprint、confirmation method 與
+實際簽回 evidence；任一快照不同一律回 stale typed error。文件 bytes 只由 upload/archive port
+接受，不能穿透 Domain。
 
 Queries 提供案件契約進度、每 segment 狀態、目前文件版本、delivery 狀態、commitment 摘要與
 blockers。文件下載／預覽必須以案件、角色、文件版本授權並寫 security audit。Query 回傳 typed
@@ -179,6 +197,7 @@ Stable errors 至少包含：
 - `contract_status_version_conflict | contract_document_version_stale`
 - `contract_line_recipient_unbound | contract_line_recipient_subject_mismatch`
 - `staff_contract_not_sent | client_contract_not_sent | staff_commitment_incomplete`
+- `manual_contract_evidence_missing | manual_contract_confirmation_method_invalid | manual_contract_reason_missing | manual_contract_preview_stale | manual_contract_customer_acceptance_required`
 - `commitment_service_days_invalid | commitment_not_effective`
 - `official_service_dates_incomplete | service_time_terms_incomplete`
 - `contract_signature_idempotency_conflict`
@@ -189,7 +208,10 @@ Alerts 涵蓋長時間未寄送／未簽回、delivery exhausted、archive/diges
 日期不守恆、identity conflict、conversion mismatch 與 orphan archive。Alert resolve 不得改變根因。
 
 人工 UI 必須提供模板與版本、產生／預覽、寄送、上傳簽回、紀錄簽署、delivery 狀態、blocker、
-receipt 與 repair navigation；不提供 status 直接修改或 SQL/data-browser patch。
+receipt 與 repair navigation；每個 staff segment 與有效 commitment 後的 client contract，另必須
+提供人工簽約證據 Preview → 明確確認 → Apply → receipt/readback。該入口必填 confirmation
+method、非空 reason 與實際簽回檔，清楚標示「未建立 LINE 寄送任務」；不提供 status 直接
+修改或 SQL/data-browser patch。
 
 ## 9. Ports、Module 與 Adapter 邊界
 
@@ -249,6 +271,66 @@ preserved migration 另具 source/target digest、projection rebuild 與 legacy 
 
 完成不得只以 schema、route、測試檔或最終資料存在判定。production DB、外部 LINE、部署與
 cutover 必須另有明確授權及 release receipt。
+
+2026-08-25 runtime 狀態：內部人工補登簽回已在 fresh lifecycle 案由 Chrome 完成雙方
+Preview／確認／Apply／receipt/readback，列為 `completed`；外部 LINE 寄送與 provider delivery
+仍是獨立未驗收 lane，不得把它反推成人工簽約功能未完成，也不得宣稱 provider 成功。
+
+## 2026-08-25 外部簽約平台 PDF 交接裁決
+
+本節是較新的人工裁決；與前文「系統直接寄送契約」或「受控 HTTPS 文件下載網址」衝突時，
+以本節為準。電子簽章仍由工會既有外部平台執行，本系統不整合或模擬該 provider。
+
+正式流程固定為：
+
+```text
+系統產生未簽 PDF → 工會人員經已認證後台直接下載 PDF bytes
+→ 工會人員將 PDF 移到外部簽約平台
+→ 系統以 LINE 提醒月嫂前往外部平台簽約
+→ 月嫂用 LINE 回報完成
+→ 系統以 LINE 提醒客戶簽約
+→ 客戶用 LINE 回報完成
+→ 系統提醒工會人員到外部平台下載最終簽署 PDF
+→ 工會人員把最終 PDF 放回指定 NAS 投放區或由管理端受控上傳 → Preview／確認／Apply
+→ Contract Signing owner 將 NAS object reference、MIME、size、SHA-256、版本、actor、時間與 audit 保存到 DB
+```
+
+1. 管理端下載使用 authenticated、case-scoped 的 backend file response 與
+   `Content-Disposition: attachment`；不得建立持久、可轉傳或帶身分的 HTTPS 文件網址，也不得把
+   presigned URL／archive locator 回傳給一般 UI。下載須記 security audit，但不是簽署完成事實。
+2. 外部平台狀態不是本系統根事實。月嫂與客戶的 LINE 回覆必須經 verified binding、目前 document／
+   segment／commitment version 與防重放驗證，分別形成 provider-neutral completion report；LINE delivery
+   success 不能代替人的回覆。LINE 不可用時保留同等證據要求的人工補登入口。
+3. 只有全部月嫂已回報完成，才可建立客戶提醒 intent；客戶回報完成後只建立「最終 PDF 待回收」任務，
+   不得在最終檔案上傳、digest 驗證與 DB 保存前形成 Contract Completion。
+4. 最終 PDF 納管採 NAS 指定投放區或管理端 staging → zero-write Preview → 明確確認 → Apply →
+   receipt/readback。Apply 必須在單一 outer UoW 鎖定 current case、document version、雙方 completion reports
+   與 status version，經 typed `ContractDocumentRepository` 保存 immutable NAS object reference 與 metadata；
+   route、UI、LINE callback 不得直接 SQL 或自行組合檔案路徑。
+5. 依較新的 `00` §2.2 人工裁決，PDF bytes 的正式來源是工會地端受控 NAS，DB 不保存大型 binary；
+   DB 只保存 opaque object reference、digest、MIME、size、版本與稽核 metadata。一般 JSON、LINE payload、
+   query string、log、receipt 不得暴露 drive letter、UNC path、NAS mount path、base64、raw PDF、SQL statement
+   或 storage locator。既有 `storage_key` 只有在被驗證為受控 logical object reference、具 digest／版本契約
+   且無 public path leakage 時才能由 adapter 採用；不能只因欄位存在就宣稱完成。若現有 schema 仍不足，
+   另立 schema release 並通過 DB change gates；本文件同步本身不授權 DDL、migration 或既有 DB mutation。
+6. 必要 commands／queries 至少包含 `DownloadUnsignedContractPdf`、`RecordExternalStaffSigningReport`、
+   `RecordExternalClientSigningReport`、`PreviewFinalSignedContractUpload`、`ApplyFinalSignedContractUpload`、
+   `QueryContractDocumentReadback`。每條 mutation 都須有 expected version、idempotency、stale／replay、
+   timeout outcome reconciliation、人工 recovery 與 receipt。
+7. Browser 驗收必須實點下載與上傳，確認 PDF MIME／檔名／digest、LINE 回覆順序、錯序／重播拒絕、
+   final readback 與一般 UI 不出現 document URL、fingerprint、raw cursor 或 storage locator。真實 provider
+   push 仍需另行授權；未測時標 `blocked`／`not_run`，不得假造。
+
+因此前述 `SendStaffContract`／`SendClientContract` 僅保留 legacy compatibility identity，不再是新 UI 的
+正式主路徑；`archive locator` 只可留在 repository 內部相容層，current public contract 必須退出。
+
+Runtime gap 狀態（2026-08-25）：`blocked`。current renderer 僅產生 XLSX；現有 `media_assets` 與
+`contract_document_versions.storage_key` 尚未驗證為 `00` §2.2 的受控 NAS logical object reference／digest／
+version adapter，事件模型也只有 legacy `sent`／`signed_received`，尚無外部平台雙方 completion report。
+必須先完成 PDF renderer、NAS discovery／read adapter、metadata 對帳與 completion-report contract；若盤點確認
+現有 schema 足夠，可不新增 binary 欄位，若不足仍須另立 DB Work Package。不得以 raw NAS path、受控 HTTPS URL
+或直接 signed-return 假裝完成。本次禁止 DDL／migration，因此 `CUR-CONTRACT-01` 保持 blocked；既有人工補登
+完成狀態不受影響。
 
 ## 2026-08-21 M3 acceptance-effect amendment
 

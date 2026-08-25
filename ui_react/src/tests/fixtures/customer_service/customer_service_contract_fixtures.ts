@@ -14,6 +14,7 @@ import type {
   CustomerServiceSummary,
   CustomerServiceSummaryResponse,
   CustomerServiceTicket,
+  CustomerServiceUpdateApply,
 } from '../../../api/customer_service/customer_service_schemas';
 
 export const CUSTOMER_SERVICE_TICKET_FIXTURE: CustomerServiceTicket = {
@@ -100,6 +101,29 @@ export const CUSTOMER_SERVICE_DETAIL_RESPONSE_FIXTURE: CustomerServiceDetailResp
   success: true,
   message: 'Success',
   data: CUSTOMER_SERVICE_DETAIL_FIXTURE,
+  error: null,
+};
+
+export const CUSTOMER_SERVICE_UPDATE_APPLY_FIXTURE: CustomerServiceUpdateApply = {
+  ticket_id: 31,
+  resulting_status: 'resolved',
+  resulting_version: 5,
+  preview_fingerprint: CUSTOMER_SERVICE_RESOLVE_PREVIEW_FIXTURE.preview_fingerprint,
+  replayed: false,
+  readback: {
+    ...CUSTOMER_SERVICE_DETAIL_FIXTURE,
+    ticket: {
+      ...CUSTOMER_SERVICE_DETAIL_FIXTURE.ticket,
+      status: 'resolved',
+      version: 5,
+    },
+  },
+};
+
+export const CUSTOMER_SERVICE_UPDATE_APPLY_RESPONSE_FIXTURE = {
+  success: true,
+  message: '客服管理操作已完成',
+  data: CUSTOMER_SERVICE_UPDATE_APPLY_FIXTURE,
   error: null,
 };
 

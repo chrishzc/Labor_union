@@ -142,4 +142,36 @@ describe('scheduling current client', () => {
     ).rejects.toBeInstanceOf(SchedulingAbortedError);
     expect(globalThis.fetch).toHaveBeenCalledTimes(4);
   });
+
+  it('rejects an unavailability entry that omits its typed reason', async () => {
+    const missingReason = {
+      ...SCHEDULING_RESPONSE_READY,
+      data: {
+        ...SCHEDULING_RESPONSE_READY.data,
+        assignments: [],
+        days: SCHEDULING_RESPONSE_READY.data.days.map((day, index) => index === 0 ? {
+          ...day,
+          entries: [{
+            occupancy_kind: 'staff_unavailability',
+            case_no: null,
+            assignment_id: null,
+            assignment_status: null,
+            lock_id: null,
+            segment_id: null,
+            availability_block_id: 91,
+            unavailability_kind: 'long_leave',
+            unavailability_reason: null,
+          }],
+        } : day),
+      },
+    };
+    globalThis.fetch = vi.fn().mockResolvedValue(response(missingReason));
+    const client = createSchedulingCurrentClient();
+
+    await expect(client.queryCurrentCalendar({
+      staffId: 11,
+      rangeStart: '2026-08-01',
+      rangeEnd: '2026-08-03',
+    })).rejects.toBeInstanceOf(SchedulingValidationError);
+  });
 });

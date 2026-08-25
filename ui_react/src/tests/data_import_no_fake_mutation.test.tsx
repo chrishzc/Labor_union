@@ -19,7 +19,7 @@ describe('DataImportPage zero fake mutation gate', () => {
 
   it('does not render retired HCM historical or cross-domain bank controls', async () => {
     render(<DataImportPage />);
-    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入receipt/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入結果/)).toBeInTheDocument());
     for (const id of ['imports.hcm-historical.preview', 'imports.hcm-historical.apply', 'imports.bank-statements.preview', 'imports.bank-statements.apply']) {
       expect(document.querySelector(`[data-control-id="${id}"]`), id).toBeNull();
     }
@@ -29,7 +29,7 @@ describe('DataImportPage zero fake mutation gate', () => {
 
   it('exposes active Preview but no Apply control before a successful Preview', async () => {
     render(<DataImportPage />);
-    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入receipt/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入結果/)).toBeInTheDocument());
     expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();
     expect(document.querySelector('[data-control-id="imports.hcm-current.preview"]')).toBeDisabled();
     expect(document.querySelector('[data-control-id="imports.hcm-current.apply"]')).toBeNull();

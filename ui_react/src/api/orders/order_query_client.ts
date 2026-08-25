@@ -41,6 +41,7 @@ export interface OrderSummaryQueryParams {
   page_size?: number;
   after_case_no?: string;
   query_text?: string;
+  lifecycle_scope?: 'all' | 'unfinished';
 }
 
 export interface OrdersQueryClient {
@@ -58,7 +59,56 @@ const SummaryParamsSchema = z.strictObject({
   page_size: z.number().int().min(1).max(200).optional(),
   after_case_no: z.string().optional(),
   query_text: z.string().optional(),
+  lifecycle_scope: z.enum(['all', 'unfinished']).optional(),
 });
+
+export class OrderSummaryContinuationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OrderSummaryContinuationError';
+  }
+}
+
+export async function loadAllOrderSummaries(
+  query: (params: OrderSummaryQueryParams, options?: OrderQueryOptions) => Promise<OrderSummaryPage>,
+  params: OrderSummaryQueryParams = {},
+  options?: OrderQueryOptions,
+): Promise<OrderSummaryPage> {
+  const parsed = SummaryParamsSchema.parse(params);
+  const itemsByCaseNo = new Map<string, OrderSummaryPage['items'][number]>();
+  const seenCursors = new Set<string>();
+  let afterCaseNo = parsed.after_case_no?.trim();
+  let lastCursor: string | undefined = afterCaseNo;
+  let lastPage: OrderSummaryPage | null = null;
+
+  while (true) {
+    const page = await query(
+      { ...parsed, ...(afterCaseNo ? { after_case_no: afterCaseNo } : {}) },
+      options,
+    );
+    lastPage = page;
+    for (const item of page.items) itemsByCaseNo.set(item.case_no, item);
+    const nextCursor = page.next_cursor;
+    if (nextCursor === null) break;
+    if (page.items.length === 0 || seenCursors.has(nextCursor) || (lastCursor !== undefined && nextCursor <= lastCursor)) {
+      throw new OrderSummaryContinuationError('Orders 摘要 continuation cursor 未前進，無法取得完整清單。');
+    }
+    const lastItem = page.items[page.items.length - 1];
+    if (lastItem.case_no !== nextCursor) {
+      throw new OrderSummaryContinuationError('Orders 摘要 continuation cursor 與頁尾案件不一致。');
+    }
+    seenCursors.add(nextCursor);
+    lastCursor = nextCursor;
+    afterCaseNo = nextCursor;
+  }
+
+  if (!lastPage) throw new OrderSummaryContinuationError('Orders 摘要未取得任何頁面。');
+  return {
+    items: [...itemsByCaseNo.values()].sort((left, right) => left.case_no.localeCompare(right.case_no)),
+    next_cursor: null,
+    etag: lastPage.etag,
+  };
+}
 
 const summaryFlights = new Map<string, Promise<OrderSummaryPage>>();
 const SUMMARY_BURST_TTL_MS = 250;
@@ -164,6 +214,7 @@ export function getOrderSummaries(
   if (afterCaseNo) queryParams.after_case_no = afterCaseNo;
   const queryText = parsed.query_text?.trim();
   if (queryText) queryParams.query_text = queryText;
+  if (parsed.lifecycle_scope) queryParams.lifecycle_scope = parsed.lifecycle_scope;
   const resolvedOptions = requestOptions(options);
   if (resolvedOptions.signal) {
     return readResolved(

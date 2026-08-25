@@ -1,4 +1,14 @@
+---
+status: superseded
+updated: 2026-08-25
+successor: ../架構重整/01_規格基線/15_正式規格索引與裁決總表.md; ../架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md; ../架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md
+retention: non-authoritative-design-reference
+---
+
 # 新竹市月子工會 ｜ LINE 運營與智能管理中心（視覺化工作台設計成果）
+
+> 本檔保留原始 UI／UX 功能與版面意圖；不得以 API 接線為由刪除其中功能，也不得以本檔
+> 的舊 route、資料模型或安全描述覆蓋正式規格。current 缺口只由代辦總表列管。
 
 ## 一、 成果存放位置與總覽
 - **Stitch 雲端專案**：`Maternity Union Import Hub` (ID: `1132467743427550883`)

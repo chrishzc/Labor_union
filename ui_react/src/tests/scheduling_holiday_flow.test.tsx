@@ -1,6 +1,6 @@
 /**
  * File: scheduling_holiday_flow.test.tsx
- * Description: 驗證 SchedulingPage 國定假日 tab 的 server-driven Query、Preview、Apply 與觀察 UI。
+ * Description: 驗證國定假日政策的查詢、影響預覽、確認套用與業務結果回讀。
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -32,7 +32,7 @@ describe('SchedulingPage holiday policy flow', () => {
     vi.spyOn(holidayClient, 'apply').mockResolvedValue(HOLIDAY_RECEIPT);
   });
 
-  it('只在使用者開啟 holiday tab 後 Query，並以 server horizon/version 顯示候選', async () => {
+  it('只在使用者開啟國定假日頁後查詢，並顯示政策區間而不暴露來源識別或雜湊版本', async () => {
     render(<SchedulingPage />);
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
     expect(holidayClient.query).not.toHaveBeenCalled();
@@ -40,12 +40,13 @@ describe('SchedulingPage holiday policy flow', () => {
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
     fireEvent.click(screen.getByRole('button', { name: '查詢國定假日政策' }));
     await waitFor(() => expect(holidayClient.query).toHaveBeenCalledTimes(1));
-    expect(screen.getByText(HOLIDAY_CALENDAR.source_identity)).toBeInTheDocument();
-    expect(screen.getByText(/^日曆版本：/)).toBeInTheDocument();
+    expect(screen.getByText(/區間：/)).toHaveTextContent('2026-01-01 ～ 2026-12-31');
+    expect(screen.queryByText(HOLIDAY_CALENDAR.source_identity)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^日曆版本：/)).not.toBeInTheDocument();
     expect(screen.getByText(/2026-02-17/)).toBeInTheDocument();
   });
 
-  it('Preview 後才解鎖 Apply，Apply 完成後顯示 receipt 並 re-query，不顯示 optimistic success', async () => {
+  it('影響預覽後才解鎖套用，完成後回讀最新政策且不顯示內部 receipt key', async () => {
     render(<SchedulingPage />);
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
@@ -72,8 +73,10 @@ describe('SchedulingPage holiday policy flow', () => {
     fireEvent.click(screen.getByRole('button', { name: '套用國定假日變更' }));
     await waitFor(() => expect(holidayClient.apply).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(holidayClient.query).toHaveBeenCalledTimes(2));
-    expect(screen.getByRole('heading', { name: '已收到正式 receipt' })).toBeInTheDocument();
-    expect(screen.getByText('已觀察最新後端日曆版本。')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '國定假日政策已更新' })).toBeInTheDocument();
+    expect(screen.getByText('已重新查詢並確認最新國定假日政策。')).toBeInTheDocument();
+    expect(screen.queryByText(HOLIDAY_RECEIPT.receipt_key)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Receipt Key|resulting_calendar_version/)).not.toBeInTheDocument();
   });
 
   it('不得由 UI 推導雙倍薪、coverage、eligibility 或日期結果，未取得 server preview 前 controls 維持 disabled', async () => {
@@ -101,7 +104,7 @@ describe('SchedulingPage holiday policy flow', () => {
 
     expect(screen.getByRole('button', { name: '預覽國定假日變更' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '套用國定假日變更' })).toBeDisabled();
-    expect(screen.getByText('查詢區間已變更，請重新查詢日曆後再建立 Preview。')).toBeInTheDocument();
-    expect(screen.getByText('Preview 後的查詢區間或變更欄位已調整；請重新查詢並建立新的 Preview，才能套用。')).toBeInTheDocument();
+    expect(screen.getByText('查詢區間已變更，請重新查詢政策後再檢查變更影響。')).toBeInTheDocument();
+    expect(screen.getByText('查詢區間或變更內容已調整；請重新查詢並檢查最新影響，才能套用。')).toBeInTheDocument();
   });
 });

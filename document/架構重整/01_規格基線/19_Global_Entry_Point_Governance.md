@@ -41,3 +41,17 @@ dynamic navigation、CLI 的人工維運都屬可能 caller；只有逐項業務
 - `retired_410` 非 HTTP entry，或 `operator_only` 非 CLI entry。
 
 這個 queue 是入口治理，不是 runtime telemetry；它不記錄呼叫次數、人員、案件、payload 或 log。
+
+## 5. 資料中心 React 入口規劃（2026-08-25）
+
+- canonical 側邊欄入口為 `資料中心`；現行 `data-import` hash 在完成 entry switch 前保留作其穩定 identity。
+- `資料中心` 內固定包含 `NAS 檔案`、`資料匯入`、`數據瀏覽` 三個分頁；分頁不是新的 Domain owner，
+  只組合各自 typed Query／Command UI。
+- 現行 `data-browser` 不得直接刪除。它作為 compatibility deep link 時，必須開啟資料中心的
+  `數據瀏覽` 分頁；不得再顯示為側邊欄獨立項目，也不得建立第二份 Data Browser 實作或 API client。
+- 舊入口轉向前須保留 hash query、認證後目標與瀏覽器 back／forward 語意，並以 focused route／navigation
+  regression 證明匯入流程、數據瀏覽 Query 與未送出草稿沒有退步。
+- NAS 分頁只先固定 read-only 的資料夾／檔案名稱投影，不另列層級、用途、案件／人員、版本、大小、
+  更新時間或異常狀態；版型與互動待使用者另行設計。實體 mount path、arbitrary path query、
+  browser-side file mutation、NAS mount／搬移與 provider delivery 均不屬此入口規劃，本次不執行
+  entry switch。

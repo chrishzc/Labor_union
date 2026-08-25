@@ -292,7 +292,7 @@ describe('Orders #orders entry static subgate', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));
 
     fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
-    const cancelTabBtn = await screen.findByRole('button', { name: /訂單取消與退款試算/ });
+    const cancelTabBtn = await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ });
     fireEvent.click(cancelTabBtn);
     await waitFor(() => expect(countPath(requests, CANCELLATION_QUERY_ENDPOINT) - initialQueryCounts.cancellation).toBe(1));
 

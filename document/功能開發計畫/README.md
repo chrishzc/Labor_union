@@ -1,40 +1,38 @@
 # 功能開發計畫索引
 
-本目錄只保留尚在規劃、待確認、已核准但未取得實作授權，或仍有未完成範圍的 initiative。
-功能計畫不是正式規格或 production mutation 授權；正式 owner 與業務語意以
+本目錄只保留尚在規劃、blocked 或 deferred，且尚未由正式規格完整承接的 initiative。
+功能計畫不是 production mutation 授權；正式 owner 與業務語意以
 [`15_正式規格索引與裁決總表.md`](../架構重整/01_規格基線/15_正式規格索引與裁決總表.md)
-及其指向的 Domain／Global 規格為準。
+及其 Domain／Global 規格為準。跨功能 current 執行清單只看
+[`96_Current_剩餘代辦任務總表.md`](../架構重整/02_決策與退役執行記錄/96_Current_剩餘代辦任務總表.md)。
 
-## Active 計畫
+## Active／deferred 計畫
 
 | 文件 | 狀態 | 下一個 gate |
 |---|---|---|
-| [Cloud Run＋單一 Cloud VPN 雲端部署測試計畫](Cloud_Run_單一Cloud_VPN_部署測試計畫.md) | `proposed` | 指定隔離 cloud project／NAS DB、operator、預算與故障注入範圍後，另立 exact-scope Work Package。 |
+| [Cloud Run＋單一 Cloud VPN 雲端部署測試計畫](Cloud_Run_單一Cloud_VPN_部署測試計畫.md) | `proposed` | 指定隔離 cloud project／NAS DB、operator、預算與故障注入範圍後，另立 exact Work Package。 |
 | [Cloud Run Durable Job Worker Supervision](Durable_Job_Worker_Supervision_延後開發計畫.md) | `proposed`／`deferred` | 指定隔離 cloud test project／NAS DB、OIDC、operator、故障注入與雲端測試 gate。 |
-| [UI 真實業務流程測試資料與驗收主計畫](UI真實業務流程測試資料與驗收主計畫.md) | `approved-planning` | 各 Part 個別完成規格與人工 activation gate。 |
-| [Part 00 全域測試資料治理與 Scenario 契約](Part_00_全域測試資料治理與Scenario契約.md) | `proposed` | 人工確認 Part 00 後才可建立執行 Work Package。 |
-| [React 管理端遷移與 UI 真實業務流程驗收](React管理端遷移與UI真實業務流程驗收計畫.md) | `proposed` | 已確認三項 Orders SOP 業務裁決；仍待確認整體架構與第一包 Access＋System Status exact write set。 |
-| [LINE_運營與智能管理中心視覺化工作台規範](LINE_運營與智能管理中心視覺化工作台規範.md) | `unspecified / review` | 設計成果文件未聲明治理 status；先與正式 17／20／23、React entry registry及owner/SSOT對齊，非正式規格或實作授權。 |
-| [LINE_LIFF_工會手機管理中心規範](LINE_LIFF_工會手機管理中心規範.md) | `approved (self-declared; current conflict/review)` | 文件自稱 approved，但未見對應人工裁決；`alert_group_id`、staff／alert／handoff範圍須與正式規格及現有 schema/owner 重新確認。 |
-| [LINE_LIFF_身分先行與服務登記導流規劃](LINE_LIFF_身分先行與服務登記導流規劃.md) | `proposed` | 只作 onboarding 候選計畫；須先對齊正式 LINE identity／Customer Service owner與binding SSOT，未授權直接寫入或導流。 |
-| [LINE_LIFF_舊客快速身分綁定與防冒領規範](LINE_LIFF_舊客快速身分綁定與防冒領規範.md) | `approved (self-declared; current conflict/review)` | 文件自稱 approved，但其直接 `clients.line_user_id`／role promotion 語意與正式 23 binding SSOT不一致；人工裁決前不得升格或施工。 |
-| [LINE_QA客服知識契約收斂計畫](LINE_QA客服知識契約收斂計畫.md) | `blocked` | `load_workspace_dependencies`／`@oai/artifact-tool` runtime unavailable；Excel 僅 input evidence、非 SSOT，loader 恢復及人工 owner/category/source/approved-answer review 前不得升格或授權 production／AI／provider／DB。 |
+| [LINE QA 客服知識契約收斂](LINE_QA客服知識契約收斂計畫.md) | `blocked` | loader runtime 可用，且 owner／category／source／approved answer 完成人工 review 後另立 Work Package。 |
 
-## 已完成或被取代的計畫
+上述三項不是目前程式施工授權。Cloud、production、provider、deployment、entry switch 與外部副作用
+仍須新的人工確認。
 
-下列文件已通過封存 gate，不再留在 active 目錄。歷史 identity、digest、evidence 與 restore trigger
-以 [`archive_manifest.json`](../架構重整/04_已完成與上線封存/archive_manifest.json) 為準：
+## 2026-08-25 封存收斂
 
-| 原計畫 | 封存結果 | Current successor |
-|---|---|---|
-| 契約整合與正常測試資料鏈 | [superseded spec](../架構重整/04_已完成與上線封存/superseded_specs/契約整合與正常測試資料鏈_決策草案.md) | [21 Contract Signing 正式規格](../架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md) |
-| UI 工作區測試資料情境矩陣 | [completed matrix](../架構重整/04_已完成與上線封存/work_packages/UI工作區測試資料情境矩陣.md) | [21 Contract Signing 正式規格](../架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md) |
-| 休假代班天數精算與 Calendar Preview | [superseded plan](../架構重整/04_已完成與上線封存/superseded_specs/00_P0_最高優先_休假代班天數精算與行事曆差異預覽修復計畫.md) | [02 Assignments／Scheduling](../架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md) |
-| 單月嫂預設與預計服務日期表傳送 | [superseded plan](../架構重整/04_已完成與上線封存/superseded_specs/00_P0_月嫂配對中心_單月嫂預設與預計服務日期表傳送改善計畫.md) | [02 Assignments／Scheduling](../架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md) |
-| 月嫂配對中心剩餘功能 | [completed plan](../架構重整/04_已完成與上線封存/superseded_specs/00_P0_月嫂配對中心_剩餘功能收斂計畫.md) | [24 Staff Matching Preferences 正式規格](../架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md) |
-| Scheduling 月嫂請假申請待辦 | [superseded plan](../架構重整/04_已完成與上線封存/superseded_specs/Scheduling_月嫂請假申請待辦與管理端處理開發計畫.md) | [02 Assignments／Scheduling](../架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md)；實作 evidence 為 [ARCH-20260815-099](../架構重整/04_已完成與上線封存/work_packages/PROV-20260815-scheduling-line-staff-leave-intake-work-package.md)。 |
-| LINE 四大模組流程驗收與實作收斂 | [completed plan](../架構重整/04_已完成與上線封存/superseded_specs/LINE_四大模組流程驗收與實作收斂計畫.md) | [15 正式規格索引](../架構重整/01_規格基線/15_正式規格索引與裁決總表.md)、[17 LINE Access](../架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md) 與 [20 LINE客服／自助服務](../架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md)；外部 E2E 延期項目日後另開任務。 |
-| ADR-001 Import Architecture Refactor | [superseded ADR](../架構重整/04_已完成與上線封存/superseded_specs/ADR-001-import-architecture-refactor.md) | 現行匯入語意由 [15 正式規格索引](../架構重整/01_規格基線/15_正式規格索引與裁決總表.md) 與各 Domain 規格擁有；入口退役待辦已移至 [active work package](../架構重整/02_決策與退役執行記錄/Import_Entry_and_Legacy_Writer_Retirement_工作包.md)。 |
+下列舊 umbrella／設計計畫已由正式規格與 current task register 完整承接，移至
+`04_已完成與上線封存/superseded_specs/`：
 
-`completed` 不代表自動封存。只有 current successor 已完整承接語意、evidence 與 inbound links
-可追溯，且原文件不再擁有 active blocker、操作入口或 rollback 責任時，才可移入封存區。
+- UI 真實業務流程測試資料與驗收主計畫
+- Part 00 全域測試資料治理與 Scenario 契約
+- React 管理端遷移與 UI 真實業務流程驗收計畫
+- LINE 運營與智能管理中心視覺化工作台規範
+- LINE LIFF 工會手機管理中心規範
+- LINE LIFF 身分先行與服務登記導流規劃
+- LINE LIFF 舊客快速身分綁定與防冒領規範
+
+這些文件的 UI／UX 設計意圖仍可在 exact 任務中作低頻參考，但不得覆蓋正式規格；其舊 phase、
+`approved` 自稱、route、writer 或待辦不再參與 current 完成度判斷。精確 archive path、digest、successor
+與 restore trigger 只由 `archive_manifest.json` 路由。
+
+`completed` 或 `superseded` 文件不得留在 active 表。只有 current successor 已承接業務不變量、
+remaining task 與人工 recovery，且 inbound links／manifest 已更新後，才能封存。

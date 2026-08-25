@@ -1,38 +1,149 @@
 /**
  * File: DataBrowserPage.css
- * Description: 去敏資料來源分頁、查詢列與歷史快照表格版面。
+ * Description: 高密度等寬資料網格、資料來源指標卡、Keyspace 分頁與 1400px 結構化 JSON 抽屜樣式。
  */
 
+/* ==========================================================================
+   1. 頁面容器與頂部 Banner
+   ========================================================================== */
+.databrowser-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.databrowser-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: linear-gradient(135deg, #ffffff 0%, #fff8f6 100%);
+  padding: 22px 26px;
+  border-radius: 16px;
+  border: 1px solid #fed9b8;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.06);
+}
+
+.databrowser-page-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.databrowser-page-title {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 800;
+  color: #2b1f1d;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.databrowser-page-subtitle {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #74593f;
+  line-height: 1.5;
+}
+
+.databrowser-header-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background-color: #fff0eb;
+  color: #ea580c;
+  border: 1px solid #fed9b8;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   2. 4 大統計與狀態指標卡 (KPI Grid)
+   ========================================================================== */
+.databrowser-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.databrowser-kpi-card {
+  background-color: #ffffff;
+  border: 1px solid #f2e2dc;
+  border-radius: 14px;
+  padding: 16px 20px;
+  box-shadow: 0 2px 10px rgba(74, 69, 67, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.databrowser-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(74, 69, 67, 0.06);
+}
+
+.databrowser-kpi-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #8b7169;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.databrowser-kpi-value {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #2b1f1d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.databrowser-kpi-desc {
+  font-size: 0.78rem;
+  color: #9c857c;
+}
+
+/* ==========================================================================
+   3. 頁籤列 (Tab Bar)
+   ========================================================================== */
 .databrowser-tab-bar {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   position: sticky;
   top: 64px;
-  z-index: 50;
-  background: rgba(255, 248, 246, 0.92);
+  z-index: 40;
+  background: rgba(255, 248, 246, 0.94);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  padding: 12px 8px;
-  margin-bottom: 20px;
-  border-bottom: 2px solid #f2e2dc;
-  border-radius: 12px;
+  padding: 10px 12px;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
   overflow-x: auto;
+  box-shadow: 0 4px 14px rgba(255, 127, 80, 0.05);
 }
 
 .databrowser-tab-btn {
-  padding: 10px 20px;
+  padding: 9px 18px;
   background-color: #ffffff;
   border: 1px solid #dec0b6;
-  border-radius: 12px;
+  border-radius: 10px;
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   color: #57423b;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .databrowser-tab-btn:hover {
@@ -45,71 +156,426 @@
   background-color: #ff7f50;
   border-color: #ff7f50;
   color: #ffffff;
-  box-shadow: 0 4px 12px rgba(255, 127, 80, 0.25);
+  box-shadow: 0 3px 10px rgba(255, 127, 80, 0.25);
 }
 
+/* ==========================================================================
+   4. 搜尋過濾工具列 (Filter Bar)
+   ========================================================================== */
 .databrowser-filter-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 14px;
+  background-color: #ffffff;
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 1px solid #dec0b6;
+  box-shadow: 0 2px 8px rgba(74, 69, 67, 0.03);
 }
 
-.databrowser-filter-bar > div:first-child,
-.databrowser-filter-bar [data-control-id="data-browser.query"] {
-  min-width: 0;
+.databrowser-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  max-width: 620px;
 }
 
-.databrowser-filter-bar [data-control-id="data-browser.query.submit"] {
-  flex: 0 0 auto;
-  min-width: 72px;
+.databrowser-search-input-box {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.databrowser-search-icon {
+  position: absolute;
+  left: 12px;
+  font-size: 0.9rem;
+  color: #9c857c;
+  pointer-events: none;
+}
+
+.databrowser-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 36px 9px 36px;
+  border: 1px solid #dec0b6;
+  border-radius: 10px;
+  background-color: #fffdfc;
+  font-size: 0.88rem;
+  color: #2b1f1d;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.databrowser-search-input:focus {
+  outline: none;
+  border-color: #ff7f50;
+  background-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(255, 127, 80, 0.15);
+}
+
+.databrowser-search-clear {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  font-size: 0.85rem;
+  color: #9c857c;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.databrowser-search-clear:hover {
+  color: #ff7f50;
+}
+
+.databrowser-btn-primary {
+  padding: 9px 20px;
+  background-color: #ff7f50;
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
   white-space: nowrap;
 }
 
-@media (max-width: 720px) {
-  .databrowser-filter-bar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .databrowser-filter-bar > div:first-child {
-    max-width: none !important;
-    width: 100%;
-  }
+.databrowser-btn-primary:hover {
+  background-color: #ff6833;
+  box-shadow: 0 2px 8px rgba(255, 127, 80, 0.3);
 }
 
+.databrowser-loaded-badge {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #74593f;
+  background-color: #fff8f6;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid #fed9b8;
+}
+
+/* ==========================================================================
+   5. 高密度等寬資料網格 (High-Density Monospace Grid)
+   ========================================================================== */
 .databrowser-table-container {
   background-color: #ffffff;
-  border-radius: 18px;
-  padding: 24px 28px;
+  border-radius: 14px;
   border: 1px solid #dec0b6;
-  box-shadow: 0 4px 20px rgba(74, 69, 67, 0.04);
+  box-shadow: 0 4px 16px rgba(74, 69, 67, 0.04);
   overflow-x: auto;
 }
 
 .databrowser-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.88rem;
+  font-size: 0.85rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   white-space: nowrap;
 }
 
 .databrowser-table th {
   background-color: #fff8f6;
-  padding: 12px 14px;
+  padding: 10px 14px;
   text-align: left;
   border-bottom: 2px solid #fed9b8;
+  font-weight: 800;
+  color: #57423b;
+  font-family: inherit;
+  letter-spacing: 0.01em;
+}
+
+.databrowser-table td {
+  padding: 9px 14px;
+  border-bottom: 1px solid #f2e2dc;
+  vertical-align: middle;
+  color: #2b1f1d;
+}
+
+.databrowser-table tbody tr:nth-child(even) {
+  background-color: #fffdfc;
+}
+
+.databrowser-table tbody tr:hover {
+  background-color: #fff4ed;
+}
+
+.databrowser-row-id {
+  font-weight: 700;
+  color: #ea580c;
+  background-color: #fff0eb;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #fed9b8;
+}
+
+.databrowser-summary-wrap {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.databrowser-cell-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background-color: #f7f3f1;
+  border: 1px solid #dec0b6;
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.databrowser-cell-label {
+  color: #8b7169;
+  font-weight: 700;
+}
+
+.databrowser-cell-value {
+  color: #2b1f1d;
+  font-weight: 600;
+}
+
+.databrowser-hash-code {
+  font-size: 0.78rem;
+  color: #64748b;
+  background-color: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+}
+
+.databrowser-action-link-btn {
+  padding: 5px 12px;
+  background-color: #ffffff;
+  border: 1px solid #ff7f50;
+  color: #ff7f50;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.databrowser-action-link-btn:hover {
+  background-color: #ff7f50;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(255, 127, 80, 0.25);
+}
+
+/* ==========================================================================
+   6. 狀態與分頁 (States & Pagination)
+   ========================================================================== */
+.databrowser-pagination-bar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+.databrowser-pagination-btn {
+  padding: 10px 24px;
+  background-color: #ffffff;
+  color: #ff7f50;
+  border: 2px solid #ff7f50;
+  border-radius: 12px;
+  font-weight: 800;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.databrowser-pagination-btn:hover {
+  background-color: #ff7f50;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(255, 127, 80, 0.25);
+}
+
+/* ==========================================================================
+   7. 1400px 結構化資料檢查抽屜樣式 (Drawer Inspector)
+   ========================================================================== */
+.databrowser-drawer-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.databrowser-drawer-meta-banner {
+  background: linear-gradient(135deg, #ffffff 0%, #fff8f6 100%);
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 20px 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.databrowser-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.databrowser-meta-item-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #8b7169;
+}
+
+.databrowser-meta-item-value {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #2b1f1d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.databrowser-hash-banner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: #ffffff;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px dashed #fed9b8;
+  overflow-x: auto;
+}
+
+.databrowser-hash-banner code {
+  font-size: 0.82rem;
+  color: #ea580c;
+  word-break: break-all;
+}
+
+.databrowser-view-mode-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 2px solid #f2e2dc;
+  padding-bottom: 10px;
+}
+
+.databrowser-mode-tab-btn {
+  padding: 8px 16px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #74593f;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.databrowser-mode-tab-btn.active {
+  background-color: #fff0eb;
+  border-color: #fed9b8;
+  color: #ea580c;
+}
+
+.databrowser-kv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  border: 1px solid #dec0b6;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.databrowser-kv-table th {
+  background-color: #fff8f6;
+  padding: 10px 16px;
+  text-align: left;
+  border-bottom: 1px solid #fed9b8;
   font-weight: 700;
   color: #57423b;
 }
 
-.databrowser-table td {
-  padding: 12px 14px;
+.databrowser-kv-table td {
+  padding: 10px 16px;
   border-bottom: 1px solid #f2e2dc;
-  vertical-align: middle;
+  vertical-align: top;
 }
 
-.databrowser-table tr:hover {
-  background-color: #fffdfc;
+.databrowser-kv-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.databrowser-json-container {
+  background-color: #1e1b19;
+  border-radius: 12px;
+  padding: 18px 22px;
+  color: #f5f5f4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  max-height: 480px;
+  border: 1px solid #44403c;
+}
+
+.databrowser-json-container pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.databrowser-retired-panel {
+  background-color: #faf8f7;
+  border: 1px dashed #dec0b6;
+  border-radius: 12px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.databrowser-retired-panel p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #8b7169;
+}
+
+.databrowser-retired-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.databrowser-retired-actions button {
+  padding: 6px 14px;
+  background-color: #e5e5e5;
+  color: #737373;
+  border: 1px solid #d4d4d4;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: not-allowed;
+}
+
+.databrowser-drawer-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.databrowser-copy-feedback {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #16a34a;
 }

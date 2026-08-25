@@ -9,7 +9,7 @@ authority: awaiting-exact-human-approval
 approval_required: 核准此 exact Phase 3D-W-H Streamlit Warning Transition Compatibility Bridge Work Package
 prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PHASE3_SCENARIO_LINEAGE_METADATA_READY; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase2d-h-closure-gate-amendment PASS; PROV-20260817-react-admin-phase3d-warning-transition-receipt-hardening exact public contract freeze
 bridge_position: W-H final-acceptance/cutover prerequisite; not a W-H public-contract design prerequisite
-scenario_governance: Part_00_全域測試資料治理與Scenario契約.md
+scenario_governance: ../01_規格基線/00_Global_共同契約.md
 ui_execution_mode: streamlit-compatibility-only
 evidence_directory: document/架構重整/03_追蹤清單與證據/evidence/PROV-20260822-react-admin-phase3d-warning-transition-streamlit-compatibility-bridge/
 base_branch: main

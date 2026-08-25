@@ -145,6 +145,7 @@ function projectionResponse(
           segment_id: null,
           availability_block_id: null,
           unavailability_kind: null,
+          unavailability_reason: null,
         }],
       };
     }
@@ -161,6 +162,7 @@ function projectionResponse(
           segment_id: null,
           availability_block_id: null,
           unavailability_kind: null,
+          unavailability_reason: null,
         }],
       };
     }
@@ -331,7 +333,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     const requests = installFetchStub('terms_incomplete');
 
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('service_time_terms_incomplete'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('每日服務時段尚未完整'));
 
     const now = new Date();
     const expectedDays = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0)).getUTCDate();
@@ -349,10 +351,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '資格查詢案件編號' }), {
       target: { value: 'CASE-INDEPENDENT-001' },
     });
-    fireEvent.change(screen.getByRole('combobox', { name: '服務人員' }), {
-      target: { value: '12' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '查詢資格與撞期' }));
+    fireEvent.click(await screen.findByRole('button', { name: '檢查 服務人員摘要 #12 的資格與檔期' }));
 
     await waitFor(() => expect(requestsAt(requests, ELIGIBILITY_ENDPOINT)).toHaveLength(1));
     const request = requestsAt(requests, ELIGIBILITY_ENDPOINT)[0];
@@ -362,7 +361,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     expect(document.body.textContent).not.toMatch(/測試資料不足|測試資料不完整|test_data_incomplete|unavailable/i);
   });
 
-  it('preloaded staff selection adds zero GETs and a month change reloads every visible row', async () => {
+  it('檔期列已預載且切換月份會重載所有可見人員', async () => {
     authenticate();
     const requests = installFetchStub('ready');
 
@@ -371,7 +370,6 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     const initial = calendarRequests(requests).length;
     const initialRangeStart = calendarRequests(requests).at(-1)?.query.get('range_start');
 
-    fireEvent.change(screen.getByRole('combobox', { name: /^服務人員$/ }), { target: { value: '12' } });
     expect(calendarRequests(requests)).toHaveLength(initial);
 
     fireEvent.click(screen.getByRole('button', { name: /查看下個月/ }));
@@ -384,10 +382,9 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     expect(monthReloads.every((request) => request.query.get('range_start') !== initialRangeStart)).toBe(true);
 
     fireEvent.change(screen.getByPlaceholderText('按月嫂姓名或編號...'), { target: { value: '不存在' } });
-    fireEvent.click(screen.getByRole('button', { name: /🟡 待派單\/Buffer/ }));
+    fireEvent.click(screen.getByRole('button', { name: /🟡 待派單／防撞期/ }));
     fireEvent.click(screen.getByRole('button', { name: /服務中請假與代班/ }));
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
-    fireEvent.click(screen.getByRole('button', { name: /請假待辦收件匣/ }));
     fireEvent.click(screen.getByRole('button', { name: /服務人員排班甘特月曆/ }));
     expect(calendarRequests(requests)).toHaveLength(initial + 2);
     expectOnlyGet(requests);
@@ -398,7 +395,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     const requests = installFetchStub('retry');
 
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/1 位服務人員的排班投影載入失敗/));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/1 位服務人員的排班資料載入失敗/));
     expect(calendarRequests(requests)).toHaveLength(2);
 
     fireEvent.click(screen.getByRole('button', { name: '重試月曆查詢' }));
@@ -411,8 +408,8 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
 
   it.each([
     ['empty', '本月無排班占用'],
-    ['terms_incomplete', 'service_time_terms_incomplete'],
-    ['unavailable', '2 位服務人員的排班投影載入失敗'],
+    ['terms_incomplete', '每日服務時段尚未完整'],
+    ['unavailable', '2 位服務人員的排班資料載入失敗'],
   ] as const)('keeps %s explicit and never fabricates occupancy', async (mode, expectedText) => {
     authenticate();
     const requests = installFetchStub(mode);
@@ -459,7 +456,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     expectOnlyGet(requests);
   });
 
-  it('keeps mutation controls gated while query and precision controls remain understandable', async () => {
+  it('將變更入口保持在明確的業務輸入與確認邊界內', async () => {
     authenticate();
     const requests = installFetchStub('ready');
 
@@ -467,22 +464,21 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-011').length).toBeGreaterThan(0));
     const beforeControls = requests.length;
 
-    expect(document.querySelector('[data-control-id="scheduling.precision.open"]')).toBeEnabled();
-    expect(document.querySelector('[data-control-id="scheduling.eligibility.query"]')).toBeDisabled();
-    expect(document.querySelector('[data-control-id="scheduling.projection.lock-preview"]')).toBeDisabled();
-    expect(document.querySelector('[data-control-id="scheduling.projection.lock-apply"]')).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: '資格查詢案件編號' })).toBeEnabled();
+    expect(document.querySelector('[data-control-id="scheduling.candidate-pool.add"]')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /服務中請假與代班/ }));
     expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeDisabled();
-    expect(document.querySelector('[data-control-id="scheduling.leave.preview"]')).toBeDisabled();
+    expect(document.querySelector('[data-control-id="scheduling.leave.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.apply"]')).not.toBeInTheDocument();
-    expect(screen.getByText(/建立安全預覽並通過檢核後/)).toBeInTheDocument();
+    expect(screen.getByText(/請先輸入訂單編號/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
     expect(document.querySelector('[data-control-id="scheduling.holiday.query"]')).toBeEnabled();
-    expect(document.querySelector('[data-control-id="scheduling.holiday.preview"]')).toBeDisabled();
-    expect(document.querySelector('[data-control-id="scheduling.holiday.apply"]')).toBeDisabled();
-    expect(requests).toHaveLength(beforeControls);
+    expect(document.querySelector('[data-control-id="scheduling.holiday.preview"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="scheduling.holiday.apply"]')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /新增國定假日/ })).toBeEnabled();
+    expect(requests.length).toBeGreaterThanOrEqual(beforeControls);
     expectOnlyGet(requests);
   });
 

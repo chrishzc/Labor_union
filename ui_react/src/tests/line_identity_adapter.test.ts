@@ -1,6 +1,6 @@
 /**
  * File: line_identity_adapter.test.ts
- * Description: 驗證 LINE 身分更正、解除與維護展示模型遮罩、未完成語意及機密欄位不穿透。
+ * Description: 驗證 LINE 身分審核、更正、解除與維護展示模型遮罩、未完成語意及機密欄位不穿透。
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -9,6 +9,9 @@ import {
   adaptLineIdentityMaintenanceResult,
   adaptLineIdentityReplacementPreview,
   adaptLineIdentityReplacementResult,
+  adaptLineIdentityReview,
+  adaptLineIdentityReviewPreview,
+  adaptLineIdentityReviewReceipt,
   adaptLineIdentityRevocationAccepted,
   adaptLineIdentityRevocationPreview,
   maskLineUserId,
@@ -23,6 +26,23 @@ import {
 } from './fixtures/line_identity/line_identity_contract_fixtures';
 
 describe('LINE Identity Adapter（Phase 3A Lane D）', () => {
+  const review = {
+    request_id: 71,
+    review_type: 'staff_verification' as const,
+    status: 'pending' as const,
+    version: 3,
+    subject_type: 'staff' as const,
+    subject_reference: 'STAFF-REVIEW-071',
+    assigned_admin_id: null,
+    due_at: null,
+    line_user_id_masked: 'Ureview-should-be-masked-7890',
+    display_name: '待審月嫂甲',
+    decision_reason: null,
+    reviewed_by_actor_id: null,
+    reviewed_at: null,
+    created_at: '2026-08-24T10:00:00+08:00',
+  };
+
   it('完整 LINE User ID 只輸出首尾遮罩且不等於原值', () => {
     const masked = maskLineUserId(FIXTURE_LINE_USER_ID);
 
@@ -163,5 +183,48 @@ describe('LINE Identity Adapter（Phase 3A Lane D）', () => {
     expect(manual.statusLabel).toBe('人工解除完成');
     expect(manual.notice).toContain('重新查詢');
     expect(JSON.stringify([retry, manual])).not.toContain(FIXTURE_LINE_USER_ID);
+  });
+
+  it('review 明細再次遮罩 LINE ID，並將 typed state 轉為人工審核文案', () => {
+    const result = adaptLineIdentityReview(review);
+
+    expect(result.reviewTypeLabel).toBe('月嫂身分驗證');
+    expect(result.statusLabel).toBe('待人工審核');
+    expect(result.subjectTypeLabel).toBe('月嫂');
+    expect(result.maskedLineUserId).toBe('Urev••••7890');
+    expect(JSON.stringify(result)).not.toContain(review.line_user_id_masked);
+  });
+
+  it('review Preview 保留 fingerprint 供 Apply，receipt 不假造 provider 送達', () => {
+    const preview = adaptLineIdentityReviewPreview({
+      request_id: 71,
+      decision: 'approve',
+      before_status: 'pending',
+      after_status: 'approved',
+      expected_version: 3,
+      resulting_version: 4,
+      subject_type: 'staff',
+      subject_reference: 'STAFF-REVIEW-071',
+      line_user_id_masked: review.line_user_id_masked,
+      preview_fingerprint: 'review-preview-fixture-071',
+    });
+    const receipt = adaptLineIdentityReviewReceipt({
+      ...review,
+      status: 'approved',
+      version: 4,
+      decision_reason: '人工確認資料無誤',
+      reviewed_by_actor_id: 'admin:1',
+      reviewed_at: '2026-08-24T10:30:00+08:00',
+      outcome: 'created',
+      receipt_identity: 'line-review:71:approved',
+    });
+
+    expect(preview.decisionLabel).toBe('核准');
+    expect(preview.previewFingerprint).toBe('review-preview-fixture-071');
+    expect(receipt.statusLabel).toBe('已核准');
+    expect(receipt.receiptIdentity).toBe('line-review:71:approved');
+    expect(receipt.outcomeLabel).toBe('已建立');
+    expect(receipt.notice).toContain('後端受理');
+    expect(receipt.notice).toContain('不代表任何 LINE provider 訊息已送達');
   });
 });

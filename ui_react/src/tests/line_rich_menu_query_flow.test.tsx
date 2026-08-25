@@ -33,8 +33,8 @@ describe('LINE Rich Menu query-only 接線', () => {
     render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} />);
     fireEvent.click(screen.getByRole('button', { name: /2\. 多角色 Rich Menu/ }));
 
-    await waitFor(() => expect(screen.getByText('案件進度')).toBeInTheDocument());
-    expect(screen.getByText('目前載入最多 100 筆。')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText('案件進度').length).toBeGreaterThan(0));
+    expect(screen.queryByText('目前載入最多 100 筆。')).not.toBeInTheDocument();
     expect(screen.getByText('已發布')).toBeInTheDocument();
     expect(screen.queryByText('case_progress')).not.toBeInTheDocument();
     expect(screen.queryByText(/https?:\/\//)).not.toBeInTheDocument();
@@ -42,12 +42,13 @@ describe('LINE Rich Menu query-only 接線', () => {
     expect(configuration.getRichMenuConfiguration).toHaveBeenCalledTimes(1);
     expect(configuration.listRichMenuPublications).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+    fireEvent.click(screen.getByRole('button', { name: /查看紀錄/ }));
     await waitFor(() => expect(configuration.getRichMenuPublication).toHaveBeenCalledWith(
       19,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ));
     expect(screen.queryByRole('button', { name: '重新發布' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/發布工作 ID|設定版本|紀錄 ID|伺服器狀態/)).not.toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

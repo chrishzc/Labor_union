@@ -1,6 +1,6 @@
 /**
  * File: order_tracker_real_data.test.tsx
- * Description: 驗證 Tracker 七階段、案件卡片投影三態、11 步 SOP、cursor 續頁與唯讀 LINE 歷程。
+ * Description: 驗證 Tracker 未完成案件、七階段、卡片投影、11 步 SOP、cursor 續頁與唯讀 LINE 歷程。
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,7 +10,7 @@ import { orderCardProjectionClient } from '../api/orders/order_card_projection_c
 import { lineNotificationTimelineClient } from '../api/line/notification_timeline_client';
 import { ORDER_STAGE_PROJECTION_UNAVAILABLE } from '../adapters/orders/order_stage_projection_adapter';
 import { OrderTrackerPage } from '../pages/OrderTrackerPage';
-import { realisticOrderSummaryPage } from './fixtures/orders_real_data_fixtures';
+import { realisticFormManagementContext, realisticOrderSummaryPage } from './fixtures/orders_real_data_fixtures';
 import { buildOrdersStageProjectionFixture } from './fixtures/orders_stage_projection_fixtures';
 
 function surface(prefix: string): HTMLElement[] {
@@ -25,6 +25,7 @@ describe('OrderTrackerPage query-only presentation', () => {
       new Error(ORDER_STAGE_PROJECTION_UNAVAILABLE),
     );
     vi.spyOn(orderCardProjectionClient, 'getCardProjection').mockRejectedValue(new Error('card query fixture'));
+    vi.spyOn(ordersQueryClient, 'getFormManagementContext').mockResolvedValue(realisticFormManagementContext);
     vi.spyOn(lineNotificationTimelineClient, 'query').mockResolvedValue({ case_no: 'ORD-2026-0801', records: [] });
   });
 
@@ -45,7 +46,7 @@ describe('OrderTrackerPage query-only presentation', () => {
     expect(cardStateTitles).toHaveLength(realisticOrderSummaryPage.items.length);
     for (const title of cardStateTitles) expect(title).toHaveTextContent('階段資料載入失敗');
     expect(screen.queryByText('資料完整性異常')).not.toBeInTheDocument();
-    expect(screen.getAllByText('原始訂單狀態')).toHaveLength(
+    expect(screen.getAllByText('目前訂單狀態')).toHaveLength(
       realisticOrderSummaryPage.items.length
     );
   });
@@ -85,6 +86,19 @@ describe('OrderTrackerPage query-only presentation', () => {
     expect(screen.getByText('聯絡電話').nextElementSibling).toHaveTextContent('載入中');
     expect(screen.getByText('服務地址').nextElementSibling).toHaveTextContent('載入中');
     expect(screen.queryByText('開啟案件卡片後載入')).not.toBeInTheDocument();
+  });
+
+  it('shows normalized client service facts without raw BeClass evidence or technical fingerprints', async () => {
+    render(<OrderTrackerPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getByRole('button', { name: /查看訂單 ORD-2026-0801/ }));
+
+    await waitFor(() => expect(screen.getByText('到府服務')).toBeInTheDocument());
+    expect(screen.getByText('08:30-17:30')).toBeInTheDocument();
+    expect(screen.getByText('公寓')).toBeInTheDocument();
+    expect(screen.getByText('台北市')).toBeInTheDocument();
+    expect(screen.getByText('生產方式').nextElementSibling).toHaveTextContent('待確認');
+    expect(document.body).not.toHaveTextContent(/fingerprint|receipt|survey_details|query_no/i);
   });
 
   it('does not disguise unavailable card fields as empty business values', async () => {
@@ -198,7 +212,7 @@ describe('OrderTrackerPage query-only presentation', () => {
     expect(screen.queryByText(/0 筆案件/)).not.toBeInTheDocument();
   });
 
-  it('continues from next_cursor, appends the next page and does not duplicate the first summary', async () => {
+  it('automatically continues to terminal and does not duplicate the first summary', async () => {
     const firstPage = {
       ...realisticOrderSummaryPage,
       items: [realisticOrderSummaryPage.items[0]],
@@ -212,7 +226,7 @@ describe('OrderTrackerPage query-only presentation', () => {
     vi.mocked(ordersQueryClient.getOrderSummaries)
       .mockResolvedValueOnce(firstPage)
       .mockResolvedValueOnce(secondPage);
-    const firstStagePage = buildOrdersStageProjectionFixture(firstPage);
+    const firstStagePage = { ...buildOrdersStageProjectionFixture(firstPage), next_cursor: firstPage.next_cursor };
     const secondStagePage = buildOrdersStageProjectionFixture(secondPage);
     secondStagePage.items[0].current_stage_code = 'matching_willingness';
     secondStagePage.stage_counts.intake_terms = 0;
@@ -223,23 +237,95 @@ describe('OrderTrackerPage query-only presentation', () => {
 
     render(<OrderTrackerPage />);
     await screen.findByText('ORD-2026-0801');
-    fireEvent.click(screen.getByRole('button', { name: '載入下一頁' }));
-
     await screen.findByText('ORD-2026-0802');
     expect(screen.getAllByText('ORD-2026-0801')).toHaveLength(1);
     expect(document.querySelector('[data-surface-id="order-tracker.stage-count.intake_terms"]')).toHaveTextContent('1');
     expect(document.querySelector('[data-surface-id="order-tracker.stage-count.matching_willingness"]')).toHaveTextContent('1');
     expect(ordersQueryClient.getOrderSummaries).toHaveBeenNthCalledWith(
       2,
-      { after_case_no: 'ORD-2026-0801' },
+      { page_size: 200, lifecycle_scope: 'unfinished', after_case_no: 'ORD-2026-0801' },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(orderStageProjectionClient.getOperationalTimelines).toHaveBeenNthCalledWith(
       2,
-      { page_size: 50, after_case_no: 'ORD-2026-0801' },
+      { page_size: 200, lifecycle_scope: 'unfinished', after_case_no: 'ORD-2026-0801' },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(screen.queryByRole('button', { name: '載入下一頁' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the active search filter and de-duplicates cross-page stage projections', async () => {
+    const firstItem = realisticOrderSummaryPage.items[0];
+    const secondItem = realisticOrderSummaryPage.items[1];
+    const firstPage = {
+      ...realisticOrderSummaryPage,
+      items: [firstItem],
+      next_cursor: firstItem.case_no,
+    };
+    const secondPage = {
+      ...realisticOrderSummaryPage,
+      items: [firstItem, secondItem],
+      next_cursor: null,
+    };
+    vi.mocked(ordersQueryClient.getOrderSummaries)
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce(secondPage);
+    const firstStagePage = { ...buildOrdersStageProjectionFixture(firstPage), next_cursor: firstPage.next_cursor };
+    const secondStagePage = buildOrdersStageProjectionFixture(secondPage);
+    secondStagePage.items[0].current_stage_code = 'intake_terms';
+    secondStagePage.items[1].current_stage_code = 'matching_willingness';
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines)
+      .mockResolvedValueOnce(firstStagePage)
+      .mockResolvedValueOnce(secondStagePage);
+
+    render(<OrderTrackerPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.change(screen.getByRole('textbox', { name: '搜尋案件' }), { target: { value: 'ORD-2026-0802' } });
+    expect(screen.queryByText('ORD-2026-0801')).not.toBeInTheDocument();
+    await screen.findByText('ORD-2026-0802');
+    expect(screen.queryByText('ORD-2026-0801')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-surface-id="order-tracker.stage-count.intake_terms"]')).toHaveTextContent('0');
+    expect(document.querySelector('[data-surface-id="order-tracker.stage-count.matching_willingness"]')).toHaveTextContent('1');
+    expect(screen.getAllByText('ORD-2026-0802')).toHaveLength(1);
+  });
+
+  it('preserves every server-scoped item when a later page contains a cancelled order', async () => {
+    const firstPage = {
+      ...realisticOrderSummaryPage,
+      items: [realisticOrderSummaryPage.items[0]],
+      next_cursor: realisticOrderSummaryPage.items[0].case_no,
+    };
+    const cancelled = {
+      ...realisticOrderSummaryPage.items[2],
+      case_no: 'ORD-2026-CANCELLED',
+      order_status: '訂單取消',
+    };
+    const secondPage = {
+      ...realisticOrderSummaryPage,
+      items: [realisticOrderSummaryPage.items[1], cancelled],
+      next_cursor: null,
+    };
+    vi.mocked(ordersQueryClient.getOrderSummaries)
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce(secondPage);
+    const firstStagePage = { ...buildOrdersStageProjectionFixture(firstPage), next_cursor: firstPage.next_cursor };
+    const secondStagePage = buildOrdersStageProjectionFixture(secondPage);
+    secondStagePage.items[0].current_stage_code = 'matching_willingness';
+    secondStagePage.items[1].current_stage_code = 'settlement_payout';
+    secondStagePage.stage_counts.intake_terms = 0;
+    secondStagePage.stage_counts.active_service = 0;
+    secondStagePage.stage_counts.matching_willingness = 1;
+    secondStagePage.stage_counts.settlement_payout = 1;
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines)
+      .mockResolvedValueOnce(firstStagePage)
+      .mockResolvedValueOnce(secondStagePage);
+
+    render(<OrderTrackerPage />);
+    await screen.findByText('ORD-2026-0801');
+    await screen.findByText('ORD-2026-0802');
+    expect(screen.getByText('ORD-2026-CANCELLED')).toBeInTheDocument();
+    expect(document.querySelector('[data-surface-id="order-tracker.stage-count.matching_willingness"]')).toHaveTextContent('1');
+    expect(document.querySelector('[data-surface-id="order-tracker.stage-count.settlement_payout"]')).toHaveTextContent('1');
   });
 
   it('marks typed projection unavailable when the next summary page succeeds but its stage page fails', async () => {
@@ -257,14 +343,11 @@ describe('OrderTrackerPage query-only presentation', () => {
       .mockResolvedValueOnce(firstPage)
       .mockResolvedValueOnce(secondPage);
     vi.mocked(orderStageProjectionClient.getOperationalTimelines)
-      .mockResolvedValueOnce(buildOrdersStageProjectionFixture(firstPage))
+      .mockResolvedValueOnce({ ...buildOrdersStageProjectionFixture(firstPage), next_cursor: firstPage.next_cursor })
       .mockRejectedValueOnce(new Error('stage page failed'));
 
     render(<OrderTrackerPage />);
     await screen.findByText('ORD-2026-0801');
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '載入下一頁' }));
-    });
     await screen.findByText('ORD-2026-0802');
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /查看訂單 ORD-2026-0802/ }));

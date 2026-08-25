@@ -31,6 +31,13 @@ const FormalPlanContactStateSchema = z.strictObject({
   all_willing: z.boolean(),
   customer_decision: z.enum(['pending', 'accepted', 'declined', 'contact_requested']),
   customer_profiles_status: z.string().nullable(),
+  customer_profiles_manual_confirmation: z.strictObject({
+    event_ids: z.array(z.number().int().positive()).min(1).max(4),
+    confirmation_method: z.enum(['phone', 'in_person', 'paper', 'other']),
+    reason: z.string().min(1).max(500),
+    actor_id: z.string().min(1).max(191),
+    preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  }).nullable().optional().default(null),
 });
 
 const CaregiverWillingnessReceiptSchema = z.strictObject({
@@ -84,9 +91,47 @@ const CustomerProfilesNotificationEnvelopeSchema = z.strictObject({
   error: z.string().nullable(),
 });
 
+const ManualCustomerProfilesPreviewSchema = z.strictObject({
+  case_no: z.string().min(1).max(50),
+  plan_id: z.number().int().positive(),
+  expected_version: z.number().int().nonnegative(),
+  segment_ids: z.array(z.number().int().positive()).min(1).max(4),
+  confirmation_method: z.enum(['phone', 'in_person', 'paper', 'other']),
+  reason: z.string().min(1).max(500),
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  apply_allowed: z.boolean(),
+});
+
+const ManualCustomerProfilesReceiptSchema = z.strictObject({
+  case_no: z.string().min(1).max(50),
+  plan_id: z.number().int().positive(),
+  communication_version: z.number().int().nonnegative(),
+  event_ids: z.array(z.number().int().positive()).min(1).max(4),
+  confirmation_method: z.enum(['phone', 'in_person', 'paper', 'other']),
+  preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  replayed: z.boolean(),
+});
+
+const ManualCustomerProfilesPreviewEnvelopeSchema = z.strictObject({
+  success: z.boolean(),
+  message: z.string(),
+  data: ManualCustomerProfilesPreviewSchema.nullable(),
+  error: z.string().nullable(),
+});
+
+const ManualCustomerProfilesReceiptEnvelopeSchema = z.strictObject({
+  success: z.boolean(),
+  message: z.string(),
+  data: ManualCustomerProfilesReceiptSchema.nullable(),
+  error: z.string().nullable(),
+});
+
 export type CustomerDecisionReceipt = z.infer<typeof CustomerDecisionReceiptSchema>;
 export type FormalPlanContactState = z.infer<typeof FormalPlanContactStateSchema>;
 export type CustomerProfilesNotificationReceipt = z.infer<typeof CustomerProfilesNotificationReceiptSchema>;
+export type ManualCustomerProfilesPreview = z.infer<typeof ManualCustomerProfilesPreviewSchema>;
+export type ManualCustomerProfilesReceipt = z.infer<typeof ManualCustomerProfilesReceiptSchema>;
+export type ManualMatchingConfirmationMethod = 'phone' | 'in_person' | 'paper' | 'other';
 
 function canonicalCaseNo(caseNo: string): string {
   const canonical = caseNo.trim();
@@ -145,6 +190,67 @@ export const matchingPlanCommunicationClient = {
     );
     if (!decoded.success || decoded.data === null) {
       throw new ApiHttpError(422, 'CUSTOMER_PROFILES_SEND_FAILED', decoded.error ?? decoded.message, false, decoded);
+    }
+    return decoded.data;
+  },
+
+  async previewManualCustomerProfiles(
+    caseNo: string,
+    planId: number,
+    expectedVersion: number,
+    confirmationMethod: ManualMatchingConfirmationMethod,
+    reason: string,
+  ): Promise<ManualCustomerProfilesPreview> {
+    const canonical = canonicalCaseNo(caseNo);
+    const actor = sessionClient.getUser()?.username.trim() ?? '';
+    const token = sessionClient.getToken();
+    const canonicalReason = reason.trim();
+    if (!actor || !token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
+    if (!canonicalReason || canonicalReason.length > 500) throw new Error('請填寫 1 至 500 字的人工送達依據。');
+    const decoded = decodePayload(
+      ManualCustomerProfilesPreviewEnvelopeSchema,
+      await transport.post(
+        `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans/${planId}/resumes/manual-confirmation/preview`,
+        { actor, expected_version: expectedVersion, confirmation_method: confirmationMethod, reason: canonicalReason },
+        { token },
+      ),
+    );
+    if (!decoded.success || decoded.data === null) {
+      throw new ApiHttpError(422, 'MANUAL_CUSTOMER_PROFILES_PREVIEW_FAILED', decoded.error ?? decoded.message, false, decoded);
+    }
+    if (decoded.data.case_no !== canonical || decoded.data.plan_id !== planId || decoded.data.expected_version !== expectedVersion) {
+      throw new Error('客戶履歷人工送達 Preview identity 不一致。');
+    }
+    return decoded.data;
+  },
+
+  async applyManualCustomerProfiles(
+    preview: ManualCustomerProfilesPreview,
+  ): Promise<ManualCustomerProfilesReceipt> {
+    const canonical = canonicalCaseNo(preview.case_no);
+    const actor = sessionClient.getUser()?.username.trim() ?? '';
+    const token = sessionClient.getToken();
+    if (!actor || !token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
+    const decoded = decodePayload(
+      ManualCustomerProfilesReceiptEnvelopeSchema,
+      await transport.post(
+        `/api/v1/orders/${encodeURIComponent(canonical)}/matching-plans/${preview.plan_id}/resumes/manual-confirmation`,
+        {
+          actor,
+          expected_version: preview.expected_version,
+          confirmation_method: preview.confirmation_method,
+          reason: preview.reason,
+          preview_fingerprint: preview.preview_fingerprint,
+          event_key: `orders-customer-profiles-manual-${preview.plan_id}-${crypto.randomUUID()}`,
+        },
+        { token },
+      ),
+    );
+    if (!decoded.success || decoded.data === null) {
+      throw new ApiHttpError(422, 'MANUAL_CUSTOMER_PROFILES_APPLY_FAILED', decoded.error ?? decoded.message, false, decoded);
+    }
+    if (decoded.data.case_no !== canonical || decoded.data.plan_id !== preview.plan_id || decoded.data.preview_fingerprint !== preview.preview_fingerprint) {
+      throw new Error('客戶履歷人工送達 receipt identity 不一致。');
     }
     return decoded.data;
   },

@@ -1,6 +1,6 @@
 /**
  * File: line_identity_client.ts
- * Description: 呼叫 LINE 身分查詢、更正、解除與失敗維護端點，逐次注入記憶體 Session 並嚴格解碼。
+ * Description: 呼叫 LINE 身分查詢、審核、更正、解除與失敗維護端點，逐次注入記憶體 Session 並嚴格解碼。
  */
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -13,6 +13,15 @@ import {
   LineIdentityBindingViewSchema,
   LineIdentityReplacementApplyRequestSchema,
   LineIdentityReplacementPreviewViewSchema,
+  LineIdentityReviewApplyRequestSchema,
+  LineIdentityReviewApplyViewSchema,
+  LineIdentityReviewDecisionSchema,
+  LineIdentityReviewListQuerySchema,
+  LineIdentityReviewPageViewSchema,
+  LineIdentityReviewPreviewRequestSchema,
+  LineIdentityReviewPreviewViewSchema,
+  LineIdentityReviewSummaryViewSchema,
+  LineIdentityReviewViewSchema,
   LineIdentityRevocationActionRequestSchema,
   LineIdentityRevocationApplyRequestSchema,
   LineIdentityRevocationPreviewViewSchema,
@@ -23,6 +32,15 @@ import {
   type LineIdentityBindingView,
   type LineIdentityReplacementApplyRequest,
   type LineIdentityReplacementPreviewView,
+  type LineIdentityReviewApplyRequest,
+  type LineIdentityReviewApplyView,
+  type LineIdentityReviewDecision,
+  type LineIdentityReviewListQuery,
+  type LineIdentityReviewPageView,
+  type LineIdentityReviewPreviewRequest,
+  type LineIdentityReviewPreviewView,
+  type LineIdentityReviewSummaryView,
+  type LineIdentityReviewView,
   type LineIdentityRevocationActionRequest,
   type LineIdentityRevocationApplyRequest,
   type LineIdentityRevocationPreviewView,
@@ -72,6 +90,29 @@ export interface LineIdentityClient {
     payload: LineIdentityRevocationActionRequest,
     options?: LineIdentityRequestOptions
   ): Promise<LineIdentityRevocationRequestView>;
+  listReviews(
+    query?: LineIdentityReviewListQuery,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityReviewPageView>;
+  getReviewSummary(
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityReviewSummaryView>;
+  getReview(
+    requestId: number,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityReviewView>;
+  previewReviewDecision(
+    requestId: number,
+    decision: LineIdentityReviewDecision,
+    payload: LineIdentityReviewPreviewRequest,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityReviewPreviewView>;
+  applyReviewDecision(
+    requestId: number,
+    decision: LineIdentityReviewDecision,
+    payload: LineIdentityReviewApplyRequest,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityReviewApplyView>;
 }
 
 function requestOptions(options?: LineIdentityRequestOptions): RequestOptions {
@@ -111,6 +152,16 @@ function revocationRequestPath(requestId: number): string {
     );
   }
   return `/api/v1/line/identity-bindings/revocations/${requestId}`;
+}
+
+function reviewPath(requestId: number): string {
+  if (!Number.isInteger(requestId) || requestId <= 0) {
+    throw new LineIdentityClientError(
+      'REQUEST_INVALID',
+      'LINE 身分審核識別值必須為正整數。'
+    );
+  }
+  return `/api/v1/line/identity/reviews/${requestId}`;
 }
 
 function requiredText(value: string, label: string, maxLength: number): string {
@@ -290,6 +341,94 @@ export function manualCompleteLineIdentityRevocation(
   return submitRevocationAction(requestId, 'manual-complete', payload, options);
 }
 
+export async function listLineIdentityReviews(
+  query: LineIdentityReviewListQuery = {},
+  options?: LineIdentityRequestOptions
+): Promise<LineIdentityReviewPageView> {
+  try {
+    const parsed = LineIdentityReviewListQuerySchema.parse(query);
+    const raw = await transport.get('/api/v1/line/identity/reviews', {
+      ...requestOptions(options),
+      params: parsed,
+    });
+    return decodeEnvelope(LineIdentityReviewPageViewSchema, raw);
+  } catch (error) {
+    throw mapLineIdentityError(error, 'query');
+  }
+}
+
+export async function getLineIdentityReviewSummary(
+  options?: LineIdentityRequestOptions
+): Promise<LineIdentityReviewSummaryView> {
+  try {
+    const raw = await transport.get(
+      '/api/v1/line/identity/reviews/summary',
+      requestOptions(options)
+    );
+    return decodeEnvelope(LineIdentityReviewSummaryViewSchema, raw);
+  } catch (error) {
+    throw mapLineIdentityError(error, 'query');
+  }
+}
+
+export async function getLineIdentityReview(
+  requestId: number,
+  options?: LineIdentityRequestOptions
+): Promise<LineIdentityReviewView> {
+  try {
+    const raw = await transport.get(reviewPath(requestId), requestOptions(options));
+    return decodeEnvelope(LineIdentityReviewViewSchema, raw);
+  } catch (error) {
+    throw mapLineIdentityError(error, 'query');
+  }
+}
+
+export async function previewLineIdentityReviewDecision(
+  requestId: number,
+  decision: LineIdentityReviewDecision,
+  payload: LineIdentityReviewPreviewRequest,
+  options?: LineIdentityRequestOptions
+): Promise<LineIdentityReviewPreviewView> {
+  try {
+    const normalizedDecision = LineIdentityReviewDecisionSchema.parse(decision);
+    const normalizedPayload = LineIdentityReviewPreviewRequestSchema.parse({
+      ...payload,
+      reason: requiredText(payload.reason, '審核原因', 1000),
+    });
+    const raw = await transport.post(
+      `${reviewPath(requestId)}/${normalizedDecision}/preview`,
+      normalizedPayload,
+      requestOptions(options)
+    );
+    return decodeEnvelope(LineIdentityReviewPreviewViewSchema, raw);
+  } catch (error) {
+    throw mapLineIdentityError(error, 'preview');
+  }
+}
+
+export async function applyLineIdentityReviewDecision(
+  requestId: number,
+  decision: LineIdentityReviewDecision,
+  payload: LineIdentityReviewApplyRequest,
+  options?: LineIdentityRequestOptions
+): Promise<LineIdentityReviewApplyView> {
+  try {
+    const normalizedDecision = LineIdentityReviewDecisionSchema.parse(decision);
+    const normalizedPayload = LineIdentityReviewApplyRequestSchema.parse({
+      ...payload,
+      reason: requiredText(payload.reason, '審核原因', 1000),
+    });
+    const raw = await transport.post(
+      `${reviewPath(requestId)}/${normalizedDecision}/apply`,
+      normalizedPayload,
+      requestOptions(options)
+    );
+    return decodeEnvelope(LineIdentityReviewApplyViewSchema, raw);
+  } catch (error) {
+    throw mapLineIdentityError(error, 'apply');
+  }
+}
+
 class DefaultLineIdentityClient implements LineIdentityClient {
   listBindings(
     query?: LineIdentityBindingListQuery,
@@ -350,6 +489,44 @@ class DefaultLineIdentityClient implements LineIdentityClient {
     options?: LineIdentityRequestOptions
   ): Promise<LineIdentityRevocationRequestView> {
     return manualCompleteLineIdentityRevocation(requestId, payload, options);
+  }
+
+  listReviews(
+    query?: LineIdentityReviewListQuery,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityReviewPageView> {
+    return listLineIdentityReviews(query, options);
+  }
+
+  getReviewSummary(
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityReviewSummaryView> {
+    return getLineIdentityReviewSummary(options);
+  }
+
+  getReview(
+    requestId: number,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityReviewView> {
+    return getLineIdentityReview(requestId, options);
+  }
+
+  previewReviewDecision(
+    requestId: number,
+    decision: LineIdentityReviewDecision,
+    payload: LineIdentityReviewPreviewRequest,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityReviewPreviewView> {
+    return previewLineIdentityReviewDecision(requestId, decision, payload, options);
+  }
+
+  applyReviewDecision(
+    requestId: number,
+    decision: LineIdentityReviewDecision,
+    payload: LineIdentityReviewApplyRequest,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityReviewApplyView> {
+    return applyLineIdentityReviewDecision(requestId, decision, payload, options);
   }
 }
 
