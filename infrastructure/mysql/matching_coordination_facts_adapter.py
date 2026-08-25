@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from domains.scheduling.matching_coordination import (
