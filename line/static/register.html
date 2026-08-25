@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
 File: register.html
-Description: 提供 LIFF 客戶服務登記，並僅在受控 development identity 下支援無 LIFF 設定的驗證。
+Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化失敗時停用完整表單。
 -->
 <html lang="zh-Hant-TW">
 <head>
@@ -116,6 +116,19 @@ Description: 提供 LIFF 客戶服務登記，並僅在受控 development identi
             box-shadow: 0 4px 15px rgba(74, 144, 226, 0.2); transition: all 0.3s ease; margin-top: 20px;
         }
         .btn-submit:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(74, 144, 226, 0.3); }
+
+        .preview-card {
+            display: none;
+            margin-top: 18px;
+            padding: 16px;
+            border: 1px solid rgba(74, 144, 226, 0.22);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.78);
+        }
+        .preview-card.visible { display: block; }
+        .preview-summary { white-space: pre-line; font-size: 14px; line-height: 1.65; }
+        .preview-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .preview-actions .btn-submit, .preview-actions .btn-secondary { margin-top: 14px; }
 
         .status-message {
             padding: 15px; border-radius: 10px; margin-bottom: 20px; font-size: 15px; display: none; line-height: 1.5;
@@ -233,7 +246,7 @@ Description: 提供 LIFF 客戶服務登記，並僅在受控 development identi
     <div class="header" id="formHeader">
         <div class="logo" id="pageLogo">新竹市月子工會</div>
         <div class="title">產婦服務登記表單</div>
-        <div class="subtitle">請詳細填寫以下資料，送出後將為您建立專屬服務檔案並進行媒合。</div>
+        <div class="subtitle">請詳細填寫以下資料；送出後由工會依正式流程審核與處理。</div>
     </div>
 
     <div id="statusMessage" class="status-message"></div>
@@ -454,14 +467,21 @@ Description: 提供 LIFF 客戶服務登記，並僅在受控 development identi
             <div id="customFieldsContainer"></div>
         </div>
 
-        <button type="submit" class="btn-submit">送出完整服務登記表單</button>
+        <button type="submit" class="btn-submit" id="registrationPreviewButton">預覽登記資料</button>
+        <div class="preview-card" id="registrationPreviewPanel" aria-live="polite">
+            <div class="preview-summary" id="registrationPreviewSummary"></div>
+            <div class="preview-actions">
+                <button type="button" class="btn-secondary" id="cancelRegistrationPreview">返回修改</button>
+                <button type="button" class="btn-submit" id="confirmRegistrationApply">確認套用這份登記預覽</button>
+            </div>
+        </div>
     </form>
 
     <!-- 成功畫面 -->
     <div id="successCard" class="success-card">
         <div class="success-icon">✓</div>
-        <div class="success-title">送出成功！</div>
-        <div class="success-desc">您的服務資料已經完整登錄至系統。<br>案件編號完成行政核發後，LINE 將主動通知您，請關閉此頁面回到 LINE 聊天室查看。</div>
+        <div class="success-title">登記已受理</div>
+        <div class="success-desc">登記結果將顯示於此。</div>
         <button class="btn-submit" id="closeButton" onclick="liff.closeWindow()">關閉視窗</button>
     </div>
 
@@ -498,7 +518,7 @@ Description: 提供 LIFF 客戶服務登記，並僅在受控 development identi
     let liffConfigRevision = "";
     let runtimePage = null;
     let refundPolicyAccepted = false;
-    const developmentLineUserId = new URLSearchParams(location.search).get("userId") || "";
+    let pendingRegistrationPreview = null;
 
     function liffStateParameters(parameters) {
         const rawState = parameters.get("liff.state") || "";
@@ -549,23 +569,14 @@ Description: 提供 LIFF 客戶服務登記，並僅在受控 development identi
 
     function showInitializationError(error) {
         const status = document.getElementById('statusMessage');
-        if (canUseDevelopmentIdentityFallback(error)) {
-            status.textContent = 'LINE LIFF 尚未設定；目前使用受控開發測試身分驗證登記流程。';
-            status.className = 'status-message';
-            status.style.display = 'block';
-            return;
-        }
         status.textContent = error.message || '頁面初始化失敗，請回到 LINE 重新開啟。';
         status.className = 'status-message error';
         status.style.display = 'block';
-        document.querySelectorAll('#registerForm input, #registerForm button').forEach(
+        document.querySelectorAll(
+            '#registerForm input, #registerForm select, #registerForm textarea, #registerForm button'
+        ).forEach(
             control => control.disabled = true
         );
-    }
-
-    function canUseDevelopmentIdentityFallback(error) {
-        return developmentLineUserId.trim() !== ''
-            && error?.message === 'LIFF 尚未完成設定。';
     }
 
     document.addEventListener("DOMContentLoaded", () => {
@@ -585,12 +596,9 @@ Description: 提供 LIFF 客戶服務登記，並僅在受控 development identi
         document.body.style.fontFamily = theme.font_family;
         document.getElementById('pageLogo').textContent = page.content.logo || '';
         document.querySelector('.title').textContent = page.title;
-        document.querySelector('.subtitle').textContent = page.subtitle;
-        document.querySelector('#registerForm > .btn-submit').textContent = page.submit_button;
-        document.querySelector('.success-title').textContent = page.success_title;
-        const successDescription = document.querySelector('.success-desc');
-        successDescription.style.whiteSpace = 'pre-line';
-        successDescription.textContent = page.success_description;
+        document.querySelector('.subtitle').textContent = '請詳細填寫以下資料；送出後由工會依正式流程審核與處理。';
+        document.getElementById('registrationPreviewButton').textContent = '預覽登記資料';
+        document.querySelector('.success-title').textContent = '登記已受理';
         document.getElementById('closeButton').textContent = page.content.close_button || '關閉視窗';
         document.getElementById('loaderText').textContent = page.loading_text;
         const fields = Object.fromEntries(page.fields.map(field => [field.id, field]));
@@ -1038,12 +1046,12 @@ Description: 提供 LIFF 客戶服務登記，並僅在受控 development identi
                 zip_code: document.getElementById("zip_code").value || "",
                 flow_id: new URLSearchParams(window.location.search).get('flow_id') || null,
                 line_id_token: currentIdToken,
-                development_line_user_id: developmentLineUserId,
+                development_line_user_id: "",
                 liff_config_revision: liffConfigRevision,
                 survey_details: surveyDetails
             };
 
-            const response = await fetch('/api/v1/line/identity/registration/apply', {
+            const response = await fetch('/api/v1/line/identity/registration/preview', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
@@ -1054,9 +1062,12 @@ Description: 提供 LIFF 客戶服務登記，並僅在受控 development identi
             loader.style.display = "none";
             
             if (response.ok && result.data) {
-                document.getElementById("formHeader").style.display = "none";
-                document.getElementById("registerForm").style.display = "none";
-                document.getElementById("successCard").style.display = "block";
+                const preview = requireRegistrationPreview(result.data);
+                pendingRegistrationPreview = {payload, preview};
+                renderRegistrationPreview(preview);
+                statusMsg.textContent = "登記預覽已建立；尚未寫入登記，請確認摘要後再套用。";
+                statusMsg.className = "status-message";
+                statusMsg.style.display = "block";
             } else {
                 statusMsg.textContent = registrationErrorMessage(result);
                 statusMsg.className = "status-message error";
@@ -1064,9 +1075,102 @@ Description: 提供 LIFF 客戶服務登記，並僅在受控 development identi
         } catch (error) {
             console.error(error);
             loader.style.display = "none";
-            statusMsg.textContent = "系統連線錯誤，請檢查網路狀態。";
+            statusMsg.textContent = error.message || "系統連線錯誤，請檢查網路狀態。";
             statusMsg.className = "status-message error";
+            statusMsg.style.display = "block";
         }
+    });
+
+    function requireRegistrationPreview(data) {
+        const fingerprint = /^[0-9a-f]{64}$/;
+        if (!data || typeof data.status !== 'string'
+            || !Number.isInteger(data.expected_binding_version)
+            || data.expected_binding_version < 0
+            || !fingerprint.test(data.payload_fingerprint || '')
+            || !fingerprint.test(data.preview_fingerprint || '')) {
+            throw new Error('預覽回應格式不完整，請勿送出並聯絡工會確認。');
+        }
+        return data;
+    }
+
+    function renderRegistrationPreview(preview) {
+        document.getElementById('registrationPreviewSummary').textContent = [
+            '資料已通過預覽檢查。',
+            '此處僅顯示去識別摘要；姓名、電話、身分證、地址與問卷內容不會回顯。',
+            '請確認後再套用；這份預覽尚未寫入登記。'
+        ].join('\n');
+        document.getElementById('registrationPreviewPanel').classList.add('visible');
+        document.getElementById('confirmRegistrationApply').disabled = false;
+    }
+
+    function invalidateRegistrationPreview() {
+        if (!pendingRegistrationPreview) return;
+        pendingRegistrationPreview = null;
+        document.getElementById('registrationPreviewPanel').classList.remove('visible');
+        document.getElementById('confirmRegistrationApply').disabled = true;
+        const statusMsg = document.getElementById('statusMessage');
+        statusMsg.textContent = '資料已修改，舊預覽已失效，請重新預覽。';
+        statusMsg.className = 'status-message error';
+        statusMsg.style.display = 'block';
+    }
+
+    async function applyRegistration() {
+        const state = pendingRegistrationPreview;
+        const statusMsg = document.getElementById('statusMessage');
+        if (!state) {
+            statusMsg.textContent = '登記預覽已失效，請重新預覽。';
+            statusMsg.className = 'status-message error';
+            statusMsg.style.display = 'block';
+            return;
+        }
+        const loader = document.getElementById('loaderOverlay');
+        loader.style.display = 'flex';
+        try {
+            const response = await fetch('/api/v1/line/identity/registration/apply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ...state.payload,
+                    expected_binding_version: state.preview.expected_binding_version,
+                    preview_fingerprint: state.preview.preview_fingerprint
+                })
+            });
+            const result = await response.json();
+            if (!response.ok || !result.data) throw new Error(registrationErrorMessage(result));
+            const receipt = result.data;
+            if (!Number.isInteger(receipt.registration_id) || receipt.registration_id < 1
+                || !Number.isInteger(receipt.client_id) || receipt.client_id < 1
+                || (receipt.identity_status !== null && typeof receipt.identity_status !== 'string')) {
+                throw new Error('登記結果驗證資料不完整，請勿重複送出並聯絡工會確認。');
+            }
+            pendingRegistrationPreview = null;
+            const successDescription = document.querySelector('.success-desc');
+            successDescription.style.whiteSpace = 'pre-line';
+            successDescription.textContent = [
+                '登記資料已安全提交。',
+                `LINE 身分狀態：${receipt.identity_status || '尚待處理'}`,
+                '此結果只表示登記與身分處理已提交，不代表已完成媒合，也不代表 LINE 訊息已送達。'
+            ].join('\n');
+            document.getElementById('formHeader').style.display = 'none';
+            document.getElementById('registerForm').style.display = 'none';
+            document.getElementById('successCard').style.display = 'block';
+        } catch (error) {
+            console.error(error);
+            statusMsg.textContent = error.message || '系統連線錯誤，請檢查網路狀態。';
+            statusMsg.className = 'status-message error';
+            statusMsg.style.display = 'block';
+        } finally {
+            loader.style.display = 'none';
+        }
+    }
+
+    document.getElementById('registerForm').addEventListener("input", invalidateRegistrationPreview);
+    document.getElementById('registerForm').addEventListener("change", invalidateRegistrationPreview);
+    document.getElementById('confirmRegistrationApply').addEventListener('click', applyRegistration);
+    document.getElementById('cancelRegistrationPreview').addEventListener('click', () => {
+        pendingRegistrationPreview = null;
+        document.getElementById('registrationPreviewPanel').classList.remove('visible');
+        document.getElementById('confirmRegistrationApply').disabled = true;
     });
 
     function registrationErrorMessage(result) {

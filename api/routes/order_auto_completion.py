@@ -1,4 +1,7 @@
-"""Internal typed API for the canonical Orders service-completion command."""
+"""
+File: order_auto_completion.py
+Description: 提供 Orders 服務完成的 typed Preview 與 canonical Apply API。
+"""
 
 from __future__ import annotations
 
@@ -15,12 +18,17 @@ from api.dependencies.order_auto_completion import (
     get_order_auto_completion_application,
 )
 from api.schemas.base import BaseResponse
-from api.schemas.order_auto_completion import OrderAutoCompletionReceiptView
+from api.schemas.order_auto_completion import (
+    OrderAutoCompletionPreviewView,
+    OrderAutoCompletionReceiptView,
+)
 from shared_kernel.errors import ErrorCategory, TypedError
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.orders.auto_completion_workflow import (
     AutoCompletionApplyRequest,
+    AutoCompletionPreviewRequest,
     AutoCompletionWorkflowError,
 )
 
@@ -34,6 +42,60 @@ class OrderAutoCompletionApplyBody(BaseModel):
     expected_order_version: int = Field(ge=0)
     evaluation_at: datetime
     reason: str = Field(min_length=1, max_length=500)
+    preview_fingerprint: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+
+
+class OrderAutoCompletionPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evaluation_at: datetime
+
+
+@router.post(
+    "/{case_no}/service-completion/preview",
+    response_model=BaseResponse[OrderAutoCompletionPreviewView],
+)
+def preview_order_auto_completion(
+    body: OrderAutoCompletionPreviewBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    correlation_id: Annotated[
+        str,
+        Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ] = "order-auto-completion-preview",
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: OrderAutoCompletionApplication = Depends(
+        get_order_auto_completion_application
+    ),
+):
+    del principal
+    request = AutoCompletionPreviewRequest(
+        case_no,
+        body.evaluation_at,
+        CorrelationId(correlation_id),
+    )
+    try:
+        preview = application.preview(request)
+        return BaseResponse(
+            data={
+                "case_no": preview.case_no,
+                "expected_order_version": preview.expected_order_version,
+                "resulting_order_version": preview.resulting_order_version,
+                "current_status": preview.current_status,
+                "completion_instant": preview.completion_instant,
+                "evaluation_at": preview.evaluation_at,
+                "official_service_dates": preview.official_service_dates,
+                "fingerprint": preview.fingerprint.value,
+            },
+            message="成功產生服務完成 Preview",
+        )
+    except AutoCompletionWorkflowError as error:
+        raise _typed_http_error(error.error) from error
+    except ValueError as error:
+        typed = TypedError(ErrorCategory.VALIDATION, str(error) or "auto_completion_validation_error", "服務完成 Preview 未通過驗證。", request.correlation_id)
+        raise _typed_http_error(typed) from error
 
 
 @router.post("/{case_no}/service-completion/apply", response_model=BaseResponse[OrderAutoCompletionReceiptView])
@@ -45,9 +107,21 @@ def apply_order_auto_completion(
     principal: AdminPrincipal = Depends(require_system_admin),
     application: OrderAutoCompletionApplication = Depends(get_order_auto_completion_application),
 ):
-    request = AutoCompletionApplyRequest(case_no, ExpectedVersion(body.expected_order_version), body.evaluation_at, IdempotencyKey(idempotency_key), ActorContext(str(principal.username or "").strip()), body.reason, CorrelationId(correlation_id))
+    request = AutoCompletionApplyRequest(case_no, ExpectedVersion(body.expected_order_version), body.evaluation_at, IdempotencyKey(idempotency_key), ActorContext(str(principal.username or "").strip()), body.reason, CorrelationId(correlation_id), PreviewFingerprint(body.preview_fingerprint) if body.preview_fingerprint is not None else None)
     try:
-        return BaseResponse(data=application.apply(request), message="成功記錄服務完成")
+        receipt = application.apply(request)
+        return BaseResponse(
+            data={
+                "case_no": receipt.case_no,
+                "idempotency_key": receipt.idempotency_key.value,
+                "order_version": receipt.order_version,
+                "lifecycle_event_id": receipt.lifecycle_event_id,
+                "completion_instant": receipt.completion_instant,
+                "evaluation_at": receipt.evaluation_at,
+                "command_fingerprint": receipt.command_fingerprint.value,
+            },
+            message="成功記錄服務完成",
+        )
     except AutoCompletionWorkflowError as error:
         raise _typed_http_error(error.error) from error
     except OperationalError as error:

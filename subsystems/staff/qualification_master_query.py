@@ -51,6 +51,13 @@ class StaffQualificationSourceRecord:
     special_skills: tuple[str, ...]
     cooking_skills: tuple[tuple[str, str | None], ...]
     massage_certified: bool | None
+    care_babies: int | None
+    service_regions: tuple[tuple[str, str | None], ...]
+    service_time_slots: tuple[tuple[str, str | None], ...]
+    transportation: tuple[str, ...]
+    holiday_availability: tuple[tuple[str, str | None], ...]
+    weekly_rest: tuple[tuple[str, str | None], ...]
+    baby_types: tuple[tuple[str, str | None], ...]
     unavailability_source_available: bool
     unavailability_source_reason: str
     unavailability_blocks: tuple[UnavailabilitySourceRecord, ...]
@@ -127,6 +134,32 @@ class QualificationSection:
 
 
 @dataclass(frozen=True, slots=True)
+class StaffServiceProfileItem:
+    value: str
+    detail: str | None = None
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.value, "staff service profile value", 100)
+        if self.detail is not None:
+            require_canonical_text(self.detail, "staff service profile detail", 200)
+
+
+@dataclass(frozen=True, slots=True)
+class StaffServiceProfile:
+    care_babies: int | None
+    service_regions: tuple[StaffServiceProfileItem, ...]
+    service_time_slots: tuple[StaffServiceProfileItem, ...]
+    transportation: tuple[StaffServiceProfileItem, ...]
+    holiday_availability: tuple[StaffServiceProfileItem, ...]
+    weekly_rest: tuple[StaffServiceProfileItem, ...]
+    baby_types: tuple[StaffServiceProfileItem, ...]
+
+    def __post_init__(self) -> None:
+        if self.care_babies is not None:
+            require_positive_integer(self.care_babies, "staff service profile care babies")
+
+
+@dataclass(frozen=True, slots=True)
 class StaffQualificationMaster:
     staff_id: int
     staff_name: str
@@ -134,6 +167,7 @@ class StaffQualificationMaster:
     overall_availability: str
     availability_reason: str
     sections: tuple[QualificationSection, ...]
+    service_profile: StaffServiceProfile
 
     def __post_init__(self) -> None:
         require_positive_integer(self.staff_id, "staff qualification staff id")
@@ -206,6 +240,22 @@ def _project(source: StaffQualificationSourceRecord, as_of: date) -> StaffQualif
         overall_availability=overall,
         availability_reason=reason,
         sections=sections,
+        service_profile=_service_profile(source),
+    )
+
+
+def _service_profile(source: StaffQualificationSourceRecord) -> StaffServiceProfile:
+    def pairs(values: tuple[tuple[str, str | None], ...]) -> tuple[StaffServiceProfileItem, ...]:
+        return tuple(StaffServiceProfileItem(value, detail) for value, detail in values)
+
+    return StaffServiceProfile(
+        care_babies=source.care_babies,
+        service_regions=pairs(source.service_regions),
+        service_time_slots=pairs(source.service_time_slots),
+        transportation=tuple(StaffServiceProfileItem(value) for value in source.transportation),
+        holiday_availability=pairs(source.holiday_availability),
+        weekly_rest=pairs(source.weekly_rest),
+        baby_types=pairs(source.baby_types),
     )
 
 
@@ -366,5 +416,7 @@ __all__ = [
     "StaffQualificationMasterRepository",
     "StaffQualificationNotFound",
     "StaffQualificationSourceRecord",
+    "StaffServiceProfile",
+    "StaffServiceProfileItem",
     "UnavailabilitySourceRecord",
 ]

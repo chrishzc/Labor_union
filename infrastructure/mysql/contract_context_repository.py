@@ -1,4 +1,7 @@
-"""MySQL read adapter for formal order/assignment contract context facts."""
+"""
+File: contract_context_repository.py
+Description: 以正式 Client BeClass 綁定與指派根事實讀取契約內容。
+"""
 
 
 class MySqlContractContextRepository:
@@ -23,7 +26,7 @@ c.city AS client_city,c.address AS client_address,c.identity_status AS client_id
 c.service_type,c.service_time,c.baby_info,c.notes AS client_notes,
 b.query_no AS beclass_query_no,b.survey_details,b.admin_notes AS beclass_admin_notes
 FROM orders o JOIN clients c ON c.case_no=o.case_no
-LEFT JOIN beclass_records b ON b.query_no=o.case_no WHERE o.case_no=%s"""
+LEFT JOIN beclass_records b ON b.bound_case_no=o.case_no WHERE o.case_no=%s"""
 
 _ASSIGNMENTS_SQL = """SELECT a.id AS assignment_id,a.case_no,a.staff_id,
 a.assignment_sequence,a.assigned_start_date,a.assigned_end_date,a.planned_hours,

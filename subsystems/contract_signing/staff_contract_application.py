@@ -76,6 +76,21 @@ class RecordStaffSignedReturnCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class ManualStaffContractAttestationCommand:
+    case_no: str
+    matching_segment_id: int
+    signed_content: bytes
+    original_filename: str
+    mime_type: str
+    confirmation_method: str
+    reason: str
+    preview_fingerprint: str
+    actor_id: str
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+
+@dataclass(frozen=True, slots=True)
 class StaffContractWorkflowReceipt:
     document_version_id: int
     signing_event_id: int
@@ -117,6 +132,106 @@ class StaffContractSigningApplication:
             storage_key=_staff_signed_storage_key(command),
         )
         return self._persist_signed_return(command, archive)
+
+    def preview_manual_attestation(
+        self,
+        *,
+        case_no: str,
+        matching_segment_id: int,
+        confirmation_method: str,
+        reason: str,
+    ) -> dict[str, object]:
+        _require_manual_confirmation(confirmation_method, reason)
+        connection = self._connection_factory()
+        try:
+            snapshot = _manual_staff_snapshot(connection, case_no, matching_segment_id, lock=False)
+            _require_manual_staff_snapshot_applicable(snapshot)
+            return {
+                "case_no": case_no,
+                "scope": "staff_segment",
+                "matching_segment_id": matching_segment_id,
+                "confirmation_method": confirmation_method,
+                "preview_fingerprint": _manual_preview_fingerprint(snapshot, confirmation_method, reason),
+                "can_apply": True,
+                "line_delivery_task_id": None,
+            }
+        finally:
+            connection.close()
+
+    def record_manual_attestation(
+        self,
+        command: ManualStaffContractAttestationCommand,
+    ) -> StaffContractWorkflowReceipt:
+        _require_manual_confirmation(command.confirmation_method, command.reason)
+        existing = self._existing_signed_return_receipt(command)
+        if existing is not None:
+            return existing
+        signed_archive = archive_contract_document(
+            command.signed_content,
+            storage_root=self._archive_root,
+            storage_key=_manual_staff_signed_storage_key(command),
+        )
+        connection = self._connection_factory()
+        template_archive = None
+        try:
+            try:
+                connection.begin()
+                snapshot = _manual_staff_snapshot(
+                    connection, command.case_no, command.matching_segment_id, lock=True,
+                )
+                _require_manual_staff_snapshot_applicable(snapshot)
+                expected = _manual_preview_fingerprint(snapshot, command.confirmation_method, command.reason)
+                if command.preview_fingerprint != expected:
+                    raise ValueError("manual_contract_preview_stale")
+                segment = _staff_segment(connection, command.case_no, command.matching_segment_id)
+                template = load_approved_template("contract_staff_service")
+                content = render_contract_template(
+                    template_path=TEMPLATE_DIRECTORY / template.template_filename,
+                    mapping_path=approved_template_mapping_path(template.template_key),
+                    facts=_staff_template_facts(connection, command.case_no, segment),
+                )
+                template_archive = archive_contract_document(
+                    content,
+                    storage_root=self._archive_root,
+                    storage_key=_manual_staff_template_storage_key(command),
+                )
+                source_document_id = _insert_generated_document(
+                    connection, command, segment, template, content, template_archive,
+                )
+                document_id = _insert_signed_document(
+                    connection, command, segment, source_document_id, signed_archive,
+                )
+                event_id = _insert_signed_event(connection, command, segment, document_id)
+                commitment_id = _create_commitment_if_ready(
+                    connection, command.case_no, segment["plan_id"], command.actor_id,
+                )
+                if commitment_id is not None:
+                    _establish_precontract_deposit(connection, command, commitment_id)
+                _append_command_outcome(
+                    connection,
+                    command,
+                    "record_manual_staff_contract_attestation",
+                    document_id,
+                    event_id,
+                    {"commitment_id": commitment_id, "confirmation_method": command.confirmation_method},
+                )
+            except Exception:
+                connection.rollback()
+                if template_archive is not None:
+                    discard_uncommitted_contract_document(
+                        storage_root=self._archive_root, storage_key=template_archive.storage_key,
+                    )
+                discard_uncommitted_contract_document(
+                    storage_root=self._archive_root, storage_key=signed_archive.storage_key,
+                )
+                raise
+            connection.commit()
+            return StaffContractWorkflowReceipt(document_id, event_id, None, commitment_id)
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def _existing_signed_return_receipt(
         self, command: RecordStaffSignedReturnCommand
@@ -267,6 +382,14 @@ def _staff_signed_storage_key(command: RecordStaffSignedReturnCommand) -> str:
     return f"{command.case_no}/staff/{command.matching_segment_id}/{command.idempotency_key.value}-signed.xlsx"
 
 
+def _manual_staff_template_storage_key(command: ManualStaffContractAttestationCommand) -> str:
+    return f"{command.case_no}/staff/{command.matching_segment_id}/{command.idempotency_key.value}-manual-template.xlsx"
+
+
+def _manual_staff_signed_storage_key(command: ManualStaffContractAttestationCommand) -> str:
+    return f"{command.case_no}/staff/{command.matching_segment_id}/{command.idempotency_key.value}-manual-signed.xlsx"
+
+
 def _staff_segment(connection, case_no: str, segment_id: int) -> dict[str, object]:
     with connection.cursor() as cursor:
         cursor.execute(
@@ -397,7 +520,15 @@ def _insert_signed_document(connection, command, segment, source_document_id, ar
 
 
 def _insert_signed_event(connection, command, segment, document_id):
-    payload = _canonical_json({"command": "record_staff_signed_return", "correlation_id": command.correlation_id.value})
+    payload_data = {"command": "record_staff_signed_return", "correlation_id": command.correlation_id.value}
+    if isinstance(command, ManualStaffContractAttestationCommand):
+        payload_data = {
+            "command": "record_manual_staff_contract_attestation",
+            "confirmation_method": command.confirmation_method,
+            "reason": command.reason,
+            "correlation_id": command.correlation_id.value,
+        }
+    payload = _canonical_json(payload_data)
     with connection.cursor() as cursor:
         cursor.execute(
             "INSERT INTO contract_signing_events (case_no,document_version_id,matching_plan_id,matching_segment_id,event_type,event_key,actor,payload) "
@@ -405,6 +536,59 @@ def _insert_signed_event(connection, command, segment, document_id):
             (command.case_no, document_id, segment["plan_id"], segment["id"], command.idempotency_key.value, command.actor_id, payload),
         )
         return int(cursor.lastrowid)
+
+
+_MANUAL_CONFIRMATION_METHODS = frozenset({"phone", "paper", "in_person", "verified_other"})
+
+
+def _require_manual_confirmation(confirmation_method: str, reason: str) -> None:
+    if confirmation_method not in _MANUAL_CONFIRMATION_METHODS:
+        raise ValueError("manual_contract_confirmation_method_invalid")
+    if not reason.strip():
+        raise ValueError("manual_contract_reason_missing")
+
+
+def _manual_staff_snapshot(connection, case_no: str, segment_id: int, *, lock: bool) -> dict[str, object]:
+    suffix = " FOR UPDATE" if lock else ""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT segment.id AS segment_id,segment.plan_id,segment.staff_id,plan.version,plan.status,plan.is_active,"
+            "COALESCE((SELECT response.response_value FROM matching_response_events response "
+            "WHERE response.plan_id=segment.plan_id AND response.response_type='customer_decision' "
+            "ORDER BY response.occurred_at_utc DESC,response.id DESC LIMIT 1),'') AS customer_decision,"
+            "EXISTS(SELECT 1 FROM contract_signing_events event WHERE event.matching_segment_id=segment.id "
+            "AND event.event_type='signed_received') AS already_signed "
+            "FROM caregiver_matching_plan_segments segment JOIN caregiver_matching_plans plan ON plan.id=segment.plan_id "
+            "WHERE segment.id=%s AND plan.case_no=%s" + suffix,
+            (segment_id, case_no),
+        )
+        snapshot = cursor.fetchone()
+    if snapshot is None:
+        raise ValueError("contract_signing_segment_not_found")
+    return dict(snapshot)
+
+
+def _require_manual_staff_snapshot_applicable(snapshot: dict[str, object]) -> None:
+    status = str(snapshot["status"])
+    if status == "accepted":
+        pass
+    elif status == "proposed" and snapshot["is_active"] == 1:
+        if str(snapshot["customer_decision"]) != "accepted":
+            raise ValueError("manual_contract_customer_acceptance_required")
+    else:
+        raise ValueError("manual_contract_plan_not_current")
+    if bool(snapshot["already_signed"]):
+        raise ValueError("manual_contract_already_signed")
+
+
+def _manual_preview_fingerprint(snapshot: dict[str, object], confirmation_method: str, reason: str) -> str:
+    payload = {
+        "scope": "staff_segment",
+        "snapshot": snapshot,
+        "confirmation_method": confirmation_method,
+        "reason": reason.strip(),
+    }
+    return _sha256(_canonical_json(payload).encode())
 
 
 def _create_commitment_if_ready(connection, case_no, plan_id, actor_id):

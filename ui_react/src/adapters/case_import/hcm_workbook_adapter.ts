@@ -6,7 +6,7 @@ import { HcmWorkbookContractError } from '../../api/case_import/hcm_workbook_err
 import type { HcmWorkbookPreview } from '../../api/case_import/hcm_workbook_schemas';
 
 export const HCM_WORKBOOK_ROW_DETAIL_UNAVAILABLE =
-  'Preview 顯示批次統計；逐列結果會在匯入完成後列出。';
+  '目前先顯示批次統計；逐列結果會在匯入完成後列出。';
 
 export interface HcmWorkbookPreviewModel {
   sourceContentDigest: string;

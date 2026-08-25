@@ -25,12 +25,26 @@ export interface StaffQualificationMasterViewModel extends Omit<StaffQualificati
   officialDataNote: string | null;
 }
 
-const AVAILABILITY_LABELS: Record<StaffQualificationAvailability, string> = {
+const SECTION_AVAILABILITY_LABELS: Record<StaffQualificationAvailability, string> = {
   available: '已登錄',
   unavailable: '尚無登錄資料',
   unknown: '資料狀態待確認',
   partial: '部分登錄',
 };
+
+const OVERALL_AVAILABILITY_LABELS: Record<StaffQualificationAvailability, string> = {
+  available: '目前無有效不可服務期間',
+  unavailable: '目前不可服務',
+  unknown: '可服務狀態待確認',
+  partial: '部分資料待確認',
+};
+
+function sectionAvailabilityLabel(section: StaffQualificationSection): string {
+  if (section.items.length === 0 && section.availability === 'available') {
+    return section.kind === 'unavailability' ? '目前無不可服務期間' : '尚未登錄';
+  }
+  return SECTION_AVAILABILITY_LABELS[section.availability];
+}
 
 function displayValue(value: string | boolean | null): string {
   if (value === null) return '尚無登錄值';
@@ -38,14 +52,7 @@ function displayValue(value: string | boolean | null): string {
   return value;
 }
 
-function hasWp85Identity(value: string | null | undefined): boolean {
-  return typeof value === 'string' && /wp85/i.test(value);
-}
-
 function sectionNote(section: StaffQualificationSection): string | null {
-  if (hasWp85Identity(section.source_identity) || section.items.some((item) => hasWp85Identity(item.source_identity))) {
-    return '測試資料污染：含 wp85 identity，未視為正式資格。';
-  }
   if (section.kind === 'medical' || section.kind === 'validity') {
     if (section.availability !== 'available') return '正式資料尚無登錄，未推定通過或有效。';
   }
@@ -57,18 +64,15 @@ export function adaptStaffQualificationMaster(master: StaffQualificationMaster):
   const sections = master.sections.map((section) => ({
     ...section,
     items: section.items.map((item) => ({ ...item, displayValue: displayValue(item.value) })),
-    availabilityLabel: AVAILABILITY_LABELS[section.availability],
+    availabilityLabel: sectionAvailabilityLabel(section),
     dataNote: sectionNote(section),
   }));
   const official = sections.find((section) => section.kind === 'medical' || section.kind === 'validity');
-  const contaminated = sections.some((section) => section.dataNote?.includes('wp85')) || hasWp85Identity(master.staff_name);
   return {
     ...master,
     sections,
-    overallAvailabilityLabel: AVAILABILITY_LABELS[master.overall_availability],
-    officialDataNote: contaminated
-      ? '測試資料污染：qualification master 含 wp85 測試 identity，未推定正式資格。'
-      : official?.dataNote ?? null,
+    overallAvailabilityLabel: OVERALL_AVAILABILITY_LABELS[master.overall_availability],
+    officialDataNote: official?.dataNote ?? null,
   };
 }
 

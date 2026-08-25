@@ -50,6 +50,7 @@ def get_staff_qualification_master_application() -> Iterator[QualificationMaster
 
 @router.get(
     "/{staff_id}/qualification-master",
+    dependencies=[Depends(require_admin)],
     response_model=BaseResponse[StaffQualificationMasterView],
     responses={
         401: {"model": GlobalTypedErrorResponseView, "description": "需要有效的管理員驗證"},
@@ -158,6 +159,33 @@ def _master_view(result: StaffQualificationMaster) -> StaffQualificationMasterVi
                 }
                 for section in result.sections
             ],
+            "service_profile": {
+                "care_babies": result.service_profile.care_babies,
+                "service_regions": [
+                    {"value": item.value, "detail": item.detail}
+                    for item in result.service_profile.service_regions
+                ],
+                "service_time_slots": [
+                    {"value": item.value, "detail": item.detail}
+                    for item in result.service_profile.service_time_slots
+                ],
+                "transportation": [
+                    {"value": item.value, "detail": item.detail}
+                    for item in result.service_profile.transportation
+                ],
+                "holiday_availability": [
+                    {"value": item.value, "detail": item.detail}
+                    for item in result.service_profile.holiday_availability
+                ],
+                "weekly_rest": [
+                    {"value": item.value, "detail": item.detail}
+                    for item in result.service_profile.weekly_rest
+                ],
+                "baby_types": [
+                    {"value": item.value, "detail": item.detail}
+                    for item in result.service_profile.baby_types
+                ],
+            },
         }
     )
 

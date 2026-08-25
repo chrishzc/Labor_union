@@ -66,45 +66,12 @@ Description: 提供月嫂查班、請假待辦與正式服務日日誌及餐食�
 
   <section class="panel" aria-labelledby="leaveTitle">
     <h2 id="leaveTitle" class="section-title">提交請假待辦</h2>
-    <p>送出後只會建立工會處理待辦，不是正式核准，也不會直接改變班表。</p>
-    <div class="form-grid">
-      <div>
-        <label for="leaveStart">請假開始日</label>
-        <input id="leaveStart" type="date">
-      </div>
-      <div>
-        <label for="leaveEnd">請假結束日</label>
-        <input id="leaveEnd" type="date">
-      </div>
-      <div class="full">
-        <label for="leaveReason">去敏說明（選填）</label>
-        <textarea id="leaveReason" maxlength="1000" placeholder="請勿填寫醫療診斷或其他敏感個資"></textarea>
-      </div>
-    </div>
-    <button id="submitLeave" class="primary" disabled>送出請假待辦</button>
-    <div id="leaveStatus" class="message" role="status" style="display:none;"></div>
+    <p>線上請假與代班待辦目前尚缺 Preview／Apply／receipt 安全契約；請聯絡工會人員人工處理。</p>
   </section>
 
   <section class="panel" aria-labelledby="logTitle">
     <h2 id="logTitle" class="section-title">提交寶寶日誌</h2>
-    <p>只能選擇已載入班表中的正式服務日；如有餐食照片，會先安全上傳再連結到日誌。</p>
-    <div class="field">
-      <label for="serviceDaySelect">服務案件與日期</label>
-      <select id="serviceDaySelect" disabled>
-        <option value="">請先載入包含正式服務日的月份</option>
-      </select>
-    </div>
-    <div class="field">
-      <label for="babyLog">寶寶日誌內容</label>
-      <textarea id="babyLog" maxlength="5000" placeholder="請記錄當日照護重點"></textarea>
-    </div>
-    <div class="field">
-      <label for="mealPhoto">餐食照片（選填）</label>
-      <input id="mealPhoto" type="file" accept="image/jpeg,image/png,image/webp">
-      <p class="hint">單張上限 10 MB；需要下廚的案件必須附餐食照片才能完成日誌。</p>
-    </div>
-    <button id="submitLog" class="primary" disabled>送出服務日日誌</button>
-    <div id="logStatus" class="message" role="status" style="display:none;"></div>
+    <p>日誌與餐食照片上傳尚缺 Preview／Apply／receipt 安全契約；請聯絡工會人員人工處理。</p>
   </section>
 
 </main>
@@ -261,135 +228,6 @@ async function loadSchedule() {
   }
 }
 
-async function submitLeaveRequest() {
-  const startDate = document.getElementById("leaveStart").value;
-  const endDate = document.getElementById("leaveEnd").value;
-  const reason = document.getElementById("leaveReason").value.trim();
-  if (!startDate || !endDate) {
-    show("leaveStatus", "請填寫請假開始日與結束日。", true);
-    return;
-  }
-  if (endDate < startDate) {
-    show("leaveStatus", "請假結束日不得早於開始日。", true);
-    return;
-  }
-  const payload = {
-    ...identityPayload(),
-    leave_start_date: startDate,
-    leave_end_date: endDate,
-    leave_reason: reason,
-  };
-  const idempotencyKey = idempotencyKeyFor("leave", JSON.stringify(payload));
-  const button = document.getElementById("submitLeave");
-  button.disabled = true;
-  show("leaveStatus", "請假待辦送出中...");
-  try {
-    const response = await fetch("/api/v1/line/staff-self-service/leave-requests", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Idempotency-Key": idempotencyKey,
-      },
-      body: JSON.stringify(payload),
-    });
-    const data = await responseData(response);
-    if (!response.ok || data.success === false || !data.data) {
-      show("leaveStatus", responseMessage(data, "請假待辦送出失敗"), true);
-      return;
-    }
-    clearIdempotencyKey("leave");
-    document.getElementById("leaveStart").value = "";
-    document.getElementById("leaveEnd").value = "";
-    document.getElementById("leaveReason").value = "";
-    show("leaveStatus", `${responseMessage(data, "請假待辦已送出")}；目前狀態為待辦，不是正式核准。`);
-  } catch (_) {
-    show("leaveStatus", "連線中斷；請保持欄位不變後重試，系統會沿用同一防重識別。", true);
-  } finally {
-    button.disabled = false;
-  }
-}
-
-async function uploadMealPhoto(photo, fingerprint) {
-  if (!photo) return [];
-  const idempotencyKey = idempotencyKeyFor("meal-photo", fingerprint);
-  const identity = identityPayload();
-  const formData = new FormData();
-  formData.append("photo", photo);
-  formData.append("flow_id", identity.flow_id);
-  formData.append("line_id_token", identity.line_id_token);
-  formData.append("development_line_user_id", identity.development_line_user_id);
-  const response = await fetch("/api/v1/line/staff-self-service/service-day-media", {
-    method: "POST",
-    headers: {"Idempotency-Key": idempotencyKey},
-    body: formData,
-  });
-  const uploadData = await responseData(response);
-  const mediaId = uploadData.data?.media_id;
-  if (!response.ok || uploadData.success === false || !mediaId) {
-    throw new Error(responseMessage(uploadData, "餐食照片上傳失敗"));
-  }
-  return [mediaId];
-}
-
-async function submitServiceDayLog() {
-  const selected = selectedServiceDay();
-  const logText = document.getElementById("babyLog").value.trim();
-  const photo = document.getElementById("mealPhoto").files[0] || null;
-  if (!selected) {
-    show("logStatus", "請先載入班表並選擇正式服務日。", true);
-    return;
-  }
-  if (!logText) {
-    show("logStatus", "請填寫寶寶日誌內容。", true);
-    return;
-  }
-  if (photo && photo.size > 10 * 1024 * 1024) {
-    show("logStatus", "餐食照片不得超過 10 MB。", true);
-    return;
-  }
-  const fingerprint = JSON.stringify({
-    assignment_id: selected.assignment_id,
-    service_date: selected.service_date,
-    log_text: logText,
-    photo: photo ? [photo.name, photo.size, photo.lastModified] : null,
-  });
-  const idempotencyKey = idempotencyKeyFor("service-day-log", fingerprint);
-  const button = document.getElementById("submitLog");
-  button.disabled = true;
-  show("logStatus", photo ? "餐食照片上傳中..." : "服務日日誌送出中...");
-  try {
-    const mediaIds = await uploadMealPhoto(photo, fingerprint);
-    const response = await fetch("/api/v1/line/staff-self-service/service-day-logs", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Idempotency-Key": idempotencyKey,
-      },
-      body: JSON.stringify({
-        ...identityPayload(),
-        assignment_id: Number(selected.assignment_id),
-        service_date: selected.service_date,
-        baby_log_text: logText,
-        meal_photo_media_ids: mediaIds,
-      }),
-    });
-    const data = await responseData(response);
-    if (!response.ok || data.success === false || !data.data) {
-      show("logStatus", responseMessage(data, "服務日日誌送出失敗"), true);
-      return;
-    }
-    clearIdempotencyKey("meal-photo");
-    clearIdempotencyKey("service-day-log");
-    document.getElementById("babyLog").value = "";
-    document.getElementById("mealPhoto").value = "";
-    show("logStatus", `服務日日誌已完成：${data.data.case_no}｜${data.data.service_date}`);
-  } catch (error) {
-    show("logStatus", error?.message || "連線中斷；請保持內容不變後重試。", true);
-  } finally {
-    button.disabled = false;
-  }
-}
-
 async function init() {
   const now = new Date();
   document.getElementById("monthInput").value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -418,14 +256,10 @@ async function init() {
     return;
   }
   document.getElementById("loadSchedule").disabled = false;
-  document.getElementById("submitLeave").disabled = false;
-  document.getElementById("submitLog").disabled = false;
   loadSchedule();
 }
 
 document.getElementById("loadSchedule").addEventListener("click", loadSchedule);
-document.getElementById("submitLeave").addEventListener("click", submitLeaveRequest);
-document.getElementById("submitLog").addEventListener("click", submitServiceDayLog);
 init();
 </script>
 </body>

@@ -82,6 +82,7 @@ export interface MatchingWorkbenchDrawerViewModel {
   requiresCookingText: string;
   waitingLockAcquired: boolean;
   waitingLockText: string;
+  planSegments: NonNullable<ActiveWaitingDepositPlan['segments']>;
 }
 
 export interface OrderTermsContractDrawerViewModel {
@@ -222,9 +223,12 @@ export function adaptMatchingWorkbenchDrawer(params: {
       ? '需要下廚'
       : terms?.terms.requires_cooking === false ? '不需下廚' : '資料待補正（下廚料理條款）',
     waitingLockAcquired: activePlan?.activeLockId !== null && activePlan?.activeLockId !== undefined,
-    waitingLockText: activePlan?.activeLockId
+    waitingLockText: assignmentSegments.length > 0
+      ? '等待訂金鎖已轉換為正式排班'
+      : activePlan?.activeLockId
       ? `已取得等待訂金鎖 #${activePlan.activeLockId}`
       : activePlan ? '目前尚未取得等待訂金鎖' : '目前沒有可建立鎖定的進行中媒合方案',
+    planSegments: activePlan?.segments ?? [],
   };
 }
 

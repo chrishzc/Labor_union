@@ -1,4 +1,7 @@
-"""Typed application contracts for LINE review queries and decisions."""
+"""
+File: review_contracts.py
+Description: 定義 LINE 身分審核查詢、決策 Preview 與 Apply 契約。
+"""
 
 from __future__ import annotations
 
@@ -82,12 +85,35 @@ class LineReviewListQuery:
 
 
 @dataclass(frozen=True, slots=True)
+class PreviewLineReviewDecisionCommand:
+    request_id: LineReviewRequestId
+    decision: LineReviewDecision
+    expected_version: ExpectedVersion
+    actor: ActorContext
+    reason: str
+
+    def __post_init__(self) -> None:
+        require_canonical_text(
+            self.reason,
+            "LINE review reason",
+            _REVIEW_REASON_MAXIMUM_LENGTH,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewLineReviewDecisionResult:
+    snapshot: LineReviewSnapshot
+    candidate: LineReviewDecisionCandidate
+
+
+@dataclass(frozen=True, slots=True)
 class DecideLineReviewCommand:
     request_id: LineReviewRequestId
     decision: LineReviewDecision
     expected_version: ExpectedVersion
     actor: ActorContext
     reason: str
+    preview_fingerprint: PreviewFingerprint
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
 
@@ -143,6 +169,8 @@ __all__ = [
     "ApplyLineReviewDecisionResult",
     "DecideLineReviewCommand",
     "DecideLineReviewResult",
+    "PreviewLineReviewDecisionCommand",
+    "PreviewLineReviewDecisionResult",
     "LineReviewCommandOutcome",
     "LineReviewListQuery",
     "LineReviewPage",

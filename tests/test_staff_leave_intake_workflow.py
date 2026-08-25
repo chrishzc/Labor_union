@@ -2,6 +2,7 @@
 Description: 驗證請假待辦 workflow 的重播與樂觀鎖定契約。"""
 
 from datetime import date, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -60,6 +61,47 @@ def test_submit_exact_replay_returns_original_receipt_snapshot():
     workflow = StaffLeaveIntakeWorkflow(FakeRepository())
     command = SubmitStaffLeaveRequest(7, "U-7", StaffLeaveRequestIntent(date(2026, 8, 20), date(2026, 8, 21), "家務"), "leave-1")
     assert workflow.submit(command) == workflow.submit(command)
+
+
+def test_preview_is_zero_write_and_apply_requires_the_same_opaque_fingerprint():
+    repository = FakeRepository()
+    workflow = StaffLeaveIntakeWorkflow(repository)
+    command = SubmitStaffLeaveRequest(
+        7,
+        "U-7",
+        StaffLeaveRequestIntent(date(2026, 8, 20), date(2026, 8, 21), "家務"),
+        "leave-apply-1",
+    )
+
+    preview = workflow.preview(command)
+
+    assert preview.can_apply is True
+    assert repository.snapshot is None
+    applied = workflow.apply(command, preview.preview_fingerprint)
+    assert applied.status is StaffLeaveRequestStatus.PENDING
+
+    changed = SubmitStaffLeaveRequest(
+        7,
+        "U-7",
+        StaffLeaveRequestIntent(date(2026, 8, 22), date(2026, 8, 23), "家務"),
+        "leave-apply-2",
+    )
+    with pytest.raises(StaffLeaveIntakeWorkflowError, match="leave_request_preview_stale"):
+        workflow.apply(changed, preview.preview_fingerprint)
+
+
+def test_preview_rejects_invalid_date_range_without_repository_write():
+    repository = FakeRepository()
+    workflow = StaffLeaveIntakeWorkflow(repository)
+    intent = SimpleNamespace(
+        leave_start_date=date(2026, 8, 22),
+        leave_end_date=date(2026, 8, 20),
+        reason="",
+    )
+    command = SubmitStaffLeaveRequest(7, "U-7", intent, "leave-invalid")
+    with pytest.raises(ValueError, match="leave_request_invalid"):
+        workflow.preview(command)
+    assert repository.snapshot is None
 
 
 def test_review_requires_fresh_expected_version():

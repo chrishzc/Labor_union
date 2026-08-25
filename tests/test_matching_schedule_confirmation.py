@@ -1,3 +1,8 @@
+"""
+File: test_matching_schedule_confirmation.py
+Description: 驗證日期表 LINE／人工快照、確認原因與版本失效契約。
+"""
+
 import json
 from datetime import date
 
@@ -74,12 +79,23 @@ class _Repository:
     def rollback(self):
         self.rolled_back = True
 
+    def prepare_manual(self, *args):
+        return {"snapshot_status": "manual_ready"}
 
-def test_schedule_rejection_requires_a_reason():
+
+@pytest.mark.parametrize("value", ["rejected", "manually_confirmed", "manually_revoked"])
+def test_manual_schedule_updates_require_a_reason(value):
     workflow = MatchingScheduleConfirmationWorkflow(_Repository())
 
-    with pytest.raises(ValueError, match="rejection_reason_required"):
-        workflow.confirm(1, "rejected", "admin", "", "key-68")
+    with pytest.raises(ValueError, match="confirmation_reason_required"):
+        workflow.confirm(1, value, "admin", "", "key-68")
+
+
+def test_manual_schedule_preparation_requires_a_reason():
+    workflow = MatchingScheduleConfirmationWorkflow(_Repository())
+
+    with pytest.raises(ValueError, match="manual_schedule_confirmation_reason_required"):
+        workflow.prepare_manual("CASE-68", 18, "admin", " ", 1, "f" * 64, "key-68")
 
 
 def test_schedule_send_requires_every_recipient_to_have_line_binding():
@@ -145,6 +161,17 @@ def test_schedule_snapshot_for_current_version_without_current_marker_is_not_sen
     }
 
     assert _snapshot_status(4, snapshot) == "not_sent"
+
+
+def test_current_draft_snapshot_is_projected_as_manual_ready():
+    snapshot = {
+        "id": 9,
+        "confirmed_version_id": 4,
+        "status": "draft",
+        "current_marker": 1,
+    }
+
+    assert _snapshot_status(4, snapshot) == "manual_ready"
 
 
 def test_schedule_query_projects_old_sent_snapshot_as_outdated_without_reusing_confirmations():

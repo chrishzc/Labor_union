@@ -1,4 +1,7 @@
-"""Typed application contracts for LINE identity claims and bindings."""
+"""
+File: identity_contracts.py
+Description: 定義 LINE identity claim、Preview、Apply 與 binding 契約。
+"""
 
 from __future__ import annotations
 
@@ -19,6 +22,7 @@ from shared_kernel.identities import (
     ExpectedVersion,
     IdempotencyKey,
 )
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.validation import require_canonical_text
 
 
@@ -28,6 +32,7 @@ class LineIdentityCommandOutcome(StrEnum):
 
 
 class LineIdentityPreviewStatus(StrEnum):
+    AUTHENTICATION_PENDING = "authentication_pending"
     MATCHED = "matched"
     ALREADY_BOUND = "already_bound"
     REQUIRES_REVIEW = "requires_review"
@@ -97,6 +102,7 @@ class LineIdentityPreview:
     line_user_id: LineUserId
     candidate: LineIdentityCandidate | None
     expected_version: ExpectedVersion
+    preview_fingerprint: PreviewFingerprint
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +112,7 @@ class LineIdentityApplyResult:
     subject_type: LineBindingSubjectType
     subject_reference: str
     review_request_id: LineReviewRequestId | None = None
+    receipt_identity: str = ""
 
 
 @dataclass(frozen=True, slots=True)

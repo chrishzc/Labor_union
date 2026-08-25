@@ -5,6 +5,7 @@ Description: 驗證 M4 escalation 原子流程、重播、hold gate 與 caller-o
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -17,6 +18,7 @@ from domains.customer_service.escalation import (
     TriggerCode,
 )
 from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.customer_service.escalation_application import HumanEscalationApplication
 from subsystems.customer_service.escalation_contracts import (
@@ -197,6 +199,38 @@ def _command(key: str = "create-1") -> CreateHumanEscalation:
 
 def _app(repo, tickets, source):
     return HumanEscalationApplication(lambda: _Uow(repo, tickets, source), now=lambda: _NOW)
+
+
+def test_create_preview_is_zero_write_and_apply_requires_matching_fingerprint():
+    repo, tickets, source = _EscalationRepo(), _TicketPort(), _Source(True)
+    app = _app(repo, tickets, source)
+    command = _command("create-preview-1")
+
+    preview = app.preview(command)
+
+    assert preview.operation == "create"
+    assert preview.escalation_id is None
+    assert preview.before_workflow_status == "absent"
+    assert preview.resulting_workflow_status is EscalationWorkflowStatus.OPEN
+    assert preview.before_hold_state == "absent"
+    assert preview.resulting_hold_state is AutomationHoldState.ACTIVE
+    assert preview.apply_ready is True
+    assert repo.rows == {}
+    assert repo.receipts == {}
+    assert repo.events == []
+    assert repo.alerts == []
+    assert tickets.rows == {}
+
+    with pytest.raises(HumanEscalationError) as mismatch:
+        app.create(replace(command, preview_fingerprint=PreviewFingerprint("0" * 64)))
+    assert mismatch.value.code == "human_escalation_preview_conflict"
+    assert repo.rows == {}
+    assert tickets.rows == {}
+
+    receipt = app.create(replace(command, preview_fingerprint=preview.preview_fingerprint))
+    assert receipt.resulting_workflow_status is EscalationWorkflowStatus.OPEN
+    assert len(repo.rows) == 1
+    assert len(tickets.rows) == 1
 
 
 def test_complaint_resolve_uses_customer_service_handling_evidence_not_runtime_gate():

@@ -1,4 +1,8 @@
 <!DOCTYPE html>
+<!--
+File: profile_update.html
+Description: 保留客戶資料異動原始版面，但在正式 Query／Preview／Apply 契約完成前只提供人工辦理指引。
+-->
 <html lang="zh-Hant-TW">
 <head>
     <meta charset="UTF-8">
@@ -80,6 +84,7 @@
             margin: 16px 0;
         }
         .status.error { display: block; color: var(--error); background: rgba(214,69,69,.08); border: 1px solid rgba(214,69,69,.2); }
+        .status.notice { display: block; color: var(--text); background: rgba(74,144,226,.08); border: 1px solid rgba(74,144,226,.2); }
         .success-card { display: none; text-align: center; padding: 18px 0; }
         .success-icon { font-size: 48px; color: var(--success); margin-bottom: 12px; }
         .success-title { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
@@ -102,187 +107,52 @@
     <div id="formArea">
         <div class="logo" id="logo">新竹市月子工會</div>
         <h1>修改登記資料申請</h1>
-        <div class="subtitle">請先勾選想修改的項目，再依序填寫新內容。送出後將由工會人員審核，審核通過後才會更新正式資料。</div>
+        <div class="subtitle">線上異動申請仍在建置中。目前請直接在 LINE 對話留下想修改的項目與內容，由工會人員人工核對與補登。</div>
         <div id="status" class="status"></div>
         <form id="changeForm">
             <div class="section-title">1. 勾選要修改的項目</div>
             <div id="fieldOptions"></div>
             <div class="section-title">2. 填寫修改後內容</div>
             <div id="fieldInputs"></div>
-            <button type="submit" id="submitButton">送出修改申請</button>
+            <button type="submit" id="submitButton" disabled>線上申請尚未啟用</button>
         </form>
     </div>
-    <div id="successCard" class="success-card">
-        <div class="success-icon">✓</div>
-        <div class="success-title">申請已送出</div>
-        <div class="success-desc">您的資料修改申請已暫存，請耐心等候工會人員審核。審核完成後，工會將依結果通知您。</div>
-        <button onclick="closeWindow()">關閉視窗</button>
-    </div>
 </div>
-<div id="loader" class="loader">資料送出中，請稍候...</div>
 
-<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
-    let currentLineUserId = "";
-    let currentIdToken = "";
-    let fields = [];
-    const supportedIds = new Set(["name", "phone", "expected_date", "service_days", "address"]);
+    const fields = [
+        { id: "name", label: "姓名", help: "由工會核對身分後人工更新。" },
+        { id: "phone", label: "聯絡電話", help: "請在 LINE 對話提供可聯絡的電話。" },
+        { id: "expected_date", label: "預產期／生產日", help: "請提供正確日期與異動原因。" },
+        { id: "service_days", label: "服務天數", help: "服務條件異動須由工會確認案件狀態。" },
+        { id: "address", label: "服務地址", help: "請勿在公開群組留下完整地址。" }
+    ];
 
-    async function init() {
-        try {
-            const [lineRes, configRes] = await Promise.all([
-                fetch("/api/line/config"),
-                fetch("/api/config/liff/runtime?page=registration")
-            ]);
-            const lineConfig = await lineRes.json();
-            const runtime = await configRes.json();
-            fields = (runtime.page.fields || []).filter(field => supportedIds.has(field.id));
-            applyTheme(runtime.theme || {});
-            renderOptions();
-            await initLiff(lineConfig);
-        } catch (error) {
-            showError("載入失敗，請重新整理後再試。");
-        }
-    }
-
-    function applyTheme(theme) {
-        if (theme.primary_color) document.documentElement.style.setProperty("--primary", theme.primary_color);
-        if (theme.primary_hover_color) document.documentElement.style.setProperty("--primary-hover", theme.primary_hover_color);
-        if (theme.background) document.documentElement.style.setProperty("--bg", theme.background);
-        if (theme.text_color) document.documentElement.style.setProperty("--text", theme.text_color);
-        if (theme.muted_text_color) document.documentElement.style.setProperty("--muted", theme.muted_text_color);
-    }
-
-    async function initLiff(config) {
-        const urlParams = new URLSearchParams(window.location.search);
-        const rawState = urlParams.get("liff.state") || "";
-        const stateQueryStart = rawState.indexOf("?");
-        const liffStateParams = new URLSearchParams(stateQueryStart >= 0 ? rawState.slice(stateQueryStart) : rawState);
-        const urlUserId = urlParams.get("userId") || liffStateParams.get("userId") || "";
-        if (config.liff_id) {
-            await liff.init({ liffId: config.liff_id });
-            if (!liff.isLoggedIn()) {
-                liff.login({ redirectUri: window.location.href });
-                return;
-            }
-            const profile = await liff.getProfile();
-            currentLineUserId = profile.userId;
-            currentIdToken = liff.getIDToken() || "";
-        } else {
-            currentLineUserId = urlUserId || "dev-profile-change-user";
-        }
+    function init() {
+        renderOptions();
+        const status = document.getElementById("status");
+        status.textContent = "這個入口目前不會送出或修改正式資料。請回到 LINE 對話聯絡工會，由專員人工協助。";
+        status.className = "status notice";
     }
 
     function renderOptions() {
         const container = document.getElementById("fieldOptions");
         container.innerHTML = fields.map(field => `
             <div class="option">
-                <input type="checkbox" id="pick_${field.id}" value="${field.id}" onchange="renderInputs()">
+                <input type="checkbox" id="pick_${field.id}" value="${field.id}" disabled>
                 <div>
                     <label for="pick_${field.id}">${escapeHtml(field.label)}</label>
-                    <div class="help">${formatRule(field)}</div>
+                    <div class="help">${escapeHtml(field.help)}</div>
                 </div>
             </div>
         `).join("");
-        renderInputs();
+        document.getElementById("fieldInputs").innerHTML = '<div class="help">正式查詢、異動預覽與送出流程完成後，才會在此載入目前資料。</div>';
     }
 
-    function renderInputs() {
-        const selected = selectedFields();
-        const container = document.getElementById("fieldInputs");
-        if (!selected.length) {
-            container.innerHTML = `<div class="help">請先勾選至少一個要修改的項目。</div>`;
-            return;
-        }
-        container.innerHTML = selected.map(field => `
-            <div class="field-card">
-                <label for="value_${field.id}">${escapeHtml(field.label)}的新內容</label>
-                ${renderControl(field)}
-                <div class="help">${formatRule(field)}</div>
-            </div>
-        `).join("");
-    }
-
-    function selectedFields() {
-        return fields.filter(field => document.getElementById(`pick_${field.id}`)?.checked);
-    }
-
-    function renderControl(field) {
-        const placeholder = escapeHtml(field.placeholder || "");
-        if (field.type === "number") {
-            return `<input id="value_${field.id}" type="number" min="1" step="1" placeholder="${placeholder}" required>`;
-        }
-        if (field.type === "date") {
-            return `<input id="value_${field.id}" type="date" required>`;
-        }
-        if (field.type === "phone") {
-            return `<input id="value_${field.id}" type="tel" inputmode="tel" placeholder="例如：0912345678" required>`;
-        }
-        return `<textarea id="value_${field.id}" placeholder="${placeholder}" required></textarea>`;
-    }
-
-    function formatRule(field) {
-        if (field.type === "phone") return "請填 09 開頭手機號碼，或可聯絡到您的完整電話。";
-        if (field.type === "date") return "請依日期格式選擇，避免用文字描述日期。";
-        if (field.type === "number") return "請填數字，例如 30。";
-        return field.help_text || "請填寫完整且正確的新內容。";
-    }
-
-    document.getElementById("changeForm").addEventListener("submit", async event => {
+    document.getElementById("changeForm").addEventListener("submit", event => {
         event.preventDefault();
-        const selected = selectedFields();
-        if (!selected.length) {
-            showError("請先勾選要修改的項目。");
-            return;
-        }
-        const changes = [];
-        for (const field of selected) {
-            const control = document.getElementById(`value_${field.id}`);
-            const value = (control?.value || "").trim();
-            if (!value) {
-                showError(`請填寫「${field.label}」的新內容。`);
-                return;
-            }
-            changes.push({ field_id: field.id, label: field.label, value });
-        }
-        showLoader(true);
-        try {
-            const response = await fetch("/api/line/profile-change-requests", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    line_user_id: currentLineUserId,
-                    line_id_token: currentIdToken,
-                    changes
-                })
-            });
-            const result = await response.json();
-            showLoader(false);
-            if (response.ok && result.status === "success") {
-                document.getElementById("formArea").style.display = "none";
-                document.getElementById("successCard").style.display = "block";
-            } else {
-                showError(result.message || result.detail || "送出失敗，請稍後再試。");
-            }
-        } catch (error) {
-            showLoader(false);
-            showError("系統連線錯誤，請檢查網路後再試。");
-        }
+        return false;
     });
-
-    function showError(message) {
-        const status = document.getElementById("status");
-        status.textContent = message;
-        status.className = "status error";
-    }
-
-    function showLoader(show) {
-        document.getElementById("loader").style.display = show ? "flex" : "none";
-    }
-
-    function closeWindow() {
-        if (window.liff && liff.isInClient()) liff.closeWindow();
-    }
 
     function escapeHtml(value) {
         return String(value || "").replace(/[&<>"']/g, char => ({

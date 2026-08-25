@@ -1,6 +1,6 @@
 """
 File: orders_stage_projection_repository.py
-Description: 以單一 bounded SQL 讀取 Orders 七階段所需跨 owner 根事實。
+Description: 依 Orders canonical lifecycle scope，以單一 bounded SQL 讀取七階段根事實。
 """
 
 from __future__ import annotations
@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from domains.orders.lifecycle import OrderLifecycleScope, OrderLifecycleStatus
 from subsystems.orders.stage_projection_query import MAXIMUM_PAGE_SIZE
 
 
@@ -39,15 +40,17 @@ SELECT o.case_no,
        plan.version AS matching_plan_version,
        plan.status AS matching_plan_status,
        plan.created_at AS matching_created_at,
+       customer_response.response_value AS matching_customer_decision,
+       customer_response.occurred_at_utc AS matching_customer_decision_at,
        GREATEST(COALESCE(willingness.willingness_count, 0), COALESCE(communication.contact_attempt_count, 0), COALESCE(response_fact.replied_count, 0)) AS willingness_contact_attempt_count,
        GREATEST(COALESCE(willingness.willingness_count, 0), COALESCE(communication.contact_sent_count, 0), COALESCE(response_fact.replied_count, 0)) AS willingness_count,
        GREATEST(COALESCE(willingness.willingness_replied_count, 0), COALESCE(response_fact.replied_count, 0)) AS willingness_replied_count,
        GREATEST(COALESCE(willingness.willingness_accepted_count, 0), COALESCE(response_fact.willing_count, 0)) AS willingness_accepted_count,
        COALESCE(GREATEST(willingness.willingness_contacted_at, communication.contact_sent_at), willingness.willingness_contacted_at, communication.contact_sent_at) AS willingness_contacted_at,
        COALESCE(GREATEST(willingness.willingness_replied_at, response_fact.replied_at), willingness.willingness_replied_at, response_fact.replied_at) AS willingness_replied_at,
-       GREATEST(COALESCE(willingness.resume_sent_count, 0), COALESCE(communication.resume_attempt_count, 0)) AS resume_attempt_count,
-       GREATEST(COALESCE(willingness.resume_sent_count, 0), COALESCE(communication.resume_sent_count, 0)) AS resume_sent_count,
-       COALESCE(GREATEST(willingness.resume_sent_at, communication.resume_sent_at), willingness.resume_sent_at, communication.resume_sent_at) AS resume_sent_at,
+       GREATEST(COALESCE(willingness.resume_sent_count, 0), COALESCE(communication.resume_attempt_count, 0), COALESCE(manual_profile.resume_sent_count, 0)) AS resume_attempt_count,
+       GREATEST(COALESCE(willingness.resume_sent_count, 0), COALESCE(communication.resume_sent_count, 0), COALESCE(manual_profile.resume_sent_count, 0)) AS resume_sent_count,
+       COALESCE(GREATEST(willingness.resume_sent_at, communication.resume_sent_at, manual_profile.resume_sent_at), willingness.resume_sent_at, communication.resume_sent_at, manual_profile.resume_sent_at) AS resume_sent_at,
        COALESCE(segment_fact.matching_segment_count, 0) AS matching_segment_count,
        COALESCE(signing.staff_contract_sent_count, 0) AS staff_contract_sent_count,
        signing.staff_contract_sent_at,
@@ -76,13 +79,14 @@ SELECT o.case_no,
        TIME_TO_SEC(o.service_start_time) AS service_start_seconds,
        TIME_TO_SEC(o.service_end_time) AS service_end_seconds,
        o.service_end_day_offset,
-       service_lock.client_settlement_fingerprint AS service_completion_identity,
-       service_lock.created_at AS service_completed_at,
+       CONCAT('orders-auto-completion-receipt:', completion_fact.receipt_id) AS service_completion_identity,
+       completion_fact.completed_at AS service_completed_at,
        COALESCE(client_fact.client_obligation_count, 0) AS client_obligation_count,
        COALESCE(client_fact.client_open_count, 0) AS client_open_count,
        client_fact.client_updated_at,
        COALESCE(staff_fact.staff_obligation_count, 0) AS staff_obligation_count,
        COALESCE(staff_fact.staff_open_count, 0) AS staff_open_count,
+       staff_fact.staff_payables_version,
        staff_fact.staff_updated_at
   FROM orders o FORCE INDEX (PRIMARY)
   LEFT JOIN (
@@ -143,6 +147,20 @@ SELECT o.case_no,
         GROUP BY intent.plan_id
   ) communication ON communication.plan_id = plan.id
   LEFT JOIN (
+       SELECT segment.plan_id,
+              CASE WHEN COUNT(DISTINCT segment.id) > 0
+                         AND COUNT(DISTINCT event.segment_id) = COUNT(DISTINCT segment.id)
+                   THEN 1 ELSE 0 END AS resume_sent_count,
+              MAX(event.occurred_at) AS resume_sent_at
+         FROM caregiver_matching_plan_segments segment
+         LEFT JOIN caregiver_matching_plan_events event
+           ON event.plan_id = segment.plan_id
+          AND event.segment_id = segment.id
+          AND event.event_type = 'resume_sent'
+          AND JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.delivery_status')) = 'manually_confirmed'
+        GROUP BY segment.plan_id
+  ) manual_profile ON manual_profile.plan_id = plan.id
+  LEFT JOIN (
        SELECT response.plan_id,
               COUNT(DISTINCT response.segment_id) AS replied_count,
               COUNT(DISTINCT CASE WHEN response.response_value = 'willing' THEN response.segment_id END) AS willing_count,
@@ -159,6 +177,20 @@ SELECT o.case_no,
           )
         GROUP BY response.plan_id
   ) response_fact ON response_fact.plan_id = plan.id
+  LEFT JOIN (
+       SELECT response.plan_id,
+              response.response_value,
+              response.occurred_at_utc
+         FROM matching_response_events response
+        WHERE response.response_type = 'customer_decision'
+          AND NOT EXISTS (
+              SELECT 1 FROM matching_response_events newer
+               WHERE newer.plan_id = response.plan_id
+                 AND newer.response_type = response.response_type
+                 AND (newer.occurred_at_utc > response.occurred_at_utc
+                      OR (newer.occurred_at_utc = response.occurred_at_utc AND newer.id > response.id))
+          )
+  ) customer_response ON customer_response.plan_id = plan.id
   LEFT JOIN (
        SELECT plan_id, COUNT(*) AS matching_segment_count
          FROM caregiver_matching_plan_segments GROUP BY plan_id
@@ -219,7 +251,10 @@ SELECT o.case_no,
           AND schedule.is_work_day = 1
         GROUP BY assignment.case_no
   ) assignments ON assignments.case_no = o.case_no
-  LEFT JOIN order_service_data_locks service_lock ON service_lock.case_no = o.case_no
+  LEFT JOIN (
+       SELECT case_no, MAX(id) AS receipt_id, MAX(created_at) AS completed_at
+         FROM order_auto_completion_apply_receipts GROUP BY case_no
+  ) completion_fact ON completion_fact.case_no = o.case_no
   LEFT JOIN (
        SELECT case_no,
               SUM(status IN ('open','settled')) AS client_obligation_count,
@@ -228,13 +263,23 @@ SELECT o.case_no,
          FROM client_obligations GROUP BY case_no
   ) client_fact ON client_fact.case_no = o.case_no
   LEFT JOIN (
-       SELECT case_no,
-              SUM(status IN ('open','settled')) AS staff_obligation_count,
-              SUM(status = 'open') AS staff_open_count,
-              MAX(updated_at) AS staff_updated_at
-         FROM staff_obligations GROUP BY case_no
+       SELECT obligation.case_no,
+              COUNT(*) AS staff_obligation_count,
+              SUM(COALESCE(projection.status, 'payable') <> 'completed') AS staff_open_count,
+              MAX(account.aggregate_version) AS staff_payables_version,
+              MAX(COALESCE(projection.updated_at, obligation.updated_at)) AS staff_updated_at
+         FROM staff_obligations obligation
+         LEFT JOIN staff_payable_projections projection
+           ON projection.obligation_identity = obligation.obligation_identity
+         LEFT JOIN staff_payable_accounts account
+           ON account.staff_id = obligation.staff_id
+        WHERE obligation.direction = 'payable_to_staff'
+          AND obligation.status <> 'cancelled'
+          AND obligation.amount_due_ntd > 0
+        GROUP BY obligation.case_no
   ) staff_fact ON staff_fact.case_no = o.case_no
  WHERE o.case_no > %s
+   AND (%s = 'all' OR o.status <> %s)
  ORDER BY o.case_no
  LIMIT %s
 """
@@ -244,11 +289,18 @@ class MySqlOrdersStageProjectionRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
-    def fetch_page(self, *, after_case_no: str | None, page_size: int) -> tuple[Mapping[str, object], ...]:
+    def fetch_page(
+        self, *, after_case_no: str | None, page_size: int,
+        lifecycle_scope: OrderLifecycleScope = OrderLifecycleScope.ALL,
+    ) -> tuple[Mapping[str, object], ...]:
         cursor_identity = _cursor(after_case_no)
         result_limit = _limit(page_size)
         with self._connection.cursor() as cursor:
-            cursor.execute(_PAGE_SQL, (cursor_identity, result_limit))
+            cursor.execute(
+                _PAGE_SQL,
+                (cursor_identity, lifecycle_scope.value,
+                 OrderLifecycleStatus.COMPLETED.value, result_limit),
+            )
             return tuple(cursor.fetchall() or ())
 
 

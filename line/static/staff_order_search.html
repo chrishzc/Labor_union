@@ -1,3 +1,4 @@
+<!-- File: staff_order_search.html | Description: 顯示已驗證月嫂可見的 assignment-owned 訂單摘要。 -->
 <!DOCTYPE html>
 <html lang="zh-Hant-TW">
 <head>
@@ -36,6 +37,7 @@
     <input id="keyword" autocomplete="off" placeholder="例如：115000035 或 王小美">
     <button id="searchBtn">查詢訂單資訊</button>
     <div id="status" class="message" style="display:none;"></div>
+    <button id="reauthenticate" class="secondary" type="button" hidden>重新登入 LINE</button>
   </section>
   <section id="results"></section>
 </main>
@@ -57,13 +59,49 @@ function showStatus(text, isError = false) {
   box.style.display = "block";
 }
 
+function responseErrorCode(data) {
+  return data.detail?.error?.code || data.detail?.code || data.error?.code || "";
+}
+
+function reauthenticateLine() {
+  try { liff.logout(); } catch (_) {}
+  const redirect = new URL("/line-identity", location.origin);
+  redirect.searchParams.set("target", "staff_order_search");
+  liff.login({redirectUri: redirect.toString()});
+}
+
 function valueText(value) {
   return value === null || value === undefined || value === "" ? "未填寫" : String(value);
 }
 
+function requireStaffOrderItem(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("訂單資料格式錯誤");
+  if (typeof value.case_no !== "string" || typeof value.client_name !== "string") {
+    throw new Error("訂單資料缺少必要欄位");
+  }
+  return value;
+}
+
+function requireStaffOrderPage(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("訂單查詢結果格式錯誤");
+  if (!Number.isInteger(value.staff_id) || typeof value.staff_name !== "string" || !Array.isArray(value.items)) {
+    throw new Error("訂單查詢結果缺少必要欄位");
+  }
+  return {...value, items: value.items.map(requireStaffOrderItem)};
+}
+
+function appendOrderField(root, label, value) {
+  const row = document.createElement("div");
+  row.className = "item";
+  const key = document.createElement("b");
+  key.textContent = label;
+  row.append(key, document.createTextNode(valueText(value)));
+  root.appendChild(row);
+}
+
 function renderResults(items) {
   const root = document.getElementById("results");
-  root.innerHTML = "";
+  root.replaceChildren();
   if (!items.length) {
     showStatus("查無可檢視的訂單。請確認案件編號/姓名是否正確，且該案件已指派給您。", true);
     return;
@@ -90,14 +128,12 @@ function renderResults(items) {
     ];
     const card = document.createElement("article");
     card.className = "order";
-    card.innerHTML = `<h2>${valueText(item.client_name)}｜${valueText(item.case_no)}</h2>
-      <div class="grid">${rows.map(([k, v]) => `<div class="item"><b>${k}</b>${valueText(v)}</div>`).join("")}</div>`;
-    if (item.survey_rows && item.survey_rows.length) {
-      const details = document.createElement("details");
-      details.innerHTML = `<summary>查看完整表單填寫內容</summary>
-        <div class="grid">${item.survey_rows.map(row => `<div class="item"><b>${row.label}</b>${valueText(row.value)}</div>`).join("")}</div>`;
-      card.appendChild(details);
-    }
+    const heading = document.createElement("h2");
+    heading.textContent = `${valueText(item.client_name)}｜${valueText(item.case_no)}`;
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    rows.forEach(([label, value]) => appendOrderField(grid, label, value));
+    card.append(heading, grid);
     root.appendChild(card);
   }
 }
@@ -118,7 +154,9 @@ async function init() {
           identityReady = true;
           return;
         }
-        liff.login();
+        const redirect = new URL("/line-identity", location.origin);
+        redirect.searchParams.set("target", "staff_order_search");
+        liff.login({redirectUri: redirect.toString()});
         return;
       }
       await captureLineIdentity();
@@ -152,13 +190,20 @@ document.getElementById("searchBtn").addEventListener("click", async () => {
   });
   const data = await response.json();
   if (!response.ok || !data.success) {
-    showStatus(data.message || data.detail?.message || "查詢失敗", true);
-    document.getElementById("results").innerHTML = "";
+    showStatus(data.message || data.detail?.message || data.detail?.error?.message || "查詢失敗", true);
+    document.getElementById("reauthenticate").hidden = !responseErrorCode(data).startsWith("liff_");
+    document.getElementById("results").replaceChildren();
     return;
   }
-  renderResults(data.data?.items || []);
+  try {
+    renderResults(requireStaffOrderPage(data.data).items);
+  } catch (_) {
+    document.getElementById("results").replaceChildren();
+    showStatus("訂單查詢結果格式錯誤，請聯絡工會人員。", true);
+  }
 });
 
+document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
 init();
 </script>
 </body>

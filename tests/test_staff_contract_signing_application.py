@@ -103,6 +103,22 @@ def test_commitment_rejects_segments_that_do_not_cover_every_planned_service_day
         )
 
 
+def test_manual_staff_attestation_accepts_a_plan_before_availability_lock_exists():
+    staff_signing._require_manual_staff_snapshot_applicable({
+        "status": "accepted", "is_active": None, "already_signed": 0,
+    })
+
+
+def test_manual_staff_attestation_requires_customer_acceptance_for_active_proposal():
+    staff_signing._require_manual_staff_snapshot_applicable({
+        "status": "proposed", "is_active": 1, "customer_decision": "accepted", "already_signed": 0,
+    })
+    with pytest.raises(ValueError, match="manual_contract_customer_acceptance_required"):
+        staff_signing._require_manual_staff_snapshot_applicable({
+            "status": "proposed", "is_active": 1, "customer_decision": "", "already_signed": 0,
+        })
+
+
 class _ReplayConnection:
     @contextmanager
     def cursor(self):

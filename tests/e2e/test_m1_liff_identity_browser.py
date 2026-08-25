@@ -31,6 +31,12 @@ _CANONICAL_API_PREFIX = "/api/v1/line/identity/"
 _CANONICAL_RESPONSE_KEYS = {
     "/api/v1/line/identity/runtime-config": {"liff_id"},
     "/api/v1/line/identity/flow/open": {"flow_id", "purpose", "expires_at"},
+    "/api/v1/line/identity/registration/preview": {
+        "status",
+        "expected_binding_version",
+        "payload_fingerprint",
+        "preview_fingerprint",
+    },
     "/api/v1/line/identity/registration/apply": {
         "registration_id",
         "client_id",
@@ -104,9 +110,22 @@ def test_m1_liff_registration_binding_readback_is_typed_and_message_free() -> No
             _fill_registration_form(page, config)
             with page.expect_response(
                 lambda item: _url_path(item.url)
+                == "/api/v1/line/identity/registration/preview"
+            ) as registration_preview_response_info:
+                page.locator("#registrationPreviewButton").click()
+            registration_preview_response = registration_preview_response_info.value
+            _assert_typed_response(
+                registration_preview_response,
+                _CANONICAL_RESPONSE_KEYS[
+                    "/api/v1/line/identity/registration/preview"
+                ],
+            )
+            assert page.locator("#registrationPreviewPanel").is_visible()
+            with page.expect_response(
+                lambda item: _url_path(item.url)
                 == "/api/v1/line/identity/registration/apply"
             ) as registration_response_info:
-                page.locator("#registerForm > .btn-submit").click()
+                page.locator("#confirmRegistrationApply").click()
             registration_response = registration_response_info.value
             registration_data = _assert_typed_response(
                 registration_response,
@@ -133,7 +152,7 @@ def test_m1_liff_registration_binding_readback_is_typed_and_message_free() -> No
             assert registration_data["client_name"] == config.registration_name
             assert readback_data["subject_name"] == registration_data["client_name"]
             assert page.locator("#successCard").is_visible()
-            assert page.locator(".success-title").inner_text() == "送出成功！"
+            assert page.locator(".success-title").inner_text() == "登記已受理"
             assert not page.locator("#registerForm").is_visible()
 
             _assert_required_network_responses(network)
@@ -458,6 +477,7 @@ def _assert_required_network_responses(state: _NetworkState) -> None:
     for required_path in (
         "/api/v1/line/identity/runtime-config",
         "/api/v1/line/identity/flow/open",
+        "/api/v1/line/identity/registration/preview",
         "/api/v1/line/identity/registration/apply",
     ):
         if required_path not in records:

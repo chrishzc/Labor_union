@@ -16,6 +16,9 @@ class OrderAutoCompletionApplication:
     def apply(self, request):
         return self.workflow.apply(request)
 
+    def preview(self, request):
+        return self.workflow.preview(request)
+
 
 def get_order_auto_completion_application():
     from infrastructure.mysql.order_auto_completion_repository import MySqlOrderAutoCompletionRepository

@@ -42,6 +42,7 @@ class AutoCompletionApplyRequest:
     actor: ActorContext
     reason: str
     correlation_id: CorrelationId
+    preview_fingerprint: PreviewFingerprint | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 50)
@@ -53,6 +54,35 @@ class AutoCompletionApplyRequest:
             "evaluation_at",
             self.evaluation_at.astimezone(TAIPEI_TIME_ZONE),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class AutoCompletionPreviewRequest:
+    case_no: str
+    evaluation_at: datetime
+    correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.case_no, "case number", 50)
+        if self.evaluation_at.tzinfo is None or self.evaluation_at.utcoffset() is None:
+            raise ValueError("evaluation_at must be timezone-aware")
+        object.__setattr__(
+            self,
+            "evaluation_at",
+            self.evaluation_at.astimezone(TAIPEI_TIME_ZONE),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AutoCompletionPreview:
+    case_no: str
+    expected_order_version: int
+    resulting_order_version: int
+    current_status: str
+    completion_instant: datetime
+    evaluation_at: datetime
+    official_service_dates: tuple[str, ...]
+    fingerprint: PreviewFingerprint
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +106,7 @@ class AutoCompletionWorkflowRepository(Protocol):
     def claim_command(self, request: AutoCompletionApplyRequest, fingerprint: PreviewFingerprint) -> AutoCompletionClaimState: ...
     def find_receipt(self, key: IdempotencyKey) -> StoredAutoCompletionReceipt | None: ...
     def load_locked_facts(self, request: AutoCompletionApplyRequest) -> Mapping[str, Any]: ...
+    def load_preview_facts(self, request: AutoCompletionPreviewRequest) -> Mapping[str, Any]: ...
     def append_lifecycle_event(self, request: AutoCompletionApplyRequest, candidate: AutoCompletionCandidate, facts: Mapping[str, Any]) -> int: ...
     def update_order(self, candidate: AutoCompletionCandidate) -> None: ...
     def append_outbox(self, request: AutoCompletionApplyRequest, candidate: AutoCompletionCandidate, lifecycle_event_id: int) -> None: ...
@@ -117,6 +148,21 @@ class AutoCompleteOrderService:
         except AutoCompletionRepositoryIntegrityError as error:
             raise _error(request, ErrorCategory.DOMAIN_BLOCKED, "auto_completion_authoritative_facts_invalid", "Order service completion is blocked because its authoritative facts are inconsistent.", ("auto_complete.authoritative_facts_invalid",)) from error
 
+    def preview(self, request: AutoCompletionPreviewRequest) -> AutoCompletionPreview:
+        try:
+            facts = self._repository.load_preview_facts(request)
+            expected_version = int(facts["locked_order"]["lifecycle_version"])
+            candidate = _candidate_or_block(request, facts, expected_version)
+            return _preview_from_facts(request, facts, candidate)
+        except AutoCompletionWorkflowError:
+            raise
+        except AutoCompletionRepositoryNotFoundError as error:
+            raise _error(request, ErrorCategory.NOT_FOUND, "order_not_found", "The requested Orders aggregate does not exist.") from error
+        except AutoCompletionRepositoryConflictError as error:
+            raise _error(request, ErrorCategory.CONFLICT, "order_version_conflict", "The Orders lifecycle version changed during Preview.") from error
+        except AutoCompletionRepositoryIntegrityError as error:
+            raise _error(request, ErrorCategory.DOMAIN_BLOCKED, "auto_completion_authoritative_facts_invalid", "Order service completion is blocked because its authoritative facts are inconsistent.", ("auto_complete.authoritative_facts_invalid",)) from error
+
     def _apply_in_transaction(self, request: AutoCompletionApplyRequest) -> AutoCompletionReceipt:
         fingerprint = _command_fingerprint(request)
         with self._unit_of_work_factory() as unit_of_work:
@@ -124,7 +170,12 @@ class AutoCompleteOrderService:
             if replay is not None:
                 return replay
             facts = self._locked_facts(request)
-            candidate = _candidate_or_block(request, facts)
+            candidate = _candidate_or_block(
+                request,
+                facts,
+                request.expected_order_version.value,
+            )
+            _validate_preview_binding(request, facts, candidate)
             lifecycle_event_id = self._repository.append_lifecycle_event(request, candidate, facts)
             self._repository.update_order(candidate)
             self._repository.append_outbox(request, candidate, lifecycle_event_id)
@@ -150,7 +201,7 @@ class AutoCompleteOrderService:
         return self._repository.load_locked_facts(request)
 
 
-def _candidate_or_block(request, facts):
+def _candidate_or_block(request, facts, expected_order_version):
     order = facts["locked_order"]
     authoritative = facts["authoritative_facts"]
     _validate_authoritative_facts(request, order, authoritative)
@@ -165,7 +216,7 @@ def _candidate_or_block(request, facts):
     if completion is None:
         raise _error(request, ErrorCategory.DOMAIN_BLOCKED, "auto_completion_blocked", "Order service completion has no complete service-time facts.", ("auto_complete.service_time_terms_incomplete",))
     try:
-        return build_auto_completion_candidate(case_no=request.case_no, expected_order_version=request.expected_order_version.value, completion_instant=datetime.fromisoformat(completion), evaluation_at=request.evaluation_at)
+        return build_auto_completion_candidate(case_no=request.case_no, expected_order_version=expected_order_version, completion_instant=datetime.fromisoformat(completion), evaluation_at=request.evaluation_at)
     except ValueError as error:
         if str(error) == "auto_completion_time_not_reached":
             raise _error(request, ErrorCategory.DOMAIN_BLOCKED, "auto_completion_time_not_reached", "Order service completion instant has not been reached.", ("auto_complete.completion_instant_not_reached",)) from error
@@ -189,12 +240,51 @@ def _validate_authoritative_facts(request, order, authoritative) -> None:
         ) from error
 
 
+def _preview_from_facts(request, facts, candidate):
+    order = facts["locked_order"]
+    authoritative = facts["authoritative_facts"]
+    fingerprint = fingerprint_payload(
+        {
+            "case_no": request.case_no,
+            "expected_order_version": candidate.expected_order_version,
+            "resulting_order_version": candidate.resulting_order_version,
+            "current_status": order["status"],
+            "completion_instant": candidate.completion_instant.isoformat(),
+            "evaluation_at": candidate.evaluation_at.isoformat(),
+            "official_service_dates": authoritative["official_service_dates"],
+        }
+    )
+    return AutoCompletionPreview(
+        request.case_no,
+        candidate.expected_order_version,
+        candidate.resulting_order_version,
+        str(order["status"]),
+        candidate.completion_instant,
+        candidate.evaluation_at,
+        tuple(authoritative["official_service_dates"]),
+        fingerprint,
+    )
+
+
+def _validate_preview_binding(request, facts, candidate):
+    if request.preview_fingerprint is None:
+        return
+    preview = _preview_from_facts(request, facts, candidate)
+    if preview.fingerprint != request.preview_fingerprint:
+        raise _error(
+            request,
+            ErrorCategory.CONFLICT,
+            "stale_preview",
+            "The business facts changed after service-completion Preview.",
+        )
+
+
 def _command_fingerprint(request):
-    return fingerprint_payload({"case_no": request.case_no, "expected_order_version": request.expected_order_version.value, "evaluation_at": request.evaluation_at.isoformat(), "actor": request.actor.actor_id, "reason": request.reason})
+    return fingerprint_payload({"case_no": request.case_no, "expected_order_version": request.expected_order_version.value, "evaluation_at": request.evaluation_at.isoformat(), "actor": request.actor.actor_id, "reason": request.reason, "preview_fingerprint": request.preview_fingerprint.value if request.preview_fingerprint is not None else None})
 
 
 def _error(request, category, code, message, blockers=()):
     return AutoCompletionWorkflowError(TypedError(category, code, message, request.correlation_id, domain_blockers=tuple(sorted(set(blockers)))))
 
 
-__all__ = ["AutoCompleteOrderService", "AutoCompletionApplyRequest", "AutoCompletionClaimState", "AutoCompletionReceipt", "AutoCompletionRepositoryConflictError", "AutoCompletionRepositoryIntegrityError", "AutoCompletionRepositoryNotFoundError", "AutoCompletionWorkflowError", "StoredAutoCompletionReceipt"]
+__all__ = ["AutoCompleteOrderService", "AutoCompletionApplyRequest", "AutoCompletionClaimState", "AutoCompletionPreview", "AutoCompletionPreviewRequest", "AutoCompletionReceipt", "AutoCompletionRepositoryConflictError", "AutoCompletionRepositoryIntegrityError", "AutoCompletionRepositoryNotFoundError", "AutoCompletionWorkflowError", "StoredAutoCompletionReceipt"]

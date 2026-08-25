@@ -5,6 +5,7 @@ Description: 驗證 LIFF 登記、LINE binding、owner projection 與 intent 共
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -28,10 +29,8 @@ NOW = datetime(2026, 8, 21, 12, tzinfo=timezone.utc)
 
 def test_registration_commits_roots_projection_and_intents_once() -> None:
     uow = _RegistrationUow()
-    receipt, binding = _application(uow).apply_registration(
-        _intent(),
-        LineUserId("U-registration"),
-        None,
+    receipt, binding = _preview_then_apply(
+        _application(uow),
         CorrelationId("line-registration:test"),
     )
 
@@ -51,10 +50,8 @@ def test_registration_does_not_require_preexisting_customer_lookup() -> None:
     uow = _RegistrationUow()
     uow.customer.resolve_result = None
 
-    receipt, binding = _application(uow).apply_registration(
-        _intent(),
-        LineUserId("U-registration"),
-        None,
+    receipt, binding = _preview_then_apply(
+        _application(uow),
         CorrelationId("line-registration:test-no-preexisting-customer"),
     )
 
@@ -72,10 +69,8 @@ def test_registration_rolls_back_when_binding_projection_fails() -> None:
     uow.customer.error = RuntimeError("owner_projection_conflict")
 
     with pytest.raises(RuntimeError, match="owner_projection_conflict"):
-        _application(uow).apply_registration(
-            _intent(),
-            LineUserId("U-registration"),
-            None,
+        _preview_then_apply(
+            _application(uow),
             CorrelationId("line-registration:test-failure"),
         )
 
@@ -83,8 +78,43 @@ def test_registration_rolls_back_when_binding_projection_fails() -> None:
     assert uow.rollbacks == 1
 
 
+def test_registration_apply_rejects_payload_changed_after_preview_before_any_write() -> None:
+    uow = _RegistrationUow()
+    application = _application(uow)
+    line_user_id = LineUserId("U-registration")
+    preview = application.preview_registration(_intent(), line_user_id, None)
+    changed = replace(_intent(), service_days=30)
+
+    with pytest.raises(RuntimeError, match="registration_preview_stale"):
+        application.apply_registration(
+            changed,
+            line_user_id,
+            None,
+            preview.expected_binding_version,
+            preview.preview_fingerprint,
+            CorrelationId("line-registration:stale"),
+        )
+
+    assert uow.registration.candidates == []
+    assert uow.commits == 0
+
+
 def _application(uow):
     return LineIdentityApplication(lambda: uow, lambda: NOW)
+
+
+def _preview_then_apply(application, correlation_id):
+    intent = _intent()
+    line_user_id = LineUserId("U-registration")
+    preview = application.preview_registration(intent, line_user_id, None)
+    return application.apply_registration(
+        intent,
+        line_user_id,
+        None,
+        preview.expected_binding_version,
+        preview.preview_fingerprint,
+        correlation_id,
+    )
 
 
 def _intent() -> ProvisionalRegistrationIntent:
@@ -126,7 +156,7 @@ class _RegistrationUow:
         return self
 
     def __exit__(self, exception_type, *_):
-        if exception_type is not None or self.commits == 0:
+        if exception_type is not None:
             self.rollbacks += 1
         return False
 

@@ -244,12 +244,15 @@ def test_apply_fresh_locks_then_commits_event_receipt_and_audit_without_delivery
     fixture = _Fixture()
     preview = fixture.application.preview_update(_preview_command())
 
-    detail = fixture.application.apply_update(
+    receipt = fixture.application.apply_update(
         _apply_command(preview.preview_fingerprint)
     )
 
-    assert detail["ticket"]["status"] == "resolved"
-    assert detail["ticket"]["version"] == 4
+    assert receipt.resulting_status is CustomerServiceStatus.RESOLVED
+    assert receipt.resulting_version == 4
+    assert receipt.replayed is False
+    assert receipt.readback["ticket"]["status"] == "resolved"
+    assert receipt.readback["ticket"]["version"] == 4
     assert fixture.repository.get_locks[-1] is True
     assert len(fixture.repository.events) == 1
     assert fixture.repository.updates == [
@@ -275,7 +278,10 @@ def test_apply_replays_same_payload_without_a_second_write():
 
     replay = fixture.application.apply_update(command)
 
-    assert replay["ticket"]["version"] == 4
+    assert replay.resulting_status is CustomerServiceStatus.RESOLVED
+    assert replay.resulting_version == 4
+    assert replay.replayed is True
+    assert replay.readback["ticket"]["version"] == 4
     assert len(fixture.repository.events) == event_count
     assert len(fixture.repository.updates) == update_count
     assert len(fixture.audit.items) == audit_count
@@ -379,9 +385,14 @@ def test_update_requests_are_strict_and_require_nullable_note_explicitly():
             **valid,
             unexpected=True,
         )
+    assert CustomerServiceUpdatePreviewRequest(
+        status="handling",
+        internal_note=None,
+        expected_version=3,
+    ).status is CustomerServiceStatus.HANDLING
     with pytest.raises(ValidationError):
         CustomerServiceUpdatePreviewRequest(
-            status="handling",
+            status="invalid",
             internal_note=None,
             expected_version=3,
         )

@@ -1,8 +1,13 @@
-"""Preserve the client LINE binding confirmation workflow during migration."""
+"""
+File: test_line_bind_legacy_characterization.py
+Description: 驗證舊 LIFF writer fail closed，且入口設定只指向 canonical 身分流程。
+"""
 
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -124,3 +129,17 @@ def test_all_legacy_liff_surfaces_fail_closed_in_canonical_runtime(monkeypatch, 
     assert exc_info.value.status_code == 410
     assert exc_info.value.detail["code"] == "legacy_line_route_retired"
     assert exc_info.value.detail["replacement"]
+
+
+def test_liff_gateway_settings_only_point_to_canonical_identity_routes():
+    settings = json.loads(Path("config/liff_settings.json").read_text(encoding="utf-8"))
+    actions = {
+        action["id"]: action["path"]
+        for action in settings["pages"]["gateway"]["actions"]
+    }
+
+    assert actions == {
+        "bind_existing": "/line-identity",
+        "register_new": "/line-registration",
+    }
+    assert all(path not in {"/bind-page", "/register-page"} for path in actions.values())

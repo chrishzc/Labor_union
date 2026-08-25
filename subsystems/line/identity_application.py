@@ -1,6 +1,6 @@
 """
 File: identity_application.py
-Description: 編排 LINE 身分流程、原子登記、owner projection 與 durable intent。
+Description: 編排 verified LINE platform root、身分流程、原子登記、owner projection 與 durable intent。
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from domains.line.identity_flow import (
     validate_identity_flow,
 )
 from domains.line.review import LineReviewType
-from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.line.identity_contracts import (
     AdminCredentialProof,
@@ -49,6 +49,7 @@ from subsystems.line.rich_menu_binding import schedule_rich_menu_binding
 from subsystems.case_import.provisional_registration_types import (
     ProvisionalRegistrationConflict,
     ProvisionalRegistrationConflictError,
+    ProvisionalRegistrationPreview,
     ProvisionalRegistrationReceipt,
 )
 
@@ -88,6 +89,7 @@ class LineIdentityApplication:
             correlation_id,
         )
         with self._unit_of_work_factory() as unit_of_work:
+            unit_of_work.platform_users.ensure_verified_user(line_user_id)
             result = unit_of_work.identity_flows.open(command)
             unit_of_work.commit()
         return result
@@ -112,10 +114,24 @@ class LineIdentityApplication:
                 self._now(),
             )
             candidate = unit_of_work.customers.resolve_customer(proof)
-            return _customer_preview(unit_of_work, line_user_id, candidate)
+            preview = _customer_preview(unit_of_work, line_user_id, candidate)
+            return _with_identity_preview_fingerprint(
+                "customer",
+                flow_id,
+                _customer_proof_fingerprint(proof),
+                preview,
+            )
 
     # Kept cohesive so flow consumption and customer binding/review stay one transaction.
-    def apply_customer(self, flow_id, line_user_id, proof, correlation_id):
+    def apply_customer(
+        self,
+        flow_id,
+        line_user_id,
+        proof,
+        expected_version,
+        preview_fingerprint,
+        correlation_id,
+    ):
         with self._unit_of_work_factory() as unit_of_work:
             _require_flow(
                 unit_of_work,
@@ -127,7 +143,13 @@ class LineIdentityApplication:
             candidate = unit_of_work.customers.resolve_customer(proof)
             if candidate is None:
                 raise LineIdentityNotFoundError("找不到相符的客戶資料")
-            preview = _customer_preview(unit_of_work, line_user_id, candidate)
+            preview = _with_identity_preview_fingerprint(
+                "customer",
+                flow_id,
+                _customer_proof_fingerprint(proof),
+                _customer_preview(unit_of_work, line_user_id, candidate),
+            )
+            _require_identity_preview(preview, expected_version, preview_fingerprint)
             unit_of_work.identity_flows.consume(
                 flow_id,
                 LineIdentityFlowPurpose.CUSTOMER_BINDING,
@@ -144,6 +166,38 @@ class LineIdentityApplication:
             unit_of_work.commit()
         return result
 
+    def preview_registration(
+        self,
+        intent: ProvisionalRegistrationIntent,
+        line_user_id: LineUserId,
+        flow_id: LineIdentityFlowId | None,
+    ) -> ProvisionalRegistrationPreview:
+        if intent.line_user_id.strip() != line_user_id.value:
+            raise LineIdentityConflictError("registration_line_identity_mismatch")
+        candidate = build_provisional_registration_candidate(intent)
+        with self._unit_of_work_factory() as unit_of_work:
+            if flow_id is not None:
+                _require_flow(
+                    unit_of_work,
+                    flow_id,
+                    LineIdentityFlowPurpose.CUSTOMER_BINDING,
+                    line_user_id,
+                    self._now(),
+                )
+            binding = unit_of_work.identities.get(line_user_id)
+        expected_version = binding.version if binding else ExpectedVersion(0)
+        return ProvisionalRegistrationPreview(
+            "ready",
+            expected_version,
+            candidate.payload_fingerprint,
+            _registration_preview_fingerprint(
+                candidate.payload_fingerprint,
+                line_user_id,
+                flow_id,
+                expected_version,
+            ),
+        )
+
     # Kept cohesive so provisional roots, verified binding, owner projection, and
     # durable intents share exactly one outer UoW and one commit owner.
     def apply_registration(
@@ -151,6 +205,8 @@ class LineIdentityApplication:
         intent: ProvisionalRegistrationIntent,
         line_user_id: LineUserId,
         flow_id: LineIdentityFlowId | None,
+        expected_binding_version: ExpectedVersion,
+        preview_fingerprint: PreviewFingerprint,
         correlation_id: CorrelationId,
     ) -> tuple[ProvisionalRegistrationReceipt, LineIdentityApplyResult]:
         if intent.line_user_id.strip() != line_user_id.value:
@@ -165,6 +221,18 @@ class LineIdentityApplication:
                     line_user_id,
                     self._now(),
                 )
+            binding = unit_of_work.identities.get(line_user_id)
+            current_binding_version = binding.version if binding else ExpectedVersion(0)
+            if current_binding_version != expected_binding_version:
+                raise LineIdentityConflictError("registration_preview_stale")
+            current_preview_fingerprint = _registration_preview_fingerprint(
+                candidate.payload_fingerprint,
+                line_user_id,
+                flow_id,
+                current_binding_version,
+            )
+            if current_preview_fingerprint != preview_fingerprint:
+                raise LineIdentityConflictError("registration_preview_stale")
             outcome = unit_of_work.provisional_registrations.apply(candidate)
             if isinstance(outcome, ProvisionalRegistrationConflict):
                 raise ProvisionalRegistrationConflictError("registration_conflict")
@@ -217,10 +285,24 @@ class LineIdentityApplication:
                 self._now(),
             )
             candidate = unit_of_work.staff.resolve_staff(proof)
-            return _staff_preview(unit_of_work, line_user_id, candidate)
+            preview = _staff_preview(unit_of_work, line_user_id, candidate)
+            return _with_identity_preview_fingerprint(
+                "staff",
+                flow_id,
+                _staff_proof_fingerprint(proof),
+                preview,
+            )
 
     # Kept cohesive so the one-use flow and manual-review claim cannot diverge.
-    def apply_staff(self, flow_id, line_user_id, proof, correlation_id):
+    def apply_staff(
+        self,
+        flow_id,
+        line_user_id,
+        proof,
+        expected_version,
+        preview_fingerprint,
+        correlation_id,
+    ):
         with self._unit_of_work_factory() as unit_of_work:
             _require_flow(
                 unit_of_work,
@@ -232,7 +314,13 @@ class LineIdentityApplication:
             candidate = unit_of_work.staff.resolve_staff(proof)
             if candidate is None:
                 raise LineIdentityNotFoundError("找不到相符的月嫂資料")
-            preview = _staff_preview(unit_of_work, line_user_id, candidate)
+            preview = _with_identity_preview_fingerprint(
+                "staff",
+                flow_id,
+                _staff_proof_fingerprint(proof),
+                _staff_preview(unit_of_work, line_user_id, candidate),
+            )
+            _require_identity_preview(preview, expected_version, preview_fingerprint)
             unit_of_work.identity_flows.consume(
                 flow_id,
                 LineIdentityFlowPurpose.STAFF_VERIFICATION,
@@ -250,10 +338,69 @@ class LineIdentityApplication:
             unit_of_work.commit()
         return result
 
+    def preview_admin(self, flow_id, line_user_id, proof):
+        # Password verification is intentionally deferred to Apply so Preview
+        # remains zero-write and cannot bypass the flow's failed-attempt policy.
+        with self._unit_of_work_factory() as unit_of_work:
+            _require_flow(
+                unit_of_work,
+                flow_id,
+                LineIdentityFlowPurpose.ADMIN_BINDING,
+                line_user_id,
+                self._now(),
+            )
+            binding = unit_of_work.identities.get(line_user_id)
+        preview = LineIdentityPreview(
+            LineIdentityPreviewStatus.AUTHENTICATION_PENDING,
+            line_user_id,
+            None,
+            binding.version if binding else ExpectedVersion(0),
+            PreviewFingerprint("0" * 64),
+        )
+        return _with_identity_preview_fingerprint(
+            "admin",
+            flow_id,
+            _admin_proof_fingerprint(proof),
+            preview,
+        )
+
     # Kept cohesive so authenticated admin binding and its notification commit together.
-    def apply_admin(self, flow_id, line_user_id, proof, correlation_id):
+    def apply_admin(
+        self,
+        flow_id,
+        line_user_id,
+        proof,
+        expected_version,
+        preview_fingerprint,
+        correlation_id,
+    ):
         candidate = self._authenticated_admin_candidate(flow_id, line_user_id, proof)
         with self._unit_of_work_factory() as unit_of_work:
+            _require_flow(
+                unit_of_work,
+                flow_id,
+                LineIdentityFlowPurpose.ADMIN_BINDING,
+                line_user_id,
+                self._now(),
+            )
+            binding = unit_of_work.identities.get(line_user_id)
+            current_preview = _with_identity_preview_fingerprint(
+                "admin",
+                flow_id,
+                _admin_proof_fingerprint(proof),
+                LineIdentityPreview(
+                    LineIdentityPreviewStatus.AUTHENTICATION_PENDING,
+                    line_user_id,
+                    None,
+                    binding.version if binding else ExpectedVersion(0),
+                    PreviewFingerprint("0" * 64),
+                ),
+            )
+            _require_identity_preview(
+                current_preview,
+                expected_version,
+                preview_fingerprint,
+            )
             unit_of_work.identity_flows.consume(
                 flow_id,
                 LineIdentityFlowPurpose.ADMIN_BINDING,
@@ -345,11 +492,84 @@ class LineIdentityApplication:
         return result
 
 
+def _registration_preview_fingerprint(
+    payload_fingerprint: PreviewFingerprint,
+    line_user_id: LineUserId,
+    flow_id: LineIdentityFlowId | None,
+    expected_binding_version: ExpectedVersion,
+) -> PreviewFingerprint:
+    return fingerprint_payload(
+        {
+            "payload_fingerprint": payload_fingerprint.value,
+            "line_user_id": line_user_id.value,
+            "flow_id": flow_id.value if flow_id else None,
+            "expected_binding_version": expected_binding_version.value,
+        }
+    )
+
+
+def _with_identity_preview_fingerprint(
+    family: str,
+    flow_id: LineIdentityFlowId,
+    proof_fingerprint: PreviewFingerprint,
+    preview: LineIdentityPreview,
+) -> LineIdentityPreview:
+    candidate = preview.candidate
+    fingerprint = fingerprint_payload(
+        {
+            "family": family,
+            "flow_id": flow_id.value,
+            "line_user_id": preview.line_user_id.value,
+            "expected_version": preview.expected_version.value,
+            "status": preview.status.value,
+            "proof_fingerprint": proof_fingerprint.value,
+            "candidate": (
+                {
+                    "subject_type": candidate.subject_type.value,
+                    "subject_reference": candidate.subject_reference,
+                    "currently_bound_line_user_id": (
+                        candidate.currently_bound_line_user_id.value
+                        if candidate.currently_bound_line_user_id
+                        else None
+                    ),
+                }
+                if candidate
+                else None
+            ),
+        }
+    )
+    return LineIdentityPreview(
+        preview.status,
+        preview.line_user_id,
+        candidate,
+        preview.expected_version,
+        fingerprint,
+    )
+
+
+def _require_identity_preview(
+    preview: LineIdentityPreview,
+    expected_version: ExpectedVersion,
+    preview_fingerprint: PreviewFingerprint,
+) -> None:
+    if (
+        preview.expected_version != expected_version
+        or preview.preview_fingerprint != preview_fingerprint
+    ):
+        raise LineIdentityConflictError("line_identity_preview_stale")
+
+
 def _customer_preview(unit_of_work, line_user_id, candidate):
     binding = unit_of_work.identities.get(line_user_id)
     version = binding.version if binding else ExpectedVersion(0)
     if candidate is None:
-        return LineIdentityPreview(LineIdentityPreviewStatus.NOT_FOUND, line_user_id, None, version)
+        return LineIdentityPreview(
+            LineIdentityPreviewStatus.NOT_FOUND,
+            line_user_id,
+            None,
+            version,
+            PreviewFingerprint("0" * 64),
+        )
     if candidate.currently_bound_line_user_id == line_user_id:
         status = LineIdentityPreviewStatus.ALREADY_BOUND
     elif candidate.currently_bound_line_user_id is not None:
@@ -358,7 +578,13 @@ def _customer_preview(unit_of_work, line_user_id, candidate):
         status = LineIdentityPreviewStatus.REQUIRES_REVIEW
     else:
         status = LineIdentityPreviewStatus.MATCHED
-    return LineIdentityPreview(status, line_user_id, candidate, version)
+    return LineIdentityPreview(
+        status,
+        line_user_id,
+        candidate,
+        version,
+        PreviewFingerprint("0" * 64),
+    )
 
 
 def _staff_preview(unit_of_work, line_user_id, candidate):
@@ -370,7 +596,13 @@ def _staff_preview(unit_of_work, line_user_id, candidate):
         status = LineIdentityPreviewStatus.ALREADY_BOUND
     else:
         status = LineIdentityPreviewStatus.REQUIRES_REVIEW
-    return LineIdentityPreview(status, line_user_id, candidate, version)
+    return LineIdentityPreview(
+        status,
+        line_user_id,
+        candidate,
+        version,
+        PreviewFingerprint("0" * 64),
+    )
 
 
 def _apply_staff_candidate(unit_of_work, flow_id, preview, proof, correlation_id):
@@ -424,6 +656,9 @@ def _bind_result(unit_of_work, line_user_id, candidate, correlation_id):
         line_user_id,
         candidate.subject_type,
         candidate.subject_reference,
+        receipt_identity=(
+            f"line-binding:{line_user_id.value}:{snapshot.version.value}"
+        ),
     )
 
 
@@ -507,6 +742,7 @@ def _create_review(
         candidate.subject_type,
         candidate.subject_reference,
         created.snapshot.request_id,
+        f"line-review:{created.snapshot.request_id.value}:pending",
     )
 
 
@@ -557,6 +793,15 @@ def _staff_proof_fingerprint(proof):
             "name": proof.name.strip(),
             "identity_card": proof.identity_card.strip().upper(),
             "birthday": proof.birthday.isoformat(),
+        }
+    )
+
+
+def _admin_proof_fingerprint(proof):
+    return fingerprint_payload(
+        {
+            "username": proof.username.strip(),
+            "password": proof.password,
         }
     )
 

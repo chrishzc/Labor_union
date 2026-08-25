@@ -1,6 +1,6 @@
 """
 File: domains/orders/lifecycle.py
-Description: 定義訂單生命週期投影，待補件案件不得自動進入服務或帳務狀態。
+Description: 定義訂單生命週期與查詢範圍，待補件案件不得自動進入服務或帳務狀態。
 """
 
 from __future__ import annotations
@@ -27,6 +27,11 @@ class OrderLifecycleStatus(StrEnum):
     IN_SERVICE = "服務中"
     COMPLETED = "訂單完成"
     CANCELLED = "訂單取消"
+
+
+class OrderLifecycleScope(StrEnum):
+    ALL = "all"
+    UNFINISHED = "unfinished"
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,13 +84,10 @@ def build_terms_lifecycle_impact(
         if actual_end_date is not None
         else None
     )
-    completion_reached = _service_completion_reached(
-        root_facts,
-        order_terms,
-        scheduling,
-        completion_instant,
-        evaluation_at,
-    )
+    # Terms、actual-start 與 Scheduling impact workflow 只可重算根事實；
+    # 即使 completion instant 已到，也必須由 AutoCompleteOrderService 這個
+    # 唯一 owner command 另行持久化完成事件。
+    completion_reached = False
     after_status = _lifecycle_status(
         root_facts,
         client_settlement,

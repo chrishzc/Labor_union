@@ -44,6 +44,13 @@ class MatchingNotificationProjectionStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class ManualMatchingConfirmationMethod(StrEnum):
+    PHONE = "phone"
+    IN_PERSON = "in_person"
+    PAPER = "paper"
+    OTHER = "other"
+
+
 @dataclass(frozen=True, slots=True)
 class RequestCaregiverInformationCommand:
     plan: MatchingPlanReference
@@ -91,6 +98,44 @@ class RequestCustomerProfilesCommand:
                 "note": self.note,
             }
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewManualCustomerProfilesCommand:
+    plan: MatchingPlanReference
+    confirmation_method: ManualMatchingConfirmationMethod
+    reason: str
+    actor: ActorContext
+    expected_version: ExpectedVersion
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.reason, "manual customer profiles reason", _REASON_MAXIMUM_LENGTH)
+        _require_matching_version(self.plan, self.expected_version)
+
+    @property
+    def fingerprint(self) -> PreviewFingerprint:
+        return fingerprint_payload(
+            {
+                "case_no": self.plan.case_no,
+                "plan_id": self.plan.plan_id,
+                "plan_version": self.plan.version,
+                "confirmation_method": self.confirmation_method.value,
+                "reason": self.reason,
+                "actor_id": self.actor.actor_id,
+            }
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyManualCustomerProfilesCommand(PreviewManualCustomerProfilesCommand):
+    preview_fingerprint: PreviewFingerprint
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if not isinstance(self.preview_fingerprint, PreviewFingerprint):
+            raise TypeError("manual customer profiles preview fingerprint is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +311,7 @@ class MatchingContactState:
     customer_decision: CustomerMatchingDecision
     customer_profiles_status: LineDeliveryStatus | None
     segments: tuple[MatchingSegmentContact, ...]
+    customer_profiles_manual_confirmation: "ManualCustomerProfilesEvidence | None" = None
 
     @property
     def all_willing(self) -> bool:
@@ -273,6 +319,46 @@ class MatchingContactState:
             segment.willingness is CaregiverWillingness.WILLING
             for segment in self.segments
         )
+
+    @property
+    def customer_profiles_are_available(self) -> bool:
+        return (
+            self.customer_profiles_status is not None
+            or self.customer_profiles_manual_confirmation is not None
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ManualCustomerProfilesEvidence:
+    event_ids: tuple[int, ...]
+    confirmation_method: ManualMatchingConfirmationMethod
+    reason: str
+    actor_id: str
+    idempotency_key: IdempotencyKey
+    preview_fingerprint: PreviewFingerprint
+
+    def __post_init__(self) -> None:
+        if not self.event_ids or any(event_id <= 0 for event_id in self.event_ids):
+            raise ValueError("manual customer profiles event IDs are invalid")
+        require_canonical_text(self.reason, "manual customer profiles reason", _REASON_MAXIMUM_LENGTH)
+        require_canonical_text(self.actor_id, "manual customer profiles actor", 191)
+
+
+@dataclass(frozen=True, slots=True)
+class ManualCustomerProfilesPreview:
+    plan: MatchingPlanReference
+    segment_ids: tuple[int, ...]
+    confirmation_method: ManualMatchingConfirmationMethod
+    reason: str
+    preview_fingerprint: PreviewFingerprint
+    apply_allowed: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ManualCustomerProfilesReceipt:
+    plan: MatchingPlanReference
+    evidence: ManualCustomerProfilesEvidence
+    replayed: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -355,7 +441,12 @@ def _require_matching_version(
 
 
 __all__ = [
+    "ApplyManualCustomerProfilesCommand",
     "AssignmentConversionNotificationResult",
+    "ManualCustomerProfilesEvidence",
+    "ManualCustomerProfilesPreview",
+    "ManualCustomerProfilesReceipt",
+    "ManualMatchingConfirmationMethod",
     "MatchingNotificationAudience",
     "MatchingContactState",
     "MatchingNotificationProjectionStatus",
@@ -363,6 +454,7 @@ __all__ = [
     "MatchingResponseResult",
     "MatchingSegmentContact",
     "NotifyAssignmentConversionCommand",
+    "PreviewManualCustomerProfilesCommand",
     "RecordCaregiverLineResponseCommand",
     "RecordCustomerLineDecisionCommand",
     "RecordManualMatchingResponseCommand",

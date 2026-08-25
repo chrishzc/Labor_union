@@ -1,6 +1,6 @@
 """
 File: stage_projection_query.py
-Description: 以跨 owner 唯讀根事實產生 Orders 七階段與十一作業步驟投影。
+Description: 依生命週期範圍讀取跨 owner 根事實，產生 Orders 七階段與十一作業步驟投影。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import hashlib
 import json
 from typing import Literal, Mapping, Protocol
 
+from domains.orders.lifecycle import OrderLifecycleScope
 from domains.orders.terms import ServiceTimeTerms
 from domains.scheduling.current_projection import AssignmentLifecycleStatus, project_service_period_status
 from shared_kernel.clock import BusinessClock, SystemBusinessClock
@@ -27,7 +28,8 @@ _ROW_FIELDS = frozenset({
     "terms_event_id", "terms_version", "terms_created_at", "candidate_pool_id", "candidate_pool_created_at",
     "candidate_pool_candidate_count", "candidate_pool_contacted_count", "candidate_pool_contacted_at",
     "candidate_pool_replied_count", "candidate_pool_replied_at", "matching_plan_id", "matching_plan_version",
-    "matching_plan_status", "matching_created_at", "willingness_contact_attempt_count", "willingness_count", "willingness_replied_count",
+    "matching_plan_status", "matching_created_at", "matching_customer_decision", "matching_customer_decision_at",
+    "willingness_contact_attempt_count", "willingness_count", "willingness_replied_count",
     "willingness_accepted_count", "willingness_contacted_at", "willingness_replied_at",
     "resume_attempt_count", "resume_sent_count", "resume_sent_at", "matching_segment_count", "staff_contract_sent_count",
     "staff_contract_sent_at", "staff_contract_signed_count", "staff_contract_signed_at",
@@ -39,7 +41,7 @@ _ROW_FIELDS = frozenset({
     "assignment_first_service_date", "assignment_last_service_date", "service_start_seconds",
     "service_end_seconds", "service_end_day_offset",
     "service_completion_identity", "service_completed_at", "client_obligation_count", "client_open_count",
-    "client_updated_at", "staff_obligation_count", "staff_open_count", "staff_updated_at",
+    "client_updated_at", "staff_obligation_count", "staff_open_count", "staff_payables_version", "staff_updated_at",
 })
 
 
@@ -48,13 +50,17 @@ class OrderStageProjectionContractError(ValueError):
 
 
 class OrderStageProjectionRepository(Protocol):
-    def fetch_page(self, *, after_case_no: str | None, page_size: int) -> tuple[Mapping[str, object], ...]: ...
+    def fetch_page(
+        self, *, after_case_no: str | None, page_size: int,
+        lifecycle_scope: OrderLifecycleScope,
+    ) -> tuple[Mapping[str, object], ...]: ...
 
 
 @dataclass(frozen=True)
 class StageProjectionQuery:
     page_size: int
     after_case_no: str | None = None
+    lifecycle_scope: OrderLifecycleScope = OrderLifecycleScope.ALL
 
     def __post_init__(self) -> None:
         require_positive_integer(self.page_size, "page_size")
@@ -62,6 +68,8 @@ class StageProjectionQuery:
             raise ValueError("page_size must not exceed 200")
         if self.after_case_no is not None:
             require_canonical_text(self.after_case_no, "after_case_no", 50)
+        if not isinstance(self.lifecycle_scope, OrderLifecycleScope):
+            raise TypeError("lifecycle_scope must be an OrderLifecycleScope")
 
 
 @dataclass(frozen=True)
@@ -147,7 +155,11 @@ class OrderStageProjectionQueryService:
         self._clock = clock or SystemBusinessClock()
 
     def query(self, request: StageProjectionQuery) -> OrderOperationalTimelinePage:
-        rows = self._repository.fetch_page(after_case_no=request.after_case_no, page_size=request.page_size)
+        rows = self._repository.fetch_page(
+            after_case_no=request.after_case_no,
+            page_size=request.page_size,
+            lifecycle_scope=request.lifecycle_scope,
+        )
         if not isinstance(rows, tuple) or len(rows) > request.page_size + 1:
             raise OrderStageProjectionContractError("repository page is not bounded")
         evaluated_at = self._clock.now()
@@ -216,12 +228,15 @@ def _intake_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
 def _matching_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
     plan_id = row["matching_plan_id"]
     status = row["matching_plan_status"]
+    customer_decision = row["matching_customer_decision"]
     candidate_pool_id = _optional_int(row, "candidate_pool_id")
     candidate_count = _nonnegative_int(row, "candidate_pool_candidate_count")
     if plan_id is not None and (isinstance(plan_id, bool) or not isinstance(plan_id, int) or plan_id <= 0):
         raise OrderStageProjectionContractError("matching_plan_id must be a positive integer")
     if plan_id is not None and status not in {"draft", "proposed", "accepted", "rejected", "superseded", "cancelled"}:
         raise OrderStageProjectionContractError("matching_plan_status is outside the closed contract")
+    if customer_decision not in {None, "pending", "accepted", "rejected"}:
+        raise OrderStageProjectionContractError("matching customer decision is outside the closed contract")
     willingness_count = _nonnegative_int(row, "willingness_count")
     replied_count = _nonnegative_int(row, "willingness_replied_count")
     accepted_count = _nonnegative_int(row, "willingness_accepted_count")
@@ -242,10 +257,10 @@ def _matching_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
         )
     if plan_id is None:
         return _unavailable_stage(2, "matching_willingness", "媒合與徵詢意願", "Assignments / Scheduling", "matching_plan_lineage_missing")
-    if status == "accepted":
+    if customer_decision == "accepted" or status == "accepted":
         projected: StageStatus = "completed"
         blockers: tuple[ProjectionNotice, ...] = ()
-    elif status in {"rejected", "cancelled"}:
+    elif customer_decision == "rejected" or status in {"rejected", "cancelled"}:
         projected = "blocked"
         blockers = (_notice("matching_plan_not_accepted", "目前媒合方案已拒絕或取消。"),)
     else:
@@ -260,10 +275,10 @@ def _client_review_stage(row: Mapping[str, object], case_no: str) -> StageProjec
     resume_sent_count = _nonnegative_int(row, "resume_sent_count")
     if plan_id is None:
         return _unavailable_stage(3, "client_review", "推薦客戶與確認", "Assignments / Customer Decision", "formal_recommendation_projection_missing")
-    accepted = row["matching_plan_status"] == "accepted"
+    accepted = row["matching_customer_decision"] == "accepted" or row["matching_plan_status"] == "accepted"
     status: StageStatus = "completed" if accepted and resume_sent_count else "in_progress" if accepted or resume_sent_count else "not_started"
     source = _source("Assignments / Customer Decision", f"caregiver-matching-plan:{plan_id}", _optional_int(row, "matching_plan_version"))
-    return _stage(3, "client_review", "推薦客戶與確認", "Assignments / Customer Decision", status, source, _optional_datetime(row, "resume_sent_at"), actions=(_get("orders.assignment_plan.query", f"/api/v1/orders/{case_no}/assignment-plan"),))
+    return _stage(3, "client_review", "推薦客戶與確認", "Assignments / Customer Decision", status, source, _latest(row, "resume_sent_at", "matching_customer_decision_at"), actions=(_get("orders.assignment_plan.query", f"/api/v1/orders/{case_no}/assignment-plan"),))
 
 
 def _contract_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
@@ -319,7 +334,7 @@ def _service_stage(row: Mapping[str, object], case_no: str, evaluated_at: dateti
 def _settlement_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
     service = _settlement_part("service_completion", "Orders", row["service_completion_identity"], 1 if row["service_completion_identity"] is not None else None, _optional_datetime(row, "service_completed_at"), None)
     client = _obligation_part("client_settlement", "Client Finance", row, "client_obligation_count", "client_open_count", "finance_version", "client_updated_at")
-    staff = _obligation_part("staff_payout", "Staff Payables", row, "staff_obligation_count", "staff_open_count", "scheduling_version", "staff_updated_at")
+    staff = _obligation_part("staff_payout", "Staff Payables", row, "staff_obligation_count", "staff_open_count", "staff_payables_version", "staff_updated_at")
     parts = (service, client, staff)
     statuses = {part.status for part in parts}
     if statuses == {"completed"}:
@@ -385,10 +400,10 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
         or replied_count > contact_attempt_count
         or accepted_count > replied_count
         or staff_sent_count > segment_count
-        or staff_signed_count > staff_sent_count
+        or staff_signed_count > segment_count
         or client_sent_count > 1
         or resume_sent_count > resume_attempt_count
-        or client_signed_count > client_sent_count
+        or client_signed_count > 1
     ):
         raise OrderStageProjectionContractError("SOP owner fact counts are inconsistent")
     contact_status: StageStatus = (
@@ -418,12 +433,12 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
     return (
         _step_from_stage(1, "intake_validation", "進件報名與資料完整性驗證", stage["intake_terms"]),
         _standalone_step(2, "matching_pool", "媒合月嫂候選人加入意願池", "Assignments / Scheduling", pool_status, _optional_datetime(row, "matching_created_at"), "matching_plan_lineage_missing" if pool_status == "unavailable" else None),
-        _standalone_step(3, "caregiver_line_delivery", "發送訂單資訊詢問月嫂意願（LINE）", "Assignments / LINE Delivery", contact_status, pool_contacted_at, "candidate_contact_pool_missing" if contact_status == "unavailable" else None),
+        _standalone_step(3, "caregiver_line_delivery", "發送訂單資訊詢問月嫂意願（LINE 或人工確認）", "Assignments / LINE Delivery", contact_status, pool_contacted_at, "candidate_contact_pool_missing" if contact_status == "unavailable" else None),
         _standalone_step(4, "caregiver_willingness_reply", "月嫂回傳接案意願", "Assignments / LINE", reply_status, pool_replied_at, "candidate_contact_pool_missing" if reply_status == "unavailable" else None),
         _step_from_stage(5, "formal_recommendation", "寄送月嫂履歷給客戶確認", stage["client_review"]),
-        _standalone_step(6, "caregiver_contract", "產生並寄送月嫂服務契約（月嫂簽回）", "Contract Signing", staff_contract_status, _latest(row, "staff_contract_signed_at", "staff_contract_sent_at"), "staff_contract_signing_lineage_missing" if staff_contract_status == "unavailable" else None),
+        _standalone_step(6, "caregiver_contract", "產生月嫂服務契約並留存簽回（寄送或人工確認）", "Contract Signing", staff_contract_status, _latest(row, "staff_contract_signed_at", "staff_contract_sent_at"), "staff_contract_signing_lineage_missing" if staff_contract_status == "unavailable" else None),
         _standalone_step(7, "deposit_settlement", "客戶定金核銷（訂單成立）", "Client Finance", deposit_status, _optional_datetime(row, "deposit_updated_at"), "deposit_obligation_missing" if deposit_status == "unavailable" else None, blockers=(_notice("deposit_not_settled", "定金 obligation 尚未結清。"),) if deposit_status == "blocked" else ()),
-        _standalone_step(8, "client_contract", "產生並寄送客戶契約（客戶簽回）", "Contract Signing / Orders", client_contract_status, _latest(row, "client_contract_signed_at", "client_contract_sent_at"), "client_contract_signing_lineage_missing" if client_contract_status == "unavailable" else None),
+        _standalone_step(8, "client_contract", "產生客戶契約並留存簽回（寄送或人工確認）", "Contract Signing / Orders", client_contract_status, _latest(row, "client_contract_signed_at", "client_contract_sent_at"), "client_contract_signing_lineage_missing" if client_contract_status == "unavailable" else None),
         _step_from_stage(9, "confirmed_service_dates", "確認事前服務日期（精算）", stage["date_confirmation"]),
         _step_from_stage(10, "formal_service", "轉換正式排班與服務履約", stage["active_service"]),
         _step_from_stage(11, "settlement_close", "完工驗收、時數核對與尾款／薪資結清", stage["settlement_payout"]),

@@ -1,3 +1,10 @@
+"""
+File: test_multi_caregiver_case_assignment_list_router.py
+Description: 驗證 case 與 staff 正式指派唯讀路由及 typed Calendar option。
+"""
+
+from datetime import date
+
 import pytest
 from fastapi import HTTPException
 
@@ -24,7 +31,18 @@ def test_staff_list_route_delegates_only_staff_id(monkeypatch):
     monkeypatch.setattr(
         router_module,
         "list_staff_case_schedule_assignments_service",
-        lambda staff_id: received.append(staff_id) or {"assignments": [{"id": 21}]},
+        lambda staff_id: received.append(staff_id) or {"assignments": [{
+            "id": 21,
+            "case_no": "115000001",
+            "staff_id": 31,
+            "status": "active",
+            "assigned_start_date": date(2026, 8, 1),
+            "assigned_end_date": date(2026, 8, 10),
+            "order_status": "服務中",
+            "actual_start_date": date(2026, 8, 1),
+            "actual_end_date": None,
+            "staff_name": "測試月嫂",
+        }]},
     )
 
     response = router_module.list_staff_schedule_assignments(31)

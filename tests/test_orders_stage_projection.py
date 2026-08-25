@@ -10,13 +10,25 @@ from decimal import Decimal
 
 import pytest
 
-from infrastructure.mysql.orders_stage_projection_repository import MySqlOrdersStageProjectionRepository
+from domains.orders.lifecycle import OrderLifecycleScope
+from infrastructure.mysql.orders_stage_projection_repository import MySqlOrdersStageProjectionRepository, _PAGE_SQL
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
 from subsystems.orders.stage_projection_query import OrderStageProjectionContractError, OrderStageProjectionQueryService, StageProjectionQuery
 
 
 NOW = datetime(2026, 8, 21, 8, 0, 0)
 BUSINESS_CLOCK = FixedBusinessClock(datetime(2026, 8, 21, 18, 0, tzinfo=TAIPEI_TIME_ZONE))
+
+
+def test_service_completion_projection_reads_the_canonical_orders_receipt() -> None:
+    assert "FROM order_auto_completion_apply_receipts" in _PAGE_SQL
+    assert "orders-auto-completion-receipt:" in _PAGE_SQL
+    assert "service_lock.client_settlement_fingerprint AS service_completion_identity" not in _PAGE_SQL
+
+
+def test_staff_settlement_reads_staff_payables_projection_not_obligation_status() -> None:
+    assert "LEFT JOIN staff_payable_projections projection" in _PAGE_SQL
+    assert "COALESCE(projection.status, 'payable') <> 'completed'" in _PAGE_SQL
 
 
 def _row(case_no: str = "CASE-001") -> dict[str, object]:
@@ -41,6 +53,8 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
         "matching_plan_version": 1,
         "matching_plan_status": "accepted",
         "matching_created_at": NOW,
+        "matching_customer_decision": "accepted",
+        "matching_customer_decision_at": NOW,
         "willingness_contact_attempt_count": 2,
         "willingness_count": 2,
         "willingness_replied_count": 2,
@@ -85,6 +99,7 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
         "client_updated_at": NOW,
         "staff_obligation_count": 2,
         "staff_open_count": 0,
+        "staff_payables_version": 9,
         "staff_updated_at": NOW,
     }
 
@@ -93,8 +108,8 @@ class _Repository:
     def __init__(self, rows: tuple[dict[str, object], ...]) -> None:
         self.rows = rows
 
-    def fetch_page(self, *, after_case_no: str | None, page_size: int):
-        del after_case_no, page_size
+    def fetch_page(self, *, after_case_no: str | None, page_size: int, lifecycle_scope: OrderLifecycleScope):
+        del after_case_no, page_size, lifecycle_scope
         return self.rows
 
 
@@ -135,6 +150,7 @@ def test_imported_complete_terms_finish_step_one_without_a_terms_change_event() 
 def test_matching_pool_step_completes_from_candidate_pool_fact_before_customer_acceptance() -> None:
     row = _row("MATCHING-POOL-COMPLETED")
     row["matching_plan_status"] = "proposed"
+    row["matching_customer_decision"] = "pending"
     row["willingness_count"] = 1
     row["willingness_replied_count"] = 1
     row["willingness_accepted_count"] = 1
@@ -147,6 +163,21 @@ def test_matching_pool_step_completes_from_candidate_pool_fact_before_customer_a
     assert item.sop_steps[1].status == "completed"
     assert item.sop_steps[2].status == "completed"
     assert item.sop_steps[3].status == "completed"
+
+
+def test_customer_decision_event_completes_matching_and_review_without_mutating_plan_status() -> None:
+    row = _row("MATCHING-CUSTOMER-DECISION")
+    row["matching_plan_status"] = "proposed"
+    row["matching_customer_decision"] = "accepted"
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[1].status == "completed"
+    assert item.stages[2].status == "completed"
+    assert item.sop_steps[4].status == "completed"
+    assert item.sop_steps[2].label == "發送訂單資訊詢問月嫂意願（LINE 或人工確認）"
 
 
 def test_candidate_pool_steps_do_not_require_a_formal_matching_plan() -> None:
@@ -236,7 +267,8 @@ def test_rootless_historical_order_is_isolated_without_guessing_a_business_stage
         "import_receipt_id", "import_created_at", "terms_event_id", "terms_version",
         "terms_created_at", "candidate_pool_id", "candidate_pool_created_at",
         "candidate_pool_contacted_at", "candidate_pool_replied_at", "matching_plan_id", "matching_plan_version",
-        "matching_plan_status", "matching_created_at", "willingness_contacted_at",
+        "matching_plan_status", "matching_created_at", "matching_customer_decision",
+        "matching_customer_decision_at", "willingness_contacted_at",
         "willingness_replied_at", "resume_sent_at", "staff_contract_sent_at",
         "staff_contract_signed_at", "client_contract_sent_at", "client_contract_signed_at",
         "contract_event_id", "contract_created_at", "finance_version", "deposit_updated_at",
@@ -244,7 +276,7 @@ def test_rootless_historical_order_is_isolated_without_guessing_a_business_stage
         "assignment_updated_at", "assignment_first_service_date", "assignment_last_service_date",
         "service_start_seconds", "service_end_seconds", "service_end_day_offset",
         "service_completion_identity", "service_completed_at", "client_updated_at",
-        "staff_updated_at",
+        "staff_payables_version", "staff_updated_at",
     ):
         row[field] = None
     for field in (
@@ -462,6 +494,44 @@ def test_sent_contracts_are_in_progress_until_each_party_signs() -> None:
     assert steps[7].status == "in_progress"
 
 
+def test_manual_signed_contract_evidence_completes_steps_without_line_sent_event() -> None:
+    row = _row()
+    row.update({
+        "staff_contract_sent_count": 0,
+        "staff_contract_sent_at": None,
+        "client_contract_sent_count": 0,
+        "client_contract_sent_at": None,
+    })
+
+    steps = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0].sop_steps
+
+    assert steps[5].status == "completed"
+    assert steps[5].label == "產生月嫂服務契約並留存簽回（寄送或人工確認）"
+    assert steps[7].status == "completed"
+    assert steps[7].label == "產生客戶契約並留存簽回（寄送或人工確認）"
+
+
+@pytest.mark.parametrize(
+    "updates",
+    (
+        {"matching_segment_count": 1, "staff_contract_signed_count": 2},
+        {"client_contract_signed_count": 2},
+    ),
+)
+def test_contract_step_counts_still_fail_closed_when_manual_evidence_exceeds_scope(
+    updates: dict[str, int],
+) -> None:
+    row = _row()
+    row.update(updates)
+
+    with pytest.raises(OrderStageProjectionContractError, match="SOP owner fact counts are inconsistent"):
+        OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+            StageProjectionQuery(50)
+        )
+
+
 @pytest.mark.parametrize("mutation", [lambda row: row.pop("finance_version"), lambda row: row.update({"order_version": -1})])
 def test_repository_contract_fails_closed_on_shape_or_version_drift(mutation) -> None:
     row = _row()
@@ -501,7 +571,7 @@ def test_mysql_repository_uses_one_bounded_select_and_never_commits() -> None:
     connection = _Connection()
     rows = MySqlOrdersStageProjectionRepository(connection).fetch_page(after_case_no="CASE-009", page_size=50)
     assert rows == ()
-    assert connection.last_cursor.params == ("CASE-009", 51)
+    assert connection.last_cursor.params == ("CASE-009", "all", "訂單完成", 51)
     assert connection.last_cursor.sql.count("SELECT") >= 1
     assert "staff_schedule" in connection.last_cursor.sql
     assert "caregiver_candidate_contact_pools" in connection.last_cursor.sql
@@ -509,6 +579,8 @@ def test_mysql_repository_uses_one_bounded_select_and_never_commits() -> None:
     assert "service_start_time" in connection.last_cursor.sql
     assert "matching_notification_intents" in connection.last_cursor.sql
     assert "matching_response_events" in connection.last_cursor.sql
+    assert "'manually_confirmed'" in connection.last_cursor.sql
+    assert "COUNT(DISTINCT event.segment_id) = COUNT(DISTINCT segment.id)" in connection.last_cursor.sql
     assert "contract_signing_events" in connection.last_cursor.sql
     assert "signing.matching_plan_id = plan.id" in connection.last_cursor.sql
     for required_terms_clause in (

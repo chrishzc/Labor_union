@@ -6,6 +6,7 @@ from dataclasses import fields, is_dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
@@ -39,6 +40,7 @@ from subsystems.orders.actual_start_workflow import (
 )
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Actual Start"])
+_LOGGER = logging.getLogger(__name__)
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
 
 
@@ -197,6 +199,7 @@ def _call_endpoint(command, message, correlation_id):
     except HTTPException:
         raise
     except Exception as error:
+        _LOGGER.exception("Unexpected actual-start workflow failure")
         raise _internal_error(correlation_id) from error
 
 

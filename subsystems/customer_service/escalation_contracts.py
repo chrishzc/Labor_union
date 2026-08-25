@@ -20,6 +20,7 @@ from domains.customer_service.escalation import (
     validate_trigger,
 )
 from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.validation import require_canonical_text, require_nonnegative_integer, require_positive_integer
 
@@ -48,6 +49,7 @@ class CreateHumanEscalation:
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
     actor: ActorContext
+    preview_fingerprint: PreviewFingerprint | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.source_event_identity, "source event identity", 191)
@@ -68,6 +70,7 @@ class ClaimHumanEscalation:
     actor: ActorContext
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
+    preview_fingerprint: PreviewFingerprint | None = None
 
     def __post_init__(self) -> None:
         _ids(self.escalation_id, self.expected_escalation_version)
@@ -81,6 +84,7 @@ class StartHumanEscalationHandling:
     actor: ActorContext
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
+    preview_fingerprint: PreviewFingerprint | None = None
 
     def __post_init__(self) -> None:
         _ids(self.escalation_id, self.expected_escalation_version, self.expected_ticket_version)
@@ -96,6 +100,7 @@ class ResolveHumanEscalation:
     actor: ActorContext
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
+    preview_fingerprint: PreviewFingerprint | None = None
 
     def __post_init__(self) -> None:
         _ids(self.escalation_id, self.expected_escalation_version, self.expected_ticket_version)
@@ -152,6 +157,20 @@ class HumanEscalationReceipt:
 
 
 @dataclass(frozen=True, slots=True)
+class HumanEscalationPreview:
+    operation: str
+    escalation_id: int | None
+    before_workflow_status: str
+    resulting_workflow_status: EscalationWorkflowStatus
+    before_hold_state: str
+    resulting_hold_state: AutomationHoldState
+    current_escalation_version: int | None
+    current_ticket_version: int | None
+    preview_fingerprint: PreviewFingerprint
+    apply_ready: bool
+
+
+@dataclass(frozen=True, slots=True)
 class AutomationHoldDecision:
     state: AutomationHoldState
     scope: str
@@ -198,7 +217,7 @@ def _ids(*values: int) -> None:
 
 __all__ = [
     "AutomationHoldDecision", "ClaimHumanEscalation", "CreateHumanEscalation",
-    "HumanEscalationError", "HumanEscalationPersistencePort", "HumanEscalationReceipt",
+    "HumanEscalationError", "HumanEscalationPersistencePort", "HumanEscalationPreview", "HumanEscalationReceipt",
     "HumanEscalationSourcePort", "HumanEscalationTicketPort", "HumanEscalationView",
     "ResolveHumanEscalation", "StartHumanEscalationHandling",
 ]

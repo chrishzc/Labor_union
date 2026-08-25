@@ -34,6 +34,12 @@ class MySqlStaffQualificationMasterRepository:
 
             cursor.execute(_COOKING_SQL, (query.staff_id,))
             cooking_rows = tuple(cursor.fetchall() or ())
+            service_regions = _load_relation(cursor, _REGIONS_SQL, query.staff_id, "region_name", "custom_region_detail")
+            service_time_slots = _load_relation(cursor, _TIME_SLOTS_SQL, query.staff_id, "slot_name", "custom_slot_detail")
+            transportation = _load_values(cursor, _TRANSPORTATION_SQL, query.staff_id, "vehicle_type")
+            holiday_availability = _load_relation(cursor, _HOLIDAY_SQL, query.staff_id, "holiday_name", "custom_holiday_detail")
+            weekly_rest = _load_relation(cursor, _WEEKLY_REST_SQL, query.staff_id, "rest_type", "custom_rest_detail")
+            baby_types = _load_relation(cursor, _BABY_TYPES_SQL, query.staff_id, "baby_type", "custom_baby_detail")
             unavailability_available, unavailability_reason, blocks = _load_unavailability(
                 cursor,
                 query,
@@ -52,10 +58,36 @@ class MySqlStaffQualificationMasterRepository:
                 for row in cooking_rows
             ),
             massage_certified=_optional_bool(staff_row.get("has_massage_cert")),
+            care_babies=_optional_positive_int(staff_row.get("care_babies")),
+            service_regions=service_regions,
+            service_time_slots=service_time_slots,
+            transportation=transportation,
+            holiday_availability=holiday_availability,
+            weekly_rest=weekly_rest,
+            baby_types=baby_types,
             unavailability_source_available=unavailability_available,
             unavailability_source_reason=unavailability_reason,
             unavailability_blocks=blocks,
         )
+
+
+def _load_relation(cursor: Any, sql: str, staff_id: int, value_field: str, detail_field: str):
+    cursor.execute(sql, (staff_id,))
+    return tuple(
+        (
+            _required_text(row, value_field, 100),
+            _optional_text(row, detail_field, 200),
+        )
+        for row in tuple(cursor.fetchall() or ())
+    )
+
+
+def _load_values(cursor: Any, sql: str, staff_id: int, value_field: str):
+    cursor.execute(sql, (staff_id,))
+    return tuple(
+        _required_text(row, value_field, 100)
+        for row in tuple(cursor.fetchall() or ())
+    )
 
 
 def _load_unavailability(cursor: Any, query: StaffQualificationMasterQuery):
@@ -129,6 +161,14 @@ def _optional_bool(value: object) -> bool | None:
     raise ValueError("staff qualification certificate value is invalid")
 
 
+def _optional_positive_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("staff service profile care_babies is invalid")
+    return value
+
+
 def _as_date(value: object) -> date:
     if isinstance(value, datetime):
         return value.date()
@@ -164,8 +204,31 @@ def _mysql_code(error: BaseException) -> int:
 
 
 _STAFF_SQL = (
-    "SELECT id,name,has_massage_cert,special_skills,updated_at "
+    "SELECT id,name,has_massage_cert,special_skills,care_babies,updated_at "
     "FROM staff WHERE id=%s LIMIT 1"
+)
+_REGIONS_SQL = (
+    "SELECT region_name,custom_region_detail FROM staff_regions "
+    "WHERE staff_id=%s ORDER BY region_name"
+)
+_TIME_SLOTS_SQL = (
+    "SELECT slot_name,custom_slot_detail FROM staff_time_slots "
+    "WHERE staff_id=%s ORDER BY slot_name"
+)
+_TRANSPORTATION_SQL = (
+    "SELECT vehicle_type FROM staff_transportation WHERE staff_id=%s ORDER BY vehicle_type"
+)
+_HOLIDAY_SQL = (
+    "SELECT holiday_name,custom_holiday_detail FROM staff_holiday_availability "
+    "WHERE staff_id=%s ORDER BY holiday_name"
+)
+_WEEKLY_REST_SQL = (
+    "SELECT rest_type,custom_rest_detail FROM staff_weekly_rest "
+    "WHERE staff_id=%s ORDER BY rest_type"
+)
+_BABY_TYPES_SQL = (
+    "SELECT baby_type,custom_baby_detail FROM staff_baby_types "
+    "WHERE staff_id=%s ORDER BY baby_type"
 )
 _COOKING_SQL = (
     "SELECT skill_name,custom_skill_detail FROM staff_cooking_skills "

@@ -1,10 +1,14 @@
-"""Read-only case-to-assignment selection endpoint for multi-caregiver scheduling."""
+"""
+File: multi_caregiver_case_assignments.py
+Description: 提供 case 與 staff 維度的正式指派唯讀選擇端點。
+"""
 
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Path
 
 from api.schemas.base import BaseResponse
+from api.schemas.staff_assignment_options import StaffAssignmentOptionsView
 from subsystems.scheduling.assignment_schedule_query import (
     list_case_schedule_assignments as list_case_schedule_assignments_service,
     list_staff_case_schedule_assignments as list_staff_case_schedule_assignments_service,
@@ -15,14 +19,14 @@ router = APIRouter(prefix="/api/v1/cases", tags=["Multi-caregiver schedules"])
 staff_router = APIRouter(prefix="/api/v1/staff", tags=["Multi-caregiver schedules"])
 
 
-@staff_router.get("/{staff_id}/assignment-schedules", response_model=BaseResponse[dict[str, Any]])
+@staff_router.get("/{staff_id}/assignment-schedules", response_model=BaseResponse[StaffAssignmentOptionsView])
 def list_staff_schedule_assignments(
     staff_id: int = Path(..., ge=1),
-) -> BaseResponse[dict[str, Any]]:
+) -> BaseResponse[StaffAssignmentOptionsView]:
     """Return one staff member's formal assignments for Calendar selection."""
 
     try:
-        return BaseResponse(
+        return BaseResponse[StaffAssignmentOptionsView](
             data=list_staff_case_schedule_assignments_service(staff_id),
             message="Staff assignments retrieved",
         )

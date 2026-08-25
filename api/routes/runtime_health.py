@@ -11,10 +11,14 @@ from api.dependencies.admin_auth import admin_actor_context, require_line_alert_
 from api.schemas.base import BaseResponse
 from api.schemas.runtime_health import (
     AlertAdminCandidateResponse,
+    AlertAdminTargetApplyRequest,
     AlertAdminTargetRequest,
+    AlertTargetEnabledApplyRequest,
     AlertTargetEnabledRequest,
     AlertTargetMutationResponse,
+    AlertTargetMutationPreviewResponse,
     AlertTargetViewResponse,
+    ResetLineAlertGroupApplyRequest,
     ResetLineAlertGroupRequest,
     RuntimeHealthEventResponse,
     RuntimeHealthRecordResponse,
@@ -22,6 +26,7 @@ from api.schemas.runtime_health import (
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.runtime_monitor_repository import MySqlRuntimeMonitorRepository
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.line.runtime_alert_target_application import RuntimeAlertTargetApplication
 from subsystems.line.runtime_alert_target_contracts import (
@@ -56,7 +61,7 @@ def admin_alert_candidates(_=Depends(require_line_alert_manager)):
 
 @router.post("/line-alert-targets/admin", response_model=BaseResponse[AlertTargetMutationResponse])
 def add_admin_target(
-    payload: AlertAdminTargetRequest,
+    payload: AlertAdminTargetApplyRequest,
     request: Request,
     principal=Depends(require_line_alert_manager),
 ):
@@ -69,6 +74,7 @@ def add_admin_target(
             IdempotencyKey(payload.idempotency_key),
             CorrelationId(payload.correlation_id),
             actor,
+            PreviewFingerprint(payload.preview_fingerprint),
         ))
     except RuntimeAlertTargetError as error:
         raise _target_error(error, payload.correlation_id) from error
@@ -76,9 +82,32 @@ def add_admin_target(
     return BaseResponse(data=AlertTargetMutationResponse.model_validate(result, from_attributes=True))
 
 
+@router.post("/line-alert-targets/admin/preview", response_model=BaseResponse[AlertTargetMutationPreviewResponse])
+def preview_add_admin_target(
+    payload: AlertAdminTargetRequest,
+    principal=Depends(require_line_alert_manager),
+):
+    actor = admin_actor_context(principal)
+    try:
+        result = _app().preview(AddLineAlertAdminTargetCommand(
+            payload.admin_user_id,
+            payload.minimum_status,
+            payload.reason,
+            IdempotencyKey(payload.idempotency_key),
+            CorrelationId(payload.correlation_id),
+            actor,
+        ))
+    except RuntimeAlertTargetError as error:
+        raise _target_error(error, payload.correlation_id) from error
+    return BaseResponse(
+        data=AlertTargetMutationPreviewResponse.model_validate(result, from_attributes=True),
+        message="LINE 告警管理員對象 Preview 已建立；尚未寫入",
+    )
+
+
 @router.post("/line-alert-targets/group/reset", response_model=BaseResponse[AlertTargetMutationResponse])
 def reset_group_target(
-    payload: ResetLineAlertGroupRequest,
+    payload: ResetLineAlertGroupApplyRequest,
     request: Request,
     principal=Depends(require_line_alert_manager),
 ):
@@ -87,6 +116,7 @@ def reset_group_target(
         result = _app().reset(ResetLineAlertGroupCommand(
             payload.expected_version, payload.reason, IdempotencyKey(payload.idempotency_key),
             CorrelationId(payload.correlation_id), actor,
+            PreviewFingerprint(payload.preview_fingerprint),
         ))
     except RuntimeAlertTargetError as error:
         raise _target_error(error, payload.correlation_id) from error
@@ -94,10 +124,32 @@ def reset_group_target(
     return BaseResponse(data=AlertTargetMutationResponse.model_validate(result, from_attributes=True))
 
 
+@router.post("/line-alert-targets/group/reset/preview", response_model=BaseResponse[AlertTargetMutationPreviewResponse])
+def preview_reset_group_target(
+    payload: ResetLineAlertGroupRequest,
+    principal=Depends(require_line_alert_manager),
+):
+    actor = admin_actor_context(principal)
+    try:
+        result = _app().preview(ResetLineAlertGroupCommand(
+            payload.expected_version,
+            payload.reason,
+            IdempotencyKey(payload.idempotency_key),
+            CorrelationId(payload.correlation_id),
+            actor,
+        ))
+    except RuntimeAlertTargetError as error:
+        raise _target_error(error, payload.correlation_id) from error
+    return BaseResponse(
+        data=AlertTargetMutationPreviewResponse.model_validate(result, from_attributes=True),
+        message="LINE 告警群組重設 Preview 已建立；尚未寫入",
+    )
+
+
 @router.patch("/line-alert-targets/{target_id}", response_model=BaseResponse[AlertTargetMutationResponse])
 def set_target_enabled(
     target_id: int,
-    payload: AlertTargetEnabledRequest,
+    payload: AlertTargetEnabledApplyRequest,
     request: Request,
     principal=Depends(require_line_alert_manager),
 ):
@@ -106,11 +158,37 @@ def set_target_enabled(
         result = _app().set_enabled(SetLineAlertTargetEnabledCommand(
             target_id, payload.expected_version, payload.enabled, payload.reason,
             IdempotencyKey(payload.idempotency_key), CorrelationId(payload.correlation_id), actor,
+            PreviewFingerprint(payload.preview_fingerprint),
         ))
     except RuntimeAlertTargetError as error:
         raise _target_error(error, payload.correlation_id) from error
     _set_alert_target_audit(request, "enable" if payload.enabled else "disable", target_id)
     return BaseResponse(data=AlertTargetMutationResponse.model_validate(result, from_attributes=True))
+
+
+@router.post("/line-alert-targets/{target_id}/preview", response_model=BaseResponse[AlertTargetMutationPreviewResponse])
+def preview_set_target_enabled(
+    target_id: int,
+    payload: AlertTargetEnabledRequest,
+    principal=Depends(require_line_alert_manager),
+):
+    actor = admin_actor_context(principal)
+    try:
+        result = _app().preview(SetLineAlertTargetEnabledCommand(
+            target_id,
+            payload.expected_version,
+            payload.enabled,
+            payload.reason,
+            IdempotencyKey(payload.idempotency_key),
+            CorrelationId(payload.correlation_id),
+            actor,
+        ))
+    except RuntimeAlertTargetError as error:
+        raise _target_error(error, payload.correlation_id) from error
+    return BaseResponse(
+        data=AlertTargetMutationPreviewResponse.model_validate(result, from_attributes=True),
+        message="LINE 告警對象狀態 Preview 已建立；尚未寫入",
+    )
 
 
 def _set_alert_target_audit(request: Request, action: str, target_id: int) -> None:

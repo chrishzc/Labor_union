@@ -174,6 +174,22 @@ class SchedulingDayEntry:
     segment_id: int | None = None
     availability_block_id: int | None = None
     unavailability_kind: str | None = None
+    unavailability_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.occupancy_kind is not SchedulingOccupancyKind.STAFF_UNAVAILABILITY:
+            return
+        require_positive_integer(
+            self.availability_block_id,
+            "staff unavailability entry block id",
+        )
+        if self.unavailability_kind not in {"long_leave", "paused_service"}:
+            raise ValueError("staff unavailability entry kind is invalid")
+        require_canonical_text(
+            self.unavailability_reason,
+            "staff unavailability entry reason",
+            500,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +199,7 @@ class StaffUnavailabilityCurrentFact:
     kind: str
     start_date: date
     end_date: date | None
+    reason: str
 
     def __post_init__(self) -> None:
         require_positive_integer(self.block_id, "availability block id")
@@ -194,6 +211,7 @@ class StaffUnavailabilityCurrentFact:
             _require_date(self.end_date, "availability end date")
             if self.end_date < self.start_date:
                 raise ValueError("staff unavailability interval is inverted")
+        require_canonical_text(self.reason, "staff unavailability reason", 500)
 
 
 @dataclass(frozen=True, slots=True)
@@ -507,6 +525,7 @@ def _append_staff_unavailability_entries(
             SchedulingOccupancyKind.STAFF_UNAVAILABILITY,
             availability_block_id=block.block_id,
             unavailability_kind=block.kind,
+            unavailability_reason=block.reason,
         )
         _claim_entry(entries, occupied_dates, blocked_date, entry)
 
@@ -649,6 +668,7 @@ def _day_payload(item):
                 "segment_id": entry.segment_id,
                 "availability_block_id": entry.availability_block_id,
                 "unavailability_kind": entry.unavailability_kind,
+                "unavailability_reason": entry.unavailability_reason,
             }
             for entry in item.entries
         ),

@@ -1,8 +1,14 @@
-"""Typed outcomes for provisional LINE registration."""
+"""
+File: provisional_registration_types.py
+Description: 定義 provisional LINE 登記的 Preview、衝突與套用結果。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.identities import ExpectedVersion
 
 
 class ProvisionalRegistrationConflictError(RuntimeError):
@@ -13,6 +19,14 @@ class ProvisionalRegistrationConflictError(RuntimeError):
 class ProvisionalRegistrationConflict:
     registration_id: int
     conflict_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class ProvisionalRegistrationPreview:
+    status: str
+    expected_binding_version: ExpectedVersion
+    payload_fingerprint: PreviewFingerprint
+    preview_fingerprint: PreviewFingerprint
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,5 +42,6 @@ class ProvisionalRegistrationReceipt:
 __all__ = [
     "ProvisionalRegistrationConflict",
     "ProvisionalRegistrationConflictError",
+    "ProvisionalRegistrationPreview",
     "ProvisionalRegistrationReceipt",
 ]

@@ -29,7 +29,7 @@
           "label": "已登記服務 / 補助",
           "description": "我已經登記過政府補助或填寫過 BeClass 表單，我要直接綁定查詢進度。",
           "icon": "📝",
-          "path": "/bind-page",
+          "path": "/line-identity",
           "enabled": true,
           "order": 10
         },
@@ -38,7 +38,7 @@
           "label": "尚未填寫登記表單",
           "description": "我是新客戶，尚未填寫任何資料，我要現在填寫並建立服務訂單。",
           "icon": "✨",
-          "path": "/register-page",
+          "path": "/line-registration",
           "enabled": true,
           "order": 20
         }

@@ -264,7 +264,7 @@ def _registration_liff_url():
     liff_id = os.getenv("LINE_LIFF_ID", "").strip()
     if not liff_id or liff_id == "your_liff_id_here":
         return None
-    return f"https://liff.line.me/{liff_id}?target=registration"
+    return f"https://liff.line.me/{liff_id}?entry=registration"
 
 
 def _registration_reply(registration_url):

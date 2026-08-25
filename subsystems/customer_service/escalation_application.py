@@ -19,13 +19,14 @@ from domains.customer_service.escalation import (
     MaskedContext,
     TriggerCode,
 )
-from domains.customer_service.ticket import CustomerServiceStatus
-from shared_kernel.fingerprints import fingerprint_payload
+from domains.customer_service.ticket import CustomerServiceStatus, transition_ticket
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from subsystems.customer_service.escalation_contracts import (
     AutomationHoldDecision,
     ClaimHumanEscalation,
     CreateHumanEscalation,
     HumanEscalationError,
+    HumanEscalationPreview,
     HumanEscalationReceipt,
     HumanEscalationView,
     ResolveHumanEscalation,
@@ -48,6 +49,22 @@ class HumanEscalationApplication:
                 uow.commit()
             return receipt
 
+    def preview(self, command) -> HumanEscalationPreview:
+        with self._unit_of_work_factory() as uow:
+            snapshot = _preview_snapshot(uow, command, lock=False)
+            return HumanEscalationPreview(
+                operation=snapshot["operation"],
+                escalation_id=snapshot["escalation_id"],
+                before_workflow_status=snapshot["before_workflow_status"],
+                resulting_workflow_status=EscalationWorkflowStatus(snapshot["resulting_workflow_status"]),
+                before_hold_state=snapshot["before_hold_state"],
+                resulting_hold_state=AutomationHoldState(snapshot["resulting_hold_state"]),
+                current_escalation_version=snapshot["current_escalation_version"],
+                current_ticket_version=snapshot["current_ticket_version"],
+                preview_fingerprint=_preview_fingerprint(command, snapshot),
+                apply_ready=True,
+            )
+
     def create_for_ticket(self, command: CreateHumanEscalation, ticket: object, unit_of_work: object) -> HumanEscalationReceipt:
         receipt, _ = self._create(command, unit_of_work, ticket)
         return receipt
@@ -58,6 +75,7 @@ class HumanEscalationApplication:
         existing = _call(repo, "get_by_idempotency", command.idempotency_key.value, lock=True)
         if existing is not None:
             return self._replay_or_conflict(repo, existing, fingerprint, command.correlation_id.value, "create"), False
+        _verify_preview(uow, command)
         source = _call(repo, "get_by_source", command.source_event_identity, lock=True)
         if source is not None:
             if _field(source, "source_fingerprint") != command.source_fingerprint:
@@ -114,6 +132,7 @@ class HumanEscalationApplication:
             replay = _replay_receipt(repo, command.idempotency_key.value, fingerprint)
             if replay is not None:
                 return replay
+            _verify_preview(uow, command)
             escalation = _load(repo, command.escalation_id)
             _check_version(escalation, command.expected_escalation_version)
             _check_state(escalation, EscalationWorkflowStatus.CLAIMED)
@@ -145,6 +164,7 @@ class HumanEscalationApplication:
             replay = _replay_receipt(repo, command.idempotency_key.value, fingerprint)
             if replay is not None:
                 return replay
+            _verify_preview(uow, command)
             escalation = _load(repo, command.escalation_id)
             _check_version(escalation, command.expected_escalation_version)
             _check_state(escalation, EscalationWorkflowStatus.HANDLING)
@@ -211,6 +231,7 @@ class HumanEscalationApplication:
             replay = _replay_receipt(repo, command.idempotency_key.value, fingerprint)
             if replay is not None:
                 return replay
+            _verify_preview(uow, command)
             escalation = _load(repo, command.escalation_id)
             _check_version(escalation, command.expected_escalation_version)
             _check_state(escalation, expected_state)
@@ -239,6 +260,120 @@ class HumanEscalationApplication:
         if isinstance(saved, HumanEscalationReceipt):
             return replace(saved, replayed=True)
         return self._receipt(row, operation, correlation_id, replayed=True)
+
+
+def _preview_snapshot(uow, command, *, lock: bool) -> dict:
+    repo = _repo(uow)
+    if isinstance(command, CreateHumanEscalation):
+        command_fingerprint = _command_fingerprint(command)
+        target = _call(repo, "get_by_idempotency", command.idempotency_key.value, lock=lock)
+        if target is not None:
+            stored = _field(target, "request_fingerprint", None)
+            if stored is not None and str(stored) != command_fingerprint:
+                raise _error("idempotency_mismatch", "human_escalation_idempotency_mismatch")
+        if target is None:
+            target = _call(repo, "get_by_source", command.source_event_identity, lock=lock)
+            if target is not None and _field(target, "source_fingerprint") != command.source_fingerprint:
+                raise _error("conflict", "human_escalation_source_conflict")
+        if target is None:
+            target = _call(repo, "get_active_by_scope", command.hold_scope, lock=lock)
+        if target is None:
+            return _preview_values(
+                "create", None, "absent", "open", "absent", "active", None, None
+            )
+        return _preview_values(
+            "create",
+            int(_field(target, "id")),
+            str(_field(target, "workflow_status", "open")),
+            str(_field(target, "workflow_status", "open")),
+            str(_field(target, "hold_state", _field(target, "automation_hold_state", "active"))),
+            str(_field(target, "hold_state", _field(target, "automation_hold_state", "active"))),
+            int(_field(target, "workflow_version", 0)),
+            _optional_int(_field(target, "ticket_version", None)),
+        )
+
+    escalation = _load(repo, command.escalation_id, lock=lock)
+    _check_version(escalation, command.expected_escalation_version)
+    before_status = EscalationWorkflowStatus(str(_field(escalation, "workflow_status", "open")))
+    before_hold = AutomationHoldState(str(_field(escalation, "hold_state", _field(escalation, "automation_hold_state", "active"))))
+    ticket_version = None
+    if isinstance(command, ClaimHumanEscalation):
+        _check_state(escalation, EscalationWorkflowStatus.OPEN)
+        resulting_status = EscalationWorkflowStatus.CLAIMED
+        resulting_hold = before_hold
+        operation = "claim"
+    else:
+        ticket = _ticket(uow, escalation, lock=lock)
+        ticket_version = int(_field(ticket, "version"))
+        if ticket_version != command.expected_ticket_version:
+            raise _error("conflict", "human_escalation_version_conflict")
+        if isinstance(command, StartHumanEscalationHandling):
+            _check_state(escalation, EscalationWorkflowStatus.CLAIMED)
+            transition_ticket(CustomerServiceStatus(str(_field(ticket, "status"))), CustomerServiceStatus.HANDLING)
+            resulting_status = EscalationWorkflowStatus.HANDLING
+            resulting_hold = before_hold
+            operation = "handling_started"
+        else:
+            _check_state(escalation, EscalationWorkflowStatus.HANDLING)
+            if CustomerServiceStatus(str(_field(ticket, "status"))) is not CustomerServiceStatus.HANDLING:
+                raise _error("domain_blocked", "automation_hold_release_blocked")
+            source = getattr(uow, "escalation_source", None)
+            if not _release_predicate_satisfied(escalation, source):
+                raise _error("domain_blocked", "automation_hold_release_blocked")
+            resulting_status = EscalationWorkflowStatus.RESOLVED
+            resulting_hold = AutomationHoldState.RELEASED
+            operation = "resolve"
+    return _preview_values(
+        operation,
+        int(_field(escalation, "id")),
+        before_status.value,
+        resulting_status.value,
+        before_hold.value,
+        resulting_hold.value,
+        int(_field(escalation, "workflow_version", 0)),
+        ticket_version,
+    )
+
+
+def _preview_values(
+    operation,
+    escalation_id,
+    before_status,
+    resulting_status,
+    before_hold,
+    resulting_hold,
+    escalation_version,
+    ticket_version,
+):
+    return {
+        "operation": operation,
+        "escalation_id": escalation_id,
+        "before_workflow_status": before_status,
+        "resulting_workflow_status": resulting_status,
+        "before_hold_state": before_hold,
+        "resulting_hold_state": resulting_hold,
+        "current_escalation_version": escalation_version,
+        "current_ticket_version": ticket_version,
+    }
+
+
+def _preview_fingerprint(command, snapshot: dict) -> PreviewFingerprint:
+    return fingerprint_payload(
+        {"command_fingerprint": _command_fingerprint(command), "candidate": snapshot}
+    )
+
+
+def _verify_preview(uow, command) -> None:
+    expected = getattr(command, "preview_fingerprint", None)
+    if expected is None:
+        return
+    current = _preview_fingerprint(command, _preview_snapshot(uow, command, lock=True))
+    if current != expected:
+        raise _error("conflict", "human_escalation_preview_conflict")
+
+
+def _optional_int(value) -> int | None:
+    return None if value is None else int(value)
 
 
 def _repo(uow):
@@ -282,8 +417,8 @@ def _call(repo, method: str, value, *, lock: bool):
         raise _error("unavailable", "human_escalation_persistence_unavailable", retryable=True) from error
 
 
-def _load(repo, escalation_id: int):
-    row = _call(repo, "get_by_id", escalation_id, lock=True)
+def _load(repo, escalation_id: int, *, lock: bool = True):
+    row = _call(repo, "get_by_id", escalation_id, lock=lock)
     if row is None:
         raise _error("not_found", "human_escalation_not_found")
     return row
@@ -318,7 +453,11 @@ def _intent(escalation, ticket, command: CreateHumanEscalation) -> MaskedAlertIn
 
 def _command_fingerprint(command) -> str:
     context = command.masked_context.as_dict() if isinstance(command, CreateHumanEscalation) and isinstance(command.masked_context, MaskedContext) else (dict(command.masked_context) if isinstance(command, CreateHumanEscalation) else None)
-    data = {field.name: getattr(command, field.name) for field in fields(command) if field.name != "actor"}
+    data = {
+        field.name: getattr(command, field.name)
+        for field in fields(command)
+        if field.name not in {"actor", "preview_fingerprint"}
+    }
     if context is not None:
         data["masked_context"] = context
     for key in ("idempotency_key", "correlation_id"):

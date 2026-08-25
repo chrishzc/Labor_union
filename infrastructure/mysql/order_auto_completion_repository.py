@@ -14,6 +14,7 @@ from shared_kernel.identities import IdempotencyKey
 from subsystems.orders.auto_completion_workflow import (
     AutoCompletionApplyRequest,
     AutoCompletionClaimState,
+    AutoCompletionPreviewRequest,
     AutoCompletionReceipt,
     AutoCompletionRepositoryConflictError,
     AutoCompletionRepositoryIntegrityError,
@@ -54,6 +55,31 @@ class MySqlOrderAutoCompletionRepository:
             with self._connection.cursor() as cursor:
                 envelope = lock_order_lifecycle_command_envelope(cursor, request.case_no, request.expected_order_version.value, request.idempotency_key.value)
                 return load_order_lifecycle_authoritative_facts(cursor, envelope, "evaluation_time_reached", request.evaluation_at)
+        except (TypeError, ValueError) as error:
+            _raise_typed_root_read_error(error)
+
+    def load_preview_facts(self, request: AutoCompletionPreviewRequest):
+        try:
+            with self._connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT lifecycle_version FROM orders WHERE case_no=%s",
+                    (request.case_no,),
+                )
+                row = cursor.fetchone()
+                if not isinstance(row, Mapping):
+                    raise ValueError("order does not exist")
+                envelope = lock_order_lifecycle_command_envelope(
+                    cursor,
+                    request.case_no,
+                    int(row["lifecycle_version"]),
+                    f"preview:orders-auto-completion:{request.case_no}",
+                )
+                return load_order_lifecycle_authoritative_facts(
+                    cursor,
+                    envelope,
+                    "evaluation_time_reached",
+                    request.evaluation_at,
+                )
         except (TypeError, ValueError) as error:
             _raise_typed_root_read_error(error)
 

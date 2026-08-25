@@ -30,6 +30,7 @@
     .event small { display:block; color:var(--muted); margin-bottom:4px; }
     .error { background:#fee2e2; color:#b91c1c; border-radius:12px; padding:12px; margin:10px 0; }
     .info { background:#dbeafe; color:#1d4ed8; border-radius:12px; padding:12px; margin:10px 0; }
+    .preview { background:#ecfdf5; color:#166534; border-radius:12px; padding:12px; margin-top:12px; white-space:pre-wrap; }
     .hidden { display:none; }
   </style>
 </head>
@@ -42,6 +43,7 @@
     <button class="tab" id="tabReview" type="button">月嫂驗證</button>
   </div>
   <div id="status" class="info">載入中...</div>
+  <button id="reauthenticate" class="secondary hidden" type="button">重新登入 LINE</button>
   <section id="customerPane" class="hidden">
     <div class="toolbar">
       <select id="ticketStatus">
@@ -69,6 +71,8 @@
 <script>
 let idToken = "";
 let target = "customer_service";
+const reviewPreviews = new Map();
+const replyPreviews = new Map();
 const statusBox = document.getElementById("status");
 const panes = {
   customer_service: document.getElementById("customerPane"),
@@ -93,6 +97,36 @@ function showStatus(message, isError=false) {
   statusBox.className = isError ? "error" : "info";
 }
 
+function showEmpty(root, message) {
+  const empty = document.createElement("div");
+  empty.className = "info";
+  empty.textContent = message;
+  root.appendChild(empty);
+}
+
+function safeErrorMessage(result, fallback) {
+  const candidates = [
+    typeof result?.detail === "string" ? result.detail : null,
+    result?.detail?.message,
+    result?.detail?.error?.message,
+    result?.error?.message,
+    result?.message,
+  ];
+  const message = candidates.find(item => typeof item === "string" && item.trim());
+  return message ? message.trim() : fallback;
+}
+
+function safeErrorCode(result) {
+  return result?.detail?.error?.code || result?.detail?.code || result?.error?.code || "";
+}
+
+function reauthenticateLine() {
+  try { liff.logout(); } catch (_) {}
+  const redirect = new URL("/line-identity", location.origin);
+  redirect.searchParams.set("target", targetFromUrl() === "staff_review" ? "staff_review" : "customer_service");
+  liff.login({redirectUri: redirect.toString()});
+}
+
 async function postJson(url, body) {
   const response = await fetch(url, {
     method: "POST",
@@ -100,7 +134,11 @@ async function postJson(url, body) {
     body: JSON.stringify({...body, line_id_token: idToken}),
   });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.detail?.message || result.detail || result.message || "操作失敗");
+  if (!response.ok) {
+    const code = safeErrorCode(result);
+    document.getElementById("reauthenticate").classList.toggle("hidden", !code.startsWith("liff_"));
+    throw new Error(safeErrorMessage(result, "操作失敗"));
+  }
   return result.data;
 }
 
@@ -112,11 +150,16 @@ async function init() {
     const liffId = configResult.data?.liff_id;
     if (!configResponse.ok || !liffId) throw new Error("LIFF 尚未完成設定");
     await liff.init({liffId});
-    if (!liff.isLoggedIn()) { liff.login({redirectUri: location.href}); return; }
+    if (!liff.isLoggedIn()) {
+      const redirect = new URL("/line-identity", location.origin);
+      redirect.searchParams.set("target", targetFromUrl() === "staff_review" ? "staff_review" : "customer_service");
+      liff.login({redirectUri: redirect.toString()});
+      return;
+    }
     idToken = liff.getIDToken() || "";
     if (!idToken) throw new Error("無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。");
     const profile = await postJson("/api/v1/line/mobile-admin/profile", {});
-    document.getElementById("subtitle").textContent = `登入人員：${profile.display_name}｜權限：${profile.role}`;
+    document.getElementById("subtitle").textContent = `登入人員：${profile.display_name}`;
     switchPane(target);
   } catch (error) {
     showStatus(error.message, true);
@@ -141,23 +184,71 @@ async function loadTickets() {
     });
     const root = document.getElementById("tickets");
     root.replaceChildren();
-    if (!data.items.length) { root.innerHTML = '<div class="info">目前沒有符合條件的客服案件。</div>'; return; }
+    if (!data.items.length) { showEmpty(root, "目前沒有符合條件的客服案件。"); return; }
     data.items.forEach(ticket => root.appendChild(ticketCard(ticket)));
   } catch (error) { showStatus(error.message, true); }
+}
+
+const ticketStatusLabels = {waiting: "待處理", handling: "處理中", resolved: "已完成"};
+const ticketCategoryLabels = {
+  service_flow: "服務流程",
+  payment_subsidy: "收費與補助",
+  service_progress: "服務進度",
+  profile_update: "修改登記資料",
+  contact_union: "聯絡工會",
+  other: "其他問題",
+};
+const reviewStatusLabels = {
+  pending: "待審核",
+  approved: "已核准",
+  rejected: "已退回",
+  cancelled: "已取消",
+  expired: "已逾期",
+};
+const reviewOutcomeLabels = {created: "本次審核已完成", existing: "先前已完成相同審核"};
+
+function businessLabel(labels, value, fallback) {
+  return labels[value] || fallback;
 }
 
 function ticketCard(ticket) {
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = `
-    <div class="row"><strong>#${ticket.ticket_id} ${ticket.client_name || "未綁定客戶"}</strong><span class="pill">${ticket.status}</span></div>
-    <p>類型：${ticket.category}｜案件：${ticket.case_no || "無"}｜電話：${ticket.client_phone || "無"}</p>
-    <div class="events" id="events-${ticket.ticket_id}"></div>
-    <textarea id="reply-${ticket.ticket_id}" placeholder="輸入要回覆給用戶的內容"></textarea>
-    <label><input type="checkbox" id="resolve-${ticket.ticket_id}"> 回覆後標示完成</label>
-    <div style="margin-top:10px"><button type="button" data-reply="${ticket.ticket_id}">送出回覆</button></div>
-  `;
-  card.querySelector(`[data-reply="${ticket.ticket_id}"]`).addEventListener("click", () => replyTicket(ticket));
+  const row = document.createElement("div");
+  row.className = "row";
+  const title = document.createElement("strong");
+  title.textContent = `#${ticket.ticket_id} ${ticket.client_name || "未綁定客戶"}`;
+  const status = document.createElement("span");
+  status.className = "pill";
+  status.textContent = businessLabel(ticketStatusLabels, ticket.status, "狀態待確認");
+  row.append(title, status);
+  const summary = document.createElement("p");
+  summary.textContent = `類型：${businessLabel(ticketCategoryLabels, ticket.category, "其他問題")}｜案件：${ticket.case_no || "無"}｜電話：${ticket.client_phone || "無"}`;
+  const events = document.createElement("div");
+  events.className = "events";
+  events.id = `events-${ticket.ticket_id}`;
+  const reply = document.createElement("textarea");
+  reply.id = `reply-${ticket.ticket_id}`;
+  reply.placeholder = "輸入要回覆給用戶的內容";
+  const resolveLabel = document.createElement("label");
+  const resolve = document.createElement("input");
+  resolve.type = "checkbox";
+  resolve.id = `resolve-${ticket.ticket_id}`;
+  resolveLabel.append(resolve, document.createTextNode(" 回覆後標示完成"));
+  const actions = document.createElement("div");
+  actions.style.marginTop = "10px";
+  const replyButton = document.createElement("button");
+  replyButton.type = "button";
+  replyButton.textContent = "預覽回覆";
+  replyButton.addEventListener("click", () => previewTicketReply(ticket));
+  actions.appendChild(replyButton);
+  const preview = document.createElement("div");
+  preview.id = `reply-preview-${ticket.ticket_id}`;
+  preview.className = "preview hidden";
+  const invalidate = () => invalidateTicketReplyPreview(ticket.ticket_id);
+  reply.addEventListener("input", invalidate);
+  resolve.addEventListener("change", invalidate);
+  card.append(row, summary, events, reply, resolveLabel, actions, preview);
   loadTicketDetail(ticket.ticket_id);
   return card;
 }
@@ -170,23 +261,117 @@ async function loadTicketDetail(ticketId) {
     data.events.forEach(event => {
       const item = document.createElement("div");
       item.className = "event";
-      item.innerHTML = `<small>${event.actor_id}｜${new Date(event.created_at).toLocaleString()}</small>${event.message_text || event.event_type}`;
+      const metadata = document.createElement("small");
+      metadata.textContent = new Date(event.created_at).toLocaleString();
+      const message = document.createElement("span");
+      message.textContent = event.message_text || event.event_type;
+      item.append(metadata, message);
       root.appendChild(item);
     });
-  } catch (_) {}
+  } catch (_) {
+    const root = document.getElementById(`events-${ticketId}`);
+    root.replaceChildren();
+    const message = document.createElement("span");
+    message.textContent = "處理紀錄載入失敗，請重試。";
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "secondary";
+    retry.textContent = "重新載入處理紀錄";
+    retry.addEventListener("click", () => loadTicketDetail(ticketId));
+    root.append(message, retry);
+  }
 }
 
-async function replyTicket(ticket) {
+function invalidateTicketReplyPreview(ticketId) {
+  replyPreviews.delete(ticketId);
+  const root = document.getElementById(`reply-preview-${ticketId}`);
+  if (root) {
+    root.replaceChildren();
+    root.classList.add("hidden");
+  }
+}
+
+function requireReplyPreview(data, ticket) {
+  if (!data || data.ticket_id !== ticket.ticket_id
+      || !Number.isInteger(data.current_version)
+      || !Number.isInteger(data.expected_version)
+      || !Number.isInteger(data.reply_character_count)
+      || data.will_enqueue_delivery !== true
+      || data.apply_ready !== true
+      || typeof data.preview_fingerprint !== "string"
+      || !/^[0-9a-f]{64}$/.test(data.preview_fingerprint)) {
+    throw new Error("客服回覆預覽格式不完整，未執行套用。");
+  }
+  return data;
+}
+
+function renderTicketReplyPreview(ticket, state) {
+  const root = document.getElementById(`reply-preview-${ticket.ticket_id}`);
+  root.replaceChildren();
+  root.classList.remove("hidden");
+  const summary = document.createElement("div");
+  summary.textContent = [
+    `狀態：${businessLabel(ticketStatusLabels, state.preview.before_status, "待確認")} → ${businessLabel(ticketStatusLabels, state.preview.after_status, "待確認")}`,
+    `回覆字數：${state.preview.reply_character_count}`,
+    "套用後只會排入 LINE 發送佇列，尚未送達。",
+  ].join("\n");
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.textContent = "確認套用此客服回覆預覽";
+  confirm.addEventListener("click", () => applyTicketReply(ticket));
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "secondary";
+  cancel.textContent = "取消預覽";
+  cancel.addEventListener("click", () => invalidateTicketReplyPreview(ticket.ticket_id));
+  root.append(summary, confirm, cancel);
+}
+
+async function previewTicketReply(ticket) {
   const text = document.getElementById(`reply-${ticket.ticket_id}`).value.trim();
   if (!text) { showStatus("請先輸入回覆內容。", true); return; }
+  const payload = {
+    reply_text: text,
+    resolve: document.getElementById(`resolve-${ticket.ticket_id}`).checked,
+    internal_note: null,
+    expected_version: ticket.version,
+  };
   try {
-    await postJson(`/api/v1/line/mobile-admin/customer-service/tickets/${ticket.ticket_id}/reply`, {
-      reply_text: text,
-      resolve: document.getElementById(`resolve-${ticket.ticket_id}`).checked,
-      expected_version: ticket.version,
+    const data = await postJson(`/api/v1/line/mobile-admin/customer-service/tickets/${ticket.ticket_id}/reply/preview`, payload);
+    const preview = requireReplyPreview(data, ticket);
+    const idempotencyKey = globalThis.crypto?.randomUUID
+      ? `mobile-reply:${ticket.ticket_id}:${globalThis.crypto.randomUUID()}`
+      : `mobile-reply:${ticket.ticket_id}:${Date.now().toString(36)}`;
+    const state = {payload, preview, idempotencyKey};
+    replyPreviews.set(ticket.ticket_id, state);
+    renderTicketReplyPreview(ticket, state);
+    showStatus("客服回覆預覽已建立；尚未寫入或排入傳送。");
+  } catch (error) { showStatus(error.message, true); }
+}
+
+async function applyTicketReply(ticket) {
+  const state = replyPreviews.get(ticket.ticket_id);
+  if (!state) { showStatus("客服回覆預覽已失效，請重新預覽。", true); return; }
+  try {
+    const data = await postJson(`/api/v1/line/mobile-admin/customer-service/tickets/${ticket.ticket_id}/reply/apply`, {
+      ...state.payload,
+      preview_fingerprint: state.preview.preview_fingerprint,
+      idempotency_key: state.idempotencyKey,
     });
-    showStatus("已記錄回覆並排入 LINE 傳送。");
-    loadTickets();
+    if (!data || data.ticket_id !== ticket.ticket_id
+        || !Number.isInteger(data.resulting_version)
+        || data.delivery_enqueued !== true
+        || data.delivery_delivered !== false
+        || typeof data.preview_fingerprint !== "string"
+        || !data.readback || data.readback.ticket?.ticket_id !== ticket.ticket_id) {
+      throw new Error("客服回覆結果驗證資料不完整，請勿重複送出並聯絡工會確認。");
+    }
+    replyPreviews.delete(ticket.ticket_id);
+    showStatus([
+      `客服回覆已保存：工單 #${data.ticket_id}`,
+      "LINE 訊息已排入可靠發送佇列，尚未送達。",
+    ].join("\n"));
+    await loadTickets();
   } catch (error) { showStatus(error.message, true); }
 }
 
@@ -198,7 +383,7 @@ async function loadReviews() {
     });
     const root = document.getElementById("reviews");
     root.replaceChildren();
-    if (!data.items.length) { root.innerHTML = '<div class="info">目前沒有符合條件的月嫂驗證申請。</div>'; return; }
+    if (!data.items.length) { showEmpty(root, "目前沒有符合條件的月嫂驗證申請。"); return; }
     data.items.forEach(review => root.appendChild(reviewCard(review)));
   } catch (error) { showStatus(error.message, true); }
 }
@@ -206,30 +391,127 @@ async function loadReviews() {
 function reviewCard(review) {
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = `
-    <div class="row"><strong>#${review.request_id} ${review.display_name}</strong><span class="pill">${review.status}</span></div>
-    <p>LINE：${review.line_user_id_masked}｜送出：${review.created_at ? new Date(review.created_at).toLocaleString() : "無"}</p>
-    <textarea id="reason-${review.request_id}" placeholder="審核備註或退回原因"></textarea>
-    <div style="display:flex; gap:8px; margin-top:10px">
-      <button type="button" data-approve="${review.request_id}">核准</button>
-      <button type="button" class="danger" data-reject="${review.request_id}">退回</button>
-    </div>
-  `;
-  card.querySelector(`[data-approve="${review.request_id}"]`).addEventListener("click", () => decideReview(review, "approve"));
-  card.querySelector(`[data-reject="${review.request_id}"]`).addEventListener("click", () => decideReview(review, "reject"));
+  card.id = `review-card-${review.request_id}`;
+  const row = document.createElement("div");
+  row.className = "row";
+  const title = document.createElement("strong");
+  title.textContent = `#${review.request_id} ${review.display_name}`;
+  const status = document.createElement("span");
+  status.className = "pill";
+  status.textContent = businessLabel(reviewStatusLabels, review.status, "狀態待確認");
+  row.append(title, status);
+  const summary = document.createElement("p");
+  summary.textContent = `LINE：${review.line_user_id_masked}｜送出：${review.created_at ? new Date(review.created_at).toLocaleString() : "無"}`;
+  if (review.status !== "pending") {
+    const readonlyReason = document.createElement("p");
+    readonlyReason.className = "muted";
+    readonlyReason.textContent = `${businessLabel(reviewStatusLabels, review.status, "目前狀態待確認")}，此申請僅供查閱；如需變更請由工會依正式更正流程處理。`;
+    card.append(row, summary, readonlyReason);
+    return card;
+  }
+  const reason = document.createElement("textarea");
+  reason.id = `reason-${review.request_id}`;
+  reason.placeholder = "審核備註或退回原因";
+  const actions = document.createElement("div");
+  actions.style.display = "flex";
+  actions.style.gap = "8px";
+  actions.style.marginTop = "10px";
+  const approve = document.createElement("button");
+  approve.type = "button";
+  approve.textContent = "預覽核准";
+  approve.addEventListener("click", () => previewReviewDecision(review, "approve"));
+  const reject = document.createElement("button");
+  reject.type = "button";
+  reject.className = "danger";
+  reject.textContent = "預覽退回";
+  reject.addEventListener("click", () => previewReviewDecision(review, "reject"));
+  actions.append(approve, reject);
+  const preview = document.createElement("div");
+  preview.id = `review-preview-${review.request_id}`;
+  preview.className = "preview hidden";
+  card.append(row, summary, reason, actions, preview);
   return card;
 }
 
-async function decideReview(review, decision) {
+function requireReviewPreview(data, review, decision) {
+  const validFingerprint = typeof data?.preview_fingerprint === "string"
+    && /^[0-9a-f]{64}$/.test(data.preview_fingerprint);
+  if (!data || data.request_id !== review.request_id || data.decision !== decision
+      || !Number.isInteger(data.expected_version) || !Number.isInteger(data.resulting_version)
+      || typeof data.before_status !== "string" || typeof data.after_status !== "string"
+      || !validFingerprint) {
+    throw new Error("審核預覽格式不完整，未執行套用。");
+  }
+  return data;
+}
+
+function renderReviewPreview(review, previewState) {
+  const root = document.getElementById(`review-preview-${review.request_id}`);
+  root.replaceChildren();
+  root.classList.remove("hidden");
+  const summary = document.createElement("div");
+  const preview = previewState.preview;
+  summary.textContent = [
+    `狀態：${businessLabel(reviewStatusLabels, preview.before_status, "待確認")} → ${businessLabel(reviewStatusLabels, preview.after_status, "待確認")}`,
+    `LINE：${preview.line_user_id_masked}`,
+  ].join("\n");
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.textContent = "確認套用此預覽";
+  confirm.addEventListener("click", () => applyReviewDecision(review));
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "secondary";
+  cancel.textContent = "取消預覽";
+  cancel.addEventListener("click", () => {
+    reviewPreviews.delete(review.request_id);
+    root.replaceChildren();
+    root.classList.add("hidden");
+  });
+  root.append(summary, confirm, cancel);
+}
+
+async function previewReviewDecision(review, decision) {
   const reason = document.getElementById(`reason-${review.request_id}`).value.trim() || (decision === "approve" ? "手機端核准月嫂驗證" : "");
   if (!reason) { showStatus("退回申請時請輸入原因。", true); return; }
   try {
-    await postJson(`/api/v1/line/mobile-admin/identity-reviews/${review.request_id}/decision`, {
+    const data = await postJson(`/api/v1/line/mobile-admin/identity-reviews/${review.request_id}/decision/preview`, {
       decision,
       expected_version: review.version,
       reason,
     });
-    showStatus("審核結果已保存。");
+    const preview = requireReviewPreview(data, review, decision);
+    const idempotencyKey = globalThis.crypto?.randomUUID
+      ? `mobile-review:${review.request_id}:${globalThis.crypto.randomUUID()}`
+      : `mobile-review:${review.request_id}:${Date.now().toString(36)}`;
+    reviewPreviews.set(review.request_id, {preview, reason, idempotencyKey});
+    renderReviewPreview(review, reviewPreviews.get(review.request_id));
+    showStatus("審核預覽已建立；尚未變更狀態。");
+  } catch (error) { showStatus(error.message, true); }
+}
+
+async function applyReviewDecision(review) {
+  const state = reviewPreviews.get(review.request_id);
+  if (!state) { showStatus("審核預覽已失效，請重新預覽。", true); return; }
+  try {
+    const data = await postJson(`/api/v1/line/mobile-admin/identity-reviews/${review.request_id}/decision/apply`, {
+      decision: state.preview.decision,
+      expected_version: state.preview.expected_version,
+      reason: state.reason,
+      preview_fingerprint: state.preview.preview_fingerprint,
+      idempotency_key: state.idempotencyKey,
+    });
+    if (!data || data.request_id !== review.request_id || typeof data.status !== "string"
+        || !Number.isInteger(data.version) || typeof data.outcome !== "string"
+        || typeof data.receipt_identity !== "string" || !data.receipt_identity) {
+      throw new Error("套用結果驗證資料不完整，請勿重複送出並聯絡工會確認。");
+    }
+    reviewPreviews.delete(review.request_id);
+    showStatus([
+      `審核結果已更新：申請 #${data.request_id}｜${businessLabel(reviewStatusLabels, data.status, "狀態待確認")}`,
+      businessLabel(reviewOutcomeLabels, data.outcome, "審核結果已保存"),
+      "通知僅排入可靠佇列，尚未證明送達。",
+    ].join("\n"));
     loadReviews();
   } catch (error) { showStatus(error.message, true); }
 }
@@ -240,6 +522,7 @@ document.getElementById("refreshTickets").addEventListener("click", loadTickets)
 document.getElementById("refreshReviews").addEventListener("click", loadReviews);
 document.getElementById("ticketStatus").addEventListener("change", loadTickets);
 document.getElementById("reviewStatus").addEventListener("change", loadReviews);
+document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
 init();
 </script>
 </body>

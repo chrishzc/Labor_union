@@ -46,6 +46,25 @@ class StaffQualificationSectionView(BaseModel):
     items: list[StaffQualificationFactView]
 
 
+class StaffServiceProfileItemView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: str = Field(min_length=1, max_length=100)
+    detail: str | None = Field(default=None, max_length=200)
+
+
+class StaffServiceProfileView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    care_babies: int | None = Field(default=None, gt=0)
+    service_regions: list[StaffServiceProfileItemView]
+    service_time_slots: list[StaffServiceProfileItemView]
+    transportation: list[StaffServiceProfileItemView]
+    holiday_availability: list[StaffServiceProfileItemView]
+    weekly_rest: list[StaffServiceProfileItemView]
+    baby_types: list[StaffServiceProfileItemView]
+
+
 class StaffQualificationMasterView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -55,6 +74,7 @@ class StaffQualificationMasterView(BaseModel):
     overall_availability: QualificationAvailability
     availability_reason: str = Field(min_length=1, max_length=191)
     sections: list[StaffQualificationSectionView]
+    service_profile: StaffServiceProfileView
 
 
 __all__ = [
@@ -63,4 +83,6 @@ __all__ = [
     "StaffQualificationFactView",
     "StaffQualificationMasterView",
     "StaffQualificationSectionView",
+    "StaffServiceProfileItemView",
+    "StaffServiceProfileView",
 ]

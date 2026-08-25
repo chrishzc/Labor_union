@@ -83,7 +83,7 @@ def test_get_staff_monthly_calendar_schedule_keeps_per_day_rows_and_base_shape(m
         }
     ]
     assignment_buffer_rows = []
-    connection = FakeConnection([{"id": 7}, rows, [], lock_rows, assignment_buffer_rows])
+    connection = FakeConnection([{"id": 7}, rows, [], lock_rows, assignment_buffer_rows, []])
     monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
 
     result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
@@ -152,8 +152,39 @@ def test_get_staff_monthly_calendar_schedule_keeps_per_day_rows_and_base_shape(m
     assert connection.closed is True
 
 
+def test_get_staff_monthly_calendar_schedule_projects_effective_unavailability(monkeypatch):
+    unavailability_rows = [
+        {
+            "unavailability_block_id": 31,
+            "staff_id": 7,
+            "block_kind": "long_leave",
+            "start_date": date(2026, 7, 8),
+            "end_date": date(2026, 7, 9),
+            "reason": "返鄉休息",
+        }
+    ]
+    connection = FakeConnection([{"id": 7}, [], [], [], [], unavailability_rows])
+    monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
+
+    result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
+        staff_id=7, year=2026, month=7
+    )
+
+    unavailable = [
+        item for item in result["days"] if item["status"] == "staff_unavailability"
+    ]
+    assert [item["work_date"] for item in unavailable] == ["2026-07-08", "2026-07-09"]
+    assert all(item["unavailability_block_id"] == 31 for item in unavailable)
+    assert all(item["unavailability_kind"] == "long_leave" for item in unavailable)
+    assert all(item["unavailability_reason"] == "返鄉休息" for item in unavailable)
+    query, params = connection.cursor_obj.executed[5]
+    assert "FROM scheduling_staff_unavailability_blocks" in query
+    assert "status = 'effective'" in query
+    assert params == (7, date(2026, 7, 31), date(2026, 7, 1))
+
+
 def test_get_staff_monthly_calendar_schedule_supports_30_day_month(monkeypatch):
-    connection = FakeConnection([{"id": 7}, [], [], [], []])
+    connection = FakeConnection([{"id": 7}, [], [], [], [], []])
     monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
 
     result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
@@ -177,7 +208,7 @@ def test_get_staff_monthly_calendar_schedule_staff_not_found(monkeypatch):
 
 
 def test_get_staff_monthly_calendar_schedule_supports_31_day_month(monkeypatch):
-    connection = FakeConnection([{"id": 7}, [], [], [], []])
+    connection = FakeConnection([{"id": 7}, [], [], [], [], []])
     monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
 
     result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
@@ -202,7 +233,7 @@ def test_completed_order_never_projects_a_synthetic_7_day_buffer(monkeypatch):
             "staff_name": "月嫂甲",
         }
     ]
-    connection = FakeConnection([{"id": 7}, [], [], [], buffer_rows])
+    connection = FakeConnection([{"id": 7}, [], [], [], buffer_rows, []])
     monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
 
     result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
@@ -226,7 +257,7 @@ def test_future_service_keeps_its_post_assignment_collision_buffer(monkeypatch):
         "order_status": "訂單成立",
         "staff_name": "月嫂甲",
     }]
-    connection = FakeConnection([{"id": 7}, [], [], [], buffer_rows])
+    connection = FakeConnection([{"id": 7}, [], [], [], buffer_rows, []])
     monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
 
     result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
@@ -252,7 +283,7 @@ def test_get_staff_monthly_calendar_schedule_schedule_only_has_lock_rows(monkeyp
             "staff_name": "月嫂甲",
         }
     ]
-    connection = FakeConnection([{"id": 7}, [], [], lock_rows, []])
+    connection = FakeConnection([{"id": 7}, [], [], lock_rows, [], []])
     monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
 
     result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
@@ -306,7 +337,7 @@ def test_get_staff_monthly_calendar_schedule_cross_month_and_mix(monkeypatch):
             "staff_name": "月嫂甲",
         }
     ]
-    connection = FakeConnection([{"id": 7}, rows, [], lock_rows, buffer_rows])
+    connection = FakeConnection([{"id": 7}, rows, [], lock_rows, buffer_rows, []])
     monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
 
     result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(

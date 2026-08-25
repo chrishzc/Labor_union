@@ -14,8 +14,10 @@ from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_
 from api.routes.scheduling_current import router
 from domains.scheduling.current_projection import (
     SchedulingCurrentDay,
+    SchedulingDayEntry,
     SchedulingCurrentDomainError,
     SchedulingCurrentErrorCode,
+    SchedulingOccupancyKind,
     SchedulingCurrentProjection,
 )
 from shared_kernel.clock import TAIPEI_TIME_ZONE
@@ -106,3 +108,57 @@ def test_current_calendar_domain_validation_uses_typed_global_error():
     assert error["code"] == "invalid_scheduling_query"
     assert error["category"] == "validation"
     assert error["correlation_id"] == "scheduling-router-invalid"
+
+
+def test_current_calendar_missing_official_dates_is_typed_conflict():
+    application = _Application(ValueError("official_service_dates_incomplete"))
+    response = TestClient(_app(application)).get(
+        "/api/v1/scheduling/staff/11/current-calendar",
+        params={"range_start": "2026-08-01", "range_end": "2026-08-03"},
+        headers={"X-Correlation-ID": "scheduling-router-missing-dates"},
+    )
+
+    assert response.status_code == 409
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "official_service_dates_incomplete"
+    assert error["category"] == "conflict"
+    assert error["correlation_id"] == "scheduling-router-missing-dates"
+
+
+def test_current_calendar_serializes_unavailability_kind_and_reason():
+    class Application(_Application):
+        def query(self, request):
+            return SchedulingCurrentProjection(
+                request.staff_id,
+                request.range_start,
+                request.range_end,
+                datetime(2026, 8, 1, 9, 0, tzinfo=TAIPEI_TIME_ZONE),
+                (),
+                (
+                    SchedulingCurrentDay(
+                        request.range_start,
+                        False,
+                        (
+                            SchedulingDayEntry(
+                                SchedulingOccupancyKind.STAFF_UNAVAILABILITY,
+                                availability_block_id=91,
+                                unavailability_kind="paused_service",
+                                unavailability_reason="暫停接新案",
+                            ),
+                        ),
+                    ),
+                ),
+                (),
+                PreviewFingerprint("b" * 64),
+            )
+
+    response = TestClient(_app(Application())).get(
+        "/api/v1/scheduling/staff/11/current-calendar",
+        params={"range_start": "2026-08-01", "range_end": "2026-08-01"},
+        headers={"X-Correlation-ID": "scheduling-router-unavailability"},
+    )
+
+    assert response.status_code == 200
+    entry = response.json()["data"]["days"][0]["entries"][0]
+    assert entry["unavailability_kind"] == "paused_service"
+    assert entry["unavailability_reason"] == "暫停接新案"

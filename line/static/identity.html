@@ -1,5 +1,8 @@
 <!doctype html>
-<!-- LINE LIFF 身分綁定頁：依 flow purpose 顯示客戶、月嫂或工會帳號表單。 -->
+<!--
+File: identity.html
+Description: 提供 LIFF 身分與登記前導流程，安全顯示 typed flow 錯誤且不輸出敏感 payload。
+-->
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
@@ -16,6 +19,8 @@
     input { box-sizing: border-box; width: 100%; padding: 12px; border: 1px solid #c9d1d9; border-radius: 9px; font-size: 16px; }
     button { width: 100%; margin-top: 22px; padding: 13px; border: 0; border-radius: 9px; background: #06c755; color: white; font-size: 17px; font-weight: 700; }
     button:disabled { opacity: .55; }
+    button.secondary { margin-top: 10px; background: #64748b; }
+    #identity-preview { margin-top: 18px; border-radius: 9px; padding: 12px; background: #ecfdf5; color: #166534; white-space: pre-wrap; }
     #customer-choice button { margin-top: 14px; text-align: left; padding: 18px; border: 1px solid #d9e2ec; background: #fff; color: #334e68; box-shadow: 0 4px 15px #00000008; }
     #customer-choice button strong { display: block; font-size: 17px; margin-bottom: 5px; }
     #customer-choice button span { display: block; color: #627d98; font-size: 13px; line-height: 1.5; }
@@ -33,6 +38,7 @@
   </div>
   <form id="form" hidden></form>
   <div id="message" role="status"></div>
+  <button id="reauthenticate" class="secondary" type="button" hidden>重新登入 LINE</button>
 </section></main>
 <script>
 const definitions = {
@@ -58,12 +64,47 @@ const definitions = {
 let idToken = "";
 let flowId = "";
 let formBuilt = false;
-const developmentLineUserId = new URLSearchParams(location.search).get("userId") || "";
+let pendingIdentityPreview = null;
+const identityPreviewStatusLabels = {
+  authentication_pending: "等待套用時驗證管理員帳號",
+  matched: "已找到可綁定資料",
+  already_bound: "此 LINE 身分已完成綁定",
+  requires_review: "需要工會人員確認",
+  not_found: "找不到相符資料",
+};
 
 function showMessage(text, isError = false) {
   const target = document.getElementById("message");
   target.textContent = text;
   target.className = isError ? "error" : "";
+}
+
+function safeIdentityErrorMessage(result, fallback) {
+  const candidates = [
+    typeof result?.detail === "string" ? result.detail : null,
+    result?.detail?.message,
+    result?.detail?.error?.message,
+    result?.error?.message
+  ];
+  const message = candidates.find(
+    candidate => typeof candidate === "string" && candidate.trim()
+  );
+  return message ? message.trim() : fallback;
+}
+
+function identityErrorCode(result) {
+  return result?.detail?.error?.code || result?.detail?.code || result?.error?.code || "";
+}
+
+function showIdentityError(error, fallback) {
+  showMessage(error?.message || fallback, true);
+  document.getElementById("reauthenticate").hidden = !String(error?.code || "").startsWith("liff_");
+}
+
+function reauthenticateLine() {
+  sessionStorage.clear();
+  try { liff.logout(); } catch (_) {}
+  liff.login({redirectUri: location.href});
 }
 
 function buildForm(definition) {
@@ -83,9 +124,18 @@ function buildForm(definition) {
   }
   const button = document.createElement("button");
   button.type = "submit";
-  button.textContent = "送出確認";
-  form.append(button);
-  form.addEventListener("submit", event => submitForm(event, definition, button));
+  button.textContent = "預覽資料";
+  const previewBox = document.createElement("div");
+  previewBox.id = "identity-preview";
+  previewBox.hidden = true;
+  const editButton = document.createElement("button");
+  editButton.type = "button";
+  editButton.className = "secondary";
+  editButton.textContent = "重新編輯";
+  editButton.hidden = true;
+  editButton.addEventListener("click", () => resetIdentityPreview(form, button, previewBox, editButton));
+  form.append(previewBox, button, editButton);
+  form.addEventListener("submit", event => submitForm(event, definition, button, previewBox, editButton));
   formBuilt = true;
 }
 
@@ -101,22 +151,10 @@ function showIdentityEntry(definition, purpose) {
 
 async function ensureLineIdToken() {
   idToken = liff.getIDToken() || "";
-  if (!idToken && !developmentLineUserId) {
+  if (!idToken) {
     throw new Error("無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid 權限後重新開啟此頁。");
   }
   return idToken;
-}
-
-async function currentLineUserId() {
-  try {
-    const context = liff.getContext && liff.getContext();
-    if (context?.userId) return context.userId;
-  } catch (_) {}
-  try {
-    const profile = await liff.getProfile();
-    if (profile?.userId) return profile.userId;
-  } catch (_) {}
-  return developmentLineUserId;
 }
 
 async function openStaffPage(path) {
@@ -137,14 +175,14 @@ async function openIdentityFlow(purpose) {
     body: JSON.stringify({
       purpose,
       idempotency_key: idempotencyKey,
-      line_id_token: idToken,
-      development_line_user_id: developmentLineUserId
+      line_id_token: idToken
     })
   });
   const result = await response.json();
   if (!response.ok) {
-    const detail = typeof result.detail === "string" ? result.detail : result.detail?.message;
-    throw new Error(detail || "目前無法建立安全操作連結，請稍後再試。");
+    const error = new Error(safeIdentityErrorMessage(result, "目前無法建立安全操作連結，請稍後再試。"));
+    error.code = identityErrorCode(result);
+    throw error;
   }
   flowId = result.data.flow_id;
   return result.data;
@@ -158,7 +196,7 @@ function configureCustomerChoice(definition) {
       await validateIdentityFlow("customer_binding");
       showMessage("");
     } catch (error) {
-      showMessage(error.message || "目前無法建立安全綁定流程。", true);
+      showIdentityError(error, "目前無法建立安全綁定流程。");
       return;
     }
     document.getElementById("customer-choice").hidden = true;
@@ -171,30 +209,128 @@ function configureCustomerChoice(definition) {
       await openIdentityFlow("customer_binding");
       location.assign(`/line-registration?flow_id=${encodeURIComponent(flowId)}`);
     } catch (error) {
-      showMessage(error.message || "目前無法開啟服務登記表單。", true);
+      showIdentityError(error, "目前無法開啟服務登記表單。");
     }
   });
 }
 
-async function submitForm(event, definition, button) {
+function requireIdentityPreview(result) {
+  const preview = result?.data;
+  if (!preview || !Object.hasOwn(identityPreviewStatusLabels, preview.status)
+      || !Number.isInteger(preview.expected_version)
+      || !/^[0-9a-f]{64}$/.test(preview.preview_fingerprint || "")) {
+    throw new Error("預覽回應格式不完整，未執行套用。");
+  }
+  if (preview.candidate !== null && preview.candidate !== undefined
+      && typeof preview.candidate.currently_bound !== "boolean") {
+    throw new Error("預覽候選狀態格式不完整，未執行套用。");
+  }
+  return preview;
+}
+
+function resetIdentityPreview(form, button, previewBox, editButton) {
+  pendingIdentityPreview = null;
+  form.querySelectorAll("input").forEach(item => item.disabled = false);
+  previewBox.hidden = true;
+  previewBox.textContent = "";
+  button.textContent = "預覽資料";
+  button.disabled = false;
+  editButton.hidden = true;
+}
+
+function identityPreviewText(endpoint, preview) {
+  const lines = [
+    `檢查結果：${identityPreviewStatusLabels[preview.status]}`,
+  ];
+  if (preview.candidate) {
+    lines.push(`目前是否已有綁定：${preview.candidate.currently_bound ? "是" : "否"}`);
+  }
+  if (endpoint === "admin" && preview.status === "authentication_pending") {
+    lines.push("帳密於套用時驗證；此預覽不代表帳密已通過。");
+  }
+  lines.push("請確認上述預覽，再按下套用。預覽本身不會變更身分。");
+  return lines.join("\n");
+}
+
+async function submitForm(event, definition, button, previewBox, editButton) {
   event.preventDefault();
+  if (pendingIdentityPreview?.endpoint === definition.endpoint) {
+    await applyIdentityPreview(definition, button, previewBox, editButton);
+    return;
+  }
   button.disabled = true;
-  showMessage("正在安全核對資料…");
+  showMessage("正在建立零寫入預覽…");
   const values = Object.fromEntries(new FormData(event.target).entries());
   const payload = {flow_id: flowId, line_id_token: idToken, ...values};
-  if (developmentLineUserId) payload.development_line_user_id = developmentLineUserId;
+  try {
+    const response = await fetch(`/api/v1/line/identity/${definition.endpoint}/preview`, {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(safeIdentityErrorMessage(result, "無法建立身分預覽。"));
+    }
+    const preview = requireIdentityPreview(result);
+    pendingIdentityPreview = {endpoint: definition.endpoint, values, preview};
+    event.target.querySelectorAll("input").forEach(item => item.disabled = true);
+    previewBox.textContent = identityPreviewText(definition.endpoint, preview);
+    previewBox.hidden = false;
+    editButton.hidden = false;
+    button.textContent = "確認上述預覽並套用";
+    button.disabled = false;
+    showMessage("預覽已建立；尚未變更 LINE 身分。", false);
+  } catch (error) {
+    showIdentityError(error, "目前無法建立預覽，請稍後再試。");
+    button.disabled = false;
+  }
+}
+
+async function applyIdentityPreview(definition, button, previewBox, editButton) {
+  const candidate = pendingIdentityPreview;
+  if (!candidate || candidate.endpoint !== definition.endpoint) {
+    throw new Error("身分預覽已失效，請重新預覽。");
+  }
+  button.disabled = true;
+  editButton.disabled = true;
+  showMessage("正在套用已確認的身分資料…");
+  const payload = {
+    flow_id: flowId,
+    line_id_token: idToken,
+    ...candidate.values,
+    expected_version: candidate.preview.expected_version,
+    preview_fingerprint: candidate.preview.preview_fingerprint,
+  };
   try {
     const response = await fetch(`/api/v1/line/identity/${definition.endpoint}/apply`, {
       method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || "資料送出失敗");
+    if (!response.ok) {
+      throw new Error(safeIdentityErrorMessage(result, "身分套用失敗。"));
+    }
+    if (!result?.data || typeof result.data.status !== "string"
+        || typeof result.data.receipt_identity !== "string" || !result.data.receipt_identity
+        || result.data.preview_fingerprint !== candidate.preview.preview_fingerprint) {
+      throw new Error("套用結果驗證資料不完整，請勿重複送出並聯絡工會確認。");
+    }
     const pending = result.data.status === "pending_review";
-    showMessage(pending ? "申請已送出，請等待工會人員確認。" : "LINE 身分已完成綁定。", false);
-    event.target.querySelectorAll("input,button").forEach(item => item.disabled = true);
+    const reviewReference = Number.isInteger(result.data.review_request_id)
+      ? `｜審核編號：${result.data.review_request_id}` : "";
+    showMessage(
+      `${pending ? "申請已送出，請等待工會人員確認。" : "LINE 身分已完成綁定。"}${reviewReference}`,
+      false
+    );
+    pendingIdentityPreview = null;
+    previewBox.textContent = [
+      `處理結果：${pending ? "等待工會人員確認" : "LINE 身分已完成綁定"}${reviewReference}`,
+      "通知僅排入可靠佇列，不代表 LINE 已送達。",
+    ].join("\n");
+    button.disabled = true;
+    editButton.hidden = true;
   } catch (error) {
-    showMessage(error.message || "目前無法送出，請稍後再試。", true);
+    showIdentityError(error, "目前無法套用，請稍後再試。");
     button.disabled = false;
+    editButton.disabled = false;
   }
 }
 
@@ -246,7 +382,53 @@ function requestedRegistrationEntry() {
 function requestedStaffPage() {
   const {parameters, stateParameters} = combinedEntryParameters();
   const target = parameters.get("target") || stateParameters.get("target");
-  return {staff_order_search: "/line-staff-orders", staff_schedule: "/line-staff-schedule"}[target] || "";
+  return {
+    staff_order_search: "/line-staff-orders",
+    staff_schedule: "/line-staff-schedule",
+    staff_leave_apply: "/line-staff-schedule"
+  }[target] || "";
+}
+
+function requestedMobileAdminPage() {
+  const {parameters, stateParameters} = combinedEntryParameters();
+  const target = parameters.get("target") || stateParameters.get("target");
+  return {
+    customer_service: "/line-mobile-admin?target=customer_service",
+    staff_review: "/line-mobile-admin?target=staff_review"
+  }[target] || "";
+}
+
+function requestedStandalonePage() {
+  const {parameters, stateParameters} = combinedEntryParameters();
+  const target = parameters.get("target") || stateParameters.get("target");
+  return {profile_update: "/static/profile_update.html"}[target] || "";
+}
+
+function requestedUnavailableTarget() {
+  const {parameters, stateParameters} = combinedEntryParameters();
+  const target = parameters.get("target") || stateParameters.get("target");
+  return {
+    staff_payout: {
+      title: "薪資請款明細",
+      reason: "目前尚未具備可安全讀取本人薪資資料的 LIFF owner 契約，請聯絡工會人員查詢。"
+    },
+    anomalies_center: {
+      title: "重大異常通報",
+      reason: "目前尚未具備 LIFF 重大異常通報契約，請改由工會管理系統處理。"
+    },
+    dashboard: {
+      title: "即時營運看板",
+      reason: "目前尚未具備 LIFF 營運看板的授權與資料契約，請使用工會管理系統。"
+    }
+  }[target] || null;
+}
+
+function showUnavailableTarget(blocker) {
+  document.getElementById("title").textContent = blocker.title;
+  document.getElementById("description").textContent = blocker.reason;
+  document.getElementById("customer-choice").hidden = true;
+  document.getElementById("form").hidden = true;
+  showMessage("此入口不會改用其他流程，也不會送出或變更任何資料。", true);
 }
 
 function hasSensitiveFlowContext() {
@@ -265,7 +447,6 @@ function showRegistrationEntry() {
 
 async function validateIdentityFlow(purpose) {
   const payload = {flow_id: flowId, purpose, line_id_token: idToken};
-  if (developmentLineUserId) payload.development_line_user_id = developmentLineUserId;
   const response = await fetch("/api/v1/line/identity/flow/validate", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
@@ -276,16 +457,23 @@ async function validateIdentityFlow(purpose) {
   if (response.status === 410) {
     throw new Error("此連結已失效，請回到 LINE 重新取得連結。");
   }
-  const detail = typeof result.detail === "string" ? result.detail : result.detail?.message;
-  throw new Error(detail || "目前無法驗證連結，請稍後再試。");
+  throw new Error(
+    safeIdentityErrorMessage(result, "目前無法驗證連結，請稍後再試。")
+  );
 }
 
 async function initialize() {
   const liffId = await loadLiffId();
   await liff.init({liffId});
+  const mobileAdminPage = requestedMobileAdminPage();
   const staffPage = requestedStaffPage();
+  const standalonePage = requestedStandalonePage();
+  const unavailableTarget = requestedUnavailableTarget();
   if (!liff.isLoggedIn()) { liff.login(); return; }
+  if (mobileAdminPage) { location.replace(mobileAdminPage); return; }
   if (staffPage) { await openStaffPage(staffPage); return; }
+  if (standalonePage) { location.replace(standalonePage); return; }
+  if (unavailableTarget) { showUnavailableTarget(unavailableTarget); return; }
   if (requestedRegistrationEntry() || !hasSensitiveFlowContext()) {
     showRegistrationEntry();
     return;
@@ -299,7 +487,8 @@ async function initialize() {
   showIdentityEntry(definition, purpose);
 }
 
-initialize().catch(error => showMessage(error.message || "頁面初始化失敗。", true));
+document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
+initialize().catch(error => showIdentityError(error, "頁面初始化失敗。"));
 </script>
 </body>
 </html>

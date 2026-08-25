@@ -11,7 +11,7 @@
       "chat_bar_text": "用戶選單",
       "size": {
         "width": 2500,
-        "height": 843
+        "height": 1686
       },
       "appearance": {
         "background_color": "#F5F5F5",
@@ -34,7 +34,27 @@
           "action": {
             "type": "uri",
             "text": null,
-            "uri": "?target=registration",
+            "uri": "?entry=registration",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "profile_update",
+          "label": "修改登記資料",
+          "text_color": "#FFFFFF",
+          "background_color": "#EA580C",
+          "bounds": {
+            "x": 1250,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=profile_update",
             "uri_source": "liff",
             "data": null
           },
@@ -46,14 +66,34 @@
           "text_color": "#FFFFFF",
           "background_color": "#3B82F6",
           "bounds": {
-            "x": 1250,
-            "y": 0,
+            "x": 0,
+            "y": 843,
             "width": 1250,
             "height": 843
           },
           "action": {
             "type": "message",
             "text": "服務說明",
+            "uri": null,
+            "uri_source": "literal",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "help_desk",
+          "label": "專人客服諮詢",
+          "text_color": "#FFFFFF",
+          "background_color": "#10B981",
+          "bounds": {
+            "x": 1250,
+            "y": 843,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "message",
+            "text": "專人客服",
             "uri": null,
             "uri_source": "literal",
             "data": null
@@ -72,7 +112,7 @@
       "chat_bar_text": "月嫂專區",
       "size": {
         "width": 2500,
-        "height": 843
+        "height": 1686
       },
       "appearance": {
         "background_color": "#FFF1F2",
@@ -120,268 +160,53 @@
             "data": null
           },
           "border_radius": 54
-        }
-      ]
-    },
-    {
-      "id": "union_staff_customer_tab",
-      "name": "工會管理者選單 - 一般用戶分頁",
-      "audience_role": "union_staff_page",
-      "rich_menu_alias_id": "union-customer",
-      "enabled": true,
-      "selected": true,
-      "set_as_default": false,
-      "chat_bar_text": "工會管理",
-      "size": {
-        "width": 2500,
-        "height": 1686
-      },
-      "appearance": {
-        "background_color": "#EFF6FF",
-        "image_mode": "generated",
-        "image_path": "line/union_staff_customer_tab.jpg",
-        "image_asset_id": null
-      },
-      "buttons": [
+        },
         {
-          "id": "tab_customer",
-          "label": "一般用戶",
+          "id": "leave_apply",
+          "label": "請假代班申請",
           "text_color": "#FFFFFF",
-          "background_color": "#1D4ED8",
-          "border_radius": 54,
+          "background_color": "#D97706",
           "bounds": {
             "x": 0,
-            "y": 0,
-            "width": 833,
-            "height": 300
-          },
-          "action": {
-            "type": "richmenuswitch",
-            "text": null,
-            "uri": null,
-            "uri_source": "literal",
-            "data": "tab=customer",
-            "rich_menu_alias_id": "union-customer"
-          }
-        },
-        {
-          "id": "tab_staff",
-          "label": "月嫂專區",
-          "text_color": "#FFFFFF",
-          "background_color": "#F43F5E",
-          "border_radius": 54,
-          "bounds": {
-            "x": 833,
-            "y": 0,
-            "width": 834,
-            "height": 300
-          },
-          "action": {
-            "type": "richmenuswitch",
-            "text": null,
-            "uri": null,
-            "uri_source": "literal",
-            "data": "tab=staff",
-            "rich_menu_alias_id": "union-staff"
-          }
-        },
-        {
-          "id": "tab_union",
-          "label": "工會管理",
-          "text_color": "#FFFFFF",
-          "background_color": "#047857",
-          "border_radius": 54,
-          "bounds": {
-            "x": 1667,
-            "y": 0,
-            "width": 833,
-            "height": 300
-          },
-          "action": {
-            "type": "richmenuswitch",
-            "text": null,
-            "uri": null,
-            "uri_source": "literal",
-            "data": "tab=union",
-            "rich_menu_alias_id": "union-admin"
-          }
-        },
-        {
-          "id": "service_registration",
-          "label": "服務登記",
-          "text_color": "#FFFFFF",
-          "background_color": "#2563EB",
-          "border_radius": 54,
-          "bounds": {
-            "x": 0,
-            "y": 300,
+            "y": 843,
             "width": 1250,
-            "height": 1386
+            "height": 843
           },
           "action": {
             "type": "uri",
             "text": null,
-            "uri": "?target=registration",
+            "uri": "?target=staff_leave_apply",
             "uri_source": "liff",
-            "data": null,
-            "rich_menu_alias_id": null
-          }
+            "data": null
+          },
+          "border_radius": 54
         },
         {
-          "id": "service_help",
-          "label": "服務說明",
+          "id": "payout_query",
+          "label": "薪資請款明細",
           "text_color": "#FFFFFF",
-          "background_color": "#3B82F6",
-          "border_radius": 54,
+          "background_color": "#059669",
           "bounds": {
             "x": 1250,
-            "y": 300,
+            "y": 843,
             "width": 1250,
-            "height": 1386
-          },
-          "action": {
-            "type": "message",
-            "text": "服務說明",
-            "uri": null,
-            "uri_source": "literal",
-            "data": null,
-            "rich_menu_alias_id": null
-          }
-        }
-      ]
-    },
-    {
-      "id": "union_staff_staff_tab",
-      "name": "工會管理者選單 - 月嫂專區分頁",
-      "audience_role": "union_staff_page",
-      "rich_menu_alias_id": "union-staff",
-      "enabled": true,
-      "selected": true,
-      "set_as_default": false,
-      "chat_bar_text": "工會管理",
-      "size": {
-        "width": 2500,
-        "height": 1686
-      },
-      "appearance": {
-        "background_color": "#FFF1F2",
-        "image_mode": "generated",
-        "image_path": "line/union_staff_staff_tab.jpg",
-        "image_asset_id": null
-      },
-      "buttons": [
-        {
-          "id": "tab_customer",
-          "label": "一般用戶",
-          "text_color": "#FFFFFF",
-          "background_color": "#3B82F6",
-          "border_radius": 54,
-          "bounds": {
-            "x": 0,
-            "y": 0,
-            "width": 833,
-            "height": 300
-          },
-          "action": {
-            "type": "richmenuswitch",
-            "text": null,
-            "uri": null,
-            "uri_source": "literal",
-            "data": "tab=customer",
-            "rich_menu_alias_id": "union-customer"
-          }
-        },
-        {
-          "id": "tab_staff",
-          "label": "月嫂專區",
-          "text_color": "#FFFFFF",
-          "background_color": "#BE123C",
-          "border_radius": 54,
-          "bounds": {
-            "x": 833,
-            "y": 0,
-            "width": 834,
-            "height": 300
-          },
-          "action": {
-            "type": "richmenuswitch",
-            "text": null,
-            "uri": null,
-            "uri_source": "literal",
-            "data": "tab=staff",
-            "rich_menu_alias_id": "union-staff"
-          }
-        },
-        {
-          "id": "tab_union",
-          "label": "工會管理",
-          "text_color": "#FFFFFF",
-          "background_color": "#047857",
-          "border_radius": 54,
-          "bounds": {
-            "x": 1667,
-            "y": 0,
-            "width": 833,
-            "height": 300
-          },
-          "action": {
-            "type": "richmenuswitch",
-            "text": null,
-            "uri": null,
-            "uri_source": "literal",
-            "data": "tab=union",
-            "rich_menu_alias_id": "union-admin"
-          }
-        },
-        {
-          "id": "order_query",
-          "label": "訂單查詢",
-          "text_color": "#FFFFFF",
-          "background_color": "#BE123C",
-          "border_radius": 54,
-          "bounds": {
-            "x": 0,
-            "y": 300,
-            "width": 1250,
-            "height": 1386
+            "height": 843
           },
           "action": {
             "type": "uri",
             "text": null,
-            "uri": "?target=staff_order_search",
+            "uri": "?target=staff_payout",
             "uri_source": "liff",
-            "data": null,
-            "rich_menu_alias_id": null
-          }
-        },
-        {
-          "id": "schedule_query",
-          "label": "排班資訊",
-          "text_color": "#FFFFFF",
-          "background_color": "#F43F5E",
-          "border_radius": 54,
-          "bounds": {
-            "x": 1250,
-            "y": 300,
-            "width": 1250,
-            "height": 1386
+            "data": null
           },
-          "action": {
-            "type": "uri",
-            "text": null,
-            "uri": "?target=staff_schedule",
-            "uri_source": "liff",
-            "data": null,
-            "rich_menu_alias_id": null
-          }
+          "border_radius": 54
         }
       ]
     },
     {
       "id": "union_staff_menu",
-      "name": "工會管理者選單 - 工會管理",
+      "name": "工會人員專屬選單",
       "audience_role": "union_staff",
-      "rich_menu_alias_id": "union-admin",
       "enabled": true,
       "selected": true,
       "set_as_default": false,
@@ -398,109 +223,84 @@
       },
       "buttons": [
         {
-          "id": "tab_customer",
-          "label": "一般用戶",
-          "text_color": "#FFFFFF",
-          "background_color": "#3B82F6",
-          "border_radius": 54,
-          "bounds": {
-            "x": 0,
-            "y": 0,
-            "width": 833,
-            "height": 300
-          },
-          "action": {
-            "type": "richmenuswitch",
-            "text": null,
-            "uri": null,
-            "uri_source": "literal",
-            "data": "tab=customer",
-            "rich_menu_alias_id": "union-customer"
-          }
-        },
-        {
-          "id": "tab_staff",
-          "label": "月嫂專區",
-          "text_color": "#FFFFFF",
-          "background_color": "#F43F5E",
-          "border_radius": 54,
-          "bounds": {
-            "x": 833,
-            "y": 0,
-            "width": 834,
-            "height": 300
-          },
-          "action": {
-            "type": "richmenuswitch",
-            "text": null,
-            "uri": null,
-            "uri_source": "literal",
-            "data": "tab=staff",
-            "rich_menu_alias_id": "union-staff"
-          }
-        },
-        {
-          "id": "tab_union",
-          "label": "工會管理",
-          "text_color": "#FFFFFF",
-          "background_color": "#065F46",
-          "border_radius": 54,
-          "bounds": {
-            "x": 1667,
-            "y": 0,
-            "width": 833,
-            "height": 300
-          },
-          "action": {
-            "type": "richmenuswitch",
-            "text": null,
-            "uri": null,
-            "uri_source": "literal",
-            "data": "tab=union",
-            "rich_menu_alias_id": "union-admin"
-          }
-        },
-        {
-          "id": "customer_service",
-          "label": "客服中心",
-          "text_color": "#FFFFFF",
-          "background_color": "#059669",
-          "border_radius": 54,
-          "bounds": {
-            "x": 0,
-            "y": 300,
-            "width": 1250,
-            "height": 1386
-          },
-          "action": {
-            "type": "uri",
-            "text": null,
-            "uri": "?target=customer_service",
-            "uri_source": "liff",
-            "data": null,
-            "rich_menu_alias_id": null
-          }
-        },
-        {
           "id": "staff_review",
-          "label": "待確認申請",
+          "label": "待確認審核",
           "text_color": "#FFFFFF",
-          "background_color": "#10B981",
-          "border_radius": 54,
+          "background_color": "#047857",
           "bounds": {
-            "x": 1250,
-            "y": 300,
+            "x": 0,
+            "y": 0,
             "width": 1250,
-            "height": 1386
+            "height": 843
           },
           "action": {
             "type": "uri",
             "text": null,
             "uri": "?target=staff_review",
             "uri_source": "liff",
-            "data": null,
-            "rich_menu_alias_id": null
-          }
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "customer_service",
+          "label": "客服中心",
+          "text_color": "#FFFFFF",
+          "background_color": "#059669",
+          "bounds": {
+            "x": 1250,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=customer_service",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "anomalies_center",
+          "label": "重大異常通報",
+          "text_color": "#FFFFFF",
+          "background_color": "#DC2626",
+          "bounds": {
+            "x": 0,
+            "y": 843,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=anomalies_center",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "ops_dashboard",
+          "label": "即時營運看板",
+          "text_color": "#FFFFFF",
+          "background_color": "#2563EB",
+          "bounds": {
+            "x": 1250,
+            "y": 843,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=dashboard",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
         }
       ]
     }

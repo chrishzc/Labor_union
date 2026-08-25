@@ -56,7 +56,7 @@ def _require_schedule_confirmation_gate(
     cursor.execute(
         "SELECT s.id FROM matching_schedule_snapshots s "
         "JOIN confirmed_service_date_versions v ON v.id=s.confirmed_version_id "
-        "WHERE s.case_no=%s AND s.current_marker=1 AND s.status='sent' AND v.is_current=1"
+        "WHERE s.case_no=%s AND s.current_marker=1 AND s.status IN ('sent','draft') AND v.is_current=1"
         + lock_clause,
         (case_no,),
     )

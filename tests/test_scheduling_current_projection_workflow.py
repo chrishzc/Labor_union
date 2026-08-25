@@ -21,6 +21,8 @@ from domains.scheduling.current_projection import (
 )
 from domains.orders.terms import ServiceTimeTerms
 from infrastructure.mysql.scheduling_current_projection_repository import (
+    _assignments,
+    _unavailability_blocks,
     _waiting_lock_fact,
 )
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
@@ -76,7 +78,12 @@ def test_current_projection_marks_long_leave_as_unavailable():
     class Repository:
         def load_current_facts(self, request):
             block = StaffUnavailabilityCurrentFact(
-                9, request.staff_id, "long_leave", date(2026, 8, 3), date(2026, 8, 4)
+                9,
+                request.staff_id,
+                "long_leave",
+                date(2026, 8, 3),
+                date(2026, 8, 4),
+                "返鄉休息",
             )
             return SchedulingCurrentFacts(request.staff_id, (), (), (), (block,))
 
@@ -90,7 +97,58 @@ def test_current_projection_marks_long_leave_as_unavailable():
 
     assert result.days[0].available is False
     assert result.days[0].entries[0].occupancy_kind is SchedulingOccupancyKind.STAFF_UNAVAILABILITY
+    assert result.days[0].entries[0].unavailability_reason == "返鄉休息"
     assert result.days[2].available is True
+
+
+def test_current_projection_repository_reads_unavailability_reason():
+    class Cursor:
+        def execute(self, sql, params):
+            self.sql = sql
+            self.params = params
+
+        def fetchall(self):
+            return [
+                {
+                    "id": 9,
+                    "staff_id": 1,
+                    "block_kind": "paused_service",
+                    "start_date": date(2026, 8, 3),
+                    "end_date": None,
+                    "reason": "暫停接新案",
+                }
+            ]
+
+    cursor = Cursor()
+    blocks = _unavailability_blocks(
+        cursor,
+        SchedulingCurrentQuery(1, date(2026, 8, 3), date(2026, 8, 5)),
+    )
+
+    assert "reason" in cursor.sql
+    assert blocks[0].reason == "暫停接新案"
+
+
+def test_current_projection_repository_fails_typed_when_generation_has_no_official_dates():
+    class Cursor:
+        def __init__(self):
+            self.result_sets = [[], [], []]
+
+        def execute(self, _sql, _params):
+            return None
+
+        def fetchall(self):
+            return self.result_sets.pop(0)
+
+    rows = (
+        {
+            "assignment_id": 21,
+            "generation_id": 16,
+        },
+    )
+
+    with pytest.raises(ValueError, match="^official_service_dates_incomplete$"):
+        _assignments(Cursor(), rows)
 
 
 def test_current_projection_accepts_waiting_lock_for_official_days_only():

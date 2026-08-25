@@ -1,4 +1,7 @@
-"""Stage 4 workflow tests for webhook identity entry and human review."""
+"""
+File: test_line_identity_stage4.py
+Description: 驗證 webhook identity entry、verified platform root、flow 與人工 review binding。
+"""
 
 from __future__ import annotations
 
@@ -25,6 +28,7 @@ from domains.line.identity_flow import (
     LineIdentityFlowSnapshot,
     LineIdentityFlowStatus,
 )
+from domains.line.platform_user import LineFriendStatus, LinePlatformUserSnapshot
 from domains.line.review import (
     LineReviewDecision,
     LineReviewSnapshot,
@@ -49,6 +53,7 @@ from subsystems.line.review_contracts import (
     CreateLineReviewResult,
     DecideLineReviewCommand,
     LineReviewCommandOutcome,
+    PreviewLineReviewDecisionCommand,
 )
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 
@@ -80,6 +85,42 @@ class RecordingRepository:
     def enqueue(self, item):
         self.items.append(item)
         return item
+
+
+def test_verified_liff_user_is_observed_before_identity_flow_open() -> None:
+    operations = []
+
+    class PlatformUsers:
+        def ensure_verified_user(self, line_user_id):
+            operations.append(("ensure_verified_user", line_user_id))
+            return LinePlatformUserSnapshot(
+                line_user_id,
+                LineFriendStatus.UNKNOWN,
+                ExpectedVersion(0),
+            )
+
+    class IdentityFlows:
+        def open(self, command):
+            assert operations == [("ensure_verified_user", command.line_user_id)]
+            operations.append(("open_flow", command.line_user_id))
+            return _opened_flow(command)
+
+    uow = FakeUow(platform_users=PlatformUsers(), identity_flows=IdentityFlows())
+    application = LineIdentityApplication(lambda: uow, lambda: NOW)
+
+    result = application.open_flow(
+        LineIdentityFlowPurpose.CUSTOMER_BINDING,
+        LineUserId("U-verified"),
+        IdempotencyKey("verified-flow:1"),
+        CorrelationId("verified-flow:1"),
+    )
+
+    assert result.line_user_id == LineUserId("U-verified")
+    assert operations == [
+        ("ensure_verified_user", LineUserId("U-verified")),
+        ("open_flow", LineUserId("U-verified")),
+    ]
+    assert uow.committed is True
 
 
 def test_staff_command_only_opens_flow_and_queues_liff_link() -> None:
@@ -146,11 +187,15 @@ def test_staff_apply_creates_manual_review_without_binding_owner() -> None:
         delivery_tasks=deliveries,
     )
     application = LineIdentityApplication(lambda: uow, lambda: NOW)
+    proof = StaffIdentityProof("王月嫂", "A123456789", date(1980, 1, 2))
+    preview = application.preview_staff(flow.flow_id, flow.line_user_id, proof)
 
     result = application.apply_staff(
         flow.flow_id,
         flow.line_user_id,
-        StaffIdentityProof("王月嫂", "A123456789", date(1980, 1, 2)),
+        proof,
+        preview.expected_version,
+        preview.preview_fingerprint,
         CorrelationId("staff-application:1"),
     )
 
@@ -215,6 +260,53 @@ def test_review_approval_requires_capability_and_binds_in_one_uow() -> None:
     denied = _approve_command()
     with pytest.raises(LineCapabilityDeniedError):
         application.decide(denied)
+
+
+def test_review_decision_preview_is_zero_write_and_apply_rejects_stale_preview() -> None:
+    snapshot = _pending_staff_review()
+    uow = FakeUow(
+        reviews=ReviewDecisionRepository(snapshot),
+        identities=ApprovalIdentityRepository(snapshot),
+        staff=StaffOwnerRepository(),
+        customers=SimpleNamespace(),
+        admins=SimpleNamespace(),
+        receipts=ReceiptRepository(),
+        audit=RecordingRepository(),
+        delivery_tasks=RecordingRepository(),
+        outbox=RecordingRepository(),
+    )
+    application = LineIdentityReviewApplication(lambda: uow, lambda: NOW)
+    actor = ActorContext("admin:7", (LineCapability.IDENTITY_REVIEW.value,))
+
+    preview = application.preview(
+        PreviewLineReviewDecisionCommand(
+            LineReviewRequestId(41),
+            LineReviewDecision.APPROVE,
+            ExpectedVersion(0),
+            actor,
+            "資料核對完成",
+        )
+    )
+
+    assert preview.candidate.before_status is LineReviewStatus.PENDING
+    assert preview.candidate.after_status is LineReviewStatus.APPROVED
+    assert uow.committed is False
+
+    stale = DecideLineReviewCommand(
+        LineReviewRequestId(41),
+        LineReviewDecision.APPROVE,
+        ExpectedVersion(0),
+        actor,
+        "資料核對完成",
+        fingerprint_payload({"stale": True}),
+        IdempotencyKey("review-decision:stale"),
+        CorrelationId("review:stale"),
+    )
+    with pytest.raises(LineReviewDataConflictError) as captured:
+        application.decide(stale)
+
+    assert captured.value.code == "line_review_preview_stale"
+    assert uow.committed is False
 
 
 def test_review_owner_drift_returns_specific_typed_conflict() -> None:
@@ -407,6 +499,16 @@ def _approve_command(*capabilities):
         ExpectedVersion(0),
         ActorContext("admin:7", tuple(sorted(capabilities))),
         "資料核對完成",
+        fingerprint_payload(
+            {
+                "request_id": 41,
+                "review_type": "staff_verification",
+                "decision": "approve",
+                "expected_version": 0,
+                "actor_id": "admin:7",
+                "reason": "資料核對完成",
+            }
+        ),
         IdempotencyKey("review-decision:41"),
         CorrelationId("review:41"),
     )

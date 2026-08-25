@@ -1,6 +1,6 @@
 /**
  * File: order_tracker_adapter.ts
- * Description: 將訂單摘要映射為七階段卡片，並提供 SOP、LINE 與結清業務狀態。
+ * Description: 將訂單摘要映射為未完成案件七階段卡片，並提供 SOP、LINE 與結清業務狀態。
  */
 import type { OrderSummaryItem, OrderSummaryPage } from '../../api/orders/order_query_schemas';
 
@@ -54,9 +54,9 @@ const SOP_STEP_NAMES = [
   '發送訂單資訊詢問月嫂意願（LINE）',
   '月嫂回傳接案意願',
   '寄送月嫂履歷給客戶確認',
-  '產生並寄送月嫂服務契約（月嫂簽回）',
+  '產生月嫂服務契約並留存簽回（寄送或人工確認）',
   '客戶定金核銷（訂單成立）',
-  '產生並寄送客戶契約（客戶簽回）',
+  '產生客戶契約並留存簽回（寄送或人工確認）',
   '確認事前服務日期（精算）',
   '轉換正式排班與服務履約',
   '完工驗收、時數核對與尾款／薪資結清',
@@ -179,6 +179,7 @@ export function adaptTrackerOrderCard(item: OrderSummaryItem): TrackerOrderCardV
 }
 
 export function adaptOrderTrackerPage(page: OrderSummaryPage): OrderTrackerPageViewModel {
+  // server lifecycle_scope 是未完成集合的唯一 owner；adapter 不得重解中文狀態或靜默縮減結果。
   const unclassifiedOrders = page.items.map(adaptTrackerOrderCard);
   return {
     stageSlots: TRACKER_STAGE_SLOTS,

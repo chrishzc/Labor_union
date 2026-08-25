@@ -8,6 +8,7 @@ import re
 
 import pytest
 from fastapi import FastAPI
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pymysql.err import ProgrammingError
 
@@ -39,6 +40,13 @@ def _source(*, blocks=(), availability_ready=True):
         special_skills=("新生兒照護",),
         cooking_skills=(("葷食", "低油"),),
         massage_certified=True,
+        care_babies=2,
+        service_regions=(("北區", None), ("其他", "新竹市")),
+        service_time_slots=(("8小時", None),),
+        transportation=("機車",),
+        holiday_availability=(("中秋節", None),),
+        weekly_rest=(("週休1日", None),),
+        baby_types=(("單胞胎", None), ("雙胞胎", None)),
         unavailability_source_available=availability_ready,
         unavailability_source_reason=(
             "scheduling_staff_unavailability_ready"
@@ -104,6 +112,9 @@ def test_staff_qualification_master_projects_all_owned_sections_and_redacts_pii(
     assert payload["sections"][3]["availability_reason"] == "staff_medical_registry_not_provided"
     assert payload["sections"][4]["availability_reason"] == "qualification_validity_registry_not_provided"
     assert payload["sections"][5]["items"][0]["valid_until"] == "2026-08-30"
+    assert payload["service_profile"]["care_babies"] == 2
+    assert payload["service_profile"]["service_regions"][1] == {"value": "其他", "detail": "新竹市"}
+    assert payload["service_profile"]["baby_types"][1]["value"] == "雙胞胎"
     assert "phone" not in payload
     assert "address" not in payload
     assert "email" not in payload
@@ -152,6 +163,10 @@ def test_staff_qualification_master_requires_admin_before_application():
     def _must_not_run():
         raise AssertionError("qualification application must not be built")
 
+    def _deny_admin():
+        raise HTTPException(status_code=401, detail="test admin required")
+
+    app.dependency_overrides[require_admin] = _deny_admin
     app.dependency_overrides[get_staff_qualification_master_application] = _must_not_run
     response = TestClient(app).get("/api/v1/staff/7/qualification-master")
 
@@ -166,6 +181,7 @@ class _Cursor:
         self.executed = []
         self._fetchone_used = False
         self._fetchall_count = 0
+        self._last_sql = ""
 
     def __enter__(self):
         return self
@@ -175,6 +191,7 @@ class _Cursor:
 
     def execute(self, sql, params):
         self.executed.append((sql, params))
+        self._last_sql = sql
 
     def fetchone(self):
         self._fetchone_used = True
@@ -182,7 +199,11 @@ class _Cursor:
 
     def fetchall(self):
         self._fetchall_count += 1
-        return self._cooking_rows if self._fetchall_count == 1 else self._unavailability_rows
+        if "staff_cooking_skills" in self._last_sql:
+            return self._cooking_rows
+        if "scheduling_staff_unavailability_blocks" in self._last_sql:
+            return self._unavailability_rows
+        return []
 
 
 class _Connection:
@@ -205,6 +226,7 @@ def test_staff_qualification_repository_uses_bounded_selects_without_commit():
             "name": "去敏服務人員",
             "has_massage_cert": 1,
             "special_skills": '["新生兒照護"]',
+            "care_babies": 2,
             "updated_at": datetime(2026, 8, 21, 1, 2, 3),
         },
         [{"skill_name": "葷食", "custom_skill_detail": None}],
@@ -219,7 +241,9 @@ def test_staff_qualification_repository_uses_bounded_selects_without_commit():
     assert source.special_skills == ("新生兒照護",)
     assert source.cooking_skills == (("葷食", None),)
     assert source.unavailability_blocks == ()
-    assert len(cursor.executed) == 3
+    assert source.care_babies == 2
+    assert source.service_regions == ()
+    assert len(cursor.executed) == 9
     assert all(re.search(r"\b(?:INSERT|UPDATE|DELETE)\b", sql, re.IGNORECASE) is None for sql, _ in cursor.executed)
     assert connection.commit_called is False
 
@@ -231,6 +255,7 @@ def test_staff_qualification_repository_fails_closed_on_malformed_legacy_skill_j
             "name": "去敏服務人員",
             "has_massage_cert": 0,
             "special_skills": "not-json",
+            "care_babies": 1,
             "updated_at": None,
         },
         [],
@@ -257,6 +282,7 @@ def test_staff_qualification_repository_marks_missing_schedule_table_unavailable
             "name": "去敏服務人員",
             "has_massage_cert": 0,
             "special_skills": None,
+            "care_babies": 1,
             "updated_at": None,
         },
         [],

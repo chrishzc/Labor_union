@@ -45,10 +45,14 @@ from subsystems.scheduling.matching_notification_application import (
     MatchingNotificationApplication,
 )
 from subsystems.scheduling.matching_notification_contracts import (
+    ApplyManualCustomerProfilesCommand,
+    ManualCustomerProfilesEvidence,
+    ManualMatchingConfirmationMethod,
     MatchingNotificationAudience,
     MatchingContactState,
     MatchingSegmentContact,
     NotifyAssignmentConversionCommand,
+    PreviewManualCustomerProfilesCommand,
     RecordManualMatchingResponseCommand,
     RequestCaregiverInformationCommand,
 )
@@ -62,12 +66,16 @@ class _MatchingRepository:
         self.intent_arguments = None
         self.interaction_arguments = None
         self.projection_arguments = None
+        self.manual_profile_arguments = None
 
     def get_intent_result(self, key, fingerprint):
         return None
 
     def get_contact_state(self, case_no, plan_id, *, lock=False):
         return self.state
+
+    def get_manual_customer_profiles_result(self, key, fingerprint):
+        return None
 
     def caregiver_card_facts(self, plan_id, segment_id):
         return {
@@ -77,6 +85,20 @@ class _MatchingRepository:
             "city": "台北市",
             "service_type": "到府服務",
         }
+
+    def customer_profile_facts(self, plan_id):
+        return ({"id": 30, "name": "林月嫂"},)
+
+    def append_manual_customer_profiles(self, **arguments):
+        self.manual_profile_arguments = arguments
+        return ManualCustomerProfilesEvidence(
+            (61,),
+            arguments["confirmation_method"],
+            arguments["reason"],
+            arguments["actor_id"],
+            arguments["idempotency_key"],
+            PreviewFingerprint(arguments["fingerprint"]),
+        )
 
     def append_notification_intent(self, **arguments):
         self.intent_arguments = arguments
@@ -251,6 +273,47 @@ def test_manual_customer_decision_allows_documented_non_line_confirmation() -> N
     assert result.customer_decision is CustomerMatchingDecision.ACCEPTED
     assert unit_of_work.committed
     assert unit_of_work.matching_notifications.response_arguments["line_user_id"] is None
+
+
+def test_manual_customer_profiles_requires_preview_and_appends_distinct_evidence() -> None:
+    willing_state = replace(
+        _state(),
+        segments=(replace(_state().segments[0], willingness=CaregiverWillingness.WILLING),),
+    )
+    unit_of_work = _UnitOfWork(willing_state)
+    application = MatchingNotificationApplication(
+        lambda: unit_of_work,
+        lambda: NOW,
+        availability_validator=lambda state: None,
+    )
+    actor = ActorContext("admin:1", ("line.matching.override",))
+    preview_command = PreviewManualCustomerProfilesCommand(
+        willing_state.plan,
+        ManualMatchingConfirmationMethod.PHONE,
+        "已逐一向客戶說明正式方案內月嫂履歷",
+        actor,
+        ExpectedVersion(0),
+    )
+
+    preview = application.preview_manual_customer_profiles(preview_command)
+    receipt = application.apply_manual_customer_profiles(
+        ApplyManualCustomerProfilesCommand(
+            willing_state.plan,
+            preview.confirmation_method,
+            preview.reason,
+            actor,
+            ExpectedVersion(0),
+            preview.preview_fingerprint,
+            IdempotencyKey("manual-profiles:1"),
+            CorrelationId("manual-profiles-correlation:1"),
+        )
+    )
+
+    assert preview.segment_ids == (20,)
+    assert receipt.evidence.confirmation_method is ManualMatchingConfirmationMethod.PHONE
+    assert receipt.replayed is False
+    assert unit_of_work.matching_notifications.manual_profile_arguments["segment_ids"] == (20,)
+    assert unit_of_work.committed is True
 
 
 def test_caregiver_card_intent_action_and_delivery_share_one_commit() -> None:

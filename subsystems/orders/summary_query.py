@@ -1,6 +1,6 @@
 """
 File: summary_query.py
-Description: 提供正式與歷史案件的唯讀訂單摘要，保留待補件欄位空值。
+Description: 提供依生命週期範圍查詢的唯讀訂單摘要，保留待補件欄位空值。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import hashlib
 import json
 from typing import Mapping, Protocol
 
+from domains.orders.lifecycle import OrderLifecycleScope
 from shared_kernel.validation import require_canonical_text, require_positive_integer
 
 
@@ -39,7 +40,8 @@ class OrderSummaryContractError(ValueError):
 
 class OrderSummaryRepository(Protocol):
     def fetch_page(
-        self, *, after_case_no: str | None, page_size: int, query_text: str | None
+        self, *, after_case_no: str | None, page_size: int, query_text: str | None,
+        lifecycle_scope: OrderLifecycleScope,
     ) -> tuple[Mapping[str, object], ...]: ...
 
 
@@ -48,6 +50,7 @@ class OrderSummaryQueryRequest:
     page_size: int
     after_case_no: str | None
     query_text: str | None = None
+    lifecycle_scope: OrderLifecycleScope = OrderLifecycleScope.ALL
 
     def __post_init__(self) -> None:
         require_positive_integer(self.page_size, "page_size")
@@ -61,6 +64,8 @@ class OrderSummaryQueryRequest:
             require_canonical_text(
                 self.query_text, "query_text", _MAXIMUM_QUERY_TEXT_LENGTH
             )
+        if not isinstance(self.lifecycle_scope, OrderLifecycleScope):
+            raise TypeError("lifecycle_scope must be an OrderLifecycleScope")
 
 
 @dataclass(frozen=True)
@@ -94,6 +99,7 @@ class OrderSummaryQueryService:
             after_case_no=request.after_case_no,
             page_size=request.page_size,
             query_text=request.query_text,
+            lifecycle_scope=request.lifecycle_scope,
         )
         _validate_repository_page(rows, request)
         items = tuple(_summary_item(row) for row in rows[: request.page_size])

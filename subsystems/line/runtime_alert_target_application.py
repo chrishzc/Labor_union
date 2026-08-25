@@ -10,13 +10,14 @@ import json
 from datetime import datetime, timezone
 from typing import Callable
 
-from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.line.runtime_alert_target_contracts import (
     AddLineAlertAdminTargetCommand,
     AlertAdminCandidateView,
     AlertTargetView,
     LineAlertTargetMutationReceipt,
+    LineAlertTargetMutationPreview,
     ResetLineAlertGroupCommand,
     RuntimeAlertTargetError,
     SetLineAlertTargetEnabledCommand,
@@ -51,6 +52,26 @@ class RuntimeAlertTargetApplication:
 
     def add_admin_target(self, command: AddLineAlertAdminTargetCommand) -> LineAlertTargetMutationReceipt:
         return self._apply(command, operation="admin_target_add")
+
+    def preview(self, command) -> LineAlertTargetMutationPreview:
+        operation = _operation(command)
+        with self._unit_of_work_factory() as unit_of_work:
+            snapshot = _preview_snapshot(
+                unit_of_work.runtime_monitor,
+                command,
+                operation,
+                for_update=False,
+            )
+            fingerprint = _preview_fingerprint(command, snapshot)
+            return LineAlertTargetMutationPreview(
+                operation=operation,
+                target_id=snapshot["target_id"],
+                previous_state=snapshot["previous_state"],
+                resulting_state=snapshot["resulting_state"],
+                current_version=snapshot["current_version"],
+                preview_fingerprint=fingerprint,
+                apply_ready=True,
+            )
 
     def register_group(
         self,
@@ -171,6 +192,20 @@ class RuntimeAlertTargetApplication:
             _check_receipt(existing, fingerprint)
             return _receipt_from_snapshot(_receipt_result(existing), replayed=True)
         try:
+                if command.preview_fingerprint is not None:
+                    preview_snapshot = _preview_snapshot(
+                        repo,
+                        command,
+                        operation,
+                        for_update=True,
+                    )
+                    current_preview = _preview_fingerprint(command, preview_snapshot)
+                    if current_preview != command.preview_fingerprint:
+                        raise RuntimeAlertTargetError(
+                            "conflict",
+                            "line_alert_target_preview_conflict",
+                            "LINE 告警對象 Preview 已過期，請重新查詢並預覽",
+                        )
                 if isinstance(command, ResetLineAlertGroupCommand):
                     target = _reset_target(repo, command.expected_version)
                     enabled = False
@@ -219,6 +254,86 @@ class RuntimeAlertTargetApplication:
                 "validation", "line_alert_admin_not_linked",
                 "工會人員尚未綁定 LINE，不能設為通知對象",
             ) from error
+
+
+def _operation(command) -> str:
+    if isinstance(command, ResetLineAlertGroupCommand):
+        return "group_reset"
+    if isinstance(command, SetLineAlertTargetEnabledCommand):
+        return "enable" if command.enabled else "disable"
+    if isinstance(command, AddLineAlertAdminTargetCommand):
+        return "admin_target_add"
+    raise TypeError("unsupported runtime alert target command")
+
+
+def _preview_snapshot(repo, command, operation: str, *, for_update: bool) -> dict:
+    if isinstance(command, ResetLineAlertGroupCommand):
+        targets = repo.find_active_group_targets(for_update=for_update)
+        if not targets:
+            _raise_not_found()
+        if len(targets) != 1:
+            raise RuntimeAlertTargetError(
+                "conflict",
+                "line_alert_group_singleton_violation",
+                "active LINE 告警群組狀態需人工復原",
+            )
+        target = targets[0]
+        _check_version(target, command.expected_version)
+        view = _target_view(target)
+        return _preview_values(view.target_id, view.state, "disabled", view.current_version, operation)
+    if isinstance(command, SetLineAlertTargetEnabledCommand):
+        target = repo.get_alert_target(command.target_id, for_update=for_update)
+        if target is None:
+            _raise_not_found()
+        _check_version(target, command.expected_version)
+        _ensure_singleton(repo, target, command.enabled)
+        view = _target_view(target)
+        return _preview_values(
+            view.target_id,
+            view.state,
+            "active" if command.enabled else "disabled",
+            view.current_version,
+            operation,
+        )
+    candidates = tuple(repo.list_admin_alert_candidates())
+    candidate = next(
+        (
+            row
+            for row in candidates
+            if int(row.get("id", row.get("candidate_id", 0))) == command.admin_user_id
+        ),
+        None,
+    )
+    if candidate is None or not bool(candidate.get("line_linked")):
+        raise RuntimeAlertTargetError(
+            "validation",
+            "line_alert_admin_not_linked",
+            "工會人員尚未綁定 LINE，不能設為通知對象",
+        )
+    target = repo.get_admin_target(command.admin_user_id, for_update=for_update)
+    if target is None:
+        return _preview_values(None, "absent", "active", "absent", operation)
+    view = _target_view(target)
+    return _preview_values(view.target_id, view.state, "active", view.current_version, operation)
+
+
+def _preview_values(target_id, previous_state, resulting_state, current_version, operation):
+    return {
+        "operation": operation,
+        "target_id": target_id,
+        "previous_state": previous_state,
+        "resulting_state": resulting_state,
+        "current_version": current_version,
+    }
+
+
+def _preview_fingerprint(command, snapshot: dict) -> PreviewFingerprint:
+    return fingerprint_payload(
+        {
+            "command_fingerprint": command_fingerprint(command).value,
+            "candidate": snapshot,
+        }
+    )
 
 
 def _acquire(repo) -> None:

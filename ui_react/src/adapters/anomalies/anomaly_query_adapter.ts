@@ -42,6 +42,46 @@ export const CATEGORY_TAB_KEYS: readonly CategoryTabKey[] = [
   '其他',
 ] as const;
 
+const ANOMALY_TITLES: Readonly<Record<string, string>> = {
+  'SCHEDULE-001': '假日排班尚未確認',
+  'SCHEDULE-002': '已替換排班待確認',
+  'SCHEDULE-003': '月嫂排班時間重疊',
+  'SCHEDULE-005': '假日服務意願與排班衝突',
+  'SCHEDULE-006': '正式服務日期與排班不一致',
+  'ORDER-001': '尚未聯繫候選月嫂',
+  'ORDER-002': '願意接案的月嫂尚待後續聯繫',
+  'ORDER-003': '候選月嫂尚未回覆意願',
+  'ORDER-004': '媒合方案尚待定案',
+  'BECLASS-001': '客戶尚未完成 BeClass 資料',
+  'IMPORT-001': '匯入資料格式待修正',
+  'IMPORT-003': 'BeClass 身分對應待確認',
+  'IMPORT-004': 'HCM 匯入待人工確認',
+  'finance_import_manual_review': '銀行流水待人工確認',
+  'LINE-001': '客戶尚未完成 LINE 綁定',
+  'LINE-005': '月嫂尚未完成 LINE 綁定',
+  'LINE-006': 'LINE 通知發送待確認',
+  'PAYOUT-003': '月嫂收款資料待補正',
+  'GOVSUB-006': '政府補助溢撥待處理',
+  'CLIENTREFUND-001': '客戶退款退匯待處理',
+};
+
+function anomalyTitle(code: string, category: AnomalyDomainCategory): string {
+  return ANOMALY_TITLES[code] ?? `${category}待處理事項`;
+}
+
+function anomalySubject(identity: string, category: AnomalyDomainCategory): string {
+  const normalized = identity.trim();
+  const staffMatch = /^staff:(\d+)$/i.exec(normalized);
+  if (staffMatch) return `月嫂 #${staffMatch[1]}`;
+  const caseMatch = /^case:(.+)$/i.exec(normalized);
+  if (caseMatch) return `案件 ${caseMatch[1]}`;
+  if (/^\d{9}$/.test(normalized)) return `案件 ${normalized}`;
+  if (/^finance-import-row:/i.test(normalized)) return '銀行流水匯入資料';
+  if (/^beclass-counterpart:/i.test(normalized)) return 'BeClass 對應資料';
+  if (/^schedule:/i.test(normalized)) return '排班資料';
+  return `${category}相關資料`;
+}
+
 // ============================================================================
 // 2. View Model Interfaces
 // ============================================================================
@@ -176,6 +216,8 @@ export function mapImportWarningLaneLabel(lane: string | null | undefined): stri
     case 'beclass':
     case 'client_beclass':
     case 'staff_beclass':
+    case 'beclass_client':
+    case 'beclass_staff':
       return 'BeClass 匯入';
     case 'historical_orders':
     case 'historical_order':
@@ -226,22 +268,26 @@ export function adaptAnomalySummary(dto: AnomalySummaryView): AnomalySummaryView
     statusLabel = '✅ 已排除';
   }
 
+  const category = mapDomainToCategory(dto.source_domain);
+  const title = anomalyTitle(dto.definition_code, category);
+  const relatedEntity = anomalySubject(dto.source_identity, category);
+
   return {
     id: dto.fingerprint,
     fingerprint: dto.fingerprint,
     code: dto.definition_code,
-    title: '異常偵測項目',
+    title,
     severity: severityLabel,
     severityClass,
     status: statusLabel,
     rawSeverity: dto.severity,
     rawWorkflowStatus: dto.workflow_status,
     rawDomain: dto.source_domain,
-    category: mapDomainToCategory(dto.source_domain),
-    relatedEntity: dto.source_identity,
-    description: `來源領域：${dto.source_domain}；來源版本：v${dto.source_version}`,
+    category,
+    relatedEntity,
+    description: `請核對${relatedEntity}的目前資料與可採取的處理方式。`,
     suggestedAction: '開啟詳情查看可執行的處置。',
-    rootEvidence: `來源識別：${dto.source_identity}`,
+    rootEvidence: `影響對象：${relatedEntity}`,
     staffCalendarNavigation: dto.staff_calendar_navigation ?? null,
     metadata: {
       sourceDomain: dto.source_domain,
@@ -256,13 +302,22 @@ export function adaptAnomalySummary(dto: AnomalySummaryView): AnomalySummaryView
  * 將後端 ImportWarningTaskView 轉換為前端 ImportWarningTaskViewModel
  */
 export function adaptImportWarningTask(dto: ImportWarningTaskView): ImportWarningTaskViewModel {
+  const maskedSubject = (() => {
+    const value = dto.masked_subject.trim();
+    if (!value || value.toLowerCase() === 'masked') return '資料內容已遮罩';
+    if (/^finance-row-/i.test(value)) return '銀行流水資料';
+    if (/^client-/i.test(value)) return '客戶資料';
+    if (/^staff-/i.test(value)) return '月嫂資料';
+    if (/^hcm-/i.test(value)) return '匯入資料';
+    return value;
+  })();
   return {
     occurrenceIdentity: dto.occurrence_identity,
     owningLane: dto.owning_lane,
     laneLabel: mapImportWarningLaneLabel(dto.owning_lane),
     logicalCode: dto.logical_code,
     fieldPath: dto.field_path,
-    maskedSubject: dto.masked_subject,
+    maskedSubject,
     issueCodes: Array.isArray(dto.issue_codes) ? [...dto.issue_codes] : [],
     status: dto.tracking_status,
     statusLabel: mapImportWarningStatusLabel(dto.tracking_status),

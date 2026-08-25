@@ -1,9 +1,21 @@
+"""
+File: test_contract_context_router.py
+Description: 驗證正式契約內容路由、指派選擇與 Client BeClass 綁定查詢。
+"""
+
 from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
 
 from api.routes import contracts
+from infrastructure.mysql.contract_context_repository import _CASE_FACTS_SQL
+
+
+def test_contract_context_joins_client_beclass_by_accepted_case_binding():
+    normalized = " ".join(_CASE_FACTS_SQL.lower().split())
+    assert "b.bound_case_no=o.case_no" in normalized
+    assert "b.query_no=o.case_no" not in normalized
 
 
 CASE_FACTS = {

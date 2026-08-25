@@ -16,6 +16,10 @@ from api.schemas.candidate_contact_pool import (
     CandidateContactPoolView,
     CandidateWillingnessRequest,
     CandidateWillingnessResult,
+    ManualCandidateInformationApplyRequest,
+    ManualCandidateInformationPreview,
+    ManualCandidateInformationPreviewRequest,
+    ManualCandidateInformationReceipt,
     SendCandidateInformationRequest,
     SendCandidateInformationResult,
 )
@@ -76,6 +80,67 @@ def send_candidate_information(case_no: str, candidate_id: int, req: SendCandida
         return BaseResponse(
             data=SendCandidateInformationResult.model_validate(result),
             message=f"候選月嫂的訂單資訊-{req.info_type} 已建立可靠發送任務",
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/orders/{case_no}/candidate-contact-pool/candidates/{candidate_id}/information/manual-confirmation/preview",
+    response_model=BaseResponse[ManualCandidateInformationPreview],
+)
+def preview_manual_candidate_information_confirmation(
+    case_no: str,
+    candidate_id: int,
+    req: ManualCandidateInformationPreviewRequest,
+    principal: AdminPrincipal = Depends(require_line_matching_override),
+):
+    _require_actor(principal, req.actor)
+    try:
+        return BaseResponse(
+            data=ManualCandidateInformationPreview.model_validate(
+                workflow.preview_manual_information_confirmation(
+                    case_no,
+                    candidate_id,
+                    req.info_type,
+                    req.confirmation_method,
+                    req.reason,
+                    req.actor,
+                )
+            ),
+            message="已預覽候選月嫂資訊人工確認",
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/orders/{case_no}/candidate-contact-pool/candidates/{candidate_id}/information/manual-confirmation",
+    response_model=BaseResponse[ManualCandidateInformationReceipt],
+)
+def apply_manual_candidate_information_confirmation(
+    case_no: str,
+    candidate_id: int,
+    req: ManualCandidateInformationApplyRequest,
+    principal: AdminPrincipal = Depends(require_line_matching_override),
+):
+    _require_actor(principal, req.actor)
+    try:
+        return BaseResponse(
+            data=ManualCandidateInformationReceipt.model_validate(
+                workflow.apply_manual_information_confirmation(
+                    case_no,
+                    candidate_id,
+                    req.info_type,
+                    req.confirmation_method,
+                    req.reason,
+                    req.actor,
+                    req.expected_version,
+                    req.preview_fingerprint,
+                    req.event_key,
+                )
+            ),
+            message="候選月嫂資訊人工確認已留存",
         )
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

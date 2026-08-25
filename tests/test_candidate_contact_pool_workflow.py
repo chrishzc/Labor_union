@@ -17,6 +17,7 @@ from subsystems.scheduling.candidate_contact_pool_workflow import (
     CandidateInformationState,
     _candidate_projection,
     _coverage_fingerprint,
+    _manual_information_preview,
 )
 from shared_kernel.fingerprints import fingerprint_payload
 
@@ -123,6 +124,100 @@ def test_coverage_fingerprint_is_stable_for_fresh_availability_facts():
     assert _coverage_fingerprint("115000015", candidate) == _coverage_fingerprint(
         "115000015", candidate
     )
+
+
+def test_manual_information_preview_binds_candidate_version_and_evidence():
+    occurred_at = datetime(2026, 8, 24, 10, 0, tzinfo=timezone.utc)
+    candidate = CandidateContactEntryState(
+        id=8,
+        staff_id=531,
+        service_start_date=date(2026, 9, 1),
+        service_end_date=date(2026, 9, 3),
+        status="active",
+        created_at=occurred_at,
+        staff_name="王小美",
+        willingness="pending",
+        reason=None,
+        information=CandidateInformationState(),
+    )
+    state = CandidateContactPoolState(
+        pool_id=3,
+        case_no="CASE-1",
+        candidates=(candidate,),
+        events=(
+            CandidateContactEventState(
+                id=11,
+                candidate_id=None,
+                event_key="evt-added",
+                event_type="candidates_added",
+                actor="admin",
+                occurred_at=occurred_at,
+                payload_fingerprint="a" * 64,
+            ),
+        ),
+    )
+
+    preview = _manual_information_preview(
+        state,
+        8,
+        1,
+        "phone",
+        "已透過電話逐項說明粗篩案況",
+        "admin",
+    )
+
+    assert preview["expected_version"] == 11
+    assert preview["staff_id"] == 531
+    assert preview["current_status"] is None
+    assert preview["apply_allowed"] is True
+    assert len(preview["preview_fingerprint"]) == 64
+
+    selected = CandidateContactPoolState(
+        pool_id=3,
+        case_no="CASE-1",
+        candidates=(
+            CandidateContactEntryState(
+                id=8,
+                staff_id=531,
+                service_start_date=date(2026, 9, 1),
+                service_end_date=date(2026, 9, 3),
+                status="selected",
+                created_at=occurred_at,
+                staff_name="王小美",
+                willingness="willing",
+                reason=None,
+                information=CandidateInformationState(),
+            ),
+        ),
+    )
+    with pytest.raises(ValueError, match="read_only"):
+        _manual_information_preview(
+            selected, 8, 1, "phone", "電話確認", "admin"
+        )
+
+
+def test_candidate_projection_preserves_manual_confirmation_as_distinct_delivery_fact():
+    occurred_at = datetime(2026, 8, 24, 11, 0, tzinfo=timezone.utc)
+    _, _, information = _candidate_projection(
+        [
+            {
+                "event_type": "info_1_sent",
+                "payload": json.dumps(
+                    {
+                        "delivery_status": "manually_confirmed",
+                        "confirmation_method": "phone",
+                        "reason": "電話確認",
+                    }
+                ),
+                "occurred_at": occurred_at,
+            }
+        ]
+    )
+
+    assert information["1"] == {
+        "status": "manually_confirmed",
+        "sent_at": occurred_at.isoformat(),
+    }
 
 
 def test_query_pool_returns_typed_full_projection_and_closes_resources(monkeypatch):

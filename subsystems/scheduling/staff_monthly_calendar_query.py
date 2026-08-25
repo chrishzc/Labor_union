@@ -6,6 +6,7 @@ Description: 查詢月嫂月份排班、正式占用與尚未開始服務的防�
 from typing import Dict, Any, List
 from calendar import monthrange
 from datetime import date, datetime, timedelta
+from domains.scheduling.current_projection import StaffUnavailabilityCurrentFact
 from infrastructure.mysql.mysql_adapter import get_connection
 from shared_kernel.clock import BusinessClock, SystemBusinessClock, TAIPEI_TIME_ZONE
 
@@ -32,7 +33,13 @@ def _coerce_bool(value: Any) -> bool:
 
 
 def _priority_status(status: str) -> int:
-    return {"red": 3, "green": 2, "yellow": 1, "historical": 1}.get(status, 0)
+    return {
+        "unavailable": 4,
+        "red": 3,
+        "green": 2,
+        "yellow": 1,
+        "historical": 1,
+    }.get(status, 0)
 
 def get_staff_monthly_calendar_schedule(
     staff_id: int,
@@ -308,6 +315,79 @@ def get_staff_monthly_calendar_schedule(
                                 "lock_id": None,
                                 "plan_id": None,
                             }
+
+            cursor.execute(
+                """
+                SELECT
+                    id AS unavailability_block_id,
+                    staff_id,
+                    block_kind,
+                    start_date,
+                    end_date,
+                    reason
+                FROM scheduling_staff_unavailability_blocks
+                WHERE staff_id = %s
+                  AND status = 'effective'
+                  AND start_date <= %s
+                  AND (end_date IS NULL OR end_date >= %s)
+                ORDER BY start_date, id
+                """,
+                (staff_id, month_end, month_start),
+            )
+            for row in cursor.fetchall():
+                start_date = _as_date(row["start_date"])
+                end_date = (
+                    None if row["end_date"] is None else _as_date(row["end_date"])
+                )
+                if start_date is None or (
+                    row["end_date"] is not None and end_date is None
+                ):
+                    raise ValueError("staff unavailability date is invalid")
+                fact = StaffUnavailabilityCurrentFact(
+                    int(row["unavailability_block_id"]),
+                    int(row["staff_id"]),
+                    str(row["block_kind"]),
+                    start_date,
+                    end_date,
+                    row["reason"],
+                )
+                current_date = max(fact.start_date, month_start)
+                final_date = min(fact.end_date or month_end, month_end)
+                while current_date <= final_date:
+                    day = current_date.day
+                    item = {
+                        "work_date": current_date.strftime("%Y-%m-%d"),
+                        "status": "staff_unavailability",
+                        "assignment_id": None,
+                        "case_no": None,
+                        "staff_id": fact.staff_id,
+                        "client_name": None,
+                        "order_status": None,
+                        "staff_name": None,
+                        "is_work_day": False,
+                        "is_double_pay": False,
+                        "notes": None,
+                        "unavailability_block_id": fact.block_id,
+                        "unavailability_kind": fact.kind,
+                        "unavailability_reason": fact.reason,
+                    }
+                    grouped_rows.setdefault(day, []).append(item)
+                    current = schedule_map.get(day)
+                    if current is None or _priority_status(
+                        "unavailable"
+                    ) > _priority_status(current["status"]):
+                        schedule_map[day] = {
+                            "status": "unavailable",
+                            "case_no": None,
+                            "client_name": None,
+                            "is_work_day": False,
+                            "is_double_pay": False,
+                            "assignment_id": None,
+                            "unavailability_block_id": fact.block_id,
+                            "unavailability_kind": fact.kind,
+                            "unavailability_reason": fact.reason,
+                        }
+                    current_date += timedelta(days=1)
 
             for d in range(1, num_days + 1):
                 cur_d = date(year, month, d)

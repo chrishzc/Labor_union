@@ -1,10 +1,14 @@
-"""Bounded MySQL read adapter for the Orders summary catalog."""
+"""
+File: order_summary_query_repository.py
+Description: 依 Orders canonical lifecycle scope 提供 bounded 摘要查詢。
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
 
+from domains.orders.lifecycle import OrderLifecycleScope, OrderLifecycleStatus
 from shared_kernel.performance import MAXIMUM_PAGE_SIZE
 
 _ORDER_SUMMARY_PAGE_SQL = """
@@ -34,6 +38,7 @@ SELECT o.case_no,
   JOIN clients c ON c.id = o.client_id
   JOIN v_order_details order_details ON order_details.case_no = o.case_no
  WHERE o.case_no > %s
+   AND (%s = 'all' OR o.status <> %s)
    AND (
        %s IS NULL
        OR o.case_no LIKE CONCAT('%%', %s, '%%')
@@ -54,13 +59,15 @@ class MySqlOrderSummaryQueryRepository:
         after_case_no: str | None,
         page_size: int,
         query_text: str | None,
+        lifecycle_scope: OrderLifecycleScope = OrderLifecycleScope.ALL,
     ) -> tuple[Mapping[str, object], ...]:
         cursor_case_no = _cursor_case_no(after_case_no)
         result_limit = _result_limit(page_size)
         with self._connection.cursor() as cursor:
             cursor.execute(
                 _ORDER_SUMMARY_PAGE_SQL,
-                (cursor_case_no, query_text, query_text, query_text, result_limit),
+                (cursor_case_no, lifecycle_scope.value, OrderLifecycleStatus.COMPLETED.value,
+                 query_text, query_text, query_text, result_limit),
             )
             return tuple(cursor.fetchall() or ())
 

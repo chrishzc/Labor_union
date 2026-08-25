@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query
 
+from api.error_contracts import typed_http_error
 from api.dependencies.line_identity import get_liff_token_verifier
 from api.schemas.base import BaseResponse
 from api.schemas.line_staff_self_service import (
@@ -38,7 +39,6 @@ def order_search(payload: StaffOrderSearchRequest):
     with open_line_unit_of_work() as unit_of_work:
         staff = _required_staff(unit_of_work.customer_service.staff_subject(line_user_id.value))
         items = unit_of_work.customer_service.staff_orders(int(staff["staff_id"]), payload.keyword.strip())
-        unit_of_work.commit()
     return BaseResponse(data={"staff_id": int(staff["staff_id"]), "staff_name": staff["staff_name"], "items": items})
 
 
@@ -51,14 +51,19 @@ def monthly_schedule(
     line_user_id = _verified_line_user_id(payload)
     with open_line_unit_of_work() as unit_of_work:
         staff = _required_staff(unit_of_work.customer_service.staff_subject(line_user_id.value))
-        unit_of_work.commit()
     schedule = get_staff_monthly_calendar_schedule(int(staff["staff_id"]), year, month)
     return BaseResponse(data={**schedule, "staff_name": staff["staff_name"]})
 
 
 def _required_staff(staff):
     if not staff:
-        raise HTTPException(status_code=403, detail={"code": "line_staff_binding_not_found", "message": "此 LINE 帳號尚未綁定月嫂身分"})
+        raise typed_http_error(
+            403,
+            "forbidden",
+            "line_staff_binding_not_found",
+            "此 LINE 帳號尚未綁定月嫂身分，請聯絡工會人員確認。",
+            "line-staff-self-service:binding",
+        )
     return staff
 
 
@@ -68,22 +73,40 @@ def _verified_line_user_id(payload) -> LineUserId:
         try:
             return get_liff_token_verifier().verify(token).line_user_id
         except InvalidLiffTokenError as error:
-            raise HTTPException(status_code=401, detail={"code": "liff_token_invalid", "message": str(error)}) from error
+            raise typed_http_error(
+                401,
+                "forbidden",
+                "liff_token_invalid",
+                "LINE 登入狀態已失效或與此 LIFF 不一致，請重新登入 LINE。",
+                "line-staff-self-service:liff-token-invalid",
+            ) from error
         except LiffVerificationUnavailableError as error:
-            raise HTTPException(status_code=503, detail={"code": "liff_verification_unavailable", "message": str(error)}) from error
+            raise typed_http_error(
+                503,
+                "unavailable",
+                "liff_verification_unavailable",
+                "LINE 身分驗證服務暫時無法連線，請稍後再試。",
+                "line-staff-self-service:liff-verification-unavailable",
+                retryable=True,
+            ) from error
     flow_id = payload.flow_id.strip()
     if flow_id:
         return _verified_staff_self_service_flow(flow_id)
     fallback = payload.development_line_user_id.strip()
     if fallback and _development_fallback_enabled():
         return LineUserId(fallback)
-    raise HTTPException(status_code=401, detail={"code": "liff_token_required", "message": "缺少有效的 LIFF ID Token"})
+    raise typed_http_error(
+        401,
+        "forbidden",
+        "liff_token_required",
+        "缺少有效的 LINE 登入狀態，請重新從 LINE 開啟此頁。",
+        "line-staff-self-service:liff-token-required",
+    )
 
 
 def _verified_staff_self_service_flow(flow_id: str) -> LineUserId:
     with open_line_unit_of_work() as unit_of_work:
         snapshot = unit_of_work.identity_flows.get(LineIdentityFlowId(flow_id))
-        unit_of_work.commit()
     if snapshot is None:
         raise HTTPException(status_code=401, detail={"code": "line_flow_not_found", "message": "LINE 操作連結無效，請重新從圖文選單開啟"})
     try:

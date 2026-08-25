@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.line.runtime_alert_target_application import (
     RuntimeAlertTargetApplication,
@@ -192,6 +193,55 @@ def test_reset_requires_fresh_version_and_commits_receipt_and_audit():
     assert repo.rows[1]["enabled"] is False
     assert repo.save_calls == 1
     assert repo.release_calls == 1
+
+
+def test_reset_preview_is_zero_write_and_apply_requires_matching_fingerprint():
+    repo = _Repo((_row(),))
+    holder = []
+    app = RuntimeAlertTargetApplication(_factory(repo, holder), lambda: NOW)
+    current = app.list_targets()[0].current_version
+    command = ResetLineAlertGroupCommand(
+        current,
+        "群組輪替",
+        IdempotencyKey("reset-preview-1"),
+        CorrelationId("corr-preview-1"),
+        _actor(),
+    )
+
+    preview = app.preview(command)
+
+    assert preview.operation == "group_reset"
+    assert preview.previous_state == "active"
+    assert preview.resulting_state == "disabled"
+    assert preview.current_version == current
+    assert preview.apply_ready is True
+    assert repo.update_calls == 0
+    assert repo.save_calls == 0
+    assert repo.audits == []
+    assert repo.lock_calls == []
+
+    with pytest.raises(RuntimeAlertTargetError) as mismatch:
+        app.reset(ResetLineAlertGroupCommand(
+            current,
+            "群組輪替",
+            IdempotencyKey("reset-preview-1"),
+            CorrelationId("corr-preview-1"),
+            _actor(),
+            PreviewFingerprint("0" * 64),
+        ))
+    assert mismatch.value.code == "line_alert_target_preview_conflict"
+    assert repo.update_calls == 0
+
+    receipt = app.reset(ResetLineAlertGroupCommand(
+        current,
+        "群組輪替",
+        IdempotencyKey("reset-preview-1"),
+        CorrelationId("corr-preview-1"),
+        _actor(),
+        preview.preview_fingerprint,
+    ))
+    assert receipt.resulting_state == "disabled"
+    assert repo.update_calls == 1
 
 
 def test_stale_reset_is_zero_write_and_typed_conflict():

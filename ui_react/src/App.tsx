@@ -20,6 +20,9 @@ import { SchedulingPage } from './pages/SchedulingPage';
 import { StaffPage } from './pages/StaffPage';
 import { DataImportPage } from './pages/DataImportPage';
 import { LineManagementPage } from './pages/LineManagementPage';
+import { AiEventStudio } from './pages/line_management/AiEventStudio';
+import { LiffCardStudio } from './pages/line_management/LiffCardStudio';
+import { AlertGroupSecurity } from './pages/line_management/AlertGroupSecurity';
 import { ReportsPage } from './pages/ReportsPage';
 import { FinancePage } from './pages/FinancePage';
 import { AnomaliesPage } from './pages/AnomaliesPage';
@@ -28,14 +31,14 @@ import { AccountManagementPage } from './pages/AccountManagementPage';
 import { SystemStatusPage } from './pages/SystemStatusPage';
 import './pages/LineManagementPage.css';
 
-const HASH_ALIASES: Record<string, PageType> = {
+export const HASH_ALIASES: Record<string, PageType> = {
   line: 'line-management',
   'line-management': 'line-management',
-  'line-ai': 'line-management',
-  'line-ai-events': 'line-management',
-  'line-studio': 'line-management',
-  'line-liff-studio': 'line-management',
-  'line-security': 'line-management',
+  'line-ai': 'line-ai-events',
+  'line-ai-events': 'line-ai-events',
+  'line-studio': 'line-liff-studio',
+  'line-liff-studio': 'line-liff-studio',
+  'line-security': 'line-security',
 };
 
 function getPageFromHash(): PageType {
@@ -120,6 +123,9 @@ export const App: React.FC = () => {
 
         {/* LINE Hub Section */}
         {currentPage === 'line-management' && <LineManagementPage />}
+        {currentPage === 'line-ai-events' && <AiEventStudio />}
+        {currentPage === 'line-liff-studio' && <LiffCardStudio />}
+        {currentPage === 'line-security' && <AlertGroupSecurity />}
 
         {/* Finance Section */}
         {currentPage === 'finance' && <FinancePage />}

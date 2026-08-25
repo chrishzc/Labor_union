@@ -1,3 +1,7 @@
+"""File: test_line_identity_management_first_release.py
+Description: 驗證 LINE 身分管理與管理員綁定的資料庫契約。
+"""
+
 from dataclasses import replace
 from datetime import datetime, timezone
 import hashlib
@@ -28,6 +32,7 @@ from infrastructure.mysql.line_identity_management_repository import (
     _REQUEST_INSERT_SQL,
     _REQUEST_SELECT_SQL,
 )
+from infrastructure.mysql.line_identity_owner_adapters import MySqlAdminIdentityOwnerAdapter
 from subsystems.line.capabilities import LineCapability
 from subsystems.line.identity_management_application import (
     IDENTITY_MENU_RESET_INTENT,
@@ -316,6 +321,33 @@ class _DefaultMenuConnection:
         return self.cursor_instance
 
 
+class _LinkedAdminCursor:
+    def __init__(self) -> None:
+        self.statement = ""
+        self.parameters = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_arguments):
+        return False
+
+    def execute(self, statement, parameters=None):
+        self.statement = statement
+        self.parameters = parameters
+
+    def fetchone(self):
+        return {"id": 7, "display_name": "管理員", "role": "line_manager"}
+
+
+class _LinkedAdminConnection:
+    def __init__(self) -> None:
+        self.cursor_instance = _LinkedAdminCursor()
+
+    def cursor(self):
+        return self.cursor_instance
+
+
 def test_revocation_repository_selects_canonical_published_default_menu() -> None:
     connection = _DefaultMenuConnection()
     repository = MySqlLineIdentityManagementRepository(connection)
@@ -330,6 +362,21 @@ def test_revocation_repository_selects_canonical_published_default_menu() -> Non
     assert "menu_definition_id='default_menu'" in connection.cursor_instance.statement
     assert "publication_status='published'" in connection.cursor_instance.statement
     assert "line_rich_menu_publications" not in connection.cursor_instance.statement
+
+
+def test_linked_admin_query_normalizes_all_utf8mb4_comparisons() -> None:
+    connection = _LinkedAdminConnection()
+    adapter = MySqlAdminIdentityOwnerAdapter(connection)
+
+    linked_admin = adapter.get_linked_admin(LineUserId("U-admin-1"))
+
+    assert linked_admin is not None
+    statement = connection.cursor_instance.statement
+    assert statement.count("COLLATE utf8mb4_unicode_ci") == 6
+    assert "CONVERT(b.line_user_id USING utf8mb4)" in statement
+    assert "CONVERT(b.subject_reference USING utf8mb4)" in statement
+    assert "CONVERT(%s USING utf8mb4)" in statement
+    assert connection.cursor_instance.parameters == ("U-admin-1",)
 
 
 def test_stage13_schema_preserves_legacy_requests_and_owns_new_canonical_fk() -> None:
@@ -377,7 +424,7 @@ def test_management_defaults_use_merge_copy_and_explicit_product_names() -> None
     menu = json.loads((PROJECT_ROOT / "config/line_menu.json").read_text(encoding="utf-8"))
     default_labels = [item["label"] for item in menu["menus"][0]["buttons"]]
     page = (PROJECT_ROOT / "ui/pages/07_line_management.py").read_text(encoding="utf-8")
-    assert default_labels == ["服務登記", "服務說明"]
+    assert default_labels == ["服務登記", "修改登記資料", "服務說明", "專人客服諮詢"]
     assert '"Rich Menu"' in page
     assert '"LIFF 表單"' in page
     assert '"身分管理"' in page

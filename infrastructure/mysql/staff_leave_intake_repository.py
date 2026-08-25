@@ -56,6 +56,13 @@ class MySqlStaffLeaveIntakeRepository:
             row = cursor.fetchone()
         return _snapshot(row) if row is not None else None
 
+    def load_for_staff(self, request_id: int, staff_id: int) -> StaffLeaveRequestSnapshot | None:
+        """Read back only a request owned by the verified staff subject."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(_ROOT_SQL + " AND staff_id=%s", (request_id, staff_id))
+            row = cursor.fetchone()
+        return _snapshot(row) if row is not None else None
+
     def replay_mutation(self, key: str, fingerprint: str) -> StaffLeaveRequestSnapshot | None:
         return self.replay(key, fingerprint)
 
@@ -107,14 +114,17 @@ def _snapshot(row) -> StaffLeaveRequestSnapshot:
         int(row["id"]), int(row["staff_id"]), str(row["line_user_id"]),
         StaffLeaveRequestStatus(str(row["request_status"])), int(row["aggregate_version"]),
         str(row["request_fingerprint"]),
+        row.get("leave_start_date") if hasattr(row, "get") else row["leave_start_date"],
+        row.get("leave_end_date") if hasattr(row, "get") else row["leave_end_date"],
+        str((row.get("request_reason") if hasattr(row, "get") else row["request_reason"]) or ""),
     )
 
 
-_ROOT_COLUMNS = "id,staff_id,line_user_id,request_status,aggregate_version,request_fingerprint"
+_ROOT_COLUMNS = "id,staff_id,line_user_id,leave_start_date,leave_end_date,request_reason,request_status,aggregate_version,request_fingerprint"
 _ROOT_SQL = f"SELECT {_ROOT_COLUMNS} FROM scheduling_staff_leave_request_aggregates WHERE id=%s"
 _RECEIPT_ROOT_COLUMNS = (
-    "a.id,a.staff_id,a.line_user_id,a.request_status,a.aggregate_version,"
-    "a.request_fingerprint"
+    "a.id,a.staff_id,a.line_user_id,a.leave_start_date,a.leave_end_date,"
+    "a.request_reason,a.request_status,a.aggregate_version,a.request_fingerprint"
 )
 _RECEIPT_SQL = (
     f"SELECT r.request_fingerprint,{_RECEIPT_ROOT_COLUMNS} "

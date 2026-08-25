@@ -23,6 +23,10 @@ class FactsPort:
                 "requires_cooking": False,
             },
             "staff_rows": [{"id": 1}],
+            "confirmed_service_dates": [
+                {"service_date": "2026-07-01"},
+                {"service_date": "2026-07-02"},
+            ],
             "assignments": [],
             "schedule_rows": [],
             "legacy_schedule_rows": [],

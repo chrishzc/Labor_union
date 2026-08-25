@@ -43,8 +43,8 @@ _SERVICE_HELP_CATEGORIES = {
         "已完成登記者，請回覆您的案件編號或登記姓名，工會人員會依資料協助確認目前進度。"
     ),
     "修改登記資料": (
-        "若要修改已送出的登記資料，請開啟下方頁面填寫資料異動申請。"
-        "送出後資料會先暫存，待工會人員審核通過後才會正式更新。"
+        "若要修改已送出的登記資料，請直接回覆要修改的項目與正確內容。"
+        "工會人員核對後會人工補登；此對話不會直接變更正式資料。"
     ),
     "月嫂身分認證": "若您是月嫂本人，請點選下方「我是月嫂」或直接回覆「我是月嫂」，系統會送出身分確認申請。",
     "其他問題": (
@@ -250,8 +250,6 @@ def _handle_service_help_text(inbox, unit_of_work, line_user_id, text, scheduled
     if normalized not in _SERVICE_HELP_CATEGORIES:
         return False
     reply_text = _SERVICE_HELP_CATEGORIES[normalized]
-    if normalized == "修改登記資料":
-        reply_text = f"{reply_text}\n\n{_liff_url('?target=profile_update')}"
     payload = _text_message_payload(reply_text)
     if normalized == "月嫂身分認證":
         payload["quickReply"] = {"items": [_quick_reply_item("我是月嫂")]}

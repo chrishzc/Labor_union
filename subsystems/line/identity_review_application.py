@@ -1,4 +1,7 @@
-"""Canonical human-authorized LINE identity review decision workflow."""
+"""
+File: identity_review_application.py
+Description: 編排真人授權的 LINE 身分審核 Preview 與 Apply 工作流。
+"""
 
 from __future__ import annotations
 
@@ -30,6 +33,8 @@ from subsystems.line.review_contracts import (
     LineReviewCommandOutcome,
     LineReviewListQuery,
     LineReviewQueueSummary,
+    PreviewLineReviewDecisionCommand,
+    PreviewLineReviewDecisionResult,
 )
 from subsystems.line.rich_menu_binding import schedule_rich_menu_binding
 
@@ -75,6 +80,24 @@ class LineIdentityReviewApplication:
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.reviews.summary(stale_hours)
 
+    def preview(
+        self,
+        command: PreviewLineReviewDecisionCommand,
+    ) -> PreviewLineReviewDecisionResult:
+        require_line_capability(command.actor, LineCapability.IDENTITY_REVIEW)
+        with self._unit_of_work_factory() as unit_of_work:
+            snapshot = unit_of_work.reviews.get(command.request_id)
+            if snapshot is None:
+                raise LineReviewNotFoundError("找不到 LINE 身分審核申請")
+            candidate = build_review_decision_candidate(
+                snapshot,
+                command.decision,
+                expected_version=command.expected_version,
+                actor=command.actor,
+                reason=command.reason,
+            )
+        return PreviewLineReviewDecisionResult(snapshot, candidate)
+
     # Kept cohesive to show every side effect inside the caller-owned review transaction.
     def decide(self, command: DecideLineReviewCommand) -> ApplyLineReviewDecisionResult:
         require_line_capability(command.actor, LineCapability.IDENTITY_REVIEW)
@@ -93,6 +116,11 @@ class LineIdentityReviewApplication:
                 actor=command.actor,
                 reason=command.reason,
             )
+            if command.preview_fingerprint != candidate.fingerprint:
+                raise LineReviewDataConflictError(
+                    "LINE 審核預覽已過期，請重新預覽。",
+                    code="line_review_preview_stale",
+                )
             if command.decision is LineReviewDecision.APPROVE:
                 _apply_approval_with_typed_conflicts(unit_of_work, snapshot, command)
             else:

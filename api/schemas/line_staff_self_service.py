@@ -4,6 +4,7 @@ Description: 定義已驗證月嫂 LIFF 查詢與請假申請的傳輸模型。"
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -50,7 +51,14 @@ class StaffOrderPageView(BaseModel):
 class StaffScheduleDayView(BaseModel):
     model_config = ConfigDict(extra="ignore")
     work_date: date
-    status: str
+    status: Literal[
+        "available",
+        "working",
+        "resting",
+        "historical_assignment",
+        "waiting_deposit_lock",
+        "staff_unavailability",
+    ]
     assignment_id: int | None = None
     case_no: str | None = None
     staff_id: int
@@ -62,6 +70,9 @@ class StaffScheduleDayView(BaseModel):
     notes: str | None = None
     lock_id: int | None = None
     plan_id: int | None = None
+    unavailability_block_id: int | None = None
+    unavailability_kind: Literal["long_leave", "paused_service"] | None = None
+    unavailability_reason: str | None = None
 
 
 class StaffScheduleView(BaseModel):
@@ -87,6 +98,38 @@ class StaffLeaveRequestCreateResponse(BaseModel):
     status: str
     staff_id: int
     staff_name: str
+    version: int
+
+
+class StaffLeaveRequestApply(StaffLeaveRequestCreate):
+    """帶入 Preview 指紋的正式請假 Apply payload。"""
+
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class StaffLeaveRequestPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    staff_id: int
+    staff_name: str
+    leave_start_date: date
+    leave_end_date: date
+    leave_reason: str
+    can_apply: bool
+    blockers: list[str]
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class StaffLeaveRequestReadbackResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: int
+    status: str
+    staff_id: int
+    staff_name: str
+    leave_start_date: date
+    leave_end_date: date
+    leave_reason: str
     version: int
 
 

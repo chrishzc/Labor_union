@@ -7,10 +7,13 @@ import type {
   CustomerServiceDetail,
   CustomerServiceEvent,
   CustomerServicePage,
+  CustomerServiceReplyApply,
+  CustomerServiceReplyPreview,
   CustomerServiceResolvePreview,
   CustomerServiceStatus,
   CustomerServiceSummary,
   CustomerServiceTicket,
+  CustomerServiceUpdateApply,
 } from '../../api/customer_service/customer_service_schemas';
 
 export interface CustomerServiceSummaryModel {
@@ -70,6 +73,39 @@ export interface CustomerServiceResolvePreviewModel {
   blockers: string[];
   previewFingerprint: string;
   applyReady: boolean;
+}
+
+export interface CustomerServiceReplyPreviewModel {
+  ticketId: number;
+  beforeStatusLabel: string;
+  afterStatusLabel: string;
+  currentVersion: number;
+  expectedVersion: number;
+  replyCharacterCount: number;
+  willEnqueueDelivery: true;
+  previewFingerprint: string;
+  applyReady: true;
+}
+
+export interface CustomerServiceReplyReceiptModel {
+  ticketId: number;
+  resultingStatusLabel: string;
+  resultingVersion: number;
+  previewFingerprint: string;
+  deliveryEnqueued: true;
+  deliveryDelivered: false;
+  replayed: boolean;
+  readback: CustomerServiceDetailModel;
+  notice: string;
+}
+
+export interface CustomerServiceUpdateReceiptModel {
+  ticketId: number;
+  resultingStatusLabel: string;
+  resultingVersion: number;
+  previewFingerprint: string;
+  replayed: boolean;
+  readback: CustomerServiceDetailModel;
 }
 
 export const CUSTOMER_SERVICE_LIST_SUMMARY_UNAVAILABLE =
@@ -187,5 +223,50 @@ export function adaptCustomerServiceResolvePreview(
     blockers: [...preview.blockers],
     previewFingerprint: preview.preview_fingerprint,
     applyReady: preview.apply_ready,
+  };
+}
+
+export function adaptCustomerServiceReplyPreview(
+  preview: CustomerServiceReplyPreview
+): CustomerServiceReplyPreviewModel {
+  return {
+    ticketId: preview.ticket_id,
+    beforeStatusLabel: customerServiceStatusLabel(preview.before_status),
+    afterStatusLabel: customerServiceStatusLabel(preview.after_status),
+    currentVersion: preview.current_version,
+    expectedVersion: preview.expected_version,
+    replyCharacterCount: preview.reply_character_count,
+    willEnqueueDelivery: preview.will_enqueue_delivery,
+    previewFingerprint: preview.preview_fingerprint,
+    applyReady: preview.apply_ready,
+  };
+}
+
+export function adaptCustomerServiceReplyReceipt(
+  receipt: CustomerServiceReplyApply
+): CustomerServiceReplyReceiptModel {
+  return {
+    ticketId: receipt.ticket_id,
+    resultingStatusLabel: customerServiceStatusLabel(receipt.resulting_status),
+    resultingVersion: receipt.resulting_version,
+    previewFingerprint: receipt.preview_fingerprint,
+    deliveryEnqueued: receipt.delivery_enqueued,
+    deliveryDelivered: receipt.delivery_delivered,
+    replayed: receipt.replayed,
+    readback: adaptCustomerServiceDetail(receipt.readback),
+    notice: '後端已建立 durable delivery task；排入佇列不等於 LINE provider 已送出、使用者已收件或已讀。',
+  };
+}
+
+export function adaptCustomerServiceUpdateReceipt(
+  receipt: CustomerServiceUpdateApply
+): CustomerServiceUpdateReceiptModel {
+  return {
+    ticketId: receipt.ticket_id,
+    resultingStatusLabel: customerServiceStatusLabel(receipt.resulting_status),
+    resultingVersion: receipt.resulting_version,
+    previewFingerprint: receipt.preview_fingerprint,
+    replayed: receipt.replayed,
+    readback: adaptCustomerServiceDetail(receipt.readback),
   };
 }

@@ -5,7 +5,7 @@ Description: 提供契約簽署與不可變文件下載的 typed API，下載須
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Path, Request, UploadFile
@@ -27,10 +27,12 @@ from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.contract_signing.client_contract_application import (
     ClientContractSigningApplication,
+    ManualClientContractAttestationCommand,
     RecordClientSignedReturnCommand,
     SendClientContractCommand,
 )
 from subsystems.contract_signing.staff_contract_application import (
+    ManualStaffContractAttestationCommand,
     RecordStaffSignedReturnCommand,
     SendStaffContractCommand,
     StaffContractSigningApplication,
@@ -45,6 +47,13 @@ class SendContractBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     download_url: str = Field(min_length=9, max_length=500)
+
+
+class ManualContractAttestationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation_method: Literal["phone", "paper", "in_person", "verified_other"]
+    reason: str = Field(min_length=1, max_length=500)
 
 
 @router.get("/{case_no}/contract-signing", response_model=BaseResponse[dict])
@@ -94,6 +103,49 @@ def record_staff_signed_return(
     return _response(lambda: application.record_signed_return(command), "已記錄月嫂簽回契約", correlation_id)
 
 
+@router.post("/{case_no}/contract-signing/staff-segments/{segment_id}/manual-attestation/preview", response_model=BaseResponse[dict])
+def preview_manual_staff_contract_attestation(
+    body: ManualContractAttestationBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    segment_id: int = Path(..., gt=0),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: StaffContractSigningApplication = Depends(get_staff_contract_signing_application),
+):
+    del principal
+    try:
+        preview = application.preview_manual_attestation(
+            case_no=case_no,
+            matching_segment_id=segment_id,
+            confirmation_method=body.confirmation_method,
+            reason=body.reason,
+        )
+        return BaseResponse(data=preview, message="人工月嫂簽約證據 Preview 已完成")
+    except ValueError as error:
+        code = str(error) or "manual_contract_preview_failed"
+        raise typed_http_error(409, "domain_blocked", code, "人工月嫂簽約證據目前無法套用。", f"manual-staff-preview:{case_no}:{segment_id}") from error
+
+
+@router.post("/{case_no}/contract-signing/staff-segments/{segment_id}/manual-attestation", response_model=BaseResponse[dict])
+def record_manual_staff_contract_attestation(
+    document: UploadFile = File(...),
+    confirmation_method: Literal["phone", "paper", "in_person", "verified_other"] = Form(...),
+    reason: str = Form(..., min_length=1, max_length=500),
+    preview_fingerprint: str = Form(..., min_length=64, max_length=64),
+    case_no: str = Path(..., min_length=1, max_length=50),
+    segment_id: int = Path(..., gt=0),
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: StaffContractSigningApplication = Depends(get_staff_contract_signing_application),
+):
+    content = _document_content(document)
+    command = ManualStaffContractAttestationCommand(
+        case_no, segment_id, content, _filename(document), _mime_type(document), confirmation_method,
+        reason, preview_fingerprint, _actor_id(principal), IdempotencyKey(idempotency_key), CorrelationId(correlation_id),
+    )
+    return _response(lambda: application.record_manual_attestation(command), "已記錄人工月嫂簽約證據", correlation_id)
+
+
 @router.post("/{case_no}/contract-signing/client/send", response_model=BaseResponse[dict])
 def send_client_contract(
     body: SendContractBody,
@@ -120,6 +172,46 @@ def record_client_signed_return(
     content = _document_content(document)
     command = RecordClientSignedReturnCommand(case_no, content, _filename(document), _mime_type(document), _actor_id(principal), IdempotencyKey(idempotency_key), CorrelationId(correlation_id), expected_document_version_id)
     return _response(lambda: application.record_signed_return(command), "已記錄客戶簽回契約", correlation_id)
+
+
+@router.post("/{case_no}/contract-signing/client/manual-attestation/preview", response_model=BaseResponse[dict])
+def preview_manual_client_contract_attestation(
+    body: ManualContractAttestationBody,
+    case_no: str = Path(..., min_length=1, max_length=50),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: ClientContractSigningApplication = Depends(get_client_contract_signing_application),
+):
+    del principal
+    try:
+        preview = application.preview_manual_attestation(
+            case_no=case_no,
+            confirmation_method=body.confirmation_method,
+            reason=body.reason,
+        )
+        return BaseResponse(data=preview, message="人工客戶簽約證據 Preview 已完成")
+    except ValueError as error:
+        code = str(error) or "manual_contract_preview_failed"
+        raise typed_http_error(409, "domain_blocked", code, "人工客戶簽約證據目前無法套用。", f"manual-client-preview:{case_no}") from error
+
+
+@router.post("/{case_no}/contract-signing/client/manual-attestation", response_model=BaseResponse[dict])
+def record_manual_client_contract_attestation(
+    document: UploadFile = File(...),
+    confirmation_method: Literal["phone", "paper", "in_person", "verified_other"] = Form(...),
+    reason: str = Form(..., min_length=1, max_length=500),
+    preview_fingerprint: str = Form(..., min_length=64, max_length=64),
+    case_no: str = Path(..., min_length=1, max_length=50),
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: ClientContractSigningApplication = Depends(get_client_contract_signing_application),
+):
+    content = _document_content(document)
+    command = ManualClientContractAttestationCommand(
+        case_no, content, _filename(document), _mime_type(document), confirmation_method,
+        reason, preview_fingerprint, _actor_id(principal), IdempotencyKey(idempotency_key), CorrelationId(correlation_id),
+    )
+    return _response(lambda: application.record_manual_attestation(command), "已記錄人工客戶簽約證據", correlation_id)
 
 
 @router.get("/{case_no}/contract-signing/documents/{document_version_id}/download")
@@ -283,4 +375,10 @@ _DOMAIN_BLOCKER_CODES = frozenset({
     "contract_identity_already_recorded",
     "contract_document_version_stale",
     "contract_signature_idempotency_conflict",
+    "manual_contract_already_signed",
+    "manual_contract_confirmation_method_invalid",
+    "manual_contract_plan_not_current",
+    "manual_contract_customer_acceptance_required",
+    "manual_contract_preview_stale",
+    "manual_contract_reason_missing",
 })

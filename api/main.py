@@ -11,6 +11,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_error_handlers
@@ -190,6 +191,15 @@ app.add_middleware(
 app.add_middleware(ApiPerformanceMiddleware)
 app.add_middleware(CorrelationBoundaryMiddleware)
 install_typed_error_handlers(app)
+
+
+@app.get("/static/bind.html", include_in_schema=False)
+def redirect_retired_static_bind(request: Request) -> RedirectResponse:
+    """Keep old bookmarks usable without exposing the retired direct-writer page."""
+    query = request.url.query
+    target = f"/line-identity?{query}" if query else "/line-identity"
+    return RedirectResponse(target, status_code=307)
+
 
 app.mount("/static", StaticFiles(directory="line/static"), name="static")
 

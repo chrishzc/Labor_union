@@ -51,6 +51,7 @@ from api.schemas.orders import (
     ScheduleCalculationRequest,
 )
 from subsystems.access.authentication_session import AdminPrincipal
+from domains.orders.lifecycle import OrderLifecycleScope
 from subsystems.orders.calendar_detail_query import (
     OrderCalendarDetailContractError,
     OrderCalendarDetailNotFoundError,
@@ -126,6 +127,7 @@ def get_order_summaries(
     page_size: int = Query(50, ge=1, le=200),
     after_case_no: str | None = Query(None, min_length=1, max_length=50),
     query_text: str | None = Query(None, min_length=1, max_length=100),
+    lifecycle_scope: OrderLifecycleScope = Query(OrderLifecycleScope.ALL),
     if_none_match: str | None = Header(None, alias="If-None-Match"),
     principal: AdminPrincipal = Depends(require_system_admin),
     application: OrderSummaryApplication = Depends(
@@ -135,7 +137,7 @@ def get_order_summaries(
     del principal
     try:
         page = application.query(
-            OrderSummaryQueryRequest(page_size, after_case_no, query_text)
+            OrderSummaryQueryRequest(page_size, after_case_no, query_text, lifecycle_scope)
         )
     except OrderSummaryContractError as error:
         raise typed_http_error(

@@ -1,6 +1,6 @@
 """
 File: matching_schedule_confirmation_repository.py
-Description: 持久化媒合排班確認快照，套用前重新驗證人員 lifecycle。
+Description: 持久化 LINE 或人工日期表快照，套用前重驗日期、方案與人員 lifecycle。
 """
 
 import json
@@ -30,7 +30,7 @@ class MySqlMatchingScheduleConfirmationRepository:
             preview = self._preview(cursor, case_no, plan_id, root["id"])
             snapshot = self._latest_snapshot(cursor, case_no, plan_id)
             status = _snapshot_status(root["id"], snapshot)
-            is_current = status == "sent"
+            is_current = status in {"sent", "manual_ready"}
             recipients = self._recipients(cursor, snapshot["id"]) if snapshot and is_current else []
             outdated_preview = (
                 self._preview(cursor, case_no, plan_id, snapshot["confirmed_version_id"])
@@ -39,6 +39,52 @@ class MySqlMatchingScheduleConfirmationRepository:
             )
         passed = bool(recipients) and all(r["confirmation_status"] in ("confirmed", "manually_confirmed") for r in recipients)
         return {"case_no": case_no, "plan_id": plan_id, "confirmed_service_date_version": root["version"], "snapshot_id": snapshot["id"] if snapshot else None, "snapshot_status": status, "schedule_preview": preview, "outdated_schedule_preview": outdated_preview, "recipients": recipients, "gate_passed": passed}
+
+    def preview_manual(self, case_no, plan_id):
+        with self.connection.cursor() as cursor:
+            root, payloads = self._manual_source(cursor, case_no, plan_id, lock=False)
+        return {
+            "case_no": case_no,
+            "plan_id": plan_id,
+            "confirmed_service_date_version": root["version"],
+            "schedule_preview": self._preview_from_payloads(payloads),
+            "preview_fingerprint": _manual_preview_fingerprint(case_no, plan_id, root, payloads),
+        }
+
+    def prepare_manual(self, case_no, plan_id, actor, reason, expected_version, fingerprint, key):
+        del key
+        with self.connection.cursor() as cursor:
+            root, payloads = self._manual_source(cursor, case_no, plan_id, lock=True)
+            if root["version"] != expected_version:
+                raise ValueError("manual_schedule_confirmation_preview_stale")
+            expected = _manual_preview_fingerprint(case_no, plan_id, root, payloads)
+            if fingerprint != expected:
+                raise ValueError("manual_schedule_confirmation_preview_stale")
+            cursor.execute(
+                "SELECT id,status,snapshot_fingerprint FROM matching_schedule_snapshots "
+                "WHERE case_no=%s AND current_marker=1 FOR UPDATE",
+                (case_no,),
+            )
+            current = cursor.fetchone()
+            if current:
+                if current["status"] == "draft" and current["snapshot_fingerprint"] == expected:
+                    return self.query(case_no, plan_id)
+                raise ValueError("manual_schedule_confirmation_current_snapshot_conflict")
+            cursor.execute(
+                "INSERT INTO matching_schedule_snapshots "
+                "(case_no,plan_id,confirmed_version_id,snapshot_fingerprint,status,current_marker,created_by_actor_id) "
+                "VALUES (%s,%s,%s,%s,'draft',1,%s)",
+                (case_no, plan_id, root["id"], expected, actor),
+            )
+            snapshot_id = cursor.lastrowid
+            for payload in payloads:
+                self._store_recipient(
+                    cursor,
+                    snapshot_id,
+                    {**payload, "manual_preparation": {"actor": actor, "reason": reason}},
+                    delivery_status="blocked",
+                )
+        return self.query(case_no, plan_id)
 
     def send(self, case_no, plan_id, actor, key):
         with self.connection.cursor() as cursor:
@@ -49,8 +95,9 @@ class MySqlMatchingScheduleConfirmationRepository:
             cursor.execute("SELECT id FROM caregiver_matching_plans WHERE id=%s AND case_no=%s AND is_active=1", (plan_id, case_no))
             if not cursor.fetchone():
                 raise ValueError("active_matching_plan_required")
-            cursor.execute("SELECT id FROM matching_schedule_snapshots WHERE case_no=%s AND plan_id=%s AND confirmed_version_id=%s AND current_marker=1", (case_no, plan_id, version["id"]))
-            if cursor.fetchone():
+            cursor.execute("SELECT id,status FROM matching_schedule_snapshots WHERE case_no=%s AND plan_id=%s AND confirmed_version_id=%s AND current_marker=1 FOR UPDATE", (case_no, plan_id, version["id"]))
+            current = cursor.fetchone()
+            if current and current["status"] == "sent":
                 return self.query(case_no, plan_id)
             cursor.execute("UPDATE matching_schedule_snapshots SET current_marker=NULL,status='invalidated',invalidated_at_utc=UTC_TIMESTAMP(6) WHERE case_no=%s AND current_marker=1", (case_no,))
             self._require_active_lifecycle(cursor, plan_id)
@@ -180,6 +227,26 @@ class MySqlMatchingScheduleConfirmationRepository:
             result.append(_schedule_payload("caregiver", f"caregiver:{row['id']}", row["id"], row["line_user_id"], own))
         return result
 
+    def _manual_source(self, cursor, case_no, plan_id, *, lock):
+        suffix = " FOR UPDATE" if lock else ""
+        cursor.execute(
+            "SELECT id,version FROM confirmed_service_date_versions "
+            "WHERE case_no=%s AND is_current=1" + suffix,
+            (case_no,),
+        )
+        root = cursor.fetchone()
+        if not root:
+            raise ValueError("confirmed_service_dates_required")
+        cursor.execute(
+            "SELECT id FROM caregiver_matching_plans "
+            "WHERE id=%s AND case_no=%s AND is_active=1" + suffix,
+            (plan_id, case_no),
+        )
+        if not cursor.fetchone():
+            raise ValueError("active_matching_plan_required")
+        self._require_active_lifecycle(cursor, plan_id)
+        return root, self._payloads(cursor, case_no, plan_id, root["id"])
+
     @staticmethod
     def _latest_snapshot(cursor, case_no, plan_id):
         cursor.execute(
@@ -192,6 +259,10 @@ class MySqlMatchingScheduleConfirmationRepository:
     @classmethod
     def _preview(cls, cursor, case_no, plan_id, version_id):
         payloads = cls._payloads(cursor, case_no, plan_id, version_id)
+        return cls._preview_from_payloads(payloads)
+
+    @staticmethod
+    def _preview_from_payloads(payloads):
         return {
             "week_grouping_policy": "calendar_week_sunday_to_saturday_v1",
             "total_service_days": payloads[0]["total_service_days"],
@@ -203,8 +274,8 @@ class MySqlMatchingScheduleConfirmationRepository:
         }
 
     @staticmethod
-    def _store_recipient(cursor, snapshot_id, payload):
-        cursor.execute("INSERT INTO matching_schedule_recipient_snapshots (parent_snapshot_id,audience_type,recipient_key,segment_id,recipient_line_user_id,payload_snapshot,payload_fingerprint,delivery_status) VALUES (%s,%s,%s,%s,%s,%s,%s,'pending')", (snapshot_id, payload["audience"], payload["key"], payload["segment_id"], payload["line_user_id"], json.dumps(payload, ensure_ascii=False), fingerprint_payload(payload).value))
+    def _store_recipient(cursor, snapshot_id, payload, delivery_status="pending"):
+        cursor.execute("INSERT INTO matching_schedule_recipient_snapshots (parent_snapshot_id,audience_type,recipient_key,segment_id,recipient_line_user_id,payload_snapshot,payload_fingerprint,delivery_status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (snapshot_id, payload["audience"], payload["key"], payload["segment_id"], payload["line_user_id"], json.dumps(payload, ensure_ascii=False), fingerprint_payload(payload).value, delivery_status))
         return cursor.lastrowid
 
     @staticmethod
@@ -257,7 +328,20 @@ def _snapshot_status(current_version_id, snapshot):
         return "sent_outdated"
     if snapshot["current_marker"] != 1:
         return "not_sent"
+    if snapshot["status"] == "draft":
+        return "manual_ready"
     return snapshot["status"]
+
+
+def _manual_preview_fingerprint(case_no, plan_id, root, payloads):
+    return fingerprint_payload({
+        "case_no": case_no,
+        "plan_id": plan_id,
+        "confirmed_service_date_version_id": root["id"],
+        "confirmed_service_date_version": root["version"],
+        "payloads": payloads,
+        "mode": "manual_schedule_confirmation_v1",
+    }).value
 
 
 def _schedule_payload(audience, key, segment_id, line_user_id, dates):

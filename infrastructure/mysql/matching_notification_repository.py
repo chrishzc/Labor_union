@@ -6,6 +6,7 @@ Description: 持久化媒合通知、互動與回覆，拒絕退休人員的新�
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from datetime import datetime
 from typing import Any, Mapping
 
@@ -20,8 +21,12 @@ from domains.scheduling.matching_communication import (
     MatchingResponseSource,
 )
 from infrastructure.mysql.line_repository_support import database_utc
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import IdempotencyKey
 from subsystems.scheduling.matching_notification_contracts import (
+    ManualCustomerProfilesEvidence,
+    ManualCustomerProfilesReceipt,
+    ManualMatchingConfirmationMethod,
     MatchingContactState,
     MatchingNotificationProjectionStatus,
     MatchingNotificationResult,
@@ -48,7 +53,72 @@ class MySqlMatchingNotificationRepository:
             segments = self._segment_rows(cursor, plan_id)
             responses = self._latest_responses(cursor, plan_id)
             deliveries = self._latest_deliveries(cursor, plan_id)
-        return _contact_state(plan, segments, responses, deliveries)
+            manual_profiles = self._manual_profile_events(cursor, plan_id)
+        return _contact_state(plan, segments, responses, deliveries, manual_profiles)
+
+    def get_manual_customer_profiles_result(
+        self,
+        key: IdempotencyKey,
+        fingerprint: str,
+    ) -> ManualCustomerProfilesReceipt | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_MANUAL_PROFILE_BY_KEY_SQL, (key.value,))
+            rows = tuple(dict(row) for row in (cursor.fetchall() or ()))
+            if not rows:
+                return None
+            plan_id = int(rows[0]["plan_id"])
+            segments = self._segment_rows(cursor, plan_id)
+        evidence = _manual_profile_evidence(rows, segments, required=True)
+        if evidence.preview_fingerprint.value != fingerprint:
+            raise MatchingCommunicationConflictError(
+                "manual customer profiles idempotency key has a different payload"
+            )
+        plan = MatchingPlanReference(
+            str(rows[0]["case_no"]),
+            plan_id,
+            int(rows[0]["communication_version"]),
+        )
+        return ManualCustomerProfilesReceipt(plan, evidence, replayed=True)
+
+    def append_manual_customer_profiles(
+        self,
+        *,
+        plan: MatchingPlanReference,
+        segment_ids: tuple[int, ...],
+        confirmation_method: ManualMatchingConfirmationMethod,
+        reason: str,
+        actor_id: str,
+        idempotency_key: IdempotencyKey,
+        fingerprint: str,
+    ) -> ManualCustomerProfilesEvidence:
+        payload = {
+            "delivery_status": "manually_confirmed",
+            "confirmation_method": confirmation_method.value,
+            "reason": reason,
+            "actor_id": actor_id,
+            "idempotency_key": idempotency_key.value,
+            "preview_fingerprint": fingerprint,
+        }
+        payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        event_ids: list[int] = []
+        with self._connection.cursor() as cursor:
+            for segment_id in segment_ids:
+                event_key = "manual-profile:" + sha256(
+                    f"{idempotency_key.value}:{segment_id}".encode("utf-8")
+                ).hexdigest()
+                cursor.execute(
+                    _INSERT_MANUAL_PROFILE_SQL,
+                    (plan.plan_id, segment_id, event_key, actor_id, payload_json),
+                )
+                event_ids.append(int(cursor.lastrowid))
+        return ManualCustomerProfilesEvidence(
+            tuple(event_ids),
+            confirmation_method,
+            reason,
+            actor_id,
+            idempotency_key,
+            PreviewFingerprint(fingerprint),
+        )
 
     def get_intent_result(
         self,
@@ -219,6 +289,10 @@ class MySqlMatchingNotificationRepository:
         cursor.execute(_DELIVERIES_SQL, (plan_id,))
         return tuple(dict(row) for row in (cursor.fetchall() or ()))
 
+    def _manual_profile_events(self, cursor, plan_id):
+        cursor.execute(_MANUAL_PROFILE_EVENTS_SQL, (plan_id,))
+        return tuple(dict(row) for row in (cursor.fetchall() or ()))
+
     def _existing_response(self, key, fingerprint):
         with self._connection.cursor() as cursor:
             cursor.execute(_RESPONSE_BY_KEY_SQL, (key.value,))
@@ -269,7 +343,7 @@ class MySqlMatchingNotificationRepository:
                 raise MatchingCommunicationConflictError("matching interaction is not active")
 
 
-def _contact_state(plan, segments, responses, deliveries):
+def _contact_state(plan, segments, responses, deliveries, manual_profiles=()):
     response_map = _response_map(responses)
     delivery_map = _delivery_map(deliveries)
     contact_segments = tuple(
@@ -287,7 +361,55 @@ def _contact_state(plan, segments, responses, deliveries):
         CustomerMatchingDecision(response_map.get((None, "customer_decision"), "pending")),
         delivery_map.get((None, "customer_profiles")),
         contact_segments,
+        _manual_profile_evidence(manual_profiles, segments),
     )
+
+
+def _manual_profile_evidence(rows, segments, *, required=False):
+    if not rows:
+        if required:
+            raise MatchingCommunicationConflictError(
+                "manual customer profiles receipt is incomplete"
+            )
+        return None
+    groups: dict[str, list[Mapping[str, Any]]] = {}
+    for row in rows:
+        key = str(row.get("idempotency_key") or "")
+        if key:
+            groups.setdefault(key, []).append(row)
+    expected_segments = {int(segment["segment_id"]) for segment in segments}
+    for key, group in groups.items():
+        actual_segments = {int(row["segment_id"]) for row in group}
+        if actual_segments != expected_segments:
+            continue
+        first = group[0]
+        fingerprint = str(first["preview_fingerprint"])
+        method = str(first["confirmation_method"])
+        reason = str(first["reason"])
+        actor_id = str(first["actor_id"])
+        if any(
+            str(row["preview_fingerprint"]) != fingerprint
+            or str(row["confirmation_method"]) != method
+            or str(row["reason"]) != reason
+            or str(row["actor_id"]) != actor_id
+            for row in group
+        ):
+            raise MatchingCommunicationConflictError(
+                "manual customer profiles evidence is inconsistent"
+            )
+        return ManualCustomerProfilesEvidence(
+            tuple(sorted(int(row["id"]) for row in group)),
+            ManualMatchingConfirmationMethod(method),
+            reason,
+            actor_id,
+            IdempotencyKey(key),
+            PreviewFingerprint(fingerprint),
+        )
+    if required:
+        raise MatchingCommunicationConflictError(
+            "manual customer profiles receipt is incomplete"
+        )
+    return None
 
 
 def _segment_contact(row, responses, deliveries):
@@ -368,6 +490,31 @@ matching_response_events WHERE plan_id=%s ORDER BY occurred_at_utc DESC,id DESC"
 _DELIVERIES_SQL = """SELECT i.segment_id,i.notification_kind,t.processing_status
 FROM matching_notification_intents i JOIN line_delivery_tasks t ON t.id=i.delivery_task_id
 WHERE i.plan_id=%s ORDER BY i.created_at_utc DESC,i.id DESC"""
+_MANUAL_PROFILE_EVENTS_SQL = """SELECT e.id,e.plan_id,e.segment_id,
+JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.confirmation_method')) AS confirmation_method,
+JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.reason')) AS reason,
+JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.actor_id')) AS actor_id,
+JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.idempotency_key')) AS idempotency_key,
+JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.preview_fingerprint')) AS preview_fingerprint
+FROM caregiver_matching_plan_events e WHERE e.plan_id=%s
+AND e.event_type='resume_sent'
+AND JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.delivery_status'))='manually_confirmed'
+ORDER BY e.occurred_at DESC,e.id DESC"""
+_MANUAL_PROFILE_BY_KEY_SQL = """SELECT e.id,e.plan_id,e.segment_id,
+p.case_no,p.communication_version,
+JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.confirmation_method')) AS confirmation_method,
+JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.reason')) AS reason,
+JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.actor_id')) AS actor_id,
+JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.idempotency_key')) AS idempotency_key,
+JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.preview_fingerprint')) AS preview_fingerprint
+FROM caregiver_matching_plan_events e JOIN caregiver_matching_plans p ON p.id=e.plan_id
+WHERE e.event_type='resume_sent'
+AND JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.delivery_status'))='manually_confirmed'
+AND JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.idempotency_key'))=%s
+ORDER BY e.id"""
+_INSERT_MANUAL_PROFILE_SQL = """INSERT INTO caregiver_matching_plan_events
+(plan_id,segment_id,event_type,event_key,actor,payload)
+VALUES (%s,%s,'resume_sent',%s,%s,%s)"""
 _INTENT_BY_KEY_SQL = """SELECT i.*,p.case_no,p.communication_version
 FROM matching_notification_intents i JOIN caregiver_matching_plans p ON p.id=i.plan_id
 WHERE i.idempotency_key=%s"""

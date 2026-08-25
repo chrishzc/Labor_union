@@ -1,4 +1,7 @@
-"""MySQL adapters for LINE friend state and one-use LIFF identity flows."""
+"""
+File: line_platform_identity_repository.py
+Description: 保存 verified platform user、friend events 與 one-use LIFF identity flows。
+"""
 
 from __future__ import annotations
 
@@ -37,6 +40,15 @@ class MySqlLinePlatformUserRepository:
             cursor.execute(_PLATFORM_USER_SELECT_SQL, (line_user_id.value,))
             row = optional_row(cursor.fetchone())
         return None if row is None else _platform_user_snapshot(row)
+
+    def ensure_verified_user(self, line_user_id: LineUserId) -> LinePlatformUserSnapshot:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_PLATFORM_USER_ENSURE_VERIFIED_SQL, (line_user_id.value,))
+            cursor.execute(_PLATFORM_USER_SELECT_SQL, (line_user_id.value,))
+            row = optional_row(cursor.fetchone())
+        if row is None:
+            raise RuntimeError("line_platform_user_observation_failed")
+        return _platform_user_snapshot(row)
 
     def apply_friend_event(self, event: LineFriendEvent) -> LinePlatformUserSnapshot:
         with self._connection.cursor() as cursor:
@@ -289,6 +301,9 @@ _PLATFORM_USER_SELECT_SQL = (
     "SELECT line_user_id,friend_status,first_followed_at_utc,last_followed_at_utc,"
     "blocked_at_utc,last_event_at_utc,aggregate_version FROM line_platform_users "
     "WHERE line_user_id=%s"
+)
+_PLATFORM_USER_ENSURE_VERIFIED_SQL = (
+    "INSERT IGNORE INTO line_platform_users (line_user_id) VALUES (%s)"
 )
 _PLATFORM_USER_INSERT_SQL = (
     "INSERT INTO line_platform_users (line_user_id,friend_status,first_followed_at_utc,"

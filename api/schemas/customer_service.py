@@ -1,6 +1,6 @@
 """
 File: customer_service.py
-Description: 定義客服查詢、結案 Preview／Apply 與既有回覆端點的嚴格 HTTP 契約。
+Description: 定義客服查詢、結案與回覆 Preview／Apply 的嚴格 HTTP 契約。
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ class CustomerServiceSummaryView(BaseModel):
 
 class CustomerServiceUpdatePreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    status: Literal["resolved"]
+    status: CustomerServiceStatus
     internal_note: str | None = Field(max_length=4000)
     expected_version: int = Field(ge=0)
 
@@ -81,19 +81,56 @@ class CustomerServiceUpdatePreviewView(BaseModel):
     apply_ready: bool
 
 
-class CustomerServiceUpdateRequest(BaseModel):
-    status: CustomerServiceStatus
-    internal_note: str | None = Field(default=None, max_length=4000)
-    expected_version: int = Field(ge=0)
-    idempotency_key: str = Field(min_length=1, max_length=191)
+class CustomerServiceUpdateApplyView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    ticket_id: int
+    resulting_status: CustomerServiceStatus
+    resulting_version: int = Field(ge=1)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    replayed: bool
+    readback: CustomerServiceDetailView
 
 
-class CustomerServiceReplyRequest(BaseModel):
+class CustomerServiceReplyPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
     reply_text: str = Field(min_length=1, max_length=2000)
-    resolve: bool = False
-    internal_note: str | None = Field(default=None, max_length=4000)
+    resolve: bool
+    internal_note: str | None = Field(max_length=4000)
     expected_version: int = Field(ge=0)
+
+
+class CustomerServiceReplyApplyRequest(CustomerServiceReplyPreviewRequest):
     idempotency_key: str = Field(min_length=1, max_length=191)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class CustomerServiceReplyPreviewView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    ticket_id: int
+    before_status: CustomerServiceStatus
+    after_status: CustomerServiceStatus
+    current_version: int = Field(ge=0)
+    expected_version: int = Field(ge=0)
+    reply_character_count: int = Field(ge=1, le=2000)
+    will_enqueue_delivery: Literal[True]
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    apply_ready: Literal[True]
+
+
+class CustomerServiceReplyApplyView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    ticket_id: int
+    resulting_status: CustomerServiceStatus
+    resulting_version: int = Field(ge=1)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    delivery_enqueued: Literal[True]
+    delivery_delivered: Literal[False]
+    replayed: bool
+    readback: CustomerServiceDetailView
 
 
 class HumanEscalationClaimRequest(BaseModel):
@@ -102,6 +139,10 @@ class HumanEscalationClaimRequest(BaseModel):
     expected_escalation_version: int = Field(ge=0)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
+
+
+class HumanEscalationClaimApplyRequest(HumanEscalationClaimRequest):
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class HumanEscalationCreateRequest(BaseModel):
@@ -131,6 +172,10 @@ class HumanEscalationCreateRequest(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
 
+
+class HumanEscalationCreateApplyRequest(HumanEscalationCreateRequest):
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
     def model_post_init(self, __context) -> None:
         if set(self.masked_context) != {
             "summary_code",
@@ -145,9 +190,17 @@ class HumanEscalationHandlingRequest(HumanEscalationClaimRequest):
     expected_ticket_version: int = Field(ge=0)
 
 
+class HumanEscalationHandlingApplyRequest(HumanEscalationHandlingRequest):
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class HumanEscalationResolveRequest(HumanEscalationHandlingRequest):
     resolution_code: str = Field(min_length=1, max_length=64)
     resolution_evidence_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HumanEscalationResolveApplyRequest(HumanEscalationResolveRequest):
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class HumanEscalationReceiptResponse(BaseModel):
@@ -164,6 +217,21 @@ class HumanEscalationReceiptResponse(BaseModel):
     replayed: bool
     correlation_id: str
     committed_at: datetime
+
+
+class HumanEscalationPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    operation: Literal["create", "claim", "handling_started", "resolve"]
+    escalation_id: int | None = Field(default=None, gt=0)
+    before_workflow_status: Literal["absent", "open", "claimed", "handling", "resolved"]
+    resulting_workflow_status: Literal["open", "claimed", "handling", "resolved"]
+    before_hold_state: Literal["absent", "active", "released"]
+    resulting_hold_state: Literal["active", "released"]
+    current_escalation_version: int | None = Field(default=None, ge=0)
+    current_ticket_version: int | None = Field(default=None, ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    apply_ready: Literal[True]
 
 
 class HumanEscalationViewResponse(BaseModel):

@@ -42,6 +42,7 @@ export interface ServiceTimeTupleViewModel {
 export interface OrderSummaryCardViewModel {
   id: string;
   clientName: string;
+  identityStatus: string;
   clientPhone: string;
   serviceRange: string;
   serviceDays: number | null;
@@ -82,6 +83,7 @@ export function adaptOrderSummaryItem(item: OrderSummaryItem): OrderSummaryCardV
   return {
     id: item.case_no,
     clientName: item.client_name,
+    identityStatus: item.identity_status?.trim() || '待確認',
     clientPhone: `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（聯絡電話）`,
     serviceRange: formatServiceRange(item.start_date, item.end_date),
     serviceDays,

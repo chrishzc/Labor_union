@@ -37,6 +37,21 @@ class SendCandidateInformationRequest(_EventIdentity):
     info_type: Literal[1, 2]
 
 
+class ManualCandidateInformationPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    info_type: Literal[1, 2]
+    confirmation_method: Literal["phone", "in_person", "paper", "other"]
+    reason: str = Field(min_length=1, max_length=500)
+    actor: str = Field(min_length=1, max_length=100)
+
+
+class ManualCandidateInformationApplyRequest(ManualCandidateInformationPreviewRequest):
+    event_key: str = Field(min_length=1, max_length=100)
+    expected_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class CandidateWillingnessRequest(_EventIdentity):
     willingness: Literal["willing", "unwilling"]
     reason: str = Field(default="", max_length=500)
@@ -49,6 +64,7 @@ class CandidateInformationDeliveryView(BaseModel):
         "queued",
         "pending",
         "sent",
+        "manually_confirmed",
         "retryable_failed",
         "failed",
         "cancelled",
@@ -135,6 +151,33 @@ class CandidateWillingnessResult(BaseModel):
     event_id: int = Field(gt=0)
 
 
+class ManualCandidateInformationPreview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_no: str = Field(min_length=1, max_length=50)
+    pool_id: int = Field(gt=0)
+    candidate_id: int = Field(gt=0)
+    staff_id: int = Field(gt=0)
+    info_type: Literal[1, 2]
+    confirmation_method: Literal["phone", "in_person", "paper", "other"]
+    reason: str = Field(min_length=1, max_length=500)
+    actor: str = Field(min_length=1, max_length=100)
+    expected_version: int = Field(ge=0)
+    current_status: str | None = Field(default=None, max_length=50)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    apply_allowed: Literal[True]
+
+
+class ManualCandidateInformationReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["recorded", "idempotent_replay"]
+    event_id: int = Field(gt=0)
+    pool_version: int = Field(gt=0)
+    delivery_status: Literal["manually_confirmed"]
+    confirmation_method: Literal["phone", "in_person", "paper", "other"]
+
+
 __all__ = [
     "AddCandidatesRequest",
     "AddCandidatesResult",
@@ -145,6 +188,10 @@ __all__ = [
     "CandidateInformationMap",
     "CandidateWillingnessRequest",
     "CandidateWillingnessResult",
+    "ManualCandidateInformationApplyRequest",
+    "ManualCandidateInformationPreview",
+    "ManualCandidateInformationPreviewRequest",
+    "ManualCandidateInformationReceipt",
     "SendCandidateInformationRequest",
     "SendCandidateInformationResult",
 ]

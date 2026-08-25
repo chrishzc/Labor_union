@@ -1,6 +1,6 @@
 """
 File: customer_service.py
-Description: 暴露客服唯讀、既有操作及受控結案 Preview／Apply 的認證 HTTP 入口。
+Description: 暴露客服唯讀、結案與回覆 Preview／Apply，以及退役 direct mutation 的認證 HTTP 入口。
 """
 
 from __future__ import annotations
@@ -17,17 +17,25 @@ from api.schemas.base import BaseResponse
 from api.schemas.customer_service import (
     CustomerServiceDetailView,
     CustomerServicePageView,
-    CustomerServiceReplyRequest,
+    CustomerServiceReplyApplyRequest,
+    CustomerServiceReplyApplyView,
+    CustomerServiceReplyPreviewRequest,
+    CustomerServiceReplyPreviewView,
     CustomerServiceSummaryView,
     CustomerServiceUpdateApplyRequest,
+    CustomerServiceUpdateApplyView,
     CustomerServiceUpdatePreviewRequest,
     CustomerServiceUpdatePreviewView,
-    CustomerServiceUpdateRequest,
     HumanEscalationClaimRequest,
+    HumanEscalationClaimApplyRequest,
     HumanEscalationCreateRequest,
+    HumanEscalationCreateApplyRequest,
     HumanEscalationHandlingRequest,
+    HumanEscalationHandlingApplyRequest,
+    HumanEscalationPreviewResponse,
     HumanEscalationReceiptResponse,
     HumanEscalationResolveRequest,
+    HumanEscalationResolveApplyRequest,
     HumanEscalationViewResponse,
 )
 from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus, CustomerServiceTransitionError
@@ -53,11 +61,11 @@ from subsystems.customer_service.escalation_contracts import (
     StartHumanEscalationHandling,
 )
 from subsystems.customer_service.contracts import (
+    ApplyCustomerServiceTicketReply,
     ApplyCustomerServiceTicketUpdate,
     CustomerServiceListQuery,
+    PreviewCustomerServiceTicketReply,
     PreviewCustomerServiceTicketUpdate,
-    ReplyCustomerServiceTicket,
-    UpdateCustomerServiceTicket,
 )
 
 
@@ -75,6 +83,32 @@ def _escalation_application():
 
 @escalation_router.post("", response_model=BaseResponse[HumanEscalationReceiptResponse])
 def create_escalation(
+    payload: HumanEscalationCreateApplyRequest,
+    principal: AdminPrincipal = Depends(require_customer_service_handler),
+):
+    command = CreateHumanEscalation(
+        payload.source_event_identity,
+        payload.source_kind,
+        payload.source_fingerprint,
+        TriggerCode(payload.trigger_code),
+        payload.trigger_policy_version,
+        CustomerServiceCategory(payload.ticket_category),
+        payload.masked_context,
+        payload.hold_scope,
+        IdempotencyKey(payload.idempotency_key),
+        CorrelationId(payload.correlation_id),
+        admin_actor_context(principal),
+        PreviewFingerprint(payload.preview_fingerprint),
+    )
+    try:
+        receipt = _escalation_application().create(command)
+    except HumanEscalationError as error:
+        raise _human_escalation_http_error(error, payload.correlation_id) from error
+    return BaseResponse(data=_escalation_receipt_response(receipt))
+
+
+@escalation_router.post("/preview", response_model=BaseResponse[HumanEscalationPreviewResponse])
+def preview_create_escalation(
     payload: HumanEscalationCreateRequest,
     principal: AdminPrincipal = Depends(require_customer_service_handler),
 ):
@@ -92,10 +126,10 @@ def create_escalation(
         admin_actor_context(principal),
     )
     try:
-        receipt = _escalation_application().create(command)
+        preview = _escalation_application().preview(command)
     except HumanEscalationError as error:
         raise _human_escalation_http_error(error, payload.correlation_id) from error
-    return BaseResponse(data=_escalation_receipt_response(receipt))
+    return BaseResponse(data=_escalation_preview_response(preview), message="人工客服升級 Preview 已建立；尚未寫入")
 
 
 @escalation_router.get("/{escalation_id}", response_model=BaseResponse[HumanEscalationViewResponse])
@@ -110,6 +144,27 @@ def escalation_detail(escalation_id: int, _: AdminPrincipal = Depends(require_cu
 @escalation_router.post("/{escalation_id}/claim", response_model=BaseResponse[HumanEscalationReceiptResponse])
 def claim_escalation(
     escalation_id: int,
+    payload: HumanEscalationClaimApplyRequest,
+    principal: AdminPrincipal = Depends(require_customer_service_handler),
+):
+    command = ClaimHumanEscalation(
+        escalation_id,
+        payload.expected_escalation_version,
+        admin_actor_context(principal),
+        IdempotencyKey(payload.idempotency_key),
+        CorrelationId(payload.correlation_id),
+        PreviewFingerprint(payload.preview_fingerprint),
+    )
+    try:
+        receipt = _escalation_application().claim(command)
+    except HumanEscalationError as error:
+        raise _human_escalation_http_error(error, payload.correlation_id) from error
+    return BaseResponse(data=_escalation_receipt_response(receipt))
+
+
+@escalation_router.post("/{escalation_id}/claim/preview", response_model=BaseResponse[HumanEscalationPreviewResponse])
+def preview_claim_escalation(
+    escalation_id: int,
     payload: HumanEscalationClaimRequest,
     principal: AdminPrincipal = Depends(require_customer_service_handler),
 ):
@@ -121,14 +176,36 @@ def claim_escalation(
         CorrelationId(payload.correlation_id),
     )
     try:
-        receipt = _escalation_application().claim(command)
+        preview = _escalation_application().preview(command)
+    except HumanEscalationError as error:
+        raise _human_escalation_http_error(error, payload.correlation_id) from error
+    return BaseResponse(data=_escalation_preview_response(preview), message="人工客服接手 Preview 已建立；尚未寫入")
+
+
+@escalation_router.post("/{escalation_id}/handling", response_model=BaseResponse[HumanEscalationReceiptResponse])
+def start_escalation_handling(
+    escalation_id: int,
+    payload: HumanEscalationHandlingApplyRequest,
+    principal: AdminPrincipal = Depends(require_customer_service_handler),
+):
+    command = StartHumanEscalationHandling(
+        escalation_id,
+        payload.expected_escalation_version,
+        payload.expected_ticket_version,
+        admin_actor_context(principal),
+        IdempotencyKey(payload.idempotency_key),
+        CorrelationId(payload.correlation_id),
+        PreviewFingerprint(payload.preview_fingerprint),
+    )
+    try:
+        receipt = _escalation_application().start_handling(command)
     except HumanEscalationError as error:
         raise _human_escalation_http_error(error, payload.correlation_id) from error
     return BaseResponse(data=_escalation_receipt_response(receipt))
 
 
-@escalation_router.post("/{escalation_id}/handling", response_model=BaseResponse[HumanEscalationReceiptResponse])
-def start_escalation_handling(
+@escalation_router.post("/{escalation_id}/handling/preview", response_model=BaseResponse[HumanEscalationPreviewResponse])
+def preview_start_escalation_handling(
     escalation_id: int,
     payload: HumanEscalationHandlingRequest,
     principal: AdminPrincipal = Depends(require_customer_service_handler),
@@ -142,14 +219,38 @@ def start_escalation_handling(
         CorrelationId(payload.correlation_id),
     )
     try:
-        receipt = _escalation_application().start_handling(command)
+        preview = _escalation_application().preview(command)
+    except HumanEscalationError as error:
+        raise _human_escalation_http_error(error, payload.correlation_id) from error
+    return BaseResponse(data=_escalation_preview_response(preview), message="人工客服開始處理 Preview 已建立；尚未寫入")
+
+
+@escalation_router.post("/{escalation_id}/resolve", response_model=BaseResponse[HumanEscalationReceiptResponse])
+def resolve_escalation(
+    escalation_id: int,
+    payload: HumanEscalationResolveApplyRequest,
+    principal: AdminPrincipal = Depends(require_customer_service_handler),
+):
+    command = ResolveHumanEscalation(
+        escalation_id,
+        payload.expected_escalation_version,
+        payload.expected_ticket_version,
+        payload.resolution_code,
+        payload.resolution_evidence_digest,
+        admin_actor_context(principal),
+        IdempotencyKey(payload.idempotency_key),
+        CorrelationId(payload.correlation_id),
+        PreviewFingerprint(payload.preview_fingerprint),
+    )
+    try:
+        receipt = _escalation_application().resolve(command)
     except HumanEscalationError as error:
         raise _human_escalation_http_error(error, payload.correlation_id) from error
     return BaseResponse(data=_escalation_receipt_response(receipt))
 
 
-@escalation_router.post("/{escalation_id}/resolve", response_model=BaseResponse[HumanEscalationReceiptResponse])
-def resolve_escalation(
+@escalation_router.post("/{escalation_id}/resolve/preview", response_model=BaseResponse[HumanEscalationPreviewResponse])
+def preview_resolve_escalation(
     escalation_id: int,
     payload: HumanEscalationResolveRequest,
     principal: AdminPrincipal = Depends(require_customer_service_handler),
@@ -165,10 +266,10 @@ def resolve_escalation(
         CorrelationId(payload.correlation_id),
     )
     try:
-        receipt = _escalation_application().resolve(command)
+        preview = _escalation_application().preview(command)
     except HumanEscalationError as error:
         raise _human_escalation_http_error(error, payload.correlation_id) from error
-    return BaseResponse(data=_escalation_receipt_response(receipt))
+    return BaseResponse(data=_escalation_preview_response(preview), message="人工客服解除暫停 Preview 已建立；尚未寫入")
 
 
 @router.get("/summary", response_model=BaseResponse[CustomerServiceSummaryView])
@@ -234,7 +335,7 @@ def preview_update(
 
 @router.post(
     "/{ticket_id}/update/apply",
-    response_model=BaseResponse[CustomerServiceDetailView],
+    response_model=BaseResponse[CustomerServiceUpdateApplyView],
 )
 def apply_update(
     ticket_id: int,
@@ -267,26 +368,137 @@ def apply_update(
         correlation_id=identity,
     )
     _audit_request(request, "update.apply", ticket_id)
-    return BaseResponse(data=result, message="客服需求已結案")
+    return BaseResponse(
+        data=CustomerServiceUpdateApplyView(
+            ticket_id=result.ticket_id,
+            resulting_status=result.resulting_status,
+            resulting_version=result.resulting_version,
+            preview_fingerprint=result.preview_fingerprint.value,
+            replayed=result.replayed,
+            readback=result.readback,
+        ),
+        message="客服管理操作已完成",
+    )
 
 
-@router.patch("/{ticket_id}", response_model=BaseResponse[CustomerServiceDetailView])
-def update(ticket_id: int, payload: CustomerServiceUpdateRequest, request: Request, principal: AdminPrincipal = Depends(require_customer_service_handler)):
-    actor = admin_actor_context(principal).actor_id
-    command = UpdateCustomerServiceTicket(ticket_id, payload.status, payload.internal_note, ExpectedVersion(payload.expected_version), actor, IdempotencyKey(payload.idempotency_key), _correlation("update"))
-    result = _call(_application().update, command)
-    _audit_request(request, "update", ticket_id)
-    return BaseResponse(data=result, message="客服需求已更新")
+@router.patch("/{ticket_id}", include_in_schema=False)
+def retired_update(ticket_id: int, request: Request):
+    del ticket_id, request
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "customer_service_update_preview_required",
+            "message": "此客服更新入口已退役，請先預覽再套用。",
+            "retryable": False,
+        },
+    )
 
 
-@router.post("/{ticket_id}/reply", response_model=BaseResponse[CustomerServiceDetailView])
-def reply(ticket_id: int, payload: CustomerServiceReplyRequest, request: Request, principal: AdminPrincipal = Depends(require_customer_service_handler)):
-    actor = admin_actor_context(principal).actor_id
-    command = ReplyCustomerServiceTicket(ticket_id, payload.reply_text, payload.resolve, payload.internal_note, ExpectedVersion(payload.expected_version), actor, principal.id, IdempotencyKey(payload.idempotency_key), _correlation("reply"))
-    result = _call(_application().reply, command)
-    _audit_request(request, "reply", ticket_id)
+@router.post(
+    "/{ticket_id}/reply/preview",
+    response_model=BaseResponse[CustomerServiceReplyPreviewView],
+)
+def preview_reply(
+    ticket_id: int,
+    payload: CustomerServiceReplyPreviewRequest,
+    correlation_id: Annotated[
+        str,
+        Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ],
+    _: AdminPrincipal = Depends(require_customer_service_handler),
+):
+    identity = CorrelationId(correlation_id)
+    command = PreviewCustomerServiceTicketReply(
+        ticket_id,
+        payload.reply_text,
+        payload.resolve,
+        payload.internal_note,
+        ExpectedVersion(payload.expected_version),
+        identity,
+    )
+    preview = _call_update_endpoint(
+        _application().preview_reply,
+        command,
+        correlation_id=identity,
+        error_scope="reply",
+    )
+    return BaseResponse(
+        data=CustomerServiceReplyPreviewView(
+            ticket_id=preview.ticket_id,
+            before_status=preview.before_status,
+            after_status=preview.after_status,
+            current_version=preview.current_version,
+            expected_version=preview.expected_version,
+            reply_character_count=preview.reply_character_count,
+            will_enqueue_delivery=preview.will_enqueue_delivery,
+            preview_fingerprint=preview.preview_fingerprint.value,
+            apply_ready=preview.apply_ready,
+        ),
+        message="客服回覆 Preview 已建立；尚未寫入或排入傳送",
+    )
+
+
+@router.post(
+    "/{ticket_id}/reply/apply",
+    response_model=BaseResponse[CustomerServiceReplyApplyView],
+)
+def apply_reply(
+    ticket_id: int,
+    payload: CustomerServiceReplyApplyRequest,
+    request: Request,
+    correlation_id: Annotated[
+        str,
+        Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ],
+    principal: AdminPrincipal = Depends(require_customer_service_handler),
+):
+    identity = CorrelationId(correlation_id)
+    command = ApplyCustomerServiceTicketReply(
+        ticket_id,
+        payload.reply_text,
+        payload.resolve,
+        payload.internal_note,
+        ExpectedVersion(payload.expected_version),
+        PreviewFingerprint(payload.preview_fingerprint),
+        admin_actor_context(principal).actor_id,
+        principal.id,
+        IdempotencyKey(payload.idempotency_key),
+        identity,
+    )
+    result = _call_update_endpoint(
+        _application().apply_reply,
+        command,
+        correlation_id=identity,
+        error_scope="reply",
+    )
+    _audit_request(request, "reply.apply", ticket_id)
     publish_line_wakeup_best_effort()
-    return BaseResponse(data=result, message="已排入 LINE 回覆")
+    return BaseResponse(
+        data=CustomerServiceReplyApplyView(
+            ticket_id=result.ticket_id,
+            resulting_status=result.resulting_status,
+            resulting_version=result.resulting_version,
+            preview_fingerprint=result.preview_fingerprint.value,
+            delivery_enqueued=result.delivery_enqueued,
+            delivery_delivered=result.delivery_delivered,
+            replayed=result.replayed,
+            readback=result.readback,
+        ),
+        message="客服回覆已保存；LINE delivery 已排入佇列，尚未送達",
+    )
+
+
+@router.post("/{ticket_id}/reply", include_in_schema=False)
+def retired_reply(ticket_id: int, request: Request):
+    del ticket_id, request
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "customer_service_reply_preview_required",
+            "message": "此回覆入口已退役，請先預覽再套用。",
+            "retryable": False,
+        },
+    )
 
 
 def _call(operation, *arguments):
@@ -298,7 +510,12 @@ def _call(operation, *arguments):
         raise HTTPException(status_code=409, detail={"code": "customer_service_ticket_version_conflict", "message": str(error)}) from error
 
 
-def _call_update_endpoint(operation, *arguments, correlation_id: CorrelationId):
+def _call_update_endpoint(
+    operation,
+    *arguments,
+    correlation_id: CorrelationId,
+    error_scope: str = "update",
+):
     try:
         return operation(*arguments)
     except CustomerServiceTicketNotFoundError as error:
@@ -316,7 +533,7 @@ def _call_update_endpoint(operation, *arguments, correlation_id: CorrelationId):
             409,
             TypedError(
                 ErrorCategory.IDEMPOTENCY_MISMATCH,
-                "customer_service_update_idempotency_mismatch",
+                f"customer_service_{error_scope}_idempotency_mismatch",
                 "相同冪等鍵已被不同內容使用。",
                 correlation_id,
             ),
@@ -326,8 +543,12 @@ def _call_update_endpoint(operation, *arguments, correlation_id: CorrelationId):
             409,
             TypedError(
                 ErrorCategory.CONFLICT,
-                "customer_service_update_preview_conflict",
-                "客服結案 Preview 已過期，請重新查詢並預覽。",
+                f"customer_service_{error_scope}_preview_conflict",
+                (
+                    "客服回覆 Preview 已過期，請重新查詢並預覽。"
+                    if error_scope == "reply"
+                    else "客服結案 Preview 已過期，請重新查詢並預覽。"
+                ),
                 correlation_id,
             ),
         ) from error
@@ -362,9 +583,9 @@ def _call_update_endpoint(operation, *arguments, correlation_id: CorrelationId):
             TypedError(
                 category,
                 (
-                    "customer_service_update_temporarily_unavailable"
+                    f"customer_service_{error_scope}_temporarily_unavailable"
                     if retryable
-                    else "customer_service_update_database_error"
+                    else f"customer_service_{error_scope}_database_error"
                 ),
                 (
                     "客服操作暫時無法完成，可使用相同冪等鍵重試。"
@@ -380,7 +601,7 @@ def _call_update_endpoint(operation, *arguments, correlation_id: CorrelationId):
             500,
             TypedError(
                 ErrorCategory.INTERNAL,
-                "customer_service_update_internal_error",
+                f"customer_service_{error_scope}_internal_error",
                 "客服操作發生未預期錯誤。",
                 correlation_id,
             ),
@@ -454,6 +675,21 @@ def _escalation_receipt_response(receipt) -> HumanEscalationReceiptResponse:
         replayed=receipt.replayed,
         correlation_id=receipt.correlation_id,
         committed_at=receipt.committed_at,
+    )
+
+
+def _escalation_preview_response(preview) -> HumanEscalationPreviewResponse:
+    return HumanEscalationPreviewResponse(
+        operation=preview.operation,
+        escalation_id=preview.escalation_id,
+        before_workflow_status=preview.before_workflow_status,
+        resulting_workflow_status=preview.resulting_workflow_status.value,
+        before_hold_state=preview.before_hold_state,
+        resulting_hold_state=preview.resulting_hold_state.value,
+        current_escalation_version=preview.current_escalation_version,
+        current_ticket_version=preview.current_ticket_version,
+        preview_fingerprint=preview.preview_fingerprint.value,
+        apply_ready=preview.apply_ready,
     )
 
 

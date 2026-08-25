@@ -38,6 +38,7 @@ class CandidateInformationDelivery:
             "queued",
             "pending",
             "sent",
+            "manually_confirmed",
             "retryable_failed",
             "failed",
             "cancelled",
@@ -357,6 +358,201 @@ def query_pool(
             _close(connection)
 
 
+_MANUAL_INFORMATION_METHODS = {"phone", "in_person", "paper", "other"}
+
+
+def _manual_information_preview(
+    state: CandidateContactPoolState,
+    candidate_id: Any,
+    info_type: Any,
+    confirmation_method: Any,
+    reason: Any,
+    actor: Any,
+) -> dict[str, Any]:
+    candidate_id = _positive_int(candidate_id, "candidate_id")
+    if info_type not in {1, 2}:
+        raise ValueError("info_type_invalid")
+    confirmation_method = _required_text(
+        confirmation_method, "confirmation_method", 30
+    )
+    if confirmation_method not in _MANUAL_INFORMATION_METHODS:
+        raise ValueError("confirmation_method_invalid")
+    reason = _required_text(reason, "reason", 500)
+    actor = _required_text(actor, "actor", 100)
+    candidate = next(
+        (item for item in state.candidates if item.id == candidate_id),
+        None,
+    )
+    if candidate is None:
+        raise ValueError("candidate_contact_not_found")
+    if candidate.status != "active":
+        raise ValueError("candidate_contact_is_read_only")
+    information = (
+        candidate.information.information_1
+        if info_type == 1
+        else candidate.information.information_2
+    )
+    current_status = information.status if information is not None else None
+    if current_status in {"sent", "manually_confirmed"}:
+        raise ValueError("candidate_information_already_confirmed")
+    expected_version = max((event.id for event in state.events), default=0)
+    payload = {
+        "case_no": state.case_no,
+        "pool_id": state.pool_id,
+        "candidate_id": candidate.id,
+        "staff_id": candidate.staff_id,
+        "info_type": info_type,
+        "confirmation_method": confirmation_method,
+        "reason": reason,
+        "actor": actor,
+        "expected_version": expected_version,
+    }
+    return {
+        **payload,
+        "current_status": current_status,
+        "preview_fingerprint": fingerprint_payload(payload).value,
+        "apply_allowed": True,
+    }
+
+
+def preview_manual_information_confirmation(
+    case_no: Any,
+    candidate_id: Any,
+    info_type: Any,
+    confirmation_method: Any,
+    reason: Any,
+    actor: Any,
+) -> dict[str, Any]:
+    case_no = _required_text(case_no, "case_no", 50)
+    connection = cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute("SELECT status FROM orders WHERE case_no=%s", (case_no,))
+        order = cursor.fetchone()
+        if not isinstance(order, Mapping) or order.get("status") != "洽談中":
+            raise ValueError("candidate_contact_order_not_negotiating")
+        state = query_pool(case_no, connection=connection)
+        return _manual_information_preview(
+            state, candidate_id, info_type, confirmation_method, reason, actor
+        )
+    finally:
+        _close(cursor)
+        _close(connection)
+
+
+def apply_manual_information_confirmation(
+    case_no: Any,
+    candidate_id: Any,
+    info_type: Any,
+    confirmation_method: Any,
+    reason: Any,
+    actor: Any,
+    expected_version: Any,
+    preview_fingerprint: Any,
+    event_key: Any,
+) -> dict[str, Any]:
+    case_no = _required_text(case_no, "case_no", 50)
+    candidate_id = _positive_int(candidate_id, "candidate_id")
+    actor = _required_text(actor, "actor", 100)
+    event_key = _required_text(event_key, "event_key", 100)
+    if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 0:
+        raise ValueError("expected_version_invalid")
+    preview_fingerprint = _required_text(
+        preview_fingerprint, "preview_fingerprint", 64
+    )
+    if len(preview_fingerprint) != 64 or any(
+        char not in "0123456789abcdef" for char in preview_fingerprint
+    ):
+        raise ValueError("preview_fingerprint_invalid")
+    connection = cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT status FROM orders WHERE case_no=%s FOR UPDATE", (case_no,)
+        )
+        order = cursor.fetchone()
+        state = query_pool(case_no, connection=connection, for_update=True)
+        existing = next(
+            (event for event in state.events if event.event_key == event_key),
+            None,
+        )
+        confirmation_method = _required_text(
+            confirmation_method, "confirmation_method", 30
+        )
+        if confirmation_method not in _MANUAL_INFORMATION_METHODS:
+            raise ValueError("confirmation_method_invalid")
+        reason = _required_text(reason, "reason", 500)
+        payload = {
+            "delivery_status": "manually_confirmed",
+            "confirmation_method": confirmation_method,
+            "reason": reason,
+            "preview_fingerprint": preview_fingerprint,
+        }
+        if existing is not None:
+            if (
+                existing.candidate_id == candidate_id
+                and existing.event_type == f"info_{info_type}_sent"
+                and existing.actor == actor
+                and existing.payload_fingerprint == fingerprint_payload(payload).value
+            ):
+                connection.rollback()
+                return {
+                    "status": "idempotent_replay",
+                    "event_id": existing.id,
+                    "pool_version": existing.id,
+                    "delivery_status": "manually_confirmed",
+                    "confirmation_method": confirmation_method,
+                }
+            raise ValueError("event_key_belongs_to_different_candidate_event")
+        preview = _manual_information_preview(
+            state, candidate_id, info_type, confirmation_method, reason, actor
+        )
+        if not isinstance(order, Mapping) or order.get("status") != "洽談中":
+            raise ValueError("candidate_contact_order_not_negotiating")
+        if preview["expected_version"] != expected_version:
+            raise ValueError("candidate_contact_pool_version_stale")
+        if preview["preview_fingerprint"] != preview_fingerprint:
+            raise ValueError("candidate_information_preview_stale")
+        candidate = next(item for item in state.candidates if item.id == candidate_id)
+        _require_full_coverage(
+            case_no,
+            candidate.staff_id,
+            candidate.service_start_date.isoformat(),
+            candidate.service_end_date.isoformat(),
+        )
+        cursor.execute(
+            "INSERT INTO caregiver_candidate_contact_events "
+            "(pool_id,candidate_id,event_type,event_key,actor,payload) "
+            "VALUES (%s,%s,%s,%s,%s,%s)",
+            (
+                state.pool_id,
+                candidate_id,
+                f"info_{info_type}_sent",
+                event_key,
+                actor,
+                json.dumps(payload, ensure_ascii=False, sort_keys=True),
+            ),
+        )
+        event_id = _positive_int(cursor.lastrowid, "event_id")
+        connection.commit()
+        return {
+            "status": "recorded",
+            "event_id": event_id,
+            "pool_version": event_id,
+            "delivery_status": "manually_confirmed",
+            "confirmation_method": confirmation_method,
+        }
+    except Exception:
+        if connection is not None:
+            connection.rollback()
+        raise
+    finally:
+        _close(cursor)
+        _close(connection)
+
+
 def send_information(case_no: Any, candidate_id: Any, info_type: Any, actor: Any, event_key: Any) -> dict[str, Any]:
     case_no = _required_text(case_no, "case_no", 50)
     candidate_id = _positive_int(candidate_id, "candidate_id")
@@ -470,4 +666,6 @@ __all__ = [
     "query_pool",
     "record_willingness",
     "send_information",
+    "apply_manual_information_confirmation",
+    "preview_manual_information_confirmation",
 ]

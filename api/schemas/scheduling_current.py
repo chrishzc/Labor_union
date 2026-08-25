@@ -1,4 +1,7 @@
-"""Typed HTTP views for the current Scheduling projection."""
+"""
+File: scheduling_current.py
+Description: 定義目前排班、檔期鎖與不可服務原因的 strict HTTP view。
+"""
 
 from datetime import date, datetime
 
@@ -38,6 +41,7 @@ class SchedulingCurrentDayEntryView(BaseModel):
     segment_id: int | None = Field(default=None, gt=0)
     availability_block_id: int | None = Field(default=None, gt=0)
     unavailability_kind: str | None = None
+    unavailability_reason: str | None = Field(default=None, min_length=1, max_length=500)
 
 
 class SchedulingCurrentDayView(BaseModel):

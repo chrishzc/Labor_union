@@ -1,6 +1,6 @@
 /**
  * File: scheduling_current_adapter.ts
- * Description: 將 server Scheduling projection 映射為甘特月曆 view model，禁止日期與資格推導。
+ * Description: 映射 server Scheduling 甘特月曆並保留不可服務類別與原因，禁止日期或資格推導。
  */
 import type { StaffDirectoryCardViewModel } from '../staff/staff_directory_adapter';
 import type {
@@ -82,7 +82,8 @@ function assignmentStatusLabel(
 
 function toneLabel(
   tone: SchedulingDayTone,
-  statuses: readonly SchedulingAssignmentStatus[]
+  statuses: readonly SchedulingAssignmentStatus[],
+  unavailabilityLabels: readonly string[]
 ): string {
   switch (tone) {
     case 'active':
@@ -94,10 +95,20 @@ function toneLabel(
     case 'waiting':
       return '待成立檔期占用';
     case 'leave':
-      return '服務人員不可服務';
+      return unavailabilityLabels.join('、') || '服務人員不可服務';
     case 'available':
       return 'Server 顯示可用';
   }
+}
+
+function unavailabilityLabel(
+  kind: string | null,
+  reason: string | null
+): string | null {
+  if (reason === null) return null;
+  if (kind === 'long_leave') return `長假：${reason}`;
+  if (kind === 'paused_service') return `暫停接案：${reason}`;
+  return `不可服務：${reason}`;
 }
 
 export function adaptSchedulingDay(day: SchedulingCurrentDay): SchedulingDayViewModel {
@@ -108,6 +119,14 @@ export function adaptSchedulingDay(day: SchedulingCurrentDay): SchedulingDayView
       .map((entry) => entry.assignment_status)
       .filter((status): status is SchedulingAssignmentStatus => status !== null)
   );
+  const unavailabilityLabels = unique(
+    day.entries
+      .map((entry) => unavailabilityLabel(
+        entry.unavailability_kind,
+        entry.unavailability_reason
+      ))
+      .filter((label): label is string => label !== null)
+  );
   const tone = dayTone(kinds);
   return {
     date: day.calendar_date,
@@ -115,7 +134,7 @@ export function adaptSchedulingDay(day: SchedulingCurrentDay): SchedulingDayView
     weekdayLabel: WEEKDAY_FORMATTER.format(date),
     available: day.available,
     tone,
-    statusLabel: toneLabel(tone, statuses),
+    statusLabel: toneLabel(tone, statuses, unavailabilityLabels),
     caseLabels: unique(
       day.entries
         .map((entry) => entry.case_no)
@@ -128,9 +147,17 @@ export function adaptSchedulingDay(day: SchedulingCurrentDay): SchedulingDayView
 
 function loadedStatusLabel(
   kinds: readonly SchedulingOccupancyKind[],
-  statuses: readonly SchedulingAssignmentStatus[]
+  statuses: readonly SchedulingAssignmentStatus[],
+  days: readonly SchedulingDayViewModel[]
 ): string {
-  if (kinds.includes('staff_unavailability')) return '請假／暫停服務';
+  if (kinds.includes('staff_unavailability')) {
+    const labels = unique(
+      days
+        .filter((day) => day.occupancyKinds.includes('staff_unavailability'))
+        .map((day) => day.statusLabel)
+    );
+    return labels.join('、') || '請假／暫停服務';
+  }
   if (
     kinds.includes('waiting_deposit_service') ||
     kinds.includes('waiting_deposit_buffer')
@@ -160,7 +187,7 @@ export function adaptSchedulingProjection(
     days,
     occupancyKinds: kinds,
     assignmentStatuses: statuses,
-    loadedStatusLabel: loadedStatusLabel(kinds, statuses),
+    loadedStatusLabel: loadedStatusLabel(kinds, statuses, days),
   };
 }
 

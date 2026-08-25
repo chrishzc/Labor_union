@@ -1,4 +1,6 @@
-"""Typed MySQL adapters for Customer, Staff, and Access identity projections."""
+"""File: line_identity_owner_adapters.py
+Description: 提供 LINE 身分 owner projection 的唯讀與綁定資料庫 adapter。
+"""
 
 from __future__ import annotations
 
@@ -253,10 +255,16 @@ _ADMIN_LINE_COLLISION_SQL = (
 _ADMIN_BIND_SQL = "UPDATE admin_users SET linked_line_user_id=%s WHERE id=%s"
 _ADMIN_LINKED_SQL = (
     "SELECT a.id,a.display_name,a.role FROM admin_users a "
-    "JOIN line_identity_bindings b ON b.line_user_id=a.linked_line_user_id "
-    "AND b.subject_type='admin' AND b.subject_reference=CAST(a.id AS CHAR) "
+    "JOIN line_identity_bindings b ON "
+    "CONVERT(b.line_user_id USING utf8mb4) COLLATE utf8mb4_unicode_ci="
+    "CONVERT(a.linked_line_user_id USING utf8mb4) COLLATE utf8mb4_unicode_ci "
+    "AND b.subject_type='admin' AND "
+    "CONVERT(b.subject_reference USING utf8mb4) COLLATE utf8mb4_unicode_ci="
+    "CONVERT(CAST(a.id AS CHAR) USING utf8mb4) COLLATE utf8mb4_unicode_ci "
     "AND b.binding_status='bound' "
-    "WHERE a.linked_line_user_id=%s AND a.enabled=1 LIMIT 1"
+    "WHERE CONVERT(a.linked_line_user_id USING utf8mb4) COLLATE utf8mb4_unicode_ci="
+    "CONVERT(%s USING utf8mb4) COLLATE utf8mb4_unicode_ci "
+    "AND a.enabled=1 LIMIT 1"
 )
 _LEGACY_ROLE_UPSERT_SQL = (
     "INSERT INTO line_users (line_user_id,role,status,last_event_at) "

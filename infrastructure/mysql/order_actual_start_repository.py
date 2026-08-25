@@ -15,6 +15,7 @@ from domains.orders.actual_start import (
     ActualStartReconfirmationState,
 )
 from domains.orders.lifecycle import OrderLifecycleStatus
+from shared_kernel.errors import ErrorCategory, TypedError
 from subsystems.orders.order_lifecycle_command_envelope import (
     lock_order_lifecycle_command_envelope,
 )
@@ -29,6 +30,7 @@ from subsystems.orders.actual_start_workflow import (
     ActualStartPersistenceCommand,
     ActualStartPreview,
     ActualStartReceiptPersistenceCommand,
+    ActualStartWorkflowError,
     ActualStartWorkflowContext,
     ConfirmActualStartReconfirmationCommand,
 )
@@ -129,7 +131,22 @@ class MySqlOrderActualStartRepository:
         command: SchedulingReplacementCommand,
     ) -> SchedulingReplacementResult:
         with self._connection.cursor() as cursor:
-            return persist_scheduling_replacement(cursor, command)
+            try:
+                return persist_scheduling_replacement(cursor, command)
+            except IntegrityError as error:
+                if _is_effective_staff_date_conflict(error):
+                    raise ActualStartWorkflowError(
+                        TypedError(
+                            ErrorCategory.CONFLICT,
+                            "actual_start_staff_schedule_conflict",
+                            "實際開工日會與月嫂既有正式排班衝突，請先改用可服務日期或完成受控調度。",
+                            command.correlation_id,
+                            domain_blockers=(
+                                "scheduling.staff_effective_date_conflict",
+                            ),
+                        )
+                    ) from error
+                raise
 
     def persist_client_finance_impact(
         self,
@@ -641,6 +658,19 @@ def _canonical_json(payload):
 
 def _mysql_error_code(error):
     return error.args[0] if error.args and isinstance(error.args[0], int) else None
+
+
+def _is_effective_staff_date_conflict(error: IntegrityError) -> bool:
+    return (
+        _mysql_error_code(error) == 1062
+        and any(
+            constraint in str(error)
+            for constraint in (
+                "uq_staff_schedule_effective_date",
+                "scheduling_effective_occupancy.PRIMARY",
+            )
+        )
+    )
 
 
 _EVENT_INSERT_SQL = (

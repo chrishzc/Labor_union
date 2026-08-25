@@ -38,3 +38,27 @@ def test_contract_document_version_stale_is_typed_domain_blocker():
     assert raised.value.status_code == 409
     assert raised.value.detail["error"]["code"] == "contract_document_version_stale"
     assert raised.value.detail["error"]["category"] == "domain_blocked"
+
+
+def test_manual_contract_preview_stale_is_a_typed_domain_blocker():
+    with pytest.raises(HTTPException) as raised:
+        _response(
+            lambda: (_ for _ in ()).throw(ValueError("manual_contract_preview_stale")),
+            "unused",
+            "manual-preview-correlation",
+        )
+
+    assert raised.value.status_code == 409
+    assert raised.value.detail["error"]["code"] == "manual_contract_preview_stale"
+
+
+def test_manual_contract_requires_customer_acceptance_as_a_typed_domain_blocker():
+    with pytest.raises(HTTPException) as raised:
+        _response(
+            lambda: (_ for _ in ()).throw(ValueError("manual_contract_customer_acceptance_required")),
+            "unused",
+            "manual-acceptance-correlation",
+        )
+
+    assert raised.value.status_code == 409
+    assert raised.value.detail["error"]["code"] == "manual_contract_customer_acceptance_required"

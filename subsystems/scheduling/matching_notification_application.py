@@ -42,12 +42,16 @@ from subsystems.scheduling.matching_line_cards import (
     customer_profiles_card,
 )
 from subsystems.scheduling.matching_notification_contracts import (
+    ApplyManualCustomerProfilesCommand,
+    ManualCustomerProfilesPreview,
+    ManualCustomerProfilesReceipt,
     MatchingContactState,
     MatchingNotificationProjectionStatus,
     MatchingNotificationResult,
     MatchingResponseResult,
     AssignmentConversionNotificationResult,
     NotifyAssignmentConversionCommand,
+    PreviewManualCustomerProfilesCommand,
     RecordManualMatchingResponseCommand,
     RequestCaregiverInformationCommand,
     RequestCustomerProfilesCommand,
@@ -120,6 +124,54 @@ class MatchingNotificationApplication:
             result = self._create_customer_notification(unit_of_work, command)
             unit_of_work.commit()
         return result
+
+    def preview_manual_customer_profiles(
+        self,
+        command: PreviewManualCustomerProfilesCommand,
+    ) -> ManualCustomerProfilesPreview:
+        require_line_capability(command.actor, LineCapability.MATCHING_OVERRIDE)
+        with self._unit_of_work_factory() as unit_of_work:
+            state = _required_state(
+                unit_of_work, command.plan.case_no, command.plan.plan_id, False
+            )
+            return _manual_customer_profiles_preview(
+                unit_of_work, command, state, self._availability_validator
+            )
+
+    def apply_manual_customer_profiles(
+        self,
+        command: ApplyManualCustomerProfilesCommand,
+    ) -> ManualCustomerProfilesReceipt:
+        require_line_capability(command.actor, LineCapability.MATCHING_OVERRIDE)
+        with self._unit_of_work_factory() as unit_of_work:
+            replay = unit_of_work.matching_notifications.get_manual_customer_profiles_result(
+                command.idempotency_key,
+                command.preview_fingerprint.value,
+            )
+            if replay is not None:
+                unit_of_work.commit()
+                return replay
+            state = _required_state(
+                unit_of_work, command.plan.case_no, command.plan.plan_id, True
+            )
+            preview = _manual_customer_profiles_preview(
+                unit_of_work, command, state, self._availability_validator
+            )
+            if preview.preview_fingerprint != command.preview_fingerprint:
+                raise MatchingCommunicationStaleError(
+                    "manual customer profiles preview fingerprint is stale"
+                )
+            evidence = unit_of_work.matching_notifications.append_manual_customer_profiles(
+                plan=state.plan,
+                segment_ids=preview.segment_ids,
+                confirmation_method=command.confirmation_method,
+                reason=command.reason,
+                actor_id=command.actor.actor_id,
+                idempotency_key=command.idempotency_key,
+                fingerprint=command.preview_fingerprint.value,
+            )
+            unit_of_work.commit()
+        return ManualCustomerProfilesReceipt(state.plan, evidence, replayed=False)
 
     def notify_assignment_conversion(
         self,
@@ -237,6 +289,8 @@ class MatchingNotificationApplication:
         self._availability_validator(state)
         if not state.all_willing:
             raise MatchingDecisionNotReadyError("all caregivers must be willing")
+        if state.customer_profiles_are_available:
+            raise MatchingCommunicationConflictError("customer profiles are already available")
         if state.customer_line_user_id is None:
             raise MatchingDecisionNotReadyError("customer has no LINE binding")
         profiles = unit_of_work.matching_notifications.customer_profile_facts(command.plan.plan_id)
@@ -332,6 +386,36 @@ def _required_state(unit_of_work, case_no, plan_id, lock):
     return state
 
 
+def _manual_customer_profiles_preview(
+    unit_of_work,
+    command,
+    state,
+    availability_validator,
+):
+    _require_sendable_state(state, command.plan.version)
+    availability_validator(state)
+    if not state.all_willing:
+        raise MatchingDecisionNotReadyError("all caregivers must be willing")
+    if state.customer_profiles_are_available:
+        raise MatchingCommunicationConflictError(
+            "customer profiles are already available"
+        )
+    profiles = unit_of_work.matching_notifications.customer_profile_facts(
+        command.plan.plan_id
+    )
+    if not 1 <= len(profiles) <= 4 or len(profiles) != len(state.segments):
+        raise MatchingDecisionNotReadyError(
+            "customer profile count must match the formal plan"
+        )
+    return ManualCustomerProfilesPreview(
+        state.plan,
+        tuple(segment.segment_id for segment in state.segments),
+        command.confirmation_method,
+        command.reason,
+        command.fingerprint,
+    )
+
+
 def _require_sendable_state(state, expected_version):
     _require_expected_state(state, expected_version)
     if not state.plan_is_active or state.plan_status != "proposed":
@@ -383,7 +467,7 @@ def _append_line_response(unit_of_work, interaction, state, decision, line_user_
             state.customer_decision, value,
             plan_is_active=state.plan_is_active,
             recipient_matches=state.customer_line_user_id == line_user_id,
-            profiles_are_available=state.customer_profiles_status is not None,
+            profiles_are_available=state.customer_profiles_are_available,
         )
         response_type = scope
     return unit_of_work.matching_notifications.append_response(

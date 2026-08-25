@@ -1,11 +1,14 @@
-"""Public LIFF and administrator schemas for canonical LINE identity workflows."""
+"""
+File: line_identity.py
+Description: 定義 canonical LINE LIFF、登記與管理端身分流程的 public schemas。
+"""
 
 from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
 class LiffIdentityContext(BaseModel):
@@ -41,15 +44,30 @@ class CustomerIdentityRequest(LiffIdentityContext):
     phone: str = Field(min_length=1, max_length=30)
 
 
+class CustomerIdentityApplyRequest(CustomerIdentityRequest):
+    expected_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class StaffIdentityRequest(LiffIdentityContext):
     name: str = Field(min_length=1, max_length=100)
     identity_card: str = Field(min_length=1, max_length=20)
     birthday: date
 
 
+class StaffIdentityApplyRequest(StaffIdentityRequest):
+    expected_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class AdminIdentityBindingRequest(LiffIdentityContext):
     username: str = Field(min_length=1, max_length=100)
     password: SecretStr
+
+
+class AdminIdentityBindingApplyRequest(AdminIdentityBindingRequest):
+    expected_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class LineIdentityCandidateResponse(BaseModel):
@@ -59,15 +77,20 @@ class LineIdentityCandidateResponse(BaseModel):
 class LineIdentityPreviewResponse(BaseModel):
     status: str
     expected_version: int
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     candidate: LineIdentityCandidateResponse | None = None
 
 
 class LineIdentityApplyResponse(BaseModel):
     status: str
     review_request_id: int | None = None
+    receipt_identity: str = Field(min_length=1, max_length=255)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-class ProvisionalRegistrationRequest(BaseModel):
+class ProvisionalRegistrationPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     flow_id: str | None = Field(default=None, max_length=191)
     line_id_token: str = Field(default="", max_length=4096)
     development_line_user_id: str = Field(default="", max_length=191)
@@ -88,6 +111,20 @@ class ProvisionalRegistrationRequest(BaseModel):
     survey_details: dict[str, Any] = Field(default_factory=dict)
 
 
+class ProvisionalRegistrationRequest(ProvisionalRegistrationPreviewRequest):
+    expected_binding_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ProvisionalRegistrationPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+    expected_binding_version: int
+    payload_fingerprint: str
+    preview_fingerprint: str
+
+
 class ProvisionalRegistrationResponse(BaseModel):
     registration_id: int
     client_id: int
@@ -99,15 +136,39 @@ class ProvisionalRegistrationResponse(BaseModel):
 
 class LineIdentityRuntimeConfigResponse(BaseModel):
     liff_id: str
+    public_base_url: str | None = None
 
 
-class CanonicalLineReviewDecisionRequest(BaseModel):
+class CanonicalLineReviewDecisionPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     expected_version: int = Field(ge=0)
-    idempotency_key: str = Field(min_length=1, max_length=191)
     reason: str = Field(min_length=1, max_length=1000)
 
 
+class CanonicalLineReviewDecisionRequest(CanonicalLineReviewDecisionPreviewRequest):
+    idempotency_key: str = Field(min_length=1, max_length=191)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class CanonicalLineReviewDecisionPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: int
+    decision: str
+    before_status: str
+    after_status: str
+    expected_version: int
+    resulting_version: int
+    subject_type: str | None
+    subject_reference: str | None
+    line_user_id_masked: str
+    preview_fingerprint: str
+
+
 class CanonicalLineReviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     request_id: int
     review_type: str
     status: str
@@ -122,6 +183,8 @@ class CanonicalLineReviewResponse(BaseModel):
     reviewed_by_actor_id: str | None
     reviewed_at: datetime | None
     created_at: datetime | None
+    outcome: str | None = None
+    receipt_identity: str | None = None
 
 
 class CanonicalLineReviewPageResponse(BaseModel):

@@ -159,7 +159,9 @@ def test_service_registration_text_returns_the_non_expiring_liff_entrypoint(monk
     handled = application.handle(_inbox("event-registration"), unit_of_work, LineUserId("U123456789"), "服務登記")
 
     assert handled is True
-    assert "https://liff.line.me/1234567890-AbCdEf?target=registration" in unit_of_work.delivery_tasks.requests[0].payload_json
+    payload = unit_of_work.delivery_tasks.requests[0].payload_json
+    assert "https://liff.line.me/1234567890-AbCdEf?entry=registration" in payload
+    assert "target=registration" not in payload
 
 
 def test_unbound_progress_creates_a_canonical_customer_binding_flow():
@@ -262,7 +264,8 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
     menu = (PROJECT_ROOT / "config/line_menu.json").read_text(encoding="utf-8")
     identity = (PROJECT_ROOT / "line/static/identity.html").read_text(encoding="utf-8")
     staff_orders = (PROJECT_ROOT / "line/static/staff_order_search.html").read_text(encoding="utf-8")
-    assert '"uri": "?target=registration"' in menu
+    assert '"uri": "?entry=registration"' in menu
+    assert '"uri": "?target=registration"' not in menu
     assert '"text": "服務說明"' in menu
     assert "?target=staff_order_search" in menu
     assert "?target=staff_schedule" in menu
@@ -271,14 +274,16 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
     assert "userId" not in staff_orders
 
 
-def test_staff_self_service_exposes_only_the_approved_scheduling_mutations():
+def test_staff_self_service_fails_closed_without_preview_apply_mutations():
     schedule = (
         PROJECT_ROOT / "line/static/staff_schedule.html"
     ).read_text(encoding="utf-8")
 
-    assert "/api/v1/line/staff-self-service/leave-requests" in schedule
-    assert "/api/v1/line/staff-self-service/service-day-logs" in schedule
-    assert "/api/v1/line/staff-self-service/service-day-media" in schedule
+    assert "/api/v1/line/staff-self-service/leave-requests" not in schedule
+    assert "/api/v1/line/staff-self-service/service-day-logs" not in schedule
+    assert "/api/v1/line/staff-self-service/service-day-media" not in schedule
+    assert "尚缺 Preview／Apply／receipt" in schedule
+    assert "請聯絡工會人員人工處理" in schedule
     assert "LINE provider" not in schedule
 
 
@@ -339,7 +344,7 @@ def test_mobile_admin_actor_is_not_restricted_by_persisted_role():
     assert "line_viewer" not in actor.permission_scope
 
 
-def test_customer_service_preview_apply_routes_preserve_legacy_patch():
+def test_customer_service_preview_apply_routes_keep_legacy_patch_as_retired_guard():
     routes = {
         (route.path, method)
         for route in customer_service_router.routes

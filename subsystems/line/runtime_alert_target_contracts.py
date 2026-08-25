@@ -101,12 +101,36 @@ class LineAlertTargetMutationReceipt:
 
 
 @dataclass(frozen=True, slots=True)
+class LineAlertTargetMutationPreview:
+    operation: str
+    target_id: int | None
+    previous_state: str
+    resulting_state: str
+    current_version: str
+    preview_fingerprint: PreviewFingerprint
+    apply_ready: bool
+
+    def __post_init__(self) -> None:
+        _text(self.operation, "operation", 100)
+        if self.target_id is not None:
+            require_positive_integer(self.target_id, "target ID")
+        if self.previous_state not in {"absent", "active", "disabled"}:
+            raise ValueError("previous state is invalid")
+        if self.resulting_state not in {"active", "disabled"}:
+            raise ValueError("resulting state is invalid")
+        _text(self.current_version, "current version", _MAX_TOKEN)
+        if not isinstance(self.apply_ready, bool):
+            raise TypeError("apply_ready must be boolean")
+
+
+@dataclass(frozen=True, slots=True)
 class ResetLineAlertGroupCommand:
     expected_version: str
     reason: str
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
     actor: ActorContext
+    preview_fingerprint: PreviewFingerprint | None = None
 
     def __post_init__(self) -> None:
         _text(self.expected_version, "expected version", _MAX_TOKEN)
@@ -122,6 +146,7 @@ class SetLineAlertTargetEnabledCommand:
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
     actor: ActorContext
+    preview_fingerprint: PreviewFingerprint | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.target_id, "target ID")
@@ -139,6 +164,7 @@ class AddLineAlertAdminTargetCommand:
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
     actor: ActorContext
+    preview_fingerprint: PreviewFingerprint | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.admin_user_id, "admin user ID")
@@ -189,6 +215,7 @@ __all__ = [
     "AlertAdminCandidateView",
     "AlertTargetView",
     "LineAlertTargetMutationReceipt",
+    "LineAlertTargetMutationPreview",
     "ResetLineAlertGroupCommand",
     "RuntimeAlertTargetError",
     "SetLineAlertTargetEnabledCommand",

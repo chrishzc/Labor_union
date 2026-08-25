@@ -14,6 +14,7 @@ from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.errors import GlobalTypedErrorResponseView
 from api.schemas.orders_stage_projection import OrderOperationalTimelinePageView
+from domains.orders.lifecycle import OrderLifecycleScope
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.orders.stage_projection_query import OrderStageProjectionContractError, StageProjectionQuery
 
@@ -38,13 +39,14 @@ def get_order_operational_timelines(
     response: Response,
     page_size: int = Query(50, ge=1, le=200),
     after_case_no: str | None = Query(None, min_length=1, max_length=50),
+    lifecycle_scope: OrderLifecycleScope = Query(OrderLifecycleScope.ALL),
     if_none_match: str | None = Header(None, alias="If-None-Match"),
     principal: AdminPrincipal = Depends(require_system_admin),
     application: OrdersStageProjectionApplication = Depends(get_orders_stage_projection_application),
 ):
     del principal
     try:
-        page = application.query(StageProjectionQuery(page_size, after_case_no))
+        page = application.query(StageProjectionQuery(page_size, after_case_no, lifecycle_scope))
         view = OrderOperationalTimelinePageView.model_validate(page, from_attributes=True)
     except OrderStageProjectionContractError as error:
         raise typed_http_error(409, "conflict", "order_stage_projection_invalid", "訂單階段根事實無法產生一致投影。", "orders-stage-projection-query") from error

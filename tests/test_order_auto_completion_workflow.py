@@ -1,15 +1,20 @@
-"""Unit invariants for the canonical Orders service-completion command."""
+"""
+File: test_order_auto_completion_workflow.py
+Description: 驗證 canonical Orders 服務完成 Preview、Apply、冪等與 typed blocker。
+"""
 
 from datetime import datetime
 
 import pytest
 
 from shared_kernel.errors import ErrorCategory
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.orders.auto_completion_workflow import (
     AutoCompleteOrderService,
     AutoCompletionApplyRequest,
     AutoCompletionClaimState,
+    AutoCompletionPreviewRequest,
     AutoCompletionRepositoryConflictError,
     AutoCompletionRepositoryIntegrityError,
     AutoCompletionRepositoryNotFoundError,
@@ -30,19 +35,20 @@ class _Repository:
     def claim_command(self, *_): return AutoCompletionClaimState.CREATED
     def find_receipt(self, *_): return self.receipt
     def load_locked_facts(self, _): return self.facts
+    def load_preview_facts(self, _): return self.facts
     def append_lifecycle_event(self, *_): self.writes.append("event"); return 9
     def update_order(self, *_): self.writes.append("order")
     def append_outbox(self, *_): self.writes.append("outbox")
     def save_receipt(self, receipt): self.writes.append("receipt"); self.receipt = type("Stored", (), {"command_fingerprint": receipt.command_fingerprint, "receipt": receipt})()
 
 
-def _request(evaluation_at="2026-08-04T17:00:00+08:00"):
-    return AutoCompletionApplyRequest("G05-CASE", ExpectedVersion(3), datetime.fromisoformat(evaluation_at), IdempotencyKey("g05-unit-key"), ActorContext("g05-test"), "scheduled completion evaluation", CorrelationId("g05-unit"))
+def _request(evaluation_at="2026-08-04T17:00:00+08:00", preview_fingerprint=None):
+    return AutoCompletionApplyRequest("G05-CASE", ExpectedVersion(3), datetime.fromisoformat(evaluation_at), IdempotencyKey("g05-unit-key"), ActorContext("g05-test"), "scheduled completion evaluation", CorrelationId("g05-unit"), preview_fingerprint)
 
 
 def _facts(*, blockers=(), status="服務中", cancellation=False, completion="2026-08-04T17:00:00+08:00"):
     return {
-        "locked_order": {"status": status},
+        "locked_order": {"status": status, "lifecycle_version": 3},
         "authoritative_facts": {
             "cancellation": cancellation,
             "cancellation_reason": "fixture cancellation" if cancellation else None,
@@ -68,6 +74,37 @@ def test_auto_completion_applies_only_orders_lifecycle_and_outbox_once():
     receipt = service.apply(_request())
     assert receipt.order_version == 4
     assert repository.writes == ["event", "order", "outbox", "receipt"]
+
+
+def test_manual_preview_binds_same_facts_to_apply() -> None:
+    repository = _Repository(_facts())
+    service = AutoCompleteOrderService(repository, _UnitOfWork)
+    preview = service.preview(
+        AutoCompletionPreviewRequest(
+            "G05-CASE",
+            datetime.fromisoformat("2026-08-04T17:00:00+08:00"),
+            CorrelationId("g05-preview"),
+        )
+    )
+
+    receipt = service.apply(_request(preview_fingerprint=preview.fingerprint))
+
+    assert preview.current_status == "服務中"
+    assert preview.expected_order_version == 3
+    assert preview.resulting_order_version == 4
+    assert preview.official_service_dates == ("2026-08-04",)
+    assert receipt.order_version == 4
+
+
+def test_manual_apply_rejects_stale_preview_without_lifecycle_writes() -> None:
+    repository = _Repository(_facts())
+    service = AutoCompleteOrderService(repository, _UnitOfWork)
+
+    with pytest.raises(AutoCompletionWorkflowError) as error:
+        service.apply(_request(preview_fingerprint=PreviewFingerprint("f" * 64)))
+
+    assert error.value.error.code == "stale_preview"
+    assert repository.writes == []
 
 
 def test_auto_completion_before_instant_is_domain_blocked_without_writes():

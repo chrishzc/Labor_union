@@ -36,11 +36,15 @@ from domains.scheduling.matching_communication import (
     MatchingPlanReference,
 )
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.scheduling.matching_notification_application import (
     MatchingNotificationApplication,
 )
 from subsystems.scheduling.matching_notification_contracts import (
+    ApplyManualCustomerProfilesCommand,
+    ManualMatchingConfirmationMethod,
+    PreviewManualCustomerProfilesCommand,
     RecordManualMatchingResponseCommand,
     RequestCaregiverInformationCommand,
     RequestCustomerProfilesCommand,
@@ -74,6 +78,20 @@ class MatchingPlanWillingnessRequest(MatchingPlanEventIdentity):
 class MatchingPlanResumeRequest(MatchingPlanEventIdentity):
     note: str = Field(..., min_length=1, max_length=1000)
     expected_version: int = Field(..., ge=0)
+
+
+class ManualMatchingProfilesPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    actor: str = Field(..., min_length=1, max_length=100)
+    confirmation_method: Literal["phone", "in_person", "paper", "other"]
+    reason: str = Field(..., min_length=1, max_length=500)
+    expected_version: int = Field(..., ge=0)
+
+
+class ManualMatchingProfilesApplyRequest(ManualMatchingProfilesPreviewRequest):
+    event_key: str = Field(..., min_length=1, max_length=191)
+    preview_fingerprint: str = Field(..., pattern=r"^[0-9a-f]{64}$")
 
 
 class MatchingPlanCustomerDecisionRequest(MatchingPlanEventIdentity):
@@ -272,6 +290,71 @@ def send_matching_plan_resumes_route(
 
 
 @router.post(
+    "/orders/{case_no}/matching-plans/{plan_id}/resumes/manual-confirmation/preview",
+    response_model=BaseResponse[Dict[str, Any]],
+)
+def preview_manual_matching_plan_resumes_route(
+    req: ManualMatchingProfilesPreviewRequest,
+    case_no: str,
+    plan_id: int,
+    principal: AdminPrincipal = Depends(require_line_matching_override),
+):
+    _require_matching_actor(principal, req.actor)
+    try:
+        result = matching_notifications.preview_manual_customer_profiles(
+            PreviewManualCustomerProfilesCommand(
+                MatchingPlanReference(case_no, plan_id, req.expected_version),
+                ManualMatchingConfirmationMethod(req.confirmation_method),
+                req.reason,
+                admin_actor_context(principal),
+                ExpectedVersion(req.expected_version),
+            )
+        )
+        return BaseResponse(
+            data=_manual_profiles_preview_data(result),
+            message="已預覽客戶履歷人工送達證據",
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/orders/{case_no}/matching-plans/{plan_id}/resumes/manual-confirmation",
+    response_model=BaseResponse[Dict[str, Any]],
+)
+def apply_manual_matching_plan_resumes_route(
+    req: ManualMatchingProfilesApplyRequest,
+    case_no: str,
+    plan_id: int,
+    principal: AdminPrincipal = Depends(require_line_matching_override),
+):
+    _require_matching_actor(principal, req.actor)
+    try:
+        result = matching_notifications.apply_manual_customer_profiles(
+            ApplyManualCustomerProfilesCommand(
+                MatchingPlanReference(case_no, plan_id, req.expected_version),
+                ManualMatchingConfirmationMethod(req.confirmation_method),
+                req.reason,
+                admin_actor_context(principal),
+                ExpectedVersion(req.expected_version),
+                PreviewFingerprint(req.preview_fingerprint),
+                IdempotencyKey(req.event_key),
+                CorrelationId(f"matching-api:{req.event_key}"),
+            )
+        )
+        return BaseResponse(
+            data=_manual_profiles_receipt_data(result),
+            message="客戶履歷人工送達證據已留存",
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
     "/orders/{case_no}/matching-plans/{plan_id}/cancel",
     response_model=BaseResponse[Dict[str, Any]],
 )
@@ -431,6 +514,12 @@ def _contact_state_data(state) -> dict[str, Any]:
             state.customer_profiles_status.value
             if state.customer_profiles_status else None
         ),
+        "customer_profiles_manual_confirmation": (
+            _manual_profiles_evidence_data(
+                state.customer_profiles_manual_confirmation
+            )
+            if state.customer_profiles_manual_confirmation else None
+        ),
     }
 
 
@@ -461,6 +550,41 @@ def _notification_data(result) -> dict[str, Any]:
         ),
         "delivery_status": result.projection_status.value,
         "notification_kind": result.notification_kind.value,
+    }
+
+
+def _manual_profiles_evidence_data(evidence) -> dict[str, Any]:
+    return {
+        "event_ids": list(evidence.event_ids),
+        "confirmation_method": evidence.confirmation_method.value,
+        "reason": evidence.reason,
+        "actor_id": evidence.actor_id,
+        "preview_fingerprint": evidence.preview_fingerprint.value,
+    }
+
+
+def _manual_profiles_preview_data(result) -> dict[str, Any]:
+    return {
+        "case_no": result.plan.case_no,
+        "plan_id": result.plan.plan_id,
+        "expected_version": result.plan.version,
+        "segment_ids": list(result.segment_ids),
+        "confirmation_method": result.confirmation_method.value,
+        "reason": result.reason,
+        "preview_fingerprint": result.preview_fingerprint.value,
+        "apply_allowed": result.apply_allowed,
+    }
+
+
+def _manual_profiles_receipt_data(result) -> dict[str, Any]:
+    return {
+        "case_no": result.plan.case_no,
+        "plan_id": result.plan.plan_id,
+        "communication_version": result.plan.version,
+        "event_ids": list(result.evidence.event_ids),
+        "confirmation_method": result.evidence.confirmation_method.value,
+        "preview_fingerprint": result.evidence.preview_fingerprint.value,
+        "replayed": result.replayed,
     }
 
 

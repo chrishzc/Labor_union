@@ -1,6 +1,6 @@
 /**
  * File: line_identity_adapter.ts
- * Description: 將 LINE 身分查詢、更正、解除與維護 DTO 轉為遮罩展示模型，排除 provider 與原始錯誤。
+ * Description: 將 LINE 身分查詢、審核、更正、解除與維護 DTO 轉為遮罩展示模型，排除 provider 與原始錯誤。
  */
 import type {
   LineBindingSubjectType,
@@ -8,6 +8,14 @@ import type {
   LineIdentityBindingStatus,
   LineIdentityBindingView,
   LineIdentityReplacementPreviewView,
+  LineIdentityReviewDecision,
+  LineIdentityReviewApplyView,
+  LineIdentityReviewPageView,
+  LineIdentityReviewPreviewView,
+  LineIdentityReviewStatus,
+  LineIdentityReviewSummaryView,
+  LineIdentityReviewType,
+  LineIdentityReviewView,
   LineIdentityRevocationPreviewView,
   LineIdentityRevocationRequestView,
   LineIdentityRevocationStatus,
@@ -66,6 +74,60 @@ export interface LineIdentityMaintenanceResultViewModel {
   notice: string;
 }
 
+export interface LineIdentityReviewRowViewModel {
+  requestId: number;
+  reviewType: LineIdentityReviewType;
+  reviewTypeLabel: string;
+  status: LineIdentityReviewStatus;
+  statusLabel: string;
+  version: number;
+  subjectTypeLabel: string;
+  subjectReference: string | null;
+  maskedLineUserId: string;
+  displayName: string;
+  decisionReason: string | null;
+  reviewedAt: string | null;
+  createdAt: string | null;
+}
+
+export interface LineIdentityReviewPageViewModel {
+  items: LineIdentityReviewRowViewModel[];
+  nextCursor: string | null;
+}
+
+export interface LineIdentityReviewSummaryViewModel {
+  pendingTotal: number;
+  staffPending: number;
+  rebindPending: number;
+  processedToday: number;
+}
+
+export interface LineIdentityReviewPreviewViewModel {
+  requestId: number;
+  decision: LineIdentityReviewDecision;
+  decisionLabel: string;
+  beforeStatusLabel: string;
+  afterStatusLabel: string;
+  expectedVersion: number;
+  resultingVersion: number;
+  subjectTypeLabel: string;
+  subjectReference: string | null;
+  maskedLineUserId: string;
+  previewFingerprint: string;
+}
+
+export interface LineIdentityReviewReceiptViewModel {
+  requestId: number;
+  status: LineIdentityReviewStatus;
+  statusLabel: string;
+  version: number;
+  decisionReason: string | null;
+  reviewedAt: string | null;
+  outcomeLabel: string;
+  receiptIdentity: string;
+  notice: string;
+}
+
 export function maskLineUserId(lineUserId: string): string {
   const value = lineUserId.trim();
   if (value.length <= 2) {
@@ -116,6 +178,36 @@ function revocationStatusLabel(status: LineIdentityRevocationStatus | null): str
     case null:
       return '尚未申請解除';
   }
+}
+
+function reviewTypeLabel(reviewType: LineIdentityReviewType): string {
+  switch (reviewType) {
+    case 'client_rebind':
+      return '客戶重新綁定';
+    case 'staff_verification':
+      return '月嫂身分驗證';
+    case 'admin_binding':
+      return '管理員綁定';
+  }
+}
+
+function reviewStatusLabel(status: LineIdentityReviewStatus): string {
+  switch (status) {
+    case 'pending':
+      return '待人工審核';
+    case 'approved':
+      return '已核准';
+    case 'rejected':
+      return '已拒絕';
+    case 'cancelled':
+      return '已取消';
+    case 'expired':
+      return '已失效';
+  }
+}
+
+function reviewDecisionLabel(decision: LineIdentityReviewDecision): string {
+  return decision === 'approve' ? '核准' : '拒絕';
 }
 
 function blockerLabel(blocker: string): string {
@@ -229,5 +321,79 @@ export function adaptLineIdentityMaintenanceResult(
       operation === 'retry'
         ? '已重新排入 Rich Menu 回復流程；請稍後重新查詢確認完成結果。'
         : '人工完成已受理；請重新查詢綁定狀態確認 owner projection 已清除。',
+  };
+}
+
+export function adaptLineIdentityReview(
+  review: LineIdentityReviewView
+): LineIdentityReviewRowViewModel {
+  return {
+    requestId: review.request_id,
+    reviewType: review.review_type,
+    reviewTypeLabel: reviewTypeLabel(review.review_type),
+    status: review.status,
+    statusLabel: reviewStatusLabel(review.status),
+    version: review.version,
+    subjectTypeLabel: review.subject_type === null ? '尚未連結對象' : subjectTypeLabel(review.subject_type),
+    subjectReference: review.subject_reference,
+    maskedLineUserId: maskLineUserId(review.line_user_id_masked),
+    displayName: review.display_name,
+    decisionReason: review.decision_reason,
+    reviewedAt: review.reviewed_at,
+    createdAt: review.created_at,
+  };
+}
+
+export function adaptLineIdentityReviewPage(
+  page: LineIdentityReviewPageView
+): LineIdentityReviewPageViewModel {
+  return {
+    items: page.items.map(adaptLineIdentityReview),
+    nextCursor: page.next_cursor,
+  };
+}
+
+export function adaptLineIdentityReviewSummary(
+  summary: LineIdentityReviewSummaryView
+): LineIdentityReviewSummaryViewModel {
+  return {
+    pendingTotal: summary.pending_total,
+    staffPending: summary.staff_pending,
+    rebindPending: summary.rebind_pending,
+    processedToday: summary.processed_today,
+  };
+}
+
+export function adaptLineIdentityReviewPreview(
+  preview: LineIdentityReviewPreviewView
+): LineIdentityReviewPreviewViewModel {
+  return {
+    requestId: preview.request_id,
+    decision: preview.decision,
+    decisionLabel: reviewDecisionLabel(preview.decision),
+    beforeStatusLabel: reviewStatusLabel(preview.before_status),
+    afterStatusLabel: reviewStatusLabel(preview.after_status),
+    expectedVersion: preview.expected_version,
+    resultingVersion: preview.resulting_version,
+    subjectTypeLabel: preview.subject_type === null ? '尚未連結對象' : subjectTypeLabel(preview.subject_type),
+    subjectReference: preview.subject_reference,
+    maskedLineUserId: maskLineUserId(preview.line_user_id_masked),
+    previewFingerprint: preview.preview_fingerprint,
+  };
+}
+
+export function adaptLineIdentityReviewReceipt(
+  review: LineIdentityReviewApplyView
+): LineIdentityReviewReceiptViewModel {
+  return {
+    requestId: review.request_id,
+    status: review.status,
+    statusLabel: reviewStatusLabel(review.status),
+    version: review.version,
+    decisionReason: review.decision_reason,
+    reviewedAt: review.reviewed_at,
+    outcomeLabel: review.outcome === 'existing' ? '已存在（幂等回放）' : '已建立',
+    receiptIdentity: review.receipt_identity,
+    notice: '審核決定已由後端受理；此回應不代表任何 LINE provider 訊息已送達。',
   };
 }

@@ -104,6 +104,76 @@ def test_client_signed_return_rejects_same_key_with_different_signed_content(mon
         application.record_signed_return(_command())
 
 
+def test_manual_client_attestation_previews_a_non_line_apply_path(monkeypatch):
+    connection = _Connection()
+    application = _application(connection)
+    snapshot = {
+        "commitment_id": 4, "matching_plan_id": 3, "version": 1,
+        "status": "accepted", "is_active": 1, "already_signed": 0,
+    }
+    monkeypatch.setattr(client_signing, "_manual_client_snapshot", lambda *_args, **_kwargs: snapshot)
+
+    preview = application.preview_manual_attestation(
+        case_no="CASE-1", confirmation_method="paper", reason="已核對紙本簽回。",
+    )
+
+    assert preview["scope"] == "client_contract"
+    assert preview["matching_segment_id"] is None
+    assert preview["line_delivery_task_id"] is None
+    assert len(str(preview["preview_fingerprint"])) == 64
+    assert connection.closed is True
+
+
+def test_manual_client_attestation_accepts_a_plan_before_availability_lock_exists():
+    client_signing._require_manual_client_snapshot_applicable({
+        "status": "accepted", "is_active": None, "already_signed": 0,
+    })
+
+
+def test_manual_client_attestation_requires_customer_acceptance_for_active_proposal():
+    client_signing._require_manual_client_snapshot_applicable({
+        "status": "proposed", "is_active": 1, "customer_decision": "accepted", "already_signed": 0,
+    })
+    with pytest.raises(ValueError, match="manual_contract_customer_acceptance_required"):
+        client_signing._require_manual_client_snapshot_applicable({
+            "status": "proposed", "is_active": 1, "customer_decision": "", "already_signed": 0,
+        })
+
+
+def test_manual_client_attestation_completes_without_sent_event(monkeypatch):
+    connection = _Connection()
+    application = _application(connection)
+    snapshot = {
+        "commitment_id": 4, "matching_plan_id": 3, "version": 1,
+        "status": "accepted", "is_active": 1, "already_signed": 0,
+    }
+    command = client_signing.ManualClientContractAttestationCommand(
+        "CASE-1", b"signed-content", "paper-signed.pdf", "application/pdf", "paper",
+        "已核對紙本簽回。", client_signing._manual_preview_fingerprint(snapshot, "paper", "已核對紙本簽回。"),
+        "wp56-test", IdempotencyKey("wp56-client-manual"), CorrelationId("wp56-client-manual"),
+    )
+    completed: list[str] = []
+    monkeypatch.setattr(application, "_existing_signed_return_receipt", lambda _command: None)
+    monkeypatch.setattr(client_signing, "_manual_client_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(client_signing, "archive_contract_document", lambda *_args, **_kwargs: SimpleNamespace(storage_key="case/manual.xlsx", sha256="manual-digest", file_size=42))
+    monkeypatch.setattr(client_signing, "_client_contract_facts", lambda *_: {"matching_plan_id": 3, "commitment_id": 4})
+    monkeypatch.setattr(client_signing, "load_approved_template", lambda *_: SimpleNamespace(template_key="contract_client_copy", template_filename="template.xlsx"))
+    monkeypatch.setattr(client_signing, "render_contract_template", lambda **_kwargs: b"template")
+    monkeypatch.setattr(client_signing, "_client_template_facts", lambda *_: {"case_no": "CASE-1"})
+    monkeypatch.setattr(client_signing, "_insert_generated_document", lambda *_: 5)
+    monkeypatch.setattr(client_signing, "_insert_signed_document", lambda *_: 6)
+    monkeypatch.setattr(client_signing, "_insert_signed_event", lambda *_: 7)
+    monkeypatch.setattr(client_signing, "_complete_contract_in_transaction", lambda _connection, _command, identity: completed.append(identity))
+    monkeypatch.setattr(client_signing, "_append_command_outcome", lambda *_: None)
+
+    receipt = application.record_manual_attestation(command)
+
+    assert receipt.line_delivery_task_id is None
+    assert receipt.contract_completed is True
+    assert completed == ["client-contract:manual-digest"]
+    assert connection.committed is True
+
+
 class _ReplayConnection:
     @contextmanager
     def cursor(self):

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from domains.orders.lifecycle import OrderLifecycleScope
 from subsystems.orders.summary_query import (
     OrderSummaryContractError,
     OrderSummaryQueryRequest,
@@ -56,6 +57,18 @@ def test_query_passes_case_or_client_search_text_to_repository() -> None:
     service.query(OrderSummaryQueryRequest(50, None, "陳小姐"))
 
     assert captured["query_text"] == "陳小姐"
+    assert captured["lifecycle_scope"] is OrderLifecycleScope.ALL
+
+
+def test_query_passes_unfinished_lifecycle_scope_to_repository() -> None:
+    captured = {}
+    service = OrderSummaryQueryService(
+        SimpleNamespace(fetch_page=lambda **arguments: captured.update(arguments) or (_row(),))
+    )
+
+    service.query(OrderSummaryQueryRequest(50, None, None, OrderLifecycleScope.UNFINISHED))
+
+    assert captured["lifecycle_scope"] is OrderLifecycleScope.UNFINISHED
 
 
 def test_query_rejects_non_tuple_repository_page() -> None:

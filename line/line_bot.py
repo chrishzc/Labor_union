@@ -172,8 +172,8 @@ SERVICE_HELP_REPLIES = {
         "已完成登記者，請回覆您的案件編號或登記姓名，工會人員會依資料協助確認目前進度。"
     ),
     "修改登記資料": (
-        "若要修改已送出的登記資料，請開啟下方頁面填寫資料異動申請。"
-        "送出後資料會先暫存，待工會人員審核通過後才會正式更新。"
+        "目前資料異動的正式線上申請介面仍在建置中。"
+        "請直接留言要修改的項目，工會人員會以人工待辦協助確認；系統不會在未確認前直接更新正式資料。"
     ),
     "月嫂身分認證": "若您是月嫂本人，請點選下方「我是月嫂」或直接回覆「我是月嫂」，系統會送出身分確認申請。",
     "其他問題": "請直接輸入您的問題內容。若已經有案件編號，也請一起提供，方便工會人員協助查詢。",
@@ -232,8 +232,6 @@ def _enqueue_service_help_reply(
         return False
     reply_text = SERVICE_HELP_REPLIES[normalized]
     payload: dict[str, Any] = {"type": "text", "text": reply_text}
-    if normalized == "修改登記資料":
-        payload["text"] = f"{reply_text}\n\n{_liff_url('?target=profile_update')}"
     if normalized == "月嫂身分認證":
         payload["quickReply"] = {"items": [_quick_reply_item("我是月嫂")]}
     enqueue_line_task(

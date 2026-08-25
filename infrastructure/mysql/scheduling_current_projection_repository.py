@@ -48,7 +48,7 @@ class MySqlSchedulingCurrentProjectionRepository:
 
 def _unavailability_blocks(cursor, query):
     cursor.execute(
-        "SELECT id,staff_id,block_kind,start_date,end_date FROM "
+        "SELECT id,staff_id,block_kind,start_date,end_date,reason FROM "
         "scheduling_staff_unavailability_blocks WHERE staff_id=%s "
         "AND status='effective' AND start_date<=%s "
         "AND (end_date IS NULL OR end_date>=%s) ORDER BY start_date,id",
@@ -63,6 +63,7 @@ def _unavailability_blocks(cursor, query):
             None
             if row["end_date"] is None
             else _as_date(row["end_date"], "availability end date"),
+            row["reason"],
         )
         for row in _mapping_rows(cursor.fetchall(), "staff unavailability")
     )
@@ -96,6 +97,11 @@ def _assignments(cursor, rows):
     official_dates = _official_service_dates(cursor, assignment_ids)
     buffer_dates = _active_buffer_dates(cursor, assignment_ids)
     case_first_service_dates = _case_first_service_dates(cursor, generation_ids)
+    if (
+        any(generation_id not in case_first_service_dates for generation_id in generation_ids)
+        or any(assignment_id not in official_dates for assignment_id in assignment_ids)
+    ):
+        raise ValueError("official_service_dates_incomplete")
     return tuple(
         _assignment_fact(
             row,

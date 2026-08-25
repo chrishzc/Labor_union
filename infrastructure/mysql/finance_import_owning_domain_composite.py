@@ -51,6 +51,12 @@ from shared_kernel.identities import (
     IdempotencyKey,
 )
 from shared_kernel.errors import ErrorCategory
+from domains.finance_import.cancellation_code import (
+    resolve_finance_cancellation_code,
+)
+from subsystems.client_finance.virtual_account_resolution import (
+    resolve_client_virtual_account,
+)
 from subsystems.client_finance.reconciliation_workflow import (
     ClientReconciliationApplyRequest,
     ClientReconciliationError,
@@ -302,20 +308,19 @@ class MySqlFinanceImportOwningDomainComposite:
 
 def _resolve_client_receipt(connection, candidate):
     client_id = _single_prefixed_identity(candidate, "client:")
-    if client_id is None:
+    case_no = None if client_id is not None else _virtual_account_case_no(
+        connection,
+        candidate.row_identity,
+    )
+    if client_id is None and case_no is None:
         return candidate
     with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT obligation.obligation_identity "
-            "FROM client_obligations obligation "
-            "JOIN orders order_row ON order_row.case_no=obligation.case_no "
-            "WHERE order_row.client_id=%s "
-            "AND obligation.direction='receivable_from_client' "
-            "AND obligation.status='open' "
-            "AND obligation.amount_due_ntd=%s "
-            "ORDER BY obligation.obligation_identity",
-            (client_id, candidate.amount.amount),
+        statement, parameters = _client_receipt_target_query(
+            client_id,
+            case_no,
+            candidate.amount.amount,
         )
+        cursor.execute(statement, parameters)
         rows = tuple(cursor.fetchall())
     if len(rows) != 1:
         return candidate
@@ -324,6 +329,52 @@ def _resolve_client_receipt(connection, candidate):
         candidate,
         (target,),
         "exact-open-client-obligation",
+    )
+
+
+def _virtual_account_case_no(connection, row_identity):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT format_id,cancellation_code,bank_references "
+            "FROM finance_import_rows WHERE id=%s",
+            (_row_id(row_identity),),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        source = dict(row)
+        source["bank_references"] = _json_object(source.get("bank_references"))
+        cancellation_code = resolve_finance_cancellation_code(source)[
+            "cancellation_code"
+        ]
+        resolution = resolve_client_virtual_account(cursor, cancellation_code)
+    if resolution["result"] != "resolved":
+        return None
+    return str(resolution["case_no"])
+
+
+def _client_receipt_target_query(client_id, case_no, amount_ntd):
+    base = (
+        "SELECT obligation.obligation_identity "
+        "FROM client_obligations obligation "
+    )
+    predicates = (
+        "AND obligation.direction='receivable_from_client' "
+        "AND obligation.status='open' "
+        "AND obligation.amount_due_ntd=%s "
+        "ORDER BY obligation.obligation_identity"
+    )
+    if client_id is not None:
+        return (
+            base
+            + "JOIN orders order_row ON order_row.case_no=obligation.case_no "
+            + "WHERE order_row.client_id=%s "
+            + predicates,
+            (client_id, amount_ntd),
+        )
+    return (
+        base + "WHERE obligation.case_no=%s " + predicates,
+        (case_no, amount_ntd),
     )
 
 
@@ -533,7 +584,11 @@ def _client_selection(connection, candidate):
         stage,
         (_row_id(candidate.row_identity),),
         targets,
-        candidate.allow_client_receipt_overage,
+        (
+            candidate.allow_client_receipt_overage
+            if isinstance(candidate, FinanceImportCorrectionCandidate)
+            else False
+        ),
     )
 
 
@@ -623,13 +678,18 @@ def _client_refund_selection(connection, candidate):
         case_no,
         (
             ClientFinanceCorrectionType.REFUND_OVERAGE
-            if candidate.allow_refund_overage_recovery
+            if isinstance(candidate, FinanceImportCorrectionCandidate)
+            and candidate.allow_refund_overage_recovery
             else ClientFinanceCorrectionType.REFUND
         ),
         ClientRefundPurpose.CUSTOMER_REFUND,
         bank_fact_identities=(_row_id(candidate.row_identity),),
         obligation_identities=targets,
-        allow_partial_refund_recovery=candidate.allow_partial_refund_recovery,
+        allow_partial_refund_recovery=(
+            candidate.allow_partial_refund_recovery
+            if isinstance(candidate, FinanceImportCorrectionCandidate)
+            else False
+        ),
     )
 
 

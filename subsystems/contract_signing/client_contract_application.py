@@ -70,6 +70,20 @@ class RecordClientSignedReturnCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class ManualClientContractAttestationCommand:
+    case_no: str
+    signed_content: bytes
+    original_filename: str
+    mime_type: str
+    confirmation_method: str
+    reason: str
+    preview_fingerprint: str
+    actor_id: str
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+
+@dataclass(frozen=True, slots=True)
 class ClientContractWorkflowReceipt:
     document_version_id: int
     signing_event_id: int
@@ -112,6 +126,104 @@ class ClientContractSigningApplication:
             storage_key=_client_signed_storage_key(command),
         )
         return self._persist_signed_return(command, archive)
+
+    def preview_manual_attestation(
+        self,
+        *,
+        case_no: str,
+        confirmation_method: str,
+        reason: str,
+    ) -> dict[str, object]:
+        _require_manual_confirmation(confirmation_method, reason)
+        connection = self._connection_factory()
+        try:
+            snapshot = _manual_client_snapshot(connection, case_no, lock=False)
+            _require_manual_client_snapshot_applicable(snapshot)
+            return {
+                "case_no": case_no,
+                "scope": "client_contract",
+                "matching_segment_id": None,
+                "confirmation_method": confirmation_method,
+                "preview_fingerprint": _manual_preview_fingerprint(snapshot, confirmation_method, reason),
+                "can_apply": True,
+                "line_delivery_task_id": None,
+            }
+        finally:
+            connection.close()
+
+    def record_manual_attestation(
+        self,
+        command: ManualClientContractAttestationCommand,
+    ) -> ClientContractWorkflowReceipt:
+        _require_manual_confirmation(command.confirmation_method, command.reason)
+        existing = self._existing_signed_return_receipt(command)
+        if existing is not None:
+            return existing
+        signed_archive = archive_contract_document(
+            command.signed_content,
+            storage_root=self._archive_root,
+            storage_key=_manual_client_signed_storage_key(command),
+        )
+        connection = self._connection_factory()
+        template_archive = None
+        try:
+            try:
+                connection.begin()
+                snapshot = _manual_client_snapshot(connection, command.case_no, lock=True)
+                _require_manual_client_snapshot_applicable(snapshot)
+                expected = _manual_preview_fingerprint(snapshot, command.confirmation_method, command.reason)
+                if command.preview_fingerprint != expected:
+                    raise ValueError("manual_contract_preview_stale")
+                facts = _client_contract_facts(connection, command.case_no)
+                template = load_approved_template("contract_client_copy")
+                content = render_contract_template(
+                    template_path=TEMPLATE_DIRECTORY / template.template_filename,
+                    mapping_path=approved_template_mapping_path(template.template_key),
+                    facts=_client_template_facts(connection, command.case_no, facts),
+                )
+                template_archive = archive_contract_document(
+                    content,
+                    storage_root=self._archive_root,
+                    storage_key=_manual_client_template_storage_key(command),
+                )
+                source_document_id = _insert_generated_document(
+                    connection, command, facts, template, template_archive,
+                )
+                document_id = _insert_signed_document(
+                    connection, command, facts, source_document_id, signed_archive,
+                )
+                identity = f"client-contract:{signed_archive.sha256}"
+                event_id = _insert_signed_event(connection, command, facts, document_id)
+                _complete_contract_in_transaction(connection, command, identity)
+                _append_command_outcome(
+                    connection,
+                    command,
+                    "record_manual_client_contract_attestation",
+                    document_id,
+                    event_id,
+                    {
+                        "contract_identity": identity,
+                        "contract_completed": True,
+                        "confirmation_method": command.confirmation_method,
+                    },
+                )
+            except Exception:
+                connection.rollback()
+                if template_archive is not None:
+                    discard_uncommitted_contract_document(
+                        storage_root=self._archive_root, storage_key=template_archive.storage_key,
+                    )
+                discard_uncommitted_contract_document(
+                    storage_root=self._archive_root, storage_key=signed_archive.storage_key,
+                )
+                raise
+            connection.commit()
+            return ClientContractWorkflowReceipt(document_id, event_id, None, identity, True)
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def _existing_signed_return_receipt(
         self, command: RecordClientSignedReturnCommand
@@ -259,6 +371,14 @@ def _client_signed_storage_key(command: RecordClientSignedReturnCommand) -> str:
     return f"{command.case_no}/client/{command.idempotency_key.value}-signed.xlsx"
 
 
+def _manual_client_template_storage_key(command: ManualClientContractAttestationCommand) -> str:
+    return f"{command.case_no}/client/{command.idempotency_key.value}-manual-template.xlsx"
+
+
+def _manual_client_signed_storage_key(command: ManualClientContractAttestationCommand) -> str:
+    return f"{command.case_no}/client/{command.idempotency_key.value}-manual-signed.xlsx"
+
+
 def _client_contract_facts(connection, case_no: str) -> dict[str, object]:
     with connection.cursor() as cursor:
         cursor.execute(
@@ -402,14 +522,77 @@ def _insert_signed_document(connection, command, facts, source_document_id, arch
 
 
 def _insert_signed_event(connection, command, facts, document_id):
-    payload = _canonical_json({"command": "record_client_signed_return", "correlation_id": command.correlation_id.value})
+    payload = {
+        "command": "record_manual_client_contract_attestation",
+        "confirmation_method": command.confirmation_method,
+        "reason": command.reason.strip(),
+        "correlation_id": command.correlation_id.value,
+    } if isinstance(command, ManualClientContractAttestationCommand) else {
+        "command": "record_client_signed_return",
+        "correlation_id": command.correlation_id.value,
+    }
     with connection.cursor() as cursor:
         cursor.execute(
             "INSERT INTO contract_signing_events (case_no,document_version_id,matching_plan_id,event_type,event_key,actor,payload) "
             "VALUES (%s,%s,%s,'signed_received',%s,%s,%s)",
-            (command.case_no, document_id, facts["matching_plan_id"], command.idempotency_key.value, command.actor_id, payload),
+            (command.case_no, document_id, facts["matching_plan_id"], command.idempotency_key.value, command.actor_id, _canonical_json(payload)),
         )
         return int(cursor.lastrowid)
+
+
+_MANUAL_CONFIRMATION_METHODS = frozenset({"phone", "paper", "in_person", "verified_other"})
+
+
+def _require_manual_confirmation(confirmation_method: str, reason: str) -> None:
+    if confirmation_method not in _MANUAL_CONFIRMATION_METHODS:
+        raise ValueError("manual_contract_confirmation_method_invalid")
+    if not reason.strip():
+        raise ValueError("manual_contract_reason_missing")
+
+
+def _manual_client_snapshot(connection, case_no: str, *, lock: bool) -> dict[str, object]:
+    suffix = " FOR UPDATE" if lock else ""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT commitment.id AS commitment_id,commitment.matching_plan_id,plan.version,plan.status,plan.is_active,"
+            "COALESCE((SELECT response.response_value FROM matching_response_events response "
+            "WHERE response.plan_id=commitment.matching_plan_id AND response.response_type='customer_decision' "
+            "ORDER BY response.occurred_at_utc DESC,response.id DESC LIMIT 1),'') AS customer_decision,"
+            "EXISTS(SELECT 1 FROM contract_signing_events event "
+            "JOIN contract_document_versions document ON document.id=event.document_version_id "
+            "WHERE event.case_no=commitment.case_no AND event.event_type='signed_received' "
+            "AND document.document_scope='client_contract') AS already_signed "
+            "FROM precontract_service_commitments commitment "
+            "JOIN caregiver_matching_plans plan ON plan.id=commitment.matching_plan_id "
+            "WHERE commitment.case_no=%s" + suffix,
+            (case_no,),
+        )
+        snapshot = cursor.fetchone()
+    if snapshot is None:
+        raise ValueError("staff_commitment_required_before_client_contract")
+    return dict(snapshot)
+
+
+def _require_manual_client_snapshot_applicable(snapshot: dict[str, object]) -> None:
+    status = str(snapshot["status"])
+    if status == "accepted":
+        pass
+    elif status == "proposed" and snapshot["is_active"] == 1:
+        if str(snapshot["customer_decision"]) != "accepted":
+            raise ValueError("manual_contract_customer_acceptance_required")
+    else:
+        raise ValueError("manual_contract_plan_not_current")
+    if bool(snapshot["already_signed"]):
+        raise ValueError("manual_contract_already_signed")
+
+
+def _manual_preview_fingerprint(snapshot: dict[str, object], confirmation_method: str, reason: str) -> str:
+    return _sha256(_canonical_json({
+        "scope": "client_contract",
+        "snapshot": snapshot,
+        "confirmation_method": confirmation_method,
+        "reason": reason.strip(),
+    }).encode())
 
 
 class _JoinedTransaction:

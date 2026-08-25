@@ -43,6 +43,10 @@ class AlertAdminTargetRequest(BaseModel):
     correlation_id: str = Field(min_length=1, max_length=191)
 
 
+class AlertAdminTargetApplyRequest(AlertAdminTargetRequest):
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class ResetLineAlertGroupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
@@ -50,6 +54,10 @@ class ResetLineAlertGroupRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
+
+
+class ResetLineAlertGroupApplyRequest(ResetLineAlertGroupRequest):
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class AlertTargetEnabledRequest(BaseModel):
@@ -60,6 +68,10 @@ class AlertTargetEnabledRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
+
+
+class AlertTargetEnabledApplyRequest(AlertTargetEnabledRequest):
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class AlertTargetViewResponse(BaseModel):
@@ -95,3 +107,15 @@ class AlertTargetMutationResponse(BaseModel):
     replayed: bool
     correlation_id: str
     committed_at: datetime
+
+
+class AlertTargetMutationPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    operation: Literal["group_reset", "enable", "disable", "admin_target_add"]
+    target_id: int | None = Field(default=None, gt=0)
+    previous_state: Literal["absent", "active", "disabled"]
+    resulting_state: Literal["active", "disabled"]
+    current_version: str
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    apply_ready: Literal[True]

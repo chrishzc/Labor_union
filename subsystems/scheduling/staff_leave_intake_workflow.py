@@ -4,6 +4,7 @@ Description: 編排月嫂請假待辦的冪等提交與版本化管理操作。"
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Protocol
 
 from domains.scheduling.staff_leave_intake import (
@@ -12,6 +13,7 @@ from domains.scheduling.staff_leave_intake import (
     transition_request,
 )
 from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.fingerprints import PreviewFingerprint
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +24,9 @@ class StaffLeaveRequestSnapshot:
     status: StaffLeaveRequestStatus
     version: int
     request_fingerprint: str
+    leave_start_date: date | None = None
+    leave_end_date: date | None = None
+    leave_reason: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +35,19 @@ class SubmitStaffLeaveRequest:
     line_user_id: str
     intent: StaffLeaveRequestIntent
     idempotency_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class StaffLeaveRequestPreview:
+    staff_id: int
+    line_user_id: str
+    intent: StaffLeaveRequestIntent
+    preview_fingerprint: PreviewFingerprint
+    blockers: tuple[str, ...] = ()
+
+    @property
+    def can_apply(self) -> bool:
+        return not self.blockers
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +75,7 @@ class StaffLeaveIntakeRepository(Protocol):
     def create(self, command: SubmitStaffLeaveRequest, fingerprint: str) -> StaffLeaveRequestSnapshot: ...
     def load_for_update(self, request_id: int) -> StaffLeaveRequestSnapshot | None: ...
     def load(self, request_id: int) -> StaffLeaveRequestSnapshot | None: ...
+    def load_for_staff(self, request_id: int, staff_id: int) -> StaffLeaveRequestSnapshot | None: ...
     def replay_mutation(self, key: str, fingerprint: str) -> StaffLeaveRequestSnapshot | None: ...
     def transition(self, snapshot: StaffLeaveRequestSnapshot, target: StaffLeaveRequestStatus, reason: str, actor_id: str, key: str, fingerprint: str) -> StaffLeaveRequestSnapshot: ...
     def resolve(self, snapshot: StaffLeaveRequestSnapshot, receipt_key: str, key: str, fingerprint: str) -> StaffLeaveRequestSnapshot: ...
@@ -76,6 +95,31 @@ class StaffLeaveIntakeWorkflow:
         if replay is not None:
             return replay
         return self._repository.create(command, fingerprint)
+
+    @staticmethod
+    def preview(command: SubmitStaffLeaveRequest) -> StaffLeaveRequestPreview:
+        """Validate the staff-owned intent without opening a write transaction."""
+        intent = StaffLeaveRequestIntent(
+            command.intent.leave_start_date,
+            command.intent.leave_end_date,
+            command.intent.reason,
+        )
+        return StaffLeaveRequestPreview(
+            command.staff_id,
+            command.line_user_id,
+            intent,
+            PreviewFingerprint(_submit_fingerprint(command)),
+        )
+
+    def apply(
+        self,
+        command: SubmitStaffLeaveRequest,
+        preview_fingerprint: PreviewFingerprint,
+    ) -> StaffLeaveRequestSnapshot:
+        expected = PreviewFingerprint(_submit_fingerprint(command))
+        if expected != preview_fingerprint:
+            raise StaffLeaveIntakeWorkflowError("leave_request_preview_stale")
+        return self.submit(command)
 
     def review(self, command: ReviewStaffLeaveRequest) -> StaffLeaveRequestSnapshot:
         fingerprint = _review_fingerprint(command)
