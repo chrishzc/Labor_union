@@ -19,6 +19,7 @@ from domains.line.delivery import (
     LineDeliveryTaskSnapshot,
 )
 from domains.line.identities import (
+    LineConfigurationRevision,
     LineDeliveryTaskId,
     LineIdentityFlowId,
     LineRichMenuPublicationId,
