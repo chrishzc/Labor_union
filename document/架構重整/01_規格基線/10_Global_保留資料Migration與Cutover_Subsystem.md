@@ -118,6 +118,14 @@ Descriptor 亦必須明列既有 parent table 被新增或修改的欄位，並�
 generated expression、index、foreign key 與 check constraint。分類器忽略 `altered_tables`、只檢查新表，
 或只確認 required column name 是 subset，都不得宣稱 `exact`。
 
+Parent-table ALTER 只擁有該 artifact 明列的新欄位與 metadata object，不擁有 parent table 既存的
+indexes、foreign keys、checks 或 triggers；這些既存物件不得被誤判為該 artifact 的 unknown drift。
+對 artifact 自己建立的新 table，unknown owned object 仍固定 fail closed。較早 artifact 的 exactness
+檢查若遇到後續 canonical release 加入的 object，只能依「successor artifact identity ＋ 完整 object
+contract」allowlist 接受；同名但 columns、uniqueness 或其他契約不同仍必須判定 `drift`。每次新增會
+修改既有 owned table 的 release，都必須補 earlier-artifact successor regression，不能只驗證最新
+artifact 自己為 exact。
+
 ### 4.5 Additive Migration Runner
 
 Modules：
@@ -253,6 +261,8 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
 - SQL splitter 保留 quoted semicolon。
 - descriptor normalization 不吞掉語意差異。
 - exact／partial／drift 分類。
+- parent-table 既有 metadata 不會被 ALTER artifact 誤判為 owned drift。
+- 後續 canonical release 的精確 successor metadata 可共存；同名錯誤契約仍 fail closed。
 - `.env` quoted value、註解與 newline round-trip。
 - fingerprint deterministic 與 stale conflict。
 

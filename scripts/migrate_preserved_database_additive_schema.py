@@ -4172,17 +4172,9 @@ def _artifact_metadata_state(
         }
         for row in snapshot["indexes"]
     }
-    # Parent column alterations do not own the parent's pre-existing indexes,
-    # checks, FKs, or triggers.  Only tables represented by an object contract
-    # participate in unknown-owned-object detection.
+    # A parent-table ALTER owns only its explicitly declared objects.  Unknown
+    # object rejection is exclusive only for tables created by this artifact.
     owned_tables = set(required_tables)
-    owned_tables.update(key[0] for key in descriptor["indexes"])
-    owned_tables.update(key[0] for key in descriptor["foreign_keys"])
-    owned_tables.update(key[0] for key in descriptor["checks"])
-    owned_tables.update(
-        str(contract["event_object_table"])
-        for contract in descriptor["triggers"].values()
-    )
     expected_index_keys = {
         key for key in descriptor["indexes"] if key[0] in owned_tables
     }
@@ -4190,7 +4182,12 @@ def _artifact_metadata_state(
         key for key in indexes if key[0] in owned_tables
     }
     extra_index_keys = actual_index_keys - expected_index_keys
-    if extra_index_keys - _auto_fk_supporting_index_keys(
+    allowed_later_indexes = _allowed_later_artifact_indexes(part_name)
+    allowed_later_index_keys = {
+        key for key in extra_index_keys
+        if indexes[key] == allowed_later_indexes.get(key)
+    }
+    if extra_index_keys - allowed_later_index_keys - _auto_fk_supporting_index_keys(
         indexes, descriptor, extra_index_keys
     ):
         return "drift"
@@ -4465,6 +4462,30 @@ def _allowed_later_artifact_columns(
     ):
         return {"source_identity"}
     return set()
+
+
+def _allowed_later_artifact_indexes(
+    part_name: str,
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Return exact successor index contracts valid on an earlier artifact."""
+    if part_name == "104_order_lifecycle_state_history.sql":
+        return {
+            (
+                "order_lifecycle_state_events",
+                "uq_order_lifecycle_state_event_case_identity",
+            ): {
+                "non_unique": 0,
+                "columns": ("id", "case_no"),
+            }
+        }
+    if part_name == "148_knowledge_retrieval.sql":
+        return {
+            ("knowledge_items", "uq_knowledge_source_identity"): {
+                "non_unique": 0,
+                "columns": ("source_identity",),
+            }
+        }
+    return {}
 
 
 def _line_identity_management_state(snapshot: Mapping[str, Any]) -> str:

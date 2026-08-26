@@ -402,6 +402,75 @@ def test_105_owned_column_subset_is_partial_then_exact() -> None:
     )
 
 
+def test_105_parent_table_preexisting_metadata_does_not_create_drift() -> None:
+    part = "105_order_service_time_terms.sql"
+    descriptor = migration._canonical_artifact_descriptor(part)
+    snapshot = _snapshot_from_descriptor(descriptor)
+    snapshot["indexes"].append({
+        "table_name": "orders",
+        "index_name": "idx_order_status",
+        "non_unique": 1,
+        "columns": "status",
+    })
+    snapshot["constraints"].append({
+        "table_name": "orders",
+        "constraint_name": "chk_orders_requires_cooking",
+        "constraint_type": "CHECK",
+        "enforced": "YES",
+        "check_clause": "requires_cooking IN (0, 1)",
+    })
+
+    assert migration._canonical_artifact_metadata_state(snapshot, part) == "exact"
+
+
+@pytest.mark.parametrize(
+    ("part", "table", "name", "columns"),
+    [
+        (
+            "104_order_lifecycle_state_history.sql",
+            "order_lifecycle_state_events",
+            "uq_order_lifecycle_state_event_case_identity",
+            "id,case_no",
+        ),
+        (
+            "148_knowledge_retrieval.sql",
+            "knowledge_items",
+            "uq_knowledge_source_identity",
+            "source_identity",
+        ),
+    ],
+)
+def test_known_later_release_index_does_not_create_earlier_drift(
+    part: str,
+    table: str,
+    name: str,
+    columns: str,
+) -> None:
+    descriptor = migration._canonical_artifact_descriptor(part)
+    snapshot = _snapshot_from_descriptor(descriptor)
+    if part == "148_knowledge_retrieval.sql":
+        snapshot["columns"].append({
+            "table_name": "knowledge_items",
+            "column_name": "source_identity",
+            "column_type": "varchar(191)",
+            "is_nullable": "YES",
+            "column_default": None,
+            "extra": "",
+            "generation_expression": "",
+        })
+    snapshot["indexes"].append({
+        "table_name": table,
+        "index_name": name,
+        "non_unique": 0,
+        "columns": columns,
+    })
+
+    assert migration._canonical_artifact_metadata_state(snapshot, part) == "exact"
+
+    snapshot["indexes"][-1]["columns"] = "wrong_column"
+    assert migration._canonical_artifact_metadata_state(snapshot, part) == "drift"
+
+
 def test_rich_menu_option_b_full_metadata_classifies_all_states() -> None:
     part = "1001_line_rich_menu_publication_step_saga.sql"
     descriptor = migration._canonical_artifact_descriptor(part)

@@ -264,6 +264,9 @@ candidate，對 candidate 套用 versioned migration／backfill 並驗證；只�
 若舊版曾建立 competing Knowledge schema，工具只在九張 Knowledge owned tables 全部為空、
 metadata fingerprint 完整相符且沒有外部 inbound FK 時，於 candidate 重建 canonical 148／163；
 任一資料列或未知 drift 都會在唯讀 plan 階段阻擋，禁止自動猜測轉換。
+Migration descriptor 對 parent table 只擁有自己明列的新欄位與物件，不獨占 parent table 原有
+metadata；後續正式 release 加入同一 owned table 的 object，必須以精確 successor 契約與回歸測試
+辨識，不能讓較早 artifact 被誤判 drift，也不能用寬鬆名稱比對放過錯誤契約。
 
 若要捨棄現有資料並恢復成版本庫模板測試資料，執行 `scripts/launchers/reset_DB.bat`。它會先驗證
 `fixtures/db_snapshot_v2/v3`，預檢成功且使用者輸入 `RESET` 後，才刪除 `union_db`、建立新 DB 並
