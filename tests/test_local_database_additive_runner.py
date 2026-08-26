@@ -76,7 +76,7 @@ def test_column_contract_detects_virtual_and_ignores_ordinary_text() -> None:
 
 
 def test_qualification_receipt_is_portable_and_digest_verified() -> None:
-    receipt = additive._discover_qualification(_option_b_receipt())
+    receipt = migration._local_validate_qualification(_option_b_receipt())
     assert receipt["metadata_backup"]["status"] == "verified"
     assert receipt["artifact"]["dependency_contracts"] == {}
     assert receipt["artifact"]["dependencies"] == []
@@ -95,7 +95,7 @@ def test_qualification_receipt_is_portable_and_digest_verified() -> None:
 
 
 def test_declared_rich_menu_prerequisites_still_validate() -> None:
-    receipt = additive._discover_qualification(_option_b_receipt())
+    receipt = migration._local_validate_qualification(_option_b_receipt())
 
     prerequisites = migration._local_validate_prerequisite_policy(receipt)
 
@@ -190,7 +190,7 @@ def test_declared_prerequisite_with_missing_fields_fails_closed() -> None:
 
 
 def test_hash_verification_uses_real_release_selection_descriptor_shape() -> None:
-    qualification = migration._local_discover_qualification(_option_b_receipt())
+    qualification = migration._local_validate_qualification(_option_b_receipt())
     assert isinstance(migration.RELEASE_MANIFEST, migration.ReleaseSelection)
     assert not hasattr(migration.RELEASE_MANIFEST, "descriptor_artifact")
     migration._local_verify_hashes(qualification)
@@ -236,21 +236,42 @@ def test_explicit_qualification_selects_only_a_published_receipt(
     monkeypatch.setattr(migration, "ROOT", tmp_path)
     monkeypatch.setattr(
         migration,
+        "RELEASE_MANIFEST",
+        SimpleNamespace(release_id="selected", fingerprint="selected-fingerprint"),
+    )
+    monkeypatch.setattr(
+        migration,
         "_local_validate_qualification",
-        lambda path: {"selected": path.name},
+        lambda path: {
+            "selected": path.name,
+            "release_id": "selected",
+            "release_fingerprint": "selected-fingerprint",
+        },
     )
 
-    assert migration._local_discover_qualification(selected) == {
-        "selected": "PROV-selected.json"
-    }
+    assert migration._local_discover_qualification(selected)["selected"] == (
+        "PROV-selected.json"
+    )
     nested = receipt_root / "phase4" / "PROV-nested.json"
     nested.parent.mkdir()
     nested.write_text("{}", encoding="utf-8")
-    assert migration._local_discover_qualification(nested) == {
-        "selected": "PROV-nested.json"
-    }
+    assert migration._local_discover_qualification(nested)["selected"] == (
+        "PROV-nested.json"
+    )
     with pytest.raises(migration.LocalAdditiveBlocked):
         migration._local_discover_qualification(tmp_path / "scratch.json")
+    monkeypatch.setattr(
+        migration,
+        "_local_validate_qualification",
+        lambda path: {
+            "selected": path.name,
+            "release_id": "old",
+            "release_fingerprint": "old-fingerprint",
+        },
+    )
+    with pytest.raises(migration.LocalAdditiveBlocked) as error:
+        migration._local_discover_qualification(selected)
+    assert error.value.code == "qualification_stale"
 
 
 def test_automatic_qualification_selects_only_the_current_release(

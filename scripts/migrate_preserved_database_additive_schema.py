@@ -2352,7 +2352,16 @@ def _local_discover_qualification(
                 "explicit qualification must be a published validation receipt",
                 code="qualification_invalid",
             )
-        return _local_validate_qualification(path)
+        selected = _local_validate_qualification(path)
+        if (
+            selected.get("release_id") != RELEASE_MANIFEST.release_id
+            or selected.get("release_fingerprint") != RELEASE_MANIFEST.fingerprint
+        ):
+            raise LocalAdditiveBlocked(
+                "explicit qualification does not match the latest release",
+                code="qualification_stale",
+            )
+        return selected
     paths = sorted((ROOT / "validation" / "receipts").rglob("PROV-*-local-additive-qualification-*.json"))
     valid: list[dict[str, Any]] = []
     for path in paths:
