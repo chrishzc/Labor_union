@@ -1,11 +1,12 @@
 """
 File: contracts.py
-Description: 定義共用受控檔案的唯讀探索、完整性讀取與 typed storage 錯誤契約。
+Description: 定義受控檔案的唯讀探索、完整性讀取與系統 staging 契約。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Protocol
 
@@ -18,10 +19,31 @@ class ControlledFileStorageStatus(str, Enum):
 
 
 class ControlledFileStorageError(RuntimeError):
-    def __init__(self, code: str, message: str, *, retryable: bool) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        retryable: bool,
+        observed_sha256: str | None = None,
+        observed_size_bytes: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.retryable = retryable
+        self.observed_sha256 = observed_sha256
+        self.observed_size_bytes = observed_size_bytes
+
+
+class ControlledFileStagingRegistrationStatus(str, Enum):
+    UNREGISTERED = "unregistered"
+    REGISTERED = "registered"
+    UNKNOWN = "unknown"
+
+
+class ControlledFileStagingCleanupReason(str, Enum):
+    EXPIRED = "expired"
+    ABANDONED = "abandoned"
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +78,25 @@ class ControlledFileContent:
     content_sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class ControlledFileStagingResult:
+    staging_id: str
+    filename: str
+    mime_type: str
+    size_bytes: int
+    sha256_digest: str
+    expires_at: datetime
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ControlledFileStagingContent:
+    staging_id: str
+    content: bytes
+    sha256_digest: str
+    expires_at: datetime
+
+
 class ControlledFileStoragePort(Protocol):
     def readiness(self) -> ControlledFileStorageReadiness: ...
 
@@ -73,6 +114,38 @@ class ControlledFileStoragePort(Protocol):
         expected_sha256: str | None = None,
     ) -> ControlledFileContent: ...
 
+    def put_staged(
+        self,
+        *,
+        idempotency_key: str,
+        filename: str,
+        mime_type: str,
+        content: bytes,
+    ) -> ControlledFileStagingResult: ...
+
+    def read_staged(
+        self,
+        staging_id: str,
+        *,
+        expected_sha256: str,
+    ) -> ControlledFileStagingContent: ...
+
+    def read_registered_staged(
+        self,
+        staging_id: str,
+        *,
+        expected_sha256: str,
+    ) -> ControlledFileStagingContent: ...
+
+    def cleanup_staged(
+        self,
+        staging_id: str,
+        *,
+        registration_status: ControlledFileStagingRegistrationStatus,
+        reason: ControlledFileStagingCleanupReason,
+        expected_sha256: str,
+    ) -> bool: ...
+
 
 __all__ = [
     "ControlledFileContent",
@@ -81,5 +154,9 @@ __all__ = [
     "ControlledFileStoragePort",
     "ControlledFileStorageReadiness",
     "ControlledFileStorageStatus",
+    "ControlledFileStagingCleanupReason",
+    "ControlledFileStagingContent",
+    "ControlledFileStagingRegistrationStatus",
+    "ControlledFileStagingResult",
     "DiscoveredControlledFile",
 ]

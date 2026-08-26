@@ -1,0 +1,438 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-controlled-file-storage-foundation-2026-08-26-v1",
+  "descriptors": {
+    "1004_controlled_file_storage_foundation.sql": {
+      "tables": {
+        "controlled_file_staging_objects": [
+          "id",
+          "staging_id",
+          "storage_locator",
+          "owner_type",
+          "subject_reference",
+          "object_key",
+          "purpose",
+          "logical_folder",
+          "original_filename",
+          "content_type",
+          "size_bytes",
+          "content_sha256",
+          "staging_state",
+          "staging_version",
+          "idempotency_key",
+          "command_fingerprint",
+          "created_by_actor",
+          "created_at_utc",
+          "expires_at_utc",
+          "applied_at_utc",
+          "cleaned_at_utc"
+        ],
+        "controlled_file_objects": [
+          "id",
+          "opaque_object_id",
+          "source_staging_id",
+          "owner_type",
+          "subject_reference",
+          "object_key",
+          "purpose",
+          "logical_folder",
+          "filename",
+          "storage_locator",
+          "content_type",
+          "size_bytes",
+          "content_sha256",
+          "version_number",
+          "supersedes_object_id",
+          "supersedes_version_number",
+          "created_by_actor",
+          "created_at_utc"
+        ],
+        "controlled_file_apply_receipts": [
+          "id",
+          "receipt_id",
+          "staging_object_id",
+          "controlled_object_id",
+          "command_type",
+          "schema_version",
+          "idempotency_key",
+          "command_fingerprint",
+          "preview_fingerprint",
+          "expected_staging_version",
+          "result_snapshot",
+          "outcome_state",
+          "actor_ref",
+          "correlation_id",
+          "applied_at_utc",
+          "created_at_utc"
+        ],
+        "controlled_file_reconciliation_events": [
+          "id",
+          "event_id",
+          "staging_object_id",
+          "controlled_object_id",
+          "outcome",
+          "observation_fingerprint",
+          "observed_sha256",
+          "observed_size_bytes",
+          "observation_snapshot",
+          "actor_ref",
+          "correlation_id",
+          "observed_at_utc",
+          "created_at_utc"
+        ],
+        "controlled_file_cleanup_events": [
+          "id",
+          "cleanup_id",
+          "event_id",
+          "staging_object_id",
+          "event_sequence",
+          "event_type",
+          "reason",
+          "idempotency_key",
+          "command_fingerprint",
+          "expected_staging_version",
+          "expected_sha256",
+          "actor_ref",
+          "correlation_id",
+          "occurred_at_utc",
+          "error_code",
+          "created_at_utc"
+        ]
+      },
+      "indexes": {
+        "controlled_file_staging_objects.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "controlled_file_staging_objects.uq_controlled_file_staging_id": {
+          "non_unique": 0,
+          "columns": [
+            "staging_id"
+          ]
+        },
+        "controlled_file_staging_objects.uq_controlled_file_staging_locator": {
+          "non_unique": 0,
+          "columns": [
+            "storage_locator"
+          ]
+        },
+        "controlled_file_staging_objects.uq_controlled_file_staging_idempotency": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "controlled_file_staging_objects.idx_controlled_file_staging_owner": {
+          "non_unique": 1,
+          "columns": [
+            "owner_type",
+            "subject_reference",
+            "purpose",
+            "staging_state",
+            "id"
+          ]
+        },
+        "controlled_file_staging_objects.idx_controlled_file_staging_cleanup": {
+          "non_unique": 1,
+          "columns": [
+            "staging_state",
+            "expires_at_utc",
+            "id"
+          ]
+        },
+        "controlled_file_objects.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "controlled_file_objects.uq_controlled_file_object_id": {
+          "non_unique": 0,
+          "columns": [
+            "opaque_object_id"
+          ]
+        },
+        "controlled_file_objects.uq_controlled_file_object_staging": {
+          "non_unique": 0,
+          "columns": [
+            "source_staging_id"
+          ]
+        },
+        "controlled_file_objects.uq_controlled_file_object_locator": {
+          "non_unique": 0,
+          "columns": [
+            "storage_locator"
+          ]
+        },
+        "controlled_file_objects.uq_controlled_file_owner_version": {
+          "non_unique": 0,
+          "columns": [
+            "owner_type",
+            "subject_reference",
+            "object_key",
+            "version_number"
+          ]
+        },
+        "controlled_file_objects.uq_controlled_file_version_identity": {
+          "non_unique": 0,
+          "columns": [
+            "id",
+            "owner_type",
+            "subject_reference",
+            "object_key",
+            "purpose",
+            "version_number"
+          ]
+        },
+        "controlled_file_objects.idx_controlled_file_object_owner": {
+          "non_unique": 1,
+          "columns": [
+            "owner_type",
+            "subject_reference",
+            "purpose",
+            "id"
+          ]
+        },
+        "controlled_file_objects.idx_controlled_file_object_supersedes": {
+          "non_unique": 1,
+          "columns": [
+            "supersedes_object_id",
+            "id"
+          ]
+        },
+        "controlled_file_apply_receipts.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "controlled_file_apply_receipts.uq_controlled_file_receipt_id": {
+          "non_unique": 0,
+          "columns": [
+            "receipt_id"
+          ]
+        },
+        "controlled_file_apply_receipts.uq_controlled_file_receipt_idempotency": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "controlled_file_apply_receipts.uq_controlled_file_receipt_staging": {
+          "non_unique": 0,
+          "columns": [
+            "staging_object_id"
+          ]
+        },
+        "controlled_file_apply_receipts.uq_controlled_file_receipt_object": {
+          "non_unique": 0,
+          "columns": [
+            "controlled_object_id"
+          ]
+        },
+        "controlled_file_reconciliation_events.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "controlled_file_reconciliation_events.uq_controlled_file_reconciliation_event": {
+          "non_unique": 0,
+          "columns": [
+            "event_id"
+          ]
+        },
+        "controlled_file_reconciliation_events.uq_controlled_file_reconciliation_fingerprint": {
+          "non_unique": 0,
+          "columns": [
+            "observation_fingerprint"
+          ]
+        },
+        "controlled_file_reconciliation_events.idx_controlled_file_reconciliation_staging": {
+          "non_unique": 1,
+          "columns": [
+            "staging_object_id",
+            "id"
+          ]
+        },
+        "controlled_file_reconciliation_events.idx_controlled_file_reconciliation_object": {
+          "non_unique": 1,
+          "columns": [
+            "controlled_object_id",
+            "id"
+          ]
+        },
+        "controlled_file_reconciliation_events.idx_controlled_file_reconciliation_outcome": {
+          "non_unique": 1,
+          "columns": [
+            "outcome",
+            "observed_at_utc",
+            "id"
+          ]
+        },
+        "controlled_file_cleanup_events.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "controlled_file_cleanup_events.uq_controlled_file_cleanup_event": {
+          "non_unique": 0,
+          "columns": [
+            "event_id"
+          ]
+        },
+        "controlled_file_cleanup_events.uq_controlled_file_cleanup_sequence": {
+          "non_unique": 0,
+          "columns": [
+            "cleanup_id",
+            "event_sequence"
+          ]
+        },
+        "controlled_file_cleanup_events.uq_controlled_file_cleanup_idempotency_sequence": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key",
+            "event_sequence"
+          ]
+        },
+        "controlled_file_cleanup_events.idx_controlled_file_cleanup_staging": {
+          "non_unique": 1,
+          "columns": [
+            "staging_object_id",
+            "event_sequence",
+            "id"
+          ]
+        },
+        "controlled_file_cleanup_events.idx_controlled_file_cleanup_terminal": {
+          "non_unique": 1,
+          "columns": [
+            "event_type",
+            "occurred_at_utc",
+            "id"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "controlled_file_objects.fk_controlled_file_object_staging": {
+          "columns": [
+            "source_staging_id"
+          ],
+          "referenced_table": "controlled_file_staging_objects",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "controlled_file_objects.fk_controlled_file_object_supersedes": {
+          "columns": [
+            "supersedes_object_id",
+            "owner_type",
+            "subject_reference",
+            "object_key",
+            "purpose",
+            "supersedes_version_number"
+          ],
+          "referenced_table": "controlled_file_objects",
+          "referenced_columns": [
+            "id",
+            "owner_type",
+            "subject_reference",
+            "object_key",
+            "purpose",
+            "version_number"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "controlled_file_apply_receipts.fk_controlled_file_receipt_staging": {
+          "columns": [
+            "staging_object_id"
+          ],
+          "referenced_table": "controlled_file_staging_objects",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "controlled_file_apply_receipts.fk_controlled_file_receipt_object": {
+          "columns": [
+            "controlled_object_id"
+          ],
+          "referenced_table": "controlled_file_objects",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "controlled_file_reconciliation_events.fk_controlled_file_reconciliation_staging": {
+          "columns": [
+            "staging_object_id"
+          ],
+          "referenced_table": "controlled_file_staging_objects",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "controlled_file_reconciliation_events.fk_controlled_file_reconciliation_object": {
+          "columns": [
+            "controlled_object_id"
+          ],
+          "referenced_table": "controlled_file_objects",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "controlled_file_cleanup_events.fk_controlled_file_cleanup_staging": {
+          "columns": [
+            "staging_object_id"
+          ],
+          "referenced_table": "controlled_file_staging_objects",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "controlled_file_staging_objects.chk_controlled_file_staging_identity": "and(atom(regexp_like(staging_id,'^cfs_[0-9a-f]{32}$')),atom(char_length(trim(storage_locator))>0),atom(char_length(trim(subject_reference))>0),atom(char_length(trim(object_key))>0),atom(char_length(trim(purpose))>0),atom(char_length(trim(original_filename))>0),atom(char_length(trim(content_type))>0),atom(regexp_like(idempotency_key,'^[a-z0-9][a-z0-9._:-]{0,190}$')),atom(char_length(trim(created_by_actor))>0),atom(size_bytes>0),atom(expires_at_utc>created_at_utc))",
+        "controlled_file_staging_objects.chk_controlled_file_staging_digest": "and(atom(regexp_like(content_sha256,'^[0-9a-f]{64}$')),atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')))",
+        "controlled_file_staging_objects.chk_controlled_file_staging_owner_purpose": "or(and(atom(owner_type='contract_signing'),atom(purpose='final_signed_contract')),and(atom(owner_type='scheduling'),atom(purposein('service_date_confirmation','baby_log_photo','meal_photo'))),and(atom(owner_type='orders'),atom(purpose='order_notice')),and(atom(owner_type='staff'),atom(purposein('staff_resume','staff_certificate','staff_health_exam'))),and(atom(owner_type='line_integration'),atom(purpose='rich_menu_background')))",
+        "controlled_file_staging_objects.chk_controlled_file_staging_state": "or(and(atom(staging_state='applied'),atom(applied_at_utcisnotnull),atom(cleaned_at_utcisnull)),and(atom(staging_state='cleaned'),atom(applied_at_utcisnull),atom(cleaned_at_utcisnotnull)),and(atom(staging_statein('staged','quarantined')),atom(applied_at_utcisnull),atom(cleaned_at_utcisnull)))",
+        "controlled_file_objects.chk_controlled_file_object_identity": "and(atom(regexp_like(opaque_object_id,'^cf_[0-9a-f]{32}$')),atom(char_length(trim(subject_reference))>0),atom(char_length(trim(object_key))>0),atom(char_length(trim(purpose))>0),atom(char_length(trim(filename))>0),atom(char_length(trim(storage_locator))>0),atom(char_length(trim(content_type))>0),atom(char_length(trim(created_by_actor))>0),atom(size_bytes>0),atom(version_number>0))",
+        "controlled_file_objects.chk_controlled_file_object_digest": "atom(regexp_like(content_sha256,'^[0-9a-f]{64}$'))",
+        "controlled_file_objects.chk_controlled_file_object_chain": "or(and(atom(supersedes_object_idisnull),atom(supersedes_version_numberisnull),atom(version_number=1)),and(atom(supersedes_object_idisnotnull),atom(supersedes_version_numberisnotnull),atom(version_number=supersedes_version_number+1)))",
+        "controlled_file_objects.chk_controlled_file_object_owner_purpose": "or(and(atom(owner_type='contract_signing'),atom(purpose='final_signed_contract')),and(atom(owner_type='scheduling'),atom(purposein('service_date_confirmation','baby_log_photo','meal_photo'))),and(atom(owner_type='orders'),atom(purpose='order_notice')),and(atom(owner_type='staff'),atom(purposein('staff_resume','staff_certificate','staff_health_exam'))),and(atom(owner_type='line_integration'),atom(purpose='rich_menu_background')))",
+        "controlled_file_apply_receipts.chk_controlled_file_receipt_identity": "and(atom(regexp_like(receipt_id,'^cfr_[0-9a-f]{32}$')),atom(regexp_like(idempotency_key,'^[a-z0-9][a-z0-9._:-]{0,190}$')),atom(char_length(trim(actor_ref))>0),atom(char_length(trim(correlation_id))>0),atom(expected_staging_version>0))",
+        "controlled_file_apply_receipts.chk_controlled_file_receipt_fingerprints": "and(atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$')))",
+        "controlled_file_apply_receipts.chk_controlled_file_receipt_result": "and(atom(json_type(result_snapshot)='OBJECT'),atom(json_length(result_snapshot)>0))",
+        "controlled_file_reconciliation_events.chk_controlled_file_reconciliation_identity": "and(atom(regexp_like(event_id,'^cfe_[0-9a-f]{32}$')),atom(regexp_like(observation_fingerprint,'^[0-9a-f]{64}$')),atom(char_length(trim(actor_ref))>0),atom(char_length(trim(correlation_id))>0),or(and(atom(outcomein('exact','missing_object','digest_mismatch')),atom(controlled_object_idisnotnull)),and(atom(outcomein('orphan_object','still_writing')),atom(staging_object_idisnotnull),atom(controlled_object_idisnull))))",
+        "controlled_file_reconciliation_events.chk_controlled_file_reconciliation_observation": "or(and(atom(outcomein('exact','digest_mismatch')),atom(regexp_like(observed_sha256,'^[0-9a-f]{64}$')),atom(observed_size_bytesisnotnull)),and(atom(outcome='missing_object'),atom(observed_sha256isnull),atom(observed_size_bytesisnull)),and(atom(outcomein('orphan_object','still_writing')),or(atom(observed_sha256isnull),atom(regexp_like(observed_sha256,'^[0-9a-f]{64}$')))))",
+        "controlled_file_reconciliation_events.chk_controlled_file_reconciliation_snapshot": "and(atom(json_type(observation_snapshot)='OBJECT'),atom(json_length(observation_snapshot)>0))",
+        "controlled_file_cleanup_events.chk_controlled_file_cleanup_identity": "and(atom(regexp_like(cleanup_id,'^cfc_[0-9a-f]{32}$')),atom(regexp_like(event_id,'^cfce_[0-9a-f]{32}$')),atom(regexp_like(idempotency_key,'^[a-z0-9][a-z0-9._:-]{0,190}$')),atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),atom(expected_staging_version>0),atom(regexp_like(expected_sha256,'^[0-9a-f]{64}$')),atom(char_length(trim(actor_ref))>0),atom(char_length(trim(correlation_id))>0))",
+        "controlled_file_cleanup_events.chk_controlled_file_cleanup_event": "or(and(atom(event_sequence=1),atom(event_type='intent'),atom(error_codeisnull)),and(atom(event_sequence=2),atom(event_type='completed'),atom(error_codeisnull)),and(atom(event_sequence=2),atom(event_type='reconciliation_required'),atom(error_codeisnotnull),atom(char_length(trim(error_code))>0)))"
+      },
+      "triggers": [
+        "trg_controlled_file_objects_before_update",
+        "trg_controlled_file_objects_before_delete",
+        "trg_controlled_file_apply_receipts_before_update",
+        "trg_controlled_file_apply_receipts_before_delete",
+        "trg_controlled_file_reconciliation_events_before_update",
+        "trg_controlled_file_reconciliation_events_before_delete",
+        "trg_controlled_file_cleanup_events_before_update",
+        "trg_controlled_file_cleanup_events_before_delete"
+      ],
+      "views": {}
+    }
+  }
+}

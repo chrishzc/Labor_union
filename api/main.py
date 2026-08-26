@@ -37,6 +37,7 @@ from api.routes import (
     client_payments,
     clients,
     contracts,
+    controlled_files,
     data_browser_admin,
     finance_import,
     hcm_import,
@@ -289,6 +290,7 @@ app.include_router(payroll.router)
 app.include_router(payroll_rebuild.router)
 app.include_router(staff_payments.router)
 app.include_router(contracts.router)
+app.include_router(controlled_files.router)
 app.include_router(finance_import.router)
 app.include_router(hcm_import.router)
 app.include_router(client_beclass_import.router)

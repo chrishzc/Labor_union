@@ -94,6 +94,10 @@ Staff、Orders、Scheduling、Contract Signing 或 LINE 的根事實。
 - MySQL metadata 與 NAS bytes 必須成對備份、還原與定期對帳；health 需區分 DB、mount、read、capacity、
   watcher lag 與 orphan／missing-object 狀態。NAS adapter、投放區配置、權限、retention、實際搬移與任何
   schema 變更仍須各自 Work Package／deployment／DB gate；本文件同步不授權 DDL、migration 或 production 操作。
+- Controlled-file 的 exact management routes、認證、closed owner／purpose registry、opaque identity、24 小時
+  staging、cleanup、receipt 與 reconciliation machine contract，由
+  `document/功能開發計畫/NAS_檔案庫與資料中心管理介面正式規範.md` §9 單一擁有；本節保留 Global 不變量，
+  不複製 machine fields。owner Domain／LIFF 仍須以自己的 verified identity 與 root facts 呼叫 typed port。
 
 ## 3. 依賴方向
 

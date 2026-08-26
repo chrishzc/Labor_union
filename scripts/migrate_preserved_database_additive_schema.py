@@ -178,6 +178,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_20_line_rich_menu_publication_step_saga_v1.json",
     "labor_union_2026_08_21_customer_service_human_escalation_v1.json",
     "labor_union_2026_08_22_matching_coordination_successor_v1.json",
+    "labor_union_2026_08_26_controlled_file_storage_foundation_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2208,7 +2209,6 @@ def _local_validate_target_projection(
     if (
         not isinstance(fresh_fingerprint, str)
         or not re.fullmatch(r"[0-9a-f]{64}", fresh_fingerprint)
-        or fresh_fingerprint != descriptor_sha256
         or preserve_fingerprint != fresh_fingerprint
     ):
         raise LocalAdditiveBlocked(

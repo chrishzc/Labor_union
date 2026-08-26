@@ -110,7 +110,7 @@ def test_generic_receipt_without_prerequisites_skips_optional_policy() -> None:
 
 
 def test_target_projection_allows_unrelated_full_schema_drift_when_exact() -> None:
-    fingerprint = "d" * 64
+    fingerprint = "c" * 64
     payload = {
         "fresh_bootstrap": {"schema_fingerprint": "a" * 64},
         "preserve_data_candidate": {"candidate_schema_fingerprint": "b" * 64},

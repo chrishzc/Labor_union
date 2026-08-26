@@ -307,7 +307,7 @@ def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
     assert len(artifact_names) == len(set(artifact_names))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
     assert runner.RELEASE_MANIFEST.release_id == (
-        "labor-union-matching-coordination-successor-2026-08-22-v1"
+        "labor-union-controlled-file-storage-foundation-2026-08-26-v1"
     )
 
 

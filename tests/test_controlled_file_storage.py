@@ -15,6 +15,8 @@ from infrastructure.file.controlled_file_storage import FileSystemControlledFile
 from subsystems.controlled_files.contracts import (
     ControlledFileStorageError,
     ControlledFileStorageStatus,
+    ControlledFileStagingCleanupReason,
+    ControlledFileStagingRegistrationStatus,
 )
 
 
@@ -152,3 +154,96 @@ def test_symlink_is_never_used_as_a_controlled_object_reference(tmp_path: Path) 
 
     assert captured.value.code == "controlled_file_reference_invalid"
     assert str(outside) not in str(captured.value)
+
+
+def test_staging_is_idempotent_digest_verified_and_cleanup_is_registration_scoped(
+    tmp_path: Path,
+) -> None:
+    content = b"controlled-upload"
+    digest = hashlib.sha256(content).hexdigest()
+    storage = FileSystemControlledFileStorage(tmp_path, clock=lambda: 200.0)
+
+    created = storage.put_staged(
+        idempotency_key="controlled-file:test-001",
+        filename="signed.pdf",
+        mime_type="application/pdf",
+        content=content,
+    )
+    replayed = storage.put_staged(
+        idempotency_key="controlled-file:test-001",
+        filename="signed.pdf",
+        mime_type="application/pdf",
+        content=content,
+    )
+
+    assert created.staging_id.startswith("cfs_")
+    assert len(created.staging_id) == 36
+    assert created.sha256_digest == digest
+    assert not created.replayed
+    assert replayed.staging_id == created.staging_id
+    assert replayed.replayed
+    assert storage.read_staged(created.staging_id, expected_sha256=digest).content == content
+
+    with pytest.raises(ControlledFileStorageError) as captured:
+        storage.cleanup_staged(
+            created.staging_id,
+            registration_status=ControlledFileStagingRegistrationStatus.REGISTERED,
+            reason=ControlledFileStagingCleanupReason.ABANDONED,
+            expected_sha256=digest,
+        )
+    assert captured.value.code == "controlled_file_staging_cleanup_forbidden"
+
+    assert storage.cleanup_staged(
+        created.staging_id,
+        registration_status=ControlledFileStagingRegistrationStatus.UNREGISTERED,
+        reason=ControlledFileStagingCleanupReason.ABANDONED,
+        expected_sha256=digest,
+    )
+    assert not storage.cleanup_staged(
+        created.staging_id,
+        registration_status=ControlledFileStagingRegistrationStatus.UNREGISTERED,
+        reason=ControlledFileStagingCleanupReason.ABANDONED,
+        expected_sha256=digest,
+    )
+
+
+def test_registered_staging_read_remains_available_after_staging_ttl(tmp_path: Path) -> None:
+    current = [200.0]
+    content = b"registered-content"
+    digest = hashlib.sha256(content).hexdigest()
+    storage = FileSystemControlledFileStorage(tmp_path, clock=lambda: current[0])
+    staged = storage.put_staged(
+        idempotency_key="controlled-file:registered-001",
+        filename="signed.pdf",
+        mime_type="application/pdf",
+        content=content,
+    )
+    current[0] += 25 * 60 * 60
+
+    with pytest.raises(ControlledFileStorageError) as expired:
+        storage.read_staged(staged.staging_id, expected_sha256=digest)
+    registered = storage.read_registered_staged(
+        staged.staging_id, expected_sha256=digest
+    )
+
+    assert expired.value.code == "controlled_file_staging_expired"
+    assert registered.content == content
+
+
+@pytest.mark.parametrize("idempotency_key", ["Uppercase", " leading", "bad/key", "a" * 192])
+def test_staging_rejects_noncanonical_idempotency_keys(
+    tmp_path: Path,
+    idempotency_key: str,
+) -> None:
+    storage = FileSystemControlledFileStorage(tmp_path)
+
+    with pytest.raises(ControlledFileStorageError) as captured:
+        storage.put_staged(
+            idempotency_key=idempotency_key,
+            filename="signed.pdf",
+            mime_type="application/pdf",
+            content=b"payload",
+        )
+
+    assert captured.value.code == "controlled_file_staging_idempotency_invalid"
+    assert not captured.value.retryable

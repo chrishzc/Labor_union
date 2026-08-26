@@ -13,6 +13,7 @@ in-progress Work Package。completed／superseded 文件通過 archive gate 後�
 | 文件 | 類型 | 狀態 | 正確用途／下一個 gate |
 |---|---|---|---|
 | [96 Current 剩餘代辦任務總表](96_Current_剩餘代辦任務總表.md) | gap-register | `in-progress` | 唯一跨功能 current task register；完成後先同步 owner 正式規格，再關閉該列。 |
+| [CUR-FILE-NAS-01 受控檔案儲存基礎工作包](PROV-20260826-controlled-file-storage-foundation-work-package.md) | work-package | `approved` | 96 O1 專用工作包；限制於 controlled-file capability、本機 additive DB gates 與 typed 驗收。 |
 | [營運前端真實資料優先裁決](PROV-20260822-operations-frontend-real-data-readiness-priority-amendment.md) | decision-work-package | `approved` | 保留 current 操作優先與真實資料／完整 continuation 原則；不是重跑已完成 Orders／Staff／Reports 的授權。 |
 | [匯入入口與 Legacy Writer 退役](Import_Entry_and_Legacy_Writer_Retirement_工作包.md) | work-package | `blocked` | Client LIFF 與 writer replacement 未全數閉合；不得直接移除入口。current LIFF 功能由 96 列管。 |
 | [React Phase 6 retirement release gate](PROV-20260817-react-admin-phase6-retirement-release-gate-work-package.md) | work-package | `blocked` | 使用者目前禁止 entry switch／retirement；維持 fail closed。 |

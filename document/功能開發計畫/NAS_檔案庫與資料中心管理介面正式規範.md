@@ -169,3 +169,96 @@ spec_references:
 > 3. **安全擴充方式**：後續串接必須在既有 React 元件樹結構上，以 Typed Adapter / Query 方式填入真實後端數據，**嚴格保留所有已核准之樹狀目錄、容量條、爭議提示條與三大多功能彈窗**。
 > 4. **Current implementation status（2026-08-26）**：資料中心三分頁、canonical 側欄名稱與 `data-browser`／`databrowser` 相容入口已完成；Chrome 已實點三分頁、兩個相容入口、back／forward、canonical active 投影及訂單／客戶真 Query。NAS 分頁明示為本機介面預覽，尚未連接 storage API，真實 storage capability 不屬本項完成範圍。
 > 5. **Next-phase authorization（2026-08-26）**：人工已授權建立後端 controlled-file capability、必要的 `lu_test_*` schema gate、typed Query／download／staging／Preview／Apply／receipt／readback 與失敗 reconciliation。實作前仍須先盤點 current storage ports／metadata／schema，並遵守 `00` §2.2、完整 DB change gates 與本節 UI preservation invariant。這項授權不允許猜測 production／`union_db` target、暴露 NAS path、直接搬檔或跳過 rollback／readback。
+
+---
+
+## 9. Controlled-file 後端 exact contract amendment（2026-08-26）
+
+本節依 `CUR-FILE-NAS-01` 已核准的規格補齊、本機實作與受控驗收 Authority，固定後端 machine
+contract；不授權 production mount、`union_db`、entry switch、provider delivery 或不可逆正式檔案刪除。
+
+### 9.1 Public route 與認證邊界
+
+管理端共用 prefix 固定為 `/api/v1/storage`，最小 public resources 為：
+
+```text
+POST /api/v1/storage/staging
+POST /api/v1/storage/files/preview
+POST /api/v1/storage/files/apply
+GET  /api/v1/storage/files
+GET  /api/v1/storage/files/{file_id}
+GET  /api/v1/storage/files/{file_id}/download
+GET  /api/v1/storage/receipts/{receipt_id}
+```
+
+- 管理端 routes 全部要求 authenticated、enabled、persisted internal user，使用現有
+  `require_persisted_admin` actor contract；不得新增 `storage.*` capability 造成內部使用者業務權限差異。
+- LIFF／LINE consumer 保留 owner route 與 server-verified identity，再由 owner Domain 驗證 assignment、
+  service day、document 或 subject facts；不得把 LIFF token 當管理端 bearer，也不得直接建立 storage metadata。
+- Preview route 固定以 `/preview` 結尾並保持零寫入；Apply、staging、download 與 receipt readback 進既有
+  authenticated audit boundary。download 回 backend attachment bytes，不建立 signed／public URL。
+
+### 9.2 Closed owner／purpose registry
+
+共用 storage 不擁有業務生命週期。public command 只接受下列 closed pairing：
+
+| owner | purpose |
+|---|---|
+| `contract_signing` | `final_signed_contract` |
+| `scheduling` | `service_date_confirmation`、`baby_log_photo`、`meal_photo` |
+| `orders` | `order_notice` |
+| `staff` | `staff_resume`、`staff_certificate`、`staff_health_exam` |
+| `line_integration` | `rich_menu_background` |
+
+owner Domain 仍負責 subject 是否存在、可見範圍、完成條件、版本採用與後續 outbox。新增 pairing 必須先同步
+current正式規格、typed enum、schema descriptor／release（若受 DB constraint 管理）與 consumer tests；不得由
+任意字串、資料列、前端設定或 storage discovery 動態升格。
+
+### 9.3 Opaque identity 與 public projection
+
+- registered file identity 固定為 `cf_` 加 32 個 lowercase UUIDv4 hex，regex
+  `^cf_[0-9a-f]{32}$`；staging identity 固定為 `cfs_` 加 32 個 lowercase UUIDv4 hex，regex
+  `^cfs_[0-9a-f]{32}$`。
+- identity 不含 owner、subject、purpose、檔名、日期、host、drive、UNC、mount 或 storage locator；SHA-256
+  是獨立 integrity fact，不能當 object identity 或 authorization token。
+- list／detail／receipt 只回 opaque ID、owner、purpose、subject reference、可理解檔名、logical folder、MIME、
+  size、version、status 與時間。一般 UI 不顯示完整 digest；JSON、header、URL、log、audit message 與 receipt
+  均不得含 storage locator、raw bytes 或公開下載位置。
+
+### 9.4 Staging、Preview、Apply 與 cleanup
+
+- staging TTL 固定 24 小時，由 server `BusinessClock` 建立 absolute `expires_at`。staging write 必須使用
+  server-generated locator、exclusive create、size／MIME／digest 驗證；same idempotency key＋same canonical
+  payload 回原 staging result，same key＋different payload 固定 conflict。
+- Preview 零寫入並回 closed candidate、`preview_fingerprint`、expected staging version、owner blockers 與
+  expiry。Apply 在單一 outer UoW 重新鎖定 staging、owner subject、purpose、digest、MIME、size、expiry、
+  expected version 與 fingerprint；任一 drift 固定零寫入。
+- Apply 成功後，registered object version、owner relation 與 terminal receipt 同一 DB transaction 提交；
+  registered bytes 不再屬於可清除 staging。commit／response outcome unknown 時先以原 idempotency key 查 receipt，
+  不得盲目重送。
+- cleanup 只可處理 system-owned、未 Apply、已逾期或明確放棄的 staging bytes；先記 cleanup intent，刪除後記
+  terminal cleanup fact。Apply 過、owner registered、operator drop-zone、reconciliation identity 不唯一或唯一
+  bytes 的檔案禁止 cleanup。cleanup failure 進 `reconciliation_required`，不得回報正式成功。
+- cleanup machine evidence 固定由 immutable `controlled_file_cleanup_events` 擁有。每一事件保存
+  `cleanup_id`（`^cfc_[0-9a-f]{32}$`）、`event_id`（`^cfce_[0-9a-f]{32}$`）、staging FK、
+  `event_sequence`、`event_type`、`reason`、idempotency／fingerprint、expected staging version／SHA-256、
+  actor、correlation、occurred time 與 nullable error code；不得保存 raw bytes 或 public locator。
+- sequence 1 只能是無 error 的 `intent`；sequence 2 只能是無 error 的 `completed`，或具非空 error code 的
+  `reconciliation_required`。reason 只接受 `expired | abandoned`；同一 cleanup sequence 與同一 idempotency
+  sequence 必須唯一，所有 cleanup events 禁止 update／delete。
+
+### 9.5 Receipt／readback 與 reconciliation
+
+Apply receipt discriminator 固定為 `controlled_file_apply`，schema version 固定
+`controlled-file-apply-receipt.v1`；payload 至少包含：
+
+```text
+receipt_id, outcome(created|replayed), file_id, owner, purpose,
+subject_reference, version, sha256_digest, mime_type, size_bytes,
+status, applied_at
+```
+
+相同 key／相同 canonical command 回原 receipt；相同 key／不同 command fingerprint 固定
+`idempotency_mismatch`。reconciliation closed outcomes 固定為 `exact | missing_object | digest_mismatch |
+orphan_object | still_writing`；只追加 observation，不自動修復、改 owner root、發送 provider 或刪除 bytes。
+mount unavailable、read denied、capacity exhausted 與 watcher lag 屬 storage readiness／health，不偽裝成合法空清單。
