@@ -1,7 +1,7 @@
 # 新竹市月子照顧服務人員職業工會－行政流程系統
 
 此專案提供 LINE 整合、案件與月嫂排班、訂單生命週期、客戶帳務、薪資、月嫂應付、
-銀行流水匯入與政府補助的地端行政系統。管理端是 Streamlit；正式業務操作透過 FastAPI、
+銀行流水匯入與政府補助的地端行政系統。管理端是 React；正式業務操作透過 FastAPI、
 application workflow 與 MySQL 完成。
 
 「架構重整」分支已完成架構重整與遺留退役治理，正作為取代 `main` 的 release candidate。
@@ -60,7 +60,7 @@ Web upload；BeClass scripts 僅保留為受控的 historical import，不再是
 自動使用容器內的 MySQL CLI。若開發者使用不同容器名稱，請在個人的 `.env` 設定
 `MYSQL_CONTAINER=<docker ps 顯示的容器名稱>`；請勿提交個人 `.env`。
 
-Windows smoke 只啟動並檢查 API、Streamlit 與 React/Vite，驗收固定為 GET-only，結束時只終止
+Windows smoke 只啟動並檢查 API 與 React/Vite，驗收固定為 GET-only，結束時只終止
 本次建立的應用程序。它不啟動 monitor、File Watcher、worker、LINE 或 provider；日常檔案匯入以
 Web UI 上傳為正式入口，不需要另外啟動通用 File Watcher。
 
@@ -80,7 +80,7 @@ Web UI 上傳為正式入口，不需要另外啟動通用 File Watcher。
 
 ```mermaid
 flowchart LR
-  UI["Streamlit\n薄顯示層"] --> API["FastAPI\nTyped API / Webhook"]
+  UI["React\n管理端 UI"] --> API["FastAPI\nTyped API / Webhook"]
   INPUT["LINE / 檔案 / 外部平台"] --> API
   API --> APP["Subsystem workflow\n唯一 outer Unit of Work"]
   WORKER["Inbox / Outbox / Durable Job Worker"] --> APP
@@ -102,7 +102,8 @@ flowchart LR
 
 ```text
 api/                 FastAPI routes、dependencies、Pydantic schemas
-ui/                  Streamlit 頁面與 typed API clients；不放業務規則
+ui_react/            React 管理端與 bounded typed API clients；不放業務規則
+ui/                  Legacy Streamlit rollback 頁面；標準本機 launcher 不啟動
 domains/             Domain 根事實、狀態機與 business rules
 subsystems/          Preview／Apply workflow、跨 Domain 協調、query models、workers
 infrastructure/      MySQL 與外部 provider 的 typed-port 實作

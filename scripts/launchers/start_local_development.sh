@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # File: start_local_development.sh
-# Description: 驗證本機 DB readiness 後啟動 API、UI、monitor 與 workers。
+# Description: 驗證本機 DB readiness 後啟動 FastAPI、React/Vite、monitor 與 workers。
 set -euo pipefail
 
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
@@ -79,7 +79,7 @@ if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
   [[ "$API_READY" == "1" ]] || { echo "FastAPI did not become ready."; exit 1; }
   "$PY" -m scripts.run_service_monitor --react-admin-health-check
 fi
-"$PY" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501 &
+(cd ui_react && npm run dev -- --host 0.0.0.0 --port 5173 --strictPort) &
 if "$PY" -m scripts.launcher_preflight --profile line-worker >/dev/null 2>&1; then
   "$PY" -m scripts.run_line_worker &
 else

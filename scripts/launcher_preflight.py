@@ -1,6 +1,6 @@
 """
 File: launcher_preflight.py
-Description: 唯讀檢查 launcher 依賴、React artifact 與 12-entry runtime state 邊界。
+Description: 唯讀檢查 FastAPI＋React launcher 依賴、React artifact 與 12-entry runtime state 邊界。
 """
 
 from __future__ import annotations
@@ -36,22 +36,21 @@ PROFILE_REQUIREMENTS = {
     "dual-run": {
         "commands": ("npm",),
         "files": (
-            "ui/app.py",
             "ui_react/package.json",
             "ui_react/src/main.tsx",
             "ui_react/index.html",
         ),
-        "modules": ("uvicorn", "streamlit"),
+        "modules": ("uvicorn",),
     },
     "local-windows": {
-        "commands": ("docker-compose",),
-        "files": ("docker-compose.yml", "scripts/wait_for_db.py", "ui/app.py"),
-        "modules": ("uvicorn", "streamlit", "scripts.run_line_worker", "scripts.run_service_monitor", "scripts.run_durable_job_worker", "scripts.smoke_local_development_launcher"),
+        "commands": ("docker-compose", "npm"),
+        "files": ("docker-compose.yml", "scripts/wait_for_db.py", "ui_react/package.json", "ui_react/src/main.tsx", "ui_react/index.html"),
+        "modules": ("uvicorn", "scripts.run_line_worker", "scripts.run_service_monitor", "scripts.run_durable_job_worker", "scripts.smoke_local_development_launcher"),
     },
     "local-unix": {
-        "commands": ("docker", "lsof"),
-        "files": ("docker-compose.yml", "scripts/wait_for_db.py", "ui/app.py"),
-        "modules": ("uvicorn", "streamlit", "scripts.run_line_worker", "scripts.run_service_monitor", "scripts.run_durable_job_worker"),
+        "commands": ("docker", "lsof", "npm"),
+        "files": ("docker-compose.yml", "scripts/wait_for_db.py", "ui_react/package.json", "ui_react/src/main.tsx", "ui_react/index.html"),
+        "modules": ("uvicorn", "scripts.run_line_worker", "scripts.run_service_monitor", "scripts.run_durable_job_worker"),
     },
     "admin-no-auth": {"files": (), "modules": ()},
     "database-update": {
@@ -143,18 +142,17 @@ def inspect_profile(profile: str) -> dict[str, object]:
     if profile == "dual-run":
         report["planned_commands"] = [
             "python -m uvicorn api.main:app --host 127.0.0.1 --port 8000",
-            "python -m streamlit run ui/app.py --server.address 127.0.0.1 --server.port 8501",
             "npm run dev -- --host 127.0.0.1 --port 5173 --strictPort",
         ]
-        report["ports"] = [8000, 8501, 5173]
+        report["ports"] = [8000, 5173]
         report["health_predicates"] = {
             "api": "GET /health == 200",
-            "streamlit": "GET /_stcore/health == 200",
-            "react": "GET / == 200, HTML, body contains id=\"root\"",
+            "react": "GET /admin/ == 200, HTML, body contains id=\"root\"",
             "proxy": "GET /api/... through 5173; browser uses relative /api",
         }
-        report["startup_order"] = ["api", "streamlit", "react"]
+        report["startup_order"] = ["api", "react"]
         report["disabled"] = [
+            "streamlit",
             "monitor",
             "LINE delivery",
             "durable worker",

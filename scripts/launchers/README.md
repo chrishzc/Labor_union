@@ -9,9 +9,9 @@ Worker 與 Monitor 都是 Private Operations API client，不直接連 MySQL。W
 `.env`、log 或 Git。若手動分別啟動服務，必須先在同一 shell 設定至少 32 字元的 key；production
 不接受 shared key，須待後續部署工作接上 Google-signed OIDC/IAM 後才可啟用 private endpoints。
 
-所有命令都從專案根目錄執行。目前 Windows 本機啟動與明確傳入 `--smoke-test` 均使用 Phase 5B
-受控三服務 foundation：API `127.0.0.1:8000`、Streamlit `127.0.0.1:8501`、React/Vite
-`127.0.0.1:5173`。該流程不啟動 Docker、monitor、File Watcher、worker、LINE 或 provider，也不切換
+所有命令都從專案根目錄執行。目前 Windows／Unix 一般本機 UI 啟動固定使用 API
+`127.0.0.1:8000` 與 React/Vite `127.0.0.1:5173`；不再啟動 Streamlit。明確傳入
+`--smoke-test` 時同樣只建立這兩個 GET-only 服務。Smoke 不啟動 Docker、monitor、File Watcher、worker、LINE 或 provider，也不切換
 navigation；日常檔案匯入由 Web UI 上傳。啟動服務不會自動更新 schema；拉取新版程式後，應先依資料需求選擇
 「保留資料更新」或「模板重設」，完成後再啟動服務。
 
@@ -28,9 +28,9 @@ journal 只供追溯，不得阻擋新 release 或被當成同一條 resume chai
 
 | 腳本 | 狀態 | 用途與安全邊界 |
 |---|---|---|
-| `start_local_development.bat` | active | Windows 一般本機開發入口；`--smoke-test` 才切入 Phase 5B 三服務 GET-only 驗證並只清理本次 owned process。 |
-| `start_local_development.sh` | active | Unix 一般本機開發入口；`--smoke-test` 使用 owned process group 執行同一 Phase 5B 契約。 |
-| `start_local_development_no_auth.bat` | active, local-only | 先停用本機 Admin 認證再啟動同一受控三服務；只供隔離開發機，禁止 shared staging／production。 |
+| `start_local_development.bat` | active | Windows 一般本機開發入口；啟動 FastAPI、React/Vite 與已配置 workers；`--smoke-test` 只驗證 API＋React 並清理本次 owned process。 |
+| `start_local_development.sh` | active | Unix 一般本機開發入口；同樣不啟動 Streamlit，`--smoke-test` 使用 owned process group。 |
+| `start_local_development_no_auth.bat` | active, local-only | 先停用本機 Admin 認證再啟動同一 FastAPI＋React 開發入口；只供隔離開發機，禁止 shared staging／production。 |
 | `configure_local_admin_no_auth.bat`／`.ps1` | active, local-only | 只調整本機 `.env` 的 Admin 開發認證設定，不啟動服務。 |
 | `update_local_database.bat` | active | 預設對 `.env` 指定的本機 development 非系統 DB 執行 qualified schema-only additive fast path；每台機器先建立自己的 release-scoped dump／receipt，不建立 candidate、不 DROP source。保留資料 replacement 必須明確使用 `--strategy replacement --allow-long-run`。 |
 
@@ -172,8 +172,8 @@ LINE 的開發者會看到 `skipped` 提示，其餘本機服務仍正常啟動�
 維護者可用下列受控 smoke 實際啟動並檢查服務；完成或失敗
 時只終止本次 smoke 建立的 PID：
 
-Smoke 固定 GET-only；不使用既有 DB mutation，不啟動 monitor／worker／LINE／provider。React ready 必須是
-5173 回傳 HTML 且含 `id="root"`，並以 `/api/...` relative proxy 觀察 backend response。每次 run 使用唯一
+Smoke 固定 GET-only；不使用既有 DB mutation，不啟動 Streamlit、monitor／worker／LINE／provider。React ready 必須是
+5173 `/admin/` 回傳 HTML 且含 `id="root"`，並以 `/api/...` relative proxy 觀察 backend response。每次 run 使用唯一
 `scratch/phase5b-dual-run/<run-id>/`，完成或失敗只終止本次建立的 PID tree／process group。
 
 ## 已搬移或退役

@@ -66,9 +66,8 @@ def test_run_smoke_cleans_partially_started_services(monkeypatch) -> None:
 def test_service_commands_match_the_windows_launcher_modules(monkeypatch) -> None:
     commands = smoke._service_commands()
 
-    assert tuple(commands) == ("api", "streamlit", "react")
+    assert tuple(commands) == ("api", "react")
     assert commands["api"][-2:] == ["--port", "8000"]
-    assert commands["streamlit"][-2:] == ["--server.port", "8501"]
     assert commands["react"][-2:] == ["5173", "--strictPort"]
 
 
@@ -95,9 +94,9 @@ def test_windows_launcher_waits_for_api_and_ui_before_workers() -> None:
 
     api_start = source.index('start "FastAPI Server"')
     api_ready = source.index('call :WAIT_FOR_HTTP "http://127.0.0.1:8000/health"')
-    ui_start = source.index('start "Streamlit Client UI"')
+    ui_start = source.index('start "React Admin UI"')
     ui_ready = source.index(
-        'call :WAIT_FOR_HTTP "http://127.0.0.1:8501/_stcore/health"'
+        'call :WAIT_FOR_HTTP "http://127.0.0.1:5173/admin/"'
     )
     first_worker = source.index('start "LINE Worker"')
 

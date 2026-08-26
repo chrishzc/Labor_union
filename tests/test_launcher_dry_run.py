@@ -45,8 +45,10 @@ def test_batch_dry_run_propagates_a_blocked_preflight() -> None:
         "reset_DB.bat",
     ):
         dry_run_block = _source(name).split('=="--dry-run"', maxsplit=1)[1]
-        assert 'set "DRY_RUN_EXIT=!ERRORLEVEL!"' in dry_run_block
-        assert "exit /b !DRY_RUN_EXIT!" in dry_run_block
+        captures_exit = 'set "DRY_RUN_EXIT=!ERRORLEVEL!"' in dry_run_block
+        assert (
+            captures_exit and "exit /b !DRY_RUN_EXIT!" in dry_run_block
+        ) or "exit /b !ERRORLEVEL!" in dry_run_block
 
 
 def test_windows_launcher_exposes_controlled_smoke_test() -> None:
@@ -70,11 +72,14 @@ def test_launchers_gate_artifact_runtime_before_children_and_probe_after_api() -
         assert source.index("--profile artifact-runtime") < source.index("api.main:app")
 
 
-def test_dual_run_preflight_freezes_three_get_only_services() -> None:
+def test_dual_run_preflight_freezes_api_and_react_get_only_services() -> None:
     report = inspect_profile("dual-run")
 
-    assert report["ports"] == [8000, 8501, 5173]
-    assert report["startup_order"] == ["api", "streamlit", "react"]
+    assert report["ports"] == [8000, 5173]
+    assert report["startup_order"] == ["api", "react"]
+    assert all("streamlit" not in command for command in report["planned_commands"])
+    assert "streamlit" not in report["health_predicates"]
+    assert "streamlit" in report["disabled"]
     assert "monitor" in report["disabled"]
     assert "consumer/provider workers" in report["disabled"]
     assert report["side_effects"] == "none"

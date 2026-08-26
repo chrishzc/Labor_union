@@ -1,7 +1,7 @@
 @echo off
 goto :MAIN
 @REM File: start_local_development.bat
-@REM Description: 驗證本機 DB readiness 後啟動 API、UI、monitor 與 workers。
+@REM Description: 驗證本機 DB readiness 後啟動 FastAPI、React/Vite、monitor 與 workers。
 :MAIN
 chcp 65001 >nul
 setlocal EnableExtensions EnableDelayedExpansion
@@ -91,9 +91,9 @@ if /I "%REACT_ADMIN_RUNTIME_PROFILE%"=="artifact-runtime" (
     if errorlevel 1 exit /b !ERRORLEVEL!
 )
 
-echo [Step 6] Launching Streamlit interface...
-start "Streamlit Client UI" cmd /k ""%PY%" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501"
-call :WAIT_FOR_HTTP "http://127.0.0.1:8501/_stcore/health" "Streamlit"
+echo [Step 6] Launching React/Vite interface...
+start "React Admin UI" /D "%CD%\ui_react" cmd /k "npm.cmd run dev -- --host 0.0.0.0 --port 5173 --strictPort"
+call :WAIT_FOR_HTTP "http://127.0.0.1:5173/admin/" "React/Vite"
 if errorlevel 1 exit /b !ERRORLEVEL!
 
 "%PY%" -m scripts.launcher_preflight --profile line-worker >nul 2>&1
@@ -122,7 +122,7 @@ if %errorlevel% equ 0 (
 echo ==========================================
 echo Lobar Union System online services are running!
 echo - API Docs: http://127.0.0.1:8000/docs
-echo - Streamlit UI: http://localhost:8501
+echo - React UI: http://localhost:5173/admin/
 echo - LINE Worker: independent durable queue consumer
 echo - Runtime Monitor: active health probes and alert projection
 echo - Durable Background Worker: independently processes background jobs

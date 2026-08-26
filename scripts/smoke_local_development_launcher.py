@@ -1,4 +1,7 @@
-"""Phase 5B 三服務 GET-only smoke；只清理由本次 run 建立的 process。"""
+"""
+File: smoke_local_development_launcher.py
+Description: 執行 FastAPI＋React GET-only smoke，並只清理由本次 run 建立的程序。
+"""
 
 from __future__ import annotations
 
@@ -24,10 +27,9 @@ from infrastructure.http.private_operations_client import PrivateOperationsClien
 ROOT = Path(__file__).resolve().parents[1]
 READY_URLS = {
     "api": "http://127.0.0.1:8000/health",
-    "streamlit": "http://127.0.0.1:8501/_stcore/health",
-    "react": "http://127.0.0.1:5173/",
+    "react": "http://127.0.0.1:5173/admin/",
 }
-PORTS = (8000, 8501, 5173)
+PORTS = (8000, 5173)
 
 
 def _service_commands() -> dict[str, list[str]]:
@@ -35,7 +37,6 @@ def _service_commands() -> dict[str, list[str]]:
     npm = shutil.which("npm.cmd" if os.name == "nt" else "npm") or "npm"
     return {
         "api": [python, "-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "8000"],
-        "streamlit": [python, "-m", "streamlit", "run", "ui/app.py", "--server.address", "127.0.0.1", "--server.port", "8501"],
         "react": [npm, "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173", "--strictPort"],
     }
 

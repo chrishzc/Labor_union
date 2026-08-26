@@ -64,3 +64,14 @@ entry 的 execution approval。任一資訊缺失固定 fail closed。
   本機介面預覽；不得宣稱已操作 NAS 或資料庫。實體 mount path、arbitrary path query、browser-side
   file mutation、NAS mount／搬移與 provider delivery 均不屬本次入口切換。後續 typed storage adapter
   只能填入真實資料，不得覆蓋或簡化既有 UI。
+
+## 6. 標準本機管理端啟動入口（2026-08-26）
+
+- `scripts/launchers/start_local_development.bat` 與 `.sh` 的 current 管理端固定為 React/Vite；標準
+  啟動不得自動建立 Streamlit process，也不得把 8501 readiness 當成服務就緒條件。
+- 本機開發服務順序固定為 FastAPI `8000` ready 後啟動 React/Vite `5173`，React canonical URL 為
+  `/admin/`，並透過 relative `/api` proxy 呼叫同一 FastAPI owner。
+- `--dry-run` 必須唯讀驗證 Python、npm、React entry files 與 launcher 依賴；`--smoke-test` 只建立
+  FastAPI＋React 兩個 owned process，執行 GET-only readiness／proxy 檢查後清理本次 process。
+- Legacy Streamlit source 是否保留作 rollback 由獨立 entry retirement／cutover 裁決管理；其存在不得
+  使標準本機 launcher 回復啟動 Streamlit。啟動服務仍不得隱式套用 schema、migration 或 entry switch。
