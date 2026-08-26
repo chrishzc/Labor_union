@@ -2360,9 +2360,15 @@ def _local_discover_qualification(
             valid.append(_local_validate_qualification(path))
         except LocalAdditiveBlocked:
             continue
-    if not valid:
+    current = [
+        item for item in valid
+        if item.get("release_id") == RELEASE_MANIFEST.release_id
+        and item.get("release_fingerprint") == RELEASE_MANIFEST.fingerprint
+    ]
+    if not current:
         raise LocalAdditiveBlocked(
-            "local additive qualification is ambiguous or invalid", code="qualification_ambiguous"
+            "latest local additive release has no valid qualification receipt",
+            code="qualification_missing",
         )
     signatures = {
         _local_digest(_local_canonical_json({
@@ -2373,14 +2379,14 @@ def _local_discover_qualification(
                 "policy", "policy_evidence",
             )
         }))
-        for item in valid
+        for item in current
     }
     if len(signatures) != 1:
         raise LocalAdditiveBlocked(
             "conflicting local additive qualification receipts",
             code="qualification_ambiguous",
         )
-    return sorted(valid, key=lambda item: str(item.get("_path", "")))[0]
+    return sorted(current, key=lambda item: str(item.get("_path", "")))[0]
 
 
 def _local_verify_hashes(qualification: Mapping[str, Any]) -> None:

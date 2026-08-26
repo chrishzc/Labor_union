@@ -322,6 +322,9 @@ system map 都不具現行 authority。
   已退役。
 - operator-facing launcher 集中在 `scripts/launchers/`；實際 worker／monitor process module 留在
   `scripts/`，不得因目錄收斂改變 owner、交易或 external side-effect 契約。
+- Windows／Unix 本機 launcher 都必須在啟動服務前執行 current schema readiness，並以唯讀 preflight
+  決定 optional LINE／Knowledge workers。DB update preview 的 `blocked` 必須回傳非零 exit code；只有
+  與 latest release identity／fingerprint 完全相符的 qualification receipt 可解鎖 additive execution。
 - `04_部署架構_無損合併稿.md` 的方案比較保留，但本文件的 logical topology、
   profile recommended-candidate 與人工選擇規則優先。
 

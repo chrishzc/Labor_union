@@ -270,14 +270,14 @@ def test_apply_failure_is_reported_without_a_raw_traceback(
 ) -> None:
     config = type("Config", (), {"host": "127.0.0.1"})()
     preview = {
-        "source_database": "union_db",
-        "candidate_database": "union_db_local_test",
+        "source_database": "lu_test_source",
+        "candidate_database": "lu_test_candidate",
         "plan": {},
     }
     monkeypatch.setattr(
         update.migration,
         "config_from_env",
-        lambda _path: (config, "union_db"),
+        lambda _path: (config, "lu_test_source"),
     )
     monkeypatch.setattr(update, "build_preview", lambda *_args: preview)
     monkeypatch.setattr(
@@ -298,4 +298,6 @@ def test_apply_failure_is_reported_without_a_raw_traceback(
             apply=True,
             confirm_configured_database=True,
             mysql_container="mysql_db",
+            strategy="replacement",
+            allow_long_run=True,
         )

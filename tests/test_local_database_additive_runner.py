@@ -253,6 +253,36 @@ def test_explicit_qualification_selects_only_a_published_receipt(
         migration._local_discover_qualification(tmp_path / "scratch.json")
 
 
+def test_automatic_qualification_selects_only_the_current_release(
+    monkeypatch, tmp_path
+) -> None:
+    receipt_root = tmp_path / "validation" / "receipts"
+    receipt_root.mkdir(parents=True)
+    old = receipt_root / "PROV-old-local-additive-qualification-v1.json"
+    current = receipt_root / "PROV-current-local-additive-qualification-v1.json"
+    old.write_text("{}", encoding="utf-8")
+    current.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(migration, "ROOT", tmp_path)
+    monkeypatch.setattr(
+        migration,
+        "RELEASE_MANIFEST",
+        SimpleNamespace(release_id="current", fingerprint="current-fingerprint"),
+    )
+    monkeypatch.setattr(
+        migration,
+        "_local_validate_qualification",
+        lambda path: {
+            "release_id": "current" if path == current else "old",
+            "release_fingerprint": (
+                "current-fingerprint" if path == current else "old-fingerprint"
+            ),
+            "_path": path,
+        },
+    )
+
+    assert migration._local_discover_qualification()["_path"] == current
+
+
 def test_target_profile_blocks_union_db_without_connecting() -> None:
     with pytest.raises(additive.LocalAdditiveBlocked) as error:
         additive.plan(SimpleNamespace(), "union_db", receipt_root=Path("scratch"))

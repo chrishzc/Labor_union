@@ -65,6 +65,7 @@ choose_db_port() {
 DB_PORT="$(choose_db_port)"
 docker compose up -d
 "$PY" scripts/wait_for_db.py --port "$DB_PORT"
+"$PY" -m scripts.update_local_database --require-current --database-port "$DB_PORT"
 "$PY" -m uvicorn api.main:app --host 0.0.0.0 --port 8000 &
 if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
   API_READY=0
@@ -79,9 +80,15 @@ if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
   "$PY" -m scripts.run_service_monitor --react-admin-health-check
 fi
 "$PY" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501 &
-"$PY" -m scripts.run_line_worker &
+if "$PY" -m scripts.launcher_preflight --profile line-worker >/dev/null 2>&1; then
+  "$PY" -m scripts.run_line_worker &
+else
+  echo "Skipping LINE Worker: local LINE credentials or runtime configuration are unavailable."
+fi
 "$PY" -m scripts.run_service_monitor &
 "$PY" -m scripts.run_durable_job_worker &
 "$PY" -m scripts.run_incident_worker &
-"$PY" -m scripts.run_knowledge_worker &
+if grep -Eiq '^KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED=true$' .env 2>/dev/null; then
+  "$PY" -m scripts.run_knowledge_worker &
+fi
 wait

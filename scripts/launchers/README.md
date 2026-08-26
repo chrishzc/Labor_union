@@ -18,6 +18,8 @@ Docker、monitor、worker、LINE 或 provider，也不切換 navigation。啟動
 每支現行 launcher 都提供唯讀 dry run。Batch／shell／Python 使用 `--dry-run`，PowerShell 使用
 `-DryRun`；只驗證路徑、interpreter、module 與必要 executable，不啟動服務、不讀寫 DB、不修改
 `.env`，也不查詢或修改 Windows 排程任務。回傳 `blocked` 表示缺少依賴，不代表已執行任何修復。
+DB update preview／dry-run 回傳 `blocked` 時，CLI 與 launcher 同時以非零 exit code 停止，且不顯示
+`UPDATE` 確認；只有與 current latest release identity／fingerprint 相符的 qualification receipt 可解鎖。
 
 ## 現行入口
 
@@ -159,9 +161,11 @@ pwsh -NoProfile -File .\scripts\launchers\manage_gcp_cloud_run_db_bridge.ps1 -Ac
 測試報告及清理receipt刪除compat資源。首次腳本輸出的Webhook與LIFF URL仍須到LINE Developers
 Console人工設定並驗證，這是整體驗收的人工 gate。
 
-Windows launcher 只在本機 LINE runtime 設定與 access token 通過唯讀檢查時啟動 LINE worker；未設定
+Windows／Unix launcher 都先通過 current schema readiness，並只在本機 LINE runtime 設定與 access
+token 通過唯讀檢查時啟動 LINE worker；未設定
 LINE 的開發者會看到 `skipped` 提示，其餘本機服務仍正常啟動。這不會自動切換 runtime mode，也不會
-把 placeholder credential 當成有效設定。維護者可用下列受控 smoke 實際啟動並檢查服務；完成或失敗
+把 placeholder credential 當成有效設定。Knowledge worker 也只在對應 runtime flag 明確啟用時啟動。
+維護者可用下列受控 smoke 實際啟動並檢查服務；完成或失敗
 時只終止本次 smoke 建立的 PID：
 
 Smoke 固定 GET-only；不使用既有 DB mutation，不啟動 monitor／worker／LINE／provider。React ready 必須是

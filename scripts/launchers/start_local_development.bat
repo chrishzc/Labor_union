@@ -125,7 +125,6 @@ echo - API Docs: http://127.0.0.1:8000/docs
 echo - Streamlit UI: http://localhost:8501
 echo - LINE Worker: independent durable queue consumer
 echo - Runtime Monitor: active health probes and alert projection
-echo - File Watcher: Monitoring downloads/ folder
 echo - Durable Background Worker: independently processes background jobs
 echo ==========================================
 pause

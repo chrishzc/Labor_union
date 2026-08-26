@@ -95,6 +95,25 @@ def test_windows_launcher_requires_current_schema_before_starting_services() -> 
     assert source.index(readiness) < source.index('start "FastAPI Server"')
 
 
+def test_unix_launcher_requires_current_schema_and_guards_optional_workers() -> None:
+    source = _source("start_local_development.sh")
+    readiness = (
+        '"$PY" -m scripts.update_local_database --require-current '
+        '--database-port "$DB_PORT"'
+    )
+
+    assert readiness in source
+    assert source.index(readiness) < source.index("api.main:app")
+    assert source.index("--profile line-worker") < source.index("scripts.run_line_worker")
+    assert source.index("KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED=true") < source.index(
+        "scripts.run_knowledge_worker"
+    )
+
+
+def test_windows_launcher_does_not_claim_an_unstarted_file_watcher() -> None:
+    assert "File Watcher: Monitoring" not in _source("start_local_development.bat")
+
+
 def test_configuration_and_scheduler_scripts_have_non_mutating_dry_run() -> None:
     configure = _source("configure_local_admin_no_auth.ps1")
     status = _source("get_durable_job_worker_task_status.ps1")

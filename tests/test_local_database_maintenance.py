@@ -367,6 +367,23 @@ def test_cli_reports_a_bounded_blocked_error(monkeypatch, capsys) -> None:
     }
 
 
+def test_cli_returns_nonzero_for_a_blocked_preview(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        update,
+        "update_local_database",
+        lambda **_arguments: {
+            "status": "blocked",
+            "code": "qualification_missing",
+            "blocked_reason": "latest release is not qualified",
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["update_local_database", "--dry-run"])
+
+    assert update.main() == 2
+    error = json.loads(capsys.readouterr().err)
+    assert error["code"] == "qualification_missing"
+
+
 def test_show_create_table_comparison_ignores_dynamic_auto_increment_value() -> None:
     source = {"show_create_tables": {"orders": "CREATE TABLE `orders` AUTO_INCREMENT=81"}}
     candidate = {"show_create_tables": {"orders": "CREATE TABLE `orders` AUTO_INCREMENT=82"}}

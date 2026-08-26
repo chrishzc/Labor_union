@@ -1,6 +1,6 @@
 """
 File: update_local_database.py
-Description: 依 .env 指定的本機資料庫建立候選升級、驗證並安全同名替換。
+Description: 預覽並執行受控本機 additive 升級；replacement 必須明確選用。
 """
 
 from __future__ import annotations
@@ -137,20 +137,6 @@ def validate_local_source(config, source: str, environment=None) -> None:
         )
     if profile not in {"local", "development", "dev", "test", "testing"}:
         raise LocalDatabaseUpdateError("local development profile required")
-
-
-def with_database_port(config, database_port: int | None):
-    """Return the same credential set with an explicit local TCP forwarding port."""
-    if database_port is None:
-        return config
-    if not 1 <= database_port <= 65535:
-        raise LocalDatabaseUpdateError("database port must be between 1 and 65535")
-    return migration.DatabaseConfig(
-        host=config.host,
-        port=database_port,
-        user=config.user,
-        password=config.password,
-    )
 
 
 def with_database_port(config, database_port: int | None):
@@ -1007,6 +993,9 @@ def main() -> int:
             "code": getattr(error, "code", "database_update_blocked"),
         }
         print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
+        return 2
+    if result.get("status") == "blocked":
+        print(json.dumps(result, ensure_ascii=False, indent=2), file=sys.stderr)
         return 2
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
