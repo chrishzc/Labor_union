@@ -155,6 +155,19 @@ Additive journal identity 必須至少包含 `source_database + release_id`；�
 journal 保留供追溯，但不得被新 release 當成 resume chain。新 release 只能讀取自己相同 identity、
 statement hashes 與 baseline schema fingerprint 的事件；identity 不同不得合併、覆寫或刪除舊鏈。
 
+開發者本機的 qualified schema-only fast path 不以固定 DB 前綴判斷合法目標。它只接受 local host
+與 development／validation profile 下的合法非 MySQL 系統 schema；remote host、production profile、
+`information_schema`、`mysql`、`performance_schema` 與 `sys` 必須 fail closed。Committed
+qualification receipt 只證明 selected release、SQL hash、descriptor、prerequisite 與代表性 evidence
+table scope，不得把 runtime 綁到 qualification 製作環境的 database、host、port、schema fingerprint
+或資料指紋。
+
+每台機器第一次 Apply 前必須建立自己的 release-scoped 完整 mysqldump 與 local backup receipt。
+Local receipt 至少綁定 `source_database + release_id + server + host + port + baseline schema
+fingerprint + dump digest + representative row fingerprints`；DDL 前、取得 maintenance lock 後與
+DDL 完成後都要 fresh-read 驗證。若同一 journal 已開始但原始 local dump／receipt 遺失、不完整或
+身分不符，固定以 `backup_required` 停止，不得重做新備份冒充原始 baseline。唯讀 plan 不建立 dump。
+
 ### 4.6 Candidate Backfill
 
 Modules：

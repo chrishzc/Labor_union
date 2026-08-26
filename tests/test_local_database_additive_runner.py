@@ -314,14 +314,22 @@ def test_automatic_qualification_selects_only_the_current_release(
     assert migration._local_discover_qualification()["_path"] == current
 
 
-def test_target_profile_blocks_union_db_without_connecting() -> None:
+def test_target_profile_blocks_mysql_system_schema_without_connecting() -> None:
     with pytest.raises(additive.LocalAdditiveBlocked) as error:
-        additive.plan(SimpleNamespace(), "union_db", receipt_root=Path("scratch"))
+        additive.plan(SimpleNamespace(), "mysql", receipt_root=Path("scratch"))
     assert error.value.code == "target_profile_blocked"
 
 
+def test_local_source_accepts_portable_development_database_name() -> None:
+    update.validate_local_source(
+        SimpleNamespace(host="127.0.0.1"),
+        "labor_union_local",
+        {"APP_ENV": "development"},
+    )
+
+
 def test_preview_reuses_one_schema_snapshot_for_target_state(monkeypatch, tmp_path) -> None:
-    source = "lu_test_dataset"
+    source = "labor_union_local"
     snapshot = {
         "sha256": "a" * 64,
         "columns": [],
@@ -339,11 +347,11 @@ def test_preview_reuses_one_schema_snapshot_for_target_state(monkeypatch, tmp_pa
         "release_id": "release",
         "release_fingerprint": "fingerprint",
         "metadata_backup": {
-            "database": source,
-            "schema_sha256": snapshot["sha256"],
+            "database": "qualification_reference",
+            "schema_sha256": "c" * 64,
             "data_fingerprint_sha256": "b" * 64,
-            "host": "127.0.0.1",
-            "port": 3306,
+            "host": "qualification-host",
+            "port": 4406,
         },
         "_canonical_artifact": artifact,
         "_path": migration.ROOT / "validation" / "receipts" / "qualification.json",
@@ -358,7 +366,11 @@ def test_preview_reuses_one_schema_snapshot_for_target_state(monkeypatch, tmp_pa
     monkeypatch.setattr(migration, "_local_discover_qualification", lambda: qualification)
     monkeypatch.setattr(migration, "_local_verify_hashes", lambda _qualification: None)
     monkeypatch.setattr(migration, "database_exists", lambda *_args: True)
-    monkeypatch.setattr(migration, "_local_verify_backup_rows", lambda *_args: None)
+    monkeypatch.setattr(
+        migration,
+        "_local_verify_backup_rows",
+        lambda *_args: pytest.fail("reference rows must not bind local preview"),
+    )
     monkeypatch.setattr(migration, "split_sql", lambda _sql: ["CREATE TABLE t (id int)"])
     monkeypatch.setattr(migration, "_schema_snapshot", snapshot_once)
     monkeypatch.setattr(migration, "_local_verify_prerequisite_metadata", lambda *_args: None)
@@ -373,7 +385,7 @@ def test_preview_reuses_one_schema_snapshot_for_target_state(monkeypatch, tmp_pa
         "local_additive_release_qualification",
         lambda *_args: {"schema_artifacts": [{"descriptor": descriptor}]},
     )
-    monkeypatch.setattr(migration, "_artifact_metadata_state", lambda *_args, **_kwargs: "exact")
+    monkeypatch.setattr(migration, "_artifact_metadata_state", lambda *_args, **_kwargs: "absent")
     monkeypatch.setattr(
         migration,
         "server_identity",
@@ -389,7 +401,7 @@ def test_preview_reuses_one_schema_snapshot_for_target_state(monkeypatch, tmp_pa
         SimpleNamespace(), source, receipt_root=tmp_path
     )
 
-    assert result["status"] == "current"
+    assert result["status"] == "ready"
     assert calls["schema_snapshot"] == 1
 
 
@@ -410,6 +422,11 @@ def test_apply_keeps_fresh_snapshot_after_maintenance_lock(monkeypatch, tmp_path
         "release_id": "release",
         "_canonical_artifact": artifact,
         "metadata_backup": {"data_fingerprint_sha256": "b" * 64},
+    }
+    local_backup = {
+        "data_fingerprint_sha256": "d" * 64,
+        "receipt_path": str(tmp_path / "backup.receipt.json"),
+        "sha256": "e" * 64,
     }
 
     def schema_snapshot(*_args):
@@ -454,6 +471,10 @@ def test_apply_keeps_fresh_snapshot_after_maintenance_lock(monkeypatch, tmp_path
     monkeypatch.setattr(migration, "split_sql", lambda _sql: [])
     monkeypatch.setattr(migration, "_local_read_events", lambda *_args: [])
     monkeypatch.setattr(migration, "_local_resume_context", lambda *_args: (baseline, {}))
+    monkeypatch.setattr(
+        migration, "_local_validate_backup", lambda *_args, **_kwargs: local_backup
+    )
+    monkeypatch.setattr(migration, "_local_verify_backup_rows", lambda *_args: None)
     monkeypatch.setattr(migration, "_local_append_event", lambda *_args, **_kwargs: {"sequence": 1})
     monkeypatch.setattr(migration, "_local_maintenance_lock", lambda *_args: Lock())
     monkeypatch.setattr(migration, "_schema_snapshot", schema_snapshot)
@@ -468,12 +489,241 @@ def test_apply_keeps_fresh_snapshot_after_maintenance_lock(monkeypatch, tmp_path
     monkeypatch.setattr(migration, "local_additive_descriptor_state", lambda *_args: "exact")
 
     result = migration.local_additive_apply(
-        SimpleNamespace(), source, receipt_root=tmp_path
+        SimpleNamespace(),
+        source,
+        receipt_root=tmp_path,
+        backup_dump_path=tmp_path / "backup.sql",
+        backup_receipt_path=tmp_path / "backup.receipt.json",
     )
 
     assert result["status"] == "completed"
     assert calls["schema_snapshot"] == 2
     assert not snapshots
+
+
+def test_apply_additive_update_prepares_release_scoped_backup_first(
+    monkeypatch, tmp_path,
+) -> None:
+    calls: list[tuple[str, Path, Path]] = []
+    monkeypatch.setattr(
+        update,
+        "build_additive_preview",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "release_id": "release-v2",
+        },
+    )
+
+    def prepare(*_args, **kwargs):
+        calls.append((
+            "prepare",
+            kwargs["backup_dump_path"],
+            kwargs["backup_receipt_path"],
+        ))
+
+    def apply(*_args, **kwargs):
+        calls.append((
+            "apply",
+            kwargs["backup_dump_path"],
+            kwargs["backup_receipt_path"],
+        ))
+        return {"status": "completed"}
+
+    monkeypatch.setattr(update.additive, "prepare_backup", prepare)
+    monkeypatch.setattr(update.additive, "apply", apply)
+
+    result = update.apply_additive_update(
+        SimpleNamespace(), "labor_union_local", tmp_path
+    )
+
+    assert result["status"] == "completed"
+    assert [item[0] for item in calls] == ["prepare", "apply"]
+    assert calls[0][1] == tmp_path / "fast_additive" / (
+        "labor_union_local.release-v2.backup.receipt.sql"
+    )
+    assert calls[0][2] == tmp_path / "fast_additive" / (
+        "labor_union_local.release-v2.backup.receipt.json"
+    )
+    assert calls[1][1:] == calls[0][1:]
+
+
+def test_prepare_backup_refuses_resume_without_original_artifacts(
+    monkeypatch, tmp_path,
+) -> None:
+    qualification = {
+        "release_id": "release-v2",
+        "metadata_backup": {"data_row_counts": {"orders": 1}},
+    }
+    monkeypatch.setattr(
+        migration,
+        "local_additive_plan",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "source_schema_sha256": "a" * 64,
+            "resume_baseline_schema_sha256": "b" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        migration, "_local_discover_qualification", lambda: qualification
+    )
+    monkeypatch.setattr(
+        migration, "_local_read_events", lambda *_args: [{"state": "planned"}]
+    )
+    monkeypatch.setattr(
+        migration,
+        "create_source_dump",
+        lambda *_args, **_kwargs: pytest.fail("resume must not create a new backup"),
+    )
+
+    with pytest.raises(migration.LocalAdditiveBlocked) as error:
+        migration.local_additive_prepare_backup(
+            SimpleNamespace(),
+            "labor_union_local",
+            receipt_root=tmp_path,
+            backup_dump_path=tmp_path / "backup.sql",
+            backup_receipt_path=tmp_path / "backup.json",
+        )
+
+    assert error.value.code == "backup_required"
+    assert "original" in str(error.value)
+
+
+def test_prepare_backup_persists_machine_local_identity_and_rows(
+    monkeypatch, tmp_path,
+) -> None:
+    source = "labor_union_local"
+    baseline = "a" * 64
+    dump_digest = "b" * 64
+    evidence = {
+        "data_row_counts": {"orders": 3},
+        "data_fingerprints": {"orders": "c" * 64},
+        "data_fingerprint_sha256": "d" * 64,
+    }
+    qualification = {
+        "release_id": "release-v2",
+        "metadata_backup": {"data_row_counts": {"orders": 99}},
+    }
+    monkeypatch.setattr(
+        migration,
+        "local_additive_plan",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "source_schema_sha256": baseline,
+            "resume_baseline_schema_sha256": baseline,
+        },
+    )
+    monkeypatch.setattr(
+        migration, "_local_discover_qualification", lambda: qualification
+    )
+    monkeypatch.setattr(migration, "_local_read_events", lambda *_args: [])
+    monkeypatch.setattr(
+        migration,
+        "local_additive_source_snapshot",
+        lambda *_args: {"snapshot": {"sha256": baseline}},
+    )
+    monkeypatch.setattr(
+        migration, "_local_capture_backup_rows", lambda *_args: evidence
+    )
+    monkeypatch.setattr(
+        migration,
+        "server_identity",
+        lambda *_args: {
+            "database": source,
+            "server": "mysql-local",
+            "host": "127.0.0.1",
+            "port": 3306,
+        },
+    )
+
+    def create_dump(_config, database, dump_path, receipt_path, **_kwargs):
+        Path(dump_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(dump_path).write_bytes(b"local dump")
+        migration.write_receipt(
+            receipt_path,
+            {
+                "kind": "source_backup",
+                "database": database,
+                "server": "mysql-local",
+                "sha256": dump_digest,
+                "size": 10,
+            },
+        )
+
+    monkeypatch.setattr(migration, "create_source_dump", create_dump)
+    monkeypatch.setattr(
+        migration,
+        "validate_dump",
+        lambda dump_path, *_args: {
+            "path": str(Path(dump_path).resolve()),
+            "sha256": dump_digest,
+        },
+    )
+    dump_path = tmp_path / "backup.sql"
+    receipt_path = tmp_path / "backup.receipt.json"
+
+    result = migration.local_additive_prepare_backup(
+        SimpleNamespace(),
+        source,
+        receipt_root=tmp_path,
+        backup_dump_path=dump_path,
+        backup_receipt_path=receipt_path,
+        mysql_container="mysql_db",
+    )
+
+    assert dump_path.is_file()
+    assert receipt_path.is_file()
+    assert result["kind"] == "local_additive_source_backup"
+    assert result["release_id"] == "release-v2"
+    assert result["database"] == source
+    assert result["schema_sha256"] == baseline
+    assert result["data_row_counts"] == {"orders": 3}
+    assert result["sha256"] == dump_digest
+
+
+def test_local_backup_validation_rejects_another_database(
+    monkeypatch, tmp_path,
+) -> None:
+    receipt = {
+        "kind": "local_additive_source_backup",
+        "release_id": "release-v2",
+        "database": "another_database",
+        "server": "mysql-local",
+        "host": "127.0.0.1",
+        "port": 3306,
+        "schema_sha256": "a" * 64,
+    }
+    monkeypatch.setattr(migration, "read_receipt", lambda _path: receipt)
+    monkeypatch.setattr(
+        migration,
+        "server_identity",
+        lambda *_args: {
+            "database": "labor_union_local",
+            "server": "mysql-local",
+            "host": "127.0.0.1",
+            "port": 3306,
+        },
+    )
+    monkeypatch.setattr(
+        migration,
+        "validate_dump",
+        lambda *_args: {"path": str(tmp_path / "backup.sql")},
+    )
+
+    with pytest.raises(migration.LocalAdditiveBlocked) as error:
+        migration._local_validate_backup(
+            SimpleNamespace(),
+            "labor_union_local",
+            {
+                "release_id": "release-v2",
+                "metadata_backup": {"data_row_counts": {"orders": 1}},
+            },
+            "a" * 64,
+            backup_dump_path=tmp_path / "backup.sql",
+            backup_receipt_path=tmp_path / "backup.json",
+        )
+
+    assert error.value.code == "backup_required"
+    assert "identity differs" in str(error.value)
 
 
 def test_duration_guard_is_bounded(monkeypatch, tmp_path) -> None:

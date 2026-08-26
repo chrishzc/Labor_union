@@ -32,7 +32,7 @@ journal 只供追溯，不得阻擋新 release 或被當成同一條 resume chai
 | `start_local_development.sh` | active | Unix 一般本機開發入口；`--smoke-test` 使用 owned process group 執行同一 Phase 5B 契約。 |
 | `start_local_development_no_auth.bat` | active, local-only | 先停用本機 Admin 認證再啟動同一受控三服務；只供隔離開發機，禁止 shared staging／production。 |
 | `configure_local_admin_no_auth.bat`／`.ps1` | active, local-only | 只調整本機 `.env` 的 Admin 開發認證設定，不啟動服務。 |
-| `update_local_database.bat` | active | 預設執行 `lu_test_*` qualified schema-only additive fast path；不建立 candidate、不 DROP source。保留資料 replacement 必須明確使用 `--strategy replacement --allow-long-run`。 |
+| `update_local_database.bat` | active | 預設對 `.env` 指定的本機 development 非系統 DB 執行 qualified schema-only additive fast path；每台機器先建立自己的 release-scoped dump／receipt，不建立 candidate、不 DROP source。保留資料 replacement 必須明確使用 `--strategy replacement --allow-long-run`。 |
 
 若 Docker MySQL 未直接 publish 到 `.env` 的 `DB_PORT`，可先建立只綁定 localhost 的暫時 TCP forward，並以 Python 入口的 `--database-port <forward-port>` 覆寫連線 port。此參數只改變當次連線位置，不改寫 `.env`、credential 或 database identity；MySQL client 仍以 `--mysql-container mysql_db` 在既有容器內執行。
 | `reset_DB.bat` | active, destructive | 不保留現有資料：預檢版本化模板 fixture，要求輸入 `RESET` 後刪除 `union_db`、重建並載入模板測試資料。 |
@@ -60,7 +60,8 @@ journal 只供追溯，不得阻擋新 release 或被當成同一條 resume chai
 `reset_DB.bat` 需要 `fixtures/db_snapshot_v2/v3/manifest.json` 及其完整 fixture。預檢未通過時不會
 刪除資料庫。目前版本庫未提供該模板 fixture，因此 reset 入口會安全停止；fixture 重建是另一個
 待核准工作，不得直接復活已退役的舊 v3 snapshot。兩種資料庫流程執行前都必須停止 API、UI、
-monitor 與 workers；保留資料更新只接受 `.env` 指定的本機非 production DB，模板重設仍只操作 `union_db`。
+monitor 與 workers；保留資料更新只接受 `.env` 指定的本機 development 非 MySQL 系統 DB，不以
+固定資料庫名稱判斷環境，模板重設仍只操作 `union_db`。
 
 Phase 5B controlled foundation：
 

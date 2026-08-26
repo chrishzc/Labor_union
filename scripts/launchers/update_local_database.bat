@@ -1,5 +1,5 @@
 rem File: update_local_database.bat
-rem Description: Runs the fast qualified additive route; replacement is explicit.
+rem Description: Validates local database update wiring and runs qualified additive only after confirmation.
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
@@ -12,10 +12,7 @@ if not exist "%PYTHON%" (
 )
 if /I "%~1"=="--dry-run" (
   "%PYTHON%" -m scripts.launcher_preflight --profile database-update
-  if errorlevel 1 exit /b !ERRORLEVEL!
-  "%PYTHON%" -m scripts.update_local_database --dry-run
-  set "DRY_RUN_EXIT=!ERRORLEVEL!"
-  exit /b !DRY_RUN_EXIT!
+  exit /b !ERRORLEVEL!
 )
 if not "%~1"=="" (
   "%PYTHON%" -m scripts.update_local_database %*

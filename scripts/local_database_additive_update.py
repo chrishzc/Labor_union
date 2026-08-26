@@ -1,6 +1,6 @@
 """
 File: local_database_additive_update.py
-Description: compatibility facade for the canonical local additive migration runner.
+Description: 提供 canonical 本機 additive migration runner 的相容匯出介面。
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ LOCK_TIMEOUT_SECONDS = _canonical.LOCAL_ADDITIVE_LOCK_TIMEOUT_SECONDS
 ALLOWED_PREFIX = _canonical.LOCAL_ADDITIVE_TARGET_PREFIX
 
 plan = _canonical.local_additive_plan
+prepare_backup = _canonical.local_additive_prepare_backup
 apply = _canonical.local_additive_apply
 _classify_statement = _canonical._local_classify_statement
 _payload_digest = _canonical._local_payload_digest

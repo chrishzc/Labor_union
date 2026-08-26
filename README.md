@@ -257,9 +257,13 @@ operator-facing 腳本、用途與退役對照見
 - 銀行檔、LINE webhook、BeClass／HCM 與其他外部輸入先進 inbox／import workflow，再由 owning Domain 寫入正式事實。
 
 開發者更新 `main` 後，若要保留現有資料，執行
-`scripts/launchers/update_local_database.bat`。流程會先完整備份舊 `union_db`，還原到暫存
-candidate，對 candidate 套用 versioned migration／backfill 並驗證；只有全部通過且 source 未在
-過程中改變，才以相同名稱替換 DB，最終驗證失敗則使用第一份 dump 嘗試 rollback。
+`scripts/launchers/update_local_database.bat`。預設 fast path 會先依當機 `.env` 回讀本機
+development source，建立綁定該 DB、server、release 與 baseline schema 的完整 dump／receipt，
+再執行已 qualification 的 schema-only additive release；DDL 前後都會驗證代表性舊資料指紋。
+共享 qualification 只證明 release、SQL、descriptor 與 evidence table scope，不會把其他開發機
+綁到製作 receipt 時的 DB 名稱、host、port 或資料內容。資料庫名稱可由各機器自行設定，但遠端、
+production profile 與 MySQL 系統 schema 一律 fail closed。長時間 candidate replacement 只有明確
+使用 `--strategy replacement --allow-long-run` 才會執行。
 若 MySQL 在預設 Docker Compose 的 `mysql_db`，工具會自動使用容器中的 MySQL CLI；自訂容器名時
 才需要於 `.env` 覆寫 `MYSQL_CONTAINER`，不需要每位開發者在 Windows 安裝額外的 client。
 若舊版曾建立 competing Knowledge schema，工具只在九張 Knowledge owned tables 全部為空、
@@ -271,7 +275,8 @@ metadata；後續正式 release 加入同一 owned table 的 object，必須以�
 Qualification receipt 必須綁定 runner 選中的單一 release fingerprint；整條 release chain 的 aggregate
 fingerprint 只表示 bundle 身分，不能取代 selected-release qualification。Fast additive journal 以
 `source_database + release_id` 分鏈；同一來源已完成的舊 release journal 會保留，但不會阻擋或污染
-後續 release 的 plan／resume。
+後續 release 的 plan／resume。若 journal 已開始但原本的 machine-local dump／receipt 遺失，runner
+必須停止並要求人工 recovery，不得重做新備份冒充原始 baseline。
 
 若要捨棄現有資料並恢復成版本庫模板測試資料，執行 `scripts/launchers/reset_DB.bat`。它會先驗證
 `fixtures/db_snapshot_v2/v3`，預檢成功且使用者輸入 `RESET` 後，才刪除 `union_db`、建立新 DB 並

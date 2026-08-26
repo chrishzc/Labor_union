@@ -131,9 +131,9 @@ def validate_local_source(config, source: str, environment=None) -> None:
     profile = str(
         values.get("APP_ENV", values.get("ENV", values.get("FLASK_ENV", "local")))
     ).casefold()
-    if source.casefold() == "union_db" or not source.casefold().startswith("lu_test_"):
+    if source.casefold() in migration.LOCAL_ADDITIVE_SYSTEM_DATABASES:
         raise LocalDatabaseUpdateError(
-            "daily additive update requires a lu_test_* local development database"
+            "developer update refuses MySQL system databases"
         )
     if profile not in {"local", "development", "dev", "test", "testing"}:
         raise LocalDatabaseUpdateError("local development profile required")
@@ -198,11 +198,13 @@ def build_preview(config, source: str, candidate: str) -> dict[str, object]:
     }
 
 
-def _fast_backup_receipt_path(receipt_root: Path, source: str) -> Path:
+def _fast_backup_receipt_path(
+    receipt_root: Path, source: str, release_id: str,
+) -> Path:
     return (
         Path(receipt_root).expanduser().resolve()
         / "fast_additive"
-        / f"{source}.backup.receipt.json"
+        / f"{source}.{release_id}.backup.receipt.json"
     )
 
 
@@ -270,7 +272,7 @@ def apply_additive_update(
     lock_timeout_seconds: int = 5,
     mysql_container: str | None = None,
 ) -> dict[str, object]:
-    """Apply only the already-qualified source plan; no candidate or dump operations."""
+    """Back up and apply only the already-qualified local source plan."""
     if additive is None:
         raise LocalDatabaseUpdateError(
             f"additive runner unavailable: {ADDITIVE_IMPORT_ERROR}"
@@ -288,7 +290,24 @@ def apply_additive_update(
         )
     if preview.get("status") == "current":
         return preview
+    receipt_path = (
+        Path(backup_receipt_path).expanduser().resolve()
+        if backup_receipt_path is not None
+        else _fast_backup_receipt_path(
+            Path(receipt_root), source, str(preview["release_id"])
+        )
+    )
+    dump_path = receipt_path.with_suffix(".sql")
     try:
+        additive.prepare_backup(
+            config,
+            source,
+            receipt_root=Path(receipt_root),
+            backup_dump_path=dump_path,
+            backup_receipt_path=receipt_path,
+            mysql_container=mysql_container,
+            qualification_path=qualification_receipt_path,
+        )
         return additive.apply(
             config,
             source,
@@ -296,6 +315,8 @@ def apply_additive_update(
             duration_guard_ms=duration_guard_ms,
             lock_timeout_seconds=lock_timeout_seconds,
             qualification_path=qualification_receipt_path,
+            backup_dump_path=dump_path,
+            backup_receipt_path=receipt_path,
         )
     except additive.LocalAdditiveBlocked as error:
         raise LocalDatabaseUpdateError(

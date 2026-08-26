@@ -1,6 +1,6 @@
 """
 File: migrate_preserved_database_additive_schema.py
-Description: 驗證 release chain，並在隔離候選中安全升級 MySQL schema。
+Description: 驗證 release chain，並以本機備份證據安全執行隔離候選或原地 additive MySQL schema 升級。
 """
 
 from __future__ import annotations
@@ -1851,7 +1851,10 @@ def local_additive_descriptor_state(
 # 本機 qualified additive 例外的唯一執行邊界；update_local_database 只負責路由。
 LOCAL_ADDITIVE_MAX_DURATION_MS = 30_000
 LOCAL_ADDITIVE_LOCK_TIMEOUT_SECONDS = 5
-LOCAL_ADDITIVE_TARGET_PREFIX = "lu_test_"
+LOCAL_ADDITIVE_SYSTEM_DATABASES = frozenset(
+    {"information_schema", "mysql", "performance_schema", "sys"}
+)
+LOCAL_ADDITIVE_TARGET_PREFIX = ""
 
 
 class LocalAdditiveBlocked(RuntimeError):
@@ -2425,27 +2428,25 @@ def _local_connect(config: Any, database: str | None, timeout_ms: int) -> Any:
         ) from error
 
 
-def _local_verify_backup_rows(config: Any, source: str, expected: Mapping[str, Any]) -> None:
-    """Verify schema and stable row evidence before any in-place DDL."""
-    counts = expected.get("data_row_counts")
-    fingerprints = expected.get("data_fingerprints")
-    expected_global = expected.get("data_fingerprint_sha256")
-    if not isinstance(counts, Mapping) or not isinstance(fingerprints, Mapping):
-        raise LocalAdditiveBlocked("source backup row evidence is missing", code="backup_required")
-    if not isinstance(expected_global, str):
-        raise LocalAdditiveBlocked("source backup data fingerprint is missing", code="backup_required")
+def _local_capture_backup_rows(
+    config: Any, source: str, table_names: Iterable[str],
+) -> dict[str, Any]:
+    """Capture stable row evidence for the qualification-selected tables."""
+    names = tuple(str(table) for table in table_names)
+    if not names or any(not IDENTIFIER.fullmatch(table) for table in names):
+        raise LocalAdditiveBlocked(
+            "source backup table identity is invalid", code="backup_required"
+        )
     connection = _local_connect(config, source, LOCAL_ADDITIVE_MAX_DURATION_MS)
     try:
         with connection.cursor() as cursor:
+            counts: dict[str, int] = {}
             actual_fingerprints: dict[str, str] = {}
-            for table, expected_count in counts.items():
-                if not re.fullmatch(r"[A-Za-z0-9_]+", str(table)):
-                    raise LocalAdditiveBlocked("source backup table identity is invalid", code="backup_required")
+            for table in names:
                 cursor.execute(f"SELECT COUNT(*) AS n FROM `{table}`")
                 row = cursor.fetchone() or {}
                 actual = row.get("n", 0) if isinstance(row, Mapping) else row[0]
-                if int(actual) != int(expected_count):
-                    raise LocalAdditiveBlocked("source backup row fingerprint changed", code="backup_required")
+                counts[table] = int(actual)
                 cursor.execute(f"CHECKSUM TABLE `{table}`")
                 checksum_row = _normalized_row(cursor.fetchone() or {})
                 checksum = checksum_row.get("checksum")
@@ -2469,12 +2470,33 @@ def _local_verify_backup_rows(config: Any, source: str, expected: Mapping[str, A
                 actual_fingerprints[str(table)] = _local_stable_table_fingerprint(
                     int(actual), checksum, pk_hash
                 )
-            if actual_fingerprints != dict(fingerprints):
-                raise LocalAdditiveBlocked("source backup row fingerprint changed", code="backup_required")
-            if _local_data_fingerprint(actual_fingerprints) != expected_global:
-                raise LocalAdditiveBlocked("source backup data fingerprint changed", code="backup_required")
+            return {
+                "data_row_counts": counts,
+                "data_fingerprints": actual_fingerprints,
+                "data_fingerprint_sha256": _local_data_fingerprint(
+                    actual_fingerprints
+                ),
+            }
     finally:
         connection.close()
+
+
+def _local_verify_backup_rows(config: Any, source: str, expected: Mapping[str, Any]) -> None:
+    """Verify stable row evidence before and after any in-place DDL."""
+    counts = expected.get("data_row_counts")
+    fingerprints = expected.get("data_fingerprints")
+    expected_global = expected.get("data_fingerprint_sha256")
+    if not isinstance(counts, Mapping) or not isinstance(fingerprints, Mapping):
+        raise LocalAdditiveBlocked("source backup row evidence is missing", code="backup_required")
+    if not isinstance(expected_global, str):
+        raise LocalAdditiveBlocked("source backup data fingerprint is missing", code="backup_required")
+    actual = _local_capture_backup_rows(config, source, counts.keys())
+    if actual["data_row_counts"] != dict(counts):
+        raise LocalAdditiveBlocked("source backup row fingerprint changed", code="backup_required")
+    if actual["data_fingerprints"] != dict(fingerprints):
+        raise LocalAdditiveBlocked("source backup row fingerprint changed", code="backup_required")
+    if actual["data_fingerprint_sha256"] != expected_global:
+        raise LocalAdditiveBlocked("source backup data fingerprint changed", code="backup_required")
 
 
 def _local_classify_statement(statement: str) -> str:
@@ -2672,22 +2694,22 @@ def local_additive_plan(
     receipt_root: Path,
     qualification_path: Path | None = None,
 ) -> dict[str, Any]:
-    if not source.startswith(LOCAL_ADDITIVE_TARGET_PREFIX):
-        raise LocalAdditiveBlocked("daily additive requires a lu_test_* source", code="target_profile_blocked")
+    if (
+        not IDENTIFIER.fullmatch(source)
+        or source.casefold() in LOCAL_ADDITIVE_SYSTEM_DATABASES
+    ):
+        raise LocalAdditiveBlocked(
+            "daily additive requires a non-system local database",
+            code="target_profile_blocked",
+        )
     qualification = (
         _local_discover_qualification()
         if qualification_path is None
         else _local_discover_qualification(qualification_path)
     )
     _local_verify_hashes(qualification)
-    metadata_backup = qualification["metadata_backup"]
-    if metadata_backup.get("database") != source:
-        raise LocalAdditiveBlocked(
-            "qualification source database identity differs", code="source_identity_mismatch"
-        )
     if not database_exists(config, source):
         raise LocalAdditiveBlocked("source database is absent; recovery is required", code="recovery_required")
-    _local_verify_backup_rows(config, source, metadata_backup)
     artifact = qualification["_canonical_artifact"]
     statements = split_sql((ROOT / artifact["relative_path"]).read_text(encoding="utf-8"))
     statement_hashes = [_local_digest(statement.encode("utf-8")) for statement in statements]
@@ -2712,24 +2734,11 @@ def local_additive_plan(
         snapshot=snapshot,
     )
     state = target["state"]
-    if state != "exact" and not events and snapshot["sha256"] != metadata_backup.get("schema_sha256"):
-        raise LocalAdditiveBlocked(
-            "source schema differs from the verified pre-apply backup baseline",
-            code="backup_required",
-        )
-    if not isinstance(metadata_backup.get("schema_sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", metadata_backup["schema_sha256"]):
-        raise LocalAdditiveBlocked("verified source schema digest is missing", code="backup_required")
-    if not isinstance(metadata_backup.get("data_fingerprint_sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", metadata_backup["data_fingerprint_sha256"]):
-        raise LocalAdditiveBlocked("verified source data digest is missing", code="backup_required")
     if state in {"partial"} and not events:
         raise LocalAdditiveBlocked("owned object state is partial", code="schema_state_blocked")
     if state in {"drift", "unknown"}:
         raise LocalAdditiveBlocked(f"owned object state is {state}", code="schema_state_blocked")
     identity = server_identity(config, source)
-    if str(identity.get("host")) != str(metadata_backup.get("host")) or int(identity.get("port", 0)) != int(metadata_backup.get("port", 0)):
-        raise LocalAdditiveBlocked(
-            "qualification server identity differs", code="source_identity_mismatch"
-        )
     return {
         "status": "current" if state == "exact" else "ready",
         "route": "daily_additive",
@@ -2743,6 +2752,7 @@ def local_additive_plan(
         "release_fingerprint": qualification["release_fingerprint"],
         "artifacts": [{"name": artifact["name"], "state": state, "data_effect": "schema_only"}],
         "artifact": {"name": artifact["name"], "state": state, "data_effect": "schema_only"},
+        "backup_required": state != "exact",
         "duration_guard_ms": LOCAL_ADDITIVE_MAX_DURATION_MS,
         "estimated_duration_ms": 0,
         "qualification_receipt": str(Path(qualification["_path"]).relative_to(ROOT)),
@@ -2750,6 +2760,192 @@ def local_additive_plan(
         "verified_ordinals": sorted(verified),
         "statement_hashes": statement_hashes,
     }
+
+
+def _local_validate_backup(
+    config: Any,
+    source: str,
+    qualification: Mapping[str, Any],
+    baseline_schema_sha256: str,
+    *,
+    backup_dump_path: Path | None,
+    backup_receipt_path: Path | None,
+) -> dict[str, Any]:
+    """Validate a machine-local pre-Apply dump and its stable evidence."""
+    if backup_dump_path is None or backup_receipt_path is None:
+        raise LocalAdditiveBlocked(
+            "local pre-apply backup is required", code="backup_required"
+        )
+    dump_path = Path(backup_dump_path).expanduser().resolve()
+    receipt_path = Path(backup_receipt_path).expanduser().resolve()
+    try:
+        receipt = read_receipt(receipt_path)
+        identity = server_identity(config, source)
+        dump = validate_dump(dump_path, receipt_path, source, identity)
+    except (OSError, UpgradeBlocked) as error:
+        raise LocalAdditiveBlocked(
+            "local pre-apply backup is invalid", code="backup_required"
+        ) from error
+    required = {
+        "kind": "local_additive_source_backup",
+        "release_id": qualification["release_id"],
+        "database": source,
+        "server": identity["server"],
+        "host": identity["host"],
+        "port": identity["port"],
+        "schema_sha256": baseline_schema_sha256,
+    }
+    if any(receipt.get(key) != value for key, value in required.items()):
+        raise LocalAdditiveBlocked(
+            "local pre-apply backup identity differs", code="backup_required"
+        )
+    reference_counts = (
+        qualification.get("metadata_backup", {}).get("data_row_counts")
+    )
+    local_counts = receipt.get("data_row_counts")
+    local_fingerprints = receipt.get("data_fingerprints")
+    local_global = receipt.get("data_fingerprint_sha256")
+    if not isinstance(reference_counts, Mapping) or not isinstance(local_counts, Mapping):
+        raise LocalAdditiveBlocked(
+            "local pre-apply backup row evidence is missing", code="backup_required"
+        )
+    if set(local_counts) != set(reference_counts):
+        raise LocalAdditiveBlocked(
+            "local pre-apply backup table scope differs", code="backup_required"
+        )
+    if not isinstance(local_fingerprints, Mapping) or set(local_fingerprints) != set(reference_counts):
+        raise LocalAdditiveBlocked(
+            "local pre-apply backup row evidence is missing", code="backup_required"
+        )
+    if not isinstance(local_global, str) or not re.fullmatch(r"[0-9a-f]{64}", local_global):
+        raise LocalAdditiveBlocked(
+            "local pre-apply backup data digest is missing", code="backup_required"
+        )
+    _local_verify_backup_rows(config, source, receipt)
+    return {
+        **receipt,
+        "dump_path": dump["path"],
+        "receipt_path": str(receipt_path),
+    }
+
+
+def local_additive_prepare_backup(
+    config: Any,
+    source: str,
+    *,
+    receipt_root: Path,
+    backup_dump_path: Path,
+    backup_receipt_path: Path,
+    mysql_container: str | None = None,
+    qualification_path: Path | None = None,
+) -> dict[str, Any]:
+    """Create or validate the immutable machine-local backup for one release."""
+    preview = local_additive_plan(
+        config,
+        source,
+        receipt_root=receipt_root,
+        qualification_path=qualification_path,
+    )
+    if preview["status"] == "current":
+        return preview
+    qualification = (
+        _local_discover_qualification()
+        if qualification_path is None
+        else _local_discover_qualification(qualification_path)
+    )
+    dump_path = Path(backup_dump_path).expanduser().resolve()
+    receipt_path = Path(backup_receipt_path).expanduser().resolve()
+    events = _local_read_events(
+        receipt_root, source, qualification["release_id"]
+    )
+    if dump_path.exists() or receipt_path.exists():
+        if not dump_path.is_file() or not receipt_path.is_file():
+            raise LocalAdditiveBlocked(
+                "local pre-apply backup set is incomplete", code="backup_required"
+            )
+        return _local_validate_backup(
+            config,
+            source,
+            qualification,
+            preview["resume_baseline_schema_sha256"],
+            backup_dump_path=dump_path,
+            backup_receipt_path=receipt_path,
+        )
+    if events:
+        raise LocalAdditiveBlocked(
+            "original local pre-apply backup is missing", code="backup_required"
+        )
+    reference_counts = (
+        qualification.get("metadata_backup", {}).get("data_row_counts")
+    )
+    if not isinstance(reference_counts, Mapping):
+        raise LocalAdditiveBlocked(
+            "qualification backup table scope is missing", code="backup_required"
+        )
+    before_snapshot = local_additive_source_snapshot(config, source)["snapshot"]
+    if before_snapshot["sha256"] != preview["source_schema_sha256"]:
+        raise LocalAdditiveBlocked(
+            "source changed before backup", code="source_changed"
+        )
+    before_rows = _local_capture_backup_rows(
+        config, source, reference_counts.keys()
+    )
+    temporary_dump = dump_path.with_suffix(dump_path.suffix + ".preparing")
+    temporary_receipt = receipt_path.with_suffix(
+        receipt_path.suffix + ".preparing"
+    )
+    if temporary_dump.exists() or temporary_receipt.exists():
+        raise LocalAdditiveBlocked(
+            "unfinished local backup requires review", code="backup_required"
+        )
+    create_source_dump(
+        config,
+        source,
+        temporary_dump,
+        temporary_receipt,
+        mysql_container=mysql_container,
+    )
+    after_snapshot = local_additive_source_snapshot(config, source)["snapshot"]
+    after_rows = _local_capture_backup_rows(
+        config, source, reference_counts.keys()
+    )
+    if after_snapshot["sha256"] != before_snapshot["sha256"] or after_rows != before_rows:
+        raise LocalAdditiveBlocked(
+            "source changed while backup was created", code="source_changed"
+        )
+    identity = server_identity(config, source)
+    receipt = read_receipt(temporary_receipt)
+    receipt.update({
+        "kind": "local_additive_source_backup",
+        "release_id": qualification["release_id"],
+        "database": source,
+        "server": identity["server"],
+        "host": identity["host"],
+        "port": identity["port"],
+        "schema_sha256": before_snapshot["sha256"],
+        **before_rows,
+    })
+    write_receipt(temporary_receipt, receipt)
+    _local_validate_backup(
+        config,
+        source,
+        qualification,
+        before_snapshot["sha256"],
+        backup_dump_path=temporary_dump,
+        backup_receipt_path=temporary_receipt,
+    )
+    dump_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_dump.replace(dump_path)
+    temporary_receipt.replace(receipt_path)
+    return _local_validate_backup(
+        config,
+        source,
+        qualification,
+        before_snapshot["sha256"],
+        backup_dump_path=dump_path,
+        backup_receipt_path=receipt_path,
+    )
 
 
 def local_additive_apply(
@@ -2760,6 +2956,8 @@ def local_additive_apply(
     duration_guard_ms: int = LOCAL_ADDITIVE_MAX_DURATION_MS,
     lock_timeout_seconds: int = LOCAL_ADDITIVE_LOCK_TIMEOUT_SECONDS,
     qualification_path: Path | None = None,
+    backup_dump_path: Path | None = None,
+    backup_receipt_path: Path | None = None,
 ) -> dict[str, Any]:
     if not 1 <= duration_guard_ms <= LOCAL_ADDITIVE_MAX_DURATION_MS:
         raise LocalAdditiveBlocked("duration guard must be between 1 and 30000 ms", code="duration_invalid")
@@ -2794,6 +2992,14 @@ def local_additive_apply(
         statement_hashes,
         preview["source_schema_sha256"],
     )
+    local_backup = _local_validate_backup(
+        config,
+        source,
+        qualification,
+        baseline,
+        backup_dump_path=backup_dump_path,
+        backup_receipt_path=backup_receipt_path,
+    )
     previous: Mapping[str, Any] | None = events[-1] if events else None
     if not events:
         previous = _local_append_event(
@@ -2805,7 +3011,7 @@ def local_additive_apply(
             source_database=source,
             source_schema_sha256=baseline,
             statement_hashes=statement_hashes,
-            data_fingerprint_sha256=qualification["metadata_backup"].get("data_fingerprint_sha256"),
+            data_fingerprint_sha256=local_backup["data_fingerprint_sha256"],
         )
     with _local_maintenance_lock(config, source, lock_timeout_seconds):
         locked_snapshot = local_additive_source_snapshot(config, source)["snapshot"]
@@ -2813,6 +3019,7 @@ def local_additive_apply(
             raise LocalAdditiveBlocked("source changed after plan or lock", code="source_changed")
         if server_identity(config, source)["database"] != source:
             raise LocalAdditiveBlocked("source changed after plan or lock", code="source_changed")
+        _local_verify_backup_rows(config, source, local_backup)
         connection = _local_connect(config, source, duration_guard_ms)
         try:
             with connection.cursor() as cursor:
@@ -2847,9 +3054,17 @@ def local_additive_apply(
         descriptor = local_additive_release_qualification(qualification["release_id"], artifact["name"])["schema_artifacts"][0]["descriptor"]
         if local_additive_descriptor_state(after, descriptor, artifact["name"]) != "exact":
             raise LocalAdditiveBlocked("post-apply descriptor is not exact", code="descriptor_drift")
+        _local_verify_backup_rows(config, source, local_backup)
     elapsed = int((time_module.monotonic() - started) * 1000)
-    result = {**preview, "status": "completed", "elapsed_ms": elapsed, "post_schema_sha256": after["sha256"]}
-    previous = _local_append_event(receipt_root, source, qualification["release_id"], "completed", previous, source_database=source, source_schema_sha256=baseline, post_schema_sha256=after["sha256"], elapsed_ms=elapsed)
+    result = {
+        **preview,
+        "status": "completed",
+        "elapsed_ms": elapsed,
+        "post_schema_sha256": after["sha256"],
+        "backup_receipt": local_backup["receipt_path"],
+        "backup_dump_sha256": local_backup["sha256"],
+    }
+    previous = _local_append_event(receipt_root, source, qualification["release_id"], "completed", previous, source_database=source, source_schema_sha256=baseline, post_schema_sha256=after["sha256"], elapsed_ms=elapsed, backup_receipt=local_backup["receipt_path"], backup_dump_sha256=local_backup["sha256"])
     _local_write_receipt(receipt_root, source, result)
     return result
 
