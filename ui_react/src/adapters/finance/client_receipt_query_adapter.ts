@@ -19,7 +19,6 @@ export function adaptClientReceiptQuery(source: ClientReceiptQuery) {
       stage: item.payment_stage,
       amountDue: `NT$ ${item.amount_due_ntd.toLocaleString()}`,
       dueDate: item.due_date ?? '—',
-      settlementStatus: '目前 typed view 未納入結清狀態欄位',
     })),
   };
 }

@@ -154,11 +154,23 @@ class RichMenuAppearance(BaseModel):
     image_mode: Literal["generated", "uploaded"] = "generated"
     image_path: str | None = None
     image_asset_id: int | None = Field(default=None, ge=1)
+    image_asset_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    image_asset_version: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def validate_uploaded_image(self):
-        if self.image_mode == "uploaded" and not (self.image_asset_id or self.image_path):
-            raise ValueError("uploaded image mode requires an image asset")
+        asset_reference = (
+            self.image_asset_id,
+            self.image_asset_sha256,
+            self.image_asset_version,
+        )
+        if self.image_mode == "uploaded":
+            if self.image_path is not None:
+                raise ValueError("uploaded image mode forbids raw image paths")
+            if any(value is None for value in asset_reference):
+                raise ValueError("uploaded image mode requires an exact media asset reference")
+        elif any(value is not None for value in asset_reference):
+            raise ValueError("generated image mode forbids media asset references")
         return self
 
 

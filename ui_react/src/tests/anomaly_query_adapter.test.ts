@@ -113,8 +113,8 @@ describe('Anomaly Query Adapter Suite', () => {
       expect(mapImportWarningLaneLabel('finance_import')).toBe('財務匯入');
     });
 
-    it('maps custom lanes to uppercase and handles empty/null', () => {
-      expect(mapImportWarningLaneLabel('custom_lane')).toBe('CUSTOM_LANE');
+    it('fails closed for custom lanes and handles empty/null', () => {
+      expect(mapImportWarningLaneLabel('custom_lane')).toBe('其他匯入');
       expect(mapImportWarningLaneLabel('')).toBe('其他匯入');
       expect(mapImportWarningLaneLabel(null)).toBe('其他匯入');
       expect(mapImportWarningLaneLabel(undefined)).toBe('其他匯入');
@@ -129,7 +129,7 @@ describe('Anomaly Query Adapter Suite', () => {
       expect(mapImportWarningStatusLabel('reimport_requested')).toBe('要求重新匯入');
       expect(mapImportWarningStatusLabel('closed')).toBe('已結案');
       expect(mapImportWarningStatusLabel('auto_resolved')).toBe('自動排除');
-      expect(mapImportWarningStatusLabel('other_status')).toBe('other_status');
+      expect(mapImportWarningStatusLabel('other_status')).toBe('狀態待確認');
     });
   });
 

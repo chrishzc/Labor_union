@@ -6,10 +6,12 @@ from datetime import date
 import pytest
 
 from domains.scheduling.service_day_log import ServiceDayLogIntent
+from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.scheduling.service_day_log_workflow import (
+    ApplyServiceDayLog,
+    PreviewServiceDayLog,
     ServiceDayLogResult,
     ServiceDayLogWorkflow,
-    SubmitServiceDayLog,
 )
 
 
@@ -18,55 +20,111 @@ class FakeRepository:
         self.assignment = {"case_no": "CASE-1", "requires_cooking": requires_cooking}
         self.submitted = []
 
-    def load_assignment(self, staff_id: int, assignment_id: int, service_date: date):
+    def load_assignment(self, staff_id: int, assignment_id: int, service_date: date, *, for_update: bool):
         assert (staff_id, assignment_id, service_date) == (9, 12, date(2026, 8, 16))
+        self.for_update = for_update
         return self.assignment
 
     def submit(self, command, assignment):
         self.submitted.append((command, assignment))
-        return ServiceDayLogResult(1, "CASE-1", "2026-08-16", bool(assignment["requires_cooking"]), "created")
+        return ServiceDayLogResult(1, "CASE-1", 12, "2026-08-16", "寶寶今日狀況正常", bool(assignment["requires_cooking"]), "created")
+
+    def load_replay(self, command):
+        return None
+
+    def load_for_staff(self, log_id, staff_id, line_user_id):
+        if (log_id, staff_id, line_user_id) != (1, 9, "U-caregiver"):
+            return None
+        return ServiceDayLogResult(1, "CASE-1", 12, "2026-08-16", "寶寶今日狀況正常", False, "existing")
 
 
-def _command(*, photos: tuple[str, ...] = ()) -> SubmitServiceDayLog:
-    return SubmitServiceDayLog(
+def _preview_command() -> PreviewServiceDayLog:
+    return PreviewServiceDayLog(
         staff_id=9,
         line_user_id="U-caregiver",
         assignment_id=12,
-        intent=ServiceDayLogIntent(date(2026, 8, 16), "寶寶今日狀況正常", photos),
-        idempotency_key="service-day-log-1",
+        intent=ServiceDayLogIntent(date(2026, 8, 16), "寶寶今日狀況正常", ()),
     )
 
 
-def test_non_cooking_service_day_log_can_be_submitted_without_meal_photo() -> None:
+def test_non_cooking_service_day_log_preview_is_zero_lock_and_can_apply() -> None:
     repository = FakeRepository(False)
+    workflow = ServiceDayLogWorkflow(repository)
 
-    result = ServiceDayLogWorkflow(repository).submit(_command())
+    preview = workflow.preview(_preview_command())
+
+    assert preview.can_apply is True
+    assert preview.blockers == ()
+    assert repository.for_update is False
+
+
+def test_non_cooking_service_day_log_apply_rechecks_with_lock() -> None:
+    repository = FakeRepository(False)
+    workflow = ServiceDayLogWorkflow(repository)
+
+    preview = workflow.preview(_preview_command())
+    command = ApplyServiceDayLog(9, "U-caregiver", 12, _preview_command().intent, "service-day-log-1", preview.preview_fingerprint)
+    result = workflow.apply(command)
 
     assert result.outcome == "created"
+    assert repository.for_update is True
     assert len(repository.submitted) == 1
 
 
-def test_cooking_service_day_log_requires_at_least_one_meal_photo() -> None:
+def test_cooking_service_day_log_is_blocked_pending_media_scope() -> None:
     repository = FakeRepository(True)
 
-    with pytest.raises(ValueError, match="meal photo is required"):
-        ServiceDayLogWorkflow(repository).submit(_command())
+    preview = ServiceDayLogWorkflow(repository).preview(_preview_command())
 
+    assert preview.blockers == ("service_day_log_meal_photo_required",)
     assert repository.submitted == []
 
 
 def test_unknown_cooking_requirement_fails_closed() -> None:
     repository = FakeRepository(None)
 
-    with pytest.raises(ValueError, match="cooking requirement is unresolved"):
-        ServiceDayLogWorkflow(repository).submit(_command(photos=("media-1",)))
+    preview = ServiceDayLogWorkflow(repository).preview(_preview_command())
+
+    assert preview.blockers == ("service_day_log_cooking_requirement_unresolved",)
+    assert repository.submitted == []
+
+
+def test_query_fails_closed_for_another_staff() -> None:
+    workflow = ServiceDayLogWorkflow(FakeRepository(False))
+
+    with pytest.raises(ValueError, match="service_day_log_not_found"):
+        workflow.query(1, 10, "U-other")
+
+
+def test_apply_rejects_stale_preview_before_submit() -> None:
+    repository = FakeRepository(False)
+    command = ApplyServiceDayLog(9, "U-caregiver", 12, _preview_command().intent, "service-day-log-1", PreviewFingerprint("0" * 64))
+
+    with pytest.raises(ValueError, match="service_day_log_preview_stale"):
+        ServiceDayLogWorkflow(repository).apply(command)
 
     assert repository.submitted == []
 
 
-def test_cooking_service_day_log_accepts_owned_meal_photo_reference() -> None:
+def test_apply_rejects_cooking_case_without_media_capability() -> None:
     repository = FakeRepository(True)
+    workflow = ServiceDayLogWorkflow(repository)
+    preview = workflow.preview(_preview_command())
+    command = ApplyServiceDayLog(9, "U-caregiver", 12, _preview_command().intent, "service-day-log-1", preview.preview_fingerprint)
 
-    ServiceDayLogWorkflow(repository).submit(_command(photos=("media-1",)))
+    with pytest.raises(ValueError, match="service_day_log_meal_photo_required"):
+        workflow.apply(command)
 
-    assert repository.submitted[0][0].intent.meal_photo_media_ids == ("media-1",)
+    assert repository.submitted == []
+
+
+def test_terminal_replay_is_returned_before_fresh_fact_validation() -> None:
+    repository = FakeRepository(None)
+    terminal = ServiceDayLogResult(1, "CASE-1", 12, "2026-08-16", "寶寶今日狀況正常", False, "existing")
+    repository.load_replay = lambda _command: terminal
+    command = ApplyServiceDayLog(9, "U-caregiver", 12, _preview_command().intent, "service-day-log-1", PreviewFingerprint("0" * 64))
+
+    result = ServiceDayLogWorkflow(repository).apply(command)
+
+    assert result is terminal
+    assert not hasattr(repository, "for_update")

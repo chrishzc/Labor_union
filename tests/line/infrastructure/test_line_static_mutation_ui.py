@@ -207,8 +207,48 @@ def test_mobile_admin_query_routes_use_closed_typed_response_models() -> None:
         "CustomerServiceSummaryView",
         "CustomerServicePageView",
         "CustomerServiceDetailView",
-        "CanonicalLineReviewPageResponse",
+        "CanonicalLineReviewNumberedPageResponse",
         "CanonicalLineReviewDecisionPreviewResponse",
         "CanonicalLineReviewResponse",
     ):
         assert f"response_model=BaseResponse[{model}]" in source
+
+
+def test_mobile_admin_customer_and_review_pagination_use_server_metadata() -> None:
+    source = _source("mobile_admin.html")
+    customer = source.split("async function loadTickets", 1)[1].split(
+        "const ticketStatusLabels", 1
+    )[0]
+    pagination = source.split("function renderPagination", 1)[1].split(
+        "function safeErrorMessage", 1
+    )[0]
+    review_page = source.split("function requireReviewPage", 1)[1].split(
+        "function renderPagination", 1
+    )[0]
+    reviews = source.split("async function loadReviews", 1)[1].split(
+        "function reviewCard", 1
+    )[0]
+
+    assert "page: requestedPage" in customer
+    assert "requireCustomerPage(data, requestedPage)" in customer
+    assert "querySequence !== ticketQuerySequence" in customer
+    assert "requestedPage !== ticketPageState.page" in customer
+    assert 'ticketPageState.page = 1' in source
+    assert "顯示 ${first}-${last} / ${pageData.total} 件" in pagination
+    assert 'previous.disabled = pageData.page <= 1' in pagination
+    assert 'next.disabled = pageData.page >= pageData.totalPages' in pagination
+    assert "cursor" not in pagination.lower()
+    assert "fingerprint" not in pagination.lower()
+    assert "provider" not in pagination.lower()
+    assert "Number.isInteger(data.page)" in review_page
+    assert "Number.isInteger(data.page_size)" in review_page
+    assert "Number.isInteger(data.total)" in review_page
+    assert "data.page_size !== reviewPageState.pageSize" in review_page
+    assert "page: requestedPage" in reviews
+    assert "page_size: reviewPageState.pageSize" in reviews
+    assert "requireReviewPage(data, requestedPage)" in reviews
+    assert "querySequence !== reviewQuerySequence" in reviews
+    assert "requestedPage !== reviewPageState.page" in reviews
+    assert "renderPagination(root, pageData" in reviews
+    assert 'reviewPageState.page = 1' in source
+    assert 'reviewStatus").addEventListener("change", () =>' in source

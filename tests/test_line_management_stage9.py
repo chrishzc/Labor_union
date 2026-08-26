@@ -131,6 +131,47 @@ def test_rich_menu_client_reads_and_writes_canonical_configuration(monkeypatch) 
     def request(method, url, **kwargs):
         calls.append({"method": method, "url": url, **kwargs})
         definition = {"version": 2, "menus": []}
+        if url.endswith("/api/v1/line/rich-menus/draft") and method == "GET":
+            return _Response(
+                200,
+                {
+                    "data": {
+                        "kind": "rich_menus",
+                        "revision": 4,
+                        "definition": definition,
+                    }
+                },
+            )
+        if url.endswith("/api/v1/line/rich-menus/draft/preview"):
+            return _Response(
+                200,
+                {
+                    "data": {
+                        "before_revision": 4,
+                        "resulting_revision": 5,
+                        "normalized_definition": definition,
+                        "preview_fingerprint": "a" * 64,
+                    }
+                },
+            )
+        if url.endswith("/api/v1/line/rich-menus/draft") and method == "PUT":
+            return _Response(
+                200,
+                {
+                    "data": {
+                        "receipt": {
+                            "outcome": "created",
+                            "committed_revision": 5,
+                            "receipt_reference": "line-rich-menu-draft:5",
+                        },
+                        "readback": {
+                            "kind": "rich_menus",
+                            "revision": 5,
+                            "definition": definition,
+                        },
+                    }
+                },
+            )
         return _Response(
             200,
             {"data": {"revision": 4, "definition": definition}},
@@ -140,19 +181,29 @@ def test_rich_menu_client_reads_and_writes_canonical_configuration(monkeypatch) 
     client = LineAdminApiClient()
 
     state = client.line_menu_state("session-token")
+    preview = client.preview_line_menu_draft(
+        "session-token",
+        state["config"],
+        revision=state["revision"],
+    )
     client.update_line_menus(
         "session-token",
         state["config"],
         revision=state["revision"],
+        preview_fingerprint=preview["preview_fingerprint"],
         reason="儲存 Rich Menu",
         idempotency_key="idem-rich-menu",
         correlation_id="corr-rich-menu",
     )
 
     assert state == {"revision": 4, "config": {"version": 2, "menus": []}}
-    assert calls[0]["url"].endswith("/api/v1/line/configurations/rich_menus")
+    assert calls[0]["url"].endswith("/api/v1/line/rich-menus/draft")
+    assert calls[1]["url"].endswith("/api/v1/line/rich-menus/draft/preview")
     assert calls[1]["json"]["expected_revision"] == 4
-    assert calls[1]["json"]["idempotency_key"] == "idem-rich-menu"
+    assert calls[2]["url"].endswith("/api/v1/line/rich-menus/draft")
+    assert calls[2]["json"]["expected_revision"] == 4
+    assert calls[2]["json"]["preview_fingerprint"] == "a" * 64
+    assert calls[2]["json"]["idempotency_key"] == "idem-rich-menu"
 
 
 @pytest.mark.parametrize(

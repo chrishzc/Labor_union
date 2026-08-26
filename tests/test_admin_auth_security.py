@@ -16,6 +16,7 @@ from api.dependencies.admin_auth import (
     require_root,
     require_line_menu_publisher,
     require_line_task_controller,
+    require_persisted_admin,
 )
 from api.dependencies.jobs import immutable_admin_job_actor
 from api.routes.admin_auth import _local_developer_session_enabled
@@ -71,6 +72,34 @@ def test_all_enabled_internal_roles_receive_equal_business_capabilities():
 
 def test_line_router_dependencies_target_their_operation_capabilities():
     assert require_line_task_controller is not require_line_menu_publisher
+
+
+def test_persisted_business_session_does_not_depend_on_role_or_capability_subset():
+    request = Request({"type": "http"})
+    principal = AdminPrincipal(
+        27,
+        "enabled-user",
+        "已啟用內部使用者",
+        "line_viewer",
+        capabilities=frozenset(),
+    )
+
+    assert require_persisted_admin(request, principal) is principal
+    assert request.state.admin_actor.actor_id == "admin:27"
+
+
+@pytest.mark.parametrize(
+    "principal",
+    (
+        AdminPrincipal(None, "development-bypass", "開發模式管理員", "system_admin"),
+        AdminPrincipal(28, "disabled-user", "停用使用者", "line_viewer", enabled=False),
+    ),
+)
+def test_persisted_business_session_rejects_bypass_and_disabled_users(principal):
+    with pytest.raises(HTTPException) as raised:
+        require_persisted_admin(Request({"type": "http"}), principal)
+
+    assert raised.value.status_code == 403
 
 
 def test_line_config_keeps_public_liff_read_but_protects_management_routes():

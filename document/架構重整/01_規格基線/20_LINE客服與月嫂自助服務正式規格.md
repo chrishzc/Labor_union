@@ -145,15 +145,38 @@ storage locator 或公開 URL；查看使用 authenticated download，重新處�
 新版本，不提供 Web 資料夾瀏覽或原地修改。月嫂即時新增照片仍須經 verified identity、assignment／
 service-day 驗證、staging、Preview／確認／Apply；不能因 NAS watcher 發現檔案就建立日誌完成事實或發送通知。
 
+Current 執行拆分（2026-08-26）：`requires_cooking=false` 的純文字日誌可先沿用既有 Scheduling
+assignment／service-day roots 與日誌 persistence，補齊 verified LIFF Query → zero-write Preview →
+明確確認 → Apply → receipt/readback，且不得接受 media reference。`requires_cooking=true`、unknown、
+餐食照片與其他附件仍 fail closed，等待 NAS staging、digest、版本、cleanup／reconciliation 與下載投影；
+純文字完成不代表媒體 lane 完成。
+
+純文字 lane runtime 狀態（2026-08-26）：`completed`。`staff_schedule.html` 由正式班表工作日選取
+assignment/date，依序執行 verified staff Query、零寫入 Preview、人工確認、fresh-lock Apply、receipt 與
+owner-filtered readback；Apply 的 terminal replay 先回既有 receipt，不因後續根事實漂移改判 stale。focused
+Domain／repository／API／static LIFF 共 53 項通過，內嵌 JavaScript 語法通過。verified-token Chrome 仍由
+`CUR-LIFF-E2E` 列管並為 `not_run`；照片／附件仍由 NAS blocker 列管。
+
+媒體 lane 執行狀態（2026-08-26）：`approved`。人工已授權在 `CUR-FILE-NAS-01` controlled-file
+capability 通過後，完成 verified LIFF staging、Preview／確認／Apply、digest／版本、cleanup／reconciliation、
+receipt 與 authenticated download。不得另建 direct upload、公開 URL 或 watcher-owned completion path。
+
 ## 6. UI 與人工入口
 
 - merge 的 Rich Menu 圖面、按鈕標籤與 LIFF 卡片樣式可移植。
 - 「客服與選單」的 Rich Menu 編輯器必須提供背景圖與按鈕顯示名稱的 draft 編輯入口；畫面預覽、
   Preview receipt 與 Apply 必須鎖定同一 revision。編輯草稿不等於發布，provider publication 仍依 `17`
   的 durable saga 執行；未啟用 provider 測試時只驗證到 committed definition／publication intent，不假造發送成功。
+- 背景圖選擇器只查目前 editable menu owner 的受控 metadata，並保存 exact asset ID／SHA-256／opaque
+  version；已刪除項目保留歷史顯示但不得選取。畫面不得顯示 digest、version、storage locator 或 raw ID
+  輸入框；合法空清單仍保留系統色彩背景。Preview 零寫入驗證 metadata，Apply 對新 command 於同一
+  outer transaction fresh-lock 後才提交草稿 revision。
 - 手機模擬器點擊每個熱區時，必須使用同一 draft revision 的真實 typed action；管理員可依 `17` §3.5
   修改 action kind 與該 kind 的 allowlisted target／內容。按鈕顯示名稱修改不得改變 action，action 修改也
   不得靠標籤推導；Preview、Apply 與 readback 必須讓編輯器、手機模擬及 server definition 顯示同一結果。
+- 管理端必須使用 server 依 exact menu／revision 投影的 `editable／processing／published` lock；後兩者
+  只顯示人可讀業務原因且不掛載草稿 mutation controls。缺 lock 或 owner projection 漂移時唯讀 fail
+  closed，不得由發布歷程首筆、按鈕標籤或瀏覽器 hardcode 猜測。
 - Rich Menu 本機預覽不是待移除的 demo：它是正式編輯 UX 的零寫入互動層。編輯背景、標籤、action 或
   message text 後，手機畫面立即更新；點擊 message 只在模擬器顯示候選文字，點擊 URI／LIFF 只顯示該
   typed target 的模擬頁，不送訊息、不開 provider mutation。另保留獨立 server Preview、確認與 Apply。
@@ -180,13 +203,27 @@ runtime `public_base_url` 產生公開網址。Chrome 已由工作室逐一實�
 4 個 Flex 仍可達，且一般畫面不再顯示資產盤點說明。本項 responsive UI 驗收亦為 `completed`。
 - AI 事件工作室在正式 catalog contract 完成前，只允許零寫入草稿編輯與 deterministic 本機預覽；未命中固定
   轉人工 fallback。滿意度調查按鈕與統計槽位不可因 API 尚缺而刪除；正式 feedback Query／record／receipt 完成前
-  只顯示本機預覽，不保存回饋、不增加硬編統計、不假造人工工單。正式規則 Query／Preview／Apply／receipt、
-  客戶 `profile_update` Query／Preview／Apply／receipt與去敏 Flex design preview 目前均為 required contract gap；
+  只顯示本機預覽，不保存回饋、不增加硬編統計、不假造人工工單。正式規則 Query／Preview／Apply／receipt
+  與客戶 `profile_update` Query／Preview／Apply／receipt目前仍是 required contract gap；四個 Flex 原始資產的
+  去敏 presentation contract 已由 §6.2 收斂，但不代表 projection composition、delivery 或 provider 已完成；
   不得誤用 notification schedule、legacy client-supplied `line_user_id` writer 或 delivery raw payload 取代。
 - 客戶「已填過／尚未填過」選擇必須保存 canonical flow ID；未填過流程完成登記後才能完成同一 LINE 身分綁定。
 - LINE 管理中心使用 Customer Service bounded API client；成功 payload 轉 typed Pydantic view，transport/schema error 轉 typed client error。
 - Streamlit 只顯示 typed result 與提交 command，不包含 ticket transition 或 SQL 規則。
 - 已綁定且 enabled 的工會人員可由 `line-mobile-admin` LIFF 查看／回覆客服案件與決定月嫂身分審核；其 server-side ID token、binding、version、receipt 與 outbox 規則不因 persisted role／capability 而改變。
+
+AI feedback 執行狀態（2026-08-26）：`approved-for-contract-first`。人工已授權補齊正式 feedback owner、
+root facts、privacy、typed Query／record／receipt／readback 與 durable manual-ticket linkage；只有 formal
+contract closure gate 通過後才可實作，不得把 blanket approval 解讀成 local counter、假統計或假工單可發布。
+
+LINE 管理 surface 驗收狀態（2026-08-25）：`completed`。三方服務群組與事件使用 additive
+numbered Query，舊 `limit` API 保留；執行中的 FastAPI 更新至 current route 後，Chrome 實點群組頁
+顯示合法零筆狀態，未再出現 `resource_not_found`。發送任務明細已實點開啟並立即關閉，晚到結果未重開
+Drawer。Rich Menu 依 typed bounds 顯示本機幾何初檢，明示正式路由仍須 server Preview；Diff 在缺少
+active typed snapshot 時明示 blocker，不猜 Before。外觀與 action 同時修改後，取消 action 仍保留外觀
+candidate，再取消外觀可完整復原，且全程未送出 mutation。Focused React 3 files／20 tests、Python 4 tests
+與 TypeScript 均通過。測試 DB 目前沒有三方群組，因此群組／事件正向翻頁為 `not_run`，由 focused
+numbered pagination regression 覆蓋；不得為取得 Chrome 正向頁面而偽造 owner root fact。
 
 ### 6.1 LIFF 資料異動申請與管理核准（2026-08-25 人工裁決）
 
@@ -213,8 +250,38 @@ runtime `public_base_url` 產生公開網址。Chrome 已由工作室逐一實�
 8. Browser 驗收必須實際由 LIFF 提交、管理端核准並讀回 DB 更新；另驗證拒絕、stale、replay、越權、
    rollback 與合法唯讀原因。不得以 API mutation、直接 DB patch、假 token 或改狀態欄取代 UI。
 
-若 owner root、欄位 allowlist、version 或 repository contract 尚未存在，實作狀態為 `blocked`，須先由
-Client／Staff 正式規格補齊；本裁決不自行授權 schema／migration／DDL、production DB 或 provider push。
+資料異動執行狀態（2026-08-26）：`approved`。人工已授權先由 Client／Staff owner 補齊 root、欄位
+allowlist、version、repository contract 與必要 `lu_test_*` schema release，再依本節完成 LIFF／管理端 E2E。
+所有 schema 工作仍須完整 DB change gates；production DB／`union_db` 與 provider push 不由 schema 授權推導。
+
+### 6.2 四個 Flex 原始資產的 presentation contract（2026-08-25 人工原圖同步）
+
+第 6 節較早將「去敏 Flex design preview」列為 required contract gap 的文字，由本節取代。
+依 26 的 Eraser M1～M4 逐節點轉錄，四張卡的真實業務用途與 owner source 固定如下：
+
+| Asset | 原圖節點／業務作用 | Current owner source | 設計預覽邊界 |
+|---|---|---|---|
+| flex_dispatch | M1 Staff_Order_View 與 M3 派案意願調查：讓候選月嫂去敏查閱正式案件資訊並表達願意／不願意 | Scheduling Candidate Contact Pool、Orders case projection；LINE 只 render／deliver | 不代表已建立聯繫事件、delivery task 或送達；不得攜帶客戶姓名、電話、詳細地址 |
+| flex_leave_confirm | M1 Client_Extension_Push 與 M3 Client_Leave_Notice：請客戶確認月嫂請假後順延或不同意並轉代班 | Scheduling leave request／canonical leave receipt／assignment service dates | 點擊只可形成 recipient-bound typed decision；卡片文字不得直接改 end_date、班表或代班 |
+| flex_alert_critical | M4 Step3_Push_Alert：將 committed HIGH escalation 的去敏摘要與安全處理入口通知已設定的幹部群 | Customer Service escalation；runtime alert target owner只提供 current recipient target；LINE負責delivery | 不顯示完整姓名、電話或 raw 摘要；不代表群組已設定、task 已送達或案件已被 claim |
+| flex_negotiation | M3 Zero_Pool_Engine／Client_Compromise_Push：呈現由 current criteria 與拒接 lineage 得出的人工選定調整方案 | Scheduling Matching Coordination criteria／willingness／zero-candidate preview | 不自動產生或套用條件、不直接改 Orders；客戶回覆後仍走 fresh owner Preview／Apply |
+
+工作室可持有 closed asset identity、design revision、去敏固定文案與 owner-fact availability
+狀態，並在 owner facts 缺失時顯示明確 blocker。它不是 Flex 素材資料庫、provider payload API
+或發送入口，不需要為純設計預覽建立 generic Flex Query。現有 Scheduling matching renderer、
+leave decision、Customer Service escalation 與 M3 zero-candidate public contracts各自維持唯一 owner；
+不得為四張設計稿另建競爭 writer。
+
+因此，四張卡的「closed typed design preview contract」已由本節回答；尚未完成的是真實 owner
+projection composition、exact recipient intent、delivery／postback、provider 與 Chrome E2E。依
+2026-08-25 人工裁決，原圖缺失需求在 96 完成前只登記於 26 的 deferred-after-96 清單，
+不得以本節擴張 current 施工。
+
+四卡 presentation 驗收狀態（2026-08-25）：completed。Focused Vitest 2 passed、TypeScript
+passed；Chrome fresh reload 後實點派案通知、服務日順延確認、重大異常通報與媒合條件溝通，
+均顯示對應去敏文案、明確 owner-fact blocker 與「不建立發送工作」邊界。頁面沒有 application
+error／warn；僅觀察到第三方 Chrome 擴充套件自身 listener warning。此完成事實不包含真實
+projection composition、postback、delivery、provider 或 26 的 deferred-after-96 缺口。
 
 ## 7. 第一版驗收
 
@@ -238,3 +305,12 @@ Client／Staff 正式規格補齊；本裁決不自行授權 schema／migration�
   provider。LINE provider仍只能由已提交task的worker執行；本規格不授權AI provider、deployment或新的外部副作用。
 - runtime／LINE管理畫面的audit清單只能使用closed masked typed view；raw details、token、完整identity或額外欄位
   一律在API client boundary fail closed，不得穿透Streamlit／React render。
+
+## 2026-08-26 current execution authorization amendment
+
+- 人工已授權 current LINE lanes 的本機實作、`lu_test_*` 必要 schema gates、verified-token Chrome E2E、
+  controlled NAS media flow、AI feedback contract-first 工作與 provider sandbox qualification。
+- 先前「provider 尚未授權／先不真實 push」只就 current sandbox lane 由本 amendment supersede；執行前仍須
+  回讀 exact environment、target、recipient、quota 與 worker isolation，只送最小受控案例並保存 provider receipt。
+- 這項授權不允許猜測 production recipient、`union_db`、部署 target 或 entry switch，也不取消各 owner 的
+  Preview／Apply、fresh-lock、idempotency、receipt、readback、rollback 與 manual fallback。

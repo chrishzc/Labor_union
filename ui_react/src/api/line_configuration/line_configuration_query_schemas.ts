@@ -121,7 +121,7 @@ const MenuBoundsSchema = z
   })
   .strict();
 
-const RichMenuActionSchema = z
+export const RichMenuActionSchema = z
   .object({
       type: z.enum(['message', 'uri', 'postback', 'richmenuswitch']),
       text: NullableTextSchema.optional(),
@@ -130,7 +130,7 @@ const RichMenuActionSchema = z
       data: NullableTextSchema.optional(),
       rich_menu_alias_id: z
         .string()
-        .regex(/^[a-zA-Z0-9_-]{1,32}$/)
+        .regex(/^[a-z0-9_-]{1,32}$/)
         .nullable()
         .optional(),
     })
@@ -149,7 +149,21 @@ const RichMenuActionSchema = z
       if (action.type === 'richmenuswitch' && !action.rich_menu_alias_id) {
         context.addIssue({ code: z.ZodIssueCode.custom, path: ['rich_menu_alias_id'], message: 'richmenuswitch action 必須有 alias' });
       }
+      const has = (value: string | null | undefined) => value !== null && value !== undefined;
+      if (action.type !== 'message' && has(action.text)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ['text'], message: '此 action kind 不可包含 text' });
+      }
+      if (action.type !== 'uri' && (has(action.uri) || action.uri_source === 'liff')) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ['uri'], message: '此 action kind 不可包含 URI' });
+      }
+      if (!['postback', 'richmenuswitch'].includes(action.type) && has(action.data)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ['data'], message: '此 action kind 不可包含 data' });
+      }
+      if (action.type !== 'richmenuswitch' && has(action.rich_menu_alias_id)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ['rich_menu_alias_id'], message: '此 action kind 不可包含 alias' });
+      }
     });
+export type RichMenuAction = z.infer<typeof RichMenuActionSchema>;
 
 const RichMenuButtonSchema = z
   .object({
@@ -176,18 +190,36 @@ const RichMenuAppearanceSchema = z
     image_mode: z.enum(['generated', 'uploaded']).optional(),
     image_path: NullableTextSchema.optional(),
     image_asset_id: z.number().int().positive().nullable().optional(),
+    image_asset_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+    image_asset_version: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
   })
   .strict()
   .superRefine((appearance, context) => {
-    if (
-      appearance.image_mode === 'uploaded' &&
-      !appearance.image_path &&
-      !appearance.image_asset_id
-    ) {
+    const assetReference = [
+      appearance.image_asset_id,
+      appearance.image_asset_sha256,
+      appearance.image_asset_version,
+    ];
+    if (appearance.image_mode === 'uploaded') {
+      if (appearance.image_path) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['image_path'],
+          message: 'uploaded Rich Menu 不接受原始影像路徑',
+        });
+      }
+      if (assetReference.some((value) => value == null)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['image_mode'],
+          message: 'uploaded Rich Menu 必須有完整受控影像資產參照',
+        });
+      }
+    } else if (assetReference.some((value) => value != null)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['image_mode'],
-        message: 'uploaded Rich Menu 必須有影像資產',
+        message: 'generated Rich Menu 不接受影像資產參照',
       });
     }
   });
@@ -207,7 +239,7 @@ const RichMenuDefinitionSchema = z
     audience_role: RichMenuAudienceRoleSchema,
     rich_menu_alias_id: z
       .string()
-      .regex(/^[a-zA-Z0-9_-]{1,32}$/)
+      .regex(/^[a-z0-9_-]{1,32}$/)
       .nullable()
       .optional(),
     enabled: z.boolean().optional(),

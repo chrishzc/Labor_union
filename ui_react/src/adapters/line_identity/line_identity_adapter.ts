@@ -92,7 +92,9 @@ export interface LineIdentityReviewRowViewModel {
 
 export interface LineIdentityReviewPageViewModel {
   items: LineIdentityReviewRowViewModel[];
-  nextCursor: string | null;
+  page: number;
+  pageSize: number;
+  total: number;
 }
 
 export interface LineIdentityReviewSummaryViewModel {
@@ -349,7 +351,9 @@ export function adaptLineIdentityReviewPage(
 ): LineIdentityReviewPageViewModel {
   return {
     items: page.items.map(adaptLineIdentityReview),
-    nextCursor: page.next_cursor,
+    page: page.page,
+    pageSize: page.page_size,
+    total: page.total,
   };
 }
 

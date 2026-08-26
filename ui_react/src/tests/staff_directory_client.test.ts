@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import {
   createStaffDirectoryClient,
+  loadAllStaffDirectoryPages,
 } from '../api/staff_directory/staff_directory_client';
 import {
   StaffDirectoryUnauthenticatedError,
@@ -127,6 +128,19 @@ describe('staff directory client', () => {
     await expect(client.queryPage({ afterId: 12 })).rejects.toBeTruthy();
     await expect(client.queryPage({ afterId: 12 })).resolves.toEqual(STAFF_RESPONSE_TWO.data);
     expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('loads every staff page for operator selectors', async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(response(STAFF_RESPONSE_ONE))
+      .mockResolvedValueOnce(response(STAFF_RESPONSE_TWO));
+    const client = createStaffDirectoryClient();
+
+    const page = await loadAllStaffDirectoryPages(client.queryPage.bind(client), { pageSize: 200 });
+
+    expect(page.items).toEqual([...STAFF_RESPONSE_ONE.data.items, ...STAFF_RESPONSE_TWO.data.items]);
+    expect(page.next_cursor).toBeNull();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 
   it('validates bounds and supports an empty page', async () => {

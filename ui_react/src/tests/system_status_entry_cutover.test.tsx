@@ -1,6 +1,6 @@
 /**
  * File: system_status_entry_cutover.test.tsx
- * Description: 驗證系統狀態 entry 的 Hash、認證、單一 GET、typed 快照、失敗與重試。
+ * Description: 驗證系統狀態入口的認證、唯讀查詢、業務化摘要、失敗去敏與重試。
  */
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -252,7 +252,10 @@ describe('System Status entry cutover candidate contract', () => {
     render(<SystemStatusPage />);
 
     await waitFor(() => expect(screen.getByTestId('system-status.query.error')).toBeInTheDocument());
-    expect(screen.getByRole('alert')).toHaveTextContent('system status unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '請確認系統服務已啟動後再試；此畫面未取得資料，不代表服務一定中斷。'
+    );
+    expect(screen.getByRole('alert')).not.toHaveTextContent('system status unavailable');
     expect(screen.queryByTestId('system-status.query.success')).not.toBeInTheDocument();
     expect(screen.queryByText(/系統在線|服務正常/)).not.toBeInTheDocument();
 

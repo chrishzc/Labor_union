@@ -1,6 +1,6 @@
 /**
  * File: system_status_entry_identity.test.tsx
- * Description: 驗證 System Status 專用 entry 的 authenticated typed snapshot 與 query 狀態。
+ * Description: 驗證系統狀態專用入口的認證查詢、業務化摘要、錯誤去敏與重試。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -67,7 +67,7 @@ describe('SystemStatusPage identity amendment', () => {
       'data-entry-identity',
       'ui-react:#system-status'
     );
-    expect(screen.getByRole('status')).toHaveTextContent('正在讀取系統效能快照');
+    expect(screen.getByRole('status')).toHaveTextContent('正在讀取系統狀態');
     expect(screen.queryByText(/系統在線|服務正常/)).not.toBeInTheDocument();
     expect(fetchSpy).toHaveBeenCalledWith(
       SYSTEM_STATUS_ENDPOINT,
@@ -104,7 +104,7 @@ describe('SystemStatusPage identity amendment', () => {
     expect(screen.queryByText(/系統在線|服務正常/)).not.toBeInTheDocument();
   });
 
-  it('shows the typed transport error and retries through the same GET client path', async () => {
+  it('hides transport internals and retries through the same GET client path', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
       .mockRejectedValueOnce(new TypeError('connection refused'))
       .mockResolvedValueOnce(jsonResponse(snapshotEnvelope({ request_count: 3 })));
@@ -112,8 +112,11 @@ describe('SystemStatusPage identity amendment', () => {
     render(<SystemStatusPage />);
 
     await waitFor(() => expect(screen.getByTestId('system-status.query.error')).toBeInTheDocument());
-    expect(screen.getByRole('alert')).toHaveTextContent('connection refused');
-    fireEvent.click(screen.getByRole('button', { name: '重新載入快照' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '請確認系統服務已啟動後再試；此畫面未取得資料，不代表服務一定中斷。'
+    );
+    expect(screen.getByRole('alert')).not.toHaveTextContent('connection refused');
+    fireEvent.click(screen.getByRole('button', { name: '更新系統狀態' }));
 
     await waitFor(() => expect(screen.getByTestId('system-status.query.success')).toBeInTheDocument());
     expect(fetchSpy).toHaveBeenCalledTimes(2);

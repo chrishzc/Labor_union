@@ -38,8 +38,13 @@ const initialAuditDetailState: QueryState<AuditDetailView> = { status: 'idle', d
 const initialJobState: QueryState<JobObservationView> = { status: 'idle', data: null, error: null };
 const initialCommandState: QueryState<AccountMutationReceipt> = { status: 'idle', data: null, error: null };
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '查詢失敗，請稍後重試。';
+function errorMessage(error: unknown, fallback: string): string {
+  const code = String((error as { code?: unknown })?.code ?? (error instanceof Error ? error.message : '')).toUpperCase();
+  if (code.includes('UNAUTHENTICATED')) return '請先完成管理員登入後再操作。';
+  if (code.includes('FORBIDDEN')) return '帳號中心僅限唯一啟用的 root 帳號；請以 root 身分重新登入。';
+  if (code.includes('STALE') || code.includes('CONFLICT')) return '資料已更新，請重新整理後再操作。';
+  if (code.includes('UNAVAILABLE') || code.includes('NETWORK') || code.includes('TIMEOUT')) return '服務目前暫時無法使用，請稍後重試。';
+  return fallback;
 }
 
 function isAbortError(error: unknown): boolean {
@@ -109,7 +114,7 @@ export const AccountManagementPage: React.FC = () => {
       setUsersState({ status: rows.length > 0 ? 'ready' : 'empty', data: rows, error: null });
     } catch (error) {
       if (generation !== usersGeneration.current || isAbortError(error)) return;
-      setUsersState({ status: 'error', data: null, error: errorMessage(error) });
+      setUsersState({ status: 'error', data: null, error: errorMessage(error, '帳號清冊暫時無法取得，請稍後重試。') });
     }
   }, []);
 
@@ -126,7 +131,7 @@ export const AccountManagementPage: React.FC = () => {
       setCreatePassword('');
       await loadUsers();
     } catch (error) {
-      setCommandState({ status: 'error', data: null, error: errorMessage(error) });
+      setCommandState({ status: 'error', data: null, error: errorMessage(error, '帳號操作未完成，請確認資料後再試。') });
     }
   }, [loadUsers]);
 
@@ -174,7 +179,7 @@ export const AccountManagementPage: React.FC = () => {
       setAuditState({ status: pageView.items.length > 0 ? 'ready' : 'empty', data: pageView, error: null });
     } catch (error) {
       if (generation !== auditGeneration.current || isAbortError(error)) return;
-      setAuditState((current) => ({ ...current, status: 'error', error: errorMessage(error) }));
+      setAuditState((current) => ({ ...current, status: 'error', error: errorMessage(error, '安全稽核紀錄暫時無法取得，請稍後重試。') }));
     }
   }, []);
 
@@ -190,7 +195,7 @@ export const AccountManagementPage: React.FC = () => {
       setAuditDetailState({ status: 'ready', data: adaptAuditDetail(result), error: null });
     } catch (error) {
       if (generation !== auditDetailGeneration.current || isAbortError(error)) return;
-      setAuditDetailState({ status: 'error', data: null, error: errorMessage(error) });
+      setAuditDetailState({ status: 'error', data: null, error: errorMessage(error, '安全稽核詳情暫時無法取得，請稍後重試。') });
     }
   }, []);
 
@@ -208,7 +213,7 @@ export const AccountManagementPage: React.FC = () => {
       setJobState({ status: 'ready', data: adaptJobObservation(result), error: null });
     } catch (error) {
       if (generation !== jobGeneration.current || isAbortError(error)) return;
-      setJobState({ status: 'error', data: null, error: errorMessage(error) });
+      setJobState({ status: 'error', data: null, error: errorMessage(error, '背景工作狀態暫時無法取得，請稍後重試。') });
     }
   }, [jobIdInput]);
 
@@ -238,13 +243,14 @@ export const AccountManagementPage: React.FC = () => {
     <div className="account-page-container" data-surface-id="account.page">
       <div className="page-header-banner account-page-header">
         <div className="account-page-header-text">
-          <h1 className="page-title">👤 系統帳號、權限與 TOTP 雙因子管理</h1>
-          <p className="page-subtitle">帳號清冊、遮罩稽核與背景工作觀察均以後端 typed GET 顯示；帳號與 MFA 變更仍由原核准流程管理。</p>
+          <h1 className="page-title">👤 系統帳號與安全管理</h1>
+          <p className="page-subtitle">管理工作人員帳號、登入驗證、安全稽核與背景工作狀態。</p>
         </div>
         <button
           type="button"
           className="account-primary-btn"
           data-control-id="account.user.create"
+          aria-describedby="account-command-disabled-reason"
           onClick={() => void createAccount()}
           disabled={commandState.status === 'loading' || !commandReason.trim() || !createUsername.trim() || !createDisplayName.trim() || createPassword.length < 12}
         >
@@ -271,7 +277,7 @@ export const AccountManagementPage: React.FC = () => {
           className={`account-tab-btn ${activeTab === 'totp' ? 'active' : ''}`}
           onClick={() => setActiveTab('totp')}
         >
-          📱 2. TOTP 雙因子認證（說明）
+          📱 2. 驗證器動態碼（說明）
         </button>
         <button
           type="button"
@@ -281,7 +287,7 @@ export const AccountManagementPage: React.FC = () => {
           className={`account-tab-btn ${activeTab === 'audit' ? 'active' : ''}`}
           onClick={() => setActiveTab('audit')}
         >
-          🛡️ 3. 安全操作與 Session 審計軌跡 {auditPageView ? `(${auditPageView.total})` : ''}
+          🛡️ 3. 安全操作與登入稽核 {auditPageView ? `(${auditPageView.total})` : ''}
         </button>
         <button
           type="button"
@@ -291,14 +297,14 @@ export const AccountManagementPage: React.FC = () => {
           className={`account-tab-btn ${activeTab === 'jobs' ? 'active' : ''}`}
           onClick={() => setActiveTab('jobs')}
         >
-          ⚙️ 4. 背景排程與系統看板
+          ⚙️ 4. 背景工作狀態
         </button>
       </div>
 
       {activeTab === 'users' && (
         <section aria-label="帳號清冊" data-surface-id="account.users.list">
           <div className="account-query-panel">
-            <span>💡 帳號清冊只顯示後端核准的識別、啟用狀態與存取版本；Email、IP、Session、TOTP 與能力不在本次 typed contract。</span>
+            <span>💡 帳號清冊顯示工作人員帳號、啟用狀態與管理權限；安全操作皆須填寫原因。</span>
             <button
               type="button"
               className="account-secondary-btn"
@@ -373,6 +379,9 @@ export const AccountManagementPage: React.FC = () => {
                 />
               </div>
             </div>
+            <p id="account-command-disabled-reason" className="account-query-state">
+              若操作按鈕無法使用，請先填寫操作原因；建立帳號須填齊帳號、顯示名稱與至少 12 位密碼，重設密碼也須輸入至少 12 位新密碼。操作進行中會暫時鎖定其他帳號操作。
+            </p>
           </div>
 
           {commandState.status === 'error' && (
@@ -382,7 +391,7 @@ export const AccountManagementPage: React.FC = () => {
           )}
           {commandState.status === 'ready' && commandState.data && (
             <div className="account-query-panel" data-surface-id="account.command.receipt">
-              命令已受理：{commandState.data.operation}／版本 {commandState.data.resulting_access_control_version}／{commandState.data.replayed ? '重播' : '首次執行'}
+              帳號操作已完成，清冊已重新整理。
             </div>
           )}
           {usersState.status === 'loading' && (
@@ -397,7 +406,7 @@ export const AccountManagementPage: React.FC = () => {
           )}
           {usersState.status === 'empty' && (
             <div className="account-query-state" data-surface-id="account.users.empty">
-              後端目前沒有可顯示的帳號清冊。
+              目前沒有可顯示的帳號清冊。
             </div>
           )}
           {usersState.status === 'ready' && (
@@ -412,16 +421,13 @@ export const AccountManagementPage: React.FC = () => {
                   </div>
                   <div className="account-card-facts">
                     <div><strong>帳號：</strong><code>{user.username}</code></div>
-                    <div><strong>帳號識別：</strong><code>{user.id}</code></div>
                     <div><strong>Root：</strong>{user.isRoot ? '是' : '否'}</div>
-                    <div><strong>Access Control Version：</strong>{user.accessControlVersion}</div>
-                    <div><strong>Email / IP / 最後登入：</strong><Unavailable /></div>
-                    <div><strong>Session / TOTP：</strong><Unavailable /></div>
                   </div>
                   <div className="account-card-actions">
                     <button
                       type="button"
                       data-control-id="account.user.password-reset"
+                      aria-describedby="account-command-disabled-reason"
                       onClick={() => void mutateAccount(user, 'password')}
                       disabled={commandState.status === 'loading' || !commandReason.trim() || commandPassword.length < 12}
                     >
@@ -430,6 +436,7 @@ export const AccountManagementPage: React.FC = () => {
                     <button
                       type="button"
                       data-control-id="account.mfa.reset"
+                      aria-describedby="account-command-disabled-reason"
                       onClick={() => void mutateAccount(user, 'mfa')}
                       disabled={commandState.status === 'loading' || !commandReason.trim()}
                     >
@@ -438,6 +445,7 @@ export const AccountManagementPage: React.FC = () => {
                     <button
                       type="button"
                       data-control-id="account.user.session-revoke"
+                      aria-describedby="account-command-disabled-reason"
                       onClick={() => void mutateAccount(user, 'sessions')}
                       disabled={commandState.status === 'loading' || !commandReason.trim()}
                     >
@@ -446,6 +454,7 @@ export const AccountManagementPage: React.FC = () => {
                     <button
                       type="button"
                       data-control-id={user.enabled ? 'account.user.disable' : 'account.user.enable'}
+                      aria-describedby="account-command-disabled-reason"
                       onClick={() => void mutateAccount(user, 'enabled')}
                       disabled={commandState.status === 'loading' || !commandReason.trim()}
                     >
@@ -461,15 +470,13 @@ export const AccountManagementPage: React.FC = () => {
 
       {activeTab === 'totp' && (
         <section className="account-explanation" aria-label="TOTP 說明">
-          <h3>📱 TOTP（Time-based One-Time Password）雙因子認證說明</h3>
-          <p>登入流程為帳號密碼 Challenge 通過後，再輸入手機 Authenticator App 產生的 6 位數動態碼。此頁只保留流程說明，不顯示任何 provisioning URI、secret、QR Code、recovery code 或帳號 enrollment 狀態。</p>
+          <h3>📱 驗證器動態碼登入說明</h3>
+          <p>登入時先輸入帳號密碼，再輸入手機驗證器產生的 6 位數動態碼。</p>
           <div className="account-step-grid">
-            <div><strong>步驟 1</strong><span>輸入帳號與密碼，取得短效登入挑戰。</span></div>
-            <div><strong>步驟 2</strong><span>輸入六位數 TOTP，通過後建立 Bearer Session。</span></div>
-            <div><strong>步驟 3</strong><span>帳號中心的綁定、重設與驗證 mutation 尚未開放。</span></div>
+            <div><strong>步驟 1</strong><span>輸入帳號與密碼。</span></div>
+            <div><strong>步驟 2</strong><span>輸入手機驗證器產生的六位數動態碼。</span></div>
+            <div><strong>管理方式</strong><span>首次登入時依畫面完成設定；需要重設時，請回帳號清冊使用「重設 MFA」。</span></div>
           </div>
-          <div className="account-query-panel"><Unavailable>後端尚未提供 typed MFA enrollment / reset contract</Unavailable></div>
-          <button type="button" data-control-id="account.mfa.enroll" disabled>啟用或重設 TOTP（未開放）</button>
         </section>
       )}
 
@@ -477,8 +484,8 @@ export const AccountManagementPage: React.FC = () => {
         <section className="account-table-container" aria-label="遮罩稽核清單" data-surface-id="account.audit.table">
           <div className="account-table-toolbar">
             <div>
-              <h3>🛡️ 安全操作與 Session 審計軌跡</h3>
-              <p>伺服器只回傳遮罩 actor、target、IP、結果、安全動作分類與 allowlisted detail；request path、raw payload 與 PII 不進入 React。</p>
+              <h3>🛡️ 安全操作與登入稽核</h3>
+              <p>查看已去敏的操作人員、影響對象、來源位置、執行結果與安全操作詳情。</p>
             </div>
             <button
               type="button"
@@ -517,7 +524,7 @@ export const AccountManagementPage: React.FC = () => {
           )}
           {auditState.status === 'empty' && (
             <div className="account-query-state" data-surface-id="account.audit.empty">
-              後端目前沒有符合條件的遮罩稽核紀錄。
+              目前沒有符合條件的安全稽核紀錄。
             </div>
           )}
           {auditState.status === 'ready' && auditPageView && (
@@ -532,8 +539,7 @@ export const AccountManagementPage: React.FC = () => {
                     <th>目標</th>
                     <th>來源 IP</th>
                     <th>執行結果</th>
-                    <th>安全代碼</th>
-                    <th>Detail</th>
+                    <th>操作詳情</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -545,8 +551,7 @@ export const AccountManagementPage: React.FC = () => {
                       <td>{entry.actorLabelMasked ?? '—'}</td>
                       <td>{entry.targetLabelMasked ?? '—'}</td>
                       <td><code>{entry.ipAddressMasked ?? '—'}</code></td>
-                      <td><span className={`account-outcome-pill ${entry.outcome}`}>{entry.outcome}</span></td>
-                      <td>{entry.reasonCode ?? '—'}</td>
+                      <td><span className="account-outcome-pill">{entry.outcome}</span></td>
                       <td>
                         <button
                           type="button"
@@ -595,7 +600,7 @@ export const AccountManagementPage: React.FC = () => {
             <aside className="account-query-panel" aria-label="遮罩稽核明細">
               <strong>稽核 #{auditDetailState.data.auditId}</strong>
               {auditDetailState.data.details.length === 0 ? (
-                <span>沒有可顯示的 allowlisted detail。</span>
+                <span>這筆紀錄沒有其他可顯示的安全詳情。</span>
               ) : (
                 <dl>
                   {auditDetailState.data.details.map((field) => (
@@ -615,19 +620,19 @@ export const AccountManagementPage: React.FC = () => {
         <section className="account-table-container" aria-label="背景工作觀察">
           <div className="account-table-toolbar">
             <div>
-              <h3>⚙️ 背景排程與系統看板</h3>
-              <p>此頁只查詢指定 job ID 的執行狀態，不顯示 receipt、error、result reference、LINE queue 或 Domain 成功結果。</p>
+              <h3>⚙️ 背景工作狀態</h3>
+              <p>輸入作業頁面提供的查詢碼，可確認背景工作是否仍在處理或已完成。</p>
             </div>
           </div>
           <div className="account-filter-row">
-            <label htmlFor="account-job-id">Job ID</label>
+            <label htmlFor="account-job-id">背景工作查詢碼</label>
             <input
               id="account-job-id"
               data-control-id="account.jobs.lookup"
               value={jobIdInput}
               onChange={(event) => setJobIdInput(event.target.value)}
               maxLength={191}
-              placeholder="輸入後端已提供的 job ID"
+              placeholder="輸入作業頁面提供的查詢碼"
             />
             <button
               type="button"
@@ -649,7 +654,7 @@ export const AccountManagementPage: React.FC = () => {
           </div>
           {jobState.status === 'idle' && (
             <div className="account-query-state">
-              <Unavailable>輸入有效 Job ID 後才會發出一次 observation GET</Unavailable>
+              <Unavailable>請輸入作業頁面提供的查詢碼。</Unavailable>
             </div>
           )}
           {jobState.status === 'loading' && <div className="account-query-state">載入背景工作狀態中…</div>}
@@ -658,18 +663,12 @@ export const AccountManagementPage: React.FC = () => {
           )}
           {jobState.status === 'ready' && jobState.data && (
             <div className="account-job-observation">
-              <div><strong>Job ID</strong><code>{jobState.data.jobId}</code></div>
-              <div><strong>Command type</strong><span>{jobState.data.commandType}</span></div>
-              <div><strong>Execution status</strong><span>{jobState.data.status}</span></div>
-              <div><strong>Attempt</strong><span>{jobState.data.attemptCount} / {jobState.data.maxAttempts}</span></div>
-              <div><strong>Domain receipt / error / result</strong><Unavailable /></div>
+              <div><strong>工作類型</strong><span>{jobState.data.commandType}</span></div>
+              <div><strong>處理狀態</strong><span>{jobState.data.status}</span></div>
+              <div><strong>已嘗試次數</strong><span>{jobState.data.attemptCount} / {jobState.data.maxAttempts}</span></div>
             </div>
           )}
-          <div className="account-card-actions">
-            <button type="button" data-control-id="account.jobs.cancel" disabled>取消背景工作（未開放）</button>
-            <button type="button" data-control-id="account.jobs.retry" disabled>重試背景工作（未開放）</button>
-            <button type="button" data-control-id="account.jobs.run" disabled>立即執行（未開放）</button>
-          </div>
+          <div className="account-query-panel">需要重新執行或修正時，請回原作業頁面依可用流程處理。</div>
         </section>
       )}
     </div>
@@ -677,4 +676,3 @@ export const AccountManagementPage: React.FC = () => {
 };
 
 export default AccountManagementPage;
-

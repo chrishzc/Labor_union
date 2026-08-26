@@ -1,5 +1,8 @@
-<!-- File: mobile_admin.html | Description: LINE LIFF mobile administration for linked union staff. -->
 <!DOCTYPE html>
+<!--
+File: mobile_admin.html
+Description: 提供 LINE 工會人員手機端客服與月嫂審核，清單採伺服器編號分頁。
+-->
 <html lang="zh-Hant-TW">
 <head>
   <meta charset="UTF-8">
@@ -31,6 +34,8 @@
     .error { background:#fee2e2; color:#b91c1c; border-radius:12px; padding:12px; margin:10px 0; }
     .info { background:#dbeafe; color:#1d4ed8; border-radius:12px; padding:12px; margin:10px 0; }
     .preview { background:#ecfdf5; color:#166534; border-radius:12px; padding:12px; margin-top:12px; white-space:pre-wrap; }
+    .pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:12px 0; }
+    .pagination-summary { color:var(--muted); font-size:14px; text-align:center; flex:1; }
     .hidden { display:none; }
   </style>
 </head>
@@ -73,6 +78,10 @@ let idToken = "";
 let target = "customer_service";
 const reviewPreviews = new Map();
 const replyPreviews = new Map();
+const ticketPageState = {page: 1, pageSize: 0, total: 0};
+const reviewPageState = {page: 1, pageSize: 50, total: 0};
+let ticketQuerySequence = 0;
+let reviewQuerySequence = 0;
 const statusBox = document.getElementById("status");
 const panes = {
   customer_service: document.getElementById("customerPane"),
@@ -102,6 +111,57 @@ function showEmpty(root, message) {
   empty.className = "info";
   empty.textContent = message;
   root.appendChild(empty);
+}
+
+function requireCustomerPage(data, requestedPage) {
+  if (!data || !Array.isArray(data.items)
+      || !Number.isInteger(data.total) || data.total < 0
+      || !Number.isInteger(data.page) || data.page !== requestedPage
+      || !Number.isInteger(data.page_size) || data.page_size < 1 || data.page_size > 100) {
+    throw new Error("客服清單分頁格式不完整，未顯示不完整資料。");
+  }
+  const totalPages = Math.max(1, Math.ceil(data.total / data.page_size));
+  if (data.total > 0 && requestedPage > totalPages) {
+    throw new Error("客服清單頁次已失效，請重新整理。");
+  }
+  return {...data, totalPages};
+}
+
+function requireReviewPage(data, requestedPage) {
+  if (!data || !Array.isArray(data.items)
+      || !Number.isInteger(data.total) || data.total < 0
+      || !Number.isInteger(data.page) || data.page !== requestedPage
+      || !Number.isInteger(data.page_size) || data.page_size !== reviewPageState.pageSize) {
+    throw new Error("月嫂驗證清單分頁格式不完整，未顯示不完整資料。");
+  }
+  const totalPages = Math.max(1, Math.ceil(data.total / data.page_size));
+  if (data.total > 0 && requestedPage > totalPages) {
+    throw new Error("月嫂驗證清單頁次已失效，請重新整理。");
+  }
+  return {...data, totalPages};
+}
+
+function renderPagination(root, pageData, onPage) {
+  const navigation = document.createElement("div");
+  navigation.className = "pagination";
+  const previous = document.createElement("button");
+  previous.type = "button";
+  previous.className = "secondary";
+  previous.textContent = "上一頁";
+  previous.disabled = pageData.page <= 1;
+  previous.addEventListener("click", () => onPage(pageData.page - 1));
+  const summary = document.createElement("span");
+  summary.className = "pagination-summary";
+  const first = pageData.total === 0 ? 0 : (pageData.page - 1) * pageData.page_size + 1;
+  const last = pageData.total === 0 ? 0 : Math.min(pageData.page * pageData.page_size, pageData.total);
+  summary.textContent = `顯示 ${first}-${last} / ${pageData.total} 件`;
+  const next = document.createElement("button");
+  next.type = "button";
+  next.textContent = "下一頁";
+  next.disabled = pageData.page >= pageData.totalPages;
+  next.addEventListener("click", () => onPage(pageData.page + 1));
+  navigation.append(previous, summary, next);
+  root.appendChild(navigation);
 }
 
 function safeErrorMessage(result, fallback) {
@@ -178,15 +238,33 @@ function switchPane(next) {
 }
 
 async function loadTickets() {
+  const requestedPage = ticketPageState.page;
+  const requestedStatus = document.getElementById("ticketStatus").value;
+  const querySequence = ++ticketQuerySequence;
+  document.getElementById("tickets").replaceChildren();
   try {
     const data = await postJson("/api/v1/line/mobile-admin/customer-service/tickets", {
-      status: document.getElementById("ticketStatus").value,
+      status: requestedStatus,
+      page: requestedPage,
     });
+    if (querySequence !== ticketQuerySequence
+        || requestedStatus !== document.getElementById("ticketStatus").value
+        || requestedPage !== ticketPageState.page) return;
+    const pageData = requireCustomerPage(data, requestedPage);
+    ticketPageState.page = pageData.page;
+    ticketPageState.pageSize = pageData.page_size;
+    ticketPageState.total = pageData.total;
     const root = document.getElementById("tickets");
     root.replaceChildren();
-    if (!data.items.length) { showEmpty(root, "目前沒有符合條件的客服案件。"); return; }
-    data.items.forEach(ticket => root.appendChild(ticketCard(ticket)));
-  } catch (error) { showStatus(error.message, true); }
+    renderPagination(root, pageData, page => {
+      ticketPageState.page = page;
+      loadTickets();
+    });
+    if (!pageData.items.length) { showEmpty(root, "目前沒有符合條件的客服案件。"); return; }
+    pageData.items.forEach(ticket => root.appendChild(ticketCard(ticket)));
+  } catch (error) {
+    if (querySequence === ticketQuerySequence) showStatus(error.message, true);
+  }
 }
 
 const ticketStatusLabels = {waiting: "待處理", handling: "處理中", resolved: "已完成"};
@@ -371,21 +449,41 @@ async function applyTicketReply(ticket) {
       `客服回覆已保存：工單 #${data.ticket_id}`,
       "LINE 訊息已排入可靠發送佇列，尚未送達。",
     ].join("\n"));
+    ticketPageState.page = 1;
     await loadTickets();
   } catch (error) { showStatus(error.message, true); }
 }
 
 async function loadReviews() {
+  const requestedPage = reviewPageState.page;
+  const requestedStatus = document.getElementById("reviewStatus").value;
+  const querySequence = ++reviewQuerySequence;
+  document.getElementById("reviews").replaceChildren();
   try {
     const data = await postJson("/api/v1/line/mobile-admin/identity-reviews", {
-      review_status: document.getElementById("reviewStatus").value,
+      review_status: requestedStatus,
       review_type: "staff_verification",
+      page: requestedPage,
+      page_size: reviewPageState.pageSize,
     });
+    if (querySequence !== reviewQuerySequence
+        || requestedStatus !== document.getElementById("reviewStatus").value
+        || requestedPage !== reviewPageState.page) return;
+    const pageData = requireReviewPage(data, requestedPage);
+    reviewPageState.page = pageData.page;
+    reviewPageState.pageSize = pageData.page_size;
+    reviewPageState.total = pageData.total;
     const root = document.getElementById("reviews");
     root.replaceChildren();
-    if (!data.items.length) { showEmpty(root, "目前沒有符合條件的月嫂驗證申請。"); return; }
-    data.items.forEach(review => root.appendChild(reviewCard(review)));
-  } catch (error) { showStatus(error.message, true); }
+    renderPagination(root, pageData, page => {
+      reviewPageState.page = page;
+      loadReviews();
+    });
+    if (!pageData.items.length) { showEmpty(root, "目前沒有符合條件的月嫂驗證申請。"); return; }
+    pageData.items.forEach(review => root.appendChild(reviewCard(review)));
+  } catch (error) {
+    if (querySequence === reviewQuerySequence) showStatus(error.message, true);
+  }
 }
 
 function reviewCard(review) {
@@ -512,6 +610,7 @@ async function applyReviewDecision(review) {
       businessLabel(reviewOutcomeLabels, data.outcome, "審核結果已保存"),
       "通知僅排入可靠佇列，尚未證明送達。",
     ].join("\n"));
+    reviewPageState.page = 1;
     loadReviews();
   } catch (error) { showStatus(error.message, true); }
 }
@@ -520,8 +619,14 @@ document.getElementById("tabCustomer").addEventListener("click", () => switchPan
 document.getElementById("tabReview").addEventListener("click", () => switchPane("staff_review"));
 document.getElementById("refreshTickets").addEventListener("click", loadTickets);
 document.getElementById("refreshReviews").addEventListener("click", loadReviews);
-document.getElementById("ticketStatus").addEventListener("change", loadTickets);
-document.getElementById("reviewStatus").addEventListener("change", loadReviews);
+document.getElementById("ticketStatus").addEventListener("change", () => {
+  ticketPageState.page = 1;
+  loadTickets();
+});
+document.getElementById("reviewStatus").addEventListener("change", () => {
+  reviewPageState.page = 1;
+  loadReviews();
+});
 document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
 init();
 </script>

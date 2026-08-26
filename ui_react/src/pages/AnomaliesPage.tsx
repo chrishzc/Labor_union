@@ -9,6 +9,7 @@ import { Drawer } from '../components/Drawer';
 import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { AnomalyValidationError } from '../api/anomalies/anomaly_query_errors';
 import { anomalyDetailClient } from '../api/anomalies/anomaly_detail_client';
+import { AnomalyDetailError } from '../api/anomalies/anomaly_detail_errors';
 import type { AnomalyRecoveryContextView, RecoveryAction } from '../api/anomalies/anomaly_detail_schemas';
 import {
   financeImportCorrectionClient,
@@ -28,6 +29,7 @@ import {
 } from '../adapters/import_warning/import_warning_transition_adapter';
 import {
   adaptAnomalyDetailBundle,
+  visibleEvidenceItems,
   type AnomalyDetailBundleViewModel,
 } from '../adapters/anomalies/anomaly_detail_adapter';
 import {
@@ -51,6 +53,18 @@ type WarningFlowStatus =
   | 'outcome_unknown' | 'observation_failed' | 'typed_error';
 
 type CorrectionFlowStatus = 'idle' | 'preview_loading' | 'preview_ready' | 'apply_pending' | 'accepted' | 'observing' | 'completed' | 'typed_error';
+
+function anomalyDetailErrorMessage(error: unknown, subject: '詳情' | '處理方式'): string {
+  if (error instanceof AnomalyDetailError) {
+    if (error.code === 'NOT_FOUND') return subject === '處理方式'
+      ? '目前沒有可用的系統處理方式，請交由對應業務負責人處理。'
+      : '目前沒有可顯示的異常詳情。';
+    if (error.code === 'UNAUTHENTICATED') return '登入已失效，請重新登入後再試。';
+    if (error.code === 'FORBIDDEN') return '目前帳號無法查看這項資料。';
+    if (error.retryable) return `${subject}暫時無法載入，請稍後重試。`;
+  }
+  return `${subject}資料無法使用，請聯絡管理員。`;
+}
 
 const ANOMALY_PAGE_SIZE = 200;
 const FINANCE_CORRECTION_OPERATIONS = {
@@ -161,6 +175,30 @@ export const AnomaliesPage: React.FC = () => {
   const warningFlowLocked = ['apply_pending', 'receipt_received', 'requery_loading', 'outcome_unknown'].includes(warningFlowStatus);
   const correctionFlowLocked = correctionFlowStatus === 'apply_pending' || correctionFlowStatus === 'observing';
   const drawerFlowLocked = warningFlowLocked || correctionFlowLocked;
+  const drawerLockReason = correctionFlowLocked
+    ? '帳務更正正在提交或確認結果；為避免結果不明，目前不能關閉或切換篩選。'
+    : warningFlowLocked
+      ? '追蹤狀態正在提交或確認結果；為避免重複操作，目前不能關閉或切換篩選。'
+      : null;
+  const correctionApplyDisabledReason = correctionFlowStatus === 'preview_ready'
+    ? null
+    : correctionFlowLocked
+      ? '帳務更正正在提交或確認結果，請等待目前流程完成。'
+      : correctionFlowStatus === 'completed'
+        ? '本次帳務更正已完成；如需其他修正，請重新開啟對應異常。'
+        : '請先完成更正影響檢查；修改任何內容後都必須重新檢查。';
+  const warningPreviewDisabledReason = warningFlowLocked
+    ? '追蹤狀態正在提交或確認結果，請等待目前流程完成。'
+    : !warningReason.trim()
+      ? '請先填寫處理說明，再檢查狀態變更影響。'
+      : warningFlowStatus === 'preview_loading'
+        ? '正在檢查狀態變更影響。'
+        : null;
+  const warningApplyDisabledReason = warningFlowStatus === 'preview_ready'
+    ? null
+    : warningFlowLocked
+      ? '追蹤狀態正在提交或確認結果，請等待目前流程完成。'
+      : '請先完成狀態變更影響檢查；修改內容後必須重新檢查。';
 
   // Fetch Anomalies from live API
   const fetchAnomalies = useCallback(async () => {
@@ -299,13 +337,13 @@ export const AnomaliesPage: React.FC = () => {
           setCorrectionReason('');
           setCorrectionEvidence('');
           if (recoveryResult.status === 'rejected') {
-            setAnomalyRecoveryError(recoveryResult.reason instanceof Error ? recoveryResult.reason.message : 'recovery context 暫時無法取得');
+            setAnomalyRecoveryError(anomalyDetailErrorMessage(recoveryResult.reason, '處理方式'));
           }
         }
       })
       .catch((err: unknown) => {
         if (seq === drawerRequestSeq.current && !controller.signal.aborted) {
-          setAnomalyDetailError(err instanceof Error ? err.message : '載入異常詳情失敗');
+          setAnomalyDetailError(anomalyDetailErrorMessage(err, '詳情'));
         }
       })
       .finally(() => {
@@ -653,6 +691,7 @@ export const AnomaliesPage: React.FC = () => {
           <button
             key={cat}
             disabled={warningFlowLocked}
+            aria-describedby={warningFlowLocked ? 'anomalies-drawer-lock-reason' : undefined}
             className={`anomaly-cat-btn ${selectedCategory === cat ? 'active' : ''}`}
             onClick={() => setSelectedCategory(cat)}
           >
@@ -665,6 +704,7 @@ export const AnomaliesPage: React.FC = () => {
       <div data-surface-id="anomalies.status-filters" style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
         <button
           disabled={warningFlowLocked}
+          aria-describedby={warningFlowLocked ? 'anomalies-drawer-lock-reason' : undefined}
           style={{
             padding: '4px 12px',
             borderRadius: '9999px',
@@ -681,6 +721,7 @@ export const AnomaliesPage: React.FC = () => {
         </button>
         <button
           disabled={warningFlowLocked}
+          aria-describedby={warningFlowLocked ? 'anomalies-drawer-lock-reason' : undefined}
           style={{
             padding: '4px 12px',
             borderRadius: '9999px',
@@ -697,6 +738,7 @@ export const AnomaliesPage: React.FC = () => {
         </button>
         <button
           disabled={warningFlowLocked}
+          aria-describedby={warningFlowLocked ? 'anomalies-drawer-lock-reason' : undefined}
           style={{
             padding: '4px 12px',
             borderRadius: '9999px',
@@ -713,6 +755,7 @@ export const AnomaliesPage: React.FC = () => {
         </button>
         <button
           disabled={warningFlowLocked}
+          aria-describedby={warningFlowLocked ? 'anomalies-drawer-lock-reason' : undefined}
           style={{
             padding: '4px 12px',
             borderRadius: '9999px',
@@ -903,35 +946,32 @@ export const AnomaliesPage: React.FC = () => {
         title={selectedAnomaly ? `⚠️ ${selectedAnomaly.title}` : '📥 匯入警示處理'}
         footer={
           <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.85rem', color: '#888' }}>
-              💡 完成處理後系統會重新核對原因；根因仍存在時會再次列入待辦。
+            <span id={drawerLockReason ? 'anomalies-drawer-lock-reason' : undefined} style={{ fontSize: '0.85rem', color: '#888' }}>
+              {drawerLockReason ?? '💡 完成處理後系統會重新核對原因；根因仍存在時會再次列入待辦。'}
             </span>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 disabled={drawerFlowLocked}
+                aria-describedby={drawerFlowLocked ? 'anomalies-drawer-lock-reason' : undefined}
                 style={{ padding: '8px 16px', border: '1px solid #dec0b6', borderRadius: '8px', background: '#fff', cursor: 'pointer' }}
                 onClick={closeDrawer}
               >
                 關閉
               </button>
               {selectedAnomaly ? (
-                <button
-                  data-control-id="anomalies.drawer.resolve"
-                  disabled={true}
-                  title="這項操作只更新處理結果，不會取代原始資料的修正。"
-                  style={{ padding: '8px 20px', backgroundColor: '#94a3b8', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'not-allowed' }}
+                <span
+                  data-surface-id="anomalies.drawer.resolve-guidance"
+                  style={{ maxWidth: '380px', color: '#57423b', fontSize: '0.84rem', fontWeight: 700 }}
                 >
-                  確認排除異常
-                </button>
+                  請先依上方處理方式修正來源資料；系統會自動重新核對異常。
+                </span>
               ) : (
-                <button
-                  data-control-id="anomalies.warning.transition"
-                  disabled={true}
-                  title="更新處理狀態不代表來源資料已修復"
-                  style={{ padding: '8px 20px', backgroundColor: '#94a3b8', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'not-allowed' }}
+                <span
+                  data-surface-id="anomalies.warning.transition-guidance"
+                  style={{ maxWidth: '380px', color: '#57423b', fontSize: '0.84rem', fontWeight: 700 }}
                 >
-                  請依上方轉介流程處理來源資料
-                </button>
+                  請依上方轉介流程處理來源資料；追蹤狀態不代表來源已修復。
+                </span>
               )}
             </div>
           </div>
@@ -962,11 +1002,14 @@ export const AnomaliesPage: React.FC = () => {
                 <>
                   <div data-surface-id="anomalies.drawer.evidence" className="anomalies-evidence-card">
                     <strong>判斷依據</strong>
-                    {anomalyDetail.evidence.filter((item) => !/(identity|version|fingerprint|hash|correlation|(^|_)id$)/i.test(item.key) && !['code', 'code_list', 'identity', 'identity_list'].includes(item.kind)).map((item) => (
+                    {visibleEvidenceItems(anomalyDetail.evidence).map((item) => (
                       <div className="anomaly-evidence-row" key={`${item.key}-${item.kind}`}>
                         <span>{item.label}</span><span>{item.value}</span>
                       </div>
                     ))}
+                    {visibleEvidenceItems(anomalyDetail.evidence).length === 0 && (
+                      <div className="anomalies-detail-empty">目前沒有需要顯示的業務判斷資料。</div>
+                    )}
                   </div>
                   <div data-surface-id="anomalies.drawer.timeline" className="anomalies-timeline-card">
                     <strong>處理紀錄</strong>
@@ -987,12 +1030,12 @@ export const AnomaliesPage: React.FC = () => {
                 🔍 問題判斷依據
               </h4>
               {!anomalyDetail && <div className="anomalies-detail-empty">正在等待正式資料。</div>}
-              {anomalyDetail?.rootFacts.filter((item) => !/(identity|version|fingerprint|hash|correlation|(^|_)id$)/i.test(item.key) && !['code', 'code_list', 'identity', 'identity_list'].includes(item.kind)).map((item) => (
+              {anomalyDetail && visibleEvidenceItems(anomalyDetail.rootFacts).map((item) => (
                 <div className="anomaly-evidence-row" key={item.key}>
                   <span>{item.label}</span><span>{item.value}</span>
                 </div>
               ))}
-              {anomalyDetail && anomalyDetail.rootFacts.every((item) => /(identity|version|fingerprint|hash|correlation|(^|_)id$)/i.test(item.key)) && (
+              {anomalyDetail && visibleEvidenceItems(anomalyDetail.rootFacts).length === 0 && (
                 <div className="anomalies-detail-empty">技術識別已保留在稽核紀錄，不顯示於日常處理畫面。</div>
               )}
             </div>
@@ -1023,18 +1066,20 @@ export const AnomaliesPage: React.FC = () => {
                 <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#115e59', marginBottom: '6px' }}>帳務資料更正</h4>
                 <p style={{ fontSize: '0.84rem', color: '#365b55', marginTop: 0 }}>此表單只執行「{correctionAction.label}」的影響檢查與確認；問題排除後，系統會再核對來源資料。</p>
                 <div className="anomaly-recovery-metadata-row"><span>處理資料</span><span>銀行流水資料</span></div>
-                <label className="import-warning-transition-field"><span>分類類型</span><select data-control-id="anomalies.finance-correction.classification" value={correctionClassificationType} disabled={correctionLocked || correctionAction.action_key !== 'classify_and_post_bank_row'} onChange={(event) => { setCorrectionClassificationType(event.target.value as FinanceImportCorrectionSelection['classification_type']); invalidateCorrectionPreview(); }}>
+                <label className="import-warning-transition-field"><span>分類類型</span><select data-control-id="anomalies.finance-correction.classification" value={correctionClassificationType} disabled={correctionLocked || correctionAction.action_key !== 'classify_and_post_bank_row'} aria-describedby={correctionAction.action_key !== 'classify_and_post_bank_row' ? 'anomalies-correction-classification-reason' : correctionLocked ? 'anomalies-drawer-lock-reason' : undefined} onChange={(event) => { setCorrectionClassificationType(event.target.value as FinanceImportCorrectionSelection['classification_type']); invalidateCorrectionPreview(); }}>
                   <option value="client_receipt">客戶收款</option><option value="client_refund">客戶退款</option><option value="client_refund_return">客戶退款退匯</option><option value="client_subsidy_return">客戶補助退回</option><option value="government_subsidy">政府補助</option><option value="staff_payout">月嫂付款</option>
                 </select></label>
+                {correctionAction.action_key !== 'classify_and_post_bank_row' && <p id="anomalies-correction-classification-reason" className="anomalies-detail-empty">此異常的分類由正式處理方式固定，不能在此改成其他分類。</p>}
                 <label className="import-warning-transition-field"><span>對應收付款紀錄編號（每行一筆）</span><textarea data-control-id="anomalies.finance-correction.obligations" value={correctionObligations} disabled={correctionLocked} rows={3} onChange={(event) => { setCorrectionObligations(event.target.value); invalidateCorrectionPreview(); }} placeholder="請填寫收付款紀錄編號" /></label>
                 <label className="import-warning-transition-field"><span>原退款紀錄編號（需要時填寫）</span><input data-control-id="anomalies.finance-correction.refund-ledger" value={correctionRefundLedgerEntry} disabled={correctionLocked} onChange={(event) => { setCorrectionRefundLedgerEntry(event.target.value); invalidateCorrectionPreview(); }} placeholder="請填寫原退款紀錄編號" /></label>
                 <label className="import-warning-transition-field"><span>更正理由</span><textarea data-control-id="anomalies.finance-correction.reason" value={correctionReason} disabled={correctionLocked} rows={2} maxLength={500} onChange={(event) => { setCorrectionReason(event.target.value); invalidateCorrectionPreview(); }} /></label>
                 <label className="import-warning-transition-field"><span>佐證（每行一筆）</span><textarea data-control-id="anomalies.finance-correction.evidence" value={correctionEvidence} disabled={correctionLocked} rows={3} onChange={(event) => { setCorrectionEvidence(event.target.value); invalidateCorrectionPreview(); }} placeholder="例：銀行交易明細或內部佐證編號" /></label>
                 <div className="import-warning-transition-actions">
                   <button type="button" data-control-id="anomalies.finance-correction.preview" disabled={correctionLocked || correctionFlowStatus === 'preview_loading'} onClick={() => void previewCorrection()}>{correctionFlowStatus === 'preview_loading' ? '檢查中…' : '檢查更正影響'}</button>
-                  <button type="button" data-control-id="anomalies.finance-correction.apply" disabled={correctionFlowStatus !== 'preview_ready'} onClick={() => void applyCorrection()}>確認並提交更正</button>
+                  <button type="button" data-control-id="anomalies.finance-correction.apply" disabled={correctionFlowStatus !== 'preview_ready'} aria-describedby={correctionApplyDisabledReason ? 'anomalies-correction-apply-reason' : undefined} onClick={() => void applyCorrection()}>確認並提交更正</button>
                   {correctionAccepted && correctionFlowStatus !== 'completed' && <button type="button" data-control-id="anomalies.finance-correction.observe" disabled={correctionLocked} onClick={() => void observeCorrectionOutcome()}>重新查詢更正結果</button>}
                 </div>
+                {correctionApplyDisabledReason && <p id="anomalies-correction-apply-reason" className="anomalies-detail-empty">{correctionApplyDisabledReason}</p>}
                 {correctionPreview && <div className="import-warning-transition-preview"><strong>更正影響預覽（尚未寫入）</strong><span>{correctionClassificationLabel(correctionPreview.candidate.classification_type)} · NT$ {correctionPreview.candidate.bank_amount_ntd.toLocaleString('en-US')}</span></div>}
                 {correctionAccepted && <div className="import-warning-transition-receipt"><strong>更正已受理</strong><span>{correctionAccepted.replayed ? '同一筆更正已受理，正在查回原結果。' : '系統正在處理，完成前不會顯示為已更正。'}</span></div>}
                 {correctionOutcome?.receipt && <div className="import-warning-transition-observed"><strong>帳務更正完成</strong><span>正式結果已確認，可重新查詢帳務資料核對。</span></div>}
@@ -1075,14 +1120,13 @@ export const AnomaliesPage: React.FC = () => {
                   <h4>更新處理狀態</h4>
                   <p>此處只記錄處理進度；來源資料仍須由負責流程實際修正。</p>
                 </div>
-                <button
+                {warningFlowStatus === 'idle' && <button
                   type="button"
                   data-control-id="anomalies.import-warning.transition.open"
-                  disabled={warningFlowLocked || warningFlowStatus !== 'idle'}
                   onClick={() => setWarningFlowStatus('editing')}
                 >
                   開啟追蹤狀態變更
-                </button>
+                </button>}
               </div>
 
               {warningFlowStatus !== 'idle' && <>
@@ -1122,6 +1166,7 @@ export const AnomaliesPage: React.FC = () => {
                     type="button"
                     data-control-id="anomalies.import-warning.transition.preview"
                     disabled={warningFlowLocked || warningFlowStatus === 'preview_loading' || !warningReason.trim()}
+                    aria-describedby={warningPreviewDisabledReason ? 'anomalies-warning-preview-reason' : undefined}
                     onClick={() => void previewWarningTransition()}
                   >
                     {warningFlowStatus === 'preview_loading' ? '檢查中…' : '檢查狀態變更影響'}
@@ -1130,6 +1175,7 @@ export const AnomaliesPage: React.FC = () => {
                     type="button"
                     data-control-id="anomalies.import-warning.transition.apply"
                     disabled={warningFlowStatus !== 'preview_ready'}
+                    aria-describedby={warningApplyDisabledReason ? 'anomalies-warning-apply-reason' : undefined}
                     onClick={() => void applyWarningTransition(false)}
                   >
                     套用追蹤狀態變更
@@ -1145,6 +1191,8 @@ export const AnomaliesPage: React.FC = () => {
                     </button>
                   )}
                 </div>
+                {warningPreviewDisabledReason && <p id="anomalies-warning-preview-reason" className="anomalies-detail-empty">{warningPreviewDisabledReason}</p>}
+                {warningApplyDisabledReason && <p id="anomalies-warning-apply-reason" className="anomalies-detail-empty">{warningApplyDisabledReason}</p>}
               </>}
 
               {warningPreview && (

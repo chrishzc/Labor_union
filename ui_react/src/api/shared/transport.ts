@@ -22,6 +22,7 @@ export interface RequestOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 10000;
+export const ADMIN_SESSION_UNAUTHORIZED_EVENT = 'union-admin-session-unauthorized';
 
 const GlobalFieldErrorSchema = z.strictObject({
   field: z.string(),
@@ -214,6 +215,12 @@ export async function request<T = unknown>(
             message = payloadMessage;
           }
         }
+      }
+
+      if (response.status === 401 && token && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(ADMIN_SESSION_UNAUTHORIZED_EVENT, {
+          detail: { rejectedToken: token },
+        }));
       }
 
       throw new ApiHttpError(

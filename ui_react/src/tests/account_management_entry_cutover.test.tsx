@@ -107,22 +107,23 @@ describe('Account Management Phase5 entry candidate', () => {
       expect(screen.getAllByRole('button', { name })[0]).toBeDisabled();
     }
 
-    fireEvent.click(screen.getByRole('tab', { name: /安全操作與 Session/ }));
-    await waitFor(() => expect(screen.getByText('authentication')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: /安全操作與登入稽核/ }));
+    await waitFor(() => expect(screen.getByText('登入驗證')).toBeInTheDocument());
     expect(count(requests, AUDIT_ENDPOINT)).toBe(1);
     fireEvent.click(screen.getByRole('button', { name: '查看' }));
     await waitFor(() => expect(screen.getByText('provided')).toBeInTheDocument());
     expect(count(requests, AUDIT_DETAIL_ENDPOINT)).toBe(1);
 
-    fireEvent.click(screen.getByRole('tab', { name: /背景排程與系統看板/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /背景工作狀態/ }));
     expect(count(requests, JOB_ENDPOINT)).toBe(0);
-    fireEvent.change(screen.getByLabelText('Job ID'), { target: { value: 'job-observation-1' } });
+    fireEvent.change(screen.getByLabelText('背景工作查詢碼'), { target: { value: 'job-observation-1' } });
     fireEvent.click(screen.getByRole('button', { name: '查詢狀態' }));
-    await waitFor(() => expect(screen.getByText('job-observation-1')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('正式排班建立')).toBeInTheDocument());
     expect(count(requests, JOB_ENDPOINT)).toBe(1);
-    for (const name of [/取消背景工作/, /重試背景工作/, /立即執行/]) {
-      expect(screen.getByRole('button', { name })).toBeDisabled();
-    }
+    expect(screen.getByText(/回原作業頁面依可用流程處理/)).toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="account.jobs.cancel"]')).toBeNull();
+    expect(document.querySelector('[data-control-id="account.jobs.retry"]')).toBeNull();
+    expect(document.querySelector('[data-control-id="account.jobs.run"]')).toBeNull();
 
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
     expect(screen.queryByText(/建立成功|停權成功|重試成功|取消成功/)).not.toBeInTheDocument();
@@ -134,7 +135,7 @@ describe('Account Management Phase5 entry candidate', () => {
     vi.spyOn(accountDirectoryClient, 'query').mockRejectedValue(new Error('帳號中心暫時無法使用'));
     render(<App />);
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('帳號中心暫時無法使用'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('帳號清冊暫時無法取得'));
     expect(document.querySelector('.account-card-name')).toBeNull();
     expect(screen.queryByText(/已成功載入帳號/)).not.toBeInTheDocument();
   });

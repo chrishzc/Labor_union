@@ -116,6 +116,23 @@ describe('Staff availability flow', () => {
     expect(receipt).not.toHaveTextContent('Idempotency');
   });
 
+  it('Drawer 對已取消紀錄顯示不可再次取消的業務原因', async () => {
+    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValueOnce([{
+      ...STAFF_AVAILABILITY_BLOCK,
+      staff_id: 11,
+      status: 'cancelled',
+    }]);
+
+    render(<StaffPage />);
+    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
+    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
+    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
+
+    const cancelButton = await screen.findByRole('button', { name: '預覽取消' });
+    expect(cancelButton).toBeDisabled();
+    expect(screen.getByText('此紀錄已取消，不可再次取消。')).toBeVisible();
+  });
+
   it('shows one error state with a direct retry instead of the idle placeholder', async () => {
     vi.mocked(staffAvailabilityClient.getBlocks)
       .mockRejectedValueOnce(new Error('不可服務期間暫時失敗'))
@@ -311,6 +328,8 @@ describe('Staff availability flow', () => {
 
     expect(screen.getByLabelText('暫停接案紀錄')).toBeDisabled();
     expect(screen.getByRole('button', { name: '預覽結束暫停' })).toBeDisabled();
+    expect(screen.getByText('目前查詢範圍沒有可結束的無期限暫停紀錄。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '預覽結束暫停' })).toHaveAttribute('aria-describedby', 'staff-end-pause-blocker');
     expect(staffAvailabilityClient.previewChange).not.toHaveBeenCalled();
   });
 

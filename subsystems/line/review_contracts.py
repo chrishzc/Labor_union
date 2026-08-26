@@ -69,6 +69,7 @@ class LineReviewListQuery:
     review_types: tuple[LineReviewType, ...] = ()
     page_size: int = 25
     cursor: str | None = None
+    page: int | None = None
 
     def __post_init__(self) -> None:
         _validate_enum_filter(self.statuses, LineReviewStatus, "review statuses")
@@ -82,6 +83,10 @@ class LineReviewListQuery:
                 "LINE review cursor",
                 _QUERY_CURSOR_MAXIMUM_LENGTH,
             )
+        if self.page is not None:
+            require_positive_integer(self.page, "LINE review page")
+        if self.cursor is not None and self.page is not None:
+            raise ValueError("LINE review cursor and page cannot be combined")
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +146,9 @@ class ApplyLineReviewDecisionResult:
 class LineReviewPage:
     items: tuple[LineReviewSnapshot, ...]
     next_cursor: str | None
+    page: int | None = None
+    page_size: int | None = None
+    total: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

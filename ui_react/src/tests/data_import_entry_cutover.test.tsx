@@ -163,6 +163,7 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
     expect(hcmRequests(requests)).toHaveLength(1);
     expect(hcmRequests(requests)[0]?.method).toBe('GET');
 
+    fireEvent.click(screen.getByRole('button', { name: /工作簿資料匯入/ }));
     fireEvent.click(screen.getByRole('button', { name: '重新整理結果' }));
     await waitFor(() => expect(hcmRequests(requests)).toHaveLength(2));
     expectOnlyGet(requests);
@@ -235,6 +236,7 @@ describe('Data Import HCM Result Review entry cutover candidate', () => {
 
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入結果/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /工作簿資料匯入/ }));
 
     expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();
     for (const controlId of ACTIVE_PREVIEW_CONTROL_IDS) {

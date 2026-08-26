@@ -45,7 +45,14 @@ describe('Anomalies Finance Import correction flow', () => {
     await waitFor(() => expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /查看處理方式 ➔/ }));
     await waitFor(() => expect(document.querySelector('[data-surface-id="anomalies.finance-correction"]')).not.toBeNull());
-    expect(document.querySelector('[data-control-id="anomalies.finance-correction.classification"]')).toBeDisabled();
+    const classification = document.querySelector('[data-control-id="anomalies.finance-correction.classification"]');
+    expect(classification).toBeDisabled();
+    expect(classification).toHaveAttribute('aria-describedby', 'anomalies-correction-classification-reason');
+    expect(screen.getByText('此異常的分類由正式處理方式固定，不能在此改成其他分類。')).toBeInTheDocument();
+    const applyButton = screen.getByRole('button', { name: '確認並提交更正' });
+    expect(applyButton).toBeDisabled();
+    expect(applyButton).toHaveAttribute('aria-describedby', 'anomalies-correction-apply-reason');
+    expect(screen.getByText('請先完成更正影響檢查；修改任何內容後都必須重新檢查。')).toBeInTheDocument();
     fireEvent.change(document.querySelector('[data-control-id="anomalies.finance-correction.reason"]')!, { target: { value: '核對退匯' } });
     fireEvent.change(document.querySelector('[data-control-id="anomalies.finance-correction.evidence"]')!, { target: { value: 'receipt:42' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查更正影響' }));
@@ -54,7 +61,8 @@ describe('Anomalies Finance Import correction flow', () => {
     await waitFor(() => expect(screen.getByText('帳務更正完成')).toBeInTheDocument());
     expect(screen.queryByText(accepted.job_id)).not.toBeInTheDocument();
     expect(screen.queryByText(/ledger 1|allocation 1|batch v2/)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /確認排除異常/ })).toBeDisabled();
+    expect(screen.getByText(/系統會自動重新核對異常/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: /確認排除異常/ })).not.toBeInTheDocument();
   });
 
   it('queued job 必須保持未完成，直到重新查詢讀到正式結果', async () => {

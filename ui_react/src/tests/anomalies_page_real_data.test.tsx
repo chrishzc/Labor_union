@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { visibleEvidenceItems } from '../adapters/anomalies/anomaly_detail_adapter';
 import { AnomaliesPage } from '../pages/AnomaliesPage';
 import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { anomalyDetailClient } from '../api/anomalies/anomaly_detail_client';
@@ -26,6 +27,13 @@ import {
 } from './fixtures/anomalies/anomaly_detail_contract_fixtures';
 
 describe('AnomaliesPage Real Data Integration Suite', () => {
+  it('treats code-only evidence as having no operator-facing rows', () => {
+    expect(visibleEvidenceItems([
+      { key: 'domain_blockers', kind: 'code_list' },
+      { key: 'source_version', kind: 'integer' },
+    ])).toEqual([]);
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
 

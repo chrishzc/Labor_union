@@ -341,10 +341,24 @@ class LineAdminApiClient:
     def line_menu_state(self, token: str | None) -> dict[str, Any]:
         snapshot = self._request(
             "GET",
-            "/api/v1/line/configurations/rich_menus",
+            "/api/v1/line/rich-menus/draft",
             token=token,
         )
         return {"revision": snapshot["revision"], "config": snapshot["definition"]}
+
+    def preview_line_menu_draft(
+        self,
+        token: str | None,
+        payload: dict[str, Any],
+        *,
+        revision: int,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/v1/line/rich-menus/draft/preview",
+            token=token,
+            json={"expected_revision": revision, "definition": payload},
+        )
 
     def update_line_menus(
         self,
@@ -352,17 +366,19 @@ class LineAdminApiClient:
         payload: dict[str, Any],
         *,
         revision: int,
+        preview_fingerprint: str,
         reason: str,
         idempotency_key: str,
         correlation_id: str,
     ) -> dict[str, Any]:
         return self._request(
             "PUT",
-            "/api/v1/line/configurations/rich_menus",
+            "/api/v1/line/rich-menus/draft",
             token=token,
             json={
                 "expected_revision": revision,
                 "definition": payload,
+                "preview_fingerprint": preview_fingerprint,
                 "reason": reason,
                 "idempotency_key": idempotency_key,
                 "correlation_id": correlation_id,

@@ -57,6 +57,18 @@ describe('StaffPage directory presentation', () => {
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
   });
 
+  it('shows a clearable empty state when the loaded directory has no search match', async () => {
+    render(<StaffPage />);
+    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('即時搜尋月嫂'), { target: { value: '不存在的人員' } });
+    expect(screen.getByText('找不到符合「不存在的人員」的服務人員。')).toBeInTheDocument();
+    expect(document.querySelector('.staff-grid')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: '清除搜尋' })[0]);
+    expect(screen.getByText('去敏人員甲')).toBeInTheDocument();
+  });
+
   it('renders explicit empty and error states', async () => {
     vi.mocked(staffDirectoryClient.queryPage).mockResolvedValueOnce({
       items: [],

@@ -230,13 +230,13 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
     });
     await waitFor(() => {
       expect(screen.getByText(/問題詳情/)).toBeInTheDocument();
-      expect(screen.getByText(/claim ·/)).toBeInTheDocument();
+      expect(screen.getByText(/已進入人工確認 ·/)).toBeInTheDocument();
       expect(screen.queryByText(/v2 → v3/)).not.toBeInTheDocument();
     });
 
-    expect(screen.getByRole('button', { name: /確認排除異常/ })).toBeDisabled();
+    expect(screen.getByText(/系統會自動重新核對異常/)).toBeVisible();
     expect(document.querySelector('[data-surface-id="anomalies.finance-correction"]')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /確認排除異常/ }));
+    expect(screen.queryByRole('button', { name: /確認排除異常/ })).not.toBeInTheDocument();
     expect(screen.queryByText('排除成功')).not.toBeInTheDocument();
 
     await act(async () => {
@@ -247,9 +247,8 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
       expect(screen.getByText('由負責流程檢查後修正')).toBeInTheDocument();
     });
 
-    const transitionButton = screen.getByRole('button', { name: '請依上方轉介流程處理來源資料' });
-    expect(transitionButton).toBeDisabled();
-    fireEvent.click(transitionButton);
+    expect(screen.getByText(/追蹤狀態不代表來源已修復/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: '請依上方轉介流程處理來源資料' })).not.toBeInTheDocument();
     expect(screen.queryByText('狀態變更成功')).not.toBeInTheDocument();
 
     const detailRequests = requests.filter(({ path }) => path.startsWith(`${ANOMALY_LIST_ENDPOINT}/`));

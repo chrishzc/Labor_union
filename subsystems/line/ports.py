@@ -1,6 +1,6 @@
 """
 File: ports.py
-Description: 定義 LINE repository、通知取消、Rich Menu durable step、cleanup redrive 與 provider typed ports。
+Description: 定義 LINE repository、Rich Menu 媒體查詢、durable step、cleanup 與 provider typed ports。
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from domains.line.identity_flow import (
     LineIdentityFlowSnapshot,
 )
 from domains.line.media import LineMediaMetadata
+from domains.line.media_asset import RichMenuMediaAsset
 from domains.line.order_group import LineOrderGroupBindingSnapshot
 from domains.line.review import LineReviewDecisionCandidate, LineReviewSnapshot
 from domains.line.platform_user import LineFriendEvent, LinePlatformUserSnapshot
@@ -93,6 +94,11 @@ from subsystems.line.media_contracts import (
     ArchiveLineMediaResult,
     LineMediaDownload,
 )
+from subsystems.line.media_asset_contracts import (
+    RichMenuMediaAssetDetailQuery,
+    RichMenuMediaAssetListQuery,
+    RichMenuMediaAssetPage,
+)
 from subsystems.line.outbox_contracts import (
     ClaimLineOutboxQuery,
     CompleteLineOutboxCommand,
@@ -101,7 +107,9 @@ from subsystems.line.outbox_contracts import (
 from subsystems.line.order_group_contracts import (
     BindLineOrderGroupCommand,
     BindLineOrderGroupResult,
+    LineOrderGroupEventPage,
     LineOrderGroupEventRecord,
+    LineOrderGroupNumberedPage,
     LineOrderGroupPage,
     LinkedLineAdmin,
     OrderLineAudience,
@@ -593,6 +601,11 @@ class LineRichMenuPublicationRepositoryPort(Protocol):
         offset: int = 0,
     ) -> LineRichMenuPublicationPage: ...
 
+    def list_for_configuration_revision(
+        self,
+        configuration_revision: LineConfigurationRevision,
+    ) -> tuple[LineRichMenuPublicationSnapshot, ...]: ...
+
     def published_provider_menu_id(self, menu_definition_id: str) -> str | None: ...
 
     def queue(
@@ -660,6 +673,23 @@ class LineMediaMetadataRepositoryPort(Protocol):
     ) -> ArchiveLineMediaResult: ...
 
 
+class LineRichMenuMediaAssetQueryRepositoryPort(Protocol):
+    def list(
+        self,
+        query: RichMenuMediaAssetListQuery,
+    ) -> RichMenuMediaAssetPage: ...
+
+    def get(
+        self,
+        query: RichMenuMediaAssetDetailQuery,
+    ) -> RichMenuMediaAsset | None: ...
+
+    def get_for_update(
+        self,
+        query: RichMenuMediaAssetDetailQuery,
+    ) -> RichMenuMediaAsset | None: ...
+
+
 class LineOrderGroupBindingRepositoryPort(Protocol):
     def get(self, case_no: str) -> LineOrderGroupBindingSnapshot | None: ...
 
@@ -667,7 +697,15 @@ class LineOrderGroupBindingRepositoryPort(Protocol):
 
     def list(self, *, status: str | None, limit: int) -> LineOrderGroupPage: ...
 
+    def list_numbered(
+        self, *, status: str | None, page: int, page_size: int
+    ) -> LineOrderGroupNumberedPage: ...
+
     def events(self, case_no: str, *, limit: int) -> tuple[LineOrderGroupEventRecord, ...]: ...
+
+    def events_numbered(
+        self, case_no: str, *, page: int, page_size: int
+    ) -> LineOrderGroupEventPage: ...
 
     def bind(
         self,
@@ -845,6 +883,7 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     notification_rules: LineNotificationRuleRepositoryPort
     configurations: LineConfigurationRepositoryPort
     rich_menu_publications: LineRichMenuPublicationRepositoryPort
+    rich_menu_media_assets: LineRichMenuMediaAssetQueryRepositoryPort
     media_metadata: LineMediaMetadataRepositoryPort
     order_groups: LineOrderGroupBindingRepositoryPort
     order_audiences: OrdersLineAudiencePort
@@ -871,6 +910,7 @@ __all__ = [
     "LineIdentityReviewRepositoryPort",
     "LineIdempotencyReceiptPort",
     "LineMediaMetadataRepositoryPort",
+    "LineRichMenuMediaAssetQueryRepositoryPort",
     "LineMediaObjectStorePort",
     "LineMediaProviderPort",
     "LiffTokenVerifierPort",

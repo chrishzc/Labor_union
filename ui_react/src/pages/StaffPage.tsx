@@ -814,6 +814,28 @@ export const StaffPage: React.FC = () => {
   const interactionLocked = actionLocksNavigation(preferenceAction.phase)
     || actionLocksNavigation(availabilityAction.phase)
     || actionLocksNavigation(lifecycleAction.phase);
+  const endPauseDisabledReason = availabilityAction.phase === 'stale'
+    ? '資料已變更，請先重新查詢不可服務期間。'
+    : eligibleEndPauseBlocks.length === 0
+      ? (availability.status === 'ready'
+          ? '目前查詢範圍沒有可結束的無期限暫停紀錄。'
+          : '請先查詢包含目前暫停期間的日期範圍。')
+      : selectedEndPauseBlock === null
+        ? '請先選擇要結束的暫停接案紀錄。'
+        : !endPauseResumeDate
+          ? '請填寫恢復接案日期。'
+          : !endPauseReason.trim()
+            ? '請填寫結束暫停原因。'
+            : interactionLocked
+              ? '目前有其他操作進行中，請稍候。'
+              : null;
+  const cancelPreviewDisabledReason = (block: StaffAvailabilityBlockViewModel): string | null => {
+    if (block.status === 'cancelled') return '此紀錄已取消，不可再次取消。';
+    if (availabilityAction.phase === 'stale') return '資料已變更，請先重新查詢不可服務期間。';
+    if (!cancelReason.trim()) return '請先展開設定並填寫取消原因。';
+    if (interactionLocked) return '目前有其他操作進行中，請稍候。';
+    return null;
+  };
 
   const changeTab = (nextTab: StaffTab) => {
     if (nextTab !== activeTab) invalidateSlice();
@@ -955,7 +977,16 @@ export const StaffPage: React.FC = () => {
             <div className="staff-directory-message" role="status">目前沒有可顯示的服務人員摘要。</div>
           )}
 
-          {staffItems.length > 0 && (
+          {directory.status === 'ready' && staffItems.length > 0 && filteredStaffItems.length === 0 && (
+            <div className="staff-directory-message" role="status">
+              找不到符合「{searchQuery.trim()}」的服務人員。
+              <button type="button" className="staff-next-btn" onClick={() => setSearchQuery('')}>
+                清除搜尋
+              </button>
+            </div>
+          )}
+
+          {filteredStaffItems.length > 0 && (
             <div className="staff-grid">
               {filteredStaffItems.map((staff) => (
                 <article key={staff.id} className="staff-card" data-control-id={`staff.card.${staff.id}`}>
@@ -1113,11 +1144,13 @@ export const StaffPage: React.FC = () => {
           <section className="staff-form-card wide" data-surface-id="staff.availability.end-pause">
             <h3>結束無指定期限的暫停接案</h3>
             <p>只列出本次查詢中屬於所選月嫂、仍生效且沒有結束日的暫停接案期間。</p>
+            {endPauseDisabledReason && <p id="staff-end-pause-blocker" className="staff-directory-message" role="status">{endPauseDisabledReason}</p>}
             <div className="staff-range-query">
               <label>
                 暫停接案紀錄
                 <select
                   aria-label="暫停接案紀錄"
+                  aria-describedby={endPauseDisabledReason ? 'staff-end-pause-blocker' : undefined}
                   disabled={eligibleEndPauseBlocks.length === 0 || interactionLocked || availabilityAction.phase === 'stale'}
                   value={endPauseBlockId ?? ''}
                   onChange={(event) => {
@@ -1137,6 +1170,7 @@ export const StaffPage: React.FC = () => {
                 <input
                   type="date"
                   aria-label="恢復接案日期"
+                  aria-describedby={endPauseDisabledReason ? 'staff-end-pause-blocker' : undefined}
                   disabled={selectedEndPauseBlock === null || interactionLocked || availabilityAction.phase === 'stale'}
                   value={endPauseResumeDate}
                   onChange={(event) => {
@@ -1151,6 +1185,7 @@ export const StaffPage: React.FC = () => {
                 <input
                   type="text"
                   aria-label="結束暫停原因"
+                  aria-describedby={endPauseDisabledReason ? 'staff-end-pause-blocker' : undefined}
                   disabled={selectedEndPauseBlock === null || interactionLocked || availabilityAction.phase === 'stale'}
                   value={endPauseReason}
                   onChange={(event) => {
@@ -1164,6 +1199,7 @@ export const StaffPage: React.FC = () => {
                 type="button"
                 data-control-id="staff.availability.end-pause"
                 className="staff-next-btn"
+                aria-describedby={endPauseDisabledReason ? 'staff-end-pause-blocker' : undefined}
                 disabled={selectedEndPauseBlock === null || !endPauseResumeDate || !endPauseReason.trim() || interactionLocked || availabilityAction.phase === 'stale' || availabilityAction.phase === 'preview_loading'}
                 onClick={() => {
                   if (!selectedEndPauseBlock) return;
@@ -1651,7 +1687,10 @@ export const StaffPage: React.FC = () => {
                         <span role="cell">無可取消紀錄</span>
                       </div>
                     )}
-                    {availability.status === 'ready' && availability.data.map((block) => (
+                    {availability.status === 'ready' && availability.data.map((block) => {
+                      const disabledReason = cancelPreviewDisabledReason(block);
+                      const blockerId = `staff-availability-cancel-blocker-${block.blockId}`;
+                      return (
                       <div className="staff-unavailability-row" role="row" key={block.blockId}>
                         <span role="cell">#{block.staffId}</span>
                         <span role="cell">{block.kindLabel}</span>
@@ -1663,14 +1702,17 @@ export const StaffPage: React.FC = () => {
                             data-control-id="staff.availability.cancel.preview"
                             className="staff-secondary-btn"
                             style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                            disabled={!cancelReason.trim() || block.status === 'cancelled' || interactionLocked || availabilityAction.phase === 'stale'}
+                            disabled={disabledReason !== null}
+                            aria-describedby={disabledReason ? blockerId : undefined}
                             onClick={() => void previewAvailability({ action: 'cancel', block_id: block.blockId, reason: cancelReason.trim() })}
                           >
                             預覽取消
                           </button>
+                          {disabledReason && <small id={blockerId}>{disabledReason}</small>}
                         </span>
                       </div>
-                    ))}
+                      );
+                    })}
                     {availability.status === 'idle' && (
                       <div className="staff-unavailability-row" role="row">
                         <span role="cell">正在載入不可服務期間…</span>

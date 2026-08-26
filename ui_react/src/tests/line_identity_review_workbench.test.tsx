@@ -52,7 +52,7 @@ const REVIEW_PREVIEW = {
 
 function reviewClient() {
   return {
-    listReviews: vi.fn().mockResolvedValue({ items: [PENDING_REVIEW], next_cursor: null }),
+    listReviews: vi.fn().mockResolvedValue({ items: [PENDING_REVIEW], page: 1, page_size: 25, total: 1 }),
     getReviewSummary: vi.fn().mockResolvedValue({
       pending_total: 4,
       staff_pending: 2,
@@ -127,5 +127,35 @@ describe('LINE 身分人工審核工作台', () => {
     expect(screen.queryByRole('heading', { name: '預覽：核准' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '提交審核決定' })).not.toBeInTheDocument();
     expect(client.applyReviewDecision).not.toHaveBeenCalled();
+  });
+
+  it('使用 server numbered metadata 換頁，並在篩選變更時回到第一頁', async () => {
+    const listReviews = vi.fn((query?: Parameters<LineIdentityReviewClient['listReviews']>[0]) => Promise.resolve({
+      items: [PENDING_REVIEW],
+      page: query?.page ?? 1,
+      page_size: 25,
+      total: 26,
+    }));
+    const client = { ...reviewClient(), listReviews };
+    render(<LineIdentityReviewWorkbench client={client} />);
+
+    await screen.findByText('顯示 1-25 / 26 件');
+    expect(screen.getByRole('button', { name: '上一頁' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
+    await waitFor(() => expect(listReviews).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2, page_size: 25 }),
+      expect.any(Object),
+    ));
+    await screen.findByText('顯示 26-26 / 26 件');
+    expect(screen.getByRole('button', { name: '下一頁' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('審核類型'), {
+      target: { value: 'staff_verification' },
+    });
+    await waitFor(() => expect(listReviews).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, review_type: 'staff_verification' }),
+      expect.any(Object),
+    ));
+    await screen.findByText('顯示 1-25 / 26 件');
   });
 });

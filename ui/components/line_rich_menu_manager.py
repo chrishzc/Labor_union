@@ -1,7 +1,7 @@
 """
 ================================================================================
 檔案名稱: ui/components/line_rich_menu_manager.py
-功能說明: LINE 聊天下方選單管理元件，編輯按鈕、預覽圖片、上傳及套用選單
+功能說明: LINE Rich Menu 管理元件，使用專用草稿 Preview／確認／Apply 與圖片發布流程
 ================================================================================
 """
 
@@ -28,6 +28,7 @@ from ui.components.line_ui_support import (
 
 FLASH_KEY = "line_rich_menu_flash"
 PREVIEW_KEY = "line_rich_menu_preview"
+DRAFT_PREVIEW_KEY = "line_rich_menu_draft_preview"
 PUBLISH_PREVIEW_KEY = "line_rich_menu_publish_preview"
 TAIPEI = ZoneInfo("Asia/Taipei")
 ROLE_LABELS = {
@@ -175,18 +176,19 @@ def _replace_menu(config: dict[str, Any], updated: dict[str, Any]) -> dict[str, 
     return result
 
 
-def _save_menu_configuration(
+def _apply_menu_draft(
     client: LineAdminApiClient,
     token: str | None,
-    definition: dict[str, Any],
-    revision: int,
+    draft_preview: dict[str, Any],
     operation: str,
 ) -> None:
+    definition = draft_preview["definition"]
     identity = operation_headers(operation, definition)
     client.update_line_menus(
         token,
         definition,
-        revision=revision,
+        revision=draft_preview["expected_revision"],
+        preview_fingerprint=draft_preview["preview_fingerprint"],
         reason="管理員儲存 Rich Menu 設定",
         idempotency_key=identity["Idempotency-Key"],
         correlation_id=identity["X-Correlation-ID"],
@@ -318,13 +320,13 @@ def render_rich_menu_manager(
         )
         preview_col, save_col = st.columns(2)
         preview_clicked = preview_col.form_submit_button(
-            "查看預覽", width="stretch"
+            "建立草稿預覽", width="stretch"
         )
-        save_clicked = save_col.form_submit_button(
-            "儲存修改", type="primary", disabled=not can_edit, width="stretch"
+        save_col.caption(
+            "預覽後需在下方明確確認，才可套用草稿。"
         )
 
-    if preview_clicked or save_clicked:
+    if preview_clicked:
         try:
             draft = _build_menu_from_editor(
                 original=selected_menu,
@@ -339,31 +341,59 @@ def render_rich_menu_manager(
                 image_mode=image_mode,
                 rows=rows,
             )
-            preview = client.preview_line_menu(token, draft)
+            draft_result = client.preview_line_menu_draft(
+                token,
+                draft,
+                revision=state["revision"],
+            )
+            normalized_definition = draft_result["normalized_definition"]
+            preview = client.preview_line_menu(token, normalized_definition)
         except (ValueError, LineAdminApiError) as exc:
             st.error(f"選單內容有問題：{exc}")
         else:
             st.session_state[PREVIEW_KEY] = preview
-            if save_clicked:
-                try:
-                    _save_menu_configuration(
-                        client,
-                        token,
-                        _replace_menu(config, draft),
-                        state["revision"],
-                        f"rich-menu-config-save:{selected_id}",
-                    )
-                except LineAdminApiError as exc:
-                    st.error(f"儲存失敗：{exc}")
-                else:
-                    st.session_state.pop(PUBLISH_PREVIEW_KEY, None)
-                    st.session_state[FLASH_KEY] = "選單修改已儲存，尚未套用到 LINE。"
-                    st.rerun()
+            st.session_state[DRAFT_PREVIEW_KEY] = {
+                "menu_id": selected_id,
+                "expected_revision": state["revision"],
+                "definition": normalized_definition,
+                "preview_fingerprint": draft_result["preview_fingerprint"],
+            }
+            st.session_state.pop(f"rich_menu_confirm_{selected_id}", None)
 
     preview = st.session_state.get(PREVIEW_KEY)
     if preview:
         st.markdown("#### 選單預覽")
         st.image(preview, width="stretch")
+
+    draft_preview = st.session_state.get(DRAFT_PREVIEW_KEY)
+    if draft_preview and draft_preview.get("menu_id") == selected_id:
+        st.warning("已建立伺服器草稿預覽；請確認目前預覽後再套用。")
+        confirmed = st.checkbox(
+            "我已確認目前 Rich Menu 草稿預覽內容",
+            key=f"rich_menu_confirm_{selected_id}",
+            disabled=not can_edit,
+        )
+        if st.button(
+            "套用已確認草稿",
+            type="primary",
+            disabled=not can_edit or not confirmed,
+            key=f"rich_menu_apply_{selected_id}",
+        ):
+            try:
+                _apply_menu_draft(
+                    client,
+                    token,
+                    draft_preview,
+                    f"rich-menu-config-apply:{selected_id}",
+                )
+            except LineAdminApiError as exc:
+                st.error(f"套用失敗：{exc}")
+            else:
+                st.session_state.pop(DRAFT_PREVIEW_KEY, None)
+                st.session_state.pop(PREVIEW_KEY, None)
+                st.session_state.pop(PUBLISH_PREVIEW_KEY, None)
+                st.session_state[FLASH_KEY] = "選單草稿已套用，尚未發布到 LINE。"
+                st.rerun()
 
     st.markdown("#### 自訂選單圖片")
     st.caption("若不上傳圖片，系統會依上方顏色自動產生選單；每個選單一次只能套用一張底圖。")
@@ -415,22 +445,31 @@ def render_rich_menu_manager(
             updated = deepcopy(selected_menu)
             updated["appearance"]["image_mode"] = "uploaded"
             updated["appearance"]["image_asset_id"] = asset["id"]
-            _save_menu_configuration(
-                client,
+            draft_result = client.preview_line_menu_draft(
                 token,
                 _replace_menu(config, updated),
-                state["revision"],
-                f"rich-menu-image-save:{selected_id}",
+                revision=state["revision"],
             )
-        except LineAdminApiError as exc:
+            normalized_definition = draft_result["normalized_definition"]
+            st.session_state[PREVIEW_KEY] = client.preview_line_menu(
+                token,
+                normalized_definition,
+            )
+            st.session_state[DRAFT_PREVIEW_KEY] = {
+                "menu_id": selected_id,
+                "expected_revision": state["revision"],
+                "definition": normalized_definition,
+                "preview_fingerprint": draft_result["preview_fingerprint"],
+            }
+            st.session_state.pop(f"rich_menu_confirm_{selected_id}", None)
+        except (ValueError, LineAdminApiError) as exc:
             st.error(f"圖片上傳失敗：{exc}")
         else:
             st.session_state.pop(PUBLISH_PREVIEW_KEY, None)
-            st.session_state[FLASH_KEY] = "自訂圖片已套用至選單。"
-            st.rerun()
+            st.session_state[FLASH_KEY] = "自訂圖片已建立草稿預覽；請確認後套用。"
 
     st.markdown("#### 套用到 LINE")
-    st.warning("請先儲存修改、確認預覽，然後建立本次套用確認。")
+    st.warning("請先套用已確認草稿、確認預覽，然後建立本次發布確認。")
     publish_preview = st.session_state.get(PUBLISH_PREVIEW_KEY)
     preview_is_current = bool(
         publish_preview and publish_preview.get("menu_id") == selected_id

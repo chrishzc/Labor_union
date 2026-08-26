@@ -72,6 +72,16 @@ export const LINE_RICH_MENU_CONFIGURATION_FIXTURE = {
   },
 } as const;
 
+export const LINE_RICH_MENU_DRAFT_FIXTURE = {
+  ...LINE_RICH_MENU_CONFIGURATION_FIXTURE,
+  publication_locks: [{
+    menu_definition_id: 'customer_menu',
+    configuration_revision: 8,
+    state: 'editable',
+    readonly_reason: null,
+  }],
+} as const;
+
 export const LINE_RICH_MENU_CONFIGURATION_ENVELOPE_FIXTURE = {
   success: true,
   message: 'Success',

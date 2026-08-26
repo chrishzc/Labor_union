@@ -37,21 +37,13 @@ export interface LineRichMenuPublicationActionsProps {
 
 type OperationState = 'idle' | 'loading' | 'success' | 'error';
 
-const RICH_MENU_PUBLISH_CAPABILITIES = new Set([
-  'line.menu.publish',
-  'line.rich_menu.publish',
-]);
-
 function publicationAccessMessage(): string | null {
   const user = sessionClient.getUser();
-  if (!user) return null;
-  if (user.capabilities.some((capability) => RICH_MENU_PUBLISH_CAPABILITIES.has(capability))) {
-    return null;
-  }
+  if (!user) return '請先登入已啟用的內部使用者帳號，再排入發布工作。';
   if (user.id === null) {
     return '本機免驗證模式不可發布；請改用真實已登入的管理員 Session。';
   }
-  return '目前登入的管理員 Session 沒有 Rich Menu 發布能力；請改用具發布能力的管理員 Session。';
+  return null;
 }
 
 function uniqueOperationIdentity(prefix: string): string {
@@ -63,7 +55,7 @@ function uniqueOperationIdentity(prefix: string): string {
 function displayError(error: unknown): string {
   if (error instanceof LineRichMenuPublicationError) {
     if (error.category === 'forbidden') {
-      return '目前登入的管理員 Session 沒有 Rich Menu 發布能力；若目前使用本機免驗證模式，該模式不可發布，請改用真實已登入的管理員 Session。';
+      return '目前登入狀態不能排入發布工作；本機免驗證模式不可發布，其他情況請重新登入已啟用的內部使用者帳號。';
     }
     return `${error.code}：${error.message}`;
   }

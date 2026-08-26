@@ -19,56 +19,74 @@ Work Package、功能開發 umbrella 計畫、archive、history 或 evidence 不
 
 ## 2. Current 執行順序
 
-主代理優先處理營運作業；只有 write set 可隔離時才由 LINE lane 平行。某一步因 Chrome、schema、NAS
-target 或 provider 授權阻塞時，只跳過該步並繼續下一個已核准且獨立的工作，不重跑已完成 lifecycle。
+主代理優先處理營運作業；只有 write set 可隔離時才由 LINE lane 平行。2026-08-26 人工已授權全部
+current lane 進入規格補齊、本機實作與受控驗收；依賴未就緒時只跳過該步，不重跑已完成 lifecycle。
+這項授權包含 `lu_test_*` 必要 schema gate 與 LINE sandbox qualification，但不省略 DB change gates、精確
+target／recipient／quota readback、rollback 或 provider receipt；未指定的 production／`union_db`／entry switch
+與不可逆 retirement 仍不得直接執行。
 
 | 順序 | Lane | Current IDs | 執行裁決 |
 |---:|---|---|---|
-| L1 | 可隔離 LINE | `CUR-LINE-RICHMENU-ACTION-01`、`CUR-LINE-RICHMENU-LOCAL-PREVIEW-01` | 先消除用 label 猜 action 的 live-drift，再做 typed action／message 編輯與本機互動預覽測試；主代理仍是共享 Rich Menu 檔案唯一 writer。 |
-| L2 | 可隔離 LINE | `CUR-LINE-04` | Delivery closure → Identity → Rich Menu publication → Mobile Admin continuation；每一段完成才往下。 |
-| L3 | 可隔離 LINE | `CUR-LINE-SURFACE-QA-01`、`CUR-LINE-FLEX-01` | 只補未完成 caller／Flex design preview，不重驗已完成 Identity、LIFF entry 或卡片 responsive。 |
-| L4 | 可隔離 LINE | `CUR-LINE-RICHMENU-01`、`CUR-LINE-AI-LOCAL-01` | action 穩定後再做背景／名稱；AI 先完成零寫入本機預覽，正式 feedback 另依 blocker。 |
-| L5 | 需外部條件 | `CUR-LINE-RICHMENU-AUTH-01`、`CUR-LIFF-E2E`、`CUR-LINE-PROVIDER` | 依序等待真 Admin Session、schema upgrade、provider sandbox／額度授權；不得用 bypass、假 token 或 queue 冒充完成。 |
-| H1 | 等待使用者設計 | `CUR-FILE-NAS-01`、`CUR-DATA-CENTER-01` | M2 依 2026-08-25 人工裁決暫停；等待使用者完成介面與功能細項設計後再重開，不繼續 adapter、API、UI 或測試。 |
-| H2 | 受 M2 影響 | `CUR-CONTRACT-01`、`CUR-LIFF-PROFILE-01` | 契約檔案流程依賴 M2；資料修改流程仍等待 persistence/schema capability。條件未解除前不施工、不改 DB。 |
-| Z1 | 後置 | `CUR-UX-01`、`CUR-UI-01`、`CUR-PERF-01` | P0/P1 功能收斂後再做全頁雜訊、視覺與量測效能；不覆蓋使用者 UI dirty changes。 |
+| O1 | 營運儲存基礎 | `CUR-FILE-NAS-01` | 先固定 controlled-file port／discovery／reconciliation／opaque reference，再做 typed NAS Query／下載／staging；不以既有 UI mock 反推 contract。 |
+| O2 | 營運契約 | `CUR-CONTRACT-01` | 儲存基礎可驗證後，完成 PDF renderer、外部平台 completion reports、最終檔案 Preview／Apply／readback。 |
+| L1 | LINE 媒體與日誌 | `CUR-LINE-BABYLOG-MEDIA-01` | 重用 O1 storage capability，完成 verified LIFF staging、digest、版本與 cleanup；不得另建直接落檔路徑。 |
+| L2 | LIFF 資料異動 | `CUR-LIFF-PROFILE-01`、`CUR-LIFF-E2E` | 先做 schema inventory／release gates，再補 owner persistence 與 verified-token Chrome E2E。 |
+| L3 | Rich Menu／provider | `CUR-LINE-RICHMENU-01`、`CUR-LINE-RICHMENU-AUTH-01`、`CUR-LINE-PROVIDER` | 現有登入 Session 可先完成 fresh Chrome；sandbox qualification 只在精確 target／recipient／quota 回讀後執行。 |
+| L4 | 客服知識 | `CUR-LINE-AI-FEEDBACK-01`、`CUR-LINE-QA` | 先補 owner／privacy／receipt 契約並唯讀盤點 QA workbook；未逐題 review 前不 publish。 |
+| Z1 | 收斂後置 | `CUR-UX-01`、`CUR-UI-01`、`CUR-PERF-01` | 功能完成後做剩餘 UX Chrome、視覺與可量測效能；不覆蓋使用者 UI dirty changes。 |
+| Z2 | 發布／退役 | `CUR-CLOUD-01`、`CUR-RETIRE-01` | 可開始 qualification、caller／replacement 與 rollback 準備；實際 external deploy／entry switch／retirement 需精確 target gate。 |
 
-## 3. Current 執行清單
+## 3. Current 未完成執行清單
 
 | ID | 優先級 | 狀態 | Owner／正式規格 | 範圍與 write set | 完成條件 |
 |---|---:|---|---|---|---|
-| CUR-CONTRACT-01 | P0 | `blocked` | Contract Signing／LINE；`00` §2.2、`21` 的 2026-08-25 amendment | current renderer 只產生 XLSX；既有 `storage_key`／metadata 尚未驗證為受控 NAS logical object reference／digest／version adapter，事件也缺外部平台 completion report。先完成 PDF renderer、NAS discovery/read adapter 與 typed reports；若現有 schema 不足才另立 DB Work Package。本次禁止 DDL／migration，不得用 raw NAS path、舊 archive URL 或 signed-return 假裝完成。 | 解鎖後：Chrome 走完未簽 PDF 下載 → 外部狀態人工／verified LINE 回報 → 最終 PDF 指定投放區／受控上傳 Preview／Apply → metadata＋NAS object readback。現有人工補登仍為 completed；provider push 另行列管。 |
-| CUR-FILE-NAS-01 | P0 | `blocked` | Global controlled files／各文件 owner；`00` §2.2、`17`、`18`、`20`、`21` | 依 2026-08-25 人工裁決暫停 M2，等待使用者完成介面與功能細項設計後再重新確認 scope。現有本機草稿原樣保留但不視為已採用或完成；不再擴寫 adapter、API、UI 或測試，也不 mount、不搬檔、不碰 production、DDL／migration。 | 使用者提供設計後，重新核對 storage port、discovery／reconciliation、opaque reference、metadata、清單／下載與各 Domain owner，再另行恢復執行及驗收。 |
-| CUR-DATA-CENTER-01 | P1 | `proposed` | Global React entry／controlled files／Case Import／Data Browser；`12` §3.4、`19` §5 | 規劃將側邊欄「資料匯入」改名為「資料中心」，內含 `NAS 檔案`、`資料匯入`、`數據瀏覽` 三分頁；NAS 只先定義資料夾與其中檔案名稱的簡單 read-only 投影，不另列層級、用途、案件／人員、版本、大小、更新時間或異常狀態。舊 `data-browser` 保留為相容深連結；不得複製或刪減既有匯入／瀏覽功能。介面版型與互動等待使用者設計，本次不改 React route/page/API。 | 使用者確認介面設計後，另將本項推進為 `approved` 並固定 UI write set／acceptance；實作時需驗證三分頁、舊 deep link、登入後目標、back／forward，以及既有匯入 Preview／Apply與數據瀏覽 Query 無退步。 |
-| CUR-LINE-SURFACE-QA-01 | P0 | `in-progress` | LINE Integration／Customer Service；`17`、`20`、`23` | `CUR-LINE-01` 的 exact successor，只盤點／補齊尚未完成的 React tab、Mobile Admin 與 LIFF typed caller；已完成 Identity UI、LIFF entry 與卡片 responsive 不重跑。只改對應 client／page／tests，不碰 provider、DB schema、entry switch。 | 未完成入口逐一有 typed Query 或明確業務 blocker；mutation 維持 Preview → 確認 → Apply → receipt/readback；Chrome 0 假空資料、靜默隱藏、「後端未提供／未開放／API 錯誤／無法載入」。 |
-| CUR-LINE-AI-LOCAL-01 | P1 | `in-progress` | Customer Service／LINE UI；`15` §17、`20` §6 | 保留 AI 事件工作室規則編輯、滿意度調查、指標槽位與人工 fallback；正式 feedback／catalog contract 未完成前只做 zero-write browser-local deterministic preview，不硬編統計、不建立假工單、不保存正式回饋。 | 原設計控制均可到達；本機預覽明示未保存，未解決固定顯示轉人工語意。正式 feedback Query／record／receipt 由 `CUR-LINE-AI-FEEDBACK-01` 另行解鎖。 |
-| CUR-LINE-FLEX-01 | P1 | `approved` | LINE Integration／UI；`20` §6 | 補齊 4 個既有 Flex 資產的去敏 typed design preview；保留原設計，不接 raw provider payload、demo token 或 client identity。 | 四個 Flex 均可由 strict DTO 顯示與錯誤分流；缺 owner fact 明示 blocker，focused tests／build／Chrome 通過。 |
-| CUR-LINE-BABYLOG-01 | P1 | `approved` | Scheduling／LINE file transport；`00` §2.2、`20` §5.4 | 寶寶日誌文字、附件與餐食照片的 verified Staff LIFF staging cleanup、Preview／Apply／receipt/readback；檔案 bytes 依賴 `CUR-FILE-NAS-01`，Scheduling 保留 owner。不得用 direct POST、公開 URL 或 watcher discovery 冒充完成。 | 依 `requires_cooking` 與正式服務日驗證；合法提交建立唯一日誌／附件版本，失敗 cleanup 可重試且不留假完成；UI 只顯示檔案投影，Chrome verified-token E2E 仍依 `CUR-LIFF-E2E`。 |
-| CUR-LIFF-PROFILE-01 | P0 | `blocked` | Client／Staff owner／LINE intake；`20` §6.1、`23` | 正式 Query／Preview／Apply／receipt／owner readback 契約已裁決；目前缺 owner allowlist／aggregate version 的 live implementation、request／decision persistence capability，且現有 schema 未證明足夠。本次禁止 DDL／migration，不得直接 SQL、借用身分審核流程或以 query-string `userId` 授權。 | 解鎖後：Chrome 由 LIFF 提交 → 管理端同內容顯示 → Preview／確認／owner Apply → DB readback → LIFF／管理端一致；另驗證拒絕、stale、replay、越權與 rollback。 |
-| CUR-LINE-04 | P1 | `in-progress` | LINE UI adapters；`17` §3.2、`20` §6、`15` §17 | 依 Delivery closure → Identity → Rich Menu publication → Mobile Admin customer/review 完成 server-side pagination。Delivery UI／focused tests 已進行中，仍須全組 regression／build／Chrome；後續不得以固定上限或記憶體切片取代。 | 每段 Chrome 可前後翻頁且 filter reset 正確，末頁鎖定與 server total/range 一致；stale response 不覆蓋新頁，不顯示 raw cursor／fingerprint／idempotency 雜訊；focused tests 與 build 通過。 |
-| CUR-LINE-RICHMENU-01 | P1 | `approved` | LINE Rich Menu／Media；`17` §3.5、`20` §6 | Rich Menu 工作台新增背景圖與按鈕顯示名稱的 draft 編輯；保留 action／熱區／audience，修改建立新 revision，不能覆寫 processing／published snapshot，也不能在草稿階段直接呼叫 provider。 | Chrome 編輯背景與名稱後，同 revision 預覽正確；Preview → 確認 → Apply 產生 committed definition／receipt，stale revision fail closed。provider publication／push 本次 `not_run`，不得假造成功。 |
-| CUR-LINE-RICHMENU-ACTION-01 | P0 | `in-progress` | LINE Rich Menu／Media；`17` §3.5、`20` §6 | 保留既有手機模擬點擊畫面，新增 closed typed action 編輯。live audit 已確認 React adapter 丟棄 action、頁面改用 label／順序猜測；generic configuration Apply 也未綁 Preview fingerprint。須建立專用 typed draft Query／Preview／Apply／receipt/readback，重用既有 configuration owner／repository。編輯範圍包含 URI／canonical LIFF target、message text、postback data、rich menu alias；kind 切換清除不相容欄位。不碰 provider publication、DB schema 或 entry switch。 | Chrome 修改四種合法 action 後，手機點擊投影與 server readback 一致；message 顯示並保存操作者輸入的實際候選訊息，按鈕改名不改 action/message。非法 scheme／target／長度、stale、fingerprint mismatch、processing／published 均 fail closed；Preview → 確認 → Apply → receipt/readback，focused tests／build 通過，provider `not_run`。 |
-| CUR-LINE-RICHMENU-LOCAL-PREVIEW-01 | P0 | `approved` | LINE Rich Menu UI；`17` §3.5、`20` §6 | 為使用者新增的手機本機互動預覽建立 focused／Chrome 測試。預覽以 current server draft＋browser-memory edits 即時重繪；點擊只模擬 typed target／message，不寫 DB、不建立 delivery/publication、不呼叫 provider，也不取代 server Preview。只改 Rich Menu UI/tests，與 action task 由同一 writer 序列整合。 | 測試背景／名稱／四種 action／message 編輯立即反映、取消還原、改名不改 action、kind 切換清欄位、未知 target 明示 blocker；監測 local edit/click 為零 mutation request。server Preview 後仍需確認 Apply，Apply readback 與手機畫面一致；Chrome 0 假成功／API error，provider `not_run`。 |
-| CUR-LINE-RICHMENU-AUTH-01 | P0 | `in-progress` | Access／LINE Rich Menu publication；`17` §3.5、`25` | canonical capability mapping 與 React 提示已修正；本機免驗證模式現在明確說明不可發布，不冒充 root。仍須以真實已登入且 enabled 的管理員 Session 驗證 Preview／queue；不得以帳號名稱硬編放行。 | focused RBAC 驗證 canonical 管理員可進 publication flow、無權角色仍為 403；Chrome 真實 Session 不再誤判。本機 bypass 的零寫入 Preview 已通過；queue 僅能在 provider worker 隔離時驗證，真實 provider publication 仍依 `CUR-LINE-PROVIDER`。 |
-| CUR-UX-01 | P1 | `in-progress` | Global UX／各 owner；`00`、`12`、`15` | 全頁盤點並移除一般操作者不需要的 fingerprint、version、cursor、idempotency 與 provider/debug 雜訊；保留必要業務原因、receipt 摘要與可復原入口。 | Chrome 逐頁無技術雜訊、靜默隱藏或只有 disabled 控制；合法鎖定具明確業務原因，進階稽核資料不進一般畫面。 |
-| CUR-UI-01 | P2 | `proposed` | React presentation；`12` 與使用者保留設計 | 功能流程完成後才做全頁視覺對齊；不得恢復已放棄的營運分析／月報設計，也不得覆蓋使用者 UI dirty changes。 | 以 Chrome 與保留設計逐頁比較；功能、可達性、responsive 與 WCAG 不退步。 |
-| CUR-PERF-01 | P2 | `proposed` | Global／React | 先定義可重現的載入、request 數、互動延遲與 bundle 基準，再做有量測證據的效能改善。 | baseline、變更前後數據、回歸測試與 build 均可重現；不得只以主觀感受宣稱改善。 |
+| CUR-CONTRACT-01 | P0 | `approved` | Contract Signing／LINE；`00` §2.2、`21` 的 2026-08-25 amendment | 人工已授權本機實作、必要 `lu_test_*` schema gate 與 sandbox 驗收。依序完成 PDF renderer、NAS discovery/read adapter、雙方 completion reports 與最終檔案 typed Preview／Apply；不得用 raw NAS path、舊 archive URL 或 signed-return 假裝完成。 | Chrome 走完未簽 PDF 下載 → 外部狀態人工／verified LINE 回報 → 最終 PDF 指定投放區／受控上傳 Preview／Apply → metadata＋NAS object readback。provider 實送依 L3 精確 target gate。 |
+| CUR-FILE-NAS-01 | P0 | `approved` | Global controlled files／各文件 owner；`00` §2.2、`17`、`18`、`20`、`21` | 人工已授權建立後端 controlled-file capability。先盤點現有 storage port／metadata／schema，再固定 discovery／reconciliation、opaque reference、清單、authenticated download、staging 與 cleanup；必要 schema 只限 `lu_test_*` 並通過完整 DB gates。 | typed Query／Preview／Apply／receipt/readback 與失敗 reconciliation 通過；NAS path 不進 UI／API／log。production mount、`union_db`、實體搬檔與 entry switch 仍須精確 target gate。 |
+| CUR-LIFF-PROFILE-01 | P0 | `approved` | Client／Staff owner／LINE intake；`20` §6.1、`23` | 人工已授權 owner persistence、必要 `lu_test_*` schema release 與 Chrome E2E。須先完成 schema inventory／DB gates，再實作 owner allowlist、aggregate version、request／decision persistence；不得直接 SQL、借用身分審核流程或以 query-string `userId` 授權。 | Chrome 由 LIFF 提交 → 管理端同內容顯示 → Preview／確認／owner Apply → DB readback → LIFF／管理端一致；另驗證拒絕、stale、replay、越權與 rollback。 |
+| CUR-LINE-RICHMENU-01 | P1 | `in-progress` | LINE Rich Menu／Media；`17` §3.5、`20` §6 | source／focused tests 已完成；2026-08-26 Chrome 已重新登入，原 Session blocker 解除。只補 editable menu 真 Query、合法空清單／選取 → Preview → 確認 → Apply → readback；上傳另走 O1 staging，不接舊直接上傳端點。 | Chrome 完成 fresh 正向與 drift／唯讀原因驗收；provider publication 依 L3 sandbox target gate，不得假發布。 |
+| CUR-LINE-RICHMENU-AUTH-01 | P0 | `approved` | Access／LINE Rich Menu publication；`17` §4.1、`25` | authenticated enabled 使用者契約與 source tests 已完成；人工已授權 sandbox queue／provider qualification。queue 前必須回讀 exact environment、target、recipient、quota 與 worker isolation；未登入、disabled、local bypass 與 production target 仍 fail closed。 | 以 enabled `chris` Session 完成 queue → worker → provider sandbox receipt／readback；不得用 UI toast、queued 狀態或帳號名稱冒充 delivery。 |
+| CUR-UX-01 | P1 | `in-progress` | Global UX／各 owner；`00`、`12`、`15` | source／focused regression 已完成；2026-08-26 Chrome 已重新登入，原 Session blocker 解除。只補 Finance fresh 錯誤路徑與 Account 唯一 enabled root 清冊正向驗收，不重改已完成頁面。 | Chrome 驗收 passed 後移入 completed；不得由顯示名稱或過期 Session 倒推 root fact。 |
+| CUR-UI-01 | P2 | `approved` | React presentation；`12` 與使用者保留設計 | 人工已授權功能收斂後逐頁視覺、responsive 與 WCAG 對齊；不得恢復已放棄的營運分析／月報設計，也不得覆蓋使用者 UI dirty changes。 | 以 Chrome 與保留設計逐頁比較；功能、可達性、responsive 與 WCAG 不退步。 |
+| CUR-PERF-01 | P2 | `approved` | Global／React | 人工已授權建立可重現的載入、request 數、互動延遲與 bundle baseline，再做有量測證據的改善。 | baseline、變更前後數據、回歸測試與 build 均可重現；不得只以主觀感受宣稱改善。 |
 
-## 4. Blocked／deferred，不得繞過
+CUR-UX auth evidence correction（2026-08-26）：CUR-UX 列所稱「`chris` 非 server root fact」無有效
+證據，固定撤回。該 403 發生於舊 `local_bypass` API，是預期安全行為；改以
+`local_developer_session` 重啟後，既有瀏覽器 token 已失效並回 401。Account root 清冊正向驗收只能在
+重新登入真實 Session 並回讀唯一 enabled root 後判定，不得由舊 403、前端顯示名稱或過期 Session 倒推。
+
+CUR-UX Anomalies addendum（2026-08-26）：複合 disabled 缺口的 source 與 regression 已完成。正式 action
+固定分類、未填理由、尚未 Preview、內容變更、提交中與結果確認中均顯示 closed 業務原因並以
+`aria-describedby` 關聯；Drawer／背景篩選鎖定亦明示原因，進入追蹤編輯後不再保留 disabled「開啟」
+按鈕。Anomalies focused `12 files / 133 tests`、TypeScript、focused oxlint passed；fresh Chrome 正向因
+瀏覽器 Session 已失效為 `blocked`，不得以 focused test 冒充 browser passed。CUR-UX 列末「仍須續查
+Anomalies 複合 disabled」由本 addendum supersede。
+
+CUR-UX auth-session addendum（2026-08-26）：React 已以 rejected-token exact guard 處理 human request 401；
+只有被拒 token 仍等於目前 Session 時才清除並卸載 protected shell。登入挑戰、403、network／5xx、不同
+service token 與晚到舊 token 不受影響。focused auth／transport `5 files / 97 tests`、TypeScript passed，
+focused oxlint 只有 `App.tsx` 既存 Fast Refresh export warning。Chrome 在 `local_developer_session` API 重啟後
+以舊 token 觸發 401，已實際返回登入頁且不再顯示 `chris` 舊 shell，結果 `passed`。重新登入後的 Finance
+正向與 Account root 清冊正向仍分別為 `blocked`／`blocked`，不由本修正冒充完成。
+
+## 4. 已授權但仍有執行門／依賴
 
 | ID | 狀態 | 原因 | 解鎖條件 |
 |---|---|---|---|
-| CUR-LIFF-E2E | `blocked` | 真實 LIFF 登入已到 server，但 development DB 的 `flow_purpose` 尚未包含正式 `staff_self_service`；目前禁止 schema／migration／DDL。 | 另行取得本機 schema upgrade 授權並通過 DB change gates，再以 verified token 重跑；query-string `userId` 只能導航，不能授權。 |
-| CUR-LINE-PROVIDER | `blocked` | 使用者要求先不真實 push，以免消耗免費額度；production/provider side effect 亦未授權。 | 使用者另行指定 sandbox delivery 範圍與額度後，只測 provider lane；不得重跑已完成本機 UI。 |
-| CUR-LINE-AI-FEEDBACK-01 | `blocked` | 滿意度正式 Query／record／receipt、統計 owner 與 durable manual-ticket linkage 尚無核准 public contract；`CUR-LINE-AI-LOCAL-01` 只能零寫入預覽。 | 先在 `20` 補齊 owner、root facts、typed Query／Preview／Apply、receipt/readback、privacy 與人工 fallback 並取得人工確認；不得用 local counter 或 notification rules 假造。 |
-| CUR-LINE-QA | `blocked` | QA workbook loader runtime／owner review 尚未完成；來源 Excel 不是 SSOT。 | loader 可用且 owner、category、source、approved answer 經人工確認後，另立 exact Work Package。 |
-| CUR-CLOUD-01 | `proposed` | Cloud Run、Worker supervision、Access production cutover、external alert sink 均延後。 | 指定隔離 project／NAS DB、operator、預算、故障注入與 rollback scope，並另行核准。 |
-| CUR-RETIRE-01 | `blocked` | production、entry switch、legacy retirement 與 Phase 6C 不在目前授權。 | 完成逐入口 caller／replacement／regression，取得 exact retirement/cutover 授權。 |
+| CUR-LIFF-E2E | `approved` | 人工已授權 `lu_test_*` 必要 schema upgrade 與 verified-token E2E；`flow_purpose` 仍須透過正式 release chain 補齊。 | 完整通過 DB change gates後再測；query-string `userId` 只能導航，不能授權。 |
+| CUR-LINE-PROVIDER | `approved` | 人工已授權 LINE sandbox／免費額度內的 provider qualification；先前「不真實 push」裁決由本項 supersede。 | 執行前回讀 exact environment、target、recipient、quota 與 worker isolation；只送最小受控案例並保存 provider receipt。production recipient 不在 blanket approval 內。 |
+| CUR-LINE-BABYLOG-MEDIA-01 | `approved` | 人工已授權 media lane；依賴 O1 受控 NAS staging、digest、版本、cleanup／reconciliation 與下載投影。 | O1 owner contract 通過後施工；不得用既有 direct upload、公開 URL 或 watcher discovery 冒充。 |
+| CUR-LINE-AI-FEEDBACK-01 | `approved` | 人工已授權先補正式 feedback contract，再施工 Query／record／receipt、統計 owner、privacy 與 durable manual-ticket linkage。 | 正式規格完成 closure gate 後才實作；不得用 local counter 或 notification rules 假造。 |
+| CUR-LINE-QA | `approved` | 人工已授權唯讀 inspect QA workbook 與建立 review queue；Excel 仍不是 SSOT，逐題答案不因 blanket approval 自動成為 approved answer。 | loader 可用後盤點；owner、category、source、exact answer 與 automation boundary 逐題 review 後才可 publish。 |
+| CUR-CLOUD-01 | `approved` | 人工已授權 Cloud／worker／alert sink qualification 與部署準備。 | 實際 external deployment 前須解析隔離 project、NAS DB、operator、預算、故障注入與 rollback；不得落到 production／`union_db` 猜測 target。 |
+| CUR-RETIRE-01 | `approved` | 人工已授權 caller／replacement／regression、retirement plan 與 cutover rehearsal。 | 實際 production entry switch 或不可逆 retirement 前仍須 exact target、rollback、maintenance window 與 readback gate。 |
 
 ## 5. 已完成／superseded，不得重複測試或重建資料
 
 | ID | 狀態 | Current completion fact | 正式來源 |
 |---|---|---|---|
+| CUR-DATA-CENTER-01 | `completed` | canonical 側欄已收斂為「資料中心」，既有 NAS 高保真前端、工作簿匯入與原 Data Browser 組成三分頁；`data-browser`／`databrowser` 相容入口、back／forward 與 canonical active 投影均由 Chrome 實驗通過。訂單與客戶來源各載入 25 筆真 Query，無指定錯誤標記。focused 5 files／30 tests、修正後 route regression 3 files／22 tests、TypeScript／build passed；NAS 操作明示為本機預覽，真 storage capability 仍由 `CUR-FILE-NAS-01` 阻塞。 | `19` §5、NAS 正式規範 §6／§8 |
+| CUR-LINE-AI-LOCAL-01 | `completed` | AI 事件工作室保留規則編輯、滿意度調查、nullable 指標槽位與人工 fallback；focused Vitest 3 passed，Chrome 實點「未解決」後明示正式流程應轉人工、客服待辦尚未接通且不假造工單。正式 feedback 仍由 `CUR-LINE-AI-FEEDBACK-01` 維持 blocked。 | `15` §17、`20` §6 |
+| CUR-LINE-RICHMENU-LOCAL-PREVIEW-01 | `completed` | 手機預覽以 current server draft＋browser-memory edits 即時重繪；Chrome 已實點 URI、message、postback、rich menu switch 與 unknown target，皆只顯示 typed candidate，不開網址、不送訊息。取消後回復 persisted v5，FastAPI 僅見初始 GET、沒有 Preview／Apply／provider request。 | `17` §3.5、`20` §6 |
 | DONE-LIFECYCLE-11 | `completed` | fresh 案件 `115000152` 已由 Chrome 完成 HCM 匯入至 11 步、三個結清投影全部 completed；不包含真實 LINE provider delivery。 | `15` §15 |
 | DONE-STAFF-CALENDAR | `completed` | Staff `#531` 已完成不可服務期間 Preview／Apply、Matching 排除、Calendar 顯示、取消與恢復。 | `15` §15、`24` §7 |
 | DONE-FINANCE-NORMAL | `completed` | 正常 ready-dispatch 已完成 Upload → Preview → Apply → terminal receipt，核銷成功且 pending 為零。 | `15` §15、`22` §13.4 |
@@ -79,6 +97,8 @@ target 或 provider 授權阻塞時，只跳過該步並繼續下一個已核准
 | CUR-ORDERS-LIST-01 | `completed` | 訂單管理與代辦看板共用同一 94 筆未完成集合；完成訂單 0 筆、無人工下一頁，continuation 去重與 partial failure focused tests 通過。 | `01` §3.1.3 |
 | CUR-LINE-LIFF-ENTRY-DRIFT-01 | `completed` | LIFF 工作室 8 個入口已依 canonical route 對齊並由 Chrome 實點；gateway／bind／identity 共用正式身分 shell，profile_update 明確保留待建狀態且不導向假頁面。 | `20` §6；profile 正式功能仍由 `CUR-LIFF-PROFILE-01` 列管 |
 | CUR-LINE-LIFF-CARDS-UI-01 | `completed` | LIFF 中央手機模擬器在桌面與窄容器均維持 360px 正常寬度；窄容器改為工作區內局部捲動，不再壓扁手機。黃色盤點說明不存在，8 個 LIFF、4 個 Flex 均保留；68 項 focused tests、build 與 Chrome 通過。 | `20` §6 |
+| CUR-LINE-FLEX-01 | `completed` | 四張原始 Flex 卡已依 Eraser M1～M4 對應 current owner 並收斂 closed typed presentation contract；focused Vitest 2 passed、TypeScript passed。Chrome fresh reload 後逐卡實點，均顯示去敏文案、owner-fact blocker 與零假發送邊界，無 application error／warn。真實 projection／postback／delivery／provider 與原圖缺失需求依 26 留到 96 後，不屬本項完成範圍。 | `20` §6.2、`26` |
+| CUR-LINE-SURFACE-QA-01 | `completed` | FastAPI current route 載入後，Chrome 實點三方群組顯示合法零筆狀態；發送明細關閉後晚到結果未重開 Drawer；Rich Menu 顯示 typed geometry 與 active snapshot blocker，且取消 action 不清除外觀 candidate。React 3 files／20 tests、Python 4 tests、TypeScript passed。測試 DB 零群組，群組／事件正向翻頁 `not_run`，由 focused numbered tests 覆蓋且未偽造 owner root fact。 | `20` §6 |
 | CUR-DATA-01 | `completed` | 客戶資料顯示 6 個已採納 typed facts，月嫂名冊顯示 7 類服務能力；Chrome 已驗證非空與合法空值，缺值明示「尚未登錄」，無 raw survey／來源 metadata。48 項 focused tests 與 build 通過。 | `17` Case Import、`24` §3.3 |
 | DONE-STAFF-RUNTIME | `completed` | Staff 三分頁 identity binding、合法空資料與 Availability runtime 已驗收。 | `15` §15 |
 | DONE-OPERATIONS-REPORTS | `completed` | Operations 六頁與週報三分頁 runtime accepted，既有季度／年度報表 regression 通過。 | `15` §§15、15.1 |
@@ -88,6 +108,10 @@ target 或 provider 授權阻塞時，只跳過該步並繼續下一個已核准
 | CUR-LINE-01 | `superseded` | 過大 umbrella 已拆為 `CUR-LINE-SURFACE-QA-01`、`CUR-LINE-04` 與 Rich Menu exact tasks；已完成 Identity／LIFF entry／卡片 UI 不重開。 | `15` §17、`20` §6 |
 | CUR-LINE-02 | `superseded` | 已拆為可執行的 `CUR-LINE-AI-LOCAL-01` 與契約 blocker `CUR-LINE-AI-FEEDBACK-01`，避免本機預覽被誤判成正式回饋完成。 | `15` §17、`20` §6 |
 | CUR-LINE-03 | `superseded` | 已拆為 `CUR-LIFF-PROFILE-01`、`CUR-LINE-FLEX-01`、`CUR-LINE-BABYLOG-01`；三條 lane 的 owner、依賴與完成條件不再共用一個狀態。 | `20` §§5.4、6、6.1；`23` |
+| CUR-LINE-BABYLOG-01 | `superseded` | 已拆為可施工的 `CUR-LINE-BABYLOG-TEXT-01` 與受 NAS 阻塞的 `CUR-LINE-BABYLOG-MEDIA-01`；純文字完成不得冒充媒體完成。 | `20` §5.4 |
+| CUR-LINE-04 | `completed` | Delivery、Mobile Admin customer/review、Identity review 與 Rich Menu publication history 已使用 server numbered pagination、range/total、末頁鎖定與 stale guard。Fresh Rich Menu React `2 files / 19 tests`、Python route `12 passed`；26 筆 fixture 覆蓋第 1→2 頁。Chrome 合法空歷程 passed；零發布／零 pending review 的正向翻頁 `not_run`，未假造資料。Mobile verified Chrome 續由 `CUR-LIFF-E2E` 列管。 | `17` §§3.2、3.5；`20` §6；`15` §17 |
+| CUR-LINE-RICHMENU-ACTION-01 | `completed` | 專用 typed draft Query／Preview／Apply／receipt/readback 與四種 closed action 已完成；server 以 exact revision 投影 `editable／processing／published`，唯讀版本不掛載 mutation controls，缺失或漂移固定 fail closed。Python focused 52、React 33、TypeScript 與 focused oxlint passed；fresh 唯讀 Chrome 因無合法 fixture 且需重新登入為 `not_run`，未假發布。 | `17` §3.5、`20` §6 |
+| CUR-LINE-BABYLOG-TEXT-01 | `completed` | `requires_cooking=false` 的純文字寶寶日誌已完成 verified staff Query → zero-write Preview → 確認 → fresh-lock Apply → receipt／owner readback；true／unknown 顯示明確 blocker，無 media input，legacy direct POST 回 410。terminal replay 先回既有 receipt，outcome-unknown UI 禁止盲目重送。focused 53 passed、LIFF JavaScript syntax passed；verified-token Chrome 由 `CUR-LIFF-E2E` 列管為 `not_run`，照片／附件仍由 `CUR-LINE-BABYLOG-MEDIA-01` 阻塞。 | `20` §5.4 |
 
 ## 6. 維護與停止條件
 
@@ -99,3 +123,6 @@ target 或 provider 授權阻塞時，只跳過該步並繼續下一個已核准
   必要完成摘要，不保存日常 logs、完整 receipt 或 evidence。
 - 前端驗收使用 Chrome 實點 UI；除 provider lane 外不得以 API mutation 取代 UI。所有結果只使用
   `passed | failed | blocked | not_run`，且不得用舊測試、單一 HTTP 或子代理摘要宣稱整體完成。
+- Eraser M1～M4 與四模組總覽已由
+  `26_LINE四大模組Eraser流程圖轉錄與驗收基線.md` 保存為後續逐節點驗收基線。原圖尚未承接的
+  需求固定為 `deferred-after-96`；不新增本表 current 工作、不中斷 96 收斂，也不得重開本表已完成項目。

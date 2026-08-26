@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
 File: staff_schedule.html
-Description: 提供月嫂查班、請假待辦與正式服務日日誌及餐食照片提交。
+Description: 提供月嫂查班、請假待辦，以及尚未接通的服務日誌與餐食照片說明。
 -->
 <html lang="zh-Hant-TW">
 <head>
@@ -14,8 +14,10 @@ Description: 提供月嫂查班、請假待辦與正式服務日日誌及餐食�
     main { max-width: 760px; margin: 0 auto; padding: 24px 16px 44px; }
     h1 { margin: 0 0 8px; font-size: 28px; }
     p { color: #71717a; line-height: 1.6; }
-    .primary { border: 0; border-radius: 6px; padding: 13px 12px; font-size: 16px; font-weight: 700; color: #fff; background: #be123c; }
-    .primary:disabled { cursor: wait; opacity: .6; }
+    button { border: 0; border-radius: 6px; padding: 13px 12px; font-size: 16px; font-weight: 700; }
+    .primary { color: #fff; background: #be123c; }
+    .secondary { margin-top: 10px; color: #9f1239; background: #ffe4e6; }
+    button:disabled { cursor: not-allowed; opacity: .6; }
     .panel { background: #fff; border: 1px solid #fecdd3; border-radius: 8px; padding: 16px; margin-top: 14px; }
     .toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
     .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -35,6 +37,9 @@ Description: 提供月嫂查班、請假待辦與正式服務日日誌及餐食�
     .date { font-weight: 700; margin-bottom: 4px; }
     .work { background: #ffe4e6; }
     .rest { background: #dcfce7; }
+    .waiting { background: #fef3c7; }
+    .unavailable { background: #ede9fe; }
+    .historical { background: #e0f2fe; }
     .available { background: #fff; color: #71717a; }
     .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; font-size: 14px; color: #52525b; }
     .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
@@ -58,20 +63,62 @@ Description: 提供月嫂查班、請假待辦與正式服務日日誌及餐食�
     <div id="calendarStatus" class="message" style="display:none;"></div>
     <div class="legend">
       <span><i class="dot" style="background:#ffe4e6"></i>服務日</span>
-      <span><i class="dot" style="background:#dcfce7"></i>休息/請假</span>
-      <span><i class="dot" style="background:#fff;border:1px solid #d4d4d8"></i>未排班</span>
+      <span><i class="dot" style="background:#fef3c7"></i>已鎖定／待成立</span>
+      <span><i class="dot" style="background:#ede9fe"></i>正式不可服務</span>
+      <span><i class="dot" style="background:#dcfce7"></i>休息日</span>
+      <span><i class="dot" style="background:#fff;border:1px solid #d4d4d8"></i>可排班</span>
     </div>
     <div id="calendar" class="calendar"></div>
+    <button id="reauthenticate" class="secondary" type="button" hidden>重新登入 LINE</button>
   </section>
 
   <section class="panel" aria-labelledby="leaveTitle">
     <h2 id="leaveTitle" class="section-title">提交請假待辦</h2>
-    <p>線上請假與代班待辦目前尚缺 Preview／Apply／receipt 安全契約；請聯絡工會人員人工處理。</p>
+    <p>送出後只會建立等待工會處理的待辦，不會直接變更正式班表。</p>
+    <div class="form-grid">
+      <div class="field">
+        <label for="leaveStart">開始日期</label>
+        <input id="leaveStart" type="date">
+      </div>
+      <div class="field">
+        <label for="leaveEnd">結束日期</label>
+        <input id="leaveEnd" type="date">
+      </div>
+      <div class="field full">
+        <label for="leaveReason">說明</label>
+        <textarea id="leaveReason" maxlength="1000" placeholder="請簡要說明不可服務原因"></textarea>
+      </div>
+    </div>
+    <button id="submitLeave" class="primary" type="button" disabled>預覽請假待辦</button>
+    <div id="leavePreview" class="message" hidden></div>
+    <label id="confirmLeaveLabel" class="field" hidden>
+      <input id="confirmLeave" type="checkbox" disabled>
+      我已確認上述期間與說明，並要送出請假待辦。
+    </label>
+    <button id="applyLeave" class="primary" type="button" disabled>確認送出</button>
+    <div id="leaveStatus" class="message" hidden></div>
   </section>
 
   <section class="panel" aria-labelledby="logTitle">
     <h2 id="logTitle" class="section-title">提交寶寶日誌</h2>
-    <p>日誌與餐食照片上傳尚缺 Preview／Apply／receipt 安全契約；請聯絡工會人員人工處理。</p>
+    <p id="selectedServiceDay">請先在上方班表點選一個正式服務日。</p>
+    <div class="field">
+      <label for="babyLog">寶寶日誌</label>
+      <textarea id="babyLog" maxlength="5000" placeholder="選擇服務日後填寫" disabled></textarea>
+    </div>
+    <div class="field">
+      <label for="mealPhoto">餐食照片</label>
+      <input id="mealPhoto" type="file" accept="image/jpeg,image/png,image/webp" disabled>
+      <p>照片功能等待受控檔案儲存區完成；需要餐食照片的案件目前不能送出日誌。</p>
+    </div>
+    <button id="previewLog" class="primary" type="button" disabled>預覽寶寶日誌</button>
+    <div id="logPreview" class="message" hidden></div>
+    <label id="confirmLogLabel" class="field" hidden>
+      <input id="confirmLog" type="checkbox" disabled>
+      我已核對服務日與日誌內容，並要正式送出。
+    </label>
+    <button id="applyLog" class="primary" type="button" disabled>確認送出日誌</button>
+    <div id="logStatus" class="message" hidden></div>
   </section>
 
 </main>
@@ -79,43 +126,36 @@ Description: 提供月嫂查班、請假待辦與正式服務日日誌及餐食�
 <script>
 let lineIdToken = "";
 let flowId = "";
-let developmentLineUserId = "";
-let loadedServiceDays = [];
+let identityReady = false;
+let leaveCandidate = null;
+let selectedServiceDay = null;
+let logCandidate = null;
 
 async function captureLineIdentity() {
   try { lineIdToken = liff.getIDToken() || ""; } catch (_) {}
+  identityReady = Boolean(lineIdToken);
 }
 
 function show(id, text, isError = false) {
   const box = document.getElementById(id);
   box.textContent = text;
   box.className = "message" + (isError ? " error" : "");
+  box.hidden = false;
   box.style.display = "block";
+}
+
+function hide(id) {
+  const box = document.getElementById(id);
+  box.hidden = true;
+  box.style.display = "none";
 }
 
 function identityPayload() {
   return {
     flow_id: lineIdToken ? "" : flowId,
     line_id_token: lineIdToken,
-    development_line_user_id: lineIdToken ? "" : developmentLineUserId,
+    development_line_user_id: "",
   };
-}
-
-const actionKeys = new Map();
-
-function idempotencyKeyFor(kind, fingerprint) {
-  const current = actionKeys.get(kind);
-  if (current?.fingerprint === fingerprint) return current.key;
-  const nonce = globalThis.crypto?.randomUUID
-    ? globalThis.crypto.randomUUID()
-    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  const key = `staff-liff:${kind}:${nonce}`;
-  actionKeys.set(kind, { fingerprint, key });
-  return key;
-}
-
-function clearIdempotencyKey(kind) {
-  actionKeys.delete(kind);
 }
 
 async function responseData(response) {
@@ -123,11 +163,81 @@ async function responseData(response) {
 }
 
 function responseMessage(data, fallback) {
-  return data.message || data.detail?.message || data.detail?.error?.message || fallback;
+  return data.message || data.detail?.message || data.detail?.error?.message || data.error?.message || fallback;
+}
+
+function responseErrorCode(data) {
+  return data.detail?.error?.code || data.detail?.code || data.error?.code || "";
+}
+
+function showReauthenticationFor(data) {
+  document.getElementById("reauthenticate").hidden = !responseErrorCode(data).startsWith("liff_");
+}
+
+function reauthenticateLine() {
+  try { liff.logout(); } catch (_) {}
+  const redirect = new URL("/line-identity", location.origin);
+  redirect.searchParams.set("target", "staff_schedule");
+  liff.login({redirectUri: redirect.toString()});
+}
+
+const scheduleStatuses = new Set([
+  "available", "working", "resting", "historical_assignment",
+  "waiting_deposit_lock", "staff_unavailability",
+]);
+
+function requireScheduleDay(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("班表日期格式錯誤");
+  if (typeof value.work_date !== "string" || !scheduleStatuses.has(value.status)) {
+    throw new Error("班表日期缺少必要狀態");
+  }
+  return value;
+}
+
+function requireStaffSchedule(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("班表格式錯誤");
+  if (!Number.isInteger(value.staff_id) || typeof value.staff_name !== "string" ||
+      !Number.isInteger(value.year) || !Number.isInteger(value.month) || !Array.isArray(value.days)) {
+    throw new Error("班表缺少必要欄位");
+  }
+  return {...value, days: value.days.map(requireScheduleDay)};
+}
+
+function appendCalendarCell(root, className, text = "") {
+  const cell = document.createElement("div");
+  cell.className = className;
+  cell.textContent = text;
+  root.appendChild(cell);
+  return cell;
+}
+
+function dayPresentation(items) {
+  const item = items.find(value => value.status === "staff_unavailability")
+    || items.find(value => value.status === "working")
+    || items.find(value => value.status === "waiting_deposit_lock")
+    || items.find(value => value.status === "historical_assignment")
+    || items.find(value => value.status === "resting")
+    || items[0];
+  if (!item || item.status === "available") return {className: "available", text: "可排班"};
+  if (item.status === "working") {
+    const subject = item.client_name || item.case_no || "服務案件";
+    return {className: "work", text: `服務日｜${subject}`};
+  }
+  if (item.status === "waiting_deposit_lock") return {className: "waiting", text: "已鎖定／待成立"};
+  if (item.status === "staff_unavailability") {
+    return {className: "unavailable", text: item.unavailability_reason || "正式不可服務"};
+  }
+  if (item.status === "historical_assignment") return {className: "historical", text: "歷史指派"};
+  return {className: "rest", text: "休息日"};
 }
 
 function renderCalendar(schedule) {
   const root = document.getElementById("calendar");
+  selectedServiceDay = null;
+  document.getElementById("selectedServiceDay").textContent = "請先在上方班表點選一個正式服務日。";
+  document.getElementById("babyLog").disabled = true;
+  document.getElementById("previewLog").disabled = true;
+  invalidateLogPreview();
   const year = schedule.year;
   const month = schedule.month;
   const first = new Date(year, month - 1, 1);
@@ -139,56 +249,34 @@ function renderCalendar(schedule) {
     if (!byDay[day]) byDay[day] = [];
     byDay[day].push(item);
   }
-  root.innerHTML = weekNames.map(name => `<div class="head">${name}</div>`).join("");
-  for (let i = 0; i < first.getDay(); i++) root.insertAdjacentHTML("beforeend", `<div class="day available"></div>`);
+  root.replaceChildren();
+  weekNames.forEach(name => appendCalendarCell(root, "head", name));
+  for (let i = 0; i < first.getDay(); i++) appendCalendarCell(root, "day available");
   for (let day = 1; day <= lastDay; day++) {
     const items = byDay[day] || [];
-    const workItems = items.filter(item => item.status === "working");
-    const restItems = items.filter(item => item.status === "resting");
-    const css = workItems.length ? "work" : (restItems.length ? "rest" : "available");
-    const text = workItems.length
-      ? workItems.map(item => `${item.client_name || "服務案件"} ${item.case_no || ""}`).join("<br>")
-      : (restItems.length ? "休息/請假" : "未排班");
-    root.insertAdjacentHTML("beforeend", `<div class="day ${css}"><div class="date">${day}</div><div>${text}</div></div>`);
-  }
-}
-
-function updateServiceDayOptions(schedule) {
-  const select = document.getElementById("serviceDaySelect");
-  const uniqueDays = new Map();
-  for (const item of schedule.days || []) {
-    if (item.is_work_day === true && Number(item.assignment_id) > 0) {
-      const key = `${item.assignment_id}:${item.work_date}`;
-      uniqueDays.set(key, {
-        assignment_id: item.assignment_id,
-        service_date: item.work_date,
-        case_no: item.case_no || "未提供案件編號",
-        client_name: item.client_name || "服務案件",
+    const presentation = dayPresentation(items);
+    const cell = appendCalendarCell(root, `day ${presentation.className}`);
+    appendCalendarCell(cell, "date", String(day));
+    appendCalendarCell(cell, "", presentation.text);
+    const serviceDay = items.find(item => item.status === "working" && item.is_work_day === true && Number.isInteger(item.assignment_id));
+    if (serviceDay) {
+      cell.tabIndex = 0;
+      cell.setAttribute("role", "button");
+      cell.setAttribute("aria-label", `選擇 ${serviceDay.work_date} 提交寶寶日誌`);
+      cell.addEventListener("click", () => selectServiceDay(serviceDay));
+      cell.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") selectServiceDay(serviceDay);
       });
     }
   }
-  loadedServiceDays = Array.from(uniqueDays.values()).sort((left, right) =>
-    String(left.service_date).localeCompare(String(right.service_date))
-  );
-  select.replaceChildren();
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = loadedServiceDays.length
-    ? "請選擇正式服務日"
-    : "此月份沒有可提交日誌的正式服務日";
-  select.appendChild(placeholder);
-  loadedServiceDays.forEach((item, index) => {
-    const option = document.createElement("option");
-    option.value = String(index);
-    option.textContent = `${item.service_date}｜${item.case_no}｜${item.client_name}`;
-    select.appendChild(option);
-  });
-  select.disabled = loadedServiceDays.length === 0;
 }
 
-function selectedServiceDay() {
-  const value = document.getElementById("serviceDaySelect").value;
-  return value === "" ? null : loadedServiceDays[Number(value)] || null;
+function selectServiceDay(day) {
+  selectedServiceDay = {assignmentId: day.assignment_id, serviceDate: day.work_date, caseNo: day.case_no || ""};
+  document.getElementById("selectedServiceDay").textContent = `已選擇 ${day.work_date}${day.case_no ? `｜案件 ${day.case_no}` : ""}`;
+  document.getElementById("babyLog").disabled = false;
+  document.getElementById("previewLog").disabled = false;
+  invalidateLogPreview();
 }
 
 async function loadSchedule() {
@@ -203,7 +291,6 @@ async function loadSchedule() {
   button.disabled = true;
   monthInput.disabled = true;
   show("calendarStatus", "班表查詢中...");
-  updateServiceDayOptions({ days: [] });
   try {
     const response = await fetch(`/api/v1/line/staff-self-service/schedule?year=${year}&month=${month}`, {
       method: "POST",
@@ -212,19 +299,259 @@ async function loadSchedule() {
     });
     const data = await responseData(response);
     if (!response.ok || data.success === false || !data.data) {
-      updateServiceDayOptions({ days: [] });
+      document.getElementById("calendar").replaceChildren();
       show("calendarStatus", responseMessage(data, "查詢失敗"), true);
+      showReauthenticationFor(data);
       return;
     }
-    show("calendarStatus", `${data.data.staff_name} 的 ${year} 年 ${month} 月排班`);
-    renderCalendar(data.data);
-    updateServiceDayOptions(data.data);
+    const schedule = requireStaffSchedule(data.data);
+    show("calendarStatus", `${schedule.staff_name} 的 ${year} 年 ${month} 月排班`);
+    renderCalendar(schedule);
   } catch (_) {
-    updateServiceDayOptions({ days: [] });
-    show("calendarStatus", "無法連線到班表服務，請稍後重試。", true);
+    document.getElementById("calendar").replaceChildren();
+    show("calendarStatus", "班表無法載入或資料格式不正確，請稍後重試；持續發生時請聯絡工會人員。", true);
   } finally {
-    button.disabled = false;
+    button.disabled = !identityReady && !flowId;
     monthInput.disabled = false;
+  }
+}
+
+function requireLeavePreview(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      typeof value.staff_name !== "string" || typeof value.leave_start_date !== "string" ||
+      typeof value.leave_end_date !== "string" || typeof value.leave_reason !== "string" ||
+      typeof value.can_apply !== "boolean" || !Array.isArray(value.blockers) ||
+      !/^[0-9a-f]{64}$/.test(value.preview_fingerprint)) {
+    throw new Error("請假預覽格式錯誤");
+  }
+  return value;
+}
+
+function requireLeaveReadback(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !Number.isInteger(value.request_id) || typeof value.status !== "string" ||
+      typeof value.staff_name !== "string" || typeof value.leave_start_date !== "string" ||
+      typeof value.leave_end_date !== "string" || typeof value.leave_reason !== "string") {
+    throw new Error("請假待辦回讀格式錯誤");
+  }
+  return value;
+}
+
+function leaveStatusLabel(status) {
+  return ({pending: "等待工會處理", accepted: "已受理處理", rejected: "已拒絕", cancelled: "已取消", resolved: "已完成處理"})[status]
+    || "狀態待工會確認";
+}
+
+function invalidateLeavePreview() {
+  const hadCandidate = Boolean(leaveCandidate);
+  leaveCandidate = null;
+  hide("leavePreview");
+  document.getElementById("confirmLeaveLabel").hidden = true;
+  document.getElementById("confirmLeave").checked = false;
+  document.getElementById("confirmLeave").disabled = true;
+  document.getElementById("applyLeave").disabled = true;
+  if (hadCandidate) show("leaveStatus", "內容已變更，請重新預覽後再確認送出。");
+}
+
+async function submitLeave() {
+  const start = document.getElementById("leaveStart").value;
+  const end = document.getElementById("leaveEnd").value;
+  const reason = document.getElementById("leaveReason").value.trim();
+  if (!start || !end || start > end) {
+    show("leaveStatus", "請確認開始與結束日期，結束日期不可早於開始日期。", true);
+    return;
+  }
+  const button = document.getElementById("submitLeave");
+  button.disabled = true;
+  show("leaveStatus", "正在準備請假待辦預覽...");
+  invalidateLeavePreview();
+  try {
+    const response = await fetch("/api/v1/line/staff-self-service/leave-requests/preview", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({...identityPayload(), leave_start_date: start, leave_end_date: end, leave_reason: reason}),
+    });
+    const result = await responseData(response);
+    if (!response.ok || result.success === false || !result.data) {
+      show("leaveStatus", responseMessage(result, "請假待辦預覽失敗，請稍後重試。"), true);
+      showReauthenticationFor(result);
+      return;
+    }
+    const preview = requireLeavePreview(result.data);
+    leaveCandidate = {
+      start, end, reason,
+      previewFingerprint: preview.preview_fingerprint,
+      idempotencyKey: `staff-leave-${crypto.randomUUID()}`,
+    };
+    const blockerText = preview.blockers.length ? "目前有業務條件尚待工會確認。" : "目前可以送出待辦。";
+    show("leavePreview", `${preview.staff_name}｜${preview.leave_start_date} 至 ${preview.leave_end_date}｜${preview.leave_reason || "未填寫說明"}。${blockerText}`);
+    document.getElementById("confirmLeaveLabel").hidden = false;
+    document.getElementById("confirmLeave").disabled = !preview.can_apply;
+    show("leaveStatus", preview.can_apply ? "請核對預覽內容並勾選確認。" : "目前無法送出，請聯絡工會人員確認。", !preview.can_apply);
+  } catch (_) {
+    show("leaveStatus", "無法載入請假預覽，請稍後重試。", true);
+  } finally {
+    button.disabled = !identityReady && !flowId;
+  }
+}
+
+async function applyLeave() {
+  if (!leaveCandidate || !document.getElementById("confirmLeave").checked) {
+    show("leaveStatus", "請先預覽並勾選確認。", true);
+    return;
+  }
+  const candidate = leaveCandidate;
+  const button = document.getElementById("applyLeave");
+  let applyCommitted = false;
+  button.disabled = true;
+  show("leaveStatus", "正在送出請假待辦...");
+  try {
+    const response = await fetch("/api/v1/line/staff-self-service/leave-requests/apply", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "Idempotency-Key": candidate.idempotencyKey},
+      body: JSON.stringify({...identityPayload(), leave_start_date: candidate.start, leave_end_date: candidate.end,
+        leave_reason: candidate.reason, preview_fingerprint: candidate.previewFingerprint}),
+    });
+    const result = await responseData(response);
+    if (!response.ok || result.success === false || !result.data) {
+      show("leaveStatus", responseMessage(result, "請假待辦送出失敗，請保留畫面並聯絡工會人員。"), true);
+      showReauthenticationFor(result);
+      button.disabled = false;
+      return;
+    }
+    requireLeaveReadback(result.data);
+    applyCommitted = true;
+    leaveCandidate = null;
+    document.getElementById("confirmLeave").disabled = true;
+    const readbackResponse = await fetch(`/api/v1/line/staff-self-service/leave-requests/${result.data.request_id}/query`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(identityPayload()),
+    });
+    const readbackResult = await responseData(readbackResponse);
+    if (!readbackResponse.ok || readbackResult.success === false || !readbackResult.data) {
+      show("leaveStatus", "待辦已送出，但目前無法重新讀取結果。請勿重複送出，並聯絡工會人員查核。", true);
+      return;
+    }
+    const readback = requireLeaveReadback(readbackResult.data);
+    show("leaveStatus", `待辦 #${readback.request_id} 已送出：${readback.leave_start_date} 至 ${readback.leave_end_date}，${leaveStatusLabel(readback.status)}。`);
+  } catch (_) {
+    leaveCandidate = null;
+    show("leaveStatus", applyCommitted
+      ? "待辦已送出，但目前無法重新讀取結果。請勿重複送出，並聯絡工會人員查核。"
+      : "送出結果尚未確認。請勿重複送出，並聯絡工會人員查核。", true);
+  }
+}
+
+function requireLogPreview(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      typeof value.case_no !== "string" || !Number.isInteger(value.assignment_id) ||
+      typeof value.service_date !== "string" || typeof value.baby_log_text !== "string" ||
+      ![true, false, null].includes(value.requires_cooking) || typeof value.can_apply !== "boolean" ||
+      !Array.isArray(value.blockers) || !/^[0-9a-f]{64}$/.test(value.preview_fingerprint)) {
+    throw new Error("寶寶日誌預覽格式錯誤");
+  }
+  return value;
+}
+
+function requireLogReadback(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !Number.isInteger(value.log_id) || typeof value.case_no !== "string" ||
+      !Number.isInteger(value.assignment_id) || typeof value.service_date !== "string" ||
+      typeof value.baby_log_text !== "string" || typeof value.requires_cooking !== "boolean" ||
+      !new Set(["created", "existing"]).has(value.outcome)) throw new Error("寶寶日誌回讀格式錯誤");
+  return value;
+}
+
+function invalidateLogPreview() {
+  const hadCandidate = Boolean(logCandidate);
+  logCandidate = null;
+  hide("logPreview");
+  document.getElementById("confirmLogLabel").hidden = true;
+  document.getElementById("confirmLog").checked = false;
+  document.getElementById("confirmLog").disabled = true;
+  document.getElementById("applyLog").disabled = true;
+  if (hadCandidate) show("logStatus", "內容已變更，請重新預覽後再確認送出。");
+}
+
+function logBlockerMessage(blockers) {
+  if (blockers.includes("service_day_log_meal_photo_required")) return "此案件需要餐食照片；照片功能等待受控檔案儲存區完成，目前請聯絡工會人員處理。";
+  if (blockers.includes("service_day_log_cooking_requirement_unresolved")) return "此案件的下廚需求尚未確定，請先由工會人員補齊訂單資料。";
+  return "目前無法送出，請聯絡工會人員確認。";
+}
+
+async function previewServiceDayLog() {
+  const text = document.getElementById("babyLog").value.trim();
+  if (!selectedServiceDay || !text) {
+    show("logStatus", "請先選擇正式服務日並填寫寶寶日誌。", true);
+    return;
+  }
+  const button = document.getElementById("previewLog");
+  button.disabled = true;
+  invalidateLogPreview();
+  show("logStatus", "正在準備寶寶日誌預覽...");
+  try {
+    const response = await fetch("/api/v1/line/staff-self-service/service-day-logs/preview", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({...identityPayload(), assignment_id: selectedServiceDay.assignmentId, service_date: selectedServiceDay.serviceDate, baby_log_text: text}),
+    });
+    const result = await responseData(response);
+    if (!response.ok || result.success === false || !result.data) {
+      show("logStatus", responseMessage(result, "寶寶日誌預覽失敗，請稍後重試。"), true);
+      showReauthenticationFor(result);
+      return;
+    }
+    const preview = requireLogPreview(result.data);
+    logCandidate = {assignmentId: preview.assignment_id, serviceDate: preview.service_date, text: preview.baby_log_text, previewFingerprint: preview.preview_fingerprint, idempotencyKey: `service-day-log-${crypto.randomUUID()}`};
+    show("logPreview", `${preview.service_date}｜案件 ${preview.case_no}｜${preview.baby_log_text}`);
+    document.getElementById("confirmLogLabel").hidden = false;
+    document.getElementById("confirmLog").disabled = !preview.can_apply;
+    show("logStatus", preview.can_apply ? "請核對預覽內容並勾選確認。" : logBlockerMessage(preview.blockers), !preview.can_apply);
+  } catch (_) {
+    show("logStatus", "無法載入寶寶日誌預覽，請稍後重試。", true);
+  } finally {
+    button.disabled = !selectedServiceDay;
+  }
+}
+
+async function applyServiceDayLog() {
+  if (!logCandidate || !document.getElementById("confirmLog").checked) {
+    show("logStatus", "請先預覽並勾選確認。", true);
+    return;
+  }
+  const candidate = logCandidate;
+  const button = document.getElementById("applyLog");
+  let applyCommitted = false;
+  button.disabled = true;
+  show("logStatus", "正在送出寶寶日誌...");
+  try {
+    const response = await fetch("/api/v1/line/staff-self-service/service-day-logs/apply", {
+      method: "POST", headers: {"Content-Type": "application/json", "Idempotency-Key": candidate.idempotencyKey},
+      body: JSON.stringify({...identityPayload(), assignment_id: candidate.assignmentId, service_date: candidate.serviceDate, baby_log_text: candidate.text, preview_fingerprint: candidate.previewFingerprint}),
+    });
+    const result = await responseData(response);
+    if (!response.ok || result.success === false || !result.data?.receipt || !result.data?.readback) {
+      logCandidate = null;
+      const unknown = responseErrorCode(result) === "service_day_log_apply_outcome_unknown";
+      show("logStatus", unknown ? "送出結果尚未確認。請勿重複送出，並聯絡工會人員查核。" : responseMessage(result, "寶寶日誌送出失敗；請重新預覽後再操作。"), true);
+      showReauthenticationFor(result);
+      return;
+    }
+    const committed = requireLogReadback(result.data.readback);
+    applyCommitted = true;
+    logCandidate = null;
+    document.getElementById("confirmLog").disabled = true;
+    const readbackResponse = await fetch(`/api/v1/line/staff-self-service/service-day-logs/${committed.log_id}/query`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(identityPayload())});
+    const readbackResult = await responseData(readbackResponse);
+    if (!readbackResponse.ok || readbackResult.success === false || !readbackResult.data) {
+      show("logStatus", "日誌已送出，但目前無法重新讀取結果。請勿重複送出，並聯絡工會人員查核。", true);
+      return;
+    }
+    const readback = requireLogReadback(readbackResult.data);
+    show("logStatus", `寶寶日誌 #${readback.log_id} 已送出：${readback.service_date}｜案件 ${readback.case_no}。`);
+  } catch (_) {
+    logCandidate = null;
+    show("logStatus", applyCommitted ? "日誌已送出，但目前無法重新讀取結果。請勿重複送出，並聯絡工會人員查核。" : "送出結果尚未確認。請勿重複送出，並聯絡工會人員查核。", true);
   }
 }
 
@@ -232,7 +559,6 @@ async function init() {
   const now = new Date();
   document.getElementById("monthInput").value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const params = new URLSearchParams(location.search);
-  developmentLineUserId = params.get("userId") || "";
   flowId = params.get("flow_id") || "";
   try {
     const result = await fetch("/api/v1/line/identity/runtime-config").then(r => r.json());
@@ -240,8 +566,11 @@ async function init() {
     if (config.liff_id) {
       await liff.init({ liffId: config.liff_id });
       if (!liff.isLoggedIn()) {
-        if (!flowId && !developmentLineUserId) {
-          liff.login();
+        if (flowId) identityReady = true;
+        else {
+          const redirect = new URL("/line-identity", location.origin);
+          redirect.searchParams.set("target", "staff_schedule");
+          liff.login({redirectUri: redirect.toString()});
           return;
         }
       } else {
@@ -250,16 +579,36 @@ async function init() {
     }
   } catch (_) {
     show("calendarStatus", "LIFF 初始化失敗，請重新開啟頁面。", true);
+    document.getElementById("reauthenticate").hidden = false;
   }
-  if (!lineIdToken && !flowId && !developmentLineUserId) {
+  if (!lineIdToken && !flowId) {
     show("calendarStatus", "無法取得 LINE 身分，請從 LINE 圖文選單重新開啟。", true);
+    document.getElementById("reauthenticate").hidden = false;
     return;
   }
+  identityReady = true;
   document.getElementById("loadSchedule").disabled = false;
+  document.getElementById("submitLeave").disabled = false;
   loadSchedule();
 }
 
 document.getElementById("loadSchedule").addEventListener("click", loadSchedule);
+document.getElementById("submitLeave").addEventListener("click", submitLeave);
+document.getElementById("applyLeave").addEventListener("click", applyLeave);
+document.getElementById("previewLog").addEventListener("click", previewServiceDayLog);
+document.getElementById("applyLog").addEventListener("click", applyServiceDayLog);
+document.getElementById("babyLog").addEventListener("input", invalidateLogPreview);
+document.getElementById("confirmLog").addEventListener("change", event => {
+  document.getElementById("applyLog").disabled = !logCandidate || !event.currentTarget.checked;
+});
+document.getElementById("confirmLeave").addEventListener("change", event => {
+  document.getElementById("applyLeave").disabled = !leaveCandidate || !event.currentTarget.checked;
+});
+for (const id of ["leaveStart", "leaveEnd", "leaveReason"]) {
+  document.getElementById(id).addEventListener("input", invalidateLeavePreview);
+  document.getElementById(id).addEventListener("change", invalidateLeavePreview);
+}
+document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
 init();
 </script>
 </body>

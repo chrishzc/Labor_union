@@ -32,6 +32,7 @@ from api.schemas.line_identity import (
     CanonicalLineReviewDecisionPreviewRequest,
     CanonicalLineReviewDecisionPreviewResponse,
     CanonicalLineReviewDecisionRequest,
+    CanonicalLineReviewNumberedPageResponse,
     CanonicalLineReviewPageResponse,
     CanonicalLineReviewResponse,
     CanonicalLineReviewSummaryResponse,
@@ -414,6 +415,34 @@ def list_reviews(
         data=CanonicalLineReviewPageResponse(
             items=[_review_response(item) for item in page.items],
             next_cursor=page.next_cursor,
+        )
+    )
+
+
+@review_router.get(
+    "/numbered",
+    response_model=BaseResponse[CanonicalLineReviewNumberedPageResponse],
+    dependencies=[Depends(require_line_identity_reader)],
+)
+def list_reviews_numbered(
+    review_status: LineReviewStatus | None = LineReviewStatus.PENDING,
+    review_type: LineReviewType | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+):
+    query = LineReviewListQuery(
+        statuses=(review_status,) if review_status else (),
+        review_types=(review_type,) if review_type else (),
+        page=page,
+        page_size=page_size,
+    )
+    result = get_line_identity_review_application().list(query)
+    return BaseResponse(
+        data=CanonicalLineReviewNumberedPageResponse(
+            items=[_review_response(item) for item in result.items],
+            page=result.page or page,
+            page_size=result.page_size or page_size,
+            total=result.total or 0,
         )
     )
 

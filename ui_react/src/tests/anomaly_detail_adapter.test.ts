@@ -54,7 +54,7 @@ describe('Anomaly detail adapter', () => {
 
     expect(view.detailTimeline).toEqual([
       {
-        action: 'claim',
+        action: '已進入人工確認',
         actor: 'O***',
         reason: '異常已進入人工確認流程。',
         correlationId: 'anomaly-detail:SYNTH-42',
@@ -63,7 +63,7 @@ describe('Anomaly detail adapter', () => {
         createdAt: '2026-08-22T09:30:00+00:00',
       },
       {
-        action: 'resolve',
+        action: '已記錄處理進度',
         actor: 'S***',
         reason: '人工處理進度已更新；不代表根事實已修正。',
         correlationId: 'anomaly-detail:SYNTH-43',
@@ -74,7 +74,7 @@ describe('Anomaly detail adapter', () => {
     ]);
     expect(view.recoveryTimeline).toEqual([
       {
-        action: 'resolve',
+        action: '已記錄處理進度',
         actor: 'O***',
         reason: '人工處理進度已更新；不代表根事實已修正。',
         correlationId: 'anomaly-recovery:SYNTH-42',

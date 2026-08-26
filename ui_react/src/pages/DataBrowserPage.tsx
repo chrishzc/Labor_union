@@ -1,6 +1,6 @@
 /**
  * File: DataBrowserPage.tsx
- * Description: 六來源原始資料與快照瀏覽器，支援等寬高密度網格、Keyspace Cursor 分頁與 1400px 結構化 JSON 抽屜。
+ * Description: 六來源去敏資料唯讀查詢，支援分頁、搜尋與業務欄位詳情。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import './DataBrowserPage.css';
@@ -23,8 +23,6 @@ type QueryState =
   | { kind: 'loading_more'; rows: DataBrowserRowViewModel[] }
   | { kind: 'page_error'; rows: DataBrowserRowViewModel[]; message: string; failedCursor: string };
 
-type DrawerDetailTab = 'kv' | 'json';
-
 const INITIAL_TAB = DATA_BROWSER_TABS[0];
 
 export const DataBrowserPage: React.FC = () => {
@@ -33,7 +31,6 @@ export const DataBrowserPage: React.FC = () => {
   const [appliedQuery, setAppliedQuery] = useState('');
   const [state, setState] = useState<QueryState>({ kind: 'idle' });
   const [selectedRecord, setSelectedRecord] = useState<DataBrowserRowViewModel | null>(null);
-  const [drawerMode, setDrawerMode] = useState<DrawerDetailTab>('kv');
   const [copyStatus, setCopyStatus] = useState('');
   const generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
@@ -71,9 +68,11 @@ export const DataBrowserPage: React.FC = () => {
       setState(rows.length === 0
         ? { kind: 'empty' }
         : { kind: 'ready', rows, nextCursor: adapted.nextCursor });
-    } catch (error) {
+    } catch {
       if (seq !== generation.current || activeController?.signal.aborted) return;
-      const message = error instanceof Error ? error.message : '載入資料來源失敗';
+      const message = after === undefined
+        ? '目前無法載入此資料來源，請稍後重試。'
+        : '下一頁資料暫時無法載入，請重試。';
       if (after !== undefined) seenCursors.current.delete(after);
       setState(existingRows.length > 0 && after !== undefined
         ? { kind: 'page_error', rows: existingRows, message, failedCursor: after }
@@ -126,12 +125,10 @@ export const DataBrowserPage: React.FC = () => {
   const copyMaskedView = async () => {
     if (!selectedRecord) return;
     const payload = {
-      source_id: selectedRecord.sourceId,
-      row_identity: selectedRecord.id,
-      display_title: selectedRecord.title,
-      detail: selectedRecord.detail,
+      data_source: selectedTab.label,
+      title: selectedRecord.title,
+      details: selectedRecord.detail.map((item) => ({ label: item.label, value: item.value })),
       recorded_at: selectedRecord.recordedAt,
-      version_identity: selectedRecord.versionIdentity,
     };
     try {
       await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
@@ -141,64 +138,48 @@ export const DataBrowserPage: React.FC = () => {
     }
   };
 
-  const recordPayload = selectedRecord
-    ? {
-        source_id: selectedRecord.sourceId,
-        row_identity: selectedRecord.id,
-        display_title: selectedRecord.title,
-        detail: selectedRecord.detail.reduce<Record<string, string>>((acc, curr) => {
-          acc[curr.id] = curr.value;
-          return acc;
-        }, {}),
-        recorded_at: selectedRecord.recordedAt,
-        version_identity: selectedRecord.versionIdentity,
-      }
-    : null;
-
   return (
     <div className="databrowser-page" data-surface-id="data-browser.page">
       {/* 頂部 Header Banner */}
       <div className="page-header-banner databrowser-page-header">
         <div className="databrowser-page-header-text">
           <h1 className="page-title databrowser-page-title">
-            🔍 核心資料庫來源與歷程快照瀏覽器
+            🔍 營運資料查詢
           </h1>
           <p className="page-subtitle databrowser-page-subtitle">
-            穿透業務封裝，檢視 6 大資料庫主表原始快照、欄位歷程、等寬資料網格與 SHA-256 存證指紋。
+            依資料來源查詢已去敏的營運資料與更新紀錄。
           </p>
         </div>
         <span className="databrowser-header-badge">
-          ● 0 Polling ｜ Keyspace Cursor Paging ｜ Read-Only Safe
+          ● 唯讀查詢
         </span>
       </div>
 
       {/* 4 大統計與狀態指標卡 (KPI Grid) */}
       <div className="databrowser-kpi-grid">
         <div className="databrowser-kpi-card">
-          <span className="databrowser-kpi-label">當前資料庫來源</span>
+          <span className="databrowser-kpi-label">目前資料來源</span>
           <span className="databrowser-kpi-value" style={{ color: '#ea580c' }}>
-            {selectedTab.sourceId}
+            {selectedTab.label}
           </span>
-          <span className="databrowser-kpi-desc">{selectedTab.label}</span>
+          <span className="databrowser-kpi-desc">已套用去敏顯示規則</span>
         </div>
         <div className="databrowser-kpi-card">
-          <span className="databrowser-kpi-label">目前載入筆數 (Loaded)</span>
+          <span className="databrowser-kpi-label">目前載入筆數</span>
           <span className="databrowser-kpi-value">{rows.length} 筆</span>
-          <span className="databrowser-kpi-desc">單頁上限 25 筆 ｜ Keyspace Cursor</span>
+          <span className="databrowser-kpi-desc">可繼續載入下一頁</span>
         </div>
         <div className="databrowser-kpi-card">
-          <span className="databrowser-kpi-label">首筆記錄時間戳</span>
+          <span className="databrowser-kpi-label">首筆記錄時間</span>
           <span className="databrowser-kpi-value" style={{ fontSize: '1.05rem', color: '#74593f' }}>
             {rows[0]?.recordedAt ?? '—'}
           </span>
-          <span className="databrowser-kpi-desc">資料庫即時快照存檔時間</span>
+          <span className="databrowser-kpi-desc">目前查詢結果中的最早記錄</span>
         </div>
         <div className="databrowser-kpi-card">
-          <span className="databrowser-kpi-label">版本完整性存證</span>
-          <span className="databrowser-kpi-value" style={{ color: '#16a34a', fontSize: '1.15rem' }}>
-            SHA-256 Verified
-          </span>
-          <span className="databrowser-kpi-desc">防重與防篡改指紋驗證</span>
+          <span className="databrowser-kpi-label">操作方式</span>
+          <span className="databrowser-kpi-value" style={{ color: '#16a34a', fontSize: '1.15rem' }}>唯讀查詢</span>
+          <span className="databrowser-kpi-desc">資料修正請前往對應業務頁面</span>
         </div>
       </div>
 
@@ -228,7 +209,7 @@ export const DataBrowserPage: React.FC = () => {
               value={queryInput}
               onChange={(event) => setQueryInput(event.target.value)}
               maxLength={100}
-              placeholder="搜尋核准的主鍵、狀態或遮罩欄位"
+              placeholder="搜尋案件編號、狀態或去敏欄位內容"
             />
             {queryInput && (
               <button
@@ -253,7 +234,7 @@ export const DataBrowserPage: React.FC = () => {
           data-surface-id="data-browser.loaded-count"
           className="databrowser-loaded-badge"
         >
-          目前載入 {rows.length} 筆（loaded scope）
+          目前已載入 {rows.length} 筆
         </div>
       </form>
 
@@ -281,21 +262,16 @@ export const DataBrowserPage: React.FC = () => {
           <table className="databrowser-table">
             <thead>
               <tr>
-                <th style={{ width: '130px' }}>資料識別</th>
                 <th style={{ minWidth: '180px' }}>標題</th>
                 <th style={{ minWidth: '320px' }}>去敏摘要</th>
                 <th style={{ width: '170px' }}>紀錄時間</th>
                 <th style={{ width: '120px' }}>來源操作者</th>
-                <th style={{ width: '140px' }}>版本</th>
                 <th style={{ width: '140px', textAlign: 'right' }}>詳情</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id} data-surface-id={`data-browser.row.${row.sourceId}.${row.id}`}>
-                  <td>
-                    <code className="databrowser-row-id">{row.id}</code>
-                  </td>
                   <td>
                     <strong>{row.title}</strong>
                   </td>
@@ -311,14 +287,6 @@ export const DataBrowserPage: React.FC = () => {
                   </td>
                   <td style={{ color: '#74593f', fontSize: '0.82rem' }}>{row.recordedAt}</td>
                   <td style={{ color: '#57423b' }}>{row.actorLabel}</td>
-                  <td>
-                    <code
-                      className="databrowser-hash-code"
-                      title={`完整 SHA-256：${row.versionIdentity}`}
-                    >
-                      {row.versionIdentity.slice(0, 12)}…
-                    </code>
-                  </td>
                   <td style={{ textAlign: 'right' }}>
                     <button
                       type="button"
@@ -327,7 +295,6 @@ export const DataBrowserPage: React.FC = () => {
                       onClick={() => {
                         setSelectedRecord(row);
                         setCopyStatus('');
-                        setDrawerMode('kv');
                       }}
                     >
                       檢視去敏詳情 ➔
@@ -368,7 +335,7 @@ export const DataBrowserPage: React.FC = () => {
         </div>
       )}
 
-      {/* 1400px 結構化資料與快照檢查抽屜 (Drawer) */}
+      {/* 去敏資料詳情抽屜 */}
       <Drawer
         isOpen={selectedRecord !== null}
         onClose={() => setSelectedRecord(null)}
@@ -416,74 +383,40 @@ export const DataBrowserPage: React.FC = () => {
             data-surface-id="data-browser.drawer"
             className="databrowser-drawer-wrap"
           >
-            {/* 頂部快照元數據卡 */}
+            {/* 頂部記錄摘要 */}
             <div className="databrowser-drawer-meta-banner">
               <div className="databrowser-meta-item">
-                <span className="databrowser-meta-item-label">來源主表 (Source ID)</span>
+                <span className="databrowser-meta-item-label">資料來源</span>
                 <span className="databrowser-meta-item-value" style={{ color: '#ea580c' }}>
-                  {selectedRecord.sourceId}
+                  {selectedTab.label}
                 </span>
               </div>
               <div className="databrowser-meta-item">
-                <span className="databrowser-meta-item-label">資料列識別 (Row Identity)</span>
-                <span className="databrowser-meta-item-value">
-                  {selectedRecord.id}
-                </span>
-              </div>
-              <div className="databrowser-meta-item">
-                <span className="databrowser-meta-item-label">快照存檔時間 (Recorded At)</span>
+                <span className="databrowser-meta-item-label">紀錄時間</span>
                 <span className="databrowser-meta-item-value">
                   {selectedRecord.recordedAt}
                 </span>
               </div>
               <div className="databrowser-meta-item">
-                <span className="databrowser-meta-item-label">來源操作者 (Actor)</span>
+                <span className="databrowser-meta-item-label">來源操作者</span>
                 <span className="databrowser-meta-item-value">
                   {selectedRecord.actorLabel}
                 </span>
               </div>
-              <div className="databrowser-hash-banner">
-                <strong style={{ fontSize: '0.8rem', color: '#74593f', whiteSpace: 'nowrap' }}>
-                  🛡️ 64-bit SHA-256 Version Hash:
-                </strong>
-                <code>{selectedRecord.versionIdentity}</code>
-              </div>
             </div>
 
-            {/* 雙模式檢視切換 */}
-            <div className="databrowser-view-mode-tabs">
-              <button
-                type="button"
-                className={`databrowser-mode-tab-btn ${drawerMode === 'kv' ? 'active' : ''}`}
-                onClick={() => setDrawerMode('kv')}
-              >
-                📊 欄位鍵值清冊 (Key-Value)
-              </button>
-              <button
-                type="button"
-                className={`databrowser-mode-tab-btn ${drawerMode === 'json' ? 'active' : ''}`}
-                onClick={() => setDrawerMode('json')}
-              >
-                💻 格式化 JSON (JSON View)
-              </button>
-            </div>
-
-            {/* 模式 A：Key-Value 欄位屬性表格 */}
-            {drawerMode === 'kv' && (
+            {/* 去敏欄位清單 */}
+            {(
               <table className="databrowser-kv-table">
                 <thead>
                   <tr>
-                    <th style={{ width: '220px' }}>欄位代碼 (Field ID)</th>
                     <th style={{ width: '200px' }}>欄位名稱</th>
-                    <th>原始值 (Value)</th>
+                    <th>去敏內容</th>
                   </tr>
                 </thead>
                 <tbody>
                   {selectedRecord.detail.map((cell) => (
                     <tr key={cell.id}>
-                      <td>
-                        <code style={{ color: '#ea580c', fontWeight: 700 }}>{cell.id}</code>
-                      </td>
                       <td>
                         <strong>{cell.label}</strong>
                       </td>
@@ -496,46 +429,13 @@ export const DataBrowserPage: React.FC = () => {
               </table>
             )}
 
-            {/* 模式 B：格式化 JSON 檢視 */}
-            {drawerMode === 'json' && recordPayload && (
-              <div className="databrowser-json-container">
-                <pre>{JSON.stringify(recordPayload, null, 2)}</pre>
-              </div>
-            )}
-
-            {/* 受控退役操作面板 */}
+            {/* 唯讀操作說明 */}
             <div className="databrowser-retired-panel">
               <div>
                 <p>
-                  <strong>⚠️ 唯讀保護提示：</strong>
-                  通用 PATCH 與來源更正已退役或移至專屬 Domain 工作流，此處僅提供資料快照調閱。
+                  <strong>唯讀查詢：</strong>
+                  此頁只提供去敏資料查詢；如需修正，請前往對應業務頁面依正式流程辦理。
                 </p>
-              </div>
-              <div className="databrowser-retired-actions">
-                <button
-                  type="button"
-                  data-control-id="data-browser.patch"
-                  disabled
-                  title="[查詢模式] generic PATCH 已退役"
-                >
-                  編輯資料
-                </button>
-                <button
-                  type="button"
-                  data-control-id="data-browser.source-correction.preview"
-                  disabled
-                  title="[查詢模式] source correction 不在此 page-slice"
-                >
-                  預覽來源更正
-                </button>
-                <button
-                  type="button"
-                  data-control-id="data-browser.source-correction.apply"
-                  disabled
-                  title="[查詢模式] source correction 不在此 page-slice"
-                >
-                  套用來源更正
-                </button>
               </div>
             </div>
           </div>
@@ -546,4 +446,3 @@ export const DataBrowserPage: React.FC = () => {
 };
 
 export default DataBrowserPage;
-

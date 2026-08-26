@@ -1,4 +1,7 @@
-"""MySQL adapters for LINE media metadata and order-group bindings."""
+"""
+File: line_media_order_group_repository.py
+Description: 以 MySQL 保存 LINE 媒體與群組綁定，並提供 COUNT/LIMIT/OFFSET 唯讀投影。
+"""
 
 from __future__ import annotations
 
@@ -29,7 +32,9 @@ from subsystems.line.order_group_contracts import (
     BindLineOrderGroupCommand,
     BindLineOrderGroupResult,
     LineOrderGroupCommandOutcome,
+    LineOrderGroupEventPage,
     LineOrderGroupEventRecord,
+    LineOrderGroupNumberedPage,
     LineOrderGroupPage,
     OrderLineAudience,
 )
@@ -135,6 +140,37 @@ class MySqlLineOrderGroupBindingRepository:
             rows = tuple(cursor.fetchall() or ())
         return LineOrderGroupPage(tuple(_group_snapshot(row) for row in rows), total)
 
+    def list_numbered(
+        self,
+        *,
+        status: str | None,
+        page: int,
+        page_size: int,
+    ) -> LineOrderGroupNumberedPage:
+        clauses = " WHERE binding_status=%s" if status else ""
+        parameters: list[object] = [status] if status else []
+        offset = (page - 1) * page_size
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM line_order_group_bindings" + clauses,
+                parameters,
+            )
+            total = int((cursor.fetchone() or {}).get("total") or 0)
+            cursor.execute(
+                f"SELECT case_no,group_id,binding_status,aggregate_version "
+                f"FROM line_order_group_bindings{clauses} "
+                "ORDER BY updated_at_utc DESC,case_no LIMIT %s OFFSET %s",
+                [*parameters, page_size, offset],
+            )
+            rows = tuple(cursor.fetchall() or ())
+        return LineOrderGroupNumberedPage(
+            tuple(_group_snapshot(row) for row in rows),
+            page,
+            page_size,
+            total,
+            (total + page_size - 1) // page_size,
+        )
+
     def events(
         self,
         case_no: str,
@@ -145,6 +181,30 @@ class MySqlLineOrderGroupBindingRepository:
             cursor.execute(_GROUP_EVENTS_SQL, (case_no, case_no, limit))
             rows = tuple(cursor.fetchall() or ())
         return tuple(_group_event_record(row) for row in rows)
+
+    def events_numbered(
+        self,
+        case_no: str,
+        *,
+        page: int,
+        page_size: int,
+    ) -> LineOrderGroupEventPage:
+        offset = (page - 1) * page_size
+        with self._connection.cursor() as cursor:
+            cursor.execute(_GROUP_EVENTS_COUNT_SQL, (case_no, case_no))
+            total = int((cursor.fetchone() or {}).get("total") or 0)
+            cursor.execute(
+                _GROUP_EVENTS_NUMBERED_SQL,
+                (case_no, case_no, page_size, offset),
+            )
+            rows = tuple(cursor.fetchall() or ())
+        return LineOrderGroupEventPage(
+            tuple(_group_event_record(row) for row in rows),
+            page,
+            page_size,
+            total,
+            (total + page_size - 1) // page_size,
+        )
 
     def bind(
         self,
@@ -459,6 +519,12 @@ _GROUP_EVENTS_SQL = (
     "event_id,case_no,event_type,actor_id,occurred_at_utc,invitation_fingerprint "
     "FROM line_order_group_runtime_events WHERE case_no=%s) events "
     "ORDER BY occurred_at_utc DESC,event_id DESC LIMIT %s"
+)
+_GROUP_EVENTS_NUMBERED_SQL = _GROUP_EVENTS_SQL + " OFFSET %s"
+_GROUP_EVENTS_COUNT_SQL = (
+    "SELECT COUNT(*) AS total FROM (SELECT id FROM "
+    "line_order_group_binding_events WHERE case_no=%s UNION ALL SELECT id FROM "
+    "line_order_group_runtime_events WHERE case_no=%s) events"
 )
 
 

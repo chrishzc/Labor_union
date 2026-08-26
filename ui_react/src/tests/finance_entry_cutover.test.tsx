@@ -150,7 +150,7 @@ function typedUnavailableResponse(): unknown {
       error: {
         category: 'unavailable',
         code: 'CLIENT_RECEIPT_UNAVAILABLE',
-        message: '客戶收款查詢暫時無法使用',
+        message: 'HTTP 503 correlation_id=finance-secret-detail',
         field_errors: [],
         domain_blockers: [],
         retryable: true,
@@ -301,7 +301,8 @@ describe('Finance #finance entry static subgate', () => {
     authenticate();
     const unavailableRequests = installFetchStub({ receiptStatus: 503 });
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('客戶收款查詢暫時無法使用'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('服務暫時無法使用，請稍後再試。'));
+    expect(screen.queryByText(/HTTP 503|correlation_id|finance-secret-detail/)).not.toBeInTheDocument();
     expect(screen.queryByText('OBL-C-1')).not.toBeInTheDocument();
     expect(screen.queryByText(/已成功|已結清|付款成功/)).not.toBeInTheDocument();
     expect(countPath(unavailableRequests, CLIENT_RECEIPT_ENDPOINT)).toBe(1);

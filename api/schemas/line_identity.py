@@ -192,6 +192,15 @@ class CanonicalLineReviewPageResponse(BaseModel):
     next_cursor: str | None
 
 
+class CanonicalLineReviewNumberedPageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    items: list[CanonicalLineReviewResponse]
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    total: int = Field(ge=0)
+
+
 class CanonicalLineReviewSummaryResponse(BaseModel):
     pending_total: int
     staff_pending: int

@@ -193,6 +193,20 @@ class MySqlLineRichMenuPublicationRepository:
         items = tuple(_publication_snapshot(row) for row in rows)
         return LineRichMenuPublicationPage(items, total, offset, query.page_size)
 
+    def list_for_configuration_revision(
+        self,
+        configuration_revision: LineConfigurationRevision,
+    ) -> tuple[LineRichMenuPublicationSnapshot, ...]:
+        if not isinstance(configuration_revision, LineConfigurationRevision):
+            raise TypeError("LINE Rich Menu configuration revision is invalid")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _MENU_SELECT_BY_CONFIGURATION_REVISION_SQL,
+                (configuration_revision.value,),
+            )
+            rows = tuple(cursor.fetchall() or ())
+        return tuple(_publication_snapshot(row) for row in rows)
+
     def published_provider_menu_id(self, menu_definition_id: str) -> str | None:
         with self._connection.cursor() as cursor:
             cursor.execute(_MENU_PUBLISHED_PROVIDER_ID_SQL, (menu_definition_id, menu_definition_id))
@@ -1052,6 +1066,10 @@ _MENU_SELECT_SQL = (
 )
 _MENU_SELECT_BY_KEY_SQL = (
     f"SELECT {_MENU_COLUMNS} FROM line_rich_menu_publication_tasks WHERE idempotency_key=%s"
+)
+_MENU_SELECT_BY_CONFIGURATION_REVISION_SQL = (
+    f"SELECT {_MENU_COLUMNS} FROM line_rich_menu_publication_tasks "
+    "WHERE configuration_revision=%s ORDER BY id DESC"
 )
 _MENU_WORK_COLUMNS = (
     _MENU_COLUMNS

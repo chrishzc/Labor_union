@@ -1,6 +1,6 @@
 /**
  * File: data_browser_no_fake_mutation.test.tsx
- * Description: 驗證 Data Browser correction/PATCH controls 原生鎖定。
+ * Description: 驗證 Data Browser 不暴露未實作的 correction/PATCH controls。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -14,7 +14,7 @@ describe('Data Browser zero fake mutation', () => {
     vi.spyOn(dataBrowserQueryClient, 'querySource').mockResolvedValue(VALID_DATA_BROWSER_PAGE);
   });
 
-  it('keeps PATCH and source correction controls disabled with zero non-GET', async () => {
+  it('shows the read-only business boundary without fake mutation controls', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
     render(<DataBrowserPage />);
@@ -27,9 +27,9 @@ describe('Data Browser zero fake mutation', () => {
       'data-browser.source-correction.apply',
     ]) {
       const control = document.querySelector(`[data-control-id="${id}"]`);
-      expect(control).toBeDisabled();
-      if (control) fireEvent.click(control);
+      expect(control).not.toBeInTheDocument();
     }
+    expect(screen.getByText(/此頁只提供去敏資料查詢/)).toBeInTheDocument();
     expect(alertSpy).not.toHaveBeenCalled();
     expect(fetchSpy.mock.calls.filter((call) => call[1]?.method && call[1]?.method !== 'GET')).toHaveLength(0);
   });

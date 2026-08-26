@@ -25,7 +25,6 @@ import {
 } from '../adapters/line_identity/line_identity_adapter';
 import {
   adaptLineNotificationRulesCatalog,
-  adaptLineRichMenuConfiguration,
   adaptLineRichMenuPublication,
   adaptLineRichMenuPublicationPage,
   type LineNotificationRuleModel,
@@ -51,13 +50,18 @@ import {
 } from '../api/line_configuration/line_configuration_query_client';
 import type { LineNotificationRulesCatalog } from '../api/line_configuration/line_configuration_query_schemas';
 import { LineConfigurationQueryError } from '../api/line_configuration/line_configuration_query_errors';
+import { adaptLineRichMenuDraft } from '../adapters/line_rich_menu_draft/line_rich_menu_draft_adapter';
+import {
+  lineRichMenuDraftClient,
+  type LineRichMenuDraftClient,
+} from '../api/line_rich_menu_draft/line_rich_menu_draft_client';
 import {
   adaptLineDeliveryDetail,
-  adaptLineDeliveryItem,
   adaptLineDeliverySummary,
 } from '../adapters/line_delivery/line_delivery_query_adapter';
 import { lineDeliveryQueryClient } from '../api/line_delivery/line_delivery_query_client';
 import { LineDeliveryQueryError } from '../api/line_delivery/line_delivery_query_errors';
+import { LineDeliveryTaskWorkbench } from '../components/LineDeliveryTaskWorkbench';
 import {
   adaptLineOrderGroupEvent,
   adaptLineOrderGroupRecord,
@@ -113,6 +117,12 @@ import {
 } from '../components/LineIdentityReviewWorkbench';
 import { LineNotificationRulesMutationPanel } from '../components/LineNotificationRulesMutationPanel';
 import { LineRichMenuPublicationActions } from '../components/LineRichMenuPublicationActions';
+import { LineRichMenuDraftActionEditor } from '../components/LineRichMenuDraftActionEditor';
+import { LineRichMenuDraftAppearanceEditor } from '../components/LineRichMenuDraftAppearanceEditor';
+import type {
+  RichMenuDraft,
+  RichMenuDraftDefinition,
+} from '../api/line_rich_menu_draft/line_rich_menu_draft_schemas';
 import './LineManagementPage.css';
 
 type LineTab = 'tickets' | 'richmenu' | 'binding' | 'push_queue' | 'order_groups' | 'runtime';
@@ -135,6 +145,7 @@ interface LineManagementPageProps {
   customerService?: CustomerServicePageClient;
   lineIdentity?: LineIdentityPageClient;
   lineConfiguration?: LineConfigurationQueryClient;
+  richMenuDraft?: LineRichMenuDraftClient;
   runtimeTarget?: typeof lineRuntimeTargetClient;
   escalation?: typeof customerServiceEscalationClient;
   delivery?: typeof lineDeliveryQueryClient;
@@ -143,19 +154,21 @@ interface LineManagementPageProps {
 type QueryStatus = 'idle' | 'loading' | 'loaded' | 'error';
 type MutationStatus = 'idle' | 'loading' | 'success' | 'error';
 type LineDeliverySummaryView = ReturnType<typeof adaptLineDeliverySummary>;
-type LineDeliveryItemView = ReturnType<typeof adaptLineDeliveryItem>;
 type LineDeliveryDetailView = ReturnType<typeof adaptLineDeliveryDetail>;
-type LineDeliveryPageView = {
-  items: LineDeliveryItemView[];
+type LineOrderGroupPageView = {
+  items: LineOrderGroupRecordView[];
   page: number;
   pageSize: number;
   total: number;
   totalPages: number;
 };
-type LineOrderGroupPageView = {
-  items: LineOrderGroupRecordView[];
-  total: number;
-  limit: number;
+type LineOrderGroupDetailView = {
+  record: LineOrderGroupRecordView;
+  events: LineOrderGroupEventView[];
+  eventPage: number;
+  eventPageSize: number;
+  eventTotal: number;
+  eventTotalPages: number;
 };
 
 interface QueryState<T> {
@@ -244,27 +257,63 @@ function asReviewClient(client: LineIdentityPageClient): LineIdentityReviewClien
   return null;
 }
 
-function getButtonActionDetails(btn: RichMenuButtonModel): { type: 'URI' | 'MESSAGE'; uri: string | null; text: string | null } {
-  const label = btn.label;
-  if (label.includes('登記')) return { type: 'URI', uri: '?entry=registration', text: null };
-  if (label.includes('修改') || label.includes('異動')) return { type: 'URI', uri: '?target=profile_update', text: null };
-  if (label.includes('訂單')) return { type: 'URI', uri: '?target=staff_order_search', text: null };
-  if (label.includes('排班') || label.includes('日曆')) return { type: 'URI', uri: '?target=staff_schedule', text: null };
-  if (label.includes('請假')) return { type: 'URI', uri: '?target=staff_leave_apply', text: null };
-  if (label.includes('薪資') || label.includes('請款')) return { type: 'URI', uri: '?target=staff_payout', text: null };
-  if (label.includes('審核')) return { type: 'URI', uri: '?target=staff_review', text: null };
-  if (label.includes('客服中心')) return { type: 'URI', uri: '?target=customer_service', text: null };
-  if (label.includes('異常')) return { type: 'URI', uri: '?target=anomalies_center', text: null };
-  if (label.includes('營運') || label.includes('看板')) return { type: 'URI', uri: '?target=dashboard', text: null };
-  if (label.includes('說明') || label.includes('FAQ')) return { type: 'MESSAGE', uri: null, text: '服務說明' };
-  if (label.includes('客服') || label.includes('諮詢')) return { type: 'MESSAGE', uri: null, text: '專人客服' };
-  return { type: 'URI', uri: `?target=${btn.id}`, text: null };
+function getTypedButtonAction(btn: RichMenuButtonModel) {
+  const action = btn.action;
+  if (!action) return { type: 'UNAVAILABLE', uri: null, text: null, data: null, alias: null } as const;
+  if (action.kind === 'uri') return { type: 'URI', uri: action.uri, text: null, data: null, alias: null } as const;
+  if (action.kind === 'message') return { type: 'MESSAGE', uri: null, text: action.text, data: null, alias: null } as const;
+  if (action.kind === 'postback') return { type: 'POSTBACK', uri: null, text: null, data: action.data, alias: null } as const;
+  return { type: 'RICHMENU_SWITCH', uri: null, text: null, data: action.data, alias: action.richMenuAliasId } as const;
+}
+
+function mergeRichMenuAppearance(
+  base: RichMenuDraftDefinition,
+  source: RichMenuDraftDefinition,
+): RichMenuDraftDefinition {
+  return {
+    ...base,
+    menus: base.menus.map((menu) => {
+      const sourceMenu = source.menus.find((candidate) => candidate.id === menu.id);
+      if (!sourceMenu) return menu;
+      return {
+        ...menu,
+        name: sourceMenu.name,
+        chat_bar_text: sourceMenu.chat_bar_text,
+        appearance: sourceMenu.appearance,
+        buttons: menu.buttons.map((button) => {
+          const sourceButton = sourceMenu.buttons.find((candidate) => candidate.id === button.id);
+          return sourceButton ? { ...button, label: sourceButton.label } : button;
+        }),
+      };
+    }),
+  };
+}
+
+function mergeRichMenuActions(
+  base: RichMenuDraftDefinition,
+  source: RichMenuDraftDefinition,
+): RichMenuDraftDefinition {
+  return {
+    ...base,
+    menus: base.menus.map((menu) => {
+      const sourceMenu = source.menus.find((candidate) => candidate.id === menu.id);
+      if (!sourceMenu) return menu;
+      return {
+        ...menu,
+        buttons: menu.buttons.map((button) => {
+          const sourceButton = sourceMenu.buttons.find((candidate) => candidate.id === button.id);
+          return sourceButton ? { ...button, action: sourceButton.action } : button;
+        }),
+      };
+    }),
+  };
 }
 
 export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   customerService = customerServiceClient,
   lineIdentity = lineIdentityClient,
   lineConfiguration = lineConfigurationQueryClient,
+  richMenuDraft = lineRichMenuDraftClient,
   runtimeTarget = lineRuntimeTargetClient,
   escalation = customerServiceEscalationClient,
   delivery = lineDeliveryQueryClient,
@@ -318,16 +367,18 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const [rulesReload, setRulesReload] = useState(0);
   const [selectedRule, setSelectedRule] = useState<LineNotificationRuleModel | null>(null);
   const [deliverySummary, setDeliverySummary] = useState<QueryState<LineDeliverySummaryView>>(idleState);
-  const [deliveryItems, setDeliveryItems] = useState<QueryState<LineDeliveryPageView>>(idleState);
-  const [deliveryPageNumber, setDeliveryPageNumber] = useState(1);
-  const deliveryPageSize = 25;
   const [deliveryDetail, setDeliveryDetail] = useState<QueryState<LineDeliveryDetailView>>(idleState);
   const deliveryDetailController = useRef<AbortController | null>(null);
+  const deliveryDetailGeneration = useRef(0);
 
   const [orderGroups, setOrderGroups] = useState<QueryState<LineOrderGroupPageView>>(idleState);
-  const [orderGroupDetail, setOrderGroupDetail] = useState<QueryState<{ record: LineOrderGroupRecordView; events: LineOrderGroupEventView[] }>>(idleState);
+  const [orderGroupDetail, setOrderGroupDetail] = useState<QueryState<LineOrderGroupDetailView>>(idleState);
+  const [orderGroupPageNumber, setOrderGroupPageNumber] = useState(1);
+  const orderGroupPageSize = 25;
   const [orderGroupReload, setOrderGroupReload] = useState(0);
+  const orderGroupListGeneration = useRef(0);
   const orderGroupDetailController = useRef<AbortController | null>(null);
+  const orderGroupDetailGeneration = useRef(0);
 
   const [safeConfigurations, setSafeConfigurations] = useState<QueryState<LineSafeConfigModel[]>>(idleState);
   const [runtimeTargets, setRuntimeTargets] = useState<QueryState<LineRuntimeTargetModel[]>>(idleState);
@@ -362,8 +413,13 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const escalationPreviewGeneration = useRef(0);
 
   const [richMenuConfiguration, setRichMenuConfiguration] = useState<QueryState<LineRichMenuConfigurationModel>>(idleState);
+  const [richMenuDraftSnapshot, setRichMenuDraftSnapshot] = useState<RichMenuDraft | null>(null);
+  const [richMenuLocalDefinition, setRichMenuLocalDefinition] = useState<RichMenuDraftDefinition | null>(null);
   const [richMenuPublications, setRichMenuPublications] = useState<QueryState<LineRichMenuPublicationPageModel>>(idleState);
+  const [richMenuPublicationPageNumber, setRichMenuPublicationPageNumber] = useState(1);
+  const richMenuPublicationPageSize = 25;
   const [richMenuReload, setRichMenuReload] = useState(0);
+  const richMenuListGeneration = useRef(0);
   const [selectedMenuId, setSelectedMenuId] = useState<string | null>(null);
   const [selectedPublication, setSelectedPublication] = useState<QueryState<LineRichMenuPublicationModel>>(idleState);
   const publicationController = useRef<AbortController | null>(null);
@@ -445,13 +501,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     setRules(loadingState());
     setRawRules(null);
     setDeliverySummary(loadingState());
-    setDeliveryItems(loadingState());
     const timer = window.setTimeout(() => {
       void Promise.allSettled([
         lineConfiguration.getNotificationRules({ signal: controller.signal }),
         delivery.summary({ signal: controller.signal }),
-        delivery.list({ page: deliveryPageNumber, pageSize: deliveryPageSize }, { signal: controller.signal }),
-      ]).then(([rulesResult, summaryResult, tasksResult]) => {
+      ]).then(([rulesResult, summaryResult]) => {
         if (cancelled) return;
         if (rulesResult.status === 'fulfilled') {
           setRawRules(rulesResult.value);
@@ -462,35 +516,32 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         }
         if (summaryResult.status === 'fulfilled') setDeliverySummary(loadedState(adaptLineDeliverySummary(summaryResult.value)));
         else setDeliverySummary(errorState(displayQueryError(summaryResult.reason, '發送任務摘要載入失敗')));
-        if (tasksResult.status === 'fulfilled') {
-          setDeliveryItems(loadedState({
-            items: tasksResult.value.items.map(adaptLineDeliveryItem),
-            page: tasksResult.value.page,
-            pageSize: tasksResult.value.page_size,
-            total: tasksResult.value.total,
-            totalPages: tasksResult.value.total_pages,
-          }));
-        }
-        else setDeliveryItems(errorState(displayQueryError(tasksResult.reason, '發送任務清單載入失敗')));
       });
     }, 0);
     return () => { cancelled = true; window.clearTimeout(timer); controller.abort(); };
-  }, [activeTab, delivery, deliveryPageNumber, lineConfiguration, rulesReload]);
+  }, [activeTab, delivery, lineConfiguration, rulesReload]);
 
   useEffect(() => {
     if (activeTab !== 'richmenu') return;
     const controller = new AbortController();
+    const generation = ++richMenuListGeneration.current;
     let cancelled = false;
+    setRichMenuLocalDefinition(null);
     setRichMenuConfiguration(loadingState());
     setRichMenuPublications(loadingState());
     const timer = window.setTimeout(() => {
       void Promise.allSettled([
-        lineConfiguration.getRichMenuConfiguration({ signal: controller.signal }),
-        lineConfiguration.listRichMenuPublications({ signal: controller.signal }),
+        richMenuDraft.query({ signal: controller.signal }),
+        lineConfiguration.listRichMenuPublications({
+          page: richMenuPublicationPageNumber,
+          pageSize: richMenuPublicationPageSize,
+          signal: controller.signal,
+        }),
       ]).then(([configurationResult, publicationResult]) => {
-        if (cancelled) return;
+        if (cancelled || generation !== richMenuListGeneration.current) return;
         if (configurationResult.status === 'fulfilled') {
-          const nextConfiguration = adaptLineRichMenuConfiguration(configurationResult.value);
+          const nextConfiguration = adaptLineRichMenuDraft(configurationResult.value);
+          setRichMenuDraftSnapshot(configurationResult.value);
           setRichMenuConfiguration(loadedState(nextConfiguration));
           setSelectedMenuId((current) => current ?? nextConfiguration.menus[0]?.id ?? null);
         } else setRichMenuConfiguration(errorState(displayQueryError(configurationResult.reason, 'Rich Menu 設定載入失敗')));
@@ -499,28 +550,32 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       });
     }, 0);
     return () => { cancelled = true; window.clearTimeout(timer); controller.abort(); };
-  }, [activeTab, lineConfiguration, richMenuReload]);
+  }, [activeTab, lineConfiguration, richMenuDraft, richMenuPublicationPageNumber, richMenuReload]);
 
   useEffect(() => {
     if (activeTab !== 'order_groups') return;
     const controller = new AbortController();
+    const generation = orderGroupListGeneration.current + 1;
+    orderGroupListGeneration.current = generation;
     let cancelled = false;
     setOrderGroups(loadingState());
     const timer = window.setTimeout(() => {
-      void lineOrderGroupQueryClient.list({ limit: 200 }, { signal: controller.signal })
+      void lineOrderGroupQueryClient.list({ page: orderGroupPageNumber, pageSize: orderGroupPageSize }, { signal: controller.signal })
         .then((page) => {
-          if (!cancelled) setOrderGroups(loadedState({
+          if (!cancelled && generation === orderGroupListGeneration.current) setOrderGroups(loadedState({
             items: page.items.map(adaptLineOrderGroupRecord),
+            page: page.page,
+            pageSize: page.page_size,
             total: page.total,
-            limit: 200,
+            totalPages: page.total_pages,
           }));
         })
         .catch((error: unknown) => {
-          if (!cancelled) setOrderGroups(errorState(displayQueryError(error, '三方服務群組載入失敗')));
+          if (!cancelled && generation === orderGroupListGeneration.current) setOrderGroups(errorState(displayQueryError(error, '三方服務群組載入失敗')));
         });
     }, 0);
     return () => { cancelled = true; window.clearTimeout(timer); controller.abort(); };
-  }, [activeTab, orderGroupReload]);
+  }, [activeTab, orderGroupPageNumber, orderGroupReload]);
 
   useEffect(() => {
     if (activeTab !== 'runtime') return;
@@ -584,11 +639,13 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     if (activeTab !== 'push_queue') {
       deliveryDetailController.current?.abort();
       deliveryDetailController.current = null;
+      deliveryDetailGeneration.current += 1;
       setDeliveryDetail(idleState());
     }
     if (activeTab !== 'order_groups') {
       orderGroupDetailController.current?.abort();
       orderGroupDetailController.current = null;
+      orderGroupDetailGeneration.current += 1;
       setOrderGroupDetail(idleState());
     }
     if (activeTab !== 'runtime') {
@@ -618,6 +675,8 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     ticketDetailGeneration.current += 1;
     bindingDetailGeneration.current += 1;
     publicationGeneration.current += 1;
+    deliveryDetailGeneration.current += 1;
+    orderGroupDetailGeneration.current += 1;
     runtimePreviewGeneration.current += 1;
     escalationPreviewGeneration.current += 1;
   }, []);
@@ -814,36 +873,49 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const openDeliveryTask = (taskId: number) => {
     deliveryDetailController.current?.abort();
     const controller = new AbortController();
+    const generation = deliveryDetailGeneration.current + 1;
+    deliveryDetailGeneration.current = generation;
     deliveryDetailController.current = controller;
     setDeliveryDetail(loadingState());
-    void lineDeliveryQueryClient.detail(taskId, { signal: controller.signal })
-      .then((detail) => { if (!controller.signal.aborted) setDeliveryDetail(loadedState(adaptLineDeliveryDetail(detail))); })
-      .catch((error: unknown) => { if (!controller.signal.aborted) setDeliveryDetail(errorState(displayQueryError(error, '發送任務明細載入失敗'))); });
+    void delivery.detail(taskId, { signal: controller.signal })
+      .then((detail) => { if (!controller.signal.aborted && generation === deliveryDetailGeneration.current) setDeliveryDetail(loadedState(adaptLineDeliveryDetail(detail))); })
+      .catch((error: unknown) => { if (!controller.signal.aborted && generation === deliveryDetailGeneration.current) setDeliveryDetail(errorState(displayQueryError(error, '發送任務明細載入失敗'))); });
   };
 
   const closeDeliveryTask = () => {
     deliveryDetailController.current?.abort();
+    deliveryDetailGeneration.current += 1;
     deliveryDetailController.current = null;
     setDeliveryDetail(idleState());
   };
 
-  const openOrderGroup = (caseNo: string) => {
+  const openOrderGroup = (caseNo: string, eventPage = 1) => {
     orderGroupDetailController.current?.abort();
     const controller = new AbortController();
+    const generation = orderGroupDetailGeneration.current + 1;
+    orderGroupDetailGeneration.current = generation;
     orderGroupDetailController.current = controller;
     setOrderGroupDetail(loadingState());
     void Promise.all([
       lineOrderGroupQueryClient.detail(caseNo, { signal: controller.signal }),
-      lineOrderGroupQueryClient.events(caseNo, 100, { signal: controller.signal }),
-    ]).then(([record, events]) => {
-      if (!controller.signal.aborted) setOrderGroupDetail(loadedState({ record: adaptLineOrderGroupRecord(record), events: events.map(adaptLineOrderGroupEvent) }));
+      lineOrderGroupQueryClient.events(caseNo, { page: eventPage, pageSize: 25 }, { signal: controller.signal }),
+    ]).then(([record, eventsPage]) => {
+      if (!controller.signal.aborted && generation === orderGroupDetailGeneration.current) setOrderGroupDetail(loadedState({
+        record: adaptLineOrderGroupRecord(record),
+        events: eventsPage.items.map(adaptLineOrderGroupEvent),
+        eventPage: eventsPage.page,
+        eventPageSize: eventsPage.page_size,
+        eventTotal: eventsPage.total,
+        eventTotalPages: eventsPage.total_pages,
+      }));
     }).catch((error: unknown) => {
-      if (!controller.signal.aborted) setOrderGroupDetail(errorState(displayQueryError(error, '三方服務群組明細載入失敗')));
+      if (!controller.signal.aborted && generation === orderGroupDetailGeneration.current) setOrderGroupDetail(errorState(displayQueryError(error, '三方服務群組明細載入失敗')));
     });
   };
 
   const closeOrderGroup = () => {
     orderGroupDetailController.current?.abort();
+    orderGroupDetailGeneration.current += 1;
     orderGroupDetailController.current = null;
     setOrderGroupDetail(idleState());
   };
@@ -1077,7 +1149,24 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     setSelectedPublication(idleState());
   };
 
-  const selectedMenu = richMenuConfiguration.value?.menus.find((menu) => menu.id === selectedMenuId) ?? null;
+  const localRichMenuConfiguration = richMenuDraftSnapshot && richMenuLocalDefinition
+    ? adaptLineRichMenuDraft({ ...richMenuDraftSnapshot, definition: richMenuLocalDefinition })
+    : richMenuConfiguration.value;
+  const selectedMenu = localRichMenuConfiguration?.menus.find((menu) => menu.id === selectedMenuId) ?? null;
+  const updateLocalRichMenuAppearance = (candidate: RichMenuDraftDefinition | null) => {
+    if (!richMenuDraftSnapshot) return;
+    setRichMenuLocalDefinition((current) => mergeRichMenuAppearance(
+      current ?? richMenuDraftSnapshot.definition,
+      candidate ?? richMenuDraftSnapshot.definition,
+    ));
+  };
+  const updateLocalRichMenuActions = (candidate: RichMenuDraftDefinition | null) => {
+    if (!richMenuDraftSnapshot) return;
+    setRichMenuLocalDefinition((current) => mergeRichMenuActions(
+      current ?? richMenuDraftSnapshot.definition,
+      candidate ?? richMenuDraftSnapshot.definition,
+    ));
+  };
 
   return (
     <div className="line-page-wrapper" data-control-id="line.page">
@@ -1102,9 +1191,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           return matchesQuery && matchesStatus && matchesCategory;
         });
 
-        const displayWaiting = ticketSummary.value?.waiting ?? 0;
-        const displayHandling = ticketSummary.value?.handling ?? 0;
-        const displayResolved = ticketSummary.value?.resolvedToday ?? 0;
         const ticketTotal = ticketPage.value?.total ?? 0;
         const ticketPageCount = Math.max(1, Math.ceil(ticketTotal / ticketPageSize));
         const ticketCurrentPage = ticketPage.value?.page ?? ticketPageNumber;
@@ -1125,21 +1211,23 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               </div>
             </div>
 
-            {/* 頂部 3 大 KPI 卡片 */}
-            <div className="line-kpi-grid">
-              <div data-control-id="line.ticket.summary.waiting">
-                <span>⏳ 待處理工單</span>
-                <strong>{displayWaiting}</strong>
+            {/* 頂部 3 大 KPI 卡片只呈現 server 已確認的摘要，避免把未知狀態偽裝成零。 */}
+            {ticketSummary.status === 'loaded' && ticketSummary.value && (
+              <div className="line-kpi-grid">
+                <div data-control-id="line.ticket.summary.waiting">
+                  <span>⏳ 待處理工單</span>
+                  <strong>{ticketSummary.value.waiting}</strong>
+                </div>
+                <div data-control-id="line.ticket.summary.handling">
+                  <span>🔄 處理中工單</span>
+                  <strong>{ticketSummary.value.handling}</strong>
+                </div>
+                <div data-control-id="line.ticket.summary.resolved_today">
+                  <span>✅ 今日已結案</span>
+                  <strong>{ticketSummary.value.resolvedToday}</strong>
+                </div>
               </div>
-              <div data-control-id="line.ticket.summary.handling">
-                <span>🔄 處理中工單</span>
-                <strong>{displayHandling}</strong>
-              </div>
-              <div data-control-id="line.ticket.summary.resolved_today">
-                <span>✅ 今日已結案</span>
-                <strong>{displayResolved}</strong>
-              </div>
-            </div>
+            )}
 
             {/* 搜尋與進階篩選工具列 */}
             <div className="line-search-filter-toolbar">
@@ -1193,7 +1281,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
             {ticketPage.status === 'error' && <div className="line-error" role="alert">{ticketPage.error}</div>}
             {ticketScopeBlocker && <div className="line-scope-note" role="status">{ticketScopeBlocker}</div>}
 
-            {ticketScopeBlocker ? null : filteredList.length === 0 ? (
+            {ticketPage.status !== 'loaded' || ticketScopeBlocker ? null : filteredList.length === 0 ? (
               <div className="line-empty-state">
                 <div>📋</div>
                 <h4>目前沒有符合篩選條件的客服工單</h4>
@@ -1283,15 +1371,17 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       })()}
 
       {activeTab === 'richmenu' && (() => {
-        const menus = richMenuConfiguration.value?.menus ?? [];
+        const menus = localRichMenuConfiguration?.menus ?? [];
         const activeMenu = selectedMenu ?? menus[0] ?? null;
+        const localDefinition = richMenuLocalDefinition ?? richMenuDraftSnapshot?.definition;
+        const activeMenuDefinition = localDefinition?.menus.find((menu) => menu.id === activeMenu?.id);
 
         return (
           <section className="line-table-container" data-control-id="line.richmenu.configuration">
             <div className="line-section-heading">
               <div>
                 <h3>📱 多角色 Rich Menu 圖文選單管理中心</h3>
-                <p>唯讀呈現圖文選單設定與熱區；發布前必須先檢查影響並由人員確認，完成後只會排入待發布工作。</p>
+            <p>可編輯草稿的背景、名稱與按鈕動作；草稿保存不會發布，正式發布另須檢查影響並由人員確認。</p>
               </div>
               <button
                 type="button"
@@ -1343,7 +1433,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   }}
                   onClick={() => setIsDiffMode(!isDiffMode)}
                 >
-                  {isDiffMode ? '✨ 關閉版本比對' : '✨ 開啟版本變更比對 (Diff Mode)'}
+                  {isDiffMode ? '✨ 關閉版本比對' : '✨ 開啟版本變更比對'}
                 </button>
                 {simChatMessages.length > 0 && (
                   <button
@@ -1358,17 +1448,25 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               </div>
             </div>
 
-            {/* 發布前幾何與契約防呆檢查狀態條 */}
+            {/* 本機幾何初檢；正式路由與發布資格只由 server Preview 裁決。 */}
             {activeMenu && (() => {
               const targetW = activeMenu.width;
               const targetH = activeMenu.height;
               let totalArea = 0;
               let hasOverlap = false;
+              let hasInvalidDimensions = false;
+              let hasOutOfBounds = false;
               const buttons = activeMenu.buttons;
 
               for (let i = 0; i < buttons.length; i++) {
                 const b1 = buttons[i].bounds;
                 totalArea += b1.width * b1.height;
+                hasInvalidDimensions ||= b1.width <= 0 || b1.height <= 0;
+                hasOutOfBounds ||=
+                  b1.x < 0 ||
+                  b1.y < 0 ||
+                  b1.x + b1.width > targetW ||
+                  b1.y + b1.height > targetH;
                 for (let j = i + 1; j < buttons.length; j++) {
                   const b2 = buttons[j].bounds;
                   if (
@@ -1382,7 +1480,14 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 }
               }
               const isFullCoverage = totalArea === targetW * targetH;
-              const isCompliant = isFullCoverage && !hasOverlap;
+              const localGeometryPassed =
+                !hasInvalidDimensions && !hasOutOfBounds && isFullCoverage && !hasOverlap;
+              const geometryIssues = [
+                hasInvalidDimensions ? '熱區尺寸必須為正值' : null,
+                hasOutOfBounds ? '熱區超出畫布範圍' : null,
+                !isFullCoverage ? '熱區未完整覆蓋版面' : null,
+                hasOverlap ? '熱區存在重疊' : null,
+              ].filter((issue): issue is string => issue !== null);
 
               return (
                 <div
@@ -1394,19 +1499,20 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     padding: '12px 18px',
                     borderRadius: '12px',
                     marginBottom: '20px',
-                    background: isCompliant ? '#f0fdf4' : '#fffbeb',
-                    border: `1px solid ${isCompliant ? '#86efac' : '#fcd34d'}`,
-                    color: isCompliant ? '#166534' : '#92400e',
+                    background: localGeometryPassed ? '#f0fdf4' : '#fffbeb',
+                    border: `1px solid ${localGeometryPassed ? '#86efac' : '#fcd34d'}`,
+                    color: localGeometryPassed ? '#166534' : '#92400e',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '1.25rem' }}>{isCompliant ? '🛡️' : '⚠️'}</span>
+                    <span style={{ fontSize: '1.25rem' }}>{localGeometryPassed ? '🛡️' : '⚠️'}</span>
                     <div>
-                      <strong>發布前幾何與契約防呆檢核：</strong>
+                      <strong>本機幾何初檢：</strong>
                       <span style={{ marginLeft: '6px', fontSize: '0.88rem' }}>
-                        {isCompliant
-                          ? `✅ 100% 滿版 (${targetW}×${targetH}) 無重疊 ｜ 全部 ${buttons.length} 個熱區路由合格 ｜ 0 個阻擋異常`
-                          : `⚠️ 發現異常：${!isFullCoverage ? '熱區未填滿版面' : ''} ${hasOverlap ? '熱區存在重疊' : ''}`}
+                        {localGeometryPassed
+                          ? `熱區位於 ${targetW}×${targetH} 畫布內、無重疊並完整覆蓋。`
+                          : `需修正：${geometryIssues.join('、')}。`}
+                        {' '}正式路由與發布資格仍須由系統檢查。
                       </span>
                     </div>
                   </div>
@@ -1416,11 +1522,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       fontWeight: 700,
                       padding: '4px 10px',
                       borderRadius: '9999px',
-                      background: isCompliant ? '#bbf7d0' : '#fef08a',
-                      color: isCompliant ? '#14532d' : '#854d0e',
+                      background: localGeometryPassed ? '#bbf7d0' : '#fef08a',
+                      color: localGeometryPassed ? '#14532d' : '#854d0e',
                     }}
                   >
-                    {isCompliant ? '合規可發布' : '需修正'}
+                    {localGeometryPassed ? '本機初檢通過' : '需修正幾何'}
                   </span>
                 </div>
               );
@@ -1498,15 +1604,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                             className={aIdx === 0 ? 'phone-liff-btn-primary' : 'phone-liff-btn-secondary'}
                             onClick={() => {
                               setActiveSimLiff(null);
-                              setSimChatMessages((prev) => [
-                                ...prev,
-                                {
-                                  id: `msg-${Date.now()}-action`,
-                                  sender: 'bot',
-                                  text: `已模擬完成「${act}」操作！在真實環境中資料將安全送達工會系統。`,
-                                  time: '09:42',
-                                },
-                              ]);
                             }}
                           >
                             {act}
@@ -1521,7 +1618,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                         <div className="richmenu-bot-avatar">🤖</div>
                         <div className="richmenu-bubble-content">
                           <strong>工會小幫手</strong>
-                          <p>您好！已載入「{activeMenu.audienceRoleLabel}」專屬選單。請點擊下方 4 個按鈕測試互動反應！</p>
+                          <p>您好！已載入「{activeMenu.audienceRoleLabel}」專屬選單。請點擊下方 {activeMenu.buttons.length} 個按鈕測試互動反應！</p>
                         </div>
                       </div>
 
@@ -1557,11 +1654,13 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
                   {/* Rich Menu Button Grid (可點擊互動) */}
                   <div
-                    className={`richmenu-buttons-grid grid-count-${activeMenu.buttons.length} ${isDiffMode ? 'diff-active' : ''}`}
+                    className="richmenu-buttons-grid"
+                    data-control-id="line.richmenu.local-preview"
+                    style={{ backgroundColor: activeMenuDefinition?.appearance?.background_color }}
                   >
-                    {activeMenu.buttons.map((btn, idx) => {
+                    {activeMenu.buttons.map((btn) => {
                       const label = btn.label;
-                      const act = getButtonActionDetails(btn);
+                      const act = getTypedButtonAction(btn);
                       let icon = '📌';
                       if (label.includes('登記')) icon = '📝';
                       else if (label.includes('修改') || label.includes('異動')) icon = '✏️';
@@ -1582,180 +1681,58 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                         <button
                           key={btn.id}
                           type="button"
-                          className={`richmenu-grid-btn ${isDiffMode ? 'diff-highlight' : ''}`}
+                          className="richmenu-grid-btn"
+                          style={{
+                            position: 'absolute',
+                            left: `${activeMenu.width > 0 ? (btn.bounds.x / activeMenu.width) * 100 : 0}%`,
+                            top: `${activeMenu.height > 0 ? (btn.bounds.y / activeMenu.height) * 100 : 0}%`,
+                            width: `${activeMenu.width > 0 ? (btn.bounds.width / activeMenu.width) * 100 : 0}%`,
+                            height: `${activeMenu.height > 0 ? (btn.bounds.height / activeMenu.height) * 100 : 0}%`,
+                          }}
                           onClick={() => {
-                            // 呼叫沙盒模擬器
                             if (act.type === 'URI') {
-                              const uri = act.uri ?? '';
-                              if (uri.includes('entry=registration') || label.includes('登記')) {
-                                setActiveSimLiff({
-                                  title: '📝 產婦到宅服務線上登記表',
-                                  subtitle: '新竹市月子照護工會 · 官方線上登記通道',
-                                  badge: 'LIFF 表單預覽',
-                                  fields: [
-                                    { label: '產婦姓名', value: '林○真 媽媽', hint: '（系統自動帶入 LINE 暱稱）' },
-                                    { label: '預產期 (EDD)', value: '115 年 06 月 18 日', hint: '依媽媽手冊載明' },
-                                    { label: '服務地點', value: '新竹市東區關新路...', hint: '到宅服務地址' },
-                                    { label: '料理與照護偏好', value: '葷食／藥膳燉湯（雙胞胎照護需額外註記）' },
-                                    { label: '預約天數', value: '26 天（每日 9 小時專職照護）' },
-                                  ],
-                                  actionButtons: ['確認送出登記', '暫存草稿'],
-                                });
-                              } else if (uri.includes('profile_update') || label.includes('修改')) {
-                                setActiveSimLiff({
-                                  title: '✏️ 客戶資料與服務異動申請',
-                                  subtitle: '安全異動通道 · 提交後需經工會督導審核',
-                                  badge: 'LIFF 異動申請',
-                                  fields: [
-                                    { label: '案件編號', value: 'CASE-202608-019' },
-                                    { label: '異動項目', value: '預產期提前 / 增加服務天數 (+5天)' },
-                                    { label: '異動原因', value: '醫師評估可能提早於 5 月底生產，申請月嫂檔期彈性調配' },
-                                    { label: '新服務地址', value: '新竹市北區北大路（原址變更）' },
-                                  ],
-                                  actionButtons: ['送出異動申請 (產生 Diff)', '取消'],
-                                });
-                              } else if (uri.includes('staff_order_search') || label.includes('訂單')) {
-                                setActiveSimLiff({
-                                  title: '📦 月嫂訂單照護資訊工作台',
-                                  subtitle: '案件摘要 · 產婦偏好與安全注意事項',
-                                  badge: '月嫂專屬 LIFF',
-                                  fields: [
-                                    { label: '承接案件', value: 'ORD-2026-HC092 (林產婦)' },
-                                    { label: '服務區間', value: '115/06/18 ～ 115/07/13 (26天)' },
-                                    { label: '寶寶狀況', value: '足月單胞胎，體重 3,200g' },
-                                    { label: '產婦料理要求', value: '少鹽少油、麻油酒料理後 2 週再食用、避開帶殼海鮮' },
-                                    { label: '緊急聯絡人', value: '先生 陳先生 (0912-***-456)' },
-                                  ],
-                                  actionButtons: ['打卡上班', '聯繫督導'],
-                                });
-                              } else if (uri.includes('staff_schedule') || label.includes('排班')) {
-                                setActiveSimLiff({
-                                  title: '📅 月嫂個人排班與服務日曆',
-                                  subtitle: '防重疊排班保護 · 7天 Buffer 鎖定期',
-                                  badge: '月嫂日曆 LIFF',
-                                  fields: [
-                                    { label: '本月已排案件', value: '2 案（共計 38 服務日）' },
-                                    { label: '檔期鎖定 (Buffer)', value: '06/11 ～ 06/17 (預產期前 7 天鎖定不接新單)' },
-                                    { label: '公休安排', value: '每週日固定公休（共 4 天）' },
-                                    { label: '次月空檔', value: '115 年 8 月起可承接新竹市東區/竹北案件' },
-                                  ],
-                                  actionButtons: ['更新可接案時段', '申請代班'],
-                                });
-                              } else if (uri.includes('staff_leave_apply') || label.includes('請假')) {
-                                setActiveSimLiff({
-                                  title: '🏖️ 月嫂請假與代班申請單',
-                                  subtitle: '工會代班媒合與產婦順延簽核',
-                                  badge: '請假代班 LIFF',
-                                  fields: [
-                                    { label: '請假假別', value: '事假 / 家庭照顧假' },
-                                    { label: '請假日期', value: '115/06/25 ～ 115/06/26 (2天)' },
-                                    { label: '代班需求', value: '由工會緊急指派支援月嫂（需具備藥膳證照）' },
-                                    { label: '產婦協商意願', value: '已與產婦初步溝通同意服務天數往後順延 2 天' },
-                                  ],
-                                  actionButtons: ['送出請假代班申請', '返回'],
-                                });
-                              } else if (uri.includes('staff_payout') || label.includes('薪資')) {
-                                setActiveSimLiff({
-                                  title: '💵 月嫂薪資津貼與完工請款明細',
-                                  subtitle: '工會核撥進度 · 勞健保與代扣明細',
-                                  badge: '請款明細 LIFF',
-                                  fields: [
-                                    { label: '上期結算案', value: 'ORD-2026-HC088 (已完工結案)' },
-                                    { label: '服務時數與津貼', value: '216 小時 · NT$ 75,600' },
-                                    { label: '補助款代領轉付', value: '新竹市政府到宅補助 NT$ 12,000 (已核銷)' },
-                                    { label: '撥款進度', value: '🟢 已入帳（115/08/05 撥入合作金庫帳戶）' },
-                                  ],
-                                  actionButtons: ['下載所得憑證 (PDF)', '帳務疑問反映'],
-                                });
-                              } else if (uri.includes('staff_review') || label.includes('審核')) {
-                                setActiveSimLiff({
-                                  title: '📋 工會行動審核工作台',
-                                  subtitle: '月嫂認證資質 · 產婦異動 Diff 審查',
-                                  badge: '工會幹部 LIFF',
-                                  fields: [
-                                    { label: '待審項目 (1)', value: '【月嫂新進審核】張○敏（保母證、良民證、體檢合格）' },
-                                    { label: '待審項目 (2)', value: '【產婦異動簽核】CASE-019 預產期提早 5 天調單申請' },
-                                    { label: '待審項目 (3)', value: '【請假調休代班】月嫂李○芳 06/25 事假代班媒合確認' },
-                                  ],
-                                  actionButtons: ['✅ 一鍵核准通過', '⚠️ 退回補件'],
-                                });
-                              } else if (uri.includes('customer_service') || label.includes('客服')) {
-                                setActiveSimLiff({
-                                  title: '🎧 行動客服工單中心',
-                                  subtitle: '線上民眾即時進件 · AI 轉真人接管',
-                                  badge: '客服中心 LIFF',
-                                  fields: [
-                                    { label: '待回覆進件', value: '3 筆民眾諮詢（新竹市月子補助條件 2 件、換約諮詢 1 件）' },
-                                    { label: 'AI 接管狀態', value: '🟢 自動小幫手運行中（已成功解答 92% 常見 QA）' },
-                                    { label: '急件通報', value: '1 筆產婦來訊反映希望更換照護時段' },
-                                  ],
-                                  actionButtons: ['接管目前對話', '指派值班督導'],
-                                });
-                              } else if (uri.includes('anomalies') || label.includes('異常')) {
-                                setActiveSimLiff({
-                                  title: '🚨 重大異常與急件通報面板',
-                                  subtitle: '財務短溢繳 · 排班重疊 · 客訴警示',
-                                  badge: '異常通報 LIFF',
-                                  fields: [
-                                    { label: '財務短溢繳', value: '1 筆：訂單 ORD-071 定金少繳 NT$ 2,000 (轉帳手續費扣除)' },
-                                    { label: '排班衝突警示', value: '0 筆：全體月嫂檔期無重疊排班衝突' },
-                                    { label: '急件客訴通報', value: '0 筆未結案重大爭議' },
-                                  ],
-                                  actionButtons: ['立即調派督導協處', '標記為已追蹤'],
-                                });
-                              } else {
-                                setActiveSimLiff({
-                                  title: '📊 工會即時營運數據看板',
-                                  subtitle: '今日派工與市府月子補助進度',
-                                  badge: '營運看板 LIFF',
-                                  fields: [
-                                    { label: '今日出勤月嫂', value: '42 位在職月嫂到宅照護中' },
-                                    { label: '進行中案件', value: '56 件產婦家庭服務中' },
-                                    { label: '本月市府補助申請', value: '累計核銷 128 戶（總補助金額 NT$ 1,536,000）' },
-                                    { label: '本月滿意度', value: '⭐ 98.6% 家長給予 5 星好評' },
-                                  ],
-                                  actionButtons: ['匯出月報表', '更新指標'],
-                                });
-                              }
-                            } else if (act.type === 'MESSAGE') {
-                              const text = act.text ?? label;
-                              let botReply = '';
-                              if (text.includes('說明') || text.includes('FAQ')) {
-                                botReply = '親愛的家長您好！新竹市到宅月子補助標準為：自 115 年 1 月 1 日起，每日最高補助 4 小時、每戶最高上限 40 小時。超出部分將依工會定型化契約以自費時薪計算。服務完成後由工會協助向市府核銷退款。';
-                              } else if (text.includes('客服')) {
-                                botReply = '已為您通報工會值班秘書！秘書將於上班時間（週一至週五 09:00-18:00）透過此對話為您服務；若有緊急照護狀況請撥打工會專線：(03) 535-****。';
-                              } else {
-                                botReply = `已收到您的指令：「${text}」，工會系統已為您記錄並處理中。`;
-                              }
-
-                              setSimChatMessages((prev) => [
-                                ...prev,
-                                { id: `msg-${Date.now()}-u`, sender: 'user', text, time: '09:42' },
-                                { id: `msg-${Date.now()}-b`, sender: 'bot', text: botReply, time: '09:42' },
-                              ]);
-                              setActiveSimLiff(null);
+                              setSimChatMessages([]);
+                              setActiveSimLiff({
+                                title: 'LIFF／網址動作本機預覽',
+                                subtitle: '僅顯示草稿中的目標；不開啟網址、不送出請求。',
+                                badge: '零寫入預覽',
+                                fields: [{ label: '目標', value: act.uri ?? '未設定' }],
+                                actionButtons: [],
+                              });
+                              return;
                             }
+                            if (act.type === 'MESSAGE') {
+                              setActiveSimLiff(null);
+                              setSimChatMessages([{ id: `msg-${Date.now()}`, sender: 'user', text: act.text ?? '', time: '本機預覽' }]);
+                              return;
+                            }
+                            if (act.type === 'POSTBACK' || act.type === 'RICHMENU_SWITCH') {
+                              setSimChatMessages([]);
+                              setActiveSimLiff({
+                                title: act.type === 'POSTBACK' ? 'Postback 動作本機預覽' : 'Rich Menu 切換本機預覽',
+                                subtitle: '僅顯示草稿中的按鈕動作；不會送出 LINE 訊息。',
+                                badge: '零寫入預覽',
+                                fields: [
+                                  { label: 'data', value: act.data ?? '未設定' },
+                                  ...(act.alias ? [{ label: 'Rich Menu alias', value: act.alias }] : []),
+                                ],
+                                actionButtons: [],
+                              });
+                              return;
+                            }
+                            setSimChatMessages([]);
+                            setActiveSimLiff({
+                              title: '此按鈕尚未設定動作',
+                              subtitle: '系統不會依按鈕名稱猜測 action。',
+                              badge: '設定缺口',
+                              fields: [],
+                              actionButtons: [],
+                            });
+                            return;
                           }}
                         >
                           <span className="richmenu-btn-icon">{icon}</span>
                           <span className="richmenu-btn-text">{btn.label}</span>
-                          {isDiffMode && (
-                            <span
-                              style={{
-                                position: 'absolute',
-                                top: '2px',
-                                right: '2px',
-                                fontSize: '0.6rem',
-                                background: '#10b981',
-                                color: '#fff',
-                                padding: '1px 4px',
-                                borderRadius: '4px',
-                                fontWeight: 700,
-                              }}
-                            >
-                              熱區 {idx + 1}
-                            </span>
-                          )}
                         </button>
                       );
                     })}
@@ -1795,7 +1772,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       </thead>
                       <tbody>
                         {activeMenu.buttons.map((btn, idx) => {
-                          const act = getButtonActionDetails(btn);
+                          const act = getTypedButtonAction(btn);
                           return (
                             <tr key={btn.id}>
                               <td>
@@ -1811,7 +1788,13 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                               </td>
                               <td>
                                 <code style={{ fontSize: '0.75rem', color: '#475569' }}>
-                                  {act.type === 'URI' ? (act.uri || '未設定') : (act.text || '未設定')}
+                                  {act.type === 'URI'
+                                    ? (act.uri || '未設定')
+                                    : act.type === 'MESSAGE'
+                                      ? (act.text || '未設定')
+                                      : act.type === 'RICHMENU_SWITCH'
+                                        ? `${act.alias || '未設定 alias'} / ${act.data || '未設定 data'}`
+                                        : (act.data || '未設定')}
                                 </code>
                               </td>
                               <td>
@@ -1839,63 +1822,58 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   </div>
 
                   <div className="line-scope-note" style={{ marginTop: '14px' }}>
-                    💡 <strong>本機沙盒比對引擎</strong>：點擊任意按鈕或「📱 模擬點擊」即可在左側 3D 手機模擬器中即時預覽 LIFF 表單或自動對話；零後端寫入。
+                    💡 <strong>本機操作預覽</strong>：只顯示草稿中的按鈕動作或實際訊息文字；不猜測動作、不開啟網址、不送出 LINE 訊息。
                   </div>
                 </div>
 
-                {/* Card B (可選): 版本變更 Diff 對比面板 */}
+                {richMenuDraftSnapshot && (
+                  <>
+                    <LineRichMenuDraftAppearanceEditor
+                      draft={richMenuDraftSnapshot}
+                      menuId={activeMenu.id}
+                      client={richMenuDraft}
+                      previewDefinition={localDefinition}
+                      onApplied={(readback) => {
+                        setRichMenuLocalDefinition(null);
+                        setRichMenuDraftSnapshot(readback);
+                        setRichMenuConfiguration(loadedState(adaptLineRichMenuDraft(readback)));
+                      }}
+                      onLocalDefinitionChange={updateLocalRichMenuAppearance}
+                    />
+                    <LineRichMenuDraftActionEditor
+                      draft={richMenuDraftSnapshot}
+                      menuId={activeMenu.id}
+                      client={richMenuDraft}
+                      previewDefinition={localDefinition}
+                      onApplied={(readback) => {
+                        setRichMenuLocalDefinition(null);
+                        setRichMenuDraftSnapshot(readback);
+                        setRichMenuConfiguration(loadedState(adaptLineRichMenuDraft(readback)));
+                      }}
+                      onLocalDefinitionChange={updateLocalRichMenuActions}
+                    />
+                  </>
+                )}
+
+                {/* 缺少 active snapshot typed Query 時，Diff 必須 fail closed。 */}
                 {isDiffMode && (
                   <div className="richmenu-card" style={{ border: '2px dashed #ff7f50', background: '#fffcfb' }}>
                     <div className="richmenu-card-header">
                       <div>
                         <h4 style={{ margin: 0, fontSize: '1rem', color: '#c2410c', fontWeight: 700 }}>
-                          ✨ 前後版本變更比對 (Visual & Property Diff)
+                          ✨ 版本變更比對
                         </h4>
                         <p style={{ margin: '2px 0 0', fontSize: '0.8rem', color: '#74593f' }}>
-                          比對線上生效快照 (Active DB Snapshot) vs 目前草稿配置
+                          線上生效版本與目前草稿配置
                         </p>
                       </div>
                       <span style={{ fontSize: '0.75rem', background: '#ffedd5', color: '#9a3412', padding: '3px 8px', borderRadius: '6px', fontWeight: 700 }}>
-                        Diff Mode 啟用中
+                        比對模式已開啟
                       </span>
                     </div>
 
-                    <div className="line-table-scroll" style={{ marginTop: '10px' }}>
-                      <table className="line-data-table">
-                        <thead>
-                          <tr>
-                            <th>熱區</th>
-                            <th>線上生效版本 (Before)</th>
-                            <th>目前草稿版本 (After)</th>
-                            <th>比對判定</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {activeMenu.buttons.map((btn, idx) => {
-                            const act = getButtonActionDetails(btn);
-                            return (
-                              <tr key={btn.id}>
-                                <td><strong>熱區 {idx + 1}</strong></td>
-                                <td>
-                                  <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                                    {idx < 2 ? (idx === 0 ? '服務登記 (2500x843 半版)' : '服務說明 (2500x843 半版)') : '（未配置/舊版無此熱區）'}
-                                  </div>
-                                </td>
-                                <td>
-                                  <div style={{ fontSize: '0.8rem', color: '#0f172a', fontWeight: 700 }}>
-                                    {btn.label} ({act.type}: {act.uri || act.text})
-                                  </div>
-                                </td>
-                                <td>
-                                  <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', background: idx < 2 ? '#ffedd5' : '#dcfce7', color: idx < 2 ? '#c2410c' : '#15803d' }}>
-                                    {idx < 2 ? '🟧 升級 4 宮格熱區' : '🟩 新增標準功能'}
-                                  </span>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                    <div className="line-scope-note" role="status" style={{ marginTop: '10px' }}>
+                      尚缺線上生效版本資料，暫不能進行正式版本差異比對；系統不會以按鈕順序或固定文案猜測原本內容。
                     </div>
                   </div>
                 )}
@@ -1904,7 +1882,10 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 <LineRichMenuPublicationActions
                   selectedMenu={activeMenu}
                   selectedPublication={selectedPublication.value}
-                  onQueued={() => setRichMenuReload((value) => value + 1)}
+                  onQueued={() => {
+                    setRichMenuPublicationPageNumber(1);
+                    setRichMenuReload((value) => value + 1);
+                  }}
                 />
               </div>
             </div>
@@ -1933,7 +1914,14 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     <p>由上方發布面板建立預覽並確認排入後，將會在此顯示發布狀態與結果。</p>
                   </div>
                 ) : (
-                  <div className="line-table-scroll">
+                  <div>
+                    <div className="line-pagination-summary">
+                      第 {richMenuPublications.value.page}／{Math.max(1, richMenuPublications.value.totalPages)} 頁，
+                      顯示第 {(richMenuPublications.value.page - 1) * richMenuPublications.value.pageSize + 1}–
+                      {Math.min(richMenuPublications.value.page * richMenuPublications.value.pageSize, richMenuPublications.value.total)} 筆，
+                      共 {richMenuPublications.value.total} 筆
+                    </div>
+                    <div className="line-table-scroll">
                     <table className="line-data-table">
                       <thead>
                         <tr>
@@ -1961,6 +1949,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                         ))}
                       </tbody>
                     </table>
+                    </div>
+                    <div className="line-pagination-actions">
+                      <button type="button" className="line-secondary-btn" disabled={richMenuPublications.value.page <= 1} onClick={() => setRichMenuPublicationPageNumber((value) => Math.max(1, value - 1))}>上一頁</button>
+                      <button type="button" className="line-secondary-btn" disabled={richMenuPublications.value.page >= Math.max(1, richMenuPublications.value.totalPages)} onClick={() => setRichMenuPublicationPageNumber((value) => Math.min(Math.max(1, richMenuPublications.value!.totalPages), value + 1))}>下一頁</button>
+                    </div>
                   </div>
                 )
               )}
@@ -2149,7 +2142,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           ) : (
             <section className="line-table-container" data-control-id="line.identity.review-unavailable">
               <div className="line-error" role="alert">
-                LINE 身分審核 typed client 未完整注入，審核操作已安全停止。
+                LINE 身分審核服務目前無法安全使用，審核操作已停止；請稍後重新整理或聯絡系統管理人員。
               </div>
             </section>
           )}
@@ -2284,87 +2277,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 「已送出」表示 LINE 已接受發送，不代表收件人已讀。
               </div>
 
-              <LoadingOrError state={deliveryItems} loadingText="正在載入發送任務…" />
-
-              {(() => {
-                const tasks = deliveryItems.value?.items ?? [];
-                return deliveryItems.status === 'loaded' && tasks.length === 0 ? (
-                  <div className="line-empty-state" style={{ marginTop: '16px' }}>
-                    <div>📮</div>
-                    <h4>目前沒有發送任務</h4>
-                    <p>當系統產生排班確認或工單通知時，發送進度將在此即時顯示。</p>
-                  </div>
-                ) : (
-                  <div className="line-table-scroll" style={{ marginTop: '16px' }}>
-                    <table className="line-data-table" data-control-id="line.delivery.table">
-                      <thead>
-                        <tr>
-                          <th>通知用途</th>
-                          <th>排程時間</th>
-                          <th>處理進度</th>
-                          <th>狀態</th>
-                          <th style={{ textAlign: 'right' }}>操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {tasks.map((task) => (
-                          <tr key={task.taskId}>
-                            <td>
-                              <span className="line-category-badge category-service_flow">
-                                {task.sourceLabel}
-                              </span>
-                            </td>
-                            <td style={{ color: '#74593f', fontSize: '0.82rem' }}>{task.scheduledAt}</td>
-                            <td>
-                              <span style={{ display: 'inline-block', width: '22px', height: '22px', lineHeight: '22px', textAlign: 'center', background: '#fed9b8', color: '#7c2d12', borderRadius: '50%', fontSize: '0.75rem', fontWeight: 700 }}>
-                                {task.attempts}
-                              </span>
-                            </td>
-                            <td>
-                              <span className={`line-status line-status-${task.status}`}>
-                                {task.statusLabel}
-                              </span>
-                            </td>
-                            <td style={{ textAlign: 'right' }}>
-                              <button
-                                type="button"
-                                className="line-action-link-btn"
-                                onClick={() => openDeliveryTask(task.taskId)}
-                              >
-                                [ 🔍 查看明細 ]
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-              })()}
-              {deliveryItems.status === 'loaded' && deliveryItems.value && (
-                <div className="line-pagination-bar">
-                  <button
-                    type="button"
-                    className="line-secondary-btn"
-                    disabled={deliveryItems.value.page <= 1}
-                    onClick={() => setDeliveryPageNumber((page) => Math.max(1, page - 1))}
-                  >
-                    上一頁
-                  </button>
-                  <span style={{ fontSize: '0.85rem', color: '#74593f' }}>
-                    第 {deliveryItems.value.page}／{Math.max(1, deliveryItems.value.totalPages)} 頁，
-                    本頁 {deliveryItems.value.items.length} 筆，共 {deliveryItems.value.total} 筆
-                  </span>
-                  <button
-                    type="button"
-                    className="line-secondary-btn"
-                    disabled={deliveryItems.value.page >= deliveryItems.value.totalPages}
-                    onClick={() => setDeliveryPageNumber((page) => page + 1)}
-                  >
-                    下一頁
-                  </button>
-                </div>
-              )}
+              <LineDeliveryTaskWorkbench
+                client={delivery}
+                reloadToken={rulesReload}
+                onOpenTask={openDeliveryTask}
+              />
             </div>
           </section>
         );
@@ -2380,7 +2297,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
             <button
               type="button"
               className="line-secondary-btn"
-              onClick={() => setOrderGroupReload((value) => value + 1)}
+              onClick={() => { setOrderGroupPageNumber(1); setOrderGroupReload((value) => value + 1); }}
             >
               🔄 重新整理
             </button>
@@ -2396,6 +2313,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 <p>訂單完成簽約並建立 LINE 群組後會顯示在這裡。</p>
               </div>
             ) : (
+              <>
               <div className="line-table-scroll">
                 <table className="line-data-table" data-control-id="line.order-groups.table">
                   <thead>
@@ -2428,6 +2346,19 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   </tbody>
                 </table>
               </div>
+              <div className="line-pagination-bar">
+                <span>
+                  顯示第 {(orderGroups.value.page - 1) * orderGroups.value.pageSize + 1} 至{' '}
+                  {Math.min(orderGroups.value.page * orderGroups.value.pageSize, orderGroups.value.total)} 筆，
+                  共 {orderGroups.value.total} 筆群組
+                </span>
+                <div className="line-pagination-controls">
+                  <button type="button" aria-label="上一頁三方服務群組" disabled={orderGroups.value.page <= 1} className="line-page-btn" onClick={() => setOrderGroupPageNumber((value) => Math.max(1, value - 1))}>‹</button>
+                  <span>第 {orderGroups.value.page} / {Math.max(1, orderGroups.value.totalPages)} 頁</span>
+                  <button type="button" aria-label="下一頁三方服務群組" disabled={orderGroups.value.page >= orderGroups.value.totalPages} className="line-page-btn" onClick={() => setOrderGroupPageNumber((value) => Math.min(orderGroups.value!.totalPages, value + 1))}>›</button>
+                </div>
+              </div>
+              </>
             )
           )}
         </section>
@@ -2563,6 +2494,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
             <LoadingOrError state={runtimeCandidates} loadingText="正在載入管理員候選…" />
 
             {runtimeCandidates.value && (
+              runtimeCandidates.value.some((candidate) => candidate.lineLinked) ? (
               <div className="line-row-actions" style={{ marginTop: '16px', padding: '12px 14px', background: '#fff8f6', borderRadius: '10px', border: '1px solid #fed9b8' }}>
                 <label htmlFor="runtime-candidate" style={{ fontSize: '0.85rem', fontWeight: 700, color: '#57423b' }}>
                   新增管理員對象：
@@ -2595,6 +2527,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   ➕ 預覽新增通知對象
                 </button>
               </div>
+              ) : (
+                <div className="line-scope-note" role="status" style={{ marginTop: '16px' }}>
+                  目前沒有已連結 LINE 且可加入的管理員。
+                </div>
+              )
             )}
 
             {runtimePending && (
@@ -2705,6 +2642,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 </div>
               </details>
               <div style={{ gridColumn: 'span 2' }}>
+                {escalationSourceIdentity.trim() && !/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) && (
+                  <div className="line-scope-note" role="status" style={{ marginBottom: '8px' }}>
+                    需先完成來源事件核對並補齊進階來源資料，才能預覽建立。
+                  </div>
+                )}
                 <button
                   type="button"
                   className="line-primary-btn"
@@ -2997,7 +2939,33 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
       <Drawer isOpen={deliveryDetail.status !== 'idle'} onClose={closeDeliveryTask} title="LINE 發送明細" size="wide" footer={<div className="line-drawer-footer"><button type="button" onClick={closeDeliveryTask}>關閉</button></div>}><div className="line-drawer-content"><LoadingOrError state={deliveryDetail} loadingText="正在載入發送明細…" />{deliveryDetail.value && <><div className="line-detail-grid"><div><span>通知用途</span><strong>{deliveryDetail.value.task.sourceLabel}</strong></div><div><span>狀態</span><strong>{deliveryDetail.value.task.statusLabel}</strong></div><div><span>排程時間</span><strong>{deliveryDetail.value.task.scheduledAt}</strong></div><div><span>處理進度</span><strong>{deliveryDetail.value.task.attempts}</strong></div></div><div className="line-events"><h4>處理紀錄</h4>{deliveryDetail.value.attempts.length === 0 ? <p>尚無處理紀錄</p> : deliveryDetail.value.attempts.map((attempt) => <article key={attempt.number}><strong>第 {attempt.number} 次：{attempt.outcome}</strong><span>{attempt.startedAt}</span><p>完成時間：{attempt.completedAt ?? '進行中'}{attempt.retryAfterSeconds === null ? '' : `；預計 ${attempt.retryAfterSeconds} 秒後重試`}</p></article>)}</div></>}</div></Drawer>
 
-      <Drawer isOpen={orderGroupDetail.status !== 'idle'} onClose={closeOrderGroup} title="三方服務群組明細" size="wide" footer={<div className="line-drawer-footer"><button type="button" onClick={closeOrderGroup}>關閉</button></div>}><div className="line-drawer-content"><LoadingOrError state={orderGroupDetail} loadingText="正在載入三方服務群組明細…" />{orderGroupDetail.value && <><div className="line-detail-grid"><div><span>案件</span><strong>{orderGroupDetail.value.record.caseNo}</strong></div><div><span>狀態</span><strong>{orderGroupDetail.value.record.statusLabel}</strong></div></div><div className="line-events"><h4>事件紀錄</h4>{orderGroupDetail.value.events.length === 0 ? <p>尚無事件紀錄</p> : orderGroupDetail.value.events.map((event) => <article key={event.eventId}><strong>{event.eventType}</strong><span>{event.occurredAt}</span></article>)}</div></>}</div></Drawer>
+      <Drawer isOpen={orderGroupDetail.status !== 'idle'} onClose={closeOrderGroup} title="三方服務群組明細" size="wide" footer={<div className="line-drawer-footer"><button type="button" onClick={closeOrderGroup}>關閉</button></div>}>
+        <div className="line-drawer-content">
+          <LoadingOrError state={orderGroupDetail} loadingText="正在載入三方服務群組明細…" />
+          {orderGroupDetail.value && <>
+            <div className="line-detail-grid">
+              <div><span>案件</span><strong>{orderGroupDetail.value.record.caseNo}</strong></div>
+              <div><span>狀態</span><strong>{orderGroupDetail.value.record.statusLabel}</strong></div>
+            </div>
+            <div className="line-events">
+              <h4>事件紀錄</h4>
+              {orderGroupDetail.value.events.length === 0
+                ? <p>尚無事件紀錄</p>
+                : orderGroupDetail.value.events.map((event) => <article key={event.eventId}><strong>{event.eventType}</strong><span>{event.occurredAt}</span></article>)}
+            </div>
+            {orderGroupDetail.value.eventTotal > 0 && (
+              <div className="line-pagination-bar">
+                <span>共 {orderGroupDetail.value.eventTotal} 筆事件</span>
+                <div className="line-pagination-controls">
+                  <button type="button" aria-label="上一頁群組事件" disabled={orderGroupDetail.value.eventPage <= 1} className="line-page-btn" onClick={() => openOrderGroup(orderGroupDetail.value!.record.caseNo, orderGroupDetail.value!.eventPage - 1)}>‹</button>
+                  <span>第 {orderGroupDetail.value.eventPage} / {Math.max(1, orderGroupDetail.value.eventTotalPages)} 頁</span>
+                  <button type="button" aria-label="下一頁群組事件" disabled={orderGroupDetail.value.eventPage >= orderGroupDetail.value.eventTotalPages} className="line-page-btn" onClick={() => openOrderGroup(orderGroupDetail.value!.record.caseNo, orderGroupDetail.value!.eventPage + 1)}>›</button>
+                </div>
+              </div>
+            )}
+          </>}
+        </div>
+      </Drawer>
 
       <Drawer isOpen={selectedRule !== null} onClose={() => setSelectedRule(null)} title="通知規則" footer={<div className="line-drawer-footer"><button type="button" onClick={() => setSelectedRule(null)}>關閉</button></div>}>{selectedRule && <div className="line-drawer-content" data-control-id="line.notification-rule.detail"><div className="line-detail-grid"><div><span>事件</span><strong>{selectedRule.eventLabel}</strong></div><div><span>收件人</span><strong>{selectedRule.recipientLabel}</strong></div><div><span>通知內容</span><strong>{selectedRule.templateId ? '已設定' : '尚未設定'}</strong></div><div><span>狀態</span><strong>{selectedRule.enabled ? '已啟用' : '未啟用'}</strong></div></div><p>{selectedRule.scheduleLabel}｜{selectedRule.frequencyLabel}</p>{selectedRule.predicateLabels.length > 0 && <p>條件：{selectedRule.predicateLabels.join('、')}</p>}</div>}</Drawer>
 

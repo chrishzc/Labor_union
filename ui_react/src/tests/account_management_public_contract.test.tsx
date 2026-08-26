@@ -26,11 +26,12 @@ describe('Account Management public mutation contract', () => {
     await screen.findByText('root-user');
     fireEvent.change(screen.getByLabelText('操作原因'), { target: { value: 'security review' } });
     fireEvent.click(screen.getByRole('button', { name: /強制登出/ }));
-    await waitFor(() => expect(screen.getByText(/account-sessions-revoke/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('帳號操作已完成，清冊已重新整理。')).toBeInTheDocument());
     expect(command).toHaveBeenCalledWith(1, expect.objectContaining({
       reason: 'security review', expected_version: 2, idempotency_key: expect.stringMatching(/^account-/),
     }));
     expect(screen.queryByText('a'.repeat(64))).not.toBeInTheDocument();
+    expect(screen.queryByText(/account-sessions-revoke|版本 3|重播|首次執行/)).not.toBeInTheDocument();
     expect(screen.queryByText(/password|secret|recovery code/i)).not.toBeInTheDocument();
   });
 });

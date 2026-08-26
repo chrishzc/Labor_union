@@ -1,4 +1,7 @@
-"""HTTP schemas for LINE order-group status and immutable event history."""
+"""
+File: line_order_groups.py
+Description: 定義 LINE 訂單群組、不可變事件與 numbered observation HTTP schemas。
+"""
 
 from __future__ import annotations
 
@@ -19,6 +22,12 @@ class LineOrderGroupPageResponse(BaseModel):
     total: int
 
 
+class LineOrderGroupNumberedPageResponse(LineOrderGroupPageResponse):
+    page: int
+    page_size: int
+    total_pages: int
+
+
 class LineOrderGroupEventResponse(BaseModel):
     event_id: int
     case_no: str
@@ -31,8 +40,18 @@ class LineOrderGroupEventResponse(BaseModel):
     )
 
 
+class LineOrderGroupEventPageResponse(BaseModel):
+    items: list[LineOrderGroupEventResponse]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
 __all__ = [
     "LineOrderGroupEventResponse",
+    "LineOrderGroupEventPageResponse",
+    "LineOrderGroupNumberedPageResponse",
     "LineOrderGroupPageResponse",
     "LineOrderGroupRecord",
 ]

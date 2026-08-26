@@ -13,9 +13,10 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from api.dependencies.admin_auth import (
+    require_admin,
     require_line_configuration_reader,
-    require_line_menu_publisher,
     require_line_viewer,
+    require_persisted_admin,
 )
 from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_error_handlers
 from api.routes import line_rich_menus
@@ -175,8 +176,9 @@ def _client(
     app = FastAPI()
     app.include_router(line_rich_menus.router)
     app.dependency_overrides[require_line_viewer] = authorize
+    app.dependency_overrides[require_admin] = authorize
     app.dependency_overrides[require_line_configuration_reader] = authorize
-    app.dependency_overrides[require_line_menu_publisher] = authorize
+    app.dependency_overrides[require_persisted_admin] = authorize
     app.add_middleware(CorrelationBoundaryMiddleware)
     install_typed_error_handlers(app)
     return TestClient(app), requests

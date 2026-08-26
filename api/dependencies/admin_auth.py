@@ -117,6 +117,20 @@ def require_root(principal: AdminPrincipal = Depends(require_admin)) -> AdminPri
     return principal
 
 
+def require_persisted_admin(
+    request: Request,
+    principal: AdminPrincipal = Depends(require_admin),
+) -> AdminPrincipal:
+    """Require an enabled, persisted human session for durable business commands."""
+    if principal.id is None or not principal.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="需要已登入且啟用的內部使用者 Session",
+        )
+    request.state.admin_actor = admin_actor_context(principal)
+    return principal
+
+
 def require_role(minimum_role: str) -> Callable[..., AdminPrincipal]:
     def dependency(principal: AdminPrincipal = Depends(require_admin)) -> AdminPrincipal:
         if not has_required_role(principal, minimum_role):

@@ -168,7 +168,9 @@ export const LineIdentityReviewViewSchema = z
 export const LineIdentityReviewPageViewSchema = z
   .object({
     items: z.array(LineIdentityReviewViewSchema),
-    next_cursor: z.string().nullable(),
+    page: z.number().int().min(1),
+    page_size: z.number().int().min(1).max(100),
+    total: z.number().int().nonnegative(),
   })
   .strict();
 
@@ -194,8 +196,8 @@ export const LineIdentityReviewListQuerySchema = z
   .object({
     review_status: LineIdentityReviewStatusSchema.optional(),
     review_type: LineIdentityReviewTypeSchema.optional(),
+    page: z.number().int().min(1).optional(),
     page_size: z.number().int().min(1).max(100).optional(),
-    cursor: z.string().min(1).max(191).optional(),
   })
   .strict();
 

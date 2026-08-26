@@ -122,6 +122,15 @@ describe('Rich Menu publication actions', () => {
   });
 
   it('retry 只對 publish_retryable_failed 顯示，且需要原因與確認', async () => {
+    sessionClient.setSession('enabled-internal-session', {
+      id: 9,
+      username: 'enabled-internal-test',
+      display_name: '啟用內部使用者測試',
+      role: 'operator',
+      capabilities: [],
+      is_root: false,
+      access_control_version: 1,
+    });
     const retry = vi.fn().mockResolvedValue({
       id: 23,
       menu_definition_id: 'customer-menu',

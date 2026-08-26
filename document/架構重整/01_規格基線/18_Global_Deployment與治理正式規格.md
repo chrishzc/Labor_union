@@ -9,8 +9,12 @@
 - Logical deployment topology：`consolidated-decision`
 - Deployment profile／target-host acceptance：`retired-by-user-2026-08-09`
 - ADAD／Checkpoint／Source Lock／system map gate：`historical`
-- 當前核准只啟用 Inventory v2 evidence；本文件 migration、deployment、release、
-  pytest 與 recovery contract 不授權本輪執行任何 mutation。
+- 2026-08-26 人工已核准 Cloud／worker／alert sink qualification、部署計畫、隔離環境 rehearsal
+  與 rollback 準備；先前「只啟用 Inventory v2 evidence」的本輪限制由本項 supersede。
+- 這項核准不恢復已退役的 deployment profile／target-host application gate，也不直接授權猜測
+  production／`union_db` 目標、外部 deployment、entry switch 或不可逆 cutover。實際外部執行前仍須
+  回讀 exact environment、host／project、credential class、operator、budget／quota、maintenance window、
+  backup／rollback 與 readback，並由涵蓋該精確 target 的 Work Package 進入 `execution_approved`。
 
 本文件固定安全邊界、release state machine 與人工批准點；不把單一廠商或機器名稱
 寫成業務 Domain 依賴。
@@ -108,6 +112,11 @@ request binding，不能取代已驗證的 OIDC identity。local/test 可使用�
 設定，也不以 target-host acceptance 作為程式 release gate。這些是部署者的外部作業選擇，
 不得寫入 application config、schema、API 或 UI。第 2 節的資料庫私網、HTTPS、secret
 不入 Git 與 preserve-data release 安全不變量仍然有效。
+
+2026-08-26 current execution authorization 允許在上述邊界內完成 deployment source inventory、
+isolated qualification、preflight、rehearsal 與 rollback plan；它是施工與驗收授權，不是 production
+target fact，也不能建立或填補 deployment profile。任何外部 mutation 都必須在執行當下以精確 target
+與 receipt 證明，未解析 target 固定 fail closed。
 
 ## 5. Subsystem：Release Orchestration
 

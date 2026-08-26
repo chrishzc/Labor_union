@@ -3,7 +3,7 @@
  * Description: 驗證 Fetch 傳輸、嚴格 Global error 與逾時中斷防護。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { transport } from '../api/shared/transport';
+import { ADMIN_SESSION_UNAUTHORIZED_EVENT, transport } from '../api/shared/transport';
 import {
   ApiAbortError,
   ApiHttpError,
@@ -138,6 +138,26 @@ describe('Shared API Transport Client', () => {
       expect(httpErr.message).toBe('帳號或密碼錯誤');
       expect(httpErr.retryable).toBe(false);
     }
+  });
+
+  it('只有帶入的人員 Session token 收到 401 時才發出精確失效事件', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ detail: '管理員 Session 已失效或過期' }),
+    });
+    const events: CustomEvent[] = [];
+    const listener = (event: Event) => events.push(event as CustomEvent);
+    window.addEventListener(ADMIN_SESSION_UNAUTHORIZED_EVENT, listener);
+
+    await expect(transport.get('/api/v1/admin/auth/me', { token: 'expired-human-token' })).rejects.toThrow(ApiHttpError);
+    await expect(transport.post('/api/v1/admin/auth/login/challenges', {})).rejects.toThrow(ApiHttpError);
+
+    window.removeEventListener(ADMIN_SESSION_UNAUTHORIZED_EVENT, listener);
+    expect(events).toHaveLength(1);
+    expect(events[0].detail).toEqual({ rejectedToken: 'expired-human-token' });
   });
 
   it('完整八欄 nested detail.error 應嚴格解碼、傳遞 login code 並保留 raw payload', async () => {

@@ -1,6 +1,6 @@
 """
 File: line_configurations.py
-Description: 提供 LINE 設定的安全唯讀查詢與既有預覽、套用相容端點。
+Description: 提供 LINE 設定安全查詢與通用 mutation，並封閉 Rich Menu 專用草稿旁路。
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from api.dependencies.admin_auth import (
     require_line_configuration_reader,
 )
 from api.dependencies.line_runtime import get_line_configuration_application
+from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.line_configurations import (
     ApplyLineConfigurationRequest,
@@ -71,8 +72,10 @@ def get_safe_configuration(
 @router.get("/{kind}", response_model=BaseResponse[dict])
 def get_configuration(
     kind: LineConfigurationKind,
+    request: Request,
     principal: AdminPrincipal = Depends(require_line_configuration_reader),
 ):
+    _require_dedicated_rich_menu_draft(kind, request)
     snapshot = get_line_configuration_application().get(
         kind,
         admin_actor_context(principal),
@@ -84,8 +87,10 @@ def get_configuration(
 def preview_configuration(
     kind: LineConfigurationKind,
     payload: PreviewLineConfigurationRequest,
+    request: Request,
     principal: AdminPrincipal = Depends(require_line_configuration_manager),
 ):
+    _require_dedicated_rich_menu_draft(kind, request)
     try:
         candidate = get_line_configuration_application().preview(
             kind,
@@ -113,6 +118,7 @@ def apply_configuration(
     request: Request,
     principal: AdminPrincipal = Depends(require_line_configuration_manager),
 ):
+    _require_dedicated_rich_menu_draft(kind, request)
     try:
         result = get_line_configuration_application().apply(
             kind=kind,
@@ -137,6 +143,27 @@ def _snapshot(snapshot) -> dict[str, object]:
         "revision": snapshot.revision.value,
         "definition": json.loads(snapshot.definition_json),
     }
+
+
+def _require_dedicated_rich_menu_draft(
+    kind: LineConfigurationKind,
+    request: Request,
+) -> None:
+    if kind is not LineConfigurationKind.RICH_MENUS:
+        return
+    correlation_id = getattr(
+        request.state,
+        "correlation_id",
+        "line-rich-menu-draft-successor",
+    )
+    raise typed_http_error(
+        410,
+        "domain_blocked",
+        "line_rich_menu_generic_configuration_retired",
+        "Rich Menu 草稿不可使用通用設定端點；請改用專用 "
+        "/api/v1/line/rich-menus/draft 契約。",
+        correlation_id,
+    )
 
 
 def _safe_query_error(code: str, *, retryable: bool) -> HTTPException:

@@ -1,6 +1,6 @@
 /**
  * File: line_order_group_query_client.ts
- * Description: 以 fresh Session 查詢 LINE 訂單群組清單、明細與事件，驗證 request identity 與頁面界線。
+ * Description: 以 fresh Session 查詢 LINE 訂單群組 numbered 清單、明細與事件，驗證 identity 與分頁界線。
  */
 import type { ZodType } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -8,13 +8,14 @@ import { ApiDecodeError } from '../shared/typed_errors';
 import { transport } from '../shared/transport';
 import { LineOrderGroupQueryError, mapLineOrderGroupQueryError } from './line_order_group_query_errors';
 import {
-  LineOrderGroupEventsSchema, LineOrderGroupPageSchema, LineOrderGroupRecordSchema,
-  LineOrderGroupStatusSchema, type LineOrderGroupEvent, type LineOrderGroupPage,
+  LineOrderGroupEventPageSchema, LineOrderGroupPageSchema, LineOrderGroupRecordSchema,
+  LineOrderGroupStatusSchema, type LineOrderGroupEventPage, type LineOrderGroupPage,
   type LineOrderGroupRecord, type LineOrderGroupStatus,
 } from './line_order_group_query_schemas';
 
 export interface LineOrderGroupQueryOptions { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; }
-export interface LineOrderGroupListQuery { status?: LineOrderGroupStatus; limit?: number; }
+export interface LineOrderGroupListQuery { status?: LineOrderGroupStatus; page?: number; pageSize?: number; }
+export interface LineOrderGroupEventQuery { page?: number; pageSize?: number; }
 
 function options(input?: LineOrderGroupQueryOptions) {
   const token = sessionClient.getToken();
@@ -34,9 +35,9 @@ function decode<T>(schema: ZodType<T>, raw: unknown): T {
   return parsed.data;
 }
 
-function assertLimit(limit: number | undefined): void {
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 200)) {
-    throw new LineOrderGroupQueryError('LINE_ORDER_GROUP_VALIDATION', 'limit 無效。');
+function assertPageBoundary(value: number | undefined, field: 'page' | 'pageSize'): void {
+  if (value !== undefined && (!Number.isInteger(value) || value < 1 || (field === 'pageSize' && value > 200))) {
+    throw new LineOrderGroupQueryError('LINE_ORDER_GROUP_VALIDATION', `${field} 無效。`);
   }
 }
 
@@ -54,11 +55,17 @@ export const lineOrderGroupQueryClient = {
   async list(query: LineOrderGroupListQuery = {}, input?: LineOrderGroupQueryOptions): Promise<LineOrderGroupPage> {
     try {
       if (query.status) LineOrderGroupStatusSchema.parse(query.status);
-      assertLimit(query.limit);
-      const data = decode(LineOrderGroupPageSchema, await transport.get('/api/v1/line/order-groups', {
-        ...options(input), params: { status: query.status, limit: query.limit },
+      assertPageBoundary(query.page, 'page');
+      assertPageBoundary(query.pageSize, 'pageSize');
+      const page = query.page ?? 1;
+      const pageSize = query.pageSize ?? 25;
+      const data = decode(LineOrderGroupPageSchema, await transport.get('/api/v1/line/order-groups/numbered', {
+        ...options(input), params: { status: query.status, page, page_size: pageSize },
       }));
-      if (data.items.length > data.total || (query.limit !== undefined && data.items.length > query.limit)) {
+      if (
+        data.page !== page || data.page_size !== pageSize || data.items.length > pageSize ||
+        data.items.length > data.total || data.total_pages !== Math.ceil(data.total / pageSize)
+      ) {
         throw new LineOrderGroupQueryError('LINE_ORDER_GROUP_PAGE_MISMATCH', '訂單群組 page aggregate 不一致。');
       }
       return data;
@@ -74,15 +81,21 @@ export const lineOrderGroupQueryClient = {
     } catch (error) { throw mapLineOrderGroupQueryError(error); }
   },
 
-  async events(caseNo: string, limit?: number, input?: LineOrderGroupQueryOptions): Promise<LineOrderGroupEvent[]> {
+  async events(caseNo: string, query: LineOrderGroupEventQuery = {}, input?: LineOrderGroupQueryOptions): Promise<LineOrderGroupEventPage> {
     try {
       const canonical = assertCaseNo(caseNo);
-      assertLimit(limit);
-      const data = decode(LineOrderGroupEventsSchema, await transport.get(`/api/v1/line/order-groups/${encodeURIComponent(canonical)}/events`, {
-        ...options(input), params: { limit },
+      assertPageBoundary(query.page, 'page');
+      assertPageBoundary(query.pageSize, 'pageSize');
+      const page = query.page ?? 1;
+      const pageSize = query.pageSize ?? 25;
+      const data = decode(LineOrderGroupEventPageSchema, await transport.get(`/api/v1/line/order-groups/${encodeURIComponent(canonical)}/events/numbered`, {
+        ...options(input), params: { page, page_size: pageSize },
       }));
-      data.forEach((event) => assertCaseIdentity(canonical, event.case_no));
-      if (limit !== undefined && data.length > limit) throw new LineOrderGroupQueryError('LINE_ORDER_GROUP_PAGE_MISMATCH', '訂單群組 events 超出 request limit。');
+      data.items.forEach((event) => assertCaseIdentity(canonical, event.case_no));
+      if (
+        data.page !== page || data.page_size !== pageSize || data.items.length > pageSize ||
+        data.items.length > data.total || data.total_pages !== Math.ceil(data.total / pageSize)
+      ) throw new LineOrderGroupQueryError('LINE_ORDER_GROUP_PAGE_MISMATCH', '訂單群組 events page aggregate 不一致。');
       return data;
     } catch (error) { throw mapLineOrderGroupQueryError(error); }
   },

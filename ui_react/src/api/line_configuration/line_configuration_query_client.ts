@@ -25,12 +25,17 @@ import {
 
 export const LINE_CONFIGURATION_QUERY_TIMEOUT_MS = 10_000;
 export const LINE_RICH_MENU_PUBLICATIONS_PAGE = 1;
-export const LINE_RICH_MENU_PUBLICATIONS_PAGE_SIZE = 100;
+export const LINE_RICH_MENU_PUBLICATIONS_PAGE_SIZE = 25;
 
 export interface LineConfigurationQueryRequestOptions {
   signal?: AbortSignal;
   headers?: Record<string, string>;
   baseUrl?: string;
+}
+
+export interface LineRichMenuPublicationListOptions extends LineConfigurationQueryRequestOptions {
+  page?: number;
+  pageSize?: number;
 }
 
 export interface LineConfigurationQueryClient {
@@ -41,7 +46,7 @@ export interface LineConfigurationQueryClient {
     options?: LineConfigurationQueryRequestOptions
   ): Promise<LineRichMenuConfiguration>;
   listRichMenuPublications(
-    options?: LineConfigurationQueryRequestOptions
+    options?: LineRichMenuPublicationListOptions
   ): Promise<LineRichMenuPublicationPage>;
   getRichMenuPublication(
     publicationId: number,
@@ -90,6 +95,13 @@ function requirePublicationId(publicationId: number): number {
   return publicationId;
 }
 
+function requirePositiveInteger(value: number, label: string): number {
+  if (!Number.isInteger(value) || value < 1) {
+    throw new LineConfigurationQueryRequestError(`${label}必須為正整數。`);
+  }
+  return value;
+}
+
 async function read<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();
@@ -123,14 +135,16 @@ export async function getLineRichMenuConfiguration(
 }
 
 export async function listLineRichMenuPublications(
-  options?: LineConfigurationQueryRequestOptions
+  options?: LineRichMenuPublicationListOptions
 ): Promise<LineRichMenuPublicationPage> {
   return read(async () => {
+    const page = requirePositiveInteger(options?.page ?? LINE_RICH_MENU_PUBLICATIONS_PAGE, '頁碼');
+    const pageSize = requirePositiveInteger(options?.pageSize ?? LINE_RICH_MENU_PUBLICATIONS_PAGE_SIZE, '每頁筆數');
     const raw = await transport.get<object>('/api/v1/line/rich-menus/publications', {
       ...readRequestOptions(options),
       params: {
-        page: LINE_RICH_MENU_PUBLICATIONS_PAGE,
-        page_size: LINE_RICH_MENU_PUBLICATIONS_PAGE_SIZE,
+        page,
+        page_size: pageSize,
       },
     });
     return decodeEnvelope(LineRichMenuPublicationPageSchema, raw);
@@ -165,7 +179,7 @@ class DefaultLineConfigurationQueryClient implements LineConfigurationQueryClien
   }
 
   listRichMenuPublications(
-    options?: LineConfigurationQueryRequestOptions
+    options?: LineRichMenuPublicationListOptions
   ): Promise<LineRichMenuPublicationPage> {
     return listLineRichMenuPublications(options);
   }

@@ -238,7 +238,7 @@ def test_active_liff_pages_do_not_accept_query_string_user_id() -> None:
         assert 'get("userId")' not in source
 
 
-def test_staff_schedule_page_uses_strict_leave_flow_but_keeps_service_log_locked() -> None:
+def test_staff_schedule_page_uses_strict_leave_and_text_log_flows() -> None:
     source = (ROOT / "line" / "static" / "staff_schedule.html").read_text(
         encoding="utf-8"
     )
@@ -246,19 +246,19 @@ def test_staff_schedule_page_uses_strict_leave_flow_but_keeps_service_log_locked
     assert "/api/v1/line/staff-self-service/leave-requests/preview" in source
     assert "/api/v1/line/staff-self-service/leave-requests/apply" in source
     assert "/query`" in source
-    assert "/api/v1/line/staff-self-service/service-day-logs" not in source
+    assert "/api/v1/line/staff-self-service/service-day-logs/preview" in source
+    assert "/api/v1/line/staff-self-service/service-day-logs/apply" in source
     assert "/api/v1/line/staff-self-service/service-day-media" not in source
-    assert "尚缺 Preview／Apply／receipt" in source
-    assert "請聯絡工會人員人工處理" in source
+    assert "等待受控檔案儲存區完成" in source
     assert 'development_line_user_id: ""' in source
     assert 'params.get("userId")' not in source
     assert '"line_user_id"' not in source
     assert "function requireStaffSchedule" in source
     assert 'id="submitLeave"' in source
     assert 'disabled>預覽請假待辦</button>' in source
-    assert 'id="submitLog" class="primary" disabled' in source
+    assert 'id="previewLog" class="primary" type="button" disabled' in source
     assert 'addEventListener("click", submitLeave)' in source
-    assert 'addEventListener("click", submitServiceDayLog)' not in source
+    assert 'addEventListener("click", previewServiceDayLog)' in source
     assert "重新登入 LINE" in source
     assert 'redirect.searchParams.set("target", "staff_schedule")' in source
     assert 'liff.login({redirectUri: redirect.toString()})' in source

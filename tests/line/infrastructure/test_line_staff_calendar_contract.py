@@ -59,7 +59,7 @@ def test_staff_schedule_page_distinguishes_waiting_lock_rest_and_unavailability(
     assert 'item.status === "staff_unavailability"' in source
 
 
-def test_staff_schedule_query_and_leave_mutation_use_typed_preview_apply_readback() -> None:
+def test_staff_schedule_mutations_use_typed_preview_apply_readback() -> None:
     source = (ROOT / "line" / "static" / "staff_schedule.html").read_text(
         encoding="utf-8"
     )
@@ -74,13 +74,17 @@ def test_staff_schedule_query_and_leave_mutation_use_typed_preview_apply_readbac
     assert "confirmLeave" in source
     assert 'idempotencyKey: `staff-leave-${crypto.randomUUID()}`' in source
     assert '"Idempotency-Key": candidate.idempotencyKey' in source
-    assert "/service-day-logs" not in source
+    assert "/service-day-logs/preview" in source
+    assert "/service-day-logs/apply" in source
+    assert "/service-day-logs/${committed.log_id}/query" in source
+    assert "送出結果尚未確認。請勿重複送出" in source
+    assert "日誌已送出，但目前無法重新讀取結果。請勿重複送出" in source
     assert "/service-day-media" not in source
-    assert "請聯絡工會人員人工處理" in source
+    assert "等待受控檔案儲存區完成" in source
     assert "requires_cooking" in source
-    assert "updateServiceDayOptions" not in source
+    assert "selectServiceDay" in source
     assert "Preview 指紋" not in source
-    assert 'id="babyLog"' in source and 'placeholder="正式流程接通後開放" disabled' in source
+    assert 'id="babyLog"' in source and 'placeholder="選擇服務日後填寫" disabled' in source
     assert 'id="mealPhoto"' in source and 'accept="image/jpeg,image/png,image/webp" disabled' in source
 
 

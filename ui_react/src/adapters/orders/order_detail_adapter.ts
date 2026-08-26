@@ -29,6 +29,26 @@ const readableCandidateReason = (reason: string | null): string | null => {
   return /^[?\uFFFD]+$/u.test(canonical) ? '原因文字無法辨識' : canonical;
 };
 
+const candidateInformationStatusLabel = (status: string | null | undefined): string => ({
+  queued: '已排入，等待處理',
+  pending: '已排入，等待處理',
+  sent: 'LINE 已接受發送',
+  manually_confirmed: '已人工確認送達',
+  retryable_failed: '暫時失敗，等待重試',
+  failed: '發送失敗',
+  cancelled: '已取消',
+}[status ?? ''] ?? (status ? '狀態待確認' : '尚未建立'));
+
+const customerProfilesStatusLabel = (status: string | null | undefined): string | null => status === null || status === undefined
+  ? null
+  : ({
+      pending: '等待排入',
+      projected: '已排入發送',
+      failed: '發送失敗',
+      cancelled: '已取消',
+      manually_confirmed: '已人工確認送達',
+    }[status] ?? '狀態待確認');
+
 export interface ServiceDateConfirmationDrawerViewModel {
   caseNo: string;
   actualStartDate: string;
@@ -56,7 +76,9 @@ export interface CandidatePoolItemViewModel {
   serviceRange: string;
   contactStatus: 'active' | 'selected' | 'withdrawn';
   info1Status: string;
+  info1StatusLabel: string;
   info2Status: string;
+  info2StatusLabel: string;
   willingness: 'pending' | 'willing' | 'unwilling';
   willingnessLabel: string;
   reason: string | null;
@@ -76,6 +98,7 @@ export interface MatchingWorkbenchDrawerViewModel {
   planId: string;
   status: string;
   customerProfilesStatus: string | null;
+  customerProfilesStatusLabel: string | null;
   candidatePool: CandidatePoolItemViewModel[];
   assignmentSegments: AssignmentSegmentViewModel[];
   serviceTimeText: string;
@@ -201,6 +224,7 @@ export function adaptMatchingWorkbenchDrawer(params: {
       ? '已接受'
       : activePlan?.status === 'proposed' ? '提案中' : '無進行中方案',
     customerProfilesStatus: customerProfilesStatus ?? null,
+    customerProfilesStatusLabel: customerProfilesStatusLabel(customerProfilesStatus),
     candidatePool: (candidateContactPool?.candidates ?? []).map((candidate) => ({
       candidateId: candidate.id,
       staffId: candidate.staff_id,
@@ -210,7 +234,9 @@ export function adaptMatchingWorkbenchDrawer(params: {
       serviceRange: `${candidate.service_start_date} ~ ${candidate.service_end_date}`,
       contactStatus: candidate.status,
       info1Status: candidate.information['1']?.status ?? '尚未建立',
+      info1StatusLabel: candidateInformationStatusLabel(candidate.information['1']?.status),
       info2Status: candidate.information['2']?.status ?? '尚未建立',
+      info2StatusLabel: candidateInformationStatusLabel(candidate.information['2']?.status),
       willingness: candidate.willingness,
       willingnessLabel: candidate.willingness === 'willing'
         ? '願意'

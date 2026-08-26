@@ -1,4 +1,7 @@
-"""Typed application contracts for order-group binding and invitation relay."""
+"""
+File: order_group_contracts.py
+Description: 定義 LINE 訂單群組綁定、邀請與唯讀 numbered query 的 typed contracts。
+"""
 
 from __future__ import annotations
 
@@ -115,12 +118,32 @@ class LineOrderGroupPage:
     total: int
 
 
+@dataclass(frozen=True, slots=True)
+class LineOrderGroupNumberedPage:
+    items: tuple[LineOrderGroupBindingSnapshot, ...]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+@dataclass(frozen=True, slots=True)
+class LineOrderGroupEventPage:
+    items: tuple[LineOrderGroupEventRecord, ...]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
 __all__ = [
     "BindLineOrderGroupCommand",
     "BindLineOrderGroupResult",
     "GetLineOrderGroupQuery",
     "LineOrderGroupCommandOutcome",
     "LineOrderGroupEventRecord",
+    "LineOrderGroupEventPage",
+    "LineOrderGroupNumberedPage",
     "LineOrderGroupPage",
     "LineOrderGroupQueryResult",
     "LinkedLineAdmin",

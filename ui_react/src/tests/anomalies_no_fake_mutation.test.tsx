@@ -87,14 +87,8 @@ describe('Anomalies no fake root mutation verification suite', () => {
     expect(screen.getByText(/沒有可直接使用的帳務更正表單/)).toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="anomalies.finance-correction"]')).toBeNull();
 
-    // Check resolve button
-    const resolveBtn = screen.getByRole('button', { name: /確認排除異常/ });
-    expect(resolveBtn).toBeDisabled();
-    expect(resolveBtn).toHaveAttribute('data-control-id', 'anomalies.drawer.resolve');
-    expect(resolveBtn).toHaveAttribute('title', expect.stringContaining('不會取代原始資料的修正'));
-
-    // Attempt click
-    fireEvent.click(resolveBtn);
+    expect(screen.getByText(/系統會自動重新核對異常/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: /確認排除異常/ })).not.toBeInTheDocument();
 
     expect(alertSpy).not.toHaveBeenCalled();
     expect(confirmSpy).not.toHaveBeenCalled();

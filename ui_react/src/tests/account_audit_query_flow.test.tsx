@@ -23,8 +23,8 @@ describe('Account Audit query flow', () => {
     await waitFor(() => expect(screen.getByText('root-user')).toBeInTheDocument());
     expect(list).not.toHaveBeenCalled();
     expect(detail).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('tab', { name: /安全操作與 Session/ }));
-    await waitFor(() => expect(screen.getByText('authentication')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: /安全操作與登入稽核/ }));
+    await waitFor(() => expect(screen.getByText('登入驗證')).toBeInTheDocument());
     expect(list).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: '查看' }));
     await waitFor(() => expect(screen.getByText('provided')).toBeInTheDocument());
@@ -37,8 +37,8 @@ describe('Account Audit query flow', () => {
     let finish: ((value: typeof AUDIT_DETAIL_FIXTURE) => void) | undefined;
     vi.spyOn(auditQueryClient, 'detail').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
     render(<AccountManagementPage />);
-    fireEvent.click(screen.getByRole('tab', { name: /安全操作與 Session/ }));
-    await screen.findByText('authentication');
+    fireEvent.click(screen.getByRole('tab', { name: /安全操作與登入稽核/ }));
+    await screen.findByText('登入驗證');
     fireEvent.click(screen.getByRole('button', { name: '查看' }));
     fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
     finish?.(AUDIT_DETAIL_FIXTURE);

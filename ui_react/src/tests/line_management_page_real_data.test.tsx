@@ -1,6 +1,6 @@
 /**
  * File: line_management_page_real_data.test.tsx
- * Description: 驗證 LINE 管理頁以 typed client 呈現六個 canonical 頁籤、客服 KPI 與遮罩身分。
+ * Description: 驗證 LINE 管理頁以 typed client 呈現六頁籤、客服 KPI 狀態與遮罩身分，不把未知資料偽裝為零。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +9,9 @@ import type { LineIdentityClient } from '../api/line_identity/line_identity_clie
 import { lineRuntimeTargetClient } from '../api/line_runtime_targets/line_runtime_target_client';
 import { customerServiceEscalationClient } from '../api/customer_service_escalations/customer_service_escalation_client';
 import { lineDeliveryQueryClient } from '../api/line_delivery/line_delivery_query_client';
+import { lineOrderGroupQueryClient } from '../api/line_order_groups/line_order_group_query_client';
+import type { LineConfigurationQueryClient } from '../api/line_configuration/line_configuration_query_client';
+import type { LineRichMenuDraftClient } from '../api/line_rich_menu_draft/line_rich_menu_draft_client';
 import { LineManagementPage } from '../pages/LineManagementPage';
 import {
   CUSTOMER_SERVICE_DETAIL_FIXTURE,
@@ -85,6 +88,35 @@ describe('LINE 管理頁真實資料呈現', () => {
     expect(document.body.textContent).not.toContain('U9a8');
   });
 
+  it('客服摘要與清單仍在載入時不顯示假零 KPI 或假空工單', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
+    const { customer, identity } = clients();
+    const pending = new Promise<never>(() => undefined);
+    vi.mocked(customer.getSummary).mockReturnValue(pending);
+    vi.mocked(customer.listTickets).mockReturnValue(pending);
+
+    render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
+
+    await screen.findByText('正在載入客服摘要…');
+    expect(screen.getByText('正在載入客服工單…')).toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="line.ticket.summary.waiting"]')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '目前沒有符合篩選條件的客服工單' })).not.toBeInTheDocument();
+  });
+
+  it('客服摘要與清單載入失敗時只顯示錯誤，不顯示假零 KPI 或假空工單', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
+    const { customer, identity } = clients();
+    vi.mocked(customer.getSummary).mockRejectedValue(new Error('summary failed'));
+    vi.mocked(customer.listTickets).mockRejectedValue(new Error('list failed'));
+
+    render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
+
+    await screen.findByText('客服摘要載入失敗');
+    expect(screen.getByText('客服工單清單載入失敗')).toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="line.ticket.summary.waiting"]')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '目前沒有符合篩選條件的客服工單' })).not.toBeInTheDocument();
+  });
+
   it('切到身分頁才查詢清單，只呈現遮罩 LINE ID', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
     const { customer, identity } = clients();
@@ -149,9 +181,70 @@ describe('LINE 管理頁真實資料呈現', () => {
     expect(screen.getByLabelText('來源案件／事件參考')).toBeVisible();
     expect(document.body).not.toHaveTextContent(/Preview 指紋|SHA-256/);
 
+    fireEvent.change(screen.getByLabelText('來源案件／事件參考'), {
+      target: { value: 'ticket-referral-31' },
+    });
+    expect(screen.getByText('需先完成來源事件核對並補齊進階來源資料，才能預覽建立。')).toBeVisible();
+
     fireEvent.click(screen.getByText('進階來源資料'));
     expect(checksumLabel).toBeVisible();
     expect(screen.getByLabelText('自動化暫停範圍')).toBeVisible();
+  });
+
+  it('沒有已連結 LINE 的管理員候選時顯示明確原因，不留下無說明的停用控制', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
+    const { customer, identity } = clients();
+    const runtimeTarget = {
+      ...lineRuntimeTargetClient,
+      listTargets: vi.fn(async () => []),
+      listAdminCandidates: vi.fn(async () => []),
+    } as typeof lineRuntimeTargetClient;
+
+    render(
+      <LineManagementPage
+        customerService={customer}
+        lineIdentity={identity}
+        runtimeTarget={runtimeTarget}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /6\. 安全設定與人工升級/ }));
+
+    await screen.findByText(/目前沒有已連結 LINE 且可加入的管理員/);
+    expect(screen.queryByLabelText('新增管理員對象：')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '➕ 預覽新增通知對象' })).not.toBeInTheDocument();
+  });
+
+  it('三方服務群組依 server metadata 翻到第 2 頁並鎖定末頁', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
+    const { customer, identity } = clients();
+    vi.spyOn(lineOrderGroupQueryClient, 'list').mockImplementation(async (query) => ({
+      items: [{
+        case_no: query?.page === 2 ? 'CASE-26' : 'CASE-1',
+        group_id: null,
+        status: 'active',
+        version: 1,
+      }],
+      page: query?.page ?? 1,
+      page_size: query?.pageSize ?? 25,
+      total: 26,
+      total_pages: 2,
+    }));
+
+    render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
+    fireEvent.click(screen.getByRole('button', { name: /5\. 三方服務群組/ }));
+
+    await screen.findByText('#CASE-1');
+    expect(lineOrderGroupQueryClient.list).toHaveBeenLastCalledWith(
+      { page: 1, pageSize: 25 },
+      expect.any(Object),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '下一頁三方服務群組' }));
+    await screen.findByText('#CASE-26');
+    expect(lineOrderGroupQueryClient.list).toHaveBeenLastCalledWith(
+      { page: 2, pageSize: 25 },
+      expect.any(Object),
+    );
+    expect(screen.getByRole('button', { name: '下一頁三方服務群組' })).toBeDisabled();
   });
 
   it('切離安全分頁會取消未完成 Preview，晚到結果不得重新掛回', async () => {
@@ -340,6 +433,105 @@ describe('LINE 管理頁真實資料呈現', () => {
     );
     expect(screen.getByRole('button', { name: '下一頁' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '上一頁' })).toBeEnabled();
-    expect(screen.getByText(/本頁 1 筆，共 26 筆/)).toBeInTheDocument();
+    expect(screen.getByText(/顯示第 26–26 筆，共 26 筆/)).toBeInTheDocument();
+  });
+
+  it('發送明細沿用注入 client 並在關閉 Drawer 時取消 caller request', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
+    const { customer, identity } = clients();
+    const task = {
+      id: 17, task_id: 17, task_type: 'follow_up', source_type: 'customer_service' as const, status: 'sent' as const,
+      scheduled_at: '2026-08-23T10:00:00+08:00', completed_attempts: 1, max_attempts: 3,
+      next_retry_at: null, sent_at: '2026-08-23T10:01:00+08:00', failed_at: null,
+      created_at: '2026-08-23T09:00:00+08:00', updated_at: '2026-08-23T10:01:00+08:00',
+    };
+    const pendingDetail = new Promise<never>(() => undefined);
+    const delivery = {
+      ...lineDeliveryQueryClient,
+      summary: vi.fn(async () => ({
+        total: 1, pending: 0, processing: 0, sent: 1, retryable_failed: 0, failed: 0,
+        cancelled: 0, overdue: 0, sent_today: 1, next_run_at: null,
+        worker_running: true, worker_status: 'healthy' as const,
+      })),
+      list: vi.fn(async () => ({ items: [task], page: 1, page_size: 25, total: 1, total_pages: 1 })),
+      detail: vi.fn(() => pendingDetail),
+    } as typeof lineDeliveryQueryClient;
+    const lineConfiguration = {
+      getNotificationRules: vi.fn(async () => LINE_NOTIFICATION_RULES_CATALOG_FIXTURE),
+      getRichMenuConfiguration: vi.fn(async () => LINE_RICH_MENU_CONFIGURATION_FIXTURE),
+      listRichMenuPublications: vi.fn(async () => ({
+        ...LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE,
+        items: [...LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE.items],
+      })),
+      getRichMenuPublication: vi.fn(async () => LINE_RICH_MENU_PUBLICATION_FIXTURE),
+    };
+
+    render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={lineConfiguration} delivery={delivery} />);
+    fireEvent.click(screen.getByRole('button', { name: /4\. 通知規則目錄/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /查看明細/ }));
+
+    await waitFor(() => expect(delivery.detail).toHaveBeenCalledWith(17, expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    const requestOptions = vi.mocked(delivery.detail).mock.calls[0][1];
+    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    expect(requestOptions?.signal?.aborted).toBe(true);
+  });
+
+  it('Rich Menu 發布紀錄使用 server page metadata 翻頁，末頁不再提供下一頁', async () => {
+    const { customer, identity } = clients();
+    const publications = Array.from({ length: 26 }, (_, index) => ({
+      ...LINE_RICH_MENU_PUBLICATION_FIXTURE,
+      id: index + 1,
+    }));
+    const listRichMenuPublications = vi.fn(async (options?: { page?: number; pageSize?: number }) => {
+      const page = options?.page ?? 1;
+      return {
+        items: page === 2 ? publications.slice(25) : publications.slice(0, 25),
+        page,
+        page_size: options?.pageSize ?? 25,
+        total: 26,
+        total_pages: 2,
+      };
+    });
+    const lineConfiguration: LineConfigurationQueryClient = {
+      getNotificationRules: vi.fn(async () => LINE_NOTIFICATION_RULES_CATALOG_FIXTURE),
+      getRichMenuConfiguration: vi.fn(async () => LINE_RICH_MENU_CONFIGURATION_FIXTURE),
+      listRichMenuPublications,
+      getRichMenuPublication: vi.fn(async () => LINE_RICH_MENU_PUBLICATION_FIXTURE),
+    };
+    const richMenuDraft: LineRichMenuDraftClient = {
+      query: vi.fn(async () => ({
+        kind: 'rich_menus' as const,
+        revision: 1,
+        definition: LINE_RICH_MENU_CONFIGURATION_FIXTURE.definition as any,
+        publication_locks: LINE_RICH_MENU_CONFIGURATION_FIXTURE.definition.menus.map((menu) => ({
+          menu_definition_id: menu.id,
+          configuration_revision: 1,
+          state: 'editable' as const,
+          readonly_reason: null,
+        })),
+      })),
+      preview: vi.fn(),
+      apply: vi.fn(),
+    };
+
+    render(
+      <LineManagementPage
+        customerService={customer}
+        lineIdentity={identity}
+        lineConfiguration={lineConfiguration}
+        richMenuDraft={richMenuDraft}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /2\. 多角色 Rich Menu/ }));
+    expect(await screen.findByText(/第 1／2 頁，\s*顯示第 1–25 筆，\s*共 26 筆/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '上一頁' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
+
+    expect(await screen.findByText(/第 2／2 頁，\s*顯示第 26–26 筆，\s*共 26 筆/)).toBeInTheDocument();
+    expect(listRichMenuPublications).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2, pageSize: 25, signal: expect.any(AbortSignal) }),
+    );
+    expect(screen.getByRole('button', { name: '下一頁' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '上一頁' })).toBeEnabled();
   });
 });

@@ -138,7 +138,7 @@ describe('Scheduling staff leave inbox flow', () => {
     renderLeaveWorkspace();
 
     expect(await screen.findByText(/已確認關聯的請假待辦完成/)).toHaveTextContent('與最新調度結果一致');
-    expect(screen.getByText(/LINE 通知工作/)).toHaveTextContent('已排入可靠發送佇列，尚未證明送達');
+    expect(screen.getByText(/LINE 通知/)).toHaveTextContent('已排入發送，尚未確認送達');
     expect(screen.queryByText(LEAVE_RECEIPT.batch_key)).not.toBeInTheDocument();
     expect(screen.queryByText(/Scheduling v|expected v|resolved v|canonical receipt/)).not.toBeInTheDocument();
     expect(list).toHaveBeenCalledWith('resolved', 100);

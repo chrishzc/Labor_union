@@ -1156,14 +1156,14 @@ function LeaveSubstitutionWorkspace({
 
       {machine.type === 'query_loading' && (
         <div style={{ padding: '24px', textAlign: 'center', background: '#fff8f6', borderRadius: '12px', border: '1px dashed #dec0b6', color: '#ea580c', fontWeight: 700 }}>
-          ⏳ 正在向後端查詢案件 #{normalizedCaseNo} 的正式指派排程…
+          ⏳ 正在查詢案件 #{normalizedCaseNo} 的正式排班…
         </div>
       )}
 
       {draft?.assignments && draft.assignments.length === 0 && machine.type !== 'query_loading' && (
         <div className="leave-substitution-notice" style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '12px', padding: '16px 20px', color: '#92400e' }}>
           <div style={{ fontWeight: 750, fontSize: '0.95rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            ℹ️ 案件 #{normalizedCaseNo} 目前在後端資料庫尚未建立正式指派排程 (Official Schedule)
+            ℹ️ 案件 #{normalizedCaseNo} 目前尚未建立正式排班
           </div>
           <p style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#78350f', lineHeight: 1.5 }}>
             此案件目前處於洽談／媒合階段。若月嫂在<strong>已簽約履約中</strong>發生突發狀況（例如郭萱或王明欣服務中請假），系統將在此工作台提供緊急代班排程調度。
@@ -1343,9 +1343,9 @@ function LeaveSubstitutionWorkspace({
           {draft.receipt.linked_request ? (
             <p>
               關聯的請假待辦已完成；
-              LINE 通知工作：{draft.receipt.linked_request.notification_intent === 'enqueued'
-                ? '已排入可靠發送佇列，尚未證明送達'
-                : '尚未建立通知工作'}。
+              LINE 通知：{draft.receipt.linked_request.notification_intent === 'enqueued'
+                ? '已排入發送，尚未確認送達'
+                : '尚未建立'}。
             </p>
           ) : (
             <p>本次為人工／電話調度，未關聯 LINE 請假待辦。</p>
@@ -2856,7 +2856,7 @@ export const SchedulingPage: React.FC = () => {
                 </h3>
                 {eligibilityState.kind === 'ready' && (
                   <span className="contract-status-pill active" style={{ fontSize: '0.8rem' }}>
-                    Server Projection
+                    已依正式資料檢查
                   </span>
                 )}
               </div>

@@ -14,6 +14,7 @@ import {
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoginPage } from './pages/LoginPage';
 import { sessionClient } from './api/auth/session_client';
+import { ADMIN_SESSION_UNAUTHORIZED_EVENT } from './api/shared/transport';
 import { OrderTrackerPage } from './pages/OrderTrackerPage';
 import { OrdersPage } from './pages/OrdersPage';
 import { SchedulingPage } from './pages/SchedulingPage';
@@ -26,12 +27,12 @@ import { AlertGroupSecurity } from './pages/line_management/AlertGroupSecurity';
 import { ReportsPage } from './pages/ReportsPage';
 import { FinancePage } from './pages/FinancePage';
 import { AnomaliesPage } from './pages/AnomaliesPage';
-import { DataBrowserPage } from './pages/DataBrowserPage';
 import { AccountManagementPage } from './pages/AccountManagementPage';
 import { SystemStatusPage } from './pages/SystemStatusPage';
 import './pages/LineManagementPage.css';
 
 export const HASH_ALIASES: Record<string, PageType> = {
+  databrowser: 'data-browser',
   line: 'line-management',
   'line-management': 'line-management',
   'line-ai': 'line-ai-events',
@@ -69,6 +70,21 @@ export const App: React.FC = () => {
     return () => {
       window.removeEventListener('hashchange', handleHashChange);
     };
+  }, []);
+
+  useEffect(() => {
+    const handleSessionUnauthorized = (event: Event) => {
+      const rejectedToken = event instanceof CustomEvent
+        ? (event.detail as { rejectedToken?: unknown } | null)?.rejectedToken
+        : null;
+      if (typeof rejectedToken !== 'string' || rejectedToken !== sessionClient.getToken()) return;
+      sessionClient.clearSession();
+      setIsLoggedIn(false);
+      window.location.hash = '#login';
+    };
+
+    window.addEventListener(ADMIN_SESSION_UNAUTHORIZED_EVENT, handleSessionUnauthorized);
+    return () => window.removeEventListener(ADMIN_SESSION_UNAUTHORIZED_EVENT, handleSessionUnauthorized);
   }, []);
 
   const handleSelectPage = (page: PageType) => {
@@ -118,7 +134,7 @@ export const App: React.FC = () => {
         {currentPage === 'orders' && <OrdersPage />}
         {currentPage === 'scheduling' && <SchedulingPage />}
         {currentPage === 'staff' && <StaffPage />}
-        {currentPage === 'data-import' && <DataImportPage />}
+        {currentPage === 'data-import' && <DataImportPage initialTab="nas-storage" />}
         {currentPage === 'reports' && <ReportsPage />}
 
         {/* LINE Hub Section */}
@@ -132,7 +148,7 @@ export const App: React.FC = () => {
 
         {/* Audit & System Section */}
         {currentPage === 'anomalies' && <AnomaliesPage />}
-        {currentPage === 'data-browser' && <DataBrowserPage />}
+        {currentPage === 'data-browser' && <DataImportPage initialTab="data-browser" />}
         {currentPage === 'account-management' && <AccountManagementPage />}
         {currentPage === 'system-status' && <SystemStatusPage />}
       </MasterLayout>

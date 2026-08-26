@@ -56,6 +56,7 @@ from api.routes import (
     line_identity,
     line_staff_self_service,
     line_mobile_admin,
+    line_media_assets,
     line_identity_management,
     customer_service,
     line_order_groups,
@@ -216,6 +217,7 @@ app.include_router(staff_service_day_media.router)
 app.include_router(staff_service_day_logs.router)
 app.include_router(line_tasks.router)
 app.include_router(line_rich_menus.router)
+app.include_router(line_media_assets.router)
 app.include_router(line_reviews.router)
 app.include_router(line_identity.public_router)
 app.include_router(line_identity.review_router)

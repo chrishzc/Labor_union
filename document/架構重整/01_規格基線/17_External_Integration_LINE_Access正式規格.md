@@ -190,6 +190,30 @@ Query 必須 0 commit、0 enqueue、0 worker wakeup、0 provider call；malforme
 sensitive field 與內部例外均須在 route/application boundary typed fail closed。cancel、run-now、retry、React caller
 adoption 與 provider rollout 不因本 query 契約而被授權。
 
+#### Identity review numbered observation query（2026-08-25）
+
+管理端 LINE 身分審核清單使用 additive
+`GET /api/v1/line/identity/reviews/numbered`；只接受 closed `review_status`／`review_type`、positive `page`
+與 bounded `page_size`，回傳 strict `items/page/page_size/total`。既有
+`GET /api/v1/line/identity/reviews` cursor contract 保留為 compatibility projection，不得改義或退役。
+
+numbered query 必須以 repository `COUNT` 與 `LIMIT/OFFSET` 取得 server metadata，不得先載入固定上限再於
+React 記憶體切片。管理端篩選變更固定回第 1 頁，previous／next 依 server total 鎖定，並以 AbortController
+及 request generation 防止較舊回應覆蓋新查詢；一般畫面不得顯示 cursor 或 fingerprint。此 query 固定
+0 commit、0 receipt、0 outbox、0 provider call，也不變更人工審核 Preview／Apply owner。
+
+#### Order group numbered observation query（2026-08-25）
+
+React 三方群組清單使用 additive `GET /api/v1/line/order-groups/numbered`；事件歷程使用
+`GET /api/v1/line/order-groups/{case_no}/events/numbered`。兩者只接受 positive `page`、bounded
+`page_size`，清單另接受 closed `status`，並回 strict `items/page/page_size/total/total_pages`。
+既有兩條 `limit` Query 保留為 compatibility projection，不改義或退役。
+
+Numbered Query 必須由 repository `COUNT` 與 `LIMIT/OFFSET` 取得 server metadata，不得固定取首
+200 筆群組、首 100 筆事件或在 React 假切片。篩選／群組切換回第 1 頁，previous／next 依 server
+metadata 鎖定，AbortController 與 request generation 防止舊回應覆蓋。此 Query 固定唯讀、
+0 commit／receipt／outbox／provider call；LINE Integration 不接管 Orders 案件根事實。
+
 #### Notification Rule Administration（2026-08-20）
 
 LINE Configuration 擁有通知規則 revision 與 closed grammar；LINE Notification 擁有 derived decision／intent，
@@ -243,11 +267,24 @@ pending → processing → published
                      └→ failed
 ```
 
+Rich Menu publication history 是唯讀、server-owned 的 numbered query；回應必須包含
+`items`、`page`、`page_size`、`total` 與 `total_pages`。管理工作台不得先讀取固定首 N 筆再在
+瀏覽器假分頁；切換頁碼必須重新向 server 查詢該頁，取消或較舊請求不得覆寫較新的頁面結果。
+空歷程是合法業務空狀態，不能改以假資料、發布 mutation 或 provider 呼叫產生可翻頁案例。
+
 - Menu definition、image digest 與 publication snapshot 不可在 processing 後被覆寫。
 - Rich Menu 管理工作台必須允許具權限的管理員在尚未進入 `processing` 的 draft revision 調整背景圖
   與各熱區按鈕顯示名稱。背景圖以受控 media asset／digest 參照，按鈕名稱屬 menu definition；不得把
   base64、任意外部 URL 或 provider raw payload 寫入 definition。修改只建立新 draft revision，不得原地
   覆寫 published／processing snapshot，也不得在儲存草稿時直接呼叫 provider。
+- uploaded 背景圖的 canonical reference 固定包含 `image_asset_id`、`image_asset_sha256` 與 opaque
+  `image_asset_version`；不得接受 raw `image_path` 或只有 asset ID。Preview 以 owner-scoped metadata Query
+  驗證 owner、digest、version、尺寸與刪除狀態且保持零寫入；Apply 只對新 command 在同一 outer
+  transaction 重新鎖定 exact owner asset 並 fresh validation，任一 drift 在 audit／commit 前 fail closed。
+  terminal replay 回原結果，不因之後的 asset 狀態改變而重做新 mutation。
+- React 只顯示可理解的檔名、尺寸、載入／合法空狀態與不可選業務原因；不得顯示 digest、opaque version、
+  storage locator 或 raw provider 欄位。選擇背景圖只改 browser-memory draft，仍須走 server Preview →
+  明確確認 → Apply → committed readback。
 - 背景或按鈕名稱變更後，工作台預覽必須立即投影同一 draft revision；既有按鈕 action、熱區座標與角色
   audience 不因改名自行變更。若操作者另行修改 action／座標／audience，必須走各自 typed contract，不能
   由前端猜測或與名稱修改綁成隱性 mutation。
@@ -272,6 +309,12 @@ pending → processing → published
   但不得把 generic raw configuration endpoint 直接穿透 React；Apply 必須帶回並驗證 server Preview
   fingerprint、expected revision、reason、idempotency 與 correlation。相同 key／payload replay 回原 receipt，
   same key／different payload、stale revision 或 fingerprint mismatch 固定零寫入。
+- `QueryRichMenuDraft` 與 committed readback 必須依 exact
+  `(menu_definition_id, configuration_revision)` 投影 `editable | processing | published` 狀態及 closed
+  業務原因。`publishing` 映射為 `processing`，同 revision 同 menu 若同時存在多筆則 `published`
+  優先；舊 revision 不得鎖住 current draft。管理 UI 對 `processing／published` 不掛載草稿 mutation
+  controls；缺 lock、revision／menu mismatch、未知狀態或缺業務原因固定 fail closed，不得讀歷程首筆、
+  固定首 N 筆或由前端 hardcode 猜測可編輯性。
 - 發布採 create／upload／link／switch／cleanup 的 saga，每一步保存 receipt。
 - retry 從已確認 provider receipt 繼續，不重複建立資產。
 - Rich Menu saga 的現行 additive persistence contract 由
@@ -318,6 +361,11 @@ grant／revoke、階層比較或雙人權限覆核。root 與所有其他 enable
 - UI 不顯示依人員而異的業務選單，也不建立「有權／無權角色」驗收案例。
 - 外部 provider、production environment、secret、資料庫 target、SystemPrincipal 自動命令範圍及
   Preview／Confirm／Apply 等安全門禁不屬於人員差異化權限，仍須遵守各自契約。
+
+Rich Menu 存取驗收狀態（2026-08-25）：authenticated、enabled 的 persisted `chris` Session 已由
+Chrome 實點 server zero-write Preview 成功，未再因 `root` 名稱或 publisher capability 被拒絕。
+publication queue 會在 commit 後 wake worker；依本輪不真實 push 裁決，queue readback 為 `not_run`，
+不得以 local bypass、假 publication 或 API mutation 補驗。provider publication 仍由獨立 blocker 列管。
 
 ### 4.1.1 2026-08-20 live traceability note
 

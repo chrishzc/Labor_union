@@ -140,21 +140,51 @@ class StaffLeaveRequestCancel(StaffLiffRequest):
     reason: str = Field(min_length=1, max_length=1000)
 
 
-class StaffServiceDayLogCreate(StaffLiffRequest):
+class StaffServiceDayLogPreviewRequest(StaffLiffRequest):
     model_config = ConfigDict(extra="forbid")
     assignment_id: int = Field(gt=0)
     service_date: date
     baby_log_text: str = Field(min_length=1, max_length=5000)
-    meal_photo_media_ids: list[str] = Field(default_factory=list, max_length=10)
 
 
-class StaffServiceDayLogResponse(BaseModel):
+class StaffServiceDayLogApplyRequest(StaffServiceDayLogPreviewRequest):
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class StaffServiceDayLogPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    case_no: str
+    assignment_id: int
+    service_date: str
+    baby_log_text: str
+    requires_cooking: bool | None
+    can_apply: bool
+    blockers: list[str]
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class StaffServiceDayLogReadbackResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     log_id: int
     case_no: str
+    assignment_id: int
     service_date: str
+    baby_log_text: str
     requires_cooking: bool
-    outcome: str
+    outcome: Literal["created", "existing"]
+
+
+class StaffServiceDayLogReceiptResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    log_id: int
+    outcome: Literal["created", "existing"]
+    receipt_reference: str
+
+
+class StaffServiceDayLogApplyResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    receipt: StaffServiceDayLogReceiptResponse
+    readback: StaffServiceDayLogReadbackResponse
 
 
 class StaffServiceDayMediaResponse(BaseModel):

@@ -1,4 +1,7 @@
-"""Canonical webhook application for order-group binding and invitation relay."""
+"""
+File: order_group_application.py
+Description: 協調 LINE 訂單群組綁定、邀請、事件與唯讀 numbered query。
+"""
 
 from __future__ import annotations
 
@@ -222,6 +225,22 @@ class LineOrderGroupQueryApplication:
             unit_of_work.commit()
         return page
 
+    def list_numbered(
+        self,
+        actor: ActorContext,
+        *,
+        status: str | None,
+        page: int,
+        page_size: int,
+    ):
+        require_line_capability(actor, LineCapability.ORDER_GROUP_READ)
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.order_groups.list_numbered(
+                status=status,
+                page=page,
+                page_size=page_size,
+            )
+
     def get(self, actor: ActorContext, case_no: str):
         require_line_capability(actor, LineCapability.ORDER_GROUP_READ)
         with self._unit_of_work_factory() as unit_of_work:
@@ -235,6 +254,22 @@ class LineOrderGroupQueryApplication:
             result = unit_of_work.order_groups.events(case_no, limit=limit)
             unit_of_work.commit()
         return result
+
+    def events_numbered(
+        self,
+        actor: ActorContext,
+        case_no: str,
+        *,
+        page: int,
+        page_size: int,
+    ):
+        require_line_capability(actor, LineCapability.ORDER_GROUP_READ)
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.order_groups.events_numbered(
+                case_no,
+                page=page,
+                page_size=page_size,
+            )
 
 
 def _linked_actor(inbox, unit_of_work, capability: LineCapability) -> ActorContext:

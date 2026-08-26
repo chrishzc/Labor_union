@@ -4,9 +4,9 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import './FinancePage.css';
-import { ordersQueryClient } from '../api/orders/order_query_client';
+import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import { adaptOrderSummaryPage } from '../adapters/orders/order_summary_adapter';
-import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
+import { loadAllStaffDirectoryPages, staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { adaptStaffDirectoryPage } from '../adapters/staff/staff_directory_adapter';
 import { clientReceiptQueryClient } from '../api/client_finance/client_receipt_query_client';
 import { adaptClientReceiptQuery } from '../adapters/finance/client_receipt_query_adapter';
@@ -14,6 +14,7 @@ import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_q
 import { adaptStaffPayablesQuery } from '../adapters/finance/staff_payables_query_adapter';
 import { accountsPayableQueryClient } from '../api/accounts_payable/accounts_payable_query_client';
 import { adaptAccountsPayablePreview } from '../adapters/finance/accounts_payable_query_adapter';
+import { financeImportBlockerMessage } from '../adapters/finance/finance_import_query_adapter';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 
 type FinanceTab = 'client-receipts' | 'staff-payables' | 'accounts-payable' | 'finance-import';
@@ -32,6 +33,29 @@ function StateMessage<T>({ state, empty }: { state: LoadState<T>; empty: string 
   if (state.kind === 'error') return <div className="finance-state error" role="alert">{state.message}</div>;
   if (state.kind === 'unavailable') return <div className="finance-state unavailable" role="status">{state.message}</div>;
   return null;
+}
+
+function financeErrorMessage(error: unknown, fallback: string): string {
+  const detail = error !== null && typeof error === 'object'
+    ? error as Record<string, unknown>
+    : {};
+  const code = String(detail.code ?? detail.name ?? '').toLowerCase();
+  const status = Number(detail.status ?? detail.statusCode ?? 0);
+
+  if (status === 401 || code.includes('unauthenticated')) return '請先登入後再執行此操作。';
+  if (status === 403 || code.includes('forbidden')) return '目前帳號無法執行此操作，請洽系統管理員。';
+  if (status === 409 || code.includes('stale') || code.includes('conflict') || code.includes('mismatch')) {
+    return '資料已變更，請重新整理並再次預覽。';
+  }
+  if (status >= 500 || code.includes('unavailable') || code.includes('network') || code.includes('timeout')) {
+    return '服務暫時無法使用，請稍後再試。';
+  }
+  if (code.includes('file_type')) return '檔案格式不符，請選擇 .xlsx 銀行流水工作簿。';
+  if (code.includes('file_empty')) return '選擇的工作簿沒有內容，請重新選擇檔案。';
+  if (code.includes('file_too_large')) return '選擇的工作簿超過允許大小，請改用較小的檔案。';
+  if (code.includes('file_changed')) return '工作簿內容已變更，請重新選擇並上傳。';
+  if (code.includes('sha256_unavailable')) return '目前無法核對工作簿內容，請重新選擇檔案後再試。';
+  return fallback;
 }
 
 export const FinancePage: React.FC = () => {
@@ -90,7 +114,8 @@ export const FinancePage: React.FC = () => {
     if (activeTab !== 'client-receipts') return;
     return schedule('cases', (request) => {
       const queryText = caseQuery.trim();
-      void ordersQueryClient.getOrderSummaries(
+      void loadAllOrderSummaries(
+        ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
         { page_size: 200, ...(queryText ? { query_text: queryText } : {}) },
         { signal: request.controller.signal },
       )
@@ -102,7 +127,7 @@ export const FinancePage: React.FC = () => {
         if (adapted.length === 0) setReceipt({ kind: 'empty' });
       })
       .catch((error: unknown) => {
-        if (current('cases', request.sequence, request.controller)) setReceipt({ kind: 'error', message: error instanceof Error ? error.message : '案件摘要載入失敗' });
+        if (current('cases', request.sequence, request.controller)) setReceipt({ kind: 'error', message: financeErrorMessage(error, '案件清單載入失敗，請重新整理。') });
       });
     });
   }, [activeTab, caseQuery, reload]);
@@ -113,7 +138,7 @@ export const FinancePage: React.FC = () => {
       setReceipt({ kind: 'loading' });
       void clientReceiptQueryClient.query(selectedCase, { signal: request.controller.signal })
         .then((data) => { if (current('receipt', request.sequence, request.controller)) setReceipt({ kind: 'ready', data: adaptClientReceiptQuery(data) }); })
-        .catch((error: unknown) => { if (current('receipt', request.sequence, request.controller)) setReceipt({ kind: 'error', message: error instanceof Error ? error.message : '客戶收款查詢失敗' }); });
+        .catch((error: unknown) => { if (current('receipt', request.sequence, request.controller)) setReceipt({ kind: 'error', message: financeErrorMessage(error, '客戶收款查詢失敗，請重新整理。') }); });
     });
   }, [activeTab, selectedCase, reload]);
 
@@ -121,7 +146,11 @@ export const FinancePage: React.FC = () => {
     if (activeTab !== 'staff-payables') return;
     return schedule('staff', (request) => {
       setPayables({ kind: 'loading' });
-      void staffDirectoryClient.queryPage({ pageSize: 20 }, { signal: request.controller.signal })
+      void loadAllStaffDirectoryPages(
+        staffDirectoryClient.queryPage.bind(staffDirectoryClient),
+        { pageSize: 200 },
+        { signal: request.controller.signal },
+      )
       .then((page) => {
         if (!current('staff', request.sequence, request.controller)) return;
         const adapted = adaptStaffDirectoryPage(page).items.map((item) => ({ id: item.id, label: item.displayName }));
@@ -129,7 +158,7 @@ export const FinancePage: React.FC = () => {
         setSelectedStaff((value) => value !== null && adapted.some((item) => item.id === value) ? value : adapted[0]?.id ?? null);
         if (adapted.length === 0) setPayables({ kind: 'empty' });
       })
-      .catch((error: unknown) => { if (current('staff', request.sequence, request.controller)) setPayables({ kind: 'error', message: error instanceof Error ? error.message : '服務人員摘要載入失敗' }); });
+      .catch((error: unknown) => { if (current('staff', request.sequence, request.controller)) setPayables({ kind: 'error', message: financeErrorMessage(error, '服務人員清單載入失敗，請重新整理。') }); });
     });
   }, [activeTab, reload]);
 
@@ -139,7 +168,7 @@ export const FinancePage: React.FC = () => {
       setPayables({ kind: 'loading' });
       void staffPayablesQueryClient.query(selectedStaff, { signal: request.controller.signal })
         .then((data) => { if (current('payables', request.sequence, request.controller)) setPayables({ kind: 'ready', data: adaptStaffPayablesQuery(data) }); })
-        .catch((error: unknown) => { if (current('payables', request.sequence, request.controller)) setPayables({ kind: 'error', message: error instanceof Error ? error.message : '月嫂應付款查詢失敗' }); });
+        .catch((error: unknown) => { if (current('payables', request.sequence, request.controller)) setPayables({ kind: 'error', message: financeErrorMessage(error, '月嫂應付款查詢失敗，請重新整理。') }); });
     });
   }, [activeTab, selectedStaff, reload]);
 
@@ -149,7 +178,7 @@ export const FinancePage: React.FC = () => {
       setAccountsPayable({ kind: 'loading' });
       void accountsPayableQueryClient.query(targetMonth, { signal: request.controller.signal })
         .then((data) => { if (current('accounts-payable', request.sequence, request.controller)) setAccountsPayable(data.rows.length ? { kind: 'ready', data: adaptAccountsPayablePreview(data) } : { kind: 'empty' }); })
-        .catch((error: unknown) => { if (current('accounts-payable', request.sequence, request.controller)) setAccountsPayable({ kind: 'error', message: error instanceof Error ? error.message : '應付帳款查詢失敗' }); });
+        .catch((error: unknown) => { if (current('accounts-payable', request.sequence, request.controller)) setAccountsPayable({ kind: 'error', message: financeErrorMessage(error, '應付帳款查詢失敗，請重新整理。') }); });
     });
   }, [activeTab, targetMonth, reload]);
 
@@ -160,13 +189,13 @@ export const FinancePage: React.FC = () => {
       const snapshot = await FinanceWorkbookSnapshot.fromFile(financeWorkbook);
       const receipt = await financeImportMutationClient.ingest(snapshot, { idempotencyKey: `ui-finance-ingest-${snapshot.sha256}`, correlationId: `ui-finance-ingest-${crypto.randomUUID()}` });
       setIngestion({ kind: 'ready', data: receipt });
-    } catch (error) { setIngestion({ kind: 'error', message: error instanceof Error ? error.message : '銀行流水入庫失敗。' }); }
+    } catch (error) { setIngestion({ kind: 'error', message: financeErrorMessage(error, '銀行流水上傳失敗，請重新選擇檔案。') }); }
   };
   const previewImportedBatch = async () => {
     if (ingestion.kind !== 'ready') return;
     setBatchPreview({ kind: 'loading' }); setApplyConfirmed(false); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
     try { setBatchPreview({ kind: 'ready', data: await financeImportMutationClient.preview(ingestion.data.batch_identity) }); }
-    catch (error) { setBatchPreview({ kind: 'error', message: error instanceof Error ? error.message : 'Finance Import Preview 失敗。' }); }
+    catch (error) { setBatchPreview({ kind: 'error', message: financeErrorMessage(error, '匯入預覽未完成，請重新執行預覽。') }); }
   };
   const applyImportedBatch = async () => {
     if (batchPreview.kind !== 'ready' || !applyConfirmed) return;
@@ -179,7 +208,7 @@ export const FinancePage: React.FC = () => {
       const accepted = await financeImportMutationClient.apply(batchPreview.data, applyReason, { idempotencyKey: `ui-finance-apply-${previewFingerprint}`, correlationId });
       setApplyJob({ kind: 'ready', data: accepted });
       await observeApplyOutcome(accepted.job_id);
-    } catch (error) { setApplyJob({ kind: 'error', message: error instanceof Error ? error.message : 'Finance Import Apply 未受理。' }); }
+    } catch (error) { setApplyJob({ kind: 'error', message: financeErrorMessage(error, '正式匯入未受理，請重新預覽後再試。') }); }
   };
   const observeApplyOutcome = async (jobId: string) => {
     const request = start('batch-outcome');
@@ -199,7 +228,7 @@ export const FinancePage: React.FC = () => {
         setBatchOutcome({ kind: 'error', message: '正式入帳仍在處理中；可重新查詢結果，不需重複上傳。' });
       }
     } catch (error) {
-      if (current('batch-outcome', request.sequence, request.controller)) setBatchOutcome({ kind: 'error', message: error instanceof Error ? error.message : '正式匯入結果查詢失敗。' });
+      if (current('batch-outcome', request.sequence, request.controller)) setBatchOutcome({ kind: 'error', message: financeErrorMessage(error, '正式匯入結果查詢失敗，請稍後重新查詢。') });
     }
   };
 
@@ -310,7 +339,6 @@ export const FinancePage: React.FC = () => {
                     <th>階段</th>
                     <th>應收</th>
                     <th>到期日</th>
-                    <th>狀態</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -320,11 +348,6 @@ export const FinancePage: React.FC = () => {
                       <td><span className="finance-badge finance-badge-stage">{item.stage}</span></td>
                       <td><strong>{item.amountDue}</strong></td>
                       <td>{item.dueDate}</td>
-                      <td>
-                        <span className={`finance-badge ${item.settlementStatus === 'settled' || item.settlementStatus === '已結算' ? 'finance-badge-paid' : 'finance-badge-unpaid'}`}>
-                          {item.settlementStatus}
-                        </span>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -425,7 +448,7 @@ export const FinancePage: React.FC = () => {
                       <td>{item.amountDue}</td>
                       <td style={{ color: '#16a34a' }}>{item.netPaid}</td>
                       <td style={{ color: '#ea580c', fontWeight: 700 }}>{item.balance}</td>
-                      <td><span className={`finance-badge ${item.payoutStatus === 'completed' ? 'finance-badge-paid' : 'finance-badge-unpaid'}`}>{item.payoutStatus}</span></td>
+                      <td><span className={`finance-badge ${item.payoutCompleted ? 'finance-badge-paid' : 'finance-badge-unpaid'}`}>{item.payoutStatus}</span></td>
                     </tr>
                   ))}
                 </tbody>
@@ -657,7 +680,7 @@ export const FinancePage: React.FC = () => {
                     ? '可進入匯入確認。'
                     : batchPreview.data.apply_allowed
                       ? '目前沒有可自動入帳的筆數；請先從帳務異常處理完成配對。'
-                    : `目前不可匯入：${batchPreview.data.blocking_codes.join('、') || '預覽未通過'}`}
+                    : `目前不可匯入：${financeImportBlockerMessage(batchPreview.data.blocking_codes)}`}
                 </div>
 
                 {batchPreview.data.apply_allowed && batchPreview.data.counts.ready_dispatch > 0 && (

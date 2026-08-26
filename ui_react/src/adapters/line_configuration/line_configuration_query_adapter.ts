@@ -38,7 +38,14 @@ export interface RichMenuButtonModel {
   id: string;
   label: string;
   bounds: { x: number; y: number; width: number; height: number };
+  action?: RichMenuActionModel;
 }
+
+export type RichMenuActionModel =
+  | { kind: 'message'; text: string }
+  | { kind: 'uri'; uri: string; uriSource: 'literal' | 'liff' }
+  | { kind: 'postback'; data: string }
+  | { kind: 'richmenuswitch'; data: string; richMenuAliasId: string };
 
 export interface RichMenuModel {
   id: string;
@@ -73,6 +80,8 @@ export interface LineRichMenuPublicationPageModel {
   items: LineRichMenuPublicationModel[];
   page: number;
   pageSize: number;
+  total: number;
+  totalPages: number;
   loadedCount: number;
   loadedScope: true;
 }
@@ -215,6 +224,8 @@ export function adaptLineRichMenuPublicationPage(
     items: page.items.map(adaptLineRichMenuPublication),
     page: page.page,
     pageSize: page.page_size,
+    total: page.total,
+    totalPages: page.total_pages,
     loadedCount: page.items.length,
     loadedScope: true,
   };

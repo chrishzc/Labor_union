@@ -346,13 +346,8 @@ describe('Adversarial Challenger 1: Phase 2D Integration Deep Stress-Testing', (
 
       const initialFetchCount = (globalThis.fetch as any).mock.calls.length;
 
-      // Find disabled resolve button
-      const resolveBtn = screen.getByRole('button', { name: /確認排除異常/ });
-      expect(resolveBtn).toBeDisabled();
-
-      // Click disabled button
-      fireEvent.click(resolveBtn);
-      fireEvent.keyDown(resolveBtn, { key: 'Enter', code: 'Enter' });
+      expect(screen.getByText(/系統會自動重新核對異常/)).toBeVisible();
+      expect(screen.queryByRole('button', { name: /確認排除異常/ })).not.toBeInTheDocument();
 
       // A generic text field cannot impersonate an owning-Domain correction.
       expect(document.querySelector('[data-surface-id="anomalies.finance-correction"]')).toBeNull();

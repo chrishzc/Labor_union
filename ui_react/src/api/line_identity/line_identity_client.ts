@@ -347,7 +347,7 @@ export async function listLineIdentityReviews(
 ): Promise<LineIdentityReviewPageView> {
   try {
     const parsed = LineIdentityReviewListQuerySchema.parse(query);
-    const raw = await transport.get('/api/v1/line/identity/reviews', {
+    const raw = await transport.get('/api/v1/line/identity/reviews/numbered', {
       ...requestOptions(options),
       params: parsed,
     });

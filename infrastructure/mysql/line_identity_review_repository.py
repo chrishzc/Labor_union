@@ -483,6 +483,8 @@ class MySqlLineIdentityReviewRepository:
         return CreateLineReviewResult(LineReviewCommandOutcome.CREATED, _review_snapshot(row))
 
     def list(self, query: LineReviewListQuery) -> LineReviewPage:
+        if query.page is not None:
+            return self._list_numbered_page(query)
         sql, parameters = _review_list_statement(query)
         with self._connection.cursor() as cursor:
             cursor.execute(sql, parameters)
@@ -492,6 +494,22 @@ class MySqlLineIdentityReviewRepository:
         items = tuple(_review_snapshot(row) for row in visible_rows)
         next_cursor = str(visible_rows[-1]["id"]) if has_more else None
         return LineReviewPage(items, next_cursor)
+
+    def _list_numbered_page(self, query: LineReviewListQuery) -> LineReviewPage:
+        count_sql, count_parameters = _review_count_statement(query)
+        page_sql, page_parameters = _review_numbered_page_statement(query)
+        with self._connection.cursor() as cursor:
+            cursor.execute(count_sql, count_parameters)
+            count_row = optional_row(cursor.fetchone()) or {}
+            cursor.execute(page_sql, page_parameters)
+            rows = tuple(cursor.fetchall() or ())
+        return LineReviewPage(
+            tuple(_review_snapshot(row) for row in rows),
+            None,
+            query.page,
+            query.page_size,
+            int(count_row.get("total") or 0),
+        )
 
     def summary(self, stale_hours: int) -> LineReviewQueueSummary:
         with self._connection.cursor() as cursor:
@@ -629,6 +647,29 @@ def _review_snapshot(row):
 
 
 def _review_list_statement(query):
+    clauses, parameters = _review_filter_parts(query)
+    if query.cursor is not None:
+        clauses.append("id < %s")
+        parameters.append(int(query.cursor))
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    parameters.append(query.page_size + 1)
+    return _REVIEW_LIST_SQL + where + " ORDER BY id DESC LIMIT %s", tuple(parameters)
+
+
+def _review_count_statement(query):
+    clauses, parameters = _review_filter_parts(query)
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    return "SELECT COUNT(*) AS total FROM line_review_requests" + where, tuple(parameters)
+
+
+def _review_numbered_page_statement(query):
+    clauses, parameters = _review_filter_parts(query)
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    parameters.extend((query.page_size, (query.page - 1) * query.page_size))
+    return _REVIEW_LIST_SQL + where + " ORDER BY id DESC LIMIT %s OFFSET %s", tuple(parameters)
+
+
+def _review_filter_parts(query):
     clauses = []
     parameters: list[object] = []
     if query.statuses:
@@ -637,12 +678,7 @@ def _review_list_statement(query):
     if query.review_types:
         clauses.append("review_type IN (" + ",".join(["%s"] * len(query.review_types)) + ")")
         parameters.extend(item.value for item in query.review_types)
-    if query.cursor is not None:
-        clauses.append("id < %s")
-        parameters.append(int(query.cursor))
-    where = " WHERE " + " AND ".join(clauses) if clauses else ""
-    parameters.append(query.page_size + 1)
-    return _REVIEW_LIST_SQL + where + " ORDER BY id DESC LIMIT %s", tuple(parameters)
+    return clauses, parameters
 
 
 def _optional_text(value):

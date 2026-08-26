@@ -227,7 +227,7 @@ export function mapImportWarningLaneLabel(lane: string | null | undefined): stri
     case 'finance_import':
       return '財務匯入';
     default:
-      return lane.toUpperCase();
+      return '其他匯入';
   }
 }
 
@@ -249,7 +249,7 @@ export function mapImportWarningStatusLabel(status: ImportWarningTrackingStatus 
     case 'auto_resolved':
       return '自動排除';
     default:
-      return String(status);
+      return '狀態待確認';
   }
 }
 

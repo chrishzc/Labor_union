@@ -689,7 +689,9 @@ button:disabled {
 }
 
 .richmenu-buttons-grid {
-  display: grid;
+  display: block;
+  position: relative;
+  overflow: hidden;
   background: #ffffff;
   height: 180px;
   border-top: 2px solid #ff7f50;
@@ -1027,6 +1029,171 @@ button:disabled {
   margin-top: 14px;
   padding-top: 10px;
   border-top: 1px solid #f2e2dc;
+}
+
+/* Rich Menu Draft Editors Form Layout & Controls */
+.richmenu-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+  margin-bottom: 16px;
+}
+
+.richmenu-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #57423b;
+}
+
+.richmenu-form-field-full {
+  grid-column: 1 / -1;
+}
+
+.richmenu-form-input,
+.richmenu-form-select,
+.richmenu-form-textarea {
+  border: 1px solid #dec0b6;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: #1e1b19;
+  background: #ffffff;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.richmenu-form-input:focus,
+.richmenu-form-select:focus,
+.richmenu-form-textarea:focus {
+  border-color: #ff7f50;
+  box-shadow: 0 0 0 2px rgba(255, 127, 80, 0.15);
+}
+
+.richmenu-form-input:disabled,
+.richmenu-form-select:disabled,
+.richmenu-form-textarea:disabled {
+  background: #fbf7f5;
+  color: #8c7873;
+  cursor: not-allowed;
+}
+
+.richmenu-buttons-grid-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  background: #fff8f6;
+  border: 1px solid #fed9b8;
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.richmenu-buttons-grid-fields-title {
+  grid-column: 1 / -1;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #a43c12;
+  margin-bottom: 2px;
+}
+
+.richmenu-editor-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.richmenu-btn-primary {
+  background: #ff7f50;
+  color: #ffffff;
+  border: 1px solid #ff7f50;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 6px rgba(255, 127, 80, 0.2);
+}
+
+.richmenu-btn-primary:hover:not(:disabled) {
+  background: #e0683a;
+  border-color: #e0683a;
+}
+
+.richmenu-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.richmenu-btn-secondary {
+  background: #ffffff;
+  color: #57423b;
+  border: 1px solid #dec0b6;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.richmenu-btn-secondary:hover:not(:disabled) {
+  border-color: #ff7f50;
+  background: #fffaf7;
+  color: #a43c12;
+}
+
+.richmenu-btn-apply {
+  background: #ea580c;
+  color: #ffffff;
+  border: 1px solid #ea580c;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 6px rgba(234, 88, 12, 0.2);
+}
+
+.richmenu-btn-apply:hover:not(:disabled) {
+  background: #c2410c;
+  border-color: #c2410c;
+}
+
+.richmenu-btn-apply:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.richmenu-preview-callout {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.richmenu-confirm-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #166534;
+  cursor: pointer;
 }
 
 .line-rule-list,

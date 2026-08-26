@@ -10,6 +10,7 @@
 
 | 文件 | 狀態 | 下一個 gate |
 |---|---|---|
+| [NAS 檔案庫與資料中心管理介面正式規範](NAS_檔案庫與資料中心管理介面正式規範.md) | `approved` | 雙欄檔案總管版型、結構化命名、Freeze-Before-Send 與刪除防呆已核准；進行 UI 實作與資料中心分頁切換。 |
 | [Cloud Run＋單一 Cloud VPN 雲端部署測試計畫](Cloud_Run_單一Cloud_VPN_部署測試計畫.md) | `proposed` | 指定隔離 cloud project／NAS DB、operator、預算與故障注入範圍後，另立 exact Work Package。 |
 | [Cloud Run Durable Job Worker Supervision](Durable_Job_Worker_Supervision_延後開發計畫.md) | `proposed`／`deferred` | 指定隔離 cloud test project／NAS DB、OIDC、operator、故障注入與雲端測試 gate。 |
 | [LINE QA 客服知識契約收斂](LINE_QA客服知識契約收斂計畫.md) | `blocked` | loader runtime 可用，且 owner／category／source／approved answer 完成人工 review 後另立 Work Package。 |
@@ -33,6 +34,11 @@
 這些文件的 UI／UX 設計意圖仍可在 exact 任務中作低頻參考，但不得覆蓋正式規格；其舊 phase、
 `approved` 自稱、route、writer 或待辦不再參與 current 完成度判斷。精確 archive path、digest、successor
 與 restore trigger 只由 `archive_manifest.json` 路由。
+
+2026-08-25 使用者提供的 Eraser M1～M4 與全系統總覽原圖需求，已另由
+`../架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md` 保存。該文件承接
+後續逐節點驗收與原圖缺口登記；缺口在 96 完成前固定 `deferred-after-96`，
+不重新啟用上述 archived 計畫。
 
 `completed` 或 `superseded` 文件不得留在 active 表。只有 current successor 已承接業務不變量、
 remaining task 與人工 recovery，且 inbound links／manifest 已更新後，才能封存。

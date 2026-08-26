@@ -132,20 +132,21 @@ describe('LINE Identity Client（Phase 3A Lane D）', () => {
 
   it('review list、summary 與 detail 只呼叫 frozen typed GET paths', async () => {
     globalThis.fetch = vi.fn()
-      .mockResolvedValueOnce(jsonResponse(envelope({ items: [REVIEW_FIXTURE], next_cursor: null })))
+      .mockResolvedValueOnce(jsonResponse(envelope({ items: [REVIEW_FIXTURE], page: 2, page_size: 25, total: 26 })))
       .mockResolvedValueOnce(jsonResponse(envelope(REVIEW_SUMMARY_FIXTURE)))
       .mockResolvedValueOnce(jsonResponse(envelope(REVIEW_FIXTURE)));
 
     await expect(listLineIdentityReviews({
       review_status: 'pending',
       review_type: 'staff_verification',
+      page: 2,
       page_size: 25,
-    })).resolves.toEqual({ items: [REVIEW_FIXTURE], next_cursor: null });
+    })).resolves.toEqual({ items: [REVIEW_FIXTURE], page: 2, page_size: 25, total: 26 });
     await expect(getLineIdentityReviewSummary()).resolves.toEqual(REVIEW_SUMMARY_FIXTURE);
     await expect(getLineIdentityReview(71)).resolves.toEqual(REVIEW_FIXTURE);
 
     expect(vi.mocked(globalThis.fetch).mock.calls.map(([url]) => url)).toEqual([
-      '/api/v1/line/identity/reviews?review_status=pending&review_type=staff_verification&page_size=25',
+      '/api/v1/line/identity/reviews/numbered?review_status=pending&review_type=staff_verification&page=2&page_size=25',
       '/api/v1/line/identity/reviews/summary',
       '/api/v1/line/identity/reviews/71',
     ]);

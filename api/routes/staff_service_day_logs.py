@@ -1,44 +1,78 @@
-"""
-File: staff_service_day_logs.py
-Description: 提供已驗證月嫂提交自己正式服務日日誌與餐食照片 reference 的 LIFF API。
-"""
+"""File: staff_service_day_logs.py
+Description: 提供已驗證月嫂寶寶日誌的 Query、零寫入 Preview 與受控 Apply。"""
 
 from typing import Annotated
-
 from fastapi import APIRouter, Header, HTTPException
-
 from api.routes.line_staff_self_service import _required_staff, _verified_line_user_id
 from api.schemas.base import BaseResponse
-from api.schemas.line_staff_self_service import StaffServiceDayLogCreate, StaffServiceDayLogResponse
+from api.schemas.line_staff_self_service import StaffLiffRequest, StaffServiceDayLogApplyRequest, StaffServiceDayLogApplyResponse, StaffServiceDayLogPreviewRequest, StaffServiceDayLogPreviewResponse, StaffServiceDayLogReadbackResponse
 from domains.scheduling.service_day_log import ServiceDayLogIntent
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.service_day_log_repository import MySqlServiceDayLogRepository
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
-from subsystems.scheduling.service_day_log_workflow import ServiceDayLogWorkflow, SubmitServiceDayLog
-
+from shared_kernel.fingerprints import PreviewFingerprint
+from subsystems.scheduling.service_day_log_workflow import ApplyServiceDayLog, PreviewServiceDayLog, ServiceDayLogResult, ServiceDayLogWorkflow
 
 router = APIRouter(prefix="/api/v1/line/staff-self-service", tags=["Scheduling Service Day Logs"])
 
+@router.post("/service-day-logs", status_code=410)
+def retired_direct_service_day_log():
+    raise HTTPException(status_code=410, detail={"code": "service_day_log_direct_submit_retired", "replacement": "/api/v1/line/staff-self-service/service-day-logs/preview"})
 
-@router.post("/service-day-logs", response_model=BaseResponse[StaffServiceDayLogResponse])
-def submit_service_day_log(body: StaffServiceDayLogCreate, idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)]):
-    line_user_id = _verified_line_user_id(body)
-    with open_line_unit_of_work() as line_uow:
-        staff = _required_staff(line_uow.customer_service.staff_subject(line_user_id.value))
-        line_uow.commit()
+@router.post("/service-day-logs/preview", response_model=BaseResponse[StaffServiceDayLogPreviewResponse])
+def preview_service_day_log(body: StaffServiceDayLogPreviewRequest):
+    staff_id, line_user_id = _verified_staff_identity(body)
+    connection = get_connection()
+    try:
+        preview = ServiceDayLogWorkflow(MySqlServiceDayLogRepository(connection)).preview(_preview_command(body, staff_id, line_user_id))
+    except ValueError as error:
+        raise _workflow_error(error) from error
+    finally:
+        connection.close()
+    return BaseResponse(data={"case_no": preview.case_no, "assignment_id": preview.assignment_id, "service_date": preview.service_date, "baby_log_text": preview.baby_log_text, "requires_cooking": preview.requires_cooking, "can_apply": preview.can_apply, "blockers": list(preview.blockers), "preview_fingerprint": preview.preview_fingerprint.value})
+
+@router.post("/service-day-logs/apply", response_model=BaseResponse[StaffServiceDayLogApplyResponse])
+def apply_service_day_log(body: StaffServiceDayLogApplyRequest, idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)]):
+    staff_id, line_user_id = _verified_staff_identity(body)
     connection = get_connection()
     try:
         with MySqlUnitOfWork(connection) as unit_of_work:
-            result = ServiceDayLogWorkflow(MySqlServiceDayLogRepository(connection)).submit(
-                SubmitServiceDayLog(int(staff["staff_id"]), line_user_id.value, body.assignment_id, ServiceDayLogIntent(body.service_date, body.baby_log_text, tuple(body.meal_photo_media_ids)), idempotency_key)
-            )
+            workflow = ServiceDayLogWorkflow(MySqlServiceDayLogRepository(connection))
+            result = workflow.apply(ApplyServiceDayLog(staff_id, line_user_id, body.assignment_id, ServiceDayLogIntent(body.service_date, body.baby_log_text, ()), idempotency_key, PreviewFingerprint(body.preview_fingerprint)))
             unit_of_work.commit()
     except ValueError as error:
-        raise HTTPException(status_code=422, detail={"code": str(error)}) from error
+        raise _workflow_error(error) from error
     finally:
         connection.close()
-    return BaseResponse(data={"log_id": result.log_id, "case_no": result.case_no, "service_date": result.service_date, "requires_cooking": result.requires_cooking, "outcome": result.outcome})
+    return BaseResponse(data={"receipt": {"log_id": result.log_id, "outcome": result.outcome, "receipt_reference": f"scheduling-service-day-log:{result.log_id}"}, "readback": _readback_data(result)})
 
+@router.post("/service-day-logs/{log_id}/query", response_model=BaseResponse[StaffServiceDayLogReadbackResponse])
+def query_service_day_log(log_id: int, body: StaffLiffRequest):
+    staff_id, line_user_id = _verified_staff_identity(body)
+    connection = get_connection()
+    try:
+        result = ServiceDayLogWorkflow(MySqlServiceDayLogRepository(connection)).query(log_id, staff_id, line_user_id)
+    except ValueError as error:
+        raise _workflow_error(error) from error
+    finally:
+        connection.close()
+    return BaseResponse(data=_readback_data(result))
+
+def _verified_staff_identity(body: StaffLiffRequest) -> tuple[int, str]:
+    line_user_id = _verified_line_user_id(body)
+    with open_line_unit_of_work() as line_uow:
+        staff = _required_staff(line_uow.customer_service.staff_subject(line_user_id.value))
+    return int(staff["staff_id"]), line_user_id.value
+
+def _preview_command(body, staff_id: int, line_user_id: str) -> PreviewServiceDayLog:
+    return PreviewServiceDayLog(staff_id, line_user_id, body.assignment_id, ServiceDayLogIntent(body.service_date, body.baby_log_text, ()))
+
+def _readback_data(result: ServiceDayLogResult) -> dict:
+    return {"log_id": result.log_id, "case_no": result.case_no, "assignment_id": result.assignment_id, "service_date": result.service_date, "baby_log_text": result.baby_log_text, "requires_cooking": result.requires_cooking, "outcome": result.outcome}
+
+def _workflow_error(error: ValueError) -> HTTPException:
+    code = str(error)
+    return HTTPException(status_code=404 if code == "service_day_log_not_found" else 422, detail={"code": code})
 
 __all__ = ["router"]

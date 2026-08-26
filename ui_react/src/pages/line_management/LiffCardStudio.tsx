@@ -7,6 +7,11 @@ import {
   lineIdentityRuntimeConfigClient,
   type LineIdentityRuntimeConfigClient,
 } from '../../api/line_identity/line_identity_runtime_config_client';
+import {
+  LINE_FLEX_DESIGN_SOURCES,
+  type LineFlexDesignSource,
+} from '../../adapters/line_flex_design/line_flex_design_adapter';
+import { LineFlexDesignPreview } from '../../components/LineFlexDesignPreview';
 import '../LineManagementPage.css';
 
 export type LiffAssetType = 'liff' | 'flex_card';
@@ -22,6 +27,7 @@ export interface LiffAssetItem {
   authLevel: string;
   description: string;
   apiMapping: string;
+  flexDesignSource?: LineFlexDesignSource;
 }
 
 const ASSET_ITEMS: LiffAssetItem[] = [
@@ -130,6 +136,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '僅為設計稿，尚未接通正式發送檢查',
     description: '僅保留去敏視覺結構；不代表已建立發送工作或已送達。',
     apiMapping: '正式卡片素材清單與發送流程尚未接通',
+    flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_dispatch,
   },
   {
     id: 'flex_leave_confirm',
@@ -141,6 +148,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '僅為設計稿，尚未接通正式發送檢查',
     description: '僅呈現選項的視覺位置；不建立順延命令、不送出 postback。',
     apiMapping: '正式卡片素材清單與發送流程尚未接通',
+    flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_leave_confirm,
   },
   {
     id: 'flex_alert_critical',
@@ -152,6 +160,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '僅為設計稿，尚未接通正式發送檢查',
     description: '僅呈現去敏告警層級與處理入口位置；不代表群組已設定或訊息已送達。',
     apiMapping: '正式卡片素材清單與發送流程尚未接通',
+    flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_alert_critical,
   },
   {
     id: 'flex_negotiation',
@@ -163,6 +172,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     authLevel: '僅為設計稿，尚未接通正式發送檢查',
     description: '僅呈現條件摘要與確認區；不修改媒合狀態、不建立 LINE 發送任務。',
     apiMapping: '正式卡片素材清單與發送流程尚未接通',
+    flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_negotiation,
   },
 ];
 
@@ -398,57 +408,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
                 </div>
               </div>
             ) : (
-              <div className="mock-flex-content">
-                <div className="mock-flex-bubble">
-                  {selectedItem.id === 'flex_dispatch' && (
-                    <div className="flex-card-inner">
-                      <div className="flex-header">🌸 新竹市月子工會 ｜ 派案通知</div>
-                      <div className="flex-body">
-                        <strong>案件編號：【寄送前依正式案件資料帶入】</strong>
-                        <p>服務期間、時段與區域會以去敏方式呈現。</p>
-                        <p>詳細地址不留在 LINE 對話內容。</p>
-                      </div>
-                      <button type="button" className="flex-action-btn" disabled>🔒 安全查閱訂單明細</button>
-                    </div>
-                  )}
-
-                  {selectedItem.id === 'flex_leave_confirm' && (
-                    <div className="flex-card-inner">
-                      <div className="flex-header">🌸 服務調休與順延確認通知</div>
-                      <div className="flex-body">
-                        <p>正式請假日期與順延後結束日會在寄送前核對。</p>
-                        <p>產婦選擇只建立確認命令，不由卡片文字直接改排班。</p>
-                      </div>
-                      <div className="flex-btn-row">
-                        <button type="button" className="flex-btn-agree" disabled>🟢 我同意順延一日</button>
-                        <button type="button" className="flex-btn-disagree" disabled>🔴 不同意順延</button>
-                      </div>
-                    </div>
-                  )}
-
-                  {selectedItem.id === 'flex_alert_critical' && (
-                    <div className="flex-card-inner alert-style">
-                      <div className="flex-header alert-header">🚨【工會急件告警 ｜ 待人工處理】</div>
-                      <div className="flex-body">
-                        <strong>案件與告警摘要會以去敏方式提供</strong>
-                        <p>本設計稿不代表通知群組已配對或訊息已送達。</p>
-                      </div>
-                      <button type="button" className="flex-action-btn alert-btn" disabled>開啟手機管理中心</button>
-                    </div>
-                  )}
-
-                  {selectedItem.id === 'flex_negotiation' && (
-                    <div className="flex-card-inner">
-                      <div className="flex-header">💡 媒合進度與服務條件調整建議</div>
-                      <div className="flex-body">
-                        <p>由正式候選聯繫結果彙整可調整條件，不以樣本原因或時間造假。</p>
-                        <p>客戶確認後仍須由正式案件流程核對並套用。</p>
-                      </div>
-                      <button type="button" className="flex-action-btn" disabled>確認調整方案</button>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <LineFlexDesignPreview source={selectedItem.flexDesignSource} />
             )}
           </div>
         </div>

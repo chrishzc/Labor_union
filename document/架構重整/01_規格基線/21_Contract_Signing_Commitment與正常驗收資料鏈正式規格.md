@@ -324,13 +324,14 @@ Preview／確認／Apply／receipt/readback，列為 `completed`；外部 LINE �
 因此前述 `SendStaffContract`／`SendClientContract` 僅保留 legacy compatibility identity，不再是新 UI 的
 正式主路徑；`archive locator` 只可留在 repository 內部相容層，current public contract 必須退出。
 
-Runtime gap 狀態（2026-08-25）：`blocked`。current renderer 僅產生 XLSX；現有 `media_assets` 與
+Runtime gap 狀態（2026-08-26）：`approved`。人工已授權本機實作、必要的 `lu_test_*` schema gate、
+controlled-file adapter 與 LINE sandbox 驗收；current renderer 仍僅產生 XLSX，現有 `media_assets` 與
 `contract_document_versions.storage_key` 尚未驗證為 `00` §2.2 的受控 NAS logical object reference／digest／
 version adapter，事件模型也只有 legacy `sent`／`signed_received`，尚無外部平台雙方 completion report。
 必須先完成 PDF renderer、NAS discovery／read adapter、metadata 對帳與 completion-report contract；若盤點確認
 現有 schema 足夠，可不新增 binary 欄位，若不足仍須另立 DB Work Package。不得以 raw NAS path、受控 HTTPS URL
-或直接 signed-return 假裝完成。本次禁止 DDL／migration，因此 `CUR-CONTRACT-01` 保持 blocked；既有人工補登
-完成狀態不受影響。
+或直接 signed-return 假裝完成。DDL／migration 只限正式 release chain 與 allowlisted `lu_test_*` 驗證；
+production／`union_db`、external deployment 與 entry switch 仍需精確 target gate。既有人工補登完成狀態不受影響。
 
 ## 2026-08-21 M3 acceptance-effect amendment
 

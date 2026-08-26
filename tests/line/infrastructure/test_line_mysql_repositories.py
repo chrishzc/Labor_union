@@ -118,6 +118,40 @@ class TransactionConnection(FakeConnection):
         self.actions.append("rollback")
 
 
+def test_order_group_numbered_queries_use_count_limit_and_offset() -> None:
+    cursor = ScriptedCursor(
+        one_rows=({"total": 26}, {"total": 11}),
+        all_rows=(
+            ({
+                "case_no": "CASE-26",
+                "group_id": None,
+                "binding_status": "active",
+                "aggregate_version": 3,
+            },),
+            ({
+                "event_id": 11,
+                "case_no": "CASE-26",
+                "event_type": "group_activated",
+                "actor_id": "admin:7",
+                "occurred_at_utc": NOW,
+                "invitation_fingerprint": None,
+            },),
+        ),
+    )
+    repository = MySqlLineOrderGroupBindingRepository(FakeConnection(cursor))
+
+    groups = repository.list_numbered(status="active", page=2, page_size=25)
+    events = repository.events_numbered("CASE-26", page=2, page_size=10)
+
+    assert (groups.page, groups.page_size, groups.total, groups.total_pages) == (2, 25, 26, 2)
+    assert groups.items[0].case_no == "CASE-26"
+    assert (events.page, events.page_size, events.total, events.total_pages) == (2, 10, 11, 2)
+    assert events.items[0].event_id == 11
+    assert "LIMIT %s OFFSET %s" in cursor.executed[1][0]
+    assert cursor.executed[1][1] == ("active", 25, 25)
+    assert cursor.executed[3][1] == ("CASE-26", "CASE-26", 10, 10)
+
+
 class DuplicateAttemptCursor(ScriptedCursor):
     def execute(self, sql, parameters=()):
         if sql.startswith("INSERT INTO line_rich_menu_publication_step_attempt_events"):
@@ -492,6 +526,37 @@ def test_rich_menu_publication_list_page_uses_db_limit_offset_and_total_over_100
     assert "menu_definition_id=%s" in cursor.executed[0][0]
     assert "menu_definition_id=%s" in cursor.executed[1][0]
     assert "LIMIT %s OFFSET %s" in cursor.executed[1][0]
+
+
+def test_rich_menu_publication_exact_revision_query_has_no_history_limit() -> None:
+    rows = (
+        {
+            "id": 12,
+            "menu_definition_id": "customer_menu",
+            "configuration_revision": 8,
+            "publication_status": LineRichMenuPublicationStatus.PUBLISHED.value,
+        },
+        {
+            "id": 11,
+            "menu_definition_id": "staff_menu",
+            "configuration_revision": 8,
+            "publication_status": LineRichMenuPublicationStatus.PUBLISHING.value,
+        },
+    )
+    cursor = ScriptedCursor(all_rows=(rows,))
+
+    result = MySqlLineRichMenuPublicationRepository(
+        FakeConnection(cursor)
+    ).list_for_configuration_revision(LineConfigurationRevision(8))
+
+    assert tuple(item.menu_definition_id for item in result) == (
+        "customer_menu",
+        "staff_menu",
+    )
+    sql, parameters = cursor.executed[0]
+    assert parameters == (8,)
+    assert "configuration_revision=%s" in sql
+    assert "LIMIT" not in sql
 
 
 def _rich_menu_cleanup_work_row() -> dict[str, object]:

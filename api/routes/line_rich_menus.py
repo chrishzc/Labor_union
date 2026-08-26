@@ -5,6 +5,7 @@ Description: 提供 Rich Menu 零寫入發布預覽、媒體與既有發布相�
 
 from __future__ import annotations
 
+import json
 from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile, status
@@ -12,10 +13,12 @@ from fastapi.responses import Response
 
 from api.dependencies.admin_auth import (
     admin_actor_context,
+    require_admin,
+    require_line_configuration_manager,
     require_line_configuration_reader,
     require_line_manager,
-    require_line_menu_publisher,
     require_line_viewer,
+    require_persisted_admin,
 )
 from api.dependencies.line_runtime import (
     get_line_configuration_application,
@@ -38,9 +41,20 @@ from api.schemas.line_rich_menus import (
     RichMenuPublicationView,
     RichMenuPublishRequest,
 )
-from domains.line.configuration import LineConfigurationKind
+from api.schemas.line_rich_menu_drafts import (
+    RichMenuDraftApplyRequest,
+    RichMenuDraftApplyView,
+    RichMenuDraftPreviewRequest,
+    RichMenuDraftPreviewView,
+    RichMenuDraftPublicationLockView,
+    RichMenuDraftReceiptView,
+    RichMenuDraftView,
+)
+from domains.line.configuration import LineConfigurationKind, LineConfigurationRevisionConflict
 from domains.line.identities import LineConfigurationRevision, LineRichMenuPublicationId
+from domains.line.rich_menu_draft import RichMenuDraftValidationError
 from domains.line.rich_menu import LineRichMenuPublicationStatus
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.line.configuration_store import read_config
@@ -97,7 +111,78 @@ _SAFE_CONFLICT_CODES = frozenset(
         "line_rich_menu_preview_stale",
     }
 )
+_DRAFT_MEDIA_CONFLICT_MESSAGES = {
+    "line_rich_menu_media_asset_missing": "選取的背景圖已不存在，請重新選擇。",
+    "line_rich_menu_media_asset_owner_conflict": "選取的背景圖不屬於目前選單，請重新選擇。",
+    "line_rich_menu_media_asset_deleted": "選取的背景圖已刪除，請重新選擇。",
+    "line_rich_menu_media_asset_digest_conflict": "選取的背景圖內容已變更，請重新選擇。",
+    "line_rich_menu_media_asset_version_conflict": "選取的背景圖版本已變更，請重新選擇。",
+    "line_rich_menu_media_asset_size_conflict": "選取的背景圖尺寸不符合目前選單，請重新選擇。",
+}
 _DEVELOPMENT_PREVIEW_ACTOR_ID = 2_147_483_647
+
+
+def _draft_error(exc: Exception) -> NoReturn:
+    if isinstance(exc, LineConfigurationRevisionConflict):
+        raise typed_http_error(
+            409,
+            "conflict",
+            "line_rich_menu_draft_revision_stale",
+            "Rich Menu 草稿版本已變更，請重新查詢。",
+            "line-rich-menu-draft",
+        ) from exc
+    if isinstance(exc, (RichMenuDraftValidationError, ValueError, TypeError)):
+        raise typed_http_error(
+            422,
+            "validation",
+            "line_rich_menu_draft_invalid",
+            "Rich Menu 草稿欄位未通過驗證。",
+            "line-rich-menu-draft",
+        ) from exc
+    if isinstance(exc, RuntimeError) and exc.args:
+        code = str(exc.args[0])
+        if code in _DRAFT_MEDIA_CONFLICT_MESSAGES:
+            raise typed_http_error(
+                409,
+                "conflict",
+                code,
+                _DRAFT_MEDIA_CONFLICT_MESSAGES[code],
+                "line-rich-menu-draft",
+            ) from exc
+        if code in {
+            "line_configuration_idempotency_conflict",
+            "line_configuration_revision_conflict",
+            "line_rich_menu_draft_preview_fingerprint_mismatch",
+        }:
+            raise typed_http_error(
+                409,
+                "conflict",
+                code,
+                "Rich Menu 草稿請求與目前版本或預覽不一致。",
+                "line-rich-menu-draft",
+            ) from exc
+    raise typed_http_error(
+        503,
+        "unavailable",
+        "line_rich_menu_draft_unavailable",
+        "Rich Menu 草稿暫時無法完成。",
+        "line-rich-menu-draft",
+        retryable=True,
+    ) from exc
+
+
+def _draft_publication_lock_view(lock) -> RichMenuDraftPublicationLockView:
+    reasons = {
+        "processing": "此版本正在發布處理中，為避免變更已送出的內容，目前只能查看。",
+        "published": "此版本已正式發布，為保留發布快照，目前只能查看；請建立新的草稿版本再調整。",
+    }
+    state = lock.state.value
+    return RichMenuDraftPublicationLockView(
+        menu_definition_id=lock.menu_definition_id,
+        configuration_revision=lock.configuration_revision.value,
+        state=state,
+        readonly_reason=reasons.get(state),
+    )
 
 
 def _publication_error(exc: Exception) -> NoReturn:
@@ -155,6 +240,112 @@ def _menu(menu_id: str) -> RichMenuDefinition:
     return menu
 
 
+@router.get(
+    "/draft",
+    response_model=BaseResponse[RichMenuDraftView],
+)
+def rich_menu_draft_query(
+    principal: AdminPrincipal = Depends(require_line_configuration_manager),
+):
+    try:
+        result = get_line_configuration_application().get_rich_menu_draft_query(
+            admin_actor_context(principal)
+        )
+        snapshot = result.snapshot
+        definition = LineMenusConfig.model_validate(json.loads(snapshot.definition_json))
+    except Exception as exc:
+        _draft_error(exc)
+    return BaseResponse[RichMenuDraftView](
+        data=RichMenuDraftView(
+            revision=snapshot.revision.value,
+            definition=definition,
+            publication_locks=tuple(
+                _draft_publication_lock_view(lock)
+                for lock in result.publication_locks
+            ),
+        )
+    )
+
+
+@router.post(
+    "/draft/preview",
+    response_model=BaseResponse[RichMenuDraftPreviewView],
+)
+def rich_menu_draft_preview(
+    payload: RichMenuDraftPreviewRequest,
+    principal: AdminPrincipal = Depends(require_line_configuration_manager),
+):
+    try:
+        candidate = get_line_configuration_application().preview_rich_menu_draft(
+            LineConfigurationRevision(payload.expected_revision),
+            payload.definition,
+            admin_actor_context(principal),
+        )
+        definition = LineMenusConfig.model_validate(json.loads(candidate.definition_json))
+    except Exception as exc:
+        _draft_error(exc)
+    return BaseResponse[RichMenuDraftPreviewView](
+        data=RichMenuDraftPreviewView(
+            before_revision=candidate.before_revision.value,
+            resulting_revision=candidate.resulting_revision.value,
+            normalized_definition=definition,
+            preview_fingerprint=candidate.fingerprint.value,
+        )
+    )
+
+
+@router.put(
+    "/draft",
+    response_model=BaseResponse[RichMenuDraftApplyView],
+)
+def rich_menu_draft_apply(
+    payload: RichMenuDraftApplyRequest,
+    request: Request,
+    principal: AdminPrincipal = Depends(require_line_configuration_manager),
+):
+    try:
+        result = get_line_configuration_application().apply_rich_menu_draft(
+            expected_revision=LineConfigurationRevision(payload.expected_revision),
+            definition=payload.definition,
+            preview_fingerprint=PreviewFingerprint(payload.preview_fingerprint),
+            actor=admin_actor_context(principal),
+            reason=payload.reason,
+            idempotency_key=IdempotencyKey(payload.idempotency_key),
+            correlation_id=CorrelationId(payload.correlation_id),
+        )
+        readback_result = get_line_configuration_application().get_rich_menu_draft_query(
+            admin_actor_context(principal)
+        )
+        if readback_result.snapshot.revision != result.snapshot.revision:
+            raise RuntimeError("line_rich_menu_draft_readback_revision_mismatch")
+        readback_definition = LineMenusConfig.model_validate(
+            json.loads(readback_result.snapshot.definition_json)
+        )
+    except Exception as exc:
+        _draft_error(exc)
+    request.state.audit_action = "line.rich_menu.draft.apply"
+    request.state.audit_resource_type = "line_configuration"
+    request.state.audit_resource_id = f"rich_menus:{result.snapshot.revision.value}"
+    return BaseResponse[RichMenuDraftApplyView](
+        data=RichMenuDraftApplyView(
+            receipt=RichMenuDraftReceiptView(
+                outcome=result.outcome.value,
+                committed_revision=result.snapshot.revision.value,
+                receipt_reference=f"line-rich-menu-draft:{result.snapshot.revision.value}",
+            ),
+            readback=RichMenuDraftView(
+                revision=result.snapshot.revision.value,
+                definition=readback_definition,
+                publication_locks=tuple(
+                    _draft_publication_lock_view(lock)
+                    for lock in readback_result.publication_locks
+                ),
+            ),
+        ),
+        message="Rich Menu 草稿版本已套用",
+    )
+
+
 @router.post("/preview", response_class=Response)
 def preview_rich_menu(payload: RichMenuDefinition):
     try:
@@ -170,7 +361,7 @@ def preview_rich_menu(payload: RichMenuDefinition):
 @router.post(
     "/{menu_id}/images",
     response_model=BaseResponse[dict],
-    dependencies=[Depends(require_line_menu_publisher)],
+    dependencies=[Depends(require_persisted_admin)],
 )
 async def upload_rich_menu_image(
     menu_id: str,
@@ -214,7 +405,7 @@ async def upload_rich_menu_image(
 @router.delete(
     "/images/{asset_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_line_menu_publisher)],
+    dependencies=[Depends(require_persisted_admin)],
 )
 def remove_rich_menu_image(asset_id: int, request: Request):
     config = read_config("line_menus", LineMenusConfig)
@@ -387,7 +578,7 @@ def publication_retry(
     publication_id: Annotated[int, Path(gt=0)],
     payload: RichMenuPublicationRetryRequest,
     request: Request,
-    principal: AdminPrincipal = Depends(require_line_menu_publisher),
+    principal: AdminPrincipal = Depends(require_persisted_admin),
 ):
     try:
         result = get_line_rich_menu_application().retry(
@@ -415,7 +606,7 @@ def publication_retry(
 )
 def create_rich_menu_publish_preview(
     menu_id: Annotated[str, Path(min_length=1, max_length=191)],
-    principal: AdminPrincipal = Depends(require_line_configuration_reader),
+    principal: AdminPrincipal = Depends(require_admin),
 ) -> RichMenuPublishPreviewResponse:
     preview_request = RichMenuPublishPreviewRequest(
         menu_id=menu_id,
@@ -503,7 +694,7 @@ def publish_rich_menu(
     menu_id: Annotated[str, Path(min_length=1, max_length=191)],
     payload: RichMenuPublishRequest,
     request: Request,
-    principal: AdminPrincipal = Depends(require_line_menu_publisher),
+    principal: AdminPrincipal = Depends(require_persisted_admin),
 ):
     actor = admin_actor_context(principal)
     try:

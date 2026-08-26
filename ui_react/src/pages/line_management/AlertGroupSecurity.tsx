@@ -81,7 +81,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [busy, setBusy] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [reason, setReason] = useState<string>('工會管理員調整異常通知群組');
+  const [reason, setReason] = useState<string>('工會人員調整異常通知群組');
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [confirmed, setConfirmed] = useState<boolean>(false);
   const [receipt, setReceipt] = useState<LineRuntimeTargetReceipt | null>(null);
@@ -236,12 +236,11 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
               <div><span>目前綁定之群組名稱</span><strong>{groupTarget.display_label}</strong></div>
               <div><span>目前狀態</span><strong>{stateLabel(groupTarget.state)}</strong></div>
               <div><span>綁定／更新時間</span><strong>{groupTarget.updated_at}</strong></div>
-              <div><span>最近操作人員</span><strong>尚未提供</strong></div>
             </div>
             <div className="line-events" style={{ marginTop: '20px' }}>
               <h4>🔒 單一互斥鎖定保護機制</h4>
               <p style={{ color: '#57423b', fontSize: '0.9rem', lineHeight: '1.6' }}>
-                系統只允許一個啟用中的群組。新增或替換必須先檢查影響並由管理員確認，
+                系統只允許一個啟用中的群組。新增或替換必須先檢查影響，並由已登入且啟用的內部使用者確認，
                 不能由聊天室文字或畫面自行覆蓋正式設定。
               </p>
             </div>
@@ -258,7 +257,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
                 </span>
               </div>
               <div className="line-detail-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
-                <div><span>對象類型</span><strong>{target.target_kind === 'group' ? 'LINE 群組' : '管理員使用者'}</strong></div>
+                <div><span>對象類型</span><strong>{target.target_kind === 'group' ? 'LINE 群組' : '內部使用者'}</strong></div>
                 <div><span>通知範圍</span><strong>{minimumStatusLabel(target.minimum_status)}</strong></div>
                 <div><span>更新時間</span><strong>{target.updated_at}</strong></div>
               </div>
@@ -278,7 +277,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
       <div className="line-workspace-card" style={{ borderColor: '#fecdd3', background: '#fff5f5', marginBottom: '24px' }}>
         <div className="line-section-heading" style={{ borderBottomColor: '#fed7aa' }}>
           <div>
-            <h3 style={{ color: '#991b1b' }}>⚠️ 最高權限管理員專區</h3>
+            <h3 style={{ color: '#991b1b' }}>⚠️ 通知群組管理</h3>
             <p style={{ color: '#9a3412' }}>更換幹部群組時，必須先檢查解除目前群組的影響，確認後才允許重新配對。</p>
           </div>
         </div>

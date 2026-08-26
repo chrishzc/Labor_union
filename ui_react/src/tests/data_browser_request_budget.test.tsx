@@ -28,7 +28,7 @@ describe('Data Browser request budget', () => {
     fireEvent.click(screen.getByRole('button', { name: /客戶歷史檔案/ }));
     await waitFor(() => expect(dataBrowserQueryClient.querySource).toHaveBeenCalledTimes(2));
 
-    fireEvent.change(screen.getByPlaceholderText(/搜尋核准/), { target: { value: '台北市' } });
+    fireEvent.change(screen.getByPlaceholderText(/搜尋案件編號/), { target: { value: '台北市' } });
     fireEvent.click(screen.getByRole('button', { name: '查詢' }));
     await waitFor(() => expect(dataBrowserQueryClient.querySource).toHaveBeenCalledTimes(3));
 

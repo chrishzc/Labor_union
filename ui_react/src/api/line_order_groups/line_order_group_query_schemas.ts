@@ -23,7 +23,10 @@ export const LineOrderGroupRecordSchema = z.strictObject({
 
 export const LineOrderGroupPageSchema = z.strictObject({
   items: z.array(LineOrderGroupRecordSchema),
+  page: z.number().int().positive(),
+  page_size: z.number().int().positive(),
   total: z.number().int().nonnegative(),
+  total_pages: z.number().int().nonnegative(),
 });
 
 export const LineOrderGroupEventSchema = z.strictObject({
@@ -35,9 +38,16 @@ export const LineOrderGroupEventSchema = z.strictObject({
   invitation_fingerprint: z.string().min(1).nullable(),
 });
 
-export const LineOrderGroupEventsSchema = z.array(LineOrderGroupEventSchema);
+export const LineOrderGroupEventPageSchema = z.strictObject({
+  items: z.array(LineOrderGroupEventSchema),
+  page: z.number().int().positive(),
+  page_size: z.number().int().positive(),
+  total: z.number().int().nonnegative(),
+  total_pages: z.number().int().nonnegative(),
+});
 
 export type LineOrderGroupStatus = z.infer<typeof LineOrderGroupStatusSchema>;
 export type LineOrderGroupRecord = z.infer<typeof LineOrderGroupRecordSchema>;
 export type LineOrderGroupPage = z.infer<typeof LineOrderGroupPageSchema>;
 export type LineOrderGroupEvent = z.infer<typeof LineOrderGroupEventSchema>;
+export type LineOrderGroupEventPage = z.infer<typeof LineOrderGroupEventPageSchema>;

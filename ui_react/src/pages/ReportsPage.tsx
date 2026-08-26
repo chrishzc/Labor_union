@@ -250,7 +250,7 @@ export const ReportsPage: React.FC = () => {
     <header className="page-header-banner reports-page-header">
       <div>
         <h1 className="page-title">📊 工會營運與補助報表</h1>
-        <p className="page-subtitle">週報三分頁與補助核銷皆採 server-redacted typed view；數值不由瀏覽器推算。</p>
+        <p className="page-subtitle">集中查詢營運週報與政府補助核銷資料，並可下載完整工作表。</p>
       </div>
     </header>
     <section className="reports-workspace" aria-label="營運與補助報表查詢工作區">
@@ -304,7 +304,7 @@ export const ReportsPage: React.FC = () => {
       </div>}
 
       {state.kind === 'weekly-ready' && <>
-        <div className="reports-meta">{state.data.period.week_label}｜{state.data.period.week_start}～{state.data.period.week_end}｜資料版本 {state.data.revision}</div>
+        <div className="reports-meta">{state.data.period.week_label}｜{state.data.period.week_start}～{state.data.period.week_end}</div>
         {weeklyTab === 'cases' && <WeeklyCasesView report={state.data} />}
         {weeklyTab === 'subsidy' && <WeeklySubsidyView report={state.data} />}
         {weeklyTab === 'service' && <WeeklyServiceView report={state.data} />}
@@ -316,7 +316,6 @@ export const ReportsPage: React.FC = () => {
           <article><span>期間</span><strong>{state.data.kind === 'quarterly' ? `${state.data.year} Q${state.data.quarter}` : `${state.data.year} 年度`}</strong></article>
           <article><span>總筆數</span><strong>{state.data.totalRows}</strong></article>
           <article><span>補助總額</span><strong>{state.data.totalAmount}</strong></article>
-          <article><span>資料版本</span><strong>{state.data.revision}</strong></article>
         </section>
         <div className="reports-meta">報表產生時間：{state.data.generatedAt}</div>
         <SubsidyPartitionsView partitions={state.data.partitions} />

@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { App } from '../App';
 import { sessionClient } from '../api/auth/session_client';
+import { ADMIN_SESSION_UNAUTHORIZED_EVENT } from '../api/shared/transport';
 
 describe('Route Guard & Shell Hash Navigation', () => {
   const originalFetch = globalThis.fetch;
@@ -223,6 +224,34 @@ describe('Route Guard & Shell Hash Navigation', () => {
 
     await waitFor(() => {
       expect(screen.getByTitle('排班日曆')).toHaveClass('active');
+    });
+  });
+
+  it('目前人員 token 收到 401 時立即清除舊 shell；晚到的舊 token 不影響新 Session', async () => {
+    sessionClient.setSession('current-human-token', {
+      id: 1,
+      username: 'admin',
+      display_name: '系統管理員',
+      role: 'system_admin',
+      capabilities: ['system.administration'],
+    });
+    render(<App />);
+    expect(screen.getByText('營運作業 (Operations)')).toBeInTheDocument();
+
+    act(() => window.dispatchEvent(new CustomEvent(ADMIN_SESSION_UNAUTHORIZED_EVENT, {
+      detail: { rejectedToken: 'older-human-token' },
+    })));
+    expect(sessionClient.getToken()).toBe('current-human-token');
+    expect(screen.getByText('營運作業 (Operations)')).toBeInTheDocument();
+
+    act(() => window.dispatchEvent(new CustomEvent(ADMIN_SESSION_UNAUTHORIZED_EVENT, {
+      detail: { rejectedToken: 'current-human-token' },
+    })));
+    await waitFor(() => {
+      expect(sessionClient.isAuthenticated()).toBe(false);
+      expect(window.location.hash).toBe('#login');
+      expect(screen.queryByText('營運作業 (Operations)')).not.toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: '月子工會管理系統' })).toBeInTheDocument();
     });
   });
 

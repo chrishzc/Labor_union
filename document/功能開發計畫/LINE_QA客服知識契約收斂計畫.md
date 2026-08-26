@@ -1,16 +1,16 @@
 ---
 doc_type: feature-plan
-declared_status: blocked
+declared_status: approved
 date: 2026-08-20
-updated: 2026-08-20
+updated: 2026-08-26
 priority: P2
 owner: Customer Service / Knowledge Retrieval Integration Owner（待人工確認）
 domain: Customer Service / Knowledge Retrieval / LINE Integration
 subsystem: Service Help / Knowledge Fallback / Evidence Intake
 source_artifact: document/line/QA問答集.xlsx
 source_artifact_role: input-evidence-only
-loader_status: BLOCKED_ARTIFACT_TOOL_RUNTIME_UNAVAILABLE
-approval_required: exact human confirmation before any production or formal-spec change
+loader_status: PENDING_RUNTIME_RECHECK
+approval_required: exact row-level human review before answer publication
 db_change: none
 ---
 
@@ -18,13 +18,15 @@ db_change: none
 
 ## 1. Status and activation boundary
 
-本計畫目前為 `blocked`。本輪無法取得 `load_workspace_dependencies` 提供的
-`@oai/artifact-tool` runtime，因此尚未 import／inspect
+本計畫目前為 `approved-for-read-only-inspection`。2026-08-26 人工已授權恢復 loader、唯讀 inspect
+workbook、建立去敏 review queue 與提出正式契約 amendment；上一輪無法取得 `load_workspace_dependencies`
+提供的 `@oai/artifact-tool` runtime，因此尚未 import／inspect
 `document/line/QA問答集.xlsx`；不得猜測 workbook 的 sheet、range、題數、答案、空值或重複資料，
 也不得以歷史抽取結果冒充本輪證據。
 
 Excel 只可作為 input evidence，不是 SSOT、正式規格、approved answer catalog 或 production
-mutation 授權。未完成 loader inspection 與人工 review 前，不得啟用 AI 回答、provider 發送、DB seed、
+mutation 授權。blanket execution approval 不會把未讀 row 自動升格為 approved answer；未完成 loader inspection
+與逐題人工 review 前，不得啟用 AI 回答、provider 發送、DB seed、
 knowledge publish、LINE webhook 行為或任何 production writer。
 
 ## 2. Business scenario
@@ -88,7 +90,8 @@ knowledge publish、LINE webhook 行為或任何 production writer。
 
 - `document/功能開發計畫/LINE_QA客服知識契約收斂計畫.md`
 
-本檔只記錄 proposed／blocked contract 與 review queue，不授權任何 production、DB、provider 或正式規格變更。
+本檔授權唯讀 inspection、去敏 review queue 與 formal amendment candidate；不授權未經逐題 review 的
+production answer、DB seed、provider 發送或正式 publication。
 
 ## 8. Acceptance and required tests
 

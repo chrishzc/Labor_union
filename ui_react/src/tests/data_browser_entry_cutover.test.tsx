@@ -137,11 +137,12 @@ describe('Data Browser Phase5 entry candidate', () => {
 
     await waitFor(() => expect(screen.getByText('訂單 115000001')).toBeInTheDocument());
     expect(window.location.hash).toBe('#data-browser');
+    expect(screen.getByTitle('資料中心')).toHaveClass('active');
     expect(count(requests, ORDERS_ENDPOINT)).toBe(1);
     expect(count(requests, SYSTEM_STATUS_ENDPOINT)).toBe(1);
   });
 
-  it('source/search/next 各只增加一個 GET，Drawer/copy/correction 不增加請求', async () => {
+  it('source/search/next 各只增加一個 GET，Drawer/copy 不增加請求且不暴露假更正操作', async () => {
     authenticate();
     const requests = installFetchStub();
     vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
@@ -156,7 +157,7 @@ describe('Data Browser Phase5 entry candidate', () => {
     expect(count(requests, ORDERS_ENDPOINT)).toBe(initialOrders);
     expect(count(requests, CLIENTS_ENDPOINT)).toBe(initialClients + 1);
 
-    fireEvent.change(screen.getByPlaceholderText(/搜尋核准/), { target: { value: '台北市' } });
+    fireEvent.change(screen.getByPlaceholderText(/搜尋案件編號/), { target: { value: '台北市' } });
     fireEvent.click(screen.getByRole('button', { name: '查詢' }));
     await waitFor(() => expect(count(requests, CLIENTS_ENDPOINT)).toBe(initialClients + 2));
     expect(requests.at(-1)?.query.get('query')).toBe('台北市');
@@ -172,15 +173,14 @@ describe('Data Browser Phase5 entry candidate', () => {
     await waitFor(() => expect(screen.getByText('已複製去敏資料')).toBeInTheDocument());
     expect(requests.length).toBe(beforeDrawerActions);
 
+    expect(screen.getByText(/此頁只提供去敏資料查詢/)).toBeInTheDocument();
     for (const controlId of [
       'data-browser.patch',
       'data-browser.source-correction.preview',
       'data-browser.source-correction.apply',
     ]) {
       const control = document.querySelector(`[data-control-id="${controlId}"]`);
-      expect(control).toBeInTheDocument();
-      expect(control).toBeDisabled();
-      if (control) fireEvent.click(control);
+      expect(control).not.toBeInTheDocument();
     }
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
     expect(screen.queryByText(/RAW JSON|更正成功|套用成功/)).not.toBeInTheDocument();

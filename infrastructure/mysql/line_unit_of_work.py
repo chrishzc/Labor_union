@@ -34,6 +34,9 @@ from infrastructure.mysql.line_media_order_group_repository import (
     MySqlLineMediaMetadataRepository,
     MySqlLineOrderGroupBindingRepository,
 )
+from infrastructure.mysql.line_media_asset_query_repository import (
+    MySqlLineRichMenuMediaAssetQueryRepository,
+)
 from infrastructure.mysql.line_order_group_adapters import (
     MySqlOrdersLineAudienceAdapter,
 )
@@ -86,6 +89,7 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.notification_rules = MySqlLineNotificationRepository(connection)
         self.configurations = MySqlLineConfigurationRepository(connection)
         self.rich_menu_publications = MySqlLineRichMenuPublicationRepository(connection)
+        self.rich_menu_media_assets = MySqlLineRichMenuMediaAssetQueryRepository(connection)
         self.media_metadata = MySqlLineMediaMetadataRepository(connection)
         self.order_groups = MySqlLineOrderGroupBindingRepository(connection)
         self.order_audiences = MySqlOrdersLineAudienceAdapter(connection)

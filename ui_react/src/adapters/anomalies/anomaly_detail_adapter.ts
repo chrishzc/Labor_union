@@ -21,6 +21,13 @@ export interface AnomalyDetailBundleViewModel {
   recoveryAvailable: boolean;
 }
 
+export function visibleEvidenceItems<T extends { key: string; kind: string }>(items: readonly T[]): T[] {
+  return items.filter((item) => (
+    !/(identity|version|fingerprint|hash|correlation|(^|_)id$)/i.test(item.key)
+    && !['code', 'code_list', 'identity', 'identity_list'].includes(item.kind)
+  ));
+}
+
 function renderValue(field: AnomalyEvidenceField): string {
   if (Array.isArray(field.value)) return field.value.join(', ');
   if (field.kind === 'boolean') return field.value ? '是' : '否';
@@ -42,7 +49,13 @@ function adaptEvidence(fields: AnomalyEvidenceField[]): EvidenceRowViewModel[] {
 }
 
 function adaptTimeline(items: AnomalyDetailView['timeline']): TimelineRowViewModel[] {
-  return items.map((item) => ({ action: item.action, actor: item.actor, reason: item.reason, correlationId: item.correlation_id, expectedVersion: item.expected_workflow_version, resultingVersion: item.resulting_workflow_version, createdAt: item.created_at }));
+  const actionLabels: Readonly<Record<string, string>> = {
+    claim: '已進入人工確認',
+    resolve: '已記錄處理進度',
+    reopen: '根因仍存在，重新列入待辦',
+    auto_resolve: '根因已自動排除',
+  };
+  return items.map((item) => ({ action: actionLabels[item.action] ?? '系統處理紀錄', actor: item.actor, reason: item.reason, correlationId: item.correlation_id, expectedVersion: item.expected_workflow_version, resultingVersion: item.resulting_workflow_version, createdAt: item.created_at }));
 }
 
 function renderBinding(item: AnomalySourceBinding): string {

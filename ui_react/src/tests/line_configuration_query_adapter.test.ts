@@ -98,7 +98,7 @@ describe('LINE configuration query adapter', () => {
       items: [...LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE.items],
     })).toEqual({
       items: [{ id: 19, menuDefinitionId: 'customer_menu', configurationRevision: 8, status: 'published', statusLabel: '已發布' }],
-      page: 1, pageSize: 20, loadedCount: 1, loadedScope: true,
+      page: 1, pageSize: 20, total: 1, totalPages: 1, loadedCount: 1, loadedScope: true,
     });
   });
 });

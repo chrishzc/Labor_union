@@ -27,7 +27,7 @@ from api.schemas.customer_service import (
 )
 from api.schemas.line_identity import (
     CanonicalLineReviewDecisionPreviewResponse,
-    CanonicalLineReviewPageResponse,
+    CanonicalLineReviewNumberedPageResponse,
     CanonicalLineReviewResponse,
 )
 from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus
@@ -86,9 +86,12 @@ class _CustomerServiceReplyApplyRequest(_CustomerServiceReplyPreviewRequest):
 
 
 class _ReviewListRequest(_LiffAuthRequest):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     review_status: LineReviewStatus | None = LineReviewStatus.PENDING
     review_type: LineReviewType | None = LineReviewType.STAFF_VERIFICATION
-    cursor: str | None = Field(default=None, min_length=1, max_length=191)
+    page: int = Field(default=1, ge=1, le=100_000)
+    page_size: int = Field(default=50, ge=1, le=100)
 
 
 class _ReviewDecisionPreviewRequest(_LiffAuthRequest):
@@ -250,18 +253,27 @@ def retired_customer_service_reply(ticket_id: int):
     )
 
 
-@router.post("/identity-reviews", response_model=BaseResponse[CanonicalLineReviewPageResponse])
+@router.post("/identity-reviews", response_model=BaseResponse[CanonicalLineReviewNumberedPageResponse])
 def identity_reviews(payload: _ReviewListRequest):
     _mobile_admin_actor(payload.line_id_token)
     page = get_line_identity_review_application().list(
         LineReviewListQuery(
             statuses=(payload.review_status,) if payload.review_status else (),
             review_types=(payload.review_type,) if payload.review_type else (),
-            page_size=50,
-            cursor=payload.cursor,
+            page_size=payload.page_size,
+            page=payload.page,
         )
     )
-    return BaseResponse(data={"items": [_review_view(item) for item in page.items], "next_cursor": page.next_cursor})
+    if page.page != payload.page or page.page_size != payload.page_size or page.total is None:
+        raise RuntimeError("line_review_numbered_page_contract_invalid")
+    return BaseResponse(
+        data=CanonicalLineReviewNumberedPageResponse(
+            items=[_review_view(item) for item in page.items],
+            page=page.page,
+            page_size=page.page_size,
+            total=page.total,
+        )
+    )
 
 
 @router.post(

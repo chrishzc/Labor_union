@@ -274,17 +274,34 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
     assert "userId" not in staff_orders
 
 
-def test_staff_self_service_fails_closed_without_preview_apply_mutations():
+def test_staff_self_service_exposes_text_log_preview_apply_but_keeps_media_locked():
     schedule = (
         PROJECT_ROOT / "line/static/staff_schedule.html"
     ).read_text(encoding="utf-8")
 
-    assert "/api/v1/line/staff-self-service/leave-requests" not in schedule
-    assert "/api/v1/line/staff-self-service/service-day-logs" not in schedule
+    preview_route = "/api/v1/line/staff-self-service/leave-requests/preview"
+    apply_route = "/api/v1/line/staff-self-service/leave-requests/apply"
+    readback_route = "/api/v1/line/staff-self-service/leave-requests/${result.data.request_id}/query"
+    assert preview_route in schedule
+    assert apply_route in schedule
+    assert readback_route in schedule
+    assert schedule.index(preview_route) < schedule.index(apply_route) < schedule.index(readback_route)
+    assert 'id="confirmLeave"' in schedule
+    assert 'if (!leaveCandidate || !document.getElementById("confirmLeave").checked)' in schedule
+    assert "preview_fingerprint" in schedule
+    assert '"Idempotency-Key": candidate.idempotencyKey' in schedule
+    assert f"fetch(`{readback_route}`, {{\n      method: \"POST\"" in schedule
+    assert "body: JSON.stringify(identityPayload())" in schedule
+    assert 'fetch("/api/v1/line/staff-self-service/leave-requests", {' not in schedule
+    assert "/api/v1/line/staff-self-service/service-day-logs/preview" in schedule
+    assert "/api/v1/line/staff-self-service/service-day-logs/apply" in schedule
+    assert "/api/v1/line/staff-self-service/service-day-logs/${committed.log_id}/query" in schedule
     assert "/api/v1/line/staff-self-service/service-day-media" not in schedule
-    assert "尚缺 Preview／Apply／receipt" in schedule
-    assert "請聯絡工會人員人工處理" in schedule
+    assert "等待受控檔案儲存區完成" in schedule
     assert "LINE provider" not in schedule
+    assert 'params.get("userId")' not in schedule
+    assert 'searchParams.get("userId")' not in schedule
+    assert 'development_line_user_id: ""' in schedule
 
 
 def test_identity_flow_requires_and_forwards_client_idempotency_key(monkeypatch):

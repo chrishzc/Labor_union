@@ -321,7 +321,37 @@ worker unavailable 才回 typed unavailable。UI 不得依 error message 字串�
   只有在辨識、下載、追蹤或客服溝通確實需要時才可保留。
 - 成功訊息使用「已排入／處理中／已完成並回讀」等業務語意；外部 provider 工作僅能顯示
   「已排入，尚未代表送達／發布完成」，不得以 task／receipt 存在冒充外部成功。
+- UX 收斂進度（2026-08-26）：LINE Rich Menu 一般畫面已移除 `typed action`、`server Preview`、
+  provider request、Diff Mode、Active DB Snapshot、Before 與內部草稿 revision；Chrome 實點保留
+  本機預覽、明確業務 blocker 與零發送邊界。Staff 名冊搜尋零結果改顯示可清除的明確空狀態；
+  接案狀態 Drawer 對已取消紀錄明示「不可再次取消」，未填取消原因、資料已變更或操作進行中也以
+  業務語意說明 disabled 原因，不以隱藏舊分頁作為驗收入口。
+  Orders 媒合工作台的 delivery raw enum 改由 adapter closed label 投影，並將 reliable task、binding、
+  assignment-plan、Customer Decision 與原 Key 等工程文案改為排入／身分核對／正式分段／客戶決定／
+  安全重試等業務語意。營運報表已移除 server typed view 與內部資料版本；排班頁已將 Server Projection、
+  backend／Official Schedule 與可靠佇列改為正式資料檢查、正式排班與 LINE 通知業務語意。Finance 案件與
+  服務人員選單必須累積所有 typed 分頁，不得把前 200／20 筆當全集；收款查詢不顯示缺失結清欄位的技術
+  占位，付款狀態與事件使用 closed business labels，未知值固定顯示待確認；Finance Import blocking code
+  只顯示 closed 業務原因，案件、收款、人員、付款、工作簿、Preview、Apply 與結果查詢的失敗也只能依
+  authentication／authorization／stale／conflict／unavailable 與本機檔案類型投影 closed 業務訊息，不得
+  顯示 raw transport、schema、HTTP、correlation 或 provider detail。Anomalies 過濾技術識別後不得留下空白卡片；沒有通用 Resolve owner 時顯示
+  常駐處理說明，不渲染永久 disabled 假按鈕，detail／recovery 錯誤也不得顯示 context／identity／job／
+  receipt 等內部術語；timeline action、未知匯入 lane 與未知追蹤狀態固定使用 closed 業務標籤，raw enum
+  只保留於 typed contract／稽核。Data Browser 只呈現六來源去敏清單、業務欄位詳情、分頁與複製；不得
+  顯示 fingerprint、row／source／field identity、version、raw JSON、`loaded scope`、資料庫快照或永久 disabled
+  假更正控制，並須常駐顯示資料修正應回到對應業務頁面的理由。System Status 一般畫面以服務啟動時間、
+  測量次數與可理解的回應時間呈現，不顯示 server snapshot、p50／p95、`ms` 或 raw transport error；未登入
+  仍須保留可操作的 closed 登入指引。Account Center 只呈現帳號、顯示名稱、啟用狀態與 root 管理權限；
+  account id、access-control version、audit raw action／reason code、job UUID 與 raw command/status 只留在
+  typed contract／命令安全邊界。合法 403 必須明示「僅唯一啟用 root 可管理」，不得以 generic disabled
+  或任意 server message 取代。本項仍為 `in-progress`，
+  不代表其他頁面已完成全站盤點。
 - 實際頁面驗證 first feedback、skeleton、loading、empty、stale、success、typed error。
+- Anomalies 的分類、Preview、Apply、Drawer 關閉與背景篩選若因正式 action、未填理由、尚未 Preview、
+  Preview 失效、提交中或結果確認中而不可操作，必須常駐顯示 closed 業務原因並以
+  `aria-describedby` 關聯控制。已進入追蹤編輯後，不保留永久 disabled 的「開啟」按鈕。
+- React 人員 Session 的目前 Bearer 收到 401 時，必須清除同一 token 並立即卸載受保護 shell、返回登入頁；
+  晚到舊 token 的 401、未帶 token 的登入挑戰、403、network／5xx 與不同 service token 不得誤登出。
 - 真實 MySQL 與真實格式 Excel 下量測 Query、Preview、Apply、export、projector lag、
   payload bytes、query count、lock wait 與 job latency。
 - 不要求 HTTP/2／HTTP/3 或 target-host 協定 evidence；部署者可在系統外量測其選用的

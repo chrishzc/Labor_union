@@ -7,19 +7,26 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CustomerServiceClient } from '../api/customer_service/customer_service_client';
 import type { LineConfigurationQueryClient } from '../api/line_configuration/line_configuration_query_client';
 import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
+import type { LineRichMenuDraftClient } from '../api/line_rich_menu_draft/line_rich_menu_draft_client';
 import { LineManagementPage } from '../pages/LineManagementPage';
 import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from './fixtures/customer_service/customer_service_contract_fixtures';
 import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE } from './fixtures/line_identity/line_identity_contract_fixtures';
-import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE } from './fixtures/line_configuration_query_fixtures';
+import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_FIXTURE, LINE_RICH_MENU_DRAFT_FIXTURE, LINE_RICH_MENU_PUBLICATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE } from './fixtures/line_configuration_query_fixtures';
 
 type CustomerServiceQueryClient = Pick<CustomerServiceClient, 'getSummary' | 'listTickets' | 'getTicketDetail'>;
 type LineIdentityQueryClient = Pick<LineIdentityClient, 'listBindings' | 'getBinding'>;
 
-function dependencies(): { customer: CustomerServiceQueryClient; identity: LineIdentityQueryClient; configuration: LineConfigurationQueryClient } {
+function dependencies(): {
+  customer: CustomerServiceQueryClient;
+  identity: LineIdentityQueryClient;
+  configuration: LineConfigurationQueryClient;
+  richMenuDraft: LineRichMenuDraftClient;
+} {
   return {
     customer: { getSummary: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_SUMMARY_FIXTURE), listTickets: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_PAGE_FIXTURE), getTicketDetail: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_DETAIL_FIXTURE) },
     identity: { listBindings: vi.fn().mockResolvedValue(BINDING_PAGE_FIXTURE), getBinding: vi.fn().mockResolvedValue(BOUND_IDENTITY_FIXTURE) },
     configuration: { getNotificationRules: vi.fn().mockResolvedValue(LINE_NOTIFICATION_RULES_CATALOG_FIXTURE), getRichMenuConfiguration: vi.fn().mockResolvedValue(LINE_RICH_MENU_CONFIGURATION_FIXTURE), listRichMenuPublications: vi.fn().mockResolvedValue(LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE), getRichMenuPublication: vi.fn().mockResolvedValue(LINE_RICH_MENU_PUBLICATION_FIXTURE) },
+    richMenuDraft: { query: vi.fn().mockResolvedValue(LINE_RICH_MENU_DRAFT_FIXTURE), preview: vi.fn(), apply: vi.fn() },
   };
 }
 
@@ -29,17 +36,19 @@ describe('LINE Rich Menu query-only 接線', () => {
   it('顯示真實 menu label 與 publication，且不暴露 provider action', async () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
-    const { customer, identity, configuration } = dependencies();
-    render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} />);
+    const { customer, identity, configuration, richMenuDraft } = dependencies();
+    render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} richMenuDraft={richMenuDraft} />);
     fireEvent.click(screen.getByRole('button', { name: /2\. 多角色 Rich Menu/ }));
 
     await waitFor(() => expect(screen.getAllByText('案件進度').length).toBeGreaterThan(0));
     expect(screen.queryByText('目前載入最多 100 筆。')).not.toBeInTheDocument();
     expect(screen.getByText('已發布')).toBeInTheDocument();
-    expect(screen.queryByText('case_progress')).not.toBeInTheDocument();
+    expect(screen.getAllByText('POSTBACK').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('case_progress').length).toBeGreaterThan(0);
     expect(screen.queryByText(/https?:\/\//)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /發布至 LINE|上傳圖片|刪除選單/ })).not.toBeInTheDocument();
-    expect(configuration.getRichMenuConfiguration).toHaveBeenCalledTimes(1);
+    expect(richMenuDraft.query).toHaveBeenCalledTimes(1);
+    expect(configuration.getRichMenuConfiguration).not.toHaveBeenCalled();
     expect(configuration.listRichMenuPublications).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: /查看紀錄/ }));

@@ -44,7 +44,7 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'finance': 'finance',
 
   'anomalies': 'audit',
-  'data-browser': 'audit',
+  'data-browser': 'operations',
   'account-management': 'audit',
   'system-status': 'audit',
 };
@@ -62,7 +62,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'orders', icon: '📦', label: '訂單管理', section: 'operations' },
   { id: 'scheduling', icon: '📅', label: '排班日曆', section: 'operations' },
   { id: 'staff', icon: '👩‍🍼', label: '月嫂名冊', section: 'operations' },
-  { id: 'data-import', icon: '📥', label: '資料匯入', section: 'operations' },
+  { id: 'data-import', icon: '🗄️', label: '資料中心', section: 'operations' },
   { id: 'reports', icon: '📊', label: '營運報表', section: 'operations' },
 
   // LINE Section
@@ -76,7 +76,6 @@ export const NAV_ITEMS: NavItem[] = [
 
   // Audit & System Section
   { id: 'anomalies', icon: '⚠️', label: '異常審核', section: 'audit' },
-  { id: 'data-browser', icon: '🔍', label: '數據瀏覽', section: 'audit' },
   { id: 'account-management', icon: '👤', label: '帳號權限', section: 'audit' },
   { id: 'system-status', icon: '🩺', label: '系統狀態', section: 'audit' },
 ];
@@ -147,6 +146,7 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
   }, [shellOwnsSystemStatusQuery]);
 
   const visibleNavItems = NAV_ITEMS.filter((item) => item.section === currentSection);
+  const sidebarCurrentPage = currentPage === 'data-browser' ? 'data-import' : currentPage;
   const currentUser = sessionClient.getUser();
 
   const handleSectionClick = (section: SectionType) => {
@@ -247,7 +247,7 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
           {visibleNavItems.map((item) => (
             <button
               key={item.id}
-              className={`sidebar-nav-item ${currentPage === item.id ? 'active' : ''}`}
+              className={`sidebar-nav-item ${sidebarCurrentPage === item.id ? 'active' : ''}`}
               onClick={() => onSelectPage(item.id)}
               title={item.label}
             >

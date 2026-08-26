@@ -34,6 +34,10 @@ describe('Data Browser real-data page', () => {
     fireEvent.click(screen.getByRole('button', { name: '複製去敏資料' }));
     await waitFor(() => expect(screen.getByText('已複製去敏資料')).toBeInTheDocument());
     expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
+    const copied = vi.mocked(navigator.clipboard.writeText).mock.calls[0]?.[0] ?? '';
+    expect(copied).not.toMatch(/source_id|row_identity|version_identity|field_id/);
+    expect(copied).toContain('"label": "訂單狀態"');
+    expect(copied).toContain('"value": "服務中"');
   });
 
   it('retries the same cursor after a next-page failure without duplicating loaded rows', async () => {

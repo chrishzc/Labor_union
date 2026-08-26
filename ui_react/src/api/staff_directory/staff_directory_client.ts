@@ -30,6 +30,27 @@ export interface StaffDirectoryClient {
   resetPagination(): void;
 }
 
+export async function loadAllStaffDirectoryPages(
+  query: (params?: StaffDirectoryQueryParams, options?: StaffDirectoryQueryOptions) => Promise<StaffDirectoryPage>,
+  params: Pick<StaffDirectoryQueryParams, 'pageSize'> = {},
+  options?: StaffDirectoryQueryOptions,
+): Promise<StaffDirectoryPage> {
+  const items: StaffDirectoryPage['items'] = [];
+  const seenCursors = new Set<number>();
+  let afterId: number | undefined;
+
+  while (true) {
+    const page = await query({ ...params, ...(afterId === undefined ? {} : { afterId }) }, options);
+    items.push(...page.items);
+    if (page.next_cursor === null) return { items, next_cursor: null };
+    if (page.items.length === 0 || seenCursors.has(page.next_cursor) || page.items[page.items.length - 1].id !== page.next_cursor) {
+      throw new StaffDirectoryValidationError('服務人員清單分頁未向前推進，無法取得完整名冊。');
+    }
+    seenCursors.add(page.next_cursor);
+    afterId = page.next_cursor;
+  }
+}
+
 function validatePositiveInteger(value: number, field: string): void {
   if (!Number.isInteger(value) || value <= 0) {
     throw new StaffDirectoryValidationError(`${field} 必須是正整數。`);

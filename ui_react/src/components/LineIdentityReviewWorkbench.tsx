@@ -69,43 +69,46 @@ function useReviewQueue(client: LineIdentityReviewClient) {
   const [summary, setSummary] = useState<QueryState<LineIdentityReviewSummaryViewModel>>(idleState);
   const [page, setPage] = useState<QueryState<LineIdentityReviewPageViewModel>>(idleState);
   const [reviewType, setReviewType] = useState<'all' | LineIdentityReviewType>('all');
-  const [cursor, setCursor] = useState<string | null>(null);
+  const [pageNumber, setPageNumber] = useState(1);
   const [reload, setReload] = useState(0);
+  const generationRef = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
     setSummary(loadingState());
     setPage(loadingState());
     void client.getReviewSummary({ signal: controller.signal })
       .then((value) => {
-        if (!controller.signal.aborted) setSummary(loadedState(adaptLineIdentityReviewSummary(value)));
+        if (!controller.signal.aborted && generation === generationRef.current) setSummary(loadedState(adaptLineIdentityReviewSummary(value)));
       })
       .catch((error: unknown) => {
-        if (!controller.signal.aborted) setSummary(errorState(safeError(error, 'LINE 身分審核摘要載入失敗。')));
+        if (!controller.signal.aborted && generation === generationRef.current) setSummary(errorState(safeError(error, 'LINE 身分審核摘要載入失敗。')));
       });
     void client.listReviews({
       review_status: 'pending',
       review_type: reviewType === 'all' ? undefined : reviewType,
+      page: pageNumber,
       page_size: 25,
-      cursor: cursor ?? undefined,
     }, { signal: controller.signal })
       .then((value) => {
-        if (!controller.signal.aborted) setPage(loadedState(adaptLineIdentityReviewPage(value)));
+        if (!controller.signal.aborted && generation === generationRef.current) setPage(loadedState(adaptLineIdentityReviewPage(value)));
       })
       .catch((error: unknown) => {
-        if (!controller.signal.aborted) setPage(errorState(safeError(error, 'LINE 身分審核清單載入失敗。')));
+        if (!controller.signal.aborted && generation === generationRef.current) setPage(errorState(safeError(error, 'LINE 身分審核清單載入失敗。')));
       });
     return () => controller.abort();
-  }, [client, cursor, reload, reviewType]);
+  }, [client, pageNumber, reload, reviewType]);
 
   return {
     summary,
     page,
     reviewType,
     setReviewType,
-    setCursor,
+    setPageNumber,
     refresh: () => {
-      setCursor(null);
+      setPageNumber(1);
       setReload((value) => value + 1);
     },
   };
@@ -146,12 +149,15 @@ interface ReviewQueuePanelProps {
   reviewType: 'all' | LineIdentityReviewType;
   onReviewTypeChange: (value: 'all' | LineIdentityReviewType) => void;
   onOpenDetail: (requestId: number) => void;
-  onNextCursor: (cursor: string) => void;
+  onPageChange: (page: number) => void;
   onRefresh: () => void;
 }
 
 function ReviewQueuePanel(props: ReviewQueuePanelProps) {
   const { summary, page, reviewType } = props;
+  const totalPages = page.value ? Math.max(1, Math.ceil(page.value.total / page.value.pageSize)) : 1;
+  const first = page.value && page.value.total > 0 ? ((page.value.page - 1) * page.value.pageSize) + 1 : 0;
+  const last = page.value ? Math.min(page.value.total, page.value.page * page.value.pageSize) : 0;
   return (
     <>
       <div className="line-section-heading">
@@ -196,7 +202,13 @@ function ReviewQueuePanel(props: ReviewQueuePanelProps) {
           </table>
         </div>
       )}
-      {page.value?.nextCursor && <button type="button" onClick={() => props.onNextCursor(page.value!.nextCursor!)}>載入下一頁</button>}
+      {page.value && (
+        <div className="line-action-row" aria-label="審核清單分頁">
+          <span>顯示 {first}-{last} / {page.value.total} 件</span>
+          <button type="button" disabled={page.value.page <= 1} onClick={() => props.onPageChange(page.value!.page - 1)}>上一頁</button>
+          <button type="button" disabled={page.value.page >= totalPages} onClick={() => props.onPageChange(page.value!.page + 1)}>下一頁</button>
+        </div>
+      )}
     </>
   );
 }
@@ -379,11 +391,11 @@ export function LineIdentityReviewWorkbench({ client }: LineIdentityReviewWorkbe
         page={queue.page}
         reviewType={queue.reviewType}
         onReviewTypeChange={(value) => {
-          queue.setCursor(null);
+          queue.setPageNumber(1);
           queue.setReviewType(value);
         }}
         onOpenDetail={(requestId) => void openDetail(requestId)}
-        onNextCursor={queue.setCursor}
+        onPageChange={queue.setPageNumber}
         onRefresh={queue.refresh}
       />
       <ReviewDetailPanel

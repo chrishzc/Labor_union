@@ -7,6 +7,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AnomaliesPage } from '../pages/AnomaliesPage';
 import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { anomalyDetailClient } from '../api/anomalies/anomaly_detail_client';
+import { AnomalyDetailError } from '../api/anomalies/anomaly_detail_errors';
 import {
   VALID_ANOMALY_SUMMARY_1,
   VALID_IMPORT_WARNING_TASK_HCM,
@@ -62,7 +63,8 @@ describe('Anomalies lazy Drawer query flow', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看警示詳情' }));
     await waitFor(() => expect(anomalyQueryClient.queryImportWarningReferral).toHaveBeenCalledTimes(1));
     expect(screen.getByText('由負責流程檢查後修正')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '請依上方轉介流程處理來源資料' })).toBeDisabled();
+    expect(screen.getByText(/追蹤狀態不代表來源已修復/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: '請依上方轉介流程處理來源資料' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '開啟追蹤狀態變更' })).toBeEnabled();
   });
 
@@ -81,14 +83,15 @@ describe('Anomalies lazy Drawer query flow', () => {
   });
 
   it('保留成功 detail，並將 recovery 404 限縮為局部錯誤', async () => {
-    vi.mocked(anomalyDetailClient.queryAnomalyRecovery).mockRejectedValue(new Error('找不到異常 recovery context。'));
+    vi.mocked(anomalyDetailClient.queryAnomalyRecovery).mockRejectedValue(new AnomalyDetailError('NOT_FOUND', '找不到異常 recovery context。'));
     render(<AnomaliesPage />);
     await waitFor(() => expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /查看處理方式 ➔/ }));
     await waitFor(() => expect(document.querySelector('[data-surface-id="anomalies.drawer.evidence"]')).toHaveTextContent('1200'));
     expect(document.querySelector('[data-surface-id="anomalies.drawer.evidence"]')).not.toHaveTextContent('amount_delta_ntd');
-    expect(screen.getByText('找不到異常 recovery context。')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /確認排除異常/ })).toBeDisabled();
+    expect(screen.getByText('目前沒有可用的系統處理方式，請交由對應業務負責人處理。')).toBeInTheDocument();
+    expect(screen.getByText(/系統會自動重新核對異常/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: /確認排除異常/ })).not.toBeInTheDocument();
   });
 
   it('closing Drawer aborts the active request and does not leave a stale Drawer', async () => {

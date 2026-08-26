@@ -86,7 +86,6 @@ describe('Anomalies Import Warning transition flow', () => {
     await openWarningTransition();
 
     for (const id of [
-      'anomalies.import-warning.transition.open',
       'anomalies.import-warning.transition.action',
       'anomalies.import-warning.transition.reason',
       'anomalies.import-warning.transition.preview',
@@ -94,6 +93,10 @@ describe('Anomalies Import Warning transition flow', () => {
     ]) {
       expect(control(id)).toBeInTheDocument();
     }
+    expect(document.querySelector('[data-control-id="anomalies.import-warning.transition.open"]')).toBeNull();
+    expect(control('anomalies.import-warning.transition.preview')).toHaveAttribute('aria-describedby', 'anomalies-warning-preview-reason');
+    expect(screen.getByText('請先填寫處理說明，再檢查狀態變更影響。')).toBeInTheDocument();
+    expect(control('anomalies.import-warning.transition.apply')).toHaveAttribute('aria-describedby', 'anomalies-warning-apply-reason');
 
     await enterReason();
     fireEvent.click(control('anomalies.import-warning.transition.preview'));

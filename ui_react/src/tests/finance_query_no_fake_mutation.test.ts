@@ -8,6 +8,7 @@ describe('FinancePage query safety', () => {
   it('contains no fake mutation or mock dependency', () => {
     const source = readFileSync('src/pages/FinancePage.tsx', 'utf8');
     for (const forbidden of ['mockData', 'MOCK_', 'alert(', 'confirm(', 'prompt(', '.post(', '.put(', '.delete(', 'handleSettle', 'handleApprove']) expect(source).not.toContain(forbidden);
+    expect(source).not.toContain('error instanceof Error ? error.message');
   });
 
   it('keeps normal import three-step and routes row recovery out of Finance Import', () => {

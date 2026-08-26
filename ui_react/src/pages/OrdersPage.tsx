@@ -1653,7 +1653,7 @@ export const OrdersPage: React.FC = () => {
               className={`filter-chip ${selectedStage === filter.stage ? 'active' : ''}`}
               disabled={filter.stage !== '全部' && !projectionReady}
               aria-disabled={filter.stage !== '全部' && !projectionReady}
-              title={filter.stage === '全部' ? '目前已載入的 Orders 摘要' : '使用後端 typed 七階段投影篩選'}
+              title={filter.stage === '全部' ? '目前已載入的訂單摘要' : '依案件進度階段篩選'}
               onClick={() => setSelectedStage(filter.stage)}
             >
               {filter.label} {pageData ? `(${count ?? '—'})` : ''}
@@ -2002,7 +2002,7 @@ export const OrdersPage: React.FC = () => {
                   )}
                   {completeMultiCaregiverCombinations.length > 0 && (
                     <div style={{ display: 'grid', gap: '10px', borderTop: '1px solid #ead8d1', paddingTop: '14px' }}>
-                      <strong style={{ color: '#1e1b19' }}>伺服器驗證的多月嫂連續備案（{completeMultiCaregiverCombinations.length} 組）</strong>
+                      <strong style={{ color: '#1e1b19' }}>已核對的多月嫂連續備案（{completeMultiCaregiverCombinations.length} 組）</strong>
                       <span style={{ color: '#74593f', fontSize: '0.82rem' }}>
                         以下每組日期與可用性均由伺服器計算；建立後會再次驗證，不會透過候選聯繫池轉換。
                       </span>
@@ -2019,7 +2019,7 @@ export const OrdersPage: React.FC = () => {
                             className="orders-load-more-btn"
                             style={{ marginTop: '10px' }}
                             disabled={candidateActionKey !== null || formalPlanCreationBlocker() !== null}
-                            title={formalPlanCreationBlocker() ?? '建立伺服器驗證的正式多月嫂方案'}
+                            title={formalPlanCreationBlocker() ?? '建立已核對的正式多月嫂方案'}
                             onClick={() => void createFormalMultiCaregiverPlan(combination)}
                           >
                             {candidateActionKey === 'multi-formal-plan' ? '建立並回讀正式方案中…' : `建立此 ${combination.length} 段正式多月嫂方案`}
@@ -2125,7 +2125,7 @@ export const OrdersPage: React.FC = () => {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ fontWeight: 700, fontSize: '0.88rem', color: '#1e1b19' }}>📢 訂單資訊-1（粗篩案況徵詢）</span>
                             <span style={{ fontSize: '0.78rem', color: c.info1Status === 'sent' ? '#16a34a' : '#888', fontWeight: 600 }}>
-                              {c.info1Status}
+                              {c.info1StatusLabel}
                             </span>
                           </div>
                           <div style={{ fontSize: '0.78rem', color: '#888' }}>
@@ -2155,7 +2155,7 @@ export const OrdersPage: React.FC = () => {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ fontWeight: 700, fontSize: '0.88rem', color: '#1e1b19' }}>📄 訂單資訊-2（精篩條款與地址）</span>
                             <span style={{ fontSize: '0.78rem', color: c.info2Status === 'sent' ? '#16a34a' : '#888', fontWeight: 600 }}>
-                              {c.info2Status}
+                              {c.info2StatusLabel}
                             </span>
                           </div>
                           <div style={{ fontSize: '0.78rem', color: '#888' }}>
@@ -2276,7 +2276,7 @@ export const OrdersPage: React.FC = () => {
                 <div className="matching-contract-grid">
                   <div className="matching-contract-box">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1e1b19' }}>👥 推薦月嫂給產婦 (Customer Decision)</span>
+                      <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1e1b19' }}>👥 推薦月嫂並記錄客戶決定</span>
                       <span style={{
                         padding: '3px 10px',
                         borderRadius: '9999px',
@@ -2293,7 +2293,7 @@ export const OrdersPage: React.FC = () => {
                       🔒 {matchingDetail.waitingLockText}
                     </div>
                     <div role="status" style={{ fontSize: '0.78rem', color: '#74593f' }}>
-                      履歷發送會依目前正式方案與分段內容建立可靠工作；畫面只表示已排入，不代表 LINE 已送達。
+                      履歷會依目前正式方案與分段內容排入發送；畫面只表示已排入，不代表 LINE 已送達。
                     </div>
                     {matchingDetail.status === '提案中' && (
                       <div style={{ display: 'grid', gap: '8px', marginTop: '12px', padding: '12px', border: '1px solid #ead8d1', borderRadius: '10px' }}>
@@ -2316,12 +2316,12 @@ export const OrdersPage: React.FC = () => {
                           onClick={() => void sendCustomerProfiles()}
                         >
                           {candidateActionKey === 'customer-profiles'
-                            ? '建立履歷發送任務並回讀中…'
+                            ? '正在排入履歷發送並確認結果…'
                             : matchingDetail.customerProfilesStatus === 'manually_confirmed'
                               ? '已留存人工履歷送達證據'
-                              : matchingDetail.customerProfilesStatus !== null ? '履歷發送任務已建立' : '建立履歷可靠發送任務'}
+                              : matchingDetail.customerProfilesStatus !== null ? '履歷已排入發送' : '排入履歷發送'}
                         </button>
-                        {matchingDetail.customerProfilesStatus !== null && <span style={{ fontSize: '0.8rem', color: '#166534' }}>履歷傳達狀態：{matchingDetail.customerProfilesStatus}</span>}
+                        {matchingDetail.customerProfilesStatusLabel !== null && <span style={{ fontSize: '0.8rem', color: '#166534' }}>履歷傳達狀態：{matchingDetail.customerProfilesStatusLabel}</span>}
                         {resumeReceipt && <span style={{ fontSize: '0.8rem', color: '#166534' }}>客戶履歷已排入發送，尚未代表 LINE 已送達。</span>}
                         <CustomerProfilesManualActions
                           caseNo={matchingOrder.id}
@@ -2419,7 +2419,7 @@ export const OrdersPage: React.FC = () => {
                       </div>
                     </div>}
                     <div role="status" style={{ fontSize: '0.78rem', color: '#74593f' }}>
-                      契約寄送需由文件版本與收件人 binding 共同建立可靠任務。
+                      契約寄送需核對文件版本與收件人身分後才能排入發送。
                     </div>
                   </div>
                 </div>
@@ -2448,7 +2448,7 @@ export const OrdersPage: React.FC = () => {
                     📋 正式執行排班（生效成果）
                   </h3>
                   <div className="matching-step-subtext">
-                    只顯示後端 assignment-plan 已確認的正式服務分段與排程日曆。
+                    只顯示系統已確認的正式服務分段與排程日曆。
                   </div>
                 </div>
               </div>
@@ -3452,7 +3452,7 @@ export const OrdersPage: React.FC = () => {
                           <span>{cancellationPreview.official_service_day_count} 天／{cancellationPreview.official_service_hours} 小時</span>
                         </div>
                         <div style={{ marginTop: '8px', fontSize: '0.78rem', color: '#74593f' }}>
-                          客戶退款與月嫂薪資影響已由後端正式規則計算；套用後將以最新案件狀態回讀確認。
+                          客戶退款與月嫂薪資影響已依正式規則計算；套用後將以最新案件狀態回讀確認。
                         </div>
                       </div>
                     )}
@@ -3569,7 +3569,7 @@ export const OrdersPage: React.FC = () => {
                     )}
 
                     <label style={{ display: 'block', fontWeight: 700, fontSize: '0.84rem' }}>
-                      重開原因說明 (Audit Log 必填 1~500 字)
+                      重開原因說明（稽核必填，1～500 字）
                       <textarea
                         data-control-id="orders.reopen.reason"
                         rows={3}
@@ -3587,7 +3587,7 @@ export const OrdersPage: React.FC = () => {
                     {reopenDraft?.status === 'outcome_unknown' && (
                       <div>
                         <div role="alert" style={{ color: '#9a3412', fontSize: '0.8rem', backgroundColor: '#fff7ed', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fdba74', marginBottom: '8px' }}>
-                          重開回應逾時或未明；只可用原 Key 重試。
+                          重開結果尚未確認；請使用下方重試功能繼續，系統會安全沿用同一次操作。
                         </div>
                         <button
                           type="button"

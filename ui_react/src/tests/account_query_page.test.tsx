@@ -23,20 +23,21 @@ describe('AccountManagementPage query slice', () => {
     await waitFor(() => expect(screen.getByText(/根帳號/, { exact: false })).toBeInTheDocument());
     expect(accountDirectoryClient.query).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: /建立工作人員帳號/ })).toBeDisabled();
-    expect(screen.getByText(/Email \/ IP \/ 最後登入/)).toBeInTheDocument();
+    expect(screen.queryByText(/Access Control Version|帳號識別|Email \/ IP/)).not.toBeInTheDocument();
   });
 
   it('loads audit lazily and does not query jobs until a job id is submitted', async () => {
     render(<AccountManagementPage />);
     await waitFor(() => expect(screen.getByText(/根帳號/, { exact: false })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('tab', { name: /安全操作與 Session/ }));
-    await waitFor(() => expect(screen.getByText('authentication')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: /安全操作與登入稽核/ }));
+    await waitFor(() => expect(screen.getByText('登入驗證')).toBeInTheDocument());
     expect(auditQueryClient.query).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('tab', { name: /背景排程與系統看板/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /背景工作狀態/ }));
     expect(jobObservationClient.query).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('Job ID'), { target: { value: 'job-observation-1' } });
+    fireEvent.change(screen.getByLabelText('背景工作查詢碼'), { target: { value: 'job-observation-1' } });
     fireEvent.click(screen.getByRole('button', { name: '查詢狀態' }));
-    await waitFor(() => expect(screen.getByText('job-observation-1')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('正式排班建立')).toBeInTheDocument());
+    expect(screen.getByText('處理中')).toBeInTheDocument();
     expect(jobObservationClient.query).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,9 +1,9 @@
 /**
  * File: react_entrypoint_registry.test.ts
- * Description: 驗證 15 個 canonical React entries、LINE 原始功能保留與 typed mutation 邊界。
+ * Description: 驗證 canonical React 導航、資料中心相容 deep link、LINE 原始功能保留與 typed mutation 邊界。
  */
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { HASH_ALIASES } from '../App';
 import { NAV_ITEMS } from '../components/MasterLayout';
@@ -17,14 +17,20 @@ import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 const EXPECTED_HASHES = [
   'order-tracker', 'orders', 'scheduling', 'staff', 'data-import', 'reports',
   'line-management', 'line-ai-events', 'line-liff-studio', 'line-security',
-  'finance', 'anomalies', 'data-browser', 'account-management', 'system-status',
+  'finance', 'anomalies', 'account-management', 'system-status',
 ] as const;
 
 describe('React entrypoint registry', () => {
-  it('保留 15 個 canonical 管理端 entry，且沒有重複 identity', () => {
+  it('canonical 側欄只保留資料中心，且沒有重複 identity', () => {
     const pages = NAV_ITEMS.map((item) => item.id);
     expect(new Set(pages).size).toBe(pages.length);
     expect(new Set(pages)).toEqual(new Set(EXPECTED_HASHES));
+  });
+
+  it('舊 Data Browser hash 保留為資料中心第三分頁的相容入口', () => {
+    expect(HASH_ALIASES).toMatchObject({ databrowser: 'data-browser' });
+    expect(NAV_ITEMS.some((item) => item.id === 'data-browser')).toBe(false);
+    expect(NAV_ITEMS.find((item) => item.id === 'data-import')?.label).toBe('資料中心');
   });
 
   it('新版 LINE 工作頁 hash 各自導向 canonical page', () => {
@@ -77,7 +83,7 @@ describe('React entrypoint registry', () => {
     fireEvent.click(screen.getByRole('button', { name: '👍 有幫助' }));
     expect(screen.getByText(/正式回饋統計尚未接通，不會寫入數據/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '👎 未解決' }));
-    expect(screen.getByText(/正式客服待辦尚未接通，不會假造工單/)).toBeInTheDocument();
+    expect(screen.getByText(/客服待辦尚未接通，本頁不會假造工單/)).toBeInTheDocument();
     expect(screen.queryByText(/已成功儲存並同步/)).not.toBeInTheDocument();
   });
 
@@ -194,8 +200,17 @@ describe('React entrypoint registry', () => {
       current_version: 'version-8',
       updated_at: '2026-08-25T01:02:03+08:00',
     };
+    const internalUserTarget = {
+      target_id: 18,
+      target_kind: 'admin_user' as const,
+      display_label: 'typed 內部使用者',
+      state: 'active' as const,
+      minimum_status: 'warning' as const,
+      current_version: 'version-18',
+      updated_at: '2026-08-25T01:02:03+08:00',
+    };
     const client: RuntimeTargetClient = {
-      listTargets: vi.fn(async () => [target]),
+      listTargets: vi.fn(async () => [target, internalUserTarget]),
       previewSetEnabled: vi.fn(async () => ({
         operation: 'disable' as const, target_id: 8, previous_state: 'active' as const,
         resulting_state: 'disabled' as const, current_version: 'version-8',
@@ -213,7 +228,18 @@ describe('React entrypoint registry', () => {
 
     render(React.createElement(AlertGroupSecurity, { client }));
     expect((await screen.findAllByText('typed 測試群組')).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('button', { name: '檢查停用影響' }));
+    expect(screen.queryByText('最近操作人員')).not.toBeInTheDocument();
+    expect(screen.queryByText('尚未提供')).not.toBeInTheDocument();
+    expect(screen.queryByText(/最高權限管理員專區/)).not.toBeInTheDocument();
+    expect(screen.queryByText('管理員使用者')).not.toBeInTheDocument();
+    expect(screen.getByText('內部使用者')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /通知群組管理/ })).toBeInTheDocument();
+    expect(screen.getByText(/已登入且啟用的內部使用者確認/)).toBeInTheDocument();
+    const groupCard = screen
+      .getAllByRole('article')
+      .find((article) => within(article).queryByText('typed 測試群組'));
+    expect(groupCard).not.toBeNull();
+    fireEvent.click(within(groupCard!).getByRole('button', { name: '檢查停用影響' }));
     expect(await screen.findByText('🔎 異動影響確認')).toBeInTheDocument();
     expect(screen.queryByText('aaaaaaaaaaaa…aaaa')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('checkbox'));

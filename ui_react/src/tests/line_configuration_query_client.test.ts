@@ -74,7 +74,7 @@ describe('LINE configuration query client', () => {
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       '/api/v1/line/notification-rules',
       '/api/v1/line/configurations/rich_menus',
-      '/api/v1/line/rich-menus/publications?page=1&page_size=100',
+      '/api/v1/line/rich-menus/publications?page=1&page_size=25',
       '/api/v1/line/rich-menus/publications/19',
     ]);
     for (const call of fetchMock.mock.calls) {
@@ -94,6 +94,19 @@ describe('LINE configuration query client', () => {
     await expect(getLineNotificationRules()).rejects.toBeInstanceOf(LineConfigurationQueryUnauthenticatedError);
     setSession('line-query-token-a');
     await expect(getLineRichMenuPublication(0)).rejects.toBeInstanceOf(LineConfigurationQueryRequestError);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('發布紀錄接受明確頁碼，且不合法分頁參數在網路前 fail closed', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(response(LINE_RICH_MENU_PUBLICATION_PAGE_ENVELOPE_FIXTURE));
+    await listLineRichMenuPublications({ page: 2, pageSize: 25 });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/v1/line/rich-menus/publications?page=2&page_size=25',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    vi.mocked(globalThis.fetch).mockClear();
+    await expect(listLineRichMenuPublications({ page: 0 })).rejects.toBeInstanceOf(LineConfigurationQueryRequestError);
+    await expect(listLineRichMenuPublications({ pageSize: 1.5 })).rejects.toBeInstanceOf(LineConfigurationQueryRequestError);
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
