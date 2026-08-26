@@ -2,6 +2,7 @@
 goto :MAIN
 @REM File: start_local_development.bat
 @REM Description: 驗證本機 DB readiness 後啟動 FastAPI、React/Vite、monitor 與 workers。
+@REM Source archives must preserve CRLF so cmd.exe can resolve CALL labels.
 :MAIN
 chcp 65001 >nul
 setlocal EnableExtensions EnableDelayedExpansion

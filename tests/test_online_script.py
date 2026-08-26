@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 LAUNCHER_ROOT = Path(__file__).resolve().parents[1] / "scripts" / "launchers"
+PROJECT_ROOT = LAUNCHER_ROOT.parents[1]
 ONLINE_SCRIPT = LAUNCHER_ROOT / "start_local_development.bat"
 ONLINE_SHELL_SCRIPT = LAUNCHER_ROOT / "start_local_development.sh"
 
@@ -17,6 +18,15 @@ def _script() -> str:
 
 def _shell_script() -> str:
     return ONLINE_SHELL_SCRIPT.read_text(encoding="utf-8")
+
+
+def test_windows_launcher_is_stored_as_crlf_for_source_archives():
+    attributes = (PROJECT_ROOT / ".gitattributes").read_text(encoding="utf-8")
+    payload = ONLINE_SCRIPT.read_bytes()
+
+    assert "scripts/launchers/start_local_development.bat -text" in attributes
+    assert b"\r\n" in payload
+    assert b"\n" not in payload.replace(b"\r\n", b"")
 
 
 def test_online_script_resolves_its_own_working_directory_and_venv():

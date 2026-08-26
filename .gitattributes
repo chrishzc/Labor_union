@@ -1,3 +1,5 @@
+# File: .gitattributes
+# Description: 固定跨平台文字行尾與二進位資產，並保留 ZIP 內 Windows launcher 的 CRLF。
 * text=auto
 
 *.py   text eol=lf
@@ -17,6 +19,7 @@
 
 *.bat  text eol=crlf
 *.cmd  text eol=crlf
+scripts/launchers/start_local_development.bat -text whitespace=cr-at-eol
 
 *.xlsx binary
 *.xls  binary
