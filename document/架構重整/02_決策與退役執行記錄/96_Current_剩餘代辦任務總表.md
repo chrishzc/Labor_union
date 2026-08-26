@@ -72,7 +72,6 @@ focused oxlint 只有 `App.tsx` 既存 Fast Refresh export warning。Chrome 在 
 
 | ID | 狀態 | 原因 | 解鎖條件 |
 |---|---|---|---|
-| CUR-LOCAL-DB-1003 | `in-progress` | Release 1003 的 static chain、descriptor、selected-release qualification、fresh bootstrap 與 preserve-data disposable candidate 已通過；runner 已修正 parent metadata ownership、successor metadata、selected-release fingerprint 與 release-scoped journal。`.env` 指定之既有 `lu_test_*` source 尚未由 developer launcher 實際套用，因此不得把 dry-run ready 或 candidate 成功寫成 developer acceptance passed。 | 停止本機服務後，以 `scripts/launchers/update_local_database.bat` 對精確回讀的 `lu_test_*` source 執行一次受控 apply，保存 backup／receipt／舊資料 preservation／post-schema exact readback；不得使用 `union_db`、`--switch` 或 production target。 |
 | CUR-LIFF-E2E | `approved` | 人工已授權 `lu_test_*` 必要 schema upgrade 與 verified-token E2E；`flow_purpose` 仍須透過正式 release chain 補齊。 | 完整通過 DB change gates後再測；query-string `userId` 只能導航，不能授權。 |
 | CUR-LINE-PROVIDER | `approved` | 人工已授權 LINE sandbox／免費額度內的 provider qualification；先前「不真實 push」裁決由本項 supersede。 | 執行前回讀 exact environment、target、recipient、quota 與 worker isolation；只送最小受控案例並保存 provider receipt。production recipient 不在 blanket approval 內。 |
 | CUR-LINE-BABYLOG-MEDIA-01 | `approved` | 人工已授權 media lane；依賴 O1 受控 NAS staging、digest、版本、cleanup／reconciliation 與下載投影。 | O1 owner contract 通過後施工；不得用既有 direct upload、公開 URL 或 watcher discovery 冒充。 |
@@ -85,6 +84,7 @@ focused oxlint 只有 `App.tsx` 既存 Fast Refresh export warning。Chrome 在 
 
 | ID | 狀態 | Current completion fact | 正式來源 |
 |---|---|---|---|
+| CUR-LOCAL-DB-1003 | `completed` | `scripts/launchers/update_local_database.bat` 已對精確回讀的 `lu_test_dataset_contract_signing_v4` 套用 qualified schema-only Release 1003；25/25 statements 完成，post-schema 為 exact。升級前 dump 保留，升級後 `orders` 仍為 151 筆且 stable fingerprint 相同；未使用 `union_db`、replacement、`--switch` 或 production target。 | `10` §§4.1、4.5、7；qualification receipt `PROV-20260826-local-additive-qualification-matching-coordination-successor` |
 | CUR-DATA-CENTER-01 | `completed` | canonical 側欄已收斂為「資料中心」，既有 NAS 高保真前端、工作簿匯入與原 Data Browser 組成三分頁；`data-browser`／`databrowser` 相容入口、back／forward 與 canonical active 投影均由 Chrome 實驗通過。訂單與客戶來源各載入 25 筆真 Query，無指定錯誤標記。focused 5 files／30 tests、修正後 route regression 3 files／22 tests、TypeScript／build passed；NAS 操作明示為本機預覽，真 storage capability 仍由 `CUR-FILE-NAS-01` 阻塞。 | `19` §5、NAS 正式規範 §6／§8 |
 | CUR-LINE-AI-LOCAL-01 | `completed` | AI 事件工作室保留規則編輯、滿意度調查、nullable 指標槽位與人工 fallback；focused Vitest 3 passed，Chrome 實點「未解決」後明示正式流程應轉人工、客服待辦尚未接通且不假造工單。正式 feedback 仍由 `CUR-LINE-AI-FEEDBACK-01` 維持 blocked。 | `15` §17、`20` §6 |
 | CUR-LINE-RICHMENU-LOCAL-PREVIEW-01 | `completed` | 手機預覽以 current server draft＋browser-memory edits 即時重繪；Chrome 已實點 URI、message、postback、rich menu switch 與 unknown target，皆只顯示 typed candidate，不開網址、不送訊息。取消後回復 persisted v5，FastAPI 僅見初始 GET、沒有 Preview／Apply／provider request。 | `17` §3.5、`20` §6 |
