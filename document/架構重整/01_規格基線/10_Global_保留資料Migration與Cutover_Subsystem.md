@@ -67,6 +67,9 @@ Canonical release chain／catalog 必須明確列出所有允許交付的 releas
 檔名 glob 或目錄排序推導目前版本。新增 schema part、altered parent column 或 seed／backfill 時，
 同一變更必須更新 chain、manifest、descriptor、fresh-bootstrap manifest、開發者操作文件與驗證測試；
 任一入口無法辨識最新 artifact 時，該 release 仍是 `live-drift`，不得標記 completed 或封存。
+Qualification receipt 必須綁定 runner 實際選中的單一 `release_id` 與該 release 的 canonical
+fingerprint。整條 release chain／bundle 的 aggregate fingerprint 只證明 catalog 組合身分，不得拿來
+取代 selected-release fingerprint；兩者混用時必須 fail closed，不能以「有 receipt」解鎖 Apply。
 
 ### 4.2 Preflight／Identity
 
@@ -148,6 +151,9 @@ append prepared journal
 ```
 
 中斷後只依 current metadata 加 durable receipt 決定是否續跑，不以記憶或最後 console line 猜測。
+Additive journal identity 必須至少包含 `source_database + release_id`；同一 source 的已完成舊 release
+journal 保留供追溯，但不得被新 release 當成 resume chain。新 release 只能讀取自己相同 identity、
+statement hashes 與 baseline schema fingerprint 的事件；identity 不同不得合併、覆寫或刪除舊鏈。
 
 ### 4.6 Candidate Backfill
 

@@ -9,10 +9,10 @@ Worker 與 Monitor 都是 Private Operations API client，不直接連 MySQL。W
 `.env`、log 或 Git。若手動分別啟動服務，必須先在同一 shell 設定至少 32 字元的 key；production
 不接受 shared key，須待後續部署工作接上 Google-signed OIDC/IAM 後才可啟用 private endpoints。
 
-所有命令都從專案根目錄執行。一般本機啟動流程仍會啟動既有 Docker、資料庫 readiness、monitor 與
-已設定的 workers；只有明確傳入 `--smoke-test` 時，才使用 Phase 5B 受控三服務 dual-run foundation：
-API `127.0.0.1:8000`、Streamlit `127.0.0.1:8501`、React/Vite `127.0.0.1:5173`。該 smoke 不啟動
-Docker、monitor、worker、LINE 或 provider，也不切換 navigation。啟動服務不會自動更新 schema；拉取新版程式後，應先依資料需求選擇
+所有命令都從專案根目錄執行。目前 Windows 本機啟動與明確傳入 `--smoke-test` 均使用 Phase 5B
+受控三服務 foundation：API `127.0.0.1:8000`、Streamlit `127.0.0.1:8501`、React/Vite
+`127.0.0.1:5173`。該流程不啟動 Docker、monitor、File Watcher、worker、LINE 或 provider，也不切換
+navigation；日常檔案匯入由 Web UI 上傳。啟動服務不會自動更新 schema；拉取新版程式後，應先依資料需求選擇
 「保留資料更新」或「模板重設」，完成後再啟動服務。
 
 每支現行 launcher 都提供唯讀 dry run。Batch／shell／Python 使用 `--dry-run`，PowerShell 使用
@@ -20,6 +20,9 @@ Docker、monitor、worker、LINE 或 provider，也不切換 navigation。啟動
 `.env`，也不查詢或修改 Windows 排程任務。回傳 `blocked` 表示缺少依賴，不代表已執行任何修復。
 DB update preview／dry-run 回傳 `blocked` 時，CLI 與 launcher 同時以非零 exit code 停止，且不顯示
 `UPDATE` 確認；只有與 current latest release identity／fingerprint 相符的 qualification receipt 可解鎖。
+這裡的 fingerprint 是 selected release 自己的 canonical fingerprint，不是整條 release chain 的 aggregate
+fingerprint。Fast additive journal 也固定以 `source_database + release_id` 分鏈，舊 release 的 completed
+journal 只供追溯，不得阻擋新 release 或被當成同一條 resume chain。
 
 ## 現行入口
 
@@ -27,7 +30,7 @@ DB update preview／dry-run 回傳 `blocked` 時，CLI 與 launcher 同時以非
 |---|---|---|
 | `start_local_development.bat` | active | Windows 一般本機開發入口；`--smoke-test` 才切入 Phase 5B 三服務 GET-only 驗證並只清理本次 owned process。 |
 | `start_local_development.sh` | active | Unix 一般本機開發入口；`--smoke-test` 使用 owned process group 執行同一 Phase 5B 契約。 |
-| `start_local_development_no_auth.bat` | active, local-only | 先停用本機 Admin 認證再啟動全部服務；只供隔離開發機，禁止 shared staging／production。 |
+| `start_local_development_no_auth.bat` | active, local-only | 先停用本機 Admin 認證再啟動同一受控三服務；只供隔離開發機，禁止 shared staging／production。 |
 | `configure_local_admin_no_auth.bat`／`.ps1` | active, local-only | 只調整本機 `.env` 的 Admin 開發認證設定，不啟動服務。 |
 | `update_local_database.bat` | active | 預設執行 `lu_test_*` qualified schema-only additive fast path；不建立 candidate、不 DROP source。保留資料 replacement 必須明確使用 `--strategy replacement --allow-long-run`。 |
 
@@ -66,7 +69,7 @@ Phase 5B controlled foundation：
 .\scripts\launchers\start_local_development.bat --smoke-test
 ```
 
-一般完整本機環境仍使用：
+一般互動本機環境使用：
 
 ```powershell
 .\scripts\launchers\start_local_development.bat
@@ -178,7 +181,7 @@ Smoke 固定 GET-only；不使用既有 DB mutation，不啟動 monitor／worker
 |---|---|---|
 | 根目錄 `online.bat`／`online.sh` | 搬移並改成描述責任的名稱 | `start_local_development.bat`／`.sh` |
 | 根目錄 `start.bat` | 退役；只是 `online.bat` 的重複轉呼叫 | `start_local_development.bat` |
-| 根目錄 `dev_API.bat` | 舊名稱誤導，實際會停用認證並啟動全部服務 | `start_local_development_no_auth.bat` |
+| 根目錄 `dev_API.bat` | 舊名稱誤導，實際會停用認證並啟動受控三服務 | `start_local_development_no_auth.bat` |
 | 根目錄 `bootstrap_admin_dev_env.bat` 與 `scripts/bootstrap_admin_dev_env.ps1` | 搬移並改名，凸顯會停用本機認證 | `configure_local_admin_no_auth.bat`／`.ps1` |
 | 根目錄 `update_DB.bat` | 搬移並改名 | `update_local_database.bat` |
 | 根目錄 `reset_DB.bat` | 搬移；模板重設能力仍為 active | `scripts/launchers/reset_DB.bat` |

@@ -2337,6 +2337,9 @@ def _local_validate_qualification(path: Path) -> dict[str, Any]:
 def _local_discover_qualification(
     qualification_path: Path | None = None,
 ) -> dict[str, Any]:
+    current_release_fingerprint = local_additive_release_qualification(
+        RELEASE_MANIFEST.release_id
+    )["release_fingerprint"]
     if qualification_path is not None:
         path = Path(qualification_path).expanduser().resolve()
         receipt_root = (ROOT / "validation" / "receipts").resolve()
@@ -2355,7 +2358,7 @@ def _local_discover_qualification(
         selected = _local_validate_qualification(path)
         if (
             selected.get("release_id") != RELEASE_MANIFEST.release_id
-            or selected.get("release_fingerprint") != RELEASE_MANIFEST.fingerprint
+            or selected.get("release_fingerprint") != current_release_fingerprint
         ):
             raise LocalAdditiveBlocked(
                 "explicit qualification does not match the latest release",
@@ -2372,7 +2375,7 @@ def _local_discover_qualification(
     current = [
         item for item in valid
         if item.get("release_id") == RELEASE_MANIFEST.release_id
-        and item.get("release_fingerprint") == RELEASE_MANIFEST.fingerprint
+        and item.get("release_fingerprint") == current_release_fingerprint
     ]
     if not current:
         raise LocalAdditiveBlocked(
@@ -2500,21 +2503,32 @@ def _local_classify_statement(statement: str) -> str:
     raise LocalAdditiveBlocked("SQL statement is outside additive allowlist", code="forbidden_sql_effect")
 
 
-def _local_journal_path(root: Path, source: str) -> Path:
-    return Path(root) / "fast_additive" / f"{source}.journal.jsonl"
+def _local_journal_path(root: Path, source: str, release_id: str) -> Path:
+    if not IDENTIFIER.fullmatch(source) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]*", release_id
+    ):
+        raise LocalAdditiveBlocked(
+            "additive journal identity is invalid", code="journal_invalid"
+        )
+    return (
+        Path(root)
+        / "fast_additive"
+        / f"{source}.{release_id}.journal.jsonl"
+    )
 
 
 def _local_receipt_path(root: Path, source: str) -> Path:
     return Path(root) / "fast_additive" / f"{source}.receipt.json"
 
 
-def _local_append_event(root: Path, source: str, state: str, previous: Mapping[str, Any] | None = None, **fields: Any) -> dict[str, Any]:
-    path = _local_journal_path(root, source)
+def _local_append_event(root: Path, source: str, release_id: str, state: str, previous: Mapping[str, Any] | None = None, **fields: Any) -> dict[str, Any]:
+    path = _local_journal_path(root, source, release_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     event = {
         "sequence": int((previous or {}).get("sequence", 0)) + 1,
         "at": _now(),
         "state": state,
+        "release_id": release_id,
         "previous_digest": str((previous or {}).get("event_digest", "")),
         **fields,
     }
@@ -2526,8 +2540,8 @@ def _local_append_event(root: Path, source: str, state: str, previous: Mapping[s
     return event
 
 
-def _local_read_events(root: Path, source: str) -> list[dict[str, Any]]:
-    path = _local_journal_path(root, source)
+def _local_read_events(root: Path, source: str, release_id: str) -> list[dict[str, Any]]:
+    path = _local_journal_path(root, source, release_id)
     if not path.exists():
         return []
     events: list[dict[str, Any]] = []
@@ -2679,7 +2693,9 @@ def local_additive_plan(
     statement_hashes = [_local_digest(statement.encode("utf-8")) for statement in statements]
     snapshot = local_additive_source_snapshot(config, source)["snapshot"]
     _local_verify_prerequisite_metadata(snapshot, qualification)
-    events = _local_read_events(receipt_root, source)
+    events = _local_read_events(
+        receipt_root, source, qualification["release_id"]
+    )
     resume_baseline, verified = _local_resume_context(
         events,
         qualification["release_id"],
@@ -2767,7 +2783,9 @@ def local_additive_apply(
     statements = split_sql(sql_path.read_text(encoding="utf-8"))
     classes = [_local_classify_statement(statement) for statement in statements]
     started = time_module.monotonic()
-    events = _local_read_events(receipt_root, source)
+    events = _local_read_events(
+        receipt_root, source, qualification["release_id"]
+    )
     statement_hashes = [_local_digest(statement.encode("utf-8")) for statement in statements]
     baseline, verified = _local_resume_context(
         events,
@@ -2781,9 +2799,9 @@ def local_additive_apply(
         previous = _local_append_event(
             receipt_root,
             source,
+            qualification["release_id"],
             "baseline_captured",
             None,
-            release_id=qualification["release_id"],
             source_database=source,
             source_schema_sha256=baseline,
             statement_hashes=statement_hashes,
@@ -2800,7 +2818,7 @@ def local_additive_apply(
             with connection.cursor() as cursor:
                 cursor.execute("SET SESSION lock_wait_timeout=%s", (lock_timeout_seconds,))
                 cursor.execute("SET SESSION innodb_lock_wait_timeout=%s", (lock_timeout_seconds,))
-                previous = _local_append_event(receipt_root, source, "maintenance_lock_acquired", previous, release_id=qualification["release_id"], source_database=source, source_schema_sha256=baseline)
+                previous = _local_append_event(receipt_root, source, qualification["release_id"], "maintenance_lock_acquired", previous, source_database=source, source_schema_sha256=baseline)
                 for ordinal, (statement, statement_class) in enumerate(zip(statements, classes), 1):
                     statement_hash = _local_digest(statement.encode("utf-8"))
                     if ordinal in verified:
@@ -2809,7 +2827,7 @@ def local_additive_apply(
                         continue
                     if (time_module.monotonic() - started) * 1000 >= duration_guard_ms:
                         raise LocalAdditiveBlocked("additive duration guard exceeded", code="blocked_duration_exceeded")
-                    previous = _local_append_event(receipt_root, source, "statement_started", previous, release_id=qualification["release_id"], source_database=source, source_schema_sha256=baseline, ordinal=ordinal, statement_sha256=statement_hash, classification=statement_class)
+                    previous = _local_append_event(receipt_root, source, qualification["release_id"], "statement_started", previous, source_database=source, source_schema_sha256=baseline, ordinal=ordinal, statement_sha256=statement_hash, classification=statement_class)
                     try:
                         cursor.execute(statement)
                     except (TimeoutError, OSError) as error:
@@ -2818,7 +2836,7 @@ def local_additive_apply(
                             code="blocked_duration_exceeded",
                         ) from error
                     elapsed = int((time_module.monotonic() - started) * 1000)
-                    previous = _local_append_event(receipt_root, source, "statement_verified", previous, release_id=qualification["release_id"], source_database=source, source_schema_sha256=baseline, ordinal=ordinal, statement_sha256=statement_hash, classification=statement_class, outcome="applied", elapsed_ms=elapsed)
+                    previous = _local_append_event(receipt_root, source, qualification["release_id"], "statement_verified", previous, source_database=source, source_schema_sha256=baseline, ordinal=ordinal, statement_sha256=statement_hash, classification=statement_class, outcome="applied", elapsed_ms=elapsed)
                     if elapsed >= duration_guard_ms:
                         raise LocalAdditiveBlocked("additive duration guard exceeded", code="blocked_duration_exceeded")
         finally:
@@ -2831,7 +2849,7 @@ def local_additive_apply(
             raise LocalAdditiveBlocked("post-apply descriptor is not exact", code="descriptor_drift")
     elapsed = int((time_module.monotonic() - started) * 1000)
     result = {**preview, "status": "completed", "elapsed_ms": elapsed, "post_schema_sha256": after["sha256"]}
-    previous = _local_append_event(receipt_root, source, "completed", previous, release_id=qualification["release_id"], source_database=source, source_schema_sha256=baseline, post_schema_sha256=after["sha256"], elapsed_ms=elapsed)
+    previous = _local_append_event(receipt_root, source, qualification["release_id"], "completed", previous, source_database=source, source_schema_sha256=baseline, post_schema_sha256=after["sha256"], elapsed_ms=elapsed)
     _local_write_receipt(receipt_root, source, result)
     return result
 

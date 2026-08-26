@@ -60,9 +60,9 @@ Web upload；BeClass scripts 僅保留為受控的 historical import，不再是
 自動使用容器內的 MySQL CLI。若開發者使用不同容器名稱，請在個人的 `.env` 設定
 `MYSQL_CONTAINER=<docker ps 顯示的容器名稱>`；請勿提交個人 `.env`。
 
-Windows smoke 會實際檢查 MySQL、API、Streamlit、monitor、file watcher 與 durable worker，結束時
-終止本次建立的應用程序。LINE worker 只有在本機 runtime 設定與 access token 有效時才啟動；未設定
-LINE 的開發者會看到 skipped 提示，不影響其餘服務。
+Windows smoke 只啟動並檢查 API、Streamlit 與 React/Vite，驗收固定為 GET-only，結束時只終止
+本次建立的應用程序。它不啟動 monitor、File Watcher、worker、LINE 或 provider；日常檔案匯入以
+Web UI 上傳為正式入口，不需要另外啟動通用 File Watcher。
 
 需要捨棄資料並回到模板測試 DB 時使用 `scripts/launchers/reset_DB.bat`，但目前模板 fixture 尚未
 重建，因此 `--dry-run` 會正確回傳 blocked；本版本不會因此刪除現有資料庫。
@@ -237,8 +237,9 @@ INTERNAL_API_MAX_ATTEMPTS=3
 Google Cloud 資源、已部署映像或已開放任何網路路徑。
 
 [`scripts/launchers/start_local_development.bat`](scripts/launchers/start_local_development.bat)
-是 Windows 本機開發啟動入口：它會啟動 MySQL、API、Streamlit、檔案監控、Durable Job Worker
-與 Incident Worker，但**不會**自動套用資料庫 schema。所有 operator-facing 腳本、用途與退役對照見
+是 Windows 本機開發啟動入口：目前受控模式會啟動 API、Streamlit 與 React/Vite，但**不會**啟動
+通用 File Watcher、monitor、worker 或 provider，也**不會**自動套用資料庫 schema。所有
+operator-facing 腳本、用途與退役對照見
 [`scripts/launchers/README.md`](scripts/launchers/README.md)。Durable Job Worker 主機 supervision 目前依
 人工裁決暫緩；只保留既有排程任務的 recovery 查詢與解除安裝：
 
@@ -267,6 +268,10 @@ metadata fingerprint 完整相符且沒有外部 inbound FK 時，於 candidate 
 Migration descriptor 對 parent table 只擁有自己明列的新欄位與物件，不獨占 parent table 原有
 metadata；後續正式 release 加入同一 owned table 的 object，必須以精確 successor 契約與回歸測試
 辨識，不能讓較早 artifact 被誤判 drift，也不能用寬鬆名稱比對放過錯誤契約。
+Qualification receipt 必須綁定 runner 選中的單一 release fingerprint；整條 release chain 的 aggregate
+fingerprint 只表示 bundle 身分，不能取代 selected-release qualification。Fast additive journal 以
+`source_database + release_id` 分鏈；同一來源已完成的舊 release journal 會保留，但不會阻擋或污染
+後續 release 的 plan／resume。
 
 若要捨棄現有資料並恢復成版本庫模板測試資料，執行 `scripts/launchers/reset_DB.bat`。它會先驗證
 `fixtures/db_snapshot_v2/v3`，預檢成功且使用者輸入 `RESET` 後，才刪除 `union_db`、建立新 DB 並

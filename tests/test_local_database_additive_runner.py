@@ -237,7 +237,12 @@ def test_explicit_qualification_selects_only_a_published_receipt(
     monkeypatch.setattr(
         migration,
         "RELEASE_MANIFEST",
-        SimpleNamespace(release_id="selected", fingerprint="selected-fingerprint"),
+        SimpleNamespace(release_id="selected", fingerprint="bundle-fingerprint"),
+    )
+    monkeypatch.setattr(
+        migration,
+        "local_additive_release_qualification",
+        lambda release_id: {"release_fingerprint": "selected-fingerprint"},
     )
     monkeypatch.setattr(
         migration,
@@ -287,7 +292,12 @@ def test_automatic_qualification_selects_only_the_current_release(
     monkeypatch.setattr(
         migration,
         "RELEASE_MANIFEST",
-        SimpleNamespace(release_id="current", fingerprint="current-fingerprint"),
+        SimpleNamespace(release_id="current", fingerprint="bundle-fingerprint"),
+    )
+    monkeypatch.setattr(
+        migration,
+        "local_additive_release_qualification",
+        lambda release_id: {"release_fingerprint": "current-fingerprint"},
     )
     monkeypatch.setattr(
         migration,
@@ -474,13 +484,23 @@ def test_duration_guard_is_bounded(monkeypatch, tmp_path) -> None:
 
 
 def test_journal_chain_detects_ordinal_or_digest_tampering(tmp_path) -> None:
-    event = additive._append_event(tmp_path, "lu_test_dataset", "planned")
+    release_id = "test-release-v1"
+    event = additive._append_event(
+        tmp_path, "lu_test_dataset", release_id, "planned"
+    )
     assert event["sequence"] == 1
-    assert additive._read_events(tmp_path, "lu_test_dataset")[0]["state"] == "planned"
-    path = tmp_path / "fast_additive" / "lu_test_dataset.journal.jsonl"
+    assert additive._read_events(
+        tmp_path, "lu_test_dataset", release_id
+    )[0]["state"] == "planned"
+    path = migration._local_journal_path(
+        tmp_path, "lu_test_dataset", release_id
+    )
+    assert path != migration._local_journal_path(
+        tmp_path, "lu_test_dataset", "test-release-v2"
+    )
     path.write_text(path.read_text(encoding="utf-8").replace("planned", "tampered"), encoding="utf-8")
     with pytest.raises(additive.LocalAdditiveBlocked, match="integrity"):
-        additive._read_events(tmp_path, "lu_test_dataset")
+        additive._read_events(tmp_path, "lu_test_dataset", release_id)
 
 
 def test_descriptor_state_rejects_owned_extra_indexes() -> None:

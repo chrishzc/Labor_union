@@ -1,0 +1,81 @@
+{
+  "contract": "local-additive-qualification/v1",
+  "work_package": "PROV-20260821-matching-coordination-successor-contract",
+  "release_id": "labor-union-matching-coordination-successor-2026-08-22-v1",
+  "release_fingerprint": "8490c6185516cad4a29ef2062c0bd2606cefd4ca292389bbb00c115ee3aed514",
+  "published_manifest_sha256": "7c7c59d755ea33f3aaed54621e892e06780b7618a8629b7295fedb0873f21952",
+  "manifest_artifact_inventory": [
+    {
+      "name": "1003_matching_coordination_successor.sql",
+      "sha256": "6dcd656e9d9e7ba66a80b8b884ffa967bb0d35e94420f0879193d6fddf56fbe9",
+      "data_effect": "schema_only",
+      "dependencies": []
+    }
+  ],
+  "artifact": {
+    "name": "1003_matching_coordination_successor.sql",
+    "sql_sha256": "6dcd656e9d9e7ba66a80b8b884ffa967bb0d35e94420f0879193d6fddf56fbe9",
+    "descriptor_sha256": "439850495478f1fb521f0823a0cc4a37f5fabb2bbdc52eda0cb74d32e16d2174",
+    "data_effect": "schema_only",
+    "dependencies": [],
+    "required_dependency_sql_sha256": {},
+    "dependency_contracts": {}
+  },
+  "fresh_bootstrap": {
+    "status": "verified",
+    "mysql_version": "8.0.46",
+    "schema_fingerprint": "84bd681c8906a5d20bd000ba17d0908b006dcf8fa88e3290e898107cd1b3a2e5",
+    "artifact_state": "exact",
+    "data_rows_written": 0
+  },
+  "preserve_data_candidate": {
+    "status": "verified",
+    "source_schema_fingerprint": "628e809f3f527bcc72cfa48f54cf2c5e60d743400a9e98f8230a40562c8f801f",
+    "candidate_schema_fingerprint": "c422a1ab6b6626435c689b0d86e0733c151949f1fdf1e2f4ff9711c4d7356de1",
+    "source_dump_sha256": "67a9d1e86011a474e097c48cc8e3786a2d7792c7442495591466bc2a96a60407",
+    "candidate_dump_sha256": "0990c245a070cd44832ef2f2808092053c3d77ea0aacc69116b6a4cb25bb3b3b",
+    "artifact_state": "exact",
+    "existing_table_preservation": "verified"
+  },
+  "metadata_backup": {
+    "status": "verified",
+    "host": "127.0.0.1",
+    "port": 3306,
+    "database": "lu_test_dataset_contract_signing_v4",
+    "schema_sha256": "628e809f3f527bcc72cfa48f54cf2c5e60d743400a9e98f8230a40562c8f801f",
+    "source_dump_sha256": "67a9d1e86011a474e097c48cc8e3786a2d7792c7442495591466bc2a96a60407",
+    "data_row_counts": {
+      "orders": 151
+    },
+    "data_fingerprints": {
+      "orders": "928725f38e765d83cda60ab5dafb210851e5fa2923b0ef721134f31231b14e49"
+    },
+    "data_fingerprint_sha256": "c0ef1dc7e19c9e00e3001f464cb428a4cafb0054b461bc5dad3aa941a67b8849"
+  },
+  "target_projection": {
+    "contract": "local-additive-target-projection/v1",
+    "artifact_name": "1003_matching_coordination_successor.sql",
+    "descriptor_sha256": "439850495478f1fb521f0823a0cc4a37f5fabb2bbdc52eda0cb74d32e16d2174",
+    "fresh_state": "exact",
+    "preserve_candidate_state": "exact",
+    "fresh_fingerprint": "439850495478f1fb521f0823a0cc4a37f5fabb2bbdc52eda0cb74d32e16d2174",
+    "preserve_candidate_fingerprint": "439850495478f1fb521f0823a0cc4a37f5fabb2bbdc52eda0cb74d32e16d2174"
+  },
+  "policy_evidence": {
+    "fresh_schema_fingerprint": "84bd681c8906a5d20bd000ba17d0908b006dcf8fa88e3290e898107cd1b3a2e5",
+    "preserve_source_schema_fingerprint": "628e809f3f527bcc72cfa48f54cf2c5e60d743400a9e98f8230a40562c8f801f",
+    "preserve_candidate_schema_fingerprint": "c422a1ab6b6626435c689b0d86e0733c151949f1fdf1e2f4ff9711c4d7356de1",
+    "source_dump_sha256": "67a9d1e86011a474e097c48cc8e3786a2d7792c7442495591466bc2a96a60407",
+    "candidate_dump_sha256": "0990c245a070cd44832ef2f2808092053c3d77ea0aacc69116b6a4cb25bb3b3b",
+    "fresh_target_projection_fingerprint": "439850495478f1fb521f0823a0cc4a37f5fabb2bbdc52eda0cb74d32e16d2174",
+    "preserve_candidate_target_projection_fingerprint": "439850495478f1fb521f0823a0cc4a37f5fabb2bbdc52eda0cb74d32e16d2174"
+  },
+  "policy": {
+    "local_in_place_eligible": true,
+    "seed": 0,
+    "backfill": 0,
+    "destructive": 0,
+    "target_prefix": "lu_test_"
+  },
+  "payload_digest": "bf820b0f4d0375d4aead8358b987261b1a5031ed59caa95fb94eda9ae9432634"
+}

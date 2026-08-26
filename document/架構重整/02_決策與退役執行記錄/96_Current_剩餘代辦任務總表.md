@@ -72,6 +72,7 @@ focused oxlint 只有 `App.tsx` 既存 Fast Refresh export warning。Chrome 在 
 
 | ID | 狀態 | 原因 | 解鎖條件 |
 |---|---|---|---|
+| CUR-LOCAL-DB-1003 | `in-progress` | Release 1003 的 static chain、descriptor、selected-release qualification、fresh bootstrap 與 preserve-data disposable candidate 已通過；runner 已修正 parent metadata ownership、successor metadata、selected-release fingerprint 與 release-scoped journal。`.env` 指定之既有 `lu_test_*` source 尚未由 developer launcher 實際套用，因此不得把 dry-run ready 或 candidate 成功寫成 developer acceptance passed。 | 停止本機服務後，以 `scripts/launchers/update_local_database.bat` 對精確回讀的 `lu_test_*` source 執行一次受控 apply，保存 backup／receipt／舊資料 preservation／post-schema exact readback；不得使用 `union_db`、`--switch` 或 production target。 |
 | CUR-LIFF-E2E | `approved` | 人工已授權 `lu_test_*` 必要 schema upgrade 與 verified-token E2E；`flow_purpose` 仍須透過正式 release chain 補齊。 | 完整通過 DB change gates後再測；query-string `userId` 只能導航，不能授權。 |
 | CUR-LINE-PROVIDER | `approved` | 人工已授權 LINE sandbox／免費額度內的 provider qualification；先前「不真實 push」裁決由本項 supersede。 | 執行前回讀 exact environment、target、recipient、quota 與 worker isolation；只送最小受控案例並保存 provider receipt。production recipient 不在 blanket approval 內。 |
 | CUR-LINE-BABYLOG-MEDIA-01 | `approved` | 人工已授權 media lane；依賴 O1 受控 NAS staging、digest、版本、cleanup／reconciliation 與下載投影。 | O1 owner contract 通過後施工；不得用既有 direct upload、公開 URL 或 watcher discovery 冒充。 |
