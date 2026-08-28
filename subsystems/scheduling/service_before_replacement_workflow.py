@@ -14,6 +14,7 @@ from typing import Callable, Protocol
 
 from domains.scheduling.service_before_replacement import (
     ReplacementOutcome,
+    ReplacementResumeStep,
     ReplacementScenario,
     ServiceBeforeReplacementCandidate,
     ServiceBeforeReplacementFacts,
@@ -120,6 +121,9 @@ class ReplacementOwnerReadback:
     retained_root_ids: tuple[str, ...]
     superseded_root_ids: tuple[str, ...]
     created_root_ids: tuple[str, ...]
+    resume_step: ReplacementResumeStep
+    candidate_count: int
+    zero_candidate_disposition: str | None
     complete: bool = True
     root_set_digests: tuple[str, ...] = ()
     root_set_counts: tuple[int, ...] = ()
@@ -144,6 +148,21 @@ class ReplacementOwnerReadback:
         _validate_ids(self.retained_root_ids, "readback retained root ids")
         _validate_ids(self.superseded_root_ids, "readback superseded root ids")
         _validate_ids(self.created_root_ids, "readback created root ids")
+        if not isinstance(self.resume_step, ReplacementResumeStep):
+            raise TypeError("readback resume step is invalid")
+        require_nonnegative_integer(self.candidate_count, "readback candidate count")
+        if self.zero_candidate_disposition is not None:
+            require_canonical_text(
+                self.zero_candidate_disposition,
+                "readback zero candidate disposition",
+                500,
+            )
+            if (
+                self.zero_candidate_disposition != "blocked_no_candidate"
+                or self.candidate_count != 0
+                or self.resume_step is not ReplacementResumeStep.STEP_2
+            ):
+                raise ValueError("readback zero candidate disposition is invalid")
         if not isinstance(self.complete, bool):
             raise TypeError("readback completeness must be bool")
         if self.root_set_digests and len(self.root_set_digests) != 3:
@@ -480,6 +499,15 @@ def _readback_matches(readback, candidate) -> bool:
         and readback.generation_version == candidate.resulting_generation_version
         and readback.event_version == candidate.resulting_event_version
         and readback.aggregate_version == candidate.resulting_aggregate_version
+        and readback.resume_step == candidate.resume_step
+        and readback.candidate_count
+        == (0 if candidate.candidate_pool_reuse_proof is None else 1)
+        and readback.zero_candidate_disposition
+        == (
+            "blocked_no_candidate"
+            if candidate.scenario is ReplacementScenario.R07
+            else None
+        )
         and set(readback.retained_root_ids) == set(candidate.retained_root_ids)
         and set(readback.superseded_root_ids) == set(candidate.superseded_root_ids)
         and set(readback.created_root_ids) == set(candidate.created_root_ids)

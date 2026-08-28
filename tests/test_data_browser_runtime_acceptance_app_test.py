@@ -52,6 +52,16 @@ def test_shared_admin_context_loads_project_dotenv():
     assert 'load_dotenv(PROJECT_ROOT / ".env")' in source
 
 
+def test_fastapi_loads_project_dotenv_before_importing_routes() -> None:
+    from pathlib import Path
+
+    source = Path("api/main.py").read_text(encoding="utf-8")
+
+    assert source.index('load_dotenv(PROJECT_ROOT / ".env")') < source.index(
+        "from api.routes import ("
+    )
+
+
 def _run_data_browser_page(
     requests_calls: list[tuple[str, dict]],
     *,

@@ -2,13 +2,23 @@
 """
 專案名稱: Lobar_union
 檔案名稱: scripts/wait_for_db.py
-描述: 輪詢探測 MySQL 3306 埠，確認資料庫已初始化並可接受連線，防範後續腳本連線逾時。
+描述: 依專案 .env 輪詢指定 MySQL database，確認 current gate 使用的同一目標可接受連線。
 """
 import os
-import time
 import sys
+import time
+from pathlib import Path
+
 import pymysql
-from dotenv import load_dotenv
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.migrate_preserved_database_additive_schema import (
+    DatabaseConfig,
+    config_from_env,
+)
 
 # 確保中文輸出編碼正確
 try:
@@ -17,20 +27,44 @@ try:
 except Exception:
     pass
 
-# 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+ENVIRONMENT_FILE = PROJECT_ROOT / ".env"
+
+
+def configured_target(
+    environment_file: Path = ENVIRONMENT_FILE,
+) -> tuple[DatabaseConfig, str]:
+    """Read the same strict .env target as the local database updater."""
+    if environment_file.is_file():
+        config, database = config_from_env(environment_file)
+    else:
+        config = DatabaseConfig(
+            host=os.getenv("DB_HOST", "127.0.0.1"),
+            port=int(os.getenv("DB_PORT", "3306")),
+            user=os.getenv("DB_USER", "root"),
+            password=os.getenv("DB_PASSWORD", ""),
+        )
+        database = os.getenv("DB_DATABASE", "").strip()
+    if not database:
+        raise ValueError("DB_DATABASE is required for local database readiness")
+    return config, database
 
 def main():
-    print("⏳ 正在等待 MySQL 資料庫啟動完成 (最長等待 30 秒)...")
+    try:
+        config, database = configured_target()
+    except (OSError, UnicodeError, ValueError) as exc:
+        print(f"❌ 錯誤：無法讀取本機資料庫目標：{exc}")
+        sys.exit(1)
+    print(f"⏳ 正在等待 MySQL 資料庫 {database} 啟動完成 (最長等待 30 秒)...")
     t = 0
     while t < 30:
         try:
             conn = pymysql.connect(
-                host=os.getenv('DB_HOST', '127.0.0.1'),
-                port=int(os.getenv('DB_PORT', 3306)),
-                user=os.getenv('DB_USER', 'root'),
-                password=os.getenv('DB_PASSWORD', '1234'),
-                charset='utf8mb4'
+                host=config.host,
+                port=config.port,
+                user=config.user,
+                password=config.password,
+                database=database,
+                charset='utf8mb4',
             )
             conn.close()
             print("🟢 MySQL 資料庫已就緒，可以開始執行初始化與匯入！")

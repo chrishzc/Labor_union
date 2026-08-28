@@ -23,6 +23,7 @@ import {
   ApplyRematchRequestSchema,
   ApplyServiceDateRematchRequestSchema,
   ApplyZeroCandidateRequestSchema,
+  ApplyZeroCandidateConfirmationRequestSchema,
   MatchingCoordinationQueryRequestSchema,
   PreviewCriteriaDiffRequestSchema,
   PreviewInitialCriteriaRequestSchema,
@@ -31,6 +32,7 @@ import {
   PreviewRematchRequestSchema,
   PreviewServiceDateRematchRequestSchema,
   PreviewZeroCandidateRequestSchema,
+  PreviewZeroCandidateConfirmationRequestSchema,
 } from '../api/matching_coordination/matching_coordination_schemas';
 import {
   toMatchingApplyReceiptView,
@@ -42,11 +44,13 @@ import {
   MATCHING_CRITERIA_DIFF,
   MATCHING_LEAVE_IMPACT,
   MATCHING_PACKAGE,
+  MATCHING_NO_CANDIDATE_PACKAGE,
   MATCHING_QUERY_DATA,
   MATCHING_SERVICE_DATE_REMATCH,
   MATCHING_SNAPSHOT,
   MATCHING_SOURCE_TUPLE,
   MATCHING_ZERO_CANDIDATE,
+  MATCHING_ZERO_CANDIDATE_CONFIRMATION_RECEIPT,
   PREVIEW_DIFF_REQUEST,
   PREVIEW_INITIAL_REQUEST,
   PREVIEW_LEAVE_REQUEST,
@@ -54,6 +58,7 @@ import {
   PREVIEW_REMATCH_REQUEST,
   PREVIEW_SERVICE_DATE_REQUEST,
   PREVIEW_ZERO_REQUEST,
+  PREVIEW_ZERO_CANDIDATE_CONFIRMATION_REQUEST,
   QUERY_REQUEST,
   SHA_A_FIXTURE,
   successEnvelope,
@@ -87,9 +92,15 @@ function endpointData(url: string): unknown {
   }
   if (url.endsWith('/preview/criteria-diff')) return MATCHING_CRITERIA_DIFF;
   if (url.endsWith('/preview/zero-candidate')) return MATCHING_ZERO_CANDIDATE;
+  if (url.endsWith('/preview/confirm-zero-candidate')) {
+    return MATCHING_NO_CANDIDATE_PACKAGE;
+  }
   if (url.endsWith('/preview/leave-impact')) return MATCHING_LEAVE_IMPACT;
   if (url.endsWith('/preview/service-date-rematch')) {
     return MATCHING_SERVICE_DATE_REMATCH;
+  }
+  if (url.endsWith('/apply/confirm-zero-candidate')) {
+    return MATCHING_ZERO_CANDIDATE_CONFIRMATION_RECEIPT;
   }
   return MATCHING_APPLY_RECEIPT;
 }
@@ -131,6 +142,12 @@ describe('matching coordination client', () => {
       'CASE-001',
       PreviewZeroCandidateRequestSchema.parse(PREVIEW_ZERO_REQUEST)
     );
+    await matchingCoordinationClient.previewZeroCandidateConfirmation(
+      'CASE-001',
+      PreviewZeroCandidateConfirmationRequestSchema.parse(
+        PREVIEW_ZERO_CANDIDATE_CONFIRMATION_REQUEST
+      )
+    );
     await matchingCoordinationClient.previewRematch(
       'CASE-001',
       PreviewRematchRequestSchema.parse(PREVIEW_REMATCH_REQUEST)
@@ -152,6 +169,7 @@ describe('matching coordination client', () => {
       '/api/v1/matching-coordination/CASE-001/preview/package',
       '/api/v1/matching-coordination/CASE-001/preview/criteria-diff',
       '/api/v1/matching-coordination/CASE-001/preview/zero-candidate',
+      '/api/v1/matching-coordination/CASE-001/preview/confirm-zero-candidate',
       '/api/v1/matching-coordination/CASE-001/preview/rematch',
       '/api/v1/matching-coordination/CASE-001/preview/leave-impact',
       '/api/v1/matching-coordination/CASE-001/preview/service-date-rematch',
@@ -163,8 +181,8 @@ describe('matching coordination client', () => {
   });
 
   it('逐一呼叫全部正式 Apply/decision 並強制 caller headers', async () => {
-    const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve(response(successEnvelope(MATCHING_APPLY_RECEIPT)))
+    const fetchMock = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(response(successEnvelope(endpointData(url))))
     );
     globalThis.fetch = fetchMock;
 
@@ -256,6 +274,14 @@ describe('matching coordination client', () => {
       }),
       APPLY_OPTIONS
     );
+    await matchingCoordinationClient.applyZeroCandidateConfirmation(
+      'CASE-001',
+      ApplyZeroCandidateConfirmationRequestSchema.parse({
+        ...PREVIEW_ZERO_CANDIDATE_CONFIRMATION_REQUEST,
+        preview_fingerprint: SHA_A_FIXTURE,
+      }),
+      APPLY_OPTIONS
+    );
 
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       '/api/v1/matching-coordination/CASE-001/apply/leave-impact',
@@ -266,12 +292,52 @@ describe('matching coordination client', () => {
       '/api/v1/matching-coordination/CASE-001/apply/caregiver-selection',
       '/api/v1/matching-coordination/CASE-001/apply/customer-decision',
       '/api/v1/matching-coordination/CASE-001/apply/zero-candidate',
+      '/api/v1/matching-coordination/CASE-001/apply/confirm-zero-candidate',
     ]);
     for (const call of fetchMock.mock.calls) {
       const headers = new Headers(call[1]?.headers);
       expect(headers.get('Idempotency-Key')).toBe(APPLY_OPTIONS.idempotencyKey);
       expect(headers.get('X-Correlation-ID')).toBe(APPLY_OPTIONS.correlationId);
     }
+  });
+
+  it('Query 可嚴格解碼 current candidate_pool_open package', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      response(successEnvelope({
+        ...MATCHING_QUERY_DATA,
+        package: {
+          ...MATCHING_PACKAGE,
+          candidate_results: [],
+          segments: [],
+          state: 'candidate_pool_open',
+        },
+        candidates: [],
+      }))
+    );
+
+    const result = await matchingCoordinationClient.query(
+      'CASE-001',
+      MatchingCoordinationQueryRequestSchema.parse(QUERY_REQUEST)
+    );
+
+    expect(result.package?.state).toBe('candidate_pool_open');
+  });
+
+  it('確認零候選 request 不接受候選數、package state 或 disposition', () => {
+    for (const forbidden of ['candidate_count', 'state', 'disposition']) {
+      expect(
+        PreviewZeroCandidateConfirmationRequestSchema.safeParse({
+          ...PREVIEW_ZERO_CANDIDATE_CONFIRMATION_REQUEST,
+          [forbidden]: forbidden === 'candidate_count' ? 0 : 'no_candidate',
+        }).success
+      ).toBe(false);
+    }
+    expect(
+      PreviewZeroCandidateConfirmationRequestSchema.safeParse({
+        ...PREVIEW_ZERO_CANDIDATE_CONFIRMATION_REQUEST,
+        evidence: ['z-last', 'a-first'],
+      }).success
+    ).toBe(false);
   });
 
   it('每次讀取 current Session 並拒絕覆寫 protected headers', async () => {

@@ -6,6 +6,11 @@ set -euo pipefail
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 cd "$SCRIPT_DIR/../.."
 
+# Docker Desktop on macOS can be installed without a global CLI symlink.
+if ! command -v docker >/dev/null 2>&1 && [[ -x /Applications/Docker.app/Contents/Resources/bin/docker ]]; then
+  export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
+fi
+
 if [[ "${1:-}" == "--dry-run" ]]; then
   if [[ -x .venv/bin/python ]]; then
     PY="$PWD/.venv/bin/python"
@@ -48,7 +53,6 @@ fi
 PY="$PWD/.venv/bin/python"
 export APP_ENV="${APP_ENV:-development}"
 export INTERNAL_SERVICE_SHARED_KEY="${INTERNAL_SERVICE_SHARED_KEY:-$("${PY}" -c 'import secrets; print(secrets.token_urlsafe(32))')}"
-export DB_PORT="${DB_PORT:-3306}"
 export MYSQL_CONTAINER="${MYSQL_CONTAINER:-mysql_db}"
 
 if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
@@ -67,7 +71,7 @@ else
   exit 1
 fi
 "$PY" scripts/wait_for_db.py
-"$PY" -m scripts.update_local_database --require-current --database-port "$DB_PORT"
+"$PY" -m scripts.update_local_database --require-current
 
 set -m
 OWNED_PIDS=()

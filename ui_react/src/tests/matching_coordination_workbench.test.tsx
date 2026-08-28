@@ -1,6 +1,6 @@
 /**
  * File: matching_coordination_workbench.test.tsx
- * Description: 驗證 M3 工作台由 Query 進入 Preview／Apply，並暴露全部十五種正式操作。
+ * Description: 驗證 M3 工作台由 Query 進入 Preview／Apply，並暴露全部十七種正式操作。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -8,9 +8,13 @@ import { matchingCoordinationClient } from '../api/matching_coordination/matchin
 import { MatchingCoordinationWorkbench } from '../components/MatchingCoordinationWorkbench';
 import {
   MATCHING_APPLY_RECEIPT,
+  MATCHING_NO_CANDIDATE_PACKAGE,
+  MATCHING_OPEN_PACKAGE,
   MATCHING_QUERY_DATA,
   MATCHING_SNAPSHOT,
+  MATCHING_ZERO_CANDIDATE_CONFIRMATION_RECEIPT,
 } from './fixtures/matching_coordination/matching_coordination_contract_fixtures';
+import { ApiTimeoutError } from '../api/matching_coordination/matching_coordination_errors';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -25,7 +29,7 @@ describe('M3 媒合協調操作台', () => {
     fireEvent.click(screen.getByRole('button', { name: '查詢媒合根事實' }));
     await screen.findByText(MATCHING_SNAPSHOT.snapshot_id);
     expect(query).toHaveBeenCalledWith('CASE-M3-001', { expected_source_versions: null });
-    expect(screen.getByLabelText('目前要處理的業務').querySelectorAll('option')).toHaveLength(15);
+    expect(screen.getByLabelText('目前要處理的業務').querySelectorAll('option')).toHaveLength(17);
 
     fireEvent.click(screen.getByRole('button', { name: '執行試算' }));
     await screen.findByText('初始條件快照');
@@ -44,6 +48,83 @@ describe('M3 媒合協調操作台', () => {
     await waitFor(() => expect(screen.getByText('Apply 已提交')).toBeInTheDocument());
     expect(apply).toHaveBeenCalledTimes(1);
     expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it('確認零候選只送 owner evidence，顯示 Step 2 blocked 且不宣稱異常解除', async () => {
+    const zeroCandidateQuery = {
+      ...MATCHING_QUERY_DATA,
+      package: MATCHING_OPEN_PACKAGE,
+      candidates: [],
+    };
+    const query = vi.spyOn(matchingCoordinationClient, 'query').mockResolvedValue(zeroCandidateQuery);
+    const preview = vi.spyOn(matchingCoordinationClient, 'previewZeroCandidateConfirmation').mockResolvedValue(MATCHING_NO_CANDIDATE_PACKAGE);
+    const apply = vi.spyOn(matchingCoordinationClient, 'applyZeroCandidateConfirmation').mockResolvedValue(MATCHING_ZERO_CANDIDATE_CONFIRMATION_RECEIPT);
+    render(<MatchingCoordinationWorkbench />);
+
+    fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: 'CASE-R07-001' } });
+    fireEvent.click(screen.getByRole('button', { name: '查詢媒合根事實' }));
+    await screen.findByText(MATCHING_OPEN_PACKAGE.package_id);
+
+    fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'previewZeroCandidateConfirmation' } });
+    const previewPayload = (screen.getByLabelText('系統交換欄位') as HTMLTextAreaElement).value;
+    expect(previewPayload).toContain('fresh_pool_query_empty');
+    expect(previewPayload).not.toContain('candidate_count');
+    expect(previewPayload).not.toContain('disposition');
+    expect(previewPayload).not.toContain('"state"');
+    fireEvent.click(screen.getByRole('button', { name: '執行試算' }));
+
+    await screen.findByText('Step 2 受阻｜package-no-candidate');
+    expect(screen.getByText('處置：blocked_no_candidate')).toBeInTheDocument();
+    expect(screen.getByText('這只記錄目前的受阻事實，不代表異常已解除')).toBeInTheDocument();
+    expect(preview).toHaveBeenCalledWith(
+      'CASE-R07-001',
+      expect.objectContaining({
+        evidence: ['fresh_pool_query_empty'],
+        package_id: MATCHING_OPEN_PACKAGE.package_id,
+        package_version: MATCHING_OPEN_PACKAGE.version,
+      }),
+      expect.anything(),
+    );
+
+    fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'applyZeroCandidateConfirmation' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '我已核對試算結果、來源版本與即將提交的決定' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認提交此業務決定' }));
+
+    await screen.findByText(/Step 2 仍受阻｜blocked_no_candidate/);
+    expect(screen.getByText(/不代表異常已解除/)).toBeInTheDocument();
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it('確認零候選 Apply 結果未知時只以相同 payload 與 idempotency key 重試', async () => {
+    const zeroCandidateQuery = {
+      ...MATCHING_QUERY_DATA,
+      package: MATCHING_OPEN_PACKAGE,
+      candidates: [],
+    };
+    vi.spyOn(matchingCoordinationClient, 'query').mockResolvedValue(zeroCandidateQuery);
+    vi.spyOn(matchingCoordinationClient, 'previewZeroCandidateConfirmation').mockResolvedValue(MATCHING_NO_CANDIDATE_PACKAGE);
+    const apply = vi.spyOn(matchingCoordinationClient, 'applyZeroCandidateConfirmation')
+      .mockRejectedValueOnce(new ApiTimeoutError(10_000))
+      .mockResolvedValueOnce(MATCHING_ZERO_CANDIDATE_CONFIRMATION_RECEIPT);
+    render(<MatchingCoordinationWorkbench />);
+
+    fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: 'CASE-R07-RETRY' } });
+    fireEvent.click(screen.getByRole('button', { name: '查詢媒合根事實' }));
+    await screen.findByText(MATCHING_OPEN_PACKAGE.package_id);
+    fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'previewZeroCandidateConfirmation' } });
+    fireEvent.click(screen.getByRole('button', { name: '執行試算' }));
+    await screen.findByText('Step 2 受阻｜package-no-candidate');
+    fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'applyZeroCandidateConfirmation' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '我已核對試算結果、來源版本與即將提交的決定' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認提交此業務決定' }));
+
+    await screen.findByRole('button', { name: '以相同內容與識別碼重試' });
+    expect(screen.getByRole('alert')).toHaveTextContent('提交結果目前無法確認');
+    fireEvent.click(screen.getByRole('button', { name: '以相同內容與識別碼重試' }));
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(2));
+    expect(apply.mock.calls[1]?.[1]).toEqual(apply.mock.calls[0]?.[1]);
+    expect(apply.mock.calls[1]?.[2].idempotencyKey).toBe(apply.mock.calls[0]?.[2].idempotencyKey);
   });
 
   it('無舊快照時，初始 Preview 會交由後端 fresh-read 來源版本', async () => {

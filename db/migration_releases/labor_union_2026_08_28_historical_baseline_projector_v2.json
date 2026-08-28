@@ -1,0 +1,80 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-historical-baseline-projector-2026-08-28-v2",
+  "release_metadata": {
+    "release_name": "Labor Union Historical baseline projector v2",
+    "application_version": "historical-baseline-projector-v2",
+    "published_at": "2026-08-28",
+    "description": "Add append-only Historical baseline occurrence state, active membership snapshots, projector delivery, checkpoints and post-commit readback"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-schema-assembly-2026-08-15-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1014_historical_baseline_projector_v2.sql",
+      "relative_path": "db/schema_parts/1014_historical_baseline_projector_v2.sql",
+      "sha256": "b8f6101868ee3c119da63daf2aed89c14c534f02a41175b85c3fcfe5e508ae76",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-preserve-historical-baseline-projector-v1-and-v2-evidence",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "historical-baseline-projector-v2-owned-objects",
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "historical-baseline-projector-v2"
+    ],
+    "required_restart_targets": [
+      "api",
+      "worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "historical-baseline-projector-v2-owned-objects"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_28_historical_baseline_projector_v2.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_28_historical_baseline_projector_v2.descriptors.json",
+    "sha256": "caebffc52e471605fcd1262eec8ad46943700c0445a82be26bad75336cc3140a",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

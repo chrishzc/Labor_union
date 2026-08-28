@@ -238,7 +238,7 @@ def test_status_claim_or_receipt_cannot_replace_owner_terminal_readback():
     assert result.occurrences[0].observation.terminal_result is False
     assert "status" not in result.outbox.payload
     assert "claim" not in result.outbox.payload
-    assert result.receipt.result_state == "projected"
+    assert result.receipt.result_state == "held_active"
 
 
 @pytest.mark.parametrize(

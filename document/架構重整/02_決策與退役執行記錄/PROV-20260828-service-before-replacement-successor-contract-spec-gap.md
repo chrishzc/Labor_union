@@ -10,6 +10,8 @@
 - `affected_package`: `PKG-R-PRE`
 - `related_matrix`: `PROV-20260827-historical-order-business-scenario-gap-matrix.md`
 - `storage_contract_revision`: `STORAGE-CONTRACT-20260828`
+- `current_extension`: `R07-ZERO-CANDIDATE-OWNER-ENTRY`
+- `current_extension_status`: `SPEC_READY`
 
 本文件不重開已核准的 R-01～R-04／R-07 行為。2026-08-28 人工已回覆「採用」；
 本文 3.1～3.6 與第4節推薦 bundle 因此全部轉為 current Authority。2026-08-28
@@ -314,6 +316,104 @@ convergence:
   status: READY
   blockers: []
 ```
+
+## 11. R-07 zero-candidate owner entry correction（2026-08-28 adopted）
+
+### 11.1 Current contradiction and objective
+
+已核准的 R-07 outcome 不變：replacement successor round 有零個合法候選時，Orders 維持
+Step 2 blocked、顯示 `blocked_no_candidate`，不復活舊月嫂、不假推進，也不把 anomaly 誤標為
+terminal。current implementation 已能投影「Scheduling successor binding 已存在」的結果，卻沒有
+production owner entry 能合法建立這個前置事實：
+
+- Matching public commands 不會把 current `candidate_pool_open` package 轉為 canonical
+  `no_candidate` package；validation-only application injection 或直接 SQL 都不是 production entry。
+- RPRE R-07 Query／Preview 又要求已存在的 zero-candidate successor，blocked candidate 不允許 Apply；
+  因此無法建立 1012 Scheduling replacement event／successor binding。
+- 1012 successor FK 同時要求 Matching package/event 與 Scheduling replacement event；只新增 Matching
+  row 或只新增 Scheduling row 都不能滿足 owner binding。
+
+`R07-O1` 的 objective 是補齊一條人工、typed、可 replay 的 owner workflow，讓操作者能先確認
+current successor candidate pool 確實沒有合法候選，再由既有 RPRE R-07 Q/P/A 建立 Scheduling
+replacement lineage 與 cross-owner binding。這是紀錄真實 blocked state，不是宣稱已找到月嫂或已解除
+異常。
+
+### 11.2 Proposed owner and public behavior
+
+`R07-R1`：Matching Coordination 擁有「確認 current successor pool 為零候選」的
+Query／Preview／Apply command。它只接受 current `candidate_pool_open` package、同一 criteria snapshot、
+完整 fresh 13-source tuple，以及「不存在 eligible 且 willing candidate」的 owner readback。
+
+`R07-R2`：Preview 必須 zero-write，回傳 case、current package／criteria／source identities與versions、
+零候選 proof、proposed `no_candidate` successor package identity/version、blocker、expected versions與
+fingerprint。Apply 只接受同一 preview 的 reason/evidence、expected identities/versions/fingerprint、
+server actor/capability 與 idempotency key；UI 不得傳入 candidate count、package state或 disposition。
+
+`R07-R3`：Apply fresh lock 後重讀 candidate pool、latest willingness、criteria與完整 source tuple；仍為零
+合法候選時，在 Matching outer UoW append canonical `no_candidate` package lineage、immutable
+`zero_candidate_confirmed` event、receipt與 internal Scheduling intent。不得建立 assignment、schedule、
+LINE/provider effect、付款效果或 1012 Scheduling row。same key＋same payload replay 原 receipt；同 key
+不同 payload拒絕。
+
+`R07-R4`：既有 RPRE R-07 Query／Preview 消費上述 current Matching package/event 作前置 owner proof。
+Preview 建立嚴格較新的 Scheduling replacement generation/event 與 1012 successor binding candidate；
+RPRE Apply 在原有單一 Scheduling outer UoW 綁定既有 Matching package/event，不建立第二個 Matching
+terminal package。成功 readback 必須為 Step 2、`candidate_count=0`、
+`zero_candidate_disposition=blocked_no_candidate`、root history retained、`complete=true`。
+
+`R07-R5`：RPRE R-07 Apply 的 `applied|replayed` 只表示 zero-candidate replacement lineage 已完整紀錄；
+業務 outcome 仍是 blocked。沒有 LINE explicit replacement request時不新增／更新 anomaly；若已有合法
+LINE request occurrence，該 occurrence 保持 active，直到後續 Matching owner facts證明候選與流程可繼續。
+
+### 11.3 Failure behavior, compatibility and exclusions
+
+- Apply 前若出現任一 eligible＋willing candidate、package不再 current、source/willingness/criteria漂移、
+  identity cross-case、duplicate current package或 proof不完整，固定 zero-write stale/conflict/unavailable；
+  不准由操作者覆寫成零候選。
+- Matching no-candidate receipt或 internal intent不能單獨建立1012 successor；RPRE仍須 fresh Query／Preview／
+  Apply與完整post-commit readback。
+- 不改R-01～R-04、actual-service substitution referral、Matching零候選「放寬條件方案」既有命令、
+  permission tier、DB schema enum、provider boundary或generic anomaly resolve。
+- route/class/component名稱為task-pack late-bind implementation detail；production contract必須保持typed、
+  bounded-domain client與既有Global envelope。
+
+### 11.4 Acceptance scenarios
+
+| ID | Scenario | Observable acceptance |
+|---|---|---|
+| `R07-A1` | current successor pool無合法候選 | Matching Query/Preview zero-write；Apply append exactly one `no_candidate` package/event/receipt/intent；fresh readback exact |
+| `R07-A2` | same-key replay | row counts與fingerprints不變，回同receipt；different payload固定拒絕 |
+| `R07-A3` | candidate在Preview後變為eligible＋willing | Apply zero-write stale/conflict；不得留下package/event/receipt/intent |
+| `R07-A4` | Matching確認後執行RPRE R-07 | RPRE綁既有Matching package/event；1012 event/successor/receipt/outbox各exactly one；不建立第二個Matching package |
+| `R07-A5` | RPRE post-Apply Browser | 顯示Step 2 blocked與`blocked_no_candidate`；舊月嫂/history不復活；`complete=true`但不得顯示「異常已解除」 |
+| `R07-A6` | 無LINE request／有LINE request | 前者anomaly零新增零更新；後者原occurrence保持active並綁owner lineage，不以receipt-only關閉 |
+| `R07-A7` | source、identity、version、readback任一漂移 | typed blocked/stale/unavailable/outcome-unknown；不得假成功或partial write |
+
+### 11.5 Source map and authority boundary
+
+| Requirement | Authority／evidence | Decision status |
+|---|---|---|
+| R-07 Step 2 blocked outcome | §3.2、§3.6、§8.5；R-07 matrix | `PRODUCT_REQUIREMENT`，已核准、不重開 |
+| Matching current source與canonical package | §8.7、§9.1～9.2；live Matching domain/repository | `ARCHITECTURE_DECISION`，既有owner邊界可重用 |
+| Scheduling 1012 cross-owner binding | §8、§10；1012 schema/repository | `ARCHITECTURE_DECISION`，既有FK與UoW不可旁路 |
+| Matching zero-candidate confirmation command | current public API無此entry；validation injection不是production | 新 public contract／entry point，`AUTHORITY_REQUIRED` |
+| no-auth、`lu_test_*`、ports與fixture identities | Task96 local validation authority | `EXECUTION_AUTHORITY`，不得升格為產品要求 |
+
+本修正只提出一個必要方法：新增 Matching owner command，讓既有 RPRE API 消費其 immutable result。
+重用 `ApplyZeroCandidateAlternative` 會混淆「確認沒有候選」與「客戶是否同意放寬條件」；直接 SQL、
+validation injection或讓RPRE自行猜零候選都不能通過owner、replay與cross-owner binding。
+
+```yaml
+convergence:
+  status: READY
+  blockers: []
+```
+
+`terminal_status: SPEC_READY`
+
+2026-08-28 人工明確回覆「核准」；R07-R1～R07-R5與R07-A1～R07-A7因此成為current Authority。
+本核准只允許task-pack編譯與其後已界定的本機實作／驗收，不包含production、`union_db`、provider、
+generic anomaly resolve、直接SQL fixture或跳過fresh owner readback。
 
 ## 8.8 RPRE 與 anomaly source 邊界裁決（2026-08-28）
 

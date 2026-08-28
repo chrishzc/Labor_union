@@ -172,16 +172,30 @@ blockers: []
   `221 passed`，並通過package-proposed exact binding、customer-decision 13-source parity、external
   signback source/receipt/session/result snapshot及rebuild predecessor五組adversarial probes。
   真MySQL integration因未提供env而`1 skipped`，不得外推為live runtime完成。
-- `PKG-RPRE-PRODUCTION-LOADER-post-Apply`: `in-progress`。已修正有效successor generation沒有
+- `PKG-RPRE-PRODUCTION-LOADER-post-Apply`: `completed`。已修正有效successor generation沒有
   `scheduling_rebuild_events` row時仍被無條件判成malformed：存在latest RPRE event時改以其exact
   generation／aggregate／event binding作predecessor；首次換人無latest且無rebuild固定回
   `replacement_prior_event_unavailable`。主代理focused/broader `68 passed`，fresh Luna/high
   P0/P1=0、focused `133 passed`、broader `67 passed`。兩個retained R-02案件已跨過原
   `replacement_source_malformed`，下一個runtime結果為`replacement_matching_plan_unavailable`：
   Apply後successor已生效且不存在active accepted plan，UI post-Apply readback不可再把同一R-02當作
-  未執行Query；durable receipt/successor readback入口仍待收斂，故runtime包不得標completed。
-- `PKG-RPRE-PROJECTION-UI-RUNTIME`: `in-progress`；pure projector、production loader與React source已完成，
-  `lu_test_*` no-auth API composition／fresh readback／真Browser仍未完成，不得外推為整包完成。
+  未執行Query。fresh R-02 fixture已通過production loader、immutable receipt/successor與complete
+  owner readback；post-Apply slice完成，scenario runtime matrix仍由下列umbrella追蹤。
+- `PKG-RPRE-PROJECTION-UI-RUNTIME`: `completed`；pure projector、production loader、typed API、React與
+  no-auth true Browser scenario matrix均已完成。
+  fresh R-02在`lu_test_task96_rpre_browser_r3_20260828`通過no-auth API composition與真Browser
+  Query→Preview→Apply→post-commit readback：版本2→3、superseded 4、created 1、Matching lineage/event
+  4／5、`complete=true`。fresh R-04亦通過0／3／1、`matching_only_zero_service`、新empty effective
+  generation與Browser complete readback；actual-service referral通過Query／Preview、forced Apply 409、1012
+  五表零寫入及Browser代班導向。R-03亦已完成production LINE review fixture、waiting-lock／commitment／
+  signback／recipient roots Query、same-UoW lock cancellation、complete readback與no-auth Browser Q/P/A；DB證明
+  lock header cancelled、5 days inactive、單一immutable `lock_cancelled`、commitment/signback history保留。
+  R-01亦已完成candidate unavailable／`candidate_pool_open` parent、no-auth Browser Q/P/A與DB before/after；
+  candidate history fingerprints不變，plan／commitment／assignment／schedule與anomaly均為0。R-07亦已由
+  Matching正式Q/P/A建立current `no_candidate` package/event，再由RPRE綁定immutable owner proof並建立
+  Scheduling 1012 successor；沒有SQL／validation injection。final case `115960427`的Apply response canonical
+  readback直接顯示Step 2、candidate count 0、`blocked_no_candidate`、versions `2／2／2`、`complete=true`，
+  且明示只完成lineage、不代表異常解除、不復活舊staff；DB successor/event/receipt/outbox各exactly one。
 - `PKG-RPRE-REACT-source`: `completed`（source／fresh E3）。專屬 strict Q/P/A client、
   R-01／02／03／04／07 明確選擇、reason/evidence、Preview 確認、actual-service
   substitution referral、server-owned resume step 與 same-key outcome-unknown 對帳已完成；
@@ -203,8 +217,10 @@ blockers: []
   observation；React不再用已套用的舊scenario重新Query，receipt-only／不完整readback仍進
   outcome-unknown並只以原payload/key對帳。主代理focused `13 passed`；fresh Luna/high PASS、
   P0/P1=0、build/lint/diff-check/UTF-8 PASS。兩個retained R-02 case的舊scenario Query仍因successor
-  生效後active accepted plan合法不存在而不可作fresh pre-Apply Browser fixture；新的未套用scenario
-  Browser Apply仍`NOT_RUN`，故`PKG-RPRE-PROJECTION-UI-RUNTIME`維持`in-progress`。
+  生效後active accepted plan合法不存在而不可作fresh pre-Apply Browser fixture；其後新增的fresh R-02
+  fixture已完成真Browser Apply與complete readback。R-01～R-04、R-07與actual-service referral matrix均已
+  由no-auth true Browser／真MySQL完成；R-07 final UI readback focused為React `16 passed`、backend
+  `146 passed`、production build PASS，並保留final case作immutable驗收lineage。
 - persistence DB gates：Scope／Change inventory／Static release／Descriptor／read-only plan／Engine／本機
   Developer acceptance `PASS`；另一台實體電腦Developer acceptance `NOT_RUN`，總結仍為
   `DB_CHANGE_NOT_READY`。
@@ -214,7 +230,8 @@ blockers: []
   `03_追蹤清單與證據/evidence/2026-08-28_task96_rpre_mysql_persistence_receipt.md`、
   `03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_hproj_rpre_static_release_receipt.md`、
   `03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_1012_engine_qualification_receipt.md`、
-  `03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_local_noauth_runtime_receipt.md`。
+  `03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_local_noauth_runtime_receipt.md`、
+  `03_追蹤清單與證據/evidence/2026-08-28_task96_rpre_noauth_browser_runtime_receipt.md`。
 
 ## 7. Concrete persistence task-pack correction（2026-08-28）
 
@@ -242,4 +259,68 @@ blockers: []
 ```yaml
 package_status: PACKAGE_READY
 blockers: []
+```
+
+## 8. R-07 zero-candidate owner-entry task package（2026-08-28）
+
+- `package_id`: `PKG-RPRE-R07-ZERO-CANDIDATE-OWNER-ENTRY`
+- `package_status`: `PACKAGE_READY`
+- `specification`: canonical successor spec §11，`SPEC_READY`／convergence READY。
+- `requirements`: `R07-R1`～`R07-R5`；`acceptance`: `R07-A1`～`R07-A7`。
+- `authority_digest`: 2026-08-28人工明確核准Matching「確認零候選」typed owner command；既有RPRE API
+  與R-07 blocked outcome不重開。
+- `effect_ceiling`: tracked source、`lu_test_*` development mutation、no-auth API／Browser；不含
+  `union_db`、production、provider、LINE effect、付款、generic resolve、直接SQL fixture或DB schema變更。
+
+### 8.1 Necessity、source basis and reuse
+
+| Step | Necessity | Source basis | Reuse decision |
+|---|---|---|---|
+| Matching zero-candidate Query／Preview／Apply | `required_now` | spec R07-R1～R3；live API無production entry | copy-adapt現有Matching Q/P/A、idempotency與repository outer UoW |
+| canonical `no_candidate` package/event persistence | `required_now` | spec R07-R3；current package lineage/event schema已存在 | minimal-glue；不新增schema、不重用zero-candidate alternative語意 |
+| RPRE consume existing package/event | `required_now` | spec R07-R4；§9.2禁止建立第二個terminal package | 修改existing loader/persistence port為typed reuse |
+| R-07 React／Browser closure | `required_now` | R07-A4～A7；Task96 no-auth Authority | copy-adapt既有RPRE workbench與Matching strict client |
+| generic status editor、SQL fixture、自動放寬條件 | `remove` | spec exclusions／owner invariants | reject |
+
+### 8.2 Ordered execution contract
+
+1. **Matching Domain／Subsystem**：建立「確認零候選」typed request、zero-write preview與apply receipt；只接受
+   current `candidate_pool_open`、same-case criteria與完整fresh source tuple，且不存在eligible＋willing candidate。
+2. **Matching persistence／API**：Apply在既有Matching outer UoW fresh lock後append exactly one canonical
+   `no_candidate` package lineage、`zero_candidate_confirmed` immutable event、receipt與internal Scheduling
+   intent；same-key replay exact，different payload拒絕。
+3. **RPRE composition**：R-07 Query／Preview讀取current Matching `no_candidate` package/event作owner proof；
+   Apply綁定該existing numeric/string identities，建立Scheduling replacement event／1012 successor／receipt／
+   outbox，但不得建立第二個Matching package。
+4. **Typed UI**：Matching workbench提供確認零候選Preview／Apply；RPRE R-07成功後顯示Step 2、
+   `blocked_no_candidate`與`complete=true`，文案不得表示異常已解除。
+5. **Runtime acceptance**：使用唯一`lu_test_*` scenario，經formal owner API建立facts；保存Matching/RPRE
+   before-after、same-key replay、candidate race zero-write、anomaly source boundary與真Browser console/readback。
+
+### 8.3 Safety, reconciliation and handoff
+
+- `dependencies`: catalog/current criteria、candidate pool與13-source tuple可fresh read；1012與既有Matching
+  schema已exact；RPRE actual-service proof為零。
+- `safe_stop`: package非current、候選出現、source/criteria/willingness/version/identity漂移、duplicate parent、
+  readback不完整或commit outcome未知時停止；不得partial write或換key重送。
+- `transaction`: Matching確認與RPRE綁定是兩個owner transaction，以immutable package/event intent交接；
+  每個transaction各自只有一個outer UoW，任一失敗不偽造另一方成功。
+- `reconciliation`: Matching與RPRE各用原idempotency key/payload reconcile；post-commit不明固定typed
+  outcome-unknown。Matching已確認但RPRE未執行是合法可續跑狀態，不得回滾已提交Matching history。
+- `cleanup`: 只處理唯一Task96 scenario rows；可明確保留作receipt，不全庫清理。
+
+### 8.4 Bidirectional coverage
+
+| Requirement／Acceptance | Package step | Direct oracle |
+|---|---|---|
+| R07-R1～R3／A1～A3 | 1～2 | Preview零寫入；Apply exact package/event/receipt/intent；candidate race與different payload零寫入 |
+| R07-R4／A4 | 3 | 1012綁既有Matching numeric/string identities；Matching package count不增加；RPRE rows各exactly one |
+| R07-R5／A5～A6 | 4～5 | Step 2 blocked、`complete=true`但不顯示resolved；無LINE request anomaly零寫入，有request仍active |
+| R07-A7 | 1～5 | stale/unavailable/outcome-unknown typed；transaction rollback或原identity reconcile |
+
+```yaml
+package_route:
+  status: PACKAGE_READY
+  package: PKG-RPRE-R07-ZERO-CANDIDATE-OWNER-ENTRY
+  blockers: []
 ```

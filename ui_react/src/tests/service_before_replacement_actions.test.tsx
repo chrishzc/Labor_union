@@ -6,6 +6,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   decodeAndVerifyServiceBeforeReplacementApplyResponse,
+  serviceBeforeReplacementActorBinding,
+  ServiceBeforeReplacementApplyRequestSchema,
   ServiceBeforeReplacementQuerySchema,
   serviceBeforeReplacementClient,
   verifyServiceBeforeReplacementApply,
@@ -100,6 +102,7 @@ const readyQuery: ServiceBeforeReplacementQuery = {
   root_delta: { retained: [retainedRoot], superseded: [supersededRoot], created: [] },
   candidate_pool_reuse_proof: null,
   successor_round: null,
+  matching_zero_candidate_proof: null,
   resume_step: 'step_2',
   blockers: [],
 };
@@ -164,6 +167,9 @@ const result: ServiceBeforeReplacementApplyResult = {
     created_root_ids: [createdRoot.root_id],
     root_set_digests: [fingerprint, fingerprint, fingerprint],
     root_set_counts: [1, 1, 1],
+    resume_step: 'step_4',
+    candidate_count: 1,
+    zero_candidate_disposition: null,
     outbox_identity: 'outbox:8',
     matching_package_lineage_id: 8,
     matching_event_id: 9,
@@ -338,6 +344,34 @@ describe('ServiceBeforeReplacementActions', () => {
     expect(screen.getByText(/Apply readback 未提供 occurrence active 欄位/)).toBeInTheDocument();
     expect(screen.getByText('Readback complete：true')).toBeInTheDocument();
   });
+
+  it('R-07 Apply readback 明確顯示停在 Step 2 且沒有候選，不誤報異常已解除', async () => {
+    vi.mocked(serviceBeforeReplacementClient.query).mockResolvedValue({ ...readyQuery, scenario: 'R-07' });
+    vi.mocked(serviceBeforeReplacementClient.preview).mockResolvedValue({ ...preview, scenario: 'R-07' });
+    vi.mocked(serviceBeforeReplacementClient.apply).mockResolvedValue({
+      ...result,
+      readback: {
+        ...result.readback,
+        resume_step: 'step_2',
+        candidate_count: 0,
+        zero_candidate_disposition: 'blocked_no_candidate',
+      },
+    });
+    render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-07" />);
+    await screen.findByText('可以建立換人 successor');
+    fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
+    fireEvent.change(screen.getByLabelText('證據（每行一筆）'), { target: { value: preview.evidence.join('\n') } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
+    await screen.findByText('預覽完成，尚未寫入');
+    fireEvent.click(screen.getByLabelText('我已核對案件、情境、原因、證據與影響範圍'));
+    fireEvent.click(screen.getByRole('button', { name: '確認建立換人 successor' }));
+
+    await screen.findByText(/目前仍停在 Step 2：沒有可用候選/);
+    expect(screen.getByText(/blocked_no_candidate/)).toBeInTheDocument();
+    expect(screen.getByText(/不代表異常已解除，也不會復活舊月嫂/)).toBeInTheDocument();
+    expect(screen.getByText(/Successor 候選數：.*0/)).toBeInTheDocument();
+    expect(serviceBeforeReplacementClient.query).toHaveBeenCalledTimes(1);
+  });
 });
 
 async function waitForQueryCallCount(count: number): Promise<void> {
@@ -377,7 +411,42 @@ describe('ServiceBeforeReplacementQuerySchema', () => {
   });
 });
 
+describe('ServiceBeforeReplacementApplyRequestSchema', () => {
+  it('接受完整 Preview 綁定欄位並維持 strict contract', () => {
+    const request = {
+      scenario: preview.scenario,
+      reason: preview.reason,
+      evidence: preview.evidence,
+      expected_generation_version: 7,
+      expected_event_version: 7,
+      expected_aggregate_version: 7,
+      prior_generation_identity: 'generation:7',
+      prior_event_identity: 'event:7',
+      prior_aggregate_identity: 'aggregate:7',
+      preview_fingerprint: fingerprint,
+    };
+    expect(ServiceBeforeReplacementApplyRequestSchema.safeParse(request).success).toBe(true);
+    expect(ServiceBeforeReplacementApplyRequestSchema.safeParse({ ...request, extra: true }).success).toBe(false);
+  });
+});
+
 describe('RPRE cryptographic response verification', () => {
+  it('no-auth development principal 使用與 server 相同的 immutable actor identity', () => {
+    expect(serviceBeforeReplacementActorBinding({
+      id: null,
+      username: 'development-bypass',
+      role: 'system_admin',
+    })).toEqual({
+      actor: 'system:local_bypass',
+      capabilities: ['orders.historical_review.remediate'],
+    });
+    expect(serviceBeforeReplacementActorBinding({
+      id: 42,
+      username: 'operator',
+      role: 'system_admin',
+    }).actor).toBe('admin:42');
+  });
+
   it('Apply transport 成功後若 response 無法解碼，一律轉成同鍵 outcome_unknown', async () => {
     const request = {
       scenario: preview.scenario,

@@ -47,7 +47,12 @@ class MySqlStaffMatchingPreferenceRepository:
     ) -> tuple[tuple[StaffPreferenceDefinition, int], ...]:
         """Project active owner definitions through the M3 typed read port."""
 
-        return self.list_definitions(active_only=True, for_update=for_update)
+        return tuple(
+            sorted(
+                self.list_definitions(active_only=True, for_update=for_update),
+                key=lambda item: item[0].preference_key,
+            )
+        )
 
     def load_profile_values(
         self, staff_ids: tuple[int, ...], *, for_update: bool = False

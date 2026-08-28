@@ -64,6 +64,19 @@ receipt 與 replacement link 僅留在 audit／history view。若 correction 產
 必須消失並由明確連結的 successor alert 取代，且畫面要說明新問題與下一個解除方式。tracking state
 只能輔助工作交接，不能是主畫面的唯一動作、完成訊號或流程閘門。
 
+### 歷史付款與結清的同頁修復（2026-08-28 人工裁決）
+
+歷史付款異常 detail 必須分開 Client receivable、client refund、client subsidy return及staff payout，
+逐筆顯示payer/payee、direction、obligation、金額／到期日、銀行候選、正常核銷 blocker、historical
+eligibility與terminal predicate。首要action為對帳單核銷；只有pre-system且已採納的historical case才可
+顯示歷史人工`paid | settled`。兩條action都在異常頁drawer內走owner typed Query→Preview→Confirm→
+Apply→fresh readback，不得跳成generic raw editor。
+
+客戶補助退款固定導向Client Finance `subsidy_return`，不得列在Government Subsidy或Staff Payables修復。
+客戶已付款但月嫂未付款時，Client alert可解除而Staff alert與Step 11 blocker保持。UI不得提供跨owner
+「整張訂單結清」按鈕、直接修改balance/status或tracking close；完整契約見
+`../02_決策與退役執行記錄/PROV-20260828-historical-payment-and-owner-settlement-spec.md`。
+
 自動解除 predicate 不是 Anomalies 自行發明的技術條件。每個 code 都必須在 registry／owner 契約中
 引用 owning Domain 正式規則書的具體章節，列出該規則實際使用的 root facts、業務完成條件與仍應保持
 active 的反例。projector 只能重用同一個 owner predicate 或其有版本、可機械證明等價的 typed result；
@@ -482,6 +495,8 @@ disposition完成。Apply／unknown／re-query期間輸入、分頁與Drawer clo
 - `CorrectAndPostFinanceImportRow` partial failure 不留下單獨 classification、ledger、
   allocation、receipt 或 resolved alert。
 - 銀行金額未完整 allocation 或任一所選義務未精確歸零時，零正式寫入並維持警示。
+- 上述exact allocation負向只約束bank-backed reconciliation；符合2026-08-28 historical eligibility的人工
+  `paid | settled`必須走獨立owner typed action及source kind，不能把不完整bank candidate硬套成歷史例外。
 - 同一來源列的多個欄位警示可獨立補齊及 `auto_resolved`，UI 分組不改變 field-level identity。
 - exact source replay 不新增 warning occurrence；新失敗取代舊 task 時由 system 留下 replacement event。
 - 人工 `closed` 不改正式 root；root predicate 仍成立時不得回傳資料已修正。

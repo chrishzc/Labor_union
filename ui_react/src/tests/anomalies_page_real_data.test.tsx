@@ -146,7 +146,7 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     });
 
     // Filter by '排班調度'
-    const schedTab = screen.getByRole('button', { name: '排班調度' });
+    const schedTab = screen.getByRole('button', { name: '排班調度 (1)' });
     await act(async () => {
       fireEvent.click(schedTab);
     });
@@ -154,9 +154,10 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
     expect(screen.queryByText('客戶帳務待處理事項')).not.toBeInTheDocument();
     expect(screen.queryByText('BeClass 身分對應待確認')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-surface-id="anomalies.import-warnings"]')).not.toBeInTheDocument();
 
     // Filter by '客戶帳務'
-    const finTab = screen.getByRole('button', { name: '客戶帳務' });
+    const finTab = screen.getByRole('button', { name: '客戶帳務 (1)' });
     await act(async () => {
       fireEvent.click(finTab);
     });
@@ -164,6 +165,7 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     expect(screen.queryByText('假日排班尚未確認')).not.toBeInTheDocument();
     expect(screen.getByText('客戶帳務待處理事項')).toBeInTheDocument();
     expect(screen.queryByText('BeClass 身分對應待確認')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-surface-id="anomalies.import-warnings"]')).not.toBeInTheDocument();
 
     // Reset to '全部 (3)'
     const allTab = screen.getByRole('button', { name: /全部 \(3\)/ });
@@ -174,6 +176,7 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
     expect(screen.getByText('客戶帳務待處理事項')).toBeInTheDocument();
     expect(screen.getByText('BeClass 身分對應待確認')).toBeInTheDocument();
+    expect(document.querySelector('[data-surface-id="anomalies.import-warnings"]')).toBeVisible();
   });
 
   it('filters anomaly cards by status filter pills', async () => {
@@ -189,6 +192,10 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
       fireEvent.click(openPill);
     });
 
+    expect(screen.getByRole('button', { name: '全部 (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '排班調度 (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '客戶帳務 (0)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '匯入資料 (0)' })).toBeInTheDocument();
     expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
     expect(screen.queryByText('客戶帳務待處理事項')).not.toBeInTheDocument();
     expect(screen.queryByText('BeClass 身分對應待確認')).not.toBeInTheDocument();
@@ -199,6 +206,9 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
       fireEvent.click(claimedPill);
     });
 
+    expect(screen.getByRole('button', { name: '全部 (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '排班調度 (0)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '客戶帳務 (1)' })).toBeInTheDocument();
     expect(screen.queryByText('假日排班尚未確認')).not.toBeInTheDocument();
     expect(screen.getByText('客戶帳務待處理事項')).toBeInTheDocument();
     expect(screen.queryByText('BeClass 身分對應待確認')).not.toBeInTheDocument();

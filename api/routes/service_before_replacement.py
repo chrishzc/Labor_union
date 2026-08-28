@@ -227,6 +227,11 @@ def _query_payload(query):
         "root_delta": None if referral else _delta_payload(query.root_delta),
         "candidate_pool_reuse_proof": None if referral else _reuse_payload(query.candidate_pool_reuse_proof),
         "successor_round": None if referral else _successor_payload(query.successor_round),
+        "matching_zero_candidate_proof": (
+            None
+            if referral
+            else _zero_candidate_proof_payload(query.matching_zero_candidate_proof)
+        ),
         "resume_step": query.resume_step.value,
         "blockers": list(query.blockers),
     }
@@ -256,6 +261,13 @@ def _preview_payload(candidate, body: ServiceBeforeReplacementPreviewBody | None
         "root_delta": None if referral else root_delta,
         "candidate_pool_reuse_proof": None if referral else _reuse_payload(candidate.candidate_pool_reuse_proof),
         "successor_round": None if referral else _successor_payload(candidate.successor_round_fact),
+        "matching_zero_candidate_proof": (
+            None
+            if referral
+            else _zero_candidate_proof_payload(
+                candidate.matching_zero_candidate_proof
+            )
+        ),
         "resume_step": candidate.resume_step.value,
         "blockers": list(candidate.blockers),
         "replacement_generation_identity": candidate.replacement_generation_identity,
@@ -412,6 +424,23 @@ def _successor_payload(successor):
     }
 
 
+def _zero_candidate_proof_payload(proof):
+    if proof is None:
+        return None
+    return {
+        "case_no": proof.case_no,
+        "package_identity": proof.package_identity,
+        "package_version": proof.package_version,
+        "criteria_snapshot_identity": proof.criteria_snapshot_identity,
+        "event_identity": proof.event_identity,
+        "event_version": proof.event_version,
+        "package_fingerprint": proof.package_fingerprint.value,
+        "event_fingerprint": proof.event_fingerprint.value,
+        "receipt_identity": proof.receipt_identity,
+        "assignment_intent_identity": proof.assignment_intent_identity,
+    }
+
+
 def _receipt_payload(receipt):
     return {
         "case_no": receipt.case_no,
@@ -449,6 +478,9 @@ def _readback_payload(readback):
         "generation_version": readback.generation_version,
         "event_version": readback.event_version,
         "aggregate_version": readback.aggregate_version,
+        "resume_step": readback.resume_step.value,
+        "candidate_count": readback.candidate_count,
+        "zero_candidate_disposition": readback.zero_candidate_disposition,
         "retained_root_ids": list(readback.retained_root_ids),
         "superseded_root_ids": list(readback.superseded_root_ids),
         "created_root_ids": list(readback.created_root_ids),

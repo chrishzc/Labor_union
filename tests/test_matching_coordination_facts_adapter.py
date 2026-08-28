@@ -237,6 +237,16 @@ def test_load_sources_uses_canonical_thirteen_source_order(monkeypatch):
     assert tuple(item.source_kind for item in projection.source_versions) == adapter_module.SOURCE_ORDER
 
 
+def test_load_sources_preserves_absent_matching_package_as_explicit_state(monkeypatch):
+    calls: list[str] = []
+    adapter, values, _ = _adapter(monkeypatch, calls=calls)
+    values["matching_package"] = None
+
+    projection = adapter.load_sources(CASE_NO)
+
+    assert projection.matching_package is None
+
+
 def test_optional_references_are_explicit_not_consulted_without_keys(monkeypatch):
     calls: list[str] = []
     adapter, _, _ = _adapter(monkeypatch, calls=calls)

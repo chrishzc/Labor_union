@@ -385,6 +385,14 @@ export function ServiceBeforeReplacementActions({
           <div>本次 Apply 已由後端完成 post-commit owner readback；若要處理另一種情境，請重新選擇情境後查詢。</div>
           <div>Active anomaly：Apply readback 未提供 occurrence active 欄位，UI 不會以 receipt 或 blocker 假推定。</div>
           <div>Generation／event／aggregate：{uiState.result.readback.generation_version}／{uiState.result.readback.event_version}／{uiState.result.readback.aggregate_version}</div>
+          <div>後端完成位置：{stepLabels[uiState.result.readback.resume_step]}</div>
+          <div>Successor 候選數：{uiState.result.readback.candidate_count}</div>
+          {uiState.result.readback.zero_candidate_disposition === 'blocked_no_candidate' ? (
+            <div role="status">
+              <strong>目前仍停在 Step 2：沒有可用候選（blocked_no_candidate）</strong>
+              <div>這次只完成換人 lineage 記錄，不代表異常已解除，也不會復活舊月嫂。</div>
+            </div>
+          ) : null}
           <div>Generation identity：{uiState.result.readback.generation_identity}</div>
           <div>Event identity：{uiState.result.readback.event_identity}</div>
           <div>Successor round：{uiState.result.readback.successor_round_identity}</div>

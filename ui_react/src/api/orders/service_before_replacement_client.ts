@@ -69,6 +69,19 @@ const CandidatePoolReuseProofSchema = z.strictObject({
   candidate_identity: z.string().min(1).max(191),
 });
 
+const MatchingZeroCandidateProofSchema = z.strictObject({
+  case_no: z.string().min(1).max(50),
+  package_identity: z.string().min(1).max(191),
+  package_version: z.number().int().nonnegative(),
+  criteria_snapshot_identity: z.string().min(1).max(191),
+  event_identity: z.string().min(1).max(191),
+  event_version: z.number().int().nonnegative(),
+  package_fingerprint: FingerprintSchema,
+  event_fingerprint: FingerprintSchema,
+  receipt_identity: z.string().min(1).max(191),
+  assignment_intent_identity: z.string().min(1).max(191),
+});
+
 const SuccessorRoundSchema = z.strictObject({
   case_no: z.string().min(1).max(50),
   round_identity: z.string().min(1).max(191),
@@ -98,12 +111,13 @@ const BaseFactsSchema = z.strictObject({
   generation_version: z.number().int().nonnegative(),
   event_version: z.number().int().nonnegative(),
   aggregate_version: z.number().int().nonnegative(),
+  resume_step: ResumeStepSchema,
   impacted_roots: z.array(ReplacementRootSchema),
   retained_roots: z.array(ReplacementRootSchema),
   root_delta: RootDeltaSchema.nullable(),
   candidate_pool_reuse_proof: CandidatePoolReuseProofSchema.nullable(),
   successor_round: SuccessorRoundSchema.nullable(),
-  resume_step: ResumeStepSchema,
+  matching_zero_candidate_proof: MatchingZeroCandidateProofSchema.nullable(),
   blockers: z.array(z.string()),
 });
 
@@ -165,12 +179,17 @@ function addBaseFactsIssues(value: BaseFacts, context: z.RefinementCtx): void {
   )) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['candidate_pool_reuse_proof'], message: 'candidate reuse identity/version mismatch' });
   }
+  if (value.matching_zero_candidate_proof
+    && value.matching_zero_candidate_proof.case_no !== value.case_no) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['matching_zero_candidate_proof'], message: 'zero candidate owner identity mismatch' });
+  }
   if (value.outcome === 'ready' && (value.blockers.length > 0 || value.root_delta === null || value.actual_service_proof === null)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['outcome'], message: 'ready facts are incomplete' });
   }
   if (value.outcome === 'substitution_referral' && (
     value.actual_service_day_count === 0 || value.root_delta !== null || value.impacted_roots.length > 0
     || value.retained_roots.length > 0 || value.candidate_pool_reuse_proof !== null || value.successor_round !== null
+    || value.matching_zero_candidate_proof !== null
   )) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['outcome'], message: 'referral contains replacement facts' });
   }
@@ -207,8 +226,14 @@ export const ServiceBeforeReplacementPreviewSchema = BaseFactsSchema.extend({
       value.replacement_generation_identity, value.replacement_event_identity, value.successor_round_identity,
       value.resulting_generation_version, value.resulting_event_version, value.resulting_aggregate_version,
     ];
-    if (required.some((item) => item === null) || value.superseded_roots.length === 0 || value.created_roots.length === 0) {
+    if (required.some((item) => item === null)
+      || (value.scenario !== 'R-07' && value.superseded_roots.length === 0)
+      || value.created_roots.length === 0) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['outcome'], message: 'ready preview lacks replacement identities' });
+    }
+    if (value.scenario === 'R-07'
+      && (value.superseded_roots.length > 0 || value.matching_zero_candidate_proof === null)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['matching_zero_candidate_proof'], message: 'R-07 owner proof mismatch' });
     }
     if (value.root_delta === null
       || rootIds(value.root_delta.superseded).join('\n') !== rootIds(value.superseded_roots).join('\n')
@@ -265,10 +290,22 @@ const ReadbackSchema = z.strictObject({
   created_root_ids: z.array(z.string().min(1)),
   root_set_digests: z.tuple([FingerprintSchema, FingerprintSchema, FingerprintSchema]),
   root_set_counts: z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative(), z.number().int().nonnegative()]),
+  resume_step: ResumeStepSchema,
+  candidate_count: z.number().int().nonnegative(),
+  zero_candidate_disposition: z.literal('blocked_no_candidate').nullable(),
   outbox_identity: z.string().min(1).max(191),
   matching_package_lineage_id: z.number().int().positive().nullable(),
   matching_event_id: z.number().int().positive().nullable(),
   complete: z.literal(true),
+}).superRefine((value, context) => {
+  if (value.zero_candidate_disposition !== null
+    && (value.candidate_count !== 0 || value.resume_step !== 'step_2')) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['zero_candidate_disposition'],
+      message: 'zero-candidate readback mismatch',
+    });
+  }
 });
 
 export const ServiceBeforeReplacementApplySchema = z.strictObject({
@@ -302,17 +339,24 @@ export const ServiceBeforeReplacementApplySchema = z.strictObject({
   }
 });
 
-const PreviewRequestSchema = z.strictObject({
+const PreviewRequestObjectSchema = z.strictObject({
   scenario: ServiceBeforeReplacementScenarioSchema,
   reason: z.string().min(1).max(500).refine((value) => value === value.trim()),
   evidence: z.array(z.string().min(1)).min(1).max(20),
-}).superRefine((value, context) => {
+});
+
+function addCanonicalEvidenceIssues(
+  value: z.infer<typeof PreviewRequestObjectSchema>,
+  context: z.RefinementCtx,
+): void {
   if (value.evidence.join('\n') !== [...new Set(value.evidence.map((item) => item.trim()).filter(Boolean))].sort().join('\n')) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['evidence'], message: 'evidence must be canonical' });
   }
-});
+}
 
-const ApplyRequestSchema = PreviewRequestSchema.and(z.strictObject({
+const PreviewRequestSchema = PreviewRequestObjectSchema.superRefine(addCanonicalEvidenceIssues);
+
+export const ServiceBeforeReplacementApplyRequestSchema = PreviewRequestObjectSchema.extend({
   expected_generation_version: z.number().int().nonnegative(),
   expected_event_version: z.number().int().nonnegative(),
   expected_aggregate_version: z.number().int().nonnegative(),
@@ -320,7 +364,9 @@ const ApplyRequestSchema = PreviewRequestSchema.and(z.strictObject({
   prior_event_identity: z.string().min(1).max(191),
   prior_aggregate_identity: z.string().min(1).max(191),
   preview_fingerprint: FingerprintSchema,
-}));
+}).superRefine(addCanonicalEvidenceIssues);
+
+const ApplyRequestSchema = ServiceBeforeReplacementApplyRequestSchema;
 
 function envelope<T extends z.ZodTypeAny>(data: T) {
   return z.strictObject({ success: z.literal(true), message: z.string().min(1), data, error: z.null() });
@@ -443,6 +489,17 @@ function successorCanonicalTuple(successor: z.infer<typeof SuccessorRoundSchema>
   ];
 }
 
+function zeroCandidateProofCanonicalTuple(
+  proof: z.infer<typeof MatchingZeroCandidateProofSchema> | null | undefined,
+): CanonicalValue {
+  return proof == null ? null : [
+    proof.case_no, proof.package_identity, proof.package_version,
+    proof.criteria_snapshot_identity, proof.event_identity, proof.event_version,
+    proof.package_fingerprint, proof.event_fingerprint, proof.receipt_identity,
+    proof.assignment_intent_identity,
+  ];
+}
+
 export async function verifyServiceBeforeReplacementQuery(
   value: ServiceBeforeReplacementQuery,
   caseNo: string,
@@ -490,6 +547,9 @@ export async function verifyServiceBeforeReplacementPreview(
     reason_evidence: [value.reason, value.evidence],
     blockers: value.blockers,
     successor_round: successorCanonicalTuple(value.successor_round),
+    ...(value.matching_zero_candidate_proof == null ? {} : {
+      matching_zero_candidate_proof: zeroCandidateProofCanonicalTuple(value.matching_zero_candidate_proof),
+    }),
   }, 'replacement preview');
   return value;
 }
@@ -583,13 +643,24 @@ function authToken(): string {
   return token;
 }
 
+export function serviceBeforeReplacementActorBinding(
+  user: Readonly<{ id: number | null; username: string; role: string }>,
+): ServiceBeforeReplacementActorBinding {
+  const actor = user.id !== null
+    ? `admin:${user.id}`
+    : user.username === 'development-bypass' && user.role === 'system_admin'
+      ? 'system:local_bypass'
+      : 'admin:development';
+  return {
+    actor,
+    capabilities: ['orders.historical_review.remediate'],
+  };
+}
+
 function actorBinding(): ServiceBeforeReplacementActorBinding {
   const user = sessionClient.getUser();
   if (!user) throw new ApiHttpError(401, 'UNAUTHENTICATED', '無法確認服務前換人的操作人員。');
-  return {
-    actor: user.id === null ? 'admin:development' : `admin:${user.id}`,
-    capabilities: ['orders.historical_review.remediate'],
-  };
+  return serviceBeforeReplacementActorBinding(user);
 }
 
 function uuidHex(): string {

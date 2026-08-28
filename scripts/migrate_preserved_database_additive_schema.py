@@ -188,6 +188,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_28_historical_baseline_projector_v1.json",
     "labor_union_2026_08_28_service_before_replacement_v1.json",
     "labor_union_2026_08_28_order_lifecycle_pending_status_v1.json",
+    "labor_union_2026_08_28_historical_baseline_projector_v2.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(

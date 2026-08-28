@@ -10,7 +10,8 @@
 - `related_scenario_matrix`: `PROV-20260827-historical-order-business-scenario-gap-matrix.md`
 - `affected_package`: `PKG-H-BASELINE`
 - `storage_contract_revision`: `STORAGE-CONTRACT-20260828`
-- `catalog_v2_amendment_status`: `proposed`
+- `catalog_v2_amendment_status`: `ADOPTED`
+- `catalog_v2_1_source_mapping_status`: `ADOPTED`
 
 本文件只提出 projector／minimum-required-facts／typed API 的規格缺口，不能覆寫已核准的
 Historical baseline storage、Orders domain 或 Anomalies domain 契約。2026-08-28 人工已回覆
@@ -291,6 +292,117 @@ projection，無需新增人工裁決。
 convergence:
   status: READY
   blockers: []
+```
+
+## 11. 六 owner repair source runtime 缺口（2026-08-28 workshop）
+
+Fresh Luna/high 對 live event／receipt／outbox 的唯讀盤點確認：1010 baseline confirmed 已有可 exact join
+的 durable event、receipt、outbox；Orders、Matching、Contract Signing、Scheduling、Client Finance、Staff
+Payables 雖各自保存部分 domain event 或其他用途 outbox，卻沒有一份共同且可唯一映射為
+`owner_repair` projector trigger 的 committed source contract。既有 root read adapter 只能做 fresh vector read，
+不能反過來充當 event source；DB `id`、`MAX(id)`、timestamp 或其他 consumer 的 outbox 也不能被推定為
+canonical source version。
+
+### 11.1 Current observable blocker
+
+- HPROJ v2 schema、persistence、typed read API、React readback、fresh bootstrap與preserve-data engine已完成。
+- 正式 runtime 若直接掃描六 owner tables，會無法區分「本次已提交 repair」與一般資料變更，也無法保證
+  duplicate／gap／out-of-order／same-identity-different-payload 的零寫入語意。
+- 因此 `HPROJ-RB-03`、`A1`、`A4`、`A5` 的正式 runtime／3→2→1→0 Browser acceptance 維持
+  `BLOCKED_SOURCE_CONTRACT`；這不推翻其他已通過 bounded slices。
+
+### 11.2 Adopted architecture decision（2026-08-28 人工核准）
+
+採用 dedicated shared HPROJ source stream／outbox contract：六 owner 的正式 repair Apply 必須在原本唯一
+outer Unit of Work 內，除了 owner event／receipt 外，再 append 一筆 typed HPROJ source envelope；baseline
+confirmed 則由既有 1010 event／receipt／outbox source-specific adapter normalize，不重寫既有資料。
+
+- Partition 固定綁定 `(source_domain, source_stream, case_no)`；不得跨 case 共用 scalar version。
+- Dedicated stream state 在同一 UoW `FOR UPDATE` 後配置連續 `source_version`，每個 partition從0開始；
+  不重用 owner table auto-increment id、aggregate version或timestamp。
+- Envelope 至少保存 source kind/domain/stream、case/order、owner event identity、owner receipt identity、
+  source version、baseline lineage identities、bounded payload與payload digest；identity＋payload immutable。
+- 每個 source-specific adapter 在 claim 前重讀 owner event／receipt與envelope exact binding，再建立
+  `HistoricalBaselineProjectorTrigger`；missing／cross-case／mismatch／gap均 fail closed、零 projection write。
+- Owner Apply 不得因 projector worker 尚未消費就偽稱 projector完成；worker只讀已提交 envelope，沿用
+  1013 delivery/checkpoint/retry/dead-letter/post-commit reconcile。
+- 不增加 generic anomaly resolve，不改 owner business rule，不 backfill legacy rows，不碰 provider、
+  `union_db`／production／reset／switch。
+
+替代方案「掃描既有 owner event／outbox 並自行推算版本」不採用，因 live source無共同完整 contract且會
+破壞 checkpoint gap oracle。替代方案「每個 owner 各建不同 HPROJ outbox」可行但會重複 envelope、stream、
+retry與descriptor contract，除非 shared contract 無法由 owner UoW 寫入才重新評估。
+
+### 11.3 Proposed acceptance
+
+- `HPROJ-SRC-A1`：六 owner 每種正式 repair Apply 都在同一 UoW 產生 exact owner event／receipt／source
+  envelope；任一 insert 失敗則整個 owner Apply rollback。
+- `HPROJ-SRC-A2`：同 partition版本0→1連續；duplicate exact replay不新增 envelope；same identity不同
+  payload、gap、out-of-order、cross-case全部fail closed。
+- `HPROJ-SRC-A3`：baseline與六 owner source-specific adapters只消費已提交且exact-bound envelope，不能由
+  read model、timestamp、DB id或其他用途outbox補猜。
+- `HPROJ-SRC-A4`：runtime以真 `lu_test_*` 完成3→2→1→0、regression reopen、retry/dead-letter與
+  committed-unverified reconcile；API／React／no-auth真Browser回讀一致。
+- `HPROJ-SRC-A5`：additive schema完整通過3.1 DB gates；configured developer DB與另一台電腦未通過前
+  結論仍為`DB_CHANGE_NOT_READY`。
+
+```yaml
+hproj_owner_source_contract:
+  status: ADOPTED
+  decision: dedicated_shared_hproj_source_stream_and_outbox
+  authority: human_explicit_2026-08-28
+  implementation_authorized: true
+```
+
+```yaml
+convergence:
+  status: READY
+  blockers: []
+```
+
+### 11.4 Catalog-v2.1 owner source semantics（2026-08-28 人工核准）
+
+2026-08-28 fresh descriptor→正式 owner Q/P/A／event／receipt／outer UoW 逐項盤點已覆蓋全部21個
+descriptor。Orders、Contract Signing、Client Finance、Staff Payables與部分Scheduling可直接沿用既有
+正式command；Matching四項及Scheduling `official_service`則揭露current catalog與較高權威業務語意不一致。
+2026-08-28 人工已明確回覆「核准 catalog-v2.1」；下列observable contract成為current Authority。
+實作只能依本節把exact mapping編入task package，不得再以舊adapter或相似event反推source。
+
+推薦採用單一`catalog-v2.1` bundle：
+
+1. `candidate_pool`與`candidate_contact`只檢查後續正式selected／used caregiver set；未採用候選人的
+   未聯繫紀錄不阻擋historical baseline。若尚無downstream canonical binding則fail closed，導向正式Matching
+   Q/P/A；不新增可用模糊證據直接補成identity的shortcut。
+2. `willingness_binding`改讀正式`matching_response_events`，每個required plan segment各有一筆observation，
+   cardinality為1～4；Candidate Contact Pool的`willingness_changed`不再使Step 4 terminal。
+3. `caregiver_binding`是derived predicate：M3 accepted package／customer decision與current plan的完整segments
+   同案、同version、同staff set exact時成立；不另外等待waiting-deposit lock，也不新增
+   `SetCaregiverBinding`或status editor。任何successor／rematch使其重新nonterminal。
+4. `official_service`是Scheduling roots＋Asia/Taipei BusinessClock的Q-only derived observation；不建立
+   descriptor-specific Apply、owner-repair event或人工完成按鈕，也不新增timer。上游Scheduling mutation或
+   Orders AutoComplete的正式source envelope觸發whole-vector fresh reread。
+5. `client_settlement`維持Client Finance全案terminal reducer，不新增`ApplyCompleteClientSettlement`。
+   Repair Query依fresh blockers導向既有receipt reconciliation、refund、subsidy return、adjustment、reversal
+   或obligation rebuild Q/P/A；pre-system historical case另可導向
+   `PROV-20260828-historical-payment-and-owner-settlement-spec.md`核准的Client owner-specific historical
+   payment／settlement Q/P/A。客戶補助退款固定屬Client Finance。每個真正改變root vector的正式Apply在
+   原UoW追加exact owner event／receipt／shared HPROJ envelope。
+6. `staff_payout`維持Staff Payables per-obligation terminal reducer。正常路徑讀bank-backed
+   payout／allocation；pre-system historical case可讀同一核准規格的Staff owner-specific historical
+   payment／settlement event。Client已付款、Orders completed、清冊或政府撥款不得使此descriptor terminal；
+   每個required staff observation仍獨立保存，不能壓成case scalar。
+
+HPROJ本身不定義付款、簽署、排班或完成公式；付款與owner settlement的2026-08-28 successor語意由上述
+historical payment spec擁有。本bundle只接收owner typed terminal result並修正descriptor cardinality、repair
+referral與projector source語意；不能把projector adapter反向當付款Authority。
+
+```yaml
+catalog_v2_1_decision:
+  status: ADOPTED
+  authority: human_explicit_2026-08-28
+  recommended_bundle: selected_used_set__per_segment_willingness__m3_exact_binding__official_service_q_only__finance_and_staff_owner_reducer_router
+  migration_expectation: additive_shared_source_and_owner_receipts_only
+  forbidden: [generic_status_editor, inferred_db_id_version, historical_backfill, provider_effect]
 ```
 
 ## 10. 1011 projector persistence v2 重建契約（2026-08-28）

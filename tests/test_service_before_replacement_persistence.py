@@ -7,6 +7,7 @@ from hashlib import sha256
 from datetime import date
 from dataclasses import replace
 import json
+from types import MappingProxyType, SimpleNamespace
 
 import pytest
 
@@ -58,6 +59,75 @@ def test_matching_successor_adapter_persists_package_proposed_and_returns_numeri
     assert loaded.candidate_results == ()
     assert connection.commit_count == 0
     assert connection.rollback_count == 0
+
+
+def test_r07_matching_successor_reuses_existing_no_candidate_lineage_without_insert():
+    from domains.scheduling.matching_coordination import (
+        MatchingPackage,
+        MatchingPackageState,
+    )
+    from infrastructure.mysql.matching_successor_persistence_adapter import (
+        MatchingSuccessorPersistenceAdapter,
+        MatchingSuccessorPersistenceRequest,
+    )
+
+    source = _canonical_source_snapshot()
+    parent = source["parent_package"]
+    no_candidate = MatchingPackage(
+        package_id="matching-package:CASE-1:no-candidate",
+        version=5,
+        mode=parent.mode,
+        segments=(),
+        required_service_dates=parent.required_service_dates,
+        candidate_results=(),
+        criteria_snapshot_id=parent.criteria_snapshot_id,
+        source_versions=parent.source_versions,
+        state=MatchingPackageState.NO_CANDIDATE,
+        blockers=("no_legal_candidate",),
+    )
+    source["parent_package"] = no_candidate
+    event_digest = "e" * 64
+    event = {
+        "id": 501,
+        "event_id": "matching:event:zero-candidate",
+        "case_no": "CASE-1",
+        "criteria_snapshot_id": 7,
+        "package_lineage_id": 11,
+        "event_type": "package_proposed",
+        "resulting_version": 5,
+        "event_digest": event_digest,
+    }
+    source["source_event_identity"] = event["event_id"]
+    connection = _Connection(
+        rows=[_stored_snapshot_row(source), _stored_parent_row(source), event]
+    )
+    request = MatchingSuccessorPersistenceRequest(
+        case_no="CASE-1",
+        successor_package_identity=no_candidate.package_id,
+        successor_round_identity="successor-round:CASE-1:4",
+        successor_matching_event_identity=event["event_id"],
+        scenario="R-07",
+        candidate_count=0,
+        source_snapshot=source,
+        actor=ActorContext("operator:1"),
+        idempotency_key=IdempotencyKey("replacement:case-1:r07"),
+        correlation_id=CorrelationId("corr:case-1:r07"),
+        candidate_disposition="blocked_no_candidate",
+        reuse_existing_successor=True,
+        existing_package_lineage_id=11,
+        existing_matching_event_id=501,
+        existing_package_fingerprint=no_candidate.fingerprint.value,
+        existing_event_fingerprint=event_digest,
+    )
+
+    result = MatchingSuccessorPersistenceAdapter(connection).persist_successor(request)
+
+    assert result.package_lineage_id == 11
+    assert result.matching_event_id == 501
+    assert result.package_identity == no_candidate.package_id
+    assert result.event_identity == event["event_id"]
+    assert result.round_identity == "successor-round:CASE-1:4"
+    assert connection.insert_count == 0
 
 
 def test_matching_successor_preflights_parent_before_any_insert():
@@ -123,6 +193,49 @@ def test_matching_successor_rejects_stored_snapshot_content_drift_before_insert(
             _request(source_snapshot=source)
         )
     assert connection.insert_count == 0
+
+
+def test_matching_successor_accepts_json_equivalent_frozen_snapshot_values():
+    from infrastructure.mysql.matching_successor_persistence_adapter import (
+        MatchingSuccessorPersistenceAdapter,
+    )
+    from shared_kernel.fingerprints import fingerprint_payload
+
+    source = _canonical_source_snapshot()
+    frozen_criteria = MappingProxyType({
+        "service_days": 2,
+        "service_time": MappingProxyType({"start_time": "09:00:00"}),
+        "confirmed_service_dates": ("2026-09-01", "2026-09-02"),
+    })
+    source["criteria"] = frozen_criteria
+    source["criteria_digest"] = fingerprint_payload({
+        "case_no": source["case_no"],
+        "criteria": frozen_criteria,
+        "criteria_version": source["criteria_version"],
+        "source_versions": [
+            (item["source_kind"], item["source_id"], item["version"], item["fingerprint"])
+            for item in source["source_versions"]
+        ],
+    }).value
+    stored_snapshot = _stored_snapshot_row(_canonical_source_snapshot())
+    stored_snapshot["criteria_snapshot"] = json.dumps({
+        "service_days": 2,
+        "service_time": {"start_time": "09:00:00"},
+        "confirmed_service_dates": ["2026-09-01", "2026-09-02"],
+    })
+    stored_snapshot["criteria_digest"] = source["criteria_digest"]
+    connection = _Connection(rows=[
+        stored_snapshot,
+        _stored_parent_row(source),
+        {"id": 501, "event_id": "matching:event:source", "case_no": "CASE-1",
+         "criteria_snapshot_id": 7, "package_lineage_id": 11},
+    ])
+
+    result = MatchingSuccessorPersistenceAdapter(connection).persist_successor(
+        _request(source_snapshot=source)
+    )
+
+    assert result.package_lineage_id > 0
 
 
 def test_matching_successor_rejects_parent_source_tuple_drift_before_insert():
@@ -215,6 +328,30 @@ def test_matching_successor_reuses_only_complete_typed_package_facts():
     assert payload["segments"][0]["service_dates"] == ["2026-09-01"]
 
 
+def test_matching_successor_reuse_keeps_package_sources_distinct_from_criteria_sources():
+    from domains.scheduling.matching_coordination import MatchingSourceVersion
+    from infrastructure.mysql.matching_successor_persistence_adapter import (
+        _successor_package,
+    )
+
+    source = _canonical_source_snapshot()
+    parent = source["parent_package"]
+    source["reuse_package"] = parent
+    source["source_versions"] = tuple(
+        MatchingSourceVersion.not_consulted(item.source_kind)
+        for item in parent.source_versions
+    )
+
+    successor = _successor_package(
+        _request(source_snapshot=source, candidate_count=1),
+        source,
+        parent.version + 1,
+    )
+
+    assert successor.source_versions == parent.source_versions
+    assert successor.source_versions != source["source_versions"]
+
+
 def test_repository_rejects_descriptor_drift_and_noncanonical_ordinals():
     from infrastructure.mysql.service_before_replacement_repository import (
         MySqlServiceBeforeReplacementRepository,
@@ -281,6 +418,7 @@ def test_replay_readback_requires_outbox_and_matching_numeric_fks():
 def test_repository_generation_transition_is_explicit_and_same_transaction():
     from infrastructure.mysql.service_before_replacement_repository import (
         MySqlServiceBeforeReplacementRepository,
+        ServiceBeforeReplacementPersistenceError,
     )
 
     connection = _Connection(rows=[
@@ -316,6 +454,211 @@ def test_repository_generation_transition_requires_prior_effective_generation():
             resulting_aggregate_version=2, actor_id="operator:1", reason="replace",
         )
     assert connection.insert_count == 0
+
+
+def test_r03_replacement_cancels_exact_waiting_lock_in_same_transaction(monkeypatch):
+    from domains.scheduling.service_before_replacement import (
+        ReplacementRootKind,
+        ReplacementScenario,
+    )
+    from infrastructure.mysql import service_before_replacement_repository as module
+    from infrastructure.mysql.service_before_replacement_loader import _root
+
+    monkeypatch.setattr(module, "bundle_fingerprint", lambda _command: "a" * 64)
+    lock = {"id": 41, "plan_id": 9, "status": "active", "is_active": 1}
+    day = {
+        "id": 101, "lock_id": 41, "segment_id": 7, "staff_id": 3,
+        "lock_date": date(2026, 9, 1), "active_marker": 1,
+    }
+    acquired = {
+        "id": 201, "lock_id": 41, "event_type": "lock_acquired",
+        "event_key": "lock:41:acquired", "payload": "{}",
+    }
+    waiting_root = _root(
+        ReplacementRootKind.WAITING_LOCK,
+        "CASE-1",
+        "scheduling.waiting-lock",
+        (lock, day, acquired),
+    )
+    connection = _Connection(rows=[
+        [{**lock, "case_no": "CASE-1"}],
+        [{**day, "released_by": None, "released_at": None}],
+        [acquired],
+    ])
+    repository = module.MySqlServiceBeforeReplacementRepository(connection)
+    command = SimpleNamespace(
+        case_no="CASE-1",
+        actor=ActorContext("operator:1"),
+        reason="replace before service",
+    )
+    candidate = SimpleNamespace(
+        scenario=ReplacementScenario.R03,
+        superseded_roots=(waiting_root,),
+        replacement_event_identity="replacement-event:CASE-1:2",
+        replacement_generation_identity="replacement-generation:CASE-1:2",
+        successor_round_identity="successor-round:CASE-1:2",
+    )
+
+    repository._cancel_r03_waiting_lock(
+        command=command,
+        candidate=candidate,
+        replacement_event_id=13,
+        replacement_generation_id=12,
+    )
+
+    statements = connection.statements
+    assert any("SET active_marker=NULL" in sql for sql, _ in statements)
+    assert any("SET status='cancelled'" in sql for sql, _ in statements)
+    event = next(params for sql, params in statements if "lock_cancelled" in sql)
+    assert event[0] == 41
+    assert event[1] == "rpre-lock:" + sha256(b"replacement-event:CASE-1:2").hexdigest()
+    assert json.loads(event[4]) == {
+        "cause": "service_before_replacement",
+        "case_no": "CASE-1",
+        "command_fingerprint": "a" * 64,
+        "lock_id": 41,
+        "plan_id": 9,
+        "prior_active_days": [{
+            "lock_day_id": 101,
+            "lock_date": "2026-09-01",
+            "segment_id": 7,
+            "staff_id": 3,
+        }],
+        "replacement_event_id": 13,
+        "replacement_event_identity": "replacement-event:CASE-1:2",
+        "replacement_generation_id": 12,
+        "replacement_generation_identity": "replacement-generation:CASE-1:2",
+        "scenario": "R-03",
+        "successor_round_identity": "successor-round:CASE-1:2",
+        "superseded_root_identity": waiting_root.root_id,
+    }
+    assert connection.commit_count == 0
+    assert connection.rollback_count == 0
+
+
+def test_r03_replacement_refuses_missing_active_waiting_lock():
+    from domains.scheduling.service_before_replacement import (
+        ReplacementRootIdentity,
+        ReplacementRootKind,
+        ReplacementScenario,
+    )
+    from infrastructure.mysql.service_before_replacement_repository import (
+        MySqlServiceBeforeReplacementRepository,
+        ServiceBeforeReplacementPersistenceError,
+    )
+
+    repository = MySqlServiceBeforeReplacementRepository(_Connection(rows=[[]]))
+    with pytest.raises(ServiceBeforeReplacementPersistenceError, match="not exact"):
+        repository._cancel_r03_waiting_lock(
+            command=SimpleNamespace(
+                case_no="CASE-1",
+                actor=ActorContext("operator:1"),
+                reason="replace before service",
+            ),
+            candidate=SimpleNamespace(
+                scenario=ReplacementScenario.R03,
+                superseded_roots=(ReplacementRootIdentity(
+                    ReplacementRootKind.WAITING_LOCK,
+                    "waiting-lock:CASE-1:41",
+                    "CASE-1",
+                ),),
+                successor_round_identity="successor-round:CASE-1:2",
+            ),
+            replacement_event_id=13,
+            replacement_generation_id=12,
+        )
+
+
+def test_r03_complete_readback_requires_cancelled_lock_event_and_inactive_days():
+    from infrastructure.mysql.service_before_replacement_repository import (
+        MySqlServiceBeforeReplacementRepository,
+        ServiceBeforeReplacementPersistenceError,
+    )
+
+    event_identity = "replacement-event:CASE-1:2"
+    event_key = "rpre-lock:" + sha256(event_identity.encode("utf-8")).hexdigest()
+    waiting_root = "scheduling.waiting-lock:CASE-1:" + "b" * 64
+    payload = {
+        "cause": "service_before_replacement",
+        "case_no": "CASE-1",
+        "command_fingerprint": "a" * 64,
+        "lock_id": 41,
+        "plan_id": 9,
+        "prior_active_days": [{
+            "lock_day_id": 101,
+            "lock_date": "2026-09-01",
+            "segment_id": 7,
+            "staff_id": 3,
+        }],
+        "replacement_event_id": 13,
+        "replacement_event_identity": event_identity,
+        "replacement_generation_id": 12,
+        "replacement_generation_identity": "replacement-generation:CASE-1:2",
+        "scenario": "R-03",
+        "successor_round_identity": "successor-round:CASE-1:2",
+        "superseded_root_identity": waiting_root,
+    }
+    connection = _Connection(rows=[
+        [{
+            "id": 41, "plan_id": 9, "status": "cancelled", "is_active": None,
+            "released_by": "operator:1", "released_at": "2026-08-28 12:00:00",
+            "actor": "operator:1", "event_type": "lock_cancelled",
+            "event_key": event_key, "payload": json.dumps(payload),
+        }],
+        [{
+            "id": 101, "segment_id": 7, "staff_id": 3,
+            "lock_date": date(2026, 9, 1), "active_marker": None,
+            "released_by": "operator:1", "released_at": "2026-08-28 12:00:00",
+        }],
+    ])
+    repository = MySqlServiceBeforeReplacementRepository(connection)
+
+    repository._require_r03_waiting_lock_readback(
+        {
+            "id": 13,
+            "case_no": "CASE-1",
+            "command_fingerprint": "a" * 64,
+            "replacement_event_identity": event_identity,
+            "replacement_generation_id": 12,
+            "replacement_generation_identity": "replacement-generation:CASE-1:2",
+            "successor_round_identity": "successor-round:CASE-1:2",
+        },
+        superseded_root_ids=(waiting_root, "commitment:CASE-1:1"),
+        for_update=False,
+    )
+
+    drifted = _Connection(rows=[
+        [{
+            "id": 41, "plan_id": 9, "status": "cancelled", "is_active": None,
+            "released_by": "operator:1", "released_at": "2026-08-28 12:00:00",
+            "actor": "operator:1", "event_type": "lock_cancelled",
+            "event_key": event_key, "payload": json.dumps(payload),
+        }],
+        [{
+            "id": 101, "segment_id": 7, "staff_id": 3,
+            "lock_date": date(2026, 9, 1), "active_marker": 1,
+            "released_by": None, "released_at": None,
+        }],
+    ])
+    with pytest.raises(
+        ServiceBeforeReplacementPersistenceError,
+        match="day readback is incomplete",
+    ):
+        MySqlServiceBeforeReplacementRepository(
+            drifted
+        )._require_r03_waiting_lock_readback(
+            {
+                "id": 13,
+                "case_no": "CASE-1",
+                "command_fingerprint": "a" * 64,
+                "replacement_event_identity": event_identity,
+                "replacement_generation_id": 12,
+                "replacement_generation_identity": "replacement-generation:CASE-1:2",
+                "successor_round_identity": "successor-round:CASE-1:2",
+            },
+            superseded_root_ids=(waiting_root, "commitment:CASE-1:1"),
+            for_update=False,
+        )
 
 
 def test_repository_rejects_existing_prior_replacement_event_for_wrong_generation():
@@ -463,6 +806,7 @@ def _receipt_for_replay():
 
 
 def _readback_for_replay(receipt, *, outbox_identity=None, matching_event_id=None):
+    from domains.scheduling.service_before_replacement import ReplacementResumeStep
     from infrastructure.mysql.service_before_replacement_repository import root_set_digest
     from subsystems.scheduling.service_before_replacement_workflow import ReplacementOwnerReadback
 
@@ -470,7 +814,8 @@ def _readback_for_replay(receipt, *, outbox_identity=None, matching_event_id=Non
         receipt.case_no, receipt.replacement_generation_identity,
         receipt.replacement_event_identity, receipt.successor_round_identity,
         receipt.resulting_generation_version, receipt.resulting_event_version,
-        receipt.resulting_aggregate_version, (), (), (), True,
+        receipt.resulting_aggregate_version, (), (), (),
+        ReplacementResumeStep.STEP_2, 0, None, True,
         (root_set_digest(()), root_set_digest(()), root_set_digest(())), (0, 0, 0),
         outbox_identity or receipt.outbox_identity,
         receipt.matching_package_lineage_id,

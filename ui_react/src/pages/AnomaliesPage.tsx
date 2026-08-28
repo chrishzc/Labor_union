@@ -11,6 +11,7 @@ import { GovernmentOverpaymentRecoveryWorkbench, type GovernmentOverpaymentRefre
 import { StaffOverpaymentRecoveryActions } from '../components/StaffOverpaymentRecoveryActions';
 import { StaffPayoutRemediationWorkbench } from '../components/StaffPayoutRemediationWorkbench';
 import { HistoricalOrderReviewRemediationWorkbench } from '../components/HistoricalOrderReviewRemediationWorkbench';
+import { HistoricalBaselineProjectorReadback } from '../components/HistoricalBaselineProjectorReadback';
 import { ClientSettlementRemediationWorkbench } from '../components/ClientSettlementRemediationWorkbench';
 import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { AnomalyValidationError } from '../api/anomalies/anomaly_query_errors';
@@ -726,10 +727,19 @@ export const AnomaliesPage: React.FC = () => {
 
   const kpis = calculateAnomalyKPIs(anomalies);
   const filteredAnomalies = filterAnomalies(anomalies, selectedCategory, selectedStatusFilter);
+  const categoryCounts = Object.fromEntries(
+    CATEGORY_TAB_KEYS.map((category) => [
+      category,
+      filterAnomalies(anomalies, category, selectedStatusFilter).length,
+    ])
+  ) as Record<CategoryTabKey, number>;
   const correctionAction = financeCorrectionAction(anomalyRecovery);
   const financeOwnerTarget = financeOwnerRecoveryTarget(anomalyRecovery) ?? payoutDetailTarget;
   const correctionLocked = correctionFlowLocked;
   const isHistoricalOrderAlert = selectedAnomaly?.code === 'HISTORICAL-ORDER-001';
+  const historicalBaselineCaseNo = selectedAnomaly?.code === 'HISTORICAL-BASELINE-ROOTS-001'
+    ? anomalyDetail?.evidence.find((item) => item.key === 'case_no' && item.kind === 'identity')?.value ?? null
+    : null;
 
   return (
     <div data-surface-id="anomalies.page">
@@ -777,7 +787,7 @@ export const AnomaliesPage: React.FC = () => {
             className={`anomaly-cat-btn ${selectedCategory === cat ? 'active' : ''}`}
             onClick={() => setSelectedCategory(cat)}
           >
-            {cat} {cat === '全部' ? `(${anomalies.length})` : ''}
+            {cat} ({categoryCounts[cat]})
           </button>
         ))}
       </div>
@@ -941,6 +951,7 @@ export const AnomaliesPage: React.FC = () => {
       </section>
 
       {/* Import Warning Tasks Section (Lane 2) */}
+      {(selectedCategory === '全部' || selectedCategory === '匯入資料') && (
       <section data-surface-id="anomalies.import-warnings">
       <div className="anomalies-section-title">
         <span>📥 匯入資料待辦</span>
@@ -1018,6 +1029,7 @@ export const AnomaliesPage: React.FC = () => {
         </div>
       )}
       </section>
+      )}
 
       {/* Diagnostic & Recovery Drawer */}
       <Drawer
@@ -1157,6 +1169,10 @@ export const AnomaliesPage: React.FC = () => {
                 reviewIdentity={selectedAnomaly.sourceIdentity}
                 onResolved={() => { void fetchAnomalies(); }}
               />
+            )}
+
+            {historicalBaselineCaseNo && (
+              <HistoricalBaselineProjectorReadback caseNo={historicalBaselineCaseNo} />
             )}
 
             {!isHistoricalOrderAlert && financeOwnerTarget?.kind === 'government' && (

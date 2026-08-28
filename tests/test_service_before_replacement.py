@@ -10,6 +10,7 @@ import pytest
 from domains.scheduling.service_before_replacement import (
     ActualServiceProof,
     CandidatePoolReuseProof,
+    MatchingZeroCandidateProof,
     ReplacementOutcome,
     ReplacementResumeStep,
     ReplacementRootIdentity,
@@ -31,7 +32,14 @@ def _root(kind: ReplacementRootKind, root_id: str, *, current: bool = True):
     return ReplacementRootIdentity(kind, root_id, CASE, current=current)
 
 
-def _facts(scenario=ReplacementScenario.R02, *, service_dates=(), roots=None, proof=None):
+def _facts(
+    scenario=ReplacementScenario.R02,
+    *,
+    service_dates=(),
+    roots=None,
+    proof=None,
+    zero_candidate_proof=None,
+):
     if roots is None:
         roots = tuple(
             _root(kind, f"{kind.value}:old")
@@ -50,7 +58,7 @@ def _facts(scenario=ReplacementScenario.R02, *, service_dates=(), roots=None, pr
         13,
     )
     successor_round = None
-    if scenario is ReplacementScenario.R07:
+    if scenario is ReplacementScenario.R07 and zero_candidate_proof is None:
         successor_round = SuccessorRoundFact(
             CASE,
             "successor-round:existing",
@@ -82,6 +90,7 @@ def _facts(scenario=ReplacementScenario.R02, *, service_dates=(), roots=None, pr
         successor_round,
         "round:1",
         "candidate:1",
+        zero_candidate_proof,
     )
 
 
@@ -104,6 +113,21 @@ def _proof(*, accepted=False, same_round=True, coverage=True, availability=True,
         8,
         13,
         "candidate:1",
+    )
+
+
+def _zero_candidate_proof() -> MatchingZeroCandidateProof:
+    return MatchingZeroCandidateProof(
+        CASE,
+        "matching:CASE-RPRE-1:no-candidate:proof",
+        3,
+        "snapshot-1",
+        "matching:CASE-RPRE-1:zero-candidate-confirmed",
+        3,
+        fingerprint_payload({"matching-package": "no-candidate"}),
+        fingerprint_payload({"matching-event": "zero-candidate-confirmed"}),
+        "matching:zero:confirm:receipt",
+        "matching:zero:confirm:zero-candidate-confirmed:assignment",
     )
 
 
@@ -137,6 +161,7 @@ def test_each_r_branch_supersedes_only_its_exact_current_caregiver_roots(scenari
         ReplacementScenario.R04: {"effective_generation:old", "assignment:old", "official_schedule:old"},
     }[scenario]
     assert set(candidate.superseded_root_ids) == expected
+    assert candidate.superseded_root_ids == tuple(sorted(candidate.superseded_root_ids))
     assert "candidate:history" in candidate.retained_root_ids
 
 
@@ -147,10 +172,26 @@ def test_server_owns_step_two_three_four_and_reuse_proof_is_required():
     assert query_service_before_replacement(_facts(proof=_proof(accepted=True, coverage=False))).resume_step is ReplacementResumeStep.STEP_2
 
 
+def test_preview_rebinds_fresh_reuse_proof_to_new_successor_round():
+    candidate = preview_service_before_replacement(_facts(proof=_proof(accepted=True)))
+
+    assert candidate.resume_step is ReplacementResumeStep.STEP_4
+    assert candidate.candidate_pool_reuse_proof is not None
+    assert candidate.candidate_pool_reuse_proof.round_identity == candidate.successor_round_identity
+    assert candidate.candidate_pool_reuse_proof.successor_round_identity == candidate.successor_round_identity
+    assert candidate.candidate_pool_reuse_proof.generation_version == candidate.expected_generation_version
+    assert candidate.candidate_pool_reuse_proof.event_version == candidate.expected_event_version
+
+
 def test_r07_zero_candidate_is_concrete_blocked_disposition_without_reviving_old_staff():
     old_staff = _root(ReplacementRootKind.CANDIDATE_BINDING, "staff:old")
-    candidate = preview_service_before_replacement(_facts(ReplacementScenario.R07, roots=(old_staff,)))
+    facts = _facts(ReplacementScenario.R07, roots=(old_staff,))
+    query = query_service_before_replacement(facts)
+    candidate = preview_service_before_replacement(facts)
 
+    assert query.blockers == ("zero_candidate_successor_disposition",)
+    assert query.resume_step is ReplacementResumeStep.STEP_2
+    assert query.root_delta is None
     assert candidate.outcome is ReplacementOutcome.BLOCKED
     assert candidate.blockers == ("zero_candidate_successor_disposition",)
     assert candidate.resume_step is ReplacementResumeStep.STEP_2
@@ -158,6 +199,39 @@ def test_r07_zero_candidate_is_concrete_blocked_disposition_without_reviving_old
     assert candidate.created_root_ids == ()
     assert candidate.successor_round_identity == "successor-round:existing"
     assert "staff:old" in candidate.retained_root_ids
+
+
+def test_r07_post_apply_query_retains_successor_without_marking_it_impacted():
+    successor_root = _root(
+        ReplacementRootKind.SUCCESSOR_ROUND,
+        "successor-round:existing",
+    )
+    facts = _facts(ReplacementScenario.R07, roots=(successor_root,))
+
+    query = query_service_before_replacement(facts)
+
+    assert query.blockers == ("zero_candidate_successor_disposition",)
+    assert query.impacted_root_ids == ()
+    assert "successor-round:existing" in query.retained_root_ids
+
+
+def test_r07_matching_owner_proof_is_ready_once_then_becomes_step_two_successor() -> None:
+    proof = _zero_candidate_proof()
+    facts = _facts(ReplacementScenario.R07, zero_candidate_proof=proof)
+
+    query = query_service_before_replacement(facts)
+    candidate = preview_service_before_replacement(facts)
+
+    assert query.blockers == ()
+    assert query.resume_step is ReplacementResumeStep.STEP_2
+    assert candidate.outcome is ReplacementOutcome.READY
+    assert candidate.can_apply is True
+    assert candidate.resume_step is ReplacementResumeStep.STEP_2
+    assert candidate.matching_zero_candidate_proof == proof
+    assert candidate.created_root_ids == (
+        "successor-round:CASE-RPRE-1:14",
+    )
+    assert candidate.superseded_root_ids == ()
 
 
 def test_any_actual_service_is_substitution_referral_and_zero_write():

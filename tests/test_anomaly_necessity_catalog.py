@@ -1,6 +1,6 @@
 """
 File: test_anomaly_necessity_catalog.py
-Description: 驗證異常定義生命週期的精確 33+7+1+1 分區。
+Description: 驗證異常定義生命週期的精確 34+7+1+1 分區。
 """
 
 from domains.anomalies.registry import (
@@ -23,8 +23,8 @@ EXPECTED_WORK_ITEM_CODES = {
 def test_default_registry_has_exact_necessity_partition() -> None:
     registry = default_anomaly_registry()
 
-    assert len(registry.codes()) == 42
-    assert len(registry.active_codes()) == 33
+    assert len(registry.codes()) == 43
+    assert len(registry.active_codes()) == 34
     assert registry.target_active_codes() == registry.active_codes()
     assert set(registry.work_item_codes()) == EXPECTED_WORK_ITEM_CODES
     assert registry.retired_codes() == ("SCHEDULE-005",)

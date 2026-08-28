@@ -361,6 +361,7 @@ def default_anomaly_registry() -> AnomalyDefinitionRegistry:
             _finance_integrity_definition(),
             _hcm_validation_definition(),
             _historical_order_review_definition(),
+            _historical_baseline_roots_definition(),
             _order_matching_stage_definition("ORDER-001"),
             _order_matching_stage_definition("ORDER-002"),
             _order_matching_stage_definition("ORDER-003"),
@@ -441,6 +442,24 @@ def _historical_order_review_definition() -> AnomalyDefinition:
         ),
         no_automated_recovery=True,
         display_fields=("issue_codes", "masked_case_identity", "review_identity"),
+    )
+
+
+def _historical_baseline_roots_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="HISTORICAL-BASELINE-ROOTS-001",
+        source_domain="historical_baseline",
+        fingerprint_fields=("umbrella_identity",),
+        severity=AnomalySeverity.BLOCKING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=(
+            "active_count",
+            "case_no",
+            "earliest_blocked_step",
+            "projection_fingerprint",
+            "repair_referrals",
+        ),
     )
 
 
@@ -1344,6 +1363,10 @@ def _validate_identity(value: str, field_name: str) -> None:
 
 
 _AUTO_RESOLUTION_CONTRACTS = {
+    "HISTORICAL-BASELINE-ROOTS-001": AutoResolutionContract(
+        "PROV-20260828-historical-baseline-projector-contract-spec-gap.md §10",
+        "historical_baseline_active_membership_zero_after_fresh_exact_projection",
+    ),
     "PAYOUT-001": AutoResolutionContract(
         "05_Staff_Payables_Export_Domain.md §3; 16_Staff_Payables與Client_Refund正式規格.md",
         "staff_payable_balance_zero_after_locked_owner_readback",

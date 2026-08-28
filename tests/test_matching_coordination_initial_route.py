@@ -24,6 +24,7 @@ from domains.scheduling.matching_coordination import (
     MatchingCandidateResult,
     MatchingPackage,
     MatchingPackageMode,
+    MatchingPackageState,
     MatchingSegment,
     MatchingSourceVersion,
     build_criteria_snapshot,
@@ -40,6 +41,7 @@ from subsystems.scheduling.matching_coordination_contracts import (
     ApplyCaregiverSelection,
     ApplyCustomerMatchingDecision,
     ApplyZeroCandidateAlternative,
+    ApplyZeroCandidateConfirmation,
     ApplyServiceDateChangeRematch,
     CriteriaDiffView,
     PreviewCriteriaDiffResend,
@@ -48,6 +50,7 @@ from subsystems.scheduling.matching_coordination_contracts import (
     PreviewServiceDateChangeRematch,
     ApplyRematch,
     PreviewZeroCandidateAlternative,
+    PreviewZeroCandidateConfirmation,
     alternative_view,
     package_view,
     snapshot_view,
@@ -161,6 +164,21 @@ class _Application:
                     risk_warnings=("explicit_manual_confirmation_required",),
                 )
             )
+        if isinstance(command, PreviewZeroCandidateConfirmation):
+            return package_view(
+                MatchingPackage(
+                    package_id="package-no-candidate",
+                    version=3,
+                    mode=MatchingPackageMode.SINGLE,
+                    segments=(),
+                    required_service_dates=(date(2026, 9, 1),),
+                    candidate_results=(),
+                    criteria_snapshot_id=self.snapshot.snapshot_id,
+                    source_versions=_sources(),
+                    state=MatchingPackageState.NO_CANDIDATE,
+                    blockers=("no_legal_candidate",),
+                )
+            )
         return snapshot_view(self.snapshot)
 
     def preview_service_date_rematch(self, command):
@@ -221,6 +239,35 @@ class _Application:
                 package_id=None,
                 outbox_intent_ids=(),
                 result_state=result_state,
+            )
+        if isinstance(command, ApplyZeroCandidateConfirmation):
+            resulting_package = MatchingPackage(
+                package_id="package-no-candidate",
+                version=3,
+                mode=MatchingPackageMode.SINGLE,
+                segments=(),
+                required_service_dates=(date(2026, 9, 1),),
+                candidate_results=(),
+                criteria_snapshot_id=self.snapshot.snapshot_id,
+                source_versions=_sources(),
+                state=MatchingPackageState.NO_CANDIDATE,
+                blockers=("no_legal_candidate",),
+            )
+            return MatchingApplyReceipt(
+                receipt_id=f"{command.idempotency_key.value}:receipt",
+                command_name=MatchingCommandName.APPLY_ZERO_CANDIDATE_CONFIRMATION,
+                command_fingerprint=fingerprint_payload(
+                    {"command": "zero-candidate-confirmation"}
+                ),
+                preview_fingerprint=command.preview_fingerprint,
+                source_versions=_sources(),
+                decision_event_id=(
+                    f"{command.idempotency_key.value}:zero-candidate-confirmed"
+                ),
+                package_id=resulting_package.package_id,
+                outbox_intent_ids=(f"{command.idempotency_key.value}:assignment",),
+                result_state="zero_candidate_confirmed",
+                resulting_package=resulting_package,
             )
         if isinstance(command, ApplyCustomerMatchingDecision):
             return MatchingApplyReceipt(
@@ -836,3 +883,43 @@ def test_preview_zero_candidate_uses_admin_selected_relaxed_criteria() -> None:
     assert response.json()["data"]["relaxed_criteria"] == ["requires_cooking"]
     assert application.preview_command.relaxed_criteria == ("requires_cooking",)
     assert application.preview_command.actor.actor_id == "system-admin"
+
+
+def test_zero_candidate_confirmation_routes_typed_preview_and_apply() -> None:
+    application = _Application()
+    body = {
+        "reason": "fresh pool has no legal candidate",
+        "evidence": ["fresh_pool_query_empty"],
+        "expected_source_versions": _source_body(),
+        "criteria_snapshot_id": application.snapshot.snapshot_id,
+        "package_id": "package-open",
+        "package_version": 2,
+    }
+
+    preview_response = _client(application).post(
+        "/api/v1/matching-coordination/CASE-001/preview/confirm-zero-candidate",
+        headers={"X-Correlation-ID": "corr-zero-confirm-preview"},
+        json=body,
+    )
+
+    assert preview_response.status_code == 200
+    preview_data = preview_response.json()["data"]
+    assert preview_data["state"] == "no_candidate"
+    assert isinstance(application.preview_command, PreviewZeroCandidateConfirmation)
+    assert application.preview_command.evidence == ("fresh_pool_query_empty",)
+
+    apply_response = _client(application).post(
+        "/api/v1/matching-coordination/CASE-001/apply/confirm-zero-candidate",
+        headers={
+            "X-Correlation-ID": "corr-zero-confirm-apply",
+            "Idempotency-Key": "matching:zero:confirm",
+        },
+        json={**body, "preview_fingerprint": preview_data["fingerprint"]},
+    )
+
+    assert apply_response.status_code == 200
+    apply_data = apply_response.json()["data"]
+    assert apply_data["result_state"] == "zero_candidate_confirmed"
+    assert apply_data["resulting_package"]["state"] == "no_candidate"
+    assert isinstance(application.apply_command, ApplyZeroCandidateConfirmation)
+    assert application.apply_command.package_version == 2

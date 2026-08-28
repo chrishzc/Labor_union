@@ -31,6 +31,7 @@ from subsystems.scheduling.matching_coordination_contracts import (
     ApplyRematch,
     ApplyServiceDateChangeRematch,
     ApplyZeroCandidateAlternative,
+    ApplyZeroCandidateConfirmation,
     MatchingCommandName,
     MatchingApplyReceipt,
     MatchingNotificationIntentProjection,
@@ -42,6 +43,7 @@ from subsystems.scheduling.matching_coordination_contracts import (
     PreviewRematch,
     PreviewServiceDateChangeRematch,
     PreviewZeroCandidateAlternative,
+    PreviewZeroCandidateConfirmation,
     QueryMatchingCoordination,
     command_fingerprint,
     candidate_view,
@@ -64,7 +66,7 @@ def _common() -> dict[str, object]:
     }
 
 
-def test_all_sixteen_commands_have_stable_names_and_common_identity() -> None:
+def test_all_eighteen_commands_have_stable_names_and_common_identity() -> None:
     fp = fingerprint_payload({"preview": "a"})
     values = [
         QueryMatchingCoordination(
@@ -80,6 +82,21 @@ def test_all_sixteen_commands_have_stable_names_and_common_identity() -> None:
         ApplyCriteriaDiffResend(**_common(), before_snapshot_id="before", after_snapshot_id="after", preview_fingerprint=fp, recipient_ids=("candidate-1",)),
         PreviewZeroCandidateAlternative(**_common(), criteria_snapshot_id="snapshot-1", policy_id="policy-v1", policy_version=1),
         ApplyZeroCandidateAlternative(**_common(), criteria_snapshot_id="snapshot-1", alternative_id="alternative-1", policy_id="policy-v1", policy_version=1, relaxed_criteria=("service_days",), preview_fingerprint=fp),
+        PreviewZeroCandidateConfirmation(
+            **_common(),
+            criteria_snapshot_id="snapshot-1",
+            package_id="package-open",
+            package_version=2,
+            evidence=("fresh_pool_query_empty",),
+        ),
+        ApplyZeroCandidateConfirmation(
+            **_common(),
+            criteria_snapshot_id="snapshot-1",
+            package_id="package-open",
+            package_version=2,
+            evidence=("fresh_pool_query_empty",),
+            preview_fingerprint=fp,
+        ),
         ApplyCaregiverSelection(**_common(), criteria_snapshot_id="snapshot-1", package_id="package-1", package_version=1, candidate_id="candidate-1", willingness="willing", reason_code=None, affected_criteria=(), preview_fingerprint=fp),
         ApplyCustomerMatchingDecision(**_common(), criteria_snapshot_id="snapshot-1", package_id="package-1", package_version=1, candidate_id="candidate-1", decision="accepted", preview_fingerprint=fp),
         PreviewRematch(**_common(), criteria_snapshot_id="snapshot-1"),

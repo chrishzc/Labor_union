@@ -12,6 +12,7 @@ from domains.scheduling.matching_coordination import (
     MatchingCandidateResult,
     MatchingPackage,
     MatchingPackageMode,
+    MatchingPackageState,
     MatchingSegment,
     MatchingSourceVersion,
     SOURCE_KINDS,
@@ -21,9 +22,11 @@ from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.scheduling.matching_coordination_contracts import (
     ApplyCustomerMatchingDecision,
     ApplyZeroCandidateAlternative,
+    ApplyZeroCandidateConfirmation,
     PreviewCriteriaDiffResend,
     PreviewMatchingPackage,
     PreviewZeroCandidateAlternative,
+    PreviewZeroCandidateConfirmation,
 )
 from subsystems.scheduling.matching_coordination_workflow import (
     MatchingCoordinationFacts,
@@ -69,6 +72,29 @@ def _common(seed: str = "c") -> dict[str, object]:
         "idempotency_key": IdempotencyKey("matching:case-001:workflow"),
         "expected_source_versions": _sources(seed),
     }
+
+
+def _open_pool_facts(
+    *, candidate: MatchingCandidateResult | None = None
+) -> MatchingCoordinationFacts:
+    original = _facts()
+    package = MatchingPackage(
+        package_id="package-open",
+        version=2,
+        mode=MatchingPackageMode.SINGLE,
+        segments=(),
+        required_service_dates=(date(2026, 9, 1), date(2026, 9, 2)),
+        candidate_results=(),
+        criteria_snapshot_id=original.snapshot.snapshot_id,
+        source_versions=original.source_versions,
+        state=MatchingPackageState.CANDIDATE_POOL_OPEN,
+    )
+    return MatchingCoordinationFacts(
+        snapshot=original.snapshot,
+        package=package,
+        candidates=() if candidate is None else (candidate,),
+        source_versions=original.source_versions,
+    )
 
 
 def test_query_and_preview_are_typed_and_do_not_mutate_facts() -> None:
@@ -381,3 +407,84 @@ def test_zero_candidate_preview_uses_only_admin_selected_criteria() -> None:
     with pytest.raises(MatchingCoordinationWorkflowError) as captured:
         MatchingCoordinationWorkflow().preview(invalid, facts)
     assert captured.value.error.code == "matching_alternative_not_explicit"
+
+
+def test_zero_candidate_confirmation_creates_canonical_owner_package_and_intent() -> None:
+    facts = _open_pool_facts()
+    workflow = MatchingCoordinationWorkflow()
+    preview_command = PreviewZeroCandidateConfirmation(
+        **_common(),
+        criteria_snapshot_id="snapshot-1",
+        package_id="package-open",
+        package_version=2,
+        evidence=("fresh_pool_query_empty",),
+    )
+
+    preview = workflow.preview(preview_command, facts)
+    apply_command = ApplyZeroCandidateConfirmation(
+        **_common(),
+        criteria_snapshot_id="snapshot-1",
+        package_id="package-open",
+        package_version=2,
+        evidence=("fresh_pool_query_empty",),
+        preview_fingerprint=preview.fingerprint,
+    )
+    receipt = workflow.apply(
+        apply_command,
+        facts,
+        preview_fingerprint=preview.fingerprint,
+    )
+
+    assert preview.state is MatchingPackageState.NO_CANDIDATE
+    assert preview.version == 3
+    assert preview.segments == ()
+    assert preview.candidate_results == ()
+    assert preview.blockers == ("no_legal_candidate",)
+    assert receipt.result_state == "zero_candidate_confirmed"
+    assert receipt.resulting_package is not None
+    assert receipt.resulting_package.fingerprint == preview.fingerprint
+    assert receipt.decision_event_id == (
+        "matching:case-001:workflow:zero-candidate-confirmed"
+    )
+    assert receipt.outbox_intent_ids == (
+        "matching:case-001:workflow:zero-candidate-confirmed:assignment",
+    )
+
+
+def test_zero_candidate_confirmation_fails_closed_when_candidate_appears() -> None:
+    candidate = MatchingCandidateResult(
+        "candidate-race",
+        12,
+        CandidateEligibility.ELIGIBLE,
+        (),
+        willingness="willing",
+    )
+    facts = _open_pool_facts(candidate=candidate)
+    command = PreviewZeroCandidateConfirmation(
+        **_common(),
+        criteria_snapshot_id="snapshot-1",
+        package_id="package-open",
+        package_version=2,
+        evidence=("fresh_pool_query_empty",),
+    )
+
+    with pytest.raises(MatchingCoordinationWorkflowError) as captured:
+        MatchingCoordinationWorkflow().preview(command, facts)
+
+    assert captured.value.error.code == "matching_zero_candidate_confirmation_stale"
+
+
+def test_zero_candidate_confirmation_fails_closed_for_stale_parent() -> None:
+    facts = _open_pool_facts()
+    command = PreviewZeroCandidateConfirmation(
+        **_common(),
+        criteria_snapshot_id="snapshot-1",
+        package_id="package-open",
+        package_version=1,
+        evidence=("fresh_pool_query_empty",),
+    )
+
+    with pytest.raises(MatchingCoordinationWorkflowError) as captured:
+        MatchingCoordinationWorkflow().preview(command, facts)
+
+    assert captured.value.error.code == "matching_zero_candidate_confirmation_stale"

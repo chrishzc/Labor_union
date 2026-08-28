@@ -13,6 +13,9 @@ import re
 from typing import Any, Callable, Iterator, Mapping
 
 from domains.scheduling.service_before_replacement import (
+    ReplacementResumeStep,
+    ReplacementRootKind,
+    ReplacementScenario,
     ReplacementRootIdentity,
     ServiceBeforeReplacementFacts,
     ServiceBeforeReplacementCandidate,
@@ -131,6 +134,29 @@ class MySqlServiceBeforeReplacementRepository:
         # generations.  Any incomplete Matching handoff therefore fails
         # closed without creating a partial replacement lineage.
         source = self._matching_source(command, for_update=True)
+        owner_proof = candidate.matching_zero_candidate_proof
+        if owner_proof is not None:
+            source_package = source.get("parent_package")
+            if (
+                source_package is None
+                or str(getattr(source_package, "package_id", ""))
+                != owner_proof.package_identity
+                or int(getattr(source_package, "version", -1))
+                != owner_proof.package_version
+                or str(getattr(getattr(source_package, "fingerprint", None), "value", ""))
+                != owner_proof.package_fingerprint.value
+                or str(source.get("snapshot_id"))
+                != owner_proof.criteria_snapshot_identity
+                or str(source.get("source_event_identity"))
+                != owner_proof.event_identity
+                or int(source.get("source_event_version", -1))
+                != owner_proof.event_version
+                or str(source.get("source_event_fingerprint"))
+                != owner_proof.event_fingerprint.value
+            ):
+                raise ServiceBeforeReplacementPersistenceError(
+                    "matching zero candidate owner proof is stale"
+                )
         if candidate.candidate_pool_reuse_proof is None:
             source = dict(source)
             source.pop("reuse_package", None)
@@ -159,6 +185,13 @@ class MySqlServiceBeforeReplacementRepository:
             prior_generation_id,
             replacement_generation_id,
         )
+        if candidate.scenario is ReplacementScenario.R03:
+            self._cancel_r03_waiting_lock(
+                command=command,
+                candidate=candidate,
+                replacement_event_id=event_id,
+                replacement_generation_id=replacement_generation_id,
+            )
         self._insert_roots(event_id, command.case_no, candidate)
         persisted_roots = self._read_root_sets(event_id, command.case_no)
         # A bundle may contain a preview convenience value, but Apply must
@@ -167,9 +200,17 @@ class MySqlServiceBeforeReplacementRepository:
             successor = adapter.persist_successor(
                 MatchingSuccessorPersistenceRequest(
                     case_no=command.case_no,
-                    successor_package_identity=f"successor-package:{candidate.successor_round_identity}",
+                    successor_package_identity=(
+                        candidate.matching_zero_candidate_proof.package_identity
+                        if candidate.matching_zero_candidate_proof is not None
+                        else f"successor-package:{candidate.successor_round_identity}"
+                    ),
                     successor_round_identity=candidate.successor_round_identity or "",
-                    successor_matching_event_identity=f"successor-matching-event:{candidate.successor_round_identity}",
+                    successor_matching_event_identity=(
+                        candidate.matching_zero_candidate_proof.event_identity
+                        if candidate.matching_zero_candidate_proof is not None
+                        else f"successor-matching-event:{candidate.successor_round_identity}"
+                    ),
                     scenario=candidate.scenario.value,
                     candidate_count=0 if candidate.candidate_pool_reuse_proof is None else 1,
                     source_snapshot=source,
@@ -177,9 +218,34 @@ class MySqlServiceBeforeReplacementRepository:
                     idempotency_key=command.idempotency_key,
                     correlation_id=command.correlation_id,
                     candidate_disposition=(
-                        None
+                        "blocked_no_candidate"
+                        if candidate.matching_zero_candidate_proof is not None
+                        else None
                         if candidate.successor_round_fact is None
                         else candidate.successor_round_fact.zero_candidate_disposition
+                    ),
+                    reuse_existing_successor=(
+                        candidate.matching_zero_candidate_proof is not None
+                    ),
+                    existing_package_lineage_id=(
+                        int(source["matching_package_lineage_id"])
+                        if owner_proof is not None
+                        else None
+                    ),
+                    existing_matching_event_id=(
+                        int(source["matching_event_id"])
+                        if owner_proof is not None
+                        else None
+                    ),
+                    existing_package_fingerprint=(
+                        owner_proof.package_fingerprint.value
+                        if owner_proof is not None
+                        else None
+                    ),
+                    existing_event_fingerprint=(
+                        owner_proof.event_fingerprint.value
+                        if owner_proof is not None
+                        else None
                     ),
                 )
             )
@@ -200,11 +266,15 @@ class MySqlServiceBeforeReplacementRepository:
         with _cursor(self._connection) as cursor:
             cursor.execute(
                 "SELECT event.id,event.case_no,event.replacement_generation_identity,"
-                "event.replacement_event_identity,event.resulting_generation_version,"
+                "event.replacement_event_identity,event.replacement_generation_id,event.scenario,"
+                "event.resulting_generation_version,"
                 "event.resulting_event_version,event.resulting_aggregate_version,"
                 "successor.id AS successor_id,successor.matching_package_lineage_id,"
                 "successor.matching_event_id,successor.successor_round_identity,"
-                "receipt.outbox_identity,receipt.retained_root_set_digest,receipt.retained_root_count,"
+                "successor.resume_step,successor.candidate_count,"
+                "successor.zero_candidate_disposition,"
+                "receipt.outbox_identity,receipt.command_fingerprint,"
+                "receipt.retained_root_set_digest,receipt.retained_root_count,"
                 "receipt.superseded_root_set_digest,receipt.superseded_root_count,"
                 "receipt.created_root_set_digest,receipt.created_root_count "
                 "FROM scheduling_service_before_replacement_events event "
@@ -236,6 +306,12 @@ class MySqlServiceBeforeReplacementRepository:
         )
         if digests != persisted_digests or counts != persisted_counts:
             raise ServiceBeforeReplacementPersistenceError("replacement root digest readback drift")
+        if str(row.get("scenario") or "") == ReplacementScenario.R03.value:
+            self._require_r03_waiting_lock_readback(
+                row,
+                superseded_root_ids=roots[1],
+                for_update=for_update,
+            )
         return ReplacementOwnerReadback(
             str(row["case_no"]),
             str(row["replacement_generation_identity"]),
@@ -244,7 +320,15 @@ class MySqlServiceBeforeReplacementRepository:
             int(row["resulting_generation_version"]),
             int(row["resulting_event_version"]),
             int(row["resulting_aggregate_version"]),
-            roots[0], roots[1], roots[2], True, digests, counts,
+            roots[0], roots[1], roots[2],
+            ReplacementResumeStep(str(row["resume_step"])),
+            int(row["candidate_count"]),
+            (
+                None
+                if row.get("zero_candidate_disposition") is None
+                else str(row["zero_candidate_disposition"])
+            ),
+            True, digests, counts,
             str(row["outbox_identity"]), int(row["matching_package_lineage_id"]),
             int(row["matching_event_id"]),
         )
@@ -315,6 +399,259 @@ class MySqlServiceBeforeReplacementRepository:
             if int(cursor.rowcount) != 1:
                 raise ServiceBeforeReplacementPersistenceError("scheduling aggregate transition conflicted")
         return int(prior_generation_id), replacement_generation_id
+
+    def _cancel_r03_waiting_lock(
+        self,
+        *,
+        command: Any,
+        candidate: ServiceBeforeReplacementCandidate,
+        replacement_event_id: int,
+        replacement_generation_id: int,
+    ) -> None:
+        waiting_roots = tuple(
+            root
+            for root in candidate.superseded_roots
+            if root.kind is ReplacementRootKind.WAITING_LOCK
+        )
+        if len(waiting_roots) != 1:
+            raise ServiceBeforeReplacementPersistenceError(
+                "replacement waiting lock root is not exact"
+            )
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "SELECT lock_header.id,lock_header.plan_id,lock_header.status,"
+                "lock_header.is_active,plan.case_no "
+                "FROM caregiver_availability_locks lock_header "
+                "JOIN caregiver_matching_plans plan ON plan.id=lock_header.plan_id "
+                "WHERE plan.case_no=%s AND plan.status='accepted' AND plan.is_active=1 "
+                "AND lock_header.status='active' "
+                "AND lock_header.is_active=1 ORDER BY lock_header.id FOR UPDATE",
+                (command.case_no,),
+            )
+            locks = tuple(cursor.fetchall() or ())
+            if len(locks) != 1:
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement waiting lock is not exact"
+                )
+            lock_id = int(locks[0]["id"])
+            cursor.execute(
+                "SELECT id,lock_id,segment_id,staff_id,lock_date,active_marker,"
+                "released_by,released_at FROM caregiver_availability_lock_days "
+                "WHERE lock_id=%s ORDER BY lock_date,segment_id,id FOR UPDATE",
+                (lock_id,),
+            )
+            active_days = tuple(cursor.fetchall() or ())
+            if not active_days or any(
+                day.get("active_marker") != 1
+                or day.get("released_by") is not None
+                or day.get("released_at") is not None
+                for day in active_days
+            ):
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement waiting lock days are missing"
+                )
+            cursor.execute(
+                "SELECT id,lock_id,event_type,event_key,payload "
+                "FROM caregiver_availability_lock_events WHERE lock_id=%s "
+                "ORDER BY id FOR UPDATE",
+                (lock_id,),
+            )
+            lock_events = tuple(cursor.fetchall() or ())
+            if (
+                len(lock_events) != 1
+                or lock_events[0].get("event_type") != "lock_acquired"
+            ):
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement waiting lock event history is not exact"
+                )
+            from infrastructure.mysql.service_before_replacement_loader import _root
+            root_lock = {
+                key: locks[0][key]
+                for key in ("id", "plan_id", "status", "is_active")
+            }
+            root_days = tuple(
+                {
+                    key: day[key]
+                    for key in (
+                        "id", "lock_id", "segment_id", "staff_id",
+                        "lock_date", "active_marker",
+                    )
+                }
+                for day in active_days
+            )
+            persisted_root = _root(
+                ReplacementRootKind.WAITING_LOCK,
+                command.case_no,
+                "scheduling.waiting-lock",
+                (root_lock, *root_days, *lock_events),
+            )
+            if persisted_root != waiting_roots[0]:
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement waiting lock root drift"
+                )
+            prior_active_days = [
+                {
+                    "lock_day_id": int(day["id"]),
+                    "segment_id": int(day["segment_id"]),
+                    "staff_id": int(day["staff_id"]),
+                    "lock_date": day["lock_date"].isoformat(),
+                }
+                for day in active_days
+            ]
+            cursor.execute(
+                "UPDATE caregiver_availability_lock_days "
+                "SET active_marker=NULL,released_by=%s,released_at=CURRENT_TIMESTAMP "
+                "WHERE lock_id=%s AND active_marker=1",
+                (command.actor.actor_id, lock_id),
+            )
+            if int(cursor.rowcount) != len(active_days):
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement waiting lock day transition conflicted"
+                )
+            cursor.execute(
+                "UPDATE caregiver_availability_locks "
+                "SET status='cancelled',is_active=NULL,released_by=%s,"
+                "released_at=CURRENT_TIMESTAMP "
+                "WHERE id=%s AND status='active' AND is_active=1",
+                (command.actor.actor_id, lock_id),
+            )
+            if int(cursor.rowcount) != 1:
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement waiting lock transition conflicted"
+                )
+            cursor.execute(
+                "INSERT INTO caregiver_availability_lock_events "
+                "(lock_id,event_type,event_key,actor,reason,payload) "
+                "VALUES (%s,'lock_cancelled',%s,%s,%s,%s)",
+                (
+                    lock_id,
+                    f"rpre-lock:{sha256((candidate.replacement_event_identity or '').encode('utf-8')).hexdigest()}",
+                    command.actor.actor_id,
+                    command.reason,
+                    _json({
+                        "cause": "service_before_replacement",
+                        "case_no": command.case_no,
+                        "command_fingerprint": bundle_fingerprint(command),
+                        "lock_id": lock_id,
+                        "plan_id": int(locks[0]["plan_id"]),
+                        "prior_active_days": prior_active_days,
+                        "replacement_event_id": replacement_event_id,
+                        "replacement_event_identity": candidate.replacement_event_identity,
+                        "replacement_generation_identity": candidate.replacement_generation_identity,
+                        "replacement_generation_id": replacement_generation_id,
+                        "superseded_root_identity": waiting_roots[0].root_id,
+                        "scenario": candidate.scenario.value,
+                        "successor_round_identity": candidate.successor_round_identity,
+                    }),
+                ),
+            )
+            if int(cursor.rowcount) != 1:
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement waiting lock event insert failed"
+                )
+
+    def _require_r03_waiting_lock_readback(
+        self,
+        replacement_row: Mapping[str, Any],
+        *,
+        superseded_root_ids: tuple[str, ...],
+        for_update: bool,
+    ) -> None:
+        suffix = " FOR UPDATE" if for_update else ""
+        fingerprint = str(replacement_row["command_fingerprint"])
+        event_key = "rpre-lock:" + sha256(
+            str(replacement_row["replacement_event_identity"]).encode("utf-8")
+        ).hexdigest()
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "SELECT lock_header.id,lock_header.plan_id,lock_header.status,lock_header.is_active,"
+                "lock_header.released_by,lock_header.released_at,lock_event.actor,"
+                "lock_event.event_type,lock_event.event_key,lock_event.payload "
+                "FROM caregiver_availability_locks lock_header "
+                "JOIN caregiver_matching_plans plan ON plan.id=lock_header.plan_id "
+                "JOIN caregiver_availability_lock_events lock_event "
+                "ON lock_event.lock_id=lock_header.id "
+                "WHERE plan.case_no=%s AND lock_event.event_key=%s" + suffix,
+                (replacement_row["case_no"], event_key),
+            )
+            locks = tuple(cursor.fetchall() or ())
+            if len(locks) != 1:
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement waiting lock readback is not exact"
+                )
+            lock = locks[0]
+            if (
+                str(lock["status"]) != "cancelled"
+                or lock.get("is_active") is not None
+                or not str(lock.get("released_by") or "").strip()
+                or lock.get("released_at") is None
+                or lock.get("event_type") != "lock_cancelled"
+                or lock.get("event_key") != event_key
+                or lock.get("actor") != lock.get("released_by")
+            ):
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement waiting lock header readback is incomplete"
+                )
+            payload = lock["payload"]
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            expected_payload = {
+                "case_no": str(replacement_row["case_no"]),
+                "cause": "service_before_replacement",
+                "command_fingerprint": fingerprint,
+                "lock_id": int(lock["id"]),
+                "plan_id": int(lock["plan_id"]),
+                "replacement_event_id": int(replacement_row["id"]),
+                "replacement_event_identity": str(replacement_row["replacement_event_identity"]),
+                "replacement_generation_id": int(replacement_row["replacement_generation_id"]),
+                "replacement_generation_identity": str(replacement_row["replacement_generation_identity"]),
+                "scenario": ReplacementScenario.R03.value,
+                "successor_round_identity": str(replacement_row["successor_round_identity"]),
+            }
+            if not isinstance(payload, dict) or any(
+                payload.get(key) != value for key, value in expected_payload.items()
+            ):
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement waiting lock event readback drift"
+                )
+            waiting_roots = tuple(
+                identity
+                for identity in superseded_root_ids
+                if identity.startswith("scheduling.waiting-lock:")
+            )
+            if waiting_roots != (payload.get("superseded_root_identity"),):
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement waiting lock root readback drift"
+                )
+            cursor.execute(
+                "SELECT id,segment_id,staff_id,lock_date,active_marker,released_by,released_at "
+                "FROM caregiver_availability_lock_days WHERE lock_id=%s "
+                "ORDER BY lock_date,segment_id,id" + suffix,
+                (int(lock["id"]),),
+            )
+            days = tuple(cursor.fetchall() or ())
+            if not days or any(
+                day.get("active_marker") is not None
+                or day.get("released_by") != lock.get("actor")
+                or day.get("released_at") is None
+                for day in days
+            ):
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement waiting lock day readback is incomplete"
+                )
+            persisted_days = [
+                {
+                    "lock_day_id": int(day["id"]),
+                    "segment_id": int(day["segment_id"]),
+                    "staff_id": int(day["staff_id"]),
+                    "lock_date": day["lock_date"].isoformat(),
+                }
+                for day in days
+            ]
+            if payload.get("prior_active_days") != persisted_days:
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement waiting lock day identity readback drift"
+                )
 
     def _matching_source(self, request: object, *, for_update: bool) -> Mapping[str, Any]:
         return self.require_matching_source(

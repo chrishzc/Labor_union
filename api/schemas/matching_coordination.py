@@ -151,6 +151,7 @@ class MatchingPackageTransportView(MatchingCoordinationSchema):
     blockers: tuple[str, ...]
     warnings: tuple[str, ...]
     state: Literal[
+        "candidate_pool_open",
         "proposed",
         "awaiting_caregiver_willingness",
         "awaiting_customer_decision",
@@ -549,6 +550,26 @@ class ApplyZeroCandidateRequest(PreviewZeroCandidateRequest):
     decision: Literal["agree", "disagree"]
 
 
+class PreviewZeroCandidateConfirmationRequest(MatchingCoordinationSchema):
+    reason: str = Field(min_length=1, max_length=500)
+    evidence: tuple[str, ...] = Field(min_length=1)
+    expected_source_versions: MatchingSourceTupleView
+    criteria_snapshot_id: str = Field(min_length=1, max_length=191)
+    package_id: str = Field(min_length=1, max_length=191)
+    package_version: int = Field(ge=0)
+
+    @field_validator("evidence")
+    @classmethod
+    def _evidence_canonical(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if value != tuple(sorted(set(value))) or any(not item.strip() for item in value):
+            raise ValueError("evidence must be sorted, unique, and non-empty")
+        return value
+
+
+class ApplyZeroCandidateConfirmationRequest(PreviewZeroCandidateConfirmationRequest):
+    preview_fingerprint: Sha256
+
+
 class ApplyCaregiverSelectionRequest(MatchingCoordinationSchema):
     reason: str = Field(min_length=1, max_length=500)
     expected_source_versions: MatchingSourceTupleView
@@ -723,6 +744,7 @@ class MatchingApplyReceiptResponse(MatchingCoordinationSchema):
         "ApplyInitialCriteriaSnapshot",
         "ApplyCriteriaDiffResend",
         "ApplyZeroCandidateAlternative",
+        "ApplyZeroCandidateConfirmation",
         "ApplyCaregiverSelection",
         "ApplyCustomerMatchingDecision",
         "ApplyRematch",
@@ -749,6 +771,7 @@ class MatchingApplyReceiptResponse(MatchingCoordinationSchema):
         "intent_queued",
         "alternative_agreed_pending_owning_workflows",
         "awaiting_matching",
+        "zero_candidate_confirmed",
     ]
     cross_domain_request: MatchingCrossDomainRequestTransportView | None = None
     zero_candidate_decision: ZeroCandidateDecisionLineageTransportView | None = None
@@ -757,6 +780,7 @@ class MatchingApplyReceiptResponse(MatchingCoordinationSchema):
     criteria_recontact_intents: tuple[
         MatchingCriteriaRecontactIntentTransportView, ...
     ] = ()
+    resulting_package: MatchingPackageTransportView | None = None
 
     @field_validator("command_fingerprint", "preview_fingerprint", mode="before")
     @classmethod
@@ -772,6 +796,7 @@ class MatchingApplyReceiptResponse(MatchingCoordinationSchema):
 
 
 __all__ = [
+    "ApplyZeroCandidateConfirmationRequest",
     "MatchingCoordinationSchema",
     "MatchingCandidateResultTransportView",
     "MatchingCriteriaResultTransportView",
@@ -787,6 +812,7 @@ __all__ = [
     "RefusalRoutingTransportView",
     "CriteriaDiffTransportView",
     "PreviewZeroCandidateRequest",
+    "PreviewZeroCandidateConfirmationRequest",
     "ZeroCandidateAlternativeTransportView",
     "PreviewMatchingPackageRequest",
     "PreviewLeaveImpactRequest",

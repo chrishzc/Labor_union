@@ -24,6 +24,7 @@ from api.schemas.matching_coordination import (
     ApplyCaregiverSelectionRequest,
     ApplyCustomerDecisionRequest,
     ApplyZeroCandidateRequest,
+    ApplyZeroCandidateConfirmationRequest,
     CriteriaDiffTransportView,
     MatchingApplyReceiptResponse,
     MatchingCoordinationQueryRequest,
@@ -43,6 +44,7 @@ from api.schemas.matching_coordination import (
     ServiceDateShiftAvailabilityConfirmationTransportView,
     ServiceDateShiftReassignmentReferenceTransportView,
     PreviewZeroCandidateRequest,
+    PreviewZeroCandidateConfirmationRequest,
     ZeroCandidateAlternativeTransportView,
 )
 from domains.scheduling.matching_coordination import (
@@ -66,6 +68,7 @@ from subsystems.scheduling.matching_coordination_contracts import (
     ApplyCaregiverSelection,
     ApplyCustomerMatchingDecision,
     ApplyZeroCandidateAlternative,
+    ApplyZeroCandidateConfirmation,
     PreviewCriteriaDiffResend,
     PreviewLeaveImpactOnMatching,
     PreviewMatchingPackage,
@@ -74,6 +77,7 @@ from subsystems.scheduling.matching_coordination_contracts import (
     ApplyRematch,
     ApplyServiceDateChangeRematch,
     PreviewZeroCandidateAlternative,
+    PreviewZeroCandidateConfirmation,
     PreviewInitialCriteriaSnapshot,
     QueryMatchingCoordination,
 )
@@ -290,6 +294,47 @@ def preview_zero_candidate_alternative(
         return BaseResponse(
             data=ZeroCandidateAlternativeTransportView.model_validate(result)
         )
+    except Exception as error:
+        _raise_matching_error(error, correlation)
+
+
+@router.post(
+    "/{case_no}/preview/confirm-zero-candidate",
+    response_model=BaseResponse[MatchingPackageTransportView],
+)
+def preview_zero_candidate_confirmation(
+    body: PreviewZeroCandidateConfirmationRequest,
+    case_no: str = Path(min_length=1, max_length=50),
+    correlation_header: Annotated[
+        str | None,
+        Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ] = None,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    composition: MatchingCoordinationComposition = Depends(
+        get_matching_coordination_composition
+    ),
+):
+    correlation = CorrelationId(correlation_header or uuid4().hex)
+    command = PreviewZeroCandidateConfirmation(
+        case_no=case_no,
+        actor=_actor(principal),
+        reason=body.reason,
+        correlation_id=correlation,
+        idempotency_key=IdempotencyKey(
+            "preview:"
+            + fingerprint_payload(
+                {"case_no": case_no, "correlation_id": correlation.value}
+            ).value
+        ),
+        expected_source_versions=_source_tuple(body.expected_source_versions),
+        criteria_snapshot_id=body.criteria_snapshot_id,
+        package_id=body.package_id,
+        package_version=body.package_version,
+        evidence=body.evidence,
+    )
+    try:
+        result = composition.application.preview(command)
+        return BaseResponse(data=MatchingPackageTransportView.model_validate(result))
     except Exception as error:
         _raise_matching_error(error, correlation)
 
@@ -753,6 +798,45 @@ def apply_zero_candidate_alternative(
         policy_version=body.policy_version,
         relaxed_criteria=body.relaxed_criteria,
         decision=body.decision,
+        preview_fingerprint=PreviewFingerprint(body.preview_fingerprint),
+    )
+    try:
+        result = composition.application.apply(command)
+        return BaseResponse(data=MatchingApplyReceiptResponse.model_validate(result))
+    except Exception as error:
+        _raise_matching_error(error, correlation)
+
+
+@router.post(
+    "/{case_no}/apply/confirm-zero-candidate",
+    response_model=BaseResponse[MatchingApplyReceiptResponse],
+)
+def apply_zero_candidate_confirmation(
+    body: ApplyZeroCandidateConfirmationRequest,
+    idempotency_header: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=1, max_length=191)
+    ],
+    correlation_header: Annotated[
+        str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)
+    ],
+    case_no: Annotated[str, Path(min_length=1, max_length=50)],
+    principal: AdminPrincipal = Depends(require_system_admin),
+    composition: MatchingCoordinationComposition = Depends(
+        get_matching_coordination_composition
+    ),
+):
+    correlation = CorrelationId(correlation_header)
+    command = ApplyZeroCandidateConfirmation(
+        case_no=case_no,
+        actor=_actor(principal),
+        reason=body.reason,
+        correlation_id=correlation,
+        idempotency_key=IdempotencyKey(idempotency_header),
+        expected_source_versions=_source_tuple(body.expected_source_versions),
+        criteria_snapshot_id=body.criteria_snapshot_id,
+        package_id=body.package_id,
+        package_version=body.package_version,
+        evidence=body.evidence,
         preview_fingerprint=PreviewFingerprint(body.preview_fingerprint),
     )
     try:

@@ -60,6 +60,9 @@ _RULEBOOK_ALLOWED_PREDICATES = {
     "CLIENTREFUND-001": "client_refund_return_linkage_and_progress_terminal",
     "GOVSUB-003": "government_subsidy_current_revision_integrity_clear",
     "GOVSUB-006": "government_overpayment_authorized_disposition_committed",
+    "HISTORICAL-BASELINE-ROOTS-001": (
+        "historical_baseline_active_membership_zero_after_fresh_exact_projection"
+    ),
     "IMPORT-004": "hcm_review_all_occurrences_owner_terminal_after_locked_readback",
     "PAYOUT-001": "staff_payable_balance_zero_after_locked_owner_readback",
     "RECEIVABLE-001": "client_receivable_overdue_remaining_zero_after_locked_owner_readback",

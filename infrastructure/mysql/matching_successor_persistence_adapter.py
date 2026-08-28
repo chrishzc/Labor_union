@@ -43,6 +43,11 @@ class MatchingSuccessorPersistenceRequest:
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
     candidate_disposition: str | None = None
+    reuse_existing_successor: bool = False
+    existing_package_lineage_id: int | None = None
+    existing_matching_event_id: int | None = None
+    existing_package_fingerprint: str | None = None
+    existing_event_fingerprint: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +106,7 @@ class MatchingSuccessorPersistenceAdapter:
         if not source_event_identity:
             raise MatchingSuccessorPersistenceError("matching source event is required")
         source_event = self._one(
-            "SELECT id,event_id,case_no,criteria_snapshot_id,package_lineage_id "
+            "SELECT id,event_id,case_no,criteria_snapshot_id,package_lineage_id,event_type,resulting_version,event_digest "
             "FROM matching_coordination_events WHERE event_id=%s FOR UPDATE",
             (source_event_identity,),
         )
@@ -114,6 +119,43 @@ class MatchingSuccessorPersistenceAdapter:
             or int(source_event["package_lineage_id"]) != int(parent["id"])
         ):
             raise MatchingSuccessorPersistenceError("matching source event binding drift")
+        if request.reuse_existing_successor:
+            package_payload = _json_value(parent["package_snapshot"])
+            if not isinstance(package_payload, Mapping):
+                raise MatchingSuccessorPersistenceError(
+                    "matching stored package is invalid"
+                )
+            package = _package_from_payload(package_payload)
+            if (
+                package.state is not MatchingPackageState.NO_CANDIDATE
+                or package.candidate_results
+                or package.segments
+                or package.blockers != ("no_legal_candidate",)
+                or str(source_event.get("event_type")) != "package_proposed"
+                or int(source_event.get("resulting_version", -1))
+                != int(parent["package_version"])
+                or request.candidate_count != 0
+                or request.candidate_disposition != "blocked_no_candidate"
+                or request.successor_package_identity != str(parent["package_id"])
+                or request.successor_matching_event_identity != source_event_identity
+                or request.existing_package_lineage_id != int(parent["id"])
+                or request.existing_matching_event_id != int(source_event["id"])
+                or request.existing_package_fingerprint != str(parent["package_digest"])
+                or request.existing_event_fingerprint != str(source_event["event_digest"])
+            ):
+                raise MatchingSuccessorPersistenceError(
+                    "matching zero candidate successor binding drift"
+                )
+            return MatchingSuccessorPersistenceResult(
+                package_lineage_id=int(parent["id"]),
+                matching_event_id=int(source_event["id"]),
+                package_identity=str(parent["package_id"]),
+                round_identity=request.successor_round_identity,
+                event_identity=source_event_identity,
+                package_version=int(parent["package_version"]),
+                event_version=int(source_event["resulting_version"]),
+                candidate_count=0,
+            )
         package_version = int(parent["package_version"]) + 1
         package = _successor_package(request, snapshot, package_version)
         package_snapshot = _package_storage_payload(package)
@@ -299,8 +341,6 @@ def _successor_package(
         raise MatchingSuccessorPersistenceError("fresh matching package facts are invalid")
     if package.criteria_snapshot_id != str(snapshot["snapshot_id"]):
         raise MatchingSuccessorPersistenceError("matching package criteria binding drift")
-    if source_versions and package.source_versions != source_versions:
-        raise MatchingSuccessorPersistenceError("matching package source tuple drift")
     if request.candidate_count != len(package.candidate_results):
         raise MatchingSuccessorPersistenceError("matching candidate count does not match fresh package")
     return MatchingPackage(
@@ -376,13 +416,19 @@ def _validate_stored_snapshot(
     row: Mapping[str, Any], snapshot: Mapping[str, Any], case_no: str
 ) -> None:
     stored_criteria = _json_value(row.get("criteria_snapshot"))
+    stored_criteria_fingerprint = fingerprint_payload(
+        {"criteria": stored_criteria}
+    )
+    fresh_criteria_fingerprint = fingerprint_payload(
+        {"criteria": snapshot["criteria"]}
+    )
     stored_versions = _canonical_versions(_json_value(row.get("source_version_tuple")))
     expected_versions = _canonical_versions(snapshot["source_versions"])
     if (
         str(row.get("snapshot_id")) != str(snapshot["snapshot_id"])
         or str(row.get("case_no")) != case_no
         or int(row.get("criteria_version", -1)) != int(snapshot["criteria_version"])
-        or stored_criteria != dict(snapshot["criteria"])
+        or stored_criteria_fingerprint != fresh_criteria_fingerprint
         or stored_versions != expected_versions
         or str(row.get("criteria_digest")) != str(snapshot["criteria_digest"])
     ):

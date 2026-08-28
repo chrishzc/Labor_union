@@ -65,6 +65,21 @@ staff_payout_obligation_links
 
 正式 ledger 只保存實際成功的 payout／return／reversal；失敗嘗試留在 bank staging／anomaly，不混入正式帳本。每筆 obligation 必須完整 allocation。
 
+### Historical Payout Evidence／Settlement（2026-08-28 人工裁決）
+
+對使用系統前且已正式採納的 historical case，首要付款證據仍是 Finance Import canonical outgoing
+bank fact，能正常對應時走既有 Payout Reconciliation。舊銀行／帳務證據缺失、歸屬不明或無法可靠
+還原時，才允許歷史人工 `paid | settled` Q/P/A。Apply 必須綁定 exact case、staff、payer=工會、
+payee=月嫂、selected obligations及historical adoption，保存actor、reason、evidence、expected version、
+fingerprint、idempotency、receipt與outbox；付款日期不明時保存unknown，不得偽填。
+
+客戶付款給工會、Orders completed、應付清冊下載、客戶補助退款或政府撥款都不能推定月嫂已付款。
+歷史 `paid` 只建立選定staff obligations的付款事實；`settled`只終止本Domain選定obligations，不改
+Client Finance。後續return、reversal、薪資／服務更正或新obligation依較新owner event重開或更新；
+舊event保持immutable。不得偽造bank row／allocation、跨staff合併或提供generic payable status editor。
+完整跨Domain契約見
+`../02_決策與退役執行記錄/PROV-20260828-historical-payment-and-owner-settlement-spec.md`。
+
 ### Payable Anomaly Facts
 
 輸出 `PAYOUT-001` 到期未匯、`PAYOUT-002` 原應付日後才形成或改變、`PAYOUT-003` 銀行主檔不完整，以及 ownership／共享帳戶／金額不符。人工 resolve 不修改義務或付款投影。
@@ -131,6 +146,9 @@ Commands：
 - `ApplyStaffPayoutReversal`
 - `ExportAccountsPayableWorkbook`
 - `QueryAccountsPayableArchive`
+- `QueryHistoricalStaffPayoutRepair`
+- `PreviewHistoricalStaffPayoutRepair`
+- `ApplyHistoricalStaffPayoutRepair`
 
 Stable errors：
 
@@ -147,6 +165,8 @@ Stable errors：
 - `accounts_payable_archive_failed`
 - `idempotency_conflict`
 - `transaction_failed`
+- `historical_staff_payout_not_eligible`
+- `historical_staff_payout_obligation_binding_invalid`
 
 ## 8. Live writer 退出
 

@@ -155,6 +155,18 @@ def test_manual_package_uses_admin_segments_and_sorts_candidates_by_name() -> No
             source_versions=_sources(),
         )
 
+    with pytest.raises(MatchingDomainError) as missing_candidate:
+        build_manual_matching_package(
+            package_id="package-manual-missing",
+            version=1,
+            segments=(MatchingSegment(99, required_dates, 1),),
+            required_service_dates=required_dates,
+            candidate_results=candidates,
+            criteria_snapshot_id="snapshot-1",
+            source_versions=_sources(),
+        )
+    assert missing_candidate.value.code == "matching_candidate_not_found"
+
 
 def test_criteria_diff_and_accepted_lineage_keep_non_conversion_marker() -> None:
     before = _snapshot("snapshot-1", {"service_days": 10, "region": "east"})

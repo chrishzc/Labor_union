@@ -18,6 +18,7 @@ from domains.scheduling.matching_coordination import (
     MatchingCandidateResult,
     MatchingPackage,
     MatchingPackageMode,
+    MatchingPackageState,
     RefusalRoutingGroup,
     MatchingSegment,
     MatchingSourceVersion,
@@ -30,10 +31,12 @@ from subsystems.scheduling.matching_coordination_contracts import (
     ApplyCaregiverSelection,
     ApplyCustomerMatchingDecision,
     ApplyZeroCandidateAlternative,
+    ApplyZeroCandidateConfirmation,
     MatchingCriteriaRecontactIntentProjection,
     MatchingNotificationIntentProjection,
     MatchingNotificationRecipientRole,
     PreviewZeroCandidateAlternative,
+    PreviewZeroCandidateConfirmation,
 )
 from subsystems.scheduling.matching_coordination_workflow import (
     MatchingCoordinationFacts,
@@ -135,6 +138,26 @@ def _facts(*, no_candidate: bool = False) -> MatchingCoordinationFacts:
         package=package,
         candidates=(candidate,),
         source_versions=sources,
+    )
+
+
+def _open_pool_facts() -> MatchingCoordinationFacts:
+    original = _facts()
+    return MatchingCoordinationFacts(
+        snapshot=original.snapshot,
+        package=MatchingPackage(
+            package_id="package-open",
+            version=2,
+            mode=MatchingPackageMode.SINGLE,
+            segments=(),
+            required_service_dates=(date(2026, 9, 1), date(2026, 9, 2)),
+            candidate_results=(),
+            criteria_snapshot_id=original.snapshot.snapshot_id,
+            source_versions=original.source_versions,
+            state=MatchingPackageState.CANDIDATE_POOL_OPEN,
+        ),
+        candidates=(),
+        source_versions=original.source_versions,
     )
 
 
@@ -618,6 +641,89 @@ def test_zero_candidate_disagree_writes_no_intents() -> None:
     assert connection.commit_count == 0
 
 
+def test_zero_candidate_confirmation_persists_package_event_receipt_and_owner_intent() -> None:
+    facts = _open_pool_facts()
+    workflow = MatchingCoordinationWorkflow()
+    preview_request = PreviewZeroCandidateConfirmation(
+        case_no="CASE-001",
+        actor=ActorContext("admin_user_id:1"),
+        reason="fresh pool has no legal candidate",
+        correlation_id=CorrelationId("corr-zero-confirm-preview"),
+        idempotency_key=IdempotencyKey("preview:matching:zero:confirm"),
+        expected_source_versions=facts.source_versions,
+        criteria_snapshot_id="snapshot-1",
+        package_id="package-open",
+        package_version=2,
+        evidence=("fresh_pool_query_empty",),
+    )
+    preview = workflow.preview(preview_request, facts)
+    command = ApplyZeroCandidateConfirmation(
+        case_no="CASE-001",
+        actor=ActorContext("admin_user_id:1"),
+        reason="fresh pool has no legal candidate",
+        correlation_id=CorrelationId("corr-zero-confirm-apply"),
+        idempotency_key=IdempotencyKey("matching:zero:confirm"),
+        expected_source_versions=facts.source_versions,
+        criteria_snapshot_id="snapshot-1",
+        package_id="package-open",
+        package_version=2,
+        evidence=("fresh_pool_query_empty",),
+        preview_fingerprint=preview.fingerprint,
+    )
+    receipt = workflow.apply(command, facts, preview_fingerprint=preview.fingerprint)
+    event_row = {
+        "id": 801,
+        "criteria_snapshot_id": 601,
+        "package_lineage_id": 901,
+    }
+    receipt_row = {"id": 1001}
+    connection = _Connection(
+        [
+            {"id": 601, "criteria_digest": facts.snapshot.fingerprint.value},
+            None,
+            {"id": 701, "package_id": "package-open", "package_version": 2},
+            {"id": 601},
+            None,
+            event_row,
+            event_row,
+            receipt_row,
+        ]
+    )
+    repository = _repo(connection)
+
+    repository.append_lineage(command, facts, receipt)
+    repository.save_receipt(command, receipt.command_fingerprint, receipt)
+    repository.append_typed_intents(command, receipt)
+
+    package_inserts = [
+        params
+        for sql, params in connection.statements
+        if sql.lstrip().upper().startswith(
+            "INSERT INTO MATCHING_COORDINATION_PACKAGE_LINEAGE"
+        )
+    ]
+    event_inserts = [
+        params
+        for sql, params in connection.statements
+        if sql.lstrip().upper().startswith("INSERT INTO MATCHING_COORDINATION_EVENTS")
+    ]
+    outbox_inserts = [
+        params
+        for sql, params in connection.statements
+        if sql.lstrip().upper().startswith("INSERT INTO MATCHING_COORDINATION_OUTBOX")
+    ]
+
+    assert len(package_inserts) == 1
+    assert '"state":"no_candidate"' in package_inserts[0][7]
+    assert len(event_inserts) == 1
+    assert event_inserts[0][4] == "package_proposed"
+    assert len(outbox_inserts) == 1
+    assert outbox_inserts[0][4:6] == ("rematch_requested", "assignment_workflow")
+    outbox_payload = json.loads(outbox_inserts[0][6])
+    assert outbox_payload["resulting_package"]["state"] == "no_candidate"
+    assert connection.commit_count == 0
+
+
 def test_every_apply_command_maps_to_a_released_matching_event_enum() -> None:
     schema = (
         Path(__file__).resolve().parents[1]
@@ -635,6 +741,7 @@ def test_every_apply_command_maps_to_a_released_matching_event_enum() -> None:
         "ApplyCaregiverSelection": "caregiver_willingness",
         "ApplyCustomerMatchingDecision": "customer_decision",
         "ApplyZeroCandidateAlternative": "customer_decision",
+        "ApplyZeroCandidateConfirmation": "package_proposed",
         "ApplyRematch": "rematch_required",
         "ApplyLeaveImpactOnMatching": "rematch_required",
         "ApplyServiceDateChangeRematch": "rematch_required",

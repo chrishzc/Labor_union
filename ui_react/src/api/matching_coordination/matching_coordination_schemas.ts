@@ -148,6 +148,7 @@ export const MatchingPackageSchema = z
     blockers: z.array(z.string()),
     warnings: z.array(z.string()),
     state: z.enum([
+      'candidate_pool_open',
       'proposed',
       'awaiting_caregiver_willingness',
       'awaiting_customer_decision',
@@ -269,6 +270,41 @@ export const PreviewZeroCandidateRequestSchema = z
     policy_id: identity,
     policy_version: nonnegativeInt,
     relaxed_criteria: z.array(z.string()).min(1),
+  })
+  .strict();
+
+const zeroCandidateEvidence = z
+  .array(
+    z
+      .string()
+      .min(1)
+      .max(191)
+      .refine((value) => value === value.trim(), {
+        message: 'evidence 不得包含前後空白',
+      })
+  )
+  .min(1)
+  .superRefine((value, context) => {
+    const canonical = [...new Set(value)].sort();
+    if (
+      canonical.length !== value.length ||
+      canonical.some((item, index) => item !== value[index])
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'evidence 必須排序且不可重複',
+      });
+    }
+  });
+
+export const PreviewZeroCandidateConfirmationRequestSchema = z
+  .object({
+    reason,
+    evidence: zeroCandidateEvidence,
+    expected_source_versions: MatchingSourceTupleSchema,
+    criteria_snapshot_id: identity,
+    package_id: identity,
+    package_version: nonnegativeInt,
   })
   .strict();
 
@@ -411,6 +447,11 @@ export const ApplyZeroCandidateRequestSchema = PreviewZeroCandidateRequestSchema
   decision: z.enum(['agree', 'disagree']),
 }).strict();
 
+export const ApplyZeroCandidateConfirmationRequestSchema =
+  PreviewZeroCandidateConfirmationRequestSchema.extend({
+    preview_fingerprint: sha256,
+  }).strict();
+
 export const ApplyCaregiverSelectionRequestSchema = z
   .object({
     reason,
@@ -541,6 +582,7 @@ export const MatchingApplyReceiptResponseSchema = z
       'ApplyInitialCriteriaSnapshot',
       'ApplyCriteriaDiffResend',
       'ApplyZeroCandidateAlternative',
+      'ApplyZeroCandidateConfirmation',
       'ApplyCaregiverSelection',
       'ApplyCustomerMatchingDecision',
       'ApplyRematch',
@@ -567,12 +609,14 @@ export const MatchingApplyReceiptResponseSchema = z
       'intent_queued',
       'alternative_agreed_pending_owning_workflows',
       'awaiting_matching',
+      'zero_candidate_confirmed',
     ]),
     cross_domain_request: MatchingCrossDomainRequestSchema.nullable(),
     zero_candidate_decision: ZeroCandidateDecisionLineageSchema.nullable(),
     willingness_lineage: DynamicWillingnessLineageSchema.nullable(),
     notification_intents: z.array(MatchingNotificationIntentSchema),
     criteria_recontact_intents: z.array(MatchingCriteriaRecontactIntentSchema),
+    resulting_package: MatchingPackageSchema.nullable(),
   })
   .strict();
 
@@ -627,6 +671,9 @@ export type PreviewCriteriaDiffRequest = z.input<
 export type PreviewZeroCandidateRequest = z.input<
   typeof PreviewZeroCandidateRequestSchema
 >;
+export type PreviewZeroCandidateConfirmationRequest = z.input<
+  typeof PreviewZeroCandidateConfirmationRequestSchema
+>;
 export type PreviewMatchingPackageRequest = z.input<
   typeof PreviewMatchingPackageRequestSchema
 >;
@@ -642,6 +689,9 @@ export type ApplyCriteriaDiffRequest = z.input<
 >;
 export type ApplyZeroCandidateRequest = z.input<
   typeof ApplyZeroCandidateRequestSchema
+>;
+export type ApplyZeroCandidateConfirmationRequest = z.input<
+  typeof ApplyZeroCandidateConfirmationRequestSchema
 >;
 export type ApplyCaregiverSelectionRequest = z.input<
   typeof ApplyCaregiverSelectionRequestSchema

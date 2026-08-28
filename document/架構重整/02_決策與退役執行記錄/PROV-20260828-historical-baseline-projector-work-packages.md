@@ -82,6 +82,29 @@ package_status: PACKAGE_READY
 blockers: []
 ```
 
+## 9. 優先縮減與重新驗證門（2026-08-28 使用者裁決）
+
+本節記錄目前候選實作的優先收斂方向。它是後續工作的執行限制，不表示本次 checkpoint
+內的所有候選程式碼已獲得永久採用，也不直接授權刪除檔案、縮減 public contract、套用
+資料庫 migration 或發布。這次 commit 只保存可檢閱的現況與裁決；實際清理前仍須先確認
+current consumer、inbound references、migration／rollback 保留責任及 focused regression。
+
+| 優先序 | 範圍 | 後續處置與判定門檻 |
+|---|---|---|
+| P0 | HPROJ 專用 delivery、retry、dead-letter、lease、checkpoint 與 worker stack | 暫停擴張。先逐項比較 `shared_kernel/durable_job_queue.py`、`infrastructure/mysql/background_job_repository.py` 與 `subsystems/jobs/durable_job_worker.py`；只有既有 durable-job 契約無法滿足且有正式 producer／consumer 證據時，才保留無法合併的最小差異。 |
+| P0 | 完成狀態與 production wiring | 在第一個正式 owner-event producer、實際 production consumer，以及可操作的 repair action／deep-link 接通前，不得把 HPROJ runtime 標示為 completed。`HISTORICAL-BASELINE-ROOTS-001` 目前沒有可用 action，屬 completion blocker。 |
+| P1 | HPROJ public API、Python dataclass、Pydantic、Zod 與 route mapping | 以實際 operator consumer 為準，優先只保留 delivery／reconciliation status、active count、earliest blocked step 與 repair referrals；未被 current consumer 使用的 receipt、digest、lease 及內部 lifecycle 欄位先證明必要性，否則縮減或留在內部模型。 |
+| P1 | 一次性 Browser runner、raw receipt、重複 evidence | `scripts/run_task96_rpre_browser_scenario.py` 與只服務該 runner 的逐步 receipt 優先移往 ignored `scratch/` 或刪除；保留前須證明有 current consumer、稽核、migration／rollback 或不可重建需求。共享區只留最小 final receipt。 |
+| P1 | runtime／環境修正 | Docker PATH、Windows／PowerShell、Vite、reset、dotenv 載入順序與 `wait_for_db` 等全域啟動語意，後續必須與 anomaly／Domain 功能分開檢閱、驗證及提交，不能以 anomaly 驗收代替。 |
+| P2 | repository 與 DB schema 體積 | 不以檔案行數直接機械拆分。先縮減重複 lifecycle、資料模型與未證明必要的 receipt／membership／delivery／checkpoint/readback 契約，再依保留下來的責任決定 repository 和六張表／十二個 trigger 是否仍必要。 |
+
+明確保留的核心是：owner-specific Query／Preview／Apply 修復流程、純 deterministic historical
+baseline projector、必要的 typed failure、fresh-fact readback、transaction boundary、focused tests，
+以及 migration／rollback 真正要求的 schema/release evidence。最早的失控點認定為：原始目標
+「所有異常都有 owner-specific、人工可完成的修復路徑」在尚未證明既有 durable-job 能力不足、
+也尚未接通正式 producer 前，擴張成新的通用六 owner event-processing platform。後續修改必須
+從原始異常修復驗收重新推導最小範圍，不得從目前候選平台的既成形狀反推需求。
+
 ## 6.1 Concrete owner adapters task-pack correction（2026-08-28）
 
 - `entry`: spec §8.1.1～8.1.2；既有 Authority 可執行的 source-map，不新增 DDL。
@@ -213,6 +236,107 @@ package_route:
   blockers: []
 ```
 
+## 6.4 HPROJ six-owner source runtime（2026-08-28）
+
+- `package_id`: `PKG-HPROJ-SIX-OWNER-SOURCE-RUNTIME`
+- `package_status`: `PACKAGE_READY`
+- `objective`: 依 canonical spec §11 將 baseline confirmed 與六 owner 已提交 repair Apply，透過
+  dedicated shared source stream／outbox 正規化為可重播 HPROJ trigger，完成正式 runtime 與 3→2→1→0。
+- `requirements`: `HPROJ-RB-03`、`HPROJ-RB-06`、`HPROJ-SRC-A1`～`A5`。
+- `acceptance`: `HPROJ-RB-A1`、`A3`～`A8`、`HPROJ-SRC-A1`～`A5`。
+- `authority_digest`: 2026-08-28 人工明確核准 dedicated shared HPROJ source stream／outbox；只涵蓋
+  tracked source、additive schema、allowlisted `lu_test_*`、no-auth API／Browser，不含 `union_db`、
+  production、legacy backfill、reset、switch、provider、generic resolve或owner business-rule變更。
+- `specification`: `PROV-20260828-historical-baseline-projector-contract#11`；shared stream架構與
+  §11.4 `catalog-v2.1` source semantics均已人工核准，`SPEC_READY`／convergence READY。
+- `entry_baseline`: catalog-v2的21 descriptors／repair capabilities；1010 baseline exact event／receipt／outbox；
+  1013 delivery/checkpoint/readback；人工核准的每-case dedicated stream contract。結案須同時對照此baseline與
+  final canonical spec，不因schema／code／tests彼此一致就推定業務完成。
+- `execution_constraints`:
+  - `lu_test_*` allowlist為`EXECUTION_AUTHORITY`，owner為2026-08-21/28人工裁決，只限本Task 96驗收。
+  - 每partition從0開始與strict `+1`為已核准`ARCHITECTURE_DECISION`，owner為spec §11，若stream
+    partition語意改變即重新裁決。
+  - worker `max_attempts=5`、lease 60s、retry 15s/cap 300s仍為`IMPLEMENTATION_DEFAULT`，只限本candidate，
+    operational calibration改變即失效。
+
+### 6.4.1 Necessity／source basis／reuse
+
+Current Spec Pipeline gate：21 descriptors已完成唯讀mapping；其中13項有可直接沿用或強語意對應的owner
+Apply，另8項依已核准canonical spec §11.4修正為formal Q/P/A、receipt或derived／router source語意。
+`catalog-v2.1`已於2026-08-28人工核准；可進入ordered step 2，但release identity仍須由integration writer
+在fresh chain上late-bind，不得預先假設1015。
+
+| Step | Necessity | Source basis | Reuse decision |
+|---|---|---|---|
+| 21 descriptor→formal repair Apply inventory | `required_now` | catalog-v2 `repair_capability`與live owner Q/P/A；缺一entry會漏trigger | `reuse` typed catalog；exact mapping只接受owner UoW證據 |
+| shared stream state＋outbox additive schema | `required_now` | spec §11 per-case contiguous source version；現有owner outbox不共通 | `minimal-glue` additive successor；無seed/backfill/destructive |
+| baseline 1010 source adapter | `required_now` | existing exact event／receipt／outbox join | `reuse`；不複製或重寫1010 |
+| six owner same-UoW envelope emission | `required_now` | spec HPROJ-SRC-A1；現況沒有共同durable repair source | `copy-adapt` shared typed port；owner仍擁有event/receipt |
+| source claim／normalize／runtime composition | `required_now` | 1013 worker只接受typed trigger，尚無source poller | `minimal-glue` source-specific verification＋bounded consumer |
+| dead-letter／reconcile UI readback | `required_now` | RB-06/A5-A7；既有1013 delivery/read API/React | `reuse`，不新增generic resolve |
+| legacy row backfill、read-model scan、`MAX(id)`／timestamp inference | `remove` | spec exclusions與gap oracle | `reject` |
+
+### 6.4.2 Ordered execution contract
+
+1. 先完成`PKG-HISTORICAL-PAYMENT-OWNER-SETTLEMENT`：銀行對帳單優先；pre-system historical fallback依
+   Client receivable／client refund／client subsidy return／staff payout分別建立owner Q/P/A。客戶已付款但
+   Staff未付款的readback必須保持Step 11 false；未通過前不得開始HPROJ finance/staff adapter施工。
+2. 以catalog-v2.1 21 descriptors的`repair_capability`逐項對到現有正式 owner Query／Preview／Apply、唯一outer
+   UoW、committed event／receipt；Client／Staff mapping必須包含上述新owner events。無exact mapping者立即
+   回到Spec Pipeline，不得自行選相似event或由Orders status／historical workbook推定付款。
+3. Late-bind additive successor release：shared partition stream state與immutable source envelope/outbox；同步
+   schema part、assembly、manifest、descriptor、generated release與developer upgrade chain。Change inventory固定
+   schema-only，system seed／business backfill／destructive均為無。
+4. 建立typed emission port；Orders、Matching、Contract Signing、Scheduling、Client Finance、Staff Payables
+   的mapped formal repair Apply在原owner UoW內配置per-case/per-source連續version並append envelope。任何一筆
+   owner event／receipt／envelope失敗即整個Apply rollback；exact replay不新增。
+5. 建立1010 baseline與六owner source-specific adapter；claim後重讀event／receipt／envelope exact binding，
+   normalize `HistoricalBaselineProjectorTrigger`。Missing、cross-case、identity/payload mismatch、gap、stale、
+   out-of-order均fail closed、零projection write。
+6. 將bounded consumer接入既有maintenance worker/runtime，明確管理connection lifetime；沿用1013
+   delivery/checkpoint、retry/dead-letter與post-commit reconcile，不在HTTP request內假同步完成。
+7. 先跑static／property／failure／concurrency focused tests，再跑fresh bootstrap與preserve-data candidate；
+   所有schema gates PASS後才建立唯一 `lu_test_*` owner-repair scenario。
+8. 以正式owner APIs依序使active membership 3→2→1→0；至少包含Client terminal／Staff open時不歸零、
+   client subsidy return不誤投Government、最後Staff terminal才歸零。再驗regression reopen、duplicate、different payload、
+   gap、lease expiry、retry exhaustion、dead-letter與committed-unverified；API／React／no-auth真Browser及DB
+   before-after/readback全部exact。
+9. 同步aggregate receipt與current task ledger；configured developer DB／另一台電腦未通過前維持
+   `DB_CHANGE_NOT_READY`，不得以disposable candidate取代Developer acceptance。
+
+### 6.4.3 Safety／handoff／evidence
+
+- `dependencies`: approved §11、catalog-v2.1、1010 exact source、1013 persistence/API/React bounded slice，
+  以及`PKG-HISTORICAL-PAYMENT-OWNER-SETTLEMENT`先完成Client Finance／Staff Payables歷史owner Q/P/A、
+  persistence、receipt/outbox與source envelope；HPROJ不得先自行實作付款shortcut。
+- `safe_stop`: descriptor無formal Apply、owner UoW不明、existing source identity/version不唯一、schema
+  partial/drift、cross-case、version gap、payload mismatch、post-commit mismatch、target非`lu_test_*`時停止。
+- `transaction`: owner mutation與envelope共用該owner唯一outer UoW；projector在已提交後的獨立UoW執行；
+  外部失敗不回滾已提交owner transaction，也不得偽造projector success。
+- `reconciliation`: same identity＋same payload只重播原delivery；different payload為integrity conflict；
+  committed-unverified只以原trigger identity reconcile。
+- `cleanup`: 只清理或保留明確scenario-owned rows；不全庫清理、不刪既有disposable evidence DB。
+- `evidence`: final receipt保留descriptor→Apply mapping、DB gate table、fresh/preserve receipts、runtime
+  before-after、Browser readback與console；原始dump/journal只放ignored scratch。
+
+### 6.4.4 Bidirectional coverage
+
+| Requirement／Acceptance | Source | Package step | Direct oracle |
+|---|---|---|---|
+| HPS-A3-A10前置 | historical payment spec／owner package | 1 | Client／Staff付款分離、補助退款歸Client、Step11不跨owner推定 |
+| RB-03／SRC-A1 | spec §11；catalog repair capabilities | 2～4 | 21 descriptors全覆蓋；owner event/receipt/envelope同UoW commit或全rollback |
+| RB-03／SRC-A2-A3／RB-A4 | per-case stream architecture | 3～5 | version 0→1；exact replay；different payload/gap/stale/cross-case零寫入 |
+| RB-06／RB-A5-A7 | 1013 delivery/checkpoint/readback | 5～8 | retry/dead-letter/reconcile/alert exact，0 active才auto-resolve |
+| RB-A1/A3／SRC-A4 | historical import repair outcome | 7～8 | formal owner APIs 3→2→1→0；Client terminal／Staff open不歸零；regression reopen |
+| RB-07/A8／SRC-A5 | Global DB gates | 3,7,9 | static、descriptor、plan、fresh、preserve、developer acceptance table |
+
+```yaml
+package_route:
+  status: PACKAGE_READY
+  package: PKG-HPROJ-SIX-OWNER-SOURCE-RUNTIME
+  blockers: []
+```
+
 ## 7. Execution ledger（2026-08-28）
 
 - `PKG-HCAT-OWNER-VECTOR-domain`: `completed`。Step 1～11 catalog、root vector、whole-vector
@@ -300,6 +424,16 @@ package_route:
   descriptor、fresh assembly、cutover catalog與generated full release已完成；fresh Luna/high static
   review為P0=0／P1=0。projector repository／worker／真MySQL與readback仍`not_run`，不得把schema
   slice外推為整包完成。
+- `PKG-HPROJ-PERSISTENCE-V2`: `in-progress`（schema／persistence／API／React／engine bounded slice
+  `completed`）。Additive 1013、delivery/checkpoint、兩個UoW post-commit readback、retry/dead-letter、
+  typed read-only API與Anomalies Drawer readback已完成；receipt現保存canonical emitted occurrence
+  identities，逐筆identity／count／digest可exact核對。主代理integrated focused `73 passed`；React
+  `19 passed`與production build PASS。Fresh bootstrap r3為140 parts／377 triggers／valid；preserve-data
+  r2為1013 owned objects `exact`、`view_mismatches=0`、status `verified`。Fresh Luna/high source inventory
+  另確認baseline confirmed有durable event／receipt／outbox，但六owner committed repair source並無共同
+  durable trigger契約，canonical monotonic source version亦未定義；不得掃描或以其他用途outbox猜來源。
+  因此正式runtime、真MySQL 3→2→1→0及Browser仍為`BLOCKED_SOURCE_CONTRACT`，需先由Spec Pipeline
+  收斂owner Apply同一UoW的typed HPROJ source emission與版本規則。
 - `PKG-HPROJ-OCCURRENCE`: `in-progress`；`PKG-HAPI-UI-RUNTIME`: `not_run`。
 - 1011 reconciliation addendum：遠端commit `a8565d4`已採用current descriptor，manifest與published
   qualification均綁定`5f01…75f3`；舊`0c16…ed2e` blocker與未裁決Spec Pipeline receipt已stale，不再作current gate。
@@ -311,7 +445,8 @@ package_route:
   `03_追蹤清單與證據/evidence/2026-08-28_task96_hcat_rpre_subsystem_slice_receipt.md`、
   `03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_hproj_rpre_static_release_receipt.md`、
   `03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_1011_engine_qualification_receipt.md`、
-  `03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_local_noauth_runtime_receipt.md`。
+  `03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_local_noauth_runtime_receipt.md`、
+  `03_追蹤清單與證據/evidence/2026-08-28_task96_hproj_v2_persistence_api_react_engine_receipt.md`。
 
 ## 8. Catalog-v2 amendment task pack（adopted 2026-08-28）
 

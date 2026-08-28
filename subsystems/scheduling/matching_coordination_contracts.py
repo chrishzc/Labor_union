@@ -46,6 +46,8 @@ class MatchingCommandName(StrEnum):
     APPLY_CRITERIA_DIFF_RESEND = "ApplyCriteriaDiffResend"
     PREVIEW_ZERO_CANDIDATE_ALTERNATIVE = "PreviewZeroCandidateAlternative"
     APPLY_ZERO_CANDIDATE_ALTERNATIVE = "ApplyZeroCandidateAlternative"
+    PREVIEW_ZERO_CANDIDATE_CONFIRMATION = "PreviewZeroCandidateConfirmation"
+    APPLY_ZERO_CANDIDATE_CONFIRMATION = "ApplyZeroCandidateConfirmation"
     APPLY_CAREGIVER_SELECTION = "ApplyCaregiverSelection"
     APPLY_CUSTOMER_DECISION = "ApplyCustomerMatchingDecision"
     PREVIEW_REMATCH = "PreviewRematch"
@@ -78,6 +80,7 @@ MATCHING_ERROR_CODES: tuple[str, ...] = (
     "matching_no_candidate",
     "matching_alternative_not_explicit",
     "matching_alternative_stale",
+    "matching_zero_candidate_confirmation_stale",
     "matching_customer_decision_conflict",
     "matching_customer_acceptance_not_conversion",
     "matching_incumbent_unavailable",
@@ -115,6 +118,7 @@ class MatchingErrorCode(StrEnum):
     NO_CANDIDATE = "matching_no_candidate"
     ALTERNATIVE_NOT_EXPLICIT = "matching_alternative_not_explicit"
     ALTERNATIVE_STALE = "matching_alternative_stale"
+    ZERO_CANDIDATE_CONFIRMATION_STALE = "matching_zero_candidate_confirmation_stale"
     CUSTOMER_DECISION_CONFLICT = "matching_customer_decision_conflict"
     CUSTOMER_ACCEPTANCE_NOT_CONVERSION = "matching_customer_acceptance_not_conversion"
     INCUMBENT_UNAVAILABLE = "matching_incumbent_unavailable"
@@ -253,6 +257,47 @@ class ApplyZeroCandidateAlternative(MatchingCommand):
             raise ValueError("relaxed criteria must be sorted and unique")
         for criterion in self.relaxed_criteria:
             require_canonical_text(criterion, "relaxed criterion", 80)
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewZeroCandidateConfirmation(MatchingCommand):
+    """Preview an owner-confirmed transition from an open pool to no-candidate."""
+
+    criteria_snapshot_id: str
+    package_id: str
+    package_version: int
+    evidence: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        _validate_zero_candidate_confirmation(self)
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyZeroCandidateConfirmation(PreviewZeroCandidateConfirmation):
+    preview_fingerprint: PreviewFingerprint
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if not isinstance(self.preview_fingerprint, PreviewFingerprint):
+            raise TypeError("zero candidate confirmation preview fingerprint is invalid")
+
+
+def _validate_zero_candidate_confirmation(command: object) -> None:
+    require_canonical_text(
+        getattr(command, "criteria_snapshot_id"), "criteria snapshot ID", 191
+    )
+    require_canonical_text(getattr(command, "package_id"), "package ID", 191)
+    require_nonnegative_integer(getattr(command, "package_version"), "package version")
+    evidence = getattr(command, "evidence")
+    if (
+        not isinstance(evidence, tuple)
+        or not evidence
+        or evidence != tuple(sorted(set(evidence)))
+    ):
+        raise ValueError("zero candidate confirmation evidence must be sorted and unique")
+    for item in evidence:
+        require_canonical_text(item, "zero candidate confirmation evidence", 191)
 
 
 @dataclass(frozen=True, slots=True)
@@ -576,6 +621,7 @@ class MatchingApplyReceipt:
     willingness_lineage: DynamicWillingnessLineage | None = None
     notification_intents: tuple[MatchingNotificationIntentProjection, ...] = ()
     criteria_recontact_intents: tuple[MatchingCriteriaRecontactIntentProjection, ...] = ()
+    resulting_package: MatchingPackage | None = None
 
 
 def snapshot_view(snapshot: MatchingCriteriaSnapshot) -> MatchingCriteriaSnapshotView:
@@ -667,6 +713,7 @@ def _validate_sources(value: object) -> None:
 
 
 __all__ = [
+    "ApplyZeroCandidateConfirmation",
     "ApplyInitialCriteriaSnapshot",
     "ApplyCaregiverSelection",
     "ApplyCriteriaDiffResend",
@@ -697,6 +744,7 @@ __all__ = [
     "PreviewRematch",
     "PreviewServiceDateChangeRematch",
     "PreviewZeroCandidateAlternative",
+    "PreviewZeroCandidateConfirmation",
     "QueryMatchingCoordination",
     "ZeroCandidateAlternativeView",
     "ZeroCandidateDecisionLineage",

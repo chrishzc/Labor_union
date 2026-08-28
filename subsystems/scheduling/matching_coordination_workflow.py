@@ -18,6 +18,7 @@ from domains.scheduling.matching_coordination import (
     MatchingDomainError,
     MatchingCrossDomainRequest,
     MatchingPackage,
+    MatchingPackageState,
     MatchingSourceTuple,
     MatchingSourceVersion,
     DynamicWillingnessLineage,
@@ -45,6 +46,7 @@ from subsystems.scheduling.matching_coordination_contracts import (
     ApplyRematch,
     ApplyServiceDateChangeRematch,
     ApplyZeroCandidateAlternative,
+    ApplyZeroCandidateConfirmation,
     CriteriaDiffView,
     MatchingApplyReceipt,
     MatchingCommand,
@@ -60,6 +62,7 @@ from subsystems.scheduling.matching_coordination_contracts import (
     PreviewRematch,
     PreviewServiceDateChangeRematch,
     PreviewZeroCandidateAlternative,
+    PreviewZeroCandidateConfirmation,
     QueryMatchingCoordination,
     ZeroCandidateAlternativeView,
     alternative_view,
@@ -332,6 +335,8 @@ class MatchingCoordinationWorkflow:
                 risk_warnings=("explicit_manual_confirmation_required",),
             )
             return alternative_view(alternative)
+        if isinstance(request, PreviewZeroCandidateConfirmation):
+            return package_view(_zero_candidate_confirmation_package(request, facts))
         raise _workflow_error(request.correlation_id, "matching_criteria_invalid")
 
     def preview_matching_package(self, package: MatchingPackage) -> MatchingPackageView:
@@ -637,6 +642,22 @@ class MatchingCoordinationWorkflow:
             lineage = build_zero_candidate_decision(event_id=f"{request.idempotency_key.value}:zero-candidate", case_no=request.case_no, alternative=alternative, decision=request.decision, actor_id=request.actor.actor_id, source_versions=facts.source_versions)
             state = "alternative_agreed_pending_owning_workflows" if lineage.decision is ZeroCandidateDecision.AGREE else "awaiting_matching"
             return self._receipt(request, facts, preview_fingerprint, result_state=state, zero_candidate_decision=lineage)
+        if isinstance(request, ApplyZeroCandidateConfirmation):
+            package = _zero_candidate_confirmation_package(request, facts)
+            if request.preview_fingerprint != package.fingerprint:
+                raise _workflow_error(
+                    request.correlation_id,
+                    "matching_zero_candidate_confirmation_stale",
+                )
+            event_id = f"{request.idempotency_key.value}:zero-candidate-confirmed"
+            return self._receipt(
+                request,
+                facts,
+                preview_fingerprint,
+                result_state="zero_candidate_confirmed",
+                outbox_intent_ids=(f"{event_id}:assignment",),
+                resulting_package=package,
+            )
         raise _workflow_error(request.correlation_id, "matching_criteria_invalid")
 
     def apply_customer_decision(self, request: ApplyCustomerMatchingDecision, facts: MatchingCoordinationFacts, *, fresh_effects_match: bool = True) -> MatchingDecisionView:
@@ -698,9 +719,13 @@ class MatchingCoordinationWorkflow:
         criteria_recontact_intents: tuple[
             MatchingCriteriaRecontactIntentProjection, ...
         ] = (),
+        resulting_package: MatchingPackage | None = None,
     ) -> MatchingApplyReceipt:
         command = command_fingerprint(request)
-        event_id = f"{request.idempotency_key.value}:decision" if candidate_id is not None or isinstance(request, ApplyCustomerMatchingDecision) else None
+        if isinstance(request, ApplyZeroCandidateConfirmation):
+            event_id = f"{request.idempotency_key.value}:zero-candidate-confirmed"
+        else:
+            event_id = f"{request.idempotency_key.value}:decision" if candidate_id is not None or isinstance(request, ApplyCustomerMatchingDecision) else None
         outbox = outbox_intent_ids
         if cross_domain_request is not None:
             outbox = (cross_domain_request.request_id,)
@@ -751,7 +776,7 @@ class MatchingCoordinationWorkflow:
             preview,
             facts.source_versions,
             event_id,
-            facts.package.package_id if facts.package else None,
+            resulting_package.package_id if resulting_package else (facts.package.package_id if facts.package else None),
             outbox,
             result_state,
             cross_domain_request,
@@ -759,6 +784,7 @@ class MatchingCoordinationWorkflow:
             willingness_lineage,
             notifications,
             criteria_recontact_intents,
+            resulting_package,
         )
 
     def _facts(self, request: QueryMatchingCoordination | str, facts: MatchingCoordinationFacts | None) -> MatchingCoordinationFacts:
@@ -768,6 +794,58 @@ class MatchingCoordinationWorkflow:
             raise ValueError("Phase A workflow requires typed facts or a read port")
         case_no = request.case_no if isinstance(request, QueryMatchingCoordination) else request
         return self._read_port.load(case_no)
+
+
+def _zero_candidate_confirmation_package(
+    request: PreviewZeroCandidateConfirmation | ApplyZeroCandidateConfirmation,
+    facts: MatchingCoordinationFacts,
+) -> MatchingPackage:
+    parent = facts.package
+    if (
+        parent is None
+        or parent.package_id != request.package_id
+        or parent.version != request.package_version
+        or parent.criteria_snapshot_id != request.criteria_snapshot_id
+        or facts.snapshot.snapshot_id != request.criteria_snapshot_id
+        or parent.state is not MatchingPackageState.CANDIDATE_POOL_OPEN
+    ):
+        raise _workflow_error(
+            request.correlation_id,
+            "matching_zero_candidate_confirmation_stale",
+        )
+    if any(
+        candidate.eligibility.value == "eligible"
+        and candidate.willingness == "willing"
+        for candidate in facts.candidates
+    ):
+        raise _workflow_error(
+            request.correlation_id,
+            "matching_zero_candidate_confirmation_stale",
+        )
+    selection = fingerprint_payload(
+        {
+            "case_no": request.case_no,
+            "criteria_snapshot_id": request.criteria_snapshot_id,
+            "parent_package_id": parent.package_id,
+            "parent_package_version": parent.version,
+            "parent_package_fingerprint": parent.fingerprint.value,
+            "source_versions": tuple(item.as_payload() for item in facts.source_versions),
+            "reason": request.reason,
+            "evidence": request.evidence,
+        }
+    )
+    return MatchingPackage(
+        package_id=f"matching:{request.case_no}:no-candidate:{selection.value[:24]}",
+        version=parent.version + 1,
+        mode=parent.mode,
+        segments=(),
+        required_service_dates=parent.required_service_dates,
+        candidate_results=(),
+        criteria_snapshot_id=parent.criteria_snapshot_id,
+        source_versions=facts.source_versions,
+        state=MatchingPackageState.NO_CANDIDATE,
+        blockers=("no_legal_candidate",),
+    )
 
 
 def _validate_source_versions(expected: MatchingSourceTuple, current: MatchingSourceTuple, correlation_id: CorrelationId) -> None:

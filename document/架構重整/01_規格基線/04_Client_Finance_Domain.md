@@ -102,6 +102,26 @@ Modules：
 - `ReconciliationInvariantValidator`
 - `ExternalReferenceDeduplicator`
 
+### Historical Payment Evidence／Settlement（2026-08-28 人工裁決）
+
+對使用系統前且已正式採納的 historical case，付款與本 Domain 結清仍須依方向分開：客戶付款給
+工會只清償 `receivable_from_client`；工會一般退款給客戶只清償 `payable_to_client/refund|adjustment`；
+工會退還客戶補助款只清償 `payable_to_client/subsidy_return`。客戶補助退款的收款人是客戶，屬本
+Domain；不得投影成 Government Subsidy 或 Staff Payables 已完成。
+
+首要證據是 Finance Import 匯入的 canonical bank facts，能正常核銷時固定走既有 reconciliation。
+舊銀行／帳務證據缺失、歸屬不明或無法可靠還原時，才允許歷史人工 `paid | settled` Q/P/A；它必須
+綁定 historical adoption、payer/payee/direction 與 exact obligation identities，並保存 actor、reason、
+evidence、版本、fingerprint、idempotency、receipt及outbox。未知付款日期保存 null／unknown，不得用
+匯入日或操作日補值。這是替代 evidence source，不是 generic balance editor，也不得偽造 Finance Import
+row、bank allocation或另一帳務方向。
+
+`paid` 是特定付款方向與義務的 payment fact；`settled` 是本 Domain 選定 obligations 的合法歷史處分。
+兩者都不能推定 Staff Payables 或 Orders Step 11完成。後續退款、退匯、reversal、服務／金額更正或新
+obligation依strictly-newer owner event更新current projection，未被舊event exact綁定的義務保持open。
+完整跨Domain契約見
+`../02_決策與退役執行記錄/PROV-20260828-historical-payment-and-owner-settlement-spec.md`。
+
 ### Immutable Ledger／Reversal
 
 原交易永不 UPDATE。reversal 指向同 case、同 obligation kind、同 ledger 的原交易；不得超過仍可沖銷餘額。
@@ -252,6 +272,9 @@ Commands：
 - `PreviewClientSubsidyAdvance`
 - `ApplyClientSubsidyAdvance`
 - `RebuildClientObligationsForCase`
+- `QueryHistoricalClientPaymentRepair`
+- `PreviewHistoricalClientPaymentRepair`
+- `ApplyHistoricalClientPaymentRepair`
 
 Stable errors：
 
@@ -274,6 +297,9 @@ Stable errors：
 - `subsidy_advance_settlement_ambiguous`
 - `client_finance_direction_missing`
 - `client_finance_direction_amount_mismatch`
+- `historical_client_payment_not_eligible`
+- `historical_client_payment_direction_ambiguous`
+- `historical_client_payment_obligation_binding_invalid`
 
 ## 7. Live writer 退出
 

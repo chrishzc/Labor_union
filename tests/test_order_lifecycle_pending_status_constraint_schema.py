@@ -42,7 +42,9 @@ def test_release_hashes_and_catalog_order_are_exact() -> None:
     ).hexdigest()
     assert manifest["backfills"] == []
     assert names.index("1012_service_before_replacement.sql") < names.index(SQL_PATH.name)
-    assert names[-1] == SQL_PATH.name
+    assert names.index(SQL_PATH.name) < names.index(
+        "1014_historical_baseline_projector_v2.sql"
+    )
 
 
 def test_descriptor_matches_full_canonical_lifecycle_checks() -> None:

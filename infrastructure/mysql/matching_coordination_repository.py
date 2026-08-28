@@ -198,7 +198,7 @@ class MySqlMatchingCoordinationRepository:
         receipt: MatchingApplyReceipt,
     ) -> None:
         snapshot_row_id = self._ensure_snapshot(command, facts)
-        package_row_id = self._ensure_package(command, facts)
+        package_row_id = self._ensure_package(command, facts, receipt)
         self._ensure_event(
             command,
             facts,
@@ -327,9 +327,12 @@ class MySqlMatchingCoordinationRepository:
             return int(cursor.lastrowid)
 
     def _ensure_package(
-        self, command: MatchingCommand, facts: MatchingCoordinationFacts
+        self,
+        command: MatchingCommand,
+        facts: MatchingCoordinationFacts,
+        receipt: MatchingApplyReceipt,
     ) -> int | None:
-        package = facts.package
+        package = receipt.resulting_package or facts.package
         if package is None:
             return None
         existing = self._one(
@@ -342,10 +345,21 @@ class MySqlMatchingCoordinationRepository:
                 raise MatchingCoordinationPersistenceError("matching package drift")
             return int(existing["id"])
         parent = self._one(
-            "SELECT id FROM matching_coordination_package_lineage "
+            "SELECT id,package_id,package_version FROM matching_coordination_package_lineage "
             "WHERE case_no=%s ORDER BY package_version DESC LIMIT 1 FOR UPDATE",
             (command.case_no,),
         )
+        if receipt.resulting_package is not None:
+            current = facts.package
+            if (
+                current is None
+                or parent is None
+                or str(parent["package_id"]) != current.package_id
+                or int(parent["package_version"]) != current.version
+            ):
+                raise MatchingCoordinationPersistenceError(
+                    "matching resulting package parent is stale"
+                )
         snapshot = self._one(
             "SELECT id FROM matching_coordination_criteria_snapshots "
             "WHERE snapshot_id=%s",
@@ -397,7 +411,8 @@ class MySqlMatchingCoordinationRepository:
             if existing["event_digest"] != digest:
                 raise MatchingCoordinationPersistenceError("matching event drift")
             return int(existing["id"])
-        resulting_version = facts.package.version if facts.package else facts.snapshot.criteria_version
+        resulting_package = receipt.resulting_package or facts.package
+        resulting_version = resulting_package.version if resulting_package else facts.snapshot.criteria_version
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "INSERT INTO matching_coordination_events "
@@ -455,6 +470,7 @@ def _event_type(command: MatchingCommand) -> str:
         "ApplyCaregiverSelection": "caregiver_willingness",
         "ApplyCustomerMatchingDecision": "customer_decision",
         "ApplyZeroCandidateAlternative": "customer_decision",
+        "ApplyZeroCandidateConfirmation": "package_proposed",
         "ApplyRematch": "rematch_required",
         "ApplyLeaveImpactOnMatching": "rematch_required",
         "ApplyServiceDateChangeRematch": "rematch_required",
@@ -522,6 +538,7 @@ def _intent_payloads(
                 "receipt_id": receipt.receipt_id,
                 "result_state": receipt.result_state,
                 "zero_candidate_decision": _jsonable(receipt.zero_candidate_decision),
+                "resulting_package": _jsonable(receipt.resulting_package),
             },
         )
     return tuple(
@@ -750,6 +767,11 @@ def _receipt_from_payload_unchecked(
         willingness_lineage=willingness,
         notification_intents=notifications,
         criteria_recontact_intents=recontact_intents,
+        resulting_package=(
+            _package_from_payload(payload["resulting_package"])
+            if payload.get("resulting_package") is not None
+            else None
+        ),
     )
 
 

@@ -57,7 +57,7 @@ provider success 或前端假計算宣稱情境完成。
 | R-04 | 服務前已建formal assignment，但官方服務日為0 | 0 actual service；effective generation/assignment/version | atomic supersede／new matching round；effective projection不再顯示舊月嫂；Step 2 | `MISSING`；Assignment Plan不允許empty segments |
 | R-05 | 已提供至少一日服務，後續月嫂不可服務 | assignment-owned actual service facts > 0 | 禁止整案回Step 2；referral至既有Leave/Substitution Q/P/A；只重建受影響日 | `REUSE_READY_SOURCE`；typed source/React tests已有，actual-service誤走replacement負例與真Browser `NOT_RUN` |
 | R-06 | 代班後薪資與客戶義務 | original/substitute assignments、official days、Payroll/Finance versions | 沿用 current Payroll／Finance impacts；原月嫂已服務金額保留，代班日算新 assignment；不建新公式。正常不要求代班月嫂獨立契約／簽回或客戶追加確認／變更簽署；可選人工 `substitution_note`與可選附件，未填、取消、寫入或附件archive失敗都不阻擋代班、排班 lineage 或薪資 | `PARTIAL_GAP`；核心無新文件 gate `28 passed`；B1／S1／S2已採用，note owner／lineage／method已收旂，但schema／release／API／readback／Browser `NOT_RUN`，維持 `DB_CHANGE_NOT_READY` |
-| R-07 | 服務前找不到替代月嫂 | successor round exists；0 legal candidate | 維持Step 2 blocked，顯示可行處置；不恢復舊月嫂、不假推進 | `PARTIAL_GAP` |
+| R-07 | 服務前找不到替代月嫂 | successor round exists；0 legal candidate | 維持Step 2 blocked，顯示可行處置；不恢復舊月嫂、不假推進 | `REUSE_READY`；Matching owner Q/P/A→RPRE Q/P/A→1012 persistence→Apply response canonical readback→no-auth true Browser均PASS；final case `115960427`顯示Step 2、0 candidate、`blocked_no_candidate`、`complete=true`且不宣稱異常解除。 |
 
 ### 3.3 訂單取消
 
@@ -77,7 +77,7 @@ provider success 或前端假計算宣稱情境完成。
 | F-01 | 歷史來源宣稱訂單完成，但缺actual start | Orders completion lineage + actual start missing | 建具體root anomaly；不假完成；owner Q/P/A補齊 | `MISSING` |
 | F-02 | 缺official service facts／service-time tuple | effective assignment-owned facts missing | occurrence-level anomaly；補齊後fresh stage projection | `MISSING` |
 | F-03 | Client已結清、Staff未結清，或反之 | independent owner versions/remaining | Orders completion與兩邊Finance projection分開；未結清alert保留 | `PARTIAL_GAP`；owner workflows可重用，Historical composition缺 |
-| F-04 | Orders、Client、Staff與必要bank/allocation roots全齊 | canonical completion + terminal settlements | Step 11 completed；historical operational/import alerts inactive；歷史lineage保留 | `REUSE_READY`；`HOB-F04-ROUTE-A-001` 已在 canonical `lu_test_task96_scenarios_20260827` 由正式 command lineage 推進至 stage-07-settled；typed API／projector／React／no-auth Browser正向PASS，Step 11與historical alerts完成、active alerts為0。 |
+| F-04 | Orders completion、Client與Staff各自的terminal owner lineage全齊 | canonical completion + owner-specific terminal settlements；一般銀行路徑使用exact bank/allocation，符合歷史fallback資格時可使用已核准的owner historical event | Step 11 completed；historical operational/import alerts inactive；歷史lineage保留 | `REUSE_READY`；`HOB-F04-ROUTE-A-001` 已在 canonical `lu_test_task96_scenarios_20260827` 由正式bank-backed command lineage推進至 stage-07-settled；typed API／projector／React／no-auth Browser正向PASS。該receipt是合法銀行路徑的既有證據，不代表銀行allocation是歷史案件唯一合法terminal來源。 |
 
 ### 3.5 異常修正與系統恢復
 
@@ -225,7 +225,7 @@ artifacts、expected oracles 與 receipts，不合併兩個 DB，也不操作 `u
 | stage-04-assignment | effective assignment、official date/time；尚未有 actual service | R-04、C-01、C-02 |
 | stage-05-in-service | 至少一筆 assignment-owned actual service fact | R-05、R-06、C-03 |
 | stage-06-service-complete | contracted service facts齊全，但 owner settlement可各自未完成 | C-04、F-02、F-03 |
-| stage-07-settled | Orders completion、Client settlement、Staff payout／bank allocation皆terminal | F-04 |
+| stage-07-settled | Orders completion、Client settlement、Staff payout皆有各自terminal owner lineage；來源可為一般exact bank/allocation或符合資格的approved historical owner event | F-04 |
 
 每個 stage 只能由上一 stage 的正式 command lineage 推進；R-02～R-04 的服務前換人會 append
 successor event 並把 current operational projection 回到 stage-02 所代表的 matching gates，但不刪除

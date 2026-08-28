@@ -12,6 +12,7 @@ from domains.scheduling.service_before_replacement import (
     ActualServiceProof,
     ReplacementRootIdentity,
     ReplacementRootKind,
+    ReplacementResumeStep,
     ReplacementScenario,
     ServiceBeforeReplacementFacts,
 )
@@ -89,6 +90,13 @@ class FakeRepository:
             candidate.retained_root_ids,
             candidate.superseded_root_ids,
             candidate.created_root_ids,
+            candidate.resume_step,
+            0 if candidate.candidate_pool_reuse_proof is None else 1,
+            (
+                "blocked_no_candidate"
+                if candidate.scenario is ReplacementScenario.R07
+                else None
+            ),
         )
 
     def load_owner_readback(self, case_no, *, for_update):
@@ -282,6 +290,7 @@ def test_replay_requires_readback_identity_to_match_receipt():
         first.receipt.successor_round_identity, first.receipt.resulting_generation_version,
         first.receipt.resulting_event_version, first.receipt.resulting_aggregate_version, (),
         preview.superseded_root_ids, preview.created_root_ids,
+        ReplacementResumeStep.STEP_4, 1, None,
     )
     replay = workflow.apply(request(preview))
     assert replay.status is ReplacementApplyStatus.OUTCOME_UNKNOWN

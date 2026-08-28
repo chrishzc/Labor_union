@@ -76,10 +76,10 @@ acceptance 的 hardening 均為 `remove` 或 `required_later`，不得進入本 
 
 - `objective`: 只有 Orders completion、actual start、official service facts、Client settlement與Staff payout正式 terminal lineage 全部成立時，Step 11與historical alerts才完成。
 - `requirements/acceptance`: HOB-A5、HOB-N1。
-- `dependencies`: WP-HOB-A；Orders、Scheduling、Client Finance、Staff Payables typed readbacks。
+- `dependencies`: WP-HOB-A；Orders、Scheduling、Client Finance、Staff Payables typed readbacks；若要支援無法可靠還原銀行資料的pre-system historical case，須先完成 `PROV-20260828-historical-payment-and-owner-settlement-work-packages.md`。
 - `in_scope`: aggregate completion oracle、missing-root actionable anomaly、owner referral與fresh terminal projector。
 - `prohibitions`: 不以 `orders.status`、匯入 status、receipt-only、provider success或 alert tracking代替 owner terminal facts。
-- `steps`: Query所有 owner roots/version → 計算缺項 → 各 owner Q/P/A → fresh aggregate readback → Step 11／alerts projection。
+- `steps`: Query所有 owner roots/version → 計算缺項 → 各 owner走其正式Q/P/A（一般exact bank/allocation；僅符合資格的歷史案件可走owner-specific historical event）→ fresh aggregate readback → Step 11／alerts projection。
 - `negative/failure`: 任一 owner unavailable/stale/integrity blocker保持 active；不得跨 Domain直接寫 ledger或payout。
 - `verification`: F-01～F-04 source、真 MySQL/API/React/Browser，證明每項缺漏逐一解除及最後才完成。
 
@@ -157,7 +157,7 @@ Staff Payables necessity review另確認：正式規格要求case-scoped current
 mutation的version／immutable successor lineage，未要求新增持久化case settlement root、跨域scalar version
 或其歷史backfill。因此`SP1-M`只保留為未來SLO／查詢成本證據成立時的可選優化；當前最低必要候選為
 `SP2-Q` query-only typed source vector，並已於2026-08-27獲人工確認。open／partially recovered overpayment必須維持獨立異常，但在原
-obligation歸零且payout/allocation lineage完整時，不自行阻擋Step 11。
+obligation歸零且Staff owner terminal lineage完整時，不自行阻擋Step 11；一般案件的lineage仍由exact payout/allocation形成，符合新裁決資格的pre-system historical case則可由approved historical owner event形成，不得跨owner推定。
 
 SP2-Q internal slice的兩輪Luna High verifier均先找出阻擋反例，主代理依DDH terminal receipt回到E2修正；
 所有子代理零寫入。最終主代理候選已通過`78`項focused／相鄰回歸、compile、`git diff --check`與

@@ -1,12 +1,17 @@
 /**
  * File: MatchingCoordinationWorkbench.tsx
- * Description: 提供 M3 媒合協調 Query、七種 Preview 與八種 Apply 的 typed 進階操作台。
+ * Description: 提供 M3 媒合協調 Query、八種 Preview 與九種 Apply 的 typed 進階操作台。
  */
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import './MatchingCoordinationWorkbench.css';
 import {
   matchingCoordinationClient,
 } from '../api/matching_coordination/matching_coordination_client';
+import {
+  ApiNetworkError,
+  ApiTimeoutError,
+  MatchingCoordinationClientError,
+} from '../api/matching_coordination/matching_coordination_errors';
 import type {
   ApplyCaregiverSelectionRequest,
   ApplyCriteriaDiffRequest,
@@ -16,6 +21,7 @@ import type {
   ApplyRematchRequest,
   ApplyServiceDateRematchRequest,
   ApplyZeroCandidateRequest,
+  ApplyZeroCandidateConfirmationRequest,
   CriteriaDiff,
   LeaveImpactPreviewResponse,
   MatchingCriteriaSnapshot,
@@ -28,6 +34,7 @@ import type {
   PreviewRematchRequest,
   PreviewServiceDateRematchRequest,
   PreviewZeroCandidateRequest,
+  PreviewZeroCandidateConfirmationRequest,
   ServiceDateRematchPreviewResponse,
   ZeroCandidateAlternative,
 } from '../api/matching_coordination/matching_coordination_schemas';
@@ -43,6 +50,7 @@ type Operation =
   | 'previewMatchingPackage'
   | 'previewCriteriaDiff'
   | 'previewZeroCandidate'
+  | 'previewZeroCandidateConfirmation'
   | 'previewRematch'
   | 'previewLeaveImpact'
   | 'previewServiceDateRematch'
@@ -51,6 +59,7 @@ type Operation =
   | 'applyCaregiverSelection'
   | 'applyCustomerDecision'
   | 'applyZeroCandidate'
+  | 'applyZeroCandidateConfirmation'
   | 'applyRematch'
   | 'applyLeaveImpact'
   | 'applyServiceDateRematch';
@@ -76,6 +85,8 @@ const OPERATION_GROUPS: ReadonlyArray<readonly [string, ReadonlyArray<readonly [
     ['applyCriteriaDiff', '確認條件差異處理'],
     ['previewZeroCandidate', '試算零候選替代方案'],
     ['applyZeroCandidate', '確認零候選處理'],
+    ['previewZeroCandidateConfirmation', '試算確認目前確實無候選'],
+    ['applyZeroCandidateConfirmation', '確認目前確實無候選'],
     ['previewRematch', '試算重新媒合'],
     ['applyRematch', '確認重新媒合'],
     ['previewLeaveImpact', '試算月嫂請假影響'],
@@ -93,6 +104,7 @@ const REQUIRED_PREVIEW: Partial<Record<Operation, Operation>> = {
   applyCustomerDecision: 'previewMatchingPackage',
   applyCriteriaDiff: 'previewCriteriaDiff',
   applyZeroCandidate: 'previewZeroCandidate',
+  applyZeroCandidateConfirmation: 'previewZeroCandidateConfirmation',
   applyRematch: 'previewRematch',
   applyLeaveImpact: 'previewLeaveImpact',
   applyServiceDateRematch: 'previewServiceDateRematch',
@@ -109,6 +121,16 @@ function displayMatchingError(caught: unknown, fallback: string): string {
   if (message.includes('matching_criteria_snapshot unavailable')) return '本案件尚未建立媒合條件快照；請先執行初始條件 Preview，核對後再提交。';
   if (message.includes('source') && message.includes('unavailable')) return '此案件的媒合來源資料尚未完整，請依錯誤來源補正後重試。';
   return message || fallback;
+}
+
+function isOutcomeUnknown(caught: unknown): boolean {
+  return caught instanceof ApiNetworkError
+    || caught instanceof ApiTimeoutError
+    || (
+      caught instanceof MatchingCoordinationClientError
+      && caught.retryable
+      && (caught.category === 'unavailable' || caught.category === 'internal')
+    );
 }
 
 function templateFor(
@@ -131,6 +153,7 @@ function templateFor(
     case 'previewMatchingPackage': return JSON.stringify({ ...common, criteria_snapshot_id: snapshotId, required_service_dates: requiredDates, segments: [] }, null, 2);
     case 'previewCriteriaDiff': return JSON.stringify({ ...common, before_snapshot_id: snapshotId, after_snapshot_id: '' }, null, 2);
     case 'previewZeroCandidate': return JSON.stringify({ ...common, criteria_snapshot_id: snapshotId, policy_id: '', policy_version: 1, relaxed_criteria: [] }, null, 2);
+    case 'previewZeroCandidateConfirmation': return JSON.stringify({ ...common, evidence: ['fresh_pool_query_empty'], criteria_snapshot_id: snapshotId, package_id: packageId, package_version: packageVersion }, null, 2);
     case 'previewRematch': return JSON.stringify({ ...common, criteria_snapshot_id: snapshotId, package_id: packageId || null }, null, 2);
     case 'previewLeaveImpact': return JSON.stringify({ ...common, package_id: packageId, criteria_snapshot_id: snapshotId, receipt_key: '', expected_leave_version: 1, original_staff_id: 1 }, null, 2);
     case 'previewServiceDateRematch': return JSON.stringify({ ...common, criteria_snapshot_id: snapshotId, package_id: packageId || null, assignment_id: 1, original_staff_id: 1, original_service_dates: requiredDates, shifted_service_dates: [] }, null, 2);
@@ -139,6 +162,7 @@ function templateFor(
     case 'applyCaregiverSelection': return JSON.stringify({ ...common, criteria_snapshot_id: snapshotId, package_id: packageId, package_version: packageVersion, candidate_id: candidateId, willingness: 'willing', reason_code: null, affected_criteria: [], preview_fingerprint: previewFingerprint }, null, 2);
     case 'applyCustomerDecision': return JSON.stringify({ ...common, criteria_snapshot_id: snapshotId, package_id: packageId, package_version: packageVersion, candidate_id: candidateId || null, decision: 'accepted', preview_fingerprint: previewFingerprint }, null, 2);
     case 'applyZeroCandidate': return JSON.stringify({ ...common, criteria_snapshot_id: snapshotId, policy_id: '', policy_version: 1, relaxed_criteria: [], alternative_id: '', preview_fingerprint: previewFingerprint, decision: 'agree' }, null, 2);
+    case 'applyZeroCandidateConfirmation': return JSON.stringify({ ...common, evidence: ['fresh_pool_query_empty'], criteria_snapshot_id: snapshotId, package_id: packageId, package_version: packageVersion, preview_fingerprint: previewFingerprint }, null, 2);
     case 'applyRematch': return JSON.stringify({ ...common, criteria_snapshot_id: snapshotId, package_id: packageId || null, preview_fingerprint: previewFingerprint }, null, 2);
     case 'applyLeaveImpact': return JSON.stringify({ ...common, package_id: packageId, leave_reference: '', criteria_snapshot_id: snapshotId, expected_leave_version: 1, original_staff_id: 1, preview_fingerprint: previewFingerprint }, null, 2);
     case 'applyServiceDateRematch': return JSON.stringify({ ...common, criteria_snapshot_id: snapshotId, package_id: packageId || null, assignment_id: 1, original_staff_id: 1, original_service_dates: requiredDates, shifted_service_dates: [], preview_fingerprint: previewFingerprint }, null, 2);
@@ -167,6 +191,12 @@ export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkben
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [outcomeUnknown, setOutcomeUnknown] = useState(false);
+  const zeroCandidateConfirmationAttempt = useRef<{
+    identity: string;
+    correlationId: string;
+    idempotencyKey: string;
+  } | null>(null);
   const isApply = operation.startsWith('apply');
   const embeddedInOrderWorkflow = initialCaseNo.trim().length > 0;
   const operationLabel = useMemo(() => OPERATIONS.find(([id]) => id === operation)?.[1] ?? operation, [operation]);
@@ -175,10 +205,16 @@ export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkben
     lastPreviewOperation === requiredPreview && lastPreviewFingerprint !== null
   );
 
+  const invalidateZeroCandidateConfirmationAttempt = () => {
+    zeroCandidateConfirmationAttempt.current = null;
+    setOutcomeUnknown(false);
+  };
+
   const loadTemplate = (nextOperation = operation) => {
     setPayloadText(templateFor(nextOperation, query, lastPreviewFingerprint, initialPreviewSourceVersions));
     setConfirmed(false);
     setError(null);
+    invalidateZeroCandidateConfirmationAttempt();
   };
 
   const runQuery = async () => {
@@ -190,6 +226,7 @@ export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkben
       setQuery(value);
       setLastPreviewFingerprint(null);
       setLastPreviewOperation(null);
+      invalidateZeroCandidateConfirmationAttempt();
       setPayloadText(templateFor(operation, value, null, initialPreviewSourceVersions));
     } catch (caught: unknown) {
       setError(displayMatchingError(caught, '媒合協調查詢失敗。'));
@@ -206,7 +243,17 @@ export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkben
     setReceipt(null);
     try {
       const parsed: unknown = JSON.parse(payloadText);
-      const options = { correlationId: operationIdentity(`matching-${operation}`), idempotencyKey: operationIdentity(`matching-${operation}-apply`) };
+      const attemptIdentity = `${operation}\n${payloadText}`;
+      let options = {
+        correlationId: operationIdentity(`matching-${operation}`),
+        idempotencyKey: operationIdentity(`matching-${operation}-apply`),
+      };
+      if (operation === 'applyZeroCandidateConfirmation') {
+        if (zeroCandidateConfirmationAttempt.current?.identity !== attemptIdentity) {
+          zeroCandidateConfirmationAttempt.current = { identity: attemptIdentity, ...options };
+        }
+        options = zeroCandidateConfirmationAttempt.current;
+      }
       let summary: PreviewSummary | null = null;
       let applyReceipt: MatchingApplyReceiptView | null = null;
       switch (operation) {
@@ -227,6 +274,22 @@ export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkben
           summary = { title: '零候選替代方案', status: value.candidate_result ? '找到替代候選' : '仍無候選', identity: value.alternative_id, fingerprint: value.preview_fingerprint, details: [`排序 ${value.deterministic_rank}`, ...value.risk_warnings] };
           break;
         }
+        case 'previewZeroCandidateConfirmation': {
+          const value = await matchingCoordinationClient.previewZeroCandidateConfirmation(caseNo.trim(), parsed as PreviewZeroCandidateConfirmationRequest, options);
+          summary = {
+            title: '確認目前確實無候選',
+            status: 'Step 2 受阻',
+            identity: value.package_id,
+            fingerprint: value.fingerprint,
+            details: [
+              '目前沒有合法且願意承接的月嫂',
+              '處置：blocked_no_candidate',
+              '這只記錄目前的受阻事實，不代表異常已解除',
+              ...value.blockers,
+            ],
+          };
+          break;
+        }
         case 'previewRematch': summary = packageSummary('重新媒合方案', await matchingCoordinationClient.previewRematch(caseNo.trim(), parsed as PreviewRematchRequest, options)); break;
         case 'previewLeaveImpact': {
           const value: LeaveImpactPreviewResponse = await matchingCoordinationClient.previewLeaveImpact(caseNo.trim(), parsed as PreviewLeaveImpactRequest, options);
@@ -244,6 +307,7 @@ export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkben
         case 'applyCaregiverSelection': applyReceipt = toMatchingApplyReceiptView(await matchingCoordinationClient.applyCaregiverSelection(caseNo.trim(), parsed as ApplyCaregiverSelectionRequest, options)); break;
         case 'applyCustomerDecision': applyReceipt = toMatchingApplyReceiptView(await matchingCoordinationClient.applyCustomerDecision(caseNo.trim(), parsed as ApplyCustomerDecisionRequest, options)); break;
         case 'applyZeroCandidate': applyReceipt = toMatchingApplyReceiptView(await matchingCoordinationClient.applyZeroCandidate(caseNo.trim(), parsed as ApplyZeroCandidateRequest, options)); break;
+        case 'applyZeroCandidateConfirmation': applyReceipt = toMatchingApplyReceiptView(await matchingCoordinationClient.applyZeroCandidateConfirmation(caseNo.trim(), parsed as ApplyZeroCandidateConfirmationRequest, options)); break;
         case 'applyRematch': applyReceipt = toMatchingApplyReceiptView(await matchingCoordinationClient.applyRematch(caseNo.trim(), parsed as ApplyRematchRequest, options)); break;
         case 'applyLeaveImpact': applyReceipt = toMatchingApplyReceiptView(await matchingCoordinationClient.applyLeaveImpact(caseNo.trim(), parsed as ApplyLeaveImpactRequest, options)); break;
         case 'applyServiceDateRematch': applyReceipt = toMatchingApplyReceiptView(await matchingCoordinationClient.applyServiceDateRematch(caseNo.trim(), parsed as ApplyServiceDateRematchRequest, options)); break;
@@ -256,10 +320,17 @@ export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkben
       if (applyReceipt) {
         setReceipt(applyReceipt);
         setConfirmed(false);
+        invalidateZeroCandidateConfirmationAttempt();
         await runQuery();
       }
     } catch (caught: unknown) {
-      setError(displayMatchingError(caught, `${operationLabel}執行失敗。`));
+      if (operation === 'applyZeroCandidateConfirmation' && isOutcomeUnknown(caught)) {
+        setOutcomeUnknown(true);
+        setError('提交結果目前無法確認。請保留相同內容，並使用同一操作識別碼重試；系統會對帳原結果，不會改用新命令。');
+      } else {
+        invalidateZeroCandidateConfirmationAttempt();
+        setError(displayMatchingError(caught, `${operationLabel}執行失敗。`));
+      }
     } finally {
       setBusy(false);
     }
@@ -271,7 +342,7 @@ export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkben
         <div><h2>{embeddedInOrderWorkflow ? '先核對本案媒合條件' : '建立媒合條件與確認決定'}</h2><p>{embeddedInOrderWorkflow ? '先依訂單、服務日期與篩選規則核對；確認後再到下一步查詢可聯繫的月嫂。' : '依目前案件根事實試算；確認提交前會再次核對來源版本。'}</p></div>
       </header>
       <div className="matching-coordination-query-row">
-        {embeddedInOrderWorkflow ? <p className="matching-coordination-case-context">案件 {caseNo}</p> : <label htmlFor="matching-case-no">案件編號<input id="matching-case-no" value={caseNo} onChange={(event) => { setCaseNo(event.target.value); setQuery(null); setInitialPreviewSourceVersions(null); }} /></label>}
+        {embeddedInOrderWorkflow ? <p className="matching-coordination-case-context">案件 {caseNo}</p> : <label htmlFor="matching-case-no">案件編號<input id="matching-case-no" value={caseNo} onChange={(event) => { setCaseNo(event.target.value); setQuery(null); setInitialPreviewSourceVersions(null); invalidateZeroCandidateConfirmationAttempt(); }} /></label>}
         <button type="button" disabled={!caseNo.trim() || busy} onClick={() => void runQuery()}>{busy ? '處理中…' : embeddedInOrderWorkflow ? '重新核對案件資料' : '查詢媒合根事實'}</button>
       </div>
       {query && <><div className="matching-coordination-facts"><div><span>{embeddedInOrderWorkflow ? '已讀取的條件版本' : '條件快照'}</span><strong>{embeddedInOrderWorkflow ? `第 ${query.snapshot.criteria_version} 版` : query.snapshot.snapshot_id}</strong></div><div><span>媒合方案</span><strong>{query.matchingPackage?.package_id ?? '尚未建立'}</strong></div><div><span>來源版本</span><strong>{query.expectedSourceVersionsMatch ? '一致，可繼續' : '已變更，請重新核對'}</strong></div><div><span>候選人</span><strong>{query.candidates.length}</strong></div><div><span>拒絕歷史</span><strong>{query.refusalHistory.length}</strong></div></div>{!embeddedInOrderWorkflow && query.candidates.length > 0 && <div className="matching-coordination-table"><table><thead><tr><th>服務人員</th><th>資格</th><th>意願</th><th>拒絕原因</th></tr></thead><tbody>{query.candidates.map((candidate) => <tr key={candidate.candidate_id}><td>{candidate.staff_name}</td><td>{candidate.eligibility}</td><td>{candidate.willingness}</td><td>{candidate.rejection_reasons.join('、') || '無'}</td></tr>)}</tbody></table></div>}</>}
@@ -281,16 +352,16 @@ export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkben
         {preview?.title === '初始條件快照' && <div className="matching-coordination-next-step" role="status"><strong>條件已核對</strong><span>{preview.details.join('｜')}</span><span>下一步：在下方「查詢合格月嫂清單」取得符合條件的候選人。</span></div>}
         <details className="matching-coordination-exception"><summary>條件變更、無候選或月嫂請假的處理</summary><p>發生例外時，先在既有媒合步驟更新案件條件或候選資料，再重新核對；不在此直接變更正式指派或契約。</p></details>
       </div> : <div className="matching-coordination-action-panel">
-        <label htmlFor="matching-operation">目前要處理的業務<select id="matching-operation" value={operation} onChange={(event) => { const next = event.target.value as Operation; setOperation(next); setPayloadText(templateFor(next, query, lastPreviewFingerprint, initialPreviewSourceVersions)); setConfirmed(false); }}>{OPERATION_GROUPS.map(([groupLabel, operations]) => <optgroup key={groupLabel} label={groupLabel}>{operations.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</optgroup>)}</select></label>
+        <label htmlFor="matching-operation">目前要處理的業務<select id="matching-operation" value={operation} onChange={(event) => { const next = event.target.value as Operation; setOperation(next); setPayloadText(templateFor(next, query, lastPreviewFingerprint, initialPreviewSourceVersions)); setConfirmed(false); invalidateZeroCandidateConfirmationAttempt(); }}>{OPERATION_GROUPS.map(([groupLabel, operations]) => <optgroup key={groupLabel} label={groupLabel}>{operations.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</optgroup>)}</select></label>
         <p className="matching-coordination-flow-note">先完成試算，再確認提交；系統會依本次查詢重建欄位。</p>
         <button type="button" className="matching-coordination-secondary" onClick={() => loadTemplate()}>依目前查詢重建欄位</button>
-        <label className="matching-coordination-payload" htmlFor="matching-payload">系統交換欄位<textarea id="matching-payload" rows={12} spellCheck={false} value={payloadText} onChange={(event) => { setPayloadText(event.target.value); setConfirmed(false); }} /></label>
+        <label className="matching-coordination-payload" htmlFor="matching-payload">系統交換欄位<textarea id="matching-payload" rows={12} spellCheck={false} value={payloadText} onChange={(event) => { setPayloadText(event.target.value); setConfirmed(false); invalidateZeroCandidateConfirmationAttempt(); }} /></label>
         {isApply && <label className="matching-coordination-confirm"><input type="checkbox" checked={confirmed} disabled={!hasRequiredPreview} onChange={(event) => setConfirmed(event.target.checked)} />我已核對試算結果、來源版本與即將提交的決定</label>}
         {isApply && !hasRequiredPreview && <p className="matching-coordination-flow-note" role="status">請先完成「{REQUIRED_PREVIEW[operation] ? OPERATIONS.find(([id]) => id === REQUIRED_PREVIEW[operation])?.[1] : '對應試算'}」。</p>}
-        <button type="button" className="matching-coordination-primary" disabled={!caseNo.trim() || busy || (isApply && (!confirmed || !hasRequiredPreview))} onClick={() => void runOperation()}>{busy ? '處理中…' : isApply ? '確認提交此業務決定' : '執行試算'}</button>
+        <button type="button" className="matching-coordination-primary" disabled={!caseNo.trim() || busy || (isApply && (!confirmed || !hasRequiredPreview))} onClick={() => void runOperation()}>{busy ? '處理中…' : outcomeUnknown ? '以相同內容與識別碼重試' : isApply ? '確認提交此業務決定' : '執行試算'}</button>
       </div>}
       {!embeddedInOrderWorkflow && preview && <div className="matching-coordination-preview" role="status"><h3>{preview.title}</h3><p>{preview.status}｜{preview.identity}</p>{preview.fingerprint && <p>fingerprint：{preview.fingerprint}</p>}<ul>{preview.details.map((detail, index) => <li key={`${detail}-${index}`}>{detail}</li>)}</ul></div>}
-      {receipt && <div className="matching-coordination-success" role="status"><h3>Apply 已提交</h3><p>{receipt.commandName}｜{receipt.resultState}</p><p>receipt：{receipt.receiptId}</p></div>}
+      {receipt && <div className="matching-coordination-success" role="status"><h3>Apply 已提交</h3><p>{receipt.commandName}｜{receipt.resultState}</p><p>receipt：{receipt.receiptId}</p>{receipt.commandName === 'ApplyZeroCandidateConfirmation' && <><p>Step 2 仍受阻｜blocked_no_candidate｜complete owner record</p><p>目前沒有合法候選；本次只完成受阻事實紀錄，不代表異常已解除。</p></>}</div>}
       {error && <div className="matching-coordination-error" role="alert">{error}</div>}
     </section>
   );

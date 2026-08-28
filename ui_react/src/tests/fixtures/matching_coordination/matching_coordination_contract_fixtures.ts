@@ -74,6 +74,25 @@ export const MATCHING_PACKAGE = {
   fingerprint: SHA_B,
 };
 
+export const MATCHING_OPEN_PACKAGE = {
+  ...MATCHING_PACKAGE,
+  package_id: 'package-open',
+  version: 2,
+  candidate_results: [],
+  segments: [],
+  blockers: [],
+  state: 'candidate_pool_open' as const,
+};
+
+export const MATCHING_NO_CANDIDATE_PACKAGE = {
+  ...MATCHING_OPEN_PACKAGE,
+  package_id: 'package-no-candidate',
+  version: 3,
+  blockers: ['no_legal_candidate'],
+  state: 'no_candidate' as const,
+  fingerprint: SHA_A,
+};
+
 export const MATCHING_QUERY_DATA = {
   case_no: 'CASE-001',
   snapshot: MATCHING_SNAPSHOT,
@@ -156,6 +175,18 @@ export const MATCHING_APPLY_RECEIPT = {
   willingness_lineage: null,
   notification_intents: [],
   criteria_recontact_intents: [],
+  resulting_package: null,
+};
+
+export const MATCHING_ZERO_CANDIDATE_CONFIRMATION_RECEIPT = {
+  ...MATCHING_APPLY_RECEIPT,
+  receipt_id: 'receipt-zero-candidate-confirmation-1',
+  command_name: 'ApplyZeroCandidateConfirmation' as const,
+  decision_event_id: 'zero-candidate-confirmed-event-1',
+  package_id: MATCHING_NO_CANDIDATE_PACKAGE.package_id,
+  result_state: 'zero_candidate_confirmed' as const,
+  outbox_intent_ids: ['zero-candidate-confirmed-event-1:assignment'],
+  resulting_package: MATCHING_NO_CANDIDATE_PACKAGE,
 };
 
 export function successEnvelope(data: unknown) {
@@ -187,6 +218,14 @@ export const PREVIEW_ZERO_REQUEST = {
   policy_id: 'policy-1',
   policy_version: 1,
   relaxed_criteria: ['district'],
+};
+export const PREVIEW_ZERO_CANDIDATE_CONFIRMATION_REQUEST = {
+  reason: '已逐筆核對目前候選池沒有合法且願意承接的月嫂',
+  evidence: ['fresh_pool_query_empty'],
+  expected_source_versions: MATCHING_SOURCE_TUPLE,
+  criteria_snapshot_id: 'snapshot-1',
+  package_id: MATCHING_OPEN_PACKAGE.package_id,
+  package_version: MATCHING_OPEN_PACKAGE.version,
 };
 export const PREVIEW_REMATCH_REQUEST = {
   reason: '重新媒合',

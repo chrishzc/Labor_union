@@ -188,6 +188,25 @@ class SuccessorRoundView(_StrictModel):
         return self
 
 
+class MatchingZeroCandidateProofView(_StrictModel):
+    case_no: str = Field(min_length=1, max_length=50)
+    package_identity: str = Field(min_length=1, max_length=191)
+    package_version: StrictInt = Field(ge=0)
+    criteria_snapshot_identity: str = Field(min_length=1, max_length=191)
+    event_identity: str = Field(min_length=1, max_length=191)
+    event_version: StrictInt = Field(ge=0)
+    package_fingerprint: _Fingerprint = Field(pattern=r"^[0-9a-f]{64}$")
+    event_fingerprint: _Fingerprint = Field(pattern=r"^[0-9a-f]{64}$")
+    receipt_identity: str = Field(min_length=1, max_length=191)
+    assignment_intent_identity: str = Field(min_length=1, max_length=191)
+
+    @model_validator(mode="after")
+    def validate_owner_versions(self):
+        if self.event_version != self.package_version:
+            raise ValueError("zero_candidate_owner_version_mismatch")
+        return self
+
+
 class _ReplacementFactsView(_StrictModel):
     case_no: str = Field(min_length=1, max_length=50)
     scenario: _Scenario
@@ -206,6 +225,7 @@ class _ReplacementFactsView(_StrictModel):
     root_delta: ReplacementRootDeltaView | None
     candidate_pool_reuse_proof: CandidatePoolReuseProofView | None
     successor_round: SuccessorRoundView | None
+    matching_zero_candidate_proof: MatchingZeroCandidateProofView | None = None
     resume_step: _Step
     blockers: list[str]
 
@@ -280,6 +300,11 @@ class _ReplacementFactsView(_StrictModel):
                 raise ValueError("candidate_pool_reuse_version_mismatch")
             if self.successor_round is not None and proof.successor_round_identity != self.successor_round.round_identity:
                 raise ValueError("candidate_pool_reuse_successor_round_mismatch")
+        if (
+            self.matching_zero_candidate_proof is not None
+            and self.matching_zero_candidate_proof.case_no != self.case_no
+        ):
+            raise ValueError("zero_candidate_owner_case_mismatch")
         if self.outcome == "ready" and self.blockers:
             raise ValueError("replacement_ready_with_blocker")
         if self.actual_service_day_count and self.outcome != "substitution_referral":
@@ -292,7 +317,11 @@ class _ReplacementFactsView(_StrictModel):
         if self.outcome == "substitution_referral":
             if self.root_delta is not None or self.impacted_roots or self.retained_roots:
                 raise ValueError("replacement_referral_contains_replacement_facts")
-            if self.candidate_pool_reuse_proof is not None or self.successor_round is not None:
+            if (
+                self.candidate_pool_reuse_proof is not None
+                or self.successor_round is not None
+                or self.matching_zero_candidate_proof is not None
+            ):
                 raise ValueError("replacement_referral_contains_successor_facts")
         return self
 
@@ -339,8 +368,15 @@ class ServiceBeforeReplacementPreviewView(_ReplacementFactsView):
                 raise ValueError("replacement_ready_requires_prior_identities")
             if any(value is None for value in replacement_values):
                 raise ValueError("replacement_ready_requires_replacement_facts")
-            if not self.superseded_roots or not self.created_roots:
+            if (
+                (self.scenario != "R-07" and not self.superseded_roots)
+                or not self.created_roots
+            ):
                 raise ValueError("replacement_ready_requires_root_delta")
+            if self.scenario == "R-07" and (
+                self.superseded_roots or self.matching_zero_candidate_proof is None
+            ):
+                raise ValueError("replacement_r07_owner_proof_mismatch")
             if self.root_delta is None:
                 raise ValueError("replacement_ready_requires_root_delta")
             if (
@@ -457,6 +493,9 @@ class ReplacementReadbackView(_StrictModel):
     generation_version: StrictInt = Field(ge=0)
     event_version: StrictInt = Field(ge=0)
     aggregate_version: StrictInt = Field(ge=0)
+    resume_step: _Step
+    candidate_count: StrictInt = Field(ge=0)
+    zero_candidate_disposition: Literal["blocked_no_candidate"] | None = None
     retained_root_ids: list[str]
     superseded_root_ids: list[str]
     created_root_ids: list[str]
@@ -476,6 +515,10 @@ class ReplacementReadbackView(_StrictModel):
             raise ValueError("replacement_root_count_mismatch")
         if len(set().union(*map(set, groups))) != sum(map(len, groups)):
             raise ValueError("replacement_root_delta_identity_overlap")
+        if self.zero_candidate_disposition is not None and (
+            self.candidate_count != 0 or self.resume_step != "step_2"
+        ):
+            raise ValueError("replacement_zero_candidate_readback_mismatch")
         return self
 
 
@@ -569,7 +612,7 @@ def _root_set_digest(values: list[str]) -> str:
 
 
 __all__ = [
-    "ActualServiceProofView", "CandidatePoolReuseProofView", "ReplacementReadbackView",
+    "ActualServiceProofView", "CandidatePoolReuseProofView", "MatchingZeroCandidateProofView", "ReplacementReadbackView",
     "ReplacementReceiptView", "ReplacementRootDeltaView", "ReplacementRootView",
     "ServiceBeforeReplacementApplyBody", "ServiceBeforeReplacementApplyView",
     "ServiceBeforeReplacementPreviewBody", "ServiceBeforeReplacementPreviewView",

@@ -243,10 +243,7 @@ def test_windows_supervisor_reacts_only_to_html_root_and_normalizes_true_flags()
 
 def test_unix_launcher_requires_current_schema_and_guards_optional_workers() -> None:
     source = _source("start_local_development.sh")
-    readiness = (
-        '"$PY" -m scripts.update_local_database --require-current '
-        '--database-port "$DB_PORT"'
-    )
+    readiness = '"$PY" -m scripts.update_local_database --require-current'
 
     assert readiness in source
     assert source.index(readiness) < source.index("api.main:app")
@@ -303,9 +300,10 @@ def test_unix_no_auth_launcher_only_sets_profile_and_delegates() -> None:
     assert "npm run dev" not in source
 
 
-def test_unix_launcher_uses_configured_database_port_and_owned_cleanup() -> None:
+def test_unix_launcher_preserves_dotenv_database_target_and_owned_cleanup() -> None:
     source = _source("start_local_development.sh")
-    assert 'export DB_PORT="${DB_PORT:-3306}"' in source
+    assert 'export DB_PORT="${DB_PORT:-3306}"' not in source
+    assert "--database-port" not in source
     assert "choose_db_port" not in source
     assert "lsof" not in PROFILE_REQUIREMENTS["local-unix"]["commands"]
     assert 'scripts/wait_for_db.py --port' not in source
@@ -321,6 +319,8 @@ def test_unix_launcher_uses_configured_database_port_and_owned_cleanup() -> None
 def test_unix_launcher_reuses_existing_mysql_container_without_recreate() -> None:
     source = _source("start_local_development.sh")
 
+    assert "command -v docker" in source
+    assert "/Applications/Docker.app/Contents/Resources/bin/docker" in source
     assert 'docker inspect --format "{{.State.Running}}" "$MYSQL_CONTAINER"' in source
     assert 'docker start "$MYSQL_CONTAINER"' in source
     assert "docker compose up -d db" in source
@@ -331,10 +331,7 @@ def test_unix_launcher_reuses_existing_mysql_container_without_recreate() -> Non
 def test_unix_no_auth_launcher_delegates_to_current_gate_before_children() -> None:
     wrapper = _source("start_local_development_no_auth.sh")
     canonical = _source("start_local_development.sh")
-    readiness = (
-        '"$PY" -m scripts.update_local_database --require-current '
-        '--database-port "$DB_PORT"'
-    )
+    readiness = '"$PY" -m scripts.update_local_database --require-current'
 
     assert 'exec "$SCRIPT_DIR/start_local_development.sh" "$@"' in wrapper
     assert canonical.index(readiness) < canonical.index("api.main:app")

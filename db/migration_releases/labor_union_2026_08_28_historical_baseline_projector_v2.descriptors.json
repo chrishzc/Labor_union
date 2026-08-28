@@ -1,0 +1,631 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-historical-baseline-projector-2026-08-28-v2",
+  "descriptors": {
+    "1014_historical_baseline_projector_v2.sql": {
+      "tables": {
+        "historical_baseline_v2_occurrence_state_events": [
+          "id",
+          "state_event_identity",
+          "occurrence_id",
+          "prior_state_event_id",
+          "case_no",
+          "order_identity",
+          "baseline_event_id",
+          "catalog_identity",
+          "catalog_version",
+          "descriptor_identity",
+          "contract_id",
+          "contract_version",
+          "terminal_predicate_id",
+          "terminal_predicate_version",
+          "owner_event_identity",
+          "owner_source_version",
+          "expected_state_version",
+          "resulting_state_version",
+          "state",
+          "owner_binding_fingerprint",
+          "fresh_readback_fingerprint",
+          "reason",
+          "created_at"
+        ],
+        "historical_baseline_v2_projector_receipts": [
+          "id",
+          "projector_receipt_identity",
+          "source_trigger_identity",
+          "source_trigger_version",
+          "payload_digest",
+          "idempotency_key",
+          "baseline_event_id",
+          "baseline_receipt_id",
+          "baseline_outbox_id",
+          "case_no",
+          "order_identity",
+          "catalog_identity",
+          "catalog_version",
+          "whole_vector_fingerprint",
+          "whole_vector_count",
+          "emitted_occurrence_set_digest",
+          "emitted_occurrence_set_count",
+          "emitted_occurrence_identities",
+          "active_membership_set_digest",
+          "active_membership_set_count",
+          "umbrella_identity",
+          "projection_sequence",
+          "current_alert_fingerprint",
+          "expected_readback_digest",
+          "result_state",
+          "created_at"
+        ],
+        "historical_baseline_v2_active_membership_snapshots": [
+          "id",
+          "membership_identity",
+          "projector_receipt_id",
+          "umbrella_identity",
+          "set_ordinal",
+          "occurrence_id",
+          "case_no",
+          "order_identity",
+          "baseline_event_id",
+          "catalog_identity",
+          "catalog_version",
+          "projection_sequence",
+          "created_at"
+        ],
+        "historical_baseline_v2_projector_deliveries": [
+          "id",
+          "delivery_identity",
+          "source_trigger_identity",
+          "payload_digest",
+          "source_kind",
+          "source_domain",
+          "source_event_identity",
+          "source_version",
+          "partition_key",
+          "projection_sequence",
+          "projector_receipt_id",
+          "delivery_status",
+          "attempt_count",
+          "max_attempts",
+          "next_attempt_at",
+          "lease_owner",
+          "lease_expires_at",
+          "last_error_code",
+          "last_error_detail",
+          "created_at",
+          "updated_at"
+        ],
+        "historical_baseline_v2_source_checkpoints": [
+          "id",
+          "checkpoint_identity",
+          "source_domain",
+          "source_stream",
+          "partition_key",
+          "last_source_event_identity",
+          "last_source_version",
+          "last_projection_sequence",
+          "checkpoint_fingerprint",
+          "created_at",
+          "updated_at"
+        ],
+        "historical_baseline_v2_post_commit_readbacks": [
+          "id",
+          "readback_identity",
+          "projector_receipt_id",
+          "delivery_id",
+          "case_no",
+          "order_identity",
+          "baseline_event_id",
+          "catalog_identity",
+          "catalog_version",
+          "umbrella_identity",
+          "projection_sequence",
+          "readback_attempt",
+          "expected_readback_digest",
+          "actual_readback_digest",
+          "actual_emitted_occurrence_set_digest",
+          "actual_emitted_occurrence_set_count",
+          "actual_active_membership_set_digest",
+          "actual_active_membership_set_count",
+          "actual_state_event_set_digest",
+          "actual_successor_set_digest",
+          "actual_workflow_event_set_digest",
+          "actual_current_alert_fingerprint",
+          "readback_result",
+          "error_code",
+          "created_at"
+        ]
+      },
+      "indexes": {
+        "historical_baseline_v2_occurrence_state_events.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "historical_baseline_v2_occurrence_state_events.uq_hbp_v2_state_identity": {
+          "non_unique": 0,
+          "columns": [
+            "state_event_identity"
+          ]
+        },
+        "historical_baseline_v2_occurrence_state_events.uq_hbp_v2_state_occurrence_version": {
+          "non_unique": 0,
+          "columns": [
+            "occurrence_id",
+            "resulting_state_version"
+          ]
+        },
+        "historical_baseline_v2_occurrence_state_events.uq_hbp_v2_state_occurrence_lineage": {
+          "non_unique": 0,
+          "columns": [
+            "id",
+            "occurrence_id",
+            "case_no",
+            "order_identity",
+            "baseline_event_id",
+            "catalog_identity",
+            "catalog_version"
+          ]
+        },
+        "historical_baseline_v2_occurrence_state_events.idx_hbp_v2_state_occurrence": {
+          "non_unique": 1,
+          "columns": [
+            "occurrence_id",
+            "resulting_state_version",
+            "id"
+          ]
+        },
+        "historical_baseline_v2_occurrence_state_events.idx_hbp_v2_state_owner_event": {
+          "non_unique": 1,
+          "columns": [
+            "owner_event_identity",
+            "owner_source_version",
+            "id"
+          ]
+        },
+        "historical_baseline_v2_projector_receipts.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "historical_baseline_v2_projector_receipts.uq_hbp_v2_receipt_identity": {
+          "non_unique": 0,
+          "columns": [
+            "projector_receipt_identity"
+          ]
+        },
+        "historical_baseline_v2_projector_receipts.uq_hbp_v2_receipt_source_trigger": {
+          "non_unique": 0,
+          "columns": [
+            "source_trigger_identity"
+          ]
+        },
+        "historical_baseline_v2_projector_receipts.uq_hbp_v2_receipt_idempotency": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "historical_baseline_v2_projector_receipts.uq_hbp_v2_receipt_lineage": {
+          "non_unique": 0,
+          "columns": [
+            "id",
+            "case_no",
+            "order_identity",
+            "baseline_event_id",
+            "catalog_identity",
+            "catalog_version",
+            "umbrella_identity"
+          ]
+        },
+        "historical_baseline_v2_projector_receipts.uq_hbp_v2_receipt_readback_binding": {
+          "non_unique": 0,
+          "columns": [
+            "id",
+            "case_no",
+            "order_identity",
+            "baseline_event_id",
+            "catalog_identity",
+            "catalog_version",
+            "umbrella_identity",
+            "projection_sequence"
+          ]
+        },
+        "historical_baseline_v2_projector_receipts.idx_hbp_v2_receipt_case_sequence": {
+          "non_unique": 1,
+          "columns": [
+            "case_no",
+            "projection_sequence",
+            "id"
+          ]
+        },
+        "historical_baseline_v2_active_membership_snapshots.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "historical_baseline_v2_active_membership_snapshots.uq_hbp_v2_membership_identity": {
+          "non_unique": 0,
+          "columns": [
+            "membership_identity"
+          ]
+        },
+        "historical_baseline_v2_active_membership_snapshots.uq_hbp_v2_membership_receipt_ordinal": {
+          "non_unique": 0,
+          "columns": [
+            "projector_receipt_id",
+            "set_ordinal"
+          ]
+        },
+        "historical_baseline_v2_active_membership_snapshots.uq_hbp_v2_membership_receipt_occurrence": {
+          "non_unique": 0,
+          "columns": [
+            "projector_receipt_id",
+            "occurrence_id"
+          ]
+        },
+        "historical_baseline_v2_active_membership_snapshots.idx_hbp_v2_membership_umbrella": {
+          "non_unique": 1,
+          "columns": [
+            "umbrella_identity",
+            "projection_sequence",
+            "set_ordinal"
+          ]
+        },
+        "historical_baseline_v2_active_membership_snapshots.idx_hbp_v2_membership_occurrence": {
+          "non_unique": 1,
+          "columns": [
+            "occurrence_id",
+            "id"
+          ]
+        },
+        "historical_baseline_v2_projector_deliveries.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "historical_baseline_v2_projector_deliveries.uq_hbp_v2_delivery_identity": {
+          "non_unique": 0,
+          "columns": [
+            "delivery_identity"
+          ]
+        },
+        "historical_baseline_v2_projector_deliveries.uq_hbp_v2_delivery_trigger": {
+          "non_unique": 0,
+          "columns": [
+            "source_trigger_identity"
+          ]
+        },
+        "historical_baseline_v2_projector_deliveries.idx_hbp_v2_delivery_claim": {
+          "non_unique": 1,
+          "columns": [
+            "delivery_status",
+            "next_attempt_at",
+            "lease_expires_at",
+            "id"
+          ]
+        },
+        "historical_baseline_v2_projector_deliveries.idx_hbp_v2_delivery_partition": {
+          "non_unique": 1,
+          "columns": [
+            "source_domain",
+            "partition_key",
+            "source_version",
+            "id"
+          ]
+        },
+        "historical_baseline_v2_projector_deliveries.idx_hbp_v2_delivery_receipt": {
+          "non_unique": 1,
+          "columns": [
+            "projector_receipt_id"
+          ]
+        },
+        "historical_baseline_v2_source_checkpoints.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "historical_baseline_v2_source_checkpoints.uq_hbp_v2_checkpoint_identity": {
+          "non_unique": 0,
+          "columns": [
+            "checkpoint_identity"
+          ]
+        },
+        "historical_baseline_v2_source_checkpoints.uq_hbp_v2_checkpoint_partition": {
+          "non_unique": 0,
+          "columns": [
+            "source_domain",
+            "source_stream",
+            "partition_key"
+          ]
+        },
+        "historical_baseline_v2_source_checkpoints.idx_hbp_v2_checkpoint_progress": {
+          "non_unique": 1,
+          "columns": [
+            "source_domain",
+            "source_stream",
+            "last_source_version",
+            "last_projection_sequence",
+            "id"
+          ]
+        },
+        "historical_baseline_v2_post_commit_readbacks.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "historical_baseline_v2_post_commit_readbacks.uq_hbp_v2_readback_identity": {
+          "non_unique": 0,
+          "columns": [
+            "readback_identity"
+          ]
+        },
+        "historical_baseline_v2_post_commit_readbacks.uq_hbp_v2_readback_receipt_attempt": {
+          "non_unique": 0,
+          "columns": [
+            "projector_receipt_id",
+            "readback_attempt"
+          ]
+        },
+        "historical_baseline_v2_post_commit_readbacks.idx_hbp_v2_readback_delivery": {
+          "non_unique": 1,
+          "columns": [
+            "delivery_id",
+            "id"
+          ]
+        },
+        "historical_baseline_v2_post_commit_readbacks.idx_hbp_v2_readback_case_sequence": {
+          "non_unique": 1,
+          "columns": [
+            "case_no",
+            "projection_sequence",
+            "id"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "historical_baseline_v2_occurrence_state_events.fk_hbp_v2_state_occurrence": {
+          "columns": [
+            "occurrence_id",
+            "case_no",
+            "order_identity",
+            "baseline_event_id",
+            "catalog_identity",
+            "catalog_version"
+          ],
+          "referenced_table": "historical_baseline_occurrences",
+          "referenced_columns": [
+            "id",
+            "case_no",
+            "order_identity",
+            "baseline_event_id",
+            "catalog_identity",
+            "catalog_version"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "historical_baseline_v2_occurrence_state_events.fk_hbp_v2_state_prior": {
+          "columns": [
+            "prior_state_event_id",
+            "occurrence_id",
+            "case_no",
+            "order_identity",
+            "baseline_event_id",
+            "catalog_identity",
+            "catalog_version"
+          ],
+          "referenced_table": "historical_baseline_v2_occurrence_state_events",
+          "referenced_columns": [
+            "id",
+            "occurrence_id",
+            "case_no",
+            "order_identity",
+            "baseline_event_id",
+            "catalog_identity",
+            "catalog_version"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "historical_baseline_v2_projector_receipts.fk_hbp_v2_receipt_baseline_event": {
+          "columns": [
+            "baseline_event_id"
+          ],
+          "referenced_table": "historical_order_operational_baseline_events",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "historical_baseline_v2_projector_receipts.fk_hbp_v2_receipt_baseline_receipt": {
+          "columns": [
+            "baseline_receipt_id"
+          ],
+          "referenced_table": "historical_order_operational_baseline_receipts",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "historical_baseline_v2_projector_receipts.fk_hbp_v2_receipt_baseline_outbox": {
+          "columns": [
+            "baseline_outbox_id"
+          ],
+          "referenced_table": "historical_order_operational_baseline_outbox",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "historical_baseline_v2_projector_receipts.fk_hbp_v2_receipt_case": {
+          "columns": [
+            "case_no"
+          ],
+          "referenced_table": "orders",
+          "referenced_columns": [
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "historical_baseline_v2_projector_receipts.fk_hbp_v2_receipt_alert": {
+          "columns": [
+            "current_alert_fingerprint"
+          ],
+          "referenced_table": "anomaly_current_alerts",
+          "referenced_columns": [
+            "fingerprint"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "historical_baseline_v2_active_membership_snapshots.fk_hbp_v2_membership_receipt": {
+          "columns": [
+            "projector_receipt_id",
+            "case_no",
+            "order_identity",
+            "baseline_event_id",
+            "catalog_identity",
+            "catalog_version",
+            "umbrella_identity"
+          ],
+          "referenced_table": "historical_baseline_v2_projector_receipts",
+          "referenced_columns": [
+            "id",
+            "case_no",
+            "order_identity",
+            "baseline_event_id",
+            "catalog_identity",
+            "catalog_version",
+            "umbrella_identity"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "historical_baseline_v2_active_membership_snapshots.fk_hbp_v2_membership_occurrence": {
+          "columns": [
+            "occurrence_id",
+            "case_no",
+            "order_identity",
+            "baseline_event_id",
+            "catalog_identity",
+            "catalog_version"
+          ],
+          "referenced_table": "historical_baseline_occurrences",
+          "referenced_columns": [
+            "id",
+            "case_no",
+            "order_identity",
+            "baseline_event_id",
+            "catalog_identity",
+            "catalog_version"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "historical_baseline_v2_projector_deliveries.fk_hbp_v2_delivery_receipt": {
+          "columns": [
+            "projector_receipt_id"
+          ],
+          "referenced_table": "historical_baseline_v2_projector_receipts",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "historical_baseline_v2_post_commit_readbacks.fk_hbp_v2_readback_receipt": {
+          "columns": [
+            "projector_receipt_id",
+            "case_no",
+            "order_identity",
+            "baseline_event_id",
+            "catalog_identity",
+            "catalog_version",
+            "umbrella_identity",
+            "projection_sequence"
+          ],
+          "referenced_table": "historical_baseline_v2_projector_receipts",
+          "referenced_columns": [
+            "id",
+            "case_no",
+            "order_identity",
+            "baseline_event_id",
+            "catalog_identity",
+            "catalog_version",
+            "umbrella_identity",
+            "projection_sequence"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "historical_baseline_v2_post_commit_readbacks.fk_hbp_v2_readback_delivery": {
+          "columns": [
+            "delivery_id"
+          ],
+          "referenced_table": "historical_baseline_v2_projector_deliveries",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "historical_baseline_v2_post_commit_readbacks.fk_hbp_v2_readback_alert": {
+          "columns": [
+            "actual_current_alert_fingerprint"
+          ],
+          "referenced_table": "anomaly_current_alerts",
+          "referenced_columns": [
+            "fingerprint"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "historical_baseline_v2_occurrence_state_events.chk_hbp_v2_state_hashes": "and(atom(regexp_like(state_event_identity,'^[0-9a-f]{64}$')),atom(regexp_like(catalog_identity,'^[0-9a-f]{64}$')),atom(regexp_like(descriptor_identity,'^[0-9a-f]{64}$')),atom(regexp_like(owner_binding_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(fresh_readback_fingerprint,'^[0-9a-f]{64}$')))",
+        "historical_baseline_v2_occurrence_state_events.chk_hbp_v2_state_versions": "and(atom(catalog_version>0),atom(contract_version>0),atom(terminal_predicate_version>0),atom(resulting_state_version=expected_state_version+1),or(and(atom(expected_state_version=0),atom(prior_state_event_idisnull)),and(atom(expected_state_version>0),atom(prior_state_event_idisnotnull))))",
+        "historical_baseline_v2_occurrence_state_events.chk_hbp_v2_state_text": "and(atom(char_length(trim(case_no))>0),atom(char_length(trim(order_identity))>0),atom(char_length(trim(contract_id))>0),atom(char_length(trim(terminal_predicate_id))>0),atom(char_length(trim(owner_event_identity))>0),atom(char_length(trim(reason))>0))",
+        "historical_baseline_v2_projector_receipts.chk_hbp_v2_receipt_hashes": "and(atom(regexp_like(projector_receipt_identity,'^[0-9a-f]{64}$')),atom(regexp_like(payload_digest,'^[0-9a-f]{64}$')),atom(regexp_like(catalog_identity,'^[0-9a-f]{64}$')),atom(regexp_like(whole_vector_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(emitted_occurrence_set_digest,'^[0-9a-f]{64}$')),atom(regexp_like(active_membership_set_digest,'^[0-9a-f]{64}$')),atom(regexp_like(umbrella_identity,'^[0-9a-f]{64}$')),atom(regexp_like(current_alert_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(expected_readback_digest,'^[0-9a-f]{64}$')))",
+        "historical_baseline_v2_projector_receipts.chk_hbp_v2_receipt_counts": "and(atom(catalog_version>0),atom(whole_vector_count>0),atom(emitted_occurrence_set_count>=0),atom(active_membership_set_count>=0),atom(projection_sequence>0))",
+        "historical_baseline_v2_projector_receipts.chk_hbp_v2_receipt_emitted_snapshot": "and(atom(json_type(emitted_occurrence_identities)='ARRAY'),atom(json_length(emitted_occurrence_identities)=emitted_occurrence_set_count))",
+        "historical_baseline_v2_projector_receipts.chk_hbp_v2_receipt_text": "and(atom(char_length(trim(source_trigger_identity))>0),atom(regexp_like(idempotency_key,'^[a-z0-9][a-z0-9._:-]{0,190}$')),atom(char_length(trim(case_no))>0),atom(char_length(trim(order_identity))>0))",
+        "historical_baseline_v2_active_membership_snapshots.chk_hbp_v2_membership_hashes": "and(atom(regexp_like(membership_identity,'^[0-9a-f]{64}$')),atom(regexp_like(umbrella_identity,'^[0-9a-f]{64}$')),atom(regexp_like(catalog_identity,'^[0-9a-f]{64}$')),atom(set_ordinal>0),atom(catalog_version>0),atom(projection_sequence>0))",
+        "historical_baseline_v2_active_membership_snapshots.chk_hbp_v2_membership_text": "and(atom(char_length(trim(case_no))>0),atom(char_length(trim(order_identity))>0))",
+        "historical_baseline_v2_projector_deliveries.chk_hbp_v2_delivery_hashes": "and(atom(regexp_like(delivery_identity,'^[0-9a-f]{64}$')),atom(regexp_like(payload_digest,'^[0-9a-f]{64}$')))",
+        "historical_baseline_v2_projector_deliveries.chk_hbp_v2_delivery_attempts": "and(atom(max_attempts>0),atom(attempt_count<=max_attempts),atom(source_version>=0))",
+        "historical_baseline_v2_projector_deliveries.chk_hbp_v2_delivery_text": "and(atom(char_length(trim(source_trigger_identity))>0),atom(char_length(trim(source_domain))>0),atom(char_length(trim(source_event_identity))>0),atom(char_length(trim(partition_key))>0))",
+        "historical_baseline_v2_source_checkpoints.chk_hbp_v2_checkpoint_hash": "and(atom(regexp_like(checkpoint_identity,'^[0-9a-f]{64}$')),atom(regexp_like(checkpoint_fingerprint,'^[0-9a-f]{64}$')))",
+        "historical_baseline_v2_source_checkpoints.chk_hbp_v2_checkpoint_versions": "and(atom(last_source_version>=0),atom(last_projection_sequence>=0))",
+        "historical_baseline_v2_source_checkpoints.chk_hbp_v2_checkpoint_text": "and(atom(char_length(trim(source_domain))>0),atom(char_length(trim(source_stream))>0),atom(char_length(trim(partition_key))>0))",
+        "historical_baseline_v2_post_commit_readbacks.chk_hbp_v2_readback_hashes": "and(atom(regexp_like(readback_identity,'^[0-9a-f]{64}$')),atom(regexp_like(catalog_identity,'^[0-9a-f]{64}$')),atom(regexp_like(umbrella_identity,'^[0-9a-f]{64}$')),atom(regexp_like(expected_readback_digest,'^[0-9a-f]{64}$')),or(atom(actual_readback_digestisnull),atom(regexp_like(actual_readback_digest,'^[0-9a-f]{64}$'))),or(atom(actual_emitted_occurrence_set_digestisnull),atom(regexp_like(actual_emitted_occurrence_set_digest,'^[0-9a-f]{64}$'))),or(atom(actual_active_membership_set_digestisnull),atom(regexp_like(actual_active_membership_set_digest,'^[0-9a-f]{64}$'))),or(atom(actual_state_event_set_digestisnull),atom(regexp_like(actual_state_event_set_digest,'^[0-9a-f]{64}$'))),or(atom(actual_successor_set_digestisnull),atom(regexp_like(actual_successor_set_digest,'^[0-9a-f]{64}$'))),or(atom(actual_workflow_event_set_digestisnull),atom(regexp_like(actual_workflow_event_set_digest,'^[0-9a-f]{64}$'))),or(atom(actual_current_alert_fingerprintisnull),atom(regexp_like(actual_current_alert_fingerprint,'^[0-9a-f]{64}$'))))",
+        "historical_baseline_v2_post_commit_readbacks.chk_hbp_v2_readback_result": "and(atom(readback_attempt>0),atom(catalog_version>0),atom(projection_sequence>0),or(and(atom(readback_result='exact'),atom(actual_readback_digestisnotnull),atom(actual_emitted_occurrence_set_digestisnotnull),atom(actual_emitted_occurrence_set_countisnotnull),atom(actual_active_membership_set_digestisnotnull),atom(actual_active_membership_set_countisnotnull),atom(actual_state_event_set_digestisnotnull),atom(actual_successor_set_digestisnotnull),atom(actual_workflow_event_set_digestisnotnull),atom(actual_current_alert_fingerprintisnotnull),atom(error_codeisnull)),and(atom(readback_resultin('mismatch','unknown')),atom(error_codeisnotnull),atom(char_length(trim(error_code))>0))))",
+        "historical_baseline_v2_post_commit_readbacks.chk_hbp_v2_readback_text": "and(atom(char_length(trim(case_no))>0),atom(char_length(trim(order_identity))>0))"
+      },
+      "triggers": [
+        "trg_hbp_v2_state_before_update",
+        "trg_hbp_v2_state_before_delete",
+        "trg_hbp_v2_receipt_before_update",
+        "trg_hbp_v2_receipt_before_delete",
+        "trg_hbp_v2_membership_before_update",
+        "trg_hbp_v2_membership_before_delete",
+        "trg_hbp_v2_delivery_before_update",
+        "trg_hbp_v2_delivery_before_delete",
+        "trg_hbp_v2_checkpoint_before_update",
+        "trg_hbp_v2_checkpoint_before_delete",
+        "trg_hbp_v2_readback_before_update",
+        "trg_hbp_v2_readback_before_delete"
+      ]
+    }
+  }
+}

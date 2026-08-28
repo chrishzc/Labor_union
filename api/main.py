@@ -9,6 +9,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
@@ -44,7 +49,9 @@ from api.routes import (
     finance_import,
     hcm_import,
     historical_order_adoption,
+    historical_baseline_projector,
     historical_completion,
+    historical_operational_baseline,
     historical_order_review_remediation,
     staff_historical_workbook,
     finance_reports,
@@ -130,8 +137,6 @@ from line.line_bot import router as line_router
 from subsystems.access.authentication_session import record_admin_audit
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(PROJECT_ROOT / ".env")
 REACT_ADMIN_RUNTIME = load_react_admin_runtime_from_environment(
     workspace_root=PROJECT_ROOT
 )
@@ -302,7 +307,9 @@ app.include_router(finance_import.router)
 app.include_router(hcm_import.router)
 app.include_router(client_beclass_import.router)
 app.include_router(historical_order_adoption.router)
+app.include_router(historical_baseline_projector.router)
 app.include_router(historical_completion.router)
+app.include_router(historical_operational_baseline.router)
 app.include_router(historical_order_review_remediation.router)
 app.include_router(staff_historical_workbook.router)
 app.include_router(beclass_import_review.router)

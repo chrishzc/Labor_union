@@ -29,6 +29,11 @@
 - 「退匯」只指銀行已退回既有出款的後續銀行事實；客戶超收後交會計師處理的項目名稱為
   「客戶退款應付／退款清冊列」，不得混稱為退匯。
 
+2026-08-28 successor例外：上述bank fact唯一現金根事實與exact allocation仍是一般／新案件及可正常
+還原歷史交易的規則；它不排除`PROV-20260828-historical-payment-and-owner-settlement-spec.md`核准的
+pre-system historical owner-specific人工付款證據。該例外必須保存獨立source kind、payer/payee/direction、
+exact obligations與audit lineage，不得偽造Finance Import row或bank allocation，也不得跨owner推定結清。
+
 ## 2. Domain：Staff Payables
 
 ### 2.1 責任與 SSOT
@@ -544,6 +549,20 @@ government return payable contract 在人工確認及相應 E2E 完成前，不�
   提供的 government return payable rows，但不能在同一 Query 中互相抵銷。
 - Finance Import 只提供 canonical bank facts，透過 borrowed Unit of Work 委派
   Client Finance 或 Staff Payables，不直接寫正式 ledger。
+
+### 4.1 Historical payment source priority（2026-08-28 人工裁決）
+
+歷史案件與一般案件都先使用Finance Import匯入的對帳單；只有pre-system且已正式採納的historical
+case，在舊銀行／帳務來源不能可靠還原時，才使用owner-specific歷史人工付款／結清Q/P/A。付款是
+具payer、payee、direction與exact obligations的event；Client Finance settlement、Staff Payables
+completion與Orders Step 11是三個不同projection，不得以單一「已付款」或「已結清」跨owner推定。
+
+客戶補助退款是工會付給客戶的Client Finance `subsidy_return`；Government Subsidy只擁有政府撥款、
+claim allocation及政府溢撥退還。工會先墊付客戶補助退款後，政府後續撥款只建立既有墊付款的
+settlement link，不新增第二筆客戶退款，也不重開已結清client obligation。
+
+完整source、replay、later-event與UI契約由
+`../02_決策與退役執行記錄/PROV-20260828-historical-payment-and-owner-settlement-spec.md`擁有。
 
 ## 5. 分層驗收
 

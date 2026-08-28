@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from domains.scheduling.service_before_replacement import (
     AuthoritativeActualServiceProof,
     CandidatePoolReuseProof,
+    MatchingZeroCandidateProof,
     ReplacementRootIdentity,
     ReplacementRootKind,
     ReplacementScenario,
@@ -23,7 +24,8 @@ from infrastructure.mysql.matching_coordination_facts_adapter import (
     MatchingCoordinationFactsAdapterError,
 )
 from shared_kernel.clock import BusinessClock, SystemBusinessClock, TAIPEI_TIME_ZONE
-from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+from subsystems.scheduling.occupancy_mutex import lock_staff_occupancy_mutex
 
 
 class ServiceBeforeReplacementSourceUnavailable(RuntimeError):
@@ -46,13 +48,42 @@ class MySqlServiceBeforeReplacementLoader:
         try:
             case_no, scenario = _request_identity(request)
             base, schedules = self._scheduling_base(case_no, for_update=for_update)
+            locked_staff_ids: tuple[int, ...] = ()
+            if scenario is ReplacementScenario.R03 and for_update:
+                locked_staff_ids = self._preflight_r03_staff_ids(case_no)
+                with self._connection.cursor() as cursor:
+                    locked_staff_ids = tuple(
+                        lock_staff_occupancy_mutex(cursor, list(locked_staff_ids))
+                    )
             successor = (
                 self._successor_round(case_no, base=base, for_update=for_update)
                 if scenario is ReplacementScenario.R07
                 else None
             )
+            zero_candidate_proof = (
+                self._matching_zero_candidate_proof(request, for_update=for_update)
+                if scenario is ReplacementScenario.R07 and successor is None
+                else None
+            )
             prior = self._r07_prior(case_no, base, for_update) if successor is not None else base
-            roots = self._scenario_roots(case_no, scenario, base, schedules, for_update=for_update)
+            roots = (
+                self._scenario_roots(
+                    case_no,
+                    scenario,
+                    base,
+                    schedules,
+                    for_update=for_update,
+                    locked_staff_ids=locked_staff_ids,
+                )
+                if locked_staff_ids
+                else self._scenario_roots(
+                    case_no,
+                    scenario,
+                    base,
+                    schedules,
+                    for_update=for_update,
+                )
+            )
             actual_dates = self._started_service_dates(base, schedules)
             proof = AuthoritativeActualServiceProof(
                 case_no=case_no,
@@ -95,6 +126,7 @@ class MySqlServiceBeforeReplacementLoader:
                 successor_round=successor,
                 candidate_pool_round_identity=None if reuse is None else reuse.round_identity,
                 candidate_identity=None if reuse is None else reuse.candidate_identity,
+                matching_zero_candidate_proof=zero_candidate_proof,
             )
         except ServiceBeforeReplacementSourceUnavailable:
             raise
@@ -111,7 +143,12 @@ class MySqlServiceBeforeReplacementLoader:
                 raise ServiceBeforeReplacementSourceUnavailable("replacement_matching_parent_package_unavailable")
             source_versions = _matching_source_payload(projection.source_versions)
             snapshot_versions = getattr(snapshot, "source_versions", None)
-            if snapshot_versions is not None and tuple(_matching_source_payload(snapshot_versions)) != source_versions:
+            criteria_sources = (
+                source_versions
+                if snapshot_versions is None
+                else _matching_source_payload(snapshot_versions)
+            )
+            if not _matching_sources_match_current(criteria_sources, source_versions):
                 raise ServiceBeforeReplacementSourceUnavailable("replacement_matching_source_version_drift")
             criteria_digest = fingerprint_payload(
                 {
@@ -122,7 +159,7 @@ class MySqlServiceBeforeReplacementLoader:
                         (
                             item["source_kind"], item["source_id"], item["version"], item["fingerprint"]
                         )
-                        for item in source_versions
+                        for item in criteria_sources
                     ),
                 }
             ).value
@@ -130,7 +167,7 @@ class MySqlServiceBeforeReplacementLoader:
             if snapshot_versions is not None and snapshot_digest != criteria_digest:
                 raise ServiceBeforeReplacementSourceUnavailable("replacement_matching_criteria_digest_drift")
             event = self._one(
-                "SELECT event.event_id,event.case_no,event.event_type,event.resulting_version,"
+                "SELECT event.id AS matching_event_id,event.event_id,event.case_no,event.event_type,event.resulting_version,event.event_digest,"
                 "event.criteria_snapshot_id,event.package_lineage_id,event.event_payload,event.source_version_tuple,"
                 "criteria.id AS expected_snapshot_row_id,criteria.snapshot_id AS expected_snapshot_id,"
                 "package.id AS expected_package_row_id,package.package_id AS expected_package_id,"
@@ -149,8 +186,21 @@ class MySqlServiceBeforeReplacementLoader:
             _validate_matching_event_binding(event, case_no, snapshot, package)
             event_sources = _matching_source_payload(event.get("source_version_tuple"))
             package_sources = _matching_source_payload(event.get("package_source_version_tuple"))
-            criteria_sources = _matching_source_payload(event.get("criteria_source_version_tuple"))
-            if event_sources != source_versions or package_sources != source_versions or criteria_sources != source_versions:
+            persisted_criteria_sources = _matching_source_payload(
+                event.get("criteria_source_version_tuple")
+            )
+            if (
+                event_sources != package_sources
+                or not _matching_sources_match_current(
+                    event_sources,
+                    source_versions,
+                    ignored_source_kinds=("matching_package",),
+                )
+                or not _matching_sources_match_current(
+                    persisted_criteria_sources,
+                    source_versions,
+                )
+            ):
                 raise ServiceBeforeReplacementSourceUnavailable("replacement_matching_source_version_drift")
             required_dates = tuple(projection.orders_service_dates.current_dates)
             if any(type(value) is not date for value in required_dates) or required_dates != tuple(sorted(set(required_dates))):
@@ -160,10 +210,21 @@ class MySqlServiceBeforeReplacementLoader:
                 "case_no": case_no,
                 "criteria_version": snapshot.criteria_version,
                 "criteria": snapshot.criteria,
-                "source_versions": source_versions,
+                "source_versions": criteria_sources,
                 "criteria_digest": criteria_digest,
                 "parent_package": package,
                 "source_event_identity": str(event["event_id"]),
+                "source_event_version": _required_nonnegative_int(
+                    event, "resulting_version"
+                ),
+                "source_event_type": str(event["event_type"]),
+                "source_event_fingerprint": str(event["event_digest"]),
+                "matching_package_lineage_id": _required_positive_int(
+                    event, "expected_package_row_id"
+                ),
+                "matching_event_id": _required_positive_int(
+                    event, "matching_event_id"
+                ),
                 "required_service_dates": required_dates,
                 "reuse_package": package if package.candidate_results else None,
             }
@@ -281,9 +342,9 @@ class MySqlServiceBeforeReplacementLoader:
         return schedules
 
     def _started_service_dates(self, base: Mapping[str, Any], schedules: tuple[Mapping[str, Any], ...]) -> tuple[date, ...]:
-        start_time = base.get("service_start_time")
+        start_time = _mysql_time(base.get("service_start_time"))
         now = self._clock.now()
-        if not isinstance(now, datetime) or now.tzinfo is None or start_time is None or not hasattr(start_time, "hour"):
+        if not isinstance(now, datetime) or now.tzinfo is None or start_time is None:
             raise ServiceBeforeReplacementSourceUnavailable("replacement_business_clock_proof_unavailable")
         now = now.astimezone(TAIPEI_TIME_ZONE)
         values: set[date] = set()
@@ -307,7 +368,16 @@ class MySqlServiceBeforeReplacementLoader:
                 values.add(work_date)
         return tuple(sorted(values))
 
-    def _scenario_roots(self, case_no, scenario, base, schedules, *, for_update):
+    def _scenario_roots(
+        self,
+        case_no,
+        scenario,
+        base,
+        schedules,
+        *,
+        for_update,
+        locked_staff_ids=(),
+    ):
         if scenario is ReplacementScenario.R01:
             pool, entries, events = self._pool(case_no, for_update)
             relevant_ids = tuple(
@@ -338,6 +408,11 @@ class MySqlServiceBeforeReplacementLoader:
             )
         if scenario is ReplacementScenario.R03:
             plan, segments = self._plan(case_no, for_update)
+            fresh_staff_ids = tuple(sorted(int(row["staff_id"]) for row in segments))
+            if for_update and fresh_staff_ids != tuple(locked_staff_ids):
+                raise ServiceBeforeReplacementSourceUnavailable(
+                    "scheduling_lock_set_stale"
+                )
             service_dates = self._orders_service_dates(case_no, for_update)
             _validate_segment_coverage(segments, service_dates)
             recipients = self._recipients(
@@ -364,8 +439,106 @@ class MySqlServiceBeforeReplacementLoader:
             )
         successor = self._successor_round(case_no, for_update=for_update)
         if successor is None:
-            raise ServiceBeforeReplacementSourceUnavailable("replacement_successor_round_unavailable")
+            return ()
         return (_root(ReplacementRootKind.SUCCESSOR_ROUND, case_no, "matching.successor-round", (successor.canonical_tuple,)),)
+
+    def _matching_zero_candidate_proof(
+        self, request: object, *, for_update: bool
+    ) -> MatchingZeroCandidateProof:
+        source = self.load_matching_source(request, for_update=for_update)
+        package = source.get("parent_package")
+        if (
+            package is None
+            or getattr(getattr(package, "state", None), "value", None) != "no_candidate"
+            or tuple(getattr(package, "candidate_results", ()))
+            or tuple(getattr(package, "segments", ()))
+            or tuple(getattr(package, "blockers", ())) != ("no_legal_candidate",)
+            or source.get("source_event_type") != "package_proposed"
+        ):
+            raise ServiceBeforeReplacementSourceUnavailable(
+                "replacement_matching_zero_candidate_proof_unavailable"
+            )
+        rows = self._all(
+            "SELECT receipt.receipt_id,receipt.command_name,receipt.outcome_state,"
+            "receipt.result_snapshot,receipt.event_id,receipt.package_lineage_id,"
+            "outbox.reference_id,outbox.intent_type,outbox.target_owner,outbox.intent_payload "
+            "FROM matching_coordination_apply_receipts receipt "
+            "JOIN matching_coordination_outbox outbox ON outbox.receipt_id=receipt.id "
+            "AND outbox.event_id=receipt.event_id "
+            "WHERE receipt.event_id=%s AND receipt.package_lineage_id=%s "
+            "ORDER BY receipt.id,outbox.id",
+            (
+                int(source["matching_event_id"]),
+                int(source["matching_package_lineage_id"]),
+            ),
+            for_update,
+        )
+        if len(rows) != 1:
+            raise ServiceBeforeReplacementSourceUnavailable(
+                "replacement_matching_zero_candidate_receipt_unavailable"
+            )
+        row = rows[0]
+        result = _json_object(row.get("result_snapshot"))
+        intent = _json_object(row.get("intent_payload"))
+        resulting_package = result.get("resulting_package")
+        intent_package = intent.get("resulting_package")
+        expected_fingerprint = package.fingerprint.value
+        if (
+            row.get("command_name") != "ApplyZeroCandidateConfirmation"
+            or row.get("outcome_state") not in {"applied", "replayed"}
+            or _required_positive_int(row, "event_id")
+            != int(source["matching_event_id"])
+            or _required_positive_int(row, "package_lineage_id")
+            != int(source["matching_package_lineage_id"])
+            or result.get("result_state") != "zero_candidate_confirmed"
+            or not isinstance(resulting_package, Mapping)
+            or str(resulting_package.get("package_id")) != package.package_id
+            or int(resulting_package.get("version", -1)) != package.version
+            or str(resulting_package.get("fingerprint")) != expected_fingerprint
+            or row.get("intent_type") != "rematch_requested"
+            or row.get("target_owner") != "assignment_workflow"
+            or not str(row.get("reference_id", "")).endswith(":assignment")
+            or not isinstance(intent_package, Mapping)
+            or str(intent_package.get("package_id")) != package.package_id
+            or str(intent_package.get("fingerprint")) != expected_fingerprint
+        ):
+            raise ServiceBeforeReplacementSourceUnavailable(
+                "replacement_matching_zero_candidate_receipt_drift"
+            )
+        return MatchingZeroCandidateProof(
+            case_no=str(source["case_no"]),
+            package_identity=str(package.package_id),
+            package_version=int(package.version),
+            criteria_snapshot_identity=str(source["snapshot_id"]),
+            event_identity=str(source["source_event_identity"]),
+            event_version=int(source["source_event_version"]),
+            package_fingerprint=package.fingerprint,
+            event_fingerprint=PreviewFingerprint(
+                str(source["source_event_fingerprint"])
+            ),
+            receipt_identity=str(row["receipt_id"]),
+            assignment_intent_identity=str(row["reference_id"]),
+        )
+
+    def _preflight_r03_staff_ids(self, case_no: str) -> tuple[int, ...]:
+        rows = self._all(
+            "SELECT segment.staff_id FROM caregiver_matching_plans plan "
+            "JOIN caregiver_matching_plan_segments segment ON segment.plan_id=plan.id "
+            "WHERE plan.case_no=%s AND plan.status='accepted' AND plan.is_active=1 "
+            "ORDER BY segment.staff_id",
+            (case_no,),
+            False,
+        )
+        staff_ids = tuple(int(row.get("staff_id", 0)) for row in rows)
+        if (
+            not 1 <= len(staff_ids) <= 4
+            or any(staff_id <= 0 for staff_id in staff_ids)
+            or staff_ids != tuple(sorted(set(staff_ids)))
+        ):
+            raise ServiceBeforeReplacementSourceUnavailable(
+                "replacement_matching_segments_staff_drift"
+            )
+        return staff_ids
 
     def _pool(self, case_no, for_update):
         pool = self._one("SELECT id,case_no FROM caregiver_candidate_contact_pools WHERE case_no=%s", (case_no,), for_update)
@@ -454,12 +627,23 @@ class MySqlServiceBeforeReplacementLoader:
             row, case_no, snapshot, package, allowed_event_types=("customer_decision",)
         )
         _required_positive_int(row, "package_version")
-        if any(
-            _matching_source_payload(row.get(key)) != current_sources
-            for key in (
-                "source_version_tuple",
-                "package_source_version_tuple",
-                "criteria_source_version_tuple",
+        event_sources = _matching_source_payload(row.get("source_version_tuple"))
+        package_sources = _matching_source_payload(
+            row.get("package_source_version_tuple")
+        )
+        criteria_sources = _matching_source_payload(
+            row.get("criteria_source_version_tuple")
+        )
+        if (
+            event_sources != package_sources
+            or not _matching_sources_match_current(
+                event_sources,
+                current_sources,
+                ignored_source_kinds=("matching_package",),
+            )
+            or not _matching_sources_match_current(
+                criteria_sources,
+                current_sources,
             )
         ):
             raise ServiceBeforeReplacementSourceUnavailable(
@@ -468,7 +652,14 @@ class MySqlServiceBeforeReplacementLoader:
         payload = _json_object(row.get("event_payload"))
         package_payload = _json_object(row.get("package_snapshot"))
         _validate_plan_bound_payload(payload, package_payload, case_no, plan, segments, service_dates, "matching_reply")
-        _validate_exact_plan_segments(payload, case_no, plan, segments, service_dates, "matching_reply")
+        _validate_exact_plan_segments(
+            package_payload,
+            case_no,
+            plan,
+            segments,
+            service_dates,
+            "matching_reply",
+        )
         return row
 
     def _orders_service_dates(self, case_no, for_update):
@@ -519,12 +710,20 @@ class MySqlServiceBeforeReplacementLoader:
             audience = row.get("audience_type")
             if audience == "customer":
                 customer_count += 1
-                if row.get("segment_id") is not None or row.get("recipient_line_user_id") is None:
+                if (
+                    row.get("segment_id") is not None
+                    or not _recipient_delivery_identity_present(row, payload)
+                ):
                     raise ServiceBeforeReplacementSourceUnavailable("replacement_recipient_binding_drift")
                 _validate_plan_bound_payload(payload, {}, case_no, {"id": plan_id}, segments, service_dates, "recipient")
             elif audience == "caregiver":
                 segment = next((item for item in segments if item.get("id") == row.get("segment_id")), None)
-                if segment is None or row.get("segment_id") in segment_ids or row.get("staff_id") != segment.get("staff_id") or row.get("recipient_line_user_id") is None:
+                if (
+                    segment is None
+                    or row.get("segment_id") in segment_ids
+                    or row.get("staff_id") != segment.get("staff_id")
+                    or not _recipient_delivery_identity_present(row, payload)
+                ):
                     raise ServiceBeforeReplacementSourceUnavailable("replacement_recipient_binding_drift")
                 segment_ids.add(row["segment_id"])
                 _validate_plan_bound_payload(payload, {}, case_no, {"id": plan_id}, (segment,), service_dates, "recipient")
@@ -620,11 +819,12 @@ class MySqlServiceBeforeReplacementLoader:
             ):
                 raise ServiceBeforeReplacementSourceUnavailable("replacement_signback_incomplete")
             return tuple(grouped[key][0] for key in sorted(grouped))
-        rows = self._all("SELECT document.id AS document_id,document.case_no AS document_case_no,document.matching_plan_id AS document_plan_id,document.matching_segment_id,document.document_scope,document.document_role,document.version_number,asset.sha256,event.id AS event_id,event.case_no AS event_case_no,event.matching_plan_id AS event_plan_id,event.matching_segment_id AS event_segment_id,event.event_key,event.payload,receipt.id AS receipt_id,receipt.case_no AS receipt_case_no,receipt.document_version_id AS receipt_document_id,receipt.signing_event_id AS receipt_event_id,receipt.idempotency_key,receipt.result_snapshot FROM contract_document_versions document JOIN media_assets asset ON asset.id=document.media_asset_id JOIN contract_signing_events event ON event.document_version_id=document.id AND event.event_type='signed_received' JOIN contract_signing_command_receipts receipt ON receipt.signing_event_id=event.id WHERE document.case_no=%s AND document.matching_plan_id=%s AND document.document_scope='staff_segment' AND document.document_role='signed_return' ORDER BY document.matching_segment_id,document.version_number DESC,event.id DESC", (case_no, plan_id), for_update)
+        rows = self._all("SELECT document.id AS document_id,document.case_no AS document_case_no,document.matching_plan_id AS document_plan_id,document.matching_segment_id AS document_segment_id,document.document_scope,document.document_role,document.version_number,asset.sha256,event.id AS event_id,event.case_no AS event_case_no,event.matching_plan_id AS event_plan_id,event.matching_segment_id AS event_segment_id,event.event_key,event.payload,receipt.id AS receipt_id,receipt.case_no AS receipt_case_no,receipt.document_version_id AS receipt_document_id,receipt.signing_event_id AS receipt_event_id,receipt.idempotency_key,receipt.result_snapshot FROM contract_document_versions document JOIN media_assets asset ON asset.id=document.media_asset_id JOIN contract_signing_events event ON event.document_version_id=document.id AND event.event_type='signed_received' JOIN contract_signing_command_receipts receipt ON receipt.signing_event_id=event.id WHERE document.case_no=%s AND document.matching_plan_id=%s AND document.document_scope='staff_segment' AND document.document_role='signed_return' ORDER BY document.matching_segment_id,document.version_number DESC,event.id DESC", (case_no, plan_id), for_update)
         grouped = {}
         for row in rows:
-            _validate_signback_row(row, case_no, plan_id, row.get("matching_segment_id"), external=False)
-            grouped.setdefault(int(row["matching_segment_id"]), []).append(row)
+            segment_id = row.get("document_segment_id")
+            _validate_signback_row(row, case_no, plan_id, segment_id, external=False)
+            grouped.setdefault(int(segment_id), []).append(row)
         latest = {}
         for segment_id, candidates in grouped.items():
             highest = max(int(row["version_number"]) for row in candidates)
@@ -694,12 +894,33 @@ class MySqlServiceBeforeReplacementLoader:
         if candidate.willingness not in {"willing", "unwilling"} or result.willingness != candidate.willingness:
             return None
         round_identity = f"matching-package:{package.package_id}"
-        exact_versions = {}
-        for kind in ("orders_service_dates", "scheduling_availability", "candidate_pool"):
-            item = source_items.get(kind)
-            if item is None or isinstance(item["version"], bool) or not isinstance(item["version"], int):
-                raise ServiceBeforeReplacementSourceUnavailable("replacement_matching_reuse_source_version_unavailable")
-            exact_versions[kind] = item["version"]
+        coverage_source = source_items.get("orders_service_dates")
+        candidate_pool_source = source_items.get("candidate_pool")
+        if (
+            coverage_source is None
+            or candidate_pool_source is None
+            or isinstance(coverage_source["version"], bool)
+            or not isinstance(coverage_source["version"], int)
+        ):
+            raise ServiceBeforeReplacementSourceUnavailable(
+                "replacement_matching_reuse_source_version_unavailable"
+            )
+        availability = tuple(
+            item
+            for item in projection.scheduling_availability
+            if item.staff_id == candidate.staff_id
+        )
+        if len(availability) != 1:
+            raise ServiceBeforeReplacementSourceUnavailable(
+                "replacement_matching_reuse_source_version_unavailable"
+            )
+        availability_version = availability[0].aggregate_version
+        if isinstance(availability_version, bool) or not isinstance(
+            availability_version, int
+        ):
+            raise ServiceBeforeReplacementSourceUnavailable(
+                "replacement_matching_reuse_source_version_unavailable"
+            )
         if tuple(package.required_service_dates) != tuple(projection.orders_service_dates.current_dates):
             raise ServiceBeforeReplacementSourceUnavailable("replacement_matching_reuse_service_dates_drift")
         willingness_events = tuple(
@@ -714,27 +935,43 @@ class MySqlServiceBeforeReplacementLoader:
             willingness_version = int(latest_willingness.id)
         except (AttributeError, TypeError, ValueError) as error:
             raise ServiceBeforeReplacementSourceUnavailable("replacement_matching_willingness_source_unavailable") from error
-        return CandidatePoolReuseProof(
-            pool_identity=f"matching-candidate-pool:{pool.pool_id}",
-            round_identity=round_identity,
-            coverage_version=exact_versions["orders_service_dates"],
-            availability_version=exact_versions["scheduling_availability"],
-            willingness_version=willingness_version,
-            fingerprint=fingerprint_payload({
+        pool_identity = f"matching-candidate-pool:{pool.pool_id}"
+        generation_version = int(base["generation_number"])
+        event_version = int(base["event_version"])
+        candidate_identity = str(candidate.id)
+        proof_fingerprint = fingerprint_payload(
+            {
+                "pool_identity": pool_identity,
+                "round_identity": round_identity,
+                "coverage_version": coverage_source["version"],
+                "availability_version": availability_version,
+                "willingness_version": willingness_version,
+                "same_round": True,
+                "coverage_valid": True,
+                "availability_valid": True,
+                "willingness_valid": True,
+                "fresh": True,
+                "accepted_candidate": bool(package.segments),
                 "case_no": case_no,
-                "package": package.canonical_payload(),
-                "candidate": candidate.id,
-                "source_versions": tuple(sorted(
-                    (kind, value["source_id"], value["version"], value["fingerprint"])
-                    for kind, value in source_items.items()
-                )),
-            }),
+                "successor_round_identity": round_identity,
+                "generation_version": generation_version,
+                "event_version": event_version,
+                "candidate_identity": candidate_identity,
+            }
+        )
+        return CandidatePoolReuseProof(
+            pool_identity=pool_identity,
+            round_identity=round_identity,
+            coverage_version=coverage_source["version"],
+            availability_version=availability_version,
+            willingness_version=willingness_version,
+            fingerprint=proof_fingerprint,
             accepted_candidate=bool(package.segments),
             case_no=case_no,
             successor_round_identity=round_identity,
-            generation_version=int(base["generation_number"]),
-            event_version=int(base["event_version"]),
-            candidate_identity=str(candidate.id),
+            generation_version=generation_version,
+            event_version=event_version,
+            candidate_identity=candidate_identity,
         )
 
     def _successor_round(self, case_no, *, base=None, for_update):
@@ -895,6 +1132,65 @@ def _matching_source_items(values: Any) -> dict[str, dict[str, Any]]:
     return {item["source_kind"]: item for item in _matching_source_payload(values)}
 
 
+def _matching_sources_match_current(
+    persisted: Any,
+    current: Any,
+    *,
+    ignored_source_kinds: tuple[str, ...] = (),
+) -> bool:
+    """Compare only facts consulted by the historical projection.
+
+    A package cannot include its own final fingerprint in the tuple used to
+    build that fingerprint.  Its identity/version/digest are validated by the
+    package and event bindings, so callers explicitly exclude that self-source.
+    """
+
+    persisted_items = _matching_source_items(persisted)
+    current_items = _matching_source_items(current)
+    if persisted_items.keys() != current_items.keys():
+        return False
+    ignored = set(ignored_source_kinds)
+    for source_kind, item in persisted_items.items():
+        if source_kind in ignored or item["source_id"] == "not_consulted":
+            continue
+        if item != current_items[source_kind]:
+            return False
+    return True
+
+
+def _recipient_delivery_identity_present(
+    row: Mapping[str, Any], payload: Mapping[str, Any]
+) -> bool:
+    """Accept either a LINE identity or the canonical manual preparation proof."""
+
+    line_user_id = row.get("recipient_line_user_id")
+    if isinstance(line_user_id, str) and bool(line_user_id.strip()):
+        return True
+    manual = payload.get("manual_preparation")
+    return (
+        isinstance(manual, Mapping)
+        and isinstance(manual.get("actor"), str)
+        and bool(manual["actor"].strip())
+        and isinstance(manual.get("reason"), str)
+        and bool(manual["reason"].strip())
+    )
+
+
+def _mysql_time(value: Any) -> time | None:
+    if value is None or isinstance(value, time):
+        return value
+    if not isinstance(value, timedelta):
+        raise ServiceBeforeReplacementSourceUnavailable(
+            "replacement_business_clock_proof_unavailable"
+        )
+    seconds = int(value.total_seconds())
+    if seconds < 0 or seconds >= 86_400:
+        raise ServiceBeforeReplacementSourceUnavailable(
+            "replacement_business_clock_proof_unavailable"
+        )
+    return time(seconds // 3_600, seconds % 3_600 // 60, seconds % 60)
+
+
 def _validate_matching_event_binding(
     row: Mapping[str, Any],
     case_no: str,
@@ -998,10 +1294,11 @@ def _validate_exact_plan_segments(
     service_dates: tuple[date, ...],
     source_name: str,
 ) -> None:
-    required = ("case_no", "plan_id", "segments")
-    if any(key not in payload for key in required) or payload.get("case_no") != case_no:
+    if "segments" not in payload:
         raise ServiceBeforeReplacementSourceUnavailable(f"replacement_{source_name}_malformed")
-    if payload.get("plan_id") != plan.get("id"):
+    if payload.get("case_no", case_no) != case_no:
+        raise ServiceBeforeReplacementSourceUnavailable(f"replacement_{source_name}_binding_drift")
+    if payload.get("plan_id", plan.get("id")) != plan.get("id"):
         raise ServiceBeforeReplacementSourceUnavailable(f"replacement_{source_name}_binding_drift")
     values = payload["segments"]
     if not isinstance(values, (tuple, list)) or len(values) != len(segments):

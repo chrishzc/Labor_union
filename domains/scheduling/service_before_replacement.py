@@ -207,6 +207,53 @@ ExistingSuccessorRound = SuccessorRoundFact
 
 
 @dataclass(frozen=True, slots=True)
+class MatchingZeroCandidateProof:
+    """Current Matching-owned no-candidate package/event consumed by R-07."""
+
+    case_no: str
+    package_identity: str
+    package_version: int
+    criteria_snapshot_identity: str
+    event_identity: str
+    event_version: int
+    package_fingerprint: PreviewFingerprint
+    event_fingerprint: PreviewFingerprint
+    receipt_identity: str
+    assignment_intent_identity: str
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.case_no, "zero candidate proof case number", _CASE_MAX)
+        require_canonical_text(self.package_identity, "zero candidate package identity", _IDENTITY_MAX)
+        require_canonical_text(self.criteria_snapshot_identity, "zero candidate criteria identity", _IDENTITY_MAX)
+        require_canonical_text(self.event_identity, "zero candidate event identity", _IDENTITY_MAX)
+        require_canonical_text(self.receipt_identity, "zero candidate receipt identity", _IDENTITY_MAX)
+        require_canonical_text(self.assignment_intent_identity, "zero candidate assignment intent identity", _IDENTITY_MAX)
+        require_nonnegative_integer(self.package_version, "zero candidate package version")
+        require_nonnegative_integer(self.event_version, "zero candidate event version")
+        if not isinstance(self.package_fingerprint, PreviewFingerprint) or not isinstance(
+            self.event_fingerprint, PreviewFingerprint
+        ):
+            raise TypeError("zero candidate fingerprint is invalid")
+        if self.event_version != self.package_version:
+            raise ServiceBeforeReplacementError("zero_candidate_owner_version_drift")
+
+    @property
+    def canonical_tuple(self) -> tuple[object, ...]:
+        return (
+            self.case_no,
+            self.package_identity,
+            self.package_version,
+            self.criteria_snapshot_identity,
+            self.event_identity,
+            self.event_version,
+            self.package_fingerprint.value,
+            self.event_fingerprint.value,
+            self.receipt_identity,
+            self.assignment_intent_identity,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class CandidatePoolReuseProof:
     """Fresh candidate-pool evidence bound to case, successor, versions and identity."""
 
@@ -283,6 +330,7 @@ class ServiceBeforeReplacementFacts:
     successor_round: SuccessorRoundFact | None = None
     candidate_pool_round_identity: str | None = None
     candidate_identity: str | None = None
+    matching_zero_candidate_proof: MatchingZeroCandidateProof | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "replacement case number", _CASE_MAX)
@@ -333,6 +381,11 @@ class ServiceBeforeReplacementFacts:
             require_canonical_text(self.candidate_pool_round_identity, "candidate pool successor round identity", _IDENTITY_MAX)
         if self.candidate_identity is not None:
             require_canonical_text(self.candidate_identity, "replacement candidate identity", _IDENTITY_MAX)
+        if self.matching_zero_candidate_proof is not None:
+            if not isinstance(self.matching_zero_candidate_proof, MatchingZeroCandidateProof):
+                raise TypeError("matching zero candidate proof is invalid")
+            if self.matching_zero_candidate_proof.case_no != self.case_no:
+                raise ServiceBeforeReplacementError("zero_candidate_owner_case_mismatch")
 
     @property
     def official_service_day_count(self) -> int:
@@ -381,6 +434,7 @@ class ServiceBeforeReplacementQuery:
     aggregate_version: int = 0
     prior_generation_identity: str | None = None
     prior_event_identity: str | None = None
+    matching_zero_candidate_proof: MatchingZeroCandidateProof | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,6 +467,7 @@ class ServiceBeforeReplacementCandidate:
     reason_evidence: ReplacementReasonEvidence | None = None
     projection_kind: ReplacementProjectionKind = ReplacementProjectionKind.SUCCESSOR_MATCHING
     successor_round_fact: SuccessorRoundFact | None = None
+    matching_zero_candidate_proof: MatchingZeroCandidateProof | None = None
 
     @property
     def can_apply(self) -> bool:
@@ -454,7 +509,18 @@ class ServiceBeforeReplacementCandidate:
 def query_service_before_replacement(facts: ServiceBeforeReplacementFacts) -> ServiceBeforeReplacementQuery:
     _require_facts(facts)
     blockers = _gate_blockers(facts)
-    impacted = _impacted_current_roots(facts)
+    if (
+        not blockers
+        and facts.scenario is ReplacementScenario.R07
+        and facts.successor_round is not None
+        and facts.successor_round.candidate_count == 0
+    ):
+        blockers = ("zero_candidate_successor_disposition",)
+    impacted = (
+        ()
+        if facts.scenario is ReplacementScenario.R07
+        else _impacted_current_roots(facts)
+    )
     retained = _retained_roots(facts, impacted if not blockers else ())
     return ServiceBeforeReplacementQuery(
         case_no=facts.case_no, scenario=facts.scenario, actual_service_day_count=facts.official_service_day_count,
@@ -467,6 +533,7 @@ def query_service_before_replacement(facts: ServiceBeforeReplacementFacts) -> Se
         prior_aggregate_identity=facts.prior_aggregate_identity, aggregate_version=facts.aggregate_version,
         prior_generation_identity=facts.prior_generation_identity,
         prior_event_identity=facts.prior_event_identity,
+        matching_zero_candidate_proof=facts.matching_zero_candidate_proof,
     )
 
 
@@ -478,11 +545,14 @@ def preview_service_before_replacement(facts: ServiceBeforeReplacementFacts) -> 
         return _blocked_candidate(facts, outcome, blockers)
     if facts.scenario is ReplacementScenario.R07:
         round_fact = facts.successor_round
-        if round_fact is None:
+        if round_fact is not None:
+            if round_fact.candidate_count != 0:
+                return _blocked_candidate(facts, ReplacementOutcome.BLOCKED, ("zero_candidate_disposition_invalid",), successor_round=round_fact)
+            return _build_r07_blocked_candidate(facts, round_fact)
+        proof = facts.matching_zero_candidate_proof
+        if proof is None:
             return _blocked_candidate(facts, ReplacementOutcome.BLOCKED, ("successor_round_missing",))
-        if round_fact.candidate_count != 0:
-            return _blocked_candidate(facts, ReplacementOutcome.BLOCKED, ("zero_candidate_disposition_invalid",), successor_round=round_fact)
-        return _build_r07_blocked_candidate(facts, round_fact)
+        return _build_r07_ready_candidate(facts, proof)
 
     impacted = _impacted_current_roots(facts)
     retained = _retained_roots(facts, impacted)
@@ -495,6 +565,12 @@ def preview_service_before_replacement(facts: ServiceBeforeReplacementFacts) -> 
     successor = ReplacementRootIdentity(ReplacementRootKind.SUCCESSOR_ROUND, round_identity, facts.case_no)
     created = (successor,)
     resume = _server_resume_step(facts.candidate_pool_reuse, facts)
+    successor_reuse = _successor_reuse_proof(
+        facts.candidate_pool_reuse,
+        round_identity=round_identity,
+        generation_version=facts.generation_version,
+        event_version=facts.event_version,
+    )
     projection_kind = ReplacementProjectionKind.MATCHING_ONLY_ZERO_SERVICE if facts.scenario is ReplacementScenario.R04 else ReplacementProjectionKind.SUCCESSOR_MATCHING
     candidate = ServiceBeforeReplacementCandidate(
         case_no=facts.case_no, scenario=facts.scenario, outcome=ReplacementOutcome.READY,
@@ -503,9 +579,9 @@ def preview_service_before_replacement(facts: ServiceBeforeReplacementFacts) -> 
         successor_round_identity=round_identity, expected_generation_version=facts.generation_version,
         resulting_generation_version=generation_version, expected_event_version=facts.event_version,
         resulting_event_version=event_version, retained_roots=retained, superseded_roots=impacted,
-        created_roots=created, resume_step=resume, candidate_pool_reuse_proof=facts.candidate_pool_reuse,
+        created_roots=created, resume_step=resume, candidate_pool_reuse_proof=successor_reuse,
         actual_service_dates=facts.actual_service_dates, blockers=(),
-        fingerprint=_candidate_fingerprint(facts, generation_identity, event_identity, round_identity, retained, impacted, created, resume, expected_aggregate_version=facts.aggregate_version, resulting_aggregate_version=aggregate_version, projection_kind=projection_kind),
+        fingerprint=_candidate_fingerprint(facts, generation_identity, event_identity, round_identity, retained, impacted, created, resume, candidate_pool_reuse=successor_reuse, expected_aggregate_version=facts.aggregate_version, resulting_aggregate_version=aggregate_version, projection_kind=projection_kind),
         prior_aggregate_identity=facts.prior_aggregate_identity, expected_aggregate_version=facts.aggregate_version,
         resulting_aggregate_version=aggregate_version, prior_case_no=facts.prior_case_no,
         actual_service_proof=facts.actual_service_proof, reason_evidence=facts.reason_evidence_contract,
@@ -516,6 +592,70 @@ def preview_service_before_replacement(facts: ServiceBeforeReplacementFacts) -> 
 
 
 build_service_before_replacement_candidate = preview_service_before_replacement
+
+
+def _build_r07_ready_candidate(
+    facts: ServiceBeforeReplacementFacts,
+    proof: MatchingZeroCandidateProof,
+) -> ServiceBeforeReplacementCandidate:
+    generation_version = facts.generation_version + 1
+    event_version = facts.event_version + 1
+    aggregate_version = facts.aggregate_version + 1
+    generation_identity = f"replacement-generation:{facts.case_no}:{generation_version}"
+    event_identity = f"replacement-event:{facts.case_no}:{event_version}"
+    round_identity = f"successor-round:{facts.case_no}:{event_version}"
+    retained = _retained_roots(facts, ())
+    created = (
+        ReplacementRootIdentity(
+            ReplacementRootKind.SUCCESSOR_ROUND,
+            round_identity,
+            facts.case_no,
+        ),
+    )
+    candidate = ServiceBeforeReplacementCandidate(
+        case_no=facts.case_no,
+        scenario=facts.scenario,
+        outcome=ReplacementOutcome.READY,
+        prior_generation_identity=facts.prior_generation_identity,
+        prior_event_identity=facts.prior_event_identity,
+        replacement_generation_identity=generation_identity,
+        replacement_event_identity=event_identity,
+        successor_round_identity=round_identity,
+        expected_generation_version=facts.generation_version,
+        resulting_generation_version=generation_version,
+        expected_event_version=facts.event_version,
+        resulting_event_version=event_version,
+        retained_roots=retained,
+        superseded_roots=(),
+        created_roots=created,
+        resume_step=ReplacementResumeStep.STEP_2,
+        candidate_pool_reuse_proof=None,
+        actual_service_dates=facts.actual_service_dates,
+        blockers=(),
+        fingerprint=_candidate_fingerprint(
+            facts,
+            generation_identity,
+            event_identity,
+            round_identity,
+            retained,
+            (),
+            created,
+            ReplacementResumeStep.STEP_2,
+            candidate_pool_reuse=None,
+            expected_aggregate_version=facts.aggregate_version,
+            resulting_aggregate_version=aggregate_version,
+            projection_kind=ReplacementProjectionKind.SUCCESSOR_MATCHING,
+        ),
+        prior_aggregate_identity=facts.prior_aggregate_identity,
+        expected_aggregate_version=facts.aggregate_version,
+        resulting_aggregate_version=aggregate_version,
+        prior_case_no=facts.prior_case_no,
+        actual_service_proof=facts.actual_service_proof,
+        reason_evidence=facts.reason_evidence_contract,
+        matching_zero_candidate_proof=proof,
+    )
+    _validate_candidate(candidate, facts)
+    return candidate
 
 
 def _build_r07_blocked_candidate(facts: ServiceBeforeReplacementFacts, round_fact: SuccessorRoundFact) -> ServiceBeforeReplacementCandidate:
@@ -529,7 +669,7 @@ def _build_r07_blocked_candidate(facts: ServiceBeforeReplacementFacts, round_fac
         retained_roots=retained, superseded_roots=(), created_roots=(), resume_step=ReplacementResumeStep.STEP_2,
         candidate_pool_reuse_proof=facts.candidate_pool_reuse, actual_service_dates=facts.actual_service_dates,
         blockers=("zero_candidate_successor_disposition",),
-        fingerprint=_candidate_fingerprint(facts, round_fact.generation_identity, round_fact.event_identity, round_fact.round_identity, retained, (), (), ReplacementResumeStep.STEP_2, expected_aggregate_version=facts.aggregate_version, resulting_aggregate_version=None, projection_kind=ReplacementProjectionKind.SUCCESSOR_MATCHING, successor_round=round_fact),
+        fingerprint=_candidate_fingerprint(facts, round_fact.generation_identity, round_fact.event_identity, round_fact.round_identity, retained, (), (), ReplacementResumeStep.STEP_2, candidate_pool_reuse=facts.candidate_pool_reuse, expected_aggregate_version=facts.aggregate_version, resulting_aggregate_version=None, projection_kind=ReplacementProjectionKind.SUCCESSOR_MATCHING, successor_round=round_fact),
         prior_aggregate_identity=facts.prior_aggregate_identity, expected_aggregate_version=facts.aggregate_version,
         prior_case_no=facts.prior_case_no, actual_service_proof=facts.actual_service_proof,
         reason_evidence=facts.reason_evidence_contract, successor_round_fact=round_fact,
@@ -548,7 +688,7 @@ def _blocked_candidate(facts: ServiceBeforeReplacementFacts, outcome: Replacemen
         expected_event_version=facts.event_version, resulting_event_version=None, retained_roots=retained,
         superseded_roots=(), created_roots=(), resume_step=resume, candidate_pool_reuse_proof=facts.candidate_pool_reuse,
         actual_service_dates=facts.actual_service_dates, blockers=tuple(blockers),
-        fingerprint=_candidate_fingerprint(facts, None, None, successor_round.round_identity if successor_round else None, retained, (), (), resume, expected_aggregate_version=facts.aggregate_version, resulting_aggregate_version=None, projection_kind=ReplacementProjectionKind.SUCCESSOR_MATCHING, blockers=tuple(blockers), successor_round=successor_round),
+        fingerprint=_candidate_fingerprint(facts, None, None, successor_round.round_identity if successor_round else None, retained, (), (), resume, candidate_pool_reuse=facts.candidate_pool_reuse, expected_aggregate_version=facts.aggregate_version, resulting_aggregate_version=None, projection_kind=ReplacementProjectionKind.SUCCESSOR_MATCHING, blockers=tuple(blockers), successor_round=successor_round),
         prior_aggregate_identity=facts.prior_aggregate_identity, expected_aggregate_version=facts.aggregate_version,
         prior_case_no=facts.prior_case_no, actual_service_proof=facts.actual_service_proof,
         reason_evidence=facts.reason_evidence_contract, successor_round_fact=successor_round,
@@ -582,7 +722,12 @@ def _gate_blockers(facts: ServiceBeforeReplacementFacts) -> tuple[str, ...]:
 
 def _impacted_current_roots(facts: ServiceBeforeReplacementFacts) -> tuple[ReplacementRootIdentity, ...]:
     required = set(_IMPACTED_KINDS[facts.scenario])
-    return tuple(item for item in facts.current_roots if item.kind in required and item.current and item.caregiver_bound)
+    impacted = (
+        item
+        for item in facts.current_roots
+        if item.kind in required and item.current and item.caregiver_bound
+    )
+    return tuple(sorted(impacted, key=lambda item: item.root_id))
 
 
 def _validate_required_roots(facts: ServiceBeforeReplacementFacts) -> None:
@@ -613,8 +758,8 @@ def _server_resume_step(proof: CandidatePoolReuseProof | None, facts: ServiceBef
     return ReplacementResumeStep.STEP_4 if proof.accepted_candidate else ReplacementResumeStep.STEP_3
 
 
-def _candidate_fingerprint(facts: ServiceBeforeReplacementFacts, generation_identity: str | None, event_identity: str | None, round_identity: str | None, retained: tuple[ReplacementRootIdentity, ...], impacted: tuple[ReplacementRootIdentity, ...], created: tuple[ReplacementRootIdentity, ...], resume: ReplacementResumeStep, *, expected_aggregate_version: int, resulting_aggregate_version: int | None, projection_kind: ReplacementProjectionKind, blockers: tuple[str, ...] = (), successor_round: SuccessorRoundFact | None = None) -> PreviewFingerprint:
-    return fingerprint_payload({
+def _candidate_fingerprint(facts: ServiceBeforeReplacementFacts, generation_identity: str | None, event_identity: str | None, round_identity: str | None, retained: tuple[ReplacementRootIdentity, ...], impacted: tuple[ReplacementRootIdentity, ...], created: tuple[ReplacementRootIdentity, ...], resume: ReplacementResumeStep, *, candidate_pool_reuse: CandidatePoolReuseProof | None, expected_aggregate_version: int, resulting_aggregate_version: int | None, projection_kind: ReplacementProjectionKind, blockers: tuple[str, ...] = (), successor_round: SuccessorRoundFact | None = None) -> PreviewFingerprint:
+    payload = {
         "family": "service-before-replacement", "case_no": facts.case_no, "prior_case_no": facts.prior_case_no,
         "scenario": facts.scenario.value, "prior_aggregate_identity": facts.prior_aggregate_identity,
         "expected_aggregate_version": expected_aggregate_version, "resulting_aggregate_version": resulting_aggregate_version,
@@ -623,13 +768,66 @@ def _candidate_fingerprint(facts: ServiceBeforeReplacementFacts, generation_iden
         "generation_identity": generation_identity, "event_identity": event_identity, "round_identity": round_identity,
         "actual_service_proof": facts.actual_service_proof.canonical_tuple if facts.actual_service_proof else None,
         "actual_service_dates": tuple(item.isoformat() for item in facts.actual_service_dates),
-        "candidate_pool_reuse": facts.candidate_pool_reuse.canonical_tuple if facts.candidate_pool_reuse else None,
-        "candidate_identity": facts.candidate_identity,
+        "candidate_pool_reuse": candidate_pool_reuse.canonical_tuple if candidate_pool_reuse else None,
+        "candidate_identity": candidate_pool_reuse.candidate_identity if candidate_pool_reuse else facts.candidate_identity,
         "retained": tuple(item.canonical_tuple for item in retained), "superseded": tuple(item.canonical_tuple for item in impacted),
         "created": tuple(item.canonical_tuple for item in created), "resume_step": resume.value,
         "projection_kind": projection_kind.value, "reason_evidence": facts.reason_evidence_contract.canonical_tuple,
         "blockers": blockers, "successor_round": successor_round.canonical_tuple if successor_round else None,
-    })
+    }
+    if facts.matching_zero_candidate_proof is not None:
+        payload["matching_zero_candidate_proof"] = (
+            facts.matching_zero_candidate_proof.canonical_tuple
+        )
+    return fingerprint_payload(payload)
+
+
+def _successor_reuse_proof(
+    source: CandidatePoolReuseProof | None,
+    *,
+    round_identity: str,
+    generation_version: int,
+    event_version: int,
+) -> CandidatePoolReuseProof | None:
+    if source is None:
+        return None
+    payload = {
+        "pool_identity": source.pool_identity,
+        "round_identity": round_identity,
+        "coverage_version": source.coverage_version,
+        "availability_version": source.availability_version,
+        "willingness_version": source.willingness_version,
+        "same_round": True,
+        "coverage_valid": source.coverage_valid,
+        "availability_valid": source.availability_valid,
+        "willingness_valid": source.willingness_valid,
+        "fresh": source.fresh,
+        "accepted_candidate": source.accepted_candidate,
+        "case_no": source.case_no,
+        "successor_round_identity": round_identity,
+        "generation_version": generation_version,
+        "event_version": event_version,
+        "candidate_identity": source.candidate_identity,
+    }
+    return CandidatePoolReuseProof(
+        pool_identity=source.pool_identity,
+        round_identity=round_identity,
+        coverage_version=source.coverage_version,
+        availability_version=source.availability_version,
+        willingness_version=source.willingness_version,
+        fingerprint=fingerprint_payload(payload),
+        same_round=True,
+        coverage_valid=source.coverage_valid,
+        availability_valid=source.availability_valid,
+        willingness_valid=source.willingness_valid,
+        fresh=source.fresh,
+        accepted_candidate=source.accepted_candidate,
+        case_no=source.case_no,
+        successor_round_identity=round_identity,
+        generation_version=generation_version,
+        event_version=event_version,
+        candidate_identity=source.candidate_identity,
+    )
 
 
 def _validate_candidate(candidate: ServiceBeforeReplacementCandidate, facts: ServiceBeforeReplacementFacts) -> None:
@@ -675,7 +873,7 @@ def _validate_dates(values: tuple[date, ...], label: str) -> None:
 __all__ = [
     "ActualServiceProof", "AuthoritativeActualServiceProof", "CandidatePoolReuseProof", "ExistingSuccessorRound", "OfficialServiceProof",
     "ReplacementOutcome", "ReplacementProjectionKind", "ReplacementReasonEvidence", "ReplacementResumeStep", "ReplacementRootDelta",
-    "ReplacementRootIdentity", "ReplacementRootKind", "ReplacementScenario", "ServiceBeforeReplacementCandidate", "ServiceBeforeReplacementError",
+    "MatchingZeroCandidateProof", "ReplacementRootIdentity", "ReplacementRootKind", "ReplacementScenario", "ServiceBeforeReplacementCandidate", "ServiceBeforeReplacementError",
     "ServiceBeforeReplacementFacts", "ServiceBeforeReplacementQuery", "SuccessorRoundFact", "build_service_before_replacement_candidate",
     "preview_service_before_replacement", "query_service_before_replacement",
 ]

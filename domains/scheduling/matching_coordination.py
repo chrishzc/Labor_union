@@ -36,8 +36,10 @@ _MAXIMUM_REASON_LENGTH = 500
 
 class MatchingDomainErrorCode(StrEnum):
     INVALID = "matching_criteria_invalid"
+    CANDIDATE_NOT_FOUND = "matching_candidate_not_found"
     COVERAGE_INCOMPLETE = "matching_coverage_incomplete"
     SOURCE_CONFLICT = "matching_source_version_conflict"
+    WILLINGNESS_CONFLICT = "matching_willingness_conflict"
     NO_CANDIDATE = "matching_no_candidate"
     ALTERNATIVE_REQUIRED = "matching_alternative_not_explicit"
     REMATCH_REQUIRED = "matching_rematch_required"
@@ -492,6 +494,21 @@ class MatchingPackage:
                     MatchingDomainErrorCode.COVERAGE_INCOMPLETE,
                     "candidate pool open package must not contain candidates or segments",
                 )
+            if self.blockers:
+                raise MatchingDomainError(
+                    MatchingDomainErrorCode.INVALID,
+                    "candidate pool open package cannot carry blockers",
+                )
+        elif (
+            self.state is MatchingPackageState.NO_CANDIDATE
+            and not self.segments
+            and not self.candidate_results
+        ):
+            if self.blockers != ("no_legal_candidate",):
+                raise MatchingDomainError(
+                    MatchingDomainErrorCode.NO_CANDIDATE,
+                    "no candidate package requires the canonical blocker",
+                )
         elif not self.segments and not self.candidate_results:
             raise MatchingDomainError(MatchingDomainErrorCode.COVERAGE_INCOMPLETE, "package requires segments")
         _validate_dates(self.required_service_dates, "required service dates")
@@ -925,7 +942,11 @@ def build_manual_matching_package(
 
 
 def _validate_package_coverage(package: MatchingPackage) -> None:
-    if package.state is MatchingPackageState.CANDIDATE_POOL_OPEN:
+    if package.state is MatchingPackageState.CANDIDATE_POOL_OPEN or (
+        package.state is MatchingPackageState.NO_CANDIDATE
+        and not package.segments
+        and not package.candidate_results
+    ):
         return
     if package.mode is MatchingPackageMode.SINGLE and len(package.segments) != 1:
         raise MatchingDomainError(MatchingDomainErrorCode.COVERAGE_INCOMPLETE, "single package requires one segment")

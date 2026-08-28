@@ -72,6 +72,8 @@ class HistoricalBaselineProjectionSourceIntent:
     catalog_identity: PreviewFingerprint
     catalog_version: int
     expected_owner_binding_fingerprint: PreviewFingerprint
+    source_trigger_version: int = 1
+    projection_sequence: int = 1
 
     def __post_init__(self) -> None:
         for value, label in (
@@ -103,6 +105,22 @@ class HistoricalBaselineProjectionSourceIntent:
             raise HistoricalBaselineProjectionError("projector_catalog_version_invalid")
         if not isinstance(self.expected_owner_binding_fingerprint, PreviewFingerprint):
             raise TypeError("baseline projector expected vector fingerprint is invalid")
+        if (
+            isinstance(self.source_trigger_version, bool)
+            or not isinstance(self.source_trigger_version, int)
+            or self.source_trigger_version < 0
+        ):
+            raise HistoricalBaselineProjectionError(
+                "projector_source_trigger_version_invalid"
+            )
+        if (
+            isinstance(self.projection_sequence, bool)
+            or not isinstance(self.projection_sequence, int)
+            or self.projection_sequence < 1
+        ):
+            raise HistoricalBaselineProjectionError(
+                "projector_projection_sequence_invalid"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,11 +210,32 @@ class HistoricalBaselineProjectorReceiptProjection:
     catalog_version: int
     whole_vector_fingerprint: PreviewFingerprint
     whole_vector_count: int
-    occurrence_set_digest: PreviewFingerprint
-    occurrence_set_count: int
+    emitted_occurrence_set_digest: PreviewFingerprint
+    emitted_occurrence_set_count: int
+    active_membership_set_digest: PreviewFingerprint
+    active_membership_set_count: int
     umbrella_identity: str
-    result_state: Literal["projected"]
-    post_commit_readback_digest: PreviewFingerprint
+    projection_sequence: int
+    result_state: Literal["projected", "held_active"]
+    expected_readback_digest: PreviewFingerprint
+
+    @property
+    def occurrence_set_digest(self) -> PreviewFingerprint:
+        """Compatibility name for the v1 emitted-occurrence field."""
+
+        return self.emitted_occurrence_set_digest
+
+    @property
+    def occurrence_set_count(self) -> int:
+        """Compatibility name for the v1 emitted-occurrence field."""
+
+        return self.emitted_occurrence_set_count
+
+    @property
+    def post_commit_readback_digest(self) -> PreviewFingerprint:
+        """Compatibility name retained for existing pure-projector callers."""
+
+        return self.expected_readback_digest
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,7 +364,9 @@ def project_historical_baseline(
         HistoricalBaselineUmbrellaMembershipProjection(
             membership_identity=_digest(
                 {
-                    "kind": "historical_baseline_umbrella_membership_v1",
+                    "kind": "historical_baseline_umbrella_membership_v2",
+                    "source_trigger_identity": source_intent.source_intent_key,
+                    "projection_sequence": source_intent.projection_sequence,
                     "umbrella_identity": umbrella_identity,
                     "occurrence_identity": occurrence_identity,
                 }
@@ -352,15 +393,17 @@ def project_historical_baseline(
     current_step = 11 if earliest is None else earliest
     payload_digest = _digest(
         {
-            "kind": "historical_baseline_projector_payload_v1",
+            "kind": "historical_baseline_projector_payload_v2",
             "source": _source_payload(source_intent),
+            "source_trigger_version": source_intent.source_trigger_version,
+            "projection_sequence": source_intent.projection_sequence,
             "whole_vector_fingerprint": projection.owner_binding_fingerprint.value,
             "prior_active_occurrences": tuple(sorted(seen_prior)),
         }
     )
     post_commit_readback_digest = _digest(
         {
-            "kind": "historical_baseline_projector_readback_v1",
+            "kind": "historical_baseline_projector_readback_v2",
             "active_occurrences": active_ids,
             "successor_occurrences": tuple(
                 item.occurrence_identity
@@ -378,14 +421,17 @@ def project_historical_baseline(
             "occurrence_set_count": len(emitted_ids),
             "membership_set_digest": membership_set_digest.value,
             "membership_count": len(active_ids),
+            "projection_sequence": source_intent.projection_sequence,
             "current_step": current_step,
             "terminal_conjunction": terminal,
         }
     )
     projector_receipt_identity = _digest(
         {
-            "kind": "historical_baseline_projector_receipt_v1",
+            "kind": "historical_baseline_projector_receipt_v2",
             "source_intent_key": source_intent.source_intent_key,
+            "source_trigger_version": source_intent.source_trigger_version,
+            "projection_sequence": source_intent.projection_sequence,
             "payload_digest": payload_digest.value,
             "post_commit_readback_digest": post_commit_readback_digest.value,
         }
@@ -404,11 +450,14 @@ def project_historical_baseline(
         catalog_version=source_intent.catalog_version,
         whole_vector_fingerprint=projection.owner_binding_fingerprint,
         whole_vector_count=len(vector),
-        occurrence_set_digest=occurrence_set_digest,
-        occurrence_set_count=len(emitted_ids),
+        emitted_occurrence_set_digest=occurrence_set_digest,
+        emitted_occurrence_set_count=len(emitted_ids),
+        active_membership_set_digest=membership_set_digest,
+        active_membership_set_count=len(active_ids),
         umbrella_identity=umbrella_identity,
-        result_state="projected",
-        post_commit_readback_digest=post_commit_readback_digest,
+        projection_sequence=source_intent.projection_sequence,
+        result_state="held_active" if active_ids else "projected",
+        expected_readback_digest=post_commit_readback_digest,
     )
     outbox_payload = {
         "projector_receipt_identity": projector_receipt_identity,
@@ -421,11 +470,17 @@ def project_historical_baseline(
         "catalog_identity": catalog_identity.value,
         "catalog_version": source_intent.catalog_version,
         "whole_vector_fingerprint": projection.owner_binding_fingerprint.value,
+        "emitted_occurrence_set_digest": occurrence_set_digest.value,
+        "emitted_occurrence_set_count": len(emitted_ids),
         "occurrence_set_digest": occurrence_set_digest.value,
         "occurrence_set_count": len(emitted_ids),
+        "active_membership_set_digest": membership_set_digest.value,
+        "active_membership_set_count": len(active_ids),
         "membership_set_digest": membership_set_digest.value,
         "membership_count": len(active_ids),
         "umbrella_identity": umbrella_identity,
+        "projection_sequence": source_intent.projection_sequence,
+        "result_state": receipt.result_state,
         "current_step": current_step,
         "terminal_conjunction": terminal,
         "post_commit_readback_digest": post_commit_readback_digest.value,

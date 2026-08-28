@@ -63,8 +63,10 @@ scenarios 全部補齊前，不得宣稱服務前或服務中取消已有完整 
 - canonical Orders completion lineage；
 - `actual_start_date` 的 Orders owner fact；
 - assignment-owned official service facts 與必要服務期間／服務時間資料；
-- Client Finance 正式義務與匯款／allocation lineage達到結清；
-- Staff Payables 正式義務與 payout／allocation lineage達到結清；
+- Client Finance 正式義務由canonical bank reconciliation，或2026-08-28核准的pre-system
+  historical owner-specific人工付款／結清event，達到本owner terminal；
+- Staff Payables 正式義務由canonical bank payout reconciliation，或同一核准歷史人工付款／結清event，
+  達到本owner terminal；Client已付款不得推定Staff已付款；
 - 規則書另列的 completion-required root 均存在且無 integrity blocker。
 
 缺項時不得把案件偽裝完成；必須產生具體、可人工補齊的必要資料異常。全部成立後，historical operational／import-completeness alerts 才轉 inactive，11 步 Step 11 顯示完成。
@@ -129,11 +131,11 @@ idempotency identity reconciliation，禁止換 key 盲送。
 | 4 | 月嫂回傳接案意願 | 當年 LINE reply | 後續採用月嫂與案件的唯一 binding；現有 matching-plan manual response 可保存特定 segment 的人工意願 |
 | 5 | 寄送月嫂履歷給客戶 | 當年 provider delivery | 後續 customer decision／selected staff binding；現有 manual customer profiles Q/P/A 可保存人工說明 evidence |
 | 6 | 月嫂契約與簽回 | 單純寄送過程 | 不得偽造簽章或文件；現有 `manual_attested` 只在核准模板版本＋實際簽回檔＋method／reason／actor／plan segment binding成立時可形成正式簽回 event |
-| 7 | 客戶定金核銷 | 無 | 正式 bank fact、deposit obligation、allocation／receipt；baseline 不得代替付款 |
+| 7 | 客戶定金核銷 | 無 | Client Finance deposit obligation與owner payment／settlement root；對帳單為首要證據，pre-system historical case才可使用核准的owner-specific人工付款event；baseline與status 1不得代替付款 |
 | 8 | 客戶契約與簽回 | 單純寄送過程 | matched caregiver／有效 commitment 必須唯一存在；`manual_attested`仍必須有實際簽回 evidence，不接受口頭勾選 |
 | 9 | 確認事前服務日期 | 當年 LINE／現場通知過程 | Orders terms、current confirmed-date version、完整日期集合；現有 `manually_confirmed` Q/P/A 可保存電話／紙本／現場確認且不偽造 LINE task |
 | 10 | 正式排班與服務履約 | 當年通知過程 | effective assignment、assignment-owned official dates、actual start、服務時間 tuple |
-| 11 | 完工驗收與結清 | 當年提醒過程 | Orders completion、Client settlement、Staff payout及其正式 bank／allocation lineage |
+| 11 | 完工驗收與結清 | 當年提醒過程 | Orders completion、Client Finance terminal readback與Staff Payables terminal readback；兩owner各自接受bank-backed或核准historical evidence lineage，但任一付款不得跨owner推定 |
 
 本表的 owner roots 由各正式規格與 2026-08-27 focused rulebook audit 收斂；baseline 只免除重建過去操作軌跡。從 current step 繼續執行所需的 identity、version、assignment、日期、金流或法律根事實仍必須存在，缺漏即產生 owner anomaly，不得直接拿 SQL 欄位存在性或人工勾選代替。
 
@@ -147,7 +149,12 @@ idempotency identity reconciliation，禁止換 key 盲送。
   各筆 `direction`／`direction_amount_ntd`（退款、補收或無帳務變動）及各月嫂薪資差額；Apply
   後 Orders 履約 alerts 解除，未結清的 Finance／Staff Payables alerts 保持 active。
 - `HOB-A4C`：完整履約案件嘗試取消固定回 `order_cancellation_after_full_service` 且 Orders、Scheduling、Client Finance、Staff Payables 均零寫入。
-- `HOB-A5`：來源宣稱完成但 actual start、official service facts、client settlement、staff payout或正式匯款 allocation任一缺失時，完成必要資料 anomaly 保持 active；全部補齊後 Step 11 與 historical alerts 才完成／消失。
+- `HOB-A5`：來源宣稱完成但actual start、official service facts、Client Finance terminal或Staff Payables
+  terminal任一缺失時，完成必要資料anomaly保持active。Owner terminal可來自正常bank reconciliation或
+  核准的pre-system historical payment／settlement event；Orders status、baseline、Client已付款或Staff已付款
+  均不能代替另一owner。全部required roots成立後Step 11與historical alerts才完成／消失。
+- `HOB-FIN-HIST-A1`：客戶付款給工會後Client Finance可terminal；工會尚未付款給月嫂時Staff Payables
+  仍payable、Step 11仍未完成。客戶補助退款由Client Finance處理，不投影為Government Subsidy完成。
 - `HOB-N1`：任意 target status、tracking resolve、receipt-only、provider success、stale baseline、version回退、readback failure或identity mismatch均不得解除 alert或推進 lifecycle。
 - `HOB-N2`：baseline step replay同 key＋同 payload回原 receipt；同 key＋不同 step／evidence固定拒絕。
 - `HOB-A6`：歷史案已在 Step 10，服務前月嫂突發車禍且必須整案換人。Apply

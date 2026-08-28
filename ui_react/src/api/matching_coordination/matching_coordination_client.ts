@@ -21,6 +21,7 @@ import {
   ApplyRematchRequestSchema,
   ApplyServiceDateRematchRequestSchema,
   ApplyZeroCandidateRequestSchema,
+  ApplyZeroCandidateConfirmationRequestSchema,
   CriteriaDiffEnvelopeSchema,
   LeaveImpactPreviewEnvelopeSchema,
   MatchingApplyReceiptEnvelopeSchema,
@@ -35,6 +36,7 @@ import {
   PreviewRematchRequestSchema,
   PreviewServiceDateRematchRequestSchema,
   PreviewZeroCandidateRequestSchema,
+  PreviewZeroCandidateConfirmationRequestSchema,
   ServiceDateRematchPreviewEnvelopeSchema,
   ZeroCandidateAlternativeEnvelopeSchema,
   type ApplyCaregiverSelectionRequest,
@@ -45,6 +47,7 @@ import {
   type ApplyRematchRequest,
   type ApplyServiceDateRematchRequest,
   type ApplyZeroCandidateRequest,
+  type ApplyZeroCandidateConfirmationRequest,
   type CriteriaDiff,
   type LeaveImpactPreviewResponse,
   type MatchingApplyReceiptResponse,
@@ -59,6 +62,7 @@ import {
   type PreviewRematchRequest,
   type PreviewServiceDateRematchRequest,
   type PreviewZeroCandidateRequest,
+  type PreviewZeroCandidateConfirmationRequest,
   type ServiceDateRematchPreviewResponse,
   type ZeroCandidateAlternative,
 } from './matching_coordination_schemas';
@@ -267,6 +271,21 @@ export function previewZeroCandidate(
   );
 }
 
+export function previewZeroCandidateConfirmation(
+  caseNo: string,
+  payload: PreviewZeroCandidateConfirmationRequest,
+  options?: MatchingCoordinationRequestOptions
+): Promise<MatchingPackage> {
+  return invoke(
+    caseNo,
+    'preview/confirm-zero-candidate',
+    payload,
+    PreviewZeroCandidateConfirmationRequestSchema,
+    MatchingPackageEnvelopeSchema,
+    options
+  );
+}
+
 export function previewRematch(
   caseNo: string,
   payload: PreviewRematchRequest,
@@ -378,12 +397,25 @@ export const applyZeroCandidate = (
   options: MatchingCoordinationApplyOptions
 ) => invokeApply(caseNo, 'zero-candidate', payload, ApplyZeroCandidateRequestSchema, options);
 
+export const applyZeroCandidateConfirmation = (
+  caseNo: string,
+  payload: ApplyZeroCandidateConfirmationRequest,
+  options: MatchingCoordinationApplyOptions
+) => invokeApply(
+  caseNo,
+  'confirm-zero-candidate',
+  payload,
+  ApplyZeroCandidateConfirmationRequestSchema,
+  options
+);
+
 export const matchingCoordinationClient = {
   query: queryMatchingCoordination,
   previewInitialCriteria,
   previewMatchingPackage,
   previewCriteriaDiff,
   previewZeroCandidate,
+  previewZeroCandidateConfirmation,
   previewRematch,
   previewLeaveImpact,
   previewServiceDateRematch,
@@ -395,6 +427,7 @@ export const matchingCoordinationClient = {
   applyCaregiverSelection,
   applyCustomerDecision,
   applyZeroCandidate,
+  applyZeroCandidateConfirmation,
 };
 
 export type MatchingCoordinationClient = typeof matchingCoordinationClient;

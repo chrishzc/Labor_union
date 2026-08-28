@@ -257,6 +257,25 @@ class MySqlMatchingCoordinationFactsAdapter:
             raise MatchingCoordinationFactsAdapterError(source_kind, "unavailable")
         return value
 
+    def _read_allow_none(
+        self, source_kind: str, operation: Callable[[], Any]
+    ) -> Any | None:
+        """Read a source whose canonical contract defines absence as a state."""
+
+        if source_kind in self._not_consulted:
+            return None
+        try:
+            return operation()
+        except MatchingCoordinationFactsAdapterError:
+            raise
+        except Exception as exc:
+            reason = (
+                "ambiguous"
+                if "ambiguous" in exc.__class__.__name__.lower()
+                else "unavailable"
+            )
+            raise MatchingCoordinationFactsAdapterError(source_kind, reason) from exc
+
     @staticmethod
     def _owner_read(method: Callable[..., Any], *args: Any, for_update: bool) -> Any:
         return method(*args, for_update=True) if for_update else method(*args)
@@ -382,7 +401,7 @@ class MySqlMatchingCoordinationFactsAdapter:
             raise MatchingCoordinationFactsAdapterError(
                 "candidate_pool", "lock_set_changed"
             )
-        package = self._read(
+        package = self._read_allow_none(
             "matching_package",
             lambda: self._owner_read(
                 self._ports["matching_package"].load_current_package,
