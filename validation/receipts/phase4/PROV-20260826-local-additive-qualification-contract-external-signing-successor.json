@@ -24,7 +24,14 @@
     "database": "lu_test_dataset_cf_candidate_1004",
     "schema_sha256": "91305fefc9c483e9370fa18376ce2ae838fb79820cdb812686e8d77e6b87a085",
     "dump_sha256": "91c072ca952105db7da0cc280234b3393d14adbc37d187aacf4d3f6418386ba1",
-    "created_at_utc": "2026-08-26T12:27:52Z"
+    "created_at_utc": "2026-08-26T12:27:52Z",
+    "data_row_counts": {
+      "orders": 151
+    },
+    "data_fingerprints": {
+      "orders": "928725f38e765d83cda60ab5dafb210851e5fa2923b0ef721134f31231b14e49"
+    },
+    "data_fingerprint_sha256": "c0ef1dc7e19c9e00e3001f464cb428a4cafb0054b461bc5dad3aa941a67b8849"
   },
   "fresh_bootstrap": {
     "status": "verified",
@@ -123,5 +130,5 @@
     "rollback_dump_available": true
   },
   "work_package": "PROV-20260826-contract-external-platform-pdf-handoff-work-package",
-  "payload_digest": "e847e7c96ce4d128102a737780ddba2571ee17eda6f3c5c33dd96be968956a5f"
+  "payload_digest": "14570f937ea7500dfa31f3a0fac9147ff2afb4d39646479c183f3fc7439baf6c"
 }

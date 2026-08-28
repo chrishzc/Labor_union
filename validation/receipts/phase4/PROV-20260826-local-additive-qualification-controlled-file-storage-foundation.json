@@ -29,7 +29,14 @@
     "tool": "canonical mysqldump plus read-only metadata snapshot",
     "schema_sha256": "0ea4983d3ed37800605b725c18b52bc095b40666f9a87ddf94a0e5e899de2bb1",
     "dump_sha256": "16a6170fb4bc10353bde53e7ed84d1c7fffd7cd95ee8aa847a89f869adf3db83",
-    "created_at_utc": "2026-08-26T11:03:22Z"
+    "created_at_utc": "2026-08-26T11:03:22Z",
+    "data_row_counts": {
+      "orders": 151
+    },
+    "data_fingerprints": {
+      "orders": "928725f38e765d83cda60ab5dafb210851e5fa2923b0ef721134f31231b14e49"
+    },
+    "data_fingerprint_sha256": "c0ef1dc7e19c9e00e3001f464cb428a4cafb0054b461bc5dad3aa941a67b8849"
   },
   "fresh_bootstrap": {
     "status": "verified",
@@ -93,5 +100,5 @@
     ]
   },
   "work_package": "PROV-20260826-controlled-file-storage-foundation-work-package",
-  "payload_digest": "263443b81e1442cc0625b4716b33f82275411e2dfb46ab37c8a1589735123f4d"
+  "payload_digest": "66398b8af405e130382ded9afd93f773f258bff314f0957265326c810988262b"
 }

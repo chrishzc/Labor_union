@@ -60,7 +60,7 @@
   "descriptor_artifact": {
     "name": "labor_union_2026_08_28_service_before_replacement_v1.descriptors.json",
     "relative_path": "db/migration_releases/labor_union_2026_08_28_service_before_replacement_v1.descriptors.json",
-    "sha256": "252a6591a4303b0803f6135e2d62a3897e3699502cfe155aaf1eb780969d7896",
+    "sha256": "87ade34c9133219c2a61367fe843277b52e86f9d402ffaed42950127d6e5a165",
     "dependencies": []
   },
   "tool_archive_policy": {
