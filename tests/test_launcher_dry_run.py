@@ -139,10 +139,14 @@ def test_windows_supervisor_has_readiness_survival_and_scoped_cleanup_contract()
     assert 'Get-Command "docker.exe" -CommandType Application' in source
     assert '"VITE_DEV_API_TARGET=http://host.docker.internal:$ApiPort"' in source
     assert '"node:lts", "npm", "run", "dev"' in source
+    assert 'npm install --no-audit --no-fund' in source
+    assert 'Docker npm install failed with exit code' in source
     assert '"--rm", "--name", $script:ReactContainerName' in source
     assert 'dockerArguments += @("-e", "VITE_ACCESS_CONTROL_PROFILE=' in source
     assert 'Stop-OwnedReactContainer' in source
     assert 'rm --force $script:ReactContainerName' in source
+    assert '$ErrorActionPreference = "SilentlyContinue"' in source
+    assert source.count("Refresh-OwnedIdentityRegistry") >= 4
     assert '"-it"' not in source
     assert "Get-DescendantIds -RootIds $activeRoots.ToArray() -Processes $treeSnapshot.Processes" in source
     assert 'event = "runtime_ready"' in source or '"runtime_ready"' in source
