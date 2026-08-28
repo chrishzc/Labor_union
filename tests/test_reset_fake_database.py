@@ -80,6 +80,24 @@ def test_target_refuses_remote_production_and_non_union_database():
         )
 
 
+def test_canonical_app_env_ignores_unrelated_legacy_environment_variables():
+    resetter.validate_target(
+        {"host": "127.0.0.1", "database": "union_db"},
+        {
+            "APP_ENV": "development",
+            "ENV": "Windows-user-environment-marker",
+            "FLASK_ENV": "legacy-value",
+        },
+    )
+
+
+def test_environment_profile_falls_back_only_when_app_env_is_missing():
+    resetter.validate_target(
+        {"host": "127.0.0.1", "database": "union_db"},
+        {"ENV": "development", "FLASK_ENV": "legacy-value"},
+    )
+
+
 def test_rebuild_executes_canonical_paths_and_postcheck(monkeypatch, tmp_path):
     assembly = _assembly(tmp_path)
     executed = []

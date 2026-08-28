@@ -37,17 +37,19 @@ def validate_target(config=None, environment=None) -> None:
         raise FakeDatabaseResetError("local MySQL only")
     if config.get("database") != "union_db":
         raise FakeDatabaseResetError("database must be union_db")
-    profiles = [
-        str(env.get(key, "")).strip().lower()
-        for key in ("APP_ENV", "ENV", "FLASK_ENV")
-        if str(env.get(key, "")).strip()
-    ]
-    if any("prod" in profile for profile in profiles):
+    profile = next(
+        (
+            str(env.get(key, "")).strip().lower()
+            for key in ("APP_ENV", "ENV", "FLASK_ENV")
+            if str(env.get(key, "")).strip()
+        ),
+        "",
+    )
+    if "prod" in profile:
         raise FakeDatabaseResetError("production environment refused")
-    if not profiles or any(
-        profile not in {"development", "dev", "local", "test", "testing", "validation"}
-        for profile in profiles
-    ):
+    if profile not in {
+        "development", "dev", "local", "test", "testing", "validation"
+    }:
         raise FakeDatabaseResetError("development environment required")
 
 
