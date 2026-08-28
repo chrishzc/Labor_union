@@ -17,16 +17,17 @@ if not "%~1"=="" (
   "%PYTHON%" -m scripts.reset_fake_database %*
   exit /b %ERRORLEVEL%
 )
-echo Previewing destructive reset of local union_db from the versioned template fixture...
+echo Previewing destructive reset of local union_db from the current canonical schema...
 "%PYTHON%" -m scripts.reset_fake_database
 if errorlevel 1 (
-  echo [ERROR] Reset preflight failed. Confirm .env targets local union_db and fixtures/db_snapshot_v2/v3 is complete.
+  echo [ERROR] Reset preflight failed. Confirm .env targets local union_db and the canonical schema catalog is valid.
   pause
   exit /b 1
 )
 echo.
 echo Stop API, UI, monitor, and workers before continuing.
-echo This deletes all current union_db data and loads the template test fixture.
+echo This deletes all current union_db data and creates an empty current-schema database.
+echo Canonical system seeds declared by schema artifacts may still be installed; no business fixture is loaded.
 set /p "RESET_CONFIRM=Type RESET to continue: "
 if /I not "!RESET_CONFIRM!"=="RESET" (
   echo Cancelled. No database changes were requested.
@@ -34,6 +35,6 @@ if /I not "!RESET_CONFIRM!"=="RESET" (
 )
 "%PYTHON%" -m scripts.reset_fake_database --apply --confirm-database union_db
 set "RESET_EXIT=!ERRORLEVEL!"
-if not "!RESET_EXIT!"=="0" (echo [ERROR] Database reset failed with exit code !RESET_EXIT!.) else (echo Template database reset completed. Restart local services.)
+if not "!RESET_EXIT!"=="0" (echo [ERROR] Database reset failed with exit code !RESET_EXIT!.) else (echo Canonical empty database reset completed. Restart local services.)
 pause
 exit /b !RESET_EXIT!

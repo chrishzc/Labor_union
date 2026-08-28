@@ -47,7 +47,7 @@ aggregate fingerprint 取代。Fast additive journal 固定以 `source_database 
 | `update_local_database.bat` | active | 預設對 `.env` 指定的本機 development 非系統 DB 執行 qualified schema-only additive fast path；每台機器先建立自己的 release-scoped dump／receipt，不建立 candidate、不 DROP source。保留資料 replacement 必須明確使用 `--strategy replacement --allow-long-run`。 |
 
 若 Docker MySQL 未直接 publish 到 `.env` 的 `DB_PORT`，可先建立只綁定 localhost 的暫時 TCP forward，並以 Python 入口的 `--database-port <forward-port>` 覆寫連線 port。此參數只改變當次連線位置，不改寫 `.env`、credential 或 database identity；MySQL client 仍以 `--mysql-container mysql_db` 在既有容器內執行。
-| `reset_DB.bat` | active, destructive | 不保留現有資料：預檢版本化模板 fixture，要求輸入 `RESET` 後刪除 `union_db`、重建並載入模板測試資料。 |
+| `reset_DB.bat` | active, destructive | 不保留現有資料：預檢 current canonical schema assembly，要求輸入 `RESET` 後刪除 `union_db` 並建立空白最新版 schema；不載入業務 fixture。 |
 | `start_fastapi_ngrok.py` | active, development-only | 本機 FastAPI/ngrok supervisor；production 明確禁止 ngrok。 |
 | `get_durable_job_worker_task_status.ps1` | recovery-only | 唯讀查詢既有 Windows 排程任務；不安裝、不啟動任務。 |
 | `uninstall_durable_job_worker_task.ps1` | recovery-only | 移除過去已安裝的 Durable Job Worker 排程任務，保留 `ShouldProcess` 確認。 |
@@ -63,17 +63,17 @@ aggregate fingerprint 取代。Fast additive journal 固定以 `source_database 
 .\scripts\launchers\update_local_database.bat
 ```
 
-捨棄目前資料、恢復成版本庫提供的模板測試資料：
+捨棄目前資料、建立版本庫 current canonical schema 的空白資料庫：
 
 ```powershell
 .\scripts\launchers\reset_DB.bat
 ```
 
-`reset_DB.bat` 需要 `fixtures/db_snapshot_v2/v3/manifest.json` 及其完整 fixture。預檢未通過時不會
-刪除資料庫。目前版本庫未提供該模板 fixture，因此 reset 入口會安全停止；fixture 重建是另一個
-待核准工作，不得直接復活已退役的舊 v3 snapshot。兩種資料庫流程執行前都必須停止 API、UI、
-monitor 與 workers；保留資料更新只接受 `.env` 指定的本機 development 非 MySQL 系統 DB，不以
-固定資料庫名稱判斷環境，模板重設仍只操作 `union_db`。
+`reset_DB.bat` 需要 `db/schema.sql`、current schema assembly 與 validation manifest 全部 hash／catalog
+一致。預檢未通過時不會刪除資料庫。它不載入業務 fixture；schema artifacts 正式聲明的 system seed
+仍會建立。兩種資料庫流程執行前都必須停止 API、UI、monitor 與 workers；保留資料更新只接受 `.env`
+指定的本機 development 非 MySQL 系統 DB，不以固定資料庫名稱判斷環境；destructive reset 仍只操作
+`union_db`。
 
 Phase 5B controlled foundation：
 
@@ -202,7 +202,7 @@ Smoke 固定 GET-only；不使用既有 DB mutation，不啟動 Streamlit、moni
 | 根目錄 `dev_API.bat` | 舊名稱誤導，實際會停用認證並啟動受控三服務 | `start_local_development_no_auth.bat` |
 | 根目錄 `bootstrap_admin_dev_env.bat` 與 `scripts/bootstrap_admin_dev_env.ps1` | 搬移並改名，凸顯會停用本機認證 | `configure_local_admin_no_auth.bat`／`.ps1` |
 | 根目錄 `update_DB.bat` | 搬移並改名 | `update_local_database.bat` |
-| 根目錄 `reset_DB.bat` | 搬移；模板重設能力仍為 active | `scripts/launchers/reset_DB.bat` |
+| 根目錄 `reset_DB.bat` | 搬移；canonical 空白 DB 重建能力為 active | `scripts/launchers/reset_DB.bat` |
 | 根目錄 `start_fastapi_ngrok.py` | 搬移，仍限開發用途 | `scripts/launchers/start_fastapi_ngrok.py` |
 | `scripts/install_durable_job_worker_task.ps1` | 退役；人工裁決已暫緩主機 supervision | 無；現階段由本機 launcher 互動式啟動 worker，舊任務僅提供查詢／解除安裝。 |
 
