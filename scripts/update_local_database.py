@@ -352,6 +352,7 @@ def apply_additive_update(
             )
         )
         dump_path = receipt_path.with_suffix(".sql")
+        execution_phase = "backup"
         try:
             additive.prepare_backup(
                 config,
@@ -362,6 +363,7 @@ def apply_additive_update(
                 mysql_container=mysql_container,
                 qualification_path=qualification_path,
             )
+            execution_phase = "apply"
             additive.apply(
                 config,
                 source,
@@ -375,6 +377,12 @@ def apply_additive_update(
         except additive.LocalAdditiveBlocked as error:
             raise LocalDatabaseUpdateError(
                 f"{error} [{error.code}]"
+            ) from error
+        except Exception as error:
+            raise LocalDatabaseUpdateError(
+                f"release {release_id} failed during {execution_phase}: "
+                f"{type(error).__name__}; rerun the updater to resume from its journal",
+                code="database_update_execution_failed",
             ) from error
         applied_releases.append(release_id)
 

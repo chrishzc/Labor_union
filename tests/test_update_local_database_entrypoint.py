@@ -149,3 +149,37 @@ def test_apply_additive_update_runs_each_pending_release_in_order(
         ("prepare", "q1004.json"), ("apply", "q1004.json"),
         ("prepare", "q1005.json"), ("apply", "q1005.json"),
     ]
+
+
+def test_apply_additive_update_reports_release_phase_and_resume_guidance(
+    tmp_path, monkeypatch
+):
+    preview = {
+        "status": "ready",
+        "pending_releases": [
+            {
+                "release_id": "release-1012",
+                "qualification_receipt": "q1012.json",
+            }
+        ],
+    }
+    monkeypatch.setattr(update, "build_additive_preview", lambda *_args, **_kwargs: preview)
+    monkeypatch.setattr(update.additive, "prepare_backup", lambda *_args, **_kwargs: None)
+
+    class ProgrammingError(RuntimeError):
+        pass
+
+    def fail_apply(*_args, **_kwargs):
+        raise ProgrammingError("sensitive SQL details")
+
+    monkeypatch.setattr(update.additive, "apply", fail_apply)
+
+    with pytest.raises(update.LocalDatabaseUpdateError) as raised:
+        update.apply_additive_update(object(), "lu_test_example", tmp_path)
+
+    assert raised.value.code == "database_update_execution_failed"
+    assert str(raised.value) == (
+        "release release-1012 failed during apply: ProgrammingError; "
+        "rerun the updater to resume from its journal"
+    )
+    assert "sensitive SQL details" not in str(raised.value)
