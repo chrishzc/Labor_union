@@ -57,11 +57,12 @@ foreach ($key in $desired.Keys) {
 
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $temporaryEnvFile = Join-Path $root (".env.tmp." + [guid]::NewGuid().ToString("N"))
+$backupEnvFile = Join-Path $root (".env.backup." + [guid]::NewGuid().ToString("N"))
 $envContent = [string]::Join([Environment]::NewLine, [string[]]$next) + [Environment]::NewLine
 try {
     [System.IO.File]::WriteAllText($temporaryEnvFile, $envContent, $utf8NoBom)
     if (Test-Path -LiteralPath $envFile) {
-        [System.IO.File]::Replace($temporaryEnvFile, $envFile, $null)
+        [System.IO.File]::Replace($temporaryEnvFile, $envFile, $backupEnvFile)
     }
     else {
         [System.IO.File]::Move($temporaryEnvFile, $envFile)
@@ -70,6 +71,9 @@ try {
 finally {
     if (Test-Path -LiteralPath $temporaryEnvFile) {
         Remove-Item -LiteralPath $temporaryEnvFile -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path -LiteralPath $backupEnvFile) {
+        Remove-Item -LiteralPath $backupEnvFile -Force -ErrorAction SilentlyContinue
     }
 }
 
