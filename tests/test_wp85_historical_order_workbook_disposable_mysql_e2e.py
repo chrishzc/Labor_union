@@ -41,7 +41,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_workbook_apply_preserves_single_assignment_and_dual_evidence(tmp_path):
+def test_workbook_apply_uses_only_the_canonical_six_columns(tmp_path):
     token = uuid4().hex
     connection = get_connection()
     try:
@@ -56,12 +56,9 @@ def test_workbook_apply_preserves_single_assignment_and_dual_evidence(tmp_path):
         replay = service.apply(str(workbook_path), f"wp85:{token}", preview.preview_fingerprint, "wp85-test", token)
 
         assert receipt.adopted_count == 2
-        assert receipt.assignments_created == 1
+        assert receipt.assignments_created == 2
         assert replay.replayed_workbook is True
         _assert_assignment_and_evidence(connection, first_case, second_case)
-        projected = consume_historical_order_adoption_review_events(connection)
-        assert projected.failed_count == 0
-        _assert_assignment_evidence_warning(connection)
     finally:
         connection.close()
 
@@ -341,11 +338,9 @@ def _write_workbook(tmp_path, first_case, first_staff, second_case, second_staff
     sheet.title = "任意來源"
     sheet.append([
         "客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名", "月嫂姓名2",
-        "月嫂1開始日期", "月嫂1結束日期",
     ])
     sheet.append([
         _client_name(first_case), first_case, date(2025, 1, 2), date(2025, 1, 31), 1, first_staff, None,
-        date(2025, 1, 2), date(2025, 1, 31),
     ])
     sheet.append([_client_name(second_case), second_case, None, None, 1, second_staff, second_staff_two, None, None])
     destination = tmp_path / "workbook.xlsx"
@@ -377,26 +372,9 @@ def _seed_staff(connection, token, suffix):
 
 def _assert_assignment_and_evidence(connection, first_case, second_case):
     assert _count(connection, "case_staff_assignments", first_case) == 1
-    assert _count(connection, "case_staff_assignments", second_case) == 0
-    assert _count(connection, "historical_order_pairing_evidence", first_case, via_receipt=True) == 2
-    assert _count(connection, "historical_order_pairing_evidence", second_case, via_receipt=True) == 2
-
-
-def _assert_assignment_evidence_warning(connection):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT occurrence.logical_code,occurrence.field_path "
-            "FROM import_warning_occurrences occurrence "
-            "JOIN historical_order_adoption_reviews review "
-            "ON review.review_identity=occurrence.source_receipt_identity "
-            "WHERE JSON_CONTAINS(review.issue_codes,%s) "
-            "ORDER BY occurrence.id DESC LIMIT 1",
-            ('"historical_assignment_evidence_insufficient"',),
-        )
-        assert cursor.fetchone() == {
-            "logical_code": "ORDER-HIST-ASSIGNMENT-001",
-            "field_path": "$assignment",
-        }
+    assert _count(connection, "case_staff_assignments", second_case) == 1
+    assert _count(connection, "historical_order_pairing_evidence", first_case, via_receipt=True) == 1
+    assert _count(connection, "historical_order_pairing_evidence", second_case, via_receipt=True) == 1
 
 
 def _assert_review_alert(connection, review_identity):

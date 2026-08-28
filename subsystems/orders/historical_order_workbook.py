@@ -25,9 +25,7 @@ _FIELD_ALIASES = {
     "end_date": {"end_date", "結束日期", "服務結束", "服務結束日", "實際服務結束日"},
     "status": {"status", "狀態", "訂單狀態", "訂單成立狀態"},
 }
-_STAFF_HEADER = re.compile(r"^(staff_name|服務人員|月嫂|月嫂姓名)(?:[._-]?[12])?$")
-_STAFF_START_HEADER = re.compile(r"^(?:staff|服務人員|月嫂)([12])(?:_)?(?:start_date|開始日|開始日期)$")
-_STAFF_END_HEADER = re.compile(r"^(?:staff|服務人員|月嫂)([12])(?:_)?(?:end_date|結束日|結束日期)$")
+_STAFF_HEADER = re.compile(r"^(staff_name|服務人員|月嫂|月嫂姓名)$")
 _STATUS_MAP = {
     "0": OrderLifecycleStatus.CANCELLED,
     "1": OrderLifecycleStatus.COMPLETED,
@@ -202,17 +200,7 @@ def _header_positions(headers):
         if staff_match:
             positions["staff"].append(index)
             continue
-        _record_staff_date_position(positions, header, index)
     return positions
-
-
-def _record_staff_date_position(positions, header, index):
-    start = _STAFF_START_HEADER.fullmatch(header)
-    end = _STAFF_END_HEADER.fullmatch(header)
-    if start:
-        positions["staff_start"][int(start.group(1))] = index
-    if end:
-        positions["staff_end"][int(end.group(1))] = index
 
 
 def _caregivers(values, positions, epoch, generic_start, generic_end):

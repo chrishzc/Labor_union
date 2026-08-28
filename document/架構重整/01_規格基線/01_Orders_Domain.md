@@ -162,6 +162,12 @@ Apply：
 
 ### 歷史訂單待確認與警示投影（2026-08-14，已人工確認）
 
+2026-08-28 人工裁決將歷史訂單 canonical workbook 固定為六欄：`client_name`、`case_no`、
+`start_date`、`end_date`、`status`、`staff_name`（標準中文標頭為「客戶姓名、案件編號、開始日期、
+結束日期、狀態、月嫂姓名」）。第七欄起包含「月嫂姓名2」不採納，不得建立第二月嫂
+pairing evidence或 assignment candidate；原檔 bytes 仍參與 content digest。前六欄的單一月嫂可使用訂單開始／
+結束日期作為其服務區間。
+
 歷史訂單採納列若已唯一匹配既有 Order、但 status、月嫂或其他來源欄位仍有 issue，安全可採納欄位
 照既有規則保存，同時建立 immutable review evidence；不因 review 回滾同列合法 status／日期或配對
 evidence。Orders outbox 將 review 投影為 `HISTORICAL-ORDER-001`，identity 為 review identity，僅顯示

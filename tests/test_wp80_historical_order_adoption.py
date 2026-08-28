@@ -1,6 +1,6 @@
 """
 File: test_wp80_historical_order_adoption.py
-Description: 驗證歷史狀態、nullable日期、雙月嫂 evidence、精確案件匹配與 replay 契約。
+Description: 驗證歷史狀態、nullable日期、六欄工作簿、精確案件匹配與 replay 契約。
 """
 
 from __future__ import annotations
@@ -116,7 +116,7 @@ def test_repository_skips_lifecycle_write_for_unchanged_adoption_preview():
     )
 
 
-def test_two_caregivers_without_individual_intervals_require_assignment_review(tmp_path):
+def test_columns_after_canonical_six_are_ignored(tmp_path):
     path = tmp_path / "historical.xlsx"
     workbook = Workbook()
     workbook.epoch = MAC_EPOCH
@@ -133,11 +133,11 @@ def test_two_caregivers_without_individual_intervals_require_assignment_review(t
 
     assert row.actual_start_date == date(1904, 1, 2)
     assert row.actual_end_date == date(1904, 1, 3)
-    assert tuple(item.name for item in row.caregivers) == ("月嫂甲", "月嫂乙")
-    assert {item.resolution for item in preview.pairings} == {
-        HistoricalPairingResolution.ASSIGNMENT_CONFLICT
-    }
-    assert preview.issue_codes == ("historical_assignment_evidence_insufficient",)
+    assert tuple(item.name for item in row.caregivers) == ("月嫂甲",)
+    assert tuple(item.resolution for item in preview.pairings) == (
+        HistoricalPairingResolution.ASSIGNMENT_CANDIDATE,
+    )
+    assert preview.issue_codes == ()
 
 
 def test_single_unique_caregiver_with_interval_builds_completed_assignment_candidate(tmp_path):
