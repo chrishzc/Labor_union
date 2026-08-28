@@ -112,6 +112,72 @@ def test_six_column_workbook_applies_zero_one_two_as_distinct_order_statuses(tmp
         connection.close()
 
 
+def test_six_column_workbook_adopts_pending_orders_with_truthful_before_status(tmp_path):
+    token = uuid4().hex
+    connection = get_connection()
+    try:
+        cancelled_case, _ = _seed_case(connection, token, "pzero")
+        completed_case, _ = _seed_case(connection, token, "qone")
+        discussion_case, _ = _seed_case(connection, token, "rtwo")
+        case_numbers = (cancelled_case, completed_case, discussion_case)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE orders SET status='待補件',lifecycle_version=0 "
+                "WHERE case_no IN (%s,%s,%s)",
+                case_numbers,
+            )
+        connection.commit()
+        workbook_path = _write_status_workbook(
+            tmp_path / "pending-statuses-012.xlsx",
+            ((cancelled_case, 0), (completed_case, 1), (discussion_case, 2)),
+        )
+        service = _service(connection)
+
+        preview = service.preview(str(workbook_path))
+        receipt = service.apply(
+            str(workbook_path),
+            f"wp85-pending-status-012:{token}",
+            preview.preview_fingerprint,
+            "wp85-test",
+            token,
+        )
+        replay = service.apply(
+            str(workbook_path),
+            f"wp85-pending-status-012:{token}",
+            preview.preview_fingerprint,
+            "wp85-test",
+            token,
+        )
+
+        assert receipt.adopted_count == 3
+        assert replay.replayed_workbook is True
+        expected_after = {
+            cancelled_case: "訂單取消",
+            completed_case: "訂單完成",
+            discussion_case: "洽談中",
+        }
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT case_no,before_status,after_status FROM "
+                "order_lifecycle_state_events WHERE case_no IN (%s,%s,%s) "
+                "ORDER BY case_no",
+                case_numbers,
+            )
+            events = {row["case_no"]: row for row in cursor.fetchall()}
+        assert set(events) == set(case_numbers)
+        assert all(row["before_status"] == "待補件" for row in events.values())
+        assert {
+            case_no: row["after_status"] for case_no, row in events.items()
+        } == expected_after
+        assert {
+            case_no: _order_status(connection, case_no) for case_no in case_numbers
+        } == expected_after
+        for case_no in case_numbers:
+            assert _count(connection, "historical_order_adoption_receipts", case_no) == 1
+    finally:
+        connection.close()
+
+
 def test_workbook_conflict_rejects_changed_source_before_row_apply(tmp_path):
     token = uuid4().hex
     connection = get_connection()

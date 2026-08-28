@@ -1,0 +1,15 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-order-lifecycle-pending-status-2026-08-28-v1",
+  "descriptors": {
+    "1013_order_lifecycle_pending_status_constraint.sql": {
+      "tables": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {
+        "order_lifecycle_state_events.chk_order_lifecycle_state_event_before_status": "atom(before_statusin('待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消'))"
+      },
+      "triggers": []
+    }
+  }
+}

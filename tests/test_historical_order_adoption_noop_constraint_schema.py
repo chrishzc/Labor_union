@@ -47,7 +47,7 @@ def test_release_and_fresh_catalog_preserve_1008_before_its_successor() -> None:
         assembly["active_bootstrap"]
     )
     assert cutover["schema_parts"]["terminal_artifact"] == (
-        "1012_service_before_replacement.sql"
+        "1013_order_lifecycle_pending_status_constraint.sql"
     )
 
 

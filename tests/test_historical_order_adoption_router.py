@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_admin
 from api.dependencies.historical_order_adoption import get_historical_order_workbook_import_service
@@ -81,6 +82,29 @@ def test_database_dependency_unavailable_is_typed(monkeypatch):
 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "historical_order_import_database_unavailable"
+
+
+def test_apply_reports_pending_status_constraint_as_database_upgrade_required():
+    service = _Service()
+
+    def fail_apply(*_args):
+        raise OperationalError(
+            3819,
+            "Check constraint 'chk_order_lifecycle_state_event_before_status' is violated.",
+        )
+
+    service.apply = fail_apply
+    response = _client(service).post(
+        "/api/v1/orders/historical-adoption/workbooks/apply",
+        headers=_headers(),
+        data={"preview_fingerprint": "2" * 64},
+        files=_file(),
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == (
+        "historical_order_database_upgrade_required"
+    )
 
 
 def _client(service):

@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-08-28-v16
+-- Release: labor-union-validation-schema-2026-08-28-v17
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -18832,3 +18832,22 @@ BEFORE DELETE ON scheduling_service_before_replacement_outbox
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'scheduling_service_before_replacement_outbox records cannot be deleted';
 -- END SOURCE: db/schema_parts/1012_service_before_replacement.sql
+
+-- BEGIN SOURCE: db/schema_parts/1013_order_lifecycle_pending_status_constraint.sql
+-- File: 1013_order_lifecycle_pending_status_constraint.sql
+-- Description: 讓 lifecycle event 如實保存既有待補件 Orders 的 before／after status。
+
+ALTER TABLE order_lifecycle_state_events
+    DROP CHECK chk_order_lifecycle_state_event_before_status,
+    ADD CONSTRAINT chk_order_lifecycle_state_event_before_status
+        CHECK (
+            before_status IN (
+                '待補件',
+                '洽談中',
+                '訂單成立',
+                '服務中',
+                '訂單完成',
+                '訂單取消'
+            )
+        );
+-- END SOURCE: db/schema_parts/1013_order_lifecycle_pending_status_constraint.sql

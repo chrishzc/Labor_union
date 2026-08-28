@@ -187,6 +187,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_28_historical_operational_baseline_v1.json",
     "labor_union_2026_08_28_historical_baseline_projector_v1.json",
     "labor_union_2026_08_28_service_before_replacement_v1.json",
+    "labor_union_2026_08_28_order_lifecycle_pending_status_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -1878,6 +1879,11 @@ def _metadata_state_for_artifact(
             snapshot,
             descriptor,
         )
+    if artifact == "1013_order_lifecycle_pending_status_constraint.sql":
+        return _order_lifecycle_pending_status_constraint_state(
+            snapshot,
+            descriptor,
+        )
     return _artifact_metadata_state(
         snapshot,
         descriptor,
@@ -2818,6 +2824,14 @@ def _local_classify_statement(statement: str) -> str:
                 .read_text(encoding="utf-8")
             )[0].strip(),
         ).casefold()
+        canonical_1013 = re.sub(
+            r"\s+",
+            " ",
+            split_sql(
+                (ROOT / "db" / "schema_parts" / "1013_order_lifecycle_pending_status_constraint.sql")
+                .read_text(encoding="utf-8")
+            )[0].strip(),
+        ).casefold()
         controlled_parent_replacement = (
             normalized.startswith("alter table controlled_file_staging_objects ")
             and "modify column purpose enum(" in normalized
@@ -2839,7 +2853,7 @@ def _local_classify_statement(statement: str) -> str:
             return "controlled_file_purpose_widen"
         if controlled_fk_rebuild:
             return "controlled_file_fk_rebuild"
-        if normalized == canonical_1008:
+        if normalized in {canonical_1008, canonical_1013}:
             return "controlled_check_replacement"
         if re.search(r"\b(drop|modify|change|rename|truncate)\b", normalized):
             raise LocalAdditiveBlocked("destructive ALTER is outside additive allowlist", code="forbidden_sql_effect")
@@ -4590,6 +4604,13 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             "IS NULL AND expected_version IS NOT NULL AND resulting_version "
             "= expected_version AND case_no IS NOT NULL)"
         )
+    if part_name == "1013_order_lifecycle_pending_status_constraint.sql":
+        descriptor["checks"][(
+            "order_lifecycle_state_events",
+            "chk_order_lifecycle_state_event_before_status",
+        )] = _normalize_sql_contract(
+            "before_status IN ('待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消')"
+        )
     if part_name == "61_finance_import_reprocessing.sql":
         _remove_retired_reclassification_audit_contract(descriptor)
         descriptor["indexes"][(
@@ -4852,6 +4873,11 @@ def _release_descriptor_metadata_state(
             snapshot,
             canonical,
         )
+    if part_name == "1013_order_lifecycle_pending_status_constraint.sql":
+        return _order_lifecycle_pending_status_constraint_state(
+            snapshot,
+            canonical,
+        )
     state = _artifact_metadata_state(
         snapshot,
         canonical,
@@ -4941,6 +4967,39 @@ def _historical_order_adoption_noop_constraint_state(
         "('review_required','current_conflict') AND lifecycle_event_id IS NULL "
         "AND expected_version IS NOT NULL AND resulting_version = "
         "expected_version AND case_no IS NOT NULL)"
+    ))
+    if actual == successor:
+        return "exact"
+    if actual == predecessor:
+        return "absent"
+    return "drift"
+
+
+def _order_lifecycle_pending_status_constraint_state(
+    snapshot: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+) -> str:
+    """Accept only the exact five-status predecessor or six-status before check."""
+    key = (
+        "order_lifecycle_state_events",
+        "chk_order_lifecycle_state_event_before_status",
+    )
+    constraints = {
+        (str(row["table_name"]), str(row["constraint_name"])): row
+        for row in snapshot.get("constraints", ())
+    }
+    row = constraints.get(key)
+    if row is None or row.get("constraint_type") != "CHECK":
+        return "drift"
+    show_create_checks: dict[tuple[str, str], str] = {}
+    for create_sql in snapshot.get("show_create_tables", {}).values():
+        show_create_checks.update(_show_create_check_clauses(create_sql))
+    actual = _normalize_check_contract(
+        show_create_checks.get(key, row.get("check_clause") or "")
+    )
+    successor = _normalize_check_contract(descriptor["checks"][key])
+    predecessor = _normalize_check_contract(_normalize_sql_contract(
+        "before_status IN ('洽談中','訂單成立','服務中','訂單完成','訂單取消')"
     ))
     if actual == successor:
         return "exact"

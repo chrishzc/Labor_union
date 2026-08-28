@@ -8,6 +8,7 @@ import tempfile
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from pymysql.err import OperationalError
 from starlette.concurrency import run_in_threadpool
 
 from api.dependencies.admin_auth import require_admin
@@ -63,6 +64,20 @@ async def _with_workbook(workbook: UploadFile, operation, message: str):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": str(error)}) from error
     except HistoricalOrderWorkbookUnavailable as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={"code": str(error)}) from error
+    except OperationalError as error:
+        code = int(error.args[0]) if error.args else 0
+        message = str(error.args[1]) if len(error.args) > 1 else ""
+        if (
+            code == 3819
+            and "chk_order_lifecycle_state_event_before_status" in message
+        ):
+            detail_code = "historical_order_database_upgrade_required"
+        else:
+            detail_code = "historical_order_import_database_unavailable"
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": detail_code},
+        ) from error
     finally:
         if upload_path is not None:
             upload_path.unlink(missing_ok=True)
