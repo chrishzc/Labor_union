@@ -13,6 +13,7 @@ wheels/
 chrome_user_data/
 downloads/
 last_count.txt
+.schemathesis/default/cache/
 
 # Editor configurations
 .obsidian/
@@ -21,6 +22,7 @@ last_count.txt
 metabase-data/
 .local_media/
 db/chroma_knowledge/
+validation/generated_contract_documents/
 
 # Grace 個人協作紀錄資料夾 (不隨專案上傳至遠端 repo)
 graceAdd/
