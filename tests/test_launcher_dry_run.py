@@ -225,9 +225,11 @@ def test_no_auth_configuration_writes_atomic_utf8_without_bom() -> None:
 
     assert "UTF8Encoding]::new($false)" in source
     assert "WriteAllText($temporaryEnvFile" in source
-    assert "File]::Replace($temporaryEnvFile, $envFile" in source
+    assert "File]::Replace($temporaryEnvFile, $envFile, $backupEnvFile)" in source
     assert "File]::Move($temporaryEnvFile, $envFile)" in source
     assert "Remove-Item -LiteralPath $temporaryEnvFile" in source
+    assert "Remove-Item -LiteralPath $backupEnvFile" in source
+    assert "File]::Replace($temporaryEnvFile, $envFile, $null)" not in source
 
 
 def test_windows_supervisor_reacts_only_to_html_root_and_normalizes_true_flags() -> None:
