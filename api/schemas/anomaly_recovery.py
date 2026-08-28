@@ -131,6 +131,80 @@ class RetryAnomalyProjectorResultView(_StrictModel):
     requeued_count: int = Field(ge=0)
 
 
+class ProjectorDeadLetterView(_StrictModel):
+    projector_identity: str = Field(min_length=1, max_length=100)
+    event_id: int = Field(gt=0)
+    intent_type: str = Field(min_length=1, max_length=191)
+    attempt_count: int = Field(ge=3)
+    error_code: str = Field(min_length=1, max_length=191)
+    failed_at: datetime
+    available_actions: list[str]
+    successor_event_id: int | None = Field(default=None, gt=0)
+    successor_source_version: int | None = Field(default=None, gt=0)
+
+
+class RetryProjectorDeadLetterPreviewBody(_StrictModel):
+    reason: str = Field(min_length=1, max_length=500)
+    evidence_reference: str = Field(min_length=1, max_length=500)
+
+
+class RetryProjectorDeadLetterPreviewView(_StrictModel):
+    projector_identity: str
+    event_id: int = Field(gt=0)
+    intent_type: str
+    expected_attempt_count: int = Field(ge=3)
+    error_code: str
+    reason: str
+    evidence_reference: str
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class RetryProjectorDeadLetterApplyBody(RetryProjectorDeadLetterPreviewBody):
+    expected_attempt_count: int = Field(ge=3)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class RetryProjectorDeadLetterReceiptView(_StrictModel):
+    projector_identity: str
+    event_id: int = Field(gt=0)
+    prior_attempt_count: int = Field(ge=3)
+    resulting_status: str
+    receipt_identity: str
+    replayed: bool
+
+
+class SupersedeProjectorDeadLetterPreviewView(_StrictModel):
+    projector_identity: str
+    event_id: int = Field(gt=0)
+    intent_type: str
+    expected_attempt_count: int = Field(ge=3)
+    successor_event_id: int = Field(gt=0)
+    successor_source_version: int = Field(gt=0)
+    successor_predicate_active: bool
+    reason: str
+    evidence_reference: str
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SupersedeProjectorDeadLetterApplyBody(
+    RetryProjectorDeadLetterPreviewBody
+):
+    expected_attempt_count: int = Field(ge=3)
+    expected_successor_event_id: int = Field(gt=0)
+    expected_successor_source_version: int = Field(gt=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SupersedeProjectorDeadLetterReceiptView(_StrictModel):
+    projector_identity: str
+    event_id: int = Field(gt=0)
+    successor_event_id: int = Field(gt=0)
+    successor_source_version: int = Field(gt=0)
+    resulting_status: str
+    receipt_identity: str
+    replayed: bool
+
+
 __all__ = [
     "AnomalyRecoveryContextView",
     "AnomalyRecoveryFieldErrorView",
@@ -138,8 +212,16 @@ __all__ = [
     "AnomalyRecoveryTypedErrorView",
     "FinanceOccurrenceView",
     "RecoveryActionView",
+    "ProjectorDeadLetterView",
     "RetryAnomalyProjectorBody",
     "RetryAnomalyProjectorResultView",
+    "RetryProjectorDeadLetterApplyBody",
+    "RetryProjectorDeadLetterPreviewBody",
+    "RetryProjectorDeadLetterPreviewView",
+    "RetryProjectorDeadLetterReceiptView",
+    "SupersedeProjectorDeadLetterApplyBody",
+    "SupersedeProjectorDeadLetterPreviewView",
+    "SupersedeProjectorDeadLetterReceiptView",
     "ScanAnomalyDefinitionBody",
     "ScanAnomalyDefinitionResultView",
 ]

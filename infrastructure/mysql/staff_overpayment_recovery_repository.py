@@ -1,7 +1,11 @@
-"""MySQL port for canonical-bank collection of staff overpayment recoveries."""
+"""
+File: staff_overpayment_recovery_repository.py
+Description: 持久化 Staff Payables 追償 root、matching、evidence 與唯讀查詢。
+"""
 
 from __future__ import annotations
 
+import hashlib
 import json
 from contextlib import contextmanager
 from typing import Iterator
@@ -22,6 +26,10 @@ from subsystems.staff_payables.overpayment_recovery_matching import (
     StaffOverpaymentRecoveryMatchingFacts,
     StaffOverpaymentRecoveryMatchingReceipt,
     StoredStaffOverpaymentRecoveryMatchingReceipt,
+)
+from subsystems.staff_payables.overpayment_recovery_query import (
+    StaffOverpaymentRecoveryMatchingView,
+    StaffOverpaymentRecoveryQueryView,
 )
 
 
@@ -61,6 +69,7 @@ class MySqlStaffOverpaymentRecoveryRepository:
             str(payload["recovery_identity"]), int(payload["recovery_version"]),
             int(payload["staff_payables_version"]), int(payload["remaining_after_ntd"]),
             str(payload["resulting_status"]), PreviewFingerprint(str(payload["preview_fingerprint"])),
+            payload.get("evidence_reference"),
         )
         return StoredStaffOverpaymentRecoveryReceipt(PreviewFingerprint(str(row["command_fingerprint"])), receipt)
 
@@ -111,6 +120,7 @@ class MySqlStaffOverpaymentRecoveryRepository:
             str(payload["recovery_identity"]), int(payload["staff_id"]),
             str(payload["finance_import_row_identity"]), int(payload["recovery_version"]),
             int(payload["staff_payables_version"]), PreviewFingerprint(str(payload["preview_fingerprint"])),
+            payload.get("evidence_reference"),
         )
         return StoredStaffOverpaymentRecoveryMatchingReceipt(PreviewFingerprint(str(row["command_fingerprint"])), receipt)
 
@@ -118,13 +128,17 @@ class MySqlStaffOverpaymentRecoveryRepository:
         candidate = preview.candidate
         with _cursor(self._connection) as cursor:
             cursor.execute(
-                "INSERT INTO staff_overpayment_recovery_matchings (matching_identity,recovery_identity,staff_id,finance_import_row_id,recovery_version,staff_payables_version,matching_version,actor,reason,idempotency_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "INSERT INTO staff_overpayment_recovery_matchings (matching_identity,recovery_identity,staff_id,finance_import_row_id,recovery_version,staff_payables_version,matching_version,actor,reason,evidence_reference,idempotency_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (receipt.matching_identity, receipt.recovery_identity, receipt.staff_id,
                  int(receipt.finance_import_row_identity), receipt.recovery_version,
                  receipt.staff_payables_version, receipt.matching_version,
-                 request.actor.actor_id, request.reason, request.idempotency_key.value),
+                 request.actor.actor_id, request.reason, request.evidence_reference,
+                 request.idempotency_key.value),
             )
-            snapshot = _matching_receipt_payload(receipt)
+            snapshot = {
+                **_matching_receipt_payload(receipt),
+                "event_type": "staff_overpayment_recovery_matched",
+            }
             cursor.execute("INSERT INTO staff_overpayment_recovery_matching_receipts (idempotency_key,command_fingerprint,preview_fingerprint,matching_identity,result_snapshot) VALUES (%s,%s,%s,%s,%s)", (request.idempotency_key.value, command_fingerprint.value, request.preview_fingerprint.value, receipt.matching_identity, json.dumps(snapshot, sort_keys=True)))
             cursor.execute("INSERT INTO staff_payables_outbox (staff_id,intent_key,intent_type,payload_snapshot) VALUES (%s,%s,'staff_overpayment_recovery_matched',%s)", (candidate.staff_id, f"staff-overpayment-recovery-match:{request.idempotency_key.value}", json.dumps(snapshot, sort_keys=True)))
 
@@ -133,6 +147,15 @@ class MySqlStaffOverpaymentRecoveryRepository:
         bank_row_id = None if request.selection.action is StaffOverpaymentRecoveryAction.ADJUST else int(request.selection.finance_import_row_identity or 0)
         event_type = "authorized_adjustment" if bank_row_id is None else "cash_recovered"
         with _cursor(self._connection) as cursor:
+            if bank_row_id is not None:
+                cursor.execute(
+                    "UPDATE finance_import_rows SET reconciliation_status='reconciled',"
+                    "reconciliation_reference=%s,reconciled_at=CURRENT_TIMESTAMP "
+                    "WHERE id=%s AND reconciliation_status='pending'",
+                    (f"staff-overpayment-recovery:{candidate.recovery_identity}", bank_row_id),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("bank_fact_not_eligible")
             cursor.execute(
                 "UPDATE staff_overpayment_recoveries SET remaining_amount_ntd=%s,status=%s,aggregate_version=%s "
                 "WHERE recovery_identity=%s AND aggregate_version=%s",
@@ -141,16 +164,74 @@ class MySqlStaffOverpaymentRecoveryRepository:
             if cursor.rowcount != 1:
                 raise ValueError("staff_overpayment_recovery_stale")
             cursor.execute(
-                "INSERT INTO staff_overpayment_recovery_events (recovery_identity,event_type,finance_import_row_id,before_remaining_ntd,after_remaining_ntd,resulting_status,idempotency_key,actor,reason,correlation_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (receipt.recovery_identity, event_type, bank_row_id, candidate.remaining_before.amount, receipt.remaining_after_ntd, receipt.resulting_status, request.idempotency_key.value, request.actor.actor_id, request.reason, request.correlation_id.value),
+                "INSERT INTO staff_overpayment_recovery_events (recovery_identity,event_type,finance_import_row_id,before_remaining_ntd,after_remaining_ntd,resulting_status,idempotency_key,actor,reason,evidence_reference,correlation_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (receipt.recovery_identity, event_type, bank_row_id, candidate.remaining_before.amount, receipt.remaining_after_ntd, receipt.resulting_status, request.idempotency_key.value, request.actor.actor_id, request.reason, request.evidence_reference, request.correlation_id.value),
             )
             cursor.execute("UPDATE staff_payable_accounts SET aggregate_version=%s WHERE staff_id=%s AND aggregate_version=%s", (receipt.staff_payables_version, candidate.staff_id, preview.staff_payables_version))
             if cursor.rowcount != 1:
                 raise ValueError("staff_overpayment_recovery_stale")
-            cursor.execute("INSERT INTO staff_payables_outbox (staff_id,intent_key,intent_type,payload_snapshot) VALUES (%s,%s,'staff_overpayment_recovery_updated',%s)", (candidate.staff_id, f"staff-overpayment-recovery:{request.idempotency_key.value}", json.dumps({"recovery_identity": receipt.recovery_identity, "status": receipt.resulting_status, "matching_identity": request.selection.matching_identity}, sort_keys=True)))
+            cursor.execute("INSERT INTO staff_payables_outbox (staff_id,intent_key,intent_type,payload_snapshot) VALUES (%s,%s,'staff_overpayment_recovery_updated',%s)", (candidate.staff_id, f"staff-overpayment-recovery:{request.idempotency_key.value}", json.dumps({"event_type": "staff_overpayment_recovery_updated", "recovery_identity": receipt.recovery_identity, "recovery_version": receipt.recovery_version, "status": receipt.resulting_status, "matching_identity": request.selection.matching_identity, "evidence_reference": request.evidence_reference}, sort_keys=True)))
             if request.selection.matching_identity is not None and receipt.resulting_status == "recovered":
-                cursor.execute("INSERT INTO staff_payables_outbox (staff_id,intent_key,intent_type,payload_snapshot) VALUES (%s,%s,'staff_overpayment_recovery_collected',%s)", (candidate.staff_id, f"staff-overpayment-recovery-collected:{request.idempotency_key.value}", json.dumps({"recovery_identity": receipt.recovery_identity, "status": receipt.resulting_status, "matching_identity": request.selection.matching_identity}, sort_keys=True)))
+                cursor.execute("INSERT INTO staff_payables_outbox (staff_id,intent_key,intent_type,payload_snapshot) VALUES (%s,%s,'staff_overpayment_recovery_collected',%s)", (candidate.staff_id, f"staff-overpayment-recovery-collected:{request.idempotency_key.value}", json.dumps({"event_type": "staff_overpayment_recovery_collected", "recovery_identity": receipt.recovery_identity, "recovery_version": receipt.recovery_version, "status": receipt.resulting_status, "matching_identity": request.selection.matching_identity, "evidence_reference": request.evidence_reference}, sort_keys=True)))
             cursor.execute("INSERT INTO staff_overpayment_recovery_apply_receipts (idempotency_key,command_fingerprint,preview_fingerprint,recovery_identity,result_snapshot) VALUES (%s,%s,%s,%s,%s)", (request.idempotency_key.value, command_fingerprint.value, receipt.preview_fingerprint.value, receipt.recovery_identity, json.dumps(_receipt_payload(receipt), sort_keys=True)))
+
+    def query_recovery(self, staff_id: int, recovery_identity: str) -> StaffOverpaymentRecoveryQueryView:
+        """Read one owner root and every immutable matching without locking or writes."""
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "SELECT recovery_identity,staff_id,remaining_amount_ntd,status,aggregate_version,"
+                "source_bank_fact_identities,source_payout_event_ids,source_obligation_identities "
+                "FROM staff_overpayment_recoveries WHERE recovery_identity=%s",
+                (recovery_identity,),
+            )
+            recovery = cursor.fetchone()
+            if recovery is None:
+                raise ValueError("staff_overpayment_recovery_not_found")
+            if int(recovery["staff_id"]) != staff_id:
+                raise ValueError("staff_overpayment_recovery_owner_mismatch")
+            cursor.execute(
+                "SELECT aggregate_version FROM staff_payable_accounts WHERE staff_id=%s",
+                (staff_id,),
+            )
+            account = cursor.fetchone()
+            if account is None:
+                raise ValueError("staff_overpayment_recovery_owner_unavailable")
+            cursor.execute(
+                "SELECT matching_identity,staff_id,matching_version,finance_import_row_id "
+                "FROM staff_overpayment_recovery_matchings WHERE recovery_identity=%s "
+                "ORDER BY matching_identity",
+                (recovery_identity,),
+            )
+            matching_rows = cursor.fetchall()
+        matchings = []
+        for row in matching_rows:
+            if int(row["staff_id"]) != staff_id:
+                raise ValueError("staff_overpayment_recovery_owner_mismatch")
+            matchings.append(
+                StaffOverpaymentRecoveryMatchingView(
+                    str(row["matching_identity"]),
+                    int(row["matching_version"]),
+                    _redact_reference(f"finance-import-row:{row['finance_import_row_id']}"),
+                )
+            )
+        return StaffOverpaymentRecoveryQueryView(
+            staff_id=staff_id,
+            recovery_identity=str(recovery["recovery_identity"]),
+            remaining_amount_ntd=int(recovery["remaining_amount_ntd"]),
+            status=str(recovery["status"]),
+            recovery_version=int(recovery["aggregate_version"]),
+            staff_payables_version=int(account["aggregate_version"]),
+            source_bank_fact_references=_redact_references(
+                recovery["source_bank_fact_identities"], "finance-import-row"
+            ),
+            source_payout_event_references=_redact_references(
+                recovery["source_payout_event_ids"], "staff-payout-event"
+            ),
+            source_obligation_references=_redact_references(
+                recovery["source_obligation_identities"], "staff-obligation"
+            ),
+            matchings=tuple(matchings),
+        )
 
     def _load_bank_fact(self, cursor, selection, staff_id, suffix):
         if selection.action is StaffOverpaymentRecoveryAction.ADJUST:
@@ -179,11 +260,23 @@ def _account_version(cursor, staff_id, suffix):
 
 
 def _receipt_payload(receipt):
-    return {"recovery_identity": receipt.recovery_identity, "recovery_version": receipt.recovery_version, "staff_payables_version": receipt.staff_payables_version, "remaining_after_ntd": receipt.remaining_after_ntd, "resulting_status": receipt.resulting_status, "preview_fingerprint": receipt.preview_fingerprint.value}
+    return {"recovery_identity": receipt.recovery_identity, "recovery_version": receipt.recovery_version, "staff_payables_version": receipt.staff_payables_version, "remaining_after_ntd": receipt.remaining_after_ntd, "resulting_status": receipt.resulting_status, "preview_fingerprint": receipt.preview_fingerprint.value, "evidence_reference": receipt.evidence_reference}
 
 
 def _matching_receipt_payload(receipt):
-    return {"matching_identity": receipt.matching_identity, "matching_version": receipt.matching_version, "recovery_identity": receipt.recovery_identity, "staff_id": receipt.staff_id, "finance_import_row_identity": receipt.finance_import_row_identity, "recovery_version": receipt.recovery_version, "staff_payables_version": receipt.staff_payables_version, "preview_fingerprint": receipt.preview_fingerprint.value}
+    return {"matching_identity": receipt.matching_identity, "matching_version": receipt.matching_version, "recovery_identity": receipt.recovery_identity, "staff_id": receipt.staff_id, "finance_import_row_identity": receipt.finance_import_row_identity, "recovery_version": receipt.recovery_version, "staff_payables_version": receipt.staff_payables_version, "preview_fingerprint": receipt.preview_fingerprint.value, "evidence_reference": receipt.evidence_reference}
+
+
+def _redact_references(value, prefix):
+    parsed = json.loads(value) if isinstance(value, str) else value
+    if not isinstance(parsed, list) or any(not isinstance(item, (str, int)) for item in parsed):
+        raise ValueError("staff_overpayment_recovery_query_invalid")
+    return tuple(_redact_reference(f"{prefix}:{item}") for item in parsed)
+
+
+def _redact_reference(value):
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+    return f"redacted:{digest}"
 
 
 def _object(value):

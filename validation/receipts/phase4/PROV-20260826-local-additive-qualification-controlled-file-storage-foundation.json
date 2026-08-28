@@ -1,0 +1,97 @@
+{
+  "contract": "local-additive-qualification/v1",
+  "release_id": "labor-union-controlled-file-storage-foundation-2026-08-26-v1",
+  "release_fingerprint": "42330ff0bea04f61de501e0acf3bd68e08ad67b187e45f7a9e7f451bb93c783f",
+  "artifact": {
+    "name": "1004_controlled_file_storage_foundation.sql",
+    "sql_sha256": "16411599b8bc02bff09cbfdfac57269f256c85f20ddae213eeb708ab60e8653b",
+    "descriptor_sha256": "311d8661208c415d0def2cdef8009a33beaa63bb91407ff167e22ef68e13fe5a",
+    "data_effect": "schema_only",
+    "dependencies": [],
+    "required_dependency_sql_sha256": {},
+    "dependency_contracts": {}
+  },
+  "published_manifest_sha256": "a639a80026c24533d895f394588103d817a03ecf8fb3b7b3cec0b4c224e33baa",
+  "manifest_artifact_inventory": [
+    {
+      "name": "1004_controlled_file_storage_foundation.sql",
+      "sha256": "16411599b8bc02bff09cbfdfac57269f256c85f20ddae213eeb708ab60e8653b",
+      "data_effect": "schema_only",
+      "dependencies": []
+    }
+  ],
+  "metadata_backup": {
+    "status": "verified",
+    "server_uuid": "617af627d98a",
+    "host": "127.0.0.1",
+    "port": 3306,
+    "database": "lu_test_dataset_cf_source_1003",
+    "tool": "canonical mysqldump plus read-only metadata snapshot",
+    "schema_sha256": "0ea4983d3ed37800605b725c18b52bc095b40666f9a87ddf94a0e5e899de2bb1",
+    "dump_sha256": "16a6170fb4bc10353bde53e7ed84d1c7fffd7cd95ee8aa847a89f869adf3db83",
+    "created_at_utc": "2026-08-26T11:03:22Z"
+  },
+  "fresh_bootstrap": {
+    "status": "verified",
+    "verified_at_utc": "2026-08-26T11:08:24Z",
+    "mysql_version": "8.0.46",
+    "schema_fingerprint": "e24969c8b0ac05f0cb8a8ae43de3cef4af62cd392dfc378e3fb6a95aa16b2df4",
+    "artifact_state": "exact",
+    "data_rows_written": 0,
+    "engine_command_category": "fresh bootstrap plus descriptor verify"
+  },
+  "preserve_data_candidate": {
+    "status": "verified",
+    "verified_at_utc": "2026-08-26T11:08:24Z",
+    "mysql_version": "8.0.46",
+    "source_schema_fingerprint": "0ea4983d3ed37800605b725c18b52bc095b40666f9a87ddf94a0e5e899de2bb1",
+    "candidate_schema_fingerprint": "f62d42668bd68b96fb6d9188fddb1ca60260ec342636390453e72dfd4f9435c6",
+    "source_dump_sha256": "16a6170fb4bc10353bde53e7ed84d1c7fffd7cd95ee8aa847a89f869adf3db83",
+    "candidate_dump_sha256": "fe10a8022f3f4e7c62ff1a194dface3b2980da607ae3b248cfcb980839cf975d",
+    "artifact_state": "exact",
+    "existing_table_preservation": "verified",
+    "representative_rows_preserved": {
+      "clients": 1,
+      "orders": 1
+    },
+    "engine_command_category": "preserve-data candidate plus readback"
+  },
+  "target_projection": {
+    "contract": "local-additive-target-projection/v1",
+    "artifact_name": "1004_controlled_file_storage_foundation.sql",
+    "descriptor_sha256": "311d8661208c415d0def2cdef8009a33beaa63bb91407ff167e22ef68e13fe5a",
+    "fresh_state": "exact",
+    "preserve_candidate_state": "exact",
+    "fresh_fingerprint": "311d8661208c415d0def2cdef8009a33beaa63bb91407ff167e22ef68e13fe5a",
+    "preserve_candidate_fingerprint": "311d8661208c415d0def2cdef8009a33beaa63bb91407ff167e22ef68e13fe5a"
+  },
+  "policy": {
+    "local_in_place_eligible": true,
+    "seed": 0,
+    "backfill": 0,
+    "destructive": 0,
+    "target_prefix": "lu_test_"
+  },
+  "policy_evidence": {
+    "fresh_schema_fingerprint": "e24969c8b0ac05f0cb8a8ae43de3cef4af62cd392dfc378e3fb6a95aa16b2df4",
+    "preserve_source_schema_fingerprint": "0ea4983d3ed37800605b725c18b52bc095b40666f9a87ddf94a0e5e899de2bb1",
+    "preserve_candidate_schema_fingerprint": "f62d42668bd68b96fb6d9188fddb1ca60260ec342636390453e72dfd4f9435c6",
+    "source_dump_sha256": "16a6170fb4bc10353bde53e7ed84d1c7fffd7cd95ee8aa847a89f869adf3db83",
+    "candidate_dump_sha256": "fe10a8022f3f4e7c62ff1a194dface3b2980da607ae3b248cfcb980839cf975d",
+    "fresh_target_projection_fingerprint": "311d8661208c415d0def2cdef8009a33beaa63bb91407ff167e22ef68e13fe5a",
+    "preserve_candidate_target_projection_fingerprint": "311d8661208c415d0def2cdef8009a33beaa63bb91407ff167e22ef68e13fe5a"
+  },
+  "engine_evidence": {
+    "mysql_version": "8.0.46",
+    "verified_at_utc": "2026-08-26T11:08:24Z",
+    "commands_category": [
+      "fresh bootstrap",
+      "preserve-data candidate",
+      "descriptor exactness",
+      "representative-row readback",
+      "read-only metadata"
+    ]
+  },
+  "work_package": "PROV-20260826-controlled-file-storage-foundation-work-package",
+  "payload_digest": "263443b81e1442cc0625b4716b33f82275411e2dfb46ab37c8a1589735123f4d"
+}

@@ -37,6 +37,20 @@ class RichMenuDraftView(_StrictModel):
     definition: LineMenusConfig
     publication_locks: tuple[RichMenuDraftPublicationLockView, ...]
 
+    @model_validator(mode="after")
+    def validate_publication_lock_topology(self):
+        menu_ids = tuple(menu.id for menu in self.definition.menus)
+        lock_ids = tuple(lock.menu_definition_id for lock in self.publication_locks)
+        if (
+            len(lock_ids) != len(menu_ids)
+            or len(set(lock_ids)) != len(lock_ids)
+            or set(lock_ids) != set(menu_ids)
+        ):
+            raise ValueError("Rich Menu publication locks do not match the draft menus")
+        if any(lock.configuration_revision != self.revision for lock in self.publication_locks):
+            raise ValueError("Rich Menu publication lock revision mismatch")
+        return self
+
 
 class RichMenuDraftPreviewRequest(_StrictModel):
     expected_revision: int = Field(ge=0)

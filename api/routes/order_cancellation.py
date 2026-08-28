@@ -1,4 +1,6 @@
-"""Typed Query, Preview, and Apply endpoints for Orders Cancellation."""
+"""File: order_cancellation.py
+Description: 提供訂單取消查詢、receipt 讀取及 Preview／Apply API。
+"""
 
 from __future__ import annotations
 
@@ -84,6 +86,34 @@ def query_order_cancellation(
         lambda: _query_payload(application.query(case_no)),
         "成功取得訂單取消狀態",
         CorrelationId(f"query:{case_no}"),
+    )
+
+
+@router.get(
+    "/{case_no}/cancellation/receipt",
+    response_model=BaseResponse[OrderCancellationReceiptView],
+)
+def query_order_cancellation_receipt(
+    case_no: str = Path(..., min_length=1, max_length=50),
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=191,
+    ),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: OrderCancellationApplication = Depends(
+        get_order_cancellation_application
+    ),
+):
+    del principal
+    identity = CorrelationId(f"order-cancellation-receipt:{case_no}")
+    return _call_endpoint(
+        lambda: _materialize(
+            application.query_receipt(case_no, idempotency_key)
+        ),
+        "成功取得訂單取消 receipt",
+        identity,
     )
 
 
@@ -314,7 +344,7 @@ def _raise_value_error(error, correlation_id):
     code = str(error)
     category = (
         ErrorCategory.NOT_FOUND
-        if code == "order_not_found"
+        if code in {"order_not_found", "order_cancellation_receipt_not_found"}
         else ErrorCategory.VALIDATION
     )
     status_code = 404 if category is ErrorCategory.NOT_FOUND else 422

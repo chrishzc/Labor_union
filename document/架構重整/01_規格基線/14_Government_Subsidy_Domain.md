@@ -179,7 +179,7 @@ pending_review
 - 尚無合法 target 時維持 `pending_review`，不能先猜測未來案件；
 - offset allocation 使用原 overpayment credit，不新增虛構銀行 receipt；
 - allocation 總額不得超過 overpayment remaining 或 target outstanding；
-- 部分 offset 可保留 `offset_reserved` remaining，歸零才為 `offset_applied`；
+- 一次 offset Apply 必須配置完整 overpayment remaining；可依明確順序分配多個 target，最後一個 target 只在 overpayment 原始可用餘額小於其 outstanding 時形成一次 partial allocation。不得由人員任意保留 overpayment remaining，也不得對同一 overpayment／claim item 反覆追加第二次 partial offset；原始匯款金額不足只表示最後一筆 allocation 小於 target outstanding，overpayment credit 本身仍須在該 Apply 歸零並進入 `offset_applied`；
 - 同一 overpayment credit 不得同時成為 return payable。
 
 #### Return payable 規則
@@ -192,6 +192,11 @@ date、due date、法源／核准 evidence reference。Apply 建立獨立
 該 obligation 是系統唯一可交會計的「政府退款單」，可進下一期應付明細，列型別固定為
 `government_overpayment_return`，輸出 remaining、government recipient snapshot、來源
 overpayment/receipt identity 與 due date。清冊是唯讀交辦資料，不命令、執行或推定會計已匯款。
+
+2026-08-27 人工裁決：不採 offset 的政府入款溢撥，其差額一律建立退回同一 government payer
+有效收款帳戶的 `government_overpayment_return` obligation；此低機率事件仍不得直接沖銷、轉入
+Client Finance／Staff Payables 或留作未來 claim 的無主 credit。帳戶不存在或不唯一時保持
+`pending_review` 並要求先完成政府收款帳戶主檔 Q/P/A。
 
 會計可因緊急情況在清冊日期前先行於系統外匯款；系統只在後續匯入 canonical outgoing bank
 fact 後，以退款對象的 canonical 收款帳戶與金額對回既有退款單，經

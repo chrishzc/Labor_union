@@ -48,7 +48,7 @@ PROFILE_REQUIREMENTS = {
         "modules": ("uvicorn", "scripts.run_line_worker", "scripts.run_service_monitor", "scripts.run_durable_job_worker", "scripts.smoke_local_development_launcher"),
     },
     "local-unix": {
-        "commands": ("docker", "lsof", "npm"),
+        "commands": ("docker", "npm"),
         "files": ("docker-compose.yml", "scripts/wait_for_db.py", "ui_react/package.json", "ui_react/src/main.tsx", "ui_react/index.html"),
         "modules": ("uvicorn", "scripts.run_line_worker", "scripts.run_service_monitor", "scripts.run_durable_job_worker"),
     },

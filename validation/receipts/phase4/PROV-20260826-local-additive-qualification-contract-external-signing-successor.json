@@ -1,0 +1,127 @@
+{
+  "contract": "local-additive-qualification/v1",
+  "release_id": "labor-union-contract-external-signing-successor-2026-08-26-v1",
+  "release_fingerprint": "d1ce001f52917e0d74d5a7ad802e78426bf754f9f68bdf154e693d247dd38900",
+  "published_manifest_sha256": "17e49e921edde9babaff218e35d05778ec99ed8ef146140dd117153e98b1d043",
+  "artifact": {
+    "name": "1005_contract_external_signing_successor.sql",
+    "sql_sha256": "4e835e4a523edcfd9e3188d30f84a182a1eba45492ea07ed2664f463849d4d4c",
+    "descriptor_sha256": "01f5f8acc6c26777dc6d4a1656138b04863a85005b74145f9102093df7e8dccb",
+    "data_effect": "schema_only",
+    "dependencies": []
+  },
+  "manifest_artifact_inventory": [
+    {
+      "name": "1005_contract_external_signing_successor.sql",
+      "sha256": "4e835e4a523edcfd9e3188d30f84a182a1eba45492ea07ed2664f463849d4d4c",
+      "data_effect": "schema_only",
+      "dependencies": []
+    }
+  ],
+  "metadata_backup": {
+    "status": "verified",
+    "server_uuid": "617af627d98a",
+    "database": "lu_test_dataset_cf_candidate_1004",
+    "schema_sha256": "91305fefc9c483e9370fa18376ce2ae838fb79820cdb812686e8d77e6b87a085",
+    "dump_sha256": "91c072ca952105db7da0cc280234b3393d14adbc37d187aacf4d3f6418386ba1",
+    "created_at_utc": "2026-08-26T12:27:52Z"
+  },
+  "fresh_bootstrap": {
+    "status": "verified",
+    "database": "lu_test_contract_o2_fresh_1005_u3",
+    "mysql_version": "8.0.46",
+    "schema_fingerprint": "31d9c5f4cef61ba9ded678c34e071ca1583b5b6cf6e3b4c12c54b0ba3eb6d530",
+    "artifact_state": "exact",
+    "data_rows_written": 0
+  },
+  "preserve_data_candidate": {
+    "status": "verified",
+    "verified_at_utc": "2026-08-26T12:29:17Z",
+    "source_database": "lu_test_dataset_cf_candidate_1004",
+    "candidate_database": "lu_test_contract_o2_candidate_1005_u3",
+    "mysql_version": "8.0.46",
+    "source_schema_fingerprint": "91305fefc9c483e9370fa18376ce2ae838fb79820cdb812686e8d77e6b87a085",
+    "candidate_schema_fingerprint": "ed95c917502b59a19b829355e222eb8ef83598149101625ded5d59d98b4ab44e",
+    "source_dump_sha256": "91c072ca952105db7da0cc280234b3393d14adbc37d187aacf4d3f6418386ba1",
+    "candidate_dump_sha256": "31dac4dfc85aa5684c59aa7893916334fc89e260f073a0cee3bee5be5acfbbed",
+    "artifact_state": "exact",
+    "existing_table_preservation": "verified",
+    "representative_rows_preserved": {
+      "clients": 1,
+      "orders": 1
+    },
+    "switch_performed": false,
+    "source_replaced": false
+  },
+  "target_projection": {
+    "contract": "local-additive-target-projection/v1",
+    "artifact_name": "1005_contract_external_signing_successor.sql",
+    "descriptor_sha256": "01f5f8acc6c26777dc6d4a1656138b04863a85005b74145f9102093df7e8dccb",
+    "fresh_state": "exact",
+    "preserve_candidate_state": "exact",
+    "fresh_fingerprint": "01f5f8acc6c26777dc6d4a1656138b04863a85005b74145f9102093df7e8dccb",
+    "preserve_candidate_fingerprint": "01f5f8acc6c26777dc6d4a1656138b04863a85005b74145f9102093df7e8dccb"
+  },
+  "policy": {
+    "local_in_place_eligible": true,
+    "seed": 0,
+    "backfill": 0,
+    "destructive": 0,
+    "target_prefix": "lu_test_"
+  },
+  "policy_evidence": {
+    "fresh_schema_fingerprint": "31d9c5f4cef61ba9ded678c34e071ca1583b5b6cf6e3b4c12c54b0ba3eb6d530",
+    "preserve_source_schema_fingerprint": "91305fefc9c483e9370fa18376ce2ae838fb79820cdb812686e8d77e6b87a085",
+    "preserve_candidate_schema_fingerprint": "ed95c917502b59a19b829355e222eb8ef83598149101625ded5d59d98b4ab44e",
+    "source_dump_sha256": "91c072ca952105db7da0cc280234b3393d14adbc37d187aacf4d3f6418386ba1",
+    "candidate_dump_sha256": "31dac4dfc85aa5684c59aa7893916334fc89e260f073a0cee3bee5be5acfbbed",
+    "fresh_target_projection_fingerprint": "01f5f8acc6c26777dc6d4a1656138b04863a85005b74145f9102093df7e8dccb",
+    "preserve_candidate_target_projection_fingerprint": "01f5f8acc6c26777dc6d4a1656138b04863a85005b74145f9102093df7e8dccb"
+  },
+  "resumability": {
+    "status": "verified",
+    "interrupted_after_statement": 7,
+    "candidate_database": "lu_test_contract_o2_resume_1005_u3",
+    "durable_applied_statement_count_before_interrupt": 7,
+    "recovery_statement_count": 17,
+    "reconciled_state": "exact",
+    "resumed_to_state": "exact",
+    "receipt_replay": "candidate_identity_and_statement_sha256_verified",
+    "operation_receipt_sha256": "7e16ea5ab4a88e34c0125d086861289d1a2eae4e466b8e6dbffbb9ad96535512",
+    "verified_at_utc": "2026-08-26T13:03:14Z"
+  },
+  "engine_evidence": {
+    "mysql_version": "8.0.46",
+    "verified_at_utc": "2026-08-26T13:09:55Z",
+    "commands_category": [
+      "fresh bootstrap",
+      "preserve-data candidate",
+      "descriptor exactness",
+      "representative-row readback",
+      "interrupted-statement reconciliation"
+    ]
+  },
+  "developer_acceptance": {
+    "status": "verified",
+    "verified_at_utc": "2026-08-26T13:09:55Z",
+    "launcher": "python -m scripts.update_local_database --apply --strategy replacement --allow-long-run",
+    "source_database": "lu_test_contract_o2_devaccept_source_u3",
+    "candidate_database": "lu_test_contract_o2_devaccept_candidate_u3",
+    "planned_release_id": "labor-union-contract-external-signing-successor-2026-08-26-v1",
+    "planned_artifact_state": "absent",
+    "backup_required": true,
+    "mutation_performed": true,
+    "source_replaced": true,
+    "replacement_status": "completed",
+    "source_backup_sha256": "315720f33ad4d2a6e3f4e44d73314d9a2ef0417e811489f8c7798e12f6f3955e",
+    "candidate_dump_sha256": "a3716aa516e1988ffcb3addd82c8e641101b53f77da8205fac414e627a9e6c40",
+    "operation_receipt_sha256": "f33bf69d6de3b14b31092f8f89a9c0e81faa20bb93914c43dcddab92f757f458",
+    "replacement_receipt_sha256": "252af453ac4d92f9cdcf63fe710189490d27f75fbe42e96d37a80ae579f0f5f1",
+    "source_candidate_data_equivalence": "verified",
+    "source_candidate_schema_equivalence": "verified",
+    "owned_objects": "exact",
+    "rollback_dump_available": true
+  },
+  "work_package": "PROV-20260826-contract-external-platform-pdf-handoff-work-package",
+  "payload_digest": "e847e7c96ce4d128102a737780ddba2571ee17eda6f3c5c33dd96be968956a5f"
+}

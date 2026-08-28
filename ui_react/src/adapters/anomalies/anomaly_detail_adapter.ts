@@ -21,11 +21,40 @@ export interface AnomalyDetailBundleViewModel {
   recoveryAvailable: boolean;
 }
 
+type SafeEvidenceKind = AnomalyEvidenceField['kind'];
+
+/**
+ * API anomaly-safe.v1 fields that may be shown in the everyday detail view.
+ * Identity-shaped values are safe only when their exact typed allowlist entry
+ * is present; raw/private fields are deliberately absent from this map.
+ */
+const DAILY_DETAIL_SAFE_FIELDS: Readonly<Record<string, readonly SafeEvidenceKind[]>> = {
+  occurred_at: ['datetime'],
+  source_version: ['integer'],
+  amount_delta_ntd: ['money_ntd'],
+  case_no: ['identity'],
+  holiday_date: ['date'],
+  staff_name: ['masked_text'],
+  root_condition_active: ['boolean'],
+  integrity_blocker_active: ['boolean'],
+  overdue_obligations: ['detail_list', 'identity_list'],
+  resolution_condition: ['code'],
+  issue_codes: ['code_list'],
+  notification_reason: ['code'],
+  domain_blockers: ['code_list'],
+  reason_codes: ['code_list'],
+  affected_order_identities: ['identity_list'],
+  affected_obligation_identities: ['identity_list'],
+  finance_import_row_id: ['identity'],
+  finance_import_batch_id: ['identity'],
+  original_refund_ledger_entry_id: ['identity'],
+  finance_import_row_identity: ['identity'],
+  finance_import_batch_identity: ['identity'],
+  original_refund_ledger_entry_identity: ['identity'],
+};
+
 export function visibleEvidenceItems<T extends { key: string; kind: string }>(items: readonly T[]): T[] {
-  return items.filter((item) => (
-    !/(identity|version|fingerprint|hash|correlation|(^|_)id$)/i.test(item.key)
-    && !['code', 'code_list', 'identity', 'identity_list'].includes(item.kind)
-  ));
+  return items.filter((item) => DAILY_DETAIL_SAFE_FIELDS[item.key]?.includes(item.kind as SafeEvidenceKind) ?? false);
 }
 
 function renderValue(field: AnomalyEvidenceField): string {
@@ -36,12 +65,27 @@ function renderValue(field: AnomalyEvidenceField): string {
 
 const EVIDENCE_LABELS: Record<string, string> = {
   occurred_at: '偵測時間',
+  source_version: '資料版本',
   amount_delta_ntd: '金額差異',
   case_no: '案件',
   holiday_date: '日期',
   staff_name: '月嫂',
+  finance_import_row_id: '銀行流水資料',
+  finance_import_batch_id: '匯入批次',
+  original_refund_ledger_entry_id: '原退款紀錄',
+  finance_import_row_identity: '銀行流水資料',
+  finance_import_batch_identity: '匯入批次',
+  original_refund_ledger_entry_identity: '原退款紀錄',
+  affected_order_identities: '受影響案件',
+  affected_obligation_identities: '受影響收付款',
+  domain_blockers: '阻擋原因',
+  reason_codes: '判斷原因',
+  issue_codes: '問題代碼',
+  notification_reason: '通知原因',
   root_condition_active: '目前仍需處理',
   integrity_blocker_active: '目前阻擋作業',
+  overdue_obligations: '具體逾期義務',
+  resolution_condition: '異常解除條件',
 };
 
 function adaptEvidence(fields: AnomalyEvidenceField[]): EvidenceRowViewModel[] {
@@ -63,10 +107,18 @@ function renderBinding(item: AnomalySourceBinding): string {
 }
 
 export function adaptAnomalyDetailBundle(detail: AnomalyDetailView, recovery: AnomalyRecoveryContextView | null): AnomalyDetailBundleViewModel {
-  if (recovery && (detail.summary.fingerprint !== recovery.fingerprint || detail.summary.definition_code !== recovery.definition_code)) {
+  if (recovery && (
+    detail.summary.fingerprint !== recovery.fingerprint
+    || detail.summary.definition_code !== recovery.definition_code
+    || detail.summary.source_identity !== recovery.source_identity
+  )) {
     throw new Error('detail 與 recovery identity 不一致');
   }
   const root = recovery?.root_fact_snapshot;
+  const boundDetailActions = detail.available_actions.filter((action) => action.source_bindings !== null);
+  const availableActions = recovery && recovery.available_actions.length > 0
+    ? recovery.available_actions
+    : boundDetailActions;
   return {
     fingerprint: detail.summary.fingerprint,
     definitionCode: detail.summary.definition_code,
@@ -88,9 +140,9 @@ export function adaptAnomalyDetailBundle(detail: AnomalyDetailView, recovery: An
       { key: 'reason_codes', kind: 'code_list', label: '判斷原因', value: root.reason_codes.join(', ') || '—' },
     ] : [],
     occurrences: recovery?.occurrence_timeline.map((item) => ({ fingerprint: item.occurrence_fingerprint, occurredAt: item.occurred_at, evidence: adaptEvidence(item.bounded_snapshot.fields) })) ?? [],
-    actions: recovery?.available_actions.map((action) => ({ key: action.action_key, label: action.label, owner: action.owning_domain, bindings: action.source_bindings.map(renderBinding), requiredInputs: action.required_operator_inputs, previewOperation: action.preview_operation, applyOperation: action.apply_operation, completionPredicate: action.completion_predicate, contractVersion: action.action_contract_version })) ?? [],
+    actions: availableActions.map((action) => ({ key: action.action_key, label: action.label, owner: action.owning_domain, bindings: (action.source_bindings ?? []).map(renderBinding), requiredInputs: action.required_operator_inputs, previewOperation: action.preview_operation, applyOperation: action.apply_operation, completionPredicate: action.completion_predicate, contractVersion: action.action_contract_version })),
     projectionFreshness: recovery?.projection_freshness ?? 'unavailable',
     domainBlockerActive: recovery?.domain_blocker_active ?? false,
-    recoveryAvailable: recovery !== null,
+    recoveryAvailable: recovery !== null || boundDetailActions.length > 0,
   };
 }

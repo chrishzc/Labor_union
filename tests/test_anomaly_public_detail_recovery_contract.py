@@ -175,8 +175,10 @@ def _recovery_context() -> RecoveryContext:
         occurred_at=_NOW,
         bounded_snapshot={
             "amount_delta_ntd": 1200,
+            "case_no": "CASE-42",
             "domain_blockers": ["manual_review"],
             "reason_codes": ["AMOUNT_MISMATCH"],
+            "recovery_identity": "recovery:42",
             "root_condition_active": True,
             "integrity_blocker_active": False,
         },
@@ -197,6 +199,8 @@ def _recovery_context() -> RecoveryContext:
             "reason_codes": ["AMOUNT_MISMATCH"],
             "finance_import_row_id": 42,
             "finance_import_batch_id": 9,
+            "case_no": "CASE-42",
+            "recovery_identity": "recovery:42",
             "recovery_bindings": {
                 "finance_import_row_identity": "finance-row:42",
                 "source_version": 7,
@@ -260,7 +264,7 @@ def test_public_detail_and_recovery_models_have_no_raw_mapping_escape_hatch() ->
         ("version", 7, "integer", 7),
         ("notification_reason", "missing_document", "code", "missing_document"),
         ("issue_codes", ["missing_document"], "code_list", ["missing_document"]),
-        ("overdue_obligations", ["obligation:19"], "identity_list", ["obligation:19"]),
+        ("overdue_obligations", ["obligation:19"], "detail_list", ["obligation:19"]),
         ("staff_name", "Private Operator Name", "masked_text", "P***"),
     ),
 )

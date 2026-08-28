@@ -56,6 +56,7 @@ const ANOMALY_TITLES: Readonly<Record<string, string>> = {
   'IMPORT-001': '匯入資料格式待修正',
   'IMPORT-003': 'BeClass 身分對應待確認',
   'IMPORT-004': 'HCM 匯入待人工確認',
+  'HISTORICAL-ORDER-001': '歷史訂單匯入待人工確認',
   'finance_import_manual_review': '銀行流水待人工確認',
   'LINE-001': '客戶尚未完成 LINE 綁定',
   'LINE-005': '月嫂尚未完成 LINE 綁定',
@@ -63,6 +64,15 @@ const ANOMALY_TITLES: Readonly<Record<string, string>> = {
   'PAYOUT-003': '月嫂收款資料待補正',
   'GOVSUB-006': '政府補助溢撥待處理',
   'CLIENTREFUND-001': '客戶退款退匯待處理',
+  'RECEIVABLE-001': '客戶應付款已逾期',
+  'CLIENTPAYABLE-001': '客戶退款／調整應付已逾期',
+  'RETURN-001': '政府補助退還款已逾期',
+};
+
+const ANOMALY_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  'RECEIVABLE-001': '列出本案每筆逾期應收與金額；所有同碼逾期應收餘額歸零後才解除。',
+  'CLIENTPAYABLE-001': '列出本案每筆逾期退款／調整應付與金額；所有同碼逾期義務餘額歸零後才解除。',
+  'RETURN-001': '列出本案每筆逾期補助退還義務與金額；不得與一般客戶退款互抵。',
 };
 
 function anomalyTitle(code: string, category: AnomalyDomainCategory): string {
@@ -96,6 +106,7 @@ export interface AnomalyMetadataViewModel {
 export interface AnomalySummaryViewModel {
   id: string; // fingerprint identity
   fingerprint: string;
+  sourceIdentity: string;
   code: string; // definition_code
   title: string;
   severity: string; // "🔴 嚴重阻擋" | "🟡 警示待補"
@@ -189,6 +200,9 @@ export function mapDomainToCategory(domain: string | null | undefined): AnomalyD
       return '排班調度';
 
     case 'client_finance':
+    case 'client_receivable':
+    case 'client_payable':
+    case 'client_subsidy_return':
       return '客戶帳務';
 
     case 'staff_payables':
@@ -268,13 +282,18 @@ export function adaptAnomalySummary(dto: AnomalySummaryView): AnomalySummaryView
     statusLabel = '✅ 已排除';
   }
 
-  const category = mapDomainToCategory(dto.source_domain);
+  const category = dto.definition_code === 'HISTORICAL-ORDER-001'
+    ? '匯入資料'
+    : mapDomainToCategory(dto.source_domain);
   const title = anomalyTitle(dto.definition_code, category);
-  const relatedEntity = anomalySubject(dto.source_identity, category);
+  const relatedEntity = ['RECEIVABLE-001', 'CLIENTPAYABLE-001', 'RETURN-001'].includes(dto.definition_code)
+    ? `案件 ${dto.source_identity}`
+    : anomalySubject(dto.source_identity, category);
 
   return {
     id: dto.fingerprint,
     fingerprint: dto.fingerprint,
+    sourceIdentity: dto.source_identity,
     code: dto.definition_code,
     title,
     severity: severityLabel,
@@ -285,8 +304,11 @@ export function adaptAnomalySummary(dto: AnomalySummaryView): AnomalySummaryView
     rawDomain: dto.source_domain,
     category,
     relatedEntity,
-    description: `請核對${relatedEntity}的目前資料與可採取的處理方式。`,
-    suggestedAction: '開啟詳情查看可執行的處置。',
+    description: ANOMALY_DESCRIPTIONS[dto.definition_code]
+      ?? `請核對${relatedEntity}的目前資料與可採取的處理方式。`,
+    suggestedAction: dto.definition_code === 'HISTORICAL-ORDER-001'
+      ? '開啟處理方式，上傳只含此 review 對應列的更正工作簿。'
+      : '開啟詳情查看可執行的處置。',
     rootEvidence: `影響對象：${relatedEntity}`,
     staffCalendarNavigation: dto.staff_calendar_navigation ?? null,
     metadata: {

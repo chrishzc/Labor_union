@@ -124,6 +124,7 @@ CAPABILITY_REGISTRY = frozenset(
         "data_browser.write",
         "system.configuration.manage",
         "system.administration",
+        "orders.historical_review.remediate",
         "knowledge.source.edit",
         "knowledge.source.review",
         "knowledge.source.publish",

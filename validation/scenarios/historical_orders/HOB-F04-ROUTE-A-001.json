@@ -1,0 +1,85 @@
+{
+  "contract": "labor-union-hob-route-a-scenario/v1",
+  "scenario_id": "HOB-F04-ROUTE-A-001",
+  "track": "A",
+  "suite_id": "HOB",
+  "status": "bound",
+  "revision": 1,
+  "owner": "Historical Orders / Orders / Scheduling / Client Finance / Staff Payables",
+  "route": "A",
+  "start_stage": "stage-00-clean",
+  "business_clock": "2026-07-07T17:01:00+08:00",
+  "requires_database": true,
+  "database_execution_mode": "controlled_persistent_append_only",
+  "database_profile": "development no-auth lu_test_task96_scenarios_20260827",
+  "test_kinds": [
+    "formal_command_lineage",
+    "synthetic_external_input",
+    "real_mysql",
+    "api",
+    "projector",
+    "react",
+    "browser",
+    "expected_manifest"
+  ],
+  "coverage_scope": "task96_hob_f04_terminal",
+  "coverage_ids": ["HOB-A5", "HOB-F04"],
+  "source_refs": [
+    "document/架構重整/02_決策與退役執行記錄/PROV-20260827-historical-order-business-scenario-gap-matrix.md#8.3 可重建階段基線",
+    "document/架構重整/02_決策與退役執行記錄/PROV-20260827-historical-order-operational-work-packages.md#6-wp-hob-e完成案件-owner-terminal-closure",
+    "document/架構重整/02_決策與退役執行記錄/PROV-20260827-historical-order-operational-work-packages.md#7-wp-hob-fversioned-scenario-與跨頁-ui-驗收"
+  ],
+  "dependencies": [
+    "canonical schema already present in the allowlisted validation database",
+    "APP_ENV=development",
+    "ACCESS_CONTROL_PROFILE=local_bypass",
+    "ENABLE_ADMIN_AUTH=false"
+  ],
+  "root_fixture_paths": [
+    "validation/fixtures/phase4/hob_f04_route_a_001.json"
+  ],
+  "command_lineage": [
+    "HCM workbook Preview/Apply",
+    "staff historical workbook Preview/Apply",
+    "client BeClass workbook Preview/Apply",
+    "Orders terms and official service-date Query/Preview/Apply",
+    "matching availability, plan, contact, customer decision and waiting-lock Query/Preview/Apply",
+    "staff/client contract attestation and commitment",
+    "assignment and deposit reconciliation Query/Preview/Apply",
+    "actual-start Query/Preview/Apply",
+    "service-completion Preview/Apply",
+    "Payroll rebuild Preview/durable Apply",
+    "Staff payout Preview/durable Apply",
+    "HOB-E fresh aggregate Query"
+  ],
+  "expected_paths": [
+    "validation/expected/phase4/hob_f04_route_a_001.json"
+  ],
+  "expected_terminal": "stage-07-settled with HOB-E completed and zero active alerts",
+  "evidence_applicability": {
+    "domain": "required",
+    "subsystem": "required",
+    "api": "required",
+    "db": "required",
+    "projector": "required",
+    "react": "required",
+    "browser": "required",
+    "replay": "required"
+  },
+  "receipt_requirements": [
+    "target profile and no-auth guards",
+    "owned identities and source digests",
+    "stage-by-stage command results",
+    "owner versions and source vector",
+    "terminal source and projection fingerprints",
+    "exact replay evidence and retained-data policy"
+  ],
+  "retained_data_policy": "retain only the versioned synthetic HOB-F04-ROUTE-A-001 rows in the canonical Task96 validation database",
+  "execution": {
+    "runner": [
+      ".venv/bin/python scripts/run_task96_hob_route_a.py",
+      ".\\.venv\\Scripts\\python.exe scripts\\run_task96_hob_route_a.py"
+    ],
+    "runner_path": "scripts/run_task96_hob_route_a.py"
+  }
+}

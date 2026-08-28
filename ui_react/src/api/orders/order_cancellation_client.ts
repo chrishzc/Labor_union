@@ -9,10 +9,145 @@ import { transport, type RequestOptions } from '../shared/transport';
 import { ApiHttpError } from '../shared/typed_errors';
 
 const DateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const ServiceDaySchema = z.strictObject({
+export const ServiceDaySchema = z.strictObject({
   service_date: DateOnlySchema,
   staff_id: z.number().int().positive(),
   reason: z.string().min(1).max(500).nullable(),
+});
+const MoneySchema = z.strictObject({ amount: z.number().int().nonnegative() });
+const SchedulingAssignmentSchema = z.strictObject({
+  candidate_key: z.string().min(1),
+  source_assignment_id: z.number().int().positive().nullable(),
+  staff_id: z.number().int().positive(),
+  sequence: z.number().int().positive(),
+  assigned_start_date: DateOnlySchema,
+  assigned_end_date: DateOnlySchema,
+  service_dates: z.array(DateOnlySchema),
+  actual_hours: z.number().int().nonnegative(),
+  lineage_source_assignment_ids: z.array(z.number().int().positive()),
+  double_pay_dates: z.array(DateOnlySchema),
+});
+const SchedulingBufferSchema = z.strictObject({
+  candidate_key: z.string().min(1),
+  staff_id: z.number().int().positive(),
+  dates: z.array(DateOnlySchema),
+  active: z.boolean(),
+});
+const SchedulingImpactSchema = z.strictObject({
+  case_no: z.string().min(1),
+  generation_number: z.number().int().nonnegative(),
+  expected_aggregate_version: z.number().int().nonnegative(),
+  resulting_aggregate_version: z.number().int().nonnegative(),
+  cancelled_assignment_ids: z.array(z.number().int().positive()),
+  assignments: z.array(SchedulingAssignmentSchema),
+  buffers: z.array(SchedulingBufferSchema),
+});
+const ClientStagePlanSchema = z.strictObject({
+  payment_stage: z.string().min(1),
+  service_dates: z.array(DateOnlySchema),
+  amount: MoneySchema,
+  due_date: DateOnlySchema.nullable(),
+});
+export const ClientFinanceDirectionSchema = z.enum([
+  'refund_due',
+  'additional_charge_due',
+  'no_finance_change',
+]);
+const ClientObligationActionSchema = z.strictObject({
+  action: z.string().min(1),
+  payment_stage: z.string().min(1),
+  obligation_identity: z.string().min(1),
+  before_amount: MoneySchema,
+  after_amount: MoneySchema,
+  obligation_amount: MoneySchema,
+  before_due_date: DateOnlySchema.nullable(),
+  after_due_date: DateOnlySchema.nullable(),
+  source_obligation_identity: z.string().min(1).nullable(),
+  direction: ClientFinanceDirectionSchema,
+  direction_amount_ntd: z.number().int().nonnegative(),
+}).superRefine((value, context) => {
+  if (value.direction === 'no_finance_change' && value.direction_amount_ntd !== 0) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['direction_amount_ntd'],
+      message: 'no_finance_change direction amount must be zero',
+    });
+  } else if (value.direction !== 'no_finance_change' && value.direction_amount_ntd <= 0) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['direction_amount_ntd'],
+      message: 'financial direction amount must be positive',
+    });
+  }
+});
+const ClientSettlementSchema = z.strictObject({
+  deposit_settled: z.boolean(),
+  all_formal_obligations_settled: z.boolean(),
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+});
+const ClientFinanceImpactSchema = z.strictObject({
+  case_no: z.string().min(1),
+  expected_account_version: z.number().int().nonnegative(),
+  resulting_account_version: z.number().int().nonnegative(),
+  stage_plans: z.array(ClientStagePlanSchema),
+  actions: z.array(ClientObligationActionSchema),
+  settlement: ClientSettlementSchema,
+  blockers: z.array(z.string()),
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+});
+const PayrollAssignmentSchema = z.strictObject({
+  assignment_identity: z.string().min(1),
+  staff_id: z.number().int().positive(),
+  official_service_day_count: z.number().int().nonnegative(),
+  actual_hours: z.number().int().nonnegative(),
+  double_pay_hours: z.number().int().nonnegative(),
+  hourly_rate: MoneySchema,
+  service_salary: MoneySchema,
+  floor_fee_allocated: MoneySchema,
+  effective_adjustments: MoneySchema,
+  total_payable: MoneySchema,
+});
+const PayrollCandidateSchema = z.strictObject({
+  assignments: z.array(PayrollAssignmentSchema),
+  earned_floor_fee: MoneySchema,
+  total_payable: MoneySchema,
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+});
+const PayrollRateSnapshotSchema = z.strictObject({
+  assignment_identity: z.string().min(1),
+  policy_version: z.string().min(1),
+  policy_kind: z.string().min(1),
+  hourly_rate: MoneySchema,
+});
+const PayrollActionSchema = z.strictObject({
+  action: z.string().min(1),
+  obligation_identity: z.string().min(1),
+  source_obligation_identity: z.string().min(1).nullable(),
+  source_assignment_id: z.number().int().positive().nullable(),
+  candidate_assignment_key: z.string().min(1).nullable(),
+  staff_id: z.number().int().positive(),
+  obligation_kind: z.string().min(1),
+  direction: z.string().min(1),
+  amount: MoneySchema,
+  due_date: DateOnlySchema.nullable(),
+});
+const PayrollImpactSchema = z.strictObject({
+  case_no: z.string().min(1),
+  expected_payroll_version: z.number().int().nonnegative(),
+  resulting_payroll_version: z.number().int().nonnegative(),
+  payroll: PayrollCandidateSchema,
+  carried_rate_snapshots: z.array(PayrollRateSnapshotSchema),
+  actions: z.array(PayrollActionSchema),
+  blockers: z.array(z.string()),
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+});
+const LifecycleImpactSchema = z.strictObject({
+  case_no: z.string().min(1),
+  before_status: z.string().min(1),
+  after_status: z.string().min(1),
+  actual_end_date: DateOnlySchema.nullable(),
+  cancellation_effective: z.boolean(),
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
 });
 const CaregiverOptionSchema = z.strictObject({
   staff_id: z.number().int().positive(),
@@ -47,10 +182,10 @@ export const OrderCancellationPreviewSchema = z.strictObject({
   scheduling_generation: z.number().int().nonnegative(),
   client_finance_version: z.number().int().nonnegative(),
   payroll_version: z.number().int().nonnegative(),
-  scheduling: z.record(z.string(), z.unknown()),
-  client_finance_impact: z.record(z.string(), z.unknown()),
-  payroll_impact: z.record(z.string(), z.unknown()),
-  lifecycle_impact: z.record(z.string(), z.unknown()),
+  scheduling: SchedulingImpactSchema,
+  client_finance_impact: ClientFinanceImpactSchema,
+  payroll_impact: PayrollImpactSchema,
+  lifecycle_impact: LifecycleImpactSchema,
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
 });
 
@@ -91,7 +226,7 @@ export type OrderCancellationQuery = z.infer<typeof OrderCancellationQuerySchema
 export type OrderCancellationPreview = z.infer<typeof OrderCancellationPreviewSchema>;
 export type OrderCancellationReceipt = z.infer<typeof OrderCancellationReceiptSchema>;
 export type OrderCancellationApplyPayload = z.infer<typeof OrderCancellationApplyPayloadSchema>;
-type ServiceDay = z.infer<typeof ServiceDaySchema>;
+export type ServiceDay = z.infer<typeof ServiceDaySchema>;
 
 interface ApplyOptions {
   idempotencyKey: string;
@@ -122,6 +257,19 @@ export const orderCancellationClient = {
       options(signal, { 'X-Correlation-ID': `orders-cancellation-preview-${caseNo}-${Date.now()}` }),
     );
     return decode(OrderCancellationPreviewSchema, raw);
+  },
+  async receipt(caseNo: string, idempotencyKey: string, signal?: AbortSignal): Promise<OrderCancellationReceipt> {
+    const key = idempotencyKey.trim();
+    if (!key || key.length > 191) {
+      throw new Error('Idempotency-Key 必須為 1 至 191 字元。');
+    }
+    const raw = await transport.get(
+      `/api/v1/orders/${encodeURIComponent(caseNo)}/cancellation/receipt`,
+      options(signal, { 'Idempotency-Key': key }),
+    );
+    const result = decode(OrderCancellationReceiptSchema, raw);
+    if (result.case_no !== caseNo) throw new Error('訂單取消收據案件識別不一致。');
+    return result;
   },
   async apply(
     caseNo: string,

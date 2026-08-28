@@ -1,0 +1,36 @@
+{
+  "contract": "labor-union-payout001-scenario/v1",
+  "scenario_id": "PAYOUT-001-EXACT-001",
+  "revision": 1,
+  "status": "bound",
+  "owner": "Staff Payables",
+  "business_clock": "2026-08-27",
+  "database_profile": "development no-auth lu_test_task96_scenarios_20260827",
+  "coverage_ids": ["POA-A1", "POA-A2", "POA-A3", "POA-A4", "POA-A5", "POA-A6"],
+  "source_refs": [
+    "document/架構重整/02_決策與退役執行記錄/PROV-20260827-payout-overdue-anomaly-remediation-spec.md",
+    "document/架構重整/02_決策與退役執行記錄/PROV-20260827-payout-overdue-anomaly-remediation-work-package.md"
+  ],
+  "root_fixture_paths": [
+    "validation/fixtures/phase4/payout_001_exact_001.json"
+  ],
+  "expected_paths": [
+    "validation/expected/phase4/payout_001_exact_001.json"
+  ],
+  "command_lineage": [
+    "HCM, Staff and Client source Preview/Apply",
+    "Orders terms and official service dates Query/Preview/Apply",
+    "matching, commitment, assignment, actual start and service completion Query/Preview/Apply",
+    "Payroll rebuild Preview/durable Apply",
+    "Finance Import outgoing bank workbook ingest/preview",
+    "PAYOUT-001 source scan and detail binding",
+    "Staff Payables payout Preview/Apply",
+    "durable job terminal observation",
+    "fresh Staff Payables Query and PAYOUT-001 predicate rescan"
+  ],
+  "execution": {
+    "prepare": ".venv/bin/python scripts/run_task96_payout001_scenario.py --phase prepare",
+    "verify": ".venv/bin/python scripts/run_task96_payout001_scenario.py --phase verify"
+  },
+  "retained_data_policy": "retain only the versioned synthetic PAYOUT-001-EXACT-001 rows in the canonical Task96 validation database"
+}

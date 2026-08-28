@@ -1,0 +1,61 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-historical-order-adoption-noop-2026-08-27-v1",
+  "release_metadata": {
+    "release_name": "Labor Union historical order adoption no-op constraint",
+    "application_version": "historical-order-adoption-noop-v1",
+    "published_at": "2026-08-27",
+    "description": "Permit adopted historical sources that leave Orders lifecycle facts unchanged without a synthetic lifecycle event"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-schema-assembly-2026-08-15-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1008_historical_order_adoption_noop_constraint.sql",
+      "relative_path": "db/schema_parts/1008_historical_order_adoption_noop_constraint.sql",
+      "sha256": "deeffab5e68885f1284e77e4cdfd2ae9643d71a65879893cd22c3c5d0c25500c",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-preserve-historical-order-adoption-receipts",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "historical-order-adoption-noop-constraint-exact",
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["historical-order-review-remediation-v1"],
+    "required_restart_targets": ["api", "worker"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["historical-order-adoption-noop-constraint-exact"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_27_historical_order_adoption_noop_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_27_historical_order_adoption_noop_v1.descriptors.json",
+    "sha256": "b6f7f1a1158079d29d08a314720e185b7641d3b2e310c4e53615c989a1c4df5c",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

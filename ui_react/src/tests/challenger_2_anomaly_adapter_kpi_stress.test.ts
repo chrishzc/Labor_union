@@ -42,6 +42,7 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
       const resolvedBlocking: AnomalySummaryViewModel = {
         id: 'mock-1',
         fingerprint: 'a'.repeat(64),
+        sourceIdentity: 'mock-source-1',
         code: 'TEST-001',
         title: '目前 typed view 未納入摘要欄位',
         severity: '🔴 嚴重阻擋',
@@ -75,6 +76,7 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
       const resolvedWarning: AnomalySummaryViewModel = {
         id: 'mock-2',
         fingerprint: 'b'.repeat(64),
+        sourceIdentity: 'mock-source-2',
         code: 'TEST-002',
         title: '目前 typed view 未納入摘要欄位',
         severity: '🟡 警示待補',
@@ -127,6 +129,7 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
         return {
           id: `item-${index}`,
           fingerprint: hex,
+          sourceIdentity: `item-source-${index}`,
           code: `CODE-${index}`,
           title: '目前 typed view 未納入摘要欄位',
           severity: isBlocking ? '🔴 嚴重阻擋' : '🟡 警示待補',
@@ -198,6 +201,7 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
         randomItems.push({
           id: `rand-${i}`,
           fingerprint: hex,
+          sourceIdentity: `rand-source-${i}`,
           code: `RAND-${i}`,
           title: '目前 typed view 未納入摘要欄位',
           severity: severity === 'blocking' ? '🔴 嚴重阻擋' : '🟡 警示待補',
@@ -279,6 +283,7 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
           fullDataset.push({
             id: `item-${hex.slice(-4)}`,
             fingerprint: hex,
+            sourceIdentity: `dataset-source-${hex.slice(-4)}`,
             code: `ANOM-${domain}-${sev}-${st}`,
             title: '目前 typed view 未納入摘要欄位',
             severity: sev === 'blocking' ? '🔴 嚴重阻擋' : '🟡 警示待補',

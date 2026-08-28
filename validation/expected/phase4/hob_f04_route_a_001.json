@@ -1,0 +1,35 @@
+{
+  "contract": "labor-union-hob-route-a-expected/v1",
+  "scenario_id": "HOB-F04-ROUTE-A-001",
+  "revision": 1,
+  "terminal_stage": "stage-07-settled",
+  "orders": {
+    "canonical_status": "訂單完成",
+    "actual_start_date": "2026-07-01",
+    "official_service_day_count": 5,
+    "official_service_hours": 40,
+    "completion_instant": "2026-07-07T17:00:00+08:00"
+  },
+  "client_finance": {
+    "open_obligation_count": 0,
+    "deposit_allocation_amount_ntd": 12000
+  },
+  "staff_payables": {
+    "obligation_amount_ntd": 12000,
+    "net_paid_ntd": 12000,
+    "balance_ntd": 0,
+    "projection_status": "completed",
+    "payout_event_count": 1,
+    "allocation_count": 1
+  },
+  "historical_completion": {
+    "state": "completed",
+    "step_11_status": "completed",
+    "step_11_completed": true,
+    "historical_alerts_completed": true,
+    "active_alert_count": 0
+  },
+  "replay": {
+    "same_scenario_identity": "no duplicate domain event, receipt, payout, allocation, outbox intent or durable command"
+  }
+}

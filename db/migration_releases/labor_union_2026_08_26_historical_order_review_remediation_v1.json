@@ -1,0 +1,61 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-historical-order-review-remediation-2026-08-26-v1",
+  "release_metadata": {
+    "release_name": "Labor Union historical order review remediation",
+    "application_version": "historical-order-review-remediation-v1",
+    "published_at": "2026-08-26",
+    "description": "Add immutable Historical Order review remediation dispositions, receipts, and anomaly projection outbox"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-schema-assembly-2026-08-15-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1006_historical_order_review_remediation.sql",
+      "relative_path": "db/schema_parts/1006_historical_order_review_remediation.sql",
+      "sha256": "b46cf20d4f2d09a1c413e92d20a1bbd214c84ef38f58f888403c5239d0ce38b9",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "code-rollback-preserve-historical-order-review-remediation-evidence",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "historical-order-review-remediation-owned-objects",
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["historical-order-review-remediation-v1"],
+    "required_restart_targets": ["api", "worker"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["historical-order-review-remediation-owned-objects"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_26_historical_order_review_remediation_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_26_historical_order_review_remediation_v1.descriptors.json",
+    "sha256": "c4aa62b5ff79e1617d2b22e09455b0691b4fc4b03d26711c5d0c259b4ee59d2a",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

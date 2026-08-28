@@ -327,15 +327,133 @@ def test_backfilled_candidate_is_eligible_for_verification() -> None:
 
 
 def test_require_current_accepts_only_an_exact_source() -> None:
-    exact = {"parts_to_apply": [], "parts_to_resume": []}
+    entries = update.migration._local_ordered_upgrade_entries()
+    exact = {
+        "status": "current",
+        "baseline_release_id": entries[0]["release_id"],
+        "latest_release_id": entries[-1]["release_id"],
+        "release_id": entries[-1]["release_id"],
+        "release_fingerprint": entries[-1]["release_fingerprint"],
+        "artifacts": [
+            {
+                "name": entry["artifact"]["name"],
+                "release_id": entry["release_id"],
+                "release_fingerprint": entry["release_fingerprint"],
+                "state": "exact",
+            }
+            for entry in entries
+        ],
+        "pending_releases": [],
+    }
 
     assert update.require_current_database(exact)["status"] == "current"
 
-    with pytest.raises(update.LocalDatabaseUpdateError, match="schema update required"):
+    with pytest.raises(
+        update.LocalDatabaseUpdateError,
+        match="canonical schema release chain is not current",
+    ):
         update.require_current_database({
-            "parts_to_apply": ["161_runtime_monitoring_line_alerts.sql"],
+            "parts_to_apply": [],
             "parts_to_resume": [],
         })
+
+    with pytest.raises(
+        update.LocalDatabaseUpdateError,
+        match="canonical schema release chain is not current",
+    ):
+        update.require_current_database({
+            **exact,
+            "status": "ready",
+            "artifacts": [*exact["artifacts"][:-1], {"state": "absent"}],
+            "pending_releases": [{"release_id": entries[-1]["release_id"]}],
+        })
+
+
+def test_require_current_rejects_noncanonical_chain_identity() -> None:
+    entries = update.migration._local_ordered_upgrade_entries()
+    artifacts = [
+        {
+            "name": entry["artifact"]["name"],
+            "release_id": entry["release_id"],
+            "release_fingerprint": entry["release_fingerprint"],
+            "state": "exact",
+        }
+        for entry in entries
+    ]
+    exact = {
+        "status": "current",
+        "baseline_release_id": entries[0]["release_id"],
+        "latest_release_id": entries[-1]["release_id"],
+        "release_id": entries[-1]["release_id"],
+        "release_fingerprint": entries[-1]["release_fingerprint"],
+        "artifacts": artifacts,
+        "pending_releases": [],
+    }
+    wrong_name = [dict(item) for item in artifacts]
+    wrong_name[0]["name"] = "arbitrary.sql"
+    wrong_artifact_fingerprint = [dict(item) for item in artifacts]
+    wrong_artifact_fingerprint[-1]["release_fingerprint"] = "stale"
+    wrong_artifact_release = [dict(item) for item in artifacts]
+    wrong_artifact_release[-1]["release_id"] = entries[0]["release_id"]
+
+    invalid_previews = (
+        {**exact, "artifacts": wrong_name},
+        {**exact, "release_fingerprint": "stale"},
+        {**exact, "artifacts": wrong_artifact_fingerprint},
+        {**exact, "artifacts": wrong_artifact_release},
+        {**exact, "artifacts": list(reversed(artifacts))},
+        {**exact, "baseline_release_id": entries[-1]["release_id"]},
+    )
+    for preview in invalid_previews:
+        with pytest.raises(
+            update.LocalDatabaseUpdateError,
+            match="canonical schema release chain is not current",
+        ):
+            update.require_current_database(preview)
+
+
+def test_require_current_route_revalidates_canonical_identity(
+    tmp_path, monkeypatch
+) -> None:
+    entries = update.migration._local_ordered_upgrade_entries()
+    artifacts = [
+        {
+            "name": entry["artifact"]["name"],
+            "release_id": entry["release_id"],
+            "release_fingerprint": entry["release_fingerprint"],
+            "state": "exact",
+        }
+        for entry in entries
+    ]
+    artifacts[0]["name"] = "arbitrary.sql"
+    preview = {
+        "status": "current",
+        "source_database": "lu_test_dataset",
+        "baseline_release_id": entries[0]["release_id"],
+        "latest_release_id": entries[-1]["release_id"],
+        "release_id": entries[-1]["release_id"],
+        "release_fingerprint": entries[-1]["release_fingerprint"],
+        "artifacts": artifacts,
+        "pending_releases": [],
+    }
+    monkeypatch.setattr(update, "resolve_mysql_container", lambda value: value)
+    monkeypatch.setattr(
+        update.migration,
+        "config_from_env",
+        lambda _path: (SimpleNamespace(host="127.0.0.1"), "lu_test_dataset"),
+    )
+    monkeypatch.setattr(
+        update, "build_additive_preview", lambda *_args, **_kwargs: preview
+    )
+
+    with pytest.raises(
+        update.LocalDatabaseUpdateError,
+        match="canonical schema release chain is not current",
+    ):
+        update.update_local_database(
+            environment_file=tmp_path / ".env",
+            require_current=True,
+        )
 
 
 def test_preview_treats_an_absent_pure_retirement_as_complete(monkeypatch) -> None:

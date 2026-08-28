@@ -1,4 +1,7 @@
-"""Audit retired field names without hiding migration or historical evidence."""
+"""
+File: verify_field_authority_legacy_names.py
+Description: 依versioned persisted-field context稽核退役欄位名稱，同時保留合法同名業務descriptor。
+"""
 
 from __future__ import annotations
 
@@ -53,6 +56,8 @@ def _mapping_errors(
     if any(not mapping.get(field) for field in required):
         return [f"field-authority mapping {mapping_id} is incomplete"]
     report = _mapping_report(mapping, manifest, project_root)
+    if report["invalid_legacy_pattern"]:
+        return [f"field-authority mapping {mapping_id} has invalid legacy pattern"]
     errors = [
         f"field-authority mapping {mapping_id} has unexpected legacy references"
         for _ in report["unexpected_legacy_references"]
@@ -70,8 +75,13 @@ def _mapping_report(
     legacy_token = str(mapping.get("legacy_token", ""))
     canonical_token = str(mapping.get("canonical_token", ""))
     allowed_paths = set(mapping.get("allowed_legacy_paths", []))
-    legacy_references = _token_references(
-        legacy_token, _mapping_scan_scope(mapping, manifest), project_root
+    pattern, invalid_pattern = _legacy_reference_pattern(mapping, legacy_token)
+    legacy_references = (
+        []
+        if invalid_pattern
+        else _token_references(
+            pattern, _mapping_scan_scope(mapping, manifest), project_root
+        )
     )
     unexpected = [
         reference
@@ -86,6 +96,7 @@ def _mapping_report(
         "mapping_id": mapping.get("mapping_id"),
         "legacy_token": legacy_token,
         "canonical_token": canonical_token,
+        "invalid_legacy_pattern": invalid_pattern,
         "allowed_legacy_references": [
             reference for reference in legacy_references if reference not in unexpected
         ],
@@ -105,12 +116,11 @@ def _mapping_scan_scope(
 
 
 def _token_references(
-    token: str, manifest: dict[str, object], project_root: Path
+    pattern: re.Pattern[str], manifest: dict[str, object], project_root: Path
 ) -> list[dict[str, object]]:
     roots = manifest.get("scan_roots", [])
     extensions = set(manifest.get("scan_extensions", []))
     excluded_paths = set(manifest.get("excluded_paths", []))
-    pattern = re.compile(rf"\b{re.escape(token)}\b")
     references: list[dict[str, object]] = []
     for root_name in roots:
         root = project_root / root_name
@@ -126,6 +136,20 @@ def _token_references(
                 if pattern.search(line):
                     references.append({"path": relative_path, "line": line_number})
     return references
+
+
+def _legacy_reference_pattern(
+    mapping: dict[str, object], legacy_token: str
+) -> tuple[re.Pattern[str], bool]:
+    pattern_text = mapping.get("legacy_pattern")
+    if pattern_text is None:
+        return re.compile(rf"\b{re.escape(legacy_token)}\b"), False
+    if not isinstance(pattern_text, str) or not pattern_text:
+        return re.compile(r"(?!)"), True
+    try:
+        return re.compile(pattern_text), False
+    except re.error:
+        return re.compile(r"(?!)"), True
 
 
 def _is_allowed(path: object, allowed_paths: set[object]) -> bool:

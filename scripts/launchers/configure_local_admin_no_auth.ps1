@@ -29,8 +29,8 @@ $desired = [ordered]@{
 }
 
 $existing = @()
-if (Test-Path $envFile) {
-    $existing = Get-Content -Path $envFile
+if (Test-Path -LiteralPath $envFile) {
+    $existing = Get-Content -LiteralPath $envFile
 }
 
 $seen = @{}
@@ -55,7 +55,23 @@ foreach ($key in $desired.Keys) {
     }
 }
 
-Set-Content -Path $envFile -Value $next -Encoding UTF8
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$temporaryEnvFile = Join-Path $root (".env.tmp." + [guid]::NewGuid().ToString("N"))
+$envContent = [string]::Join([Environment]::NewLine, [string[]]$next) + [Environment]::NewLine
+try {
+    [System.IO.File]::WriteAllText($temporaryEnvFile, $envContent, $utf8NoBom)
+    if (Test-Path -LiteralPath $envFile) {
+        [System.IO.File]::Replace($temporaryEnvFile, $envFile, $null)
+    }
+    else {
+        [System.IO.File]::Move($temporaryEnvFile, $envFile)
+    }
+}
+finally {
+    if (Test-Path -LiteralPath $temporaryEnvFile) {
+        Remove-Item -LiteralPath $temporaryEnvFile -Force -ErrorAction SilentlyContinue
+    }
+}
 
 Write-Host "[OK] .env updated:"
 Write-Host "APP_ENV=$($desired['APP_ENV'])"

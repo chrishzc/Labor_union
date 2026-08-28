@@ -1,4 +1,7 @@
-"""MySQL adapter for the Government Subsidy owning ledger."""
+"""
+File: government_subsidy_repository.py
+Description: 持久化政府補助根事實並提供唯讀溢撥查詢。
+"""
 
 from __future__ import annotations
 
@@ -6,6 +9,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
+import hashlib
 import json
 from typing import Any
 
@@ -38,6 +42,7 @@ from domains.government_subsidy.ledger import (
 )
 from domains.government_subsidy.overpayment import GovernmentRecipientSnapshot, GovernmentSubsidyOverpayment, GovernmentSubsidyOverpaymentStatus
 from domains.government_subsidy.payer_master import PAYER_IDENTITY, PAYER_NAME
+from shared_kernel.clock import BusinessClock, SystemBusinessClock
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import IdempotencyKey
 from shared_kernel.money import MoneyNTD
@@ -61,6 +66,11 @@ from subsystems.government_subsidy.claim_workflow import (
     StoredGovernmentSubsidyClaimReceipt,
 )
 from subsystems.government_subsidy.overpayment_workflow import OffsetApplyRequest, ReceiptWithOverageApplyRequest, ReturnApplyRequest, ReturnReconciliationApplyRequest
+from subsystems.government_subsidy.overpayment_query import (
+    GovernmentSubsidyOffsetTargetQueryView,
+    GovernmentSubsidyOverpaymentQueryView,
+    GovernmentSubsidyReturnRecipientQueryView,
+)
 
 _GENERAL_CITIZEN = "一般市民"
 _SUBSIDIZED_CITIZEN = "補助市民"
@@ -82,7 +92,9 @@ def _overpayment_outbox_lineage(cursor, overpayment_identity):
     cursor.execute(
         "SELECT transaction.claim_batch_id,transaction.id transaction_id,"
         "(SELECT event.id FROM government_subsidy_projection_events event "
-        "WHERE event.batch_id=transaction.claim_batch_id ORDER BY event.id DESC LIMIT 1) projection_event_id "
+        "WHERE event.batch_id=transaction.claim_batch_id "
+        "AND event.transaction_id=transaction.id "
+        "ORDER BY event.id DESC LIMIT 1) projection_event_id "
         "FROM government_subsidy_overpayments overpayment "
         "JOIN government_subsidy_transactions transaction "
         "ON transaction.id=overpayment.source_transaction_id "
@@ -132,8 +144,9 @@ def _apply_offset_target_accounts(cursor, overpayment_event_id, request, candida
 
 
 class MySqlGovernmentSubsidyRepository:
-    def __init__(self, connection: Any) -> None:
+    def __init__(self, connection: Any, clock: BusinessClock | None = None) -> None:
         self._connection = connection
+        self._clock = clock or SystemBusinessClock()
 
     def load_receipt_context(
         self,
@@ -172,6 +185,89 @@ class MySqlGovernmentSubsidyRepository:
             row=cursor.fetchone()
         if row is None: raise ValueError("government_subsidy_overpayment_not_found")
         return GovernmentSubsidyOverpayment(str(row['overpayment_identity']),str(row['payer_identity']),MoneyNTD(int(row['remaining_amount_ntd'])),GovernmentSubsidyOverpaymentStatus(str(row['status'])),int(row['projection_version']))
+
+    def query_overpayment(self, overpayment_identity):
+        """Read the committed overpayment root and owner-computed disposition facts."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT overpayment_identity,source_finance_import_row_id,"
+                "source_transaction_id,payer_identity,remaining_amount_ntd,status,"
+                "projection_version FROM government_subsidy_overpayments "
+                "WHERE overpayment_identity=%s",
+                (overpayment_identity,),
+            )
+            root = cursor.fetchone()
+            if root is None:
+                return None
+            if str(root["payer_identity"]) != PAYER_IDENTITY:
+                raise ValueError("government_subsidy_overpayment_cross_payer")
+            cursor.execute(
+                "SELECT i.id AS claim_item_id,i.batch_id,account.aggregate_version,"
+                "i.approved_amount,"
+                "COALESCE(receipts.net_amount,0) AS receipt_amount,"
+                "COALESCE(offsets.offset_amount,0) AS offset_amount,"
+                "b.submitted_at,b.approved_at "
+                "FROM subsidy_claim_batch_items i "
+                "JOIN subsidy_claim_batches b ON b.id=i.batch_id "
+                "JOIN government_subsidy_batch_accounts account "
+                "ON account.batch_id=i.batch_id "
+                "LEFT JOIN (SELECT claim_item_id,claim_batch_id,"
+                "SUM(CASE WHEN allocation_type='receipt' THEN allocated_amount "
+                "WHEN allocation_type='reversal' THEN -allocated_amount ELSE 0 END) "
+                "AS net_amount FROM government_subsidy_allocations "
+                "GROUP BY claim_item_id,claim_batch_id) receipts "
+                "ON receipts.claim_item_id=i.id AND receipts.claim_batch_id=i.batch_id "
+                "LEFT JOIN (SELECT claim_item_id,claim_batch_id,"
+                "SUM(allocated_amount_ntd) AS offset_amount "
+                "FROM government_subsidy_overpayment_offsets "
+                "GROUP BY claim_item_id,claim_batch_id) offsets "
+                "ON offsets.claim_item_id=i.id AND offsets.claim_batch_id=i.batch_id "
+                "WHERE b.submitted_at IS NOT NULL AND b.approved_at IS NOT NULL "
+                "ORDER BY i.batch_id,i.id",
+            )
+            target_rows = cursor.fetchall()
+            cursor.execute(
+                "SELECT bank_code,account_number,account_name,effective_from "
+                "FROM government_payer_receiving_accounts "
+                "WHERE payer_identity=%s AND effective_until IS NULL "
+                "ORDER BY effective_from DESC",
+                (PAYER_IDENTITY,),
+            )
+            recipient_rows = cursor.fetchall()
+        targets = tuple(
+            _query_offset_target(row) for row in target_rows
+            if _query_target_outstanding(row) > 0
+        )
+        recipient = _query_return_recipient(recipient_rows, self._clock.today())
+        status = str(root["status"])
+        remaining = int(root["remaining_amount_ntd"])
+        blockers = set()
+        if status in {"pending_review", "offset_reserved"} and not targets:
+            blockers.add("government_subsidy_overpayment_target_not_eligible")
+        if status == "pending_review" and recipient.blockers:
+            blockers.update(recipient.blockers)
+        available_actions = []
+        if status in {"pending_review", "offset_reserved"} and remaining > 0 and targets:
+            available_actions.append("offset")
+        if status == "pending_review" and remaining > 0 and recipient.ready:
+            available_actions.append("return")
+        return GovernmentSubsidyOverpaymentQueryView(
+            overpayment_identity=str(root["overpayment_identity"]),
+            payer_identity=PAYER_IDENTITY,
+            remaining_amount_ntd=remaining,
+            status=status,
+            overpayment_version=int(root["projection_version"]),
+            source_bank_fact_reference=_redact_query_reference(
+                "finance-import-row", root["source_finance_import_row_id"]
+            ),
+            source_transaction_reference=_redact_query_reference(
+                "government-subsidy-transaction", root["source_transaction_id"]
+            ),
+            offset_targets=targets,
+            return_recipient=recipient,
+            blockers=tuple(sorted(blockers)),
+            available_actions=tuple(sorted(available_actions)),
+        )
 
     def find_overpayment_apply_receipt(self, idempotency_key, command_fingerprint):
         with self._connection.cursor() as cursor:
@@ -236,26 +332,18 @@ class MySqlGovernmentSubsidyRepository:
         lock_clause = " FOR UPDATE" if lock else ""
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT bank_code,account_number,effective_from FROM government_payer_receiving_accounts "
+                "SELECT bank_code,account_number,account_name,effective_from "
+                "FROM government_payer_receiving_accounts "
                 "WHERE payer_identity=%s AND effective_until IS NULL "
-                "ORDER BY effective_from DESC LIMIT 1" + lock_clause,
+                "ORDER BY effective_from DESC" + lock_clause,
                 (PAYER_IDENTITY,),
             )
-            account = cursor.fetchone()
-        if account is None:
-            raise ValueError("government_subsidy_recipient_account_missing")
-        account_number = str(account["account_number"])
-        display = "*" * max(0, len(account_number) - 4) + account_number[-4:]
-        fingerprint = fingerprint_payload({
-            "payer_identity": PAYER_IDENTITY,
-            "bank_code": str(account["bank_code"]),
-            "account_number": account_number,
-            "effective_date": account["effective_from"].isoformat(),
-        })
-        return GovernmentRecipientSnapshot(
-            PAYER_IDENTITY, PAYER_NAME, str(account["bank_code"]), display,
-            fingerprint.value, account["effective_from"].isoformat(), due_date,
+            accounts = cursor.fetchall()
+        return _return_recipient_snapshot(
+            accounts,
+            due_date,
             evidence_reference,
+            as_of=self._clock.today(),
         )
 
     def load_return_reconciliation_context(self, identity, finance_import_row_id, *, lock):
@@ -1502,6 +1590,145 @@ def _canonical_json(payload):
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+def _query_target_outstanding(row):
+    approved = int(row["approved_amount"])
+    receipt_amount = int(row["receipt_amount"])
+    offset_amount = int(row["offset_amount"])
+    outstanding = approved - receipt_amount - offset_amount
+    if outstanding < 0:
+        raise ValueError("government_subsidy_overpayment_query_invalid")
+    return outstanding
+
+
+def _query_offset_target(row):
+    return GovernmentSubsidyOffsetTargetQueryView(
+        claim_item_id=int(row["claim_item_id"]),
+        claim_batch_id=int(row["batch_id"]),
+        batch_version=int(row["aggregate_version"]),
+        outstanding_amount_ntd=_query_target_outstanding(row),
+        payer_identity=PAYER_IDENTITY,
+    )
+
+
+def _return_recipient_snapshot(rows, due_date, evidence_reference, *, as_of):
+    if not rows:
+        raise ValueError("government_subsidy_recipient_account_missing")
+    if len(rows) != 1:
+        raise ValueError("government_subsidy_recipient_account_ambiguous")
+
+    account = rows[0]
+    if not isinstance(account, Mapping):
+        raise ValueError("government_subsidy_recipient_account_invalid")
+    account_number = str(account.get("account_number") or "").strip()
+    account_name = str(account.get("account_name") or "").strip()
+    bank_code = str(account.get("bank_code") or "").strip()
+    effective_from = account.get("effective_from")
+    if not account_number or not account_name or not bank_code or effective_from is None:
+        raise ValueError("government_subsidy_recipient_account_invalid")
+
+    effective_date = _query_date_text(effective_from)
+    try:
+        effective_date_value = date.fromisoformat(effective_date)
+        due_date_value = date.fromisoformat(str(due_date).strip())
+        as_of_value = date.fromisoformat(str(as_of).strip())
+    except (TypeError, ValueError) as error:
+        raise ValueError("government_subsidy_recipient_account_invalid") from error
+    if effective_date_value > as_of_value or effective_date_value > due_date_value:
+        raise ValueError("government_subsidy_recipient_account_invalid")
+
+    fingerprint = fingerprint_payload(
+        {
+            "payer_identity": PAYER_IDENTITY,
+            "bank_code": bank_code,
+            "account_number": account_number,
+            "account_name": account_name,
+            "effective_date": effective_date,
+        }
+    )
+    display = "*" * max(0, len(account_number) - 4) + account_number[-4:]
+    return GovernmentRecipientSnapshot(
+        PAYER_IDENTITY,
+        PAYER_NAME,
+        bank_code,
+        display,
+        fingerprint.value,
+        effective_date,
+        str(due_date).strip(),
+        evidence_reference,
+    )
+
+
+def _query_return_recipient(rows, as_of):
+    if not rows:
+        return GovernmentSubsidyReturnRecipientQueryView(
+            ready=False,
+            blockers=("government_subsidy_recipient_account_missing",),
+        )
+    if len(rows) != 1:
+        return GovernmentSubsidyReturnRecipientQueryView(
+            ready=False,
+            blockers=("government_subsidy_recipient_account_ambiguous",),
+        )
+    row = rows[0]
+    account_number = str(row.get("account_number") or "").strip()
+    account_name = str(row.get("account_name") or "").strip()
+    bank_code = str(row.get("bank_code") or "").strip()
+    effective_from = row.get("effective_from")
+    if not account_number or not account_name or not bank_code or effective_from is None:
+        return GovernmentSubsidyReturnRecipientQueryView(
+            ready=False,
+            blockers=("government_subsidy_recipient_account_invalid",),
+        )
+    effective_date = _query_date_text(effective_from)
+    try:
+        if date.fromisoformat(effective_date) > date.fromisoformat(str(as_of).strip()):
+            return GovernmentSubsidyReturnRecipientQueryView(
+                ready=False,
+                blockers=("government_subsidy_recipient_account_invalid",),
+            )
+    except ValueError:
+        return GovernmentSubsidyReturnRecipientQueryView(
+            ready=False,
+            blockers=("government_subsidy_recipient_account_invalid",),
+        )
+    fingerprint = fingerprint_payload(
+        {
+            "payer_identity": PAYER_IDENTITY,
+            "bank_code": bank_code,
+            "account_number": account_number,
+            "account_name": account_name,
+            "effective_date": effective_date,
+        }
+    )
+    return GovernmentSubsidyReturnRecipientQueryView(
+        ready=True,
+        blockers=(),
+        agency_identity=PAYER_IDENTITY,
+        agency_name=PAYER_NAME,
+        bank_code=bank_code,
+        account_display="*" * max(0, len(account_number) - 4) + account_number[-4:],
+        account_fingerprint=fingerprint.value,
+        effective_date=effective_date,
+    )
+
+
+def _query_date_text(value):
+    if isinstance(value, date):
+        return value.isoformat()
+    text = str(value).strip()
+    if len(text) < 10:
+        raise ValueError("government_subsidy_recipient_account_invalid")
+    return text[:10]
+
+
+def _redact_query_reference(prefix, value):
+    text = str(value).strip()
+    if not text:
+        raise ValueError("government_subsidy_overpayment_query_invalid")
+    digest = hashlib.sha256(f"{prefix}:{text}".encode("utf-8")).hexdigest()[:12]
+    return f"redacted:{digest}"
 
 
 def _mysql_error_code(error):

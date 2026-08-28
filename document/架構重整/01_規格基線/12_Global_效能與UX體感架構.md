@@ -106,6 +106,12 @@ Streamlit 先使用 placeholder、`session_state` 的 local draft／stable idemp
    owner-specific typed Preview／Apply 匯入流程；
 3. `數據瀏覽`：完整保留既有六來源去敏、唯讀 Query 與明細抽屜。
 
+2026-08-27 人工已將「工會內部管理 UI 的一般業務資料去敏」改為完整值顯示；上列「去敏」是施工前
+現況描述，不再是目標契約。後續由
+`PROV-20260827-internal-admin-ui-unmasked-display-spec-gap.md` 逐 surface 固定 permission、完整值欄位與
+負向驗收後分批替換。未完成該 package 前不得以臨時前端反遮罩、raw payload 或擴大 Query 欄位繞過
+typed owner contract。
+
 分頁切換屬 local navigation，不得重送 mutation、清空尚未送出的合法草稿或讓舊 response 覆蓋新分頁。
 每個分頁使用可程式判讀的 tab／tabpanel 關聯、鍵盤焦點與明確 selected state。NAS 分頁目前只規劃
 資料夾與檔案名稱的檔案總管式投影；不在畫面另列資料夾層級、用途、所屬案件／人員、版本、大小、
@@ -115,6 +121,19 @@ Streamlit 先使用 placeholder、`session_state` 的 local draft／stable idemp
 digest 全值、Preview fingerprint、raw cursor 或其他非業務必要雜訊。
 
 ## 4. 網路關卡：傳最少且可快取的 typed data
+
+### 4.0 內部完整值與外部安全邊界（2026-08-27 人工裁決）
+
+- 已認證、enabled 且具對應 owner permission 的工會內部管理 UI，對畫面實際需要的一般業務資料使用
+  canonical 完整值，不再以遮罩防止內部人員查看。
+- 完整值顯示不等於 unrestricted dump：API 仍只回該 ViewModel 需要的 typed fields，維持 cursor
+  pagination、bounded page size、rate limit、audit、download/export capability 與 server-side filtering。
+- LINE 對客／群組訊息、Client／Staff LIFF、自助／公開頁面仍依各自 recipient 與 privacy 契約，不受本
+  裁決自動改成完整值。
+- credential、secret、完整銀行驗證資料、raw provider payload、NAS 實體 locator、raw error／log／receipt／
+  evidence 與純技術 identity 不是「一般 UI 去敏」範圍，仍禁止顯示。
+- 每個既有 masked surface 必須先盤點 API owner、permission、欄位、copy/export/download、cache 與測試，
+  再由 bounded package 修改；不得以 browser-side unmask、額外 raw endpoint 或 client-selected fields 實作。
 
 ### 4.1 Payload contract
 

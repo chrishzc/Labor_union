@@ -4,6 +4,14 @@
 module（例如 `scripts/run_service_monitor.py`、`scripts/run_durable_job_worker.py`）仍留在 `scripts/`。
 個人安裝工具與其 wrapper 不在本目錄的治理、搬移或退役範圍內，也不是其他開發者的必要依賴。
 
+Windows 一般啟動由 `supervise_local_runtime.ps1` 擁有並監督本次建立的 API、React、monitor 與
+worker process trees。它會先等待 API `/health` 與 React `/admin/`，持續檢查 required／已啟用 optional
+child 的存活；任一 child 非預期結束、readiness timeout 或啟動失敗都以非零狀態結束。每個事件會以
+`RUNTIME_EVENT {JSON}` 輸出，結束時只清理由本次 supervisor 建立的 root PID 及其 descendants，不依
+port、名稱或全機 process 搜尋。
+一般啟動會保持前景執行；以 `Ctrl+C` 結束時同樣進行 scoped cleanup，若任一服務自行結束則 launcher
+回傳非零狀態。
+
 Worker 與 Monitor 都是 Private Operations API client，不直接連 MySQL。Windows／Unix 本機 launcher
 會在目前 process tree 產生一次性的 `INTERNAL_SERVICE_SHARED_KEY`，API 與各 client 共用，但不寫回
 `.env`、log 或 Git。若手動分別啟動服務，必須先在同一 shell 設定至少 32 字元的 key；production
@@ -12,25 +20,29 @@ Worker 與 Monitor 都是 Private Operations API client，不直接連 MySQL。W
 所有命令都從專案根目錄執行。目前 Windows／Unix 一般本機 UI 啟動固定使用 API
 `127.0.0.1:8000` 與 React/Vite `127.0.0.1:5173`；不再啟動 Streamlit。明確傳入
 `--smoke-test` 時同樣只建立這兩個 GET-only 服務。Smoke 不啟動 Docker、monitor、File Watcher、worker、LINE 或 provider，也不切換
-navigation；日常檔案匯入由 Web UI 上傳。啟動服務不會自動更新 schema；拉取新版程式後，應先依資料需求選擇
-「保留資料更新」或「模板重設」，完成後再啟動服務。
+navigation；日常檔案匯入由 Web UI 上傳。一般啟動會先檢查 canonical manifests 定義的完整 ordered
+release chain；任何中間 release 缺漏、partial 或 drift 都會在建立 child 前停止。啟動服務不會自動
+套用 schema；拉取新版程式後，應先依資料需求選擇「保留資料更新」或「模板重設」，完成後再啟動服務。
 
 每支現行 launcher 都提供唯讀 dry run。Batch／shell／Python 使用 `--dry-run`，PowerShell 使用
 `-DryRun`；只驗證路徑、interpreter、module 與必要 executable，不啟動服務、不讀寫 DB、不修改
 `.env`，也不查詢或修改 Windows 排程任務。回傳 `blocked` 表示缺少依賴，不代表已執行任何修復。
 DB update preview／dry-run 回傳 `blocked` 時，CLI 與 launcher 同時以非零 exit code 停止，且不顯示
 `UPDATE` 確認；只有與 current latest release identity／fingerprint 相符的 qualification receipt 可解鎖。
-這裡的 fingerprint 是 selected release 自己的 canonical fingerprint，不是整條 release chain 的 aggregate
-fingerprint。Fast additive journal 也固定以 `source_database + release_id` 分鏈，舊 release 的 completed
-journal 只供追溯，不得阻擋新 release 或被當成同一條 resume chain。
+每個待套 release 都以自己的 canonical fingerprint 與 current qualification 驗證，不使用整條 chain 的
+aggregate fingerprint 取代。Fast additive journal 固定以 `source_database + release_id` 分鏈；runner
+依 canonical manifests 動態解析 baseline 到 current latest 的完整順序，逐支檢查、套用與續跑，不把任何
+單一 release 硬編成永久終點。
 
 ## 現行入口
 
 | 腳本 | 狀態 | 用途與安全邊界 |
 |---|---|---|
-| `start_local_development.bat` | active | Windows 一般本機開發入口；啟動 FastAPI、React/Vite 與已配置 workers；`--smoke-test` 只驗證 API＋React 並清理本次 owned process。 |
-| `start_local_development.sh` | active | Unix 一般本機開發入口；同樣不啟動 Streamlit，`--smoke-test` 使用 owned process group。 |
+| `start_local_development.bat` | active | Windows 一般本機開發入口；通過完整 DB current gate 後委派 `supervise_local_runtime.ps1` 啟動並監督 FastAPI 8000、React/Vite 5173、runtime monitor、durable job worker 與 incident worker；LINE 未設定時只略過 LINE worker。`--smoke-test` 只驗證 API＋React 並清理本次 owned process。 |
+| `supervise_local_runtime.ps1` | active, internal | Windows launcher 的唯一 runtime supervisor；直接建立 owned child trees、readiness／survival check、JSON-line evidence 與 scoped cleanup。不得獨立用於 production。 |
+| `start_local_development.sh` | active | Unix 一般本機開發入口；服務與 current gate 同 Windows，且不啟動 Streamlit；`--smoke-test` 使用 owned process group。 |
 | `start_local_development_no_auth.bat` | active, local-only | 先停用本機 Admin 認證再啟動同一 FastAPI＋React 開發入口；只供隔離開發機，禁止 shared staging／production。 |
+| `start_local_development_no_auth.sh` | active, local-only | 只設定 development `local_bypass` 免登入環境，再委派 Unix 一般入口；不複製啟動流程或套用 schema。 |
 | `configure_local_admin_no_auth.bat`／`.ps1` | active, local-only | 只調整本機 `.env` 的 Admin 開發認證設定，不啟動服務。 |
 | `update_local_database.bat` | active | 預設對 `.env` 指定的本機 development 非系統 DB 執行 qualified schema-only additive fast path；每台機器先建立自己的 release-scoped dump／receipt，不建立 candidate、不 DROP source。保留資料 replacement 必須明確使用 `--strategy replacement --allow-long-run`。 |
 
@@ -90,7 +102,12 @@ Phase 5B controlled foundation：
 .\scripts\launchers\uninstall_durable_job_worker_task.ps1 -DryRun
 ```
 
-macOS／Unix 另執行 `./scripts/launchers/start_local_development.sh --dry-run`。
+macOS／Unix 可執行一般或免登入 dry run：
+
+```bash
+./scripts/launchers/start_local_development.sh --dry-run
+./scripts/launchers/start_local_development_no_auth.sh --dry-run
+```
 
 ## Cloud Run compat staging（開發用 GCE＋IAP 反向 SSH Tunnel 版）
 

@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-08-26-v10
+-- Release: labor-union-validation-schema-2026-08-28-v16
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -16532,3 +16532,2303 @@ CREATE TRIGGER trg_controlled_file_cleanup_events_before_delete
 BEFORE DELETE ON controlled_file_cleanup_events FOR EACH ROW
 SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_cleanup_events records cannot be deleted';
 -- END SOURCE: db/schema_parts/1004_controlled_file_storage_foundation.sql
+
+-- BEGIN SOURCE: db/schema_parts/1005_contract_external_signing_successor.sql
+-- File: 1005_contract_external_signing_successor.sql
+-- Description: 建立外部平台簽署 session、完成回報、最終 PDF recovery、文件連結與 closed receipts。
+
+ALTER TABLE controlled_file_staging_objects
+    MODIFY COLUMN purpose ENUM(
+        'unsigned_contract', 'final_signed_contract', 'service_date_confirmation',
+        'baby_log_photo', 'meal_photo', 'order_notice', 'staff_resume',
+        'staff_certificate', 'staff_health_exam', 'rich_menu_background'
+    ) NOT NULL,
+    DROP CHECK chk_controlled_file_staging_owner_purpose,
+    ADD CONSTRAINT chk_controlled_file_staging_owner_purpose CHECK (
+        (owner_type = 'contract_signing'
+            AND purpose IN ('unsigned_contract', 'final_signed_contract'))
+        OR (owner_type = 'scheduling' AND purpose IN (
+            'service_date_confirmation', 'baby_log_photo', 'meal_photo'
+        ))
+        OR (owner_type = 'orders' AND purpose = 'order_notice')
+        OR (owner_type = 'staff' AND purpose IN (
+            'staff_resume', 'staff_certificate', 'staff_health_exam'
+        ))
+        OR (owner_type = 'line_integration' AND purpose = 'rich_menu_background')
+    );
+
+ALTER TABLE controlled_file_objects
+    DROP FOREIGN KEY fk_controlled_file_object_supersedes;
+
+ALTER TABLE controlled_file_objects
+    MODIFY COLUMN purpose ENUM(
+        'unsigned_contract', 'final_signed_contract', 'service_date_confirmation',
+        'baby_log_photo', 'meal_photo', 'order_notice', 'staff_resume',
+        'staff_certificate', 'staff_health_exam', 'rich_menu_background'
+    ) NOT NULL,
+    DROP CHECK chk_controlled_file_object_owner_purpose,
+    ADD CONSTRAINT chk_controlled_file_object_owner_purpose CHECK (
+        (owner_type = 'contract_signing'
+            AND purpose IN ('unsigned_contract', 'final_signed_contract'))
+        OR (owner_type = 'scheduling' AND purpose IN (
+            'service_date_confirmation', 'baby_log_photo', 'meal_photo'
+        ))
+        OR (owner_type = 'orders' AND purpose = 'order_notice')
+        OR (owner_type = 'staff' AND purpose IN (
+            'staff_resume', 'staff_certificate', 'staff_health_exam'
+        ))
+        OR (owner_type = 'line_integration' AND purpose = 'rich_menu_background')
+    );
+
+ALTER TABLE controlled_file_objects
+    ADD CONSTRAINT fk_controlled_file_object_supersedes FOREIGN KEY (
+        supersedes_object_id, owner_type, subject_reference, object_key,
+        purpose, supersedes_version_number
+    ) REFERENCES controlled_file_objects (
+        id, owner_type, subject_reference, object_key, purpose, version_number
+    )
+        ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+CREATE TABLE IF NOT EXISTS contract_external_signing_sessions (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    external_signing_session_id VARCHAR(64) NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    matching_plan_id BIGINT NOT NULL,
+    current_document_set_sha256 CHAR(64) NOT NULL,
+    commitment_id BIGINT NULL,
+    client_reminder_task_id BIGINT UNSIGNED NULL,
+    session_state ENUM(
+        'staff_reporting', 'staff_reports_complete',
+        'client_reported_final_pdf_pending', 'completed', 'superseded'
+    ) NOT NULL DEFAULT 'staff_reporting',
+    aggregate_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    active_case_key VARCHAR(50) GENERATED ALWAYS AS (
+        CASE WHEN session_state = 'superseded' THEN NULL ELSE case_no END
+    ) STORED,
+    activated_by_actor VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_contract_external_session_id (external_signing_session_id),
+    UNIQUE KEY uq_contract_external_active_case (active_case_key),
+    INDEX idx_contract_external_session_case (case_no, id),
+    INDEX idx_contract_external_session_plan (matching_plan_id, id),
+    INDEX idx_contract_external_session_state (session_state, updated_at_utc, id),
+    CONSTRAINT fk_contract_external_session_case FOREIGN KEY (case_no)
+        REFERENCES orders(case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_external_session_plan FOREIGN KEY (matching_plan_id)
+        REFERENCES caregiver_matching_plans(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_external_session_commitment FOREIGN KEY (commitment_id)
+        REFERENCES precontract_service_commitments(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_external_session_reminder FOREIGN KEY (client_reminder_task_id)
+        REFERENCES line_delivery_tasks(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_contract_external_session_identity CHECK (
+        external_signing_session_id REGEXP '^ces_[0-9a-f]{32}$'
+        AND current_document_set_sha256 REGEXP '^[0-9a-f]{64}$'
+        AND CHAR_LENGTH(TRIM(activated_by_actor)) > 0
+    ),
+    CONSTRAINT chk_contract_external_session_state CHECK (
+        (session_state = 'staff_reporting'
+            AND commitment_id IS NULL AND client_reminder_task_id IS NULL)
+        OR (session_state IN ('staff_reports_complete',
+                'client_reported_final_pdf_pending', 'completed')
+            AND commitment_id IS NOT NULL AND client_reminder_task_id IS NOT NULL)
+        OR session_state = 'superseded'
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS contract_external_completion_reports (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    report_id VARCHAR(64) NOT NULL,
+    external_signing_session_id BIGINT UNSIGNED NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    report_scope ENUM('staff', 'client') NOT NULL,
+    matching_segment_id BIGINT NULL,
+    document_version_id BIGINT NOT NULL,
+    commitment_id BIGINT NULL,
+    reporter_subject_type ENUM('staff', 'customer') NOT NULL,
+    reporter_subject_reference VARCHAR(191) NOT NULL,
+    source_kind ENUM('verified_line', 'manual_attested') NOT NULL,
+    source_event_identity VARCHAR(191) NOT NULL,
+    source_payload_sha256 CHAR(64) NOT NULL,
+    line_inbox_event_id BIGINT UNSIGNED NULL,
+    verified_line_user_id VARCHAR(191) NULL,
+    verified_binding_version BIGINT UNSIGNED NULL,
+    manual_confirmation_method VARCHAR(100) NULL,
+    manual_reason VARCHAR(1000) NULL,
+    manual_evidence_reference VARCHAR(191) NULL,
+    manual_evidence_sha256 CHAR(64) NULL,
+    target_identity VARCHAR(191) GENERATED ALWAYS AS (
+        CONCAT(report_scope, ':', COALESCE(CAST(matching_segment_id AS CHAR), 'client'))
+    ) STORED,
+    idempotency_key VARCHAR(191) NOT NULL,
+    command_fingerprint CHAR(64) NOT NULL,
+    expected_status_version BIGINT UNSIGNED NOT NULL,
+    resulting_status_version BIGINT UNSIGNED NOT NULL,
+    occurred_at_utc DATETIME(6) NOT NULL,
+    actor_ref VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_contract_external_report_id (report_id),
+    UNIQUE KEY uq_contract_external_report_source (source_event_identity),
+    UNIQUE KEY uq_contract_external_report_idempotency (idempotency_key),
+    UNIQUE KEY uq_contract_external_report_target (
+        external_signing_session_id, target_identity
+    ),
+    INDEX idx_contract_external_report_case (case_no, id),
+    INDEX idx_contract_external_report_document (document_version_id, id),
+    INDEX idx_contract_external_report_segment (matching_segment_id, id),
+    CONSTRAINT fk_contract_external_report_session FOREIGN KEY (
+        external_signing_session_id
+    ) REFERENCES contract_external_signing_sessions(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_external_report_case FOREIGN KEY (case_no)
+        REFERENCES orders(case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_external_report_segment FOREIGN KEY (matching_segment_id)
+        REFERENCES caregiver_matching_plan_segments(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_external_report_document FOREIGN KEY (document_version_id)
+        REFERENCES contract_document_versions(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_external_report_commitment FOREIGN KEY (commitment_id)
+        REFERENCES precontract_service_commitments(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_external_report_inbox FOREIGN KEY (line_inbox_event_id)
+        REFERENCES line_inbox_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_external_report_binding FOREIGN KEY (verified_line_user_id)
+        REFERENCES line_identity_bindings(line_user_id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_contract_external_report_identity CHECK (
+        report_id REGEXP '^cer_[0-9a-f]{32}$'
+        AND source_payload_sha256 REGEXP '^[0-9a-f]{64}$'
+        AND command_fingerprint REGEXP '^[0-9a-f]{64}$'
+        AND idempotency_key REGEXP '^[a-z0-9][a-z0-9._:-]{0,190}$'
+        AND CHAR_LENGTH(TRIM(source_event_identity)) > 0
+        AND CHAR_LENGTH(TRIM(reporter_subject_reference)) > 0
+        AND CHAR_LENGTH(TRIM(actor_ref)) > 0
+        AND resulting_status_version = expected_status_version + 1
+    ),
+    CONSTRAINT chk_contract_external_report_target CHECK (
+        (report_scope = 'staff' AND matching_segment_id IS NOT NULL
+            AND commitment_id IS NULL AND reporter_subject_type = 'staff')
+        OR (report_scope = 'client' AND matching_segment_id IS NULL
+            AND commitment_id IS NOT NULL AND reporter_subject_type = 'customer')
+    ),
+    CONSTRAINT chk_contract_external_report_source CHECK (
+        (source_kind = 'verified_line'
+            AND line_inbox_event_id IS NOT NULL
+            AND verified_line_user_id IS NOT NULL
+            AND verified_binding_version IS NOT NULL
+            AND manual_confirmation_method IS NULL
+            AND manual_reason IS NULL
+            AND manual_evidence_reference IS NULL
+            AND manual_evidence_sha256 IS NULL)
+        OR (source_kind = 'manual_attested'
+            AND line_inbox_event_id IS NULL
+            AND verified_line_user_id IS NULL
+            AND verified_binding_version IS NULL
+            AND manual_confirmation_method IS NOT NULL
+            AND manual_reason IS NOT NULL
+            AND manual_evidence_reference IS NOT NULL
+            AND manual_evidence_sha256 IS NOT NULL
+            AND CHAR_LENGTH(TRIM(manual_confirmation_method)) > 0
+            AND CHAR_LENGTH(TRIM(manual_reason)) > 0
+            AND CHAR_LENGTH(TRIM(manual_evidence_reference)) > 0
+            AND manual_evidence_sha256 REGEXP '^[0-9a-f]{64}$')
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS contract_final_pdf_recovery_tasks (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    recovery_task_id VARCHAR(64) NOT NULL,
+    external_signing_session_id BIGINT UNSIGNED NOT NULL,
+    client_report_id BIGINT UNSIGNED NOT NULL,
+    task_state ENUM('pending', 'fulfilled', 'superseded') NOT NULL DEFAULT 'pending',
+    aggregate_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    idempotency_key VARCHAR(191) NOT NULL,
+    command_fingerprint CHAR(64) NOT NULL,
+    created_by_actor VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    fulfilled_at_utc DATETIME(6) NULL,
+    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_contract_final_recovery_id (recovery_task_id),
+    UNIQUE KEY uq_contract_final_recovery_report (client_report_id),
+    UNIQUE KEY uq_contract_final_recovery_idempotency (idempotency_key),
+    INDEX idx_contract_final_recovery_session (external_signing_session_id, id),
+    INDEX idx_contract_final_recovery_state (task_state, created_at_utc, id),
+    CONSTRAINT fk_contract_final_recovery_session FOREIGN KEY (
+        external_signing_session_id
+    ) REFERENCES contract_external_signing_sessions(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_final_recovery_report FOREIGN KEY (client_report_id)
+        REFERENCES contract_external_completion_reports(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_contract_final_recovery_identity CHECK (
+        recovery_task_id REGEXP '^cfrt_[0-9a-f]{32}$'
+        AND idempotency_key REGEXP '^[a-z0-9][a-z0-9._:-]{0,190}$'
+        AND command_fingerprint REGEXP '^[0-9a-f]{64}$'
+        AND CHAR_LENGTH(TRIM(created_by_actor)) > 0
+    ),
+    CONSTRAINT chk_contract_final_recovery_state CHECK (
+        (task_state = 'fulfilled' AND fulfilled_at_utc IS NOT NULL)
+        OR (task_state IN ('pending', 'superseded') AND fulfilled_at_utc IS NULL)
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS contract_final_document_versions (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    final_document_id VARCHAR(64) NOT NULL,
+    external_signing_session_id BIGINT UNSIGNED NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    source_document_set_sha256 CHAR(64) NOT NULL,
+    controlled_file_object_id BIGINT UNSIGNED NOT NULL,
+    version_number BIGINT UNSIGNED NOT NULL,
+    contract_identity VARCHAR(191) NOT NULL,
+    content_type ENUM('application/pdf') NOT NULL,
+    size_bytes BIGINT UNSIGNED NOT NULL,
+    content_sha256 CHAR(64) NOT NULL,
+    created_by_actor VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_contract_final_document_id (final_document_id),
+    UNIQUE KEY uq_contract_final_document_session (external_signing_session_id),
+    UNIQUE KEY uq_contract_final_document_object (controlled_file_object_id),
+    UNIQUE KEY uq_contract_final_document_case_version (case_no, version_number),
+    INDEX idx_contract_final_document_case (case_no, id),
+    CONSTRAINT fk_contract_final_document_session FOREIGN KEY (
+        external_signing_session_id
+    ) REFERENCES contract_external_signing_sessions(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_final_document_case FOREIGN KEY (case_no)
+        REFERENCES orders(case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_final_document_object FOREIGN KEY (controlled_file_object_id)
+        REFERENCES controlled_file_objects(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_contract_final_document_identity CHECK (
+        final_document_id REGEXP '^cfd_[0-9a-f]{32}$'
+        AND source_document_set_sha256 REGEXP '^[0-9a-f]{64}$'
+        AND content_sha256 REGEXP '^[0-9a-f]{64}$'
+        AND CHAR_LENGTH(TRIM(contract_identity)) > 0
+        AND CHAR_LENGTH(TRIM(created_by_actor)) > 0
+        AND version_number > 0
+        AND size_bytes > 0
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS contract_external_signing_receipts (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    receipt_id VARCHAR(64) NOT NULL,
+    external_signing_session_id BIGINT UNSIGNED NOT NULL,
+    command_type ENUM(
+        'record_staff_report', 'record_client_report', 'apply_final_signed_contract'
+    ) NOT NULL,
+    schema_version ENUM('contract-external-signing-receipt.v1') NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    command_fingerprint CHAR(64) NOT NULL,
+    preview_fingerprint CHAR(64) NULL,
+    expected_status_version BIGINT UNSIGNED NOT NULL,
+    result_status_version BIGINT UNSIGNED NOT NULL,
+    completion_report_id BIGINT UNSIGNED NULL,
+    final_document_version_id BIGINT UNSIGNED NULL,
+    result_snapshot JSON NOT NULL,
+    outcome_state ENUM('recorded', 'completed') NOT NULL,
+    actor_ref VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    applied_at_utc DATETIME(6) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_contract_external_receipt_id (receipt_id),
+    UNIQUE KEY uq_contract_external_receipt_idempotency (idempotency_key),
+    INDEX idx_contract_external_receipt_session (external_signing_session_id, id),
+    INDEX idx_contract_external_receipt_report (completion_report_id, id),
+    INDEX idx_contract_external_receipt_document (final_document_version_id, id),
+    CONSTRAINT fk_contract_external_receipt_session FOREIGN KEY (
+        external_signing_session_id
+    ) REFERENCES contract_external_signing_sessions(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_external_receipt_report FOREIGN KEY (completion_report_id)
+        REFERENCES contract_external_completion_reports(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_contract_external_receipt_document FOREIGN KEY (
+        final_document_version_id
+    ) REFERENCES contract_final_document_versions(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_contract_external_receipt_identity CHECK (
+        receipt_id REGEXP '^cesr_[0-9a-f]{32}$'
+        AND idempotency_key REGEXP '^[a-z0-9][a-z0-9._:-]{0,190}$'
+        AND command_fingerprint REGEXP '^[0-9a-f]{64}$'
+        AND CHAR_LENGTH(TRIM(actor_ref)) > 0
+        AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+        AND result_status_version = expected_status_version + 1
+    ),
+    CONSTRAINT chk_contract_external_receipt_target CHECK (
+        (command_type IN ('record_staff_report', 'record_client_report')
+            AND completion_report_id IS NOT NULL
+            AND final_document_version_id IS NULL
+            AND preview_fingerprint IS NULL
+            AND outcome_state = 'recorded')
+        OR (command_type = 'apply_final_signed_contract'
+            AND completion_report_id IS NULL
+            AND final_document_version_id IS NOT NULL
+            AND preview_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND outcome_state = 'completed')
+    ),
+    CONSTRAINT chk_contract_external_receipt_result CHECK (
+        JSON_TYPE(result_snapshot) = 'OBJECT' AND JSON_LENGTH(result_snapshot) > 0
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_contract_external_reports_before_update;
+CREATE TRIGGER trg_contract_external_reports_before_update BEFORE UPDATE ON contract_external_completion_reports FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_external_completion_reports records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_contract_external_reports_before_delete;
+CREATE TRIGGER trg_contract_external_reports_before_delete BEFORE DELETE ON contract_external_completion_reports FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_external_completion_reports records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_contract_final_documents_before_update;
+CREATE TRIGGER trg_contract_final_documents_before_update BEFORE UPDATE ON contract_final_document_versions FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_final_document_versions records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_contract_final_documents_before_delete;
+CREATE TRIGGER trg_contract_final_documents_before_delete BEFORE DELETE ON contract_final_document_versions FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_final_document_versions records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_contract_external_receipts_before_update;
+CREATE TRIGGER trg_contract_external_receipts_before_update BEFORE UPDATE ON contract_external_signing_receipts FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_external_signing_receipts records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_contract_external_receipts_before_delete;
+CREATE TRIGGER trg_contract_external_receipts_before_delete BEFORE DELETE ON contract_external_signing_receipts FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_external_signing_receipts records cannot be deleted';
+-- END SOURCE: db/schema_parts/1005_contract_external_signing_successor.sql
+
+-- BEGIN SOURCE: db/schema_parts/1006_historical_order_review_remediation.sql
+-- File: 1006_historical_order_review_remediation.sql
+-- Description: 保存 Historical Order review 的不可變人工更正 disposition、receipt 與 outbox。
+
+CREATE TABLE IF NOT EXISTS historical_order_review_remediation_events (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    event_identity VARCHAR(191) NOT NULL,
+    prior_review_identity VARCHAR(191) NOT NULL,
+    original_adoption_receipt_id BIGINT UNSIGNED NOT NULL,
+    replacement_adoption_receipt_id BIGINT UNSIGNED NOT NULL,
+    disposition ENUM('corrected_source_adopted','superseded_by_replacement_review') NOT NULL,
+    successor_review_identity VARCHAR(191) NULL,
+    source_content_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    review_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    command_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    actor VARCHAR(255) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    evidence_snapshot JSON NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    applied_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_historical_order_review_remediation_event (event_identity),
+    UNIQUE KEY uq_historical_order_review_remediation_prior (prior_review_identity),
+    UNIQUE KEY uq_historical_order_review_remediation_replacement (replacement_adoption_receipt_id),
+    INDEX idx_historical_order_review_remediation_successor (successor_review_identity, id),
+    CONSTRAINT fk_historical_order_review_remediation_prior
+        FOREIGN KEY (prior_review_identity) REFERENCES historical_order_adoption_reviews(review_identity)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_order_review_remediation_original_receipt
+        FOREIGN KEY (original_adoption_receipt_id) REFERENCES historical_order_adoption_receipts(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_order_review_remediation_replacement_receipt
+        FOREIGN KEY (replacement_adoption_receipt_id) REFERENCES historical_order_adoption_receipts(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_order_review_remediation_successor
+        FOREIGN KEY (successor_review_identity) REFERENCES historical_order_adoption_reviews(review_identity)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_order_review_remediation_fingerprints
+        CHECK (
+            source_content_digest REGEXP '^[0-9a-f]{64}$'
+            AND review_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND command_fingerprint REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_historical_order_review_remediation_evidence
+        CHECK (JSON_TYPE(evidence_snapshot) = 'OBJECT'),
+    CONSTRAINT chk_historical_order_review_remediation_disposition
+        CHECK (
+            (disposition = 'corrected_source_adopted' AND successor_review_identity IS NULL)
+            OR (disposition = 'superseded_by_replacement_review' AND successor_review_identity IS NOT NULL)
+        ),
+    CONSTRAINT chk_historical_order_review_remediation_replacement
+        CHECK (replacement_adoption_receipt_id <> original_adoption_receipt_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_order_review_remediation_receipts (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    remediation_receipt_identity VARCHAR(191) NOT NULL,
+    event_id BIGINT UNSIGNED NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    command_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    preview_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    expected_remediation_version BIGINT UNSIGNED NOT NULL,
+    resulting_remediation_version BIGINT UNSIGNED NOT NULL,
+    result_snapshot JSON NOT NULL,
+    actor VARCHAR(255) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_historical_order_review_remediation_receipt (remediation_receipt_identity),
+    UNIQUE KEY uq_historical_order_review_remediation_receipt_event (event_id),
+    UNIQUE KEY uq_historical_order_review_remediation_receipt_idempotency (idempotency_key),
+    CONSTRAINT fk_historical_order_review_remediation_receipt_event
+        FOREIGN KEY (event_id) REFERENCES historical_order_review_remediation_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_order_review_remediation_receipt_fingerprints
+        CHECK (
+            command_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND preview_fingerprint REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_historical_order_review_remediation_receipt_snapshot
+        CHECK (JSON_TYPE(result_snapshot) = 'OBJECT'),
+    CONSTRAINT chk_historical_order_review_remediation_receipt_version
+        CHECK (expected_remediation_version = 0 AND resulting_remediation_version = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_order_review_remediation_outbox (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    event_id BIGINT UNSIGNED NOT NULL,
+    remediation_receipt_id BIGINT UNSIGNED NOT NULL,
+    intent_key VARCHAR(191) NOT NULL,
+    intent_type ENUM('historical_order_review_remediated') NOT NULL,
+    bounded_snapshot JSON NOT NULL,
+    published_at TIMESTAMP(6) NULL,
+    attempts INT UNSIGNED NOT NULL DEFAULT 0,
+    last_error VARCHAR(500) NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_historical_order_review_remediation_outbox_intent (intent_key),
+    INDEX idx_historical_order_review_remediation_outbox_pending (published_at, attempts, id),
+    CONSTRAINT fk_historical_order_review_remediation_outbox_event
+        FOREIGN KEY (event_id) REFERENCES historical_order_review_remediation_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_order_review_remediation_outbox_receipt
+        FOREIGN KEY (remediation_receipt_id) REFERENCES historical_order_review_remediation_receipts(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_order_review_remediation_outbox_snapshot
+        CHECK (JSON_TYPE(bounded_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_historical_order_review_remediation_events_before_update;
+CREATE TRIGGER trg_historical_order_review_remediation_events_before_update
+BEFORE UPDATE ON historical_order_review_remediation_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_review_remediation_events records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_historical_order_review_remediation_events_before_delete;
+CREATE TRIGGER trg_historical_order_review_remediation_events_before_delete
+BEFORE DELETE ON historical_order_review_remediation_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_review_remediation_events records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_historical_order_review_remediation_receipts_before_update;
+CREATE TRIGGER trg_historical_order_review_remediation_receipts_before_update
+BEFORE UPDATE ON historical_order_review_remediation_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_review_remediation_receipts records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_historical_order_review_remediation_receipts_before_delete;
+CREATE TRIGGER trg_historical_order_review_remediation_receipts_before_delete
+BEFORE DELETE ON historical_order_review_remediation_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_review_remediation_receipts records cannot be deleted';
+-- END SOURCE: db/schema_parts/1006_historical_order_review_remediation.sql
+
+-- BEGIN SOURCE: db/schema_parts/1007_finance_recovery_evidence.sql
+-- Add independent, auditable evidence references to manual finance recovery actions.
+
+ALTER TABLE client_over_refund_recovery_events
+    ADD COLUMN evidence_reference VARCHAR(500) NULL AFTER reason,
+    ADD CONSTRAINT chk_client_over_refund_recovery_event_evidence
+        CHECK (
+            evidence_reference IS NULL
+            OR CHAR_LENGTH(TRIM(evidence_reference)) > 0
+        );
+
+ALTER TABLE client_over_refund_recovery_matchings
+    ADD COLUMN evidence_reference VARCHAR(500) NULL AFTER reason,
+    ADD CONSTRAINT chk_client_over_refund_recovery_matching_evidence
+        CHECK (
+            evidence_reference IS NULL
+            OR CHAR_LENGTH(TRIM(evidence_reference)) > 0
+        );
+
+ALTER TABLE staff_overpayment_recovery_events
+    ADD COLUMN evidence_reference VARCHAR(500) NULL AFTER reason,
+    ADD CONSTRAINT chk_staff_overpayment_recovery_event_evidence
+        CHECK (
+            evidence_reference IS NULL
+            OR CHAR_LENGTH(TRIM(evidence_reference)) > 0
+        );
+
+ALTER TABLE staff_overpayment_recovery_matchings
+    ADD COLUMN evidence_reference VARCHAR(500) NULL AFTER reason,
+    ADD CONSTRAINT chk_staff_overpayment_recovery_matching_evidence
+        CHECK (
+            evidence_reference IS NULL
+            OR CHAR_LENGTH(TRIM(evidence_reference)) > 0
+        );
+-- END SOURCE: db/schema_parts/1007_finance_recovery_evidence.sql
+
+-- BEGIN SOURCE: db/schema_parts/1008_historical_order_adoption_noop_constraint.sql
+-- File: 1008_historical_order_adoption_noop_constraint.sql
+-- Description: 讓合法且不改變 Orders 根狀態的歷史採納不建立假的 lifecycle event。
+
+ALTER TABLE historical_order_adoption_receipts
+    DROP CHECK chk_historical_order_adoption_shape,
+    ADD CONSTRAINT chk_historical_order_adoption_shape
+        CHECK (
+            (outcome = 'unmatched_case' AND lifecycle_event_id IS NULL
+             AND expected_version IS NULL AND resulting_version IS NULL)
+            OR
+            (outcome = 'adopted'
+             AND expected_version IS NOT NULL
+             AND case_no IS NOT NULL
+             AND (
+                 (lifecycle_event_id IS NULL
+                  AND resulting_version = expected_version)
+                 OR
+                 (lifecycle_event_id IS NOT NULL
+                  AND resulting_version = expected_version + 1)
+             ))
+            OR
+            (outcome IN ('review_required','current_conflict')
+             AND lifecycle_event_id IS NULL
+             AND expected_version IS NOT NULL
+             AND resulting_version = expected_version
+             AND case_no IS NOT NULL)
+        );
+-- END SOURCE: db/schema_parts/1008_historical_order_adoption_noop_constraint.sql
+
+-- BEGIN SOURCE: db/schema_parts/1009_anomaly_reclassification_disposition.sql
+-- File: 1009_anomaly_reclassification_disposition.sql
+-- Description: 保存異常必要性移轉的不可變處分、receipt 與 bounded batch 證據。
+
+CREATE TABLE IF NOT EXISTS anomaly_reclassification_dispositions (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    disposition_identity VARCHAR(191) NOT NULL,
+    alert_fingerprint CHAR(64) NOT NULL,
+    definition_code VARCHAR(191) NOT NULL,
+    disposition ENUM(
+        'reclassified_to_owner_work_item',
+        'retired_false_positive',
+        'replaced_by_successor'
+    ) NOT NULL,
+    source_identity VARCHAR(191) NOT NULL,
+    source_version BIGINT UNSIGNED NOT NULL,
+    expected_workflow_version BIGINT UNSIGNED NOT NULL,
+    target_domain VARCHAR(100) NULL,
+    target_reference VARCHAR(191) NULL,
+    target_version BIGINT UNSIGNED NULL,
+    actor VARCHAR(255) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    evidence_reference VARCHAR(500) NOT NULL,
+    rulebook_reference VARCHAR(500) NULL,
+    release_evidence_reference VARCHAR(500) NULL,
+    preview_fingerprint CHAR(64) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_anomaly_reclassification_disposition_identity (
+        disposition_identity
+    ),
+    UNIQUE KEY uq_anomaly_reclassification_disposition_idempotency (
+        idempotency_key
+    ),
+    UNIQUE KEY uq_anomaly_reclassification_disposition_alert (
+        alert_fingerprint
+    ),
+    INDEX idx_anomaly_reclassification_disposition_source (
+        definition_code,
+        source_identity,
+        source_version
+    ),
+    CONSTRAINT fk_anomaly_reclassification_disposition_alert
+        FOREIGN KEY (alert_fingerprint)
+        REFERENCES anomaly_current_alerts(fingerprint)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_anomaly_reclassification_disposition_fingerprints
+        CHECK (
+            alert_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND preview_fingerprint REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_anomaly_reclassification_disposition_target
+        CHECK (
+            (
+                disposition = 'retired_false_positive'
+                AND target_domain IS NULL
+                AND target_reference IS NULL
+                AND target_version IS NULL
+            )
+            OR (
+                disposition IN (
+                    'reclassified_to_owner_work_item',
+                    'replaced_by_successor'
+                )
+                AND CHAR_LENGTH(TRIM(target_domain)) > 0
+                AND CHAR_LENGTH(TRIM(target_reference)) > 0
+                AND target_version IS NOT NULL
+            )
+        ),
+    CONSTRAINT chk_anomaly_reclassification_disposition_retired_evidence
+        CHECK (
+            (
+                disposition = 'retired_false_positive'
+                AND CHAR_LENGTH(TRIM(rulebook_reference)) > 0
+                AND CHAR_LENGTH(TRIM(release_evidence_reference)) > 0
+            )
+            OR disposition <> 'retired_false_positive'
+        ),
+    CONSTRAINT chk_anomaly_reclassification_disposition_optional_evidence
+        CHECK (
+            (
+                (rulebook_reference IS NULL AND release_evidence_reference IS NULL)
+                OR (
+                    rulebook_reference IS NOT NULL
+                    AND release_evidence_reference IS NOT NULL
+                    AND CHAR_LENGTH(TRIM(rulebook_reference)) > 0
+                    AND CHAR_LENGTH(TRIM(release_evidence_reference)) > 0
+                )
+            )
+        ),
+    CONSTRAINT chk_anomaly_reclassification_disposition_text
+        CHECK (
+            CHAR_LENGTH(TRIM(disposition_identity)) > 0
+            AND CHAR_LENGTH(TRIM(definition_code)) > 0
+            AND CHAR_LENGTH(TRIM(source_identity)) > 0
+            AND CHAR_LENGTH(TRIM(actor)) > 0
+            AND CHAR_LENGTH(TRIM(reason)) > 0
+            AND CHAR_LENGTH(TRIM(evidence_reference)) > 0
+            AND CHAR_LENGTH(TRIM(idempotency_key)) > 0
+            AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS anomaly_reclassification_receipts (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    receipt_identity VARCHAR(191) NOT NULL,
+    disposition_id BIGINT UNSIGNED NOT NULL,
+    workflow_event_id BIGINT NOT NULL,
+    before_state_fingerprint CHAR(64) NOT NULL,
+    after_state_fingerprint CHAR(64) NOT NULL,
+    before_workflow_version BIGINT UNSIGNED NOT NULL,
+    after_workflow_version BIGINT UNSIGNED NOT NULL,
+    result_snapshot JSON NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_anomaly_reclassification_receipt_identity (receipt_identity),
+    UNIQUE KEY uq_anomaly_reclassification_receipt_disposition (disposition_id),
+    UNIQUE KEY uq_anomaly_reclassification_receipt_workflow_event (workflow_event_id),
+    INDEX idx_anomaly_reclassification_receipt_state (
+        before_state_fingerprint,
+        id
+    ),
+    CONSTRAINT fk_anomaly_reclassification_receipt_disposition
+        FOREIGN KEY (disposition_id)
+        REFERENCES anomaly_reclassification_dispositions(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_anomaly_reclassification_receipt_workflow_event
+        FOREIGN KEY (workflow_event_id)
+        REFERENCES anomaly_workflow_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_anomaly_reclassification_receipt_fingerprints
+        CHECK (
+            before_state_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND after_state_fingerprint REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_anomaly_reclassification_receipt_versions
+        CHECK (after_workflow_version = before_workflow_version + 1),
+    CONSTRAINT chk_anomaly_reclassification_receipt_snapshot
+        CHECK (JSON_TYPE(result_snapshot) = 'OBJECT'),
+    CONSTRAINT chk_anomaly_reclassification_receipt_text
+        CHECK (
+            CHAR_LENGTH(TRIM(receipt_identity)) > 0
+            AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS anomaly_reclassification_batch_receipts (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    batch_receipt_identity VARCHAR(191) NOT NULL,
+    operation_identity VARCHAR(191) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    request_fingerprint CHAR(64) NOT NULL,
+    actor VARCHAR(255) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    eligible_codes JSON NOT NULL,
+    eligible_codes_fingerprint CHAR(64) NOT NULL,
+    cursor_definition_code VARCHAR(191) NOT NULL DEFAULT '',
+    cursor_source_identity VARCHAR(191) NOT NULL DEFAULT '',
+    next_cursor_definition_code VARCHAR(191) NULL,
+    next_cursor_source_identity VARCHAR(191) NULL,
+    batch_size TINYINT UNSIGNED NOT NULL,
+    scanned_count INT UNSIGNED NOT NULL,
+    applied_count INT UNSIGNED NOT NULL,
+    blocked_count INT UNSIGNED NOT NULL,
+    before_fingerprints JSON NOT NULL,
+    after_fingerprints JSON NOT NULL,
+    blocked_items JSON NOT NULL,
+    status ENUM('in_progress', 'blocked', 'completed') NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_anomaly_reclassification_batch_receipt_identity (
+        batch_receipt_identity
+    ),
+    UNIQUE KEY uq_anomaly_reclassification_batch_operation_cursor (
+        operation_identity,
+        cursor_definition_code,
+        cursor_source_identity
+    ),
+    UNIQUE KEY uq_anomaly_reclassification_batch_idempotency (idempotency_key),
+    INDEX idx_anomaly_reclassification_batch_status (
+        eligible_codes_fingerprint,
+        status,
+        id
+    ),
+    CONSTRAINT chk_anomaly_reclassification_batch_size
+        CHECK (batch_size BETWEEN 1 AND 100),
+    CONSTRAINT chk_anomaly_reclassification_batch_counts
+        CHECK (
+            scanned_count <= batch_size
+            AND applied_count + blocked_count = scanned_count
+        ),
+    CONSTRAINT chk_anomaly_reclassification_batch_fingerprints
+        CHECK (
+            JSON_TYPE(eligible_codes) = 'ARRAY'
+            AND JSON_LENGTH(eligible_codes) > 0
+            AND eligible_codes_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND JSON_TYPE(before_fingerprints) = 'ARRAY'
+            AND JSON_TYPE(after_fingerprints) = 'ARRAY'
+            AND JSON_TYPE(blocked_items) = 'ARRAY'
+        ),
+    CONSTRAINT chk_anomaly_reclassification_batch_status
+        CHECK (
+            (status = 'completed' AND next_cursor_definition_code IS NULL
+                AND next_cursor_source_identity IS NULL AND blocked_count = 0)
+            OR (status = 'in_progress' AND next_cursor_definition_code IS NOT NULL
+                AND next_cursor_source_identity IS NOT NULL AND blocked_count = 0)
+            OR (status = 'blocked' AND blocked_count > 0)
+        ),
+    CONSTRAINT chk_anomaly_reclassification_batch_cursor_pairs
+        CHECK (
+            ((
+                cursor_definition_code = ''
+                AND cursor_source_identity = ''
+            )
+            OR (
+                CHAR_LENGTH(TRIM(cursor_definition_code)) > 0
+                AND CHAR_LENGTH(TRIM(cursor_source_identity)) > 0
+            ))
+        AND (
+            (
+                next_cursor_definition_code IS NULL
+                AND next_cursor_source_identity IS NULL
+            )
+            OR (
+                CHAR_LENGTH(TRIM(next_cursor_definition_code)) > 0
+                AND CHAR_LENGTH(TRIM(next_cursor_source_identity)) > 0
+            )
+        )),
+    CONSTRAINT chk_anomaly_reclassification_batch_text
+        CHECK (
+            CHAR_LENGTH(TRIM(batch_receipt_identity)) > 0
+            AND CHAR_LENGTH(TRIM(operation_identity)) > 0
+            AND CHAR_LENGTH(TRIM(idempotency_key)) > 0
+            AND CHAR_LENGTH(TRIM(actor)) > 0
+            AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+            AND request_fingerprint REGEXP '^[0-9a-f]{64}$'
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_anomaly_reclassification_dispositions_before_update;
+CREATE TRIGGER trg_anomaly_reclassification_dispositions_before_update
+BEFORE UPDATE ON anomaly_reclassification_dispositions
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'anomaly_reclassification_dispositions records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_anomaly_reclassification_dispositions_before_delete;
+CREATE TRIGGER trg_anomaly_reclassification_dispositions_before_delete
+BEFORE DELETE ON anomaly_reclassification_dispositions
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'anomaly_reclassification_dispositions records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_anomaly_reclassification_receipts_before_update;
+CREATE TRIGGER trg_anomaly_reclassification_receipts_before_update
+BEFORE UPDATE ON anomaly_reclassification_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'anomaly_reclassification_receipts records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_anomaly_reclassification_receipts_before_delete;
+CREATE TRIGGER trg_anomaly_reclassification_receipts_before_delete
+BEFORE DELETE ON anomaly_reclassification_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'anomaly_reclassification_receipts records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_anomaly_reclassification_batch_receipts_before_update;
+CREATE TRIGGER trg_anomaly_reclassification_batch_receipts_before_update
+BEFORE UPDATE ON anomaly_reclassification_batch_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'anomaly_reclassification_batch_receipts records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_anomaly_reclassification_batch_receipts_before_delete;
+CREATE TRIGGER trg_anomaly_reclassification_batch_receipts_before_delete
+BEFORE DELETE ON anomaly_reclassification_batch_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'anomaly_reclassification_batch_receipts records cannot be deleted';
+-- END SOURCE: db/schema_parts/1009_anomaly_reclassification_disposition.sql
+
+-- BEGIN SOURCE: db/schema_parts/1010_historical_operational_baseline.sql
+-- File: 1010_historical_operational_baseline.sql
+-- Description: 保存歷史訂單作業基準的不可變事件、receipt 與僅可更新投遞 metadata 的 outbox。
+
+CREATE TABLE IF NOT EXISTS historical_order_operational_baseline_events (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    baseline_event_identity VARCHAR(191) NOT NULL,
+    prior_baseline_event_id BIGINT UNSIGNED NULL,
+    order_identity VARCHAR(191) NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    source_event_identity VARCHAR(191) NOT NULL,
+    source_version BIGINT UNSIGNED NOT NULL,
+    selected_step TINYINT UNSIGNED NOT NULL,
+    expected_orders_version BIGINT UNSIGNED NOT NULL,
+    resulting_orders_version BIGINT UNSIGNED NOT NULL,
+    owner_binding_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    evidence_mode ENUM(
+        'retained',
+        'historical_evidence_unavailable_accepted'
+    ) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    evidence_reference VARCHAR(191) NOT NULL,
+    document_kind VARCHAR(191) NULL,
+    affected_steps JSON NULL,
+    candidate_snapshot JSON NOT NULL,
+    step_projection JSON NOT NULL,
+    preview_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    command_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    actor VARCHAR(255) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_historical_operational_baseline_event_identity (
+        baseline_event_identity
+    ),
+    UNIQUE KEY uq_historical_operational_baseline_prior_event (
+        prior_baseline_event_id
+    ),
+    INDEX idx_historical_operational_baseline_case (
+        case_no,
+        resulting_orders_version,
+        id
+    ),
+    INDEX idx_historical_operational_baseline_source (
+        source_event_identity,
+        source_version
+    ),
+    CONSTRAINT fk_historical_operational_baseline_prior
+        FOREIGN KEY (prior_baseline_event_id)
+        REFERENCES historical_order_operational_baseline_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_operational_baseline_case
+        FOREIGN KEY (case_no) REFERENCES orders(case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_operational_baseline_source
+        FOREIGN KEY (source_event_identity)
+        REFERENCES historical_order_adoption_receipts(source_event_identity)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_operational_baseline_step
+        CHECK (selected_step BETWEEN 1 AND 11),
+    CONSTRAINT chk_historical_operational_baseline_versions
+        CHECK (resulting_orders_version = expected_orders_version),
+    CONSTRAINT chk_historical_operational_baseline_fingerprints
+        CHECK (
+            owner_binding_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND preview_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND command_fingerprint REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_historical_operational_baseline_evidence
+        CHECK (
+            (
+                evidence_mode = 'retained'
+                AND document_kind IS NULL
+                AND affected_steps IS NULL
+            )
+            OR (
+                evidence_mode = 'historical_evidence_unavailable_accepted'
+                AND CHAR_LENGTH(TRIM(document_kind)) > 0
+                AND JSON_TYPE(affected_steps) = 'ARRAY'
+                AND JSON_LENGTH(affected_steps) > 0
+            )
+        ),
+    CONSTRAINT chk_historical_operational_baseline_snapshots
+        CHECK (
+            JSON_TYPE(candidate_snapshot) = 'OBJECT'
+            AND JSON_TYPE(step_projection) = 'ARRAY'
+            AND JSON_LENGTH(step_projection) = selected_step
+        ),
+    CONSTRAINT chk_historical_operational_baseline_text
+        CHECK (
+            CHAR_LENGTH(TRIM(baseline_event_identity)) > 0
+            AND CHAR_LENGTH(TRIM(order_identity)) > 0
+            AND CHAR_LENGTH(TRIM(source_event_identity)) > 0
+            AND CHAR_LENGTH(TRIM(reason)) > 0
+            AND CHAR_LENGTH(TRIM(evidence_reference)) > 0
+            AND CHAR_LENGTH(TRIM(actor)) > 0
+            AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_order_operational_baseline_receipts (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    receipt_identity VARCHAR(191) NOT NULL,
+    event_id BIGINT UNSIGNED NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    command_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    preview_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    resulting_orders_version BIGINT UNSIGNED NOT NULL,
+    result_snapshot JSON NOT NULL,
+    actor VARCHAR(255) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_historical_operational_baseline_receipt_identity (
+        receipt_identity
+    ),
+    UNIQUE KEY uq_historical_operational_baseline_receipt_event (event_id),
+    UNIQUE KEY uq_historical_operational_baseline_receipt_idempotency (
+        idempotency_key
+    ),
+    CONSTRAINT fk_historical_operational_baseline_receipt_event
+        FOREIGN KEY (event_id)
+        REFERENCES historical_order_operational_baseline_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_operational_baseline_receipt_fingerprints
+        CHECK (
+            command_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND preview_fingerprint REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_historical_operational_baseline_receipt_snapshot
+        CHECK (JSON_TYPE(result_snapshot) = 'OBJECT'),
+    CONSTRAINT chk_historical_operational_baseline_receipt_text
+        CHECK (
+            CHAR_LENGTH(TRIM(receipt_identity)) > 0
+            AND idempotency_key REGEXP '^[a-z0-9][a-z0-9._:-]{0,190}$'
+            AND CHAR_LENGTH(TRIM(actor)) > 0
+            AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_order_operational_baseline_outbox (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    event_id BIGINT UNSIGNED NOT NULL,
+    receipt_id BIGINT UNSIGNED NOT NULL,
+    intent_key VARCHAR(191) NOT NULL,
+    intent_type ENUM('historical_operational_baseline_confirmed') NOT NULL,
+    bounded_snapshot JSON NOT NULL,
+    published_at TIMESTAMP(6) NULL,
+    attempts INT UNSIGNED NOT NULL DEFAULT 0,
+    last_error VARCHAR(500) NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_historical_operational_baseline_outbox_event (event_id),
+    UNIQUE KEY uq_historical_operational_baseline_outbox_receipt (receipt_id),
+    UNIQUE KEY uq_historical_operational_baseline_outbox_intent (intent_key),
+    INDEX idx_historical_operational_baseline_outbox_pending (
+        published_at,
+        attempts,
+        id
+    ),
+    CONSTRAINT fk_historical_operational_baseline_outbox_event
+        FOREIGN KEY (event_id)
+        REFERENCES historical_order_operational_baseline_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_operational_baseline_outbox_receipt
+        FOREIGN KEY (receipt_id)
+        REFERENCES historical_order_operational_baseline_receipts(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_operational_baseline_outbox_snapshot
+        CHECK (JSON_TYPE(bounded_snapshot) = 'OBJECT'),
+    CONSTRAINT chk_historical_operational_baseline_outbox_text
+        CHECK (CHAR_LENGTH(TRIM(intent_key)) > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_historical_operational_baseline_events_before_update;
+CREATE TRIGGER trg_historical_operational_baseline_events_before_update
+BEFORE UPDATE ON historical_order_operational_baseline_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_operational_baseline_events records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_historical_operational_baseline_events_before_delete;
+CREATE TRIGGER trg_historical_operational_baseline_events_before_delete
+BEFORE DELETE ON historical_order_operational_baseline_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_operational_baseline_events records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_historical_operational_baseline_receipts_before_update;
+CREATE TRIGGER trg_historical_operational_baseline_receipts_before_update
+BEFORE UPDATE ON historical_order_operational_baseline_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_operational_baseline_receipts records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_historical_operational_baseline_receipts_before_delete;
+CREATE TRIGGER trg_historical_operational_baseline_receipts_before_delete
+BEFORE DELETE ON historical_order_operational_baseline_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_operational_baseline_receipts records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_historical_operational_baseline_outbox_before_update;
+CREATE TRIGGER trg_historical_operational_baseline_outbox_before_update
+BEFORE UPDATE ON historical_order_operational_baseline_outbox
+FOR EACH ROW SET NEW.event_id = IF(
+    OLD.id <=> NEW.id
+    AND OLD.event_id <=> NEW.event_id
+    AND OLD.receipt_id <=> NEW.receipt_id
+    AND OLD.intent_key <=> NEW.intent_key
+    AND OLD.intent_type <=> NEW.intent_type
+    AND OLD.bounded_snapshot <=> NEW.bounded_snapshot
+    AND OLD.created_at <=> NEW.created_at,
+    NEW.event_id,
+    NULL
+);
+
+DROP TRIGGER IF EXISTS trg_historical_operational_baseline_outbox_before_delete;
+CREATE TRIGGER trg_historical_operational_baseline_outbox_before_delete
+BEFORE DELETE ON historical_order_operational_baseline_outbox
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_operational_baseline_outbox records cannot be deleted';
+-- END SOURCE: db/schema_parts/1010_historical_operational_baseline.sql
+
+-- BEGIN SOURCE: db/schema_parts/1011_historical_baseline_projector.sql
+-- File: 1011_historical_baseline_projector.sql
+-- Description: 保存歷史基準 projector 的不可變 occurrence、umbrella membership、successor 與 receipt。
+
+CREATE TABLE IF NOT EXISTS historical_baseline_occurrences (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    occurrence_identity CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    order_identity VARCHAR(191) NOT NULL,
+    baseline_event_id BIGINT UNSIGNED NOT NULL,
+    baseline_receipt_id BIGINT UNSIGNED NOT NULL,
+    catalog_identity CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    catalog_version BIGINT UNSIGNED NOT NULL,
+    descriptor_identity CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    contract_id VARCHAR(191) NOT NULL,
+    contract_version BIGINT UNSIGNED NOT NULL,
+    step_number TINYINT UNSIGNED NOT NULL,
+    owner_domain VARCHAR(100) NOT NULL,
+    root_identity_kind VARCHAR(191) NOT NULL,
+    root_identity_path VARCHAR(500) NOT NULL,
+    terminal_predicate_id VARCHAR(191) NOT NULL,
+    terminal_predicate_version BIGINT UNSIGNED NOT NULL,
+    repair_target VARCHAR(191) NOT NULL,
+    repair_capability VARCHAR(191) NOT NULL,
+    observation_variant ENUM('available', 'unavailable') NOT NULL,
+    observation_identity CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    observed_root_identity VARCHAR(191) NULL,
+    owner_source_event_identity VARCHAR(191) NULL,
+    owner_source_version BIGINT UNSIGNED NULL,
+    terminal_result TINYINT(1) NULL,
+    unavailable_code VARCHAR(191) NULL,
+    owner_binding_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_hbp_occurrence_identity (occurrence_identity),
+    UNIQUE KEY uq_hbp_occurrence_observation (
+        baseline_event_id,
+        catalog_identity,
+        descriptor_identity,
+        observation_identity
+    ),
+    UNIQUE KEY uq_hbp_occurrence_membership_lineage (
+        id,
+        case_no,
+        order_identity,
+        baseline_event_id,
+        catalog_identity,
+        catalog_version
+    ),
+    UNIQUE KEY uq_hbp_occurrence_successor_lineage (
+        id,
+        case_no,
+        order_identity,
+        baseline_event_id,
+        catalog_identity,
+        catalog_version,
+        descriptor_identity,
+        contract_id,
+        contract_version,
+        terminal_predicate_id,
+        terminal_predicate_version,
+        owner_source_version
+    ),
+    INDEX idx_hbp_occurrence_case_catalog (
+        case_no,
+        catalog_version,
+        step_number,
+        id
+    ),
+    INDEX idx_hbp_occurrence_contract (
+        contract_id,
+        contract_version,
+        owner_source_version
+    ),
+    CONSTRAINT fk_hbp_occurrence_case
+        FOREIGN KEY (case_no) REFERENCES orders(case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_hbp_occurrence_baseline_event
+        FOREIGN KEY (baseline_event_id)
+        REFERENCES historical_order_operational_baseline_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_hbp_occurrence_baseline_receipt
+        FOREIGN KEY (baseline_receipt_id)
+        REFERENCES historical_order_operational_baseline_receipts(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_hbp_occurrence_hashes
+        CHECK (
+            occurrence_identity REGEXP '^[0-9a-f]{64}$'
+            AND catalog_identity REGEXP '^[0-9a-f]{64}$'
+            AND descriptor_identity REGEXP '^[0-9a-f]{64}$'
+            AND observation_identity REGEXP '^[0-9a-f]{64}$'
+            AND owner_binding_fingerprint REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_hbp_occurrence_versions
+        CHECK (
+            catalog_version > 0
+            AND contract_version > 0
+            AND terminal_predicate_version > 0
+            AND step_number BETWEEN 1 AND 11
+        ),
+    CONSTRAINT chk_hbp_occurrence_observation
+        CHECK (
+            (
+                observation_variant = 'available'
+                AND observed_root_identity IS NOT NULL
+                AND CHAR_LENGTH(TRIM(observed_root_identity)) > 0
+                AND owner_source_event_identity IS NOT NULL
+                AND CHAR_LENGTH(TRIM(owner_source_event_identity)) > 0
+                AND owner_source_version IS NOT NULL
+                AND terminal_result IS NOT NULL
+                AND terminal_result IN (0, 1)
+                AND unavailable_code IS NULL
+            )
+            OR (
+                observation_variant = 'unavailable'
+                AND observed_root_identity IS NULL
+                AND owner_source_event_identity IS NULL
+                AND owner_source_version IS NULL
+                AND terminal_result IS NULL
+                AND unavailable_code IS NOT NULL
+                AND CHAR_LENGTH(TRIM(unavailable_code)) > 0
+            )
+        ),
+    CONSTRAINT chk_hbp_occurrence_text
+        CHECK (
+            CHAR_LENGTH(TRIM(case_no)) > 0
+            AND CHAR_LENGTH(TRIM(order_identity)) > 0
+            AND CHAR_LENGTH(TRIM(contract_id)) > 0
+            AND CHAR_LENGTH(TRIM(owner_domain)) > 0
+            AND CHAR_LENGTH(TRIM(root_identity_kind)) > 0
+            AND CHAR_LENGTH(TRIM(root_identity_path)) > 0
+            AND CHAR_LENGTH(TRIM(terminal_predicate_id)) > 0
+            AND CHAR_LENGTH(TRIM(repair_target)) > 0
+            AND CHAR_LENGTH(TRIM(repair_capability)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_baseline_projector_receipts (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    projector_receipt_identity CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    source_intent_key VARCHAR(191) NOT NULL,
+    payload_digest CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    baseline_event_id BIGINT UNSIGNED NOT NULL,
+    baseline_receipt_id BIGINT UNSIGNED NOT NULL,
+    baseline_outbox_id BIGINT UNSIGNED NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    order_identity VARCHAR(191) NOT NULL,
+    catalog_identity CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    catalog_version BIGINT UNSIGNED NOT NULL,
+    whole_vector_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    whole_vector_count INT UNSIGNED NOT NULL,
+    occurrence_set_digest CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    occurrence_set_count INT UNSIGNED NOT NULL,
+    umbrella_identity CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    result_state ENUM('projected', 'held_active') NOT NULL,
+    post_commit_readback_digest CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_hbp_projector_receipt_identity (projector_receipt_identity),
+    UNIQUE KEY uq_hbp_projector_source_intent (source_intent_key),
+    UNIQUE KEY uq_hbp_projector_idempotency (idempotency_key),
+    UNIQUE KEY uq_hbp_projector_membership_lineage (
+        id,
+        case_no,
+        order_identity,
+        baseline_event_id,
+        catalog_identity,
+        catalog_version,
+        umbrella_identity
+    ),
+    INDEX idx_hbp_projector_case_catalog (
+        case_no,
+        catalog_version,
+        id
+    ),
+    CONSTRAINT fk_hbp_projector_baseline_event
+        FOREIGN KEY (baseline_event_id)
+        REFERENCES historical_order_operational_baseline_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_hbp_projector_baseline_receipt
+        FOREIGN KEY (baseline_receipt_id)
+        REFERENCES historical_order_operational_baseline_receipts(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_hbp_projector_baseline_outbox
+        FOREIGN KEY (baseline_outbox_id)
+        REFERENCES historical_order_operational_baseline_outbox(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_hbp_projector_case
+        FOREIGN KEY (case_no) REFERENCES orders(case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_hbp_projector_hashes
+        CHECK (
+            projector_receipt_identity REGEXP '^[0-9a-f]{64}$'
+            AND payload_digest REGEXP '^[0-9a-f]{64}$'
+            AND catalog_identity REGEXP '^[0-9a-f]{64}$'
+            AND whole_vector_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND occurrence_set_digest REGEXP '^[0-9a-f]{64}$'
+            AND umbrella_identity REGEXP '^[0-9a-f]{64}$'
+            AND post_commit_readback_digest REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_hbp_projector_counts
+        CHECK (
+            catalog_version > 0
+            AND whole_vector_count > 0
+            AND occurrence_set_count >= 0
+        ),
+    CONSTRAINT chk_hbp_projector_text
+        CHECK (
+            source_intent_key REGEXP '^[a-z0-9][a-z0-9._:-]{0,190}$'
+            AND idempotency_key REGEXP '^[a-z0-9][a-z0-9._:-]{0,190}$'
+            AND CHAR_LENGTH(TRIM(case_no)) > 0
+            AND CHAR_LENGTH(TRIM(order_identity)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_baseline_umbrella_memberships (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    membership_identity CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    umbrella_identity CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    projector_receipt_id BIGINT UNSIGNED NOT NULL,
+    set_ordinal INT UNSIGNED NOT NULL,
+    occurrence_id BIGINT UNSIGNED NOT NULL,
+    anomaly_alert_fingerprint CHAR(64) NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    order_identity VARCHAR(191) NOT NULL,
+    baseline_event_id BIGINT UNSIGNED NOT NULL,
+    catalog_identity CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    catalog_version BIGINT UNSIGNED NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_hbp_membership_identity (membership_identity),
+    UNIQUE KEY uq_hbp_membership_occurrence (occurrence_id),
+    UNIQUE KEY uq_hbp_membership_receipt_ordinal (
+        projector_receipt_id,
+        set_ordinal
+    ),
+    INDEX idx_hbp_membership_umbrella (
+        umbrella_identity,
+        catalog_version,
+        occurrence_id
+    ),
+    INDEX idx_hbp_membership_alert (anomaly_alert_fingerprint),
+    CONSTRAINT fk_hbp_membership_occurrence_lineage
+        FOREIGN KEY (
+            occurrence_id,
+            case_no,
+            order_identity,
+            baseline_event_id,
+            catalog_identity,
+            catalog_version
+        ) REFERENCES historical_baseline_occurrences (
+            id,
+            case_no,
+            order_identity,
+            baseline_event_id,
+            catalog_identity,
+            catalog_version
+        ) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_hbp_membership_receipt_lineage
+        FOREIGN KEY (
+            projector_receipt_id,
+            case_no,
+            order_identity,
+            baseline_event_id,
+            catalog_identity,
+            catalog_version,
+            umbrella_identity
+        ) REFERENCES historical_baseline_projector_receipts (
+            id,
+            case_no,
+            order_identity,
+            baseline_event_id,
+            catalog_identity,
+            catalog_version,
+            umbrella_identity
+        ) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_hbp_membership_alert
+        FOREIGN KEY (anomaly_alert_fingerprint)
+        REFERENCES anomaly_current_alerts(fingerprint)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_hbp_membership_hashes
+        CHECK (
+            membership_identity REGEXP '^[0-9a-f]{64}$'
+            AND umbrella_identity REGEXP '^[0-9a-f]{64}$'
+            AND anomaly_alert_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND catalog_identity REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_hbp_membership_identity_text
+        CHECK (
+            CHAR_LENGTH(TRIM(case_no)) > 0
+            AND CHAR_LENGTH(TRIM(order_identity)) > 0
+            AND catalog_version > 0
+            AND set_ordinal > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_baseline_successors (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    successor_relation_identity CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    predecessor_occurrence_id BIGINT UNSIGNED NOT NULL,
+    successor_occurrence_id BIGINT UNSIGNED NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    order_identity VARCHAR(191) NOT NULL,
+    baseline_event_id BIGINT UNSIGNED NOT NULL,
+    catalog_identity CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    catalog_version BIGINT UNSIGNED NOT NULL,
+    descriptor_identity CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    contract_id VARCHAR(191) NOT NULL,
+    contract_version BIGINT UNSIGNED NOT NULL,
+    owner_event_identity VARCHAR(191) NOT NULL,
+    prior_owner_source_version BIGINT UNSIGNED NOT NULL,
+    new_owner_source_version BIGINT UNSIGNED NOT NULL,
+    terminal_predicate_id VARCHAR(191) NOT NULL,
+    terminal_predicate_version BIGINT UNSIGNED NOT NULL,
+    fresh_readback_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_hbp_successor_identity (successor_relation_identity),
+    UNIQUE KEY uq_hbp_successor_predecessor (predecessor_occurrence_id),
+    UNIQUE KEY uq_hbp_successor_occurrence (successor_occurrence_id),
+    INDEX idx_hbp_successor_case_contract (
+        case_no,
+        contract_id,
+        contract_version,
+        new_owner_source_version
+    ),
+    CONSTRAINT fk_hbp_successor_predecessor_lineage
+        FOREIGN KEY (
+            predecessor_occurrence_id,
+            case_no,
+            order_identity,
+            baseline_event_id,
+            catalog_identity,
+            catalog_version,
+            descriptor_identity,
+            contract_id,
+            contract_version,
+            terminal_predicate_id,
+            terminal_predicate_version,
+            prior_owner_source_version
+        ) REFERENCES historical_baseline_occurrences (
+            id,
+            case_no,
+            order_identity,
+            baseline_event_id,
+            catalog_identity,
+            catalog_version,
+            descriptor_identity,
+            contract_id,
+            contract_version,
+            terminal_predicate_id,
+            terminal_predicate_version,
+            owner_source_version
+        ) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_hbp_successor_occurrence_lineage
+        FOREIGN KEY (
+            successor_occurrence_id,
+            case_no,
+            order_identity,
+            baseline_event_id,
+            catalog_identity,
+            catalog_version,
+            descriptor_identity,
+            contract_id,
+            contract_version,
+            terminal_predicate_id,
+            terminal_predicate_version,
+            new_owner_source_version
+        ) REFERENCES historical_baseline_occurrences (
+            id,
+            case_no,
+            order_identity,
+            baseline_event_id,
+            catalog_identity,
+            catalog_version,
+            descriptor_identity,
+            contract_id,
+            contract_version,
+            terminal_predicate_id,
+            terminal_predicate_version,
+            owner_source_version
+        ) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_hbp_successor_hashes
+        CHECK (
+            successor_relation_identity REGEXP '^[0-9a-f]{64}$'
+            AND catalog_identity REGEXP '^[0-9a-f]{64}$'
+            AND descriptor_identity REGEXP '^[0-9a-f]{64}$'
+            AND fresh_readback_fingerprint REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_hbp_successor_lineage
+        CHECK (
+            predecessor_occurrence_id <> successor_occurrence_id
+            AND new_owner_source_version > prior_owner_source_version
+            AND catalog_version > 0
+            AND contract_version > 0
+            AND terminal_predicate_version > 0
+        ),
+    CONSTRAINT chk_hbp_successor_text
+        CHECK (
+            CHAR_LENGTH(TRIM(case_no)) > 0
+            AND CHAR_LENGTH(TRIM(order_identity)) > 0
+            AND CHAR_LENGTH(TRIM(contract_id)) > 0
+            AND CHAR_LENGTH(TRIM(owner_event_identity)) > 0
+            AND CHAR_LENGTH(TRIM(terminal_predicate_id)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_hbp_occurrences_before_insert;
+CREATE TRIGGER trg_hbp_occurrences_before_insert
+BEFORE INSERT ON historical_baseline_occurrences
+FOR EACH ROW SET NEW.case_no = IF(
+    EXISTS(
+        SELECT 1
+        FROM historical_order_operational_baseline_events AS event
+        INNER JOIN historical_order_operational_baseline_receipts AS receipt
+            ON receipt.event_id = event.id
+        WHERE event.id = NEW.baseline_event_id
+          AND receipt.id = NEW.baseline_receipt_id
+          AND event.case_no = NEW.case_no
+          AND event.order_identity = NEW.order_identity
+    ),
+    NEW.case_no,
+    NULL
+);
+
+DROP TRIGGER IF EXISTS trg_hbp_projector_receipts_before_insert;
+CREATE TRIGGER trg_hbp_projector_receipts_before_insert
+BEFORE INSERT ON historical_baseline_projector_receipts
+FOR EACH ROW SET NEW.case_no = IF(
+    EXISTS(
+        SELECT 1
+        FROM historical_order_operational_baseline_events AS event
+        INNER JOIN historical_order_operational_baseline_receipts AS receipt
+            ON receipt.event_id = event.id
+        INNER JOIN historical_order_operational_baseline_outbox AS outbox
+            ON outbox.event_id = event.id
+           AND outbox.receipt_id = receipt.id
+        WHERE event.id = NEW.baseline_event_id
+          AND receipt.id = NEW.baseline_receipt_id
+          AND outbox.id = NEW.baseline_outbox_id
+          AND outbox.intent_key = NEW.source_intent_key
+          AND event.case_no = NEW.case_no
+          AND event.order_identity = NEW.order_identity
+    ),
+    NEW.case_no,
+    NULL
+);
+
+DROP TRIGGER IF EXISTS trg_hbp_memberships_before_insert;
+CREATE TRIGGER trg_hbp_memberships_before_insert
+BEFORE INSERT ON historical_baseline_umbrella_memberships
+FOR EACH ROW SET NEW.anomaly_alert_fingerprint = IF(
+    EXISTS(
+        SELECT 1
+        FROM anomaly_current_alerts AS alert
+        WHERE alert.fingerprint = NEW.anomaly_alert_fingerprint
+          AND alert.source_identity = NEW.umbrella_identity
+    ),
+    NEW.anomaly_alert_fingerprint,
+    NULL
+);
+
+DROP TRIGGER IF EXISTS trg_hbp_occurrences_before_update;
+CREATE TRIGGER trg_hbp_occurrences_before_update
+BEFORE UPDATE ON historical_baseline_occurrences
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_baseline_occurrences records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_hbp_occurrences_before_delete;
+CREATE TRIGGER trg_hbp_occurrences_before_delete
+BEFORE DELETE ON historical_baseline_occurrences
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_baseline_occurrences records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_hbp_memberships_before_update;
+CREATE TRIGGER trg_hbp_memberships_before_update
+BEFORE UPDATE ON historical_baseline_umbrella_memberships
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_baseline_umbrella_memberships records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_hbp_memberships_before_delete;
+CREATE TRIGGER trg_hbp_memberships_before_delete
+BEFORE DELETE ON historical_baseline_umbrella_memberships
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_baseline_umbrella_memberships records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_hbp_successors_before_update;
+CREATE TRIGGER trg_hbp_successors_before_update
+BEFORE UPDATE ON historical_baseline_successors
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_baseline_successors records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_hbp_successors_before_delete;
+CREATE TRIGGER trg_hbp_successors_before_delete
+BEFORE DELETE ON historical_baseline_successors
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_baseline_successors records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_hbp_projector_receipts_before_update;
+CREATE TRIGGER trg_hbp_projector_receipts_before_update
+BEFORE UPDATE ON historical_baseline_projector_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_baseline_projector_receipts records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_hbp_projector_receipts_before_delete;
+CREATE TRIGGER trg_hbp_projector_receipts_before_delete
+BEFORE DELETE ON historical_baseline_projector_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_baseline_projector_receipts records cannot be deleted';
+-- END SOURCE: db/schema_parts/1011_historical_baseline_projector.sql
+
+-- BEGIN SOURCE: db/schema_parts/1012_service_before_replacement.sql
+-- File: 1012_service_before_replacement.sql
+-- Description: 保存服務前換人的不可變事件、逐 root disposition、successor binding、receipt 與內部 outbox。
+
+CREATE TABLE IF NOT EXISTS scheduling_service_before_replacement_events (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    replacement_event_identity VARCHAR(191) NOT NULL,
+    prior_replacement_event_id BIGINT UNSIGNED NULL,
+    case_no VARCHAR(50) NOT NULL,
+    scenario ENUM('R-01', 'R-02', 'R-03', 'R-04', 'R-07') NOT NULL,
+    prior_generation_id BIGINT NOT NULL,
+    replacement_generation_id BIGINT NOT NULL,
+    prior_generation_identity VARCHAR(191) NOT NULL,
+    replacement_generation_identity VARCHAR(191) NOT NULL,
+    prior_event_identity VARCHAR(191) NOT NULL,
+    expected_aggregate_version BIGINT UNSIGNED NOT NULL,
+    resulting_aggregate_version BIGINT UNSIGNED NOT NULL,
+    expected_generation_version BIGINT UNSIGNED NOT NULL,
+    resulting_generation_version BIGINT UNSIGNED NOT NULL,
+    expected_event_version BIGINT UNSIGNED NOT NULL,
+    resulting_event_version BIGINT UNSIGNED NOT NULL,
+    zero_service_proof_identity VARCHAR(191) NOT NULL,
+    zero_service_proof_owner ENUM(
+        'scheduling_official_service_projection'
+    ) NOT NULL,
+    zero_service_proof_contract_version SMALLINT UNSIGNED NOT NULL,
+    zero_service_source_projection_identity VARCHAR(191) NOT NULL,
+    zero_service_source_projection_version BIGINT UNSIGNED NOT NULL,
+    zero_service_proof_version BIGINT UNSIGNED NOT NULL,
+    zero_service_proof_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    official_service_day_count INT UNSIGNED NOT NULL,
+    replacement_reason VARCHAR(500) NOT NULL,
+    reason_evidence_digest CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    command_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    preview_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    actor_id VARCHAR(191) NOT NULL,
+    capability_atom VARCHAR(191) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_service_before_replacement_event_identity (
+        replacement_event_identity
+    ),
+    UNIQUE KEY uq_service_before_replacement_event_idempotency (
+        idempotency_key
+    ),
+    UNIQUE KEY uq_service_before_replacement_event_prior (
+        prior_replacement_event_id
+    ),
+    UNIQUE KEY uq_service_before_replacement_event_generation (
+        replacement_generation_id
+    ),
+    UNIQUE KEY uq_service_before_replacement_event_successor_binding (
+        id,
+        case_no,
+        replacement_generation_id,
+        scenario,
+        expected_generation_version,
+        expected_event_version
+    ),
+    UNIQUE KEY uq_service_before_replacement_event_version_binding (
+        id,
+        case_no,
+        resulting_aggregate_version,
+        resulting_generation_version,
+        resulting_event_version
+    ),
+    UNIQUE KEY uq_service_before_replacement_case_event_version (
+        case_no,
+        resulting_event_version
+    ),
+    INDEX idx_service_before_replacement_prior_event (
+        prior_replacement_event_id
+    ),
+    INDEX idx_service_before_replacement_case_versions (
+        case_no,
+        resulting_aggregate_version,
+        resulting_generation_version,
+        id
+    ),
+    CONSTRAINT fk_service_before_replacement_prior_event
+        FOREIGN KEY (
+            prior_replacement_event_id,
+            case_no,
+            expected_aggregate_version,
+            expected_generation_version,
+            expected_event_version
+        )
+        REFERENCES scheduling_service_before_replacement_events(
+            id,
+            case_no,
+            resulting_aggregate_version,
+            resulting_generation_version,
+            resulting_event_version
+        )
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_service_before_replacement_case
+        FOREIGN KEY (case_no) REFERENCES orders(case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_service_before_replacement_prior_generation
+        FOREIGN KEY (prior_generation_id, case_no)
+        REFERENCES scheduling_generations(id, case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_service_before_replacement_generation
+        FOREIGN KEY (replacement_generation_id, case_no)
+        REFERENCES scheduling_generations(id, case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_service_before_replacement_distinct_generation
+        CHECK (replacement_generation_id <> prior_generation_id),
+    CONSTRAINT chk_service_before_replacement_strict_versions
+        CHECK (
+            resulting_aggregate_version > expected_aggregate_version
+            AND resulting_generation_version > expected_generation_version
+            AND resulting_event_version > expected_event_version
+        ),
+    CONSTRAINT chk_service_before_replacement_zero_service
+        CHECK (
+            zero_service_proof_contract_version = 1
+            AND zero_service_proof_version > 0
+            AND zero_service_source_projection_version = zero_service_proof_version
+            AND official_service_day_count = 0
+        ),
+    CONSTRAINT chk_service_before_replacement_digests
+        CHECK (
+            zero_service_proof_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND reason_evidence_digest REGEXP '^[0-9a-f]{64}$'
+            AND command_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND preview_fingerprint REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_service_before_replacement_text
+        CHECK (
+            CHAR_LENGTH(TRIM(replacement_event_identity)) > 0
+            AND CHAR_LENGTH(TRIM(prior_generation_identity)) > 0
+            AND CHAR_LENGTH(TRIM(replacement_generation_identity)) > 0
+            AND CHAR_LENGTH(TRIM(prior_event_identity)) > 0
+            AND CHAR_LENGTH(TRIM(zero_service_proof_identity)) > 0
+            AND CHAR_LENGTH(
+                TRIM(zero_service_source_projection_identity)
+            ) > 0
+            AND CHAR_LENGTH(TRIM(replacement_reason)) > 0
+            AND CHAR_LENGTH(TRIM(actor_id)) > 0
+            AND CHAR_LENGTH(TRIM(capability_atom)) > 0
+            AND idempotency_key REGEXP '^[a-z0-9][a-z0-9._:-]{0,190}$'
+            AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_service_before_replacement_roots (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    replacement_event_id BIGINT UNSIGNED NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    root_identity VARCHAR(191) NOT NULL,
+    owner_domain ENUM('scheduling', 'matching') NOT NULL,
+    root_kind ENUM(
+        'candidate_binding',
+        'willingness',
+        'matching_plan',
+        'matching_segment',
+        'matching_reply',
+        'recipient_confirmation',
+        'waiting_lock',
+        'commitment',
+        'signback',
+        'recipient_binding',
+        'effective_generation',
+        'assignment',
+        'official_schedule',
+        'successor_round'
+    ) NOT NULL,
+    disposition ENUM('retained', 'superseded', 'created') NOT NULL,
+    canonical_ordinal INT UNSIGNED NOT NULL,
+    owner_descriptor_identity VARCHAR(191) NOT NULL,
+    owner_descriptor_version BIGINT UNSIGNED NOT NULL,
+    owner_descriptor_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_service_before_replacement_root_identity (
+        replacement_event_id,
+        root_identity
+    ),
+    UNIQUE KEY uq_service_before_replacement_root_ordinal (
+        replacement_event_id,
+        disposition,
+        canonical_ordinal
+    ),
+    INDEX idx_service_before_replacement_root_case (
+        case_no,
+        disposition,
+        root_kind,
+        id
+    ),
+    CONSTRAINT fk_service_before_replacement_root_event
+        FOREIGN KEY (replacement_event_id, case_no)
+        REFERENCES scheduling_service_before_replacement_events(id, case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_service_before_replacement_root_ordinal
+        CHECK (canonical_ordinal > 0),
+    CONSTRAINT chk_service_before_replacement_root_owner_kind
+        CHECK (
+            (
+                owner_domain = 'matching'
+                AND root_kind IN (
+                    'candidate_binding',
+                    'willingness',
+                    'matching_plan',
+                    'matching_segment',
+                    'matching_reply',
+                    'recipient_confirmation',
+                    'successor_round'
+                )
+            )
+            OR (
+                owner_domain = 'scheduling'
+                AND root_kind IN (
+                    'waiting_lock',
+                    'commitment',
+                    'signback',
+                    'recipient_binding',
+                    'effective_generation',
+                    'assignment',
+                    'official_schedule'
+                )
+            )
+        ),
+    CONSTRAINT chk_service_before_replacement_root_descriptor
+        CHECK (
+            CHAR_LENGTH(TRIM(owner_descriptor_identity)) > 0
+            AND owner_descriptor_version > 0
+            AND owner_descriptor_fingerprint REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_service_before_replacement_root_text
+        CHECK (
+            CHAR_LENGTH(TRIM(root_identity)) > 0
+            AND root_identity NOT REGEXP '[[:cntrl:]]'
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_service_before_replacement_successors (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    replacement_event_id BIGINT UNSIGNED NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    replacement_generation_id BIGINT NOT NULL,
+    matching_package_lineage_id BIGINT UNSIGNED NOT NULL,
+    matching_event_id BIGINT UNSIGNED NOT NULL,
+    successor_package_identity VARCHAR(191) NOT NULL,
+    successor_round_identity VARCHAR(191) NOT NULL,
+    successor_matching_event_identity VARCHAR(191) NOT NULL,
+    scenario ENUM('R-01', 'R-02', 'R-03', 'R-04', 'R-07') NOT NULL,
+    expected_generation_version BIGINT UNSIGNED NOT NULL,
+    expected_event_version BIGINT UNSIGNED NOT NULL,
+    candidate_count INT UNSIGNED NOT NULL,
+    zero_candidate_disposition ENUM('blocked_no_candidate') NULL,
+    reuse_proof_variant ENUM('not_reused', 'candidate_pool_reused') NOT NULL,
+    reuse_pool_identity VARCHAR(191) NULL,
+    reuse_round_identity VARCHAR(191) NULL,
+    reuse_coverage_version BIGINT UNSIGNED NULL,
+    reuse_availability_version BIGINT UNSIGNED NULL,
+    reuse_willingness_version BIGINT UNSIGNED NULL,
+    reuse_candidate_identity VARCHAR(191) NULL,
+    reuse_accepted_candidate TINYINT(1) NULL,
+    reuse_proof_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NULL,
+    resume_step ENUM('step_2', 'step_3', 'step_4') NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_service_before_replacement_successor_event (
+        replacement_event_id
+    ),
+    UNIQUE KEY uq_service_before_replacement_successor_round (
+        successor_round_identity
+    ),
+    UNIQUE KEY uq_service_before_replacement_successor_binding (
+        id,
+        replacement_event_id,
+        case_no
+    ),
+    INDEX idx_service_before_replacement_successor_package (
+        matching_package_lineage_id,
+        matching_event_id
+    ),
+    CONSTRAINT fk_service_before_replacement_successor_owner_event
+        FOREIGN KEY (
+            replacement_event_id,
+            case_no,
+            replacement_generation_id,
+            scenario,
+            expected_generation_version,
+            expected_event_version
+        )
+        REFERENCES scheduling_service_before_replacement_events(
+            id,
+            case_no,
+            replacement_generation_id,
+            scenario,
+            expected_generation_version,
+            expected_event_version
+        )
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_service_before_replacement_successor_package
+        FOREIGN KEY (matching_package_lineage_id)
+        REFERENCES matching_coordination_package_lineage(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_service_before_replacement_successor_matching_event
+        FOREIGN KEY (matching_event_id)
+        REFERENCES matching_coordination_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_service_before_replacement_successor_r07
+        CHECK (
+            (
+                scenario = 'R-07'
+                AND candidate_count = 0
+                AND zero_candidate_disposition = 'blocked_no_candidate'
+                AND reuse_proof_variant = 'not_reused'
+                AND resume_step = 'step_2'
+            )
+            OR (
+                scenario <> 'R-07'
+                AND zero_candidate_disposition IS NULL
+            )
+        ),
+    CONSTRAINT chk_service_before_replacement_successor_reuse
+        CHECK (
+            (
+                reuse_proof_variant = 'not_reused'
+                AND reuse_pool_identity IS NULL
+                AND reuse_round_identity IS NULL
+                AND reuse_coverage_version IS NULL
+                AND reuse_availability_version IS NULL
+                AND reuse_willingness_version IS NULL
+                AND reuse_candidate_identity IS NULL
+                AND reuse_accepted_candidate IS NULL
+                AND reuse_proof_fingerprint IS NULL
+                AND resume_step = 'step_2'
+            )
+            OR (
+                reuse_proof_variant = 'candidate_pool_reused'
+                AND reuse_round_identity = successor_round_identity
+                AND CHAR_LENGTH(TRIM(reuse_pool_identity)) > 0
+                AND reuse_coverage_version IS NOT NULL
+                AND reuse_availability_version IS NOT NULL
+                AND reuse_willingness_version IS NOT NULL
+                AND CHAR_LENGTH(TRIM(reuse_candidate_identity)) > 0
+                AND reuse_accepted_candidate IN (0, 1)
+                AND reuse_proof_fingerprint REGEXP '^[0-9a-f]{64}$'
+                AND (
+                    (
+                        reuse_accepted_candidate = 0
+                        AND resume_step = 'step_3'
+                    )
+                    OR (
+                        reuse_accepted_candidate = 1
+                        AND resume_step = 'step_4'
+                    )
+                )
+            )
+        ),
+    CONSTRAINT chk_service_before_replacement_successor_text
+        CHECK (
+            CHAR_LENGTH(TRIM(successor_package_identity)) > 0
+            AND CHAR_LENGTH(TRIM(successor_round_identity)) > 0
+            AND CHAR_LENGTH(TRIM(successor_matching_event_identity)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_service_before_replacement_receipts (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    receipt_identity VARCHAR(191) NOT NULL,
+    replacement_event_id BIGINT UNSIGNED NOT NULL,
+    successor_binding_id BIGINT UNSIGNED NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    root_set_digest_contract ENUM('sha256_newline_v1') NOT NULL,
+    command_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    preview_fingerprint CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    retained_root_set_digest CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    retained_root_count INT UNSIGNED NOT NULL,
+    superseded_root_set_digest CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    superseded_root_count INT UNSIGNED NOT NULL,
+    created_root_set_digest CHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    created_root_count INT UNSIGNED NOT NULL,
+    resulting_aggregate_version BIGINT UNSIGNED NOT NULL,
+    resulting_generation_version BIGINT UNSIGNED NOT NULL,
+    resulting_event_version BIGINT UNSIGNED NOT NULL,
+    outbox_identity VARCHAR(191) NOT NULL,
+    result_state ENUM('applied') NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_service_before_replacement_receipt_identity (
+        receipt_identity
+    ),
+    UNIQUE KEY uq_service_before_replacement_receipt_event (
+        replacement_event_id
+    ),
+    UNIQUE KEY uq_service_before_replacement_receipt_successor (
+        successor_binding_id
+    ),
+    UNIQUE KEY uq_service_before_replacement_receipt_idempotency (
+        idempotency_key
+    ),
+    UNIQUE KEY uq_service_before_replacement_receipt_outbox (
+        outbox_identity
+    ),
+    UNIQUE KEY uq_service_before_replacement_receipt_binding (
+        id,
+        replacement_event_id,
+        case_no
+    ),
+    CONSTRAINT fk_service_before_replacement_receipt_event
+        FOREIGN KEY (
+            replacement_event_id,
+            case_no,
+            resulting_aggregate_version,
+            resulting_generation_version,
+            resulting_event_version
+        )
+        REFERENCES scheduling_service_before_replacement_events(
+            id,
+            case_no,
+            resulting_aggregate_version,
+            resulting_generation_version,
+            resulting_event_version
+        )
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_service_before_replacement_receipt_successor
+        FOREIGN KEY (successor_binding_id, replacement_event_id, case_no)
+        REFERENCES scheduling_service_before_replacement_successors(
+            id,
+            replacement_event_id,
+            case_no
+        )
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_service_before_replacement_receipt_digests
+        CHECK (
+            command_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND preview_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND retained_root_set_digest REGEXP '^[0-9a-f]{64}$'
+            AND superseded_root_set_digest REGEXP '^[0-9a-f]{64}$'
+            AND created_root_set_digest REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_service_before_replacement_receipt_versions
+        CHECK (
+            resulting_aggregate_version > 0
+            AND resulting_generation_version > 0
+            AND resulting_event_version > 0
+        ),
+    CONSTRAINT chk_service_before_replacement_receipt_text
+        CHECK (
+            CHAR_LENGTH(TRIM(receipt_identity)) > 0
+            AND idempotency_key REGEXP '^[a-z0-9][a-z0-9._:-]{0,190}$'
+            AND CHAR_LENGTH(TRIM(outbox_identity)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_service_before_replacement_outbox (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    replacement_event_id BIGINT UNSIGNED NOT NULL,
+    receipt_id BIGINT UNSIGNED NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    outbox_identity VARCHAR(191) NOT NULL,
+    intent_type ENUM('successor_projection_readback_requested') NOT NULL,
+    target_owner ENUM('orders_anomalies_projection') NOT NULL,
+    bounded_payload JSON NOT NULL,
+    published_at TIMESTAMP(6) NULL,
+    attempts INT UNSIGNED NOT NULL DEFAULT 0,
+    last_error VARCHAR(500) NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_service_before_replacement_outbox_event (
+        replacement_event_id
+    ),
+    UNIQUE KEY uq_service_before_replacement_outbox_receipt (receipt_id),
+    UNIQUE KEY uq_service_before_replacement_outbox_identity (
+        outbox_identity
+    ),
+    INDEX idx_service_before_replacement_outbox_pending (
+        published_at,
+        attempts,
+        id
+    ),
+    CONSTRAINT fk_service_before_replacement_outbox_event
+        FOREIGN KEY (replacement_event_id, case_no)
+        REFERENCES scheduling_service_before_replacement_events(id, case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_service_before_replacement_outbox_receipt
+        FOREIGN KEY (receipt_id, replacement_event_id, case_no)
+        REFERENCES scheduling_service_before_replacement_receipts(
+            id,
+            replacement_event_id,
+            case_no
+        )
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_service_before_replacement_outbox_payload
+        CHECK (JSON_TYPE(bounded_payload) = 'OBJECT'),
+    CONSTRAINT chk_service_before_replacement_outbox_text
+        CHECK (CHAR_LENGTH(TRIM(outbox_identity)) > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_service_before_replacement_events_before_insert;
+CREATE TRIGGER trg_service_before_replacement_events_before_insert
+BEFORE INSERT ON scheduling_service_before_replacement_events
+FOR EACH ROW SET NEW.case_no = IF(
+    EXISTS(
+        SELECT 1
+        FROM scheduling_generations AS prior_generation
+        INNER JOIN scheduling_generations AS replacement_generation
+            ON replacement_generation.id = NEW.replacement_generation_id
+           AND replacement_generation.case_no = NEW.case_no
+        INNER JOIN scheduling_aggregates AS aggregate
+            ON aggregate.case_no = NEW.case_no
+        WHERE prior_generation.id = NEW.prior_generation_id
+          AND prior_generation.case_no = NEW.case_no
+          AND prior_generation.generation_number = NEW.expected_generation_version
+          AND prior_generation.resulting_aggregate_version = NEW.expected_aggregate_version
+          AND replacement_generation.generation_number = NEW.resulting_generation_version
+          AND replacement_generation.resulting_aggregate_version = NEW.resulting_aggregate_version
+          AND aggregate.generation_counter = NEW.resulting_generation_version
+          AND aggregate.aggregate_version = NEW.resulting_aggregate_version
+          AND NOT EXISTS (
+              SELECT 1
+              FROM scheduling_service_day_logs AS service_day_log
+              WHERE service_day_log.case_no = NEW.case_no
+          )
+    ),
+    NEW.case_no,
+    NULL
+);
+
+DROP TRIGGER IF EXISTS trg_service_before_replacement_events_before_update;
+CREATE TRIGGER trg_service_before_replacement_events_before_update
+BEFORE UPDATE ON scheduling_service_before_replacement_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_before_replacement_events records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_service_before_replacement_events_before_delete;
+CREATE TRIGGER trg_service_before_replacement_events_before_delete
+BEFORE DELETE ON scheduling_service_before_replacement_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_before_replacement_events records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_service_before_replacement_roots_before_update;
+CREATE TRIGGER trg_service_before_replacement_roots_before_update
+BEFORE UPDATE ON scheduling_service_before_replacement_roots
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_before_replacement_roots records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_service_before_replacement_roots_before_delete;
+CREATE TRIGGER trg_service_before_replacement_roots_before_delete
+BEFORE DELETE ON scheduling_service_before_replacement_roots
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_before_replacement_roots records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_service_before_replacement_successors_before_insert;
+CREATE TRIGGER trg_service_before_replacement_successors_before_insert
+BEFORE INSERT ON scheduling_service_before_replacement_successors
+FOR EACH ROW SET NEW.case_no = IF(
+    EXISTS(
+        SELECT 1
+        FROM matching_coordination_package_lineage AS matching_package
+        INNER JOIN matching_coordination_events AS matching_event
+            ON matching_event.package_lineage_id = matching_package.id
+        WHERE matching_package.id = NEW.matching_package_lineage_id
+          AND matching_event.id = NEW.matching_event_id
+          AND matching_package.package_id = NEW.successor_package_identity
+          AND matching_event.event_id = NEW.successor_matching_event_identity
+          AND matching_package.case_no = NEW.case_no
+          AND matching_event.case_no = NEW.case_no
+    ),
+    NEW.case_no,
+    NULL
+);
+
+DROP TRIGGER IF EXISTS trg_service_before_replacement_successors_before_update;
+CREATE TRIGGER trg_service_before_replacement_successors_before_update
+BEFORE UPDATE ON scheduling_service_before_replacement_successors
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_before_replacement_successors records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_service_before_replacement_successors_before_delete;
+CREATE TRIGGER trg_service_before_replacement_successors_before_delete
+BEFORE DELETE ON scheduling_service_before_replacement_successors
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_before_replacement_successors records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_service_before_replacement_receipts_before_update;
+DROP TRIGGER IF EXISTS trg_service_before_replacement_receipts_before_insert;
+CREATE TRIGGER trg_service_before_replacement_receipts_before_insert
+BEFORE INSERT ON scheduling_service_before_replacement_receipts
+FOR EACH ROW SET NEW.case_no = IF(
+    NEW.retained_root_count = (
+        SELECT COUNT(*)
+        FROM scheduling_service_before_replacement_roots AS retained_root
+        WHERE retained_root.replacement_event_id = NEW.replacement_event_id
+          AND retained_root.case_no = NEW.case_no
+          AND retained_root.disposition = 'retained'
+    )
+    AND NEW.retained_root_count = (
+        SELECT COALESCE(MAX(retained_root.canonical_ordinal), 0)
+        FROM scheduling_service_before_replacement_roots AS retained_root
+        WHERE retained_root.replacement_event_id = NEW.replacement_event_id
+          AND retained_root.case_no = NEW.case_no
+          AND retained_root.disposition = 'retained'
+    )
+    AND NEW.superseded_root_count = (
+        SELECT COUNT(*)
+        FROM scheduling_service_before_replacement_roots AS superseded_root
+        WHERE superseded_root.replacement_event_id = NEW.replacement_event_id
+          AND superseded_root.case_no = NEW.case_no
+          AND superseded_root.disposition = 'superseded'
+    )
+    AND NEW.superseded_root_count = (
+        SELECT COALESCE(MAX(superseded_root.canonical_ordinal), 0)
+        FROM scheduling_service_before_replacement_roots AS superseded_root
+        WHERE superseded_root.replacement_event_id = NEW.replacement_event_id
+          AND superseded_root.case_no = NEW.case_no
+          AND superseded_root.disposition = 'superseded'
+    )
+    AND NEW.created_root_count = (
+        SELECT COUNT(*)
+        FROM scheduling_service_before_replacement_roots AS created_root
+        WHERE created_root.replacement_event_id = NEW.replacement_event_id
+          AND created_root.case_no = NEW.case_no
+          AND created_root.disposition = 'created'
+    )
+    AND NEW.created_root_count = (
+        SELECT COALESCE(MAX(created_root.canonical_ordinal), 0)
+        FROM scheduling_service_before_replacement_roots AS created_root
+        WHERE created_root.replacement_event_id = NEW.replacement_event_id
+          AND created_root.case_no = NEW.case_no
+          AND created_root.disposition = 'created'
+    ),
+    NEW.case_no,
+    NULL
+);
+
+CREATE TRIGGER trg_service_before_replacement_receipts_before_update
+BEFORE UPDATE ON scheduling_service_before_replacement_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_before_replacement_receipts records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_service_before_replacement_receipts_before_delete;
+CREATE TRIGGER trg_service_before_replacement_receipts_before_delete
+BEFORE DELETE ON scheduling_service_before_replacement_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_before_replacement_receipts records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_service_before_replacement_outbox_before_update;
+CREATE TRIGGER trg_service_before_replacement_outbox_before_update
+BEFORE UPDATE ON scheduling_service_before_replacement_outbox
+FOR EACH ROW SET NEW.replacement_event_id = IF(
+    OLD.id <=> NEW.id
+    AND OLD.replacement_event_id <=> NEW.replacement_event_id
+    AND OLD.receipt_id <=> NEW.receipt_id
+    AND OLD.case_no <=> NEW.case_no
+    AND OLD.outbox_identity <=> NEW.outbox_identity
+    AND OLD.intent_type <=> NEW.intent_type
+    AND OLD.target_owner <=> NEW.target_owner
+    AND OLD.bounded_payload <=> NEW.bounded_payload
+    AND OLD.created_at <=> NEW.created_at,
+    NEW.replacement_event_id,
+    NULL
+);
+
+DROP TRIGGER IF EXISTS trg_service_before_replacement_outbox_before_insert;
+CREATE TRIGGER trg_service_before_replacement_outbox_before_insert
+BEFORE INSERT ON scheduling_service_before_replacement_outbox
+FOR EACH ROW SET NEW.case_no = IF(
+    EXISTS(
+        SELECT 1
+        FROM scheduling_service_before_replacement_receipts AS receipt
+        WHERE receipt.id = NEW.receipt_id
+          AND receipt.replacement_event_id = NEW.replacement_event_id
+          AND receipt.case_no = NEW.case_no
+          AND receipt.outbox_identity = NEW.outbox_identity
+    ),
+    NEW.case_no,
+    NULL
+);
+
+DROP TRIGGER IF EXISTS trg_service_before_replacement_outbox_before_delete;
+CREATE TRIGGER trg_service_before_replacement_outbox_before_delete
+BEFORE DELETE ON scheduling_service_before_replacement_outbox
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_before_replacement_outbox records cannot be deleted';
+-- END SOURCE: db/schema_parts/1012_service_before_replacement.sql

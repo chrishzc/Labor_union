@@ -1,0 +1,76 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-anomaly-reclassification-disposition-2026-08-27-v1",
+  "descriptors": {
+    "1009_anomaly_reclassification_disposition.sql": {
+      "tables": {
+        "anomaly_reclassification_dispositions": [
+          "id", "disposition_identity", "alert_fingerprint", "definition_code", "disposition",
+          "source_identity", "source_version", "expected_workflow_version", "target_domain",
+          "target_reference", "target_version", "actor", "reason", "evidence_reference",
+          "rulebook_reference", "release_evidence_reference", "preview_fingerprint", "idempotency_key",
+          "correlation_id", "created_at"
+        ],
+        "anomaly_reclassification_receipts": [
+          "id", "receipt_identity", "disposition_id", "workflow_event_id", "before_state_fingerprint",
+          "after_state_fingerprint", "before_workflow_version", "after_workflow_version", "result_snapshot",
+          "correlation_id", "created_at"
+        ],
+        "anomaly_reclassification_batch_receipts": [
+          "id", "batch_receipt_identity", "operation_identity", "idempotency_key", "request_fingerprint",
+          "actor", "correlation_id", "eligible_codes", "eligible_codes_fingerprint", "cursor_definition_code", "cursor_source_identity",
+          "next_cursor_definition_code", "next_cursor_source_identity",
+          "batch_size", "scanned_count", "applied_count", "blocked_count", "before_fingerprints",
+          "after_fingerprints", "blocked_items", "status", "created_at"
+        ]
+      },
+      "indexes": {
+        "anomaly_reclassification_dispositions.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "anomaly_reclassification_dispositions.uq_anomaly_reclassification_disposition_identity": {"non_unique": 0, "columns": ["disposition_identity"]},
+        "anomaly_reclassification_dispositions.uq_anomaly_reclassification_disposition_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "anomaly_reclassification_dispositions.uq_anomaly_reclassification_disposition_alert": {"non_unique": 0, "columns": ["alert_fingerprint"]},
+        "anomaly_reclassification_dispositions.idx_anomaly_reclassification_disposition_source": {"non_unique": 1, "columns": ["definition_code", "source_identity", "source_version"]},
+        "anomaly_reclassification_receipts.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "anomaly_reclassification_receipts.uq_anomaly_reclassification_receipt_identity": {"non_unique": 0, "columns": ["receipt_identity"]},
+        "anomaly_reclassification_receipts.uq_anomaly_reclassification_receipt_disposition": {"non_unique": 0, "columns": ["disposition_id"]},
+        "anomaly_reclassification_receipts.uq_anomaly_reclassification_receipt_workflow_event": {"non_unique": 0, "columns": ["workflow_event_id"]},
+        "anomaly_reclassification_receipts.idx_anomaly_reclassification_receipt_state": {"non_unique": 1, "columns": ["before_state_fingerprint", "id"]},
+        "anomaly_reclassification_batch_receipts.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "anomaly_reclassification_batch_receipts.uq_anomaly_reclassification_batch_receipt_identity": {"non_unique": 0, "columns": ["batch_receipt_identity"]},
+        "anomaly_reclassification_batch_receipts.uq_anomaly_reclassification_batch_operation_cursor": {"non_unique": 0, "columns": ["operation_identity", "cursor_definition_code", "cursor_source_identity"]},
+        "anomaly_reclassification_batch_receipts.uq_anomaly_reclassification_batch_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "anomaly_reclassification_batch_receipts.idx_anomaly_reclassification_batch_status": {"non_unique": 1, "columns": ["eligible_codes_fingerprint", "status", "id"]}
+      },
+      "foreign_keys": {
+        "anomaly_reclassification_dispositions.fk_anomaly_reclassification_disposition_alert": {"columns": ["alert_fingerprint"], "referenced_table": "anomaly_current_alerts", "referenced_columns": ["fingerprint"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "anomaly_reclassification_receipts.fk_anomaly_reclassification_receipt_disposition": {"columns": ["disposition_id"], "referenced_table": "anomaly_reclassification_dispositions", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "anomaly_reclassification_receipts.fk_anomaly_reclassification_receipt_workflow_event": {"columns": ["workflow_event_id"], "referenced_table": "anomaly_workflow_events", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"}
+      },
+      "checks": {
+        "anomaly_reclassification_dispositions.chk_anomaly_reclassification_disposition_fingerprints": "and(atom(regexp_like(alert_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$')))",
+        "anomaly_reclassification_dispositions.chk_anomaly_reclassification_disposition_target": "or(and(atom(disposition='retired_false_positive'),atom(target_domainisnull),atom(target_referenceisnull),atom(target_versionisnull)),and(atom(dispositionin('reclassified_to_owner_work_item','replaced_by_successor')),atom(char_length(trim(target_domain))>0),atom(char_length(trim(target_reference))>0),atom(target_versionisnotnull)))",
+        "anomaly_reclassification_dispositions.chk_anomaly_reclassification_disposition_retired_evidence": "or(and(atom(disposition='retired_false_positive'),atom(char_length(trim(rulebook_reference))>0),atom(char_length(trim(release_evidence_reference))>0)),atom(disposition<>'retired_false_positive'))",
+        "anomaly_reclassification_dispositions.chk_anomaly_reclassification_disposition_optional_evidence": "or(and(atom(rulebook_referenceisnull),atom(release_evidence_referenceisnull)),and(atom(rulebook_referenceisnotnull),atom(release_evidence_referenceisnotnull),atom(char_length(trim(rulebook_reference))>0),atom(char_length(trim(release_evidence_reference))>0)))",
+        "anomaly_reclassification_dispositions.chk_anomaly_reclassification_disposition_text": "and(atom(char_length(trim(disposition_identity))>0),atom(char_length(trim(definition_code))>0),atom(char_length(trim(source_identity))>0),atom(char_length(trim(actor))>0),atom(char_length(trim(reason))>0),atom(char_length(trim(evidence_reference))>0),atom(char_length(trim(idempotency_key))>0),atom(char_length(trim(correlation_id))>0))",
+        "anomaly_reclassification_receipts.chk_anomaly_reclassification_receipt_fingerprints": "and(atom(regexp_like(before_state_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(after_state_fingerprint,'^[0-9a-f]{64}$')))",
+        "anomaly_reclassification_receipts.chk_anomaly_reclassification_receipt_versions": "atom(after_workflow_version=before_workflow_version+1)",
+        "anomaly_reclassification_receipts.chk_anomaly_reclassification_receipt_snapshot": "atom(json_type(result_snapshot)='OBJECT')",
+        "anomaly_reclassification_receipts.chk_anomaly_reclassification_receipt_text": "and(atom(char_length(trim(receipt_identity))>0),atom(char_length(trim(correlation_id))>0))",
+        "anomaly_reclassification_batch_receipts.chk_anomaly_reclassification_batch_size": "and(atom(batch_sizebetween1),atom(100))",
+        "anomaly_reclassification_batch_receipts.chk_anomaly_reclassification_batch_counts": "and(atom(scanned_count<=batch_size),atom(applied_count+blocked_count=scanned_count))",
+        "anomaly_reclassification_batch_receipts.chk_anomaly_reclassification_batch_fingerprints": "and(atom(json_type(eligible_codes)='ARRAY'),atom(json_length(eligible_codes)>0),atom(regexp_like(eligible_codes_fingerprint,'^[0-9a-f]{64}$')),atom(json_type(before_fingerprints)='ARRAY'),atom(json_type(after_fingerprints)='ARRAY'),atom(json_type(blocked_items)='ARRAY'))",
+        "anomaly_reclassification_batch_receipts.chk_anomaly_reclassification_batch_status": "or(and(atom(status='completed'),atom(next_cursor_definition_codeisnull),atom(next_cursor_source_identityisnull),atom(blocked_count=0)),and(atom(status='in_progress'),atom(next_cursor_definition_codeisnotnull),atom(next_cursor_source_identityisnotnull),atom(blocked_count=0)),and(atom(status='blocked'),atom(blocked_count>0)))",
+        "anomaly_reclassification_batch_receipts.chk_anomaly_reclassification_batch_cursor_pairs": "and(or(and(atom(cursor_definition_code=''),atom(cursor_source_identity='')),and(atom(char_length(trim(cursor_definition_code))>0),atom(char_length(trim(cursor_source_identity))>0))),or(and(atom(next_cursor_definition_codeisnull),atom(next_cursor_source_identityisnull)),and(atom(char_length(trim(next_cursor_definition_code))>0),atom(char_length(trim(next_cursor_source_identity))>0))))",
+        "anomaly_reclassification_batch_receipts.chk_anomaly_reclassification_batch_text": "and(atom(char_length(trim(batch_receipt_identity))>0),atom(char_length(trim(operation_identity))>0),atom(char_length(trim(idempotency_key))>0),atom(char_length(trim(actor))>0),atom(char_length(trim(correlation_id))>0),atom(regexp_like(request_fingerprint,'^[0-9a-f]{64}$')))"
+      },
+      "triggers": [
+        "trg_anomaly_reclassification_dispositions_before_update",
+        "trg_anomaly_reclassification_dispositions_before_delete",
+        "trg_anomaly_reclassification_receipts_before_update",
+        "trg_anomaly_reclassification_receipts_before_delete",
+        "trg_anomaly_reclassification_batch_receipts_before_update",
+        "trg_anomaly_reclassification_batch_receipts_before_delete"
+      ]
+    }
+  }
+}

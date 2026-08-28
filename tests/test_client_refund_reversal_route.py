@@ -2,7 +2,10 @@
 
 from types import SimpleNamespace
 
-from api.routes.client_refund_reversal import apply_subsidy_return
+from api.routes.client_refund_reversal import (
+    apply_subsidy_return,
+    query_settlement_remediation,
+)
 from api.schemas.client_refund_reversal import ClientRefundApplyBody
 
 
@@ -33,3 +36,60 @@ def test_subsidy_return_apply_uses_the_dedicated_purpose_and_executes_workflow()
     assert len(requests) == 1
     assert requests[0].selection.refund_purpose.value == "subsidy_return"
     assert requests[0].selection.correction_type.value == "refund"
+
+
+def test_settlement_remediation_query_returns_only_current_overdue_owner_facts():
+    class RefundApplication:
+        def query(self, case_no):
+            assert case_no == "CASE-2"
+            return {
+                "account_version": 5,
+                "refund_obligations": [
+                    {
+                        "obligation_identity": "refund:old",
+                        "obligation_type": "refund",
+                        "amount_due_ntd": 1200,
+                        "due_date": __import__("datetime").date(2026, 1, 1),
+                    },
+                    {
+                        "obligation_identity": "refund:future",
+                        "obligation_type": "refund",
+                        "amount_due_ntd": 800,
+                        "due_date": __import__("datetime").date(2099, 1, 1),
+                    },
+                ],
+                "subsidy_return_obligations": [],
+                "refund_bank_facts": [],
+                "subsidy_return_bank_facts": [],
+            }
+
+    class ReceiptApplication:
+        def query(self, case_no):
+            assert case_no == "CASE-2"
+            return {
+                "account_version": 5,
+                "obligations": [
+                    {
+                        "obligation_identity": "receipt:old",
+                        "payment_stage": "first",
+                        "amount_due_ntd": 1500,
+                        "due_date": __import__("datetime").date(2026, 1, 1),
+                    }
+                ],
+                "bank_facts": [],
+            }
+
+    response = query_settlement_remediation(
+        "CASE-2",
+        SimpleNamespace(username="test-admin"),
+        RefundApplication(),
+        ReceiptApplication(),
+    )
+
+    assert response.data["account_version"] == 5
+    assert [item["obligation_identity"] for item in response.data["refund_obligations"]] == [
+        "refund:old"
+    ]
+    assert [item["obligation_identity"] for item in response.data["receivable_obligations"]] == [
+        "receipt:old"
+    ]

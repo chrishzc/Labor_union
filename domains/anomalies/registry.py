@@ -1,6 +1,6 @@
 """
 File: registry.py
-Description: 定義 canonical anomaly 契約並將來源事實歸約為 current-state 警示。
+Description: 定義 canonical anomaly 契約與有限 owner recovery action descriptors。
 """
 
 from __future__ import annotations
@@ -32,6 +32,30 @@ class AlertWorkflowStatus(StrEnum):
     OPEN = "open"
     CLAIMED = "claimed"
     RESOLVED = "resolved"
+
+
+class AnomalyDefinitionLifecycle(StrEnum):
+    ACTIVE = "active"
+    WORK_ITEM = "work_item"
+    RETIRED = "retired"
+    AUDIT_ONLY = "audit_only"
+
+
+@dataclass(frozen=True, slots=True)
+class AutoResolutionContract:
+    """Bind automatic alert removal to one approved owner rulebook oracle."""
+
+    owner_rulebook_reference: str
+    terminal_predicate: str
+    contract_version: int = 1
+
+    def __post_init__(self) -> None:
+        require_canonical_text(
+            self.owner_rulebook_reference, "auto-resolution rulebook reference", 191
+        )
+        _validate_identity(self.terminal_predicate, "auto-resolution terminal predicate")
+        if self.contract_version < 1:
+            raise ValueError("auto-resolution contract version must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,10 +130,13 @@ class AnomalyDefinition:
     available_actions: tuple[RecoveryActionDescriptor, ...]
     no_automated_recovery: bool = False
     display_fields: tuple[str, ...] = ()
+    lifecycle: AnomalyDefinitionLifecycle = AnomalyDefinitionLifecycle.ACTIVE
 
     def __post_init__(self) -> None:
         _validate_identity(self.code, "anomaly code")
         _validate_identity(self.source_domain, "source domain")
+        if not isinstance(self.lifecycle, AnomalyDefinitionLifecycle):
+            raise TypeError("anomaly definition lifecycle must be AnomalyDefinitionLifecycle")
         if self.fingerprint_fields != tuple(
             sorted(set(self.fingerprint_fields))
         ):
@@ -120,6 +147,11 @@ class AnomalyDefinition:
             raise TypeError("no automated recovery must be boolean")
         if self.source_domain in _FINANCE_SOURCE_DOMAINS:
             _validate_finance_recovery_contract(self)
+
+    @property
+    def target_lifecycle(self) -> AnomalyDefinitionLifecycle:
+        """Return the approved product target, not migration cutover state."""
+        return self.lifecycle
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +187,9 @@ class AnomalyDefinitionRegistry:
         if len(self._definitions) != len(definitions):
             raise ValueError("anomaly definition codes must be unique")
         _validate_recovery_action_keys(definitions)
+        unknown_contracts = set(_AUTO_RESOLUTION_CONTRACTS) - set(self._definitions)
+        if unknown_contracts:
+            raise ValueError("auto-resolution contract references an unknown anomaly code")
 
     def require(self, code: str) -> AnomalyDefinition:
         try:
@@ -176,6 +211,53 @@ class AnomalyDefinitionRegistry:
     def available_actions(self, code: str) -> tuple[RecoveryActionDescriptor, ...]:
         return self.require(code).available_actions
 
+    def codes(self) -> tuple[str, ...]:
+        return tuple(sorted(self._definitions))
+
+    def active_codes(self) -> tuple[str, ...]:
+        """Return target-active codes; this is not a producer-cutover receipt."""
+        return self._codes_for_lifecycle(AnomalyDefinitionLifecycle.ACTIVE)
+
+    def target_active_codes(self) -> tuple[str, ...]:
+        """Explicit alias used where target and operational state may diverge."""
+        return self.active_codes()
+
+    def work_item_codes(self) -> tuple[str, ...]:
+        return self._codes_for_lifecycle(AnomalyDefinitionLifecycle.WORK_ITEM)
+
+    def retired_codes(self) -> tuple[str, ...]:
+        return self._codes_for_lifecycle(AnomalyDefinitionLifecycle.RETIRED)
+
+    def audit_only_codes(self) -> tuple[str, ...]:
+        return self._codes_for_lifecycle(AnomalyDefinitionLifecycle.AUDIT_ONLY)
+
+    def reclassification_codes(self) -> tuple[str, ...]:
+        """Return target-non-active codes eligible for the approved migration."""
+        return tuple(
+            sorted(
+                {
+                    *self.work_item_codes(),
+                    *self.retired_codes(),
+                    *self.audit_only_codes(),
+                }
+            )
+        )
+
+    def _codes_for_lifecycle(
+        self, lifecycle: AnomalyDefinitionLifecycle
+    ) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                definition.code
+                for definition in self._definitions.values()
+                if definition.lifecycle is lifecycle
+            )
+        )
+
+    def auto_resolution_contract(self, code: str) -> AutoResolutionContract | None:
+        self.require(code)
+        return _AUTO_RESOLUTION_CONTRACTS.get(code)
+
 
 def reduce_current_alert(
     registry: AnomalyDefinitionRegistry,
@@ -186,14 +268,39 @@ def reduce_current_alert(
     if current is None:
         return _new_projection(desired, fingerprint) if desired.active else None
     _validate_current_identity(current, desired, fingerprint)
-    workflow_status = _reduced_status(current.workflow_status, desired.active)
-    changed = _projection_changed(current, desired, workflow_status)
+    effective_desired = _rulebook_guarded_desired(registry, current, desired)
+    workflow_status = _reduced_status(
+        current.workflow_status, effective_desired.active
+    )
+    changed = _projection_changed(current, effective_desired, workflow_status)
     return replace(
         current,
-        source_version=desired.source_version,
-        predicate_active=desired.active,
+        source_version=effective_desired.source_version,
+        predicate_active=effective_desired.active,
         workflow_status=workflow_status,
         workflow_version=current.workflow_version + (1 if changed else 0),
+    )
+
+
+def _rulebook_guarded_desired(
+    registry: AnomalyDefinitionRegistry,
+    current: CurrentAlertProjection,
+    desired: DesiredAlertState,
+) -> DesiredAlertState:
+    if auto_resolution_blocked(registry, current, desired):
+        return replace(desired, active=True)
+    return desired
+
+
+def auto_resolution_blocked(
+    registry: AnomalyDefinitionRegistry,
+    current: CurrentAlertProjection,
+    desired: DesiredAlertState,
+) -> bool:
+    return (
+        current.predicate_active
+        and not desired.active
+        and registry.auto_resolution_contract(desired.definition_code) is None
     )
 
 
@@ -243,7 +350,10 @@ def default_anomaly_registry() -> AnomalyDefinitionRegistry:
             _client_refund_underpayment_definition(),
             _staff_overpayment_recovery_open_definition(),
             _staff_payout_difference_definition("staff_payout_underpayment"),
-            _staff_payout_difference_definition("staff_payout_overpayment"),
+            _staff_payout_difference_definition(
+                "staff_payout_overpayment",
+                lifecycle=AnomalyDefinitionLifecycle.AUDIT_ONLY,
+            ),
             _beclass_validation_definition(),
             _beclass_identity_conflict_definition(),
             _finance_manual_review_definition(),
@@ -290,6 +400,7 @@ def _order_matching_stage_definition(code: str) -> AnomalyDefinition:
             ),
         ),
         display_fields=("case_no",),
+        lifecycle=AnomalyDefinitionLifecycle.WORK_ITEM,
     )
 
 
@@ -312,7 +423,22 @@ def _historical_order_review_definition() -> AnomalyDefinition:
         fingerprint_fields=("review_identity",),
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
-        available_actions=(),
+        available_actions=(
+            RecoveryActionDescriptor(
+                action_key="reimport_corrected_historical_order_review",
+                owning_domain="orders",
+                preview_operation="PreviewHistoricalOrderReviewRemediation",
+                apply_operation="ApplyHistoricalOrderReviewRemediation",
+                requires_preview=True,
+                label="上傳更正後的單筆歷史訂單",
+                form_schema_key="orders.historical_review_remediation.v1",
+                source_binding_keys=("review_identity", "review_version"),
+                required_operator_inputs=("evidence", "reason", "workbook"),
+                required_capability="orders.historical_review.remediate",
+                completion_predicate="historical_order_prior_review_disposition_recorded",
+                action_contract_version=1,
+            ),
+        ),
         no_automated_recovery=True,
         display_fields=("issue_codes", "masked_case_identity", "review_identity"),
     )
@@ -334,6 +460,7 @@ def _resume_not_sent_definition() -> AnomalyDefinition:
             ),
         ),
         display_fields=("case_no",),
+        lifecycle=AnomalyDefinitionLifecycle.WORK_ITEM,
     )
 
 
@@ -344,8 +471,26 @@ def _client_receivable_overdue_definition() -> AnomalyDefinition:
         fingerprint_fields=("case_no",),
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
-        available_actions=(),
-        display_fields=("action", "case_no", "overdue_obligations"),
+        available_actions=(
+            RecoveryActionDescriptor(
+                action_key="reconcile_client_receivable",
+                label="核銷逾期客戶應收",
+                owning_domain="client_finance",
+                preview_operation="PreviewClientReceiptReconciliation",
+                apply_operation="ApplyClientReceiptReconciliation",
+                requires_preview=True,
+                form_schema_key="client_finance.receivable_reconciliation.v1",
+                source_binding_keys=("account_version", "case_no"),
+                required_operator_inputs=(
+                    "bank_fact_identities",
+                    "obligation_identities",
+                    "payment_stage",
+                    "reason",
+                ),
+                completion_predicate="client_receivable_overdue_obligations_cleared",
+            ),
+        ),
+        display_fields=("action", "case_no", "overdue_obligations", "resolution_condition"),
     )
 
 
@@ -356,8 +501,21 @@ def _subsidy_return_overdue_definition() -> AnomalyDefinition:
         fingerprint_fields=("case_no",),
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
-        available_actions=(),
-        display_fields=("action", "case_no", "overdue_obligations"),
+        available_actions=(
+            RecoveryActionDescriptor(
+                action_key="settle_client_subsidy_return",
+                label="核銷逾期客戶補助退還",
+                owning_domain="client_finance",
+                preview_operation="PreviewClientSubsidyReturn",
+                apply_operation="ApplyClientSubsidyReturn",
+                requires_preview=True,
+                form_schema_key="client_finance.subsidy_return.v1",
+                source_binding_keys=("account_version", "case_no"),
+                required_operator_inputs=("bank_fact_identities", "obligation_identities", "reason"),
+                completion_predicate="client_subsidy_return_overdue_obligations_cleared",
+            ),
+        ),
+        display_fields=("action", "case_no", "overdue_obligations", "resolution_condition"),
     )
 
 
@@ -368,8 +526,21 @@ def _client_payable_overdue_definition() -> AnomalyDefinition:
         fingerprint_fields=("case_no",),
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
-        available_actions=(),
-        display_fields=("action", "case_no", "overdue_obligations"),
+        available_actions=(
+            RecoveryActionDescriptor(
+                action_key="settle_client_payable",
+                label="核銷逾期客戶退款應付",
+                owning_domain="client_finance",
+                preview_operation="PreviewClientRefund",
+                apply_operation="ApplyClientRefund",
+                requires_preview=True,
+                form_schema_key="client_finance.client_payable_refund.v1",
+                source_binding_keys=("account_version", "case_no"),
+                required_operator_inputs=("bank_fact_identities", "obligation_identities", "reason"),
+                completion_predicate="client_payable_overdue_obligations_cleared",
+            ),
+        ),
+        display_fields=("action", "case_no", "overdue_obligations", "resolution_condition"),
     )
 
 
@@ -383,6 +554,7 @@ def _subsidy_advance_due_definition() -> AnomalyDefinition:
         available_actions=(),
         no_automated_recovery=True,
         display_fields=("action", "advance_candidates", "case_no"),
+        lifecycle=AnomalyDefinitionLifecycle.WORK_ITEM,
     )
 
 
@@ -431,6 +603,7 @@ def _schedule_holiday_preference_conflict_definition() -> AnomalyDefinition:
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(),
         display_fields=("case_no", "staff_id", "staff_name", "work_date"),
+        lifecycle=AnomalyDefinitionLifecycle.RETIRED,
     )
 
 
@@ -486,6 +659,7 @@ def _line_task_no_reply_definition() -> AnomalyDefinition:
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(),
         display_fields=("task_id", "to_user_id"),
+        lifecycle=AnomalyDefinitionLifecycle.WORK_ITEM,
     )
 
 
@@ -531,9 +705,28 @@ def _schedule_coverage_definition() -> AnomalyDefinition:
 
 
 def _staff_payout_overdue_definition() -> AnomalyDefinition:
-    return _staff_payables_definition(
+    return AnomalyDefinition(
         code="PAYOUT-001",
+        source_domain="staff_payables",
         fingerprint_fields=("obligation_identity",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(
+            RecoveryActionDescriptor(
+                action_key="reconcile_overdue_staff_payable",
+                label="核銷逾期月嫂應付款",
+                owning_domain="staff_payables",
+                preview_operation="PreviewStaffPayout",
+                apply_operation="ApplyStaffPayout",
+                requires_preview=True,
+                form_schema_key="staff_payables.payout_reconciliation.v1",
+                source_binding_keys=("obligation_identity", "staff_id"),
+                required_operator_inputs=("finance_import_row_ids", "reason"),
+                required_capability="staff_payables.payout.apply",
+                completion_predicate="staff_payable_obligation_settled",
+                action_contract_version=1,
+            ),
+        ),
         display_fields=(
             "amount_due_ntd",
             "balance_ntd",
@@ -541,8 +734,6 @@ def _staff_payout_overdue_definition() -> AnomalyDefinition:
             "obligation_identity",
             "staff_id",
         ),
-        severity=AnomalySeverity.WARNING,
-        action_code="review_overdue_staff_payable",
     )
 
 
@@ -684,12 +875,27 @@ def _government_subsidy_overpayment_definition():
                 requires_preview=True,
                 form_schema_key="government_subsidy.overpayment.disposition.v1",
                 source_binding_keys=("overpayment_identity", "overpayment_version"),
-                required_operator_inputs=("disposition", "evidence_reference", "reason"),
+                required_operator_inputs=(
+                    "disposition",
+                    "evidence_reference",
+                    "offset_amounts",
+                    "offset_targets",
+                    "reason",
+                    "return_due_date",
+                ),
                 required_capability="government_subsidy.overpayment.disposition",
                 completion_predicate="government_subsidy_overpayment_disposed",
             ),
         ),
-        display_fields=("overpayment_identity",),
+        display_fields=(
+            "amount_delta_ntd",
+            "domain_blockers",
+            "finance_import_row_id",
+            "integrity_blocker_active",
+            "overpayment_identity",
+            "reason_codes",
+            "root_condition_active",
+        ),
     )
 
 
@@ -731,12 +937,65 @@ def _client_over_refund_recovery_open_definition() -> AnomalyDefinition:
                     "recovery_identity",
                     "recovery_version",
                 ),
-                required_operator_inputs=("evidence", "reason"),
+                required_operator_inputs=("evidence_reference", "reason"),
                 required_capability="client_finance.recovery.collect",
                 completion_predicate="client_over_refund_recovery_remaining_updated",
             ),
+            RecoveryActionDescriptor(
+                action_key="match_client_over_refund_recovery",
+                label="配對客戶退款超額追償入款",
+                owning_domain="client_finance",
+                preview_operation="PreviewClientOverRefundRecoveryMatching",
+                apply_operation="ApplyClientOverRefundRecoveryMatching",
+                requires_preview=True,
+                form_schema_key="client_finance.over_refund_recovery.matching.v1",
+                source_binding_keys=(
+                    "account_version",
+                    "case_no",
+                    "recovery_identity",
+                    "recovery_version",
+                ),
+                required_operator_inputs=(
+                    "evidence_reference",
+                    "finance_import_row_identity",
+                    "reason",
+                ),
+                required_capability="client_finance.recovery.collect",
+                completion_predicate="client_over_refund_recovery_matching_established",
+            ),
+            RecoveryActionDescriptor(
+                action_key="adjust_client_over_refund_recovery",
+                label="調整客戶退款超額追償",
+                owning_domain="client_finance",
+                preview_operation="PreviewClientOverRefundRecoveryAdjustment",
+                apply_operation="ApplyClientOverRefundRecoveryAdjustment",
+                requires_preview=True,
+                form_schema_key="client_finance.over_refund_recovery.adjustment.v1",
+                source_binding_keys=(
+                    "account_version",
+                    "case_no",
+                    "recovery_identity",
+                    "recovery_version",
+                ),
+                required_operator_inputs=(
+                    "adjustment_amount",
+                    "evidence_reference",
+                    "reason",
+                ),
+                required_capability="client_finance.recovery.adjust",
+                completion_predicate="client_over_refund_recovery_remaining_updated",
+            ),
         ),
-        display_fields=("recovery_identity",),
+        display_fields=(
+            "amount_delta_ntd",
+            "case_no",
+            "domain_blockers",
+            "finance_import_row_id",
+            "integrity_blocker_active",
+            "reason_codes",
+            "recovery_identity",
+            "root_condition_active",
+        ),
     )
 
 
@@ -755,24 +1014,97 @@ def _staff_overpayment_recovery_open_definition() -> AnomalyDefinition:
         code="staff_overpayment_recovery_open", source_domain="staff_payables",
         fingerprint_fields=("recovery_identity",), severity=AnomalySeverity.BLOCKING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
-        available_actions=(RecoveryActionDescriptor(
-            action_key="collect_staff_overpayment_recovery", label="收回月嫂超額付款追償",
-            owning_domain="staff_payables", preview_operation="PreviewCollectMatchedStaffOverpaymentRecovery",
-            apply_operation="ApplyCollectMatchedStaffOverpaymentRecovery", requires_preview=True,
-            form_schema_key="staff_payables.overpayment_recovery.collection.v1",
-            source_binding_keys=("finance_import_row_identity", "matching_identity", "matching_version", "recovery_identity", "recovery_version", "staff_id", "staff_payables_version"),
-            required_operator_inputs=("evidence", "reason"), required_capability="staff_payables.recovery.collect",
-            completion_predicate="staff_overpayment_recovery_remaining_updated",
-        ),), display_fields=("recovery_identity", "staff_id"),
+        available_actions=(
+            RecoveryActionDescriptor(
+                action_key="collect_staff_overpayment_recovery",
+                label="收回月嫂超額付款追償",
+                owning_domain="staff_payables",
+                preview_operation="PreviewCollectMatchedStaffOverpaymentRecovery",
+                apply_operation="ApplyCollectMatchedStaffOverpaymentRecovery",
+                requires_preview=True,
+                form_schema_key="staff_payables.overpayment_recovery.collection.v1",
+                source_binding_keys=(
+                    "finance_import_row_identity",
+                    "matching_identity",
+                    "matching_version",
+                    "recovery_identity",
+                    "recovery_version",
+                    "staff_id",
+                    "staff_payables_version",
+                ),
+                required_operator_inputs=("evidence_reference", "reason"),
+                required_capability="staff_payables.recovery.collect",
+                completion_predicate="staff_overpayment_recovery_remaining_updated",
+            ),
+            RecoveryActionDescriptor(
+                action_key="match_staff_overpayment_recovery",
+                label="配對月嫂超額付款追償入款",
+                owning_domain="staff_payables",
+                preview_operation="PreviewStaffOverpaymentRecoveryMatching",
+                apply_operation="ApplyStaffOverpaymentRecoveryMatching",
+                requires_preview=True,
+                form_schema_key="staff_payables.overpayment_recovery.matching.v1",
+                source_binding_keys=(
+                    "recovery_identity",
+                    "recovery_version",
+                    "staff_id",
+                    "staff_payables_version",
+                ),
+                required_operator_inputs=(
+                    "evidence_reference",
+                    "finance_import_row_identity",
+                    "reason",
+                ),
+                required_capability="staff_payables.recovery.collect",
+                completion_predicate="staff_overpayment_recovery_matching_established",
+            ),
+            RecoveryActionDescriptor(
+                action_key="adjust_staff_overpayment_recovery",
+                label="調整月嫂超額付款追償",
+                owning_domain="staff_payables",
+                preview_operation="PreviewStaffOverpaymentRecoveryAdjustment",
+                apply_operation="ApplyStaffOverpaymentRecoveryAdjustment",
+                requires_preview=True,
+                form_schema_key="staff_payables.overpayment_recovery.adjustment.v1",
+                source_binding_keys=(
+                    "recovery_identity",
+                    "recovery_version",
+                    "staff_id",
+                    "staff_payables_version",
+                ),
+                required_operator_inputs=(
+                    "adjustment_amount",
+                    "evidence_reference",
+                    "reason",
+                ),
+                required_capability="staff_payables.recovery.adjust",
+                completion_predicate="staff_overpayment_recovery_remaining_updated",
+            ),
+        ),
+        display_fields=(
+            "amount_delta_ntd",
+            "domain_blockers",
+            "finance_import_row_id",
+            "integrity_blocker_active",
+            "reason_codes",
+            "recovery_identity",
+            "root_condition_active",
+            "staff_id",
+        ),
     )
 
 
-def _staff_payout_difference_definition(code: str) -> AnomalyDefinition:
+def _staff_payout_difference_definition(
+    code: str,
+    *,
+    lifecycle: AnomalyDefinitionLifecycle = AnomalyDefinitionLifecycle.ACTIVE,
+) -> AnomalyDefinition:
     return AnomalyDefinition(
         code=code, source_domain="staff_payables", fingerprint_fields=("payout_difference_identity",),
         severity=AnomalySeverity.BLOCKING, projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(), no_automated_recovery=True,
         display_fields=("payout_difference_identity", "staff_id"),
+        lifecycle=lifecycle,
     )
 
 
@@ -923,6 +1255,18 @@ def _client_refund_return_definition() -> AnomalyDefinition:
                 completion_predicate="client_refund_return_cleared",
             ),
         ),
+        display_fields=(
+            "affected_obligation_identities",
+            "affected_order_identities",
+            "amount_delta_ntd",
+            "domain_blockers",
+            "finance_import_batch_id",
+            "finance_import_row_id",
+            "integrity_blocker_active",
+            "original_refund_ledger_entry_id",
+            "reason_codes",
+            "root_condition_active",
+        ),
     )
 
 
@@ -997,6 +1341,50 @@ def _require_workflow_version(current, expected_version) -> None:
 
 def _validate_identity(value: str, field_name: str) -> None:
     require_canonical_text(value, field_name, _IDENTITY_MAXIMUM_LENGTH)
+
+
+_AUTO_RESOLUTION_CONTRACTS = {
+    "PAYOUT-001": AutoResolutionContract(
+        "05_Staff_Payables_Export_Domain.md §3; 16_Staff_Payables與Client_Refund正式規格.md",
+        "staff_payable_balance_zero_after_locked_owner_readback",
+    ),
+    "GOVSUB-003": AutoResolutionContract(
+        "14_Government_Subsidy_Domain.md §6",
+        "government_subsidy_current_revision_integrity_clear",
+    ),
+    "GOVSUB-006": AutoResolutionContract(
+        "14_Government_Subsidy_Domain.md §4.5.1",
+        "government_overpayment_authorized_disposition_committed",
+    ),
+    "client_over_refund_recovery_open": AutoResolutionContract(
+        "16_Staff_Payables與Client_Refund正式規格.md §3.5.1",
+        "client_over_refund_recovery_remaining_zero",
+    ),
+    "staff_overpayment_recovery_open": AutoResolutionContract(
+        "16_Staff_Payables與Client_Refund正式規格.md §2.4.2",
+        "staff_overpayment_recovery_remaining_zero",
+    ),
+    "CLIENTREFUND-001": AutoResolutionContract(
+        "16_Staff_Payables與Client_Refund正式規格.md §3.6",
+        "client_refund_return_linkage_and_progress_terminal",
+    ),
+    "IMPORT-004": AutoResolutionContract(
+        "17_External_Integration_LINE_Access正式規格.md §5.2.1",
+        "hcm_review_all_occurrences_owner_terminal_after_locked_readback",
+    ),
+    "RECEIVABLE-001": AutoResolutionContract(
+        "04_Client_Finance_Domain.md §2-3; 16_Staff_Payables與Client_Refund正式規格.md §3.6",
+        "client_receivable_overdue_remaining_zero_after_locked_owner_readback",
+    ),
+    "CLIENTPAYABLE-001": AutoResolutionContract(
+        "04_Client_Finance_Domain.md §2-3; 16_Staff_Payables與Client_Refund正式規格.md §3.6",
+        "client_payable_overdue_remaining_zero_after_locked_owner_readback",
+    ),
+    "RETURN-001": AutoResolutionContract(
+        "04_Client_Finance_Domain.md §2-3; 16_Staff_Payables與Client_Refund正式規格.md §3.6",
+        "client_subsidy_return_overdue_remaining_zero_after_locked_owner_readback",
+    ),
+}
 
 
 def _validate_recovery_action_keys(definitions: tuple[AnomalyDefinition, ...]) -> None:

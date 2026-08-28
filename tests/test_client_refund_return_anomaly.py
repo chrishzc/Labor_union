@@ -1,4 +1,10 @@
+"""
+File: test_client_refund_return_anomaly.py
+Description: 驗證客戶退款退匯異常的安全詳情、實際流水綁定與精確解除門禁。
+"""
+
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from domains.anomalies.registry import default_anomaly_registry
 from domains.anomalies.root_fact_projection import (
@@ -27,7 +33,7 @@ def test_confirmed_refund_return_review_creates_a_distinct_blocking_anomaly() ->
     assert action.action_key == "classify_client_refund_return"
     assert action.form_schema_key == "finance_import.correction.v1"
     assert action.source_bindings == {
-        "finance_import_row_identity": "finance-import-refund-return:71:41",
+        "finance_import_row_identity": "finance-import-row:71",
         "source_version": 12,
     }
     assert candidate.occurrence is not None
@@ -115,4 +121,23 @@ class _ReversalCursor:
         return None
 
     def fetchone(self):
-        return {"present": 1}
+        return {
+            "bank_row_id": 71,
+            "bank_transaction_date": datetime(2026, 8, 5, tzinfo=timezone.utc),
+            "bank_debit": Decimal("0.00"),
+            "bank_credit": Decimal("300.00"),
+            "bank_direction": "incoming",
+            "bank_currency": "TWD",
+            "bank_classification_type": "client_refund_return",
+            "bank_reconciliation_status": "reconciled",
+            "target_entry_id": 41,
+            "target_entry_type": "refund",
+            "target_case_no": "C-1",
+            "target_amount_ntd": 300,
+            "reversal_entry_id": 42,
+            "reversal_entry_type": "refund_reversal",
+            "reversal_case_no": "C-1",
+            "reversal_amount_ntd": 300,
+            "reversal_row_id": 71,
+            "reversal_target_id": 41,
+        }

@@ -196,7 +196,7 @@ describe('LineRichMenuDraftAppearanceEditor', () => {
         ...DRAFT,
         publication_locks: [{
           menu_definition_id: 'customer_menu', configuration_revision: 8,
-          state: 'published', readonly_reason: '此版本已正式發布，目前只能查看。',
+          state: 'published', readonly_reason: '此版本已正式發布，為保留發布快照，目前只能查看；請建立新的草稿版本再調整。',
         }],
       }}
       menuId="customer_menu"
@@ -205,7 +205,7 @@ describe('LineRichMenuDraftAppearanceEditor', () => {
       onApplied={vi.fn()}
     />);
 
-    expect(screen.getByText('此版本已正式發布，目前只能查看。')).toBeInTheDocument();
+    expect(screen.getByText('此版本已正式發布，為保留發布快照，目前只能查看；請建立新的草稿版本再調整。')).toBeInTheDocument();
     expect(screen.queryByLabelText('選單名稱')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '預覽草稿變更' })).not.toBeInTheDocument();
     expect(draftClient.preview).not.toHaveBeenCalled();

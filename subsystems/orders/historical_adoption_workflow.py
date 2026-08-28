@@ -100,21 +100,31 @@ class HistoricalOrderAdoptionWorkflow:
         return self._build_preview(row, for_update=False)
 
     def apply(self, request: HistoricalOrderAdoptionRequest) -> HistoricalOrderAdoptionReceipt:
-        command_fingerprint = _command_fingerprint(request)
         with self._unit_of_work_factory() as unit_of_work:
-            replay = self._replay(request, command_fingerprint)
-            if replay is not None:
-                unit_of_work.commit()
-                return replay
-            preview = self._build_preview(request.row, for_update=True)
-            if preview.fingerprint != request.preview_fingerprint:
-                raise RuntimeError("historical_order_candidate_stale")
-            if preview.outcome is HistoricalOrderOutcome.UNMATCHED_CASE:
-                unit_of_work.commit()
-                return _unmatched_receipt(preview)
-            receipt = self._repository.persist(request, preview)
+            receipt = self.apply_in_current_unit_of_work(request)
             unit_of_work.commit()
             return receipt
+
+    def preview_in_current_unit_of_work(
+        self, row: HistoricalOrderWorkbookRow, *, for_update: bool
+    ) -> HistoricalOrderAdoptionPreview:
+        """Evaluate one row using the caller-owned transaction and lock policy."""
+        return self._build_preview(row, for_update=for_update)
+
+    def apply_in_current_unit_of_work(
+        self, request: HistoricalOrderAdoptionRequest
+    ) -> HistoricalOrderAdoptionReceipt:
+        """Persist one adoption without opening or committing a nested transaction."""
+        command_fingerprint = _command_fingerprint(request)
+        replay = self._replay(request, command_fingerprint)
+        if replay is not None:
+            return replay
+        preview = self._build_preview(request.row, for_update=True)
+        if preview.fingerprint != request.preview_fingerprint:
+            raise RuntimeError("historical_order_candidate_stale")
+        if preview.outcome is HistoricalOrderOutcome.UNMATCHED_CASE:
+            return _unmatched_receipt(preview)
+        return self._repository.persist(request, preview)
 
     def _replay(self, request, command_fingerprint):
         stored = self._repository.find_receipt(

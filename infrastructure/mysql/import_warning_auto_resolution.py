@@ -5,8 +5,33 @@ Description: 以已提交 owner event 將既有匯入警示冪等投影為系統
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import json
+
+HCM_FIELD_CORRECTION_TERMINAL_PREDICATE = "hcm_validated_field_correction_root_exact"
+_TERMINAL_PREDICATE_LOGICAL_CODES = {
+    HCM_FIELD_CORRECTION_TERMINAL_PREDICATE: frozenset(
+        {"HCM-FIELD-001", "HCM-FIELD-002"}
+    ),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ImportWarningReviewResolutionState:
+    review_identity: str
+    source_row: int
+    masked_case_identity: str
+    unresolved_occurrence_count: int
+    unresolved_issue_codes: tuple[str, ...]
+
+    @property
+    def active(self) -> bool:
+        return self.unresolved_occurrence_count > 0
+
+    @property
+    def unresolved_count(self) -> int:
+        return self.unresolved_occurrence_count
 
 
 def auto_resolve_import_warning_occurrence(
@@ -16,6 +41,7 @@ def auto_resolve_import_warning_occurrence(
     owning_lane: str,
     owner_event_identity: str,
     projector_identity: str,
+    terminal_predicate: str,
 ) -> int:
     """Resolve one existing occurrence; an absent occurrence is a valid no-op."""
     rows = _load_tasks(
@@ -28,13 +54,49 @@ def auto_resolve_import_warning_occurrence(
         rows,
         owner_event_identity=owner_event_identity,
         projector_identity=projector_identity,
+        terminal_predicate=terminal_predicate,
     )
+
+
+def load_import_warning_review_resolution_state(
+    connection,
+    *,
+    occurrence_identity: str,
+    owning_lane: str,
+) -> ImportWarningReviewResolutionState:
+    """Read the exact review aggregate after one occurrence transition."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT o.source_receipt_identity AS review_identity,"
+            "r.source_row,r.masked_case_identity "
+            "FROM import_warning_occurrences o "
+            "JOIN case_import_hcm_review_rows r "
+            "ON r.review_identity=o.source_receipt_identity "
+            "WHERE o.occurrence_identity=%s AND o.owning_lane=%s FOR UPDATE",
+            (occurrence_identity, owning_lane),
+        )
+        review = cursor.fetchone()
+        if review is None:
+            raise ValueError("import_warning_review_binding_missing")
+        cursor.execute(
+            "SELECT o.issue_codes,t.tracking_status "
+            "FROM import_warning_occurrences o "
+            "LEFT JOIN import_warning_current_tasks t ON t.occurrence_id=o.id "
+            "WHERE o.source_receipt_identity=%s AND o.owning_lane=%s "
+            "ORDER BY o.id FOR UPDATE",
+            (str(review["review_identity"]), owning_lane),
+        )
+        siblings = tuple(cursor.fetchall())
+    if not siblings:
+        raise ValueError("import_warning_review_occurrences_missing")
+    return _review_resolution_state(review, siblings)
 
 
 def _load_tasks(connection, predicate: str, parameters: tuple[str, str]):
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT o.id,o.occurrence_identity,t.tracking_status,t.tracking_version "
+            "SELECT o.id,o.occurrence_identity,o.logical_code,"
+            "t.tracking_status,t.tracking_version "
             "FROM import_warning_occurrences o JOIN import_warning_current_tasks t "
             "ON t.occurrence_id=o.id WHERE " + predicate + " FOR UPDATE",
             parameters,
@@ -48,7 +110,9 @@ def _resolve_rows(
     *,
     owner_event_identity: str,
     projector_identity: str,
+    terminal_predicate: str,
 ) -> int:
+    _require_rulebook_terminal_contract(rows, terminal_predicate)
     resolved_count = 0
     for row in rows:
         if str(row["tracking_status"]) == "auto_resolved":
@@ -61,6 +125,39 @@ def _resolve_rows(
         )
         resolved_count += 1
     return resolved_count
+
+
+def _require_rulebook_terminal_contract(rows, terminal_predicate: str) -> None:
+    allowed_codes = _TERMINAL_PREDICATE_LOGICAL_CODES.get(terminal_predicate)
+    if allowed_codes is None:
+        raise ValueError("import_warning_auto_resolution_rulebook_contract_missing")
+    if any(str(row.get("logical_code")) not in allowed_codes for row in rows):
+        raise ValueError("import_warning_auto_resolution_predicate_mismatch")
+
+
+def _review_resolution_state(review, siblings) -> ImportWarningReviewResolutionState:
+    unresolved: list[str] = []
+    unresolved_occurrence_count = 0
+    for sibling in siblings:
+        # Manual tracking closure is not an owning-domain terminal predicate.
+        if str(sibling["tracking_status"]) == "auto_resolved":
+            continue
+        unresolved_occurrence_count += 1
+        issue_codes = json.loads(sibling["issue_codes"]) if isinstance(
+            sibling["issue_codes"], str
+        ) else sibling["issue_codes"]
+        if not isinstance(issue_codes, list) or any(
+            not isinstance(code, str) or not code.strip() for code in issue_codes
+        ):
+            raise ValueError("import_warning_review_issue_codes_invalid")
+        unresolved.extend(issue_codes)
+    return ImportWarningReviewResolutionState(
+        review_identity=str(review["review_identity"]),
+        source_row=int(review["source_row"]),
+        masked_case_identity=str(review["masked_case_identity"]),
+        unresolved_occurrence_count=unresolved_occurrence_count,
+        unresolved_issue_codes=tuple(sorted(set(unresolved))),
+    )
 
 
 def _append_auto_resolved_event(
@@ -169,5 +266,8 @@ def _json(value: object) -> str:
 
 
 __all__ = [
+    "HCM_FIELD_CORRECTION_TERMINAL_PREDICATE",
+    "ImportWarningReviewResolutionState",
     "auto_resolve_import_warning_occurrence",
+    "load_import_warning_review_resolution_state",
 ]

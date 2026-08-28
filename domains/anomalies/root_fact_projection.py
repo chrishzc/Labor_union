@@ -1,4 +1,7 @@
-"""Root-fact contracts for canonical Anomalies projection."""
+"""
+File: root_fact_projection.py
+Description: 建立 canonical 異常根事實、owner domain、desired projection 與 exact recovery action。
+"""
 
 from __future__ import annotations
 
@@ -21,6 +24,9 @@ from shared_kernel.validation import (
 
 _IDENTITY_MAXIMUM_LENGTH = 191
 _BOUNDED_COLLECTION_MAXIMUM_LENGTH = 20
+_PUBLIC_RECOVERY_BINDING_FIELDS = frozenset(
+    {"case_no", "overpayment_identity", "recovery_identity", "staff_id"}
+)
 
 
 class RootFactEventOrigin(StrEnum):
@@ -81,6 +87,7 @@ class RootFactProjectionCandidate:
     source_event_identity: str
     event_payload_fingerprint: PreviewFingerprint
     alert_fingerprint: PreviewFingerprint
+    source_domain: str
     desired: DesiredAlertState
     root_fact_snapshot: dict[str, object]
     occurrence: FinanceAnomalyOccurrence | None
@@ -104,6 +111,7 @@ def build_finance_manual_review_candidate(
     registry: AnomalyDefinitionRegistry,
     root_fact: FinanceManualReviewRootFact,
 ) -> RootFactProjectionCandidate:
+    definition = registry.require(root_fact.definition_code)
     desired = _desired_alert(root_fact)
     alert_fingerprint = registry.fingerprint(desired)
     root_fact_snapshot = _root_fact_snapshot(root_fact)
@@ -112,6 +120,7 @@ def build_finance_manual_review_candidate(
         root_fact.source_event_identity,
         _event_payload_fingerprint(root_fact),
         alert_fingerprint,
+        definition.source_domain,
         desired,
         root_fact_snapshot,
         occurrence,
@@ -167,7 +176,7 @@ def _desired_alert(root_fact: FinanceManualReviewRootFact) -> DesiredAlertState:
 
 
 def _root_fact_snapshot(root_fact: FinanceManualReviewRootFact) -> dict[str, object]:
-    return {
+    snapshot = {
         "finance_import_row_id": root_fact.finance_import_row_id,
         "finance_import_batch_id": root_fact.finance_import_batch_id,
         "occurred_at": root_fact.occurred_at.isoformat(),
@@ -185,6 +194,14 @@ def _root_fact_snapshot(root_fact: FinanceManualReviewRootFact) -> dict[str, obj
         "original_refund_ledger_entry_id": root_fact.original_refund_ledger_entry_id,
         "recovery_bindings": dict(root_fact.recovery_bindings),
     }
+    snapshot.update(
+        {
+            key: value
+            for key, value in root_fact.recovery_bindings
+            if key in _PUBLIC_RECOVERY_BINDING_FIELDS
+        }
+    )
+    return snapshot
 
 
 # Kept cohesive because occurrence identity and snapshot share one root event.
@@ -398,16 +415,16 @@ def _recovery_actions(root_fact):
     if root_fact.definition_code == "CLIENTREFUND-001":
         return (
             _refund_return_review_action(
-                root_fact.source_identity,
+                f"finance-import-row:{root_fact.finance_import_row_id}",
                 root_fact.source_version,
             ),
         )
     if root_fact.definition_code == "GOVSUB-006":
         return (_government_overpayment_action(root_fact),)
     if root_fact.definition_code == "client_over_refund_recovery_open":
-        return (_client_over_refund_recovery_action(root_fact),)
+        return _client_over_refund_recovery_actions(root_fact)
     if root_fact.definition_code == "staff_overpayment_recovery_open":
-        return (_staff_overpayment_recovery_action(root_fact),)
+        return _staff_overpayment_recovery_actions(root_fact)
     if root_fact.definition_code in {"client_refund_underpayment", "staff_payout_underpayment", "staff_payout_overpayment"}:
         return ()
     return finance_manual_review_recovery_actions(
@@ -468,41 +485,100 @@ def _government_overpayment_action(root_fact):
         form_schema_key="government_subsidy.overpayment.disposition.v1",
         source_binding_keys=tuple(sorted(bindings)),
         source_bindings=bindings,
-        required_operator_inputs=("disposition", "evidence_reference", "reason"),
+        required_operator_inputs=(
+            "disposition", "evidence_reference", "offset_amounts",
+            "offset_targets", "reason", "return_due_date",
+        ),
         required_capability="government_subsidy.overpayment.disposition",
         completion_predicate="government_subsidy_overpayment_disposed",
     )
 
 
-def _client_over_refund_recovery_action(root_fact):
+def _client_over_refund_recovery_actions(root_fact):
     bindings = dict(root_fact.recovery_bindings)
-    return RecoveryActionLink(
-        action_key="collect_client_over_refund_recovery",
-        label="收回客戶退款超額追償",
-        owning_domain="client_finance",
-        preview_operation="PreviewCollectMatchedClientOverRefundRecovery",
-        apply_operation="ApplyCollectMatchedClientOverRefundRecovery",
-        requires_preview=True,
+    base_keys = ("account_version", "case_no", "recovery_identity", "recovery_version")
+    if "matching_identity" not in bindings:
+        base = _exact_bindings(bindings, base_keys)
+        return (
+            RecoveryActionLink(
+                action_key="match_client_over_refund_recovery", label="配對客戶退款超額追償入款",
+                owning_domain="client_finance", preview_operation="PreviewClientOverRefundRecoveryMatching",
+                apply_operation="ApplyClientOverRefundRecoveryMatching", requires_preview=True,
+                form_schema_key="client_finance.over_refund_recovery.matching.v1",
+                source_binding_keys=base_keys, source_bindings=base,
+                required_operator_inputs=("evidence_reference", "finance_import_row_identity", "reason"),
+                required_capability="client_finance.recovery.collect",
+                completion_predicate="client_over_refund_recovery_matching_established",
+            ),
+            RecoveryActionLink(
+                action_key="adjust_client_over_refund_recovery", label="調整客戶退款超額追償",
+                owning_domain="client_finance", preview_operation="PreviewClientOverRefundRecoveryAdjustment",
+                apply_operation="ApplyClientOverRefundRecoveryAdjustment", requires_preview=True,
+                form_schema_key="client_finance.over_refund_recovery.adjustment.v1",
+                source_binding_keys=base_keys, source_bindings=base,
+                required_operator_inputs=("adjustment_amount", "evidence_reference", "reason"),
+                required_capability="client_finance.recovery.adjust",
+                completion_predicate="client_over_refund_recovery_remaining_updated",
+            ),
+        )
+    keys = (*base_keys, "finance_import_row_identity", "matching_identity", "matching_version")
+    return (RecoveryActionLink(
+        action_key="collect_client_over_refund_recovery", label="收回客戶退款超額追償",
+        owning_domain="client_finance", preview_operation="PreviewCollectMatchedClientOverRefundRecovery",
+        apply_operation="ApplyCollectMatchedClientOverRefundRecovery", requires_preview=True,
         form_schema_key="client_finance.over_refund_recovery.collection.v1",
-        source_binding_keys=tuple(sorted(bindings)),
-        source_bindings=bindings,
-        required_operator_inputs=("evidence", "reason"),
+        source_binding_keys=tuple(sorted(keys)), source_bindings=_exact_bindings(bindings, keys),
+        required_operator_inputs=("evidence_reference", "reason"),
         required_capability="client_finance.recovery.collect",
         completion_predicate="client_over_refund_recovery_remaining_updated",
-    )
+    ),)
 
 
-def _staff_overpayment_recovery_action(root_fact):
+def _staff_overpayment_recovery_actions(root_fact):
     bindings = dict(root_fact.recovery_bindings)
-    return RecoveryActionLink(
+    base_keys = ("recovery_identity", "recovery_version", "staff_id", "staff_payables_version")
+    if "matching_identity" not in bindings:
+        base = _exact_bindings(bindings, base_keys)
+        return (
+            RecoveryActionLink(
+                action_key="match_staff_overpayment_recovery", label="配對月嫂超額付款追償入款",
+                owning_domain="staff_payables", preview_operation="PreviewStaffOverpaymentRecoveryMatching",
+                apply_operation="ApplyStaffOverpaymentRecoveryMatching", requires_preview=True,
+                form_schema_key="staff_payables.overpayment_recovery.matching.v1",
+                source_binding_keys=base_keys, source_bindings=base,
+                required_operator_inputs=("evidence_reference", "finance_import_row_identity", "reason"),
+                required_capability="staff_payables.recovery.collect",
+                completion_predicate="staff_overpayment_recovery_matching_established",
+            ),
+            RecoveryActionLink(
+                action_key="adjust_staff_overpayment_recovery", label="調整月嫂超額付款追償",
+                owning_domain="staff_payables", preview_operation="PreviewStaffOverpaymentRecoveryAdjustment",
+                apply_operation="ApplyStaffOverpaymentRecoveryAdjustment", requires_preview=True,
+                form_schema_key="staff_payables.overpayment_recovery.adjustment.v1",
+                source_binding_keys=base_keys, source_bindings=base,
+                required_operator_inputs=("adjustment_amount", "evidence_reference", "reason"),
+                required_capability="staff_payables.recovery.adjust",
+                completion_predicate="staff_overpayment_recovery_remaining_updated",
+            ),
+        )
+    keys = ("finance_import_row_identity", "matching_identity", "matching_version", *base_keys)
+    return (RecoveryActionLink(
         action_key="collect_staff_overpayment_recovery", label="收回月嫂超額付款追償",
         owning_domain="staff_payables", preview_operation="PreviewCollectMatchedStaffOverpaymentRecovery",
         apply_operation="ApplyCollectMatchedStaffOverpaymentRecovery", requires_preview=True,
         form_schema_key="staff_payables.overpayment_recovery.collection.v1",
-        source_binding_keys=tuple(sorted(bindings)), source_bindings=bindings,
-        required_operator_inputs=("evidence", "reason"), required_capability="staff_payables.recovery.collect",
+        source_binding_keys=tuple(sorted(keys)), source_bindings=_exact_bindings(bindings, keys),
+        required_operator_inputs=("evidence_reference", "reason"),
+        required_capability="staff_payables.recovery.collect",
         completion_predicate="staff_overpayment_recovery_remaining_updated",
-    )
+    ),)
+
+
+def _exact_bindings(bindings, keys):
+    missing = set(keys) - set(bindings)
+    if missing:
+        raise ValueError("anomaly_recovery_binding_incomplete")
+    return {key: bindings[key] for key in keys}
 
 
 

@@ -14,7 +14,7 @@
   "source_scenario_ids": ["LINE-IDENTITY-DELIVERY-001"],
   "source_refs": [
     "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#LINE-02",
-    "document/功能開發計畫/Part_00_全域測試資料治理與Scenario契約.md#7.3.1 LINE 管理中心與訂單狀態自動推送"
+    "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md#3.3 Subsystem：LINE Delivery Task"
   ],
   "lineage_mappings": [
     {"source": "committed LINE delivery task", "successor": "masked delivery query row", "disposition": "unchanged"},

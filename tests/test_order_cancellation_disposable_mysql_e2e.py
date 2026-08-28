@@ -48,6 +48,7 @@ def test_g03_mid_service_multi_caregiver_cancellation_updates_each_domain_once()
         ConfirmedServiceDay(_date(2), 2),
     )
     preview = workflow.preview("G03-CASE", confirmed_days)
+    _assert_client_refund_directions(preview.client_finance_impact.actions)
     request = OrderCancellationApplyRequest(
         "G03-CASE",
         confirmed_days,
@@ -130,6 +131,15 @@ def test_g03_panel_uses_real_http_preview_and_apply(monkeypatch):
             headers={"X-Legacy-Shared-Key": "g03-ui-key"},
             session=_CancellationTestClientSession(http_client),
         )
+        api_preview = client.preview(
+            "G03-CASE",
+            (
+                {"service_date": _date(1), "staff_id": 1, "reason": None},
+                {"service_date": _date(2), "staff_id": 2, "reason": None},
+            ),
+            correlation_id="g03-direction-contract",
+        )
+        _assert_client_refund_directions(api_preview.client_finance_impact.actions)
         display.button_values["cancellation_preview_btn_G03-CASE"] = True
         cancellation_panel.render_order_cancellation_panel("G03-CASE", client)
         display.button_values["cancellation_preview_btn_G03-CASE"] = False
@@ -140,6 +150,23 @@ def test_g03_panel_uses_real_http_preview_and_apply(monkeypatch):
     assert display.rerun_called is True
     _assert_cross_domain_result()
     _assert_no_cross_domain_auto_netting()
+
+
+def _assert_client_refund_directions(actions) -> None:
+    refund_actions = tuple(
+        action for action in actions if str(action.action) == "create_refund"
+    )
+    assert tuple(
+        (
+            str(action.direction),
+            action.direction_amount_ntd,
+            action.obligation_amount.amount,
+        )
+        for action in refund_actions
+    ) == (
+        ("refund_due", 200, 200),
+        ("refund_due", 1600, 1600),
+    )
 
 
 class _CancellationTestClientSession:

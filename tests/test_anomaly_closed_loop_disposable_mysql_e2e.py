@@ -59,16 +59,16 @@ def test_scheduling_anomaly_claim_repair_and_reopen_closed_loop():
         with pytest.raises(ValueError, match="anomaly_version_conflict"):
             application.claim(_workflow_request(opened, 0, "claim-race"))
 
-        resolved = application.resolve(_workflow_request(claimed, 1, "resolve"))
-        assert resolved.workflow_status is AlertWorkflowStatus.RESOLVED
-        reopened = application.project(_project_request(case_no, 2, active=True))
-        assert reopened is not None
-        assert reopened.workflow_status is AlertWorkflowStatus.OPEN
+        with pytest.raises(ValueError, match="anomaly_manual_resolve_forbidden"):
+            application.resolve(_workflow_request(claimed, 1, "resolve"))
+        still_claimed = application.query_detail(opened.fingerprint).summary.projection
+        assert still_claimed.predicate_active is True
+        assert still_claimed.workflow_status is AlertWorkflowStatus.CLAIMED
 
-        auto_resolved = application.project(_project_request(case_no, 3, active=False))
+        auto_resolved = application.project(_project_request(case_no, 2, active=False))
         assert auto_resolved is not None
         assert auto_resolved.workflow_status is AlertWorkflowStatus.RESOLVED
-        reintroduced = application.project(_project_request(case_no, 4, active=True))
+        reintroduced = application.project(_project_request(case_no, 3, active=True))
         assert reintroduced is not None
         assert reintroduced.workflow_status is AlertWorkflowStatus.OPEN
         _assert_detail(application, reintroduced, case_no)

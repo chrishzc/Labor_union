@@ -332,7 +332,7 @@ def test_query_anomalies_explicit_include_snapshot_false_and_true() -> None:
             {"kind": "code", "key": "action", "value": "review_receivable"},
             {"kind": "identity", "key": "case_no", "value": "CASE-201"},
             {
-                "kind": "identity_list",
+                "kind": "detail_list",
                 "key": "overdue_obligations",
                 "value": ["obligation:201"],
             },

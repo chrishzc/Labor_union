@@ -1,4 +1,7 @@
-"""Canonical location and retirement locks for operator-facing launchers."""
+"""
+File: test_launcher_inventory.py
+Description: 驗證操作用 launcher 集中於正式目錄，且已退役入口不會復活。
+"""
 
 from pathlib import Path
 
@@ -17,6 +20,8 @@ def test_operator_launchers_are_converged_under_one_directory() -> None:
         "start_local_development.bat",
         "start_local_development.sh",
         "start_local_development_no_auth.bat",
+        "start_local_development_no_auth.sh",
+        "supervise_local_runtime.ps1",
         "uninstall_durable_job_worker_task.ps1",
         "update_local_database.bat",
     }

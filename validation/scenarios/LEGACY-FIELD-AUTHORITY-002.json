@@ -9,7 +9,7 @@
   "test_kinds": ["metadata_fixture", "process_network_harness"],
   "source_refs": [
     "document/文件整併工作區/06_欄位權威性與計算邏輯盤點.md#文件狀態",
-    "document/架構重整/03_追蹤清單與證據/evidence/field_authority_live_audit_20260810.md#orders.contract_id"
+    "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md#8. 來源文件處置"
   ],
   "root_facts": [
     "Versioned legacy-to-canonical field mapping, active source roots and explicit historical/migration retention paths."

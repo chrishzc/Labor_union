@@ -24,7 +24,6 @@ from subsystems.anomalies.process_reminder_anomaly_source import (
     build_line_task_no_reply_requests,
     build_order_matching_requests,
     build_resume_not_sent_requests,
-    build_schedule_holiday_preference_requests,
     build_schedule_holiday_undecided_requests,
     build_schedule_overlap_requests,
     build_schedule_replaced_assignment_requests,
@@ -95,19 +94,25 @@ def _scan_all(connection, as_of: date) -> tuple:
         beclass_rows = _fetch(cursor, _BECLASS_SQL)
         hcm_missing_rows = _fetch(cursor, _HCM_MISSING_SQL)
         resume_rows = _fetch(cursor, _RESUME_SQL)
-        client_obligation_rows = _fetch(cursor, _CLIENT_OBLIGATION_REMINDER_SQL)
+        client_candidate_rows = _fetch(cursor, _CLIENT_OBLIGATION_CANDIDATE_CASES_SQL)
+        client_case_nos = _candidate_case_nos(client_candidate_rows)
+        client_account_rows = _fetch_scoped_for_update(
+            cursor, _CLIENT_FINANCE_ACCOUNT_LOCK_SQL, client_case_nos
+        )
+        client_obligation_rows = _fetch_scoped_for_update(
+            cursor, _CLIENT_OBLIGATION_REMINDER_SQL, client_case_nos
+        )
+        client_obligation_rows = _prepare_locked_client_obligation_rows(
+            client_candidate_rows, client_account_rows, client_obligation_rows
+        )
         subsidy_advance_rows = _fetch(cursor, _SUBSIDY_ADVANCE_REMINDER_SQL)
         holiday_undecided_rows = _fetch(cursor, _SCHEDULE_HOLIDAY_UNDECIDED_SQL)
         replaced_rows = _fetch(cursor, _SCHEDULE_REPLACED_SQL)
-        already_resolved = _fetch(cursor, _SCHEDULE_REPLACED_RESOLVED_SQL)
         overlap_rows = _fetch(cursor, _SCHEDULE_OVERLAP_SQL)
-        holiday_preference_rows = _fetch(cursor, _SCHEDULE_HOLIDAY_PREFERENCE_SQL)
         client_line_rows = _fetch(cursor, _CLIENT_LINE_SQL)
         staff_line_rows = _fetch(cursor, _STAFF_LINE_SQL)
         line_task_rows = _fetch(cursor, _LINE_TASK_SQL)
         line_conflict_rows = _line_identity_conflict_rows(cursor)
-
-    already_resolved_ids = frozenset(int(row["assignment_id"]) for row in already_resolved)
 
     return (
         build_order_matching_requests(order_rows, as_of=as_of)
@@ -119,11 +124,8 @@ def _scan_all(connection, as_of: date) -> tuple:
         + build_subsidy_return_requests(client_obligation_rows, as_of=as_of)
         + build_subsidy_advance_due_requests(subsidy_advance_rows, as_of=as_of)
         + build_schedule_holiday_undecided_requests(holiday_undecided_rows, as_of=as_of)
-        + build_schedule_replaced_assignment_requests(
-            replaced_rows, as_of=as_of, already_resolved_assignment_ids=already_resolved_ids
-        )
+        + build_schedule_replaced_assignment_requests(replaced_rows, as_of=as_of)
         + build_schedule_overlap_requests(overlap_rows, as_of=as_of)
-        + build_schedule_holiday_preference_requests(holiday_preference_rows, as_of=as_of)
         + build_client_missing_line_requests(client_line_rows, as_of=as_of)
         + build_staff_missing_line_requests(staff_line_rows, as_of=as_of)
         + build_line_task_no_reply_requests(line_task_rows, as_of=as_of)
@@ -151,9 +153,72 @@ def _line_identity_conflict_rows(cursor) -> list[dict[str, Any]]:
     return list(current.values())
 
 
-def _fetch(cursor, sql: str):
-    cursor.execute(sql)
+def _fetch(cursor, sql: str, params=()):
+    if params:
+        cursor.execute(sql, params)
+    else:
+        cursor.execute(sql)
     return _mapping_rows(cursor.fetchall())
+
+
+def _fetch_scoped_for_update(cursor, sql_template: str, case_nos: tuple[str, ...]):
+    if not case_nos:
+        return []
+    placeholders = ", ".join(["%s"] * len(case_nos))
+    return _fetch(cursor, sql_template.format(placeholders=placeholders), case_nos)
+
+
+def _candidate_case_nos(rows: list[dict[str, Any]]) -> tuple[str, ...]:
+    case_nos = []
+    for row in rows:
+        case_no = row.get("case_no")
+        if not isinstance(case_no, str) or not case_no:
+            raise ValueError("client_finance_case_identity_missing")
+        if case_no not in case_nos:
+            case_nos.append(case_no)
+    return tuple(case_nos)
+
+
+def _prepare_locked_client_obligation_rows(
+    candidate_rows: list[dict[str, Any]],
+    account_rows: list[dict[str, Any]],
+    obligation_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    case_nos = _candidate_case_nos(candidate_rows)
+    accounts: dict[str, dict[str, Any]] = {}
+    for account in account_rows:
+        case_no = account.get("case_no")
+        if not isinstance(case_no, str) or not case_no:
+            raise ValueError("client_finance_account_identity_missing")
+        if case_no in accounts:
+            raise ValueError("client_finance_account_ambiguous")
+        if account.get("aggregate_version") is None:
+            raise ValueError("client_finance_account_version_missing")
+        accounts[case_no] = account
+
+    obligations_by_case: dict[str, list[dict[str, Any]]] = {}
+    for obligation in obligation_rows:
+        case_no = obligation.get("case_no")
+        if not isinstance(case_no, str) or not case_no:
+            raise ValueError("client_finance_obligation_identity_missing")
+        obligations_by_case.setdefault(case_no, []).append(obligation)
+
+    locked_rows: list[dict[str, Any]] = []
+    for case_no in case_nos:
+        account = accounts.get(case_no)
+        obligations = obligations_by_case.get(case_no, [])
+        if account is None:
+            raise ValueError("client_finance_account_missing")
+        if not obligations:
+            raise ValueError("client_finance_obligation_root_missing")
+        for obligation in obligations:
+            locked_rows.append(
+                {
+                    **obligation,
+                    "account_version": account["aggregate_version"],
+                }
+            )
+    return locked_rows
 
 
 def _mapping_rows(rows):
@@ -187,23 +252,28 @@ _RESUME_SQL = (
     "FROM orders o LEFT JOIN matching_records m ON m.case_no = o.case_no "
     "GROUP BY o.case_no, o.staff_id"
 )
-_CLIENT_OBLIGATION_REMINDER_SQL = (
-    "SELECT candidates.case_no, obligation.obligation_type, obligation.direction, "
-    "obligation.amount_due_ntd, obligation.due_date, obligation.status "
-    "FROM ("
+_CLIENT_OBLIGATION_CANDIDATE_CASES_SQL = (
     "SELECT case_no FROM client_obligations "
     "WHERE (direction='receivable_from_client' AND obligation_type IN ('deposit','first','second','adjustment')) "
     "OR (direction='payable_to_client' AND obligation_type IN ('refund','adjustment','subsidy_return')) "
     "UNION "
     "SELECT source_identity AS case_no FROM anomaly_current_alerts "
     "WHERE definition_code IN ('RECEIVABLE-001','CLIENTPAYABLE-001','RETURN-001')"
-    ") candidates "
-    "LEFT JOIN client_obligations obligation ON obligation.case_no=candidates.case_no "
+)
+_CLIENT_FINANCE_ACCOUNT_LOCK_SQL = (
+    "SELECT case_no, aggregate_version FROM client_finance_accounts "
+    "WHERE case_no IN ({placeholders}) FOR UPDATE"
+)
+_CLIENT_OBLIGATION_REMINDER_SQL = (
+    "SELECT obligation.case_no, obligation.obligation_identity, obligation.obligation_type, obligation.direction, "
+    "obligation.amount_due_ntd, obligation.due_date, obligation.status "
+    "FROM client_obligations obligation "
+    "WHERE obligation.case_no IN ({placeholders}) "
     "AND ((obligation.direction='receivable_from_client' "
     "AND obligation.obligation_type IN ('deposit','first','second','adjustment')) "
     "OR (obligation.direction='payable_to_client' "
     "AND obligation.obligation_type IN ('refund','adjustment','subsidy_return'))) "
-    "ORDER BY candidates.case_no, obligation.due_date, obligation.obligation_identity"
+    "ORDER BY obligation.case_no, obligation.due_date, obligation.obligation_identity FOR UPDATE"
 )
 _SUBSIDY_ADVANCE_REMINDER_SQL = (
     "SELECT candidates.case_no, orders.actual_end_date, link.entitled_amount_ntd, "
@@ -239,10 +309,6 @@ _SCHEDULE_REPLACED_SQL = (
     "floor_fee_allocated, replacement_reason "
     "FROM case_staff_assignments WHERE status = 'replaced'"
 )
-_SCHEDULE_REPLACED_RESOLVED_SQL = (
-    "SELECT source_identity AS assignment_id FROM anomaly_current_alerts "
-    "WHERE definition_code = 'SCHEDULE-002' AND workflow_status = 'resolved'"
-)
 _SCHEDULE_OVERLAP_SQL = (
     "SELECT a.id AS a_id, a.case_no AS a_case_no, a.assigned_start_date AS a_start, "
     "a.assigned_end_date AS a_end, a.status AS a_status, "
@@ -254,21 +320,24 @@ _SCHEDULE_OVERLAP_SQL = (
     "WHERE a.assigned_start_date IS NOT NULL AND a.assigned_end_date IS NOT NULL "
     "AND b.assigned_start_date IS NOT NULL AND b.assigned_end_date IS NOT NULL"
 )
-_SCHEDULE_HOLIDAY_PREFERENCE_SQL = (
-    "SELECT ss.staff_id, ss.case_no, ss.work_date, ss.is_work_day, h.holiday_name, "
-    "s.name AS staff_name "
-    "FROM staff_schedule ss "
-    "JOIN holidays h ON h.holiday_date = ss.work_date "
-    "JOIN staff_holiday_availability sha "
-    "ON sha.staff_id = ss.staff_id AND sha.holiday_name = '國定假日必休' "
-    "JOIN staff s ON s.id = ss.staff_id"
-)
 _CLIENT_LINE_SQL = (
-    "SELECT o.case_no, c.line_user_id FROM orders o JOIN clients c ON c.case_no = o.case_no"
+    "SELECT o.case_no, c.id AS client_id, c.line_user_id, "
+    "b.line_user_id AS binding_line_user_id, b.binding_status, "
+    "b.subject_type AS binding_subject_type, "
+    "b.subject_reference AS binding_subject_reference, "
+    "b.aggregate_version AS binding_version "
+    "FROM orders o LEFT JOIN clients c "
+    "ON c.id = o.client_id AND c.case_no = o.case_no "
+    "LEFT JOIN line_identity_bindings b ON b.line_user_id = c.line_user_id"
 )
 _STAFF_LINE_SQL = (
-    "SELECT o.case_no, o.staff_id, s.line_user_id AS staff_line_user_id "
-    "FROM orders o LEFT JOIN staff s ON s.id = o.staff_id"
+    "SELECT o.case_no, o.staff_id, s.line_user_id AS staff_line_user_id, "
+    "b.line_user_id AS binding_line_user_id, b.binding_status, "
+    "b.subject_type AS binding_subject_type, "
+    "b.subject_reference AS binding_subject_reference, "
+    "b.aggregate_version AS binding_version "
+    "FROM orders o LEFT JOIN staff s ON s.id = o.staff_id "
+    "LEFT JOIN line_identity_bindings b ON b.line_user_id = s.line_user_id"
 )
 _LINE_TASK_SQL = (
     "SELECT lt.id, lt.to_user_id, lt.sent_at, lt.message_content, "

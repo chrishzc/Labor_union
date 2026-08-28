@@ -1,3 +1,8 @@
+"""
+File: test_finance_import_review_alert.py
+Description: 驗證財務匯入完整性警示、摘要與 canonical 投影契約。
+"""
+
 from __future__ import annotations
 
 import pytest
@@ -74,6 +79,18 @@ def test_summary_event_identity_is_bounded_and_deterministic():
 
     assert first == second
     assert len(first) < 191
+
+
+def test_duplicate_occurrences_keep_import_integrity_alert_active():
+    summary = subject._integrity_summary(
+        {"row_count": 2},
+        {"occurrence_count": 2, "distinct_count": 1},
+        0,
+        None,
+    )
+
+    assert summary["duplicate_occurrence_count"] == 1
+    assert summary["integrity_inconsistent_count"] == 1
 
 
 def test_rejects_non_positive_batch_id():

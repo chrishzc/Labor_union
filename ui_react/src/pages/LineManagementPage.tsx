@@ -1375,6 +1375,12 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         const activeMenu = selectedMenu ?? menus[0] ?? null;
         const localDefinition = richMenuLocalDefinition ?? richMenuDraftSnapshot?.definition;
         const activeMenuDefinition = localDefinition?.menus.find((menu) => menu.id === activeMenu?.id);
+        const activePublicationLock = activeMenu && richMenuDraftSnapshot
+          ? richMenuDraftSnapshot.publication_locks.find(
+            (lock) => lock.menu_definition_id === activeMenu.id
+              && lock.configuration_revision === richMenuDraftSnapshot.revision,
+          )
+          : undefined;
 
         return (
           <section className="line-table-container" data-control-id="line.richmenu.configuration">
@@ -1879,14 +1885,16 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 )}
 
                 {/* Card C: 發布操作 */}
-                <LineRichMenuPublicationActions
-                  selectedMenu={activeMenu}
-                  selectedPublication={selectedPublication.value}
-                  onQueued={() => {
-                    setRichMenuPublicationPageNumber(1);
-                    setRichMenuReload((value) => value + 1);
-                  }}
-                />
+                {activePublicationLock?.state === 'editable' && (
+                  <LineRichMenuPublicationActions
+                    selectedMenu={activeMenu}
+                    selectedPublication={selectedPublication.value}
+                    onQueued={() => {
+                      setRichMenuPublicationPageNumber(1);
+                      setRichMenuReload((value) => value + 1);
+                    }}
+                  />
+                )}
               </div>
             </div>
             )}

@@ -1,6 +1,6 @@
 """
 File: test_react_dual_run_infrastructure.py
-Description: 驗證 Phase 5B 三服務、relative API 與 owned cleanup 的靜態契約。
+Description: 驗證 Phase 5B FastAPI＋React、relative API 與 owned cleanup 的靜態契約。
 """
 
 from pathlib import Path
@@ -16,10 +16,10 @@ def test_dual_run_contract_has_exact_services_and_loopback_ports() -> None:
     report = inspect_profile("dual-run")
     commands = smoke._service_commands()
 
-    assert tuple(commands) == ("api", "streamlit", "react")
-    assert report["ports"] == [8000, 8501, 5173]
+    assert tuple(commands) == ("api", "react")
+    assert report["ports"] == [8000, 5173]
     assert all("127.0.0.1" in " ".join(command) for command in commands.values())
-    assert report["startup_order"] == ["api", "streamlit", "react"]
+    assert report["startup_order"] == ["api", "react"]
 
 
 def test_smoke_never_composes_monitor_workers_or_provider() -> None:
@@ -28,7 +28,7 @@ def test_smoke_never_composes_monitor_workers_or_provider() -> None:
     )
     commands = smoke._service_commands()
 
-    assert set(commands) == {"api", "streamlit", "react"}
+    assert set(commands) == {"api", "react"}
     assert "scripts.run_service_monitor" not in source
     assert "scripts.run_line_worker" not in source
     assert "scripts.run_durable_job_worker" not in source

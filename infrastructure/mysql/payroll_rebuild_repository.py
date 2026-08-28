@@ -262,6 +262,7 @@ def _rebuild_facts(
         terms=_payroll_terms(root),
         adjustments=_payroll_adjustments(adjustments_by_assignment),
         existing_obligations=_existing_obligations(obligations),
+        staff_payment_due_date=root["staff_payment_due_date"],
     )
 
 
@@ -341,6 +342,7 @@ def _existing_obligations(rows):
             str(row["obligation_identity"]),
             MoneyNTD(_integer_ntd(row["effective_contractual_amount_ntd"])),
             bool(row["payout_history_exists"]),
+            row["due_date"],
         )
         for row in rows
     )
@@ -351,6 +353,9 @@ def _persist_action(cursor, persistence, action, ordinal):
         _create_service_obligation(cursor, persistence, action, ordinal)
         return
     if action.action is StaffObligationActionKind.REPLACE_UNPAID:
+        if action.delta_amount.is_zero and action.due_date is not None:
+            _replace_missing_due_date(cursor, persistence, action, ordinal)
+            return
         _replace_unpaid_obligation(cursor, persistence, action, ordinal)
         return
     _append_frozen_delta(cursor, persistence, action, ordinal)
@@ -389,6 +394,7 @@ def _create_service_obligation(cursor, persistence, action, ordinal):
 # Kept cohesive because immutable rebuild event and projection CAS cannot separate.
 def _replace_unpaid_obligation(cursor, persistence, action, ordinal):
     owner = _obligation_owner(cursor, action.obligation_identity)
+    owner["due_date"] = action.due_date
     event_id = _insert_event(
         cursor,
         persistence,
@@ -405,12 +411,13 @@ def _replace_unpaid_obligation(cursor, persistence, action, ordinal):
     )
     status = "open" if action.after_amount.amount > 0 else "cancelled"
     cursor.execute(
-        "UPDATE staff_obligations SET amount_due_ntd=%s,status=%s,"
+        "UPDATE staff_obligations SET amount_due_ntd=%s,due_date=%s,status=%s,"
         "current_event_id=%s,payroll_version=%s "
         "WHERE obligation_identity=%s AND case_no=%s "
         "AND payout_history_exists=0",
         (
             action.after_amount.amount,
+            action.due_date,
             status,
             event_id,
             persistence.receipt.payroll_version,
@@ -420,6 +427,72 @@ def _replace_unpaid_obligation(cursor, persistence, action, ordinal):
     )
     if int(cursor.rowcount) != 1:
         raise ValueError("staff_obligation_frozen")
+
+
+def _replace_missing_due_date(cursor, persistence, action, ordinal):
+    old_owner = _obligation_owner(cursor, action.obligation_identity)
+    if old_owner["due_date"] is not None:
+        raise ValueError("staff_obligation_due_date_already_established")
+    closed_event_id = _insert_event(
+        cursor,
+        persistence,
+        action,
+        ordinal,
+        old_owner,
+        obligation_identity=action.obligation_identity,
+        obligation_kind="service_pay",
+        direction="payable_to_staff",
+        source_identity=None,
+        event_type="rebuilt",
+        before_amount=action.before_amount.amount,
+        after_amount=0,
+        idempotency_purpose="due-date-close-event",
+    )
+    cursor.execute(
+        "UPDATE staff_obligations SET amount_due_ntd=0,status='cancelled',"
+        "current_event_id=%s,payroll_version=%s "
+        "WHERE obligation_identity=%s AND case_no=%s "
+        "AND due_date IS NULL AND payout_history_exists=0 AND status='open'",
+        (
+            closed_event_id,
+            persistence.receipt.payroll_version,
+            action.obligation_identity,
+            persistence.request.case_no,
+        ),
+    )
+    if int(cursor.rowcount) != 1:
+        raise ValueError("staff_obligation_frozen")
+
+    successor_identity = _due_date_successor_identity(persistence, action)
+    successor_owner = _assignment_owner(cursor, action.assignment_identity)
+    if successor_owner["due_date"] != action.due_date:
+        raise ValueError("staff_obligation_due_date_stale")
+    established_event_id = _insert_event(
+        cursor,
+        persistence,
+        action,
+        ordinal,
+        successor_owner,
+        obligation_identity=successor_identity,
+        obligation_kind="service_pay",
+        direction="payable_to_staff",
+        source_identity=action.obligation_identity,
+        event_type="established",
+        before_amount=0,
+        after_amount=action.after_amount.amount,
+        idempotency_purpose="due-date-successor-event",
+    )
+    _insert_projection(
+        cursor,
+        persistence,
+        successor_owner,
+        successor_identity,
+        "service_pay",
+        "payable_to_staff",
+        action.obligation_identity,
+        action.after_amount.amount,
+        established_event_id,
+    )
 
 
 # Kept cohesive because delta sign owns direction, kind, lineage, and amount.
@@ -472,6 +545,7 @@ def _insert_event(
     event_type,
     before_amount,
     after_amount,
+    idempotency_purpose="event",
 ):
     cursor.execute(
         _EVENT_INSERT_SQL,
@@ -490,7 +564,7 @@ def _insert_event(
             persistence.preview.payroll.fingerprint.value,
             persistence.preview.payroll_version,
             persistence.receipt.payroll_version,
-            _child_idempotency_key(persistence, "event", ordinal),
+            _child_idempotency_key(persistence, idempotency_purpose, ordinal),
             persistence.request.actor.actor_id,
             persistence.request.reason,
         ),
@@ -652,6 +726,17 @@ def _delta_obligation_identity(persistence, action):
     return f"staff-obligation-delta:{fingerprint.value}"
 
 
+def _due_date_successor_identity(persistence, action):
+    fingerprint = fingerprint_payload(
+        {
+            "case_no": persistence.request.case_no,
+            "source_obligation_identity": action.obligation_identity,
+            "due_date": action.due_date.isoformat(),
+        }
+    )
+    return f"staff-obligation:{fingerprint.value}"
+
+
 def _child_idempotency_key(persistence, purpose, ordinal):
     fingerprint = fingerprint_payload(
         {
@@ -742,7 +827,7 @@ _ADJUSTMENT_SELECT_SQL = (
     "GROUP BY assignment_id ORDER BY assignment_id"
 )
 _EXISTING_OBLIGATION_SELECT_SQL = (
-    "SELECT base.assignment_id,base.obligation_identity,"
+    "SELECT base.assignment_id,base.obligation_identity,base.due_date,"
     "base.payout_history_exists,"
     "base_event.after_amount_ntd + COALESCE(("
     "SELECT SUM(CASE WHEN child.direction='payable_to_staff' "

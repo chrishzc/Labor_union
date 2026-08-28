@@ -401,7 +401,7 @@ def test_manual_refund_correction_posts_ledger_allocation_and_resolves_anomaly(t
 
     _deliver_finance_import_outbox()
     assert receipt.ledger_entry_count == receipt.allocation_count == 1
-    _assert_manual_review_alert_is_inactive()
+    _assert_manual_review_alert_remains_active_without_owner_terminal_contract()
 
 
 def test_durable_correction_worker_posts_manual_refund_once(tmp_path):
@@ -805,7 +805,7 @@ def test_g11_ordinary_finance_review_projects_once_without_integrity_alert(tmp_p
         connection.close()
 
 
-def test_finance_final_dispatch_auto_resolves_existing_warning_once(tmp_path):
+def test_finance_final_dispatch_does_not_auto_resolve_without_owner_terminal_contract(tmp_path):
     bootstrap(_arguments())
     _ingest_unresolved_taishin_outflow(tmp_path)
     _deliver_finance_import_outbox()
@@ -831,8 +831,8 @@ def test_finance_final_dispatch_auto_resolves_existing_warning_once(tmp_path):
 
     _deliver_finance_import_outbox()
     _deliver_finance_import_outbox()
-    _assert_manual_review_alert_is_inactive()
-    _assert_manual_review_warning_is_auto_resolved_once()
+    _assert_manual_review_alert_remains_active_without_owner_terminal_contract()
+    _assert_manual_review_warning_remains_open()
 
 
 def test_real_taishin_subsidy_payout_advances_then_recovers_after_government_allocation(tmp_path):
@@ -1229,18 +1229,18 @@ def _deliver_finance_import_outbox() -> None:
         connection.close()
 
 
-def _assert_manual_review_alert_is_inactive() -> None:
+def _assert_manual_review_alert_remains_active_without_owner_terminal_contract() -> None:
     from infrastructure.mysql.mysql_adapter import get_connection
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT predicate_active,workflow_status FROM anomaly_current_alerts WHERE definition_code='finance_import_manual_review'")
-            assert cursor.fetchone() == {"predicate_active": 0, "workflow_status": "resolved"}
+            assert cursor.fetchone() == {"predicate_active": 1, "workflow_status": "open"}
     finally:
         connection.close()
 
 
-def _assert_manual_review_warning_is_auto_resolved_once() -> None:
+def _assert_manual_review_warning_remains_open() -> None:
     from infrastructure.mysql.mysql_adapter import get_connection
 
     connection = get_connection()
@@ -1255,8 +1255,8 @@ def _assert_manual_review_warning_is_auto_resolved_once() -> None:
                 "AND occurrence.logical_code='FINANCE-ROW-001'"
             )
             assert cursor.fetchone() == {
-                "tracking_status": "auto_resolved",
-                "tracking_version": 2,
+                "tracking_status": "open",
+                "tracking_version": 1,
             }
             cursor.execute(
                 "SELECT event.action,event.actor_kind,event.reason_code "
@@ -1271,25 +1271,20 @@ def _assert_manual_review_warning_is_auto_resolved_once() -> None:
                     "action": "opened",
                     "actor_kind": "system",
                     "reason_code": "source_review_opened",
-                },
-                {
-                    "action": "auto_resolved",
-                    "actor_kind": "system",
-                    "reason_code": "root_predicate_cleared",
-                },
+                }
             ]
             cursor.execute(
                 "SELECT COUNT(*) AS count FROM import_warning_tracking_receipts "
                 "WHERE occurrence_id=(SELECT id FROM import_warning_occurrences "
                 "WHERE owning_lane='finance_import' AND logical_code='FINANCE-ROW-001')"
             )
-            assert cursor.fetchone() == {"count": 1}
+            assert cursor.fetchone() == {"count": 0}
             cursor.execute(
                 "SELECT COUNT(*) AS count FROM import_warning_tracking_outbox outbox "
                 "JOIN import_warning_tracking_events event "
                 "ON event.id=outbox.tracking_event_id "
                 "WHERE event.action='auto_resolved'"
             )
-            assert cursor.fetchone() == {"count": 1}
+            assert cursor.fetchone() == {"count": 0}
     finally:
         connection.close()

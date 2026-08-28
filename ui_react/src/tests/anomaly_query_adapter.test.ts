@@ -84,6 +84,9 @@ describe('Anomaly Query Adapter Suite', () => {
       expect(mapDomainToCategory('assignments')).toBe('排班調度');
 
       expect(mapDomainToCategory('client_finance')).toBe('客戶帳務');
+      expect(mapDomainToCategory('client_receivable')).toBe('客戶帳務');
+      expect(mapDomainToCategory('client_payable')).toBe('客戶帳務');
+      expect(mapDomainToCategory('client_subsidy_return')).toBe('客戶帳務');
 
       expect(mapDomainToCategory('staff_payables')).toBe('月嫂薪資');
       expect(mapDomainToCategory('payroll')).toBe('月嫂薪資');
@@ -182,6 +185,33 @@ describe('Anomaly Query Adapter Suite', () => {
       expect(adapted.category).toBe('客戶帳務');
       expect(adapted.staffCalendarNavigation).toBeNull();
       expect(adapted.metadata.predicateActive).toBe(true);
+    });
+
+    it('將 Orders 擁有的歷史訂單檢查映射為匯入資料，而非其他', () => {
+      const adapted = adaptAnomalySummary({
+        ...VALID_ANOMALY_SUMMARY_2,
+        definition_code: 'HISTORICAL-ORDER-001',
+        source_domain: 'orders',
+        source_identity: 'historical-order:source:7',
+      });
+
+      expect(adapted.category).toBe('匯入資料');
+      expect(adapted.title).toBe('歷史訂單匯入待人工確認');
+      expect(adapted.suggestedAction).toBe('開啟處理方式，上傳只含此 review 對應列的更正工作簿。');
+    });
+
+    it('顯示客戶應付異常的具體案件與完整解除條件', () => {
+      const adapted = adaptAnomalySummary({
+        ...VALID_ANOMALY_SUMMARY_2,
+        definition_code: 'CLIENTPAYABLE-001',
+        source_domain: 'client_payable',
+        source_identity: 'T96-CS-20260827-01',
+      });
+
+      expect(adapted.category).toBe('客戶帳務');
+      expect(adapted.title).toBe('客戶退款／調整應付已逾期');
+      expect(adapted.relatedEntity).toBe('案件 T96-CS-20260827-01');
+      expect(adapted.description).toContain('所有同碼逾期義務餘額歸零後才解除');
     });
 
     it('transforms resolved anomaly correctly', () => {

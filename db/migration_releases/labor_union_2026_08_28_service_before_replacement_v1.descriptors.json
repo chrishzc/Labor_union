@@ -1,0 +1,548 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-service-before-replacement-2026-08-28-v1",
+  "descriptors": {
+    "1012_service_before_replacement.sql": {
+      "tables": {
+        "scheduling_service_before_replacement_events": [
+          "id",
+          "replacement_event_identity",
+          "prior_replacement_event_id",
+          "case_no",
+          "scenario",
+          "prior_generation_id",
+          "replacement_generation_id",
+          "prior_generation_identity",
+          "replacement_generation_identity",
+          "prior_event_identity",
+          "expected_aggregate_version",
+          "resulting_aggregate_version",
+          "expected_generation_version",
+          "resulting_generation_version",
+          "expected_event_version",
+          "resulting_event_version",
+          "zero_service_proof_identity",
+          "zero_service_proof_owner",
+          "zero_service_proof_contract_version",
+          "zero_service_source_projection_identity",
+          "zero_service_source_projection_version",
+          "zero_service_proof_version",
+          "zero_service_proof_fingerprint",
+          "official_service_day_count",
+          "replacement_reason",
+          "reason_evidence_digest",
+          "command_fingerprint",
+          "preview_fingerprint",
+          "actor_id",
+          "capability_atom",
+          "idempotency_key",
+          "correlation_id",
+          "created_at"
+        ],
+        "scheduling_service_before_replacement_roots": [
+          "id",
+          "replacement_event_id",
+          "case_no",
+          "root_identity",
+          "owner_domain",
+          "root_kind",
+          "disposition",
+          "canonical_ordinal",
+          "owner_descriptor_identity",
+          "owner_descriptor_version",
+          "owner_descriptor_fingerprint",
+          "created_at"
+        ],
+        "scheduling_service_before_replacement_successors": [
+          "id",
+          "replacement_event_id",
+          "case_no",
+          "replacement_generation_id",
+          "matching_package_lineage_id",
+          "matching_event_id",
+          "successor_package_identity",
+          "successor_round_identity",
+          "successor_matching_event_identity",
+          "scenario",
+          "expected_generation_version",
+          "expected_event_version",
+          "candidate_count",
+          "zero_candidate_disposition",
+          "reuse_proof_variant",
+          "reuse_pool_identity",
+          "reuse_round_identity",
+          "reuse_coverage_version",
+          "reuse_availability_version",
+          "reuse_willingness_version",
+          "reuse_candidate_identity",
+          "reuse_accepted_candidate",
+          "reuse_proof_fingerprint",
+          "resume_step",
+          "created_at"
+        ],
+        "scheduling_service_before_replacement_receipts": [
+          "id",
+          "receipt_identity",
+          "replacement_event_id",
+          "successor_binding_id",
+          "case_no",
+          "idempotency_key",
+          "root_set_digest_contract",
+          "command_fingerprint",
+          "preview_fingerprint",
+          "retained_root_set_digest",
+          "retained_root_count",
+          "superseded_root_set_digest",
+          "superseded_root_count",
+          "created_root_set_digest",
+          "created_root_count",
+          "resulting_aggregate_version",
+          "resulting_generation_version",
+          "resulting_event_version",
+          "outbox_identity",
+          "result_state",
+          "created_at"
+        ],
+        "scheduling_service_before_replacement_outbox": [
+          "id",
+          "replacement_event_id",
+          "receipt_id",
+          "case_no",
+          "outbox_identity",
+          "intent_type",
+          "target_owner",
+          "bounded_payload",
+          "published_at",
+          "attempts",
+          "last_error",
+          "created_at"
+        ]
+      },
+      "indexes": {
+        "scheduling_service_before_replacement_events.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "scheduling_service_before_replacement_events.uq_service_before_replacement_event_identity": {
+          "non_unique": 0,
+          "columns": [
+            "replacement_event_identity"
+          ]
+        },
+        "scheduling_service_before_replacement_events.uq_service_before_replacement_event_idempotency": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "scheduling_service_before_replacement_events.uq_service_before_replacement_event_prior": {
+          "non_unique": 0,
+          "columns": [
+            "prior_replacement_event_id"
+          ]
+        },
+        "scheduling_service_before_replacement_events.uq_service_before_replacement_event_generation": {
+          "non_unique": 0,
+          "columns": [
+            "replacement_generation_id"
+          ]
+        },
+        "scheduling_service_before_replacement_events.uq_service_before_replacement_event_successor_binding": {
+          "non_unique": 0,
+          "columns": [
+            "id",
+            "case_no",
+            "replacement_generation_id",
+            "scenario",
+            "expected_generation_version",
+            "expected_event_version"
+          ]
+        },
+        "scheduling_service_before_replacement_events.uq_service_before_replacement_event_version_binding": {
+          "non_unique": 0,
+          "columns": [
+            "id",
+            "case_no",
+            "resulting_aggregate_version",
+            "resulting_generation_version",
+            "resulting_event_version"
+          ]
+        },
+        "scheduling_service_before_replacement_events.uq_service_before_replacement_case_event_version": {
+          "non_unique": 0,
+          "columns": [
+            "case_no",
+            "resulting_event_version"
+          ]
+        },
+        "scheduling_service_before_replacement_events.idx_service_before_replacement_prior_event": {
+          "non_unique": 1,
+          "columns": [
+            "prior_replacement_event_id"
+          ]
+        },
+        "scheduling_service_before_replacement_events.idx_service_before_replacement_case_versions": {
+          "non_unique": 1,
+          "columns": [
+            "case_no",
+            "resulting_aggregate_version",
+            "resulting_generation_version",
+            "id"
+          ]
+        },
+        "scheduling_service_before_replacement_roots.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "scheduling_service_before_replacement_roots.uq_service_before_replacement_root_identity": {
+          "non_unique": 0,
+          "columns": [
+            "replacement_event_id",
+            "root_identity"
+          ]
+        },
+        "scheduling_service_before_replacement_roots.uq_service_before_replacement_root_ordinal": {
+          "non_unique": 0,
+          "columns": [
+            "replacement_event_id",
+            "disposition",
+            "canonical_ordinal"
+          ]
+        },
+        "scheduling_service_before_replacement_roots.idx_service_before_replacement_root_case": {
+          "non_unique": 1,
+          "columns": [
+            "case_no",
+            "disposition",
+            "root_kind",
+            "id"
+          ]
+        },
+        "scheduling_service_before_replacement_successors.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "scheduling_service_before_replacement_successors.uq_service_before_replacement_successor_event": {
+          "non_unique": 0,
+          "columns": [
+            "replacement_event_id"
+          ]
+        },
+        "scheduling_service_before_replacement_successors.uq_service_before_replacement_successor_round": {
+          "non_unique": 0,
+          "columns": [
+            "successor_round_identity"
+          ]
+        },
+        "scheduling_service_before_replacement_successors.uq_service_before_replacement_successor_binding": {
+          "non_unique": 0,
+          "columns": [
+            "id",
+            "replacement_event_id",
+            "case_no"
+          ]
+        },
+        "scheduling_service_before_replacement_successors.idx_service_before_replacement_successor_package": {
+          "non_unique": 1,
+          "columns": [
+            "matching_package_lineage_id",
+            "matching_event_id"
+          ]
+        },
+        "scheduling_service_before_replacement_receipts.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "scheduling_service_before_replacement_receipts.uq_service_before_replacement_receipt_identity": {
+          "non_unique": 0,
+          "columns": [
+            "receipt_identity"
+          ]
+        },
+        "scheduling_service_before_replacement_receipts.uq_service_before_replacement_receipt_event": {
+          "non_unique": 0,
+          "columns": [
+            "replacement_event_id"
+          ]
+        },
+        "scheduling_service_before_replacement_receipts.uq_service_before_replacement_receipt_successor": {
+          "non_unique": 0,
+          "columns": [
+            "successor_binding_id"
+          ]
+        },
+        "scheduling_service_before_replacement_receipts.uq_service_before_replacement_receipt_idempotency": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "scheduling_service_before_replacement_receipts.uq_service_before_replacement_receipt_outbox": {
+          "non_unique": 0,
+          "columns": [
+            "outbox_identity"
+          ]
+        },
+        "scheduling_service_before_replacement_receipts.uq_service_before_replacement_receipt_binding": {
+          "non_unique": 0,
+          "columns": [
+            "id",
+            "replacement_event_id",
+            "case_no"
+          ]
+        },
+        "scheduling_service_before_replacement_outbox.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "scheduling_service_before_replacement_outbox.uq_service_before_replacement_outbox_event": {
+          "non_unique": 0,
+          "columns": [
+            "replacement_event_id"
+          ]
+        },
+        "scheduling_service_before_replacement_outbox.uq_service_before_replacement_outbox_receipt": {
+          "non_unique": 0,
+          "columns": [
+            "receipt_id"
+          ]
+        },
+        "scheduling_service_before_replacement_outbox.uq_service_before_replacement_outbox_identity": {
+          "non_unique": 0,
+          "columns": [
+            "outbox_identity"
+          ]
+        },
+        "scheduling_service_before_replacement_outbox.idx_service_before_replacement_outbox_pending": {
+          "non_unique": 1,
+          "columns": [
+            "published_at",
+            "attempts",
+            "id"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "scheduling_service_before_replacement_events.fk_service_before_replacement_prior_event": {
+          "columns": [
+            "prior_replacement_event_id",
+            "case_no",
+            "expected_aggregate_version",
+            "expected_generation_version",
+            "expected_event_version"
+          ],
+          "referenced_table": "scheduling_service_before_replacement_events",
+          "referenced_columns": [
+            "id",
+            "case_no",
+            "resulting_aggregate_version",
+            "resulting_generation_version",
+            "resulting_event_version"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_service_before_replacement_events.fk_service_before_replacement_case": {
+          "columns": [
+            "case_no"
+          ],
+          "referenced_table": "orders",
+          "referenced_columns": [
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_service_before_replacement_events.fk_service_before_replacement_prior_generation": {
+          "columns": [
+            "prior_generation_id",
+            "case_no"
+          ],
+          "referenced_table": "scheduling_generations",
+          "referenced_columns": [
+            "id",
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_service_before_replacement_events.fk_service_before_replacement_generation": {
+          "columns": [
+            "replacement_generation_id",
+            "case_no"
+          ],
+          "referenced_table": "scheduling_generations",
+          "referenced_columns": [
+            "id",
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_service_before_replacement_roots.fk_service_before_replacement_root_event": {
+          "columns": [
+            "replacement_event_id",
+            "case_no"
+          ],
+          "referenced_table": "scheduling_service_before_replacement_events",
+          "referenced_columns": [
+            "id",
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_service_before_replacement_successors.fk_service_before_replacement_successor_owner_event": {
+          "columns": [
+            "replacement_event_id",
+            "case_no",
+            "replacement_generation_id",
+            "scenario",
+            "expected_generation_version",
+            "expected_event_version"
+          ],
+          "referenced_table": "scheduling_service_before_replacement_events",
+          "referenced_columns": [
+            "id",
+            "case_no",
+            "replacement_generation_id",
+            "scenario",
+            "expected_generation_version",
+            "expected_event_version"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_service_before_replacement_successors.fk_service_before_replacement_successor_package": {
+          "columns": [
+            "matching_package_lineage_id"
+          ],
+          "referenced_table": "matching_coordination_package_lineage",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_service_before_replacement_successors.fk_service_before_replacement_successor_matching_event": {
+          "columns": [
+            "matching_event_id"
+          ],
+          "referenced_table": "matching_coordination_events",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_service_before_replacement_receipts.fk_service_before_replacement_receipt_event": {
+          "columns": [
+            "replacement_event_id",
+            "case_no",
+            "resulting_aggregate_version",
+            "resulting_generation_version",
+            "resulting_event_version"
+          ],
+          "referenced_table": "scheduling_service_before_replacement_events",
+          "referenced_columns": [
+            "id",
+            "case_no",
+            "resulting_aggregate_version",
+            "resulting_generation_version",
+            "resulting_event_version"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_service_before_replacement_receipts.fk_service_before_replacement_receipt_successor": {
+          "columns": [
+            "successor_binding_id",
+            "replacement_event_id",
+            "case_no"
+          ],
+          "referenced_table": "scheduling_service_before_replacement_successors",
+          "referenced_columns": [
+            "id",
+            "replacement_event_id",
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_service_before_replacement_outbox.fk_service_before_replacement_outbox_event": {
+          "columns": [
+            "replacement_event_id",
+            "case_no"
+          ],
+          "referenced_table": "scheduling_service_before_replacement_events",
+          "referenced_columns": [
+            "id",
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_service_before_replacement_outbox.fk_service_before_replacement_outbox_receipt": {
+          "columns": [
+            "receipt_id",
+            "replacement_event_id",
+            "case_no"
+          ],
+          "referenced_table": "scheduling_service_before_replacement_receipts",
+          "referenced_columns": [
+            "id",
+            "replacement_event_id",
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "scheduling_service_before_replacement_events.chk_service_before_replacement_distinct_generation": "atom(replacement_generation_id<>prior_generation_id)",
+        "scheduling_service_before_replacement_events.chk_service_before_replacement_strict_versions": "and(atom(resulting_aggregate_version>expected_aggregate_version),atom(resulting_generation_version>expected_generation_version),atom(resulting_event_version>expected_event_version))",
+        "scheduling_service_before_replacement_events.chk_service_before_replacement_zero_service": "and(atom(zero_service_proof_contract_version=1),atom(zero_service_proof_version>0),atom(zero_service_source_projection_version=zero_service_proof_version),atom(official_service_day_count=0))",
+        "scheduling_service_before_replacement_events.chk_service_before_replacement_digests": "and(atom(regexp_like(zero_service_proof_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(reason_evidence_digest,'^[0-9a-f]{64}$')),atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$')))",
+        "scheduling_service_before_replacement_events.chk_service_before_replacement_text": "and(atom(char_length(trim(replacement_event_identity))>0),atom(char_length(trim(prior_generation_identity))>0),atom(char_length(trim(replacement_generation_identity))>0),atom(char_length(trim(prior_event_identity))>0),atom(char_length(trim(zero_service_proof_identity))>0),atom(char_length(trim(zero_service_source_projection_identity))>0),atom(char_length(trim(replacement_reason))>0),atom(char_length(trim(actor_id))>0),atom(char_length(trim(capability_atom))>0),atom(regexp_like(idempotency_key,'^[a-z0-9][a-z0-9._:-]{0,190}$')),atom(char_length(trim(correlation_id))>0))",
+        "scheduling_service_before_replacement_roots.chk_service_before_replacement_root_ordinal": "atom(canonical_ordinal>0)",
+        "scheduling_service_before_replacement_roots.chk_service_before_replacement_root_owner_kind": "or(and(atom(owner_domain='matching'),atom(root_kindin('candidate_binding','willingness','matching_plan','matching_segment','matching_reply','recipient_confirmation','successor_round'))),and(atom(owner_domain='scheduling'),atom(root_kindin('waiting_lock','commitment','signback','recipient_binding','effective_generation','assignment','official_schedule'))))",
+        "scheduling_service_before_replacement_roots.chk_service_before_replacement_root_descriptor": "and(atom(char_length(trim(owner_descriptor_identity))>0),atom(owner_descriptor_version>0),atom(regexp_like(owner_descriptor_fingerprint,'^[0-9a-f]{64}$')))",
+        "scheduling_service_before_replacement_roots.chk_service_before_replacement_root_text": "and(atom(char_length(trim(root_identity))>0),atom(root_identityregexp_like(not,'[[:cntrl:]]')))",
+        "scheduling_service_before_replacement_successors.chk_service_before_replacement_successor_r07": "or(and(atom(scenario='R-07'),atom(candidate_count=0),atom(zero_candidate_disposition='blocked_no_candidate'),atom(reuse_proof_variant='not_reused'),atom(resume_step='step_2')),and(atom(scenario<>'R-07'),atom(zero_candidate_dispositionisnull)))",
+        "scheduling_service_before_replacement_successors.chk_service_before_replacement_successor_reuse": "or(and(atom(reuse_proof_variant='not_reused'),atom(reuse_pool_identityisnull),atom(reuse_round_identityisnull),atom(reuse_coverage_versionisnull),atom(reuse_availability_versionisnull),atom(reuse_willingness_versionisnull),atom(reuse_candidate_identityisnull),atom(reuse_accepted_candidateisnull),atom(reuse_proof_fingerprintisnull),atom(resume_step='step_2')),and(atom(reuse_proof_variant='candidate_pool_reused'),atom(reuse_round_identity=successor_round_identity),atom(char_length(trim(reuse_pool_identity))>0),atom(reuse_coverage_versionisnotnull),atom(reuse_availability_versionisnotnull),atom(reuse_willingness_versionisnotnull),atom(char_length(trim(reuse_candidate_identity))>0),atom(reuse_accepted_candidatein(0,1)),atom(regexp_like(reuse_proof_fingerprint,'^[0-9a-f]{64}$')),or(and(atom(reuse_accepted_candidate=0),atom(resume_step='step_3')),and(atom(reuse_accepted_candidate=1),atom(resume_step='step_4')))))",
+        "scheduling_service_before_replacement_successors.chk_service_before_replacement_successor_text": "and(atom(char_length(trim(successor_package_identity))>0),atom(char_length(trim(successor_round_identity))>0),atom(char_length(trim(successor_matching_event_identity))>0))",
+        "scheduling_service_before_replacement_receipts.chk_service_before_replacement_receipt_digests": "and(atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(retained_root_set_digest,'^[0-9a-f]{64}$')),atom(regexp_like(superseded_root_set_digest,'^[0-9a-f]{64}$')),atom(regexp_like(created_root_set_digest,'^[0-9a-f]{64}$')))",
+        "scheduling_service_before_replacement_receipts.chk_service_before_replacement_receipt_versions": "and(atom(resulting_aggregate_version>0),atom(resulting_generation_version>0),atom(resulting_event_version>0))",
+        "scheduling_service_before_replacement_receipts.chk_service_before_replacement_receipt_text": "and(atom(char_length(trim(receipt_identity))>0),atom(regexp_like(idempotency_key,'^[a-z0-9][a-z0-9._:-]{0,190}$')),atom(char_length(trim(outbox_identity))>0))",
+        "scheduling_service_before_replacement_outbox.chk_service_before_replacement_outbox_payload": "atom(json_type(bounded_payload)='OBJECT')",
+        "scheduling_service_before_replacement_outbox.chk_service_before_replacement_outbox_text": "atom(char_length(trim(outbox_identity))>0)"
+      },
+      "triggers": [
+        "trg_service_before_replacement_events_before_insert",
+        "trg_service_before_replacement_events_before_update",
+        "trg_service_before_replacement_events_before_delete",
+        "trg_service_before_replacement_roots_before_update",
+        "trg_service_before_replacement_roots_before_delete",
+        "trg_service_before_replacement_successors_before_insert",
+        "trg_service_before_replacement_successors_before_update",
+        "trg_service_before_replacement_successors_before_delete",
+        "trg_service_before_replacement_receipts_before_insert",
+        "trg_service_before_replacement_receipts_before_update",
+        "trg_service_before_replacement_receipts_before_delete",
+        "trg_service_before_replacement_outbox_before_update",
+        "trg_service_before_replacement_outbox_before_insert",
+        "trg_service_before_replacement_outbox_before_delete"
+      ]
+    }
+  }
+}

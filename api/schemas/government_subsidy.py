@@ -1,4 +1,7 @@
-"""Typed HTTP contracts for the Government Subsidy owner."""
+"""
+File: government_subsidy.py
+Description: 定義政府補助 typed HTTP 輸入與唯讀輸出契約。
+"""
 
 from __future__ import annotations
 
@@ -418,6 +421,45 @@ class GovernmentSubsidyOverpaymentReceiptView(BaseModel):
     payable_identity: str | None = None
 
 
+class GovernmentSubsidyOffsetTargetQueryView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    claim_item_id: int = Field(gt=0)
+    claim_batch_id: int = Field(gt=0)
+    batch_version: int = Field(ge=0)
+    outstanding_amount_ntd: int = Field(gt=0)
+    payer_identity: str = Field(min_length=1, max_length=191)
+
+
+class GovernmentSubsidyReturnRecipientQueryView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ready: bool
+    blockers: list[str] = Field(default_factory=list)
+    agency_identity: str | None = None
+    agency_name: str | None = None
+    bank_code: str | None = None
+    account_display: str | None = None
+    account_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    effective_date: str | None = None
+
+
+class GovernmentSubsidyOverpaymentQueryView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    overpayment_identity: str
+    payer_identity: str
+    remaining_amount_ntd: int = Field(ge=0)
+    status: str
+    overpayment_version: int = Field(ge=0)
+    source_bank_fact_reference: str
+    source_transaction_reference: str
+    offset_targets: list[GovernmentSubsidyOffsetTargetQueryView]
+    return_recipient: GovernmentSubsidyReturnRecipientQueryView
+    blockers: list[str] = Field(default_factory=list)
+    available_actions: list[str] = Field(default_factory=list)
+
+
 __all__ = [
     "GovernmentSubsidyAllocationCandidateView",
     "GovernmentSubsidyAllocationIntentView",
@@ -456,4 +498,7 @@ __all__ = [
     "GovernmentOverpaymentReturnReconciliationPreviewView",
     "GovernmentSubsidyOverpaymentPreviewView",
     "GovernmentSubsidyOverpaymentReceiptView",
+    "GovernmentSubsidyOffsetTargetQueryView",
+    "GovernmentSubsidyReturnRecipientQueryView",
+    "GovernmentSubsidyOverpaymentQueryView",
 ]

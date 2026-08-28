@@ -60,7 +60,7 @@ class _UnitOfWork:
         self.committed = True
 
 
-def _facts(existing=(), version=4):
+def _facts(existing=(), version=4, due_date=date(2026, 9, 15)):
     identity = "assignment:8"
     return PayrollRebuildFacts(
         "CASE-1",
@@ -70,6 +70,7 @@ def _facts(existing=(), version=4):
         PayrollTerms(1, 8, MoneyNTD(1000)),
         (),
         existing,
+        due_date,
     )
 
 
@@ -88,9 +89,9 @@ def _request(preview, *, version=4, key="payroll-rebuild-1"):
 def test_preview_classifies_create_replace_frozen_and_removed_actions():
     create = PayrollRebuildWorkflow(_Repository(_facts()), _UnitOfWork).preview("CASE-1")
     total = create.payroll.total_payable
-    replace = ExistingStaffObligation("assignment:8", "old-8", MoneyNTD(1), False)
-    frozen = ExistingStaffObligation("assignment:8", "old-8", MoneyNTD(1), True)
-    removed = ExistingStaffObligation("assignment:9", "old-9", MoneyNTD(20), False)
+    replace = ExistingStaffObligation("assignment:8", "old-8", MoneyNTD(1), False, date(2026, 9, 15))
+    frozen = ExistingStaffObligation("assignment:8", "old-8", MoneyNTD(1), True, date(2026, 9, 15))
+    removed = ExistingStaffObligation("assignment:9", "old-9", MoneyNTD(20), False, date(2026, 9, 15))
 
     replace_preview = PayrollRebuildWorkflow(_Repository(_facts((replace,))), _UnitOfWork).preview("CASE-1")
     frozen_preview = PayrollRebuildWorkflow(_Repository(_facts((frozen,))), _UnitOfWork).preview("CASE-1")
@@ -103,6 +104,43 @@ def test_preview_classifies_create_replace_frozen_and_removed_actions():
     assert removed_preview.actions[0].action is StaffObligationActionKind.CREATE
     assert removed_preview.actions[1].action is StaffObligationActionKind.REPLACE_UNPAID
     assert removed_preview.actions[1].after_amount == MoneyNTD(0)
+
+
+def test_preview_rebuilds_unpaid_obligation_when_orders_first_forms_due_date():
+    existing = ExistingStaffObligation(
+        "assignment:8",
+        "old-8",
+        MoneyNTD(3400),
+        False,
+        None,
+    )
+
+    preview = PayrollRebuildWorkflow(
+        _Repository(_facts((existing,))),
+        _UnitOfWork,
+    ).preview("CASE-1")
+
+    assert preview.actions[0].action is StaffObligationActionKind.REPLACE_UNPAID
+    assert preview.actions[0].before_amount == preview.actions[0].after_amount
+    assert preview.actions[0].due_date == date(2026, 9, 15)
+
+
+def test_preview_does_not_rewrite_existing_non_null_due_date():
+    existing = ExistingStaffObligation(
+        "assignment:8",
+        "old-8",
+        MoneyNTD(3400),
+        False,
+        date(2026, 9, 15),
+    )
+
+    preview = PayrollRebuildWorkflow(
+        _Repository(_facts((existing,), due_date=date(2026, 10, 15))),
+        _UnitOfWork,
+    ).preview("CASE-1")
+
+    assert preview.actions[0].action is StaffObligationActionKind.UNCHANGED
+    assert preview.actions[0].due_date == date(2026, 9, 15)
 
 
 def test_apply_persists_one_fresh_preview_and_replays_matching_idempotency_key():

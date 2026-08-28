@@ -1,4 +1,7 @@
-"""Per-request construction for the Government Subsidy application."""
+"""
+File: government_subsidy.py
+Description: 建立政府補助命令與溢撥唯讀查詢的 request-scoped dependencies。
+"""
 
 from __future__ import annotations
 
@@ -15,6 +18,7 @@ from subsystems.government_subsidy.claim_workflow import (
     GovernmentSubsidyClaimWorkflow,
 )
 from subsystems.government_subsidy.overpayment_workflow import GovernmentSubsidyOverpaymentWorkflow
+from subsystems.government_subsidy.overpayment_query import GovernmentSubsidyOverpaymentQueryWorkflow
 
 
 @dataclass(slots=True)
@@ -26,6 +30,7 @@ class GovernmentSubsidyApplication:
     ledger_workflow: GovernmentSubsidyLedgerWorkflow
     claim_workflow: GovernmentSubsidyClaimWorkflow
     overpayment_workflow: GovernmentSubsidyOverpaymentWorkflow
+    overpayment_query_workflow: GovernmentSubsidyOverpaymentQueryWorkflow
 
     def list_batches(self, cursor, limit):
         return self.claim_workflow.list_batches(cursor, limit)
@@ -87,6 +92,9 @@ class GovernmentSubsidyApplication:
     def apply_overpayment_return_reconciliation(self, request):
         return self.overpayment_workflow.apply_return_reconciliation(request)
 
+    def query_overpayment(self, overpayment_identity, correlation_id):
+        return self.overpayment_query_workflow.query(overpayment_identity, correlation_id)
+
 
 def get_government_subsidy_application():
     connection = get_connection()
@@ -110,7 +118,13 @@ def build_government_subsidy_application(connection):
         repository,
         lambda: MySqlUnitOfWork(connection),
     )
-    return GovernmentSubsidyApplication(repository, ledger_workflow, claim_workflow, GovernmentSubsidyOverpaymentWorkflow(repository, lambda: MySqlUnitOfWork(connection)))
+    return GovernmentSubsidyApplication(
+        repository,
+        ledger_workflow,
+        claim_workflow,
+        GovernmentSubsidyOverpaymentWorkflow(repository, lambda: MySqlUnitOfWork(connection)),
+        GovernmentSubsidyOverpaymentQueryWorkflow(repository),
+    )
 
 
 __all__ = [

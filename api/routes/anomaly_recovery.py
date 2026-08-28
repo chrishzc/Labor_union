@@ -1,6 +1,6 @@
 """
 File: anomaly_recovery.py
-Description: 提供異常根事實、事件歷程與修復動作的封閉唯讀 FastAPI 投影。
+Description: 提供去敏異常根事實查詢、重掃描與具證據的 projector 死信人工重試 API。
 """
 
 from __future__ import annotations
@@ -8,8 +8,9 @@ from __future__ import annotations
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime, time, timezone
 from enum import Enum
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 
 from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.anomaly_recovery import (
@@ -20,11 +21,19 @@ from api.schemas.anomaly_recovery import (
     AnomalyRootFactSnapshotView,
     AnomalyRecoveryContextView,
     FinanceOccurrenceView,
+    ProjectorDeadLetterView,
     RecoveryActionView,
     RetryAnomalyProjectorBody,
     RetryAnomalyProjectorResultView,
+    RetryProjectorDeadLetterApplyBody,
+    RetryProjectorDeadLetterPreviewBody,
+    RetryProjectorDeadLetterPreviewView,
+    RetryProjectorDeadLetterReceiptView,
     ScanAnomalyDefinitionBody,
     ScanAnomalyDefinitionResultView,
+    SupersedeProjectorDeadLetterApplyBody,
+    SupersedeProjectorDeadLetterPreviewView,
+    SupersedeProjectorDeadLetterReceiptView,
 )
 from api.schemas.anomaly_registry import (
     AnomalyDisplaySnapshotView,
@@ -33,13 +42,21 @@ from api.schemas.anomaly_registry import (
 )
 from api.schemas.base import BaseResponse
 from domains.anomalies.maintenance import (
+    ProjectorDeadLetterIdentity,
     RetryAnomalyProjectorRequest,
+    RetryProjectorDeadLetterRequest,
     ScanAnomalyDefinitionRequest,
+    SupersedeProjectorDeadLetterRequest,
 )
 from subsystems.access.authentication_session import AdminPrincipal
 from shared_kernel.errors import ErrorCategory
 from shared_kernel.fingerprints import PreviewFingerprint
-from shared_kernel.identities import CorrelationId, ExpectedVersion
+from shared_kernel.identities import (
+    ActorContext,
+    CorrelationId,
+    ExpectedVersion,
+    IdempotencyKey,
+)
 from subsystems.anomalies.maintenance_workflow import (
     AnomalyMaintenanceApplication,
     AnomalyMaintenanceError,
@@ -50,6 +67,14 @@ from subsystems.anomalies.root_fact_projection_workflow import (
 )
 
 router = APIRouter(prefix="/api/v1/anomaly-recovery", tags=["Anomalies"])
+_IdempotencyHeader = Annotated[
+    str,
+    Header(alias="Idempotency-Key", min_length=1, max_length=191),
+]
+_PROJECTOR_PATTERN = (
+    r"^(government_overpayment|client_over_refund_recovery|"
+    r"staff_overpayment_recovery)$"
+)
 
 
 # The typed HTTP signature remains explicit so FastAPI documents every boundary.
@@ -84,6 +109,7 @@ def scan_anomaly_definition(
             application.scan_definition(request, correlation_id)
         ),
         "完成異常根事實分頁重掃描",
+        correlation_id,
     )
 
 
@@ -114,9 +140,164 @@ def retry_anomaly_projector(
             application.retry_projector(request, correlation_id)
         ),
         "已重新排入失敗的異常 projector 事件",
+        correlation_id,
     )
 
 
+@router.get(
+    "/projector/dead-letters",
+    response_model=BaseResponse[list[ProjectorDeadLetterView]],
+)
+def query_projector_dead_letters(
+    maximum_items: int = Query(default=50, ge=1, le=100),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: AnomalyMaintenanceApplication = Depends(
+        get_anomaly_maintenance_application
+    ),
+):
+    del principal
+    return _call_maintenance(
+        lambda: [
+            _dead_letter_payload(item)
+            for item in application.query_dead_letters(maximum_items)
+        ],
+        "成功取得 projector dead-letter",
+        CorrelationId("projector-dead-letter-query"),
+    )
+
+
+@router.post(
+    "/projector/dead-letters/{projector_identity}/{event_id}/retry/preview",
+    response_model=BaseResponse[RetryProjectorDeadLetterPreviewView],
+)
+def preview_projector_dead_letter_retry(
+    body: RetryProjectorDeadLetterPreviewBody,
+    projector_identity: str = Path(..., pattern=_PROJECTOR_PATTERN),
+    event_id: int = Path(..., gt=0),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: AnomalyMaintenanceApplication = Depends(
+        get_anomaly_maintenance_application
+    ),
+):
+    del principal
+    return _call_maintenance(
+        lambda: _dead_letter_preview_payload(
+            application.preview_dead_letter_retry(
+                ProjectorDeadLetterIdentity(projector_identity, event_id),
+                body.reason,
+                body.evidence_reference,
+            )
+        ),
+        "成功預覽 projector dead-letter 重試",
+        CorrelationId(
+            f"projector-dead-letter-preview:{projector_identity}:{event_id}"
+        ),
+    )
+
+
+@router.post(
+    "/projector/dead-letters/{projector_identity}/{event_id}/retry/apply",
+    response_model=BaseResponse[RetryProjectorDeadLetterReceiptView],
+)
+def apply_projector_dead_letter_retry(
+    body: RetryProjectorDeadLetterApplyBody,
+    projector_identity: str = Path(..., pattern=_PROJECTOR_PATTERN),
+    event_id: int = Path(..., gt=0),
+    idempotency_key: _IdempotencyHeader = ...,
+    correlation_header: str | None = Header(default=None, alias="X-Correlation-ID"),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: AnomalyMaintenanceApplication = Depends(
+        get_anomaly_maintenance_application
+    ),
+):
+    correlation = _correlation_id(
+        correlation_header, f"projector-dead-letter-retry:{projector_identity}:{event_id}"
+    )
+    request = RetryProjectorDeadLetterRequest(
+        ProjectorDeadLetterIdentity(projector_identity, event_id),
+        body.expected_attempt_count,
+        body.reason,
+        body.evidence_reference,
+        PreviewFingerprint(body.preview_fingerprint),
+        IdempotencyKey(idempotency_key),
+        ActorContext(str(principal.username or "").strip()),
+        correlation,
+    )
+    return _call_maintenance(
+        lambda: _dead_letter_receipt_payload(
+            application.apply_dead_letter_retry(request)
+        ),
+        "已重新排入 projector dead-letter",
+        correlation,
+    )
+
+
+@router.post(
+    "/projector/dead-letters/{projector_identity}/{event_id}/supersede/preview",
+    response_model=BaseResponse[SupersedeProjectorDeadLetterPreviewView],
+)
+def preview_projector_dead_letter_supersede(
+    body: RetryProjectorDeadLetterPreviewBody,
+    projector_identity: str = Path(..., pattern=_PROJECTOR_PATTERN),
+    event_id: int = Path(..., gt=0),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: AnomalyMaintenanceApplication = Depends(
+        get_anomaly_maintenance_application
+    ),
+):
+    del principal
+    identity = ProjectorDeadLetterIdentity(projector_identity, event_id)
+    return _call_maintenance(
+        lambda: _dead_letter_supersede_preview_payload(
+            application.preview_dead_letter_supersede(
+                identity, body.reason, body.evidence_reference
+            )
+        ),
+        "成功預覽 projector dead-letter successor 處分",
+        CorrelationId(
+            f"projector-dead-letter-supersede-preview:{projector_identity}:{event_id}"
+        ),
+    )
+
+
+@router.post(
+    "/projector/dead-letters/{projector_identity}/{event_id}/supersede/apply",
+    response_model=BaseResponse[SupersedeProjectorDeadLetterReceiptView],
+)
+def apply_projector_dead_letter_supersede(
+    body: SupersedeProjectorDeadLetterApplyBody,
+    projector_identity: str = Path(..., pattern=_PROJECTOR_PATTERN),
+    event_id: int = Path(..., gt=0),
+    idempotency_key: _IdempotencyHeader = ...,
+    correlation_header: str | None = Header(default=None, alias="X-Correlation-ID"),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: AnomalyMaintenanceApplication = Depends(
+        get_anomaly_maintenance_application
+    ),
+):
+    correlation = _correlation_id(
+        correlation_header,
+        f"projector-dead-letter-supersede:{projector_identity}:{event_id}",
+    )
+    request = SupersedeProjectorDeadLetterRequest(
+        ProjectorDeadLetterIdentity(projector_identity, event_id),
+        body.expected_attempt_count,
+        body.expected_successor_event_id,
+        body.expected_successor_source_version,
+        body.reason,
+        body.evidence_reference,
+        PreviewFingerprint(body.preview_fingerprint),
+        IdempotencyKey(idempotency_key),
+        ActorContext(str(principal.username or "").strip()),
+        correlation,
+    )
+    return _call_maintenance(
+        lambda: _dead_letter_supersede_receipt_payload(
+            application.apply_dead_letter_supersede(request)
+        ),
+        "已以驗證 successor 處分 projector dead-letter",
+        correlation,
+    )
 @router.get(
     "/{fingerprint}",
     response_model=BaseResponse[AnomalyRecoveryContextView],
@@ -205,11 +386,124 @@ def _call(query, message, correlation):
         raise _contract_error(correlation) from error
 
 
-def _call_maintenance(command, message):
+def _call_maintenance(command, message, correlation):
     try:
         return BaseResponse(data=command(), message=message)
     except (AnomalyMaintenanceError, RootFactProjectionError) as error:
         raise _http_error(error) from error
+    except ValueError as error:
+        raise _maintenance_contract_error(error, correlation) from error
+    except (TypeError, KeyError) as error:
+        raise _contract_error(correlation) from error
+
+
+def _dead_letter_payload(dead_letter):
+    successor = dead_letter.successor
+    actions = ["retry_after_source_correction"]
+    if successor is not None:
+        actions.append("supersede_with_verified_successor")
+    return {
+        "projector_identity": dead_letter.identity.projector_identity,
+        "event_id": dead_letter.identity.event_id,
+        "intent_type": dead_letter.intent_type,
+        "attempt_count": dead_letter.attempt_count,
+        "error_code": dead_letter.error_code,
+        "failed_at": dead_letter.failed_at,
+        "available_actions": actions,
+        "successor_event_id": None if successor is None else successor.event_id,
+        "successor_source_version": (
+            None if successor is None else successor.source_version
+        ),
+    }
+
+
+def _dead_letter_preview_payload(preview):
+    return {
+        "projector_identity": preview.dead_letter.identity.projector_identity,
+        "event_id": preview.dead_letter.identity.event_id,
+        "intent_type": preview.dead_letter.intent_type,
+        "expected_attempt_count": preview.dead_letter.attempt_count,
+        "error_code": preview.dead_letter.error_code,
+        "reason": preview.reason,
+        "evidence_reference": preview.evidence_reference,
+        "preview_fingerprint": preview.fingerprint.value,
+    }
+
+
+def _dead_letter_receipt_payload(receipt):
+    return {
+        "projector_identity": receipt.identity.projector_identity,
+        "event_id": receipt.identity.event_id,
+        "prior_attempt_count": receipt.prior_attempt_count,
+        "resulting_status": receipt.resulting_status,
+        "receipt_identity": receipt.receipt_identity,
+        "replayed": receipt.replayed,
+    }
+
+
+def _dead_letter_supersede_preview_payload(preview):
+    return {
+        "projector_identity": preview.dead_letter.identity.projector_identity,
+        "event_id": preview.dead_letter.identity.event_id,
+        "intent_type": preview.dead_letter.intent_type,
+        "expected_attempt_count": preview.dead_letter.attempt_count,
+        "successor_event_id": preview.successor.event_id,
+        "successor_source_version": preview.successor.source_version,
+        "successor_predicate_active": preview.successor.predicate_active,
+        "reason": preview.reason,
+        "evidence_reference": preview.evidence_reference,
+        "preview_fingerprint": preview.fingerprint.value,
+    }
+
+
+def _dead_letter_supersede_receipt_payload(receipt):
+    return {
+        "projector_identity": receipt.identity.projector_identity,
+        "event_id": receipt.identity.event_id,
+        "successor_event_id": receipt.successor_event_id,
+        "successor_source_version": receipt.successor_source_version,
+        "resulting_status": receipt.resulting_status,
+        "receipt_identity": receipt.receipt_identity,
+        "replayed": receipt.replayed,
+    }
+
+
+def _maintenance_contract_error(error, correlation):
+    code = str(error)
+    status, message = {
+        "projector_dead_letter_not_found": (404, "找不到可人工重試的 projector 死信。"),
+        "projector_dead_letter_stale": (409, "死信狀態已變更，請重新預覽。"),
+        "projector_dead_letter_preview_stale": (409, "重試預覽已過期，請重新預覽。"),
+        "projector_dead_letter_successor_not_verified": (409, "尚無可驗證的較新成功投影，不能處分此死信。"),
+        "projector_dead_letter_successor_stale": (409, "較新成功投影已變更，請重新預覽。"),
+        "idempotency_conflict": (409, "此 Idempotency-Key 已用於不同的重試內容。"),
+        "projector_identity_not_supported": (422, "不支援此 projector。"),
+    }.get(
+        code,
+        (422, "projector 死信重試資料未通過驗證。"),
+    )
+    return HTTPException(
+        status_code=status,
+        detail={
+            "error": {
+                "category": "validation" if status == 422 else "conflict",
+                "code": code if code in {
+                    "projector_dead_letter_not_found",
+                    "projector_dead_letter_stale",
+                    "projector_dead_letter_preview_stale",
+                    "projector_dead_letter_successor_not_verified",
+                    "projector_dead_letter_successor_stale",
+                    "idempotency_conflict",
+                    "projector_identity_not_supported",
+                } else "projector_dead_letter_request_invalid",
+                "message": message,
+                "correlation_id": correlation.value,
+                "field_errors": [],
+                "domain_blockers": [],
+                "retryable": status == 409,
+            }
+        },
+    )
 
 
 _TIMELINE_ACTIONS = {"claim", "resolve", "reopen", "auto_resolve"}
@@ -231,7 +525,14 @@ def _root_snapshot_payload(snapshot) -> AnomalyRootFactSnapshotView:
         "domain_blockers",
         "reason_codes",
     }
-    redacted_internal = {"definition_code", "recovery_bindings"}
+    redacted_internal = {
+        "case_no",
+        "definition_code",
+        "overpayment_identity",
+        "recovery_bindings",
+        "recovery_identity",
+        "staff_id",
+    }
     optional_public = {"original_refund_ledger_entry_id"}
     if not required.issubset(snapshot) or set(snapshot) - (required | redacted_internal | optional_public):
         raise ValueError("root snapshot fields are not public")
@@ -247,6 +548,13 @@ def _root_snapshot_payload(snapshot) -> AnomalyRootFactSnapshotView:
         raise ValueError("root snapshot code collections are invalid")
     if not all(_safe_code(item) for item in blockers + reasons):
         raise ValueError("root snapshot codes are invalid")
+    original_ledger_id = snapshot.get("original_refund_ledger_entry_id")
+    if original_ledger_id is not None and (
+        isinstance(original_ledger_id, bool)
+        or not isinstance(original_ledger_id, int)
+        or original_ledger_id <= 0
+    ):
+        raise ValueError("root snapshot original refund ledger identity is invalid")
     return AnomalyRootFactSnapshotView(
         occurred_at=_datetime_value(snapshot["occurred_at"]),
         source_version=snapshot["source_version"],
@@ -254,8 +562,8 @@ def _root_snapshot_payload(snapshot) -> AnomalyRootFactSnapshotView:
         finance_import_batch_identity=_identity_value(snapshot["finance_import_batch_id"]),
         original_refund_ledger_entry_identity=(
             None
-            if snapshot.get("original_refund_ledger_entry_id") is None
-            else _identity_value(snapshot["original_refund_ledger_entry_id"])
+            if original_ledger_id is None
+            else _identity_value(original_ledger_id)
         ),
         amount_delta_ntd=snapshot["amount_delta_ntd"],
         root_condition_active=snapshot["root_condition_active"],
@@ -286,7 +594,14 @@ def _occurrence_payload(occurrence) -> FinanceOccurrenceView:
         "finance_import_batch_id": _identity_field,
         "original_refund_ledger_entry_id": _identity_field,
     }
-    internal_keys = {"definition_code", "recovery_bindings"}
+    internal_keys = {
+        "case_no",
+        "definition_code",
+        "overpayment_identity",
+        "recovery_bindings",
+        "recovery_identity",
+        "staff_id",
+    }
     unknown_keys = set(snapshot) - set(field_builders) - internal_keys
     if unknown_keys:
         raise ValueError("occurrence snapshot fields are unknown")

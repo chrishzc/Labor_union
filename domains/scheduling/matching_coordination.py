@@ -124,6 +124,7 @@ class MatchingPackageMode(StrEnum):
 
 
 class MatchingPackageState(StrEnum):
+    CANDIDATE_POOL_OPEN = "candidate_pool_open"
     PROPOSED = "proposed"
     AWAITING_CAREGIVER_WILLINGNESS = "awaiting_caregiver_willingness"
     AWAITING_CUSTOMER_DECISION = "awaiting_customer_decision"
@@ -481,16 +482,22 @@ class MatchingPackage:
         require_nonnegative_integer(self.version, "package version")
         if not isinstance(self.mode, MatchingPackageMode):
             object.__setattr__(self, "mode", MatchingPackageMode(self.mode))
+        if not isinstance(self.state, MatchingPackageState):
+            object.__setattr__(self, "state", MatchingPackageState(self.state))
         if not isinstance(self.segments, tuple) or any(not isinstance(item, MatchingSegment) for item in self.segments):
             raise TypeError("package segments must be typed tuple")
-        if not self.segments and self.state is not MatchingPackageState.NO_CANDIDATE:
+        if self.state is MatchingPackageState.CANDIDATE_POOL_OPEN:
+            if self.segments or self.candidate_results:
+                raise MatchingDomainError(
+                    MatchingDomainErrorCode.COVERAGE_INCOMPLETE,
+                    "candidate pool open package must not contain candidates or segments",
+                )
+        elif not self.segments and not self.candidate_results:
             raise MatchingDomainError(MatchingDomainErrorCode.COVERAGE_INCOMPLETE, "package requires segments")
         _validate_dates(self.required_service_dates, "required service dates")
         _validate_tuple(self.candidate_results, MatchingCandidateResult, "candidate results")
         _validate_identity(self.criteria_snapshot_id, "criteria snapshot id")
         object.__setattr__(self, "source_versions", canonical_source_tuple(self.source_versions))
-        if not isinstance(self.state, MatchingPackageState):
-            object.__setattr__(self, "state", MatchingPackageState(self.state))
         _validate_reason_codes(self.blockers)
         _validate_reason_codes(self.warnings)
         _validate_package_coverage(self)
@@ -918,6 +925,8 @@ def build_manual_matching_package(
 
 
 def _validate_package_coverage(package: MatchingPackage) -> None:
+    if package.state is MatchingPackageState.CANDIDATE_POOL_OPEN:
+        return
     if package.mode is MatchingPackageMode.SINGLE and len(package.segments) != 1:
         raise MatchingDomainError(MatchingDomainErrorCode.COVERAGE_INCOMPLETE, "single package requires one segment")
     if package.mode is MatchingPackageMode.MULTI_SEGMENT and not 2 <= len(package.segments) <= 4:

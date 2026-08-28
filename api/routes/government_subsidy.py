@@ -64,6 +64,7 @@ from api.schemas.government_subsidy import (
     GovernmentSubsidyOverpaymentDispositionPreviewBody,
     GovernmentOverpaymentReturnReconciliationApplyBody,
     GovernmentOverpaymentReturnReconciliationPreviewBody,
+    GovernmentSubsidyOverpaymentQueryView,
 )
 from domains.government_subsidy.payer_master import GovernmentRefundAccount
 from domains.government_subsidy.claims import (
@@ -114,6 +115,9 @@ from subsystems.government_subsidy.overpayment_workflow import (
     ReturnReconciliationApplyRequest,
 )
 from domains.government_subsidy.overpayment import GovernmentSubsidyOffsetIntent
+from subsystems.government_subsidy.overpayment_query import (
+    GovernmentSubsidyOverpaymentQueryError,
+)
 
 router = APIRouter(
     prefix="/api/v1/government-subsidy",
@@ -187,6 +191,30 @@ def query_government_subsidy_batch(
     return _call_endpoint(
         lambda: _batch_payload(application.query_batch(batch_id)),
         "成功取得政府補助批次",
+        correlation,
+    )
+
+
+@router.get(
+    "/overpayments/{overpayment_identity}",
+    response_model=BaseResponse[GovernmentSubsidyOverpaymentQueryView],
+)
+def query_government_subsidy_overpayment(
+    overpayment_identity: str = Path(..., min_length=1, max_length=191),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: GovernmentSubsidyApplication = Depends(
+        get_government_subsidy_application
+    ),
+):
+    del principal
+    correlation = CorrelationId(
+        f"government-overpayment-query:{overpayment_identity}"
+    )
+    return _call_endpoint(
+        lambda: _overpayment_query_payload(
+            application.query_overpayment(overpayment_identity.strip(), correlation)
+        ),
+        "成功取得政府補助溢撥現況",
         correlation,
     )
 
@@ -730,6 +758,8 @@ def _call_endpoint(command, message, correlation_id):
         _raise_typed_error(error.error)
     except GovernmentSubsidyClaimWorkflowError as error:
         _raise_typed_error(error.error)
+    except GovernmentSubsidyOverpaymentQueryError as error:
+        _raise_typed_error(error.error)
     except GovernmentSubsidyDomainError as error:
         _raise_domain_error(error, correlation_id)
     except OperationalError as error:
@@ -1157,6 +1187,40 @@ def _overpayment_candidate_payload(candidate):
     }
 
 
+def _overpayment_query_payload(value):
+    return {
+        "overpayment_identity": value.overpayment_identity,
+        "payer_identity": value.payer_identity,
+        "remaining_amount_ntd": value.remaining_amount_ntd,
+        "status": value.status,
+        "overpayment_version": value.overpayment_version,
+        "source_bank_fact_reference": value.source_bank_fact_reference,
+        "source_transaction_reference": value.source_transaction_reference,
+        "offset_targets": [
+            {
+                "claim_item_id": target.claim_item_id,
+                "claim_batch_id": target.claim_batch_id,
+                "batch_version": target.batch_version,
+                "outstanding_amount_ntd": target.outstanding_amount_ntd,
+                "payer_identity": target.payer_identity,
+            }
+            for target in value.offset_targets
+        ],
+        "return_recipient": {
+            "ready": value.return_recipient.ready,
+            "blockers": list(value.return_recipient.blockers),
+            "agency_identity": value.return_recipient.agency_identity,
+            "agency_name": value.return_recipient.agency_name,
+            "bank_code": value.return_recipient.bank_code,
+            "account_display": value.return_recipient.account_display,
+            "account_fingerprint": value.return_recipient.account_fingerprint,
+            "effective_date": value.return_recipient.effective_date,
+        },
+        "blockers": list(value.blockers),
+        "available_actions": list(value.available_actions),
+    }
+
+
 def _require_iso_date(value):
     try:
         date.fromisoformat(value)
@@ -1227,6 +1291,7 @@ __all__ = [
     "GovernmentSubsidyReversalApplyBody",
     "GovernmentSubsidyReversalPreviewBody",
     "list_government_subsidy_batches",
+    "query_government_subsidy_overpayment",
     "preview_government_subsidy_claim_approval",
     "preview_government_subsidy_claim_plan",
     "preview_government_subsidy_claim_submission",

@@ -34,6 +34,7 @@ class ControlledFileOwner(str, Enum):
 
 
 class ControlledFilePurpose(str, Enum):
+    UNSIGNED_CONTRACT = "unsigned_contract"
     FINAL_SIGNED_CONTRACT = "final_signed_contract"
     SERVICE_DATE_CONFIRMATION = "service_date_confirmation"
     BABY_LOG_PHOTO = "baby_log_photo"
@@ -64,7 +65,12 @@ class ControlledFileWorkflowError(RuntimeError):
 
 
 _ALLOWED_PURPOSES = {
-    ControlledFileOwner.CONTRACT_SIGNING: frozenset({ControlledFilePurpose.FINAL_SIGNED_CONTRACT}),
+    ControlledFileOwner.CONTRACT_SIGNING: frozenset(
+        {
+            ControlledFilePurpose.UNSIGNED_CONTRACT,
+            ControlledFilePurpose.FINAL_SIGNED_CONTRACT,
+        }
+    ),
     ControlledFileOwner.SCHEDULING: frozenset(
         {
             ControlledFilePurpose.SERVICE_DATE_CONFIRMATION,
@@ -134,6 +140,7 @@ class ControlledFileStagingFacts:
     staging: ControlledFileStagingResult
     version: int
     registration_status: ControlledFileStagingRegistrationStatus
+    stored_intent: ControlledFileIntent
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,64 +320,67 @@ class ControlledFileWorkflow:
         return self._build_preview(intent, for_update=False)
 
     def apply(self, command: ApplyControlledFile) -> ControlledFileApplyReceipt:
-        command_fingerprint = _command_fingerprint(command)
         with self._unit_of_work_factory() as unit_of_work:
-            stored = self._repository.find_receipt(
-                command.idempotency_key, for_update=True
-            )
-            if stored is not None:
-                replay = _replay(stored, command_fingerprint)
-                unit_of_work.commit()
-                return replay
-
-            fresh = self._build_preview(command.intent, for_update=True)
-            if fresh.expected_staging_version != command.expected_staging_version:
-                raise ControlledFileWorkflowError("stale_staging_version", "staging 版本已變更")
-            if fresh.blockers:
-                raise ControlledFileWorkflowError(fresh.blockers[0], "檔案目前不可 Apply")
-            if fresh.preview_fingerprint != command.preview_fingerprint:
-                raise ControlledFileWorkflowError("stale_preview", "Preview 已過期")
-
-            claim = self._repository.claim_command(
-                command.idempotency_key, command_fingerprint, command.correlation_id
-            )
-            if claim is ControlledFileCommandClaim.MISMATCH:
-                raise ControlledFileWorkflowError(
-                    "idempotency_mismatch", "相同重播識別對應不同命令"
-                )
-            if claim is ControlledFileCommandClaim.MATCHED:
-                matched = self._repository.find_receipt(
-                    command.idempotency_key, for_update=True
-                )
-                if matched is None:
-                    raise ControlledFileWorkflowError(
-                        "idempotency_evidence_incomplete", "命令已存在但 receipt 不完整"
-                    )
-                replay = _replay(matched, command_fingerprint)
-                unit_of_work.commit()
-                return replay
-
-            now = _utc(self._clock.now())
-            readback = self._repository.register_file(
-                fresh.candidate, actor=command.actor, applied_at=now
-            )
-            self._repository.mark_staging_registered(
-                fresh.candidate.staging_id,
-                expected_version=command.expected_staging_version,
-                file_id=readback.file_id,
-            )
-            receipt = ControlledFileApplyReceipt(
-                receipt_id=_receipt_id(command.idempotency_key),
-                outcome=ControlledFileApplyOutcome.CREATED,
-                readback=readback,
-            )
-            self._repository.save_receipt(
-                command.idempotency_key,
-                StoredControlledFileApplyReceipt(command_fingerprint, receipt),
-                command.correlation_id,
-            )
+            receipt = self.apply_borrowed(command)
             unit_of_work.commit()
             return receipt
+
+    def apply_borrowed(
+        self, command: ApplyControlledFile
+    ) -> ControlledFileApplyReceipt:
+        """Apply inside a caller-owned transaction without committing it."""
+        command_fingerprint = _command_fingerprint(command)
+        stored = self._repository.find_receipt(
+            command.idempotency_key, for_update=True
+        )
+        if stored is not None:
+            return _replay(stored, command_fingerprint)
+
+        fresh = self._build_preview(command.intent, for_update=True)
+        if fresh.expected_staging_version != command.expected_staging_version:
+            raise ControlledFileWorkflowError("stale_staging_version", "staging 版本已變更")
+        if fresh.blockers:
+            raise ControlledFileWorkflowError(fresh.blockers[0], "檔案目前不可 Apply")
+        if fresh.preview_fingerprint != command.preview_fingerprint:
+            raise ControlledFileWorkflowError("stale_preview", "Preview 已過期")
+
+        claim = self._repository.claim_command(
+            command.idempotency_key, command_fingerprint, command.correlation_id
+        )
+        if claim is ControlledFileCommandClaim.MISMATCH:
+            raise ControlledFileWorkflowError(
+                "idempotency_mismatch", "相同重播識別對應不同命令"
+            )
+        if claim is ControlledFileCommandClaim.MATCHED:
+            matched = self._repository.find_receipt(
+                command.idempotency_key, for_update=True
+            )
+            if matched is None:
+                raise ControlledFileWorkflowError(
+                    "idempotency_evidence_incomplete", "命令已存在但 receipt 不完整"
+                )
+            return _replay(matched, command_fingerprint)
+
+        now = _utc(self._clock.now())
+        readback = self._repository.register_file(
+            fresh.candidate, actor=command.actor, applied_at=now
+        )
+        self._repository.mark_staging_registered(
+            fresh.candidate.staging_id,
+            expected_version=command.expected_staging_version,
+            file_id=readback.file_id,
+        )
+        receipt = ControlledFileApplyReceipt(
+            receipt_id=_receipt_id(command.idempotency_key),
+            outcome=ControlledFileApplyOutcome.CREATED,
+            readback=readback,
+        )
+        self._repository.save_receipt(
+            command.idempotency_key,
+            StoredControlledFileApplyReceipt(command_fingerprint, receipt),
+            command.correlation_id,
+        )
+        return receipt
 
     def readback(self, file_id: str) -> ControlledFileReadback:
         if _FILE_ID.fullmatch(file_id) is None:
@@ -423,6 +433,11 @@ class ControlledFileWorkflow:
             raise ControlledFileWorkflowError("controlled_file_already_registered", "staging 已 Apply")
         if facts.version <= 0:
             raise ControlledFileWorkflowError("controlled_file_staging_version_invalid", "staging 版本無效")
+        if facts.stored_intent != intent:
+            raise ControlledFileWorkflowError(
+                "controlled_file_staging_intent_mismatch",
+                "staging owner 與用途已變更",
+            )
 
         now = _utc(self._clock.now())
         expires_at = _utc(facts.staging.expires_at)

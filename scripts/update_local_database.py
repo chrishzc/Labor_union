@@ -1,6 +1,6 @@
 """
 File: update_local_database.py
-Description: 預覽並執行受控本機 additive 升級；replacement 必須明確選用。
+Description: 依 canonical release chain 預覽並逐版執行受控本機 additive 升級；replacement 必須明確選用。
 """
 
 from __future__ import annotations
@@ -126,6 +126,8 @@ def validate_local_source(config, source: str, environment=None) -> None:
         raise LocalDatabaseUpdateError("developer update only accepts local MySQL")
     if not isinstance(source, str) or not migration.IDENTIFIER.fullmatch(source):
         raise LocalDatabaseUpdateError("source database name is invalid")
+    if len(source) > MYSQL_IDENTIFIER_MAX_LENGTH:
+        raise LocalDatabaseUpdateError("source database name exceeds 64 characters")
     if any("prod" in str(values.get(key, "")).casefold() for key in ("APP_ENV", "ENV", "FLASK_ENV")):
         raise LocalDatabaseUpdateError("production environment refused")
     profile = str(
@@ -135,10 +137,32 @@ def validate_local_source(config, source: str, environment=None) -> None:
         raise LocalDatabaseUpdateError(
             "developer update refuses MySQL system databases"
         )
+    if not source.casefold().startswith("lu_test_") or len(source) <= len("lu_test_"):
+        raise LocalDatabaseUpdateError(
+            "developer update only accepts the lu_test_* database allowlist"
+        )
     if profile not in {"local", "development", "dev", "test", "testing"}:
         raise LocalDatabaseUpdateError("local development profile required")
 
 
+def _database_config_from_environment(
+    environment_path: Path,
+    environment_values: dict[str, str],
+):
+    """Use a strict env file when present, otherwise require explicit process values."""
+    try:
+        return migration.config_from_env(environment_path)
+    except FileNotFoundError:
+        pass
+    return (
+        migration.DatabaseConfig(
+            host=environment_values.get("DB_HOST", "127.0.0.1"),
+            port=int(environment_values.get("DB_PORT", "3306")),
+            user=environment_values.get("DB_USER", "root"),
+            password=environment_values.get("DB_PASSWORD", ""),
+        ),
+        environment_values.get("DB_DATABASE", "").strip(),
+    )
 def with_database_port(config, database_port: int | None):
     """Return the same credential set with an explicit local TCP forwarding port."""
     if database_port is None:
@@ -277,51 +301,82 @@ def apply_additive_update(
         raise LocalDatabaseUpdateError(
             f"additive runner unavailable: {ADDITIVE_IMPORT_ERROR}"
         )
-    preview = build_additive_preview(
-        config,
-        source,
-        receipt_root,
-        qualification_receipt_path=qualification_receipt_path,
-    )
-    if preview.get("status") not in {"ready", "current"}:
-        raise LocalDatabaseUpdateError(
-            f"{preview.get('blocked_reason', 'additive route blocked')} "
-            f"[{preview.get('code', 'additive_blocked')}]"
-        )
-    if preview.get("status") == "current":
-        return preview
-    receipt_path = (
-        Path(backup_receipt_path).expanduser().resolve()
-        if backup_receipt_path is not None
-        else _fast_backup_receipt_path(
-            Path(receipt_root), source, str(preview["release_id"])
-        )
-    )
-    dump_path = receipt_path.with_suffix(".sql")
-    try:
-        additive.prepare_backup(
+    applied_releases: list[str] = []
+    while True:
+        preview = build_additive_preview(
             config,
             source,
-            receipt_root=Path(receipt_root),
-            backup_dump_path=dump_path,
-            backup_receipt_path=receipt_path,
-            mysql_container=mysql_container,
-            qualification_path=qualification_receipt_path,
+            receipt_root,
+            qualification_receipt_path=qualification_receipt_path,
         )
-        return additive.apply(
-            config,
-            source,
-            receipt_root=Path(receipt_root),
-            duration_guard_ms=duration_guard_ms,
-            lock_timeout_seconds=lock_timeout_seconds,
-            qualification_path=qualification_receipt_path,
-            backup_dump_path=dump_path,
-            backup_receipt_path=receipt_path,
+        if preview.get("status") == "current":
+            current = require_current_database(preview)
+            current["applied_releases"] = applied_releases
+            return current
+        if preview.get("status") != "ready":
+            raise LocalDatabaseUpdateError(
+                f"{preview.get('blocked_reason', 'additive route blocked')} "
+                f"[{preview.get('code', 'additive_blocked')}]"
+            )
+        pending = preview.get("pending_releases")
+        if not isinstance(pending, list) or not pending:
+            raise LocalDatabaseUpdateError(
+                "ordered additive preview is incomplete",
+                code="release_chain_invalid",
+            )
+        next_release = pending[0]
+        if not isinstance(next_release, dict):
+            raise LocalDatabaseUpdateError(
+                "ordered additive preview is malformed",
+                code="release_chain_invalid",
+            )
+        release_id = next_release.get("release_id")
+        qualification_reference = next_release.get("qualification_receipt")
+        if (
+            not isinstance(release_id, str)
+            or not isinstance(qualification_reference, str)
+            or release_id in applied_releases
+        ):
+            raise LocalDatabaseUpdateError(
+                "ordered additive progression is invalid",
+                code="release_chain_invalid",
+            )
+        qualification_path = Path(qualification_reference)
+        if not qualification_path.is_absolute():
+            qualification_path = ROOT / qualification_path
+        receipt_path = (
+            Path(backup_receipt_path).expanduser().resolve()
+            if backup_receipt_path is not None and not applied_releases
+            else _fast_backup_receipt_path(
+                Path(receipt_root), source, release_id
+            )
         )
-    except additive.LocalAdditiveBlocked as error:
-        raise LocalDatabaseUpdateError(
-            f"{error} [{error.code}]"
-        ) from error
+        dump_path = receipt_path.with_suffix(".sql")
+        try:
+            additive.prepare_backup(
+                config,
+                source,
+                receipt_root=Path(receipt_root),
+                backup_dump_path=dump_path,
+                backup_receipt_path=receipt_path,
+                mysql_container=mysql_container,
+                qualification_path=qualification_path,
+            )
+            additive.apply(
+                config,
+                source,
+                receipt_root=Path(receipt_root),
+                duration_guard_ms=duration_guard_ms,
+                lock_timeout_seconds=lock_timeout_seconds,
+                qualification_path=qualification_path,
+                backup_dump_path=dump_path,
+                backup_receipt_path=receipt_path,
+            )
+        except additive.LocalAdditiveBlocked as error:
+            raise LocalDatabaseUpdateError(
+                f"{error} [{error.code}]"
+            ) from error
+        applied_releases.append(release_id)
 
 
 def build_drift_report(config, source: str) -> dict[str, object]:
@@ -391,14 +446,59 @@ def _drift_remediation(snapshot, artifact: str, state: str) -> dict[str, object]
 
 
 def require_current_database(preview: dict[str, object]) -> dict[str, object]:
-    pending = [*preview["parts_to_apply"], *preview["parts_to_resume"]]
-    if pending:
-        names = ", ".join(str(name) for name in pending)
-        raise LocalDatabaseUpdateError(f"schema update required: {names}")
+    try:
+        entries = migration._local_ordered_upgrade_entries()
+    except Exception as error:
+        raise LocalDatabaseUpdateError(
+            "canonical schema release chain is not current",
+            code="schema_update_required",
+        ) from error
+    expected_artifacts = [
+        {
+            "name": entry["artifact"]["name"],
+            "release_id": entry["release_id"],
+            "release_fingerprint": entry["release_fingerprint"],
+            "state": "exact",
+        }
+        for entry in entries
+    ]
+    artifacts = preview.get("artifacts")
+    baseline = entries[0]["release_id"]
+    latest = entries[-1]["release_id"]
+    latest_fingerprint = entries[-1]["release_fingerprint"]
+    projected_artifacts = (
+        [
+            {
+                "name": item.get("name"),
+                "release_id": item.get("release_id"),
+                "release_fingerprint": item.get("release_fingerprint"),
+                "state": item.get("state"),
+            }
+            for item in artifacts
+        ]
+        if isinstance(artifacts, list)
+        and all(isinstance(item, dict) for item in artifacts)
+        else None
+    )
+    if (
+        preview.get("status") != "current"
+        or preview.get("baseline_release_id") != baseline
+        or preview.get("latest_release_id") != latest
+        or preview.get("release_id") != latest
+        or preview.get("release_fingerprint") != latest_fingerprint
+        or projected_artifacts != expected_artifacts
+        or preview.get("pending_releases") != []
+    ):
+        raise LocalDatabaseUpdateError(
+            "canonical schema release chain is not current",
+            code="schema_update_required",
+        )
     return {
         "status": "current",
         "source_database": preview.get("source_database"),
-        "release_id": preview.get("release_id"),
+        "release_id": latest,
+        "baseline_release_id": baseline,
+        "latest_release_id": latest,
     }
 
 
@@ -819,7 +919,10 @@ def update_local_database(
             or None
         )
         mysql_container = resolve_mysql_container(mysql_container)
-        config, source = migration.config_from_env(environment_path)
+        config, source = _database_config_from_environment(
+            environment_path,
+            environment_values,
+        )
         config = with_database_port(config, database_port)
         validate_local_source(config, source, environment_values)
         if drift_report:
@@ -888,11 +991,7 @@ def update_local_database(
                 code="strategy_flags_conflict",
             )
         if preview.get("status") == "current":
-            return {
-                "status": "current",
-                "source_database": source,
-                "release_id": preview.get("release_id"),
-            }
+            return require_current_database(preview)
         if preview.get("status") != "blocked":
             raise LocalDatabaseUpdateError(
                 "schema update required",

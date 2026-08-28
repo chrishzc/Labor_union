@@ -8,6 +8,7 @@ import type { CustomerServiceClient } from '../api/customer_service/customer_ser
 import type { LineConfigurationQueryClient } from '../api/line_configuration/line_configuration_query_client';
 import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
 import type { LineRichMenuDraftClient } from '../api/line_rich_menu_draft/line_rich_menu_draft_client';
+import { RichMenuDraftSchema } from '../api/line_rich_menu_draft/line_rich_menu_draft_schemas';
 import { LineManagementPage } from '../pages/LineManagementPage';
 import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from './fixtures/customer_service/customer_service_contract_fixtures';
 import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE } from './fixtures/line_identity/line_identity_contract_fixtures';
@@ -45,8 +46,9 @@ describe('LINE Rich Menu query-only 接線', () => {
     expect(screen.getByText('已發布')).toBeInTheDocument();
     expect(screen.getAllByText('POSTBACK').length).toBeGreaterThan(0);
     expect(screen.getAllByText('case_progress').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('此版本已正式發布，為保留發布快照，目前只能查看；請建立新的草稿版本再調整。').length).toBeGreaterThan(0);
     expect(screen.queryByText(/https?:\/\//)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /發布至 LINE|上傳圖片|刪除選單/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /檢查發布影響|發布至 LINE|上傳圖片|刪除選單|預覽草稿變更|套用並回讀/ })).not.toBeInTheDocument();
     expect(richMenuDraft.query).toHaveBeenCalledTimes(1);
     expect(configuration.getRichMenuConfiguration).not.toHaveBeenCalled();
     expect(configuration.listRichMenuPublications).toHaveBeenCalledTimes(1);
@@ -58,6 +60,32 @@ describe('LINE Rich Menu query-only 接線', () => {
     ));
     expect(screen.queryByRole('button', { name: '重新發布' })).not.toBeInTheDocument();
     expect(screen.queryByText(/發布工作 ID|設定版本|紀錄 ID|伺服器狀態/)).not.toBeInTheDocument();
+    expect(richMenuDraft.preview).not.toHaveBeenCalled();
+    expect(richMenuDraft.apply).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('processing exact lock 不掛載草稿或 provider mutation controls', async () => {
+    const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
+    vi.stubGlobal('fetch', fetchSpy);
+    const dependenciesValue = dependencies();
+    vi.mocked(dependenciesValue.richMenuDraft.query).mockResolvedValue(RichMenuDraftSchema.parse({
+      ...LINE_RICH_MENU_DRAFT_FIXTURE,
+      publication_locks: [{
+        menu_definition_id: 'customer_menu',
+        configuration_revision: 8,
+        state: 'processing',
+        readonly_reason: '此版本正在發布處理中，為避免變更已送出的內容，目前只能查看。',
+      }],
+    }));
+
+    render(<LineManagementPage customerService={dependenciesValue.customer} lineIdentity={dependenciesValue.identity} lineConfiguration={dependenciesValue.configuration} richMenuDraft={dependenciesValue.richMenuDraft} />);
+    fireEvent.click(screen.getByRole('button', { name: /2\. 多角色 Rich Menu/ }));
+
+    expect((await screen.findAllByText('此版本正在發布處理中，為避免變更已送出的內容，目前只能查看。')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /檢查發布影響|預覽草稿變更|套用並回讀/ })).not.toBeInTheDocument();
+    expect(dependenciesValue.richMenuDraft.preview).not.toHaveBeenCalled();
+    expect(dependenciesValue.richMenuDraft.apply).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

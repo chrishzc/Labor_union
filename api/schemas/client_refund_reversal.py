@@ -1,9 +1,12 @@
-"""Typed HTTP contracts for Client Refund and Client Reversal."""
+"""
+File: client_refund_reversal.py
+Description: Client Finance refund、recovery 與 reversal 的 strict HTTP contracts。
+"""
 
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -61,6 +64,7 @@ class ClientOverRefundRecoveryApplyBody(ClientOverRefundRecoveryPreviewBody):
 class ClientOverRefundRecoveryMatchedPreviewBody(ClientOverRefundRecoveryPreviewBody):
     matching_identity: str = Field(min_length=1, max_length=191)
     matching_version: int = Field(ge=1)
+    evidence_reference: str = Field(min_length=1, max_length=500)
 
 
 class ClientOverRefundRecoveryMatchedApplyBody(
@@ -75,6 +79,7 @@ class ClientOverRefundRecoveryMatchedApplyBody(
 class ClientOverRefundRecoveryAdjustmentPreviewBody(_StrictModel):
     recovery_identity: str = Field(min_length=1, max_length=191)
     adjustment_amount_ntd: int = Field(gt=0)
+    evidence_reference: str = Field(min_length=1, max_length=500)
 
 
 class ClientOverRefundRecoveryAdjustmentApplyBody(
@@ -89,6 +94,7 @@ class ClientOverRefundRecoveryAdjustmentApplyBody(
 class ClientOverRefundRecoveryMatchingPreviewBody(_StrictModel):
     recovery_identity: str = Field(min_length=1, max_length=191)
     finance_import_row_id: int = Field(gt=0)
+    evidence_reference: str = Field(min_length=1, max_length=500)
 
 
 class ClientOverRefundRecoveryMatchingApplyBody(
@@ -117,6 +123,7 @@ class ClientOverRefundRecoveryReceiptView(_StrictModel):
     recovery_version: int = Field(ge=0)
     remaining_after_ntd: int = Field(ge=0)
     resulting_status: str
+    evidence_reference: str | None = None
 
 
 class ClientOverRefundRecoveryAdjustmentPreviewView(_StrictModel):
@@ -145,6 +152,24 @@ class ClientOverRefundRecoveryMatchingReceiptView(_StrictModel):
     finance_import_row_identity: str
     recovery_version: int = Field(ge=0)
     account_version: int = Field(ge=0)
+    evidence_reference: str | None = None
+
+
+class ClientOverRefundRecoveryMatchingQueryView(_StrictModel):
+    matching_identity: str = Field(min_length=1, max_length=191)
+    matching_version: int = Field(ge=1)
+    incoming_row_reference: str = Field(min_length=1, max_length=191)
+
+
+class ClientOverRefundRecoveryQueryView(_StrictModel):
+    case_no: str = Field(min_length=1, max_length=191)
+    recovery_identity: str = Field(min_length=1, max_length=191)
+    remaining_amount_ntd: int = Field(ge=0)
+    status: Literal["open", "partially_recovered", "recovered", "adjusted"]
+    recovery_version: int = Field(ge=0)
+    account_version: int = Field(ge=0)
+    source_row_reference: str = Field(min_length=1, max_length=191)
+    current_matchings: list[ClientOverRefundRecoveryMatchingQueryView]
 
 
 class ClientRefundReversalPreviewView(_StrictModel):
@@ -163,13 +188,54 @@ class ClientRefundReversalReceiptView(_StrictModel):
     affected_obligations: list[str]
 
 
+class ClientPayableObligationView(_StrictModel):
+    obligation_identity: str = Field(min_length=1, max_length=191)
+    obligation_type: Literal["adjustment", "refund", "subsidy_return"]
+    amount_due_ntd: int = Field(gt=0)
+    due_date: date | None = None
+
+
+class ClientOutgoingBankFactView(_StrictModel):
+    finance_import_row_id: int = Field(gt=0)
+    amount_ntd: int = Field(gt=0)
+    transaction_date: date
+    eligible_obligation_identities: list[str] = Field(min_length=1)
+
+
 class ClientRefundReversalQueryView(_StrictModel):
     case_no: str
     account_version: int = Field(ge=0)
-    refund_obligations: list[dict[str, Any]]
-    subsidy_return_obligations: list[dict[str, Any]]
+    refund_obligations: list[ClientPayableObligationView]
+    subsidy_return_obligations: list[ClientPayableObligationView]
+    refund_bank_facts: list[ClientOutgoingBankFactView]
+    subsidy_return_bank_facts: list[ClientOutgoingBankFactView]
     reversal_targets: list[dict[str, Any]]
     refund_return_targets: list[dict[str, Any]]
+
+
+class ClientSettlementReceivableObligationView(_StrictModel):
+    obligation_identity: str = Field(min_length=1, max_length=191)
+    payment_stage: Literal["deposit", "first", "second", "adjustment"]
+    amount_due_ntd: int = Field(gt=0)
+    due_date: date
+
+
+class ClientSettlementIncomingBankFactView(_StrictModel):
+    finance_import_row_id: int = Field(gt=0)
+    amount_ntd: int = Field(gt=0)
+    transaction_date: date
+
+
+class ClientSettlementRemediationQueryView(_StrictModel):
+    case_no: str = Field(min_length=1, max_length=191)
+    account_version: int = Field(ge=0)
+    as_of: date
+    receivable_obligations: list[ClientSettlementReceivableObligationView]
+    refund_obligations: list[ClientPayableObligationView]
+    subsidy_return_obligations: list[ClientPayableObligationView]
+    incoming_bank_facts: list[ClientSettlementIncomingBankFactView]
+    refund_bank_facts: list[ClientOutgoingBankFactView]
+    subsidy_return_bank_facts: list[ClientOutgoingBankFactView]
 
 
 __all__ = [
@@ -178,6 +244,7 @@ __all__ = [
     "ClientRefundReversalPreviewView",
     "ClientRefundReversalQueryView",
     "ClientRefundReversalReceiptView",
+    "ClientSettlementRemediationQueryView",
     "ClientRefundReturnApplyBody",
     "ClientRefundReturnPreviewBody",
     "ClientOverRefundRecoveryApplyBody",
@@ -190,6 +257,8 @@ __all__ = [
     "ClientOverRefundRecoveryMatchingPreviewBody",
     "ClientOverRefundRecoveryMatchingPreviewView",
     "ClientOverRefundRecoveryMatchingReceiptView",
+    "ClientOverRefundRecoveryMatchingQueryView",
+    "ClientOverRefundRecoveryQueryView",
     "ClientOverRefundRecoveryPreviewBody",
     "ClientOverRefundRecoveryPreviewView",
     "ClientOverRefundRecoveryReceiptView",

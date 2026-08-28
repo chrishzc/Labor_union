@@ -77,6 +77,16 @@ export const LINE_RICH_MENU_DRAFT_FIXTURE = {
   publication_locks: [{
     menu_definition_id: 'customer_menu',
     configuration_revision: 8,
+    state: 'published',
+    readonly_reason: '此版本已正式發布，為保留發布快照，目前只能查看；請建立新的草稿版本再調整。',
+  }],
+} as const;
+
+export const LINE_RICH_MENU_EDITABLE_DRAFT_FIXTURE = {
+  ...LINE_RICH_MENU_CONFIGURATION_FIXTURE,
+  publication_locks: [{
+    menu_definition_id: 'customer_menu',
+    configuration_revision: 8,
     state: 'editable',
     readonly_reason: null,
   }],
@@ -94,6 +104,12 @@ export const LINE_RICH_MENU_PUBLICATION_FIXTURE = {
   menu_definition_id: 'customer_menu',
   configuration_revision: 8,
   status: 'published',
+} as const;
+
+export const LINE_RICH_MENU_OLD_PUBLICATION_FIXTURE = {
+  ...LINE_RICH_MENU_PUBLICATION_FIXTURE,
+  id: 18,
+  configuration_revision: 7,
 } as const;
 
 export const LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE = {

@@ -14,6 +14,7 @@
       "mapping_id": "orders-contract-identity-v1",
       "legacy_token": "contract_id",
       "canonical_token": "contract_identity",
+      "legacy_pattern": "(?i)(?:\\borders\\s*\\.\\s*contract_id\\b|\\borders\\b[^\\r\\n]{0,200}\\bcontract_id\\b|\\bcontract_id\\b[^\\r\\n]{0,200}\\borders\\b)",
       "required_canonical_paths": [
         "db/schema.sql",
         "db/schema_parts/999_v_order_details_view.sql",
@@ -27,6 +28,8 @@
         "tests/test_migrate_order_contract_identity.py",
         "tests/test_field_authority_legacy_name_audit.py",
         "tests/test_plan_legacy_ui_dataset_integration.py",
+        "document/架構重整/02_決策與退役執行記錄/PROV-20260828-local-db-1003-to-current-upgrade-spec.md",
+        "document/架構重整/02_決策與退役執行記錄/PROV-20260828-local-db-1003-to-current-upgrade-work-package.md",
         "document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md",
         "document/架構重整/03_追蹤清單與證據/evidence/"
       ]

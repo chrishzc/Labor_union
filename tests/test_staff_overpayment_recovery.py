@@ -114,6 +114,7 @@ def _collection_selection():
     return StaffOverpaymentRecoverySelection(
         "staff-overpayment-recovery:1", StaffOverpaymentRecoveryAction.COLLECT,
         "finance-import-row:11",
+        matching_identity="staff-recovery-match:1", matching_version=1,
     )
 
 
@@ -157,6 +158,28 @@ def test_workflow_rejects_stale_recovery_before_persisting():
     assert raised.value.error.category is ErrorCategory.CONFLICT
     assert raised.value.error.code == "staff_overpayment_recovery_stale"
     assert repository.persisted == [("load", True)]
+
+
+def test_collection_preview_requires_existing_immutable_matching_identity_and_version():
+    with pytest.raises(ValueError, match="staff_overpayment_recovery_matching_required"):
+        StaffOverpaymentRecoverySelection(
+            "staff-overpayment-recovery:1", StaffOverpaymentRecoveryAction.COLLECT,
+            "finance-import-row:11",
+        )
+    with pytest.raises(ValueError, match="staff_overpayment_recovery_matching_invalid"):
+        StaffOverpaymentRecoverySelection(
+            "staff-overpayment-recovery:1", StaffOverpaymentRecoveryAction.COLLECT,
+            "finance-import-row:11", matching_identity="staff-recovery-match:1",
+            matching_version=0,
+        )
+
+
+def test_adjustment_cannot_carry_matching_or_bank_row_identity():
+    with pytest.raises(ValueError, match="staff_overpayment_recovery_action_invalid"):
+        StaffOverpaymentRecoverySelection(
+            "staff-overpayment-recovery:1", StaffOverpaymentRecoveryAction.ADJUST,
+            adjustment_amount=MoneyNTD(1), matching_version=1,
+        )
 
 
 def test_unmatched_collection_endpoint_requires_immutable_matching():

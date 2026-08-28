@@ -1,6 +1,6 @@
 /**
  * File: order_tracker_real_data.test.tsx
- * Description: 驗證 Tracker 未完成案件、七階段、卡片投影、11 步 SOP、cursor 續頁與唯讀 LINE 歷程。
+ * Description: 驗證 Tracker 未完成／已完成案件、七階段、卡片投影、11 步 SOP、cursor 續頁與唯讀 LINE 歷程。
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,6 +48,30 @@ describe('OrderTrackerPage query-only presentation', () => {
     expect(screen.queryByText('資料完整性異常')).not.toBeInTheDocument();
     expect(screen.getAllByText('目前訂單狀態')).toHaveLength(
       realisticOrderSummaryPage.items.length
+    );
+  });
+
+  it('loads completed orders only after the operator explicitly enables them', async () => {
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(
+      buildOrdersStageProjectionFixture(realisticOrderSummaryPage),
+    );
+
+    render(<OrderTrackerPage />);
+    await screen.findByText('ORD-2026-0801');
+    expect(ordersQueryClient.getOrderSummaries).toHaveBeenLastCalledWith(
+      { page_size: 200, lifecycle_scope: 'unfinished' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '包含已完成案件' }));
+
+    await waitFor(() => expect(ordersQueryClient.getOrderSummaries).toHaveBeenLastCalledWith(
+      { page_size: 200, lifecycle_scope: 'all' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    expect(orderStageProjectionClient.getOperationalTimelines).toHaveBeenLastCalledWith(
+      { page_size: 200, lifecycle_scope: 'all' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 

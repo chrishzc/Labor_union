@@ -1,6 +1,6 @@
 /**
  * File: orders_page_real_data.test.tsx
- * Description: 驗證 OrdersPage 契約與 active-plan 查詢的 fail-closed、404 與合法空狀態。
+ * Description: 驗證 OrdersPage successor 契約 surface、active-plan 查詢的 fail-closed、404 與合法空狀態。
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
@@ -40,6 +40,12 @@ import {
   realisticServiceDateQueryView,
 } from './fixtures/orders/order_mutation_contract_fixtures';
 import { buildOrdersStageProjectionFixture } from './fixtures/orders_stage_projection_fixtures';
+
+vi.mock('../components/ContractExternalSigningActions', () => ({
+  ContractExternalSigningActions: ({ caseNo }: { caseNo: string }) => (
+    <section aria-label="外部平台簽約與最終 PDF">successor contract surface：{caseNo}</section>
+  ),
+}));
 
 function unavailableCardProjection(caseNo: string): OrdersCardProjection {
   const field = <T,>(owner: string, value: T | null = null) => ({
@@ -131,8 +137,11 @@ describe('OrdersPage query real-data slice', () => {
       cancellation_date: '2026-08-23', actual_end_date: null, confirmed_service_days: [],
       official_service_day_count: 0, official_service_hours: 0, order_version: 0,
       scheduling_version: 0, scheduling_generation: 0, client_finance_version: 0,
-      payroll_version: 0, scheduling: {}, client_finance_impact: {}, payroll_impact: {},
-      lifecycle_impact: {}, preview_fingerprint: 'a'.repeat(64),
+      payroll_version: 0,
+      scheduling: { case_no: 'ORD-2026-0801', generation_number: 1, expected_aggregate_version: 0, resulting_aggregate_version: 1, cancelled_assignment_ids: [], assignments: [], buffers: [] },
+      client_finance_impact: { case_no: 'ORD-2026-0801', expected_account_version: 0, resulting_account_version: 1, stage_plans: [], actions: [], settlement: { deposit_settled: false, all_formal_obligations_settled: false, fingerprint: 'b'.repeat(64) }, blockers: [], fingerprint: 'c'.repeat(64) },
+      payroll_impact: { case_no: 'ORD-2026-0801', expected_payroll_version: 0, resulting_payroll_version: 1, payroll: { assignments: [], earned_floor_fee: { amount: 0 }, total_payable: { amount: 0 }, fingerprint: 'd'.repeat(64) }, carried_rate_snapshots: [], actions: [], blockers: [], fingerprint: 'e'.repeat(64) },
+      lifecycle_impact: { case_no: 'ORD-2026-0801', before_status: '訂單成立', after_status: '訂單取消', actual_end_date: null, cancellation_effective: true, fingerprint: 'f'.repeat(64) }, preview_fingerprint: 'a'.repeat(64),
     });
     vi.spyOn(orderCancellationClient, 'apply').mockResolvedValue({
       case_no: 'ORD-2026-0801', order_version: 1, scheduling_version: 1,
@@ -646,6 +655,19 @@ describe('OrdersPage query real-data slice', () => {
     expect(locationFact).not.toHaveTextContent('地址待確認');
   });
 
+  it('mounts the successor contract workflow without exposing the legacy external URL surface', async () => {
+    useOperableSummary();
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+
+    expect(await screen.findByRole('region', { name: '外部平台簽約與最終 PDF' })).toHaveTextContent(
+      'successor contract surface：ORD-2026-0801',
+    );
+    expect(screen.queryByLabelText('受控 HTTPS 文件下載網址')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '契約寄送與簽回文件操作' })).not.toBeInTheDocument();
+  });
+
   it('shows missing service-time and cooking roots as pending instead of inventing defaults', async () => {
     useOperableSummary();
     vi.mocked(ordersQueryClient.getOrderTerms).mockResolvedValueOnce({
@@ -798,6 +820,166 @@ describe('OrdersPage query real-data slice', () => {
     expect(document.body.textContent).not.toContain('preview_fingerprint');
     expect(document.body.textContent).not.toContain('NT$ 18,000');
     expect(ordersQueryClient.getAssignmentPlan).not.toHaveBeenCalled();
+  });
+
+  it('locks the cancellation drawer while Apply is unresolved and rejects case switching', async () => {
+    useOperableSummary();
+    let resolveApply: ((value: Awaited<ReturnType<typeof orderCancellationClient.apply>>) => void) | undefined;
+    const pendingApply = new Promise<Awaited<ReturnType<typeof orderCancellationClient.apply>>>((resolve) => {
+      resolveApply = resolve;
+    });
+    vi.mocked(orderCancellationClient.apply).mockReturnValueOnce(pendingApply);
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
+    await screen.findByText(/實際開始日：尚未開始/);
+    fireEvent.click(screen.getByRole('button', { name: /預覽取消與退款試算/ }));
+    await screen.findByText(/取消影響預覽/);
+    fireEvent.change(screen.getByLabelText('人工取消原因'), { target: { value: '客戶電話確認取消' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /我已核對本次取消日期/ }));
+    fireEvent.click(screen.getByRole('button', { name: /確認執行取消/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /正在套用取消/ })).toBeDisabled());
+    expect(screen.getByRole('button', { name: 'Close drawer' })).toBeDisabled();
+
+    fireEvent.click(screen.getAllByRole('button', { name: /媒合與正式排班/ })[1]);
+    expect(screen.getByRole('button', { name: /正在套用取消/ })).toBeInTheDocument();
+
+    resolveApply?.({
+      case_no: 'ORD-2026-0801', order_version: 1, scheduling_version: 1,
+      scheduling_generation: 1, client_finance_version: 1, payroll_version: 1,
+      lifecycle_status: '訂單取消', actual_end_date: null,
+      official_service_day_count: 0, official_service_hours: 0,
+      cancelled_assignment_ids: [], created_assignment_keys: [],
+      preview_fingerprint: 'a'.repeat(64),
+    });
+    await screen.findByText(/訂單取消已完成/);
+  });
+
+  it('retries an unknown cancellation outcome with the original payload and idempotency key', async () => {
+    useOperableSummary();
+    vi.spyOn(orderCancellationClient, 'receipt').mockRejectedValueOnce(
+      new ApiHttpError(404, 'order_cancellation_receipt_not_found', 'receipt not found'),
+    );
+    vi.mocked(orderCancellationClient.apply)
+      .mockRejectedValueOnce(new Error('network timeout'))
+      .mockResolvedValueOnce({
+        case_no: 'ORD-2026-0801', order_version: 1, scheduling_version: 1,
+        scheduling_generation: 1, client_finance_version: 1, payroll_version: 1,
+        lifecycle_status: '訂單取消', actual_end_date: null,
+        official_service_day_count: 0, official_service_hours: 0,
+        cancelled_assignment_ids: [], created_assignment_keys: [],
+        preview_fingerprint: 'a'.repeat(64),
+      });
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
+    await screen.findByText(/實際開始日：尚未開始/);
+    fireEvent.click(screen.getByRole('button', { name: /預覽取消與退款試算/ }));
+    await screen.findByText(/取消影響預覽/);
+    fireEvent.change(screen.getByLabelText('人工取消原因'), { target: { value: '客戶電話確認取消' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /我已核對本次取消日期/ }));
+    fireEvent.click(screen.getByRole('button', { name: /確認執行取消/ }));
+    await screen.findByText(/取消結果未明/);
+    const firstCall = vi.mocked(orderCancellationClient.apply).mock.calls[0];
+    fireEvent.click(screen.getByRole('button', { name: /以相同命令重試取消/ }));
+    await screen.findByText(/訂單取消已完成/);
+    const secondCall = vi.mocked(orderCancellationClient.apply).mock.calls[1];
+    expect(secondCall?.[2].idempotencyKey).toBe(firstCall?.[2].idempotencyKey);
+    expect(secondCall?.[1]).toEqual(firstCall?.[1]);
+  });
+
+  it('reconciles an unknown cancellation outcome by receipt before owner card and stage readback', async () => {
+    useOperableSummary();
+    vi.mocked(orderCancellationClient.apply).mockRejectedValueOnce(new Error('network timeout'));
+    vi.spyOn(orderCancellationClient, 'receipt').mockResolvedValueOnce({
+      case_no: 'ORD-2026-0801', order_version: 1, scheduling_version: 1,
+      scheduling_generation: 1, client_finance_version: 1, payroll_version: 1,
+      lifecycle_status: '訂單取消', actual_end_date: null,
+      official_service_day_count: 0, official_service_hours: 0,
+      cancelled_assignment_ids: [], created_assignment_keys: [],
+      preview_fingerprint: 'a'.repeat(64),
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
+    await screen.findByText(/實際開始日：尚未開始/);
+    fireEvent.click(screen.getByRole('button', { name: /預覽取消與退款試算/ }));
+    await screen.findByText(/取消影響預覽/);
+    fireEvent.change(screen.getByLabelText('人工取消原因'), { target: { value: '客戶電話確認取消' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /我已核對本次取消日期/ }));
+    fireEvent.click(screen.getByRole('button', { name: /確認執行取消/ }));
+    await screen.findByText(/取消結果未明/);
+
+    const apply = vi.mocked(orderCancellationClient.apply);
+    const firstApply = apply.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: /以相同命令重試取消/ }));
+    await screen.findByText(/訂單取消已完成/);
+    expect(orderCancellationClient.receipt).toHaveBeenCalledWith(
+      'ORD-2026-0801',
+      expect.any(String),
+      expect.any(AbortSignal),
+    );
+    expect(apply).toHaveBeenCalledTimes(firstApply);
+    expect(orderCancellationClient.query).toHaveBeenCalledWith('ORD-2026-0801');
+    expect(vi.mocked(orderCardProjectionClient.getCardProjection).mock.calls.length).toBeGreaterThan(1);
+    expect(vi.mocked(orderStageProjectionClient.getOperationalTimelines).mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('keeps an unknown cancellation outcome unresolved without POST when receipt lookup fails', async () => {
+    useOperableSummary();
+    vi.mocked(orderCancellationClient.apply).mockRejectedValueOnce(new Error('network timeout'));
+    vi.spyOn(orderCancellationClient, 'receipt').mockRejectedValueOnce(
+      new ApiHttpError(500, 'receipt_lookup_failed', 'receipt lookup failed'),
+    );
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
+    await screen.findByText(/實際開始日：尚未開始/);
+    fireEvent.click(screen.getByRole('button', { name: /預覽取消與退款試算/ }));
+    await screen.findByText(/取消影響預覽/);
+    fireEvent.change(screen.getByLabelText('人工取消原因'), { target: { value: '客戶電話確認取消' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /我已核對本次取消日期/ }));
+    fireEvent.click(screen.getByRole('button', { name: /確認執行取消/ }));
+    await screen.findByText(/取消結果未明/);
+    const applyCalls = vi.mocked(orderCancellationClient.apply).mock.calls.length;
+
+    fireEvent.click(screen.getByRole('button', { name: /以相同命令重試取消/ }));
+    await screen.findByText(/receipt 尚未可讀取/);
+    expect(vi.mocked(orderCancellationClient.apply)).toHaveBeenCalledTimes(applyCalls);
+    expect(screen.queryByText(/訂單取消已完成/)).not.toBeInTheDocument();
+  });
+
+  it('edits an in-service day and caregiver with a required change reason before Preview', async () => {
+    useOperableSummary();
+    vi.mocked(orderCancellationClient.query).mockResolvedValueOnce({
+      ...cancellationQuery,
+      actual_start_date: '2026-08-01',
+      service_started: true,
+      confirmed_service_days: [{ service_date: '2026-08-20', staff_id: 101, reason: null }],
+      caregiver_options: [{ staff_id: 101, display_name: '原月嫂' }, { staff_id: 202, display_name: '替代月嫂' }],
+    });
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
+    await screen.findByDisplayValue('2026-08-20');
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: '202' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '第 1 日人工原因' }), { target: { value: '實際照護人員更換' } });
+    fireEvent.click(screen.getByRole('button', { name: /預覽取消與退款試算/ }));
+    await screen.findByText(/取消影響預覽/);
+    expect(orderCancellationClient.preview).toHaveBeenCalledWith(
+      'ORD-2026-0801',
+      [{ service_date: '2026-08-20', staff_id: 202, reason: '實際照護人員更換' }],
+      expect.any(AbortSignal),
+    );
   });
 
   it('loads the two owned date workflows without unrelated detail projections', async () => {

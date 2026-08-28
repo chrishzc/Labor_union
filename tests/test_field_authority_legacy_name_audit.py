@@ -1,3 +1,8 @@
+"""
+File: test_field_authority_legacy_name_audit.py
+Description: 驗證欄位權威稽核只阻擋所屬persisted field的legacy reference，並保留合法同名descriptor。
+"""
+
 import copy
 
 from scripts.verify_field_authority_legacy_names import (
@@ -19,7 +24,9 @@ def test_checked_in_legacy_name_audit_has_no_active_contract_id_reference():
 
 def test_legacy_name_audit_rejects_an_unapproved_reference(tmp_path):
     (tmp_path / "api").mkdir()
-    (tmp_path / "api" / "writer.py").write_text("contract_id = value\n", encoding="utf-8")
+    (tmp_path / "api" / "writer.py").write_text(
+        "value = orders.contract_id\n", encoding="utf-8"
+    )
     (tmp_path / "canonical.py").write_text("contract_identity = value\n", encoding="utf-8")
     manifest = copy.deepcopy(load_manifest())
     manifest["scan_roots"] = ["api"]
@@ -30,4 +37,39 @@ def test_legacy_name_audit_rejects_an_unapproved_reference(tmp_path):
 
     assert verify_manifest(manifest, tmp_path) == [
         "field-authority mapping orders-contract-identity-v1 has unexpected legacy references"
+    ]
+
+
+def test_legacy_name_audit_allows_unrelated_descriptor_contract_id(tmp_path):
+    (tmp_path / "domains").mkdir()
+    (tmp_path / "domains" / "catalog.py").write_text(
+        "descriptor = OwnerRoot(contract_id=value)\n", encoding="utf-8"
+    )
+    (tmp_path / "canonical.py").write_text(
+        "contract_identity = value\n", encoding="utf-8"
+    )
+    manifest = copy.deepcopy(load_manifest())
+    manifest["scan_roots"] = ["domains"]
+    manifest["mappings"] = [manifest["mappings"][0]]
+    mapping = manifest["mappings"][0]
+    mapping["required_canonical_paths"] = ["canonical.py"]
+    mapping["allowed_legacy_paths"] = []
+
+    assert verify_manifest(manifest, tmp_path) == []
+
+
+def test_legacy_name_audit_rejects_invalid_context_pattern(tmp_path):
+    (tmp_path / "api").mkdir()
+    (tmp_path / "canonical.py").write_text(
+        "contract_identity = value\n", encoding="utf-8"
+    )
+    manifest = copy.deepcopy(load_manifest())
+    manifest["scan_roots"] = ["api"]
+    manifest["mappings"] = [manifest["mappings"][0]]
+    mapping = manifest["mappings"][0]
+    mapping["required_canonical_paths"] = ["canonical.py"]
+    mapping["legacy_pattern"] = "["
+
+    assert verify_manifest(manifest, tmp_path) == [
+        "field-authority mapping orders-contract-identity-v1 has invalid legacy pattern"
     ]

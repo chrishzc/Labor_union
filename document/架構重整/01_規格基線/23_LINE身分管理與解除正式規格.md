@@ -17,6 +17,7 @@
 3. 解除不刪除個人、訂單、排班、客服、審核或歷史事件；只停用 binding，並在 Rich Menu 回復成功後清除 owner projection。
 4. 外部 LINE API 與 MySQL 不能假設原子交易；解除採 durable saga，不把 provider call 包進 DB transaction。
 5. Streamlit 只呼叫 Identity Binding bounded API 並顯示 typed views，不直接讀寫 binding 或 owner table。
+6. 同一 LINE User ID 可以同時具有 customer 與 staff 兩個 active binding；雙角色本身不是 conflict 或 anomaly。每個 binding 仍以自己的 subject type/reference、version、capability 與 owner projection 獨立驗證，request context 必須明確選定角色，不得把 customer 權限合併成 staff 權限或反向繼承。只有同一 subject type 指向互斥／多個 active subject、owner projection 不一致或 replacement lineage 斷裂時才是 binding conflict。
 
 ## 3. 根事實與狀態機
 
@@ -86,5 +87,5 @@ LINE 管理中心新增「身分管理」，並將「LINE 下方選單」改名�
 
 - `line_identity_bindings` 與 binding events 由 LINE Identity application 作唯一 writer；`clients.line_user_id`、`staff.line_user_id`、`admin_users.linked_line_user_id` 只作 owner projection。
 - `provisional_client_registrations` 的 provisional registration 由 Case Import 擁有；LIFF onboarding 成功只表示 binding／projection outcome，不得直接 promotion customer／staff／admin role，也不得覆蓋其他 Domain root。
-- legacy direct writers、舊 approve writer 與 `bind.html` 必須 guarded／readonly 或 `410`，逐 caller 建立 replacement、focused regression 與 restore trigger 後退出。Customer Service 的 `binding_failed_assistance` 可提供人工協助；dual-role／two-failure escalation 尚未實作，交 M4 escalation。
+- legacy direct writers、舊 approve writer 與 `bind.html` 必須 guarded／readonly 或 `410`，逐 caller 建立 replacement、focused regression 與 restore trigger 後退出。Customer Service 的 `binding_failed_assistance` 可提供人工協助；dual-role 依 §2 明定為合法多 binding，後續實作必須補角色選擇、同 type conflict 與 two-failure escalation，不得把雙角色本身投影為 `LINE-004`。
 - 真實 verified-token／LIFF browser／registration／binding／Rich Menu E2E 仍需 sandbox config；本正式規格同步不把現況 evidence 宣稱為 PASS，也不授權 provider、schema／DB 或 route cutover。

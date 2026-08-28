@@ -117,6 +117,61 @@ def test_draft_query_returns_action_only_through_manager_contract(monkeypatch) -
     }
 
 
+def test_published_draft_query_returns_the_canonical_readonly_reason(monkeypatch) -> None:
+    class Application:
+        def get_rich_menu_draft_query(self, _actor):
+            return _query_result(
+                LineConfigurationSnapshot(
+                    LineConfigurationKind.RICH_MENUS,
+                    LineConfigurationRevision(8),
+                    canonical_line_payload_json(_definition()),
+                ),
+                LineRichMenuDraftPublicationState.PUBLISHED,
+            )
+
+    response = _client(monkeypatch, Application()).get("/api/v1/line/rich-menus/draft")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["publication_locks"] == [{
+        "menu_definition_id": "customer_menu",
+        "configuration_revision": 8,
+        "state": "published",
+        "readonly_reason": "此版本已正式發布，為保留發布快照，目前只能查看；請建立新的草稿版本再調整。",
+    }]
+
+
+@pytest.mark.parametrize("locks", ((), (
+    LineRichMenuDraftPublicationLock(
+        "ghost_menu",
+        LineConfigurationRevision(8),
+        LineRichMenuDraftPublicationState.EDITABLE,
+    ),
+), (
+    LineRichMenuDraftPublicationLock(
+        "customer_menu",
+        LineConfigurationRevision(7),
+        LineRichMenuDraftPublicationState.EDITABLE,
+    ),
+)))
+def test_draft_query_maps_malformed_server_lock_projection_to_typed_unavailable(
+    monkeypatch,
+    locks,
+) -> None:
+    class Application:
+        def get_rich_menu_draft_query(self, _actor):
+            snapshot = LineConfigurationSnapshot(
+                LineConfigurationKind.RICH_MENUS,
+                LineConfigurationRevision(8),
+                canonical_line_payload_json(_definition()),
+            )
+            return LineRichMenuDraftQueryResult(snapshot, locks)
+
+    response = _client(monkeypatch, Application()).get("/api/v1/line/rich-menus/draft")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"]["code"] == "line_rich_menu_draft_unavailable"
+
+
 def test_draft_preview_and_apply_return_normalized_readback(monkeypatch) -> None:
     definition = _definition("實際候選訊息")
     normalized_json = canonical_line_payload_json(_definition("實際候選訊息"))

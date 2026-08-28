@@ -80,6 +80,11 @@ class AnomalyIdentityListEvidenceView(_AnomalyEvidenceBase):
     value: list[str] = Field(max_length=100)
 
 
+class AnomalyDetailListEvidenceView(_AnomalyEvidenceBase):
+    kind: Literal["detail_list"]
+    value: list[str] = Field(max_length=100)
+
+
 AnomalyEvidenceFieldView = Annotated[
     AnomalyIdentityEvidenceView
     | AnomalyMaskedTextEvidenceView
@@ -90,7 +95,8 @@ AnomalyEvidenceFieldView = Annotated[
     | AnomalyIntegerEvidenceView
     | AnomalyCodeEvidenceView
     | AnomalyCodeListEvidenceView
-    | AnomalyIdentityListEvidenceView,
+    | AnomalyIdentityListEvidenceView
+    | AnomalyDetailListEvidenceView,
     Field(discriminator="kind"),
 ]
 
@@ -212,6 +218,7 @@ __all__ = [
     "AnomalyCodeListEvidenceView",
     "AnomalyDateEvidenceView",
     "AnomalyDatetimeEvidenceView",
+    "AnomalyDetailListEvidenceView",
     "AnomalyDetailView",
     "AnomalyDisplaySnapshotView",
     "AnomalyEvidenceFieldView",

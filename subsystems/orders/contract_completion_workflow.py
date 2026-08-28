@@ -178,16 +178,23 @@ class ContractCompletionWorkflow:
         return _build_preview(self._repository.load_for_preview(case_no), intent)
 
     def apply(self, request: ContractCompletionApplyRequest) -> ContractCompletionReceipt:
-        command_fingerprint = _command_fingerprint(request)
         with self._unit_of_work_factory() as unit_of_work:
-            replay = self._claim_or_replay(request, command_fingerprint)
-            if replay is not None:
-                return replay
-            preview = self._fresh_preview(request)
-            receipt = _build_receipt(preview)
-            self._persist(request, preview, command_fingerprint, receipt)
+            receipt = self.apply_borrowed(request)
             unit_of_work.commit()
             return receipt
+
+    def apply_borrowed(
+        self, request: ContractCompletionApplyRequest
+    ) -> ContractCompletionReceipt:
+        """Apply under an existing outer transaction without committing it."""
+        command_fingerprint = _command_fingerprint(request)
+        replay = self._claim_or_replay(request, command_fingerprint)
+        if replay is not None:
+            return replay
+        preview = self._fresh_preview(request)
+        receipt = _build_receipt(preview)
+        self._persist(request, preview, command_fingerprint, receipt)
+        return receipt
 
     def _claim_or_replay(self, request, command_fingerprint):
         state = self._repository.claim_command(request, command_fingerprint)

@@ -1,4 +1,7 @@
-"""Project GOVSUB-004 from Government Subsidy reversal root facts."""
+"""
+File: government_subsidy_reversal_anomaly_source.py
+Description: 依政府補助 reversal 根事實投影 GOVSUB-004 告警。
+"""
 
 from __future__ import annotations
 
@@ -167,8 +170,6 @@ def _project_request(root_fact, coordinate, current_coordinate):
 
 def _reversal_review_required(root_fact) -> bool:
     if not root_fact.currently_government_subsidy:
-        return False
-    if root_fact.successful_reversal_source_receipt_id is not None:
         return False
     receipt = root_fact.source_receipt
     if root_fact.classified_source_receipt_id is None or receipt is None:

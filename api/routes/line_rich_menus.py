@@ -185,6 +185,22 @@ def _draft_publication_lock_view(lock) -> RichMenuDraftPublicationLockView:
     )
 
 
+def _draft_view(result) -> RichMenuDraftView:
+    try:
+        snapshot = result.snapshot
+        definition = LineMenusConfig.model_validate(json.loads(snapshot.definition_json))
+        return RichMenuDraftView(
+            revision=snapshot.revision.value,
+            definition=definition,
+            publication_locks=tuple(
+                _draft_publication_lock_view(lock)
+                for lock in result.publication_locks
+            ),
+        )
+    except Exception as exc:
+        raise RuntimeError("line_rich_menu_draft_projection_invalid") from exc
+
+
 def _publication_error(exc: Exception) -> NoReturn:
     if isinstance(exc, (RichMenuPublicationNotFoundError, MediaAssetNotFoundError)):
         raise typed_http_error(
@@ -251,19 +267,11 @@ def rich_menu_draft_query(
         result = get_line_configuration_application().get_rich_menu_draft_query(
             admin_actor_context(principal)
         )
-        snapshot = result.snapshot
-        definition = LineMenusConfig.model_validate(json.loads(snapshot.definition_json))
+        view = _draft_view(result)
     except Exception as exc:
         _draft_error(exc)
     return BaseResponse[RichMenuDraftView](
-        data=RichMenuDraftView(
-            revision=snapshot.revision.value,
-            definition=definition,
-            publication_locks=tuple(
-                _draft_publication_lock_view(lock)
-                for lock in result.publication_locks
-            ),
-        )
+        data=view
     )
 
 
@@ -318,9 +326,7 @@ def rich_menu_draft_apply(
         )
         if readback_result.snapshot.revision != result.snapshot.revision:
             raise RuntimeError("line_rich_menu_draft_readback_revision_mismatch")
-        readback_definition = LineMenusConfig.model_validate(
-            json.loads(readback_result.snapshot.definition_json)
-        )
+        readback_view = _draft_view(readback_result)
     except Exception as exc:
         _draft_error(exc)
     request.state.audit_action = "line.rich_menu.draft.apply"
@@ -333,14 +339,7 @@ def rich_menu_draft_apply(
                 committed_revision=result.snapshot.revision.value,
                 receipt_reference=f"line-rich-menu-draft:{result.snapshot.revision.value}",
             ),
-            readback=RichMenuDraftView(
-                revision=result.snapshot.revision.value,
-                definition=readback_definition,
-                publication_locks=tuple(
-                    _draft_publication_lock_view(lock)
-                    for lock in readback_result.publication_locks
-                ),
-            ),
+            readback=readback_view,
         ),
         message="Rich Menu 草稿版本已套用",
     )

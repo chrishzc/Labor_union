@@ -1,4 +1,7 @@
-"""Public CLI entrypoint tests for preserve-data migration runner."""
+"""
+File: test_migrate_preserved_database_additive_schema_cli.py
+Description: 驗證 preserve-data CLI、container port與完整低權限mysqldump選項。
+"""
 
 from __future__ import annotations
 
@@ -91,4 +94,4 @@ def test_source_backup_avoids_process_privilege_for_tablespace_metadata(
     )
 
     assert "--no-tablespaces" in captured
-    assert "--events" not in captured
+    assert "--events" in captured

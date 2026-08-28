@@ -1,4 +1,7 @@
-"""Preview/apply orchestration for immutable client recovery matching."""
+"""
+File: over_refund_recovery_matching_workflow.py
+Description: 協調客戶退款超額追償的 immutable matching。
+"""
 
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ class ClientOverRefundRecoveryMatchingSelection:
     case_no: str
     recovery_identity: str
     finance_import_row_identity: str
+    evidence_reference: str | None = None
 
     def __post_init__(self) -> None:
         for value, label in (
@@ -29,6 +33,8 @@ class ClientOverRefundRecoveryMatchingSelection:
             (self.finance_import_row_identity, "finance import row identity"),
         ):
             require_canonical_text(value, label, 191)
+        if self.evidence_reference is not None:
+            require_canonical_text(self.evidence_reference, "evidence reference", 500)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,9 +64,12 @@ class ClientOverRefundRecoveryMatchingApplyRequest:
     actor: ActorContext
     reason: str
     correlation_id: CorrelationId
+    evidence_reference: str | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.reason, "reason", 500)
+        if self.evidence_reference is not None:
+            require_canonical_text(self.evidence_reference, "evidence reference", 500)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +81,7 @@ class ClientOverRefundRecoveryMatchingReceipt:
     recovery_version: int
     account_version: int
     preview_fingerprint: PreviewFingerprint
+    evidence_reference: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +131,8 @@ class ClientOverRefundRecoveryMatchingWorkflow:
 
 
 def _fresh_preview(repository, request):
+    if request.evidence_reference != request.selection.evidence_reference:
+        raise _error(request.correlation_id, ErrorCategory.CONFLICT, "client_finance_candidate_stale")
     facts = repository.load_matching(request.selection, for_update=True)
     if facts.recovery_version != request.expected_recovery_version.value or facts.account_version != request.expected_account_version.value:
         raise _error(request.correlation_id, ErrorCategory.CONFLICT, "client_finance_candidate_stale")
@@ -142,7 +154,13 @@ def _preview(facts, selection, correlation_id):
         )
     except ValueError as error:
         raise _error(correlation_id, ErrorCategory.DOMAIN_BLOCKED, str(error)) from error
-    return ClientOverRefundRecoveryMatchingPreview(candidate, candidate.fingerprint)
+    return ClientOverRefundRecoveryMatchingPreview(
+        candidate,
+        fingerprint_payload({
+            "candidate": candidate.fingerprint.value,
+            "evidence_reference": selection.evidence_reference or "",
+        }),
+    )
 
 
 def _receipt(preview, request):
@@ -155,6 +173,7 @@ def _receipt(preview, request):
         recovery_version=candidate.recovery_version,
         account_version=candidate.account_version,
         preview_fingerprint=preview.fingerprint,
+        evidence_reference=request.evidence_reference,
     )
 
 
@@ -162,11 +181,13 @@ def _command_fingerprint(request):
     return fingerprint_payload({
         "selection": request.selection.__dict__ if hasattr(request.selection, "__dict__") else {
             "case_no": request.selection.case_no, "recovery_identity": request.selection.recovery_identity,
-            "finance_import_row_identity": request.selection.finance_import_row_identity},
+            "finance_import_row_identity": request.selection.finance_import_row_identity,
+            "evidence_reference": request.selection.evidence_reference or ""},
         "expected_recovery_version": request.expected_recovery_version.value,
         "expected_account_version": request.expected_account_version.value,
         "preview_fingerprint": request.preview_fingerprint.value,
         "actor": request.actor.actor_id, "reason": request.reason,
+        "evidence_reference": request.evidence_reference or "",
     })
 
 

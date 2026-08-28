@@ -1,0 +1,72 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-historical-operational-baseline-2026-08-28-v1",
+  "descriptors": {
+    "1010_historical_operational_baseline.sql": {
+      "tables": {
+        "historical_order_operational_baseline_events": [
+          "id", "baseline_event_identity", "prior_baseline_event_id", "order_identity", "case_no",
+          "source_event_identity", "source_version", "selected_step", "expected_orders_version",
+          "resulting_orders_version", "owner_binding_fingerprint", "evidence_mode", "reason",
+          "evidence_reference", "document_kind", "affected_steps", "candidate_snapshot",
+          "step_projection", "preview_fingerprint", "command_fingerprint", "actor", "correlation_id",
+          "created_at"
+        ],
+        "historical_order_operational_baseline_receipts": [
+          "id", "receipt_identity", "event_id", "idempotency_key", "command_fingerprint",
+          "preview_fingerprint", "resulting_orders_version", "result_snapshot", "actor",
+          "correlation_id", "created_at"
+        ],
+        "historical_order_operational_baseline_outbox": [
+          "id", "event_id", "receipt_id", "intent_key", "intent_type", "bounded_snapshot",
+          "published_at", "attempts", "last_error", "created_at"
+        ]
+      },
+      "indexes": {
+        "historical_order_operational_baseline_events.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "historical_order_operational_baseline_events.uq_historical_operational_baseline_event_identity": {"non_unique": 0, "columns": ["baseline_event_identity"]},
+        "historical_order_operational_baseline_events.uq_historical_operational_baseline_prior_event": {"non_unique": 0, "columns": ["prior_baseline_event_id"]},
+        "historical_order_operational_baseline_events.idx_historical_operational_baseline_case": {"non_unique": 1, "columns": ["case_no", "resulting_orders_version", "id"]},
+        "historical_order_operational_baseline_events.idx_historical_operational_baseline_source": {"non_unique": 1, "columns": ["source_event_identity", "source_version"]},
+        "historical_order_operational_baseline_receipts.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "historical_order_operational_baseline_receipts.uq_historical_operational_baseline_receipt_identity": {"non_unique": 0, "columns": ["receipt_identity"]},
+        "historical_order_operational_baseline_receipts.uq_historical_operational_baseline_receipt_event": {"non_unique": 0, "columns": ["event_id"]},
+        "historical_order_operational_baseline_receipts.uq_historical_operational_baseline_receipt_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "historical_order_operational_baseline_outbox.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "historical_order_operational_baseline_outbox.uq_historical_operational_baseline_outbox_event": {"non_unique": 0, "columns": ["event_id"]},
+        "historical_order_operational_baseline_outbox.uq_historical_operational_baseline_outbox_receipt": {"non_unique": 0, "columns": ["receipt_id"]},
+        "historical_order_operational_baseline_outbox.uq_historical_operational_baseline_outbox_intent": {"non_unique": 0, "columns": ["intent_key"]},
+        "historical_order_operational_baseline_outbox.idx_historical_operational_baseline_outbox_pending": {"non_unique": 1, "columns": ["published_at", "attempts", "id"]}
+      },
+      "foreign_keys": {
+        "historical_order_operational_baseline_events.fk_historical_operational_baseline_prior": {"columns": ["prior_baseline_event_id"], "referenced_table": "historical_order_operational_baseline_events", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "historical_order_operational_baseline_events.fk_historical_operational_baseline_case": {"columns": ["case_no"], "referenced_table": "orders", "referenced_columns": ["case_no"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "historical_order_operational_baseline_events.fk_historical_operational_baseline_source": {"columns": ["source_event_identity"], "referenced_table": "historical_order_adoption_receipts", "referenced_columns": ["source_event_identity"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "historical_order_operational_baseline_receipts.fk_historical_operational_baseline_receipt_event": {"columns": ["event_id"], "referenced_table": "historical_order_operational_baseline_events", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "historical_order_operational_baseline_outbox.fk_historical_operational_baseline_outbox_event": {"columns": ["event_id"], "referenced_table": "historical_order_operational_baseline_events", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "historical_order_operational_baseline_outbox.fk_historical_operational_baseline_outbox_receipt": {"columns": ["receipt_id"], "referenced_table": "historical_order_operational_baseline_receipts", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"}
+      },
+      "checks": {
+        "historical_order_operational_baseline_events.chk_historical_operational_baseline_step": "and(atom(selected_stepbetween1),atom(11))",
+        "historical_order_operational_baseline_events.chk_historical_operational_baseline_versions": "atom(resulting_orders_version=expected_orders_version)",
+        "historical_order_operational_baseline_events.chk_historical_operational_baseline_fingerprints": "and(atom(regexp_like(owner_binding_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')))",
+        "historical_order_operational_baseline_events.chk_historical_operational_baseline_evidence": "or(and(atom(evidence_mode='retained'),atom(document_kindisnull),atom(affected_stepsisnull)),and(atom(evidence_mode='historical_evidence_unavailable_accepted'),atom(char_length(trim(document_kind))>0),atom(json_type(affected_steps)='ARRAY'),atom(json_length(affected_steps)>0)))",
+        "historical_order_operational_baseline_events.chk_historical_operational_baseline_snapshots": "and(atom(json_type(candidate_snapshot)='OBJECT'),atom(json_type(step_projection)='ARRAY'),atom(json_length(step_projection)=selected_step))",
+        "historical_order_operational_baseline_events.chk_historical_operational_baseline_text": "and(atom(char_length(trim(baseline_event_identity))>0),atom(char_length(trim(order_identity))>0),atom(char_length(trim(source_event_identity))>0),atom(char_length(trim(reason))>0),atom(char_length(trim(evidence_reference))>0),atom(char_length(trim(actor))>0),atom(char_length(trim(correlation_id))>0))",
+        "historical_order_operational_baseline_receipts.chk_historical_operational_baseline_receipt_fingerprints": "and(atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$')))",
+        "historical_order_operational_baseline_receipts.chk_historical_operational_baseline_receipt_snapshot": "atom(json_type(result_snapshot)='OBJECT')",
+        "historical_order_operational_baseline_receipts.chk_historical_operational_baseline_receipt_text": "and(atom(char_length(trim(receipt_identity))>0),atom(regexp_like(idempotency_key,'^[a-z0-9][a-z0-9._:-]{0,190}$')),atom(char_length(trim(actor))>0),atom(char_length(trim(correlation_id))>0))",
+        "historical_order_operational_baseline_outbox.chk_historical_operational_baseline_outbox_snapshot": "atom(json_type(bounded_snapshot)='OBJECT')",
+        "historical_order_operational_baseline_outbox.chk_historical_operational_baseline_outbox_text": "atom(char_length(trim(intent_key))>0)"
+      },
+      "triggers": [
+        "trg_historical_operational_baseline_events_before_update",
+        "trg_historical_operational_baseline_events_before_delete",
+        "trg_historical_operational_baseline_receipts_before_update",
+        "trg_historical_operational_baseline_receipts_before_delete",
+        "trg_historical_operational_baseline_outbox_before_update",
+        "trg_historical_operational_baseline_outbox_before_delete"
+      ]
+    }
+  }
+}

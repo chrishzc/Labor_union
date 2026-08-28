@@ -24,6 +24,11 @@ describe('Case workbook Preview adapters', () => {
     expect(model.reviewRequiredCount).toBe(1);
   });
 
+  it('Historical Orders接受invalid status形成的terminal review row', () => {
+    const model = adaptHistoricalOrderWorkbookPreview({ source_content_digest: digest, sheet_identity: identity, source_row_count: 1, adopted_count: 0, unmatched_case_count: 0, review_required_count: 1, current_conflict_count: 0, assignment_candidate_count: 0, evidence_only_pairing_count: 0, preview_fingerprint: fingerprint });
+    expect(model.reviewRequiredCount).toBe(1);
+  });
+
   it('拒絕來源列數不守恆', () => {
     expect(() => adaptClientBeClassWorkbookPreview({ source_content_digest: digest, sheet_identity: identity, source_row_count: 9, create_count: 1, review_required_count: 1, existing_conflict_count: 1, existing_source_count: 1, preview_fingerprint: fingerprint })).toThrow(/不守恆/);
     expect(() => adaptStaffHistoricalWorkbookPreview({ source_content_digest: digest, source_row_count: 9, created_count: 1, adopted_existing_count: 1, blocked_identity_count: 1, identity_conflict_count: 1, review_required_count: 1, preview_fingerprint: fingerprint })).toThrow(/不守恆/);

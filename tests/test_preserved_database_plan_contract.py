@@ -48,6 +48,34 @@ def test_current_notification_schema_parts_are_always_in_preserve_data_chain() -
     assert notification_parts <= preserve_parts
 
 
+def test_source_backup_includes_manifest_required_event_objects(
+    tmp_path, monkeypatch
+) -> None:
+    observed = {}
+
+    def run(command, *, stdout, stderr, env, check):
+        del stderr, env, check
+        observed["command"] = command
+        stdout.write(b"-- deterministic test dump\n")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(
+        runner,
+        "server_identity",
+        lambda *_: {"server": "test", "version": "8.0"},
+    )
+    monkeypatch.setattr(runner.subprocess, "run", run)
+
+    runner.create_source_dump(
+        runner.DatabaseConfig("127.0.0.1", 3306, "tester", "secret"),
+        "lu_test_source",
+        tmp_path / "source.sql",
+        tmp_path / "source-backup.json",
+    )
+
+    assert "--events" in observed["command"]
+
+
 def test_every_catalog_descriptor_and_schema_artifact_has_exact_hash() -> None:
     release_root = Path(__file__).resolve().parents[1]
 
@@ -300,14 +328,16 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
 
 def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
+    assembly_terminal = load_schema_assembly().active_artifact_paths[-1].name
 
     assert artifact_names.index("209_access_control_totp_root.sql") == (
         artifact_names.index("208_scheduling_rebuild_notification_invalidation.sql") + 1
     )
     assert len(artifact_names) == len(set(artifact_names))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
+    assert artifact_names[-1] == assembly_terminal
     assert runner.RELEASE_MANIFEST.release_id == (
-        "labor-union-controlled-file-storage-foundation-2026-08-26-v1"
+        runner.RELEASE_MANIFEST.manifests[-1].release_id
     )
 
 

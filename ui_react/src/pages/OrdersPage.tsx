@@ -1,17 +1,19 @@
 /**
  * File: OrdersPage.tsx
- * Description: 顯示 Orders 摘要與可操作 Drawer，媒合控制只使用 typed facts 與可靠任務。
+ * Description: 顯示 Orders 摘要與可操作 Drawer，契約操作走外部簽約 successor，媒合只使用 typed facts。
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './OrdersPage.css';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
-import { contractSigningClient, type ContractSigningStatus } from '../api/orders/contract_signing_client';
+import { contractSigningClient } from '../api/orders/contract_signing_client';
 import {
   orderCancellationClient,
+  type OrderCancellationApplyPayload,
   type OrderCancellationPreview,
   type OrderCancellationQuery,
   type OrderCancellationReceipt,
+  type ServiceDay,
 } from '../api/orders/order_cancellation_client';
 import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
 import { loadAllOrderOperationalTimelines, orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
@@ -59,7 +61,7 @@ import type {
   OrderOperationalTimelinePage,
 } from '../api/orders/order_stage_projection_schemas';
 import { Drawer } from '../components/Drawer';
-import { ContractSigningActions } from '../components/ContractSigningActions';
+import { ContractExternalSigningActions } from '../components/ContractExternalSigningActions';
 import { MatchingScheduleAndAssignmentActions } from '../components/MatchingScheduleAndAssignmentActions';
 import { OrderServiceCompletionActions } from '../components/OrderServiceCompletionActions';
 import {
@@ -144,6 +146,58 @@ const EMPTY_ORDER_TERMS_DRAFT: OrderTermsDraft = {
 
 const timeWithSeconds = (value: string) => value.length === 5 ? `${value}:00` : value;
 
+interface CancellationServiceDayDraft {
+  service_date: string;
+  staff_id: number;
+  reason: string;
+}
+
+type ClientFinanceDirection =
+  | 'refund_due'
+  | 'additional_charge_due'
+  | 'no_finance_change';
+
+function clientFinanceDirectionLabel(direction: ClientFinanceDirection): string {
+  switch (direction) {
+    case 'refund_due':
+      return '應退款';
+    case 'additional_charge_due':
+      return '應補收';
+    case 'no_finance_change':
+      return '無帳務變動';
+    default:
+      return direction;
+  }
+}
+
+const cancellationDayDrafts = (days: ServiceDay[]): CancellationServiceDayDraft[] => days.map((day) => ({
+  service_date: day.service_date,
+  staff_id: day.staff_id,
+  reason: day.reason ?? '',
+}));
+
+const validCancellationDays = (days: CancellationServiceDayDraft[]): ServiceDay[] | null => {
+  if (days.some((day) => !/^\d{4}-\d{2}-\d{2}$/.test(day.service_date) || !Number.isInteger(day.staff_id) || day.staff_id <= 0)) return null;
+  const typed = days.map((day) => ({
+    service_date: day.service_date,
+    staff_id: day.staff_id,
+    reason: day.reason.trim() || null,
+  }));
+  const dates = typed.map((day) => day.service_date);
+  return new Set(dates).size === dates.length ? typed : null;
+};
+
+interface CancellationApplyAttempt {
+  caseNo: string;
+  idempotencyKey: string;
+  payload: OrderCancellationApplyPayload;
+}
+
+const sameCancellationApplyPayload = (
+  left: OrderCancellationApplyPayload,
+  right: OrderCancellationApplyPayload,
+): boolean => JSON.stringify(left) === JSON.stringify(right);
+
 export const OrdersPage: React.FC = () => {
   const [pageData, setPageData] = useState<OrderSummaryPageViewModel | null>(null);
   const [stagePage, setStagePage] = useState<OrderOperationalTimelinePage | null>(null);
@@ -190,7 +244,6 @@ export const OrdersPage: React.FC = () => {
   const [waitingLockPreview, setWaitingLockPreview] = useState<WaitingDepositPreview | null>(null);
   const [waitingLockReceipt, setWaitingLockReceipt] = useState<WaitingDepositReceipt | null>(null);
   const [contractDetail, setContractDetail] = useState<OrderTermsContractDrawerViewModel | null>(null);
-  const [contractSigningStatus, setContractSigningStatus] = useState<ContractSigningStatus | null>(null);
   const [contractQueryError, setContractQueryError] = useState<string | null>(null);
   const [contractCorrectionNotice, setContractCorrectionNotice] = useState<string | null>(null);
   type ContractWorkbenchTab = 'contract_terms' | 'calendar' | 'cancellation' | 'reopen';
@@ -220,12 +273,14 @@ export const OrdersPage: React.FC = () => {
   const [actualStartStatus, setActualStartStatus] = useState<'idle' | 'previewing' | 'applying'>('idle');
   const [actualStartError, setActualStartError] = useState<string | null>(null);
   const [cancellationQuery, setCancellationQuery] = useState<OrderCancellationQuery | null>(null);
+  const [cancellationDays, setCancellationDays] = useState<CancellationServiceDayDraft[]>([]);
   const [cancellationPreview, setCancellationPreview] = useState<OrderCancellationPreview | null>(null);
   const [cancellationReceipt, setCancellationReceipt] = useState<OrderCancellationReceipt | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
   const [cancellationConfirmed, setCancellationConfirmed] = useState(false);
   const [cancellationStatus, setCancellationStatus] = useState<'idle' | 'querying' | 'previewing' | 'applying'>('idle');
   const [cancellationError, setCancellationError] = useState<string | null>(null);
+  const [cancellationRetryMode, setCancellationRetryMode] = useState(false);
   const [cardProjection, setCardProjection] = useState<OrdersCardProjectionViewModel | null>(null);
   const [cardProjectionLoading, setCardProjectionLoading] = useState<boolean>(false);
   const [cardProjectionError, setCardProjectionError] = useState<string | null>(null);
@@ -240,6 +295,8 @@ export const OrdersPage: React.FC = () => {
   const cardProjectionControllerRef = useRef<AbortController | null>(null);
   const currentCardProjectionRequestRef = useRef<number>(0);
   const precisionRequestRef = useRef<number>(0);
+  const cancellationApplyAttemptRef = useRef<CancellationApplyAttempt | null>(null);
+  const cancellationApplyInFlightRef = useRef(false);
 
   useEffect(
     () => orderMutationFlowStore.subscribe(() => setMutationRevision((value) => value + 1)),
@@ -512,6 +569,27 @@ export const OrdersPage: React.FC = () => {
     reopenDraft?.status === 'outcome_unknown' ||
     reopenDraft?.status === 'receipt_received' ||
     reopenDraft?.status === 'requery_loading';
+  const closeContractDrawer = () => {
+    if (cancellationApplyInFlightRef.current) {
+      setCancellationError('取消套用仍在進行中，請等待結果確認後再關閉工作台。');
+      return;
+    }
+    if (serviceDatesLocked || reopenLocked) return;
+    serviceDatesPreviewControllerRef.current?.abort();
+    serviceDatesPreviewControllerRef.current = null;
+    reopenPreviewControllerRef.current?.abort();
+    reopenPreviewControllerRef.current = null;
+    const activeId = (contractOrder || dateConfirmOrder || reopenOrder || cancelOrder)?.id;
+    if (activeId) {
+      orderMutationFlowStore.closeReopenDialog(activeId);
+    }
+    precisionRequestRef.current += 1;
+    invalidateDrawerRequest();
+    setContractOrder(null);
+    setDateConfirmOrder(null);
+    setReopenOrder(null);
+    setCancelOrder(null);
+  };
   const termsMutationLocked =
     termsMutationStatus !== 'idle' || termsQuery?.service_data_locked === true;
   const termsDraftReady =
@@ -574,6 +652,10 @@ export const OrdersPage: React.FC = () => {
     order: OrderSummaryCardViewModel,
     options?: { preserveCandidateAction?: boolean },
   ) => {
+    if (cancellationApplyInFlightRef.current) {
+      setCancellationError('取消套用仍在進行中，請等待結果確認後再切換案件。');
+      return;
+    }
     setContractOrder(null);
     setDateConfirmOrder(null);
     setCancelOrder(null);
@@ -1192,7 +1274,6 @@ export const OrdersPage: React.FC = () => {
           orderDetail,
         });
         setContractDetail(adapted);
-        setContractSigningStatus(signing);
       }
     } finally {
       if (requestId === currentDrawerRequestRef.current) {
@@ -1346,16 +1427,19 @@ export const OrdersPage: React.FC = () => {
     const { controller, requestId } = beginDrawerRequest();
     setDrawerLoading(true);
     setCancellationQuery(null);
+    setCancellationDays([]);
     setCancellationPreview(null);
     setCancellationReceipt(null);
     setCancellationReason('');
     setCancellationConfirmed(false);
     setCancellationError(null);
     setCancellationStatus('querying');
+    setCancellationRetryMode(cancellationApplyAttemptRef.current?.caseNo === order.id);
     try {
       const query = await orderCancellationClient.query(order.id, controller.signal);
       if (requestId !== currentDrawerRequestRef.current) return;
       setCancellationQuery(query);
+      setCancellationDays(cancellationDayDrafts(query.service_started ? query.confirmed_service_days : []));
       setCancellationStatus('idle');
     } catch {
       if (requestId !== currentDrawerRequestRef.current) return;
@@ -1382,6 +1466,10 @@ export const OrdersPage: React.FC = () => {
     order: OrderSummaryCardViewModel,
     initialTab: ContractWorkbenchTab = 'contract_terms',
   ) => {
+    if (cancellationApplyInFlightRef.current) {
+      setCancellationError('取消套用仍在進行中，請等待結果確認後再關閉或切換案件。');
+      return;
+    }
     serviceDatesPreviewControllerRef.current?.abort();
     reopenPreviewControllerRef.current?.abort();
     setContractOrder(order);
@@ -1406,6 +1494,14 @@ export const OrdersPage: React.FC = () => {
     setActualStartReason('');
     setActualStartStatus('idle');
     setActualStartError(null);
+    setCancellationDays([]);
+    setCancellationPreview(null);
+    setCancellationReceipt(null);
+    setCancellationReason('');
+    setCancellationConfirmed(false);
+    setCancellationError(null);
+    setCancellationStatus('idle');
+    setCancellationRetryMode(cancellationApplyAttemptRef.current?.caseNo === order.id);
     precisionRequestRef.current += 1;
     setPrecisionResult(null);
     setPrecisionError(null);
@@ -1427,6 +1523,10 @@ export const OrdersPage: React.FC = () => {
   };
 
   const switchContractTab = (tab: ContractWorkbenchTab) => {
+    if (cancellationApplyInFlightRef.current) {
+      setCancellationError('取消套用仍在進行中，請等待結果確認後再切換工作台。');
+      return;
+    }
     setActiveContractTab(tab);
     const activeOrder = contractOrder || dateConfirmOrder || reopenOrder || cancelOrder;
     if (!activeOrder) return;
@@ -1520,11 +1620,31 @@ export const OrdersPage: React.FC = () => {
 
   const previewCancellation = async () => {
     if (!cancelOrder || !cancellationQuery) return;
+    const typedDays = validCancellationDays(cancellationDays);
+    if (typedDays === null) {
+      setCancellationError('請輸入有效且不重複的實際服務日期、月嫂。');
+      return;
+    }
+    if (!cancellationQuery.service_started && typedDays.length > 0) {
+      setCancellationError('服務尚未開始，實際服務日必須維持為 0 天。');
+      return;
+    }
+    if (cancellationQuery.service_started && typedDays.length === 0) {
+      setCancellationError('服務已開始時，至少要保留一日實際服務事實。');
+      return;
+    }
+    const baseline = new Set(cancellationQuery.confirmed_service_days.map((day) => `${day.service_date}:${day.staff_id}`));
+    if (typedDays.some((day) => !baseline.has(`${day.service_date}:${day.staff_id}`) && day.reason === null)) {
+      setCancellationError('新增或變更實際服務日／月嫂時，必須填寫該日的人工原因。');
+      return;
+    }
+    const orderedDays = [...typedDays].sort((left, right) => left.service_date.localeCompare(right.service_date));
+    setCancellationDays(cancellationDayDrafts(orderedDays));
     const { controller, requestId } = beginDrawerRequest();
     setCancellationStatus('previewing');
     setCancellationError(null);
     try {
-      const preview = await orderCancellationClient.preview(cancelOrder.id, cancellationQuery.confirmed_service_days, controller.signal);
+      const preview = await orderCancellationClient.preview(cancelOrder.id, orderedDays, controller.signal);
       if (controller.signal.aborted || requestId !== currentDrawerRequestRef.current) return;
       setCancellationPreview(preview);
       setCancellationReceipt(null);
@@ -1539,39 +1659,102 @@ export const OrdersPage: React.FC = () => {
 
   const applyCancellation = async () => {
     if (!cancelOrder || !cancellationPreview || !cancellationReason.trim() || !cancellationConfirmed) return;
+    const caseNo = cancelOrder.id;
+    const payload: OrderCancellationApplyPayload = {
+      confirmed_service_days: cancellationPreview.confirmed_service_days,
+      expected_order_version: cancellationPreview.order_version,
+      expected_scheduling_version: cancellationPreview.scheduling_version,
+      expected_client_finance_version: cancellationPreview.client_finance_version,
+      expected_payroll_version: cancellationPreview.payroll_version,
+      preview_fingerprint: cancellationPreview.preview_fingerprint,
+      reason: cancellationReason.trim(),
+    };
+    const existingAttempt = cancellationApplyAttemptRef.current;
+    if (existingAttempt && (
+      existingAttempt.caseNo !== caseNo
+      || !sameCancellationApplyPayload(existingAttempt.payload, payload)
+    )) {
+      setCancellationRetryMode(true);
+      setCancellationError('上一個取消命令的結果尚未確認，且目前內容已不同；請先用原內容完成同一命令 reconciliation，系統不會產生新的 Idempotency-Key。');
+      return;
+    }
+    const attempt = existingAttempt ?? {
+      caseNo,
+      payload,
+      idempotencyKey: `orders-cancellation-ui-${caseNo}-${crypto.randomUUID()}`,
+    };
+    cancellationApplyAttemptRef.current = attempt;
+    cancellationApplyInFlightRef.current = true;
+    const drawerRequestId = currentDrawerRequestRef.current;
+    const isCurrentDrawer = () => (
+      drawerRequestId === currentDrawerRequestRef.current
+      && cancelOrder?.id === caseNo
+    );
     setCancellationStatus('applying');
     setCancellationError(null);
+    setCancellationRetryMode(false);
     try {
-      const receipt = await orderCancellationClient.apply(
-        cancelOrder.id,
-        {
-          confirmed_service_days: cancellationPreview.confirmed_service_days,
-          expected_order_version: cancellationPreview.order_version,
-          expected_scheduling_version: cancellationPreview.scheduling_version,
-          expected_client_finance_version: cancellationPreview.client_finance_version,
-          expected_payroll_version: cancellationPreview.payroll_version,
-          preview_fingerprint: cancellationPreview.preview_fingerprint,
-          reason: cancellationReason.trim(),
-        },
-        { idempotencyKey: `orders-cancellation-ui-${cancelOrder.id}-${crypto.randomUUID()}` },
-      );
+      let receipt: OrderCancellationReceipt;
+      if (existingAttempt) {
+        try {
+          receipt = await orderCancellationClient.receipt(
+            caseNo,
+            attempt.idempotencyKey,
+            drawerControllerRef.current?.signal,
+          );
+        } catch (caught) {
+          if (!(caught instanceof ApiHttpError) || caught.status !== 404) {
+            if (!isCurrentDrawer()) return;
+            setCancellationRetryMode(true);
+            setCancellationError('取消結果未明；receipt 尚未可讀取，系統不會重送取消命令。');
+            return;
+          }
+          receipt = await orderCancellationClient.apply(
+            caseNo,
+            payload,
+            { idempotencyKey: attempt.idempotencyKey },
+          );
+        }
+      } else {
+        receipt = await orderCancellationClient.apply(
+          caseNo,
+          payload,
+          { idempotencyKey: attempt.idempotencyKey },
+        );
+      }
+      if (!isCurrentDrawer()) return;
       setCancellationReceipt(receipt);
       setCancellationPreview(null);
       setCancellationConfirmed(false);
+      cancellationApplyAttemptRef.current = null;
+      setCancellationRetryMode(false);
       try {
-        const readback = await orderCancellationClient.query(cancelOrder.id);
+        const readback = await orderCancellationClient.query(caseNo);
+        if (!isCurrentDrawer()) return;
         setCancellationQuery(readback);
+        setCancellationDays(cancellationDayDrafts(readback.service_started ? readback.confirmed_service_days : []));
         await fetchOrderSummaries();
+        if (isCurrentDrawer()) loadCardProjection(caseNo);
       } catch {
+        if (!isCurrentDrawer()) return;
         setCancellationError('取消已套用，但最新案件狀態讀取失敗；請重新整理後確認。');
       }
     } catch (caught) {
+      if (!isCurrentDrawer()) return;
       const isKnownRejection = caught instanceof ApiHttpError && caught.status >= 400 && caught.status < 500;
-      setCancellationError(isKnownRejection
-        ? caught.message
-        : '取消結果未明，請先重新查詢案件，勿重複送出。');
+      if (isKnownRejection) {
+        cancellationApplyAttemptRef.current = null;
+        setCancellationRetryMode(false);
+        setCancellationPreview(null);
+        setCancellationConfirmed(false);
+        setCancellationError(caught.message);
+      } else {
+        setCancellationRetryMode(true);
+        setCancellationError('取消結果未明；系統保留同一命令與 Idempotency-Key，只能用相同內容重試，尚未收到 receipt 前不視為成功。');
+      }
     } finally {
-      setCancellationStatus('idle');
+      cancellationApplyInFlightRef.current = false;
+      if (isCurrentDrawer()) setCancellationStatus('idle');
     }
   };
 
@@ -2509,24 +2692,8 @@ export const OrdersPage: React.FC = () => {
       {/* 3. Unified 1280px Workbench: Terms, Service Dates & Contract Progress (size="xl") */}
       <Drawer
         isOpen={Boolean(contractOrder || dateConfirmOrder || reopenOrder || cancelOrder)}
-        onClose={() => {
-          if (!serviceDatesLocked && !reopenLocked) {
-            serviceDatesPreviewControllerRef.current?.abort();
-            serviceDatesPreviewControllerRef.current = null;
-            reopenPreviewControllerRef.current?.abort();
-            reopenPreviewControllerRef.current = null;
-            const activeId = (contractOrder || dateConfirmOrder || reopenOrder || cancelOrder)?.id;
-            if (activeId) {
-              orderMutationFlowStore.closeReopenDialog(activeId);
-            }
-            precisionRequestRef.current += 1;
-            invalidateDrawerRequest();
-            setContractOrder(null);
-            setDateConfirmOrder(null);
-            setReopenOrder(null);
-            setCancelOrder(null);
-          }
-        }}
+        onClose={closeContractDrawer}
+        closeDisabled={cancellationStatus === 'applying'}
         size="xl"
         title={`📑 訂單條款、服務日曆與契約簽署工作台 — ${(contractOrder || dateConfirmOrder || reopenOrder || cancelOrder)?.id || ''}`}
         footer={
@@ -2539,25 +2706,8 @@ export const OrdersPage: React.FC = () => {
               fontWeight: 700,
               cursor: 'pointer',
             }}
-            onClick={() => {
-              if (!serviceDatesLocked && !reopenLocked) {
-                serviceDatesPreviewControllerRef.current?.abort();
-                serviceDatesPreviewControllerRef.current = null;
-                reopenPreviewControllerRef.current?.abort();
-                reopenPreviewControllerRef.current = null;
-                const activeId = (contractOrder || dateConfirmOrder || reopenOrder || cancelOrder)?.id;
-                if (activeId) {
-                  orderMutationFlowStore.closeReopenDialog(activeId);
-                }
-                precisionRequestRef.current += 1;
-                invalidateDrawerRequest();
-                setContractOrder(null);
-                setDateConfirmOrder(null);
-                setReopenOrder(null);
-                setCancelOrder(null);
-              }
-            }}
-            disabled={serviceDatesLocked || reopenLocked}
+            onClick={closeContractDrawer}
+            disabled={serviceDatesLocked || reopenLocked || cancellationStatus === 'applying'}
           >
             關閉
           </button>
@@ -2714,10 +2864,9 @@ export const OrdersPage: React.FC = () => {
                   </div>
                 </div>
 
-                {contractSigningStatus && (contractOrder || dateConfirmOrder) && (
-                  <ContractSigningActions
+                {(contractOrder || dateConfirmOrder) && (
+                  <ContractExternalSigningActions
                     caseNo={(contractOrder || dateConfirmOrder)!.id}
-                    signing={contractSigningStatus}
                     onCommitted={() => loadContractTabQueries((contractOrder || dateConfirmOrder)!)}
                   />
                 )}
@@ -3423,16 +3572,90 @@ export const OrdersPage: React.FC = () => {
                         {cancellationError}
                       </div>
                     )}
+                    {cancellationRetryMode && !cancellationError && (
+                      <div role="status" style={{ color: '#9a3412', fontSize: '0.82rem', marginBottom: '8px' }}>
+                        上一次取消結果尚未確認；重試會沿用同一命令內容與識別，不會建立新的送出命令。
+                      </div>
+                    )}
 
                     {cancellationQuery ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem', color: '#57423b', marginBottom: '12px' }}>
                         <div>實際開始日：{cancellationQuery.actual_start_date ?? '尚未開始'}</div>
                         <div>契約服務天數：{cancellationQuery.contracted_service_days} 天</div>
-                        <div>已確認服務日：{cancellationQuery.confirmed_service_days.length} 天</div>
+                        <div>目前實際服務日：{cancellationDays.length} 天</div>
+                        <div style={{ color: '#74593f' }}>
+                          {cancellationQuery.service_started
+                            ? '服務進行中：請逐日核對實際服務日期與月嫂；未服務的未來日期請移除。'
+                            : '服務尚未開始：實際服務日固定為 0 天，不得把未來排班當作已服務事實。'}
+                        </div>
+                        {cancellationQuery.service_started && cancellationDays.length >= cancellationQuery.contracted_service_days && (
+                          <div role="alert" style={{ color: '#991b1b' }}>已達完整服務天數；依正式規則不可執行取消，Apply 維持零寫入。</div>
+                        )}
+                        {cancellationQuery.service_started && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #f3d8c8', paddingTop: '10px' }}>
+                            <strong>逐日實際服務事實</strong>
+                            {cancellationDays.length === 0 && <span style={{ color: '#8b7169' }}>尚未填入實際服務日；服務已開始時必須至少保留一日。</span>}
+                            {cancellationDays.map((day, index) => {
+                              const original = cancellationQuery.confirmed_service_days.some((candidate) => candidate.service_date === day.service_date && candidate.staff_id === day.staff_id);
+                              return (
+                                <div key={`${index}-${day.service_date}`} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', alignItems: 'center' }}>
+                                  <label>
+                                    <span className="sr-only">第 {index + 1} 日日期</span>
+                                    <input
+                                      type="date"
+                                      value={day.service_date}
+                                      disabled={cancellationStatus === 'applying'}
+                                      onChange={(event) => {
+                                        setCancellationDays((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, service_date: event.target.value } : item));
+                                        setCancellationPreview(null);
+                                      }}
+                                    />
+                                  </label>
+                                  <label>
+                                    <span className="sr-only">第 {index + 1} 日月嫂</span>
+                                    <select
+                                      value={day.staff_id}
+                                      disabled={cancellationStatus === 'applying'}
+                                      onChange={(event) => {
+                                        setCancellationDays((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, staff_id: Number(event.target.value) } : item));
+                                        setCancellationPreview(null);
+                                      }}
+                                    >
+                                      <option value={0}>請選擇月嫂</option>
+                                      {cancellationQuery.caregiver_options.map((option) => <option key={option.staff_id} value={option.staff_id}>{option.display_name}</option>)}
+                                    </select>
+                                  </label>
+                                  <input
+                                    aria-label={`第 ${index + 1} 日人工原因`}
+                                    value={day.reason}
+                                    maxLength={500}
+                                    placeholder={original ? '若更換日期／月嫂請填原因' : '新增／變更必填原因'}
+                                    disabled={cancellationStatus === 'applying'}
+                                    onChange={(event) => {
+                                      setCancellationDays((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, reason: event.target.value } : item));
+                                      setCancellationPreview(null);
+                                    }}
+                                  />
+                                  <button type="button" className="btn-secondary-action" disabled={cancellationStatus === 'applying'} onClick={() => { setCancellationDays((current) => current.filter((_, itemIndex) => itemIndex !== index)); setCancellationPreview(null); }}>移除本日</button>
+                                </div>
+                              );
+                            })}
+                            <button
+                              type="button"
+                              className="btn-secondary-action"
+                              disabled={cancellationStatus === 'applying' || cancellationQuery.caregiver_options.length === 0}
+                              onClick={() => {
+                                const staffId = cancellationQuery.caregiver_options[0]?.staff_id ?? 0;
+                                setCancellationDays((current) => [...current, { service_date: '', staff_id: staffId, reason: '' }]);
+                                setCancellationPreview(null);
+                              }}
+                            >新增實際服務日</button>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div style={{ fontSize: '0.82rem', color: '#8b7169', marginBottom: '12px' }}>
-                        {cancellationStatus === 'querying' ? '⏳ 載入取消事實中…' : '點擊下方預覽按鈕以試算退款與違約金。'}
+                        {cancellationStatus === 'querying' ? '⏳ 載入取消事實中…' : '點擊下方預覽按鈕以試算退款與服務影響。'}
                       </div>
                     )}
 
@@ -3452,8 +3675,25 @@ export const OrdersPage: React.FC = () => {
                           <span>{cancellationPreview.official_service_day_count} 天／{cancellationPreview.official_service_hours} 小時</span>
                         </div>
                         <div style={{ marginTop: '8px', fontSize: '0.78rem', color: '#74593f' }}>
-                          客戶退款與月嫂薪資影響已依正式規則計算；套用後將以最新案件狀態回讀確認。
+                          不另加收額外費用；客戶帳務與月嫂薪資只依正式根事實產生影響。
                         </div>
+                        <div style={{ marginTop: '8px', fontSize: '0.78rem', color: '#57423b' }}>
+                          Client Finance：{cancellationPreview.client_finance_impact.actions?.length ?? 0} 筆帳務動作，阻擋 {cancellationPreview.client_finance_impact.blockers?.length ?? 0} 項。
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: '#57423b' }}>
+                          Payroll：{cancellationPreview.payroll_impact.actions?.length ?? 0} 筆薪資動作，阻擋 {cancellationPreview.payroll_impact.blockers?.length ?? 0} 項。
+                        </div>
+                        {cancellationPreview.client_finance_impact.actions?.slice(0, 3).map((action) => (
+                          <div key={`client-${action.obligation_identity}`} style={{ fontSize: '0.76rem', color: '#57423b' }}>
+                            Client Finance／{action.action}：{action.obligation_identity}，
+                            {clientFinanceDirectionLabel(action.direction)}（{action.direction}）NT$ {action.direction_amount_ntd}
+                          </div>
+                        ))}
+                        {cancellationPreview.payroll_impact.actions?.slice(0, 3).map((action) => (
+                          <div key={`payroll-${action.obligation_identity}`} style={{ fontSize: '0.76rem', color: '#57423b' }}>
+                            Payroll／{action.action}：{action.obligation_identity}，NT$ {action.amount.amount}
+                          </div>
+                        ))}
                       </div>
                     )}
 
@@ -3485,7 +3725,7 @@ export const OrdersPage: React.FC = () => {
 
                     {cancellationReceipt && (
                       <div role="status" style={{ marginTop: '12px', color: '#166534', fontSize: '0.84rem', fontWeight: 700 }}>
-                        訂單取消已完成；最新狀態：{cancellationReceipt.lifecycle_status}，正式服務量為 {cancellationReceipt.official_service_day_count} 天／{cancellationReceipt.official_service_hours} 小時。
+                        訂單取消已完成；最新狀態：{cancellationReceipt.lifecycle_status}，正式服務量為 {cancellationReceipt.official_service_day_count} 天／{cancellationReceipt.official_service_hours} 小時；Orders、Client Finance、Payroll 版本已回讀為 {cancellationReceipt.order_version}／{cancellationReceipt.client_finance_version}／{cancellationReceipt.payroll_version}。
                       </div>
                     )}
                   </div>
@@ -3496,20 +3736,22 @@ export const OrdersPage: React.FC = () => {
                       data-control-id="orders.cancellation.preview"
                       className="btn-secondary-action"
                       style={{ width: '100%', padding: '10px' }}
-                      disabled={!cancellationQuery || cancellationStatus !== 'idle'}
+                      disabled={!cancellationQuery || cancellationStatus !== 'idle' || (cancellationQuery.service_started && cancellationDays.length >= cancellationQuery.contracted_service_days)}
                       onClick={() => void previewCancellation()}
                     >
-                      {cancellationStatus === 'previewing' ? '正在試算取消退款…' : '🔍 預覽取消與退款試算'}
+                      {cancellationStatus === 'previewing' ? '正在試算取消影響…' : '🔍 預覽取消與退款試算（取消影響）'}
                     </button>
                     <button
                       type="button"
                       data-control-id="orders.cancellation.apply"
                       className="btn-primary-action"
                       style={{ backgroundColor: '#9f1239', borderColor: '#9f1239', width: '100%', padding: '10px' }}
-                      disabled={!cancellationPreview || !cancellationReason.trim() || !cancellationConfirmed || cancellationStatus !== 'idle'}
+                      disabled={!cancellationPreview || !cancellationReason.trim() || !cancellationConfirmed || cancellationStatus !== 'idle' || (cancellationQuery?.service_started === true && cancellationDays.length >= cancellationQuery.contracted_service_days)}
                       onClick={() => void applyCancellation()}
                     >
-                      {cancellationStatus === 'applying' ? '正在套用取消…' : '確認執行取消'}
+                      {cancellationStatus === 'applying'
+                        ? '正在套用取消…'
+                        : cancellationRetryMode ? '以相同命令重試取消' : '確認執行取消'}
                     </button>
                   </div>
                 </div>

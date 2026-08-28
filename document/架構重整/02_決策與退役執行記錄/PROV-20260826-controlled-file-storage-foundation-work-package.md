@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: approved
+declared_status: in-progress
 date: 2026-08-26
 owner: Data-Center-and-Controlled-Storage-Integration
 current_task: CUR-FILE-NAS-01
@@ -110,4 +110,3 @@ preserve-data candidate → developer acceptance。任一必要 gate `BLOCKED`�
 - public contract、Domain owner、production target、destructive retention／delete 或 external side effect 需要新裁決。
 - release chain、descriptor 或既有 owned object 出現 `partial`／`drift` 時停止 DB lane並保存去敏 evidence。
 - 任何單次補丁執行超過 30 秒時停止該補丁並通知使用者。
-

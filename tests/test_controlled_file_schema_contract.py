@@ -57,8 +57,10 @@ def test_controlled_file_release_is_canonical_schema_only_artifact() -> None:
         "controlled_file_reconciliation_events",
         "controlled_file_cleanup_events",
     }
-    assert assembly["active_bootstrap"][-1] == (
+    assert assembly["active_bootstrap"].index(
         "db/schema_parts/1004_controlled_file_storage_foundation.sql"
+    ) < assembly["active_bootstrap"].index(
+        "db/schema_parts/1005_contract_external_signing_successor.sql"
     )
 
     normalized = load_migration_release_manifest(MANIFEST_PATH, ROOT).owned_object_descriptors(

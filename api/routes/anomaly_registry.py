@@ -1,6 +1,6 @@
 """
 File: anomaly_registry.py
-Description: 提供異常清單、詳情、工作流與封閉去敏投影的 FastAPI 路由。
+Description: 提供異常清單、owner remediation 詳情、工作流與封閉去敏投影。
 """
 
 from __future__ import annotations
@@ -264,6 +264,7 @@ _IDENTITY_EVIDENCE_FIELDS = frozenset(
         "underpayment_identity",
         "finance_import_batch_id",
         "finance_import_row_id",
+        "original_refund_ledger_entry_id",
     }
 )
 _MASKED_TEXT_EVIDENCE_FIELDS = frozenset(
@@ -300,6 +301,7 @@ _CODE_EVIDENCE_FIELDS = frozenset(
         "bank_account_issue",
         "entity_kind",
         "notification_reason",
+        "resolution_condition",
         "source_sheet",
     }
 )
@@ -315,9 +317,9 @@ _IDENTITY_LIST_EVIDENCE_FIELDS = frozenset(
         "candidate_batch_ids",
         "item_outstanding",
         "obligation_identities",
-        "overdue_obligations",
     }
 )
+_DETAIL_LIST_EVIDENCE_FIELDS = frozenset({"overdue_obligations"})
 _IDENTITY_ITEM_KEYS = (
     "advance_identity",
     "advance_id",
@@ -383,6 +385,34 @@ def _private_navigation_fields(definition_code: str) -> frozenset[str]:
                 "source_version",
             }
         )
+    if definition_code == "CLIENTREFUND-001":
+        return frozenset(
+            {
+                "definition_code",
+                "occurred_at",
+                "recovery_bindings",
+                "source_version",
+            }
+        )
+    if definition_code in {"RECEIVABLE-001", "CLIENTPAYABLE-001", "RETURN-001"}:
+        return frozenset({"account_version"})
+    if definition_code in {
+        "GOVSUB-006",
+        "client_over_refund_recovery_open",
+        "staff_overpayment_recovery_open",
+    }:
+        return frozenset(
+            {
+                "affected_obligation_identities",
+                "affected_order_identities",
+                "definition_code",
+                "finance_import_batch_id",
+                "occurred_at",
+                "original_refund_ledger_entry_id",
+                "recovery_bindings",
+                "source_version",
+            }
+        )
     return frozenset()
 
 
@@ -407,6 +437,8 @@ def _evidence_payload(key: str, value: object) -> dict[str, object]:
             "key": key,
             "value": _identity_list(value),
         }
+    if key in _DETAIL_LIST_EVIDENCE_FIELDS:
+        return {"kind": "detail_list", "key": key, "value": _text_list(value)}
     if key in _BOOLEAN_EVIDENCE_FIELDS:
         if not isinstance(value, bool):
             raise ValueError("anomaly_projection_data_integrity_violation")

@@ -27,11 +27,14 @@ import {
 } from './fixtures/anomalies/anomaly_detail_contract_fixtures';
 
 describe('AnomaliesPage Real Data Integration Suite', () => {
-  it('treats code-only evidence as having no operator-facing rows', () => {
+  it('renders allowlisted domain blockers and source version while excluding untyped fields', () => {
     expect(visibleEvidenceItems([
       { key: 'domain_blockers', kind: 'code_list' },
       { key: 'source_version', kind: 'integer' },
-    ])).toEqual([]);
+    ])).toEqual([
+      { key: 'domain_blockers', kind: 'code_list' },
+      { key: 'source_version', kind: 'integer' },
+    ]);
   });
 
   beforeEach(() => {
@@ -244,7 +247,12 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     expect(screen.getByText(/目前是否仍需處理/)).toBeInTheDocument();
     expect(screen.queryByText(/資料版本：|工作流版本：/)).not.toBeInTheDocument();
     expect(screen.getByText(/目前是否仍需處理：/)).toBeInTheDocument();
-    expect(document.querySelector('[data-surface-id="anomalies.drawer.root-evidence"]')).not.toHaveTextContent('finance_import_row_identity');
+    const rootEvidence = document.querySelector('[data-surface-id="anomalies.drawer.root-evidence"]');
+    expect(rootEvidence).toHaveTextContent('資料版本');
+    expect(rootEvidence).toHaveTextContent('阻擋原因');
+    expect(rootEvidence).not.toHaveTextContent('finance_import_row_identity');
+    expect(rootEvidence).not.toHaveTextContent('private');
+    expect(rootEvidence).not.toHaveTextContent('raw');
 
     // Check staff calendar navigation link
     const navLink = screen.getByRole('link', { name: /前往排班調度 ➔/ });

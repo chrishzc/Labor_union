@@ -105,7 +105,7 @@ describe('LineRichMenuDraftActionEditor', () => {
         ...DRAFT,
         publication_locks: [{
           menu_definition_id: 'customer_menu', configuration_revision: 3,
-          state: 'processing', readonly_reason: '此版本正在發布處理中，目前只能查看。',
+          state: 'processing', readonly_reason: '此版本正在發布處理中，為避免變更已送出的內容，目前只能查看。',
         }],
       }}
       menuId="customer_menu"
@@ -113,7 +113,7 @@ describe('LineRichMenuDraftActionEditor', () => {
       onApplied={vi.fn()}
     />);
 
-    expect(screen.getByText('此版本正在發布處理中，目前只能查看。')).toBeInTheDocument();
+    expect(screen.getByText('此版本正在發布處理中，為避免變更已送出的內容，目前只能查看。')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '預覽草稿變更' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('動作類型')).not.toBeInTheDocument();
     expect(draftClient.preview).not.toHaveBeenCalled();

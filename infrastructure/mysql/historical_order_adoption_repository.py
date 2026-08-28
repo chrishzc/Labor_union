@@ -126,7 +126,10 @@ class MySqlHistoricalOrderAdoptionRepository:
         return review_identity
 
     def _apply_order(self, request, preview):
-        if preview.outcome is not HistoricalOrderOutcome.ADOPTED:
+        if (
+            preview.outcome is not HistoricalOrderOutcome.ADOPTED
+            or preview.resulting_version == preview.expected_version
+        ):
             return None
         date_patch = dict(preview.date_patch)
         with _cursor(self._connection) as cursor:

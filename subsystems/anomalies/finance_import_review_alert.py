@@ -1,8 +1,6 @@
-"""Project completed Finance Import review integrity into IMPORT-006.
-
-This projection is deliberately derived from the completed import batch and
-its occurrence membership.  It owns no finance facts; it only maintains the
-current actionable anomaly state for an operator.
+"""
+File: finance_import_review_alert.py
+Description: 依完成匯入批次與 occurrence 完整性根事實投影 IMPORT-006。
 """
 
 from __future__ import annotations
@@ -85,7 +83,11 @@ def _integrity_summary(
         "non_pending_inconsistent_count": inconsistent_count,
         "partial_batch_count": partial_count,
         "integrity_inconsistent_count": (
-            missing_count + unexpected_count + inconsistent_count + partial_count
+            missing_count
+            + unexpected_count
+            + duplicate_count
+            + inconsistent_count
+            + partial_count
         ),
     }
 

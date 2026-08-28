@@ -179,6 +179,14 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_21_customer_service_human_escalation_v1.json",
     "labor_union_2026_08_22_matching_coordination_successor_v1.json",
     "labor_union_2026_08_26_controlled_file_storage_foundation_v1.json",
+    "labor_union_2026_08_26_contract_external_signing_successor_v1.json",
+    "labor_union_2026_08_26_historical_order_review_remediation_v1.json",
+    "labor_union_2026_08_26_finance_recovery_evidence_v1.json",
+    "labor_union_2026_08_27_historical_order_adoption_noop_v1.json",
+    "labor_union_2026_08_27_anomaly_reclassification_disposition_v1.json",
+    "labor_union_2026_08_28_historical_operational_baseline_v1.json",
+    "labor_union_2026_08_28_historical_baseline_projector_v1.json",
+    "labor_union_2026_08_28_service_before_replacement_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -1783,13 +1791,10 @@ def local_additive_target_state(
     if snapshot is None:
         snapshot = _schema_snapshot(config, source)
     normalized_descriptor = _normalize_local_descriptor(descriptor)
-    state = _artifact_metadata_state(
+    state = _metadata_state_for_artifact(
         json.loads(json.dumps(snapshot)),
         normalized_descriptor,
         artifact,
-        # Local additive qualification must classify a missing trigger as
-        # partial.  The preserve-data preflight keeps its historical
-        # defer_missing_triggers boundary separately.
         defer_missing_triggers=False,
     )
     owned_tables = set(descriptor.get("tables", {})) | set(descriptor.get("parent_columns", {}))
@@ -1839,13 +1844,45 @@ def local_additive_descriptor_state(
     snapshot: Mapping[str, Any], descriptor: Mapping[str, Any], artifact: str,
 ) -> str:
     """Use the canonical descriptor comparator without exposing its implementation."""
-    return _artifact_metadata_state(
+    return _metadata_state_for_artifact(
         json.loads(json.dumps(snapshot)),
         _normalize_local_descriptor(descriptor),
         artifact,
         # Post-apply verification is strict: a missing owned trigger is not
         # an exact compatible projection and cannot be deferred.
         defer_missing_triggers=False,
+    )
+
+
+def _metadata_state_for_artifact(
+    snapshot: Mapping[str, Any],
+    descriptor: dict[str, Any],
+    artifact: str,
+    *,
+    defer_missing_triggers: bool,
+) -> str:
+    if artifact == "1004_controlled_file_storage_foundation.sql":
+        return _controlled_file_storage_foundation_state(
+            snapshot,
+            descriptor,
+            defer_missing_triggers=defer_missing_triggers,
+        )
+    if artifact == "1005_contract_external_signing_successor.sql":
+        return _contract_external_signing_successor_state(
+            snapshot,
+            descriptor,
+            defer_missing_triggers=defer_missing_triggers,
+        )
+    if artifact == "1008_historical_order_adoption_noop_constraint.sql":
+        return _historical_order_adoption_noop_constraint_state(
+            snapshot,
+            descriptor,
+        )
+    return _artifact_metadata_state(
+        snapshot,
+        descriptor,
+        artifact,
+        defer_missing_triggers=defer_missing_triggers,
     )
 
 
@@ -1861,9 +1898,16 @@ LOCAL_ADDITIVE_TARGET_PREFIX = ""
 class LocalAdditiveBlocked(RuntimeError):
     """Bounded, redacted failure for the local-development additive route."""
 
-    def __init__(self, message: str, *, code: str = "additive_blocked") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "additive_blocked",
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
         super().__init__(str(message)[:240])
         self.code = code
+        self.details = dict(details or {})
 
 
 def _local_canonical_json(value: Any) -> bytes:
@@ -2339,9 +2383,13 @@ def _local_validate_qualification(path: Path) -> dict[str, Any]:
 
 def _local_discover_qualification(
     qualification_path: Path | None = None,
+    *,
+    release_id: str | None = None,
+    artifact_name: str | None = None,
 ) -> dict[str, Any]:
-    current_release_fingerprint = local_additive_release_qualification(
-        RELEASE_MANIFEST.release_id
+    selected_release_id = release_id or RELEASE_MANIFEST.release_id
+    selected_release_fingerprint = local_additive_release_qualification(
+        selected_release_id
     )["release_fingerprint"]
     if qualification_path is not None:
         path = Path(qualification_path).expanduser().resolve()
@@ -2360,11 +2408,15 @@ def _local_discover_qualification(
             )
         selected = _local_validate_qualification(path)
         if (
-            selected.get("release_id") != RELEASE_MANIFEST.release_id
-            or selected.get("release_fingerprint") != current_release_fingerprint
+            selected.get("release_id") != selected_release_id
+            or selected.get("release_fingerprint") != selected_release_fingerprint
+            or (
+                artifact_name is not None
+                and selected.get("artifact", {}).get("name") != artifact_name
+            )
         ):
             raise LocalAdditiveBlocked(
-                "explicit qualification does not match the latest release",
+                f"explicit qualification does not match release {selected_release_id}",
                 code="qualification_stale",
             )
         return selected
@@ -2377,13 +2429,18 @@ def _local_discover_qualification(
             continue
     current = [
         item for item in valid
-        if item.get("release_id") == RELEASE_MANIFEST.release_id
-        and item.get("release_fingerprint") == current_release_fingerprint
+        if item.get("release_id") == selected_release_id
+        and item.get("release_fingerprint") == selected_release_fingerprint
+        and (
+            artifact_name is None
+            or item.get("artifact", {}).get("name") == artifact_name
+        )
     ]
     if not current:
         raise LocalAdditiveBlocked(
-            "latest local additive release has no valid qualification receipt",
+            f"release {selected_release_id} has no valid qualification receipt",
             code="qualification_missing",
+            details={"release_id": selected_release_id},
         )
     signatures = {
         _local_digest(_local_canonical_json({
@@ -2402,6 +2459,244 @@ def _local_discover_qualification(
             code="qualification_ambiguous",
         )
     return sorted(current, key=lambda item: str(item.get("_path", "")))[0]
+
+
+LOCAL_ADDITIVE_BASELINE_ARTIFACT = "1003_matching_coordination_successor.sql"
+
+
+def _local_ordered_upgrade_entries() -> tuple[dict[str, Any], ...]:
+    """Project the canonical manifest chain from the approved local baseline."""
+    entries: list[dict[str, Any]] = []
+    baseline_found = False
+    for manifest in RELEASE_MANIFEST.manifests:
+        for item in manifest.schema_artifacts:
+            artifact = item.artifact
+            if artifact.name == LOCAL_ADDITIVE_BASELINE_ARTIFACT:
+                if baseline_found:
+                    raise LocalAdditiveBlocked(
+                        "local additive baseline is duplicated",
+                        code="release_chain_invalid",
+                    )
+                baseline_found = True
+            if not baseline_found:
+                continue
+            if item.data_effect != "schema_only":
+                raise LocalAdditiveBlocked(
+                    f"release chain contains non-schema-only artifact: {artifact.name}",
+                    code="release_chain_invalid",
+                    details={"release_id": manifest.release_id, "artifact": artifact.name},
+                )
+            entries.append({
+                "release_id": manifest.release_id,
+                "release_fingerprint": manifest.fingerprint,
+                "artifact": {
+                    "name": artifact.name,
+                    "relative_path": artifact.relative_path,
+                    "sha256": artifact.sha256,
+                },
+                "descriptor": local_additive_release_qualification(
+                    manifest.release_id, artifact.name
+                )["schema_artifacts"][0]["descriptor"],
+            })
+    if not baseline_found or not entries:
+        raise LocalAdditiveBlocked(
+            "local additive baseline is unavailable in the canonical chain",
+            code="release_chain_invalid",
+        )
+    return tuple(entries)
+
+
+def _local_receipt_reference(path: Any) -> str:
+    resolved = Path(path).resolve()
+    try:
+        return str(resolved.relative_to(ROOT.resolve()))
+    except ValueError:
+        return str(resolved)
+
+
+def _local_ordered_chain_plan(
+    config: Any,
+    source: str,
+    snapshot: Mapping[str, Any],
+    *,
+    qualification_path: Path | None = None,
+) -> dict[str, Any]:
+    """Classify one continuous exact prefix and qualify every missing release."""
+    entries = _local_ordered_upgrade_entries()
+    explicit_release_id: str | None = None
+    explicit_artifact_name: str | None = None
+    if qualification_path is not None:
+        explicit_path = Path(qualification_path).expanduser().resolve()
+        receipt_root = (ROOT / "validation" / "receipts").resolve()
+        try:
+            explicit_path.relative_to(receipt_root)
+        except ValueError:
+            raise LocalAdditiveBlocked(
+                "explicit qualification must be a published validation receipt",
+                code="qualification_invalid",
+            ) from None
+        explicit_qualification = _local_validate_qualification(explicit_path)
+        explicit_release_id = explicit_qualification.get("release_id")
+        explicit_artifact = explicit_qualification.get("artifact")
+        explicit_artifact_name = (
+            explicit_artifact.get("name")
+            if isinstance(explicit_artifact, Mapping)
+            else None
+        )
+        if (
+            not isinstance(explicit_release_id, str)
+            or not isinstance(explicit_artifact_name, str)
+        ):
+            raise LocalAdditiveBlocked(
+                "explicit qualification identity is incomplete",
+                code="qualification_invalid",
+            )
+    artifacts: list[dict[str, Any]] = []
+    dependency_gap_seen = False
+    for entry in entries:
+        artifact = entry["artifact"]
+        state = local_additive_target_state(
+            config,
+            source,
+            artifact["name"],
+            entry["descriptor"],
+            snapshot=snapshot,
+        )["state"]
+        if (
+            dependency_gap_seen
+            and state not in {"absent", "exact"}
+            and _local_parent_tables_dependency_pending(snapshot, entry["descriptor"])
+        ):
+            state = "dependency_pending"
+        projected = {
+            "release_id": entry["release_id"],
+            "release_fingerprint": entry["release_fingerprint"],
+            "name": artifact["name"],
+            "state": state,
+            "data_effect": "schema_only",
+            "qualification": "not_required" if state == "exact" else "pending",
+            "blocked_reason": None,
+        }
+        artifacts.append(projected)
+        if state in {"absent", "dependency_pending"}:
+            dependency_gap_seen = True
+
+    chain_details = {
+        "baseline_release_id": entries[0]["release_id"],
+        "latest_release_id": entries[-1]["release_id"],
+        "artifacts": artifacts,
+    }
+    baseline = artifacts[0]
+    if baseline["state"] != "exact":
+        baseline["blocked_reason"] = "approved_baseline_not_exact"
+        raise LocalAdditiveBlocked(
+            f"approved baseline is not exact: {baseline['name']}={baseline['state']}",
+            code="baseline_not_exact",
+            details={
+                **chain_details,
+                "release_id": baseline["release_id"],
+                "artifact": baseline["name"],
+                "state": baseline["state"],
+            },
+        )
+    blocked = next(
+        (
+            item for item in artifacts
+            if item["state"] not in {"absent", "dependency_pending", "exact"}
+        ),
+        None,
+    )
+    if blocked is not None:
+        blocked["blocked_reason"] = f"schema_state_{blocked['state']}"
+        raise LocalAdditiveBlocked(
+            f"release artifact state is {blocked['state']}: {blocked['name']}",
+            code="schema_state_blocked",
+            details={
+                **chain_details,
+                "release_id": blocked["release_id"],
+                "artifact": blocked["name"],
+                "state": blocked["state"],
+            },
+        )
+    missing_seen = False
+    for item in artifacts:
+        if item["state"] in {"absent", "dependency_pending"}:
+            missing_seen = True
+            continue
+        if missing_seen:
+            item["blocked_reason"] = "exact_after_absent_chain_hole"
+            raise LocalAdditiveBlocked(
+                f"release chain hole before exact artifact: {item['name']}",
+                code="schema_chain_hole",
+                details={
+                    **chain_details,
+                    "release_id": item["release_id"],
+                    "artifact": item["name"],
+                    "state": item["state"],
+                },
+            )
+
+    pending: list[dict[str, Any]] = []
+    for projected, entry in zip(artifacts, entries, strict=True):
+        if projected["state"] not in {"absent", "dependency_pending"}:
+            continue
+        try:
+            qualification = _local_discover_qualification(
+                qualification_path
+                if (
+                    entry["release_id"] == explicit_release_id
+                    and entry["artifact"]["name"] == explicit_artifact_name
+                )
+                else None,
+                release_id=entry["release_id"],
+                artifact_name=entry["artifact"]["name"],
+            )
+            _local_verify_hashes(qualification)
+        except LocalAdditiveBlocked as error:
+            projected["qualification"] = "blocked"
+            projected["blocked_reason"] = error.code
+            details = {
+                **chain_details,
+                "release_id": entry["release_id"],
+                "artifact": entry["artifact"]["name"],
+                "state": projected["state"],
+                **error.details,
+            }
+            raise LocalAdditiveBlocked(
+                f"{entry['artifact']['name']}: {error}",
+                code=error.code,
+                details=details,
+            ) from error
+        receipt = _local_receipt_reference(qualification["_path"])
+        projected["qualification"] = "exact"
+        projected["qualification_receipt"] = receipt
+        pending.append({
+            "release_id": entry["release_id"],
+            "release_fingerprint": entry["release_fingerprint"],
+            "artifact": entry["artifact"]["name"],
+            "qualification_receipt": receipt,
+        })
+    return {
+        "baseline_release_id": entries[0]["release_id"],
+        "latest_release_id": entries[-1]["release_id"],
+        "artifacts": artifacts,
+        "pending_releases": pending,
+    }
+
+
+def _local_parent_tables_dependency_pending(
+    snapshot: Mapping[str, Any], descriptor: Mapping[str, Any]
+) -> bool:
+    """Defer only a future descriptor whose prerequisite parent tables are all absent."""
+    parent_tables = set(descriptor.get("parent_columns", {}))
+    if not parent_tables:
+        return False
+    present_tables = {
+        str(row.get("table_name"))
+        for row in snapshot.get("columns", ())
+        if row.get("table_name")
+    }
+    return parent_tables.isdisjoint(present_tables)
 
 
 def _local_verify_hashes(qualification: Mapping[str, Any]) -> None:
@@ -2515,6 +2810,37 @@ def _local_classify_statement(statement: str) -> str:
             raise LocalAdditiveBlocked("trigger DML is outside additive allowlist", code="forbidden_sql_effect")
         return "create_trigger"
     if normalized.startswith("alter table"):
+        canonical_1008 = re.sub(
+            r"\s+",
+            " ",
+            split_sql(
+                (ROOT / "db" / "schema_parts" / "1008_historical_order_adoption_noop_constraint.sql")
+                .read_text(encoding="utf-8")
+            )[0].strip(),
+        ).casefold()
+        controlled_parent_replacement = (
+            normalized.startswith("alter table controlled_file_staging_objects ")
+            and "modify column purpose enum(" in normalized
+            and "'unsigned_contract'" in normalized
+            and "drop check chk_controlled_file_staging_owner_purpose" in normalized
+            and "add constraint chk_controlled_file_staging_owner_purpose check" in normalized
+        ) or (
+            normalized.startswith("alter table controlled_file_objects ")
+            and "modify column purpose enum(" in normalized
+            and "'unsigned_contract'" in normalized
+            and "drop check chk_controlled_file_object_owner_purpose" in normalized
+            and "add constraint chk_controlled_file_object_owner_purpose check" in normalized
+        )
+        controlled_fk_rebuild = normalized in {
+            "alter table controlled_file_objects drop foreign key "
+            "fk_controlled_file_object_supersedes",
+        }
+        if controlled_parent_replacement:
+            return "controlled_file_purpose_widen"
+        if controlled_fk_rebuild:
+            return "controlled_file_fk_rebuild"
+        if normalized == canonical_1008:
+            return "controlled_check_replacement"
         if re.search(r"\b(drop|modify|change|rename|truncate)\b", normalized):
             raise LocalAdditiveBlocked("destructive ALTER is outside additive allowlist", code="forbidden_sql_effect")
         if not re.search(r"\badd\s+(column|index|unique|constraint|fulltext|spatial)\b", normalized):
@@ -2702,18 +3028,53 @@ def local_additive_plan(
             "daily additive requires a non-system local database",
             code="target_profile_blocked",
         )
-    qualification = (
-        _local_discover_qualification()
-        if qualification_path is None
-        else _local_discover_qualification(qualification_path)
-    )
-    _local_verify_hashes(qualification)
     if not database_exists(config, source):
         raise LocalAdditiveBlocked("source database is absent; recovery is required", code="recovery_required")
+    snapshot = local_additive_source_snapshot(config, source)["snapshot"]
+    chain = _local_ordered_chain_plan(
+        config,
+        source,
+        snapshot,
+        qualification_path=qualification_path,
+    )
+    pending = chain["pending_releases"]
+    identity = server_identity(config, source)
+    if not pending:
+        return {
+            "status": "current",
+            "route": "daily_additive",
+            "selected_strategy": "additive",
+            "target_profile": "local-development",
+            "local_qualified_additive_exception": True,
+            "source_database": source,
+            "source_identity": {
+                "database": source,
+                "server": identity["server"],
+                "schema_sha256": snapshot["sha256"],
+            },
+            "source_schema_sha256": snapshot["sha256"],
+            "release_id": chain["latest_release_id"],
+            "release_fingerprint": _local_ordered_upgrade_entries()[-1]["release_fingerprint"],
+            **chain,
+            "backup_required": False,
+            "duration_guard_ms": LOCAL_ADDITIVE_MAX_DURATION_MS,
+            "estimated_duration_ms": 0,
+            "verified_ordinals": [],
+            "statement_hashes": [],
+        }
+    next_release = pending[0]
+    qualification_reference = Path(next_release["qualification_receipt"])
+    if not qualification_reference.is_absolute():
+        qualification_reference = ROOT / qualification_reference
+    qualification = _local_discover_qualification(
+        qualification_reference,
+        release_id=next_release["release_id"],
+        artifact_name=next_release["artifact"],
+    )
+    _local_verify_hashes(qualification)
     artifact = qualification["_canonical_artifact"]
     statements = split_sql((ROOT / artifact["relative_path"]).read_text(encoding="utf-8"))
     statement_hashes = [_local_digest(statement.encode("utf-8")) for statement in statements]
-    snapshot = local_additive_source_snapshot(config, source)["snapshot"]
     _local_verify_prerequisite_metadata(snapshot, qualification)
     events = _local_read_events(
         receipt_root, source, qualification["release_id"]
@@ -2725,22 +3086,8 @@ def local_additive_plan(
         statement_hashes,
         snapshot["sha256"],
     )
-    descriptor = local_additive_release_qualification(qualification["release_id"], artifact["name"])["schema_artifacts"][0]["descriptor"]
-    target = local_additive_target_state(
-        config,
-        source,
-        artifact["name"],
-        descriptor,
-        snapshot=snapshot,
-    )
-    state = target["state"]
-    if state in {"partial"} and not events:
-        raise LocalAdditiveBlocked("owned object state is partial", code="schema_state_blocked")
-    if state in {"drift", "unknown"}:
-        raise LocalAdditiveBlocked(f"owned object state is {state}", code="schema_state_blocked")
-    identity = server_identity(config, source)
     return {
-        "status": "current" if state == "exact" else "ready",
+        "status": "ready",
         "route": "daily_additive",
         "selected_strategy": "additive",
         "target_profile": "local-development",
@@ -2750,12 +3097,12 @@ def local_additive_plan(
         "source_schema_sha256": snapshot["sha256"],
         "release_id": qualification["release_id"],
         "release_fingerprint": qualification["release_fingerprint"],
-        "artifacts": [{"name": artifact["name"], "state": state, "data_effect": "schema_only"}],
-        "artifact": {"name": artifact["name"], "state": state, "data_effect": "schema_only"},
-        "backup_required": state != "exact",
+        **chain,
+        "artifact": {"name": artifact["name"], "state": "absent", "data_effect": "schema_only"},
+        "backup_required": True,
         "duration_guard_ms": LOCAL_ADDITIVE_MAX_DURATION_MS,
         "estimated_duration_ms": 0,
-        "qualification_receipt": str(Path(qualification["_path"]).relative_to(ROOT)),
+        "qualification_receipt": _local_receipt_reference(qualification["_path"]),
         "resume_baseline_schema_sha256": resume_baseline,
         "verified_ordinals": sorted(verified),
         "statement_hashes": statement_hashes,
@@ -2849,9 +3196,16 @@ def local_additive_prepare_backup(
     if preview["status"] == "current":
         return preview
     qualification = (
-        _local_discover_qualification()
+        _local_discover_qualification(
+            release_id=preview["release_id"],
+            artifact_name=preview["artifact"]["name"],
+        )
         if qualification_path is None
-        else _local_discover_qualification(qualification_path)
+        else _local_discover_qualification(
+            qualification_path,
+            release_id=preview["release_id"],
+            artifact_name=preview["artifact"]["name"],
+        )
     )
     dump_path = Path(backup_dump_path).expanduser().resolve()
     receipt_path = Path(backup_receipt_path).expanduser().resolve()
@@ -2972,9 +3326,16 @@ def local_additive_apply(
     if preview["status"] == "current":
         return preview
     qualification = (
-        _local_discover_qualification()
+        _local_discover_qualification(
+            release_id=preview["release_id"],
+            artifact_name=preview["artifact"]["name"],
+        )
         if qualification_path is None
-        else _local_discover_qualification(qualification_path)
+        else _local_discover_qualification(
+            qualification_path,
+            release_id=preview["release_id"],
+            artifact_name=preview["artifact"]["name"],
+        )
     )
     artifact = qualification["_canonical_artifact"]
     sql_path = ROOT / artifact["relative_path"]
@@ -3315,7 +3676,7 @@ def create_source_dump(
     command = _mysql_base(
         config, mysqldump, container=mysql_container
     ) + [
-        "--single-transaction", "--routines", "--triggers",
+        "--single-transaction", "--routines", "--events", "--triggers",
         "--no-tablespaces", "--hex-blob", source,
     ]
     with target.open("wb") as output:
@@ -4111,6 +4472,124 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["tables"]["customer_service_tickets"][
             "active_marker"
         ]["extra"] = "stored generated"
+    if part_name == "1005_contract_external_signing_successor.sql":
+        purpose_column = _column_contract(
+            "enum('unsigned_contract','final_signed_contract',"
+            "'service_date_confirmation','baby_log_photo','meal_photo',"
+            "'order_notice','staff_resume','staff_certificate',"
+            "'staff_health_exam','rich_menu_background')",
+            "NO",
+        )
+        descriptor["parent_columns"]["controlled_file_staging_objects"] = {
+            "purpose": purpose_column,
+        }
+        descriptor["parent_columns"]["controlled_file_objects"] = {
+            "purpose": purpose_column,
+        }
+        owner_purpose = _normalize_sql_contract(
+            "(owner_type = 'contract_signing' AND purpose IN "
+            "('unsigned_contract', 'final_signed_contract')) OR "
+            "(owner_type = 'scheduling' AND purpose IN "
+            "('service_date_confirmation', 'baby_log_photo', 'meal_photo')) OR "
+            "(owner_type = 'orders' AND purpose = 'order_notice') OR "
+            "(owner_type = 'staff' AND purpose IN "
+            "('staff_resume', 'staff_certificate', 'staff_health_exam')) OR "
+            "(owner_type = 'line_integration' AND purpose = 'rich_menu_background')"
+        )
+        descriptor["checks"][(
+            "controlled_file_staging_objects",
+            "chk_controlled_file_staging_owner_purpose",
+        )] = owner_purpose
+        descriptor["checks"][(
+            "controlled_file_objects",
+            "chk_controlled_file_object_owner_purpose",
+        )] = owner_purpose
+        descriptor["indexes"][(
+            "controlled_file_staging_objects",
+            "idx_controlled_file_staging_owner",
+        )] = {
+            "non_unique": 1,
+            "columns": (
+                "owner_type", "subject_reference", "purpose", "staging_state", "id",
+            ),
+        }
+        descriptor["indexes"][(
+            "controlled_file_objects",
+            "uq_controlled_file_version_identity",
+        )] = {
+            "non_unique": 0,
+            "columns": (
+                "id", "owner_type", "subject_reference", "object_key", "purpose",
+                "version_number",
+            ),
+        }
+        descriptor["indexes"][(
+            "controlled_file_objects",
+            "idx_controlled_file_object_owner",
+        )] = {
+            "non_unique": 1,
+            "columns": ("owner_type", "subject_reference", "purpose", "id"),
+        }
+        descriptor["foreign_keys"][(
+            "controlled_file_objects",
+            "fk_controlled_file_object_supersedes",
+        )] = {
+            "columns": (
+                "supersedes_object_id", "owner_type", "subject_reference", "object_key",
+                "purpose", "supersedes_version_number",
+            ),
+            "referenced_table": "controlled_file_objects",
+            "referenced_columns": (
+                "id", "owner_type", "subject_reference", "object_key", "purpose",
+                "version_number",
+            ),
+            "update_rule": "RESTRICT",
+            "delete_rule": "RESTRICT",
+        }
+    if part_name == "1007_finance_recovery_evidence.sql":
+        evidence_column = _column_contract("varchar(500)", "YES")
+        evidence_check = _normalize_sql_contract(
+            "evidence_reference IS NULL OR "
+            "CHAR_LENGTH(TRIM(evidence_reference)) > 0"
+        )
+        for table, check_name in (
+            (
+                "client_over_refund_recovery_events",
+                "chk_client_over_refund_recovery_event_evidence",
+            ),
+            (
+                "client_over_refund_recovery_matchings",
+                "chk_client_over_refund_recovery_matching_evidence",
+            ),
+            (
+                "staff_overpayment_recovery_events",
+                "chk_staff_overpayment_recovery_event_evidence",
+            ),
+            (
+                "staff_overpayment_recovery_matchings",
+                "chk_staff_overpayment_recovery_matching_evidence",
+            ),
+        ):
+            descriptor["parent_columns"][table] = {
+                "evidence_reference": deepcopy(evidence_column),
+            }
+            descriptor["checks"][(table, check_name)] = evidence_check
+    if part_name == "1008_historical_order_adoption_noop_constraint.sql":
+        descriptor["checks"][(
+            "historical_order_adoption_receipts",
+            "chk_historical_order_adoption_shape",
+        )] = _normalize_sql_contract(
+            "(outcome = 'unmatched_case' AND lifecycle_event_id IS NULL "
+            "AND expected_version IS NULL AND resulting_version IS NULL) OR "
+            "(outcome = 'adopted' AND expected_version IS NOT NULL "
+            "AND case_no IS NOT NULL AND ((lifecycle_event_id IS NULL "
+            "AND resulting_version = expected_version) OR "
+            "(lifecycle_event_id IS NOT NULL AND resulting_version = "
+            "expected_version + 1))) OR (outcome IN "
+            "('review_required','current_conflict') AND lifecycle_event_id "
+            "IS NULL AND expected_version IS NOT NULL AND resulting_version "
+            "= expected_version AND case_no IS NOT NULL)"
+        )
     if part_name == "61_finance_import_reprocessing.sql":
         _remove_retired_reclassification_audit_contract(descriptor)
         descriptor["indexes"][(
@@ -4267,7 +4746,57 @@ def _normalize_check_contract(value: Any) -> str:
     while normalized != previous:
         previous = normalized
         normalized = re.sub(r"([=<>])\(([^()]*)\)", r"\1\2", normalized)
+    normalized = re.sub(
+        r"atom\(([a-z0-9_]+)regexp_like\(not,([^()]*)\)\)",
+        r"not(atom(regexp_like(\1,\2)))",
+        normalized,
+    )
+    normalized = _flatten_associative_contract(normalized)
     return normalized.replace("=false", "=0").replace("=true", "=1")
+
+
+def _flatten_associative_contract(value: str) -> str:
+    """Canonicalize nested normalized AND/OR calls as associative lists."""
+    call = _normalized_contract_call(value)
+    if call is None:
+        return value
+    name, arguments = call
+    flattened = [_flatten_associative_contract(item) for item in arguments]
+    if name in {"and", "or"}:
+        expanded: list[str] = []
+        for item in flattened:
+            nested = _normalized_contract_call(item)
+            if nested is not None and nested[0] == name:
+                expanded.extend(nested[1])
+            else:
+                expanded.append(item)
+        flattened = expanded
+    return f"{name}({','.join(flattened)})"
+
+
+def _normalized_contract_call(value: str) -> tuple[str, list[str]] | None:
+    opening = value.find("(")
+    if opening <= 0 or not value.endswith(")"):
+        return None
+    name = value[:opening]
+    depth = 0
+    start = opening + 1
+    arguments: list[str] = []
+    for index in range(start, len(value) - 1):
+        char = value[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            if depth == 0:
+                return None
+            depth -= 1
+        elif char == "," and depth == 0:
+            arguments.append(value[start:index])
+            start = index + 1
+    if depth != 0:
+        return None
+    arguments.append(value[start:-1])
+    return name, arguments
 
 
 def _canonical_artifact_metadata_state(
@@ -4312,12 +4841,224 @@ def _release_descriptor_metadata_state(
             raise UpgradeBlocked(
                 f"release descriptor differs from canonical SQL: {part_name}:{kind}"
             )
-    return _artifact_metadata_state(
+    if part_name == "1005_contract_external_signing_successor.sql":
+        return _contract_external_signing_successor_state(
+            snapshot,
+            canonical,
+            defer_missing_triggers=defer_missing_triggers,
+        )
+    if part_name == "1008_historical_order_adoption_noop_constraint.sql":
+        return _historical_order_adoption_noop_constraint_state(
+            snapshot,
+            canonical,
+        )
+    state = _artifact_metadata_state(
         snapshot,
         canonical,
         part_name,
         defer_missing_triggers=defer_missing_triggers,
     )
+    if part_name == "1004_controlled_file_storage_foundation.sql":
+        return _controlled_file_storage_foundation_state(
+            snapshot,
+            canonical,
+            defer_missing_triggers=defer_missing_triggers,
+            initial_state=state,
+        )
+    return state
+
+
+def _controlled_file_storage_foundation_state(
+    snapshot: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+    *,
+    defer_missing_triggers: bool,
+    initial_state: str | None = None,
+) -> str:
+    """Accept 1004 only in its exact predecessor or canonical 1005 shape."""
+    canonical = deepcopy(descriptor)
+    state = initial_state or _artifact_metadata_state(
+        snapshot,
+        canonical,
+        "1004_controlled_file_storage_foundation.sql",
+        defer_missing_triggers=defer_missing_triggers,
+    )
+    if state != "drift":
+        return state
+    successor = _canonical_artifact_descriptor(
+        "1005_contract_external_signing_successor.sql"
+    )
+    for table in (
+        "controlled_file_staging_objects",
+        "controlled_file_objects",
+    ):
+        canonical["tables"][table]["purpose"] = deepcopy(
+            successor["parent_columns"][table]["purpose"]
+        )
+    for key, clause in successor["checks"].items():
+        if key[0] in {
+            "controlled_file_staging_objects",
+            "controlled_file_objects",
+        }:
+            canonical["checks"][key] = clause
+    return _artifact_metadata_state(
+        snapshot,
+        canonical,
+        "1004_controlled_file_storage_foundation.sql",
+        defer_missing_triggers=defer_missing_triggers,
+    )
+
+
+def _historical_order_adoption_noop_constraint_state(
+    snapshot: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+) -> str:
+    """Accept only the exact predecessor or successor check contract."""
+    key = (
+        "historical_order_adoption_receipts",
+        "chk_historical_order_adoption_shape",
+    )
+    constraints = {
+        (str(row["table_name"]), str(row["constraint_name"])): row
+        for row in snapshot.get("constraints", ())
+    }
+    row = constraints.get(key)
+    if row is None or row.get("constraint_type") != "CHECK":
+        return "drift"
+    show_create_checks: dict[tuple[str, str], str] = {}
+    for create_sql in snapshot.get("show_create_tables", {}).values():
+        show_create_checks.update(_show_create_check_clauses(create_sql))
+    actual = _normalize_check_contract(
+        show_create_checks.get(key, row.get("check_clause") or "")
+    )
+    successor = _normalize_check_contract(descriptor["checks"][key])
+    predecessor = _normalize_check_contract(_normalize_sql_contract(
+        "(outcome = 'unmatched_case' AND lifecycle_event_id IS NULL "
+        "AND expected_version IS NULL AND resulting_version IS NULL) OR "
+        "(outcome = 'adopted' AND lifecycle_event_id IS NOT NULL "
+        "AND expected_version IS NOT NULL AND resulting_version = "
+        "expected_version + 1 AND case_no IS NOT NULL) OR (outcome IN "
+        "('review_required','current_conflict') AND lifecycle_event_id IS NULL "
+        "AND expected_version IS NOT NULL AND resulting_version = "
+        "expected_version AND case_no IS NOT NULL)"
+    ))
+    if actual == successor:
+        return "exact"
+    if actual == predecessor:
+        return "absent"
+    return "drift"
+
+
+def _contract_external_signing_successor_state(
+    snapshot: Mapping[str, Any],
+    descriptor: dict[str, Any],
+    *,
+    defer_missing_triggers: bool,
+) -> str:
+    """Distinguish the exact 1004 parent contract from a drifted 1005 source."""
+    present_columns = {
+        (str(row["table_name"]), str(row["column_name"]))
+        for row in snapshot.get("columns", ())
+    }
+    successor_columns = {
+        (table, column)
+        for table, columns in descriptor["tables"].items()
+        for column in columns
+    }
+    if successor_columns.intersection(present_columns):
+        return _artifact_metadata_state(
+            snapshot,
+            descriptor,
+            "1005_contract_external_signing_successor.sql",
+            defer_missing_triggers=defer_missing_triggers,
+        )
+
+    predecessor_type = _normalize_column_type_contract(
+        "enum('final_signed_contract','service_date_confirmation',"
+        "'baby_log_photo','meal_photo','order_notice','staff_resume',"
+        "'staff_certificate','staff_health_exam','rich_menu_background')"
+    )
+    successor_type = descriptor["parent_columns"][
+        "controlled_file_objects"
+    ]["purpose"]["column_type"]
+    purpose_rows = {
+        str(row["table_name"]): row
+        for row in snapshot.get("columns", ())
+        if row["column_name"] == "purpose"
+        and row["table_name"] in {
+            "controlled_file_staging_objects",
+            "controlled_file_objects",
+        }
+    }
+    if len(purpose_rows) != 2 or any(
+        _normalize_column_type_contract(row["column_type"])
+        not in {predecessor_type, successor_type}
+        or row["is_nullable"] != "NO"
+        or row["column_default"] is not None
+        or str(row["extra"] or "") != ""
+        for row in purpose_rows.values()
+    ):
+        return "drift"
+
+    predecessor_check = _normalize_sql_contract(
+        "(owner_type = 'contract_signing' AND purpose = 'final_signed_contract') OR "
+        "(owner_type = 'scheduling' AND purpose IN "
+        "('service_date_confirmation', 'baby_log_photo', 'meal_photo')) OR "
+        "(owner_type = 'orders' AND purpose = 'order_notice') OR "
+        "(owner_type = 'staff' AND purpose IN "
+        "('staff_resume', 'staff_certificate', 'staff_health_exam')) OR "
+        "(owner_type = 'line_integration' AND purpose = 'rich_menu_background')"
+    )
+    show_create_checks: dict[tuple[str, str], str] = {}
+    for create_sql in snapshot.get("show_create_tables", {}).values():
+        show_create_checks.update(_show_create_check_clauses(create_sql))
+    constraint_checks = {
+        (str(row["table_name"]), str(row["constraint_name"])): str(
+            row.get("check_clause") or ""
+        )
+        for row in snapshot.get("constraints", ())
+        if row.get("constraint_type") == "CHECK"
+    }
+    expected_check_keys = {
+        "controlled_file_staging_objects": (
+            "controlled_file_staging_objects",
+            "chk_controlled_file_staging_owner_purpose",
+        ),
+        "controlled_file_objects": (
+            "controlled_file_objects",
+            "chk_controlled_file_object_owner_purpose",
+        ),
+    }
+    predecessor_check = _normalize_check_contract(predecessor_check)
+    successor_checks = {
+        table: descriptor["checks"][key]
+        for table, key in expected_check_keys.items()
+    }
+    modes: list[str] = []
+    for table, key in expected_check_keys.items():
+        actual_check = _normalize_check_contract(
+            show_create_checks.get(key, constraint_checks.get(key, ""))
+        )
+        actual_type = _normalize_column_type_contract(
+            purpose_rows[table]["column_type"]
+        )
+        if actual_type == predecessor_type and actual_check == predecessor_check:
+            modes.append("predecessor")
+            continue
+        if actual_type == successor_type and actual_check == successor_checks[table]:
+            modes.append("successor")
+            continue
+        return "drift"
+
+    foreign_key_present = any(
+        row.get("table_name") == "controlled_file_objects"
+        and row.get("constraint_name") == "fk_controlled_file_object_supersedes"
+        and row.get("constraint_type") == "FOREIGN KEY"
+        for row in snapshot.get("constraints", ())
+    )
+    if modes == ["predecessor", "predecessor"] and foreign_key_present:
+        return "absent"
+    return "partial"
 
 
 def _auto_fk_supporting_index_keys(
@@ -4802,6 +5543,13 @@ def schema_statements_for_state(
     snapshot: Mapping[str, Any],
 ) -> list[str]:
     statements = split_sql(part.read_text(encoding="utf-8"))
+    if (
+        part.name == "1005_contract_external_signing_successor.sql"
+        and state == "partial"
+    ):
+        return _contract_external_signing_recovery_statements(
+            statements, snapshot
+        )
     if part.name == "148_knowledge_retrieval.sql" and state == "partial":
         return _knowledge_retrieval_recovery_statements(statements, snapshot)
     if part.name == "185_customer_service_runtime.sql" and state == "partial":
@@ -4814,6 +5562,89 @@ def schema_statements_for_state(
                 raise UpgradeBlocked("line identity management partial state is not resumable")
         return statements
     return _knowledge_runtime_recovery_statements(statements, snapshot)
+
+
+def _contract_external_signing_recovery_statements(
+    statements: list[str], snapshot: Mapping[str, Any]
+) -> list[str]:
+    """Resume only the unreconciled suffix of the 1005 parent-table ALTERs."""
+    columns = {
+        (str(row["table_name"]), str(row["column_name"])): row
+        for row in snapshot.get("columns", ())
+    }
+    successor_type = _normalize_column_type_contract(
+        "enum('unsigned_contract','final_signed_contract',"
+        "'service_date_confirmation','baby_log_photo','meal_photo',"
+        "'order_notice','staff_resume','staff_certificate',"
+        "'staff_health_exam','rich_menu_background')"
+    )
+    staging_current = _normalize_column_type_contract(
+        columns[("controlled_file_staging_objects", "purpose")]["column_type"]
+    ) == successor_type
+    object_current = _normalize_column_type_contract(
+        columns[("controlled_file_objects", "purpose")]["column_type"]
+    ) == successor_type
+    foreign_key_present = any(
+        row.get("table_name") == "controlled_file_objects"
+        and row.get("constraint_name") == "fk_controlled_file_object_supersedes"
+        and row.get("constraint_type") == "FOREIGN KEY"
+        for row in snapshot.get("constraints", ())
+    )
+    if not staging_current:
+        start = 0
+    elif not object_current and foreign_key_present:
+        start = 1
+    elif not object_current:
+        start = 2
+    elif not foreign_key_present:
+        start = 3
+    else:
+        start = 4
+
+    present_triggers = {
+        str(row["trigger_name"]) for row in snapshot.get("triggers", ())
+    }
+    remaining: list[str] = []
+    for statement in statements[start:]:
+        trigger_match = re.match(
+            r"\s*CREATE\s+TRIGGER\s+`?([A-Za-z0-9_]+)`?",
+            statement,
+            flags=re.IGNORECASE,
+        )
+        if trigger_match and trigger_match.group(1) in present_triggers:
+            continue
+        remaining.append(statement)
+    return remaining
+
+
+def _receipt_resumable_partial_artifacts(
+    receipt: Mapping[str, Any], candidate: str
+) -> frozenset[str]:
+    """Authorize reconciliation only for hash-bound durable statement steps."""
+    if receipt.get("candidate_database") != candidate:
+        return frozenset()
+    resumable: set[str] = set()
+    parts = {part.name: part for part in SCHEMA_PARTS}
+    for step in receipt.get("schema_steps", ()):
+        if step.get("status") not in {"prepared", "failed", "applied"}:
+            continue
+        if step.get("status") == "applied" and (
+            step.get("verification_status") != "pending_part_completion"
+            or step.get("after_part_state") != "partial"
+        ):
+            continue
+        part_name = str(step.get("part") or "")
+        part = parts.get(part_name)
+        index = int(step.get("index") or 0)
+        if part is None or index < 1:
+            continue
+        statements = split_sql(part.read_text(encoding="utf-8"))
+        if index > len(statements):
+            continue
+        expected_sha = _sha256_bytes(statements[index - 1].encode("utf-8"))
+        if step.get("statement_sha256") == expected_sha:
+            resumable.add(part_name)
+    return frozenset(resumable)
 
 
 def _customer_service_runtime_recovery_statements(
@@ -4945,6 +5776,28 @@ def apply_schema(
     if plan.get("status") != "ready":
         raise UpgradeBlocked("plan is not ready")
     existing_receipt = read_receipt(operation_receipt_path)
+    schema_artifacts = plan.get("schema_artifacts") or []
+    artifact_names = [
+        str(artifact.get("name"))
+        for artifact in schema_artifacts
+        if isinstance(artifact, Mapping) and artifact.get("name")
+    ]
+    canonical_release_fingerprint = plan.get("release_fingerprint")
+    if len(artifact_names) == 1 and isinstance(plan.get("release_id"), str):
+        canonical_release_fingerprint = local_additive_release_qualification(
+            str(plan["release_id"]), artifact_names[0]
+        )["release_fingerprint"]
+    existing_receipt.update(
+        release_id=plan.get("release_id"),
+        release_fingerprint=canonical_release_fingerprint,
+        plan_release_fingerprint=plan.get("release_fingerprint"),
+        artifact_names=artifact_names,
+        artifact_name=(artifact_names[0] if len(artifact_names) == 1 else None),
+    )
+    write_receipt(operation_receipt_path, existing_receipt)
+    allowed_partial_artifacts = allowed_partial_artifacts.union(
+        _receipt_resumable_partial_artifacts(existing_receipt, candidate)
+    )
     if existing_receipt.get("status") == "schema_applied":
         return run_candidate_post_schema(
             config, source, candidate, operation_receipt_path,

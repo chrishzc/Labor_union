@@ -15,7 +15,7 @@
   "source_scenario_absence_reason": "no canonical scenario exists",
   "source_refs": [
     "document/架構重整/01_規格基線/00_Global_共同契約.md#2. 跨 Domain 不變量",
-    "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase4c-line-notification-rules-mutation-work-package.md#Phase 4C-NR-H：Notification Rules mutation public contract hardening"
+    "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md#17. LINE React successor 與 caller adoption 狀態（2026-08-25）"
   ],
   "lineage_mappings": [
     {"source": "Global Preview and Apply invariants", "successor": "notification rule preview and apply contract", "disposition": "unchanged"},

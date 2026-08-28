@@ -1,11 +1,17 @@
 /**
  * File: AnomaliesPage.tsx
- * Description: 提供 typed 異常詳情、Import Warning 與 Finance correction 的 Preview／Apply／receipt 閉環。
+ * Description: 顯示異常根因，並依 owner form schema 路由可回讀驗證的人工修正工作區。
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './AnomaliesPage.css';
 import { Drawer } from '../components/Drawer';
+import { ClientOverRefundRecoveryWorkbench } from '../components/ClientOverRefundRecoveryWorkbench';
+import { GovernmentOverpaymentRecoveryWorkbench, type GovernmentOverpaymentRefreshResult } from '../components/GovernmentOverpaymentRecoveryWorkbench';
+import { StaffOverpaymentRecoveryActions } from '../components/StaffOverpaymentRecoveryActions';
+import { StaffPayoutRemediationWorkbench } from '../components/StaffPayoutRemediationWorkbench';
+import { HistoricalOrderReviewRemediationWorkbench } from '../components/HistoricalOrderReviewRemediationWorkbench';
+import { ClientSettlementRemediationWorkbench } from '../components/ClientSettlementRemediationWorkbench';
 import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { AnomalyValidationError } from '../api/anomalies/anomaly_query_errors';
 import { anomalyDetailClient } from '../api/anomalies/anomaly_detail_client';
@@ -46,6 +52,8 @@ import {
   type ImportWarningTaskViewModel,
   type ImportWarningReferralViewModel,
 } from '../adapters/anomalies/anomaly_query_adapter';
+import { financeOwnerRecoveryTarget, payoutOwnerDetailTarget, type FinanceOwnerRecoveryTarget } from '../adapters/anomalies/finance_owner_recovery_target';
+import { clientSettlementTarget, type ClientSettlementTarget } from '../adapters/anomalies/client_settlement_target';
 
 type WarningFlowStatus =
   | 'idle' | 'editing' | 'preview_loading' | 'preview_ready' | 'apply_pending'
@@ -67,9 +75,17 @@ function anomalyDetailErrorMessage(error: unknown, subject: '詳情' | '處理�
 }
 
 const ANOMALY_PAGE_SIZE = 200;
-const FINANCE_CORRECTION_OPERATIONS = {
-  classify_and_post_bank_row: ['PreviewCorrectAndPostFinanceImportRow', 'CorrectAndPostFinanceImportRow'],
-  classify_client_refund_return: ['PreviewCorrectAndPostClientRefundReturn', 'CorrectAndPostClientRefundReturn'],
+const FINANCE_CORRECTION_CONTRACTS = {
+  classify_and_post_bank_row: {
+    operations: ['PreviewCorrectAndPostFinanceImportRow', 'CorrectAndPostFinanceImportRow'],
+    inputs: ['classification_type', 'evidence', 'reason', 'target_obligation_identities'],
+    completion: 'finance_import_manual_review_cleared',
+  },
+  classify_client_refund_return: {
+    operations: ['PreviewCorrectAndPostClientRefundReturn', 'CorrectAndPostClientRefundReturn'],
+    inputs: ['evidence', 'reason', 'refund_ledger_entry_identity', 'target_obligation_identities'],
+    completion: 'client_refund_return_cleared',
+  },
 } as const;
 
 function warningKey(prefix: string): string {
@@ -80,18 +96,18 @@ function warningKey(prefix: string): string {
 function financeCorrectionAction(context: AnomalyRecoveryContextView | null): RecoveryAction | null {
   if (!context) return null;
   return context.available_actions.find((action) => {
-    const operations = FINANCE_CORRECTION_OPERATIONS[action.action_key as keyof typeof FINANCE_CORRECTION_OPERATIONS];
-    return operations !== undefined
+    const contract = FINANCE_CORRECTION_CONTRACTS[action.action_key as keyof typeof FINANCE_CORRECTION_CONTRACTS];
+    return contract !== undefined
       && action.form_schema_key === 'finance_import.correction.v1'
       && action.action_contract_version === 1
       && action.owning_domain === 'finance_import'
       && action.required_capability === 'finance_import.correct_and_post'
       && action.requires_preview
-      && action.preview_operation === operations[0]
-      && action.apply_operation === operations[1]
-      && action.source_binding_keys.length === 2
-      && action.source_binding_keys.includes('finance_import_row_identity')
-      && action.source_binding_keys.includes('source_version')
+      && action.preview_operation === contract.operations[0]
+      && action.apply_operation === contract.operations[1]
+      && action.completion_predicate === contract.completion
+      && action.source_binding_keys.join('|') === 'finance_import_row_identity|source_version'
+      && action.required_operator_inputs.join('|') === contract.inputs.join('|')
       && action.source_bindings.length === 2;
   }) ?? null;
 }
@@ -124,6 +140,8 @@ export const AnomaliesPage: React.FC = () => {
 
   const [anomalyDetail, setAnomalyDetail] = useState<AnomalyDetailBundleViewModel | null>(null);
   const [anomalyRecovery, setAnomalyRecovery] = useState<AnomalyRecoveryContextView | null>(null);
+  const [payoutDetailTarget, setPayoutDetailTarget] = useState<Extract<FinanceOwnerRecoveryTarget, { kind: 'staff_payout' }> | null>(null);
+  const [clientSettlement, setClientSettlement] = useState<ClientSettlementTarget | null>(null);
   const [anomalyDetailLoading, setAnomalyDetailLoading] = useState(false);
   const [anomalyDetailError, setAnomalyDetailError] = useState<string | null>(null);
   const [anomalyRecoveryError, setAnomalyRecoveryError] = useState<string | null>(null);
@@ -162,6 +180,7 @@ export const AnomaliesPage: React.FC = () => {
   // Race condition guards
   const anomalyRequestSeq = useRef<number>(0);
   const anomalyNextOffset = useRef<number>(0);
+  const latestAnomalyRefresh = useRef<{ succeeded: boolean; snapshot: AnomalySummaryViewModel[] }>({ succeeded: false, snapshot: [] });
   const importWarningRequestSeq = useRef<number>(0);
   const drawerRequestSeq = useRef<number>(0);
   const drawerAbortController = useRef<AbortController | null>(null);
@@ -201,24 +220,34 @@ export const AnomaliesPage: React.FC = () => {
       : '請先完成狀態變更影響檢查；修改內容後必須重新檢查。';
 
   // Fetch Anomalies from live API
-  const fetchAnomalies = useCallback(async () => {
+  const fetchAnomalies = useCallback(async (requireSuccess = false, originalFingerprint?: string): Promise<GovernmentOverpaymentRefreshResult> => {
     const seq = ++anomalyRequestSeq.current;
+    latestAnomalyRefresh.current = { succeeded: false, snapshot: [] };
     setAnomaliesLoading(true);
     setAnomaliesError(null);
 
     try {
       const rawList = await anomalyQueryClient.queryAnomalies({ activeOnly: true, limit: ANOMALY_PAGE_SIZE, offset: 0 });
+      const adaptedList = rawList.map(adaptAnomalySummary);
       if (seq === anomalyRequestSeq.current) {
-        const adaptedList = rawList.map(adaptAnomalySummary);
         setAnomalies(adaptedList);
         anomalyNextOffset.current = rawList.length;
         setAnomaliesHasMore(rawList.length === ANOMALY_PAGE_SIZE);
       }
+      if (seq === anomalyRequestSeq.current) latestAnomalyRefresh.current = { succeeded: true, snapshot: adaptedList };
+      if (seq !== anomalyRequestSeq.current) return { succeeded: false, originalFingerprintPresent: true };
+      return {
+        succeeded: true,
+        originalFingerprintPresent: originalFingerprint !== undefined
+          && adaptedList.some((anomaly) => anomaly.fingerprint === originalFingerprint),
+      };
     } catch (err) {
       if (seq === anomalyRequestSeq.current) {
         const msg = err instanceof Error ? err.message : '載入異常資料失敗';
         setAnomaliesError(msg);
       }
+      if (requireSuccess) throw err;
+      return { succeeded: false, originalFingerprintPresent: true };
     } finally {
       if (seq === anomalyRequestSeq.current) {
         setAnomaliesLoading(false);
@@ -285,6 +314,8 @@ export const AnomaliesPage: React.FC = () => {
     setSelectedWarning(null);
     setAnomalyDetail(null);
     setAnomalyRecovery(null);
+    setPayoutDetailTarget(null);
+    setClientSettlement(null);
     setWarningReferral(null);
     setAnomalyDetailLoading(false);
     setWarningReferralLoading(false);
@@ -309,6 +340,8 @@ export const AnomaliesPage: React.FC = () => {
     setSelectedWarning(null);
     setAnomalyDetail(null);
     setAnomalyRecovery(null);
+    setPayoutDetailTarget(null);
+    setClientSettlement(null);
     setAnomalyDetailError(null);
     setAnomalyRecoveryError(null);
     setAnomalyDetailLoading(true);
@@ -323,6 +356,16 @@ export const AnomaliesPage: React.FC = () => {
           const recovery = recoveryResult.status === 'fulfilled' ? recoveryResult.value : null;
           setAnomalyDetail(adaptAnomalyDetailBundle(detailResult.value, recovery));
           setAnomalyRecovery(recovery);
+          const payoutDetailFallbackAllowed = recoveryResult.status === 'fulfilled'
+            ? recoveryResult.value.available_actions.length === 0
+            : recoveryResult.reason instanceof AnomalyDetailError
+              && recoveryResult.reason.code === 'NOT_FOUND';
+          setPayoutDetailTarget(
+            payoutDetailFallbackAllowed
+              ? payoutOwnerDetailTarget(detailResult.value)
+              : null,
+          );
+          setClientSettlement(clientSettlementTarget(detailResult.value));
           const action = financeCorrectionAction(recovery);
           correctionApplyKey.current = warningKey('finance-correction-apply');
           correctionCorrelationId.current = warningKey('finance-correction');
@@ -336,7 +379,7 @@ export const AnomaliesPage: React.FC = () => {
           setCorrectionRefundLedgerEntry(recovery?.root_fact_snapshot.original_refund_ledger_entry_identity ?? '');
           setCorrectionReason('');
           setCorrectionEvidence('');
-          if (recoveryResult.status === 'rejected') {
+          if (recoveryResult.status === 'rejected' && anomaly.code !== 'HISTORICAL-ORDER-001') {
             setAnomalyRecoveryError(anomalyDetailErrorMessage(recoveryResult.reason, '處理方式'));
           }
         }
@@ -365,6 +408,7 @@ export const AnomaliesPage: React.FC = () => {
     setWarningReferralError(null);
     setWarningReferralLoading(true);
     setAnomalyDetail(null);
+    setClientSettlement(null);
     warningFlowSeq.current += 1;
     warningPreviewKey.current = warningKey('warning-preview');
     warningApplyKey.current = warningKey('warning-apply');
@@ -598,11 +642,47 @@ export const AnomaliesPage: React.FC = () => {
     try {
       const outcome = await financeImportCorrectionClient.queryOutcome(accepted.job_id);
       if (seq !== correctionFlowSeq.current) return;
+      if (!['queued', 'running', 'succeeded', 'failed', 'cancelled'].includes(outcome.status)) {
+        throw new Error('帳務更正結果狀態未知，已停止自動判定；請以同一 job/root 重新查詢。');
+      }
       if (outcome.status === 'succeeded' && outcome.receipt === null) throw new Error('已完成的 Finance Import 更正 job 缺少 terminal receipt。');
       setCorrectionOutcome(outcome);
       if (outcome.status === 'succeeded' && outcome.receipt) {
-        setCorrectionFlowStatus('completed');
-        await fetchAnomalies();
+        const originalFingerprint = selectedAnomaly?.fingerprint;
+        if (!originalFingerprint) throw new Error('找不到原異常 fingerprint，已停止完成判定；請以同一 job/root 重新查詢。');
+
+        try {
+          const terminalDetail = await anomalyDetailClient.queryAnomalyDetail({ fingerprint: originalFingerprint });
+          if (seq !== correctionFlowSeq.current) return;
+          if (terminalDetail.summary.fingerprint !== originalFingerprint) {
+            throw new Error('異常詳情與原 fingerprint 不一致，已停止完成判定；請以同一 job/root 重新查詢。');
+          }
+          if (terminalDetail.summary.predicate_active) {
+            setCorrectionFlowStatus('accepted');
+            setCorrectionError('帳務更正已提交，來源異常仍待核對；根因條件仍成立，請以同一 job/root 重新查詢。');
+            return;
+          }
+
+          await fetchAnomalies();
+          if (seq !== correctionFlowSeq.current) return;
+          const refreshedAnomalies = latestAnomalyRefresh.current;
+          if (!refreshedAnomalies.succeeded) {
+            throw new Error('帳務更正已提交，來源異常仍待核對；最新異常清單查詢失敗，請以同一 job/root 重新查詢。');
+          }
+          if (refreshedAnomalies.snapshot.some((anomaly) => anomaly.fingerprint === originalFingerprint)) {
+            setCorrectionFlowStatus('accepted');
+            setCorrectionError('帳務更正已提交，來源異常仍待核對；最新清單仍顯示原異常，請以同一 job/root 重新查詢。');
+            return;
+          }
+          setCorrectionFlowStatus('completed');
+          setCorrectionError(null);
+        } catch (error) {
+          if (seq !== correctionFlowSeq.current) return;
+          setCorrectionFlowStatus('accepted');
+          setCorrectionError(error instanceof Error
+            ? error.message
+            : '帳務更正已提交，來源異常仍待核對；根因查詢失敗，請以同一 job/root 重新查詢。');
+        }
       } else {
         setCorrectionFlowStatus('accepted');
       }
@@ -647,7 +727,9 @@ export const AnomaliesPage: React.FC = () => {
   const kpis = calculateAnomalyKPIs(anomalies);
   const filteredAnomalies = filterAnomalies(anomalies, selectedCategory, selectedStatusFilter);
   const correctionAction = financeCorrectionAction(anomalyRecovery);
+  const financeOwnerTarget = financeOwnerRecoveryTarget(anomalyRecovery) ?? payoutDetailTarget;
   const correctionLocked = correctionFlowLocked;
+  const isHistoricalOrderAlert = selectedAnomaly?.code === 'HISTORICAL-ORDER-001';
 
   return (
     <div data-surface-id="anomalies.page">
@@ -781,7 +863,7 @@ export const AnomaliesPage: React.FC = () => {
       {anomaliesError && (
         <div className="anomalies-error">
           <span>載入異常資料失敗：{anomaliesError}</span>
-          <button className="anomalies-retry-btn" onClick={fetchAnomalies}>重試</button>
+          <button className="anomalies-retry-btn" onClick={() => { void fetchAnomalies(); }}>重試</button>
         </div>
       )}
 
@@ -1047,12 +1129,21 @@ export const AnomaliesPage: React.FC = () => {
                   前往排班調度 ➔（目標日期: {selectedAnomaly.staffCalendarNavigation.target_date}，月嫂 ID: #{selectedAnomaly.staffCalendarNavigation.staff_id}）
                 </a>
               )}
-              {anomalyRecoveryError && <div className="anomalies-detail-error">{anomalyRecoveryError}</div>}
+              {anomalyRecoveryError && !clientSettlement && !financeOwnerTarget && <div className="anomalies-detail-error">{anomalyRecoveryError}</div>}
               {anomalyDetail && <>
-                <div className="anomaly-recovery-metadata-row"><span>目前是否阻擋作業</span><span>{anomalyDetail.domainBlockerActive ? '是' : '否'}</span></div>
-                <div className="anomaly-recovery-metadata-row"><span>累計偵測次數</span><span>{anomalyDetail.occurrences.length}</span></div>
-                {anomalyDetail.actions.length === 0 && <div className="anomalies-detail-empty">目前沒有可用的處理方式。</div>}
-                {anomalyDetail.actions.map((action) => (
+                {clientSettlement && (
+                  <div className="anomaly-recovery-metadata-row">
+                    <span>正式處理方式</span>
+                    <span>依下方 Client Finance 根事實執行 Query／Preview／Apply</span>
+                  </div>
+                )}
+                {!isHistoricalOrderAlert && anomalyDetail.recoveryAvailable && <div className="anomaly-recovery-metadata-row"><span>目前是否阻擋作業</span><span>{anomalyDetail.domainBlockerActive ? '是' : '否'}</span></div>}
+                {!isHistoricalOrderAlert && anomalyDetail.recoveryAvailable && <div className="anomaly-recovery-metadata-row"><span>累計偵測次數</span><span>{anomalyDetail.occurrences.length}</span></div>}
+                {!isHistoricalOrderAlert && anomalyDetail.recoveryAvailable && anomalyDetail.actions.length === 0 && <div className="anomalies-detail-empty">目前沒有可用的處理方式。</div>}
+                {isHistoricalOrderAlert && (
+                  <div className="anomaly-recovery-metadata-row"><span>正式處理方式</span><span>上傳只含此 review 對應列的更正工作簿</span></div>
+                )}
+                {!isHistoricalOrderAlert && anomalyDetail.actions.map((action) => (
                   <div className="anomaly-recovery-metadata-row" key={action.key}>
                     <span>{action.label}</span>
                     <span>{action.requiredInputs.length > 0 ? `需填寫 ${action.requiredInputs.length} 項資料` : '可直接進行檢查'}</span>
@@ -1061,7 +1152,56 @@ export const AnomaliesPage: React.FC = () => {
               </>}
             </div>
 
-            {correctionAction ? (
+            {isHistoricalOrderAlert && (
+              <HistoricalOrderReviewRemediationWorkbench
+                reviewIdentity={selectedAnomaly.sourceIdentity}
+                onResolved={() => { void fetchAnomalies(); }}
+              />
+            )}
+
+            {!isHistoricalOrderAlert && financeOwnerTarget?.kind === 'government' && (
+              <GovernmentOverpaymentRecoveryWorkbench
+                overpaymentIdentity={financeOwnerTarget.overpaymentIdentity}
+                anomalyFingerprint={selectedAnomaly?.fingerprint ?? ''}
+                onResolved={(fingerprint) => fetchAnomalies(true, fingerprint)}
+              />
+            )}
+            {!isHistoricalOrderAlert && financeOwnerTarget?.kind === 'client' && (
+              <ClientOverRefundRecoveryWorkbench
+                caseNo={financeOwnerTarget.caseNo}
+                recoveryIdentity={financeOwnerTarget.recoveryIdentity}
+                initialFinanceImportRowId={financeOwnerTarget.financeImportRowId}
+                onCommitted={(query) => {
+                  if (query.remaining_amount_ntd === 0 && (query.status === 'recovered' || query.status === 'adjusted')) {
+                    void fetchAnomalies();
+                  }
+                }}
+              />
+            )}
+            {!isHistoricalOrderAlert && financeOwnerTarget?.kind === 'staff' && (
+              <StaffOverpaymentRecoveryActions
+                staffId={financeOwnerTarget.staffId}
+                recoveryIdentity={financeOwnerTarget.recoveryIdentity}
+                initialFinanceImportRowId={financeOwnerTarget.financeImportRowId}
+                onCommitted={() => { void fetchAnomalies(); }}
+              />
+            )}
+            {!isHistoricalOrderAlert && financeOwnerTarget?.kind === 'staff_payout' && (
+              <StaffPayoutRemediationWorkbench
+                target={{
+                  staffId: financeOwnerTarget.staffId,
+                  obligationIdentity: financeOwnerTarget.obligationIdentity,
+                }}
+                onResolved={() => { void fetchAnomalies(); }}
+              />
+            )}
+            {!isHistoricalOrderAlert && clientSettlement && (
+              <ClientSettlementRemediationWorkbench
+                target={clientSettlement}
+                onResolved={() => { void fetchAnomalies(); }}
+              />
+            )}
+            {!isHistoricalOrderAlert && !financeOwnerTarget && !clientSettlement && (correctionAction ? (
               <section data-surface-id="anomalies.finance-correction" style={{ border: '1px solid #b7d8d1', padding: '16px', borderRadius: '12px', backgroundColor: '#f5fffc' }}>
                 <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#115e59', marginBottom: '6px' }}>帳務資料更正</h4>
                 <p style={{ fontSize: '0.84rem', color: '#365b55', marginTop: 0 }}>此表單只執行「{correctionAction.label}」的影響檢查與確認；問題排除後，系統會再核對來源資料。</p>
@@ -1082,7 +1222,7 @@ export const AnomaliesPage: React.FC = () => {
                 {correctionApplyDisabledReason && <p id="anomalies-correction-apply-reason" className="anomalies-detail-empty">{correctionApplyDisabledReason}</p>}
                 {correctionPreview && <div className="import-warning-transition-preview"><strong>更正影響預覽（尚未寫入）</strong><span>{correctionClassificationLabel(correctionPreview.candidate.classification_type)} · NT$ {correctionPreview.candidate.bank_amount_ntd.toLocaleString('en-US')}</span></div>}
                 {correctionAccepted && <div className="import-warning-transition-receipt"><strong>更正已受理</strong><span>{correctionAccepted.replayed ? '同一筆更正已受理，正在查回原結果。' : '系統正在處理，完成前不會顯示為已更正。'}</span></div>}
-                {correctionOutcome?.receipt && <div className="import-warning-transition-observed"><strong>帳務更正完成</strong><span>正式結果已確認，可重新查詢帳務資料核對。</span></div>}
+                {correctionFlowStatus === 'completed' && correctionOutcome?.receipt && <div className="import-warning-transition-observed"><strong>帳務更正完成</strong><span>正式結果已確認，可重新查詢帳務資料核對。</span></div>}
                 {correctionAccepted && correctionOutcome && correctionOutcome.status !== 'succeeded' && <div className="import-warning-transition-warning">帳務更正尚未完成；請稍後重新查詢結果。</div>}
                 {correctionError && <div className="anomalies-detail-error">{correctionError}</div>}
               </section>
@@ -1091,7 +1231,7 @@ export const AnomaliesPage: React.FC = () => {
                 <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1e1b19', marginBottom: '10px' }}>來源資料修正</h4>
                 <div className="anomalies-detail-empty">此異常目前沒有可直接使用的帳務更正表單，請交由對應業務負責人處理。</div>
               </div>
-            )}
+            ))}
           </div>
         )}
         {selectedWarning && (

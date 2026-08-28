@@ -47,11 +47,10 @@ INVENTORY
 每次開始或恢復 Phase，只做一次：
 
 1. 記錄 branch、HEAD、`git status --short`；保留所有 dirty／untracked 成果。
-2. 執行一次 Graphify scoped query；graph stale 時改讀 source，不更新 graph。
-3. 只讀 AGENTS、正式規格索引、該 Phase 直接 active Work Packages 與 final receipts。
-4. 產生一張 Phase inventory：`identity | status | owner | write set | dependencies | code | focused |
+2. 只讀 AGENTS、正式規格索引、該 Phase 直接 active Work Packages、final receipts 與命中的 current source。
+3. 產生一張 Phase inventory：`identity | status | owner | write set | dependencies | code | focused |
    runtime | blocker | next action`。
-5. completed／superseded 預設排除；只有新鮮 failing evidence 才能進 remediation。
+4. completed／superseded 預設排除；只有新鮮 failing evidence 才能進 remediation。
 
 禁止在同一 Phase 內因切換小工作包重做 Step 0。
 

@@ -1,6 +1,6 @@
 /**
  * File: OrderTrackerPage.tsx
- * Description: 顯示未完成訂單的七階段、聯絡資料、SOP、結清與 LINE 通知唯讀歷程。
+ * Description: 顯示訂單七階段、聯絡資料、SOP、結清與 LINE 通知唯讀歷程，並可明確納入已完成案件。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adaptOrderTrackerPage, type OrderTrackerPageViewModel, type TrackerOrderCardViewModel } from '../adapters/orders/order_tracker_adapter';
@@ -20,6 +20,7 @@ import { loadAllOrderOperationalTimelines, orderStageProjectionClient } from '..
 import type { OrderOperationalTimelinePage } from '../api/orders/order_stage_projection_schemas';
 import { lineNotificationTimelineClient, type LineNotificationTimeline } from '../api/line/notification_timeline_client';
 import { Drawer } from '../components/Drawer';
+import { HistoricalCompletionPanel } from '../components/HistoricalCompletionPanel';
 import './OrderTrackerPage.css';
 
 type TrackerQueryState =
@@ -150,6 +151,7 @@ export const OrderTrackerPage: React.FC = () => {
   const [formContextState, setFormContextState] = useState<FormManagementContextState>({ kind: 'idle' });
   const [notificationTimelineState, setNotificationTimelineState] = useState<NotificationTimelineState>({ kind: 'idle' });
   const [searchQuery, setSearchQuery] = useState('');
+  const [includeCompleted, setIncludeCompleted] = useState(false);
   const generationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const drawerAbortRef = useRef<AbortController | null>(null);
@@ -168,12 +170,12 @@ export const OrderTrackerPage: React.FC = () => {
       const [summaryResult, stageResult] = await Promise.allSettled([
         loadAllOrderSummaries(
           ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
-          { page_size: 200, lifecycle_scope: 'unfinished' },
+          { page_size: 200, lifecycle_scope: includeCompleted ? 'all' : 'unfinished' },
           { signal: controller.signal },
         ),
         loadAllOrderOperationalTimelines(
           orderStageProjectionClient.getOperationalTimelines.bind(orderStageProjectionClient),
-          { page_size: 200, lifecycle_scope: 'unfinished' },
+          { page_size: 200, lifecycle_scope: includeCompleted ? 'all' : 'unfinished' },
           { signal: controller.signal },
         ),
       ]);
@@ -208,7 +210,7 @@ export const OrderTrackerPage: React.FC = () => {
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }
-  }, []);
+  }, [includeCompleted]);
 
   useEffect(() => {
     let cancelled = false;
@@ -381,6 +383,14 @@ export const OrderTrackerPage: React.FC = () => {
               )}
             </label>
           </div>
+          <label className="tracker-completed-toggle">
+            <input
+              type="checkbox"
+              checked={includeCompleted}
+              onChange={(event) => setIncludeCompleted(event.target.checked)}
+            />
+            <span>包含已完成案件</span>
+          </label>
           <button
             type="button"
             className="tracker-reload-button"
@@ -807,6 +817,7 @@ export const OrderTrackerPage: React.FC = () => {
                               {/* Step 11 Embedded 3 Settlement Cards */}
                               {step.ordinal === 11 && (
                                 <div className="step-11-settlement-wrap">
+                                  <HistoricalCompletionPanel caseNo={selectedOrder.id} />
                                   <div className="step-info-callout">
                                     <span className="step-info-icon">ℹ️</span>
                                     <p className="step-info-text">三大獨立結算投影：服務履約、客戶款項與月嫂薪資獨立推進。</p>

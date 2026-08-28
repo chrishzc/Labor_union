@@ -1,3 +1,8 @@
+"""
+File: test_government_subsidy_reversal_anomaly_source.py
+Description: 驗證 GOVSUB-004 reversal predicate 與 source receipt 守恆。
+"""
+
 from subsystems.anomalies.government_subsidy_reversal_anomaly_source import (
     GovernmentSubsidyReversalAllocationRootFact,
     GovernmentSubsidyReversalRootFact,
@@ -24,7 +29,41 @@ def test_reversal_requires_review_when_partial_allocation_is_ambiguous():
     assert requests[0].desired.active is True
 
 
-def test_reversal_closes_current_alert_after_successful_reversal():
+def test_single_remaining_allocation_partial_is_unambiguous_for_automation():
+    request = build_reversal_alert_requests(_root_fact(amount_ntd=30))[0]
+
+    assert request.desired.active is False
+
+
+def test_successful_reversal_id_does_not_bypass_ambiguous_remaining_allocations():
+    requests = build_reversal_alert_requests(
+        _root_fact(
+            amount_ntd=30,
+            successful_reversal_source_receipt_id=17,
+            multiple_remaining_allocations=True,
+        )
+    )
+
+    assert requests[0].desired.active is True
+
+
+def test_successful_reversal_id_does_not_bypass_invalid_source_receipt():
+    requests = build_reversal_alert_requests(
+        _root_fact(successful_reversal_source_receipt_id=17, transaction_status="failed")
+    )
+
+    assert requests[0].desired.active is True
+
+
+def test_successful_reversal_id_does_not_bypass_over_amount():
+    requests = build_reversal_alert_requests(
+        _root_fact(amount_ntd=61, successful_reversal_source_receipt_id=17)
+    )
+
+    assert requests[0].desired.active is True
+
+
+def test_reversal_closes_current_alert_after_successful_exact_remaining_reversal():
     root_fact = _root_fact(successful_reversal_source_receipt_id=17)
 
     request = build_reversal_alert_requests(root_fact)[0]
@@ -38,6 +77,7 @@ def _root_fact(
     previous_coordinates=(),
     successful_reversal_source_receipt_id=None,
     multiple_remaining_allocations=False,
+    transaction_status="succeeded",
 ):
     allocations = (
         GovernmentSubsidyReversalAllocationRootFact(1, 60, 0),
@@ -48,7 +88,7 @@ def _root_fact(
     receipt = GovernmentSubsidySourceReceiptRootFact(
         17,
         "receipt",
-        "succeeded",
+        transaction_status,
         100,
         allocations,
     )

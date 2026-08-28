@@ -668,6 +668,12 @@ Staff BeClass 歷史匯入以有效身分證及姓名為最低資格。後來的
 由 display projection 以「缺少{欄位名稱}」或「{欄位名稱}格式錯誤」呈現。exact replay 不建立新 occurrence。顯式關聯的新提交仍
 不合格時建立新 warning 並由 system 關閉被取代的舊 task；成功補齊後才 `auto_resolved`。所有來源、issue
 codes、occurrence 與狀態事件保留。第一階段只記錄公會人工聯絡，不自動傳 LINE、不猜 recipient。
+2026-08-27 人工進一步裁決：同一匯入 review 內每個 `logical_code + field_path` occurrence 獨立完成。
+完整修正來源 Apply 後，每個已通過 owner validation 與 fresh readback 的 occurrence 立即 inactive；仍有
+兩個未修正 occurrence 時只能解除已修正的一個。最後一個 occurrence 也 inactive 後，整筆匯入 review／
+umbrella warning 自動完成並從 active list 消失，不需要也不允許另外按 tracking resolve。若某欄位經正式
+人工處分確認來源原值可接受，該 disposition 必須保存 actor、reason、evidence、version、fingerprint 與
+receipt，並以相同 occurrence terminal predicate 處理；不得用整筆處分壓掉其他未修正欄位。
 未登錄的 issue code 不得靜默略過或落入 generic field warning；投影交易必須回滾，只寫入
 lane 與 issue digest 的去敏錯誤；總嘗試上限 3 次，相鄰嘗試至少間隔 1 秒，後進入
 dead-letter，供維運先補 registry／映射再重放。retry-ready time 必須持久化，worker 重啟不得提早嘗試。

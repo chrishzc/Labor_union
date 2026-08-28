@@ -20,6 +20,7 @@ from api.dependencies.staff_payout import (
     StaffPayoutApplication,
     get_staff_overpayment_recovery_application,
     get_staff_overpayment_recovery_matching_application,
+    get_staff_overpayment_recovery_query_application,
     get_staff_payout_application,
 )
 from api.schemas.base import BaseResponse
@@ -58,6 +59,7 @@ from api.schemas.staff_payout import (
     StaffOverpaymentRecoveryPreviewBody,
     StaffOverpaymentRecoveryPreviewView,
     StaffOverpaymentRecoveryReceiptView,
+    StaffOverpaymentRecoveryQueryView,
 )
 from domains.staff_payables.reconciliation import StaffPayoutDifferenceMode, StaffPayoutEventType
 from infrastructure.mysql.staff_payout_repository import (
@@ -92,6 +94,7 @@ from subsystems.staff_payables.overpayment_recovery_matching import (
     StaffOverpaymentRecoveryMatchingSelection,
     StaffOverpaymentRecoveryMatchingWorkflow,
 )
+from subsystems.staff_payables.overpayment_recovery_query import StaffOverpaymentRecoveryQueryService
 
 router = APIRouter(prefix="/api/v1/staff-payables", tags=["Staff Payables"])
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
@@ -271,6 +274,25 @@ def apply_reversal(
 
 
 @router.get(
+    "/overpayment-recoveries/{staff_id}/{recovery_identity}",
+    response_model=BaseResponse[StaffOverpaymentRecoveryQueryView],
+)
+def query_staff_overpayment_recovery(
+    staff_id: int = Path(..., gt=0),
+    recovery_identity: str = Path(..., min_length=1, max_length=191),
+    principal: AdminPrincipal = Depends(require_admin),
+    query: StaffOverpaymentRecoveryQueryService = Depends(
+        get_staff_overpayment_recovery_query_application
+    ),
+):
+    del principal
+    correlation = CorrelationId(f"staff-overpayment-recovery-query:{staff_id}:{recovery_identity}")
+    return _call_recovery_query_endpoint(
+        lambda: query.query(staff_id, recovery_identity), correlation
+    )
+
+
+@router.get(
     "/{staff_id}",
     response_model=BaseResponse[StaffPayablesQueryView],
 )
@@ -324,7 +346,7 @@ def preview_matched_overpayment_recovery_collection(
 ):
     del principal
     correlation = CorrelationId(correlation_id)
-    return _call_endpoint(lambda: _recovery_preview_payload(workflow.preview(_matched_recovery_selection(body), correlation)), "成功產生已配對月嫂追償收款預覽", correlation)
+    return _call_endpoint(lambda: _recovery_preview_payload(workflow.preview(_matched_recovery_selection(body), correlation, _required_evidence(body))), "成功產生已配對月嫂追償收款預覽", correlation)
 
 
 @router.post("/overpayment-recoveries/matched/apply", response_model=BaseResponse[StaffOverpaymentRecoveryReceiptView])
@@ -339,7 +361,7 @@ def apply_matched_overpayment_recovery_collection(
     request = StaffOverpaymentRecoveryApplyRequest(
         _matched_recovery_selection(body), ExpectedVersion(body.expected_recovery_version),
         ExpectedVersion(body.expected_staff_payables_version), PreviewFingerprint(body.preview_fingerprint),
-        IdempotencyKey(idempotency_key), ActorContext(str(principal.username or "").strip()), body.reason, correlation,
+        IdempotencyKey(idempotency_key), ActorContext(str(principal.username or "").strip()), body.reason, correlation, _required_evidence(body),
     )
     return _call_endpoint(lambda: _materialize(workflow.apply(request)), "已核銷已配對月嫂追償入款", correlation)
 
@@ -353,7 +375,7 @@ def preview_overpayment_recovery_matching(
 ):
     del principal
     correlation = CorrelationId(correlation_id)
-    return _call_endpoint(lambda: _matching_preview_payload(workflow.preview(_matching_selection(body), correlation)), "成功產生月嫂追償入款配對預覽", correlation)
+    return _call_matching_endpoint(lambda: _matching_preview_payload(workflow.preview(_matching_selection(body), correlation, _required_evidence(body))), "成功產生月嫂追償入款配對預覽", correlation)
 
 
 @router.post("/overpayment-recoveries/matching/apply", response_model=BaseResponse[StaffOverpaymentRecoveryMatchingReceiptView])
@@ -369,7 +391,7 @@ def apply_overpayment_recovery_matching(
         _matching_selection(body), ExpectedVersion(body.expected_recovery_version),
         ExpectedVersion(body.expected_staff_payables_version), PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(idempotency_key), ActorContext(str(principal.username or "").strip()),
-        body.reason, correlation,
+        body.reason, correlation, _required_evidence(body),
     )
     return _call_matching_endpoint(lambda: _materialize(workflow.apply(request)), "已建立月嫂追償入款配對", correlation)
 
@@ -392,7 +414,7 @@ def preview_overpayment_recovery_adjustment(
     correlation = CorrelationId(correlation_id)
     return _call_endpoint(
         lambda: _recovery_adjustment_preview_payload(
-            workflow.preview(_recovery_adjustment_selection(body), correlation)
+            workflow.preview(_recovery_adjustment_selection(body), correlation, _required_evidence(body))
         ),
         "成功產生月嫂超額付款追償調整預覽",
         correlation,
@@ -424,6 +446,7 @@ def apply_overpayment_recovery_adjustment(
         ActorContext(str(principal.username or "").strip()),
         body.reason,
         correlation,
+        _required_evidence(body),
     )
     return _call_endpoint(
         lambda: _materialize(workflow.apply(request)),
@@ -669,6 +692,42 @@ def _call_endpoint(command, message, correlation_id):
         raise
     except Exception as error:
         raise _internal_error(correlation_id) from error
+
+
+def _call_recovery_query_endpoint(command, correlation_id):
+    try:
+        return BaseResponse(data=command(), message="成功取得月嫂追償根事實")
+    except ValueError as error:
+        code = str(error) or "staff_overpayment_recovery_query_invalid"
+        category = "not_found" if code == "staff_overpayment_recovery_not_found" else "conflict"
+        status_code = 404 if category == "not_found" else 409
+        raise HTTPException(
+            status_code=status_code,
+            detail={
+                "error": {
+                    "category": category,
+                    "code": code,
+                    "message": "月嫂追償根事實查詢未通過 owner 驗證。",
+                    "correlation_id": correlation_id.value,
+                }
+            },
+        ) from error
+
+
+def _required_evidence(body) -> str:
+    evidence = body.evidence_reference
+    if evidence is None or not evidence.strip():
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "category": "validation",
+                    "code": "evidence_reference_required",
+                    "message": "追償操作必須提供獨立 evidence_reference。",
+                }
+            },
+        )
+    return evidence
 
 
 def _call_matching_endpoint(command, message, correlation_id):

@@ -1,4 +1,7 @@
-"""Preview/apply orchestration for staff overpayment recovery actions."""
+"""
+File: overpayment_recovery.py
+Description: 協調 Staff Payables 追償的 evidence-bound Preview／Apply。
+"""
 
 from __future__ import annotations
 
@@ -42,14 +45,20 @@ class StaffOverpaymentRecoverySelection:
             require_canonical_text(self.finance_import_row_identity or "", "finance import row identity", 191)
             if self.adjustment_amount is not None:
                 raise ValueError("staff_overpayment_recovery_action_invalid")
+            if self.matching_identity is None or self.matching_version is None:
+                raise ValueError("staff_overpayment_recovery_matching_required")
             if (self.matching_identity is None) != (self.matching_version is None):
                 raise ValueError("staff_overpayment_recovery_matching_invalid")
-            if self.matching_identity is not None:
-                require_canonical_text(self.matching_identity, "staff matching identity", 191)
-                if not isinstance(self.matching_version, int) or self.matching_version <= 0:
-                    raise ValueError("staff_overpayment_recovery_matching_invalid")
+            require_canonical_text(self.matching_identity, "staff matching identity", 191)
+            if not isinstance(self.matching_version, int) or self.matching_version <= 0:
+                raise ValueError("staff_overpayment_recovery_matching_invalid")
         elif self.action is StaffOverpaymentRecoveryAction.ADJUST:
-            if self.finance_import_row_identity is not None or self.adjustment_amount is None or self.matching_identity is not None:
+            if (
+                self.finance_import_row_identity is not None
+                or self.adjustment_amount is None
+                or self.matching_identity is not None
+                or self.matching_version is not None
+            ):
                 raise ValueError("staff_overpayment_recovery_action_invalid")
         else:
             raise TypeError("staff recovery action is invalid")
@@ -75,6 +84,7 @@ class StaffOverpaymentRecoveryPreview:
     staff_payables_version: int
     recovery_version: int
     fingerprint: PreviewFingerprint
+    evidence_reference: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,9 +97,12 @@ class StaffOverpaymentRecoveryApplyRequest:
     actor: ActorContext
     reason: str
     correlation_id: CorrelationId
+    evidence_reference: str | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.reason, "reason", 500)
+        if self.evidence_reference is not None:
+            require_canonical_text(self.evidence_reference, "evidence reference", 191)
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +113,7 @@ class StaffOverpaymentRecoveryReceipt:
     remaining_after_ntd: int
     resulting_status: str
     preview_fingerprint: PreviewFingerprint
+    evidence_reference: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,8 +139,8 @@ class StaffOverpaymentRecoveryWorkflow:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
 
-    def preview(self, selection: StaffOverpaymentRecoverySelection, correlation_id: CorrelationId) -> StaffOverpaymentRecoveryPreview:
-        return _build_preview(self._repository.load(selection, for_update=False), selection, correlation_id)
+    def preview(self, selection: StaffOverpaymentRecoverySelection, correlation_id: CorrelationId, evidence_reference: str | None = None) -> StaffOverpaymentRecoveryPreview:
+        return _build_preview(self._repository.load(selection, for_update=False), selection, correlation_id, evidence_reference)
 
     def apply(self, request: StaffOverpaymentRecoveryApplyRequest) -> StaffOverpaymentRecoveryReceipt:
         fingerprint = _command_fingerprint(request)
@@ -159,14 +173,16 @@ class StaffOverpaymentRecoveryWorkflow:
             raise _error(request.correlation_id, ErrorCategory.CONFLICT, "staff_overpayment_recovery_stale")
         if facts.staff_payables_version != request.expected_staff_payables_version.value:
             raise _error(request.correlation_id, ErrorCategory.CONFLICT, "staff_overpayment_recovery_stale")
-        preview = _build_preview(facts, request.selection, request.correlation_id)
+        preview = _build_preview(facts, request.selection, request.correlation_id, request.evidence_reference)
         if preview.fingerprint != request.preview_fingerprint:
             raise _error(request.correlation_id, ErrorCategory.CONFLICT, "staff_overpayment_recovery_stale")
         return preview
 
 
-def _build_preview(facts, selection, correlation_id):
+def _build_preview(facts, selection, correlation_id, evidence_reference=None):
     try:
+        if evidence_reference is not None:
+            require_canonical_text(evidence_reference, "evidence reference", 191)
         candidate = _candidate(facts, selection)
     except ValueError as error:
         raise _error(correlation_id, _category(str(error)), str(error)) from error
@@ -174,9 +190,11 @@ def _build_preview(facts, selection, correlation_id):
         "selection": _selection_payload(selection),
         "staff_payables_version": facts.staff_payables_version,
         "candidate": candidate.fingerprint.value,
+        "evidence_reference": evidence_reference,
     })
     return StaffOverpaymentRecoveryPreview(
         candidate, facts.staff_payables_version, facts.recovery.version, fingerprint,
+        evidence_reference,
     )
 
 
@@ -208,6 +226,7 @@ def _receipt(preview):
         remaining_after,
         candidate.resulting_status.value,
         preview.fingerprint,
+        preview.evidence_reference,
     )
 
 
@@ -219,6 +238,7 @@ def _command_fingerprint(request):
         "preview_fingerprint": request.preview_fingerprint.value,
         "actor": request.actor.actor_id,
         "reason": request.reason,
+        "evidence_reference": request.evidence_reference,
     })
 
 

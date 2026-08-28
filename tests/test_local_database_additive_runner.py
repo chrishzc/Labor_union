@@ -1,6 +1,6 @@
 """
 File: test_local_database_additive_runner.py
-Description: 驗證本機 qualified additive runner 的資格、SQL allowlist、journal 與安全邊界。
+Description: 驗證本機 ordered additive runner 的逐版資格、SQL allowlist、journal、續跑與安全邊界。
 """
 
 from __future__ import annotations
@@ -50,6 +50,26 @@ def test_statement_classifier_rejects_data_and_destructive_sql() -> None:
     ):
         with pytest.raises(additive.LocalAdditiveBlocked):
             additive._classify_statement(sql)
+
+
+def test_statement_classifier_allows_only_canonical_1008_atomic_check_replacement() -> None:
+    sql = (
+        migration.ROOT / "db" / "schema_parts" /
+        "1008_historical_order_adoption_noop_constraint.sql"
+    ).read_text(encoding="utf-8")
+    statements = migration.split_sql(sql)
+
+    assert len(statements) == 1
+    assert migration._local_classify_statement(statements[0]) == (
+        "controlled_check_replacement"
+    )
+    with pytest.raises(migration.LocalAdditiveBlocked):
+        migration._local_classify_statement(
+            statements[0].replace(
+                "ADD CONSTRAINT chk_historical_order_adoption_shape",
+                "ADD CONSTRAINT chk_historical_order_adoption_shape_tampered",
+            )
+        )
 
 
 def test_column_contract_detects_stored_generated_column() -> None:
@@ -314,18 +334,305 @@ def test_automatic_qualification_selects_only_the_current_release(
     assert migration._local_discover_qualification()["_path"] == current
 
 
+def test_release_specific_qualification_discovery_is_not_latest_only(
+    monkeypatch, tmp_path
+) -> None:
+    receipt_root = tmp_path / "validation" / "receipts"
+    receipt_root.mkdir(parents=True)
+    older = receipt_root / "PROV-older-local-additive-qualification-v1.json"
+    latest = receipt_root / "PROV-latest-local-additive-qualification-v1.json"
+    older.write_text("{}", encoding="utf-8")
+    latest.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(migration, "ROOT", tmp_path)
+    monkeypatch.setattr(
+        migration,
+        "local_additive_release_qualification",
+        lambda release_id: {"release_fingerprint": f"fingerprint-{release_id}"},
+    )
+    monkeypatch.setattr(
+        migration,
+        "_local_validate_qualification",
+        lambda path: {
+            "release_id": "older" if path == older else "latest",
+            "release_fingerprint": (
+                "fingerprint-older" if path == older else "fingerprint-latest"
+            ),
+            "_path": path,
+        },
+    )
+
+    selected = migration._local_discover_qualification(release_id="older")
+
+    assert selected["_path"] == older
+
+
+def test_ordered_chain_rejects_hole_even_when_terminal_is_exact(monkeypatch) -> None:
+    entries = (
+        {"release_id": "baseline", "release_fingerprint": "f0", "artifact": {"name": "1003_base.sql"}, "descriptor": {}},
+        {"release_id": "middle", "release_fingerprint": "f1", "artifact": {"name": "1004_middle.sql"}, "descriptor": {}},
+        {"release_id": "latest", "release_fingerprint": "f2", "artifact": {"name": "1005_latest.sql"}, "descriptor": {}},
+    )
+    states = iter(("exact", "absent", "exact"))
+    monkeypatch.setattr(migration, "_local_ordered_upgrade_entries", lambda: entries)
+    monkeypatch.setattr(
+        migration, "local_additive_target_state", lambda *_args, **_kwargs: {"state": next(states)}
+    )
+
+    with pytest.raises(migration.LocalAdditiveBlocked) as error:
+        migration._local_ordered_chain_plan(
+            SimpleNamespace(), "lu_test_dataset", {"sha256": "a" * 64}
+        )
+
+    assert error.value.code == "schema_chain_hole"
+    assert error.value.details["artifact"] == "1005_latest.sql"
+
+
+def test_ordered_chain_accepts_exact_prefix_and_lists_missing_qualifications(
+    monkeypatch, tmp_path
+) -> None:
+    entries = (
+        {"release_id": "baseline", "release_fingerprint": "f0", "artifact": {"name": "1003_base.sql"}, "descriptor": {}},
+        {"release_id": "next", "release_fingerprint": "f1", "artifact": {"name": "1004_next.sql"}, "descriptor": {}},
+        {"release_id": "latest", "release_fingerprint": "f2", "artifact": {"name": "1005_latest.sql"}, "descriptor": {}},
+    )
+    states = iter(("exact", "absent", "absent"))
+    monkeypatch.setattr(migration, "_local_ordered_upgrade_entries", lambda: entries)
+    monkeypatch.setattr(
+        migration, "local_additive_target_state", lambda *_args, **_kwargs: {"state": next(states)}
+    )
+    monkeypatch.setattr(
+        migration,
+        "_local_discover_qualification",
+        lambda _path=None, *, release_id=None, **_kwargs: {
+            "release_id": release_id,
+            "release_fingerprint": {"next": "f1", "latest": "f2"}[release_id],
+            "_path": tmp_path / f"{release_id}.json",
+        },
+    )
+    monkeypatch.setattr(migration, "_local_verify_hashes", lambda _value: None)
+
+    result = migration._local_ordered_chain_plan(
+        SimpleNamespace(), "lu_test_dataset", {"sha256": "a" * 64}
+    )
+
+    assert [item["state"] for item in result["artifacts"]] == [
+        "exact", "absent", "absent"
+    ]
+    assert [item["release_id"] for item in result["pending_releases"]] == [
+        "next", "latest"
+    ]
+    assert result["baseline_release_id"] == "baseline"
+    assert result["latest_release_id"] == "latest"
+
+
+def test_ordered_chain_defers_future_drift_when_parent_tables_are_dependency_pending(
+    monkeypatch, tmp_path
+) -> None:
+    entries = (
+        {"release_id": "baseline", "release_fingerprint": "f0", "artifact": {"name": "1003_base.sql"}, "descriptor": {}},
+        {"release_id": "parent", "release_fingerprint": "f1", "artifact": {"name": "1004_parent.sql"}, "descriptor": {}},
+        {
+            "release_id": "successor",
+            "release_fingerprint": "f2",
+            "artifact": {"name": "1005_successor.sql"},
+            "descriptor": {"parent_columns": {"parent_table": {"kind": {}}}},
+        },
+    )
+    states = iter(("exact", "absent", "drift"))
+    monkeypatch.setattr(migration, "_local_ordered_upgrade_entries", lambda: entries)
+    monkeypatch.setattr(
+        migration, "local_additive_target_state", lambda *_args, **_kwargs: {"state": next(states)}
+    )
+    monkeypatch.setattr(
+        migration,
+        "_local_discover_qualification",
+        lambda _path=None, *, release_id=None, **_kwargs: {
+            "release_id": release_id,
+            "release_fingerprint": {"parent": "f1", "successor": "f2"}[release_id],
+            "_path": tmp_path / f"{release_id}.json",
+        },
+    )
+    monkeypatch.setattr(migration, "_local_verify_hashes", lambda _value: None)
+
+    result = migration._local_ordered_chain_plan(
+        SimpleNamespace(),
+        "lu_test_dataset",
+        {"sha256": "a" * 64, "columns": [{"table_name": "baseline_table"}]},
+    )
+
+    assert [item["state"] for item in result["artifacts"]] == [
+        "exact", "absent", "dependency_pending"
+    ]
+    assert [item["release_id"] for item in result["pending_releases"]] == [
+        "parent", "successor"
+    ]
+
+
+def test_ordered_chain_does_not_hide_future_drift_when_parent_table_exists(
+    monkeypatch
+) -> None:
+    entries = (
+        {"release_id": "baseline", "release_fingerprint": "f0", "artifact": {"name": "1003_base.sql"}, "descriptor": {}},
+        {"release_id": "parent", "release_fingerprint": "f1", "artifact": {"name": "1004_parent.sql"}, "descriptor": {}},
+        {
+            "release_id": "successor",
+            "release_fingerprint": "f2",
+            "artifact": {"name": "1005_successor.sql"},
+            "descriptor": {"parent_columns": {"parent_table": {"kind": {}}}},
+        },
+    )
+    states = iter(("exact", "absent", "drift"))
+    monkeypatch.setattr(migration, "_local_ordered_upgrade_entries", lambda: entries)
+    monkeypatch.setattr(
+        migration, "local_additive_target_state", lambda *_args, **_kwargs: {"state": next(states)}
+    )
+
+    with pytest.raises(migration.LocalAdditiveBlocked) as error:
+        migration._local_ordered_chain_plan(
+            SimpleNamespace(),
+            "lu_test_dataset",
+            {"sha256": "a" * 64, "columns": [{"table_name": "parent_table"}]},
+        )
+
+    assert error.value.code == "schema_state_blocked"
+    assert error.value.details["artifact"] == "1005_successor.sql"
+
+
+@pytest.mark.parametrize("state", ("partial", "drift", "unknown"))
+def test_ordered_chain_reports_precise_non_exact_artifact(
+    monkeypatch, state
+) -> None:
+    entries = (
+        {"release_id": "baseline", "release_fingerprint": "f0", "artifact": {"name": "1003_base.sql"}, "descriptor": {}},
+        {"release_id": "blocked", "release_fingerprint": "f1", "artifact": {"name": "1004_blocked.sql"}, "descriptor": {}},
+    )
+    states = iter(("exact", state))
+    monkeypatch.setattr(migration, "_local_ordered_upgrade_entries", lambda: entries)
+    monkeypatch.setattr(
+        migration, "local_additive_target_state", lambda *_args, **_kwargs: {"state": next(states)}
+    )
+
+    with pytest.raises(migration.LocalAdditiveBlocked) as error:
+        migration._local_ordered_chain_plan(
+            SimpleNamespace(), "lu_test_dataset", {"sha256": "a" * 64}
+        )
+
+    assert error.value.code == "schema_state_blocked"
+    assert {
+        key: error.value.details[key]
+        for key in ("release_id", "artifact", "state")
+    } == {"release_id": "blocked", "artifact": "1004_blocked.sql", "state": state}
+    assert error.value.details["baseline_release_id"] == "baseline"
+    assert error.value.details["latest_release_id"] == "blocked"
+
+
+def test_ordered_chain_names_release_with_missing_qualification(monkeypatch) -> None:
+    entries = (
+        {"release_id": "baseline", "release_fingerprint": "f0", "artifact": {"name": "1003_base.sql"}, "descriptor": {}},
+        {"release_id": "missing", "release_fingerprint": "f1", "artifact": {"name": "1004_missing.sql"}, "descriptor": {}},
+    )
+    states = iter(("exact", "absent"))
+    monkeypatch.setattr(migration, "_local_ordered_upgrade_entries", lambda: entries)
+    monkeypatch.setattr(
+        migration, "local_additive_target_state", lambda *_args, **_kwargs: {"state": next(states)}
+    )
+    monkeypatch.setattr(
+        migration,
+        "_local_discover_qualification",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            migration.LocalAdditiveBlocked(
+                "missing", code="qualification_missing", details={"release_id": "missing"}
+            )
+        ),
+    )
+
+    with pytest.raises(migration.LocalAdditiveBlocked) as error:
+        migration._local_ordered_chain_plan(
+            SimpleNamespace(), "lu_test_dataset", {"sha256": "a" * 64}
+        )
+
+    assert error.value.code == "qualification_missing"
+    assert error.value.details["artifact"] == "1004_missing.sql"
+
+
+def test_ordered_chain_resumes_from_first_absent_after_exact_prefix(
+    monkeypatch, tmp_path
+) -> None:
+    entries = tuple(
+        {
+            "release_id": f"release-{number}",
+            "release_fingerprint": f"f{number}",
+            "artifact": {"name": f"{number}_part.sql"},
+            "descriptor": {},
+        }
+        for number in range(1003, 1008)
+    )
+    states = iter(("exact", "exact", "exact", "exact", "absent"))
+    monkeypatch.setattr(migration, "_local_ordered_upgrade_entries", lambda: entries)
+    monkeypatch.setattr(
+        migration, "local_additive_target_state", lambda *_args, **_kwargs: {"state": next(states)}
+    )
+    monkeypatch.setattr(
+        migration,
+        "_local_discover_qualification",
+        lambda _path=None, *, release_id=None, **_kwargs: {
+            "release_id": release_id,
+            "release_fingerprint": "f1007",
+            "_path": tmp_path / "q1007.json",
+        },
+    )
+    monkeypatch.setattr(migration, "_local_verify_hashes", lambda _value: None)
+
+    result = migration._local_ordered_chain_plan(
+        SimpleNamespace(), "lu_test_dataset", {"sha256": "a" * 64}
+    )
+
+    assert [item["release_id"] for item in result["pending_releases"]] == [
+        "release-1007"
+    ]
+
+
 def test_target_profile_blocks_mysql_system_schema_without_connecting() -> None:
     with pytest.raises(additive.LocalAdditiveBlocked) as error:
         additive.plan(SimpleNamespace(), "mysql", receipt_root=Path("scratch"))
     assert error.value.code == "target_profile_blocked"
 
 
-def test_local_source_accepts_portable_development_database_name() -> None:
+def test_local_source_accepts_allowlisted_development_database_name() -> None:
     update.validate_local_source(
         SimpleNamespace(host="127.0.0.1"),
-        "labor_union_local",
+        "lu_test_labor_union_local",
         {"APP_ENV": "development"},
     )
+
+
+def test_local_source_rejects_staging_and_mysql_system_schema() -> None:
+    with pytest.raises(update.LocalDatabaseUpdateError, match="profile"):
+        update.validate_local_source(
+            SimpleNamespace(host="127.0.0.1"),
+            "lu_test_dataset",
+            {"APP_ENV": "staging"},
+        )
+    with pytest.raises(update.LocalDatabaseUpdateError, match="system"):
+        update.validate_local_source(
+            SimpleNamespace(host="127.0.0.1"),
+            "mysql",
+            {"APP_ENV": "development"},
+        )
+
+
+def test_local_source_rejects_union_and_non_allowlisted_database_names() -> None:
+    for source, message in (
+        ("union_db", "lu_test"),
+        ("labor_union_local", "lu_test"),
+        ("lu_test_" + "a" * 57, "64"),
+    ):
+        with pytest.raises(update.LocalDatabaseUpdateError, match=message):
+            update.validate_local_source(
+                SimpleNamespace(host="127.0.0.1"),
+                source,
+                {"APP_ENV": "development"},
+            )
 
 
 def test_preview_reuses_one_schema_snapshot_for_target_state(monkeypatch, tmp_path) -> None:
@@ -363,7 +670,11 @@ def test_preview_reuses_one_schema_snapshot_for_target_state(monkeypatch, tmp_pa
         calls["schema_snapshot"] += 1
         return snapshot
 
-    monkeypatch.setattr(migration, "_local_discover_qualification", lambda: qualification)
+    monkeypatch.setattr(
+        migration,
+        "_local_discover_qualification",
+        lambda *_args, **_kwargs: qualification,
+    )
     monkeypatch.setattr(migration, "_local_verify_hashes", lambda _qualification: None)
     monkeypatch.setattr(migration, "database_exists", lambda *_args: True)
     monkeypatch.setattr(
@@ -385,7 +696,20 @@ def test_preview_reuses_one_schema_snapshot_for_target_state(monkeypatch, tmp_pa
         "local_additive_release_qualification",
         lambda *_args: {"schema_artifacts": [{"descriptor": descriptor}]},
     )
-    monkeypatch.setattr(migration, "_artifact_metadata_state", lambda *_args, **_kwargs: "absent")
+    monkeypatch.setattr(
+        migration,
+        "_local_ordered_upgrade_entries",
+        lambda: (
+            {"release_id": "baseline", "release_fingerprint": "base", "artifact": {"name": "1003_base.sql"}, "descriptor": {}},
+            {"release_id": "release", "release_fingerprint": "fingerprint", "artifact": artifact, "descriptor": descriptor},
+        ),
+    )
+    states = iter(("exact", "absent"))
+    monkeypatch.setattr(
+        migration,
+        "local_additive_target_state",
+        lambda *_args, **_kwargs: {"state": next(states)},
+    )
     monkeypatch.setattr(
         migration,
         "server_identity",
@@ -467,7 +791,11 @@ def test_apply_keeps_fresh_snapshot_after_maintenance_lock(monkeypatch, tmp_path
             "artifact": artifact,
         },
     )
-    monkeypatch.setattr(migration, "_local_discover_qualification", lambda: qualification)
+    monkeypatch.setattr(
+        migration,
+        "_local_discover_qualification",
+        lambda *_args, **_kwargs: qualification,
+    )
     monkeypatch.setattr(migration, "split_sql", lambda _sql: [])
     monkeypatch.setattr(migration, "_local_read_events", lambda *_args: [])
     monkeypatch.setattr(migration, "_local_resume_context", lambda *_args: (baseline, {}))
@@ -505,14 +833,40 @@ def test_apply_additive_update_prepares_release_scoped_backup_first(
     monkeypatch, tmp_path,
 ) -> None:
     calls: list[tuple[str, Path, Path]] = []
+    entries = update.migration._local_ordered_upgrade_entries()
     monkeypatch.setattr(
         update,
         "build_additive_preview",
-        lambda *_args, **_kwargs: {
+        lambda *_args, **_kwargs: previews.pop(0),
+    )
+    previews = [
+        {
             "status": "ready",
             "release_id": "release-v2",
+            "artifact": {"name": "1004_next.sql"},
+            "pending_releases": [{
+                "release_id": "release-v2",
+                "qualification_receipt": str(tmp_path / "qualification.json"),
+            }],
         },
-    )
+        {
+            "status": "current",
+            "release_id": entries[-1]["release_id"],
+            "release_fingerprint": entries[-1]["release_fingerprint"],
+            "baseline_release_id": entries[0]["release_id"],
+            "latest_release_id": entries[-1]["release_id"],
+            "artifacts": [
+                {
+                    "name": entry["artifact"]["name"],
+                    "release_id": entry["release_id"],
+                    "release_fingerprint": entry["release_fingerprint"],
+                    "state": "exact",
+                }
+                for entry in entries
+            ],
+            "pending_releases": [],
+        },
+    ]
 
     def prepare(*_args, **kwargs):
         calls.append((
@@ -536,7 +890,7 @@ def test_apply_additive_update_prepares_release_scoped_backup_first(
         SimpleNamespace(), "labor_union_local", tmp_path
     )
 
-    assert result["status"] == "completed"
+    assert result["status"] == "current"
     assert [item[0] for item in calls] == ["prepare", "apply"]
     assert calls[0][1] == tmp_path / "fast_additive" / (
         "labor_union_local.release-v2.backup.receipt.sql"
@@ -559,12 +913,14 @@ def test_prepare_backup_refuses_resume_without_original_artifacts(
         "local_additive_plan",
         lambda *_args, **_kwargs: {
             "status": "ready",
+            "release_id": "release-v2",
+            "artifact": {"name": "1004_next.sql"},
             "source_schema_sha256": "a" * 64,
             "resume_baseline_schema_sha256": "b" * 64,
         },
     )
     monkeypatch.setattr(
-        migration, "_local_discover_qualification", lambda: qualification
+        migration, "_local_discover_qualification", lambda *_args, **_kwargs: qualification
     )
     monkeypatch.setattr(
         migration, "_local_read_events", lambda *_args: [{"state": "planned"}]
@@ -608,12 +964,14 @@ def test_prepare_backup_persists_machine_local_identity_and_rows(
         "local_additive_plan",
         lambda *_args, **_kwargs: {
             "status": "ready",
+            "release_id": "release-v2",
+            "artifact": {"name": "1004_next.sql"},
             "source_schema_sha256": baseline,
             "resume_baseline_schema_sha256": baseline,
         },
     )
     monkeypatch.setattr(
-        migration, "_local_discover_qualification", lambda: qualification
+        migration, "_local_discover_qualification", lambda *_args, **_kwargs: qualification
     )
     monkeypatch.setattr(migration, "_local_read_events", lambda *_args: [])
     monkeypatch.setattr(

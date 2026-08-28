@@ -61,8 +61,9 @@ Web upload；BeClass scripts 僅保留為受控的 historical import，不再是
 `MYSQL_CONTAINER=<docker ps 顯示的容器名稱>`；請勿提交個人 `.env`。
 
 Windows smoke 只啟動並檢查 API 與 React/Vite，驗收固定為 GET-only，結束時只終止
-本次建立的應用程序。它不啟動 monitor、File Watcher、worker、LINE 或 provider；日常檔案匯入以
-Web UI 上傳為正式入口，不需要另外啟動通用 File Watcher。
+本次建立的應用程序。一般 launcher 則在完整 DB current gate 通過後啟動 FastAPI 8000、React/Vite
+5173、runtime monitor、durable job worker 與 incident worker；LINE credentials 缺失時只略過 LINE
+worker。兩種模式都不啟動 Streamlit 或通用 File Watcher，日常檔案匯入以 Web UI 上傳為正式入口。
 
 需要捨棄資料並回到模板測試 DB 時使用 `scripts/launchers/reset_DB.bat`，但目前模板 fixture 尚未
 重建，因此 `--dry-run` 會正確回傳 blocked；本版本不會因此刪除現有資料庫。
@@ -237,10 +238,14 @@ INTERNAL_API_MAX_ATTEMPTS=3
 [`document/雲端部署/計劃書/`](document/雲端部署/計劃書/)；這些都是規劃文件，不代表已建立
 Google Cloud 資源、已部署映像或已開放任何網路路徑。
 
-[`scripts/launchers/start_local_development.bat`](scripts/launchers/start_local_development.bat)
-是 Windows 本機開發啟動入口：目前受控模式會啟動 API、Streamlit 與 React/Vite，但**不會**啟動
-通用 File Watcher、monitor、worker 或 provider，也**不會**自動套用資料庫 schema。所有
-operator-facing 腳本、用途與退役對照見
+[`scripts/launchers/start_local_development.bat`](scripts/launchers/start_local_development.bat) 與
+[`scripts/launchers/start_local_development.sh`](scripts/launchers/start_local_development.sh) 是 Windows／Unix
+本機開發啟動入口。它們先驗證完整 DB release chain 已到 current，再啟動 FastAPI 8000、React/Vite
+5173、runtime monitor、durable job worker 與 incident worker；LINE credentials 缺失時只顯示 skip，
+不會阻擋必要服務。launcher 不啟動 Streamlit 或通用 File Watcher，也不會自動套用資料庫 schema。
+Unix 免登入開發可使用
+[`start_local_development_no_auth.sh`](scripts/launchers/start_local_development_no_auth.sh)，它只設定
+development `local_bypass` 後委派同一標準入口。所有 operator-facing 腳本、用途與退役對照見
 [`scripts/launchers/README.md`](scripts/launchers/README.md)。Durable Job Worker 主機 supervision 目前依
 人工裁決暫緩；只保留既有排程任務的 recovery 查詢與解除安裝：
 
@@ -259,8 +264,9 @@ operator-facing 腳本、用途與退役對照見
 
 開發者更新 `main` 後，若要保留現有資料，執行
 `scripts/launchers/update_local_database.bat`。預設 fast path 會先依當機 `.env` 回讀本機
-development source，建立綁定該 DB、server、release 與 baseline schema 的完整 dump／receipt，
-再執行已 qualification 的 schema-only additive release；DDL 前後都會驗證代表性舊資料指紋。
+development source，建立綁定該 DB、server、release 與 baseline schema 的完整 dump／receipt。
+runner 會從 canonical manifests 動態解析 baseline 到 current latest 的完整 ordered chain，逐支確認
+qualification 後依序套用 schema-only additive releases；每一步 DDL 前後都會驗證代表性舊資料指紋。
 共享 qualification 只證明 release、SQL、descriptor 與 evidence table scope，不會把其他開發機
 綁到製作 receipt 時的 DB 名稱、host、port 或資料內容。資料庫名稱可由各機器自行設定，但遠端、
 production profile 與 MySQL 系統 schema 一律 fail closed。長時間 candidate replacement 只有明確
@@ -273,10 +279,10 @@ metadata fingerprint 完整相符且沒有外部 inbound FK 時，於 candidate 
 Migration descriptor 對 parent table 只擁有自己明列的新欄位與物件，不獨占 parent table 原有
 metadata；後續正式 release 加入同一 owned table 的 object，必須以精確 successor 契約與回歸測試
 辨識，不能讓較早 artifact 被誤判 drift，也不能用寬鬆名稱比對放過錯誤契約。
-Qualification receipt 必須綁定 runner 選中的單一 release fingerprint；整條 release chain 的 aggregate
-fingerprint 只表示 bundle 身分，不能取代 selected-release qualification。Fast additive journal 以
-`source_database + release_id` 分鏈；同一來源已完成的舊 release journal 會保留，但不會阻擋或污染
-後續 release 的 plan／resume。若 journal 已開始但原本的 machine-local dump／receipt 遺失，runner
+每一支 release 的 qualification receipt 必須綁定該 release fingerprint；整條 release chain 的 aggregate
+fingerprint 只表示 bundle 身分，不能取代逐 release qualification。Fast additive journal 以
+`source_database + release_id` 分鏈；同一來源已完成的 release journal 會保留，runner 只從目前
+連續 exact prefix 的下一支續跑。若 journal 已開始但原本的 machine-local dump／receipt 遺失，runner
 必須停止並要求人工 recovery，不得重做新備份冒充原始 baseline。
 
 若要捨棄現有資料並恢復成版本庫模板測試資料，執行 `scripts/launchers/reset_DB.bat`。它會先驗證

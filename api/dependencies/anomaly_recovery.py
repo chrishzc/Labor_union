@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from domains.anomalies.registry import default_anomaly_registry
 from infrastructure.mysql.anomaly_maintenance_repository import (
+    AnomalyReclassificationMySqlUnitOfWork,
     MySqlAnomalyMaintenanceRepository,
+)
+from infrastructure.mysql.anomaly_reclassification_owner_query_adapter import (
+    MySqlAnomalyReclassificationOwnerQueryAdapter,
 )
 from infrastructure.mysql.anomaly_root_fact_projection_repository import (
     MySqlRootFactProjectionRepository,
     RootFactProjectionMySqlUnitOfWork,
 )
-from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.mysql_adapter import get_connection
 from subsystems.anomalies.maintenance_workflow import (
     AnomalyMaintenanceApplication,
@@ -60,7 +63,11 @@ def _maintenance_application(source_connection, projection_connection):
         repository,
         repository,
         projector,
-        lambda: MySqlUnitOfWork(source_connection),
+        lambda: AnomalyReclassificationMySqlUnitOfWork(source_connection),
+        reclassification_port=repository,
+        target_verifier=MySqlAnomalyReclassificationOwnerQueryAdapter(
+            source_connection
+        ),
     )
 
 

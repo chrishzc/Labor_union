@@ -1,0 +1,31 @@
+{
+  "contract": "labor-union-payout001-expected/v1",
+  "scenario_id": "PAYOUT-001-EXACT-001",
+  "revision": 1,
+  "prepared": {
+    "obligation_balance_ntd": 12000,
+    "obligation_status": "payable",
+    "alert_code": "PAYOUT-001",
+    "predicate_active": true,
+    "workflow_status": "open",
+    "action_key": "reconcile_overdue_staff_payable"
+  },
+  "apply_accepted": {
+    "http_status": 202,
+    "job_status_before_worker": ["queued", "running"],
+    "predicate_active": true
+  },
+  "terminal": {
+    "job_status": "succeeded",
+    "obligation_balance_ntd": 0,
+    "obligation_status": "completed",
+    "predicate_active": false,
+    "workflow_status": "resolved"
+  },
+  "negative_oracles": {
+    "partial_or_over_amount": "preview rejected and alert remains active",
+    "stale": "apply rejected, preview invalidated and alert remains active",
+    "timeout_or_unknown": "reuse the original idempotency identity, do not claim resolution",
+    "owner_readback_failure": "fail closed and retain the alert"
+  }
+}

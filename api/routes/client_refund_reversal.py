@@ -1,4 +1,7 @@
-"""Authenticated typed endpoints for Client Refund and Client Reversal."""
+"""
+File: client_refund_reversal.py
+Description: 提供 Client Finance refund、recovery 與 reversal 的 authenticated typed endpoints。
+"""
 
 from __future__ import annotations
 
@@ -15,6 +18,10 @@ from api.dependencies.client_refund_reversal import (
     ClientRefundReversalApplication,
     get_client_refund_reversal_application,
 )
+from api.dependencies.client_receipt_reconciliation import (
+    ClientReceiptReconciliationApplication,
+    get_client_receipt_reconciliation_application,
+)
 from api.dependencies.client_over_refund_recovery import (
     ClientOverRefundRecoveryApplication,
     get_client_over_refund_recovery_application,
@@ -26,6 +33,7 @@ from api.schemas.client_refund_reversal import (
     ClientRefundReversalPreviewView,
     ClientRefundReversalQueryView,
     ClientRefundReversalReceiptView,
+    ClientSettlementRemediationQueryView,
     ClientRefundReturnApplyBody,
     ClientRefundReturnPreviewBody,
     ClientOverRefundRecoveryApplyBody,
@@ -38,6 +46,7 @@ from api.schemas.client_refund_reversal import (
     ClientOverRefundRecoveryMatchingPreviewBody,
     ClientOverRefundRecoveryMatchingPreviewView,
     ClientOverRefundRecoveryMatchingReceiptView,
+    ClientOverRefundRecoveryQueryView,
     ClientOverRefundRecoveryPreviewBody,
     ClientOverRefundRecoveryPreviewView,
     ClientOverRefundRecoveryReceiptView,
@@ -55,7 +64,12 @@ from subsystems.client_finance.over_refund_recovery_matching_workflow import (
     ClientOverRefundRecoveryMatchingError,
     ClientOverRefundRecoveryMatchingSelection,
 )
+from subsystems.client_finance.client_over_refund_recovery_query import (
+    ClientOverRefundRecoveryQueryError,
+    ClientOverRefundRecoveryQuerySelection,
+)
 from shared_kernel.money import MoneyNTD
+from shared_kernel.business_time import current_business_instant
 from domains.client_finance.error_contract import (
     canonicalize_client_finance_error,
 )
@@ -106,6 +120,63 @@ def query_refund_reversal(
     del principal
     correlation = CorrelationId(f"client-refund-reversal-query:{case_no}")
     return _call(lambda: application.query(case_no), "成功取得退款與沖正根事實", correlation)
+
+
+@router.get(
+    "/settlement-remediation",
+    response_model=BaseResponse[ClientSettlementRemediationQueryView],
+)
+def query_settlement_remediation(
+    case_no: str = Path(..., min_length=1, max_length=191),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    refund_application: ClientRefundReversalApplication = Depends(
+        get_client_refund_reversal_application
+    ),
+    receipt_application: ClientReceiptReconciliationApplication = Depends(
+        get_client_receipt_reconciliation_application
+    ),
+):
+    del principal
+    correlation = CorrelationId(f"client-settlement-remediation-query:{case_no}")
+
+    def query():
+        payable = refund_application.query(case_no)
+        receivable = receipt_application.query(case_no)
+        if payable["account_version"] != receivable["account_version"]:
+            raise ValueError("client_finance_candidate_stale")
+        as_of = current_business_instant().date()
+        return {
+            "case_no": case_no,
+            "account_version": payable["account_version"],
+            "as_of": as_of,
+            "receivable_obligations": [
+                item
+                for item in receivable["obligations"]
+                if item["due_date"] is not None and item["due_date"] < as_of
+            ],
+            "refund_obligations": [
+                item
+                for item in payable["refund_obligations"]
+                if item["due_date"] is not None and item["due_date"] < as_of
+            ],
+            "subsidy_return_obligations": [
+                item
+                for item in payable["subsidy_return_obligations"]
+                if item["due_date"] is not None and item["due_date"] < as_of
+            ],
+            "incoming_bank_facts": [
+                {
+                    "finance_import_row_id": item["finance_import_row_id"],
+                    "amount_ntd": item["amount_ntd"],
+                    "transaction_date": item["transaction_date"],
+                }
+                for item in receivable["bank_facts"]
+            ],
+            "refund_bank_facts": payable["refund_bank_facts"],
+            "subsidy_return_bank_facts": payable["subsidy_return_bank_facts"],
+        }
+
+    return _call(query, "成功取得客戶應收與應付人工處理根事實", correlation)
 
 
 @router.post(
@@ -230,6 +301,30 @@ def preview_refund_overage_recovery(
     _raise_unmatched_recovery_retired()
 
 
+@router.get(
+    "/refund-overage-recovery/{recovery_identity}",
+    response_model=BaseResponse[ClientOverRefundRecoveryQueryView],
+)
+def query_refund_overage_recovery(
+    case_no: str = Path(..., min_length=1, max_length=191),
+    recovery_identity: str = Path(..., min_length=1, max_length=191),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: ClientOverRefundRecoveryApplication = Depends(get_client_over_refund_recovery_application),
+):
+    del principal
+    correlation = CorrelationId(f"client-over-refund-recovery-query:{case_no}:{recovery_identity}")
+    return _call_recovery_query(
+        lambda: _recovery_query_payload(
+            application.query_recovery(
+                ClientOverRefundRecoveryQuerySelection(case_no.strip(), recovery_identity.strip()),
+                correlation,
+            )
+        ),
+        "成功取得客戶退款超額追償現況",
+        correlation,
+    )
+
+
 @router.post(
     "/refund-overage-recovery/apply",
     response_model=BaseResponse[ClientOverRefundRecoveryReceiptView],
@@ -278,6 +373,7 @@ def apply_matched_refund_overage_recovery(
         ExpectedVersion(body.expected_recovery_version), ExpectedVersion(body.expected_account_version),
         PreviewFingerprint(body.preview_fingerprint), IdempotencyKey(idempotency_key),
         ActorContext(str(principal.username or "").strip()), body.reason.strip(), correlation,
+        body.evidence_reference.strip(),
     )
     return _call_recovery(
         lambda: _materialize(application.apply(request)), "已核銷已配對客戶追償入款", correlation
@@ -336,6 +432,7 @@ def apply_refund_overage_recovery_adjustment(
         ActorContext(str(principal.username or "").strip()),
         body.reason.strip(),
         correlation,
+        body.evidence_reference.strip(),
     )
     return _call_recovery(
         lambda: _materialize(application.apply(request)),
@@ -388,6 +485,7 @@ def apply_refund_overage_recovery_matching(
         ActorContext(str(principal.username or "").strip()),
         body.reason.strip(),
         correlation,
+        body.evidence_reference.strip(),
     )
     return _call_matching(
         lambda: _materialize(application.apply_matching(request)),
@@ -596,6 +694,7 @@ def _matched_recovery_selection(case_no, body):
     return ClientOverRefundRecoverySelection(
         case_no.strip(), body.recovery_identity.strip(), str(body.finance_import_row_id),
         matching_identity=body.matching_identity.strip(), matching_version=body.matching_version,
+        evidence_reference=body.evidence_reference.strip(),
     )
 
 
@@ -618,13 +717,35 @@ def _recovery_adjustment_selection(case_no, body):
         body.recovery_identity.strip(),
         action=ClientOverRefundRecoveryAction.ADJUST,
         adjustment_amount=MoneyNTD(body.adjustment_amount_ntd),
+        evidence_reference=body.evidence_reference.strip(),
     )
 
 
 def _matching_selection(case_no, body):
     return ClientOverRefundRecoveryMatchingSelection(
-        case_no.strip(), body.recovery_identity.strip(), str(body.finance_import_row_id)
+        case_no.strip(), body.recovery_identity.strip(), str(body.finance_import_row_id),
+        body.evidence_reference.strip(),
     )
+
+
+def _recovery_query_payload(value):
+    return {
+        "case_no": value.case_no,
+        "recovery_identity": value.recovery_identity,
+        "remaining_amount_ntd": value.remaining_amount_ntd,
+        "status": value.status,
+        "recovery_version": value.recovery_version,
+        "account_version": value.account_version,
+        "source_row_reference": value.source_row_reference,
+        "current_matchings": [
+            {
+                "matching_identity": item.matching_identity,
+                "matching_version": item.matching_version,
+                "incoming_row_reference": item.incoming_row_reference,
+            }
+            for item in value.current_matchings
+        ],
+    }
 
 
 def _matching_preview_payload(preview):
@@ -759,6 +880,15 @@ def _call_recovery(command, message, correlation):
     try:
         return BaseResponse(data=command(), message=message)
     except ClientOverRefundRecoveryError as error:
+        _raise_typed(error.error)
+    except ValueError as error:
+        _raise_value_error(error, correlation)
+
+
+def _call_recovery_query(command, message, correlation):
+    try:
+        return BaseResponse(data=command(), message=message)
+    except ClientOverRefundRecoveryQueryError as error:
         _raise_typed(error.error)
     except ValueError as error:
         _raise_value_error(error, correlation)

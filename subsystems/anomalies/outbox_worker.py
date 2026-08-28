@@ -28,6 +28,9 @@ from subsystems.anomalies.hcm_resubmission_outbox_consumer import consume_hcm_re
 from subsystems.anomalies.historical_order_adoption_outbox_consumer import (
     consume_historical_order_adoption_review_events,
 )
+from subsystems.anomalies.historical_order_review_remediation_outbox_consumer import (
+    consume_historical_order_review_remediation_events,
+)
 from subsystems.anomalies.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
 from subsystems.anomalies.government_overpayment_anomaly_consumer import (
     consume_government_overpayment_anomaly_events,
@@ -118,6 +121,9 @@ def _consume_once(source_scan_state: ArchitectureSourceScanState | None = None):
         hcm = consume_hcm_import_review_events(connection)
         hcm_resubmission_delivered = consume_hcm_resubmission_outbox(connection)
         historical_order = consume_historical_order_adoption_review_events(connection)
+        historical_order_remediation = (
+            consume_historical_order_review_remediation_events(connection)
+        )
         subsidy_advance_delivered, subsidy_advance_failed = (
             consume_government_subsidy_advance_events(connection)
         )
@@ -140,8 +146,8 @@ def _consume_once(source_scan_state: ArchitectureSourceScanState | None = None):
         access_control = consume_security_alert_outbox(connection)
         source_delivered, source_failed = _consume_sources_if_due(connection, source_scan_state)
         return ArchitectureDeliveryResult(
-            finance.delivered_count + beclass.delivered_count + hcm.delivered_count + hcm_resubmission_delivered + historical_order.delivered_count + subsidy_advance_delivered + overpayment_delivered + client_recovery_delivered + client_underpayment_delivered + staff_recovery_delivered + staff_difference_delivered + deposit_delivered + access_control.delivered_count + source_delivered,
-            finance.failed_count + beclass.failed_count + hcm.failed_count + historical_order.failed_count + subsidy_advance_failed + overpayment_failed + client_recovery_failed + client_underpayment_failed + staff_recovery_failed + staff_difference_failed + deposit_failed + access_control.failed_count + source_failed,
+            finance.delivered_count + beclass.delivered_count + hcm.delivered_count + hcm_resubmission_delivered + historical_order.delivered_count + historical_order_remediation.delivered_count + subsidy_advance_delivered + overpayment_delivered + client_recovery_delivered + client_underpayment_delivered + staff_recovery_delivered + staff_difference_delivered + deposit_delivered + access_control.delivered_count + source_delivered,
+            finance.failed_count + beclass.failed_count + hcm.failed_count + historical_order.failed_count + historical_order_remediation.failed_count + subsidy_advance_failed + overpayment_failed + client_recovery_failed + client_underpayment_failed + staff_recovery_failed + staff_difference_failed + deposit_failed + access_control.failed_count + source_failed,
         )
     finally:
         connection.close()

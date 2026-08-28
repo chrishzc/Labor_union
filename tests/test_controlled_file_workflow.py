@@ -109,6 +109,7 @@ class FakeRepository:
             ),
             version=1,
             registration_status=ControlledFileStagingRegistrationStatus.UNREGISTERED,
+            stored_intent=_intent(),
         )
         self.owner_exists = True
         self.receipt = None
@@ -124,6 +125,7 @@ class FakeRepository:
             staging=result,
             version=1,
             registration_status=ControlledFileStagingRegistrationStatus.UNREGISTERED,
+            stored_intent=_intent(),
         )
         return result
 
@@ -256,6 +258,26 @@ def test_preview_is_read_only_deterministic_and_fresh_reads_bytes() -> None:
     assert unit_of_work.commits == 0
 
 
+def test_preview_rejects_intent_that_differs_from_stored_staging_metadata() -> None:
+    workflow, repository, storage, unit_of_work = _workflow()
+    mismatched = ControlledFileIntent(
+        staging_id=STAGING_ID,
+        owner=ControlledFileOwner.CONTRACT_SIGNING,
+        purpose=ControlledFilePurpose.FINAL_SIGNED_CONTRACT,
+        subject_reference="CASE-002",
+        object_key="final-contract",
+        logical_folder="contracts",
+    )
+
+    with pytest.raises(ControlledFileWorkflowError) as captured:
+        workflow.preview(mismatched)
+
+    assert captured.value.code == "controlled_file_staging_intent_mismatch"
+    assert repository.owner_reads == []
+    assert storage.reads == 0
+    assert unit_of_work.commits == 0
+
+
 def test_invalid_owner_purpose_pairing_fails_before_repository_access() -> None:
     workflow, repository, _, _ = _workflow()
 
@@ -303,6 +325,18 @@ def test_apply_fresh_locks_and_commits_once_without_locator_projection() -> None
     assert "storage_locator" not in projection
     assert "file:" not in projection
     assert "://" not in projection
+
+
+def test_apply_borrowed_leaves_commit_to_outer_owner() -> None:
+    workflow, repository, _, unit_of_work = _workflow()
+    preview = workflow.preview(_intent())
+
+    receipt = workflow.apply_borrowed(_command(preview))
+
+    assert receipt.outcome is ControlledFileApplyOutcome.CREATED
+    assert (repository.registered, repository.marked, repository.saved) == (1, 1, 1)
+    assert unit_of_work.commits == 0
+    assert unit_of_work.rollbacks == 0
 
 
 def test_apply_replay_returns_same_identity_without_second_registration() -> None:

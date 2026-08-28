@@ -75,11 +75,12 @@ Modules 必須是純函式，不讀 DB、不取得現在時間、不 import API�
 
 ### 3.2 Matching 語意
 
-- filter checkbox 預設勾選；取消只影響本次 Query。
+- 偏好只影響媒合排序與 explanation，不是接案資格或硬性排除條件。filter checkbox 僅控制本次 Query 是否將該偏好納入排序權重／說明，不得因此移除 selectable candidate。
 - integer target 落在月嫂 `[minimum, maximum]` 內，或存在於 integer set 內，為 `matched`；否則 `not_matched`。
-- 月嫂未設定啟用中的偏好時為 `source_not_ready`；勾選該 filter 時不可列為 selectable，取消後可顯示。
+- 月嫂未設定啟用中的偏好時為 `source_not_ready`；仍可列為 selectable，但排序不得把未知值當成 matched，UI 必須明示尚未登錄。
 - Query 回傳 definition identity／version、顯示名稱、target、staff value、result 與 reason code；UI 不解析中文名稱決定規則。
 - Query 結果綁定 Staff preference、Orders 與 Scheduling source versions；選擇或 Apply 前必須 fresh recheck。
+- 單純 `not_matched` 或 `source_not_ready` 不得投影 `SCHEDULE-005` 或任何硬性異常；只有偏好 root 本身違反 schema/version invariant，或正式 assignment／不可服務期間等其他 owner root 衝突時，才由其對應 anomaly code 處理。
 
 ### 3.3 月嫂名冊的服務能力投影（2026-08-25 人工裁決）
 
@@ -118,8 +119,15 @@ focused tests 與 React build 通過，畫面不含 raw workbook／JSON、來源
   `long_leave` 必須有結束日，`paused_service` 可 open-ended，恢復時以 resume date 前一日封閉期間。
 - Apply 預設拒絕同一月嫂的 current overlap，回
   `staff_unavailability_period_conflict`，避免重複事實。
-- 建立前須鎖共用 staff occupancy mutex 並 fresh-read assignment、waiting service lock 與 buffer；
-  任一既有承諾重疊皆拒絕，不能用不可服務期間掩蓋 assignment 或 waiting lock。
+- 建立前須鎖共用 staff occupancy mutex 並 fresh-read assignment、waiting service lock 與 buffer。若與既有
+  assignment／正式訂單排程重疊，Preview與管理端必須列出exact case、assignment及日期，預設Apply拒絕並回
+  `staff_unavailability_committed_schedule_conflict`。具權限人員可在看過相同fresh conflict snapshot後，以
+  明確`force_preserve_committed_schedule`確認保存不可服務申請；此時既有assignment／waiting service lock
+  固定優先，不得取消、縮短、改派或標記為不上班，並須保存committed-exception lineage、actor、reason、
+  idempotency receipt與兩邊版本。若Apply時衝突集合改變固定stale。
+- 強制保存後，原不可服務區間仍約束未來媒合與尚未承諾日期；與既有有效assignment重疊的日期是
+  `committed_schedule_exception`。Calendar必須同時顯示不可服務宣告與既有服務承諾，不得把任一方隱藏；
+  如需改變既有服務，只能另走leave／substitution／cancellation正式流程。
 - 取消只追加事件，不刪除或改寫原期間。
 - Matching 勾選「檔期」時，與 current 不可服務期間重疊者為 actual conflict 並排除；取消檔期 filter
   時可顯示，但必須保留警告，且建立 matching plan／assignment 前仍 fail closed。
@@ -152,6 +160,9 @@ focused tests 與 React build 通過，畫面不含 raw workbook／JSON、來源
 - `case_import_cooking_requirement_ambiguous`
 - `staff_unavailability_period_invalid`
 - `staff_unavailability_period_conflict`
+- `staff_unavailability_committed_schedule_conflict`
+- `staff_unavailability_force_confirmation_required`
+- `staff_unavailability_committed_exception_stale`
 - `staff_unavailability_version_conflict`
 - `stale_preview`
 - `idempotency_conflict`

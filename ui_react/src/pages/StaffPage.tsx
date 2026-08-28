@@ -5,7 +5,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './StaffPage.css';
 import { Drawer } from '../components/Drawer';
-import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
+import {
+  loadAllStaffDirectoryPages,
+  staffDirectoryClient,
+} from '../api/staff_directory/staff_directory_client';
 import { StaffDirectoryAbortedError } from '../api/staff_directory/staff_directory_errors';
 import { staffPreferencesClient } from '../api/staff_preferences/staff_preferences_client';
 import {
@@ -75,6 +78,11 @@ type DirectoryState =
   | { status: 'ready'; items: StaffDirectoryCardViewModel[]; nextCursor: number | null }
   | { status: 'loading-more'; items: StaffDirectoryCardViewModel[]; nextCursor: number }
   | { status: 'error'; items: StaffDirectoryCardViewModel[]; message: string; retryCursor: number | null };
+type DirectorySearchState =
+  | { status: 'idle'; items: StaffDirectoryCardViewModel[] }
+  | { status: 'loading'; items: StaffDirectoryCardViewModel[] }
+  | { status: 'ready'; items: StaffDirectoryCardViewModel[] }
+  | { status: 'error'; items: StaffDirectoryCardViewModel[]; message: string };
 type QueryState<T> =
   | { status: 'idle' }
   | { status: 'loading' }
@@ -228,6 +236,7 @@ export const StaffPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [drawerTab, setDrawerTab] = useState<'qualification' | 'preferences' | 'unavailability' | 'lifecycle'>('qualification');
   const [directory, setDirectory] = useState<DirectoryState>({ status: 'loading', items: [] });
+  const [directorySearch, setDirectorySearch] = useState<DirectorySearchState>({ status: 'idle', items: [] });
   const [selectedStaff, setSelectedStaff] = useState<StaffDirectoryCardViewModel | null>(null);
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
   const [preferences, setPreferences] = useState<QueryState<StaffPreferencesProfileViewModel>>({ status: 'idle' });
@@ -259,6 +268,8 @@ export const StaffPage: React.FC = () => {
   const initialRequestedRef = useRef(false);
   const requestGenerationRef = useRef(0);
   const activeControllerRef = useRef<AbortController | null>(null);
+  const searchGenerationRef = useRef(0);
+  const searchControllerRef = useRef<AbortController | null>(null);
   const sliceGenerationRef = useRef(0);
   const sliceControllerRef = useRef<AbortController | null>(null);
   const availabilityQueryGenerationRef = useRef(0);
@@ -340,6 +351,8 @@ export const StaffPage: React.FC = () => {
       sliceControllerRef.current?.abort();
       availabilityQueryGenerationRef.current += 1;
       availabilityQueryControllerRef.current?.abort();
+      searchGenerationRef.current += 1;
+      searchControllerRef.current?.abort();
       queueMicrotask(() => {
         if (!mountedRef.current) {
           requestGenerationRef.current += 1;
@@ -349,6 +362,40 @@ export const StaffPage: React.FC = () => {
       });
     };
   }, [loadInitialDirectory]);
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    const generation = searchGenerationRef.current + 1;
+    searchGenerationRef.current = generation;
+    searchControllerRef.current?.abort();
+    if (!query) {
+      staffDirectoryClient.resetPagination();
+      setDirectorySearch({ status: 'idle', items: [] });
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    searchControllerRef.current = controller;
+    setDirectorySearch((current) => ({ status: 'loading', items: current.items }));
+    const timer = window.setTimeout(() => {
+      void loadAllStaffDirectoryPages(
+        staffDirectoryClient.queryPage.bind(staffDirectoryClient),
+        { pageSize: 200 },
+        { signal: controller.signal },
+      ).then((page) => {
+        if (!mountedRef.current || controller.signal.aborted || generation !== searchGenerationRef.current) return;
+        setDirectorySearch({ status: 'ready', items: adaptStaffDirectoryPage(page).items });
+      }).catch((error: unknown) => {
+        if (error instanceof StaffDirectoryAbortedError || !mountedRef.current || controller.signal.aborted || generation !== searchGenerationRef.current) return;
+        setDirectorySearch({ status: 'error', items: [], message: error instanceof Error ? error.message : '服務人員搜尋失敗。' });
+      });
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchQuery]);
 
   useEffect(() => {
     const { generation, controller } = beginSliceRequest();
@@ -850,7 +897,10 @@ export const StaffPage: React.FC = () => {
 
   const filteredStaffItems = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    return staffItems.filter((staff) => {
+    const searchableItems = query && directorySearch.status === 'ready'
+      ? directorySearch.items
+      : staffItems;
+    return searchableItems.filter((staff) => {
       if (query) {
         const matchId = String(staff.id).includes(query);
         const matchName = staff.displayName.toLowerCase().includes(query);
@@ -859,7 +909,7 @@ export const StaffPage: React.FC = () => {
       }
       return true;
     });
-  }, [staffItems, searchQuery]);
+  }, [directorySearch, staffItems, searchQuery]);
 
   return (
     <div data-surface-id="staff.page">
@@ -977,7 +1027,14 @@ export const StaffPage: React.FC = () => {
             <div className="staff-directory-message" role="status">目前沒有可顯示的服務人員摘要。</div>
           )}
 
-          {directory.status === 'ready' && staffItems.length > 0 && filteredStaffItems.length === 0 && (
+          {searchQuery.trim() && directorySearch.status === 'loading' && (
+            <div className="staff-directory-message" role="status">正在搜尋完整服務人員名冊…</div>
+          )}
+          {searchQuery.trim() && directorySearch.status === 'error' && (
+            <div className="staff-directory-message error" role="alert">搜尋服務人員失敗：{directorySearch.message}</div>
+          )}
+
+          {directory.status === 'ready' && staffItems.length > 0 && directorySearch.status === 'ready' && filteredStaffItems.length === 0 && (
             <div className="staff-directory-message" role="status">
               找不到符合「{searchQuery.trim()}」的服務人員。
               <button type="button" className="staff-next-btn" onClick={() => setSearchQuery('')}>
@@ -1048,7 +1105,7 @@ export const StaffPage: React.FC = () => {
             </div>
           )}
 
-          {directory.status === 'ready' && directory.nextCursor !== null && (
+          {!searchQuery.trim() && directory.status === 'ready' && directory.nextCursor !== null && (
             <div className="staff-pagination">
               <button type="button" data-control-id="staff.directory.next-page" className="staff-next-btn" disabled={interactionLocked} onClick={() => void loadNextPage()}>
                 載入下一頁

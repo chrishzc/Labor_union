@@ -22,6 +22,7 @@ from api.routes import (
     admin_auth,
     admin_entry_targets,
     account_center,
+    anomaly_necessity_migration,
     anomaly_recovery,
     anomaly_registry,
     import_warning_tracking,
@@ -34,6 +35,7 @@ from api.routes import (
     client_receipt_reconciliation,
     client_refund_reversal,
     contract_signing,
+    contract_external_signing,
     client_payments,
     clients,
     contracts,
@@ -42,6 +44,8 @@ from api.routes import (
     finance_import,
     hcm_import,
     historical_order_adoption,
+    historical_completion,
+    historical_order_review_remediation,
     staff_historical_workbook,
     finance_reports,
     operations_reports,
@@ -83,6 +87,7 @@ from api.routes import (
     order_reopen,
     order_schedule_calculation,
     service_date_confirmation,
+    service_before_replacement,
     matching_schedule_confirmation,
     matching_coordination,
     order_terms,
@@ -242,6 +247,7 @@ app.include_router(case_architecture_bootstrap.router)
 app.include_router(order_terms.router)
 app.include_router(order_contract_completion.router)
 app.include_router(contract_signing.router)
+app.include_router(contract_external_signing.router)
 app.include_router(order_actual_start.router)
 app.include_router(order_auto_completion.router)
 app.include_router(order_cancellation.router)
@@ -250,6 +256,7 @@ app.include_router(assignment_plan.router)
 app.include_router(leave_substitution.router)
 app.include_router(order_schedule_calculation.router)
 app.include_router(service_date_confirmation.router)
+app.include_router(service_before_replacement.router)
 app.include_router(matching_schedule_confirmation.router)
 app.include_router(matching_coordination.router)
 app.include_router(assignment_schedule_rest_dates.router)
@@ -295,11 +302,14 @@ app.include_router(finance_import.router)
 app.include_router(hcm_import.router)
 app.include_router(client_beclass_import.router)
 app.include_router(historical_order_adoption.router)
+app.include_router(historical_completion.router)
+app.include_router(historical_order_review_remediation.router)
 app.include_router(staff_historical_workbook.router)
 app.include_router(beclass_import_review.router)
 app.include_router(finance_reports.router)
 app.include_router(operations_reports.router)
 app.include_router(government_subsidy.router)
+app.include_router(anomaly_necessity_migration.router)
 app.include_router(anomaly_registry.router)
 app.include_router(anomaly_recovery.router)
 app.include_router(import_warning_tracking.router)

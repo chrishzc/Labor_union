@@ -5,7 +5,7 @@ Description: 驗證各操作 launcher 的唯讀 preflight 與服務啟動前 rea
 
 from pathlib import Path
 
-from scripts.launcher_preflight import inspect_profile
+from scripts.launcher_preflight import PROFILE_REQUIREMENTS, inspect_profile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -86,10 +86,20 @@ def test_dual_run_preflight_freezes_api_and_react_get_only_services() -> None:
 
 
 def test_windows_launcher_guards_optional_line_worker_configuration() -> None:
-    source = _source("start_local_development.bat")
+    source = _source("start_local_development.bat") + _source("supervise_local_runtime.ps1")
 
     assert "scripts.launcher_preflight --profile line-worker" in source
     assert "Skipping LINE Worker" in source
+
+
+def test_windows_launcher_reuses_existing_mysql_container_without_recreate() -> None:
+    source = _source("start_local_development.bat")
+
+    assert 'docker inspect --format "{{.State.Running}}" "!MYSQL_CONTAINER!"' in source
+    assert 'docker start "!MYSQL_CONTAINER!"' in source
+    assert "docker-compose up -d redis" in source
+    assert "docker-compose up -d db" in source
+    assert "\ndocker-compose up -d\n" not in source
 
 
 def test_windows_launcher_requires_current_schema_before_starting_services() -> None:
@@ -97,7 +107,120 @@ def test_windows_launcher_requires_current_schema_before_starting_services() -> 
     readiness = '"%PY%" -m scripts.update_local_database --require-current'
 
     assert readiness in source
-    assert source.index(readiness) < source.index('start "FastAPI Server"')
+    assert source.index(readiness) < source.index("supervise_local_runtime.ps1")
+
+
+def test_windows_launcher_delegates_runtime_ownership_after_current_gate() -> None:
+    source = _source("start_local_development.bat")
+    supervisor = _source("supervise_local_runtime.ps1")
+    readiness = '"%PY%" -m scripts.update_local_database --require-current'
+
+    assert "supervise_local_runtime.ps1" in source
+    assert source.index(readiness) < source.index("supervise_local_runtime.ps1")
+    assert "-ApiPort 8000 -ReactPort 5173" in source
+    assert 'start "FastAPI Server" cmd' not in source
+    assert "cmd /k" not in source
+    assert "Start-Process" in supervisor
+    assert "finally" in supervisor
+
+
+def test_windows_supervisor_has_readiness_survival_and_scoped_cleanup_contract() -> None:
+    source = _source("supervise_local_runtime.ps1")
+
+    assert "Invoke-WebRequest" in source
+    assert "/health" in source
+    assert "/admin/" in source
+    assert "Get-CimInstance -ClassName Win32_Process" in source
+    assert "Stop-Process -Id $id -Force" in source
+    assert "Get-DescendantIds -RootIds $activeRoots.ToArray() -Processes $treeSnapshot.Processes" in source
+    assert 'event = "runtime_ready"' in source or '"runtime_ready"' in source
+    assert '"survival_failed"' in source
+    assert '"cleanup_complete"' in source
+    for module in (
+        "api.main:app",
+        "scripts.run_service_monitor",
+        "scripts.run_durable_job_worker",
+        "scripts.run_incident_worker",
+    ):
+        assert module in source
+
+
+def test_windows_supervisor_preserves_optional_worker_and_profile_semantics() -> None:
+    source = _source("supervise_local_runtime.ps1")
+
+    assert "REACT_ADMIN_RUNTIME_PROFILE" in source
+    assert "--react-admin-health-check" in source
+    assert "--profile line-worker" in source
+    assert "RUNTIME_EVENT" in source  # optional workers emit structured skipped events
+    assert "KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED" in source
+    assert '"LINE Worker"' in source
+    assert '"Knowledge Retrieval Worker"' in source
+
+
+def test_windows_supervisor_registry_is_immutable_and_refreshes_orphan_descendants() -> None:
+    source = _source("supervise_local_runtime.ps1")
+
+    assert "IdentityRegistry" in source
+    assert "StartTime" in source
+    assert "Process = $process" in source
+    assert "ExitCode = $exitCode" in source
+    assert "Refresh-OwnedIdentityRegistry" in source
+    assert "Keep the immutable root identity" in source
+    assert "immediate PID + immutable StartTime check" in source
+
+
+def test_windows_supervisor_never_discovers_from_dead_or_reused_root_pid() -> None:
+    source = _source("supervise_local_runtime.ps1")
+
+    assert "activeRoots" in source
+    assert "Get-ProcessTreeSnapshot" in source
+    assert "CreationDate" in source
+    assert "sameCreation" in source
+    assert "treeSnapshot.Processes" in source
+    assert source.count("Get-CimInstance -ClassName Win32_Process") == 1
+    assert "record.CreationDate" in source
+    assert "Test-SameProcessIdentity -Entry $root -Snapshot $snapshot" in source
+    assert "Get-DescendantIds -RootIds $activeRoots.ToArray() -Processes $treeSnapshot.Processes" in source
+    assert "$roots = @($script:Owned" not in source
+    assert "if ($activeRoots.Count -eq 0) { return }" in source
+    assert "CleanupUnknown" in source
+    assert "UnknownRootPids" in source
+    assert '"cleanup_unknown"' in source
+
+
+def test_windows_supervisor_cleanup_reports_failures_without_false_completion() -> None:
+    source = _source("supervise_local_runtime.ps1")
+
+    assert '"cleanup_failed"' in source
+    assert "failed_pids" in source
+    assert "stopped_pids" in source
+    assert "skipped_pids" in source
+    assert "if ($failedIds.Count -gt 0)" in source
+    assert source.index('"cleanup_failed"') < source.rindex('"cleanup_complete"')
+    assert "child_exit_codes" in source
+    assert 'State = "unknown"' in source
+    assert 'if ($notFound) { "exited" } else { "unknown" }' in source
+    assert 'if ($current.State -eq "unknown")' in source
+    assert 'if ($current.State -eq "exited")' in source
+
+
+def test_no_auth_configuration_writes_atomic_utf8_without_bom() -> None:
+    source = _source("configure_local_admin_no_auth.ps1")
+
+    assert "UTF8Encoding]::new($false)" in source
+    assert "WriteAllText($temporaryEnvFile" in source
+    assert "File]::Replace($temporaryEnvFile, $envFile" in source
+    assert "File]::Move($temporaryEnvFile, $envFile)" in source
+    assert "Remove-Item -LiteralPath $temporaryEnvFile" in source
+
+
+def test_windows_supervisor_reacts_only_to_html_root_and_normalizes_true_flags() -> None:
+    source = _source("supervise_local_runtime.ps1")
+
+    assert "RequireHtmlRoot" in source
+    assert "response.Content" in source
+    assert "id\\s*=\\s*[\"'']root[\"'']" in source
+    assert "Trim().ToLowerInvariant() -eq \"true\"" in source
 
 
 def test_unix_launcher_requires_current_schema_and_guards_optional_workers() -> None:
@@ -125,7 +248,7 @@ def test_configuration_and_scheduler_scripts_have_non_mutating_dry_run() -> None
     uninstall = _source("uninstall_durable_job_worker_task.ps1")
 
     assert "[switch]$DryRun" in configure
-    assert configure.index("if ($DryRun)") < configure.index("Set-Content")
+    assert configure.index("if ($DryRun)") < configure.index("WriteAllText")
     assert "no task was queried" in status
     assert "no task was queried or removed" in uninstall
 
@@ -147,6 +270,56 @@ def test_composed_no_auth_launcher_dry_runs_both_steps() -> None:
     assert source.index('set "VITE_ACCESS_CONTROL_PROFILE=local_bypass"') < source.index(
         'call "%~dp0start_local_development.bat"'
     )
+
+
+def test_unix_no_auth_launcher_only_sets_profile_and_delegates() -> None:
+    source = _source("start_local_development_no_auth.sh")
+
+    assert "export APP_ENV=development" in source
+    assert "export ACCESS_CONTROL_PROFILE=local_bypass" in source
+    assert "export ENABLE_ADMIN_AUTH=false" in source
+    assert "export VITE_ACCESS_CONTROL_PROFILE=local_bypass" in source
+    assert 'exec "$SCRIPT_DIR/start_local_development.sh" "$@"' in source
+    assert "scripts.update_local_database" not in source
+    assert "api.main:app" not in source
+    assert "npm run dev" not in source
+
+
+def test_unix_launcher_uses_configured_database_port_and_owned_cleanup() -> None:
+    source = _source("start_local_development.sh")
+    assert 'export DB_PORT="${DB_PORT:-3306}"' in source
+    assert "choose_db_port" not in source
+    assert "lsof" not in PROFILE_REQUIREMENTS["local-unix"]["commands"]
+    assert 'scripts/wait_for_db.py --port' not in source
+    assert "trap cleanup_owned EXIT" in source
+    assert "trap 'exit 130' INT" in source
+    assert "trap 'exit 143' TERM" in source
+    assert 'kill -TERM -- "-$pid"' in source
+    assert 'require_owned_process "Runtime Monitor"' in source
+    assert 'require_owned_process "Durable Background Worker"' in source
+    assert 'require_owned_process "Incident Maintenance Worker"' in source
+
+
+def test_unix_launcher_reuses_existing_mysql_container_without_recreate() -> None:
+    source = _source("start_local_development.sh")
+
+    assert 'docker inspect --format "{{.State.Running}}" "$MYSQL_CONTAINER"' in source
+    assert 'docker start "$MYSQL_CONTAINER"' in source
+    assert "docker compose up -d db" in source
+    assert "docker compose up -d redis" in source
+    assert "\ndocker compose up -d\n" not in source
+
+
+def test_unix_no_auth_launcher_delegates_to_current_gate_before_children() -> None:
+    wrapper = _source("start_local_development_no_auth.sh")
+    canonical = _source("start_local_development.sh")
+    readiness = (
+        '"$PY" -m scripts.update_local_database --require-current '
+        '--database-port "$DB_PORT"'
+    )
+
+    assert 'exec "$SCRIPT_DIR/start_local_development.sh" "$@"' in wrapper
+    assert canonical.index(readiness) < canonical.index("api.main:app")
 
 
 def test_ngrok_launcher_routes_dry_run_before_supervision() -> None:

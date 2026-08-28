@@ -21,9 +21,8 @@ import {
 import {
   LINE_NOTIFICATION_RULES_CATALOG_FIXTURE,
   LINE_RICH_MENU_CONFIGURATION_FIXTURE,
-  LINE_RICH_MENU_DRAFT_FIXTURE,
-  LINE_RICH_MENU_PUBLICATION_FIXTURE,
-  LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE,
+  LINE_RICH_MENU_EDITABLE_DRAFT_FIXTURE,
+  LINE_RICH_MENU_OLD_PUBLICATION_FIXTURE,
 } from './fixtures/line_configuration_query_fixtures';
 
 type CustomerQuery = Pick<CustomerServiceClient, 'getSummary' | 'listTickets' | 'getTicketDetail'>;
@@ -47,11 +46,13 @@ describe('Rich Menu 本機互動預覽', () => {
     const configuration: LineConfigurationQueryClient = {
       getNotificationRules: vi.fn().mockResolvedValue(LINE_NOTIFICATION_RULES_CATALOG_FIXTURE),
       getRichMenuConfiguration: vi.fn().mockResolvedValue(LINE_RICH_MENU_CONFIGURATION_FIXTURE),
-      listRichMenuPublications: vi.fn().mockResolvedValue(LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE),
-      getRichMenuPublication: vi.fn().mockResolvedValue(LINE_RICH_MENU_PUBLICATION_FIXTURE),
+      listRichMenuPublications: vi.fn().mockResolvedValue({
+        items: [LINE_RICH_MENU_OLD_PUBLICATION_FIXTURE], page: 1, page_size: 20, total: 1, total_pages: 1,
+      }),
+      getRichMenuPublication: vi.fn().mockResolvedValue(LINE_RICH_MENU_OLD_PUBLICATION_FIXTURE),
     };
     const richMenuDraft: LineRichMenuDraftClient = {
-      query: vi.fn().mockResolvedValue(LINE_RICH_MENU_DRAFT_FIXTURE),
+      query: vi.fn().mockResolvedValue(LINE_RICH_MENU_EDITABLE_DRAFT_FIXTURE),
       preview: vi.fn().mockRejectedValue(new Error('local preview must not call server Preview')),
       apply: vi.fn().mockRejectedValue(new Error('local preview must not Apply')),
     };

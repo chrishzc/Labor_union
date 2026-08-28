@@ -1,12 +1,14 @@
 """
 File: finance_import_anomaly_consumer.py
-Description: 投影 Finance row／source 警示、自動解除，失敗以三次一秒停損。
+Description: 投影 Finance row／source 警示；未具 owner 終態證據時禁止自動解除。
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 
@@ -18,9 +20,6 @@ from domains.finance_import.warning_review import (
     build_finance_source_warning_occurrences,
 )
 from infrastructure.mysql.anomaly_root_fact_projection_repository import MySqlRootFactProjectionRepository
-from infrastructure.mysql.import_warning_auto_resolution import (
-    auto_resolve_import_warning_occurrence,
-)
 from shared_kernel.identities import CorrelationId
 from subsystems.anomalies.finance_import_review_alert import (
     project_finance_import_review_alert,
@@ -171,13 +170,8 @@ def _project_warning_occurrence(connection, root_fact: FinanceManualReviewRootFa
         finance_import_row_id=root_fact.finance_import_row_id
     )
     if not root_fact.active:
-        auto_resolve_import_warning_occurrence(
-            connection,
-            occurrence_identity=warning.occurrence_identity,
-            owning_lane=warning.owning_lane,
-            owner_event_identity=root_fact.source_event_identity,
-            projector_identity="finance-import-projector",
-        )
+        # A correction/dispatch event is evidence, not the owner terminal oracle.
+        # The canonical alert remains guarded until a code-specific root predicate exists.
         return
     evidence = {
         "batch_id": root_fact.finance_import_batch_id,
@@ -397,13 +391,145 @@ def _positive_integer(value):
 def _require_refund_return_reversal(connection, row_id, ledger_id):
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT 1 AS present FROM client_ledger_entries "
-            "WHERE finance_import_row_id=%s AND entry_type='refund_reversal' "
-            "AND reversal_of_entry_id=%s",
-            (row_id, ledger_id),
+            "SELECT bank_fact.id AS bank_row_id,bank_fact.transaction_date AS bank_transaction_date,"
+            "bank_fact.debit AS bank_debit,bank_fact.credit AS bank_credit,"
+            "bank_fact.direction AS bank_direction,bank_fact.currency AS bank_currency,"
+            "COALESCE(classification.classification_type,bank_fact.classification_type) "
+            "AS bank_classification_type,"
+            "bank_fact.reconciliation_status AS bank_reconciliation_status,"
+            "target.id AS target_entry_id,target.entry_type AS target_entry_type,"
+            "target.case_no AS target_case_no,target.amount_ntd AS target_amount_ntd,"
+            "reversal.id AS reversal_entry_id,reversal.entry_type AS reversal_entry_type,"
+            "reversal.case_no AS reversal_case_no,reversal.amount_ntd AS reversal_amount_ntd,"
+            "reversal.finance_import_row_id AS reversal_row_id,"
+            "reversal.reversal_of_entry_id AS reversal_target_id "
+            "FROM finance_import_rows AS bank_fact "
+            "LEFT JOIN finance_import_classification_events AS classification "
+            "ON classification.id=(SELECT MAX(latest.id) "
+            "FROM finance_import_classification_events AS latest "
+            "WHERE latest.finance_import_row_id=bank_fact.id) "
+            "JOIN client_ledger_entries AS target "
+            "ON target.id=%s AND target.entry_type='refund' "
+            "JOIN client_ledger_entries AS reversal "
+            "ON reversal.reversal_of_entry_id=target.id "
+            "WHERE bank_fact.id=%s "
+            "AND reversal.finance_import_row_id=%s "
+            "AND reversal.entry_type='refund_reversal' FOR UPDATE",
+            (ledger_id, row_id, row_id),
         )
-        if cursor.fetchone() is None:
+        reversal = cursor.fetchone()
+        if (
+            not _is_exact_refund_return_reversal(reversal, row_id, ledger_id)
+            or not _is_exact_refund_return_row(
+                reversal,
+                row_id,
+                expected_amount_ntd=reversal.get("target_amount_ntd")
+                if isinstance(reversal, Mapping)
+                else None,
+            )
+        ):
             raise ValueError("refund_return_reversal_not_found")
+
+
+def _is_exact_refund_return_row(row, row_id, *, expected_amount_ntd=None):
+    if not isinstance(row, Mapping):
+        return False
+    required = {
+        "bank_row_id",
+        "bank_transaction_date",
+        "bank_debit",
+        "bank_credit",
+        "bank_direction",
+        "bank_currency",
+        "bank_classification_type",
+        "bank_reconciliation_status",
+    }
+    if not required.issubset(row):
+        return False
+    return (
+        _is_positive_integer(row["bank_row_id"])
+        and row["bank_row_id"] == row_id
+        and row["bank_direction"] == "incoming"
+        and _is_positive_integer_money(row["bank_credit"])
+        and _is_zero_or_none(row["bank_debit"])
+        and (
+            expected_amount_ntd is None
+            or (
+                _is_positive_integer_money(expected_amount_ntd)
+                and Decimal(str(row["bank_credit"]))
+                == Decimal(str(expected_amount_ntd))
+            )
+        )
+        and row["bank_classification_type"] == "client_refund_return"
+        and row["bank_reconciliation_status"] == "reconciled"
+        and row["bank_transaction_date"] is not None
+        and _is_twd(row["bank_currency"])
+    )
+
+
+def _is_exact_refund_return_reversal(row, row_id, ledger_id):
+    if not isinstance(row, Mapping):
+        return False
+    required = {
+        "target_entry_id",
+        "target_entry_type",
+        "target_case_no",
+        "target_amount_ntd",
+        "reversal_entry_id",
+        "reversal_entry_type",
+        "reversal_case_no",
+        "reversal_amount_ntd",
+        "reversal_row_id",
+        "reversal_target_id",
+    }
+    if not required.issubset(row):
+        return False
+    return (
+        _is_positive_integer(row["target_entry_id"])
+        and row["target_entry_id"] == ledger_id
+        and row["target_entry_type"] == "refund"
+        and _is_positive_integer(row["reversal_entry_id"])
+        and row["reversal_entry_id"] != ledger_id
+        and row["reversal_entry_type"] == "refund_reversal"
+        and _is_positive_integer(row["reversal_row_id"])
+        and row["reversal_row_id"] == row_id
+        and _is_positive_integer(row["reversal_target_id"])
+        and row["reversal_target_id"] == ledger_id
+        and row["target_case_no"] == row["reversal_case_no"]
+        and row["target_amount_ntd"] == row["reversal_amount_ntd"]
+        and isinstance(row["target_case_no"], str)
+        and bool(row["target_case_no"].strip())
+        and isinstance(row["target_amount_ntd"], int)
+        and not isinstance(row["target_amount_ntd"], bool)
+        and row["target_amount_ntd"] > 0
+    )
+
+
+def _is_positive_integer(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _is_positive_integer_money(value):
+    if isinstance(value, bool) or value is None:
+        return False
+    try:
+        amount = Decimal(str(value))
+        return amount > 0 and amount == amount.to_integral_value()
+    except (InvalidOperation, ValueError, TypeError):
+        return False
+
+
+def _is_zero_or_none(value):
+    if value is None:
+        return True
+    try:
+        return Decimal(str(value)) == 0
+    except (InvalidOperation, ValueError, TypeError):
+        return False
+
+
+def _is_twd(value):
+    return isinstance(value, str) and value.strip().upper() in {"TWD", "NTD"}
 
 
 def _mark_delivered(connection, event):

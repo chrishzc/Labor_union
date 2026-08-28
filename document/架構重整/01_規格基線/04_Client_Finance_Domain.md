@@ -32,6 +32,54 @@
 簽回後的 Contract Completion 保留該 deposit identity、金額、ledger 與 allocation，只補足
 尚未建立的剩餘正式期款；不得重建、重複計入或因客戶晚簽而撤銷已合法核銷的 deposit。
 
+### 取消帳務 impact 的公開 direction（2026-08-27 人工裁決）
+
+取消 Preview／Apply 對外公開的每一筆 Client Finance impact 必須帶 server-owned、required
+`direction`；UI 不得由 `action_kind`、金額正負、before／after 差值或排序推定。固定 enum 與顯示
+語意如下：
+
+| `direction` | 公開意義 | `direction_amount_ntd` invariant |
+|---|---|---|
+| `refund_due` | 應退款：客戶有待收回的款項 | 非負整數且 `> 0` |
+| `additional_charge_due` | 應補收：客戶仍有待繳的款項 | 非負整數且 `> 0` |
+| `no_finance_change` | 無帳務變動 | 必須為 `0` |
+
+`action_kind` 仍可說明 adjustment／refund／collection 等操作類型，但不具 direction 權威。
+若同一取消同時存在多個獨立 impact，結果必須逐筆帶 direction，不得先由 UI 合併成一個淨額
+方向。`before_amount_ntd`／`after_amount_ntd` 是 obligation target；既有
+`obligation_amount_ntd` 是該 action 新建／變更的 obligation delta（或新建 obligation 金額），
+不是客戶實際應退款／補收的金額。另公開 required `direction_amount_ntd`，代表 direction 對
+客戶的現金／待收付影響，為非負整數；只有它能和 direction 配對。Direction 是 derived public
+view 的必要欄位，實際 obligation、ledger、allocation 與 settlement 仍由本 Domain 根事實重建；
+不存在新的帳務根事實或 UI writer。
+
+取消結果對現有 action kind 的 canonical mapping 固定如下；server 必須在建 candidate 時寫入，
+caller 不得重算：
+
+表中的 `current_settled_amount_ntd` 是 Client Finance 由 immutable ledger／allocation reducer
+重建的目前已結算金額；不是 `before_amount_ntd`（後者是既有 obligation target）。
+
+| `action_kind` | 條件 | `direction` | `direction_amount_ntd` | `obligation_amount_ntd` |
+|---|---|---|---:|---:|
+| `create_stage` | `after_amount_ntd > 0` | `additional_charge_due` | `after_amount_ntd` | `after_amount_ntd` |
+| `replace_open` | after > before | `additional_charge_due` | `after - before` | `abs(after - before)` |
+| `replace_open` | after < before（尚無正式收款歷史） | `no_finance_change` | `0` | `before - after` |
+| `cancel_open` | open obligation、無正式收款歷史 | `no_finance_change` | `0` | `before_amount_ntd` |
+| `create_adjustment` | `after_amount_ntd - current_settled_amount_ntd > 0` | `additional_charge_due` | `after - current_settled` | `after - current_settled` |
+| `create_refund` | `after_amount_ntd - current_settled_amount_ntd < 0` | `refund_due` | `current_settled - after` | `current_settled - after` |
+| `unchanged` | before = after 且沒有新 obligation | `no_finance_change` | `0` | `0` |
+
+因此 `replace_open` 減額與 `cancel_open` 都不是退款：它們只減少／取消尚未收取的 open
+obligation；真正已有正式收款而新義務下降時，固定使用 `create_refund` 與 `refund_due`。
+同一 cancellation response 可含多筆 action，各筆均依本表產生自己的 direction 與
+direction amount。
+
+缺少 direction、direction_amount 與 direction 不一致、或 current owner readback 不能唯一確認
+方向時，Query／Preview／Apply 回 typed schema／domain error 或 `outcome_unknown`，不建立或
+變更正式交易；不得 fallback 成 action kind 或以正負號猜測。舊 caller 若無法驗證該欄位，只能
+顯示 schema-drift／unavailable。相同 idempotency identity 的結果重查後，receipt／readback 必須
+保留同一 direction。
+
 補助資格與客戶收費採同一組衍生政策：補助市民（含低收入戶／中低收入戶映射）的月嫂服務薪資與政府請款單價均為每小時 350 元；政府先負擔最多 120 小時，第 121 小時起按每小時 350 元形成客戶應收。這使服務薪資在時數層由「政府補助＋客戶超額自費」完整覆蓋。樓層費不受時數補助抵銷，永遠是客戶應收。故「全補助訂單」只表示本案實際時數未超過 120 且無樓層費或其他自費項目，不能作為客戶身分的別名。
 
 Modules：
@@ -135,7 +183,7 @@ Adjustment 必須明確宣告 scope：
 
 ### Projection／Query
 
-從 obligation 與 ledger events 重建各 stage receivable、received、due date、settled at。總額只供顯示，不得掩蓋單期差異。對 Orders 只輸出 typed `ClientSettlementFacts`。
+從 obligation 與 ledger events 重建各 stage receivable、received、due date、settled at。總額只供顯示，不得掩蓋單期差異。對 Orders 只輸出 typed `ClientSettlementFacts`；取消 impact 的每一筆公開結果必須包含上述 `direction`，不得讓 caller 由 action kind 或 amount 推定。
 
 ## 4. Ports
 
@@ -180,6 +228,8 @@ Adjustment 必須明確宣告 scope：
 - 補助退款日為結案月份加兩曆月的 15 日；未清償的客戶補助退還必須出現在
   Accounts Payable Query／Export，並以 `client_subsidy_return` 類型與月嫂應付款區分。
 - 政府撥款、核准或墊付額不一致時，零自動 settlement 並建立 anomaly。
+- 取消帳務每筆 impact 都公開 `refund_due`／`additional_charge_due`／`no_finance_change` direction；
+  UI 顯示 server enum，不從 action kind 或金額正負推定，且 direction／direction_amount 不一致時零寫入。
 - Domain blocker 不因 Alert resolve 被繞過。
 - 任一 ledger／allocation／projection／outbox 失敗整筆 rollback。
 
@@ -222,6 +272,8 @@ Stable errors：
 - `subsidy_advance_not_due`
 - `subsidy_advance_already_recovered`
 - `subsidy_advance_settlement_ambiguous`
+- `client_finance_direction_missing`
+- `client_finance_direction_amount_mismatch`
 
 ## 7. Live writer 退出
 

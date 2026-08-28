@@ -1,4 +1,6 @@
-"""MySQL facts and atomic persistence for client refund and reversal."""
+"""File: client_refund_reversal_repository.py
+Description: 客戶退款、沖正與超額追償的 MySQL 原子持久化與 outbox。
+"""
 
 from __future__ import annotations
 
@@ -188,6 +190,27 @@ class MySqlClientRefundReversalRepository:
                     _UNDERPAYMENT_OUTBOX_INSERT_SQL,
                     (candidate.case_no, _child_key(request, "refund-underpayment-outbox", 1), _canonical_json({"underpayment_identity": f"client-refund-underpayment:{candidate.fingerprint.value}"})),
                 )
+            if candidate.correction_type is ClientFinanceCorrectionType.REFUND_OVERAGE:
+                recovery_identity = _over_refund_recovery_identity(candidate.fingerprint.value)
+                cursor.execute(
+                    _RECOVERY_ESTABLISHED_OUTBOX_INSERT_SQL,
+                    (
+                        candidate.case_no,
+                        _recovery_outbox_key(request, "established"),
+                        _canonical_json(
+                            {
+                                "event_type": "client_over_refund_recovery_established",
+                                "recovery_identity": recovery_identity,
+                                "finance_import_row_identity": str(
+                                    self._refund_row_metadata[
+                                        candidate.entries[0].finance_import_row_identity
+                                    ][0]
+                                ),
+                                "resulting_account_version": resulting_version,
+                            }
+                        ),
+                    ),
+                )
 
     def save_receipt(self, key, stored_receipt) -> None:
         request = self._require_request()
@@ -221,13 +244,24 @@ class MySqlClientRefundReversalRepository:
                 case_no,
                 ClientRefundPurpose.SUBSIDY_RETURN,
             )
+            outgoing_rows = _query_candidate_outgoing_bank_rows(cursor)
             targets = _query_reversal_targets(cursor, case_no, "receipt")
             refund_return_targets = _query_reversal_targets(cursor, case_no, "refund")
         return {
             "case_no": case_no,
             "account_version": version,
-            "refund_obligations": refunds,
-            "subsidy_return_obligations": subsidy_returns,
+            "refund_obligations": _public_payable_obligations(refunds),
+            "subsidy_return_obligations": _public_payable_obligations(subsidy_returns),
+            "refund_bank_facts": _query_outgoing_bank_facts(
+                outgoing_rows,
+                refunds,
+                ClientRefundPurpose.CUSTOMER_REFUND,
+            ),
+            "subsidy_return_bank_facts": _query_outgoing_bank_facts(
+                outgoing_rows,
+                subsidy_returns,
+                ClientRefundPurpose.SUBSIDY_RETURN,
+            ),
             "reversal_targets": targets,
             "refund_return_targets": refund_return_targets,
         }
@@ -384,6 +418,7 @@ def _load_refund_return_bank_rows(cursor, identities, lock):
 
 
 def _load_refund_obligation_rows(cursor, selection, lock):
+    obligation_types = _obligation_types_for_purpose(selection.refund_purpose)
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
         "SELECT obligation.obligation_identity,obligation.case_no,obligation.obligation_type,"
@@ -393,9 +428,10 @@ def _load_refund_obligation_rows(cursor, selection, lock):
         "ON snapshot.refund_obligation_identity=obligation.obligation_identity "
         f"WHERE obligation.obligation_identity IN ({_placeholders(selection.obligation_identities)}) "
         "AND obligation.case_no=%s AND obligation.direction='payable_to_client' AND obligation.status='open' "
-        "AND obligation.amount_due_ntd>0 AND obligation.obligation_type IN ('refund','subsidy_return') "
+        "AND obligation.amount_due_ntd>0 "
+        f"AND obligation.obligation_type IN ({_placeholders(obligation_types)}) "
         f"ORDER BY obligation.obligation_identity{suffix}",
-        (*selection.obligation_identities, selection.case_no),
+        (*selection.obligation_identities, selection.case_no, *obligation_types),
     )
     return tuple(cursor.fetchall())
 
@@ -710,14 +746,88 @@ def _advance_account_version(cursor, request, resulting_version):
 def _query_payable_obligations(cursor, case_no, refund_purpose):
     obligation_types = _obligation_types_for_purpose(refund_purpose)
     cursor.execute(
-        "SELECT obligation_identity,obligation_type,amount_due_ntd,due_date "
-        "FROM client_obligations WHERE case_no=%s "
-        "AND direction='payable_to_client' AND status='open' "
-        f"AND obligation_type IN ({_placeholders(obligation_types)}) "
-        "ORDER BY due_date,obligation_identity",
+        "SELECT obligation.obligation_identity,obligation.obligation_type,"
+        "obligation.amount_due_ntd,obligation.due_date,snapshot.bank_account "
+        "FROM client_obligations obligation "
+        "JOIN client_refund_recipient_snapshots snapshot "
+        "ON snapshot.refund_obligation_identity=obligation.obligation_identity "
+        "WHERE obligation.case_no=%s "
+        "AND obligation.direction='payable_to_client' AND obligation.status='open' "
+        f"AND obligation.obligation_type IN ({_placeholders(obligation_types)}) "
+        "ORDER BY obligation.due_date,obligation.obligation_identity",
         (case_no, *obligation_types),
     )
     return tuple(dict(row) for row in cursor.fetchall())
+
+
+def _public_payable_obligations(rows):
+    return tuple(
+        {
+            "obligation_identity": str(row["obligation_identity"]),
+            "obligation_type": str(row["obligation_type"]),
+            "amount_due_ntd": int(row["amount_due_ntd"]),
+            "due_date": row.get("due_date"),
+        }
+        for row in rows
+    )
+
+
+def _query_candidate_outgoing_bank_rows(cursor):
+    cursor.execute(
+        "SELECT fir.id,fir.transaction_date,fir.debit,fir.credit,fir.direction,"
+        "fir.currency,fir.reconciliation_status,fir.resolved_counterparty_account,"
+        "COALESCE(classification.classification_type,fir.classification_type) "
+        "AS effective_classification_type,ledger.id AS ledger_entry_id "
+        "FROM finance_import_rows fir "
+        "LEFT JOIN finance_import_classification_events classification "
+        "ON classification.id=(SELECT MAX(latest.id) "
+        "FROM finance_import_classification_events latest "
+        "WHERE latest.finance_import_row_id=fir.id) "
+        "LEFT JOIN client_ledger_entries ledger ON ledger.finance_import_row_id=fir.id "
+        "WHERE fir.direction='outgoing' AND fir.reconciliation_status='pending' "
+        "AND fir.debit>0 AND (fir.credit IS NULL OR fir.credit=0) "
+        "AND (fir.currency IS NULL OR fir.currency IN ('TWD','NTD')) "
+        "AND fir.transaction_date IS NOT NULL AND ledger.id IS NULL "
+        "AND COALESCE(classification.classification_type,fir.classification_type) "
+        "IN ('client_refund','client_subsidy_return') "
+        "ORDER BY fir.transaction_date,fir.id"
+    )
+    return tuple(cursor.fetchall())
+
+
+def _query_outgoing_bank_facts(rows, obligations, purpose):
+    expected_classification = _classification_for_purpose(purpose)
+    accounts_to_obligations: dict[str, list[str]] = {}
+    for obligation in obligations:
+        account = obligation.get("bank_account")
+        if isinstance(account, str) and account.strip():
+            accounts_to_obligations.setdefault(account.strip(), []).append(
+                str(obligation["obligation_identity"])
+            )
+    facts = []
+    for row in rows:
+        account = row.get("resolved_counterparty_account")
+        targets = accounts_to_obligations.get(str(account).strip(), ())
+        if (
+            row.get("effective_classification_type") != expected_classification
+            or not targets
+            or not _refund_row_is_eligible(
+                row,
+                "query",
+                expected_classification,
+                str(account).strip(),
+            )
+        ):
+            continue
+        facts.append(
+            {
+                "finance_import_row_id": int(row["id"]),
+                "amount_ntd": _integer_money(row["debit"]).amount,
+                "transaction_date": row["transaction_date"],
+                "eligible_obligation_identities": tuple(sorted(targets)),
+            }
+        )
+    return tuple(facts)
 
 
 def _classification_for_purpose(refund_purpose):
@@ -797,6 +907,11 @@ def _stored_receipt(row):
 def _child_key(request, purpose, ordinal):
     value = f"{request.idempotency_key.value}:{purpose}:{ordinal}"
     return f"client-correction:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
+
+
+def _recovery_outbox_key(request, event_type):
+    value = f"{request.idempotency_key.value}:client-over-refund-recovery:{event_type}"
+    return f"client-over-refund-recovery-{event_type}:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
 
 
 def _integer_money(value):
@@ -887,6 +1002,11 @@ _UNDERPAYMENT_SOURCE_INSERT_SQL = "INSERT INTO client_refund_underpayment_source
 _UNDERPAYMENT_SOURCE_ROW_INSERT_SQL = "INSERT INTO client_refund_underpayment_source_bank_rows (underpayment_identity,finance_import_row_id,ordinal) VALUES (%s,%s,%s)"
 _UNDERPAYMENT_SOURCE_OBLIGATION_INSERT_SQL = "INSERT INTO client_refund_underpayment_source_obligations (underpayment_identity,refund_obligation_identity,remaining_after_ntd) VALUES (%s,%s,%s)"
 _UNDERPAYMENT_OUTBOX_INSERT_SQL = "INSERT INTO client_finance_outbox (case_no,intent_type,intent_key,payload_snapshot) VALUES (%s,'client_refund_underpayment_required',%s,%s)"
+_RECOVERY_ESTABLISHED_OUTBOX_INSERT_SQL = (
+    "INSERT INTO client_finance_outbox "
+    "(case_no,intent_type,intent_key,payload_snapshot) "
+    "VALUES (%s,'projection_refresh',%s,%s)"
+)
 _RECEIPT_INSERT_SQL = (
     "INSERT INTO client_refund_reversal_apply_receipts "
     "(idempotency_key,correction_type,command_fingerprint,preview_fingerprint,"

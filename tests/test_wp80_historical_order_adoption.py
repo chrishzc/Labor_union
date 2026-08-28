@@ -19,6 +19,9 @@ from domains.orders.historical_adoption import (
 )
 from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.fingerprints import fingerprint_payload
+from infrastructure.mysql.historical_order_adoption_repository import (
+    MySqlHistoricalOrderAdoptionRepository,
+)
 from subsystems.orders.historical_adoption_workflow import (
     HistoricalOrderAdoptionRequest,
     HistoricalOrderAdoptionWorkflow,
@@ -78,6 +81,41 @@ def test_valid_historical_status_overwrites_current_value_without_false_warning(
     assert candidate.issue_codes == ()
 
 
+def test_same_status_and_dates_do_not_repeat_order_lifecycle_version():
+    current = _current(OrderLifecycleStatus.COMPLETED)
+    candidate = build_historical_order_candidate(
+        current,
+        HistoricalOrderSourceFacts(OrderLifecycleStatus.COMPLETED, None, None),
+    )
+
+    assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
+    assert candidate.mutates_order is False
+    assert candidate.resulting_version == current.lifecycle_version
+
+
+def test_repository_skips_lifecycle_write_for_unchanged_adoption_preview():
+    class NoSqlConnection:
+        def cursor(self):
+            raise AssertionError("unchanged adoption must not execute lifecycle SQL")
+
+    preview = type(
+        "Preview",
+        (),
+        {
+            "outcome": HistoricalOrderOutcome.ADOPTED,
+            "expected_version": 3,
+            "resulting_version": 3,
+        },
+    )()
+
+    assert (
+        MySqlHistoricalOrderAdoptionRepository(NoSqlConnection())._apply_order(
+            object(), preview
+        )
+        is None
+    )
+
+
 def test_two_caregivers_without_individual_intervals_require_assignment_review(tmp_path):
     path = tmp_path / "historical.xlsx"
     workbook = Workbook()
@@ -110,6 +148,30 @@ def test_single_unique_caregiver_with_interval_builds_completed_assignment_candi
 
     assert preview.outcome is HistoricalOrderOutcome.ADOPTED
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+
+
+def test_existing_assignment_never_builds_duplicate_assignment_candidate(tmp_path):
+    path = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"],
+        ["客戶甲", "CASE-1", 45937, 45978, 1, "月嫂甲"],
+    )
+    row = load_historical_order_workbook(path).rows[0]
+
+    class RepositoryWithExistingAssignment(_Repository):
+        def active_assignments(self, case_no, *, for_update):
+            del case_no, for_update
+            return ({"id": 91, "staff_id": 11, "status": "completed"},)
+
+    preview = HistoricalOrderAdoptionWorkflow(
+        RepositoryWithExistingAssignment(row), _UnitOfWork
+    ).preview(row)
+
+    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CONFLICT
+    assert all(
+        pairing.resolution is not HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+        for pairing in preview.pairings
+    )
 
 
 def test_unmatched_case_does_not_resolve_staff_or_create_review(tmp_path):

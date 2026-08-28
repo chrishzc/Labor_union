@@ -64,6 +64,22 @@ lock day 只對應該分段的正式服務日；固定週休不是 lock day。�
 
 提供 Query、Preview、Apply；支援 bootstrap、分段增減、換人、日期調整及 Orders Terms 全案重建。Apply 取消舊紀錄並新增新集合，通用 rebuild event 保存一對多／多對一 lineage。
 
+2026-08-27 人工裁決：服務前現任月嫂因車禍或其他正式不可服務事實必須
+整案換人時，不是將 Orders／Scheduling version 改小，也不是原地改舊 assignment。
+必須新增 version 更大的 caregiver-replacement event，supersede 舊 active matching／assignment
+lineage，建立新 matching round，並讓 Orders 11 步投影回到最早失效的 caregiver-bound
+step。整案重新媒合默認為 Step 2；只有 current replacement round 的 owner root 證明可沿用
+合法候選池時，server 才可投影 Step 3／4。舊候選回覆、特定月嫂簽回、recipient
+confirmation、waiting lock、commitment 與排班的 immutable 歷史保留，但不得滿足
+新 round 的 gate。
+
+分流根事實固定由 Scheduling 的 assignment-owned official service facts 決定：
+
+- 尚未提供任何服務：可建立新 matching round 並讓 Orders current SOP 回 Step 2／3／4。
+- 已提供任何服務：禁止整案回媒合，固定走既有 Leave／Substitution；只重建受影響
+  assignment family，保留已服務日與原月嫂薪資事實，代班日由新 assignment 及既有
+  Payroll impact 計算。不新建另一套代班或薪資公式。
+
 第一個正式 assignment 的 bootstrap 必須轉換同案仍有效的 waiting-deposit lock；
 若沒有 waiting lock，回 `assignment_plan_bootstrap.waiting_lock_required`，不得直接建立
 正式 assignment。轉換前仍必須驗證契約流程完成、服務時間完整及訂金正式核銷；

@@ -1,0 +1,80 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-service-before-replacement-2026-08-28-v1",
+  "release_metadata": {
+    "release_name": "Labor Union Service-before replacement",
+    "application_version": "service-before-replacement-v1",
+    "published_at": "2026-08-28",
+    "description": "Add immutable Scheduling service-before replacement lineage, receipt and internal outbox records"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-schema-assembly-2026-08-15-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1012_service_before_replacement.sql",
+      "relative_path": "db/schema_parts/1012_service_before_replacement.sql",
+      "sha256": "e16194caca67193001eef36baccd358b996082d29826e7722b5f25730099add7",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-preserve-service-before-replacement-evidence",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "service-before-replacement-owned-objects",
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "service-before-replacement-v1"
+    ],
+    "required_restart_targets": [
+      "api",
+      "worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "service-before-replacement-owned-objects"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_28_service_before_replacement_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_28_service_before_replacement_v1.descriptors.json",
+    "sha256": "252a6591a4303b0803f6135e2d62a3897e3699502cfe155aaf1eb780969d7896",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

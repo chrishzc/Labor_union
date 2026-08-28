@@ -1,13 +1,31 @@
-"""Transactional root-fact projection and human recovery queries."""
+"""
+File: root_fact_projection_workflow.py
+Description: 協調 root-fact projection 並依 owner 根事實綁定 recovery actions。
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Protocol
 
-from domains.anomalies.recovery_context import RecoveryContextFacts, assemble_recovery_action
-from domains.anomalies.registry import AnomalyDefinition, AnomalyDefinitionRegistry, CurrentAlertProjection, RecoveryActionDescriptor, reduce_current_alert
-from domains.anomalies.root_fact_projection import FinanceAnomalyOccurrence, FinanceManualReviewRootFact, RecoveryActionLink, RecoveryContext, RootFactEventOrigin, build_finance_manual_review_candidate, finance_manual_review_recovery_actions
+from domains.anomalies.recovery_context import bind_recovery_actions
+from domains.anomalies.registry import (
+    AnomalyDefinition,
+    AnomalyDefinitionRegistry,
+    CurrentAlertProjection,
+    RecoveryActionDescriptor,
+    auto_resolution_blocked,
+    reduce_current_alert,
+)
+from domains.anomalies.root_fact_projection import (
+    FinanceAnomalyOccurrence,
+    FinanceManualReviewRootFact,
+    RecoveryActionLink,
+    RecoveryContext,
+    RootFactEventOrigin,
+    build_finance_manual_review_candidate,
+    finance_manual_review_recovery_actions,
+)
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, ExpectedVersion
@@ -107,7 +125,12 @@ class RootFactProjectionApplication:
             previous = self._repository.load_current(candidate.alert_fingerprint, for_update=True)
             _validate_source_version(previous, root_fact, correlation_id)
             resulting = reduce_current_alert(self._registry, candidate.desired, previous)
-            self._repository.save_current(previous, resulting, candidate)
+            stored_candidate = _rulebook_guarded_candidate(
+                self._registry,
+                previous,
+                candidate,
+            )
+            self._repository.save_current(previous, resulting, stored_candidate)
             if candidate.occurrence is not None:
                 self._repository.append_occurrence(candidate.occurrence)
             receipt = _projection_receipt(root_fact, candidate, resulting)
@@ -115,6 +138,22 @@ class RootFactProjectionApplication:
             self._repository.save_checkpoint(root_fact)
             unit_of_work.commit()
             return receipt
+
+
+def _rulebook_guarded_candidate(registry, previous, candidate):
+    if previous is None or not auto_resolution_blocked(
+        registry,
+        previous,
+        candidate.desired,
+    ):
+        return candidate
+    snapshot = dict(candidate.root_fact_snapshot)
+    snapshot["root_condition_active"] = True
+    reason_codes = tuple(str(item) for item in snapshot.get("reason_codes", ()))
+    snapshot["reason_codes"] = list(
+        dict.fromkeys(reason_codes + ("auto_resolution_rulebook_contract_missing",))
+    )
+    return replace(candidate, root_fact_snapshot=snapshot)
 
 
 def _validate_replay(replay, candidate, correlation_id) -> None:
@@ -145,6 +184,10 @@ def _recovery_actions(
 ) -> tuple[RecoveryActionLink, ...]:
     projection = stored.projection
     if definition.code == "CLIENTREFUND-001":
+        bindings = _refund_return_bindings(stored.root_fact_snapshot)
+        if bindings is None:
+            return ()
+        row_id, _, _ = bindings
         return (
             RecoveryActionLink(
                 action_key="classify_client_refund_return",
@@ -156,7 +199,7 @@ def _recovery_actions(
                 form_schema_key="finance_import.correction.v1",
                 source_binding_keys=("finance_import_row_identity", "source_version"),
                 source_bindings={
-                    "finance_import_row_identity": projection.source_identity,
+                    "finance_import_row_identity": row_id,
                     "source_version": projection.source_version,
                 },
                 required_operator_inputs=("evidence", "reason", "refund_ledger_entry_identity", "target_obligation_identities"),
@@ -172,63 +215,43 @@ def _recovery_actions(
     return _bound_registry_actions(definition.available_actions, stored.root_fact_snapshot)
 
 
+def _refund_return_row_id(snapshot: dict[str, object]) -> str | None:
+    bindings = _refund_return_bindings(snapshot)
+    return None if bindings is None else bindings[0]
+
+
+def _refund_return_bindings(
+    snapshot: dict[str, object],
+) -> tuple[str, int, tuple[str, ...]] | None:
+    row_id = snapshot.get("finance_import_row_id")
+    ledger_id = snapshot.get("original_refund_ledger_entry_id")
+    obligation_ids = snapshot.get("affected_obligation_identities")
+    if (
+        isinstance(row_id, bool)
+        or not isinstance(row_id, int)
+        or row_id <= 0
+        or isinstance(ledger_id, bool)
+        or not isinstance(ledger_id, int)
+        or ledger_id <= 0
+        or not isinstance(obligation_ids, list)
+        or not obligation_ids
+        or any(
+            not isinstance(identity, str)
+            or not identity.strip()
+            or len(identity) > 191
+            for identity in obligation_ids
+        )
+        or len(set(obligation_ids)) != len(obligation_ids)
+    ):
+        return None
+    return f"finance-import-row:{row_id}", ledger_id, tuple(obligation_ids)
+
+
 def _bound_registry_actions(
     descriptors: tuple[RecoveryActionDescriptor, ...],
     root_fact_snapshot: dict[str, object],
 ) -> tuple[RecoveryActionLink, ...]:
-    bindings = root_fact_snapshot.get("recovery_bindings")
-    if not isinstance(bindings, dict):
-        return ()
-    aggregate_versions = _aggregate_versions(bindings, root_fact_snapshot)
-    if not aggregate_versions:
-        return ()
-    actions: list[RecoveryActionLink] = []
-    for descriptor in descriptors:
-        action = _assemble_registry_action(
-            descriptor,
-            bindings,
-            aggregate_versions,
-        )
-        if action is not None:
-            actions.append(action)
-    return tuple(actions)
-
-
-def _aggregate_versions(
-    bindings: dict[object, object],
-    root_fact_snapshot: dict[str, object],
-) -> dict[str, int]:
-    versions = {
-        str(key): value
-        for key, value in bindings.items()
-        if isinstance(key, str)
-        and key.endswith("_version")
-        and not isinstance(value, bool)
-        and isinstance(value, int)
-        and value >= 0
-    }
-    source_version = root_fact_snapshot.get("source_version")
-    if isinstance(source_version, int) and not isinstance(source_version, bool) and source_version >= 0:
-        versions.setdefault("source_version", source_version)
-    return versions
-
-
-def _assemble_registry_action(
-    descriptor: RecoveryActionDescriptor,
-    bindings: dict[object, object],
-    aggregate_versions: dict[str, int],
-) -> RecoveryActionLink | None:
-    if not all(isinstance(key, str) for key in bindings):
-        return None
-    try:
-        facts = RecoveryContextFacts(
-            descriptor.action_key,
-            {str(key): value for key, value in bindings.items()},
-            aggregate_versions,
-        )
-    except (TypeError, ValueError):
-        return None
-    return assemble_recovery_action(descriptor, facts)
+    return bind_recovery_actions(descriptors, root_fact_snapshot)
 
 
 def _projection_error(correlation_id, code, *, current_version=None) -> RootFactProjectionError:

@@ -24,6 +24,7 @@ export const AnomalyEvidenceFieldSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...evidenceBase, kind: z.literal('code'), value: codeSchema }),
   z.strictObject({ ...evidenceBase, kind: z.literal('code_list'), value: stringListSchema }),
   z.strictObject({ ...evidenceBase, kind: z.literal('identity_list'), value: stringListSchema }),
+  z.strictObject({ ...evidenceBase, kind: z.literal('detail_list'), value: stringListSchema }),
 ]);
 export type AnomalyEvidenceField = z.infer<typeof AnomalyEvidenceFieldSchema>;
 

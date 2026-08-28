@@ -1,4 +1,7 @@
-"""Typed HTTP contracts for Staff Payout Reconciliation."""
+"""
+File: staff_payout.py
+Description: 定義 Staff Payables 付款與追償的嚴格 HTTP 契約。
+"""
 
 from __future__ import annotations
 
@@ -64,6 +67,7 @@ class ReversalApplyBody(StaffPayoutApplyFields):
 class StaffOverpaymentRecoveryPreviewBody(_StrictModel):
     recovery_identity: str = Field(min_length=1, max_length=191)
     finance_import_row_id: int = Field(gt=0)
+    evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
 
 
 class StaffOverpaymentRecoveryApplyBody(StaffOverpaymentRecoveryPreviewBody):
@@ -71,6 +75,7 @@ class StaffOverpaymentRecoveryApplyBody(StaffOverpaymentRecoveryPreviewBody):
     expected_staff_payables_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(min_length=1, max_length=500)
+    evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
 
 
 class StaffOverpaymentRecoveryMatchedPreviewBody(StaffOverpaymentRecoveryPreviewBody):
@@ -83,11 +88,19 @@ class StaffOverpaymentRecoveryMatchedApplyBody(StaffOverpaymentRecoveryMatchedPr
     expected_staff_payables_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(min_length=1, max_length=500)
+    evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
 
 
 class StaffOverpaymentRecoveryMatchingPreviewBody(_StrictModel):
     recovery_identity: str = Field(min_length=1, max_length=191)
     finance_import_row_id: int = Field(gt=0)
+    evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
+
+    def model_dump(self, *args, **kwargs):
+        payload = super().model_dump(*args, **kwargs)
+        if self.evidence_reference is None:
+            payload.pop("evidence_reference", None)
+        return payload
 
 
 class StaffOverpaymentRecoveryMatchingApplyBody(
@@ -97,11 +110,13 @@ class StaffOverpaymentRecoveryMatchingApplyBody(
     expected_staff_payables_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(min_length=1, max_length=500)
+    evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
 
 
 class StaffOverpaymentRecoveryAdjustmentPreviewBody(_StrictModel):
     recovery_identity: str = Field(min_length=1, max_length=191)
     adjustment_amount_ntd: int = Field(gt=0)
+    evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
 
 
 class StaffOverpaymentRecoveryAdjustmentApplyBody(
@@ -111,6 +126,7 @@ class StaffOverpaymentRecoveryAdjustmentApplyBody(
     expected_staff_payables_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(min_length=1, max_length=500)
+    evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
 
 
 class StaffOverpaymentRecoveryPreviewView(_StrictModel):
@@ -131,6 +147,7 @@ class StaffOverpaymentRecoveryReceiptView(_StrictModel):
     remaining_after_ntd: int = Field(ge=0)
     resulting_status: str
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evidence_reference: str | None = None
 
 
 class StaffOverpaymentRecoveryAdjustmentPreviewView(_StrictModel):
@@ -174,6 +191,26 @@ class StaffOverpaymentRecoveryMatchingReceiptView(_StrictModel):
     finance_import_row_identity: str
     recovery_version: int = Field(ge=0)
     staff_payables_version: int = Field(ge=0)
+    evidence_reference: str | None = None
+
+
+class StaffOverpaymentRecoveryMatchingQueryView(_StrictModel):
+    matching_identity: str
+    matching_version: int = Field(ge=1)
+    finance_import_row_identity: str
+
+
+class StaffOverpaymentRecoveryQueryView(_StrictModel):
+    staff_id: int = Field(gt=0)
+    recovery_identity: str
+    remaining_amount_ntd: int = Field(ge=0)
+    status: str
+    recovery_version: int = Field(ge=0)
+    staff_payables_version: int = Field(ge=0)
+    source_bank_fact_references: list[str]
+    source_payout_event_references: list[str]
+    source_obligation_references: list[str]
+    matchings: list[StaffOverpaymentRecoveryMatchingQueryView]
 
 
 class StaffPayableObligationView(_StrictModel):
@@ -320,4 +357,6 @@ __all__ = [
     "StaffOverpaymentRecoveryPreviewBody",
     "StaffOverpaymentRecoveryPreviewView",
     "StaffOverpaymentRecoveryReceiptView",
+    "StaffOverpaymentRecoveryMatchingQueryView",
+    "StaffOverpaymentRecoveryQueryView",
 ]

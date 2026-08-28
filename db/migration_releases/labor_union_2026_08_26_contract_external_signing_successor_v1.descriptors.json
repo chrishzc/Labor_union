@@ -1,0 +1,599 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-contract-external-signing-successor-2026-08-26-v1",
+  "descriptors": {
+    "1005_contract_external_signing_successor.sql": {
+      "tables": {
+        "contract_external_signing_sessions": [
+          "id",
+          "external_signing_session_id",
+          "case_no",
+          "matching_plan_id",
+          "current_document_set_sha256",
+          "commitment_id",
+          "client_reminder_task_id",
+          "session_state",
+          "aggregate_version",
+          "active_case_key",
+          "activated_by_actor",
+          "created_at_utc",
+          "updated_at_utc"
+        ],
+        "contract_external_completion_reports": [
+          "id",
+          "report_id",
+          "external_signing_session_id",
+          "case_no",
+          "report_scope",
+          "matching_segment_id",
+          "document_version_id",
+          "commitment_id",
+          "reporter_subject_type",
+          "reporter_subject_reference",
+          "source_kind",
+          "source_event_identity",
+          "source_payload_sha256",
+          "line_inbox_event_id",
+          "verified_line_user_id",
+          "verified_binding_version",
+          "manual_confirmation_method",
+          "manual_reason",
+          "manual_evidence_reference",
+          "manual_evidence_sha256",
+          "target_identity",
+          "idempotency_key",
+          "command_fingerprint",
+          "expected_status_version",
+          "resulting_status_version",
+          "occurred_at_utc",
+          "actor_ref",
+          "created_at_utc"
+        ],
+        "contract_final_pdf_recovery_tasks": [
+          "id",
+          "recovery_task_id",
+          "external_signing_session_id",
+          "client_report_id",
+          "task_state",
+          "aggregate_version",
+          "idempotency_key",
+          "command_fingerprint",
+          "created_by_actor",
+          "created_at_utc",
+          "fulfilled_at_utc",
+          "updated_at_utc"
+        ],
+        "contract_final_document_versions": [
+          "id",
+          "final_document_id",
+          "external_signing_session_id",
+          "case_no",
+          "source_document_set_sha256",
+          "controlled_file_object_id",
+          "version_number",
+          "contract_identity",
+          "content_type",
+          "size_bytes",
+          "content_sha256",
+          "created_by_actor",
+          "created_at_utc"
+        ],
+        "contract_external_signing_receipts": [
+          "id",
+          "receipt_id",
+          "external_signing_session_id",
+          "command_type",
+          "schema_version",
+          "idempotency_key",
+          "command_fingerprint",
+          "preview_fingerprint",
+          "expected_status_version",
+          "result_status_version",
+          "completion_report_id",
+          "final_document_version_id",
+          "result_snapshot",
+          "outcome_state",
+          "actor_ref",
+          "correlation_id",
+          "applied_at_utc",
+          "created_at_utc"
+        ]
+      },
+      "indexes": {
+        "controlled_file_staging_objects.idx_controlled_file_staging_owner": {
+          "non_unique": 1,
+          "columns": [
+            "owner_type",
+            "subject_reference",
+            "purpose",
+            "staging_state",
+            "id"
+          ]
+        },
+        "controlled_file_objects.uq_controlled_file_version_identity": {
+          "non_unique": 0,
+          "columns": [
+            "id",
+            "owner_type",
+            "subject_reference",
+            "object_key",
+            "purpose",
+            "version_number"
+          ]
+        },
+        "controlled_file_objects.idx_controlled_file_object_owner": {
+          "non_unique": 1,
+          "columns": [
+            "owner_type",
+            "subject_reference",
+            "purpose",
+            "id"
+          ]
+        },
+        "contract_external_signing_sessions.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "contract_external_signing_sessions.uq_contract_external_session_id": {
+          "non_unique": 0,
+          "columns": [
+            "external_signing_session_id"
+          ]
+        },
+        "contract_external_signing_sessions.uq_contract_external_active_case": {
+          "non_unique": 0,
+          "columns": [
+            "active_case_key"
+          ]
+        },
+        "contract_external_signing_sessions.idx_contract_external_session_case": {
+          "non_unique": 1,
+          "columns": [
+            "case_no",
+            "id"
+          ]
+        },
+        "contract_external_signing_sessions.idx_contract_external_session_plan": {
+          "non_unique": 1,
+          "columns": [
+            "matching_plan_id",
+            "id"
+          ]
+        },
+        "contract_external_signing_sessions.idx_contract_external_session_state": {
+          "non_unique": 1,
+          "columns": [
+            "session_state",
+            "updated_at_utc",
+            "id"
+          ]
+        },
+        "contract_external_completion_reports.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "contract_external_completion_reports.uq_contract_external_report_id": {
+          "non_unique": 0,
+          "columns": [
+            "report_id"
+          ]
+        },
+        "contract_external_completion_reports.uq_contract_external_report_source": {
+          "non_unique": 0,
+          "columns": [
+            "source_event_identity"
+          ]
+        },
+        "contract_external_completion_reports.uq_contract_external_report_idempotency": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "contract_external_completion_reports.uq_contract_external_report_target": {
+          "non_unique": 0,
+          "columns": [
+            "external_signing_session_id",
+            "target_identity"
+          ]
+        },
+        "contract_external_completion_reports.idx_contract_external_report_case": {
+          "non_unique": 1,
+          "columns": [
+            "case_no",
+            "id"
+          ]
+        },
+        "contract_external_completion_reports.idx_contract_external_report_document": {
+          "non_unique": 1,
+          "columns": [
+            "document_version_id",
+            "id"
+          ]
+        },
+        "contract_external_completion_reports.idx_contract_external_report_segment": {
+          "non_unique": 1,
+          "columns": [
+            "matching_segment_id",
+            "id"
+          ]
+        },
+        "contract_final_pdf_recovery_tasks.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "contract_final_pdf_recovery_tasks.uq_contract_final_recovery_id": {
+          "non_unique": 0,
+          "columns": [
+            "recovery_task_id"
+          ]
+        },
+        "contract_final_pdf_recovery_tasks.uq_contract_final_recovery_report": {
+          "non_unique": 0,
+          "columns": [
+            "client_report_id"
+          ]
+        },
+        "contract_final_pdf_recovery_tasks.uq_contract_final_recovery_idempotency": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "contract_final_pdf_recovery_tasks.idx_contract_final_recovery_session": {
+          "non_unique": 1,
+          "columns": [
+            "external_signing_session_id",
+            "id"
+          ]
+        },
+        "contract_final_pdf_recovery_tasks.idx_contract_final_recovery_state": {
+          "non_unique": 1,
+          "columns": [
+            "task_state",
+            "created_at_utc",
+            "id"
+          ]
+        },
+        "contract_final_document_versions.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "contract_final_document_versions.uq_contract_final_document_id": {
+          "non_unique": 0,
+          "columns": [
+            "final_document_id"
+          ]
+        },
+        "contract_final_document_versions.uq_contract_final_document_session": {
+          "non_unique": 0,
+          "columns": [
+            "external_signing_session_id"
+          ]
+        },
+        "contract_final_document_versions.uq_contract_final_document_object": {
+          "non_unique": 0,
+          "columns": [
+            "controlled_file_object_id"
+          ]
+        },
+        "contract_final_document_versions.uq_contract_final_document_case_version": {
+          "non_unique": 0,
+          "columns": [
+            "case_no",
+            "version_number"
+          ]
+        },
+        "contract_final_document_versions.idx_contract_final_document_case": {
+          "non_unique": 1,
+          "columns": [
+            "case_no",
+            "id"
+          ]
+        },
+        "contract_external_signing_receipts.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "contract_external_signing_receipts.uq_contract_external_receipt_id": {
+          "non_unique": 0,
+          "columns": [
+            "receipt_id"
+          ]
+        },
+        "contract_external_signing_receipts.uq_contract_external_receipt_idempotency": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "contract_external_signing_receipts.idx_contract_external_receipt_session": {
+          "non_unique": 1,
+          "columns": [
+            "external_signing_session_id",
+            "id"
+          ]
+        },
+        "contract_external_signing_receipts.idx_contract_external_receipt_report": {
+          "non_unique": 1,
+          "columns": [
+            "completion_report_id",
+            "id"
+          ]
+        },
+        "contract_external_signing_receipts.idx_contract_external_receipt_document": {
+          "non_unique": 1,
+          "columns": [
+            "final_document_version_id",
+            "id"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "controlled_file_objects.fk_controlled_file_object_supersedes": {
+          "columns": [
+            "supersedes_object_id",
+            "owner_type",
+            "subject_reference",
+            "object_key",
+            "purpose",
+            "supersedes_version_number"
+          ],
+          "referenced_table": "controlled_file_objects",
+          "referenced_columns": [
+            "id",
+            "owner_type",
+            "subject_reference",
+            "object_key",
+            "purpose",
+            "version_number"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_signing_sessions.fk_contract_external_session_case": {
+          "columns": [
+            "case_no"
+          ],
+          "referenced_table": "orders",
+          "referenced_columns": [
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_signing_sessions.fk_contract_external_session_plan": {
+          "columns": [
+            "matching_plan_id"
+          ],
+          "referenced_table": "caregiver_matching_plans",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_signing_sessions.fk_contract_external_session_commitment": {
+          "columns": [
+            "commitment_id"
+          ],
+          "referenced_table": "precontract_service_commitments",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_signing_sessions.fk_contract_external_session_reminder": {
+          "columns": [
+            "client_reminder_task_id"
+          ],
+          "referenced_table": "line_delivery_tasks",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_completion_reports.fk_contract_external_report_session": {
+          "columns": [
+            "external_signing_session_id"
+          ],
+          "referenced_table": "contract_external_signing_sessions",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_completion_reports.fk_contract_external_report_case": {
+          "columns": [
+            "case_no"
+          ],
+          "referenced_table": "orders",
+          "referenced_columns": [
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_completion_reports.fk_contract_external_report_segment": {
+          "columns": [
+            "matching_segment_id"
+          ],
+          "referenced_table": "caregiver_matching_plan_segments",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_completion_reports.fk_contract_external_report_document": {
+          "columns": [
+            "document_version_id"
+          ],
+          "referenced_table": "contract_document_versions",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_completion_reports.fk_contract_external_report_commitment": {
+          "columns": [
+            "commitment_id"
+          ],
+          "referenced_table": "precontract_service_commitments",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_completion_reports.fk_contract_external_report_inbox": {
+          "columns": [
+            "line_inbox_event_id"
+          ],
+          "referenced_table": "line_inbox_events",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_completion_reports.fk_contract_external_report_binding": {
+          "columns": [
+            "verified_line_user_id"
+          ],
+          "referenced_table": "line_identity_bindings",
+          "referenced_columns": [
+            "line_user_id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_final_pdf_recovery_tasks.fk_contract_final_recovery_session": {
+          "columns": [
+            "external_signing_session_id"
+          ],
+          "referenced_table": "contract_external_signing_sessions",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_final_pdf_recovery_tasks.fk_contract_final_recovery_report": {
+          "columns": [
+            "client_report_id"
+          ],
+          "referenced_table": "contract_external_completion_reports",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_final_document_versions.fk_contract_final_document_session": {
+          "columns": [
+            "external_signing_session_id"
+          ],
+          "referenced_table": "contract_external_signing_sessions",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_final_document_versions.fk_contract_final_document_case": {
+          "columns": [
+            "case_no"
+          ],
+          "referenced_table": "orders",
+          "referenced_columns": [
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_final_document_versions.fk_contract_final_document_object": {
+          "columns": [
+            "controlled_file_object_id"
+          ],
+          "referenced_table": "controlled_file_objects",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_signing_receipts.fk_contract_external_receipt_session": {
+          "columns": [
+            "external_signing_session_id"
+          ],
+          "referenced_table": "contract_external_signing_sessions",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_signing_receipts.fk_contract_external_receipt_report": {
+          "columns": [
+            "completion_report_id"
+          ],
+          "referenced_table": "contract_external_completion_reports",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "contract_external_signing_receipts.fk_contract_external_receipt_document": {
+          "columns": [
+            "final_document_version_id"
+          ],
+          "referenced_table": "contract_final_document_versions",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "contract_external_signing_sessions.chk_contract_external_session_identity": "and(atom(regexp_like(external_signing_session_id,'^ces_[0-9a-f]{32}$')),atom(regexp_like(current_document_set_sha256,'^[0-9a-f]{64}$')),atom(char_length(trim(activated_by_actor))>0))",
+        "contract_external_signing_sessions.chk_contract_external_session_state": "or(and(atom(session_state='staff_reporting'),atom(commitment_idisnull),atom(client_reminder_task_idisnull)),and(atom(session_statein('staff_reports_complete','client_reported_final_pdf_pending','completed')),atom(commitment_idisnotnull),atom(client_reminder_task_idisnotnull)),atom(session_state='superseded'))",
+        "contract_external_completion_reports.chk_contract_external_report_identity": "and(atom(regexp_like(report_id,'^cer_[0-9a-f]{32}$')),atom(regexp_like(source_payload_sha256,'^[0-9a-f]{64}$')),atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(idempotency_key,'^[a-z0-9][a-z0-9._:-]{0,190}$')),atom(char_length(trim(source_event_identity))>0),atom(char_length(trim(reporter_subject_reference))>0),atom(char_length(trim(actor_ref))>0),atom(resulting_status_version=expected_status_version+1))",
+        "contract_external_completion_reports.chk_contract_external_report_target": "or(and(atom(report_scope='staff'),atom(matching_segment_idisnotnull),atom(commitment_idisnull),atom(reporter_subject_type='staff')),and(atom(report_scope='client'),atom(matching_segment_idisnull),atom(commitment_idisnotnull),atom(reporter_subject_type='customer')))",
+        "contract_external_completion_reports.chk_contract_external_report_source": "or(and(atom(source_kind='verified_line'),atom(line_inbox_event_idisnotnull),atom(verified_line_user_idisnotnull),atom(verified_binding_versionisnotnull),atom(manual_confirmation_methodisnull),atom(manual_reasonisnull),atom(manual_evidence_referenceisnull),atom(manual_evidence_sha256isnull)),and(atom(source_kind='manual_attested'),atom(line_inbox_event_idisnull),atom(verified_line_user_idisnull),atom(verified_binding_versionisnull),atom(manual_confirmation_methodisnotnull),atom(manual_reasonisnotnull),atom(manual_evidence_referenceisnotnull),atom(manual_evidence_sha256isnotnull),atom(char_length(trim(manual_confirmation_method))>0),atom(char_length(trim(manual_reason))>0),atom(char_length(trim(manual_evidence_reference))>0),atom(regexp_like(manual_evidence_sha256,'^[0-9a-f]{64}$'))))",
+        "contract_final_pdf_recovery_tasks.chk_contract_final_recovery_identity": "and(atom(regexp_like(recovery_task_id,'^cfrt_[0-9a-f]{32}$')),atom(regexp_like(idempotency_key,'^[a-z0-9][a-z0-9._:-]{0,190}$')),atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),atom(char_length(trim(created_by_actor))>0))",
+        "contract_final_pdf_recovery_tasks.chk_contract_final_recovery_state": "or(and(atom(task_state='fulfilled'),atom(fulfilled_at_utcisnotnull)),and(atom(task_statein('pending','superseded')),atom(fulfilled_at_utcisnull)))",
+        "contract_final_document_versions.chk_contract_final_document_identity": "and(atom(regexp_like(final_document_id,'^cfd_[0-9a-f]{32}$')),atom(regexp_like(source_document_set_sha256,'^[0-9a-f]{64}$')),atom(regexp_like(content_sha256,'^[0-9a-f]{64}$')),atom(char_length(trim(contract_identity))>0),atom(char_length(trim(created_by_actor))>0),atom(version_number>0),atom(size_bytes>0))",
+        "contract_external_signing_receipts.chk_contract_external_receipt_identity": "and(atom(regexp_like(receipt_id,'^cesr_[0-9a-f]{32}$')),atom(regexp_like(idempotency_key,'^[a-z0-9][a-z0-9._:-]{0,190}$')),atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),atom(char_length(trim(actor_ref))>0),atom(char_length(trim(correlation_id))>0),atom(result_status_version=expected_status_version+1))",
+        "contract_external_signing_receipts.chk_contract_external_receipt_target": "or(and(atom(command_typein('record_staff_report','record_client_report')),atom(completion_report_idisnotnull),atom(final_document_version_idisnull),atom(preview_fingerprintisnull),atom(outcome_state='recorded')),and(atom(command_type='apply_final_signed_contract'),atom(completion_report_idisnull),atom(final_document_version_idisnotnull),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$')),atom(outcome_state='completed')))",
+        "contract_external_signing_receipts.chk_contract_external_receipt_result": "and(atom(json_type(result_snapshot)='OBJECT'),atom(json_length(result_snapshot)>0))",
+        "controlled_file_staging_objects.chk_controlled_file_staging_owner_purpose": "or(and(atom(owner_type='contract_signing'),atom(purposein('unsigned_contract','final_signed_contract'))),and(atom(owner_type='scheduling'),atom(purposein('service_date_confirmation','baby_log_photo','meal_photo'))),and(atom(owner_type='orders'),atom(purpose='order_notice')),and(atom(owner_type='staff'),atom(purposein('staff_resume','staff_certificate','staff_health_exam'))),and(atom(owner_type='line_integration'),atom(purpose='rich_menu_background')))",
+        "controlled_file_objects.chk_controlled_file_object_owner_purpose": "or(and(atom(owner_type='contract_signing'),atom(purposein('unsigned_contract','final_signed_contract'))),and(atom(owner_type='scheduling'),atom(purposein('service_date_confirmation','baby_log_photo','meal_photo'))),and(atom(owner_type='orders'),atom(purpose='order_notice')),and(atom(owner_type='staff'),atom(purposein('staff_resume','staff_certificate','staff_health_exam'))),and(atom(owner_type='line_integration'),atom(purpose='rich_menu_background')))"
+      },
+      "triggers": [
+        "trg_contract_external_reports_before_update",
+        "trg_contract_external_reports_before_delete",
+        "trg_contract_final_documents_before_update",
+        "trg_contract_final_documents_before_delete",
+        "trg_contract_external_receipts_before_update",
+        "trg_contract_external_receipts_before_delete"
+      ]
+    }
+  }
+}

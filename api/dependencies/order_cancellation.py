@@ -1,4 +1,6 @@
-"""Per-request construction for the Orders Cancellation workflow."""
+"""File: order_cancellation.py
+Description: 建立訂單取消查詢、receipt 讀取及 Preview／Apply application。
+"""
 
 from __future__ import annotations
 
@@ -9,6 +11,7 @@ from typing import Protocol
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.mysql_adapter import get_connection
 from shared_kernel.clock import SystemBusinessClock
+from shared_kernel.identities import IdempotencyKey
 from subsystems.orders.cancellation_workflow import (
     CancellationWorkflowFacts,
     CancellationWorkflowRepository,
@@ -40,6 +43,15 @@ class OrderCancellationApplication:
 
     def apply(self, request):
         return self.workflow.apply(request)
+
+    def query_receipt(self, case_no: str, idempotency_key: str):
+        stored = self.repository.find_receipt(
+            IdempotencyKey(idempotency_key),
+            for_update=False,
+        )
+        if stored is None or stored.receipt.case_no != case_no:
+            raise ValueError("order_cancellation_receipt_not_found")
+        return stored.receipt
 
 
 @dataclass(frozen=True, slots=True)

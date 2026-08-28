@@ -1,0 +1,55 @@
+{
+  "contract": "labor-union-hob-route-a-root-fixture/v1",
+  "scenario_id": "HOB-F04-ROUTE-A-001",
+  "revision": 1,
+  "pii_classification": "synthetic",
+  "case_source": {
+    "case_no": "115960401",
+    "client_name": "Task96 合成客戶",
+    "planned_start_date": "2026-07-01",
+    "service_days": 5,
+    "service_hours_per_day": 8,
+    "service_time": {
+      "start_time": "09:00:00",
+      "end_time": "17:00:00",
+      "end_day_offset": 0
+    }
+  },
+  "staff_source": {
+    "identity": "A123456789",
+    "name": "Task96 合成月嫂",
+    "bank_code": "812",
+    "branch_code": "0001",
+    "account_no": "0096000000000001"
+  },
+  "official_service_dates": [
+    "2026-07-01",
+    "2026-07-02",
+    "2026-07-03",
+    "2026-07-06",
+    "2026-07-07"
+  ],
+  "external_bank_facts": [
+    {
+      "identity": "TASK96-DEP-001",
+      "direction": "incoming",
+      "amount_ntd": 12000,
+      "transaction_date": "2026-06-05"
+    },
+    {
+      "identity": "TASK96-PAYOUT-001",
+      "direction": "outgoing",
+      "amount_ntd": 12000,
+      "transaction_date": "2026-07-15",
+      "counterparty_account": "0096000000000001"
+    }
+  ],
+  "forbidden_derived_roots": [
+    "orders completed status",
+    "historical completion alert status",
+    "matching or assignment receipt",
+    "client ledger allocation",
+    "staff payout event or allocation",
+    "durable job or outbox row"
+  ]
+}

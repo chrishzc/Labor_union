@@ -117,6 +117,25 @@ commitment_ready → client_draft_generated → client_contract_sent
   有效 commitment 的精確服務日判斷，不要求先建立 execution schedule。
 - 服務中仍須 actual start、有效 execution schedule、訂金與契約完成；不得只看 Orders label。
 
+### 4.3 服務中代班的文件例外（2026-08-27 人工裁決）
+
+服務中已有至少一筆 assignment-owned actual service fact 時，代班屬 Scheduling 的受影響日期
+substitution，不開啟新的整案 Contract Signing round：
+
+- 正常代班不要求代班月嫂獨立服務契約或簽回；客戶不需要追加確認或簽署變更文件。既有有效
+  commitment、客戶契約與不受影響日期的文件／簽回仍是 current facts，不能因代班而被
+  supersede 或重建。
+- 代班月嫂 identity、受影響服務日、原／新 assignment 與 Payroll impact 由 Scheduling／Payroll
+  的 substitution lineage 擁有。Contract Signing 不得把「代班無新簽回」投影成 contract blocker，
+  也不得要求 client completion report 才能讓 substitution、排班 lineage 或薪資成立。
+- 工會人員可選擇追加人工 `substitution_supplement` 文件／證據。它是 optional、可稽核的補充
+  evidence，不是獨立契約、簽回或客戶接受事件；無附件、未上傳或 archive 暫時不可用均不阻擋
+  代班與薪資。若補充文件宣稱改變條款、日期或金額，仍須另經 Orders／Scheduling／Client
+  Finance 的正式 owner command，附件本身不能改寫根事實。
+- 文件選配入口仍須沿用既有 actor、reason、method、digest／版本、Preview／Apply（若為納管
+  文件）與 immutable receipt；不可用口頭勾選或文件存在反推 signed／delivered／customer-
+  accepted。代班本身也不得偽造任何 provider delivery 或簽署事件。
+
 ## 5. Commands、Queries 與 typed views
 
 Commands：
@@ -238,7 +257,11 @@ archive 與 LINE 是 port adapter，不重新判斷狀態機或 commit。
 - legacy 與 validation case number、external event identity、document digest、idempotency key 不得碰撞。
 - migration runner 必須使用 table classification allowlist；禁止對所有 base tables做通用
   `INSERT ... SELECT`，也禁止以關閉 FK 作為正常搬移策略。
-- rebuild／清空任何 validation DB 前仍需逐次明確確認；本規格不授權 DB mutation。
+- 依 2026-08-26 最新人工裁決，本機 DB 驗收皆屬測試版本；名稱通過 `lu_test_*` allowlist 且
+  environment／host／database／credential class 已精確回讀後，可直接建立或重建 disposable DB、寫入
+  去識別代表性測試資料、執行 Query／Preview／Apply、receipt readback 與只清理本次 scenario owned rows，
+  不需逐次請示。這項授權不涵蓋 `union_db`、production、全庫 cleanup、source replacement、`--switch`、
+  未核准 schema／migration 或其他不可逆外部效果。
 
 ## 11. Legacy exit
 
@@ -264,6 +287,9 @@ Domain：
 2. 訂金先核銷時 Orders 為「訂單成立」、契約等待客戶、execution 為零。
 3. 客戶後簽只補剩餘期款，deposit 不重建，contract receipt 唯一。
 4. 訂金＋客戶契約完成後，只有 exact commitment 可轉 execution。
+
+5. 服務中代班不建立新的必需契約／簽回或客戶變更簽署；無 optional substitution supplement
+   仍可完成 Scheduling substitution、排班 lineage 與 Payroll，補充文件若存在則只作 evidence。
 
 Global：每個 UI scenario 具 versioned fixture/expected、command lineage、DB verifier JSON、
 disposable-MySQL pytest、typed API contract、UI 截圖或人工驗收、Repair/Re-observe/Replay receipt；

@@ -1,0 +1,15 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-historical-order-adoption-noop-2026-08-27-v1",
+  "descriptors": {
+    "1008_historical_order_adoption_noop_constraint.sql": {
+      "tables": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {
+        "historical_order_adoption_receipts.chk_historical_order_adoption_shape": "or(and(atom(outcome='unmatched_case'),atom(lifecycle_event_idisnull),atom(expected_versionisnull),atom(resulting_versionisnull)),and(atom(outcome='adopted'),atom(expected_versionisnotnull),atom(case_noisnotnull),or(and(atom(lifecycle_event_idisnull),atom(resulting_version=expected_version)),and(atom(lifecycle_event_idisnotnull),atom(resulting_version=expected_version+1)))),and(atom(outcomein('review_required','current_conflict')),atom(lifecycle_event_idisnull),atom(expected_versionisnotnull),atom(resulting_version=expected_version),atom(case_noisnotnull)))"
+      },
+      "triggers": []
+    }
+  }
+}

@@ -151,7 +151,7 @@ def _project_warning_occurrences(connection, review) -> None:
     )
     evidence = _json_object(review["evidence_snapshot"])
     for warning in warnings:
-        _append_warning_occurrence(
+        append_historical_order_warning_occurrence(
             connection,
             warning,
             str(review["review_identity"]),
@@ -159,7 +159,10 @@ def _project_warning_occurrences(connection, review) -> None:
         )
 
 
-def _append_warning_occurrence(connection, warning, review_identity: str, evidence) -> None:
+def append_historical_order_warning_occurrence(
+    connection, warning, review_identity: str, evidence
+) -> None:
+    """Append one owner-validated historical warning inside the caller's UoW."""
     with connection.cursor() as cursor:
         cursor.execute(
             "INSERT IGNORE INTO import_warning_occurrences "
@@ -266,5 +269,6 @@ def _mysql_code(error: OperationalError) -> int:
 
 __all__ = [
     "HistoricalOrderAdoptionOutboxResult",
+    "append_historical_order_warning_occurrence",
     "consume_historical_order_adoption_review_events",
 ]

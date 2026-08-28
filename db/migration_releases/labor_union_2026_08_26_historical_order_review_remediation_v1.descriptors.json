@@ -1,0 +1,52 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-historical-order-review-remediation-2026-08-26-v1",
+  "descriptors": {
+    "1006_historical_order_review_remediation.sql": {
+      "tables": {
+        "historical_order_review_remediation_events": ["id", "event_identity", "prior_review_identity", "original_adoption_receipt_id", "replacement_adoption_receipt_id", "disposition", "successor_review_identity", "source_content_digest", "review_fingerprint", "command_fingerprint", "actor", "reason", "evidence_snapshot", "correlation_id", "applied_at"],
+        "historical_order_review_remediation_receipts": ["id", "remediation_receipt_identity", "event_id", "idempotency_key", "command_fingerprint", "preview_fingerprint", "expected_remediation_version", "resulting_remediation_version", "result_snapshot", "actor", "correlation_id", "created_at"],
+        "historical_order_review_remediation_outbox": ["id", "event_id", "remediation_receipt_id", "intent_key", "intent_type", "bounded_snapshot", "published_at", "attempts", "last_error", "created_at"]
+      },
+      "indexes": {
+        "historical_order_review_remediation_events.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "historical_order_review_remediation_events.uq_historical_order_review_remediation_event": {"non_unique": 0, "columns": ["event_identity"]},
+        "historical_order_review_remediation_events.uq_historical_order_review_remediation_prior": {"non_unique": 0, "columns": ["prior_review_identity"]},
+        "historical_order_review_remediation_events.uq_historical_order_review_remediation_replacement": {"non_unique": 0, "columns": ["replacement_adoption_receipt_id"]},
+        "historical_order_review_remediation_events.idx_historical_order_review_remediation_successor": {"non_unique": 1, "columns": ["successor_review_identity", "id"]},
+        "historical_order_review_remediation_receipts.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "historical_order_review_remediation_receipts.uq_historical_order_review_remediation_receipt": {"non_unique": 0, "columns": ["remediation_receipt_identity"]},
+        "historical_order_review_remediation_receipts.uq_historical_order_review_remediation_receipt_event": {"non_unique": 0, "columns": ["event_id"]},
+        "historical_order_review_remediation_receipts.uq_historical_order_review_remediation_receipt_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "historical_order_review_remediation_outbox.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "historical_order_review_remediation_outbox.uq_historical_order_review_remediation_outbox_intent": {"non_unique": 0, "columns": ["intent_key"]},
+        "historical_order_review_remediation_outbox.idx_historical_order_review_remediation_outbox_pending": {"non_unique": 1, "columns": ["published_at", "attempts", "id"]}
+      },
+      "foreign_keys": {
+        "historical_order_review_remediation_events.fk_historical_order_review_remediation_prior": {"columns": ["prior_review_identity"], "referenced_table": "historical_order_adoption_reviews", "referenced_columns": ["review_identity"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "historical_order_review_remediation_events.fk_historical_order_review_remediation_original_receipt": {"columns": ["original_adoption_receipt_id"], "referenced_table": "historical_order_adoption_receipts", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "historical_order_review_remediation_events.fk_historical_order_review_remediation_replacement_receipt": {"columns": ["replacement_adoption_receipt_id"], "referenced_table": "historical_order_adoption_receipts", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "historical_order_review_remediation_events.fk_historical_order_review_remediation_successor": {"columns": ["successor_review_identity"], "referenced_table": "historical_order_adoption_reviews", "referenced_columns": ["review_identity"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "historical_order_review_remediation_receipts.fk_historical_order_review_remediation_receipt_event": {"columns": ["event_id"], "referenced_table": "historical_order_review_remediation_events", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "historical_order_review_remediation_outbox.fk_historical_order_review_remediation_outbox_event": {"columns": ["event_id"], "referenced_table": "historical_order_review_remediation_events", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "historical_order_review_remediation_outbox.fk_historical_order_review_remediation_outbox_receipt": {"columns": ["remediation_receipt_id"], "referenced_table": "historical_order_review_remediation_receipts", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"}
+      },
+      "checks": {
+        "historical_order_review_remediation_events.chk_historical_order_review_remediation_fingerprints": "and(atom(regexp_like(source_content_digest,'^[0-9a-f]{64}$')),atom(regexp_like(review_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')))",
+        "historical_order_review_remediation_events.chk_historical_order_review_remediation_evidence": "atom(json_type(evidence_snapshot)='OBJECT')",
+        "historical_order_review_remediation_events.chk_historical_order_review_remediation_disposition": "or(and(atom(disposition='corrected_source_adopted'),atom(successor_review_identityisnull)),and(atom(disposition='superseded_by_replacement_review'),atom(successor_review_identityisnotnull)))",
+        "historical_order_review_remediation_events.chk_historical_order_review_remediation_replacement": "atom(replacement_adoption_receipt_id<>original_adoption_receipt_id)",
+        "historical_order_review_remediation_receipts.chk_historical_order_review_remediation_receipt_fingerprints": "and(atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$')))",
+        "historical_order_review_remediation_receipts.chk_historical_order_review_remediation_receipt_snapshot": "atom(json_type(result_snapshot)='OBJECT')",
+        "historical_order_review_remediation_receipts.chk_historical_order_review_remediation_receipt_version": "and(atom(expected_remediation_version=0),atom(resulting_remediation_version=1))",
+        "historical_order_review_remediation_outbox.chk_historical_order_review_remediation_outbox_snapshot": "atom(json_type(bounded_snapshot)='OBJECT')"
+      },
+      "triggers": [
+        "trg_historical_order_review_remediation_events_before_update",
+        "trg_historical_order_review_remediation_events_before_delete",
+        "trg_historical_order_review_remediation_receipts_before_update",
+        "trg_historical_order_review_remediation_receipts_before_delete"
+      ]
+    }
+  }
+}

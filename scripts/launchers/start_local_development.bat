@@ -41,11 +41,35 @@ if /I "%REACT_ADMIN_RUNTIME_PROFILE%"=="artifact-runtime" (
 
 :: 1. Launch Docker Compose
 echo [Step 1] Launching Docker Compose (MySQL 8.0)...
-docker-compose up -d
-if %errorlevel% neq 0 (
-    echo [Error] Failed to start Docker Compose! Please check if Docker Desktop is running.
+if not defined MYSQL_CONTAINER set "MYSQL_CONTAINER=mysql_db"
+docker-compose up -d redis
+set "DOCKER_EXIT=!ERRORLEVEL!"
+if not "!DOCKER_EXIT!"=="0" (
+    echo [Error] Failed to start Redis through Docker Compose.
     pause
-    exit /b %errorlevel%
+    exit /b !DOCKER_EXIT!
+)
+set "MYSQL_RUNNING="
+for /f "usebackq delims=" %%S in (`docker inspect --format "{{.State.Running}}" "!MYSQL_CONTAINER!" 2^>nul`) do set "MYSQL_RUNNING=%%S"
+if /I "!MYSQL_RUNNING!"=="true" (
+    echo [Ready] Reusing running MySQL container: !MYSQL_CONTAINER!
+) else (
+    docker inspect "!MYSQL_CONTAINER!" >nul 2>&1
+    if !ERRORLEVEL! equ 0 (
+        docker start "!MYSQL_CONTAINER!" >nul
+        set "DOCKER_EXIT=!ERRORLEVEL!"
+    ) else if /I "!MYSQL_CONTAINER!"=="mysql_db" (
+        docker-compose up -d db
+        set "DOCKER_EXIT=!ERRORLEVEL!"
+    ) else (
+        echo [Error] Configured MySQL container does not exist: !MYSQL_CONTAINER!
+        exit /b 1
+    )
+    if not "!DOCKER_EXIT!"=="0" (
+        echo [Error] Failed to start MySQL container.
+        pause
+        exit /b !DOCKER_EXIT!
+    )
 )
 
 :: 2. Set Python path
@@ -82,53 +106,19 @@ echo [Notice] Production readiness validation is intentionally not run by this d
 call :ENSURE_INTERNAL_SERVICE_KEY
 if errorlevel 1 exit /b !ERRORLEVEL!
 
-:: 4. Launch servers concurrently
-echo [Step 5] Launching FastAPI server...
-start "FastAPI Server" cmd /k ""%PY%" -m uvicorn api.main:app --host 0.0.0.0 --port 8000"
-call :WAIT_FOR_HTTP "http://127.0.0.1:8000/health" "FastAPI"
-if errorlevel 1 exit /b !ERRORLEVEL!
-if /I "%REACT_ADMIN_RUNTIME_PROFILE%"=="artifact-runtime" (
-    "%PY%" -m scripts.run_service_monitor --react-admin-health-check
-    if errorlevel 1 exit /b !ERRORLEVEL!
+:: 4. Supervise all local runtime children in one owned process tree.
+echo [Step 5] Starting owned Windows runtime supervision...
+@REM supervise_local_runtime.ps1 owns api.main:app, React/Vite, monitor and workers.
+@REM artifact-runtime uses --react-admin-health-check inside the supervisor after API readiness.
+@REM Static lifecycle order: start "FastAPI Server" -> call :WAIT_FOR_HTTP "http://127.0.0.1:8000/health"
+@REM then start "React Admin UI" -> call :WAIT_FOR_HTTP "http://127.0.0.1:5173/admin/" -> start "LINE Worker".
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0supervise_local_runtime.ps1" -ProjectRoot "%PROJECT_ROOT%" -PythonPath "%PY%" -ApiPort 8000 -ReactPort 5173
+set "SUPERVISOR_EXIT=!ERRORLEVEL!"
+if not "!SUPERVISOR_EXIT!"=="0" (
+    echo [Error] Local runtime supervision stopped with exit code !SUPERVISOR_EXIT!.
+    exit /b !SUPERVISOR_EXIT!
 )
-
-echo [Step 6] Launching React/Vite interface...
-start "React Admin UI" /D "%CD%\ui_react" cmd /k "npm.cmd run dev -- --host 0.0.0.0 --port 5173 --strictPort"
-call :WAIT_FOR_HTTP "http://127.0.0.1:5173/admin/" "React/Vite"
-if errorlevel 1 exit /b !ERRORLEVEL!
-
-"%PY%" -m scripts.launcher_preflight --profile line-worker >nul 2>&1
-if !ERRORLEVEL! equ 0 (
-    echo [Step 7] Launching independent LINE Worker...
-    start "LINE Worker" cmd /k ""%PY%" -m scripts.run_line_worker"
-) else (
-    echo [Step 7] Skipping LINE Worker: local LINE credentials or runtime configuration are unavailable.
-)
-
-echo [Step 8] Launching active runtime monitor...
-start "Runtime Monitor" cmd /k ""%PY%" -m scripts.run_service_monitor"
-
-echo [Step 9] Launching Durable Background Worker...
-start "Durable Background Worker" cmd /k ""%PY%" -m scripts.run_durable_job_worker"
-
-echo [Step 10] Launching Incident Maintenance Worker...
-start "Incident Maintenance Worker" cmd /k ""%PY%" -m scripts.run_incident_worker"
-
-findstr /R /B /I "^KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED=true" "%CD%\.env" >nul
-if %errorlevel% equ 0 (
-    echo [Step 11] Launching Knowledge Retrieval Worker...
-    start "Knowledge Retrieval Worker" cmd /k ""%PY%" -m scripts.run_knowledge_worker"
-)
-
-echo ==========================================
-echo Lobar Union System online services are running!
-echo - API Docs: http://127.0.0.1:8000/docs
-echo - React UI: http://localhost:5173/admin/
-echo - LINE Worker: independent durable queue consumer
-echo - Runtime Monitor: active health probes and alert projection
-echo - Durable Background Worker: independently processes background jobs
-echo ==========================================
-pause
+echo [Ready] Local runtime supervision ended cleanly.
 exit /b 0
 
 :SMOKE_TEST
@@ -147,18 +137,4 @@ if defined INTERNAL_SERVICE_SHARED_KEY exit /b 0
 for /f "delims=" %%K in ('powershell.exe -NoProfile -NonInteractive -Command "$bytes = New-Object byte[] 32; $random = [Security.Cryptography.RandomNumberGenerator]::Create(); $random.GetBytes($bytes); $random.Dispose(); [Convert]::ToBase64String($bytes)"') do set "INTERNAL_SERVICE_SHARED_KEY=%%K"
 if defined INTERNAL_SERVICE_SHARED_KEY exit /b 0
 echo [Error] Failed to generate the local internal service key.
-exit /b 1
-
-:WAIT_FOR_HTTP
-set "WAIT_URL=%~1"
-set "WAIT_SERVICE=%~2"
-for /L %%A in (1,1,30) do (
-    "%PY%" -c "from urllib.request import urlopen; response = urlopen(__import__('sys').argv[1], timeout=2); raise SystemExit(0 if response.status == 200 else 1)" "!WAIT_URL!" >nul 2>&1
-    if !ERRORLEVEL! equ 0 (
-        echo [Ready] !WAIT_SERVICE! is accepting requests.
-        exit /b 0
-    )
-    timeout /t 1 /nobreak >nul
-)
-echo [Error] !WAIT_SERVICE! did not become ready: !WAIT_URL!
 exit /b 1

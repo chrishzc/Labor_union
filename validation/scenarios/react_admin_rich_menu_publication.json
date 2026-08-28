@@ -15,7 +15,7 @@
   "source_scenario_absence_reason": "no canonical scenario exists",
   "source_refs": [
     "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md#3.5 Subsystem：Rich Menu／Media",
-    "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase4c-line-richmenu-publication-mutation-work-package.md#Phase 4C-RM-H：Rich Menu publication public contract／provider saga hardening"
+    "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md#17. LINE React successor 與 caller adoption 狀態（2026-08-25）"
   ],
   "lineage_mappings": [
     {"source": "formal Rich Menu publication contract", "successor": "typed preview and apply contract", "disposition": "unchanged"},

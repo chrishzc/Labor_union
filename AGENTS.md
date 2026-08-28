@@ -131,18 +131,3 @@ blanket restriction。這項 current 裁決適用於 Phase 3～6 及後續本機
 ## 8. 交付前檢查
 
 確認scope／owner／SSOT／交易與副作用邊界、dirty paths、文件與code可追溯、正確層級測試、`git diff --check`、strict UTF-8、敏感資訊及所有未完成／未授權／live-drift。DB變更另確認release chain、descriptor、fresh、preserve-data與developer acceptance。
-
-## graphify
-
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
-
-When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
-
-Rules:
-- Agents and operators must first run from the project root, then invoke the project-local wrapper `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\graphify.ps1`, followed directly by the Graphify subcommand and arguments; do not insert `--` and do not use bare `graphify`. This process-scoped policy option does not change user or system policy, and the wrapper resolves only `.venv\Scripts\graphify.exe` without changing `PATH`.
-- For codebase questions, first run `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\graphify.ps1 query "<question>"` when graphify-out/graph.json exists. Use `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\graphify.ps1 path "<A>" "<B>"` for relationships and `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\graphify.ps1 explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
-- If `graphify-out/graph.json` is missing or stale, or the project wrapper／`.venv` executable is unavailable, report that state and use authorised source reads. Do not install Graphify, use bare `graphify`, or substitute an inline BFS/NetworkX traversal or any other fallback graph query.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- Do not run `graphify update` for the frozen-base/freshness workflow. Only an explicitly authorised full Base build may refresh its graph evidence.

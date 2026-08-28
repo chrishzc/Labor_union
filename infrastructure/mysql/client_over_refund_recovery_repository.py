@@ -1,8 +1,11 @@
-"""MySQL adapter for canonical-bank collection of refund-overpayment recoveries."""
+"""File: client_over_refund_recovery_repository.py
+Description: 客戶退款超額追償的 MySQL collection、adjustment 與 outbox 持久化。
+"""
 
 from __future__ import annotations
 
 import json
+import hashlib
 from contextlib import contextmanager
 from datetime import date
 from typing import Iterator
@@ -28,6 +31,11 @@ from subsystems.client_finance.over_refund_recovery_matching_workflow import (
     ClientOverRefundRecoveryMatchingReceipt,
     StoredClientOverRefundRecoveryMatchingReceipt,
 )
+from subsystems.client_finance.client_over_refund_recovery_query import (
+    ClientOverRefundRecoveryMatchingQueryFact,
+    ClientOverRefundRecoveryQueryFacts,
+    ClientOverRefundRecoveryQuerySelection,
+)
 
 
 class MySqlClientOverRefundRecoveryRepository:
@@ -42,6 +50,8 @@ class MySqlClientOverRefundRecoveryRepository:
                 (selection.case_no,),
             )
             account = cursor.fetchone()
+            if account is None:
+                raise ValueError("client_over_refund_recovery_owner_unavailable")
             cursor.execute(
                 "SELECT recovery_identity,case_no,amount_due_ntd,status,projection_version "
                 "FROM client_over_refund_recoveries WHERE recovery_identity=%s AND case_no=%s" + suffix,
@@ -66,6 +76,49 @@ class MySqlClientOverRefundRecoveryRepository:
             ),
             0 if account is None else int(account["aggregate_version"]),
             selection.action is ClientOverRefundRecoveryAction.ADJUST,
+        )
+
+    def query_recovery(self, selection: ClientOverRefundRecoveryQuerySelection):
+        """Read the committed owner root and every immutable matching without locking or writes."""
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "SELECT recovery_identity,case_no,finance_import_row_id,amount_due_ntd,status,projection_version "
+                "FROM client_over_refund_recoveries WHERE recovery_identity=%s",
+                (selection.recovery_identity,),
+            )
+            recovery = cursor.fetchone()
+            if recovery is None:
+                return None
+            if str(recovery["case_no"]) != selection.case_no:
+                raise ValueError("client_over_refund_recovery_owner_mismatch")
+            cursor.execute(
+                "SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s",
+                (selection.case_no,),
+            )
+            account = cursor.fetchone()
+            cursor.execute(
+                "SELECT matching_identity,matching_version,finance_import_row_id "
+                "FROM client_over_refund_recovery_matchings "
+                "WHERE recovery_identity=%s AND case_no=%s ORDER BY matching_identity",
+                (selection.recovery_identity, selection.case_no),
+            )
+            matchings = tuple(
+                ClientOverRefundRecoveryMatchingQueryFact(
+                    str(row["matching_identity"]),
+                    int(row["matching_version"]),
+                    _row_reference(row["finance_import_row_id"]),
+                )
+                for row in cursor.fetchall()
+            )
+        return ClientOverRefundRecoveryQueryFacts(
+            case_no=str(recovery["case_no"]),
+            recovery_identity=str(recovery["recovery_identity"]),
+            remaining_amount_ntd=int(recovery["amount_due_ntd"]),
+            status=str(recovery["status"]),
+            recovery_version=int(recovery["projection_version"]),
+            account_version=int(account["aggregate_version"]),
+            source_row_reference=_row_reference(recovery["finance_import_row_id"]),
+            current_matchings=matchings,
         )
 
     def _load_bank_fact(self, cursor, selection, suffix):
@@ -119,6 +172,7 @@ class MySqlClientOverRefundRecoveryRepository:
             payload["recovery_identity"], int(payload["account_version"]),
             int(payload["recovery_version"]), int(payload["remaining_after_ntd"]),
             payload["resulting_status"], PreviewFingerprint(payload["preview_fingerprint"]),
+            payload.get("evidence_reference"),
         )
         return StoredClientOverRefundRecoveryReceipt(PreviewFingerprint(row["command_fingerprint"]), receipt)
 
@@ -176,7 +230,7 @@ class MySqlClientOverRefundRecoveryRepository:
             payload["matching_identity"], int(payload["matching_version"]),
             payload["recovery_identity"], payload["finance_import_row_identity"],
             int(payload["recovery_version"]), int(payload["account_version"]),
-            PreviewFingerprint(payload["preview_fingerprint"]),
+            PreviewFingerprint(payload["preview_fingerprint"]), payload.get("evidence_reference"),
         )
         return StoredClientOverRefundRecoveryMatchingReceipt(
             PreviewFingerprint(row["command_fingerprint"]), receipt)
@@ -188,10 +242,10 @@ class MySqlClientOverRefundRecoveryRepository:
             cursor.execute(
                 "INSERT INTO client_over_refund_recovery_matchings "
                 "(matching_identity,case_no,recovery_identity,finance_import_row_id,recovery_version,account_version,"
-                "matching_version,actor,reason,idempotency_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "matching_version,actor,reason,evidence_reference,idempotency_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (receipt.matching_identity, candidate.case_no, candidate.recovery_identity, row_id,
                  candidate.recovery_version, candidate.account_version, receipt.matching_version,
-                 request.actor.actor_id, request.reason, request.idempotency_key.value),
+                 request.actor.actor_id, request.reason, request.evidence_reference or "", request.idempotency_key.value),
             )
             snapshot = _matching_receipt_payload(receipt)
             cursor.execute(
@@ -247,10 +301,10 @@ class MySqlClientOverRefundRecoveryRepository:
             cursor.execute(
                 "INSERT INTO client_over_refund_recovery_events "
                 "(recovery_identity,event_type,finance_import_row_id,receipt_ledger_entry_id,before_amount_ntd,after_amount_ntd,"
-                "idempotency_key,actor,reason) VALUES (%s,'collected',%s,%s,%s,%s,%s,%s,%s)",
+                "idempotency_key,actor,reason,evidence_reference) VALUES (%s,'collected',%s,%s,%s,%s,%s,%s,%s,%s)",
                 (candidate.recovery_identity, row_id, ledger_id, candidate.remaining_before.amount,
                  candidate.remaining_after.amount, f"{request.idempotency_key.value}:event",
-                 request.actor.actor_id, request.reason),
+                 request.actor.actor_id, request.reason, request.evidence_reference or ""),
             )
             cursor.execute(
                 "INSERT INTO client_finance_accounts (case_no,aggregate_version) VALUES (%s,%s) "
@@ -275,6 +329,14 @@ class MySqlClientOverRefundRecoveryRepository:
                 (candidate.case_no, f"{request.idempotency_key.value}:projection",
                  _json({"case_no": candidate.case_no, "recovery_identity": candidate.recovery_identity,
                         "remaining_after_ntd": candidate.remaining_after.amount})),
+            )
+            cursor.execute(
+                _RECOVERY_UPDATED_OUTBOX_INSERT_SQL,
+                (
+                    candidate.case_no,
+                    _recovery_outbox_key(request, "updated"),
+                    _json(_updated_outbox_payload(request, candidate, receipt)),
+                ),
             )
             if (request.selection.matching_identity is not None
                     and candidate.resulting_status is ClientOverRefundRecoveryStatus.RECOVERED):
@@ -303,10 +365,10 @@ class MySqlClientOverRefundRecoveryRepository:
             cursor.execute(
                 "INSERT INTO client_over_refund_recovery_events "
                 "(recovery_identity,event_type,finance_import_row_id,receipt_ledger_entry_id,before_amount_ntd,after_amount_ntd,"
-                "idempotency_key,actor,reason) VALUES (%s,'authorized_adjustment',NULL,NULL,%s,%s,%s,%s,%s)",
+                "idempotency_key,actor,reason,evidence_reference) VALUES (%s,'authorized_adjustment',NULL,NULL,%s,%s,%s,%s,%s,%s)",
                 (candidate.recovery_identity, candidate.remaining_before.amount,
                  candidate.remaining_after.amount, f"{request.idempotency_key.value}:event",
-                 request.actor.actor_id, request.reason),
+                 request.actor.actor_id, request.reason, request.evidence_reference or ""),
             )
             cursor.execute(
                 "INSERT INTO client_finance_accounts (case_no,aggregate_version) VALUES (%s,%s) "
@@ -332,6 +394,14 @@ class MySqlClientOverRefundRecoveryRepository:
                         "recovery_identity": candidate.recovery_identity,
                         "remaining_after_ntd": candidate.remaining_after.amount,
                         "resulting_status": candidate.resulting_status.value})),
+            )
+            cursor.execute(
+                _RECOVERY_UPDATED_OUTBOX_INSERT_SQL,
+                (
+                    candidate.case_no,
+                    _recovery_outbox_key(request, "updated"),
+                    _json(_updated_outbox_payload(request, candidate, receipt)),
+                ),
             )
 
 
@@ -360,6 +430,11 @@ def _row_id(value):
     return row_id
 
 
+def _row_reference(value):
+    row_id = _row_id(value)
+    return f"finance-import-row:{row_id}"
+
+
 def _date_text(value):
     return value.isoformat() if isinstance(value, date) else "0001-01-01"
 
@@ -367,7 +442,28 @@ def _date_text(value):
 def _receipt_payload(receipt):
     return {"recovery_identity": receipt.recovery_identity, "account_version": receipt.account_version,
             "recovery_version": receipt.recovery_version, "remaining_after_ntd": receipt.remaining_after_ntd,
-            "resulting_status": receipt.resulting_status, "preview_fingerprint": receipt.preview_fingerprint.value}
+            "resulting_status": receipt.resulting_status, "preview_fingerprint": receipt.preview_fingerprint.value,
+            "evidence_reference": receipt.evidence_reference}
+
+
+def _updated_outbox_payload(request, candidate, receipt):
+    return {
+        "event_type": "client_over_refund_recovery_updated",
+        "recovery_identity": candidate.recovery_identity,
+        "case_no": candidate.case_no,
+        "remaining_after_ntd": candidate.remaining_after.amount,
+        "resulting_status": candidate.resulting_status.value,
+        "recovery_version": receipt.recovery_version,
+        "account_version": receipt.account_version,
+        "matching_identity": request.selection.matching_identity,
+        "evidence_reference": request.evidence_reference,
+    }
+
+
+def _recovery_outbox_key(request, event_type):
+    value = f"{request.idempotency_key.value}:client-over-refund-recovery:{event_type}"
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return f"client-over-refund-recovery-{event_type}:{digest}"
 
 
 def _matching_receipt_payload(receipt):
@@ -379,11 +475,19 @@ def _matching_receipt_payload(receipt):
         "recovery_version": receipt.recovery_version,
         "account_version": receipt.account_version,
         "preview_fingerprint": receipt.preview_fingerprint.value,
+        "evidence_reference": receipt.evidence_reference,
     }
 
 
 def _json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+_RECOVERY_UPDATED_OUTBOX_INSERT_SQL = (
+    "INSERT INTO client_finance_outbox "
+    "(case_no,intent_type,intent_key,payload_snapshot) "
+    "VALUES (%s,'projection_refresh',%s,%s)"
+)
 
 
 @contextmanager

@@ -537,6 +537,14 @@ def _staging_facts(row: Mapping[str, object]) -> ControlledFileStagingFacts:
         ),
         version=int(row["staging_version"]),
         registration_status=registration,
+        stored_intent=ControlledFileIntent(
+            staging_id=str(row["staging_id"]),
+            owner=ControlledFileOwner(str(row["owner_type"])),
+            purpose=ControlledFilePurpose(str(row["purpose"])),
+            subject_reference=str(row["subject_reference"]),
+            object_key=str(row["object_key"]),
+            logical_folder=str(row["logical_folder"]),
+        ),
     )
 
 
@@ -687,7 +695,8 @@ def _lock_suffix(lock: bool) -> str:
 
 
 _STAGING_SELECT_SQL = (
-    "SELECT staging_id,original_filename,content_type,size_bytes,content_sha256,"
+    "SELECT staging_id,owner_type,subject_reference,object_key,purpose,logical_folder,"
+    "original_filename,content_type,size_bytes,content_sha256,"
     "staging_state,staging_version,expires_at_utc FROM controlled_file_staging_objects "
     "WHERE staging_id=%s"
 )

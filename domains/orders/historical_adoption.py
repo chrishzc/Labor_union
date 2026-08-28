@@ -45,11 +45,12 @@ class HistoricalOrderAdoptionCandidate:
     resulting_version: int
     date_patch: tuple[tuple[str, date], ...]
     issue_codes: tuple[str, ...]
+    order_changed: bool
     fingerprint: PreviewFingerprint
 
     @property
     def mutates_order(self) -> bool:
-        return self.outcome is HistoricalOrderOutcome.ADOPTED
+        return self.order_changed
 
 
 def build_historical_order_candidate(
@@ -60,7 +61,10 @@ def build_historical_order_candidate(
     outcome = _outcome(current.status, source.asserted_status, issues)
     date_patch = _date_patch(current, source, issues, outcome)
     after_status = source.asserted_status if outcome is HistoricalOrderOutcome.ADOPTED else current.status
-    resulting_version = current.lifecycle_version + int(outcome is HistoricalOrderOutcome.ADOPTED)
+    order_changed = outcome is HistoricalOrderOutcome.ADOPTED and (
+        after_status != current.status or bool(date_patch)
+    )
+    resulting_version = current.lifecycle_version + int(order_changed)
     payload = {
         "case_no": current.case_no,
         "before_status": current.status.value,
@@ -77,6 +81,7 @@ def build_historical_order_candidate(
         resulting_version,
         date_patch,
         tuple(sorted(issues)),
+        order_changed,
         fingerprint_payload(payload),
     )
 

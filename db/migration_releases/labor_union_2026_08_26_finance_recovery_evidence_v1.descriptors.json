@@ -1,0 +1,18 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-finance-recovery-evidence-2026-08-26-v1",
+  "descriptors": {
+    "1007_finance_recovery_evidence.sql": {
+      "tables": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {
+        "client_over_refund_recovery_events.chk_client_over_refund_recovery_event_evidence": "or(atom(evidence_referenceisnull),atom(char_length(trim(evidence_reference))>0))",
+        "client_over_refund_recovery_matchings.chk_client_over_refund_recovery_matching_evidence": "or(atom(evidence_referenceisnull),atom(char_length(trim(evidence_reference))>0))",
+        "staff_overpayment_recovery_events.chk_staff_overpayment_recovery_event_evidence": "or(atom(evidence_referenceisnull),atom(char_length(trim(evidence_reference))>0))",
+        "staff_overpayment_recovery_matchings.chk_staff_overpayment_recovery_matching_evidence": "or(atom(evidence_referenceisnull),atom(char_length(trim(evidence_reference))>0))"
+      },
+      "triggers": []
+    }
+  }
+}

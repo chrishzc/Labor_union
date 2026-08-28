@@ -34,6 +34,14 @@ class ClientObligationActionKind(StrEnum):
     UNCHANGED = "unchanged"
 
 
+class ClientFinanceDirection(StrEnum):
+    """Server-owned cash impact direction for a Client Finance action."""
+
+    REFUND_DUE = "refund_due"
+    ADDITIONAL_CHARGE_DUE = "additional_charge_due"
+    NO_FINANCE_CHANGE = "no_finance_change"
+
+
 @dataclass(frozen=True, slots=True)
 class ClientChargeDay:
     service_date: date
@@ -151,6 +159,28 @@ class ClientObligationAction:
     before_due_date: date | None
     after_due_date: date | None
     source_obligation_identity: str | None
+    direction: ClientFinanceDirection
+    direction_amount_ntd: int
+
+    def __post_init__(self) -> None:
+        _require_nonnegative_money(self.before_amount, "before amount")
+        _require_nonnegative_money(self.after_amount, "after amount")
+        _require_nonnegative_money(self.obligation_amount, "obligation amount")
+        if not isinstance(self.direction, ClientFinanceDirection):
+            raise TypeError("client finance direction must be ClientFinanceDirection")
+        require_nonnegative_integer(
+            self.direction_amount_ntd,
+            "client finance direction amount",
+        )
+        expected_direction, expected_amount = _expected_direction(
+            self.action,
+            self.before_amount,
+            self.after_amount,
+        )
+        if self.direction is not expected_direction:
+            raise ValueError("client_finance_direction_mismatch")
+        if self.direction_amount_ntd != expected_amount:
+            raise ValueError("client_finance_direction_amount_mismatch")
 
 
 @dataclass(frozen=True, slots=True)
@@ -497,6 +527,7 @@ def _new_stage_action(case_no, stage_plan):
         None,
         stage_plan.due_date,
         None,
+        *_expected_direction(action, MoneyNTD(0), stage_plan.amount),
     )
 
 
@@ -512,6 +543,7 @@ def _open_stage_action(stage_plan, existing):
         existing.due_date,
         stage_plan.due_date,
         None,
+        *_expected_direction(action, existing.contracted_amount, stage_plan.amount),
     )
 
 
@@ -536,6 +568,7 @@ def _settled_stage_action(change_identity, stage_plan, existing):
         None,
         stage_plan.due_date,
         existing.obligation_identity,
+        *_expected_direction(action, existing.contracted_amount, stage_plan.amount),
     )
 
 
@@ -545,6 +578,49 @@ def _settled_action_kind(difference):
     if difference.amount > 0:
         return ClientObligationActionKind.CREATE_ADJUSTMENT
     return ClientObligationActionKind.CREATE_REFUND
+
+
+def _expected_direction(
+    action: ClientObligationActionKind,
+    before_amount: MoneyNTD,
+    after_amount: MoneyNTD,
+) -> tuple[ClientFinanceDirection, int]:
+    """Return the canonical public direction for the cancellation action.
+
+    The action kind explains the ledger operation; this mapping is the sole
+    authority for the customer-facing cash impact and is fingerprinted below.
+    """
+
+    if action is ClientObligationActionKind.CREATE_STAGE:
+        if after_amount.amount <= 0:
+            raise ValueError("client_finance_direction_mapping_invalid")
+        return ClientFinanceDirection.ADDITIONAL_CHARGE_DUE, after_amount.amount
+    if action is ClientObligationActionKind.REPLACE_OPEN:
+        difference = after_amount.amount - before_amount.amount
+        if difference == 0:
+            raise ValueError("client_finance_direction_mapping_invalid")
+        if difference < 0:
+            return ClientFinanceDirection.NO_FINANCE_CHANGE, 0
+        return ClientFinanceDirection.ADDITIONAL_CHARGE_DUE, difference
+    if action is ClientObligationActionKind.CANCEL_OPEN:
+        if after_amount.amount != 0 or before_amount.amount <= 0:
+            raise ValueError("client_finance_direction_mapping_invalid")
+        return ClientFinanceDirection.NO_FINANCE_CHANGE, 0
+    if action is ClientObligationActionKind.CREATE_ADJUSTMENT:
+        difference = after_amount.amount - before_amount.amount
+        if difference <= 0:
+            raise ValueError("client_finance_direction_mapping_invalid")
+        return ClientFinanceDirection.ADDITIONAL_CHARGE_DUE, difference
+    if action is ClientObligationActionKind.CREATE_REFUND:
+        difference = before_amount.amount - after_amount.amount
+        if difference <= 0:
+            raise ValueError("client_finance_direction_mapping_invalid")
+        return ClientFinanceDirection.REFUND_DUE, difference
+    if action is ClientObligationActionKind.UNCHANGED:
+        if before_amount != after_amount:
+            raise ValueError("client_finance_direction_mapping_invalid")
+        return ClientFinanceDirection.NO_FINANCE_CHANGE, 0
+    raise ValueError("client_finance_direction_mapping_invalid")
 
 
 def _candidate(facts, stage_plans, actions):
@@ -635,6 +711,8 @@ def _action_payload(action):
         "before_due_date": _date_text(action.before_due_date),
         "after_due_date": _date_text(action.after_due_date),
         "source_obligation_identity": action.source_obligation_identity,
+        "direction": action.direction.value,
+        "direction_amount_ntd": action.direction_amount_ntd,
     }
 
 

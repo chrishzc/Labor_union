@@ -3,7 +3,7 @@
   "track": "A", "suite_id": "GDATA", "status": "blocked", "part": "BLOCKED_DECISION", "browser_execution_mode": "no-browser-execution",
   "requires_database": true, "test_kinds": ["domain_root_data", "expected_manifest"], "coverage_ids": ["GDATA-REACT-ADMIN-DATA-BROWSER-QUERY-01"], "coverage_scope": "supplemental",
   "source_scenario_ids": [],
-  "source_refs": ["document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase3d-data-browser-part-identity-gap.md#Phase 3D Data Browser UI Part／Scenario Identity 缺口"],
+  "source_refs": ["document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md#14. Phase 3D-DB-H Data Browser masked query裁決（2026-08-22）"],
   "source_to_successor_mapping": [{"source": "no sufficient canonical source", "successor": "masked allowlist query contract", "disposition": "unresolved"}],
   "root_inputs": ["synthetic allowlisted row", "synthetic masked detail", "cursor and row budget"],
   "root_facts": ["Synthetic allowlisted source, masked row, cursor and row budget are the proposed query roots."],

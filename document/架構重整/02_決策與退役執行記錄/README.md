@@ -13,6 +13,15 @@ in-progress Work Package。completed／superseded 文件通過 archive gate 後�
 | 文件 | 類型 | 狀態 | 正確用途／下一個 gate |
 |---|---|---|---|
 | [96 Current 剩餘代辦任務總表](96_Current_剩餘代辦任務總表.md) | gap-register | `in-progress` | 唯一跨功能 current task register；完成後先同步 owner 正式規格，再關閉該列。 |
+| [全異常人工 remediation 收斂缺口](PROV-20260826-all-anomaly-manual-remediation-spec-gap.md) | spec-gap | `in-progress` | 96 新增 P0；先收斂每個 anomaly code 的 owner action／completion predicate，再分 owner package 實作。 |
+| [HCM 多問題匯入警示逐筆解除](PROV-20260827-hcm-multi-occurrence-umbrella-resolution-work-package.md) | work-package | `completed`（source scope） | `IMPORT-004` source 與獨立 E3 PASS；真 MySQL 同 review lock／active-list runtime 仍 `NOT_RUN`，不屬於此 source completion 的已通過證據。 |
+| [歷史訂單 review 人工更正工作包](PROV-20260826-historical-order-review-remediation-work-package.md) | work-package | `in-progress` | 96 P0 的第一個 owner slice；尚缺 enabled persisted-human Browser 與 developer acceptance。 |
+| [歷史案件作業基準與狀態感知異常規格](PROV-20260827-historical-order-operational-baseline-spec.md) | spec | `approved`／`SPEC_READY` | Historical-only baseline、無額外違約金、Orders／Finance 分離、服務中代班不要求新契約／簽回或客戶變更簽署（optional supplement 不阻擋代班／排班 lineage／薪資），以及 Client Finance cancellation `direction` 與 action mapping 均已裁決；剩餘為實作／runtime 驗收，不是 authority blocker。 |
+| [歷史案件作業基準與狀態感知異常工作包](PROV-20260827-historical-order-operational-work-packages.md) | work packages | `PACKAGE_READY` | B1／S1／S2已裁決；六包契約ready，但各包source／schema／runtime完成度仍以包內snapshot為準。 |
+| [Historical Staff Payables case completion readback 裁決](PROV-20260827-historical-staff-payables-completion-root-spec-gap.md) | decision record | `approved`／`SP2-Q_APPROVED` | 人工已採用query-only typed source vector；internal source candidate為`78 passed`＋真MySQL唯讀SQL解析PASS。fresh verifier與API／projector／React／runtime仍未完成；`SP1-M`無必要性證據。 |
+| [Historical baseline storage 與 substitution supplement 裁決記錄](PROV-20260827-historical-operational-storage-and-supplement-spec-gap.md) | decision record | `approved` | B1 baseline三表append-only storage、S1 Scheduling-owned note與S2 method enum已採用；S1／S2只是備註，不影響流程運行。 |
+| [異常必要性移轉工作包](PROV-20260827-anomaly-necessity-migration-work-package.md) | work-package | `approved`／A～C ready、D `SPEC_GAP` | 42-code inventory→33 active target；先建 immutable migration disposition，再安全移轉六個工作項、退役 SCHEDULE-005、去重 Staff overpayment successor。 |
+| [六個一般工作項 owner target 契約](PROV-20260827-anomaly-work-item-owner-target-spec.md) | spec-gap | `proposed`／`AUTHORITY_REQUIRED` | 固定六碼 migration 的 owner root／version／fresh-lock／fail-closed 契約；Candidate Pool 版本、LINE task 版本與 ORDER-001/002 target 尚待確認。 |
 | [CUR-FILE-NAS-01 受控檔案儲存基礎工作包](PROV-20260826-controlled-file-storage-foundation-work-package.md) | work-package | `approved` | 96 O1 專用工作包；限制於 controlled-file capability、本機 additive DB gates 與 typed 驗收。 |
 | [營運前端真實資料優先裁決](PROV-20260822-operations-frontend-real-data-readiness-priority-amendment.md) | decision-work-package | `approved` | 保留 current 操作優先與真實資料／完整 continuation 原則；不是重跑已完成 Orders／Staff／Reports 的授權。 |
 | [匯入入口與 Legacy Writer 退役](Import_Entry_and_Legacy_Writer_Retirement_工作包.md) | work-package | `blocked` | Client LIFF 與 writer replacement 未全數閉合；不得直接移除入口。current LIFF 功能由 96 列管。 |

@@ -1,4 +1,7 @@
-"""MySQL adapter for root-fact anomaly projection and recovery queries."""
+"""
+File: anomaly_root_fact_projection_repository.py
+Description: 保存 owner-domain root-fact 異常投影、receipt、snapshot 與 recovery query。
+"""
 
 from __future__ import annotations
 
@@ -69,7 +72,7 @@ class MySqlRootFactProjectionRepository:
             return
         with _cursor(self._connection) as cursor:
             if previous is None:
-                _insert_current(cursor, resulting, candidate.root_fact_snapshot)
+                _insert_current(cursor, resulting, candidate)
             else:
                 _update_current(cursor, previous, resulting, candidate)
             _save_root_snapshot(cursor, resulting, candidate)
@@ -189,18 +192,19 @@ def _projection(row) -> CurrentAlertProjection:
     )
 
 
-def _insert_current(cursor, resulting, snapshot) -> None:
+def _insert_current(cursor, resulting, candidate) -> None:
     cursor.execute(
         _CURRENT_INSERT_SQL,
         (
             resulting.fingerprint.value,
             resulting.definition_code,
+            candidate.source_domain,
             resulting.source_identity,
             resulting.source_version,
             resulting.predicate_active,
             resulting.workflow_status.value,
             resulting.workflow_version,
-            _json_dump(snapshot),
+            _json_dump(candidate.root_fact_snapshot),
         ),
     )
 
@@ -220,6 +224,7 @@ def _update_current(cursor, previous, resulting, candidate) -> None:
         _CURRENT_UPDATE_SQL,
         (
             resulting.source_version,
+            candidate.source_domain,
             resulting.predicate_active,
             resulting.workflow_status.value,
             resulting.workflow_version,
@@ -243,6 +248,7 @@ def _update_current_without_workflow_change(
         _CURRENT_FACT_UPDATE_SQL,
         (
             resulting.source_version,
+            candidate.source_domain,
             resulting.predicate_active,
             resulting.workflow_version,
             _json_dump(candidate.root_fact_snapshot),
@@ -351,6 +357,15 @@ def _root_snapshot(row) -> dict[str, object]:
         "source_version": int(row["snapshot_source_version"]),
     }
     current_snapshot = _json_object(row["current_display_snapshot"])
+    if "original_refund_ledger_entry_id" in current_snapshot:
+        original_ledger_id = current_snapshot["original_refund_ledger_entry_id"]
+        if original_ledger_id is not None and (
+            isinstance(original_ledger_id, bool)
+            or not isinstance(original_ledger_id, int)
+            or original_ledger_id <= 0
+        ):
+            raise ValueError("anomaly_projection_data_integrity_violation")
+        snapshot["original_refund_ledger_entry_id"] = original_ledger_id
     recovery_bindings = current_snapshot.get("recovery_bindings")
     if isinstance(recovery_bindings, dict):
         snapshot["recovery_bindings"] = recovery_bindings
@@ -452,16 +467,16 @@ _CURRENT_INSERT_SQL = (
     "(fingerprint,definition_code,definition_version,source_domain,"
     "source_identity,source_version,predicate_active,workflow_status,"
     "workflow_version,projection_version,display_snapshot) "
-    "VALUES (%s,%s,1,'finance_import',%s,%s,%s,%s,%s,1,%s)"
+    "VALUES (%s,%s,1,%s,%s,%s,%s,%s,%s,1,%s)"
 )
 _CURRENT_UPDATE_SQL = (
-    "UPDATE anomaly_current_alerts SET source_version=%s,predicate_active=%s,"
+    "UPDATE anomaly_current_alerts SET source_version=%s,source_domain=%s,predicate_active=%s,"
     "workflow_status=%s,workflow_version=%s,projection_version=projection_version+1,"
     "claimed_by=%s,claimed_at=%s,resolved_by=%s,resolved_at=%s,"
     "display_snapshot=%s WHERE fingerprint=%s AND workflow_version=%s"
 )
 _CURRENT_FACT_UPDATE_SQL = (
-    "UPDATE anomaly_current_alerts SET source_version=%s,predicate_active=%s,"
+    "UPDATE anomaly_current_alerts SET source_version=%s,source_domain=%s,predicate_active=%s,"
     "workflow_version=%s,projection_version=projection_version+1,"
     "display_snapshot=%s WHERE fingerprint=%s AND workflow_version=%s"
 )

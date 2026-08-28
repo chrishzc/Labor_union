@@ -33,7 +33,8 @@ def test_queue_has_no_unreviewed_entries() -> None:
         f"ui-react:#{page}"
         for page in (
             "order-tracker", "orders", "scheduling", "staff", "data-import", "line-management",
-            "reports", "finance", "anomalies", "data-browser", "account-management", "system-status",
+            "reports", "finance", "anomalies", "account-management", "system-status",
+            "line-security", "line-liff-studio", "line-ai-events",
         )
     }
 

@@ -1,4 +1,7 @@
-"""Composition root for client refund-overpayment recovery collection."""
+"""
+File: client_over_refund_recovery.py
+Description: 建立客戶退款超額追償的 owner workflows 與唯讀 Query。
+"""
 
 from dataclasses import dataclass
 
@@ -10,12 +13,17 @@ from subsystems.client_finance.over_refund_recovery_workflow import ClientOverRe
 from subsystems.client_finance.over_refund_recovery_matching_workflow import (
     ClientOverRefundRecoveryMatchingWorkflow,
 )
+from subsystems.client_finance.client_over_refund_recovery_query import (
+    ClientOverRefundRecoveryQuerySelection,
+    ClientOverRefundRecoveryQueryWorkflow,
+)
 
 
 @dataclass(slots=True)
 class ClientOverRefundRecoveryApplication:
     workflow: ClientOverRefundRecoveryWorkflow
     matching_workflow: ClientOverRefundRecoveryMatchingWorkflow
+    query_workflow: ClientOverRefundRecoveryQueryWorkflow
 
     def preview(self, selection, correlation_id):
         return self.workflow.preview(selection, correlation_id)
@@ -29,6 +37,9 @@ class ClientOverRefundRecoveryApplication:
     def apply_matching(self, request):
         return self.matching_workflow.apply(request)
 
+    def query_recovery(self, selection: ClientOverRefundRecoveryQuerySelection, correlation_id):
+        return self.query_workflow.query(selection, correlation_id)
+
 
 def get_client_over_refund_recovery_application():
     connection = get_connection()
@@ -38,6 +49,7 @@ def get_client_over_refund_recovery_application():
         yield ClientOverRefundRecoveryApplication(
             ClientOverRefundRecoveryWorkflow(repository, unit_of_work),
             ClientOverRefundRecoveryMatchingWorkflow(repository, unit_of_work),
+            ClientOverRefundRecoveryQueryWorkflow(repository),
         )
     finally:
         connection.close()

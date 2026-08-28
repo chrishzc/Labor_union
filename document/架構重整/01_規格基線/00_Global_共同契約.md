@@ -99,6 +99,14 @@ Staff、Orders、Scheduling、Contract Signing 或 LINE 的根事實。
   `document/功能開發計畫/NAS_檔案庫與資料中心管理介面正式規範.md` §9 單一擁有；本節保留 Global 不變量，
   不複製 machine fields。owner Domain／LIFF 仍須以自己的 verified identity 與 root facts 呼叫 typed port。
 
+Runtime 狀態（2026-08-26）：`in-progress`。共用 typed port、owner-scoped metadata／version、24 小時
+staging、零寫入 Preview、fresh-fact Apply／terminal replay、authenticated list／download、cleanup 與五種
+reconciliation outcome 已完成本機實作；schema-only release `1004_controlled_file_storage_foundation.sql`
+已通過 static／descriptor／fresh／preserve-data candidate／唯讀 developer plan gates，且未執行
+`union_db`、production、replacement 或 `--switch`。focused Python `115 passed`、React `15 passed`；
+fresh Chrome 的未登入／local-bypass 403 fail-closed 已確認，enabled human Session 的正向 list／download
+仍待執行，因此不得把本狀態解讀為 production NAS mount、部署或 O1 最終 browser completion。
+
 ## 3. 依賴方向
 
 ```text

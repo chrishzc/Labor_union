@@ -226,6 +226,11 @@ capacity exhausted、watcher lag、digest mismatch 與 metadata/object orphan；
 作業環境可直接操作資料夾。未掛載 NAS 的 Web／LIFF consumer 只能透過 authenticated list／download／
 versioned upload contract 存取，不能退回本機預設資料夾或顯示假健康。
 
+Controlled-file runtime status（2026-08-26）：本機 storage composition、typed API 與 Data Center adapter
+已接線，`lu_test_*` fresh／preserve-data metadata release 驗收為 `passed`；正式 NAS mount、capacity／watcher
+運維、backup／restore drill、production deployment 與 entry switch 均未執行。local-bypass 對受保護 route
+回 403 是預期負向控制，不得當作 enabled human authenticated acceptance。
+
 Private Operations client 必須依 typed `retryable` 決定是否重試；HTTP status 只能作缺少 typed
 envelope 時的保守 fallback。transient retry 必須有上限、exponential backoff 與 jitter；認證、設定、
 schema 或 contract failure 不得無限重試。一次性 CLI cycle 只要未成功即回傳非零。

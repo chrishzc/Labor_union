@@ -251,14 +251,14 @@ def _validate_refund_scope(case_no, bank_facts, obligations) -> None:
 
 def _validate_refund_obligation_types(obligations, purpose) -> None:
     expected = (
-        "subsidy_return"
+        {"subsidy_return"}
         if purpose in {
             ClientRefundPurpose.SUBSIDY_RETURN,
             ClientRefundPurpose.SUBSIDY_ADVANCE,
         }
-        else "refund"
+        else {"adjustment", "refund"}
     )
-    if any(item.obligation_type != expected for item in obligations):
+    if any(item.obligation_type not in expected for item in obligations):
         raise ValueError("invalid_client_refund_intent")
 
 

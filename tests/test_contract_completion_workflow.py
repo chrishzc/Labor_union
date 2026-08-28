@@ -109,6 +109,23 @@ def test_preview_apply_persists_canonical_contract_completion_chain():
     assert repository.persisted[-1].stored_receipt.receipt == receipt
 
 
+def test_apply_borrowed_leaves_commit_to_outer_owner():
+    repository = _Repository(_facts())
+    unit_of_work = _UnitOfWork()
+    workflow = ContractCompletionWorkflow(
+        repository,
+        lambda: unit_of_work,
+        FixedBusinessClock(datetime(2026, 8, 3, 9, 0).astimezone()),
+    )
+    preview = workflow.preview("CASE-1", ContractCompletionIntent.CONFIRM_COMPLETED)
+
+    receipt = workflow.apply_borrowed(_request(preview))
+
+    assert receipt.contract_completed is True
+    assert repository.persisted[-1].stored_receipt.receipt == receipt
+    assert unit_of_work.committed is False
+
+
 def test_apply_replays_matching_receipt_without_new_writes():
     repository = _Repository(_facts())
     workflow = _workflow(repository)

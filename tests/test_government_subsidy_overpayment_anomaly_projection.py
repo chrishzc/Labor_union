@@ -1,3 +1,8 @@
+"""
+File: test_government_subsidy_overpayment_anomaly_projection.py
+Description: 驗證政府溢撥根事實的 owner action、source domain 與 stored binding。
+"""
+
 from datetime import datetime, timezone
 
 from domains.anomalies.registry import default_anomaly_registry
@@ -25,6 +30,8 @@ def test_government_overpayment_root_fact_exposes_bound_typed_action() -> None:
         recovery_bindings=(("overpayment_identity", "over-1"), ("overpayment_version", 1)),
     )
     candidate = build_finance_manual_review_candidate(default_anomaly_registry(), root_fact)
+    assert candidate.source_domain == "government_subsidy"
+    assert candidate.root_fact_snapshot["overpayment_identity"] == "over-1"
     action = candidate.available_actions[0]
     assert action.action_key == "dispose_government_subsidy_overpayment"
     assert action.source_bindings == {"overpayment_identity": "over-1", "overpayment_version": 1}

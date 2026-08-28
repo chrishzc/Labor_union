@@ -1,4 +1,7 @@
-"""Preview/apply orchestration for client refund-overpayment recovery receipts."""
+"""
+File: over_refund_recovery_workflow.py
+Description: 協調客戶退款超額追償的 collection 與 authorized adjustment。
+"""
 
 from __future__ import annotations
 
@@ -36,6 +39,7 @@ class ClientOverRefundRecoverySelection:
     adjustment_amount: MoneyNTD | None = None
     matching_identity: str | None = None
     matching_version: int | None = None
+    evidence_reference: str | None = None
 
     def __post_init__(self) -> None:
         for value, label in (
@@ -51,17 +55,25 @@ class ClientOverRefundRecoverySelection:
             )
             if self.adjustment_amount is not None:
                 raise ValueError("client_over_refund_recovery_action_invalid")
+            if self.matching_identity is None or self.matching_version is None:
+                raise ValueError("client_over_refund_recovery_matching_required")
             if (self.matching_identity is None) != (self.matching_version is None):
                 raise ValueError("client_over_refund_recovery_matching_invalid")
-            if self.matching_identity is not None:
-                require_canonical_text(self.matching_identity, "matching identity", 191)
-                if not isinstance(self.matching_version, int) or self.matching_version <= 0:
-                    raise ValueError("client_over_refund_recovery_matching_invalid")
+            require_canonical_text(self.matching_identity, "matching identity", 191)
+            if not isinstance(self.matching_version, int) or self.matching_version <= 0:
+                raise ValueError("client_over_refund_recovery_matching_invalid")
         elif self.action is ClientOverRefundRecoveryAction.ADJUST:
-            if self.finance_import_row_identity is not None or self.adjustment_amount is None or self.matching_identity is not None:
+            if (
+                self.finance_import_row_identity is not None
+                or self.adjustment_amount is None
+                or self.matching_identity is not None
+                or self.matching_version is not None
+            ):
                 raise ValueError("client_over_refund_recovery_action_invalid")
         else:
             raise TypeError("client recovery action is invalid")
+        if self.evidence_reference is not None:
+            require_canonical_text(self.evidence_reference, "evidence reference", 500)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,9 +102,12 @@ class ClientOverRefundRecoveryApplyRequest:
     actor: ActorContext
     reason: str
     correlation_id: CorrelationId
+    evidence_reference: str | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.reason, "reason", 500)
+        if self.evidence_reference is not None:
+            require_canonical_text(self.evidence_reference, "evidence reference", 500)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +118,7 @@ class ClientOverRefundRecoveryReceipt:
     remaining_after_ntd: int
     resulting_status: str
     preview_fingerprint: PreviewFingerprint
+    evidence_reference: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,7 +155,7 @@ class ClientOverRefundRecoveryWorkflow:
                 if replay is not None:
                     return replay
                 preview = self._fresh_preview(request)
-                receipt = _receipt(preview)
+                receipt = _receipt(preview, request)
                 self._repository.persist(request, preview, receipt, command_fingerprint)
                 unit_of_work.commit()
                 return receipt
@@ -157,6 +173,8 @@ class ClientOverRefundRecoveryWorkflow:
         raise _error(request.correlation_id, ErrorCategory.IDEMPOTENCY_MISMATCH, "idempotency_conflict")
 
     def _fresh_preview(self, request):
+        if request.evidence_reference != request.selection.evidence_reference:
+            raise _error(request.correlation_id, ErrorCategory.CONFLICT, "client_finance_candidate_stale")
         facts = self._repository.load(request.selection, for_update=True)
         if facts.recovery.version != request.expected_recovery_version.value or facts.account_version != request.expected_account_version.value:
             raise _error(request.correlation_id, ErrorCategory.CONFLICT, "client_finance_candidate_stale")
@@ -179,7 +197,7 @@ def _build_preview(facts, selection, correlation_id):
     return ClientOverRefundRecoveryPreview(candidate, facts.account_version, facts.recovery.version, fingerprint)
 
 
-def _receipt(preview):
+def _receipt(preview, request):
     candidate = preview.candidate
     return ClientOverRefundRecoveryReceipt(
         candidate.recovery_identity,
@@ -188,6 +206,7 @@ def _receipt(preview):
         candidate.remaining_after.amount,
         candidate.resulting_status.value,
         preview.fingerprint,
+        request.evidence_reference,
     )
 
 
@@ -199,6 +218,7 @@ def _command_fingerprint(request):
         "preview_fingerprint": request.preview_fingerprint.value,
         "actor": request.actor.actor_id,
         "reason": request.reason,
+        "evidence_reference": request.evidence_reference or "",
     })
 
 
@@ -211,6 +231,7 @@ def _selection_payload(selection):
         "adjustment_amount_ntd": None if selection.adjustment_amount is None else selection.adjustment_amount.amount,
         "matching_identity": selection.matching_identity,
         "matching_version": selection.matching_version,
+        "evidence_reference": selection.evidence_reference or "",
     }
 
 

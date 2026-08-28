@@ -312,6 +312,9 @@ describe('Rich Menu draft client', () => {
       [{ ...QUERY_DATA.publication_locks[0], state: 'unknown' }],
       [{ ...QUERY_DATA.publication_locks[0], configuration_revision: 3 }],
       [{ ...QUERY_DATA.publication_locks[0], state: 'processing', readonly_reason: null }],
+      [{ ...QUERY_DATA.publication_locks[0], menu_definition_id: 'staff_menu' }],
+      [QUERY_DATA.publication_locks[0], QUERY_DATA.publication_locks[0]],
+      [{ ...QUERY_DATA.publication_locks[0], readonly_reason: '不應存在' }],
     ];
 
     for (const publicationLocks of invalidLocks) {

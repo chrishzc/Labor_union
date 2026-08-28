@@ -18,6 +18,7 @@ from domains.client_finance.subsidy_advance import (
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.money import MoneyNTD
 from subsystems.anomalies.alert_workflow import ProjectAlertRequest
+from subsystems.anomalies.source_version import daily_root_source_version
 
 _CONSUMER_IDENTITY = "process-reminder-anomaly-source-v1"
 
@@ -157,9 +158,11 @@ def build_client_receivable_requests(
     rows: list[Mapping[str, Any]], *, as_of: date
 ) -> tuple[ProjectAlertRequest, ...]:
     """rows: canonical client-obligation candidates, including inactive alert cases."""
-    version = as_of.toordinal()
     requests: list[ProjectAlertRequest] = []
     for case_no, obligations in _obligations_by_case(rows).items():
+        version = daily_root_source_version(
+            as_of=as_of, root_version=_account_version(obligations)
+        )
         overdue_obligations = [
             _overdue_obligation_snapshot(obligation, _RECEIVABLE_STAGE_LABELS, "未收")
             for obligation in obligations
@@ -170,8 +173,10 @@ def build_client_receivable_requests(
         overdue_obligations = [item for item in overdue_obligations if item is not None]
         snapshot = {
             "case_no": case_no,
-            "action": "核對應收資料、銀行對帳單與匯入結果",
+            "action": "以客戶收款 Query／Preview／Apply 核銷；電話或通知不等於入帳",
             "overdue_obligations": overdue_obligations,
+            "resolution_condition": "本案所有逾期應收義務餘額歸零後自動解除",
+            "account_version": _account_version(obligations),
         }
         active = bool(overdue_obligations)
         requests.append(_request("RECEIVABLE-001", case_no, version, active, snapshot, {"case_no": case_no}))
@@ -182,9 +187,11 @@ def build_subsidy_return_requests(
     rows: list[Mapping[str, Any]], *, as_of: date
 ) -> tuple[ProjectAlertRequest, ...]:
     """rows: canonical client-obligation candidates, including inactive alert cases."""
-    version = as_of.toordinal()
     requests: list[ProjectAlertRequest] = []
     for case_no, obligations in _obligations_by_case(rows).items():
+        version = daily_root_source_version(
+            as_of=as_of, root_version=_account_version(obligations)
+        )
         overdue_obligations = [
             _overdue_obligation_snapshot(
                 obligation, {"subsidy_return": "客戶補助退還"}, "未付"
@@ -197,8 +204,10 @@ def build_subsidy_return_requests(
         overdue_obligations = [item for item in overdue_obligations if item is not None]
         snapshot = {
             "case_no": case_no,
-            "action": "核對應付資料、銀行對帳單與匯入結果",
+            "action": "以客戶補助退還 Query／Preview／Apply 核銷；不得當一般退款",
             "overdue_obligations": overdue_obligations,
+            "resolution_condition": "本案所有逾期補助退還義務餘額歸零後自動解除",
+            "account_version": _account_version(obligations),
         }
         active = bool(overdue_obligations)
         requests.append(_request("RETURN-001", case_no, version, active, snapshot, {"case_no": case_no}))
@@ -209,10 +218,12 @@ def build_client_payable_requests(
     rows: list[Mapping[str, Any]], *, as_of: date
 ) -> tuple[ProjectAlertRequest, ...]:
     """rows: canonical client-obligation candidates, including inactive alert cases."""
-    version = as_of.toordinal()
     requests: list[ProjectAlertRequest] = []
     labels = {"refund": "一般客戶退款", "adjustment": "客戶調整應付"}
     for case_no, obligations in _obligations_by_case(rows).items():
+        version = daily_root_source_version(
+            as_of=as_of, root_version=_account_version(obligations)
+        )
         overdue_obligations = [
             _overdue_obligation_snapshot(obligation, labels, "未付")
             for obligation in obligations
@@ -221,8 +232,10 @@ def build_client_payable_requests(
         overdue_obligations = [item for item in overdue_obligations if item is not None]
         snapshot = {
             "case_no": case_no,
-            "action": "核對應付資料、銀行對帳單與匯入結果",
+            "action": "以客戶退款 Query／Preview／Apply 核銷；不得與補助退還互抵",
             "overdue_obligations": overdue_obligations,
+            "resolution_condition": "本案所有逾期一般退款／調整應付餘額歸零後自動解除",
+            "account_version": _account_version(obligations),
         }
         requests.append(
             _request("CLIENTPAYABLE-001", case_no, version, bool(overdue_obligations), snapshot, {"case_no": case_no})
@@ -293,23 +306,33 @@ def _is_open_overdue_of_type(
     return (
         due_date is not None
         and due_date < as_of
-        and row.get("status") == "open"
         and row.get("amount_due_ntd", 0) > 0
     )
 
 
 def _overdue_obligation_snapshot(
     row: Mapping[str, Any], labels: Mapping[str, str], amount_label: str
-) -> dict[str, str] | None:
+) -> str | None:
     label = labels.get(str(row.get("obligation_type")))
     if label is None:
         return None
-    snapshot = {
-        "階段": label,
-        "到期日": str(row["due_date"]),
-    }
-    snapshot[amount_label] = str(row["amount_due_ntd"])
-    return snapshot
+    identity = str(row.get("obligation_identity") or "未提供義務識別")
+    return (
+        f"義務 {identity}｜{label}｜到期 {row['due_date']}"
+        f"｜{amount_label} NT$ {int(row['amount_due_ntd']):,}"
+    )
+
+
+def _account_version(rows: list[Mapping[str, Any]]) -> int:
+    versions = set()
+    for row in rows:
+        converted = _whole_ntd(row.get("account_version"))
+        if converted is None or converted < 0:
+            raise ValueError("client_finance_account_version_missing")
+        versions.add(converted)
+    if len(versions) != 1:
+        raise ValueError("client_finance_account_version_ambiguous")
+    return versions.pop()
 
 
 def build_schedule_holiday_undecided_requests(
@@ -347,19 +370,12 @@ def build_schedule_replaced_assignment_requests(
     rows: list[Mapping[str, Any]],
     *,
     as_of: date,
-    already_resolved_assignment_ids: frozenset[int] = frozenset(),
 ) -> tuple[ProjectAlertRequest, ...]:
-    """rows: case_staff_assignments where status='replaced'.
-
-    This alert never auto-resolves: once a human resolves it in the alert
-    center, re-scanning must not reopen it, matching the legacy comment that
-    there is no data-driven signal for "financial split already reviewed".
-    """
+    """Keep replaced roots active until an owner completion predicate exists."""
     version = as_of.toordinal()
     requests = []
     for row in rows:
         assignment_id = row["id"]
-        active = assignment_id not in already_resolved_assignment_ids
         snapshot = {
             "assignment_id": assignment_id,
             "case_no": row.get("case_no"),
@@ -374,7 +390,7 @@ def build_schedule_replaced_assignment_requests(
                 "SCHEDULE-002",
                 str(assignment_id),
                 version,
-                active,
+                True,
                 snapshot,
                 {"assignment_id": str(assignment_id)},
             )
@@ -449,12 +465,17 @@ def build_schedule_holiday_preference_requests(
 def build_client_missing_line_requests(
     rows: list[Mapping[str, Any]], *, as_of: date
 ) -> tuple[ProjectAlertRequest, ...]:
-    """rows: every order JOIN clients (case_no is required, so INNER JOIN is safe)."""
+    """Build Client LINE reminders from projection plus canonical binding roots."""
     version = as_of.toordinal()
     requests = []
     for row in rows:
         case_no = row["case_no"]
-        active = not row.get("line_user_id")
+        active = not _canonical_line_binding_matches(
+            row,
+            projection_key="line_user_id",
+            subject_id_key="client_id",
+            subject_type="customer",
+        )
         snapshot = {"case_no": case_no}
         requests.append(_request("LINE-001", case_no, version, active, snapshot, {"case_no": case_no}))
     return tuple(requests)
@@ -463,15 +484,43 @@ def build_client_missing_line_requests(
 def build_staff_missing_line_requests(
     rows: list[Mapping[str, Any]], *, as_of: date
 ) -> tuple[ProjectAlertRequest, ...]:
-    """rows: every order LEFT JOIN staff."""
+    """Build Staff LINE reminders from projection plus canonical binding roots."""
     version = as_of.toordinal()
     requests = []
     for row in rows:
         case_no = row["case_no"]
-        active = row.get("staff_id") is not None and not row.get("staff_line_user_id")
+        active = row.get("staff_id") is not None and not _canonical_line_binding_matches(
+            row,
+            projection_key="staff_line_user_id",
+            subject_id_key="staff_id",
+            subject_type="staff",
+        )
         snapshot = {"case_no": case_no}
         requests.append(_request("LINE-005", case_no, version, active, snapshot, {"case_no": case_no}))
     return tuple(requests)
+
+
+def _canonical_line_binding_matches(
+    row: Mapping[str, Any],
+    *,
+    projection_key: str,
+    subject_id_key: str,
+    subject_type: str,
+) -> bool:
+    projection_line_user_id = row.get(projection_key)
+    subject_id = row.get(subject_id_key)
+    if not isinstance(projection_line_user_id, str) or not projection_line_user_id:
+        return False
+    if projection_line_user_id != projection_line_user_id.strip():
+        return False
+    if isinstance(subject_id, bool) or not isinstance(subject_id, int) or subject_id < 1:
+        return False
+    return (
+        row.get("binding_line_user_id") == projection_line_user_id
+        and row.get("binding_status") == "bound"
+        and row.get("binding_subject_type") == subject_type
+        and row.get("binding_subject_reference") == str(subject_id)
+    )
 
 
 def build_line_task_no_reply_requests(

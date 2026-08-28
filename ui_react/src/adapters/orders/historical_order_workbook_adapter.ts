@@ -1,6 +1,6 @@
 /**
  * File: historical_order_workbook_adapter.ts
- * Description: 投影Historical Orders Preview，依互斥terminal結果守恆並保留review overlay。
+ * Description: 投影Historical Orders Preview，含terminal review與review overlay的守恆驗證。
  */
 import { HistoricalOrderWorkbookContractError } from '../../api/orders/historical_order_workbook/errors';
 import type { HistoricalOrderWorkbookPreview } from '../../api/orders/historical_order_workbook/schemas';
@@ -22,7 +22,8 @@ export function adaptHistoricalOrderWorkbookPreview(
   preview: HistoricalOrderWorkbookPreview
 ): HistoricalOrderWorkbookPreviewModel {
   const primaryTotal = preview.adopted_count + preview.unmatched_case_count + preview.current_conflict_count;
-  if (primaryTotal !== preview.source_row_count) {
+  const terminalReviewCount = preview.source_row_count - primaryTotal;
+  if (terminalReviewCount < 0 || terminalReviewCount > preview.review_required_count) {
     throw new HistoricalOrderWorkbookContractError('historical_order_row_outcomes_not_conserved', 'Historical Orders Preview主要結果計數不守恆。');
   }
   if (preview.assignment_candidate_count + preview.evidence_only_pairing_count > preview.adopted_count) {

@@ -38,7 +38,7 @@ def _response(data):
 
 def test_client_uses_distinct_subsidy_return_apply_path_and_idempotency_header():
     session = _Session([
-        _response({"case_no": "C-1", "account_version": 2, "refund_obligations": [], "subsidy_return_obligations": [], "reversal_targets": [], "refund_return_targets": []}),
+        _response({"case_no": "C-1", "account_version": 2, "refund_obligations": [], "subsidy_return_obligations": [], "refund_bank_facts": [], "subsidy_return_bank_facts": [], "reversal_targets": [], "refund_return_targets": []}),
         _response({"account_version": 2, "candidate": {}, "preview_fingerprint": "a" * 64}),
         _response({"case_no": "C-1", "correction_type": "refund", "account_version": 3, "correction_identity": "b" * 64, "ledger_entry_count": 1, "allocation_count": 1, "affected_obligations": ["subsidy:C-1"]}),
     ])

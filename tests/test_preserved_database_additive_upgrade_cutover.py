@@ -5,6 +5,7 @@ Description: 驗證保留資料的 additive migration、metadata 精確比對與
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 from datetime import date
@@ -421,6 +422,91 @@ def test_105_parent_table_preexisting_metadata_does_not_create_drift() -> None:
     })
 
     assert migration._canonical_artifact_metadata_state(snapshot, part) == "exact"
+
+
+def test_1004_release_accepts_only_the_exact_1005_purpose_successor() -> None:
+    released = migration._canonical_artifact_descriptor(
+        "1004_controlled_file_storage_foundation.sql"
+    )
+    predecessor = deepcopy(released)
+    successor = migration._canonical_artifact_descriptor(
+        "1005_contract_external_signing_successor.sql"
+    )
+    for table in (
+        "controlled_file_staging_objects",
+        "controlled_file_objects",
+    ):
+        predecessor["tables"][table]["purpose"] = successor[
+            "parent_columns"
+        ][table]["purpose"]
+    for key, clause in successor["checks"].items():
+        if key[0] in {
+            "controlled_file_staging_objects",
+            "controlled_file_objects",
+        }:
+            predecessor["checks"][key] = clause
+    snapshot = _snapshot_from_descriptor(predecessor)
+
+    assert migration._release_descriptor_metadata_state(
+        snapshot,
+        "1004_controlled_file_storage_foundation.sql",
+        migration.OWNED_OBJECTS[
+            "1004_controlled_file_storage_foundation.sql"
+        ],
+    ) == "exact"
+    assert migration.local_additive_descriptor_state(
+        snapshot,
+        released,
+        "1004_controlled_file_storage_foundation.sql",
+    ) == "exact"
+
+    purpose = next(
+        row for row in snapshot["columns"]
+        if row["table_name"] == "controlled_file_objects"
+        and row["column_name"] == "purpose"
+    )
+    purpose["column_type"] = "enum('unexpected')"
+    assert migration._release_descriptor_metadata_state(
+        snapshot,
+        "1004_controlled_file_storage_foundation.sql",
+        migration.OWNED_OBJECTS[
+            "1004_controlled_file_storage_foundation.sql"
+        ],
+    ) == "drift"
+    assert migration.local_additive_descriptor_state(
+        snapshot,
+        released,
+        "1004_controlled_file_storage_foundation.sql",
+    ) == "drift"
+
+
+def test_check_normalizer_flattens_mysql_between_parentheses() -> None:
+    actual = (
+        "((`catalog_version` > 0) and (`contract_version` > 0) "
+        "and (`terminal_predicate_version` > 0) "
+        "and (`step_number` between 1 and 11))"
+    )
+    released = (
+        "and(atom(catalog_version>0),atom(contract_version>0),"
+        "atom(terminal_predicate_version>0),atom(step_numberbetween1),atom(11))"
+    )
+
+    assert migration._normalize_check_contract(actual) == released
+
+
+def test_check_normalizer_accepts_mysql_not_regexp_projection() -> None:
+    actual = (
+        "((char_length(trim(`root_identity`)) > 0) and "
+        "(not(regexp_like(`root_identity`,_utf8mb4'[[:cntrl:]]'))))"
+    )
+    released = (
+        "and(atom(char_length(trim(root_identity))>0),"
+        "atom(root_identityregexp_like(not,'[[:cntrl:]]')))"
+    )
+
+    assert migration._normalize_check_contract(actual) == (
+        migration._normalize_check_contract(released)
+    )
 
 
 @pytest.mark.parametrize(

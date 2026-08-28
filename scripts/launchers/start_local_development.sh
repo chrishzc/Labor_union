@@ -48,47 +48,135 @@ fi
 PY="$PWD/.venv/bin/python"
 export APP_ENV="${APP_ENV:-development}"
 export INTERNAL_SERVICE_SHARED_KEY="${INTERNAL_SERVICE_SHARED_KEY:-$("${PY}" -c 'import secrets; print(secrets.token_urlsafe(32))')}"
+export DB_PORT="${DB_PORT:-3306}"
+export MYSQL_CONTAINER="${MYSQL_CONTAINER:-mysql_db}"
 
 if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
   "$PY" -m scripts.launcher_preflight --profile artifact-runtime
 fi
 
-choose_db_port() {
-  if ! lsof -iTCP:3306 -sTCP:LISTEN >/dev/null 2>&1; then
-    echo 3306
-    return
-  fi
-  echo "Port 3306 is busy; using 3307 for local development." >&2
-  echo 3307
+docker compose up -d redis
+if [[ "$(docker inspect --format "{{.State.Running}}" "$MYSQL_CONTAINER" 2>/dev/null || true)" == "true" ]]; then
+  echo "Reusing running MySQL container: $MYSQL_CONTAINER"
+elif docker inspect "$MYSQL_CONTAINER" >/dev/null 2>&1; then
+  docker start "$MYSQL_CONTAINER" >/dev/null
+elif [[ "$MYSQL_CONTAINER" == "mysql_db" ]]; then
+  docker compose up -d db
+else
+  echo "Configured MySQL container does not exist: $MYSQL_CONTAINER" >&2
+  exit 1
+fi
+"$PY" scripts/wait_for_db.py
+"$PY" -m scripts.update_local_database --require-current --database-port "$DB_PORT"
+
+set -m
+OWNED_PIDS=()
+OWNED_LABELS=()
+LAST_OWNED_PID=""
+
+start_owned() {
+  local label="$1"
+  shift
+  "$@" &
+  LAST_OWNED_PID=$!
+  OWNED_PIDS+=("$LAST_OWNED_PID")
+  OWNED_LABELS+=("$label")
 }
 
-DB_PORT="$(choose_db_port)"
-docker compose up -d
-"$PY" scripts/wait_for_db.py --port "$DB_PORT"
-"$PY" -m scripts.update_local_database --require-current --database-port "$DB_PORT"
-"$PY" -m uvicorn api.main:app --host 0.0.0.0 --port 8000 &
-if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
-  API_READY=0
+register_owned() {
+  LAST_OWNED_PID="$2"
+  OWNED_LABELS+=("$1")
+  OWNED_PIDS+=("$2")
+}
+
+cleanup_owned() {
+  local status=$?
+  trap - EXIT INT TERM
+  local pid
+  for pid in "${OWNED_PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    fi
+  done
+  for pid in "${OWNED_PIDS[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+  exit "$status"
+}
+
+require_owned_process() {
+  local label="$1"
+  local pid="$2"
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "$label exited before readiness." >&2
+    return 1
+  fi
+}
+
+wait_for_http() {
+  local url="$1"
+  local label="$2"
   for _ in {1..30}; do
-    if "$PY" -c 'from urllib.request import urlopen; raise SystemExit(0 if urlopen("http://127.0.0.1:8000/health", timeout=2).status == 200 else 1)' >/dev/null 2>&1; then
-      API_READY=1
-      break
+    if "$PY" -c 'from urllib.request import urlopen; import sys; raise SystemExit(0 if urlopen(sys.argv[1], timeout=2).status == 200 else 1)' "$url" >/dev/null 2>&1; then
+      return 0
     fi
     sleep 1
   done
-  [[ "$API_READY" == "1" ]] || { echo "FastAPI did not become ready."; exit 1; }
+  echo "$label did not become ready." >&2
+  return 1
+}
+
+trap cleanup_owned EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+start_owned "FastAPI" "$PY" -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+API_PID="$LAST_OWNED_PID"
+wait_for_http "http://127.0.0.1:8000/health" "FastAPI"
+if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
   "$PY" -m scripts.run_service_monitor --react-admin-health-check
 fi
-(cd ui_react && npm run dev -- --host 0.0.0.0 --port 5173 --strictPort) &
+(cd ui_react && exec npm run dev -- --host 0.0.0.0 --port 5173 --strictPort) &
+register_owned "React/Vite" "$!"
+REACT_PID="$LAST_OWNED_PID"
+wait_for_http "http://127.0.0.1:5173/admin/" "React/Vite"
 if "$PY" -m scripts.launcher_preflight --profile line-worker >/dev/null 2>&1; then
-  "$PY" -m scripts.run_line_worker &
+  start_owned "LINE Worker" "$PY" -m scripts.run_line_worker
+  LINE_PID="$LAST_OWNED_PID"
 else
   echo "Skipping LINE Worker: local LINE credentials or runtime configuration are unavailable."
 fi
-"$PY" -m scripts.run_service_monitor &
-"$PY" -m scripts.run_durable_job_worker &
-"$PY" -m scripts.run_incident_worker &
+start_owned "Runtime Monitor" "$PY" -m scripts.run_service_monitor
+MONITOR_PID="$LAST_OWNED_PID"
+start_owned "Durable Background Worker" "$PY" -m scripts.run_durable_job_worker
+DURABLE_PID="$LAST_OWNED_PID"
+start_owned "Incident Maintenance Worker" "$PY" -m scripts.run_incident_worker
+INCIDENT_PID="$LAST_OWNED_PID"
 if grep -Eiq '^KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED=true$' .env 2>/dev/null; then
-  "$PY" -m scripts.run_knowledge_worker &
+  start_owned "Knowledge Retrieval Worker" "$PY" -m scripts.run_knowledge_worker
+  KNOWLEDGE_PID="$LAST_OWNED_PID"
 fi
-wait
+
+sleep 1
+require_owned_process "FastAPI" "$API_PID"
+require_owned_process "React/Vite" "$REACT_PID"
+require_owned_process "Runtime Monitor" "$MONITOR_PID"
+require_owned_process "Durable Background Worker" "$DURABLE_PID"
+require_owned_process "Incident Maintenance Worker" "$INCIDENT_PID"
+if [[ -n "${LINE_PID:-}" ]]; then require_owned_process "LINE Worker" "$LINE_PID"; fi
+if [[ -n "${KNOWLEDGE_PID:-}" ]]; then require_owned_process "Knowledge Retrieval Worker" "$KNOWLEDGE_PID"; fi
+
+while true; do
+  for index in "${!OWNED_PIDS[@]}"; do
+    pid="${OWNED_PIDS[$index]}"
+    if ! kill -0 "$pid" 2>/dev/null; then
+      set +e
+      wait "$pid"
+      status=$?
+      set -e
+      echo "${OWNED_LABELS[$index]} exited; stopping owned local runtime." >&2
+      exit "$status"
+    fi
+  done
+  sleep 2
+done

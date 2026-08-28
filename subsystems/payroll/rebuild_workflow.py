@@ -1,8 +1,12 @@
-"""Canonical Payroll rebuild preview, replay, and obligation persistence."""
+"""
+File: rebuild_workflow.py
+Description: 以正式服務、費率、到期日與既有付款歷史重建 Payroll obligations。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 from typing import Callable, Protocol
 
@@ -45,6 +49,7 @@ class ExistingStaffObligation:
     obligation_identity: str
     amount_due: MoneyNTD
     payout_history_exists: bool
+    due_date: date | None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.assignment_identity, "assignment identity", _IDENTITY_MAXIMUM_LENGTH)
@@ -54,6 +59,8 @@ class ExistingStaffObligation:
         require_nonnegative_integer(self.amount_due.amount, "staff obligation amount")
         if not isinstance(self.payout_history_exists, bool):
             raise TypeError("payout history flag must be bool")
+        if self.due_date is not None and not isinstance(self.due_date, date):
+            raise TypeError("staff obligation due date must be a date")
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,10 +72,15 @@ class PayrollRebuildFacts:
     terms: PayrollTerms
     adjustments: tuple[PayrollAdjustment, ...]
     existing_obligations: tuple[ExistingStaffObligation, ...]
+    staff_payment_due_date: date | None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", _IDENTITY_MAXIMUM_LENGTH)
         require_nonnegative_integer(self.payroll_version, "payroll version")
+        if self.staff_payment_due_date is not None and not isinstance(
+            self.staff_payment_due_date, date
+        ):
+            raise TypeError("staff payment due date must be a date")
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +91,7 @@ class StaffObligationAction:
     before_amount: MoneyNTD
     after_amount: MoneyNTD
     delta_amount: MoneyNTD
+    due_date: date | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,7 +215,15 @@ class PayrollRebuildWorkflow:
 
 def _build_preview(facts: PayrollRebuildFacts) -> PayrollRebuildPreview:
     payroll = build_case_payroll_candidate(facts.service_facts, facts.rate_snapshots, facts.terms, facts.adjustments)
-    return _preview_result(facts, payroll, _build_actions(payroll, facts.existing_obligations))
+    return _preview_result(
+        facts,
+        payroll,
+        _build_actions(
+            payroll,
+            facts.existing_obligations,
+            facts.staff_payment_due_date,
+        ),
+    )
 
 
 def _preview_result(facts, payroll, actions) -> PayrollRebuildPreview:
@@ -219,36 +240,54 @@ def _preview_result(facts, payroll, actions) -> PayrollRebuildPreview:
     )
 
 
-def _build_actions(payroll, existing_obligations):
+def _build_actions(payroll, existing_obligations, staff_payment_due_date):
     existing = {item.assignment_identity: item for item in existing_obligations}
     if len(existing) != len(existing_obligations):
         raise ValueError("invalid_payroll_facts")
-    candidate_actions = tuple(_obligation_action(item, existing.get(item.assignment_identity)) for item in payroll.assignments)
+    candidate_actions = tuple(
+        _obligation_action(
+            item,
+            existing.get(item.assignment_identity),
+            staff_payment_due_date,
+        )
+        for item in payroll.assignments
+    )
     candidate_identities = {item.assignment_identity for item in payroll.assignments}
     removed_actions = tuple(_removed_obligation_action(item) for identity, item in sorted(existing.items()) if identity not in candidate_identities)
     return candidate_actions + removed_actions
 
 
-def _obligation_action(candidate, existing):
+def _obligation_action(candidate, existing, staff_payment_due_date):
     if existing is None:
-        return _new_obligation_action(candidate)
+        return _new_obligation_action(candidate, staff_payment_due_date)
     delta = candidate.total_payable - existing.amount_due
-    return StaffObligationAction(candidate.assignment_identity, existing.obligation_identity, _existing_action_kind(existing, delta), existing.amount_due, candidate.total_payable, delta)
+    due_date = existing.due_date or staff_payment_due_date
+    return StaffObligationAction(
+        candidate.assignment_identity,
+        existing.obligation_identity,
+        _existing_action_kind(existing, delta, due_date),
+        existing.amount_due,
+        candidate.total_payable,
+        delta,
+        due_date,
+    )
 
 
-def _new_obligation_action(candidate):
+def _new_obligation_action(candidate, due_date):
     zero = MoneyNTD(0)
-    return StaffObligationAction(candidate.assignment_identity, f"staff-obligation:{candidate.assignment_identity}", StaffObligationActionKind.CREATE, zero, candidate.total_payable, candidate.total_payable)
+    return StaffObligationAction(candidate.assignment_identity, f"staff-obligation:{candidate.assignment_identity}", StaffObligationActionKind.CREATE, zero, candidate.total_payable, candidate.total_payable, due_date)
 
 
 def _removed_obligation_action(existing):
     zero = MoneyNTD(0)
     delta = zero - existing.amount_due
-    return StaffObligationAction(existing.assignment_identity, existing.obligation_identity, _existing_action_kind(existing, delta), existing.amount_due, zero, delta)
+    return StaffObligationAction(existing.assignment_identity, existing.obligation_identity, _existing_action_kind(existing, delta, existing.due_date), existing.amount_due, zero, delta, existing.due_date)
 
 
-def _existing_action_kind(existing, delta):
+def _existing_action_kind(existing, delta, due_date):
     if delta.is_zero:
+        if existing.due_date is None and due_date is not None and not existing.payout_history_exists:
+            return StaffObligationActionKind.REPLACE_UNPAID
         return StaffObligationActionKind.UNCHANGED
     if existing.payout_history_exists:
         return StaffObligationActionKind.APPEND_FROZEN_DELTA
@@ -263,6 +302,7 @@ def _action_payload(action) -> dict[str, object]:
         "before_amount_ntd": action.before_amount.amount,
         "after_amount_ntd": action.after_amount.amount,
         "delta_amount_ntd": action.delta_amount.amount,
+        "due_date": action.due_date.isoformat() if action.due_date else None,
     }
 
 

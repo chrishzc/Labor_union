@@ -1,4 +1,7 @@
-"""MySQL source loader and atomic persistence for Staff Payout Reconciliation."""
+"""
+File: staff_payout_repository.py
+Description: 讀取 MySQL Staff Payables 根事實並原子保存 payout、recovery、receipt 與 outbox。
+"""
 
 from __future__ import annotations
 
@@ -47,6 +50,7 @@ _RETURN_IDENTITY = re.compile(r"^return:row:(\d+):source:(\d+)$")
 _REVERSAL_IDENTITY = re.compile(
     r"^reversal:source:(\d+):on:(\d{4}-\d{2}-\d{2})$"
 )
+_JAVASCRIPT_SAFE_VERSION_HEX_DIGITS = 13
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +130,9 @@ class MySqlStaffPayoutRepository:
         if not isinstance(candidate, StaffPayoutCandidate) or candidate.recovery is None:
             return
         recovery = candidate.recovery
+        source_bank_fact_identities = _canonical_recovery_source_bank_fact_identities(
+            recovery.source_bank_fact_identities
+        )
         source_event_ids = tuple(
             self._event_ids[event.identity]
             for event in candidate.events
@@ -138,11 +145,25 @@ class MySqlStaffPayoutRepository:
                     recovery.staff_id,
                     recovery.original_amount.amount,
                     recovery.original_amount.amount,
-                    _canonical_json(recovery.source_bank_fact_identities),
+                    _canonical_json(source_bank_fact_identities),
                     _canonical_json(source_event_ids),
                     _canonical_json(recovery.source_obligation_identities),
                     self._require_request().actor.actor_id,
                     self._require_request().reason,
+                ),
+            )
+            cursor.execute(
+                _RECOVERY_ESTABLISHED_OUTBOX_SQL,
+                (
+                    recovery.staff_id,
+                    _recovery_established_intent_key(recovery.identity),
+                    _canonical_json(
+                        {
+                            "event_type": "staff_overpayment_recovery_established",
+                            "recovery_identity": recovery.identity,
+                            "recovery_version": 0,
+                        }
+                    ),
                 ),
             )
 
@@ -482,6 +503,26 @@ def _positive_row_id(value: str) -> int:
     except ValueError:
         return -1
     return row_id if row_id > 0 else -1
+
+
+def _canonical_recovery_source_bank_fact_identities(
+    identities: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Translate legacy payout row ids to the persisted Finance Import identity."""
+    canonical: list[str] = []
+    for identity in identities:
+        if not isinstance(identity, str):
+            raise ValueError("staff_overpayment_recovery_source_bank_fact_invalid")
+        raw_id = identity.removeprefix("finance-import-row:")
+        if not re.fullmatch(r"[0-9]+", raw_id):
+            raise ValueError("staff_overpayment_recovery_source_bank_fact_invalid")
+        row_id = int(raw_id)
+        if row_id <= 0:
+            raise ValueError("staff_overpayment_recovery_source_bank_fact_invalid")
+        canonical.append(f"finance-import-row:{row_id}")
+    if not canonical or len(canonical) != len(set(canonical)):
+        raise ValueError("staff_overpayment_recovery_source_bank_fact_invalid")
+    return tuple(canonical)
 
 
 # Kept cohesive because the ordered SQL result is the bank-ownership fact boundary.
@@ -845,7 +886,7 @@ def _bank_facts_version(bank_rows, reopen_fact) -> int:
         "reopen": None if reopen_fact is None else _reopen_version_row(reopen_fact),
     }
     digest = hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
-    return int(digest[:15], 16)
+    return int(digest[:_JAVASCRIPT_SAFE_VERSION_HEX_DIGITS], 16)
 
 
 def _bank_version_row(row) -> dict[str, object]:
@@ -1045,6 +1086,13 @@ def _payout_difference_identity(key: IdempotencyKey) -> str:
     return f"staff-payout-difference:{digest}"
 
 
+def _recovery_established_intent_key(recovery_identity: str) -> str:
+    digest = hashlib.sha256(
+        f"staff-overpayment-recovery-established:{recovery_identity}".encode("utf-8")
+    ).hexdigest()
+    return f"staff-overpayment-recovery-established:{digest}"
+
+
 def _outbox_intent_type(request: StaffPayoutApplyRequest) -> str:
     if request.selection.difference_mode is not None:
         return "payout_anomaly_required"
@@ -1222,6 +1270,11 @@ _RECOVERY_INSERT_SQL = (
     "(recovery_identity,staff_id,original_amount_ntd,remaining_amount_ntd,"
     "source_bank_fact_identities,source_payout_event_ids,source_obligation_identities,"
     "actor,reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+)
+_RECOVERY_ESTABLISHED_OUTBOX_SQL = (
+    "INSERT INTO staff_payables_outbox "
+    "(staff_id,intent_key,intent_type,payload_snapshot) "
+    "VALUES (%s,%s,'staff_overpayment_recovery_updated',%s)"
 )
 
 __all__ = [

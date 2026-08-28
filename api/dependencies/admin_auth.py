@@ -174,6 +174,25 @@ def require_integration_capability(
     return require_capability(capability)
 
 
+def require_anomaly_necessity_migration_operator(
+    request: Request,
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+) -> AdminPrincipal:
+    """Require a persisted administrator for the approved migration runner."""
+    if principal.id is None or not principal.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="需要已登入且啟用的內部使用者 Session",
+        )
+    if not has_required_capability(principal, "system.administration"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="缺少必要能力：system.administration",
+        )
+    request.state.admin_actor = admin_actor_context(principal)
+    return principal
+
+
 require_line_viewer = require_capability("line.identity.read")
 require_line_agent = require_capability("line.review.read")
 require_line_manager = require_capability("system.configuration.manage")
@@ -225,3 +244,6 @@ require_knowledge_reindexer = require_integration_capability(
 )
 require_system_config_manager = require_capability("system.configuration.manage")
 require_system_admin = require_capability("system.administration")
+require_historical_order_review_remediator = require_capability(
+    "orders.historical_review.remediate"
+)

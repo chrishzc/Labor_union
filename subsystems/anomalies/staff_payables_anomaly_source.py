@@ -1,4 +1,7 @@
-"""Scan Staff Payables root facts and project bounded anomaly requests."""
+"""
+File: staff_payables_anomaly_source.py
+Description: 掃描月嫂應付款根事實並投影有界異常命令。
+"""
 
 from __future__ import annotations
 
@@ -14,11 +17,12 @@ from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId
 from shared_kernel.validation import require_canonical_text, require_nonnegative_integer, require_positive_integer
 from subsystems.anomalies.alert_workflow import AnomalyApplication, ProjectAlertRequest
+from subsystems.anomalies.source_version import daily_root_source_version
 
 _CONSUMER_IDENTITY = "staff-payables-anomaly-source-v1"
 _MAXIMUM_SCAN_ITEMS = 100
 _MAXIMUM_DISPLAY_OBLIGATIONS = 20
-_OVERDUE_PAYABLES_SQL = """SELECT obligations.obligation_identity, obligations.staff_id, obligations.amount_due_ntd, obligations.due_date, obligations.status AS obligation_status, COALESCE(projection.status, 'payable') AS projection_status, COALESCE(projection.balance_ntd, obligations.amount_due_ntd) AS balance_ntd, GREATEST(COALESCE(obligations.current_event_id, 0), COALESCE(obligations.payroll_version, 0), COALESCE(projection.current_event_id, 0), COALESCE(projection.aggregate_version, 0)) AS root_version FROM staff_obligations obligations LEFT JOIN staff_payable_projections projection ON projection.obligation_identity = obligations.obligation_identity WHERE obligations.direction = 'payable_to_staff' AND obligations.obligation_identity > %s ORDER BY obligations.obligation_identity LIMIT %s"""
+_OVERDUE_PAYABLES_SQL = """SELECT obligations.obligation_identity, obligations.staff_id, obligations.amount_due_ntd, obligations.due_date, obligations.status AS obligation_status, COALESCE(projection.status, 'payable') AS projection_status, COALESCE(projection.balance_ntd, obligations.amount_due_ntd) AS balance_ntd, GREATEST(COALESCE(obligations.current_event_id, 0), COALESCE(obligations.payroll_version, 0), COALESCE(projection.current_event_id, 0), COALESCE(projection.aggregate_version, 0)) AS root_version FROM staff_obligations obligations LEFT JOIN staff_payable_projections projection ON projection.obligation_identity = obligations.obligation_identity WHERE obligations.direction = 'payable_to_staff' AND obligations.obligation_identity > %s ORDER BY obligations.obligation_identity LIMIT %s FOR UPDATE"""
 _LATE_CHANGE_SQL = """SELECT events.id AS event_id, events.obligation_identity, events.before_amount_ntd, events.after_amount_ntd, events.due_date AS original_due_date, events.created_at, obligations.staff_id, obligations.status AS obligation_status, COALESCE(projection.status, 'payable') AS projection_status, GREATEST(events.id, COALESCE(events.resulting_payroll_version, 0), COALESCE(obligations.current_event_id, 0), COALESCE(obligations.payroll_version, 0), COALESCE(projection.current_event_id, 0), COALESCE(projection.aggregate_version, 0)) AS root_version FROM staff_obligation_events events JOIN staff_obligations obligations ON obligations.obligation_identity = events.obligation_identity LEFT JOIN staff_payable_projections projection ON projection.obligation_identity = obligations.obligation_identity WHERE events.id > %s AND obligations.direction = 'payable_to_staff' ORDER BY events.id LIMIT %s"""
 _BANK_MASTER_STAFF_SQL = """SELECT obligations.staff_id, GREATEST(MAX(COALESCE(obligations.current_event_id, 0)), MAX(COALESCE(obligations.payroll_version, 0)), MAX(COALESCE(projection.current_event_id, 0)), MAX(COALESCE(projection.aggregate_version, 0))) AS root_version FROM staff_obligations obligations LEFT JOIN staff_payable_projections projection ON projection.obligation_identity = obligations.obligation_identity WHERE obligations.direction = 'payable_to_staff' AND obligations.staff_id > %s GROUP BY obligations.staff_id ORDER BY obligations.staff_id LIMIT %s"""
 _BANK_MASTER_ROWS_SQL = """SELECT obligations.staff_id, obligations.obligation_identity, obligations.amount_due_ntd, obligations.status AS obligation_status, COALESCE(projection.status, 'payable') AS projection_status, bank_accounts.id AS bank_account_id, bank_accounts.is_primary, bank_accounts.bank_code, bank_accounts.branch_code, bank_accounts.account_no FROM staff_obligations obligations LEFT JOIN staff_payable_projections projection ON projection.obligation_identity = obligations.obligation_identity LEFT JOIN staff_bank_accounts bank_accounts ON bank_accounts.staff_id = obligations.staff_id WHERE obligations.direction = 'payable_to_staff' AND obligations.staff_id IN ({placeholders}) ORDER BY obligations.staff_id, obligations.obligation_identity, bank_accounts.id"""
@@ -134,9 +138,19 @@ def _project_requests(connection, requests):
 
 def _overdue_request(row, as_of):
     identity = _text(row, "obligation_identity"); due_date = _optional_date(row.get("due_date")); amount = _integer(row, "amount_due_ntd"); balance = _integer(row, "balance_ntd")
-    active = due_date is not None and due_date < as_of and amount > 0 and balance > 0 and row.get("obligation_status") not in {"settled", "cancelled"} and row.get("projection_status") not in {"completed", "cancelled"}
+    active = (
+        due_date is not None
+        and due_date < as_of
+        and balance > 0
+        and row.get("obligation_status") != "cancelled"
+        and row.get("projection_status") != "cancelled"
+    )
     snapshot = {"amount_due_ntd": amount, "balance_ntd": balance, "due_date": due_date.isoformat() if due_date else None, "obligation_identity": identity, "staff_id": _positive_row_id(row, "staff_id")}
-    return _request("PAYOUT-001", identity, _source_version(row, as_of), active, snapshot)
+    source_version = daily_root_source_version(
+        as_of=as_of,
+        root_version=_nonnegative_integer(row.get("root_version"), "root version"),
+    )
+    return _request("PAYOUT-001", identity, source_version, active, snapshot)
 
 
 def _late_change_request(row, as_of):

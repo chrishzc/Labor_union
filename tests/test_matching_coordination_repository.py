@@ -6,8 +6,10 @@ Description: 驗證 M3 MySQL adapter 的 borrowed transaction、FK 順序與 typ
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import replace
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -614,3 +616,41 @@ def test_zero_candidate_disagree_writes_no_intents() -> None:
 
     assert not any("OUTBOX" in statement.upper() for statement, _ in connection.statements)
     assert connection.commit_count == 0
+
+
+def test_every_apply_command_maps_to_a_released_matching_event_enum() -> None:
+    schema = (
+        Path(__file__).resolve().parents[1]
+        / "db/schema_parts/1003_matching_coordination_successor.sql"
+    ).read_text(encoding="utf-8")
+    enum_values = set(
+        re.findall(
+            r"'([^']+)'",
+            schema.split("event_type ENUM(", 1)[1].split(")", 1)[0],
+        )
+    )
+    mappings = {
+        "ApplyInitialCriteriaSnapshot": "criteria_snapshotted",
+        "ApplyCriteriaDiffResend": "criteria_diff",
+        "ApplyCaregiverSelection": "caregiver_willingness",
+        "ApplyCustomerMatchingDecision": "customer_decision",
+        "ApplyZeroCandidateAlternative": "customer_decision",
+        "ApplyRematch": "rematch_required",
+        "ApplyLeaveImpactOnMatching": "rematch_required",
+        "ApplyServiceDateChangeRematch": "rematch_required",
+    }
+
+    assert all(event_type in enum_values for event_type in mappings.values())
+    for command_name, expected_event_type in mappings.items():
+        command = type(command_name, (), {})()
+        assert _repository_module._event_type(command) == expected_event_type
+
+
+def test_unsupported_matching_command_does_not_fallback_to_rematch_event() -> None:
+    unsupported = type("UnsupportedMatchingCommand", (), {})()
+
+    with pytest.raises(
+        _repository_module.MatchingCoordinationPersistenceError,
+        match="unsupported matching command event type",
+    ):
+        _repository_module._event_type(unsupported)

@@ -1,3 +1,8 @@
+"""
+File: test_leave_substitution_workflow.py
+Description: 驗證 Scheduling 請假代班規則與服務中代班文件例外。
+"""
+
 from __future__ import annotations
 
 from datetime import date
@@ -73,6 +78,53 @@ def test_holiday_rest_day_defers_service_without_changing_contract_day_count():
     )
     assert planned_dates == [date(2026, 8, 1), date(2026, 8, 3), date(2026, 8, 4)]
     assert len(planned_dates) == facts.assignment_plan.contracted_service_days
+
+
+def test_in_progress_substitution_needs_no_new_contract_or_customer_signature():
+    """服務中代班只依 Scheduling 根事實，不引入新的契約／簽回 gate。"""
+    service_date = date(2026, 8, 5)
+    assignment = EffectiveAssignmentFact(
+        1,
+        1,
+        1,
+        service_date,
+        service_date,
+        (service_date,),
+    )
+    facts = LeaveSubstitutionFacts(
+        AssignmentPlanFacts(
+            "case-substitution-contract-exception",
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            8,
+            True,
+            (assignment,),
+        ),
+        (OfficialScheduleFact(10, 1, 1, service_date),),
+        False,
+    )
+
+    candidate = build_leave_substitution_candidate(
+        facts,
+        LeaveSubstitutionBatchIntent(
+            1,
+            (
+                LeaveSubstitutionItem(
+                    10,
+                    service_date,
+                    LeaveResolutionType.SUBSTITUTE,
+                    2,
+                ),
+            ),
+        ),
+    )
+
+    assert candidate.outcomes[0].resulting_staff_id == 2
+    assert candidate.scheduling.assignments[0].staff_id == 2
 
 
 def test_holiday_only_preview_requires_no_manual_leave_item():

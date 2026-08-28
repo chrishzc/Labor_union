@@ -1,3 +1,5 @@
+import pytest
+
 from domains.client_finance.over_refund_recovery import (
     ClientOverRefundRecovery,
     ClientOverRefundRecoveryStatus,
@@ -92,7 +94,10 @@ def test_preview_fingerprint_is_canonical_for_the_selected_bank_row() -> None:
     workflow = ClientOverRefundRecoveryWorkflow(_PreviewRepository(), _NeverUsedUnitOfWork)
 
     preview = workflow.preview(
-        ClientOverRefundRecoverySelection("115000001", "client-over-refund-recovery:1", "row:1"),
+        ClientOverRefundRecoverySelection(
+            "115000001", "client-over-refund-recovery:1", "row:1",
+            matching_identity="client-recovery-match:1", matching_version=1,
+        ),
         CorrelationId("test-client-over-refund-preview"),
     )
 
@@ -126,6 +131,28 @@ def test_adjustment_apply_rebuilds_authorized_candidate_before_persisting() -> N
     assert receipt.remaining_after_ntd == 150
     assert receipt.resulting_status == "open"
     assert repository.persisted is not None
+
+
+def test_collection_preview_requires_existing_immutable_matching_identity_and_version() -> None:
+    with pytest.raises(ValueError, match="client_over_refund_recovery_matching_required"):
+        ClientOverRefundRecoverySelection(
+            "115000001", "client-over-refund-recovery:1", "row:1",
+        )
+
+    with pytest.raises(ValueError, match="client_over_refund_recovery_matching_invalid"):
+        ClientOverRefundRecoverySelection(
+            "115000001", "client-over-refund-recovery:1", "row:1",
+            matching_identity="client-recovery-match:1", matching_version=0,
+        )
+
+
+def test_adjustment_cannot_carry_matching_or_bank_row_identity() -> None:
+    with pytest.raises(ValueError, match="client_over_refund_recovery_action_invalid"):
+        ClientOverRefundRecoverySelection(
+            "115000001", "client-over-refund-recovery:1",
+            action=ClientOverRefundRecoveryAction.ADJUST,
+            adjustment_amount=MoneyNTD(100), matching_version=1,
+        )
 
 
 def test_matching_apply_preserves_bank_fact_and_recovery_versions() -> None:

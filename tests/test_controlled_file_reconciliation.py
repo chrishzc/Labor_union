@@ -23,6 +23,7 @@ from subsystems.controlled_files.reconciliation import (
 )
 from subsystems.controlled_files.workflow import (
     ControlledFileDownloadReference,
+    ControlledFileIntent,
     ControlledFileOwner,
     ControlledFilePurpose,
     ControlledFileReadback,
@@ -79,6 +80,14 @@ class _Repository:
             ),
             1,
             ControlledFileStagingRegistrationStatus.UNREGISTERED,
+            ControlledFileIntent(
+                staging_id=STAGING_ID,
+                owner=ControlledFileOwner.ORDERS,
+                purpose=ControlledFilePurpose.ORDER_NOTICE,
+                subject_reference="CASE-001",
+                object_key="notice",
+                logical_folder="orders/CASE-001",
+            ),
         )
         self.events = []
 

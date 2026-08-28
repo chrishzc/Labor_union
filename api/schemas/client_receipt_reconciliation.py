@@ -47,9 +47,30 @@ class ClientReceiptQueryView(_StrictModel):
     obligations: list[ClientReceiptObligationView]
 
 
+class MoneyNTDView(_StrictModel):
+    amount: int = Field(ge=0)
+
+
+class ClientReceiptAllocationView(_StrictModel):
+    bank_fact_identity: str = Field(min_length=1, max_length=191)
+    obligation_identity: str = Field(min_length=1, max_length=191)
+    amount: MoneyNTDView
+
+
+class ClientReceiptCandidateView(_StrictModel):
+    status: Literal["exact", "overage", "review_required"]
+    payment_stage: ReceiptStage
+    bank_total: MoneyNTDView
+    obligation_total: MoneyNTDView
+    overage_amount: MoneyNTDView
+    allocations: list[ClientReceiptAllocationView]
+    blockers: list[str]
+    settlement_identity: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class ClientReceiptPreviewView(_StrictModel):
     account_version: int = Field(ge=0)
-    candidate: dict[str, Any]
+    candidate: ClientReceiptCandidateView
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 

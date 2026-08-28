@@ -68,6 +68,27 @@ Orders 不擁有：
 - Staff Payables 結清只讀 `staff_payable_projections` 的 current status／version／updated time；
   `staff_obligations` 是不可變義務來源，原始 `open` 不得被 Orders 誤判為付款仍未完成。
 
+#### 作業步驟回退與 aggregate version（2026-08-27 人工裁決）
+
+- append-only lineage 與 current aggregate version 不倒退，不代表 SOP step ordinal 只能往前。
+  typed owner event 可使 current operational step 回到較早步驟，但新 event／projection version
+  必須大於舊版，既有歷史 event不得刪除、改寫或改小 version。
+- 服務前已配對月嫂因車禍、健康或其他正式不可服務事實必須整案換人時，由
+  Scheduling owner 的 replacement Query／Preview／Apply 追加具名 event，並以 immutable
+  successor lineage 使舊 caregiver-bound matching plan、recipient confirmation、commitment、簽回與
+  assignment 轉為 superseded／不再滿足 current round。不得原地改 staff id。
+- 整案重新媒合默認從 Step 2 `matching_pool` 開始；若 current owner readback 證明同一
+  replacement round 已有可沿用的合法候選池，可由 server 計算為 Step 3／4。
+  `resume_step` 必須是最早失效 owner root 的後端投影，不是人員任意輸入 status。
+- 上述整案回到媒合只適用於 owner readback 證明尚未有任何 assignment-owned actual
+  service fact。只要已提供服務，不得回 Step 2 也不新建另一套整案換人；必須使用
+  Scheduling 既有 leave／substitution Query／Preview／Apply，只重建受影響日期，並沿用
+  current Payroll impact／obligation lineage 計算原月嫂與代班月嫂薪資。
+- 回退後 Step 1 與無關 caregiver identity 的合法 Orders／Client Finance 根事實保留；
+  定金不因換人自動退款或重建。舊月嫂簽回、客戶對特定月嫂的承諾、
+  日期確認與正式排班依 binding 失效範圍逐項重做。若日期／金額／條款未變，
+  Finance 不得伪造新義務；若改變，仍走各 owner 正式 impact／adjustment 契約。
+
 ### 3.1.2 未完成訂單代辦看板（2026-08-25 人工裁決）
 
 - 代辦看板的候選集合固定為所有尚未完成的訂單；canonical lifecycle 已為「訂單完成」的案件不得顯示。
@@ -145,6 +166,43 @@ Apply：
 照既有規則保存，同時建立 immutable review evidence；不因 review 回滾同列合法 status／日期或配對
 evidence。Orders outbox 將 review 投影為 `HISTORICAL-ORDER-001`，identity 為 review identity，僅顯示
 遮罩案件識別與 issue codes。`case_no + client_name` 未匹配列固定不寫 Orders、review、outbox 或 anomaly。
+
+### 歷史 review 更正來源重新匯入（2026-08-26，已人工確認）
+
+`HISTORICAL-ORDER-001` 不得因只能查看或追蹤而永久懸置。Orders 必須提供以單一 immutable
+`review_identity` 為根的人工 remediation；Anomalies 只可組合受控入口，不能直接修改 Orders root、
+review 或 alert status。首版只接受一份僅含該 review 對應列的更正 `.xlsx`，不得接受任意
+`corrected_fields` 或以多列檔案猜測對應關係。
+
+1. Context Query 以 server-owned `review_identity` 讀取 immutable review、原 adoption receipt 與
+   Orders root，僅回傳去敏案件識別、每個衝突的 `field_path`、來源值／既有 Orders 值（依權限遮罩）、
+   檢核規則與可採用值、造成的流程阻擋、必要 workbook contract、review／disposition version，及
+   reason／evidence 要求；不得回傳原始工作簿或未遮罩個資。只回傳 `issue_codes`、顯示「欄位衝突」
+   或空白判斷依據不符合此 Query 契約。
+2. Preview 零寫入，必須重新讀取並鎖定 prior review、原 receipt 與目標 Orders root，驗證 actor
+   capability `orders.historical_review.remediate`、prior review／disposition version、唯一來源列對應、新檔 digest、根事實與既有
+   disposition。它產生只能用於該 prior review 的 fingerprint，並明示可採納或仍須建立 successor
+   review 的 blocker。
+3. Apply 必須帶 `prior_review_identity`、expected review／disposition version、preview fingerprint、
+   idempotency key、reason 與 evidence；在一個 Orders outer Unit of Work fresh-read 後重驗全部
+   binding。它可委派既有歷史採納 typed command，但不得重複 lifecycle event、assignment 或既有
+   adoption receipt。
+4. 原 `historical_order_adoption_reviews` 永遠 immutable。更正結果必須另以 append-only
+   remediation disposition／receipt／outbox 表示 `prior_review_identity → replacement adoption receipt`
+   的唯一關係，保存 actor、reason、evidence、source digest、版本、時間與可重播 identity。
+5. 更正列合法採納且沒有 issue 時，寫入 `corrected_source_adopted` disposition，由 Orders outbox
+   令 prior alert 與其 field warnings 依 predicate auto-resolve。若更正列仍有 issue，必須先建立
+   successor review／warning，再以 `superseded_by_replacement_review` disposition 關閉 prior task；
+   不得靜默刪除或把 successor 當成功。
+6. duplicate Apply 只回同一 receipt；payload mismatch、stale version、未授權 actor、非唯一對應、
+   preview stale、worker timeout 或 projector readback 未達 predicate 均回 typed error／pending，保留
+   可見 blocker。Apply 結果必須可從 Orders receipt、disposition 與 anomaly current projection
+   readback 驗證。predicate 已解除的 prior alert 必須從 active 異常頁移除，僅在 audit history 保留；
+   successor 存在時必須顯示 successor 的具體欄位衝突與新修正入口，不能留 prior review 作為唯一待辦。
+7. 更正來源若通過 Orders 完整規則、但採納後 status、日期與 assignment 均與現行 root
+   相同，這是合法 no-op adoption：必須可寫入 remediation disposition，但不得建立
+   lifecycle event 或增加 lifecycle version。schema constraint 也必須同時允許此形狀，並繼續對
+   真實狀態轉換強制 event 與 `resulting_lifecycle_version = expected_lifecycle_version + 1`。
 
 ### 3.2.1 Contract Completion Preview／Apply
 
@@ -257,7 +315,28 @@ AutoComplete 與 Scheduling leave-substitution Apply 必須序列化於同一 Or
 - 只適用於全部約定服務完成前。
 - 已開始服務時，Preview 由使用者確認逐日「實際服務日期＋實際月嫂」；現有事實預填，新增或改派必須指定月嫂與原因。
 - Apply 取消舊 assignments、未來 schedule 與 buffer，依確認後服務日建立新 assignments，重算 hours、整數樓層費、Client Finance 與 Staff Finance。
+- 取消結果若包含 Client Finance impact，Orders 只轉送 owning Domain 的 typed 結果；每筆必須帶
+  `direction`（`refund_due`／`additional_charge_due`／`no_finance_change`）與
+  `direction_amount_ntd`。Orders、API 與 UI 不得由 action kind、obligation amount 或金額正負自行推定。
 - 完整履約後取消回 `order_cancellation_after_full_service` blocker 並零寫入；狀態、薪資與服務結算維持完整履約。
+
+#### 3.5.1 服務中代班的契約邊界（2026-08-27 人工裁決）
+
+服務中已有至少一筆 assignment-owned actual service fact 時，代班是 Scheduling 對受影響日期
+的 substitution，不是 Orders 的整案換人或契約重建：
+
+- 正常代班不要求代班月嫂另簽獨立服務契約／簽回，也不要求客戶追加確認或簽署變更文件；既有
+  commitment、客戶契約、已服務日期與原月嫂的合法薪資根事實保留。
+- 代班月嫂 identity、受影響日期、原／新 assignment 與 Payroll impact 由 Scheduling／Payroll
+  的 typed substitution lineage 擁有；缺少新契約、簽回、客戶確認或變更文件，不得阻擋代班
+  Apply、排班 lineage、actual-service readback 或薪資。
+- 人員可另走人工受控的 optional `substitution_supplement` 文件／證據入口。附件只形成可稽核
+  supplemental evidence，不自動形成 signed／customer-accepted 事件；無附件或 archive 失敗
+  不影響代班合法性。若內容要改變日期、條款或金額，須另依 Terms／Finance impact／adjustment
+  owner command 處理，不得由附件直接改寫 Orders root。
+- substitute identity 不存在、occupancy conflict、fresh version stale 或 owner readback 失敗等
+  真實 blocker 仍須 fail closed；以「沒有追加契約」作為 blocker 則不符合本契約。已有 actual
+  service 卻嘗試整案回 Step 2，仍固定拒絕且零寫入。
 
 ### 3.6 Controlled Reopen
 
@@ -289,6 +368,26 @@ HCM Current仍由Case Import編排whole-workbook outer UoW。若HCM來源`exact 
 命中既有Client，Orders端固定0 mutation並接受`review_only`結果，不得建立partial Order；只有未命中duplicate
 identity、但尚無唯一Client BeClass對方的合法案件，才可依既有條款建立Order並讓
 `requires_cooking = NULL`。archive成功不等於Orders commit，rollback後的archive compensation由Case Import擁有。
+
+### 3.8 Historical Operational Baseline（2026-08-27 人工裁決）
+
+只有 Historical Orders 可由具權限人員以 append-only Preview／Apply 設定目前 11 步作業基準。選定
+第 `N` 步後，第 `1..N-1` 步投影為 `historical_baseline_completed`，第 `N` 步為 current／in-progress；
+一般新案件不得使用此狀態。baseline event 必須保存 case/order identity、selected step、actor、reason、
+evidence、current owner versions／fingerprints、idempotency 與 receipt，且不得建立不存在的 LINE delivery、
+簽章、付款、allocation、assignment 或 lifecycle event。
+
+歷史案件可免除重建已不可得的過去操作軌跡，但從 current step 繼續執行所需的 canonical root 仍必須存在。
+缺少 matched caregiver、有效 commitment、confirmed official dates、effective assignment、actual start、
+service-time tuple 或 owner financial root 時，必須建立具體、可由 owning Domain Q/P/A 補齊的異常；補正後
+fresh readback 使該 occurrence 消失並允許後續推進。歷史簽回或傳遞證據確實不可取得時，可追加具
+actor／reason／獨立 evidence 的 `historical_evidence_unavailable_accepted` disposition；它只結束補找舊文件的
+operational blocker，不得偽造成 signed／delivered／paid，也不得繞過 current/future command 的必要 root。
+
+Orders service completion 與 Client Finance、Staff Payables、Government Subsidy settlement 分開投影：
+服務根事實完整可使 Orders 完成；未結清金流仍各自保持 actionable alert，不得把 Orders 倒退為服務中。
+取消則依 §3.5 分流，沒有額外解約違約金；服務前無正式金流不要求付款紀錄，已有收款或服務中取消所形成的
+退款、補收、月嫂應付／追回仍由各 owner 結清後才解除。
 
 ## 4. Module
 
@@ -412,6 +511,8 @@ Live writer 退出清單：
   不得重放；
 - 多月嫂中途取消及雙邊重算；
 - 全部服務完成後取消零寫入；
+- 服務中代班不要求新契約／簽回或客戶變更簽署，缺少文件仍可完成 substitution、排班 lineage
+  與薪資；optional supplement 只保存人工 evidence；
 - 完成但未鎖時補登正確服務根事實；
 - 鎖形成後退款／reversal 不解鎖；
 - legacy status／assignment writers 不可達或固定 Gone。

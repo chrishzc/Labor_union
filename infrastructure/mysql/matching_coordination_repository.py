@@ -449,13 +449,23 @@ def _event_identity(command: MatchingCommand, receipt: MatchingApplyReceipt) -> 
 
 
 def _event_type(command: MatchingCommand) -> str:
-    return {
-        "ApplyInitialCriteriaSnapshot": "criteria_snapshot",
+    event_type_by_command = {
+        "ApplyInitialCriteriaSnapshot": "criteria_snapshotted",
         "ApplyCriteriaDiffResend": "criteria_diff",
         "ApplyCaregiverSelection": "caregiver_willingness",
         "ApplyCustomerMatchingDecision": "customer_decision",
         "ApplyZeroCandidateAlternative": "customer_decision",
-    }.get(type(command).__name__, "rematch_required")
+        "ApplyRematch": "rematch_required",
+        "ApplyLeaveImpactOnMatching": "rematch_required",
+        "ApplyServiceDateChangeRematch": "rematch_required",
+    }
+    command_name = type(command).__name__
+    try:
+        return event_type_by_command[command_name]
+    except KeyError as error:
+        raise MatchingCoordinationPersistenceError(
+            f"unsupported matching command event type: {command_name}"
+        ) from error
 
 
 def _outcome_state(result_state: str) -> str:
