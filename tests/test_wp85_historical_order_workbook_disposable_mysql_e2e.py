@@ -63,6 +63,55 @@ def test_workbook_apply_uses_only_the_canonical_six_columns(tmp_path):
         connection.close()
 
 
+def test_six_column_workbook_applies_zero_one_two_as_distinct_order_statuses(tmp_path):
+    token = uuid4().hex
+    connection = get_connection()
+    try:
+        cancelled_case, _ = _seed_case(connection, token, "zero")
+        completed_case, _ = _seed_case(connection, token, "one")
+        discussion_case, _ = _seed_case(connection, token, "two")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE orders SET status='訂單完成',lifecycle_version=1 WHERE case_no=%s",
+                (discussion_case,),
+            )
+        connection.commit()
+        workbook_path = _write_status_workbook(
+            tmp_path / "statuses-012.xlsx",
+            ((cancelled_case, 0), (completed_case, 1), (discussion_case, 2)),
+        )
+        service = _service(connection)
+
+        preview = service.preview(str(workbook_path))
+        receipt = service.apply(
+            str(workbook_path), f"wp85-status-012:{token}", preview.preview_fingerprint,
+            "wp85-test", token,
+        )
+        replay = service.apply(
+            str(workbook_path), f"wp85-status-012:{token}", preview.preview_fingerprint,
+            "wp85-test", token,
+        )
+
+        expected_counts = {
+            "cancelled_0": 1,
+            "completed_1": 1,
+            "discussion_2": 1,
+            "invalid_or_blank": 0,
+        }
+        assert preview.status_counts.as_dict() == expected_counts
+        assert receipt.status_counts.as_dict() == expected_counts
+        assert replay.status_counts.as_dict() == expected_counts
+        assert replay.replayed_workbook is True
+        assert _order_status(connection, cancelled_case) == "訂單取消"
+        assert _order_status(connection, completed_case) == "訂單完成"
+        assert _order_status(connection, discussion_case) == "洽談中"
+        for case_no in (cancelled_case, completed_case, discussion_case):
+            assert _count(connection, "order_lifecycle_state_events", case_no) == 1
+            assert _count(connection, "historical_order_adoption_receipts", case_no) == 1
+    finally:
+        connection.close()
+
+
 def test_workbook_conflict_rejects_changed_source_before_row_apply(tmp_path):
     token = uuid4().hex
     connection = get_connection()
@@ -354,6 +403,17 @@ def _write_single_workbook(destination, case_no, staff_name, status):
     sheet.title = "任意來源"
     sheet.append(["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"])
     sheet.append([_client_name(case_no), case_no, date(2025, 1, 2), date(2025, 1, 31), status, staff_name])
+    workbook.save(destination)
+    return destination
+
+
+def _write_status_workbook(destination, case_statuses):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "六欄狀態驗收"
+    sheet.append(["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"])
+    for case_no, status in case_statuses:
+        sheet.append([_client_name(case_no), case_no, None, None, status, None])
     workbook.save(destination)
     return destination
 

@@ -15,6 +15,12 @@ export interface HistoricalOrderWorkbookPreviewModel {
   currentConflictCount: number;
   assignmentCandidateCount: number;
   evidenceOnlyPairingCount: number;
+  statusCounts: {
+    cancelled0: number;
+    completed1: number;
+    discussion2: number;
+    invalidOrBlank: number;
+  };
   previewFingerprint: string;
 }
 
@@ -29,6 +35,10 @@ export function adaptHistoricalOrderWorkbookPreview(
   if (preview.assignment_candidate_count + preview.evidence_only_pairing_count > preview.adopted_count) {
     throw new HistoricalOrderWorkbookContractError('historical_order_pairing_counts_exceed_adopted', 'Historical Orders配對分類超過已認領筆數。');
   }
+  const statusTotal = Object.values(preview.status_counts).reduce((total, count) => total + count, 0);
+  if (statusTotal !== preview.source_row_count) {
+    throw new HistoricalOrderWorkbookContractError('historical_order_status_counts_not_conserved', 'Historical Orders狀態判定計數不守恆。');
+  }
   return {
     sourceContentDigest: preview.source_content_digest,
     sheetIdentity: preview.sheet_identity,
@@ -39,6 +49,12 @@ export function adaptHistoricalOrderWorkbookPreview(
     currentConflictCount: preview.current_conflict_count,
     assignmentCandidateCount: preview.assignment_candidate_count,
     evidenceOnlyPairingCount: preview.evidence_only_pairing_count,
+    statusCounts: {
+      cancelled0: preview.status_counts.cancelled_0,
+      completed1: preview.status_counts.completed_1,
+      discussion2: preview.status_counts.discussion_2,
+      invalidOrBlank: preview.status_counts.invalid_or_blank,
+    },
     previewFingerprint: preview.preview_fingerprint,
   };
 }

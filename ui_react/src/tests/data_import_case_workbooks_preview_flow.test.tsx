@@ -27,8 +27,8 @@ describe('Data Import case workbook Preview flows', () => {
     vi.spyOn(clientBeClassWorkbookPreviewClient, 'apply').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, created_count: 1, exact_replay_count: 0, review_required_count: 1, existing_conflict_count: 1, existing_source_count: 1, replayed_workbook: false });
     vi.spyOn(staffHistoricalWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, created_count: 1, adopted_existing_count: 1, blocked_identity_count: 1, identity_conflict_count: 1, review_required_count: 1, preview_fingerprint: fingerprint });
     vi.spyOn(staffHistoricalWorkbookPreviewClient, 'apply').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, created_count: 1, adopted_existing_count: 1, blocked_identity_count: 1, identity_conflict_count: 1, review_required_count: 1, preview_fingerprint: fingerprint, exact_replay_count: 0, replayed_workbook: false });
-    vi.spyOn(historicalOrderWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, sheet_identity: identity, source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 1, current_conflict_count: 1, assignment_candidate_count: 1, evidence_only_pairing_count: 1, preview_fingerprint: fingerprint });
-    vi.spyOn(historicalOrderWorkbookPreviewClient, 'apply').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 1, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: false });
+    vi.spyOn(historicalOrderWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, sheet_identity: identity, source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 1, current_conflict_count: 1, assignment_candidate_count: 1, evidence_only_pairing_count: 1, status_counts: { cancelled_0: 1, completed_1: 1, discussion_2: 1, invalid_or_blank: 1 }, preview_fingerprint: fingerprint });
+    vi.spyOn(historicalOrderWorkbookPreviewClient, 'apply').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 1, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: false, status_counts: { cancelled_0: 1, completed_1: 1, discussion_2: 1, invalid_or_blank: 1 } });
   });
 
   it('三張卡可獨立完成Preview、確認與Apply', async () => {
@@ -65,6 +65,11 @@ describe('Data Import case workbook Preview flows', () => {
     expect(screen.getAllByText('匯入完成，有資料需要檢查')).toHaveLength(3);
     expect(screen.getByText(/身分阻擋 1 筆、身分衝突 1 筆、需檢查 1 筆/)).toBeInTheDocument();
     expect(screen.getByText(/未配對案件 1 筆、需檢查 1 筆、目前資料衝突 0 筆/)).toBeInTheDocument();
+    expect(screen.getByText(/狀態判定：0→取消 1 筆、1→完成 1 筆、2→洽談中 1 筆、無法辨識 1 筆/)).toBeInTheDocument();
+    const historicalCard = document.querySelector('[data-surface-id="imports.historic-orders.workbench"]') as HTMLElement;
+    for (const label of ['來源狀態 0 → 訂單取消', '來源狀態 1 → 訂單完成', '來源狀態 2 → 洽談中', '狀態無法辨識']) {
+      expect(within(historicalCard).getByText(label)).toBeInTheDocument();
+    }
     for (const id of ['client-beclass', 'staff-historical', 'historic-orders']) {
       const card = document.querySelector(`[data-surface-id="imports.${id}.workbench"]`) as HTMLElement;
       expect(document.querySelector(`[data-control-id="imports.${id}.apply"]`)).toBeDisabled();
@@ -123,7 +128,7 @@ describe('Data Import case workbook Preview flows', () => {
   it('三類整份工作簿replay先標示未新增，原receipt統計僅供追溯', async () => {
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, created_count: 1, exact_replay_count: 0, review_required_count: 0, existing_conflict_count: 0, existing_source_count: 0, replayed_workbook: true });
     vi.mocked(staffHistoricalWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, created_count: 1, adopted_existing_count: 0, blocked_identity_count: 0, identity_conflict_count: 0, review_required_count: 0, preview_fingerprint: fingerprint, exact_replay_count: 0, replayed_workbook: true });
-    vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, adopted_count: 1, unmatched_case_count: 0, review_required_count: 0, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: true });
+    vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, adopted_count: 1, unmatched_case_count: 0, review_required_count: 0, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: true, status_counts: { cancelled_0: 0, completed_1: 1, discussion_2: 0, invalid_or_blank: 0 } });
     render(<DataImportPage />);
 
     const cases = [

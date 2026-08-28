@@ -163,7 +163,7 @@ def _parse_row(values, positions, source_row, epoch, digest):
     payload = {
         "case_no": _text(_value(values, positions.get("case_no"))),
         "client_name": _text(_value(values, positions.get("client_name"))),
-        "status": str(_value(values, positions.get("status")) or ""),
+        "status": _source_status_token(_value(values, positions.get("status"))),
         "start_date": start.isoformat() if start else None,
         "end_date": end.isoformat() if end else None,
         "caregivers": tuple(
@@ -262,6 +262,12 @@ def _text(value):
 def _case_no(value):
     text = _text(value)
     return text[:-2] if text and text.endswith(".0") and text[:-2].isdigit() else text
+
+
+def _source_status_token(value) -> str:
+    """Keep numeric zero distinct from an absent source status."""
+
+    return "" if _blank(value) else str(value).strip()
 
 
 def _blank(value):

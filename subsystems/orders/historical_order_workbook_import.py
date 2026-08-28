@@ -11,10 +11,35 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
+from domains.orders.lifecycle import OrderLifecycleStatus
 from infrastructure.mysql.historical_order_workbook_import_repository import HistoricalOrderWorkbookImportRepository
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from subsystems.orders.historical_adoption_workflow import HistoricalOrderAdoptionRequest, HistoricalOrderAdoptionWorkflow
 from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbook, load_historical_order_workbook
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalOrderStatusCounts:
+    cancelled_0: int
+    completed_1: int
+    discussion_2: int
+    invalid_or_blank: int
+
+    def __post_init__(self) -> None:
+        if any(value < 0 for value in self.as_dict().values()):
+            raise ValueError("historical_order_status_count_negative")
+
+    @property
+    def total(self) -> int:
+        return sum(self.as_dict().values())
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "cancelled_0": self.cancelled_0,
+            "completed_1": self.completed_1,
+            "discussion_2": self.discussion_2,
+            "invalid_or_blank": self.invalid_or_blank,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +53,7 @@ class HistoricalOrderWorkbookPreview:
     current_conflict_count: int
     assignment_candidate_count: int
     evidence_only_pairing_count: int
+    status_counts: HistoricalOrderStatusCounts
     preview_fingerprint: str
 
     def as_dict(self) -> dict[str, object]:
@@ -41,6 +67,7 @@ class HistoricalOrderWorkbookPreview:
             "current_conflict_count": self.current_conflict_count,
             "assignment_candidate_count": self.assignment_candidate_count,
             "evidence_only_pairing_count": self.evidence_only_pairing_count,
+            "status_counts": self.status_counts.as_dict(),
             "preview_fingerprint": self.preview_fingerprint,
         }
 
@@ -56,6 +83,7 @@ class HistoricalOrderWorkbookReceipt:
     assignments_created: int
     replayed_rows: int
     replayed_workbook: bool
+    status_counts: HistoricalOrderStatusCounts
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -68,6 +96,7 @@ class HistoricalOrderWorkbookReceipt:
             "assignments_created": self.assignments_created,
             "replayed_rows": self.replayed_rows,
             "replayed_workbook": self.replayed_workbook,
+            "status_counts": self.status_counts.as_dict(),
         }
 
 
@@ -101,7 +130,7 @@ class HistoricalOrderWorkbookImportService:
             raise HistoricalOrderWorkbookUnavailable("historical_order_workbook_coordinator_lock_timeout")
         try:
             workbook = load_historical_order_workbook(source_path)
-            replay = self._stored_replay(key, workbook.content_digest)
+            replay = self._stored_replay(key, workbook)
             if replay is not None:
                 return replay
             preview = self._preview_or_stale(workbook, supplied_preview_fingerprint)
@@ -135,25 +164,35 @@ class HistoricalOrderWorkbookImportService:
         return HistoricalOrderWorkbookReceipt(
             workbook.content_digest, len(workbook.rows), outcomes["adopted"], outcomes["unmatched_case"],
             review_rows, outcomes["current_conflict"], assignments_created, replayed_rows, False,
+            _status_counts(workbook),
         )
 
-    def _stored_replay(self, key: str, digest: str) -> HistoricalOrderWorkbookReceipt | None:
+    def _stored_replay(self, key: str, workbook: HistoricalOrderWorkbook) -> HistoricalOrderWorkbookReceipt | None:
         stored = self._repository.load_receipt(key)
         if stored is None:
             return None
-        if stored["request_fingerprint"] != digest:
+        if stored["request_fingerprint"] != workbook.content_digest:
             raise HistoricalOrderWorkbookConflict("historical_order_workbook_idempotency_conflict")
-        return HistoricalOrderWorkbookReceipt(**{**json.loads(stored["result_snapshot"]), "replayed_workbook": True})
+        snapshot = {**json.loads(stored["result_snapshot"]), "replayed_workbook": True}
+        stored_counts = snapshot.get("status_counts")
+        snapshot["status_counts"] = (
+            HistoricalOrderStatusCounts(**stored_counts)
+            if stored_counts is not None
+            else _status_counts(workbook)
+        )
+        return HistoricalOrderWorkbookReceipt(**snapshot)
 
 
 def _preview(workbook: HistoricalOrderWorkbook, row_previews) -> HistoricalOrderWorkbookPreview:
     outcomes = Counter(item.outcome.value for item in row_previews)
     candidates = sum(sum(item.resolution.value == "assignment_candidate" for item in preview.pairings) for preview in row_previews)
     evidence = sum(sum(item.resolution.value == "evidence_only" for item in preview.pairings) for preview in row_previews)
+    status_counts = _status_counts(workbook)
     fingerprint = fingerprint_payload({
         "digest": workbook.content_digest,
         "sheet": workbook.sheet_identity,
         "rows": tuple((item.source_identity, item.source_fingerprint, item.fingerprint.value) for item in row_previews),
+        "status_counts": status_counts.as_dict(),
     }).value
     review_rows = sum(
         item.outcome.value != "unmatched_case" and bool(getattr(item, "issue_codes", ()))
@@ -162,8 +201,21 @@ def _preview(workbook: HistoricalOrderWorkbook, row_previews) -> HistoricalOrder
     return HistoricalOrderWorkbookPreview(
         workbook.content_digest, workbook.sheet_identity, len(workbook.rows), outcomes["adopted"],
         outcomes["unmatched_case"], review_rows, outcomes["current_conflict"],
-        candidates, evidence, fingerprint,
+        candidates, evidence, status_counts, fingerprint,
     )
+
+
+def _status_counts(workbook: HistoricalOrderWorkbook) -> HistoricalOrderStatusCounts:
+    counts = Counter(row.asserted_status for row in workbook.rows)
+    result = HistoricalOrderStatusCounts(
+        cancelled_0=counts[OrderLifecycleStatus.CANCELLED],
+        completed_1=counts[OrderLifecycleStatus.COMPLETED],
+        discussion_2=counts[OrderLifecycleStatus.DISCUSSION],
+        invalid_or_blank=counts[None],
+    )
+    if result.total != len(workbook.rows):
+        raise RuntimeError("historical_order_status_counts_not_conserved")
+    return result
 
 
 def _row_request(row, fingerprint: PreviewFingerprint, workbook_key: str, actor: str, correlation_id: str) -> HistoricalOrderAdoptionRequest:
@@ -182,4 +234,5 @@ def _assert_conservation(source_rows: int, outcomes: Counter[str]) -> None:
 __all__ = [
     "HistoricalOrderWorkbookConflict", "HistoricalOrderWorkbookImportService", "HistoricalOrderWorkbookPreview",
     "HistoricalOrderWorkbookReceipt", "HistoricalOrderWorkbookUnavailable",
+    "HistoricalOrderStatusCounts",
 ]

@@ -357,6 +357,11 @@ restricted historical source 只能補登既有 Order，不建立 Client／Order
 `case_no + client_name` 精確相符；找不到固定為 `unmatched_case`，零 Domain mutation且不建立警示。
 source profile v1 只接受 0→取消、1→完成、2→洽談中；空白／其他值保存 review evidence。
 
+2026-08-28 狀態判定補充裁決：numeric `0`不得因falsy正規化而與空白共用row fingerprint；
+Preview與Apply receipt必須由Orders回傳`0／1／2／invalid`守恆數量，管理端只顯示該typed結果，
+不得由前端重算或提供target status editor。完整契約與驗收位於
+`PROV-20260828-historical-order-six-column-status-observability-spec-gap.md`。
+
 `actual_start_date`、`actual_end_date` 永遠允許 `NULL`。精確配對且可解析的有效歷史來源值直接寫入，
 不比較 current value 或 source time，也不產生 `current_conflict`。來源 terminal assertion 可在缺日期、取消原因、排班或付款時成立，
 但不得觸發現行通知、訂金、收付款或自動帳務；immutable lifecycle event／receipt 必須標示

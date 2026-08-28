@@ -42,6 +42,46 @@ def test_status_profile_accepts_only_zero_one_two():
     assert parse_historical_status("訂單完成") is None
 
 
+def test_numeric_zero_status_has_a_distinct_source_fingerprint_from_blank(tmp_path):
+    zero_path = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"],
+        ["客戶甲", "CASE-1", None, None, 0, None],
+    )
+    blank_path = tmp_path / "historical-blank.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"])
+    sheet.append(["客戶甲", "CASE-1", None, None, None, None])
+    workbook.save(blank_path)
+
+    zero = load_historical_order_workbook(zero_path).rows[0]
+    blank = load_historical_order_workbook(blank_path).rows[0]
+
+    assert zero.asserted_status is OrderLifecycleStatus.CANCELLED
+    assert blank.asserted_status is None
+    assert zero.source_fingerprint != blank.source_fingerprint
+
+
+def test_six_column_workbook_distinguishes_zero_one_two_and_invalid_statuses(tmp_path):
+    path = tmp_path / "historical-statuses.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"])
+    for index, status in enumerate((0, 1, 2, None), start=1):
+        sheet.append([f"客戶{index}", f"CASE-{index}", None, None, status, None])
+    workbook.save(path)
+
+    rows = load_historical_order_workbook(path).rows
+
+    assert tuple(row.asserted_status for row in rows) == (
+        OrderLifecycleStatus.CANCELLED,
+        OrderLifecycleStatus.COMPLETED,
+        OrderLifecycleStatus.DISCUSSION,
+        None,
+    )
+
+
 def test_valid_status_is_adopted_when_dates_are_null():
     current = _current(OrderLifecycleStatus.DISCUSSION)
     source = HistoricalOrderSourceFacts(OrderLifecycleStatus.COMPLETED, None, None)

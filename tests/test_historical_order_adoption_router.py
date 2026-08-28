@@ -15,7 +15,8 @@ from api.dependencies.admin_auth import require_admin
 from api.dependencies.historical_order_adoption import get_historical_order_workbook_import_service
 from api.routes.historical_order_adoption import router
 from subsystems.orders.historical_order_workbook_import import (
-    HistoricalOrderWorkbookConflict, HistoricalOrderWorkbookPreview, HistoricalOrderWorkbookReceipt,
+    HistoricalOrderStatusCounts, HistoricalOrderWorkbookConflict, HistoricalOrderWorkbookPreview,
+    HistoricalOrderWorkbookReceipt,
 )
 
 
@@ -26,13 +27,19 @@ class _Service:
 
     def preview(self, path):
         self.paths.append(Path(path))
-        return HistoricalOrderWorkbookPreview("0" * 64, "1" * 64, 1, 1, 0, 0, 0, 0, 0, "2" * 64)
+        return HistoricalOrderWorkbookPreview(
+            "0" * 64, "1" * 64, 1, 1, 0, 0, 0, 0, 0,
+            HistoricalOrderStatusCounts(0, 1, 0, 0), "2" * 64,
+        )
 
     def apply(self, path, key, preview, actor, correlation):
         self.paths.append(Path(path))
         if self.conflict:
             raise HistoricalOrderWorkbookConflict("historical_order_workbook_idempotency_conflict")
-        return HistoricalOrderWorkbookReceipt("0" * 64, 1, 1, 0, 0, 0, 0, 0, False)
+        return HistoricalOrderWorkbookReceipt(
+            "0" * 64, 1, 1, 0, 0, 0, 0, 0, False,
+            HistoricalOrderStatusCounts(0, 1, 0, 0),
+        )
 
 
 def test_preview_and_apply_remove_server_temporary_workbooks():

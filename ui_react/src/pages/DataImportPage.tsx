@@ -494,7 +494,7 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
     adaptHistoricalOrderWorkbookPreview,
     (receipt) => applyPresentation(
       receipt.replayed_workbook,
-      `認領 ${receipt.adopted_count} 筆、建立指派 ${receipt.assignments_created} 筆、已存在相同資料 ${receipt.replayed_rows} 筆、未配對案件 ${receipt.unmatched_case_count} 筆、需檢查 ${receipt.review_required_count} 筆、目前資料衝突 ${receipt.current_conflict_count} 筆。`,
+      `認領 ${receipt.adopted_count} 筆、建立指派 ${receipt.assignments_created} 筆、已存在相同資料 ${receipt.replayed_rows} 筆、未配對案件 ${receipt.unmatched_case_count} 筆、需檢查 ${receipt.review_required_count} 筆、目前資料衝突 ${receipt.current_conflict_count} 筆。狀態判定：0→取消 ${receipt.status_counts.cancelled_0} 筆、1→完成 ${receipt.status_counts.completed_1} 筆、2→洽談中 ${receipt.status_counts.discussion_2} 筆、無法辨識 ${receipt.status_counts.invalid_or_blank} 筆。`,
       receipt.unmatched_case_count > 0 || receipt.review_required_count > 0 || receipt.current_conflict_count > 0
         ? 'needs-review'
         : receipt.adopted_count === 0 ? 'no-change' : 'applied'
@@ -1156,6 +1156,10 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
                 ['目前資料衝突', historicalOrders.previewState.preview.currentConflictCount],
                 ['派工候選', historicalOrders.previewState.preview.assignmentCandidateCount],
                 ['僅證據配對', historicalOrders.previewState.preview.evidenceOnlyPairingCount],
+                ['來源狀態 0 → 訂單取消', historicalOrders.previewState.preview.statusCounts.cancelled0],
+                ['來源狀態 1 → 訂單完成', historicalOrders.previewState.preview.statusCounts.completed1],
+                ['來源狀態 2 → 洽談中', historicalOrders.previewState.preview.statusCounts.discussion2],
+                ['狀態無法辨識', historicalOrders.previewState.preview.statusCounts.invalidOrBlank],
               ] : []}
               onSelect={historicalOrders.selectWorkbook}
               onPreview={historicalOrders.previewWorkbook}
