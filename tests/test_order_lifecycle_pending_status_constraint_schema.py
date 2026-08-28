@@ -57,6 +57,19 @@ def test_descriptor_matches_full_canonical_lifecycle_checks() -> None:
     assert all("待補件" in clause for clause in canonical["checks"].values())
 
 
+def test_release_scoped_snapshot_reads_show_create_for_check_only_parent(
+    monkeypatch,
+) -> None:
+    released = load_migration_release_manifest(
+        MANIFEST_PATH, ROOT
+    ).owned_object_descriptors(ROOT)
+    monkeypatch.setattr(migration, "OWNED_OBJECTS", released)
+
+    assert migration._show_create_owned_table_names() == {
+        "order_lifecycle_state_events"
+    }
+
+
 def test_predecessor_successor_and_drift_are_distinct() -> None:
     canonical = migration._canonical_artifact_descriptor(SQL_PATH.name)
     predecessor = _snapshot(

@@ -1039,6 +1039,18 @@ def database_exists(
         connection.close()
 
 
+def _show_create_owned_table_names() -> set[str]:
+    """Return every owned table whose exact DDL may be needed by a comparator."""
+    return {
+        table
+        for owned in OWNED_OBJECTS.values()
+        for table in (
+            *owned.get("tables", {}),
+            *(key[0] for key in owned.get("checks", {})),
+        )
+    }
+
+
 def _schema_snapshot(config: DatabaseConfig, database: str) -> dict[str, Any]:
     connection = config.connect(database)
     try:
@@ -1109,14 +1121,11 @@ def _schema_snapshot(config: DatabaseConfig, database: str) -> dict[str, Any]:
             foreign_keys = [
                 _normalized_row(row) for row in cursor.fetchall()
             ]
+            owned_table_names = _show_create_owned_table_names()
             table_names = sorted(
                 {
                     row["table_name"] for row in columns
-                    if row["table_name"] in {
-                        table
-                        for owned in OWNED_OBJECTS.values()
-                        for table in owned["tables"]
-                    }
+                    if row["table_name"] in owned_table_names
                     or row["table_name"] == "finance_import_batches"
                 }
             )
