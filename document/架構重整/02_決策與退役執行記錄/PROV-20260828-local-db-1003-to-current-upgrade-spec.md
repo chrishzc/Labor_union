@@ -4,6 +4,9 @@
 - `declared_status`: `approved`
 - `convergence`: `SPEC_READY`
 - `authority`: 2026-08-28 人工要求確保另一台目前只到 DB release 1003 的電腦可升級並正常 local 啟動
+- `target-policy-authority`: 2026-08-28 人工恢復 operator-facing local updater 接受 localhost／development
+  profile 的任意合法非 MySQL system database identity，包含 `union_db`；`lu_test_*` 只保留為 qualification
+  producer、disposable rehearsal 與自動化驗收的隔離 namespace
 - `owner`: Global Migration／Developer Local Runtime
 - `research`: `NO_RESEARCH (R0)`；canonical manifests、runner、launcher 與 tests 已足以裁決
 
@@ -64,7 +67,8 @@ fresh bootstrap、preserve-data upgrade、fixture reset 與 normal startup 是�
 - `LDU-A4`：qualification 缺失、過期或衝突時，零 backup／DDL。
 - `LDU-A5`：disposable真 MySQL以代表舊資料完成1003 source→dump→candidate→sequential apply→verify；source
   不變，candidate objects exact，代表資料 count／PK／stable fingerprint相同，`backfills=[]`。
-- `LDU-A6`：allowlisted developer copy完成停服務、plan、backup、apply、full-chain current與before/after保存。
+- `LDU-A6`：合法 localhost development database完成停服務、plan、backup、apply、full-chain current與
+  before/after保存；operator updater不得以`lu_test_*`前綴作為名稱 gate。
 - `LDU-A7`：舊 DB normal startup在建立 child前阻擋；升級後 no-auth API／React／required workers與Browser GET通過。
 - `LDU-A8`：1006後模擬中斷，重跑從1007開始，1004～1006不重套。
 - `LDU-A9`：同一final engine run可機械重建metadata backup／fresh bootstrap／preserve candidate三種evidence；
@@ -76,7 +80,7 @@ fresh bootstrap、preserve-data upgrade、fixture reset 與 normal startup 是�
   absent。1008 exact predecessor為absent、任意第三種check expression為drift。1008 canonical statement可執行，
   改名constraint、拆成standalone DROP或加入其他DROP／DML皆被allowlist拒絕。
 
-target非localhost development allowlist、DB為`union_db`／system、服務未停、1003非exact、latest執行中漂移、
+target非localhost development profile、DB為MySQL system schema、服務未停、1003非exact、latest執行中漂移、
 chain／qualification／descriptor／backup／journal不一致、出現非schema-only效果、row fingerprint改變、lock／timeout
 或startup health失敗時固定停止。
 

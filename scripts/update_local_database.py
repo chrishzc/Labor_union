@@ -137,10 +137,6 @@ def validate_local_source(config, source: str, environment=None) -> None:
         raise LocalDatabaseUpdateError(
             "developer update refuses MySQL system databases"
         )
-    if not source.casefold().startswith("lu_test_") or len(source) <= len("lu_test_"):
-        raise LocalDatabaseUpdateError(
-            "developer update only accepts the lu_test_* database allowlist"
-        )
     if profile not in {"local", "development", "dev", "test", "testing"}:
         raise LocalDatabaseUpdateError("local development profile required")
 

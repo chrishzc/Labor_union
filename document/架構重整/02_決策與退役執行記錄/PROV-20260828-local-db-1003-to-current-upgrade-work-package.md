@@ -29,8 +29,9 @@
    build result，拒絕copied／hand-built mapping與任何nested secret/PII擴張。
 4. developer runner加入逐release backup／journal／exact readback／resume；失敗不得replacement或盲目重跑。
 5. 同步 Windows／Unix launcher、operator docs與focused tests；old DB startup零child阻擋，current DB才啟動。
-6. 在allowlisted developer copy完成受控apply與normal no-auth API／React／Browser acceptance，最後由fresh
-   Luna/high read-only verifier獨立檢查。
+6. 在合法 localhost development database完成受控apply與normal no-auth API／React／Browser acceptance，
+   最後由fresh Luna/high read-only verifier獨立檢查。operator updater不得以`lu_test_*`前綴限制configured DB；
+   qualification producer、disposable rehearsal與自動化驗收仍使用`lu_test_*`隔離namespace。
 
 ## Write set 與 hot spots
 
@@ -44,13 +45,14 @@
 - final engine evidence producer source／focused tests；supporting evidence只寫ignored scratch且不得冒充qualification
 
 共同 catalog、manifest、receipt index與README由同一 integration writer處理。禁止改寫已發布SQL／hash-locked
-artifact、建立新 DDL、操作`union_db`、production、reset、replacement、`--switch`或全庫cleanup。
+artifact、建立新 DDL、由自動化驗收操作`union_db`、production、reset、replacement、`--switch`或全庫cleanup。
+2026-08-28人工已明確授權operator-facing local updater接受configured `union_db`；這不授權測試或Agent自行對其Apply。
 
 ## Verification
 
 依序：static catalog／descriptor tests → read-only ordered plan tests → fresh disposable MySQL → 1003 representative
 source preserve-data candidate → final evidence producer negatives／source re-read → builder preview／publish →
-interruption/resume → allowlisted developer acceptance → no-auth local startup／Browser。
+interruption/resume → configured local developer database acceptance → no-auth local startup／Browser。
 
 Windows operator commands必須分開報告：
 
@@ -96,7 +98,8 @@ Package status：`PACKAGE_READY`；runtime status：`in-progress`；DB summary�
 - Fresh Luna/high final DB verifier確認source/candidate row count與fingerprint一致、1006～1012 validator exact及
   candidate current；其兩個P1（producer header超限、mysqldump `--events` privilege）已以root regression修正。
   Unix no-auth live-drift亦已修正：前端bypass、missing `.env` process values、DB port、owned child cleanup及
-  required worker survival；後續再補MySQL container reuse、雙平台launcher與`lu_test_*`／64字元allowlist。
+  required worker survival；後續再補MySQL container reuse、雙平台launcher與64字元／system-schema安全門。
+  2026-08-28人工後續裁決已移除operator updater的`lu_test_*`名稱限制；qualification／rehearsal隔離規則不變。
   final root `204 passed, 1 skipped`，fresh R11 P0=0/P1=0；normal Browser已驗收。
 - receipt：`03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_ordered_chain_launcher_slice_receipt.md`。
   本slice另見`03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_hproj_rpre_static_release_receipt.md`。

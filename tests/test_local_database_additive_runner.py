@@ -598,15 +598,22 @@ def test_target_profile_blocks_mysql_system_schema_without_connecting() -> None:
     assert error.value.code == "target_profile_blocked"
 
 
-def test_local_source_accepts_allowlisted_development_database_name() -> None:
-    update.validate_local_source(
-        SimpleNamespace(host="127.0.0.1"),
-        "lu_test_labor_union_local",
-        {"APP_ENV": "development"},
-    )
+def test_local_source_accepts_local_development_database_names() -> None:
+    for source in ("lu_test_labor_union_local", "labor_union_local", "union_db"):
+        update.validate_local_source(
+            SimpleNamespace(host="127.0.0.1"),
+            source,
+            {"APP_ENV": "development"},
+        )
 
 
-def test_local_source_rejects_staging_and_mysql_system_schema() -> None:
+def test_local_source_rejects_remote_staging_and_mysql_system_schema() -> None:
+    with pytest.raises(update.LocalDatabaseUpdateError, match="local MySQL"):
+        update.validate_local_source(
+            SimpleNamespace(host="db.example.internal"),
+            "union_db",
+            {"APP_ENV": "development"},
+        )
     with pytest.raises(update.LocalDatabaseUpdateError, match="profile"):
         update.validate_local_source(
             SimpleNamespace(host="127.0.0.1"),
@@ -621,18 +628,13 @@ def test_local_source_rejects_staging_and_mysql_system_schema() -> None:
         )
 
 
-def test_local_source_rejects_union_and_non_allowlisted_database_names() -> None:
-    for source, message in (
-        ("union_db", "lu_test"),
-        ("labor_union_local", "lu_test"),
-        ("lu_test_" + "a" * 57, "64"),
-    ):
-        with pytest.raises(update.LocalDatabaseUpdateError, match=message):
-            update.validate_local_source(
-                SimpleNamespace(host="127.0.0.1"),
-                source,
-                {"APP_ENV": "development"},
-            )
+def test_local_source_rejects_database_name_over_64_characters() -> None:
+    with pytest.raises(update.LocalDatabaseUpdateError, match="64"):
+        update.validate_local_source(
+            SimpleNamespace(host="127.0.0.1"),
+            "a" * 65,
+            {"APP_ENV": "development"},
+        )
 
 
 def test_preview_reuses_one_schema_snapshot_for_target_state(monkeypatch, tmp_path) -> None:
