@@ -127,6 +127,7 @@ def test_windows_launcher_delegates_runtime_ownership_after_current_gate() -> No
 def test_windows_supervisor_has_readiness_survival_and_scoped_cleanup_contract() -> None:
     source = _source("supervise_local_runtime.ps1")
 
+    assert source.isascii()  # Windows PowerShell 5.1 treats UTF-8 without BOM as ANSI.
     assert "<#" in source and "#>" in source
     assert "<##" not in source and "##>" not in source
     assert "Invoke-WebRequest" in source
