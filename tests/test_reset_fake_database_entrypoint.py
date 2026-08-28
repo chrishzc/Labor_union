@@ -6,8 +6,9 @@ SCRIPT = (
 ).read_text(encoding="utf-8")
 
 
-def test_double_click_is_confirmed_template_reset():
-    assert "versioned template fixture" in SCRIPT
+def test_double_click_is_confirmed_canonical_empty_reset():
+    assert "current canonical schema" in SCRIPT
+    assert "no business fixture is loaded" in SCRIPT
     assert "-m scripts.reset_fake_database --apply --confirm-database union_db" in SCRIPT
     assert "Type RESET to continue" in SCRIPT
 

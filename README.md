@@ -65,8 +65,8 @@ Windows smoke 只啟動並檢查 API 與 React/Vite，驗收固定為 GET-only�
 5173、runtime monitor、durable job worker 與 incident worker；LINE credentials 缺失時只略過 LINE
 worker。兩種模式都不啟動 Streamlit 或通用 File Watcher，日常檔案匯入以 Web UI 上傳為正式入口。
 
-需要捨棄資料並回到模板測試 DB 時使用 `scripts/launchers/reset_DB.bat`，但目前模板 fixture 尚未
-重建，因此 `--dry-run` 會正確回傳 blocked；本版本不會因此刪除現有資料庫。
+需要捨棄資料並建立 current canonical schema 的空白 DB 時使用 `scripts/launchers/reset_DB.bat`；它不載入
+業務 fixture，只保留 canonical schema artifacts 明列的 system seed。
 
 ## 給開發者與 Agent 的開始方式
 
@@ -285,10 +285,11 @@ fingerprint 只表示 bundle 身分，不能取代逐 release qualification。Fa
 連續 exact prefix 的下一支續跑。若 journal 已開始但原本的 machine-local dump／receipt 遺失，runner
 必須停止並要求人工 recovery，不得重做新備份冒充原始 baseline。
 
-若要捨棄現有資料並恢復成版本庫模板測試資料，執行 `scripts/launchers/reset_DB.bat`。它會先驗證
-`fixtures/db_snapshot_v2/v3`，預檢成功且使用者輸入 `RESET` 後，才刪除 `union_db`、建立新 DB 並
-載入模板；這不是保留資料更新的相容別名。目前版本庫尚未重建該模板 fixture，所以此入口會在
-預檢安全停止，fixture 重建另案處理。
+若要捨棄現有資料並建立版本庫 current canonical schema 的空白資料庫，執行
+`scripts/launchers/reset_DB.bat`。它會先驗證 base schema、current schema assembly、ordered artifact hashes
+與 validation manifest；預檢成功且使用者輸入 `RESET` 後，才刪除 `union_db` 並建立 current schema。
+它不載入業務 fixture，且不是保留資料更新的相容別名；canonical schema artifacts 正式聲明的 system
+seed 仍會建立。
 
 執行前必須停止 API、UI、monitor 與 workers，完成後再重啟。兩個入口都只供本機開發，禁止用於
 production／shared staging；任何 partial／drift 都會停止，不會猜測修復，candidate 與 receipts

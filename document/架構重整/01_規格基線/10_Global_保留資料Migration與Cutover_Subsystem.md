@@ -47,6 +47,10 @@ Console output、README、測試名稱、候選 DB 名稱或人工記憶不是 S
 15. Receipt 不得保存 credential、完整 `.env`、客戶資料或銀行 raw payload。
 16. `db/schema.sql` 與 `scripts/init_db.py` 屬 fresh bootstrap／disposable test；
     不得由 preserve-data workflow 呼叫。
+17. 開發者明確捨棄本機資料時，`scripts/launchers/reset_DB.bat` 是獨立 destructive fresh-bootstrap
+   入口，只接受 localhost／development 的 `union_db`、exact `RESET` 確認與 current hash-locked schema
+   assembly。它不載入業務 fixture；canonical schema artifacts 明列的 system seed 仍可建立。靜態 catalog／
+   digest 預檢必須在 DROP 前完成，重建後必須驗證 validation manifest 宣告的 database objects。
 
 ## 4. Subsystems
 

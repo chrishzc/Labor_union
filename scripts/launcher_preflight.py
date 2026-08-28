@@ -58,7 +58,13 @@ PROFILE_REQUIREMENTS = {
         "modules": ("scripts.update_local_database",),
     },
     "database-reset": {
-        "files": (".env", "fixtures/db_snapshot_v2/v3/manifest.json"),
+        "files": (
+            ".env",
+            "db/schema.sql",
+            "db/schema_parts",
+            "db/schema_assembly/labor_union_fresh_schema_v1.json",
+            "db/cutover_releases/labor_union_validation_schema_v1.json",
+        ),
         "modules": ("scripts.reset_fake_database",),
     },
     "ngrok-development": {
