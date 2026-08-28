@@ -1,6 +1,6 @@
 /**
  * File: OrdersPage.tsx
- * Description: 顯示 Orders 摘要與可操作 Drawer，契約操作走外部簽約 successor，媒合只使用 typed facts。
+ * Description: 顯示 Orders 摘要與可操作 Drawer，整合外部簽約、服務前換人與 typed 媒合操作。
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -62,6 +62,7 @@ import type {
 } from '../api/orders/order_stage_projection_schemas';
 import { Drawer } from '../components/Drawer';
 import { ContractExternalSigningActions } from '../components/ContractExternalSigningActions';
+import { ServiceBeforeReplacementActions } from '../components/ServiceBeforeReplacementActions';
 import { MatchingScheduleAndAssignmentActions } from '../components/MatchingScheduleAndAssignmentActions';
 import { OrderServiceCompletionActions } from '../components/OrderServiceCompletionActions';
 import {
@@ -326,10 +327,15 @@ export const OrdersPage: React.FC = () => {
 
     try {
       const queryText = searchQuery.trim();
+      if (queryText) {
+        setSelectedStage('全部');
+        setStagePage(null);
+        setStageIndex(new Map());
+      }
       const [summaryResult, stageResult] = await Promise.allSettled([
         loadAllOrderSummaries(
           ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
-          { page_size: 200, lifecycle_scope: 'unfinished', ...(queryText ? { query_text: queryText } : {}) },
+          { page_size: 200, lifecycle_scope: queryText ? 'all' : 'unfinished', ...(queryText ? { query_text: queryText } : {}) },
           { signal: controller.signal },
         ),
         queryText
@@ -2868,6 +2874,16 @@ export const OrdersPage: React.FC = () => {
                   <ContractExternalSigningActions
                     caseNo={(contractOrder || dateConfirmOrder)!.id}
                     onCommitted={() => loadContractTabQueries((contractOrder || dateConfirmOrder)!)}
+                  />
+                )}
+
+                {(contractOrder || dateConfirmOrder) && (
+                  <ServiceBeforeReplacementActions
+                    caseNo={(contractOrder || dateConfirmOrder)!.id}
+                    onCommitted={() => loadContractTabQueries((contractOrder || dateConfirmOrder)!)}
+                    onSubstitutionReferral={() => {
+                      window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent((contractOrder || dateConfirmOrder)!.id)}`;
+                    }}
                   />
                 )}
 

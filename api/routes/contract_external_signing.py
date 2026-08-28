@@ -24,12 +24,16 @@ from api.dependencies.contract_external_signing import (
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from domains.contract_signing.external_signing import ExternalSigningRuleError
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.contract_signing.external_signing_contracts import (
+    ApplyLegacyManualRecoveryReport,
+    ExternalCompletionReportScope,
     ExternalSigningTypedError,
     ManualAttestationEvidence,
     ManualAttestationMethod,
+    PreviewLegacyManualRecoveryReport,
     RecordManualExternalClientSigningReport,
     RecordManualExternalStaffSigningReport,
 )
@@ -73,6 +77,144 @@ class CompletionReportBody(BaseModel):
 
 class ClientCompletionReportBody(CompletionReportBody):
     expected_commitment_id: int = Field(ge=1)
+
+
+class LegacyRecoveryPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scope: ExternalCompletionReportScope
+    matching_segment_id: int | None = Field(default=None, ge=1)
+    legacy_document_version_id: int = Field(ge=1)
+    signing_event_id: int = Field(ge=1)
+    command_receipt_id: int = Field(ge=1)
+    confirmation_method: ManualAttestationMethod
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def require_scope_target(self):
+        if (
+            self.scope is ExternalCompletionReportScope.STAFF
+            and self.matching_segment_id is None
+        ):
+            raise ValueError("staff recovery requires matching_segment_id")
+        if (
+            self.scope is ExternalCompletionReportScope.CLIENT
+            and self.matching_segment_id is not None
+        ):
+            raise ValueError("client recovery cannot contain matching_segment_id")
+        return self
+
+
+class LegacyRecoveryApplyBody(LegacyRecoveryPreviewBody):
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_status_version: int = Field(ge=0)
+
+
+class LegacyRecoveryTargetView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scope: ExternalCompletionReportScope
+    matching_segment_id: int | None = Field(default=None, ge=1)
+    target_subject_reference: str = Field(min_length=1, max_length=191)
+    current_document_version_id: int = Field(ge=1)
+    reported: bool
+    legacy_document_version_id: int | None = Field(default=None, ge=1)
+    signing_event_id: int | None = Field(default=None, ge=1)
+    command_receipt_id: int | None = Field(default=None, ge=1)
+    legacy_media_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def require_scope_target(self):
+        if (
+            self.scope is ExternalCompletionReportScope.STAFF
+            and self.matching_segment_id is None
+        ):
+            raise ValueError("staff recovery target requires matching_segment_id")
+        if (
+            self.scope is ExternalCompletionReportScope.CLIENT
+            and self.matching_segment_id is not None
+        ):
+            raise ValueError("client recovery target cannot contain matching_segment_id")
+        legacy_values = (
+            self.legacy_document_version_id,
+            self.signing_event_id,
+            self.command_receipt_id,
+            self.legacy_media_sha256,
+        )
+        if any(value is not None for value in legacy_values) and not all(
+            value is not None for value in legacy_values
+        ):
+            raise ValueError("legacy recovery target tuple must be complete")
+        return self
+
+
+class LegacyRecoveryQueryView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_no: str = Field(pattern=_CASE)
+    session_id: str = Field(pattern=_SESSION)
+    matching_plan_id: int = Field(ge=1)
+    current_document_set_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    commitment_id: int | None = Field(default=None, ge=1)
+    state: Literal[
+        "staff_reporting",
+        "staff_reports_complete",
+        "client_reported_final_pdf_pending",
+        "completed",
+    ]
+    status_version: int = Field(ge=0)
+    targets: list[LegacyRecoveryTargetView]
+
+    @model_validator(mode="after")
+    def require_scope_target_cardinality(self):
+        staff = [
+            target
+            for target in self.targets
+            if target.scope is ExternalCompletionReportScope.STAFF
+        ]
+        clients = [
+            target
+            for target in self.targets
+            if target.scope is ExternalCompletionReportScope.CLIENT
+        ]
+        if not staff:
+            raise ValueError("legacy recovery query requires at least one staff target")
+        if len(clients) != 1:
+            raise ValueError("legacy recovery query requires exactly one client target")
+        segment_ids = [target.matching_segment_id for target in staff]
+        if len(segment_ids) != len(set(segment_ids)):
+            raise ValueError("legacy recovery query staff targets must be unique")
+        return self
+
+
+class LegacyRecoveryPreviewView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    session_id: str = Field(pattern=_SESSION)
+    expected_status_version: int = Field(ge=0)
+    scope: ExternalCompletionReportScope
+    matching_segment_id: int | None = Field(default=None, ge=1)
+    current_document_version_id: int = Field(ge=1)
+    current_document_set_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    current_commitment_id: int | None = Field(default=None, ge=1)
+    legacy_media_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    blockers: list[str]
+    can_apply: bool
+
+    @model_validator(mode="after")
+    def require_scope_target(self):
+        if (
+            self.scope is ExternalCompletionReportScope.STAFF
+            and self.matching_segment_id is None
+        ):
+            raise ValueError("staff recovery preview requires matching_segment_id")
+        if (
+            self.scope is ExternalCompletionReportScope.CLIENT
+            and self.matching_segment_id is not None
+        ):
+            raise ValueError("client recovery preview cannot contain matching_segment_id")
+        return self
 
 
 class FinalPreviewBody(BaseModel):
@@ -199,6 +341,68 @@ def query_external_signing(
         lambda: BaseResponse(data=_public_query(application.query_case(case_no))),
         "query",
     )
+
+
+@router.get("/{case_no}/contract-external-signing/legacy-recovery")
+def query_legacy_recovery(
+    case_no: str = ApiPath(pattern=_CASE),
+    _: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    def action():
+        result = application.reports.query_legacy_manual_recovery(case_no)
+        return BaseResponse(data=_public_legacy_recovery_query(result))
+
+    return _call(action, "legacy-recovery-query")
+
+
+@router.post("/{case_no}/contract-external-signing/legacy-recovery/preview")
+def preview_legacy_recovery(
+    body: LegacyRecoveryPreviewBody,
+    case_no: str = ApiPath(pattern=_CASE),
+    _: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    def action():
+        result = application.reports.preview_legacy_manual_recovery(
+            _legacy_preview_request(case_no, body)
+        )
+        return BaseResponse(data=_public_legacy_recovery_preview(result))
+
+    return _call(action, "legacy-recovery-preview")
+
+
+@router.post("/{case_no}/contract-external-signing/legacy-recovery/apply")
+def apply_legacy_recovery(
+    body: LegacyRecoveryApplyBody,
+    case_no: str = ApiPath(pattern=_CASE),
+    idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY),
+    receipt_id: str = Header(alias="X-Receipt-ID", pattern=_RECEIPT),
+    correlation_id: str = Header(alias="X-Correlation-ID", pattern=_CORRELATION),
+    principal: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    _require_receipt_identity(idempotency_key, receipt_id, correlation_id)
+
+    def action():
+        receipt = application.reports.apply_legacy_manual_recovery(
+            ApplyLegacyManualRecoveryReport(
+                preview=_legacy_preview_request(case_no, body),
+                preview_fingerprint=PreviewFingerprint(body.preview_fingerprint),
+                expected_status_version=ExpectedVersion(body.expected_status_version),
+                occurred_at=datetime.now(timezone.utc),
+                actor=admin_actor_context(principal),
+                idempotency_key=IdempotencyKey(idempotency_key),
+                correlation_id=CorrelationId(correlation_id),
+            )
+        )
+        view = application.read_receipt(case_no, receipt_id)
+        if view is None:
+            raise RuntimeError("external signing receipt missing after commit")
+        view["replayed"] = receipt.replayed
+        return BaseResponse(data=_public_receipt(view))
+
+    return _call(action, correlation_id)
 
 
 @router.get("/{case_no}/contract-external-signing/unsigned-pdf")
@@ -493,6 +697,65 @@ def _public_query(value: Mapping[str, Any]) -> dict[str, Any]:
 
 def _public_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
     return ExternalSigningReceiptView.model_validate(value).model_dump(mode="json")
+
+
+def _legacy_preview_request(
+    case_no: str, body: LegacyRecoveryPreviewBody
+) -> PreviewLegacyManualRecoveryReport:
+    return PreviewLegacyManualRecoveryReport(
+        case_no=case_no,
+        scope=body.scope,
+        matching_segment_id=body.matching_segment_id,
+        legacy_document_version_id=body.legacy_document_version_id,
+        signing_event_id=body.signing_event_id,
+        command_receipt_id=body.command_receipt_id,
+        confirmation_method=body.confirmation_method,
+        reason=body.reason.strip(),
+    )
+
+
+def _public_legacy_recovery_query(value) -> dict[str, Any]:
+    payload = {
+        "case_no": value.case_no,
+        "session_id": value.session_id,
+        "matching_plan_id": value.matching_plan_id,
+        "current_document_set_sha256": value.current_document_set_sha256,
+        "commitment_id": value.commitment_id,
+        "state": value.state.value,
+        "status_version": value.status_version,
+        "targets": [
+            {
+                "scope": target.scope.value,
+                "matching_segment_id": target.matching_segment_id,
+                "target_subject_reference": target.target_subject_reference,
+                "current_document_version_id": target.current_document_version_id,
+                "reported": target.reported,
+                "legacy_document_version_id": target.legacy_document_version_id,
+                "signing_event_id": target.signing_event_id,
+                "command_receipt_id": target.command_receipt_id,
+                "legacy_media_sha256": target.legacy_media_sha256,
+            }
+            for target in value.targets
+        ],
+    }
+    return LegacyRecoveryQueryView.model_validate(payload).model_dump(mode="json")
+
+
+def _public_legacy_recovery_preview(value) -> dict[str, Any]:
+    payload = {
+        "preview_fingerprint": value.preview_fingerprint.value,
+        "session_id": value.session_id,
+        "expected_status_version": value.expected_status_version,
+        "scope": value.scope.value,
+        "matching_segment_id": value.matching_segment_id,
+        "current_document_version_id": value.current_document_version_id,
+        "current_document_set_sha256": value.current_document_set_sha256,
+        "current_commitment_id": value.current_commitment_id,
+        "legacy_media_sha256": value.legacy_media_sha256,
+        "blockers": list(value.blockers),
+        "can_apply": value.can_apply,
+    }
+    return LegacyRecoveryPreviewView.model_validate(payload).model_dump(mode="json")
 
 
 def _attestation(body: CompletionReportBody, receipt_id: str) -> ManualAttestationEvidence:

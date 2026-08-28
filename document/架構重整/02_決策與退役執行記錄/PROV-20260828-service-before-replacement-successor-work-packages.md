@@ -16,7 +16,8 @@
 |---|---|---|---|
 | Scheduling replacement generation/event + exact supersession | `required_now` | spec §3.1～3.2、§8；R-01～R-04/R-07 | owner-specific additive persisted contract；不複製Matching/Assignment SSOT |
 | server Q/P/A + idempotency/receipt/outbox/readback | `required_now` | spec §3.3～3.5 | copy-adapt current Scheduling Q/P/A/UoW patterns |
-| anomaly terminal + Orders/React/Browser | `required_now` | spec §3.6／§6 | typed projection/minimal glue |
+| Orders/React/Browser manual action | `required_now` | spec §3.6／§6／§8.8 | typed projection/minimal glue |
+| LINE-request anomaly terminal | `conditional_deferred` | spec §8.8 | only after explicit LINE request event exists |
 | 放寬generic assignment空service-date、改actual service、重算Finance/Payroll | `remove` | spec non-goals/safe stop | reject |
 
 Current Matching `rematch_required` event/receipt可作intent evidence，但不是successor completion；current assignment、waiting lock、commitment與matching roots只能由owner ports消費。
@@ -41,15 +42,18 @@ Current Matching `rematch_required` event/receipt可作intent evidence，但不�
 - `objective`: 用replacement lineage/successor/current-step owner readback終止或轉換異常，並提供Orders/Anomalies人工操作入口。
 - `dependencies`: `PKG-RPRE-OWNER-SUCCESSOR`；H current-step composition只在已核准H projector contract接通後整合；未接通時回typed unavailable而非假terminal。
 - `requirements`: spec §3.6、§6、§8.5；R-01～R-04/R-07 runtime acceptance。
-- `in_scope`: deterministic replacement occurrence/successor identity；terminal conjunction；typed API client；Orders/Anomalies React impact/reason/evidence/reuse/resume/readback；versioned scenarios/no-auth Browser。
+- `in_scope`: deterministic replacement projection/successor identity；typed API client；Orders React impact/reason/evidence/reuse/resume/readback；versioned scenarios/no-auth Browser。Anomalies entry只在explicit LINE request event存在時另包接入。
 - `exclusions`: tracking resolve/receipt-only success/UI-selected step；C-05 generic case binding；provider/persisted-human gate。
-- `steps`: projector/read model→spec §8.5 typed Q/P/A API/strict decoder→React exact-case entry→post-Apply full readback→R scenarios→real Browser。
+- `steps`: projector/read model→spec §8.5 typed Q/P/A API/strict decoder→Orders exact-case entry→驗證Apply
+  response內complete full owner readback→R scenarios→real Browser；不得為一般RPRE建立或自動關閉anomaly，
+  也不得用已套用的舊scenario再Query取代canonical Apply readback。
 - `api_write_set`: `api/schemas/service_before_replacement.py`、`api/routes/service_before_replacement.py`、
   `api/dependencies/service_before_replacement.py`、`api/main.py`及 focused tests；route 只組合既有
   Scheduling workflow/repository，不新增 Domain 規則或 raw-dict response。
-- `terminal`: service=0；strictly newer event/prior binding；successor exists；old caregiver roots retained but non-current；server Step 2/3/4；fresh reads complete；R-07維持concrete blocked successor。
+- `terminal`: service=0；strictly newer event/prior binding；successor exists；old caregiver roots retained but non-current；server Step 2/3/4；Apply receipt與server post-commit readback完整對帳且`complete=true`；R-07維持concrete blocked successor。
 - `safe_stop`: schema drift、permission、stale、timeout/decode/outcome unknown或readback unavailable不顯示成功。
-- `verification`: API typed errors/readback；React完整impact/no fake success；`lu_test_*` DB before/after；no-auth Browser R-01～R-04/R-07 + actual-service negative。
+- `verification`: API typed errors/readback；React拒絕receipt-only與不完整readback，成功後不重Query已消耗
+  scenario；`lu_test_*` DB before/after；no-auth Browser R-01～R-04/R-07 + actual-service negative；無explicit LINE request時驗證anomaly零新增/零更新。
 - `cleanup`: unique scenario identity與owned-row scoped cleanup/保留receipt；不清他人rows。
 
 ## 4. Coverage matrix
@@ -62,7 +66,7 @@ Current Matching `rematch_required` event/receipt可作intent evidence，但不�
 | R-04 | matrix/spec §3.4 | OWNER replacement-specific zero-service representation | generic assignment invariant不放寬；resume step server-owned |
 | R-07 | matrix/spec §3.6 | OWNER zero-pool + UI terminal projection | Step 2 blocked with concrete disposition；不復活舊staff |
 | HOB-A6/A7 | controlling spec | OWNER service gate + PROJECTION readback | zero service replacement；any service substitution referral/zero write |
-| stale/replay/unknown | spec §3.5／§5 | OWNER idempotency + UI reconciliation | same-key exact；unknown無假成功 |
+| stale/replay/unknown | spec §3.5／§5／§8.5.3 | OWNER idempotency + UI reconciliation | same-key exact；Apply complete readback為canonical observation；unknown無假成功且不重Query已消耗scenario |
 | R storage exactness | spec §8 | OWNER additive artifact＋DB gates | event/root/successor/receipt/outbox可機械對帳；seed/backfill/destructive皆無 |
 
 ## 5. Readiness
@@ -74,10 +78,11 @@ package_status: PACKAGE_READY
 blockers: []
 ```
 
-## 5.1 Production loader task pack（pending Authority）
+## 5.1 Production loader task pack（approved）
 
 - `entry`: spec §8.6。
-- `status`: `proposed`；未核准前 dependency 維持 honest 503。
+- `status`: `approved`；2026-08-28 人工已核准 spec §8.6 source-map。實作完成並通過驗收前，
+  dependency 仍須維持 honest 503，不得以 partial loader 假成功。
 - `write_set`:
   - 新增 `infrastructure/mysql/service_before_replacement_loader.py`；
   - `infrastructure/mysql/service_before_replacement_repository.py`（typed loader handoff）；
@@ -87,11 +92,15 @@ blockers: []
 - `acceptance`: same connection/read mode，actual-service positive referral/future negative，predecessor identity，
   13-source tuple/criteria/package/event exact binding，R01～R04/R07 root set，Step2/3/4 reuse，
   missing/ambiguous/stale/partial zero-write，replay/readback exact。
+- `composite source correction`: `candidate_binding` 為 current candidate pool exact set；`signback`
+  的 canonical evidence owner 為 Contract Signing；`recipient_binding` 複合 schedule recipient snapshot
+  與 LINE Identity current binding。1012 `owner_domain` 只表示 replacement relation transition owner，
+  不轉移 source SSOT，不授權 Scheduling 改寫 Contract/LINE 根事實。
 - `excluded`: Domain behavior、DDL/migration/backfill，Orders/Finance/Payroll writer，provider/production。
 
 ```yaml
-package_status: AUTHORITY_REQUIRED
-blockers: [human_loader_source_map_approval]
+package_status: PACKAGE_READY
+blockers: []
 ```
 
 ## 8. Matching package compatibility task-pack correction（2026-08-28）
@@ -154,8 +163,48 @@ blockers: []
   §8.5 error vocabulary已完成；production loader未接時 TestClient誠實回
   `503 replacement_source_unavailable`。主代理`116 passed`；fresh Luna/high
   `133 passed, 1 skipped`，P0/P1/P2=0；skip為未設真MySQL env。
-- `PKG-RPRE-PROJECTION-UI-RUNTIME`: `in-progress`；pure projector已完成，production loader／
-  typed Query wiring／React／no-auth Browser仍未完成，不得外推為整包完成。
+- `PKG-RPRE-PRODUCTION-LOADER-source`: `completed`（source／fresh E3）。request-aware
+  composite loader、explicit R-01～R-04/R-07、BusinessClock started official moments、rebuild/RPRE
+  predecessor、14 root sources、Matching 13-source/package-bound event、Contract signback 與
+  schedule-recipient＋LINE binding 已接入 request-scoped connection/outer UoW；partial/missing/stale
+  預期固定 typed `503 replacement_source_unavailable`。r1～r3 findings均已修正；final主代理
+  focused `58 passed`、RPRE source suite `129 passed`。fresh Luna/high r4為P0/P1/P2=0、cross
+  `221 passed`，並通過package-proposed exact binding、customer-decision 13-source parity、external
+  signback source/receipt/session/result snapshot及rebuild predecessor五組adversarial probes。
+  真MySQL integration因未提供env而`1 skipped`，不得外推為live runtime完成。
+- `PKG-RPRE-PRODUCTION-LOADER-post-Apply`: `in-progress`。已修正有效successor generation沒有
+  `scheduling_rebuild_events` row時仍被無條件判成malformed：存在latest RPRE event時改以其exact
+  generation／aggregate／event binding作predecessor；首次換人無latest且無rebuild固定回
+  `replacement_prior_event_unavailable`。主代理focused/broader `68 passed`，fresh Luna/high
+  P0/P1=0、focused `133 passed`、broader `67 passed`。兩個retained R-02案件已跨過原
+  `replacement_source_malformed`，下一個runtime結果為`replacement_matching_plan_unavailable`：
+  Apply後successor已生效且不存在active accepted plan，UI post-Apply readback不可再把同一R-02當作
+  未執行Query；durable receipt/successor readback入口仍待收斂，故runtime包不得標completed。
+- `PKG-RPRE-PROJECTION-UI-RUNTIME`: `in-progress`；pure projector、production loader與React source已完成，
+  `lu_test_*` no-auth API composition／fresh readback／真Browser仍未完成，不得外推為整包完成。
+- `PKG-RPRE-REACT-source`: `completed`（source／fresh E3）。專屬 strict Q/P/A client、
+  R-01／02／03／04／07 明確選擇、reason/evidence、Preview 確認、actual-service
+  substitution referral、server-owned resume step 與 same-key outcome-unknown 對帳已完成；
+  producer focused Vitest `4 passed`、oxlint/build/diff-check PASS。現有 anomaly drawer 尚無
+  typed `case_no + RPRE scenario` binding，本 slice 不從 `sourceIdentity` 猜情境、不假掛載；
+  fresh Luna/high r1 重驗 focused `4 passed`、build/oxlint PASS，但未放行：尚需補
+  fingerprint/root-digest 重算、request/response case・scenario・idempotency binding、
+  referral proof、Preview/Apply race/abort 及 callback failure handling；且正式入口未掛載。
+  r2 已補nested/root digest、request binding、abort/race與入口掛載，主代理`9 passed`＋build PASS，
+  fresh Luna/high合計`55 passed`＋build/oxlint PASS但仍未放行：完整preview與command fingerprint未重算、
+  Apply後未fresh Query、入口仍預設猜R-01，且UI未完整顯示root/reuse/readback/proof lineage。
+  r3 exact repair已完成full fingerprint、Apply後fresh Query、explicit scenario與完整root/proof/readback；
+  主代理r4 `59 passed`＋build PASS；fresh Luna/high r4 focused`13 passed`、backend adjacent`109 passed`、
+  Orders direct`46 passed`且build/oxlint PASS。r5已補完整numeric versions與projection_kind，主代理
+  `13 passed`＋build/oxlint PASS；fresh Luna/high r5 `13 passed`、build/oxlint/diff-check PASS，P0/P1=0。
+  依人工§8.8裁決，一般RPRE不具有anomaly occurrence；沒有explicit LINE request時UI不推定、不建立、
+  不關閉active anomaly。Orders Browser可獨立驗收；3個既有Orders錯誤文字test為P2且不在RPRE路徑。
+  post-Apply r6依Spec Pipeline校正：Apply response內`receipt + complete readback`為canonical post-commit
+  observation；React不再用已套用的舊scenario重新Query，receipt-only／不完整readback仍進
+  outcome-unknown並只以原payload/key對帳。主代理focused `13 passed`；fresh Luna/high PASS、
+  P0/P1=0、build/lint/diff-check/UTF-8 PASS。兩個retained R-02 case的舊scenario Query仍因successor
+  生效後active accepted plan合法不存在而不可作fresh pre-Apply Browser fixture；新的未套用scenario
+  Browser Apply仍`NOT_RUN`，故`PKG-RPRE-PROJECTION-UI-RUNTIME`維持`in-progress`。
 - persistence DB gates：Scope／Change inventory／Static release／Descriptor／read-only plan／Engine／本機
   Developer acceptance `PASS`；另一台實體電腦Developer acceptance `NOT_RUN`，總結仍為
   `DB_CHANGE_NOT_READY`。

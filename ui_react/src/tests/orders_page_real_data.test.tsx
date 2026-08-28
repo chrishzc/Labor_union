@@ -252,7 +252,7 @@ describe('OrdersPage query real-data slice', () => {
     expect(screen.getByRole('button', { name: '重試' })).toBeInTheDocument();
   });
 
-  it('clears the old stage filter when a text search disables the stage projection', async () => {
+  it('searches all lifecycle states and clears the old stage filter', async () => {
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
     fireEvent.click(screen.getByRole('button', { name: /1\. 進件與補件 \(1\)/ }));
@@ -262,8 +262,12 @@ describe('OrdersPage query real-data slice', () => {
       target: { value: 'ORD-2026-0802' },
     });
 
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: /1\. 進件與補件/ }),
+    ).toBeDisabled());
+
     await waitFor(() => expect(ordersQueryClient.getOrderSummaries).toHaveBeenLastCalledWith(
-      { page_size: 200, lifecycle_scope: 'unfinished', query_text: 'ORD-2026-0802' },
+      { page_size: 200, lifecycle_scope: 'all', query_text: 'ORD-2026-0802' },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ));
     expect(await screen.findByText('ORD-2026-0802')).toBeInTheDocument();

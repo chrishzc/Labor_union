@@ -318,6 +318,26 @@ def test_repository_generation_transition_requires_prior_effective_generation():
     assert connection.insert_count == 0
 
 
+def test_repository_rejects_existing_prior_replacement_event_for_wrong_generation():
+    from infrastructure.mysql.service_before_replacement_repository import (
+        MySqlServiceBeforeReplacementRepository,
+        ServiceBeforeReplacementPersistenceError,
+    )
+
+    connection = _Connection(rows=[{
+        "id": 14,
+        "replacement_generation_id": 99,
+    }])
+    repository = MySqlServiceBeforeReplacementRepository(connection)
+
+    with pytest.raises(ServiceBeforeReplacementPersistenceError, match="generation binding drift"):
+        repository._prior_replacement_event_id(
+            "replacement-event:CASE-1:14",
+            "CASE-1",
+            expected_generation_id=10,
+        )
+
+
 def _request(*, source_snapshot=None, candidate_count=0):
     from infrastructure.mysql.matching_successor_persistence_adapter import MatchingSuccessorPersistenceRequest
 

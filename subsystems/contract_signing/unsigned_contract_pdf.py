@@ -31,7 +31,9 @@ from subsystems.contract_signing.template_catalog import (
 )
 
 
-_PERSISTED_ADMIN_ACTOR = re.compile(r"^admin:[1-9][0-9]*$")
+_AUTHORIZED_LOCAL_OR_PERSISTED_ACTOR = re.compile(
+    r"^(?:admin:[1-9][0-9]*|system:local_bypass)$"
+)
 _OPAQUE_OBJECT_REFERENCE = re.compile(r"^[a-z][a-z0-9_-]{15,63}$")
 _UNSIGNED_DOCUMENT_ROLE = "template_generated"
 _MAXIMUM_PDF_BYTES = 20 * 1024 * 1024
@@ -308,7 +310,7 @@ def _validate_request_identity(
 
 
 def _require_persisted_actor(actor: ActorContext) -> None:
-    if _PERSISTED_ADMIN_ACTOR.fullmatch(actor.actor_id) is None:
+    if _AUTHORIZED_LOCAL_OR_PERSISTED_ACTOR.fullmatch(actor.actor_id) is None:
         raise _error(
             "forbidden",
             "contract_pdf_requires_persisted_actor",

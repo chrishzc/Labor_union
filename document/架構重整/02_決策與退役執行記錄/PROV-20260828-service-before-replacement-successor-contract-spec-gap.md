@@ -129,8 +129,9 @@ service-date invariant。
 - same key＋same canonical payload 回同一 receipt/readback；same key＋different payload 拒絕；
 - fresh lock 依 Scheduling 既有 case／staff／generation／lock 順序，不能信任 UI snapshot；
 - outbox 只發已提交的內部 successor／readback intent，不產生 LINE/provider 或付款效果；
-- post-Apply 必須重新讀 Orders current step、Scheduling effective generation／assignment、
-  matching successor round 與 active anomaly；receipt 只是證據之一。
+- post-Apply 必須由 server 重新讀 Orders current step、Scheduling effective generation／assignment、
+  matching successor round 與 active anomaly，並把 complete readback 與 receipt 一起回傳；receipt 只是
+  證據之一。React 不得在成功後以已消耗的舊 scenario 再發一次 Query 取代這份 readback。
 
 需裁決 receipt 的 canonical owner、outbox target／intent vocabulary、outcome-unknown reconciliation
 邊界，以及 missing successor／readback failure 是否由原 occurrence 保持 active、另建 successor，
@@ -240,8 +241,10 @@ readback，或在 current Authority 未核准前新增 schema／route／worker�
 
 - React 從 Orders／Anomalies exact case 開啟 replacement view，顯示 root impact、reason/evidence、
   candidate reuse、resume step、blocked disposition 與 fresh readback。
-- Apply 後重新 Query owner roots／current step／active anomalies；不得以 receipt-only 或任意 step
-  更新畫面。
+- Apply 後以 Apply response 內 server 已完成的 fresh owner readback 顯示 roots／current step／active
+  anomalies；必須同時驗證receipt/readback identity、versions、root digests/counts、outbox與`complete=true`。
+  不得以receipt-only或任意step更新畫面，也不得用已套用的舊scenario再次Query；操作者之後明確選擇
+  新scenario時，才重新Query該scenario的current owner roots。
 - Task96 development `local_bypass` no-auth Browser：R-01～R-04、R-07 及 actual-service negative，
   驗證回原 Orders workspace 可繼續；每 case 保存最小去敏 receipt、before/after/readback。
 - Browser 不得成為唯一 contract evidence；沒有 API／DB／owner readback 時固定 `NOT_RUN` 或 `BLOCKED`。
@@ -312,7 +315,28 @@ convergence:
   blockers: []
 ```
 
-## 8.6 Production loader source-map proposal（2026-08-28）
+## 8.8 RPRE 與 anomaly source 邊界裁決（2026-08-28）
+
+2026-08-28 人工明確裁決：一般服務前換人不具備可由 owner facts 自動推定的「明確換人申請」紀錄。
+RPRE 因此是 Orders exact-case 的人工 owner command，不因歷史匯入、現有 caregiver roots或操作者選擇
+scenario 自動建立 anomaly，也不得為了關閉 UI acceptance 反推 `predicate_active=false`。
+
+只有客戶透過 LINE 的明確換人申請入口提出時，才允許由該筆 typed request/event 建立 anomaly occurrence；
+該 occurrence 必須保留 LINE request identity/version、case/customer binding、actor/time、request payload
+fingerprint與後續 RPRE replacement event/successor lineage。沒有此 source event 時，Orders RPRE Apply
+只回 fresh owner readback，不回也不改 anomaly。LINE 申請入口、request event與anomaly projector屬 LINE
+模組1～4補齊任務，不由本 package 猜造或以 generic anomaly resolve 取代。
+
+```yaml
+rpre_anomaly_source:
+  status: ADOPTED
+  authority: human_explicit_2026-08-28
+  default_rpre_mode: orders_manual_action_without_anomaly
+  anomaly_mode_requires: explicit_line_replacement_request_event
+  forbidden: [infer_request_from_import, infer_request_from_roots, receipt_only_terminal, generic_resolve]
+```
+
+## 8.6 Production loader source-map（2026-08-28 人工核准）
 
 本節只解除 current production dependency 固定 503，不改 R-01～R-04／R-07 結果、
 Domain invariant、1012 schema 或 provider boundary。
@@ -334,9 +358,59 @@ Domain invariant、1012 schema 或 provider boundary。
 
 ```yaml
 rpre_loader_source_map:
-  status: AUTHORITY_REQUIRED
+  status: ADOPTED
+  authority: human_explicit_2026-08-28
   schema_change_expected: false
   production_provider_effect: none
+```
+
+### 8.7 Composite root owner 與 exact source 修正
+
+1012 root relation 的 `owner_domain` 表示 replacement transition 中負責將該關係
+supersede/retain/create 的邊界，不得把它解釋為轉移 canonical source SSOT。production
+loader 必須在同一 borrowed connection/UoW 讀取實際 source owner，產生帶
+source-owner identity/version/event/fingerprint 的 composite proof，再投影成 1012 relation。
+
+- `candidate_binding` 固定為 current candidate pool header，entries 及 exact
+  `candidates_added`/latest candidate events 的完整 set binding，不是單一 candidate row，
+  也不是 accepted caregiver binding。R-01 必須 exactly one aggregate root。
+- `willingness` 是該 pool 內 current relevant candidates 的 latest valid willingness event set；
+  duplicate、unknown、nonterminal 或 candidate-set drift 停止。
+- `matching_plan`/`matching_segment` 是 exactly one accepted active plan 與其完整 1..4 segment set；
+  `matching_reply` 只接受 current criteria/package/13-source tuple 綁定的 M3
+  `customer_decision` event，不以 legacy reply row 取代。
+- `recipient_confirmation` 是 current schedule snapshot、customer recipient、每個 current
+  segment recipient 與各自 latest confirmation event 的 complete set；cardinality 固定為
+  `segment_count + 1`，confirmed-date version/snapshot marker/fingerprint 必須 exact。
+- `waiting_lock` 是 exactly one active lock header，其完整 days 與 exact `lock_acquired`
+  event；必須完整覆蓋 current plan/segment/date set。
+- `commitment` 來自 Scheduling Commitment SSOT：exactly one current plan commitment、全部
+  commitment days 與 terminal event absence；day count 必須等於 Orders service days，
+  segment/staff/date 必須對齊。
+- `signback` 在 1012 關係中為 Scheduling transition 受影響關係，但 canonical
+  evidence owner 仍是 Contract Signing；必須複合 current plan/segments 的所有 staff
+  signed document/event/receipt/media-digest facts。Scheduling 不得重算或改寫簽回根事實。
+- `recipient_binding` 在 1012 關係中為 Scheduling recipient projection，canonical
+  binding owner 仍是 LINE Identity；必須將 schedule recipient snapshot 的 customer/
+  segment recipients 逐筆與 `line_identity_bindings` current bound subject 對齊，cardinality
+  同樣為 `segment_count + 1`。單獨 snapshot、access grant 或 LINE row 都不足以 terminal。
+- `effective_generation`/`assignment`/`official_schedule` 必須同時綁定 current
+  Scheduling aggregate、effective generation、rebuild predecessor、完整 assignments 與
+  assignment-owned official schedules。BusinessClock 已開始的 official moments 才形成
+  actual-service proof；future schedule 不阻擋。
+- `successor_round` 來自 Matching package lineage、criteria、完整 13-source tuple 與
+  package-bound event；不以 Scheduling generation/event version 取代。
+
+Composite proof 必須保存 source owner、canonical ordered row-set identity、version/event vector
+與 whole-set fingerprint；missing、duplicate、cross-case、partial、stale、owner mismatch、幾何不完整
+或 predecessor 缺失時固定 typed unavailable，不產生 partial `ServiceBeforeReplacementFacts`。
+
+```yaml
+rpre_composite_root_contract:
+  status: SPEC_READY
+  candidate_binding: current_candidate_pool_set
+  relationship_owner_is_not_source_owner: true
+  schema_change_expected: false
 ```
 
 ### 8.5 Typed public API contract（2026-08-28 人工核准）
@@ -378,6 +452,11 @@ Apply 必須依序做 fresh owner lock，重驗 proof/identity/version/reason/ev
 outer UoW append/supersede/successor/receipt/outbox，transaction-local 對帳，commit 後再做
 Scheduling/Matching/Orders/Anomalies fresh readback。Commit 後不明回
 `503 replacement_outcome_unknown`，只能同 key reconcile，不得假成功或回滾已提交交易。
+
+Apply response 內的`readback`就是本次 mutation 的canonical post-commit observation。React 成功路徑
+不得再用同一已套用scenario呼叫Query，因successor生效後該scenario的前置根事實（例如R-02的active
+accepted plan）可能已合法不存在；這種重新Query失敗不得覆蓋已complete的Apply readback。後續Query
+只代表操作者明確選擇另一個current scenario，不是前一筆Apply的完成判定。
 
 #### 8.5.4 Stable error vocabulary
 

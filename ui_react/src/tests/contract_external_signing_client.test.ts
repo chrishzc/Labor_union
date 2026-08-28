@@ -70,6 +70,12 @@ describe('contractExternalSigningClient', () => {
 
     vi.mocked(get).mockResolvedValueOnce(envelope({ ...query, storage_locator: '/mnt/contracts' }));
     await expect(contractExternalSigningClient.query('CASE-001')).rejects.toThrow();
+
+    vi.mocked(get).mockResolvedValueOnce(envelope({
+      ...query,
+      staff_targets: [query.staff_targets[0], { ...query.staff_targets[0] }],
+    }));
+    await expect(contractExternalSigningClient.query('CASE-001')).rejects.toThrow();
   });
 
   it('records a staff completion report with expected versions and stable command identity', async () => {
@@ -98,6 +104,124 @@ describe('contractExternalSigningClient', () => {
         },
       }),
     );
+  });
+
+  it('strictly decodes complete legacy recovery lineage and rejects partial or duplicate targets', async () => {
+    const recovery = {
+      case_no: 'CASE-001',
+      session_id: sessionId,
+      matching_plan_id: 17,
+      current_document_set_sha256: 'a'.repeat(64),
+      commitment_id: null,
+      state: 'staff_reporting' as const,
+      status_version: 3,
+      targets: [
+        {
+          scope: 'staff' as const,
+          matching_segment_id: 41,
+          target_subject_reference: 'STAFF-009',
+          current_document_version_id: 31,
+          reported: false,
+          legacy_document_version_id: 21,
+          signing_event_id: 51,
+          command_receipt_id: 61,
+          legacy_media_sha256: 'b'.repeat(64),
+        },
+        {
+          scope: 'client' as const,
+          matching_segment_id: null,
+          target_subject_reference: 'CLIENT-001',
+          current_document_version_id: 32,
+          reported: false,
+          legacy_document_version_id: 22,
+          signing_event_id: 52,
+          command_receipt_id: 62,
+          legacy_media_sha256: 'c'.repeat(64),
+        },
+      ],
+    };
+    const get = vi.spyOn(transport, 'get').mockResolvedValueOnce(envelope(recovery));
+    await expect(contractExternalSigningClient.queryLegacyRecovery('CASE-001')).resolves.toEqual(recovery);
+
+    vi.mocked(get).mockResolvedValueOnce(envelope({
+      ...recovery,
+      targets: [{ ...recovery.targets[0], command_receipt_id: null }, recovery.targets[1]],
+    }));
+    await expect(contractExternalSigningClient.queryLegacyRecovery('CASE-001')).rejects.toThrow();
+
+    vi.mocked(get).mockResolvedValueOnce(envelope({
+      ...recovery,
+      targets: [recovery.targets[0], { ...recovery.targets[0] }, recovery.targets[1]],
+    }));
+    await expect(contractExternalSigningClient.queryLegacyRecovery('CASE-001')).rejects.toThrow();
+  });
+
+  it('binds legacy recovery Preview and Apply to the exact typed command identity', async () => {
+    const request = {
+      scope: 'staff' as const,
+      matching_segment_id: 41,
+      legacy_document_version_id: 21,
+      signing_event_id: 51,
+      command_receipt_id: 61,
+      confirmation_method: 'paper' as const,
+      reason: '  已核對受控歷史紙本  ',
+    };
+    const preview = {
+      preview_fingerprint: 'd'.repeat(64),
+      session_id: sessionId,
+      expected_status_version: 3,
+      scope: 'staff' as const,
+      matching_segment_id: 41,
+      current_document_version_id: 31,
+      current_document_set_sha256: 'a'.repeat(64),
+      current_commitment_id: null,
+      legacy_media_sha256: 'b'.repeat(64),
+      blockers: [],
+      can_apply: true,
+    };
+    const identity = createExternalSigningCommandIdentity('legacy-staff-41');
+    const recoveryReceipt = { ...reportReceipt, receipt_id: identity.receiptId };
+    const post = vi.spyOn(transport, 'post')
+      .mockResolvedValueOnce(envelope(preview))
+      .mockResolvedValueOnce(envelope(recoveryReceipt));
+
+    await expect(contractExternalSigningClient.previewLegacyRecovery('CASE-001', request)).resolves.toEqual(preview);
+    await expect(contractExternalSigningClient.applyLegacyRecovery('CASE-001', {
+      ...request,
+      preview_fingerprint: preview.preview_fingerprint,
+      expected_status_version: preview.expected_status_version,
+    }, identity)).resolves.toEqual(recoveryReceipt);
+
+    expect(post.mock.calls[0][1]).toEqual({ ...request, reason: request.reason.trim() });
+    expect(post.mock.calls[1][2]).toEqual(expect.objectContaining({
+      headers: {
+        'Idempotency-Key': identity.idempotencyKey,
+        'X-Correlation-ID': identity.correlationId,
+        'X-Receipt-ID': identity.receiptId,
+      },
+    }));
+  });
+
+  it('rejects a legacy recovery Apply receipt with an unexpected next status version', async () => {
+    const identity = createExternalSigningCommandIdentity('legacy-staff-41');
+    const post = vi.spyOn(transport, 'post').mockResolvedValueOnce(envelope({
+      ...reportReceipt,
+      receipt_id: identity.receiptId,
+      resulting_status_version: 999,
+    }));
+
+    await expect(contractExternalSigningClient.applyLegacyRecovery('CASE-001', {
+      scope: 'staff',
+      matching_segment_id: 41,
+      legacy_document_version_id: 21,
+      signing_event_id: 51,
+      command_receipt_id: 61,
+      confirmation_method: 'paper',
+      reason: '已核對受控歷史紙本',
+      preview_fingerprint: 'd'.repeat(64),
+      expected_status_version: 4,
+    }, identity)).rejects.toThrow(/狀態版本/);
+    expect(post).toHaveBeenCalledTimes(1);
   });
 
   it('keeps final Preview fingerprint private and uses an opaque preview token', async () => {
@@ -312,5 +436,24 @@ describe('contractExternalSigningClient', () => {
       `/api/v1/orders/CASE-001/contract-external-signing/receipts/${reportReceipt.receipt_id}`,
       '/api/v1/orders/CASE-001/contract-external-signing/final-document/readback',
     ]);
+  });
+
+  it('rejects a schema-valid final readback belonging to another case', async () => {
+    const get = vi.spyOn(transport, 'get').mockResolvedValueOnce(envelope({
+      case_no: 'OTHER-CASE',
+      session_id: sessionId,
+      final_document_id: 'cfd_1234567890abcdef1234567890abcdef',
+      controlled_file_id: 'cf_1234567890abcdef1234567890abcdef',
+      version_number: 1,
+      filename: 'final-signed.pdf',
+      mime_type: 'application/pdf',
+      size_bytes: 20,
+      status: 'completed',
+      integrity_verified: true,
+      applied_at: '2026-08-26T10:00:00Z',
+    }));
+
+    await expect(contractExternalSigningClient.getFinalDocumentReadback('CASE-001')).rejects.toThrow(/案件識別/);
+    expect(get).toHaveBeenCalledTimes(1);
   });
 });

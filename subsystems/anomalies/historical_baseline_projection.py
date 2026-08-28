@@ -656,6 +656,21 @@ def _validate_prior(
         raise HistoricalBaselineProjectionError(
             "projector_prior_occurrence_malformed"
         ) from error
+    catalog_descriptor = next(
+        (
+            item
+            for item in HISTORICAL_BASELINE_OWNER_ROOT_CATALOG_V2
+            if item.contract_id == prior.descriptor.contract_id
+        ),
+        None,
+    )
+    if (
+        catalog_descriptor is None
+        or prior.descriptor.canonical_tuple != catalog_descriptor.canonical_tuple
+        or prior.observation.descriptor.canonical_tuple
+        != catalog_descriptor.canonical_tuple
+    ):
+        raise HistoricalBaselineProjectionError("projector_prior_occurrence_malformed")
     if (
         prior.case_no != source.identity.case_no
         or prior.order_identity != source.identity.order_identity

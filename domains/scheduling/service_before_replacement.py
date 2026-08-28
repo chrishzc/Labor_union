@@ -379,6 +379,8 @@ class ServiceBeforeReplacementQuery:
     successor_round: SuccessorRoundFact | None = None
     prior_aggregate_identity: str | None = None
     aggregate_version: int = 0
+    prior_generation_identity: str | None = None
+    prior_event_identity: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -463,6 +465,8 @@ def query_service_before_replacement(facts: ServiceBeforeReplacementFacts) -> Se
         retained_roots=retained, root_delta=ReplacementRootDelta(retained, impacted, ()) if not blockers else None,
         candidate_pool_reuse_proof=facts.candidate_pool_reuse, successor_round=facts.successor_round,
         prior_aggregate_identity=facts.prior_aggregate_identity, aggregate_version=facts.aggregate_version,
+        prior_generation_identity=facts.prior_generation_identity,
+        prior_event_identity=facts.prior_event_identity,
     )
 
 

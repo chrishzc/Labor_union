@@ -13,6 +13,10 @@ from domains.orders.historical_operational_baseline import (
     HistoricalOrderIdentity,
 )
 from shared_kernel.fingerprints import fingerprint_payload
+from subsystems.contract_signing.external_signing_contracts import (
+    ExternalCompletionReportScope,
+    LegacyManualSigningEvidence,
+)
 from subsystems.orders.historical_baseline_owner_vector import (
     HistoricalBaselineOwnerObservationReadback,
 )
@@ -51,12 +55,15 @@ SELECT segment.id AS segment_id,segment.plan_id AS segment_plan_id,
        report.document_version_id,report.source_event_identity,report.resulting_status_version,
        report.expected_status_version AS report_expected_status_version,
        report.reporter_subject_type,report.reporter_subject_reference,
+       report.source_kind,report.source_payload_sha256,report.manual_confirmation_method,
+       report.manual_reason,report.manual_evidence_reference,report.manual_evidence_sha256,
        document.case_no AS document_case_no,document.document_scope,document.document_role,
        document.matching_plan_id AS document_plan_id,document.matching_segment_id AS document_segment_id,
        receipt.id AS receipt_db_id,receipt.receipt_id,
        receipt.external_signing_session_id AS receipt_session_db_id,receipt.command_type,
        receipt.expected_status_version AS receipt_expected_status_version,
        receipt.result_status_version,receipt.completion_report_id,receipt.outcome_state,receipt.preview_fingerprint,
+       receipt.result_snapshot AS report_result_snapshot,
        current_document.id AS current_document_version_id,
        client_document.id AS current_client_document_version_id
 FROM caregiver_matching_plan_segments segment
@@ -113,6 +120,8 @@ SELECT report.id AS report_db_id,report.report_id,
        report.source_event_identity,report.resulting_status_version AS report_status_version,
        report.expected_status_version AS report_expected_status_version,
        report.reporter_subject_type,report.reporter_subject_reference,
+       report.source_kind,report.source_payload_sha256,report.manual_confirmation_method,
+       report.manual_reason,report.manual_evidence_reference,report.manual_evidence_sha256,
        document.case_no AS report_document_case_no,
        document.document_scope AS report_document_scope,
        document.document_role AS report_document_role,
@@ -125,6 +134,7 @@ SELECT report.id AS report_db_id,report.report_id,
        report_receipt.result_status_version AS report_receipt_status_version,
        report_receipt.completion_report_id,report_receipt.outcome_state AS report_outcome,
        report_receipt.preview_fingerprint AS report_preview_fingerprint,
+       report_receipt.result_snapshot AS report_result_snapshot,
        final.id AS final_document_db_id,final.final_document_id,
        final.external_signing_session_id AS final_session_db_id,final.case_no AS final_case_no,
        final.source_document_set_sha256,final.controlled_file_object_id,
@@ -255,7 +265,12 @@ class MySqlHistoricalBaselineContractSigningOwnerAdapter:
             (session["session_db_id"], session["matching_plan_id"]),
             for_update,
         )
-        return _staff_observations(identity, descriptor, session, rows)
+        legacy = (
+            self._rows(_LEGACY_SQL, (identity.case_no,), for_update)
+            if any(row.get("source_kind") == "manual_attested" for row in rows)
+            else ()
+        )
+        return _staff_observations(identity, descriptor, session, rows, legacy)
 
     def _external_commitment(self, identity, descriptor, session, for_update):
         staff = self._external_staff(
@@ -296,11 +311,16 @@ class MySqlHistoricalBaselineContractSigningOwnerAdapter:
         if not staff or any(not item.available or item.terminal_result is not True for item in staff):
             return (_unavailable(descriptor, identity, "contract_signing_client_signed_evidence_staff_lineage_incomplete"),)
         rows = self._rows(_CLIENT_EVIDENCE_SQL, (session["session_db_id"],), for_update)
+        legacy = (
+            self._rows(_LEGACY_SQL, (identity.case_no,), for_update)
+            if any(row.get("source_kind") == "manual_attested" for row in rows)
+            else ()
+        )
         if len(rows) != 1:
             code = "contract_signing_client_signed_evidence_missing" if not rows else "contract_signing_client_signed_evidence_ambiguous"
             return (_unavailable(descriptor, identity, code),)
         row = rows[0]
-        error = _validate_client_evidence(identity.case_no, session, row)
+        error = _validate_client_evidence(identity.case_no, session, row, legacy)
         if error is not None:
             return (_unavailable(descriptor, identity, error),)
         return (
@@ -358,7 +378,7 @@ def _current_session(rows, case_no):
     return row, None
 
 
-def _staff_observations(identity, descriptor, session, rows):
+def _staff_observations(identity, descriptor, session, rows, legacy_rows):
     if not rows:
         return (_unavailable(descriptor, identity, "contract_signing_staff_segments_missing"),)
     if session.get("session_state") == "staff_reporting":
@@ -410,6 +430,14 @@ def _staff_observations(identity, descriptor, session, rows):
             or not _text(row.get("source_event_identity"))
             or not _opaque_identity(row.get("report_id"), "cer_")
             or not _opaque_identity(row.get("receipt_id"), "cesr_")
+            or _validate_recovery_report(
+                identity.case_no,
+                session,
+                row,
+                legacy_rows,
+                ExternalCompletionReportScope.STAFF,
+                segment_id,
+            )
         ):
             return (_unavailable(descriptor, identity, "contract_signing_staff_segment_lineage_invalid"),)
         source_tuple = (row["source_event_identity"], row["resulting_status_version"])
@@ -454,7 +482,7 @@ def _staff_observations(identity, descriptor, session, rows):
     return tuple(observations)
 
 
-def _validate_client_evidence(case_no, session, row):
+def _validate_client_evidence(case_no, session, row, legacy_rows):
     session_id = session.get("session_db_id")
     commitment_id = session.get("commitment_id")
     if (
@@ -517,14 +545,114 @@ def _validate_client_evidence(case_no, session, row):
         or row.get("final_receipt_status_version") != row.get("report_status_version") + 1
         or not _opaque_identity(row.get("report_receipt_id"), "cesr_")
         or not _opaque_identity(row.get("final_receipt_id"), "cesr_")
+        or _validate_recovery_report(
+            case_no,
+            session,
+            row,
+            legacy_rows,
+            ExternalCompletionReportScope.CLIENT,
+            None,
+        )
     ):
         return "contract_signing_client_signed_evidence_lineage_invalid"
+    return None
+
+
+def _validate_recovery_report(case_no, session, row, legacy_rows, scope, segment_id):
+    source_kind = row.get("source_kind")
+    if source_kind == "verified_line":
+        return None
+    if source_kind != "manual_attested":
+        return "contract_signing_recovery_source_kind_invalid"
+    snapshot = _json_object(row.get("report_result_snapshot"))
+    recovery = snapshot.get("recovery") if isinstance(snapshot, Mapping) else None
+    current = recovery.get("current") if isinstance(recovery, Mapping) else None
+    legacy = recovery.get("legacy") if isinstance(recovery, Mapping) else None
+    if (
+        not isinstance(recovery, Mapping)
+        or recovery.get("kind") != "contract_legacy_manual_recovery.v1"
+        or not _digest(recovery.get("preview_fingerprint"))
+        or recovery.get("scope") != scope.value
+        or recovery.get("matching_segment_id") != segment_id
+        or recovery.get("confirmation_method") != row.get("manual_confirmation_method")
+        or recovery.get("reason") != row.get("manual_reason")
+        or not isinstance(current, Mapping)
+        or current.get("session_id") != session.get("external_signing_session_id")
+        or current.get("matching_plan_id") != session.get("matching_plan_id")
+        or current.get("document_version_id") != row.get("document_version_id")
+        or current.get("document_set_sha256") != session.get("current_document_set_sha256")
+        or current.get("target_subject_reference") != row.get("reporter_subject_reference")
+        or not isinstance(legacy, Mapping)
+        or legacy.get("case_no") != case_no
+        or legacy.get("scope") != scope.value
+        or legacy.get("matching_plan_id") != session.get("matching_plan_id")
+        or legacy.get("matching_segment_id") != segment_id
+        or row.get("manual_evidence_sha256") != legacy.get("media_sha256")
+    ):
+        return "contract_signing_recovery_snapshot_lineage_invalid"
+    if scope is ExternalCompletionReportScope.CLIENT:
+        if current.get("commitment_id") != session.get("commitment_id"):
+            return "contract_signing_recovery_snapshot_lineage_invalid"
+    elif current.get("commitment_id") not in (None, session.get("commitment_id")):
+        return "contract_signing_recovery_snapshot_lineage_invalid"
+    matches = tuple(
+        legacy_row
+        for legacy_row in legacy_rows
+        if legacy_row.get("event_id") == legacy.get("signing_event_id")
+        and legacy_row.get("receipt_db_id") == legacy.get("command_receipt_id")
+        and legacy_row.get("document_version_id")
+        == legacy.get("legacy_document_version_id")
+    )
+    if len(matches) != 1:
+        return "contract_signing_recovery_legacy_lineage_missing"
+    legacy_row = matches[0]
+    if row.get("manual_evidence_reference") != (
+        f"legacy-contract-media:{legacy_row.get('document_version_id')}"
+    ):
+        return "contract_signing_recovery_legacy_evidence_reference_invalid"
+    kind = (
+        "signed_staff_segment"
+        if scope is ExternalCompletionReportScope.STAFF
+        else "client_signed_evidence"
+    )
+    legacy_error = _validate_legacy_manual((legacy_row,), case_no, kind)
+    if legacy_error is not None:
+        return legacy_error
+    try:
+        evidence = LegacyManualSigningEvidence(
+            case_no=case_no,
+            scope=scope,
+            matching_plan_id=int(legacy_row["event_plan_id"]),
+            matching_segment_id=legacy_row.get("event_segment_id"),
+            legacy_document_version_id=int(legacy_row["document_version_id"]),
+            source_document_version_id=int(legacy_row["source_document_version_id"]),
+            signing_event_id=int(legacy_row["event_id"]),
+            command_receipt_id=int(legacy_row["receipt_db_id"]),
+            event_key=str(legacy_row["event_key"]),
+            command_kind=str(legacy_row["command_kind"]),
+            media_sha256=str(legacy_row["media_sha256"]),
+            actor_ref=str(legacy_row["actor"]),
+            correlation_id=str(legacy_row["correlation_id"]),
+        )
+    except (TypeError, ValueError, KeyError):
+        return "contract_signing_recovery_legacy_lineage_invalid"
+    if (
+        evidence.canonical_payload != dict(legacy)
+        or row.get("source_event_identity") != evidence.source_event_identity
+        or row.get("source_payload_sha256") != evidence.canonical_tuple_sha256
+    ):
+        return "contract_signing_recovery_legacy_lineage_invalid"
     return None
 
 
 def _validate_legacy_manual(rows, case_no, kind):
     if not rows:
         return f"contract_signing_{kind}_legacy_evidence_missing"
+    if any(
+        row.get("document_scope") not in {"staff_segment", "client_contract"}
+        for row in rows
+    ):
+        return f"contract_signing_{kind}_legacy_evidence_malformed"
     relevant = []
     expected_scope = (
         "client_contract" if kind == "client_signed_evidence" else "staff_segment"

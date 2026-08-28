@@ -7,10 +7,47 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Header, HTTPException
+from fastapi import Header
+
+from infrastructure.mysql.assignment_plan_repository import MySqlAssignmentPlanRepository
+from infrastructure.mysql.candidate_contact_pool_query_adapter import (
+    MySqlCandidateContactPoolQueryAdapter,
+)
+from infrastructure.mysql.matching_coordination_facts_adapter import (
+    MatchingAvailabilityQueryAdapter,
+    MatchingEffectiveGenerationQueryAdapter,
+    MySqlMatchingCoordinationFactsAdapter,
+)
+from infrastructure.mysql.matching_coordination_repository import (
+    MySqlMatchingCoordinationRepository,
+)
+from infrastructure.mysql.matching_successor_persistence_adapter import (
+    MatchingSuccessorPersistenceAdapter,
+)
+from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.order_terms_repository import MySqlOrderTermsRepository
+from infrastructure.mysql.service_before_replacement_loader import (
+    MySqlServiceBeforeReplacementLoader,
+)
+from infrastructure.mysql.service_before_replacement_repository import (
+    MySqlServiceBeforeReplacementRepository,
+)
+from infrastructure.mysql.service_date_confirmation_repository import (
+    MySqlServiceDateConfirmationRepository,
+)
+from infrastructure.mysql.staff_availability_repository import (
+    MySqlStaffAvailabilityRepository,
+)
+from infrastructure.mysql.staff_matching_preference_repository import (
+    MySqlStaffMatchingPreferenceRepository,
+)
+from infrastructure.mysql.staff_retirement_repository import MySqlStaffRetirementRepository
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from shared_kernel.clock import SystemBusinessClock
 
 from subsystems.scheduling.service_before_replacement_workflow import (
     ServiceBeforeReplacementQueryRequest,
+    ServiceBeforeReplacementWorkflow,
 )
 
 
@@ -39,25 +76,57 @@ class ServiceBeforeReplacementApplication:
 def get_service_before_replacement_application(
     correlation_id: _CorrelationHeader = "service-before-replacement-dependency",
 ):
-    """Do not construct a production writer without both authoritative loaders."""
-    raise HTTPException(
-        status_code=503,
-        detail={
-            "error": {
-                "category": "unavailable",
-                "code": "replacement_source_unavailable",
-                "message": "服務前換人根事實來源尚未安全接通。",
-                "field_errors": [],
-                "domain_blockers": ["facts_loader_unavailable", "matching_source_loader_unavailable"],
-                "retryable": True,
-                "correlation_id": correlation_id,
-                "current_version": None,
-            }
-        },
+    """Yield one request-scoped connection and one outer-UoW workflow."""
+    del correlation_id
+    connection = get_connection()
+    try:
+        yield build_service_before_replacement_application(connection)
+    finally:
+        connection.close()
+
+
+def build_service_before_replacement_application(connection):
+    """Compose all production owner readers on the repository's borrowed connection."""
+    clock = SystemBusinessClock()
+    order_terms = MySqlOrderTermsRepository(connection)
+    service_dates = MySqlServiceDateConfirmationRepository(connection)
+    candidate_pool = MySqlCandidateContactPoolQueryAdapter(connection)
+    assignments = MySqlAssignmentPlanRepository(connection)
+    staff_profile = MySqlStaffMatchingPreferenceRepository(connection)
+    staff_lifecycle = MySqlStaffRetirementRepository(connection)
+    staff_availability = MySqlStaffAvailabilityRepository(connection)
+    matching_repository = MySqlMatchingCoordinationRepository(connection, clock)
+    matching_facts = MySqlMatchingCoordinationFactsAdapter(
+        orders_terms=order_terms,
+        orders_service_dates=service_dates,
+        scheduling_availability=MatchingAvailabilityQueryAdapter(
+            service_dates, staff_availability
+        ),
+        scheduling_effective_generation=MatchingEffectiveGenerationQueryAdapter(order_terms),
+        staff_profile=staff_profile,
+        staff_lifecycle=staff_lifecycle,
+        matching_criteria_snapshot=matching_repository,
+        candidate_pool=candidate_pool,
+        matching_package=matching_repository,
+        incumbent_assignment=assignments,
+        staff_ids=candidate_pool.load_staff_ids,
     )
+    loader = MySqlServiceBeforeReplacementLoader(connection, matching_facts, clock)
+    repository = MySqlServiceBeforeReplacementRepository(
+        connection,
+        MatchingSuccessorPersistenceAdapter(connection),
+        facts_loader=loader.load_facts,
+        matching_source_loader=loader.load_matching_source,
+    )
+    workflow = ServiceBeforeReplacementWorkflow(
+        repository,
+        lambda: MySqlUnitOfWork(connection),
+    )
+    return ServiceBeforeReplacementApplication(workflow)
 
 
 __all__ = [
     "ServiceBeforeReplacementApplication",
+    "build_service_before_replacement_application",
     "get_service_before_replacement_application",
 ]

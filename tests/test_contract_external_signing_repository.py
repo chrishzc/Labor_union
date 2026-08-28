@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import pytest
 
 from domains.contract_signing.external_signing import (
     ExternalSigningSessionFacts,
@@ -17,6 +18,8 @@ from domains.contract_signing.external_signing import (
 from infrastructure.db.contract_external_signing_repository import (
     MySqlContractExternalSigningRepository,
     _document_set_fingerprint,
+    _legacy_manual_evidence,
+    _stored_receipt,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
@@ -25,6 +28,9 @@ from subsystems.contract_signing.external_signing_contracts import (
     ExternalReportCommandType,
     ExternalReporterSubjectType,
     ExternalSigningReportReceipt,
+    ExternalSigningTypedError,
+    LegacyManualRecoverySnapshot,
+    LegacyManualSigningEvidence,
     RecordExternalStaffSigningReport,
     ManualAttestationEvidence,
     ManualAttestationMethod,
@@ -278,6 +284,194 @@ def test_load_session_rejects_changed_current_document_set() -> None:
         assert str(error) == "external_signing_document_set_stale"
     else:
         raise AssertionError("stale document set must fail closed")
+
+
+def test_legacy_manual_evidence_rejects_unknown_document_scope() -> None:
+    with pytest.raises(ExternalSigningTypedError) as captured:
+        _legacy_manual_evidence({"document_scope": "evil_scope"}, "CASE-001")
+
+    assert captured.value.code == "contract_legacy_manual_recovery_evidence_malformed"
+
+
+def test_stored_receipt_rejects_recovery_scope_lineage_mismatch() -> None:
+    recovery = LegacyManualRecoverySnapshot(
+        PreviewFingerprint("a" * 64),
+        "CASE-001",
+        "ces_1234567890abcdef1234567890abcdef",
+        ExternalCompletionReportScope.STAFF,
+        11,
+        "staff:501",
+        9,
+        101,
+        "b" * 64,
+        None,
+        LegacyManualSigningEvidence(
+            "CASE-001",
+            ExternalCompletionReportScope.STAFF,
+            9,
+            11,
+            81,
+            101,
+            71,
+            61,
+            "legacy-event-001",
+            "record_manual_staff_contract_attestation",
+            "c" * 64,
+            "admin:17",
+            "corr-legacy-001",
+        ),
+        ManualAttestationMethod.PHONE,
+        "verified",
+    )
+    row = {
+        "command_fingerprint": "d" * 64,
+        "result_snapshot": {
+            "command_type": "record_external_client_signing_report",
+            "report_id": "cer_1234567890abcdef1234567890abcdef",
+            "session_id": recovery.session_id,
+            "scope": "client",
+            "matching_segment_id": None,
+            "resulting_status_version": 1,
+            "resulting_state": "client_reported_final_pdf_pending",
+            "client_reminder_intent_created": False,
+            "final_pdf_recovery_task_created": False,
+            "recovery": recovery.persisted_payload(),
+        },
+    }
+
+    with pytest.raises(ExternalSigningTypedError) as captured:
+        _stored_receipt(row)
+    assert captured.value.code == "external_signing_recovery_snapshot_lineage_invalid"
+
+
+    recovery_payload = recovery.persisted_payload()
+    nested_legacy = recovery_payload["legacy"]
+    assert isinstance(nested_legacy, dict)
+    nested_legacy["scope"] = "client"
+    snapshot = row["result_snapshot"]
+    assert isinstance(snapshot, dict)
+    snapshot.update(
+        {
+            "command_type": "record_external_staff_signing_report",
+            "scope": "staff",
+            "matching_segment_id": 11,
+            "resulting_state": "staff_reporting",
+            "recovery": recovery_payload,
+        }
+    )
+    with pytest.raises(RuntimeError, match="recovery_snapshot_lineage_invalid"):
+        _stored_receipt(row)
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        "recovery",
+        [],
+        1,
+        False,
+        {
+            "kind": "contract_legacy_manual_recovery.v1",
+            "scope": "staff",
+            "current": {},
+            "legacy": {"scope": "staff"},
+        },
+        {
+            "kind": "contract_legacy_manual_recovery.v1",
+            "scope": "staff",
+            "current": {"matching_plan_id": 9},
+            "legacy": {},
+        },
+    ],
+)
+def test_stored_receipt_rejects_non_mapping_recovery_snapshot(malformed) -> None:
+    row = {
+        "command_fingerprint": "d" * 64,
+        "result_snapshot": {
+            "command_type": "record_external_staff_signing_report",
+            "report_id": "cer_1234567890abcdef1234567890abcdef",
+            "session_id": "ces_1234567890abcdef1234567890abcdef",
+            "scope": "staff",
+            "matching_segment_id": 11,
+            "resulting_status_version": 1,
+            "resulting_state": "staff_reporting",
+            "client_reminder_intent_created": False,
+            "final_pdf_recovery_task_created": False,
+            "recovery": malformed,
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="recovery_snapshot_invalid"):
+        _stored_receipt(row)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("command_type", "unknown"),
+        ("scope", "unknown"),
+        ("resulting_state", "unknown"),
+        ("client_reminder_intent_created", "false"),
+        ("resulting_status_version", True),
+    ],
+)
+def test_stored_receipt_rejects_malformed_current_snapshot(field, value) -> None:
+    snapshot = {
+        "command_type": "record_external_staff_signing_report",
+        "report_id": "cer_1234567890abcdef1234567890abcdef",
+        "session_id": "ces_1234567890abcdef1234567890abcdef",
+        "scope": "staff",
+        "matching_segment_id": 11,
+        "resulting_status_version": 1,
+        "resulting_state": "staff_reporting",
+        "client_reminder_intent_created": False,
+        "final_pdf_recovery_task_created": False,
+    }
+    snapshot[field] = value
+    with pytest.raises(ExternalSigningTypedError) as captured:
+        _stored_receipt(
+            {"command_fingerprint": "d" * 64, "result_snapshot": snapshot}
+        )
+
+    assert captured.value.code == "external_signing_receipt_snapshot_invalid"
+
+
+def test_legacy_manual_evidence_rejects_none_actor_without_string_coercion() -> None:
+    row = {
+        "document_scope": "staff_segment",
+        "event_case_no": "CASE-001",
+        "document_case_no": "CASE-001",
+        "receipt_case_no": "CASE-001",
+        "event_type": "signed_received",
+        "document_role": "signed_return",
+        "event_plan_id": 9,
+        "document_plan_id": 9,
+        "event_segment_id": 11,
+        "document_segment_id": 11,
+        "receipt_document_id": 81,
+        "document_version_id": 81,
+        "source_document_version_id": 80,
+        "receipt_event_id": 71,
+        "event_id": 71,
+        "receipt_db_id": 61,
+        "idempotency_key": "legacy-event-001",
+        "event_key": "legacy-event-001",
+        "command_kind": "record_manual_staff_contract_attestation",
+        "correlation_id": "corr-legacy-001",
+        "actor": None,
+        "media_sha256": "c" * 64,
+        "payload": {
+            "command": "record_manual_staff_contract_attestation",
+            "correlation_id": "corr-legacy-001",
+            "confirmation_method": "phone",
+            "reason": "verified",
+        },
+        "result_snapshot": {"document_version_id": 81, "signing_event_id": 71},
+    }
+    with pytest.raises(ExternalSigningTypedError) as captured:
+        _legacy_manual_evidence(row, "CASE-001")
+
+    assert captured.value.code == "contract_legacy_manual_recovery_evidence_malformed"
 
 
 def _session_row(fingerprint: str) -> dict[str, object]:

@@ -6,7 +6,7 @@ Description: 驗證外部完成回報命令的 canonical fingerprint、typed rec
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -40,6 +40,13 @@ def test_staff_command_fingerprint_is_canonical_and_excludes_correlation() -> No
     second = _staff_command(correlation="corr-999")
 
     assert external_report_command_fingerprint(first) == external_report_command_fingerprint(second)
+
+
+def test_command_fingerprint_excludes_server_assigned_occurrence_time() -> None:
+    first = _staff_command()
+    retried = replace(first, occurred_at=first.occurred_at + timedelta(seconds=5))
+
+    assert external_report_command_fingerprint(first) == external_report_command_fingerprint(retried)
 
 
 def test_same_command_replays_the_typed_receipt() -> None:
@@ -152,6 +159,22 @@ def test_manual_report_requires_persisted_admin_actor() -> None:
             ActorContext("operator:17"), IdempotencyKey("external-report:manual:002"),
             CorrelationId("corr-manual-002"),
         )
+
+
+def test_manual_report_accepts_the_exact_local_bypass_validation_actor() -> None:
+    command = RecordManualExternalStaffSigningReport(
+        "ces_1234567890abcdef1234567890abcdef", "CASE-001", 9, 11, 101, "501",
+        ManualAttestationEvidence(
+            ManualAttestationMethod.PHONE, "confirmed", "evidence:1", "e" * 64
+        ),
+        "manual-event-local-bypass", "d" * 64,
+        datetime(2026, 8, 26, 12, tzinfo=timezone.utc), ExpectedVersion(0),
+        ActorContext("system:local_bypass"),
+        IdempotencyKey("external-report:manual:local-bypass"),
+        CorrelationId("corr-manual-local-bypass"),
+    )
+
+    assert command.actor.actor_id == "system:local_bypass"
 
 
 def _staff_command(

@@ -40,7 +40,7 @@ def access_control_profile() -> str:
 
 def admin_auth_is_enabled() -> bool:
     """Return False only for the named local_bypass profile with both safeguards."""
-    app_env = os.getenv("APP_ENV", "development").strip().lower()
+    app_env = os.getenv("APP_ENV", "").strip().lower()
     configured = os.getenv("ENABLE_ADMIN_AUTH", "true").strip().lower()
     requested_bypass = configured in {"0", "false", "no", "off"}
     return not (
@@ -122,7 +122,13 @@ def require_persisted_admin(
     principal: AdminPrincipal = Depends(require_admin),
 ) -> AdminPrincipal:
     """Require an enabled, persisted human session for durable business commands."""
-    if principal.id is None or not principal.enabled:
+    local_bypass = (
+        not admin_auth_is_enabled()
+        and principal.id is None
+        and principal.username == "development-bypass"
+        and principal.role == "system_admin"
+    )
+    if (principal.id is None and not local_bypass) or not principal.enabled:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="需要已登入且啟用的內部使用者 Session",
@@ -144,7 +150,16 @@ def require_role(minimum_role: str) -> Callable[..., AdminPrincipal]:
 
 
 def admin_actor_context(principal: AdminPrincipal) -> ActorContext:
-    actor_id = f"admin:{principal.id}" if principal.id is not None else "admin:development"
+    if principal.id is not None:
+        actor_id = f"admin:{principal.id}"
+    elif (
+        not admin_auth_is_enabled()
+        and principal.username == "development-bypass"
+        and principal.role == "system_admin"
+    ):
+        actor_id = "system:local_bypass"
+    else:
+        actor_id = "admin:development"
     return ActorContext(actor_id, tuple(sorted(principal.effective_capabilities())))
 
 

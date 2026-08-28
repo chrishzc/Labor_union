@@ -102,6 +102,34 @@ def test_persisted_business_session_rejects_bypass_and_disabled_users(principal)
     assert raised.value.status_code == 403
 
 
+def test_explicit_local_bypass_supplies_the_global_validation_actor(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_bypass")
+    request = Request({"type": "http"})
+    principal = require_admin(request, None)
+
+    assert require_persisted_admin(request, principal) is principal
+    assert request.state.admin_actor.actor_id == "system:local_bypass"
+
+
+def test_local_bypass_fails_closed_when_app_environment_is_missing(monkeypatch):
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_bypass")
+    principal = AdminPrincipal(
+        None,
+        "development-bypass",
+        "開發模式管理員",
+        "system_admin",
+    )
+
+    assert admin_auth_is_enabled()
+    with pytest.raises(HTTPException) as raised:
+        require_persisted_admin(Request({"type": "http"}), principal)
+    assert raised.value.status_code == 403
+
+
 def test_line_config_keeps_public_liff_read_but_protects_management_routes():
     source = (ROOT / "api/routes/line_system_config.py").read_text(encoding="utf-8")
 

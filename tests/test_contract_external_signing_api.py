@@ -39,6 +39,59 @@ class FakeReports:
         self.command = command
         return SimpleNamespace(replayed=False)
 
+    def query_legacy_manual_recovery(self, case_no):
+        assert case_no == CASE_NO
+        return SimpleNamespace(
+            case_no=case_no,
+            session_id=SESSION_ID,
+            matching_plan_id=41,
+            current_document_set_sha256="a" * 64,
+            commitment_id=None,
+            state=ExternalSigningState.STAFF_REPORTING,
+            status_version=0,
+            targets=(SimpleNamespace(
+                scope=route.ExternalCompletionReportScope.STAFF,
+                matching_segment_id=71,
+                target_subject_reference="staff:9",
+                current_document_version_id=81,
+                reported=False,
+                legacy_document_version_id=61,
+                signing_event_id=62,
+                command_receipt_id=63,
+                legacy_media_sha256="e" * 64,
+            ), SimpleNamespace(
+                scope=route.ExternalCompletionReportScope.CLIENT,
+                matching_segment_id=None,
+                target_subject_reference="client:3",
+                current_document_version_id=82,
+                reported=False,
+                legacy_document_version_id=None,
+                signing_event_id=None,
+                command_receipt_id=None,
+                legacy_media_sha256=None,
+            )),
+        )
+
+    def preview_legacy_manual_recovery(self, request):
+        self.command = request
+        return SimpleNamespace(
+            preview_fingerprint=route.PreviewFingerprint("f" * 64),
+            session_id=SESSION_ID,
+            expected_status_version=0,
+            scope=request.scope,
+            matching_segment_id=request.matching_segment_id,
+            current_document_version_id=81,
+            current_document_set_sha256="a" * 64,
+            current_commitment_id=None,
+            legacy_media_sha256="e" * 64,
+            blockers=(),
+            can_apply=True,
+        )
+
+    def apply_legacy_manual_recovery(self, command):
+        self.command = command
+        return SimpleNamespace(replayed=False)
+
 
 class FakeControlledFiles:
     def __init__(self) -> None:
@@ -168,6 +221,13 @@ def _client(application: FakeApplication) -> TestClient:
     return TestClient(app)
 
 
+def _local_bypass_client(application: FakeApplication) -> TestClient:
+    app = FastAPI()
+    app.include_router(route.router)
+    app.dependency_overrides[route._application] = lambda: application
+    return TestClient(app)
+
+
 def test_query_returns_only_react_contract_fields() -> None:
     response = _client(FakeApplication()).get(
         f"/api/v1/orders/{CASE_NO}/contract-external-signing"
@@ -206,6 +266,207 @@ def test_manual_staff_report_uses_persisted_admin_and_closed_receipt_identity() 
     assert all(term not in serialized for term in ("locator", "fingerprint", "digest", "path", "url"))
     assert application.reports.command.actor.actor_id == "admin:7"
     assert application.reports.command.attestation.evidence_reference == f"manual-evidence:{RECEIPT_ID}"
+
+
+def test_local_bypass_can_execute_the_approved_recovery_without_a_root_account(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_bypass")
+    application = FakeApplication()
+    client = _local_bypass_client(application)
+    preview_body = {
+        "scope": "staff",
+        "matching_segment_id": 71,
+        "legacy_document_version_id": 61,
+        "signing_event_id": 62,
+        "command_receipt_id": 63,
+        "confirmation_method": "paper",
+        "reason": "依受控歷史紙本建立修復血緣",
+    }
+
+    query = client.get(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing/legacy-recovery"
+    )
+    apply = client.post(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing/legacy-recovery/apply",
+        headers={
+            "Idempotency-Key": "contract-legacy-recovery:" + UUID,
+            "X-Receipt-ID": RECEIPT_ID,
+            "X-Correlation-ID": "corr-local-bypass-recovery",
+        },
+        json={
+            **preview_body,
+            "preview_fingerprint": "f" * 64,
+            "expected_status_version": 0,
+        },
+    )
+
+    assert query.status_code == 200
+    assert apply.status_code == 200
+    assert application.reports.command.actor.actor_id == "system:local_bypass"
+
+
+def test_legacy_recovery_query_preview_and_apply_are_typed_and_closed() -> None:
+    application = FakeApplication()
+    client = _client(application)
+    query = client.get(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing/legacy-recovery"
+    )
+    preview_body = {
+        "scope": "staff",
+        "matching_segment_id": 71,
+        "legacy_document_version_id": 61,
+        "signing_event_id": 62,
+        "command_receipt_id": 63,
+        "confirmation_method": "paper",
+        "reason": "依受控歷史紙本建立修復血緣",
+    }
+    preview = client.post(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing/legacy-recovery/preview",
+        json=preview_body,
+    )
+    apply = client.post(
+        f"/api/v1/orders/{CASE_NO}/contract-external-signing/legacy-recovery/apply",
+        headers={
+            "Idempotency-Key": "contract-legacy-recovery:" + UUID,
+            "X-Receipt-ID": RECEIPT_ID,
+            "X-Correlation-ID": "corr-legacy-recovery",
+        },
+        json={
+            **preview_body,
+            "preview_fingerprint": "f" * 64,
+            "expected_status_version": 0,
+        },
+    )
+
+    assert query.status_code == 200
+    assert query.json()["data"]["targets"][0]["legacy_media_sha256"] == "e" * 64
+    assert preview.status_code == 200
+    assert preview.json()["data"]["preview_fingerprint"] == "f" * 64
+    assert apply.status_code == 200
+    assert application.reports.command.actor.actor_id == "admin:7"
+
+
+@pytest.mark.parametrize("state", ["superseded", "unknown"])
+def test_legacy_recovery_query_rejects_states_outside_active_session_contract(state: str) -> None:
+    value = {
+        "case_no": CASE_NO,
+        "session_id": SESSION_ID,
+        "matching_plan_id": 41,
+        "current_document_set_sha256": "a" * 64,
+        "commitment_id": None,
+        "state": state,
+        "status_version": 0,
+        "targets": [],
+    }
+
+    with pytest.raises(ValidationError):
+        route.LegacyRecoveryQueryView.model_validate(value)
+
+
+def _legacy_recovery_target(scope: str, matching_segment_id: int | None):
+    return {
+        "scope": scope,
+        "matching_segment_id": matching_segment_id,
+        "target_subject_reference": "staff:9" if scope == "staff" else "client:3",
+        "current_document_version_id": 81,
+        "reported": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        _legacy_recovery_target("staff", None),
+        _legacy_recovery_target("client", 71),
+    ],
+)
+def test_legacy_recovery_target_requires_scope_specific_segment_identity(target) -> None:
+    with pytest.raises(ValidationError):
+        route.LegacyRecoveryTargetView.model_validate(target)
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "legacy_document_version_id",
+        "signing_event_id",
+        "command_receipt_id",
+        "legacy_media_sha256",
+    ],
+)
+def test_legacy_recovery_target_rejects_partial_legacy_tuple(missing_field: str) -> None:
+    target = _legacy_recovery_target("staff", 71)
+    target.update({
+        "legacy_document_version_id": 61,
+        "signing_event_id": 62,
+        "command_receipt_id": 63,
+        "legacy_media_sha256": "e" * 64,
+    })
+    target[missing_field] = None
+
+    with pytest.raises(ValidationError):
+        route.LegacyRecoveryTargetView.model_validate(target)
+
+
+def _legacy_recovery_query_value(targets):
+    return SimpleNamespace(
+        case_no=CASE_NO,
+        session_id=SESSION_ID,
+        matching_plan_id=41,
+        current_document_set_sha256="a" * 64,
+        commitment_id=None,
+        state=ExternalSigningState.STAFF_REPORTING,
+        status_version=0,
+        targets=tuple(
+            SimpleNamespace(
+                scope=route.ExternalCompletionReportScope(target["scope"]),
+                matching_segment_id=target.get("matching_segment_id"),
+                target_subject_reference=target.get("target_subject_reference", "staff:9"),
+                current_document_version_id=target.get("current_document_version_id", 81),
+                reported=False,
+                legacy_document_version_id=None,
+                signing_event_id=None,
+                command_receipt_id=None,
+                legacy_media_sha256=None,
+            )
+            for target in targets
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "targets",
+    [
+        [],
+        [_legacy_recovery_target("staff", 71)],
+        [_legacy_recovery_target("staff", 71), _legacy_recovery_target("staff", 71), _legacy_recovery_target("client", None)],
+        [_legacy_recovery_target("staff", 71), _legacy_recovery_target("client", None), _legacy_recovery_target("client", None)],
+    ],
+)
+def test_legacy_recovery_query_rejects_malformed_backend_target_cardinality(targets) -> None:
+    with pytest.raises(ValidationError):
+        route._public_legacy_recovery_query(_legacy_recovery_query_value(targets))
+
+
+@pytest.mark.parametrize("scope,matching_segment_id", [("staff", None), ("client", 71)])
+def test_legacy_recovery_preview_rejects_malformed_backend_scope_target(scope, matching_segment_id) -> None:
+    value = SimpleNamespace(
+        preview_fingerprint=route.PreviewFingerprint("f" * 64),
+        session_id=SESSION_ID,
+        expected_status_version=0,
+        scope=route.ExternalCompletionReportScope(scope),
+        matching_segment_id=matching_segment_id,
+        current_document_version_id=81,
+        current_document_set_sha256="a" * 64,
+        current_commitment_id=None,
+        legacy_media_sha256="e" * 64,
+        blockers=(),
+        can_apply=True,
+    )
+
+    with pytest.raises(ValidationError):
+        route._public_legacy_recovery_preview(value)
 
 
 def test_receipt_identity_mismatch_fails_before_workflow() -> None:

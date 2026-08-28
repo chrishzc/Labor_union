@@ -29,11 +29,10 @@ target／recipient／quota readback、rollback 或 provider receipt；未指定�
 代表性測試資料寫入、Query／Preview／Apply、receipt readback 與 scoped cleanup 可直接執行，不需逐次請示。
 本裁決不涵蓋 `union_db`、production、全庫 cleanup、replacement、`--switch` 或其他不可逆外部效果。
 
-2026-08-27 人工新增 Task 96 執行 gate：後續每個新的 bounded execution slice 都必須先經
-`spec-workshop` 收斂為 `SPEC_READY`；只有存在 material 技術證據缺口時才使用 `tech-research`，之後必須由
-`task-pack` 編譯至 `PACKAGE_READY`，才可交由 DDH 執行。未同時具備 current `SPEC_READY` 與
-`PACKAGE_READY` 時，不得修改 production source、DB 或執行 Browser mutation。已完成且 evidence 仍 current
-的工作不因此重做；runtime 發現 material drift 時，只讓受影響 requirement 回到 Spec Pipeline，不擴張整包。
+2026-08-28 人工以 [Agent 任務分級與交付規範](../00_Agent任務分級與交付規範.md) 取代逐 slice
+`SPEC_READY／PACKAGE_READY` blanket gate。T1 與依既有契約施工的 T2 直接重用 current spec；只有
+`SPEC_GAP` 才回 `spec-workshop`，只有 material execution 確需跨步驟 coverage／handoff 時才更新一份
+living package。T3 邊界變更仍須 current spec、package 與人工 Authority。既有完成 evidence 不重做。
 
 2026-08-28 人工校正 Task 96 業務優先序：本任務的 terminal objective 是「完整歷史案件匯入後，依實際
 業務情況由 UI 修正 owner root，並讓衍生異常 fresh recheck」。可執行包是否較早 `PACKAGE_READY` 不得取代
@@ -50,10 +49,10 @@ LINE模組1～4流程圖逐模組補齊backend、frontend與真UI驗收。只有
 該 gate 固定記為 `BLOCKED_APPROVAL`，不重複追問，立即切到下一個不依賴該權限的 current package。使用者之後
 補批准時才續跑原 gate；未執行的 command／DB／Browser evidence不得標成PASS。
 
-2026-08-28 Task 96 completion bookkeeping gate：每個 bounded package 或明確 slice 達到其 current
-acceptance 時，必須在同一 completion turn 更新 owner 規格／Work Package 的 coverage 與狀態、final receipt
-或 evidence index，以及本表對應列。只完成 slice 時只標記該 slice，不得把 umbrella 改為 `completed`；整包完成
-後不得延後文件整理到下一個任務，也不得因舊 handoff／舊狀態再次重做已通過的驗收。
+2026-08-28 Task 96 completion bookkeeping gate：達到 current acceptance 時只更新實際擁有該 durable
+fact 的 canonical artifact。本表只更新 owner、status、blocker 與下一個 material gate；一般 slice 不新增
+tracked receipt 或重抄 commands。只有 release／migration／rollback／incident／external effect／audit 或
+明確 consumer 需要時才保存 aggregate final receipt。局部 PASS 不得冒充 umbrella 完成。
 
 | 順序 | Lane | Current IDs | 執行裁決 |
 |---:|---|---|---|
@@ -87,7 +86,7 @@ work packages 的 implementation／runtime／Browser evidence，不得以本段�
 | CUR-P0-HISTORICAL-IMPORT-01 | P0 | `completed` | Orders／`01`、`17` | 合法 review workbook 已在 Chrome Import UI 完成 Preview／Apply；MySQL readback 證明 `HISTORICAL-ORDER-001` review 已發布，但訂單 status／lifecycle version／assignment 均未變，符合 zero-mutation。未新增 public response、DB schema 或 migration。crash 後 durable resume 是 schema／migration 範圍，仍另立 Work Package。 | 已完成。final receipt：`03_追蹤清單與證據/evidence/2026-08-26_task96_p0_import_anomaly_staff_receipt.md`。 |
 | CUR-P0-ANOMALY-RECOVERY-01 | P0 | `in-progress` | Orders／Scheduling／Client Finance／Staff Payables／Anomalies；`01`、`02`、`04`、`05`、`06`、`12`、`17` | 單列 historical review remediation 只是一個已接通 slice，不代表匯入後狀態調整完成。current 主線固定涵蓋 H-01～H-06 baseline／缺根補正、R-01～R-07 服務前換人與服務中 substitution、C-01～C-04/C-06 取消與帳務方向、A-04～A-06 stale／unknown／tracking-only safety，以及各 scenario 的 owner Q/P/A、projector、React 與 no-auth Browser。只能修改 owning Domain root；不得提供 generic status editor、直接 assignment SQL 或 anomaly close。 | `WP-HOB-A/B/C/D/F` 與 versioned H/R/C/A scenarios 全部通過 Module→Subsystem→Domain→Global、真 MySQL/API/React/no-auth Browser 後才完成。HOB-E與F-04已完成不重做；C-05仍依 ACB1 `AUTHORITY_REQUIRED` 分離，不得阻擋其他 ready scenarios。Historical review remediation source假成功已修正並由fresh Luna/high複核PASS。pure-domain、HCAT composition、RPRE QPA、R concrete persistence source與1011／1012 static schema/release、engine qualification slices已`completed`。R真MySQL已PASS，projector/API/React/Browser仍`NOT_RUN`；H catalog-v2已於2026-08-28人工核准，concrete owner adapters／projector可依`PACKAGE_READY`執行。兩個umbrella仍`in-progress`；Rich Menu不得先行。DB gates為Scope／Change inventory／Static release／Descriptor／read-only plan／Engine與本機Developer acceptance PASS，另一台實體電腦Developer acceptance NOT_RUN，總結`DB_CHANGE_NOT_READY`。 |
 | CUR-ANOMALY-CATEGORY-COUNT-01 | P0 | `approved` | Anomalies React；`PROV-20260828-anomaly-category-count-import-section-ux-spec.md` | 每個分類 tab 依目前 status filter 顯示數量；匯入待辦只在「全部」或「匯入資料」顯示，其他分類不得混入。 | `PKG-ANOMALY-CATEGORY-COUNT-IMPORT-SEPARATION` 已`PACKAGE_READY`；React focused/build/no-auth Browser 通過後完成。 |
-| CUR-LOCAL-DB-1003-CURRENT-01 | P0 | `in-progress` | Global Migration／`10`、`18`；`PROV-20260828-local-db-1003-to-current-upgrade-spec.md` | exact 1003=`matching_coordination_successor`；canonical runner current readback為1012（51 manifests／101 ordered upgrade artifacts）。dynamic ordered plan、qualification/engine chain、macOS exact-1003/current-1012 no-auth runtime/Browser均PASS。Windows supervisor source亦已通過fresh Luna/high：same-snapshot PID identity、required-worker survival、scoped cleanup、unknown fail-closed、PowerShell parser與no-BOM writer均PASS。另一台實體developer acceptance尚未執行，所以維持`DB_CHANGE_NOT_READY`。 | 下一步只剩另一台allowlisted exact-1003 DB的backup→apply→current、Windows launcher與no-auth Browser；本機已完成slice不得重跑。source不變、candidate descriptors exact、資料count/fingerprint保留、backfills=[]；不得使用reset/replacement/`--switch`。 |
+| CUR-LOCAL-DB-1003-CURRENT-01 | P0 | `in-progress` | Global Migration／`10`、`18`；`PROV-20260828-local-db-1003-to-current-upgrade-spec.md` | exact 1003=`matching_coordination_successor`；dynamic plan、engine chain、macOS runtime與Windows supervisor source證據保留。遠端commit `a8565d4`已將1011 descriptor／manifest／qualification統一為`5f01…75f3`並縮減非必要row-scope證據；Static release、Descriptor、read-only plan與Engine現為PASS。 | 只剩另一台實體電腦的configured local developer acceptance為`NOT_RUN`，總結仍為`DB_CHANGE_NOT_READY`。2026-08-28使用者暫停Task 96施工；不得reset、`--switch`或由Agent自行對configured `union_db` Apply。 |
 | CUR-P0-STAFF-QUERY-01 | P0 | `completed` | Staff／Global UX；`12`、`24` | Browser 實測初始 200 筆後載入下一頁，再搜尋唯一 marker 命中第 201 筆；cursor continuation、debounce、AbortController 與 generation stale suppression 維持既有合約。 | 已完成。final receipt：`03_追蹤清單與證據/evidence/2026-08-26_task96_p0_import_anomaly_staff_receipt.md`。 |
 | CUR-LOCAL-DB-PORTABILITY | P0 | `in-progress` | Global Migration／`10` §4.5 | 已移除 `lu_test_*` 名稱綁定與 shared qualification 的 reference DB／host／port／資料指紋耦合；每台機器 Apply 前改建 release-scoped local dump／receipt，DDL 前後驗 row evidence，journal 存在但原備份遺失時 fail closed。focused clean-baseline 75 passed、全專案 blocking flake8 0、launcher `--dry-run` passed；本包未執行 DB DDL。 | 由另一台 development 機器對自己的 `.env` 目標依序完成 launcher dry-run、Python 唯讀 plan、明確確認 Apply 與保留資料 readback；remote／production／MySQL system schema 負向仍須保持封鎖。 |
 | CUR-CONTRACT-01 | P0 | `in-progress` | Contract Signing／LINE；`00` §2.2、`21` 的 2026-08-25 amendment；`PROV-20260826-contract-external-platform-pdf-handoff-work-package.md` | final 1005 已補齊 immutable unsigned PDF purpose／checks；Scope、inventory、static、descriptor、read-only plan、fresh、preserve-data、resume 與 developer acceptance 均為 `PASS`，總結 `DB_CHANGE_READY`。canonical qualification：`validation/receipts/phase4/PROV-20260826-local-additive-qualification-contract-external-signing-successor.json`。 | DB gate 已完成；仍須以 enabled persisted human 的 fresh Chrome 完成未簽 PDF 下載 → staff/client completion reports → final PDF staging／Preview／Apply → receipt、metadata 與 NAS object readback。 |
@@ -328,10 +327,9 @@ legacy replaced assignment false-blocker，以及BusinessClock source-version／
 
 ## 7. 維護與停止條件
 
-- 每完成一個 bounded package，必須在同一 completion turn 更新 owner 正式規格／Work Package coverage、
-  final receipt或evidence index與本表狀態；只有全部 acceptance 都有current evidence才把整列改為
-  `completed`。若只完成slice，明確記錄slice identity與剩餘項，不得用局部PASS冒充umbrella完成；下一輪
-  不得因舊handoff、舊Work Package或過期狀態重開已完成slice。
+- 每次 completion 只更新真正改變的 canonical owner；本表保留 owner、status、blocker 與下一個 material
+  gate。只有全部 acceptance 都有 current evidence 才把整列改為 `completed`；局部 PASS 只更新 living
+  package 或本列摘要，不另建逐 slice spec／package／receipt。
 - 新需求先找 current 正式 owner；已有答案直接依規格執行。只有 public contract、owner、根事實、
   schema、外部副作用或不可逆操作缺少 Authority 時才停止要求裁決。
 - current 任務完成後，對應 completed／superseded 文件依 archive gate 移出 active 目錄；本表只保留

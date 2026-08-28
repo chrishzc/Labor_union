@@ -6,7 +6,7 @@
 - `specification`: `PROV-20260828-historical-baseline-projector-contract-spec-gap.md`
 - `spec_revision`: `CONFIRMED-2026-08-28`
 - `storage_contract_revision`: `STORAGE-CONTRACT-20260828`
-- `catalog_v2_amendment_status`: `BLOCKED_AUTHORITY`
+- `catalog_v2_amendment_status`: `ADOPTED`
 - `convergence`: `READY`
 - `authority_digest`: 2026-08-28 人工採用 spec 第2.2～2.7推薦候選；2.1 adopted-only eligibility與2.8 Task96 no-auth維持current Authority。
 - `effect_ceiling`: 本機source、versioned additive schema及`lu_test_*`development驗收；不含`union_db`、production、provider、deployment、generic resolve或任意status editor。
@@ -85,8 +85,8 @@ blockers: []
 ## 6.1 Concrete owner adapters task-pack correction（2026-08-28）
 
 - `entry`: spec §8.1.1～8.1.2；既有 Authority 可執行的 source-map，不新增 DDL。
-- `status`: `approved`；Contract legacy repair mutation 另為 `AUTHORITY_REQUIRED`，不阻擋
-  adapters 對 incomplete legacy evidence 先回 typed unavailable。
+- `status`: `approved`；2026-08-28 人工已核准 Contract legacy append-only recovery mutation；
+  incomplete legacy evidence 在 recovery 完成前仍回 typed unavailable。
 - `shared_boundary`: 六個 owner adapters 使用同一 borrowed connection；Query/Preview
   唯讀，Apply/projector fresh read 由 outer UoW 傳入 locked mode；adapter 不
   begin/commit/rollback/close。
@@ -105,6 +105,112 @@ blockers: []
 ```yaml
 package_status: PACKAGE_READY
 blockers: []
+```
+
+## 6.2 Contract legacy manual recovery task-pack correction（2026-08-28）
+
+- `entry`: spec §8.1.3；2026-08-28 人工明確核准 append-only recovery。
+- `status`: `approved`。
+- `objective`: 對缺少 persisted Preview fingerprint 的 preserved historical manual signing，建立
+  可驗證的新 recovery lineage，讓 Contract Signing owner readback 可在不改寫歷史資料下 terminal。
+- `write_set`: Contract Signing recovery Q/P/A、repository/composition、typed API、React owner referral、
+  focused tests及 `lu_test_*` integration scenarios；若 current schema 已可完整表達則不得新增 DDL。
+- `required behavior`: 採每個 target 獨立 Query／Preview／Apply 的 resumable saga；首筆 staff
+  Apply 建立 deterministic recovery external session，後續 staff、client 各自 append 完整
+  `manual_attested` report 與 receipt，最後沿用 final PDF staging／Preview／Apply。legacy
+  `media_assets.sha256` 為 immutable controlled evidence；recovery Preview fingerprint 與 legacy/current
+  lineage 存於既有 `result_snapshot.recovery` versioned JSON，不冒充 command/source digest。
+- `safe_stop`: legacy/current lineage conflict、文件/plan/commitment漂移、stale fingerprint、cross-case、
+  missing controlled file或post-commit readback不完整時不得假成功；同 key 只能 exact reconcile。
+- `forbidden`: 改寫 legacy document/event、推測 Preview fingerprint、generic resolve、provider success、
+  `union_db`／production／backfill。
+- `verification`: fail-before-fix legacy unavailable；Q/P zero-write；Apply/replay/stale/conflict；真
+  `lu_test_*` before/after；no-auth API/Browser完整人工修復與owner重新投影。
+
+```yaml
+package_status: PACKAGE_READY
+blockers: []
+```
+
+### 6.2.1 `PKG-HCAT-LEGACY-RECOVERY-REACT`
+
+- `status`: `in-progress`；`dependency`: recovery backend final r12 fresh PASS。
+- `scenario`: 既有歷史人工簽回缺少現行 recovery lineage 時，操作者在訂單的外部簽約工作台逐一補齊
+  未完成 staff、再補 client，最後沿用既有 final PDF staging／Preview／Apply；不得要求操作 generic resolve。
+- `write_set`: `ui_react/src/api/orders/contract_external_signing_client.ts`、
+  `ui_react/src/components/ContractExternalSigningActions.tsx`及其直接 tests；不改 schema、owner rules、
+  provider、production或 legacy rows。
+- `typed client`: strict decode recovery Query／Preview／Apply；target scope/cardinality、合法state、
+  case/segment/legacy document-event-receipt、media digest、session/status、Preview fingerprint與receipt
+  identity全部綁定；raw dict不得進入render。
+- `operator flow`: 只列server Query回傳且`reported=false`的target；reason/method須人工輸入；Preview先
+  顯示current與legacy lineage、blockers及明確確認，才可Apply。same-key outcome unknown只用原identity
+  查receipt/reconcile，不換key盲送。
+- `fresh readback`: 每次Apply後重新Query同案並顯示remaining/reported targets、session/status；staff未全
+  完成時client保持disabled；全部reports完成後明確導向同頁既有final PDF流程；不得以callback或HTTP 200
+  冒充HCAT terminal。
+- `acceptance`: strict/adversarial client tests、staff→client resume UI tests、stale/mismatch/outcome-unknown、
+  fresh Luna/high、`lu_test_*` no-auth API與真Browser完整流程，最後再回讀六owner/HCAT projection。
+
+```yaml
+package_status: PACKAGE_READY
+blockers: []
+```
+
+## 6.3 HPROJ persistence semantic-audit correction（2026-08-28）
+
+- `package_id`: `PKG-HPROJ-PERSISTENCE-V2`；`status`: `approved`。
+- `objective`: 依 spec §10 將 pure projector 接到可重播的 append-only persistence，使六 owner 逐筆
+  修復後 active membership 可由 3→2→1→0，並正確更新、auto-resolve 或 reopen baseline current alert。
+- `requirements`: `HPROJ-RB-01`～`07`；`acceptance`: `HPROJ-RB-A1`～`A8`。
+- `authority_digest`: 2026-08-28 人工「1011核准重建」；只涵蓋未發布 projector successor candidate、
+  local/disposable 驗證與既有 owner event consumer，不含 `union_db`、production、backfill、reset 或 switch。
+- `specification`: `PROV-20260828-historical-baseline-projector-contract#10`，`SPEC_READY`／convergence READY。
+- `dependencies`: catalog-v2 pure projector與六owner adapters；read-only applied-target inventory；canonical
+  migration chain late-bind新provisional identity。非disposable target若已套舊candidate，只走additive successor。
+- `in_scope`: pure projector emitted/active-set語意；v2 occurrence state、receipt、membership snapshot、
+  delivery/checkpoint/readback schema；baseline與六owner event source adapters；worker/reconcile；typed current
+  alert與Anomaly Maintenance dead-letter integration；focused/property/concurrency/DB/API/Browser evidence。
+- `excluded`: owner business rules、11-step結果、legacy row rewrite、system seed、business backfill、provider、
+  `union_db`／production、另一台DB upgrade、generic resolve。
+- `effect_ceiling`: tracked source與disposable/allowlisted `lu_test_*` owned scenarios。schema execution先只在
+  disposable fresh/preserve candidate；developer-local replacement需七個DB gates全部PASS且另有current Authority。
+- `execution_defaults`: 本次candidate暫定`max_attempts=5`、lease `60s`、retry base `15s`且cap `300s`；
+  分類為`IMPLEMENTATION_DEFAULT`，owner為本package runtime，只在此次驗證有效，真實calibration或
+  operational policy改變即重訂，不升格為product requirement。
+- `steps`:
+  1. 唯讀盤點舊1011 applied targets、current release/hash/descriptor exactness與六owner committed event sources。
+  2. 修pure projector：分開emitted occurrence set與active membership set，對齊result state與exact digests/counts。
+  3. late-bind additive successor schema/release：保留舊objects，新增v2 state/receipt/snapshot/delivery/checkpoint/readback，
+     同步assembly、descriptor、manifest、catalog與read-only plan。
+  4. 建立source-specific checkpoint adapters；只讀已提交baseline/owner events並normalize durable delivery；
+     duplicate、gap、out-of-order與different-payload fail closed。
+  5. 建立single-UoW projector worker與post-commit reconcile，寫current alert與typed workflow event；dead letter
+     只透過既有Anomaly Maintenance Q/P/A retry/supersede。
+  6. 接HOB-E API/React fresh readback；UI只顯示server typed referral/count/state，不提供generic resolve。
+  7. 跑static→fresh bootstrap→preserve-data candidate→developer acceptance，再做`lu_test_*` no-auth API/Browser
+     3→2→1→0、reopen、retry/dead-letter與outcome-unknown。
+- `safe_stop`: owner event缺durable identity/version、source gap、non-disposable applied-state未知、descriptor/
+  manifest drift、partial/unknown object、post-commit mismatch或current alert binding不exact時停止；不得重算
+  既有qualification、跳event、掃描猜source或以UI/receipt-only宣稱terminal。
+- `evidence`: 保留一份aggregate migration/final receipt與release artifacts；intermediate stdout、HTTP dump、
+  plan/retry journal只放ignored scratch，完成後依規範清理。
+
+| Requirement / Acceptance | Package step | Oracle |
+|---|---|---|
+| RB-01/A2/A3 | 2,3,5 | same-lineage newer resolution；regression新occurrence；history immutable |
+| RB-02/A1 | 2,3,5 | snapshot rows與digest/count逐版exact 3→2→1→0 |
+| RB-03/A4/A5 | 4,5 | duplicate/gap/lease/retry/dead-letter transition tests |
+| RB-04/A6 | 2,3,5 | `committed_unverified`直到post-commit exact reconcile |
+| RB-05/A7 | 5,6 | definition/source/version/display exact；0才auto-resolve；regression reopen |
+| RB-06/A4/A5 | 4,5 | original identity replay；different payload zero-write conflict |
+| RB-07/A8 | 1,3,7 | DB gate table全部PASS，否則`DB_CHANGE_NOT_READY` |
+
+```yaml
+package_route:
+  status: PACKAGE_READY
+  package: PKG-HPROJ-PERSISTENCE-V2
+  blockers: []
 ```
 
 ## 7. Execution ledger（2026-08-28）
@@ -156,7 +262,7 @@ blockers: []
   document set、session version、accepted/active plan及final PDF exact lineage已完成；第一輪fresh
   4個P1已修正，主代理`128 passed`，final fresh focused `22 passed`、cross `81 passed`、
   signing/PDF `41 passed`、adversarial `14 PASS`，P0/P1/P2=0。Legacy Preview fingerprint維持typed
-  unavailable；append-only recovery仍待Authority，真MySQL readback仍屬六owner integration gate。
+  unavailable；append-only recovery已核准但尚未實作，真MySQL readback仍屬六owner integration gate。
 - `PKG-HCAT-CONCRETE-OWNER-ADAPTERS`: `completed`（source／focused）。Scheduling、Orders、Matching、
   Contract Signing、Client Finance、Staff Payables六個adapter均已通過fresh verifier；下一個必要gate為
   同一borrowed connection composition與真`lu_test_*` current-schema readback。本狀態不代表projector、
@@ -166,6 +272,28 @@ blockers: []
   drift並修正。主代理final`174 passed`；fresh static與兩個`lu_test_*` mixed/canonical-current negative
   readback均P0/P1/P2=0，21 collections／64字fingerprint且無storage drift。Adopted-positive與projector
   仍`NOT_RUN`，不得由此外推整包完成。
+- `PKG-HCAT-LEGACY-RECOVERY-backend`: `completed`（source／fresh E3）。每 target
+  typed Query／Preview／Apply、fresh legacy/current lineage、首筆 staff deterministic activation、
+  每次單一 outer UoW、`result_snapshot.recovery.v1`、exact replay/mismatch/stale、
+  final PDF 後 HCAT adapter exact terminal 與 typed API 已完成；不改 schema/legacy rows。
+  歷次fresh findings已完成scope/session/segment/command/document lineage、target cardinality、legacy tuple
+  all-or-none、unknown scope、malformed persisted receipt/evidence與typed API fail-closed tightening；主代理
+  final cross `106 passed`。fresh Luna/high r12 focused `59 passed`、cross `131 passed`、18組adversarial
+  probes、compile/diff-check均PASS，P0/P1/P2=0。遠端commit `a8565d4`已解除1011 digest blocker；真
+  `lu_test_*`／React／Browser尚為`in-progress`，不得外推整包完成。
+- `PKG-HCAT-LEGACY-RECOVERY-REACT`: `in-progress`（React與兩方歷史簽回 runtime PASS）。Client／UI
+  exact 綁定case、session、command、segment、receipt與next status version；outcome-unknown只用原identity
+  reconcile。主代理focused `28 passed`，fresh Luna/high r6 PASS、P0/P1=0。`115960401`在
+  `lu_test_task96_scenarios_20260827`以no-auth完成staff 0→1、client 1→2；same-key client replay
+  `replayed=true`，DB readback只有兩筆report／receipt，legacy document/event/receipt lineage未改寫。
+  真Browser 5183已可搜尋completed歷史案件並開啟契約工作台；預設清單仍只查unfinished，搜尋才查all。
+  既有legacy contract completion使final PDF Preview以`contract_completion_already_recorded` fail closed，
+  不得將此既有根事實改寫或以假完成繞過；六owner/HCAT terminal re-projection仍`NOT_RUN`。
+- `PKG-HPROJ-OCCURRENCE-pure`: `completed`。Deterministic occurrence／umbrella membership／
+  same-lineage strictly-newer successor／receipt／outbox純投影已完成；forged prior P1修正後主代理
+  `66 passed`，fresh focused`20 passed`＋4 forged probes＋1000 permutations，P0/P1/P2=0。
+  Persistence仍`NOT_RUN`；1011 descriptor／manifest／qualification已由遠端commit `a8565d4`統一為
+  `5f01…75f3`，membership/projector delivery語意與runtime驗收仍未完成。
 - subsystem evidence：主代理H/R cross-regression `105 passed`；fresh Luna/high H r4 focused
   `41 passed`＋adversarial probes，P0=0、P1=0。
 - `PKG-HPROJ-OCCURRENCE-schema`: `completed`。additive part 1011、release manifest、owned-object
@@ -173,6 +301,8 @@ blockers: []
   review為P0=0／P1=0。projector repository／worker／真MySQL與readback仍`not_run`，不得把schema
   slice外推為整包完成。
 - `PKG-HPROJ-OCCURRENCE`: `in-progress`；`PKG-HAPI-UI-RUNTIME`: `not_run`。
+- 1011 reconciliation addendum：遠端commit `a8565d4`已採用current descriptor，manifest與published
+  qualification均綁定`5f01…75f3`；舊`0c16…ed2e` blocker與未裁決Spec Pipeline receipt已stale，不再作current gate。
 - HPROJ DB gates：Scope／Change inventory／Static release／Descriptor／read-only plan／Engine／本機
   Developer acceptance `PASS`；另一台實體電腦Developer acceptance `NOT_RUN`，總結仍為
   `DB_CHANGE_NOT_READY`。runtime必須在同一UoW以canonical

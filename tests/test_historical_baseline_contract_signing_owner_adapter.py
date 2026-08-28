@@ -13,7 +13,14 @@ from domains.orders.historical_operational_baseline import (
 from infrastructure.mysql.historical_baseline_contract_signing_owner_adapter import (
     MySqlHistoricalBaselineContractSigningOwnerAdapter,
 )
+from infrastructure.db.contract_external_signing_repository import (
+    _legacy_recovery_snapshot,
+)
 from shared_kernel.fingerprints import fingerprint_payload
+from subsystems.contract_signing.external_signing_contracts import (
+    ExternalCompletionReportScope,
+    LegacyManualSigningEvidence,
+)
 
 
 IDENTITY = HistoricalOrderIdentity("order:CASE-1", "CASE-1")
@@ -108,6 +115,12 @@ def _staff_row(segment_id=41, version=1, **changes):
         "report_expected_status_version": version - 1,
         "reporter_subject_type": "staff",
         "reporter_subject_reference": str(500 + segment_id),
+        "source_kind": "verified_line",
+        "source_payload_sha256": "7" * 64,
+        "manual_confirmation_method": None,
+        "manual_reason": None,
+        "manual_evidence_reference": None,
+        "manual_evidence_sha256": None,
         "document_case_no": "CASE-1",
         "document_scope": "staff_segment",
         "document_role": "template_generated",
@@ -122,6 +135,7 @@ def _staff_row(segment_id=41, version=1, **changes):
         "completion_report_id": 100 + segment_id,
         "outcome_state": "recorded",
         "preview_fingerprint": None,
+        "report_result_snapshot": json.dumps({"command_type": "record_staff_report"}),
         "current_document_version_id": 200 + segment_id,
         "current_client_document_version_id": 72,
     }
@@ -144,6 +158,12 @@ def _client_row(**changes):
         "report_expected_status_version": 1,
         "reporter_subject_type": "customer",
         "reporter_subject_reference": "301",
+        "source_kind": "verified_line",
+        "source_payload_sha256": "8" * 64,
+        "manual_confirmation_method": None,
+        "manual_reason": None,
+        "manual_evidence_reference": None,
+        "manual_evidence_sha256": None,
         "report_document_case_no": "CASE-1",
         "report_document_scope": "client_contract",
         "report_document_role": "template_generated",
@@ -158,6 +178,7 @@ def _client_row(**changes):
         "completion_report_id": 71,
         "report_outcome": "recorded",
         "report_preview_fingerprint": None,
+        "report_result_snapshot": json.dumps({"command_type": "record_client_report"}),
         "final_document_db_id": 74,
         "final_document_id": "cfd_" + "e" * 32,
         "final_session_db_id": 11,
@@ -238,6 +259,50 @@ def _legacy_row(scope="staff_segment", **changes):
     }
     row.update(changes)
     return row
+
+
+def _recovery_snapshot(scope="staff"):
+    staff = scope == "staff"
+    legacy = LegacyManualSigningEvidence(
+        case_no="CASE-1",
+        scope=(
+            ExternalCompletionReportScope.STAFF
+            if staff
+            else ExternalCompletionReportScope.CLIENT
+        ),
+        matching_plan_id=21,
+        matching_segment_id=41 if staff else None,
+        legacy_document_version_id=81 if staff else 91,
+        source_document_version_id=80 if staff else 90,
+        signing_event_id=82 if staff else 92,
+        command_receipt_id=83 if staff else 93,
+        event_key="manual-key-1" if staff else "manual-key-2",
+        command_kind=(
+            "record_manual_staff_contract_attestation"
+            if staff
+            else "record_manual_client_contract_attestation"
+        ),
+        media_sha256="5" * 64,
+        actor_ref="operator-1",
+        correlation_id="corr-1",
+    )
+    return legacy, {
+        "confirmation_method": "paper",
+        "current": {
+            "commitment_id": 31,
+            "document_set_sha256": _document_set(),
+            "document_version_id": 241 if staff else 72,
+            "matching_plan_id": 21,
+            "session_id": "ces_" + "a" * 32,
+            "target_subject_reference": "541" if staff else "301",
+        },
+        "kind": "contract_legacy_manual_recovery.v1",
+        "legacy": legacy.canonical_payload,
+        "matching_segment_id": 41 if staff else None,
+        "preview_fingerprint": "9" * 64,
+        "reason": "依受控歷史紙本建立修復血緣",
+        "scope": scope,
+    }
 
 
 def _read(descriptor, responses, *, for_update=False):
@@ -414,6 +479,93 @@ def test_valid_legacy_manual_tuple_stays_typed_unavailable_without_persisted_pre
     assert all(statement.rstrip().endswith("FOR UPDATE") for statement, _ in connection.calls)
 
 
+def test_completed_manual_recovery_requires_exact_legacy_and_current_lineage():
+    staff_legacy, staff_recovery = _recovery_snapshot("staff")
+    client_legacy, client_recovery = _recovery_snapshot("client")
+    staff_row = _staff_row(
+        source_kind="manual_attested",
+        source_event_identity=staff_legacy.source_event_identity,
+        source_payload_sha256=staff_legacy.canonical_tuple_sha256,
+        manual_confirmation_method="paper",
+        manual_reason="依受控歷史紙本建立修復血緣",
+        manual_evidence_reference="legacy-contract-media:81",
+        manual_evidence_sha256="5" * 64,
+        report_result_snapshot=json.dumps({"recovery": staff_recovery}),
+    )
+    client_row = _client_row(
+        source_kind="manual_attested",
+        source_event_identity=client_legacy.source_event_identity,
+        source_payload_sha256=client_legacy.canonical_tuple_sha256,
+        manual_confirmation_method="paper",
+        manual_reason="依受控歷史紙本建立修復血緣",
+        manual_evidence_reference="legacy-contract-media:91",
+        manual_evidence_sha256="5" * 64,
+        report_result_snapshot=json.dumps({"recovery": client_recovery}),
+    )
+    staff_legacy_row = _legacy_row()
+    client_legacy_row = _legacy_row(
+        "client_contract",
+        event_id=92,
+        document_version_id=91,
+        source_document_version_id=90,
+        receipt_db_id=93,
+        receipt_document_id=91,
+        receipt_event_id=92,
+        event_key="manual-key-2",
+        idempotency_key="manual-key-2",
+        result_snapshot=json.dumps({"document_version_id": 91, "signing_event_id": 92}),
+    )
+
+    result, _connection = _read(
+        CLIENT,
+        [[_session()], [staff_row], [staff_legacy_row], [client_row], [client_legacy_row]],
+    )
+
+    assert result.observations[0].available is True
+
+
+def test_manual_recovery_tampered_preview_or_legacy_digest_fails_closed():
+    legacy, recovery = _recovery_snapshot("staff")
+    recovery["preview_fingerprint"] = "bad"
+    row = _staff_row(
+        source_kind="manual_attested",
+        source_event_identity=legacy.source_event_identity,
+        source_payload_sha256=legacy.canonical_tuple_sha256,
+        manual_confirmation_method="paper",
+        manual_reason="依受控歷史紙本建立修復血緣",
+        manual_evidence_sha256="5" * 64,
+        report_result_snapshot=json.dumps({"recovery": recovery}),
+    )
+
+    result, _connection = _read(STAFF, [[_session()], [row], [_legacy_row()]])
+
+    assert result.observations[0].available is False
+    assert result.observations[0].unavailable_code == (
+        "contract_signing_staff_segment_lineage_invalid"
+    )
+
+
+def test_manual_recovery_evidence_reference_must_bind_to_legacy_document_identity():
+    legacy, recovery = _recovery_snapshot("staff")
+    row = _staff_row(
+        source_kind="manual_attested",
+        source_event_identity=legacy.source_event_identity,
+        source_payload_sha256=legacy.canonical_tuple_sha256,
+        manual_confirmation_method="paper",
+        manual_reason="依受控歷史紙本建立修復血緣",
+        manual_evidence_reference="legacy-contract-media:999",
+        manual_evidence_sha256="5" * 64,
+        report_result_snapshot=json.dumps({"recovery": recovery}),
+    )
+
+    result, _connection = _read(STAFF, [[_session()], [row], [_legacy_row()]])
+
+    assert result.observations[0].available is False
+    assert result.observations[0].unavailable_code == (
+        "contract_signing_staff_segment_lineage_invalid"
+    )
+
+
 def test_plain_or_malformed_legacy_signed_received_cannot_be_promoted():
     row = _legacy_row(payload=json.dumps({"command": "record_staff_signed_return"}))
     result, _connection = _read(STAFF, [[], [row]])
@@ -421,6 +573,27 @@ def test_plain_or_malformed_legacy_signed_received_cannot_be_promoted():
     assert result.observations[0].unavailable_code == (
         "contract_signing_signed_staff_segment_legacy_evidence_malformed"
     )
+
+
+def test_legacy_document_scope_must_be_an_exact_supported_scope():
+    result, _connection = _read(STAFF, [[], [_legacy_row("unexpected_scope")]])
+
+    assert result.observations[0].available is False
+    assert result.observations[0].unavailable_code == (
+        "contract_signing_signed_staff_segment_legacy_evidence_malformed"
+    )
+
+
+def test_persisted_recovery_snapshot_cannot_cross_plan_or_omit_client_commitment():
+    _legacy, recovery = _recovery_snapshot("client")
+    recovery["current"]["matching_plan_id"] = 99
+    with pytest.raises(RuntimeError, match="recovery_snapshot_lineage_invalid"):
+        _legacy_recovery_snapshot(recovery)
+
+    _legacy, recovery = _recovery_snapshot("client")
+    recovery["current"]["commitment_id"] = None
+    with pytest.raises(ValueError, match="requires a commitment ID"):
+        _legacy_recovery_snapshot(recovery)
 
 
 def test_descriptor_boundary_and_read_failures_are_typed_and_connection_is_borrowed():

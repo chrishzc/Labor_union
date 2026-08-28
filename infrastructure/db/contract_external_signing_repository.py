@@ -27,6 +27,9 @@ from subsystems.contract_signing.external_signing_contracts import (
     ExternalSigningReportCommand,
     ExternalSigningReportReceipt,
     ExternalSigningTypedError,
+    LegacyManualRecoverySnapshot,
+    LegacyManualSigningEvidence,
+    ManualAttestationMethod,
     RecordExternalClientSigningReport,
     RecordExternalStaffSigningReport,
     RecordManualExternalClientSigningReport,
@@ -201,6 +204,12 @@ class MySqlContractExternalSigningRepository:
             ExternalSigningState.STAFF_REPORTING,
             0,
         )
+
+    def load_legacy_manual_signing_evidence(
+        self, case_no: str, *, for_update: bool
+    ) -> tuple[LegacyManualSigningEvidence, ...]:
+        rows = self._all(_LEGACY_MANUAL_EVIDENCE_SQL + _lock_suffix(for_update), (case_no,))
+        return tuple(_legacy_manual_evidence(row, case_no) for row in rows)
 
     def activate_session(
         self, facts: ExternalSigningSessionFacts, *, actor_id: str
@@ -379,6 +388,8 @@ class MySqlContractExternalSigningRepository:
         session = self._require_one(_SESSION_INTERNAL_SELECT_SQL, (command.session_id,))
         receipt_id = _receipt_id(key)
         snapshot = _receipt_snapshot(stored.receipt)
+        if stored.recovery is not None:
+            snapshot["recovery"] = stored.recovery.persisted_payload()
         self._insert(
             _RECEIPT_INSERT_SQL,
             (
@@ -543,25 +554,238 @@ class MySqlContractExternalSigningRepository:
 
 
 def _stored_receipt(row: Mapping[str, object]) -> StoredExternalSigningReportReceipt:
-    snapshot = row["result_snapshot"]
-    if isinstance(snapshot, str):
-        snapshot = json.loads(snapshot)
-    if not isinstance(snapshot, Mapping):
-        raise RuntimeError("external_signing_receipt_snapshot_invalid")
-    receipt = ExternalSigningReportReceipt(
-        command_type=ExternalReportCommandType(str(snapshot["command_type"])),
-        report_id=str(snapshot["report_id"]),
-        session_id=str(snapshot["session_id"]),
-        scope=ExternalCompletionReportScope(str(snapshot["scope"])),
-        matching_segment_id=_optional_int(snapshot.get("matching_segment_id")),
-        resulting_status_version=int(snapshot["resulting_status_version"]),
-        resulting_state=ExternalSigningState(str(snapshot["resulting_state"])),
-        client_reminder_intent_created=bool(snapshot["client_reminder_intent_created"]),
-        final_pdf_recovery_task_created=bool(snapshot["final_pdf_recovery_task_created"]),
+    snapshot = _json_mapping(row.get("result_snapshot"))
+    if snapshot is None:
+        raise _stored_fact_error("external_signing_receipt_snapshot_invalid")
+    if any(
+        type(snapshot.get(key)) is not bool
+        for key in (
+            "client_reminder_intent_created",
+            "final_pdf_recovery_task_created",
+        )
+    ):
+        raise _stored_fact_error("external_signing_receipt_snapshot_invalid")
+    try:
+        receipt = ExternalSigningReportReceipt(
+            command_type=ExternalReportCommandType(snapshot["command_type"]),
+            report_id=snapshot["report_id"],
+            session_id=snapshot["session_id"],
+            scope=ExternalCompletionReportScope(snapshot["scope"]),
+            matching_segment_id=snapshot.get("matching_segment_id"),
+            resulting_status_version=snapshot["resulting_status_version"],
+            resulting_state=ExternalSigningState(snapshot["resulting_state"]),
+            client_reminder_intent_created=snapshot[
+                "client_reminder_intent_created"
+            ],
+            final_pdf_recovery_task_created=snapshot[
+                "final_pdf_recovery_task_created"
+            ],
+        )
+        command_fingerprint = PreviewFingerprint(row["command_fingerprint"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise _stored_fact_error("external_signing_receipt_snapshot_invalid") from None
+    recovery_value = snapshot.get("recovery")
+    if recovery_value is None:
+        recovery = None
+    elif isinstance(recovery_value, Mapping):
+        recovery = _legacy_recovery_snapshot(recovery_value)
+    else:
+        raise _stored_fact_error("external_signing_recovery_snapshot_invalid")
+    try:
+        return StoredExternalSigningReportReceipt(
+            command_fingerprint, receipt, recovery
+        )
+    except (TypeError, ValueError):
+        raise _stored_fact_error(
+            "external_signing_recovery_snapshot_lineage_invalid"
+        ) from None
+
+
+def _legacy_manual_evidence(
+    row: Mapping[str, object], case_no: str
+) -> LegacyManualSigningEvidence:
+    payload = _json_mapping(row.get("payload"))
+    result = _json_mapping(row.get("result_snapshot"))
+    document_scope = row.get("document_scope")
+    if document_scope == "staff_segment":
+        scope = ExternalCompletionReportScope.STAFF
+    elif document_scope == "client_contract":
+        scope = ExternalCompletionReportScope.CLIENT
+    else:
+        raise ExternalSigningTypedError(
+            category="conflict",
+            code="contract_legacy_manual_recovery_evidence_malformed",
+            message="歷史人工簽回證據不完整。",
+        )
+    expected_command = (
+        "record_manual_staff_contract_attestation"
+        if scope is ExternalCompletionReportScope.STAFF
+        else "record_manual_client_contract_attestation"
     )
-    return StoredExternalSigningReportReceipt(
-        PreviewFingerprint(str(row["command_fingerprint"])), receipt
+    valid = (
+        row.get("event_case_no") == case_no
+        and row.get("document_case_no") == case_no
+        and row.get("receipt_case_no") == case_no
+        and row.get("event_type") == "signed_received"
+        and row.get("document_role") == "signed_return"
+        and row.get("event_plan_id") == row.get("document_plan_id")
+        and row.get("event_segment_id") == row.get("document_segment_id")
+        and row.get("receipt_document_id") == row.get("document_version_id")
+        and row.get("receipt_event_id") == row.get("event_id")
+        and row.get("idempotency_key") == row.get("event_key")
+        and row.get("command_kind") == expected_command
+        and payload is not None
+        and payload.get("command") == expected_command
+        and payload.get("correlation_id") == row.get("correlation_id")
+        and payload.get("confirmation_method")
+        in {item.value for item in ManualAttestationMethod}
+        and isinstance(payload.get("reason"), str)
+        and bool(str(payload.get("reason")).strip())
+        and result is not None
+        and result.get("document_version_id") == row.get("document_version_id")
+        and result.get("signing_event_id") == row.get("event_id")
+        and all(
+            type(row.get(key)) is int and row[key] > 0
+            for key in (
+                "event_plan_id",
+                "document_version_id",
+                "source_document_version_id",
+                "event_id",
+                "receipt_db_id",
+            )
+        )
+        and all(
+            isinstance(row.get(key), str) and row[key] == row[key].strip() and bool(row[key])
+            for key in ("event_key", "command_kind", "actor", "correlation_id")
+        )
+        and _is_sha256(row.get("media_sha256"))
     )
+    if not valid:
+        raise ExternalSigningTypedError(
+            category="conflict",
+            code="contract_legacy_manual_recovery_evidence_malformed",
+            message="歷史人工簽回證據不完整。",
+        )
+    try:
+        return LegacyManualSigningEvidence(
+            case_no=case_no,
+            scope=scope,
+            matching_plan_id=row["event_plan_id"],
+            matching_segment_id=row.get("event_segment_id"),
+            legacy_document_version_id=row["document_version_id"],
+            source_document_version_id=row["source_document_version_id"],
+            signing_event_id=row["event_id"],
+            command_receipt_id=row["receipt_db_id"],
+            event_key=row["event_key"],
+            command_kind=row["command_kind"],
+            media_sha256=row["media_sha256"],
+            actor_ref=row["actor"],
+            correlation_id=row["correlation_id"],
+        )
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise _legacy_evidence_error() from None
+
+
+def _stored_fact_error(code: str) -> ExternalSigningTypedError:
+    return ExternalSigningTypedError(
+        category="conflict",
+        code=code,
+        message=code,
+    )
+
+
+def _legacy_evidence_error() -> ExternalSigningTypedError:
+    return ExternalSigningTypedError(
+        category="conflict",
+        code="contract_legacy_manual_recovery_evidence_malformed",
+        message="歷史人工簽回證據不完整。",
+    )
+
+
+def _is_sha256(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
+def _legacy_recovery_snapshot(value: Mapping[str, object]) -> LegacyManualRecoverySnapshot:
+    current = value.get("current")
+    legacy = value.get("legacy")
+    if (
+        value.get("kind") != "contract_legacy_manual_recovery.v1"
+        or not isinstance(current, Mapping)
+        or not isinstance(legacy, Mapping)
+    ):
+        raise _stored_fact_error("external_signing_recovery_snapshot_invalid")
+    scope_value = value.get("scope")
+    legacy_scope_value = legacy.get("scope")
+    if not isinstance(scope_value, str) or not isinstance(legacy_scope_value, str):
+        raise _stored_fact_error("external_signing_recovery_snapshot_invalid")
+    if legacy_scope_value != scope_value:
+        raise _stored_fact_error("external_signing_recovery_snapshot_lineage_invalid")
+    try:
+        scope = ExternalCompletionReportScope(scope_value)
+        evidence = LegacyManualSigningEvidence(
+            case_no=legacy["case_no"],
+            scope=scope,
+            matching_plan_id=legacy["matching_plan_id"],
+            matching_segment_id=legacy.get("matching_segment_id"),
+            legacy_document_version_id=legacy["legacy_document_version_id"],
+            source_document_version_id=legacy["source_document_version_id"],
+            signing_event_id=legacy["signing_event_id"],
+            command_receipt_id=legacy["command_receipt_id"],
+            event_key=legacy["event_key"],
+            command_kind=legacy["command_kind"],
+            media_sha256=legacy["media_sha256"],
+            actor_ref=legacy["actor_ref"],
+            correlation_id=legacy["correlation_id"],
+        )
+        if evidence.matching_plan_id != current["matching_plan_id"]:
+            raise _stored_fact_error(
+                "external_signing_recovery_snapshot_lineage_invalid"
+            )
+        preview_fingerprint = PreviewFingerprint(value["preview_fingerprint"])
+        session_id = current["session_id"]
+        matching_segment_id = value.get("matching_segment_id")
+        target_subject_reference = current["target_subject_reference"]
+        current_matching_plan_id = current["matching_plan_id"]
+        current_document_version_id = current["document_version_id"]
+        current_document_set_sha256 = current["document_set_sha256"]
+        current_commitment_id = current.get("commitment_id")
+        confirmation_method = ManualAttestationMethod(value["confirmation_method"])
+        reason = value["reason"]
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise _stored_fact_error("external_signing_recovery_snapshot_invalid") from None
+    try:
+        return LegacyManualRecoverySnapshot(
+            preview_fingerprint,
+            evidence.case_no,
+            session_id,
+            scope,
+            matching_segment_id,
+            target_subject_reference,
+            current_matching_plan_id,
+            current_document_version_id,
+            current_document_set_sha256,
+            current_commitment_id,
+            evidence,
+            confirmation_method,
+            reason,
+        )
+    except ValueError as error:
+        if str(error) == "client legacy recovery requires a commitment ID":
+            raise
+        raise _stored_fact_error("external_signing_recovery_snapshot_invalid") from None
+    except (TypeError, OverflowError):
+        raise _stored_fact_error("external_signing_recovery_snapshot_invalid") from None
+
+
+def _json_mapping(value: object) -> Mapping[str, object] | None:
+    try:
+        decoded = json.loads(value) if isinstance(value, (str, bytes, bytearray)) else value
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return decoded if isinstance(decoded, Mapping) else None
 
 
 def _stored_final_receipt(
@@ -785,6 +1009,24 @@ _CLIENT_DOCUMENT_SELECT_SQL = (
 _REPORT_TARGETS_SELECT_SQL = (
     "SELECT report_scope,matching_segment_id FROM contract_external_completion_reports "
     "WHERE external_signing_session_id=%s ORDER BY id"
+)
+_LEGACY_MANUAL_EVIDENCE_SQL = (
+    "SELECT event.id AS event_id,event.case_no AS event_case_no,event.document_version_id,"
+    "event.matching_plan_id AS event_plan_id,event.matching_segment_id AS event_segment_id,"
+    "event.event_type,event.event_key,event.actor,event.payload,"
+    "document.case_no AS document_case_no,document.document_scope,document.document_role,"
+    "document.matching_plan_id AS document_plan_id,"
+    "document.matching_segment_id AS document_segment_id,"
+    "document.source_document_version_id,asset.sha256 AS media_sha256,"
+    "receipt.id AS receipt_db_id,receipt.idempotency_key,receipt.command_kind,"
+    "receipt.case_no AS receipt_case_no,receipt.document_version_id AS receipt_document_id,"
+    "receipt.signing_event_id AS receipt_event_id,receipt.correlation_id,receipt.result_snapshot "
+    "FROM contract_signing_events event "
+    "JOIN contract_document_versions document ON document.id=event.document_version_id "
+    "JOIN media_assets asset ON asset.id=document.media_asset_id "
+    "JOIN contract_signing_command_receipts receipt ON receipt.signing_event_id=event.id "
+    "WHERE event.case_no=%s AND event.event_type='signed_received' "
+    "AND document.document_role='signed_return' ORDER BY event.id,receipt.id"
 )
 _BINDING_SELECT_SQL = (
     "SELECT binding_status,subject_type,subject_reference,aggregate_version "

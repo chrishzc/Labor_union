@@ -181,7 +181,7 @@ def test_prepare_maps_renderer_failure_to_closed_error():
     assert "/private/path" not in str(captured.value)
 
 
-def test_prepare_rejects_nonpersisted_actor_before_repository_access():
+def test_prepare_rejects_unapproved_nonpersisted_actor_before_repository_access():
     application, repository, _storage, renderer = _application(source=_source())
 
     with pytest.raises(UnsignedContractPdfError) as captured:
@@ -189,7 +189,7 @@ def test_prepare_rejects_nonpersisted_actor_before_repository_access():
             PrepareUnsignedContractPdf(
                 "CASE-1",
                 11,
-                _actor("system:local_bypass"),
+                _actor("admin:development"),
             )
         )
 
@@ -224,7 +224,7 @@ def test_download_returns_pdf_only_after_integrity_and_durable_audit():
     assert not hasattr(result, "object_reference")
 
 
-def test_download_rejects_nonpersisted_actor_before_repository_access():
+def test_download_rejects_unapproved_nonpersisted_actor_before_repository_access():
     application, repository, storage, _renderer = _application(stored=_stored())
 
     with pytest.raises(UnsignedContractPdfError) as captured:
@@ -232,7 +232,7 @@ def test_download_rejects_nonpersisted_actor_before_repository_access():
             DownloadUnsignedContractPdf(
                 "CASE-1",
                 12,
-                _actor("system:local_bypass"),
+                _actor("admin:development"),
                 CorrelationId("contract-download-local-bypass"),
             )
         )
@@ -240,6 +240,23 @@ def test_download_rejects_nonpersisted_actor_before_repository_access():
     assert captured.value.code == "contract_pdf_requires_persisted_actor"
     assert repository.download_queries == []
     assert storage.calls == []
+
+
+def test_download_accepts_the_exact_local_bypass_validation_actor():
+    application, repository, storage, _renderer = _application(stored=_stored())
+
+    result = application.download(
+        DownloadUnsignedContractPdf(
+            "CASE-1",
+            12,
+            _actor("system:local_bypass"),
+            CorrelationId("contract-download-local-bypass"),
+        )
+    )
+
+    assert result.content == PDF
+    assert len(repository.audits) == 1
+    assert storage.calls
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,8 @@ const FinalDocumentIdSchema = z.string().regex(/^cfd_[0-9a-f]{32}$/);
 const ControlledFileIdSchema = z.string().regex(/^cf_[0-9a-f]{32}$/);
 const PdfMimeSchema = z.literal('application/pdf');
 const ZonedTimeSchema = z.string().datetime({ offset: true });
+const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
+const ExternalSigningConfirmationMethodSchema = z.enum(['phone', 'paper', 'in_person', 'verified_other']);
 
 export const ExternalSigningStateSchema = z.enum([
   'staff_reporting',
@@ -45,6 +47,84 @@ const ClientTargetSchema = z.strictObject({
   reported: z.boolean(),
 });
 
+const LegacyRecoveryTargetSchema = z.strictObject({
+  scope: z.enum(['staff', 'client']),
+  matching_segment_id: z.number().int().positive().nullable(),
+  target_subject_reference: z.string().min(1).max(191),
+  current_document_version_id: z.number().int().positive(),
+  reported: z.boolean(),
+  legacy_document_version_id: z.number().int().positive().nullable(),
+  signing_event_id: z.number().int().positive().nullable(),
+  command_receipt_id: z.number().int().positive().nullable(),
+  legacy_media_sha256: Sha256Schema.nullable(),
+}).superRefine((value, context) => {
+  if ((value.scope === 'staff') !== (value.matching_segment_id !== null)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['matching_segment_id'], message: 'recovery target scope is invalid' });
+  }
+  const legacyValues = [
+    value.legacy_document_version_id,
+    value.signing_event_id,
+    value.command_receipt_id,
+    value.legacy_media_sha256,
+  ];
+  if (legacyValues.some((item) => item !== null) && !legacyValues.every((item) => item !== null)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['legacy_document_version_id'], message: 'legacy recovery lineage must be complete' });
+  }
+});
+
+export const LegacyRecoveryQuerySchema = z.strictObject({
+  case_no: z.string().min(1).max(50),
+  session_id: SessionIdSchema,
+  matching_plan_id: z.number().int().positive(),
+  current_document_set_sha256: Sha256Schema,
+  commitment_id: z.number().int().positive().nullable(),
+  state: z.enum(['staff_reporting', 'staff_reports_complete', 'client_reported_final_pdf_pending', 'completed']),
+  status_version: z.number().int().nonnegative(),
+  targets: z.array(LegacyRecoveryTargetSchema).min(2),
+}).superRefine((value, context) => {
+  const staffTargets = value.targets.filter((target) => target.scope === 'staff');
+  const clientTargets = value.targets.filter((target) => target.scope === 'client');
+  if (staffTargets.length === 0 || clientTargets.length !== 1) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['targets'], message: 'recovery target cardinality is invalid' });
+  }
+  const segmentIds = staffTargets.map((target) => target.matching_segment_id);
+  if (new Set(segmentIds).size !== segmentIds.length) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['targets'], message: 'staff recovery targets must be unique' });
+  }
+  const allStaffReported = staffTargets.every((target) => target.reported);
+  const clientReported = clientTargets[0]?.reported ?? false;
+  const validState = (
+    (value.state === 'staff_reporting' && !allStaffReported && !clientReported)
+    || (value.state === 'staff_reports_complete' && allStaffReported && !clientReported && value.commitment_id !== null)
+    || (['client_reported_final_pdf_pending', 'completed'].includes(value.state)
+      && allStaffReported && clientReported && value.commitment_id !== null)
+  );
+  if (!validState) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['state'], message: 'recovery target reports do not match state' });
+  }
+});
+
+export const LegacyRecoveryPreviewSchema = z.strictObject({
+  preview_fingerprint: Sha256Schema,
+  session_id: SessionIdSchema,
+  expected_status_version: z.number().int().nonnegative(),
+  scope: z.enum(['staff', 'client']),
+  matching_segment_id: z.number().int().positive().nullable(),
+  current_document_version_id: z.number().int().positive(),
+  current_document_set_sha256: Sha256Schema,
+  current_commitment_id: z.number().int().positive().nullable(),
+  legacy_media_sha256: Sha256Schema,
+  blockers: z.array(z.string()),
+  can_apply: z.boolean(),
+}).superRefine((value, context) => {
+  if ((value.scope === 'staff') !== (value.matching_segment_id !== null)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['matching_segment_id'], message: 'recovery Preview scope is invalid' });
+  }
+  if (value.can_apply !== (value.blockers.length === 0)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['can_apply'], message: 'recovery Preview readiness does not match blockers' });
+  }
+});
+
 export const ContractExternalSigningQuerySchema = z.strictObject({
   case_no: z.string().min(1).max(50),
   session_id: SessionIdSchema,
@@ -56,6 +136,10 @@ export const ContractExternalSigningQuerySchema = z.strictObject({
   staff_targets: z.array(StaffTargetSchema).min(1),
   client_target: ClientTargetSchema,
 }).superRefine((value, context) => {
+  const segmentIds = value.staff_targets.map((target) => target.matching_segment_id);
+  if (new Set(segmentIds).size !== segmentIds.length) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['staff_targets'], message: 'staff signing targets must be unique' });
+  }
   const allStaffReported = value.staff_targets.every((target) => target.reported);
   if (value.state === 'staff_reporting' && allStaffReported) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['state'], message: 'staff_reporting cannot have every staff report' });
@@ -151,7 +235,10 @@ export type ContractExternalSigningQuery = z.infer<typeof ContractExternalSignin
 export type ExternalSigningReceipt = z.infer<typeof ReceiptSchema>;
 export type FinalDocumentPreview = z.infer<typeof PreviewSchema>;
 export type FinalDocumentReadback = z.infer<typeof FinalReadbackSchema>;
-export type ExternalSigningConfirmationMethod = 'phone' | 'paper' | 'in_person' | 'verified_other';
+export type LegacyRecoveryQuery = z.infer<typeof LegacyRecoveryQuerySchema>;
+export type LegacyRecoveryTarget = z.infer<typeof LegacyRecoveryTargetSchema>;
+export type LegacyRecoveryPreview = z.infer<typeof LegacyRecoveryPreviewSchema>;
+export type ExternalSigningConfirmationMethod = z.infer<typeof ExternalSigningConfirmationMethodSchema>;
 
 export interface ExternalSigningCommandIdentity {
   idempotencyKey: string;
@@ -170,6 +257,27 @@ export interface FinalDocumentApplyInput {
   staging_id: string;
   expected_staging_version: number;
   preview_token: string;
+  expected_status_version: number;
+}
+
+const LegacyRecoveryPreviewInputSchema = z.strictObject({
+  scope: z.enum(['staff', 'client']),
+  matching_segment_id: z.number().int().positive().nullable(),
+  legacy_document_version_id: z.number().int().positive(),
+  signing_event_id: z.number().int().positive(),
+  command_receipt_id: z.number().int().positive(),
+  confirmation_method: ExternalSigningConfirmationMethodSchema,
+  reason: z.string().min(1).max(1000),
+}).superRefine((value, context) => {
+  if ((value.scope === 'staff') !== (value.matching_segment_id !== null)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['matching_segment_id'], message: 'recovery input scope is invalid' });
+  }
+});
+
+export type LegacyRecoveryPreviewInput = z.infer<typeof LegacyRecoveryPreviewInputSchema>;
+
+export interface LegacyRecoveryApplyInput extends LegacyRecoveryPreviewInput {
+  preview_fingerprint: string;
   expected_status_version: number;
 }
 
@@ -229,7 +337,7 @@ function stagingCommandOptions(identity: ExternalSigningCommandIdentity): Reques
   };
 }
 
-function normalizedReport(input: CompletionReportInput) {
+function normalizedReport<T extends { reason: string }>(input: T): T {
   const reason = input.reason.trim();
   if (!reason) throw new Error('請填寫外部簽署完成證據。');
   return { ...input, reason };
@@ -270,10 +378,68 @@ function basePath(caseNo: string): string {
 
 export const contractExternalSigningClient = {
   async query(caseNo: string, options?: { signal?: AbortSignal }): Promise<ContractExternalSigningQuery> {
-    return decodePayload(
+    const expectedCaseNo = canonicalCaseNo(caseNo);
+    const value = decodePayload(
       envelope(ContractExternalSigningQuerySchema),
-      await transport.get(basePath(caseNo), { token: authToken(), signal: options?.signal }),
+      await transport.get(basePath(expectedCaseNo), { token: authToken(), signal: options?.signal }),
     ).data;
+    if (value.case_no !== expectedCaseNo) throw new ApiHttpError(409, 'CONTRACT_CASE_MISMATCH', '外部簽約查詢案件識別不一致。');
+    return value;
+  },
+
+  async queryLegacyRecovery(caseNo: string, options?: { signal?: AbortSignal }): Promise<LegacyRecoveryQuery> {
+    const expectedCaseNo = canonicalCaseNo(caseNo);
+    const value = decodePayload(
+      envelope(LegacyRecoveryQuerySchema),
+      await transport.get(`${basePath(expectedCaseNo)}/legacy-recovery`, { token: authToken(), signal: options?.signal }),
+    ).data;
+    if (value.case_no !== expectedCaseNo) throw new ApiHttpError(409, 'CONTRACT_RECOVERY_CASE_MISMATCH', '歷史簽回修復案件識別不一致。');
+    return value;
+  },
+
+  async previewLegacyRecovery(
+    caseNo: string,
+    input: LegacyRecoveryPreviewInput,
+    signal?: AbortSignal,
+  ): Promise<LegacyRecoveryPreview> {
+    const normalized = LegacyRecoveryPreviewInputSchema.parse({ ...input, reason: input.reason.trim() });
+    return decodePayload(
+      envelope(LegacyRecoveryPreviewSchema),
+      await transport.post(
+        `${basePath(caseNo)}/legacy-recovery/preview`,
+        normalized,
+        { token: authToken(), signal },
+      ),
+    ).data;
+  },
+
+  async applyLegacyRecovery(
+    caseNo: string,
+    input: LegacyRecoveryApplyInput,
+    identity: ExternalSigningCommandIdentity,
+    signal?: AbortSignal,
+  ): Promise<ExternalSigningReceipt> {
+    const { preview_fingerprint: previewFingerprint, expected_status_version: expectedStatusVersion, ...previewInput } = input;
+    Sha256Schema.parse(previewFingerprint);
+    if (!Number.isInteger(expectedStatusVersion) || expectedStatusVersion < 0) throw new Error('歷史簽回修復狀態版本無效。');
+    const normalized = LegacyRecoveryPreviewInputSchema.parse({ ...previewInput, reason: previewInput.reason.trim() });
+    const value = decodePayload(
+      envelope(ReceiptSchema),
+      await transport.post(
+        `${basePath(caseNo)}/legacy-recovery/apply`,
+        {
+          ...normalized,
+          preview_fingerprint: previewFingerprint,
+          expected_status_version: expectedStatusVersion,
+        },
+        commandOptions(identity, signal),
+      ),
+    ).data;
+    if (value.receipt_id !== identity.receiptId) throw new ApiHttpError(409, 'CONTRACT_RECOVERY_RECEIPT_MISMATCH', '歷史簽回修復 receipt 識別不一致。');
+    if (value.resulting_status_version !== expectedStatusVersion + 1) {
+      throw new ApiHttpError(409, 'CONTRACT_RECOVERY_STATUS_VERSION_MISMATCH', '歷史簽回修復 receipt 狀態版本不符合預期。');
+    }
+    return value;
   },
 
   async downloadUnsignedPdf(caseNo: string, expectedDocumentVersionId: number, signal?: AbortSignal): Promise<PdfDownloadArtifact> {
@@ -387,16 +553,23 @@ export const contractExternalSigningClient = {
 
   async getReceipt(caseNo: string, receiptId: string, signal?: AbortSignal): Promise<ExternalSigningReceipt> {
     ReceiptIdSchema.parse(receiptId);
-    return decodePayload(
+    const value = decodePayload(
       envelope(ReceiptSchema),
       await transport.get(`${basePath(caseNo)}/receipts/${receiptId}`, { token: authToken(), signal }),
     ).data;
+    if (value.receipt_id !== receiptId) throw new ApiHttpError(409, 'CONTRACT_RECEIPT_MISMATCH', '簽約 receipt 識別不一致。');
+    return value;
   },
 
   async getFinalDocumentReadback(caseNo: string, signal?: AbortSignal): Promise<FinalDocumentReadback> {
-    return decodePayload(
+    const expectedCaseNo = canonicalCaseNo(caseNo);
+    const value = decodePayload(
       envelope(FinalReadbackSchema),
-      await transport.get(`${basePath(caseNo)}/final-document/readback`, { token: authToken(), signal }),
+      await transport.get(`${basePath(expectedCaseNo)}/final-document/readback`, { token: authToken(), signal }),
     ).data;
+    if (value.case_no !== expectedCaseNo) {
+      throw new ApiHttpError(409, 'CONTRACT_FINAL_READBACK_CASE_MISMATCH', '最終 PDF readback 案件識別不一致。');
+    }
+    return value;
   },
 };

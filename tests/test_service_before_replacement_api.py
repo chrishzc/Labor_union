@@ -158,17 +158,30 @@ def test_actor_is_server_derived_and_narrowed_to_orders_capability():
     assert actor.permission_scope == ("orders.historical_review.remediate",)
 
 
-def test_production_dependency_fails_closed_without_authoritative_loaders():
-    with pytest.raises(HTTPException) as raised:
-        get_service_before_replacement_application()
-    assert raised.value.status_code == 503
-    assert raised.value.detail["error"]["code"] == "replacement_source_unavailable"
+def test_production_dependency_yields_composed_application_and_closes_connection(monkeypatch):
+    import api.dependencies.service_before_replacement as dependency
 
+    class Connection:
+        closed = False
 
-def test_dependency_preserves_request_correlation_when_source_is_unavailable():
-    with pytest.raises(HTTPException) as raised:
-        get_service_before_replacement_application(correlation_id="request-correlation")
-    assert raised.value.detail["error"]["correlation_id"] == "request-correlation"
+        def close(self):
+            self.closed = True
+
+    connection = Connection()
+    application = object()
+    monkeypatch.setattr(dependency, "get_connection", lambda: connection)
+    monkeypatch.setattr(
+        dependency,
+        "build_service_before_replacement_application",
+        lambda value: application if value is connection else None,
+    )
+
+    provider = get_service_before_replacement_application(
+        correlation_id="request-correlation"
+    )
+    assert next(provider) is application
+    provider.close()
+    assert connection.closed is True
 
 
 def test_application_query_forwards_the_typed_request_without_positional_guessing():
@@ -186,6 +199,28 @@ def test_application_query_forwards_the_typed_request_without_positional_guessin
 
     assert ServiceBeforeReplacementApplication(Workflow()).query(request) == "query-result"
     assert seen == [request]
+
+
+def test_loader_unavailable_is_a_typed_source_503():
+    from infrastructure.mysql.service_before_replacement_loader import (
+        ServiceBeforeReplacementSourceUnavailable,
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        _call(
+            lambda: (_ for _ in ()).throw(
+                ServiceBeforeReplacementSourceUnavailable(
+                    "replacement_signback_incomplete"
+                )
+            ),
+            "unused",
+            CorrelationId("query-correlation"),
+        )
+    assert raised.value.status_code == 503
+    assert raised.value.detail["error"]["code"] == "replacement_source_unavailable"
+    assert raised.value.detail["error"]["domain_blockers"] == [
+        "replacement_signback_incomplete"
+    ]
 
 
 def test_query_route_fails_closed_without_guessing_scenario():

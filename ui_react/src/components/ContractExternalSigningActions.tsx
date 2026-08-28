@@ -12,6 +12,10 @@ import {
   type ExternalSigningReceipt,
   type FinalDocumentPreview,
   type FinalDocumentReadback,
+  type LegacyRecoveryPreview,
+  type LegacyRecoveryPreviewInput,
+  type LegacyRecoveryQuery,
+  type LegacyRecoveryTarget,
 } from '../api/orders/contract_external_signing_client';
 import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
 
@@ -22,13 +26,28 @@ export interface ContractExternalSigningActionsProps {
 
 type WorkingOperation = 'query' | 'download' | 'staff_report' | 'client_report' | 'final_preview' | 'final_apply' | 'receipt' | 'readback';
 
+interface RecoveryPreviewState {
+  target: LegacyRecoveryTarget;
+  request: LegacyRecoveryPreviewInput;
+  preview: LegacyRecoveryPreview;
+  confirmed: boolean;
+}
+
+interface ReceiptExpectation {
+  commandType: ExternalSigningReceipt['command_type'];
+  sessionId: string;
+  matchingSegmentId: number | null;
+  resultingStatusVersion: number;
+}
+
 export type ContractExternalSigningUiState =
   | { type: 'querying' }
   | { type: 'ready' }
   | { type: 'working'; operation: WorkingOperation }
   | { type: 'preview_ready'; preview: FinalDocumentPreview; confirmed: boolean }
+  | { type: 'recovery_preview_ready'; recovery: RecoveryPreviewState }
   | { type: 'receipt_committed'; receipt: ExternalSigningReceipt; message: string }
-  | { type: 'outcome_unknown'; identity: ExternalSigningCommandIdentity; message: string }
+  | { type: 'outcome_unknown'; identity: ExternalSigningCommandIdentity; expected: ReceiptExpectation; message: string }
   | { type: 'observed'; receipt: ExternalSigningReceipt; readback: FinalDocumentReadback }
   | { type: 'error'; message: string };
 
@@ -40,6 +59,12 @@ function safeErrorMessage(error: unknown): string {
   if (unsafePublicText.test(message)) return fallback;
   if (error instanceof ApiHttpError) return `${error.code}：${message}`;
   return message || fallback;
+}
+
+function assertFinalReadbackMatchesCase(caseNo: string, readback: FinalDocumentReadback): void {
+  if (readback.case_no !== caseNo.trim()) {
+    throw new Error('最終 PDF readback 案件識別不一致。');
+  }
 }
 
 function outcomeCouldBeUnknown(error: unknown): boolean {
@@ -69,14 +94,82 @@ function currentIdentity(
   return created;
 }
 
+function recoveryTargetKey(target: LegacyRecoveryTarget): string {
+  return target.scope === 'staff' ? `staff-${target.matching_segment_id}` : 'client';
+}
+
+function hasCompleteLegacyLineage(target: LegacyRecoveryTarget): boolean {
+  return target.legacy_document_version_id !== null
+    && target.signing_event_id !== null
+    && target.command_receipt_id !== null
+    && target.legacy_media_sha256 !== null;
+}
+
+function assertRecoveryQueryMatchesCurrent(
+  current: ContractExternalSigningQuery,
+  recovery: LegacyRecoveryQuery,
+): void {
+  if (
+    current.case_no !== recovery.case_no
+    || current.session_id !== recovery.session_id
+    || current.matching_plan_id !== recovery.matching_plan_id
+    || current.commitment_id !== recovery.commitment_id
+    || current.state !== recovery.state
+    || current.status_version !== recovery.status_version
+  ) {
+    throw new Error('歷史簽回修復與目前簽約狀態不一致，請重新查詢。');
+  }
+  const currentStaff = new Map(current.staff_targets.map((target) => [target.matching_segment_id, target]));
+  const recoveryStaff = recovery.targets.filter((target) => target.scope === 'staff');
+  if (currentStaff.size !== recoveryStaff.length || recoveryStaff.some((target) => {
+    const source = currentStaff.get(target.matching_segment_id!);
+    return !source
+      || source.staff_subject_reference !== target.target_subject_reference
+      || source.document_version_id !== target.current_document_version_id
+      || source.reported !== target.reported;
+  })) {
+    throw new Error('歷史簽回修復與目前月嫂簽署對象不一致，請重新查詢。');
+  }
+  const recoveryClient = recovery.targets.find((target) => target.scope === 'client');
+  if (
+    !recoveryClient
+    || recoveryClient.target_subject_reference !== current.client_target.client_subject_reference
+    || recoveryClient.current_document_version_id !== current.client_target.document_version_id
+    || recoveryClient.reported !== current.client_target.reported
+  ) {
+    throw new Error('歷史簽回修復與目前客戶簽署對象不一致，請重新查詢。');
+  }
+}
+
+function assertRecoveryPreviewMatches(
+  recovery: LegacyRecoveryQuery,
+  target: LegacyRecoveryTarget,
+  preview: LegacyRecoveryPreview,
+): void {
+  if (
+    preview.session_id !== recovery.session_id
+    || preview.expected_status_version !== recovery.status_version
+    || preview.scope !== target.scope
+    || preview.matching_segment_id !== target.matching_segment_id
+    || preview.current_document_version_id !== target.current_document_version_id
+    || preview.current_document_set_sha256 !== recovery.current_document_set_sha256
+    || preview.current_commitment_id !== recovery.commitment_id
+    || preview.legacy_media_sha256 !== target.legacy_media_sha256
+  ) {
+    throw new Error('歷史簽回修復 Preview 血緣不一致，請重新查詢。');
+  }
+}
+
 export function ContractExternalSigningActions({ caseNo, onCommitted }: ContractExternalSigningActionsProps) {
   const identities = useRef(new Map<string, ExternalSigningCommandIdentity>());
   const requestGeneration = useRef(0);
   const [query, setQuery] = useState<ContractExternalSigningQuery | null>(null);
+  const [recoveryQuery, setRecoveryQuery] = useState<LegacyRecoveryQuery | null>(null);
   const [uiState, setUiState] = useState<ContractExternalSigningUiState>({ type: 'querying' });
   const [notice, setNotice] = useState<string | null>(null);
   const [staffReasons, setStaffReasons] = useState<Record<number, string>>({});
   const [clientReason, setClientReason] = useState('');
+  const [recoveryReasons, setRecoveryReasons] = useState<Record<string, string>>({});
   const [confirmationMethod, setConfirmationMethod] = useState<ExternalSigningConfirmationMethod>('verified_other');
   const [finalFile, setFinalFile] = useState<File | null>(null);
 
@@ -84,8 +177,13 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     const generation = ++requestGeneration.current;
     setUiState({ type: 'querying' });
     const value = await contractExternalSigningClient.query(caseNo, { signal });
+    const recovery = value.state === 'superseded'
+      ? null
+      : await contractExternalSigningClient.queryLegacyRecovery(caseNo, { signal });
+    if (recovery) assertRecoveryQueryMatchesCurrent(value, recovery);
     if (generation !== requestGeneration.current) return value;
     setQuery(value);
+    setRecoveryQuery(recovery);
     setUiState({ type: 'ready' });
     return value;
   }, [caseNo]);
@@ -93,6 +191,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   useEffect(() => {
     const controller = new AbortController();
     setQuery(null);
+    setRecoveryQuery(null);
     setNotice(null);
     setFinalFile(null);
     identities.current.clear();
@@ -101,6 +200,10 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       try {
         setUiState({ type: 'working', operation: 'readback' });
         const readback = await contractExternalSigningClient.getFinalDocumentReadback(caseNo, controller.signal);
+        assertFinalReadbackMatchesCase(caseNo, readback);
+        if (readback.session_id !== value.session_id) {
+          throw new Error('最終 PDF readback 簽約工作識別不一致。');
+        }
         if (!controller.signal.aborted) {
           setNotice(`最終 PDF 第 ${readback.version_number} 版已完成 readback，完整性驗證通過。`);
           setUiState({ type: 'ready' });
@@ -151,12 +254,105 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     setUiState({ type: 'working', operation: key.startsWith('staff') ? 'staff_report' : 'client_report' });
     try {
       const receipt = await operation(identity);
+      const staffSegmentId = key.startsWith('staff-') ? Number(key.slice('staff-'.length)) : null;
+      const expectedCommand = staffSegmentId === null ? 'record_client_report' : 'record_staff_report';
+      if (
+        receipt.receipt_id !== identity.receiptId
+        || receipt.session_id !== query!.session_id
+        || receipt.command_type !== expectedCommand
+        || receipt.matching_segment_id !== staffSegmentId
+        || receipt.resulting_status_version !== query!.status_version + 1
+      ) {
+        throw new Error('完成回報 receipt 與原命令或目前狀態不一致；不得視為完成。');
+      }
       identities.current.delete(key);
       setNotice(receipt.replayed ? '完成回報已安全重播，正在重新查詢。' : '完成回報已記錄，正在重新查詢。');
       await loadQuery();
     } catch (error) {
       if (outcomeCouldBeUnknown(error)) {
-        setUiState({ type: 'outcome_unknown', identity, message: '完成回報結果未明；只可用原命令識別查詢 receipt。' });
+        const segmentId = key.startsWith('staff-') ? Number(key.slice('staff-'.length)) : null;
+        setUiState({
+          type: 'outcome_unknown',
+          identity,
+          expected: {
+            commandType: segmentId === null ? 'record_client_report' : 'record_staff_report',
+            sessionId: query!.session_id,
+            matchingSegmentId: segmentId,
+            resultingStatusVersion: query!.status_version + 1,
+          },
+          message: '完成回報結果未明；只可用原命令識別查詢 receipt。',
+        });
+      } else {
+        setUiState({ type: 'error', message: safeErrorMessage(error) });
+      }
+    }
+  };
+
+  const previewLegacyRecovery = async (target: LegacyRecoveryTarget) => {
+    if (!recoveryQuery || target.reported || !hasCompleteLegacyLineage(target)) return;
+    const key = recoveryTargetKey(target);
+    const reason = (recoveryReasons[key] ?? '').trim();
+    if (!reason) return;
+    const request: LegacyRecoveryPreviewInput = {
+      scope: target.scope,
+      matching_segment_id: target.matching_segment_id,
+      legacy_document_version_id: target.legacy_document_version_id!,
+      signing_event_id: target.signing_event_id!,
+      command_receipt_id: target.command_receipt_id!,
+      confirmation_method: confirmationMethod,
+      reason,
+    };
+    setNotice(null);
+    setUiState({ type: 'working', operation: target.scope === 'staff' ? 'staff_report' : 'client_report' });
+    try {
+      const preview = await contractExternalSigningClient.previewLegacyRecovery(caseNo, request);
+      assertRecoveryPreviewMatches(recoveryQuery, target, preview);
+      identities.current.delete(`legacy-${key}`);
+      setUiState({ type: 'recovery_preview_ready', recovery: { target, request, preview, confirmed: false } });
+    } catch (error) {
+      setUiState({ type: 'error', message: safeErrorMessage(error) });
+    }
+  };
+
+  const applyLegacyRecovery = async () => {
+    if (!recoveryQuery || uiState.type !== 'recovery_preview_ready') return;
+    const { target, request, preview, confirmed } = uiState.recovery;
+    if (!confirmed || !preview.can_apply) return;
+    const key = `legacy-${recoveryTargetKey(target)}`;
+    const identity = currentIdentity(identities.current, key);
+    setUiState({ type: 'working', operation: target.scope === 'staff' ? 'staff_report' : 'client_report' });
+    try {
+      const receipt = await contractExternalSigningClient.applyLegacyRecovery(caseNo, {
+        ...request,
+        preview_fingerprint: preview.preview_fingerprint,
+        expected_status_version: preview.expected_status_version,
+      }, identity);
+      const expectedCommand = target.scope === 'staff' ? 'record_staff_report' : 'record_client_report';
+      if (
+        receipt.receipt_id !== identity.receiptId
+        || receipt.session_id !== recoveryQuery.session_id
+        || receipt.command_type !== expectedCommand
+        || receipt.matching_segment_id !== target.matching_segment_id
+        || receipt.resulting_status_version !== preview.expected_status_version + 1
+      ) {
+        throw new Error('歷史簽回修復 receipt 血緣不一致；不得視為完成。');
+      }
+      identities.current.delete(key);
+      setNotice(receipt.replayed ? '歷史簽回修復已安全重播，正在重新查詢。' : '歷史簽回修復已記錄，正在重新查詢。');
+      await loadQuery();
+    } catch (error) {
+      if (outcomeCouldBeUnknown(error)) {
+        setUiState({
+          type: 'outcome_unknown',
+          identity,
+          expected: {
+            commandType: target.scope === 'staff' ? 'record_staff_report' : 'record_client_report',
+            sessionId: recoveryQuery.session_id,
+            matchingSegmentId: target.matching_segment_id,
+            resultingStatusVersion: preview.expected_status_version + 1,
+          },
+          message: '歷史簽回修復結果未明；不得重送，只能以原命令查詢 receipt。',
+        });
       } else {
         setUiState({ type: 'error', message: safeErrorMessage(error) });
       }
@@ -186,10 +382,19 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
     setUiState({ type: 'receipt_committed', receipt, message: 'Apply receipt 已提交；正在核對最終文件 readback。' });
     try {
       const readback = await contractExternalSigningClient.getFinalDocumentReadback(caseNo);
+      assertFinalReadbackMatchesCase(caseNo, readback);
       if (receipt.final_document_id !== readback.final_document_id || receipt.session_id !== readback.session_id) {
         throw new Error('最終 PDF receipt 與 readback identity 不一致。');
       }
       setUiState({ type: 'observed', receipt, readback });
+      const refreshed = await loadQuery();
+      if (
+        refreshed.session_id !== receipt.session_id
+        || refreshed.state !== 'completed'
+        || refreshed.status_version !== receipt.resulting_status_version
+      ) {
+        throw new Error('最終 PDF readback 後的簽約狀態尚未完成；不得重送 Apply。');
+      }
       setNotice(`契約完成，最終 PDF 已完成 readback（第 ${readback.version_number} 版，完整性驗證通過）。`);
       await onCommitted?.();
     } catch (error) {
@@ -213,11 +418,30 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         preview_token: preview.preview_token,
         expected_status_version: query.status_version,
       }, identity);
+      if (
+        receipt.receipt_id !== identity.receiptId
+        || receipt.session_id !== query.session_id
+        || receipt.command_type !== 'apply_final_signed_contract'
+        || receipt.matching_segment_id !== null
+        || receipt.resulting_status_version !== query.status_version + 1
+      ) {
+        throw new Error('最終 PDF receipt 與原命令或目前狀態不一致；不得視為完成。');
+      }
       identities.current.delete('final-apply');
       await observeFinalReceipt(receipt);
     } catch (error) {
       if (outcomeCouldBeUnknown(error)) {
-        setUiState({ type: 'outcome_unknown', identity, message: '最終 PDF Apply 結果未明；不得重送，只能以原命令查 receipt。' });
+        setUiState({
+          type: 'outcome_unknown',
+          identity,
+          expected: {
+            commandType: 'apply_final_signed_contract',
+            sessionId: query.session_id,
+            matchingSegmentId: null,
+            resultingStatusVersion: query.status_version + 1,
+          },
+          message: '最終 PDF Apply 結果未明；不得重送，只能以原命令查 receipt。',
+        });
       } else {
         setUiState({ type: 'error', message: safeErrorMessage(error) });
       }
@@ -227,9 +451,19 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   const reconcileUnknown = async () => {
     if (uiState.type !== 'outcome_unknown') return;
     const identity = uiState.identity;
+    const expected = uiState.expected;
     setUiState({ type: 'working', operation: 'receipt' });
     try {
       const receipt = await contractExternalSigningClient.getReceipt(caseNo, identity.receiptId);
+      if (
+        receipt.receipt_id !== identity.receiptId
+        || receipt.command_type !== expected.commandType
+        || receipt.session_id !== expected.sessionId
+        || receipt.matching_segment_id !== expected.matchingSegmentId
+        || receipt.resulting_status_version !== expected.resultingStatusVersion
+      ) {
+        throw new Error('receipt 與原命令識別不一致；不得視為完成。');
+      }
       if (receipt.command_type === 'apply_final_signed_contract') {
         identities.current.delete('final-apply');
         await observeFinalReceipt(receipt);
@@ -240,6 +474,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       setUiState({
         type: 'outcome_unknown',
         identity,
+        expected,
         message: `receipt 尚未可觀察；請稍後仍以原命令查詢。${safeErrorMessage(error)}`,
       });
     }
@@ -253,6 +488,17 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   };
 
   const busy = uiState.type === 'working';
+  const pendingRecoveryTargets = recoveryQuery?.targets.filter((target) => !target.reported) ?? [];
+  const allRecoveryStaffReported = recoveryQuery?.targets
+    .filter((target) => target.scope === 'staff')
+    .every((target) => target.reported) ?? false;
+  const isRecoveryOwnedTarget = (scope: 'staff' | 'client', segmentId: number | null) =>
+    recoveryQuery?.targets.some((target) => (
+      target.scope === scope
+      && target.matching_segment_id === segmentId
+      && !target.reported
+      && hasCompleteLegacyLineage(target)
+    )) ?? false;
 
   return (
     <section aria-label="外部平台簽約與最終 PDF" data-control-id="orders.contract-external-signing.actions" style={{ display: 'grid', gap: '14px' }}>
@@ -268,6 +514,88 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
           <strong>{stateLabel(query)}</strong>
           <div style={{ fontSize: '0.8rem', color: '#74593f' }}>狀態版本 {query.status_version}</div>
         </div>
+      )}
+
+      {recoveryQuery && pendingRecoveryTargets.length > 0 && (
+        <section aria-label="歷史簽回人工修復" style={{ border: '2px solid #f59e0b', borderRadius: '12px', padding: '14px', display: 'grid', gap: '12px' }}>
+          <header>
+            <strong>🧾 歷史簽回人工修復</strong>
+            <div style={{ fontSize: '0.82rem', color: '#74593f', marginTop: '4px' }}>
+              尚有 {pendingRecoveryTargets.length} 個未完成對象。每筆都必須先核對歷史血緣並 Preview；月嫂完成後才可修復客戶。
+            </div>
+            <div style={{ fontSize: '0.78rem', color: '#74593f' }}>
+              Session {recoveryQuery.session_id}｜狀態版本 {recoveryQuery.status_version}｜配對方案 {recoveryQuery.matching_plan_id}
+            </div>
+          </header>
+
+          {pendingRecoveryTargets.map((target) => {
+            const key = recoveryTargetKey(target);
+            const lineageComplete = hasCompleteLegacyLineage(target);
+            const clientBlocked = target.scope === 'client' && (!allRecoveryStaffReported || recoveryQuery.commitment_id === null);
+            const activePreview = uiState.type === 'recovery_preview_ready'
+              && recoveryTargetKey(uiState.recovery.target) === key
+              ? uiState.recovery
+              : null;
+            return (
+              <article key={key} aria-label={`${target.scope === 'staff' ? '月嫂' : '客戶'} ${target.target_subject_reference} 歷史簽回修復`} style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px', display: 'grid', gap: '8px' }}>
+                <strong>{target.scope === 'staff' ? '月嫂' : '客戶'} {target.target_subject_reference}</strong>
+                <div style={{ fontSize: '0.8rem', color: '#74593f' }}>
+                  現行文件版本 {target.current_document_version_id}
+                  {lineageComplete
+                    ? `｜歷史文件 ${target.legacy_document_version_id}／事件 ${target.signing_event_id}／receipt ${target.command_receipt_id}／證據 ${target.legacy_media_sha256!.slice(0, 8)}…`
+                    : '｜找不到完整歷史簽回證據，無法建立 Preview'}
+                </div>
+                {clientBlocked && <div role="status">需先完成所有月嫂修復並取得現行 commitment。</div>}
+                <label style={{ display: 'grid', gap: '4px' }}>
+                  修復原因與人工核對依據
+                  <input
+                    value={recoveryReasons[key] ?? ''}
+                    disabled={busy || clientBlocked || !lineageComplete}
+                    maxLength={1000}
+                    onChange={(event) => {
+                      setRecoveryReasons((current) => ({ ...current, [key]: event.target.value }));
+                      identities.current.delete(`legacy-${key}`);
+                      if (activePreview) setUiState({ type: 'ready' });
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={busy || clientBlocked || !lineageComplete || !(recoveryReasons[key] ?? '').trim()}
+                  onClick={() => void previewLegacyRecovery(target)}
+                >
+                  Preview {target.scope === 'staff' ? '月嫂' : '客戶'}歷史簽回修復
+                </button>
+                {activePreview && (
+                  <div style={{ padding: '10px', background: '#fffbeb', borderRadius: '8px', display: 'grid', gap: '6px' }}>
+                    <div>Preview 已綁定現行文件版本 {activePreview.preview.current_document_version_id} 與歷史證據 {activePreview.preview.legacy_media_sha256.slice(0, 8)}…</div>
+                    {activePreview.preview.blockers.length > 0 && (
+                      <ul>{activePreview.preview.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
+                    )}
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={activePreview.confirmed}
+                        onChange={(event) => setUiState({
+                          type: 'recovery_preview_ready',
+                          recovery: { ...activePreview, confirmed: event.target.checked },
+                        })}
+                      />
+                      我已核對案件、對象、現行文件與歷史 event／receipt 血緣
+                    </label>
+                    <button
+                      type="button"
+                      disabled={!activePreview.confirmed || !activePreview.preview.can_apply}
+                      onClick={() => void applyLegacyRecovery()}
+                    >
+                      確認套用此筆歷史簽回修復
+                    </button>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </section>
       )}
 
       {query?.unsigned_document && (
@@ -305,7 +633,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         <section key={target.matching_segment_id} aria-label={`月嫂 ${target.staff_subject_reference} 外部簽署回報`} style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px' }}>
           <strong>月嫂 {target.staff_subject_reference}</strong>
           <div style={{ fontSize: '0.82rem', margin: '5px 0' }}>{target.reported ? '完成回報已記錄' : '尚待外部簽署完成回報'}</div>
-          {!target.reported && query.state === 'staff_reporting' && (
+          {!target.reported && query.state === 'staff_reporting' && !isRecoveryOwnedTarget('staff', target.matching_segment_id) && (
             <>
               <label style={{ display: 'grid', gap: '4px' }}>
                 月嫂完成證據
@@ -343,6 +671,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
           <select value={confirmationMethod} disabled={busy} onChange={(event) => {
             setConfirmationMethod(event.target.value as ExternalSigningConfirmationMethod);
             identities.current.clear();
+            if (uiState.type === 'recovery_preview_ready') setUiState({ type: 'ready' });
           }}>
             <option value="phone">電話確認</option>
             <option value="paper">紙本確認</option>
@@ -352,7 +681,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         </label>
       )}
 
-      {query?.state === 'staff_reports_complete' && !query.client_target.reported && query.commitment_id !== null && (
+      {query?.state === 'staff_reports_complete' && !query.client_target.reported && query.commitment_id !== null && !isRecoveryOwnedTarget('client', null) && (
         <section aria-label="客戶外部簽署回報" style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px' }}>
           <strong>客戶 {query.client_target.client_subject_reference}</strong>
           <label style={{ display: 'grid', gap: '4px' }}>
@@ -379,7 +708,9 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         </section>
       )}
 
-      {query?.state === 'client_reported_final_pdf_pending' && (
+      {query?.state === 'client_reported_final_pdf_pending'
+        && uiState.type !== 'receipt_committed'
+        && !(uiState.type === 'outcome_unknown' && uiState.expected.commandType === 'apply_final_signed_contract') && (
         <section aria-label="最終簽署 PDF 納管" style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px', display: 'grid', gap: '8px' }}>
           <strong>最終簽署 PDF 待回收</strong>
           <label style={{ display: 'grid', gap: '4px' }}>

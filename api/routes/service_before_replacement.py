@@ -10,6 +10,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pymysql.err import IntegrityError, OperationalError
 
+from infrastructure.mysql.service_before_replacement_loader import (
+    ServiceBeforeReplacementSourceUnavailable,
+)
+
 from api.dependencies.admin_auth import (
     admin_actor_context,
     require_historical_order_review_remediator,
@@ -190,6 +194,16 @@ def _server_actor(principal: AdminPrincipal) -> ActorContext:
 def _query_payload(query):
     actual_dates = tuple(query.actual_service_dates)
     referral = bool(actual_dates)
+    prior_generation_identity = _first(query, "prior_generation_identity")
+    prior_event_identity = _first(query, "prior_event_identity")
+    if not referral and not query.blockers:
+        if (
+            not isinstance(prior_generation_identity, str)
+            or not prior_generation_identity.strip()
+            or not isinstance(prior_event_identity, str)
+            or not prior_event_identity.strip()
+        ):
+            raise ServiceBeforeReplacementSourceUnavailable("replacement_prior_event_unavailable")
     outcome = (
         ReplacementOutcome.SUBSTITUTION_REFERRAL.value
         if actual_dates
@@ -202,8 +216,8 @@ def _query_payload(query):
         "actual_service_day_count": query.actual_service_day_count,
         "actual_service_dates": list(actual_dates),
         "actual_service_proof": _proof_payload(query.actual_service_proof),
-        "prior_generation_identity": _first(query, "prior_generation_identity"),
-        "prior_event_identity": _first(query, "prior_event_identity"),
+        "prior_generation_identity": prior_generation_identity,
+        "prior_event_identity": prior_event_identity,
         "prior_aggregate_identity": query.prior_aggregate_identity,
         "generation_version": query.generation_version,
         "event_version": query.event_version,
@@ -470,6 +484,16 @@ def _call(operation, message: str, correlation: CorrelationId):
     except IntegrityError as error:
         typed = TypedError(ErrorCategory.CONFLICT, "replacement_version_conflict", "服務前換人與目前資料衝突，請重新查詢與 Preview。", correlation)
         raise _http_error(409, typed) from error
+    except ServiceBeforeReplacementSourceUnavailable as error:
+        typed = TypedError(
+            ErrorCategory.UNAVAILABLE,
+            "replacement_source_unavailable",
+            "服務前換人根事實目前無法完整讀取。",
+            correlation,
+            domain_blockers=(error.code,),
+            retryable=True,
+        )
+        raise _http_error(503, typed) from error
     except (TypeError, ValueError) as error:
         typed = TypedError(ErrorCategory.VALIDATION, "replacement_request_invalid", "服務前換人資料未通過驗證。", correlation)
         raise _http_error(422, typed) from error

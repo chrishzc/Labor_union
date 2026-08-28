@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from hashlib import sha256
 import json
+import re
 from typing import Any, Callable, Iterator, Mapping
 
 from domains.scheduling.service_before_replacement import (
@@ -54,12 +55,12 @@ class MySqlServiceBeforeReplacementRepository:
     def load_facts(self, case_no: str, *, for_update: bool) -> ServiceBeforeReplacementFacts | None:
         if self._facts_loader is None:
             return None
-        return self._facts_loader(case_no, for_update)
+        return self._facts_loader(case_no, for_update=for_update)
 
     def load_facts_for_request(self, request: object, *, for_update: bool) -> ServiceBeforeReplacementFacts | None:
         if self._facts_loader is None:
             return None
-        return self._facts_loader(request, for_update)
+        return self._facts_loader(request, for_update=for_update)
 
     def find_receipt(self, key: IdempotencyKey, case_no: str, *, for_update: bool) -> StoredReplacementReceipt | None:
         suffix = " FOR UPDATE" if for_update else ""
@@ -130,6 +131,9 @@ class MySqlServiceBeforeReplacementRepository:
         # generations.  Any incomplete Matching handoff therefore fails
         # closed without creating a partial replacement lineage.
         source = self._matching_source(command, for_update=True)
+        if candidate.candidate_pool_reuse_proof is None:
+            source = dict(source)
+            source.pop("reuse_package", None)
         adapter = self._matching_adapter
         if adapter is None:
             raise ServiceBeforeReplacementPersistenceError("matching source adapter is required")
@@ -142,7 +146,11 @@ class MySqlServiceBeforeReplacementRepository:
             actor_id=command.actor.actor_id,
             reason=command.reason,
         )
-        prior_event_id = self._prior_replacement_event_id(candidate.prior_event_identity, command.case_no)
+        prior_event_id = self._prior_replacement_event_id(
+            candidate.prior_event_identity,
+            command.case_no,
+            expected_generation_id=prior_generation_id,
+        )
         event_id = self._insert_event(
             command,
             candidate,
@@ -310,7 +318,9 @@ class MySqlServiceBeforeReplacementRepository:
 
     def _matching_source(self, request: object, *, for_update: bool) -> Mapping[str, Any]:
         return self.require_matching_source(
-            None if self._matching_source_loader is None else self._matching_source_loader(request, for_update)
+            None
+            if self._matching_source_loader is None
+            else self._matching_source_loader(request, for_update=for_update)
         )
 
     def _generation_ids(self, case_no: str, prior_version: int, result_version: int | None) -> tuple[int, int]:
@@ -329,15 +339,65 @@ class MySqlServiceBeforeReplacementRepository:
             raise ServiceBeforeReplacementPersistenceError("replacement scheduling generations are incomplete")
         return by_version[prior_version], by_version[result_version]
 
-    def _prior_replacement_event_id(self, identity: str, case_no: str) -> int | None:
+    def _prior_replacement_event_id(
+        self, identity: str, case_no: str, *, expected_generation_id: int | None = None
+    ) -> int | None:
         with _cursor(self._connection) as cursor:
             cursor.execute(
-                "SELECT id FROM scheduling_service_before_replacement_events "
+                "SELECT id,replacement_generation_id FROM scheduling_service_before_replacement_events "
                 "WHERE replacement_event_identity=%s AND case_no=%s FOR UPDATE",
                 (identity, case_no),
             )
             row = cursor.fetchone()
-        return None if row is None else int(row["id"])
+        if row is not None:
+            try:
+                if (
+                    expected_generation_id is not None
+                    and int(row["replacement_generation_id"]) != expected_generation_id
+                ):
+                    raise ServiceBeforeReplacementPersistenceError(
+                        "replacement prior event generation binding drift"
+                    )
+                return int(row["id"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement prior event identity is malformed"
+                ) from error
+        match = re.fullmatch(r"scheduling-rebuild-event:(.+):(\d+)", str(identity))
+        if match is None or match.group(1) != case_no:
+            raise ServiceBeforeReplacementPersistenceError(
+                "replacement prior event identity is unavailable"
+            )
+        rebuild_id = int(match.group(2))
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "SELECT id,case_no,new_generation_id,previous_generation_id,"
+                "expected_scheduling_version,resulting_scheduling_version "
+                "FROM scheduling_rebuild_events WHERE id=%s AND case_no=%s FOR UPDATE",
+                (rebuild_id, case_no),
+            )
+            rebuild = cursor.fetchone()
+        if rebuild is None:
+            raise ServiceBeforeReplacementPersistenceError(
+                "replacement rebuild predecessor is unavailable"
+            )
+        try:
+            if (
+                int(rebuild["id"]) != rebuild_id
+                or rebuild["case_no"] != case_no
+                or expected_generation_id is not None
+                and int(rebuild["new_generation_id"]) != expected_generation_id
+                or int(rebuild["resulting_scheduling_version"])
+                != int(rebuild["expected_scheduling_version"]) + 1
+            ):
+                raise ServiceBeforeReplacementPersistenceError(
+                    "replacement rebuild predecessor binding drift"
+                )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ServiceBeforeReplacementPersistenceError(
+                "replacement rebuild predecessor is malformed"
+            ) from error
+        return None
 
     def _insert_event(self, command, candidate, proof, prior_event_id, prior_generation_id, replacement_generation_id):
         with _cursor(self._connection) as cursor:

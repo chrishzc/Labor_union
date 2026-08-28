@@ -10,6 +10,7 @@ import random
 
 import pytest
 
+from subsystems.anomalies import historical_baseline_projection as projection_module
 from domains.orders.historical_operational_baseline import (
     HISTORICAL_BASELINE_OWNER_ROOT_CATALOG_V2,
     HistoricalBaselineOwnerObservation,
@@ -357,6 +358,57 @@ def test_prior_occurrence_cross_case_or_tampered_predicate_fails_closed():
     )
     with pytest.raises(HistoricalBaselineProjectionError) as error:
         _project(repaired, (replace(prior, descriptor=tampered_descriptor),))
+    assert error.value.code == "projector_prior_occurrence_malformed"
+
+
+@pytest.mark.parametrize("tamper", ("predicate", "owner", "root_kind", "cardinality"))
+def test_internally_consistent_prior_still_requires_current_catalog_membership(tamper):
+    descriptor = next(
+        item
+        for item in HISTORICAL_BASELINE_OWNER_ROOT_CATALOG_V2
+        if tamper != "cardinality" or item.collection.maximum_cardinality is None
+    )
+    before_projection = _projection(
+        {descriptor.contract_id: {"terminal": False, "version": 1}}
+    )
+    before = _project(before_projection)
+    prior = next(
+        item
+        for item in before.occurrences
+        if item.descriptor.contract_id == descriptor.contract_id
+    )
+    if tamper == "predicate":
+        tampered_descriptor = replace(
+            descriptor, terminal_predicate_id="tampered-terminal-predicate"
+        )
+    elif tamper == "owner":
+        tampered_descriptor = replace(descriptor, owner_domain="tampered_owner")
+    elif tamper == "root_kind":
+        tampered_descriptor = replace(
+            descriptor, root_identity_kind="tampered_root_kind"
+        )
+    else:
+        tampered_descriptor = replace(
+            descriptor,
+            collection=replace(
+                descriptor.collection,
+                minimum_cardinality=descriptor.collection.minimum_cardinality + 1,
+            ),
+        )
+    tampered_observation = replace(
+        prior.observation, descriptor=tampered_descriptor
+    )
+    forged_prior = projection_module._occurrence(
+        _intent(before_projection),
+        tampered_observation,
+        prior.owner_binding_fingerprint,
+    )
+    repaired = _projection(
+        {descriptor.contract_id: {"terminal": True, "version": 2}}
+    )
+
+    with pytest.raises(HistoricalBaselineProjectionError) as error:
+        _project(repaired, (forged_prior,))
     assert error.value.code == "projector_prior_occurrence_malformed"
 
 

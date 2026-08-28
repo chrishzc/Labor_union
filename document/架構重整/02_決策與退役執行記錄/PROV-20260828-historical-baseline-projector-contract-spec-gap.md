@@ -293,6 +293,91 @@ convergence:
   blockers: []
 ```
 
+## 10. 1011 projector persistence v2 重建契約（2026-08-28）
+
+本節依 2026-08-28 人工「1011核准重建」成為 current Authority，並取代 §9.2(7) 對「預期不新增
+DDL」的舊假設。現行 1011 只能保存 immutable occurrence／單次 membership，不能表達 occurrence
+解除、membership 3→2→1→0、owner repair retrigger或可靠 projector delivery，因此不得直接
+requalify。這是 T3 schema／worker／current projection 變更；不改 HCAT 的 11-step、owner root或
+terminal predicate。
+
+### 10.1 Requirements
+
+- `HPROJ-RB-01 Occurrence state`：保留既有 immutable occurrence與successor；另以 append-only
+  state event保存 `opened | resolved | superseded`。每筆event綁prior state event、同案同descriptor／
+  contract／predicate lineage、owner event identity/version與fresh readback fingerprint。只有同lineage
+  strictly-newer owner version可使predecessor inactive；owner regression以新occurrence `opened`，不改舊列。
+- `HPROJ-RB-02 Exact active membership`：每次projector receipt保存一份append-only active-set snapshot；
+  同一occurrence可出現在不同receipt，但同receipt不得重複。receipt保存active membership set
+  digest/count；0筆必須可表達。舊snapshot不可update/delete，3→2→1→0由連續receipt機械讀回。
+- `HPROJ-RB-03 Durable trigger/delivery`：初始baseline confirmed與六owner已提交repair event都必須成為
+  typed trigger。owner event必須由owner Apply同一UoW的既有immutable event/receipt/outbox產生；projector
+  只按source-specific checkpoint讀取新event，不做全表猜測或以UI callback代替durable trigger。
+  normalized delivery狀態固定為 `pending | processing | retryable_failed | committed_unverified | processed |
+  dead_letter`，保存payload digest、partition、source version、projection sequence、lease與錯誤。
+- `HPROJ-RB-04 Receipt/readback`：v2 immutable receipt分開保存emitted occurrence set與active membership
+  set的digest/count、projection sequence、alert fingerprint、expected readback digest與result state
+  `projected | held_active`。commit後另append actual readback；只有receipt、state、snapshot、current alert、
+  workflow與successor全部exact，delivery才由`committed_unverified`轉`processed`。
+- `HPROJ-RB-05 Current alert`：重用`anomaly_current_alerts`，definition固定
+  `HISTORICAL-BASELINE-ROOTS-001`／version `1`、source domain `historical_baseline`、source identity為
+  umbrella identity、source version為case-local projection sequence。active count>0時open/reopen；0時只由
+  fresh exact projection auto-resolve。display snapshot只含case、earliest blocked step、active count、typed
+  repair referrals及projection fingerprint；不得重用`HISTORICAL-ORDER-001`或generic resolve。
+- `HPROJ-RB-06 Replay/gap/recovery`：same trigger identity＋same payload只reconcile原delivery/receipt；different
+  payload為integrity conflict。partition version gap、stale vector、lease loss、unknown owner、partial read或
+  post-commit mismatch固定fail closed。retry只處理明確transient錯誤；超過該次execution package設定的
+  `max_attempts`轉dead letter，沿用Anomaly Maintenance typed retry/supersede Q/P/A，不能靜默跳過。
+- `HPROJ-RB-07 Compatibility/release`：不backfill、不重寫既有1010／1011資料，不刪舊table/index/trigger。
+  以successor v2 tables／release保存新receipt、state、membership snapshot、delivery、checkpoint與readback。
+  先唯讀確認任何非disposable target是否曾套用舊1011；若已套用，仍只走additive successor。舊descriptor
+  hash drift不得以既有qualification冒充通過；新candidate建立新release identity並重跑全部DB gates。
+
+`max_attempts`、lease duration與retry delay是每次execution package的`IMPLEMENTATION_DEFAULT`，不在本規格
+固定數值；owner為projector runtime，revision trigger為真實worker calibration或operational policy變更。
+`HISTORICAL-BASELINE-ROOTS-001`與definition version是已核准架構契約，不是execution default。
+
+### 10.2 Transaction and failure boundary
+
+worker claim使用短lease transaction；實際projection只有一個outer UoW，依case／delivery／alert順序鎖定，
+fresh讀六owner vector後append occurrence/state、v2 receipt、active snapshot、current alert及必要workflow event，
+再保存checkpoint並將delivery標為`committed_unverified`。commit後唯讀重算exact set／alert／receipt／successor
+digest；第二個reconcile UoW只append readback並CAS delivery為`processed`。未知commit outcome只能以原trigger
+reconcile，不能建立新identity。Domain失敗rollback全部projected state；post-commit readback失敗不得回滾
+已提交owner或projector transaction，delivery保持可對帳狀態。
+
+### 10.3 Acceptance
+
+- `HPROJ-RB-A1`：同一case依owner修復依序產生active membership 3→2→1→0；每版digest/count與rows exact。
+- `HPROJ-RB-A2`：unavailable→terminal只由strictly-newer same-lineage event解除一筆；其他occurrence不變。
+- `HPROJ-RB-A3`：owner regression建立新opened occurrence並使alert reopen；舊history不可變。
+- `HPROJ-RB-A4`：duplicate delivery exact replay；different payload、version gap、out-of-order與stale vector零寫入。
+- `HPROJ-RB-A5`：transient retry、lease expiry、attempt exhaustion、dead-letter人工retry/supersede可重播且不跳事件。
+- `HPROJ-RB-A6`：commit後readback mismatch維持`committed_unverified`／outcome unknown；原identity修復後才processed。
+- `HPROJ-RB-A7`：current alert definition/source/version/display/referral exact；只有0 active可auto-resolve。
+- `HPROJ-RB-A8`：static chain、descriptor、read-only plan、fresh bootstrap、preserve-data candidate及developer
+  acceptance全部PASS；任何必要gate未過時結論固定`DB_CHANGE_NOT_READY`。
+
+### 10.4 Change inventory and exclusions
+
+- `schema-only`：successor v2 receipt、occurrence state event、active membership snapshot、delivery、checkpoint、
+  post-commit readback及其constraints/indexes/triggers；source為new provisional release candidate。
+- `system-seed`：none；definition由code registry擁有。
+- `business-row-backfill`：none；只處理新baseline／owner events。
+- `destructive`：none；舊1011 objects保留但不作v2 current truth。
+- `excluded`：`union_db`／production、existing-row rewrite、generic anomaly resolve、provider effect、另一台DB upgrade。
+
+```yaml
+spec_route:
+  status: SPEC_READY
+  specification: PROV-20260828-historical-baseline-projector-contract#10
+  requirements: [HPROJ-RB-01, HPROJ-RB-02, HPROJ-RB-03, HPROJ-RB-04, HPROJ-RB-05, HPROJ-RB-06, HPROJ-RB-07]
+  acceptance: [HPROJ-RB-A1, HPROJ-RB-A2, HPROJ-RB-A3, HPROJ-RB-A4, HPROJ-RB-A5, HPROJ-RB-A6, HPROJ-RB-A7, HPROJ-RB-A8]
+convergence:
+  status: READY
+  blockers: []
+```
+
 ## 8.1 Concrete owner adapter source-map correction（2026-08-28）
 
 ### 8.1.1 Existing Authority 可直接修正的 live-drift
@@ -314,7 +399,7 @@ event：`event_key` 為 source event identity，該 exact event `id` 為 numeric
 `candidates_added`；contact/willingness 使用該 candidate 的 latest exact info/willingness event。
 不得使用整池 `MAX(id)`、timestamp 或 fingerprint 代替 observation vector。
 
-### 8.1.3 Contract Signing precedence 與仍待核准的 repair policy
+### 8.1.3 Contract Signing precedence 與已核准的 repair policy
 
 current external session 存在時，只接受該 session 的 provider-neutral completion reports、
 final controlled file 與 receipt。沒有 external session 時，legacy manual evidence 必須同時具備
@@ -322,18 +407,60 @@ final controlled file 與 receipt。沒有 external session 時，legacy manual 
 `signed_received` event、manual method/reason/actor/correlation 與 matching receipt。普通
 `signed_received` 或 1005 `manual_attested` row 都不能假裝成此 fallback。
 
-舊 manual workflow 未 persisted Preview fingerprint；因此可實作 adapter fail-closed readback，
-但不能宣稱人工修復閉環。建議新增 append-only recovery：不改寫舊 document/event，
+舊 manual workflow 未 persisted Preview fingerprint；因此既有資料只能先由 adapter fail-closed readback，
+不能直接宣稱人工修復閉環。2026-08-28 人工已核准新增 append-only recovery：不改寫舊 document/event，
 以 current plan/commitment 與 controlled signed file 建立 recovery external session，再寫入完整
 `manual_attested` report、Preview fingerprint、actor/reason/evidence 與 receipt。兩條 lineage
 不一致時 fail closed。
 
 ```yaml
 contract_legacy_manual_recovery:
-  status: AUTHORITY_REQUIRED
+  status: ADOPTED
+  authority: human_explicit_2026-08-28
   schema_change_expected: false
   mutation: append_only_external_session_recovery
   forbidden: [rewrite_legacy_document, rewrite_legacy_event, infer_preview_fingerprint]
+```
+
+### 8.1.4 Legacy manual recovery 多命令可續跑契約
+
+Recovery 不以單一跨 workflow 大交易包住所有月嫂、客戶與最終 PDF。每個
+target 使用一次 Query → Preview → Apply，每次 Apply 只有一個 outer Unit of Work；
+已提交的 staff report 保留在 `staff_reporting`，中斷後由 Query 回傳已完成與待補
+target，不回滾已提交的正當歷史，也不得假稱 terminal。
+
+- Query 必須同時回傳 current accepted/active plan、commitment、current document set、
+  staff segments、client target，以及 legacy `signed_return` document/media digest、
+  `signed_received` event、matching command receipt 與目前 recovery session/report 進度。
+- Preview 為零寫入 fresh read；輸入固定為 target、legacy document/event/receipt identity、
+  manual method 與 reason。它必須重驗同案、同 plan、scope、`signed_return`、media digest、
+  event payload command、receipt/result snapshot、current plan/commitment/document set 與 target 未重複；
+  回傳 recovery Preview fingerprint、expected session/status version、lineage 與 typed blockers。
+- 首筆 staff Apply 可在當次 UoW 建立 deterministic external session 並 append report/receipt；
+  後續 staff 及 client 各自一個 UoW。client 只能在所有 staff reports 與 commitment
+  complete 後寫入；之後沿用 final PDF staging → Preview → Apply。
+- recovery report 的 `source_payload_sha256` 保留 canonical legacy tuple digest 語意；
+  `manual_evidence_sha256` 保留 legacy `media_assets.sha256`。現行 report receipt 的
+  `preview_fingerprint` 依 schema 必須為 NULL，因此 recovery Preview fingerprint、legacy event/
+  receipt/document identity、media digest、current plan/commitment/document-set 必須存入既有
+  `result_snapshot.recovery`，`kind` 固定為 `contract_legacy_manual_recovery.v1`。
+- HCAT adapter 必須重讀並對帳該 versioned recovery snapshot、legacy immutable tuple、
+  current report/final controlled-file lineage；不可把 command fingerprint 或 source payload digest
+  當作 Preview fingerprint。
+- 同 idempotency key 與相同 canonical command 回原 receipt；同 key 或 source identity
+  但 target、lineage、digest、reason 或 Preview fingerprint 不同為 typed mismatch。狀態、plan、
+  commitment 或 document set stale 時要求重做 Query → Preview。
+- 只有 session completed、final controlled-file/readback、final receipt、recovery snapshots 與
+  Contract Signing 三組 owner observations 全部 exact，並完成 fresh 六 owner vector readback，
+  才能交給 HCAT projector 判定 terminal。
+
+```yaml
+contract_legacy_manual_recovery_execution:
+  status: SPEC_READY
+  command_model: resumable_per_target_qpa
+  preview_storage: contract_external_signing_receipts.result_snapshot.recovery
+  controlled_evidence: immutable_contract_archive_media_digest
+  schema_change_expected: false
 ```
 
 ## 9. Owner source-map 與 catalog-v2 採用修正（2026-08-28）
