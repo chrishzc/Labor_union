@@ -3,11 +3,13 @@
 ## 目的與使用方式
 
 本文件是進入程式碼前的快速導航，不取代正式規格、人工裁決或部署決策。
+先用 [Agent 任務分級與交付規範](./00_Agent任務分級與交付規範.md) 判斷 T0–T3 與最小交付；
+既有契約已涵蓋的 T1／T2 工作直接重用 current spec，不為每個 slice 另建規格、工作包或 receipt。
 執行 React 管理端 Phase 3–6 遷移時，另先讀[Phase 3–6 執行 SOP](./00_Phase3-6執行SOP.md)，
 用其控制 Phase 順序、測試次數、runtime batch、工具阻塞與 evidence 收斂。
 要修改某個業務流程時，先依下列順序閱讀：
 
-1. 根目錄 `AGENTS.md`：工作區規則、dirty worktree 與驗證方式。
+1. 根目錄 `AGENTS.md` 與本目錄 `00_Agent任務分級與交付規範.md`：工作區規則、T0–T3、dirty worktree 與驗證方式。
 2. 根目錄 `README.md`：執行入口、目錄與安全界線。
 3. `01_規格基線/00_Global_共同契約.md`：跨領域共同不變量。
 4. `15_正式規格索引與裁決總表.md`、對應 Domain 規格及 `16`～`24` 中與任務相關的最新補充裁決。
@@ -83,6 +85,7 @@ flowchart LR
 
 ## 文件地圖
 
+- `00_Agent任務分級與交付規範.md`：任務大小、最小 durable artifacts、驗證範圍與失敗回送的 canonical 路由。
 - `01_規格基線/`：現行正式 Global／Domain／Application 契約；`15` 是規格收斂入口，目前正式範圍為 `15`～`24`。`16`～`24` 補足帳務衝突、外部整合／權限與部署治理，`19` 管理 entry point，`20`：LINE 客服，`21`：Contract Signing 與簽約前服務承諾，`22`：銀行流水與帳務異常處置，`23`：LINE 身分管理與解除，`24`：Staff Matching Preferences 與不可服務期間。
 - `02_決策與退役執行記錄/`：已核准的 Work Package、退役、驗收與部署決策；先確認 `declared_status`，不要把草案當授權。
 - `03_追蹤清單與證據/`：legacy inventory、evidence、收據；是現況證據，不自動構成業務規格或刪檔權限。
@@ -91,7 +94,7 @@ flowchart LR
 
 ### 完成後的文件收斂
 
-每個 Work Package 完成、supersede 或封存前，必須以檔名、標題、owner、business scenario 與既有 initiative ID
+只有實際存在且仍 active 的 Work Package 完成、supersede 或封存前，才以檔名、標題、owner、business scenario 與既有 initiative ID
 搜尋 `document/功能開發計畫/`、active `02`／`03` 索引與 current SSOT。逐筆判定該文件是否仍有未承接的
 業務語意、操作入口、rollback 責任或未完成 gate；結果只能是保留 current、標記 `superseded` 並連到 successor、
 建立新的 active successor，或通過 archive gate 後封存。不可因一份文件尚標 `proposed`／`partial`、不在本次

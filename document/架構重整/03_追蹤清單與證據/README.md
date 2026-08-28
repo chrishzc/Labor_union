@@ -10,6 +10,11 @@
 secret、DB dump 與 validation canonical assets 不因封存而加入 Git。Agent 日常只讀任務命中的
 evidence，不得整個 `evidence/` 載入上下文。
 
+依 [Agent 任務分級與交付規範](../00_Agent任務分級與交付規範.md)，一般 T1／T2 的 command 與 source
+state 直接在交付訊息回報，不按 slice 建 tracked receipt。只有 release／migration／rollback／incident／
+external effect／audit 或明確 current consumer 才保存 aggregate final receipt；intermediate plan、raw log、
+HTTP dump、重複 candidate receipt 與 cache 放 ignored `scratch/`，完成摘要後依 inbound／retention gate 清理。
+
 | 檔案 | 一句話摘要 |
 |---|---|
 | [evidence/2026-08-27_anomaly_necessity_migration_runtime_receipt.md](evidence/2026-08-27_anomaly_necessity_migration_runtime_receipt.md) | Task 96 ANM-NM-A／producer cutover：typed API、三個真 MySQL remediation 情境與 `SCHEDULE-005` 停產證據 PASS；DB release 1009 developer replacement 因受控 credential 未注入而 NOT_RUN。 |

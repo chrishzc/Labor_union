@@ -8,6 +8,10 @@ in-progress Work Package。completed／superseded 文件通過 archive gate 後�
 [`96_Current_剩餘代辦任務總表.md`](96_Current_剩餘代辦任務總表.md)。舊 session、舊 gap register、
 已封存 Work Package 與 archive evidence 不得重新建立待辦或完成 gate。
 
+依 [Agent 任務分級與交付規範](../00_Agent任務分級與交付規範.md)，本目錄不是每個 implementation
+slice 的日誌區。T1 不建立 Work Package；T2 只有確需跨步驟 coverage／handoff 時才維護一份 living parent
+package；T3 才要求 current spec＋package。相同 owner／scenario／scope 應更新既有文件，不建立完成版複本。
+
 ## Current active working set
 
 | 文件 | 類型 | 狀態 | 正確用途／下一個 gate |
@@ -47,3 +51,4 @@ M1 binding ownership、M3 matching coordination、M4 human escalation 的 backen
 - `completed`／`superseded` 必須確認 successor、remaining task、inbound links 與 restore trigger 後封存。
 - archive 是低頻追溯區，不是 current SSOT、代辦或實作授權；日常不得整批載入。
 - provider、production DB、schema／migration、deployment、entry switch 與 destructive removal 仍須個別授權。
+- 建立文件前必須有 current consumer、owner、close condition 與不能由 current spec／code／test 取代的理由。

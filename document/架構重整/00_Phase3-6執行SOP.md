@@ -11,13 +11,15 @@ Phase；同一 Phase 內只有互不依賴且 write set 不重疊的工作才能
 
 Phase 完成必須同時具備：
 
-1. 所有該 Phase 已核准且可施工的 Work Package 已完成 code／contract acceptance。
+1. 所有該 Phase 已核准且可施工的 current requirements 已完成 code／contract acceptance；只有 T2／T3
+   且確有跨步驟 consumer 時才要求 living Work Package。
 2. focused verification 覆蓋每個改動邊界，沒有以舊結果或單一 example 假 PASS。
 3. runtime／API／browser gate 為 `PASS`，或有精確 `BLOCKED_TOOLING | BLOCKED_DATA | BLOCKED_AUTHORITY`
    並列出未完成 acceptance；blocked 不得改寫成 completed。
 4. DB gate 使用 `PASS | BLOCKED | NOT_RUN`，schema／migration 未完成時固定
    `DB_CHANGE_NOT_READY`。
-5. 只有一份 final receipt；原始成功 log、重複 journal 與 intermediate receipt 不長期保存。
+5. 需要 durable evidence 時只有一份 aggregate final receipt；T1／一般 T2 以 current command 與 source
+   state 交付即可。原始成功 log、重複 journal 與 intermediate receipt 不長期保存。
 
 ## 2. Phase 狀態機
 
@@ -48,8 +50,8 @@ INVENTORY
 
 1. 記錄 branch、HEAD、`git status --short`；保留所有 dirty／untracked 成果。
 2. 只讀 AGENTS、正式規格索引、該 Phase 直接 active Work Packages、final receipts 與命中的 current source。
-3. 產生一張 Phase inventory：`identity | status | owner | write set | dependencies | code | focused |
-   runtime | blocker | next action`。
+3. 重用一張 living Phase inventory：`identity | status | owner | write set | dependencies | code | focused |
+   runtime | blocker | next action`；沒有跨批次 consumer 時只在對話維護，不新增 tracked 文件。
 4. completed／superseded 預設排除；只有新鮮 failing evidence 才能進 remediation。
 
 禁止在同一 Phase 內因切換小工作包重做 Step 0。
@@ -62,20 +64,17 @@ INVENTORY
 2. 優先完成 shared backend/API contract，再一次接完 React clients／handlers／pages。
 3. LINE lane 與非 LINE lane分離；LINE 尚未開發完成時，不阻塞非 LINE 模組遷移。
 4. 規格缺口若不改變本批 scope，記入既有 WP 的 open finding 後繼續下一個 bounded slice。
-5. 只有 owner、SSOT、public interface、schema、交易邊界或外部副作用改變時，才建立 successor 並等待人工核准。
+5. 只有 T3 的 owner、SSOT、public interface、schema、交易邊界、外部副作用或治理邊界改變時，才更新
+   current spec／package；只有 identity 或 Authority 真正改變時才建立 successor。
 
 小型 bug、測試 matcher、tooling blocker、evidence 補充不得建立 successor。
 
 ### Step 2 — 實作
 
 1. 凍結 exact write set 與 shared hot spots；Integration Owner 是 shared docs／catalog 的唯一 writer。
-2. 子代理模型依工作複雜度路由：
-   - Luna 只負責唯讀搜尋／inventory、單檔 adapter／client、簡單接線、獨立測試與文件一致性掃描；
-   - 同一 Work Package 一旦同時跨越兩個以上 production layer，或涉及 public contract、typed variant、
-     state machine、transaction／idempotency、schema／migration、shared hot spot，就不得交給 Luna 當完整 writer；
-     固定由主代理或較強模型擔任唯一 writer，必要時先拆成互不重疊的 bounded slice；
-   - delegated lane 若在兩個自然工具邊界後仍沒有 bounded artifact／明確 evidence，Integration Owner 應停止該
-     lane並接手，不得因代理仍在運行而無界等待。
+2. 先依 [Agent 任務分級與交付規範](./00_Agent任務分級與交付規範.md) 判斷 T0–T3，再獨立判斷 topology。
+   T0–T2 預設單 Agent；只有真正需要獨立 verifier、序列交接或至少兩條隔離 lane 時才使用多 Agent。
+   子代理數是上限不是目標；共享 hot spot 同批次只有一位 integration writer。
 3. 先完成該 Phase 的 API／adapter／action handler 接線，再執行 UI/runtime 測試。
 4. UI 顯示「後端未提供」時先分類：
    - endpoint／typed projection 缺失：backend contract gap；
@@ -113,15 +112,18 @@ INVENTORY
 
 1. 0 schema／migration change：不跑 migration chain；Static release、Descriptor、Read-only plan固定
    `NOT_RUN`，總結仍為 `DB_CHANGE_NOT_READY (0 DB change)`。
-2. API／UI／Domain runtime可依AGENTS 3.2使用allowlisted development `lu_test_*`與目前credential；只操作
+2. API／UI／Domain runtime 可依
+   [Migration 與 Cutover 規格](./01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md#9-agent-與開發者-db-變更執行門)
+   使用 allowlisted development `lu_test_*`與目前 credential；只操作
    scenario-owned rows，保存before／after／receipt並scoped cleanup。禁止`union_db`與production target。
-3. schema／migration變更必須完整執行AGENTS 3.1七個 gate；既有 DB runtime不可取代fresh與preserve-data
+3. schema／migration變更必須完整執行同一正式規格的七個 gate；既有 DB runtime不可取代fresh與preserve-data
    candidate evidence。
 4. HCM仍只做Import Result Review，不合成或上傳測試 XLSX。
 
 ### Step 6 — 收斂與移交
 
-1. 每個 WP只保留一份final receipt，內容含commands、counts、runtime identity、blockers、cleanup與DB gate。
+1. 只有 release／migration／rollback／incident／外部效果／稽核或明確 consumer 需要時，才保留一份
+   aggregate final receipt；不按 slice 建 receipt。
 2. Phase inventory 更新一次；completed／superseded不再出現在active execution queue。
 3. 刪除無 inbound reference、已被final receipt摘要且不屬migration／rollback／incident的raw logs。
 4. Phase只有在 requirement-by-requirement evidence 完整時標 completed；否則使用精確 pending／blocked 狀態。

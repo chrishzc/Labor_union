@@ -331,3 +331,45 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
 - restart 後執行 Orders、Finance Import、Scheduling、Payroll／Payables、Anomalies read smoke；
 - ASUS 或其他主機的特定 row counts 只屬 acceptance evidence，不是 Global invariant；
 - 舊 `system_map` 的 Task、Checkpoint、Source binding 與 timeout 不搬入新架構。
+
+## 9. Agent 與開發者 DB 變更執行門
+
+只要 diff、錯誤或規格出現 table／column／constraint／index／trigger／view／seed／backfill 變更，
+必須依序執行下列 gate，不得先直接修改 SQL：
+
+1. **Scope**：固定 business scenario、owner、current spec 與涵蓋本次 write set／acceptance 的 approved
+   package。缺少 scope 時為 `BLOCKED_SCOPE`。
+2. **Change inventory**：分開列出 `schema-only`、`system-seed`、`business-row-backfill`、
+   `destructive` 的 source、target、data effect、replay、rollback 與 unresolved policy。無法分類時為
+   `BLOCKED_CLASSIFICATION`。
+3. **Static release**：schema part、fresh assembly、canonical release chain、manifest hash／dependency、
+   descriptor 與操作文件必須互相引用；runner 實際解析的 latest release 必須包含本次 artifact。
+4. **Descriptor**：新表與 altered parent columns 均驗完整 columns、indexes、foreign keys、checks、
+   triggers 與 views；`absent | exact | partial | drift` 可機械區分，未知 partial／drift fail closed。
+5. **Read-only plan**：launcher `--dry-run` 只證明 wiring；真正 plan 使用
+   `.venv\Scripts\python.exe -m scripts.update_local_database`，必須列 latest release、待套／續跑／exact
+   artifacts 與 blocked reason，且零 DB 寫入。
+6. **Engine verification**：先跑 metadata／manifest／plan focused tests，再以 disposable DB 驗 fresh
+   bootstrap，最後以含上一支援版 schema 與代表性舊資料的 source 驗 dump → candidate → apply → verify。
+   schema／migration 沒有真 MySQL evidence 時為 `BLOCKED_ENGINE_EVIDENCE`，mock／compile 不能取代。
+7. **Developer acceptance**：前六項 PASS 後才驗本機 launcher；保存 source backup、candidate／replacement
+   receipts、舊資料 preservation、new object exactness、unresolved rows 與 rollback evidence。
+
+每次 DB 變更交付輸出一張 gate table，狀態只用 `PASS | BLOCKED | NOT_RUN` 並附 evidence path／command。
+任一必要 gate 為 `BLOCKED`／`NOT_RUN` 時，總結固定 `DB_CHANGE_NOT_READY`。
+
+### 9.1 既有開發測試 DB 的受控驗收
+
+依 2026-08-21 人工裁決，一般 API／UI／Domain 驗收不再強制 disposable DB 或 non-root：
+
+- 只允許 `APP_ENV=development` 或等價 validation profile，database 必須符合 `lu_test_*`；每次先回讀
+  environment、host、database 與 credential class，target 不符即 fail closed。
+- 可使用目前 development credential（包括 root）執行 approved package 明列的 Q／P／A、API、browser、
+  worker replay 與 scenario-owned 測試資料 mutation。使用唯一 scenario identity、before／after readback、
+  receipt 與 scoped cleanup；不得碰其他 rows。
+- 仍禁止 `union_db`、production DB／provider、未核准 DDL／migration／seed／backfill、reset、source
+  replacement、`--switch`、全庫清理與其他破壞性操作。
+- schema／migration 仍須完整通過 disposable fresh-bootstrap 與 preserve-data candidate gates；既有 DB
+  runtime 不能取代。
+- 本裁決不擴張 package 的業務 scope、owner、public contract、external effect 或 write set；更嚴格的
+  scenario data policy 繼續適用。
