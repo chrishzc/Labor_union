@@ -135,6 +135,15 @@ def test_windows_supervisor_has_readiness_survival_and_scoped_cleanup_contract()
     assert "/admin/" in source
     assert "Get-CimInstance -ClassName Win32_Process" in source
     assert "Stop-Process -Id $id -Force" in source
+    assert 'Get-Command "npm.cmd" -CommandType Application' in source
+    assert 'Get-Command "docker.exe" -CommandType Application' in source
+    assert '"VITE_DEV_API_TARGET=http://host.docker.internal:$ApiPort"' in source
+    assert '"node:lts", "npm", "run", "dev"' in source
+    assert '"--rm", "--name", $script:ReactContainerName' in source
+    assert 'dockerArguments += @("-e", "VITE_ACCESS_CONTROL_PROFILE=' in source
+    assert 'Stop-OwnedReactContainer' in source
+    assert 'rm --force $script:ReactContainerName' in source
+    assert '"-it"' not in source
     assert "Get-DescendantIds -RootIds $activeRoots.ToArray() -Processes $treeSnapshot.Processes" in source
     assert 'event = "runtime_ready"' in source or '"runtime_ready"' in source
     assert '"survival_failed"' in source

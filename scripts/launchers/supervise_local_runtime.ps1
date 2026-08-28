@@ -33,6 +33,7 @@ $script:Stopping = $false
 $script:RunId = [guid]::NewGuid().ToString("N")
 $script:RunStartedAt = (Get-Date).ToUniversalTime()
 $script:CleanupUnknown = $false
+$script:ReactContainerName = $null
 $script:UnknownRootPids = [System.Collections.Generic.List[int]]::new()
 
 function Get-RootStartTime {
@@ -455,6 +456,27 @@ function Start-Owned {
     }
 }
 
+function Stop-OwnedReactContainer {
+    if ([string]::IsNullOrWhiteSpace($script:ReactContainerName)) { return }
+    $docker = Get-Command "docker.exe" -CommandType Application -ErrorAction SilentlyContinue
+    if ($null -eq $docker) {
+        $script:ExitCode = 1
+        Write-RuntimeEvent -Event "cleanup_failed" -Label "React/Vite" -Code 1 -Detail "docker.exe is unavailable for owned Vite container cleanup"
+        return
+    }
+    & $docker.Source rm --force $script:ReactContainerName *> $null
+    if ($LASTEXITCODE -ne 0) {
+        & $docker.Source inspect $script:ReactContainerName *> $null
+        if ($LASTEXITCODE -eq 0) {
+            $script:ExitCode = 1
+            Write-RuntimeEvent -Event "cleanup_failed" -Label "React/Vite" -Code 1 -Detail "owned Vite container could not be removed"
+            return
+        }
+    }
+    Write-RuntimeEvent -Event "container_cleanup_complete" -Label "React/Vite" -Detail $script:ReactContainerName
+    $script:ReactContainerName = $null
+}
+
 function Test-OwnedAlive {
     param([Parameter(Mandatory = $true)]$Entry)
     $snapshot = Get-ProcessSnapshot -ProcessId $Entry.Pid
@@ -545,9 +567,30 @@ try {
         Write-RuntimeEvent -Event "artifact_probe_passed" -Label "Runtime Monitor"
     }
 
-    $react = Start-Owned -Label "React/Vite" -FilePath "npm.cmd" -WorkingDirectory (Join-Path $ProjectRoot "ui_react") -ArgumentList @(
-        "run", "dev", "--", "--host", "0.0.0.0", "--port", "$ReactPort", "--strictPort"
-    )
+    $uiRoot = Join-Path $ProjectRoot "ui_react"
+    $npm = Get-Command "npm.cmd" -CommandType Application -ErrorAction SilentlyContinue
+    if ($null -ne $npm) {
+        $react = Start-Owned -Label "React/Vite" -FilePath $npm.Source -WorkingDirectory $uiRoot -ArgumentList @(
+            "run", "dev", "--", "--host", "0.0.0.0", "--port", "$ReactPort", "--strictPort"
+        )
+    }
+    else {
+        $docker = Get-Command "docker.exe" -CommandType Application -ErrorAction SilentlyContinue
+        if ($null -eq $docker) { throw "React/Vite requires host npm.cmd or docker.exe" }
+        $script:ReactContainerName = "labor-union-vite-$($script:RunId)"
+        $dockerArguments = @(
+            "run", "--rm", "--name", $script:ReactContainerName,
+            "-e", "VITE_DEV_API_TARGET=http://host.docker.internal:$ApiPort"
+        )
+        if (-not [string]::IsNullOrWhiteSpace($env:VITE_ACCESS_CONTROL_PROFILE)) {
+            $dockerArguments += @("-e", "VITE_ACCESS_CONTROL_PROFILE=$($env:VITE_ACCESS_CONTROL_PROFILE)")
+        }
+        $dockerArguments += @(
+            "-v", "${uiRoot}:/app", "-w", "/app", "-p", "${ReactPort}:${ReactPort}",
+            "node:lts", "npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "$ReactPort", "--strictPort"
+        )
+        $react = Start-Owned -Label "React/Vite" -FilePath $docker.Source -ArgumentList $dockerArguments
+    }
     Wait-HttpReady -Url "http://127.0.0.1:$ReactPort/admin/" -Label "React/Vite" -RequireHtmlRoot
 
     & $PythonPath -m scripts.launcher_preflight --profile line-worker *> $null
@@ -581,6 +624,7 @@ catch {
     Write-RuntimeEvent -Event "supervision_failed" -Code $script:ExitCode -Detail $_.Exception.Message
 }
 finally {
+    Stop-OwnedReactContainer
     Stop-OwnedProcessTrees
 }
 
