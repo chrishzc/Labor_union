@@ -1,7 +1,7 @@
 #requires -Version 5.1
 # File: supervise_local_runtime.ps1
 # Description: Windows 本機 runtime 的 owned identity supervision、readiness 與安全清理。
-<##
+<#
 .SYNOPSIS
   Own and supervise the Windows local development runtime.
 
@@ -10,7 +10,7 @@
   a direct child, waits for the two HTTP endpoints, reports JSON-line runtime
   events, and propagates any child failure. Cleanup is limited to immutable
   PID/start-time identities created or discovered by this invocation.
-##>
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
