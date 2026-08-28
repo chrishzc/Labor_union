@@ -464,14 +464,26 @@ function Stop-OwnedReactContainer {
         Write-RuntimeEvent -Event "cleanup_failed" -Label "React/Vite" -Code 1 -Detail "docker.exe is unavailable for owned Vite container cleanup"
         return
     }
-    & $docker.Source rm --force $script:ReactContainerName *> $null
-    if ($LASTEXITCODE -ne 0) {
-        & $docker.Source inspect $script:ReactContainerName *> $null
-        if ($LASTEXITCODE -eq 0) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    try {
+        & $docker.Source rm --force $script:ReactContainerName *> $null
+        $removeExit = $LASTEXITCODE
+        if ($removeExit -ne 0) {
+            & $docker.Source inspect $script:ReactContainerName *> $null
+            $inspectExit = $LASTEXITCODE
+        }
+        else {
+            $inspectExit = 1
+        }
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($removeExit -ne 0 -and $inspectExit -eq 0) {
             $script:ExitCode = 1
             Write-RuntimeEvent -Event "cleanup_failed" -Label "React/Vite" -Code 1 -Detail "owned Vite container could not be removed"
             return
-        }
     }
     Write-RuntimeEvent -Event "container_cleanup_complete" -Label "React/Vite" -Detail $script:ReactContainerName
     $script:ReactContainerName = $null
@@ -560,6 +572,7 @@ try {
         "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "$ApiPort"
     )
     Wait-HttpReady -Url "http://127.0.0.1:$ApiPort/health" -Label "FastAPI"
+    Refresh-OwnedIdentityRegistry
 
     if ($env:REACT_ADMIN_RUNTIME_PROFILE -eq "artifact-runtime") {
         & $PythonPath -m scripts.run_service_monitor --react-admin-health-check
@@ -577,6 +590,9 @@ try {
     else {
         $docker = Get-Command "docker.exe" -CommandType Application -ErrorAction SilentlyContinue
         if ($null -eq $docker) { throw "React/Vite requires host npm.cmd or docker.exe" }
+        & $docker.Source run --rm -v "${uiRoot}:/app" -w "/app" "node:lts" `
+            npm install --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw "Docker npm install failed with exit code $LASTEXITCODE" }
         $script:ReactContainerName = "labor-union-vite-$($script:RunId)"
         $dockerArguments = @(
             "run", "--rm", "--name", $script:ReactContainerName,
@@ -592,6 +608,7 @@ try {
         $react = Start-Owned -Label "React/Vite" -FilePath $docker.Source -ArgumentList $dockerArguments
     }
     Wait-HttpReady -Url "http://127.0.0.1:$ReactPort/admin/" -Label "React/Vite" -RequireHtmlRoot
+    Refresh-OwnedIdentityRegistry
 
     & $PythonPath -m scripts.launcher_preflight --profile line-worker *> $null
     $linePreflightExit = $LASTEXITCODE
