@@ -6,7 +6,11 @@ import hashlib
 import json
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
+)
 
 
 def test_stage5_release_locks_schema_and_owned_objects() -> None:
