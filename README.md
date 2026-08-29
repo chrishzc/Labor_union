@@ -10,9 +10,9 @@ application workflow 與 MySQL 完成。
 維持可重播、可稽核的業務操作。版本與驗收狀態以 Git、release manifest 及架構文件內的
 evidence 為準；不要以本 README 的文字代替實際驗收。
 
-## 2026-08-10 Release Candidate
+## 2026-08-10 歷史 Release Candidate 摘要
 
-本候選版本相較目前 `main` 的主要新增與收斂項目：
+以下為 2026-08-10 當時的候選版本摘要，不代表目前 release 狀態：
 
 - LINE runtime：保留 webhook、身分綁定與人工 review、訊息設定、Rich Menu、媒體、
   order group、delivery task、matching notification、runtime health 與正式 worker 啟動流程。
@@ -29,10 +29,9 @@ evidence 為準；不要以本 README 的文字代替實際驗收。
 - 治理：348 個 API／CLI／UI entry 已全部裁決，結果為 306 `active`、41 `operator_only`、
   1 `retired_410`、0 `review_required`；九份業務附件已依目前 hash 完成人工語意裁決。
 
-本機隔離 candidate 已完成兩次 bootstrap、restart/read-smoke 與退役結構不存在驗證；
-這不代表已授權套用到任何其他部署環境。詳細結果見
-[`2026-08-09_line_merge_candidate_acceptance_receipt.md`](document/架構重整/03_追蹤清單與證據/evidence/2026-08-09_line_merge_candidate_acceptance_receipt.md)，
-版本摘要見 [`CHANGELOG.md`](CHANGELOG.md)。
+本機隔離 candidate 當時完成兩次 bootstrap、restart/read-smoke 與退役結構不存在驗證；
+這不代表已授權套用到任何其他部署環境。原始 receipt 已自目前工作樹移除，必要時從 Git
+歷史精準取回；版本摘要見 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 2026-08-13 開發者 DB、月嫂配對與啟動入口更新
 

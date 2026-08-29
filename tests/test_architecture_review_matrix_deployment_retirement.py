@@ -12,7 +12,7 @@ def test_historical_matrix_marks_target_host_acceptance_as_retired() -> None:
     ).read_text(encoding="utf-8")
 
     assert "target-host acceptance 已依決策 53 退役" in source
-    assert "target-host acceptance 已依\n`../04_已完成與上線封存" in source
+    assert "target-host acceptance 已依決策 53 退役" in source
 
 
 def test_historical_matrix_receipt_does_not_keep_target_host_external_gate() -> None:

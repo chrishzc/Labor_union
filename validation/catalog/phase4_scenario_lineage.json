@@ -19,7 +19,7 @@
       "scenario_id": "LINE-REACT-DELIVERY-QUERY-001", "successor_scenario_id": "LINE-REACT-DELIVERY-QUERY-001", "revision": 1, "part": "15", "owner": "LINE Delivery Validation Owner", "suite_id": "LINE", "track": "A",
       "target_work_package_identity": "PROV-20260817-react-admin-phase4c-line-delivery-public-query-hardening-work-package",
       "source_scenario_ids": ["LINE-IDENTITY-DELIVERY-001"],
-      "source_refs": ["document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#LINE-02", "document/功能開發計畫/Part_00_全域測試資料治理與Scenario契約.md#7.3.1 LINE 管理中心與訂單狀態自動推送"],
+      "source_refs": ["document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#LINE-02", "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md#3.3 Subsystem：LINE Delivery Task"],
       "business_now": "2026-08-20T10:00:00+08:00", "command_lineage": ["query", "page", "observe-attempt"],
       "lineage_mappings": [{"source": "committed delivery task", "target": "masked query row", "disposition": "unchanged"}, {"source": "attempt result", "target": "bounded outcome", "disposition": "renamed"}, {"source": "legacy task detail", "target": "redacted projection", "disposition": "regenerated"}],
       "fixture_paths": ["validation/fixtures/phase4/react_admin_line_delivery_query.json"], "expected_paths": ["validation/expected/phase4/react_admin_line_delivery_query.json"], "scenario_path": "validation/scenarios/react_admin_line_delivery_query.json",

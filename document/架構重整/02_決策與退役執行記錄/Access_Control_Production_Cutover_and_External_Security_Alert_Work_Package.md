@@ -6,7 +6,7 @@ owner: Access Control / Global Security
 domain: Internal Access
 subsystem: Production cutover and external security alert
 implementation_authorization: requires-new-human-confirmation
-predecessor: ../04_已完成與上線封存/work_packages/Access_Control_TOTP_Account_Management_Work_Package.md
+predecessor: Access Control TOTP Account Management 歷史 Work Package（原文已自工作樹移除）
 ---
 
 # Access Control：Production Cutover 與 External Security Alert 工作包

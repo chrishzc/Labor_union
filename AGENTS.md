@@ -25,7 +25,7 @@
 2. 讀 `README.md` 與 `document/架構重整/00_開發者與Agent導覽.md`。
 3. 讀 `document/架構重整/01_規格基線/00_Global_共同契約.md`、`15_正式規格索引與裁決總表.md`、對應 Domain 規格及最新補充裁決；目前正式收斂範圍為 `15`～`24`，以 `15` 為入口。
 4. 只讀任務直接對應、仍 active 的 `02_決策與退役執行記錄/` Work Package／decision，以及 `03_追蹤清單與證據/` inventory／evidence；不要整目錄載入。
-5. `04_已完成與上線封存/` 是低頻歷史區，日常任務禁止預設或遞迴讀取。只有歷史追溯、incident／rollback、migration/cutover、舊 release 重現、稽核，或 current SSOT 明確引用 archive identity 時，才先精準搜尋 manifest，再讀命中的單一文件。
+5. `04_已完成與上線封存/README.md` 是低頻歷史文件的 Git 復原入口。只有歷史追溯、incident／rollback、migration/cutover、舊 release 重現或稽核時，才從指定 Git commit 精準取回單一文件；日常任務不得還原或載入整批歷史。
 6. 最後才讀 live schema、API、Domain、Subsystem、repository、caller 與測試，確認規格和現況是否漂移。
 
 思考程式、資料與流程時，先從實際 business scenario、操作者、根事實與不可破壞的不變量出發，以第一性原理拆解責任，不從既有頁面、資料表或函式形狀反推需求。

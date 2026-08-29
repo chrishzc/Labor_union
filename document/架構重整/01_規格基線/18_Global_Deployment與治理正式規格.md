@@ -273,7 +273,7 @@ Logs 必須具 correlation ID、service、release version、operation 與 typed 
   → 人工 release／external-side-effect approval
   → deployment／migration
   → post-start verification／release receipt
-  → 不再 active 的執行文件通過 archive gate 後低頻封存
+  → 不再 active 的執行文件確認無 current consumer 後由 Git 歷史保存
 ```
 
 目前 activation 只到 `Writer Inventory v2` 的唯讀盤點、語意分類、digest 與 evidence
@@ -319,7 +319,7 @@ system map 都不具現行 authority。
 
 ## 10. Legacy 與已完成文件處理
 
-- `document/文件整併工作區` 保留為來源與追溯，不再使用 ADAD 授權語彙。
+- `document/文件整併工作區` 只保留仍被欄位權威稽核讀取的 `06` 盤點；其餘來源從 Git 歷史追溯，不再使用 ADAD 授權語彙。
 - `system_map*.md`／`system_map*.yaml` 只供歷史比對。
 - `scripts/launchers/start_fastapi_ngrok.py` 只屬 development。
 - `scripts/launchers/start_local_development.bat`／`.sh` 是本機開發 launcher，不得用於 production
@@ -333,26 +333,25 @@ system map 都不具現行 authority。
 - `04_部署架構_無損合併稿.md` 的方案比較保留，但本文件的 logical topology、
   profile recommended-candidate 與人工選擇規則優先。
 
-### 10.1 Current SSOT 與低頻封存
+### 10.1 Current SSOT 與低頻歷史
 
 - `01_規格基線/` 只保存仍約束 current production 的精簡正式規格；完成實作或上線不會降低
   規格權威，也不是搬入 archive 的理由。
 - `02_決策與退役執行記錄/` 與 `03_追蹤清單與證據/` 優先保存 active、blocked、awaiting
   execution／release、current recovery 與最近驗收所需文件。
-- `04_已完成與上線封存/` 保存不再 active 的 completed Work Package、已有 successor 的
-  superseded 舊規格，以及 closed release／receipt。其內容不是 current SSOT 或新 mutation 授權。
-- Agent 日常開工禁止遞迴讀取 archive；只有歷史追溯、incident／rollback、migration/cutover、
-  舊 release 重現、稽核或 current SSOT 明確引用時，才精準搜尋 manifest 並讀單一文件。
+- 不再 active 的 completed Work Package、已有 successor 的 superseded 舊規格與 closed receipt
+  從目前工作樹移除，由 Git 歷史保存；其內容不是 current SSOT 或新 mutation 授權。
+- 只有歷史追溯、incident／rollback、migration/cutover、舊 release 重現或稽核時，才依
+  `04_已完成與上線封存/README.md` 精準取回單一文件。
 
-### 10.2 Archive gate
+### 10.2 歷史移除 gate
 
-搬移前必須同時具備 final status、completion evidence、deployment/release identity（如適用）、
-current successor（如適用）、完整 inbound-link 更新、content SHA-256、archive manifest entry 與
-restore triggers。仍有 blocker、待辦、人工操作入口、rollback 責任或 awaiting execution 的文件
-不得封存。無法唯一判定時留在原位並進人工 review，不得自動搬移或刪除。
+移除前必須同時具備 final status、completion evidence、deployment/release identity（如適用）、
+current successor（如適用）、完整 inbound-link 更新與 restore trigger。仍有 blocker、待辦、
+人工操作入口、rollback 責任或 awaiting execution 的文件不得移除。無法唯一判定時留在原位並進人工 review。
 
-封存後 active index 只保留一行 archive pointer 或分類摘要；不得以減少上下文為由刪除 Git
-history、validation assets、release artifacts 或 current recovery evidence。
+移除後 active index 不保留逐檔歷史 pointer；不得刪除 Git history、validation assets、release
+artifacts 或 current recovery evidence。
 
 ## 11. 分層驗收
 
@@ -381,14 +380,14 @@ history、validation assets、release artifacts 或 current recovery evidence。
 - 根目錄 `AGENTS.md` 的 ADAD／legacy 邊界規則
 - `10_Global_保留資料Migration與Cutover_Subsystem.md`
 - `12_Global_效能與UX體感架構.md`
-- `document/文件整併工作區/04_部署架構_無損合併稿.md`
+- 歷史部署合併稿（已由本規格承接；需要時從 Git 歷史取回）
 - `README.md`
 - `scripts/launchers/README.md`
 - `scripts/launchers/start_local_development.bat`
 - `scripts/launchers/start_local_development.sh`
 - `scripts/launchers/start_fastapi_ngrok.py`
 - `scripts/launchers/configure_local_admin_no_auth.ps1`
-- `../04_已完成與上線封存/release_records/53_Deployment_Profile_and_Target_Host_Acceptance_Retirement.md`
+- 決策 53 Deployment Profile／Target Host Acceptance retirement（歷史原文已移除）
 - 根目錄 `AGENTS.md`
 
 live 啟動腳本僅作現況證據；正式 release 仍須依本文件 preserve-data manifest 驗證，

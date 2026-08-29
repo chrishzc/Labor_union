@@ -72,17 +72,16 @@ LINE、管理權限、部署與治理語彙集中到當時的 `15`～`18`；`19`
 `15` 是正式收斂入口；`16`～`24` 分別補齊帳務衝突、外部整合／權限及
 Deployment／治理，`19` 定義 API／Streamlit／CLI entry point 的逐項治理，`22` 定義銀行流水、
 帳務異常固定處置與管理端入口，`24` 定義 Staff Matching Preferences 與不可服務期間的最新裁決。
-`document/文件整併工作區` 保留來源追溯，
-不再作為直接施工入口。
+`document/文件整併工作區` 只保留仍被欄位權威稽核讀取的 `06` 盤點；其餘歷史合併稿由 Git
+歷史追溯，不再作為直接施工入口。
 
 `02_決策與退役執行記錄/` 與 `03_追蹤清單與證據/` 各自有獨立的 `README.md`
 索引（含一句話摘要，`02` 另附機器可讀 `doc_type`／`declared_status`）；本節僅
 列出規格基線，避免執行記錄的增修頻率拖累規格索引的穩定性。
 
-已完成且不再擁有 current contract 的歷史規格已封存：
-[`08 ADAD／Legacy 邊界`](04_已完成與上線封存/superseded_specs/08_ADAD卸載與Legacy資料邊界.md)、
-[`11 架構總審矩陣`](04_已完成與上線封存/superseded_specs/11_架構總審矩陣與實作切片.md)、
-[`13 規格實作完成度矩陣`](04_已完成與上線封存/superseded_specs/13_規格實作完成度矩陣.md)。
+已完成且不再擁有 current contract 的歷史規格（08 ADAD／Legacy 邊界、11 架構總審矩陣、
+13 規格實作完成度矩陣）已自目前工作樹移除，需要時依 `04_已完成與上線封存/README.md`
+從 Git 歷史精準取回。
 現行語意由 `15`、個別 Domain／Global 規格、AGENTS.md 與 `03` 的 current evidence 承接。
 
 ## 實作門檻

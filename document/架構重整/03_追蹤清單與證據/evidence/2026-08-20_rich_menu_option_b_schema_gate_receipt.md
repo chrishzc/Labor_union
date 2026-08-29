@@ -84,7 +84,7 @@ disposable MySQL environment. Work Package status remains `in-progress` until th
 ## Current state update（2026-08-21；supersedes the pre-recovery gate summary above）
 
 The earlier gate table records the pre-recovery state. The approved local recovery has now completed and is evidenced by
-the [prepared-replacement verification receipt](PROV-20260820-line-local-database-prepared-replacement-recovery/verification-receipt.md).
+the prepared-replacement verification receipt（原始低頻 evidence 已自目前工作樹移除，可由 Git 歷史精準取回）。
 
 | Current assertion | Status | Evidence |
 |---|---|---|
@@ -92,7 +92,7 @@ the [prepared-replacement verification receipt](PROV-20260820-line-local-databas
 | Candidate preservation | PASS | Candidate dump/database remain hash-exact and were not rebuilt, deleted or rewritten。 |
 | Rich Menu drain | PASS | Source and candidate both report `queued=0`, `publishing=0`。 |
 | Prepared replacement recovery | PASS | Recovery exit `0`, restore `21.226s`, terminal replacement receipt `completed`；schema reapply／seed／backfill／destructive counts are `0`。 |
-| Qualified additive read-only preview | PASS | [fast preview output](../../../../scratch/fast_additive_preview_20260821/stdout_snapshot_reuse_rerun.txt)：`current / daily_additive / exact`，`5.633s` within the `30s` guard，zero write。 |
+| Qualified additive read-only preview | PASS | 歷史 fast preview output（未納入 Git）：`current / daily_additive / exact`，`5.633s` within the `30s` guard，zero write。 |
 | Fast preview `<=5s` UX target | BLOCKED | Current preview is `5.633s`; mandatory `30s` safety guard still passes。 |
 | Pending additive apply | NOT_RUN | No pending additive release was applied；the fast updater developer-acceptance apply remains unverified。 |
 

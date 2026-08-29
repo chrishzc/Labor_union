@@ -4,7 +4,7 @@
 
 - 狀態：`approved-by-user-2026-08-13`
 - Owner：`Scheduling Staff Matching Profile／Assignments／Matching`
-- 已封存實作包：[72_Matching_Preferences_and_Staff_Unavailability_Work_Package.md](../04_已完成與上線封存/work_packages/72_Matching_Preferences_and_Staff_Unavailability_Work_Package.md)
+- 歷史實作包已自工作樹移除；需要時依 `../04_已完成與上線封存/README.md` 從 Git 歷史精準取回。
 - 目的：讓公會人員維護月嫂配對偏好與不可服務期間，並由同一份 typed facts 同時服務配對中心與行事曆。
 
 ## 2. Global → Domain → Subsystem → Module

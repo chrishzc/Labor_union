@@ -179,8 +179,7 @@ def test_logic_b_custom_leave_date_extends_completion_like_a_holiday():
 
 def test_logic_b_partial_attendance_within_consecutive_holidays():
     """Regression test for the documented business rule in
-    document/文件整併工作區/01_管理端UI與排班_無損合併稿.md:1420-1426
-    ("國定假日單日個體決策規範"): during a run of consecutive national
+    current Scheduling contract ("國定假日單日個體決策規範"): during a run of consecutive national
     holidays, each individual day must be selectable as worked or rested
     independently - e.g. a caregiver rests on the first holiday of a block
     but works normally through the rest of it.

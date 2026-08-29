@@ -7,8 +7,7 @@
 - 正式收斂日期：2026-08-11
 - Owner：Contract Signing Integration
 - 跨域協作者：Orders、Assignments／Scheduling、Client Finance、LINE Integration
-- 歷史來源：`document/架構重整/04_已完成與上線封存/superseded_specs/契約整合與正常測試資料鏈_決策草案.md`
-- 已完成執行範圍：[`56_Contract_Signing_and_UI_Validation_Work_Package.md`](../04_已完成與上線封存/work_packages/56_Contract_Signing_and_UI_Validation_Work_Package.md)
+- 歷史來源與已完成執行包已自工作樹移除；需要時依 `../04_已完成與上線封存/README.md` 從 Git 歷史精準取回。
 - 2026-08-21 M3 coordination amendment：customer `accepted` 只代表 matching decision；須經 fresh-effects
   check 與 Assignment typed conversion/rematch request，不能直接形成 contract、assignment 或 Payroll obligation。
 

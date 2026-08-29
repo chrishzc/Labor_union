@@ -182,7 +182,7 @@ provider success 或前端假計算宣稱情境完成。
 ### 8.1 權威邊界
 
 封存文件
-`04_已完成與上線封存/superseded_specs/Part_00_全域測試資料治理與Scenario契約.md`
+Part 00 全域測試資料治理與 Scenario 契約（歷史原文已自工作樹移除）
 只作為測試情境設計與既有資料採用方法的參考，不恢復其 `superseded` 狀態，也不覆蓋 current
 Global／Domain 規格、根層 `AGENTS.md` 的 2026-08-21 DB 裁決或本矩陣記錄的最新人工裁決。
 

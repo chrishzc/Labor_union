@@ -1,8 +1,8 @@
 # 決策與退役執行記錄索引
 
 本目錄只保留 current task register、仍具約束力的 approved decision，以及 proposed／blocked／
-in-progress Work Package。completed／superseded 文件通過 archive gate 後移至
-`../04_已完成與上線封存/`，不得繼續出現在日常 active 表。
+in-progress Work Package。completed／superseded 文件確認無 current consumer 後自工作樹移除，
+由 Git 歷史保存，不得繼續出現在日常 active 表。
 
 正式業務語意以 `../01_規格基線/` 為準；跨功能 current 待辦只看
 [`96_Current_剩餘代辦任務總表.md`](96_Current_剩餘代辦任務總表.md)。舊 session、舊 gap register、
@@ -35,11 +35,11 @@ package；T3 才要求 current spec＋package。相同 owner／scenario／scope 
 | [Warning Transition Streamlit bridge](PROV-20260822-react-admin-phase3d-warning-transition-streamlit-compatibility-bridge-work-package.md) | work-package | `proposed` | 非目前優先；須另行核准 exact scope 才可施工。 |
 | [Access Control production cutover／external alert](Access_Control_Production_Cutover_and_External_Security_Alert_Work_Package.md) | work-package | `proposed` | production target、external sink、operator 與 rollback scope 未指定；維持 deferred。 |
 
-## 2026-08-25 archive closeout
+## 2026-08-25 歷史 closeout
 
 本輪將已由正式規格記錄完成，或已被較新規格／successor 取代的舊 Work Package、gap register 與
-功能計畫移至 `../04_已完成與上線封存/work_packages/` 或 `superseded_specs/`。精確 source path、
-archive path、digest、successor 與 restore trigger 只查 `archive_manifest.json`；本索引不重列長清單。
+功能計畫已完成歷史收斂；其低頻副本現已自工作樹移除，需要時從移除前 Git commit
+`5c43e847e016fb8d64ada4ac63fe2bee4b4a7a65` 精準取回。本索引不重列長清單。
 
 M1 binding ownership、M3 matching coordination、M4 human escalation 的 backend closeout 已封存；
 其尚未完成的 verified LIFF、provider、UI 或資料情境由 96 的 current tasks 接管，不能因舊包封存而
@@ -49,7 +49,7 @@ M1 binding ownership、M3 matching coordination、M4 human escalation 的 backen
 
 - 新文件狀態限 `draft | proposed | approved | in-progress | blocked | completed | superseded`，並具 owner、
   scenario、scope、dependencies、write set、acceptance、tests 與 evidence／正式規格路由。
-- `completed`／`superseded` 必須確認 successor、remaining task、inbound links 與 restore trigger 後封存。
-- archive 是低頻追溯區，不是 current SSOT、代辦或實作授權；日常不得整批載入。
+- `completed`／`superseded` 必須確認 successor、remaining task、inbound links 與 restore trigger 後從工作樹移除。
+- Git 歷史是低頻追溯區，不是 current SSOT、代辦或實作授權；日常不得整批載入。
 - provider、production DB、schema／migration、deployment、entry switch 與 destructive removal 仍須個別授權。
 - 建立文件前必須有 current consumer、owner、close condition 與不能由 current spec／code／test 取代的理由。

@@ -608,8 +608,7 @@ settlement link，不新增第二筆客戶退款，也不重開已結清client o
 - `05_Staff_Payables_Export_Domain.md`
 - `07_跨Domain交易與pytest驗收架構.md`
 - `../03_追蹤清單與證據/evidence/2026-08-09_implementation_matrix_revalidation_receipt.md`
-- `document/文件整併工作區/02_訂單帳務與資料處理_無損合併稿.md`
-- `document/文件整併工作區/05_潛在狀態機規則盤點.md`
+- 訂單帳務與資料處理、潛在狀態機歷史合併稿（已由本規格承接並自工作樹移除）
 - `document/文件整併工作區/06_欄位權威性與計算邏輯盤點.md`
 - `domains/client_finance/client_refund_reversal.py`
 - `subsystems/client_finance/client_refund_reversal_workflow.py`

@@ -18,10 +18,9 @@
 上述三項不是目前程式施工授權。Cloud、production、provider、deployment、entry switch 與外部副作用
 仍須新的人工確認。
 
-## 2026-08-25 封存收斂
+## 2026-08-25 歷史收斂
 
-下列舊 umbrella／設計計畫已由正式規格與 current task register 完整承接，移至
-`04_已完成與上線封存/superseded_specs/`：
+下列舊 umbrella／設計計畫已由正式規格與 current task register 完整承接，並自目前工作樹移除：
 
 - UI 真實業務流程測試資料與驗收主計畫
 - Part 00 全域測試資料治理與 Scenario 契約
@@ -32,8 +31,7 @@
 - LINE LIFF 舊客快速身分綁定與防冒領規範
 
 這些文件的 UI／UX 設計意圖仍可在 exact 任務中作低頻參考，但不得覆蓋正式規格；其舊 phase、
-`approved` 自稱、route、writer 或待辦不再參與 current 完成度判斷。精確 archive path、digest、successor
-與 restore trigger 只由 `archive_manifest.json` 路由。
+`approved` 自稱、route、writer 或待辦不再參與 current 完成度判斷；需要原文時從 Git 歷史精準取回。
 
 2026-08-25 使用者提供的 Eraser M1～M4 與全系統總覽原圖需求，已另由
 `../架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md` 保存。該文件承接
@@ -41,4 +39,4 @@
 不重新啟用上述 archived 計畫。
 
 `completed` 或 `superseded` 文件不得留在 active 表。只有 current successor 已承接業務不變量、
-remaining task 與人工 recovery，且 inbound links／manifest 已更新後，才能封存。
+remaining task 與人工 recovery，且 inbound links 已更新後，才能從工作樹移除。

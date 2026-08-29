@@ -125,10 +125,9 @@ CUR-ANOMALY 42-code necessity addendum（2026-08-27）：本輪因使用者新�
 Finance 22 三條互斥 E4 唯讀 lane；三個子代理皆明確使用 `gpt-5.6-luna`／`high`，無 nested delegation、
 無 workspace writes。聯集精確 42、無重複／遺漏，native reconciliation `passed`。主代理依最新人工 Authority
 校正為33個 active anomaly、7個 owner work items、1個退役 false-positive、1個 audit-only successor
-occurrence；完整逐碼 evidence 位於
+occurrence；完整逐碼 durable evidence 位於
 `03_追蹤清單與證據/evidence/2026-08-27_anomaly_rulebook_oracle_matrix.md`。這次確實發生一次 material
-plan／operating-mode change，並已保存於 ignored
-`scratch/task96-drift-audit-20260827/native-terminal-r3.json`。
+plan／operating-mode change；其 transient scratch 輸出未納入 Git，也不是後續施工依賴。
 後續 migration-design phase 再以三條 Luna High E4 唯讀 lane 對照既有 owner work queue、bounded rescan、
 successor/history 與候選 write set，DDH reconciliation 同樣 `passed`。結果確認 33 是已裁決的產品目標，
 necessity migration Work Package 已建立；pure Domain catalog slice 已加入 lifecycle 與
@@ -336,7 +335,7 @@ legacy replaced assignment false-blocker，以及BusinessClock source-version／
   package 或本列摘要，不另建逐 slice spec／package／receipt。
 - 新需求先找 current 正式 owner；已有答案直接依規格執行。只有 public contract、owner、根事實、
   schema、外部副作用或不可逆操作缺少 Authority 時才停止要求裁決。
-- current 任務完成後，對應 completed／superseded 文件依 archive gate 移出 active 目錄；本表只保留
+- current 任務完成後，對應 completed／superseded 文件確認無 current consumer 後移出工作樹；本表只保留
   必要完成摘要，不保存日常 logs、完整 receipt 或 evidence。
 - 前端驗收使用 Chrome 實點 UI；除 provider lane 外不得以 API mutation 取代 UI。所有結果只使用
   `passed | failed | blocked | not_run`，且不得用舊測試、單一 HTTP 或子代理摘要宣稱整體完成。

@@ -854,8 +854,7 @@ durable source job 或退出；LINE bot 不得直接更新 knowledge root 或無
 
 ## 9. 來源追溯
 
-- `document/文件整併工作區/03_API_LINE與自動化_無損合併稿.md`
-- `document/文件整併工作區/05_潛在狀態機規則盤點.md`
+- API／LINE／自動化與潛在狀態機歷史合併稿（已由本規格承接並自工作樹移除）
 - `document/文件整併工作區/06_欄位權威性與計算邏輯盤點.md`
 - `api/dependencies/admin_auth.py`
 - `services/admin_auth_service.py`
