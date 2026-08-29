@@ -37,15 +37,19 @@
 - static:
   - `db/schema_parts/1012_service_before_replacement.sql`
   - `db/migration_releases/labor_union_2026_08_28_service_before_replacement_v1.json`
-- test_root: `layout_gap` — focused suites currently use flat `tests/test_service_before_replacement*`.
+- test_root: `tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/`
 - higher_boundary:
-  - `tests/integration/test_service_before_replacement_mysql_adapter.py`
+  - `tests/integration/`
+- layout_gap:
+  - `tests/test_service_before_replacement_schema_contract.py` — relocation-sensitive schema lookup remains at observed path.
+  - `tests/test_service_before_replacement_projection.py` — owned by Anomalies projection and deferred to the Anomalies migration batch.
 - routing: `.arch-map/tests/domains/scheduling/subsystems/scheduling/index.md`.
 
 ## Provenance
 - Scheduling ownership/transaction semantics — `architecture_declared` — current specs.
 - API/domain/subsystem/infra/UI/migration paths — `source_observed` — current repository search.
-- Test layout gap — `source_observed` — current flat and integration tests.
+- Scheduling-owned focused tests — `source_observed` — module-owned test root.
+- Remaining schema/projection exceptions — `source_observed` — current flat test paths.
 
 ## Change triggers
 Reconcile when scenario ownership, actual-service referral boundary, matching dependency, route/schema, persistence/migration or test roots change.
