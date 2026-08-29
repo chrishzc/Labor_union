@@ -6,7 +6,11 @@ Description: 驗證 LINE static mutation UI 的 preview、確認、apply 與安�
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
+)
 
 
 def _source(name: str) -> str:
