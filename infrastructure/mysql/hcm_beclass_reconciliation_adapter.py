@@ -9,6 +9,7 @@ from dataclasses import replace
 
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 from infrastructure.mysql.order_terms_repository import MySqlOrderTermsRepository
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import (
