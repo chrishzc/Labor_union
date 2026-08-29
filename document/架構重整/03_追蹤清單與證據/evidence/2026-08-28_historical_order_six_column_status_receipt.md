@@ -11,7 +11,7 @@
 
 | Acceptance | 狀態 | 證據 |
 |---|---|---|
-| `HOS-A1` 六欄 `0／1／2` exact mapping | passed | `tests/domains/orders/test_historical_order_adoption.py`、`tests/test_historical_order_workbook_import.py` |
+| `HOS-A1` 六欄 `0／1／2` exact mapping | passed | `tests/domains/orders/subsystems/orders/modules/historical-adoption/unit/test_historical_order_adoption.py`、`tests/domains/orders/subsystems/orders/modules/historical-adoption/regression/test_historical_order_workbook_import.py` |
 | `HOS-A2` numeric `0` 與 blank fingerprint 分離 | passed | `test_numeric_zero_status_has_a_distinct_source_fingerprint_from_blank` |
 | `HOS-A3` 真 MySQL Apply／event／receipt | passed | `lu_test_task96_rpre_browser_r3_20260828`；focused E2E `1 passed` |
 | `HOS-A4` typed contract 與 no-auth Browser 四項 counts | passed | Python／React strict tests；Browser Preview `1／1／1／1` |
@@ -22,10 +22,10 @@
 
 ```text
 .venv/bin/python -m pytest -q \
-  tests/domains/orders/test_historical_order_adoption.py \
-  tests/test_historical_order_workbook_import.py \
-  tests/test_historical_order_adoption_router.py \
-  tests/test_historical_order_adoption_api_client.py
+  tests/domains/orders/subsystems/orders/modules/historical-adoption/unit/test_historical_order_adoption.py \
+  tests/domains/orders/subsystems/orders/modules/historical-adoption/regression/test_historical_order_workbook_import.py \
+  tests/domains/orders/subsystems/orders/modules/historical-adoption/contract/test_historical_order_adoption_router.py \
+  tests/domains/orders/subsystems/orders/modules/historical-adoption/contract/test_historical_order_adoption_api_client.py
 => 25 passed
 
 npm test -- --run \

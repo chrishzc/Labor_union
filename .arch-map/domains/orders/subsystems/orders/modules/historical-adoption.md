@@ -11,6 +11,8 @@
 - primary:
   - `domains/orders/historical_adoption.py`
   - `subsystems/orders/historical_adoption_workflow.py`
+  - `subsystems/orders/historical_order_workbook.py`
+  - `subsystems/orders/historical_order_workbook_import.py`
   - `infrastructure/mysql/historical_order_adoption_repository.py`
 - entrypoints:
   - `api/routes/historical_order_adoption.py`
@@ -32,15 +34,15 @@
 ## Verification
 - static:
   - `db/schema_parts/1008_historical_order_adoption_noop_constraint.sql`
-- test_root: `tests/domains/orders/`
+- test_root: `tests/domains/orders/subsystems/orders/modules/historical-adoption/`
 - higher_boundary:
-  - `tests/integration/`
-- layout_gap: integration workbook coverage remains at `tests/integration/test_historical_order_workbook.py`, not a module-owned canonical root.
+  - `tests/integration/test_historical_order_workbook.py`
+- layout_gap: disposable-MySQL workbook integration remains at `tests/integration/test_historical_order_workbook.py`; it is a higher-boundary oracle and has repo-root fixture resolution.
 
 ## Provenance
 - Orders ownership and historical adoption contract — `architecture_declared` — `01_Orders_Domain.md`.
-- API/repository/migration paths — `source_observed` — current repository at `meta.yaml:source_revision`.
-- Test routing — `source_observed` — `tests/domains/orders/` and `tests/integration/`.
+- API/repository/migration paths — `source_observed` — current repository.
+- Owner-local test routing — `source_observed` — module-owned unit/contract/regression roots.
 
 ## Change triggers
 Reconcile when historical workbook contract, Orders owner, API/script entry, persistence schema, receipt/replay semantics or test roots move.

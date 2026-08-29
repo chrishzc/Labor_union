@@ -1,13 +1,13 @@
 subsystem: orders
 parent_domain: orders
 architecture: ../../../../../domains/orders/subsystems/orders/index.md
-test_root: layout_gap
-integration_root: tests/integration/
+test_root: tests/domains/orders/subsystems/orders/
+integration_root: tests/domains/orders/subsystems/orders/integration/
 fixtures_root: tests/fixtures/
 modules:
   historical-adoption:
-    test_root: tests/domains/orders/
+    test_root: tests/domains/orders/subsystems/orders/modules/historical-adoption/
 
 # Exceptions
-- `historical-adoption` — owner-local unit/domain coverage currently sits directly under `tests/domains/orders/`; MySQL workbook integration is under `tests/integration/`. Status: `layout_gap`, not duplicated.
+- `historical-adoption` — disposable-MySQL workbook integration remains at `tests/integration/test_historical_order_workbook.py`; it is a higher-boundary `layout_gap`, not duplicate owner-local coverage.
 - Other Orders focused tests may still be flat under `tests/`; admit by current behavior/contract search rather than broad scan.
