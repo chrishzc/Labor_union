@@ -6,4 +6,4 @@ integration_root: tests/domains/finance-import/subsystems/finance-import/integra
 fixtures_root: tests/fixtures/
 
 # Routing notes
-The former `tests/imports/` root contained only current Finance Import format detection, normalization and bank-adapter tests and has moved to the canonical Finance Import subsystem integration root. Future import tests owned by Case Import or another Domain must use that owner's architecture root rather than recreating a generic `tests/imports/` bucket.
+Current owner-local coverage includes format detection, normalization, bank adapters, application/boundary behavior, dry-run, heuristic receipt matching, ingestion, orchestration, query, reprocessing, staging, and correction contracts. Relocation-sensitive schema/audit tests and cross-domain, UI, durable-job, or disposable-MySQL verification remain at their higher test boundaries. Tests owned by Case Import or another Domain must use that owner's architecture root rather than recreating a generic `tests/imports/` bucket.
