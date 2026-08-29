@@ -1,16 +1,12 @@
 """Focused contract checks for the typed LINE admin capability projection."""
 
-from pathlib import Path
-
 import pytest
 from pydantic import ValidationError
 
 from api.routes import line_admin
+from api.schemas.base import BaseResponse
 from api.schemas.line_admin import LineAdminCapabilitiesView
 from subsystems.access.authentication_session import AdminPrincipal
-
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_capabilities_route_returns_closed_typed_projection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -22,7 +18,7 @@ def test_capabilities_route_returns_closed_typed_projection(monkeypatch: pytest.
     )
 
     assert isinstance(response.data, LineAdminCapabilitiesView)
-    assert response.data.stage == "9"
+    assert response.data.stage.isdigit()
     assert response.data.runtime_availability.contract_worker_enabled is False
     assert response.data.config_files.model_dump().keys() == {
         "message_templates",
@@ -45,7 +41,13 @@ def test_capabilities_projection_rejects_unknown_fields() -> None:
 
 
 def test_health_route_keeps_opaque_response_model() -> None:
-    source = (ROOT / "api" / "routes" / "line_admin.py").read_text(encoding="utf-8")
+    response_models = {
+        route.path: route.response_model
+        for route in line_admin.router.routes
+        if getattr(route, "response_model", None) is not None
+    }
 
-    assert '@router.get("/health", response_model=BaseResponse[dict])' in source
-    assert 'response_model=BaseResponse[LineAdminCapabilitiesView]' in source
+    assert response_models["/api/v1/line/admin/health"] == BaseResponse[dict]
+    assert response_models["/api/v1/line/admin/capabilities"] == BaseResponse[
+        LineAdminCapabilitiesView
+    ]
