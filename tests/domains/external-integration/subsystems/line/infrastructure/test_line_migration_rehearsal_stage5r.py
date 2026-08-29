@@ -9,7 +9,11 @@ import pytest
 from scripts import migrate_preserved_database_additive_schema as runner
 
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
+)
 MANIFESTS = tuple(
     ROOT / "db" / "migration_releases" / name
     for name in (
