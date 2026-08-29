@@ -15,5 +15,7 @@
 
 ## Verification routing
 - default_boundary: Domain
-- test_root: unknown (`layout_gap`; no `tests/domains/payroll/` observed)
-- integration_root: `tests/subsystems/payroll/` — current subsystem-owned root.
+- test_root: `tests/domains/payroll/`
+- subsystem_root: `tests/domains/payroll/subsystems/payroll/`
+- higher_boundary: shared cross-domain/disposable-MySQL/Task 97 suites remain at their owning higher roots.
+- routing: `.arch-map/tests/domains/payroll/index.md`.

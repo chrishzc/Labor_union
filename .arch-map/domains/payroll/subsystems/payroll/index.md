@@ -16,5 +16,6 @@
 
 ## Verification routing
 - default_boundary: Subsystem
-- test_root: `tests/subsystems/payroll/`
-- integration_root: unknown (`layout_gap`; no domain-specific higher root observed).
+- test_root: `tests/domains/payroll/subsystems/payroll/`
+- integration_root: `tests/domains/payroll/subsystems/payroll/integration/`
+- routing: `.arch-map/tests/domains/payroll/subsystems/payroll/index.md`.

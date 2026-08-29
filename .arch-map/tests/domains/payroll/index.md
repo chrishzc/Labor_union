@@ -1,11 +1,11 @@
 domain: payroll
 architecture: ../../../domains/payroll/index.md
-test_root: layout_gap
-integration_root: tests/subsystems/payroll/
+test_root: tests/domains/payroll/
+integration_root: tests/domains/payroll/subsystems/payroll/integration/
 fixtures_root: tests/fixtures/
 subsystems:
   payroll:
     index: subsystems/payroll/index.md
 
 # Routing notes
-No `tests/domains/payroll/` root was observed. `tests/subsystems/payroll/` is the current strongest owner-local root; remaining Payroll suites in flat/shared roots are `layout_gap` and should be admitted only by scoped search.
+Payroll focused subsystem coverage now lives under the canonical Domain-owned tree. Cross-domain acceptance, disposable-MySQL and Task 97 oracles remain at their higher boundary rather than being moved solely for layout symmetry.

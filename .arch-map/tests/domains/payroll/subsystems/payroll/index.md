@@ -1,9 +1,9 @@
 subsystem: payroll
 parent_domain: payroll
 architecture: ../../../../../domains/payroll/subsystems/payroll/index.md
-test_root: tests/subsystems/payroll/
-integration_root: unknown
+test_root: tests/domains/payroll/subsystems/payroll/
+integration_root: tests/domains/payroll/subsystems/payroll/integration/
 fixtures_root: tests/fixtures/
 
 # Routing notes
-`tests/subsystems/payroll/` is the current owner-local root. A canonical Domain parent test root has not yet been observed, so higher-boundary Payroll coverage remains a `layout_gap`.
+Owner-local Payroll rebuild and terms-impact verification lives here. Tests may consume canonical Orders/Scheduling source facts while still being Payroll-owned when the subject under test is `domains.payroll` or `subsystems.payroll`. Keep true cross-domain acceptance, disposable-MySQL and Task 97 oracles at their higher boundary.
