@@ -24,7 +24,11 @@ from subsystems.line.message_configuration import (
     render_message_template,
 )
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
+)
 FOLLOWED_AT = datetime(2026, 8, 8, 2, 30, tzinfo=timezone.utc)
 
 
