@@ -77,8 +77,12 @@ def test_g16_durable_worker_crash_recovery_and_duplicate_delivery_apply_once(tmp
         )
         job_id = "durable-finance-job-" + uuid.uuid4().hex
         repository = BackgroundJobRepository(connection)
-        repository.enqueue_command(_batch_apply_job_command(job_id, request))
-        crashed_lease = repository.claim_next_command("crashed-worker", 60)
+        connection.begin()
+        repository.enqueue_canonical_command(_batch_apply_job_command(job_id, request))
+        connection.commit()
+        connection.begin()
+        crashed_lease = repository.claim_next_canonical_command("crashed-worker", 60)
+        connection.commit()
         assert crashed_lease is not None
         with connection.cursor() as cursor:
             cursor.execute(
@@ -95,6 +99,7 @@ def test_g16_durable_worker_crash_recovery_and_duplicate_delivery_apply_once(tmp
     try:
         worker = DurableJobWorker(
             BackgroundJobRepository(worker_connection),
+            worker_connection,
             default_job_handlers(),
             "durable-test-worker",
             retry_delay_seconds=0,

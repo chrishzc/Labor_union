@@ -1,11 +1,27 @@
 from fastapi import APIRouter, Depends, HTTPException, Path
-from typing import List, Dict, Any, Literal, Optional
+from typing import Literal, Optional
 from datetime import date
 from pydantic import BaseModel, Field, field_validator, model_validator
+from api.dependencies.client_payments import (
+    get_client_finance_query_application,
+)
 from api.schemas.base import BaseResponse
-from api.dependencies.admin_auth import require_system_admin
+from api.schemas.client_payments import (
+    ClientFinanceAllocationView,
+    ClientFinanceCaseView,
+    ClientFinanceLedgerEntryView,
+    ClientFinanceObligationView,
+    ClientFinancePageView,
+    ClientFinanceCaseSummaryView,
+)
+from api.dependencies.admin_auth import require_admin, require_system_admin
 from subsystems.access.authentication_session import AdminPrincipal
-from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.client_finance.client_payments_query import (
+    ClientFinanceQueryApplication,
+)
+from infrastructure.mysql.client_payments_query_repository import (
+    ClientFinanceCaseNotFound,
+)
 
 router = APIRouter(prefix="/api/v1/client-payments", tags=["Client Payments 客戶帳務"])
 
@@ -57,47 +73,98 @@ class ClientTransactionCreate(BaseModel):
         return self
 
 
-@router.get("", response_model=BaseResponse[List[Dict[str, Any]]])
-def get_all_client_payments():
-    """取得所有客戶帳務摘要列表"""
-    conn = get_connection()
+@router.get("", response_model=BaseResponse[ClientFinancePageView])
+def get_all_client_payments(
+    principal: AdminPrincipal = Depends(require_admin),
+    application: ClientFinanceQueryApplication = Depends(
+        get_client_finance_query_application
+    ),
+):
+    """取得 bounded Client Finance 案件摘要；不暴露 compatibility table rows。"""
+    del principal
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM client_payments ORDER BY id DESC")
-            data = cursor.fetchall()
-            return BaseResponse(data=data, message="成功取得所有客戶帳務摘要")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
+        result = application.query_all()
+        return BaseResponse(
+            data=ClientFinancePageView(
+                cases=[
+                    ClientFinanceCaseSummaryView(
+                        case_no=item.case_no,
+                        account_version=item.account_version,
+                        open_receivable_amount_ntd=item.open_receivable_amount_ntd,
+                        open_payable_amount_ntd=item.open_payable_amount_ntd,
+                        obligation_count=item.obligation_count,
+                        ledger_entry_count=item.ledger_entry_count,
+                    )
+                    for item in result.cases
+                ]
+            ),
+            message="成功取得 Client Finance 案件摘要",
+        )
+    except Exception as error:
+        raise HTTPException(status_code=500, detail="client_finance_query_failed") from error
 
 
-@router.get("/{case_no}", response_model=BaseResponse[Dict[str, Any]])
-def get_client_payment_by_case_no(case_no: str = Path(..., description="案件編號")):
-    """依案件編號取得單筆客戶帳務摘要與交易明細"""
-    conn = get_connection()
+@router.get("/{case_no}", response_model=BaseResponse[ClientFinanceCaseView])
+def get_client_payment_by_case_no(
+    case_no: str = Path(..., min_length=1, max_length=50, description="案件編號"),
+    principal: AdminPrincipal = Depends(require_admin),
+    application: ClientFinanceQueryApplication = Depends(
+        get_client_finance_query_application
+    ),
+):
+    """依案件編號取得 bounded Client Finance roots 與 immutable ledger。"""
+    del principal
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM client_payments WHERE case_no = %s", (case_no,))
-            payment = cursor.fetchone()
-            if not payment:
-                raise HTTPException(status_code=404, detail="找不到該案件的客戶帳務摘要")
-            
-            cursor.execute("SELECT * FROM client_payment_transactions WHERE client_payment_id = %s ORDER BY occurred_at ASC, id ASC", (payment["id"],))
-            transactions = cursor.fetchall()
-            
-            result = dict(payment)
-            result["transactions"] = transactions
-            return BaseResponse(data=result, message="成功取得客戶帳務與明細")
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
+        result = application.query_case(case_no)
+        return BaseResponse(
+            data=ClientFinanceCaseView(
+                case_no=result.case_no,
+                account_version=result.account_version,
+                obligations=[
+                    ClientFinanceObligationView(
+                        obligation_identity=item.obligation_identity,
+                        obligation_type=item.obligation_type,
+                        direction=item.direction,
+                        amount_due_ntd=item.amount_due_ntd,
+                        due_date=item.due_date,
+                        status=item.status,
+                        projection_version=item.projection_version,
+                    )
+                    for item in result.obligations
+                ],
+                ledger_entries=[
+                    ClientFinanceLedgerEntryView(
+                        entry_id=item.entry_id,
+                        entry_type=item.entry_type,
+                        amount_ntd=item.amount_ntd,
+                        occurred_on=item.occurred_on,
+                        reconciliation_reference=item.reconciliation_reference,
+                        reversal_of_entry_id=item.reversal_of_entry_id,
+                        created_at=item.created_at,
+                        allocations=[
+                            ClientFinanceAllocationView(
+                                obligation_identity=allocation.obligation_identity,
+                                amount_ntd=allocation.amount_ntd,
+                            )
+                            for allocation in item.allocations
+                        ],
+                    )
+                    for item in result.ledger_entries
+                ],
+            ),
+            message="成功取得 Client Finance 案件根事實",
+        )
+    except ClientFinanceCaseNotFound as error:
+        raise HTTPException(
+            status_code=404, detail="client_finance_case_not_found"
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="client_finance_query_invalid") from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail="client_finance_query_failed") from error
 
 
-@router.post("/due-dates/backfill", response_model=BaseResponse[Dict[str, Any]])
+@router.post("/due-dates/backfill")
 def backfill_client_payment_due_dates(
     case_no: Optional[str] = None,
     _: AdminPrincipal = Depends(require_system_admin),
@@ -110,7 +177,7 @@ def backfill_client_payment_due_dates(
     )
 
 
-@router.post("/transaction", response_model=BaseResponse[Dict[str, Any]])
+@router.post("/transaction")
 def create_client_transaction(
     req: ClientTransactionCreate,
     principal: AdminPrincipal = Depends(require_system_admin),

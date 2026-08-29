@@ -103,6 +103,18 @@ class LineDeliveryPublicDetailView(_StrictModel):
     attempts: list[LineDeliveryPublicAttemptView]
 
 
+class LineDeliveryTaskActionResultView(_StrictModel):
+    """Masked typed readback returned after a task control operation."""
+
+    id: int = Field(gt=0)
+    task_id: int = Field(gt=0)
+    task_type: str = Field(min_length=1, max_length=191)
+    message_kind: str = Field(min_length=1, max_length=191)
+    scheduled_at: datetime
+    status: LineDeliveryStatus = Field(strict=False)
+    completed_attempts: int = Field(ge=0)
+
+
 __all__ = [
     "LineDeliveryPublicAttemptView",
     "LineDeliveryPublicDetailView",
@@ -110,6 +122,7 @@ __all__ = [
     "LineDeliveryPublicPageView",
     "LineDeliveryPublicSourceType",
     "LineDeliveryPublicSummaryView",
+    "LineDeliveryTaskActionResultView",
     "LineDeliveryWorkerStatus",
     "LineTaskActionRequest",
 ]

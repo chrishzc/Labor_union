@@ -47,6 +47,7 @@ class FileSystemControlledFileStorage:
         settle_seconds: float = 5.0,
         max_read_bytes: int = _DEFAULT_MAX_READ_BYTES,
         max_staging_bytes: int = _DEFAULT_MAX_STAGING_BYTES,
+        staging_ttl: timedelta = _STAGING_TTL,
         clock: Callable[[], float] = time.time,
     ) -> None:
         if settle_seconds < 0:
@@ -55,12 +56,20 @@ class FileSystemControlledFileStorage:
             raise ValueError("max_read_bytes must be positive")
         if max_staging_bytes <= 0:
             raise ValueError("max_staging_bytes must be positive")
+        if staging_ttl <= timedelta(0):
+            raise ValueError("staging_ttl must be positive")
         configured = str(storage_root).strip() if storage_root is not None else ""
         self._configured_root = Path(configured) if configured else None
         self._settle_seconds = settle_seconds
         self._max_read_bytes = max_read_bytes
         self._max_staging_bytes = max_staging_bytes
+        self._staging_ttl = staging_ttl
         self._clock = clock
+
+    @property
+    def staging_ttl(self) -> timedelta:
+        """Return the operational staging TTL without exposing a storage locator."""
+        return self._staging_ttl
 
     def readiness(self) -> ControlledFileStorageReadiness:
         if self._configured_root is None:
@@ -221,7 +230,7 @@ class FileSystemControlledFileStorage:
         staging_id = f"{_STAGING_ID_PREFIX}{uuid.uuid4().hex}"
         object_directory = self._create_staging_object_directory(staging_root, staging_id)
         now = datetime.fromtimestamp(self._clock(), timezone.utc)
-        expires_at = now + _STAGING_TTL
+        expires_at = now + self._staging_ttl
         metadata = {
             "schema": "controlled-file-staging.v1",
             "staging_id": staging_id,
@@ -333,6 +342,24 @@ class FileSystemControlledFileStorage:
             content=content,
             sha256_digest=digest,
             expires_at=_parse_utc_datetime(metadata.get("expires_at")),
+        )
+
+    def finalize_staged(
+        self,
+        staging_id: str,
+        *,
+        expected_sha256: str,
+    ) -> ControlledFileStagingContent:
+        """Verify an applied object after DB commit.
+
+        The filesystem adapter deliberately does not rename or delete bytes here:
+        the 1004 schema stores the staging locator as the immutable object source.
+        Finalization is therefore an idempotent integrity check; a future durable
+        intent/reconciler may call it again without changing object identity.
+        """
+        return self.read_registered_staged(
+            staging_id,
+            expected_sha256=expected_sha256,
         )
 
     def cleanup_staged(

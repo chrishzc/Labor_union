@@ -32,6 +32,7 @@ from api.schemas.line_tasks import (
     LineDeliveryPublicPageView,
     LineDeliveryPublicSourceType,
     LineDeliveryPublicSummaryView,
+    LineDeliveryTaskActionResultView,
     LineTaskActionRequest,
 )
 from domains.line.delivery import LineDeliveryStatus, LineDeliveryTaskSnapshot
@@ -339,7 +340,10 @@ def _raise_query_error(
     )
 
 
-@router.post("/{task_id}/cancel", response_model=BaseResponse[dict])
+@router.post(
+    "/{task_id}/cancel",
+    response_model=BaseResponse[LineDeliveryTaskActionResultView],
+)
 def cancel_task(
     task_id: int,
     payload: LineTaskActionRequest,
@@ -351,7 +355,10 @@ def cancel_task(
     return BaseResponse(data=_task_snapshot(task), message="任務已取消")
 
 
-@router.post("/{task_id}/run-now", response_model=BaseResponse[dict])
+@router.post(
+    "/{task_id}/run-now",
+    response_model=BaseResponse[LineDeliveryTaskActionResultView],
+)
 def run_task_now(
     task_id: int,
     payload: LineTaskActionRequest,
@@ -364,7 +371,10 @@ def run_task_now(
     return BaseResponse(data=_task_snapshot(task), message="任務已排入立即執行")
 
 
-@router.post("/{task_id}/retry", response_model=BaseResponse[dict])
+@router.post(
+    "/{task_id}/retry",
+    response_model=BaseResponse[LineDeliveryTaskActionResultView],
+)
 def retry_task(
     task_id: int,
     payload: LineTaskActionRequest,
@@ -397,25 +407,16 @@ def _control(action, task_id, payload, principal):
         _raise_task_error(exc)
 
 
-def _task_snapshot(task: LineDeliveryTaskSnapshot) -> dict[str, object]:
-    preview = _message_preview(task.request.payload_json)
-    return {
-        "id": task.task_id.value,
-        "task_id": task.task_id.value,
-        "task_type": _legacy_task_type(task.request.source_aggregate_type),
-        "to_user_id": task.request.recipient.identity.value,
-        "recipient_type": task.request.recipient.recipient_type.value,
-        "recipient_identity": task.request.recipient.identity.value,
-        "message_kind": task.request.message_kind.value,
-        "payload_json": task.request.payload_json,
-        "message_content": preview,
-        "message_preview": preview,
-        "scheduled_at": task.request.scheduled_at,
-        "source_aggregate_type": task.request.source_aggregate_type,
-        "source_aggregate_identity": task.request.source_aggregate_identity,
-        "status": task.status.value,
-        "completed_attempts": task.completed_attempts,
-    }
+def _task_snapshot(task: LineDeliveryTaskSnapshot) -> LineDeliveryTaskActionResultView:
+    return LineDeliveryTaskActionResultView(
+        id=task.task_id.value,
+        task_id=task.task_id.value,
+        task_type=_legacy_task_type(task.request.source_aggregate_type),
+        message_kind=task.request.message_kind.value,
+        scheduled_at=task.request.scheduled_at,
+        status=task.status,
+        completed_attempts=task.completed_attempts,
+    )
 
 
 def _admin_record(item) -> dict[str, object]:

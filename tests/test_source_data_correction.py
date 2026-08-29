@@ -24,8 +24,20 @@ class _Repository:
             "result_snapshot": result,
         }
 
+
+
+class _UnitOfWork:
+    def __init__(self, repository):
+        self._repository = repository
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
     def commit(self):
-        self.commits += 1
+        self._repository.commits += 1
 
 
 def test_source_correction_apply_replays_and_rejects_protected_fields():
@@ -34,14 +46,16 @@ def test_source_correction_apply_replays_and_rejects_protected_fields():
         repository, "clients", 1, {"phone": "0988", "address": "新址"}
     )
     result = source_data_correction.apply(
-        repository, "clients", 1, {"phone": "0988", "address": "新址"},
+        repository, lambda: _UnitOfWork(repository),
+        "clients", 1, {"phone": "0988", "address": "新址"},
         preview["preview_fingerprint"], "source-key-1", "admin", "更正聯絡資料"
     )
 
     assert result["changed_fields"] == ["address", "phone"]
     assert repository.rows["clients"][1]["phone"] == "0988"
     assert source_data_correction.apply(
-        repository, "clients", 1, {"phone": "0988", "address": "新址"},
+        repository, lambda: _UnitOfWork(repository),
+        "clients", 1, {"phone": "0988", "address": "新址"},
         preview["preview_fingerprint"], "source-key-1", "admin", "更正聯絡資料"
     ) == result
     with pytest.raises(ValueError, match="protected_source_field"):

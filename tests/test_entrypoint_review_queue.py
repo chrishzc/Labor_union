@@ -39,6 +39,44 @@ def test_queue_has_no_unreviewed_entries() -> None:
     }
 
 
+def test_governed_entries_have_exact_task97_terminal_receipts() -> None:
+    required = {
+        "runtime_registration",
+        "current_inbound_callers",
+        "external_operator_evidence",
+        "canonical_owner",
+        "replacement_path_or_symbol",
+        "replacement_readback",
+        "deletion_410_gate",
+        "focused_regression",
+        "final_zero_reference_oracle",
+        "terminal_disposition",
+        "terminal_receipt",
+    }
+    terminal = {
+        "active_canonical",
+        "rewrite_to_canonical",
+        "retired_410",
+        "delete",
+        "operator_only_guarded",
+        "blocked_external_evidence",
+    }
+    for entry in _load_queue():
+        if entry["status"] == "review_required":
+            continue
+        assert required <= entry.keys(), entry["entry_id"]
+        assert entry["terminal_disposition"] in terminal
+        assert all(str(entry[field]).strip() for field in required)
+
+
+def test_queue_has_no_generic_owner_placeholder() -> None:
+    assert not [
+        entry["entry_id"]
+        for entry in _load_queue()
+        if entry.get("canonical_owner") == "owning bounded domain"
+    ]
+
+
 def _load_queue() -> list[dict[str, object]]:
     return [json.loads(line) for line in queue.QUEUE_PATH.read_text(encoding="utf-8").splitlines()]
 

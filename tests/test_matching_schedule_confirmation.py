@@ -73,26 +73,31 @@ class _Repository:
     def confirm(self, *args):
         return {"gate_passed": True}
 
-    def commit(self):
-        return None
-
-    def rollback(self):
-        self.rolled_back = True
-
     def prepare_manual(self, *args):
         return {"snapshot_status": "manual_ready"}
 
 
+class _UnitOfWork:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def commit(self):
+        return None
+
+
 @pytest.mark.parametrize("value", ["rejected", "manually_confirmed", "manually_revoked"])
 def test_manual_schedule_updates_require_a_reason(value):
-    workflow = MatchingScheduleConfirmationWorkflow(_Repository())
+    workflow = MatchingScheduleConfirmationWorkflow(_Repository(), _UnitOfWork)
 
     with pytest.raises(ValueError, match="confirmation_reason_required"):
         workflow.confirm(1, value, "admin", "", "key-68")
 
 
 def test_manual_schedule_preparation_requires_a_reason():
-    workflow = MatchingScheduleConfirmationWorkflow(_Repository())
+    workflow = MatchingScheduleConfirmationWorkflow(_Repository(), _UnitOfWork)
 
     with pytest.raises(ValueError, match="manual_schedule_confirmation_reason_required"):
         workflow.prepare_manual("CASE-68", 18, "admin", " ", 1, "f" * 64, "key-68")

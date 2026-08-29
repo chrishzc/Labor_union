@@ -10,6 +10,7 @@
 
 | 文件 | 狀態 | 下一個 gate |
 |---|---|---|
+| [LINE 後端瘦身執行計畫](LINE_BACKEND_SLIMMING_PLAN.md) | `approved-for-inventory-and-non-destructive-refactor` | 依 `CUR-LINE-BACKEND-SLIMMING-01` 完成 S0～S9、regression 與 baseline freeze；完成前 Task 96 LINE M1～M4 closure 不得恢復。 |
 | [NAS 檔案庫與資料中心管理介面正式規範](NAS_檔案庫與資料中心管理介面正式規範.md) | `approved` | 雙欄檔案總管版型、結構化命名、Freeze-Before-Send 與刪除防呆已核准；進行 UI 實作與資料中心分頁切換。 |
 | [Cloud Run＋單一 Cloud VPN 雲端部署測試計畫](Cloud_Run_單一Cloud_VPN_部署測試計畫.md) | `proposed` | 指定隔離 cloud project／NAS DB、operator、預算與故障注入範圍後，另立 exact Work Package。 |
 | [Cloud Run Durable Job Worker Supervision](Durable_Job_Worker_Supervision_延後開發計畫.md) | `proposed`／`deferred` | 指定隔離 cloud test project／NAS DB、OIDC、operator、故障注入與雲端測試 gate。 |

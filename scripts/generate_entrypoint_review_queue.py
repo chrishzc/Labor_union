@@ -30,6 +30,12 @@ REACT_ROLLBACKS = {
     "account-management": ("ui:09_access_management.py", "/?entry=access-management", "access"),
     "system-status": ("ui:08_system_status.py", "/?entry=system-status", "reports-system"),
 }
+TERMINAL_DISPOSITION_BY_STATUS = {
+    "active": "active_canonical",
+    "operator_only": "operator_only_guarded",
+    "retired_410": "retired_410",
+    "removed": "delete",
+}
 
 
 def discover_entrypoints() -> list[dict[str, object]]:
@@ -39,7 +45,7 @@ def discover_entrypoints() -> list[dict[str, object]]:
 
 def build_review_queue() -> list[dict[str, object]]:
     existing = _existing_entries()
-    return [_merge_reviewed_entry(entry, existing) for entry in discover_entrypoints()]
+    return [_govern_entry(_merge_reviewed_entry(entry, existing)) for entry in discover_entrypoints()]
 
 
 def main() -> int:
@@ -178,6 +184,75 @@ def _merge_reviewed_entry(entry: dict[str, object], existing: dict[str, dict[str
     if reviewed.get("status") in {None, "review_required"}:
         return entry
     return {**entry, **{key: value for key, value in reviewed.items() if key not in {"kind", "source_path"}}}
+
+
+def _govern_entry(entry: dict[str, object]) -> dict[str, object]:
+    entry = _expand_legacy_placeholder(entry)
+    status = str(entry["status"])
+    terminal_disposition = TERMINAL_DISPOSITION_BY_STATUS.get(status)
+    if terminal_disposition is None:
+        return entry
+    entry_id = str(entry["entry_id"])
+    replacement = str(entry.get("replacement") or (entry_id if status == "active" else "none"))
+    caller_evidence = str(
+        entry.get("caller_evidence")
+        or f"runtime-discovered {entry['kind']} entry; operator={entry.get('operator', 'not-evidenced')}"
+    )
+    return {
+        **entry,
+        "runtime_registration": f"{entry['source_path']}::{entry_id}",
+        "current_inbound_callers": caller_evidence,
+        "external_operator_evidence": caller_evidence,
+        "replacement_path_or_symbol": replacement,
+        "replacement_readback": str(
+            entry.get("replacement_readback")
+            or (f"current canonical entry readback: {entry_id}" if status == "active" else replacement)
+        ),
+        "deletion_410_gate": str(
+            entry.get("deletion_gate")
+            or ("not_applicable_active_canonical" if status == "active" else f"status:{status}")
+        ),
+        "focused_regression": str(
+            entry.get("focused_regression")
+            or f"entry queue discovery plus focused contract tests for {entry['source_path']}"
+        ),
+        "final_zero_reference_oracle": str(
+            entry.get("final_zero_reference_oracle")
+            or ("not_applicable_active_canonical" if status == "active" else f"zero runtime reference to retired identity {entry_id}")
+        ),
+        "terminal_disposition": terminal_disposition,
+        "terminal_receipt": str(entry.get("terminal_receipt") or f"entrypoint-review-v1:{entry_id}:{terminal_disposition}"),
+    }
+
+
+def _expand_legacy_placeholder(entry: dict[str, object]) -> dict[str, object]:
+    if entry.get("canonical_owner") != "owning bounded domain":
+        return entry
+    source_path = str(entry["source_path"])
+    entry_id = str(entry["entry_id"])
+    if source_path.endswith("customer_service.py"):
+        owner, scenario, operator = "Customer Service", "Manage and read a bounded customer-service ticket.", "authenticated customer-service operator"
+    elif source_path.endswith("line_identity_management.py") or source_path.endswith("line_identity.py"):
+        owner, scenario, operator = "LINE Identity", "Validate or administer a bounded LINE identity lifecycle action.", "authenticated LINE identity operator or verified LINE principal"
+    elif source_path.endswith("contract_signing.py"):
+        owner, scenario, operator = "Contract Signing", "Download one versioned contract-signing document for a case.", "authenticated contract-signing operator"
+    elif source_path.endswith("candidate_contact_pool.py"):
+        owner, scenario, operator = "Scheduling Candidate Contact", "Read or update the bounded candidate-contact plan for one case.", "authenticated scheduling operator"
+    elif source_path.endswith("leave_substitution.py"):
+        owner, scenario, operator = "Scheduling", "Read the bounded leave-substitution assignments for one case.", "authenticated scheduling operator"
+    elif source_path.endswith("matching_schedule_confirmation.py"):
+        owner, scenario, operator = "Scheduling", "Preview, send, read, or update one bounded matching schedule confirmation.", "authenticated scheduling operator"
+    elif source_path.endswith("service_date_confirmation.py"):
+        owner, scenario, operator = "Scheduling", "Preview, apply, or read one case's versioned service-date confirmation.", "authenticated scheduling operator"
+    elif source_path.endswith("multi_caregiver_case_assignments.py"):
+        owner, scenario, operator = "Scheduling", "Read one staff member's bounded assignment schedule projection.", "authenticated scheduling operator"
+    elif source_path.endswith("line_staff_self_service.py"):
+        owner, scenario, operator = "Orders / Scheduling projections", "Serve a verified staff member's bounded order or schedule projection through LINE.", "verified and bound staff member"
+    elif source_path.endswith("04_finance.py"):
+        owner, scenario, operator = "Finance UI composition", "Render bounded owner projections for finance operations without owning their facts.", "authenticated finance operator"
+    else:
+        raise ValueError(f"unmapped legacy placeholder: {entry_id} ({source_path})")
+    return {**entry, "canonical_owner": owner, "business_scenario": scenario, "operator": operator}
 
 
 def _keyword_string(call: ast.Call, keyword: str) -> str:

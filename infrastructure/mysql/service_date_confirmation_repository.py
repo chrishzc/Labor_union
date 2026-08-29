@@ -117,12 +117,6 @@ class MySqlServiceDateConfirmationRepository:
             candidate.fingerprint,
         )
 
-    def commit(self):
-        self._connection.commit()
-
-    def rollback(self):
-        self._connection.rollback()
-
     @staticmethod
     def _dates(cursor, version_id, *, lock=False):
         cursor.execute(

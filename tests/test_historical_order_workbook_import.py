@@ -43,6 +43,17 @@ class _Repository:
         self.receipts[key] = {"request_fingerprint": digest, "result_snapshot": json.dumps(result)}
 
 
+class _UnitOfWork:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def commit(self):
+        return None
+
+
 class _Workflow:
     def __init__(self) -> None:
         self.apply_calls = 0
@@ -67,7 +78,7 @@ def test_workbook_apply_replays_terminal_receipt_and_conflicts_before_row_apply(
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda path: original if path == "first.xlsx" else different)
     repository = _Repository()
     workflow = _Workflow()
-    service = module.HistoricalOrderWorkbookImportService(repository, workflow)
+    service = module.HistoricalOrderWorkbookImportService(repository, workflow, _UnitOfWork)
     preview = service.preview("first.xlsx")
 
     first = service.apply("first.xlsx", "workbook-key", preview.preview_fingerprint, "operator", "correlation")
@@ -84,7 +95,7 @@ def test_workbook_apply_replays_terminal_receipt_and_conflicts_before_row_apply(
 def test_apply_rejects_a_stale_preview_before_row_apply(monkeypatch):
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda path: _workbook("c" * 64))
     workflow = _Workflow()
-    service = module.HistoricalOrderWorkbookImportService(_Repository(), workflow)
+    service = module.HistoricalOrderWorkbookImportService(_Repository(), workflow, _UnitOfWork)
 
     with pytest.raises(ValueError, match="historical_order_preview_stale"):
         service.apply("first.xlsx", "workbook-key", "0" * 64, "operator", "correlation")
@@ -95,7 +106,7 @@ def test_apply_rejects_a_stale_preview_before_row_apply(monkeypatch):
 def test_preview_and_receipt_expose_conserved_zero_one_two_status_counts(monkeypatch):
     workbook = _workbook_with_statuses()
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda path: workbook)
-    service = module.HistoricalOrderWorkbookImportService(_Repository(), _Workflow())
+    service = module.HistoricalOrderWorkbookImportService(_Repository(), _Workflow(), _UnitOfWork)
 
     preview = service.preview("statuses.xlsx")
     receipt = service.apply(
@@ -130,7 +141,7 @@ def test_legacy_stored_receipt_replay_derives_status_counts_from_same_workbook(m
     }
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda path: workbook)
 
-    replay = module.HistoricalOrderWorkbookImportService(repository, _Workflow()).apply(
+    replay = module.HistoricalOrderWorkbookImportService(repository, _Workflow(), _UnitOfWork).apply(
         "statuses.xlsx", "legacy-key", "0" * 64, "operator", "correlation",
     )
 

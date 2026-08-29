@@ -627,16 +627,17 @@ Modules：
 - `CaseBootstrapCandidateBuilder`
 
 File Watcher 只建立 durable import job；CLI／Adapter 不直接寫正式 Client／Order。
-invalid row 必須保存 privacy-safe root fact；只有已滿足該 lane 最低 import 條件、且需要人工處理的
-review 才投影 canonical anomaly。
+invalid row 必須保存 privacy-safe root fact；已滿足該 lane 最低 import 條件且需要人工處理時，
+只產生 Case Import owner review。只有 `BECLASS-001`／`IMPORT-003` current pairing predicate
+成立時才投影 canonical current issue。
 
 HCM 不得以 fabricated default 補造欄位。案件編號是最低寫入資格：有可用案件編號時必須建立／保留
-正式案件，其他欄位缺漏、格式錯誤或身份關聯歧義各自形成 durable field／link warning；只有案件編號
+正式案件，其他欄位缺漏、格式錯誤或身份關聯歧義各自形成 owner validation／review result；只有案件編號
 缺失或不可用時不建案，且只保留來源 review／receipt／outbox 稽核，不投影異常中心。
 Client／Staff historical import 必須另走 HistoricalAdoption
 Preview／Apply，不得重用 current LIFF command 假裝一般資料更新。
 
-### 匯入異常的外部確認與重新提交
+### 匯入 owner review 的外部確認與重新提交
 
 HCM、Client／Staff BeClass 與其他 Case Import 來源的 review 是公會人員聯絡來源當事人的待辦，
 不是管理端直接修正資料的表單。review root、處理狀態與 disposition 必須保留去敏資訊；不得持久化
@@ -647,16 +648,16 @@ HCM 欄位權威的差異；不提供警示中心或 Streamlit 單欄編輯，�
 
 WP77／WP92 將 HCM 與 Client BeClass 定義為可獨立存在的兩條 intake lane。HCM 案件編號不得重複；
 IP＋姓名精確命中既有 Client、多候選或其他身份關聯歧義時，案件仍依案件編號建立，但不自動綁定 Client，
-並建立獨立 link warning 供外部確認。HCM 歷史過渡模式只要符合最低寫入資格，即直接寫入來源的可寫欄位，
-不推定目前 DB 值較有效；無法寫入的個別欄位仍各自警示。
+並建立獨立 link review 供外部確認。HCM 歷史過渡模式只要符合最低寫入資格，即直接寫入來源的可寫欄位，
+不推定目前 DB 值較有效；無法寫入的個別欄位仍各自留在 owner review。
 
 Client BeClass 的 `query_no` 只是來源流水號，不得作為客戶識別或案件編號。LIFF 啟用前的過渡匯入只在
 姓名＋手機完全一致且唯一命中 Client，且案件候選唯一時綁定；零筆或多筆候選都保留來源並警示，不允許
 人工在警示中心挑選。LIFF 啟用後由登入身分直接綁定，不再使用這組過渡條件。
 
 Staff BeClass 歷史匯入以有效身分證及姓名為最低資格。後來的歷史快照覆蓋可更新 scalar，銀行帳戶與勾選
-關聯視為完整集合原子替換；姓名改變可寫入並留下已自動結束的追溯 warning。任一其他欄位缺漏或格式無效
-仍建立欄位級 warning。Staff 退役不由匯入推定或修改。
+關聯視為完整集合原子替換；姓名改變可寫入並留下 owner source／receipt 追溯。任一其他欄位缺漏或格式無效
+仍建立欄位級 owner review result。Staff 退役不由匯入推定或修改。
 
 2026-08-25 管理端正規化資料投影：客戶資料只讀已採納的 `identity_status`、`city`、`service_type`、
 `service_time`、`delivery_type`、`residence_type` typed facts；不得解析或顯示 raw `survey_details`、來源識別、
@@ -664,16 +665,15 @@ Staff BeClass 歷史匯入以有效身分證及姓名為最低資格。後來的
 正式規格 §3.3 擁有。此客戶投影已以 Chrome 驗證非空與合法空值，狀態為 `completed`。
 
 有 HCM 而無唯一 Client BeClass 對方時投影 `BECLASS-001`；對方日後唯一綁定後由 root predicate 自動解除。
-任何警示均以 `logical_code + field_path` 獨立追蹤；缺漏與格式錯誤不按欄位新增 logical code，
-由 display projection 以「缺少{欄位名稱}」或「{欄位名稱}格式錯誤」呈現。exact replay 不建立新 occurrence。顯式關聯的新提交仍
-不合格時建立新 warning 並由 system 關閉被取代的舊 task；成功補齊後才 `auto_resolved`。所有來源、issue
-codes、occurrence 與狀態事件保留。第一階段只記錄公會人工聯絡，不自動傳 LINE、不猜 recipient。
-2026-08-27 人工進一步裁決：同一匯入 review 內每個 `logical_code + field_path` occurrence 獨立完成。
-完整修正來源 Apply 後，每個已通過 owner validation 與 fresh readback 的 occurrence 立即 inactive；仍有
-兩個未修正 occurrence 時只能解除已修正的一個。最後一個 occurrence 也 inactive 後，整筆匯入 review／
-umbrella warning 自動完成並從 active list 消失，不需要也不允許另外按 tracking resolve。若某欄位經正式
-人工處分確認來源原值可接受，該 disposition 必須保存 actor、reason、evidence、version、fingerprint 與
-receipt，並以相同 occurrence terminal predicate 處理；不得用整筆處分壓掉其他未修正欄位。
+
+2026-08-29 current-state anomaly slimming 裁決取代舊的 field-warning occurrence／tracking
+生命週期：新輸入缺漏或格式錯誤在 LIFF／backend validation 拒絕；既有或歷史錯誤
+只存在 Case Import owner review Query。Case Import 仍保留來源、review、人工 disposition、
+actor、reason、evidence、version、fingerprint 與 receipt 等 owner evidence，但 Anomalies 不另建或
+保留 occurrence、warning task、tracking state、auto-resolve 或 replacement event。
+只有 `BECLASS-001`／`IMPORT-003` 的 current pairing predicate 成立時進入 `#anomalies`；
+owner 驗證後形成唯一、一致、可追溯的 accepted mapping，fresh recheck 才刪除 current row。
+第一階段只記錄公會人工聯絡，不自動傳 LINE、不猜 recipient。
 未登錄的 issue code 不得靜默略過或落入 generic field warning；投影交易必須回滾，只寫入
 lane 與 issue digest 的去敏錯誤；總嘗試上限 3 次，相鄰嘗試至少間隔 1 秒，後進入
 dead-letter，供維運先補 registry／映射再重放。retry-ready time 必須持久化，worker 重啟不得提早嘗試。
@@ -686,7 +686,8 @@ dead-letter，供維運先補 registry／映射再重放。retry-ready time 必�
 `ORDER-HIST-FIELD-001/actual_start_date|actual_end_date`。
 
 live `ApplyBeClassReview`／`RejectCaseImportReview` 的 corrected-fields／Correct／Reject 形狀不是核准目標；
-必須依 entrypoint governance 退役或替換為 tracking-only transition 與 owning Domain typed command。
+必須依 entrypoint governance 退役或替換為 owning Domain typed command；不新建 tracking-only
+transition 作為 anomaly lifecycle。
 
 WP77最新裁決將HCM與Client BeClass定義為可獨立存在的兩條intake lane。HCM案件編號不得重複；
 新案件若IP位址與姓名同時命中既有Client，視為疑似同一客戶重複申請，必須停止該列、建立review
@@ -708,11 +709,10 @@ Typed operations：
 
 - `IngestCaseImportSource` → `CaseImportIntakeReceipt`
 - `PreviewCaseImport` → candidate、validation、mapping、fingerprint、expected version
-- `ApplyCaseImport`／各 lane HistoricalAdoption Apply → 正式 root receipt、欄位級 warning 或 typed blocker
-- `PreviewWarningTransition`／`ApplyWarningTransition` → 只更新外部追蹤狀態，不接受 corrected payload
-- `PreviewHcmResubmission`／`ApplyHcmResubmission` → 驗證完整修正來源、prior warning 與 canonical
+- `ApplyCaseImport`／各 lane HistoricalAdoption Apply → 正式 root receipt、owner validation／review result 或 typed blocker
+- `PreviewHcmResubmission`／`ApplyHcmResubmission` → 驗證完整修正來源、prior owner review 與 canonical
   case 的明確關聯，採納通過驗證的 HCM-owned fields；link 只有唯一可證明時建立
-- warning referral descriptor → 只回傳 owner command identifier、expected warning version 與去敏 context
+- owner review referral descriptor → 只回傳 owner command identifier、expected review version 與去敏 context
 
 Ports：`CaseImportSourceArchive`、`CaseImportRepository`、`CaseIdentityQuery`、
 `CaseBootstrapGateway`、`CaseImportOutbox`、`CaseImportClock` 與
@@ -734,9 +734,9 @@ payload digest 與 operation 組成 idempotency identity；stale／identity ambi
 - `import_warning_resubmission_association_invalid`
 - `import_warning_predicate_owner_unavailable`
 
-警示中心人工入口只允許查詢去敏警示、推進外部追蹤狀態及導向已核准的 owning Domain typed command；
+警示中心人工入口只允許查詢去敏 current issue 及導向已核准的 owning Domain typed command；
 不得使用 Data Browser、importer fallback、generic corrected payload 或 candidate picker 改正式資料。
-人工 `closed` 不等於 reject source 或 resolve root predicate。live `RejectCaseImportReview` 不得再作為正式入口；
+異常頁不提供人工 `closed`。live `RejectCaseImportReview` 不得再作為正式入口；
 退役前只能 fail closed，不得建立新的 rejection business meaning。
 
 ## 6. Domain：Knowledge Retrieval

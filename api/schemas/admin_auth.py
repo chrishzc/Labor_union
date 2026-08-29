@@ -68,6 +68,14 @@ class AdminRefreshResponse(BaseModel):
     expires_at: datetime
 
 
+class AdminLogoutResponse(BaseModel):
+    """Closed success result for revoking the current administrator session."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    logged_out: Literal[True]
+
+
 class MfaEnrollmentVerificationRequest(BaseModel):
     challenge_token: str = Field(min_length=32, max_length=256)
     totp_code: str = Field(min_length=6, max_length=6, pattern=r"^[0-9]{6}$")

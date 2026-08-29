@@ -82,7 +82,6 @@ class HcmWorkbookImportRepository:
                 claim = cursor.fetchone()
                 if not claim or claim["command_family"] != self._FAMILY or claim["command_fingerprint"] != digest:
                     return "conflict"
-        self._connection.commit()
         return "created" if created else "resume"
 
     def save_receipt(self, key: str, digest: str, actor: str, result: dict) -> None:
@@ -93,7 +92,6 @@ class HcmWorkbookImportRepository:
                 "VALUES (%s,%s,%s,%s,%s,%s,%s)",
                 (self._FAMILY, key, digest, digest, actor, "HCM workbook upload", _json(result)),
             )
-        self._connection.commit()
 
 
 def _json(value: dict) -> str:

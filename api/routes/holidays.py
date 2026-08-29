@@ -5,13 +5,13 @@ Description: 暴露國定假日 typed Query、零寫入 Preview 與 single-UoW A
 
 from __future__ import annotations
 
-import logging
 from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Query
 
 from api.dependencies.admin_auth import require_admin
+from api.dependencies.holidays import get_holiday_maintenance_application
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.errors import GlobalTypedErrorResponseView
@@ -32,13 +32,9 @@ from subsystems.scheduling.holiday_calendar_query import (
     HolidayCalendarUnavailable,
     HolidayFact,
 )
-from subsystems.scheduling.holiday_query_cache import (
-    invalidate_holiday_query_cache,
-    query_holidays,
-)
+from subsystems.scheduling.holiday_query_cache import query_holidays
 
 router = APIRouter(prefix="/api/v1/holidays", tags=["Holidays 國定假日設定"])
-LOGGER = logging.getLogger("labor_union.api.holidays")
 _LEGACY_FROM = date(1900, 1, 1)
 _LEGACY_TO = date(9999, 12, 31)
 _QUERY_ERRORS = {
@@ -119,14 +115,13 @@ def preview_holiday_change(
     req: HolidayPreviewRequest,
     correlation_id: Annotated[str, Header(alias="X-Correlation-ID", max_length=191)],
     principal: AdminPrincipal = Depends(require_admin),
+    application: holiday_maintenance.HolidayMaintenanceApplication = Depends(
+        get_holiday_maintenance_application
+    ),
 ):
     del principal
-    connection = get_connection()
     try:
-        result = holiday_maintenance.preview(
-            MySqlSchedulingHolidayQuery(connection),
-            _command(req),
-        )
+        result = application.preview(_command(req))
         return BaseResponse(data=_preview_payload(result), message="已產生國定假日變更預覽")
     except holiday_maintenance.HolidayWorkflowError as error:
         _raise_workflow_error(error, correlation_id)
@@ -145,8 +140,6 @@ def preview_holiday_change(
             "國定假日預覽失敗。",
             correlation_id,
         ) from error
-    finally:
-        connection.close()
 
 
 @router.post(
@@ -165,11 +158,12 @@ def apply_holiday_change(
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ],
     principal: AdminPrincipal = Depends(require_admin),
+    application: holiday_maintenance.HolidayMaintenanceApplication = Depends(
+        get_holiday_maintenance_application
+    ),
 ):
-    connection = get_connection()
     try:
-        result = holiday_maintenance.apply(
-            MySqlSchedulingHolidayQuery(connection),
+        result = application.apply(
             _command(req),
             req.expected_calendar_version,
             req.preview_fingerprint,
@@ -177,12 +171,9 @@ def apply_holiday_change(
             str(principal.username or "").strip(),
             req.reason,
         )
-        connection.commit()
     except holiday_maintenance.HolidayWorkflowError as error:
-        connection.rollback()
         _raise_workflow_error(error, correlation_id)
     except HolidayCalendarUnavailable as error:
-        connection.rollback()
         raise typed_http_error(
             503,
             "unavailable",
@@ -192,18 +183,11 @@ def apply_holiday_change(
             retryable=True,
         ) from error
     except Exception as error:
-        connection.rollback()
         raise internal_query_error(
             "holiday_apply_internal_error",
             "國定假日套用失敗。",
             correlation_id,
         ) from error
-    finally:
-        connection.close()
-    try:
-        invalidate_holiday_query_cache()
-    except Exception:
-        LOGGER.exception("Holiday cache invalidation failed after committed apply")
     return BaseResponse(data=_receipt_payload(result), message="已套用國定假日變更")
 
 

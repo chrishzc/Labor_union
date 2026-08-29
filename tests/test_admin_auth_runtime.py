@@ -214,7 +214,7 @@ def test_capability_projection_ignores_legacy_persisted_subsets():
 
     response = line_admin.line_admin_capabilities(principal)
 
-    assert response.data["effective_capabilities"] == sorted(CAPABILITY_REGISTRY)
+    assert response.data.effective_capabilities == sorted(CAPABILITY_REGISTRY)
 
 
 def test_rich_menu_stale_preview_returns_typed_conflict():

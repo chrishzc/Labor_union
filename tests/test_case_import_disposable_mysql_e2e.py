@@ -29,6 +29,7 @@ from infrastructure.mysql.case_import_repository import (
 )
 from infrastructure.mysql.hcm_workbook_import_repository import HcmWorkbookImportRepository
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from scripts.imports.import_client_hcm import HcmLegacyRowIntake
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.money import MoneyNTD
@@ -113,6 +114,7 @@ def test_valid_hcm_workbook_creates_complete_formal_case_and_bootstrap(tmp_path)
     try:
         service = HcmWorkbookImportService(
             HcmWorkbookImportRepository(connection), HcmLegacyRowIntake(connection),
+            lambda: MySqlUnitOfWork(connection),
         )
         frame = service.load_frame(str(workbook_path))
         assert frame is not None
@@ -143,6 +145,7 @@ def test_dirty_hcm_workbook_writes_parseable_client_fields_and_keeps_invalid_fie
     try:
         service = HcmWorkbookImportService(
             HcmWorkbookImportRepository(connection), HcmLegacyRowIntake(connection),
+            lambda: MySqlUnitOfWork(connection),
         )
         frame = service.load_frame(str(workbook_path))
         assert frame is not None

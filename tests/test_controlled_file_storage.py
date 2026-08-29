@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -228,6 +229,25 @@ def test_registered_staging_read_remains_available_after_staging_ttl(tmp_path: P
 
     assert expired.value.code == "controlled_file_staging_expired"
     assert registered.content == content
+
+
+def test_staging_ttl_is_configurable_and_defaults_are_not_mutated(tmp_path: Path) -> None:
+    current = [200.0]
+    storage = FileSystemControlledFileStorage(
+        tmp_path,
+        staging_ttl=timedelta(hours=2),
+        clock=lambda: current[0],
+    )
+
+    staged = storage.put_staged(
+        idempotency_key="controlled-file:ttl-001",
+        filename="signed.pdf",
+        mime_type="application/pdf",
+        content=b"payload",
+    )
+
+    assert storage.staging_ttl == timedelta(hours=2)
+    assert staged.expires_at.timestamp() == 7_400.0
 
 
 @pytest.mark.parametrize("idempotency_key", ["Uppercase", " leading", "bad/key", "a" * 192])

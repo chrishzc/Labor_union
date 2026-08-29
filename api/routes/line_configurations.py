@@ -19,8 +19,10 @@ from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.line_configurations import (
     ApplyLineConfigurationRequest,
+    LineConfigurationPreviewView,
     LineConfigurationSafePublicView,
     LineConfigurationSafeResponse,
+    LineConfigurationSnapshotView,
     PreviewLineConfigurationRequest,
 )
 from domains.line.configuration import (
@@ -69,27 +71,27 @@ def get_safe_configuration(
     )
 
 
-@router.get("/{kind}", response_model=BaseResponse[dict])
+@router.get("/{kind}", response_model=BaseResponse[LineConfigurationSnapshotView])
 def get_configuration(
     kind: LineConfigurationKind,
     request: Request,
     principal: AdminPrincipal = Depends(require_line_configuration_reader),
-):
+) -> BaseResponse[LineConfigurationSnapshotView]:
     _require_dedicated_rich_menu_draft(kind, request)
     snapshot = get_line_configuration_application().get(
         kind,
         admin_actor_context(principal),
     )
-    return BaseResponse(data=_snapshot(snapshot))
+    return BaseResponse[LineConfigurationSnapshotView](data=_snapshot(snapshot))
 
 
-@router.post("/{kind}/preview", response_model=BaseResponse[dict])
+@router.post("/{kind}/preview", response_model=BaseResponse[LineConfigurationPreviewView])
 def preview_configuration(
     kind: LineConfigurationKind,
     payload: PreviewLineConfigurationRequest,
     request: Request,
     principal: AdminPrincipal = Depends(require_line_configuration_manager),
-):
+) -> BaseResponse[LineConfigurationPreviewView]:
     _require_dedicated_rich_menu_draft(kind, request)
     try:
         candidate = get_line_configuration_application().preview(
@@ -100,24 +102,24 @@ def preview_configuration(
         )
     except (LineConfigurationRevisionConflict, LineMessageConfigurationError, ValueError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    return BaseResponse(
-        data={
-            "kind": candidate.kind.value,
-            "before_revision": candidate.before_revision.value,
-            "resulting_revision": candidate.resulting_revision.value,
-            "definition": json.loads(candidate.definition_json),
-            "fingerprint": candidate.fingerprint.value,
-        }
+    return BaseResponse[LineConfigurationPreviewView](
+        data=LineConfigurationPreviewView(
+            kind=candidate.kind,
+            before_revision=candidate.before_revision.value,
+            resulting_revision=candidate.resulting_revision.value,
+            definition=json.loads(candidate.definition_json),
+            fingerprint=candidate.fingerprint.value,
+        )
     )
 
 
-@router.put("/{kind}", response_model=BaseResponse[dict])
+@router.put("/{kind}", response_model=BaseResponse[LineConfigurationSnapshotView])
 def apply_configuration(
     kind: LineConfigurationKind,
     payload: ApplyLineConfigurationRequest,
     request: Request,
     principal: AdminPrincipal = Depends(require_line_configuration_manager),
-):
+) -> BaseResponse[LineConfigurationSnapshotView]:
     _require_dedicated_rich_menu_draft(kind, request)
     try:
         result = get_line_configuration_application().apply(
@@ -134,15 +136,18 @@ def apply_configuration(
     request.state.audit_action = "line.configuration.apply"
     request.state.audit_resource_type = "line_configuration"
     request.state.audit_resource_id = kind.value
-    return BaseResponse(data=_snapshot(result.snapshot), message="LINE 設定版本已套用")
+    return BaseResponse[LineConfigurationSnapshotView](
+        data=_snapshot(result.snapshot),
+        message="LINE 設定版本已套用",
+    )
 
 
-def _snapshot(snapshot) -> dict[str, object]:
-    return {
-        "kind": snapshot.kind.value,
-        "revision": snapshot.revision.value,
-        "definition": json.loads(snapshot.definition_json),
-    }
+def _snapshot(snapshot) -> LineConfigurationSnapshotView:
+    return LineConfigurationSnapshotView(
+        kind=snapshot.kind,
+        revision=snapshot.revision.value,
+        definition=json.loads(snapshot.definition_json),
+    )
 
 
 def _require_dedicated_rich_menu_draft(

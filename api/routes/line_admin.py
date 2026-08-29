@@ -15,6 +15,12 @@ from fastapi import APIRouter, Depends
 
 from api.dependencies.admin_auth import require_line_viewer
 from api.schemas.base import BaseResponse
+from api.schemas.line_admin import (
+    LineAdminCapabilitiesView,
+    LineAdminConfigFilesView,
+    LineAdminFeatureFlagsView,
+    LineAdminRuntimeAvailabilityView,
+)
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.line_runtime_repository import MySqlLineRuntimeRepository
 from subsystems.line.runtime_health import classify_line_worker_health
@@ -88,54 +94,57 @@ def line_admin_health():
     )
 
 
-@router.get("/capabilities", response_model=BaseResponse[dict])
+@router.get(
+    "/capabilities",
+    response_model=BaseResponse[LineAdminCapabilitiesView],
+)
 # Keep this projection together so operators can audit capability and feature drift in one response.
 def line_admin_capabilities(
     principal: AdminPrincipal = Depends(require_line_viewer),
-):
+) -> BaseResponse[LineAdminCapabilitiesView]:
     return BaseResponse(
-        data={
-            "stage": "9",
-            "effective_capabilities": sorted(principal.effective_capabilities()),
-            "features": {
-                "health_overview": True,
-                "message_template_api": True,
-                "message_schedule_api": True,
-                "message_schedule_editor": True,
-                "line_task_admin_api": True,
-                "line_task_attempt_history": True,
-                "rich_menu_api": True,
-                "rich_menu_editor": True,
-                "rich_menu_publication_history": True,
-                "liff_config_api": True,
-                "liff_config_editor": True,
-                "liff_runtime_config": True,
-                "liff_revision_history": True,
-                "customer_service_config_api": True,
-                "staff_review_api": True,
-                "staff_review_management": True,
-                "admin_session": True,
-                "role_permissions": True,
-                "audit_log": True,
-                "order_group_management": True,
-                "contract_evidence": True,
-                "knowledge_management": True,
-            },
-            "runtime_availability": {
-                "line_worker_enabled": True,
-                "contract_worker_enabled": _enabled(
+        data=LineAdminCapabilitiesView(
+            stage="9",
+            effective_capabilities=sorted(principal.effective_capabilities()),
+            features=LineAdminFeatureFlagsView(
+                health_overview=True,
+                message_template_api=True,
+                message_schedule_api=True,
+                message_schedule_editor=True,
+                line_task_admin_api=True,
+                line_task_attempt_history=True,
+                rich_menu_api=True,
+                rich_menu_editor=True,
+                rich_menu_publication_history=True,
+                liff_config_api=True,
+                liff_config_editor=True,
+                liff_runtime_config=True,
+                liff_revision_history=True,
+                customer_service_config_api=True,
+                staff_review_api=True,
+                staff_review_management=True,
+                admin_session=True,
+                role_permissions=True,
+                audit_log=True,
+                order_group_management=True,
+                contract_evidence=True,
+                knowledge_management=True,
+            ),
+            runtime_availability=LineAdminRuntimeAvailabilityView(
+                line_worker_enabled=True,
+                contract_worker_enabled=_enabled(
                     "CONTRACT_INTEGRATION_RUNTIME_ENABLED"
                 ),
-                "knowledge_worker_enabled": _enabled(
+                knowledge_worker_enabled=_enabled(
                     "KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED"
                 ),
-            },
-            "config_files": {
-                "message_templates": (PROJECT_ROOT / "config/message_templates.json").exists(),
-                "message_schedules": (PROJECT_ROOT / "config/message_schedules.json").exists(),
-                "line_menus": (PROJECT_ROOT / "config/line_menu.json").exists(),
-                "liff": (PROJECT_ROOT / "config/liff_settings.json").exists(),
-                "customer_service": (PROJECT_ROOT / "config/customer_service.json").exists(),
-            },
-        }
+            ),
+            config_files=LineAdminConfigFilesView(
+                message_templates=(PROJECT_ROOT / "config/message_templates.json").exists(),
+                message_schedules=(PROJECT_ROOT / "config/message_schedules.json").exists(),
+                line_menus=(PROJECT_ROOT / "config/line_menu.json").exists(),
+                liff=(PROJECT_ROOT / "config/liff_settings.json").exists(),
+                customer_service=(PROJECT_ROOT / "config/customer_service.json").exists(),
+            ),
+        ),
     )

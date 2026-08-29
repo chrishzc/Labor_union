@@ -2,15 +2,10 @@
 """
 scripts/migrate_assignment_schedule_integrity.py
 
-可稽核的 live-DB migration 腳本（具備完整防護）：
-1. 預設為 check 模式，僅執行檢核與產出 Manifest JSON，零寫入破壞。
-2. 傳入 --apply 時，在上游前置檢查與緊接在 ALTER 前的第二輪連線檢查均無錯誤的前提下，執行：
-   ALTER TABLE staff_schedule ADD UNIQUE KEY uq_staff_schedule_assignment_date (assignment_id, work_date)
-3. 嚴禁在輸出、日誌或 Manifest 中洩漏資料庫密碼或完整 DSN。
-4. 索引解析相容 DictCursor 與 Tuple Cursor、大小寫正規化並依 SEQ_IN_INDEX 顯式排序。
-5. 欄位或 FK 缺失時自動阻斷依賴 assignment_id 的後續查詢。
-6. canonical index 已存在且 post-check 失敗時，於早退分支明確填入 error。
-7. ALTER 失敗時保護 post-check 不覆蓋主錯誤；post_check 失敗時明確設置 post_check_failed=true 且 exit code 1。
+唯讀的 assignment schedule integrity 檢查器。
+
+目前沒有 canonical release caller；舊 direct DDL writer 已退役。`--apply`
+固定 fail closed，唯讀檢查也必須明確提供 target database。
 """
 import argparse
 import json
@@ -28,6 +23,11 @@ if hasattr(sys.stderr, 'reconfigure'):
 
 # 載入 .env
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
+APPLY_BLOCKED_REASON = (
+    "no current canonical runner caller for the assignment schedule integrity "
+    "migration; direct DDL apply is blocked"
+)
 
 
 def mask_secrets(obj, secrets):
@@ -54,14 +54,14 @@ def mask_secrets(obj, secrets):
     return obj
 
 
-def get_db_config():
+def get_db_config(target_database=None):
     """取得資料庫設定，密碼僅供連線，嚴禁寫入輸出或 Manifest。"""
     return {
-        'host': os.getenv('DB_HOST', '127.0.0.1'),
+        'host': os.getenv('DB_HOST', '').strip(),
         'port': int(os.getenv('DB_PORT', 3306)),
-        'user': os.getenv('DB_USER', 'root'),
-        'password': os.getenv('DB_PASSWORD', '1234'),
-        'database': os.getenv('DB_NAME', 'labor_union_db'),
+        'user': os.getenv('DB_USER', '').strip(),
+        'password': os.getenv('DB_PASSWORD', ''),
+        'database': str(target_database or '').strip(),
         'charset': 'utf8mb4'
     }
 
@@ -341,138 +341,39 @@ def run_post_check(cursor, db_name):
     }
 
 
-def apply_migration(connection, cursor, db_name, secrets=None):
-    """
-    執行 --apply：
-    1. 執行 Pass 1 的 pre-check。
-    2. 緊接在 ALTER 之前利用同一 connection/cursor 執行 Pass 2 的 pre-check。
-    3. 只有兩次檢查完全零錯誤且 Canonical 索引不存在時，才執行 ALTER。
-    4. ALTER 失敗時原樣遮罩回報且不 commit、不 retry、不刪除資料。受保護的 post_check 不覆蓋主錯誤。
-    5. 若 canonical index 已存在且 post-check 失敗，在早退分支中明確記錄 error 並標記 post_check_failed=true。
-    """
-    secrets = secrets or []
-
-    # Pass 1 Check
-    manifest = run_checks(cursor, db_name)
-    manifest['mode'] = 'apply'
-
-    if manifest['errors']:
-        manifest['apply_result'] = {
-            'applied': False,
-            'reason': 'Pass 1 pre-checks failed with errors',
-            'errors': manifest['errors']
-        }
-        manifest['success'] = False
-        manifest['post_check_failed'] = False
-        return manifest
-
-    if manifest['index_status']['canonical_index_exists']:
-        manifest['apply_result'] = {
-            'applied': False,
-            'reason': 'Canonical index already exists and is valid'
-        }
-        try:
-            post_check = run_post_check(cursor, db_name)
-            manifest['post_check'] = post_check
-            manifest['post_check_failed'] = not post_check['all_post_checks_passed']
-            if not post_check['all_post_checks_passed']:
-                manifest['errors'].append('Post-check failed: canonical or ukey_staff_date index missing or invalid')
-        except Exception as exc:
-            masked_exc = mask_secrets(str(exc), secrets)
-            manifest['post_check'] = None
-            manifest['post_check_failed'] = True
-            manifest['errors'].append(f'Post-check execution failed: {masked_exc}')
-        manifest['errors'] = sorted(manifest['errors'])
-        manifest['success'] = (len(manifest['errors']) == 0 and not manifest['post_check_failed'])
-        return manifest
-
-    # Pass 2 Check (同一連線緊接在 ALTER 之前)
-    pass2_manifest = run_checks(cursor, db_name)
-    if pass2_manifest['errors']:
-        manifest['errors'] = pass2_manifest['errors']
-        manifest['apply_result'] = {
-            'applied': False,
-            'reason': 'Pass 2 pre-checks immediately before DDL failed with errors',
-            'errors': pass2_manifest['errors']
-        }
-        manifest['success'] = False
-        manifest['post_check_failed'] = False
-        return manifest
-
-    if pass2_manifest['index_status']['canonical_index_exists']:
-        manifest['apply_result'] = {
-            'applied': False,
-            'reason': 'Canonical index was created concurrently prior to DDL'
-        }
-        try:
-            post_check = run_post_check(cursor, db_name)
-            manifest['post_check'] = post_check
-            manifest['post_check_failed'] = not post_check['all_post_checks_passed']
-            if not post_check['all_post_checks_passed']:
-                manifest['errors'].append('Post-check failed: canonical or ukey_staff_date index missing or invalid')
-        except Exception as exc:
-            masked_exc = mask_secrets(str(exc), secrets)
-            manifest['post_check'] = None
-            manifest['post_check_failed'] = True
-            manifest['errors'].append(f'Post-check execution failed: {masked_exc}')
-        manifest['errors'] = sorted(manifest['errors'])
-        manifest['success'] = (len(manifest['errors']) == 0 and not manifest['post_check_failed'])
-        return manifest
-
-    alter_sql = "ALTER TABLE staff_schedule ADD UNIQUE KEY uq_staff_schedule_assignment_date (assignment_id, work_date)"
-    try:
-        cursor.execute(alter_sql)
-        connection.commit()
-        manifest['apply_result'] = {
-            'applied': True,
-            'executed_sql': alter_sql
-        }
-    except Exception as exc:
-        masked_exc = mask_secrets(str(exc), secrets)
-        manifest['apply_result'] = {
-            'applied': False,
-            'reason': f'ALTER TABLE failed: {masked_exc}'
-        }
-        manifest['errors'].append(f'ALTER TABLE failed: {masked_exc}')
-        manifest['errors'] = sorted(manifest['errors'])
-        manifest['success'] = False
-        # 受保護的 post-check，防止例外覆蓋主錯誤
-        try:
-            post_check = run_post_check(cursor, db_name)
-            manifest['post_check'] = post_check
-            manifest['post_check_failed'] = not post_check['all_post_checks_passed']
-        except Exception:
-            manifest['post_check'] = None
-            manifest['post_check_failed'] = True
-        return manifest
-
-    # Post Check
-    try:
-        post_check = run_post_check(cursor, db_name)
-        manifest['post_check'] = post_check
-        manifest['post_check_failed'] = not post_check['all_post_checks_passed']
-        if not post_check['all_post_checks_passed']:
-            manifest['errors'].append('Post-check failed: canonical or ukey_staff_date index missing or invalid')
-            manifest['success'] = False
-        else:
-            manifest['success'] = (len(manifest['errors']) == 0)
-    except Exception as exc:
-        masked_exc = mask_secrets(str(exc), secrets)
-        manifest['errors'].append(f'Post-check execution failed: {masked_exc}')
-        manifest['post_check_failed'] = True
-        manifest['success'] = False
-
-    manifest['errors'] = sorted(manifest['errors'])
-    return manifest
-
-
 def main():
     parser = argparse.ArgumentParser(description="AssignmentScheduleIntegrityMigration")
-    parser.add_argument('--apply', action='store_true', help='Execute ALTER TABLE to add unique key')
+    parser.add_argument('--apply', action='store_true', help='Retired; always fails closed')
+    parser.add_argument('--target-database', help='Exact database used for read-only checks')
     parser.add_argument('--report-path', type=str, help='Optional path to write manifest JSON report')
     args = parser.parse_args()
 
-    db_config = get_db_config()
+    # This migration has no current release artifact or canonical runner
+    # caller.  Keep read-only inspection available, but never leave a direct
+    # DDL path that can report success outside the governed runner.
+    if args.apply:
+        blocked_manifest = {
+            'mode': 'apply',
+            'success': False,
+            'post_check_failed': False,
+            'errors': [APPLY_BLOCKED_REASON],
+            'apply_result': {
+                'applied': False,
+                'reason': APPLY_BLOCKED_REASON,
+            },
+        }
+        print(json.dumps(blocked_manifest, ensure_ascii=False, indent=2, sort_keys=True))
+        sys.exit(2)
+
+    if not args.target_database:
+        print(json.dumps({
+            'mode': 'check',
+            'success': False,
+            'errors': ['explicit --target-database is required for read-only checks'],
+        }, ensure_ascii=False, indent=2, sort_keys=True))
+        sys.exit(2)
+
+    db_config = get_db_config(args.target_database)
     dsn_str = f"mysql://{db_config.get('user')}:{db_config.get('password')}@{db_config.get('host')}:{db_config.get('port')}/{db_config.get('database')}"
     secrets = [db_config.get('password'), dsn_str]
 
@@ -494,11 +395,8 @@ def main():
         with connection.cursor() as cursor:
             cursor.execute("SET NAMES utf8mb4;")
 
-            if args.apply:
-                manifest = apply_migration(connection, cursor, db_config['database'], secrets)
-            else:
-                manifest = run_checks(cursor, db_config['database'])
-                manifest['mode'] = 'check'
+            manifest = run_checks(cursor, db_config['database'])
+            manifest['mode'] = 'check'
 
             # 全面秘密遮罩
             manifest = mask_secrets(manifest, secrets)

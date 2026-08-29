@@ -10,7 +10,7 @@ from datetime import datetime
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 import pandas as pd
 
@@ -137,9 +137,10 @@ class HcmWorkbookUnavailable(RuntimeError):
 
 
 class HcmWorkbookImportService:
-    def __init__(self, repository: HcmWorkbookImportRepository, intake: HcmRowIntake) -> None:
+    def __init__(self, repository: HcmWorkbookImportRepository, intake: HcmRowIntake, unit_of_work_factory: Callable[[], object]) -> None:
         self._repository = repository
         self._intake = intake
+        self._unit_of_work_factory = unit_of_work_factory
 
     def ingest(self, frame: pd.DataFrame, source_path: str, key: str, actor: str, correlation_id: str) -> HcmWorkbookReceipt:
         digest = _workbook_digest(source_path)
@@ -152,13 +153,17 @@ class HcmWorkbookImportService:
             digest_replay = self._stored_digest_replay(digest)
             if digest_replay is not None:
                 return digest_replay
-            claim = self._repository.claim(key, digest, correlation_id)
-            if claim == "conflict":
-                raise HcmWorkbookConflict("hcm_workbook_idempotency_conflict")
+            with self._unit_of_work_factory() as unit_of_work:
+                claim = self._repository.claim(key, digest, correlation_id)
+                if claim == "conflict":
+                    raise HcmWorkbookConflict("hcm_workbook_idempotency_conflict")
+                unit_of_work.commit()
             outcomes = self._intake.import_rows(frame, source_path)
             _assert_terminal_row_outcomes(len(frame), outcomes)
             receipt = _receipt(digest, len(frame), outcomes, False)
-            self._repository.save_receipt(key, digest, actor, receipt.as_dict())
+            with self._unit_of_work_factory() as unit_of_work:
+                self._repository.save_receipt(key, digest, actor, receipt.as_dict())
+                unit_of_work.commit()
             return receipt
         finally:
             self._repository.release_lock(key)

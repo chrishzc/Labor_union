@@ -1,6 +1,6 @@
 {
   "contract": "production-writer-inventory/v1",
-  "finding_count": 666,
+  "finding_count": 1056,
   "gone_route_rules": [
     {
       "forbidden_calls": [
@@ -213,6 +213,16 @@
       "strategy": "exclusive-cross-domain-adjustment-adapter"
     },
     {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "contract_signing",
+      "patterns": [
+        "infrastructure/db/contract_external_signing_repository.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-contract-signing-persistence-adapter"
+    },
+    {
       "exit_slice": "slice-3",
       "legacy_status": "authoritative",
       "owner": "government_subsidy",
@@ -294,6 +304,192 @@
       "owner": "anomalies",
       "patterns": [
         "infrastructure/mysql/anomaly_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-anomaly-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "contract_signing",
+      "patterns": [
+        "infrastructure/db/contract_unsigned_pdf_repository.py",
+        "infrastructure/db/external_staff_completion_port.py",
+        "infrastructure/mysql/historical_baseline_contract_signing_owner_adapter.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-contract-signing-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "controlled_files",
+      "patterns": ["infrastructure/db/controlled_file_repository.py"],
+      "runtime_class": "production",
+      "strategy": "exclusive-controlled-files-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "access_control",
+      "patterns": [
+        "infrastructure/mysql/admin_capability_grant_repository.py",
+        "infrastructure/mysql/admin_command_repository.py",
+        "infrastructure/mysql/data_browser_query_repository.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-access-and-admin-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "global_infrastructure",
+      "patterns": [
+        "infrastructure/mysql/background_job_repository.py",
+        "infrastructure/mysql/runtime_monitor_repository.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "shared-runtime-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "case_onboarding",
+      "patterns": [
+        "infrastructure/mysql/beclass_import_review_anomaly_source.py",
+        "infrastructure/mysql/hcm_*.py",
+        "infrastructure/mysql/import_warning_*.py",
+        "infrastructure/mysql/provisional_registration_repository.py",
+        "infrastructure/mysql/staff_historical_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-case-onboarding-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "customer_service",
+      "patterns": ["infrastructure/mysql/customer_service_*.py"],
+      "runtime_class": "production",
+      "strategy": "exclusive-customer-service-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "government_subsidy",
+      "patterns": [
+        "infrastructure/mysql/government_payer_master_repository.py",
+        "infrastructure/mysql/government_return_outbound_overage_anomaly_source.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-government-subsidy-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "historical_baseline_projection",
+      "patterns": [
+        "infrastructure/mysql/historical_baseline_projector_repository.py",
+        "infrastructure/mysql/historical_baseline_projector_worker.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "restricted-historical-baseline-projection-boundary"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "orders",
+      "patterns": [
+        "infrastructure/mysql/historical_baseline_orders_owner_adapter.py",
+        "infrastructure/mysql/historical_operational_baseline_repository.py",
+        "infrastructure/mysql/historical_order_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-orders-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "finance_import",
+      "patterns": ["infrastructure/mysql/historical_reprocess_repository.py"],
+      "runtime_class": "production",
+      "strategy": "exclusive-finance-import-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "knowledge_retrieval",
+      "patterns": ["infrastructure/mysql/knowledge_retrieval_repository.py"],
+      "runtime_class": "production",
+      "strategy": "exclusive-knowledge-retrieval-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "line",
+      "patterns": ["infrastructure/mysql/line_*.py"],
+      "runtime_class": "production",
+      "strategy": "exclusive-line-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "scheduling",
+      "patterns": [
+        "infrastructure/mysql/historical_baseline_matching_owner_adapter.py",
+        "infrastructure/mysql/historical_baseline_scheduling_owner_adapter.py",
+        "infrastructure/mysql/matching_*.py",
+        "infrastructure/mysql/scheduling_checkpoint_notification_source_repository.py",
+        "infrastructure/mysql/service_before_replacement_*.py",
+        "infrastructure/mysql/service_day_*.py",
+        "infrastructure/mysql/service_date_confirmation_repository.py",
+        "infrastructure/mysql/staff_availability_repository.py",
+        "infrastructure/mysql/staff_matching_preference_repository.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-scheduling-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "staff_operations",
+      "patterns": [
+        "infrastructure/mysql/staff_leave_intake_repository.py",
+        "infrastructure/mysql/staff_qualification_master_repository.py",
+        "infrastructure/mysql/staff_retirement_repository.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-staff-operations-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "client_finance",
+      "patterns": [
+        "infrastructure/mysql/historical_baseline_client_finance_owner_adapter.py",
+        "infrastructure/mysql/subsidy_advance_recovery_repository.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-client-finance-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "staff_payables",
+      "patterns": [
+        "infrastructure/mysql/historical_baseline_staff_payables_owner_adapter.py",
+        "infrastructure/mysql/staff_overpayment_recovery_repository.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-staff-payables-persistence-adapter"
+    },
+    {
+      "exit_slice": "task-97",
+      "legacy_status": "authoritative",
+      "owner": "anomalies",
+      "patterns": [
+        "infrastructure/mysql/case_anomaly_readback_adapter.py",
+        "infrastructure/mysql/process_reminder_anomaly_source.py"
       ],
       "runtime_class": "production",
       "strategy": "exclusive-anomaly-persistence-adapter"
@@ -444,5 +640,5 @@
     "line",
     "scripts"
   ],
-  "scan_fingerprint": "d7ab5eb7f257037fd26407a78e4c82347b01c945120bd33df77a6c942e50f3d5"
+  "scan_fingerprint": "a9f09114a590cb3bf37a96fbee3de0ac43fbae22607b78648564e8497be2c41f"
 }

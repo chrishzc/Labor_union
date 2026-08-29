@@ -7,19 +7,17 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 
-from api.dependencies.line_worker_operation import _media_storage_root
+from api.dependencies.service_day_media import get_liff_meal_photo_upload_application
 from api.routes.line_staff_self_service import _required_staff, _verified_line_user_id
 from api.schemas.base import BaseResponse
 from api.schemas.line_staff_self_service import StaffLiffRequest, StaffServiceDayMediaResponse
 from shared_kernel.identities import IdempotencyKey
-from infrastructure.line.media_adapters import FileSystemLineMediaObjectStore
-from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from subsystems.line.liff_media_upload import (
     LiffMealPhotoUpload,
-    existing_liff_upload_matches,
-    prepare_liff_meal_photo_upload,
+    LiffMealPhotoUploadApplication,
+    LiffMealPhotoUploadStaffBindingNotFound,
 )
 
 
@@ -34,6 +32,9 @@ async def upload_service_day_meal_photo(
     line_id_token: Annotated[str, Form(max_length=4096)] = "",
     development_line_user_id: Annotated[str, Form(max_length=191)] = "",
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=160)] = ...,
+    application: LiffMealPhotoUploadApplication = Depends(
+        get_liff_meal_photo_upload_application
+    ),
 ):
     payload = StaffLiffRequest(
         flow_id=flow_id,
@@ -51,21 +52,16 @@ async def upload_service_day_meal_photo(
         IdempotencyKey(idempotency_key),
     )
     try:
-        metadata = prepare_liff_meal_photo_upload(command)
+        result = application.upload(command)
+    except LiffMealPhotoUploadStaffBindingNotFound:
+        _required_staff(None)
     except ValueError as error:
-        raise HTTPException(status_code=422, detail={"code": str(error)}) from error
-    with open_line_unit_of_work() as unit_of_work:
-        _required_staff(unit_of_work.customer_service.staff_subject(line_user_id.value))
-        existing = unit_of_work.media_metadata.get(metadata.provider_media_id)
-        if existing is not None:
-            if not existing_liff_upload_matches(existing, command):
-                raise HTTPException(status_code=409, detail={"code": "service_day_meal_photo_idempotency_conflict"})
-            unit_of_work.commit()
-            return BaseResponse(data={"media_id": metadata.provider_media_id, "content_type": metadata.content_type, "size_bytes": metadata.size_bytes, "outcome": "existing"})
-        object_reference = FileSystemLineMediaObjectStore(_media_storage_root()).put(metadata, content)
-        unit_of_work.media_metadata.register(metadata, object_reference, command.idempotency_key)
-        unit_of_work.commit()
-    return BaseResponse(data={"media_id": metadata.provider_media_id, "content_type": metadata.content_type, "size_bytes": metadata.size_bytes, "outcome": "created"})
+        code = str(error)
+        raise HTTPException(
+            status_code=409 if code == "service_day_meal_photo_idempotency_conflict" else 422,
+            detail={"code": code},
+        ) from error
+    return BaseResponse(data={"media_id": result.media_id, "content_type": result.content_type, "size_bytes": result.size_bytes, "outcome": result.outcome})
 
 
 __all__ = ["router"]

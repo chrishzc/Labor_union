@@ -6,7 +6,7 @@ Description: 協調月嫂已驗證身分、服務日所有權、日誌完成、r
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
 from domains.scheduling.service_day_log import ServiceDayLogIntent, require_service_day_log_completion
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -125,6 +125,24 @@ class ServiceDayLogWorkflow:
         if result is None:
             raise ServiceDayLogWorkflowError("service_day_log_not_found")
         return result
+
+
+class ServiceDayLogApplication:
+    def __init__(self, repository: ServiceDayLogRepository, unit_of_work_factory: Callable[[], object]) -> None:
+        self._workflow = ServiceDayLogWorkflow(repository)
+        self._unit_of_work_factory = unit_of_work_factory
+
+    def preview(self, command: PreviewServiceDayLog) -> ServiceDayLogPreview:
+        return self._workflow.preview(command)
+
+    def apply(self, command: ApplyServiceDayLog) -> ServiceDayLogResult:
+        with self._unit_of_work_factory() as unit_of_work:
+            result = self._workflow.apply(command)
+            unit_of_work.commit()
+            return result
+
+    def query(self, log_id: int, staff_id: int, line_user_id: str) -> ServiceDayLogResult:
+        return self._workflow.query(log_id, staff_id, line_user_id)
 
 
 def _blockers(requires_cooking: bool | None) -> tuple[str, ...]:

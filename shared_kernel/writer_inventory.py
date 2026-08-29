@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fnmatch import fnmatch
 import hashlib
 import json
@@ -33,6 +33,7 @@ class WriterFinding:
     operation: str
     table: str
     fingerprint: str
+    occurrence: int = 1
 
     @property
     def identity(self) -> str:
@@ -44,6 +45,7 @@ class WriterFinding:
                 self.operation,
                 self.table,
                 self.fingerprint,
+                str(self.occurrence),
             )
         )
 
@@ -156,6 +158,7 @@ class _WriterCallVisitor(ast.NodeVisitor):
         self.string_constants = string_constants
         self.symbol_stack: list[str] = []
         self.findings: list[WriterFinding] = []
+        self.occurrences: dict[tuple[str, str, str, str, str], int] = {}
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._visit_symbol(node)
@@ -179,6 +182,16 @@ class _WriterCallVisitor(ast.NodeVisitor):
             self.string_constants,
         )
         if finding is not None:
+            key = (
+                finding.symbol,
+                finding.method,
+                finding.operation,
+                finding.table,
+                finding.fingerprint,
+            )
+            occurrence = self.occurrences.get(key, 0) + 1
+            self.occurrences[key] = occurrence
+            finding = replace(finding, occurrence=occurrence)
             self.findings.append(finding)
         self.generic_visit(node)
 

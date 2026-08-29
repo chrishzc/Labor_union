@@ -62,14 +62,14 @@ flowchart LR
 | Staff Payables | `domains/staff_payables/`、`subsystems/staff_payables/` | 月嫂應付、出款與退匯／沖正投影 |
 | Finance Import | `domains/finance_import/`、`subsystems/finance_import/` | 銀行來源事實、分類、修正，並以 borrowed UoW 委派 owning Domain |
 | Government Subsidy | `domains/government_subsidy/`、`subsystems/government_subsidy/` | 申請、核准、政府撥款、allocation 與 reversal |
-| Anomalies | `domains/anomalies/`、`subsystems/anomalies/` | 根事實異常的 projection、告警與人工處理進度 |
+| Anomalies | `domains/anomalies/`、`subsystems/anomalies/` | 15-code current-state projection 與 owner action dispatch；不擁有 claim／resolve 進度或 occurrence history |
 | Case Import | `domains/case_import/`、`subsystems/case_import/` | BeClass／HCM 來源驗證、review 與 case bootstrap |
 | Access／LINE／Jobs | `subsystems/access/`、`subsystems/line/`、`subsystems/jobs/` | 管理員身分與 capability、LINE inbox／delivery、durable worker supervision |
 
 完整 Domain ownership、SSOT 與跨域關係請讀
 `01_規格基線/15_正式規格索引與裁決總表.md`；其中的圖、`16`～`24` 補充裁決與權威順序
-優先於本摘要。銀行流水、帳務異常及管理端處置另以
-`22_銀行流水匯入與帳務異常處理正式規格.md` 的最新明確裁決為準。
+優先於本摘要。Anomalies lifecycle 固定先讀 `06_Anomalies_Domain.md` 與索引最新
+current-state slimming 裁決；`22_銀行流水匯入與帳務異常處理正式規格.md` 只繼續擁有銀行流水與帳務 owner 根事實，不得復活舊 anomaly tracking／resolve 機制。
 
 ## 常見改動的定位
 

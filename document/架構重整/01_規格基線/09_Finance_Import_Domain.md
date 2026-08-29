@@ -65,7 +65,8 @@ Finance Import 不使用單一巨大狀態欄位：
    - 已是 business classification 不得自動倒退。
 4. Reconciliation：由 owning Finance Domain ledger／allocation 推導；相容 projection
    可顯示 `pending → reconciled`，但不是第二套 SSOT，也不得倒退。
-5. Alert lifecycle：`open → claimed → resolved`，問題重現可 reopen。
+5. Current issue projection：只有 15-code owner predicate 當下成立時存在；predicate false 後
+   bounded fresh recheck 直接刪除 row。不存在 `open／claimed／resolved／reopen` lifecycle。
 
 Occurrence outcome 不得寫入 classification 或 reconciliation。正式退匯、退款、adjustment 與 reversal 是 owning Finance Domain 的 append-only ledger event，不把 Finance Import reconciliation 改回 pending。
 
@@ -385,44 +386,44 @@ Modules：
 若人員認為某筆 candidate 不應入帳，必須先使用 Correction Workbench 提供原因與合法
 target，重新產生 Preview；不得以無稽核的 checkbox 讓分類結果與 Apply 結果分離。
 
-## 6. Anomalies Ports
+## 6. Owner review 與 current-issue Ports
 
 ### 6.1 `finance_import_manual_review`：帳務區待確認
 
 普通 `non_business_review` 或分類／關聯目標暫時無法唯一判定的 canonical bank fact，
-逐筆轉入警示中心「帳務」區，不留在「資料匯入異常」。已具有明確 business
+逐筆轉入 Finance Import owner classification queue，不進入 `#anomalies`。已具有明確 business
 classification、但正式核銷仍 pending 的列，改用 owning Finance Domain 對應的既有
-finance alert code，不得一律改掛本代碼。Identity 綁定 canonical bank fact：
+owner work queue／current issue contract，不得一律改掛本代碼。Identity 綁定 canonical bank fact：
 
-- `alert_code = finance_import_manual_review`
+- `work_item_code = finance_import_manual_review`
 - `source_domain = finance_import`
 - `source_type = canonical_bank_fact`
 - `source_id = <finance_import_row_id>`
-- 每個 canonical bank fact 最多一個 active review。
+- 每個 canonical bank fact 最多一個 current owner review。
 
-Finance alert 顯示：
+Finance owner review 顯示：
 
 - 不可變銀行日期、整數金額、方向及遮蔽帳號；
 - 自動 classification、reason、合法候選對象與判定證據；
 - affected obligations、預計核銷結果與 available actions；
-- current fact version、alert version 與 idempotency identity。
+- current fact version、review version 與 idempotency identity。
 
 人員在同一帳務工作區選擇 classification、合法 target、reason 及 evidence。Server
 立即回傳 correction impact Preview；按下「確認修正並入帳」後執行
 `CorrectAndPostFinanceImportRow`：
 
 ```text
-lock canonical bank fact、alert version、target obligations
+lock canonical bank fact、review version、target obligations
 → fresh rebuild correction candidate
 → 驗證銀行金額完整 allocation 且所選 obligations 精確歸零
 → append manual classification decision event
 → owning Finance Domain append ledger／allocation
 → append reconciliation receipt
-→ append finance alert resolved event／outbox
+→ append owner receipt／outbox 與 durable current-issue recheck intent
 → commit
 ```
 
-任一步驟失敗全部 rollback，警示保持 active。UI 不直接連 DB，也不得送出 raw amount、
+任一步驟失敗全部 rollback，owner review 保持 current。UI 不直接連 DB，也不得送出 raw amount、
 derived balance 或 target status。若金額無法完整核銷，改提供 adjustment／refund／reversal
 等 owning Domain action，不得硬寫帳務。
 
@@ -457,10 +458,11 @@ Allowed details：
 - 完整銀行列；
 - 可用於猜測 identity 的非必要欄位。
 
-Refresh：
+Refresh（2026-08-29 current-state anomaly slimming supersession）：
 
 - import completion／reprocess completion 寫入 outbox intent；
-- projector post-commit create、update、resolve 或 reopen；
+- projector post-commit 只對 bounded scope 依 fresh owner facts upsert present／delete absent；不寫
+  resolve、reopen、claim 或 workflow event；
 - projection failure 不回滾已提交的銀行根事實或正式 ledger；
 - historical scan 是明確 Command，只讀根事實並更新 projection；
 - 一般 Query 不 scan；
@@ -476,7 +478,10 @@ active = integrity_inconsistent_count > 0
 occurrence membership CTE、bounded aggregate、grouped counts、`LIMIT 20` sample 及
 latest-run query 組成，不得把整批 canonical rows 載入記憶體。
 
-Remaining 為零時自動 resolve；問題存在或再次出現時即使曾人工 resolve 也 reopen。Claimed alert 更新 details 時保留認領資訊。
+`integrity_inconsistent_count = 0` 且 bounded recheck authoritative complete 時直接刪除
+current row。問題再次出現時以相同 stable `issue_key` 建立新 episode；不存在人工
+resolve、reopen 或 claimed metadata。Finance Import batch、canonical bank facts、owner occurrences、
+classification、ledger／allocation 與 receipts 仍保留在 Finance owner，不得被 anomaly cleanup 刪除。
 
 ## 7. Typed Commands／Results／Errors
 

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from api.dependencies.admin_auth import (
     require_line_configuration_manager,
@@ -19,7 +19,11 @@ from api.dependencies.admin_auth import (
 )
 from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_error_handlers
 from api.routes import line_configurations
-from api.schemas.line_configurations import LineConfigurationSafePublicView
+from api.schemas.line_configurations import (
+    LineConfigurationPreviewView,
+    LineConfigurationSafePublicView,
+    LineConfigurationSnapshotView,
+)
 from domains.line.configuration import LineConfigurationKind, LineConfigurationSnapshot
 from domains.line.identities import LineConfigurationRevision
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -164,6 +168,38 @@ def test_safe_public_view_rejects_extra_or_unknown_fields() -> None:
 
 
 @pytest.mark.parametrize(
+    ("view", "payload"),
+    [
+        (
+            LineConfigurationSnapshotView,
+            {
+                "kind": "liff",
+                "revision": 1,
+                "definition": {},
+                "unexpected": True,
+            },
+        ),
+        (
+            LineConfigurationPreviewView,
+            {
+                "kind": "liff",
+                "before_revision": 1,
+                "resulting_revision": 2,
+                "definition": {},
+                "fingerprint": "not-a-fingerprint",
+            },
+        ),
+    ],
+)
+def test_generic_output_views_reject_untyped_payloads(
+    view: type[BaseModel],
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        view.model_validate(payload)
+
+
+@pytest.mark.parametrize(
     ("failure", "expected_code", "expected_retryable"),
     [
         (
@@ -296,10 +332,44 @@ def test_other_configuration_kinds_keep_generic_query_preview_and_apply(
     )
 
     assert queried.status_code == 200
+    assert queried.json() == {
+        "success": True,
+        "message": "Success",
+        "data": {
+            "kind": "liff",
+            "revision": 9,
+            "definition": {
+                "menus": [],
+                "provider_id": "legacy-provider-secret",
+                "uri": "https://legacy.invalid/menu",
+            },
+        },
+        "error": None,
+    }
     assert previewed.status_code == 200
-    assert previewed.json()["data"]["resulting_revision"] == 10
+    assert previewed.json() == {
+        "success": True,
+        "message": "Success",
+        "data": {
+            "kind": "liff",
+            "before_revision": 9,
+            "resulting_revision": 10,
+            "definition": {"pages": []},
+            "fingerprint": "a" * 64,
+        },
+        "error": None,
+    }
     assert applied.status_code == 200
-    assert applied.json()["data"]["revision"] == 10
+    assert applied.json() == {
+        "success": True,
+        "message": "LINE 設定版本已套用",
+        "data": {
+            "kind": "liff",
+            "revision": 10,
+            "definition": {"pages": []},
+        },
+        "error": None,
+    }
     assert application.get_calls == [LineConfigurationKind.LIFF]
     assert application.preview_calls == [LineConfigurationKind.LIFF]
     assert application.apply_calls == [LineConfigurationKind.LIFF]

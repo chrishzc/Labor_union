@@ -1,0 +1,42 @@
+{
+  "contract": "formal-architecture-baseline/v1",
+  "writer_inventory": {
+    "roots": [
+      "api",
+      "domains",
+      "infrastructure",
+      "line",
+      "scripts",
+      "subsystems"
+    ],
+    "finding_count": 1541,
+    "scan_fingerprint": "728d360e0ed3a8cffef8b72ae85a96ff6d048d95bc38e7705874f4d49cbba919"
+  },
+  "legacy_projection_boundary": {
+    "fields": [
+      "subsidy_refund_receivable",
+      "subsidy_refund_refunded"
+    ],
+    "runtime_callers": [],
+    "retired_legacy_module": "subsystems/client_finance/subsidy_return_reconciliation.py",
+    "retired_legacy_module_path_exists": false,
+    "legacy_module_callers": []
+  },
+  "api_route_wiring": {
+    "client_refund_reversal": true,
+    "finance_import": true,
+    "government_subsidy": true
+  },
+  "schema_evidence": {
+    "legacy_projection_columns_preserved": true,
+    "canonical_client_finance_ledger_declared": true,
+    "subsidy_advance_recovery_schema_declared": true
+  },
+  "test_source_sha256": {
+    "tests/test_legacy_subsidy_projection_boundary.py": "61b854e9bcbb2b0663d3c6cd27fd8cb2c6bd3ef4f4eccd2bcf3a29b83c76f6aa",
+    "tests/test_client_refund_partial_allocation.py": "18c2eb4c90f597e85785f8f41909c8661929f924cb86856af5fb2bfd4781d128",
+    "tests/test_client_refund_return_reversal.py": "6e54100ccb7d690223efe1f2b2c4220113216060157d4860b593191c09f191d4",
+    "tests/test_client_subsidy_advance.py": "002df33aee609900224d94837a2c7948dbfa86b6c57bb9a39d5d57a972ba7e14",
+    "tests/test_client_subsidy_advance_recovery_workflow.py": "ab45b439176ae9aa395c33b35d370e23e88526c9b32201fd587d0c07c426bdeb"
+  }
+}

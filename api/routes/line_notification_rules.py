@@ -23,10 +23,14 @@ from api.dependencies.line_runtime import (
 from api.schemas.base import BaseResponse
 from api.schemas.line_notification_rules import (
     ApplyLineNotificationManualReplayRequest,
+    ApplyLineNotificationManualReplayView,
     DeleteLineNotificationRuleRequest,
     DeleteLineNotificationRuleView,
     LineNotificationRulesDefinition,
+    LineNotificationRulesCatalogView,
+    LineNotificationTimelineView,
     PreviewLineNotificationRulesRequest,
+    PreviewLineNotificationManualReplayView,
     PreviewLineNotificationRulesView,
     SaveLineNotificationRulesRequest,
     SaveLineNotificationRulesView,
@@ -48,7 +52,7 @@ from subsystems.line.notification_rule_administration import (
 router = APIRouter(prefix="/api/v1/line/notification-rules", tags=["LINE Notification Rules"])
 
 
-@router.get("", response_model=BaseResponse[dict])
+@router.get("", response_model=BaseResponse[LineNotificationRulesCatalogView])
 def get_notification_rules(
     principal: AdminPrincipal = Depends(require_line_configuration_reader),
 ):
@@ -57,13 +61,15 @@ def get_notification_rules(
         admin_actor_context(principal),
     )
     definition = _definition_from_snapshot(snapshot.definition_json)
-    return BaseResponse(data={
-        "revision": snapshot.revision.value,
-        "definition": definition.model_dump(mode="json"),
-    })
+    return BaseResponse(
+        data=LineNotificationRulesCatalogView(
+            revision=snapshot.revision.value,
+            definition=definition,
+        )
+    )
 
 
-@router.get("/timeline/{case_no}", response_model=BaseResponse[dict])
+@router.get("/timeline/{case_no}", response_model=BaseResponse[LineNotificationTimelineView])
 def get_notification_timeline(
     case_no: str,
     principal: AdminPrincipal = Depends(require_line_configuration_reader),
@@ -74,10 +80,15 @@ def get_notification_timeline(
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    return BaseResponse(data={"case_no": case_no, "records": list(records)})
+    return BaseResponse(
+        data=LineNotificationTimelineView(case_no=case_no, records=list(records))
+    )
 
 
-@router.post("/sources/{source_event_id}/manual-replay/preview", response_model=BaseResponse[dict])
+@router.post(
+    "/sources/{source_event_id}/manual-replay/preview",
+    response_model=BaseResponse[PreviewLineNotificationManualReplayView],
+)
 def preview_notification_manual_replay(
     source_event_id: int,
     principal: AdminPrincipal = Depends(require_line_configuration_manager),
@@ -90,10 +101,13 @@ def preview_notification_manual_replay(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    return BaseResponse(data=result)
+    return BaseResponse(data=PreviewLineNotificationManualReplayView.model_validate(result))
 
 
-@router.post("/sources/{source_event_id}/manual-replay", response_model=BaseResponse[dict])
+@router.post(
+    "/sources/{source_event_id}/manual-replay",
+    response_model=BaseResponse[ApplyLineNotificationManualReplayView],
+)
 def apply_notification_manual_replay(
     source_event_id: int,
     payload: ApplyLineNotificationManualReplayRequest,
@@ -112,7 +126,12 @@ def apply_notification_manual_replay(
     request.state.audit_action = "line.notification_rule.manual_replay"
     request.state.audit_resource_type = "line_notification_source_event"
     request.state.audit_resource_id = str(source_event_id)
-    return BaseResponse(data={"source_event_id": source_event_id, "replayed_source_event_id": replayed_source_id})
+    return BaseResponse(
+        data=ApplyLineNotificationManualReplayView(
+            source_event_id=source_event_id,
+            replayed_source_event_id=replayed_source_id,
+        )
+    )
 
 
 @router.post(

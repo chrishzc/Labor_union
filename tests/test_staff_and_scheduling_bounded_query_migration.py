@@ -16,8 +16,11 @@ def test_staff_summary_route_uses_database_bounded_cursor_query():
 
     assert '@router.get("/summaries"' in source
     assert "page_size: int = Query(default=200, ge=1, le=200)" in source
-    assert "WHERE id > %s ORDER BY id LIMIT %s" in source
-    assert "SELECT id, name, phone FROM staff" in source
+    assert "get_staff_summary_application" in source
+    assert "StaffSummaryQueryRequest" in source
+    assert "get_connection" not in source
+    assert ".execute(" not in source
+    assert "cursor()" not in source
 
 
 def test_finance_page_uses_typed_bounded_staff_summary_query():

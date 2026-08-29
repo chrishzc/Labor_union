@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
+from typing import Callable
 
 from domains.orders.lifecycle import OrderLifecycleStatus
 from infrastructure.mysql.historical_order_workbook_import_repository import HistoricalOrderWorkbookImportRepository
@@ -109,9 +110,10 @@ class HistoricalOrderWorkbookUnavailable(RuntimeError):
 
 
 class HistoricalOrderWorkbookImportService:
-    def __init__(self, repository: HistoricalOrderWorkbookImportRepository, workflow: HistoricalOrderAdoptionWorkflow) -> None:
+    def __init__(self, repository: HistoricalOrderWorkbookImportRepository, workflow: HistoricalOrderAdoptionWorkflow, unit_of_work_factory: Callable[[], object]) -> None:
         self._repository = repository
         self._workflow = workflow
+        self._unit_of_work_factory = unit_of_work_factory
 
     def preview(self, source_path: str) -> HistoricalOrderWorkbookPreview:
         workbook = load_historical_order_workbook(source_path)
@@ -134,10 +136,14 @@ class HistoricalOrderWorkbookImportService:
             if replay is not None:
                 return replay
             preview = self._preview_or_stale(workbook, supplied_preview_fingerprint)
-            if self._repository.claim(key, workbook.content_digest, correlation_id) == "conflict":
-                raise HistoricalOrderWorkbookConflict("historical_order_workbook_idempotency_conflict")
+            with self._unit_of_work_factory() as unit_of_work:
+                if self._repository.claim(key, workbook.content_digest, correlation_id) == "conflict":
+                    raise HistoricalOrderWorkbookConflict("historical_order_workbook_idempotency_conflict")
+                unit_of_work.commit()
             receipt = self._apply_rows(workbook, key, actor, correlation_id)
-            self._repository.save_receipt(key, workbook.content_digest, preview.preview_fingerprint, actor, receipt.as_dict())
+            with self._unit_of_work_factory() as unit_of_work:
+                self._repository.save_receipt(key, workbook.content_digest, preview.preview_fingerprint, actor, receipt.as_dict())
+                unit_of_work.commit()
             return receipt
         finally:
             self._repository.release_lock(key)

@@ -68,6 +68,7 @@ class FakeStorage:
     def __init__(self, content: bytes = CONTENT) -> None:
         self.content = content
         self.reads = 0
+        self.finalized: list[tuple[str, str]] = []
 
     def put_staged(self, *, idempotency_key, filename, mime_type, content):
         digest = hashlib.sha256(content).hexdigest()
@@ -93,6 +94,10 @@ class FakeStorage:
 
     def read_registered_staged(self, staging_id: str, *, expected_sha256: str):
         return self.read_staged(staging_id, expected_sha256=expected_sha256)
+
+    def finalize_staged(self, staging_id: str, *, expected_sha256: str):
+        self.finalized.append((staging_id, expected_sha256))
+        return self.read_registered_staged(staging_id, expected_sha256=expected_sha256)
 
 
 class FakeRepository:
@@ -325,6 +330,49 @@ def test_apply_fresh_locks_and_commits_once_without_locator_projection() -> None
     assert "storage_locator" not in projection
     assert "file:" not in projection
     assert "://" not in projection
+
+
+def test_apply_registers_idempotent_integrity_finalize_after_commit_when_supported() -> None:
+    class HookedUnitOfWork(FakeUnitOfWork):
+        def __init__(self):
+            super().__init__()
+            self.hooks = []
+
+        def add_after_completion(self, hook):
+            self.hooks.append(hook)
+
+        def commit(self):
+            super().commit()
+            for hook in self.hooks:
+                hook()
+
+    storage = FakeStorage()
+    unit_of_work = HookedUnitOfWork()
+    workflow, _, _, _ = _workflow(storage=storage, unit_of_work=unit_of_work)
+    preview = workflow.preview(_intent())
+
+    workflow.apply(_command(preview))
+
+    assert unit_of_work.commits == 1
+    assert storage.finalized == [(STAGING_ID, DIGEST)]
+
+
+def test_metadata_commit_failure_retains_staging_bytes_for_reconciliation() -> None:
+    class FailingUnitOfWork(FakeUnitOfWork):
+        def commit(self):
+            raise RuntimeError("db_commit_failed")
+
+    storage = FakeStorage()
+    unit_of_work = FailingUnitOfWork()
+    workflow, _, _, _ = _workflow(storage=storage, unit_of_work=unit_of_work)
+    preview = workflow.preview(_intent())
+
+    with pytest.raises(RuntimeError, match="db_commit_failed"):
+        workflow.apply(_command(preview))
+
+    assert storage.content == CONTENT
+    assert storage.finalized == []
+    assert unit_of_work.rollbacks == 1
 
 
 def test_apply_borrowed_leaves_commit_to_outer_owner() -> None:

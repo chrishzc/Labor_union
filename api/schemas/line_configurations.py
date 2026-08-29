@@ -41,9 +41,25 @@ class LineConfigurationSafeResponse(_StrictPublicModel):
     error: None = None
 
 
+class LineConfigurationSnapshotView(_StrictPublicModel):
+    kind: LineConfigurationKind = Field(strict=False)
+    revision: StrictInt = Field(ge=0)
+    definition: dict[str, Any]
+
+
+class LineConfigurationPreviewView(_StrictPublicModel):
+    kind: LineConfigurationKind = Field(strict=False)
+    before_revision: StrictInt = Field(ge=0)
+    resulting_revision: StrictInt = Field(ge=0)
+    definition: dict[str, Any]
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 __all__ = [
     "ApplyLineConfigurationRequest",
+    "LineConfigurationPreviewView",
     "LineConfigurationSafePublicView",
     "LineConfigurationSafeResponse",
+    "LineConfigurationSnapshotView",
     "PreviewLineConfigurationRequest",
 ]

@@ -205,9 +205,6 @@ class MySqlMatchingScheduleConfirmationRepository:
             )
         )
 
-    def commit(self): self.connection.commit()
-    def rollback(self): self.connection.rollback()
-
     @staticmethod
     def _require_active_lifecycle(cursor, plan_id):
         cursor.execute("SELECT segment.staff_id FROM caregiver_matching_plan_segments segment LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=segment.staff_id WHERE segment.plan_id=%s AND COALESCE(lifecycle.lifecycle_state,'active')<>'active' FOR UPDATE", (plan_id,))

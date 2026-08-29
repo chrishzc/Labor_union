@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections import Counter
+from fnmatch import fnmatch
+from functools import lru_cache
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -16,6 +18,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 from shared_kernel.writer_inventory import (  # noqa: E402
     WriterFinding,
+    load_writer_inventory_baseline,
     scan_production_writers,
     writer_scan_fingerprint,
 )
@@ -54,6 +57,9 @@ EVIDENCE_ONLY_PATHS = frozenset(
 
 
 def _owner_candidate(relative_path: str) -> str | None:
+    baseline_owner = _baseline_owner(relative_path)
+    if baseline_owner is not None:
+        return baseline_owner
     parts = Path(relative_path).parts
     if parts[0] == "subsystems":
         return _subsystem_owner(parts[1]) if len(parts) > 1 else None
@@ -77,14 +83,38 @@ def _subsystem_owner(name: str) -> str | None:
         "bootstrap": "case_import",
         "case_import": "case_import",
         "client_finance": "client_finance",
+        "contract_signing": "contract_signing",
+        "controlled_files": "controlled_files",
+        "customer_service": "customer_service",
         "finance_import": "finance_import",
         "government_subsidy": "government_subsidy",
+        "jobs": "global_infrastructure",
+        "knowledge_retrieval": "knowledge_retrieval",
         "line": "line_integration",
         "orders": "orders",
         "payroll": "payroll",
         "scheduling": "scheduling",
+        "staff": "staff_operations",
         "staff_payables": "staff_payables",
+        "validation_dataset": "staff_operations",
     }.get(name)
+
+
+@lru_cache(maxsize=1)
+def _baseline_rules():
+    baseline = load_writer_inventory_baseline(
+        REPOSITORY_ROOT / "config" / "production_writer_inventory.v1.json"
+    )
+    return baseline.owner_rules
+
+
+def _baseline_owner(relative_path: str) -> str | None:
+    matches = [
+        rule.owner
+        for rule in _baseline_rules()
+        if any(fnmatch(relative_path, pattern) for pattern in rule.patterns)
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _service_owner(filename: str) -> str | None:

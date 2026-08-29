@@ -225,20 +225,6 @@ def _target_error(error: RuntimeAlertTargetError, correlation_id: str) -> HTTPEx
     )
 
 
-def _mutate(method, *args):
-    connection = get_connection()
-    try:
-        connection.begin()
-        result = getattr(MySqlRuntimeMonitorRepository(connection), method)(*args)
-        connection.commit()
-        return result
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
-
-
 def _record(item):
     return {name: getattr(item, name) for name in item.__dataclass_fields__}
 

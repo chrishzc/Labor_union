@@ -22,11 +22,16 @@ REVIEW_REFRESH_PATHS = frozenset(
 
 
 def _load(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
 def _review(record: dict[str, object]) -> tuple[str, str, str, str]:
     path = str(record["relative_path"])
+    exact = _task97_exact_review(path, str(record["symbol"]))
+    if exact is not None:
+        return exact
     reviewed = _current_runtime_review(path)
     if reviewed is not None:
         return reviewed
@@ -43,7 +48,70 @@ def _review(record: dict[str, object]) -> tuple[str, str, str, str]:
         return _line_worker_review()
     if path.startswith("subsystems/line/"):
         return _typed_line_review(path)
+    if record.get("owner_candidate") == "payroll":
+        return (
+            "payroll",
+            "typed Payroll repository or application transaction",
+            "typed Payroll application composition and workflow",
+            "retain_canonical:Payroll owns its calculation facts, receipts, outbox, and rebuild transitions",
+        )
     return _service_review(path)
+
+
+def _task97_exact_review(
+    path: str, symbol: str
+) -> tuple[str, str, str, str] | None:
+    """Exact Task 97 decisions that must not be widened to a whole module."""
+    canonical: dict[tuple[str, str], tuple[str, str]] = {
+        ("api/dependencies/contract_external_signing.py", "ContractExternalSigningApplication.download_unsigned"): (
+            "contract_signing", "Contract Signing application transaction"
+        ),
+        ("infrastructure/mysql/unit_of_work.py", "MySqlUnitOfWork.commit"): (
+            "global_infrastructure", "explicit caller-owned outer Unit of Work"
+        ),
+        ("infrastructure/mysql/service_day_log_repository.py", "MySqlServiceDayLogRepository.submit"): (
+            "scheduling", "Scheduling Service Day Log repository inside caller UoW"
+        ),
+        ("subsystems/case_import/hcm_beclass_reconciliation.py", "CaseImportReconciliationApplication.reconcile"): (
+            "case_import", "Case Import reconciliation outer Unit of Work"
+        ),
+        ("subsystems/anomalies/current_issue_recheck.py", "CurrentIssueApplication.mutate_owner_with_recheck_intent"): (
+            "anomalies", "owner mutation and bounded recheck-intent application transaction"
+        ),
+        ("subsystems/anomalies/current_issue_recheck.py", "CurrentIssueApplication.reconcile"): (
+            "anomalies", "current projection reconcile and intent-complete application transaction"
+        ),
+        ("subsystems/scheduling/service_day_log_workflow.py", "ServiceDayLogApplication.apply"): (
+            "scheduling", "Scheduling Service Day Log application transaction"
+        ),
+    }
+    key = (path, symbol)
+    if key in canonical:
+        owner, boundary = canonical[key]
+        return (
+            owner,
+            boundary,
+            f"Task97 exact application/UoW evidence for {path}::{symbol}",
+            "retain_canonical:exact Task97 owner and transaction boundary verified; no module-wide inference",
+        )
+    restricted: dict[tuple[str, str], str] = {
+        ("api/dependencies/line_worker_operation.py", "_write_heartbeat"): "LINE worker heartbeat short transaction",
+        ("api/dependencies/private_operations.py", "_write_durable_job_heartbeat"): "private durable-job heartbeat short transaction",
+        ("api/dependencies/private_operations.py", "record_monitor_cycle"): "private monitor-cycle short transaction",
+        ("api/dependencies/runtime_heartbeat.py", "record_runtime_heartbeat"): "runtime heartbeat short transaction",
+        ("infrastructure/mysql/line_notification_reconciliation_worker.py", "MySqlLineNotificationReconciliationWorker.run_once"): "LINE notification reconciliation worker transaction",
+        ("infrastructure/mysql/scheduling_checkpoint_notification_source_worker.py", "MySqlSchedulingCheckpointNotificationSourceWorker.run_once"): "Scheduling checkpoint notification worker transaction",
+        ("infrastructure/mysql/scheduling_rebuild_notification_invalidation_worker.py", "MySqlSchedulingRebuildNotificationInvalidationWorker.run_once"): "Scheduling rebuild invalidation worker transaction",
+        ("infrastructure/mysql/service_day_log_notification_stop_worker.py", "MySqlServiceDayLogNotificationStopWorker.run_once"): "Service Day Log notification-stop worker transaction",
+    }
+    if key in restricted:
+        return (
+            "global_operations" if path.startswith("api/dependencies/") else "worker_owner",
+            restricted[key],
+            f"Task97 exact bounded worker evidence for {path}::{symbol}",
+            "retain_restricted:independent short worker/heartbeat transaction; not a domain repository commit",
+        )
+    return None
 
 
 def _current_runtime_review(path: str) -> tuple[str, str, str, str] | None:

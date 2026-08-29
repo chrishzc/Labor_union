@@ -39,13 +39,11 @@ class MySqlStaffHistoricalWorkbookRepository:
                 claim = cursor.fetchone()
                 if claim is None or claim["command_family"] != self._FAMILY or claim["command_fingerprint"] != digest:
                     return "conflict"
-        self._connection.commit()
         return "created" if created else "resume"
 
     def save_receipt(self, key: str, digest: str, actor: str, preview_fingerprint: str, result: dict[str, object]) -> None:
         with self._connection.cursor() as cursor:
             cursor.execute("INSERT INTO admin_command_receipts (command_family,idempotency_key,request_fingerprint,preview_fingerprint,actor,reason,result_snapshot) VALUES (%s,%s,%s,%s,%s,%s,%s)", (self._FAMILY, key, digest, preview_fingerprint, actor, "Staff historical workbook upload", json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)))
-        self._connection.commit()
 
     @staticmethod
     def lock_name(key: str) -> str:

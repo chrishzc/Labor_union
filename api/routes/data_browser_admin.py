@@ -15,6 +15,7 @@ from api.schemas.data_browser import (
     DataBrowserMaskedPageView,
 )
 from infrastructure.mysql.admin_command_repository import AdminCommandRepository
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.data_browser_query_repository import (
     DataBrowserQueryRepository,
@@ -151,12 +152,12 @@ def apply_source_correction(
     connection = get_connection()
     try:
         result = source_data_correction.apply(
-            AdminCommandRepository(connection), table, row_id, request.updates,
+            AdminCommandRepository(connection), lambda: MySqlUnitOfWork(connection),
+            table, row_id, request.updates,
             request.preview_fingerprint, idempotency_key, principal.username, request.reason,
         )
         return BaseResponse(data=result)
     except ValueError as error:
-        connection.rollback()
         raise HTTPException(status_code=_http_status_for_data_browser_admin_error(str(error)), detail=str(error))
     finally:
         connection.close()

@@ -65,34 +65,15 @@ def test_preview_returns_business_fields_and_opaque_transport_fingerprint(monkey
 
 
 def test_apply_rejects_changed_intent_against_preview(monkeypatch):
-    class FakeWorkflow:
-        def __init__(self, _repository):
-            pass
-
+    class FakeApplication:
         def apply(self, _command, _fingerprint):
             raise StaffLeaveIntakeWorkflowError("leave_request_preview_stale")
-
-    class FakeUnitOfWork:
-        def __init__(self, _connection):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def commit(self):
-            pass
 
     monkeypatch.setattr(
         staff_leave_intake,
         "_verified_staff_context",
         lambda _: (LineUserId("U-private"), STAFF),
     )
-    monkeypatch.setattr(staff_leave_intake, "get_connection", lambda: FakeConnection())
-    monkeypatch.setattr(staff_leave_intake, "MySqlUnitOfWork", FakeUnitOfWork)
-    monkeypatch.setattr(staff_leave_intake, "StaffLeaveIntakeWorkflow", FakeWorkflow)
 
     body = StaffLeaveRequestApply(
         leave_start_date=date(2026, 8, 20),
@@ -101,7 +82,7 @@ def test_apply_rejects_changed_intent_against_preview(monkeypatch):
         preview_fingerprint="a" * 64,
     )
     with pytest.raises(HTTPException) as captured:
-        staff_leave_intake.apply_staff_leave_request(body, "leave-1")
+        staff_leave_intake.apply_staff_leave_request(body, "leave-1", FakeApplication())
 
     assert captured.value.status_code == 409
     assert captured.value.detail == {"code": "leave_request_preview_stale"}

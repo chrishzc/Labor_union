@@ -1,15 +1,20 @@
 ---
 doc_type: gap-register
-declared_status: in-progress
+declared_status: blocked
 date: 2026-08-25
 owner: architecture-governance / product-and-domain-owners
 ---
 
 # Current 剩餘代辦任務總表
 
+> 2026-08-29 使用者優先序裁決：Task 96 暫停，先執行 Task 97 的架構一致性盤點、修復與全域驗收，
+> 目的是讓 Task 96 後續執行建立在更準確的 entry、writer、transaction 與 typed contract 基線上。
+> 本狀態是 `blocked-by-user-priority`，不表示 Task 96 的既有需求、完成證據或剩餘工作失效；Task 97
+> terminal completion 或使用者另行調整優先序後，才恢復本表施工。
+
 ## 1. 用途與唯一性
 
-本表是目前唯一的跨功能 active 代辦入口。正式業務語意、owner、根事實與狀態機仍由
+本表仍是 Task 96 未完成業務工作的唯一 register，但目前不具執行優先權。正式業務語意、owner、根事實與狀態機仍由
 `01_規格基線` 擁有；本表只路由未完成工作，不複製完整規格。舊 session handoff、已完成
 Work Package、功能開發 umbrella 計畫、archive、history 或 evidence 不得重新形成 current 待辦。
 

@@ -10,12 +10,15 @@ from datetime import date
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from api.dependencies import holidays as holiday_dependencies
 from api.dependencies.admin_auth import require_admin
+from api.dependencies.holidays import get_holiday_maintenance_application
 from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_error_handlers
 from api.routes import holidays as route
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.scheduling.holiday_calendar_query import HolidayCalendarFacts, HolidayFact
+from subsystems.scheduling.holiday_maintenance import HolidayMaintenanceApplication
 
 
 class _Connection:
@@ -32,6 +35,24 @@ class _Connection:
 
     def close(self):
         self.closes += 1
+
+
+class _UnitOfWork:
+    def __init__(self, connection):
+        self._connection = connection
+        self._committed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exception_type, exception, traceback):
+        if exception_type is not None or not self._committed:
+            self._connection.rollback()
+        return False
+
+    def commit(self):
+        self._connection.commit()
+        self._committed = True
 
 
 class _Repository:
@@ -88,6 +109,11 @@ def _client(monkeypatch):
         "測試人員",
         "admin",
     )
+    app.dependency_overrides[get_holiday_maintenance_application] = lambda: HolidayMaintenanceApplication(
+        repository,
+        lambda: _UnitOfWork(connection),
+        holiday_dependencies._invalidate_cache_after_commit,
+    )
     return TestClient(app), connection, repository
 
 
@@ -127,7 +153,7 @@ def test_apply_commits_once_replays_and_cache_failure_does_not_rewrite_outcome(
     client, connection, _repository = _client(monkeypatch)
     preview = _preview(client).json()["data"]
     monkeypatch.setattr(
-        route,
+        holiday_dependencies,
         "invalidate_holiday_query_cache",
         lambda: (_ for _ in ()).throw(RuntimeError("cache unavailable")),
     )

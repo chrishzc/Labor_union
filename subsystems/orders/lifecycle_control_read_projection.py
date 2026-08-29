@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from datetime import datetime
+from typing import Literal, Protocol
 
-from infrastructure.mysql.mysql_adapter import get_connection
 from shared_kernel.business_time import current_business_instant
+from shared_kernel.validation import require_canonical_text
 from subsystems.orders.lifecycle_control_read_facts import (
+    OrderLifecycleControlReadFacts,
     OrderLifecycleControlReadNotFoundError,
-    load_order_lifecycle_control_read_facts,
 )
 
 _INACTIVE_BLOCKER = "enter_service.actual_start_reconfirmation_inactive"
@@ -31,15 +32,33 @@ class OrderLifecycleControlState:
     actual_start_reconfirmation: ActualStartReconfirmationControlState
 
 
-def get_order_lifecycle_control_state(case_no: str) -> OrderLifecycleControlState:
-    """Return one immutable, side-effect-free canonical control snapshot."""
-    evaluation_at = current_business_instant()
-    connection = get_connection()
-    try:
-        with connection.cursor() as cursor:
-            facts = load_order_lifecycle_control_read_facts(cursor=cursor, case_no=case_no, as_of=evaluation_at)
-    finally:
-        connection.close()
+class OrderLifecycleControlReadRepository(Protocol):
+    """Orders-owned read port for one lifecycle control projection."""
+
+    def fetch_by_case_no(
+        self, case_no: str, as_of: datetime
+    ) -> OrderLifecycleControlReadFacts:
+        ...
+
+
+class OrderLifecycleControlQueryService:
+    """Validate and project one read-only lifecycle control query."""
+
+    def __init__(self, repository: OrderLifecycleControlReadRepository) -> None:
+        self._repository = repository
+
+    def query(self, case_no: str) -> OrderLifecycleControlState:
+        canonical_case_no = require_canonical_text(case_no, "case_no", 50)
+        facts = self._repository.fetch_by_case_no(
+            canonical_case_no, current_business_instant()
+        )
+        return build_order_lifecycle_control_state(facts)
+
+
+def build_order_lifecycle_control_state(
+    facts: OrderLifecycleControlReadFacts,
+) -> OrderLifecycleControlState:
+    """Project validated owner facts without acquiring resources or writing state."""
     control = facts.actual_start_control
     state = "not_required" if control.state is None else control.state
     blockers = list(facts.deposit_blockers)
@@ -53,4 +72,11 @@ def get_order_lifecycle_control_state(case_no: str) -> OrderLifecycleControlStat
     return OrderLifecycleControlState(facts.case_no, facts.lifecycle_version, facts.canonical_status, actual_start)
 
 
-__all__ = ["ActualStartReconfirmationControlState", "OrderLifecycleControlReadNotFoundError", "OrderLifecycleControlState", "get_order_lifecycle_control_state", "load_order_lifecycle_control_read_facts"]
+__all__ = [
+    "ActualStartReconfirmationControlState",
+    "OrderLifecycleControlQueryService",
+    "OrderLifecycleControlReadNotFoundError",
+    "OrderLifecycleControlReadRepository",
+    "OrderLifecycleControlState",
+    "build_order_lifecycle_control_state",
+]

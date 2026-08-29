@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Protocol
+from typing import Callable, Protocol
 
 from domains.scheduling.staff_leave_intake import (
     StaffLeaveRequestIntent,
@@ -171,6 +171,37 @@ class StaffLeaveIntakeWorkflow:
             if code in {"leave_request_receipt_conflict", "leave_request_stale"}:
                 raise StaffLeaveIntakeWorkflowError(code) from error
             raise
+
+
+class StaffLeaveIntakeApplication:
+    """Own the single transaction for each Staff Leave mutation."""
+
+    def __init__(
+        self,
+        repository: StaffLeaveIntakeRepository,
+        unit_of_work_factory: Callable[[], object],
+    ) -> None:
+        self._workflow = StaffLeaveIntakeWorkflow(repository)
+        self._unit_of_work_factory = unit_of_work_factory
+
+    def apply(
+        self,
+        command: SubmitStaffLeaveRequest,
+        preview_fingerprint: PreviewFingerprint,
+    ) -> StaffLeaveRequestSnapshot:
+        return self._mutate(lambda: self._workflow.apply(command, preview_fingerprint))
+
+    def submit(self, command: SubmitStaffLeaveRequest) -> StaffLeaveRequestSnapshot:
+        return self._mutate(lambda: self._workflow.submit(command))
+
+    def review(self, command: ReviewStaffLeaveRequest) -> StaffLeaveRequestSnapshot:
+        return self._mutate(lambda: self._workflow.review(command))
+
+    def _mutate(self, operation):
+        with self._unit_of_work_factory() as unit_of_work:
+            result = operation()
+            unit_of_work.commit()
+            return result
 
 
 def _submit_fingerprint(command: SubmitStaffLeaveRequest) -> str:

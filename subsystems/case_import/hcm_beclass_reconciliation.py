@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from domains.case_import.cooking_requirement import CookingRequirementDomainError, normalize_cooking_requirement
+from shared_kernel.ports import UnitOfWork
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +30,27 @@ class HcmBeClassReconciliationPort(Protocol):
         self, case_no: str, beclass_id: int, requires_cooking: bool
     ) -> None: ...
 
+
+class HcmBeClassReconciliationRunnerPort(Protocol):
+    def reconcile(self, case_no: str) -> HcmBeClassReconciliationResult: ...
+
+
+class CaseImportReconciliationApplication:
+    """Own the outer transaction while adapters borrow the current UoW."""
+
+    def __init__(
+        self,
+        port: HcmBeClassReconciliationRunnerPort,
+        unit_of_work_factory: Callable[[], UnitOfWork],
+    ) -> None:
+        self._port = port
+        self._unit_of_work_factory = unit_of_work_factory
+
+    def reconcile(self, case_no: str) -> HcmBeClassReconciliationResult:
+        with self._unit_of_work_factory() as unit_of_work:
+            result = self._port.reconcile(case_no)
+            unit_of_work.commit()
+            return result
 
 def reconcile_hcm_beclass_cooking(
     port: HcmBeClassReconciliationPort, case_no: str
@@ -57,7 +79,9 @@ def _survey_object(value):
     parsed = json.loads(value) if isinstance(value, str) else value
     return parsed if isinstance(parsed, dict) else {}
 __all__ = [
+    "CaseImportReconciliationApplication",
     "HcmBeClassReconciliationPort",
+    "HcmBeClassReconciliationRunnerPort",
     "HcmBeClassReconciliationResult",
     "reconcile_hcm_beclass_cooking",
 ]
