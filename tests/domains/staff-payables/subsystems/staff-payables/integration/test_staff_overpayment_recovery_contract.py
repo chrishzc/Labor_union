@@ -11,11 +11,17 @@ from fastapi.testclient import TestClient
 from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.staff_payout import get_staff_overpayment_recovery_matching_application
 from api.main import app
+from domains.staff_payables.overpayment_recovery import (
+    StaffOverpaymentRecovery,
+    StaffOverpaymentRecoveryStatus,
+    StaffRecoveryIncomingBankFact,
+)
 from infrastructure.mysql.staff_overpayment_recovery_repository import (
     MySqlStaffOverpaymentRecoveryRepository,
 )
 from shared_kernel.errors import ErrorCategory
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+from shared_kernel.money import MoneyNTD
 from subsystems.staff_payables.overpayment_recovery import (
     StaffOverpaymentRecoveryAction,
     StaffOverpaymentRecoveryApplyRequest,
@@ -27,12 +33,59 @@ from subsystems.staff_payables.overpayment_recovery import (
 from subsystems.staff_payables.overpayment_recovery_query import (
     StaffOverpaymentRecoveryQueryView,
 )
-from tests.test_staff_overpayment_recovery import (
-    _Repository,
-    _UnitOfWork,
-    _incoming,
-    _recovery,
-)
+
+
+def _recovery(amount: int = 1_000, version: int = 4) -> StaffOverpaymentRecovery:
+    return StaffOverpaymentRecovery(
+        "staff-overpayment-recovery:1",
+        7,
+        MoneyNTD(amount),
+        StaffOverpaymentRecoveryStatus.OPEN,
+        version,
+    )
+
+
+def _incoming(amount: int = 1_000, staff_id: int = 7) -> StaffRecoveryIncomingBankFact:
+    return StaffRecoveryIncomingBankFact(
+        "finance-import-row:11",
+        staff_id,
+        MoneyNTD(amount),
+        "2026-08-11",
+        True,
+    )
+
+
+class _UnitOfWork:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def commit(self):
+        return None
+
+
+class _Repository:
+    def __init__(self, facts):
+        self.facts = facts
+        self.receipt = None
+        self.persisted = []
+
+    def load(self, _selection, *, for_update):
+        self.persisted.append(("load", for_update))
+        return self.facts
+
+    def find_receipt(self, _key):
+        return self.receipt
+
+    def persist(self, _request, preview, receipt, fingerprint):
+        self.persisted.append(("persist", preview.candidate.bank_fact_identity))
+        from subsystems.staff_payables.overpayment_recovery import (
+            StoredStaffOverpaymentRecoveryReceipt,
+        )
+
+        self.receipt = StoredStaffOverpaymentRecoveryReceipt(fingerprint, receipt)
 
 
 def test_same_key_evidence_change_is_idempotency_conflict() -> None:
