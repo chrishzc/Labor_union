@@ -1,6 +1,6 @@
 """Focused contract checks for the typed LINE admin capability projection."""
 
-from pathlib import Path
+from inspect import getsource
 
 import pytest
 from pydantic import ValidationError
@@ -8,9 +8,6 @@ from pydantic import ValidationError
 from api.routes import line_admin
 from api.schemas.line_admin import LineAdminCapabilitiesView
 from subsystems.access.authentication_session import AdminPrincipal
-
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_capabilities_route_returns_closed_typed_projection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,7 +42,7 @@ def test_capabilities_projection_rejects_unknown_fields() -> None:
 
 
 def test_health_route_keeps_opaque_response_model() -> None:
-    source = (ROOT / "api" / "routes" / "line_admin.py").read_text(encoding="utf-8")
+    source = getsource(line_admin)
 
     assert '@router.get("/health", response_model=BaseResponse[dict])' in source
     assert 'response_model=BaseResponse[LineAdminCapabilitiesView]' in source

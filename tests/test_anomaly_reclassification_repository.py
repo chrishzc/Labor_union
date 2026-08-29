@@ -9,7 +9,7 @@ from domains.anomalies.maintenance import (
     AnomalyReclassificationDisposition,
     preview_anomaly_reclassification,
 )
-from pathlib import Path
+from inspect import getsource
 from types import SimpleNamespace
 
 from infrastructure.mysql.anomaly_maintenance_repository import (
@@ -192,8 +192,7 @@ def test_savepoint_primitives_validate_name_and_preserve_sql_order():
 def test_disposition_insert_has_one_placeholder_per_schema_column():
     sql = repository_module.MySqlAnomalyMaintenanceRepository._insert_reclassification_disposition
     assert sql is not None
-    source = Path(__file__).resolve().parents[1] / "infrastructure/mysql/anomaly_maintenance_repository.py"
-    text = source.read_text(encoding="utf-8")
+    text = getsource(repository_module)
     statement = text[text.index('"INSERT INTO anomaly_reclassification_dispositions'):]
     statement = statement[: statement.index("),", statement.index("VALUES"))]
     assert statement.count("%s") == 18
