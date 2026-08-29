@@ -29,15 +29,18 @@
 - `document/架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md` — matching preference/unavailability facts.
 
 ## Verification
-- test_root: `layout_gap` — focused suites currently live in flat `tests/` (`test_matching_coordination_*`).
+- test_root: `tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/`
 - higher_boundary:
   - `tests/integration/`
+- layout_gap:
+  - `tests/test_matching_coordination_repository.py` — still uses a repo-relative schema path and remains at its observed path until that path dependency is reconciled.
 - routing: `.arch-map/tests/domains/scheduling/subsystems/scheduling/index.md`.
 
 ## Provenance
 - Domain ownership — `architecture_declared` — Scheduling specs.
 - Source/API/UI paths — `source_observed` — current repository search.
-- Flat focused test layout — `source_observed` — current `tests/test_matching_coordination_*`.
+- Module-owned contract/domain/workflow/facts/API-route tests — `source_observed` — architecture-aligned test root.
+- Repository test exception — `source_observed` — current flat path with relocation-sensitive schema lookup.
 
 ## Change triggers
 Reconcile when coordination owner, package/event contract, API route/schema, persistence adapter or focused test root moves.
