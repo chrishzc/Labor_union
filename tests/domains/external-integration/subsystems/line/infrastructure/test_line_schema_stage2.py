@@ -5,7 +5,11 @@ from pathlib import Path
 from scripts.init_db import load_schema_parts
 from shared_kernel.migration_release import load_migration_release_manifest
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
+)
 SCHEMA_PARTS = (
     "154_line_integration_inbox_delivery.sql",
     "155_line_identity_review_configuration.sql",

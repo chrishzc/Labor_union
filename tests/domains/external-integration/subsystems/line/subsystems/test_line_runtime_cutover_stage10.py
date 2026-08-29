@@ -103,7 +103,11 @@ def test_stage10_cutover_release_names_full_migration_chain() -> None:
     import json
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[3]
+    root = next(
+        parent
+        for parent in Path(__file__).resolve().parents
+        if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
+    )
     path = root / "db/cutover_releases/labor_union_2026_08_09_line_stage10_v1.json"
     release = load_line_cutover_release(json.loads(path.read_text(encoding="utf-8")))
 

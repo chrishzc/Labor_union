@@ -10,7 +10,11 @@ import asyncio
 from line import line_bot
 
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
+)
 
 
 def test_canonical_mode_retires_legacy_identity_and_review_routes(

@@ -6,7 +6,11 @@ from pathlib import Path
 from shared_kernel.ports import UnitOfWork
 from subsystems.line.ports import LineUnitOfWorkPort
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
+)
 LINE_DOMAIN_DIRECTORY = PROJECT_ROOT / "domains" / "line"
 LINE_SUBSYSTEM_DIRECTORY = PROJECT_ROOT / "subsystems" / "line"
 FORBIDDEN_IMPORT_PREFIXES = (

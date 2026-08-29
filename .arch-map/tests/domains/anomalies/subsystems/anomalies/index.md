@@ -6,10 +6,16 @@ integration_root: tests/domains/anomalies/subsystems/anomalies/integration/
 fixtures_root: tests/fixtures/
 
 # Routing notes
-Focused Anomalies workflow, registry, projection, source and adapter contracts live here. Current owner-local coverage includes anomaly rulebook/action/recovery-context guards; finance/staff/client recovery anomaly consumers and projections; LINE-binding predicate guards; historical-order remediation outbox consumption; historical-baseline projection; and historical-baseline projector API/persistence readback contracts.
+Focused Anomalies workflow, registry, projection, source and adapter contracts live here. Current owner-local coverage includes anomaly rulebook/action/recovery-context guards; finance/staff/client recovery anomaly consumers and projections; LINE-binding predicate guards; historical-order remediation outbox consumption; historical-baseline projection; historical-baseline projector API/persistence readback contracts; anomaly reclassification domain and Staff Payables owner-query adapter contracts; anomaly-necessity lifecycle catalog and runtime producer cutover; and root-fact projection repository owner-binding contracts.
 
 # Deferred / higher-boundary
 - Cross-domain acceptance, Task97, release/migration/schema, disposable-MySQL and relocation-sensitive tests remain at their owning higher boundary.
+- `tests/test_anomaly_reclassification_repository.py` remains a relocation-sensitive higher-boundary test because it derives a repository source path from `__file__`.
+- `tests/test_anomaly_reclassification_schema_contract.py` remains at the schema verification boundary.
+- `tests/test_anomaly_bootstrap_import.py` remains at the application-composition/OpenAPI boundary.
 - `tests/test_remote_anomaly_schedule_merge.py` remains higher because it spans Anomalies, Staff, HCM import, and legacy Scheduling UI state.
 - `tests/test_historical_order_adoption_anomaly_consumer.py` remains higher because it also verifies a legacy UI finance-alert surface.
 - Government-subsidy worker wiring remains at its cross-owner delivery boundary.
+
+# Flat-test audit
+The current flat-test audit found no additional high-confidence Anomalies owner-local tests outside the documented cross-domain, application-composition, Task97, release/migration/schema, disposable-MySQL/E2E, relocation-sensitive, legacy UI, or cross-owner boundaries. Admit future cases by direct SUT/current ownership rather than filename alone.

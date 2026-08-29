@@ -15,7 +15,11 @@ from api.schemas.line_staff_self_service import StaffLiffRequest, StaffScheduleD
 from infrastructure.line.liff_token_verifier import InvalidLiffTokenError
 
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
+)
 
 
 def _day(**overrides) -> dict:

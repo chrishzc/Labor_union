@@ -15,7 +15,11 @@ from domains.line.identity_flow import LineIdentityFlowConflict
 from api.dependencies import line_worker_operation
 
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
+)
 
 
 class ExpiredFlowApplication:

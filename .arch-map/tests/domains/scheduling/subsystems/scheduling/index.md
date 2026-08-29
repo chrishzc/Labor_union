@@ -19,3 +19,6 @@ modules:
 - Service-before-replacement anomaly projection is owned by `tests/domains/anomalies/subsystems/anomalies/integration/`.
 - Matching schedule confirmation and staff leave LIFF intake live under the canonical LINE subsystem integration root.
 - Matching is a Scheduling responsibility in the current architecture map; no separate top-level Matching test domain is invented.
+
+# Flat-test audit
+The current flat-test audit found no additional high-confidence Scheduling owner-local tests outside the documented relocation-sensitive layout gaps, LINE external-identity boundary, cross-implementation/MySQL verification, Anomalies verification, or true cross-owner orchestration. Admit future cases by direct SUT/current ownership rather than filename alone.

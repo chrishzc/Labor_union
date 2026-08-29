@@ -6,7 +6,11 @@ Description: 驗證月嫂訂單 LIFF 只顯示 strict typed staff-order view，�
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
+)
 
 
 def test_staff_order_page_does_not_render_untyped_raw_survey_rows() -> None:

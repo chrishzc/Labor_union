@@ -17,7 +17,11 @@ from scripts.verify_validation_schema_manifest import verify_manifest
 from shared_kernel.migration_release import load_migration_release_manifest
 
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
+)
 PART_NAME = "1001_line_rich_menu_publication_step_saga.sql"
 MANIFEST_PATH = (
     ROOT

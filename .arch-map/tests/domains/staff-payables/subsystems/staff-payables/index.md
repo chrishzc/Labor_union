@@ -11,3 +11,6 @@ Current owner-local coverage includes payout reconciliation workflow/public cont
 # Deferred / higher-boundary
 - `tests/test_accounts_payable_export_api_client.py` — imports legacy `ui.api_clients`; keep at the legacy UI boundary until Streamlit retirement/replacement reconciliation.
 - Task97 and disposable-MySQL acceptance tests remain at their higher verification boundary.
+
+# Flat-test audit
+The current flat-test audit found no additional high-confidence Staff Payables owner-local tests outside the documented Anomalies, legacy UI/API-client, Task97, disposable-MySQL/E2E, or true cross-owner boundaries. Admit future cases by direct SUT/current ownership rather than filename alone.

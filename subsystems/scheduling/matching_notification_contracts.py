@@ -133,7 +133,7 @@ class ApplyManualCustomerProfilesCommand(PreviewManualCustomerProfilesCommand):
     correlation_id: CorrelationId
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        PreviewManualCustomerProfilesCommand.__post_init__(self)
         if not isinstance(self.preview_fingerprint, PreviewFingerprint):
             raise TypeError("manual customer profiles preview fingerprint is invalid")
 

@@ -8,7 +8,11 @@ from pathlib import Path
 from scripts import migrate_preserved_database_additive_schema as runner
 
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "requirements.txt").is_file() and (parent / "subsystems").is_dir()
+)
 MANIFEST_NAMES = (
     "labor_union_2026_08_08_line_stage2_v1.json",
     "labor_union_2026_08_08_line_stage3_v1.json",
