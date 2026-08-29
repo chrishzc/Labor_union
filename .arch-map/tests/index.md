@@ -6,7 +6,7 @@ global_root: layout_gap
 
 # Test routing
 
-Current `tests/` is a mixed legacy/architecture-aligned tree, so this index is intentionally sparse. Architecture-owned roots now exist for Orders, Scheduling, Payroll, Finance Import, Government Subsidy, External Integration, Anomalies and other migrated owners; higher-boundary suites still remain under roots such as `tests/integration/`. Do not treat this map as a coverage report or migration authorization.
+Current `tests/` is a mixed legacy/architecture-aligned tree, so this index is intentionally sparse. Architecture-owned roots now exist for Orders, Scheduling, Payroll, Finance Import, Government Subsidy, External Integration, Anomalies, Contract Signing and other migrated owners; higher-boundary suites still remain under roots such as `tests/integration/`. Do not treat this map as a coverage report or migration authorization.
 
 ## Domains
 - `orders` — `domains/orders/index.md`
@@ -17,6 +17,7 @@ Current `tests/` is a mixed legacy/architecture-aligned tree, so this index is i
 - `government-subsidy` — `domains/government-subsidy/index.md`
 - `external-integration` — `domains/external-integration/index.md`
 - `anomalies` — `domains/anomalies/index.md`
+- `contract-signing` — `domains/contract-signing/index.md`
 
 ## Cross-domain/global routing
 - `tests/integration/` — shared higher-boundary legacy root; admit only scenario-relevant tests.
