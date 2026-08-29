@@ -441,11 +441,8 @@ package_route:
   Developer acceptance `PASS`；另一台實體電腦Developer acceptance `NOT_RUN`，總結仍為
   `DB_CHANGE_NOT_READY`。runtime必須在同一UoW以canonical
   membership重算exact set digest／count並於fresh readback核對，不能只信receipt欄位。
-- receipts：`03_追蹤清單與證據/evidence/2026-08-28_task96_hcat_rpre_domain_slice_receipt.md`、
-  `03_追蹤清單與證據/evidence/2026-08-28_task96_hcat_rpre_subsystem_slice_receipt.md`、
-  `03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_hproj_rpre_static_release_receipt.md`、
-  `03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_1011_engine_qualification_receipt.md`、
-  `03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_local_noauth_runtime_receipt.md`、
+- receipts：`03_追蹤清單與證據/evidence/2026-08-28_task96_hcat_rpre_aggregate_final_receipt.md`、
+  `03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_1003_to_1012_final_receipt.md`、
   `03_追蹤清單與證據/evidence/2026-08-28_task96_hproj_v2_persistence_api_react_engine_receipt.md`。
 
 ## 8. Catalog-v2 amendment task pack（adopted 2026-08-28）

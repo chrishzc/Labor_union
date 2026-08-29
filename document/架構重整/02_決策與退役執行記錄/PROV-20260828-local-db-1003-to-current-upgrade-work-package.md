@@ -101,14 +101,4 @@ Package status：`PACKAGE_READY`；runtime status：`in-progress`；DB summary�
   required worker survival；後續再補MySQL container reuse、雙平台launcher與64字元／system-schema安全門。
   2026-08-28人工後續裁決已移除operator updater的`lu_test_*`名稱限制；qualification／rehearsal隔離規則不變。
   final root `204 passed, 1 skipped`，fresh R11 P0=0/P1=0；normal Browser已驗收。
-- receipt：`03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_ordered_chain_launcher_slice_receipt.md`。
-  本slice另見`03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_hproj_rpre_static_release_receipt.md`。
-  1006 engine slice另見`03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_1006_engine_qualification_receipt.md`。
-  1007 engine slice另見`03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_1007_engine_qualification_receipt.md`。
-  1008 engine slice另見`03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_1008_engine_qualification_receipt.md`。
-  1009 engine slice另見`03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_1009_engine_qualification_receipt.md`。
-  1010 engine slice另見`03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_1010_engine_qualification_receipt.md`。
-  1011 engine slice另見`03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_1011_engine_qualification_receipt.md`。
-  1012 engine slice另見`03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_1012_engine_qualification_receipt.md`。
-  local no-auth runtime另見`03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_local_noauth_runtime_receipt.md`。
-  Windows supervisor source另見`03_追蹤清單與證據/evidence/2026-08-28_task96_windows_runtime_supervision_source_receipt.md`。
+- receipt：`03_追蹤清單與證據/evidence/2026-08-28_task96_ldu_1003_to_1012_final_receipt.md`。

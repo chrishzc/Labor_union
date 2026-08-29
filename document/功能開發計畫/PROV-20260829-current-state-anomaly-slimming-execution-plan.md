@@ -1080,7 +1080,7 @@ fresh canonical assembly 的最終 exact schema 必須不存在這 25 張表。
 | `tests/test_plan_legacy_ui_dataset_integration.py` | 同上 |
 | `tests/test_refund_return_review_disposable_mysql_e2e.py` | owner review work item出現/消失；不查CLIENTREFUND anomaly status |
 | `tests/test_wp77_disposable_mysql_e2e.py` | Staff/HCM/BeClass owner adoption/review；刪warning tracking assertions |
-| `tests/test_wp85_historical_order_workbook_disposable_mysql_e2e.py` | Orders adoption/review work item；刪warning occurrence/alert history assertions |
+| `tests/integration/test_historical_order_workbook.py` | Orders adoption/review work item；刪warning occurrence/alert history assertions |
 | `ui_react/src/tests/anomalies_detail_referral_flow.test.tsx` | current detail＋owner manual action flow |
 | `ui_react/src/tests/anomalies_entry_cutover.test.tsx` | current-only entry與removed legacy surfaces |
 | `ui_react/src/tests/anomalies_finance_correction_flow.test.tsx` | Finance owner work-item/action＋fresh current recheck |

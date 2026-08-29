@@ -1,5 +1,5 @@
 """
-File: test_wp80_historical_order_adoption.py
+File: tests/domains/orders/test_historical_order_adoption.py
 Description: 驗證歷史狀態、nullable日期、六欄工作簿、精確案件匹配與 replay 契約。
 """
 

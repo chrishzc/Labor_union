@@ -1,5 +1,5 @@
 """
-File: test_wp85_historical_order_workbook_disposable_mysql_e2e.py
+File: tests/integration/test_historical_order_workbook.py
 Description: 在 disposable MySQL 驗證歷史訂單配對、rollback 與未知警示重試停損。
 """
 
