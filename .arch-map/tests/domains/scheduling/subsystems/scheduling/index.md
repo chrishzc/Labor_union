@@ -11,7 +11,7 @@ modules:
     test_root: tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/
 
 # Exceptions
-- Current owner-local coverage includes holiday maintenance/router; multi-caregiver schedule read and assignment-list routes; the historical-baseline Scheduling owner adapter; and Matching coordination compatibility/owner-adapter contracts.
+- Current owner-local coverage includes holiday maintenance/router; multi-caregiver schedule read and assignment-list routes; the historical-baseline Scheduling owner adapter; Matching coordination compatibility/owner-adapter contracts; and the scheduling replacement-writer empty-resolution compatibility guard used by Orders terms rebuilds.
 - `matching-coordination` — `tests/test_matching_coordination_repository.py` remains a bounded `layout_gap` because it reads a schema using a repo-relative `__file__` path.
 - `service-before-replacement` — `tests/test_service_before_replacement_schema_contract.py` remains a relocation-sensitive `layout_gap`.
 - `tests/test_staff_service_day_log_api.py` remains at the external-identity/API boundary because it binds LINE identity before issuing a Scheduling command.
