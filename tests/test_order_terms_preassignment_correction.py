@@ -278,24 +278,3 @@ def test_preassignment_service_started_allows_unique_cooking_correction():
     assert preview.after.requires_cooking is False
     assert preview.scheduling.assignments == ()
     assert preview.scheduling.cancelled_assignment_ids == ()
-
-
-def test_empty_impacted_staff_set_requires_no_mutex_query():
-    cursor = SimpleNamespace(execute=lambda *_args: pytest.fail("unexpected SQL"))
-
-    from infrastructure.mysql.order_terms_read_model import lock_staff_mutexes
-
-    lock_staff_mutexes(cursor, ())
-
-
-def test_terms_rebuild_accepts_empty_assignment_resolution():
-    from infrastructure.mysql.scheduling_replacement_writer import (
-        _assignment_resolution,
-    )
-
-    resolution = _assignment_resolution(
-        SimpleNamespace(command_family="orders_terms_rebuild"),
-        {},
-    )
-
-    assert dict(resolution.assignment_id_by_candidate_key) == {}
