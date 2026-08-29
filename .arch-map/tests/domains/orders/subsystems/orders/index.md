@@ -10,4 +10,6 @@ modules:
 
 # Exceptions
 - `historical-adoption` — disposable-MySQL workbook integration remains at `tests/integration/test_historical_order_workbook.py`; it is a higher-boundary `layout_gap`, not duplicate owner-local coverage.
+- Order cancellation receipt/API route contract now routes through `tests/domains/orders/subsystems/orders/integration/`; cancellation E2E that proves Scheduling/Finance side effects remains at its higher boundary.
+- `tests/test_order_cancellation_api_client.py` directly exercises legacy `ui.api_clients` and remains deferred to Streamlit retirement rather than being misfiled as current Orders coverage.
 - Other Orders focused tests may still be flat under `tests/`; admit by current behavior/contract search rather than broad scan.
