@@ -6,4 +6,4 @@ integration_root: tests/domains/government-subsidy/subsystems/government-subsidy
 fixtures_root: tests/fixtures/
 
 # Routing notes
-Focused Government Subsidy owner query, repository, API and owner-local Query/Preview/Apply workflow contracts live here. Anomaly projections sourced from subsidy roots stay under the Anomalies verification boundary; UI/legacy adapters, cross-boundary durable-job acceptance and disposable-MySQL tests remain at their higher owner boundary.
+Focused Government Subsidy owner query, repository, API, owner-specific schema and owner-local Query/Preview/Apply workflow contracts live here. Anomaly projections sourced from subsidy roots stay under the Anomalies verification boundary; UI/legacy adapters, cross-boundary durable-job acceptance and disposable-MySQL tests remain at their higher owner boundary.
