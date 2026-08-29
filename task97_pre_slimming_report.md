@@ -8,8 +8,21 @@
 - merged count：2 個 canonical aggregate final receipts
 - rehomed count：2 個 regression test files
 - net reduction：27 個 durable paths（30 刪除－2 aggregate－1 本報告；rehome 淨變化為 0）
-- test result：collection 24 tests PASS；新位置測試 `15 passed, 9 skipped`；相鄰 regression `17 passed`；保留的 WP77 測試 `36 passed`；governance validator PASS
+- test result（上一個瘦身 commit）：collection 24 tests PASS；新位置測試 `15 passed, 9 skipped`；相鄰 regression `17 passed`；保留的 WP77 測試 `36 passed`；governance validator PASS
 - runtime／production behavior：未修改 production code、schema、migration、dependency、Streamlit 或外部效果
+
+## CORRECTIVE_PATCH
+
+- relocation path fix：`tests/integration/test_historical_order_workbook.py` 改用 `Path(__file__).resolve().parents[2]`；resolved path 已確認為 repository root 下的 `document/資料庫、資料處理/假資料_歷史訂單.xlsx`，檔案存在。
+- relocation-sensitive audit：只檢查本次 rehome 的兩個測試；除上述已修正 path 外，未發現其他由搬移造成的 `__file__`、relative fixture、document、SQL、JSON 或 XLSX path drift。
+- test-only identity cleanup：兩個 rehome 測試中的 `wp80`／`wp85` idempotency key、correlation、actor、reason 與測試資料識別字串已改為 business-oriented identity；未修改 production identity、fixture contract 或 baseline identity。
+- old-path reference check：兩個舊 test path 沒有 current reference；本報告保留舊路徑僅作 rehome provenance mapping。
+- code/path fix：PASS；collection：PASS。
+- MySQL runtime：`MYSQL_RUNTIME_NOT_RUN_ENVIRONMENT_UNAVAILABLE`。本環境未提供明確 disposable `lu_test_*` database，故 9 個 MySQL-gated tests 未宣稱 PASS；未連接 `union_db` 或 production。
+
+## RETENTION
+
+- `DELETE_AFTER_TASK97`：Task 97 terminal 後，若 Task 97 final receipt／final report 已承接本報告的 current value，且沒有 remaining inbound consumer，則將本檔移出 current working tree，由 Git history 保存；在此前保留本檔。
 
 ## MERGED
 

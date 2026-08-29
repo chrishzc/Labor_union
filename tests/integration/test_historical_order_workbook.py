@@ -52,8 +52,8 @@ def test_workbook_apply_uses_only_the_canonical_six_columns(tmp_path):
         service = _service(connection)
 
         preview = service.preview(str(workbook_path))
-        receipt = service.apply(str(workbook_path), f"wp85:{token}", preview.preview_fingerprint, "wp85-test", token)
-        replay = service.apply(str(workbook_path), f"wp85:{token}", preview.preview_fingerprint, "wp85-test", token)
+        receipt = service.apply(str(workbook_path), f"historical-workbook:{token}", preview.preview_fingerprint, "historical-workbook-test", token)
+        replay = service.apply(str(workbook_path), f"historical-workbook:{token}", preview.preview_fingerprint, "historical-workbook-test", token)
 
         assert receipt.adopted_count == 2
         assert receipt.assignments_created == 2
@@ -84,12 +84,12 @@ def test_six_column_workbook_applies_zero_one_two_as_distinct_order_statuses(tmp
 
         preview = service.preview(str(workbook_path))
         receipt = service.apply(
-            str(workbook_path), f"wp85-status-012:{token}", preview.preview_fingerprint,
-            "wp85-test", token,
+            str(workbook_path), f"historical-workbook:status-012:{token}", preview.preview_fingerprint,
+            "historical-workbook-test", token,
         )
         replay = service.apply(
-            str(workbook_path), f"wp85-status-012:{token}", preview.preview_fingerprint,
-            "wp85-test", token,
+            str(workbook_path), f"historical-workbook:status-012:{token}", preview.preview_fingerprint,
+            "historical-workbook-test", token,
         )
 
         expected_counts = {
@@ -136,16 +136,16 @@ def test_six_column_workbook_adopts_pending_orders_with_truthful_before_status(t
         preview = service.preview(str(workbook_path))
         receipt = service.apply(
             str(workbook_path),
-            f"wp85-pending-status-012:{token}",
+            f"historical-workbook:pending-status-012:{token}",
             preview.preview_fingerprint,
-            "wp85-test",
+            "historical-workbook-test",
             token,
         )
         replay = service.apply(
             str(workbook_path),
-            f"wp85-pending-status-012:{token}",
+            f"historical-workbook:pending-status-012:{token}",
             preview.preview_fingerprint,
-            "wp85-test",
+            "historical-workbook-test",
             token,
         )
 
@@ -187,11 +187,11 @@ def test_workbook_conflict_rejects_changed_source_before_row_apply(tmp_path):
         changed_path = _write_single_workbook(tmp_path / "changed.xlsx", case_no, staff_name, status=2)
         service = _service(connection)
         first_preview = service.preview(str(first_path))
-        service.apply(str(first_path), f"wp85-conflict:{token}", first_preview.preview_fingerprint, "wp85-test", token)
+        service.apply(str(first_path), f"historical-workbook:conflict:{token}", first_preview.preview_fingerprint, "historical-workbook-test", token)
 
         changed_preview = service.preview(str(changed_path))
         with pytest.raises(HistoricalOrderWorkbookConflict):
-            service.apply(str(changed_path), f"wp85-conflict:{token}", changed_preview.preview_fingerprint, "wp85-test", token)
+            service.apply(str(changed_path), f"historical-workbook:conflict:{token}", changed_preview.preview_fingerprint, "historical-workbook-test", token)
 
         assert _order_status(connection, case_no) == "訂單完成"
     finally:
@@ -218,8 +218,8 @@ def test_valid_historical_values_replace_current_values_without_false_conflict(t
         preview = service.preview(str(workbook))
 
         receipt = service.apply(
-            str(workbook), f"wp85-replace:{token}", preview.preview_fingerprint,
-            "wp85-test", token,
+            str(workbook), f"historical-workbook:replace:{token}", preview.preview_fingerprint,
+            "historical-workbook-test", token,
         )
 
         assert receipt.adopted_count == 1
@@ -252,8 +252,8 @@ def test_row_apply_rolls_back_when_persist_fails(tmp_path, monkeypatch):
         preview = workflow.preview(row)
         monkeypatch.setattr(repository, "_append_outbox", _raise_after_domain_writes)
 
-        with pytest.raises(RuntimeError, match="wp85_forced_outbox_failure"):
-            workflow.apply(HistoricalOrderAdoptionRequest(row, preview.fingerprint, f"wp85-rollback:{token}", "wp85-test", "rollback", token))
+        with pytest.raises(RuntimeError, match="historical_workbook_forced_outbox_failure"):
+            workflow.apply(HistoricalOrderAdoptionRequest(row, preview.fingerprint, f"historical-workbook:rollback:{token}", "historical-workbook-test", "rollback", token))
 
         assert _order_status(connection, case_no) == "洽談中"
         assert _count(connection, "order_lifecycle_state_events", case_no) == 0
@@ -285,7 +285,7 @@ def test_matched_dirty_row_projects_masked_historical_order_anomaly():
         preview = workflow.preview(row)
         receipt = workflow.apply(
             HistoricalOrderAdoptionRequest(
-                row, preview.fingerprint, f"wp85-review:{token}", "wp85-test", "review", token
+                row, preview.fingerprint, f"historical-workbook:review:{token}", "historical-workbook-test", "review", token
             )
         )
         result = consume_historical_order_adoption_review_events(connection)
@@ -324,8 +324,8 @@ def test_historical_unknown_issue_obeys_one_second_three_attempt_dead_letter_pol
         preview = workflow.preview(row)
         receipt = workflow.apply(
             HistoricalOrderAdoptionRequest(
-                row, preview.fingerprint, f"wp85-unknown:{token}",
-                "wp85-test", "unknown", token,
+                row, preview.fingerprint, f"historical-workbook:unknown:{token}",
+                "historical-workbook-test", "unknown", token,
             )
         )
         assert receipt.review_identity is not None
@@ -378,7 +378,7 @@ def test_historical_unknown_issue_obeys_one_second_three_attempt_dead_letter_pol
 
 
 def test_controlled_deidentified_historical_workbook_rebuilds_and_replays():
-    workbook_path = Path(__file__).parents[1] / "document" / "資料庫、資料處理" / "假資料_歷史訂單.xlsx"
+    workbook_path = Path(__file__).resolve().parents[2] / "document" / "資料庫、資料處理" / "假資料_歷史訂單.xlsx"
     parsed = load_historical_order_workbook(str(workbook_path))
     assert len(parsed.rows) == 1
     source_row = parsed.rows[0]
@@ -390,12 +390,12 @@ def test_controlled_deidentified_historical_workbook_rebuilds_and_replays():
         service = _service(connection)
         preview = service.preview(str(workbook_path))
         receipt = service.apply(
-            str(workbook_path), "wp85-controlled-deidentified-source",
-            preview.preview_fingerprint, "wp85-test", "controlled-deidentified-source",
+            str(workbook_path), "historical-workbook:controlled-deidentified-source",
+            preview.preview_fingerprint, "historical-workbook-test", "controlled-deidentified-source",
         )
         replay = service.apply(
-            str(workbook_path), "wp85-controlled-deidentified-source",
-            preview.preview_fingerprint, "wp85-test", "controlled-deidentified-source",
+            str(workbook_path), "historical-workbook:controlled-deidentified-source",
+            preview.preview_fingerprint, "historical-workbook-test", "controlled-deidentified-source",
         )
 
         assert preview.source_row_count == 1
@@ -437,9 +437,9 @@ def _seed_controlled_source_roots(connection, source_row):
 
 
 def _seed_case(connection, token, suffix):
-    case_no = f"WP85-{suffix}-{token[:10]}"
-    client_name = f"wp85-client-{suffix}-{token[:6]}"
-    staff_name = f"wp85-staff-{suffix}-{token[:6]}"
+    case_no = f"HISTORICAL-WORKBOOK-{suffix}-{token[:10]}"
+    client_name = f"historical-workbook-client-{suffix}-{token[:6]}"
+    staff_name = f"historical-workbook-staff-{suffix}-{token[:6]}"
     with connection.cursor() as cursor:
         cursor.execute("INSERT INTO clients (case_no,name) VALUES (%s,%s)", (case_no, client_name))
         cursor.execute(
@@ -489,11 +489,11 @@ def _write_status_workbook(destination, case_statuses):
 
 
 def _client_name(case_no):
-    return f"wp85-client-{case_no.split('-')[1]}-{case_no.split('-')[2][:6]}"
+    return f"historical-workbook-client-{case_no.split('-')[2]}-{case_no.split('-')[3][:6]}"
 
 
 def _seed_staff(connection, token, suffix):
-    staff_name = f"wp85-staff-{suffix}-{token[:6]}"
+    staff_name = f"historical-workbook-staff-{suffix}-{token[:6]}"
     with connection.cursor() as cursor:
         cursor.execute("INSERT INTO staff (name,identity_card) VALUES (%s,%s)", (staff_name, f"W{token[:8]}{suffix[:2]}"))
     connection.commit()
@@ -561,4 +561,4 @@ def _count(connection, table_name, case_no, *, via_receipt=False):
 
 
 def _raise_after_domain_writes(*_args):
-    raise RuntimeError("wp85_forced_outbox_failure")
+    raise RuntimeError("historical_workbook_forced_outbox_failure")

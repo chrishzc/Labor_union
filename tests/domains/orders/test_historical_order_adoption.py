@@ -239,10 +239,10 @@ def test_unmatched_case_apply_is_a_zero_write_skip(tmp_path):
     request = HistoricalOrderAdoptionRequest(
         row,
         preview.fingerprint,
-        "wp80:unmatched",
+        "historical-order:unmatched",
         "test-operator",
         "verify unmatched skip",
-        "wp80:unmatched:correlation",
+        "historical-order:unmatched:correlation",
     )
 
     receipt = workflow.apply(request)
@@ -277,10 +277,10 @@ def test_same_source_and_fingerprint_replays_across_operator_metadata(tmp_path):
     request = HistoricalOrderAdoptionRequest(
         row,
         preview.fingerprint,
-        "wp80:different-key",
+        "historical-order:replay",
         "different-operator",
         "different-reason",
-        "wp80:replay:correlation",
+        "historical-order:replay:correlation",
     )
 
     receipt = workflow.apply(request)
