@@ -16,4 +16,6 @@
 
 ## Verification routing
 - default_boundary: Subsystem
-- test_root: unknown (`layout_gap`; focused Access tests currently use flat `tests/test_access_*`).
+- test_root: `tests/domains/external-integration/subsystems/access/`
+- integration_root: `tests/domains/external-integration/subsystems/access/integration/`.
+- remaining_layout_gap: selected flat Access tests plus legacy Streamlit rollback coverage; see Test Map.

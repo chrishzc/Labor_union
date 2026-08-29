@@ -1,7 +1,7 @@
 domain: external-integration
 architecture: ../../../domains/external-integration/index.md
-test_root: layout_gap
-integration_root: unknown
+test_root: tests/domains/external-integration/
+integration_root: tests/domains/external-integration/
 fixtures_root: tests/fixtures/
 subsystems:
   access:
@@ -10,4 +10,4 @@ subsystems:
     index: subsystems/line/index.md
 
 # Routing notes
-LINE-focused tests currently live under `tests/line/`; Access-focused tests are primarily flat `tests/test_access_*`. Neither physical root matches the canonical architecture-owned layout yet.
+LINE and migrated Access-focused tests now use canonical subsystem roots. Remaining flat Access tests are bounded `layout_gap` candidates and must move only when semantic ownership is directly proven; legacy Streamlit rollback coverage remains deferred to Streamlit retirement.

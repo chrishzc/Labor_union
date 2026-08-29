@@ -40,16 +40,17 @@
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/`
 - higher_boundary:
   - `tests/integration/`
+- cross_owner:
+  - `tests/domains/anomalies/subsystems/anomalies/integration/test_service_before_replacement_projection.py` — Anomalies-owned projection contract.
 - layout_gap:
   - `tests/test_service_before_replacement_schema_contract.py` — relocation-sensitive schema lookup remains at observed path.
-  - `tests/test_service_before_replacement_projection.py` — owned by Anomalies projection and deferred to the Anomalies migration batch.
 - routing: `.arch-map/tests/domains/scheduling/subsystems/scheduling/index.md`.
 
 ## Provenance
 - Scheduling ownership/transaction semantics — `architecture_declared` — current specs.
 - API/domain/subsystem/infra/UI/migration paths — `source_observed` — current repository search.
 - Scheduling-owned focused tests — `source_observed` — module-owned test root.
-- Remaining schema/projection exceptions — `source_observed` — current flat test paths.
+- Remaining schema exception and Anomalies projection boundary — `source_observed` — current test roots.
 
 ## Change triggers
 Reconcile when scenario ownership, actual-service referral boundary, matching dependency, route/schema, persistence/migration or test roots change.

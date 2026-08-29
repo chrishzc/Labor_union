@@ -12,6 +12,7 @@ modules:
 
 # Exceptions
 - `matching-coordination` — `tests/test_matching_coordination_repository.py` remains a bounded `layout_gap` because it reads a schema using a repo-relative `__file__` path.
-- `service-before-replacement` — `tests/test_service_before_replacement_schema_contract.py` remains a relocation-sensitive `layout_gap`; `tests/test_service_before_replacement_projection.py` is deferred to the Anomalies owner batch rather than misfiled under Scheduling.
-- `tests/test_matching_schedule_confirmation.py` and `tests/test_staff_leave_intake_api.py` cross Scheduling with LINE delivery/LIFF transport and are deferred to the Access/LINE owner batch.
+- `service-before-replacement` — `tests/test_service_before_replacement_schema_contract.py` remains a relocation-sensitive `layout_gap`.
+- Service-before-replacement anomaly projection is owned by `tests/domains/anomalies/subsystems/anomalies/integration/`.
+- Matching schedule confirmation and staff leave LIFF intake now live under the canonical LINE subsystem integration root.
 These exceptions are routing facts only; remove them after exact path/owner reconciliation and verification.

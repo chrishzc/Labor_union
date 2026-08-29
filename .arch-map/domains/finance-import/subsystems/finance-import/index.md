@@ -17,5 +17,5 @@
 
 ## Verification routing
 - default_boundary: Subsystem
-- test_root: `tests/imports/` (`layout_gap`: functional rather than architecture-owned layout)
-- integration_root: unknown.
+- test_root: `tests/domains/finance-import/subsystems/finance-import/`
+- integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/`.

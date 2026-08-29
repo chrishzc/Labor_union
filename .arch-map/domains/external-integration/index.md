@@ -21,5 +21,6 @@
 
 ## Verification routing
 - default_boundary: Domain
-- test_root: unknown (`layout_gap`; LINE tests in `tests/line/`, Access tests mainly flat `tests/test_access_*`)
-- integration_root: unknown; see `.arch-map/tests/domains/external-integration/index.md`.
+- test_root: `tests/domains/external-integration/`
+- integration_root: subsystem-owned integration roots; see `.arch-map/tests/domains/external-integration/index.md`.
+- remaining_layout_gap: selected flat Access/legacy Streamlit rollback tests only.

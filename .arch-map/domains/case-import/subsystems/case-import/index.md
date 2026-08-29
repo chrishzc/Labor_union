@@ -19,4 +19,4 @@
 - default_boundary: Subsystem
 - test_root: `tests/subsystems/case_import/`
 - higher_boundary: `tests/domains/case_import/`
-- layout_gap: `tests/imports/` 與 `tests/test_wp77_import_contracts.py` 尚未完全 architecture-owned.
+- layout_gap: `tests/test_wp77_import_contracts.py` remains a protected current legacy path with a direct current inventory consumer.

@@ -19,5 +19,5 @@
 
 ## Verification routing
 - default_boundary: Domain
-- test_root: unknown (`layout_gap`; current finance/import tests are under `tests/imports/` and flat `tests/`)
-- integration_root: `tests/imports/` (legacy functional root); see Test Map.
+- test_root: `tests/domains/finance-import/`
+- integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/`; see Test Map.

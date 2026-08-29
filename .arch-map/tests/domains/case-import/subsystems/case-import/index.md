@@ -6,5 +6,4 @@ higher_boundary: tests/domains/case_import/
 fixtures_root: tests/fixtures/
 
 # Exceptions
-- `tests/imports/` is a shared functional legacy root; admit only Case Import-owned scenarios.
 - `tests/test_wp77_import_contracts.py` is a current protected legacy path with an external inventory consumer; status: `layout_gap`.

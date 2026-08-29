@@ -18,5 +18,5 @@
 
 ## Verification routing
 - default_boundary: Subsystem
-- test_root: `tests/line/` (`layout_gap`: not yet under architecture-owned external-integration path)
-- integration_root: unknown.
+- test_root: `tests/domains/external-integration/subsystems/line/`
+- integration_root: `tests/domains/external-integration/subsystems/line/integration/`.

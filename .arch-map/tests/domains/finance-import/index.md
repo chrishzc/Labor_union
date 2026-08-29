@@ -1,11 +1,11 @@
 domain: finance-import
 architecture: ../../../domains/finance-import/index.md
-test_root: layout_gap
-integration_root: tests/imports/
+test_root: tests/domains/finance-import/
+integration_root: tests/domains/finance-import/subsystems/finance-import/integration/
 fixtures_root: tests/fixtures/
 subsystems:
   finance-import:
     index: subsystems/finance-import/index.md
 
 # Routing notes
-`tests/imports/` is a functional legacy root shared with Case Import rather than a canonical `tests/domains/finance-import/` tree. Treat it as `layout_gap`; select tests by Finance Import contracts/paths and expand to Client Finance/Staff Payables/Subsidy only when owner delegation is in scope.
+Finance Import format detection, normalization and bank-adapter tests now live under the canonical Finance Import subsystem integration root. Do not recreate a generic `tests/imports/` bucket; Case Import and other owners must route to their own architecture roots.

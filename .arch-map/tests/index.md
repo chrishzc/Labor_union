@@ -6,7 +6,7 @@ global_root: layout_gap
 
 # Test routing
 
-Current `tests/` is a mixed legacy/architecture-aligned tree, so this index is intentionally sparse. Architecture-owned roots exist for Orders and Case Import at Domain level and for Case Import/Payroll at subsystem-like roots; many other suites remain flat or functional (`tests/imports/`, `tests/line/`, `tests/integration/`). Do not treat this map as a coverage report or migration authorization.
+Current `tests/` is a mixed legacy/architecture-aligned tree, so this index is intentionally sparse. Architecture-owned roots now exist for Orders, Scheduling, Finance Import, External Integration, Anomalies and other migrated owners; higher-boundary suites still remain under roots such as `tests/integration/`. Do not treat this map as a coverage report or migration authorization.
 
 ## Domains
 - `orders` — `domains/orders/index.md`
@@ -15,6 +15,7 @@ Current `tests/` is a mixed legacy/architecture-aligned tree, so this index is i
 - `payroll` — `domains/payroll/index.md`
 - `finance-import` — `domains/finance-import/index.md`
 - `external-integration` — `domains/external-integration/index.md`
+- `anomalies` — `domains/anomalies/index.md`
 
 ## Cross-domain/global routing
 - `tests/integration/` — shared higher-boundary legacy root; admit only scenario-relevant tests.
@@ -22,4 +23,4 @@ Current `tests/` is a mixed legacy/architecture-aligned tree, so this index is i
 - `tests/fixtures/` — shared legacy fixture root; ownership must be resolved by actual consumers before moving/removing.
 - `tests/global/` — not currently present (`layout_gap`).
 
-Domains omitted from this first Test Map are not test-free; their physical ownership remains unresolved in the mixed tree and should be added only when a material task needs durable routing.
+Domains omitted from this Test Map are not test-free; their physical ownership remains unresolved in the mixed tree and should be added only when a material task needs durable routing.
