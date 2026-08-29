@@ -6,4 +6,4 @@ integration_root: tests/domains/client-finance/subsystems/client-finance/integra
 fixtures_root: tests/fixtures/
 
 # Routing notes
-Current owner-local coverage includes cancellation direction, settlement query and over-refund recovery. Anomaly reminder/projection tests that read Client Finance facts belong to the Anomalies verification boundary and are not duplicated here.
+Current owner-local coverage includes cancellation direction, settlement query, over-refund recovery, payment transaction state, deposit lifecycle, receipt overage, and refund overage contracts. Anomaly reminder/projection tests that read Client Finance facts belong to the Anomalies verification boundary and are not duplicated here.
