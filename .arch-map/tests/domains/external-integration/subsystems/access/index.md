@@ -6,4 +6,11 @@ integration_root: tests/domains/external-integration/subsystems/access/integrati
 fixtures_root: tests/fixtures/
 
 # Routing notes
-Account-center, command-safety, audit-query and disposable-MySQL Access tests now live under the canonical Access subsystem root. Remaining flat Access tests should be migrated only when their current semantic owner is directly proven. `tests/test_access_control_ui_app_test.py` remains outside this root because it protects the legacy Streamlit rollback surface and is deferred to Streamlit retirement.
+Focused Access account-center, command-safety, audit-query, security-alert-outbox and TOTP coverage lives under the canonical Access subsystem root. Existing owner-local disposable-MySQL coverage already placed under this root remains there.
+
+# Higher-boundary / deferred coverage
+- `tests/test_access_knowledge_disposable_mysql_e2e.py` — explicit disposable-MySQL business-flow oracle; keep at the higher boundary until a dedicated knowledge owner/root is proven.
+- `tests/test_access_control_ui_app_test.py` — protects the legacy Streamlit rollback surface; defer to Streamlit retirement.
+- `tests/test_admin_auth_security.py` — path-sensitive repo-wide security contract and Streamlit compatibility coverage; keep at the higher boundary.
+
+Do not move remaining flat tests by filename alone; require direct semantic-owner and path-consumer proof.

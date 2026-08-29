@@ -18,4 +18,8 @@
 - default_boundary: Subsystem
 - test_root: `tests/domains/external-integration/subsystems/access/`
 - integration_root: `tests/domains/external-integration/subsystems/access/integration/`.
-- remaining_layout_gap: selected flat Access tests plus legacy Streamlit rollback coverage; see Test Map.
+- higher_boundary:
+  - `tests/test_access_knowledge_disposable_mysql_e2e.py` — disposable MySQL / knowledge flow.
+  - `tests/test_access_control_ui_app_test.py` — legacy Streamlit rollback coverage.
+  - `tests/test_admin_auth_security.py` — repo-wide path-sensitive auth/security compatibility contract.
+- routing: `.arch-map/tests/domains/external-integration/subsystems/access/index.md`.
