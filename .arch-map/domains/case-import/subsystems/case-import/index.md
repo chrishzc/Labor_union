@@ -1,0 +1,22 @@
+# Subsystem: case-import
+
+## Parent
+- domain: `case-import`
+
+## Responsibility
+編排 typed source intake、validation、review、dedupe、Preview／Apply 與 bootstrap；來源不完整或 ambiguous 時 fail closed／review，不猜 owner roots。
+
+## Dependencies
+- outbound: `orders` — formal bootstrap。
+- outbound: `anomalies` — review/projection evidence only。
+
+## Contracts
+- `domains/case_import/` — Case Import rules
+- `subsystems/case_import/` — Case Import workflows
+- `document/架構重整/01_規格基線/00_Global_共同契約.md` — idempotency/receipt/outbox
+
+## Verification routing
+- default_boundary: Subsystem
+- test_root: `tests/subsystems/case_import/`
+- higher_boundary: `tests/domains/case_import/`
+- layout_gap: `tests/imports/` 與 `tests/test_wp77_import_contracts.py` 尚未完全 architecture-owned.
