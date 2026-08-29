@@ -74,7 +74,7 @@ Aggregate gate table 明確限定 1003→1012；不誤稱 repository current ter
 ## REHOMED
 
 - `tests/test_wp80_historical_order_adoption.py` → `tests/domains/orders/test_historical_order_adoption.py`；全部 15 tests collection／execution 保留。
-- `tests/test_wp85_historical_order_workbook_disposable_mysql_e2e.py` → `tests/integration/test_historical_order_workbook.py`；全部 9 MySQL-gated tests 保留 skip condition，collection／execution 通過。
+- `tests/test_wp85_historical_order_workbook_disposable_mysql_e2e.py` → `tests/integration/test_historical_order_workbook.py`；9 個 MySQL-gated tests collection 通過；runtime 因 disposable MySQL environment unavailable 而 NOT_RUN。
 
 ## DELETED_NOW
 
