@@ -1,6 +1,6 @@
 subsystem: scheduling
 parent_domain: scheduling
-architecture: ../../../../domains/scheduling/subsystems/scheduling/index.md
+architecture: ../../../../../domains/scheduling/subsystems/scheduling/index.md
 test_root: layout_gap
 integration_root: tests/integration/
 fixtures_root: tests/fixtures/

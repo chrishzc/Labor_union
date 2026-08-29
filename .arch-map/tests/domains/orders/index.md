@@ -1,5 +1,5 @@
 domain: orders
-architecture: ../../domains/orders/index.md
+architecture: ../../../domains/orders/index.md
 test_root: tests/domains/orders/
 integration_root: tests/integration/
 fixtures_root: tests/fixtures/

@@ -1,6 +1,6 @@
 subsystem: orders
 parent_domain: orders
-architecture: ../../../../domains/orders/subsystems/orders/index.md
+architecture: ../../../../../domains/orders/subsystems/orders/index.md
 test_root: layout_gap
 integration_root: tests/integration/
 fixtures_root: tests/fixtures/
