@@ -65,6 +65,8 @@ jobs:
             path: tests/domains/external-integration/subsystems/access
           - owner: line
             path: tests/domains/external-integration/subsystems/line
+          - owner: contract-signing
+            path: tests/domains/contract-signing/subsystems/contract-signing
 
     steps:
     - uses: actions/checkout@v6

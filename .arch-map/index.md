@@ -13,6 +13,7 @@
 - `government-subsidy` — 補助申請、核准、撥款、allocation 與 reversal；path: `domains/government-subsidy/index.md`
 - `anomalies` — 異常 projection、告警與 owner-specific remediation routing；path: `domains/anomalies/index.md`
 - `case-import` — BeClass／HCM intake、review 與 formal case bootstrap；path: `domains/case-import/index.md`
+- `contract-signing` — 核准契約文件版本、簽回 evidence、external-signing session 與 final signed document lineage；path: `domains/contract-signing/index.md`
 - `external-integration` — Access 與 LINE transport／identity／delivery boundaries；path: `domains/external-integration/index.md`
 
 ## Cross-domain relationships
@@ -20,8 +21,9 @@
 - `payroll -> scheduling` — Payroll 從 assignment／service ownership 建立薪資義務，不反向改寫排班根事實。
 - `finance-import -> client-finance | staff-payables | government-subsidy` — 匯入只保存銀行來源與分類，正式業務變更委派給 owning Domain。
 - `anomalies -> owning domains` — Anomalies 投影／追蹤 owner facts，不直接改寫 owner root；解除必須以 owner predicate 為準。
+- `contract-signing -> scheduling | orders | client-finance | external-integration` — Contract Signing 擁有文件／簽回與簽署 session evidence；commitment／execution、Orders lifecycle、Finance roots 與 LINE binding／delivery 仍由各 owner 決定。
 - `external-integration -> owning domains` — Access／LINE 只提供 actor、identity、webhook／delivery 等邊界，業務命令仍由 owning Subsystem／Domain 決定。
 - `all mutation -> Global` — `shared_kernel/`、outer UoW、receipt/outbox/durable job 與 migration governance 提供跨域不變量。
 
 ## Navigation notes
-本地圖是 current architecture routing evidence，不是產品需求 Authority、architecture compliance/completion claim 或 source/test 的替代品。正式語意先讀 `AGENTS.md`、`document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` 與 owning spec，再用此圖縮小 source/test scope。`api/`、`ui_react/`、legacy `ui/`、`line/`、`infrastructure/`、`scripts/`、`db/` 是 adapters／runtime／release locations，不因資料夾存在而自動成為 Domain。`contract_integration`、`contract_signing`、`customer_service`、`knowledge_retrieval`、`staff`、`bootstrap`、`controlled_files`、`reporting`、`jobs` 等 current source 邊界尚未在第一版完整建模；需要時依 current spec/source scoped 擴張。不得以此地圖復活 legacy `system_map*`／`scripts_map.md` gate。
+本地圖是 current architecture routing evidence，不是產品需求 Authority、architecture compliance/completion claim 或 source/test 的替代品。正式語意先讀 `AGENTS.md`、`document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` 與 owning spec，再用此圖縮小 source/test scope。`api/`、`ui_react/`、legacy `ui/`、`line/`、`infrastructure/`、`scripts/`、`db/` 是 adapters／runtime／release locations，不因資料夾存在而自動成為 Domain。`contract_integration`、`customer_service`、`knowledge_retrieval`、`staff`、`bootstrap`、`controlled_files`、`reporting`、`jobs` 等 current source 邊界尚未在第一版完整建模；需要時依 current spec/source scoped 擴張。不得以此地圖復活 legacy `system_map*`／`scripts_map.md` gate。
