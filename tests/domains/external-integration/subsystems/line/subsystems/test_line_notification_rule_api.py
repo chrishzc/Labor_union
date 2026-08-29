@@ -180,15 +180,27 @@ def test_dedicated_notification_rule_api_supports_get_preview_and_save(monkeypat
 
 
 def test_notification_timeline_api_returns_deidentified_evidence(monkeypatch) -> None:
+    record = {
+        "source_event_id": 9,
+        "event_code": "service_time_checkpoint",
+        "occurred_at_utc": "2026-08-08T02:30:00Z",
+        "historical_silent": False,
+        "rule_id": "baby_log_reminder",
+        "decision_status": "matched",
+        "reason_code": None,
+        "recipient_type": "assigned_caregiver",
+        "recipient_masked": "***1234",
+        "occurrence_number": 1,
+        "intent_status": "cancelled",
+        "scheduled_at_utc": "2026-08-08T03:00:00Z",
+        "delivery_status": "cancelled",
+        "delivery_task_id": 44,
+    }
+
     class Timeline:
         def list_case(self, case_no, _actor):
             assert case_no == "CASE-8"
-            return ({
-                "source_event_id": 9,
-                "event_code": "service_time_checkpoint",
-                "recipient_masked": "***1234",
-                "intent_status": "cancelled",
-            },)
+            return (record,)
 
     monkeypatch.setattr(
         line_notification_rules,
@@ -203,12 +215,7 @@ def test_notification_timeline_api_returns_deidentified_evidence(monkeypatch) ->
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["records"] == [{
-        "source_event_id": 9,
-        "event_code": "service_time_checkpoint",
-        "recipient_masked": "***1234",
-        "intent_status": "cancelled",
-    }]
+    assert response.json()["data"]["records"] == [record]
 
 
 def test_manual_replay_api_requires_previewable_source_and_reason(monkeypatch) -> None:
@@ -217,7 +224,13 @@ def test_manual_replay_api_requires_previewable_source_and_reason(monkeypatch) -
     class Replay:
         def preview(self, source_event_id, _actor):
             calls.append(("preview", source_event_id))
-            return {"source_event_id": source_event_id, "matching_rule_count": 1}
+            return {
+                "source_event_id": source_event_id,
+                "event_code": "service_time_checkpoint",
+                "historical_silent": False,
+                "matching_rule_count": 1,
+                "will_create_new_immutable_source": True,
+            }
 
         def apply(self, source_event_id, _actor, reason, key, correlation):
             calls.append(("apply", source_event_id, reason, key.value, correlation.value))
