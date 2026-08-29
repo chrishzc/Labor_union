@@ -162,7 +162,7 @@ def test_staff_workbook_preview_treats_newer_name_change_as_adoption(monkeypatch
         "MySqlStaffHistoricalAdoptionRepository",
         lambda connection: repository,
     )
-    service = staff_workbook_adoption.StaffHistoricalWorkbookService(None, None)
+    service = staff_workbook_adoption.StaffHistoricalWorkbookService(None, None, lambda: None)
 
     outcome, reviewed = service._preview_row(row)
 

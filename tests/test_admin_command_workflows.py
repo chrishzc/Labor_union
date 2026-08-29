@@ -79,6 +79,17 @@ class FakeRepository:
         self.clients[case_no]["name"] = client_name
 
 
+class FakeUnitOfWork:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def commit(self):
+        return None
+
+
 def _holiday_command(name: str = "國慶日") -> holiday_maintenance.HolidayCommand:
     target = date(2026, 10, 10)
     return holiday_maintenance.HolidayCommand(
@@ -164,6 +175,7 @@ def test_client_name_apply_rejects_stale_preview():
     with pytest.raises(ValueError, match="stale_preview"):
         client_name_maintenance.apply(
             repository,
+            FakeUnitOfWork,
             "CASE-1",
             "新客戶",
             preview["preview_fingerprint"],

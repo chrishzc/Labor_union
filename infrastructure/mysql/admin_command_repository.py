@@ -74,7 +74,3 @@ class AdminCommandRepository:
                 f"UPDATE {table} SET {assignments} WHERE {primary_key}=%s",
                 (*updates.values(), row_id),
             )
-
-    def commit(self): self._connection.commit()
-
-    def rollback(self): self._connection.rollback()

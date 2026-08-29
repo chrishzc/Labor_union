@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
+from typing import Callable
 
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 from domains.case_import.staff_historical_adoption import plan_staff_scalar_merge
@@ -59,9 +60,10 @@ class StaffHistoricalWorkbookUnavailable(RuntimeError):
 
 
 class StaffHistoricalWorkbookService:
-    def __init__(self, connection, workbook_repository) -> None:
+    def __init__(self, connection, workbook_repository, unit_of_work_factory: Callable[[], object]) -> None:
         self._connection = connection
         self._workbook_repository = workbook_repository
+        self._unit_of_work_factory = unit_of_work_factory
 
     def preview(self, source_path: str, source_revision: str | None = None) -> StaffHistoricalWorkbookPreview:
         return self._preview(load_staff_historical_workbook(source_path, source_revision))
@@ -80,11 +82,15 @@ class StaffHistoricalWorkbookService:
             fresh_preview = self._preview(workbook)
             if fresh_preview.preview_fingerprint != preview.preview_fingerprint:
                 raise StaffHistoricalWorkbookConflict("staff_historical_workbook_preview_stale")
-            claim = self._workbook_repository.claim(key, workbook.source_content_digest, correlation_id)
-            if claim == "conflict":
-                raise StaffHistoricalWorkbookConflict("staff_historical_workbook_idempotency_conflict")
+            with self._unit_of_work_factory() as unit_of_work:
+                claim = self._workbook_repository.claim(key, workbook.source_content_digest, correlation_id)
+                if claim == "conflict":
+                    raise StaffHistoricalWorkbookConflict("staff_historical_workbook_idempotency_conflict")
+                unit_of_work.commit()
             receipt = self._apply_rows(workbook, fresh_preview.preview_fingerprint)
-            self._workbook_repository.save_receipt(key, workbook.source_content_digest, actor, fresh_preview.preview_fingerprint, receipt.as_dict())
+            with self._unit_of_work_factory() as unit_of_work:
+                self._workbook_repository.save_receipt(key, workbook.source_content_digest, actor, fresh_preview.preview_fingerprint, receipt.as_dict())
+                unit_of_work.commit()
             return receipt
         finally:
             self._workbook_repository.release_lock(key)

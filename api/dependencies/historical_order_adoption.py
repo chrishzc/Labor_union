@@ -29,6 +29,7 @@ def get_historical_order_workbook_import_service():
         yield HistoricalOrderWorkbookImportService(
             HistoricalOrderWorkbookImportRepository(connection),
             workflow,
+            lambda: MySqlUnitOfWork(connection),
         )
     finally:
         connection.close()

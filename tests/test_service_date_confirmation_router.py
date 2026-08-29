@@ -86,11 +86,24 @@ class InMemoryServiceDateConfirmationRepository:
         self.next_version += 1
         return receipt
 
-    def commit(self) -> None:
-        self.committed = True
 
-    def rollback(self) -> None:
-        self.rolled_back = True
+
+class _UnitOfWork:
+    def __init__(self, repository: InMemoryServiceDateConfirmationRepository) -> None:
+        self._repository = repository
+        self._committed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exception_type, exception, traceback):
+        if exception_type is not None or not self._committed:
+            self._repository.rolled_back = True
+        return False
+
+    def commit(self) -> None:
+        self._repository.committed = True
+        self._committed = True
 
 
 from fastapi.exceptions import RequestValidationError
@@ -121,7 +134,7 @@ def _create_app(repo: InMemoryServiceDateConfirmationRepository, authenticate: b
             id=1, username="admin_tester", display_name="Admin Tester", role="system_admin"
         )
     app.dependency_overrides[get_service_date_confirmation_workflow] = (
-        lambda: ServiceDateConfirmationWorkflow(repo)
+        lambda: ServiceDateConfirmationWorkflow(repo, lambda: _UnitOfWork(repo))
     )
     return app
 

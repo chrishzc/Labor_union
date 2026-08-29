@@ -10,6 +10,17 @@ application workflow 與 MySQL 完成。
 維持可重播、可稽核的業務操作。版本與驗收狀態以 Git、release manifest 及架構文件內的
 evidence 為準；不要以本 README 的文字代替實際驗收。
 
+> **Current governance checkpoint（2026-08-29）**：Task 97 final-candidate discovery 的 entry queue 為
+> 685 entries，其中 437 `active`、74 `operator_only`、22 `retired_410`、152 legacy `review_required`，
+> generic placeholder 已為 0。逐列 Task 97 disposition 為 437 `active_canonical`、74
+> `operator_only_guarded`、22 `retired_410`、147 `blocked_external_evidence`、5
+> `rewrite_to_canonical`；152 張 terminal receipt 的結果仍是 `blocked`，不是完成。下方 2026-08-10
+> 的 348／0 數字是該次 release candidate 的歷史 snapshot，不代表 current repository 已通過 Task 97。
+> Current conclusion 為 `ARCHITECTURE_COMPLIANCE_NOT_CONFIRMED`，詳見
+> [任務 97](document/架構重整/02_決策與退役執行記錄/97_架構一致性修復與全域驗收計畫.md#13-2026-08-29-current-execution-checkpoint)。
+> 2026-08-29 最新人工優先序：其他任務與本機當前 Task 97 發生重疊衝突時，
+> 以 Task 97 優先並停止重疊 lane。
+
 ## 2026-08-10 歷史 Release Candidate 摘要
 
 以下為 2026-08-10 當時的候選版本摘要，不代表目前 release 狀態：

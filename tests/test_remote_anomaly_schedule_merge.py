@@ -13,8 +13,16 @@ import pytest
 from api.routes import anomaly_registry, staff
 from domains.anomalies.registry import default_anomaly_registry
 from infrastructure.mysql import anomaly_registry_repository
+from infrastructure.mysql.staff_summary_query_repository import (
+    MySqlStaffSummaryQueryRepository,
+)
 from scripts.imports import import_client_hcm
 from subsystems.anomalies import finance_import_anomaly_consumer
+from subsystems.staff.summary_query import (
+    StaffSummaryQueryApplication,
+    StaffSummaryQueryService,
+)
+from subsystems.access.authentication_session import AdminPrincipal
 from ui.pages.scheduling.navigation_state import (
     apply_one_time_default,
     clear_staff_calendar_navigation,
@@ -127,15 +135,19 @@ def test_schedule_registry_declares_staff_name_display_contract():
         assert "staff_name" in registry.require(code).display_fields
 
 
-def test_staff_summary_supports_exact_typed_lookup(monkeypatch):
+def test_staff_summary_supports_exact_typed_lookup():
     connection = _Connection([{"id": 7, "name": "王小美", "phone": "0900"}])
-    monkeypatch.setattr(staff.db_service, "get_connection", lambda: connection)
 
     response = staff.get_staff_summaries(
         page_size=1,
         after_id=None,
         staff_id=7,
+        principal=AdminPrincipal(7, "staff-reader", "Staff Reader", "admin"),
+        application=StaffSummaryQueryApplication(
+            StaffSummaryQueryService(MySqlStaffSummaryQueryRepository(connection))
+        ),
     )
+    connection.close()
 
     assert response.data.items[0].id == 7
     assert response.data.next_cursor is None

@@ -6,10 +6,16 @@ Description: 驗證正式契約內容路由、指派選擇與 Client BeClass 綁
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
 
 from api.routes import contracts
-from infrastructure.mysql.contract_context_repository import _CASE_FACTS_SQL
+from infrastructure.mysql.contract_context_repository import (
+    MySqlContractContextRepository,
+    _CASE_FACTS_SQL,
+)
+from subsystems.contract_integration.contract_context import (
+    ContractContextAmbiguous,
+    ContractContextQueryService,
+)
 
 
 def test_contract_context_joins_client_beclass_by_accepted_case_binding():
@@ -106,44 +112,43 @@ class FakeConnection:
         self.closed = True
 
 
-def install_fake_connection(monkeypatch, case_facts=CASE_FACTS, assignments=None):
+def build_query_service(case_facts=CASE_FACTS, assignments=None):
     cursor = FakeCursor(case_facts, assignments or [assignment(1)])
     connection = FakeConnection(cursor)
-    monkeypatch.setattr(contracts, "get_connection", lambda: connection)
-    return cursor, connection
+    service = ContractContextQueryService(MySqlContractContextRepository(connection))
+    return service, cursor, connection
 
 
-def test_contract_context_uses_formal_assignment_not_orders_staff_id(monkeypatch):
-    cursor, connection = install_fake_connection(monkeypatch)
+def test_contract_context_uses_formal_assignment_not_orders_staff_id():
+    service, cursor, connection = build_query_service()
 
-    result = contracts.get_staff_contract_context("115000001")
+    result = service.query("115000001")
 
-    assert result["order"]["case_no"] == "115000001"
-    assert result["assignment"]["assignment_id"] == 1
-    assert result["staff"]["name"] == "月嫂1"
-    assert result["client"]["identity_status"] == "一般市民"
-    assert result["beclass"]["query_no"] == "115000001"
+    assert result.order.case_no == "115000001"
+    assert result.assignment.assignment_id == 1
+    assert result.staff.name == "月嫂1"
+    assert result.client.identity_status == "一般市民"
+    assert result.beclass.query_no == "115000001"
     assert "orders.staff_id" not in " ".join(cursor.sql)
     assert "v_order_details" not in " ".join(cursor.sql)
     assert "c.identity_status AS client_identity_status" in " ".join(cursor.sql)
     assert "clients.identity_status" not in " ".join(cursor.sql)
-    assert connection.closed is True
+    assert connection.closed is False
 
 
-def test_multiple_active_assignments_require_explicit_assignment_id(monkeypatch):
-    install_fake_connection(monkeypatch, assignments=[assignment(1), assignment(2)])
+def test_multiple_active_assignments_require_explicit_assignment_id():
+    service, _, _ = build_query_service(assignments=[assignment(1), assignment(2)])
 
-    with pytest.raises(HTTPException) as error:
-        contracts.get_staff_contract_context("115000001")
+    with pytest.raises(ContractContextAmbiguous) as error:
+        service.query("115000001")
 
-    assert error.value.status_code == 422
-    assert "assignment_id" in error.value.detail
+    assert "assignment_id" in str(error.value)
 
 
-def test_assignment_id_selects_the_requested_formal_assignment(monkeypatch):
-    install_fake_connection(monkeypatch, assignments=[assignment(1), assignment(2)])
+def test_assignment_id_selects_the_requested_formal_assignment():
+    service, _, _ = build_query_service(assignments=[assignment(1), assignment(2)])
 
-    result = contracts.get_staff_contract_context("115000001", assignment_id=2)
+    result = service.query("115000001", assignment_id=2)
 
-    assert result["assignment"]["assignment_id"] == 2
-    assert result["staff"]["name"] == "月嫂2"
+    assert result.assignment.assignment_id == 2
+    assert result.staff.name == "月嫂2"

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal, Protocol
+from typing import Callable, Literal, Protocol
 
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.scheduling.holiday_calendar_query import (
@@ -80,6 +80,44 @@ class HolidayMaintenanceRepository(SchedulingHolidayQuery, Protocol):
     ) -> None: ...
 
     def delete_holiday(self, holiday_date: date) -> None: ...
+
+
+class HolidayMaintenanceApplication:
+    def __init__(
+        self,
+        repository: HolidayMaintenanceRepository,
+        unit_of_work_factory: Callable[[], object],
+        after_commit: Callable[[], None],
+    ) -> None:
+        self._repository = repository
+        self._unit_of_work_factory = unit_of_work_factory
+        self._after_commit = after_commit
+
+    def preview(self, command: HolidayCommand) -> HolidayPreview:
+        return preview(self._repository, command)
+
+    def apply(
+        self,
+        command: HolidayCommand,
+        expected_calendar_version: str,
+        preview_fingerprint: str,
+        idempotency_key: str,
+        actor: str,
+        reason: str,
+    ) -> HolidayReceipt:
+        with self._unit_of_work_factory() as unit_of_work:
+            receipt = apply(
+                self._repository,
+                command,
+                expected_calendar_version,
+                preview_fingerprint,
+                idempotency_key,
+                actor,
+                reason,
+            )
+            unit_of_work.commit()
+        self._after_commit()
+        return receipt
 
 
 def preview(repository: SchedulingHolidayQuery, command: HolidayCommand) -> HolidayPreview:

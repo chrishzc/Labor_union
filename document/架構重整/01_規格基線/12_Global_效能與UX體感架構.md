@@ -78,7 +78,8 @@ success --版本落後→ stale
 - Orders Terms／Actual Start／Cancellation／Reopen Apply；
 - assignment、leave／substitution、waiting lock 或 buffer Apply；
 - 收款、付款、退款、adjustment、reversal、帳務修正與核銷；
-- Alert claim／resolve；
+- current issue owner Apply；Anomalies 不存在 claim／resolve command。cutover 前尚存的 legacy
+  Claim／Resolve 也不得 optimistic 顯示成功，且必須依 current-state slimming gate 退役；
 - Accounts Payable archive、正式匯入或 database cutover。
 
 上述權威命令按下後可立即顯示「處理中」，但只有收到成功 receipt 才能顯示已完成。

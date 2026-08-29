@@ -86,6 +86,46 @@ class LineNotificationRulesDefinition(_ClosedModel):
     rules: tuple[LineNotificationRuleInput, ...]
 
 
+class LineNotificationRulesCatalogView(_ClosedModel):
+    revision: StrictInt
+    definition: LineNotificationRulesDefinition
+
+
+class LineNotificationTimelineRecordView(_ClosedModel):
+    source_event_id: StrictInt
+    event_code: StrictStr
+    occurred_at_utc: StrictStr
+    historical_silent: StrictBool
+    rule_id: StrictStr | None
+    decision_status: StrictStr | None
+    reason_code: StrictStr | None
+    recipient_type: StrictStr | None
+    recipient_masked: StrictStr | None
+    occurrence_number: StrictInt | None
+    intent_status: StrictStr | None
+    scheduled_at_utc: StrictStr | None
+    delivery_status: StrictStr | None
+    delivery_task_id: StrictInt | None
+
+
+class LineNotificationTimelineView(_ClosedModel):
+    case_no: StrictStr
+    records: list[LineNotificationTimelineRecordView]
+
+
+class PreviewLineNotificationManualReplayView(_ClosedModel):
+    source_event_id: StrictInt
+    event_code: StrictStr
+    historical_silent: StrictBool
+    matching_rule_count: StrictInt
+    will_create_new_immutable_source: StrictBool
+
+
+class ApplyLineNotificationManualReplayView(_ClosedModel):
+    source_event_id: StrictInt
+    replayed_source_event_id: StrictInt
+
+
 class _MutationRequest(_ClosedModel):
     expected_revision: StrictInt = Field(ge=0)
     preview_fingerprint: Sha256Hex
@@ -146,11 +186,16 @@ class ApplyLineNotificationManualReplayRequest(BaseModel):
 
 
 __all__ = [
+    "ApplyLineNotificationManualReplayView",
     "DeleteLineNotificationRuleRequest",
     "DeleteLineNotificationRuleView",
     "ApplyLineNotificationManualReplayRequest",
     "LineNotificationRuleInput",
     "LineNotificationRulesDefinition",
+    "LineNotificationRulesCatalogView",
+    "LineNotificationTimelineRecordView",
+    "LineNotificationTimelineView",
+    "PreviewLineNotificationManualReplayView",
     "PreviewLineNotificationRulesRequest",
     "PreviewLineNotificationRulesView",
     "SaveLineNotificationRulesRequest",

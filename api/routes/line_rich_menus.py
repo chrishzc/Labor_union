@@ -30,6 +30,8 @@ from api.schemas.base import BaseResponse
 from api.schemas.errors import GlobalTypedErrorResponseView
 from api.schemas.line_config import LineMenusConfig, RichMenuDefinition
 from api.schemas.line_rich_menus import (
+    RichMenuImageUploadResponse,
+    RichMenuImageUploadResult,
     RichMenuPublishPreviewRequest,
     RichMenuPublishPreviewResponse,
     RichMenuPublishPreviewResult,
@@ -359,7 +361,7 @@ def preview_rich_menu(payload: RichMenuDefinition):
 
 @router.post(
     "/{menu_id}/images",
-    response_model=BaseResponse[dict],
+    response_model=RichMenuImageUploadResponse,
     dependencies=[Depends(require_persisted_admin)],
 )
 async def upload_rich_menu_image(
@@ -383,21 +385,17 @@ async def upload_rich_menu_image(
     request.state.audit_action = "line.rich_menu.image.upload"
     request.state.audit_resource_type = "media_asset"
     request.state.audit_resource_id = str(asset["id"])
-    return BaseResponse(
-        data={
-            key: asset.get(key)
-            for key in (
-                "id",
-                "original_filename",
-                "mime_type",
-                "file_size",
-                "sha256",
-                "width",
-                "height",
-                "created_at",
-            )
-        },
-        message="Rich Menu 圖片已安全保存",
+    return RichMenuImageUploadResponse(
+        data=RichMenuImageUploadResult(
+            id=asset["id"],
+            original_filename=asset.get("original_filename"),
+            mime_type=asset["mime_type"],
+            file_size=asset["file_size"],
+            sha256=asset["sha256"],
+            width=asset["width"],
+            height=asset["height"],
+            created_at=asset["created_at"],
+        )
     )
 
 

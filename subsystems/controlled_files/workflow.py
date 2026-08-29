@@ -322,6 +322,12 @@ class ControlledFileWorkflow:
     def apply(self, command: ApplyControlledFile) -> ControlledFileApplyReceipt:
         with self._unit_of_work_factory() as unit_of_work:
             receipt = self.apply_borrowed(command)
+            _register_postcommit_finalize(
+                unit_of_work,
+                self._storage,
+                receipt.readback,
+                command.intent.staging_id,
+            )
             unit_of_work.commit()
             return receipt
 
@@ -575,6 +581,33 @@ def _replay(
 
 def _receipt_id(key: IdempotencyKey) -> str:
     return f"cfr_{hashlib.sha256(key.value.encode('utf-8')).hexdigest()[:32]}"
+
+
+def _register_postcommit_finalize(
+    unit_of_work: UnitOfWork,
+    storage: ControlledFileStoragePort,
+    readback: ControlledFileReadback,
+    staging_id: str,
+) -> None:
+    """Attach an integrity-only finalizer when the UoW supports completion hooks.
+
+    The DB transaction remains the sole owner of metadata/reference/receipt.  A
+    completion hook is intentionally best-effort infrastructure composition: a
+    failure happens after commit and must be surfaced as an unknown post-commit
+    outcome for reconciliation, never converted into a rollback or object delete.
+    The baseline MySQL UoW has no hook and therefore leaves the durable
+    reconciliation path as the owner of any later verification.
+    """
+    add_after_completion = getattr(unit_of_work, "add_after_completion", None)
+    finalize = getattr(storage, "finalize_staged", None)
+    if not callable(add_after_completion) or not callable(finalize):
+        return
+    add_after_completion(
+        lambda: finalize(
+            staging_id,
+            expected_sha256=readback.sha256_digest,
+        )
+    )
 
 
 def _utc(value: datetime) -> datetime:

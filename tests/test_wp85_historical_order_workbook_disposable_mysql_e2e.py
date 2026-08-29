@@ -410,7 +410,11 @@ def _service(connection):
     workflow = HistoricalOrderAdoptionWorkflow(
         MySqlHistoricalOrderAdoptionRepository(connection), lambda: MySqlUnitOfWork(connection)
     )
-    return HistoricalOrderWorkbookImportService(HistoricalOrderWorkbookImportRepository(connection), workflow)
+    return HistoricalOrderWorkbookImportService(
+        HistoricalOrderWorkbookImportRepository(connection),
+        workflow,
+        lambda: MySqlUnitOfWork(connection),
+    )
 
 
 def _seed_controlled_source_roots(connection, source_row):

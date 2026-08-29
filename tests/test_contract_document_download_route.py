@@ -9,37 +9,22 @@ import pytest
 from fastapi import HTTPException
 
 from api.routes import contract_signing as route
+from subsystems.contract_signing.document_query import ContractSigningDocumentDownload
 
 
-class _Cursor:
-    def execute(self, *_args, **_kwargs):
-        return None
-
-    def fetchone(self):
-        return {
-            "storage_key": "CASE-1/client/missing.pdf",
-            "sha256": "a" * 64,
-            "mime_type": "application/pdf",
-            "original_filename": "服務人員契約.xlsx",
-        }
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return False
-
-
-class _Connection:
-    def cursor(self):
-        return _Cursor()
-
-    def close(self):
-        return None
+class _DocumentQueryApplication:
+    def find_document_for_download(self, case_no, document_version_id):
+        return ContractSigningDocumentDownload(
+            case_no=case_no,
+            document_version_id=document_version_id,
+            storage_key="CASE-1/client/missing.pdf",
+            sha256="a" * 64,
+            mime_type="application/pdf",
+            original_filename="服務人員契約.xlsx",
+        )
 
 
 def test_missing_contract_archive_returns_typed_not_found_instead_of_internal_error(monkeypatch):
-    monkeypatch.setattr(route, "get_connection", _Connection)
     monkeypatch.setattr(
         route,
         "read_archived_contract_document",
@@ -52,6 +37,7 @@ def test_missing_contract_archive_returns_typed_not_found_instead_of_internal_er
             case_no="CASE-1",
             document_version_id=7,
             principal=SimpleNamespace(),
+            application=_DocumentQueryApplication(),
         )
 
     assert captured.value.status_code == 404
@@ -60,7 +46,6 @@ def test_missing_contract_archive_returns_typed_not_found_instead_of_internal_er
 
 
 def test_download_uses_rfc5987_filename_for_non_ascii_archive_name(monkeypatch):
-    monkeypatch.setattr(route, "get_connection", _Connection)
     monkeypatch.setattr(route, "read_archived_contract_document", lambda **_kwargs: b"pdf")
     monkeypatch.setattr(route, "record_admin_audit", lambda **_kwargs: None)
 
@@ -69,6 +54,7 @@ def test_download_uses_rfc5987_filename_for_non_ascii_archive_name(monkeypatch):
         case_no="CASE-1",
         document_version_id=7,
         principal=SimpleNamespace(),
+        application=_DocumentQueryApplication(),
     )
 
     assert response.headers["content-disposition"] == (

@@ -49,6 +49,17 @@ class _Repository:
         return tuple(self.recent_rows)
 
 
+class _UnitOfWork:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def commit(self):
+        return None
+
+
 class _Intake:
     def __init__(self, repository) -> None:
         self._repository = repository
@@ -108,7 +119,7 @@ def test_same_key_and_digest_returns_terminal_workbook_receipt(tmp_path):
     workbook = tmp_path / "hcm.xlsx"
     workbook.write_bytes(b"same workbook")
     repository = _Repository()
-    service = HcmWorkbookImportService(repository, _Intake(repository))
+    service = HcmWorkbookImportService(repository, _Intake(repository), _UnitOfWork)
 
     first = service.ingest(pd.DataFrame({"案件": ["A"]}), str(workbook), "key-1", "operator", "corr-1")
     replay = service.ingest(pd.DataFrame({"案件": ["A"]}), str(workbook), "key-1", "operator", "corr-2")
@@ -123,7 +134,7 @@ def test_same_digest_with_a_new_key_returns_the_existing_terminal_receipt(tmp_pa
     workbook = tmp_path / "hcm.xlsx"
     workbook.write_bytes(b"same workbook new key")
     repository = _Repository()
-    service = HcmWorkbookImportService(repository, _Intake(repository))
+    service = HcmWorkbookImportService(repository, _Intake(repository), _UnitOfWork)
 
     first = service.ingest(pd.DataFrame({"案件": ["A"]}), str(workbook), "key-1", "operator", "corr-1")
     replay = service.ingest(pd.DataFrame({"案件": ["A"]}), str(workbook), "key-2", "operator", "corr-2")
@@ -138,7 +149,7 @@ def test_preview_is_zero_write_and_apply_requires_matching_fingerprint(tmp_path)
     workbook = tmp_path / "hcm.xlsx"
     workbook.write_bytes(b"previewed workbook")
     repository = _Repository()
-    service = HcmWorkbookImportService(repository, _Intake(repository))
+    service = HcmWorkbookImportService(repository, _Intake(repository), _UnitOfWork)
     frame = pd.DataFrame({"案件": ["A"]})
 
     preview = service.preview(frame, str(workbook))
@@ -157,7 +168,7 @@ def test_partial_formal_cases_are_explicit_in_preview_and_terminal_receipt(tmp_p
     workbook = tmp_path / "hcm.xlsx"
     workbook.write_bytes(b"partial formal cases")
     repository = _Repository()
-    service = HcmWorkbookImportService(repository, _WarningIntake(repository))
+    service = HcmWorkbookImportService(repository, _WarningIntake(repository), _UnitOfWork)
     frame = pd.DataFrame({"案件": ["A", "B"]})
 
     preview = service.preview(frame, str(workbook))
@@ -175,7 +186,7 @@ def test_apply_rejects_stale_preview_before_row_intake(tmp_path):
     workbook = tmp_path / "hcm.xlsx"
     workbook.write_bytes(b"stale workbook")
     repository = _Repository()
-    service = HcmWorkbookImportService(repository, _Intake(repository))
+    service = HcmWorkbookImportService(repository, _Intake(repository), _UnitOfWork)
 
     with pytest.raises(HcmWorkbookConflict, match="hcm_workbook_preview_stale"):
         service.apply(
@@ -193,7 +204,7 @@ def test_same_key_and_different_digest_conflicts_before_row_intake(tmp_path):
     first.write_bytes(b"first")
     second.write_bytes(b"second")
     repository = _Repository()
-    service = HcmWorkbookImportService(repository, _Intake(repository))
+    service = HcmWorkbookImportService(repository, _Intake(repository), _UnitOfWork)
 
     service.ingest(pd.DataFrame({"案件": ["A"]}), str(first), "key-1", "operator", "corr-1")
     with pytest.raises(HcmWorkbookConflict):
@@ -207,7 +218,7 @@ def test_incomplete_row_outcomes_do_not_create_a_terminal_receipt(tmp_path):
     workbook = tmp_path / "hcm.xlsx"
     workbook.write_bytes(b"one incomplete outcome")
     repository = _Repository()
-    service = HcmWorkbookImportService(repository, _IncompleteIntake(repository))
+    service = HcmWorkbookImportService(repository, _IncompleteIntake(repository), _UnitOfWork)
 
     with pytest.raises(ValueError, match="hcm_import_row_outcomes_not_conserved"):
         service.ingest(pd.DataFrame({"案件": ["A", "B"]}), str(workbook), "key-1", "operator", "corr-1")
@@ -219,7 +230,7 @@ def test_detailed_receipt_preserves_batch_membership_and_problem_lineage(tmp_pat
     workbook = tmp_path / "hcm.xlsx"
     workbook.write_bytes(b"detailed workbook")
     repository = _Repository()
-    service = HcmWorkbookImportService(repository, _DetailedIntake(repository))
+    service = HcmWorkbookImportService(repository, _DetailedIntake(repository), _UnitOfWork)
 
     receipt = service.ingest(
         pd.DataFrame({"案件": ["A", "B"]}),
@@ -239,7 +250,7 @@ def test_recent_results_keep_legacy_receipt_membership_unavailable(tmp_path):
     workbook = tmp_path / "hcm.xlsx"
     workbook.write_bytes(b"legacy workbook")
     repository = _Repository()
-    service = HcmWorkbookImportService(repository, _Intake(repository))
+    service = HcmWorkbookImportService(repository, _Intake(repository), _UnitOfWork)
     repository.recent_rows = [{
         "id": 9,
         "request_fingerprint": "a" * 64,

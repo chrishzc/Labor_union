@@ -126,6 +126,26 @@ class RichMenuPublicationRetryResponse(_StrictModel):
     error: None = None
 
 
+class RichMenuImageUploadResult(_StrictModel):
+    """已保存 Rich Menu 圖片的非敏感 metadata 投影。"""
+
+    id: StrictInt = Field(gt=0)
+    original_filename: StrictStr | None = Field(default=None, max_length=255)
+    mime_type: StrictStr = Field(min_length=1, max_length=100)
+    file_size: StrictInt = Field(gt=0)
+    sha256: StrictStr = Field(pattern=r"^[0-9a-f]{64}$")
+    width: StrictInt = Field(gt=0)
+    height: StrictInt = Field(gt=0)
+    created_at: datetime
+
+
+class RichMenuImageUploadResponse(_StrictModel):
+    success: Literal[True] = True
+    message: Literal["Rich Menu 圖片已安全保存"] = "Rich Menu 圖片已安全保存"
+    data: RichMenuImageUploadResult
+    error: None = None
+
+
 __all__ = [
     "RichMenuPublicationPageView",
     "RichMenuPublicationMutationResult",
@@ -138,4 +158,6 @@ __all__ = [
     "RichMenuPublishPreviewResponse",
     "RichMenuPublishPreviewResult",
     "RichMenuPublishRequest",
+    "RichMenuImageUploadResponse",
+    "RichMenuImageUploadResult",
 ]

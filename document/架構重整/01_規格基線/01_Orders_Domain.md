@@ -196,15 +196,18 @@ review 或 alert status。首版只接受一份僅含該 review 對應列的更�
 4. 原 `historical_order_adoption_reviews` 永遠 immutable。更正結果必須另以 append-only
    remediation disposition／receipt／outbox 表示 `prior_review_identity → replacement adoption receipt`
    的唯一關係，保存 actor、reason、evidence、source digest、版本、時間與可重播 identity。
-5. 更正列合法採納且沒有 issue 時，寫入 `corrected_source_adopted` disposition，由 Orders outbox
-   令 prior alert 與其 field warnings 依 predicate auto-resolve。若更正列仍有 issue，必須先建立
-   successor review／warning，再以 `superseded_by_replacement_review` disposition 關閉 prior task；
-   不得靜默刪除或把 successor 當成功。
+5. 2026-08-29 current-state anomaly slimming 裁決後，上述 immutable review、Orders
+   remediation disposition／receipt／outbox 仍是 Orders owner evidence，但不再建立或保存
+   anomaly occurrence、field-warning tracking event、replacement history 或 auto-resolve event。
+   更正列合法採納且沒有 issue 時，Orders 在同一 commit 寫入 durable recheck intent；
+   fresh recheck 證明 predicate false 後直接刪除 current row。若更正列仍有 issue，
+   Orders review Query 繼續顯示當下問題；只有符合 current 15-code contract 的問題才投影
+   current issue，不另造 prior／successor anomaly history。
 6. duplicate Apply 只回同一 receipt；payload mismatch、stale version、未授權 actor、非唯一對應、
    preview stale、worker timeout 或 projector readback 未達 predicate 均回 typed error／pending，保留
-   可見 blocker。Apply 結果必須可從 Orders receipt、disposition 與 anomaly current projection
-   readback 驗證。predicate 已解除的 prior alert 必須從 active 異常頁移除，僅在 audit history 保留；
-   successor 存在時必須顯示 successor 的具體欄位衝突與新修正入口，不能留 prior review 作為唯一待辦。
+   可見 blocker。Apply 結果必須可從 Orders receipt、disposition、owner review Query 與
+   anomaly current projection readback 驗證。predicate 已解除時 current row 必須刪除；
+   Orders audit 只保留 owner review／remediation evidence，不保留 anomaly alert 或 warning timeline。
 7. 更正來源若通過 Orders 完整規則、但採納後 status、日期與 assignment 均與現行 root
    相同，這是合法 no-op adoption：必須可寫入 remediation disposition，但不得建立
    lifecycle event 或增加 lifecycle version。schema constraint 也必須同時允許此形狀，並繼續對

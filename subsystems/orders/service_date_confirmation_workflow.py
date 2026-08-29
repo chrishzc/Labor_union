@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Protocol
+from typing import Callable, Protocol
 
 from domains.orders.service_date_confirmation import (
     ConfirmedServiceDateCandidate,
@@ -47,13 +47,22 @@ class ServiceDateConfirmationRepository(Protocol):
     def replay(self, idempotency_key: str, command_fingerprint: str) -> ServiceDateConfirmationReceipt | None: ...
     def save(self, candidate: ConfirmedServiceDateCandidate, *, actor: str, reason: str,
              idempotency_key: str, command_fingerprint: str) -> ServiceDateConfirmationReceipt: ...
+
+
+class UnitOfWork(Protocol):
+    def __enter__(self) -> "UnitOfWork": ...
+    def __exit__(self, exception_type, exception, traceback) -> bool: ...
     def commit(self) -> None: ...
-    def rollback(self) -> None: ...
 
 
 class ServiceDateConfirmationWorkflow:
-    def __init__(self, repository: ServiceDateConfirmationRepository) -> None:
+    def __init__(
+        self,
+        repository: ServiceDateConfirmationRepository,
+        unit_of_work_factory: Callable[[], UnitOfWork],
+    ) -> None:
         self._repository = repository
+        self._unit_of_work_factory = unit_of_work_factory
 
     def query(self, case_no: str) -> ServiceDateConfirmationFacts:
         return self._repository.load(case_no)
@@ -75,7 +84,7 @@ class ServiceDateConfirmationWorkflow:
         replay = self._repository.replay(idempotency_key, command_fingerprint)
         if replay is not None:
             return replay
-        try:
+        with self._unit_of_work_factory() as unit_of_work:
             facts = self._repository.load(case_no, lock=True)
             if (facts.order_version, facts.scheduling_version) != (
                 expected_order_version,
@@ -92,11 +101,8 @@ class ServiceDateConfirmationWorkflow:
                 idempotency_key=idempotency_key,
                 command_fingerprint=command_fingerprint,
             )
-            self._repository.commit()
+            unit_of_work.commit()
             return receipt
-        except Exception:
-            self._repository.rollback()
-            raise
 
 
 def _candidate(facts, service_dates):

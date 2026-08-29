@@ -19,6 +19,7 @@ def get_hcm_workbook_import_service():
         yield HcmWorkbookImportService(
             HcmWorkbookImportRepository(connection),
             HcmLegacyRowIntake(connection),
+            lambda: MySqlUnitOfWork(connection),
         )
     finally:
         connection.close()

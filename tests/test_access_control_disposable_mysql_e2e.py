@@ -43,7 +43,7 @@ def test_account_center_security_transitions_are_atomic_and_root_is_protected(mo
     from api.routes import admin_auth
 
     assert admin_auth.me(root).data.username == root_username
-    assert asyncio.run(admin_auth.logout(f"Bearer {root_token}", root)).data["logged_out"]
+    assert asyncio.run(admin_auth.logout(f"Bearer {root_token}", root)).data.logged_out
     assert authentication_session.get_admin_session(root_token) is None
     replay_challenge = authentication_session.issue_password_login_challenge(
         root_username, "Root-password-123"

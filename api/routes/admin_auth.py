@@ -25,6 +25,7 @@ from api.schemas.admin_auth import (
     MfaEnrollmentVerificationResponse,
     AdminRefreshResponse,
     AdminSessionResponse,
+    AdminLogoutResponse,
 )
 from api.schemas.base import BaseResponse
 from subsystems.access.authentication_session import (
@@ -258,7 +259,7 @@ async def refresh(
     )
 
 
-@router.post("/logout", response_model=BaseResponse[dict])
+@router.post("/logout", response_model=BaseResponse[AdminLogoutResponse])
 async def logout(
     authorization: str | None = Header(default=None),
     principal: AdminPrincipal = Depends(require_admin),
@@ -268,4 +269,7 @@ async def logout(
         await asyncio.to_thread(revoke_admin_session, token)
     except AdminSessionStorageError as error:
         raise _login_unavailable("admin_session_storage_unavailable", str(error)) from error
-    return BaseResponse(data={"logged_out": True}, message=f"{principal.display_name} 已登出")
+    return BaseResponse(
+        data=AdminLogoutResponse(logged_out=True),
+        message=f"{principal.display_name} 已登出",
+    )

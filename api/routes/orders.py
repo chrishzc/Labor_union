@@ -1,19 +1,11 @@
-from collections.abc import Mapping
-from dataclasses import fields, is_dataclass
-from datetime import date, datetime
-from decimal import Decimal
-from math import isfinite
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response
 from pymysql.err import OperationalError, ProgrammingError
 from infrastructure.mysql import mysql_adapter as db_service
 from infrastructure.mysql.admin_command_repository import AdminCommandRepository
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.mysql_adapter import get_connection
-from subsystems.orders.lifecycle_control_read_projection import (
-    OrderLifecycleControlReadNotFoundError,
-    get_order_lifecycle_control_state,
-)
 from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.order_calendar_detail import (
     OrderCalendarDetailApplication,
@@ -22,6 +14,9 @@ from api.dependencies.order_calendar_detail import (
 from api.dependencies.order_detail import (
     OrderDetailApplication,
     get_order_detail_application,
+)
+from api.dependencies.order_lifecycle_control import (
+    get_order_lifecycle_control_application,
 )
 from api.dependencies.order_summary import (
     OrderSummaryApplication,
@@ -35,6 +30,7 @@ from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.order_calendar_detail import OrderCalendarDetailView
 from api.schemas.order_detail import OrderDetailView
+from api.schemas.order_lifecycle_control import OrderLifecycleControlStateView
 from api.schemas.order_summary import (
     OrderSummaryItemView,
     OrderSummaryPageView,
@@ -69,39 +65,14 @@ from subsystems.orders.form_management_query import (
     FormManagementQueryContractError,
 )
 from subsystems.orders import client_name_maintenance
+from subsystems.orders.lifecycle_control_read_projection import (
+    OrderLifecycleControlQueryService,
+    OrderLifecycleControlReadNotFoundError,
+)
 
 
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Orders 訂單管理"])
-
-
-def _json_safe(value: Any) -> Any:
-    """Recursively materialize one service result without flattening its shape."""
-    if is_dataclass(value) and not isinstance(value, type):
-        return {
-            field.name: _json_safe(getattr(value, field.name))
-            for field in fields(value)
-        }
-    if isinstance(value, Mapping):
-        materialized: dict[str, Any] = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise TypeError("lifecycle result mapping keys must be strings")
-            materialized[key] = _json_safe(item)
-        return materialized
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, float):
-        if not isfinite(value):
-            raise TypeError("lifecycle result contains a non-finite float")
-        return value
-    if value is None or isinstance(value, (str, int, bool)):
-        return value
-    raise TypeError("lifecycle result contains an unsupported value")
 
 
 @router.get("")
@@ -420,21 +391,23 @@ def _order_detail_database_error(error):
 
 @router.get(
     "/{case_no}/lifecycle-control-state",
-    response_model=BaseResponse[dict[str, Any]],
+    response_model=BaseResponse[OrderLifecycleControlStateView],
 )
 def get_order_lifecycle_control_state_route(
-    case_no: str = Path(..., description="案件編號"),
+    case_no: str = Path(..., min_length=1, max_length=50, description="案件編號"),
     principal: AdminPrincipal = Depends(require_system_admin),
+    application: OrderLifecycleControlQueryService = Depends(
+        get_order_lifecycle_control_application
+    ),
 ):
     """Return the authoritative, read-only lifecycle control snapshot."""
     del principal
     try:
-        result = get_order_lifecycle_control_state(case_no)
-        materialized = _json_safe(result)
-        if not isinstance(materialized, dict):
-            raise TypeError("lifecycle control state must be an object")
+        result = application.query(case_no)
         return BaseResponse(
-            data=materialized,
+            data=OrderLifecycleControlStateView.model_validate(
+                result, from_attributes=True
+            ),
             message="成功取得訂單生命週期控制狀態",
         )
     except OrderLifecycleControlReadNotFoundError as error:
@@ -466,14 +439,21 @@ def preview_client_name_change(req: ClientNamePreviewRequest, case_no: str = Pat
 def apply_client_name_change(req: ClientNameApplyRequest, case_no: str = Path(..., description="案件編號"), idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=191), principal: AdminPrincipal = Depends(require_system_admin)):
     connection = get_connection()
     try:
-        result = client_name_maintenance.apply(AdminCommandRepository(connection), case_no, req.client_name.strip(), req.preview_fingerprint, idempotency_key, principal.username, req.reason)
+        result = client_name_maintenance.apply(
+            AdminCommandRepository(connection),
+            lambda: MySqlUnitOfWork(connection),
+            case_no,
+            req.client_name.strip(),
+            req.preview_fingerprint,
+            idempotency_key,
+            principal.username,
+            req.reason,
+        )
         return BaseResponse(data=result, message="已套用客戶姓名變更")
     except ValueError as error:
-        connection.rollback()
         code = str(error)
         raise HTTPException(status_code=409 if code in {"stale_preview", "idempotency_key_conflict"} else 404 if code == "client_not_found" else 422, detail={"code": code}) from error
     except Exception as error:
-        connection.rollback()
         raise internal_query_error("client_name_apply_internal_error", "客戶姓名套用失敗。", "client-name-apply") from error
     finally:
         connection.close()

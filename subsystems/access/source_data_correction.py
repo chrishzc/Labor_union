@@ -25,21 +25,22 @@ def preview(repository, table: str, row_id: int, updates: Mapping[str, Any]) -> 
     return _preview_payload(table, row_id, row, normalized)
 
 
-def apply(repository, table: str, row_id: int, updates: Mapping[str, Any], preview_fingerprint: str, idempotency_key: str, actor: str, reason: str) -> dict[str, Any]:
+def apply(repository, unit_of_work_factory, table: str, row_id: int, updates: Mapping[str, Any], preview_fingerprint: str, idempotency_key: str, actor: str, reason: str) -> dict[str, Any]:
     normalized = _validate(table, updates)
     request_fingerprint = fingerprint({"table": table, "row_id": row_id, "updates": normalized, "actor": actor, "reason": reason})
     replay = replay_result(repository.load_receipt(_FAMILY, idempotency_key), request_fingerprint)
     if replay is not None:
         return replay
-    current = repository.load_source_row(table, row_id, for_update=True)
-    preview_payload = _preview_payload(table, row_id, current, normalized)
-    if preview_payload["preview_fingerprint"] != preview_fingerprint:
-        raise ValueError("stale_preview")
-    repository.update_source_row(table, row_id, normalized)
-    result = {"table": table, "row_id": row_id, "changed_fields": sorted(normalized)}
-    repository.save_receipt(_FAMILY, idempotency_key, request_fingerprint, preview_fingerprint, actor, reason, result)
-    repository.commit()
-    return result
+    with unit_of_work_factory() as unit_of_work:
+        current = repository.load_source_row(table, row_id, for_update=True)
+        preview_payload = _preview_payload(table, row_id, current, normalized)
+        if preview_payload["preview_fingerprint"] != preview_fingerprint:
+            raise ValueError("stale_preview")
+        repository.update_source_row(table, row_id, normalized)
+        result = {"table": table, "row_id": row_id, "changed_fields": sorted(normalized)}
+        repository.save_receipt(_FAMILY, idempotency_key, request_fingerprint, preview_fingerprint, actor, reason, result)
+        unit_of_work.commit()
+        return result
 
 
 def _validate(table: str, updates: Mapping[str, Any]) -> dict[str, Any]:

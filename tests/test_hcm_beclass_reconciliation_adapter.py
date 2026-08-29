@@ -6,10 +6,14 @@ Description: 驗證 reconciliation adapter 借用 caller UoW，且 standalone wr
 from datetime import date, time
 from types import SimpleNamespace
 
+import pytest
+
 from domains.orders.terms import OrderTerms, ServiceTimeTerms
 from infrastructure.mysql import hcm_beclass_reconciliation_adapter as adapter
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.money import MoneyNTD
 from subsystems.case_import.hcm_beclass_reconciliation import (
+    CaseImportReconciliationApplication,
     reconcile_hcm_beclass_cooking,
 )
 
@@ -84,7 +88,7 @@ def test_apply_cooking_terms_uses_current_uow_without_hidden_commit(monkeypatch)
     assert connection.begins == connection.commits == connection.rollbacks == 0
 
 
-def test_standalone_wrapper_owns_exactly_one_uow(monkeypatch):
+def test_case_import_application_owns_exactly_one_uow(monkeypatch):
     connection = _Connection()
     monkeypatch.setattr(
         adapter.MySqlHcmBeClassReconciliationAdapter,
@@ -92,12 +96,66 @@ def test_standalone_wrapper_owns_exactly_one_uow(monkeypatch):
         lambda _self, case_no: SimpleNamespace(status="reconciled", case_no=case_no),
     )
 
-    result = adapter.reconcile_hcm_beclass_cooking(connection, "115990823")
+    result = CaseImportReconciliationApplication(
+        adapter.MySqlHcmBeClassReconciliationAdapter(connection),
+        lambda: MySqlUnitOfWork(connection),
+    ).reconcile("115990823")
 
     assert result.status == "reconciled"
     assert connection.begins == 1
     assert connection.commits == 1
     assert connection.rollbacks == 0
+
+
+def test_case_import_application_rolls_back_reconciliation_failure(monkeypatch):
+    connection = _Connection()
+
+    def fail(_self, _case_no):
+        raise RuntimeError("orders_apply_failed")
+
+    monkeypatch.setattr(
+        adapter.MySqlHcmBeClassReconciliationAdapter,
+        "reconcile",
+        fail,
+    )
+
+    application = CaseImportReconciliationApplication(
+        adapter.MySqlHcmBeClassReconciliationAdapter(connection),
+        lambda: MySqlUnitOfWork(connection),
+    )
+    try:
+        application.reconcile("115990823")
+    except RuntimeError as error:
+        assert str(error) == "orders_apply_failed"
+    else:
+        raise AssertionError("reconciliation failure must escape")
+
+    assert connection.begins == 1
+    assert connection.commits == 0
+    assert connection.rollbacks == 1
+
+
+def test_stale_owner_version_is_zero_write_and_rolls_back_outer_uow():
+    connection = _Connection()
+
+    class StalePort:
+        writes = 0
+
+        def reconcile(self, _case_no):
+            raise RuntimeError("stale_owner_version")
+
+    port = StalePort()
+    application = CaseImportReconciliationApplication(
+        port,
+        lambda: MySqlUnitOfWork(connection),
+    )
+
+    with pytest.raises(RuntimeError, match="stale_owner_version"):
+        application.reconcile("115990823")
+
+    assert port.writes == 0
+    assert connection.commits == 0
+    assert connection.rollbacks == 1
 
 
 def test_reconciliation_replay_does_not_repeat_typed_terms_apply():

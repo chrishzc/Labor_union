@@ -111,6 +111,11 @@ def _authorize_apply(database, confirmation):
         raise RuntimeError("historical_order_database_target_not_allowed")
     if confirmation != database:
         raise RuntimeError("historical_order_database_confirmation_required")
+    # The existing CLI contract has no prior-preview receipt, backup receipt,
+    # connected-host verification, or post-apply verification.  Keep the
+    # typed workflow available to its canonical API caller, but never let this
+    # operator entrypoint perform a production-capable mutation.
+    raise RuntimeError("historical_order_apply_guard_contract_incomplete")
 
 
 def _required_environment(name):

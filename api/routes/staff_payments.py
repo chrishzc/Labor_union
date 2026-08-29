@@ -1,9 +1,13 @@
-from fastapi import APIRouter, HTTPException, Path
-from typing import List, Dict, Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, Path
+from typing import List, Optional
 from datetime import date
 from pydantic import BaseModel, Field, model_validator
 from api.schemas.base import BaseResponse
-from infrastructure.mysql.mysql_adapter import get_connection
+from api.dependencies.admin_auth import require_admin
+from api.dependencies.staff_payments import get_staff_payment_query_application
+from api.schemas.staff_payments import StaffPaymentSummaryView
+from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.staff_payables.legacy_payment_query import StaffPaymentQueryApplication
 
 router = APIRouter(prefix="/api/v1/staff-payments", tags=["Staff Payments 月嫂帳務"])
 
@@ -25,51 +29,50 @@ class StaffTransactionCreate(BaseModel):
     notes: Optional[str] = Field(None, description="備註")
 
 
-@router.get("", response_model=BaseResponse[List[Dict[str, Any]]])
-def get_all_staff_payments():
-    """取得所有月嫂應付帳務列表"""
-    conn = get_connection()
+@router.get("", response_model=BaseResponse[List[StaffPaymentSummaryView]])
+def get_all_staff_payments(
+    principal: AdminPrincipal = Depends(require_admin),
+    application: StaffPaymentQueryApplication = Depends(
+        get_staff_payment_query_application
+    ),
+):
+    """取得 bounded typed Staff Payables compatibility projection."""
+    del principal
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM staff_payments ORDER BY id DESC")
-            data = cursor.fetchall()
-            return BaseResponse(data=data, message="成功取得所有月嫂應付帳務")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
+        return BaseResponse(
+            data=list(application.query_all()), message="成功取得所有月嫂應付帳務"
+        )
+    except Exception as error:
+        raise HTTPException(status_code=500, detail="staff_payments_query_failed") from error
 
 
-@router.get("/{case_no}", response_model=BaseResponse[List[Dict[str, Any]]])
-def get_staff_payments_by_case_no(case_no: str = Path(..., description="案件編號")):
+@router.get("/{case_no}", response_model=BaseResponse[List[StaffPaymentSummaryView]])
+def get_staff_payments_by_case_no(
+    case_no: str = Path(..., min_length=1, max_length=50, description="案件編號"),
+    principal: AdminPrincipal = Depends(require_admin),
+    application: StaffPaymentQueryApplication = Depends(
+        get_staff_payment_query_application
+    ),
+):
     """依案件編號取得該案之月嫂帳務與交易明細"""
-    conn = get_connection()
+    del principal
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM staff_payments WHERE case_no = %s", (case_no,))
-            payments = cursor.fetchall()
-            if not payments:
-                return BaseResponse(data=[], message="此案件無任何月嫂應付帳務")
-            
-            # 針對每一筆付款單讀取其交易明細
-            result = []
-            for payment in payments:
-                pay_dict = dict(payment)
-                cursor.execute("SELECT * FROM staff_payment_transactions WHERE staff_payment_id = %s ORDER BY occurred_at ASC, id ASC", (payment["id"],))
-                pay_dict["transactions"] = cursor.fetchall()
-                result.append(pay_dict)
-                
-            return BaseResponse(data=result, message="成功取得案件月嫂帳務與明細")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
+        data = list(application.query_by_case_no(case_no))
+        message = "成功取得案件月嫂帳務與明細" if data else "此案件無任何月嫂應付帳務"
+        return BaseResponse(data=data, message=message)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="invalid_case_number") from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail="staff_payments_query_failed") from error
 
 
-@router.post("/transaction", response_model=BaseResponse[Dict[str, Any]])
-def create_staff_transaction(req: StaffTransactionCreate):
+@router.post("/transaction", response_model=BaseResponse[None])
+def create_staff_transaction(
+    req: StaffTransactionCreate,
+    principal: AdminPrincipal = Depends(require_admin),
+):
     """Legacy free-form staff transaction writer is permanently unavailable."""
-    del req
+    del req, principal
     raise HTTPException(
         status_code=410,
         detail="use_staff_payables_preview_apply",

@@ -53,7 +53,6 @@ class HistoricalOrderWorkbookImportRepository:
                 claim = cursor.fetchone()
                 if not claim or claim["command_family"] != self._FAMILY or claim["command_fingerprint"] != digest:
                     return "conflict"
-        self._connection.commit()
         return "created" if created else "resume"
 
     def save_receipt(self, key: str, digest: str, preview_fingerprint: str, actor: str, result: dict) -> None:
@@ -64,7 +63,6 @@ class HistoricalOrderWorkbookImportRepository:
                 "VALUES (%s,%s,%s,%s,%s,%s,%s)",
                 (self._FAMILY, key, digest, preview_fingerprint, actor, "訂單歷史資料匯入", _json(result)),
             )
-        self._connection.commit()
 
     @staticmethod
     def _lock_name(key: str) -> str:

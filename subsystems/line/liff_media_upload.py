@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Callable
 
 from domains.line.identities import LineSourceIdentity, LineSourceType, LineUserId
 from domains.line.media import (
@@ -39,6 +40,47 @@ class LiffMealPhotoUploadResult:
     content_type: str
     size_bytes: int
     outcome: str
+
+
+class LiffMealPhotoUploadApplication:
+    """Own metadata transaction; object bytes remain content-addressed for replay/reconciliation."""
+
+    def __init__(self, unit_of_work_factory: Callable[[], object], object_store) -> None:
+        self._unit_of_work_factory = unit_of_work_factory
+        self._object_store = object_store
+
+    def upload(self, command: LiffMealPhotoUpload) -> LiffMealPhotoUploadResult:
+        metadata = prepare_liff_meal_photo_upload(command)
+        with self._unit_of_work_factory() as unit_of_work:
+            if not unit_of_work.customer_service.staff_subject(command.line_user_id.value):
+                raise LiffMealPhotoUploadStaffBindingNotFound
+            existing = unit_of_work.media_metadata.get(metadata.provider_media_id)
+            if existing is not None:
+                if not existing_liff_upload_matches(existing, command):
+                    raise ValueError("service_day_meal_photo_idempotency_conflict")
+                unit_of_work.commit()
+                return _result(metadata, "existing")
+            object_reference = self._object_store.put(metadata, command.content)
+            unit_of_work.media_metadata.register(
+                metadata,
+                object_reference,
+                command.idempotency_key,
+            )
+            unit_of_work.commit()
+        return _result(metadata, "created")
+
+
+class LiffMealPhotoUploadStaffBindingNotFound(PermissionError):
+    pass
+
+
+def _result(metadata: LineMediaMetadata, outcome: str) -> LiffMealPhotoUploadResult:
+    return LiffMealPhotoUploadResult(
+        metadata.provider_media_id,
+        metadata.content_type,
+        metadata.size_bytes,
+        outcome,
+    )
 
 
 def prepare_liff_meal_photo_upload(command: LiffMealPhotoUpload) -> LineMediaMetadata:
@@ -97,7 +139,9 @@ def _image_content_type(content: bytes) -> str | None:
 
 __all__ = [
     "LiffMealPhotoUpload",
+    "LiffMealPhotoUploadApplication",
     "LiffMealPhotoUploadResult",
+    "LiffMealPhotoUploadStaffBindingNotFound",
     "MEAL_PHOTO_POLICY",
     "existing_liff_upload_matches",
     "prepare_liff_meal_photo_upload",

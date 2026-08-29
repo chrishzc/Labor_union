@@ -34,9 +34,9 @@ Global 只定義跨 Domain 不得被破壞的不變量及共用技術契約，�
 12. 全部約定服務完成後不得取消訂單；即使服務資料鎖尚未形成也相同。月嫂薪資與服務結算按完整履約計算。
 13. 所有服務日期、完成時刻及到期日政策固定以 `Asia/Taipei` 解讀；測試必須注入 clock。
 14. Alert workflow 不是 Domain 門禁。Domain 直接檢查根事實；Alert 只投影同一 predicate。
-15. 任何無法從根事實唯一判定原因或修復方式的異常，都必須先產生異常投影通知人員；系統不得自行猜測並自動更正根事實、建立 adjustment／reversal、改差額或改狀態。
-16. 異常中心必須提供足以判斷的來源事實、影響範圍、關聯事件、建議合法操作及 Preview 入口。人員確認後，異常中心只能呼叫 owning Domain 的 typed command；不得直接寫 Domain 資料。
-17. 人工處理異常的正式操作仍須遵守 Preview／Confirm／Apply、版本、fingerprint、冪等、權限、完整稽核與交易門禁。人工 resolve 只管理待辦，不代表修復已完成。
+15. 任何無法從根事實唯一判定原因或修復方式的問題都必須停止自動更正；系統不得自行猜測並建立 adjustment／reversal、改差額或改狀態。對人員的 current surface 依最新 owner 分類導向 `#anomalies` current issue 或 owning Domain review／work queue；不得為一般待辦建立 anomaly occurrence。
+16. `#anomalies` 只對 current issue 提供足以判斷的去敏來源事實、影響範圍、建議合法操作及 Preview 入口；一般 review／work item 只顯示在 owning Domain page。兩者在人員確認後都只能呼叫 owning Domain typed command，不得直接寫 Domain 資料。
+17. 人工處理的正式操作仍須遵守 Preview／Confirm／Apply、版本、fingerprint、冪等、權限、完整稽核與交易門禁。Anomalies 不使用人工 claim／resolve 作為生命週期；只有 owner root predicate 不再成立且 fresh recheck 完成時，current row 才可刪除。
 18. UI 可立即顯示 local draft、loading 或 pending，但正式 Apply 只有收到 server receipt
     才能顯示成功；不得以 optimistic UI 冒充正式帳務、排班或狀態已完成。
 19. Cache、read model、HTTP conditional response 與 background notification 都不是 SSOT。

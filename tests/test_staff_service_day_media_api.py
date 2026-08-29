@@ -47,14 +47,16 @@ def test_upload_meal_photo_persists_verified_staff_media(monkeypatch) -> None:
             assert content.startswith(b"\x89PNG")
             return "user_upload/aa/photo.png"
 
-    monkeypatch.setattr(staff_service_day_media, "open_line_unit_of_work", line_uow)
     monkeypatch.setattr(staff_service_day_media, "_verified_line_user_id", lambda _payload: LineUserId("U-caregiver"))
-    monkeypatch.setattr(staff_service_day_media, "FileSystemLineMediaObjectStore", Store)
+    application = staff_service_day_media.LiffMealPhotoUploadApplication(
+        line_uow,
+        Store(None),
+    )
 
     response = asyncio.run(
         staff_service_day_media.upload_service_day_meal_photo(
             Upload(b"\x89PNG\r\n\x1a\nphoto", "image/png"),
-            "flow", "token", "", "meal-photo-1",
+            "flow", "token", "", "meal-photo-1", application,
         )
     )
 
@@ -67,12 +69,16 @@ def test_upload_meal_photo_persists_verified_staff_media(monkeypatch) -> None:
 
 def test_upload_meal_photo_rejects_declared_type_that_does_not_match_bytes(monkeypatch) -> None:
     monkeypatch.setattr(staff_service_day_media, "_verified_line_user_id", lambda _payload: LineUserId("U-caregiver"))
+    application = staff_service_day_media.LiffMealPhotoUploadApplication(
+        lambda: (_ for _ in ()).throw(AssertionError("invalid media must not open a transaction")),
+        object(),
+    )
 
     try:
         asyncio.run(
             staff_service_day_media.upload_service_day_meal_photo(
                 Upload(b"not-an-image", "image/jpeg"),
-                "flow", "token", "", "meal-photo-invalid",
+                "flow", "token", "", "meal-photo-invalid", application,
             )
         )
     except staff_service_day_media.HTTPException as error:

@@ -41,8 +41,9 @@ from subsystems.case_import.hcm_adapter import (
     parse_hcm_service_time,
 )
 from infrastructure.mysql.hcm_beclass_reconciliation_adapter import (
-    reconcile_hcm_beclass_cooking,
+    MySqlHcmBeClassReconciliationAdapter,
 )
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.identities import (
     ActorContext,
     CorrelationId,
@@ -52,6 +53,9 @@ from shared_kernel.identities import (
 from subsystems.case_import.case_import_workflow import (
     ApplyCaseImport,
     CaseImportWorkflowError,
+)
+from subsystems.case_import.hcm_beclass_reconciliation import (
+    CaseImportReconciliationApplication,
 )
 
 # Local operator compatibility only. Missing database settings fail closed.
@@ -547,7 +551,10 @@ def _reconcile_without_rolling_back_hcm(connection, case_no):
     if connection is None:
         return "not_run"
     try:
-        result = reconcile_hcm_beclass_cooking(connection, case_no)
+        result = CaseImportReconciliationApplication(
+            MySqlHcmBeClassReconciliationAdapter(connection),
+            lambda: MySqlUnitOfWork(connection),
+        ).reconcile(case_no)
     except Exception as error:
         print(f"[配對待重試] HCM root 已建立；reconciliation稍後重試：{type(error).__name__}")
         return "failed_retryable"
