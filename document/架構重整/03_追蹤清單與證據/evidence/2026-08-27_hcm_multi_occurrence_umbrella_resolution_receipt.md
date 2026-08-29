@@ -1,7 +1,7 @@
 # 2026-08-27 HCM Multi-occurrence Umbrella Resolution Receipt
 
 - `status`: `source_pass_runtime_not_run`
-- `work_package`: `PROV-20260827-hcm-multi-occurrence-umbrella-resolution-work-package.md`
+- `source_work_package_status`: `removed_after_source_completion`
 - `authority`: 同一匯入三個問題逐筆解除；最後一個修正後整筆匯入警示消失。
 
 ## Final candidate

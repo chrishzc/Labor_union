@@ -18,7 +18,6 @@ package；T3 才要求 current spec＋package。相同 owner／scenario／scope 
 |---|---|---|---|
 | [96 Current 剩餘代辦任務總表](96_Current_剩餘代辦任務總表.md) | gap-register | `in-progress` | 唯一跨功能 current task register；完成後先同步 owner 正式規格，再關閉該列。 |
 | [全異常人工 remediation 收斂缺口](PROV-20260826-all-anomaly-manual-remediation-spec-gap.md) | spec-gap | `in-progress` | 96 新增 P0；先收斂每個 anomaly code 的 owner action／completion predicate，再分 owner package 實作。 |
-| [HCM 多問題匯入警示逐筆解除](PROV-20260827-hcm-multi-occurrence-umbrella-resolution-work-package.md) | work-package | `completed`（source scope） | `IMPORT-004` source 與獨立 E3 PASS；真 MySQL 同 review lock／active-list runtime 仍 `NOT_RUN`，不屬於此 source completion 的已通過證據。 |
 | [歷史訂單 review 人工更正工作包](PROV-20260826-historical-order-review-remediation-work-package.md) | work-package | `in-progress` | 96 P0 的第一個 owner slice；尚缺 enabled persisted-human Browser 與 developer acceptance。 |
 | [歷史案件作業基準與狀態感知異常規格](PROV-20260827-historical-order-operational-baseline-spec.md) | spec | `approved`／`SPEC_READY` | Historical-only baseline、無額外違約金、Orders／Finance 分離、服務中代班不要求新契約／簽回或客戶變更簽署（optional supplement 不阻擋代班／排班 lineage／薪資），以及 Client Finance cancellation `direction` 與 action mapping 均已裁決；剩餘為實作／runtime 驗收，不是 authority blocker。 |
 | [歷史案件作業基準與狀態感知異常工作包](PROV-20260827-historical-order-operational-work-packages.md) | work packages | `PACKAGE_READY` | B1／S1／S2已裁決；六包契約ready，但各包source／schema／runtime完成度仍以包內snapshot為準。 |

@@ -8,8 +8,7 @@
   "database_profile": "development no-auth lu_test_task96_scenarios_20260827",
   "coverage_ids": ["POA-A1", "POA-A2", "POA-A3", "POA-A4", "POA-A5", "POA-A6"],
   "source_refs": [
-    "document/架構重整/02_決策與退役執行記錄/PROV-20260827-payout-overdue-anomaly-remediation-spec.md",
-    "document/架構重整/02_決策與退役執行記錄/PROV-20260827-payout-overdue-anomaly-remediation-work-package.md"
+    "document/架構重整/02_決策與退役執行記錄/PROV-20260827-payout-overdue-anomaly-remediation-spec.md"
   ],
   "root_fixture_paths": [
     "validation/fixtures/phase4/payout_001_exact_001.json"
