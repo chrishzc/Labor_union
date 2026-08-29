@@ -726,7 +726,7 @@ def test_zero_candidate_confirmation_persists_package_event_receipt_and_owner_in
 
 def test_every_apply_command_maps_to_a_released_matching_event_enum() -> None:
     schema = (
-        Path(__file__).resolve().parents[1]
+        Path(_repository_module.__file__).resolve().parents[2]
         / "db/schema_parts/1003_matching_coordination_successor.sql"
     ).read_text(encoding="utf-8")
     enum_values = set(
