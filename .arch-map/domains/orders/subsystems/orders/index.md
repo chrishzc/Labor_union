@@ -20,6 +20,6 @@
 
 ## Verification routing
 - default_boundary: Subsystem
-- test_root: `tests/domains/orders/` (mixed Domain/subsystem ownership)
-- integration_root: `tests/integration/`
-- layout_gap: canonical `tests/domains/orders/subsystems/orders/` 尚未建立。
+- test_root: `tests/domains/orders/subsystems/orders/`
+- integration_root: `tests/domains/orders/subsystems/orders/integration/`
+- fixtures_root: `tests/fixtures/`
