@@ -16,5 +16,7 @@
 
 ## Verification routing
 - default_boundary: Domain
-- test_root: unknown (`layout_gap`; no `tests/domains/staff_payables/` observed)
-- integration_root: unknown; resolve scoped from current `tests/`.
+- test_root: `tests/domains/staff-payables/`
+- subsystem_root: `tests/domains/staff-payables/subsystems/staff-payables/`
+- higher_boundary: shared acceptance/disposable-MySQL suites remain under their current higher roots.
+- routing: `.arch-map/tests/domains/staff-payables/index.md`.

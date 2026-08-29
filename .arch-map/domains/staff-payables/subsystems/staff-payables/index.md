@@ -16,4 +16,7 @@
 
 ## Verification routing
 - default_boundary: Subsystem
-- test_root: unknown (`layout_gap`; current tests remain mixed under `tests/`).
+- test_root: `tests/domains/staff-payables/subsystems/staff-payables/`
+- integration_root: `tests/domains/staff-payables/subsystems/staff-payables/integration/`
+- legacy_ui_boundary: `tests/test_accounts_payable_export_api_client.py`
+- routing: `.arch-map/tests/domains/staff-payables/subsystems/staff-payables/index.md`.
