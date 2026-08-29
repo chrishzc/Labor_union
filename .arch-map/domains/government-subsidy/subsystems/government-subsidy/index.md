@@ -16,4 +16,7 @@
 
 ## Verification routing
 - default_boundary: Subsystem
-- test_root: unknown (`layout_gap`; current tests remain mixed under `tests/`).
+- test_root: `tests/domains/government-subsidy/subsystems/government-subsidy/`
+- integration_root: `tests/domains/government-subsidy/subsystems/government-subsidy/integration/`
+- anomaly-focused subsidy projections remain under `tests/domains/anomalies/`.
+- routing: `.arch-map/tests/domains/government-subsidy/subsystems/government-subsidy/index.md`.
