@@ -53,6 +53,20 @@ jobs:
             path: tests/domains/staff-payables/subsystems/staff-payables
           - owner: anomalies
             path: tests/domains/anomalies/subsystems/anomalies
+          - owner: payroll
+            path: tests/domains/payroll/subsystems/payroll
+          - owner: finance-import
+            path: tests/domains/finance-import/subsystems/finance-import
+          - owner: government-subsidy
+            path: tests/domains/government-subsidy/subsystems/government-subsidy
+          - owner: case-import
+            path: tests/subsystems/case_import
+          - owner: access
+            path: tests/domains/external-integration/subsystems/access
+          - owner: line
+            path: tests/domains/external-integration/subsystems/line
+          - owner: contract-signing
+            path: tests/domains/contract-signing/subsystems/contract-signing
 
     steps:
     - uses: actions/checkout@v6
