@@ -14,7 +14,6 @@ permissions:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
@@ -36,7 +35,37 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Validate Agent governance routing
       run: python scripts/validate_agent_governance.py
-    - name: Collect Orders owner-local tests
-      run: python -m pytest --collect-only -q tests/domains/orders/subsystems/orders
-    - name: Run Orders owner-local tests
-      run: python -m pytest -q tests/domains/orders/subsystems/orders
+
+  canonical-tests:
+    name: canonical tests (${{ matrix.owner }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - owner: orders
+            path: tests/domains/orders/subsystems/orders
+          - owner: scheduling
+            path: tests/domains/scheduling/subsystems/scheduling
+          - owner: client-finance
+            path: tests/domains/client-finance/subsystems/client-finance
+          - owner: staff-payables
+            path: tests/domains/staff-payables/subsystems/staff-payables
+          - owner: anomalies
+            path: tests/domains/anomalies/subsystems/anomalies
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.11"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Collect ${{ matrix.owner }} owner-local tests
+      run: python -m pytest --collect-only -q "${{ matrix.path }}"
+    - name: Run ${{ matrix.owner }} owner-local tests
+      run: python -m pytest -q "${{ matrix.path }}"

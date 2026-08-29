@@ -230,7 +230,7 @@ class PreviewZeroCandidateAlternative(MatchingCommand):
     relaxed_criteria: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        MatchingCommand.__post_init__(self)
         if not self.relaxed_criteria:
             return
         if self.relaxed_criteria != tuple(sorted(set(self.relaxed_criteria))):
@@ -250,7 +250,7 @@ class ApplyZeroCandidateAlternative(MatchingCommand):
     decision: str = "agree"
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        MatchingCommand.__post_init__(self)
         if not self.relaxed_criteria:
             raise ValueError("relaxed criteria are required")
         if self.relaxed_criteria != tuple(sorted(set(self.relaxed_criteria))):
@@ -269,7 +269,7 @@ class PreviewZeroCandidateConfirmation(MatchingCommand):
     evidence: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        MatchingCommand.__post_init__(self)
         _validate_zero_candidate_confirmation(self)
 
 
@@ -278,7 +278,7 @@ class ApplyZeroCandidateConfirmation(PreviewZeroCandidateConfirmation):
     preview_fingerprint: PreviewFingerprint
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        PreviewZeroCandidateConfirmation.__post_init__(self)
         if not isinstance(self.preview_fingerprint, PreviewFingerprint):
             raise TypeError("zero candidate confirmation preview fingerprint is invalid")
 
@@ -351,7 +351,7 @@ class ApplyLeaveImpactOnMatching(MatchingCommand):
     preview_fingerprint: PreviewFingerprint
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        MatchingCommand.__post_init__(self)
         require_canonical_text(self.package_id, "package ID", 191)
         require_canonical_text(self.leave_reference, "leave reference", 191)
         require_canonical_text(
@@ -373,7 +373,7 @@ class PreviewServiceDateChangeRematch(MatchingCommand):
     package_id: str | None = None
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        MatchingCommand.__post_init__(self)
         _validate_service_date_change(self)
 
 
@@ -388,7 +388,7 @@ class ApplyServiceDateChangeRematch(MatchingCommand):
     preview_fingerprint: PreviewFingerprint
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        MatchingCommand.__post_init__(self)
         _validate_service_date_change(self)
 
 

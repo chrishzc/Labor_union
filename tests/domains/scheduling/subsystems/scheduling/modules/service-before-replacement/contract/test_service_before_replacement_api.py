@@ -44,7 +44,7 @@ from subsystems.scheduling.service_before_replacement_workflow import (
     ReplacementApplyStatus,
     ServiceBeforeReplacementQueryRequest,
 )
-from tests.test_service_before_replacement import _facts
+from tests.fixtures.service_before_replacement import _facts
 
 
 def test_routes_are_case_scoped_and_exact_qpa_paths():
