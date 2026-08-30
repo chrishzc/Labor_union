@@ -2,7 +2,7 @@
 artifact_role: validation_receipt
 owner: architecture-governance / integration-writer
 consumer: Task 97 current register / future DB and production acceptance tasks
-source_of_truth: candidate-bound repository-local validation evidence; not production or DB execution Authority
+source_of_truth: source-commit-bound repository-local validation evidence; not production or DB execution Authority
 close_condition: superseded only by material repository-local architecture drift or a later independent acceptance receipt
 retention: retain_current
 invalidation: Task 97 owner, SSOT, UoW, public-entry disposition, generator, schema contract, or repository-local acceptance evidence materially changes
@@ -10,7 +10,8 @@ replacement_or_absorption: independent DB-engine, deployment, cutover, or extern
 date: 2026-08-30
 validated_branch: main
 validated_base_head: a48caa82f6d25c28add541ab1933c76c8f2b69ba
-candidate_state: tracked working-tree correction over validated_base_head
+validated_source_head: d7167b9013a55e9a40a507bbf3d269881ff79668
+receipt_binding_state: evidence-only successor commit; scanner inputs unchanged from validated_source_head
 ---
 
 # Task 97 repository-local architecture closeout receipt
@@ -59,21 +60,19 @@ DB_ENGINE_ACCEPTANCE_NOT_RUN
 | writer candidate manifest | 1320 identities；0 unresolved | `eb7720a9926d52133da042407dbe86f4878048075ddb6b669057ea51f5e38cd0` |
 | writer disposition manifest | 1320；1085 canonical、235 restricted、0 exit、0 needs-decision | `10137417601e64ba7a9deb2f3d79f468b148d8d14c04c01fb260d3529a02380a` |
 | writer disposition records | 1320 exact records | `fa6eb8a0ba95664c394cd6852af776f86be9624981518cdbaf138020ed03da8c` |
-| repository commit dispositions | last committed scanner-input evidence；308／308 passed | `c6127c5bdcce29d72e1aa7960f5d53f79888e2d457772af3495475e47f09fd5a` |
+| repository commit dispositions | source revision `d7167b9`；308／308 passed | `03ce2bb55f590998bd70b6e2620e626e3088baba741bc6971c6af95f2b6a43f1` |
 
-Repository commit disposition generator 會對 dirty scanner inputs fail closed。本 closeout candidate 修改了 scanner
-inputs但未經授權 commit，因此兩個 source-lock tests 如設計般拒絕重綁 committed artifact；這證明 guard 生效，
-不代表 architecture assertion failure。Current candidate 的 writer／entry／script generators 與 validators 已直接
-重跑，完整 executable local suite 另排除這兩個只接受 clean committed revision 的 source-lock tests。未為了製造
-綠燈而 stage、commit、push 或放寬 guard。
+Repository commit disposition generator 會對 dirty scanner inputs fail closed。Task 97 source correction 已提交為
+`d7167b9013a55e9a40a507bbf3d269881ff79668`，其後只重建本 artifact並更新本 receipt；scanner inputs沒有
+再變更。三個 clean-commit source-lock tests全部通過，沒有放寬 guard。
 
 ## 4. Repository-local validation
 
 | Gate | Result |
 |---|---|
 | Access owner／sink／UoW、entry、script、writer、DB static focused regression | `47 passed` |
-| Full local Python executable suite，排除 3 個真 MySQL engine modules與 2 個 clean-commit source-lock tests | `4766 passed, 141 skipped, 3 xfailed` |
-| Clean-commit source-lock guard | `PASS_FAIL_CLOSED_DIRTY_INPUT_GUARD`；2 tests 拒絕 dirty scanner input，1 sibling test passed |
+| Full local Python executable suite，排除 3 個真 MySQL engine modules | `4769 passed, 141 skipped, 3 xfailed` |
+| Clean-commit source-lock guard | `3 passed`；artifact綁定source revision `d7167b9` |
 | React tests | `183` files、`1219 passed` |
 | React build | `PASS`；保留既有 chunk-size warning |
 | React lint | `PASS`；7 個既有 non-fatal warnings |
