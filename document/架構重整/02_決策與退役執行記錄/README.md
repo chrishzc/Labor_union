@@ -18,7 +18,7 @@ package；T3 才要求 current spec＋package。相同 owner／scenario／scope 
 | 文件 | 類型 | 狀態 | 正確用途／下一個 gate |
 |---|---|---|---|
 | [96 Current 剩餘代辦任務總表](96_Current_剩餘代辦任務總表.md) | gap-register | `blocked`（user-priority） | 未完成業務工作與既有 evidence 保留；Task 97 terminal completion 或使用者另行調整優先序後才恢復施工。 |
-| [任務 97：架構一致性修復與全域驗收計畫](97_架構一致性修復與全域驗收計畫.md) | work-package | `in-progress` | 目前 execution priority；先完成 WP0 基線，再依有界 owner／write set 執行 WP1～WP8，使 Task 96 後續建立在準確治理基線上。 |
+| [任務 97：架構一致性修復與全域驗收計畫](97_架構一致性修復與全域驗收計畫.md)（[97A post-prep baseline](97A_Task97_前置處理後基線修訂.md)；[97B current-head stabilization](97B_Task97_current_head_stabilization_amendment.md)） | work-package | `in-progress / STABILIZATION_REQUIRED` | 目前 execution priority，但禁止新增 architecture scope。先依 97B 修 current HEAD 的 F821／CI，讓 flake8 fatal、Agent governance、build、cross-domain、12-owner matrix全綠並重建 hash-bound evidence；exit 前不得新增 1019+ schema、新 retirement或跨 Domain redesign。 |
 | [全異常人工 remediation 收斂缺口](PROV-20260826-all-anomaly-manual-remediation-spec-gap.md) | spec-gap | `in-progress` | 96 新增 P0；先收斂每個 anomaly code 的 owner action／completion predicate，再分 owner package 實作。 |
 | [歷史訂單 review 人工更正工作包](PROV-20260826-historical-order-review-remediation-work-package.md) | work-package | `in-progress` | 96 P0 的第一個 owner slice；尚缺 enabled persisted-human Browser 與 developer acceptance。 |
 | [歷史案件作業基準與狀態感知異常規格](PROV-20260827-historical-order-operational-baseline-spec.md) | spec | `approved`／`SPEC_READY` | Historical-only baseline、無額外違約金、Orders／Finance 分離、服務中代班不要求新契約／簽回或客戶變更簽署（optional supplement 不阻擋代班／排班 lineage／薪資），以及 Client Finance cancellation `direction` 與 action mapping 均已裁決；剩餘為實作／runtime 驗收，不是 authority blocker。 |
