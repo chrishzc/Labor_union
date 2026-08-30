@@ -147,6 +147,7 @@ SOURCE_MEDIA_RETIRED_HTTP_ENTRIES = frozenset(
 )
 SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES = frozenset(
     {
+        "api:GET /api/v1/anomalies/{issue_key}",
         "api:GET /api/v1/anomaly-recovery/{issue_key}",
         "api:GET /api/v1/anomaly-recovery/{issue_key}/actions/{action_key}",
         "api:GET /api/v1/admin/data-browser/sources/{source_id}",
@@ -276,6 +277,7 @@ SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES = frozenset(
         "api:GET /api/v1/admin/entry-targets",
         "api:GET /api/v1/admin/entry-targets/{entry_id}",
         "api:GET /api/v1/line/media-assets/rich-menu/{asset_id}",
+        "api:GET /api/v1/line/identity-bindings/{line_user_id}/current-fact",
         "api:GET /api/v1/orders/historical-baseline-projector/deliveries/{delivery_identity}",
         "api:GET /api/v1/orders/{case_no}/historical-operational-baseline",
         "api:GET /static/bind.html",
@@ -351,6 +353,7 @@ REVIEW_REQUIRED_PATH_GOVERNANCE = {
     "api/routes/admin_auth.py": ("Access Control", "unauthenticated administrator completing the bounded login challenge"),
     "api/routes/admin_entry_targets.py": ("Global Entry Target Governance", "authenticated release or cutover operator"),
     "api/routes/anomaly_recovery.py": ("Anomalies / Global Durable Jobs", "authenticated anomaly recovery operator"),
+    "api/routes/anomaly_registry.py": ("Anomalies", "authenticated anomaly operator"),
     "api/routes/candidate_contact_pool.py": ("Scheduling Candidate Contact", "authenticated scheduling operator"),
     "api/routes/client_refund_reversal.py": ("Client Finance", "authenticated client-finance operator"),
     "api/routes/contract_external_signing.py": ("Contract Signing", "authenticated contract-signing operator or verified external signing integration"),
@@ -369,6 +372,7 @@ REVIEW_REQUIRED_PATH_GOVERNANCE = {
     "api/routes/jobs.py": ("Global Durable Jobs", "authenticated job observer"),
     "api/routes/line_configurations.py": ("LINE Configuration", "authenticated LINE configuration operator"),
     "api/routes/line_identity.py": ("LINE Identity", "authenticated LINE identity operator or verified LINE principal"),
+    "api/routes/line_identity_management.py": ("LINE Identity", "authenticated LINE identity operator"),
     "api/routes/line_media_assets.py": ("LINE Integration Media", "authenticated LINE media operator"),
     "api/routes/line_order_groups.py": ("LINE Order Group Integration", "authenticated LINE order-group operator"),
     "api/routes/line_rich_menus.py": ("LINE Rich Menu Publication", "authenticated LINE rich-menu operator"),
@@ -414,6 +418,10 @@ REVIEW_REQUIRED_REACT_OWNERS = {
 }
 LOCAL_CANONICAL_EVIDENCE_BY_SOURCE = {
     "api/routes/anomaly_recovery.py": (
+        "ui_react/src/api/anomalies/anomaly_detail_client.ts",
+        "tests/domains/anomalies/subsystems/anomalies/integration/test_anomaly_public_detail_recovery_contract.py; ui_react/src/tests/anomaly_detail_client.test.ts",
+    ),
+    "api/routes/anomaly_registry.py": (
         "ui_react/src/api/anomalies/anomaly_detail_client.ts",
         "tests/domains/anomalies/subsystems/anomalies/integration/test_anomaly_public_detail_recovery_contract.py; ui_react/src/tests/anomaly_detail_client.test.ts",
     ),
