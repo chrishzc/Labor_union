@@ -18,5 +18,6 @@
 ## Verification routing
 - default_boundary: Subsystem
 - test_root: `tests/subsystems/case_import/`
+- current owner-local HCM resubmission domain/workbook/workflow coverage is routed to this root.
 - higher_boundary: `tests/domains/case_import/`
 - layout_gap: `tests/test_wp77_import_contracts.py` remains a protected current legacy path with a direct current inventory consumer.
