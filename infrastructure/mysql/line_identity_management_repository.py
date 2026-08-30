@@ -11,6 +11,11 @@ from subsystems.line.identity_management_contracts import (
     LineIdentityBindingListQuery,
     LineIdentityBindingManagementView,
     LineIdentityBindingPage,
+    LineIdentityCurrentFactBinding,
+    LineIdentityCurrentFactFinding,
+    LineIdentityCurrentFactQuery,
+    LineIdentityCurrentFactReadback,
+    LineIdentityCurrentFactReadbackStatus,
     LineIdentityRevocationRequest,
     LineIdentityRevocationStatus,
 )
@@ -41,6 +46,22 @@ class MySqlLineIdentityManagementRepository:
         if not row:
             raise LookupError("line_identity_binding_not_found")
         return _binding_view(row)
+
+    def current_fact(
+        self,
+        query: LineIdentityCurrentFactQuery,
+    ) -> LineIdentityCurrentFactReadback:
+        """Read the canonical root and all owner projections without writing.
+
+        The current schema has one row per ``line_user_id``.  The query therefore
+        deliberately reports a customer+staff dual role as legal while exposing
+        that the single-row root cannot persist both role-scoped bindings.
+        """
+
+        with self._connection.cursor() as cursor:
+            cursor.execute(_CURRENT_FACT_SQL, (query.line_user_id.value,) * 4)
+            rows = tuple(cursor.fetchall() or ())
+        return _current_fact_readback(query.line_user_id, rows)
 
     def default_menu_publication(self) -> dict[str, Any] | None:
         with self._connection.cursor() as cursor:
@@ -210,8 +231,125 @@ def _revocation_request(row: dict[str, Any]) -> LineIdentityRevocationRequest:
     )
 
 
+def _current_fact_readback(
+    line_user_id: LineUserId,
+    rows: tuple[dict[str, Any], ...],
+) -> LineIdentityCurrentFactReadback:
+    roots = tuple(row for row in rows if row.get("source_kind") == "root")
+    root = roots[0] if roots else None
+    root_binding = _fact_binding(root) if root and root.get("subject_type") else None
+    owner_projections = tuple(
+        binding
+        for binding in (_fact_binding(row) for row in rows if row.get("source_kind") != "root")
+        if binding is not None
+    )
+
+    by_type: dict[LineBindingSubjectType, int] = {}
+    for projection in owner_projections:
+        by_type[projection.subject_type] = by_type.get(projection.subject_type, 0) + 1
+    duplicate_type = any(count > 1 for count in by_type.values())
+    role_types = set(by_type)
+    legal_dual_role = (
+        role_types
+        == {
+            LineBindingSubjectType.CUSTOMER,
+            LineBindingSubjectType.STAFF,
+        }
+        and not duplicate_type
+    )
+    root_key = _fact_key(root_binding)
+    owner_keys = {_fact_key(projection) for projection in owner_projections}
+    projection_mismatch = ({root_key} if root_key is not None else set()) != owner_keys
+
+    findings: list[LineIdentityCurrentFactFinding] = []
+    manual_actions: list[str] = []
+    if legal_dual_role:
+        findings.append(LineIdentityCurrentFactFinding.LEGAL_CUSTOMER_STAFF_DUAL_ROLE)
+        manual_actions.append("schema_release_for_role_scoped_bindings")
+    if duplicate_type:
+        findings.append(LineIdentityCurrentFactFinding.SAME_TYPE_MULTIPLE_ACTIVE_BINDING)
+        manual_actions.append("review_same_type_multiple_active_bindings")
+    if projection_mismatch:
+        findings.append(LineIdentityCurrentFactFinding.ROOT_OWNER_PROJECTION_MISMATCH)
+        manual_actions.append("reconcile_root_and_owner_projections")
+    if not findings:
+        findings.append(LineIdentityCurrentFactFinding.CONSISTENT)
+
+    if root is None:
+        readback_status = LineIdentityCurrentFactReadbackStatus.ROOT_MISSING
+    elif legal_dual_role:
+        readback_status = LineIdentityCurrentFactReadbackStatus.ROOT_PERSISTENCE_LIMITED
+    elif duplicate_type:
+        readback_status = LineIdentityCurrentFactReadbackStatus.PROJECTION_MULTIPLE
+    elif not owner_projections:
+        readback_status = LineIdentityCurrentFactReadbackStatus.PROJECTION_MISSING
+    elif projection_mismatch:
+        readback_status = LineIdentityCurrentFactReadbackStatus.MISMATCH
+    else:
+        readback_status = LineIdentityCurrentFactReadbackStatus.COMPLETE
+
+    status = None
+    version = None
+    if root is not None:
+        status = LineIdentityBindingStatus(str(root["binding_status"]))
+        version = int(root["aggregate_version"])
+    return LineIdentityCurrentFactReadback(
+        line_user_id=line_user_id.value,
+        root_status=status,
+        root_version=version,
+        root_binding=root_binding,
+        owner_projections=owner_projections,
+        findings=tuple(findings),
+        readback_status=readback_status,
+        manual_actions=tuple(dict.fromkeys(manual_actions)),
+        dual_role_persistence_supported=False,
+    )
+
+
+def _fact_binding(row: dict[str, Any] | None) -> LineIdentityCurrentFactBinding | None:
+    if row is None or not row.get("subject_type") or row.get("subject_reference") is None:
+        return None
+    return LineIdentityCurrentFactBinding(
+        subject_type=LineBindingSubjectType(str(row["subject_type"])),
+        subject_reference=str(row["subject_reference"]),
+        subject_name=str(row.get("subject_name") or "-"),
+        owner_line_user_id=(
+            str(row["owner_line_user_id"])
+            if row.get("owner_line_user_id") is not None
+            else None
+        ),
+    )
+
+
+def _fact_key(binding: LineIdentityCurrentFactBinding | None):
+    if binding is None:
+        return None
+    return (binding.subject_type, binding.subject_reference)
+
+
 _SUBJECT_NAME_SQL = (
     "COALESCE(c.name,s.name,a.display_name,'-')"
+)
+_CURRENT_FACT_SQL = (
+    "SELECT 'root' AS source_kind,b.line_user_id,b.binding_status,"
+    "b.aggregate_version,b.subject_type,b.subject_reference,NULL AS subject_name,"
+    "NULL AS owner_line_user_id FROM line_identity_bindings b WHERE b.line_user_id=%s "
+    "UNION ALL "
+    "SELECT 'customer' AS source_kind,c.line_user_id,NULL AS binding_status,"
+    "NULL AS aggregate_version,'customer' AS subject_type,CAST(c.id AS CHAR) "
+    "AS subject_reference,c.name AS subject_name,c.line_user_id AS owner_line_user_id "
+    "FROM clients c WHERE c.line_user_id=%s AND c.line_user_id<>'' "
+    "UNION ALL "
+    "SELECT 'staff' AS source_kind,s.line_user_id,NULL AS binding_status,"
+    "NULL AS aggregate_version,'staff' AS subject_type,CAST(s.id AS CHAR) "
+    "AS subject_reference,s.name AS subject_name,s.line_user_id AS owner_line_user_id "
+    "FROM staff s WHERE s.line_user_id=%s AND s.line_user_id<>'' "
+    "UNION ALL "
+    "SELECT 'admin' AS source_kind,a.linked_line_user_id AS line_user_id,"
+    "NULL AS binding_status,NULL AS aggregate_version,'admin' AS subject_type,"
+    "CAST(a.id AS CHAR) AS subject_reference,a.display_name AS subject_name,"
+    "a.linked_line_user_id AS owner_line_user_id FROM admin_users a "
+    "WHERE a.linked_line_user_id=%s AND a.linked_line_user_id<>''"
 )
 _BASE_SELECT = (
     "SELECT b.line_user_id,b.binding_status,b.aggregate_version,b.subject_type,"

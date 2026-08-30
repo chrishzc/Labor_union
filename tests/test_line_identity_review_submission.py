@@ -1,6 +1,12 @@
 """Characterize LINE identity-review request submission."""
 
+import pytest
+
 from subsystems.line import identity_review_workflow
+from subsystems.line.client_binding_application import (
+    LegacyClientBindingRetiredError,
+    bind_client,
+)
 
 
 class _Cursor:
@@ -40,79 +46,70 @@ class _Connection:
         return None
 
 
-def test_submit_staff_verification_replaces_pending_request_and_queues_reply(monkeypatch):
+def test_submit_staff_verification_is_retired_before_read_or_write(monkeypatch):
     connection = _Connection()
     queued: list[dict] = []
     monkeypatch.setattr(identity_review_workflow, "get_connection", lambda: connection)
-    monkeypatch.setattr(
-        identity_review_workflow,
-        "_template",
-        lambda _template_id, fallback: fallback,
-    )
-    monkeypatch.setattr(
-        identity_review_workflow,
-        "enqueue_line_task",
-        lambda _cursor, **kwargs: queued.append(kwargs),
-    )
 
-    result = identity_review_workflow.submit_staff_verification(
-        "U-staff",
-        source_event_id="event-1",
-    )
+    with pytest.raises(identity_review_workflow.LegacyLineReviewRetiredError):
+        identity_review_workflow.submit_staff_verification(
+            "U-staff",
+            source_event_id="event-1",
+            delivery_callback=queued.append,
+        )
 
     statements = [statement for statement, _ in connection.cursor_instance.statements]
-    assert result == {"request_id": 41, "worker_wakeup_required": True}
-    assert any("UPDATE line_confirmation_requests SET status='cancelled'" in statement for statement in statements)
-    assert any("INSERT INTO line_confirmation_requests (request_type, line_user_id)" in statement for statement in statements)
-    assert queued == [{
-        "to_user_id": "U-staff",
-        "message_content": "月嫂身分申請已送出，請等待工會人員確認。",
-        "source_event_id": "event-1",
-        "idempotency_key": "staff-verification-request:41",
-    }]
-    assert connection.commits == 1
-
-
-def test_submit_client_rebind_replaces_pending_request(monkeypatch):
-    connection = _Connection()
-    monkeypatch.setattr(identity_review_workflow, "get_connection", lambda: connection)
-
-    result = identity_review_workflow.submit_client_rebind_request_in_transaction(
-        connection.cursor_instance,
-        client_id=17,
-        client_name="王小美",
-        old_line_user_id="U-old",
-        new_line_user_id="U-new",
-    )
-
-    statements = [statement for statement, _ in connection.cursor_instance.statements]
-    assert result == {"request_id": 41, "worker_wakeup_required": True}
-    assert any("UPDATE line_confirmation_requests SET status='cancelled'" in statement for statement in statements)
-    assert any("INSERT INTO line_confirmation_requests ( request_type, line_user_id, client_id, client_name," in statement for statement in statements)
+    assert statements == []
+    assert queued == []
     assert connection.commits == 0
 
 
-def test_complete_client_binding_updates_identity_and_queues_confirmation(monkeypatch):
-    cursor = _Cursor()
-    queued: list[dict] = []
-    monkeypatch.setattr(
-        identity_review_workflow,
-        "enqueue_line_task",
-        lambda _cursor, **kwargs: queued.append(kwargs),
-    )
+def test_submit_client_rebind_is_retired_before_write(monkeypatch):
+    connection = _Connection()
+    monkeypatch.setattr(identity_review_workflow, "get_connection", lambda: connection)
 
-    result = identity_review_workflow.complete_client_binding_in_transaction(
-        cursor,
-        client_id=17,
-        client_name="王小美",
-        case_no="C-2026-01",
-        current_line_user_id="",
-        line_user_id="U-client",
-    )
+    with pytest.raises(identity_review_workflow.LegacyLineReviewRetiredError):
+        identity_review_workflow.submit_client_rebind_request_in_transaction(
+            connection.cursor_instance,
+            client_id=17,
+            client_name="王小美",
+            old_line_user_id="U-old",
+            new_line_user_id="U-new",
+        )
+
+    statements = [statement for statement, _ in connection.cursor_instance.statements]
+    assert statements == []
+    assert connection.commits == 0
+
+
+def test_complete_client_binding_is_retired_without_canonical_apply_context():
+    cursor = _Cursor()
+
+    with pytest.raises(identity_review_workflow.LegacyLineReviewRetiredError):
+        identity_review_workflow.complete_client_binding_in_transaction(
+            cursor,
+            client_id=17,
+            client_name="王小美",
+            case_no="C-2026-01",
+            current_line_user_id="",
+            line_user_id="U-client",
+        )
 
     statements = [statement for statement, _ in cursor.statements]
-    assert result == {"worker_wakeup_required": True}
-    assert any("UPDATE clients SET line_user_id = %s WHERE id = %s" in statement for statement in statements)
-    assert not any("INSERT INTO orders" in statement for statement in statements)
-    assert queued[0]["to_user_id"] == "U-client"
-    assert "C-2026-01" in queued[0]["message_content"]
+    assert statements == []
+
+
+def test_legacy_client_binding_wrapper_fails_closed_before_read_or_write():
+    connection = _Connection()
+
+    with pytest.raises(LegacyClientBindingRetiredError):
+        bind_client(
+            connection,
+            name="王小美",
+            phone="0912-345-678",
+            line_user_id="U-client",
+            force_rebind=False,
+        )
+
+    assert connection.cursor_instance.statements == []
+    assert connection.commits == 0
