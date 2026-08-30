@@ -609,8 +609,6 @@ def _require_replaceable_binding(snapshot, claim, expected_version):
         raise RuntimeError("line_identity_subject_type_change_forbidden")
     if snapshot.subject_reference == claim.subject_reference:
         raise RuntimeError("line_identity_subject_unchanged")
-    if snapshot.subject_reference != claim.subject_reference:
-        raise RuntimeError("line_identity_subject_conflict")
 
 
 def _identity_snapshot(row):

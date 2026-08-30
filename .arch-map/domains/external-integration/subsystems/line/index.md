@@ -6,6 +6,9 @@
 ## Responsibility
 處理 LINE webhook、identity binding/review、LIFF/self-service transport、rich menu／message delivery與committed delivery worker composition；擁有 identity root／owner projections／current-fact interpretation，business mutation回owning Subsystem。
 
+## Modules
+- `line-identity-management` — canonical LINE identity binding and review persistence; path: `modules/line-identity-management.md`
+
 ## Dependencies
 - outbound: `scheduling | case-import | orders | other owning domains` — typed commands only。
 - outbound: external LINE provider — only after committed durable intent/outbox when side effect is required。
