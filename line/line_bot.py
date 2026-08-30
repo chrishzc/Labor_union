@@ -9,29 +9,20 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 import pymysql
 import os
-import json
 import asyncio
 import sys
 import requests
 from typing import Any, Dict, Optional
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from fastapi.responses import FileResponse
 from line.worker import wake_worker
 from api.dependencies.line_runtime import line_webhook_runtime_mode
 from api.line_webhook_boundary import canonical_line_webhook
 from subsystems.line.runtime_contracts import LineRuntimeMode
-from line.security import verify_line_signature
-from subsystems.line.delivery_task_workflow import enqueue_line_task
-from subsystems.line.postback_intent_registry import (
-    LinePostbackIntentError,
-    handle_matching_willingness,
-)
-from subsystems.line.identity_review_workflow import submit_staff_verification_in_transaction
+# Task 97 still audits this fail-closed compatibility module by path.  Import it
+# here so the retained surface is explicit until that governance consumer moves.
+from subsystems.line import user_lifecycle as _retired_user_lifecycle  # noqa: F401
 from subsystems.line.client_binding_application import bind_client
-from subsystems.line.rich_menu_publication_workflow import get_current_rich_menu_id
-from subsystems.line.webhook_inbox import mark_events_completed, register_event
 from subsystems.line.liff_identity_verification import (
     LiffIdentityError,
     liff_token_required,
@@ -46,11 +37,6 @@ from subsystems.case_import.provisional_registration_application import (
 )
 from subsystems.case_import.provisional_registration_types import ProvisionalRegistrationStorageError
 from api.dependencies.provisional_registration import build_provisional_registration_application
-from subsystems.line.user_lifecycle import (
-    activate_follow,
-    block_unfollow,
-    cancel_pending_onboarding,
-)
 
 # 載入環境變數
 load_dotenv()
@@ -63,39 +49,6 @@ def get_setting(key: str, default: str = "") -> str:
     """從環境變數讀取設定，取代舊版 admin.settings_manager"""
     env_key = key.upper()
     return os.getenv(env_key, default)
-
-def load_message_templates():
-    """Return enabled text templates keyed by template id."""
-    config_path = os.path.join(os.path.dirname(__file__), "..", "config", "message_templates.json")
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return {
-            item["id"]: item["content"]
-            for item in data.get("templates", [])
-            if item.get("enabled", True) and item.get("message_type", "text") == "text"
-        }
-    except Exception as e:
-        print(f"[LINE Webhook] Failed to load message templates: {e}")
-        return {}
-
-
-def _load_rich_menu_id(role: str) -> str:
-    current_id = get_current_rich_menu_id(role)
-    if current_id:
-        return current_id
-    key_by_role = {
-        "staff": "staff_rich_menu_id",
-        "union_staff": "union_staff_rich_menu_id",
-        "customer": "default_rich_menu_id",
-    }
-    path = os.path.join(os.path.dirname(__file__), "..", "config", "rich_menu_ids.json")
-    try:
-        with open(path, "r", encoding="utf-8") as stream:
-            return json.load(stream).get(key_by_role[role], "")
-    except (OSError, ValueError, KeyError):
-        return ""
-
 
 def _notify_development_reviewer(request_type: str, request_id: str | int) -> None:
     """Push one review event to the local dev supervisor; never affect webhook success."""
@@ -113,75 +66,6 @@ def _notify_development_reviewer(request_type: str, request_id: str | int) -> No
         print(f"[LINE Review] Development notification failed: {exc}")
 
 
-def _create_onboarding_tasks(cursor, user_id: str, source_event_id: str | None) -> None:
-    schedule_path = os.path.join(os.path.dirname(__file__), "..", "config", "message_schedules.json")
-    templates = load_message_templates()
-    try:
-        with open(schedule_path, "r", encoding="utf-8") as stream:
-            schedule_config = json.load(stream)
-            schedules = schedule_config.get("schedules", [])
-    except (OSError, ValueError):
-        return
-    onboarding = next((item for item in schedules if item.get("id") == "new_user_onboarding" and item.get("enabled")), None)
-    if not onboarding:
-        return
-    restart_on_refollow = bool(onboarding.get("restart_on_refollow", False))
-    if restart_on_refollow:
-        cancel_pending_onboarding(cursor, user_id)
-    for step in onboarding.get("steps", []):
-        template_id = step.get("template_id")
-        content = templates.get(template_id)
-        if not content:
-            continue
-        send_time = step.get("send_time", "10:00")
-        day = int(step.get("day", 0))
-        hour, minute = map(int, send_time.split(":"))
-        schedule_zone = ZoneInfo(schedule_config.get("timezone", "Asia/Taipei"))
-        local_now = datetime.now(schedule_zone)
-        local_target = (local_now + timedelta(days=day)).replace(
-            hour=hour, minute=minute, second=0, microsecond=0
-        )
-        # MySQL currently stores UTC in a timezone-naive DATETIME column.
-        scheduled_at = local_target.astimezone(timezone.utc).replace(tzinfo=None)
-        if restart_on_refollow and source_event_id:
-            idempotency_key = f"onboarding:{user_id}:{source_event_id}:d{day}"
-        else:
-            idempotency_key = f"onboarding:{user_id}:d{day}"
-        enqueue_line_task(
-            cursor, to_user_id=user_id, message_content=content,
-            scheduled_at=scheduled_at, source_event_id=source_event_id,
-            idempotency_key=idempotency_key,
-        )
-
-
-SERVICE_HELP_REPLIES = {
-    "服務流程": (
-        "服務流程如下：\n\n"
-        "1. 先完成服務登記。\n"
-        "2. 工會確認您的資料與服務期程。\n"
-        "3. 系統篩選可配合的月嫂。\n"
-        "4. 月嫂同意接案後，工會提供月嫂資料給您確認。\n"
-        "5. 雙方確認後，進入後續媒合與簽約流程。\n\n"
-        "如您尚未登記，請點選下方選單的「服務登記」。"
-    ),
-    "收費與補助": (
-        "收費與補助說明：\n\n"
-        "實際費用會依服務天數、每日服務時數、服務地點與個案條件確認。"
-        "若要申請補助，請於服務登記時填寫身分證字號與戶籍資料，工會會再依規範協助確認資格。"
-    ),
-    "查詢服務進度": (
-        "若要查詢服務進度，請先完成服務登記或帳號綁定。\n\n"
-        "已完成登記者，請回覆您的案件編號或登記姓名，工會人員會依資料協助確認目前進度。"
-    ),
-    "修改登記資料": (
-        "目前資料異動的正式線上申請介面仍在建置中。"
-        "請直接留言要修改的項目，工會人員會以人工待辦協助確認；系統不會在未確認前直接更新正式資料。"
-    ),
-    "月嫂身分認證": "若您是月嫂本人，請點選下方「我是月嫂」或直接回覆「我是月嫂」，系統會送出身分確認申請。",
-    "其他問題": "請直接輸入您的問題內容。若已經有案件編號，也請一起提供，方便工會人員協助查詢。",
-}
-
-
 def _liff_url(query: str = "") -> str:
     liff_id = os.getenv("LINE_LIFF_ID", "").strip()
     if not liff_id or liff_id == "your_liff_id_here":
@@ -189,62 +73,6 @@ def _liff_url(query: str = "") -> str:
     if not liff_id:
         return "LIFF 尚未完成設定，請聯絡工會人員。"
     return f"https://liff.line.me/{liff_id}/{query}"
-
-
-def _quick_reply_item(label: str, text: str | None = None) -> dict[str, Any]:
-    return {
-        "type": "action",
-        "action": {
-            "type": "message",
-            "label": label,
-            "text": text or label,
-        },
-    }
-
-
-def _enqueue_service_help_menu(cursor, user_id: str, source_event_id: str | None) -> None:
-    payload = {
-        "type": "text",
-        "text": "請選擇您想了解或處理的項目：",
-        "quickReply": {
-            "items": [_quick_reply_item(label) for label in SERVICE_HELP_REPLIES]
-        },
-    }
-    enqueue_line_task(
-        cursor,
-        to_user_id=user_id,
-        task_type="line_message",
-        payload=payload,
-        source_event_id=source_event_id,
-        idempotency_key=f"service-help-menu:{source_event_id or user_id}",
-    )
-
-
-def _enqueue_service_help_reply(
-    cursor,
-    user_id: str,
-    user_text: str,
-    source_event_id: str | None,
-) -> bool:
-    normalized = user_text.strip()
-    if normalized == "服務說明":
-        _enqueue_service_help_menu(cursor, user_id, source_event_id)
-        return True
-    if normalized not in SERVICE_HELP_REPLIES:
-        return False
-    reply_text = SERVICE_HELP_REPLIES[normalized]
-    payload: dict[str, Any] = {"type": "text", "text": reply_text}
-    if normalized == "月嫂身分認證":
-        payload["quickReply"] = {"items": [_quick_reply_item("我是月嫂")]}
-    enqueue_line_task(
-        cursor,
-        to_user_id=user_id,
-        task_type="line_message",
-        payload=payload,
-        source_event_id=source_event_id,
-        idempotency_key=f"service-help-reply:{normalized}:{source_event_id or user_id}",
-    )
-    return True
 
 
 router = APIRouter(tags=["LINE"])
@@ -550,10 +378,6 @@ def set_line_user_role(user_id: str, role: str) -> None:
     )
 
 # ----------------- 1. LINE WEBHOOK 接收 -----------------
-class LineWebhookPayload(BaseModel):
-    events: list = []
-    destination: str = ""
-
 @router.get("/webhook/line")
 @router.get("/webhook/line/")
 @router.get("/webhook")
@@ -569,227 +393,3 @@ async def line_webhook_get():
 async def line_webhook(request: Request):
     """The public webhook has one canonical inbox boundary after WP35 cutover."""
     return await canonical_line_webhook(request)
-
-    '''Retired direct-writer webhook source retained only until history extraction.
-    raw_body = await request.body()
-    signature = request.headers.get("x-line-signature", "")
-    channel_secret = os.getenv("LINE_CHANNEL_SECRET", "")
-    if not verify_line_signature(raw_body, signature, channel_secret):
-        raise HTTPException(status_code=401, detail="Invalid LINE webhook signature")
-    try:
-        payload = LineWebhookPayload.model_validate_json(raw_body)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid LINE webhook payload") from exc
-    print(f"[LINE Webhook] Received line webhook. Events count: {len(payload.events)}")
-    
-    review_notifications: list[tuple[str, int]] = []
-    conn = get_db_connection()
-    try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            for event in payload.events:
-                if not register_event(cursor, event):
-                    print(f"[LINE Webhook] Duplicate event ignored: {event.get('webhookEventId')}")
-                    continue
-                event_type = event.get("type")
-                
-                # 處理新用戶加入好友 (follow) 事件
-                if event_type == "follow":
-                    source = event.get("source", {})
-                    user_id = source.get("userId", "")
-                    print(f"[LINE Webhook] Follow event received from User: {user_id}")
-                    
-                    if user_id:
-                        activate_follow(cursor, user_id)
-                        liff_id = os.getenv("LINE_LIFF_ID", "")
-                        if not liff_id or liff_id == "your_liff_id_here":
-                            liff_id = get_setting("line_liff_id", "")
-                            
-                        # 決定 LIFF 網頁的綁定連結 (若無真實 LIFF ID 則回退至測試 URL)
-                        if liff_id and liff_id != "your_liff_id_here" and liff_id.strip() != "":
-                            bind_url = f"https://liff.line.me/{liff_id}"
-                        else:
-                            base_url = os.getenv("BASE_URL", "").strip().rstrip("/")
-                            if base_url:
-                                bind_url = f"{base_url}/gateway?userId={user_id}"
-                            else:
-                                host = request.headers.get("host", "127.0.0.1:8000")
-                                proto = request.headers.get("x-forwarded-proto", "http")
-                                bind_url = f"{proto}://{host}/gateway?userId={user_id}"
-                            
-                        welcome_msg = (
-                            "您好！感謝您加入新竹市月子公會官方帳號。\n"
-                            "為了提供您更完整的服務，請點擊以下連結進行帳號與訂單綁定：\n\n"
-                            f"{bind_url}\n\n"
-                            "請於網頁中填寫您在政府補助登記時的姓名與電話，以利系統進行安全配對。如有任何疑問，歡迎隨時聯絡公會專員。"
-                        )
-                        
-                        # 寫入推播任務佇列，由背景發送
-                        enqueue_line_task(
-                            cursor, to_user_id=user_id, message_content=welcome_msg,
-                            source_event_id=event.get("webhookEventId"),
-                            idempotency_key=f"welcome:{event.get('webhookEventId') or user_id}",
-                        )
-                        _create_onboarding_tasks(cursor, user_id, event.get("webhookEventId"))
-                        print(f"[LINE Webhook] Queued welcome message for new user {user_id}")
-
-                elif event_type == "unfollow":
-                    source = event.get("source", {})
-                    user_id = source.get("userId", "")
-                    if user_id:
-                        block_unfollow(cursor, user_id)
-                
-                elif event_type == "postback":
-                    postback_data = event["postback"].get("data", "")
-                    user_id = event.get("source", {}).get("userId", "")
-                    print(f"[LINE Webhook] Postback data received: {postback_data}")
-                    
-                    params = {}
-                    for item in postback_data.split("&"):
-                        if "=" in item:
-                            k, v = item.split("=", 1)
-                            params[k] = v
-                            
-                    action = params.get("action")
-                    case_no = params.get("case_no")
-                    staff_id = params.get("staff_id")
-                    
-                    if not action or not case_no:
-                        continue
-
-                    if action in {"willing", "unwilling"} and (
-                        "plan_id" in params or "segment_id" in params
-                    ):
-                        try:
-                            result = handle_matching_willingness(
-                                params, event.get("webhookEventId", ""), user_id
-                            )
-                        except LinePostbackIntentError as exc:
-                            print(f"[LINE Webhook] Invalid matching postback: {exc}")
-                            continue
-                        print(f"[LINE Webhook] Matching willingness recorded: {result}")
-                        continue
-                        
-                    legacy_actions = {"willing", "unwilling", "client_approve", "client_reject"}
-                    if action in legacy_actions:
-                        enqueue_line_task(
-                            cursor,
-                            to_user_id=user_id,
-                            message_content="此媒合訊息已過期，請由工會提供的最新媒合流程重新操作。",
-                            source_event_id=event.get("webhookEventId"),
-                            idempotency_key=f"retired-legacy-postback:{event.get('webhookEventId') or case_no}",
-                        )
-                        print(f"[LINE Webhook] Retired legacy postback ignored: {action}")
-                        continue
-                # 處理文字對答與 RAG
-                elif event_type == "message":
-                    message = event.get("message", {})
-                    if message.get("type") == "text":
-                        user_text = message.get("text", "")
-                        source = event.get("source", {})
-                        user_id = source.get("userId", "")
-                        reply_token = event.get("replyToken", "")
-                        print(f"[LINE Webhook] Text message received from {user_id}: {user_text}")
-
-                        cursor.execute("SELECT role FROM line_users WHERE line_user_id=%s", (user_id,))
-                        role_row = cursor.fetchone()
-                        current_role = role_row["role"] if role_row else "customer"
-                        if current_role == "union_staff" and user_text.strip() in {"工會選單", "開啟客服系統", "月嫂驗證管理"}:
-                            enqueue_line_task(
-                                cursor, to_user_id=user_id, task_type="rich_menu_link",
-                                payload={
-                                    "rich_menu_id": _load_rich_menu_id("union_staff"),
-                                    "success_message": "已切換至工會人員客服選單。",
-                                },
-                                source_event_id=event.get("webhookEventId"),
-                                idempotency_key=f"union-menu:{event.get('webhookEventId')}",
-                            )
-                            continue
-
-                        # 攔截「我是月嫂」並建立人工確認請求，不直接切換身分。
-                        if "我是月嫂" in user_text:
-                            result = submit_staff_verification_in_transaction(
-                                cursor,
-                                user_id,
-                                source_event_id=event.get("webhookEventId"),
-                            )
-                            request_id = result["request_id"]
-                            review_notifications.append(("staff_verification", request_id))
-                            print(f"[LINE Webhook] Staff verification request #{request_id} created for {user_id}")
-                            continue
-                            
-                        # 攔截「esc」關鍵字恢復預設選單
-                        if user_text.lower().strip() == "esc":
-                            replies = load_message_templates()
-                            enqueue_line_task(
-                                cursor, to_user_id=user_id, task_type="rich_menu_unlink",
-                                payload={"success_message": replies.get("esc_success", "已切換回一般用戶選單。")},
-                                source_event_id=event.get("webhookEventId"),
-                                idempotency_key=f"menu-unlink:{event.get('webhookEventId')}",
-                            )
-                            continue
-
-                        if _enqueue_service_help_reply(
-                            cursor,
-                            user_id,
-                            user_text,
-                            event.get("webhookEventId"),
-                        ):
-                            print(f"[LINE Webhook] Service help handled for {user_id}: {user_text}")
-                            continue
-
-                        # 攔截「查詢訂單」或「綁定」關鍵字對話流
-                        if "查詢訂單" in user_text or "綁定" in user_text:
-                            liff_id = os.getenv("LINE_LIFF_ID", "")
-                            if not liff_id or liff_id == "your_liff_id_here":
-                                liff_id = get_setting("line_liff_id", "")
-                                
-                            if liff_id and liff_id != "your_liff_id_here" and liff_id.strip() != "":
-                                bind_url = f"https://liff.line.me/{liff_id}"
-                            else:
-                                base_url = os.getenv("BASE_URL", "").strip().rstrip("/")
-                                if base_url:
-                                    bind_url = f"{base_url}/gateway?userId={user_id}"
-                                else:
-                                    host = request.headers.get("host", "127.0.0.1:8000")
-                                    proto = request.headers.get("x-forwarded-proto", "http")
-                                    bind_url = f"{proto}://{host}/gateway?userId={user_id}"
-                                
-                            replies = load_message_templates()
-                            reply_msg = replies.get("bind_link_msg").replace("{bind_url}", bind_url)
-                            
-                            enqueue_line_task(
-                                cursor, to_user_id=user_id, message_content=reply_msg,
-                                source_event_id=event.get("webhookEventId"),
-                                idempotency_key=f"bind-link:{event.get('webhookEventId')}",
-                            )
-                            print(f"[LINE Webhook] Intercepted keyword '{user_text}', queued query link for User: {user_id}")
-                            continue
-                        
-                        # Legacy runtime cannot provide reviewed sources/citations safely.
-                        enqueue_line_task(
-                            cursor,
-                            to_user_id=user_id,
-                            message_content="此問題將由工會人員協助確認，請稍候。",
-                            source_event_id=event.get("webhookEventId"),
-                            idempotency_key=f"knowledge-manual-fallback:{event.get('webhookEventId')}",
-                        )
-
-                        
-            completed_event_ids = [
-                event.get("webhookEventId") for event in payload.events
-                if event.get("webhookEventId")
-            ]
-            mark_events_completed(cursor, completed_event_ids)
-            conn.commit()
-            wake_worker()
-            for request_type, request_id in review_notifications:
-                _notify_development_reviewer(request_type, request_id)
-    except Exception as e:
-        conn.rollback()
-        print(f"[LINE Webhook] Webhook handler failed: {e}")
-        raise HTTPException(status_code=500, detail="LINE webhook processing failed") from e
-    finally:
-        conn.close()
-        
-    return {"status": "ok"}
-    '''

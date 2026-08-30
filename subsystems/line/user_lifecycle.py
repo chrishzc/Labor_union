@@ -1,89 +1,50 @@
-"""Typed owner for LINE user state and onboarding-task lifecycle."""
+"""Fail-closed compatibility surface for the retired legacy LINE user lifecycle.
+
+Canonical friend state, identity binding, and follow scheduling are owned by the
+LINE platform identity repository and webhook applications.  The historical
+module remains importable only because the current Task 97 governance matrix
+still audits this path; none of its direct ``line_users``/``line_tasks`` writes
+are retained.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Callable
 
-_ROLES = frozenset({"customer", "staff", "union_staff"})
+class LegacyLineUserLifecycleRetiredError(RuntimeError):
+    code = "legacy_line_user_lifecycle_retired"
 
 
-def activate_follow(cursor, line_user_id: str) -> None:
-    """Activate a follow event without deciding its presentation tasks."""
-    cursor.execute(
-        """INSERT INTO line_users (line_user_id,status,followed_at,last_event_at,onboarding_started_at)
-           VALUES (%s,'active',NOW(),NOW(),NOW())
-           ON DUPLICATE KEY UPDATE status='active',followed_at=NOW(),
-               blocked_at=NULL,last_event_at=NOW()""",
-        (line_user_id,),
+def _retired() -> None:
+    raise LegacyLineUserLifecycleRetiredError(
+        "use the canonical LINE platform identity and follow schedule applications"
     )
 
 
-def block_unfollow(cursor, line_user_id: str) -> None:
-    """Block a user and cancel only undelivered onboarding messages."""
-    cursor.execute(
-        """UPDATE line_users SET status='blocked',blocked_at=NOW(),last_event_at=NOW()
-           WHERE line_user_id=%s""",
-        (line_user_id,),
-    )
-    cancel_pending_onboarding(cursor, line_user_id)
+def activate_follow(*_args, **_kwargs) -> None:
+    _retired()
 
 
-def cancel_pending_onboarding(cursor, line_user_id: str) -> None:
-    cursor.execute(
-        """UPDATE line_tasks SET status='cancelled'
-           WHERE to_user_id=%s AND status='pending'
-             AND idempotency_key LIKE 'onboarding:%%'""",
-        (line_user_id,),
-    )
+def block_unfollow(*_args, **_kwargs) -> None:
+    _retired()
 
 
-def assign_role(cursor, line_user_id: str, role: str) -> None:
-    if role not in _ROLES:
-        raise ValueError("unsupported_line_user_role")
-    cursor.execute(
-        """INSERT INTO line_users (line_user_id,role,status,last_event_at)
-           VALUES (%s,%s,'active',NOW())
-           ON DUPLICATE KEY UPDATE role=VALUES(role),status='active',last_event_at=NOW()""",
-        (line_user_id, role),
-    )
+def cancel_pending_onboarding(*_args, **_kwargs) -> None:
+    _retired()
 
 
-def apply_role(
-    connection,
-    line_user_id: str,
-    role: str,
-    *,
-    unit_of_work_factory: Callable[[Any], Any] | None = None,
-) -> None:
-    """Own the role command transaction so transports cannot bypass it."""
-    unit_of_work = (
-        unit_of_work_factory(connection)
-        if unit_of_work_factory is not None
-        else _ConnectionUnitOfWork(connection)
-    )
-    with unit_of_work:
-        with connection.cursor() as cursor:
-            assign_role(cursor, line_user_id, role)
-        unit_of_work.commit()
+def assign_role(*_args, **_kwargs) -> None:
+    _retired()
 
 
-class _ConnectionUnitOfWork:
-    def __init__(self, connection: Any) -> None:
-        self._connection = connection
-
-    def __enter__(self):
-        begin = getattr(self._connection, "begin", None)
-        if callable(begin):
-            begin()
-        return self
-
-    def __exit__(self, exception_type, exception, traceback):
-        if exception_type is not None:
-            self._connection.rollback()
-        return False
-
-    def commit(self) -> None:
-        self._connection.commit()
+def apply_role(*_args, **_kwargs) -> None:
+    _retired()
 
 
-__all__ = ["activate_follow", "apply_role", "assign_role", "block_unfollow", "cancel_pending_onboarding"]
+__all__ = [
+    "LegacyLineUserLifecycleRetiredError",
+    "activate_follow",
+    "apply_role",
+    "assign_role",
+    "block_unfollow",
+    "cancel_pending_onboarding",
+]
