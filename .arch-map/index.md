@@ -27,5 +27,23 @@
 - `external-integration -> owning domains` — Access／LINE 只提供 actor、identity、webhook／delivery 等邊界，業務命令仍由 owning Subsystem／Domain 決定。
 - `all mutation -> Global` — `shared_kernel/`、outer UoW、receipt/outbox/durable job 與 migration governance 提供跨域不變量。
 
+## Verification routing
+Current canonical owner roots are:
+
+- Orders — `tests/domains/orders/subsystems/orders/`
+- Scheduling — `tests/domains/scheduling/subsystems/scheduling/`
+- Client Finance — `tests/domains/client-finance/subsystems/client-finance/`
+- Staff Payables — `tests/domains/staff-payables/subsystems/staff-payables/`
+- Anomalies — `tests/domains/anomalies/subsystems/anomalies/`
+- Payroll — `tests/domains/payroll/subsystems/payroll/`
+- Finance Import — `tests/domains/finance-import/subsystems/finance-import/`
+- Government Subsidy — `tests/domains/government-subsidy/subsystems/government-subsidy/`
+- Case Import — `tests/subsystems/case_import/`（既有特殊 layout；Domain-level higher boundary仍可使用 `tests/domains/case_import/`）
+- Access — `tests/domains/external-integration/subsystems/access/`
+- LINE — `tests/domains/external-integration/subsystems/line/`
+- Contract Signing — `tests/domains/contract-signing/subsystems/contract-signing/`
+
+`tests/` flat root不是 owner-local 測試的預設目的地。只有 application composition/OpenAPI、真正 cross-domain、release/schema/migration、disposable-MySQL/engine、Task97/governance、或有明確 compatibility/path consumer 的 higher-boundary coverage 才應留在 flat/higher roots。詳細路由見 `tests/index.md`。
+
 ## Navigation notes
 本地圖是 current architecture routing evidence，不是產品需求 Authority、architecture compliance/completion claim 或 source/test 的替代品。正式語意先讀 `AGENTS.md`、`document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` 與 owning spec，再用此圖縮小 source/test scope。`api/`、`ui_react/`、legacy `ui/`、`line/`、`infrastructure/`、`scripts/`、`db/` 是 adapters／runtime／release locations，不因資料夾存在而自動成為 Domain。`contract_integration`、`customer_service`、`knowledge_retrieval`、`staff`、`bootstrap`、`controlled_files`、`reporting`、`jobs` 等 current source 邊界尚未在第一版完整建模；需要時依 current spec/source scoped 擴張。不得以此地圖復活 legacy `system_map*`／`scripts_map.md` gate。

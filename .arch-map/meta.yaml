@@ -1,6 +1,6 @@
 schema_version: 1
 system: labor-union-admin
-source_revision: 82b2c8b960300e4a3b5fd2cdc72a664e7678cbfe
+source_revision: ab8c5df34278df32e5195e0250c7b53c4a2e675b
 status: partial
 last_reconciled_scope:
   - anomalies/anomalies
@@ -9,3 +9,7 @@ last_reconciled_scope:
   - tests/anomalies
   - tests/external-integration/line
   - tests/external-integration/access
+  - system/test-routing
+  - case-import/case-import
+  - tests
+  - tests/case-import
