@@ -6,6 +6,8 @@ task_id: 97
 amends: 97_架構一致性修復與全域驗收計畫.md
 supersedes_current_checkpoint: 13.27
 owner: architecture-governance / domain-owners / integration-writer
+stabilization_status: completed
+current_receipt: ../03_追蹤清單與證據/evidence/task97_current_head_stabilization_receipt_75827fb.md
 ---
 
 # Task 97 current-head stabilization amendment
@@ -126,8 +128,8 @@ exit 後新增一個短 current-head receipt；不要再把整個 repository-wid
 ## 9. Current conclusion
 
 ```text
-TASK97_STABILIZATION_REQUIRED
+TASK97_STABILIZATION_CONFIRMED
 ARCHITECTURE_COMPLIANCE_NOT_CONFIRMED
 ```
 
-下一個 Agent 的第一責任是恢復 current HEAD 的可驗證一致性，不是繼續新增架構修復範圍。
+hash-bound current result 由 [Task 97 current-head stabilization receipt](../03_追蹤清單與證據/evidence/task97_current_head_stabilization_receipt_75827fb.md) 保存。後續只可恢復第 6 節既有 finishing lanes，仍不得新增架構範圍，也不得把 stabilization success 外推成 WP8 terminal acceptance。
