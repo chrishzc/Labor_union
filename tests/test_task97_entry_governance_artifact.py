@@ -21,19 +21,23 @@ def test_task97_entry_governance_is_fresh_clone_reproducible():
     assert artifact["source"]["entry_count"] == 683
     assert artifact["summary"]["generic_placeholder_count"] == 0
     assert artifact["summary"]["queue_status_counts"] == {
-        "active": 514,
+        "active": 488,
         "operator_only": 75,
-        "retired_410": 61,
+        "retired_410": 87,
         "review_required": 33,
     }
     assert artifact["summary"]["terminal_disposition_counts"] == {
-        "active_canonical": 514,
+        "active_canonical": 488,
         "blocked_external_evidence": 31,
         "operator_only_guarded": 75,
-        "retired_410": 61,
+        "retired_410": 87,
         "rewrite_to_canonical": 2,
     }
     assert artifact["summary"]["blocked_receipt_count"] == 33
+    assert artifact["summary"]["repo_local_blocker_count"] == 0
+    assert artifact["summary"]["deferred_external_evidence_count"] == 33
+    assert artifact["summary"]["overall"] == "TASK97_REPOSITORY_LOCAL_COMPLETE"
+    assert artifact["summary"]["production_acceptance"] == "NOT_RUN"
     assert len(artifact["records"]) == len(
         {record["exact_entry_identity"] for record in artifact["records"]}
     )

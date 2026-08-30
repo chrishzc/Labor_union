@@ -7,9 +7,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
-
-from subsystems.anomalies.system_alert_projection import upsert_system_alert
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -18,7 +16,27 @@ class SecurityAlertProjectionResult:
     failed_count: int
 
 
-def consume_security_alert_outbox(connection: Any, *, maximum_events: int = 25) -> SecurityAlertProjectionResult:
+class SecurityAlertSink(Protocol):
+    """Caller-composed sink for a committed Access security-alert intent."""
+
+    def __call__(
+        self,
+        cursor: Any,
+        *,
+        alert_code: str,
+        source_domain: str,
+        case_key: str,
+        reason: str,
+        details: dict[str, Any],
+    ) -> object: ...
+
+
+def consume_security_alert_outbox(
+    connection: Any,
+    *,
+    project_alert: SecurityAlertSink,
+    maximum_events: int = 25,
+) -> SecurityAlertProjectionResult:
     """Claim committed intents and project them without re-running Access Control commands."""
     if maximum_events < 0:
         raise ValueError("maximum_events_must_not_be_negative")
@@ -47,7 +65,7 @@ def consume_security_alert_outbox(connection: Any, *, maximum_events: int = 25) 
                     (event["id"],),
                 )
                 payload = _payload(event["payload_snapshot"])
-                upsert_system_alert(
+                project_alert(
                     cursor,
                     alert_code=str(event["alert_code"]),
                     source_domain="ACCESS_CONTROL",

@@ -102,10 +102,14 @@ def test_account_center_security_transitions_are_atomic_and_root_is_protected(mo
         child_username, "Child-password-123", source_identifier="disabled-account-e2e"
     ) is None
     from subsystems.access.security_alert_outbox import consume_security_alert_outbox
+    from subsystems.anomalies.system_alert_projection import upsert_system_alert
 
     projection_connection = _connection()
     try:
-        projection = consume_security_alert_outbox(projection_connection)
+        projection = consume_security_alert_outbox(
+            projection_connection,
+            project_alert=upsert_system_alert,
+        )
     finally:
         projection_connection.close()
     assert projection.delivered_count >= 3

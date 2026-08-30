@@ -12,16 +12,14 @@ import pytest
 from subsystems.access import security_alert_outbox
 
 
-def test_completed_intent_is_projected_once_and_marked_completed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_completed_intent_is_projected_once_and_marked_completed() -> None:
     connection = _Connection([_event(9), None])
     projected: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        security_alert_outbox,
-        "upsert_system_alert",
-        lambda _cursor, **values: projected.append(values),
-    )
 
-    result = security_alert_outbox.consume_security_alert_outbox(connection)
+    result = security_alert_outbox.consume_security_alert_outbox(
+        connection,
+        project_alert=lambda _cursor, **values: projected.append(values),
+    )
 
     assert result.delivered_count == 1
     assert result.failed_count == 0
@@ -37,15 +35,16 @@ def test_completed_intent_is_projected_once_and_marked_completed(monkeypatch: py
     assert connection.rollbacks == 1  # The final empty queue check has no state to commit.
 
 
-def test_projection_failure_requeues_the_same_intent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_projection_failure_requeues_the_same_intent() -> None:
     connection = _Connection([_event(10)])
-    monkeypatch.setattr(
-        security_alert_outbox,
-        "upsert_system_alert",
-        lambda _cursor, **_values: (_ for _ in ()).throw(RuntimeError("projection down")),
-    )
 
-    result = security_alert_outbox.consume_security_alert_outbox(connection, maximum_events=1)
+    result = security_alert_outbox.consume_security_alert_outbox(
+        connection,
+        project_alert=lambda _cursor, **_values: (_ for _ in ()).throw(
+            RuntimeError("projection down")
+        ),
+        maximum_events=1,
+    )
 
     assert result.delivered_count == 0
     assert result.failed_count == 1
@@ -56,7 +55,11 @@ def test_projection_failure_requeues_the_same_intent(monkeypatch: pytest.MonkeyP
 
 def test_negative_maximum_events_is_rejected() -> None:
     with pytest.raises(ValueError, match="maximum_events_must_not_be_negative"):
-        security_alert_outbox.consume_security_alert_outbox(_Connection([]), maximum_events=-1)
+        security_alert_outbox.consume_security_alert_outbox(
+            _Connection([]),
+            project_alert=lambda _cursor, **_values: None,
+            maximum_events=-1,
+        )
 
 
 def _event(identifier: int) -> dict[str, object]:

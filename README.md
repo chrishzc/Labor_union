@@ -4,29 +4,29 @@
 銀行流水匯入與政府補助的地端行政系統。管理端是 React；正式業務操作透過 FastAPI、
 application workflow 與 MySQL 完成。
 
-目前 `main` 上的架構重整仍是尚待全域 gate 收斂的 working candidate；不得把它解讀為已完成
-遺留退役或已獲 deployment／cutover 授權。
+目前 `main` 的 Task 97 repository-local architecture已完成；這只代表repository內owner／SSOT／UoW、
+source、inventory、tests、build／lint與static schema／migration契約收斂，不代表已完成production deployment、
+DB engine acceptance、external caller/provider驗收、entry switch、cutover或rollback。
 系統以 `Global → Domain → Subsystem → Module` 分層，
 並以明確的根事實、typed command、Preview／Apply、outer Unit of Work、receipt 與 outbox
 維持可重播、可稽核的業務操作。版本與驗收狀態以 Git、release manifest 及架構文件內的
 evidence 為準；不要以本 README 的文字代替實際驗收。
 
-> **Current governance checkpoint（2026-08-30）**：Task 97 fresh discovery 的 entry queue 為
-> 683 entries，其中 519 `active`、75 `operator_only`、56 `retired_410`、33 `review_required`，
-> generic placeholder 已為 0。逐列 Task 97 disposition 為 519 `active_canonical`、75
-> `operator_only_guarded`、56 `retired_410`、31 `blocked_external_evidence`、2
-> `rewrite_to_canonical`；33 張 terminal receipt 的結果仍是 `blocked`，不是完成。下方 2026-08-10
+> **Current governance checkpoint（2026-08-30）**：Task 97 entry queue為683 entries，其中
+> 488 `active`、75 `operator_only`、87 `retired_410`、33 `review_required`，generic placeholder為0。
+> 逐列disposition為488 `active_canonical`、75 `operator_only_guarded`、87 `retired_410`、31
+> `blocked_external_evidence`、2 `rewrite_to_canonical`；後兩類維持safe blocked disposition並列為
+> deferred external evidence，不再阻止repository-local closeout。下方2026-08-10
 > 的 348／0 數字是該次 release candidate 的歷史 snapshot，不代表 current repository 已通過 Task 97。
-> Current writer inventory為1370 identities：1124 `retain_canonical`、234 `retain_restricted`、12
-> `migrate_then_remove`、0 `needs_decision`；12個exit仍是未完成的exact remediation，不是通過。
+> Current writer inventory為1320 identities：1085 `retain_canonical`、235 `retain_restricted`、0
+> `migrate_then_remove`、0 `needs_decision`。
 > Repository commit evidence為322／322 legitimate Application-owned outer UoW；route direct DB call與
 > Domain／Subsystem forbidden outward import均為0。
-> Production-script inventory為86 entries；classification為37 keep／2 rewrite／6 delete／38 test-only／3
-> caller-blocked，當中15個exact gate仍為`BLOCKED`。
-> Current conclusion 為 `ARCHITECTURE_COMPLIANCE_NOT_CONFIRMED`，詳見
-> [任務 97 最新執行與全域驗收 checkpoint](document/架構重整/02_決策與退役執行記錄/97_架構一致性修復與全域驗收計畫.md#1327-2026-08-30-beclass-rebuild-executable與anomaly-reclassification-retirement-successor)。
-> 2026-08-29 最新人工優先序：其他任務與本機當前 Task 97 發生重疊衝突時，
-> 以 Task 97 優先並停止重疊 lane。
+> Production-script inventory為86 entries；classification為38 keep／1 rewrite／6 delete／38 test-only／3
+> caller-blocked；14個exact gate仍為DB／production／external deferred acceptance，沒有被提升為PASS。
+> Current conclusion為`TASK97_REPOSITORY_LOCAL_COMPLETE`；同時保留
+> `PRODUCTION_ACCEPTANCE_NOT_RUN`與`DB_ENGINE_ACCEPTANCE_NOT_RUN`。詳見
+> [97B repository-local successor](document/架構重整/02_決策與退役執行記錄/97B_Task97_current_head_stabilization_amendment.md#10-repository-local-terminal-closeout)。
 
 ## 2026-08-10 歷史 Release Candidate 摘要
 

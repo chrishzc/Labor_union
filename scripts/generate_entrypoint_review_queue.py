@@ -77,7 +77,63 @@ SOURCE_RETIRED_HTTP_ENTRIES = {
     "api:POST /api/v1/orders/{case_no}/matching-plans/{plan_id}/availability-locks/{lock_id}/release": "waiting-deposit-lock release Preview/Apply",
     "api:POST /api/v1/line/staff-self-service/service-day-logs": "api:POST /api/v1/line/staff-self-service/service-day-logs/preview and /apply",
     "api:POST /api/v1/orders/{case_no}/send-resume": "Matching Plan resumes endpoint",
+    "api:GET /api/v1/orders": "api:GET /api/v1/orders/summaries",
+    "api:GET /api/v1/orders/{case_no}/historical-baseline-projector": "api:GET /api/v1/orders/{case_no}/historical-operational-baseline",
+    "api:GET /api/v1/staff": "api:GET /api/v1/staff/summaries",
+    "api:PATCH /api/v1/admin/data-browser/{table}/{row_id_str}": "Owning Domain typed Preview/Apply command",
+    "api:PATCH /api/v1/customer-service/tickets/{ticket_id}": "api:POST /api/v1/customer-service/tickets/{ticket_id}/update/preview and /apply",
+    "api:POST /api/config/line-menus/{menu_id}/publish": "api:POST /api/v1/line/rich-menus/{menu_id}/publish-preview and /publish",
+    "api:POST /api/v1/assignment-schedules/{assignment_id}/generate": "Assignment Plan Query/Preview/Apply",
+    "api:POST /api/v1/assignment-schedules/{assignment_id}/rest-dates/leave-resolution/apply": "api:POST /api/v1/orders/{case_no}/leave-substitution/preview and /apply",
+    "api:POST /api/v1/assignment-schedules/{assignment_id}/rest-dates/leave-resolution/batch-apply": "api:POST /api/v1/orders/{case_no}/leave-substitution/preview and /apply",
+    "api:POST /api/v1/assignment-schedules/{assignment_id}/rest-dates/leave-resolution/batch-preview": "api:POST /api/v1/orders/{case_no}/leave-substitution/preview and /apply",
+    "api:POST /api/v1/assignment-schedules/{assignment_id}/rest-dates/leave-resolution/preview": "api:POST /api/v1/orders/{case_no}/leave-substitution/preview and /apply",
+    "api:POST /api/v1/client-payments/due-dates/backfill": "Client Finance typed Query/Preview/Apply",
+    "api:POST /api/v1/client-payments/transaction": "Client Finance typed Query/Preview/Apply",
+    "api:POST /api/v1/customer-service/tickets/{ticket_id}/reply": "api:POST /api/v1/customer-service/tickets/{ticket_id}/reply/preview and /apply",
+    "api:POST /api/v1/line/identity/reviews/{request_id}/{decision}": "api:POST /api/v1/line/identity/reviews/{request_id}/{decision}/preview and /apply",
+    "api:POST /api/v1/line/mobile-admin/customer-service/tickets/{ticket_id}/reply": "api:POST /api/v1/line/mobile-admin/customer-service/tickets/{ticket_id}/reply/preview and /apply",
+    "api:POST /api/v1/line/mobile-admin/identity-reviews/{request_id}/decision": "api:POST /api/v1/line/mobile-admin/identity-reviews/{request_id}/decision/preview and /apply",
+    "api:POST /api/v1/matches/{match_id}/send-resume": "Matching Plan communication endpoints",
+    "api:POST /api/v1/orders/{case_no}/assign-staff": "Assignment Plan Query/Preview/Apply",
+    "api:POST /api/v1/schedule/save": "Assignment Plan or Leave/Substitution Preview/Apply",
+    "api:POST /api/v1/staff-payments/transaction": "Staff Payables typed Query/Preview/Apply",
+    "api:PUT /api/line/users/{user_id}/role/{role}": "api:POST /api/v1/line/identity",
+    "api:PUT /api/v1/assignment-schedules/{assignment_id}/days/{work_date}": "Assignment Plan Query/Preview/Apply",
+    "api:PUT /api/v1/assignment-schedules/{assignment_id}/rest-dates": "api:POST /api/v1/orders/{case_no}/leave-substitution/preview and /apply",
+    "api:PUT /api/v1/matches/{match_id}/reply": "Matching Plan communication endpoints",
+    "api:PUT /api/v1/orders/{case_no}/status": "Orders typed lifecycle Preview/Apply commands",
 }
+SOURCE_REPOSITORY_LOCAL_TYPED_410_ENTRIES = frozenset(
+    {
+        "api:GET /api/v1/orders",
+        "api:GET /api/v1/orders/{case_no}/historical-baseline-projector",
+        "api:GET /api/v1/staff",
+        "api:PATCH /api/v1/admin/data-browser/{table}/{row_id_str}",
+        "api:PATCH /api/v1/customer-service/tickets/{ticket_id}",
+        "api:POST /api/config/line-menus/{menu_id}/publish",
+        "api:POST /api/v1/assignment-schedules/{assignment_id}/generate",
+        "api:POST /api/v1/assignment-schedules/{assignment_id}/rest-dates/leave-resolution/apply",
+        "api:POST /api/v1/assignment-schedules/{assignment_id}/rest-dates/leave-resolution/batch-apply",
+        "api:POST /api/v1/assignment-schedules/{assignment_id}/rest-dates/leave-resolution/batch-preview",
+        "api:POST /api/v1/assignment-schedules/{assignment_id}/rest-dates/leave-resolution/preview",
+        "api:POST /api/v1/client-payments/due-dates/backfill",
+        "api:POST /api/v1/client-payments/transaction",
+        "api:POST /api/v1/customer-service/tickets/{ticket_id}/reply",
+        "api:POST /api/v1/line/identity/reviews/{request_id}/{decision}",
+        "api:POST /api/v1/line/mobile-admin/customer-service/tickets/{ticket_id}/reply",
+        "api:POST /api/v1/line/mobile-admin/identity-reviews/{request_id}/decision",
+        "api:POST /api/v1/matches/{match_id}/send-resume",
+        "api:POST /api/v1/orders/{case_no}/assign-staff",
+        "api:POST /api/v1/schedule/save",
+        "api:POST /api/v1/staff-payments/transaction",
+        "api:PUT /api/line/users/{user_id}/role/{role}",
+        "api:PUT /api/v1/assignment-schedules/{assignment_id}/days/{work_date}",
+        "api:PUT /api/v1/assignment-schedules/{assignment_id}/rest-dates",
+        "api:PUT /api/v1/matches/{match_id}/reply",
+        "api:PUT /api/v1/orders/{case_no}/status",
+    }
+)
 SOURCE_MEDIA_RETIRED_HTTP_ENTRIES = frozenset(
     {
         "api:GET /api/v1/storage/files",
@@ -436,7 +492,10 @@ def _apply_source_retirement(entry: dict[str, object]) -> dict[str, object]:
             ),
             "terminal_receipt": f"entrypoint-review-v1:{identity}:rewrite_to_canonical",
         }
-    if identity in SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES:
+    if (
+        identity in SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES
+        and identity not in SOURCE_RETIRED_HTTP_ENTRIES
+    ):
         source_path = str(entry["source_path"])
         governance = REVIEW_REQUIRED_PATH_GOVERNANCE.get(source_path)
         evidence = LOCAL_CANONICAL_EVIDENCE_BY_SOURCE.get(source_path)

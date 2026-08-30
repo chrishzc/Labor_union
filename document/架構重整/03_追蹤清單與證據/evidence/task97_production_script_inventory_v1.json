@@ -6,7 +6,7 @@
   "authority": "D97-PRODUCTION-SCRIPT-GOVERNANCE; Global migration spec section 9",
   "source": {
     "entrypoint_queue": "document/架構重整/03_追蹤清單與證據/evidence/entrypoint_review_queue_v1.jsonl",
-    "entrypoint_queue_sha256": "9a73e3554d12b233299ba053aaff519e0125ea94efd94fb9d612943d62340783",
+    "entrypoint_queue_sha256": "a0dd2872e839e40d89383ee12a8c4e9be3707812df04125a7a3c0addb82d8645",
     "cli_count": 86,
     "queue_cli_count": 86,
     "discovery": "AST __main__ registration over current scripts/**/*.py; queue is caller-evidence input and is regenerated independently."
@@ -29,8 +29,8 @@
     "classification_counts": {
       "blocked-caller-evidence": 3,
       "delete-executable": 6,
-      "keep-operator-only": 37,
-      "rewrite-to-canonical-runner": 2,
+      "keep-operator-only": 38,
+      "rewrite-to-canonical-runner": 1,
       "test-only": 38
     },
     "queue_status_counts": {
@@ -38,8 +38,12 @@
       "operator_only": 75,
       "review_required": 7
     },
-    "overall_status": "blocked",
-    "blocker": "Production-capable mutation/import entries remain fail-closed until every applicable guard is evidenced; caller-evidence blockers remain local to their exact entries."
+    "repo_local_blocker_count": 0,
+    "deferred_gate_count": 14,
+    "overall_status": "TASK97_REPOSITORY_LOCAL_COMPLETE",
+    "deferred_gate_note": "Production-capable mutation/import entries remain fail-closed until every applicable guard is evidenced; caller-evidence blockers remain local to their exact future acceptance task.",
+    "production_acceptance": "NOT_RUN",
+    "db_engine_acceptance": "NOT_RUN"
   },
   "entries": [
     {
@@ -389,7 +393,6 @@
       },
       "classification": "blocked-caller-evidence",
       "guard_gap": [
-        "none_required",
         "caller_evidence_and_terminal_disposition"
       ],
       "replacement": "none evidenced; obtain exact caller/owner evidence before choosing canonical replacement or retirement",
@@ -451,7 +454,6 @@
       },
       "classification": "blocked-caller-evidence",
       "guard_gap": [
-        "none_required",
         "caller_evidence_and_terminal_disposition"
       ],
       "replacement": "none evidenced; obtain exact caller/owner evidence before choosing canonical replacement or retirement",
@@ -622,8 +624,8 @@
         "operator": "authorized local evidence operator; caller not evidenced",
         "observed": {
           "dry_run": false,
-          "explicit_db": false,
-          "host_check": false,
+          "explicit_db": true,
+          "host_check": true,
           "schema_fingerprint": true,
           "prior_dry_run_receipt": false,
           "backup_receipt": false,
@@ -636,8 +638,6 @@
       },
       "classification": "blocked-caller-evidence",
       "guard_gap": [
-        "explicit_target_database",
-        "configured_connected_host_match",
         "caller_evidence_and_terminal_disposition"
       ],
       "replacement": "none evidenced; obtain exact caller/owner evidence before choosing canonical replacement or retirement",
@@ -865,8 +865,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "1fdfae93ddfd0d15cce1b1d27e1b5ba1afce4c83b31ba509fbee6ba1b187f834",
-        "line_count": 891,
+        "source_sha256": "47f1004fe7d52a128139040d630e4f4d5ae7261948b5d947df9a9378e9f13e99",
+        "line_count": 950,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",
@@ -1182,8 +1182,8 @@
         "identity": "PROV-20260829-task97-production-script-scripts-generate_task97_entry_governance-py"
       },
       "evidence": {
-        "source_sha256": "87179a2de548fce8abd3348754de040735bb94fa141cc9e7b47d92e7963fe2fc",
-        "line_count": 142,
+        "source_sha256": "659bce224b84c88a30abe3a7c454d36a3c57af4d103cf32c9d7aef56d52d6eed",
+        "line_count": 149,
         "queue_status": "operator_only",
         "owner": "Architecture Governance",
         "scenario": "Regenerate the tracked Task 97 entry-governance evidence from the reviewed queue.",
@@ -1243,8 +1243,8 @@
         "identity": "PROV-20260829-task97-production-script-scripts-generate_task97_production_script_inventory-py"
       },
       "evidence": {
-        "source_sha256": "ba1de6b22607846460992b0fa32d7d794755b3e9baee4788d9fb470099b8a27c",
-        "line_count": 801,
+        "source_sha256": "d1ff70210a89bbe98c1fcab75a761557de4f9dceeeb45882d1a4548f3d61b990",
+        "line_count": 865,
         "queue_status": "operator_only",
         "owner": "Architecture Governance",
         "scenario": "Regenerate the tracked Task 97 production-script inventory from current executable sources.",
@@ -1835,54 +1835,33 @@
           "production_authority": false
         }
       },
-      "classification": "rewrite-to-canonical-runner",
+      "classification": "keep-operator-only",
       "guard_gap": [
-        "dry_run_default",
-        "explicit_target_database",
-        "configured_connected_host_match",
-        "schema_fingerprint_or_plan_drift",
-        "prior_dry_run_receipt",
-        "destructive_backup_receipt",
-        "explicit_apply_and_exact_confirmation",
-        "post_apply_verify",
-        "terminal_receipt",
-        "production_authority_credential_gate"
+        "none_required"
       ],
-      "replacement": "supported runtime supervisor or owner-bound application command",
+      "replacement": "library-only schema assembly helpers; executable main fails closed and disposable bootstrap/reset callers import the helpers directly",
       "gate": {
-        "status": "BLOCKED",
-        "reason": "static guard coverage does not grant production authority; an exact apply, verify, and terminal receipt remain required"
+        "status": "PASS",
+        "reason": "capability requires no destructive DB backup/apply guards"
       },
       "test": {
-        "status": "not_run",
-        "focused": "tests/test_task97_production_script_governance.py",
-        "oracle": "record remains classified as declared and source digest/path remain exact"
+        "status": "passed",
+        "focused": "tests/test_task97_production_script_governance.py; tests/test_task97_operator_script_guards.py",
+        "oracle": "the executable returns a stable blocked result without opening a database; importable helpers remain caller-owned"
       },
-      "oracle": "fail closed unless all required operator guards and caller evidence are present",
+      "oracle": "old runbooks cannot execute schema writes through scripts.init_db; current callers only import the bounded helper functions",
       "receipt": {
-        "status": "not_run",
-        "identity": "PROV-20260829-task97-production-script-scripts-init-db-py"
+        "status": "passed",
+        "identity": "PROV-20260830-task97-init-db-fail-closed-library-shim"
       },
       "capabilities": {
-        "kind": "production-mutation",
-        "database": "write",
-        "production_mutation": true,
+        "kind": "library-only-shim",
+        "database": "none",
+        "production_mutation": false,
         "data_import": false,
         "process_launch": false
       },
-      "required_guards": [
-        "dry_run_default",
-        "explicit_target_database",
-        "configured_connected_host_match",
-        "schema_fingerprint_or_plan_drift",
-        "prior_dry_run_receipt",
-        "destructive_backup_receipt",
-        "explicit_apply_and_exact_confirmation",
-        "post_apply_verify",
-        "resume_replay",
-        "terminal_receipt",
-        "production_authority_credential_gate"
-      ]
+      "required_guards": []
     },
     {
       "exact_id": "cli:scripts/launcher_preflight.py",
@@ -2104,7 +2083,6 @@
       },
       "classification": "delete-executable",
       "guard_gap": [
-        "none_required",
         "caller_evidence_and_terminal_disposition"
       ],
       "replacement": "none evidenced; governed preserve-data release chain only after release and caller evidence, otherwise delete executable after retirement gate",
@@ -2425,7 +2403,7 @@
         "canonical_runner_absorption_not_complete",
         "immutable-retirement-receipt"
       ],
-      "replacement": "scripts/migrate_preserved_database_additive_schema.py::run_candidate_post_schema (canonical subprocess composition; child CLI retained until runner absorbs it)",
+      "replacement": "scripts/migrate_preserved_database_additive_schema.py::run_candidate_post_schema (canonical in-process library composition; child executable remains source-locked until its release retirement gate)",
       "gate": {
         "status": "BLOCKED",
         "reason": "static guard coverage does not grant production authority; an exact apply, verify, and terminal receipt remain required"
@@ -2975,7 +2953,7 @@
         ]
       },
       "evidence": {
-        "source_sha256": "81ec3f77dba201e4b01af489015cc4f0c90064e016b5b764305740601e45817c",
+        "source_sha256": "70b62d426b4afc3b1988bde42a004ca02cb03f937bc7818200b82a00b848ba42",
         "line_count": 1233,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
@@ -3648,7 +3626,6 @@
       },
       "classification": "test-only",
       "guard_gap": [
-        "none_required",
         "caller_evidence_and_terminal_disposition"
       ],
       "replacement": "none evidenced; obtain exact caller/owner evidence before choosing canonical replacement or retirement",
@@ -3710,7 +3687,6 @@
       },
       "classification": "test-only",
       "guard_gap": [
-        "none_required",
         "caller_evidence_and_terminal_disposition"
       ],
       "replacement": "none evidenced; obtain exact caller/owner evidence before choosing canonical replacement or retirement",
@@ -3772,7 +3748,6 @@
       },
       "classification": "test-only",
       "guard_gap": [
-        "none_required",
         "caller_evidence_and_terminal_disposition"
       ],
       "replacement": "none evidenced; obtain exact caller/owner evidence before choosing canonical replacement or retirement",

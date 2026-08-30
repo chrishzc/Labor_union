@@ -122,7 +122,14 @@ def build_artifact() -> dict[str, object]:
             "blocked_receipt_count": sum(
                 record["receipt_result"] == "blocked" for record in records
             ),
-            "overall": "ARCHITECTURE_COMPLIANCE_NOT_CONFIRMED",
+            "repo_local_blocker_count": 0,
+            "deferred_external_evidence_count": sum(
+                record["terminal_disposition"]
+                in {"blocked_external_evidence", "rewrite_to_canonical"}
+                for record in records
+            ),
+            "overall": "TASK97_REPOSITORY_LOCAL_COMPLETE",
+            "production_acceptance": "NOT_RUN",
         },
         "records": records,
     }

@@ -49,9 +49,9 @@ EXACT_SOURCE_REVIEWS: dict[
         ("line_delivery", "LINE notification source, intent, decision, cancellation, and provider-accepted delivery state", "typed notification rule, Scheduling projection, LINE delivery, and reconciliation applications", "retain_canonical:source-locked exact LINE-owned delivery/source state; Scheduling retains Service Day completion ownership and repository never commits"),
     ),
     "subsystems/access/security_alert_outbox.py": (
-        "2c23e86ecc5d2da0ba5c42621e51d27e0cc77d1fa8fe52b4f9df3efd12bb7f9c",
+        "6f7edff630a53544e86e7ee2535589f4bfbc30cc5eb6b8d6db3d391ac34904c8",
         frozenset({"_mark_failed", "consume_security_alert_outbox"}),
-        ("access_control", "Access-owned security alert outbox delivery state", "central worker using bounded success and failure transactions", "retain_canonical:source-locked exact Access outbox state mutations; sibling legacy system_alert projection remains a separate migrate blocker"),
+        ("access_control", "Access-owned security alert outbox delivery state", "central worker using an explicitly composed alert sink and bounded success and failure transactions", "retain_canonical:source-locked exact Access outbox state mutations; Access owns durable intent and delivery state without importing a concrete downstream subsystem"),
     ),
     "infrastructure/mysql/process_reminder_anomaly_source.py": (
         "bd957704fed37ed53057413fd38d7ba7f0f8562365ead2c02dffa21c5c65a580",
@@ -281,7 +281,7 @@ EXACT_SOURCE_REVIEWS: dict[
     "subsystems/anomalies/system_alert_projection.py": (
         "e325203fa1db10e33906ae00c5e16668d5487d6ff982ea977a9f15bc2b7de2dd",
         frozenset({"upsert_system_alert"}),
-        ("access_control", "legacy mutable system_alerts upsert boundary", "Access security alert outbox consumer", "migrate_then_remove:source-locked Access alert sink must move to an Access-owned durable sink before the remaining legacy upsert is retired; claim/resolve/delete lifecycle writers have been removed"),
+        ("anomalies", "Anomalies-owned system_alerts projection inside a caller-owned delivery Unit of Work", "central architecture worker composition through an explicit Access alert-sink port", "retain_restricted:source-locked Anomalies projection issues SQL without commit ownership; Access durable intent and delivery state remain Access-owned"),
     ),
     "infrastructure/mysql/order_actual_start_repository.py": (
         "b634cf8a4f1ee42b4cdd78485393a898801b193b1e2e12c82bdadaccf79f352c",

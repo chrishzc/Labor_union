@@ -5,8 +5,8 @@ in-progress Work Package。completed／superseded 文件確認無 current consum
 由 Git 歷史保存，不得繼續出現在日常 active 表。
 
 正式業務語意以 `../01_規格基線/` 為準；Task 96 未完成業務工作仍只看
-[`96_Current_剩餘代辦任務總表.md`](96_Current_剩餘代辦任務總表.md)，但 2026-08-29 使用者已暫停其執行，
-目前先由 Task 97 建立更準確的架構治理基線。舊 session、舊 gap register、
+[`96_Current_剩餘代辦任務總表.md`](96_Current_剩餘代辦任務總表.md)。2026-08-30 Task 97 已完成
+repository-local architecture closeout；Task 96 仍維持暫停並等待使用者另行恢復。舊 session、舊 gap register、
 已封存 Work Package 與 archive evidence 不得重新建立待辦或完成 gate。
 
 依 [Agent 任務分級與交付規範](../00_Agent任務分級與交付規範.md)，本目錄不是每個 implementation
@@ -17,8 +17,7 @@ package；T3 才要求 current spec＋package。相同 owner／scenario／scope 
 
 | 文件 | 類型 | 狀態 | 正確用途／下一個 gate |
 |---|---|---|---|
-| [96 Current 剩餘代辦任務總表](96_Current_剩餘代辦任務總表.md) | gap-register | `blocked`（user-priority） | 未完成業務工作與既有 evidence 保留；Task 97 terminal completion 或使用者另行調整優先序後才恢復施工。 |
-| [任務 97：架構一致性修復與全域驗收計畫](97_架構一致性修復與全域驗收計畫.md)（[97A post-prep baseline](97A_Task97_前置處理後基線修訂.md)；[97B current-head stabilization](97B_Task97_current_head_stabilization_amendment.md)；[hash-bound receipt](../03_追蹤清單與證據/evidence/task97_current_head_stabilization_receipt_75827fb.md)） | work-package | `in-progress / STABILIZATION_CONFIRMED` | `main@75827fb` 的 build、governance、cross-domain、12-owner、current artifacts、local Python／React gates已通過；DB engine仍為 `BLOCKED_ENGINE_EVIDENCE`。只可恢復 97B 第 6 節既有 finishing lanes，不得新增 architecture scope或外推為 WP8 terminal acceptance。 |
+| [96 Current 剩餘代辦任務總表](96_Current_剩餘代辦任務總表.md) | gap-register | `blocked / awaiting-user-resume` | Task 97 repository-local prerequisite已完成；未完成業務工作與既有evidence保留，但不因Task 97 closeout自動恢復施工。 |
 | [全異常人工 remediation 收斂缺口](PROV-20260826-all-anomaly-manual-remediation-spec-gap.md) | spec-gap | `in-progress` | 96 新增 P0；先收斂每個 anomaly code 的 owner action／completion predicate，再分 owner package 實作。 |
 | [歷史訂單 review 人工更正工作包](PROV-20260826-historical-order-review-remediation-work-package.md) | work-package | `in-progress` | 96 P0 的第一個 owner slice；尚缺 enabled persisted-human Browser 與 developer acceptance。 |
 | [歷史案件作業基準與狀態感知異常規格](PROV-20260827-historical-order-operational-baseline-spec.md) | spec | `approved`／`SPEC_READY` | Historical-only baseline、無額外違約金、Orders／Finance 分離、服務中代班不要求新契約／簽回或客戶變更簽署（optional supplement 不阻擋代班／排班 lineage／薪資），以及 Client Finance cancellation `direction` 與 action mapping 均已裁決；剩餘為實作／runtime 驗收，不是 authority blocker。 |
@@ -36,6 +35,19 @@ package；T3 才要求 current spec＋package。相同 owner／scenario／scope 
 | [React Phase 6C per-entry readiness gap](PROV-20260817-react-admin-phase6c-per-entry-retirement-readiness-gap.md) | gap-package | `blocked` | 未達逐入口 replacement／regression gate，不得啟動 retirement。 |
 | [Warning Transition Streamlit bridge](PROV-20260822-react-admin-phase3d-warning-transition-streamlit-compatibility-bridge-work-package.md) | work-package | `proposed` | 非目前優先；須另行核准 exact scope 才可施工。 |
 | [Access Control production cutover／external alert](Access_Control_Production_Cutover_and_External_Security_Alert_Work_Package.md) | work-package | `proposed` | production target、external sink、operator 與 rollback scope 未指定；維持 deferred。 |
+
+## Task 97 repository-local closeout
+
+[任務97架構一致性計畫](97_架構一致性修復與全域驗收計畫.md)及
+[97B current successor](97B_Task97_current_head_stabilization_amendment.md)已依2026-08-30人工Authority完成
+repository-local closeout；aggregate evidence由
+[repository-local closeout receipt](../03_追蹤清單與證據/evidence/task97_repository_local_closeout_receipt_a48caa8.md)
+保存。Current terminal result為`TASK97_REPOSITORY_LOCAL_COMPLETE`。
+
+`PRODUCTION_ACCEPTANCE_NOT_RUN`及`DB_ENGINE_ACCEPTANCE_NOT_RUN`不是Task 97 local blocker，也不代表已通過。
+Access T3／external provider／deployment／cutover仍由上列proposed Access Work Package或未來獨立production task
+承接；真MySQL fresh／preserve驗證由未來獨立DB acceptance task承接。External caller未知的public entry維持
+typed 410或`blocked_external_evidence`，不得physical delete。
 
 ## 2026-08-25 歷史 closeout
 

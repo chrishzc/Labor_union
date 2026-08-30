@@ -1,20 +1,26 @@
 ---
 doc_type: work-package-amendment
-declared_status: active
+declared_status: completed
 date: 2026-08-30
 task_id: 97
 amends: 97_架構一致性修復與全域驗收計畫.md
 supersedes_current_checkpoint: 13.27
 owner: architecture-governance / domain-owners / integration-writer
 stabilization_status: completed
-current_receipt: ../03_追蹤清單與證據/evidence/task97_current_head_stabilization_receipt_75827fb.md
+repository_local_status: completed
+production_acceptance: not_run
+db_engine_acceptance: not_run
+current_receipt: ../03_追蹤清單與證據/evidence/task97_repository_local_closeout_receipt_a48caa8.md
 ---
 
 # Task 97 current-head stabilization amendment
 
 ## 1. 修訂目的與效力
 
-本檔是 Task 97 在 `main` 已接收大型 WIP checkpoint 後的 current execution successor。它不刪除 `97_架構一致性修復與全域驗收計畫.md` 的 13.13～13.27 歷史紀錄，也不變更七項正式裁決、WP0～WP8、owner／SSOT／UoW 原則、DB／runtime／deployment authority 或 terminal acceptance。
+本檔是 Task 97 在 `main` 已接收大型 WIP checkpoint 後的 current execution successor。它不刪除
+`97_架構一致性修復與全域驗收計畫.md` 的13.13～13.27歷史紀錄，也不變更七項正式裁決、
+owner／SSOT／UoW原則或DB／runtime／deployment authority。2026-08-30最新人工Authority另將Task 97
+terminal acceptance改為repository-local architecture completion；其效力與結果記於第10節。
 
 本檔只修正三件已發生的 current-state drift：
 
@@ -88,7 +94,8 @@ GitHub Actions run #238 是 stabilization 啟動時的 historical failure eviden
 - fatal Flake8 `E9,F63,F7,F82`、Agent governance、build、cross-domain workflow boundaries 與 12-owner canonical matrix 全部 `PASS`。
 - receipt-only commit `b65d78ec7365a62150f1e65c6c4896c04909855e` 的 GitHub Actions run [33298210829](https://github.com/chrishzc/Labor_union/actions/runs/33298210829) 亦為 `success`。
 
-因此 run #238 與 7 個 F821 不再是 current stabilization blocker；current 未完成項只由第 6 節 finishing lanes、receipt 的 remaining blockers 與 Task 97 umbrella terminal gates決定。
+因此 run #238 與 7 個 F821 不再是 current stabilization blocker；原finishing lanes已依第10節重新分類，
+只有`REPO_LOCAL_BLOCKER`可以阻止Task 97 repository-local closeout。
 
 ## 4. Historical stabilization hard stop — satisfied
 
@@ -116,7 +123,7 @@ Stabilization package 已依下列順序完成：
 
 本順序是已完成的歷史執行記錄。現在的可執行範圍只剩第 6 節既有 finishing lanes，且仍受第 4 節持續 guard 約束。
 
-## 6. Finishing lanes after stabilization
+## 6. Finishing lanes after stabilization（historical routing）
 
 只有 stabilization exit gate 全部成功後，Task 97 才恢復下列已存在 finishing work；不得新增第七類 lane：
 
@@ -129,16 +136,16 @@ Stabilization package 已依下列順序完成：
 
 已完成的 97.3 repository／route UoW、canonical test routing、Contract Signing owner model等只做 drift check；沒有 drift不得重做。
 
-## 7. Current segmented status
+## 7. Repository-local segmented status
 
 | Slice | Current status | Stabilization interpretation |
 |---|---|---|
-| `97.1` inventory／governance | `passed_with_terminal_blockers` | counts/hash 已重新綁定 validated HEAD 與 receipt；terminal blockers仍保留，不得沿用 13.27 作永久 denominator。 |
+| `97.1` inventory／governance | `repository_local_passed` | current generators、source hashes與focused validators通過；external／production deferred列仍保留。 |
 | `97.2` Clients／typed Query／UoW | `local_contract_passed` | 不重開產品設計；physical delete仍只由 external caller closure決定。 |
 | `97.3` repository／route UoW | `passed_drift_check_only` | 322／322 等數字在 current generator重跑前只作上一 checkpoint evidence；禁止重新設計。 |
-| `97.4` Media／Anomaly | `local_contract_passed_runtime_blocked` | local successor與stabilization驗證已通過；1015～1018 DB engine、runtime composition、legacy zero-reference及deployment／cutover仍未terminal。 |
-| `97.5` scripts／entry | `inventory_passed_remediation_blocked` | 只處理既有 exact gates；禁止擴張 inventory taxonomy。 |
-| `97.6` final acceptance | `stabilization_passed_terminal_acceptance_pending` | validated HEAD 的local Python／React與CI已成功；DB engine仍blocked，external／runtime／deployment／cutover與WP8 terminal acceptance仍pending，因此不是architecture final pass。 |
+| `97.4` Media／Anomaly | `repository_local_passed` | local owner／outbox／projection契約通過；DB engine、runtime、deployment與cutover分列deferred。 |
+| `97.5` scripts／entry | `repository_local_passed_with_deferred_exact_gates` | inventory與safe disposition一致；blocked exact gates只代表後續DB／production／external acceptance。 |
+| `97.6` final acceptance | `TASK97_REPOSITORY_LOCAL_COMPLETE` | local Python／React、build／lint、governance、cross-domain、owner tests與DB static contract完成；production與DB engine均未執行。 |
 
 ## 8. Verified stabilization exit result
 
@@ -162,7 +169,7 @@ stabilization_exit:
 
 完整 hash-bound 結果由 [Task 97 current-head stabilization receipt](../03_追蹤清單與證據/evidence/task97_current_head_stabilization_receipt_75827fb.md) 保存。exit 後不得再把整個 repository-wide remediation 壓成一個新的超大型 WIP commit。
 
-## 9. Current conclusion
+## 9. Stabilization conclusion（historical layer）
 
 ```text
 TASK97_STABILIZATION_CONFIRMED
@@ -170,3 +177,33 @@ ARCHITECTURE_COMPLIANCE_NOT_CONFIRMED
 ```
 
 hash-bound current result 由 [Task 97 current-head stabilization receipt](../03_追蹤清單與證據/evidence/task97_current_head_stabilization_receipt_75827fb.md) 保存。後續只可恢復第 6 節既有 finishing lanes，仍不得新增架構範圍，也不得把 stabilization success 外推成 WP8 terminal acceptance。
+
+## 10. Repository-local terminal closeout
+
+### 10.1 Gate separation
+
+| Classification | Result | Interpretation |
+|---|---|---|
+| `REPO_LOCAL_BLOCKER` | `0` | owner／SSOT／UoW、dependency、source、inventory、static contract、tests、build／lint與tracked documents均已收斂。 |
+| `DEFERRED_DB_ACCEPTANCE` | `NOT_RUN / BLOCKED_ENGINE_EVIDENCE` | 缺合法disposable MySQL；沒有連接`union_db`或production。 |
+| `DEFERRED_PRODUCTION_ACCEPTANCE` | `NOT_RUN` | Access T3、deployment、runtime、entry switch、cutover、smoke及rollback交由未來獨立任務。 |
+| `DEFERRED_EXTERNAL_EVIDENCE` | `NOT_RUN` | unknown caller、provider、operator及external zero-reference證據維持safe blocked disposition。 |
+
+### 10.2 Current repository-local evidence
+
+- Access security-alert outbox只依賴caller-composed typed sink；durable intent／delivery state由Access擁有，
+  Anomalies projection不擁有commit。
+- writer v3為1320 records：1085 retain-canonical、235 retain-restricted、0 migrate、0 needs-decision。
+- entry governance為683 records：488 active、75 operator-only、87 retired-410、33 review-required；terminal為
+  488 active-canonical、75 operator-only-guarded、87 retired-410、31 blocked-external、2 rewrite。
+- production scripts為86 records：38 keep、1 rewrite、6 delete、38 test-only、3 caller-blocked；14個exact
+  production／DB／external gates仍是blocked/deferred，沒有被誤記為pass。
+- static schema／migration、canonical owner、cross-domain、Python／React、build與lint結果由
+  [repository-local closeout receipt](../03_追蹤清單與證據/evidence/task97_repository_local_closeout_receipt_a48caa8.md)保存。
+
+```text
+TASK97_REPOSITORY_ARCHITECTURE_CONFIRMED
+TASK97_REPOSITORY_LOCAL_COMPLETE
+PRODUCTION_ACCEPTANCE_NOT_RUN
+DB_ENGINE_ACCEPTANCE_NOT_RUN
+```

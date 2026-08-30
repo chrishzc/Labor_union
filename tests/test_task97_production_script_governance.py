@@ -31,9 +31,9 @@ REQUIRED_ENTRY_FIELDS = {
     "receipt",
 }
 EXPECTED_COUNTS = {
-    "keep-operator-only": 37,
+    "keep-operator-only": 38,
     "test-only": 38,
-    "rewrite-to-canonical-runner": 2,
+    "rewrite-to-canonical-runner": 1,
     "delete-executable": 6,
     "blocked-caller-evidence": 3,
 }
@@ -84,7 +84,12 @@ def test_task97_script_inventory_is_complete_and_current() -> None:
         if entry["capabilities"]["production_mutation"] or entry["capabilities"]["data_import"]:
             assert entry["gate"]["status"] == "BLOCKED"
             assert set(entry["required_guards"]) == set(inventory["required_guard_contract"])
-        elif entry["capabilities"]["kind"] in {"launcher", "non-db-tool", "test-only"}:
+        elif entry["capabilities"]["kind"] in {
+            "launcher",
+            "library-only-shim",
+            "non-db-tool",
+            "test-only",
+        }:
             assert not {
                 "prior_dry_run_receipt",
                 "destructive_backup_receipt",
@@ -124,7 +129,11 @@ def test_task97_script_inventory_preserves_guard_contract_and_blocked_callers() 
         "caller_evidence_and_terminal_disposition" in entry["guard_gap"]
         for entry in blocked
     )
-    assert inventory["summary"]["overall_status"] == "blocked"
+    assert inventory["summary"]["repo_local_blocker_count"] == 0
+    assert inventory["summary"]["deferred_gate_count"] == 14
+    assert inventory["summary"]["overall_status"] == "TASK97_REPOSITORY_LOCAL_COMPLETE"
+    assert inventory["summary"]["production_acceptance"] == "NOT_RUN"
+    assert inventory["summary"]["db_engine_acceptance"] == "NOT_RUN"
 
 
 def test_task97_inventory_records_fail_closed_migrations_and_canonical_order_callers() -> None:
@@ -143,6 +152,19 @@ def test_task97_inventory_records_fail_closed_migrations_and_canonical_order_cal
     assert lifecycle["classification"] == "delete-executable"
     assert "immutable-retirement-receipt" in lifecycle["guard_gap"]
     assert lifecycle["gate"]["status"] == "BLOCKED"
+    assert "in-process library composition" in lifecycle["replacement"]
+
+    init_db = entries["scripts/init_db.py"]
+    assert init_db["classification"] == "keep-operator-only"
+    assert init_db["capabilities"]["kind"] == "library-only-shim"
+    assert init_db["capabilities"]["production_mutation"] is False
+    assert init_db["gate"]["status"] == "PASS"
+    assert init_db["receipt"]["status"] == "passed"
+
+    engine = entries["scripts/collect_local_additive_engine_evidence.py"]
+    assert engine["evidence"]["observed"]["explicit_db"] is True
+    assert engine["evidence"]["observed"]["host_check"] is True
+    assert engine["guard_gap"] == ["caller_evidence_and_terminal_disposition"]
 
     for path in (
         "scripts/imports/adopt_historical_orders.py",
@@ -321,7 +343,7 @@ def test_task97_guard_requirements_follow_source_capability() -> None:
         for entry in inventory["entries"]
         if entry["gate"]["status"] == "BLOCKED"
     }
-    assert len(blocked_paths) == 15
+    assert len(blocked_paths) == 14
     assert "scripts/verify_validation_schema_manifest.py" not in blocked_paths
     assert "scripts/verify_verification_receipts.py" not in blocked_paths
     assert "scripts/imports/reprocess_finance_import_batch.py" not in blocked_paths

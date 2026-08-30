@@ -72,9 +72,14 @@ def test_queue_has_no_generic_owner_placeholder() -> None:
 
 def test_task97_local_canonical_http_promotions_are_exact_identity_locked() -> None:
     entries = {entry["entry_id"]: entry for entry in _load_queue()}
+    canonical_entries = (
+        queue.SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES
+        - set(queue.SOURCE_RETIRED_HTTP_ENTRIES)
+    )
 
     assert len(queue.SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES) == 92
-    for identity in queue.SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES:
+    assert len(canonical_entries) == 91
+    for identity in canonical_entries:
         entry = entries[identity]
         assert entry["status"] == "active"
         assert entry["terminal_disposition"] == "active_canonical"
@@ -110,6 +115,18 @@ def test_task97_anomaly_dead_letter_entries_are_exact_retired_410() -> None:
         assert "durable-job" in entry["replacement_path_or_symbol"]
 
 
+def test_repository_local_typed_410_entries_are_not_marked_active() -> None:
+    entries = {entry["entry_id"]: entry for entry in queue.build_review_queue()}
+
+    assert len(queue.SOURCE_REPOSITORY_LOCAL_TYPED_410_ENTRIES) == 26
+    for identity in queue.SOURCE_REPOSITORY_LOCAL_TYPED_410_ENTRIES:
+        entry = entries[identity]
+        assert entry["status"] == "retired_410"
+        assert entry["terminal_disposition"] == "retired_410"
+        assert entry["replacement_path_or_symbol"] != identity
+        assert entry["deletion_410_gate"].startswith("blocked_external_evidence")
+
+
 def test_task97_remaining_api_blockers_are_exact_identity_locked() -> None:
     entries = _load_queue()
     review_api = {
@@ -134,8 +151,8 @@ def test_task97_remaining_api_blockers_are_exact_identity_locked() -> None:
 def test_task97_review_queue_current_terminal_counts() -> None:
     entries = _load_queue()
 
-    assert sum(entry["status"] == "active" for entry in entries) == 514
-    assert sum(entry["status"] == "retired_410" for entry in entries) == 61
+    assert sum(entry["status"] == "active" for entry in entries) == 488
+    assert sum(entry["status"] == "retired_410" for entry in entries) == 87
     assert sum(entry["status"] == "review_required" for entry in entries) == 33
     assert sum(entry["status"] == "operator_only" for entry in entries) == 75
 

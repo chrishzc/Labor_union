@@ -35,6 +35,7 @@ from subsystems.orders.client_finance_outbox_consumer import (
     consume_client_finance_orders_events,
 )
 from subsystems.access.security_alert_outbox import consume_security_alert_outbox
+from subsystems.anomalies.system_alert_projection import upsert_system_alert
 
 _POLL_INTERVAL_SECONDS = 2.0
 _SOURCE_SCAN_INTERVAL_SECONDS = 60.0
@@ -114,7 +115,10 @@ def _consume_once(source_scan_state: ArchitectureSourceScanState | None = None, 
         deposit_delivered, deposit_failed = consume_client_finance_orders_events(
             connection
         )
-        access_control = consume_security_alert_outbox(connection)
+        access_control = consume_security_alert_outbox(
+            connection,
+            project_alert=upsert_system_alert,
+        )
         source_delivered, source_failed = _consume_sources_if_due(connection, source_scan_state, runtime)
         return ArchitectureDeliveryResult(
             finance.delivered_count + beclass.delivered_count + hcm.delivered_count + hcm_resubmission_delivered + historical_order.delivered_count + historical_order_remediation.delivered_count + subsidy_advance_delivered + deposit_delivered + access_control.delivered_count + source_delivered,

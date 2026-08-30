@@ -11,6 +11,10 @@ owner: architecture-governance / product-and-domain-owners
 > 目的是讓 Task 96 後續執行建立在更準確的 entry、writer、transaction 與 typed contract 基線上。
 > 本狀態是 `blocked-by-user-priority`，不表示 Task 96 的既有需求、完成證據或剩餘工作失效；Task 97
 > terminal completion 或使用者另行調整優先序後，才恢復本表施工。
+>
+> 2026-08-30 Task 97 已依最新 Authority 完成 repository-local architecture closeout。這解除 Task 97
+> 對本表的 architecture prerequisite，但不自動啟動 Task 96，也不授權其DB、provider、deployment或
+> external effects；在使用者另行要求恢復前，本表維持 `blocked / awaiting-user-resume`。
 
 ## 1. 用途與唯一性
 

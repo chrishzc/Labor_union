@@ -4,15 +4,19 @@ owner: architecture-governance / integration-writer
 consumer: Task 97 current register / bounded finishing-lane operators
 source_of_truth: hash-bound validation evidence; not architecture Authority
 close_condition: superseded by a later exact-head stabilization receipt after material source, workflow, or artifact change
-retention: retain_current
+retention: bounded_retain
 invalidation: validated HEAD, CI workflow, canonical roots, artifact generators, or acceptance gates materially change
-replacement_or_absorption: a later hash-bound Task 97 stabilization or terminal WP8 receipt
+replacement_or_absorption: task97_repository_local_closeout_receipt_a48caa8.md
 date: 2026-08-30
 validated_branch: main
 validated_head: 75827fbcc139e87d16a3f753c4478fc9e82910f1
 ---
 
 # Task 97 current-head stabilization receipt
+
+> Historical stabilization evidence only. Task 97 current terminal result is owned by
+> `task97_repository_local_closeout_receipt_a48caa8.md`; the production and DB statements below remain
+> historical provenance and must not be reused as the current completion gate.
 
 ## 1. Bound identity and conclusion
 
