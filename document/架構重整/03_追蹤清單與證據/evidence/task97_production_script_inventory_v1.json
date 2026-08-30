@@ -6,7 +6,7 @@
   "authority": "D97-PRODUCTION-SCRIPT-GOVERNANCE; Global migration spec section 9",
   "source": {
     "entrypoint_queue": "document/架構重整/03_追蹤清單與證據/evidence/entrypoint_review_queue_v1.jsonl",
-    "entrypoint_queue_sha256": "4d0640c4b843dc52e1e41a1761911f5da2614710886267991061e52230234f64",
+    "entrypoint_queue_sha256": "9a73e3554d12b233299ba053aaff519e0125ea94efd94fb9d612943d62340783",
     "cli_count": 86,
     "queue_cli_count": 86,
     "discovery": "AST __main__ registration over current scripts/**/*.py; queue is caller-evidence input and is regenerated independently."
@@ -865,8 +865,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "4e26ac4f019b6a9c0a7683e66b32afe42c09741b9de69bd4d60e1e94a3d2d3ea",
-        "line_count": 888,
+        "source_sha256": "1fdfae93ddfd0d15cce1b1d27e1b5ba1afce4c83b31ba509fbee6ba1b187f834",
+        "line_count": 891,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",
@@ -2975,8 +2975,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "4377be8999121376e5246b161ed5ace18b9a139bd81433aa4b6b66da91f7f226",
-        "line_count": 1229,
+        "source_sha256": "81ec3f77dba201e4b01af489015cc4f0c90064e016b5b764305740601e45817c",
+        "line_count": 1233,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",
@@ -3162,7 +3162,7 @@
         ]
       },
       "evidence": {
-        "source_sha256": "12b9b2b91d6dbc0170edb46285a0f8dabcd80c30880ea9e0aaed087cd843a488",
+        "source_sha256": "dda9327cdf7de1149942123b237aabd57c7c72645536a15575b883819b3d7ee1",
         "line_count": 864,
         "queue_status": "operator_only",
         "owner": "Global operations boundary",
@@ -3626,7 +3626,7 @@
         ]
       },
       "evidence": {
-        "source_sha256": "af72be26b21af748d00b464f4e07b13dd712762050f41f40b3e3b936676c40b2",
+        "source_sha256": "9ffc408ad0b6e12ef1e2cdf9249526ab2d4ea876164333e62139dea3af8206b1",
         "line_count": 1452,
         "queue_status": "review_required",
         "owner": "Task 96 HOB Scenario Evidence",
