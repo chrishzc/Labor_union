@@ -24,30 +24,53 @@ current_receipt: ../03_追蹤清單與證據/evidence/task97_current_head_stabil
 
 若本檔與 13.13～13.27 對「current HEAD／current CI／下一個可執行動作」的描述衝突，以本檔為準；歷史數字仍只作 provenance。
 
-## 2. Current stabilization baseline
+## 2. Historical trigger and confirmed stabilization result
+
+### 2.1 Historical stabilization trigger
 
 ```yaml
-stabilization:
+stabilization_trigger:
+  historical_only: true
   baseline_branch: main
   baseline_commit: 5dfa3b9f9224c544182b5b84f9485dc4d9934968
   workflow_run: 238
   workflow_conclusion: failure
   architecture_compliance_confirmed: false
   new_architecture_work_allowed: false
+  superseded_as_current_truth_by: ../03_追蹤清單與證據/evidence/task97_current_head_stabilization_receipt_75827fb.md
 ```
 
-`main@5dfa3b9...` 相對上一個 tracked docs baseline `153d42b...` 為 1 commit ahead；該 commit 約 `+37412 / -44259`，必須視為待穩定化的整合 checkpoint，而不是可繼續無界擴張的 execution base。
+`main@5dfa3b9...` 相對上一個 tracked docs baseline `153d42b...` 為 1 commit ahead；該 commit 約 `+37412 / -44259`，當時必須視為待穩定化的整合 checkpoint，而不是可繼續無界擴張的 execution base。上述內容只保存 stabilization 的歷史觸發，不再描述 current repository 狀態。
 
-## 3. Current CI truth
+### 2.2 Confirmed stabilization result
 
-GitHub Actions run #238 的 current-head結果：
+```yaml
+stabilization_result:
+  validated_branch: main
+  validated_head: 75827fbcc139e87d16a3f753c4478fc9e82910f1
+  validated_workflow_run: 33298062001
+  validated_workflow_conclusion: success
+  receipt_commit: b65d78ec7365a62150f1e65c6c4896c04909855e
+  receipt_workflow_run: 33298210829
+  receipt_workflow_conclusion: success
+  stabilization_confirmed: true
+  architecture_compliance_confirmed: false
+```
+
+此結果由 hash-bound receipt 綁定 validated HEAD、CI workflow、canonical roots、artifact generators 與 acceptance gates。current `main` 可在 receipt-only 或 docs-only commit 後前進；除非 source、workflow、generator 或 acceptance gate 發生 material change，否則不會因此使 validated stabilization result 失效。
+
+## 3. Historical failure trigger and confirmed CI successor
+
+### 3.1 Historical failure trigger
+
+GitHub Actions run #238 是 stabilization 啟動時的 historical failure evidence：
 
 - 12-owner canonical matrix：全部成功。
 - cross-domain workflow boundaries：成功。
 - build：失敗。
 - Agent governance validator：因 build 前置 flake8 失敗而 skipped。
 
-build 目前有 7 個 `F821 undefined name` occurrences：
+該次 build 有 7 個 `F821 undefined name` occurrences：
 
 1. `infrastructure/mysql/anomaly_runtime.py` 呼叫不存在的 `project_government_subsidy_reversal_page`；current import 是 `project_government_subsidy_reversal_anomaly_page`。
 2. `scripts/run_contract_signing_normal_chain.py` 使用未定義 `build_anomaly_runtime`。
@@ -57,11 +80,19 @@ build 目前有 7 個 `F821 undefined name` occurrences：
 6. 同檔另一處使用未定義 `get_connection`。
 7. `tests/test_wp77_disposable_mysql_e2e.py` 使用未定義 `time`。
 
-在這些 current-head defects 關閉前，不得把 `97.6 local_full_suite_passed_external_gates_blocked` 解讀為 current repository已通過 local acceptance。
+上述 7 個 defects 已在 bounded stabilization package 中修正，現在只作 resolved-defect provenance；沒有 material regression evidence 時不得把它們重開為 current blocker。
 
-## 4. Stabilization hard stop
+### 3.2 Confirmed CI successor
 
-直到本節 exit gate 全部通過，Task 97 固定禁止：
+- validated HEAD `75827fbcc139e87d16a3f753c4478fc9e82910f1` 的 GitHub Actions run [33298062001](https://github.com/chrishzc/Labor_union/actions/runs/33298062001) 為 `success`。
+- fatal Flake8 `E9,F63,F7,F82`、Agent governance、build、cross-domain workflow boundaries 與 12-owner canonical matrix 全部 `PASS`。
+- receipt-only commit `b65d78ec7365a62150f1e65c6c4896c04909855e` 的 GitHub Actions run [33298210829](https://github.com/chrishzc/Labor_union/actions/runs/33298210829) 亦為 `success`。
+
+因此 run #238 與 7 個 F821 不再是 current stabilization blocker；current 未完成項只由第 6 節 finishing lanes、receipt 的 remaining blockers 與 Task 97 umbrella terminal gates決定。
+
+## 4. Historical stabilization hard stop — satisfied
+
+在 stabilization exit gate 通過前，Task 97 曾固定禁止：
 
 - 新增 `1019+` schema part、release manifest、descriptor 或 fresh assembly scope；唯一例外是 1015～1018 本身驗證失敗所證明必須修正的 defect，且不得改 published immutable artifact。
 - 新的 legacy physical deletion／retirement；只允許修復 current build／import／reference defect，以及為既有已裁決 retirement 恢復一致性所必需的最小 correction。
@@ -69,17 +100,21 @@ build 目前有 7 個 `F821 undefined name` occurrences：
 - 為了讓數字下降而重新分類 writer／entry／script，除非有 exact caller／source-lock／replacement evidence。
 - 把缺 DB credential、external evidence、runtime／deployment authority 降級成 skip、pass 或 assumed-complete。
 
-## 5. Stabilization execution order
+上述 stabilization hard stop 已由第 8 節 verified result 滿足。後續可恢復第 6 節既有 finishing lanes，但下列 guard 持續有效：不得新增未授權的 architecture／schema scope；不得只為降低數字而重分類 evidence；不得把缺 DB credential、external evidence或runtime／deployment authority推定為已通過；沒有 drift 時不得重做已完成 package；不得再產生無界大型 WIP checkpoint。
 
-只允許依下列順序工作：
+## 5. Historical stabilization execution order — completed
 
-1. 修正上述 F821 與其直接暴露的最小 import/name defect，不順手重構。
-2. 執行 strict flake8 fatal gate：`E9,F63,F7,F82`。
-3. 單獨執行 `python scripts/validate_agent_governance.py`，即使 lint gate 失敗也必須取得獨立 governance 結果；後續 workflow 應把 governance validator 拆成獨立 job或等價不被 lint skip 的 gate。
-4. 重跑 build、cross-domain boundaries、12-owner canonical matrix。
-5. current HEAD 全綠後，重新生成／驗證 entry、production-script、writer、repository-commit artifacts；只有 generator 輸出與 exact source state 一致才可更新 current counts/hash。
-6. 重新跑 local full Python／React current gates；需要 disposable MySQL 的 cases 必須保持 `BLOCKED_ENGINE_EVIDENCE`，不可假裝已執行。
-7. 建立新的 hash-bound stabilization receipt，綁定「修正後 exact HEAD + GitHub Actions successful run」。完成前不得進 finishing lanes。
+Stabilization package 已依下列順序完成：
+
+1. 修正上述 F821 與其直接暴露的最小 import/name defect，未順帶重構。
+2. strict flake8 fatal gate `E9,F63,F7,F82` 已通過。
+3. Agent governance 已作為獨立 workflow job 執行並通過，不再被 lint skip。
+4. build、cross-domain boundaries 與 12-owner canonical matrix 已在同一 validated HEAD 通過。
+5. entry、production-script、writer、repository-commit artifacts 已依 exact source state 重新生成並驗證。
+6. local non-engine Python、React tests／build／lint 已通過；disposable MySQL cases維持 `BLOCKED_ENGINE_EVIDENCE`，未偽裝成已執行。
+7. 已建立新的 hash-bound stabilization receipt，綁定修正後 exact HEAD 與 successful GitHub Actions run。
+
+本順序是已完成的歷史執行記錄。現在的可執行範圍只剩第 6 節既有 finishing lanes，且仍受第 4 節持續 guard 約束。
 
 ## 6. Finishing lanes after stabilization
 
@@ -98,19 +133,20 @@ build 目前有 7 個 `F821 undefined name` occurrences：
 
 | Slice | Current status | Stabilization interpretation |
 |---|---|---|
-| `97.1` inventory／governance | `passed_with_terminal_blockers` | counts/hash 必須在 CI 修正後重新綁 current HEAD；不得沿用 13.27 作永久 denominator。 |
+| `97.1` inventory／governance | `passed_with_terminal_blockers` | counts/hash 已重新綁定 validated HEAD 與 receipt；terminal blockers仍保留，不得沿用 13.27 作永久 denominator。 |
 | `97.2` Clients／typed Query／UoW | `local_contract_passed` | 不重開產品設計；physical delete仍只由 external caller closure決定。 |
 | `97.3` repository／route UoW | `passed_drift_check_only` | 322／322 等數字在 current generator重跑前只作上一 checkpoint evidence；禁止重新設計。 |
-| `97.4` Media／Anomaly | `stabilization_required` | local successor方向保留；禁止新 schema、新 retirement，先恢復 current CI／Authority一致性。 |
+| `97.4` Media／Anomaly | `local_contract_passed_runtime_blocked` | local successor與stabilization驗證已通過；1015～1018 DB engine、runtime composition、legacy zero-reference及deployment／cutover仍未terminal。 |
 | `97.5` scripts／entry | `inventory_passed_remediation_blocked` | 只處理既有 exact gates；禁止擴張 inventory taxonomy。 |
-| `97.6` final acceptance | `not_currently_passed` | run #238 build failure；必須以修正後 HEAD 的 successful CI + current local gates重建。 |
+| `97.6` final acceptance | `stabilization_passed_terminal_acceptance_pending` | validated HEAD 的local Python／React與CI已成功；DB engine仍blocked，external／runtime／deployment／cutover與WP8 terminal acceptance仍pending，因此不是architecture final pass。 |
 
-## 8. Exit gate
+## 8. Verified stabilization exit result
 
-只有同一 exact HEAD 同時滿足以下條件，才可結束 stabilization：
+validated HEAD `75827fbcc139e87d16a3f753c4478fc9e82910f1` 已滿足 stabilization exit gate：
 
 ```yaml
 stabilization_exit:
+  validated_head: 75827fbcc139e87d16a3f753c4478fc9e82910f1
   flake8_fatal: PASS
   agent_governance_validator: PASS
   github_build: PASS
@@ -119,11 +155,12 @@ stabilization_exit:
   current_artifact_regeneration: PASS
   local_python_non_engine: PASS
   react_current_gate: PASS
-  db_engine_missing_credentials: BLOCKED_ENGINE_EVIDENCE_or_PASS
+  db_engine_missing_credentials: BLOCKED_ENGINE_EVIDENCE
   new_schema_or_architecture_scope_added: false
+  conclusion: TASK97_STABILIZATION_CONFIRMED
 ```
 
-exit 後新增一個短 current-head receipt；不要再把整個 repository-wide remediation 壓成一個新的超大型 WIP commit。
+完整 hash-bound 結果由 [Task 97 current-head stabilization receipt](../03_追蹤清單與證據/evidence/task97_current_head_stabilization_receipt_75827fb.md) 保存。exit 後不得再把整個 repository-wide remediation 壓成一個新的超大型 WIP commit。
 
 ## 9. Current conclusion
 
