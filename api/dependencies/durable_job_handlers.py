@@ -75,13 +75,17 @@ def anomaly_recheck_handler(payload: dict[str, Any]) -> tuple[dict[str, Any], st
     work instead of manufacturing an incomplete projection.
     """
 
+    import os
+
     from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
     from infrastructure.mysql.mysql_adapter import get_connection
 
     connection = get_connection()
     try:
         try:
-            result = build_anomaly_runtime().run_current_issue_recheck(connection, payload)
+            result = build_anomaly_runtime(
+                issue_identity_secret=os.getenv("ANOMALY_ISSUE_IDENTITY_KEY_V1", "")
+            ).run_current_issue_recheck(connection, payload)
         except RuntimeError as error:
             raise RetryableDurableJobError(
                 "anomaly_recheck_runtime_unavailable",

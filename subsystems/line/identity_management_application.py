@@ -16,6 +16,7 @@ from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.identity_management_contracts import (
     LineIdentityBindingListQuery,
     LineIdentityCurrentFactQuery,
+    LineIdentityCurrentFactReadback,
     LineIdentityRevocationPreview,
     LineIdentityReplacementPreview,
     LineIdentityRevocationStatus,
@@ -45,7 +46,7 @@ class LineIdentityManagementApplication:
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.identity_management.detail(line_user_id)
 
-    def current_fact(self, line_user_id: LineUserId):
+    def current_fact(self, line_user_id: LineUserId) -> LineIdentityCurrentFactReadback:
         """Return a zero-write LINE-004 root/projection diagnosis."""
 
         query = LineIdentityCurrentFactQuery(line_user_id)

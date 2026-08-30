@@ -108,10 +108,32 @@ class MySqlAnomalyRuntime:
         detector = self._current_issue_detectors.get(
             (scope.owner_domain, scope.owner_root_type, scope.subject_type)
         )
+        owner_snapshot_reader = self._owner_snapshot_reader
+        if detector is None:
+            from infrastructure.mysql.line_identity_current_issue_adapter import (
+                MySqlLineIdentityCurrentIssueAdapter,
+            )
+            from subsystems.anomalies.line_identity_current_issue_consumer import (
+                LINE_IDENTITY_OWNER_DOMAIN,
+                LINE_IDENTITY_OWNER_ROOT_TYPE,
+                LineIdentityCurrentIssueConsumer,
+            )
+
+            if (
+                scope.owner_domain == LINE_IDENTITY_OWNER_DOMAIN
+                and scope.owner_root_type == LINE_IDENTITY_OWNER_ROOT_TYPE
+            ):
+                adapter = MySqlLineIdentityCurrentIssueAdapter(connection)
+                owner_snapshot_reader = adapter.read_owner_snapshot
+                detector = LineIdentityCurrentIssueConsumer(
+                    self.current_issue_key
+                ).detect
         if detector is None:
             raise RuntimeError("anomaly_recheck_owner_detector_not_composed")
         intent = recheck_intent_from_payload(payload)
-        result = self.current_issue_application(connection).reconcile(
+        result = self.current_issue_application(
+            connection, owner_snapshot_reader=owner_snapshot_reader
+        ).reconcile(
             scope, detector, completed_intent=intent
         )
         return {
@@ -176,8 +198,10 @@ class MySqlAnomalyRuntime:
         return load_import_warning_review_resolution_state(connection, **kwargs)
 
 
-def build_anomaly_runtime() -> AnomalyRuntime:
-    return MySqlAnomalyRuntime()
+def build_anomaly_runtime(
+    *, issue_identity_secret: str | bytes | None = None
+) -> AnomalyRuntime:
+    return MySqlAnomalyRuntime(issue_identity_secret=issue_identity_secret)
 
 
 __all__ = ["MySqlAnomalyRuntime", "build_anomaly_runtime"]
