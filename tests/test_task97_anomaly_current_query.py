@@ -99,7 +99,8 @@ def test_cursor_tampering_fails_closed() -> None:
 
 def test_current_list_route_has_only_current_filters_and_typed_page() -> None:
     row = _projection("ci_" + "4" * 64, blocking=True, severity="blocking", minutes=0)
-    application = CurrentIssueQueryApplication(_Repository((row,)), CurrentIssueCursorCodec(SECRET))
+    repository = _Repository((row,))
+    application = CurrentIssueQueryApplication(repository, CurrentIssueCursorCodec(SECRET))
     app.dependency_overrides[require_system_admin] = lambda: object()
     app.dependency_overrides[get_current_issue_query_application] = lambda: application
     client = TestClient(app)
@@ -125,6 +126,8 @@ def test_current_list_route_has_only_current_filters_and_typed_page() -> None:
         "next_cursor": None,
     }
     assert obsolete.status_code == 422
+    assert obsolete.json()["detail"]["error"]["code"] == "anomaly_query_filter_not_allowed"
+    assert len(repository.calls) == 1
 
 
 def test_current_list_route_maps_invalid_cursor_to_stable_code() -> None:
@@ -138,4 +141,4 @@ def test_current_list_route_maps_invalid_cursor_to_stable_code() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 422
-    assert response.json()["error"]["code"] == "anomaly_cursor_invalid"
+    assert response.json()["detail"]["error"]["code"] == "anomaly_cursor_invalid"

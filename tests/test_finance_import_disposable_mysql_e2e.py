@@ -836,6 +836,9 @@ def test_government_receipt_recovers_existing_subsidy_advance_without_second_cli
     _seed_subsidy_advance_recovery_facts()
 
     from infrastructure.mysql.mysql_adapter import get_connection
+    from infrastructure.mysql.subsidy_advance_recovery_repository import (
+        MySqlSubsidyAdvanceRecoveryRepository,
+    )
     from subsystems.government_subsidy.subsidy_advance_outbox_consumer import (
         consume_government_subsidy_advance_events,
     )
@@ -962,6 +965,7 @@ def _ingest_unresolved_taishin_outflow(tmp_path, *, amount=300):
         pd.DataFrame(
             [["說明"], ["序號", "交易日期", "交易時間", "帳務日期", "摘要", "支出金額", "存入金額", "帳戶餘額", "備註"], ["0001", "2026/08/04", "09:08:07", "2026/08/04", "轉帳", str(amount), "", "9000", "客戶退款 " + ("9" * 16)]]
         ).to_excel(workbook, sheet_name="交易明細", index=False, header=False)
+    from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import ActorContext, IdempotencyKey
     from subsystems.finance_import.ingestion import ingest_finance_workbook
     return ingest_finance_workbook(str(workbook), IdempotencyKey("lu-test-manual-refund-ingest"), ActorContext("lu-test-runner"), connection_factory=get_connection, normalizer=normalize_workbook)
@@ -991,6 +995,7 @@ def _post_manual_refund(tmp_path):
 def _ingest_unresolved_taishin_inflow(tmp_path, *, amount=300):
     workbook = tmp_path / "taishin-refund-return.xlsx"
     pd.DataFrame([["說明"], ["序號", "交易日期", "交易時間", "帳務日期", "摘要", "支出金額", "存入金額", "帳戶餘額", "備註"], ["0002", "2026/08/05", "09:08:07", "2026/08/05", "退款退回", "", str(amount), str(9000 + amount), "客戶退款退回"]]).to_excel(workbook, sheet_name="交易明細", index=False, header=False)
+    from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import ActorContext, IdempotencyKey
     from subsystems.finance_import.ingestion import ingest_finance_workbook
     return ingest_finance_workbook(str(workbook), IdempotencyKey("lu-test-refund-return-ingest"), ActorContext("lu-test-runner"), connection_factory=get_connection, normalizer=normalize_workbook)

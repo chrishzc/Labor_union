@@ -156,7 +156,7 @@ class MySqlAnomalyRuntime:
         return project_government_subsidy_integrity_page(connection, request)
 
     def project_government_subsidy_reversal_page(self, connection, request):
-        return project_government_subsidy_reversal_page(connection, request)
+        return project_government_subsidy_reversal_anomaly_page(connection, request)
 
     def project_government_return_outbound_overage_page(self, connection, request):
         return project_government_return_outbound_overage_page(connection, request)

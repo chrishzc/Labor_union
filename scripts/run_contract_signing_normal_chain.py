@@ -262,7 +262,6 @@ def _resume_conversion(arguments) -> dict[str, object]:
 
 def _existing_matching_plan(case_no: str) -> tuple[int, int, date, date]:
     from infrastructure.mysql.mysql_adapter import get_connection
-    from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
 
     connection = get_connection()
     try:
@@ -504,6 +503,7 @@ def _reconcile_deposit() -> dict[str, object]:
     from api.dependencies.finance_import import build_finance_import_application
     from domains.finance_import.correction import FinanceImportCorrectionSelection
     from domains.finance_import.planning import FinanceClassificationType
+    from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
     from infrastructure.mysql.finance_import_owning_domain_composite import MySqlFinanceImportOwningDomainComposite
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey

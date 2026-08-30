@@ -10,7 +10,7 @@ from datetime import date, datetime, time
 from enum import Enum
 from typing import Mapping
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
@@ -43,9 +43,14 @@ from subsystems.anomalies.current_issue_query import (
 
 router = APIRouter(prefix="/api/v1/anomalies", tags=["Anomalies"])
 
+_CURRENT_QUERY_PARAMETERS = frozenset(
+    {"definition_code", "owner_domain", "blocking", "limit", "cursor"}
+)
+
 
 @router.get("", response_model=BaseResponse[CurrentAnomalyPageView])
 def query_anomalies(
+    request: Request,
     definition_code: str | None = Query(default=None, min_length=1, max_length=191),
     owner_domain: str | None = Query(default=None, min_length=1, max_length=191),
     blocking: bool | None = Query(default=None),
@@ -57,6 +62,13 @@ def query_anomalies(
     ),
 ):
     del principal
+    unsupported = sorted(set(request.query_params) - _CURRENT_QUERY_PARAMETERS)
+    if unsupported:
+        _raise_current_query_error(
+            422,
+            "anomaly_query_filter_not_allowed",
+            "目前異常清單的查詢篩選條件不在允許範圍。",
+        )
     try:
         page = application.query(
             CurrentIssueListRequest(
@@ -71,12 +83,15 @@ def query_anomalies(
         code = str(error)
         if code != "anomaly_cursor_invalid":
             code = "anomaly_query_invalid"
-        raise HTTPException(status_code=422, detail={"code": code}) from error
+        _raise_current_query_error(422, code, "目前異常清單的查詢條件無效。", cause=error)
     except OperationalError as error:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "anomaly_query_temporarily_unavailable"},
-        ) from error
+        _raise_current_query_error(
+            503,
+            "anomaly_query_temporarily_unavailable",
+            "目前異常清單暫時無法查詢。",
+            retryable=True,
+            cause=error,
+        )
     return BaseResponse(
         success=True,
         message="成功取得目前異常清單",
@@ -96,6 +111,34 @@ def query_anomalies(
             "next_cursor": page.next_cursor,
         },
     )
+
+
+def _raise_current_query_error(
+    status_code: int,
+    code: str,
+    message: str,
+    *,
+    retryable: bool = False,
+    cause: Exception | None = None,
+) -> None:
+    error = HTTPException(
+        status_code=status_code,
+        detail={
+            "error": {
+                "category": "unavailable" if status_code == 503 else "validation",
+                "code": code,
+                "message": message,
+                "correlation_id": "anomaly-current-query",
+                "field_errors": [],
+                "domain_blockers": [],
+                "retryable": retryable,
+                "current_version": None,
+            }
+        },
+    )
+    if cause is None:
+        raise error
+    raise error from cause
 
 
 @router.get(

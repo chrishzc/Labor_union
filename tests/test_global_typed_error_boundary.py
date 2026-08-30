@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from api.dependencies.admin_auth import require_system_admin
-from api.dependencies.anomaly_registry import get_anomaly_application
+from api.dependencies.anomaly_registry import get_current_issue_query_application
 from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_error_handlers
 from api.main import app as production_app
 from api.routes import admin_auth, anomaly_registry, data_browser_admin
@@ -110,12 +110,12 @@ def test_b_query_validation_uses_fixed_query_field_path_without_calling_applicat
     query_called = False
 
     class QueryMustNotRun:
-        def query_summaries(self, **_kwargs):
+        def query(self, _request):
             nonlocal query_called
             query_called = True
             raise AssertionError("query application must not run for invalid query")
 
-    app.dependency_overrides[get_anomaly_application] = lambda: QueryMustNotRun()
+    app.dependency_overrides[get_current_issue_query_application] = lambda: QueryMustNotRun()
     response = TestClient(app).get(
         "/api/v1/anomalies?limit=0",
         headers={"X-Correlation-ID": "query-validation"},
