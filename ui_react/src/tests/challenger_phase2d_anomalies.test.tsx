@@ -14,7 +14,7 @@ import {
   AnomalySummaryViewSchema,
   ImportWarningTaskViewSchema,
 } from '../api/anomalies/anomaly_query_schemas';
-import { AnomaliesPage } from '../pages/AnomaliesPage';
+import { LegacyAnomaliesPage as AnomaliesPage } from '../pages/AnomaliesPage';
 import {
   VALID_ANOMALY_SUMMARY_1,
   VALID_ANOMALY_SUMMARY_2,

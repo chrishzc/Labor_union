@@ -75,7 +75,7 @@ describe('Anomaly detail client strict GET boundary', () => {
     const firstCall = fetchSpy.mock.calls[0];
     const secondCall = fetchSpy.mock.calls[1];
     expect(firstCall[0]).toBe(`/api/v1/anomalies/${fingerprint}`);
-    expect(secondCall[0]).toBe(`/api/v1/anomaly-recovery/${issueKey}`);
+    expect(secondCall[0]).toBe(`/api/v1/anomalies/${issueKey}`);
 
     for (const call of [firstCall, secondCall]) {
       const options = call[1];

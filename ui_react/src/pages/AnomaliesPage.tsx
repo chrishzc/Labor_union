@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { CurrentAnomaliesPage } from './CurrentAnomaliesPage';
 import './AnomaliesPage.css';
 import { Drawer } from '../components/Drawer';
 import { ClientOverRefundRecoveryWorkbench } from '../components/ClientOverRefundRecoveryWorkbench';
@@ -133,7 +134,7 @@ function correctionBinding(action: RecoveryAction, key: string): string | number
   return action.source_bindings.find((binding) => binding.key === key)?.value ?? null;
 }
 
-export const AnomaliesPage: React.FC = () => {
+export const LegacyAnomaliesPage: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<CategoryTabKey>('全部');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | 'open' | 'claimed' | 'resolved'>('all');
   const [selectedAnomaly, setSelectedAnomaly] = useState<AnomalySummaryViewModel | null>(null);
@@ -1392,4 +1393,5 @@ export const AnomaliesPage: React.FC = () => {
   );
 };
 
+export const AnomaliesPage = CurrentAnomaliesPage;
 export default AnomaliesPage;
