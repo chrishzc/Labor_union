@@ -78,14 +78,10 @@ class LineServiceHelpApplication:
             self._handle_category(inbox, unit_of_work, line_user_id, outcome.category, normalized)
             return True
         if isinstance(outcome, SafeMenu):
-            self._reply_or_enqueue(
-                inbox,
-                unit_of_work,
-                line_user_id,
-                _safe_menu_payload(outcome),
-                "safe-menu",
-            )
-            return True
+            # Unknown text belongs to the canonical Knowledge fallback owned by
+            # the webhook composition. Consuming it here makes that durable
+            # request path unreachable.
+            return False
         if isinstance(outcome, Clarification):
             self._reply_or_enqueue(
                 inbox,
@@ -279,6 +275,7 @@ def _service_menu_payload():
         ("收費與補助", "查看服務費用、樓層費與補助資格的初步說明。", "#0F766E"),
         ("查詢服務進度", "查詢已綁定案件的最新狀態與服務期間。", "#7C3AED"),
         ("修改登記資料", "申請修正姓名、電話、地址、日期等登記內容。", "#BE123C"),
+        ("月嫂身分認證", "月嫂本人可送出身分確認申請，由工會人員審核。", "#B45309", "我是月嫂"),
         ("其他問題", "不是以上分類時，留下問題讓工會人員協助確認。", "#475569"),
     )
     return {
@@ -291,7 +288,7 @@ def _service_menu_payload():
     }
 
 
-def _service_help_card(label, description, color):
+def _service_help_card(label, description, color, action_text=None):
     return {
         "type": "bubble",
         "size": "micro",
@@ -341,7 +338,7 @@ def _service_help_card(label, description, color):
                     "action": {
                         "type": "message",
                         "label": "選擇",
-                        "text": label,
+                        "text": action_text or label,
                     },
                 }
             ],
