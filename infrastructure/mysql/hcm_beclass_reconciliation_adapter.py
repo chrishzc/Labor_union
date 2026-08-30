@@ -9,7 +9,7 @@ from dataclasses import replace
 
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 from infrastructure.mysql.order_terms_repository import MySqlOrderTermsRepository
-from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql.beclass_import_review_repository import MySqlBeClassImportReviewRepository
 from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import (
@@ -29,6 +29,10 @@ from subsystems.orders.terms_workflow import (
     OrderTermsApplyRequest,
     OrderTermsWorkflow,
 )
+
+
+def _nested_uow_forbidden():
+    raise RuntimeError("hcm_reconciliation_requires_caller_owned_uow")
 
 
 class MySqlHcmBeClassReconciliationAdapter:
@@ -77,6 +81,7 @@ class MySqlHcmBeClassReconciliationAdapter:
                 "cooking_answer_state": issue_code,
             },
             issue_codes=("case_import_cooking_requirement_ambiguous",),
+            repository=MySqlBeClassImportReviewRepository(self._connection),
         )
 
     def apply_cooking_terms(
@@ -85,7 +90,7 @@ class MySqlHcmBeClassReconciliationAdapter:
         repository = MySqlOrderTermsRepository(self._connection)
         workflow = OrderTermsWorkflow(
             repository,
-            lambda: MySqlUnitOfWork(self._connection),
+            _nested_uow_forbidden,
             SystemBusinessClock(),
         )
         proposed_terms = replace(

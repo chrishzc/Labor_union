@@ -77,7 +77,8 @@ def test_payroll_rebuild_durable_crash_recovery_and_duplicate_apply():
     from infrastructure.mysql.background_job_repository import BackgroundJobRepository
     from infrastructure.mysql.mysql_adapter import get_connection
     from subsystems.access.authentication_session import AdminPrincipal
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
     from subsystems.jobs.command_application import DurableJobCommandApplication
 
     connection = get_connection()

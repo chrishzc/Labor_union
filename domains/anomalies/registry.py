@@ -336,50 +336,19 @@ def default_anomaly_registry() -> AnomalyDefinitionRegistry:
     return AnomalyDefinitionRegistry(
         (
             _schedule_coverage_definition(),
-            _staff_payout_overdue_definition(),
             _staff_payout_late_change_definition(),
-            _staff_payout_bank_master_definition(),
             _government_subsidy_no_unique_batch_definition(),
             _government_subsidy_ambiguous_allocation_definition(),
             _government_subsidy_integrity_definition(),
             _government_subsidy_reversal_definition(),
             _government_subsidy_assignment_drift_definition(),
-            _government_subsidy_overpayment_definition(),
             _government_return_outbound_overage_definition(),
-            _client_over_refund_recovery_open_definition(),
-            _client_refund_underpayment_definition(),
-            _staff_overpayment_recovery_open_definition(),
-            _staff_payout_difference_definition("staff_payout_underpayment"),
-            _staff_payout_difference_definition(
-                "staff_payout_overpayment",
-                lifecycle=AnomalyDefinitionLifecycle.AUDIT_ONLY,
-            ),
-            _beclass_validation_definition(),
             _beclass_identity_conflict_definition(),
-            _finance_manual_review_definition(),
-            _client_refund_return_definition(),
             _finance_integrity_definition(),
-            _hcm_validation_definition(),
-            _historical_order_review_definition(),
-            _historical_baseline_roots_definition(),
-            _order_matching_stage_definition("ORDER-001"),
-            _order_matching_stage_definition("ORDER-002"),
-            _order_matching_stage_definition("ORDER-003"),
-            _order_matching_stage_definition("ORDER-004"),
             _beclass_missing_definition(),
-            _resume_not_sent_definition(),
-            _client_receivable_overdue_definition(),
-            _client_payable_overdue_definition(),
-            _subsidy_return_overdue_definition(),
-            _subsidy_advance_due_definition(),
-            _schedule_holiday_undecided_definition(),
             _schedule_replaced_assignment_definition(),
             _schedule_overlap_definition(),
-            _schedule_holiday_preference_conflict_definition(),
-            _client_missing_line_definition(),
-            _staff_missing_line_definition(),
             _line_notification_delivery_definition(),
-            _line_task_no_reply_definition(),
             _line_identity_conflict_definition(),
         )
     )
@@ -1296,14 +1265,8 @@ def _finance_integrity_definition() -> AnomalyDefinition:
         fingerprint_fields=("batch_id",),
         severity=AnomalySeverity.BLOCKING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
-        available_actions=(
-            DomainActionLink(
-                "retry_projector",
-                "anomalies",
-                "RetryAnomalyProjector",
-                False,
-            ),
-        ),
+        available_actions=(),
+        no_automated_recovery=True,
     )
 
 
@@ -1363,49 +1326,9 @@ def _validate_identity(value: str, field_name: str) -> None:
 
 
 _AUTO_RESOLUTION_CONTRACTS = {
-    "HISTORICAL-BASELINE-ROOTS-001": AutoResolutionContract(
-        "PROV-20260828-historical-baseline-projector-contract-spec-gap.md §10",
-        "historical_baseline_active_membership_zero_after_fresh_exact_projection",
-    ),
-    "PAYOUT-001": AutoResolutionContract(
-        "05_Staff_Payables_Export_Domain.md §3; 16_Staff_Payables與Client_Refund正式規格.md",
-        "staff_payable_balance_zero_after_locked_owner_readback",
-    ),
     "GOVSUB-003": AutoResolutionContract(
         "14_Government_Subsidy_Domain.md §6",
         "government_subsidy_current_revision_integrity_clear",
-    ),
-    "GOVSUB-006": AutoResolutionContract(
-        "14_Government_Subsidy_Domain.md §4.5.1",
-        "government_overpayment_authorized_disposition_committed",
-    ),
-    "client_over_refund_recovery_open": AutoResolutionContract(
-        "16_Staff_Payables與Client_Refund正式規格.md §3.5.1",
-        "client_over_refund_recovery_remaining_zero",
-    ),
-    "staff_overpayment_recovery_open": AutoResolutionContract(
-        "16_Staff_Payables與Client_Refund正式規格.md §2.4.2",
-        "staff_overpayment_recovery_remaining_zero",
-    ),
-    "CLIENTREFUND-001": AutoResolutionContract(
-        "16_Staff_Payables與Client_Refund正式規格.md §3.6",
-        "client_refund_return_linkage_and_progress_terminal",
-    ),
-    "IMPORT-004": AutoResolutionContract(
-        "17_External_Integration_LINE_Access正式規格.md §5.2.1",
-        "hcm_review_all_occurrences_owner_terminal_after_locked_readback",
-    ),
-    "RECEIVABLE-001": AutoResolutionContract(
-        "04_Client_Finance_Domain.md §2-3; 16_Staff_Payables與Client_Refund正式規格.md §3.6",
-        "client_receivable_overdue_remaining_zero_after_locked_owner_readback",
-    ),
-    "CLIENTPAYABLE-001": AutoResolutionContract(
-        "04_Client_Finance_Domain.md §2-3; 16_Staff_Payables與Client_Refund正式規格.md §3.6",
-        "client_payable_overdue_remaining_zero_after_locked_owner_readback",
-    ),
-    "RETURN-001": AutoResolutionContract(
-        "04_Client_Finance_Domain.md §2-3; 16_Staff_Payables與Client_Refund正式規格.md §3.6",
-        "client_subsidy_return_overdue_remaining_zero_after_locked_owner_readback",
     ),
 }
 

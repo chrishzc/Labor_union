@@ -29,14 +29,7 @@ def test_queue_has_no_unreviewed_entries() -> None:
         if entry["status"] == "review_required"
     ]
 
-    assert {entry_id for entry_id in unreviewed if entry_id.startswith("ui-react:#")} == {
-        f"ui-react:#{page}"
-        for page in (
-            "order-tracker", "orders", "scheduling", "staff", "data-import", "line-management",
-            "reports", "finance", "anomalies", "account-management", "system-status",
-            "line-security", "line-liff-studio", "line-ai-events",
-        )
-    }
+    assert not [entry_id for entry_id in unreviewed if entry_id.startswith("ui-react:#")]
 
 
 def test_governed_entries_have_exact_task97_terminal_receipts() -> None:
@@ -75,6 +68,100 @@ def test_queue_has_no_generic_owner_placeholder() -> None:
         for entry in _load_queue()
         if entry.get("canonical_owner") == "owning bounded domain"
     ]
+
+
+def test_task97_local_canonical_http_promotions_are_exact_identity_locked() -> None:
+    entries = {entry["entry_id"]: entry for entry in _load_queue()}
+
+    assert len(queue.SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES) == 92
+    for identity in queue.SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES:
+        entry = entries[identity]
+        assert entry["status"] == "active"
+        assert entry["terminal_disposition"] == "active_canonical"
+        assert entry["replacement_path_or_symbol"] == identity
+        assert entry["deletion_410_gate"] == "not_applicable_active_canonical"
+        assert entry["final_zero_reference_oracle"] == "not_applicable_active_canonical"
+        assert "repository-local typed caller" in entry["current_inbound_callers"]
+        assert "production deployment or external usage is not claimed" in entry["external_operator_evidence"]
+
+
+def test_task97_controlled_file_entries_are_exact_retired_410() -> None:
+    entries = {entry["entry_id"]: entry for entry in queue.build_review_queue()}
+
+    assert len(queue.SOURCE_MEDIA_REWRITE_HTTP_ENTRIES) == 7
+    for identity in queue.SOURCE_MEDIA_REWRITE_HTTP_ENTRIES:
+        entry = entries[identity]
+        assert entry["status"] == "retired_410"
+        assert entry["terminal_disposition"] == "retired_410"
+        assert entry["deletion_410_gate"] == "blocked_media_successor_schema_and_runtime_gate"
+        assert entry["replacement_path_or_symbol"] == (
+            "subsystems.controlled_files.reference_finalize.ControlledFileReferenceService"
+        )
+
+
+def test_task97_anomaly_dead_letter_entries_are_exact_retired_410() -> None:
+    entries = {entry["entry_id"]: entry for entry in queue.build_review_queue()}
+
+    assert len(queue.SOURCE_ANOMALY_REWRITE_HTTP_ENTRIES) == 5
+    for identity in queue.SOURCE_ANOMALY_REWRITE_HTTP_ENTRIES:
+        entry = entries[identity]
+        assert entry["status"] == "retired_410"
+        assert entry["terminal_disposition"] == "retired_410"
+        assert "durable-job" in entry["replacement_path_or_symbol"]
+
+
+def test_task97_remaining_api_blockers_are_exact_identity_locked() -> None:
+    entries = _load_queue()
+    review_api = {
+        entry["entry_id"]: entry
+        for entry in entries
+        if entry["status"] == "review_required" and entry["kind"] == "api"
+    }
+
+    assert len(queue.SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES) == 24
+    assert set(review_api) == (
+        queue.SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES
+        | queue.SOURCE_OWNER_COMMAND_REWRITE_HTTP_ENTRIES
+    )
+    for identity in queue.SOURCE_OWNER_COMMAND_REWRITE_HTTP_ENTRIES:
+        assert review_api[identity]["terminal_disposition"] == "rewrite_to_canonical"
+        assert "owning typed BeClass command" in review_api[identity]["replacement_path_or_symbol"]
+        assert review_api[identity]["deletion_410_gate"] == "blocked_owner_command_contract"
+    for identity in queue.SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES:
+        assert review_api[identity]["terminal_disposition"] == "blocked_external_evidence"
+
+
+def test_task97_review_queue_current_terminal_counts() -> None:
+    entries = _load_queue()
+
+    assert sum(entry["status"] == "active" for entry in entries) == 514
+    assert sum(entry["status"] == "retired_410" for entry in entries) == 61
+    assert sum(entry["status"] == "review_required" for entry in entries) == 33
+    assert sum(entry["status"] == "operator_only" for entry in entries) == 75
+
+
+def test_local_mysql_forward_is_owned_by_the_exact_local_bridge_launcher() -> None:
+    entries = {entry["entry_id"]: entry for entry in _load_queue()}
+    forward = entries["cli:scripts/launchers/local_mysql_tcp_forward.py"]
+
+    assert forward["status"] == "operator_only"
+    assert forward["terminal_disposition"] == "operator_only_guarded"
+    assert "manage_gcp_cloud_run_db_bridge.ps1" in forward["caller_evidence"]
+    assert "127.0.0.1" in forward["caller_evidence"]
+
+
+def test_read_only_governance_validators_have_formal_operator_callers() -> None:
+    entries = {entry["entry_id"]: entry for entry in _load_queue()}
+    expected = {
+        "cli:scripts/validate_agent_governance.py": "00_Agent任務分級與交付規範.md",
+        "cli:scripts/validate_streamlit_retirement_readiness.py": "Phase 6A",
+    }
+
+    for identity, caller_marker in expected.items():
+        entry = entries[identity]
+        assert entry["status"] == "operator_only"
+        assert entry["terminal_disposition"] == "operator_only_guarded"
+        assert caller_marker in entry["caller_evidence"]
 
 
 def _load_queue() -> list[dict[str, object]]:

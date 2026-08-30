@@ -35,11 +35,11 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_historical_reprocess_ui.py tests\\test_order_auto_completion_api.py tests\\test_line_management_stage9.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_historical_reprocess_ui.py tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_auto_completion_api.py tests\\test_line_management_stage9.py"
     ],
     "test_paths": [
       "tests/test_finance_import_historical_reprocess_ui.py",
-      "tests/test_order_auto_completion_api.py",
+      "tests/domains/orders/subsystems/orders/integration/test_order_auto_completion_api.py",
       "tests/test_line_management_stage9.py"
     ]
   }

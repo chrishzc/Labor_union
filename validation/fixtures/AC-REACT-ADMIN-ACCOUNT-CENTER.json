@@ -1,0 +1,38 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "AC-REACT-ADMIN-ACCOUNT-CENTER",
+  "revision": 1,
+  "test_kind": "domain_root_data",
+  "data_classification": "synthetic",
+  "generation_method": "hand-authored scenario account command facts; no production account export",
+  "allowed_use": "validation-only disposable database",
+  "redaction_policy": "synthetic account identity and one-way credential placeholders only",
+  "root_inputs": [
+    "scenario-owned account",
+    "root actor",
+    "expected account version",
+    "reason",
+    "idempotency identity"
+  ],
+  "seed_fields": [
+    "account.username",
+    "account.expected_version",
+    "command.reason",
+    "command.idempotency_key"
+  ],
+  "derived_fields": [
+    "account.version",
+    "account.enabled",
+    "account.session_revocation_state",
+    "command.receipt"
+  ],
+  "expected_manifest_path": "validation/expected/AC-REACT-ADMIN-ACCOUNT-CENTER.json",
+  "fixed_business_clock": "2026-01-15T09:00:00+08:00",
+  "forbidden_direct_seed": [
+    "production account",
+    "TOTP seed",
+    "recovery code",
+    "raw session token",
+    "terminal receipt"
+  ]
+}

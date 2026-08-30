@@ -12,7 +12,7 @@ from typing import Any
 
 import pandas as pd
 
-from scripts.imports.finance_normalized_row import validate_normalized_row
+from domains.finance_import.normalized_row import validate_normalized_row
 
 
 REQUIRED_HEADERS = {

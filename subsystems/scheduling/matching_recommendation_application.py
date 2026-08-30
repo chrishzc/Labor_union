@@ -1,15 +1,26 @@
 """Application boundary for the canonical read-only matching query."""
 
 from datetime import date, timedelta
-from typing import Mapping
+from typing import Any, Mapping, Protocol
 
-from infrastructure.mysql.matching_recommendation_repository import MySqlMatchingRecommendationRepository
-from infrastructure.mysql.mysql_adapter import get_connection
 from subsystems.scheduling.matching_recommendation_query import (
     RecommendationFilters,
     RecommendationRequest,
     recommend_staff,
 )
+
+
+class MatchingRecommendationRepository(Protocol):
+    def load_request_facts(self, case_no: str) -> Mapping[str, object] | None: ...
+
+    def load_candidates(self, service_dates: tuple[date, ...]) -> tuple[Any, ...]: ...
+
+
+def _unconfigured_connection() -> Any:
+    raise RuntimeError("matching recommendation connection factory is not configured")
+
+
+get_connection = _unconfigured_connection
 
 
 def query_matching_recommendations(
@@ -19,10 +30,15 @@ def query_matching_recommendations(
     filter_schedule: bool,
     filter_babies: bool,
     filter_time: bool,
+    connection_factory=None,
+    repository_factory=None,
 ) -> list[dict[str, object]]:
-    connection = get_connection()
+    factory = connection_factory or get_connection
+    connection = factory()
     try:
-        repository = MySqlMatchingRecommendationRepository(connection)
+        if repository_factory is None:
+            raise RuntimeError("matching recommendation repository is not configured")
+        repository: MatchingRecommendationRepository = repository_factory(connection)
         facts = repository.load_request_facts(case_no)
         if facts is None:
             return []

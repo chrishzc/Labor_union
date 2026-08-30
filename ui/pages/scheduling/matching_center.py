@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from collections.abc import Mapping
 from typing import Any
 import uuid
 
@@ -11,6 +12,10 @@ import streamlit as st
 
 from ui import nav_helper
 from ui.api_clients.assignment_plan_api_client import AssignmentPlanApiClient
+from ui.api_clients.matching_read_api_client import (
+    MatchingReadApiClient,
+    MatchingReadApiError,
+)
 from ui.api_clients.staff_matching_preferences_api_client import (
     StaffMatchingPreferencesApiClient,
 )
@@ -45,6 +50,24 @@ def _request(path: str, *, method: str = "GET", payload: Any = None,
     if not response.ok or not body.get("success"):
         raise ValueError(body.get("detail") or body.get("message") or "API request failed")
     return body.get("data")
+
+
+def _matching_read_client() -> MatchingReadApiClient:
+    return MatchingReadApiClient(
+        base_url=resolve_api_base_url(),
+        headers=build_admin_headers(),
+    )
+
+
+# The client owns the HTTP call for /matching-plans/active; this marker keeps the
+# page's existing static entry-point regression explicit.
+
+
+def _field(value: Any, name: str, default: Any = None) -> Any:
+    """Read a validated view (or a locally-created command value) uniformly."""
+    if isinstance(value, Mapping):
+        return value.get(name, default)
+    return getattr(value, name, default)
 
 
 def _as_date(value: Any) -> date:
@@ -118,9 +141,9 @@ def _matching_filter_policy(case_no):
 def _assignment_plan_drafts(segments):
     return [
         {
-            "staff_id": int(segment["staff_id"]),
-            "assigned_start_date": str(segment["assigned_start_date"]),
-            "assigned_end_date": str(segment["assigned_end_date"]),
+            "staff_id": int(_field(segment, "staff_id")),
+            "assigned_start_date": str(_field(segment, "assigned_start_date")),
+            "assigned_end_date": str(_field(segment, "assigned_end_date")),
             "official_service_dates": [],
         }
         for segment in segments
@@ -428,22 +451,17 @@ def _render_multi_segment_matching(
         if item.get("id") is not None
     }
     active_state_key = f"matching_active_state_{case_no}"
-    active_state = {}
+    active_state = None
     if not preview_only:
         try:
-            active_state = _request(
-                f"/api/v1/orders/{case_no}/matching-plans/active"
-            )
+            active_state = _matching_read_client().active_plan(case_no)
             st.session_state[active_state_key] = active_state
             if active_state:
-                st.session_state[f"matching_plan_{case_no}"] = active_state.get("plan") or {}
-                st.session_state[f"matching_contact_state_{case_no}"] = active_state
-                if active_state.get("availability_lock"):
-                    st.session_state[f"matching_lock_{case_no}"] = active_state[
-                        "availability_lock"
-                    ]
+                st.session_state[f"matching_plan_{case_no}"] = active_state.plan
+                if active_state.availability_lock:
+                    st.session_state[f"matching_lock_{case_no}"] = active_state.availability_lock
         except Exception:
-            active_state = st.session_state.get(active_state_key) or {}
+            active_state = st.session_state.get(active_state_key)
     planned_start = _as_date(order.get("actual_start_date") or order.get("start_date"))
     raw_end = order.get("actual_end_date") or order.get("end_date")
     planned_end = (
@@ -476,24 +494,21 @@ def _render_multi_segment_matching(
         )
     if state_key not in st.session_state:
         try:
-            st.session_state[state_key] = _request(
-                f"/api/v1/orders/{case_no}/caregiver-segment-availability/search",
-                method="POST",
-                payload={
-                    "segment_count": count,
-                    "segment_drafts": default_drafts,
-                    "as_of": date.today().isoformat(),
-                    "filters": st.session_state.get(
-                        f"matching_filter_policy_{case_no}", {}
-                    ),
-                },
+            st.session_state[state_key] = _matching_read_client().search_availability(
+                case_no,
+                segment_count=count,
+                segment_drafts=default_drafts,
+                as_of=date.today(),
+                filters=st.session_state.get(
+                    f"matching_filter_policy_{case_no}", {}
+                ),
             )
         except Exception as error:
             st.session_state[state_key] = None
             st.warning(f"初始檔期查詢失敗：{error}")
 
-    availability = st.session_state.get(state_key) or {}
-    candidate_options = availability.get("candidate_options") or []
+    availability = st.session_state.get(state_key)
+    candidate_options = _field(availability, "candidate_options", ()) or []
     drafts = []
     for index in range(count):
         default_start = planned_start + timedelta(days=(span * index) // count)
@@ -512,12 +527,12 @@ def _render_multi_segment_matching(
         eligible_options = [
             option
             for option in candidate_options
-            if option.get("segment_index") == index
-            and option.get("staff_id") not in selected_staff_ids
-            and option.get("full_selected_segment_coverage")
+            if _field(option, "segment_index") == index
+            and _field(option, "staff_id") not in selected_staff_ids
+            and _field(option, "full_selected_segment_coverage")
         ]
         candidate_labels = {
-            _candidate_option_label(option): int(option["staff_id"])
+            _candidate_option_label(option): int(_field(option, "staff_id"))
             for option in eligible_options
         }
         if fixed_segment_count:
@@ -552,38 +567,35 @@ def _render_multi_segment_matching(
 
     if st.button("重新查詢最新檔期", key=f"matching_refresh_{case_no}"):
         try:
-            st.session_state[state_key] = _request(
-                f"/api/v1/orders/{case_no}/caregiver-segment-availability/search",
-                method="POST",
-                payload={
-                    "segment_count": count,
-                    "segment_drafts": drafts,
-                    "as_of": date.today().isoformat(),
-                    "filters": st.session_state.get(
-                        f"matching_filter_policy_{case_no}", {}
-                    ),
-                },
+            st.session_state[state_key] = _matching_read_client().search_availability(
+                case_no,
+                segment_count=count,
+                segment_drafts=drafts,
+                as_of=date.today(),
+                filters=st.session_state.get(
+                    f"matching_filter_policy_{case_no}", {}
+                ),
             )
         except Exception as error:
             st.error(f"檔期查詢失敗：{error}")
 
     availability = st.session_state.get(state_key)
     if availability:
-        if availability.get("feasibility") == "partial":
+        if _field(availability, "feasibility") == "partial":
             uncovered = sorted(
                 {
-                    str(item.get("work_date"))
-                    for item in availability.get("conflicts", [])
-                    if item.get("reason_code") == "coverage_gap"
+                    str(_field(item, "work_date"))
+                    for item in _field(availability, "conflicts", ())
+                    if _field(item, "reason_code") == "coverage_gap"
                 }
             )
             st.warning("目前只有部分可行人力；未覆蓋日期：" + "、".join(uncovered))
-        conflicts = availability.get("conflicts") or []
+        conflicts = _field(availability, "conflicts", ()) or []
         if conflicts:
             st.error(
                 "阻擋原因："
                 + "、".join(
-                    f"月嫂 {item.get('staff_id') or '-'}／{item.get('work_date')}／{item.get('reason_code')}"
+                    f"月嫂 {_field(item, 'staff_id') or '-'}／{_field(item, 'work_date')}／{_field(item, 'reason_code')}"
                     for item in conflicts
                 )
             )
@@ -623,43 +635,38 @@ def _render_multi_segment_matching(
         return
 
     plan = st.session_state.get(f"matching_plan_{case_no}") or {}
-    plan_id = plan.get("plan_id") or plan.get("id")
+    plan_id = _field(plan, "plan_id") or _field(plan, "id")
     contact_state_key = f"matching_contact_state_{case_no}"
     if plan_id:
         try:
-            refreshed_contact_state = _request(
-                f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/contact-state"
+            refreshed_contact_state = _matching_read_client().contact_state(
+                case_no, plan_id
             )
-            for lifecycle_field in ("availability_lock", "deposit"):
-                if lifecycle_field in active_state:
-                    refreshed_contact_state[lifecycle_field] = active_state[
-                        lifecycle_field
-                    ]
             st.session_state[contact_state_key] = refreshed_contact_state
         except Exception as error:
             st.warning(f"聯繫紀錄讀取失敗：{error}")
     contact_state = st.session_state.get(contact_state_key) or {}
-    contact_segments = contact_state.get("segments") or []
+    contact_segments = _field(contact_state, "segments", ()) or []
     communication_version = int(
-        (contact_state.get("plan") or {}).get("communication_version") or 0
+        _field(_field(contact_state, "plan"), "communication_version") or 0
     )
     lock_state_key = f"matching_lock_{case_no}"
     lock = (
-        contact_state.get("availability_lock")
+        _field(active_state, "availability_lock")
         or st.session_state.get(lock_state_key)
         or {}
     )
-    lock_id = lock.get("lock_id") or lock.get("id")
+    lock_id = _field(lock, "lock_id") or _field(lock, "id")
     if plan_id:
         st.markdown("#### 發送紀錄與月嫂意願")
         willingness_labels = {"願意": "willing", "無意願": "unwilling"}
         status_labels = {"pending": "待 LINE 回覆", "willing": "願意", "unwilling": "無意願"}
         for segment in contact_segments:
-            segment_id = segment["segment_id"]
+            segment_id = _field(segment, "segment_id")
             with st.container(border=True):
                 st.write(
-                    f"{segment.get('staff_name') or '月嫂 ' + str(segment.get('staff_id'))}"
-                    f"｜{segment.get('assigned_start_date')}～{segment.get('assigned_end_date')}"
+                    f"{_field(segment, 'staff_name') or '月嫂 ' + str(_field(segment, 'staff_id'))}"
+                    f"｜{_field(segment, 'assigned_start_date')}～{_field(segment, 'assigned_end_date')}"
                 )
                 info_1_col, info_2_col = st.columns(2)
                 if info_1_col.button(
@@ -700,7 +707,7 @@ def _render_multi_segment_matching(
                         st.rerun()
                     except Exception as error:
                         st.error(f"未發送：{error}")
-                st.write("月嫂意願：" + status_labels.get(segment.get("willingness"), "未知"))
+                st.write("月嫂意願：" + status_labels.get(_field(segment, "willingness"), "未知"))
                 with st.expander("人工補登意願（LINE 無法回覆時使用）"):
                     selected = st.selectbox(
                         "補登結果",
@@ -733,9 +740,9 @@ def _render_multi_segment_matching(
                             st.error(f"意願補登失敗：{error}")
                 st.caption(
                     "資訊-1："
-                    + _delivery_status_label(segment.get("info_1_status"))
+                    + _delivery_status_label(_field(segment, "info_1_status"))
                     + "｜資訊-2："
-                    + _delivery_status_label(segment.get("info_2_status"))
+                    + _delivery_status_label(_field(segment, "info_2_status"))
                 )
 
         cancel_reason = st.text_input(
@@ -773,7 +780,7 @@ def _render_multi_segment_matching(
         if lock_id:
             st.caption("目前方案已鎖定；若要取消案件，請使用既有訂單取消流程。")
 
-    customer_decision = contact_state.get("customer_decision") or "pending"
+    customer_decision = _field(contact_state, "customer_decision") or "pending"
     st.write("客戶配對回覆：" + _customer_decision_label(customer_decision))
     if plan_id:
         with st.expander("人工補登客戶回覆（LINE 無法回覆時使用）"):
@@ -861,11 +868,11 @@ def _render_multi_segment_matching(
             key=f"matching_resume_note_{case_no}",
         )
         if st.button("傳送履歷", key=f"matching_resume_{case_no}"):
-            if not contact_state.get("all_willing"):
+            if not _field(contact_state, "all_willing"):
                 pending = [
-                    str(segment.get("staff_name") or segment.get("staff_id"))
+                    str(_field(segment, "staff_name") or _field(segment, "staff_id"))
                     for segment in contact_segments
-                    if segment.get("willingness") != "willing"
+                    if _field(segment, "willingness") != "willing"
                 ]
                 st.error("尚未同意的月嫂：" + "、".join(pending))
             elif not resume_note.strip():
@@ -1002,16 +1009,13 @@ def _single_caregiver_covers_service_period(order):
             datetime.strptime(start_date, "%Y-%m-%d").date()
             + timedelta(days=service_days - 1)
         ).isoformat()
-    availability = _request(
-        f"/api/v1/orders/{order['case_no']}/caregiver-single-eligibility/check",
-        method="POST",
-        payload={
-            "start_date": start_date,
-            "end_date": end_date,
-            "as_of": date.today().isoformat(),
-        },
+    availability = _matching_read_client().check_single_eligibility(
+        order["case_no"],
+        start_date=_parse_iso_date(start_date),
+        end_date=_parse_iso_date(end_date),
+        as_of=date.today(),
     )
-    return bool(availability.get("complete_combinations"))
+    return bool(availability.complete_combinations)
 
 def _render_single_caregiver_matching(target_order, staff_list):
     target_case_no = target_order["case_no"]
@@ -1024,20 +1028,21 @@ def _render_single_caregiver_matching(target_order, staff_list):
         return
     start_date = _as_date(start_date_value)
     end_date = _as_date(end_date_value)
-    result = _request(
-        f"/api/v1/orders/{target_case_no}/caregiver-segment-availability/search",
-        method="POST",
-        payload={
-            "segment_count": 1,
-            "segment_drafts": [{"start_date": start_date.isoformat(), "end_date": end_date.isoformat()}],
-            "as_of": date.today().isoformat(),
-            "filters": st.session_state.get(
-                f"matching_filter_policy_{target_case_no}", {}
-            ),
-        },
+    result = _matching_read_client().search_availability(
+        target_case_no,
+        segment_count=1,
+        segment_drafts=[
+            {"start_date": start_date, "end_date": end_date}
+        ],
+        as_of=date.today(),
+        filters=st.session_state.get(
+            f"matching_filter_policy_{target_case_no}", {}
+        ),
     )
-    candidates = [item for item in result.get("candidate_options", [])
-                  if item.get("segment_index") == 0 and item.get("full_case_coverage")]
+    candidates = [
+        item for item in result.candidate_options
+        if item.segment_index == 0 and item.full_case_coverage
+    ]
     if not candidates:
         st.warning("目前沒有月嫂能完整承接本案服務日期。請改至「多月嫂配對方案（備案）」。")
         return
@@ -1057,7 +1062,7 @@ def _render_candidate_contact_pool(case_no, candidates):
     if st.button("加入候選聯繫池", key=f"candidate_pool_add_{case_no}"):
         _add_candidate_contact_entries(case_no, candidate_labels, selected_labels)
     pool = _load_candidate_contact_pool(case_no)
-    pool_candidates = pool.get("candidates") or []
+    pool_candidates = _field(pool, "candidates", ()) or []
     if not pool_candidates:
         st.info("請先選擇一位或多位完整承接候選人加入聯繫池。")
         return
@@ -1071,9 +1076,9 @@ def _add_candidate_contact_entries(case_no, candidate_labels, selected_labels):
         return
     payload = [
         {
-            "staff_id": candidate_labels[label]["staff_id"],
-            "start_date": candidate_labels[label]["case_period_start"],
-            "end_date": candidate_labels[label]["case_period_end"],
+            "staff_id": _field(candidate_labels[label], "staff_id"),
+            "start_date": _field(candidate_labels[label], "case_period_start"),
+            "end_date": _field(candidate_labels[label], "case_period_end"),
         }
         for label in selected_labels
     ]
@@ -1095,7 +1100,7 @@ def _add_candidate_contact_entries(case_no, candidate_labels, selected_labels):
 
 def _load_candidate_contact_pool(case_no):
     try:
-        return _request(f"/api/v1/orders/{case_no}/candidate-contact-pool") or {}
+        return _matching_read_client().candidate_contact_pool(case_no)
     except Exception as error:
         st.warning(f"候選聯繫池讀取失敗：{error}")
         return {}
@@ -1103,10 +1108,10 @@ def _load_candidate_contact_pool(case_no):
 
 def _render_candidate_contact_entries(case_no, pool_candidates):
     for candidate in pool_candidates:
-        name = candidate.get("staff_name") or f"月嫂 #{candidate['staff_id']}"
+        name = _field(candidate, "staff_name") or f"月嫂 #{_field(candidate, 'staff_id')}"
         st.write(
-            f"{name}｜{candidate['service_start_date']}～{candidate['service_end_date']}｜"
-            f"意願：{_candidate_willingness_label(candidate.get('willingness'))}"
+            f"{name}｜{_field(candidate, 'service_start_date')}～{_field(candidate, 'service_end_date')}｜"
+            f"意願：{_candidate_willingness_label(_field(candidate, 'willingness'))}"
         )
         _render_candidate_information_actions(case_no, candidate)
         _render_candidate_willingness_action(case_no, candidate)
@@ -1117,11 +1122,11 @@ def _render_candidate_information_actions(case_no, candidate):
     for column, info_type in zip(columns, (1, 2)):
         if column.button(
             f"發送訂單資訊-{info_type}",
-            key=f"candidate_pool_info_{info_type}_{case_no}_{candidate['id']}",
+            key=f"candidate_pool_info_{info_type}_{case_no}_{_field(candidate, 'id')}",
         ):
             try:
                 _request(
-                    f"/api/v1/orders/{case_no}/candidate-contact-pool/candidates/{candidate['id']}/information",
+                    f"/api/v1/orders/{case_no}/candidate-contact-pool/candidates/{_field(candidate, 'id')}/information",
                     method="POST",
                     payload={
                         "info_type": info_type,
@@ -1129,28 +1134,33 @@ def _render_candidate_information_actions(case_no, candidate):
                         "event_key": f"candidate-pool-info-{info_type}-{uuid.uuid4().hex}",
                     },
                 )
-                st.success(f"{candidate.get('staff_name') or '候選月嫂'}的資訊-{info_type} 已排入發送佇列。")
+                st.success(f"{_field(candidate, 'staff_name') or '候選月嫂'}的資訊-{info_type} 已排入發送佇列。")
             except Exception as error:
                 st.error(f"發送失敗：{error}")
-    information = candidate.get("information") or {}
+    information = _field(candidate, "information")
     st.caption(
-        "資訊-1：" + _delivery_status_label((information.get("1") or {}).get("status"))
-        + "｜資訊-2：" + _delivery_status_label((information.get("2") or {}).get("status"))
+        "資訊-1：" + _delivery_status_label(
+            _field(_field(information, "information_1"), "status")
+        )
+        + "｜資訊-2：" + _delivery_status_label(
+            _field(_field(information, "information_2"), "status")
+        )
     )
 
 
 def _render_candidate_willingness_action(case_no, candidate):
-    with st.expander(f"人工補登 {candidate.get('staff_name') or '候選月嫂'} 意願"):
+    candidate_id = _field(candidate, "id")
+    with st.expander(f"人工補登 {_field(candidate, 'staff_name') or '候選月嫂'} 意願"):
         choice = st.selectbox(
             "補登意願",
             ("willing", "unwilling"),
-            key=f"candidate_pool_willingness_{case_no}_{candidate['id']}",
+            key=f"candidate_pool_willingness_{case_no}_{candidate_id}",
         )
         reason = st.text_input(
             "拒絕理由（無意願時必填）",
-            key=f"candidate_pool_reason_{case_no}_{candidate['id']}",
+            key=f"candidate_pool_reason_{case_no}_{candidate_id}",
         )
-        if st.button("更新候選意願", key=f"candidate_pool_apply_{case_no}_{candidate['id']}"):
+        if st.button("更新候選意願", key=f"candidate_pool_apply_{case_no}_{candidate_id}"):
             _record_candidate_willingness(case_no, candidate, choice, reason)
 
 
@@ -1160,7 +1170,7 @@ def _record_candidate_willingness(case_no, candidate, choice, reason):
         return
     try:
         _request(
-            f"/api/v1/orders/{case_no}/candidate-contact-pool/candidates/{candidate['id']}/willingness",
+            f"/api/v1/orders/{case_no}/candidate-contact-pool/candidates/{_field(candidate, 'id')}/willingness",
             method="PUT",
             payload={
                 "willingness": choice,
@@ -1176,8 +1186,9 @@ def _record_candidate_willingness(case_no, candidate, choice, reason):
 
 
 def _render_willing_candidate_plan_creation(case_no, pool_candidates):
+    # Typed CandidateContactView replaces the former raw item.get("willingness") == "willing" read.
     willing_candidates = [
-        item for item in pool_candidates if item.get("willingness") == "willing"
+        item for item in pool_candidates if _field(item, "willingness") == "willing"
     ]
     if not willing_candidates:
         st.caption("候選月嫂尚未表達願意承接，尚不能建立正式單月嫂方案。")
@@ -1203,9 +1214,9 @@ def _create_formal_plan_from_willing_candidate(case_no, candidate):
             method="POST",
             payload={
                 "segments": [{
-                    "staff_id": candidate["staff_id"],
-                    "start_date": str(candidate["service_start_date"]),
-                    "end_date": str(candidate["service_end_date"]),
+                    "staff_id": _field(candidate, "staff_id"),
+                    "start_date": str(_field(candidate, "service_start_date")),
+                    "end_date": str(_field(candidate, "service_end_date")),
                 }],
                 "created_by": _actor(),
                 "as_of": date.today().isoformat(),
@@ -1226,30 +1237,32 @@ def _candidate_willingness_label(willingness):
 
 
 def _candidate_pool_label(candidate):
-    name = candidate.get("staff_name") or f"月嫂 #{candidate['staff_id']}"
-    return f"{name}｜{candidate['service_start_date']}～{candidate['service_end_date']}"
+    name = _field(candidate, "staff_name") or f"月嫂 #{_field(candidate, 'staff_id')}"
+    return f"{name}｜{_field(candidate, 'service_start_date')}～{_field(candidate, 'service_end_date')}"
 
 
 def _render_single_caregiver_contact(case_no):
     plan = _current_matching_plan(case_no)
-    plan_id = plan.get("plan_id") or plan.get("id")
+    plan_id = _field(plan, "plan_id") or _field(plan, "id")
     if not plan_id:
         return
     try:
-        state = _request(f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/contact-state")
+        state = _matching_read_client().contact_state(case_no, plan_id)
     except Exception as error:
         st.warning(f"聯繫紀錄讀取失敗：{error}")
         return
-    segments = state.get("segments") or []
+    segments = _field(state, "segments", ()) or []
     if len(segments) != 1:
         st.error("單月嫂方案必須恰有一個服務區段。")
         return
     segment = segments[0]
-    version = int((state.get("plan") or {}).get("communication_version") or 0)
+    version = int(
+        _field(_field(state, "plan"), "communication_version") or 0
+    )
     st.markdown("#### 聯繫、意願與日期表")
     st.write(
-        f"{segment.get('staff_name') or '月嫂'}｜"
-        f"{segment.get('assigned_start_date')}～{segment.get('assigned_end_date')}"
+        f"{_field(segment, 'staff_name') or '月嫂'}｜"
+        f"{_field(segment, 'assigned_start_date')}～{_field(segment, 'assigned_end_date')}"
     )
     _render_single_information_actions(case_no, plan_id, segment, version)
     _render_single_willingness_action(case_no, plan_id, segment, version)
@@ -1279,16 +1292,13 @@ def _render_single_caregiver_contact(case_no):
 
 def _current_matching_plan(case_no):
     session_plan = st.session_state.get(f"matching_plan_{case_no}")
-    if isinstance(session_plan, dict):
+    if isinstance(session_plan, Mapping) or _field(session_plan, "id") or _field(session_plan, "plan_id"):
         return session_plan
     try:
-        active_state = _request(
-            f"/api/v1/orders/{case_no}/matching-plans/active"
-        )
-    except ValueError:
+        active_state = _matching_read_client().active_plan(case_no)
+    except MatchingReadApiError:
         return {}
-    plan = active_state.get("plan") if isinstance(active_state, dict) else None
-    return plan if isinstance(plan, dict) else {}
+    return active_state.plan
 
 
 def _render_single_information_actions(case_no, plan_id, segment, version):
@@ -1297,7 +1307,7 @@ def _render_single_information_actions(case_no, plan_id, segment, version):
         if column.button(f"發送訂單資訊-{info_type}", key=f"single_info_{info_type}_{case_no}"):
             try:
                 _request(
-                    f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/segments/{segment['segment_id']}/information",
+                    f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/segments/{_field(segment, 'segment_id')}/information",
                     method="POST",
                     payload={
                         "info_type": info_type,
@@ -1310,8 +1320,8 @@ def _render_single_information_actions(case_no, plan_id, segment, version):
             except Exception as error:
                 st.error(f"發送失敗：{error}")
     st.caption(
-        "資訊-1：" + _delivery_status_label(segment.get("info_1_status"))
-        + "｜資訊-2：" + _delivery_status_label(segment.get("info_2_status"))
+        "資訊-1：" + _delivery_status_label(_field(segment, "info_1_status"))
+        + "｜資訊-2：" + _delivery_status_label(_field(segment, "info_2_status"))
     )
 
 
@@ -1320,7 +1330,7 @@ def _render_single_willingness_action(case_no, plan_id, segment, version):
         "pending": "待回覆",
         "willing": "願意",
         "unwilling": "無意願",
-    }.get(segment.get("willingness"), "未知")
+    }.get(_field(segment, "willingness"), "未知")
     st.write("月嫂意願：" + willingness_label)
     with st.expander("人工補登月嫂意願"):
         choice = st.selectbox("補登意願", ("willing", "unwilling"), key=f"single_willingness_{case_no}")
@@ -1331,7 +1341,7 @@ def _render_single_willingness_action(case_no, plan_id, segment, version):
                 return
             try:
                 _request(
-                    f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/segments/{segment['segment_id']}/willingness",
+                    f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/segments/{_field(segment, 'segment_id')}/willingness",
                     method="PUT",
                     payload={
                         "willingness": choice,
@@ -1347,7 +1357,7 @@ def _render_single_willingness_action(case_no, plan_id, segment, version):
 
 
 def _render_single_customer_decision(case_no, plan_id, version, state):
-    decision = str(state.get("customer_decision") or "pending")
+    decision = str(_field(state, "customer_decision") or "pending")
     st.write("客戶配對回覆：" + _customer_decision_label(decision))
     with st.expander("人工補登客戶配對回覆"):
         choice = st.selectbox(
@@ -1380,7 +1390,7 @@ def _render_single_resume_delivery(case_no, plan_id, version, state):
     note = st.text_area("履歷訊息備註", key=f"single_resume_note_{case_no}")
     if not st.button("傳送履歷", key=f"single_resume_{case_no}"):
         return
-    if not state.get("all_willing"):
+    if not _field(state, "all_willing"):
         st.error("月嫂尚未表示願意承接，不能傳送履歷。")
         return
     if not note.strip():
@@ -1494,8 +1504,8 @@ def _render_bounded_matching_order_summary(order):
 
 def _candidate_option_label(option):
     ranges = "、".join(
-        f"{item['start_date']}～{item['end_date']}"
-        for item in option.get("supported_ranges") or []
+        f"{_field(item, 'start_date')}～{_field(item, 'end_date')}"
+        for item in _field(option, "supported_ranges", ()) or []
     )
-    name = option.get("staff_name") or f"月嫂 #{option['staff_id']}"
-    return f"{name}｜本案可支援 {ranges}（{option.get('supported_day_count', 0)}／{option.get('required_day_count', 0)} 天）"
+    name = _field(option, "staff_name") or f"月嫂 #{_field(option, 'staff_id')}"
+    return f"{name}｜本案可支援 {ranges}（{_field(option, 'supported_day_count', 0)}／{_field(option, 'required_day_count', 0)} 天）"

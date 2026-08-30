@@ -3,6 +3,9 @@ import requests
 import streamlit as st
 import pandas as pd
 from uuid import uuid4
+from ui.api_clients.data_browser_correction_api_client import (
+    DataBrowserCorrectionApiClient,
+)
 from ui.pages import shared
 
 title = "🔍 資料庫原始資料瀏覽"
@@ -491,6 +494,10 @@ def show():
         )
 
         preview_key = f"source_correction_preview_{table_name}"
+        correction_client = DataBrowserCorrectionApiClient(
+            base_url=_resolve_api_base_url(),
+            headers=admin_headers,
+        )
         if is_read_only:
             st.info("此資料表目前為唯讀保護模式，僅供瀏覽，不開放來源資料更正。")
         elif st.button("預覽變更", type="primary"):
@@ -513,14 +520,18 @@ def show():
                 if errors or not changed_fields:
                     continue
                 try:
-                    response = requests.post(
-                        f"{_resolve_api_base_url()}/api/v1/admin/data-browser/{table_name}/{row_id}/source-correction/preview",
-                        headers=admin_headers,
-                        json={"updates": changed_fields},
-                        timeout=15,
+                    preview = correction_client.preview(
+                        table_name,
+                        int(row_id),
+                        changed_fields,
                     )
-                    response.raise_for_status()
-                    previews.append({"row_id": row_id, "updates": changed_fields, "preview": response.json()["data"]})
+                    previews.append(
+                        {
+                            "row_id": int(row_id),
+                            "updates": changed_fields,
+                            "preview": preview,
+                        }
+                    )
                 except Exception as error:
                     errors.append(f"第 {row_id} 筆預覽失敗: {error}")
             if errors:
@@ -535,7 +546,14 @@ def show():
         if previews:
             st.subheader("來源資料更正預覽")
             for item in previews:
-                st.json({"row_id": item["row_id"], "changes": item["preview"].get("changes", {})})
+                st.json(
+                    {
+                        "row_id": item["row_id"],
+                        "changes": item["preview"].model_dump(
+                            mode="json"
+                        )["changes"],
+                    }
+                )
             reason = st.text_input("更正原因", key=f"source_correction_reason_{table_name}")
             if st.button("取消預覽變更"):
                 st.session_state.pop(preview_key, None)
@@ -548,17 +566,14 @@ def show():
                     errors = []
                     for item in previews:
                         try:
-                            response = requests.post(
-                                f"{_resolve_api_base_url()}/api/v1/admin/data-browser/{table_name}/{item['row_id']}/source-correction/apply",
-                                headers={**admin_headers, "Idempotency-Key": str(uuid4())},
-                                json={
-                                    "updates": item["updates"],
-                                    "preview_fingerprint": item["preview"]["preview_fingerprint"],
-                                    "reason": reason.strip(),
-                                },
-                                timeout=15,
+                            correction_client.apply(
+                                table_name,
+                                item["row_id"],
+                                item["updates"],
+                                item["preview"],
+                                reason=reason.strip(),
+                                idempotency_key=str(uuid4()),
                             )
-                            response.raise_for_status()
                         except Exception as error:
                             errors.append(f"第 {item['row_id']} 筆套用失敗: {error}")
                     if errors:

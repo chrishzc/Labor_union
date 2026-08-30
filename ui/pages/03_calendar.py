@@ -30,6 +30,10 @@ from ui.api_clients.leave_substitution_api_client import (
 from ui.api_clients.scheduling_current_api_client import (
     SchedulingCurrentApiClient,
 )
+from ui.api_clients.schedule_precision_api_client import (
+    SchedulePrecisionApiClient,
+    SchedulePrecisionApiError,
+)
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
 from ui.pages.scheduling.case_staffing import render_case_staffing
 from ui.pages.scheduling.navigation_state import (
@@ -457,7 +461,7 @@ def _render_attendance_calculation(target_order, headers):
             }
     stored = st.session_state.get(state_key)
     if isinstance(stored, dict) and stored.get("request") == request_payload:
-        _render_attendance_result(stored.get("preview") or {})
+        _render_attendance_result(stored.get("preview"))
 
 
 def _attendance_context(target_order):
@@ -560,38 +564,33 @@ def _order_belongs_to_calendar_staff(order, staff_id, staff_name):
 
 def _request_attendance_preview(payload, headers):
     try:
-        response = requests.post(
-            f"{resolve_api_base_url()}/api/v1/orders/calculate-schedule",
+        return SchedulePrecisionApiClient(
+            base_url=resolve_api_base_url(),
             headers=headers,
-            json=payload,
-            timeout=10,
-        )
-        response.raise_for_status()
-        body = response.json()
-        return body.get("data") if body.get("success") else None
-    except (requests.RequestException, ValueError) as error:
+        ).preview(payload)
+    except SchedulePrecisionApiError as error:
         st.error(f"出勤天數精算 Preview 失敗：{error}")
         return None
 
 
 def _render_attendance_result(preview):
-    if not preview:
+    if preview is None:
         st.warning("後端未回傳出勤天數精算結果。")
         return
     st.markdown("#### 出勤天數與完工日 Preview")
     columns = st.columns(4)
-    columns[0].metric("目標服務天數", preview.get("target_service_days", 0))
-    columns[1].metric("總日曆天數", preview.get("total_calendar_days", 0))
-    columns[2].metric("休假／請假天數", preview.get("rest_days_count", 0))
-    columns[3].metric("預計完工日", str(preview.get("actual_end_date", "")))
+    columns[0].metric("目標服務天數", preview.target_service_days)
+    columns[1].metric("總日曆天數", preview.total_calendar_days)
+    columns[2].metric("休假／請假天數", preview.rest_days_count)
+    columns[3].metric("預計完工日", str(preview.actual_end_date))
     
-    rest_days_count = preview.get("rest_days_count", 0)
-    day_by_day = preview.get("day_by_day", [])
+    rest_days_count = preview.rest_days_count
+    day_by_day = preview.day_by_day
     if rest_days_count > 0 and day_by_day:
         rest_dates = [
-            str(d.get("date", ""))
-            for d in day_by_day
-            if d.get("is_rest_day") and d.get("date")
+            str(day.date)
+            for day in day_by_day
+            if day.is_rest_day
         ]
         if rest_dates:
             st.info(f"休假日期清單：{', '.join(rest_dates)}")

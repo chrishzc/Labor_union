@@ -16,14 +16,13 @@ from typing import Any, Mapping
 import pymysql
 import requests
 
-from api.schemas.line_config import LineMenusConfig, RichMenuDefinition
+from subsystems.line.rich_menu_models import LineMenusConfig, RichMenuDefinition
 from domains.line.configuration import LineConfigurationKind
 from domains.line.identities import LineRichMenuPublicationId
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import IdempotencyReceipt
 from shared_kernel.ports import OutboxIntent
-from infrastructure.mysql.mysql_adapter import get_connection
-from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
+from subsystems.line.ports import unconfigured_connection_factory
 from subsystems.line.delivery_task_workflow import enqueue_line_task
 from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.message_configuration import configuration_definition
@@ -39,6 +38,36 @@ from subsystems.line.media_archive import (
     read_media_asset,
     store_generated_rich_menu_image,
 )
+
+
+get_connection = unconfigured_connection_factory
+
+
+def _unconfigured_unit_of_work() -> Any:
+    raise RuntimeError("LINE unit-of-work factory is not configured")
+
+
+open_line_unit_of_work = _unconfigured_unit_of_work
+line_unit_of_work_factory = None
+
+
+class _ConnectionUnitOfWork:
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def __enter__(self):
+        begin = getattr(self._connection, "begin", None)
+        if callable(begin):
+            begin()
+        return self
+
+    def __exit__(self, exception_type, exception, traceback):
+        if exception_type is not None:
+            self._connection.rollback()
+        return False
+
+    def commit(self) -> None:
+        self._connection.commit()
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -427,66 +456,63 @@ def create_publication_job(
 
     conn = get_connection()
     try:
-        conn.begin()
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                """
-                SELECT id FROM line_rich_menu_publish_previews
-                WHERE id=%s AND menu_config_id=%s AND config_revision=%s
-                  AND config_fingerprint=%s AND previewed_by_admin_user_id=%s
-                  AND publication_id IS NULL
-                FOR UPDATE
-                """,
-                (preview_id, menu_id, revision, fingerprint, requested_by_admin_user_id),
-            )
-            if not cursor.fetchone():
-                raise RichMenuPublicationConflictError(
-                    "請先預覽目前版本的 Rich Menu，再確認套用",
-                    code="rich_menu_preview_stale",
+        with (line_unit_of_work_factory or _ConnectionUnitOfWork)(conn) as unit_of_work:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT id FROM line_rich_menu_publish_previews
+                    WHERE id=%s AND menu_config_id=%s AND config_revision=%s
+                      AND config_fingerprint=%s AND previewed_by_admin_user_id=%s
+                      AND publication_id IS NULL
+                    FOR UPDATE
+                    """,
+                    (preview_id, menu_id, revision, fingerprint, requested_by_admin_user_id),
                 )
-            cursor.execute(
-                """
-                SELECT id FROM line_rich_menu_publications
-                WHERE menu_config_id=%s AND status IN ('pending','processing')
-                LIMIT 1 FOR UPDATE
-                """,
-                (menu_id,),
-            )
-            active = cursor.fetchone()
-            if active:
-                raise RichMenuPublicationConflictError(
-                    f"此選單已有發布工作 #{active['id']} 正在處理"
+                if not cursor.fetchone():
+                    raise RichMenuPublicationConflictError(
+                        "請先預覽目前版本的 Rich Menu，再確認套用",
+                        code="rich_menu_preview_stale",
+                    )
+                cursor.execute(
+                    """
+                    SELECT id FROM line_rich_menu_publications
+                    WHERE menu_config_id=%s AND status IN ('pending','processing')
+                    LIMIT 1 FOR UPDATE
+                    """,
+                    (menu_id,),
                 )
-            cursor.execute(
-                """
-                INSERT INTO line_rich_menu_publications (
-                    menu_config_id, audience_role, config_revision, config_snapshot,
-                    image_asset_id, requested_by_admin_user_id
-                ) VALUES (%s,%s,%s,%s,%s,%s)
-                """,
-                (
-                    menu.id,
-                    menu.audience_role,
-                    revision,
-                    json.dumps(menu.model_dump(mode="json"), ensure_ascii=False),
-                    menu.appearance.image_asset_id,
-                    requested_by_admin_user_id,
-                ),
-            )
-            publication_id = int(cursor.lastrowid)
-            cursor.execute(
-                """
-                UPDATE line_rich_menu_publish_previews
-                SET publication_id=%s, confirmed_at=UTC_TIMESTAMP()
-                WHERE id=%s
-                """,
-                (publication_id, preview_id),
-            )
-        conn.commit()
+                active = cursor.fetchone()
+                if active:
+                    raise RichMenuPublicationConflictError(
+                        f"此選單已有發布工作 #{active['id']} 正在處理"
+                    )
+                cursor.execute(
+                    """
+                    INSERT INTO line_rich_menu_publications (
+                        menu_config_id, audience_role, config_revision, config_snapshot,
+                        image_asset_id, requested_by_admin_user_id
+                    ) VALUES (%s,%s,%s,%s,%s,%s)
+                    """,
+                    (
+                        menu.id,
+                        menu.audience_role,
+                        revision,
+                        json.dumps(menu.model_dump(mode="json"), ensure_ascii=False),
+                        menu.appearance.image_asset_id,
+                        requested_by_admin_user_id,
+                    ),
+                )
+                publication_id = int(cursor.lastrowid)
+                cursor.execute(
+                    """
+                    UPDATE line_rich_menu_publish_previews
+                    SET publication_id=%s, confirmed_at=UTC_TIMESTAMP()
+                    WHERE id=%s
+                    """,
+                    (publication_id, preview_id),
+                )
+            unit_of_work.commit()
         return get_publication(publication_id)
-    except Exception:
-        conn.rollback()
-        raise
     finally:
         conn.close()
 
@@ -567,34 +593,31 @@ def list_publications(
 def retry_publication(publication_id: int) -> dict[str, Any]:
     conn = get_connection()
     try:
-        conn.begin()
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                "SELECT id,status FROM line_rich_menu_publications WHERE id=%s FOR UPDATE",
-                (publication_id,),
-            )
-            item = cursor.fetchone()
-            if not item:
-                raise RichMenuPublicationNotFoundError(
-                    f"找不到 Rich Menu 發布工作 #{publication_id}"
+        with (line_unit_of_work_factory or _ConnectionUnitOfWork)(conn) as unit_of_work:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(
+                    "SELECT id,status FROM line_rich_menu_publications WHERE id=%s FOR UPDATE",
+                    (publication_id,),
                 )
-            if item["status"] != "failed":
-                raise RichMenuPublicationConflictError("只有失敗的發布工作可以重試")
-            cursor.execute(
-                """
-                UPDATE line_rich_menu_publications
-                SET status='pending', retry_count=0, next_retry_at=NULL,
-                    processing_started_at=NULL, error_code=NULL, error_message=NULL,
-                    failed_at=NULL
-                WHERE id=%s
-                """,
-                (publication_id,),
-            )
-        conn.commit()
+                item = cursor.fetchone()
+                if not item:
+                    raise RichMenuPublicationNotFoundError(
+                        f"找不到 Rich Menu 發布工作 #{publication_id}"
+                    )
+                if item["status"] != "failed":
+                    raise RichMenuPublicationConflictError("只有失敗的發布工作可以重試")
+                cursor.execute(
+                    """
+                    UPDATE line_rich_menu_publications
+                    SET status='pending', retry_count=0, next_retry_at=NULL,
+                        processing_started_at=NULL, error_code=NULL, error_message=NULL,
+                        failed_at=NULL
+                    WHERE id=%s
+                    """,
+                    (publication_id,),
+                )
+            unit_of_work.commit()
         return get_publication(publication_id)
-    except Exception:
-        conn.rollback()
-        raise
     finally:
         conn.close()
 
@@ -636,42 +659,39 @@ def import_legacy_rich_menu_ids() -> int:
     imported = 0
     conn = get_connection()
     try:
-        conn.begin()
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            for menu in config.menus:
-                rich_menu_id = str(legacy.get(key_by_role[menu.audience_role]) or "").strip()
-                if not rich_menu_id:
-                    continue
-                cursor.execute(
-                    """
-                    SELECT id FROM line_rich_menu_publications
-                    WHERE audience_role=%s AND is_current=TRUE LIMIT 1 FOR UPDATE
-                    """,
-                    (menu.audience_role,),
-                )
-                if cursor.fetchone():
-                    continue
-                cursor.execute(
-                    """
-                    INSERT INTO line_rich_menu_publications (
-                        menu_config_id, audience_role, config_revision, config_snapshot,
-                        status, line_rich_menu_id, is_current, published_at
-                    ) VALUES (%s,%s,%s,%s,'published',%s,TRUE,UTC_TIMESTAMP())
-                    """,
-                    (
-                        menu.id,
-                        menu.audience_role,
-                        revision,
-                        json.dumps(menu.model_dump(mode="json"), ensure_ascii=False),
-                        rich_menu_id,
-                    ),
-                )
-                imported += 1
-        conn.commit()
+        with (line_unit_of_work_factory or _ConnectionUnitOfWork)(conn) as unit_of_work:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                for menu in config.menus:
+                    rich_menu_id = str(legacy.get(key_by_role[menu.audience_role]) or "").strip()
+                    if not rich_menu_id:
+                        continue
+                    cursor.execute(
+                        """
+                        SELECT id FROM line_rich_menu_publications
+                        WHERE audience_role=%s AND is_current=TRUE LIMIT 1 FOR UPDATE
+                        """,
+                        (menu.audience_role,),
+                    )
+                    if cursor.fetchone():
+                        continue
+                    cursor.execute(
+                        """
+                        INSERT INTO line_rich_menu_publications (
+                            menu_config_id, audience_role, config_revision, config_snapshot,
+                            status, line_rich_menu_id, is_current, published_at
+                        ) VALUES (%s,%s,%s,%s,'published',%s,TRUE,UTC_TIMESTAMP())
+                        """,
+                        (
+                            menu.id,
+                            menu.audience_role,
+                            revision,
+                            json.dumps(menu.model_dump(mode="json"), ensure_ascii=False),
+                            rich_menu_id,
+                        ),
+                    )
+                    imported += 1
+            unit_of_work.commit()
         return imported
-    except Exception:
-        conn.rollback()
-        raise
     finally:
         conn.close()
 
@@ -679,17 +699,18 @@ def import_legacy_rich_menu_ids() -> int:
 def recover_stale_publications() -> None:
     conn = get_connection()
     try:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                UPDATE line_rich_menu_publications
-                SET status='pending', processing_started_at=NULL,
-                    error_code='stale_recovered'
-                WHERE status='processing'
-                  AND processing_started_at < UTC_TIMESTAMP() - INTERVAL 10 MINUTE
-                """
-            )
-        conn.commit()
+        with (line_unit_of_work_factory or _ConnectionUnitOfWork)(conn) as unit_of_work:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE line_rich_menu_publications
+                    SET status='pending', processing_started_at=NULL,
+                        error_code='stale_recovered'
+                    WHERE status='processing'
+                      AND processing_started_at < UTC_TIMESTAMP() - INTERVAL 10 MINUTE
+                    """
+                )
+            unit_of_work.commit()
     finally:
         conn.close()
 
@@ -713,35 +734,32 @@ def next_publication_run_at() -> datetime | None:
 def _claim_publications(limit: int = 2) -> list[dict[str, Any]]:
     conn = get_connection()
     try:
-        conn.begin()
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                """
-                SELECT * FROM line_rich_menu_publications
-                WHERE status='pending'
-                  AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP())
-                ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED
-                """,
-                (limit,),
-            )
-            items = list(cursor.fetchall())
-            for item in items:
+        with (line_unit_of_work_factory or _ConnectionUnitOfWork)(conn) as unit_of_work:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(
                     """
-                    UPDATE line_rich_menu_publications
-                    SET status='processing', processing_started_at=UTC_TIMESTAMP(),
-                        started_at=COALESCE(started_at,UTC_TIMESTAMP())
-                    WHERE id=%s
+                    SELECT * FROM line_rich_menu_publications
+                    WHERE status='pending'
+                      AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP())
+                    ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED
                     """,
-                    (item["id"],),
+                    (limit,),
                 )
-        conn.commit()
+                items = list(cursor.fetchall())
+                for item in items:
+                    cursor.execute(
+                        """
+                        UPDATE line_rich_menu_publications
+                        SET status='processing', processing_started_at=UTC_TIMESTAMP(),
+                            started_at=COALESCE(started_at,UTC_TIMESTAMP())
+                        WHERE id=%s
+                        """,
+                        (item["id"],),
+                    )
+            unit_of_work.commit()
         for item in items:
             item["config_snapshot"] = _decode_json(item["config_snapshot"])
         return items
-    except Exception:
-        conn.rollback()
-        raise
     finally:
         conn.close()
 
@@ -850,16 +868,6 @@ def _publish_to_line(item: dict[str, Any]) -> tuple[str, int]:
                 menu,
                 created_by_admin_user_id=item.get("requested_by_admin_user_id"),
             )
-            conn = get_connection()
-            try:
-                with conn.cursor() as cursor:
-                    cursor.execute(
-                        "UPDATE line_rich_menu_publications SET image_asset_id=%s WHERE id=%s",
-                        (asset["id"], item["id"]),
-                    )
-                conn.commit()
-            finally:
-                conn.close()
             item["image_asset_id"] = asset["id"]
     else:
         asset = get_media_asset(int(appearance["image_asset_id"]))
@@ -931,55 +939,52 @@ def _write_legacy_id(audience_role: str, rich_menu_id: str) -> None:
 def _complete_publication(item: dict[str, Any], rich_menu_id: str, asset_id: int) -> None:
     conn = get_connection()
     try:
-        conn.begin()
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                """
-                SELECT line_rich_menu_id FROM line_rich_menu_publications
-                WHERE menu_config_id=%s AND is_current=TRUE
-                ORDER BY id DESC LIMIT 1 FOR UPDATE
-                """,
-                (item["menu_config_id"],),
-            )
-            previous = cursor.fetchone()
-            previous_id = previous["line_rich_menu_id"] if previous else None
-            cursor.execute(
-                "UPDATE line_rich_menu_publications SET is_current=FALSE WHERE menu_config_id=%s",
-                (item["menu_config_id"],),
-            )
-            cursor.execute(
-                """
-                UPDATE line_rich_menu_publications
-                SET status='published', line_rich_menu_id=%s,
-                    previous_line_rich_menu_id=%s, image_asset_id=%s,
-                    is_current=TRUE, published_at=UTC_TIMESTAMP(),
-                    processing_started_at=NULL, next_retry_at=NULL,
-                    error_code=NULL, error_message=NULL
-                WHERE id=%s
-                """,
-                (rich_menu_id, previous_id, asset_id, item["id"]),
-            )
-            if item["audience_role"] in {"staff", "union_staff"}:
+        with (line_unit_of_work_factory or _ConnectionUnitOfWork)(conn) as unit_of_work:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(
                     """
-                    SELECT line_user_id FROM line_users
-                    WHERE role=%s AND status='active'
+                    SELECT line_rich_menu_id FROM line_rich_menu_publications
+                    WHERE menu_config_id=%s AND is_current=TRUE
+                    ORDER BY id DESC LIMIT 1 FOR UPDATE
                     """,
-                    (item["audience_role"],),
+                    (item["menu_config_id"],),
                 )
-                for user in cursor.fetchall():
-                    user_id = user["line_user_id"]
-                    enqueue_line_task(
-                        cursor,
-                        to_user_id=user_id,
-                        task_type="rich_menu_link",
-                        payload={"rich_menu_id": rich_menu_id},
-                        idempotency_key=f"rich-menu-publication:{item['id']}:{user_id}",
+                previous = cursor.fetchone()
+                previous_id = previous["line_rich_menu_id"] if previous else None
+                cursor.execute(
+                    "UPDATE line_rich_menu_publications SET is_current=FALSE WHERE menu_config_id=%s",
+                    (item["menu_config_id"],),
+                )
+                cursor.execute(
+                    """
+                    UPDATE line_rich_menu_publications
+                    SET status='published', line_rich_menu_id=%s,
+                        previous_line_rich_menu_id=%s, image_asset_id=%s,
+                        is_current=TRUE, published_at=UTC_TIMESTAMP(),
+                        processing_started_at=NULL, next_retry_at=NULL,
+                        error_code=NULL, error_message=NULL
+                    WHERE id=%s
+                    """,
+                    (rich_menu_id, previous_id, asset_id, item["id"]),
+                )
+                if item["audience_role"] in {"staff", "union_staff"}:
+                    cursor.execute(
+                        """
+                        SELECT line_user_id FROM line_users
+                        WHERE role=%s AND status='active'
+                        """,
+                        (item["audience_role"],),
                     )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
+                    for user in cursor.fetchall():
+                        user_id = user["line_user_id"]
+                        enqueue_line_task(
+                            cursor,
+                            to_user_id=user_id,
+                            task_type="rich_menu_link",
+                            payload={"rich_menu_id": rich_menu_id},
+                            idempotency_key=f"rich-menu-publication:{item['id']}:{user_id}",
+                        )
+            unit_of_work.commit()
     finally:
         conn.close()
     try:
@@ -997,31 +1002,32 @@ def _fail_publication(item: dict[str, Any], exc: Exception) -> None:
     will_retry = retryable and retry_count <= int(item.get("max_retries") or 0)
     conn = get_connection()
     try:
-        with conn.cursor() as cursor:
-            if will_retry:
-                delay = min(60 * (2 ** (retry_count - 1)), 3600)
-                cursor.execute(
-                    """
-                    UPDATE line_rich_menu_publications
-                    SET status='pending', retry_count=%s,
-                        next_retry_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL %s SECOND),
-                        processing_started_at=NULL, error_code=%s, error_message=%s
-                    WHERE id=%s
-                    """,
-                    (retry_count, delay, code, str(exc)[:4000], item["id"]),
-                )
-            else:
-                cursor.execute(
-                    """
-                    UPDATE line_rich_menu_publications
-                    SET status='failed', retry_count=%s, failed_at=UTC_TIMESTAMP(),
-                        processing_started_at=NULL, next_retry_at=NULL,
-                        error_code=%s, error_message=%s
-                    WHERE id=%s
-                    """,
-                    (retry_count, code, str(exc)[:4000], item["id"]),
-                )
-        conn.commit()
+        with (line_unit_of_work_factory or _ConnectionUnitOfWork)(conn) as unit_of_work:
+            with conn.cursor() as cursor:
+                if will_retry:
+                    delay = min(60 * (2 ** (retry_count - 1)), 3600)
+                    cursor.execute(
+                        """
+                        UPDATE line_rich_menu_publications
+                        SET status='pending', retry_count=%s,
+                            next_retry_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL %s SECOND),
+                            processing_started_at=NULL, error_code=%s, error_message=%s
+                        WHERE id=%s
+                        """,
+                        (retry_count, delay, code, str(exc)[:4000], item["id"]),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE line_rich_menu_publications
+                        SET status='failed', retry_count=%s, failed_at=UTC_TIMESTAMP(),
+                            processing_started_at=NULL, next_retry_at=NULL,
+                            error_code=%s, error_message=%s
+                        WHERE id=%s
+                        """,
+                        (retry_count, code, str(exc)[:4000], item["id"]),
+                    )
+            unit_of_work.commit()
     finally:
         conn.close()
 

@@ -28,7 +28,6 @@ from api.dependencies.finance_import import (
     get_refund_return_review_application,
 )
 from api.schemas.base import BaseResponse
-from api.schemas.jobs import JobResponse
 from api.dependencies.jobs import (
     durable_job_conflict_http_error,
     get_durable_job_application,
@@ -102,13 +101,6 @@ from subsystems.finance_import.refund_return_review_workflow import (
 )
 
 router = APIRouter(prefix="/api/v1/finance-import", tags=["Finance Import"])
-_FINANCE_JOB_COMMAND_TYPES = frozenset(
-    {
-        "finance_import_historical_reprocess_apply",
-        "finance_import_batch_apply",
-        "finance_import_correction_apply",
-    }
-)
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
 _MAXIMUM_WORKBOOK_BYTES = 20 * 1024 * 1024
 _CorrelationHeader = Annotated[
@@ -121,26 +113,29 @@ _IdempotencyHeader = Annotated[
 ]
 
 
-@router.get("/jobs/{job_id}", response_model=BaseResponse[JobResponse])
+@router.get("/jobs/{job_id}")
 def query_finance_import_job(
     job_id: str,
     principal: AdminPrincipal = Depends(require_admin),
-    repository: BackgroundJobRepository = Depends(get_job_repository),
-) -> BaseResponse[JobResponse]:
+) -> None:
+    """Retired duplicate job-status query; use the bounded observation endpoint."""
     del principal
-    correlation_id = f"finance-import-job:{job_id}"
-    job = repository.get_job(job_id)
-    if job is None or job.command_type not in _FINANCE_JOB_COMMAND_TYPES:
-        raise typed_http_error(
-            404,
-            "not_found",
-            "finance_import_job_not_found",
-            "Finance Import job was not found.",
-            correlation_id,
-        )
-    return BaseResponse(
-        data=_job_response(job, correlation_id),
-        message="成功取得 Finance Import job 狀態",
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "error": {
+                "category": "not_found",
+                "code": "finance_import_job_status_endpoint_retired",
+                "message": "Finance Import job 狀態查詢已收斂至通用有界 observation。",
+                "field_errors": [],
+                "domain_blockers": [
+                    "replacement_identifier:/api/v1/jobs/{job_id}/observation"
+                ],
+                "retryable": False,
+                "correlation_id": f"finance-import-job-retired:{job_id}",
+                "current_version": None,
+            }
+        },
     )
 
 

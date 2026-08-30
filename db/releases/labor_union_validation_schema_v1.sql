@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-08-28-v18
+-- Release: labor-union-validation-schema-2026-08-30-v20
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -19528,3 +19528,323 @@ BEFORE DELETE ON historical_baseline_v2_post_commit_readbacks
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'historical_baseline_v2_post_commit_readbacks records cannot be deleted';
 -- END SOURCE: db/schema_parts/1014_historical_baseline_projector_v2.sql
+
+-- BEGIN SOURCE: db/schema_parts/1015_controlled_file_reference_finalize_leases.sql
+-- File: 1015_controlled_file_reference_finalize_leases.sql
+-- Description: 1015 additive reference-aware finalize, Scheduling bridge and leases.
+-- This part is schema-only: no seed, backfill, provider operation, or byte deletion.
+-- Pre-successor rows remain legacy-readable; controlled_file_object_id is not backfilled.
+-- finalize_state='available' means bytes passed digest/size integrity verification.
+
+ALTER TABLE scheduling_service_day_log_attachments
+    MODIFY COLUMN provider_media_id VARCHAR(191) NULL,
+    ADD COLUMN controlled_file_object_id BIGINT UNSIGNED NULL,
+    ADD UNIQUE KEY uq_scheduling_service_day_log_attachment_controlled_file (
+        controlled_file_object_id
+    ),
+    ADD CONSTRAINT fk_scheduling_service_day_log_attachment_controlled_file
+        FOREIGN KEY (controlled_file_object_id) REFERENCES controlled_file_objects(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    ADD CONSTRAINT chk_scheduling_service_day_log_attachment_reference_source CHECK (
+        (provider_media_id IS NOT NULL AND controlled_file_object_id IS NULL)
+        OR (provider_media_id IS NULL AND controlled_file_object_id IS NOT NULL)
+    );
+
+CREATE TABLE IF NOT EXISTS controlled_file_finalize_intents (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    finalize_id VARCHAR(64) NOT NULL,
+    staging_object_id BIGINT UNSIGNED NOT NULL,
+    controlled_file_object_id BIGINT UNSIGNED NOT NULL,
+    expected_sha256 CHAR(64) NOT NULL,
+    finalize_state ENUM(
+        'pending', 'processing', 'available', 'reconciliation_required'
+    ) NOT NULL DEFAULT 'pending',
+    attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+    claimed_by VARCHAR(191) NULL,
+    claim_token VARCHAR(191) NULL,
+    claimed_at_utc DATETIME(6) NULL,
+    observed_sha256 CHAR(64) NULL,
+    observed_size_bytes BIGINT UNSIGNED NULL,
+    last_error_code VARCHAR(128) NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    available_at_utc DATETIME(6) NULL,
+    failed_at_utc DATETIME(6) NULL,
+    UNIQUE KEY uq_controlled_file_finalize_id (finalize_id),
+    UNIQUE KEY uq_controlled_file_finalize_staging (staging_object_id),
+    UNIQUE KEY uq_controlled_file_finalize_object (controlled_file_object_id),
+    INDEX idx_controlled_file_finalize_claim (
+        finalize_state, claimed_at_utc, id
+    ),
+    CONSTRAINT fk_controlled_file_finalize_staging FOREIGN KEY (staging_object_id)
+        REFERENCES controlled_file_staging_objects(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_controlled_file_finalize_object FOREIGN KEY (controlled_file_object_id)
+        REFERENCES controlled_file_objects(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_controlled_file_finalize_identity CHECK (
+        finalize_id REGEXP '^cff_[0-9a-f]{32}$'
+        AND expected_sha256 REGEXP '^[0-9a-f]{64}$'
+        AND (claimed_by IS NULL OR CHAR_LENGTH(TRIM(claimed_by)) > 0)
+        AND (claim_token IS NULL OR CHAR_LENGTH(TRIM(claim_token)) > 0)
+        AND attempt_count >= 0
+    ),
+    CONSTRAINT chk_controlled_file_finalize_observation CHECK (
+        (observed_sha256 IS NULL AND observed_size_bytes IS NULL)
+        OR (observed_sha256 REGEXP '^[0-9a-f]{64}$' AND observed_size_bytes > 0)
+    ),
+    CONSTRAINT chk_controlled_file_finalize_state CHECK (
+        (finalize_state = 'pending'
+            AND claimed_by IS NULL AND claimed_at_utc IS NULL
+            AND available_at_utc IS NULL AND failed_at_utc IS NULL)
+        OR (finalize_state = 'processing'
+            AND claimed_by IS NOT NULL AND claimed_at_utc IS NOT NULL
+            AND available_at_utc IS NULL AND failed_at_utc IS NULL)
+        OR (finalize_state = 'available'
+            AND available_at_utc IS NOT NULL AND failed_at_utc IS NULL
+            AND observed_sha256 IS NOT NULL AND observed_size_bytes > 0)
+        OR (finalize_state = 'reconciliation_required'
+            AND failed_at_utc IS NOT NULL AND last_error_code IS NOT NULL)
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS controlled_file_references (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    reference_id VARCHAR(64) NOT NULL,
+    controlled_file_object_id BIGINT UNSIGNED NOT NULL,
+    service_day_log_attachment_id BIGINT UNSIGNED NOT NULL,
+    reference_kind ENUM('scheduling_service_day_log_attachment') NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_controlled_file_reference_id (reference_id),
+    UNIQUE KEY uq_controlled_file_reference_object (controlled_file_object_id),
+    UNIQUE KEY uq_controlled_file_reference_attachment (service_day_log_attachment_id),
+    CONSTRAINT fk_controlled_file_reference_object FOREIGN KEY (controlled_file_object_id)
+        REFERENCES controlled_file_objects(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_controlled_file_reference_attachment FOREIGN KEY (
+        service_day_log_attachment_id
+    ) REFERENCES scheduling_service_day_log_attachments(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_controlled_file_reference_identity CHECK (
+        reference_id REGEXP '^cfrf_[0-9a-f]{32}$'
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS controlled_file_leases (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    lease_id VARCHAR(64) NOT NULL,
+    staging_object_id BIGINT UNSIGNED NOT NULL,
+    holder VARCHAR(191) NOT NULL,
+    lease_state ENUM('active', 'released', 'expired') NOT NULL DEFAULT 'active',
+    acquired_at_utc DATETIME(6) NOT NULL,
+    expires_at_utc DATETIME(6) NOT NULL,
+    released_at_utc DATETIME(6) NULL,
+    active_staging_object_id BIGINT UNSIGNED GENERATED ALWAYS AS (
+        CASE WHEN lease_state = 'active' THEN staging_object_id ELSE NULL END
+    ) STORED,
+    UNIQUE KEY uq_controlled_file_lease_id (lease_id),
+    UNIQUE KEY uq_controlled_file_active_staging (active_staging_object_id),
+    INDEX idx_controlled_file_lease_expiry (lease_state, expires_at_utc, id),
+    CONSTRAINT fk_controlled_file_lease_staging FOREIGN KEY (staging_object_id)
+        REFERENCES controlled_file_staging_objects(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_controlled_file_lease_identity CHECK (
+        lease_id REGEXP '^cfl_[0-9a-f]{32}$'
+        AND CHAR_LENGTH(TRIM(holder)) > 0
+        AND expires_at_utc > acquired_at_utc
+    ),
+    CONSTRAINT chk_controlled_file_lease_state CHECK (
+        (lease_state = 'active' AND released_at_utc IS NULL)
+        OR (lease_state IN ('released', 'expired') AND released_at_utc IS NOT NULL)
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TRIGGER trg_controlled_file_references_before_update
+BEFORE UPDATE ON controlled_file_references
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'controlled_file_references cannot be updated';
+
+CREATE TRIGGER trg_controlled_file_references_before_delete
+BEFORE DELETE ON controlled_file_references
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'controlled_file_references cannot be deleted';
+-- END SOURCE: db/schema_parts/1015_controlled_file_reference_finalize_leases.sql
+
+-- BEGIN SOURCE: db/schema_parts/1016_current_anomaly_issues.sql
+-- Additive current-only anomaly successor.
+-- This part deliberately creates no occurrence, workflow, claim, resolve,
+-- reclassification, timeline, history, or anomaly-specific delivery table.
+CREATE TABLE IF NOT EXISTS current_anomaly_issues (
+    issue_key CHAR(67) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    definition_code VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    owner_domain VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    owner_root_type VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    subject_type VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    subject_id VARCHAR(191) NOT NULL,
+    subject_identity JSON NOT NULL,
+    owner_snapshot_token VARCHAR(191) NOT NULL,
+    owner_version BIGINT UNSIGNED NOT NULL,
+    severity ENUM('warning', 'blocking') NOT NULL,
+    blocking TINYINT(1) NOT NULL,
+    details_version SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+    details JSON NOT NULL,
+    episode_started_at DATETIME(6) NOT NULL,
+    last_verified_at DATETIME(6) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (issue_key),
+    INDEX idx_current_anomaly_owner (
+        owner_domain, owner_root_type, subject_type, subject_id, issue_key
+    ),
+    INDEX idx_current_anomaly_definition (
+        definition_code, blocking, severity, episode_started_at, issue_key
+    ),
+    CONSTRAINT chk_current_anomaly_issue_key
+        CHECK (issue_key REGEXP '^ci_[0-9a-f]{64}$'),
+    CONSTRAINT chk_current_anomaly_subject_identity
+        CHECK (JSON_TYPE(subject_identity) = 'OBJECT'),
+    CONSTRAINT chk_current_anomaly_details
+        CHECK (details_version = 1 AND JSON_TYPE(details) = 'OBJECT'),
+    CONSTRAINT chk_current_anomaly_boolean
+        CHECK (blocking IN (0, 1)),
+    CONSTRAINT chk_current_anomaly_time_order
+        CHECK (last_verified_at >= episode_started_at),
+    CONSTRAINT chk_current_anomaly_text
+        CHECK (
+            CHAR_LENGTH(TRIM(definition_code)) > 0
+            AND CHAR_LENGTH(TRIM(owner_domain)) > 0
+            AND CHAR_LENGTH(TRIM(owner_root_type)) > 0
+            AND CHAR_LENGTH(TRIM(subject_type)) > 0
+            AND CHAR_LENGTH(TRIM(subject_id)) > 0
+            AND CHAR_LENGTH(TRIM(owner_snapshot_token)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema_parts/1016_current_anomaly_issues.sql
+
+-- BEGIN SOURCE: db/schema_parts/1017_client_hcm_correction_versioning.sql
+-- File: 1017_client_hcm_correction_versioning.sql
+-- Description: Client-owned version/event/receipt evidence for HCM corrections.
+-- Additive only. No data backfill, seed, drop, or Orders service_type column.
+
+ALTER TABLE clients
+    ADD COLUMN client_hcm_correction_version BIGINT UNSIGNED NOT NULL DEFAULT 0
+    COMMENT 'Client-owned HCM correction aggregate version';
+
+CREATE TABLE IF NOT EXISTS client_hcm_correction_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    event_identity VARCHAR(191) NOT NULL,
+    client_id INT NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    review_identity VARCHAR(191) NOT NULL,
+    source_event_identity VARCHAR(191) NOT NULL,
+    field_path VARCHAR(191) NOT NULL,
+    source_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    expected_client_version BIGINT UNSIGNED NOT NULL,
+    resulting_client_version BIGINT UNSIGNED NOT NULL,
+    before_values JSON NOT NULL,
+    after_values JSON NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_client_hcm_correction_event_identity (event_identity),
+    INDEX idx_client_hcm_correction_event_client (client_id, id),
+    INDEX idx_client_hcm_correction_event_review (review_identity, id),
+    CONSTRAINT fk_client_hcm_correction_event_client
+        FOREIGN KEY (client_id) REFERENCES clients(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_client_hcm_correction_event_case
+        FOREIGN KEY (case_no) REFERENCES clients(case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_client_hcm_correction_event_versions
+        CHECK (resulting_client_version = expected_client_version + 1),
+    CONSTRAINT chk_client_hcm_correction_event_fingerprint
+        CHECK (source_fingerprint REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_client_hcm_correction_event_json
+        CHECK (JSON_TYPE(before_values) = 'OBJECT' AND JSON_TYPE(after_values) = 'OBJECT'),
+    CONSTRAINT chk_client_hcm_correction_event_text
+        CHECK (
+            CHAR_LENGTH(TRIM(event_identity)) > 0
+            AND CHAR_LENGTH(TRIM(review_identity)) > 0
+            AND CHAR_LENGTH(TRIM(source_event_identity)) > 0
+            AND CHAR_LENGTH(TRIM(field_path)) > 0
+            AND CHAR_LENGTH(TRIM(actor)) > 0
+            AND CHAR_LENGTH(TRIM(reason)) > 0
+            AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS client_hcm_correction_receipts (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    idempotency_key VARCHAR(191) NOT NULL,
+    command_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    correction_event_id BIGINT NOT NULL,
+    result_snapshot JSON NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_client_hcm_correction_receipt_key (idempotency_key),
+    UNIQUE KEY uq_client_hcm_correction_receipt_event (correction_event_id),
+    CONSTRAINT fk_client_hcm_correction_receipt_event
+        FOREIGN KEY (correction_event_id) REFERENCES client_hcm_correction_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_client_hcm_correction_receipt_fingerprint
+        CHECK (command_fingerprint REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_client_hcm_correction_receipt_snapshot
+        CHECK (JSON_TYPE(result_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_client_hcm_correction_events_before_update;
+CREATE TRIGGER trg_client_hcm_correction_events_before_update
+BEFORE UPDATE ON client_hcm_correction_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'client HCM correction events cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_client_hcm_correction_events_before_delete;
+CREATE TRIGGER trg_client_hcm_correction_events_before_delete
+BEFORE DELETE ON client_hcm_correction_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'client HCM correction events cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_client_hcm_correction_receipts_before_update;
+CREATE TRIGGER trg_client_hcm_correction_receipts_before_update
+BEFORE UPDATE ON client_hcm_correction_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'client HCM correction receipts cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_client_hcm_correction_receipts_before_delete;
+CREATE TRIGGER trg_client_hcm_correction_receipts_before_delete
+BEFORE DELETE ON client_hcm_correction_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'client HCM correction receipts cannot be deleted';
+-- END SOURCE: db/schema_parts/1017_client_hcm_correction_versioning.sql
+
+-- BEGIN SOURCE: db/schema_parts/1018_hcm_resubmission_canonical_review_version.sql
+-- File: 1018_hcm_resubmission_canonical_review_version.sql
+-- Description: Canonical HCM review identity/version evidence for correction events.
+-- Additive only. Existing 193/201 artifacts are immutable; no backfill.
+
+ALTER TABLE case_import_hcm_correction_events
+    MODIFY COLUMN prior_occurrence_id BIGINT NULL,
+    ADD COLUMN canonical_review_identity VARCHAR(191) NULL
+        COMMENT 'Immutable Case Import HCM review identity; NULL only for historical events',
+    ADD COLUMN expected_review_version BIGINT UNSIGNED NULL,
+    ADD COLUMN resulting_review_version BIGINT UNSIGNED NULL,
+    ADD UNIQUE KEY uq_hcm_correction_event_review_version
+        (canonical_review_identity, resulting_review_version),
+    ADD INDEX idx_hcm_correction_event_canonical_review
+        (canonical_review_identity, id),
+    ADD CONSTRAINT fk_hcm_correction_event_canonical_review
+        FOREIGN KEY (canonical_review_identity)
+        REFERENCES case_import_hcm_review_rows(review_identity)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    ADD CONSTRAINT chk_hcm_correction_event_review_version
+        CHECK (
+            (canonical_review_identity IS NULL
+             AND expected_review_version IS NULL
+             AND resulting_review_version IS NULL)
+            OR
+            (canonical_review_identity IS NOT NULL
+             AND CHAR_LENGTH(TRIM(canonical_review_identity)) > 0
+             AND expected_review_version IS NOT NULL
+             AND resulting_review_version = expected_review_version + 1)
+        );
+-- END SOURCE: db/schema_parts/1018_hcm_resubmission_canonical_review_version.sql

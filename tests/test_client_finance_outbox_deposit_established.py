@@ -1,7 +1,6 @@
 from subsystems.orders.client_finance_outbox_consumer import (
     _activate_reconfirmation_if_current,
     _project_deposit_established,
-    _requeue_delivery,
 )
 
 
@@ -48,17 +47,6 @@ def test_deposit_consumer_skips_actual_start_control_when_service_has_not_starte
     )
 
     assert len(connection.cursor_instance.executed) == 1
-
-
-def test_incomplete_delivery_requeue_never_mutates_the_order_directly():
-    connection = _Connection(rowcounts=(1,))
-
-    _requeue_delivery(connection, 8)
-
-    statement, parameters = connection.cursor_instance.executed[0]
-    assert "UPDATE client_finance_outbox" in statement
-    assert "UPDATE orders" not in statement
-    assert parameters == (8,)
 
 
 class _Connection:

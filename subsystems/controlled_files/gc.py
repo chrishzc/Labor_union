@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from threading import RLock
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -48,6 +49,7 @@ class ControlledFileGcDisposition(str, Enum):
     SKIPPED_LEASED = "skipped_leased"
     SKIPPED_GRACE_PERIOD = "skipped_grace_period"
     SKIPPED_REGISTERED = "skipped_registered"
+    SKIPPED_ALREADY_CLEANED = "skipped_already_cleaned"
     CLEANED = "cleaned"
     BLOCKED = "blocked"
 
@@ -75,6 +77,8 @@ class ControlledFileGcCandidate:
             raise ValueError("controlled file staging expiry must include timezone")
         if self.reference_count < 0:
             raise ValueError("controlled file staging reference count must not be negative")
+        if not isinstance(self.active_lease, bool):
+            raise ValueError("controlled file staging lease state must be boolean")
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,8 +140,19 @@ class ControlledFileStagingGarbageCollector:
         self._cleanup = cleanup_workflow
         self._clock = clock
         self._runs: dict[str, tuple[PreviewFingerprint, ControlledFileGcReceipt]] = {}
+        # A worker process can receive duplicate jobs before its durable
+        # cleanup terminal fact is visible.  Serialize the small bounded pass
+        # and remember successful local cleanups so two keys cannot issue two
+        # byte-delete attempts for the same candidate.  The repository remains
+        # the cross-process authority.
+        self._lock = RLock()
+        self._cleaned_staging: set[str] = set()
 
     def run(self, command: GarbageCollectControlledFileStaging) -> ControlledFileGcReceipt:
+        with self._lock:
+            return self._run(command)
+
+    def _run(self, command: GarbageCollectControlledFileStaging) -> ControlledFileGcReceipt:
         observed_at = _utc(self._clock.now())
         fingerprint = fingerprint_payload(
             {
@@ -161,6 +176,15 @@ class ControlledFileStagingGarbageCollector:
         eligible = cleaned = blocked = 0
         cutoff = observed_at - command.grace_period
         for candidate in candidates[: command.limit]:
+            if candidate.staging_id in self._cleaned_staging:
+                items.append(
+                    ControlledFileGcItem(
+                        candidate.staging_id,
+                        ControlledFileGcDisposition.SKIPPED_ALREADY_CLEANED,
+                        "already_cleaned_in_process",
+                    )
+                )
+                continue
             disposition, reason = _eligibility(candidate, cutoff)
             if disposition is ControlledFileGcDisposition.SKIPPED_REGISTERED:
                 items.append(ControlledFileGcItem(candidate.staging_id, disposition, reason))
@@ -192,6 +216,7 @@ class ControlledFileStagingGarbageCollector:
             else:
                 if cleanup.outcome is ControlledFileCleanupOutcome.CLEANED:
                     cleaned += 1
+                    self._cleaned_staging.add(candidate.staging_id)
                 items.append(ControlledFileGcItem(candidate.staging_id, ControlledFileGcDisposition.CLEANED, cleanup.outcome.value))
 
         outcome = (

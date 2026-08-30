@@ -175,17 +175,41 @@ class CaseImportWorkflow:
         except Exception as error:
             raise _transaction_error(command, retryable=False) from error
 
+    def apply_in_current_uow(self, command: ApplyCaseImport) -> CaseImportReceipt:
+        """Apply while borrowing an outer application-owned transaction.
+
+        Cross-domain Case Import compositions (for example HCM reconciliation)
+        must keep the Case Import receipt and the owning-domain mutation in the
+        same transaction.  The regular ``apply`` entry point remains the
+        standalone command boundary for callers that need it; this entry point
+        deliberately performs no begin/commit/rollback itself.
+        """
+        fingerprint = _command_fingerprint(command)
+        try:
+            return self._apply_current_uow(command, fingerprint)
+        except CaseImportWorkflowError:
+            raise
+        except CaseImportDomainError as error:
+            raise _domain_error(command.correlation_id, error) from error
+        except CaseImportStorageError as error:
+            raise _transaction_error(command, error.retryable) from error
+        except Exception as error:
+            raise _transaction_error(command, retryable=False) from error
+
     def _apply_transaction(self, command, command_fingerprint):
         with self._unit_of_work_factory() as unit_of_work:
-            claim = self._repository.claim_command(command, command_fingerprint)
-            _raise_if_claim_mismatched(command, claim)
-            replay = self._find_replay(command, command_fingerprint)
-            if replay is not None:
-                return replay
-            _raise_if_claim_incomplete(command, claim)
-            receipt = self._apply_fresh(command, command_fingerprint)
+            receipt = self._apply_current_uow(command, command_fingerprint)
             unit_of_work.commit()
             return receipt
+
+    def _apply_current_uow(self, command, command_fingerprint):
+        claim = self._repository.claim_command(command, command_fingerprint)
+        _raise_if_claim_mismatched(command, claim)
+        replay = self._find_replay(command, command_fingerprint)
+        if replay is not None:
+            return replay
+        _raise_if_claim_incomplete(command, claim)
+        return self._apply_fresh(command, command_fingerprint)
 
     def _find_replay(self, command, command_fingerprint):
         stored = self._repository.find_receipt(command.idempotency_key)

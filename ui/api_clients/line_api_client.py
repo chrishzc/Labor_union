@@ -13,6 +13,9 @@ from typing import Any
 
 import requests
 from dotenv import load_dotenv
+from pydantic import ValidationError
+
+from api.schemas.line_admin import LineAdminHealthView
 from ui.pages.shared import build_cloud_run_invocation_headers, resolve_api_base_url
 
 
@@ -211,8 +214,16 @@ class LineAdminApiClient:
     def logout(self, token: str) -> None:
         self._request("POST", "/api/v1/admin/auth/logout", token=token)
 
-    def health(self, token: str | None) -> dict[str, Any]:
-        return self._request("GET", "/api/v1/line/admin/health", token=token)
+    def health(self, token: str | None) -> LineAdminHealthView:
+        payload = self._request("GET", "/api/v1/line/admin/health", token=token)
+        try:
+            return LineAdminHealthView.model_validate(payload)
+        except ValidationError as exc:
+            raise LineAdminApiError(
+                "LINE 健康狀態回應格式不符合契約。",
+                category="schema",
+                code="line_admin_health_response_invalid",
+            ) from exc
 
     def capabilities(self, token: str | None) -> dict[str, Any]:
         return self._request("GET", "/api/v1/line/admin/capabilities", token=token)

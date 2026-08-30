@@ -8,7 +8,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-
 _FIELD_TARGETS = {
     "報名時間(建檔)": ("clients.created_at",),
     "IP位址": ("clients.ip_address",),
@@ -16,7 +15,6 @@ _FIELD_TARGETS = {
     "性別": ("clients.gender",),
     "行動電話": ("clients.phone",),
     "縣市": ("clients.city",),
-    "身分資格": ("clients.identity_status",),
     "預產期/預計服務開始月份": ("clients.due_month",),
     "居住型態": ("clients.residence_type",),
     "生產方式": ("clients.delivery_type",),
@@ -29,27 +27,30 @@ _FIELD_TARGETS = {
     ),
     "預計服務日期": ("orders.start_date", "orders.end_date"),
     "希望服務天數": ("orders.service_days", "orders.end_date"),
-    "服務方式": ("orders.service_type", "orders.end_date"),
+    # 服務方式 is a Client root fact.  The derived Order end date belongs to
+    # Orders terms/lifecycle and is never part of this Client correction.
+    "服務方式": ("clients.service_type",),
 }
 
 
 @dataclass(frozen=True, slots=True)
 class HcmResubmissionFacts:
-    occurrence_identity: str
-    occurrence_id: int
+    review_identity: str
     logical_code: str
     field_path: str
     case_no: str
     client_id: int
     review_binding_id: int
     prior_source_event_identity: str
-    occurrence_version: int
+    review_version: int
     root_fingerprint: str
+    client_version: int = 0
+    order_version: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class HcmFieldCorrectionCandidate:
-    occurrence_identity: str
+    review_identity: str
     case_no: str
     source_field: str
     target_fields: tuple[str, ...]
@@ -81,7 +82,7 @@ def build_hcm_field_correction_candidate(
     if set(target_values) != set(targets) or any(value is None for value in target_values.values()):
         raise ValueError("hcm_resubmission_target_values_invalid")
     return HcmFieldCorrectionCandidate(
-        occurrence_identity=_required_text(facts.occurrence_identity, "occurrence identity"),
+        review_identity=_required_text(facts.review_identity, "review identity"),
         case_no=_required_text(facts.case_no, "case number"),
         source_field=field,
         target_fields=targets,

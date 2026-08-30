@@ -11,12 +11,17 @@ from typing import Callable
 
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 from domains.case_import.staff_historical_adoption import plan_staff_scalar_merge
-from infrastructure.mysql.staff_historical_adoption_repository import MySqlStaffHistoricalAdoptionRepository
-from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.case_import.beclass_review_intake import masked_review_identifier, record_invalid_beclass_row
 from subsystems.case_import.staff_historical_adoption import adopt_existing_staff, record_created_staff_adoption, record_staff_adoption_outcome
 from subsystems.case_import.staff_historical_workbook import StaffHistoricalWorkbook, StaffHistoricalWorkbookRow, load_staff_historical_workbook
+
+
+def _missing_repository(_connection):
+    raise RuntimeError("staff_historical_adoption_repository_not_configured")
+
+
+MySqlStaffHistoricalAdoptionRepository = _missing_repository
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,10 +65,21 @@ class StaffHistoricalWorkbookUnavailable(RuntimeError):
 
 
 class StaffHistoricalWorkbookService:
-    def __init__(self, connection, workbook_repository, unit_of_work_factory: Callable[[], object]) -> None:
+    def __init__(self, connection, workbook_repository, unit_of_work_factory: Callable[[], object], repository_factory: Callable[[object], object] | None = None, review_recorder: Callable[..., str] | None = None) -> None:
         self._connection = connection
         self._workbook_repository = workbook_repository
         self._unit_of_work_factory = unit_of_work_factory
+        self._repository_factory = repository_factory
+        self._review_recorder = review_recorder
+
+    def _adoption_repository(self):
+        factory = self._repository_factory or MySqlStaffHistoricalAdoptionRepository
+        return factory(self._connection)
+
+    def _record_review(self, **kwargs):
+        if self._review_recorder is None:
+            raise RuntimeError("beclass_review_recorder_not_configured")
+        return self._review_recorder(self._connection, repository=self._adoption_repository(), **kwargs)
 
     def preview(self, source_path: str, source_revision: str | None = None) -> StaffHistoricalWorkbookPreview:
         return self._preview(load_staff_historical_workbook(source_path, source_revision))
@@ -108,7 +124,7 @@ class StaffHistoricalWorkbookService:
         name = str(row.record.get("name") or "")
         if not identity or "身分證字號" in row.errors or not name or "姓名" in row.errors:
             return "blocked_identity", True
-        rows = MySqlStaffHistoricalAdoptionRepository(self._connection).load_staff(identity, for_update=False)
+        rows = self._adoption_repository().load_staff(identity, for_update=False)
         if _identity_conflicts(rows, row.record):
             return "identity_conflict", True
         if not rows:
@@ -131,26 +147,26 @@ class StaffHistoricalWorkbookService:
         name = str(row.record.get("name") or "")
         if not identity or "身分證字號" in row.errors or not name or "姓名" in row.errors:
             return self._record_terminal_review(workbook, row, "blocked_identity", None)
-        repository = MySqlStaffHistoricalAdoptionRepository(self._connection)
+        repository = self._adoption_repository()
         roots = repository.load_staff(identity, for_update=False)
         if _identity_conflicts(roots, row.record):
             staff_id = None if len(roots) != 1 else int(roots[0]["id"])
             return self._record_terminal_review(workbook, row, "identity_conflict", staff_id)
         if roots:
-            result = adopt_existing_staff(self._connection, source_content_digest=workbook.source_content_digest, source_row=row.source_row, identity_card=identity, historical_record=row.record, source_sheet=workbook.sheet_identity, review_payload=_review_payload(row.record), validation_issue_codes=tuple(f"staff_field_invalid:{field}" for field in row.errors), bank_accounts=row.bank_accounts, relations=row.relations)
+            result = adopt_existing_staff(self._connection, source_content_digest=workbook.source_content_digest, source_row=row.source_row, identity_card=identity, historical_record=row.record, source_sheet=workbook.sheet_identity, review_payload=_review_payload(row.record), validation_issue_codes=tuple(f"staff_field_invalid:{field}" for field in row.errors), bank_accounts=row.bank_accounts, relations=row.relations, repository=repository, unit_of_work_factory=self._unit_of_work_factory, review_recorder=self._review_recorder)
             return ("exact_replay", bool(row.errors)) if result.replayed else ("adopted_existing", bool(row.errors or result.conflict_fields))
         return self._create_new_staff(workbook, row)
 
     def _record_terminal_review(self, workbook, row, outcome, staff_id) -> tuple[str, bool]:
-        with MySqlUnitOfWork(self._connection) as unit_of_work:
-            review_identity = _record_review(self._connection, workbook, row, _issues(row, outcome))
-            replayed = record_staff_adoption_outcome(self._connection, source_content_digest=workbook.source_content_digest, source_row=row.source_row, staff_id=staff_id, historical_record=row.record, review_identity=review_identity, outcome=outcome)
+        with self._unit_of_work_factory() as unit_of_work:
+            review_identity = self._record_review(workbook=workbook, row=row, issues=_issues(row, outcome))
+            replayed = record_staff_adoption_outcome(self._connection, source_content_digest=workbook.source_content_digest, source_row=row.source_row, staff_id=staff_id, historical_record=row.record, review_identity=review_identity, outcome=outcome, repository=self._adoption_repository())
             unit_of_work.commit()
         return ("exact_replay", True) if replayed else (outcome, True)
 
     def _create_new_staff(self, workbook, row) -> tuple[str, bool]:
-        with MySqlUnitOfWork(self._connection) as unit_of_work:
-            repository = MySqlStaffHistoricalAdoptionRepository(self._connection)
+        with self._unit_of_work_factory() as unit_of_work:
+            repository = self._adoption_repository()
             identity_card = str(row.record["identity_card"])
             if repository.load_staff(identity_card, for_update=True):
                 raise RuntimeError("staff_historical_adoption_stale")
@@ -163,8 +179,8 @@ class StaffHistoricalWorkbookService:
                 if conflict:
                     relation_conflicts.append(table_name)
             issues = tuple(sorted(set(tuple(f"staff_field_invalid:{field}" for field in row.errors) + tuple(f"historical_nonempty_conflict:{field}" for field in relation_conflicts + (["bank_accounts"] if bank_conflict else [])))))
-            review_identity = _record_review(self._connection, workbook, row, issues) if issues else None
-            replayed = record_created_staff_adoption(self._connection, source_content_digest=workbook.source_content_digest, source_row=row.source_row, staff_id=staff_id, historical_record=row.record, review_identity=review_identity)
+            review_identity = self._record_review(workbook=workbook, row=row, issues=issues) if issues else None
+            replayed = record_created_staff_adoption(self._connection, source_content_digest=workbook.source_content_digest, source_row=row.source_row, staff_id=staff_id, historical_record=row.record, review_identity=review_identity, repository=repository)
             if replayed:
                 raise RuntimeError("staff_historical_created_replay_after_insert")
             unit_of_work.commit()
@@ -176,8 +192,8 @@ class StaffHistoricalWorkbookService:
         return StaffHistoricalWorkbookReceipt(**{**json.loads(stored["result_snapshot"]), "replayed_workbook": True})
 
 
-def _record_review(connection, workbook, row, issues: tuple[str, ...]) -> str:
-    return record_invalid_beclass_row(connection, source_kind=BeClassImportSourceKind.STAFF, source_content_digest=workbook.source_content_digest, source_sheet=workbook.sheet_identity, source_row=row.source_row, masked_identifier=masked_review_identifier(BeClassImportSourceKind.STAFF, row.record.get("identity_card"), row.source_row), source_payload=_review_payload(row.record), issue_codes=issues)
+def _record_review(connection, workbook, row, issues: tuple[str, ...], *, recorder, repository) -> str:
+    return recorder(connection, source_kind=BeClassImportSourceKind.STAFF, source_content_digest=workbook.source_content_digest, source_sheet=workbook.sheet_identity, source_row=row.source_row, masked_identifier=masked_review_identifier(BeClassImportSourceKind.STAFF, row.record.get("identity_card"), row.source_row), source_payload=_review_payload(row.record), issue_codes=issues, repository=repository)
 
 
 def _issues(row, outcome: str) -> tuple[str, ...]:

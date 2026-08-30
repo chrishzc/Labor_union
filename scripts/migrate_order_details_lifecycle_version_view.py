@@ -7,17 +7,10 @@ claims that failed postchecks were rolled back.
 
 from __future__ import annotations
 
-import argparse
 import hashlib
-import json
-import os
 from pathlib import Path
 import re
 from typing import Any, Mapping
-
-import pymysql
-from dotenv import load_dotenv
-
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = ROOT / "db" / "schema_parts" / "999_v_order_details_view.sql"
@@ -27,20 +20,6 @@ _FORBIDDEN_SQL = re.compile(
     r"DELETE|UPDATE|INSERT|ALTER\s+TABLE)\b",
     re.IGNORECASE,
 )
-
-
-def database_config() -> dict[str, Any]:
-    """Load the configured target without opening a connection."""
-    load_dotenv(ROOT / ".env")
-    return {
-        "host": os.getenv("DB_HOST", "127.0.0.1"),
-        "port": int(os.getenv("DB_PORT", "3306")),
-        "user": os.getenv("DB_USER", "root"),
-        "password": os.getenv("DB_PASSWORD", "1234"),
-        "database": os.getenv("DB_DATABASE", "union_db"),
-        "charset": "utf8mb4",
-        "cursorclass": pymysql.cursors.DictCursor,
-    }
 
 
 def _metadata_value(row: Any, expected_key: str) -> Any:
@@ -357,52 +336,3 @@ def run_migration(
             manifest["status"] = "failed_no_rollback_claimed"
             manifest["error"] = str(exc)
         return manifest
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Audit v_order_details and optionally project orders.lifecycle_version."
-        )
-    )
-    parser.add_argument(
-        "--apply",
-        action="store_true",
-        help="Execute only the canonical CREATE OR REPLACE VIEW after rechecks.",
-    )
-    parser.add_argument(
-        "--schema-path",
-        default=str(SCHEMA_PATH),
-        help="Version-controlled schema.sql used as the only DDL source.",
-    )
-    args = parser.parse_args(argv)
-    connection = None
-    try:
-        connection = pymysql.connect(**database_config())
-        manifest = run_migration(
-            connection,
-            apply=args.apply,
-            schema_path=args.schema_path,
-        )
-    except Exception as exc:
-        print(
-            json.dumps(
-                {
-                    "mode": "apply" if args.apply else "dry-run",
-                    "status": "error",
-                    "error": str(exc),
-                },
-                ensure_ascii=False,
-            )
-        )
-        return 2
-    finally:
-        if connection is not None:
-            connection.close()
-
-    print(json.dumps(manifest, ensure_ascii=False, indent=2))
-    return 0 if manifest["status"] in {"ready", "existing", "applied"} else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

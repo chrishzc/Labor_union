@@ -8,6 +8,7 @@ from typing import Any
 
 from domains.anomalies.registry import default_anomaly_registry
 from infrastructure.mysql.anomaly_registry_repository import (
+    AnomalyMySqlUnitOfWork,
     MySqlAnomalyRepository,
 )
 from subsystems.anomalies.government_subsidy_integrity_anomaly_source import (
@@ -21,20 +22,6 @@ from subsystems.anomalies.alert_workflow import AnomalyApplication
 
 _MAXIMUM_TRANSACTION_ROWS = 10_000
 _MAXIMUM_PRIOR_ALERTS_PER_BATCH = 100
-
-
-class BorrowedGovernmentSubsidyIntegrityUnitOfWork:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exception_type, exception, traceback):
-        return False
-
-    def commit(self) -> None:
-        return None
-
-    def rollback(self) -> None:
-        return None
 
 
 class MySqlGovernmentSubsidyIntegrityRootFactSource:
@@ -57,22 +44,14 @@ def project_government_subsidy_integrity_page(
     connection: Any,
     request: GovernmentSubsidyIntegrityScanRequest,
 ):
-    consumer = _projection_consumer(connection)
-    try:
-        connection.begin()
-        result = consumer.scan_page(request)
-        connection.commit()
-        return result
-    except Exception:
-        connection.rollback()
-        raise
+    return _projection_consumer(connection).scan_page(request)
 
 
 def _projection_consumer(connection):
     application = AnomalyApplication(
         default_anomaly_registry(),
         MySqlAnomalyRepository(connection),
-        BorrowedGovernmentSubsidyIntegrityUnitOfWork,
+        lambda: AnomalyMySqlUnitOfWork(connection),
     )
     return GovernmentSubsidyIntegrityAnomalyConsumer(
         MySqlGovernmentSubsidyIntegrityRootFactSource(connection),
@@ -605,7 +584,6 @@ LIMIT %s
 
 
 __all__ = [
-    "BorrowedGovernmentSubsidyIntegrityUnitOfWork",
     "MySqlGovernmentSubsidyIntegrityRootFactSource",
     "project_government_subsidy_integrity_page",
 ]

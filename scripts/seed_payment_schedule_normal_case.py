@@ -17,6 +17,7 @@ from scripts.seed_validation_dataset import (
     connect,
     load_dataset,
     require_dataset_database,
+    require_validation_profile,
 )
 
 
@@ -24,6 +25,7 @@ DEFAULT_MANIFEST = PROJECT_ROOT / "validation" / "datasets" / "dataset_v1_paymen
 
 
 def seed(arguments) -> dict[str, object]:
+    require_validation_profile()
     database = require_dataset_database(arguments.database)
     if arguments.confirm_database != database:
         raise ValueError("confirmation must exactly match database")

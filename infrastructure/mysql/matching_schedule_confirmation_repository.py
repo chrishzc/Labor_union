@@ -40,6 +40,15 @@ class MySqlMatchingScheduleConfirmationRepository:
         passed = bool(recipients) and all(r["confirmation_status"] in ("confirmed", "manually_confirmed") for r in recipients)
         return {"case_no": case_no, "plan_id": plan_id, "confirmed_service_date_version": root["version"], "snapshot_id": snapshot["id"] if snapshot else None, "snapshot_status": status, "schedule_preview": preview, "outdated_schedule_preview": outdated_preview, "recipients": recipients, "gate_passed": passed}
 
+    def invalidate_current_snapshot(self, case_no: str) -> None:
+        """Invalidate Scheduling's current snapshot in the caller's transaction."""
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE matching_schedule_snapshots SET current_marker=NULL,status='invalidated',"
+                "invalidated_at_utc=UTC_TIMESTAMP(6) WHERE case_no=%s AND current_marker=1",
+                (case_no,),
+            )
+
     def preview_manual(self, case_no, plan_id):
         with self.connection.cursor() as cursor:
             root, payloads = self._manual_source(cursor, case_no, plan_id, lock=False)

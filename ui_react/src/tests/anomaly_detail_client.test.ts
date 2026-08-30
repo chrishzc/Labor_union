@@ -22,6 +22,7 @@ import {
 } from './fixtures/anomalies/anomaly_detail_contract_fixtures';
 
 const fingerprint = 'a'.repeat(64);
+const issueKey = `ci_${'c'.repeat(64)}`;
 
 function jsonResponse(payload: unknown): Response {
   return {
@@ -63,18 +64,18 @@ describe('Anomaly detail client strict GET boundary', () => {
       { headers: { Authorization: 'Bearer forged-token' } }
     );
     const recovery = await queryAnomalyRecovery(
-      { fingerprint },
+      { issueKey },
       { headers: { authorization: 'Bearer forged-token' } }
     );
 
     expect(detail.summary.fingerprint).toBe(fingerprint);
-    expect(recovery.fingerprint).toBe(fingerprint);
+    expect(recovery.issue_key).toBe(issueKey);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
 
     const firstCall = fetchSpy.mock.calls[0];
     const secondCall = fetchSpy.mock.calls[1];
     expect(firstCall[0]).toBe(`/api/v1/anomalies/${fingerprint}`);
-    expect(secondCall[0]).toBe(`/api/v1/anomaly-recovery/${fingerprint}`);
+    expect(secondCall[0]).toBe(`/api/v1/anomaly-recovery/${issueKey}`);
 
     for (const call of [firstCall, secondCall]) {
       const options = call[1];
@@ -93,15 +94,26 @@ describe('Anomaly detail client strict GET boundary', () => {
   });
 
   it.each([
-    ['unknown evidence kind', INVALID_ANOMALY_DETAIL_UNKNOWN_EVIDENCE_KIND, queryAnomalyDetail],
-    ['extra detail envelope field', INVALID_ANOMALY_DETAIL_EXTRA_FIELD, queryAnomalyDetail],
-    ['malformed detail date', INVALID_ANOMALY_DETAIL_MALFORMED_DATE, queryAnomalyDetail],
-    ['recovery missing binding', INVALID_ANOMALY_RECOVERY_MISSING_BINDING, queryAnomalyRecovery],
-    ['malformed recovery identity', INVALID_ANOMALY_RECOVERY_MALFORMED_IDENTITY, queryAnomalyRecovery],
-  ])('strictly rejects %s response vectors', async (_label, payload, query) => {
+    ['unknown evidence kind', INVALID_ANOMALY_DETAIL_UNKNOWN_EVIDENCE_KIND],
+    ['extra detail envelope field', INVALID_ANOMALY_DETAIL_EXTRA_FIELD],
+    ['malformed detail date', INVALID_ANOMALY_DETAIL_MALFORMED_DATE],
+  ])('strictly rejects %s detail response vectors', async (_label, payload) => {
     globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(payload));
 
-    await expect(query({ fingerprint })).rejects.toMatchObject({
+    await expect(queryAnomalyDetail({ fingerprint })).rejects.toMatchObject({
+      name: 'AnomalyDetailError',
+      code: 'VALIDATION',
+      retryable: false,
+    });
+  });
+
+  it.each([
+    ['recovery missing binding', INVALID_ANOMALY_RECOVERY_MISSING_BINDING],
+    ['malformed recovery identity', INVALID_ANOMALY_RECOVERY_MALFORMED_IDENTITY],
+  ])('strictly rejects %s recovery response vectors', async (_label, payload) => {
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(payload));
+
+    await expect(queryAnomalyRecovery({ issueKey })).rejects.toMatchObject({
       name: 'AnomalyDetailError',
       code: 'VALIDATION',
       retryable: false,
@@ -155,7 +167,7 @@ describe('Anomaly detail client strict GET boundary', () => {
     globalThis.fetch = fetchSpy;
 
     await queryAnomalyDetail({ fingerprint });
-    await queryAnomalyRecovery({ fingerprint });
+    await queryAnomalyRecovery({ issueKey });
 
     expect(fetchSpy.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
     expect(fetchSpy.mock.calls.every(([, options]) => options?.body === undefined)).toBe(true);

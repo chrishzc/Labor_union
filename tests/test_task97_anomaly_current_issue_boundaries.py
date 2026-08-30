@@ -13,11 +13,13 @@ from domains.anomalies.current_issue import (
     RecheckIntent,
     RecheckScope,
 )
+from shared_kernel.durable_job_queue import DurableJobCommand, DurableJobLease
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.anomalies.current_issue_recheck import (
     CurrentIssueApplication,
     CurrentIssueRecheckBlocked,
 )
+from subsystems.jobs.durable_job_worker import DurableJobWorker
 
 
 NOW = datetime(2026, 8, 29, 1, 0, tzinfo=timezone.utc)
@@ -99,7 +101,8 @@ class _Repository:
 
     def complete_recheck_intent(self, intent):
         self.events.append(("complete_intent", intent.intent_identity))
-        self.completed.append(intent.intent_identity)
+        if intent.intent_identity not in self.completed:
+            self.completed.append(intent.intent_identity)
 
 
 def test_reconcile_deletes_absent_issue_and_completes_intent_in_one_application_uow():
@@ -160,6 +163,124 @@ def test_projection_and_intent_completion_rollback_together():
         application.reconcile(scope, lambda _snapshot: (_candidate(),), completed_intent=_intent())
 
     assert tx_log == ["begin", "rollback"]
+
+
+def test_owner_mutation_is_not_committed_when_recheck_intent_append_fails():
+    scope = _scope()
+    repository = _Repository(OwnerSnapshot(scope, "owner-v3", 3, object()))
+    mutation_calls = []
+
+    def fail_append(_intent):
+        repository.events.append(("append_intent_failed",))
+        raise RuntimeError("intent_append_failed")
+
+    repository.append_recheck_intent = fail_append
+    tx_log = []
+    application = CurrentIssueApplication(repository, lambda: _Uow(tx_log))
+
+    with pytest.raises(RuntimeError, match="intent_append_failed"):
+        application.mutate_owner_with_recheck_intent(
+            lambda: mutation_calls.append("owner_mutated"), _intent()
+        )
+
+    assert mutation_calls == ["owner_mutated"]
+    assert repository.intents == []
+    assert tx_log == ["begin", "rollback"]
+
+
+def test_reconcile_rejects_intent_for_another_scope_before_projection_writes():
+    scope = _scope()
+    other_scope = RecheckScope(
+        "scheduling", "assignment", "assignment", ("a-2",), ("scheduling:assignment:a-2",)
+    )
+    repository = _Repository(OwnerSnapshot(scope, "owner-v3", 3, object()))
+    application = CurrentIssueApplication(repository, lambda: _Uow([]), clock=lambda: NOW)
+    other_intent = RecheckIntent(
+        "recheck:a-2", other_scope, 3, fingerprint_payload({"subject": "a-2"})
+    )
+
+    with pytest.raises(CurrentIssueRecheckBlocked, match="scope mismatch"):
+        application.reconcile(scope, lambda _snapshot: (_candidate(),), completed_intent=other_intent)
+
+    assert not any(event[0] in {"upsert", "delete", "complete_intent"} for event in repository.events)
+
+
+def test_reconcile_rejects_intent_newer_than_owner_snapshot_before_projection_writes():
+    scope = _scope()
+    repository = _Repository(OwnerSnapshot(scope, "owner-v3", 3, object()))
+    application = CurrentIssueApplication(repository, lambda: _Uow([]), clock=lambda: NOW)
+    newer_intent = RecheckIntent(
+        "recheck:a-1:v4", scope, 4, fingerprint_payload({"subject": "a-1", "version": 4})
+    )
+
+    with pytest.raises(CurrentIssueRecheckBlocked, match="newer than snapshot"):
+        application.reconcile(scope, lambda _snapshot: (_candidate(),), completed_intent=newer_intent)
+
+    assert not any(event[0] in {"upsert", "delete", "complete_intent"} for event in repository.events)
+
+
+def test_recheck_replay_is_idempotent_for_current_projection_and_intent_completion():
+    scope = _scope()
+    repository = _Repository(OwnerSnapshot(scope, "owner-v3", 3, object()))
+    tx_log = []
+    application = CurrentIssueApplication(repository, lambda: _Uow(tx_log), clock=lambda: NOW)
+
+    first = application.reconcile(scope, lambda _snapshot: (_candidate(),), completed_intent=_intent())
+    second = application.reconcile(scope, lambda _snapshot: (_candidate(),), completed_intent=_intent())
+
+    assert first == second
+    assert [item.issue_key for item in repository.current] == ["ci-a-1"]
+    assert repository.completed == ["recheck:a-1"]
+    assert tx_log == ["begin", "commit", "begin", "commit"]
+
+
+def test_generic_worker_claim_and_lease_are_short_transactions_around_provider_call():
+    command = DurableJobCommand(
+        "job-1", "anomaly-recheck:a-1", "anomaly.recheck", 1,
+        {"subject": "a-1"}, "system:anomaly-recheck", "corr-1",
+    )
+    lease = DurableJobLease("job-1", "lease-1", command, 1)
+    events = []
+
+    class DurableRepository:
+        def recover_expired_canonical_leases(self, _delay):
+            events.append("recover")
+            return 0
+
+        def claim_next_canonical_command(self, _worker_id, _lease_seconds):
+            events.append("claim")
+            return lease
+
+        def complete_canonical_claim(self, _lease, _outcome):
+            events.append("complete")
+
+    class DurableTransaction:
+        def begin(self):
+            events.append("begin")
+
+        def commit(self):
+            events.append("commit")
+
+        def rollback(self):
+            events.append("rollback")
+
+    def provider_handler(_payload):
+        events.append("provider")
+        return {}, "recheck-receipt:a-1"
+
+    worker = DurableJobWorker(
+        DurableRepository(), DurableTransaction(), {"anomaly.recheck": provider_handler}, "worker-1"
+    )
+    assert worker.recover_and_run_once() is True
+
+    assert events == [
+        "begin", "recover", "commit",
+        "begin", "claim", "commit",
+        "provider",
+        "begin", "complete", "commit",
+    ]
+    assert events.index("provider") > events.index("claim")
+    assert events.index("provider") < events.index("complete")
 
 
 def test_generic_durable_job_remains_the_only_claim_lease_retry_mechanism():

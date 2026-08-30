@@ -17,7 +17,7 @@ from infrastructure.mysql.staff_summary_query_repository import (
     MySqlStaffSummaryQueryRepository,
 )
 from scripts.imports import import_client_hcm
-from subsystems.anomalies import finance_import_anomaly_consumer
+from subsystems.finance_import import finance_import_anomaly_consumer
 from subsystems.staff.summary_query import (
     StaffSummaryQueryApplication,
     StaffSummaryQueryService,
@@ -62,17 +62,13 @@ class _Connection:
         self.closed = True
 
 
-def test_historical_reprocess_outbox_projects_import006_with_event_version(monkeypatch):
+def test_historical_reprocess_outbox_projects_import006_with_event_version():
     captured = {}
 
-    def project(cursor, batch_id, **kwargs):
-        captured.update(batch_id=batch_id, cursor=cursor, **kwargs)
+    class _Runtime:
+        def project_finance_import_review_alert(self, cursor, batch_id, **kwargs):
+            captured.update(batch_id=batch_id, cursor=cursor, **kwargs)
 
-    monkeypatch.setattr(
-        finance_import_anomaly_consumer,
-        "project_finance_import_review_alert",
-        project,
-    )
     connection = _Connection()
     event = {
         "id": 91,
@@ -81,9 +77,11 @@ def test_historical_reprocess_outbox_projects_import006_with_event_version(monke
         ),
     }
 
+    runtime = _Runtime()
     finance_import_anomaly_consumer._project_historical_reprocess_integrity(
         connection,
         event,
+        runtime,
     )
 
     assert captured == {
@@ -131,8 +129,9 @@ def test_schedule_navigation_is_typed_by_api_adapter():
 def test_schedule_registry_declares_staff_name_display_contract():
     registry = default_anomaly_registry()
 
-    for code in ("SCHEDULE-001", "SCHEDULE-003", "SCHEDULE-005"):
-        assert "staff_name" in registry.require(code).display_fields
+    assert "staff_name" in registry.require("SCHEDULE-003").display_fields
+    assert "SCHEDULE-001" not in registry.codes()
+    assert "SCHEDULE-005" not in registry.codes()
 
 
 def test_staff_summary_supports_exact_typed_lookup():

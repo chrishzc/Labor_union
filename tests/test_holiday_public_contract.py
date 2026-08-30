@@ -61,7 +61,7 @@ def test_apply_requires_version_fingerprint_and_trimmed_reason():
     assert request.reason == "年度設定"
 
 
-def test_holiday_workflow_has_no_hidden_commit_or_rollback():
+def test_holiday_repository_has_no_hidden_commit_or_rollback_and_application_owns_uow():
     workflow = Path("subsystems/scheduling/holiday_maintenance.py").read_text(
         encoding="utf-8"
     )
@@ -69,6 +69,7 @@ def test_holiday_workflow_has_no_hidden_commit_or_rollback():
         "infrastructure/mysql/scheduling_holiday_query.py"
     ).read_text(encoding="utf-8")
 
-    for source in (workflow, repository):
-        assert ".commit(" not in source
-        assert ".rollback(" not in source
+    assert ".commit(" not in repository
+    assert ".rollback(" not in repository
+    assert "with self._unit_of_work_factory() as unit_of_work:" in workflow
+    assert "unit_of_work.commit()" in workflow

@@ -3,6 +3,7 @@ from pathlib import Path
 from subsystems.finance_import import application as importer
 from domains.finance_import.transaction_classifier import classify_finance_transaction
 from domains.finance_import.transaction_fingerprint import build_dedup_fingerprint
+from scripts.imports.finance_statement_normalizer import normalize_workbook
 
 
 SAMPLE = (
@@ -76,7 +77,6 @@ def test_exact_historical_statement_runs_full_dry_run_and_rolls_back(monkeypatch
             ],
         }
 
-    monkeypatch.setattr(importer, "get_connection", lambda: connection)
     monkeypatch.setattr(importer, "load_finance_identity_maps", lambda cursor: {})
     monkeypatch.setattr(importer, "stage_finance_rows", stage_rows)
     monkeypatch.setattr(
@@ -96,7 +96,10 @@ def test_exact_historical_statement_runs_full_dry_run_and_rolls_back(monkeypatch
         lambda *args, **kwargs: None,
     )
 
-    result = importer.import_finance_workbook(str(SAMPLE), dry_run=True)
+    result = importer.import_finance_workbook(
+        str(SAMPLE), dry_run=True, connection_factory=lambda: connection,
+        normalizer=normalize_workbook,
+    )
 
     assert result["mode"] == "dry_run"
     assert result["source_path"] == str(SAMPLE.resolve())

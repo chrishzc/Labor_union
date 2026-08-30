@@ -92,8 +92,28 @@ def test_invalid_root_version_fails_closed(root_version) -> None:
 def test_scan_lock_failure_rolls_back_without_projecting() -> None:
     connection = _FailingConnection()
 
+    class _Runtime:
+        class _UnitOfWork:
+            def __init__(self, connection):
+                self.connection = connection
+
+            def __enter__(self):
+                self.connection.begin()
+                return self
+
+            def __exit__(self, exception_type, *_args):
+                if exception_type is not None:
+                    self.connection.rollback()
+                return False
+
+            def commit(self):
+                self.connection.commit()
+
+        def failure_unit_of_work(self, connection):
+            return self._UnitOfWork(connection)
+
     result = consume_staff_payables_anomaly_sources(
-        connection, as_of=_AS_OF, maximum_items=1
+        connection, as_of=_AS_OF, maximum_items=1, runtime=_Runtime()
     )
 
     assert result.projected_count == 0

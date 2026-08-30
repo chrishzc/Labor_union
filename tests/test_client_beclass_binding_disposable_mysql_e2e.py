@@ -19,6 +19,7 @@ from infrastructure.mysql.hcm_beclass_reconciliation_adapter import (
     MySqlHcmBeClassReconciliationAdapter,
 )
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from domains.case_import.client_beclass_binding import ClientCaseBindingStatus
 from subsystems.case_import.client_beclass_workbook_import import (
@@ -153,25 +154,23 @@ def test_typed_workbook_apply_isolates_dirty_rows_replays_and_conflicts(tmp_path
         assert first.review_required_count == 1
         assert first.existing_conflict_count == 1
         assert replay.replayed_workbook is True
-        from subsystems.anomalies.beclass_import_outbox_consumer import (
+        from subsystems.case_import.beclass_import_outbox_consumer import (
             consume_beclass_import_review_events,
         )
 
-        projected = consume_beclass_import_review_events(connection)
+        projected = consume_beclass_import_review_events(
+            connection,
+            runtime=build_anomaly_runtime(),
+        )
         assert projected.failed_count == 0
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT DISTINCT occurrence.logical_code "
-                "FROM import_warning_occurrences occurrence "
-                "JOIN beclass_import_review_rows review "
-                "ON review.source_event_identity=occurrence.source_event_identity "
-                "WHERE review.source_event_identity LIKE %s",
+                "SELECT COUNT(*) AS count FROM beclass_import_review_outbox outbox "
+                "JOIN beclass_import_review_rows review ON review.id=outbox.review_row_id "
+                "WHERE review.source_event_identity LIKE %s AND outbox.published_at IS NOT NULL",
                 (f"beclass-workbook:{first.source_content_digest}:%",),
             )
-            assert {row["logical_code"] for row in cursor.fetchall()} == {
-                "CLIENT-BECLASS-SOURCE-001",
-                "CLIENT-BECLASS-BIND-001",
-            }
+            assert cursor.fetchone() == {"count": 1}
         with pytest.raises(
             ClientBeClassWorkbookConflict,
             match="client_beclass_workbook_idempotency_conflict",

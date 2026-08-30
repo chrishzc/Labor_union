@@ -31,7 +31,9 @@ from domains.case_import.case_import import (
     HcmIdentityResolution,
     fingerprint_case_import_source,
 )
-from subsystems.case_import.application import build_case_import_application
+from api.dependencies.case_import import build_case_import_application
+from infrastructure.mysql.hcm_import_review_repository import MySqlHcmImportReviewRepository
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.case_import.beclass_review_intake import fingerprint_workbook
 from subsystems.case_import.hcm_import_review_intake import record_hcm_import_review
 from subsystems.case_import.hcm_adapter import (
@@ -43,7 +45,6 @@ from subsystems.case_import.hcm_adapter import (
 from infrastructure.mysql.hcm_beclass_reconciliation_adapter import (
     MySqlHcmBeClassReconciliationAdapter,
 )
-from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.identities import (
     ActorContext,
     CorrelationId,
@@ -281,7 +282,6 @@ def _connect_database():
         )
         cursor = connection.cursor()
         cursor.execute("SET NAMES utf8mb4;")
-        connection.commit()
         return connection
     except Exception as error:
         print(f"資料庫連線失敗：{error}")
@@ -312,6 +312,12 @@ def _database_config():
 
 # Kept cohesive because it owns the one batch-level rollback and result tally.
 def _process_import_rows(frame, connection, excel_path):
+    return _process_import_rows_with_boundary(
+        frame, connection, excel_path, whole_workbook=False,
+    )
+
+
+def _process_import_rows_with_boundary(frame, connection, excel_path, *, whole_workbook):
     counts = _result()
     row_outcomes = []
     application = build_case_import_application(connection)
@@ -320,21 +326,42 @@ def _process_import_rows(frame, connection, excel_path):
     source_sheet = str(frame.attrs.get("source_sheet") or "HCM")
     try:
         for ordinal, (_, row) in enumerate(frame.iterrows(), start=1):
-            outcome = _import_row(
-                row,
-                ordinal,
-                cursor,
-                application,
-                excel_path,
-                connection=connection,
-                source_digest=source_digest,
-                source_sheet=source_sheet,
-                detailed=True,
-            )
+            if whole_workbook:
+                outcome = _import_row(
+                    row,
+                    ordinal,
+                    cursor,
+                    application,
+                    excel_path,
+                    connection=connection,
+                    source_digest=source_digest,
+                    source_sheet=source_sheet,
+                    detailed=True,
+                    current_uow=True,
+                )
+            else:
+                outcome = application.execute_in_uow(
+                    lambda row=row, ordinal=ordinal: _import_row(
+                        row,
+                        ordinal,
+                        cursor,
+                        application,
+                        excel_path,
+                        connection=connection,
+                        source_digest=source_digest,
+                        source_sheet=source_sheet,
+                        detailed=True,
+                        current_uow=True,
+                    )
+                )
             counts[outcome["outcome"]] += 1
             row_outcomes.append(outcome)
     except Exception as error:
-        connection.rollback()
+        if whole_workbook:
+            # The workbook application owns this transaction.  Do not turn a
+            # partial write into a committed failed receipt; its context must
+            # roll every row, review, claim, and receipt back together.
+            raise
         _report_import_failure(error)
         counts["failed"] = 1
         counts["row_outcomes"] = row_outcomes
@@ -355,6 +382,12 @@ class HcmLegacyRowIntake:
 
     def import_rows(self, frame, source_path: str) -> dict[str, object]:
         return _process_import_rows(frame, self._connection, source_path)
+
+    def import_rows_in_current_uow(self, frame, source_path: str) -> dict[str, object]:
+        """Import HCM rows while borrowing the workbook application UoW."""
+        return _process_import_rows_with_boundary(
+            frame, self._connection, source_path, whole_workbook=True,
+        )
 
     def preview_rows(self, frame, source_path: str) -> dict[str, int]:
         outcomes = {"ready": 0, "ready_with_warning": 0, "review_required": 0}
@@ -381,6 +414,7 @@ def _import_row(
     source_digest=None,
     source_sheet="HCM",
     detailed=False,
+    current_uow=False,
 ):
     raw_row = row.to_dict()
     record = _normalized_record(row)
@@ -418,18 +452,24 @@ def _import_row(
                 source_sheet,
                 ordinal,
                 raw_row,
+                current_uow=current_uow,
             )
             return _row_outcome(outcome, ordinal, str(case_no), {}, None, detailed)
         preview = application.preview(intent, correlation)
         command = _apply_command(intent, preview, correlation, excel_path)
-        application.apply(command)
+        _apply_case_import(application, command, current_uow=current_uow)
         warning_errors = _hcm_warning_errors(validation_errors, identity_resolution)
         problem_identity = None
         if warning_errors:
             problem_identity = _persist_hcm_review(
                 connection, source_digest, source_sheet, ordinal, raw_row, case_no, warning_errors,
             )
-        _reconcile_without_rolling_back_hcm(connection, str(case_no))
+        if current_uow:
+            _reconcile_without_rolling_back_hcm(
+                connection, str(case_no), in_current_uow=True,
+            )
+        else:
+            _reconcile_without_rolling_back_hcm(connection, str(case_no))
         outcome = "inserted_with_warning" if warning_errors else "inserted"
         return _row_outcome(outcome, ordinal, str(case_no), warning_errors, problem_identity, detailed)
     except CaseImportWorkflowError as error:
@@ -485,6 +525,7 @@ def _persist_hcm_review(
         case_identity=case_no,
         issue_codes=issue_codes,
         evidence_snapshot=_privacy_safe_hcm_evidence(raw_row, validation_errors),
+        repository=MySqlHcmImportReviewRepository(connection),
     )
     return identity
 
@@ -541,21 +582,41 @@ def _hcm_warning_errors(validation_errors, identity_resolution):
 
 
 def _workflow_error_outcome(error):
+    # A stale or mismatched command must leave no claim, review, or partial
+    # root behind.  Let the application-owned UoW roll back the whole attempt.
+    if error.error.code in {
+        "case_import_candidate_stale",
+        "idempotency_mismatch",
+        "idempotency_evidence_incomplete",
+    }:
+        raise error
     review_categories = {"validation", "domain_blocked", "conflict"}
     if error.error.category.value in review_categories:
         return "review_required"
     raise error
 
 
-def _reconcile_without_rolling_back_hcm(connection, case_no):
+def _reconcile_without_rolling_back_hcm(connection, case_no, *, in_current_uow=False):
     if connection is None:
         return "not_run"
     try:
-        result = CaseImportReconciliationApplication(
+        reconciliation = CaseImportReconciliationApplication(
             MySqlHcmBeClassReconciliationAdapter(connection),
-            lambda: MySqlUnitOfWork(connection),
-        ).reconcile(case_no)
+            # The current-UoW path never evaluates this factory.  The
+            # fallback is retained for private legacy callers and keeps the
+            # transaction owner in the Case Import application layer.
+            lambda: build_case_import_application(connection).unit_of_work_factory(),
+        )
+        if in_current_uow:
+            result = reconciliation.reconcile_in_current_uow(case_no)
+        else:
+            result = reconciliation.reconcile(case_no)
     except Exception as error:
+        if in_current_uow:
+            # A reconciliation failure is part of the current HCM command;
+            # let the application UoW roll back the Case Import roots, review,
+            # and receipt together.
+            raise
         print(f"[配對待重試] HCM root 已建立；reconciliation稍後重試：{type(error).__name__}")
         return "failed_retryable"
     print(f"[配對狀態] {result.status}")
@@ -587,6 +648,8 @@ def _replay_existing_hcm_case(
     source_sheet,
     ordinal,
     raw_row,
+    *,
+    current_uow=False,
 ):
     key = IdempotencyKey(f"case-import:{intent.case_no}")
     stored = application.find_receipt(key)
@@ -614,9 +677,20 @@ def _replay_existing_hcm_case(
         f"Import negotiated HCM case from {os.path.basename(excel_path)}.",
         correlation,
     )
-    application.apply(command)
-    _reconcile_without_rolling_back_hcm(connection, intent.case_no)
+    _apply_case_import(application, command, current_uow=current_uow)
+    if current_uow:
+        _reconcile_without_rolling_back_hcm(
+            connection, intent.case_no, in_current_uow=True,
+        )
+    else:
+        _reconcile_without_rolling_back_hcm(connection, intent.case_no)
     return "exact_replay"
+
+
+def _apply_case_import(application, command, *, current_uow):
+    if current_uow and hasattr(application, "apply_in_current_uow"):
+        return application.apply_in_current_uow(command)
+    return application.apply(command)
 
 
 def normalize_hcm_row(row):

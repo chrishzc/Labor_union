@@ -163,7 +163,7 @@
       "owner": "Global Validation Governance", "suite_id": "GDATA", "track": "A",
       "work_package_identity": "PROV-20260817-react-admin-phase3-scenario-lineage-governance",
       "source_scenario_ids": [],
-      "source_refs": ["document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md#4.8 Subsystem：Data Browser masked query"],
+      "source_refs": ["document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md#14. Phase 3D-DB-H Data Browser masked query裁決（2026-08-22）"],
       "source_to_successor_mapping": [{"source": "no sufficient canonical source", "successor": "masked allowlist query contract", "disposition": "unresolved"}],
       "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-01-15T09:00:00+08:00"},
       "commands": ["query allowlisted masked rows", "reject unknown source and excessive row budget"],

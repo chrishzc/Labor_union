@@ -15,7 +15,7 @@ from scripts.imports.finance_formats.historical_multisheet import (
 )
 from scripts.imports.finance_formats.sinopac import normalize_sinopac_rows
 from scripts.imports.finance_formats.taishin import normalize_taishin_rows
-from scripts.imports.finance_normalized_row import validate_normalized_row
+from domains.finance_import.normalized_row import validate_normalized_row
 
 
 Adapter = Callable[[str | Path, str, int], list[dict[str, Any]]]

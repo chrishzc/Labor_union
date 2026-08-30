@@ -10,7 +10,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from infrastructure.mysql.mysql_adapter import get_connection
 from scripts.migrate_order_details_lifecycle_version_view import canonical_view_statement
 
 
@@ -43,26 +42,14 @@ def rebuild_order_details_view(cursor: Any) -> None:
 
 
 def migrate(connection: Any) -> dict[str, str]:
+    """Apply this library-only step using a caller-owned connection.
+
+    The preserve-data runner owns the candidate transaction and its receipt.
+    Keeping this function free of commit/rollback/close is important because
+    the legacy child executable is no longer an independent migration owner.
+    """
     with connection.cursor() as cursor:
         outcome = retire_legacy_contract_column(cursor)
         if outcome == "renamed":
             rebuild_order_details_view(cursor)
-    connection.commit()
     return {"status": outcome, "canonical_column": CANONICAL_COLUMN}
-
-
-def main() -> int:
-    connection = get_connection()
-    try:
-        print(migrate(connection))
-        return 0
-    except Exception as error:
-        connection.rollback()
-        print(f"migration failed: {error}", file=sys.stderr)
-        return 1
-    finally:
-        connection.close()
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

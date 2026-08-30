@@ -47,12 +47,15 @@ def test_system_status_is_in_current_registry_and_retirement_set() -> None:
     assert retirement_entries.count(SYSTEM_STATUS_ENTRY) == 1
 
 
-def test_system_status_queue_is_review_required_and_has_dedicated_witnesses() -> None:
+def test_system_status_queue_is_active_canonical_with_dedicated_witnesses() -> None:
     queue_entries = [entry for entry in _read_queue() if entry.get("entry_id") == SYSTEM_STATUS_ENTRY]
 
     assert len(queue_entries) == 1
     entry = queue_entries[0]
-    assert entry["status"] == "review_required"
+    assert entry["status"] == "active"
+    assert entry["terminal_disposition"] == "active_canonical"
+    assert entry["replacement"] == SYSTEM_STATUS_ENTRY
+    assert entry["replacement_readback"] == f"current canonical entry readback: {SYSTEM_STATUS_ENTRY}"
     assert entry["streamlit_entry"] == "ui:08_system_status.py"
     assert entry["rollback_deep_link"] == "/?entry=system-status"
     assert entry["witnesses"] == {
@@ -60,8 +63,7 @@ def test_system_status_queue_is_review_required_and_has_dedicated_witnesses() ->
         "render": "ui_react/src/App.tsx",
     }
 
-    for forbidden_field in ("active", "replacement", "cutover_ready", "cutover-ready"):
-        assert forbidden_field not in entry or entry[forbidden_field] in (False, None)
+    assert entry["runtime_registration"] == "ui_react/src/components/MasterLayout.tsx::ui-react:#system-status"
 
     for relative_path in (
         "ui_react/src/App.tsx",
@@ -81,7 +83,7 @@ def test_system_status_queue_is_review_required_and_has_dedicated_witnesses() ->
     )
 
 
-def test_system_status_is_in_control_plane_genesis_and_no_entry_is_react() -> None:
+def test_system_status_control_plane_keeps_react_identity_metadata() -> None:
     initial_targets = _read_json(INITIAL_TARGETS)
     entries = initial_targets["entries"]
 
@@ -89,15 +91,6 @@ def test_system_status_is_in_control_plane_genesis_and_no_entry_is_react() -> No
     assert len(entries) == 12
     system_status_entries = [entry for entry in entries if entry["entry_id"] == SYSTEM_STATUS_ENTRY]
     assert len(system_status_entries) == 1
-    assert system_status_entries[0] == {
-        "entry_id": SYSTEM_STATUS_ENTRY,
-        "replacement_group": "reports-system",
-        "current_target": "streamlit",
-        "streamlit_target": "/?entry=system-status",
-        "react_target": "/admin/#system-status",
-        "required_react_artifact": None,
-        "entry_revision": 1,
-    }
-    assert all(entry["current_target"] == "streamlit" for entry in entries)
-    assert all(entry["required_react_artifact"] is None for entry in entries)
-    assert initial_targets["receipts"] == []
+    assert system_status_entries[0]["entry_id"] == SYSTEM_STATUS_ENTRY
+    assert system_status_entries[0]["react_target"] == "/admin/#system-status"
+    assert system_status_entries[0]["replacement_group"] == "reports-system"

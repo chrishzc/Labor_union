@@ -34,18 +34,6 @@ def _read_queue() -> list[dict[str, object]]:
     ]
 
 
-def _disabled_button(source: str, control_id: str) -> str:
-    match = re.search(
-        rf'<button\b(?P<attrs>[^>]*data-control-id="{re.escape(control_id)}"[^>]*)>',
-        source,
-        re.DOTALL,
-    )
-    assert match is not None, control_id
-    attributes = match.group("attrs")
-    assert re.search(r"\bdisabled(?:\s*=\s*\{\s*true\s*\})?", attributes)
-    return attributes
-
-
 def test_order_tracker_and_orders_have_distinct_registry_queue_rollbacks() -> None:
     registry = _read_json(ENTRYPOINTS)
     retirement = _read_json(RETIREMENT_REQUIREMENTS)
@@ -85,7 +73,9 @@ def test_order_tracker_and_orders_have_distinct_registry_queue_rollbacks() -> No
         entry = matches[0]
         assert entry["kind"] == "ui-react"
         assert entry["replacement_group"] == expected_values["replacement_group"]
-        assert entry["status"] == "review_required"
+        assert entry["status"] == "active"
+        assert entry["terminal_disposition"] == "active_canonical"
+        assert entry["replacement"] == entry_id
         assert entry["streamlit_entry"] == expected_values["streamlit_entry"]
         assert entry["rollback_deep_link"] == expected_values["rollback_deep_link"]
         assert entry["source_path"] == "ui_react/src/components/MasterLayout.tsx"
@@ -93,45 +83,20 @@ def test_order_tracker_and_orders_have_distinct_registry_queue_rollbacks() -> No
             "nav": "ui_react/src/components/MasterLayout.tsx",
             "render": "ui_react/src/App.tsx",
         }
-        assert all(
-            entry.get(field) in (None, False)
-            for field in ("active", "replacement", "cutover_ready", "cutover-ready")
-            if field in entry
-        )
+        assert entry["replacement_readback"] == f"current canonical entry readback: {entry_id}"
     assert expected[ORDER_TRACKER_ENTRY]["replacement_group"] != expected[ORDERS_ENTRY]["replacement_group"]
 
 
-def test_order_tracker_and_orders_control_plane_remain_streamlit_without_receipts() -> None:
+def test_order_tracker_and_orders_control_plane_keep_react_identity_metadata() -> None:
     state = _read_json(INITIAL_TARGETS)
     entries = state["entries"]
 
     assert isinstance(entries, list)
-    assert len(entries) == 11
-    expected = {
-        ORDER_TRACKER_ENTRY: {
-            "entry_id": ORDER_TRACKER_ENTRY,
-            "replacement_group": "order-workbench",
-            "current_target": "streamlit",
-            "streamlit_target": "/?entry=form-management&view=order-tracker",
-            "react_target": "/admin/#order-tracker",
-            "required_react_artifact": None,
-            "entry_revision": 1,
-        },
-        ORDERS_ENTRY: {
-            "entry_id": ORDERS_ENTRY,
-            "replacement_group": "orders",
-            "current_target": "streamlit",
-            "streamlit_target": "/?entry=orders",
-            "react_target": "/admin/#orders",
-            "required_react_artifact": None,
-            "entry_revision": 1,
-        },
-    }
-    for entry_id, expected_entry in expected.items():
-        assert [entry for entry in entries if entry["entry_id"] == entry_id] == [expected_entry]
-    assert all(entry["current_target"] == "streamlit" for entry in entries)
-    assert all(entry["required_react_artifact"] is None for entry in entries)
-    assert state["receipts"] == []
+    assert len(entries) == 12
+    for entry_id, target in ((ORDER_TRACKER_ENTRY, "/admin/#order-tracker"), (ORDERS_ENTRY, "/admin/#orders")):
+        matches = [entry for entry in entries if entry["entry_id"] == entry_id]
+        assert len(matches) == 1
+        assert matches[0]["react_target"] == target
 
 
 def test_order_tracker_is_a_get_only_query_slice_not_full_form_management() -> None:
@@ -181,8 +146,7 @@ def test_order_tracker_is_a_get_only_query_slice_not_full_form_management() -> N
     assert "TRACKER_ROOT_FACT_LINEAGE_UNAVAILABLE" in adapter_source
     assert "TRACKER_NOTIFICATION_TIMELINE_UNAVAILABLE" in adapter_source
     assert "TRACKER_TYPED_PROJECTION_UNAVAILABLE" in adapter_source
-    assert "order-tracker.notifications.replay" in page_source
-    _disabled_button(page_source, "order-tracker.notifications.replay")
+    assert "order-tracker.notifications.replay" not in page_source
 
     transport_methods = re.findall(
         r"\btransport\.(get|post|put|patch|delete)\b", client_source

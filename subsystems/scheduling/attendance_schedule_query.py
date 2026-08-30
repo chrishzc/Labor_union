@@ -5,7 +5,18 @@ Description: 編排出勤精算 Query，將固定週休、假日、請假及人�
 
 from typing import Dict, Any, List, Optional
 from datetime import date
-from infrastructure.mysql import mysql_adapter as db_service
+from typing import Protocol
+
+
+class AttendanceScheduleCalculator(Protocol):
+    def __call__(self, **kwargs: object) -> dict[str, Any]: ...
+
+
+def _unconfigured_calculator(**_: object) -> dict[str, Any]:
+    raise RuntimeError("scheduling attendance calculator is not configured")
+
+
+calculate_attendance_schedule: AttendanceScheduleCalculator = _unconfigured_calculator
 
 def calculate_order_attendance_schedule(
     actual_start_date: date,
@@ -27,7 +38,7 @@ def calculate_order_attendance_schedule(
     - custom_leave_dates：與國定假日無關的個別排休/請假日，一律算休假。
     - custom_work_dates：只覆蓋固定週休；若同日也是請假或選定放假的國定假日，仍算休假。
     """
-    result = db_service.calculate_attendance_schedule(
+    result = calculate_attendance_schedule(
         actual_start_date=actual_start_date,
         target_service_days=target_service_days,
         service_mode=service_mode,

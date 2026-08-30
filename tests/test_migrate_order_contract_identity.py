@@ -69,7 +69,7 @@ def test_replay_is_idempotent_after_the_legacy_column_is_retired() -> None:
     result = migrate(connection)
 
     assert result == {"status": "already_retired", "canonical_column": CANONICAL_COLUMN}
-    assert connection.committed is True
+    assert connection.committed is False
     assert cursor.statements == ["SHOW COLUMNS FROM orders"]
 
 

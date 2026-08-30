@@ -38,15 +38,11 @@ class LineIdentityManagementApplication:
 
     def list(self, query: LineIdentityBindingListQuery):
         with self._unit_of_work_factory() as unit_of_work:
-            result = unit_of_work.identity_management.list(query)
-            unit_of_work.commit()
-        return result
+            return unit_of_work.identity_management.list(query)
 
     def detail(self, line_user_id: LineUserId):
         with self._unit_of_work_factory() as unit_of_work:
-            result = unit_of_work.identity_management.detail(line_user_id)
-            unit_of_work.commit()
-        return result
+            return unit_of_work.identity_management.detail(line_user_id)
 
     def preview_revocation(
         self,
@@ -55,7 +51,6 @@ class LineIdentityManagementApplication:
         with self._unit_of_work_factory() as unit_of_work:
             binding = unit_of_work.identity_management.detail(line_user_id)
             publication = unit_of_work.identity_management.default_menu_publication()
-            unit_of_work.commit()
         blockers = _revocation_blockers(binding.status, publication)
         return LineIdentityRevocationPreview(
             binding,
@@ -75,7 +70,6 @@ class LineIdentityManagementApplication:
                 binding.subject_type,
                 target_subject_reference,
             )
-            unit_of_work.commit()
         blockers = _replacement_blockers(binding, candidate, target_subject_reference)
         return LineIdentityReplacementPreview(
             binding,

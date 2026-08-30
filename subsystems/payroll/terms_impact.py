@@ -148,6 +148,25 @@ class PayrollTermsAction:
 
 
 @dataclass(frozen=True, slots=True)
+class PayrollSpecialPayEventCandidate:
+    assignment_identity: str
+    assignment_sequence: int
+    service_dates: tuple[date, ...]
+
+    def __post_init__(self) -> None:
+        require_canonical_text(
+            self.assignment_identity,
+            "special-pay assignment identity",
+            _IDENTITY_MAXIMUM_LENGTH,
+        )
+        require_positive_integer(
+            self.assignment_sequence,
+            "special-pay assignment sequence",
+        )
+        _validate_dates(self.service_dates, "special-pay service dates")
+
+
+@dataclass(frozen=True, slots=True)
 class PayrollTermsImpactCandidate:
     case_no: str
     expected_payroll_version: int
@@ -157,6 +176,7 @@ class PayrollTermsImpactCandidate:
     actions: tuple[PayrollTermsAction, ...]
     blockers: tuple[str, ...]
     fingerprint: PreviewFingerprint
+    special_pay_events: tuple[PayrollSpecialPayEventCandidate, ...] = ()
 
 
 def build_payroll_terms_impact_candidate(facts: PayrollTermsImpactFacts, change_identity: str) -> PayrollTermsImpactCandidate:
@@ -381,8 +401,41 @@ def _removed_frozen_reversal(facts, existing, change_identity):
 
 
 def _candidate(facts, payroll, rate_snapshots, actions):
-    payload = {"case_no": facts.case_no, "payroll_version": facts.payroll_version, "payroll_fingerprint": payroll.fingerprint.value, "rates": tuple(_rate_payload(item) for item in rate_snapshots), "actions": tuple(_action_payload(item) for item in actions)}
-    return PayrollTermsImpactCandidate(facts.case_no, facts.payroll_version, facts.payroll_version + 1, payroll, rate_snapshots, actions, (), fingerprint_payload(payload))
+    special_pay_events = tuple(
+        PayrollSpecialPayEventCandidate(
+            item.candidate_key,
+            item.sequence,
+            item.double_pay_dates,
+        )
+        for item in facts.scheduling.assignments
+        if item.double_pay_dates
+    )
+    payload = {
+        "case_no": facts.case_no,
+        "payroll_version": facts.payroll_version,
+        "payroll_fingerprint": payroll.fingerprint.value,
+        "rates": tuple(_rate_payload(item) for item in rate_snapshots),
+        "actions": tuple(_action_payload(item) for item in actions),
+        "special_pay_events": tuple(
+            {
+                "assignment_identity": item.assignment_identity,
+                "assignment_sequence": item.assignment_sequence,
+                "service_dates": tuple(value.isoformat() for value in item.service_dates),
+            }
+            for item in special_pay_events
+        ),
+    }
+    return PayrollTermsImpactCandidate(
+        facts.case_no,
+        facts.payroll_version,
+        facts.payroll_version + 1,
+        payroll,
+        rate_snapshots,
+        actions,
+        (),
+        fingerprint_payload(payload),
+        special_pay_events,
+    )
 
 
 def _rate_payload(item):

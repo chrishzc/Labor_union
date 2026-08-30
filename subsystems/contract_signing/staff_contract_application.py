@@ -17,20 +17,6 @@ from domains.client_finance.obligation_planning import (
     build_precontract_deposit_candidate,
     precontract_deposit_terms_impact,
 )
-from infrastructure.archive.contract_documents import (
-    archive_contract_document,
-    discard_uncommitted_contract_document,
-)
-from infrastructure.mysql.client_finance_terms_writer import (
-    persist_client_finance_terms_impact,
-)
-from infrastructure.mysql.line_delivery_task_repository import (
-    MySqlLineDeliveryTaskRepository,
-)
-from infrastructure.mysql.order_terms_read_model import (
-    load_contract_client_finance_facts,
-    select_order,
-)
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.orders.contract_completion_workflow import (
     ContractCompletionClientFinanceCommand,
@@ -50,6 +36,17 @@ from subsystems.contract_signing.template_catalog import (
 )
 from subsystems.contract_signing.contract_renderer import render_contract_template
 from subsystems.contract_signing.command_receipts import append_command_receipt, append_outbox_intent
+
+
+def _missing_adapter(*_args, **_kwargs):
+    raise RuntimeError("contract_signing_adapter_not_configured")
+
+
+archive_contract_document = _missing_adapter
+discard_uncommitted_contract_document = lambda **_kwargs: None
+persist_client_finance_terms_impact = _missing_adapter
+load_contract_client_finance_facts = _missing_adapter
+select_order = _missing_adapter
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,10 +104,61 @@ class StaffContractSigningApplication:
         *,
         archive_root: Path,
         now: Callable[[], datetime],
+        archive_document: Callable[..., object] | None = None,
+        discard_document: Callable[..., None] | None = None,
+        line_delivery_repository_factory: Callable[[object], object] | None = None,
+        finance_facts_loader: Callable[..., object] | None = None,
+        finance_terms_writer: Callable[..., None] | None = None,
     ) -> None:
         self._connection_factory = connection_factory
         self._archive_root = archive_root
         self._now = now
+        self._archive_document = archive_document
+        self._discard_document = discard_document
+        self._line_delivery_repository_factory = line_delivery_repository_factory
+        self._finance_facts_loader = finance_facts_loader
+        self._finance_terms_writer = finance_terms_writer
+
+    def _archive(self, content: bytes, storage_key: str):
+        fn = self._archive_document or archive_contract_document
+        return fn(content, storage_root=self._archive_root, storage_key=storage_key)
+
+    def _discard(self, storage_key: str) -> None:
+        fn = self._discard_document or discard_uncommitted_contract_document
+        fn(storage_root=self._archive_root, storage_key=storage_key)
+
+    def _line_delivery_repository(self, connection):
+        factory = self._line_delivery_repository_factory or _missing_line_delivery_repository
+        return factory(connection)
+
+    def _establish_deposit(self, connection, command, commitment_id: int) -> None:
+        _establish_precontract_deposit(
+            connection,
+            command,
+            commitment_id,
+            facts_loader=self._finance_facts_loader,
+            terms_writer=self._finance_terms_writer,
+        )
+
+    def _run_in_application_unit_of_work(self, operation: Callable[[object], object]):
+        connection = self._connection_factory()
+        unit_of_work = connection
+        try:
+            unit_of_work.begin()
+            result = operation(connection)
+            unit_of_work.commit()
+            return result
+        except Exception:
+            try:
+                unit_of_work.rollback()
+            except BaseException:
+                pass
+            raise
+        finally:
+            try:
+                connection.close()
+            except BaseException:
+                pass
 
     def send(self, command: SendStaffContractCommand) -> StaffContractWorkflowReceipt:
         existing = self._existing_receipt(command.idempotency_key)
@@ -126,11 +174,7 @@ class StaffContractSigningApplication:
         existing = self._existing_signed_return_receipt(command)
         if existing is not None:
             return existing
-        archive = archive_contract_document(
-            command.signed_content,
-            storage_root=self._archive_root,
-            storage_key=_staff_signed_storage_key(command),
-        )
+        archive = self._archive(command.signed_content, _staff_signed_storage_key(command))
         return self._persist_signed_return(command, archive)
 
     def preview_manual_attestation(
@@ -166,16 +210,10 @@ class StaffContractSigningApplication:
         existing = self._existing_signed_return_receipt(command)
         if existing is not None:
             return existing
-        signed_archive = archive_contract_document(
-            command.signed_content,
-            storage_root=self._archive_root,
-            storage_key=_manual_staff_signed_storage_key(command),
-        )
-        connection = self._connection_factory()
+        signed_archive = self._archive(command.signed_content, _manual_staff_signed_storage_key(command))
         template_archive = None
         try:
-            try:
-                connection.begin()
+            def persist(connection):
                 snapshot = _manual_staff_snapshot(
                     connection, command.case_no, command.matching_segment_id, lock=True,
                 )
@@ -190,11 +228,7 @@ class StaffContractSigningApplication:
                     mapping_path=approved_template_mapping_path(template.template_key),
                     facts=_staff_template_facts(connection, command.case_no, segment),
                 )
-                template_archive = archive_contract_document(
-                    content,
-                    storage_root=self._archive_root,
-                    storage_key=_manual_staff_template_storage_key(command),
-                )
+                template_archive = self._archive(content, _manual_staff_template_storage_key(command))
                 source_document_id = _insert_generated_document(
                     connection, command, segment, template, content, template_archive,
                 )
@@ -215,23 +249,13 @@ class StaffContractSigningApplication:
                     event_id,
                     {"commitment_id": commitment_id, "confirmation_method": command.confirmation_method},
                 )
-            except Exception:
-                connection.rollback()
-                if template_archive is not None:
-                    discard_uncommitted_contract_document(
-                        storage_root=self._archive_root, storage_key=template_archive.storage_key,
-                    )
-                discard_uncommitted_contract_document(
-                    storage_root=self._archive_root, storage_key=signed_archive.storage_key,
-                )
-                raise
-            connection.commit()
-            return StaffContractWorkflowReceipt(document_id, event_id, None, commitment_id)
+                return StaffContractWorkflowReceipt(document_id, event_id, None, commitment_id)
+            return self._run_in_application_unit_of_work(persist)
         except Exception:
-            connection.rollback()
+            if template_archive is not None:
+                self._discard(template_archive.storage_key)
+            self._discard(signed_archive.storage_key)
             raise
-        finally:
-            connection.close()
 
     def _existing_signed_return_receipt(
         self, command: RecordStaffSignedReturnCommand
@@ -282,21 +306,17 @@ class StaffContractSigningApplication:
             connection.close()
 
     def _persist_sent_contract(self, command, template):
-        connection = self._connection_factory()
         archive = None
         try:
-            try:
-                connection.begin()
+            def persist(connection):
+                nonlocal archive
                 segment = _staff_segment(connection, command.case_no, command.matching_segment_id)
                 content = render_contract_template(
                     template_path=TEMPLATE_DIRECTORY / template.template_filename,
                     mapping_path=approved_template_mapping_path(template.template_key),
                     facts=_staff_template_facts(connection, command.case_no, segment),
                 )
-                archive = archive_contract_document(
-                    content, storage_root=self._archive_root,
-                    storage_key=_staff_template_storage_key(command),
-                )
+                archive = self._archive(content, _staff_template_storage_key(command))
                 binding = _line_binding(connection, "staff", str(segment["staff_id"]))
                 recipient = require_contract_line_recipient(binding, subject_type="staff", subject_reference=str(segment["staff_id"]))
                 document_id = _insert_generated_document(connection, command, segment, template, content, archive)
@@ -317,29 +337,19 @@ class StaffContractSigningApplication:
                     idempotency_key=command.idempotency_key,
                     correlation_id=command.correlation_id,
                 )
-                delivery = MySqlLineDeliveryTaskRepository(connection).enqueue(request)
+                delivery = self._line_delivery_repository(connection).enqueue(request)
                 event_id = _insert_sent_event(connection, command, segment, document_id, int(delivery.task_id.value), grant_id)
                 _append_command_outcome(connection, command, "send_staff_contract", document_id, event_id, {"line_delivery_task_id": int(delivery.task_id.value)})
-            except Exception:
-                connection.rollback()
-                if archive is not None:
-                    discard_uncommitted_contract_document(
-                        storage_root=self._archive_root, storage_key=archive.storage_key
-                    )
-                raise
-            connection.commit()
-            return StaffContractWorkflowReceipt(document_id, event_id, int(delivery.task_id.value), None)
+                return StaffContractWorkflowReceipt(document_id, event_id, int(delivery.task_id.value), None)
+            return self._run_in_application_unit_of_work(persist)
         except Exception:
-            connection.rollback()
+            if archive is not None:
+                self._discard(archive.storage_key)
             raise
-        finally:
-            connection.close()
 
     def _persist_signed_return(self, command, archive):
-        connection = self._connection_factory()
         try:
-            try:
-                connection.begin()
+            def persist(connection):
                 segment = _staff_segment(connection, command.case_no, command.matching_segment_id)
                 source_document_id = _sent_staff_document(connection, command.case_no, command.matching_segment_id)
                 _require_expected_document_version(command.expected_document_version_id, source_document_id)
@@ -347,25 +357,17 @@ class StaffContractSigningApplication:
                 event_id = _insert_signed_event(connection, command, segment, document_id)
                 commitment_id = _create_commitment_if_ready(connection, command.case_no, segment["plan_id"], command.actor_id)
                 if commitment_id is not None:
-                    _establish_precontract_deposit(
+                    self._establish_deposit(
                         connection,
                         command,
                         commitment_id,
                     )
                 _append_command_outcome(connection, command, "record_staff_signed_return", document_id, event_id, {"commitment_id": commitment_id})
-            except Exception:
-                connection.rollback()
-                discard_uncommitted_contract_document(
-                    storage_root=self._archive_root, storage_key=archive.storage_key
-                )
-                raise
-            connection.commit()
-            return StaffContractWorkflowReceipt(document_id, event_id, None, commitment_id)
+                return StaffContractWorkflowReceipt(document_id, event_id, None, commitment_id)
+            return self._run_in_application_unit_of_work(persist)
         except Exception:
-            connection.rollback()
+            self._discard(archive.storage_key)
             raise
-        finally:
-            connection.close()
 
 
 def _staff_template_storage_key(command: SendStaffContractCommand) -> str:
@@ -616,17 +618,26 @@ def _create_commitment_if_ready(connection, case_no, plan_id, actor_id):
         return commitment_id
 
 
-def _establish_precontract_deposit(connection, command, commitment_id: int) -> None:
+def _establish_precontract_deposit(
+    connection,
+    command,
+    commitment_id: int,
+    *,
+    facts_loader: Callable[..., object] | None = None,
+    terms_writer: Callable[..., None] | None = None,
+) -> None:
     with connection.cursor() as cursor:
         order = select_order(cursor, command.case_no, lock=True)
-        facts = load_contract_client_finance_facts(cursor, order, lock=True)
+        loader = facts_loader or load_contract_client_finance_facts
+        facts = loader(cursor, order, lock=True)
         candidate = build_precontract_deposit_candidate(
             facts,
             f"precontract-commitment:{commitment_id}",
         )
         if not candidate.mutates:
             return
-        persist_client_finance_terms_impact(
+        writer = terms_writer or persist_client_finance_terms_impact
+        writer(
             cursor,
             ContractCompletionClientFinanceCommand(
                 precontract_deposit_terms_impact(candidate),
@@ -638,6 +649,10 @@ def _establish_precontract_deposit(connection, command, commitment_id: int) -> N
                 commitment_id,
             ),
         )
+
+
+def _missing_line_delivery_repository(_connection):
+    raise RuntimeError("line_delivery_adapter_not_configured")
 
 
 def _plan_has_unsigned_segment(connection, case_no, plan_id):

@@ -29,7 +29,9 @@ class MySqlReadOnlySnapshot:
         return self
 
     def __exit__(self, exception_type, exception, traceback) -> None:
-        self._connection.rollback()
+        # The caller owns snapshot finalization.  This adapter only establishes
+        # the read view and must not decide transaction success or failure.
+        return None
 
 
 class MySqlStaffPayableExportSource:

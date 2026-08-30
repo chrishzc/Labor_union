@@ -15,9 +15,37 @@ from zoneinfo import ZoneInfo
 
 import pymysql
 
-from infrastructure.mysql.mysql_adapter import get_connection
+from typing import Callable
+from subsystems.line.ports import unconfigured_connection_factory
 from subsystems.line.rich_menu_publication_workflow import get_current_rich_menu_id
 from subsystems.line.delivery_task_workflow import enqueue_line_task
+
+
+get_connection = unconfigured_connection_factory
+
+
+class _ConnectionUnitOfWork:
+    """Protocol-compatible fallback for tests and already borrowed connections."""
+
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def __enter__(self):
+        begin = getattr(self._connection, "begin", None)
+        if callable(begin):
+            begin()
+        return self
+
+    def __exit__(self, exception_type, exception, traceback):
+        if exception_type is not None:
+            self._connection.rollback()
+        return False
+
+    def commit(self) -> None:
+        self._connection.commit()
+
+
+line_unit_of_work_factory: Callable[[Any], Any] = _ConnectionUnitOfWork
 
 
 REQUEST_TYPES = {"staff_verification", "client_rebind"}
@@ -192,19 +220,17 @@ def submit_staff_verification(
     line_user_id: str,
     *,
     source_event_id: str | None = None,
+    unit_of_work_factory: Callable[[Any], Any] | None = None,
 ) -> dict[str, Any]:
     conn = get_connection()
     try:
-        conn.begin()
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            result = submit_staff_verification_in_transaction(
-                cursor, line_user_id, source_event_id=source_event_id
-            )
-        conn.commit()
+        with (unit_of_work_factory or line_unit_of_work_factory)(conn) as unit_of_work:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                result = submit_staff_verification_in_transaction(
+                    cursor, line_user_id, source_event_id=source_event_id
+                )
+            unit_of_work.commit()
         return result
-    except Exception:
-        conn.rollback()
-        raise
     finally:
         conn.close()
 
@@ -400,86 +426,87 @@ def approve_line_review(
     admin_user_id: int | None,
     reviewer_line_user_id: str | None = None,
     reason: str = "",
+    unit_of_work_factory: Callable[[Any], Any] | None = None,
 ) -> dict[str, Any]:
     conn = get_connection()
     try:
-        conn.begin()
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            item = _lock_pending_request(cursor, request_id)
-            if item["request_type"] == "staff_verification":
-                line_user_id = str(item.get("line_user_id") or "").strip()
-                if not line_user_id:
-                    raise LineReviewDataConflictError("月嫂身分申請缺少 LINE 使用者")
-                cursor.execute(
-                    """
-                    INSERT INTO line_users (line_user_id,role,status,last_event_at)
-                    VALUES (%s,'staff','active',UTC_TIMESTAMP())
-                    ON DUPLICATE KEY UPDATE role='staff',status='active',last_event_at=UTC_TIMESTAMP()
-                    """,
-                    (line_user_id,),
-                )
-                enqueue_line_task(
-                    cursor,
-                    to_user_id=line_user_id,
-                    task_type="rich_menu_link",
-                    payload={
-                        "rich_menu_id": _staff_rich_menu_id(),
-                        "success_message": _template(
-                            "staff_switch_success", "月嫂身分已由工會確認通過。"
-                        ),
-                    },
-                    idempotency_key=f"staff-review-approved:{request_id}",
-                )
-                message = "已核准月嫂身分並切換專屬選單"
-            else:
-                client_id = item.get("client_id")
-                new_line_user_id = str(item.get("new_line_user_id") or "").strip()
-                old_line_user_id = str(item.get("old_line_user_id") or "").strip()
-                if not client_id or not new_line_user_id:
-                    raise LineReviewDataConflictError("重新綁定申請缺少客戶或新 LINE 資料")
-                cursor.execute(
-                    "SELECT id,name,case_no,line_user_id FROM clients WHERE id=%s FOR UPDATE",
-                    (client_id,),
-                )
-                client = cursor.fetchone()
-                if not client:
-                    raise LineReviewDataConflictError("客戶資料已不存在，無法重新綁定")
-                current_line_user_id = str(client.get("line_user_id") or "").strip()
-                if current_line_user_id != old_line_user_id:
-                    raise LineReviewDataConflictError(
-                        "客戶目前綁定資料已在申請後變更，請重新確認後再建立申請"
+        with (unit_of_work_factory or line_unit_of_work_factory)(conn) as unit_of_work:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                item = _lock_pending_request(cursor, request_id)
+                if item["request_type"] == "staff_verification":
+                    line_user_id = str(item.get("line_user_id") or "").strip()
+                    if not line_user_id:
+                        raise LineReviewDataConflictError("月嫂身分申請缺少 LINE 使用者")
+                    cursor.execute(
+                        """
+                        INSERT INTO line_users (line_user_id,role,status,last_event_at)
+                        VALUES (%s,'staff','active',UTC_TIMESTAMP())
+                        ON DUPLICATE KEY UPDATE role='staff',status='active',last_event_at=UTC_TIMESTAMP()
+                        """,
+                        (line_user_id,),
                     )
-                cursor.execute(
-                    "SELECT id FROM clients WHERE line_user_id=%s AND id<>%s LIMIT 1 FOR UPDATE",
-                    (new_line_user_id, client_id),
-                )
-                if cursor.fetchone():
-                    raise LineReviewDataConflictError("新的 LINE 帳號已綁定其他客戶")
-                cursor.execute(
-                    "UPDATE clients SET line_user_id=%s WHERE id=%s",
-                    (new_line_user_id, client_id),
-                )
-                client_name = str(item.get("client_name") or client.get("name") or "")
-                enqueue_line_task(
+                    enqueue_line_task(
+                        cursor,
+                        to_user_id=line_user_id,
+                        task_type="rich_menu_link",
+                        payload={
+                            "rich_menu_id": _staff_rich_menu_id(),
+                            "success_message": _template(
+                                "staff_switch_success", "月嫂身分已由工會確認通過。"
+                            ),
+                        },
+                        idempotency_key=f"staff-review-approved:{request_id}",
+                    )
+                    message = "已核准月嫂身分並切換專屬選單"
+                else:
+                    client_id = item.get("client_id")
+                    new_line_user_id = str(item.get("new_line_user_id") or "").strip()
+                    old_line_user_id = str(item.get("old_line_user_id") or "").strip()
+                    if not client_id or not new_line_user_id:
+                        raise LineReviewDataConflictError("重新綁定申請缺少客戶或新 LINE 資料")
+                    cursor.execute(
+                        "SELECT id,name,case_no,line_user_id FROM clients WHERE id=%s FOR UPDATE",
+                        (client_id,),
+                    )
+                    client = cursor.fetchone()
+                    if not client:
+                        raise LineReviewDataConflictError("客戶資料已不存在，無法重新綁定")
+                    current_line_user_id = str(client.get("line_user_id") or "").strip()
+                    if current_line_user_id != old_line_user_id:
+                        raise LineReviewDataConflictError(
+                            "客戶目前綁定資料已在申請後變更，請重新確認後再建立申請"
+                        )
+                    cursor.execute(
+                        "SELECT id FROM clients WHERE line_user_id=%s AND id<>%s LIMIT 1 FOR UPDATE",
+                        (new_line_user_id, client_id),
+                    )
+                    if cursor.fetchone():
+                        raise LineReviewDataConflictError("新的 LINE 帳號已綁定其他客戶")
+                    cursor.execute(
+                        "UPDATE clients SET line_user_id=%s WHERE id=%s",
+                        (new_line_user_id, client_id),
+                    )
+                    client_name = str(item.get("client_name") or client.get("name") or "")
+                    enqueue_line_task(
+                        cursor,
+                        to_user_id=new_line_user_id,
+                        message_content=_template(
+                            "client_rebind_approved",
+                            "【系統通知】\n您的帳號重新綁定申請已審核通過。",
+                            client_name=client_name,
+                        ),
+                        idempotency_key=f"client-rebind-approved:{request_id}",
+                    )
+                    message = "已確認並完成重新綁定"
+                _record_decision(
                     cursor,
-                    to_user_id=new_line_user_id,
-                    message_content=_template(
-                        "client_rebind_approved",
-                        "【系統通知】\n您的帳號重新綁定申請已審核通過。",
-                        client_name=client_name,
-                    ),
-                    idempotency_key=f"client-rebind-approved:{request_id}",
+                    request_id=request_id,
+                    status="approved",
+                    admin_user_id=admin_user_id,
+                    reviewer_line_user_id=reviewer_line_user_id,
+                    reason=reason,
                 )
-                message = "已確認並完成重新綁定"
-            _record_decision(
-                cursor,
-                request_id=request_id,
-                status="approved",
-                admin_user_id=admin_user_id,
-                reviewer_line_user_id=reviewer_line_user_id,
-                reason=reason,
-            )
-        conn.commit()
+            unit_of_work.commit()
         return {
             "request_id": request_id,
             "request_type": item["request_type"],
@@ -487,9 +514,6 @@ def approve_line_review(
             "message": message,
             "worker_wakeup_required": True,
         }
-    except Exception:
-        conn.rollback()
-        raise
     finally:
         conn.close()
 
@@ -500,48 +524,49 @@ def reject_line_review(
     admin_user_id: int | None,
     reviewer_line_user_id: str | None = None,
     reason: str,
+    unit_of_work_factory: Callable[[Any], Any] | None = None,
 ) -> dict[str, Any]:
     reason = reason.strip()
     if not reason:
         raise ValueError("拒絕申請時必須填寫原因")
     conn = get_connection()
     try:
-        conn.begin()
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            item = _lock_pending_request(cursor, request_id)
-            if item["request_type"] == "staff_verification":
-                target_user_id = str(item.get("line_user_id") or "").strip()
-                content = _template(
-                    "staff_verification_rejected",
-                    "您的月嫂身分驗證申請未通過，請聯絡工會服務人員。",
+        with (unit_of_work_factory or line_unit_of_work_factory)(conn) as unit_of_work:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                item = _lock_pending_request(cursor, request_id)
+                if item["request_type"] == "staff_verification":
+                    target_user_id = str(item.get("line_user_id") or "").strip()
+                    content = _template(
+                        "staff_verification_rejected",
+                        "您的月嫂身分驗證申請未通過，請聯絡工會服務人員。",
+                    )
+                    message = "已拒絕月嫂身分申請"
+                    idempotency_key = f"staff-review-rejected:{request_id}"
+                else:
+                    target_user_id = str(item.get("new_line_user_id") or "").strip()
+                    content = _template(
+                        "client_rebind_rejected",
+                        "【系統通知】\n您的帳號重新綁定申請未通過。",
+                    )
+                    message = "已拒絕重新綁定申請"
+                    idempotency_key = f"client-rebind-rejected:{request_id}"
+                if not target_user_id:
+                    raise LineReviewDataConflictError("審查申請缺少通知對象")
+                enqueue_line_task(
+                    cursor,
+                    to_user_id=target_user_id,
+                    message_content=content,
+                    idempotency_key=idempotency_key,
                 )
-                message = "已拒絕月嫂身分申請"
-                idempotency_key = f"staff-review-rejected:{request_id}"
-            else:
-                target_user_id = str(item.get("new_line_user_id") or "").strip()
-                content = _template(
-                    "client_rebind_rejected",
-                    "【系統通知】\n您的帳號重新綁定申請未通過。",
+                _record_decision(
+                    cursor,
+                    request_id=request_id,
+                    status="rejected",
+                    admin_user_id=admin_user_id,
+                    reviewer_line_user_id=reviewer_line_user_id,
+                    reason=reason,
                 )
-                message = "已拒絕重新綁定申請"
-                idempotency_key = f"client-rebind-rejected:{request_id}"
-            if not target_user_id:
-                raise LineReviewDataConflictError("審查申請缺少通知對象")
-            enqueue_line_task(
-                cursor,
-                to_user_id=target_user_id,
-                message_content=content,
-                idempotency_key=idempotency_key,
-            )
-            _record_decision(
-                cursor,
-                request_id=request_id,
-                status="rejected",
-                admin_user_id=admin_user_id,
-                reviewer_line_user_id=reviewer_line_user_id,
-                reason=reason,
-            )
-        conn.commit()
+            unit_of_work.commit()
         return {
             "request_id": request_id,
             "request_type": item["request_type"],
@@ -549,8 +574,5 @@ def reject_line_review(
             "message": message,
             "worker_wakeup_required": True,
         }
-    except Exception:
-        conn.rollback()
-        raise
     finally:
         conn.close()

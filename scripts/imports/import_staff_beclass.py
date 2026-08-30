@@ -45,6 +45,8 @@ from shared_kernel.fingerprints import fingerprint_payload
 from infrastructure.mysql.staff_historical_workbook_repository import (
     MySqlStaffHistoricalWorkbookRepository,
 )
+from infrastructure.mysql.staff_historical_adoption_repository import MySqlStaffHistoricalAdoptionRepository
+from subsystems.case_import.beclass_review_intake import record_invalid_beclass_row
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.case_import.staff_historical_workbook_adoption import (
     StaffHistoricalWorkbookConflict,
@@ -161,6 +163,8 @@ def _typed_historical_import(excel_path: str, source_revision: str | None):
             connection,
             MySqlStaffHistoricalWorkbookRepository(connection),
             lambda: MySqlUnitOfWork(connection),
+            repository_factory=MySqlStaffHistoricalAdoptionRepository,
+            review_recorder=record_invalid_beclass_row,
         )
         preview = service.preview(excel_path, source_revision)
         digest = _staff_source_content_digest(excel_path, source_revision)

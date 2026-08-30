@@ -11,19 +11,13 @@ from domains.customer_service.ticket import (
     CustomerServiceCategory,
     CustomerServiceStatus,
     CustomerServiceTicket,
+    CustomerServiceTicketNotFoundError,
+    CustomerServiceVersionConflictError,
 )
 from subsystems.customer_service.contracts import (
     CreateCustomerServiceMessage,
     CustomerServiceListQuery,
 )
-
-
-class CustomerServiceTicketNotFoundError(LookupError):
-    pass
-
-
-class CustomerServiceVersionConflictError(RuntimeError):
-    pass
 
 
 class MySqlCustomerServiceRepository:

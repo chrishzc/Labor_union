@@ -6,7 +6,10 @@
 """
 
 from typing import Dict, Any, List
-from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.scheduling.ports import unconfigured_connection_factory
+
+
+get_connection = unconfigured_connection_factory
 
 def get_order_match_records(case_no: str) -> List[Dict[str, Any]]:
     """查詢特定案件之全量媒合紀錄列表"""
@@ -26,4 +29,3 @@ def get_order_match_records(case_no: str) -> List[Dict[str, Any]]:
             return cursor.fetchall()
     finally:
         conn.close()
-

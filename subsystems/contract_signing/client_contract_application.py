@@ -9,28 +9,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from infrastructure.archive.contract_documents import (
-    archive_contract_document,
-    discard_uncommitted_contract_document,
-)
-from infrastructure.mysql.line_delivery_task_repository import (
-    MySqlLineDeliveryTaskRepository,
-)
-from infrastructure.mysql.order_contract_completion_repository import (
-    MySqlOrderContractCompletionRepository,
-)
-from shared_kernel.clock import SystemBusinessClock
-from shared_kernel.identities import (
-    ActorContext,
-    CorrelationId,
-    ExpectedVersion,
-    IdempotencyKey,
-)
-from subsystems.orders.contract_completion_workflow import (
-    ContractCompletionApplyRequest,
-    ContractCompletionWorkflow,
-)
-from domains.orders.contract_completion import ContractCompletionIntent
+from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.contract_signing.document_access import (
     create_document_access_credential,
 )
@@ -46,6 +25,17 @@ from subsystems.contract_signing.template_catalog import (
 )
 from subsystems.contract_signing.contract_renderer import render_contract_template
 from subsystems.contract_signing.command_receipts import append_command_receipt, append_outbox_intent
+
+
+def _missing_adapter(*_args, **_kwargs):
+    raise RuntimeError("contract_signing_adapter_not_configured")
+
+
+# Composition roots replace these callbacks with concrete adapters.  Keeping
+# named seams here also makes the application straightforward to exercise with
+# in-memory doubles without importing infrastructure into the subsystem.
+archive_contract_document = _missing_adapter
+discard_uncommitted_contract_document = lambda **_kwargs: None
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,10 +91,54 @@ class ClientContractSigningApplication:
         *,
         archive_root: Path,
         now: Callable[[], datetime],
+        archive_document: Callable[..., object] | None = None,
+        discard_document: Callable[..., None] | None = None,
+        line_delivery_repository_factory: Callable[[object], object] | None = None,
+        completion: Callable[[object, object, str], None] | None = None,
     ) -> None:
         self._connection_factory = connection_factory
         self._archive_root = archive_root
         self._now = now
+        self._archive_document = archive_document
+        self._discard_document = discard_document
+        self._line_delivery_repository_factory = line_delivery_repository_factory
+        self._completion = completion
+
+    def _archive(self, content: bytes, storage_key: str):
+        fn = self._archive_document or archive_contract_document
+        return fn(content, storage_root=self._archive_root, storage_key=storage_key)
+
+    def _discard(self, storage_key: str) -> None:
+        fn = self._discard_document or discard_uncommitted_contract_document
+        fn(storage_root=self._archive_root, storage_key=storage_key)
+
+    def _line_delivery_repository(self, connection):
+        factory = self._line_delivery_repository_factory or _missing_line_delivery_repository
+        return factory(connection)
+
+    def _complete(self, connection, command, identity: str) -> None:
+        callback = self._completion or _complete_contract_in_transaction
+        callback(connection, command, identity)
+
+    def _run_in_application_unit_of_work(self, operation: Callable[[object], object]):
+        connection = self._connection_factory()
+        unit_of_work = connection
+        try:
+            unit_of_work.begin()
+            result = operation(connection)
+            unit_of_work.commit()
+            return result
+        except Exception:
+            try:
+                unit_of_work.rollback()
+            except BaseException:
+                pass
+            raise
+        finally:
+            try:
+                connection.close()
+            except BaseException:
+                pass
 
     def send(self, command: SendClientContractCommand) -> ClientContractWorkflowReceipt:
         existing = self._existing_receipt(command.idempotency_key)
@@ -120,11 +154,7 @@ class ClientContractSigningApplication:
         existing = self._existing_signed_return_receipt(command)
         if existing is not None:
             return existing
-        archive = archive_contract_document(
-            command.signed_content,
-            storage_root=self._archive_root,
-            storage_key=_client_signed_storage_key(command),
-        )
+        archive = self._archive(command.signed_content, _client_signed_storage_key(command))
         return self._persist_signed_return(command, archive)
 
     def preview_manual_attestation(
@@ -159,16 +189,10 @@ class ClientContractSigningApplication:
         existing = self._existing_signed_return_receipt(command)
         if existing is not None:
             return existing
-        signed_archive = archive_contract_document(
-            command.signed_content,
-            storage_root=self._archive_root,
-            storage_key=_manual_client_signed_storage_key(command),
-        )
-        connection = self._connection_factory()
+        signed_archive = self._archive(command.signed_content, _manual_client_signed_storage_key(command))
         template_archive = None
         try:
-            try:
-                connection.begin()
+            def persist(connection):
                 snapshot = _manual_client_snapshot(connection, command.case_no, lock=True)
                 _require_manual_client_snapshot_applicable(snapshot)
                 expected = _manual_preview_fingerprint(snapshot, command.confirmation_method, command.reason)
@@ -181,11 +205,7 @@ class ClientContractSigningApplication:
                     mapping_path=approved_template_mapping_path(template.template_key),
                     facts=_client_template_facts(connection, command.case_no, facts),
                 )
-                template_archive = archive_contract_document(
-                    content,
-                    storage_root=self._archive_root,
-                    storage_key=_manual_client_template_storage_key(command),
-                )
+                template_archive = self._archive(content, _manual_client_template_storage_key(command))
                 source_document_id = _insert_generated_document(
                     connection, command, facts, template, template_archive,
                 )
@@ -194,7 +214,7 @@ class ClientContractSigningApplication:
                 )
                 identity = f"client-contract:{signed_archive.sha256}"
                 event_id = _insert_signed_event(connection, command, facts, document_id)
-                _complete_contract_in_transaction(connection, command, identity)
+                self._complete(connection, command, identity)
                 _append_command_outcome(
                     connection,
                     command,
@@ -207,23 +227,13 @@ class ClientContractSigningApplication:
                         "confirmation_method": command.confirmation_method,
                     },
                 )
-            except Exception:
-                connection.rollback()
-                if template_archive is not None:
-                    discard_uncommitted_contract_document(
-                        storage_root=self._archive_root, storage_key=template_archive.storage_key,
-                    )
-                discard_uncommitted_contract_document(
-                    storage_root=self._archive_root, storage_key=signed_archive.storage_key,
-                )
-                raise
-            connection.commit()
-            return ClientContractWorkflowReceipt(document_id, event_id, None, identity, True)
+                return ClientContractWorkflowReceipt(document_id, event_id, None, identity, True)
+            return self._run_in_application_unit_of_work(persist)
         except Exception:
-            connection.rollback()
+            if template_archive is not None:
+                self._discard(template_archive.storage_key)
+            self._discard(signed_archive.storage_key)
             raise
-        finally:
-            connection.close()
 
     def _existing_signed_return_receipt(
         self, command: RecordClientSignedReturnCommand
@@ -282,21 +292,17 @@ class ClientContractSigningApplication:
             connection.close()
 
     def _persist_sent_contract(self, command, template):
-        connection = self._connection_factory()
         archive = None
         try:
-            try:
-                connection.begin()
+            def persist(connection):
+                nonlocal archive
                 facts = _client_contract_facts(connection, command.case_no)
                 content = render_contract_template(
                     template_path=TEMPLATE_DIRECTORY / template.template_filename,
                     mapping_path=approved_template_mapping_path(template.template_key),
                     facts=_client_template_facts(connection, command.case_no, facts),
                 )
-                archive = archive_contract_document(
-                    content, storage_root=self._archive_root,
-                    storage_key=_client_template_storage_key(command),
-                )
+                archive = self._archive(content, _client_template_storage_key(command))
                 binding = _line_binding(connection, "customer", str(facts["client_id"]))
                 recipient = require_contract_line_recipient(binding, subject_type="customer", subject_reference=str(facts["client_id"]))
                 document_id = _insert_generated_document(connection, command, facts, template, archive)
@@ -311,50 +317,32 @@ class ClientContractSigningApplication:
                     idempotency_key=command.idempotency_key,
                     correlation_id=command.correlation_id,
                 )
-                delivery = MySqlLineDeliveryTaskRepository(connection).enqueue(request)
+                delivery = self._line_delivery_repository(connection).enqueue(request)
                 event_id = _insert_sent_event(connection, command, facts, document_id, int(delivery.task_id.value), grant_id)
                 _append_command_outcome(connection, command, "send_client_contract", document_id, event_id, {"line_delivery_task_id": int(delivery.task_id.value)})
-            except Exception:
-                connection.rollback()
-                if archive is not None:
-                    discard_uncommitted_contract_document(
-                        storage_root=self._archive_root, storage_key=archive.storage_key
-                    )
-                raise
-            connection.commit()
-            return ClientContractWorkflowReceipt(document_id, event_id, int(delivery.task_id.value), None)
+                return ClientContractWorkflowReceipt(document_id, event_id, int(delivery.task_id.value), None)
+            return self._run_in_application_unit_of_work(persist)
         except Exception:
-            connection.rollback()
+            if archive is not None:
+                self._discard(archive.storage_key)
             raise
-        finally:
-            connection.close()
 
     def _persist_signed_return(self, command, archive):
-        connection = self._connection_factory()
         try:
-            try:
-                connection.begin()
+            def persist(connection):
                 facts = _client_contract_facts(connection, command.case_no)
                 source_document_id = _sent_client_document(connection, command.case_no)
                 _require_expected_document_version(command.expected_document_version_id, source_document_id)
                 document_id = _insert_signed_document(connection, command, facts, source_document_id, archive)
                 identity = f"client-contract:{archive.sha256}"
                 event_id = _insert_signed_event(connection, command, facts, document_id)
-                _complete_contract_in_transaction(connection, command, identity)
+                self._complete(connection, command, identity)
                 _append_command_outcome(connection, command, "record_client_signed_return", document_id, event_id, {"contract_identity": identity, "contract_completed": True})
-            except Exception:
-                connection.rollback()
-                discard_uncommitted_contract_document(
-                    storage_root=self._archive_root, storage_key=archive.storage_key
-                )
-                raise
-            connection.commit()
-            return ClientContractWorkflowReceipt(document_id, event_id, None, identity, True)
+                return ClientContractWorkflowReceipt(document_id, event_id, None, identity, True)
+            return self._run_in_application_unit_of_work(persist)
         except Exception:
-            connection.rollback()
+            self._discard(archive.storage_key)
             raise
-        finally:
-            connection.close()
 
 
 def _client_template_storage_key(command: SendClientContractCommand) -> str:
@@ -609,28 +597,11 @@ class _JoinedTransaction:
 
 
 def _complete_contract_in_transaction(connection, command, identity: str) -> None:
-    repository = MySqlOrderContractCompletionRepository(connection)
-    repository.record_contract_identity(command.case_no, identity)
-    workflow = ContractCompletionWorkflow(
-        repository,
-        _JoinedTransaction,
-        SystemBusinessClock(),
-    )
-    facts = repository.load_for_apply(command.case_no)
-    preview = workflow.preview(command.case_no, ContractCompletionIntent.CONFIRM_COMPLETED)
-    workflow.apply(
-        ContractCompletionApplyRequest(
-            command.case_no,
-            ContractCompletionIntent.CONFIRM_COMPLETED,
-            ExpectedVersion(facts.order.aggregate_version),
-            ExpectedVersion(facts.client_finance.account_version),
-            preview.fingerprint,
-            command.idempotency_key,
-            ActorContext(command.actor_id),
-            "client signed returned contract was accepted",
-            command.correlation_id,
-        )
-    )
+    raise RuntimeError("contract_completion_adapter_not_configured")
+
+
+def _missing_line_delivery_repository(_connection):
+    raise RuntimeError("line_delivery_adapter_not_configured")
 
 
 def _insert_media_asset(connection, case_no, storage_key, filename, mime_type, file_size, digest):

@@ -1,0 +1,67 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-current-anomaly-issues-2026-08-30-v1",
+  "descriptors": {
+    "1016_current_anomaly_issues.sql": {
+      "tables": {
+        "current_anomaly_issues": [
+          "issue_key",
+          "definition_code",
+          "owner_domain",
+          "owner_root_type",
+          "subject_type",
+          "subject_id",
+          "subject_identity",
+          "owner_snapshot_token",
+          "owner_version",
+          "severity",
+          "blocking",
+          "details_version",
+          "details",
+          "episode_started_at",
+          "last_verified_at",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "indexes": {
+        "current_anomaly_issues.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "issue_key"
+          ]
+        },
+        "current_anomaly_issues.idx_current_anomaly_owner": {
+          "non_unique": 1,
+          "columns": [
+            "owner_domain",
+            "owner_root_type",
+            "subject_type",
+            "subject_id",
+            "issue_key"
+          ]
+        },
+        "current_anomaly_issues.idx_current_anomaly_definition": {
+          "non_unique": 1,
+          "columns": [
+            "definition_code",
+            "blocking",
+            "severity",
+            "episode_started_at",
+            "issue_key"
+          ]
+        }
+      },
+      "foreign_keys": {},
+      "checks": {
+        "current_anomaly_issues.chk_current_anomaly_issue_key": "atom(regexp_like(issue_key,'^ci_[0-9a-f]{64}$'))",
+        "current_anomaly_issues.chk_current_anomaly_subject_identity": "atom(json_type(subject_identity)='OBJECT')",
+        "current_anomaly_issues.chk_current_anomaly_details": "and(atom(details_version=1),atom(json_type(details)='OBJECT'))",
+        "current_anomaly_issues.chk_current_anomaly_boolean": "atom(blockingin(0,1))",
+        "current_anomaly_issues.chk_current_anomaly_time_order": "atom(last_verified_at>=episode_started_at)",
+        "current_anomaly_issues.chk_current_anomaly_text": "and(atom(char_length(trim(definition_code))>0),atom(char_length(trim(owner_domain))>0),atom(char_length(trim(owner_root_type))>0),atom(char_length(trim(subject_type))>0),atom(char_length(trim(subject_id))>0),atom(char_length(trim(owner_snapshot_token))>0))"
+      },
+      "triggers": []
+    }
+  }
+}

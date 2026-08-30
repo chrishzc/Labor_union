@@ -359,21 +359,35 @@ def _require_identifiers(*identifiers: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", required=True)
-    parser.add_argument("--confirm-database", required=True)
-    parser.add_argument("--host", default=os.getenv("DB_HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.getenv("DB_PORT", "3306")))
-    parser.add_argument("--user", default=os.getenv("DB_USER", "root"))
-    parser.add_argument("--password", default=os.getenv("DB_PASSWORD", "1234"))
-    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--confirm-database", help="For apply, must exactly match --database.")
+    parser.add_argument("--host", help="Explicit database host; must match DB_HOST when configured.")
+    parser.add_argument("--port", type=int, help="Database port; defaults only from DB_PORT.")
+    parser.add_argument("--user", help="Explicit database user; defaults only from DB_USER.")
+    parser.add_argument("--apply", action="store_true", help="Retired mutation entrypoint; always fail closed.")
+    parser.add_argument("--dry-run", action="store_true", help="Explicitly request the default read-only preflight.")
     arguments = parser.parse_args()
-    if arguments.confirm_database != arguments.database:
+    target = require_target_database(arguments.database)
+    if arguments.apply:
+        raise RuntimeError("legacy_ui_dataset_apply_guard_contract_incomplete")
+    if arguments.confirm_database is not None and arguments.confirm_database != target:
         raise ValueError("confirmation must exactly match target database")
+    configured_host = os.getenv("DB_HOST", "").strip()
+    host = (arguments.host or configured_host).strip()
+    if not host:
+        raise RuntimeError("legacy_ui_dataset_database_host_required")
+    if configured_host and host != configured_host:
+        raise RuntimeError("legacy_ui_dataset_configured_host_mismatch")
+    user = (arguments.user or os.getenv("DB_USER", "")).strip()
+    password = os.getenv("DB_PASSWORD", "")
+    if not user or not password:
+        raise RuntimeError("legacy_ui_dataset_database_credentials_required")
+    port = arguments.port or int(os.getenv("DB_PORT", "3306"))
     connection = pymysql.connect(
-        host=arguments.host, port=arguments.port, user=arguments.user,
-        password=arguments.password, charset="utf8mb4",
+        host=host, port=port, user=user,
+        password=password, charset="utf8mb4",
     )
     try:
-        result = preflight(connection, arguments.database) if arguments.dry_run else migrate(connection, arguments.database)
+        result = preflight(connection, target)
     finally:
         connection.close()
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))

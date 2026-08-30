@@ -8,11 +8,9 @@ from __future__ import annotations
 
 import os
 from decimal import Decimal
-from typing import Any
+from typing import Any, Callable
 
 from domains.client_finance.order_amount_calculation import calculate_order_amounts
-from infrastructure.mysql.mysql_adapter import get_connection
-from scripts.imports.finance_statement_normalizer import normalize_workbook
 from subsystems.anomalies.finance_import_review_alert import (
     project_finance_import_review_alert,
 )
@@ -86,9 +84,14 @@ def _order_for_snapshot(cursor: Any, case_no: str) -> dict[str, Any] | None:
     return cursor.fetchone()
 
 
-def import_finance_workbook(excel_path: str, *, dry_run: bool = False) -> dict[str, Any]:
+def import_finance_workbook(
+    excel_path: str,
+    *,
+    dry_run: bool = False,
+    connection_factory: Callable[[], Any],
+    normalizer: Callable[[str], dict[str, Any]],
+) -> dict[str, Any]:
     """Run a diagnostic transaction that is rolled back before return."""
-    assert callable(get_connection), "database connection factory is required"
     if not isinstance(excel_path, str) or not excel_path.strip():
         raise ValueError("excel_path is required")
     if not isinstance(dry_run, bool):
@@ -97,8 +100,8 @@ def import_finance_workbook(excel_path: str, *, dry_run: bool = False) -> dict[s
         raise ValueError("finance_import_diagnostic_is_dry_run_only")
 
     source_path = os.path.abspath(excel_path)
-    normalized_result = normalize_workbook(source_path)
-    connection = get_connection()
+    normalized_result = normalizer(source_path)
+    connection = connection_factory()
     try:
         with connection.cursor() as cursor:
             staging = stage_finance_rows(

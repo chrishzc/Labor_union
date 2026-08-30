@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from domains.anomalies.registry import default_anomaly_registry
 from infrastructure.mysql.anomaly_registry_repository import (
+    AnomalyMySqlUnitOfWork,
     MySqlAnomalyRepository,
 )
 from subsystems.anomalies.government_subsidy_assignment_drift_anomaly_source import (
@@ -19,20 +20,6 @@ from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.anomalies.alert_workflow import AnomalyApplication
 
 _SOURCE_VERSION_COUNTER_BASE = 4_294_967_296
-
-
-class BorrowedGovernmentSubsidyAssignmentDriftUnitOfWork:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exception_type, exception, traceback):
-        return False
-
-    def commit(self) -> None:
-        return None
-
-    def rollback(self) -> None:
-        return None
 
 
 class MySqlGovernmentSubsidyAssignmentDriftRootFactSource:
@@ -60,22 +47,14 @@ def project_government_subsidy_assignment_drift_page(
     connection: Any,
     request: GovernmentSubsidyAssignmentDriftScanRequest,
 ):
-    consumer = _projection_consumer(connection)
-    try:
-        connection.begin()
-        result = consumer.scan_page(request)
-        connection.commit()
-        return result
-    except Exception:
-        connection.rollback()
-        raise
+    return _projection_consumer(connection).scan_page(request)
 
 
 def _projection_consumer(connection):
     application = AnomalyApplication(
         default_anomaly_registry(),
         MySqlAnomalyRepository(connection),
-        BorrowedGovernmentSubsidyAssignmentDriftUnitOfWork,
+        lambda: AnomalyMySqlUnitOfWork(connection),
     )
     return GovernmentSubsidyAssignmentDriftAnomalyConsumer(
         MySqlGovernmentSubsidyAssignmentDriftRootFactSource(connection),
@@ -228,7 +207,6 @@ LIMIT %s
 
 
 __all__ = [
-    "BorrowedGovernmentSubsidyAssignmentDriftUnitOfWork",
     "MySqlGovernmentSubsidyAssignmentDriftRootFactSource",
     "project_government_subsidy_assignment_drift_page",
 ]

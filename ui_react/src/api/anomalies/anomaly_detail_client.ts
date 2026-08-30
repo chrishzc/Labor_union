@@ -21,6 +21,7 @@ export interface AnomalyDetailOptions {
 }
 
 export interface AnomalyDetailParams { fingerprint: string }
+export interface AnomalyRecoveryParams { issueKey: string }
 
 function requestOptions(options?: AnomalyDetailOptions): RequestOptions {
   const headers = { ...(options?.headers ?? {}) };
@@ -37,6 +38,13 @@ function endpointFor(prefix: string, fingerprint: string): string {
     throw new AnomalyDetailError('VALIDATION', 'fingerprint 必須為 64 位小寫十六進位字串');
   }
   return `${prefix}/${encodeURIComponent(fingerprint)}`;
+}
+
+function currentIssueEndpoint(issueKey: string): string {
+  if (!/^ci_[0-9a-f]{64}$/.test(issueKey)) {
+    throw new AnomalyDetailError('VALIDATION', 'issue_key 必須為 current anomaly opaque key');
+  }
+  return `/api/v1/anomaly-recovery/${encodeURIComponent(issueKey)}`;
 }
 
 function decode<T>(schema: z.ZodType<T>, raw: unknown, endpoint: string): T {
@@ -60,8 +68,8 @@ export function queryAnomalyDetail(params: AnomalyDetailParams, options?: Anomal
   return getData(endpointFor('/api/v1/anomalies', params.fingerprint), AnomalyDetailResponseSchema, options);
 }
 
-export function queryAnomalyRecovery(params: AnomalyDetailParams, options?: AnomalyDetailOptions): Promise<AnomalyRecoveryContextView> {
-  return getData(endpointFor('/api/v1/anomaly-recovery', params.fingerprint), AnomalyRecoveryResponseSchema, options);
+export function queryAnomalyRecovery(params: AnomalyRecoveryParams, options?: AnomalyDetailOptions): Promise<AnomalyRecoveryContextView> {
+  return getData(currentIssueEndpoint(params.issueKey), AnomalyRecoveryResponseSchema, options);
 }
 
 export const anomalyDetailClient = { queryAnomalyDetail, queryAnomalyRecovery };

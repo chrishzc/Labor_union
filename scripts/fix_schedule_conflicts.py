@@ -10,13 +10,16 @@
       Assignment Plan Preview／Apply。
 ================================================================================
 """
+import argparse
 import sys
 import os
+import re
 
 # 確保可讀取上層 service 模組
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.mysql_adapter import DB_CONFIG
 
 # 確保中文輸出編碼正確
 try:
@@ -26,6 +29,41 @@ except Exception:
     pass
 
 _REPAIR_RETIRED_CODE = "legacy_schedule_conflict_repair_retired"
+
+def _require_target_database(target: str) -> None:
+    if not target or target != str(DB_CONFIG.get("database") or ""):
+        raise ValueError("target database must exactly match configured DB_DATABASE")
+    if target == "union_db" or not re.fullmatch(r"lu_test_[a-z0-9_]+", target):
+        raise ValueError("target database must be an explicitly named lu_test_* database")
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        raise ValueError("production environment is not permitted for this read-only CLI")
+
+
+def _check_connected_identity(target: str) -> None:
+    if not os.getenv("DB_HOST", "").strip():
+        raise RuntimeError("DB_HOST must be configured explicitly")
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT DATABASE() AS database_name, @@hostname AS server")
+            identity = cursor.fetchone()
+            cursor.execute(
+                "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+                "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN "
+                "('scheduling_effective_occupancy','scheduling_generations') "
+                "ORDER BY TABLE_NAME"
+            )
+            objects = cursor.fetchall()
+        if not identity or identity.get("database_name") != target:
+            raise RuntimeError("connected database does not match --target-database")
+        if not str(identity.get("server") or "").strip():
+            raise RuntimeError("connected MySQL server identity is unavailable")
+        names = [row.get("TABLE_NAME") for row in objects]
+        if names != ["scheduling_effective_occupancy", "scheduling_generations"]:
+            raise RuntimeError("canonical Scheduling conflict schema is incomplete")
+    finally:
+        conn.close()
+
 
 def detect_schedule_conflicts():
     """Read duplicate canonical effective occupancy without modifying facts."""
@@ -72,12 +110,18 @@ ORDER BY occupancy.staff_id,occupancy.occupancy_date
 """
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == '--repair':
+    if "--repair" in sys.argv[1:]:
         print(_REPAIR_RETIRED_CODE, file=sys.stderr)
         raise SystemExit(2)
-    elif len(sys.argv) > 1 and sys.argv[1] == '--test':
-        conflicts = detect_schedule_conflicts()
-        if conflicts:
-            raise SystemExit(1)
-    else:
-        detect_schedule_conflicts()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--target-database", required=True)
+    parser.add_argument("--test", action="store_true")
+    args = parser.parse_args()
+    try:
+        _require_target_database(args.target_database)
+        _check_connected_identity(args.target_database)
+    except (ValueError, RuntimeError) as exc:
+        parser.error(str(exc))
+    conflicts = detect_schedule_conflicts()
+    if args.test and conflicts:
+        raise SystemExit(1)

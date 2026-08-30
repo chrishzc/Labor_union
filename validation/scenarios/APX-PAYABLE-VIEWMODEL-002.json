@@ -37,11 +37,11 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_accounts_payable_export_workflow.py tests\\test_accounts_payable_export_sources.py tests\\test_accounts_payable_export_api_client.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\staff-payables\\subsystems\\staff-payables\\integration\\test_accounts_payable_export_workflow.py tests\\domains\\staff-payables\\subsystems\\staff-payables\\integration\\test_accounts_payable_export_sources.py tests\\test_accounts_payable_export_api_client.py"
     ],
     "test_paths": [
-      "tests/test_accounts_payable_export_workflow.py",
-      "tests/test_accounts_payable_export_sources.py",
+      "tests/domains/staff-payables/subsystems/staff-payables/integration/test_accounts_payable_export_workflow.py",
+      "tests/domains/staff-payables/subsystems/staff-payables/integration/test_accounts_payable_export_sources.py",
       "tests/test_accounts_payable_export_api_client.py"
     ]
   }

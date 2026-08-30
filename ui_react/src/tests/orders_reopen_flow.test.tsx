@@ -280,7 +280,7 @@ describe('Controlled Order Reopen Component Flow Suite', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/重開回應逾時或未明/)).toBeInTheDocument();
+      expect(screen.getByText(/重開結果尚未確認；請使用下方重試功能繼續/)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /重試提交/ })).toBeInTheDocument();
     });
 

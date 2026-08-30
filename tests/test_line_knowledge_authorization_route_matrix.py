@@ -43,6 +43,14 @@ MATCHING_ROUTE_CONTRACT = {
             {"require_line_matching_sender"},
             "durable-provider-worker",
         ),
+        "preview_manual_candidate_information_confirmation": (
+            {"require_line_matching_override"},
+            "none",
+        ),
+        "apply_manual_candidate_information_confirmation": (
+            {"require_line_matching_override"},
+            "none",
+        ),
         "record_candidate_willingness": (
             {"require_line_matching_override"},
             "none",
@@ -73,15 +81,17 @@ MATCHING_ROUTE_CONTRACT = {
             {"require_line_matching_sender"},
             "durable-provider-worker",
         ),
+        "preview_manual_matching_plan_resumes_route": (
+            {"require_line_matching_override"},
+            "none",
+        ),
+        "apply_manual_matching_plan_resumes_route": (
+            {"require_line_matching_override"},
+            "none",
+        ),
         "cancel_matching_plan_route": ({"require_system_admin"}, "none"),
         "create_matching_plan_version_route": ({"require_system_admin"}, "none"),
         "recommend_staff": ({"require_system_admin"}, "none"),
-        "send_info_1": ({"require_system_admin"}, "none"),
-        "send_info_2": ({"require_system_admin"}, "none"),
-        "reply_matching_inquiry": ({"require_system_admin"}, "none"),
-        "send_resume_to_client": ({"require_system_admin"}, "none"),
-        "send_resume_for_case": ({"require_system_admin"}, "none"),
-        "assign_staff_to_order": ({"require_system_admin"}, "none"),
     },
     "runtime_health.py": {
         "health_status": ({"require_line_monitor_reader"}, "none"),
@@ -89,9 +99,20 @@ MATCHING_ROUTE_CONTRACT = {
         "alert_targets": ({"require_line_monitor_reader"}, "none"),
         "admin_alert_candidates": ({"require_line_alert_manager"}, "none"),
         "add_admin_target": ({"require_line_alert_manager"}, "none"),
+        "preview_add_admin_target": ({"require_line_alert_manager"}, "none"),
         "reset_group_target": ({"require_line_alert_manager"}, "none"),
+        "preview_reset_group_target": ({"require_line_alert_manager"}, "none"),
         "set_target_enabled": ({"require_line_alert_manager"}, "none"),
+        "preview_set_target_enabled": ({"require_line_alert_manager"}, "none"),
     },
+}
+RETIRED_410_HANDLERS = {
+    "send_info_1",
+    "send_info_2",
+    "reply_matching_inquiry",
+    "send_resume_to_client",
+    "send_resume_for_case",
+    "assign_staff_to_order",
 }
 EXPECTED_CAPABILITIES = {
     "require_line_matching_reader": "line.matching.read",
@@ -152,6 +173,24 @@ def _route_inventory(filename: str) -> dict[str, set[str]]:
         }
         if not routers:
             continue
+        route_decorators = [
+            decorator
+            for decorator in statement.decorator_list
+            if isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and isinstance(decorator.func.value, ast.Name)
+            and decorator.func.value.id in routers
+        ]
+        if statement.name in RETIRED_410_HANDLERS or route_decorators and all(
+            any(
+                isinstance(keyword.value, ast.Constant)
+                and keyword.arg == "include_in_schema"
+                and keyword.value.value is False
+                for keyword in decorator.keywords
+            )
+            for decorator in route_decorators
+        ):
+            continue
         dependencies = _dependency_names(statement)
         for router in routers:
                     inventory[statement.name] = dependencies | router_dependencies.get(router, set())
@@ -172,6 +211,24 @@ def _route_endpoint_nodes(filename: str) -> dict[str, ast.AST]:
             and isinstance(decorator.func.value, ast.Name)
         }
         if routers:
+            route_decorators = [
+                decorator
+                for decorator in statement.decorator_list
+                if isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Attribute)
+                and isinstance(decorator.func.value, ast.Name)
+                and decorator.func.value.id in routers
+            ]
+            if statement.name in RETIRED_410_HANDLERS or route_decorators and all(
+                any(
+                    isinstance(keyword.value, ast.Constant)
+                    and keyword.arg == "include_in_schema"
+                    and keyword.value.value is False
+                    for keyword in decorator.keywords
+                )
+                for decorator in route_decorators
+            ):
+                continue
             endpoint_nodes[statement.name] = statement
     return endpoint_nodes
 
@@ -314,7 +371,7 @@ def test_matching_and_runtime_routes_have_complete_guard_capability_matrix() -> 
             )
             route_count += 1
 
-    assert route_count == 26
+    assert route_count == 27
 
 
 def test_identity_public_liff_and_page_static_routes_are_explicit_exclusions() -> None:

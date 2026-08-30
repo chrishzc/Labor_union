@@ -29,12 +29,14 @@ def test_client_payment_snapshot_has_no_production_caller() -> None:
     assert caller_paths == []
 
 
-def test_current_receipt_keeps_only_preserve_data_as_external_gate() -> None:
-    receipt = (
-        ROOT
-        / "document/架構重整/03_追蹤清單與證據/evidence"
-        / "2026-08-09_staff_payables_client_refund_formal_spec_revalidation_receipt.md"
+def test_current_ssot_keeps_target_host_retired_and_history_recoverable() -> None:
+    index = (
+        ROOT / "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md"
+    ).read_text(encoding="utf-8")
+    archive = (
+        ROOT / "document/架構重整/04_已完成與上線封存/README.md"
     ).read_text(encoding="utf-8")
 
-    assert "target-host\n部署驗收已依決策 53 退役" in receipt
-    assert "preserve-data hard rehearsal 仍是 Global external gate" in receipt
+    assert "target-host acceptance 已依決策 53 退役" in index
+    assert "preserve-data" in index
+    assert "精準取回單一檔案" in archive

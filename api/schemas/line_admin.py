@@ -5,7 +5,7 @@ Description: 定義 LINE 管理中心 capability projection 的封閉公開 sche
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class _ClosedModel(BaseModel):
@@ -59,9 +59,63 @@ class LineAdminCapabilitiesView(_ClosedModel):
     config_files: LineAdminConfigFilesView
 
 
+class LineWorkerHealthView(_ClosedModel):
+    status: Literal[
+        "healthy", "stale", "missing", "degraded", "stopped", "unknown"
+    ]
+    running: bool
+    worker_identity: str | None = None
+    runtime_mode: Literal["legacy", "canonical", "compatibility"] | None = None
+    heartbeat_age_seconds: float | None = None
+    last_error_code: str | None = None
+
+
+class LegacyLineTaskCountsView(_ClosedModel):
+    pending: int = Field(default=0, ge=0)
+    processing: int = Field(default=0, ge=0)
+    sent: int = Field(default=0, ge=0)
+    failed: int = Field(default=0, ge=0)
+    cancelled: int = Field(default=0, ge=0)
+
+
+class LineQueueCountsView(_ClosedModel):
+    inbox_pending: int = Field(default=0, ge=0)
+    delivery_pending: int = Field(default=0, ge=0)
+    legacy_pending: int = Field(default=0, ge=0)
+    matching_delivery_active: int = Field(default=0, ge=0)
+    matching_delivery_failed: int = Field(default=0, ge=0)
+
+
+class LineDatabaseHealthView(_ClosedModel):
+    ok: bool
+    line_task_counts: LegacyLineTaskCountsView
+    queue_counts: LineQueueCountsView
+    worker: LineWorkerHealthView
+    error_code: Literal["line_database_unavailable"] | None = None
+
+
+class LineCredentialPresenceView(_ClosedModel):
+    channel_secret: bool
+    channel_access_token: bool
+    liff_id: bool
+
+
+class LineAdminHealthView(_ClosedModel):
+    status: Literal["healthy", "degraded"]
+    database: LineDatabaseHealthView
+    worker: LineWorkerHealthView
+    line_credentials: LineCredentialPresenceView
+
+
 __all__ = [
     "LineAdminCapabilitiesView",
     "LineAdminConfigFilesView",
+    "LineAdminHealthView",
+    "LineCredentialPresenceView",
+    "LineDatabaseHealthView",
     "LineAdminFeatureFlagsView",
+    "LineQueueCountsView",
     "LineAdminRuntimeAvailabilityView",
+    "LineWorkerHealthView",
+    "LegacyLineTaskCountsView",
 ]

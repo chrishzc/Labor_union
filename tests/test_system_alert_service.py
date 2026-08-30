@@ -6,13 +6,8 @@ from datetime import datetime
 import pytest
 
 from subsystems.anomalies.system_alert_projection import (
-    claim_system_alert,
     get_system_alert,
     list_system_alerts,
-    resolve_absent_alerts,
-    resolve_absent_current_state_alerts,
-    resolve_current_state_alert,
-    resolve_system_alert,
     upsert_system_alert,
 )
 
@@ -283,96 +278,6 @@ def test_details_allow_explicit_safe_partial_account_references(details):
     assert result["alert"]["details"] == details
 
 
-def test_generic_absent_resolution_preserves_claimed_rows():
-    cursor = Cursor()
-    open_id = cursor.seed(case_key="open")
-    claimed_id = cursor.seed(case_key="claimed", status="claimed", claimed_by="amy")
-
-    count = resolve_absent_alerts(
-        cursor,
-        alert_code="IMPORT-006",
-        still_open_case_keys=set(),
-        reason="cleared",
-    )
-
-    assert count == 1
-    assert cursor.rows[open_id]["status"] == "resolved"
-    assert cursor.rows[claimed_id]["status"] == "claimed"
-
-
-def test_explicit_current_state_resolution_can_resolve_claimed_and_retain_claim():
-    cursor = Cursor()
-    alert_id = cursor.seed(case_key="batch:1", status="claimed", claimed_by="amy")
-
-    result = resolve_current_state_alert(
-        cursor,
-        alert_code="IMPORT-006",
-        case_key="batch:1",
-        reason="projection is clean",
-    )
-
-    assert result["result"] == "resolved"
-    assert result["alert"]["claimed_by"] == "amy"
-    assert result["alert"]["resolved_by"] == "system"
-
-
-def test_bulk_current_state_resolution_resolves_open_and_claimed_only():
-    cursor = Cursor()
-    kept = cursor.seed(case_key="keep")
-    opened = cursor.seed(case_key="clear-open")
-    claimed = cursor.seed(case_key="clear-claimed", status="claimed", claimed_by="amy")
-    resolved = cursor.seed(case_key="already", status="resolved")
-
-    count = resolve_absent_current_state_alerts(
-        cursor,
-        alert_code="IMPORT-006",
-        still_present_case_keys={"keep"},
-        reason="projection is clean",
-    )
-
-    assert count == 2
-    assert cursor.rows[kept]["status"] == "open"
-    assert cursor.rows[opened]["status"] == "resolved"
-    assert cursor.rows[claimed]["status"] == "resolved"
-    assert cursor.rows[claimed]["claimed_by"] == "amy"
-    assert cursor.rows[resolved]["status"] == "resolved"
-
-
-def test_claim_is_idempotent_for_owner_and_conflicts_for_other_operator():
-    cursor = Cursor()
-    alert_id = cursor.seed()
-
-    claimed = claim_system_alert(cursor, alert_id=alert_id, operator="amy")
-    same = claim_system_alert(cursor, alert_id=alert_id, operator="amy")
-    conflict = claim_system_alert(cursor, alert_id=alert_id, operator="bob")
-
-    assert claimed["result"] == "claimed"
-    assert same["result"] == "existing"
-    assert conflict["result"] == "conflict"
-    assert cursor.rows[alert_id]["claimed_by"] == "amy"
-
-
-def test_manual_resolve_cannot_override_another_operator_claim():
-    cursor = Cursor()
-    alert_id = cursor.seed(status="claimed", claimed_by="amy")
-
-    conflict = resolve_system_alert(
-        cursor, alert_id=alert_id, operator="bob", reason="fixed"
-    )
-    resolved = resolve_system_alert(
-        cursor, alert_id=alert_id, operator="amy", reason="fixed"
-    )
-    repeated = resolve_system_alert(
-        cursor, alert_id=alert_id, operator="bob", reason="different"
-    )
-
-    assert conflict["result"] == "conflict"
-    assert resolved["result"] == "resolved"
-    assert repeated["result"] == "existing"
-    assert cursor.rows[alert_id]["resolved_by"] == "amy"
-    assert cursor.rows[alert_id]["resolution_reason"] == "fixed"
-
-
 def test_list_and_detail_are_bounded_read_only_projections():
     cursor = Cursor()
     first = cursor.seed(alert_code="ORDER-001", source_domain="ORDER")
@@ -396,30 +301,3 @@ def test_list_and_detail_are_bounded_read_only_projections():
 def test_list_rejects_unbounded_pagination(limit, offset):
     with pytest.raises(ValueError):
         list_system_alerts(Cursor(), limit=limit, offset=offset)
-
-
-def test_detector_root_claim_reopen_auto_resolve_and_read_model_form_one_closed_loop():
-    cursor = Cursor()
-    projected = _upsert(cursor, case_key="batch:closed-loop")
-    alert_id = projected["alert"]["id"]
-
-    assert claim_system_alert(cursor, alert_id=alert_id, operator="amy")["result"] == "claimed"
-    assert resolve_system_alert(cursor, alert_id=alert_id, operator="amy", reason="checked")["result"] == "resolved"
-
-    reopened = _upsert(cursor, case_key="batch:closed-loop", reason="root remains active")
-    assert reopened["result"] == "reopened"
-    assert reopened["alert"]["status"] == "open"
-
-    assert resolve_absent_current_state_alerts(
-        cursor,
-        alert_code="IMPORT-006",
-        still_present_case_keys=set(),
-        reason="owning root repaired",
-    ) == 1
-    detail = get_system_alert(cursor, alert_id)
-    before_read = copy.deepcopy(cursor.rows)
-    listed = list_system_alerts(cursor, alert_code="IMPORT-006", limit=10, offset=0)
-
-    assert detail["status"] == "resolved"
-    assert listed[0]["id"] == alert_id
-    assert cursor.rows == before_read

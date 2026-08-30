@@ -22,6 +22,23 @@ from subsystems.staff_payables.accounts_payable_export import (
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
+class _ReadOnlySnapshotComposition:
+    """Own finalization for the request-wide export snapshot."""
+
+    def __init__(self, connection) -> None:
+        self._connection = connection
+        self._snapshot = MySqlReadOnlySnapshot(connection)
+
+    def __enter__(self):
+        return self._snapshot.__enter__()
+
+    def __exit__(self, exception_type, exception, traceback) -> None:
+        try:
+            return self._snapshot.__exit__(exception_type, exception, traceback)
+        finally:
+            self._connection.rollback()
+
+
 @dataclass(slots=True)
 class AccountsPayableExportApplication:
     workflow: AccountsPayableExportWorkflow
@@ -43,7 +60,7 @@ def get_accounts_payable_export_application():
         MySqlClientRefundExportSource(connection),
         MySqlGovernmentOverpaymentReturnExportSource(connection),
         LocalAccountsPayableArchive(_REPOSITORY_ROOT),
-        lambda: MySqlReadOnlySnapshot(connection),
+        lambda: _ReadOnlySnapshotComposition(connection),
         current_business_instant,
     )
     try:

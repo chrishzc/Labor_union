@@ -11,7 +11,7 @@ from subsystems.access.authentication_session import AdminPrincipal
 router = APIRouter(prefix="/api/v1/admin/capability-grants", tags=["Capability Grants"])
 
 
-@router.get("/{admin_user_id}", response_model=BaseResponse[list[dict]])
+@router.get("/{admin_user_id}", response_model=BaseResponse[None])
 def list_grants(admin_user_id: int, _: AdminPrincipal = Depends(require_system_admin)):
     del admin_user_id
     raise HTTPException(

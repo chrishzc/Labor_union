@@ -86,6 +86,8 @@ def _consume_rollback_query() -> bool:
     params = getattr(st, "query_params", None)
     if params is None:
         return True
+    if not params:
+        return True
     resolved = resolve_rollback_query(params)
     params.clear()
     if resolved is None:

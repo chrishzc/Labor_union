@@ -60,9 +60,13 @@ def test_contract_signing_schema_allows_only_line_as_the_send_channel():
     assert "AND line_delivery_task_id IS NOT NULL" in schema
 
 
-def test_orders_adapter_owns_contract_identity_projection():
+def test_api_composition_supplies_orders_contract_identity_projection():
     repository = Path("infrastructure/mysql/order_contract_completion_repository.py")
     signing_application = Path("subsystems/contract_signing/client_contract_application.py")
+    composition = Path("api/dependencies/contract_signing.py")
 
     assert "def record_contract_identity" in repository.read_text(encoding="utf-8")
-    assert "repository.record_contract_identity" in signing_application.read_text(encoding="utf-8")
+    assert "repository.record_contract_identity" not in signing_application.read_text(
+        encoding="utf-8"
+    )
+    assert "repository.record_contract_identity" in composition.read_text(encoding="utf-8")

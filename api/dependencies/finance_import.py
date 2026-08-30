@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import Protocol
 
 from infrastructure.mysql.finance_import_repository import (
@@ -16,6 +17,7 @@ from infrastructure.mysql.historical_reprocess_repository import (
     MySqlHistoricalReprocessRepository,
 )
 from infrastructure.mysql.mysql_adapter import get_connection
+from scripts.imports.finance_statement_normalizer import normalize_workbook
 from subsystems.finance_import.ingestion import ingest_finance_workbook
 from subsystems.finance_import.query import FinanceImportQueryService
 from subsystems.finance_import.correction_workflow import (
@@ -182,7 +184,11 @@ def get_refund_return_review_application():
 
 
 def get_finance_import_ingestion_service():
-    return ingest_finance_workbook
+    return partial(
+        ingest_finance_workbook,
+        connection_factory=get_connection,
+        normalizer=normalize_workbook,
+    )
 
 
 def get_finance_import_query_service():

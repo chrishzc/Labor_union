@@ -267,7 +267,7 @@ def test_invalid_admin_session_fails_closed_before_downstream(
     looked_up_tokens = []
     downstream_calls = []
 
-    def fake_get_admin_session(token):
+    def fake_get_admin_session(token, **_kwargs):
         looked_up_tokens.append(token)
         return None
 
@@ -304,7 +304,7 @@ def test_invalid_admin_session_http_boundary_blocks_endpoint(
     looked_up_tokens = []
     downstream_calls = []
 
-    def fake_get_admin_session(token):
+    def fake_get_admin_session(token, **_kwargs):
         looked_up_tokens.append(token)
         return None
 

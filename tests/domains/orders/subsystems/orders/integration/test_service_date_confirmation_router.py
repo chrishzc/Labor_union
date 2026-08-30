@@ -87,6 +87,14 @@ class InMemoryServiceDateConfirmationRepository:
         return receipt
 
 
+class InMemorySchedulingSnapshotInvalidationPort:
+    def __init__(self) -> None:
+        self.invalidated_case_nos: list[str] = []
+
+    def invalidate_current_snapshot(self, case_no: str) -> None:
+        self.invalidated_case_nos.append(case_no)
+
+
 
 class _UnitOfWork:
     def __init__(self, repository: InMemoryServiceDateConfirmationRepository) -> None:
@@ -110,7 +118,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
-def _create_app(repo: InMemoryServiceDateConfirmationRepository, authenticate: bool = True):
+def _create_app(
+    repo: InMemoryServiceDateConfirmationRepository,
+    snapshot_invalidation: InMemorySchedulingSnapshotInvalidationPort,
+    authenticate: bool = True,
+):
     app = FastAPI()
     app.include_router(router)
 
@@ -134,14 +146,18 @@ def _create_app(repo: InMemoryServiceDateConfirmationRepository, authenticate: b
             id=1, username="admin_tester", display_name="Admin Tester", role="system_admin"
         )
     app.dependency_overrides[get_service_date_confirmation_workflow] = (
-        lambda: ServiceDateConfirmationWorkflow(repo, lambda: _UnitOfWork(repo))
+        lambda: ServiceDateConfirmationWorkflow(
+            repo,
+            lambda: _UnitOfWork(repo),
+            snapshot_invalidation,
+        )
     )
     return app
 
 
 def test_query_service_dates_success():
     repo = InMemoryServiceDateConfirmationRepository()
-    client = TestClient(_create_app(repo))
+    client = TestClient(_create_app(repo, InMemorySchedulingSnapshotInvalidationPort()))
 
     response = client.get("/api/v1/orders/CASE-SD-001/service-dates")
     assert response.status_code == 200
@@ -158,7 +174,7 @@ def test_query_service_dates_success():
 
 def test_query_service_dates_case_not_found():
     repo = InMemoryServiceDateConfirmationRepository()
-    client = TestClient(_create_app(repo))
+    client = TestClient(_create_app(repo, InMemorySchedulingSnapshotInvalidationPort()))
 
     response = client.get("/api/v1/orders/NON-EXISTENT/service-dates")
     assert response.status_code == 404
@@ -170,7 +186,7 @@ def test_query_service_dates_case_not_found():
 
 def test_preview_service_dates_success():
     repo = InMemoryServiceDateConfirmationRepository()
-    client = TestClient(_create_app(repo))
+    client = TestClient(_create_app(repo, InMemorySchedulingSnapshotInvalidationPort()))
 
     response = client.post(
         "/api/v1/orders/CASE-SD-001/service-dates/preview",
@@ -191,7 +207,7 @@ def test_preview_service_dates_success():
 
 def test_preview_service_dates_validation_errors():
     repo = InMemoryServiceDateConfirmationRepository()
-    client = TestClient(_create_app(repo))
+    client = TestClient(_create_app(repo, InMemorySchedulingSnapshotInvalidationPort()))
 
     # Empty service dates (Pydantic min_length=1)
     res_empty = client.post(
@@ -219,7 +235,8 @@ def test_preview_service_dates_validation_errors():
 
 def test_apply_service_dates_success():
     repo = InMemoryServiceDateConfirmationRepository()
-    client = TestClient(_create_app(repo))
+    snapshot_invalidation = InMemorySchedulingSnapshotInvalidationPort()
+    client = TestClient(_create_app(repo, snapshot_invalidation))
 
     # Obtain preview first to get valid fingerprint
     preview_res = client.post(
@@ -251,11 +268,12 @@ def test_apply_service_dates_success():
     assert data["service_dates"] == ["2026-08-03", "2026-08-04", "2026-08-05"]
     assert data["preview_fingerprint"] == fingerprint
     assert repo.committed is True
+    assert snapshot_invalidation.invalidated_case_nos == ["CASE-SD-001"]
 
 
 def test_apply_service_dates_reason_validation():
     repo = InMemoryServiceDateConfirmationRepository()
-    client = TestClient(_create_app(repo))
+    client = TestClient(_create_app(repo, InMemorySchedulingSnapshotInvalidationPort()))
 
     preview_res = client.post(
         "/api/v1/orders/CASE-SD-001/service-dates/preview",
@@ -325,7 +343,7 @@ def test_apply_service_dates_reason_validation():
 
 def test_apply_service_dates_idempotency_and_conflict():
     repo = InMemoryServiceDateConfirmationRepository()
-    client = TestClient(_create_app(repo))
+    client = TestClient(_create_app(repo, InMemorySchedulingSnapshotInvalidationPort()))
 
     preview_res = client.post(
         "/api/v1/orders/CASE-SD-001/service-dates/preview",
@@ -370,7 +388,7 @@ def test_apply_service_dates_idempotency_and_conflict():
 
 def test_apply_service_dates_stale_versions():
     repo = InMemoryServiceDateConfirmationRepository()
-    client = TestClient(_create_app(repo))
+    client = TestClient(_create_app(repo, InMemorySchedulingSnapshotInvalidationPort()))
 
     preview_res = client.post(
         "/api/v1/orders/CASE-SD-001/service-dates/preview",
@@ -399,7 +417,7 @@ def test_apply_service_dates_stale_versions():
 def test_service_dates_mysql_retryable_error():
     repo = InMemoryServiceDateConfirmationRepository()
     repo.fail_with_mysql_code = 1205  # Lock wait timeout
-    client = TestClient(_create_app(repo))
+    client = TestClient(_create_app(repo, InMemorySchedulingSnapshotInvalidationPort()))
 
     res = client.get("/api/v1/orders/CASE-SD-001/service-dates")
     assert res.status_code == 503
@@ -411,7 +429,11 @@ def test_service_dates_mysql_retryable_error():
 
 def test_service_dates_requires_auth():
     repo = InMemoryServiceDateConfirmationRepository()
-    app = _create_app(repo, authenticate=False)
+    app = _create_app(
+        repo,
+        InMemorySchedulingSnapshotInvalidationPort(),
+        authenticate=False,
+    )
     client = TestClient(app)
 
     res = client.get("/api/v1/orders/CASE-SD-001/service-dates")

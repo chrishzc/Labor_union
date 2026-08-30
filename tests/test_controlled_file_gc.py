@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
 
 from shared_kernel.clock import FixedBusinessClock
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
@@ -120,3 +121,22 @@ def test_registered_objects_are_never_gc_eligible():
     assert receipt.eligible == 0
     assert receipt.items[0].disposition is ControlledFileGcDisposition.SKIPPED_REGISTERED
     assert cleanup.commands == []
+
+
+def test_concurrent_gc_passes_do_not_issue_duplicate_cleanup_for_one_staging_object():
+    candidate = _candidate()
+    cleanup = _Cleanup()
+    service = ControlledFileStagingGarbageCollector(
+        _Repository([candidate]), cleanup, FixedBusinessClock(NOW)
+    )
+
+    def run(key):
+        return service.run(_command(key, dry_run=False))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = pool.map(run, ("controlled-file.gc:concurrent-1", "controlled-file.gc:concurrent-2"))
+
+    assert len(cleanup.commands) == 1
+    assert sorted((first.cleaned, second.cleaned)) == [0, 1]
+    skipped = second if second.cleaned == 0 else first
+    assert skipped.items[0].disposition is ControlledFileGcDisposition.SKIPPED_ALREADY_CLEANED

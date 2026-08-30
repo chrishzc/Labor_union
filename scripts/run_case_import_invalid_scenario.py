@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
 import pymysql
+from infrastructure.mysql.beclass_import_review_repository import MySqlBeClassImportReviewRepository
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +33,8 @@ _ROOT_TABLES = ("clients", "orders", "client_finance_accounts")
 
 def run(arguments) -> dict[str, object]:
     _require_dataset_database(arguments.database)
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        raise ValueError("validation scenario requires a development validation profile")
     connection = _connect(arguments)
     try:
         before_counts = _root_counts(connection)
@@ -62,6 +66,7 @@ def _record_invalid_root(connection) -> str:
         masked_identifier=masked_review_identifier(BeClassImportSourceKind.CLIENT, None, SCENARIO_ID),
         source_payload={"query_no": None, "validation_marker": "missing_query_no"},
         issue_codes=("missing_query_no",),
+        repository=MySqlBeClassImportReviewRepository(connection),
     )
 
 
@@ -76,6 +81,7 @@ def _require_payload_conflict(connection) -> str:
             masked_identifier=masked_review_identifier(BeClassImportSourceKind.CLIENT, None, SCENARIO_ID),
             source_payload={"query_no": None, "validation_marker": "changed_payload"},
             issue_codes=("missing_query_no",),
+            repository=MySqlBeClassImportReviewRepository(connection),
         )
     except RuntimeError as error:
         if str(error) == "beclass_import_review_source_conflict":

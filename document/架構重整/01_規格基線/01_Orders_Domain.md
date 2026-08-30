@@ -150,6 +150,9 @@ Apply：
 
 下廚需求契約：
 
+- HCM `服務方式` 是 Client-owned `clients.service_type`，不是 Orders term；Orders 不新增
+  `service_type`。Orders `end_date` 仍依正式 terms／lifecycle root facts 衍生，Client／Case Import
+  修正不得直接寫入或以服務方式猜測。
 - `requires_cooking` 是可為 unknown 的 Orders root；HCM 獨立匯入時若尚未唯一綁定 Client
   BeClass，固定保存 `NULL`，不得預設為否，也不得因此阻擋 Client／Order 建立；
 - HCM 與 Client BeClass 唯一配對後，Case Import reconciliation 才可從明確 yes／no source

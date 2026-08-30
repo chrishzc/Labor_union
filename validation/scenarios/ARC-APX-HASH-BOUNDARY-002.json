@@ -34,8 +34,8 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_accounts_payable_export_workflow.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\staff-payables\\subsystems\\staff-payables\\integration\\test_accounts_payable_export_workflow.py"
     ],
-    "test_paths": ["tests/test_accounts_payable_export_workflow.py"]
+    "test_paths": ["tests/domains/staff-payables/subsystems/staff-payables/integration/test_accounts_payable_export_workflow.py"]
   }
 }

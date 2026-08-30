@@ -87,12 +87,14 @@ def test_v2_is_the_fresh_assembly_and_validation_release_terminal() -> None:
     assembly = load_schema_assembly()
     validation_manifest = load_manifest()
 
-    assert [path.name for path in assembly.active_artifact_paths[-3:]] == [
-        "1012_service_before_replacement.sql",
-        "1013_order_lifecycle_pending_status_constraint.sql",
-        "1014_historical_baseline_projector_v2.sql",
-    ]
-    assert validation_manifest["schema_parts"]["terminal_artifact"] == SQL_PATH.name
+    names = [path.name for path in assembly.active_artifact_paths]
+    assert names.index("1014_historical_baseline_projector_v2.sql") < names.index(
+        "1015_controlled_file_reference_finalize_leases.sql"
+    )
+    assert names[-1] == "1018_hcm_resubmission_canonical_review_version.sql"
+    assert validation_manifest["schema_parts"]["terminal_artifact"] == (
+        "1018_hcm_resubmission_canonical_review_version.sql"
+    )
     assert verify_manifest(validation_manifest) == []
     assert verify_release(validation_manifest) == []
 

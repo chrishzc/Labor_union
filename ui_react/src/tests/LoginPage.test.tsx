@@ -47,20 +47,28 @@ const createNestedGlobalError = (
   },
 });
 
+function clearStorage(storage: Storage): void {
+  if (typeof storage.clear === 'function') storage.clear();
+}
+
+function readStorage(storage: Storage, key: string): string | null {
+  return typeof storage.getItem === 'function' ? storage.getItem(key) : null;
+}
+
 describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
     vi.restoreAllMocks();
     sessionClient.clearSession();
-    window.localStorage.clear();
-    window.sessionStorage.clear();
+    clearStorage(window.localStorage);
+    clearStorage(window.sessionStorage);
   });
 
   afterEach(() => {
     sessionClient.clearSession();
-    window.localStorage.clear();
-    window.sessionStorage.clear();
+    clearStorage(window.localStorage);
+    clearStorage(window.sessionStorage);
     globalThis.fetch = originalFetch;
   });
 
@@ -767,12 +775,12 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     });
 
     // Storage Audit
-    expect(window.localStorage.getItem('token')).toBeNull();
-    expect(window.localStorage.getItem('access_token')).toBeNull();
-    expect(window.localStorage.getItem('challenge_token')).toBeNull();
-    expect(window.sessionStorage.getItem('token')).toBeNull();
-    expect(window.sessionStorage.getItem('access_token')).toBeNull();
-    expect(window.sessionStorage.getItem('challenge_token')).toBeNull();
+    expect(readStorage(window.localStorage, 'token')).toBeNull();
+    expect(readStorage(window.localStorage, 'access_token')).toBeNull();
+    expect(readStorage(window.localStorage, 'challenge_token')).toBeNull();
+    expect(readStorage(window.sessionStorage, 'token')).toBeNull();
+    expect(readStorage(window.sessionStorage, 'access_token')).toBeNull();
+    expect(readStorage(window.sessionStorage, 'challenge_token')).toBeNull();
 
     const writtenKeys = setItemSpy.mock.calls.map((call) => call[0]);
     expect(writtenKeys).not.toContain('token');

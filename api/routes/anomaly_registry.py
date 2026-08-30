@@ -8,21 +8,21 @@ from __future__ import annotations
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime, time
 from enum import Enum
-from typing import Annotated, Mapping
+from typing import Mapping
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
-from api.dependencies.anomaly_registry import get_anomaly_application
+from api.dependencies.anomaly_registry import (
+    get_anomaly_application,
+    get_current_issue_query_application,
+)
 from api.schemas.anomaly_registry import (
-    AnomalyDetailView,
     AnomalyDisplaySnapshotView,
     AnomalySummaryView,
     AnomalyTimelineEventView,
-    AnomalyWorkflowReceiptView,
-    ClaimAnomalyBody,
-    ResolveAnomalyBody,
+    CurrentAnomalyPageView,
 )
 from api.schemas.base import BaseResponse
 from infrastructure.mysql.anomaly_registry_repository import (
@@ -31,144 +31,143 @@ from infrastructure.mysql.anomaly_registry_repository import (
 from subsystems.access.authentication_session import AdminPrincipal
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint
-from shared_kernel.identities import (
-    ActorContext,
-    CorrelationId,
-    IdempotencyKey,
-)
+from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.anomalies.alert_workflow import (
     AnomalyApplication,
     AnomalyWorkflowError,
-    AnomalyWorkflowRequest,
+)
+from subsystems.anomalies.current_issue_query import (
+    CurrentIssueListRequest,
+    CurrentIssueQueryApplication,
 )
 
 router = APIRouter(prefix="/api/v1/anomalies", tags=["Anomalies"])
-_CorrelationHeader = Annotated[
-    str,
-    Header(alias="X-Correlation-ID", min_length=1, max_length=191),
-]
-_IdempotencyHeader = Annotated[
-    str,
-    Header(alias="Idempotency-Key", min_length=1, max_length=191),
-]
 
 
-@router.get("", response_model=BaseResponse[list[AnomalySummaryView]])
+@router.get("", response_model=BaseResponse[CurrentAnomalyPageView])
 def query_anomalies(
-    active_only: bool = Query(True),
-    limit: int = Query(100, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    include_snapshot: bool = Query(False),
+    definition_code: str | None = Query(default=None, min_length=1, max_length=191),
+    owner_domain: str | None = Query(default=None, min_length=1, max_length=191),
+    blocking: bool | None = Query(default=None),
+    limit: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(default=None, min_length=1, max_length=2048),
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: AnomalyApplication = Depends(get_anomaly_application),
+    application: CurrentIssueQueryApplication = Depends(
+        get_current_issue_query_application
+    ),
 ):
     del principal
-    correlation = CorrelationId("anomaly-query")
-    return _call(
-        lambda: [
-            _summary_payload(item, include_snapshot=include_snapshot)
-            for item in application.query_summaries(
-                active_only=active_only,
+    try:
+        page = application.query(
+            CurrentIssueListRequest(
+                definition_code=definition_code,
+                owner_domain=owner_domain,
+                blocking=blocking,
                 limit=limit,
-                offset=offset,
+                cursor=cursor,
             )
-        ],
-        "成功取得異常摘要",
-        correlation,
+        )
+    except ValueError as error:
+        code = str(error)
+        if code != "anomaly_cursor_invalid":
+            code = "anomaly_query_invalid"
+        raise HTTPException(status_code=422, detail={"code": code}) from error
+    except OperationalError as error:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "anomaly_query_temporarily_unavailable"},
+        ) from error
+    return BaseResponse(
+        success=True,
+        message="成功取得目前異常清單",
+        data={
+            "items": [
+                {
+                    "issue_key": item.issue_key,
+                    "definition_code": item.definition_code,
+                    "owner_domain": item.owner_domain,
+                    "severity": item.severity,
+                    "blocking": item.blocking,
+                    "episode_started_at": item.episode_started_at,
+                    "last_verified_at": item.last_verified_at,
+                }
+                for item in page.items
+            ],
+            "next_cursor": page.next_cursor,
+        },
     )
 
 
 @router.get(
     "/{fingerprint}",
-    response_model=BaseResponse[AnomalyDetailView],
+    response_model=None,
 )
 def query_anomaly_detail(
     fingerprint: str = Path(..., pattern=r"^[0-9a-f]{64}$"),
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: AnomalyApplication = Depends(get_anomaly_application),
 ):
-    del principal
-    correlation = CorrelationId(f"anomaly-detail:{fingerprint}")
-    return _call(
-        lambda: _detail_payload(
-            application.query_detail(PreviewFingerprint(fingerprint))
-        ),
-        "成功取得異常詳情",
-        correlation,
+    del fingerprint, principal
+    _raise_legacy_registry_retired(
+        "anomaly_fingerprint_detail_retired",
+        "GET /api/v1/anomalies/{fingerprint}",
+        "GET /api/v1/anomaly-recovery/{issue_key}",
     )
 
 
 @router.post(
     "/{fingerprint}/claim",
-    response_model=BaseResponse[AnomalyWorkflowReceiptView],
+    response_model=None,
 )
-# Kept explicit so authenticated actor and command identity stay server-owned.
 def claim_anomaly(
-    body: ClaimAnomalyBody,
     fingerprint: str = Path(..., pattern=r"^[0-9a-f]{64}$"),
-    idempotency_key: _IdempotencyHeader = ...,
-    correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: AnomalyApplication = Depends(get_anomaly_application),
 ):
-    request = _workflow_request(
-        fingerprint,
-        body.expected_workflow_version,
-        idempotency_key,
-        correlation_id,
-        principal,
-        "Claimed for human review.",
-    )
-    return _call(
-        lambda: _materialize(application.claim(request)),
-        "成功認領異常",
-        request.correlation_id,
+    del fingerprint, principal
+    _raise_legacy_registry_retired(
+        "anomaly_claim_retired",
+        "POST /api/v1/anomalies/{fingerprint}/claim",
+        "Owning Domain typed Query/Preview/Apply action",
     )
 
 
 @router.post(
     "/{fingerprint}/resolve",
-    response_model=BaseResponse[AnomalyWorkflowReceiptView],
+    response_model=None,
 )
-# Kept explicit so resolution reason and version cross one typed boundary.
 def resolve_anomaly(
-    body: ResolveAnomalyBody,
     fingerprint: str = Path(..., pattern=r"^[0-9a-f]{64}$"),
-    idempotency_key: _IdempotencyHeader = ...,
-    correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: AnomalyApplication = Depends(get_anomaly_application),
 ):
-    request = _workflow_request(
-        fingerprint,
-        body.expected_workflow_version,
-        idempotency_key,
-        correlation_id,
-        principal,
-        body.reason.strip(),
-    )
-    return _call(
-        lambda: _materialize(application.resolve(request)),
-        "成功更新異常處理進度",
-        request.correlation_id,
+    del fingerprint, principal
+    _raise_legacy_registry_retired(
+        "anomaly_resolve_retired",
+        "POST /api/v1/anomalies/{fingerprint}/resolve",
+        "Owning Domain typed Query/Preview/Apply action followed by bounded recheck",
     )
 
 
-def _workflow_request(
-    fingerprint,
-    expected_version,
-    key,
-    correlation,
-    principal,
-    reason,
-):
-    return AnomalyWorkflowRequest(
-        PreviewFingerprint(fingerprint),
-        expected_version,
-        IdempotencyKey(key),
-        ActorContext(str(principal.username or "").strip()),
-        reason,
-        CorrelationId(correlation),
+def _raise_legacy_registry_retired(
+    code: str,
+    route_identity: str,
+    replacement: str,
+) -> None:
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "error": {
+                "category": "domain_blocked",
+                "code": code,
+                "message": "Legacy anomaly fingerprint workflow has been retired.",
+                "correlation_id": "anomaly-registry-retired:" + route_identity,
+                "field_errors": [],
+                "domain_blockers": [
+                    f"replacement_identifier:{replacement}",
+                    "removal_gate:blocked_external_caller_evidence",
+                ],
+                "retryable": False,
+                "current_version": None,
+            }
+        },
     )
 
 

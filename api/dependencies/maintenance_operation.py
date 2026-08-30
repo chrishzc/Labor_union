@@ -7,6 +7,9 @@ import time
 
 from api.dependencies.runtime_heartbeat import record_runtime_heartbeat
 from api.schemas.private_operations import WorkerRuntimeIdentity
+from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
+from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.access.security_audit_retention_worker import (
     archive_due_security_audits_once,
 )
@@ -20,12 +23,13 @@ AUDIT_RETENTION_INTERVAL_SECONDS = 24 * 60 * 60
 _operation_lock = threading.Lock()
 _source_scan_state = ArchitectureSourceScanState.start()
 _next_audit_retention_at = 0.0
+_anomaly_runtime = build_anomaly_runtime()
 
 
 def run_incident_maintenance_cycle(identity: WorkerRuntimeIdentity) -> int:
     """Serialize one local cycle so a single API process cannot overlap DB writers."""
     with _operation_lock:
-        delivery = consume_architecture_outbox_once(_source_scan_state)
+        delivery = consume_architecture_outbox_once(_source_scan_state, runtime=_anomaly_runtime)
         archived_count = _archive_audits_if_due()
     processed = delivery.delivered_count + archived_count
     record_runtime_heartbeat(identity, processed)
@@ -37,6 +41,9 @@ def _archive_audits_if_due() -> int:
     now = time.monotonic()
     if now < _next_audit_retention_at:
         return 0
-    archived_count = archive_due_security_audits_once()
+    archived_count = archive_due_security_audits_once(
+        connection_factory=get_connection,
+        unit_of_work_factory=MySqlUnitOfWork,
+    )
     _next_audit_retention_at = now + AUDIT_RETENTION_INTERVAL_SECONDS
     return archived_count

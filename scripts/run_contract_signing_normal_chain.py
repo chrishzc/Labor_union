@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 from tempfile import TemporaryDirectory
 
@@ -48,7 +49,7 @@ def run(arguments) -> dict[str, object]:
         ),
     }
     staff_id = int(receipts["staff_root"]["staff_id"])
-    plan = _create_matching_plan(staff_id)
+    plan = _create_matching_plan(arguments, staff_id)
     receipts["matching_plan"] = plan
     receipts["staff_signing"] = _sign_staff_contracts(int(plan["plan_id"]))
     if getattr(arguments, "stop_before_client_signed", False):
@@ -102,8 +103,10 @@ def run(arguments) -> dict[str, object]:
 def _configure_database(arguments) -> None:
     if arguments.confirm_database != arguments.database:
         raise ValueError("confirmation must exactly match database")
-    if not arguments.database.startswith("lu_test_dataset_"):
+    if not re.fullmatch(r"lu_test_dataset_[a-z0-9_]+", arguments.database):
         raise ValueError("database must be a disposable validation dataset")
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        raise ValueError("normal chain requires a development validation profile")
     os.environ.update({"DB_HOST": arguments.host, "DB_PORT": str(arguments.port), "DB_USER": arguments.user, "DB_PASSWORD": arguments.password, "DB_DATABASE": arguments.database})
 
 
@@ -194,14 +197,31 @@ def _existing_line_bindings(arguments, client_id: int, staff_id: int) -> dict[st
     return statuses
 
 
-def _create_matching_plan(staff_id: int):
+def _create_matching_plan(arguments, staff_id: int):
+    import pymysql
+
     from subsystems.scheduling.matching_plan_workflow import create_matching_plan_version
+    from infrastructure.mysql.segmented_availability_repository import (
+        MySqlSegmentedAvailabilityFactsRepository,
+    )
+
+    def connect():
+        return pymysql.connect(
+            host=arguments.host,
+            port=arguments.port,
+            user=arguments.user,
+            password=arguments.password,
+            database=arguments.database,
+            charset="utf8mb4",
+            cursorclass=pymysql.cursors.DictCursor,
+        )
 
     return create_matching_plan_version(
         CASE_NO,
         [{"staff_id": staff_id, "start_date": SERVICE_START.isoformat(), "end_date": SERVICE_END.isoformat()}],
         "wp56-validation",
         "2026-08-01",
+        facts_port=MySqlSegmentedAvailabilityFactsRepository(connect),
     )
 
 
@@ -242,6 +262,7 @@ def _resume_conversion(arguments) -> dict[str, object]:
 
 def _existing_matching_plan(case_no: str) -> tuple[int, int, date, date]:
     from infrastructure.mysql.mysql_adapter import get_connection
+    from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
 
     connection = get_connection()
     try:
@@ -486,18 +507,27 @@ def _reconcile_deposit() -> dict[str, object]:
     from infrastructure.mysql.finance_import_owning_domain_composite import MySqlFinanceImportOwningDomainComposite
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
-    from subsystems.anomalies.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
+    from subsystems.finance_import.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
     from subsystems.finance_import.correction_workflow import FinanceImportCorrectionApplyRequest
     from subsystems.finance_import.ingestion import ingest_finance_workbook
+    from scripts.imports.finance_statement_normalizer import normalize_workbook
     from subsystems.orders.client_finance_outbox_consumer import consume_client_finance_orders_events
 
     with TemporaryDirectory(prefix="lu-wp56-deposit-") as directory:
         workbook = Path(directory) / "deposit.xlsx"
         _write_deposit_workbook(workbook)
-        intake = ingest_finance_workbook(str(workbook), IdempotencyKey(_key("deposit-intake")), ActorContext("wp56-validation"))
+        intake = ingest_finance_workbook(
+            str(workbook),
+            IdempotencyKey(_key("deposit-intake")),
+            ActorContext("wp56-validation"),
+            connection_factory=get_connection,
+            normalizer=normalize_workbook,
+        )
     connection = get_connection()
     try:
-        anomaly_delivery = consume_finance_import_anomaly_events(connection)
+        anomaly_delivery = consume_finance_import_anomaly_events(
+            connection, runtime=build_anomaly_runtime()
+        )
         row_id = _finance_row_id(connection, intake.batch_identity)
         application = build_finance_import_application(connection, MySqlFinanceImportOwningDomainComposite(connection))
         selection = FinanceImportCorrectionSelection(f"finance-import-row:{row_id}", FinanceClassificationType.CLIENT_RECEIPT, (DEPOSIT_OBLIGATION,), "WP56 deposit receipt reviewed against signed contract", ("bank-statement:wp56-deposit-line-1", f"signed-contract:{CASE_NO}"))

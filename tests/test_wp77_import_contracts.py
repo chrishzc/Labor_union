@@ -20,17 +20,10 @@ from domains.case_import.case_import import (
 from domains.case_import.staff_historical_adoption import plan_staff_scalar_merge
 from scripts.imports import import_client_hcm
 from scripts.imports import import_client_beclass, import_staff_beclass
-from scripts import rebuild_beclass_import_anomalies
 from scripts import audit_staff_historical_adoption
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId
 from subsystems.anomalies import hcm_import_review_outbox_consumer as hcm_outbox
-from subsystems.anomalies.alert_workflow import AnomalyApplication, ProjectAlertRequest
-from domains.anomalies.registry import (
-    AlertWorkflowStatus,
-    DesiredAlertState,
-    default_anomaly_registry,
-)
 from subsystems.anomalies.process_reminder_anomaly_source import (
     build_beclass_missing_requests,
     build_hcm_missing_requests,
@@ -248,9 +241,11 @@ def test_import_adapters_use_owned_review_outboxes_instead_of_legacy_alert_write
 
 def test_hcm_outbox_result_counts_terminal_delivery_attempts(monkeypatch):
     outcomes = iter((True, False, None))
-    monkeypatch.setattr(hcm_outbox, "_consume_next", lambda connection: next(outcomes))
+    monkeypatch.setattr(hcm_outbox, "_consume_next", lambda connection, runtime: next(outcomes))
 
-    result = hcm_outbox.consume_hcm_import_review_events(object(), maximum_events=3)
+    result = hcm_outbox.consume_hcm_import_review_events(
+        object(), maximum_events=3, runtime=object()
+    )
 
     assert result.delivered_count == 1
     assert result.failed_count == 1
@@ -463,73 +458,6 @@ def test_staff_successful_receipt_requires_fresh_matching_root(monkeypatch):
             review_identity=None,
             outcome="blocked_identity",
         )
-
-
-def test_anomaly_checkpoint_does_not_hide_a_missing_current_projection():
-    desired = DesiredAlertState(
-        "IMPORT-001",
-        "beclass-review:" + "a" * 64,
-        0,
-        True,
-        {"entity_kind": "staff", "review_item_id": "beclass-review:" + "a" * 64},
-    )
-    request = ProjectAlertRequest(desired, "review-rescan:event", "consumer", "partition", {})
-
-    class Repository:
-        def __init__(self):
-            self.saved = None
-
-        def checkpoint_matches(self, request):
-            return True
-
-        def load_current(self, fingerprint, *, for_update):
-            return None
-
-        def save_projection(self, definition, previous, resulting, display_snapshot):
-            self.saved = resulting
-
-        def append_projector_event(self, previous, resulting, request):
-            pass
-
-        def save_checkpoint(self, request):
-            pass
-
-    class UnitOfWork:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def commit(self):
-            pass
-
-    repository = Repository()
-    application = AnomalyApplication(default_anomaly_registry(), repository, UnitOfWork)
-
-    resulting = application.project(request)
-
-    assert resulting is repository.saved
-    assert resulting.workflow_status is AlertWorkflowStatus.OPEN
-
-
-def test_beclass_anomaly_rebuild_cli_returns_a_typed_projection_count(monkeypatch):
-    connection = SimpleNamespace(close=lambda: None)
-    page = SimpleNamespace(projected_count=14, next_review_row_id=None)
-    monkeypatch.setattr(rebuild_beclass_import_anomalies, "get_connection", lambda: connection)
-    monkeypatch.setattr(
-        rebuild_beclass_import_anomalies,
-        "project_beclass_import_review_page",
-        lambda received, **kwargs: page,
-    )
-
-    result = rebuild_beclass_import_anomalies.rebuild_beclass_import_anomalies()
-
-    assert result == {
-        "status": "projected",
-        "projected_count": 14,
-        "next_review_row_id": None,
-    }
 
 
 @pytest.mark.parametrize(

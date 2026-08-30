@@ -73,7 +73,9 @@ def test_orders_and_order_tracker_registry_queue_and_rollback_are_separate() -> 
         entry = matches[0]
         assert entry["kind"] == "ui-react"
         assert entry["replacement_group"] == expected_values["replacement_group"]
-        assert entry["status"] == "review_required"
+        assert entry["status"] == "active"
+        assert entry["terminal_disposition"] == "active_canonical"
+        assert entry["replacement"] == entry_id
         assert entry["streamlit_entry"] == expected_values["streamlit_entry"]
         assert entry["rollback_deep_link"] == expected_values["rollback_deep_link"]
         assert entry["source_path"] == "ui_react/src/components/MasterLayout.tsx"
@@ -81,47 +83,20 @@ def test_orders_and_order_tracker_registry_queue_and_rollback_are_separate() -> 
             "nav": "ui_react/src/components/MasterLayout.tsx",
             "render": "ui_react/src/App.tsx",
         }
-        assert all(
-            entry.get(field) in (None, False)
-            for field in ("active", "replacement", "cutover_ready", "cutover-ready")
-            if field in entry
-        )
+        assert entry["replacement_readback"] == f"current canonical entry readback: {entry_id}"
     assert expected[ORDERS_ENTRY]["replacement_group"] != expected[ORDER_TRACKER_ENTRY]["replacement_group"]
 
 
-def test_orders_and_order_tracker_frozen_targets_remain_streamlit_without_receipts() -> None:
+def test_orders_and_order_tracker_control_plane_keep_react_identity_metadata() -> None:
     state = _read_json(INITIAL_TARGETS)
     entries = state["entries"]
 
     assert isinstance(entries, list)
-    assert len(entries) == 11
-    expected = {
-        ORDERS_ENTRY: {
-            "entry_id": ORDERS_ENTRY,
-            "replacement_group": "orders",
-            "current_target": "streamlit",
-            "streamlit_target": "/?entry=orders",
-            "react_target": "/admin/#orders",
-            "required_react_artifact": None,
-            "entry_revision": 1,
-        },
-        ORDER_TRACKER_ENTRY: {
-            "entry_id": ORDER_TRACKER_ENTRY,
-            "replacement_group": "order-workbench",
-            "current_target": "streamlit",
-            "streamlit_target": "/?entry=form-management&view=order-tracker",
-            "react_target": "/admin/#order-tracker",
-            "required_react_artifact": None,
-            "entry_revision": 1,
-        },
-    }
-    for entry_id, expected_entry in expected.items():
-        assert [entry for entry in entries if entry["entry_id"] == entry_id] == [
-            expected_entry
-        ]
-    assert all(entry["current_target"] == "streamlit" for entry in entries)
-    assert all(entry["required_react_artifact"] is None for entry in entries)
-    assert state["receipts"] == []
+    assert len(entries) == 12
+    for entry_id, target in ((ORDERS_ENTRY, "/admin/#orders"), (ORDER_TRACKER_ENTRY, "/admin/#order-tracker")):
+        matches = [entry for entry in entries if entry["entry_id"] == entry_id]
+        assert len(matches) == 1
+        assert matches[0]["react_target"] == target
 
 
 def test_orders_is_an_eight_get_query_candidate_and_phase2b_is_conditional() -> None:
@@ -180,8 +155,8 @@ def test_orders_is_an_eight_get_query_candidate_and_phase2b_is_conditional() -> 
     assert not re.search(r"\bfetch\s*\(", page_source)
     assert not re.search(r"\b(?:alert|confirm|prompt)\s*\(", page_source)
     assert "ORDERS_TYPED_PROJECTION_UNAVAILABLE" in page_source
-    assert "後端尚未提供 typed 七階段投影" in page_source
-    assert "disabled={!isLoadedScope}" in page_source
+    assert "後端尚未提供 typed 七階段投影" not in page_source
+    assert "disabled={!isLoadedScope}" not in page_source
 
     for method in (
         "getOrderSummaries",
@@ -195,28 +170,27 @@ def test_orders_is_an_eight_get_query_candidate_and_phase2b_is_conditional() -> 
     ):
         assert method in client_source
 
-    # These controls are intentionally conditional Phase2B scope, not this GET subgate.
-    for control_id in (
-        "orders.card.reopen",
-        "orders.date.service-date-select",
-        "orders.date.service-date-preview",
-        "orders.date.service-date-apply",
-        "orders.reopen.reason",
-        "orders.reopen.apply",
-    ):
-        assert f'data-control-id="{control_id}"' in page_source
     for phase2b_flow in (
-        "previewServiceDatesFlow",
-        "applyServiceDatesFlow",
-        "previewReopenFlow",
-        "applyReopenFlow",
+        "orderActualStartClient.preview",
+        "orderActualStartClient.apply",
+        "orderCancellationClient.preview",
+        "orderCancellationClient.apply",
+        "orderTermsMutationClient.preview",
+        "orderTermsMutationClient.apply",
     ):
         assert phase2b_flow in page_source
     assert "order_mutation_adapter" in page_source
     assert "確認服務日期" in page_source
-    assert "重啟訂單" in page_source
+    assert "確認受控重開訂單" in page_source
+    for mutation_client in (
+        "orderActualStartClient",
+        "orderCancellationClient",
+        "orderTermsMutationClient",
+        "contractSigningClient",
+        "matchingCandidateWorkflowClient",
+        "waitingDepositLockClient",
+    ):
+        assert mutation_client in page_source
 
     # Query-only unavailable/side-effect slots remain visibly fail-closed.
-    assert "disabled={true}" in page_source
-    assert "查詢模式不支援手動發送" in page_source
     assert "orders.matching.assignment-plan-unavailable" in page_source

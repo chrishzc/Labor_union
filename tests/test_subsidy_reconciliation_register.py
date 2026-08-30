@@ -60,9 +60,7 @@ def test_quarterly_register_uses_actual_dates_and_optional_lower_section(monkeyp
             "employer_address": "", "staff_name": "", "survey_details": {},
         },
     ])
-    monkeypatch.setattr(register, "get_connection", lambda: connection)
-
-    result = register.build_quarterly_subsidy_register(2026, 1)
+    result = register.build_quarterly_subsidy_register(2026, 1, lambda: connection)
 
     assert [row["\u5e02\u5e9c\u8a02\u55ae\u865f\u78bc"] for row in result["general_citizen_rows"]] == ["115000002"]
     assert [row["\u5e02\u5e9c\u8a02\u55ae\u865f\u78bc"] for row in result["subsidized_citizen_rows"]] == ["115000001"]
@@ -83,7 +81,7 @@ def test_quarterly_register_uses_actual_dates_and_optional_lower_section(monkeyp
 
 def test_annual_summary_omits_subsidized_section_and_repairs_legacy_key(monkeypatch):
     legacy_key = "\u8eab\u5206\u8b49\u5b57\u865f".encode("utf-8").decode("latin1")
-    monkeypatch.setattr(register, "get_connection", lambda: FakeConnection([
+    connection = FakeConnection([
         {
             "case_no": "115000010", "identity_status": "\u4e00\u822c\u5e02\u6c11",
             "actual_start_date": "2026-07-01", "actual_end_date": "2026-07-20",
@@ -91,9 +89,9 @@ def test_annual_summary_omits_subsidized_section_and_repairs_legacy_key(monkeypa
             "employer_address": "\u6843\u5712\u5e02", "staff_name": "\u6708\u5ac2\u4e19",
             "survey_details": {legacy_key: "C123456789"},
         },
-    ]))
+    ])
 
-    result = register.build_annual_subsidy_summary(2026)
+    result = register.build_annual_subsidy_summary(2026, lambda: connection)
     row = result["general_citizen_rows"][0]
     assert row["\u8eab\u5206\u8b49\u5b57\u865f"] == "C123456789"
     assert result["subsidized_citizen_rows"] == []
@@ -106,14 +104,12 @@ def test_annual_summary_omits_subsidized_section_and_repairs_legacy_key(monkeypa
 
 
 def test_invalid_quarter_is_rejected_before_database_access(monkeypatch):
-    monkeypatch.setattr(
-        register,
-        "get_connection",
-        lambda: (_ for _ in ()).throw(AssertionError("database must not be opened")),
-    )
-
     try:
-        register.build_quarterly_subsidy_register(2026, 5)
+        register.build_quarterly_subsidy_register(
+            2026,
+            5,
+            lambda: (_ for _ in ()).throw(AssertionError("database must not be opened")),
+        )
     except ValueError as exc:
         assert "quarter" in str(exc)
     else:

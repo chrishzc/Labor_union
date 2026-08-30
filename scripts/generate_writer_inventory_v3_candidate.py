@@ -60,6 +60,13 @@ def _owner_candidate(relative_path: str) -> str | None:
     baseline_owner = _baseline_owner(relative_path)
     if baseline_owner is not None:
         return baseline_owner
+    exact_owner = {
+        "infrastructure/db/controlled_file_reference_finalize_repository.py": "controlled_files",
+        "infrastructure/mysql/current_anomaly_issue_repository.py": "anomalies",
+        "infrastructure/mysql/historical_assignment_writer.py": "scheduling",
+    }.get(relative_path)
+    if exact_owner is not None:
+        return exact_owner
     parts = Path(relative_path).parts
     if parts[0] == "subsystems":
         return _subsystem_owner(parts[1]) if len(parts) > 1 else None
@@ -93,6 +100,7 @@ def _subsystem_owner(name: str) -> str | None:
         "line": "line_integration",
         "orders": "orders",
         "payroll": "payroll",
+        "runtime_monitoring": "global_infrastructure",
         "scheduling": "scheduling",
         "staff": "staff_operations",
         "staff_payables": "staff_payables",

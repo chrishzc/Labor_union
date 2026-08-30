@@ -6,6 +6,7 @@ Description: 以唯一 schema assembly 建立並驗證隔離的 disposable MySQL
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -63,6 +64,54 @@ def _connect(arguments):
         charset="utf8mb4",
         autocommit=False,
     )
+
+
+def _dry_run_payload(arguments, manifest: dict[str, object]) -> dict[str, object]:
+    database = _require_disposable_database(arguments.database, arguments.confirm_database)
+    statements, views = _partition_base_statements(database)
+    maximum_part = getattr(arguments, "max_schema_part", None)
+    selected_parts = [
+        str(path)
+        for path in selected_schema_parts(manifest)
+        if maximum_part is None or int(re.match(r"^(\d+)", path.name).group(1)) <= maximum_part
+    ]
+    if getattr(arguments, "base_only", False):
+        selected_parts = []
+    payload = {
+        "mode": "dry-run",
+        "database": database,
+        "release_id": manifest["release_id"],
+        "base_statement_count": len(statements),
+        "schema_parts": selected_parts,
+        "view_count": len(views),
+    }
+    payload["plan_fingerprint"] = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return payload
+
+
+def _require_configured_host(host: str) -> None:
+    configured = os.getenv("DB_HOST", "").strip()
+    if not configured:
+        raise RuntimeError("DB_HOST must be configured explicitly")
+    if host.strip() != configured:
+        raise RuntimeError("--host must exactly match configured DB_HOST")
+
+
+def _check_connected_identity(arguments, database: str) -> None:
+    _require_configured_host(arguments.host)
+    connection = _connect(arguments)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT DATABASE() AS database_name, @@hostname AS server")
+            identity = cursor.fetchone()
+        if identity and identity.get("database_name") not in (None, database):
+            raise RuntimeError("connected database identity does not match target")
+        if not identity or not str(identity.get("server") or "").strip():
+            raise RuntimeError("connected MySQL server identity is unavailable")
+    finally:
+        connection.close()
 
 
 def _verified_manifest(manifest_path: Path) -> dict[str, object]:
@@ -171,6 +220,14 @@ def main() -> int:
     parser.add_argument("--password", default=os.getenv("DB_PASSWORD", "1234"))
     parser.add_argument("--database", required=True)
     parser.add_argument("--confirm-database", required=True)
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply the disposable schema after an explicit dry-run and confirmation.",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Plan only (the default).")
+    parser.add_argument("--confirm-apply")
+    parser.add_argument("--receipt-path", type=Path)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST_PATH)
     parser.add_argument(
         "--base-only",
@@ -183,7 +240,44 @@ def main() -> int:
         help="Apply only schema parts whose leading number is at most this value",
     )
     arguments = parser.parse_args()
-    print(json.dumps(bootstrap(arguments), ensure_ascii=False, sort_keys=True))
+    if arguments.apply and arguments.dry_run:
+        parser.error("--apply and --dry-run are mutually exclusive")
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        parser.error("production environment is not permitted for disposable schema bootstrap")
+    manifest = _verified_manifest(Path(getattr(arguments, "manifest", DEFAULT_MANIFEST_PATH)))
+    if not arguments.apply:
+        _require_validation_gate()
+        payload = _dry_run_payload(arguments, manifest)
+        if arguments.receipt_path:
+            arguments.receipt_path.parent.mkdir(parents=True, exist_ok=True)
+            arguments.receipt_path.write_text(
+                json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 0
+    expected = f"APPLY {arguments.database}"
+    if arguments.confirm_apply != expected:
+        parser.error(f"--confirm-apply must exactly equal {expected!r}")
+    if not arguments.receipt_path or not arguments.receipt_path.is_file():
+        parser.error("--apply requires --receipt-path from a prior --dry-run")
+    try:
+        prior = json.loads(arguments.receipt_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        parser.error(f"--receipt-path is not a valid dry-run receipt: {exc}")
+    if prior.get("mode") != "dry-run" or prior.get("database") != arguments.database:
+        parser.error("--receipt-path belongs to another disposable schema target")
+    current = _dry_run_payload(arguments, manifest)
+    if prior.get("plan_fingerprint") != current["plan_fingerprint"]:
+        parser.error("schema bootstrap plan drift detected; rerun the dry-run")
+    _check_connected_identity(arguments, arguments.database)
+    payload = bootstrap(arguments)
+    payload["mode"] = "apply"
+    payload["receipt_status"] = "committed"
+    arguments.receipt_path.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0
 
 

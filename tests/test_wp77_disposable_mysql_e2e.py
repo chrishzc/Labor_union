@@ -7,16 +7,16 @@ from __future__ import annotations
 
 import hashlib
 import os
-import time
 from uuid import uuid4
 
 import pytest
 
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
 from infrastructure.mysql.beclass_import_review_anomaly_source import (
     project_beclass_import_review_page,
 )
-from subsystems.anomalies.beclass_import_outbox_consumer import (
+from subsystems.case_import.beclass_import_outbox_consumer import (
     consume_beclass_import_review_events,
 )
 from subsystems.case_import.beclass_review_intake import record_invalid_beclass_row
@@ -111,9 +111,12 @@ def test_newer_staff_snapshot_replaces_name_bank_relations_and_keeps_old_replay(
         assert new_result.changed_fields == ("name", "registered_at")
         assert old_replay.replayed is True
         _assert_replaced_staff_snapshot(connection, staff_id, new_bank)
-        projection = consume_beclass_import_review_events(connection)
+        projection = consume_beclass_import_review_events(
+            connection,
+            runtime=build_anomaly_runtime(),
+        )
         assert projection.failed_count == 0
-        _assert_staff_name_trace_warning(connection)
+        _assert_staff_name_trace_review(connection)
     finally:
         connection.close()
 
@@ -357,12 +360,15 @@ def test_beclass_review_root_rescan_rebuilds_missing_current_projection():
         connection.close()
 
 
-def test_staff_beclass_review_outbox_projects_field_warning_without_source_mutation():
+def test_staff_beclass_review_outbox_acknowledges_canonical_review_without_legacy_warning_rows():
     digest = hashlib.sha256(uuid4().bytes).hexdigest()
     connection = get_connection()
     try:
         # 先排空前序 HCM／BeClass 事件，使本案例不受測試執行順序影響。
-        consume_beclass_import_review_events(connection)
+        consume_beclass_import_review_events(
+            connection,
+            runtime=build_anomaly_runtime(),
+        )
         review_identity = record_invalid_beclass_row(
             connection,
             source_kind=BeClassImportSourceKind.STAFF,
@@ -375,36 +381,38 @@ def test_staff_beclass_review_outbox_projects_field_warning_without_source_mutat
         )
         connection.commit()
 
-        result = consume_beclass_import_review_events(connection)
+        result = consume_beclass_import_review_events(
+            connection,
+            runtime=build_anomaly_runtime(),
+        )
 
         assert result.delivered_count == 1
         assert result.failed_count == 0
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT occurrence.logical_code,occurrence.field_path,task.tracking_status,task.tracking_version "
-                "FROM import_warning_occurrences occurrence "
-                "JOIN import_warning_current_tasks task ON task.occurrence_id=occurrence.id "
-                "WHERE occurrence.source_receipt_identity=%s",
+                "SELECT published_at,attempts,last_error FROM beclass_import_review_outbox outbox "
+                "JOIN beclass_import_review_rows root ON root.id=outbox.review_row_id "
+                "WHERE root.review_identity=%s",
                 (review_identity,),
             )
-            assert cursor.fetchall() == [
-                {
-                    "logical_code": "STAFF-BECLASS-FIELD-002",
-                    "field_path": "銀行代號",
-                    "tracking_status": "open",
-                    "tracking_version": 1,
-                }
-            ]
+            rows = cursor.fetchall()
+            assert len(rows) == 1
+            assert rows[0]["published_at"] is not None
+            assert rows[0]["attempts"] == 0
+            assert rows[0]["last_error"] is None
     finally:
         connection.close()
 
 
-def test_beclass_unknown_issue_obeys_one_second_three_attempt_dead_letter_policy():
+def test_beclass_unknown_issue_is_delivered_as_canonical_review_evidence():
     digest = hashlib.sha256(uuid4().bytes).hexdigest()
     raw_issue = "future_client_state:完整手機不得寫入錯誤"
     connection = get_connection()
     try:
-        consume_beclass_import_review_events(connection)
+        consume_beclass_import_review_events(
+            connection,
+            runtime=build_anomaly_runtime(),
+        )
         review_identity = record_invalid_beclass_row(
             connection,
             source_kind=BeClassImportSourceKind.CLIENT,
@@ -417,21 +425,15 @@ def test_beclass_unknown_issue_obeys_one_second_three_attempt_dead_letter_policy
         )
         connection.commit()
 
-        for attempt in range(3):
-            result = consume_beclass_import_review_events(connection, maximum_events=1)
-            assert result.failed_count == 1
-            immediate = consume_beclass_import_review_events(connection, maximum_events=1)
-            assert immediate.failed_count == 0
-            if attempt < 2:
-                time.sleep(1.05)
+        result = consume_beclass_import_review_events(
+            connection,
+            maximum_events=1,
+            runtime=build_anomaly_runtime(),
+        )
+        assert result.delivered_count == 1
+        assert result.failed_count == 0
 
         with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT COUNT(*) AS count FROM import_warning_occurrences "
-                "WHERE source_receipt_identity=%s",
-                (review_identity,),
-            )
-            assert cursor.fetchone() == {"count": 0}
             cursor.execute(
                 "SELECT outbox.published_at,outbox.attempts,outbox.last_error "
                 "FROM beclass_import_review_outbox outbox "
@@ -440,14 +442,9 @@ def test_beclass_unknown_issue_obeys_one_second_three_attempt_dead_letter_policy
                 (review_identity,),
             )
             outbox = cursor.fetchone()
-            failure = __import__("json").loads(outbox["last_error"])
-            assert outbox["published_at"] is None
-            assert outbox["attempts"] == 3
-            assert failure["terminal"] == 1
-            assert failure["error_code"].startswith(
-                "import_warning_projection_unknown_issue:beclass_client:"
-            )
-            assert raw_issue not in outbox["last_error"]
+            assert outbox["published_at"] is not None
+            assert outbox["attempts"] == 0
+            assert outbox["last_error"] is None
     finally:
         connection.close()
 
@@ -533,7 +530,7 @@ def _assert_replaced_staff_snapshot(connection, staff_id, expected_bank):
         assert "historical_name_changed" in str(cursor.fetchone()["issue_codes"])
 
 
-def _assert_staff_name_trace_warning(connection):
+def _assert_staff_name_trace_review(connection):
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT root.review_identity FROM beclass_import_review_rows root "
@@ -543,25 +540,13 @@ def _assert_staff_name_trace_warning(connection):
         )
         review_identity = cursor.fetchone()["review_identity"]
         cursor.execute(
-            "SELECT occurrence.logical_code,occurrence.field_path,"
-            "task.tracking_status,task.tracking_version "
-            "FROM import_warning_occurrences occurrence "
-            "JOIN import_warning_current_tasks task ON task.occurrence_id=occurrence.id "
-            "WHERE occurrence.source_receipt_identity=%s",
+            "SELECT published_at,attempts,last_error FROM beclass_import_review_outbox outbox "
+            "JOIN beclass_import_review_rows root ON root.id=outbox.review_row_id "
+            "WHERE root.review_identity=%s",
             (review_identity,),
         )
-        assert cursor.fetchall() == [
-            {
-                "logical_code": "STAFF-BECLASS-NAME-002",
-                "field_path": "姓名",
-                "tracking_status": "auto_resolved",
-                "tracking_version": 1,
-            }
-        ]
-        cursor.execute(
-            "SELECT COUNT(*) AS count FROM anomaly_current_alerts "
-            "WHERE definition_code='IMPORT-001' AND source_identity=%s "
-            "AND predicate_active=TRUE",
-            (review_identity,),
-        )
-        assert cursor.fetchone() == {"count": 0}
+        rows = cursor.fetchall()
+        assert len(rows) == 1
+        assert rows[0]["published_at"] is not None
+        assert rows[0]["attempts"] == 0
+        assert rows[0]["last_error"] is None

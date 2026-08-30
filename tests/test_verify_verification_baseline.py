@@ -323,7 +323,7 @@ def test_gate_report_separates_complete_contracts_from_unverified_execution():
     assert report["errors"]["field_authority"] == []
     assert report["field_authority"]["mappings"][0]["unexpected_legacy_references"] == []
     assert report["business_matrix"] == {"required": 127, "missing": []}
-    assert report["fixtures"]["fixture_count"] == 32
+    assert report["fixtures"]["fixture_count"] == 38
     assert report["fixtures"]["valid"] is True
     assert report["fixtures"]["all_a_scenarios_have_fixture"] is True
     assert all(not track["suites_missing_contract"] for track in report["tracks"])
@@ -482,7 +482,7 @@ def test_fixture_validator_rejects_an_unknown_or_duplicate_a_fixture():
 def test_fixture_coverage_proves_every_a_scenario_has_root_data_contract():
     report = fixture_coverage_report(load_fixtures())
 
-    assert report["required_a_scenario_count"] == 32
+    assert report["required_a_scenario_count"] == 38
     assert report["scenarios_without_fixture"] == []
     assert report["all_a_scenarios_have_fixture"] is True
     assert "CF-REFUND-RECOVERY-001" not in report["scenarios_without_fixture"]

@@ -9,11 +9,10 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import pymysql
 
-from infrastructure.mysql.mysql_adapter import get_connection
 from shared_kernel.clock import TAIPEI_TIME_ZONE
 
 
@@ -122,13 +121,23 @@ def mask_ip_address(ip_address: str | None) -> str | None:
     return ".".join([*parts[:3], "***"]) if len(parts) == 4 else "***"
 
 
-def list_admin_audits(*, page: int, page_size: int, action: str | None, action_prefix: str | None = None, actor_query: str | None, created_from: datetime | None, created_to: datetime | None) -> AuditPage:
+def list_admin_audits(
+    *,
+    page: int,
+    page_size: int,
+    action: str | None,
+    action_prefix: str | None = None,
+    actor_query: str | None,
+    created_from: datetime | None,
+    created_to: datetime | None,
+    connection_factory: Callable[[], Any],
+) -> AuditPage:
     clauses, params = _audit_filters(
         action, action_prefix, actor_query, created_from, created_to
     )
     where_sql = " AND ".join(clauses)
     try:
-        with get_connection() as connection:
+        with connection_factory() as connection:
             with connection.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(f"SELECT COUNT(*) AS total FROM admin_audit_logs a LEFT JOIN admin_users u ON u.id=a.admin_user_id WHERE {where_sql}", params)
                 total = int((cursor.fetchone() or {}).get("total") or 0)
@@ -139,9 +148,13 @@ def list_admin_audits(*, page: int, page_size: int, action: str | None, action_p
     return AuditPage([_audit_list_item(row) for row in rows], page, page_size, total)
 
 
-def get_admin_audit_detail(audit_id: int) -> AuditDetailItem | None:
+def get_admin_audit_detail(
+    audit_id: int,
+    *,
+    connection_factory: Callable[[], Any],
+) -> AuditDetailItem | None:
     try:
-        with get_connection() as connection:
+        with connection_factory() as connection:
             with connection.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(_audit_detail_sql(), (audit_id,))
                 row = cursor.fetchone()
@@ -154,19 +167,24 @@ class AuditQueryStorageError(RuntimeError):
     pass
 
 
-def archive_expired_admin_audits(*, batch_size: int = 500) -> int:
-    with get_connection() as connection:
-        try:
-            connection.begin()
-            with connection.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(_expired_audit_select_sql(), (batch_size,))
-                rows = list(cursor.fetchall())
-                _archive_audit_rows(cursor, rows)
-            connection.commit()
-            return len(rows)
-        except Exception:
-            connection.rollback()
-            raise
+def archive_expired_admin_audits(
+    *,
+    batch_size: int = 500,
+    connection_factory: Callable[[], Any],
+    unit_of_work_factory: Callable[[Any], Any],
+) -> int:
+    with connection_factory() as connection:
+        with unit_of_work_factory(connection) as unit_of_work:
+            try:
+                with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+                    cursor.execute(_expired_audit_select_sql(), (batch_size,))
+                    rows = list(cursor.fetchall())
+                    _archive_audit_rows(cursor, rows)
+                unit_of_work.commit()
+                return len(rows)
+            except Exception:
+                unit_of_work.rollback()
+                raise
 
 
 def _audit_filters(action, action_prefix, actor_query, created_from, created_to):

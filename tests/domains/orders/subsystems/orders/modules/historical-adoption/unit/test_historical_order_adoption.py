@@ -22,6 +22,9 @@ from shared_kernel.fingerprints import fingerprint_payload
 from infrastructure.mysql.historical_order_adoption_repository import (
     MySqlHistoricalOrderAdoptionRepository,
 )
+from infrastructure.mysql.historical_assignment_writer import (
+    MySqlHistoricalAssignmentWriter,
+)
 from subsystems.orders.historical_adoption_workflow import (
     HistoricalOrderAdoptionRequest,
     HistoricalOrderAdoptionWorkflow,
@@ -168,7 +171,7 @@ def test_columns_after_canonical_six_are_ignored(tmp_path):
 
     parsed = load_historical_order_workbook(path)
     row = parsed.rows[0]
-    workflow = HistoricalOrderAdoptionWorkflow(_Repository(row), _UnitOfWork)
+    workflow = HistoricalOrderAdoptionWorkflow(_Repository(row), _UnitOfWork, _SchedulingHistoricalAssignment())
     preview = workflow.preview(row)
 
     assert row.actual_start_date == date(1904, 1, 2)
@@ -184,7 +187,7 @@ def test_single_unique_caregiver_with_interval_builds_completed_assignment_candi
     path = _workbook(tmp_path, ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"], ["客戶甲", "CASE-1", 45937, 45978, 1, "月嫂甲"])
     row = load_historical_order_workbook(path).rows[0]
 
-    preview = HistoricalOrderAdoptionWorkflow(_Repository(row), _UnitOfWork).preview(row)
+    preview = HistoricalOrderAdoptionWorkflow(_Repository(row), _UnitOfWork, _SchedulingHistoricalAssignment()).preview(row)
 
     assert preview.outcome is HistoricalOrderOutcome.ADOPTED
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
@@ -204,7 +207,7 @@ def test_existing_assignment_never_builds_duplicate_assignment_candidate(tmp_pat
             return ({"id": 91, "staff_id": 11, "status": "completed"},)
 
     preview = HistoricalOrderAdoptionWorkflow(
-        RepositoryWithExistingAssignment(row), _UnitOfWork
+        RepositoryWithExistingAssignment(row), _UnitOfWork, _SchedulingHistoricalAssignment()
     ).preview(row)
 
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CONFLICT
@@ -219,7 +222,7 @@ def test_unmatched_case_does_not_resolve_staff_or_create_review(tmp_path):
     row = load_historical_order_workbook(path).rows[0]
     repository = _Repository(row, matched=False)
 
-    preview = HistoricalOrderAdoptionWorkflow(repository, _UnitOfWork).preview(row)
+    preview = HistoricalOrderAdoptionWorkflow(repository, _UnitOfWork, _SchedulingHistoricalAssignment()).preview(row)
 
     assert preview.outcome is HistoricalOrderOutcome.UNMATCHED_CASE
     assert preview.pairings == ()
@@ -234,7 +237,7 @@ def test_unmatched_case_apply_is_a_zero_write_skip(tmp_path):
     )
     row = load_historical_order_workbook(path).rows[0]
     repository = _Repository(row, matched=False)
-    workflow = HistoricalOrderAdoptionWorkflow(repository, _UnitOfWork)
+    workflow = HistoricalOrderAdoptionWorkflow(repository, _UnitOfWork, _SchedulingHistoricalAssignment())
     preview = workflow.preview(row)
     request = HistoricalOrderAdoptionRequest(
         row,
@@ -260,7 +263,7 @@ def test_same_source_and_fingerprint_replays_across_operator_metadata(tmp_path):
     )
     row = load_historical_order_workbook(path).rows[0]
     repository = _Repository(row)
-    workflow = HistoricalOrderAdoptionWorkflow(repository, _UnitOfWork)
+    workflow = HistoricalOrderAdoptionWorkflow(repository, _UnitOfWork, _SchedulingHistoricalAssignment())
     preview = workflow.preview(row)
     repository.receipt = {
         "command_fingerprint": fingerprint_payload({
@@ -341,9 +344,68 @@ class _Repository:
     def find_receipt(self, key, source_identity):
         return self.receipt
 
-    def persist(self, request, preview):
+    def persist(self, request, preview, assignment_ids):
         self.persist_count += 1
         raise AssertionError("unit preview must not persist")
+
+
+class _SchedulingHistoricalAssignment:
+    def append_completed_assignments(self, case_no, assignments):
+        return ()
+
+
+def test_historical_assignment_writer_uses_borrowed_connection_without_commit():
+    class Cursor:
+        lastrowid = 91
+
+        def __init__(self):
+            self.calls = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def execute(self, statement, parameters):
+            self.calls.append((statement, parameters))
+
+        def fetchone(self):
+            return {"last_sequence": 3}
+
+    class Connection:
+        def __init__(self, cursor):
+            self.cursor_value = cursor
+            self.commits = 0
+
+        def cursor(self):
+            return self.cursor_value
+
+        def commit(self):
+            self.commits += 1
+
+    cursor = Cursor()
+    connection = Connection(cursor)
+    writer = MySqlHistoricalAssignmentWriter(connection)
+
+    assert writer.append_completed_assignments(
+        "CASE-1", ((11, date(2026, 1, 2), date(2026, 1, 4)),)
+    ) == (91,)
+    assert connection.commits == 0
+    assert cursor.calls == [
+        (
+            "SELECT COALESCE(MAX(assignment_sequence),0) AS last_sequence "
+            "FROM case_staff_assignments WHERE case_no=%s FOR UPDATE",
+            ("CASE-1",),
+        ),
+        (
+            "INSERT INTO case_staff_assignments "
+            "(case_no,staff_id,assignment_sequence,assigned_start_date,assigned_end_date,"
+            "original_assigned_start_date,original_assigned_end_date,status) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,'completed')",
+            ("CASE-1", 11, 4, date(2026, 1, 2), date(2026, 1, 4), date(2026, 1, 2), date(2026, 1, 4)),
+        ),
+    ]
 
 
 class _UnitOfWork:

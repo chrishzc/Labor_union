@@ -5,11 +5,14 @@ Description: 原子建立或 replay HCM Case Import review，source conflict 固
 
 from __future__ import annotations
 
+from typing import Callable, Protocol
+
 from domains.case_import.hcm_import_review import build_hcm_import_review_root
-from infrastructure.mysql.hcm_import_review_repository import (
-    HcmImportReviewMySqlUnitOfWork,
-    MySqlHcmImportReviewRepository,
-)
+
+
+class HcmImportReviewRepository(Protocol):
+    def find_fingerprint(self, source_event_identity: str, *, for_update: bool): ...
+    def append_root_and_outbox(self, root, *, canonical_case_no: str | None) -> None: ...
 
 
 def record_hcm_import_review(
@@ -21,6 +24,8 @@ def record_hcm_import_review(
     case_identity: object,
     issue_codes: tuple[str, ...],
     evidence_snapshot: dict[str, object],
+    repository: HcmImportReviewRepository,
+    unit_of_work_factory: Callable[[], object] | None = None,
 ) -> str:
     root = build_hcm_import_review_root(
         source_content_digest=source_content_digest,
@@ -30,20 +35,23 @@ def record_hcm_import_review(
         issue_codes=issue_codes,
         evidence_snapshot=evidence_snapshot,
     )
-    repository = MySqlHcmImportReviewRepository(connection)
-    with HcmImportReviewMySqlUnitOfWork(connection) as unit_of_work:
+    def persist() -> str:
         existing = repository.find_fingerprint(root.source_event_identity, for_update=True)
         if existing is None:
             repository.append_root_and_outbox(
                 root,
                 canonical_case_no=_canonical_case_no(case_identity),
             )
-            unit_of_work.commit()
             return root.review_identity
         if existing != root.source_fingerprint.value:
             raise RuntimeError("case_import_source_conflict")
+        return root.review_identity
+    if unit_of_work_factory is None:
+        return persist()
+    with unit_of_work_factory() as unit_of_work:
+        result = persist()
         unit_of_work.commit()
-    return root.review_identity
+        return result
 
 
 def _canonical_case_no(value: object) -> str | None:

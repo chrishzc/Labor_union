@@ -43,7 +43,7 @@ def test_release_hashes_and_catalog_order_are_exact() -> None:
     assert manifest["backfills"] == []
     assert names.index("1012_service_before_replacement.sql") < names.index(SQL_PATH.name)
     assert names.index(SQL_PATH.name) < names.index(
-        "1014_historical_baseline_projector_v2.sql"
+        "1018_hcm_resubmission_canonical_review_version.sql"
     )
 
 

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from subsystems.line.media_archive import render_rich_menu_image
+from infrastructure.line.rich_menu_image_store import render_rich_menu_image
 
 
 def create_rich_menu_image(menu: dict, output_path) -> None:

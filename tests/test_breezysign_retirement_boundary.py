@@ -21,11 +21,18 @@ def test_legacy_provider_column_is_absent_outside_its_one_time_migration():
             "migrate_order_contract_identity.py",
             "migrate_preserved_database_additive_schema.py",
         }
+        and not _is_historical_baseline_artifact(path)
     )
 
     for path in active_paths:
         content = path.read_text(encoding="utf-8")
         assert re.search(r"\bcontract_id\b", content) is None, path
+
+
+def _is_historical_baseline_artifact(path: Path) -> bool:
+    """The historical projector owns a separate, intentionally named contract_id."""
+    relative = path.relative_to(REPOSITORY_ROOT).as_posix()
+    return "historical_baseline" in relative or "historical_operational_baseline" in relative
 
 
 def _current_runtime_schema_and_baseline_paths() -> tuple[Path, ...]:

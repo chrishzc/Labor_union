@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from domains.anomalies.registry import DesiredAlertState, default_anomaly_registry
-from infrastructure.mysql.anomaly_registry_repository import MySqlAnomalyRepository
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.anomalies.alert_workflow import AnomalyApplication, ProjectAlertRequest
+from subsystems.anomalies.ports import AnomalyRuntime, require_runtime
 class _BorrowedAnomalyUnitOfWork:
     """No-op unit of work: the caller's own transaction owns commit/rollback."""
 
@@ -98,6 +98,7 @@ def project_finance_import_review_alert(
     *,
     source_version: int = 0,
     source_event_identity: str | None = None,
+    runtime: AnomalyRuntime | None = None,
 ) -> dict[str, Any]:
     """Project one completed batch into its current IMPORT-006 alert state."""
     if not callable(getattr(cursor, "execute", None)):
@@ -118,6 +119,7 @@ def project_finance_import_review_alert(
         latest_run,
         source_version,
         source_event_identity,
+        require_runtime(runtime),
     )
 
 
@@ -213,6 +215,7 @@ def _project_batch_integrity_alert(
     latest_run: Mapping[str, Any] | None,
     source_version: int,
     source_event_identity: str | None,
+    runtime: AnomalyRuntime,
 ) -> dict[str, Any]:
     summary = _projection_summary(batch, membership_counts, remaining, inconsistent, latest_run)
     details = _projection_details(batch_id, batch, summary, remaining, inconsistent, latest_run)
@@ -223,6 +226,7 @@ def _project_batch_integrity_alert(
         details,
         source_version=source_version,
         source_event_identity=source_event_identity,
+        runtime=runtime,
     )
     return {"alert_action": result["action"], "summary": summary, "alert": result["alert"]}
 
@@ -235,6 +239,7 @@ def _project_canonical_import006_alert(
     *,
     source_version: int,
     source_event_identity: str | None,
+    runtime: AnomalyRuntime,
 ) -> dict[str, Any]:
     """Project IMPORT-006 through the canonical registry in the caller's UoW."""
     active = summary["integrity_inconsistent_count"] > 0
@@ -246,7 +251,7 @@ def _project_canonical_import006_alert(
         source_version,
         source_event_identity,
     )
-    return _project_canonical_request(cursor, request)
+    return _project_canonical_request(cursor, request, runtime)
 
 
 def _canonical_projection_request(
@@ -278,9 +283,9 @@ def _canonical_projection_request(
     )
 
 
-def _project_canonical_request(cursor, request):
+def _project_canonical_request(cursor, request, runtime: AnomalyRuntime):
     registry = default_anomaly_registry()
-    repository = MySqlAnomalyRepository(cursor.connection)
+    repository = runtime.anomaly_repository(cursor.connection)
     already_processed = repository.checkpoint_matches(request)
     fingerprint = registry.fingerprint(request.desired)
     loaded = repository.load_current(fingerprint, for_update=True)

@@ -12,12 +12,10 @@ export interface AnomalyDetailBundleViewModel {
   definitionCode: string;
   evidence: EvidenceRowViewModel[];
   detailTimeline: TimelineRowViewModel[];
-  recoveryTimeline: TimelineRowViewModel[];
-  rootFacts: EvidenceRowViewModel[];
-  occurrences: Array<{ fingerprint: string; occurredAt: string; evidence: EvidenceRowViewModel[] }>;
+  currentDetails: EvidenceRowViewModel[];
   actions: RecoveryActionViewModel[];
-  projectionFreshness: string;
-  domainBlockerActive: boolean;
+  currentIssueKey: string | null;
+  blocking: boolean;
   recoveryAvailable: boolean;
 }
 
@@ -108,13 +106,10 @@ function renderBinding(item: AnomalySourceBinding): string {
 
 export function adaptAnomalyDetailBundle(detail: AnomalyDetailView, recovery: AnomalyRecoveryContextView | null): AnomalyDetailBundleViewModel {
   if (recovery && (
-    detail.summary.fingerprint !== recovery.fingerprint
-    || detail.summary.definition_code !== recovery.definition_code
-    || detail.summary.source_identity !== recovery.source_identity
+    detail.summary.definition_code !== recovery.definition_code
   )) {
     throw new Error('detail 與 recovery identity 不一致');
   }
-  const root = recovery?.root_fact_snapshot;
   const boundDetailActions = detail.available_actions.filter((action) => action.source_bindings !== null);
   const availableActions = recovery && recovery.available_actions.length > 0
     ? recovery.available_actions
@@ -124,25 +119,10 @@ export function adaptAnomalyDetailBundle(detail: AnomalyDetailView, recovery: An
     definitionCode: detail.summary.definition_code,
     evidence: adaptEvidence(detail.summary.display_snapshot.fields),
     detailTimeline: adaptTimeline(detail.timeline),
-    recoveryTimeline: recovery ? adaptTimeline(recovery.workflow_timeline) : [],
-    rootFacts: root ? [
-      { key: 'occurred_at', kind: 'datetime', label: '偵測時間', value: root.occurred_at },
-      { key: 'source_version', kind: 'integer', label: '資料版本', value: String(root.source_version) },
-      { key: 'finance_import_row_identity', kind: 'identity', label: '銀行流水資料', value: root.finance_import_row_identity },
-      { key: 'finance_import_batch_identity', kind: 'identity', label: '匯入批次', value: root.finance_import_batch_identity },
-      { key: 'original_refund_ledger_entry_identity', kind: 'identity', label: '原退款紀錄', value: root.original_refund_ledger_entry_identity ?? '—' },
-      { key: 'amount_delta_ntd', kind: 'money_ntd', label: '金額差異', value: `NT$ ${root.amount_delta_ntd.toLocaleString('zh-TW')}` },
-      { key: 'root_condition_active', kind: 'boolean', label: '目前仍需處理', value: root.root_condition_active ? '是' : '否' },
-      { key: 'integrity_blocker_active', kind: 'boolean', label: '目前阻擋作業', value: root.integrity_blocker_active ? '是' : '否' },
-      { key: 'affected_order_identities', kind: 'identity_list', label: '受影響案件', value: root.affected_order_identities.join(', ') || '—' },
-      { key: 'affected_obligation_identities', kind: 'identity_list', label: '受影響收付款', value: root.affected_obligation_identities.join(', ') || '—' },
-      { key: 'domain_blockers', kind: 'code_list', label: '阻擋原因', value: root.domain_blockers.join(', ') || '—' },
-      { key: 'reason_codes', kind: 'code_list', label: '判斷原因', value: root.reason_codes.join(', ') || '—' },
-    ] : [],
-    occurrences: recovery?.occurrence_timeline.map((item) => ({ fingerprint: item.occurrence_fingerprint, occurredAt: item.occurred_at, evidence: adaptEvidence(item.bounded_snapshot.fields) })) ?? [],
+    currentDetails: recovery ? adaptEvidence(recovery.details.fields) : [],
     actions: availableActions.map((action) => ({ key: action.action_key, label: action.label, owner: action.owning_domain, bindings: (action.source_bindings ?? []).map(renderBinding), requiredInputs: action.required_operator_inputs, previewOperation: action.preview_operation, applyOperation: action.apply_operation, completionPredicate: action.completion_predicate, contractVersion: action.action_contract_version })),
-    projectionFreshness: recovery?.projection_freshness ?? 'unavailable',
-    domainBlockerActive: recovery?.domain_blocker_active ?? false,
+    currentIssueKey: recovery?.issue_key ?? null,
+    blocking: recovery?.blocking ?? false,
     recoveryAvailable: recovery !== null || boundDetailActions.length > 0,
   };
 }

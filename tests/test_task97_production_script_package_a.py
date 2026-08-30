@@ -18,6 +18,8 @@ CANONICAL_TARGETS = (
     "scripts/migrate_order_details_lifecycle_version_view.py",
     "scripts/migrate_order_lifecycle_control_facts.py",
 )
+RETIRED_CHILD_EXECUTABLES = CANONICAL_TARGETS[:2]
+IMMUTABLE_CHILD_ARTIFACT = CANONICAL_TARGETS[2]
 NON_CANONICAL_TARGET = "scripts/migrate_scheduling_generation_bootstrap.py"
 
 
@@ -44,20 +46,29 @@ def _has_top_level_symbol(tree: ast.AST, name: str) -> bool:
     )
 
 
-def test_canonical_runner_calls_first_three_package_a_scripts_via_subprocess() -> None:
+def test_canonical_runner_composes_package_a_library_steps_in_process() -> None:
     source = CANONICAL_RUNNER.read_text(encoding="utf-8")
 
-    for target in CANONICAL_TARGETS:
-        assert target in source
     assert "def run_candidate_post_schema(" in source
-    assert "_run_project_python" in source
-    assert "contract_apply = _run_project_python(" in source
-    assert "view_dry = _run_project_python(" in source
-    assert "dry = _run_project_python(" in source
+    assert "_run_orders_library_step" in source
+    assert "migrate_order_contract_identity as contract_identity" in source
+    assert "migrate_order_details_lifecycle_version_view as lifecycle_view" in source
+    assert "migrate_order_lifecycle_control_facts as control_facts" in source
+    assert "connection.commit()" in source
 
 
-def test_subprocess_called_scripts_keep_cli_identity_until_runner_is_rewritten() -> None:
-    for relative_path in (*CANONICAL_TARGETS, NON_CANONICAL_TARGET):
+def test_absorbed_mutable_children_are_library_only() -> None:
+    for relative_path in RETIRED_CHILD_EXECUTABLES:
+        tree = ast.parse(
+            (ROOT / relative_path).read_text(encoding="utf-8"),
+            filename=relative_path,
+        )
+        assert not _has_main_guard(tree), relative_path
+        assert not _has_top_level_symbol(tree, "main"), relative_path
+
+
+def test_hash_locked_and_unabsorbed_scripts_keep_their_exact_artifacts() -> None:
+    for relative_path in (IMMUTABLE_CHILD_ARTIFACT, NON_CANONICAL_TARGET):
         tree = ast.parse(
             (ROOT / relative_path).read_text(encoding="utf-8"),
             filename=relative_path,

@@ -36,7 +36,7 @@ def test_audit_routes_require_only_an_authenticated_administrator() -> None:
 
 
 def test_any_authenticated_administrator_can_open_masked_detail(monkeypatch) -> None:
-    monkeypatch.setattr(admin_audit, "get_admin_audit_detail", lambda _: _audit_detail(2))
+    monkeypatch.setattr(admin_audit, "get_admin_audit_detail", lambda _, **__: _audit_detail(2))
     principal = AdminPrincipal(1, "reader", "Reader", "line_viewer")
 
     response = admin_audit.audit_detail(7, principal)

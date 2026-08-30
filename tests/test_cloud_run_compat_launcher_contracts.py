@@ -61,3 +61,7 @@ def test_bridge_uses_project_scoped_key_os_login_and_restricted_acl() -> None:
     assert "sudo fuser -k $RemotePort/tcp" in script
     assert "Remove-StaleRemoteListener" in script
     assert ".ssh\\google_compute_engine" not in script
+    assert '"local_mysql_tcp_forward.py"' in script
+    assert "/opt/local_mysql_tcp_forward.py:ro" in script
+    assert '"python", "/opt/local_mysql_tcp_forward.py"' in script
+    assert '"-p", "127.0.0.1:${LocalForwardPort}:13306"' in script

@@ -82,9 +82,22 @@ from subsystems.line.media_archive import (
     MediaValidationError,
     delete_media_asset,
     read_media_asset,
-    render_rich_menu_image,
     store_uploaded_rich_menu_image,
 )
+from infrastructure.line.rich_menu_image_store import encode_line_jpeg, render_rich_menu_image
+from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.line_unit_of_work import LineMySqlUnitOfWork, open_line_unit_of_work
+from subsystems.line import media_archive as _media_archive
+from subsystems.line import rich_menu_publication_workflow as _rich_menu_workflow
+
+
+# The API composition root supplies concrete adapters to the subsystem.
+_media_archive.get_connection = get_connection
+_media_archive.encode_line_jpeg = encode_line_jpeg
+_media_archive.render_rich_menu_image = render_rich_menu_image
+_rich_menu_workflow.get_connection = get_connection
+_rich_menu_workflow.open_line_unit_of_work = open_line_unit_of_work
+_rich_menu_workflow.line_unit_of_work_factory = LineMySqlUnitOfWork
 
 
 router = APIRouter(
@@ -379,6 +392,8 @@ async def upload_rich_menu_image(
             expected_width=menu.size.width,
             expected_height=menu.size.height,
             created_by_admin_user_id=request.state.admin_principal.id,
+            connection_factory=get_connection,
+            unit_of_work_factory=LineMySqlUnitOfWork,
         )
     except (MediaValidationError, MediaAssetNotFoundError) as exc:
         _publication_error(exc)
@@ -409,7 +424,11 @@ def remove_rich_menu_image(asset_id: int, request: Request):
     if any(menu.appearance.image_asset_id == asset_id for menu in config.menus):
         raise HTTPException(status_code=409, detail="此圖片仍被 Rich Menu 草稿引用")
     try:
-        delete_media_asset(asset_id)
+        delete_media_asset(
+            asset_id,
+            connection_factory=get_connection,
+            unit_of_work_factory=LineMySqlUnitOfWork,
+        )
     except (MediaAssetNotFoundError, MediaValidationError) as exc:
         _publication_error(exc)
     request.state.audit_action = "line.rich_menu.image.delete"

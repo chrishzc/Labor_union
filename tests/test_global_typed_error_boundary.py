@@ -27,7 +27,11 @@ from subsystems.access.authentication_session import (
     PasswordLoginChallenge,
 )
 
-from tests.test_order_reopen_router import InMemoryOrderReopenRepository, _create_app, _default_facts
+from tests.domains.orders.subsystems.orders.integration.test_order_reopen_router import (
+    InMemoryOrderReopenRepository,
+    _create_app,
+    _default_facts,
+)
 
 
 SAFE_CORRELATION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$")
@@ -240,7 +244,10 @@ def test_d_missing_and_expired_bearer_are_forbidden_typed_errors(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "production")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
-    monkeypatch.setattr("api.dependencies.admin_auth.get_admin_session", lambda _token: None)
+    monkeypatch.setattr(
+        "api.dependencies.admin_auth.get_admin_session",
+        lambda _token, **_kwargs: None,
+    )
     client = TestClient(_admin_app(None, authenticate=False))
 
     missing = client.post("/api/v1/orders/CASE-RO-001/reopen/preview")
@@ -260,7 +267,7 @@ def test_d_session_storage_failure_is_redacted_and_retryable(monkeypatch):
     monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "production")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
 
-    def unavailable(_token):
+    def unavailable(_token, **_kwargs):
         raise AdminSessionStorageError("database-secret-token")
 
     monkeypatch.setattr("api.dependencies.admin_auth.get_admin_session", unavailable)

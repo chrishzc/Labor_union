@@ -28,7 +28,6 @@ def test_task97_repositories_do_not_own_commit_or_rollback() -> None:
 
 def test_task97_workflows_do_not_call_repository_transaction_methods() -> None:
     for relative_path in (
-        "subsystems/access/source_data_correction.py",
         "subsystems/case_import/hcm_workbook_import.py",
         "subsystems/case_import/staff_historical_workbook_adoption.py",
         "subsystems/orders/client_name_maintenance.py",

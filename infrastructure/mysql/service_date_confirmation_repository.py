@@ -99,11 +99,6 @@ class MySqlServiceDateConfirmationRepository:
                 [(version_id, index, value) for index, value in enumerate(candidate.service_dates, start=1)],
             )
             cursor.execute(
-                "UPDATE matching_schedule_snapshots SET current_marker=NULL,status='invalidated',"
-                "invalidated_at_utc=UTC_TIMESTAMP(6) WHERE case_no=%s AND current_marker=1",
-                (candidate.case_no,),
-            )
-            cursor.execute(
                 "INSERT INTO confirmed_service_date_receipts "
                 "(idempotency_key,command_fingerprint,confirmed_version_id,actor_id) VALUES (%s,%s,%s,%s)",
                 (idempotency_key, command_fingerprint, version_id, actor),

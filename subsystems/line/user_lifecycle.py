@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any, Callable
 
 _ROLES = frozenset({"customer", "staff", "union_staff"})
 
@@ -47,16 +48,42 @@ def assign_role(cursor, line_user_id: str, role: str) -> None:
     )
 
 
-def apply_role(connection, line_user_id: str, role: str) -> None:
+def apply_role(
+    connection,
+    line_user_id: str,
+    role: str,
+    *,
+    unit_of_work_factory: Callable[[Any], Any] | None = None,
+) -> None:
     """Own the role command transaction so transports cannot bypass it."""
-    try:
-        connection.begin()
+    unit_of_work = (
+        unit_of_work_factory(connection)
+        if unit_of_work_factory is not None
+        else _ConnectionUnitOfWork(connection)
+    )
+    with unit_of_work:
         with connection.cursor() as cursor:
             assign_role(cursor, line_user_id, role)
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
+        unit_of_work.commit()
+
+
+class _ConnectionUnitOfWork:
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def __enter__(self):
+        begin = getattr(self._connection, "begin", None)
+        if callable(begin):
+            begin()
+        return self
+
+    def __exit__(self, exception_type, exception, traceback):
+        if exception_type is not None:
+            self._connection.rollback()
+        return False
+
+    def commit(self) -> None:
+        self._connection.commit()
 
 
 __all__ = ["activate_follow", "apply_role", "assign_role", "block_unfollow", "cancel_pending_onboarding"]

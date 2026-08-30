@@ -7,7 +7,10 @@ from decimal import Decimal
 from typing import Any, Mapping
 
 from domains.anomalies.registry import default_anomaly_registry
-from infrastructure.mysql.anomaly_registry_repository import MySqlAnomalyRepository
+from infrastructure.mysql.anomaly_registry_repository import (
+    AnomalyMySqlUnitOfWork,
+    MySqlAnomalyRepository,
+)
 from subsystems.anomalies.government_subsidy_reversal_anomaly_source import (
     GovernmentSubsidyReversalAllocationRootFact,
     GovernmentSubsidyReversalAnomalyConsumer,
@@ -23,20 +26,6 @@ _SOURCE_RECEIPT_TARGET_PREFIX = "government-subsidy-receipt:"
 _SOURCE_COORDINATE_MARKER = ":source-receipt:"
 _MAXIMUM_PRIOR_ALERTS_PER_ROW = 100
 _MAXIMUM_SOURCE_ALLOCATION_ROWS = 10_000
-
-
-class BorrowedGovernmentSubsidyReversalAnomalyUnitOfWork:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exception_type, exception, traceback):
-        return False
-
-    def commit(self) -> None:
-        return None
-
-    def rollback(self) -> None:
-        return None
 
 
 class MySqlGovernmentSubsidyReversalRootFactSource:
@@ -60,22 +49,14 @@ def project_government_subsidy_reversal_anomaly_page(
     connection: Any,
     request: GovernmentSubsidyReversalScanRequest,
 ):
-    consumer = _projection_consumer(connection)
-    try:
-        connection.begin()
-        result = consumer.scan_page(request)
-        connection.commit()
-        return result
-    except Exception:
-        connection.rollback()
-        raise
+    return _projection_consumer(connection).scan_page(request)
 
 
 def _projection_consumer(connection):
     application = AnomalyApplication(
         default_anomaly_registry(),
         MySqlAnomalyRepository(connection),
-        BorrowedGovernmentSubsidyReversalAnomalyUnitOfWork,
+        lambda: AnomalyMySqlUnitOfWork(connection),
     )
     return GovernmentSubsidyReversalAnomalyConsumer(
         MySqlGovernmentSubsidyReversalRootFactSource(connection),
@@ -451,7 +432,6 @@ SELECT
 
 
 __all__ = [
-    "BorrowedGovernmentSubsidyReversalAnomalyUnitOfWork",
     "MySqlGovernmentSubsidyReversalRootFactSource",
     "project_government_subsidy_reversal_anomaly_page",
 ]

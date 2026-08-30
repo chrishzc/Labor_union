@@ -221,6 +221,33 @@ class StoredControlledFileApplyReceipt:
 
 
 @dataclass(frozen=True, slots=True)
+class ControlledFilePostCommitFinalizeIntent:
+    """The immutable facts a worker needs to verify bytes after DB commit.
+
+    The intent is deliberately separate from the apply receipt.  A repository
+    that owns a durable intent table may persist it in the same outer UoW; a
+    repository without that schema can still use the completion hook as a
+    local compatibility path while the missing durable capability remains
+    visible to reconciliation.
+    """
+
+    staging_id: str
+    file_id: str
+    expected_sha256: str
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        if _STAGING_ID.fullmatch(self.staging_id) is None:
+            raise ValueError("controlled file staging identity is invalid")
+        if _FILE_ID.fullmatch(self.file_id) is None:
+            raise ValueError("controlled file identity is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.expected_sha256):
+            raise ValueError("controlled file digest is invalid")
+        if self.created_at.tzinfo is None:
+            raise ValueError("controlled file finalize intent time must include timezone")
+
+
+@dataclass(frozen=True, slots=True)
 class ControlledFileDownloadReference:
     readback: ControlledFileReadback
     staging_id: str
@@ -272,6 +299,10 @@ class ControlledFileWorkflowRepository(Protocol):
         key: IdempotencyKey,
         receipt: StoredControlledFileApplyReceipt,
         correlation_id: CorrelationId,
+    ) -> None: ...
+
+    def save_post_commit_finalize_intent(
+        self, intent: ControlledFilePostCommitFinalizeIntent
     ) -> None: ...
 
     def get_readback(self, file_id: str) -> ControlledFileReadback | None: ...
@@ -386,6 +417,18 @@ class ControlledFileWorkflow:
             StoredControlledFileApplyReceipt(command_fingerprint, receipt),
             command.correlation_id,
         )
+        save_finalize_intent = getattr(
+            self._repository, "save_post_commit_finalize_intent", None
+        )
+        if callable(save_finalize_intent):
+            save_finalize_intent(
+                ControlledFilePostCommitFinalizeIntent(
+                    staging_id=fresh.candidate.staging_id,
+                    file_id=readback.file_id,
+                    expected_sha256=readback.sha256_digest,
+                    created_at=now,
+                )
+            )
         return receipt
 
     def readback(self, file_id: str) -> ControlledFileReadback:
@@ -598,16 +641,38 @@ def _register_postcommit_finalize(
     The baseline MySQL UoW has no hook and therefore leaves the durable
     reconciliation path as the owner of any later verification.
     """
+    add_after_commit = getattr(unit_of_work, "add_after_commit", None)
     add_after_completion = getattr(unit_of_work, "add_after_completion", None)
     finalize = getattr(storage, "finalize_staged", None)
-    if not callable(add_after_completion) or not callable(finalize):
+    if not callable(finalize):
         return
-    add_after_completion(
-        lambda: finalize(
-            staging_id,
-            expected_sha256=readback.sha256_digest,
-        )
-    )
+
+    def run_finalize() -> None:
+        # Some legacy UoWs expose only an ``after_completion`` hook and invoke
+        # it for both commit and rollback.  Never verify (or otherwise touch)
+        # bytes after a failed DB commit.  Native UoWs expose this state as a
+        # private implementation detail; custom test UoWs without it are
+        # treated as commit-only hooks for backwards compatibility.
+        if getattr(unit_of_work, "_committed", False) is not True:
+            return
+        try:
+            finalize(staging_id, expected_sha256=readback.sha256_digest)
+        except ControlledFileWorkflowError:
+            raise
+        except Exception as error:  # noqa: BLE001 - convert provider/storage failure to typed blocker
+            retryable = bool(getattr(error, "retryable", False))
+            raise ControlledFileWorkflowError(
+                "controlled_file_post_commit_reconciliation_required",
+                "資料庫已提交，但檔案完整性尚待對帳",
+                retryable=retryable,
+            ) from error
+
+    if callable(add_after_commit):
+        add_after_commit(run_finalize)
+    elif callable(add_after_completion) and isinstance(
+        getattr(unit_of_work, "_committed", None), bool
+    ):
+        add_after_completion(run_finalize)
 
 
 def _utc(value: datetime) -> datetime:
@@ -625,6 +690,7 @@ __all__ = [
     "ControlledFileDownloadReference",
     "ControlledFileIntent",
     "ControlledFileOwner",
+    "ControlledFilePostCommitFinalizeIntent",
     "ControlledFilePreview",
     "ControlledFilePurpose",
     "ControlledFileReadback",

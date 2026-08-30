@@ -59,6 +59,7 @@ from subsystems.scheduling.matching_notification_contracts import (
 from subsystems.scheduling.segmented_availability_query import (
     search_segmented_caregiver_availability,
 )
+from subsystems.scheduling.ports import SegmentedAvailabilityFactsPort
 
 
 class MatchingNotificationApplication:
@@ -70,12 +71,17 @@ class MatchingNotificationApplication:
         token_factory: Callable[[], str] | None = None,
         interaction_lifetime: timedelta = timedelta(days=7),
         availability_validator: Callable[[MatchingContactState], None] | None = None,
+        availability_facts_port: SegmentedAvailabilityFactsPort | None = None,
     ) -> None:
+        if availability_validator is None and availability_facts_port is None:
+            raise RuntimeError("matching availability facts port is not configured")
         self._unit_of_work_factory = unit_of_work_factory
         self._now = now
         self._token_factory = token_factory or (lambda: secrets.token_urlsafe(24))
         self._interaction_lifetime = interaction_lifetime
-        self._availability_validator = availability_validator or _validate_availability
+        self._availability_validator = availability_validator or (
+            lambda state: _validate_availability(state, availability_facts_port)
+        )
 
     def get_contact_state(
         self,
@@ -86,7 +92,6 @@ class MatchingNotificationApplication:
         require_line_capability(actor, LineCapability.MATCHING_READ)
         with self._unit_of_work_factory() as unit_of_work:
             state = unit_of_work.matching_notifications.get_contact_state(case_no, plan_id)
-            unit_of_work.commit()
         if state is None:
             raise LookupError("matching plan not found")
         return state
@@ -662,7 +667,10 @@ def self_timezone():
     return timezone.utc
 
 
-def _validate_availability(state: MatchingContactState) -> None:
+def _validate_availability(
+    state: MatchingContactState,
+    facts_port: SegmentedAvailabilityFactsPort,
+) -> None:
     result = search_segmented_caregiver_availability(
         case_no=state.plan.case_no,
         segment_count=len(state.segments),
@@ -675,6 +683,7 @@ def _validate_availability(state: MatchingContactState) -> None:
             for segment in state.segments
         ],
         as_of=datetime.now().date().isoformat(),
+        facts_port=facts_port,
     )
     if result.get("feasibility") != "complete" or result.get("conflicts"):
         raise MatchingDecisionNotReadyError("matching plan is no longer fully available")

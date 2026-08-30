@@ -11,7 +11,6 @@ import type {
 } from '../../../api/anomalies/anomaly_detail_schemas';
 
 const DETAIL_FINGERPRINT = 'a'.repeat(64);
-const OCCURRENCE_FINGERPRINT = 'b'.repeat(64);
 
 const VALID_DISPLAY_SNAPSHOT = {
   redaction_version: 'anomaly-safe.v1' as const,
@@ -120,127 +119,35 @@ export const VALID_ANOMALY_DETAIL_RESPONSE: AnomalyDetailResponse = {
   error: null,
 };
 
-const VALID_OCCURRENCE_SNAPSHOT = {
-  redaction_version: 'anomaly-safe.v1' as const,
-  definition_code: 'finance_import_manual_review',
-  fields: [
-    {
-      kind: 'identity_list' as const,
-      key: 'affected_obligation_identities',
-      value: ['obligation:SYNTH-19'],
-    },
-    {
-      kind: 'identity_list' as const,
-      key: 'affected_order_identities',
-      value: ['order:SYNTH-17'],
-    },
-    {
-      kind: 'money_ntd' as const,
-      key: 'amount_delta_ntd',
-      value: 1200,
-    },
-    {
-      kind: 'code_list' as const,
-      key: 'domain_blockers',
-      value: ['manual_review'],
-    },
-    {
-      kind: 'identity' as const,
-      key: 'finance_import_batch_id',
-      value: 'batch:SYNTH-09',
-    },
-    {
-      kind: 'identity' as const,
-      key: 'finance_import_row_id',
-      value: 'row:SYNTH-42',
-    },
-    {
-      kind: 'boolean' as const,
-      key: 'integrity_blocker_active',
-      value: false,
-    },
-    {
-      kind: 'datetime' as const,
-      key: 'occurred_at',
-      value: '2026-08-22T09:30:00+00:00',
-    },
-    {
-      kind: 'identity' as const,
-      key: 'original_refund_ledger_entry_id',
-      value: 'ledger-refund:SYNTH-42',
-    },
-    {
-      kind: 'code_list' as const,
-      key: 'reason_codes',
-      value: ['AMOUNT_MISMATCH'],
-    },
-    {
-      kind: 'boolean' as const,
-      key: 'root_condition_active',
-      value: true,
-    },
-    {
-      kind: 'identity' as const,
-      key: 'source_identity',
-      value: 'event:SYNTH-42',
-    },
-    {
-      kind: 'integer' as const,
-      key: 'source_version',
-      value: 7,
-    },
-  ],
-};
-
 export const VALID_ANOMALY_RECOVERY_CONTEXT_VIEW: AnomalyRecoveryContextView = {
-  fingerprint: DETAIL_FINGERPRINT,
+  issue_key: `ci_${'c'.repeat(64)}`,
   definition_code: 'finance_import_manual_review',
-  source_domain: 'finance_import',
-  source_identity: 'opaque-subject:SYNTH-42',
-  source_version: 7,
+  owner_domain: 'finance_import',
+  owner_root_type: 'finance_import_batch',
+  subject: VALID_DISPLAY_SNAPSHOT,
+  owner_snapshot_token: 'finance-import-snapshot:SYNTH-42',
+  owner_version: 7,
   severity: 'warning',
-  predicate_active: true,
-  workflow_status: 'open',
-  workflow_version: 3,
-  domain_blocker_active: true,
-  projection_freshness: 'fresh',
-  root_fact_snapshot: {
-    occurred_at: '2026-08-22T09:30:00+00:00',
-    source_version: 7,
-    finance_import_row_identity: 'row:SYNTH-42',
-    finance_import_batch_identity: 'batch:SYNTH-09',
-    original_refund_ledger_entry_identity: 'ledger-refund:SYNTH-42',
-    amount_delta_ntd: 1200,
-    root_condition_active: true,
-    integrity_blocker_active: false,
-    affected_order_identities: ['order:SYNTH-17'],
-    affected_obligation_identities: ['obligation:SYNTH-19'],
-    domain_blockers: ['manual_review'],
-    reason_codes: ['AMOUNT_MISMATCH'],
+  blocking: true,
+  details_version: 1,
+  details: {
+    ...VALID_DISPLAY_SNAPSHOT,
+    fields: [
+      ...VALID_DISPLAY_SNAPSHOT.fields,
+      {
+        kind: 'code_list' as const,
+        key: 'domain_blockers',
+        value: ['manual_review'],
+      },
+      {
+        kind: 'identity_list' as const,
+        key: 'affected_obligation_identities',
+        value: ['obligation:SYNTH-19'],
+      },
+    ],
   },
-  occurrence_timeline: [
-    {
-      occurrence_fingerprint: OCCURRENCE_FINGERPRINT,
-      definition_code: 'finance_import_manual_review',
-      source_event_identity: 'event:SYNTH-42',
-      finance_import_row_id: 42,
-      finance_import_batch_id: 9,
-      source_version: 7,
-      occurred_at: '2026-08-22T09:30:00+00:00',
-      bounded_snapshot: VALID_OCCURRENCE_SNAPSHOT,
-    },
-  ],
-  workflow_timeline: [
-    {
-      action: 'resolve',
-      expected_workflow_version: 2,
-      resulting_workflow_version: 3,
-      actor: 'O***',
-      reason: '人工處理進度已更新；不代表根事實已修正。',
-      correlation_id: 'anomaly-recovery:SYNTH-42',
-      created_at: '2026-08-22T10:00:00+00:00',
-    },
-  ],
+  episode_started_at: '2026-08-22T09:30:00+00:00',
+  last_verified_at: '2026-08-22T10:00:00+00:00',
   available_actions: [
     {
       action_key: 'repair_finance_projection',
@@ -320,10 +227,7 @@ export const INVALID_ANOMALY_RECOVERY_MALFORMED_IDENTITY = {
   ...VALID_ANOMALY_RECOVERY_RESPONSE,
   data: {
     ...VALID_ANOMALY_RECOVERY_CONTEXT_VIEW,
-    root_fact_snapshot: {
-      ...VALID_ANOMALY_RECOVERY_CONTEXT_VIEW.root_fact_snapshot,
-      finance_import_row_identity: '',
-    },
+    issue_key: 'not-a-current-issue-key',
   },
 };
 

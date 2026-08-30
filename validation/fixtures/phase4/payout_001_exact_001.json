@@ -15,7 +15,7 @@
     "name": "Task96 PAYOUT 合成月嫂",
     "bank_code": "812",
     "branch_code": "0001",
-    "account_no": "0096000000000011"
+    "account_no": "synthetic-account-011"
   },
   "official_service_dates": [
     "2026-07-01",
@@ -29,7 +29,7 @@
     "direction": "outgoing",
     "amount_ntd": 12000,
     "transaction_date": "2026-07-15",
-    "counterparty_account": "0096000000000011"
+    "counterparty_account": "synthetic-account-011"
   },
   "formal_generated_roots": [
     "order and assignment command lineage",

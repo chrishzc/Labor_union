@@ -26,6 +26,33 @@ import {
   VALID_ANOMALY_RECOVERY_CONTEXT_VIEW,
 } from './fixtures/anomalies/anomaly_detail_contract_fixtures';
 
+const PAGE_DETAIL = {
+  ...VALID_ANOMALY_DETAIL_VIEW,
+  summary: {
+    ...VALID_ANOMALY_DETAIL_VIEW.summary,
+    fingerprint: VALID_ANOMALY_SUMMARY_1.fingerprint,
+    definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+    source_domain: VALID_ANOMALY_SUMMARY_1.source_domain,
+    source_identity: VALID_ANOMALY_SUMMARY_1.source_identity,
+    display_snapshot: {
+      ...VALID_ANOMALY_DETAIL_VIEW.summary.display_snapshot,
+      definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+    },
+  },
+};
+const PAGE_RECOVERY = {
+  ...VALID_ANOMALY_RECOVERY_CONTEXT_VIEW,
+  definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+  subject: {
+    ...VALID_ANOMALY_RECOVERY_CONTEXT_VIEW.subject,
+    definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+  },
+  details: {
+    ...VALID_ANOMALY_RECOVERY_CONTEXT_VIEW.details,
+    definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+  },
+};
+
 describe('AnomaliesPage Real Data Integration Suite', () => {
   it('renders allowlisted domain blockers and source version while excluding untyped fields', () => {
     expect(visibleEvidenceItems([
@@ -55,10 +82,10 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
       VALID_IMPORT_WARNING_TASK_AUTO_RESOLVED,
     ]);
     vi.spyOn(anomalyDetailClient, 'queryAnomalyDetail').mockResolvedValue(
-      VALID_ANOMALY_DETAIL_VIEW
+      PAGE_DETAIL
     );
     vi.spyOn(anomalyDetailClient, 'queryAnomalyRecovery').mockResolvedValue(
-      VALID_ANOMALY_RECOVERY_CONTEXT_VIEW
+      PAGE_RECOVERY
     );
     vi.spyOn(anomalyQueryClient, 'queryImportWarningReferral').mockResolvedValue(
       VALID_IMPORT_WARNING_REFERRAL_VIEW
@@ -224,7 +251,7 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     expect(screen.getByText('BeClass 身分對應待確認')).toBeInTheDocument();
   });
 
-  it('opens Drawer and displays anomaly metadata, root evidence gap, and staff calendar navigation link', async () => {
+  it('opens Drawer and displays anomaly metadata, current details, and staff calendar navigation link', async () => {
     render(<AnomaliesPage />);
 
     await waitFor(() => {
@@ -243,7 +270,7 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
 
     for (const surfaceId of [
       'anomalies.drawer',
-      'anomalies.drawer.root-evidence',
+      'anomalies.drawer.current-details',
       'anomalies.drawer.recovery',
     ]) {
       expect(
@@ -254,15 +281,14 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
       screen.queryByText(VALID_ANOMALY_SUMMARY_1.fingerprint)
     ).not.toBeInTheDocument();
 
-    expect(screen.getByText(/目前是否仍需處理/)).toBeInTheDocument();
+    expect(screen.getAllByText('1200')).not.toHaveLength(0);
     expect(screen.queryByText(/資料版本：|工作流版本：/)).not.toBeInTheDocument();
-    expect(screen.getByText(/目前是否仍需處理：/)).toBeInTheDocument();
-    const rootEvidence = document.querySelector('[data-surface-id="anomalies.drawer.root-evidence"]');
-    expect(rootEvidence).toHaveTextContent('資料版本');
-    expect(rootEvidence).toHaveTextContent('阻擋原因');
-    expect(rootEvidence).not.toHaveTextContent('finance_import_row_identity');
-    expect(rootEvidence).not.toHaveTextContent('private');
-    expect(rootEvidence).not.toHaveTextContent('raw');
+    const currentDetails = document.querySelector('[data-surface-id="anomalies.drawer.current-details"]');
+    expect(currentDetails).toHaveTextContent('金額差異');
+    expect(currentDetails).toHaveTextContent('受影響收付款');
+    expect(currentDetails).not.toHaveTextContent('finance_import_row_identity');
+    expect(currentDetails).not.toHaveTextContent('private');
+    expect(currentDetails).not.toHaveTextContent('raw');
 
     // Check staff calendar navigation link
     const navLink = screen.getByRole('link', { name: /前往排班調度 ➔/ });

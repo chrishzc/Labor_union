@@ -696,7 +696,9 @@ def _assignment_matches(query: dict[str, object], staff_id: int) -> bool:
 def _run_one_durable_job() -> bool:
     from infrastructure.mysql.background_job_repository import BackgroundJobRepository
     from infrastructure.mysql.mysql_adapter import get_connection
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
 
     connection = get_connection()
     try:
@@ -755,13 +757,15 @@ def _ensure_deposit_root(client: TestClient) -> dict[str, object]:
     if not isinstance(rows, list) or len(rows) != 1 or rows[0].get("amount_ntd") != 12000:
         raise RuntimeError("finance_deposit_row_invalid")
     from infrastructure.mysql.mysql_adapter import get_connection
-    from subsystems.anomalies.finance_import_anomaly_consumer import (
+    from subsystems.finance_import.finance_import_anomaly_consumer import (
         consume_finance_import_anomaly_events,
     )
 
     anomaly_connection = get_connection()
     try:
-        projected = consume_finance_import_anomaly_events(anomaly_connection)
+        projected = consume_finance_import_anomaly_events(
+            anomaly_connection, runtime=build_anomaly_runtime()
+        )
     finally:
         anomaly_connection.close()
     if projected.failed_count:

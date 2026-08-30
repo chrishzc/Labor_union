@@ -77,7 +77,28 @@ def discover_fixture_documents(
 
 
 def load_fixtures(directory: Path = DEFAULT_FIXTURE_DIRECTORY) -> list[dict[str, object]]:
-    return [json.loads(path.read_text(encoding="utf-8")) for path in sorted(directory.glob("*.json"))]
+    documents, errors = discover_fixture_documents(directory)
+    if errors:
+        raise ValueError("; ".join(errors))
+    required_a_ids = {
+        str(scenario["scenario_id"])
+        for scenario in load_scenarios()
+        if scenario.get("track") == "A"
+    }
+    selected: dict[str, dict[str, object]] = {}
+    for document in documents:
+        if document.namespace not in {"baseline", PHASE4_NAMESPACE}:
+            continue
+        scenario_id = document.payload.get("scenario_id")
+        if not isinstance(scenario_id, str):
+            continue
+        if document.namespace == PHASE4_NAMESPACE and scenario_id not in required_a_ids:
+            continue
+        # A root fixture is the canonical baseline when a Phase 4 package also
+        # keeps a more specialised browser/runtime fixture for the same case.
+        if scenario_id not in selected or document.namespace == "baseline":
+            selected[scenario_id] = document.payload
+    return [selected[scenario_id] for scenario_id in sorted(selected)]
 
 
 def verify_fixtures(

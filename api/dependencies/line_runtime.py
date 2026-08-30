@@ -15,11 +15,16 @@ from infrastructure.line.redis_wakeup import (
 )
 from infrastructure.line.signature_verifier import LineWebhookSignatureVerifier
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
-from infrastructure.mysql.line_runtime_repository import MySqlLineRuntimeRepository
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.line_runtime_repository import MySqlLineRuntimeRepository
+from api.schemas.line_admin import (
+    LegacyLineTaskCountsView,
+    LineDatabaseHealthView,
+    LineQueueCountsView,
+    LineWorkerHealthView,
+)
 from subsystems.line.runtime_contracts import (
     LineRuntimeMode,
-    LineWebhookSecurityReceipt,
     LineWebhookVerificationOutcome,
 )
 from subsystems.line.runtime_cutover import validate_line_api_runtime
@@ -39,6 +44,8 @@ from subsystems.line.delivery_admin_application import (
 from subsystems.line.rich_menu_application import LineRichMenuApplication
 from subsystems.line.order_group_application import LineOrderGroupQueryApplication
 from subsystems.line.webhook_intake import LineWebhookIntake
+from subsystems.line.runtime_alert_application import LineRuntimeApplication
+from subsystems.line.runtime_health import classify_line_worker_health
 
 
 def line_webhook_runtime_mode() -> LineRuntimeMode:
@@ -94,6 +101,44 @@ def get_line_order_group_query_application() -> LineOrderGroupQueryApplication:
 
 
 @lru_cache(maxsize=1)
+def get_line_runtime_application() -> LineRuntimeApplication:
+    return LineRuntimeApplication(
+        open_line_unit_of_work,
+        lambda unit_of_work: MySqlLineRuntimeRepository(unit_of_work._connection),
+    )
+
+
+def get_line_database_health() -> LineDatabaseHealthView:
+    connection = None
+    try:
+        connection = get_connection()
+        repository = MySqlLineRuntimeRepository(connection)
+        worker = classify_line_worker_health(
+            repository.latest_heartbeat(),
+            stale_after_seconds=float(os.getenv("LINE_WORKER_STALE_SECONDS", "90")),
+        )
+        return LineDatabaseHealthView(
+            ok=repository.database_ready(),
+            line_task_counts=LegacyLineTaskCountsView.model_validate(
+                repository.legacy_task_counts()
+            ),
+            queue_counts=LineQueueCountsView.model_validate(repository.queue_counts()),
+            worker=LineWorkerHealthView.model_validate(worker),
+        )
+    except Exception:
+        return LineDatabaseHealthView(
+            ok=False,
+            line_task_counts=LegacyLineTaskCountsView(),
+            queue_counts=LineQueueCountsView(),
+            worker=LineWorkerHealthView(status="unknown", running=False),
+            error_code="line_database_unavailable",
+        )
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+@lru_cache(maxsize=1)
 def get_line_wakeup_publisher():
     return _wakeup_publisher()
 
@@ -119,24 +164,13 @@ def record_line_webhook_security_receipt(
     event_count: int,
     correlation_id: str,
 ) -> None:
-    receipt = LineWebhookSecurityReceipt(
+    get_line_runtime_application().record_webhook_security_receipt(
         request_fingerprint,
         signature_present,
         outcome,
         event_count,
         correlation_id,
-        datetime.now(timezone.utc),
     )
-    connection = get_connection()
-    try:
-        connection.begin()
-        MySqlLineRuntimeRepository(connection).append_security_receipt(receipt)
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
 
 
 __all__ = [
@@ -147,6 +181,8 @@ __all__ = [
     "get_line_delivery_task_admin_application",
     "get_line_rich_menu_application",
     "get_line_order_group_query_application",
+    "get_line_runtime_application",
+    "get_line_database_health",
     "get_line_webhook_intake",
     "get_line_wakeup_publisher",
     "line_webhook_runtime_mode",

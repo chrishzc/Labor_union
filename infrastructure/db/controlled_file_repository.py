@@ -34,6 +34,7 @@ from subsystems.controlled_files.workflow import (
     StageControlledFile,
 )
 from subsystems.controlled_files.reconciliation import ControlledFileReconciliationEvent
+from subsystems.controlled_files.gc import ControlledFileGcCandidate, ControlledFileGcError
 from subsystems.controlled_files.cleanup import (
     CleanupControlledFileStaging,
     ControlledFileCleanupOutcome,
@@ -317,6 +318,18 @@ class MySqlControlledFileWorkflowRepository:
             cursor.execute(_RECEIPT_ID_SELECT_SQL, (receipt_id,))
             row = cursor.fetchone()
         return None if row is None else _stored_receipt(row).receipt
+
+    def list_staging_gc_candidates(
+        self, *, limit: int, observed_at: datetime
+    ) -> tuple[ControlledFileGcCandidate, ...]:
+        """Fail closed until every reference and active lease is authoritative."""
+        if isinstance(limit, bool) or not 1 <= limit <= 100:
+            raise ValueError("controlled file GC limit must be between 1 and 100")
+        _ = _mysql_utc(observed_at)
+        raise ControlledFileGcError(
+            "controlled_file_gc_reference_authority_not_ready",
+            "附件 reference 與 active lease SSOT 尚未完成，GC 不得推定零 reference／零 lease",
+        )
 
     def append_reconciliation_event(
         self, event: ControlledFileReconciliationEvent

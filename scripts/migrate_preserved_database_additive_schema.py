@@ -20,7 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time as time_module
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -54,6 +54,8 @@ from shared_kernel.migration_release import (
     MigrationReleaseManifest,
     load_migration_release_manifest,
 )
+
+APPLY_CONFIRMATION = "APPLY_PRESERVED_DATABASE_ADDITIVE_SCHEMA"
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +191,10 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_28_service_before_replacement_v1.json",
     "labor_union_2026_08_28_order_lifecycle_pending_status_v1.json",
     "labor_union_2026_08_28_historical_baseline_projector_v2.json",
+    "labor_union_2026_08_30_controlled_file_reference_finalize_leases_v1.json",
+    "labor_union_2026_08_30_current_anomaly_issues_v1.json",
+    "labor_union_2026_08_30_client_hcm_correction_versioning_v1.json",
+    "labor_union_2026_08_30_hcm_resubmission_canonical_review_version_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -791,6 +797,28 @@ def validate_rehearsal_database_names(source: str, candidate: str) -> None:
             )
 
 
+def _require_production_authority_credential_gate(args: argparse.Namespace) -> None:
+    """Formal runs require the reviewed principal and maintenance-window evidence."""
+    if args.rehearsal:
+        return
+    required = (
+        args.source_read_descriptor,
+        args.candidate_write_descriptor,
+        args.source_principal_evidence,
+        args.maintenance_token,
+        args.receipt_directory,
+    )
+    if not all(required):
+        raise UpgradeBlocked(
+            "production credential gate requires source/candidate descriptors, "
+            "source principal evidence, maintenance token, and receipt directory"
+        )
+    if not all(Path(value).expanduser().is_file() for value in required[:-1]):
+        raise UpgradeBlocked(
+            "production credential gate requires existing safety evidence files"
+        )
+
+
 def build_descriptor_runtime(
     source_descriptor_path: Path,
     candidate_descriptor_path: Path,
@@ -1013,8 +1041,12 @@ def server_identity(
     finally:
         connection.close()
     if not row or row.get("db") != database:
-        raise UpgradeBlocked("database connection identity mismatch")
+        raise UpgradeBlocked("connected database does not match the explicit target")
+    if not str(row.get("server") or "").strip():
+        raise UpgradeBlocked("connected MySQL server identity is unavailable")
     connection_config = _database_connection_config(config, database)
+    if not str(connection_config.host).strip():
+        raise UpgradeBlocked("configured host is required for the connected-host check")
     return {
         "database": row["db"],
         "server": str(row["server"]),
@@ -1893,6 +1925,12 @@ def _metadata_state_for_artifact(
         return _order_lifecycle_pending_status_constraint_state(
             snapshot,
             descriptor,
+        )
+    if artifact == "204_scheduling_service_day_logs.sql":
+        return _scheduling_service_day_logs_successor_state(
+            snapshot,
+            descriptor,
+            defer_missing_triggers=defer_missing_triggers,
         )
     return _artifact_metadata_state(
         snapshot,
@@ -4621,6 +4659,84 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         )] = _normalize_sql_contract(
             "before_status IN ('待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消')"
         )
+    if part_name == "1015_controlled_file_reference_finalize_leases.sql":
+        descriptor["parent_columns"]["scheduling_service_day_log_attachments"] = {
+            "provider_media_id": _column_contract("varchar(191)", "YES"),
+            "controlled_file_object_id": _column_contract("bigint unsigned", "YES"),
+        }
+        descriptor["indexes"][(
+            "scheduling_service_day_log_attachments",
+            "uq_scheduling_service_day_log_attachment_controlled_file",
+        )] = {
+            "non_unique": 0,
+            "columns": ("controlled_file_object_id",),
+        }
+        descriptor["foreign_keys"][(
+            "scheduling_service_day_log_attachments",
+            "fk_scheduling_service_day_log_attachment_controlled_file",
+        )] = {
+            "columns": ("controlled_file_object_id",),
+            "referenced_table": "controlled_file_objects",
+            "referenced_columns": ("id",),
+            "update_rule": "RESTRICT",
+            "delete_rule": "RESTRICT",
+        }
+        descriptor["checks"][(
+            "scheduling_service_day_log_attachments",
+            "chk_scheduling_service_day_log_attachment_reference_source",
+        )] = _normalize_sql_contract(
+            "(provider_media_id IS NOT NULL AND controlled_file_object_id IS NULL) "
+            "OR (provider_media_id IS NULL AND controlled_file_object_id IS NOT NULL)"
+        )
+    if part_name == "1017_client_hcm_correction_versioning.sql":
+        descriptor["parent_columns"]["clients"] = {
+            "client_hcm_correction_version": _column_contract(
+                "bigint unsigned", "NO", "0"
+            )
+        }
+    if part_name == "1018_hcm_resubmission_canonical_review_version.sql":
+        descriptor["parent_columns"]["case_import_hcm_correction_events"] = {
+            "prior_occurrence_id": _column_contract("bigint", "YES"),
+            "canonical_review_identity": _column_contract("varchar(191)", "YES"),
+            "expected_review_version": _column_contract("bigint unsigned", "YES"),
+            "resulting_review_version": _column_contract("bigint unsigned", "YES"),
+        }
+        descriptor["indexes"][(
+            "case_import_hcm_correction_events",
+            "uq_hcm_correction_event_review_version",
+        )] = {
+            "non_unique": 0,
+            "columns": ("canonical_review_identity", "resulting_review_version"),
+        }
+        descriptor["indexes"][(
+            "case_import_hcm_correction_events",
+            "idx_hcm_correction_event_canonical_review",
+        )] = {
+            "non_unique": 1,
+            "columns": ("canonical_review_identity", "id"),
+        }
+        descriptor["foreign_keys"][(
+            "case_import_hcm_correction_events",
+            "fk_hcm_correction_event_canonical_review",
+        )] = {
+            "columns": ("canonical_review_identity",),
+            "referenced_table": "case_import_hcm_review_rows",
+            "referenced_columns": ("review_identity",),
+            "update_rule": "RESTRICT",
+            "delete_rule": "RESTRICT",
+        }
+        descriptor["checks"][(
+            "case_import_hcm_correction_events",
+            "chk_hcm_correction_event_review_version",
+        )] = _normalize_sql_contract(
+            "(canonical_review_identity IS NULL "
+            "AND expected_review_version IS NULL "
+            "AND resulting_review_version IS NULL) OR "
+            "(canonical_review_identity IS NOT NULL "
+            "AND CHAR_LENGTH(TRIM(canonical_review_identity)) > 0 "
+            "AND expected_review_version IS NOT NULL "
+            "AND resulting_review_version = expected_review_version + 1)"
+        )
     if part_name == "61_finance_import_reprocessing.sql":
         _remove_retired_reclassification_audit_contract(descriptor)
         descriptor["indexes"][(
@@ -4888,6 +5004,12 @@ def _release_descriptor_metadata_state(
             snapshot,
             canonical,
         )
+    if part_name == "204_scheduling_service_day_logs.sql":
+        return _scheduling_service_day_logs_successor_state(
+            snapshot,
+            canonical,
+            defer_missing_triggers=defer_missing_triggers,
+        )
     state = _artifact_metadata_state(
         snapshot,
         canonical,
@@ -4941,6 +5063,42 @@ def _controlled_file_storage_foundation_state(
         snapshot,
         canonical,
         "1004_controlled_file_storage_foundation.sql",
+        defer_missing_triggers=defer_missing_triggers,
+    )
+
+
+def _scheduling_service_day_logs_successor_state(
+    snapshot: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+    *,
+    defer_missing_triggers: bool,
+) -> str:
+    """Accept part 204 in its exact original or approved 1015 bridge shape."""
+
+    canonical = deepcopy(descriptor)
+    state = _artifact_metadata_state(
+        snapshot,
+        canonical,
+        "204_scheduling_service_day_logs.sql",
+        defer_missing_triggers=defer_missing_triggers,
+    )
+    if state != "drift":
+        return state
+    successor = _canonical_artifact_descriptor(
+        "1015_controlled_file_reference_finalize_leases.sql"
+    )
+    table = "scheduling_service_day_log_attachments"
+    canonical["tables"][table].update(
+        deepcopy(successor["parent_columns"][table])
+    )
+    for kind in ("indexes", "foreign_keys", "checks"):
+        for key, contract in successor[kind].items():
+            if key[0] == table:
+                canonical[kind][key] = deepcopy(contract)
+    return _artifact_metadata_state(
+        snapshot,
+        canonical,
+        "204_scheduling_service_day_logs.sql",
         defer_missing_triggers=defer_missing_triggers,
     )
 
@@ -6151,55 +6309,167 @@ def _rebuild_empty_legacy_knowledge_candidate(
     write_receipt(receipt_path, receipt)
 
 
-def _run_project_python(
-    arguments: list[str],
+def _run_orders_library_step(
+    config: DatabaseConfig | SeparateDatabaseConfig,
+    candidate: str,
+    operation: Callable[[Any], dict[str, Any]],
     *,
-    config: DatabaseConfig,
-    database: str,
+    label: str,
+    commit: bool = False,
 ) -> dict[str, Any]:
-    environment = os.environ.copy()
-    environment.update(
-        {
-            "DB_HOST": config.host,
-            "DB_PORT": str(config.port),
-            "DB_USER": config.user,
-            "DB_PASSWORD": config.password,
-            "DB_DATABASE": database,
-            "PYTHONIOENCODING": "utf-8",
-            "PYTHONUTF8": "1",
-        }
-    )
-    completed = subprocess.run(
-        [sys.executable, *arguments],
-        cwd=str(ROOT),
-        env=environment,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise UpgradeBlocked(
-            f"candidate migration failed: {Path(arguments[0]).name}"
+    """Run one approved Orders migration library step in runner-owned UoW.
+
+    The former implementation launched child CLIs.  That made target
+    confirmation, receipts, and commit ownership invisible to this runner.
+    Library steps now receive the runner's candidate connection; only this
+    composition boundary may commit or rollback it.
+    """
+    connection = config.connect(candidate)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT DATABASE() AS database_name")
+            identity = cursor.fetchone()
+            if not isinstance(identity, Mapping) or identity.get("database_name") != candidate:
+                raise UpgradeBlocked(f"{label} connection is not the explicit candidate")
+        result = operation(connection)
+        if not isinstance(result, dict):
+            raise UpgradeBlocked(f"{label} returned a non-object receipt")
+        if commit:
+            connection.commit()
+        return result
+    except Exception:
+        if commit:
+            connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def _require_orders_step_status(
+    result: Mapping[str, Any],
+    *,
+    label: str,
+    accepted: frozenset[str],
+) -> dict[str, Any]:
+    status = result.get("status")
+    if status not in accepted:
+        raise UpgradeBlocked(f"{label} did not reach an accepted state: {status!r}")
+    return dict(result)
+
+
+def _run_order_control_library_step(
+    connection: Any,
+    *,
+    mode: str,
+    target_database: str,
+    backup_receipt: str | None = None,
+    plan_receipt: str | None = None,
+) -> dict[str, Any]:
+    """Compose the immutable ORD-01 library helpers without its CLI owner.
+
+    ``migrate_order_lifecycle_control_facts.py`` is a published, hash-locked
+    migration artifact and therefore cannot be edited to remove its historical
+    CLI commit.  The canonical runner deliberately calls its pure inspection
+    and write helpers here, retaining this runner as the sole commit owner.
+    """
+    from scripts import migrate_order_lifecycle_control_facts as control_facts
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT DATABASE() AS database_name, @@hostname AS server"
         )
-    try:
-        stdout_text = completed.stdout.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise UpgradeBlocked("candidate migration stdout is not UTF-8") from error
-    last_line = next(
-        (
-            line for line in reversed(stdout_text.splitlines())
-            if line.strip().startswith("{")
-        ),
-        "",
-    )
-    try:
-        payload = json.loads(last_line)
-    except json.JSONDecodeError:
-        payload = {"stdout_sha256": _sha256_bytes(completed.stdout)}
+        identity = cursor.fetchone()
+        if not isinstance(identity, Mapping) or identity.get("database_name") != target_database:
+            raise UpgradeBlocked("order lifecycle control target identity mismatch")
+        schema = control_facts._fetch_schema_snapshot(cursor)
+        control_facts._assert_schema(schema)
+        schema_fingerprint = control_facts._schema_fingerprint(schema)
+        order_count, rows = control_facts._load_orders(
+            cursor, lock=mode == "apply"
+        )
+        bootstrappable, review_required = control_facts.classify_legacy_rows(rows)
+        dataset_fingerprint = control_facts._dataset_fingerprint(
+            bootstrappable, review_required
+        )
+        before_counts = control_facts._control_counts(cursor)
+        plan = None
+        backup = None
+        if mode == "apply":
+            if not backup_receipt or not plan_receipt:
+                raise UpgradeBlocked(
+                    "order lifecycle apply requires backup and prior dry-run plan"
+                )
+            backup = control_facts.validate_backup(
+                backup_receipt, target_database=target_database
+            )
+            plan = control_facts.validate_plan(
+                plan_receipt,
+                target_database=target_database,
+                server=str(identity["server"]),
+            )
+            current_plan_identity = {
+                "orders": order_count,
+                "cancelled": len(rows),
+                "bootstrappable": len(bootstrappable),
+                "review_required": len(review_required),
+                "dataset_fingerprint": dataset_fingerprint,
+                "schema_fingerprint": schema_fingerprint,
+            }
+            for field, value in current_plan_identity.items():
+                if plan.get(field) != value:
+                    raise UpgradeBlocked(f"order lifecycle plan drift: {field}")
+
+        existing_count = 0
+        created_count = 0
+        if mode in {"verify", "apply"}:
+            rows_by_case = {row["case_no"]: row for row in rows}
+            for item in bootstrappable:
+                _event_id, exists = control_facts._assert_existing_identity(
+                    cursor, item
+                )
+                if exists:
+                    existing_count += 1
+                    continue
+                if mode == "verify":
+                    raise UpgradeBlocked(
+                        "missing bootstrap cancellation: " + item["case_no"]
+                    )
+                if int(rows_by_case[item["case_no"]]["lifecycle_version"]) != 0:
+                    raise UpgradeBlocked(
+                        "legacy order has nonzero lifecycle_version: "
+                        + item["case_no"]
+                    )
+                control_facts._insert_bootstrap(cursor, item)
+                created_count += 1
+        after_counts = control_facts._control_counts(cursor)
     return {
-        "exit_code": completed.returncode,
-        "result": payload,
-        "stderr_sha256": _sha256_bytes(completed.stderr),
+        "migration": control_facts.MIGRATION_ID,
+        "mode": mode,
+        "database": identity["database_name"],
+        "server": identity["server"],
+        "orders": order_count,
+        "cancelled": len(rows),
+        "bootstrappable": len(bootstrappable),
+        "review_required": len(review_required),
+        "existing": existing_count,
+        "created": created_count,
+        "dataset_fingerprint": dataset_fingerprint,
+        "schema_fingerprint": schema_fingerprint,
+        "before_counts": before_counts,
+        "after_counts": after_counts,
+        "backup": backup,
+        "plan_receipt": (
+            {
+                "path": str(Path(plan_receipt).expanduser().resolve()),
+                "sha256": _sha256_bytes(_canonical_json(plan)),
+            }
+            if plan is not None and plan_receipt is not None
+            else None
+        ),
+        "rollback": {
+            "strategy": "restore_dump_to_new_database_then_switch",
+            "source_database": target_database,
+        },
     }
 
 
@@ -6268,42 +6538,103 @@ def run_candidate_post_schema(
     )
     receipt["candidate_pre_backfill_dump"] = candidate_backup
     write_receipt(operation_receipt_path, receipt)
-    migration = "scripts/migrate_order_lifecycle_control_facts.py"
-    dry = _run_project_python(
-        [
-            migration, "--dry-run", "--target-database", candidate,
-            "--receipt-path", str(plan),
-        ],
-        config=candidate_config,
-        database=candidate,
+    # These three historical child scripts are library-only.  Their approved
+    # behavior is now composed here, after candidate identity and backup
+    # checks, with this runner owning every connection and commit boundary.
+    from scripts import (
+        migrate_order_contract_identity as contract_identity,
+        migrate_order_details_lifecycle_version_view as lifecycle_view,
     )
-    applied = _run_project_python(
-        [
-            migration, "--apply", "--target-database", candidate,
-            "--backup-receipt", str(backup), "--plan-receipt", str(plan),
-            "--receipt-path", str(backfill_receipt),
-        ],
-        config=candidate_config,
-        database=candidate,
+
+    dry = _run_orders_library_step(
+        candidate_config,
+        candidate,
+        lambda connection: _run_order_control_library_step(
+            connection,
+            mode="dry-run",
+            target_database=candidate,
+        ),
+        label="order lifecycle control dry-run",
     )
-    verified = _run_project_python(
-        [
-            migration, "--verify", "--target-database", candidate,
-            "--receipt-path", str(backfill_receipt),
-        ],
-        config=candidate_config,
-        database=candidate,
+    write_receipt(plan, dry)
+    applied = _run_orders_library_step(
+        candidate_config,
+        candidate,
+        lambda connection: _run_order_control_library_step(
+            connection,
+            mode="apply",
+            target_database=candidate,
+            backup_receipt=str(backup),
+            plan_receipt=str(plan),
+        ),
+        label="order lifecycle control apply",
+        commit=True,
     )
-    contract_migration = "scripts/migrate_order_contract_identity.py"
-    contract_apply = _run_project_python(
-        [contract_migration], config=candidate_config, database=candidate
+    applied["receipt_status"] = "committed_by_canonical_runner"
+    write_receipt(backfill_receipt, applied)
+    verified = _run_orders_library_step(
+        candidate_config,
+        candidate,
+        lambda connection: _run_order_control_library_step(
+            connection,
+            mode="verify",
+            target_database=candidate,
+        ),
+        label="order lifecycle control verify",
     )
-    view_migration = "scripts/migrate_order_details_lifecycle_version_view.py"
-    view_dry = _run_project_python(
-        [view_migration], config=candidate_config, database=candidate
+    write_receipt(artifact_dir / f"{candidate}.backfill.verify.json", verified)
+    if int(verified.get("review_required", -1)) != 0:
+        raise UpgradeBlocked("order lifecycle control backfill has unresolved rows")
+
+    contract_apply = _run_orders_library_step(
+        candidate_config,
+        candidate,
+        contract_identity.migrate,
+        label="order contract identity apply",
+        commit=True,
     )
-    view_apply = _run_project_python(
-        [view_migration, "--apply"], config=candidate_config, database=candidate
+    contract_verify = _run_orders_library_step(
+        candidate_config,
+        candidate,
+        contract_identity.migrate,
+        label="order contract identity verify",
+    )
+    if contract_verify.get("status") not in {"already_retired", "renamed"}:
+        raise UpgradeBlocked("order contract identity verification failed")
+
+    view_dry = _run_orders_library_step(
+        candidate_config,
+        candidate,
+        lambda connection: lifecycle_view.run_migration(connection),
+        label="order details view dry-run",
+    )
+    view_dry = _require_orders_step_status(
+        view_dry,
+        label="order details view dry-run",
+        accepted=frozenset({"ready", "existing"}),
+    )
+    view_apply = _run_orders_library_step(
+        candidate_config,
+        candidate,
+        lambda connection: lifecycle_view.run_migration(connection, apply=True),
+        label="order details view apply",
+        commit=True,
+    )
+    view_apply = _require_orders_step_status(
+        view_apply,
+        label="order details view apply",
+        accepted=frozenset({"applied", "existing"}),
+    )
+    view_verify = _run_orders_library_step(
+        candidate_config,
+        candidate,
+        lambda connection: lifecycle_view.run_migration(connection),
+        label="order details view verify",
+    )
+    view_verify = _require_orders_step_status(
+        view_verify,
+        label="order details view verify",
+        accepted=frozenset({"existing"}),
     )
     receipt.update(
         status="backfilled",
@@ -6317,7 +6648,8 @@ def run_candidate_post_schema(
             "receipt_sha256": _sha256_file(backfill_receipt),
         },
         contract_identity=contract_apply,
-        view={"dry_run": view_dry, "apply": view_apply},
+        contract_identity_verify=contract_verify,
+        view={"dry_run": view_dry, "apply": view_apply, "verify": view_verify},
     )
     write_receipt(operation_receipt_path, receipt)
     return receipt
@@ -7036,7 +7368,7 @@ def _post_restart_validators(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    modes = parser.add_mutually_exclusive_group(required=True)
+    modes = parser.add_mutually_exclusive_group()
     for name in (
         "check", "dry-run", "backup", "restore", "apply", "verify",
         "switch", "rollback-switch", "complete-restart",
@@ -7052,7 +7384,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--maintenance-token")
     parser.add_argument("--receipt-directory")
     parser.add_argument("--plan-receipt")
-    parser.add_argument("--operation-receipt")
+    parser.add_argument(
+        "--operation-receipt", "--receipt-path", dest="operation_receipt",
+        help="terminal operation receipt (required for apply and verification)",
+    )
     parser.add_argument("--source-dump")
     parser.add_argument("--source-backup-receipt")
     parser.add_argument("--switch-receipt")
@@ -7083,6 +7418,7 @@ def _parser() -> argparse.ArgumentParser:
         dest="startup_timeout_seconds", type=int, default=30,
     )
     parser.add_argument("--runtime-evidence-directory")
+    parser.add_argument("--confirm", "--confirm-apply", dest="confirm")
     return parser
 
 
@@ -7123,6 +7459,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise UpgradeBlocked(
                     "source/candidate safety arguments are required"
                 )
+            _require_production_authority_credential_gate(args)
             config = build_descriptor_runtime(
                 Path(args.source_read_descriptor),
                 Path(args.candidate_write_descriptor),
@@ -7130,14 +7467,18 @@ def main(argv: list[str] | None = None) -> int:
                 candidate,
             )
             receipt_directory = Path(args.receipt_directory)
+        mode = "dry-run"
         mode = next(
-            name.replace("_", "-")
-            for name in (
-                "check", "dry_run", "backup", "restore", "apply", "verify",
-                "switch", "rollback_switch", "complete_restart",
-                "recover_interrupted_switch",
-            )
-            if getattr(args, name)
+            (
+                name.replace("_", "-")
+                for name in (
+                    "check", "dry_run", "backup", "restore", "apply", "verify",
+                    "switch", "rollback_switch", "complete_restart",
+                    "recover_interrupted_switch",
+                )
+                if getattr(args, name)
+            ),
+            mode,
         )
         if (
             not args.rehearsal
@@ -7187,6 +7528,10 @@ def main(argv: list[str] | None = None) -> int:
                 mysql_container=args.mysql_container,
             )
         elif mode == "apply":
+            if args.confirm != APPLY_CONFIRMATION:
+                raise UpgradeBlocked(
+                    "--apply requires --confirm " + APPLY_CONFIRMATION
+                )
             if not args.plan_receipt or not args.operation_receipt:
                 raise UpgradeBlocked("apply requires plan and operation receipts")
             result = apply_schema(
@@ -7194,6 +7539,13 @@ def main(argv: list[str] | None = None) -> int:
                 Path(args.operation_receipt),
                 mysql_container=args.mysql_container,
             )
+            if (
+                result.get("status") not in VERIFYABLE_CANDIDATE_STATUSES
+                or not Path(args.operation_receipt).is_file()
+            ):
+                raise UpgradeBlocked(
+                    "apply did not produce a verified terminal receipt"
+                )
         elif mode == "verify":
             if not args.operation_receipt:
                 raise UpgradeBlocked("verify requires operation receipt")

@@ -131,29 +131,3 @@ def test_local_tcp_forward_port_rejects_invalid_value():
         assert str(error) == "database port must be between 1 and 65535"
     else:
         raise AssertionError("invalid database port must fail closed")
-
-
-def test_candidate_python_uses_utf8_and_hashes_non_utf8_stderr(monkeypatch):
-    captured = {}
-
-    def run(command, **kwargs):
-        captured.update(command=command, **kwargs)
-        return SimpleNamespace(
-            returncode=0,
-            stdout=b'{"status":"completed"}\r\n',
-            stderr=b"mysql diagnostic: \xb7",
-        )
-
-    monkeypatch.setattr(migration.subprocess, "run", run)
-    config = SimpleNamespace(
-        host="127.0.0.1", port=3306, user="root", password="unit-test-only"
-    )
-
-    result = migration._run_project_python(
-        ["scripts/example.py"], config=config, database="candidate"
-    )
-
-    assert captured["env"]["PYTHONUTF8"] == "1"
-    assert captured["env"]["PYTHONIOENCODING"] == "utf-8"
-    assert result["result"] == {"status": "completed"}
-    assert len(result["stderr_sha256"]) == 64

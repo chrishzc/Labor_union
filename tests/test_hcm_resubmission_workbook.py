@@ -20,7 +20,7 @@ class _Workflow:
     source: object | None = None
 
     def facts(self, occurrence_identity):
-        assert occurrence_identity == self.facts_value.occurrence_identity
+        assert occurrence_identity == self.facts_value.review_identity
         return self.facts_value
 
     def preview(self, occurrence_identity, source):
@@ -38,7 +38,7 @@ class _Loader:
 
 def _facts():
     return HcmResubmissionFacts(
-        "warning-1", 1, "HCM-FIELD-001", "身分資格", "CASE-1", 5, 7,
+        "hcm-review:1", "HCM-FIELD-001", "服務方式", "CASE-1", 5, 7,
         "prior-source", 2, "a" * 64,
     )
 
@@ -64,9 +64,9 @@ def test_full_valid_workbook_row_derives_only_warning_target(tmp_path):
         workflow, _Loader(pd.DataFrame([_row()])), lambda: set(), _normalizer,
     )
 
-    source = service.preview(str(path), "warning-1")
+    source = service.preview(str(path), "hcm-review:1")
 
-    assert source.target_values == {"clients.identity_status": "一般市民"}
+    assert source.target_values == {"clients.service_type": "連續服務"}
     assert source.source_event_identity.startswith("hcm-resubmission:")
 
 
@@ -79,7 +79,7 @@ def test_resubmission_rejects_wrong_or_multiple_case_rows(tmp_path):
     )
 
     with pytest.raises(ValueError, match="hcm_resubmission_case_row_not_unique"):
-        service.preview(str(path), "warning-1")
+        service.preview(str(path), "hcm-review:1")
 
 
 def test_resubmission_requires_whole_source_row_to_pass_validator(tmp_path):
@@ -91,8 +91,11 @@ def test_resubmission_requires_whole_source_row_to_pass_validator(tmp_path):
     )
 
     with pytest.raises(ValueError, match="hcm_resubmission_workbook_still_invalid"):
-        service.preview(str(path), "warning-1")
+        service.preview(str(path), "hcm-review:1")
 
 
 def _normalizer(row):
-    return {"case_no": row.get("查詢序號(案件編號)"), "identity_status": row.get("身分資格")}
+    return {
+        "case_no": row.get("查詢序號(案件編號)"),
+        "service_type": row.get("服務方式"),
+    }

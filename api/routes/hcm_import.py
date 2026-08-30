@@ -74,19 +74,19 @@ async def apply_hcm_workbook(
 @router.post("/resubmissions/preview", response_model=BaseResponse[HcmResubmissionPreviewView])
 async def preview_hcm_resubmission(
     workbook: UploadFile = File(...),
-    occurrence_identity: str = Form(min_length=1, max_length=191),
+    review_identity: str = Form(min_length=1, max_length=191),
     principal: AdminPrincipal = Depends(require_admin),
     service=Depends(get_hcm_resubmission_workbook_service),
 ):
     del principal
-    return await _run_hcm_resubmission_preview(workbook, occurrence_identity, service)
+    return await _run_hcm_resubmission_preview(workbook, review_identity, service)
 
 
 @router.post("/resubmissions/apply", response_model=BaseResponse[HcmResubmissionReceiptView])
 async def apply_hcm_resubmission(
     workbook: UploadFile = File(...),
-    occurrence_identity: str = Form(min_length=1, max_length=191),
-    expected_occurrence_version: int = Form(ge=1),
+    review_identity: str = Form(min_length=1, max_length=191),
+    expected_review_version: int = Form(ge=0),
     expected_root_fingerprint: str = Form(pattern=r"^[0-9a-f]{64}$"),
     reason: str = Form(min_length=1, max_length=500),
     idempotency_key: _IdempotencyHeader = ...,
@@ -96,8 +96,8 @@ async def apply_hcm_resubmission(
     service=Depends(get_hcm_resubmission_workbook_service),
 ):
     request = HcmResubmissionApplyRequest(
-        occurrence_identity,
-        expected_occurrence_version,
+        review_identity,
+        expected_review_version,
         expected_root_fingerprint,
         preview_fingerprint,
         idempotency_key,
@@ -180,11 +180,11 @@ async def _run_workbook_command(workbook, service, operation: str, arguments=())
             upload_path.unlink(missing_ok=True)
 
 
-async def _run_hcm_resubmission_preview(workbook, occurrence_identity: str, service):
+async def _run_hcm_resubmission_preview(workbook, review_identity: str, service):
     upload_path = None
     try:
         upload_path = await _persist_uploaded_workbook(workbook)
-        result = await run_in_threadpool(service.preview, str(upload_path), occurrence_identity)
+        result = await run_in_threadpool(service.preview, str(upload_path), review_identity)
         return BaseResponse(data=asdict(result), message="HCM 修正版 Preview 已完成")
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": str(error)}) from error

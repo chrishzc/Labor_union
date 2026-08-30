@@ -40,6 +40,20 @@ class MySqlLineRuntimeRepository:
             row = optional_row(cursor.fetchone())
         return None if row is None else _heartbeat(row)
 
+    def database_ready(self) -> bool:
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT 1 AS ok")
+            row = optional_row(cursor.fetchone()) or {"ok": 0}
+        return bool(row["ok"])
+
+    def legacy_task_counts(self) -> dict[str, int]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT status,COUNT(*) AS total FROM line_tasks GROUP BY status"
+            )
+            rows = cursor.fetchall()
+        return {str(row["status"]): int(row["total"]) for row in rows}
+
     def append_security_receipt(self, receipt: LineWebhookSecurityReceipt) -> None:
         with self._connection.cursor() as cursor:
             cursor.execute(

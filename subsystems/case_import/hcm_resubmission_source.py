@@ -18,7 +18,7 @@ from subsystems.case_import.hcm_adapter import (
 _CLIENT_FIELDS = {
     "報名時間(建檔)": "created_at", "IP位址": "ip_address", "姓名": "name",
     "性別": "gender", "行動電話": "phone", "縣市": "city",
-    "身分資格": "identity_status", "預產期/預計服務開始月份": "due_month",
+    "預產期/預計服務開始月份": "due_month",
     "居住型態": "residence_type", "生產方式": "delivery_type", "寶寶資訊": "baby_info",
 }
 
@@ -34,9 +34,13 @@ def hcm_resubmission_target_values(
     if field_path in _CLIENT_FIELDS:
         value = normalized_record.get(_CLIENT_FIELDS[field_path])
         return _exact(expected, {expected[0]: value})
+    kind = normalized_record.get("service_type")
+    if field_path == "服務方式":
+        # HCM's service method is owned by Client. Orders derives its end
+        # date from its own terms/lifecycle facts; never write either here.
+        return _exact(expected, {"clients.service_type": kind})
     start = normalized_record.get("service_start_date")
     days = normalized_record.get("service_days")
-    kind = normalized_record.get("service_type")
     if not isinstance(start, date) or not isinstance(days, int) or not isinstance(kind, str):
         raise ValueError("hcm_resubmission_service_terms_incomplete")
     end = calculate_hcm_service_end_date(start, days, kind, holiday_dates)
@@ -54,8 +58,6 @@ def hcm_resubmission_target_values(
         return _exact(expected, {"orders.start_date": start, "orders.end_date": end})
     if field_path == "希望服務天數":
         return _exact(expected, {"orders.service_days": days, "orders.end_date": end})
-    if field_path == "服務方式":
-        return _exact(expected, {"orders.service_type": kind, "orders.end_date": end})
     raise ValueError("hcm_resubmission_field_not_owned")
 
 

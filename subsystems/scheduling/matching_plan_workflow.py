@@ -4,14 +4,56 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Callable
 
-from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.scheduling.ports import (
+    SegmentedAvailabilityFactsPort,
+    unconfigured_connection_factory,
+)
 from subsystems.scheduling.segmented_availability_query import (
     search_segmented_caregiver_availability,
 )
 
+
+get_connection = unconfigured_connection_factory
+
 _STRICT_YMD = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _run_in_application_uow(operation: Callable[[Any, Any], dict[str, Any]]) -> dict[str, Any]:
+    """Own matching-plan persistence in one Application transaction."""
+    connection = cursor = None
+    cursor_closed = {"closed": False}
+    connection_closed = {"closed": False}
+    unit_of_work = None
+    try:
+        connection = get_connection()
+        unit_of_work = connection
+        cursor = connection.cursor()
+        result = operation(connection, cursor)
+        if result.get("result") != "existing" and result.get("status") != "idempotent_replay":
+            unit_of_work.commit()
+        else:
+            unit_of_work.rollback()
+        return result
+    except Exception:
+        if unit_of_work is not None:
+            try:
+                unit_of_work.rollback()
+            except BaseException:
+                pass
+        raise
+    finally:
+        cursor_error = None
+        connection_error = None
+        if cursor is not None:
+            cursor_error = _safe_close(cursor, cursor_closed)
+        if connection is not None:
+            connection_error = _safe_close(connection, connection_closed)
+        if cursor_error is not None:
+            raise cursor_error
+        if connection_error is not None:
+            raise connection_error
 
 
 def _normalize_case_no(case_no: Any) -> str:
@@ -178,6 +220,8 @@ def create_matching_plan_version(
     segments: Any,
     created_by: Any,
     as_of: Any,
+    *,
+    facts_port: SegmentedAvailabilityFactsPort,
 ) -> dict[str, Any]:
     """Create or reuse a proposed matching plan version for one case.
 
@@ -190,11 +234,15 @@ def create_matching_plan_version(
     as_of_value = _normalize_ymd(as_of, "as_of")
     normalized_segments = _normalize_segments(segments)
 
+    availability_kwargs = {
+        "case_no": case_no_value,
+        "segment_count": len(normalized_segments),
+        "segment_drafts": _as_sql_payload(normalized_segments),
+        "as_of": as_of_value,
+    }
+    availability_kwargs["facts_port"] = facts_port
     availability = search_segmented_caregiver_availability(
-        case_no=case_no_value,
-        segment_count=len(normalized_segments),
-        segment_drafts=_as_sql_payload(normalized_segments),
-        as_of=as_of_value,
+        **availability_kwargs,
     )
 
     complete_combinations = availability.get("complete_combinations")
@@ -218,13 +266,23 @@ def create_matching_plan_version(
     if not matched:
         raise ValueError("submitted segments must match a complete combination")
 
-    connection = None
-    cursor = None
-    cursor_closed = {"closed": False}
-    connection_closed = {"closed": False}
+    return _run_in_application_uow(
+        lambda connection, cursor: _create_matching_plan_version_in_transaction(
+            connection, cursor, case_no_value, normalized_segments, created_by_value,
+            target_signature,
+        )
+    )
+
+
+def _create_matching_plan_version_in_transaction(
+    connection: Any,
+    cursor: Any,
+    case_no_value: str,
+    normalized_segments: list[dict[str, Any]],
+    created_by_value: str,
+    target_signature: tuple[tuple[int, int, str, str], ...],
+) -> dict[str, Any]:
     try:
-        connection = get_connection()
-        cursor = connection.cursor()
         cursor.execute(
             "SELECT o.case_no, o.status, o.start_date, o.end_date\n"
             "FROM orders o\n"
@@ -329,7 +387,6 @@ def create_matching_plan_version(
                 key=lambda item: item["segment_order"],
             )
             if _segments_signature(current_segments) == target_signature:
-                connection.rollback()
                 return {
                     "plan_id": plan["id"],
                     "case_no": plan.get("case_no", case_no_value),
@@ -392,7 +449,6 @@ def create_matching_plan_version(
                 ),
             )
 
-        connection.commit()
         return {
             "plan_id": plan_id,
             "case_no": case_no_value,
@@ -409,19 +465,5 @@ def create_matching_plan_version(
                 for index, segment in enumerate(normalized_segments)
             ],
         }
-    except Exception:
-        if connection is not None:
-            connection.rollback()
-        raise
     finally:
-        cursor_error: BaseException | None = None
-        connection_error: BaseException | None = None
-        if cursor is not None:
-            cursor_error = _safe_close(cursor, cursor_closed)
-        if connection is not None:
-            connection_error = _safe_close(connection, connection_closed)
-        if cursor_error is not None:
-            raise cursor_error
-        if connection_error is not None:
-            raise connection_error
-
+        pass

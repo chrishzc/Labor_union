@@ -127,6 +127,8 @@ from api.routes import (
 
 
 from api.schemas.base import BaseResponse
+from api.schemas.runtime_health import ApiHealthView
+from api.dependencies.admin_auth import get_access_control_connection_factory
 from api.dependencies.line_runtime import line_webhook_runtime_mode
 from infrastructure.runtime.react_admin_artifact import (
     ReactAdminArtifactRuntime,
@@ -350,6 +352,7 @@ async def audit_authenticated_mutations(request: Request, call_next):
         try:
             await asyncio.to_thread(
                 record_admin_audit,
+                connection_factory=get_access_control_connection_factory(),
                 principal=principal,
                 action=getattr(request.state, "audit_action", "api.mutation"),
                 request_path=request.url.path,
@@ -365,10 +368,10 @@ async def audit_authenticated_mutations(request: Request, call_next):
     return response
 
 
-@app.get("/health", response_model=BaseResponse[dict], tags=["Health"])
-def api_health_check():
+@app.get("/health", response_model=BaseResponse[ApiHealthView], tags=["Health"])
+def api_health_check() -> BaseResponse[ApiHealthView]:
     return BaseResponse(
-        data={"status": "healthy", "service": "Labor Union API"},
+        data=ApiHealthView(status="healthy", service="Labor Union API"),
         message="API Server is running normally",
     )
 

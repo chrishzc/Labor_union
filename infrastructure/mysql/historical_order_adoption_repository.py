@@ -74,11 +74,10 @@ class MySqlHistoricalOrderAdoptionRepository:
             )
             return cursor.fetchone()
 
-    def persist(self, request, preview):
+    def persist(self, request, preview, assignment_ids):
         command_fingerprint = _command_fingerprint(request)
         review_identity = self._append_review(request, preview)
         lifecycle_event_id = self._apply_order(request, preview)
-        assignment_ids = self._append_assignments(preview)
         receipt_id = self._append_receipt(
             request,
             preview,
@@ -165,38 +164,6 @@ class MySqlHistoricalOrderAdoptionRepository:
                 ),
             )
             return int(cursor.lastrowid)
-
-    def _append_assignments(self, preview):
-        candidates = [item for item in preview.pairings if item.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE]
-        if not candidates:
-            return []
-        with _cursor(self._connection) as cursor:
-            cursor.execute(
-                "SELECT COALESCE(MAX(assignment_sequence),0) AS last_sequence "
-                "FROM case_staff_assignments WHERE case_no=%s FOR UPDATE",
-                (preview.case_no,),
-            )
-            sequence = int(cursor.fetchone()["last_sequence"])
-            identifiers = []
-            for item in candidates:
-                sequence += 1
-                cursor.execute(
-                    "INSERT INTO case_staff_assignments "
-                    "(case_no,staff_id,assignment_sequence,assigned_start_date,assigned_end_date,"
-                    "original_assigned_start_date,original_assigned_end_date,status) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,'completed')",
-                    (
-                        preview.case_no,
-                        item.staff_id,
-                        sequence,
-                        item.start_date,
-                        item.end_date,
-                        item.start_date,
-                        item.end_date,
-                    ),
-                )
-                identifiers.append(int(cursor.lastrowid))
-            return identifiers
 
     def _append_receipt(self, request, preview, command_fingerprint, event_id, assignment_count, review_identity):
         snapshot = {

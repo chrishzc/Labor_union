@@ -37,17 +37,17 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\line\\domain\\test_line_webhook_domain.py tests\\line\\domain\\test_line_identity_stage4_domain.py tests\\line\\domain\\test_line_identity_review_domain.py tests\\line\\domain\\test_line_delivery_domain.py tests\\line\\domain\\test_line_idempotency_domain.py tests\\line\\subsystems\\test_line_identity_stage4.py tests\\line\\subsystems\\test_line_runtime_stage3.py tests\\line\\infrastructure\\test_line_provider_adapters.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\external-integration\\subsystems\\line\\domain\\test_line_webhook_domain.py tests\\domains\\external-integration\\subsystems\\line\\domain\\test_line_identity_stage4_domain.py tests\\domains\\external-integration\\subsystems\\line\\domain\\test_line_identity_review_domain.py tests\\domains\\external-integration\\subsystems\\line\\domain\\test_line_delivery_domain.py tests\\domains\\external-integration\\subsystems\\line\\domain\\test_line_idempotency_domain.py tests\\domains\\external-integration\\subsystems\\line\\subsystems\\test_line_identity_stage4.py tests\\domains\\external-integration\\subsystems\\line\\subsystems\\test_line_runtime_stage3.py tests\\domains\\external-integration\\subsystems\\line\\infrastructure\\test_line_provider_adapters.py"
     ],
     "test_paths": [
-      "tests/line/domain/test_line_webhook_domain.py",
-      "tests/line/domain/test_line_identity_stage4_domain.py",
-      "tests/line/domain/test_line_identity_review_domain.py",
-      "tests/line/domain/test_line_delivery_domain.py",
-      "tests/line/domain/test_line_idempotency_domain.py",
-      "tests/line/subsystems/test_line_identity_stage4.py",
-      "tests/line/subsystems/test_line_runtime_stage3.py",
-      "tests/line/infrastructure/test_line_provider_adapters.py"
+      "tests/domains/external-integration/subsystems/line/domain/test_line_webhook_domain.py",
+      "tests/domains/external-integration/subsystems/line/domain/test_line_identity_stage4_domain.py",
+      "tests/domains/external-integration/subsystems/line/domain/test_line_identity_review_domain.py",
+      "tests/domains/external-integration/subsystems/line/domain/test_line_delivery_domain.py",
+      "tests/domains/external-integration/subsystems/line/domain/test_line_idempotency_domain.py",
+      "tests/domains/external-integration/subsystems/line/subsystems/test_line_identity_stage4.py",
+      "tests/domains/external-integration/subsystems/line/subsystems/test_line_runtime_stage3.py",
+      "tests/domains/external-integration/subsystems/line/infrastructure/test_line_provider_adapters.py"
     ]
   }
 }

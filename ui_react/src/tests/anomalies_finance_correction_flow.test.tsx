@@ -15,11 +15,29 @@ const fingerprint = 'c'.repeat(64);
 const selectedFingerprint = VALID_ANOMALY_SUMMARY_1.fingerprint;
 const selectedDetail = {
   ...VALID_ANOMALY_DETAIL_VIEW,
-  summary: { ...VALID_ANOMALY_DETAIL_VIEW.summary, fingerprint: selectedFingerprint },
+  summary: {
+    ...VALID_ANOMALY_DETAIL_VIEW.summary,
+    fingerprint: selectedFingerprint,
+    definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+    source_domain: VALID_ANOMALY_SUMMARY_1.source_domain,
+    source_identity: VALID_ANOMALY_SUMMARY_1.source_identity,
+    display_snapshot: {
+      ...VALID_ANOMALY_DETAIL_VIEW.summary.display_snapshot,
+      definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+    },
+  },
 };
 const correctionRecovery = {
   ...VALID_ANOMALY_RECOVERY_CONTEXT_VIEW,
-  fingerprint: selectedFingerprint,
+  definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+  subject: {
+    ...VALID_ANOMALY_RECOVERY_CONTEXT_VIEW.subject,
+    definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+  },
+  details: {
+    ...VALID_ANOMALY_RECOVERY_CONTEXT_VIEW.details,
+    definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+  },
   available_actions: [{
     action_key: 'classify_client_refund_return', label: '處理客戶退款退匯', owning_domain: 'finance_import',
     form_schema_key: 'finance_import.correction.v1', source_binding_keys: ['finance_import_row_identity', 'source_version'],
@@ -65,6 +83,8 @@ async function openAndPreview(classification?: FinanceImportCorrectionSelection[
   fireEvent.click(screen.getByRole('button', { name: /查看處理方式 ➔/ }));
   await waitFor(() => expect(document.querySelector('[data-surface-id="anomalies.finance-correction"]')).not.toBeNull());
   if (classification) fireEvent.change(document.querySelector('[data-control-id="anomalies.finance-correction.classification"]')!, { target: { value: classification } });
+  fireEvent.change(document.querySelector('[data-control-id="anomalies.finance-correction.obligations"]')!, { target: { value: 'obligation:SYNTH-19' } });
+  fireEvent.change(document.querySelector('[data-control-id="anomalies.finance-correction.refund-ledger"]')!, { target: { value: 'ledger-refund:SYNTH-42' } });
   fireEvent.change(document.querySelector('[data-control-id="anomalies.finance-correction.reason"]')!, { target: { value: '核對退匯' } });
   fireEvent.change(document.querySelector('[data-control-id="anomalies.finance-correction.evidence"]')!, { target: { value: 'receipt:42' } });
   fireEvent.click(screen.getByRole('button', { name: '檢查更正影響' }));

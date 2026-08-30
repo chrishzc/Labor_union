@@ -54,6 +54,8 @@ from infrastructure.mysql.hcm_beclass_reconciliation_adapter import (
 from infrastructure.mysql.client_beclass_workbook_import_repository import (
     ClientBeClassWorkbookImportRepository,
 )
+from infrastructure.mysql.beclass_import_review_repository import MySqlBeClassImportReviewRepository
+from subsystems.case_import.beclass_review_intake import record_invalid_beclass_row
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.case_import.client_beclass_workbook_import import (
     ClientBeClassWorkbookConflict,
@@ -164,6 +166,7 @@ def _typed_historical_import(excel_path):
             ClientBeClassWorkbookImportRepository(connection),
             MySqlHcmBeClassReconciliationAdapter(connection),
             lambda: MySqlUnitOfWork(connection),
+            review_recorder=lambda conn, **kwargs: record_invalid_beclass_row(conn, repository=MySqlBeClassImportReviewRepository(conn), **kwargs),
         )
         preview = service.preview(excel_path)
         digest = fingerprint_workbook(excel_path)

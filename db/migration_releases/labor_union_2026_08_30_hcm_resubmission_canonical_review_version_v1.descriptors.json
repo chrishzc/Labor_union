@@ -1,0 +1,32 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-hcm-resubmission-canonical-review-version-2026-08-30-v1",
+  "descriptors": {
+    "1018_hcm_resubmission_canonical_review_version.sql": {
+      "tables": {},
+      "indexes": {
+        "case_import_hcm_correction_events.uq_hcm_correction_event_review_version": {
+          "non_unique": 0,
+          "columns": ["canonical_review_identity", "resulting_review_version"]
+        },
+        "case_import_hcm_correction_events.idx_hcm_correction_event_canonical_review": {
+          "non_unique": 1,
+          "columns": ["canonical_review_identity", "id"]
+        }
+      },
+      "foreign_keys": {
+        "case_import_hcm_correction_events.fk_hcm_correction_event_canonical_review": {
+          "columns": ["canonical_review_identity"],
+          "referenced_table": "case_import_hcm_review_rows",
+          "referenced_columns": ["review_identity"],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "case_import_hcm_correction_events.chk_hcm_correction_event_review_version": "or(and(atom(canonical_review_identityisnull),atom(expected_review_versionisnull),atom(resulting_review_versionisnull)),and(atom(canonical_review_identityisnotnull),atom(char_length(trim(canonical_review_identity))>0),atom(expected_review_versionisnotnull),atom(resulting_review_version=expected_review_version+1)))"
+      },
+      "triggers": []
+    }
+  }
+}

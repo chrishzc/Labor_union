@@ -61,40 +61,36 @@ def test_anomalies_is_unique_in_current_registries_and_review_queue() -> None:
     queue_entries = [entry for entry in _read_queue() if entry.get("entry_id") == ANOMALIES_ENTRY]
     assert len(queue_entries) == 1
     queue_entry = queue_entries[0]
-    assert queue_entry["status"] == "review_required"
+    assert queue_entry["status"] == "active"
+    assert queue_entry["terminal_disposition"] == "active_canonical"
+    assert queue_entry["replacement"] == ANOMALIES_ENTRY
+    assert queue_entry["replacement_readback"] == f"current canonical entry readback: {ANOMALIES_ENTRY}"
     assert queue_entry["streamlit_entry"] == "ui:06_finance_alerts.py"
     assert queue_entry["rollback_deep_link"] == "/?entry=anomalies"
     assert queue_entry["witnesses"] == {
         "nav": "ui_react/src/components/MasterLayout.tsx",
         "render": "ui_react/src/App.tsx",
     }
-    assert set(queue_entry).isdisjoint(
-        {"active", "replacement", "cutover_ready", "cutover-ready"}
+    assert queue_entry["runtime_registration"].startswith(
+        "ui_react/src/components/MasterLayout.tsx::"
     )
 
 
-def test_anomalies_control_plane_target_is_still_streamlit_without_receipts() -> None:
+def test_anomalies_control_plane_keeps_react_identity_metadata() -> None:
     initial_targets = _read_json(INITIAL_TARGETS)
     entries = initial_targets["entries"]
 
     assert isinstance(entries, list)
-    assert len(entries) == 11
+    assert len(entries) == 12
     anomalies_entries = [entry for entry in entries if entry["entry_id"] == ANOMALIES_ENTRY]
     assert len(anomalies_entries) == 1
-    assert anomalies_entries[0] == {
-        "entry_id": ANOMALIES_ENTRY,
-        "replacement_group": "anomalies",
-        "current_target": "streamlit",
-        "streamlit_target": "/?entry=anomalies",
-        "react_target": "/admin/#anomalies",
-        "required_react_artifact": None,
-        "entry_revision": 1,
-    }
-    assert all(entry["current_target"] == "streamlit" for entry in entries)
-    assert initial_targets["receipts"] == []
+    assert len(anomalies_entries) == 1
+    assert anomalies_entries[0]["entry_id"] == ANOMALIES_ENTRY
+    assert anomalies_entries[0]["react_target"] == "/admin/#anomalies"
+    assert anomalies_entries[0]["replacement_group"] == "anomalies"
 
 
-def test_anomalies_sources_keep_mutations_disabled_and_client_get_only() -> None:
+def test_anomalies_sources_use_typed_query_and_recovery_boundaries() -> None:
     app_source = (ROOT / "ui_react/src/App.tsx").read_text(encoding="utf-8")
     nav_source = (ROOT / "ui_react/src/components/MasterLayout.tsx").read_text(encoding="utf-8")
     page_path = ROOT / "ui_react/src/pages/AnomaliesPage.tsx"
@@ -108,16 +104,21 @@ def test_anomalies_sources_keep_mutations_disabled_and_client_get_only() -> None
     )
     assert re.search(r"\{\s*id:\s*'anomalies'\s*,[^}]*section:\s*'audit'\s*\}", nav_source)
 
-    expected_controls = {
-        "anomalies.card.claim": "button",
-        "anomalies.drawer.resolve": "button",
-        "anomalies.warning.transition": "button",
-        "anomalies.drawer.resolve-reason": "textarea",
-    }
-    for control_id, expected_tag in expected_controls.items():
-        tag, attributes = _opening_tag(page_source, control_id)
-        assert tag == expected_tag
-        assert re.search(r"\bdisabled\s*=\s*\{\s*true\s*\}", attributes)
+    for control_id in (
+        "anomalies.card.drawer_open",
+        "anomalies.warning.drawer_open",
+        "anomalies.import-warning.transition.preview",
+        "anomalies.import-warning.transition.apply",
+        "anomalies.finance-correction.preview",
+        "anomalies.finance-correction.apply",
+    ):
+        assert f'data-control-id="{control_id}"' in page_source
+
+    assert "anomalyDetailClient.queryAnomalyDetail" in page_source
+    assert "importWarningTransitionClient.preview" in page_source
+    assert "importWarningTransitionClient.apply" in page_source
+    assert "financeImportCorrectionClient.preview" in page_source
+    assert "financeImportCorrectionClient.apply" in page_source
 
     transport_methods = re.findall(
         r"\btransport\.(get|post|put|patch|delete)\b",

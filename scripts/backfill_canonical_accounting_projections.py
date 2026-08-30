@@ -14,7 +14,9 @@ from datetime import date
 from decimal import Decimal
 import hashlib
 import json
+import os
 from pathlib import Path
+import re
 import sys
 from typing import Any, Iterable
 
@@ -374,23 +376,52 @@ def _write_receipt(path_value: str | None, payload: dict[str, Any]) -> None:
     path.write_text(canonical_json(payload) + "\n", encoding="utf-8", newline="\n")
 
 
-def _read_plan(path_value: str | None) -> dict[str, Any]:
+def _read_plan(
+    path_value: str | None,
+    *,
+    target_database: str,
+    server: str,
+    schema_fingerprint: str,
+) -> dict[str, Any]:
     if not path_value:
         raise ValueError("--apply requires --plan-receipt")
     path = Path(path_value).expanduser().resolve()
     if not path.is_file():
         raise ValueError("plan receipt does not exist")
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        plan = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("dry-run plan receipt is not valid UTF-8 JSON") from exc
+    if not isinstance(plan, dict) or plan.get("mode") != "dry-run":
+        raise ValueError("plan receipt must be produced by a prior dry-run")
+    if plan.get("migration") != MIGRATION_ID:
+        raise ValueError("plan receipt belongs to another migration")
+    if plan.get("database") != target_database or str(plan.get("server")) != str(server):
+        raise ValueError("plan receipt belongs to another migration target")
+    if plan.get("schema_fingerprint") != schema_fingerprint:
+        raise ValueError("schema fingerprint drift detected")
+    if not plan.get("dataset_fingerprint"):
+        raise ValueError("plan receipt is missing dataset fingerprint")
+    return plan
 
 
-def _validate_backup(path_value: str | None) -> str:
+def _validate_backup(path_value: str | None, *, target_database: str | None = None) -> str:
     if not path_value:
         raise ValueError("--apply requires --backup-receipt")
     path = Path(path_value).expanduser().resolve()
     if not path.is_file() or path.stat().st_size <= 0:
         raise ValueError("backup receipt does not exist or is empty")
-    if not _is_native_mysql_dump(path.read_bytes()[: 1_048_576]):
+    header = path.read_bytes()[:1_048_576]
+    if not _is_native_mysql_dump(header):
         raise ValueError("backup receipt is not a MySQL dump")
+    if target_database is not None:
+        markers = (
+            f"Current Database: `{target_database}`".encode(),
+            f"USE `{target_database}`".encode(),
+            f"Database: {target_database}".encode(),
+        )
+        if not any(marker in header for marker in markers):
+            raise ValueError("backup receipt does not identify the target database")
     return str(path)
 
 
@@ -468,6 +499,8 @@ def run_migration(*, mode: str, target_database: str, plan_receipt: str | None =
     configured_database = str(DB_CONFIG.get("database") or "")
     if target_database != configured_database:
         raise ValueError("target database must exactly match configured DB_DATABASE")
+    if not os.getenv("DB_HOST", "").strip():
+        raise ValueError("DB_HOST must be configured explicitly")
     connection = get_connection()
     committed = False
     try:
@@ -476,6 +509,8 @@ def run_migration(*, mode: str, target_database: str, plan_receipt: str | None =
             identity = cursor.fetchone()
             if identity["database_name"] != target_database:
                 raise RuntimeError("connected database does not match --target-database")
+            if not str(identity.get("server") or "").strip():
+                raise RuntimeError("connected MySQL server identity is unavailable")
             schema_fingerprint = _assert_schema(cursor)
             client_items, client_review_keys = build_client_open_obligations(
                 _load_client_rows(cursor, lock=mode == "apply"),
@@ -491,10 +526,18 @@ def run_migration(*, mode: str, target_database: str, plan_receipt: str | None =
             )
             if mode == "apply":
                 _assert_safe_existing_state(cursor, existing_counts)
-                saved_plan = _read_plan(plan_receipt)
+                saved_plan = _read_plan(
+                    plan_receipt,
+                    target_database=target_database,
+                    server=str(identity["server"]),
+                    schema_fingerprint=schema_fingerprint,
+                )
                 if saved_plan.get("dataset_fingerprint") != plan["dataset_fingerprint"]:
                     raise RuntimeError("dry-run plan drift detected")
-                backup_path = _validate_backup(backup_receipt)
+                backup_path = _validate_backup(
+                    backup_receipt,
+                    target_database=target_database,
+                )
                 _apply(cursor, client_items, staff_items)
                 connection.commit()
                 committed = True
@@ -529,7 +572,7 @@ def _verify(cursor, client_items, staff_items) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    modes = parser.add_mutually_exclusive_group(required=True)
+    modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--dry-run", action="store_true")
     modes.add_argument("--apply", action="store_true")
     modes.add_argument("--verify", action="store_true")
@@ -537,8 +580,22 @@ def main() -> int:
     parser.add_argument("--plan-receipt")
     parser.add_argument("--backup-receipt")
     parser.add_argument("--receipt-path")
+    parser.add_argument(
+        "--confirm-apply",
+        help="Exact confirmation required for a write: APPLY <target-database>",
+    )
     args = parser.parse_args()
+    if not re.fullmatch(r"lu_test_[a-z0-9_]+", args.target_database):
+        parser.error("target database must be an explicitly named lu_test_* database")
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        parser.error("production environment is not permitted for this legacy migration CLI")
     mode = "apply" if args.apply else "verify" if args.verify else "dry-run"
+    if args.apply:
+        expected_confirmation = f"APPLY {args.target_database}"
+        if args.confirm_apply != expected_confirmation:
+            parser.error(f"--confirm-apply must exactly equal {expected_confirmation!r}")
+        if not args.receipt_path:
+            parser.error("--apply requires --receipt-path for a terminal receipt")
     receipt = run_migration(mode=mode, target_database=args.target_database, plan_receipt=args.plan_receipt, backup_receipt=args.backup_receipt, receipt_path=args.receipt_path)
     print(canonical_json({key: receipt.get(key) for key in ("mode", "receipt_status", "dataset_fingerprint", "database")}))
     return 0

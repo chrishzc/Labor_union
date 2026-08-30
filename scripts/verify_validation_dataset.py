@@ -19,6 +19,11 @@ from subsystems.validation_dataset.inspection import (
     FOUNDATION_DATASET_ID,
     inspect_dataset,
 )
+from infrastructure.mysql.order_contract_completion_repository import (
+    MySqlOrderContractCompletionRepository,
+)
+from shared_kernel.clock import SystemBusinessClock
+from subsystems.orders.contract_completion_workflow import ContractCompletionWorkflow
 
 
 _DATABASE_PATTERN = re.compile(r"lu_test_dataset_[a-z0-9_]+")
@@ -29,12 +34,21 @@ def verify_dataset(arguments) -> dict[str, object]:
         raise ValueError("database must match lu_test_dataset_[a-z0-9_]+")
     connection = pymysql.connect(host=arguments.host, port=arguments.port, user=arguments.user, password=arguments.password, database=arguments.database, charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor)
     try:
-        inspection = inspect_dataset(connection, arguments.dataset_id)
+        workflow = ContractCompletionWorkflow(
+            MySqlOrderContractCompletionRepository(connection),
+            _query_only_unit_of_work,
+            SystemBusinessClock(),
+        )
+        inspection = inspect_dataset(connection, workflow.query, arguments.dataset_id)
     finally:
         connection.close()
     payload = inspection.payload()
     payload["valid"] = inspection.verdict in {"pass", "blocked_as_expected"}
     return payload
+
+
+def _query_only_unit_of_work():
+    raise RuntimeError("validation inspection query must not open a unit of work")
 
 
 def main() -> int:

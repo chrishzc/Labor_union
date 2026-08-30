@@ -9,7 +9,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Mapping
+import hashlib
+import hmac
+import json
+import math
+from typing import Any, Mapping
 
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.validation import (
@@ -18,6 +22,138 @@ from shared_kernel.validation import (
 )
 
 _IDENTITY_MAXIMUM_LENGTH = 191
+_ISSUE_KEY_PREFIX = "ci_"
+_ISSUE_KEY_VERSION = 1
+
+# The subject object is closed per definition.  A detector with no entry here
+# must not fall back to a generic anomaly row.
+CURRENT_ISSUE_SUBJECT_FIELDS: dict[str, tuple[str, ...]] = {
+    "BECLASS-001": ("case_no",),
+    "GOVSUB-001": ("bank_fact_identity",),
+    "GOVSUB-002": ("bank_fact_identity", "batch_id"),
+    "GOVSUB-003": ("batch_id", "integrity_revision"),
+    "GOVSUB-004": ("reversal_bank_fact_identity", "source_receipt_id"),
+    "GOVSUB-005": ("assignment_id", "batch_id", "claim_item_id"),
+    "GOVSUB-007": ("payable_identity",),
+    "IMPORT-003": ("entity_kind", "review_item_id"),
+    "IMPORT-006": ("batch_id",),
+    "LINE-004": ("subject_type", "line_user_id"),
+    "LINE-006": ("case_no", "notification_reason"),
+    "PAYOUT-002": ("obligation_identity", "source_event_identity"),
+    "SCHEDULE-002": ("assignment_id",),
+    "SCHEDULE-003": ("assignment_id_a", "assignment_id_b"),
+    "SCHEDULE-006": ("case_no", "generation"),
+}
+
+
+def canonical_subject_identity_for_code(
+    definition_code: str, subject_identity: Mapping[str, Any]
+) -> str:
+    """Validate and serialize a definition's closed subject object."""
+
+    try:
+        expected = CURRENT_ISSUE_SUBJECT_FIELDS[definition_code]
+    except KeyError as error:
+        raise ValueError("anomaly subject schema is unavailable") from error
+    if set(subject_identity) != set(expected):
+        raise ValueError("anomaly subject identity fields are not closed")
+    if definition_code == "SCHEDULE-003":
+        left = subject_identity["assignment_id_a"]
+        right = subject_identity["assignment_id_b"]
+        if not isinstance(left, str) or not isinstance(right, str) or left >= right:
+            raise ValueError("SCHEDULE-003 assignment identity is not canonical")
+    return canonical_subject_identity(subject_identity)
+
+
+def build_owner_lock_key(
+    owner_domain: str, owner_root_type: str, canonical_owner_root_id: str
+) -> str:
+    """Build the deterministic lock identity shared by all codes on one root."""
+
+    values = (
+        (owner_domain, "owner domain"),
+        (owner_root_type, "owner root type"),
+        (canonical_owner_root_id, "owner root id"),
+    )
+    for value, field_name in values:
+        require_canonical_text(value, field_name, _IDENTITY_MAXIMUM_LENGTH)
+    return ":".join(value for value, _ in values)
+
+
+def canonical_subject_identity(subject_identity: Mapping[str, Any]) -> str:
+    """Return the closed subject object in its stable UTF-8 JSON form.
+
+    This is intentionally independent of the database collation.  The object
+    is validated here, before an issue key is derived or persisted.
+    """
+
+    if not isinstance(subject_identity, Mapping):
+        raise TypeError("subject identity must be a mapping")
+    value = dict(subject_identity)
+    _validate_json_object(value)
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+def build_issue_key(
+    secret: str | bytes,
+    definition_code: str,
+    subject_identity: Mapping[str, Any],
+) -> str:
+    """Derive the opaque current issue identity using the injected secret."""
+
+    require_canonical_text(definition_code, "definition code", _IDENTITY_MAXIMUM_LENGTH)
+    if isinstance(secret, str):
+        secret_bytes = secret.encode("utf-8")
+    elif isinstance(secret, bytes):
+        secret_bytes = secret
+    else:
+        raise TypeError("issue identity secret must be text or bytes")
+    if not secret_bytes:
+        raise ValueError("issue identity secret is required")
+    canonical = canonical_subject_identity_for_code(definition_code, subject_identity)
+    payload = json.dumps(
+        {
+            "v": _ISSUE_KEY_VERSION,
+            "definition_code": definition_code,
+            "subject_identity": json.loads(canonical),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    digest = hmac.new(secret_bytes, payload, hashlib.sha256).hexdigest()
+    return _ISSUE_KEY_PREFIX + digest
+
+
+def _validate_json_object(value: Mapping[str, Any]) -> None:
+    for key, item in value.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError("subject identity keys must be non-empty text")
+        _validate_json_value(item)
+
+
+def _validate_json_value(value: Any) -> None:
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("subject identity contains a non-finite number")
+        return
+    if isinstance(value, list):
+        for item in value:
+            _validate_json_value(item)
+        return
+    if isinstance(value, dict):
+        _validate_json_object(value)
+        return
+    raise TypeError("subject identity contains a non-JSON value")
 
 
 def _sorted_unique(values: tuple[str, ...], field_name: str) -> tuple[str, ...]:
@@ -46,6 +182,7 @@ class CurrentIssueCandidate:
     severity: str
     blocking: bool
     details: Mapping[str, object]
+    subject_identity: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         for value, field_name in (
@@ -63,6 +200,17 @@ class CurrentIssueCandidate:
             raise TypeError("blocking must be boolean")
         if not isinstance(self.details, Mapping):
             raise TypeError("current issue details must be a mapping")
+        if self.subject_identity is not None:
+            canonical_subject_identity_for_code(self.definition_code, self.subject_identity)
+
+    @property
+    def canonical_subject_identity(self) -> str:
+        """Return the persisted identity, with a compatibility fallback."""
+
+        identity = self.subject_identity
+        if identity is None:
+            identity = {"subject_id": self.subject_id}
+        return canonical_subject_identity(identity)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +220,8 @@ class CurrentIssueProjection:
     candidate: CurrentIssueCandidate
     episode_started_at: datetime
     last_verified_at: datetime
+    owner_snapshot_token: str = ""
+    details_version: int = 1
 
     def __post_init__(self) -> None:
         if not isinstance(self.candidate, CurrentIssueCandidate):
@@ -80,6 +230,14 @@ class CurrentIssueProjection:
             raise ValueError("current issue timestamps must be timezone-aware")
         if self.last_verified_at < self.episode_started_at:
             raise ValueError("last verified time cannot precede episode start")
+        if self.owner_snapshot_token:
+            require_canonical_text(
+                self.owner_snapshot_token,
+                "owner snapshot token",
+                _IDENTITY_MAXIMUM_LENGTH,
+            )
+        if self.details_version != 1:
+            raise ValueError("unsupported current issue details version")
 
     @property
     def issue_key(self) -> str:
@@ -174,6 +332,11 @@ def validate_candidate_set(
 
 
 __all__ = [
+    "build_issue_key",
+    "build_owner_lock_key",
+    "canonical_subject_identity",
+    "canonical_subject_identity_for_code",
+    "CURRENT_ISSUE_SUBJECT_FIELDS",
     "CurrentIssueCandidate",
     "CurrentIssueProjection",
     "OwnerSnapshot",

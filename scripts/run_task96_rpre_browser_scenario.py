@@ -10,6 +10,7 @@ import os
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
+import re
 import sys
 
 from fastapi.testclient import TestClient
@@ -51,8 +52,10 @@ SCENARIO = "R-02"
 
 def _configured_database() -> str:
     database = os.getenv("DB_DATABASE", "").strip()
-    if not database.startswith("lu_test_"):
+    if not re.fullmatch(r"lu_test_[a-z0-9_]+", database):
         raise RuntimeError("task96_rpre_browser_database_must_be_lu_test")
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        raise RuntimeError("task96_rpre_browser_requires_development_validation_profile")
     return database
 
 

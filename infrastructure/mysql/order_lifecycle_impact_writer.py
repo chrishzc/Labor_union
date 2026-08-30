@@ -21,6 +21,23 @@ def persist_order_lifecycle_impact(cursor, command) -> int:
     return lifecycle_event_id
 
 
+def persist_order_lifecycle_projection(cursor, command) -> None:
+    """Apply the typed lifecycle status projection through the Orders boundary."""
+    lifecycle = command.candidate
+    cursor.execute(
+        _ORDER_PROJECTION_UPDATE_SQL,
+        (
+            lifecycle.after_status.value,
+            lifecycle.actual_end_date,
+            command.resulting_order_version,
+            lifecycle.case_no,
+            command.expected_order_version,
+        ),
+    )
+    if cursor.rowcount != 1:
+        raise RuntimeError("order_version_conflict")
+
+
 def _append_lifecycle_event(cursor, command):
     cursor.execute(
         _LIFECYCLE_EVENT_INSERT_SQL,
@@ -124,4 +141,9 @@ _LIFECYCLE_EVENT_INSERT_SQL = (
     "(case_no,trigger_event,before_status,after_status,actor,business_date,"
     "expected_version,idempotency_key,facts_snapshot) "
     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+)
+
+_ORDER_PROJECTION_UPDATE_SQL = (
+    "UPDATE orders SET status=%s,actual_end_date=%s,lifecycle_version=%s "
+    "WHERE case_no=%s AND lifecycle_version=%s"
 )

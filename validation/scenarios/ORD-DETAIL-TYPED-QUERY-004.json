@@ -37,11 +37,11 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_order_detail_query.py tests\\test_order_detail_query_repository.py tests\\test_order_detail_ui_client_boundary.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_detail_query.py tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_detail_query_repository.py tests\\test_order_detail_ui_client_boundary.py"
     ],
     "test_paths": [
-      "tests/test_order_detail_query.py",
-      "tests/test_order_detail_query_repository.py",
+      "tests/domains/orders/subsystems/orders/integration/test_order_detail_query.py",
+      "tests/domains/orders/subsystems/orders/integration/test_order_detail_query_repository.py",
       "tests/test_order_detail_ui_client_boundary.py"
     ]
   }

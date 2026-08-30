@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from api.schemas.line_admin import LineAdminHealthView
 from subsystems.access.authentication_session import AdminPrincipal
 from ui.api_clients.knowledge_retrieval_api_client import KnowledgeRetrievalApiClient
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
@@ -123,6 +124,54 @@ def test_line_task_query_uses_only_safe_source_filters() -> None:
     assert "user_id" not in rich_menu
     assert "task_type" not in rich_menu
     assert "onboarding_only" not in onboarding
+
+
+def test_line_health_client_returns_a_typed_projection(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ui.api_clients.line_api_client.requests.request",
+        lambda *args, **kwargs: _Response(
+            200,
+            {
+                "data": {
+                    "status": "degraded",
+                    "database": {
+                        "ok": False,
+                        "line_task_counts": {},
+                        "queue_counts": {},
+                        "worker": {"status": "unknown", "running": False},
+                        "error_code": "line_database_unavailable",
+                    },
+                    "worker": {"status": "unknown", "running": False},
+                    "line_credentials": {
+                        "channel_secret": False,
+                        "channel_access_token": False,
+                        "liff_id": False,
+                    },
+                }
+            },
+        ),
+    )
+
+    result = LineAdminApiClient().health("session-token")
+
+    assert isinstance(result, LineAdminHealthView)
+    assert result.database.error_code == "line_database_unavailable"
+
+
+def test_line_health_client_fails_closed_on_schema_drift(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ui.api_clients.line_api_client.requests.request",
+        lambda *args, **kwargs: _Response(
+            200,
+            {"data": {"status": "healthy", "unexpected": True}},
+        ),
+    )
+
+    with pytest.raises(LineAdminApiError) as captured:
+        LineAdminApiClient().health("session-token")
+
+    assert captured.value.category == "schema"
+    assert captured.value.code == "line_admin_health_response_invalid"
 
 
 def test_rich_menu_client_reads_and_writes_canonical_configuration(monkeypatch) -> None:

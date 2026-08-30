@@ -4,6 +4,7 @@ Description: 組合 Orders historical workbook coordinator、repository 與單�
 """
 
 from infrastructure.mysql.historical_order_adoption_repository import MySqlHistoricalOrderAdoptionRepository
+from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
 from infrastructure.mysql.historical_order_workbook_import_repository import HistoricalOrderWorkbookImportRepository
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
@@ -25,6 +26,7 @@ def get_historical_order_workbook_import_service():
         workflow = HistoricalOrderAdoptionWorkflow(
             MySqlHistoricalOrderAdoptionRepository(connection),
             lambda: MySqlUnitOfWork(connection),
+            MySqlHistoricalAssignmentWriter(connection),
         )
         yield HistoricalOrderWorkbookImportService(
             HistoricalOrderWorkbookImportRepository(connection),

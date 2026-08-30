@@ -20,9 +20,7 @@ SOURCE_ROOTS = (
 )
 ENTRY_MODULES = frozenset({"api.main", "ui.app", "line.setup_rich_menus"})
 ENTRY_PREFIXES = ("api.routes.", "ui.pages.", "scripts.")
-APPROVED_UNCALLED_LEGACY_MODULES = frozenset({
-    "subsystems.scheduling.staff_leave_review_service",
-})
+APPROVED_UNCALLED_LEGACY_MODULES = frozenset()
 
 
 def test_every_non_entry_production_module_has_a_static_caller() -> None:

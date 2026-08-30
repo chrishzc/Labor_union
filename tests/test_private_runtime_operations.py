@@ -17,7 +17,9 @@ from fastapi.testclient import TestClient
 from api.dependencies import internal_service_auth
 from api.dependencies import private_operations as private_operation_dependencies
 from api.dependencies.line_worker_operation import _heartbeat_from_caller
-from api.schemas.private_operations import MonitorCycleRequest, WorkerRuntimeIdentity
+from api.schemas.base import BaseResponse
+from api.schemas.private_operations import WorkerRuntimeIdentity
+from api.schemas.runtime_health import PrivateRuntimeCheckView
 from api.routes import private_operations
 from infrastructure.http.private_operations_client import (
     PrivateOperationError,
@@ -26,6 +28,12 @@ from infrastructure.http.private_operations_client import (
 )
 import infrastructure.http.private_operations_client as private_operations_client
 from subsystems.line.runtime_contracts import LineRuntimeMode, LineWorkerHeartbeat
+from subsystems.line.runtime_monitoring import RuntimeHealthObservation, RuntimeHealthStatus
+from subsystems.line.runtime_alert_application import (
+    RuntimeHeartbeatApplication,
+    RuntimeMonitoringApplication,
+)
+import subsystems.line.runtime_monitoring_application as runtime_monitoring_application
 
 
 LOCAL_KEY = "local-test-key-that-is-longer-than-thirty-two-characters"
@@ -77,6 +85,15 @@ def test_private_endpoint_accepts_local_service_key(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["data"] == {"status": "ready", "service": "test-worker"}
+
+    response_models = {
+        route.path: route.response_model
+        for route in private_operations.router.routes
+        if getattr(route, "response_model", None) is not None
+    }
+    assert response_models["/internal/v1/runtime/check"] == BaseResponse[
+        PrivateRuntimeCheckView
+    ]
 
 
 def test_production_rejects_local_shared_key(monkeypatch) -> None:
@@ -259,12 +276,9 @@ def test_durable_endpoint_delegates_one_complete_cycle(monkeypatch) -> None:
     assert runtime.hostname == "worker-host"
 
 
-def test_durable_composition_gives_worker_transaction_owner_then_commits_heartbeat(monkeypatch) -> None:
+def test_durable_composition_delegates_heartbeat_to_typed_application_after_worker(monkeypatch) -> None:
     calls = []
     connection = SimpleNamespace(
-        begin=lambda: calls.append("heartbeat-begin"),
-        commit=lambda: calls.append("heartbeat-commit"),
-        rollback=lambda: calls.append("heartbeat-rollback"),
         close=lambda: calls.append("close"),
     )
 
@@ -285,6 +299,17 @@ def test_durable_composition_gives_worker_transaction_owner_then_commits_heartbe
             calls.append("worker-terminal-committed")
             return True
 
+    class HeartbeatApplication:
+        def record(self, runtime_identity, processed):
+            calls.append(
+                (
+                    "heartbeat-application",
+                    runtime_identity.service_name,
+                    runtime_identity.process_id,
+                    processed,
+                )
+            )
+
     identity = WorkerRuntimeIdentity.model_validate(_runtime_identity())
     monkeypatch.setattr(private_operation_dependencies, "get_connection", lambda: connection)
     monkeypatch.setattr(private_operation_dependencies, "BackgroundJobRepository", Repository)
@@ -292,10 +317,8 @@ def test_durable_composition_gives_worker_transaction_owner_then_commits_heartbe
     monkeypatch.setattr(private_operation_dependencies, "default_job_handlers", lambda: {})
     monkeypatch.setattr(
         private_operation_dependencies,
-        "write_runtime_heartbeat",
-        lambda active_connection, _identity, processed: calls.append(
-            ("heartbeat-write", active_connection is connection, processed)
-        ),
+        "get_runtime_heartbeat_application",
+        lambda: HeartbeatApplication(),
     )
 
     assert private_operation_dependencies.run_durable_job_cycle(
@@ -304,54 +327,100 @@ def test_durable_composition_gives_worker_transaction_owner_then_commits_heartbe
     assert calls == [
         "schema",
         "worker-terminal-committed",
-        "heartbeat-begin",
-        ("heartbeat-write", True, 1),
-        "heartbeat-commit",
+        ("heartbeat-application", "durable-job-worker", 321, 1),
         "close",
     ]
 
 
-def test_durable_heartbeat_failure_rolls_back_only_heartbeat_after_terminal(monkeypatch) -> None:
+def test_runtime_heartbeat_application_commits_after_repository_write() -> None:
     calls = []
-    connection = SimpleNamespace(
-        begin=lambda: calls.append("heartbeat-begin"),
-        commit=lambda: calls.append("heartbeat-commit"),
-        rollback=lambda: calls.append("heartbeat-rollback"),
-        close=lambda: calls.append("close"),
-    )
-    repository = SimpleNamespace(assert_durable_queue_schema=lambda: calls.append("schema"))
-
-    class Worker:
-        def __init__(self, *_args):
-            pass
-
-        def recover_and_run_once(self):
-            calls.append("worker-terminal-committed")
-            return True
-
     identity = WorkerRuntimeIdentity.model_validate(_runtime_identity())
-    monkeypatch.setattr(private_operation_dependencies, "get_connection", lambda: connection)
-    monkeypatch.setattr(private_operation_dependencies, "BackgroundJobRepository", lambda _: repository)
-    monkeypatch.setattr(private_operation_dependencies, "DurableJobWorker", Worker)
-    monkeypatch.setattr(private_operation_dependencies, "default_job_handlers", lambda: {})
 
-    def fail_heartbeat(*_args):
-        calls.append("heartbeat-write-failed")
-        raise RuntimeError("heartbeat unavailable")
+    class UnitOfWork:
+        def __enter__(self):
+            calls.append("uow-enter")
+            return self
 
-    monkeypatch.setattr(private_operation_dependencies, "write_runtime_heartbeat", fail_heartbeat)
+        def __exit__(self, exception_type, _exception, _traceback):
+            calls.append("uow-exit")
+            return False
+
+        def commit(self):
+            calls.append("uow-commit")
+
+    class Repository:
+        def record_heartbeat(self, *args):
+            calls.append(
+                (
+                    "heartbeat-write",
+                    args[0],
+                    args[1],
+                    args[2],
+                    args[3],
+                    args[4],
+                    args[5],
+                )
+            )
+
+    application = RuntimeHeartbeatApplication(
+        lambda: UnitOfWork(),
+        lambda _unit_of_work: Repository(),
+    )
+
+    application.record(identity, 1)
+
+    assert calls[0] == "uow-enter"
+    assert calls[1][:6] == (
+        "heartbeat-write",
+        "durable-job-worker",
+        "durable-job-worker:instance-1",
+        321,
+        "worker-host",
+        "running",
+    )
+    assert calls[1][6] == {
+        "processed_last_cycle": 1,
+        "release_version": "test-release",
+        "caller_started_at": identity.started_at.isoformat(),
+    }
+    assert calls[2:] == ["uow-commit", "uow-exit"]
+
+
+def test_runtime_heartbeat_application_rolls_back_on_repository_failure() -> None:
+    calls = []
+
+    class UnitOfWork:
+        def __enter__(self):
+            calls.append("uow-enter")
+            return self
+
+        def __exit__(self, exception_type, _exception, _traceback):
+            if exception_type is not None:
+                calls.append("uow-rollback")
+            calls.append("uow-exit")
+            return False
+
+        def commit(self):
+            calls.append("uow-commit")
+
+    class Repository:
+        def record_heartbeat(self, *_args):
+            calls.append("heartbeat-write-failed")
+            raise RuntimeError("heartbeat unavailable")
+
+    application = RuntimeHeartbeatApplication(
+        lambda: UnitOfWork(),
+        lambda _unit_of_work: Repository(),
+    )
 
     with pytest.raises(RuntimeError, match="heartbeat unavailable"):
-        private_operation_dependencies.run_durable_job_cycle(
-            "worker-1", 60, 15, identity, check_only=False
-        )
+        application.record(WorkerRuntimeIdentity.model_validate(_runtime_identity()), 1)
+
     assert calls == [
-        "schema",
-        "worker-terminal-committed",
-        "heartbeat-begin",
+        "uow-enter",
         "heartbeat-write-failed",
-        "heartbeat-rollback",
-        "close",
+        "uow-rollback",
+        "uow-exit",
     ]
 
 
@@ -626,54 +695,97 @@ def test_monitor_does_not_probe_api_internal_redis_or_storage() -> None:
     project_root = Path(__file__).resolve().parents[1]
     monitor_source = (project_root / "scripts/run_service_monitor.py").read_text(encoding="utf-8")
     api_source = (project_root / "api/dependencies/private_operations.py").read_text(encoding="utf-8")
+    application_source = (
+        project_root / "subsystems/line/runtime_monitoring_application.py"
+    ).read_text(encoding="utf-8")
 
     assert "REDIS_URL" not in monitor_source
     assert "MEDIA_STORAGE_ROOT" not in monitor_source
-    assert "REDIS_URL" in api_source
-    assert "MEDIA_STORAGE_ROOT" in api_source
+    assert "REDIS_URL" not in api_source
+    assert "MEDIA_STORAGE_ROOT" not in api_source
+    assert "REDIS_URL" in application_source
+    assert "MEDIA_STORAGE_ROOT" in application_source
 
 
-# Kept cohesive so the full transaction call order remains visible in one regression.
-def test_monitor_cycle_reuses_canonical_heartbeat_writer(monkeypatch) -> None:
+def test_runtime_monitoring_application_commits_heartbeat_and_observations_in_order(
+    monkeypatch,
+) -> None:
     calls = []
-    connection = SimpleNamespace(
-        begin=lambda: calls.append("begin"),
-        commit=lambda: calls.append("commit"),
-        rollback=lambda: calls.append("rollback"),
-        close=lambda: calls.append("close"),
-    )
-    monkeypatch.setattr(private_operation_dependencies, "get_connection", lambda: connection)
+    identity = WorkerRuntimeIdentity.model_validate(_runtime_identity("runtime-monitor"))
+
+    class RuntimeRepository:
+        def record_heartbeat(self, *args):
+            calls.append(("heartbeat", args[0], args[1], args[2], args[3], args[4]))
+
+        def record_observation(self, observation):
+            calls.append(("observation", observation.check_name))
+            return None
+
+    class UnitOfWork:
+        runtime_monitor = RuntimeRepository()
+
+        def __enter__(self):
+            calls.append("uow-enter")
+            return self
+
+        def __exit__(self, exception_type, _exception, _traceback):
+            calls.append("uow-exit")
+            return False
+
+        def commit(self):
+            calls.append("uow-commit")
+
+    def application_check(name):
+        def build(now):
+            calls.append(name)
+            return RuntimeHealthObservation(
+                name,
+                name,
+                RuntimeHealthStatus.UNKNOWN,
+                name,
+                {},
+                now,
+            )
+
+        return build
+
     monkeypatch.setattr(
-        private_operation_dependencies,
-        "write_runtime_heartbeat",
-        lambda active_connection, identity, processed: calls.append(
-            (active_connection, identity.service_name, processed)
-        ),
+        runtime_monitoring_application,
+        "_redis_observation",
+        application_check("redis"),
     )
     monkeypatch.setattr(
-        private_operation_dependencies,
-        "MySqlRuntimeMonitorRepository",
-        lambda _connection: object(),
+        runtime_monitoring_application,
+        "_media_storage_observation",
+        application_check("media-storage"),
     )
-    monkeypatch.setattr(private_operation_dependencies, "_redis_observation", lambda _now: object())
-    monkeypatch.setattr(private_operation_dependencies, "_media_storage_observation", lambda _now: object())
-    monkeypatch.setattr(private_operation_dependencies, "_database_observations", lambda *_args: [])
-    monkeypatch.setattr(private_operation_dependencies, "_record_observations", lambda *_args: 0)
-    request = MonitorCycleRequest(
-        runtime_identity=WorkerRuntimeIdentity.model_validate(
-            _runtime_identity("runtime-monitor")
-        ),
-        observations=(),
+    monkeypatch.setattr(
+        runtime_monitoring_application,
+        "_database_observations",
+        lambda *_args: [],
+    )
+    application = RuntimeMonitoringApplication(
+        lambda: UnitOfWork(),
+        lambda _unit_of_work: calls.append("line-repository") or object(),
+        lambda _unit_of_work: calls.append("delivery-repository") or object(),
+        lambda _unit_of_work: calls.append("connection") or object(),
     )
 
-    result = private_operation_dependencies.record_monitor_cycle(request)
+    result = application.record_cycle(identity, ())
 
     assert result == (2, 0)
     assert calls == [
-        "begin",
-        (connection, "runtime-monitor", 0),
-        "commit",
-        "close",
+        "uow-enter",
+        "connection",
+        "redis",
+        "media-storage",
+        ("heartbeat", "runtime-monitor", "runtime-monitor:instance-1", 321, "worker-host", "running"),
+        "line-repository",
+        "delivery-repository",
+        ("observation", "redis"),
+        ("observation", "media-storage"),
+        "uow-commit",
+        "uow-exit",
     ]
 
 
@@ -681,7 +793,7 @@ def test_api_media_readiness_does_not_create_missing_storage(monkeypatch, tmp_pa
     missing_storage = tmp_path / "missing-media"
     monkeypatch.setenv("MEDIA_STORAGE_ROOT", str(missing_storage))
 
-    observation = private_operation_dependencies._media_storage_observation(
+    observation = runtime_monitoring_application._media_storage_observation(
         datetime.now(timezone.utc)
     )
 

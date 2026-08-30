@@ -52,7 +52,7 @@ def test_masked_detail_is_a_closed_allowlist_and_never_returns_raw_payload(monke
     monkeypatch.setattr(
         admin_audit,
         "get_admin_audit_detail",
-        lambda _: AuditDetailItem(
+        lambda _, **__: AuditDetailItem(
             audit_id=11,
             occurred_at=datetime.fromisoformat("2026-08-20T10:00:00+08:00"),
             actor_label_masked="管***",

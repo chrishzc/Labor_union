@@ -49,6 +49,12 @@ class ServiceDateConfirmationRepository(Protocol):
              idempotency_key: str, command_fingerprint: str) -> ServiceDateConfirmationReceipt: ...
 
 
+class SchedulingSnapshotInvalidationPort(Protocol):
+    """Scheduling-owned invalidation using the caller's active transaction."""
+
+    def invalidate_current_snapshot(self, case_no: str) -> None: ...
+
+
 class UnitOfWork(Protocol):
     def __enter__(self) -> "UnitOfWork": ...
     def __exit__(self, exception_type, exception, traceback) -> bool: ...
@@ -60,9 +66,11 @@ class ServiceDateConfirmationWorkflow:
         self,
         repository: ServiceDateConfirmationRepository,
         unit_of_work_factory: Callable[[], UnitOfWork],
+        scheduling_snapshot_invalidation: SchedulingSnapshotInvalidationPort,
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
+        self._scheduling_snapshot_invalidation = scheduling_snapshot_invalidation
 
     def query(self, case_no: str) -> ServiceDateConfirmationFacts:
         return self._repository.load(case_no)
@@ -100,6 +108,9 @@ class ServiceDateConfirmationWorkflow:
                 reason=reason,
                 idempotency_key=idempotency_key,
                 command_fingerprint=command_fingerprint,
+            )
+            self._scheduling_snapshot_invalidation.invalidate_current_snapshot(
+                candidate.case_no
             )
             unit_of_work.commit()
             return receipt

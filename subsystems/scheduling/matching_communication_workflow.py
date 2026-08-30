@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-from datetime import date
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
-from subsystems.scheduling.segmented_availability_query import (
-    search_segmented_caregiver_availability,
-)
-from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.scheduling.ports import unconfigured_connection_factory
 from subsystems.line.delivery_task_workflow import enqueue_line_task
+
+
+get_connection = unconfigured_connection_factory
 
 
 def _positive_int(value: Any, field: str) -> int:
@@ -187,143 +185,26 @@ def get_active_matching_plan_state(case_no: Any) -> dict[str, Any]:
         _close(connection)
 
 
-def _assert_latest_plan_availability(state: Mapping[str, Any]) -> None:
-    plan = state["plan"]
-    segments = state["segments"]
-    result = search_segmented_caregiver_availability(
-        case_no=plan["case_no"],
-        segment_count=len(segments),
-        segment_drafts=[
-            {
-                "staff_id": segment["staff_id"],
-                "start_date": segment["assigned_start_date"],
-                "end_date": segment["assigned_end_date"],
-            }
-            for segment in segments
-        ],
-        as_of=date.today().isoformat(),
-    )
-    conflicts = result.get("conflicts")
-    if result.get("feasibility") != "complete" or not isinstance(conflicts, list):
-        raise ValueError("matching plan is no longer fully available")
-    if conflicts:
-        details = ", ".join(
-            f"staff={row.get('staff_id')} date={row.get('work_date')} reason={row.get('reason_code')}"
-            for row in conflicts
-        )
-        raise ValueError("matching plan availability conflict: " + details)
-
-
-def send_matching_plan_information(
-    case_no: Any,
-    plan_id: Any,
-    segment_id: Any,
-    info_type: Any,
-    event_key: Any,
-    actor: Any,
-) -> dict[str, Any]:
-    case_no = _text(case_no, "case_no", 50)
-    plan_id = _positive_int(plan_id, "plan_id")
-    segment_id = _positive_int(segment_id, "segment_id")
-    if info_type not in {1, 2}:
-        raise ValueError("info_type must be 1 or 2")
-    event_key = _text(event_key, "event_key", 100)
-    actor = _text(actor, "actor", 100)
-    state = get_matching_plan_contact_state(case_no, plan_id)
-    if state["plan"].get("status") != "proposed" or state["plan"].get("is_active") != 1:
-        raise ValueError("matching plan is not an active proposed plan")
-    _assert_latest_plan_availability(state)
-    segment = next(
-        (row for row in state["segments"] if row["segment_id"] == segment_id),
-        None,
-    )
-    if segment is None:
-        raise ValueError("segment does not belong to matching plan")
-    recipient = segment.get("staff_line_user_id")
-    if not isinstance(recipient, str) or not recipient.strip():
-        raise ValueError("caregiver has no LINE delivery identity")
-
+def _run_in_application_uow(operation: Callable[[Any, Any], dict[str, Any]]) -> dict[str, Any]:
+    """Own one matching communication mutation and its durable task atomically."""
     connection = cursor = None
+    unit_of_work = None
     try:
         connection = get_connection()
+        unit_of_work = connection
         cursor = connection.cursor()
-        cursor.execute(
-            """SELECT id, plan_id, segment_id, event_type
-                 FROM caregiver_matching_plan_events
-                WHERE event_key = %s FOR UPDATE""",
-            (event_key,),
-        )
-        existing = cursor.fetchone()
-        event_type = f"info_{info_type}_sent"
-        if existing is not None:
-            if (
-                existing.get("plan_id") == plan_id
-                and existing.get("segment_id") == segment_id
-                and existing.get("event_type") == event_type
-            ):
-                connection.rollback()
-                return {"status": "idempotent_replay", "event_id": existing["id"]}
-            raise ValueError("event_key belongs to a different matching event")
-        cursor.execute(
-            """SELECT p.status, p.is_active, o.status AS order_status
-                 FROM caregiver_matching_plans p
-                 JOIN orders o ON o.case_no = p.case_no
-                WHERE p.id = %s AND p.case_no = %s FOR UPDATE""",
-            (plan_id, case_no),
-        )
-        locked = cursor.fetchone()
-        if (
-            not isinstance(locked, Mapping)
-            or locked.get("status") != "proposed"
-            or locked.get("is_active") != 1
-            or locked.get("order_status") != "洽談中"
-        ):
-            raise ValueError("matching plan is no longer sendable")
-        message = (
-            f"訂單資訊-{info_type}\n"
-            f"服務區段：{segment['assigned_start_date']}～{segment['assigned_end_date']}"
-        )
-        task_id = enqueue_line_task(
-            cursor,
-            to_user_id=recipient.strip(),
-            message_content=message,
-            task_type="matching_willingness_card",
-            payload={
-                "case_no": case_no,
-                "plan_id": plan_id,
-                "segment_id": segment_id,
-                "info_type": info_type,
-            },
-            source_event_id=event_key,
-            idempotency_key=event_key,
-        )
-        if task_id is None:
-            raise ValueError("LINE information delivery task was not created")
-        payload = {"line_task_id": task_id, "delivery_status": "queued"}
-        cursor.execute(
-            """INSERT INTO caregiver_matching_plan_events
-                   (plan_id, segment_id, event_type, event_key, actor, payload)
-               VALUES (%s, %s, %s, %s, %s, %s)""",
-            (
-                plan_id,
-                segment_id,
-                event_type,
-                event_key,
-                actor,
-                json.dumps(payload, ensure_ascii=False, sort_keys=True),
-            ),
-        )
-        event_id = _positive_int(cursor.lastrowid, "event_id")
-        connection.commit()
-        return {
-            "status": "sent",
-            "event_id": event_id,
-            "line_task_id": task_id,
-            "delivery_status": "queued",
-        }
+        result = operation(connection, cursor)
+        if result.get("result") != "existing" and result.get("status") != "idempotent_replay":
+            unit_of_work.commit()
+        else:
+            unit_of_work.rollback()
+        return result
     except Exception:
-        if connection is not None:
-            connection.rollback()
+        if unit_of_work is not None:
+            try:
+                unit_of_work.rollback()
+            except BaseException:
+                pass
         raise
     finally:
         _close(cursor)
@@ -353,10 +234,27 @@ def record_matching_plan_willingness(
     if reply_to_user_id is not None:
         reply_to_user_id = _text(reply_to_user_id, "reply_to_user_id", 255)
         reply_message = _text(reply_message, "reply_message", 2000)
-    connection = cursor = None
+    return _run_in_application_uow(
+        lambda connection, cursor: _record_matching_plan_willingness_in_transaction(
+            connection, cursor, case_no, plan_id, segment_id, willingness,
+            event_key, actor, reply_to_user_id, reply_message
+        )
+    )
+
+
+def _record_matching_plan_willingness_in_transaction(
+    connection: Any,
+    cursor: Any,
+    case_no: str,
+    plan_id: int,
+    segment_id: int,
+    willingness: str,
+    event_key: str,
+    actor: str,
+    reply_to_user_id: str | None,
+    reply_message: str | None,
+) -> dict[str, Any]:
     try:
-        connection = get_connection()
-        cursor = connection.cursor()
         cursor.execute(
             """SELECT p.status, p.is_active, s.id AS segment_id
                  FROM caregiver_matching_plans p
@@ -387,7 +285,6 @@ def record_matching_plan_willingness(
                 and existing.get("event_type") == "willingness_changed"
                 and _event_payload(existing.get("payload")) == payload
             ):
-                connection.rollback()
                 return {"status": "idempotent_replay", "event_id": existing["id"]}
             raise ValueError("event_key belongs to a different matching event")
         cursor.execute(
@@ -414,147 +311,9 @@ def record_matching_plan_willingness(
             )
             if line_task_id is None:
                 raise ValueError("LINE willingness reply task was not created")
-        connection.commit()
         return {"status": "recorded", "event_id": event_id, "line_task_id": line_task_id, **payload}
-    except Exception:
-        if connection is not None:
-            connection.rollback()
-        raise
     finally:
-        _close(cursor)
-        _close(connection)
-
-
-def send_matching_plan_resumes(
-    case_no: Any,
-    plan_id: Any,
-    note: Any,
-    event_key: Any,
-    actor: Any,
-) -> dict[str, Any]:
-    case_no = _text(case_no, "case_no", 50)
-    plan_id = _positive_int(plan_id, "plan_id")
-    note = _text(note, "note", 1000)
-    event_key = _text(event_key, "event_key", 100)
-    actor = _text(actor, "actor", 100)
-    state = get_matching_plan_contact_state(case_no, plan_id)
-    if not state["all_willing"]:
-        missing = [
-            {
-                "segment_id": row["segment_id"],
-                "staff_id": row["staff_id"],
-                "willingness": row["willingness"],
-            }
-            for row in state["segments"]
-            if row["willingness"] != "willing"
-        ]
-        raise ValueError("all caregivers must be willing before resume delivery: " + json.dumps(missing))
-    recipient = state["plan"].get("client_line_user_id")
-    if not isinstance(recipient, str) or not recipient.strip():
-        raise ValueError("client has no LINE delivery identity")
-    if len(state["segments"]) > 1 and "由多位月嫂共同完成" not in note:
-        note = "本案預計由多位月嫂共同完成服務。" + note
-
-    connection = cursor = None
-    try:
-        connection = get_connection()
-        cursor = connection.cursor()
-        derived_keys = [
-            "resume-" + hashlib.sha256(
-                f"{event_key}:{segment['segment_id']}".encode("utf-8")
-            ).hexdigest()
-            for segment in state["segments"]
-        ]
-        placeholders = ", ".join(["%s"] * len(derived_keys))
-        cursor.execute(
-            f"""SELECT id, event_key, plan_id, segment_id, event_type
-                  FROM caregiver_matching_plan_events
-                 WHERE event_key IN ({placeholders})
-                 FOR UPDATE""",
-            tuple(derived_keys),
-        )
-        existing = [dict(row) for row in (cursor.fetchall() or [])]
-        if existing:
-            if len(existing) == len(derived_keys) and all(
-                row["plan_id"] == plan_id and row["event_type"] == "resume_sent"
-                for row in existing
-            ):
-                connection.rollback()
-                return {
-                    "status": "idempotent_replay",
-                    "event_ids": [row["id"] for row in existing],
-                }
-            raise ValueError("resume event_key has a partial or conflicting history")
-        cursor.execute(
-            """SELECT p.status, p.is_active, o.status AS order_status
-                 FROM caregiver_matching_plans p
-                 JOIN orders o ON o.case_no = p.case_no
-                WHERE p.id = %s AND p.case_no = %s FOR UPDATE""",
-            (plan_id, case_no),
-        )
-        locked = cursor.fetchone()
-        if (
-            not isinstance(locked, Mapping)
-            or locked.get("status") not in {"proposed", "accepted"}
-            or locked.get("order_status") != "洽談中"
-        ):
-            raise ValueError("matching plan is no longer eligible for resume delivery")
-        event_ids, task_ids = [], []
-        for segment, derived_key in zip(state["segments"], derived_keys):
-            message = (
-                f"月嫂履歷（第 {segment['segment_order']} 段）\n"
-                f"服務區段：{segment['assigned_start_date']}～{segment['assigned_end_date']}\n"
-                f"備註：{note}"
-            )
-            task_id = enqueue_line_task(
-                cursor,
-                to_user_id=recipient.strip(),
-                message_content=message,
-                payload={
-                    "case_no": case_no,
-                    "plan_id": plan_id,
-                    "segment_id": segment["segment_id"],
-                    "resume_note": note,
-                },
-                source_event_id=derived_key,
-                idempotency_key=derived_key,
-            )
-            if task_id is None:
-                raise ValueError("LINE resume delivery task was not created")
-            payload = {
-                "line_task_id": task_id,
-                "delivery_status": "queued",
-                "note": note,
-            }
-            cursor.execute(
-                """INSERT INTO caregiver_matching_plan_events
-                       (plan_id, segment_id, event_type, event_key, actor, payload)
-                   VALUES (%s, %s, 'resume_sent', %s, %s, %s)""",
-                (
-                    plan_id,
-                    segment["segment_id"],
-                    derived_key,
-                    actor,
-                    json.dumps(payload, ensure_ascii=False, sort_keys=True),
-                ),
-            )
-            event_ids.append(_positive_int(cursor.lastrowid, "event_id"))
-            task_ids.append(task_id)
-        connection.commit()
-        return {
-            "status": "sent",
-            "event_ids": event_ids,
-            "line_task_ids": task_ids,
-            "delivery_status": "queued",
-            "note": note,
-        }
-    except Exception:
-        if connection is not None:
-            connection.rollback()
-        raise
-    finally:
-        _close(cursor)
-        _close(connection)
+        pass
 
 
 def cancel_matching_plan(
@@ -569,10 +328,23 @@ def cancel_matching_plan(
     event_key = _text(event_key, "event_key", 100)
     actor = _text(actor, "actor", 100)
     reason = _text(reason, "reason", 255)
-    connection = cursor = None
+    return _run_in_application_uow(
+        lambda connection, cursor: _cancel_matching_plan_in_transaction(
+            connection, cursor, case_no, plan_id, event_key, actor, reason
+        )
+    )
+
+
+def _cancel_matching_plan_in_transaction(
+    connection: Any,
+    cursor: Any,
+    case_no: str,
+    plan_id: int,
+    event_key: str,
+    actor: str,
+    reason: str,
+) -> dict[str, Any]:
     try:
-        connection = get_connection()
-        cursor = connection.cursor()
         cursor.execute(
             """SELECT p.status, p.is_active, o.status AS order_status
                  FROM caregiver_matching_plans p
@@ -597,7 +369,6 @@ def cancel_matching_plan(
                 and existing.get("event_type") == "plan_cancelled"
                 and _event_payload(existing.get("payload")).get("reason") == reason
             ):
-                connection.rollback()
                 return {"status": "idempotent_replay", "event_id": existing["id"]}
             raise ValueError("event_key belongs to a different matching event")
         if (
@@ -627,12 +398,6 @@ def cancel_matching_plan(
             ),
         )
         event_id = _positive_int(cursor.lastrowid, "event_id")
-        connection.commit()
         return {"status": "cancelled", "event_id": event_id}
-    except Exception:
-        if connection is not None:
-            connection.rollback()
-        raise
     finally:
-        _close(cursor)
-        _close(connection)
+        pass

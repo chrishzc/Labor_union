@@ -10,10 +10,12 @@ from collections.abc import Callable
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
+from infrastructure.mysql.mysql_adapter import get_connection
 from shared_kernel.identities import ActorContext
 from subsystems.access.authentication_session import (
     AdminPrincipal,
     AdminSessionStorageError,
+    ConnectionFactory,
     get_admin_session,
     has_required_capability,
     has_required_role,
@@ -30,6 +32,11 @@ DEVELOPMENT_BYPASS_DENIED_CAPABILITIES = frozenset(
 ACCESS_CONTROL_PROFILES = frozenset(
     {"local_bypass", "local_auth", "local_developer_session", "production"}
 )
+
+
+def get_access_control_connection_factory() -> ConnectionFactory:
+    """Compose the production connection provider at the API boundary."""
+    return get_connection
 
 
 def access_control_profile() -> str:
@@ -63,6 +70,7 @@ def get_bearer_token(authorization: str | None) -> str:
 def require_admin(
     request: Request,
     authorization: str | None = Header(default=None),
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
 ) -> AdminPrincipal:
     if not admin_auth_is_enabled():
         principal = _development_bypass_principal()
@@ -72,7 +80,7 @@ def require_admin(
 
     token = get_bearer_token(authorization)
     try:
-        principal = get_admin_session(token)
+        principal = get_admin_session(token, connection_factory=connection_factory)
     except AdminSessionStorageError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -187,25 +195,6 @@ def require_integration_capability(
     capability: IntegrationCapability,
 ) -> Callable[..., AdminPrincipal]:
     return require_capability(capability)
-
-
-def require_anomaly_necessity_migration_operator(
-    request: Request,
-    principal: AdminPrincipal = Depends(require_persisted_admin),
-) -> AdminPrincipal:
-    """Require a persisted administrator for the approved migration runner."""
-    if principal.id is None or not principal.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="需要已登入且啟用的內部使用者 Session",
-        )
-    if not has_required_capability(principal, "system.administration"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="缺少必要能力：system.administration",
-        )
-    request.state.admin_actor = admin_actor_context(principal)
-    return principal
 
 
 require_line_viewer = require_capability("line.identity.read")

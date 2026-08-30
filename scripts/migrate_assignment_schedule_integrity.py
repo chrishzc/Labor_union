@@ -8,8 +8,10 @@ scripts/migrate_assignment_schedule_integrity.py
 固定 fail closed，唯讀檢查也必須明確提供 target database。
 """
 import argparse
+import hashlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 import pymysql
@@ -64,6 +66,33 @@ def get_db_config(target_database=None):
         'database': str(target_database or '').strip(),
         'charset': 'utf8mb4'
     }
+
+
+def require_safe_target_database(target_database: str) -> None:
+    configured = os.getenv("DB_DATABASE", "").strip()
+    if not target_database:
+        raise ValueError("explicit --target-database is required for read-only checks")
+    if not configured or target_database != configured:
+        raise ValueError("target database must exactly match configured DB_DATABASE")
+    if not re.fullmatch(r"lu_test_[a-z0-9_]+", target_database):
+        raise ValueError("target database must be an explicitly named lu_test_* database")
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        raise ValueError("production environment is not permitted for this read-only CLI")
+
+
+def require_connected_identity(cursor, target_database: str) -> dict[str, str]:
+    cursor.execute("SELECT DATABASE() AS database_name, @@hostname AS server")
+    row = cursor.fetchone()
+    if isinstance(row, dict):
+        database_name = row.get("database_name")
+        server = row.get("server")
+    else:
+        database_name, server = row
+    if database_name != target_database:
+        raise RuntimeError("connected database does not match --target-database")
+    if not str(server or "").strip():
+        raise RuntimeError("connected MySQL server identity is unavailable")
+    return {"database": str(database_name), "server": str(server)}
 
 
 def get_indexes_info(cursor, db_name, table_name='staff_schedule'):
@@ -314,6 +343,17 @@ def run_checks(cursor, db_name):
         'post_check': None,
         'post_check_failed': False
     }
+    manifest["schema_fingerprint"] = hashlib.sha256(
+        json.dumps(
+            {
+                "schema_prechecks": schema_prechecks,
+                "indexes": indexes_info,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
     return manifest
 
 
@@ -365,11 +405,13 @@ def main():
         print(json.dumps(blocked_manifest, ensure_ascii=False, indent=2, sort_keys=True))
         sys.exit(2)
 
-    if not args.target_database:
+    try:
+        require_safe_target_database(args.target_database)
+    except ValueError as exc:
         print(json.dumps({
             'mode': 'check',
             'success': False,
-            'errors': ['explicit --target-database is required for read-only checks'],
+            'errors': [str(exc)],
         }, ensure_ascii=False, indent=2, sort_keys=True))
         sys.exit(2)
 
@@ -394,9 +436,11 @@ def main():
     try:
         with connection.cursor() as cursor:
             cursor.execute("SET NAMES utf8mb4;")
+            identity = require_connected_identity(cursor, args.target_database)
 
             manifest = run_checks(cursor, db_config['database'])
             manifest['mode'] = 'check'
+            manifest['connection_identity'] = identity
 
             # 全面秘密遮罩
             manifest = mask_secrets(manifest, secrets)

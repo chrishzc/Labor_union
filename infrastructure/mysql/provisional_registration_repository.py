@@ -23,12 +23,9 @@ from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.case_import.provisional_registration_types import (
     ProvisionalRegistrationConflict,
     ProvisionalRegistrationReceipt,
+    ProvisionalRegistrationStorageError,
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
-
-
-class ProvisionalRegistrationStorageError(RuntimeError):
-    pass
 
 
 class ProvisionalRegistrationMySqlUnitOfWork(MySqlUnitOfWork):

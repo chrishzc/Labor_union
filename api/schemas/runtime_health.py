@@ -119,3 +119,17 @@ class AlertTargetMutationPreviewResponse(BaseModel):
     current_version: str
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     apply_ready: Literal[True]
+
+
+class _ClosedProbeModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class ApiHealthView(_ClosedProbeModel):
+    status: Literal["healthy"]
+    service: Literal["Labor Union API"]
+
+
+class PrivateRuntimeCheckView(_ClosedProbeModel):
+    status: Literal["ready"]
+    service: str = Field(min_length=1, max_length=100)

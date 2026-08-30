@@ -30,25 +30,9 @@ def consume_client_finance_orders_events(connection, maximum_events: int = 50):
         except Exception as error:
             connection.rollback()
             _mark_failed(connection, int(event["id"]), error)
+            connection.commit()
             failed += 1
     return delivered, failed
-
-
-def requeue_incomplete_deposit_projections(connection, maximum_events: int = 50) -> int:
-    """Recover legacy worker deliveries that never projected the order state."""
-
-    if not isinstance(maximum_events, int) or not 1 <= maximum_events <= 100:
-        raise ValueError("maximum events must be between 1 and 100")
-    requeued = 0
-    for _ in range(maximum_events):
-        event_id = _claim_incomplete_delivery(connection)
-        if event_id is None:
-            connection.rollback()
-            return requeued
-        _requeue_delivery(connection, event_id)
-        connection.commit()
-        requeued += 1
-    return requeued
 
 
 def _claim_next_event(connection):
@@ -62,34 +46,6 @@ def _claim_next_event(connection):
             "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
         )
         return cursor.fetchone()
-
-
-def _claim_incomplete_delivery(connection):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT outbox.id FROM client_finance_outbox outbox "
-            "JOIN orders order_row ON order_row.case_no=outbox.case_no "
-            "JOIN client_deposit_settlement_projection settlement "
-            "ON settlement.case_no=outbox.case_no "
-            "WHERE outbox.intent_type='orders_deposit_reconciled' "
-            "AND outbox.status='delivered' AND order_row.status='洽談中' "
-            "AND settlement.settlement_state='settled' "
-            "ORDER BY outbox.id LIMIT 1 FOR UPDATE SKIP LOCKED"
-        )
-        row = cursor.fetchone()
-    return None if row is None else int(row["id"])
-
-
-def _requeue_delivery(connection, event_id: int) -> None:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "UPDATE client_finance_outbox SET status='pending',delivered_at=NULL,"
-            "next_attempt_at=NULL,last_error='requeued_incomplete_deposit_projection' "
-            "WHERE id=%s AND status='delivered'",
-            (event_id,),
-        )
-        if cursor.rowcount != 1:
-            raise RuntimeError("client_finance_outbox_requeue_conflict")
 
 
 def _consume_event(connection, event) -> None:
@@ -193,7 +149,6 @@ def _mark_failed(connection, event_id: int, error: Exception) -> None:
             "last_error=%s WHERE id=%s",
             (error_message, event_id),
         )
-    connection.commit()
 
 
 def _delivery_error_message(error: Exception) -> str:

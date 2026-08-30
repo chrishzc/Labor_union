@@ -32,6 +32,7 @@ from shared_kernel.ports import UnitOfWork
 from subsystems.payroll.terms_impact import (
     build_payroll_terms_impact,
     build_preassignment_payroll_noop,
+    PayrollSpecialPayEventCandidate,
 )
 
 
@@ -157,6 +158,7 @@ class PayrollImpactPersistenceCommand:
     reason: str
     correlation_id: Any
     source_event_id: int
+    special_pay_events: tuple[PayrollSpecialPayEventCandidate, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

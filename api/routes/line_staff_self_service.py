@@ -27,7 +27,12 @@ from infrastructure.line.liff_token_verifier import (
     LiffVerificationUnavailableError,
 )
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
+from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.scheduling import staff_monthly_calendar_query as _staff_monthly_calendar_query
 from subsystems.scheduling.staff_monthly_calendar_query import get_staff_monthly_calendar_schedule
+
+
+_staff_monthly_calendar_query.get_connection = get_connection
 
 
 router = APIRouter(prefix="/api/v1/line/staff-self-service", tags=["LINE Staff Self Service"])

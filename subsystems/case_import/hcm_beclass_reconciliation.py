@@ -48,9 +48,13 @@ class CaseImportReconciliationApplication:
 
     def reconcile(self, case_no: str) -> HcmBeClassReconciliationResult:
         with self._unit_of_work_factory() as unit_of_work:
-            result = self._port.reconcile(case_no)
+            result = self.reconcile_in_current_uow(case_no)
             unit_of_work.commit()
             return result
+
+    def reconcile_in_current_uow(self, case_no: str) -> HcmBeClassReconciliationResult:
+        """Borrow an already-open Case Import application transaction."""
+        return self._port.reconcile(case_no)
 
 def reconcile_hcm_beclass_cooking(
     port: HcmBeClassReconciliationPort, case_no: str

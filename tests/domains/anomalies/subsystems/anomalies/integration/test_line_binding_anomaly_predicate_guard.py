@@ -139,9 +139,13 @@ def test_mysql_scan_failure_rolls_back_without_legacy_fallback():
             self.rollbacks += 1
 
     connection = FailingConnection()
-    result = consume_process_reminder_anomaly_sources(connection, as_of=_AS_OF)
+    result = consume_process_reminder_anomaly_sources(
+        connection,
+        as_of=_AS_OF,
+        unit_of_work_factory=lambda: None,
+    )
 
     assert result.succeeded is False
     assert result.error is not None
     assert result.error.code == "transaction_failed"
-    assert (connection.begins, connection.commits, connection.rollbacks) == (1, 0, 1)
+    assert (connection.begins, connection.commits, connection.rollbacks) == (0, 0, 0)

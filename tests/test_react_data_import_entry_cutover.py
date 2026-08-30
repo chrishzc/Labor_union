@@ -51,18 +51,17 @@ def test_data_import_registry_queue_and_rollback_mapping_are_consistent() -> Non
     queue_entries = [entry for entry in _read_queue() if entry.get("entry_id") == DATA_IMPORT_ENTRY]
     assert len(queue_entries) == 1
     entry = queue_entries[0]
-    assert entry["status"] == "review_required"
+    assert entry["status"] == "active"
+    assert entry["terminal_disposition"] == "active_canonical"
+    assert entry["replacement"] == DATA_IMPORT_ENTRY
+    assert entry["replacement_readback"] == f"current canonical entry readback: {DATA_IMPORT_ENTRY}"
     assert entry["streamlit_entry"] == "ui:09_data_import.py"
     assert entry["rollback_deep_link"] == "/?entry=data-import"
     assert entry["witnesses"] == {
         "nav": "ui_react/src/components/MasterLayout.tsx",
         "render": "ui_react/src/App.tsx",
     }
-    assert all(
-        entry.get(field) in (None, False)
-        for field in ("active", "replacement", "cutover_ready", "cutover-ready")
-        if field in entry
-    )
+    assert entry["terminal_disposition"] == "active_canonical"
 
     api_entries = [
         entry
@@ -70,30 +69,25 @@ def test_data_import_registry_queue_and_rollback_mapping_are_consistent() -> Non
         if entry.get("entry_id") == "api:GET /api/v1/case-import/hcm/workbooks/results"
     ]
     assert len(api_entries) == 1
-    assert api_entries[0]["status"] == "review_required"
-    assert api_entries[0]["source_path"] == "api/routes/hcm_import.py"
+    api_entry = api_entries[0]
+    assert api_entry["terminal_disposition"] == "active_canonical"
+    assert api_entry["source_path"] == "api/routes/hcm_import.py"
+    assert "hcm_import_result_client.ts" in api_entry["current_inbound_callers"]
+    assert api_entry["replacement_path_or_symbol"] == api_entry["entry_id"]
+    assert api_entry["deletion_410_gate"] == "not_applicable_active_canonical"
 
 
-def test_data_import_frozen_target_remains_streamlit_without_switch_receipts() -> None:
+def test_data_import_control_plane_keeps_react_identity_metadata() -> None:
     state = _read_json(INITIAL_TARGETS)
     entries = state["entries"]
 
     assert isinstance(entries, list)
     assert len(entries) == len({entry["entry_id"] for entry in entries})
+    assert len(entries) == 12
     data_import_entries = [entry for entry in entries if entry["entry_id"] == DATA_IMPORT_ENTRY]
-    assert data_import_entries == [
-        {
-            "entry_id": DATA_IMPORT_ENTRY,
-            "replacement_group": "data-import",
-            "current_target": "streamlit",
-            "streamlit_target": "/?entry=data-import",
-            "react_target": "/admin/#data-import",
-            "required_react_artifact": None,
-            "entry_revision": 1,
-        }
-    ]
-    assert all(entry["current_target"] == "streamlit" for entry in entries)
-    assert state["receipts"] == []
+    assert len(data_import_entries) == 1
+    assert data_import_entries[0]["react_target"] == "/admin/#data-import"
+    assert data_import_entries[0]["replacement_group"] == "data-import"
 
 
 def test_data_import_sources_expose_typed_preview_apply_and_safety_guidance() -> None:
@@ -112,9 +106,13 @@ def test_data_import_sources_expose_typed_preview_apply_and_safety_guidance() ->
     assert page_path.is_file()
     assert client_path.is_file()
     assert re.search(
-        r"\{currentPage\s*===\s*'data-import'\s*&&\s*<DataImportPage\s*/>\}",
+        r"\{currentPage\s*===\s*'data-import'\s*&&\s*<DataImportPage\s+initialTab=\"workbook-import\"\s*/>\}",
         app_source,
     )
+    assert "nas-storage" not in app_source
+    assert "NAS 檔案管理" not in page_source
+    assert "controlled_file_client" not in page_source
+    assert "/api/v1/storage/" not in page_source
     assert re.search(
         r"\{\s*id:\s*'data-import'\s*,[^}]*section:\s*'operations'\s*\}",
         nav_source,
@@ -122,6 +120,8 @@ def test_data_import_sources_expose_typed_preview_apply_and_safety_guidance() ->
     assert "imports.hcm-results.open" in page_source
     assert "imports.hcm-results.refresh" in page_source
     assert "hcmImportResultClient.query" in page_source
+    assert "<DataBrowserPage />" in page_source
+    assert "initialTab" in app_source
 
     assert "clientBeClassWorkbookPreviewClient.preview" in page_source
     assert "clientBeClassWorkbookPreviewClient.apply" in page_source
@@ -131,15 +131,15 @@ def test_data_import_sources_expose_typed_preview_apply_and_safety_guidance() ->
     assert "historicalOrderWorkbookPreviewClient.apply" in page_source
     assert "hcmWorkbookPreviewClient.preview" in page_source
     assert "hcmWorkbookPreviewClient.apply" in page_source
-    assert "imports.hcm-current.preview" in page_source
-    assert "imports.hcm-current.apply" in page_source
+    assert "data-control-id={`imports.${id}.preview`}" in page_source
+    assert "data-control-id={`imports.${id}.apply`}" in page_source
     assert "imports.${id}.preview" in page_source
     assert "imports.${id}.apply" in page_source
     assert "beforeunload" in page_source
-    assert "Apply 結果尚未確認" in page_source
-    assert "Receipt 已回傳，需檢查" in page_source
-    assert "整份工作簿已重播／未新增寫入" in page_source
-    assert "receipt.replayed_workbook" in page_source
+    assert "匯入結果尚未確認" in page_source
+    assert "匯入已完成" in page_source
+    assert "這份工作簿已處理過，未重複匯入" in page_source
+    assert "replayed_workbook" in page_source
     assert "imports.hcm-results.retry" in page_source
     assert "hcm-historical" not in page_source
     assert "bank-statements" not in page_source

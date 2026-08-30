@@ -5,7 +5,6 @@ Description: 客戶退款超額追償的 MySQL collection、adjustment 與 outbo
 from __future__ import annotations
 
 import json
-import hashlib
 from contextlib import contextmanager
 from datetime import date
 from typing import Iterator
@@ -255,11 +254,6 @@ class MySqlClientOverRefundRecoveryRepository:
                 (request.idempotency_key.value, command_fingerprint.value,
                  request.preview_fingerprint.value, receipt.matching_identity, _json(snapshot)),
             )
-            cursor.execute(
-                "INSERT INTO client_finance_outbox (case_no,intent_type,intent_key,payload_snapshot) "
-                "VALUES (%s,'client_over_refund_recovery_matched',%s,%s)",
-                (candidate.case_no, f"{request.idempotency_key.value}:recovery-match", _json(snapshot)),
-            )
 
     # One method owns all writes so a collection cannot commit as a partial accounting result.
     def persist(self, request, preview, receipt, command_fingerprint) -> None:
@@ -323,32 +317,6 @@ class MySqlClientOverRefundRecoveryRepository:
                  candidate.recovery_identity, row_id, ledger_id, receipt.recovery_version,
                  candidate.remaining_after.amount, candidate.resulting_status.value, _json(snapshot)),
             )
-            cursor.execute(
-                "INSERT INTO client_finance_outbox (case_no,intent_type,intent_key,payload_snapshot) "
-                "VALUES (%s,'projection_refresh',%s,%s)",
-                (candidate.case_no, f"{request.idempotency_key.value}:projection",
-                 _json({"case_no": candidate.case_no, "recovery_identity": candidate.recovery_identity,
-                        "remaining_after_ntd": candidate.remaining_after.amount})),
-            )
-            cursor.execute(
-                _RECOVERY_UPDATED_OUTBOX_INSERT_SQL,
-                (
-                    candidate.case_no,
-                    _recovery_outbox_key(request, "updated"),
-                    _json(_updated_outbox_payload(request, candidate, receipt)),
-                ),
-            )
-            if (request.selection.matching_identity is not None
-                    and candidate.resulting_status is ClientOverRefundRecoveryStatus.RECOVERED):
-                cursor.execute(
-                    "INSERT INTO client_finance_outbox (case_no,intent_type,intent_key,payload_snapshot) "
-                    "VALUES (%s,'client_over_refund_recovery_collected',%s,%s)",
-                    (candidate.case_no, f"{request.idempotency_key.value}:recovery-collected",
-                     _json({"matching_identity": request.selection.matching_identity,
-                            "recovery_identity": candidate.recovery_identity,
-                            "remaining_after_ntd": candidate.remaining_after.amount,
-                            "resulting_status": candidate.resulting_status.value})),
-                )
 
     def _persist_adjustment(self, request, preview, receipt, command_fingerprint) -> None:
         candidate = preview.candidate
@@ -385,23 +353,6 @@ class MySqlClientOverRefundRecoveryRepository:
                  request.preview_fingerprint.value, candidate.recovery_identity,
                  receipt.recovery_version, candidate.remaining_after.amount,
                  candidate.resulting_status.value, _json(_receipt_payload(receipt))),
-            )
-            cursor.execute(
-                "INSERT INTO client_finance_outbox (case_no,intent_type,intent_key,payload_snapshot) "
-                "VALUES (%s,'projection_refresh',%s,%s)",
-                (candidate.case_no, f"{request.idempotency_key.value}:projection",
-                 _json({"case_no": candidate.case_no,
-                        "recovery_identity": candidate.recovery_identity,
-                        "remaining_after_ntd": candidate.remaining_after.amount,
-                        "resulting_status": candidate.resulting_status.value})),
-            )
-            cursor.execute(
-                _RECOVERY_UPDATED_OUTBOX_INSERT_SQL,
-                (
-                    candidate.case_no,
-                    _recovery_outbox_key(request, "updated"),
-                    _json(_updated_outbox_payload(request, candidate, receipt)),
-                ),
             )
 
 
@@ -446,26 +397,6 @@ def _receipt_payload(receipt):
             "evidence_reference": receipt.evidence_reference}
 
 
-def _updated_outbox_payload(request, candidate, receipt):
-    return {
-        "event_type": "client_over_refund_recovery_updated",
-        "recovery_identity": candidate.recovery_identity,
-        "case_no": candidate.case_no,
-        "remaining_after_ntd": candidate.remaining_after.amount,
-        "resulting_status": candidate.resulting_status.value,
-        "recovery_version": receipt.recovery_version,
-        "account_version": receipt.account_version,
-        "matching_identity": request.selection.matching_identity,
-        "evidence_reference": request.evidence_reference,
-    }
-
-
-def _recovery_outbox_key(request, event_type):
-    value = f"{request.idempotency_key.value}:client-over-refund-recovery:{event_type}"
-    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
-    return f"client-over-refund-recovery-{event_type}:{digest}"
-
-
 def _matching_receipt_payload(receipt):
     return {
         "matching_identity": receipt.matching_identity,
@@ -483,11 +414,6 @@ def _json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-_RECOVERY_UPDATED_OUTBOX_INSERT_SQL = (
-    "INSERT INTO client_finance_outbox "
-    "(case_no,intent_type,intent_key,payload_snapshot) "
-    "VALUES (%s,'projection_refresh',%s,%s)"
-)
 
 
 @contextmanager

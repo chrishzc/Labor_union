@@ -97,6 +97,24 @@ def _enrollment_success_test_app() -> None:
     app._render_login_or_enrollment(_Client())
 
 
+def test_empty_rollback_query_params_are_valid(monkeypatch) -> None:
+    from ui import app
+
+    monkeypatch.setattr(app.st, "query_params", {})
+
+    assert app._consume_rollback_query() is True
+
+
+def test_nonempty_invalid_rollback_query_params_fail_closed(monkeypatch) -> None:
+    from ui import app
+
+    params = {"entry": "unknown"}
+    monkeypatch.setattr(app.st, "query_params", params)
+
+    assert app._consume_rollback_query() is False
+    assert params == {}
+
+
 def test_global_guard_renders_login_before_navigation(monkeypatch):
     import builtins
 

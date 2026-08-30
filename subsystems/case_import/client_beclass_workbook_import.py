@@ -123,10 +123,16 @@ class ClientBeClassWorkbookImportService:
         repository: ClientBeClassWorkbookImportRepositoryPort,
         reconciliation: BoundCaseCookingReconciliationPort,
         unit_of_work_factory: Callable[[], UnitOfWork],
+        review_recorder: Callable[..., str] | None = None,
     ) -> None:
         self._repository = repository
         self._reconciliation = reconciliation
         self._unit_of_work_factory = unit_of_work_factory
+        self._review_recorder = review_recorder
+
+    def _persist_review(self, connection, **kwargs):
+        recorder = self._review_recorder or record_invalid_beclass_row
+        return recorder(connection, **kwargs)
 
     def preview(self, source_path: str) -> ClientBeClassWorkbookPreview:
         workbook = _load_workbook(source_path)
@@ -191,7 +197,7 @@ class ClientBeClassWorkbookImportService:
             self._repository.claim_row(source_identity, fingerprint, correlation_id)
             errors = validate_client_beclass_row(row)
             if errors:
-                review_identity = record_invalid_beclass_row(
+                review_identity = self._persist_review(
                     self._repository.connection, source_kind=BeClassImportSourceKind.CLIENT,
                     source_content_digest=workbook.digest, source_sheet=workbook.sheet_identity,
                     source_row=row_number, masked_identifier=masked_review_identifier(BeClassImportSourceKind.CLIENT, payload.get("query_no"), row_number),
@@ -273,7 +279,7 @@ class ClientBeClassWorkbookImportService:
     def _record_review(
         self, workbook, row_number, payload, issue_code, review_payload=None
     ) -> str:
-        return record_invalid_beclass_row(
+        return self._persist_review(
             self._repository.connection, source_kind=BeClassImportSourceKind.CLIENT,
             source_content_digest=workbook.digest, source_sheet=workbook.sheet_identity,
             source_row=row_number,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -20,21 +21,21 @@ from domains.case_import.beclass_import_review import (
     BeClassImportSourceKind,
 )
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
 from shared_kernel.identities import (
     ActorContext,
     CorrelationId,
     ExpectedVersion,
     IdempotencyKey,
 )
-from subsystems.anomalies.beclass_import_outbox_consumer import (
+from subsystems.case_import.beclass_import_outbox_consumer import (
     consume_beclass_import_review_events,
 )
 from subsystems.case_import.beclass_import_review_workflow import (
     ApplyBeClassImportReview,
 )
-from subsystems.case_import.beclass_review_application import (
-    build_beclass_import_review_application,
-)
+from api.dependencies.beclass_import_review import build_beclass_import_review_application
+from infrastructure.mysql.beclass_import_review_repository import MySqlBeClassImportReviewRepository
 from subsystems.case_import.beclass_review_intake import record_invalid_beclass_row
 
 
@@ -67,6 +68,8 @@ def _require_dataset_database() -> None:
 
     if not _DATABASE_PATTERN.fullmatch(str(DB_CONFIG["database"])):
         raise ValueError("DB_DATABASE must match lu_test_dataset_[a-z0-9_]+")
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        raise ValueError("validation dataset seed requires a development validation profile")
 
 
 def _fixture(path: Path) -> tuple[dict[str, object], str]:
@@ -89,6 +92,7 @@ def _record_invalid_root(fixture: dict[str, object], source_digest: str) -> str:
             masked_identifier=str(fixture["masked_identifier"]),
             source_payload=_object(fixture, "source_payload"),
             issue_codes=_text_items(fixture, "issue_codes"),
+            repository=MySqlBeClassImportReviewRepository(connection),
         )
         connection.commit()
         return review_identity
@@ -99,11 +103,14 @@ def _record_invalid_root(fixture: dict[str, object], source_digest: str) -> str:
 def _deliver_outbox() -> None:
     connection = get_connection()
     try:
-        result = consume_beclass_import_review_events(connection)
+        result = consume_beclass_import_review_events(
+            connection,
+            runtime=build_anomaly_runtime(),
+        )
     finally:
         connection.close()
     if result.failed_count:
-        raise RuntimeError("BeClass review anomaly projection failed")
+        raise RuntimeError("BeClass review outbox delivery failed")
 
 
 def _repair_if_open(review_identity: str, fixture: dict[str, object]) -> None:

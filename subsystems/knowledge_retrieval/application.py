@@ -47,7 +47,6 @@ class KnowledgeApplication:
     def list_items(self, limit: int, lifecycle_status: str | None = None):
         with self._unit_of_work() as unit_of_work:
             result = unit_of_work.knowledge.list_items(limit, lifecycle_status)
-            unit_of_work.commit()
         return result
 
     def get_item(self, item_id: int):
@@ -56,7 +55,6 @@ class KnowledgeApplication:
     def list_jobs(self, limit: int, processing_status: str | None = None):
         with self._unit_of_work() as unit_of_work:
             result = unit_of_work.knowledge.list_jobs(limit, processing_status)
-            unit_of_work.commit()
         return result
 
     def list_indexes(self, limit: int):
@@ -74,7 +72,6 @@ class KnowledgeApplication:
     def _query(self, method: str, *args):
         with self._unit_of_work() as unit_of_work:
             result = getattr(unit_of_work.knowledge, method)(*args)
-            unit_of_work.commit()
         return result
 
 

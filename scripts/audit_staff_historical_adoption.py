@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import json
+import os
+import re
 
 import pymysql
 
@@ -21,9 +23,22 @@ from subsystems.case_import.beclass_review_intake import fingerprint_workbook
 
 
 _SUCCESS_OUTCOMES = frozenset({"created", "adopted_existing"})
+_DATABASE_PATTERN = re.compile(r"lu_test_[a-z0-9_]+")
+
+
+def _require_validation_database() -> str:
+    """Refuse the historical audit unless it targets an isolated test DB."""
+
+    database = str(DB_CONFIG.get("database") or "").strip()
+    if not _DATABASE_PATTERN.fullmatch(database):
+        raise ValueError("staff historical audit requires a lu_test_* database")
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        raise ValueError("staff historical audit requires a development validation profile")
+    return database
 
 
 def audit_staff_historical_adoption(workbook_path: str) -> dict[str, object]:
+    database = _require_validation_database()
     selected = _load_staff_beclass_frame(workbook_path)
     if selected is None:
         raise RuntimeError("staff_historical_audit_sheet_contract_not_unique")
@@ -47,7 +62,7 @@ def audit_staff_historical_adoption(workbook_path: str) -> dict[str, object]:
     reasons = Counter(item["reason"] for item in results)
     root_mappings = _summarize_root_mappings(results, source_evidence_by_row)
     return {
-        "database": str(DB_CONFIG["database"]),
+        "database": database,
         "source_rows": len(results),
         "staff_total": staff_total,
         "reason_counts": dict(sorted(reasons.items())),

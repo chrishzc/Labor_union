@@ -11,12 +11,12 @@ from decimal import Decimal
 from typing import Any, Mapping
 
 from domains.anomalies.registry import DesiredAlertState, default_anomaly_registry
-from infrastructure.mysql.anomaly_registry_repository import MySqlAnomalyRepository
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId
 from shared_kernel.validation import require_canonical_text, require_nonnegative_integer, require_positive_integer
 from subsystems.anomalies.alert_workflow import AnomalyApplication, ProjectAlertRequest
+from subsystems.anomalies.ports import AnomalyRuntime, require_runtime
 from subsystems.anomalies.source_version import daily_root_source_version
 
 _CONSUMER_IDENTITY = "staff-payables-anomaly-source-v1"
@@ -71,23 +71,23 @@ class BorrowedAnomalyProjectionUnitOfWork:
     def rollback(self): return None
 
 
-def consume_staff_payables_anomaly_sources(connection, *, as_of: date, maximum_items: int = 50, cursors: StaffPayablesAnomalyScanCursors | None = None) -> StaffPayablesAnomalyConsumeResult:
+def consume_staff_payables_anomaly_sources(connection, *, as_of: date, maximum_items: int = 50, cursors: StaffPayablesAnomalyScanCursors | None = None, runtime: AnomalyRuntime | None = None) -> StaffPayablesAnomalyConsumeResult:
     _validate_scan_inputs(as_of, maximum_items, 0)
+    runtime = require_runtime(runtime)
     current = cursors or StaffPayablesAnomalyScanCursors.start()
     if current.last_successful_as_of is not None and as_of < current.last_successful_as_of:
         return StaffPayablesAnomalyConsumeResult(current, 0, 0, _typed_error(ErrorCategory.VALIDATION, "staff_payables_anomaly_source_invalid", "月嫂應付款異常掃描日期不可倒退。", as_of))
     if _all_sources_exhausted(current):
         return StaffPayablesAnomalyConsumeResult(current, 0, 0)
     try:
-        connection.begin()
-        pages = _scan_source_pages(connection, as_of, maximum_items, current)
-        requests = tuple(request for page in pages for request in page.requests)
-        _project_requests(connection, requests)
-        connection.commit()
+        with runtime.failure_unit_of_work(connection) as unit_of_work:
+            pages = _scan_source_pages(connection, as_of, maximum_items, current)
+            requests = tuple(request for page in pages for request in page.requests)
+            _project_requests(connection, requests, runtime)
+            unit_of_work.commit()
         next_cursors = StaffPayablesAnomalyScanCursors(*(_next_cursor(old, page) for old, page in zip((current.overdue_after_obligation_identity, current.late_change_after_event_id, current.bank_master_after_staff_id), pages)), as_of)
         return StaffPayablesAnomalyConsumeResult(next_cursors, len(requests), sum(request.desired.active for request in requests))
     except Exception as error:
-        connection.rollback()
         category = ErrorCategory.VALIDATION if isinstance(error, (TypeError, ValueError)) else ErrorCategory.INTERNAL
         code = "staff_payables_anomaly_source_invalid" if category is ErrorCategory.VALIDATION else "transaction_failed"
         message = "月嫂應付款異常來源資料不符合契約。" if category is ErrorCategory.VALIDATION else "月嫂應付款異常投影失敗。"
@@ -130,8 +130,8 @@ def _scan_source_pages(connection, as_of, maximum_items, cursors):
     return overdue, late, bank
 
 
-def _project_requests(connection, requests):
-    application = AnomalyApplication(default_anomaly_registry(), MySqlAnomalyRepository(connection), BorrowedAnomalyProjectionUnitOfWork)
+def _project_requests(connection, requests, runtime: AnomalyRuntime):
+    application = AnomalyApplication(default_anomaly_registry(), runtime.anomaly_repository(connection), BorrowedAnomalyProjectionUnitOfWork)
     for request in requests:
         application.project(request)
 

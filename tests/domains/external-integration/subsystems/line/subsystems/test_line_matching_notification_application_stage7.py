@@ -255,7 +255,11 @@ def test_assignment_conversion_command_rejects_mismatched_receipt_and_customer_s
 
 def test_manual_customer_decision_allows_documented_non_line_confirmation() -> None:
     unit_of_work = _UnitOfWork(_state())
-    application = MatchingNotificationApplication(lambda: unit_of_work, lambda: NOW)
+    application = MatchingNotificationApplication(
+        lambda: unit_of_work,
+        lambda: NOW,
+        availability_validator=lambda state: None,
+    )
     command = RecordManualMatchingResponseCommand(
         MatchingPlanReference("CASE-1", 10, 0),
         None,
@@ -352,7 +356,11 @@ def test_caregiver_card_intent_action_and_delivery_share_one_commit() -> None:
 
 def test_assignment_conversion_enqueues_bilateral_created_user_texts_in_one_commit() -> None:
     unit_of_work = _UnitOfWork(_state())
-    application = MatchingNotificationApplication(lambda: unit_of_work, lambda: NOW)
+    application = MatchingNotificationApplication(
+        lambda: unit_of_work,
+        lambda: NOW,
+        availability_validator=lambda state: None,
+    )
     command = _assignment_conversion_notification()
 
     result = application.notify_assignment_conversion(command)
@@ -420,7 +428,11 @@ def test_assignment_conversion_bilateral_existing_is_a_committed_replay() -> Non
             LineDeliveryCommandOutcome.EXISTING,
         ),
     )
-    application = MatchingNotificationApplication(lambda: unit_of_work, lambda: NOW)
+    application = MatchingNotificationApplication(
+        lambda: unit_of_work,
+        lambda: NOW,
+        availability_validator=lambda state: None,
+    )
 
     result = application.notify_assignment_conversion(
         _assignment_conversion_notification()
@@ -440,7 +452,11 @@ def test_assignment_conversion_mixed_delivery_outcomes_fail_without_commit() -> 
             LineDeliveryCommandOutcome.EXISTING,
         ),
     )
-    application = MatchingNotificationApplication(lambda: unit_of_work, lambda: NOW)
+    application = MatchingNotificationApplication(
+        lambda: unit_of_work,
+        lambda: NOW,
+        availability_validator=lambda state: None,
+    )
 
     with pytest.raises(MatchingCommunicationConflictError):
         application.notify_assignment_conversion(

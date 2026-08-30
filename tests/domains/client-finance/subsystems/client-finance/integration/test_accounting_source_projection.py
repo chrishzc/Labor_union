@@ -56,11 +56,10 @@ class FakeConnection:
         self.closed = True
 
 
-def test_projects_raw_source_tables_and_explicit_gaps(monkeypatch):
+def test_projects_raw_source_tables_and_explicit_gaps():
     connection = FakeConnection()
-    monkeypatch.setattr(projection, "get_connection", lambda: connection)
 
-    result = projection.load_case_accounting_source("115000001")
+    result = projection.load_case_accounting_source("115000001", lambda: connection)
 
     assert result["case_no"] == "115000001"
     assert result["client"]["client_name"] == "王小明"
@@ -86,9 +85,8 @@ def test_projects_raw_source_tables_and_explicit_gaps(monkeypatch):
     assert connection.closed is True
 
 
-def test_missing_assignment_rate_is_reported(monkeypatch):
+def test_missing_assignment_rate_is_reported():
     connection = FakeConnection()
-    monkeypatch.setattr(projection, "get_connection", lambda: connection)
     original_execute = connection.cursor_instance.execute
 
     def execute_without_rate(sql, params):
@@ -98,14 +96,13 @@ def test_missing_assignment_rate_is_reported(monkeypatch):
 
     connection.cursor_instance.execute = execute_without_rate
 
-    result = projection.load_case_accounting_source("115000001")
+    result = projection.load_case_accounting_source("115000001", lambda: connection)
 
     assert "assignment:9:hourly_rate" in result["missing_terms"]
 
 
-def test_missing_collection_terms_are_reported_without_defaults(monkeypatch):
+def test_missing_collection_terms_are_reported_without_defaults():
     connection = FakeConnection()
-    monkeypatch.setattr(projection, "get_connection", lambda: connection)
     original_execute = connection.cursor_instance.execute
 
     def execute_without_schedule_terms(sql, params):
@@ -117,7 +114,7 @@ def test_missing_collection_terms_are_reported_without_defaults(monkeypatch):
 
     connection.cursor_instance.execute = execute_without_schedule_terms
 
-    result = projection.load_case_accounting_source("115000001")
+    result = projection.load_case_accounting_source("115000001", lambda: connection)
 
     assert result["collection_schedule"] == {
         "deposit_service_days": None,
@@ -132,12 +129,6 @@ def test_missing_collection_terms_are_reported_without_defaults(monkeypatch):
 
 def test_cursor_core_reuses_caller_transaction_without_owning_lifecycle(monkeypatch):
     cursor = FakeCursor()
-    monkeypatch.setattr(
-        projection,
-        "get_connection",
-        lambda: (_ for _ in ()).throw(AssertionError("core opened a connection")),
-    )
-
     result = projection.load_case_accounting_source_with_cursor(cursor, "115000001")
 
     assert result["case_no"] == "115000001"

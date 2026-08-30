@@ -24,7 +24,20 @@ from api.dependencies.admin_auth import (
 )
 from api.schemas.base import BaseResponse
 from api.error_contracts import internal_query_error
-from api.schemas.matches import MatchReplyRequest, MatchAssignRequest
+from api.schemas.matches import (
+    MatchAssignRequest,
+    MatchReplyRequest,
+    ActiveMatchingPlanStateView,
+    FormalPlanContactStateView,
+    ManualMatchingProfilesPreviewView,
+    ManualMatchingProfilesReceiptView,
+    MatchingCaregiverWillingnessReceiptView,
+    MatchingCustomerDecisionReceiptView,
+    MatchingNotificationReceiptView,
+    MatchingPlanCancellationReceiptView,
+    MatchingPlanReceiptView,
+    StaffRecommendationView,
+)
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.scheduling.matching_recommendation_application import (
     query_matching_recommendations,
@@ -37,6 +50,16 @@ from domains.scheduling.matching_communication import (
 )
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from shared_kernel.fingerprints import PreviewFingerprint
+from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.matching_recommendation_repository import MySqlMatchingRecommendationRepository
+from infrastructure.mysql.segmented_availability_repository import MySqlSegmentedAvailabilityFactsRepository
+from subsystems.scheduling import matching_plan_workflow as _matching_plan_workflow
+from subsystems.scheduling import matching_communication_workflow as _matching_communication_workflow
+
+
+_matching_plan_workflow.get_connection = get_connection
+_matching_communication_workflow.get_connection = get_connection
+_matching_facts_port = MySqlSegmentedAvailabilityFactsRepository(get_connection)
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.scheduling.matching_notification_application import (
     MatchingNotificationApplication,
@@ -54,6 +77,7 @@ router = APIRouter(prefix="/api/v1", tags=["Matches 案件配對與 LINE 訊息�
 matching_notifications = MatchingNotificationApplication(
     open_line_unit_of_work,
     lambda: datetime.now(timezone.utc),
+    availability_facts_port=_matching_facts_port,
 )
 
 
@@ -111,7 +135,7 @@ def _require_matching_actor(principal: AdminPrincipal, actor: str) -> None:
 
 @router.get(
     "/orders/{case_no}/matching-plans/{plan_id}/contact-state",
-    response_model=BaseResponse[Dict[str, Any]],
+    response_model=BaseResponse[FormalPlanContactStateView],
 )
 def get_matching_plan_contact_state_route(
     case_no: str,
@@ -125,7 +149,9 @@ def get_matching_plan_contact_state_route(
             plan_id,
         )
         return BaseResponse(
-            data=_contact_state_data(state),
+            data=FormalPlanContactStateView.model_validate(
+                _contact_state_data(state)
+            ),
             message="成功讀取配對聯繫與意願狀態",
         )
     except LookupError as error:
@@ -136,7 +162,7 @@ def get_matching_plan_contact_state_route(
 
 @router.get(
     "/orders/{case_no}/matching-plans/active",
-    response_model=BaseResponse[Dict[str, Any]],
+    response_model=BaseResponse[ActiveMatchingPlanStateView],
 )
 def get_active_matching_plan_state_route(
     case_no: str,
@@ -145,7 +171,9 @@ def get_active_matching_plan_state_route(
     del principal
     try:
         return BaseResponse(
-            data=get_active_matching_plan_state(case_no),
+            data=ActiveMatchingPlanStateView.model_validate(
+                get_active_matching_plan_state(case_no)
+            ),
             message="成功讀取目前有效配對方案",
         )
     except ValueError as error:
@@ -154,7 +182,7 @@ def get_active_matching_plan_state_route(
 
 @router.post(
     "/orders/{case_no}/matching-plans/{plan_id}/segments/{segment_id}/information",
-    response_model=BaseResponse[Dict[str, Any]],
+    response_model=BaseResponse[MatchingNotificationReceiptView],
 )
 def send_matching_plan_information_route(
     req: MatchingPlanInformationRequest,
@@ -166,16 +194,18 @@ def send_matching_plan_information_route(
     _require_matching_actor(principal, req.actor)
     try:
         return BaseResponse(
-            data=_notification_data(
-                matching_notifications.request_caregiver_information(
-                    RequestCaregiverInformationCommand(
-                        MatchingPlanReference(case_no, plan_id, req.expected_version),
-                        segment_id,
-                        MatchingNotificationKind(f"caregiver_info_{req.info_type}"),
-                        admin_actor_context(principal),
-                        ExpectedVersion(req.expected_version),
-                        IdempotencyKey(req.event_key),
-                        CorrelationId(f"matching-api:{req.event_key}"),
+            data=MatchingNotificationReceiptView.model_validate(
+                _notification_data(
+                    matching_notifications.request_caregiver_information(
+                        RequestCaregiverInformationCommand(
+                            MatchingPlanReference(case_no, plan_id, req.expected_version),
+                            segment_id,
+                            MatchingNotificationKind(f"caregiver_info_{req.info_type}"),
+                            admin_actor_context(principal),
+                            ExpectedVersion(req.expected_version),
+                            IdempotencyKey(req.event_key),
+                            CorrelationId(f"matching-api:{req.event_key}"),
+                        )
                     )
                 )
             ),
@@ -189,7 +219,7 @@ def send_matching_plan_information_route(
 
 @router.put(
     "/orders/{case_no}/matching-plans/{plan_id}/customer-decision",
-    response_model=BaseResponse[Dict[str, Any]],
+    response_model=BaseResponse[MatchingCustomerDecisionReceiptView],
 )
 def record_matching_customer_decision_route(
     req: MatchingPlanCustomerDecisionRequest,
@@ -212,7 +242,12 @@ def record_matching_customer_decision_route(
                 CorrelationId(f"matching-api:{req.event_key}"),
             )
         )
-        return BaseResponse(data=_response_data(result), message="成功補登客戶配對決策")
+        return BaseResponse(
+            data=MatchingCustomerDecisionReceiptView.model_validate(
+                _response_data(result)
+            ),
+            message="成功補登客戶配對決策",
+        )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
@@ -221,7 +256,7 @@ def record_matching_customer_decision_route(
 
 @router.put(
     "/orders/{case_no}/matching-plans/{plan_id}/segments/{segment_id}/willingness",
-    response_model=BaseResponse[Dict[str, Any]],
+    response_model=BaseResponse[MatchingCaregiverWillingnessReceiptView],
 )
 def record_matching_plan_willingness_route(
     req: MatchingPlanWillingnessRequest,
@@ -233,18 +268,20 @@ def record_matching_plan_willingness_route(
     _require_matching_actor(principal, req.actor)
     try:
         return BaseResponse(
-            data=_response_data(
-                matching_notifications.record_manual_response(
-                    RecordManualMatchingResponseCommand(
-                        MatchingPlanReference(case_no, plan_id, req.expected_version),
-                        segment_id,
-                        CaregiverWillingness(req.willingness),
-                        None,
-                        req.reason,
-                        admin_actor_context(principal),
-                        ExpectedVersion(req.expected_version),
-                        IdempotencyKey(req.event_key),
-                        CorrelationId(f"matching-api:{req.event_key}"),
+            data=MatchingCaregiverWillingnessReceiptView.model_validate(
+                _response_data(
+                    matching_notifications.record_manual_response(
+                        RecordManualMatchingResponseCommand(
+                            MatchingPlanReference(case_no, plan_id, req.expected_version),
+                            segment_id,
+                            CaregiverWillingness(req.willingness),
+                            None,
+                            req.reason,
+                            admin_actor_context(principal),
+                            ExpectedVersion(req.expected_version),
+                            IdempotencyKey(req.event_key),
+                            CorrelationId(f"matching-api:{req.event_key}"),
+                        )
                     )
                 )
             ),
@@ -258,7 +295,7 @@ def record_matching_plan_willingness_route(
 
 @router.post(
     "/orders/{case_no}/matching-plans/{plan_id}/resumes",
-    response_model=BaseResponse[Dict[str, Any]],
+    response_model=BaseResponse[MatchingNotificationReceiptView],
 )
 def send_matching_plan_resumes_route(
     req: MatchingPlanResumeRequest,
@@ -269,15 +306,17 @@ def send_matching_plan_resumes_route(
     _require_matching_actor(principal, req.actor)
     try:
         return BaseResponse(
-            data=_notification_data(
-                matching_notifications.request_customer_profiles(
-                    RequestCustomerProfilesCommand(
-                        MatchingPlanReference(case_no, plan_id, req.expected_version),
-                        req.note,
-                        admin_actor_context(principal),
-                        ExpectedVersion(req.expected_version),
-                        IdempotencyKey(req.event_key),
-                        CorrelationId(f"matching-api:{req.event_key}"),
+            data=MatchingNotificationReceiptView.model_validate(
+                _notification_data(
+                    matching_notifications.request_customer_profiles(
+                        RequestCustomerProfilesCommand(
+                            MatchingPlanReference(case_no, plan_id, req.expected_version),
+                            req.note,
+                            admin_actor_context(principal),
+                            ExpectedVersion(req.expected_version),
+                            IdempotencyKey(req.event_key),
+                            CorrelationId(f"matching-api:{req.event_key}"),
+                        )
                     )
                 )
             ),
@@ -291,7 +330,7 @@ def send_matching_plan_resumes_route(
 
 @router.post(
     "/orders/{case_no}/matching-plans/{plan_id}/resumes/manual-confirmation/preview",
-    response_model=BaseResponse[Dict[str, Any]],
+    response_model=BaseResponse[ManualMatchingProfilesPreviewView],
 )
 def preview_manual_matching_plan_resumes_route(
     req: ManualMatchingProfilesPreviewRequest,
@@ -311,7 +350,9 @@ def preview_manual_matching_plan_resumes_route(
             )
         )
         return BaseResponse(
-            data=_manual_profiles_preview_data(result),
+            data=ManualMatchingProfilesPreviewView.model_validate(
+                _manual_profiles_preview_data(result)
+            ),
             message="已預覽客戶履歷人工送達證據",
         )
     except LookupError as error:
@@ -322,7 +363,7 @@ def preview_manual_matching_plan_resumes_route(
 
 @router.post(
     "/orders/{case_no}/matching-plans/{plan_id}/resumes/manual-confirmation",
-    response_model=BaseResponse[Dict[str, Any]],
+    response_model=BaseResponse[ManualMatchingProfilesReceiptView],
 )
 def apply_manual_matching_plan_resumes_route(
     req: ManualMatchingProfilesApplyRequest,
@@ -345,7 +386,9 @@ def apply_manual_matching_plan_resumes_route(
             )
         )
         return BaseResponse(
-            data=_manual_profiles_receipt_data(result),
+            data=ManualMatchingProfilesReceiptView.model_validate(
+                _manual_profiles_receipt_data(result)
+            ),
             message="客戶履歷人工送達證據已留存",
         )
     except LookupError as error:
@@ -356,7 +399,7 @@ def apply_manual_matching_plan_resumes_route(
 
 @router.post(
     "/orders/{case_no}/matching-plans/{plan_id}/cancel",
-    response_model=BaseResponse[Dict[str, Any]],
+    response_model=BaseResponse[MatchingPlanCancellationReceiptView],
 )
 def cancel_matching_plan_route(
     req: MatchingPlanCancellationRequest,
@@ -367,8 +410,10 @@ def cancel_matching_plan_route(
     _require_matching_actor(principal, req.actor)
     try:
         return BaseResponse(
-            data=cancel_matching_plan(
-                case_no, plan_id, req.event_key, req.actor, req.reason
+            data=MatchingPlanCancellationReceiptView.model_validate(
+                cancel_matching_plan(
+                    case_no, plan_id, req.event_key, req.actor, req.reason
+                )
             ),
             message="已取消目前配對組合並保留歷史",
         )
@@ -378,7 +423,7 @@ def cancel_matching_plan_route(
 
 @router.post(
     "/orders/{case_no}/matching-plans",
-    response_model=BaseResponse[Dict[str, Any]],
+    response_model=BaseResponse[MatchingPlanReceiptView],
 )
 def create_matching_plan_version_route(
     case_no: str = Path(..., description="案件編號"),
@@ -395,8 +440,12 @@ def create_matching_plan_version_route(
             segments=segments,
             created_by=str(principal.username or "").strip(),
             as_of=as_of,
+            facts_port=_matching_facts_port,
         )
-        return BaseResponse(data=result, message="成功建立多月嫂配對計畫版本")
+        return BaseResponse(
+            data=MatchingPlanReceiptView.model_validate(result),
+            message="成功建立多月嫂配對計畫版本",
+        )
     except ValueError as error:
         message = str(error)
         if message == "case not found":
@@ -414,7 +463,10 @@ def create_matching_plan_version_route(
         raise HTTPException(status_code=500, detail="建立多月嫂配對計畫版本失敗")
 
 
-@router.get("/matches/recommend-staff", response_model=BaseResponse[list[dict]])
+@router.get(
+    "/matches/recommend-staff",
+    response_model=BaseResponse[list[StaffRecommendationView]],
+)
 
 
 def recommend_staff(
@@ -433,9 +485,14 @@ def recommend_staff(
             filter_region=filter_region,
             filter_schedule=filter_schedule,
             filter_babies=filter_babies,
-            filter_time=filter_time
+            filter_time=filter_time,
+            connection_factory=get_connection,
+            repository_factory=MySqlMatchingRecommendationRepository,
         )
-        return BaseResponse(data=data, message="成功計算月嫂智慧粗篩推薦名單")
+        return BaseResponse(
+            data=[StaffRecommendationView.model_validate(item) for item in data],
+            message="成功計算月嫂智慧粗篩推薦名單",
+        )
     except Exception as error:
         raise internal_query_error(
             "matching_recommendation_query_internal_error",
@@ -443,7 +500,7 @@ def recommend_staff(
             "matching-recommendation-query",
         ) from error
 
-@router.post("/matches/{match_id}/send-info-1", response_model=BaseResponse[Dict[str, Any]])
+@router.post("/matches/{match_id}/send-info-1", response_model=BaseResponse[None])
 def send_info_1(
     match_id: int = Path(..., description="配對紀錄 ID"),
     principal: AdminPrincipal = Depends(require_system_admin),
@@ -452,7 +509,7 @@ def send_info_1(
     del principal
     _raise_legacy_matching_gone(match_id)
 
-@router.post("/matches/{match_id}/send-info-2", response_model=BaseResponse[Dict[str, Any]])
+@router.post("/matches/{match_id}/send-info-2", response_model=BaseResponse[None])
 def send_info_2(
     match_id: int = Path(..., description="配對紀錄 ID"),
     principal: AdminPrincipal = Depends(require_system_admin),
@@ -481,7 +538,7 @@ def send_resume_to_client(
     _raise_legacy_matching_gone(match_id)
 
 
-@router.post("/orders/{case_no}/send-resume", response_model=BaseResponse[Dict[str, Any]])
+@router.post("/orders/{case_no}/send-resume", response_model=BaseResponse[None])
 def send_resume_for_case(
     case_no: str = Path(..., description="案件編號"),
     principal: AdminPrincipal = Depends(require_system_admin),

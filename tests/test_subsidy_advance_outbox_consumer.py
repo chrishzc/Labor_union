@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from subsystems.client_finance.subsidy_advance_outbox_consumer import (
+from subsystems.government_subsidy.subsidy_advance_outbox_consumer import (
     _allocation_event,
     _payload,
 )

@@ -8,7 +8,7 @@ import json
 import unicodedata
 from typing import Any
 
-from scripts.imports.finance_normalized_row import validate_normalized_row
+from domains.finance_import.normalized_row import validate_normalized_row
 
 
 _BANK_SOURCE = {
@@ -67,5 +67,4 @@ def build_dedup_fingerprint(normalized_row: dict[str, Any]) -> str:
     assert len(values) == len(_FINGERPRINT_FIELDS)
     payload = json.dumps(values, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
 

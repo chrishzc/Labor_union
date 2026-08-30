@@ -20,6 +20,33 @@ import {
   VALID_ANOMALY_RECOVERY_CONTEXT_VIEW,
 } from './fixtures/anomalies/anomaly_detail_contract_fixtures';
 
+const ALIGNED_DETAIL = {
+  ...VALID_ANOMALY_DETAIL_VIEW,
+  summary: {
+    ...VALID_ANOMALY_DETAIL_VIEW.summary,
+    fingerprint: VALID_ANOMALY_SUMMARY_1.fingerprint,
+    definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+    source_domain: VALID_ANOMALY_SUMMARY_1.source_domain,
+    source_identity: VALID_ANOMALY_SUMMARY_1.source_identity,
+    display_snapshot: {
+      ...VALID_ANOMALY_DETAIL_VIEW.summary.display_snapshot,
+      definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+    },
+  },
+};
+const ALIGNED_RECOVERY = {
+  ...VALID_ANOMALY_RECOVERY_CONTEXT_VIEW,
+  definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+  subject: {
+    ...VALID_ANOMALY_RECOVERY_CONTEXT_VIEW.subject,
+    definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+  },
+  details: {
+    ...VALID_ANOMALY_RECOVERY_CONTEXT_VIEW.details,
+    definition_code: VALID_ANOMALY_SUMMARY_1.definition_code,
+  },
+};
+
 describe('Anomalies no fake root mutation verification suite', () => {
   let alertSpy: MockInstance;
   let confirmSpy: MockInstance;
@@ -44,10 +71,10 @@ describe('Anomalies no fake root mutation verification suite', () => {
       VALID_IMPORT_WARNING_TASK_HCM,
     ]);
     vi.spyOn(anomalyDetailClient, 'queryAnomalyDetail').mockResolvedValue(
-      VALID_ANOMALY_DETAIL_VIEW
+      ALIGNED_DETAIL
     );
     vi.spyOn(anomalyDetailClient, 'queryAnomalyRecovery').mockResolvedValue(
-      VALID_ANOMALY_RECOVERY_CONTEXT_VIEW
+      ALIGNED_RECOVERY
     );
     vi.spyOn(anomalyQueryClient, 'queryImportWarningReferral').mockResolvedValue(
       VALID_IMPORT_WARNING_REFERRAL_VIEW
@@ -103,7 +130,7 @@ describe('Anomalies no fake root mutation verification suite', () => {
     });
 
     // Category click
-    const schedTab = screen.getByRole('button', { name: '排班調度' });
+    const schedTab = screen.getByRole('button', { name: /^排班調度/ });
     await act(async () => {
       fireEvent.click(schedTab);
     });

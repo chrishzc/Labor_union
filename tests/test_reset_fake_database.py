@@ -1,9 +1,12 @@
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from scripts import reset_fake_database as resetter
+
+
+def _config(database="lu_test_current", host="127.0.0.1"):
+    return {"host": host, "port": 3306, "database": database, "user": "tester", "password": "x"}
 
 
 def _assembly(tmp_path: Path):
@@ -14,150 +17,105 @@ def _assembly(tmp_path: Path):
         encoding="utf-8",
     )
     part.write_text("CREATE TABLE current_table (id INT PRIMARY KEY);", encoding="utf-8")
-    return SimpleNamespace(
-        assembly_id="current-test",
-        base_schema_path=base,
-        active_artifact_paths=(part,),
-    )
+    return type("Assembly", (), {
+        "assembly_id": "current-test",
+        "base_schema_path": base,
+        "active_artifact_paths": (part,),
+    })()
+
+
+def test_validate_target_requires_explicit_allowlisted_disposable_target():
+    with pytest.raises(resetter.FakeDatabaseResetError, match="lu_test"):
+        resetter.validate_target(_config("union_db"), {"APP_ENV": "development"}, "union_db")
+    with pytest.raises(resetter.FakeDatabaseResetError, match="exactly match"):
+        resetter.validate_target(_config("lu_test_a"), {"APP_ENV": "development"}, "lu_test_b")
+    assert resetter.validate_target(
+        _config("lu_test_a"), {"APP_ENV": "development"}, "lu_test_a"
+    ) == "lu_test_a"
+
+
+def test_validate_target_rejects_remote_and_production():
+    with pytest.raises(resetter.FakeDatabaseResetError, match="host"):
+        resetter.validate_target(_config(host="db.example.com"), {"APP_ENV": "development"}, "lu_test_current")
+    with pytest.raises(resetter.FakeDatabaseResetError, match="production"):
+        resetter.validate_target(_config(), {"APP_ENV": "production"}, "lu_test_current")
 
 
 def test_preview_uses_canonical_assembly_without_connecting(monkeypatch, tmp_path):
     assembly = _assembly(tmp_path)
-    monkeypatch.setattr(resetter, "DB_CONFIG", {
-        "host": "127.0.0.1", "port": 3306, "database": "union_db"
-    })
-    monkeypatch.setattr(
-        resetter, "_canonical_bootstrap_contract", lambda: (assembly, {})
+    monkeypatch.setattr(resetter, "_canonical_bootstrap_contract", lambda: (assembly, {"release_id": "r1"}))
+    monkeypatch.setattr(resetter, "expected_database_objects", lambda _manifest: {})
+    result = resetter.reset(
+        target_database="lu_test_current",
+        config=_config(),
+        environment={"APP_ENV": "development"},
+        connection_factory=lambda **_: pytest.fail("preview must not connect"),
     )
-    monkeypatch.setenv("APP_ENV", "development")
-
-    def refused_connection(**_kwargs):
-        raise AssertionError("preview must not connect")
-
-    result = resetter.reset(connection_factory=refused_connection)
-
     assert result["status"] == "preview"
     assert result["side_effects"] == "none"
-    assert result["mode"] == "canonical_empty_database"
-    assert result["terminal_schema_artifact"] == "1012_current.sql"
-    assert result["business_fixture"] == "none"
+    assert result["business_fixture_rows_loaded"] == 0
+    assert result["plan_fingerprint"]
 
 
-def test_apply_requires_exact_database_confirmation_before_connect(monkeypatch, tmp_path):
+def test_apply_requires_plan_backup_and_exact_confirmation_before_connect(monkeypatch, tmp_path):
     assembly = _assembly(tmp_path)
-    monkeypatch.setattr(resetter, "DB_CONFIG", {
-        "host": "localhost", "port": 3306, "database": "union_db"
-    })
-    monkeypatch.setattr(
-        resetter, "_canonical_bootstrap_contract", lambda: (assembly, {})
-    )
-    monkeypatch.setenv("APP_ENV", "development")
-
-    with pytest.raises(resetter.FakeDatabaseResetError, match="requires"):
-        resetter.reset(apply=True, connection_factory=lambda **_kwargs: None)
-
-
-def test_target_refuses_remote_production_and_non_union_database():
-    with pytest.raises(resetter.FakeDatabaseResetError, match="local MySQL"):
-        resetter.validate_target(
-            {"host": "db.example.com", "database": "union_db"},
-            {"APP_ENV": "development"},
-        )
-    with pytest.raises(resetter.FakeDatabaseResetError, match="must be union_db"):
-        resetter.validate_target(
-            {"host": "127.0.0.1", "database": "other"},
-            {"APP_ENV": "development"},
-        )
-    with pytest.raises(resetter.FakeDatabaseResetError, match="production"):
-        resetter.validate_target(
-            {"host": "127.0.0.1", "database": "union_db"},
-            {"APP_ENV": "production"},
-        )
-    with pytest.raises(resetter.FakeDatabaseResetError, match="development"):
-        resetter.validate_target(
-            {"host": "127.0.0.1", "database": "union_db"},
-            {"APP_ENV": "staging"},
+    monkeypatch.setattr(resetter, "_canonical_bootstrap_contract", lambda: (assembly, {"release_id": "r1"}))
+    monkeypatch.setattr(resetter, "expected_database_objects", lambda _manifest: {})
+    with pytest.raises(resetter.FakeDatabaseResetError, match="exact"):
+        resetter.reset(
+            apply=True,
+            target_database="lu_test_current",
+            confirm_database="wrong",
+            config=_config(),
+            environment={"APP_ENV": "development"},
+            connection_factory=lambda **_: pytest.fail("must not connect"),
         )
 
 
-def test_canonical_app_env_ignores_unrelated_legacy_environment_variables():
-    resetter.validate_target(
-        {"host": "127.0.0.1", "database": "union_db"},
-        {
-            "APP_ENV": "development",
-            "ENV": "Windows-user-environment-marker",
-            "FLASK_ENV": "legacy-value",
-        },
-    )
+def test_backup_receipt_requires_mysql_dump_and_exact_target(tmp_path):
+    path = tmp_path / "backup.sql"
+    path.write_text("-- MySQL dump\nUSE `lu_test_current`;\n", encoding="utf-8")
+    receipt = resetter._validate_backup(path, "lu_test_current")
+    assert receipt["target_database"] == "lu_test_current"
+    with pytest.raises(resetter.FakeDatabaseResetError, match="identify"):
+        resetter._validate_backup(path, "lu_test_other")
 
 
-def test_environment_profile_falls_back_only_when_app_env_is_missing():
-    resetter.validate_target(
-        {"host": "127.0.0.1", "database": "union_db"},
-        {"ENV": "development", "FLASK_ENV": "legacy-value"},
-    )
-
-
-def test_rebuild_executes_canonical_paths_and_postcheck(monkeypatch, tmp_path):
+def test_rebuild_executes_target_not_default_database(monkeypatch, tmp_path):
     assembly = _assembly(tmp_path)
     executed = []
 
     class Cursor:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def execute(self, statement, _parameters=None):
-            executed.append(statement)
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def execute(self, statement, _parameters=None): executed.append(statement)
 
     class Connection:
-        committed = False
-        rolled_back = False
-        closed = False
+        def cursor(self): return Cursor()
+        def commit(self): self.committed = True
+        def rollback(self): self.rolled_back = True
+        def close(self): self.closed = True
 
-        def cursor(self):
-            return Cursor()
-
-        def commit(self):
-            self.committed = True
-
-        def rollback(self):
-            self.rolled_back = True
-
-        def close(self):
-            self.closed = True
-
-    connection = Connection()
-    loaded = []
-    monkeypatch.setattr(
-        resetter,
-        "load_schema_paths",
-        lambda _cursor, paths: loaded.extend(paths) or [path.name for path in paths],
-    )
+    monkeypatch.setattr(resetter, "load_schema_paths", lambda _cursor, paths: [p.name for p in paths])
     monkeypatch.setattr(resetter, "expected_database_objects", lambda _manifest: {})
-    monkeypatch.setattr(
-        resetter, "verify_database_objects", lambda _cursor, _database, _expected: []
-    )
-
+    monkeypatch.setattr(resetter, "verify_database_objects", lambda *_args: [])
     report = resetter.rebuild_schema(
-        assembly,
-        {},
-        connection_factory=lambda **_kwargs: connection,
+        assembly, {}, "lu_test_current", config=_config(), connection_factory=lambda **_: Connection()
     )
-
-    assert connection.committed and connection.closed and not connection.rolled_back
-    assert loaded == list(assembly.active_artifact_paths)
-    assert "USE `union_db`" in executed
-    assert report["business_fixture_rows_loaded"] == 0
+    assert "USE `lu_test_current`" in executed
+    assert all("union_db" not in statement for statement in executed)
     assert report["schema_postcheck"] == "pass"
 
 
-def test_database_reset_preflight_uses_canonical_files_not_fixture():
-    from scripts.launcher_preflight import PROFILE_REQUIREMENTS
-
-    requirements = PROFILE_REQUIREMENTS["database-reset"]["files"]
-    assert "fixtures/db_snapshot_v2/v3/manifest.json" not in requirements
-    assert "db/schema_assembly/labor_union_fresh_schema_v1.json" in requirements
-    assert "db/cutover_releases/labor_union_validation_schema_v1.json" in requirements
+def test_terminal_receipt_verify_and_replay_are_read_only(monkeypatch, tmp_path):
+    path = tmp_path / "terminal.json"
+    path.write_text('{"receipt_status":"committed","target_database":"lu_test_current"}\n', encoding="utf-8")
+    for mode, expected in (("verify", "verified"), ("replay", "replayed")):
+        result = resetter.reset(
+            target_database="lu_test_current",
+            config=_config(),
+            environment={"APP_ENV": "development"},
+            receipt_path=path,
+            **{mode: True},
+        )
+        assert result["status"] == expected

@@ -10,20 +10,20 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import pymysql
 from fastapi import APIRouter, Depends
 
 from api.dependencies.admin_auth import require_line_viewer
+from api.dependencies.line_runtime import get_line_database_health
 from api.schemas.base import BaseResponse
 from api.schemas.line_admin import (
     LineAdminCapabilitiesView,
     LineAdminConfigFilesView,
+    LineAdminHealthView,
+    LineCredentialPresenceView,
+    LineDatabaseHealthView,
     LineAdminFeatureFlagsView,
     LineAdminRuntimeAvailabilityView,
 )
-from infrastructure.mysql.mysql_adapter import get_connection
-from infrastructure.mysql.line_runtime_repository import MySqlLineRuntimeRepository
-from subsystems.line.runtime_health import classify_line_worker_health
 from subsystems.access.authentication_session import AdminPrincipal
 
 
@@ -44,53 +44,23 @@ def _enabled(name: str) -> bool:
     return os.getenv(name, "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _database_health() -> dict:
-    try:
-        conn = get_connection()
-        try:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute("SELECT 1 AS ok")
-                database_ok = bool(cursor.fetchone()["ok"])
-                task_counts = _legacy_task_counts(cursor)
-            runtime = MySqlLineRuntimeRepository(conn)
-            heartbeat = runtime.latest_heartbeat()
-            queue_counts = runtime.queue_counts()
-        finally:
-            conn.close()
-        return {
-            "ok": database_ok,
-            "line_task_counts": task_counts,
-            "queue_counts": queue_counts,
-            "worker": classify_line_worker_health(
-                heartbeat,
-                stale_after_seconds=float(os.getenv("LINE_WORKER_STALE_SECONDS", "90")),
-            ),
-        }
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def _legacy_task_counts(cursor) -> dict[str, int]:
-    cursor.execute("SELECT status,COUNT(*) AS total FROM line_tasks GROUP BY status")
-    return {row["status"]: int(row["total"]) for row in cursor.fetchall()}
-
-
-@router.get("/health", response_model=BaseResponse[dict])
-def line_admin_health():
-    database = _database_health()
-    worker = database.get("worker", {"status": "unknown", "running": False})
-    status_text = "healthy" if database.get("ok") and worker.get("running") else "degraded"
+@router.get("/health", response_model=BaseResponse[LineAdminHealthView])
+def line_admin_health(
+    database: LineDatabaseHealthView = Depends(get_line_database_health),
+) -> BaseResponse[LineAdminHealthView]:
+    worker = database.worker
+    status_text = "healthy" if database.ok and worker.running else "degraded"
     return BaseResponse(
-        data={
-            "status": status_text,
-            "database": database,
-            "worker": worker,
-            "line_credentials": {
-                "channel_secret": _configured("LINE_CHANNEL_SECRET"),
-                "channel_access_token": _configured("LINE_CHANNEL_ACCESS_TOKEN"),
-                "liff_id": _configured("LINE_LIFF_ID"),
-            },
-        }
+        data=LineAdminHealthView(
+            status=status_text,
+            database=database,
+            worker=worker,
+            line_credentials=LineCredentialPresenceView(
+                channel_secret=_configured("LINE_CHANNEL_SECRET"),
+                channel_access_token=_configured("LINE_CHANNEL_ACCESS_TOKEN"),
+                liff_id=_configured("LINE_LIFF_ID"),
+            ),
+        )
     )
 
 

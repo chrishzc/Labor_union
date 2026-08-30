@@ -63,8 +63,6 @@ def test_pipeline_dispatches_only_inserted_rows_and_completes_batch(monkeypatch)
             },
         ],
     }
-    monkeypatch.setattr(importer, "normalize_workbook", lambda path: normalized)
-    monkeypatch.setattr(importer, "get_connection", lambda: connection)
     monkeypatch.setattr(importer, "load_finance_identity_maps", lambda cursor: {"staff_accounts": {}})
     monkeypatch.setattr(importer, "stage_finance_rows", lambda cursor, result, maps: staged)
 
@@ -88,7 +86,10 @@ def test_pipeline_dispatches_only_inserted_rows_and_completes_batch(monkeypatch)
         lambda cursor, batch_id: None,
     )
 
-    result = importer.import_finance_workbook("renamed.xlsx", dry_run=True)
+    result = importer.import_finance_workbook(
+        "renamed.xlsx", dry_run=True, connection_factory=lambda: connection,
+        normalizer=lambda _path: normalized,
+    )
 
     assert dispatched == [10, 12]
     assert result == {
@@ -142,8 +143,6 @@ def test_pipeline_dispatches_only_inserted_rows_and_completes_batch(monkeypatch)
 
 def test_downstream_error_rolls_back_entire_batch(monkeypatch):
     connection = Connection()
-    monkeypatch.setattr(importer, "normalize_workbook", lambda path: {"normalized_rows": []})
-    monkeypatch.setattr(importer, "get_connection", lambda: connection)
     monkeypatch.setattr(importer, "load_finance_identity_maps", lambda cursor: {})
     monkeypatch.setattr(
         importer,
@@ -164,7 +163,10 @@ def test_downstream_error_rolls_back_entire_batch(monkeypatch):
     )
 
     with pytest.raises(RuntimeError, match="downstream failed"):
-        importer.import_finance_workbook("input.xlsx", dry_run=True)
+        importer.import_finance_workbook(
+            "input.xlsx", dry_run=True, connection_factory=lambda: connection,
+            normalizer=lambda _path: {"normalized_rows": []},
+        )
 
     assert connection.commits == 0
     assert connection.rollbacks == 1

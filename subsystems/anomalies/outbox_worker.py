@@ -9,50 +9,26 @@ import asyncio
 from dataclasses import dataclass
 import time
 
-from domains.anomalies.registry import default_anomaly_registry
-from infrastructure.mysql.government_subsidy_anomaly_source import project_government_subsidy_anomaly_page
-from infrastructure.mysql.government_subsidy_assignment_drift_anomaly_source import project_government_subsidy_assignment_drift_page
-from infrastructure.mysql.government_subsidy_integrity_anomaly_source import project_government_subsidy_integrity_page
-from infrastructure.mysql.government_subsidy_reversal_anomaly_source import project_government_subsidy_reversal_anomaly_page
-from infrastructure.mysql.government_return_outbound_overage_anomaly_source import project_government_return_outbound_overage_page
-from infrastructure.mysql.mysql_adapter import get_connection
-from infrastructure.mysql.anomaly_registry_repository import MySqlAnomalyRepository
-from infrastructure.mysql.beclass_import_review_anomaly_source import project_beclass_import_review_page
-from infrastructure.mysql.process_reminder_anomaly_source import consume_process_reminder_anomaly_sources
-from infrastructure.mysql.scheduling_coverage_anomaly_source import MySqlSchedulingCoverageAnomalySource
 from shared_kernel.business_time import current_business_instant
-from subsystems.anomalies.alert_workflow import AnomalyApplication
-from subsystems.anomalies.beclass_import_outbox_consumer import consume_beclass_import_review_events
+from subsystems.case_import.beclass_import_outbox_consumer import consume_beclass_import_review_events
 from subsystems.anomalies.hcm_import_review_outbox_consumer import consume_hcm_import_review_events
-from subsystems.anomalies.hcm_resubmission_outbox_consumer import consume_hcm_resubmission_outbox
-from subsystems.anomalies.historical_order_adoption_outbox_consumer import (
+from subsystems.case_import.hcm_resubmission_outbox_consumer import consume_hcm_resubmission_outbox
+from subsystems.orders.historical_order_adoption_outbox_consumer import (
     consume_historical_order_adoption_review_events,
 )
-from subsystems.anomalies.historical_order_review_remediation_outbox_consumer import (
+from subsystems.orders.historical_order_review_remediation_outbox_consumer import (
     consume_historical_order_review_remediation_events,
 )
-from subsystems.anomalies.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
-from subsystems.anomalies.government_overpayment_anomaly_consumer import (
-    consume_government_overpayment_anomaly_events,
-)
-from subsystems.anomalies.client_over_refund_recovery_anomaly_consumer import (
-    consume_client_over_refund_recovery_anomaly_events,
-)
-from subsystems.anomalies.client_refund_underpayment_anomaly_consumer import (
-    consume_client_refund_underpayment_anomaly_events,
-)
-from subsystems.anomalies.staff_overpayment_recovery_anomaly_consumer import (
-    consume_staff_overpayment_recovery_anomaly_events,
-)
-from subsystems.anomalies.staff_payout_difference_anomaly_consumer import consume_staff_payout_difference_anomaly_events
+from subsystems.finance_import.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
 from subsystems.anomalies.government_subsidy_anomaly_source import GovernmentSubsidyAnomalyScanRequest
 from subsystems.anomalies.government_subsidy_assignment_drift_anomaly_source import GovernmentSubsidyAssignmentDriftScanRequest
 from subsystems.anomalies.government_subsidy_integrity_anomaly_source import GovernmentSubsidyIntegrityScanRequest
 from subsystems.anomalies.government_subsidy_reversal_anomaly_source import GovernmentSubsidyReversalScanRequest
 from subsystems.anomalies.government_return_outbound_overage_anomaly_source import GovernmentReturnOutboundOverageScanRequest
-from subsystems.anomalies.scheduling_coverage_anomaly_consumer import SchedulingCoverageAnomalyConsumer, SchedulingCoverageScanRequest
+from subsystems.anomalies.scheduling_coverage_anomaly_consumer import SchedulingCoverageScanRequest
 from subsystems.anomalies.staff_payables_anomaly_source import StaffPayablesAnomalyScanCursors, consume_staff_payables_anomaly_sources
-from subsystems.client_finance.subsidy_advance_outbox_consumer import (
+from subsystems.anomalies.ports import AnomalyRuntime, require_runtime
+from subsystems.government_subsidy.subsidy_advance_outbox_consumer import (
     consume_government_subsidy_advance_events,
 )
 from subsystems.orders.client_finance_outbox_consumer import (
@@ -113,41 +89,36 @@ def wake_architecture_outbox_worker() -> None:
     _wakeup_event.set()
 
 
-def _consume_once(source_scan_state: ArchitectureSourceScanState | None = None):
-    connection = get_connection()
+def _consume_once(source_scan_state: ArchitectureSourceScanState | None = None, runtime: AnomalyRuntime | None = None):
+    runtime = require_runtime(runtime)
+    connection = runtime.connection()
     try:
-        finance = consume_finance_import_anomaly_events(connection)
-        beclass = consume_beclass_import_review_events(connection)
-        hcm = consume_hcm_import_review_events(connection)
-        hcm_resubmission_delivered = consume_hcm_resubmission_outbox(connection)
-        historical_order = consume_historical_order_adoption_review_events(connection)
+        finance = consume_finance_import_anomaly_events(connection, runtime=runtime)
+        beclass = consume_beclass_import_review_events(connection, runtime=runtime)
+        hcm = consume_hcm_import_review_events(connection, runtime=runtime)
+        hcm_resubmission_delivered = consume_hcm_resubmission_outbox(connection, runtime=runtime)
+        historical_order = consume_historical_order_adoption_review_events(
+            connection, runtime=runtime
+        )
         historical_order_remediation = (
-            consume_historical_order_review_remediation_events(connection)
+            consume_historical_order_review_remediation_events(
+                connection, runtime=runtime
+            )
         )
         subsidy_advance_delivered, subsidy_advance_failed = (
-            consume_government_subsidy_advance_events(connection)
+            consume_government_subsidy_advance_events(
+                connection,
+                runtime.subsidy_advance_recovery_repository,
+            )
         )
-        overpayment_delivered, overpayment_failed = (
-            consume_government_overpayment_anomaly_events(connection)
-        )
-        client_recovery_delivered, client_recovery_failed = (
-            consume_client_over_refund_recovery_anomaly_events(connection)
-        )
-        client_underpayment_delivered, client_underpayment_failed = (
-            consume_client_refund_underpayment_anomaly_events(connection)
-        )
-        staff_recovery_delivered, staff_recovery_failed = (
-            consume_staff_overpayment_recovery_anomaly_events(connection)
-        )
-        staff_difference_delivered, staff_difference_failed = consume_staff_payout_difference_anomaly_events(connection)
         deposit_delivered, deposit_failed = consume_client_finance_orders_events(
             connection
         )
         access_control = consume_security_alert_outbox(connection)
-        source_delivered, source_failed = _consume_sources_if_due(connection, source_scan_state)
+        source_delivered, source_failed = _consume_sources_if_due(connection, source_scan_state, runtime)
         return ArchitectureDeliveryResult(
-            finance.delivered_count + beclass.delivered_count + hcm.delivered_count + hcm_resubmission_delivered + historical_order.delivered_count + historical_order_remediation.delivered_count + subsidy_advance_delivered + overpayment_delivered + client_recovery_delivered + client_underpayment_delivered + staff_recovery_delivered + staff_difference_delivered + deposit_delivered + access_control.delivered_count + source_delivered,
-            finance.failed_count + beclass.failed_count + hcm.failed_count + historical_order.failed_count + historical_order_remediation.failed_count + subsidy_advance_failed + overpayment_failed + client_recovery_failed + client_underpayment_failed + staff_recovery_failed + staff_difference_failed + deposit_failed + access_control.failed_count + source_failed,
+            finance.delivered_count + beclass.delivered_count + hcm.delivered_count + hcm_resubmission_delivered + historical_order.delivered_count + historical_order_remediation.delivered_count + subsidy_advance_delivered + deposit_delivered + access_control.delivered_count + source_delivered,
+            finance.failed_count + beclass.failed_count + hcm.failed_count + historical_order.failed_count + historical_order_remediation.failed_count + subsidy_advance_failed + deposit_failed + access_control.failed_count + source_failed,
         )
     finally:
         connection.close()
@@ -155,23 +126,25 @@ def _consume_once(source_scan_state: ArchitectureSourceScanState | None = None):
 
 def consume_architecture_outbox_once(
     source_scan_state: ArchitectureSourceScanState | None = None,
+    *,
+    runtime: AnomalyRuntime | None = None,
 ) -> ArchitectureDeliveryResult:
     """Run one complete API-owned delivery cycle without starting a background thread."""
-    return _consume_once(source_scan_state)
+    return _consume_once(source_scan_state, runtime)
 
 
-def _consume_sources_if_due(connection, state):
+def _consume_sources_if_due(connection, state, runtime: AnomalyRuntime):
     if state is None: return 0, 0
     now = time.monotonic()
     if state.cycle_complete() and now < state.next_cycle_at: return 0, 0
     if state.cycle_complete(): _restart_source_cycle(state)
-    results = _consume_source_pages(connection, state)
+    results = _consume_source_pages(connection, state, runtime)
     if state.cycle_complete(): state.next_cycle_at = now + _SOURCE_SCAN_INTERVAL_SECONDS
     return tuple(sum(result[index] for result in results) for index in (0, 1))
 
 
-def _consume_source_pages(connection, state):
-    return (_consume_staff_source(connection, state), _consume_scheduling_source(connection, state), _consume_government_subsidy_source(connection, state), _consume_government_subsidy_integrity_source(connection, state), _consume_government_subsidy_reversal_source(connection, state), _consume_government_subsidy_assignment_drift_source(connection, state), _consume_government_return_outbound_overage_source(connection, state), _consume_process_reminder_source(connection, state), _consume_beclass_review_source(connection, state))
+def _consume_source_pages(connection, state, runtime):
+    return (_consume_staff_source(connection, state, runtime), _consume_scheduling_source(connection, state, runtime), _consume_government_subsidy_source(connection, state, runtime), _consume_government_subsidy_integrity_source(connection, state, runtime), _consume_government_subsidy_reversal_source(connection, state, runtime), _consume_government_subsidy_assignment_drift_source(connection, state, runtime), _consume_government_return_outbound_overage_source(connection, state, runtime), _consume_process_reminder_source(connection, state, runtime), _consume_beclass_review_source(connection, state, runtime))
 
 
 def _restart_source_cycle(state):
@@ -182,21 +155,31 @@ def _restart_source_cycle(state):
     state.beclass_review_after_row_id = 0; state.beclass_review_exhausted = False
 
 
-def _consume_process_reminder_source(connection, state):
+def _consume_process_reminder_source(connection, state, runtime):
     if state.process_reminder_exhausted:
         return 0, 0
-    result = consume_process_reminder_anomaly_sources(connection, as_of=current_business_instant().date())
+    try:
+        with runtime.failure_unit_of_work(connection) as unit_of_work:
+            result = runtime.consume_process_reminder_anomaly_sources(
+                connection,
+                as_of=current_business_instant().date(),
+            )
+            if not result.succeeded:
+                state.process_reminder_exhausted = True
+                return 0, 1
+            unit_of_work.commit()
+    except Exception:
+        state.process_reminder_exhausted = True
+        return 0, 1
     state.process_reminder_exhausted = True
-    if result.succeeded:
-        return result.projected_count, 0
-    return 0, 1
+    return result.projected_count, 0
 
 
-def _consume_beclass_review_source(connection, state):
+def _consume_beclass_review_source(connection, state, runtime):
     if state.beclass_review_exhausted:
         return 0, 0
     try:
-        result = project_beclass_import_review_page(
+        result = runtime.project_beclass_import_review_page(
             connection,
             after_review_row_id=state.beclass_review_after_row_id,
             limit=_SOURCE_SCAN_PAGE_SIZE,
@@ -209,8 +192,8 @@ def _consume_beclass_review_source(connection, state):
     return result.projected_count, 0
 
 
-def _consume_staff_source(connection, state):
-    result = consume_staff_payables_anomaly_sources(connection, as_of=current_business_instant().date(), maximum_items=_SOURCE_SCAN_PAGE_SIZE, cursors=state.staff_payables)
+def _consume_staff_source(connection, state, runtime):
+    result = runtime.consume_staff_payables_anomaly_sources(connection, as_of=current_business_instant().date(), maximum_items=_SOURCE_SCAN_PAGE_SIZE, cursors=state.staff_payables)
     if result.succeeded:
         state.staff_payables = result.cursors
         return result.projected_count, 0
@@ -218,21 +201,23 @@ def _consume_staff_source(connection, state):
     return 0, 1
 
 
-def _consume_scheduling_source(connection, state):
+def _consume_scheduling_source(connection, state, runtime):
     if state.scheduling_exhausted: return 0, 0
     try:
-        connection.begin(); result = _scheduling_consumer(connection).scan_page(SchedulingCoverageScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.scheduling_after_source_identity)); connection.commit()
+        with runtime.failure_unit_of_work(connection) as unit_of_work:
+            result = runtime.scheduling_coverage_consumer(connection).scan_page(SchedulingCoverageScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.scheduling_after_source_identity))
+            unit_of_work.commit()
     except Exception:
-        connection.rollback(); state.scheduling_exhausted = True; return 0, 1
+        state.scheduling_exhausted = True; return 0, 1
     state.scheduling_after_source_identity = result.next_source_identity; state.scheduling_exhausted = result.next_source_identity is None
     return len(result.projections), 0
 
 
-def _consume_government_subsidy_source(connection, state): return _consume_bounded_source(connection, state, GovernmentSubsidyAnomalyScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_after_row_id), project_government_subsidy_anomaly_page, "next_finance_import_row_id", "government_subsidy_after_row_id", "government_subsidy_exhausted")
-def _consume_government_subsidy_integrity_source(connection, state): return _consume_bounded_source(connection, state, GovernmentSubsidyIntegrityScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_integrity_after_batch_id), project_government_subsidy_integrity_page, "next_batch_id", "government_subsidy_integrity_after_batch_id", "government_subsidy_integrity_exhausted")
-def _consume_government_subsidy_reversal_source(connection, state): return _consume_bounded_source(connection, state, GovernmentSubsidyReversalScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_reversal_after_row_id), project_government_subsidy_reversal_anomaly_page, "next_finance_import_row_id", "government_subsidy_reversal_after_row_id", "government_subsidy_reversal_exhausted")
-def _consume_government_subsidy_assignment_drift_source(connection, state): return _consume_bounded_source(connection, state, GovernmentSubsidyAssignmentDriftScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_assignment_drift_after_claim_item_id), project_government_subsidy_assignment_drift_page, "next_claim_item_id", "government_subsidy_assignment_drift_after_claim_item_id", "government_subsidy_assignment_drift_exhausted")
-def _consume_government_return_outbound_overage_source(connection, state): return _consume_bounded_source(connection, state, GovernmentReturnOutboundOverageScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_return_outbound_overage_after_row_id), project_government_return_outbound_overage_page, "next_finance_import_row_id", "government_return_outbound_overage_after_row_id", "government_return_outbound_overage_exhausted")
+def _consume_government_subsidy_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentSubsidyAnomalyScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_after_row_id), runtime.project_government_subsidy_anomaly_page, "next_finance_import_row_id", "government_subsidy_after_row_id", "government_subsidy_exhausted")
+def _consume_government_subsidy_integrity_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentSubsidyIntegrityScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_integrity_after_batch_id), runtime.project_government_subsidy_integrity_page, "next_batch_id", "government_subsidy_integrity_after_batch_id", "government_subsidy_integrity_exhausted")
+def _consume_government_subsidy_reversal_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentSubsidyReversalScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_reversal_after_row_id), runtime.project_government_subsidy_reversal_page, "next_finance_import_row_id", "government_subsidy_reversal_after_row_id", "government_subsidy_reversal_exhausted")
+def _consume_government_subsidy_assignment_drift_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentSubsidyAssignmentDriftScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_assignment_drift_after_claim_item_id), runtime.project_government_subsidy_assignment_drift_page, "next_claim_item_id", "government_subsidy_assignment_drift_after_claim_item_id", "government_subsidy_assignment_drift_exhausted")
+def _consume_government_return_outbound_overage_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentReturnOutboundOverageScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_return_outbound_overage_after_row_id), runtime.project_government_return_outbound_overage_page, "next_finance_import_row_id", "government_return_outbound_overage_after_row_id", "government_return_outbound_overage_exhausted")
 
 
 def _consume_bounded_source(connection, state, request, projector, next_cursor_field, state_cursor_field, exhausted_field):
@@ -243,15 +228,11 @@ def _consume_bounded_source(connection, state, request, projector, next_cursor_f
     return len(result.projections), 0
 
 
-def _scheduling_consumer(connection):
-    return SchedulingCoverageAnomalyConsumer(MySqlSchedulingCoverageAnomalySource(connection), AnomalyApplication(default_anomaly_registry(), MySqlAnomalyRepository(connection), BorrowedAnomalyUnitOfWork))
-
-
-async def architecture_outbox_worker_loop() -> None:
+async def architecture_outbox_worker_loop(runtime: AnomalyRuntime) -> None:
     state = ArchitectureSourceScanState.start()
     while True:
         try:
-            result = await asyncio.to_thread(_consume_once, state)
+            result = await asyncio.to_thread(_consume_once, state, runtime)
             if result.delivered_count: continue
             _wakeup_event.clear()
             try: await asyncio.wait_for(_wakeup_event.wait(), timeout=_POLL_INTERVAL_SECONDS)
@@ -262,9 +243,9 @@ async def architecture_outbox_worker_loop() -> None:
             await asyncio.sleep(5)
 
 
-def start_architecture_outbox_worker() -> asyncio.Task[None]:
+def start_architecture_outbox_worker(runtime: AnomalyRuntime) -> asyncio.Task[None]:
     global _worker_task
-    _worker_task = asyncio.create_task(architecture_outbox_worker_loop(), name="architecture-outbox-worker")
+    _worker_task = asyncio.create_task(architecture_outbox_worker_loop(runtime), name="architecture-outbox-worker")
     return _worker_task
 
 

@@ -7,7 +7,10 @@ from datetime import date, datetime
 from decimal import Decimal, ROUND_CEILING
 from typing import Any
 
-from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.scheduling.ports import unconfigured_connection_factory
+
+
+get_connection = unconfigured_connection_factory
 
 
 class AssignmentScheduleConflictSnapshotDomainError(Exception):

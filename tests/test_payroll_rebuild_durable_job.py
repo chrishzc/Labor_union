@@ -18,7 +18,7 @@ from shared_kernel.identities import (
 )
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.jobs.command_application import DurableJobAcceptance
-from subsystems.jobs.durable_job_worker import (
+from api.dependencies.durable_job_handlers import (
     default_job_handlers,
     payroll_rebuild_apply_handler,
 )

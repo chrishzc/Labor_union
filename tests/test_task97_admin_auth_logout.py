@@ -28,7 +28,7 @@ def test_logout_returns_closed_typed_result_and_preserves_bearer_path(monkeypatc
     principal = AdminPrincipal(7, "operator", "操作人員", "line_viewer")
     revoked_tokens: list[str] = []
 
-    def revoke(token: str) -> None:
+    def revoke(token: str, **_kwargs) -> None:
         revoked_tokens.append(token)
 
     monkeypatch.setattr(admin_auth, "revoke_admin_session", revoke)
@@ -47,13 +47,13 @@ def test_logout_returns_closed_typed_result_and_preserves_bearer_path(monkeypatc
 
 def test_logout_direct_result_is_typed_and_storage_failure_remains_typed_http_error(monkeypatch):
     principal = AdminPrincipal(7, "operator", "操作人員", "line_viewer")
-    monkeypatch.setattr(admin_auth, "revoke_admin_session", lambda _token: None)
+    monkeypatch.setattr(admin_auth, "revoke_admin_session", lambda _token, **_kwargs: None)
 
     result = asyncio.run(admin_auth.logout("Bearer opaque-session-token", principal))
     assert isinstance(result.data, AdminLogoutResponse)
     assert result.data.logged_out is True
 
-    def unavailable(_token: str) -> None:
+    def unavailable(_token: str, **_kwargs) -> None:
         raise AdminSessionStorageError("session storage unavailable")
 
     monkeypatch.setattr(admin_auth, "revoke_admin_session", unavailable)

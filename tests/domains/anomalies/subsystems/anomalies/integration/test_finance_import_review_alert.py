@@ -44,7 +44,7 @@ def test_project_creates_import_alert_for_occurrence_integrity_mismatch(monkeypa
         },
     )
 
-    result = subject.project_finance_import_review_alert(cursor, 4)
+    result = subject.project_finance_import_review_alert(cursor, 4, runtime=object())
 
     assert result["alert_action"] == "created"
     assert result["summary"]["integrity_inconsistent_count"] == 1
@@ -66,7 +66,7 @@ def test_project_keeps_consistent_batch_without_active_alert(monkeypatch):
         lambda *args, **kwargs: {"action": "existing", "alert": None},
     )
 
-    result = subject.project_finance_import_review_alert(cursor, 4)
+    result = subject.project_finance_import_review_alert(cursor, 4, runtime=object())
 
     assert result["alert_action"] == "existing"
     assert result["alert"] is None
@@ -117,6 +117,7 @@ def test_project_also_mirrors_into_canonical_anomaly_registry(monkeypatch):
         *,
         source_version,
         source_event_identity,
+        **_kwargs,
     ):
         captured["batch_id"] = batch_id
         captured["active"] = summary["integrity_inconsistent_count"] > 0
@@ -126,7 +127,7 @@ def test_project_also_mirrors_into_canonical_anomaly_registry(monkeypatch):
 
     monkeypatch.setattr(subject, "_project_canonical_import006_alert", _fake_canonical_projection)
 
-    subject.project_finance_import_review_alert(cursor, 4)
+    subject.project_finance_import_review_alert(cursor, 4, runtime=object())
 
     assert captured["batch_id"] == 4
     assert captured["active"] is True

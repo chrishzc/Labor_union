@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 from datetime import date
+from pathlib import Path
 
 from domains.case_import.hcm_resubmission import (
     HcmResubmissionFacts,
@@ -16,17 +17,19 @@ from domains.case_import.hcm_resubmission import (
 from subsystems.case_import.hcm_resubmission_source import hcm_resubmission_target_values
 
 
-def _facts(*, code: str = "HCM-FIELD-001", field: str = "身分資格") -> HcmResubmissionFacts:
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _facts(*, code: str = "HCM-FIELD-001", field: str = "服務方式") -> HcmResubmissionFacts:
     return HcmResubmissionFacts(
-        occurrence_identity="import-warning:sample",
-        occurrence_id=1,
+        review_identity="hcm-review:sample",
         logical_code=code,
         field_path=field,
         case_no="HCM-001",
         client_id=2,
         review_binding_id=3,
         prior_source_event_identity="hcm-source:prior",
-        occurrence_version=1,
+        review_version=1,
         root_fingerprint="a" * 64,
     )
 
@@ -34,14 +37,22 @@ def _facts(*, code: str = "HCM-FIELD-001", field: str = "身分資格") -> HcmRe
 def test_correction_adopts_only_the_prior_warning_field() -> None:
     candidate = build_hcm_field_correction_candidate(
         _facts(),
-        {"身分資格": "一般市民", "姓名": "不應覆寫的既有姓名"},
+        {"服務方式": "週休二日", "姓名": "不應覆寫的既有姓名"},
         {},
-        {"clients.identity_status": "一般市民"},
+        {"clients.service_type": "週休二日"},
     )
 
-    assert candidate.source_field == "身分資格"
-    assert candidate.target_fields == ("clients.identity_status",)
-    assert candidate.target_values == {"clients.identity_status": "一般市民"}
+    assert candidate.source_field == "服務方式"
+    assert candidate.target_fields == ("clients.service_type",)
+    assert candidate.target_values == {"clients.service_type": "週休二日"}
+
+
+def test_canonical_hcm_writer_does_not_append_legacy_occurrence_association() -> None:
+    source = (
+        ROOT / "infrastructure/mysql/hcm_resubmission_repository.py"
+    ).read_text(encoding="utf-8")
+
+    assert "import_warning_resubmission_associations" not in source
 
 
 @pytest.mark.parametrize(
@@ -50,6 +61,7 @@ def test_correction_adopts_only_the_prior_warning_field() -> None:
         ("服務時間", ("orders.service_hours_per_day", "orders.service_start_time", "orders.service_end_time", "orders.service_end_day_offset")),
         ("預計服務日期", ("orders.start_date", "orders.end_date")),
         ("希望服務天數", ("orders.service_days", "orders.end_date")),
+        ("服務方式", ("clients.service_type",)),
     ],
 )
 def test_order_warning_field_has_a_fixed_derived_write_set(field_path, targets) -> None:
@@ -66,13 +78,24 @@ def test_service_day_warning_derives_only_days_and_end_date() -> None:
     assert values == {"orders.service_days": 2, "orders.end_date": date(2026, 8, 4)}
 
 
+def test_service_type_correction_is_client_owned_and_does_not_write_order_end_date() -> None:
+    values = hcm_resubmission_target_values(
+        "服務方式",
+        {"service_start_date": date(2026, 8, 3), "service_days": 2, "service_type": "週休2日"},
+        holiday_dates=set(),
+    )
+
+    assert values == {"clients.service_type": "週休2日"}
+
+
 @pytest.mark.parametrize(
     ("facts", "record", "errors", "target_values", "code"),
     [
         (_facts(code="HCM-CASE-002", field="$source_row"), {"姓名": "x"}, {}, {}, "hcm_resubmission_field_scope_ambiguous"),
         (_facts(field="案件狀態"), {"案件狀態": "符合"}, {}, {}, "hcm_resubmission_field_not_owned"),
-        (_facts(), {"身分資格": "一般市民"}, {"身分資格": "格式錯誤"}, {}, "hcm_resubmission_field_still_invalid"),
-        (_facts(), {"身分資格": "一般市民"}, {}, {"clients.name": "不得寫入"}, "hcm_resubmission_target_values_invalid"),
+        (_facts(), {"服務方式": "週休二日"}, {"服務方式": "格式錯誤"}, {}, "hcm_resubmission_field_still_invalid"),
+        (_facts(), {"服務方式": "週休二日"}, {}, {"clients.name": "不得寫入"}, "hcm_resubmission_target_values_invalid"),
+        (_facts(field="身分資格"), {"身分資格": "一般市民"}, {}, {"clients.identity_status": "一般市民"}, "hcm_resubmission_field_not_owned"),
     ],
 )
 def test_correction_fails_closed_when_the_warning_cannot_define_one_safe_write(

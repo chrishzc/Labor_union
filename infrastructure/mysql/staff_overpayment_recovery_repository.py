@@ -140,7 +140,6 @@ class MySqlStaffOverpaymentRecoveryRepository:
                 "event_type": "staff_overpayment_recovery_matched",
             }
             cursor.execute("INSERT INTO staff_overpayment_recovery_matching_receipts (idempotency_key,command_fingerprint,preview_fingerprint,matching_identity,result_snapshot) VALUES (%s,%s,%s,%s,%s)", (request.idempotency_key.value, command_fingerprint.value, request.preview_fingerprint.value, receipt.matching_identity, json.dumps(snapshot, sort_keys=True)))
-            cursor.execute("INSERT INTO staff_payables_outbox (staff_id,intent_key,intent_type,payload_snapshot) VALUES (%s,%s,'staff_overpayment_recovery_matched',%s)", (candidate.staff_id, f"staff-overpayment-recovery-match:{request.idempotency_key.value}", json.dumps(snapshot, sort_keys=True)))
 
     def persist(self, request: StaffOverpaymentRecoveryApplyRequest, preview: StaffOverpaymentRecoveryPreview, receipt: StaffOverpaymentRecoveryReceipt, command_fingerprint: PreviewFingerprint) -> None:
         candidate = preview.candidate
@@ -170,9 +169,6 @@ class MySqlStaffOverpaymentRecoveryRepository:
             cursor.execute("UPDATE staff_payable_accounts SET aggregate_version=%s WHERE staff_id=%s AND aggregate_version=%s", (receipt.staff_payables_version, candidate.staff_id, preview.staff_payables_version))
             if cursor.rowcount != 1:
                 raise ValueError("staff_overpayment_recovery_stale")
-            cursor.execute("INSERT INTO staff_payables_outbox (staff_id,intent_key,intent_type,payload_snapshot) VALUES (%s,%s,'staff_overpayment_recovery_updated',%s)", (candidate.staff_id, f"staff-overpayment-recovery:{request.idempotency_key.value}", json.dumps({"event_type": "staff_overpayment_recovery_updated", "recovery_identity": receipt.recovery_identity, "recovery_version": receipt.recovery_version, "status": receipt.resulting_status, "matching_identity": request.selection.matching_identity, "evidence_reference": request.evidence_reference}, sort_keys=True)))
-            if request.selection.matching_identity is not None and receipt.resulting_status == "recovered":
-                cursor.execute("INSERT INTO staff_payables_outbox (staff_id,intent_key,intent_type,payload_snapshot) VALUES (%s,%s,'staff_overpayment_recovery_collected',%s)", (candidate.staff_id, f"staff-overpayment-recovery-collected:{request.idempotency_key.value}", json.dumps({"event_type": "staff_overpayment_recovery_collected", "recovery_identity": receipt.recovery_identity, "recovery_version": receipt.recovery_version, "status": receipt.resulting_status, "matching_identity": request.selection.matching_identity, "evidence_reference": request.evidence_reference}, sort_keys=True)))
             cursor.execute("INSERT INTO staff_overpayment_recovery_apply_receipts (idempotency_key,command_fingerprint,preview_fingerprint,recovery_identity,result_snapshot) VALUES (%s,%s,%s,%s,%s)", (request.idempotency_key.value, command_fingerprint.value, receipt.preview_fingerprint.value, receipt.recovery_identity, json.dumps(_receipt_payload(receipt), sort_keys=True)))
 
     def query_recovery(self, staff_id: int, recovery_identity: str) -> StaffOverpaymentRecoveryQueryView:

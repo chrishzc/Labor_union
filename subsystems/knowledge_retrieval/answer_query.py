@@ -2,16 +2,6 @@
 
 from typing import Any
 
-from infrastructure.mysql.knowledge_retrieval_repository import query_published_knowledge
-
-
-def answer_line_question(question: str) -> str | None:
-    result = query_published_knowledge(question)
-    if result is None:
-        return None
-    return _format_cited_answer(result)
-
-
 def _format_cited_answer(result: dict[str, Any]) -> str:
     sources = "；".join(
         f"{citation['source_uri']}（v{citation['version']}）"

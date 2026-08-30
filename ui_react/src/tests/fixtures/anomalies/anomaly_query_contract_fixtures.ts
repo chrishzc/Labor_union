@@ -18,6 +18,7 @@ import type {
 
 export const VALID_ANOMALY_SUMMARY_1: AnomalySummaryView = {
   fingerprint: '8f48483d980d2105151522a36a7f05ee461e78a63574a3f1244d2d6c66cf17f8',
+  issue_key: `ci_${'1'.repeat(64)}`,
   definition_code: 'SCHEDULE-001',
   source_domain: 'scheduling',
   source_identity: 'assignment:102',
@@ -35,6 +36,7 @@ export const VALID_ANOMALY_SUMMARY_1: AnomalySummaryView = {
 
 export const VALID_ANOMALY_SUMMARY_2: AnomalySummaryView = {
   fingerprint: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f90123456789abcdef0123456789a',
+  issue_key: `ci_${'2'.repeat(64)}`,
   definition_code: 'FINANCE-002',
   source_domain: 'client_finance',
   source_identity: 'receivable:501',
@@ -49,6 +51,7 @@ export const VALID_ANOMALY_SUMMARY_2: AnomalySummaryView = {
 
 export const VALID_ANOMALY_SUMMARY_3: AnomalySummaryView = {
   fingerprint: 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
+  issue_key: `ci_${'3'.repeat(64)}`,
   definition_code: 'IMPORT-003',
   source_domain: 'case_import',
   source_identity: 'import:88',

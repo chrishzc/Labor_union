@@ -39,6 +39,17 @@ from infrastructure.mysql.process_reminder_anomaly_source import (
 )
 
 
+class _BorrowedAnomalyUnitOfWork:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exception_type, exception, traceback):
+        return False
+
+    def commit(self):
+        return None
+
+
 def test_database_identity_guards_fail_closed() -> None:
     with pytest.raises(UpgradeBlocked):
         validate_database_names("union_db", "union_db")
@@ -1564,7 +1575,7 @@ def test_real_mysql_preserved_source_candidate_cutover(tmp_path: Path) -> None:
                 summary = consume_process_reminder_anomaly_sources(
                     connection,
                     as_of=date.today(),
-                    owns_transaction=False,
+                    unit_of_work_factory=lambda: _BorrowedAnomalyUnitOfWork(),
                 )
                 assert summary.succeeded
                 assert summary.projected_count > 0

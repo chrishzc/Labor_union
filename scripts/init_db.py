@@ -6,10 +6,13 @@ Description: 以唯一 schema assembly 初始化本機資料庫，不從目錄�
 import sys
 import os
 import re
-import argparse
 from pathlib import Path
-import pymysql
 from dotenv import load_dotenv
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from scripts.sql_statements import split_sql
 from scripts.schema_assembly import load_schema_assembly
 
@@ -63,122 +66,21 @@ def _schema_part_sort_key(path: Path) -> tuple[int, str, str]:
         return int(match.group(1)), match.group(2).lower(), path.name
     return 10**9, "", path.name
 
-def main(argv: list[str] | None = None):
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--allow-drop",
-        action="store_true",
-        help="允許執行 db/schema.sql 內的 DROP DATABASE；僅限明確重建本機資料庫時使用。",
+def main(argv: list[str] | None = None) -> int:
+    """Retired executable entrypoint; schema helpers remain importable.
+
+    Fresh schema work is owned by ``scripts.reset_fake_database``.  Keeping a
+    fail-closed shim here prevents old runbooks from silently writing a
+    configured database while preserving the helper functions used by tests
+    and the canonical disposable bootstrapper.
+    """
+    del argv
+    print(
+        "[blocked] scripts.init_db is a library-only schema helper; "
+        "use scripts.reset_fake_database for an explicit lu_test_* target.",
+        file=sys.stderr,
     )
-    args = parser.parse_args([] if argv is None else argv)
-    schema_path = r'db/schema.sql'
-    if not os.path.exists(schema_path):
-        # 嘗試相對路徑
-        schema_path = os.path.join(os.path.dirname(__file__), '..', 'db', 'schema.sql')
-        
-    if not os.path.exists(schema_path):
-        print(f"錯誤：找不到 schema.sql 檔案，路徑：{schema_path}")
-        return
-
-    print(f"正在讀取 {schema_path}...")
-    with open(schema_path, 'r', encoding='utf-8') as f:
-        sql_content = f.read()
-
-    if "DROP DATABASE" in sql_content.upper() and not args.allow_drop:
-        print("[安全停止] db/schema.sql 會重建整個 union_db。")
-        print("一般更新資料表請勿使用 scripts/init_db.py。")
-        print("若你確定要重建本機資料庫，請改用 ./reset_DB.sh，或明確加上 --allow-drop。")
-        return
-
-    # 簡單用分號分割 SQL 語句 (排除空行)
-    # ponytail: split by semicolon and filter out comments or empty statements
-    statements = []
-    current_stmt = []
-    for line in sql_content.split('\n'):
-        # 忽略單行注釋
-        if line.strip().startswith('--'):
-            continue
-        if ';' in line:
-            parts = line.split(';')
-            current_stmt.append(parts[0])
-            statements.append('\n'.join(current_stmt).strip())
-            current_stmt = [parts[1]] if len(parts) > 1 else []
-        else:
-            current_stmt.append(line)
-            
-    if current_stmt and '\n'.join(current_stmt).strip():
-        statements.append('\n'.join(current_stmt).strip())
-
-    print(f"解析出 {len(statements)} 個 SQL 語句，準備執行...")
-    
-    try:
-        connection = pymysql.connect(**DB_CONFIG)
-        with connection.cursor() as c:
-            c.execute("SET NAMES utf8mb4;")
-        print("成功連線至 MySQL 伺服器！")
-    except Exception as e:
-        print(f"無法連線至 MySQL 伺服器：{e}\n請確認 Docker 中的 MySQL 容器是否已啟動，且連接埠為 3306。")
-        return
-
-    success_count = 0
-    try:
-        with connection.cursor() as cursor:
-            for i, stmt in enumerate(statements):
-                stmt_clean = stmt.strip()
-                if not stmt_clean:
-                    continue
-                try:
-                    cursor.execute(stmt_clean)
-                    success_count += 1
-                except Exception as stmt_err:
-                    print(f"執行第 {i+1} 個語句時出錯：{stmt_err}")
-                    print(f"出錯語句：\n{stmt_clean[:200]}...\n")
-                    raise stmt_err
-
-            assembly = load_schema_assembly()
-            loaded_parts = load_schema_paths(cursor, assembly.active_artifact_paths)
-            if loaded_parts:
-                print(f"已依序載入 Schema parts：{', '.join(loaded_parts)}")
-            
-            connection.commit()
-            print(f"\n====== 資料庫 Schema 更新成功！共執行 {success_count} 個語句 ======")
-            
-            # 預載 2026 年中華民國核心國定假日
-            holidays_2026 = [
-                ('2026-01-01', '中華民國開國紀念日(元旦)', False),
-                ('2026-02-17', '農曆除夕', False),
-                ('2026-02-18', '春節初一', False),
-                ('2026-02-19', '春節初二', False),
-                ('2026-02-20', '春節初三', False),
-                ('2026-02-21', '春節初四', False),
-                ('2026-02-22', '春節初五', False),
-                ('2026-02-27', '和平紀念日(補假)', False),
-                ('2026-02-28', '和平紀念日', False),
-                ('2026-04-03', '兒童節', False),
-                ('2026-04-04', '清明節/民族掃墓節', False),
-                ('2026-06-19', '端午節', False),
-                ('2026-09-25', '中秋節', False),
-                ('2026-10-09', '國慶日(補假)', False),
-                ('2026-10-10', '國慶日', False)
-            ]
-            
-            with connection.cursor() as cursor:
-                for date_str, name, is_double in holidays_2026:
-                    cursor.execute("""
-                        INSERT INTO holidays (holiday_date, holiday_name, is_double_pay_default)
-                        VALUES (%s, %s, %s)
-                        ON DUPLICATE KEY UPDATE holiday_name = %s, is_double_pay_default = %s
-                    """, (date_str, name, is_double, name, is_double))
-            connection.commit()
-            print("====== 2026 年中華民國國定假日預載成功 ======")
-            
-    except Exception as e:
-        connection.rollback()
-        print(f"執行失敗，已回滾所有變更。錯誤原因：{e}")
-        raise
-    finally:
-        connection.close()
-        print("資料庫連線已關閉。")
+    return 2
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    raise SystemExit(main(sys.argv[1:]))

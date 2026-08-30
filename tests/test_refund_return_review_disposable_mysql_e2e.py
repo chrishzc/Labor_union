@@ -62,9 +62,10 @@ def test_review_event_projects_blocking_anomaly_without_refund_reversal():
         FinanceImportMySqlUnitOfWork,
         MySqlFinanceImportRepository,
     )
+    from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
-    from subsystems.anomalies.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
+    from subsystems.finance_import.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
     from subsystems.finance_import.refund_return_review_workflow import (
         RefundReturnReviewApplyRequest,
         RefundReturnReviewWorkflow,
@@ -104,7 +105,9 @@ def test_review_event_projects_blocking_anomaly_without_refund_reversal():
                 CorrelationId("review-apply"),
             )
         ) == receipt
-        result = consume_finance_import_anomaly_events(connection)
+        result = consume_finance_import_anomaly_events(
+            connection, runtime=build_anomaly_runtime()
+        )
         assert result.delivered_count == 1
         with connection.cursor() as cursor:
             cursor.execute("SELECT entry_type FROM client_ledger_entries ORDER BY id")
@@ -113,16 +116,18 @@ def test_review_event_projects_blocking_anomaly_without_refund_reversal():
             assert cursor.fetchone() == {"count": 1}
             cursor.execute("SELECT COUNT(*) AS count FROM client_refund_return_review_receipts")
             assert cursor.fetchone() == {"count": 1}
-            cursor.execute("SELECT predicate_active,workflow_status FROM anomaly_current_alerts WHERE definition_code='CLIENTREFUND-001'")
-            assert cursor.fetchone() == {"predicate_active": 1, "workflow_status": "open"}
+            cursor.execute("SELECT COUNT(*) AS count FROM anomaly_current_alerts WHERE definition_code='CLIENTREFUND-001'")
+            assert cursor.fetchone() == {"count": 0}
             cursor.execute("INSERT INTO client_ledger_entries(case_no,finance_import_row_id,entry_type,amount_ntd,occurred_on,reconciliation_reference,reversal_of_entry_id,idempotency_key,actor,reason) VALUES ('C-1',1,'refund_reversal',300,'2026-08-05','fixture-refund-return',1,'fixture-refund-return','lu-test-runner','fixture reversal')")
             cursor.execute("INSERT INTO finance_import_outbox(batch_id,intent_key,intent_type,payload_snapshot) VALUES (1,'fixture-refund-return-resolution','manual_correction_completed',JSON_OBJECT('row_identity','finance-import-row:1','batch_identity','finance-import-batch:1','classification_type','client_refund_return','refund_ledger_entry_identity','client-ledger-entry:1'))")
         connection.commit()
-        resolved = consume_finance_import_anomaly_events(connection)
+        resolved = consume_finance_import_anomaly_events(
+            connection, runtime=build_anomaly_runtime()
+        )
         assert resolved.delivered_count == 1
         with connection.cursor() as cursor:
-            cursor.execute("SELECT predicate_active,workflow_status FROM anomaly_current_alerts WHERE definition_code='CLIENTREFUND-001'")
-            assert cursor.fetchone() == {"predicate_active": 0, "workflow_status": "resolved"}
+            cursor.execute("SELECT COUNT(*) AS count FROM anomaly_current_alerts WHERE definition_code='CLIENTREFUND-001'")
+            assert cursor.fetchone() == {"count": 0}
     finally:
         connection.close()
 

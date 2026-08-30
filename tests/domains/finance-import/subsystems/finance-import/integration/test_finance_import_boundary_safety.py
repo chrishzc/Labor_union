@@ -39,8 +39,6 @@ class Connection:
 def _run(monkeypatch, staged_rows):
     connection = Connection()
     dispatched = []
-    monkeypatch.setattr(importer, "normalize_workbook", lambda path: {"normalized_rows": []})
-    monkeypatch.setattr(importer, "get_connection", lambda: connection)
     monkeypatch.setattr(importer, "load_finance_identity_maps", lambda cursor: {})
     monkeypatch.setattr(
         importer,
@@ -73,7 +71,10 @@ def _run(monkeypatch, staged_rows):
         lambda cursor, batch_id: None,
     )
     return importer.import_finance_workbook(
-        "renamed-and-overlapping.xlsx", dry_run=True
+        "renamed-and-overlapping.xlsx",
+        dry_run=True,
+        connection_factory=lambda: connection,
+        normalizer=lambda _path: {"normalized_rows": []},
     ), dispatched, connection
 
 

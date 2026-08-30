@@ -23,12 +23,33 @@ class OrderFullUpdateRequest(BaseModel):
 
 
 class ClientNamePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     client_name: str = Field(min_length=1, max_length=100)
 
 
 class ClientNameApplyRequest(ClientNamePreviewRequest):
     preview_fingerprint: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(min_length=1, max_length=500)
+
+
+class ClientNamePreviewView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_no: str
+    before_client_name: str | None
+    after_client_name: str
+    terms_impact: Literal["none"]
+    scheduling_impact: Literal["none"]
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ClientNameReceiptView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_no: str
+    client_name: str
+    changed: bool
 
 class OrderStatusUpdateRequest(BaseModel):
     """Retired request kept only for the legacy HTTP 410 response."""

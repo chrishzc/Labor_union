@@ -43,6 +43,8 @@ from api.schemas.orders import (
     OrderFullUpdateRequest,
     ClientNameApplyRequest,
     ClientNamePreviewRequest,
+    ClientNamePreviewView,
+    ClientNameReceiptView,
     OrderStatusUpdateRequest,
     ScheduleCalculationRequest,
 )
@@ -422,20 +424,29 @@ def get_order_lifecycle_control_state_route(
         ) from error
 
 
-@router.post("/{case_no}/client-name/preview", response_model=BaseResponse[Dict[str, Any]])
+@router.post(
+    "/{case_no}/client-name/preview",
+    response_model=BaseResponse[ClientNamePreviewView],
+)
 def preview_client_name_change(req: ClientNamePreviewRequest, case_no: str = Path(..., description="案件編號"), principal: AdminPrincipal = Depends(require_system_admin)):
     del principal
     connection = get_connection()
     try:
         result = client_name_maintenance.preview(AdminCommandRepository(connection), case_no, req.client_name.strip())
-        return BaseResponse(data=result, message="已產生客戶姓名變更預覽")
+        return BaseResponse(
+            data=ClientNamePreviewView.model_validate(result),
+            message="已產生客戶姓名變更預覽",
+        )
     except Exception as error:
         raise internal_query_error("client_name_preview_internal_error", "客戶姓名預覽失敗。", "client-name-preview") from error
     finally:
         connection.close()
 
 
-@router.post("/{case_no}/client-name/apply", response_model=BaseResponse[Dict[str, Any]])
+@router.post(
+    "/{case_no}/client-name/apply",
+    response_model=BaseResponse[ClientNameReceiptView],
+)
 def apply_client_name_change(req: ClientNameApplyRequest, case_no: str = Path(..., description="案件編號"), idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=191), principal: AdminPrincipal = Depends(require_system_admin)):
     connection = get_connection()
     try:
@@ -449,7 +460,10 @@ def apply_client_name_change(req: ClientNameApplyRequest, case_no: str = Path(..
             principal.username,
             req.reason,
         )
-        return BaseResponse(data=result, message="已套用客戶姓名變更")
+        return BaseResponse(
+            data=ClientNameReceiptView.model_validate(result),
+            message="已套用客戶姓名變更",
+        )
     except ValueError as error:
         code = str(error)
         raise HTTPException(status_code=409 if code in {"stale_preview", "idempotency_key_conflict"} else 404 if code == "client_not_found" else 422, detail={"code": code}) from error
@@ -512,7 +526,7 @@ def update_order_status(
 
 @router.post(
     "/{case_no}/cancel",
-    response_model=BaseResponse[dict[str, Any]],
+    response_model=BaseResponse[None],
     deprecated=True,
 )
 def cancel_order_lock_for_case_no(
@@ -536,7 +550,7 @@ def cancel_order_lock_for_case_no(
 
 @router.post(
     "/{case_no}/actual-start/reconfirm",
-    response_model=BaseResponse[dict[str, Any]],
+    response_model=BaseResponse[None],
     deprecated=True,
 )
 def reconfirm_order_actual_start_route(
@@ -558,7 +572,7 @@ def reconfirm_order_actual_start_route(
 
 @router.post(
     "/{case_no}/holds",
-    response_model=BaseResponse[dict[str, Any]],
+    response_model=BaseResponse[None],
     deprecated=True,
 )
 def activate_order_lifecycle_hold(
@@ -579,7 +593,7 @@ def activate_order_lifecycle_hold(
 
 @router.post(
     "/{case_no}/holds/{hold_key}/release",
-    response_model=BaseResponse[dict[str, Any]],
+    response_model=BaseResponse[None],
     deprecated=True,
 )
 def release_order_lifecycle_hold(
@@ -602,7 +616,7 @@ def release_order_lifecycle_hold(
 
 @router.post(
     "/{case_no}/lifecycle-corrections",
-    response_model=BaseResponse[dict[str, Any]],
+    response_model=BaseResponse[None],
     deprecated=True,
 )
 def correct_order_lifecycle_route(
@@ -623,7 +637,7 @@ def correct_order_lifecycle_route(
 
 @router.post(
     "/{case_no}/assignment-synchronization/preview",
-    response_model=BaseResponse[Dict[str, Any]],
+    response_model=BaseResponse[None],
     deprecated=True,
 )
 def preview_order_assignment_synchronization(
@@ -637,7 +651,7 @@ def preview_order_assignment_synchronization(
 
 @router.post(
     "/{case_no}/assignment-synchronization/apply",
-    response_model=BaseResponse[Dict[str, Any]],
+    response_model=BaseResponse[None],
     deprecated=True,
 )
 def apply_order_assignment_synchronization(

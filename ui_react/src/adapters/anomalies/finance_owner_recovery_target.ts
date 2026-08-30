@@ -132,26 +132,18 @@ function exactBindings(action: ActionView, contract: ActionContract): boolean {
 }
 
 function hasCompleteRecoveryContext(context: ActionSource): boolean {
-  // Recovery actions are only trustworthy when they came from the complete
-  // recovery GET. A detail-only DomainAction has no root facts or freshness
-  // guarantee and must never be used to open an owner workbench.
+  // Recovery actions are only trustworthy when they came from the current
+  // projection GET. A detail-only DomainAction has no current issue identity
+  // or owner-version guarantee and must never open an owner workbench.
   if (typeof context !== 'object' || context === null) return false;
-  if (typeof context.predicate_active !== 'boolean'
-    || typeof context.projection_freshness !== 'string'
-    || typeof context.fingerprint !== 'string'
-    || typeof context.source_identity !== 'string'
-    || !Number.isSafeInteger(context.source_version)
-    || typeof context.root_fact_snapshot !== 'object'
-    || context.root_fact_snapshot === null
-    || typeof context.root_fact_snapshot.root_condition_active !== 'boolean'
-    || !Array.isArray(context.available_actions)) return false;
-  return context.predicate_active
-    && context.projection_freshness === 'fresh'
-    && /^[0-9a-f]{64}$/.test(context.fingerprint)
-    && context.source_identity.trim().length > 0
-    && context.root_fact_snapshot.root_condition_active
-    && Array.isArray(context.occurrence_timeline)
-    && Array.isArray(context.workflow_timeline);
+  return /^ci_[0-9a-f]{64}$/.test(context.issue_key)
+    && typeof context.owner_domain === 'string'
+    && context.owner_domain.trim().length > 0
+    && Number.isSafeInteger(context.owner_version)
+    && context.owner_version >= 0
+    && typeof context.details === 'object'
+    && context.details !== null
+    && Array.isArray(context.available_actions);
 }
 
 function exactContract(action: ActionView): ActionContract | null {
@@ -168,7 +160,7 @@ function exactContract(action: ActionView): ActionContract | null {
 }
 
 function contextMatchesContract(context: ActionSource, action: ActionView, contract: ActionContract): boolean {
-  return context.source_domain === contract.owner
+  return context.owner_domain === contract.owner
     && context.definition_code === DEFINITION_BY_SCHEMA[action.form_schema_key];
 }
 

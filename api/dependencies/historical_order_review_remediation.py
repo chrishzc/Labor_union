@@ -6,6 +6,7 @@ Description: 建立每次請求專用的歷史訂單 review 更正 application�
 from __future__ import annotations
 
 from infrastructure.mysql.historical_order_adoption_repository import MySqlHistoricalOrderAdoptionRepository
+from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
 from infrastructure.mysql.historical_order_review_remediation_repository import (
     HistoricalOrderReviewRemediationMySqlUnitOfWork,
     MySqlHistoricalOrderReviewRemediationRepository,
@@ -54,6 +55,7 @@ def get_historical_order_review_remediation_application():
     adoption_workflow = HistoricalOrderAdoptionWorkflow(
         adoption_repository,
         lambda: HistoricalOrderReviewRemediationMySqlUnitOfWork(connection),
+        MySqlHistoricalAssignmentWriter(connection),
     )
     repository = MySqlHistoricalOrderReviewRemediationRepository(connection, adoption_workflow)
     workflow = HistoricalReviewRemediationWorkflow(

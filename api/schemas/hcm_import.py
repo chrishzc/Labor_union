@@ -71,11 +71,11 @@ class HcmResubmissionPreviewView(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    occurrence_identity: str = Field(min_length=1, max_length=191)
+    review_identity: str = Field(min_length=1, max_length=191)
     case_no: str = Field(min_length=1, max_length=50)
     source_field: str = Field(min_length=1, max_length=191)
     target_fields: tuple[str, ...] = Field(min_length=1)
-    occurrence_version: int = Field(ge=1)
+    review_version: int = Field(ge=0)
     root_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
@@ -84,7 +84,8 @@ class HcmResubmissionReceiptView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     event_identity: str = Field(min_length=1, max_length=191)
-    occurrence_identity: str = Field(min_length=1, max_length=191)
+    review_identity: str = Field(min_length=1, max_length=191)
     case_no: str = Field(min_length=1, max_length=50)
     target_fields: tuple[str, ...] = Field(min_length=1)
+    resulting_review_version: int = Field(ge=1)
     replayed: bool

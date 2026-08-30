@@ -28,6 +28,12 @@ class _Cursor:
     def execute(self, statement, parameters):
         self.calls.append((statement, parameters))
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
 
 class _QueryCursor:
     def __init__(self, one_rows, many_rows):
@@ -155,6 +161,21 @@ def test_schedule_snapshot_with_old_confirmed_date_version_is_sent_outdated():
     }
 
     assert _snapshot_status(4, snapshot) == "sent_outdated"
+
+
+def test_snapshot_invalidation_uses_the_borrowed_connection_without_commit():
+    cursor = _Cursor()
+    repository = MySqlMatchingScheduleConfirmationRepository(_QueryConnection(cursor))
+
+    repository.invalidate_current_snapshot("CASE-68")
+
+    assert cursor.calls == [
+        (
+            "UPDATE matching_schedule_snapshots SET current_marker=NULL,status='invalidated',"
+            "invalidated_at_utc=UTC_TIMESTAMP(6) WHERE case_no=%s AND current_marker=1",
+            ("CASE-68",),
+        )
+    ]
 
 
 def test_schedule_snapshot_for_current_version_without_current_marker_is_not_sent():

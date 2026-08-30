@@ -37,8 +37,8 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_staff_payout_reconciliation_workflow.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\staff-payables\\subsystems\\staff-payables\\integration\\test_staff_payout_reconciliation_workflow.py"
     ],
-    "test_paths": ["tests/test_staff_payout_reconciliation_workflow.py"]
+    "test_paths": ["tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_payout_reconciliation_workflow.py"]
   }
 }

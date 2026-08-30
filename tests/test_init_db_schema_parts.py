@@ -108,50 +108,10 @@ def test_empty_schema_parts_directory_is_valid(tmp_path):
     assert load_schema_parts(RecordingCursor(), parts) == []
 
 
-class MainConnection:
-    def __init__(self):
-        self.cursor_instance = RecordingCursor()
-        self.commits = 0
-        self.rollbacks = 0
-        self.closed = False
+def test_main_is_retired_and_cannot_open_or_commit(monkeypatch, capsys):
+    monkeypatch.setattr(init_db, "load_schema_paths", lambda *_: pytest.fail("legacy writer ran"))
 
-    def cursor(self):
-        connection = self
-
-        class CursorContext:
-            def __enter__(self):
-                return connection.cursor_instance
-
-            def __exit__(self, exc_type, exc, traceback):
-                return False
-
-        return CursorContext()
-
-    def commit(self):
-        self.commits += 1
-
-    def rollback(self):
-        self.rollbacks += 1
-
-    def close(self):
-        self.closed = True
-
-
-def test_main_rolls_back_closes_and_propagates_schema_part_failure(monkeypatch, capsys):
-    connection = MainConnection()
-    monkeypatch.setattr(init_db.pymysql, "connect", lambda **kwargs: connection)
-
-    def fail_schema_part(cursor, schema_parts_dir):
-        raise RuntimeError("載入 schema part 失敗：60_broken.sql: forced failure")
-
-    monkeypatch.setattr(init_db, "load_schema_paths", fail_schema_part)
-
-    with pytest.raises(RuntimeError, match="60_broken.sql"):
-        init_db.main(["--allow-drop"])
-
-    output = capsys.readouterr().out
-    assert connection.rollbacks == 1
-    assert connection.commits == 0
-    assert connection.closed is True
-    assert "60_broken.sql" in output
-    assert "Schema 更新成功" not in output
+    assert init_db.main(["--allow-drop"]) == 2
+    captured = capsys.readouterr()
+    assert "library-only" in captured.err
+    assert "reset_fake_database" in captured.err

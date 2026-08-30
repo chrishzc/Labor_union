@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from scripts.imports.finance_normalized_row import REQUIRED_FIELDS, validate_normalized_row
+from domains.finance_import.normalized_row import REQUIRED_FIELDS, validate_normalized_row
 
 
 def _row(**updates):

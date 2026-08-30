@@ -8,7 +8,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
+
+
+def unconfigured_connection_factory() -> Any:
+    """Fail closed until the outer LINE composition supplies a DB factory."""
+    raise RuntimeError("LINE connection factory is not configured")
 
 from domains.line.configuration import (
     LineConfigurationKind,

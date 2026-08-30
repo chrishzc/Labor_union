@@ -200,7 +200,8 @@ def test_staff_payout_durable_crash_recovery_and_duplicate_apply():
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import CorrelationId
     from subsystems.access.authentication_session import AdminPrincipal
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
     from subsystems.staff_payables.payout_reconciliation import (
         StaffPayoutEventType,
         StaffPayoutSelection,
@@ -292,7 +293,8 @@ def test_staff_payout_return_durable_crash_recovery_and_duplicate_apply():
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import CorrelationId
     from subsystems.access.authentication_session import AdminPrincipal
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
 
     connection = get_connection()
     try:
@@ -378,7 +380,8 @@ def test_staff_payout_reversal_durable_crash_recovery_and_duplicate_apply():
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import CorrelationId
     from subsystems.access.authentication_session import AdminPrincipal
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
 
     connection = get_connection()
     try:

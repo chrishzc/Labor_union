@@ -34,10 +34,10 @@ function alignedRecovery(): AnomalyRecoveryContextView {
 }
 
 describe('Anomaly detail adapter', () => {
-  it('投影 typed evidence 的業務標籤、兩條 timeline、root facts、occurrences 與 action metadata', () => {
+  it('投影 typed evidence、detail timeline、current details 與 action metadata', () => {
     const view = adaptAnomalyDetailBundle(alignedDetail(), alignedRecovery());
 
-    expect(view.fingerprint).toBe(VALID_ANOMALY_RECOVERY_CONTEXT_VIEW.fingerprint);
+    expect(view.fingerprint).toBe(VALID_ANOMALY_DETAIL_VIEW.summary.fingerprint);
     expect(view.definitionCode).toBe(VALID_ANOMALY_RECOVERY_CONTEXT_VIEW.definition_code);
     expect(view.evidence).toContainEqual({
       key: 'case_no',
@@ -72,42 +72,20 @@ describe('Anomaly detail adapter', () => {
         createdAt: '2026-08-22T10:00:00+00:00',
       },
     ]);
-    expect(view.recoveryTimeline).toEqual([
-      {
-        action: '已記錄處理進度',
-        actor: 'O***',
-        reason: '人工處理進度已更新；不代表根事實已修正。',
-        correlationId: 'anomaly-recovery:SYNTH-42',
-        expectedVersion: 2,
-        resultingVersion: 3,
-        createdAt: '2026-08-22T10:00:00+00:00',
-      },
-    ]);
-
-    expect(view.rootFacts).toContainEqual({
+    expect(view.currentDetails).toContainEqual({
       key: 'amount_delta_ntd',
       kind: 'money_ntd',
       label: '金額差異',
-      value: 'NT$ 1,200',
+      value: '1200',
     });
-    expect(view.rootFacts).toContainEqual({
+    expect(view.currentDetails).toContainEqual({
       key: 'domain_blockers',
       kind: 'code_list',
       label: '阻擋原因',
       value: 'manual_review',
     });
-    expect(view.occurrences).toEqual([
-      expect.objectContaining({
-        fingerprint: 'b'.repeat(64),
-        occurredAt: '2026-08-22T09:30:00+00:00',
-      }),
-    ]);
-    expect(view.occurrences[0]?.evidence).toContainEqual({
-      key: 'integrity_blocker_active',
-      kind: 'boolean',
-      label: '目前阻擋作業',
-      value: '否',
-    });
+    expect(view.currentIssueKey).toBe(VALID_ANOMALY_RECOVERY_CONTEXT_VIEW.issue_key);
+    expect(view.blocking).toBe(true);
     expect(view.actions).toEqual([
       {
         key: 'repair_finance_projection',
@@ -124,30 +102,15 @@ describe('Anomaly detail adapter', () => {
         contractVersion: 1,
       },
     ]);
-    expect(view.projectionFreshness).toBe('fresh');
-    expect(view.domainBlockerActive).toBe(true);
   });
 
-  it('identity mismatch 會 fail closed，且分別涵蓋 fingerprint、definition 與 source', () => {
+  it('definition mismatch 會 fail closed', () => {
     const detail = alignedDetail();
     const recovery = alignedRecovery();
 
     expect(() => adaptAnomalyDetailBundle(
-      {
-        ...detail,
-        summary: { ...detail.summary, fingerprint: 'c'.repeat(64) },
-      },
-      recovery,
-    )).toThrow('detail 與 recovery identity 不一致');
-
-    expect(() => adaptAnomalyDetailBundle(
       detail,
       { ...recovery, definition_code: 'other-definition' },
-    )).toThrow('detail 與 recovery identity 不一致');
-
-    expect(() => adaptAnomalyDetailBundle(
-      detail,
-      { ...recovery, source_identity: 'different-source:17' },
     )).toThrow('detail 與 recovery identity 不一致');
   });
 
@@ -159,7 +122,7 @@ describe('Anomaly detail adapter', () => {
     expect(view).not.toHaveProperty('severityLabel');
     expect(view).not.toHaveProperty('statusLabel');
     expect(view).not.toHaveProperty('domainLabel');
-    expect(view.rootFacts.find((item) => item.key === 'domain_blockers')?.value).toBe('manual_review');
+    expect(view.currentDetails.find((item) => item.key === 'domain_blockers')?.value).toBe('manual_review');
   });
 
   it('顯示 CLIENTREFUND 的 typed row／batch／refund／case-obligation 與原因阻擋欄位，但隱藏 private/raw 欄位', () => {

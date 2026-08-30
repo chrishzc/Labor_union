@@ -70,47 +70,28 @@ def test_scheduling_and_staff_registry_queue_and_rollback_mappings_are_consisten
         entries = [entry for entry in queue if entry.get("entry_id") == entry_id]
         assert len(entries) == 1
         entry = entries[0]
-        assert entry["status"] == "review_required"
+        assert entry["status"] == "active"
+        assert entry["terminal_disposition"] == "active_canonical"
+        assert entry["replacement"] == entry_id
         assert entry["streamlit_entry"] == expected_values["streamlit_entry"]
         assert entry["rollback_deep_link"] == expected_values["rollback_deep_link"]
         assert entry["witnesses"] == {
             "nav": "ui_react/src/components/MasterLayout.tsx",
             "render": "ui_react/src/App.tsx",
         }
-        assert all(
-            entry.get(field) in (None, False)
-            for field in ("active", "replacement", "cutover_ready", "cutover-ready")
-            if field in entry
-        )
+        assert entry["replacement"] == entry_id
 
 
-def test_scheduling_and_staff_keep_their_streamlit_rollback_targets() -> None:
+def test_scheduling_and_staff_control_plane_keep_react_identity_metadata() -> None:
     state = _read_json(INITIAL_TARGETS)
     entries = state["entries"]
 
     assert isinstance(entries, list)
-    expected = {
-        SCHEDULING_ENTRY: {
-            "entry_id": SCHEDULING_ENTRY,
-            "replacement_group": "staff-scheduling",
-            "current_target": "streamlit",
-            "streamlit_target": "/?entry=scheduling&view=calendar",
-            "react_target": "/admin/#scheduling",
-            "required_react_artifact": None,
-            "entry_revision": 1,
-        },
-        STAFF_ENTRY: {
-            "entry_id": STAFF_ENTRY,
-            "replacement_group": "staff-scheduling",
-            "current_target": "streamlit",
-            "streamlit_target": "/?entry=scheduling&view=staff-directory",
-            "react_target": "/admin/#staff",
-            "required_react_artifact": None,
-            "entry_revision": 1,
-        },
-    }
-    for entry_id, expected_entry in expected.items():
-        assert [entry for entry in entries if entry["entry_id"] == entry_id] == [expected_entry]
+    expected_targets = {SCHEDULING_ENTRY: "/admin/#scheduling", STAFF_ENTRY: "/admin/#staff"}
+    for entry_id, expected_target in expected_targets.items():
+        matches = [entry for entry in entries if entry["entry_id"] == entry_id]
+        assert len(matches) == 1
+        assert matches[0]["react_target"] == expected_target
 
 
 def test_scheduling_projection_sources_are_typed_get_only() -> None:

@@ -121,49 +121,20 @@ export const AnomalyDetailViewSchema = z.strictObject({
 });
 export type AnomalyDetailView = z.infer<typeof AnomalyDetailViewSchema>;
 
-export const FinanceOccurrenceSchema = z.strictObject({
-  occurrence_fingerprint: fingerprintSchema,
-  definition_code: codeSchema,
-  source_event_identity: identitySchema,
-  finance_import_row_id: z.number().int().positive(),
-  finance_import_batch_id: z.number().int().positive(),
-  source_version: z.number().int().nonnegative(),
-  occurred_at: dateTimeSchema,
-  bounded_snapshot: AnomalyDisplaySnapshotSchema,
-});
-export type FinanceOccurrence = z.infer<typeof FinanceOccurrenceSchema>;
-
-export const AnomalyRootFactSnapshotSchema = z.strictObject({
-  occurred_at: dateTimeSchema,
-  source_version: z.number().int().nonnegative(),
-  finance_import_row_identity: identitySchema,
-  finance_import_batch_identity: identitySchema,
-  original_refund_ledger_entry_identity: identitySchema.nullable(),
-  amount_delta_ntd: z.number().int(),
-  root_condition_active: z.boolean(),
-  integrity_blocker_active: z.boolean(),
-  affected_order_identities: stringListSchema,
-  affected_obligation_identities: stringListSchema,
-  domain_blockers: z.array(codeSchema).max(20),
-  reason_codes: z.array(codeSchema).max(20),
-});
-export type AnomalyRootFactSnapshot = z.infer<typeof AnomalyRootFactSnapshotSchema>;
-
 export const AnomalyRecoveryContextViewSchema = z.strictObject({
-  fingerprint: fingerprintSchema,
+  issue_key: z.string().regex(/^ci_[0-9a-f]{64}$/),
   definition_code: codeSchema,
-  source_domain: codeSchema,
-  source_identity: identitySchema,
-  source_version: z.number().int().nonnegative(),
+  owner_domain: codeSchema,
+  owner_root_type: codeSchema,
+  subject: AnomalyDisplaySnapshotSchema,
+  owner_snapshot_token: identitySchema,
+  owner_version: z.number().int().nonnegative(),
   severity: severitySchema,
-  predicate_active: z.boolean(),
-  workflow_status: workflowStatusSchema,
-  workflow_version: z.number().int().nonnegative(),
-  domain_blocker_active: z.boolean(),
-  projection_freshness: codeSchema,
-  root_fact_snapshot: AnomalyRootFactSnapshotSchema,
-  occurrence_timeline: z.array(FinanceOccurrenceSchema).max(100),
-  workflow_timeline: z.array(AnomalyTimelineEventSchema).max(100),
+  blocking: z.boolean(),
+  details_version: z.number().int().positive(),
+  details: AnomalyDisplaySnapshotSchema,
+  episode_started_at: dateTimeSchema,
+  last_verified_at: dateTimeSchema,
   available_actions: z.array(RecoveryActionSchema).max(20),
 });
 export type AnomalyRecoveryContextView = z.infer<

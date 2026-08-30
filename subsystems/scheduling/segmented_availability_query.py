@@ -16,11 +16,13 @@ from domains.scheduling.waiting_deposit_lock import (
 from subsystems.scheduling.segmented_availability import (
     derive_segment_availability,
 )
-from infrastructure.mysql.mysql_adapter import get_connection
-from infrastructure.mysql.segmented_availability_repository import (
-    MySqlSegmentedAvailabilityFactsRepository,
+from subsystems.scheduling.ports import (
     SegmentedAvailabilityFactsPort,
+    unconfigured_connection_factory,
 )
+
+
+get_connection = unconfigured_connection_factory
 
 
 def _as_optional_date(value: Any, field_name: str) -> date:
@@ -94,7 +96,9 @@ def search_segmented_caregiver_availability(
     if not isinstance(segment_drafts, list):
         raise ValueError("segment_drafts must be a list")
 
-    facts = facts_port or MySqlSegmentedAvailabilityFactsRepository(get_connection)
+    if facts_port is None:
+        raise RuntimeError("segmented availability facts port is not configured")
+    facts = facts_port
     loaded_facts = facts.load_case_facts(case_no)
     order_row = loaded_facts["order"]
     if not order_row:

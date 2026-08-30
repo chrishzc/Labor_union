@@ -9,7 +9,7 @@ from api.routes.staff_payout import _staff_payout_command
 from domains.staff_payables.reconciliation import StaffPayoutDifferenceMode, StaffPayoutEventType
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
-from subsystems.jobs.durable_job_worker import (
+from api.dependencies.durable_job_handlers import (
     _staff_payout_request,
     default_job_handlers,
     staff_payout_apply_handler,

@@ -5,8 +5,13 @@ Description: 驗證服務日期精算的假日、請假與固定排休覆寫規�
 
 import pytest
 from datetime import date
-from api.routes.order_schedule_calculation import calculate_schedule
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from api.routes.order_schedule_calculation import calculate_schedule, router
 from api.schemas.orders import ScheduleCalculationRequest
+from api.schemas.schedule_precision import SchedulePrecisionResultView
+from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.scheduling.attendance_schedule_query import calculate_order_attendance_schedule
 
 
@@ -105,7 +110,35 @@ def test_schedule_route_forwards_custom_work_dates(monkeypatch):
 
     def _calculate(**kwargs):
         received.update(kwargs)
-        return {"actual_end_date": date(2026, 9, 12)}
+        return {
+            "actual_start_date": date(2026, 9, 12),
+            "actual_end_date": date(2026, 9, 12),
+            "target_service_days": 1,
+            "total_calendar_days": 1,
+            "actual_work_days_count": 1,
+            "rest_days_count": 0,
+            "national_holidays_found": [],
+            "total_estimated_salary": None,
+            "weekly_stats": [
+                {
+                    "week_num": 1,
+                    "start_date": date(2026, 9, 12),
+                    "end_date": date(2026, 9, 12),
+                    "work_days": 1,
+                    "rest_days": 0,
+                    "holiday_days": 0,
+                }
+            ],
+            "day_by_day": [
+                {
+                    "date": date(2026, 9, 12),
+                    "day_num": 1,
+                    "is_work_day": True,
+                    "is_rest_day": False,
+                    "holiday_name": None,
+                }
+            ],
+        }
 
     monkeypatch.setattr(
         "api.routes.order_schedule_calculation"
@@ -119,8 +152,27 @@ def test_schedule_route_forwards_custom_work_dates(monkeypatch):
             target_service_days=1,
             service_mode="週休2日",
             custom_work_dates=[date(2026, 9, 12)],
-        )
+        ),
+        AdminPrincipal(1, "typed-schedule", "Typed Schedule", "system_admin"),
     )
 
     assert received["custom_work_dates"] == [date(2026, 9, 12)]
-    assert response.data["actual_end_date"] == date(2026, 9, 12)
+    assert isinstance(response.data, SchedulePrecisionResultView)
+    assert response.data.actual_end_date == date(2026, 9, 12)
+
+
+def test_schedule_precision_requires_authenticated_admin():
+    app = FastAPI()
+    app.include_router(router)
+
+    response = TestClient(app).post(
+        "/api/v1/orders/calculate-schedule",
+        json={
+            "actual_start_date": "2026-09-12",
+            "target_service_days": 1,
+            "service_mode": "週休2日",
+            "custom_work_dates": ["2026-09-12"],
+        },
+    )
+
+    assert response.status_code == 401

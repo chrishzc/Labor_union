@@ -90,10 +90,22 @@ class ControlledFileReconciler:
                 retryable=False,
             )
         try:
-            observed = self._storage.read_registered_staged(
-                target.staging_id,
-                expected_sha256=target.readback.sha256_digest,
-            )
+            # A post-commit worker must use the storage adapter's finalize
+            # operation when available.  It is intentionally idempotent and
+            # integrity-only; it never promotes bytes based on a path or
+            # mutates the owner Domain.  Older adapters can still be audited
+            # through their verified-read operation.
+            finalize = getattr(self._storage, "finalize_staged", None)
+            if callable(finalize):
+                observed = finalize(
+                    target.staging_id,
+                    expected_sha256=target.readback.sha256_digest,
+                )
+            else:
+                observed = self._storage.read_registered_staged(
+                    target.staging_id,
+                    expected_sha256=target.readback.sha256_digest,
+                )
             outcome = ControlledFileReconciliationOutcome.EXACT
             digest = observed.sha256_digest
             size_bytes = len(observed.content)

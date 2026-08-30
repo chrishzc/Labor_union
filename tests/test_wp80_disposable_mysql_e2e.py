@@ -12,6 +12,7 @@ from uuid import uuid4
 import pytest
 
 from infrastructure.mysql.historical_order_adoption_repository import MySqlHistoricalOrderAdoptionRepository
+from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.orders.historical_adoption_workflow import (
@@ -44,6 +45,7 @@ def test_historical_order_apply_is_atomic_and_replays():
         workflow = HistoricalOrderAdoptionWorkflow(
             MySqlHistoricalOrderAdoptionRepository(connection),
             lambda: MySqlUnitOfWork(connection),
+            MySqlHistoricalAssignmentWriter(connection),
         )
         preview = workflow.preview(row)
         request = HistoricalOrderAdoptionRequest(

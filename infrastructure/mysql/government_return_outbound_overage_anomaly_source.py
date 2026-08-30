@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from domains.anomalies.registry import default_anomaly_registry
-from infrastructure.mysql.anomaly_registry_repository import MySqlAnomalyRepository
+from infrastructure.mysql.anomaly_registry_repository import (
+    AnomalyMySqlUnitOfWork,
+    MySqlAnomalyRepository,
+)
 from subsystems.anomalies.alert_workflow import AnomalyApplication
 from subsystems.anomalies.government_return_outbound_overage_anomaly_source import (
     GovernmentReturnOutboundOverageAnomalyConsumer,
@@ -29,32 +32,15 @@ class MySqlGovernmentReturnOutboundOverageSource:
 
 
 def project_government_return_outbound_overage_page(connection: Any, request: GovernmentReturnOutboundOverageScanRequest):
-    application = AnomalyApplication(default_anomaly_registry(), MySqlAnomalyRepository(connection), _BorrowedUnitOfWork)
+    application = AnomalyApplication(
+        default_anomaly_registry(),
+        MySqlAnomalyRepository(connection),
+        lambda: AnomalyMySqlUnitOfWork(connection),
+    )
     consumer = GovernmentReturnOutboundOverageAnomalyConsumer(
         MySqlGovernmentReturnOutboundOverageSource(connection), application
     )
-    try:
-        connection.begin()
-        projections = consumer.scan_page(request)
-        connection.commit()
-        return projections
-    except Exception:
-        connection.rollback()
-        raise
-
-
-class _BorrowedUnitOfWork:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exception_type, exception, traceback):
-        return False
-
-    def commit(self) -> None:
-        return None
-
-    def rollback(self) -> None:
-        return None
+    return consumer.scan_page(request)
 
 
 def _root_fact(row: Mapping[str, object]) -> GovernmentReturnOutboundOverageRootFact:

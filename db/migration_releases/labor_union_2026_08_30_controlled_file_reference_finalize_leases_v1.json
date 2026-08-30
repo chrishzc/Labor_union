@@ -1,0 +1,57 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-controlled-file-reference-finalize-leases-2026-08-30-v1",
+  "release_metadata": {
+    "release_name": "Labor Union controlled file reference finalize leases",
+    "application_version": "controlled-file-reference-finalize-leases-v1",
+    "published_at": "2026-08-30",
+    "description": "Add Scheduling-owned controlled-file references, durable finalize intents, active leases and the legacy-readable attachment bridge"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-schema-assembly-2026-08-15-v1"
+  },
+  "artifacts": [{
+    "name": "1015_controlled_file_reference_finalize_leases.sql",
+    "relative_path": "db/schema_parts/1015_controlled_file_reference_finalize_leases.sql",
+    "sha256": "94759c89f29733183f916f9acb6abd57818836c7b97206a750f6dd6f6b579c46",
+    "dependencies": [],
+    "data_effect": "schema_only",
+    "rollback_policy": "code-rollback-preserve-controlled-file-reference-finalize-evidence",
+    "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+  }],
+  "backfills": [],
+  "verification_contracts": [{
+    "verification_id": "controlled-file-reference-finalize-leases-owned-objects",
+    "phase": "post-schema",
+    "policy": "candidate-owned-objects-exact",
+    "read_only": true,
+    "blocking": true
+  }],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["controlled-file-reference-finalize-leases-v1"],
+    "required_restart_targets": ["api", "worker"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["controlled-file-reference-finalize-leases-owned-objects"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_30_controlled_file_reference_finalize_leases_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_30_controlled_file_reference_finalize_leases_v1.descriptors.json",
+    "sha256": "a483e966792cba4a104d5fc63ee60d1aeea5e0d14a9e72884f36147a04de596e",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

@@ -7,7 +7,10 @@ from typing import Dict, Any, List
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from domains.scheduling.current_projection import StaffUnavailabilityCurrentFact
-from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.scheduling.ports import unconfigured_connection_factory
+
+
+get_connection = unconfigured_connection_factory
 from shared_kernel.clock import BusinessClock, SystemBusinessClock, TAIPEI_TIME_ZONE
 
 

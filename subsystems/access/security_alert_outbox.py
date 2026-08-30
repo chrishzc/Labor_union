@@ -67,7 +67,15 @@ def consume_security_alert_outbox(connection: Any, *, maximum_events: int = 25) 
         except Exception:
             connection.rollback()
             failed += 1
-            _mark_failed(connection, event)
+            # Retry bookkeeping is part of the worker's explicit second
+            # transaction; the helper only issues SQL and never owns commit.
+            if event is not None:
+                try:
+                    connection.begin()
+                    _mark_failed(connection, event)
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
     return SecurityAlertProjectionResult(delivered, failed)
 
 
@@ -91,4 +99,3 @@ def _mark_failed(connection: Any, event: dict[str, object] | None) -> None:
             WHERE id=%s""",
             (event["id"],),
         )
-    connection.commit()

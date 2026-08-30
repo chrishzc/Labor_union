@@ -160,7 +160,18 @@ def _require_payroll_typed_ownership(records: list[dict[str, object]]) -> None:
     payroll_records = [record for record in records if record["owner"] == "payroll"]
     if not payroll_records:
         raise ValueError("Payroll writer inventory is empty")
+    cross_owner_exit = (
+        "infrastructure/mysql/leave_substitution_repository.py:"
+        "_insert_special_pay_events:execute:INSERT:payroll_special_pay_events:"
+        "45f84f3ac8e75cce:1"
+    )
     for record in payroll_records:
+        if record["identity"] == cross_owner_exit:
+            if record["final_disposition"] != "migrate_then_remove":
+                raise ValueError("Payroll cross-owner writer lacks an explicit exit")
+            if "typed Payroll" not in str(record["replacement_evidence"]):
+                raise ValueError("Payroll cross-owner writer lacks a typed replacement")
+            continue
         path = str(record["identity"]).split(":", 1)[0]
         if not path.startswith(("infrastructure/mysql/payroll_", "subsystems/payroll/")):
             raise ValueError("Payroll writer is outside the typed ownership boundary")

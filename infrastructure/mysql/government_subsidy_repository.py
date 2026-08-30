@@ -390,14 +390,11 @@ class MySqlGovernmentSubsidyRepository:
             cursor.execute("INSERT INTO government_subsidy_overpayments (overpayment_identity,source_finance_import_row_id,source_transaction_id,payer_identity,original_amount_ntd,remaining_amount_ntd,status,projection_version,actor,reason,evidence_reference) VALUES (%s,%s,%s,%s,%s,%s,'pending_review',1,%s,%s,%s)",(identity,request.finance_import_row_id,transaction_id,PAYER_IDENTITY,candidate.overpayment_amount_ntd.amount,candidate.overpayment_amount_ntd.amount,request.actor.actor_id,request.reason,request.evidence_reference))
             cursor.execute("INSERT INTO government_subsidy_overpayment_events (overpayment_identity,event_type,before_remaining_ntd,after_remaining_ntd,resulting_status,expected_version,resulting_version,preview_fingerprint,idempotency_key,actor,reason,evidence_reference) VALUES (%s,'established',1,%s,'pending_review',0,1,%s,%s,%s,%s,%s)",(identity,candidate.overpayment_amount_ntd.amount,candidate.fingerprint.value,request.idempotency_key.value,request.actor.actor_id,request.reason,request.evidence_reference))
             cursor.execute("INSERT INTO government_subsidy_projection_events (batch_id,transaction_id,before_status,after_status,before_net_allocated_ntd,after_net_allocated_ntd,outstanding_ntd,expected_batch_version,resulting_batch_version,preview_fingerprint,actor,reason,idempotency_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",(batch.batch_id,transaction_id,reduce_batch_status(batch).value,candidate.resulting_batch_status,batch.net_allocated_total_ntd.amount,candidate.resulting_net_allocated_ntd.amount,candidate.resulting_outstanding_ntd.amount,batch.aggregate_version,batch.aggregate_version+1,candidate.fingerprint.value,request.actor.actor_id,request.reason,request.idempotency_key.value))
-            projection_event_id=int(cursor.lastrowid)
-            cursor.execute(_OUTBOX_INSERT_SQL,(batch.batch_id,transaction_id,projection_event_id,f"government_subsidy_overpayment:{request.idempotency_key.value}",'government_subsidy_overpayment_established',_canonical_json({'overpayment_identity':identity,'amount_ntd':candidate.overpayment_amount_ntd.amount,'payer_identity':PAYER_IDENTITY})))
         return {'overpayment_identity':identity,'transaction_id':transaction_id,'status':'pending_review','amount_ntd':candidate.overpayment_amount_ntd.amount,'preview_fingerprint':candidate.fingerprint.value}
 
     def persist_offset(self, request: OffsetApplyRequest, candidate):
         with self._connection.cursor() as cursor:
             _advance_overpayment(cursor, request, candidate, "offset_applied", request.evidence_reference)
-            lineage = _overpayment_outbox_lineage(cursor, request.identity)
             cursor.execute("SELECT id FROM government_subsidy_overpayment_events WHERE idempotency_key=%s", (request.idempotency_key.value,))
             event_id = int(cursor.fetchone()["id"])
             cursor.executemany(
@@ -405,19 +402,16 @@ class MySqlGovernmentSubsidyRepository:
                 tuple((event_id, request.identity, item.claim_item_id, item.amount_ntd.amount, item.claim_item_id) for item in request.intents),
             )
             _apply_offset_target_accounts(cursor, event_id, request, candidate)
-            cursor.execute(_OUTBOX_INSERT_SQL, (*lineage, f"government_overpayment_offset:{request.idempotency_key.value}", "government_subsidy_overpayment_offset", _canonical_json({"overpayment_identity": request.identity, "remaining_ntd": candidate.remaining_after_ntd.amount})))
         return _overpayment_receipt(candidate)
 
     def persist_return(self, request: ReturnApplyRequest, candidate, recipient):
         with self._connection.cursor() as cursor:
             _advance_overpayment(cursor, request, candidate, "return_payable_created", recipient.evidence_reference)
-            lineage = _overpayment_outbox_lineage(cursor, request.identity)
             payable_identity = f"government-overpayment-return:{request.identity}"
             cursor.execute(
                 "INSERT INTO government_overpayment_return_payables (payable_identity,overpayment_identity,amount_due_ntd,remaining_amount_ntd,status,agency_identity,agency_name,bank_code,account_display,account_fingerprint,effective_date,due_date,evidence_reference,projection_version) VALUES (%s,%s,%s,%s,'payable',%s,%s,%s,%s,%s,%s,%s,%s,1)",
                 (payable_identity, request.identity, candidate.disposition_amount_ntd.amount, candidate.disposition_amount_ntd.amount, recipient.agency_identity, recipient.agency_name, recipient.bank_code, recipient.account_display, recipient.account_fingerprint, recipient.effective_date, recipient.due_date, recipient.evidence_reference),
             )
-            cursor.execute(_OUTBOX_INSERT_SQL, (*lineage, f"government_overpayment_return:{request.idempotency_key.value}", "government_overpayment_return_payable", _canonical_json({"overpayment_identity": request.identity, "payable_identity": payable_identity})))
         return _overpayment_receipt(candidate, payable_identity)
 
     def persist_return_reconciliation(self, request: ReturnReconciliationApplyRequest, candidate):

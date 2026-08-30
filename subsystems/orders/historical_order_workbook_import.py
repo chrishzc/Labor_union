@@ -10,13 +10,18 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
 
 from domains.orders.lifecycle import OrderLifecycleStatus
-from infrastructure.mysql.historical_order_workbook_import_repository import HistoricalOrderWorkbookImportRepository
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from subsystems.orders.historical_adoption_workflow import HistoricalOrderAdoptionRequest, HistoricalOrderAdoptionWorkflow
 from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbook, load_historical_order_workbook
+
+
+class HistoricalOrderWorkbookRepository(Protocol):
+    def find_workbook_receipt(self, key: str): ...
+
+    def save_workbook_receipt(self, key: str, receipt) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,7 +115,7 @@ class HistoricalOrderWorkbookUnavailable(RuntimeError):
 
 
 class HistoricalOrderWorkbookImportService:
-    def __init__(self, repository: HistoricalOrderWorkbookImportRepository, workflow: HistoricalOrderAdoptionWorkflow, unit_of_work_factory: Callable[[], object]) -> None:
+    def __init__(self, repository: HistoricalOrderWorkbookRepository, workflow: HistoricalOrderAdoptionWorkflow, unit_of_work_factory: Callable[[], object]) -> None:
         self._repository = repository
         self._workflow = workflow
         self._unit_of_work_factory = unit_of_work_factory

@@ -41,10 +41,13 @@ def test_plan_fingerprint_is_deterministic_and_database_bound() -> None:
     assert first != reprocessing._plan_fingerprint({"database": "two", "server": "db"}, 9, plans)
 
 
-def test_apply_path_is_retired_before_opening_a_connection(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(reprocessing, "get_connection", lambda: pytest.fail("must not connect"))
+def test_apply_path_is_retired_before_opening_a_connection() -> None:
     with pytest.raises(ValueError, match="legacy_finance_import_reprocess_apply_retired"):
-        reprocessing.reprocess_finance_import_batch(1, dry_run=False)
+        reprocessing.reprocess_finance_import_batch(
+            1,
+            dry_run=False,
+            connection_factory=lambda: pytest.fail("must not connect"),
+        )
 
 
 def test_identity_ids_reject_boolean_even_though_bool_is_an_int() -> None:

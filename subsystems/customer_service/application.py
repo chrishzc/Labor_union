@@ -11,16 +11,14 @@ from typing import Callable
 
 from domains.customer_service.ticket import (
     CustomerServiceStatus,
+    CustomerServiceTicketNotFoundError,
     CustomerServiceTransitionError,
+    CustomerServiceVersionConflictError,
     transition_ticket,
 )
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identities import LineUserId
-from infrastructure.mysql.customer_service_repository import (
-    CustomerServiceTicketNotFoundError,
-    CustomerServiceVersionConflictError,
-)
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import IdempotencyReceipt
 from subsystems.customer_service.contracts import (
@@ -198,7 +196,6 @@ class CustomerServiceApplication:
     def _read(self, operation):
         with self._unit_of_work_factory() as unit_of_work:
             result = operation(unit_of_work.customer_service)
-            unit_of_work.commit()
         return result
 
 

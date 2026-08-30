@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from domains.finance_import.ingestion import (
     FinanceImportAttempt,
@@ -21,8 +21,6 @@ from domains.finance_import.ingestion import (
 from domains.finance_import.source_warning_review import (
     build_finance_source_review,
 )
-from infrastructure.mysql.mysql_adapter import get_connection
-from scripts.imports.finance_statement_normalizer import normalize_workbook
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import ActorContext, IdempotencyKey
 from subsystems.finance_import.identity_maps import load_finance_identity_maps
@@ -54,6 +52,9 @@ def ingest_finance_workbook(
     excel_path: str,
     idempotency_key: IdempotencyKey,
     actor: ActorContext,
+    *,
+    connection_factory: Callable[[], Any],
+    normalizer: Callable[[str], Mapping[str, Any]],
 ) -> FinanceWorkbookIngestionReceipt:
     # Kept cohesive: the primary UoW rollback and independent attempt audit are one boundary.
     source_path = _validated_source_path(excel_path)
@@ -61,13 +62,13 @@ def ingest_finance_workbook(
     command_fingerprint = _command_fingerprint(source_digest, actor)
     started_at = _utc_timestamp()
     progress = _IngestionProgress()
-    connection = get_connection()
+    connection = connection_factory()
     try:
         with connection.cursor() as cursor:
             replay = _find_replay_or_attempt(cursor, idempotency_key, command_fingerprint)
         if replay is not None:
             return replay
-        normalized_result = normalize_workbook(str(source_path))
+        normalized_result = normalizer(str(source_path))
         receipt = _ingest_or_replay(
             connection,
             normalized_result,
@@ -95,6 +96,7 @@ def ingest_finance_workbook(
     except Exception as error:
         connection.rollback()
         attempt = _record_failed_attempt(
+            connection_factory,
             idempotency_key,
             command_fingerprint,
             source_digest,
@@ -460,6 +462,7 @@ def _save_success_attempt(
 
 
 def _record_failed_attempt(
+    connection_factory: Callable[[], Any],
     idempotency_key: IdempotencyKey,
     command_fingerprint: str,
     source_digest: str,
@@ -467,7 +470,7 @@ def _record_failed_attempt(
     started_at: datetime,
     error_code: str,
 ) -> FinanceImportAttempt:
-    connection = get_connection()
+    connection = connection_factory()
     try:
         with connection.cursor() as cursor:
             attempt = _save_or_load_failed_attempt(

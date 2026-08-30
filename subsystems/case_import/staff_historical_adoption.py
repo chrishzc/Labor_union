@@ -6,13 +6,34 @@ Description: 編排 Staff 歷史來源 replay、保守 scalar merge 與 adoption
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable, Protocol
 
 from domains.case_import.staff_historical_adoption import plan_staff_scalar_merge
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
-from infrastructure.mysql.staff_historical_adoption_repository import MySqlStaffHistoricalAdoptionRepository
-from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.case_import.beclass_review_intake import masked_review_identifier, record_invalid_beclass_row
+
+
+class StaffHistoricalAdoptionRepository(Protocol):
+    def claim(self, key, command_fingerprint, source_identity) -> bool: ...
+    def find_receipt(self, key): ...
+    def save_receipt(self, **kwargs) -> None: ...
+    def load_staff(self, identity_card, *, for_update: bool): ...
+    def merge_bank_accounts(self, staff_id, accounts, *, replace_existing=False): ...
+    def merge_relation(self, staff_id, table_name, values, *, replace_existing=False): ...
+    def apply_scalar_patch(self, staff_id, patch) -> None: ...
+
+
+def _missing_repository(_connection):
+    raise RuntimeError("staff_historical_adoption_repository_not_configured")
+
+
+def _missing_uow(_connection):
+    raise RuntimeError("staff_historical_adoption_uow_not_configured")
+
+
+MySqlStaffHistoricalAdoptionRepository = _missing_repository
+MySqlUnitOfWork = _missing_uow
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +53,7 @@ def record_created_staff_adoption(
     staff_id: int,
     historical_record: dict[str, object],
     review_identity: str | None,
+    repository: StaffHistoricalAdoptionRepository | None = None,
 ) -> bool:
     return record_staff_adoption_outcome(
         connection,
@@ -41,6 +63,7 @@ def record_created_staff_adoption(
         historical_record=historical_record,
         review_identity=review_identity,
         outcome="created",
+        repository=repository,
     )
 
 
@@ -53,8 +76,9 @@ def record_staff_adoption_outcome(
     historical_record: dict[str, object],
     review_identity: str | None,
     outcome: str,
+    repository: StaffHistoricalAdoptionRepository | None = None,
 ) -> bool:
-    repository = MySqlStaffHistoricalAdoptionRepository(connection)
+    repository = repository or MySqlStaffHistoricalAdoptionRepository(connection)
     source_identity = f"staff-workbook:{source_content_digest}:row:{source_row}"
     source_fingerprint = fingerprint_payload(historical_record).value
     key = f"staff-historical-adoption:{source_content_digest}:row:{source_row}"
@@ -98,8 +122,11 @@ def adopt_existing_staff(
     validation_issue_codes: tuple[str, ...] = (),
     bank_accounts: tuple[tuple[object, ...], ...] = (),
     relations: dict[str, tuple[tuple[object, ...], ...]] | None = None,
+    repository: StaffHistoricalAdoptionRepository | None = None,
+    unit_of_work_factory: Callable[[], object] | None = None,
+    review_recorder: Callable[..., str] | None = None,
 ) -> StaffHistoricalAdoptionResult:
-    repository = MySqlStaffHistoricalAdoptionRepository(connection)
+    repository = repository or MySqlStaffHistoricalAdoptionRepository(connection)
     source_identity = f"staff-workbook:{source_content_digest}:row:{source_row}"
     normalized_relations = relations or {}
     source_fingerprint = fingerprint_payload({
@@ -111,7 +138,8 @@ def adopt_existing_staff(
     command_fingerprint = fingerprint_payload(
         {"source_identity": source_identity, "source_fingerprint": source_fingerprint}
     ).value
-    with MySqlUnitOfWork(connection) as unit_of_work:
+    uow_factory = unit_of_work_factory or (lambda: MySqlUnitOfWork(connection))
+    with uow_factory() as unit_of_work:
         receipt = repository.find_receipt(key)
         if receipt is not None:
             if str(receipt["command_fingerprint"]) != command_fingerprint:
@@ -172,7 +200,8 @@ def adopt_existing_staff(
         ) + tuple(f"historical_nonempty_conflict:{field}" for field in relation_conflicts))))
         review_identity = None
         if review_issues:
-            review_identity = record_invalid_beclass_row(
+            recorder = review_recorder or record_invalid_beclass_row
+            review_identity = recorder(
                 connection,
                 source_kind=BeClassImportSourceKind.STAFF,
                 source_content_digest=source_content_digest,
@@ -183,6 +212,7 @@ def adopt_existing_staff(
                 ),
                 source_payload=review_payload,
                 issue_codes=review_issues,
+                repository=repository,
             )
         repository.apply_scalar_patch(int(existing["id"]), dict(merge.patch))
         repository.save_receipt(

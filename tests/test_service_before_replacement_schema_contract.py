@@ -85,13 +85,11 @@ def test_descriptor_matches_every_canonical_owned_object() -> None:
 def test_fresh_assembly_orders_1012_before_projector_v2_successor() -> None:
     assembly = load_schema_assembly()
 
-    assert [path.name for path in assembly.active_artifact_paths[-5:]] == [
-        "1010_historical_operational_baseline.sql",
-        "1011_historical_baseline_projector.sql",
-        "1012_service_before_replacement.sql",
-        "1013_order_lifecycle_pending_status_constraint.sql",
-        "1014_historical_baseline_projector_v2.sql",
-    ]
+    names = [path.name for path in assembly.active_artifact_paths]
+    assert names.index("1012_service_before_replacement.sql") < names.index(
+        "1014_historical_baseline_projector_v2.sql"
+    )
+    assert names[-1] == "1018_hcm_resubmission_canonical_review_version.sql"
 
 
 def _sql() -> str:

@@ -10,28 +10,27 @@
   "test_kinds": ["domain_root_data", "expected_manifest"],
   "coverage_ids": ["AC-CAPABILITY-SESSION-002"],
   "source_refs": [
-    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ACSM-01",
-    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#5.2"
+    "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md#4.1 正式內部使用者存取模型",
+    "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md#4.3 Subsystem：Authentication／Session"
   ],
   "root_facts": [
-    "Unique administrator identities, one active session, a temporary capability-grant command and a fixed authorization version."
+    "Unique enabled administrator identities and one valid active bearer session under the shared internal-user business access model."
   ],
   "forbidden_direct_seed": [
-    "effective capability decision, capability-grant event, session revocation timestamp, knowledge authorization result or security-alert projection"
+    "authentication result, effective authorization decision, session revocation timestamp, knowledge lifecycle state or security-alert projection"
   ],
   "commands": [
-    "Issue a temporary capability grant to an administrator with an active session, then use separately granted editor and reviewer capabilities in the bounded knowledge workflow."
+    "Use an authenticated enabled internal user session and the same bounded knowledge business workflow with another enabled internal user; no per-user authorization command is part of the flow."
   ],
   "expected": [
-    "Applying a valid capability grant revokes the target's active session as one persisted authorization effect.",
-    "A role-local editor cannot review or publish without separately granted capability roots.",
-    "The session revocation and effective authorization are derived by the grant workflow, not supplied as result rows."
+    "All authenticated and enabled internal users share the same business-function access regardless of role, title or department.",
+    "The valid active session remains governed by authentication and enabled-user checks and is not changed by a knowledge lifecycle command.",
+    "Authorization and session state are derived from the canonical access/session facts, not supplied as result rows."
   ],
   "receipt_requirements": [
     "unique administrator/session root evidence",
-    "capability-grant command identities",
-    "persisted session-revocation assertion",
-    "separate editor/reviewer authorization assertions"
+    "authenticated enabled-user session assertion",
+    "equal business-access assertion for the knowledge workflow"
   ],
   "execution": {
     "runner": [

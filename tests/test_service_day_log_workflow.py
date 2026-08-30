@@ -9,6 +9,7 @@ from domains.scheduling.service_day_log import ServiceDayLogIntent
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.scheduling.service_day_log_workflow import (
     ApplyServiceDayLog,
+    ControlledServiceDayLogAttachment,
     PreviewServiceDayLog,
     ServiceDayLogResult,
     ServiceDayLogWorkflow,
@@ -78,6 +79,37 @@ def test_cooking_service_day_log_is_blocked_pending_media_scope() -> None:
 
     assert preview.blockers == ("service_day_log_meal_photo_required",)
     assert repository.submitted == []
+
+
+def test_cooking_service_day_log_accepts_typed_controlled_file_attachment() -> None:
+    repository = FakeRepository(True)
+    attachment = ControlledServiceDayLogAttachment(
+        "cf_1234567890abcdef1234567890abcdef",
+        "cfs_1234567890abcdef1234567890abcdef",
+        "a" * 64,
+    )
+    preview_command = PreviewServiceDayLog(
+        9,
+        "U-caregiver",
+        12,
+        ServiceDayLogIntent(date(2026, 8, 16), "寶寶正常", ()),
+        controlled_file_attachments=(attachment,),
+    )
+    preview = ServiceDayLogWorkflow(repository).preview(preview_command)
+    command = ApplyServiceDayLog(
+        9,
+        "U-caregiver",
+        12,
+        preview_command.intent,
+        "service-day-log-controlled",
+        preview.preview_fingerprint,
+        controlled_file_attachments=(attachment,),
+    )
+
+    result = ServiceDayLogWorkflow(repository).apply(command)
+
+    assert preview.can_apply is True
+    assert result.outcome == "created"
 
 
 def test_unknown_cooking_requirement_fails_closed() -> None:

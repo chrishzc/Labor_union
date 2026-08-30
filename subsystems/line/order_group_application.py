@@ -221,9 +221,7 @@ class LineOrderGroupQueryApplication:
     def list(self, actor: ActorContext, *, status: str | None, limit: int):
         require_line_capability(actor, LineCapability.ORDER_GROUP_READ)
         with self._unit_of_work_factory() as unit_of_work:
-            page = unit_of_work.order_groups.list(status=status, limit=limit)
-            unit_of_work.commit()
-        return page
+            return unit_of_work.order_groups.list(status=status, limit=limit)
 
     def list_numbered(
         self,
@@ -244,16 +242,12 @@ class LineOrderGroupQueryApplication:
     def get(self, actor: ActorContext, case_no: str):
         require_line_capability(actor, LineCapability.ORDER_GROUP_READ)
         with self._unit_of_work_factory() as unit_of_work:
-            result = unit_of_work.order_groups.get(case_no)
-            unit_of_work.commit()
-        return result
+            return unit_of_work.order_groups.get(case_no)
 
     def events(self, actor: ActorContext, case_no: str, *, limit: int):
         require_line_capability(actor, LineCapability.ORDER_GROUP_READ)
         with self._unit_of_work_factory() as unit_of_work:
-            result = unit_of_work.order_groups.events(case_no, limit=limit)
-            unit_of_work.commit()
-        return result
+            return unit_of_work.order_groups.events(case_no, limit=limit)
 
     def events_numbered(
         self,

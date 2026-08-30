@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -64,6 +65,38 @@ class LocalDatabaseUpdateError(RuntimeError):
     def __init__(self, message: str, *, code: str = "database_update_blocked"):
         super().__init__(message)
         self.code = code
+
+
+def _plan_receipt_payload(preview: dict[str, object]) -> dict[str, object]:
+    payload = {
+        "contract": "local-database-update/v1",
+        "mode": "dry-run",
+        "source_database": preview.get("source_database"),
+        "candidate_database": preview.get("candidate_database"),
+        "release_id": preview.get("release_id"),
+        "release_fingerprint": preview.get("release_fingerprint"),
+        "source_schema_sha256": preview.get("source_schema_sha256"),
+    }
+    payload["plan_fingerprint"] = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return payload
+
+
+def _validate_plan_receipt(path: Path, preview: dict[str, object]) -> None:
+    try:
+        payload = json.loads(path.expanduser().resolve().read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise LocalDatabaseUpdateError(
+            "prior dry-run receipt is not valid UTF-8 JSON",
+            code="plan_receipt_invalid",
+        ) from error
+    expected = _plan_receipt_payload(preview)
+    if payload != expected:
+        raise LocalDatabaseUpdateError(
+            "prior dry-run receipt does not match the current schema plan",
+            code="plan_drift",
+        )
 
 
 def resolve_mysql_container(configured_container=None) -> str | None:
@@ -297,6 +330,20 @@ def apply_additive_update(
         raise LocalDatabaseUpdateError(
             f"additive runner unavailable: {ADDITIVE_IMPORT_ERROR}"
         )
+    if not isinstance(source, str) or not migration.IDENTIFIER.fullmatch(source):
+        raise LocalDatabaseUpdateError(
+            "source database name is invalid",
+            code="target_profile_blocked",
+        )
+    if callable(getattr(config, "connect", None)):
+        identity = migration.server_identity(config, source)
+        if identity.get("database") != source or not identity.get("server"):
+            raise LocalDatabaseUpdateError(
+                "configured connected database host identity does not match the explicit database target",
+                code="connected_identity_mismatch",
+            )
+    # Recompute the plan immediately before backup/DDL so schema fingerprint and
+    # release identity drift fail closed on every apply or resume/replay.
     applied_releases: list[str] = []
     while True:
         preview = build_additive_preview(
@@ -308,6 +355,9 @@ def apply_additive_update(
         if preview.get("status") == "current":
             current = require_current_database(preview)
             current["applied_releases"] = applied_releases
+            current["terminal_receipt"] = str(
+                migration._local_receipt_path(Path(receipt_root), source)
+            )
             return current
         if preview.get("status") != "ready":
             raise LocalDatabaseUpdateError(
@@ -900,6 +950,8 @@ def update_local_database(
     lock_timeout_seconds=5,
     backup_receipt_path=None,
     qualification_receipt_path=None,
+    plan_receipt_path=None,
+    resume=False,
 ) -> dict[str, object]:
     if migration is None:
         raise LocalDatabaseUpdateError(f"migration catalog unavailable: {MIGRATION_IMPORT_ERROR}")
@@ -912,6 +964,11 @@ def update_local_database(
         )
     environment_path = Path(environment_file)
     try:
+        if resume and not apply:
+            raise LocalDatabaseUpdateError(
+                "--resume requires --apply",
+                code="strategy_flags_conflict",
+            )
         environment_values = dict(os.environ)
         if environment_path.is_file():
             _, file_environment_values = migration._read_env_bytes(environment_path)
@@ -988,6 +1045,8 @@ def update_local_database(
         raise
     except Exception as error:
         raise LocalDatabaseUpdateError("database update preview failed") from error
+    if plan_receipt_path is not None and apply:
+        _validate_plan_receipt(Path(plan_receipt_path), preview)
     if require_current:
         if apply:
             raise LocalDatabaseUpdateError(
@@ -1083,14 +1142,74 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--lock-timeout-seconds", type=int, default=5)
     command.add_argument("--backup-receipt", type=Path)
     command.add_argument("--qualification-receipt", type=Path)
+    command.add_argument(
+        "--plan-receipt",
+        type=Path,
+        help="write a dry-run plan receipt and validate it before apply",
+    )
+    command.add_argument(
+        "--receipt-path",
+        type=Path,
+        help="optional terminal receipt path for a completed mutation",
+    )
+    command.add_argument(
+        "--resume",
+        action="store_true",
+        help="resume/replay the recorded additive journal after an interruption",
+    )
+    command.add_argument(
+        "--verify",
+        action="store_true",
+        help="verify a previously written terminal receipt without a database write",
+    )
     return command
 
 
 def main() -> int:
     arguments = parser().parse_args()
+    mode = "dry-run" if not arguments.apply else "apply"
     if arguments.dry_run and arguments.apply:
         print(json.dumps({"status": "blocked", "code": "dry_run_apply_conflict", "error": "--dry-run cannot be combined with --apply"}, ensure_ascii=False), file=sys.stderr)
         return 2
+    if arguments.verify:
+        if arguments.apply or not arguments.receipt_path:
+            print(
+                json.dumps(
+                    {
+                        "status": "blocked",
+                        "code": "terminal_receipt_required",
+                        "error": "--verify requires --receipt-path and cannot be combined with --apply",
+                    },
+                    ensure_ascii=False,
+                ),
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            receipt = json.loads(
+                arguments.receipt_path.expanduser().resolve().read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            print(
+                json.dumps(
+                    {"status": "blocked", "code": "terminal_receipt_invalid", "error": str(error)},
+                    ensure_ascii=False,
+                ),
+                file=sys.stderr,
+            )
+            return 2
+        if receipt.get("receipt_status") != "committed":
+            print(
+                json.dumps(
+                    {"status": "blocked", "code": "terminal_receipt_invalid", "error": "terminal receipt is not committed"},
+                    ensure_ascii=False,
+                ),
+                file=sys.stderr,
+            )
+            return 2
+        receipt["status"] = "verified"
+        print(json.dumps(receipt, ensure_ascii=False, indent=2))
+        return 0
     try:
         result = update_local_database(
             environment_file=arguments.environment_file,
@@ -1109,6 +1228,8 @@ def main() -> int:
             lock_timeout_seconds=arguments.lock_timeout_seconds,
             backup_receipt_path=arguments.backup_receipt,
             qualification_receipt_path=arguments.qualification_receipt,
+            plan_receipt_path=arguments.plan_receipt,
+            resume=arguments.resume,
         )
     except LocalDatabaseUpdateError as error:
         payload = {
@@ -1121,6 +1242,42 @@ def main() -> int:
     if result.get("status") == "blocked":
         print(json.dumps(result, ensure_ascii=False, indent=2), file=sys.stderr)
         return 2
+    if not arguments.apply and arguments.plan_receipt:
+        arguments.plan_receipt.parent.mkdir(parents=True, exist_ok=True)
+        arguments.plan_receipt.write_text(
+            json.dumps(_plan_receipt_payload(result), ensure_ascii=False, sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
+    if arguments.apply and arguments.receipt_path:
+        if result.get("status") not in {"completed", "current"}:
+            print(
+                json.dumps(
+                    {
+                        "status": "blocked",
+                        "code": "terminal_receipt_required",
+                        "error": "mutation did not produce a terminal receipt",
+                    },
+                    ensure_ascii=False,
+                ),
+                file=sys.stderr,
+            )
+            return 2
+        terminal = {
+            "contract": "local-database-update/v1",
+            "mode": "apply",
+            "receipt_status": "committed",
+            "source_database": result.get("source_database"),
+            "release_id": result.get("release_id"),
+            "release_fingerprint": result.get("release_fingerprint"),
+            "terminal_receipt": result.get("terminal_receipt"),
+            "replay_key": result.get("release_fingerprint"),
+        }
+        arguments.receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        arguments.receipt_path.write_text(
+            json.dumps(terminal, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

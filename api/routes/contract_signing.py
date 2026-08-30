@@ -12,7 +12,10 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Path,
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import (
+    get_access_control_connection_factory,
+    require_system_admin,
+)
 from api.dependencies.contract_signing import (
     _archive_root,
     get_client_contract_signing_application,
@@ -27,7 +30,7 @@ from api.schemas.contract_signing import (
     ContractSigningReceiptView,
 )
 from infrastructure.archive.contract_documents import read_archived_contract_document, validate_contract_document_content
-from subsystems.access.authentication_session import record_admin_audit
+from subsystems.access.authentication_session import ConnectionFactory, record_admin_audit
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.contract_signing.client_contract_application import (
@@ -243,6 +246,7 @@ def download_contract_document(
     application: ContractSigningDocumentQueryApplication = Depends(
         get_contract_signing_document_query_application
     ),
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
 ):
     try:
         document = application.find_document_for_download(case_no, document_version_id)
@@ -253,6 +257,7 @@ def download_contract_document(
             expected_sha256=document.sha256,
         )
         record_admin_audit(
+            connection_factory=connection_factory,
             principal=principal, action="contract_document_downloaded",
             request_path=request.url.path, http_method="GET", result_status=200,
             resource_type="contract_document_version", resource_id=str(document_version_id),

@@ -3,8 +3,7 @@ File: data_browser_maintenance.py
 Description: 編排 legacy table metadata 與 masked Data Browser query。
 """
 
-from typing import Any, Dict
-from infrastructure.mysql import mysql_adapter as db_service
+from typing import Any, Callable, Dict, Mapping
 
 # 白名單資料表
 ALLOWED_TABLES = {
@@ -54,7 +53,13 @@ COLUMN_VALID_OPTIONS = {
     },
 }
 
-def get_data_browser_table_schema(table_name: str) -> Dict[str, Any]:
+def get_data_browser_table_schema(
+    table_name: str,
+    *,
+    data_reader: Callable[[str], Any],
+    columns_reader: Callable[[str], Any],
+    primary_keys: Mapping[str, str],
+) -> Dict[str, Any]:
     """
     動態取得資料表之資料列、欄位清單與中繼權限 SSOT。
     關鍵修復：主鍵由 TABLE_PRIMARY_KEYS 動態回傳 (例如 orders 轉為 case_no)。
@@ -62,9 +67,9 @@ def get_data_browser_table_schema(table_name: str) -> Dict[str, Any]:
     if table_name not in ALLOWED_TABLES:
         raise ValueError(f"不允許存取的資料表: {table_name}")
 
-    rows = db_service.get_table_data(table_name)
-    cols = db_service.get_table_columns(table_name)
-    pk_col = db_service.TABLE_PRIMARY_KEYS.get(table_name, "id")
+    rows = data_reader(table_name)
+    cols = columns_reader(table_name)
+    pk_col = primary_keys.get(table_name, "id")
     is_read_only = table_name in READ_ONLY_TABLES
     editable = [] if is_read_only else EDITABLE_COLUMNS.get(table_name, [])
 

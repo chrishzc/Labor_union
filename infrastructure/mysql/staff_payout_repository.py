@@ -152,20 +152,6 @@ class MySqlStaffPayoutRepository:
                     self._require_request().reason,
                 ),
             )
-            cursor.execute(
-                _RECOVERY_ESTABLISHED_OUTBOX_SQL,
-                (
-                    recovery.staff_id,
-                    _recovery_established_intent_key(recovery.identity),
-                    _canonical_json(
-                        {
-                            "event_type": "staff_overpayment_recovery_established",
-                            "recovery_identity": recovery.identity,
-                            "recovery_version": 0,
-                        }
-                    ),
-                ),
-            )
 
     def update_payable_projection(
         self,
@@ -184,6 +170,8 @@ class MySqlStaffPayoutRepository:
     def append_outbox(self, candidate) -> None:
         request = self._require_request()
         difference_identity = self._persist_difference_source(candidate, request)
+        if difference_identity is not None:
+            return
         payload = _outbox_payload(candidate, request, difference_identity)
         with _mysql_cursor(self._connection) as cursor:
             cursor.execute(
@@ -191,7 +179,7 @@ class MySqlStaffPayoutRepository:
                 (
                     candidate.staff_id,
                     _outbox_intent_key(request.idempotency_key),
-                    _outbox_intent_type(request),
+                    "payable_projection_refresh",
                     _canonical_json(payload),
                 ),
             )
@@ -1086,19 +1074,6 @@ def _payout_difference_identity(key: IdempotencyKey) -> str:
     return f"staff-payout-difference:{digest}"
 
 
-def _recovery_established_intent_key(recovery_identity: str) -> str:
-    digest = hashlib.sha256(
-        f"staff-overpayment-recovery-established:{recovery_identity}".encode("utf-8")
-    ).hexdigest()
-    return f"staff-overpayment-recovery-established:{digest}"
-
-
-def _outbox_intent_type(request: StaffPayoutApplyRequest) -> str:
-    if request.selection.difference_mode is not None:
-        return "payout_anomaly_required"
-    return "payable_projection_refresh"
-
-
 def _event_idempotency_key(key, ordinal) -> str:
     digest = hashlib.sha256(f"{key.value}:{ordinal}".encode("utf-8")).hexdigest()
     return f"staff-payout-event:{digest}"
@@ -1271,12 +1246,6 @@ _RECOVERY_INSERT_SQL = (
     "source_bank_fact_identities,source_payout_event_ids,source_obligation_identities,"
     "actor,reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
-_RECOVERY_ESTABLISHED_OUTBOX_SQL = (
-    "INSERT INTO staff_payables_outbox "
-    "(staff_id,intent_key,intent_type,payload_snapshot) "
-    "VALUES (%s,%s,'staff_overpayment_recovery_updated',%s)"
-)
-
 __all__ = [
     "MySqlStaffPayoutRepository",
     "StaffPayoutMySqlUnitOfWork",

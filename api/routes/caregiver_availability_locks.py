@@ -32,6 +32,13 @@ from subsystems.scheduling.availability_lock_acquisition_workflow import (
 )
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.identities import CorrelationId
+from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.scheduling import availability_lock_acquisition_workflow as _lock_acquisition
+from subsystems.scheduling import availability_lock_release_workflow as _lock_release
+
+
+_lock_acquisition.get_connection = get_connection
+_lock_release.get_connection = get_connection
 
 
 router = APIRouter(
@@ -146,14 +153,14 @@ def apply_waiting_deposit_lock_acquisition(
 
 @router.post(
     "/{case_no}/matching-plans/{plan_id}/availability-lock/acquire",
-    response_model=BaseResponse[dict[str, Any]],
+    response_model=BaseResponse[None],
 )
 def acquire_availability_lock(
     request: AcquireAvailabilityLockRequest,
     case_no: str = Path(..., min_length=1),
     plan_id: int = Path(..., strict=True, gt=0),
     principal: AdminPrincipal = Depends(require_system_admin),
-) -> BaseResponse[dict[str, Any]]:
+) -> BaseResponse[None]:
     _require_actor(principal, request.actor)
     raise HTTPException(
         status_code=410,
@@ -229,7 +236,7 @@ def apply_waiting_deposit_lock_release(
 
 @router.post(
     "/{case_no}/matching-plans/{plan_id}/availability-locks/{lock_id}/release",
-    response_model=BaseResponse[dict[str, Any]],
+    response_model=BaseResponse[None],
 )
 def release_availability_lock(
     request: ReleaseAvailabilityLockRequest,
@@ -237,7 +244,7 @@ def release_availability_lock(
     plan_id: int = Path(..., strict=True, gt=0),
     lock_id: int = Path(..., strict=True, gt=0),
     principal: AdminPrincipal = Depends(require_system_admin),
-) -> BaseResponse[dict[str, Any]]:
+) -> BaseResponse[None]:
     _require_actor(principal, request.actor)
     raise HTTPException(
         status_code=410,
@@ -258,14 +265,14 @@ def release_availability_lock(
 
 @router.post(
     "/{case_no}/availability-locks/{lock_id}/convert",
-    response_model=BaseResponse[dict[str, Any]],
+    response_model=BaseResponse[None],
 )
 def convert_availability_lock(
     request: ConvertAvailabilityLockRequest,
     case_no: str = Path(..., min_length=1),
     lock_id: int = Path(..., strict=True, gt=0),
     principal: AdminPrincipal = Depends(require_system_admin),
-) -> BaseResponse[dict[str, Any]]:
+) -> BaseResponse[None]:
     _require_actor(principal, request.actor)
     del lock_id
     raise HTTPException(

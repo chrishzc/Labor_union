@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, HTTPException, Path
 
 from api.dependencies.admin_auth import require_system_admin
@@ -28,7 +26,7 @@ def preview_assignment_leave_resolution_batch_route(
     req: AssignmentLeaveResolutionBatchPreviewRequest,
     assignment_id: int = Path(..., gt=0),
     principal: AdminPrincipal = Depends(require_system_admin),
-) -> Any:
+) -> None:
     del req, assignment_id, principal
     _raise_retired()
 
@@ -38,7 +36,7 @@ def apply_assignment_leave_resolution_batch_route(
     req: AssignmentLeaveResolutionBatchApplyRequest,
     assignment_id: int = Path(..., gt=0),
     principal: AdminPrincipal = Depends(require_system_admin),
-) -> Any:
+) -> None:
     del req, assignment_id, principal
     _raise_retired()
 
@@ -47,7 +45,7 @@ def apply_assignment_leave_resolution_batch_route(
 def save_assignment_rest_dates(
     req: AssignmentRestDatesUpdateRequest,
     assignment_id: int = Path(..., gt=0),
-) -> Any:
+) -> None:
     del req, assignment_id
     _raise_retired()
 
@@ -57,7 +55,7 @@ def preview_assignment_leave_resolution_route(
     req: AssignmentLeaveResolutionPreviewRequest,
     assignment_id: int = Path(..., gt=0),
     principal: AdminPrincipal = Depends(require_system_admin),
-) -> Any:
+) -> None:
     del req, assignment_id, principal
     _raise_retired()
 
@@ -67,7 +65,7 @@ def apply_assignment_leave_resolution_route(
     req: AssignmentLeaveResolutionApplyRequest,
     assignment_id: int = Path(..., gt=0),
     principal: AdminPrincipal = Depends(require_system_admin),
-) -> Any:
+) -> None:
     del req, assignment_id, principal
     _raise_retired()
 

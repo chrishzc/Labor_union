@@ -71,19 +71,8 @@ def apply_knowledge_command(
     command: KnowledgeCommand,
     actor: AdminPrincipal,
 ) -> dict[str, Any]:
-    _validate_compatibility_command(command, actor)
-    connection = get_connection()
-    try:
-        connection.begin()
-        repository = MySqlKnowledgeRetrievalRepository(connection)
-        result = _apply_compatibility_command(repository, command, int(actor.id))
-        connection.commit()
-        return result
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
+    del command, actor
+    raise KnowledgeCommandError("knowledge_legacy_writer_retired")
 
 
 def query_published_knowledge(question: str) -> dict[str, Any] | None:

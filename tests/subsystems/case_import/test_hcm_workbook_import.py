@@ -60,6 +60,20 @@ class _UnitOfWork:
         return None
 
 
+class _RecordingUnitOfWork(_UnitOfWork):
+    def __init__(self):
+        self.commits = 0
+        self.rollbacks = 0
+
+    def __exit__(self, exception_type, *_):
+        if exception_type is not None:
+            self.rollbacks += 1
+        return False
+
+    def commit(self):
+        self.commits += 1
+
+
 class _Intake:
     def __init__(self, repository) -> None:
         self._repository = repository
@@ -77,6 +91,19 @@ class _Intake:
 
     def preview_rows(self, frame, source_path):
         return {"ready": len(frame), "ready_with_warning": 0, "review_required": 0}
+
+
+class _CurrentUowIntake(_Intake):
+    def import_rows(self, frame, source_path):
+        raise AssertionError("workbook composition must borrow its UoW")
+
+    def import_rows_in_current_uow(self, frame, source_path):
+        return _Intake.import_rows(self, frame, source_path)
+
+
+class _FailingCurrentUowIntake(_CurrentUowIntake):
+    def import_rows_in_current_uow(self, frame, source_path):
+        raise RuntimeError("orders_reconciliation_failed")
 
 
 class _IncompleteIntake(_Intake):
@@ -128,6 +155,43 @@ def test_same_key_and_digest_returns_terminal_workbook_receipt(tmp_path):
     assert replay.replayed_workbook is True
     assert repository.intake_calls == 1
     assert repository.locked == []
+
+
+def test_ingest_keeps_claim_rows_and_workbook_receipt_in_one_outer_uow(tmp_path):
+    workbook = tmp_path / "single-uow.xlsx"
+    workbook.write_bytes(b"single workbook transaction")
+    repository = _Repository()
+    unit_of_work = _RecordingUnitOfWork()
+    service = HcmWorkbookImportService(
+        repository, _CurrentUowIntake(repository), lambda: unit_of_work,
+    )
+
+    receipt = service.ingest(
+        pd.DataFrame({"案件": ["A"]}), str(workbook), "key-single-uow", "operator", "corr-1",
+    )
+
+    assert receipt.inserted_count == 1
+    assert unit_of_work.commits == 1
+    assert unit_of_work.rollbacks == 0
+
+
+def test_ingest_rolls_back_claim_and_receipt_when_current_uow_step_fails(tmp_path):
+    workbook = tmp_path / "failed-single-uow.xlsx"
+    workbook.write_bytes(b"failed workbook transaction")
+    repository = _Repository()
+    unit_of_work = _RecordingUnitOfWork()
+    service = HcmWorkbookImportService(
+        repository, _FailingCurrentUowIntake(repository), lambda: unit_of_work,
+    )
+
+    with pytest.raises(RuntimeError, match="orders_reconciliation_failed"):
+        service.ingest(
+            pd.DataFrame({"案件": ["A"]}), str(workbook), "key-failed-uow", "operator", "corr-1",
+        )
+
+    assert unit_of_work.commits == 0
+    assert unit_of_work.rollbacks == 1
+    assert repository.receipts == {}
 
 
 def test_same_digest_with_a_new_key_returns_the_existing_terminal_receipt(tmp_path):

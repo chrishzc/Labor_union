@@ -7,7 +7,10 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from api.dependencies.admin_auth import require_root
+from api.dependencies.admin_auth import (
+    get_access_control_connection_factory,
+    require_root,
+)
 from api.error_contracts import typed_http_error
 from api.schemas.account_center import (
     AccountDirectoryItemView,
@@ -28,6 +31,7 @@ from subsystems.access.authentication_session import (
     reset_account_center_mfa,
     revoke_account_center_sessions,
     set_account_center_enabled,
+    ConnectionFactory,
 )
 
 
@@ -35,10 +39,13 @@ router = APIRouter(prefix="/api/v1/admin/accounts", tags=["Account Center"])
 
 
 @router.get("", response_model=BaseResponse[list[AccountDirectoryItemView]])
-async def list_accounts(principal: AdminPrincipal = Depends(require_root)):
+async def list_accounts(
+    principal: AdminPrincipal = Depends(require_root),
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
+):
     del principal
     try:
-        accounts = await asyncio.to_thread(list_account_center_users)
+        accounts = await asyncio.to_thread(list_account_center_users, connection_factory=connection_factory)
     except AdminSessionStorageError as error:
         raise typed_http_error(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -65,11 +72,14 @@ async def list_accounts(principal: AdminPrincipal = Depends(require_root)):
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=BaseResponse[AccountMutationReceiptView])
 async def create_account(
-    payload: AccountCreateRequest, principal: AdminPrincipal = Depends(require_root)
+    payload: AccountCreateRequest,
+    principal: AdminPrincipal = Depends(require_root),
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
 ):
     try:
         result = await asyncio.to_thread(
             create_account_center_user_with_receipt,
+            connection_factory=connection_factory,
             actor=principal,
             username=payload.username,
             password=payload.password,
@@ -90,11 +100,14 @@ async def create_account(
 
 @router.patch("/{account_id}/enabled", response_model=BaseResponse[AccountMutationReceiptView])
 async def set_enabled(
-    account_id: int, payload: AccountEnabledRequest, principal: AdminPrincipal = Depends(require_root)
+    account_id: int,
+    payload: AccountEnabledRequest,
+    principal: AdminPrincipal = Depends(require_root),
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
 ):
     try:
         receipt = await asyncio.to_thread(
-            set_account_center_enabled, actor=principal, account_id=account_id, enabled=payload.enabled, reason=payload.reason, expected_version=payload.expected_version, idempotency_key=payload.idempotency_key
+            set_account_center_enabled, connection_factory=connection_factory, actor=principal, account_id=account_id, enabled=payload.enabled, reason=payload.reason, expected_version=payload.expected_version, idempotency_key=payload.idempotency_key
         )
     except ValueError as error:
         raise _command_error(error) from error
@@ -105,11 +118,14 @@ async def set_enabled(
 
 @router.post("/{account_id}/password-reset", response_model=BaseResponse[AccountMutationReceiptView])
 async def reset_password(
-    account_id: int, payload: AccountPasswordResetRequest, principal: AdminPrincipal = Depends(require_root)
+    account_id: int,
+    payload: AccountPasswordResetRequest,
+    principal: AdminPrincipal = Depends(require_root),
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
 ):
     try:
         receipt = await asyncio.to_thread(
-            reset_account_center_password, actor=principal, account_id=account_id, password=payload.password, reason=payload.reason, expected_version=payload.expected_version, idempotency_key=payload.idempotency_key
+            reset_account_center_password, connection_factory=connection_factory, actor=principal, account_id=account_id, password=payload.password, reason=payload.reason, expected_version=payload.expected_version, idempotency_key=payload.idempotency_key
         )
     except ValueError as error:
         raise _command_error(error) from error
@@ -120,10 +136,13 @@ async def reset_password(
 
 @router.post("/{account_id}/mfa-reset", response_model=BaseResponse[AccountMutationReceiptView])
 async def reset_mfa(
-    account_id: int, payload: AccountSecurityActionRequest, principal: AdminPrincipal = Depends(require_root)
+    account_id: int,
+    payload: AccountSecurityActionRequest,
+    principal: AdminPrincipal = Depends(require_root),
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
 ):
     try:
-        receipt = await asyncio.to_thread(reset_account_center_mfa, actor=principal, account_id=account_id, reason=payload.reason, expected_version=payload.expected_version, idempotency_key=payload.idempotency_key)
+        receipt = await asyncio.to_thread(reset_account_center_mfa, connection_factory=connection_factory, actor=principal, account_id=account_id, reason=payload.reason, expected_version=payload.expected_version, idempotency_key=payload.idempotency_key)
     except ValueError as error:
         raise _command_error(error) from error
     except AdminSessionStorageError as error:
@@ -133,10 +152,13 @@ async def reset_mfa(
 
 @router.post("/{account_id}/sessions/revoke", response_model=BaseResponse[AccountMutationReceiptView])
 async def revoke_sessions(
-    account_id: int, payload: AccountSecurityActionRequest, principal: AdminPrincipal = Depends(require_root)
+    account_id: int,
+    payload: AccountSecurityActionRequest,
+    principal: AdminPrincipal = Depends(require_root),
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
 ):
     try:
-        receipt = await asyncio.to_thread(revoke_account_center_sessions, actor=principal, account_id=account_id, reason=payload.reason, expected_version=payload.expected_version, idempotency_key=payload.idempotency_key)
+        receipt = await asyncio.to_thread(revoke_account_center_sessions, connection_factory=connection_factory, actor=principal, account_id=account_id, reason=payload.reason, expected_version=payload.expected_version, idempotency_key=payload.idempotency_key)
     except ValueError as error:
         raise _command_error(error) from error
     except AdminSessionStorageError as error:

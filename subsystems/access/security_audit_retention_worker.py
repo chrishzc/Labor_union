@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any, Callable
 
 from subsystems.access.security_audit_query import archive_expired_admin_audits
 
@@ -10,8 +11,17 @@ from subsystems.access.security_audit_query import archive_expired_admin_audits
 _ARCHIVE_INTERVAL_SECONDS = 24 * 60 * 60
 
 
-def start_security_audit_retention_worker() -> asyncio.Task[None]:
-    return asyncio.create_task(_run_retention_loop())
+def start_security_audit_retention_worker(
+    *,
+    connection_factory: Callable[[], Any],
+    unit_of_work_factory: Callable[[Any], Any],
+) -> asyncio.Task[None]:
+    return asyncio.create_task(
+        _run_retention_loop(
+            connection_factory=connection_factory,
+            unit_of_work_factory=unit_of_work_factory,
+        )
+    )
 
 
 async def stop_security_audit_retention_worker(task: asyncio.Task[None]) -> None:
@@ -22,24 +32,46 @@ async def stop_security_audit_retention_worker(task: asyncio.Task[None]) -> None
         pass
 
 
-async def _run_retention_loop() -> None:
+async def _run_retention_loop(
+    *,
+    connection_factory: Callable[[], Any],
+    unit_of_work_factory: Callable[[Any], Any],
+) -> None:
     while True:
         try:
-            await asyncio.to_thread(_archive_all_due_records)
+            await asyncio.to_thread(
+                _archive_all_due_records,
+                connection_factory=connection_factory,
+                unit_of_work_factory=unit_of_work_factory,
+            )
         except Exception as exc:
             print(f"[Admin Audit] Retention archive failed: {exc}")
         await asyncio.sleep(_ARCHIVE_INTERVAL_SECONDS)
 
 
-def archive_due_security_audits_once() -> int:
+def archive_due_security_audits_once(
+    *,
+    connection_factory: Callable[[], Any],
+    unit_of_work_factory: Callable[[Any], Any],
+) -> int:
     """Archive all currently due pages and return the moved row count."""
     archived_count = 0
     while True:
-        moved_count = archive_expired_admin_audits()
+        moved_count = archive_expired_admin_audits(
+            connection_factory=connection_factory,
+            unit_of_work_factory=unit_of_work_factory,
+        )
         archived_count += moved_count
         if moved_count <= 0:
             return archived_count
 
 
-def _archive_all_due_records() -> None:
-    archive_due_security_audits_once()
+def _archive_all_due_records(
+    *,
+    connection_factory: Callable[[], Any],
+    unit_of_work_factory: Callable[[Any], Any],
+) -> None:
+    archive_due_security_audits_once(
+        connection_factory=connection_factory,
+        unit_of_work_factory=unit_of_work_factory,
+    )

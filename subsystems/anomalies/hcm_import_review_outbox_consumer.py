@@ -13,8 +13,8 @@ from pymysql.err import OperationalError
 
 from domains.anomalies.registry import DesiredAlertState, default_anomaly_registry
 from domains.case_import.hcm_import_review import build_hcm_warning_occurrences_from_review
-from infrastructure.mysql.anomaly_registry_repository import MySqlAnomalyRepository
 from subsystems.anomalies.alert_workflow import AnomalyApplication, ProjectAlertRequest
+from subsystems.anomalies.ports import AnomalyRuntime, require_runtime
 from subsystems.anomalies.import_warning_projection_retry import (
     MAX_WARNING_PROJECTION_ATTEMPTS,
     WARNING_PROJECTION_RETRY_DELAY_SECONDS,
@@ -36,12 +36,13 @@ class BorrowedUnitOfWork:
     def rollback(self): return None
 
 
-def consume_hcm_import_review_events(connection, *, maximum_events: int = 50):
+def consume_hcm_import_review_events(connection, *, maximum_events: int = 50, runtime: AnomalyRuntime | None = None):
     if not isinstance(maximum_events, int) or not 1 <= maximum_events <= 100:
         raise ValueError("maximum_events must be between 1 and 100")
+    runtime = require_runtime(runtime)
     delivered = failed = 0
     for _ in range(maximum_events):
-        outcome = _consume_next(connection)
+        outcome = _consume_next(connection, runtime)
         if outcome is None:
             break
         delivered += int(outcome)
@@ -49,7 +50,7 @@ def consume_hcm_import_review_events(connection, *, maximum_events: int = 50):
     return HcmImportReviewOutboxResult(delivered, failed)
 
 
-def _consume_next(connection):
+def _consume_next(connection, runtime: AnomalyRuntime):
     event = None
     try:
         event = _claim_next(connection)
@@ -61,7 +62,7 @@ def _consume_next(connection):
         if warning_count:
             application = AnomalyApplication(
                 default_anomaly_registry(),
-                MySqlAnomalyRepository(connection),
+                runtime.anomaly_repository(connection),
                 BorrowedUnitOfWork,
             )
             application.project(_project_request(event, snapshot))
@@ -72,11 +73,11 @@ def _consume_next(connection):
         connection.rollback()
         if event is None and _mysql_code(error) == 1146:
             return None
-        _mark_failed(connection, event, error)
+        _record_failure(connection, event, error, runtime)
         return False
     except Exception as error:
         connection.rollback()
-        _mark_failed(connection, event, error)
+        _record_failure(connection, event, error, runtime)
         return False
 
 
@@ -203,7 +204,14 @@ def _mark_failed(connection, event, error):
             "WHERE id=%s",
             (message, int(event["id"])),
         )
-    connection.commit()
+
+
+def _record_failure(connection, event, error, runtime: AnomalyRuntime):
+    if not isinstance(event, dict) or "id" not in event:
+        return None
+    with runtime.failure_unit_of_work(connection) as unit_of_work:
+        _mark_failed(connection, event, error)
+        unit_of_work.commit()
 
 
 def _json_object(value):

@@ -1,14 +1,15 @@
 # Anomalies Domain
 
-狀態：`current_projection_contract_approved`；`runtime_cutover_blocked_spec_gap`
+狀態：`current_projection_and_additive_successor_approved`；`runtime_cutover_pending_db_and_runtime_evidence`
 
 最新人工裁決：2026-08-29 current-state 異常瘦身
 
-執行邊界：2026-08-29 Task 97 最新人工裁決授權本機 current-only typed Domain／
-Application contract、bounded recheck／intent transaction contract 與 focused tests。Runtime cutover、
-source replacement、刪檔、schema／DB migration、entry retirement、provider effect 與 deployment 仍不在授權內。
-因 current schema 尚缺 `current_anomaly_issues` 與 durable recheck-intent contract，新 contract 只可
-fail closed，不得透過 placeholder adapter 或 anomaly-specific claim／delivery state 偽裝 cutover 完成。
+執行邊界：2026-08-30 Task 97 最新人工裁決已授權本機 current-only typed Domain／
+Application contract、bounded recheck／intent transaction contract、additive `current_anomaly_issues`
+successor release 與 generic durable-job 接線。仍不授權 production／`union_db`、provider effect、
+deployment、entry switch、legacy table drop 或任何 destructive migration。在 static release、descriptor、
+disposable fresh／preserve-data engine 與 runtime cutover evidence 通過前，新 contract 必須 fail closed，
+不得透過 placeholder adapter 或 anomaly-specific claim／delivery state 偽裝 cutover 完成。
 
 ## 1. Domain 定位與最新裁決
 
@@ -194,6 +195,31 @@ Repository 不得 commit／rollback；route、worker、detector 不得直接寫 
 
 ## 6. Cutover、entry 與 migration gate
 
+### 6.1 Additive successor 裁決（2026-08-30）
+
+1. 新 runtime 唯一 projection table 為 `current_anomaly_issues`，只保存當下仍成立的 row；
+   action descriptors 保存於 `details_version=1` 的 closed typed details，不新增 occurrence、
+   workflow、claim、resolve、reclassification、timeline 或 history table。
+2. `subject_identity` 使用本規格§3.1的 per-code closed object，以 UTF-8 sorted-key compact JSON
+   保存；SQL collation 不得影響 canonical bytes。`issue_key` 依§3.1的 `ci_` + HMAC-SHA-256
+   產生，runtime secret 只由 composition 注入，不寫入 schema、log 或 receipt。一般 key rotation
+   不得改變已公開 identity；需更換時必須另有 exact migration Authority。
+3. owner-root／lock mapping 依§5的 canonical tuple 實作；任一 code 缺 subject schema、
+   severity／details discriminator、owner root 或 authoritative-complete predicate 時該 code fail closed，
+   不得用 generic row 承接。
+4. recheck intent 重用 generic `background_jobs` 的 typed `anomaly.recheck` command。owner mutation
+   與 append intent 同一 owner transaction；worker claim／lease是獨立短交易；projection reconcile
+   與該 intent complete 同一 Application-owned transaction。intent 只保留 replay、bounded retry、
+   terminal delivery 所需的通用 job evidence，不擴張為 anomaly history。
+5. external provider call 固定在 DB transaction 之外，結果另由通用 delivery mechanism 完成；
+   provider 失敗不回滾已提交的 owner mutation 或偽裝 projection complete。
+6. legacy 6 個 immutable schema parts 與 25 張 tables 只作 migration provenance。本次先建立
+   additive successor 並允許 coexistence；新 fresh successor assembly 最終排除 legacy parts 的時點，
+   必須等 runtime successor、zero-reference、backup／restore、cutback 與 release gate 完成。
+   preserve-data 只由 fresh owner facts recheck 重建 current projection，不從 legacy snapshot backfill。
+7. destructive drop 是未來獨立 package；本裁決不包含 production DB、deployment、provider、
+   entry retirement 或實體刪除 Authority。
+
 API、DB 與 entry cutover 必須等到：
 
 - 15-code action source map 全部 terminal-ready；
@@ -232,16 +258,16 @@ write set 或驗收基線重疊，一律以 Task 97 優先，Anomalies 重疊 la
 
 ```yaml
 spec_route:
-  status: SPEC_GAP
+  status: APPROVED_ADDITIVE_SUCCESSOR
 convergence:
   status: NOT_READY
   blockers:
     - 15-code owner action source map incomplete
     - 25 owner replacements incomplete
-    - 15-code subject scalar normalization and public redaction views incomplete
-    - recheck owner-lock and maintenance subject-universe mappings incomplete
-    - Task 97 canonical dependency unavailable in base
+    - 15-code subject scalar normalization and public redaction views require implementation evidence
+    - recheck owner-lock and maintenance subject-universe mappings require runtime evidence
     - dependency inventory lacks executable successor gates
+    - additive schema release and disposable fresh/preserve-data engine evidence incomplete
     - destructive migration remains unauthorized
 ```
 

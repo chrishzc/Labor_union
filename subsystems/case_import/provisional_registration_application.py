@@ -7,15 +7,11 @@ from domains.case_import.provisional_registration import (
     ProvisionalRegistrationIntent,
     build_provisional_registration_candidate,
 )
-from infrastructure.mysql.provisional_registration_repository import (
-    MySqlProvisionalRegistrationRepository,
-    ProvisionalRegistrationMySqlUnitOfWork,
-    ProvisionalRegistrationStorageError,
-)
 from subsystems.case_import.provisional_registration_types import (
     ProvisionalRegistrationConflict,
     ProvisionalRegistrationConflictError,
     ProvisionalRegistrationReceipt,
+    ProvisionalRegistrationStorageError,
 )
 
 
@@ -34,19 +30,10 @@ class ProvisionalRegistrationApplication:
         return outcome
 
 
-def build_provisional_registration_application(connection):
-    repository = MySqlProvisionalRegistrationRepository(connection)
-    return ProvisionalRegistrationApplication(
-        repository,
-        lambda: ProvisionalRegistrationMySqlUnitOfWork(connection),
-    )
-
-
 __all__ = [
     "ProvisionalRegistrationApplication",
     "ProvisionalRegistrationConflictError",
     "ProvisionalRegistrationDomainError",
     "ProvisionalRegistrationReceipt",
     "ProvisionalRegistrationStorageError",
-    "build_provisional_registration_application",
 ]

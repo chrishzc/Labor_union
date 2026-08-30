@@ -10,7 +10,10 @@ from datetime import timezone
 import json
 
 from domains.anomalies.registry import default_anomaly_registry
-from infrastructure.mysql.anomaly_registry_repository import MySqlAnomalyRepository
+from infrastructure.mysql.anomaly_registry_repository import (
+    AnomalyMySqlUnitOfWork,
+    MySqlAnomalyRepository,
+)
 from subsystems.anomalies.alert_workflow import AnomalyApplication
 from subsystems.anomalies.beclass_import_anomaly_consumer import (
     BeClassImportReviewItem,
@@ -31,16 +34,12 @@ def project_beclass_import_review_page(
         raise ValueError("limit must be between 1 and 100")
     rows = _load_review_page(connection, after_review_row_id, limit)
     application = AnomalyApplication(
-        default_anomaly_registry(), MySqlAnomalyRepository(connection), _BorrowedUnitOfWork
+        default_anomaly_registry(),
+        MySqlAnomalyRepository(connection),
+        lambda: AnomalyMySqlUnitOfWork(connection),
     )
-    try:
-        connection.begin()
-        for row in rows:
-            consume_beclass_import_review_item(application, _review_item(row))
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
+    for row in rows:
+        consume_beclass_import_review_item(application, _review_item(row))
     next_row_id = int(rows[-1]["id"]) if len(rows) == limit else None
     return BeClassReviewAnomalyPage(len(rows), next_row_id)
 
@@ -81,17 +80,6 @@ def _text_tuple(value) -> tuple[str, ...]:
     if not isinstance(parsed, list):
         raise ValueError("BeClass review issue codes must be an array")
     return tuple(sorted({str(item) for item in parsed}))
-
-
-class _BorrowedUnitOfWork:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exception_type, exception, traceback):
-        return False
-
-    def commit(self) -> None:
-        return None
 
 
 _REVIEW_PAGE_SQL = """

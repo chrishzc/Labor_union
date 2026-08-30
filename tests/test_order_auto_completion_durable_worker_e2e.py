@@ -88,7 +88,8 @@ def _dispatch(value):
 def _run_worker_once():
     from infrastructure.mysql.background_job_repository import BackgroundJobRepository
     from infrastructure.mysql.mysql_adapter import get_connection
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
 
     connection = get_connection()
     try:

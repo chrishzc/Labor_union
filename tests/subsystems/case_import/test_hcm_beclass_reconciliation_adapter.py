@@ -57,8 +57,12 @@ def test_apply_cooking_terms_uses_current_uow_without_hidden_commit(monkeypatch)
             return SimpleNamespace(order=SimpleNamespace(terms=_terms()))
 
     class Workflow:
-        def __init__(self, repository, _factory, _clock):
+        def __init__(self, repository, factory, _clock):
             self.repository = repository
+            with pytest.raises(
+                RuntimeError, match="hcm_reconciliation_requires_caller_owned_uow"
+            ):
+                factory()
 
         def preview(self, _case_no, proposed_terms):
             return SimpleNamespace(
@@ -105,6 +109,23 @@ def test_case_import_application_owns_exactly_one_uow(monkeypatch):
     assert connection.begins == 1
     assert connection.commits == 1
     assert connection.rollbacks == 0
+
+
+def test_case_import_application_borrows_existing_uow(monkeypatch):
+    connection = _Connection()
+    monkeypatch.setattr(
+        adapter.MySqlHcmBeClassReconciliationAdapter,
+        "reconcile",
+        lambda _self, case_no: SimpleNamespace(status="reconciled", case_no=case_no),
+    )
+
+    result = CaseImportReconciliationApplication(
+        adapter.MySqlHcmBeClassReconciliationAdapter(connection),
+        lambda: (_ for _ in ()).throw(AssertionError("current path must not create a UoW")),
+    ).reconcile_in_current_uow("115990823")
+
+    assert result.status == "reconciled"
+    assert connection.begins == connection.commits == connection.rollbacks == 0
 
 
 def test_case_import_application_rolls_back_reconciliation_failure(monkeypatch):

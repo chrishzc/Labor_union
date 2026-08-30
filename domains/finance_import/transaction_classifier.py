@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 import unicodedata
 
-from scripts.imports.finance_normalized_row import validate_normalized_row
+from domains.finance_import.normalized_row import validate_normalized_row
 from domains.finance_import.cancellation_code import resolve_finance_cancellation_code
 
 

@@ -15,7 +15,12 @@ import sys
 from dotenv import load_dotenv
 import pymysql
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from infrastructure.mysql.historical_order_adoption_repository import MySqlHistoricalOrderAdoptionRepository
+from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.orders.historical_adoption_workflow import (
@@ -51,6 +56,7 @@ def _process_workbook(connection, workbook, apply, actor, reason):
     workflow = HistoricalOrderAdoptionWorkflow(
         repository,
         lambda: MySqlUnitOfWork(connection),
+        MySqlHistoricalAssignmentWriter(connection),
     )
     outcomes: Counter[str] = Counter()
     review_rows = 0
@@ -129,6 +135,7 @@ def _parser():
     parser = argparse.ArgumentParser(description="Preview or apply typed Historical Order Adoption.")
     parser.add_argument("workbook", type=Path)
     parser.add_argument("--sheet")
+    parser.add_argument("--dry-run", action="store_true", help="Explicitly request the default read-only preview.")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm-database")
     parser.add_argument("--actor", default="historical-order-operator")

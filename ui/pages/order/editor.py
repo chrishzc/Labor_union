@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-import requests
 import streamlit as st
 
+from api.schemas.orders import ClientNamePreviewView
+from ui.api_clients.client_name_api_client import ClientNameApiClient, ClientNameApiError
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
 
 
@@ -62,8 +63,8 @@ def _render_basic_details(case_no, order, headers, key_prefix):
     ):
         _save_client_name(case_no, client_name, headers)
     preview = st.session_state.get(f"client_name_preview_{case_no}")
-    if preview:
-        st.info(f"預覽：客戶姓名將由「{preview.get('before') or '未設定'}」改為「{preview['name']}」；正式條款與排班不變。")
+    if isinstance(preview, ClientNamePreviewView):
+        st.info(f"預覽：客戶姓名將由「{preview.before_client_name or '未設定'}」改為「{preview.after_client_name}」；正式條款與排班不變。")
         reason = st.text_input("客戶姓名異動原因", key=f"{key_prefix}_client_name_reason_{case_no}")
         if st.button("確認套用客戶姓名", type="primary", key=f"{key_prefix}_apply_client_name_{case_no}"):
             _apply_client_name(case_no, headers, preview, reason)
@@ -95,30 +96,31 @@ def _save_client_name(case_no, client_name, headers):
         st.error("客戶名稱不可空白。")
         return
     try:
-        preview = _request(f"/api/v1/orders/{case_no}/client-name/preview", headers, method="POST", payload={"client_name": normalized_name})
-    except (requests.RequestException, ValueError) as error:
+        preview = ClientNameApiClient(
+            base_url=resolve_api_base_url(),
+            headers=headers,
+        ).preview(case_no, normalized_name)
+    except (ClientNameApiError, ValueError) as error:
         st.error(f"客戶姓名預覽失敗：{error}")
         return
-    data = preview or {}
-    preview_fingerprint = data.get("preview_fingerprint")
-    if not preview_fingerprint:
-        st.error("客戶姓名預覽失敗：後端未回傳確認指紋，請重新整理後再試。")
-        return
-    st.session_state[f"client_name_preview_{case_no}"] = {"name": normalized_name, "fingerprint": data.get("preview_fingerprint"), "before": data.get("before_client_name")}
+    st.session_state[f"client_name_preview_{case_no}"] = preview
 
 
-def _apply_client_name(case_no, headers, preview, reason):
+def _apply_client_name(case_no, headers, preview: ClientNamePreviewView, reason):
     if not reason.strip():
         st.error("請填寫客戶姓名異動原因。")
         return
-    if not preview.get("fingerprint"):
-        st.error("缺少客戶姓名預覽確認指紋，請先重新按「儲存訂單基本資料」產生預覽。")
-        st.session_state.pop(f"client_name_preview_{case_no}", None)
-        return
     try:
-        apply_headers = {**headers, "Idempotency-Key": str(uuid4())}
-        _request(f"/api/v1/orders/{case_no}/client-name/apply", apply_headers, method="POST", payload={"client_name": preview["name"], "preview_fingerprint": preview["fingerprint"], "reason": reason.strip()})
-    except (requests.RequestException, ValueError) as error:
+        ClientNameApiClient(
+            base_url=resolve_api_base_url(),
+            headers=headers,
+        ).apply(
+            case_no,
+            preview,
+            reason=reason.strip(),
+            idempotency_key=str(uuid4()),
+        )
+    except (ClientNameApiError, ValueError) as error:
         st.error(f"客戶姓名套用失敗：{error}")
         return
     st.session_state.pop(f"client_name_preview_{case_no}", None)
@@ -213,30 +215,3 @@ def _render_order_state_workflow(case_no, order, clients):
             case_no,
             clients["cancellation"],
         )
-
-
-def _request(path, headers, *, method="GET", payload=None):
-    response = requests.request(
-        method,
-        f"{resolve_api_base_url()}{path}",
-        headers=headers,
-        json=payload,
-        timeout=15,
-    )
-    body = _response_body(response)
-    if not response.ok or not body.get("success", False):
-        raise ValueError(_response_error(response, body))
-    return body.get("data")
-
-
-def _response_body(response):
-    try:
-        body = response.json()
-    except ValueError:
-        return {"detail": response.text}
-    return body if isinstance(body, dict) else {}
-
-
-def _response_error(response, body):
-    detail = body.get("detail") or body.get("message") or body
-    return f"HTTP {response.status_code}: {detail}"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from datetime import date, datetime, time
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -59,6 +60,11 @@ def require_dataset_database(database: str) -> str:
     if not _DATASET_DATABASE_PATTERN.fullmatch(database):
         raise ValueError("database must match lu_test_dataset_[a-z0-9_]+")
     return database
+
+
+def require_validation_profile() -> None:
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        raise ValueError("validation dataset seed requires a development validation profile")
 
 
 def connect(arguments):
@@ -153,6 +159,7 @@ def apply_dataset(connection, dataset: dict[str, object]):
 
 
 def seed(arguments) -> dict[str, object]:
+    require_validation_profile()
     if arguments.confirm_database != arguments.database:
         raise ValueError("confirmation must exactly match database")
     dataset = load_dataset(arguments.manifest)
@@ -175,6 +182,7 @@ def seed(arguments) -> dict[str, object]:
 
 def seed_into_integrated_dataset(arguments) -> dict[str, object]:
     """Append this manifest only when its root case is absent or identical."""
+    require_validation_profile()
     if arguments.confirm_database != arguments.database:
         raise ValueError("confirmation must exactly match database")
     dataset = load_dataset(arguments.manifest)

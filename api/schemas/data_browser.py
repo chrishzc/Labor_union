@@ -3,8 +3,11 @@ File: data_browser.py
 Description: 定義 legacy Data Browser 與六來源 masked query 契約。
 """
 
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Dict, List, Literal
-from pydantic import BaseModel, ConfigDict, Field
+
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 
 DataBrowserSourceId = Literal[
@@ -74,3 +77,24 @@ class DataBrowserSourceCorrectionPreviewRequest(DataBrowserPatchRequest):
 class DataBrowserSourceCorrectionApplyRequest(DataBrowserPatchRequest):
     preview_fingerprint: str = Field(min_length=1)
     reason: str = Field(min_length=1)
+
+
+DataBrowserCorrectionValue = JsonValue | date | datetime | Decimal
+
+
+class DataBrowserFieldChangeView(_StrictQueryModel):
+    before: DataBrowserCorrectionValue
+    after: DataBrowserCorrectionValue
+
+
+class DataBrowserSourceCorrectionPreviewView(_StrictQueryModel):
+    table: Literal["clients", "beclass_records", "staff"]
+    row_id: int = Field(gt=0)
+    changes: dict[str, DataBrowserFieldChangeView]
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class DataBrowserSourceCorrectionReceiptView(_StrictQueryModel):
+    table: Literal["clients", "beclass_records", "staff"]
+    row_id: int = Field(gt=0)
+    changed_fields: list[str]

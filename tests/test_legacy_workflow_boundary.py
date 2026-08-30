@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,11 @@ def test_retired_workflow_is_confined_to_ignored_history() -> None:
     )
     assert all(hook.suffix == ".sample" for hook in (PROJECT_ROOT / ".git" / "hooks").iterdir())
     assert all(
-        legacy_name not in source_path.read_text(encoding="utf-8").lower()
+        re.search(
+            rf"(?<![A-Za-z0-9_]){legacy_name}(?![A-Za-z0-9_])",
+            source_path.read_text(encoding="utf-8"),
+            flags=re.IGNORECASE,
+        )
+        is None
         for source_path in _runtime_python_sources()
     )

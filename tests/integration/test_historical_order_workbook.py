@@ -1,6 +1,6 @@
 """
 File: tests/integration/test_historical_order_workbook.py
-Description: 在 disposable MySQL 驗證歷史訂單配對、rollback 與未知警示重試停損。
+Description: 在 disposable MySQL 驗證歷史訂單配對、rollback 與 Orders review outbox acknowledgement。
 """
 
 from __future__ import annotations
@@ -8,7 +8,6 @@ from __future__ import annotations
 from datetime import date
 import os
 from pathlib import Path
-import time
 from uuid import uuid4
 
 from openpyxl import Workbook
@@ -16,10 +15,11 @@ import pytest
 
 from domains.orders.lifecycle import OrderLifecycleStatus
 from infrastructure.mysql.historical_order_adoption_repository import MySqlHistoricalOrderAdoptionRepository
+from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
 from infrastructure.mysql.historical_order_workbook_import_repository import HistoricalOrderWorkbookImportRepository
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
-from subsystems.anomalies.historical_order_adoption_outbox_consumer import (
+from subsystems.orders.historical_order_adoption_outbox_consumer import (
     consume_historical_order_adoption_review_events,
 )
 from subsystems.orders.historical_adoption_workflow import HistoricalOrderAdoptionRequest, HistoricalOrderAdoptionWorkflow
@@ -39,6 +39,11 @@ pytestmark = pytest.mark.skipif(
     not DATABASE or os.getenv("DB_DATABASE") != DATABASE,
     reason="requires an explicitly configured disposable lu_test_* MySQL database",
 )
+
+
+class _OutboxRuntime:
+    def failure_unit_of_work(self, connection):
+        return MySqlUnitOfWork(connection)
 
 
 def test_workbook_apply_uses_only_the_canonical_six_columns(tmp_path):
@@ -248,7 +253,9 @@ def test_row_apply_rolls_back_when_persist_fails(tmp_path, monkeypatch):
         case_no, staff_name = _seed_case(connection, token, "rollback")
         row = load_historical_order_workbook(str(_write_single_workbook(tmp_path / "rollback.xlsx", case_no, staff_name, status=1))).rows[0]
         repository = MySqlHistoricalOrderAdoptionRepository(connection)
-        workflow = HistoricalOrderAdoptionWorkflow(repository, lambda: MySqlUnitOfWork(connection))
+        workflow = HistoricalOrderAdoptionWorkflow(
+            repository, lambda: MySqlUnitOfWork(connection), MySqlHistoricalAssignmentWriter(connection)
+        )
         preview = workflow.preview(row)
         monkeypatch.setattr(repository, "_append_outbox", _raise_after_domain_writes)
 
@@ -262,7 +269,7 @@ def test_row_apply_rolls_back_when_persist_fails(tmp_path, monkeypatch):
         connection.close()
 
 
-def test_matched_dirty_row_projects_masked_historical_order_anomaly():
+def test_matched_dirty_row_acknowledges_orders_historical_review_outbox():
     token = uuid4().hex
     connection = get_connection()
     try:
@@ -280,7 +287,8 @@ def test_matched_dirty_row_projects_masked_historical_order_anomaly():
             ("staff_missing",),
         )
         workflow = HistoricalOrderAdoptionWorkflow(
-            MySqlHistoricalOrderAdoptionRepository(connection), lambda: MySqlUnitOfWork(connection)
+            MySqlHistoricalOrderAdoptionRepository(connection), lambda: MySqlUnitOfWork(connection),
+            MySqlHistoricalAssignmentWriter(connection),
         )
         preview = workflow.preview(row)
         receipt = workflow.apply(
@@ -288,22 +296,22 @@ def test_matched_dirty_row_projects_masked_historical_order_anomaly():
                 row, preview.fingerprint, f"historical-workbook:review:{token}", "historical-workbook-test", "review", token
             )
         )
-        result = consume_historical_order_adoption_review_events(connection)
+        result = consume_historical_order_adoption_review_events(
+            connection, runtime=_OutboxRuntime()
+        )
 
         assert result.failed_count == 0
         assert receipt.review_identity is not None
-        _assert_review_alert(connection, receipt.review_identity)
-        _assert_warning_task(connection, receipt.review_identity)
+        _assert_orders_review_outbox_acknowledged(connection, receipt.review_identity)
     finally:
         connection.close()
 
 
-def test_historical_unknown_issue_obeys_one_second_three_attempt_dead_letter_policy():
+def test_historical_unknown_issue_remains_an_orders_review_and_is_acknowledged():
     token = uuid4().hex
     raw_issue = "future_order_state:完整客戶名不得寫入錯誤"
     connection = get_connection()
     try:
-        consume_historical_order_adoption_review_events(connection)
         case_no, _ = _seed_case(connection, token, "unknown")
         row = HistoricalOrderWorkbookRow(
             3,
@@ -319,7 +327,7 @@ def test_historical_unknown_issue_obeys_one_second_three_attempt_dead_letter_pol
         )
         workflow = HistoricalOrderAdoptionWorkflow(
             MySqlHistoricalOrderAdoptionRepository(connection),
-            lambda: MySqlUnitOfWork(connection),
+            lambda: MySqlUnitOfWork(connection), MySqlHistoricalAssignmentWriter(connection),
         )
         preview = workflow.preview(row)
         receipt = workflow.apply(
@@ -330,31 +338,13 @@ def test_historical_unknown_issue_obeys_one_second_three_attempt_dead_letter_pol
         )
         assert receipt.review_identity is not None
 
-        for attempt in range(3):
-            result = consume_historical_order_adoption_review_events(
-                connection, maximum_events=1
-            )
-            assert result.failed_count == 1
-            immediate = consume_historical_order_adoption_review_events(
-                connection, maximum_events=1
-            )
-            assert immediate.failed_count == 0
-            if attempt < 2:
-                time.sleep(1.05)
+        result = consume_historical_order_adoption_review_events(
+            connection, maximum_events=1, runtime=_OutboxRuntime()
+        )
+        assert result.delivered_count == 1
+        assert result.failed_count == 0
 
         with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT COUNT(*) AS count FROM import_warning_occurrences "
-                "WHERE source_receipt_identity=%s",
-                (receipt.review_identity,),
-            )
-            assert cursor.fetchone() == {"count": 0}
-            cursor.execute(
-                "SELECT COUNT(*) AS count FROM anomaly_current_alerts "
-                "WHERE definition_code='HISTORICAL-ORDER-001' AND source_identity=%s",
-                (receipt.review_identity,),
-            )
-            assert cursor.fetchone() == {"count": 0}
             cursor.execute(
                 "SELECT outbox.published_at,outbox.attempts,outbox.last_error "
                 "FROM historical_order_adoption_outbox outbox "
@@ -365,14 +355,9 @@ def test_historical_unknown_issue_obeys_one_second_three_attempt_dead_letter_pol
                 (receipt.review_identity,),
             )
             outbox = cursor.fetchone()
-            failure = __import__("json").loads(outbox["last_error"])
-            assert outbox["published_at"] is None
-            assert outbox["attempts"] == 3
-            assert failure["terminal"] == 1
-            assert failure["error_code"].startswith(
-                "import_warning_projection_unknown_issue:historical_order:"
-            )
-            assert raw_issue not in outbox["last_error"]
+            assert outbox["published_at"] is not None
+            assert outbox["attempts"] == 0
+            assert outbox["last_error"] is None
     finally:
         connection.close()
 
@@ -408,7 +393,8 @@ def test_controlled_deidentified_historical_workbook_rebuilds_and_replays():
 
 def _service(connection):
     workflow = HistoricalOrderAdoptionWorkflow(
-        MySqlHistoricalOrderAdoptionRepository(connection), lambda: MySqlUnitOfWork(connection)
+        MySqlHistoricalOrderAdoptionRepository(connection), lambda: MySqlUnitOfWork(connection),
+        MySqlHistoricalAssignmentWriter(connection),
     )
     return HistoricalOrderWorkbookImportService(
         HistoricalOrderWorkbookImportRepository(connection),
@@ -507,38 +493,21 @@ def _assert_assignment_and_evidence(connection, first_case, second_case):
     assert _count(connection, "historical_order_pairing_evidence", second_case, via_receipt=True) == 1
 
 
-def _assert_review_alert(connection, review_identity):
+def _assert_orders_review_outbox_acknowledged(connection, review_identity):
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT definition_code,source_identity,display_snapshot FROM anomaly_current_alerts "
-            "WHERE definition_code='HISTORICAL-ORDER-001' AND source_identity=%s",
+            "SELECT review_identity FROM historical_order_adoption_reviews "
+            "WHERE review_identity=%s",
             (review_identity,),
         )
-        alert = cursor.fetchone()
-    assert alert is not None
-    assert alert["definition_code"] == "HISTORICAL-ORDER-001"
-    assert alert["source_identity"] == review_identity
-    assert "staff_missing" in str(alert["display_snapshot"])
-
-
-def _assert_warning_task(connection, review_identity):
-    with connection.cursor() as cursor:
+        assert cursor.fetchone() == {"review_identity": review_identity}
         cursor.execute(
-            "SELECT occurrence.logical_code,occurrence.field_path,task.tracking_status,task.tracking_version "
-            "FROM import_warning_occurrences occurrence "
-            "JOIN import_warning_current_tasks task ON task.occurrence_id=occurrence.id "
-            "WHERE occurrence.source_receipt_identity=%s",
+            "SELECT published_at,attempts,last_error FROM historical_order_adoption_outbox outbox "
+            "JOIN historical_order_adoption_receipts receipt ON receipt.id=outbox.receipt_id "
+            "WHERE receipt.review_identity=%s AND outbox.intent_type='historical_order_review_required'",
             (review_identity,),
         )
-        rows = cursor.fetchall()
-    assert rows == [
-        {
-            "logical_code": "ORDER-HIST-STAFF-001",
-            "field_path": "$staff",
-            "tracking_status": "open",
-            "tracking_version": 1,
-        }
-    ]
+        assert cursor.fetchone()["published_at"] is not None
 
 
 def _order_status(connection, case_no):

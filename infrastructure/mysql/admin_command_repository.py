@@ -3,18 +3,6 @@ from __future__ import annotations
 import json
 
 
-SOURCE_TABLE_PRIMARY_KEYS = {
-    "clients": "id",
-    "beclass_records": "id",
-    "staff": "id",
-}
-SOURCE_TABLE_EDITABLE_COLUMNS = {
-    "clients": frozenset({"name", "gender", "phone", "city", "address", "notes", "admin_notes", "reject_reason"}),
-    "beclass_records": frozenset({"name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes"}),
-    "staff": frozenset({"name", "phone", "tel", "tel_ext", "email", "city", "zip_code", "address", "birthday", "has_massage_cert", "weekly_rest_days", "service_regions", "special_skills", "care_babies"}),
-}
-
-
 class AdminCommandRepository:
     def __init__(self, connection):
         self._connection = connection
@@ -51,26 +39,3 @@ class AdminCommandRepository:
     def update_client_name(self, case_no, client_name):
         with self._connection.cursor() as cursor:
             cursor.execute("UPDATE clients SET name = %s WHERE case_no = %s", (client_name, case_no))
-
-    def load_source_row(self, table, row_id, *, for_update=False):
-        primary_key = SOURCE_TABLE_PRIMARY_KEYS.get(table)
-        if primary_key is None:
-            raise ValueError("source_table_not_editable")
-        suffix = " FOR UPDATE" if for_update else ""
-        with self._connection.cursor() as cursor:
-            cursor.execute(f"SELECT * FROM {table} WHERE {primary_key}=%s" + suffix, (row_id,))
-            return cursor.fetchone()
-
-    def update_source_row(self, table, row_id, updates):
-        primary_key = SOURCE_TABLE_PRIMARY_KEYS.get(table)
-        if primary_key is None or not updates or any(not field.isidentifier() for field in updates):
-            raise ValueError("source_update_invalid")
-        protected_columns = set(updates) - SOURCE_TABLE_EDITABLE_COLUMNS[table]
-        if protected_columns:
-            raise ValueError("protected_source_field:" + ",".join(sorted(protected_columns)))
-        assignments = ", ".join(f"{field}=%s" for field in updates)
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                f"UPDATE {table} SET {assignments} WHERE {primary_key}=%s",
-                (*updates.values(), row_id),
-            )

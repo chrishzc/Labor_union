@@ -185,32 +185,6 @@ class MySqlClientRefundReversalRepository:
                     _canonical_json(payload),
                 ),
             )
-            if request.selection.allow_partial_refund_recovery:
-                cursor.execute(
-                    _UNDERPAYMENT_OUTBOX_INSERT_SQL,
-                    (candidate.case_no, _child_key(request, "refund-underpayment-outbox", 1), _canonical_json({"underpayment_identity": f"client-refund-underpayment:{candidate.fingerprint.value}"})),
-                )
-            if candidate.correction_type is ClientFinanceCorrectionType.REFUND_OVERAGE:
-                recovery_identity = _over_refund_recovery_identity(candidate.fingerprint.value)
-                cursor.execute(
-                    _RECOVERY_ESTABLISHED_OUTBOX_INSERT_SQL,
-                    (
-                        candidate.case_no,
-                        _recovery_outbox_key(request, "established"),
-                        _canonical_json(
-                            {
-                                "event_type": "client_over_refund_recovery_established",
-                                "recovery_identity": recovery_identity,
-                                "finance_import_row_identity": str(
-                                    self._refund_row_metadata[
-                                        candidate.entries[0].finance_import_row_identity
-                                    ][0]
-                                ),
-                                "resulting_account_version": resulting_version,
-                            }
-                        ),
-                    ),
-                )
 
     def save_receipt(self, key, stored_receipt) -> None:
         request = self._require_request()
@@ -909,11 +883,6 @@ def _child_key(request, purpose, ordinal):
     return f"client-correction:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
 
 
-def _recovery_outbox_key(request, event_type):
-    value = f"{request.idempotency_key.value}:client-over-refund-recovery:{event_type}"
-    return f"client-over-refund-recovery-{event_type}:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
-
-
 def _integer_money(value):
     amount = Decimal(str(value))
     if amount <= 0 or amount != amount.to_integral_value():
@@ -1001,12 +970,6 @@ _OUTBOX_INSERT_SQL = (
 _UNDERPAYMENT_SOURCE_INSERT_SQL = "INSERT INTO client_refund_underpayment_sources (underpayment_identity,case_no,bank_total_ntd,remaining_after_ntd,resulting_account_version,idempotency_key,actor,reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"
 _UNDERPAYMENT_SOURCE_ROW_INSERT_SQL = "INSERT INTO client_refund_underpayment_source_bank_rows (underpayment_identity,finance_import_row_id,ordinal) VALUES (%s,%s,%s)"
 _UNDERPAYMENT_SOURCE_OBLIGATION_INSERT_SQL = "INSERT INTO client_refund_underpayment_source_obligations (underpayment_identity,refund_obligation_identity,remaining_after_ntd) VALUES (%s,%s,%s)"
-_UNDERPAYMENT_OUTBOX_INSERT_SQL = "INSERT INTO client_finance_outbox (case_no,intent_type,intent_key,payload_snapshot) VALUES (%s,'client_refund_underpayment_required',%s,%s)"
-_RECOVERY_ESTABLISHED_OUTBOX_INSERT_SQL = (
-    "INSERT INTO client_finance_outbox "
-    "(case_no,intent_type,intent_key,payload_snapshot) "
-    "VALUES (%s,'projection_refresh',%s,%s)"
-)
 _RECEIPT_INSERT_SQL = (
     "INSERT INTO client_refund_reversal_apply_receipts "
     "(idempotency_key,correction_type,command_fingerprint,preview_fingerprint,"

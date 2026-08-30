@@ -227,7 +227,8 @@ current正式規格、typed enum、schema descriptor／release（若受 DB const
 
 ### 9.4 Staging、Preview、Apply 與 cleanup
 
-- staging TTL 固定 24 小時，由 server `BusinessClock` 建立 absolute `expires_at`。staging write 必須使用
+- staging TTL 以 24 小時作為可配置的 operational default，不是不可變 business rule；由 server
+  `BusinessClock` 與當次生效的維運設定建立 absolute `expires_at`。staging write 必須使用
   server-generated locator、exclusive create、size／MIME／digest 驗證；same idempotency key＋same canonical
   payload 回原 staging result，same key＋different payload 固定 conflict。
 - Preview 零寫入並回 closed candidate、`preview_fingerprint`、expected staging version、owner blockers 與
@@ -262,3 +263,34 @@ status, applied_at
 `idempotency_mismatch`。reconciliation closed outcomes 固定為 `exact | missing_object | digest_mismatch |
 orphan_object | still_writing`；只追加 observation，不自動修復、改 owner root、發送 provider 或刪除 bytes。
 mount unavailable、read denied、capacity exhausted 與 watcher lag 屬 storage readiness／health，不偽裝成合法空清單。
+
+### 9.6 Reference-aware finalize、lease 與 Scheduling bridge（2026-08-30 人工裁決）
+
+Task 97 的 additive successor 已核准為 schema-only、no-backfill package；它不把 filesystem 與
+MySQL 偽裝成 distributed transaction，也不授權 production／`union_db`、NAS mount、provider、deployment
+或不可逆檔案刪除。
+
+1. `controlled_file_finalize_intents` 保存 `pending | processing | available |
+   reconciliation_required` 的 durable finalize state；finalize identity 固定為
+   `cff_` 加 32 個 lowercase UUIDv4 hex。
+2. `controlled_file_references` 首版只允許 Scheduling service-day-log attachment，reference identity
+   固定為 `cfrf_` 加 32 個 lowercase UUIDv4 hex。這是 Scheduling-owned relation，不建立
+   generic polymorphic owner registry。
+3. `controlled_file_leases` 以 staging object 為 bounded key，lease identity 固定為
+   `cfl_` 加 32 個 lowercase UUIDv4 hex。lease duration 與 renewal 是可配置 operational policy，
+   不得寫成不可變業務期間。
+4. Scheduling Apply 在同一 outer UoW 寫入 log、attachment relation、reference、committed outbox
+   與 finalize intent；worker 以獨立短交易 claim／lease，DB 交易外執行 storage effect，再以短交易
+   寫入 `available` 或 typed reconciliation blocker。DB commit 失敗後不得立即刪除 object。
+5. canonical Scheduling object key 固定為
+   `scheduling/service-day/v1/{assignment_id}/{service_date}/{attachment_kind}/{sequence}/{sha256}`。
+   參數必須使用 owner 已驗證的 canonical scalar，不得含姓名、原檔名或其他 PII。
+6. 既有 filesystem `finalize_staged()` 的 `available` 首版只表示bytes 存在且 digest／size
+   完整性已驗證；不暗示physical rename／promotion。未來若要變更實體 locator，需獨立
+   provider／migration 裁決。
+7. pre-successor objects 維持 legacy-readable，排除於新 GC，且不自動 backfill。GC 只能在
+   grace period 屆滿、DB 零 authoritative reference 且無 active lease 時處理 staging object；必須
+   reference-aware、idempotent、bounded、可 dry-run 並產生 receipt。
+8. metadata 存在但 bytes 缺失、或 referenced object 仍留在 staging，分別形成 typed
+   repair／blocker 與 reconciler finalize；兩者都不得偽造成功。這些是短期 media processing
+   state，不建立永久 media event history。

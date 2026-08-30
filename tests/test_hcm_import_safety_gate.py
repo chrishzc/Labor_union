@@ -57,6 +57,51 @@ class _PartialCaseApplication:
         return import_client_hcm.HcmIdentityResolution.NEW
 
 
+def test_hcm_row_import_is_dispatched_through_application_owned_uow(monkeypatch):
+    class Connection:
+        def cursor(self):
+            return object()
+
+    class Application:
+        def __init__(self):
+            self.calls = []
+
+        def execute_in_uow(self, operation):
+            self.calls.append("open")
+            result = operation()
+            self.calls.append("commit")
+            return result
+
+    application = Application()
+    dispatched = []
+    monkeypatch.setattr(
+        import_client_hcm,
+        "build_case_import_application",
+        lambda connection: application,
+    )
+    monkeypatch.setattr(
+        import_client_hcm,
+        "fingerprint_workbook",
+        lambda source_path: "a" * 64,
+    )
+    def fake_import_row(row, ordinal, cursor, app, source_path, **kwargs):
+        del row, cursor, app, source_path
+        dispatched.append({"ordinal": ordinal, **kwargs})
+        return {"outcome": "inserted", "source_row": ordinal}
+
+    monkeypatch.setattr(import_client_hcm, "_import_row", fake_import_row)
+
+    result = import_client_hcm._process_import_rows(
+        pd.DataFrame({"案件": ["HCM-001", "HCM-002"]}),
+        Connection(),
+        "hcm.xlsx",
+    )
+
+    assert result["inserted"] == 2
+    assert application.calls == ["open", "commit", "open", "commit"]
+    assert [item["current_uow"] for item in dispatched] == [True, True]
+
+
 def test_invalid_hcm_row_with_case_number_creates_partial_formal_case(monkeypatch):
     recorded = []
     application = _PartialCaseApplication()

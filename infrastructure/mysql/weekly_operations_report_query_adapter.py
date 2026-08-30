@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+from infrastructure.mysql.mysql_adapter import get_connection
 from subsystems.government_subsidy import reconciliation_register_query
 from subsystems.reporting.weekly_operations_report_query import (
     SubsidyFact,
@@ -67,6 +68,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
         report = reconciliation_register_query.build_year_to_date_subsidy_rows(
             application_year,
             cutoff_date,
+            get_connection,
         )
         return SubsidyFacts(
             general=tuple(_subsidy_fact(row) for row in report["general_citizen_rows"]),

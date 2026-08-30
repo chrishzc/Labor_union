@@ -34,12 +34,12 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\line\\subsystems\\test_line_runtime_stage3.py tests\\line\\subsystems\\test_line_runtime_cutover_stage10.py tests\\line\\infrastructure\\test_line_schema_stage6.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\external-integration\\subsystems\\line\\subsystems\\test_line_runtime_stage3.py tests\\domains\\external-integration\\subsystems\\line\\subsystems\\test_line_runtime_cutover_stage10.py tests\\domains\\external-integration\\subsystems\\line\\infrastructure\\test_line_schema_stage6.py"
     ],
     "test_paths": [
-      "tests/line/subsystems/test_line_runtime_stage3.py",
-      "tests/line/subsystems/test_line_runtime_cutover_stage10.py",
-      "tests/line/infrastructure/test_line_schema_stage6.py"
+      "tests/domains/external-integration/subsystems/line/subsystems/test_line_runtime_stage3.py",
+      "tests/domains/external-integration/subsystems/line/subsystems/test_line_runtime_cutover_stage10.py",
+      "tests/domains/external-integration/subsystems/line/infrastructure/test_line_schema_stage6.py"
     ]
   }
 }

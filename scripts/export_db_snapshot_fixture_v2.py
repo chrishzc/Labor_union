@@ -1,9 +1,9 @@
 """Read-only deterministic exporter for the fixed v3 fixture."""
 from __future__ import annotations
-import argparse, hashlib, json, os, shutil, tempfile
+import argparse, hashlib, json, os, re, shutil, tempfile
 from datetime import timedelta
 from pathlib import Path
-from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.mysql_adapter import DB_CONFIG, get_connection
 from scripts.db_snapshot_fixture_v2_serializer import serialize_table, build_manifest
 from scripts.db_snapshot_fixture_v2_validator import validate_snapshot_fixture_v2
 
@@ -70,7 +70,42 @@ def export_snapshot_fixture(output=DEFAULT_OUTPUT,connection_factory=get_connect
         return {"status":status,"fixture_version":FIXTURE_VERSION,"snapshot_checksum":manifest.snapshot_checksum,
         "table_counts":{t.table_name:t.row_count for t in serialized},"validation":validation}
     finally: conn.rollback(); conn.close()
+def _require_target_database(target: str) -> None:
+    configured = str(DB_CONFIG.get("database") or "")
+    if not target or target != configured:
+        raise ValueError("target database must exactly match configured DB_DATABASE")
+    if not re.fullmatch(r"lu_test_[a-z0-9_]+", target):
+        raise ValueError("target database must be an explicitly named lu_test_* database")
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        raise ValueError("production environment is not permitted for fixture export")
+
+
+def _check_connected_identity(target: str) -> None:
+    if not os.getenv("DB_HOST", "").strip():
+        raise RuntimeError("DB_HOST must be configured explicitly")
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT DATABASE() AS database_name, @@hostname AS server")
+            identity = cursor.fetchone()
+        if not identity or identity.get("database_name") != target:
+            raise RuntimeError("connected database does not match --target-database")
+        if not str(identity.get("server") or "").strip():
+            raise RuntimeError("connected MySQL server identity is unavailable")
+    finally:
+        conn.close()
+
+
 def main():
-    p=argparse.ArgumentParser();p.add_argument("--output",type=Path,default=DEFAULT_OUTPUT);a=p.parse_args()
-    print(json.dumps(export_snapshot_fixture(a.output),ensure_ascii=False,indent=2));return 0
+    p = argparse.ArgumentParser()
+    p.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    p.add_argument("--target-database", required=True)
+    a = p.parse_args()
+    try:
+        _require_target_database(a.target_database)
+        _check_connected_identity(a.target_database)
+    except (ValueError, RuntimeError) as exc:
+        p.error(str(exc))
+    print(json.dumps(export_snapshot_fixture(a.output), ensure_ascii=False, indent=2))
+    return 0
 if __name__=="__main__":raise SystemExit(main())

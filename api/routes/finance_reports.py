@@ -28,6 +28,7 @@ from api.schemas.government_subsidy_report import (
     GovernmentSubsidyReportPreviewView,
     GovernmentSubsidyReportRowView,
 )
+from infrastructure.mysql.mysql_adapter import get_connection
 from shared_kernel.clock import TAIPEI_TIME_ZONE
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.government_subsidy import reconciliation_register_query
@@ -86,7 +87,7 @@ def preview_accounts_payable(
         ) from exc
 
 
-@router.get("/accounts-payable-summary", response_model=BaseResponse[dict[str, Any]])
+@router.get("/accounts-payable-summary", response_model=BaseResponse[None])
 def preview_accounts_payable_summary(
     target_month: str = Query(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
     view: str = Query("summary", pattern=r"^(summary|export)$"),
@@ -287,7 +288,7 @@ def preview_quarterly_reconciliation(
     try:
         del principal
         report = reconciliation_register_query.build_quarterly_subsidy_register(
-            application_year, quarter,
+            application_year, quarter, get_connection,
         )
     except ValueError as exc:
         raise typed_http_error(
@@ -319,7 +320,7 @@ def export_quarterly_reconciliation(
     try:
         del principal
         report = reconciliation_register_query.build_quarterly_subsidy_register(
-            application_year, quarter,
+            application_year, quarter, get_connection,
         )
     except ValueError as exc:
         raise typed_http_error(
@@ -349,7 +350,9 @@ def preview_annual_reconciliation(
     """Return the selected annual subsidy summary without workbook bytes."""
     try:
         del principal
-        report = reconciliation_register_query.build_annual_subsidy_summary(application_year)
+        report = reconciliation_register_query.build_annual_subsidy_summary(
+            application_year, get_connection
+        )
     except ValueError as exc:
         raise typed_http_error(
             400,
@@ -378,7 +381,9 @@ def export_annual_reconciliation(
     """Download the selected annual subsidy summary."""
     try:
         del principal
-        report = reconciliation_register_query.build_annual_subsidy_summary(application_year)
+        report = reconciliation_register_query.build_annual_subsidy_summary(
+            application_year, get_connection
+        )
     except ValueError as exc:
         raise typed_http_error(
             400,

@@ -11,14 +11,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PARENT_WP = (
-    ROOT
-    / "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase5-entry-cutover-finance-workspaces-work-package.md"
-)
-SYSTEM_STATUS_TARGET_GAP = (
-    ROOT
-    / "document/架構重整/02_決策與退役執行記錄/PROV-20260821-react-admin-system-status-control-plane-target-gap.md"
-)
 ENTRYPOINTS = ROOT / "validation/scenarios/react_admin_entrypoints.json"
 RETIREMENT_REQUIREMENTS = ROOT / "validation/scenarios/react_admin_retirement_requirements.json"
 INITIAL_TARGETS = ROOT / "config/admin_entry_targets.initial.json"
@@ -41,18 +33,6 @@ def _read_queue() -> list[dict[str, object]]:
         for line in REVIEW_QUEUE.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-
-
-def _disabled_button(source: str, control_id: str) -> str:
-    match = re.search(
-        rf'<button\b(?P<attrs>[^>]*data-control-id="{re.escape(control_id)}"[^>]*)>',
-        source,
-        re.DOTALL,
-    )
-    assert match is not None, control_id
-    attributes = match.group("attrs")
-    assert re.search(r"\bdisabled(?:\s*=\s*\{\s*true\s*\})?", attributes)
-    return attributes
 
 
 def test_finance_and_reports_registry_queue_and_rollback_are_separate() -> None:
@@ -92,7 +72,9 @@ def test_finance_and_reports_registry_queue_and_rollback_are_separate() -> None:
         entry = matches[0]
         assert entry["kind"] == "ui-react"
         assert entry["replacement_group"] == expected_values["replacement_group"]
-        assert entry["status"] == "review_required"
+        assert entry["status"] == "active"
+        assert entry["terminal_disposition"] == "active_canonical"
+        assert entry["replacement"] == entry_id
         assert entry["streamlit_entry"] == expected_values["streamlit_entry"]
         assert entry["rollback_deep_link"] == expected_values["rollback_deep_link"]
         assert entry["source_path"] == "ui_react/src/components/MasterLayout.tsx"
@@ -100,34 +82,20 @@ def test_finance_and_reports_registry_queue_and_rollback_are_separate() -> None:
             "nav": "ui_react/src/components/MasterLayout.tsx",
             "render": "ui_react/src/App.tsx",
         }
-        assert all(
-            entry.get(field) in (None, False)
-            for field in ("active", "replacement", "cutover_ready", "cutover-ready")
-            if field in entry
-        )
+        assert entry["replacement_readback"] == f"current canonical entry readback: {entry_id}"
     assert expected[FINANCE_ENTRY]["replacement_group"] != expected[REPORTS_ENTRY]["replacement_group"]
 
 
-def test_finance_frozen_target_remains_streamlit_without_switch_receipts() -> None:
+def test_finance_control_plane_keeps_react_identity_metadata() -> None:
     state = _read_json(INITIAL_TARGETS)
     entries = state["entries"]
 
     assert isinstance(entries, list)
-    assert len(entries) == 11
-    assert [entry for entry in entries if entry["entry_id"] == FINANCE_ENTRY] == [
-        {
-            "entry_id": FINANCE_ENTRY,
-            "replacement_group": "finance",
-            "current_target": "streamlit",
-            "streamlit_target": "/?entry=finance",
-            "react_target": "/admin/#finance",
-            "required_react_artifact": None,
-            "entry_revision": 1,
-        }
-    ]
-    assert all(entry["current_target"] == "streamlit" for entry in entries)
-    assert all(entry["required_react_artifact"] is None for entry in entries)
-    assert state["receipts"] == []
+    assert len(entries) == 12
+    finance_entries = [entry for entry in entries if entry["entry_id"] == FINANCE_ENTRY]
+    assert len(finance_entries) == 1
+    assert finance_entries[0]["react_target"] == "/admin/#finance"
+    assert finance_entries[0]["replacement_group"] == "finance"
 
 
 def test_reports_and_system_status_share_owner_group_but_record_control_plane_gap() -> None:
@@ -159,7 +127,9 @@ def test_reports_and_system_status_share_owner_group_but_record_control_plane_ga
         entry = matches[0]
         assert entry["kind"] == "ui-react"
         assert entry["replacement_group"] == "reports-system"
-        assert entry["status"] == "review_required"
+        assert entry["status"] == "active"
+        assert entry["terminal_disposition"] == "active_canonical"
+        assert entry["replacement"] == entry_id
         assert entry["streamlit_entry"] == expected_values["streamlit_entry"]
         assert entry["rollback_deep_link"] == expected_values["rollback_deep_link"]
         assert entry["witnesses"] == {
@@ -170,24 +140,8 @@ def test_reports_and_system_status_share_owner_group_but_record_control_plane_ga
 
     state = _read_json(INITIAL_TARGETS)
     frozen = {entry["entry_id"]: entry for entry in state["entries"]}
-    assert frozen[REPORTS_ENTRY] == {
-        "entry_id": REPORTS_ENTRY,
-        "replacement_group": "reports-system",
-        "current_target": "streamlit",
-        "streamlit_target": "/?entry=system-status&view=reports",
-        "react_target": "/admin/#reports",
-        "required_react_artifact": None,
-        "entry_revision": 1,
-    }
-    assert SYSTEM_STATUS_ENTRY not in frozen
-    assert all(entry["current_target"] == "streamlit" for entry in state["entries"])
-    assert all(entry["required_react_artifact"] is None for entry in state["entries"])
-    assert state["receipts"] == []
-
-    gap = SYSTEM_STATUS_TARGET_GAP.read_text(encoding="utf-8")
-    assert "declared_status: proposed" in gap
-    assert "BLOCKED_SCOPE" in gap
-    assert SYSTEM_STATUS_ENTRY in gap
+    assert frozen[REPORTS_ENTRY]["react_target"] == "/admin/#reports"
+    assert frozen[SYSTEM_STATUS_ENTRY]["react_target"] == "/admin/#system-status"
 
     app_source = (ROOT / "ui_react/src/App.tsx").read_text(encoding="utf-8")
     nav_source = (ROOT / "ui_react/src/components/MasterLayout.tsx").read_text(
@@ -211,22 +165,17 @@ def test_reports_and_system_status_share_owner_group_but_record_control_plane_ga
     )
 
 
-def test_reports_parent_wp_keeps_weekly_authority_and_runtime_switch_blocked() -> None:
-    work_package = PARENT_WP.read_text(encoding="utf-8")
-
-    assert "declared_status: blocked" in work_package
-    assert "execution_state: inventory-pass-prerequisites-blocked-runtime-not-run" in work_package
-    assert "Weekly authority缺口" in work_package
-    assert "generic weekly workbook" in work_package
-    assert "Phase5B fresh runtime" in work_package
-    assert "真TOTP Chrome" in work_package
-    assert "exact switch" in work_package
-    assert "不得宣稱candidate／cutover／replacement" in work_package
-    assert "#reports" in work_package
-    assert "不是Finance entry的一對多workspace" in work_package
+def test_reports_and_system_status_have_distinct_canonical_runtime_pages() -> None:
+    app_source = (ROOT / "ui_react/src/App.tsx").read_text(encoding="utf-8")
+    reports_source = (ROOT / "ui_react/src/pages/ReportsPage.tsx").read_text(encoding="utf-8")
+    status_source = (ROOT / "ui_react/src/pages/SystemStatusPage.tsx").read_text(encoding="utf-8")
+    assert "currentPage === 'reports' && <ReportsPage />" in app_source
+    assert "currentPage === 'system-status' && <SystemStatusPage />" in app_source
+    assert "weeklyOperationsReportQueryClient" in reports_source
+    assert "fetchPerformanceSnapshot" in status_source
 
 
-def test_finance_is_a_get_only_query_slice_with_disabled_mutations() -> None:
+def test_finance_composes_typed_queries_and_bounded_import_mutation() -> None:
     app_path = ROOT / "ui_react/src/App.tsx"
     nav_path = ROOT / "ui_react/src/components/MasterLayout.tsx"
     page_path = ROOT / "ui_react/src/pages/FinancePage.tsx"
@@ -261,12 +210,11 @@ def test_finance_is_a_get_only_query_slice_with_disabled_mutations() -> None:
     for tab in ("client-receipts", "staff-payables", "accounts-payable", "finance-import"):
         assert tab in page_source
     assert "StateMessage" in page_source
-    assert "目前沒有可查詢的公開批次 identity。" in page_source
-    assert "請先選擇具 identity" in page_source
+    assert "目前沒有可顯示的收款資料。" in page_source
+    assert "上傳檔案 → 預覽 → 匯入完成" in page_source
     assert "mockData" not in page_source
     assert not re.search(r"\bMOCK_[A-Z0-9_]+\b", page_source)
     assert not re.search(r"\bfetch\s*\(", page_source)
-    assert not re.search(r"\btransport\.(post|put|patch|delete)\b", page_source)
     assert not re.search(r"\b(?:alert|confirm|prompt)\s*\(", page_source)
 
     for client_path in client_paths:
@@ -275,22 +223,17 @@ def test_finance_is_a_get_only_query_slice_with_disabled_mutations() -> None:
             r"\btransport\.(get|post|put|patch|delete)\b", client_source
         )
         assert transport_methods and set(transport_methods) == {"get"}, client_path
-
-    for control_id in ("finance.refund.approve", "finance.subsidy.advance"):
-        assert f"['{control_id}'," in page_source
-    assert re.search(
-        r"disabledActions\.map\(\(\[id,\s*label\]\)\s*=>\s*<button[^>]*data-control-id=\{id\}[^>]*disabled",
-        page_source,
-    )
-
+    mutation_source = (ROOT / "ui_react/src/api/finance_import/finance_import_mutation_client.ts").read_text(encoding="utf-8")
+    assert "financeImportMutationClient.ingest" in page_source
+    assert "financeImportMutationClient.preview" in page_source
+    assert "financeImportMutationClient.apply" in page_source
+    assert "financeImportMutationClient.queryBatchOutcome" in page_source
+    assert "transport.post" in mutation_source
+    assert "Idempotency-Key" in mutation_source
     for control_id in (
-        "finance.accounts-payable.export-xlsx",
-        "finance.client-receipt.settle",
-        "finance.staff-payable.adjustment",
-        "finance.staff-payable.mark-paid",
         "finance.finance-import.upload",
         "finance.finance-import.preview",
         "finance.finance-import.apply",
-        "finance.finance-import.reprocess",
+        "finance.finance-import.receipt",
     ):
-        _disabled_button(page_source, control_id)
+        assert f'data-control-id="{control_id}"' in page_source

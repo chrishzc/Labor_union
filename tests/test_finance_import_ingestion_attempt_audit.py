@@ -65,14 +65,19 @@ def test_failed_normalization_writes_safe_attempt_and_exact_retry_replays_it(mon
     audit_connection = _Connection(_Cursor([None, failed_row]))
     retry_connection = _Connection(_Cursor([None, failed_row]))
     connections = iter([first_connection, audit_connection, retry_connection])
-    monkeypatch.setattr(ingestion, "get_connection", lambda: next(connections))
-    monkeypatch.setattr(ingestion, "normalize_workbook", _raise_invalid_workbook)
+    connection_factory = lambda: next(connections)
     key = IdempotencyKey("finance-import-attempt-test")
 
     with pytest.raises(ingestion.FinanceImportAttemptError) as first_error:
-        ingestion.ingest_finance_workbook(str(workbook), key, actor)
+        ingestion.ingest_finance_workbook(
+            str(workbook), key, actor, connection_factory=connection_factory,
+            normalizer=_raise_invalid_workbook,
+        )
     with pytest.raises(ingestion.FinanceImportAttemptError) as retry_error:
-        ingestion.ingest_finance_workbook(str(workbook), key, actor)
+        ingestion.ingest_finance_workbook(
+            str(workbook), key, actor, connection_factory=connection_factory,
+            normalizer=_raise_invalid_workbook,
+        )
 
     attempt = first_error.value.attempt
     assert first_connection.rolled_back is True

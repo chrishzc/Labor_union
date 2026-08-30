@@ -106,6 +106,7 @@ export interface AnomalyMetadataViewModel {
 export interface AnomalySummaryViewModel {
   id: string; // fingerprint identity
   fingerprint: string;
+  issueKey?: string;
   sourceIdentity: string;
   code: string; // definition_code
   title: string;
@@ -293,6 +294,7 @@ export function adaptAnomalySummary(dto: AnomalySummaryView): AnomalySummaryView
   return {
     id: dto.fingerprint,
     fingerprint: dto.fingerprint,
+    issueKey: dto.issue_key,
     sourceIdentity: dto.source_identity,
     code: dto.definition_code,
     title,

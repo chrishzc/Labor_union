@@ -30,6 +30,7 @@ from api.schemas.private_operations import (
     WorkerCycleResponse,
     WorkerRuntimeIdentity,
 )
+from api.schemas.runtime_health import PrivateRuntimeCheckView
 
 
 router = APIRouter(
@@ -58,11 +59,16 @@ def react_admin_artifact_health(
     return BaseResponse(data=health)
 
 
-@router.post("/check", response_model=BaseResponse[dict[str, str]])
+@router.post("/check", response_model=BaseResponse[PrivateRuntimeCheckView])
 def check_private_runtime(
     principal: InternalServicePrincipal = Depends(require_internal_service),
-) -> BaseResponse[dict[str, str]]:
-    return BaseResponse(data={"status": "ready", "service": principal.service_name})
+) -> BaseResponse[PrivateRuntimeCheckView]:
+    return BaseResponse(
+        data=PrivateRuntimeCheckView(
+            status="ready",
+            service=principal.service_name,
+        )
+    )
 
 
 @router.post("/readiness", response_model=BaseResponse[RuntimeReadinessResponse])

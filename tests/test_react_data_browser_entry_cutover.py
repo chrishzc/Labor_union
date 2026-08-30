@@ -33,19 +33,7 @@ def _read_queue() -> list[dict[str, object]]:
     ]
 
 
-def _disabled_opening_tag(source: str, control_id: str) -> str:
-    match = re.search(
-        rf'<button\b(?P<attrs>[^>]*data-control-id="{re.escape(control_id)}"[^>]*)>',
-        source,
-        re.DOTALL,
-    )
-    assert match is not None, control_id
-    attributes = match.group("attrs")
-    assert re.search(r"\bdisabled(?:\s*=\s*\{\s*true\s*\})?", attributes)
-    return attributes
-
-
-def test_data_browser_registry_is_unique_and_has_current_rollback_mapping() -> None:
+def test_data_browser_registry_alias_has_current_rollback_mapping_without_fake_runtime_entry() -> None:
     registry = _read_json(ENTRYPOINTS)
     retirement = _read_json(RETIREMENT_REQUIREMENTS)
     registry_entries = registry["react_entries"]
@@ -63,15 +51,16 @@ def test_data_browser_registry_is_unique_and_has_current_rollback_mapping() -> N
     queue_entries = [
         entry for entry in _read_queue() if entry.get("entry_id") == DATA_BROWSER_ENTRY
     ]
-    assert len(queue_entries) == 1
-    entry = queue_entries[0]
-    assert entry["status"] == "review_required"
-    assert entry["streamlit_entry"] == "ui:01_data_browser.py"
-    assert entry["rollback_deep_link"] == "/?entry=data-browser"
-    assert entry["witnesses"] == {
-        "nav": "ui_react/src/components/MasterLayout.tsx",
-        "render": "ui_react/src/App.tsx",
-    }
+    # The successor keeps the hash only as a deterministic deep-link alias.
+    # It must not be reintroduced into the exact runtime queue as a separate
+    # navigation entry now that Data Import owns the rendered composition.
+    assert queue_entries == []
+    successor = [
+        entry for entry in _read_queue() if entry.get("entry_id") == "ui-react:#data-import"
+    ]
+    assert len(successor) == 1
+    assert successor[0]["status"] == "active"
+    assert successor[0]["terminal_disposition"] == "active_canonical"
 
 
 def test_data_browser_frozen_control_plane_remains_streamlit_without_receipt() -> None:
@@ -79,7 +68,7 @@ def test_data_browser_frozen_control_plane_remains_streamlit_without_receipt() -
     entries = state["entries"]
 
     assert isinstance(entries, list)
-    assert len(entries) == 11
+    assert len(entries) == 12
     data_browser_entries = [
         entry for entry in entries if entry["entry_id"] == DATA_BROWSER_ENTRY
     ]
@@ -111,13 +100,12 @@ def test_data_browser_app_nav_and_bounded_client_remain_query_only() -> None:
     ).read_text(encoding="utf-8")
 
     assert re.search(
-        r"\{currentPage\s*===\s*'data-browser'\s*&&\s*<DataBrowserPage\s*/>\}",
+        r"\{currentPage\s*===\s*'data-browser'\s*&&\s*"
+        r"<DataImportPage\s+initialTab=\"data-browser\"\s*/>\}",
         app_source,
     )
-    assert re.search(
-        r"\{\s*id:\s*'data-browser'\s*,[^}]*section:\s*'audit'\s*\}",
-        nav_source,
-    )
+    assert "const sidebarCurrentPage = currentPage === 'data-browser' ? 'data-import'" in nav_source
+    assert not re.search(r"\{\s*id:\s*'data-browser'\s*,", nav_source)
     for source_id in (
         "orders",
         "clients",
@@ -133,7 +121,7 @@ def test_data_browser_app_nav_and_bounded_client_remain_query_only() -> None:
         "data-browser.source-correction.preview",
         "data-browser.source-correction.apply",
     ):
-        _disabled_opening_tag(page_source, control_id)
+        assert f'data-control-id="{control_id}"' not in page_source
 
     client_path = ROOT / "ui_react/src/api/data_browser/data_browser_query_client.ts"
     client_source = client_path.read_text(encoding="utf-8")

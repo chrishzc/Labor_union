@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -23,6 +24,16 @@ import pymysql
 
 
 DOC_FONT = "STHeiti"
+_DATABASE_PATTERN = re.compile(r"lu_test_[a-z0-9_]+")
+
+
+def _require_validation_database() -> str:
+    database = os.getenv("DB_DATABASE", "").strip()
+    if not _DATABASE_PATTERN.fullmatch(database):
+        raise ValueError("staff resume generation requires a lu_test_* database")
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        raise ValueError("staff resume generation requires a development validation profile")
+    return database
 
 
 def _apply_font(run, size: Pt | None = None) -> None:
@@ -35,12 +46,13 @@ def _apply_font(run, size: Pt | None = None) -> None:
 
 
 def _connect() -> pymysql.connections.Connection:
+    database = _require_validation_database()
     return pymysql.connect(
         host=os.getenv("DB_HOST", "127.0.0.1"),
         port=int(os.getenv("DB_PORT", "3306")),
         user=os.getenv("DB_USER", "root"),
         password=os.getenv("DB_PASSWORD", "1234"),
-        database=os.getenv("DB_DATABASE", "union_db"),
+        database=database,
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,
     )

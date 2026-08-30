@@ -24,6 +24,7 @@ from subsystems.controlled_files.reconciliation import (
     ControlledFileReconciliationEvent,
     ControlledFileReconciliationOutcome,
 )
+from subsystems.controlled_files.gc import ControlledFileGcError
 from subsystems.controlled_files.cleanup import (
     CleanupControlledFileStaging,
     ControlledFileCleanupOutcome,
@@ -69,6 +70,10 @@ class ScriptedCursor:
 
     def fetchone(self):
         return self.rows.pop(0) if self.rows else None
+
+    def fetchall(self):
+        rows, self.rows = self.rows, []
+        return rows
 
 
 class FakeConnection:
@@ -166,6 +171,20 @@ def test_load_staging_maps_state_and_applies_requested_lock_without_commit() -> 
     )
     assert cursor.executions[0][0].endswith(" FOR UPDATE")
     assert cursor.executions[0][1] == (STAGING_ID,)
+    assert connection.commits == connection.rollbacks == 0
+
+
+def test_gc_candidate_query_fails_closed_without_reference_and_lease_ssot() -> None:
+    cursor = ScriptedCursor()
+    connection = FakeConnection(cursor)
+
+    with pytest.raises(ControlledFileGcError) as captured:
+        MySqlControlledFileWorkflowRepository(connection).list_staging_gc_candidates(
+            limit=10, observed_at=NOW
+        )
+
+    assert captured.value.code == "controlled_file_gc_reference_authority_not_ready"
+    assert cursor.executions == []
     assert connection.commits == connection.rollbacks == 0
 
 

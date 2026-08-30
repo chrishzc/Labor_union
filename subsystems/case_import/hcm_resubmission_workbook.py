@@ -30,8 +30,8 @@ class HcmWorkbookFrameLoader(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class HcmResubmissionApplyRequest:
-    occurrence_identity: str
-    expected_occurrence_version: int
+    review_identity: str
+    expected_review_version: int
     expected_root_fingerprint: str
     preview_fingerprint: str
     idempotency_key: str
@@ -43,7 +43,7 @@ class HcmResubmissionApplyRequest:
 class HcmResubmissionWorkbookService:
     """Keeps raw workbook input inside the HCM owner boundary.
 
-    The warning center supplies only an occurrence identity and navigation.  A
+    The review center supplies only a canonical review identity and navigation.  A
     complete re-submitted workbook is revalidated here, and exactly one row
     matching the already-bound canonical case can become a source command.
     """
@@ -60,18 +60,18 @@ class HcmResubmissionWorkbookService:
         self._holiday_dates = holiday_dates
         self._row_normalizer = row_normalizer
 
-    def preview(self, source_path: str, occurrence_identity: str) -> HcmResubmissionPreview:
+    def preview(self, source_path: str, review_identity: str) -> HcmResubmissionPreview:
         return self._workflow.preview(
-            occurrence_identity,
-            self._source(source_path, occurrence_identity),
+            review_identity,
+            self._source(source_path, review_identity),
         )
 
     def apply(self, source_path: str, request: HcmResubmissionApplyRequest) -> HcmResubmissionReceipt:
         return self._workflow.apply(
             ApplyHcmResubmission(
-                request.occurrence_identity,
-                self._source(source_path, request.occurrence_identity),
-                request.expected_occurrence_version,
+                request.review_identity,
+                self._source(source_path, request.review_identity),
+                request.expected_review_version,
                 request.expected_root_fingerprint,
                 request.preview_fingerprint,
                 request.idempotency_key,
@@ -81,8 +81,8 @@ class HcmResubmissionWorkbookService:
             )
         )
 
-    def _source(self, source_path: str, occurrence_identity: str) -> HcmResubmissionSource:
-        facts = self._workflow.facts(occurrence_identity)
+    def _source(self, source_path: str, review_identity: str) -> HcmResubmissionSource:
+        facts = self._workflow.facts(review_identity)
         frame = self._frame_loader.load_frame(source_path)
         if frame is None:
             raise ValueError("hcm_resubmission_workbook_sheet_contract_not_unique")
@@ -103,7 +103,7 @@ class HcmResubmissionWorkbookService:
                 normalized,
                 holiday_dates=self._holiday_dates(),
             ),
-            hcm_resubmission_source_event_identity(occurrence_identity, _digest(source_path)),
+            hcm_resubmission_source_event_identity(review_identity, _digest(source_path)),
             _digest(source_path),
         )
 

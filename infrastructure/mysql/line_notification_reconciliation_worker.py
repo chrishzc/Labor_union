@@ -7,27 +7,19 @@ from __future__ import annotations
 
 from typing import Callable
 
-from infrastructure.mysql.line_notification_repository import MySqlLineNotificationRepository
 from subsystems.line.notification_reconciliation import LineNotificationReconciler
 
 
 class MySqlLineNotificationReconciliationWorker:
-    def __init__(self, connection_factory: Callable[[], object]) -> None:
-        self._connection_factory = connection_factory
+    """Borrow a caller-owned notification repository for one bounded pass."""
+
+    def __init__(self, repository_factory: Callable[[], object]) -> None:
+        self._repository_factory = repository_factory
 
     def run_once(self, *, limit: int = 100) -> int:
-        connection = self._connection_factory()
-        try:
-            connection.begin()
-            repository = MySqlLineNotificationRepository(connection)
-            result = LineNotificationReconciler().reconcile(repository, limit=limit)
-            connection.commit()
-            return result
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
+        return LineNotificationReconciler().reconcile(
+            self._repository_factory(), limit=limit
+        )
 
 
 __all__ = ["MySqlLineNotificationReconciliationWorker"]

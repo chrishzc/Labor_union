@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from subsystems.jobs.durable_job_worker import (
+from api.dependencies.durable_job_handlers import (
     _government_subsidy_request,
     default_job_handlers,
     government_subsidy_apply_handler,

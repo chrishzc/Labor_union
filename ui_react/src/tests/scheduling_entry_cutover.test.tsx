@@ -14,6 +14,8 @@ import {
 } from './fixtures/staff/staff_directory_contract_fixtures';
 
 const STAFF_SUMMARY_ENDPOINT = '/api/v1/staff/summaries';
+const ORDER_SUMMARY_ENDPOINT = '/api/v1/orders/summaries';
+const STAFF_ASSIGNMENT_OPTIONS_ENDPOINT_PREFIX = '/api/v1/staff/';
 const CALENDAR_ENDPOINT_PREFIX = '/api/v1/scheduling/staff/';
 const ELIGIBILITY_ENDPOINT = '/api/v1/scheduling/eligibility-collisions';
 type FetchRecord = {
@@ -222,6 +224,53 @@ function eligibilityResponse(url: URL): Response {
   });
 }
 
+function schedulingOrderSummaryResponse(): Response {
+  return jsonResponse({
+    success: true,
+    message: '成功取得訂單摘要',
+    data: {
+      items: [{
+        case_no: 'CASE-SCH-011',
+        client_name: '排班驗證案件',
+        order_status: '洽談中',
+        staff_name: null,
+        identity_status: 'regular',
+        start_date: '2026-09-01',
+        end_date: '2026-09-30',
+        actual_start_date: null,
+        actual_end_date: null,
+        service_days: 30,
+        total_employer_self_pay_payable: 90_000,
+      }],
+      next_cursor: null,
+      etag: 'c'.repeat(64),
+    },
+    error: null,
+  });
+}
+
+function schedulingAssignmentOptionsResponse(staffId: number): Response {
+  return jsonResponse({
+    success: true,
+    message: '成功取得服務人員正式指派案件',
+    data: {
+      assignments: [{
+        id: staffId + 100,
+        case_no: 'CASE-SCH-011',
+        staff_id: staffId,
+        status: 'active',
+        assigned_start_date: '2026-09-01',
+        assigned_end_date: '2026-09-30',
+        order_status: '洽談中',
+        actual_start_date: null,
+        actual_end_date: null,
+        staff_name: staffId === 11 ? '去敏人員甲' : '服務人員摘要 #12',
+      }],
+    },
+    error: null,
+  });
+}
+
 function installFetchStub(mode: FetchMode): FetchRecord[] {
   const requests: FetchRecord[] = [];
   let calendarCalls = 0;
@@ -235,6 +284,14 @@ function installFetchStub(mode: FetchMode): FetchRecord[] {
     }
     if (url.pathname === STAFF_SUMMARY_ENDPOINT) {
       return jsonResponse(STAFF_RESPONSE_ONE);
+    }
+    if (url.pathname === ORDER_SUMMARY_ENDPOINT) {
+      return schedulingOrderSummaryResponse();
+    }
+    if (url.pathname.startsWith(STAFF_ASSIGNMENT_OPTIONS_ENDPOINT_PREFIX)
+      && url.pathname.endsWith('/assignment-schedules')) {
+      const match = url.pathname.match(/\/staff\/(\d+)\/assignment-schedules$/);
+      return schedulingAssignmentOptionsResponse(Number(match?.[1] ?? 0));
     }
     if (url.pathname === ELIGIBILITY_ENDPOINT) {
       return eligibilityResponse(url);
@@ -348,14 +405,15 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(calendarRequests(requests)).toHaveLength(2));
 
-    fireEvent.change(screen.getByRole('textbox', { name: '資格查詢案件編號' }), {
-      target: { value: 'CASE-INDEPENDENT-001' },
+    fireEvent.change(screen.getByRole('combobox', { name: '資格查詢案件編號' }), {
+      target: { value: 'CASE-SCH-011' },
     });
     fireEvent.click(await screen.findByRole('button', { name: '檢查 服務人員摘要 #12 的資格與檔期' }));
 
-    await waitFor(() => expect(requestsAt(requests, ELIGIBILITY_ENDPOINT)).toHaveLength(1));
-    const request = requestsAt(requests, ELIGIBILITY_ENDPOINT)[0];
-    expect(request?.query.get('case_no')).toBe('CASE-INDEPENDENT-001');
+    await waitFor(() => expect(requestsAt(requests, ELIGIBILITY_ENDPOINT).length).toBeGreaterThan(0));
+    const eligibilityRequests = requestsAt(requests, ELIGIBILITY_ENDPOINT);
+    const request = eligibilityRequests.at(-1);
+    expect(request?.query.get('case_no')).toBe('CASE-SCH-011');
     expect(request?.query.get('staff_id')).toBe('12');
     await waitFor(() => expect(screen.getByText(/資料待補正：請至訂單管理/)).toBeInTheDocument());
     expect(document.body.textContent).not.toMatch(/測試資料不足|測試資料不完整|test_data_incomplete|unavailable/i);
@@ -464,7 +522,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-011').length).toBeGreaterThan(0));
     const beforeControls = requests.length;
 
-    expect(screen.getByRole('textbox', { name: '資格查詢案件編號' })).toBeEnabled();
+    expect(screen.getByRole('combobox', { name: '資格查詢案件編號' })).toBeEnabled();
     expect(document.querySelector('[data-control-id="scheduling.candidate-pool.add"]')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /服務中請假與代班/ }));

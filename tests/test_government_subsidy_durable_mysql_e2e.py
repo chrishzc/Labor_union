@@ -108,7 +108,8 @@ def test_government_subsidy_receipt_durable_crash_recovery_and_duplicate_apply()
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import CorrelationId
     from subsystems.access.authentication_session import AdminPrincipal
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
     from domains.government_subsidy.ledger import AllocationIntent, ReceiptIntent
     from shared_kernel.money import MoneyNTD
 
@@ -186,7 +187,8 @@ def test_government_subsidy_claim_plan_durable_crash_recovery_and_duplicate_appl
     from infrastructure.mysql.background_job_repository import BackgroundJobRepository
     from infrastructure.mysql.mysql_adapter import get_connection
     from subsystems.access.authentication_session import AdminPrincipal
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
 
     connection = get_connection()
     try:
@@ -285,7 +287,8 @@ def test_government_subsidy_submission_durable_crash_recovery_and_duplicate_appl
     from infrastructure.mysql.mysql_adapter import get_connection
     from subsystems.access.authentication_session import AdminPrincipal
     from subsystems.government_subsidy.claim_workflow import ClaimSubmissionIntent
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
 
     connection = get_connection()
     try:
@@ -376,7 +379,8 @@ def test_government_subsidy_approval_durable_crash_recovery_and_duplicate_apply(
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.money import MoneyNTD
     from subsystems.access.authentication_session import AdminPrincipal
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
 
     connection = get_connection()
     try:
@@ -440,7 +444,8 @@ def test_government_subsidy_reversal_durable_crash_recovery_and_duplicate_apply(
     from shared_kernel.money import MoneyNTD
     from subsystems.access.authentication_session import AdminPrincipal
     from subsystems.government_subsidy.ledger_workflow import GovernmentSubsidyReceiptApplyRequest
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
 
     batch_id, item_id, receipt_row_id = _seed_receiptable_batch()
     connection = get_connection()

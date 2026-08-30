@@ -6,17 +6,23 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Path
-from typing import Dict, Any, List
 from api.schemas.base import BaseResponse
 from api.error_contracts import internal_query_error
-from api.schemas.matches import MatchCreateRequest
+from api.schemas.matches import MatchCreateRequest, OrderMatchRecordView
 from api.dependencies.admin_auth import require_system_admin
 from subsystems.scheduling import match_record_query
+from infrastructure.mysql.mysql_adapter import get_connection
 from subsystems.access.authentication_session import AdminPrincipal
+
+
+match_record_query.get_connection = get_connection
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Match Records 媒合紀錄"])
 
-@router.get("/{case_no}/matches", response_model=BaseResponse[List[Dict[str, Any]]])
+@router.get(
+    "/{case_no}/matches",
+    response_model=BaseResponse[list[OrderMatchRecordView]],
+)
 def get_order_matches(
     case_no: str = Path(..., description="案件編號"),
     principal: AdminPrincipal = Depends(require_system_admin),
@@ -25,7 +31,10 @@ def get_order_matches(
     del principal
     try:
         data = match_record_query.get_order_match_records(case_no)
-        return BaseResponse(data=data, message="成功取得案件媒合紀錄")
+        return BaseResponse(
+            data=[OrderMatchRecordView.model_validate(item) for item in data],
+            message="成功取得案件媒合紀錄",
+        )
     except Exception as error:
         raise internal_query_error(
             "legacy_match_history_query_internal_error",
@@ -33,7 +42,7 @@ def get_order_matches(
             "legacy-match-history-query",
         ) from error
 
-@router.post("/{case_no}/matches", response_model=BaseResponse[Dict[str, Any]])
+@router.post("/{case_no}/matches", response_model=BaseResponse[None])
 def create_or_get_match_record(
     req: MatchCreateRequest,
     case_no: str = Path(..., description="案件編號"),

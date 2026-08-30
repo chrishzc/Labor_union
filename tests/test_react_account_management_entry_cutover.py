@@ -1,6 +1,6 @@
 """
 File: test_react_account_management_entry_cutover.py
-Description: 驗證 Account query candidate 的 registry、rollback、Streamlit target、disabled controls 與 GET-only clients。
+Description: 驗證 Account 管理 React entry、typed query 與受控 mutation boundaries。
 """
 
 from __future__ import annotations
@@ -33,18 +33,6 @@ def _read_queue() -> list[dict[str, object]]:
     ]
 
 
-def _disabled_opening_tag(source: str, control_id: str) -> str:
-    match = re.search(
-        rf'<button\b(?P<attrs>[^>]*data-control-id="{re.escape(control_id)}"[^>]*)>',
-        source,
-        re.DOTALL,
-    )
-    assert match is not None, control_id
-    attributes = match.group("attrs")
-    assert re.search(r"\bdisabled(?:\s*=\s*\{\s*true\s*\})?", attributes)
-    return attributes
-
-
 def test_account_entry_is_unique_and_has_current_rollback_mapping() -> None:
     registry = _read_json(ENTRYPOINTS)
     retirement = _read_json(RETIREMENT_REQUIREMENTS)
@@ -63,7 +51,10 @@ def test_account_entry_is_unique_and_has_current_rollback_mapping() -> None:
     queue_entries = [entry for entry in _read_queue() if entry.get("entry_id") == ACCOUNT_ENTRY]
     assert len(queue_entries) == 1
     entry = queue_entries[0]
-    assert entry["status"] == "review_required"
+    assert entry["status"] == "active"
+    assert entry["terminal_disposition"] == "active_canonical"
+    assert entry["replacement"] == ACCOUNT_ENTRY
+    assert entry["replacement_readback"] == f"current canonical entry readback: {ACCOUNT_ENTRY}"
     assert entry["streamlit_entry"] == "ui:09_access_management.py"
     assert entry["rollback_deep_link"] == "/?entry=access-management"
     assert entry["witnesses"] == {
@@ -72,29 +63,20 @@ def test_account_entry_is_unique_and_has_current_rollback_mapping() -> None:
     }
 
 
-def test_account_target_remains_streamlit_without_switch_receipt() -> None:
+def test_account_control_plane_keeps_react_identity_metadata() -> None:
     state = _read_json(INITIAL_TARGETS)
     entries = state["entries"]
 
     assert isinstance(entries, list)
-    assert len(entries) == 11
+    assert len(entries) == 12
     account_entries = [entry for entry in entries if entry["entry_id"] == ACCOUNT_ENTRY]
-    assert account_entries == [
-        {
-            "entry_id": ACCOUNT_ENTRY,
-            "replacement_group": "access",
-            "current_target": "streamlit",
-            "streamlit_target": "/?entry=access-management",
-            "react_target": "/admin/#account-management",
-            "required_react_artifact": None,
-            "entry_revision": 1,
-        }
-    ]
-    assert all(entry["current_target"] == "streamlit" for entry in entries)
-    assert state["receipts"] == []
+    assert len(account_entries) == 1
+    assert account_entries[0]["entry_id"] == ACCOUNT_ENTRY
+    assert account_entries[0]["react_target"] == "/admin/#account-management"
+    assert account_entries[0]["replacement_group"] == "access"
 
 
-def test_account_sources_keep_mutations_disabled_and_clients_get_only() -> None:
+def test_account_sources_use_typed_queries_and_account_commands() -> None:
     app_source = (ROOT / "ui_react/src/App.tsx").read_text(encoding="utf-8")
     nav_source = (ROOT / "ui_react/src/components/MasterLayout.tsx").read_text(encoding="utf-8")
     page_source = (ROOT / "ui_react/src/pages/AccountManagementPage.tsx").read_text(encoding="utf-8")
@@ -110,14 +92,21 @@ def test_account_sources_keep_mutations_disabled_and_clients_get_only() -> None:
 
     for control_id in (
         "account.user.create",
-        "account.mfa.enroll",
+        "account.user.password-reset",
+        "account.mfa.reset",
         "account.user.session-revoke",
         "account.audit.detail",
-        "account.jobs.cancel",
-        "account.jobs.retry",
-        "account.jobs.run",
     ):
-        _disabled_opening_tag(page_source, control_id)
+        assert f'data-control-id="{control_id}"' in page_source
+
+    for method in (
+        "accountCenterClient.create",
+        "accountCenterClient.setEnabled",
+        "accountCenterClient.resetPassword",
+        "accountCenterClient.resetMfa",
+        "accountCenterClient.revokeSessions",
+    ):
+        assert method in page_source
 
     client_paths = (
         "ui_react/src/api/access/account_directory_client.ts",
@@ -127,4 +116,4 @@ def test_account_sources_keep_mutations_disabled_and_clients_get_only() -> None:
     for relative_path in client_paths:
         client_source = (ROOT / relative_path).read_text(encoding="utf-8")
         methods = re.findall(r"\btransport\.(get|post|put|patch|delete)\b", client_source)
-        assert methods == ["get"], relative_path
+        assert methods and set(methods) == {"get"}, relative_path

@@ -1,0 +1,218 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-controlled-file-reference-finalize-leases-2026-08-30-v1",
+  "descriptors": {
+    "1015_controlled_file_reference_finalize_leases.sql": {
+      "tables": {
+        "controlled_file_finalize_intents": [
+          "id",
+          "finalize_id",
+          "staging_object_id",
+          "controlled_file_object_id",
+          "expected_sha256",
+          "finalize_state",
+          "attempt_count",
+          "claimed_by",
+          "claim_token",
+          "claimed_at_utc",
+          "observed_sha256",
+          "observed_size_bytes",
+          "last_error_code",
+          "created_at_utc",
+          "available_at_utc",
+          "failed_at_utc"
+        ],
+        "controlled_file_references": [
+          "id",
+          "reference_id",
+          "controlled_file_object_id",
+          "service_day_log_attachment_id",
+          "reference_kind",
+          "created_at_utc"
+        ],
+        "controlled_file_leases": [
+          "id",
+          "lease_id",
+          "staging_object_id",
+          "holder",
+          "lease_state",
+          "acquired_at_utc",
+          "expires_at_utc",
+          "released_at_utc",
+          "active_staging_object_id"
+        ]
+      },
+      "indexes": {
+        "controlled_file_finalize_intents.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "controlled_file_finalize_intents.uq_controlled_file_finalize_id": {
+          "non_unique": 0,
+          "columns": [
+            "finalize_id"
+          ]
+        },
+        "controlled_file_finalize_intents.uq_controlled_file_finalize_staging": {
+          "non_unique": 0,
+          "columns": [
+            "staging_object_id"
+          ]
+        },
+        "controlled_file_finalize_intents.uq_controlled_file_finalize_object": {
+          "non_unique": 0,
+          "columns": [
+            "controlled_file_object_id"
+          ]
+        },
+        "controlled_file_finalize_intents.idx_controlled_file_finalize_claim": {
+          "non_unique": 1,
+          "columns": [
+            "finalize_state",
+            "claimed_at_utc",
+            "id"
+          ]
+        },
+        "controlled_file_references.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "controlled_file_references.uq_controlled_file_reference_id": {
+          "non_unique": 0,
+          "columns": [
+            "reference_id"
+          ]
+        },
+        "controlled_file_references.uq_controlled_file_reference_object": {
+          "non_unique": 0,
+          "columns": [
+            "controlled_file_object_id"
+          ]
+        },
+        "controlled_file_references.uq_controlled_file_reference_attachment": {
+          "non_unique": 0,
+          "columns": [
+            "service_day_log_attachment_id"
+          ]
+        },
+        "controlled_file_leases.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "controlled_file_leases.uq_controlled_file_lease_id": {
+          "non_unique": 0,
+          "columns": [
+            "lease_id"
+          ]
+        },
+        "controlled_file_leases.uq_controlled_file_active_staging": {
+          "non_unique": 0,
+          "columns": [
+            "active_staging_object_id"
+          ]
+        },
+        "controlled_file_leases.idx_controlled_file_lease_expiry": {
+          "non_unique": 1,
+          "columns": [
+            "lease_state",
+            "expires_at_utc",
+            "id"
+          ]
+        },
+        "scheduling_service_day_log_attachments.uq_scheduling_service_day_log_attachment_controlled_file": {
+          "non_unique": 0,
+          "columns": [
+            "controlled_file_object_id"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "controlled_file_finalize_intents.fk_controlled_file_finalize_staging": {
+          "columns": [
+            "staging_object_id"
+          ],
+          "referenced_table": "controlled_file_staging_objects",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "controlled_file_finalize_intents.fk_controlled_file_finalize_object": {
+          "columns": [
+            "controlled_file_object_id"
+          ],
+          "referenced_table": "controlled_file_objects",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "controlled_file_references.fk_controlled_file_reference_object": {
+          "columns": [
+            "controlled_file_object_id"
+          ],
+          "referenced_table": "controlled_file_objects",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "controlled_file_references.fk_controlled_file_reference_attachment": {
+          "columns": [
+            "service_day_log_attachment_id"
+          ],
+          "referenced_table": "scheduling_service_day_log_attachments",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "controlled_file_leases.fk_controlled_file_lease_staging": {
+          "columns": [
+            "staging_object_id"
+          ],
+          "referenced_table": "controlled_file_staging_objects",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "scheduling_service_day_log_attachments.fk_scheduling_service_day_log_attachment_controlled_file": {
+          "columns": [
+            "controlled_file_object_id"
+          ],
+          "referenced_table": "controlled_file_objects",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "controlled_file_finalize_intents.chk_controlled_file_finalize_identity": "and(atom(regexp_like(finalize_id,'^cff_[0-9a-f]{32}$')),atom(regexp_like(expected_sha256,'^[0-9a-f]{64}$')),or(atom(claimed_byisnull),atom(char_length(trim(claimed_by))>0)),or(atom(claim_tokenisnull),atom(char_length(trim(claim_token))>0)),atom(attempt_count>=0))",
+        "controlled_file_finalize_intents.chk_controlled_file_finalize_observation": "or(and(atom(observed_sha256isnull),atom(observed_size_bytesisnull)),and(atom(regexp_like(observed_sha256,'^[0-9a-f]{64}$')),atom(observed_size_bytes>0)))",
+        "controlled_file_finalize_intents.chk_controlled_file_finalize_state": "or(and(atom(finalize_state='pending'),atom(claimed_byisnull),atom(claimed_at_utcisnull),atom(available_at_utcisnull),atom(failed_at_utcisnull)),and(atom(finalize_state='processing'),atom(claimed_byisnotnull),atom(claimed_at_utcisnotnull),atom(available_at_utcisnull),atom(failed_at_utcisnull)),and(atom(finalize_state='available'),atom(available_at_utcisnotnull),atom(failed_at_utcisnull),atom(observed_sha256isnotnull),atom(observed_size_bytes>0)),and(atom(finalize_state='reconciliation_required'),atom(failed_at_utcisnotnull),atom(last_error_codeisnotnull)))",
+        "controlled_file_references.chk_controlled_file_reference_identity": "atom(regexp_like(reference_id,'^cfrf_[0-9a-f]{32}$'))",
+        "controlled_file_leases.chk_controlled_file_lease_identity": "and(atom(regexp_like(lease_id,'^cfl_[0-9a-f]{32}$')),atom(char_length(trim(holder))>0),atom(expires_at_utc>acquired_at_utc))",
+        "controlled_file_leases.chk_controlled_file_lease_state": "or(and(atom(lease_state='active'),atom(released_at_utcisnull)),and(atom(lease_statein('released','expired')),atom(released_at_utcisnotnull)))",
+        "scheduling_service_day_log_attachments.chk_scheduling_service_day_log_attachment_reference_source": "or(and(atom(provider_media_idisnotnull),atom(controlled_file_object_idisnull)),and(atom(provider_media_idisnull),atom(controlled_file_object_idisnotnull)))"
+      },
+      "triggers": [
+        "trg_controlled_file_references_before_update",
+        "trg_controlled_file_references_before_delete"
+      ]
+    }
+  }
+}

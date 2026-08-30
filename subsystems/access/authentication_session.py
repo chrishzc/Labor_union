@@ -15,11 +15,10 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Protocol
 
 import pymysql
 
-from infrastructure.mysql.mysql_adapter import get_connection
 from subsystems.access.security_audit_query import mask_audit_details
 from subsystems.access.totp import (
     EncryptedTotpSecret,
@@ -65,6 +64,40 @@ REQUIRED_ADMIN_SESSION_COLUMNS = frozenset(
         "revoked_at",
     }
 )
+
+
+class ConnectionFactory(Protocol):
+    """Application-composed database connection provider for access workflows."""
+
+    def __call__(self) -> Any:
+        ...
+
+
+class AccessControlUnitOfWork:
+    """Application-owned transaction boundary over a caller-provided connection."""
+
+    def __init__(self, connection) -> None:
+        self._connection = connection
+        self._committed = False
+        self._rolled_back = False
+
+    def __enter__(self):
+        self._connection.begin()
+        return self
+
+    def commit(self) -> None:
+        if self._committed or self._rolled_back:
+            raise RuntimeError("transaction is already finalized")
+        self._connection.commit()
+        self._committed = True
+
+    def rollback(self) -> None:
+        if self._committed:
+            raise RuntimeError("committed transaction cannot be rolled back")
+        if self._rolled_back:
+            return
+        self._connection.rollback()
+        self._rolled_back = True
 
 
 class AdminLoginRateLimitedError(Exception):
@@ -280,6 +313,7 @@ def verify_admin_password(password: str, encoded_hash: str) -> bool:
 
 def create_admin_user(
     *,
+    connection_factory: ConnectionFactory,
     username: str,
     password: str,
     display_name: str,
@@ -293,8 +327,10 @@ def create_admin_user(
     if role not in ROLE_LEVELS:
         raise ValueError(f"不支援的管理員角色：{role}")
 
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
+        unit_of_work.__enter__()
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -311,29 +347,31 @@ def create_admin_user(
                 ),
             )
             admin_id = int(cursor.lastrowid)
-        conn.commit()
+        unit_of_work.commit()
         return admin_id
     except pymysql.err.IntegrityError as exc:
-        conn.rollback()
+        unit_of_work.rollback()
         raise ValueError("管理員帳號或綁定的 LINE 使用者已存在") from exc
     except Exception:
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     finally:
         conn.close()
 
 
 def bootstrap_root_admin(
-    *, username: str, password: str, display_name: str, linked_line_user_id: str | None = None
+    *, connection_factory: ConnectionFactory, username: str, password: str,
+    display_name: str, linked_line_user_id: str | None = None
 ) -> int:
     """Offline-only initial root bootstrap; it fails closed once a root fact exists."""
     normalized_username = username.strip().lower()
     normalized_name = display_name.strip()
     if not normalized_username or not normalized_name:
         raise ValueError("username 與 display_name 不可為空")
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
-        conn.begin()
+        unit_of_work.__enter__()
         with conn.cursor() as cursor:
             cursor.execute("SELECT admin_user_id FROM admin_root_account WHERE singleton_key=1 FOR UPDATE")
             if cursor.fetchone() is not None:
@@ -353,21 +391,21 @@ def bootstrap_root_admin(
                 cursor, principal=None, action="admin.root.bootstrap", result_status=201,
                 details={"account_id": admin_id},
             )
-        conn.commit()
+        unit_of_work.commit()
         return admin_id
     except pymysql.err.IntegrityError as error:
-        conn.rollback()
+        unit_of_work.rollback()
         raise ValueError("root bootstrap 衝突") from error
     except Exception:
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     finally:
         conn.close()
 
 
-def list_account_center_users() -> list[AdminPrincipal]:
+def list_account_center_users(*, connection_factory: ConnectionFactory) -> list[AdminPrincipal]:
     """Return account metadata only; encrypted factors and password hashes never leave storage."""
-    conn = get_connection()
+    conn = connection_factory()
     try:
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             cursor.execute(
@@ -384,7 +422,8 @@ def list_account_center_users() -> list[AdminPrincipal]:
 
 
 def create_account_center_user_with_receipt(
-    *, actor: AdminPrincipal, username: str, password: str, display_name: str,
+    *, connection_factory: ConnectionFactory, actor: AdminPrincipal, username: str,
+    password: str, display_name: str,
     linked_line_user_id: str | None = None, reason: str, idempotency_key: str,
 ) -> AccountCreationResult:
     """Create or safely replay an enabled equal-business account creation command."""
@@ -393,9 +432,10 @@ def create_account_center_user_with_receipt(
     normalized_name = display_name.strip()
     if not normalized_username or not normalized_name:
         raise ValueError("username 與 display_name 不可為空")
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
-        conn.begin()
+        unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             command_payload = {
                 "username": normalized_username,
@@ -407,7 +447,7 @@ def create_account_center_user_with_receipt(
                 cursor, idempotency_key, actor, reason, command_payload
             )
             if replayed is not None:
-                conn.commit()
+                unit_of_work.commit()
                 return AccountCreationResult(
                     replayed,
                     _account_command_receipt(
@@ -433,7 +473,7 @@ def create_account_center_user_with_receipt(
                     "access_control_version": 1,
                 },
             )
-        conn.commit()
+        unit_of_work.commit()
         return AccountCreationResult(
             principal,
             _account_command_receipt(
@@ -441,22 +481,24 @@ def create_account_center_user_with_receipt(
             ),
         )
     except pymysql.err.IntegrityError as error:
-        conn.rollback()
+        unit_of_work.rollback()
         raise ValueError("管理員帳號或綁定的 LINE 使用者已存在") from error
     except Exception:
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     finally:
         conn.close()
 
 
 def create_account_center_user(
-    *, actor: AdminPrincipal, username: str, password: str, display_name: str,
+    *, connection_factory: ConnectionFactory, actor: AdminPrincipal, username: str,
+    password: str, display_name: str,
     linked_line_user_id: str | None = None, reason: str, idempotency_key: str,
 ) -> AdminPrincipal:
     """Compatibility entry returning the created account while the API exposes its receipt."""
     return create_account_center_user_with_receipt(
         actor=actor,
+        connection_factory=connection_factory,
         username=username,
         password=password,
         display_name=display_name,
@@ -466,15 +508,16 @@ def create_account_center_user(
     ).account
 
 
-def set_account_center_enabled(*, actor: AdminPrincipal, account_id: int, enabled: bool, reason: str, expected_version: int, idempotency_key: str) -> AccountCommandReceipt:
+def set_account_center_enabled(*, connection_factory: ConnectionFactory, actor: AdminPrincipal, account_id: int, enabled: bool, reason: str, expected_version: int, idempotency_key: str) -> AccountCommandReceipt:
     """Enable or disable a non-root account and revoke sessions in the same transaction."""
     _require_root_account_action(actor, account_id, reason)
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
-        conn.begin()
+        unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             if _replay_account_command(cursor, "account-enabled", idempotency_key, actor, account_id, expected_version, reason, {"enabled": enabled}):
-                conn.commit()
+                unit_of_work.commit()
                 return _account_command_receipt("account-enabled", idempotency_key, account_id, expected_version + 1, replayed=True)
             _lock_non_root_account(cursor, account_id, expected_version)
             cursor.execute("UPDATE admin_users SET enabled=%s, access_control_version=access_control_version+1 WHERE id=%s", (enabled, account_id))
@@ -488,25 +531,26 @@ def set_account_center_enabled(*, actor: AdminPrincipal, account_id: int, enable
                 details={"account_id": account_id, "enabled": enabled, "reason": reason.strip()},
             )
             _save_account_command_receipt(cursor, "account-enabled", idempotency_key, actor, account_id, expected_version, reason, {"enabled": enabled})
-        conn.commit()
+        unit_of_work.commit()
         return _account_command_receipt("account-enabled", idempotency_key, account_id, expected_version + 1, replayed=False)
     except Exception:
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     finally:
         conn.close()
 
 
-def reset_account_center_password(*, actor: AdminPrincipal, account_id: int, password: str, reason: str, expected_version: int, idempotency_key: str) -> AccountCommandReceipt:
+def reset_account_center_password(*, connection_factory: ConnectionFactory, actor: AdminPrincipal, account_id: int, password: str, reason: str, expected_version: int, idempotency_key: str) -> AccountCommandReceipt:
     """Set a new password and revoke all existing sessions atomically."""
     _require_root_account_action(actor, account_id, reason)
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
-        conn.begin()
+        unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             payload = {"password_hash": _token_hash(password)}
             if _replay_account_command(cursor, "account-password-reset", idempotency_key, actor, account_id, expected_version, reason, payload):
-                conn.commit()
+                unit_of_work.commit()
                 return _account_command_receipt("account-password-reset", idempotency_key, account_id, expected_version + 1, replayed=True)
             _lock_non_root_account(cursor, account_id, expected_version)
             cursor.execute("UPDATE admin_users SET password_hash=%s, access_control_version=access_control_version+1 WHERE id=%s", (hash_admin_password(password), account_id))
@@ -519,24 +563,25 @@ def reset_account_center_password(*, actor: AdminPrincipal, account_id: int, pas
                 details={"account_id": account_id, "reason": reason.strip()},
             )
             _save_account_command_receipt(cursor, "account-password-reset", idempotency_key, actor, account_id, expected_version, reason, payload)
-        conn.commit()
+        unit_of_work.commit()
         return _account_command_receipt("account-password-reset", idempotency_key, account_id, expected_version + 1, replayed=False)
     except Exception:
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     finally:
         conn.close()
 
 
-def revoke_account_center_sessions(*, actor: AdminPrincipal, account_id: int, reason: str, expected_version: int, idempotency_key: str) -> AccountCommandReceipt:
+def revoke_account_center_sessions(*, connection_factory: ConnectionFactory, actor: AdminPrincipal, account_id: int, reason: str, expected_version: int, idempotency_key: str) -> AccountCommandReceipt:
     """Revoke all sessions for a selected account with an auditable operator reason."""
     _require_root_account_action(actor, account_id, reason)
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
-        conn.begin()
+        unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             if _replay_account_command(cursor, "account-sessions-revoke", idempotency_key, actor, account_id, expected_version, reason, {}):
-                conn.commit()
+                unit_of_work.commit()
                 return _account_command_receipt("account-sessions-revoke", idempotency_key, account_id, expected_version + 1, replayed=True)
             _lock_non_root_account(cursor, account_id, expected_version)
             cursor.execute("UPDATE admin_users SET access_control_version=access_control_version+1 WHERE id=%s", (account_id,))
@@ -549,24 +594,25 @@ def revoke_account_center_sessions(*, actor: AdminPrincipal, account_id: int, re
                 details={"account_id": account_id, "reason": reason.strip()},
             )
             _save_account_command_receipt(cursor, "account-sessions-revoke", idempotency_key, actor, account_id, expected_version, reason, {})
-        conn.commit()
+        unit_of_work.commit()
         return _account_command_receipt("account-sessions-revoke", idempotency_key, account_id, expected_version + 1, replayed=False)
     except Exception:
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     finally:
         conn.close()
 
 
-def reset_account_center_mfa(*, actor: AdminPrincipal, account_id: int, reason: str, expected_version: int, idempotency_key: str) -> AccountCommandReceipt:
+def reset_account_center_mfa(*, connection_factory: ConnectionFactory, actor: AdminPrincipal, account_id: int, reason: str, expected_version: int, idempotency_key: str) -> AccountCommandReceipt:
     """Revoke a non-root factor and its sessions; the user must enroll again after password proof."""
     _require_root_account_action(actor, account_id, reason)
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
-        conn.begin()
+        unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             if _replay_account_command(cursor, "account-mfa-reset", idempotency_key, actor, account_id, expected_version, reason, {}):
-                conn.commit()
+                unit_of_work.commit()
                 return _account_command_receipt("account-mfa-reset", idempotency_key, account_id, expected_version + 1, replayed=True)
             _lock_non_root_account(cursor, account_id, expected_version)
             cursor.execute("UPDATE admin_users SET access_control_version=access_control_version+1 WHERE id=%s", (account_id,))
@@ -584,10 +630,10 @@ def reset_account_center_mfa(*, actor: AdminPrincipal, account_id: int, reason: 
                 details={"account_id": account_id, "reason": reason.strip()},
             )
             _save_account_command_receipt(cursor, "account-mfa-reset", idempotency_key, actor, account_id, expected_version, reason, {})
-        conn.commit()
+        unit_of_work.commit()
         return _account_command_receipt("account-mfa-reset", idempotency_key, account_id, expected_version + 1, replayed=False)
     except Exception:
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     finally:
         conn.close()
@@ -723,14 +769,16 @@ def authenticate_admin(
     username: str,
     password: str,
     *,
+    connection_factory: ConnectionFactory,
     session_minutes: int,
     totp_code: str | None = None,
     source_identifier: str = "unknown",
 ) -> tuple[str, datetime, AdminPrincipal] | None:
     username = username.strip().lower()
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
-        conn.begin()
+        unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             _require_admin_session_schema(cursor)
             cursor.execute(
@@ -748,13 +796,13 @@ def authenticate_admin(
             row = cursor.fetchone()
             if _is_rate_limited(cursor, username, source_identifier):
                 _record_login_attempt(cursor, username, source_identifier, "rate_limited")
-                conn.commit()
+                unit_of_work.commit()
                 raise AdminLoginRateLimitedError()
             if not row or not row["enabled"] or not verify_admin_password(password, row["password_hash"]):
                 _record_login_attempt(cursor, username, source_identifier, "failed")
                 if row is not None and not row["enabled"]:
                     _record_disabled_account_login_attempt(cursor, username)
-                conn.commit()
+                unit_of_work.commit()
                 return None
 
             factor = _active_factor_for_user(cursor, int(row["id"]))
@@ -765,21 +813,21 @@ def authenticate_admin(
                     cursor, principal=_principal_from_row(cursor, row),
                     action="admin.mfa.enrollment_issued", result_status=403,
                 )
-                conn.commit()
+                unit_of_work.commit()
                 return enrollment
             if not totp_code:
                 _record_login_attempt(cursor, username, source_identifier, "failed")
-                conn.commit()
+                unit_of_work.commit()
                 return None
             try:
                 verification = _verify_and_consume_second_factor(cursor, factor, totp_code)
             except AdminMfaReplayError:
                 _record_login_attempt(cursor, username, source_identifier, "mfa_replay")
-                conn.commit()
+                unit_of_work.commit()
                 return None
             if not verification:
                 _record_login_attempt(cursor, username, source_identifier, "failed")
-                conn.commit()
+                unit_of_work.commit()
                 return None
 
             now = _utc_now_naive()
@@ -809,29 +857,31 @@ def authenticate_admin(
                 details={"mfa_method": verification},
             )
             _record_login_attempt(cursor, username, source_identifier, "succeeded")
-        conn.commit()
+        unit_of_work.commit()
         return token, expires_at, principal
     except (AdminSessionSchemaError, AdminMfaConfigurationError):
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     except pymysql.MySQLError as error:
-        conn.rollback()
+        unit_of_work.rollback()
         raise AdminSessionStorageError("管理員登入儲存服務暫時無法使用") from error
     except Exception:
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     finally:
         conn.close()
 
 
 def issue_password_login_challenge(
-    username: str, password: str, *, source_identifier: str = "unknown",
+    username: str, password: str, *, connection_factory: ConnectionFactory,
+    source_identifier: str = "unknown",
 ) -> PasswordLoginChallenge | MfaEnrollmentChallenge | None:
     """Verify only the password and persist a short-lived second-factor challenge."""
     normalized_username = username.strip().lower()
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
-        conn.begin()
+        unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             _require_admin_session_schema(cursor)
             cursor.execute(
@@ -844,20 +894,20 @@ def issue_password_login_challenge(
             row = cursor.fetchone()
             if _is_rate_limited(cursor, normalized_username, source_identifier):
                 _record_login_attempt(cursor, normalized_username, source_identifier, "rate_limited")
-                conn.commit()
+                unit_of_work.commit()
                 raise AdminLoginRateLimitedError()
             if not row or not row["enabled"] or not verify_admin_password(password, row["password_hash"]):
                 _record_login_attempt(cursor, normalized_username, source_identifier, "failed")
                 if row is not None and not row["enabled"]:
                     _record_disabled_account_login_attempt(cursor, normalized_username)
-                conn.commit()
+                unit_of_work.commit()
                 return None
             factor = _active_factor_for_user(cursor, int(row["id"]))
             if factor is None:
                 enrollment = _issue_mfa_enrollment(cursor, row)
                 _record_login_attempt(cursor, normalized_username, source_identifier, "succeeded")
                 _record_admin_audit_with_cursor(cursor, principal=_principal_from_row(cursor, row), action="admin.mfa.enrollment_issued", result_status=403)
-                conn.commit()
+                unit_of_work.commit()
                 return enrollment
             challenge_id = str(uuid.uuid4())
             challenge_token = secrets.token_urlsafe(32)
@@ -871,25 +921,27 @@ def issue_password_login_challenge(
             )
             _record_login_attempt(cursor, normalized_username, source_identifier, "succeeded")
             _record_admin_audit_with_cursor(cursor, principal=_principal_from_row(cursor, row), action="admin.password_challenge_issued", result_status=202)
-        conn.commit()
+        unit_of_work.commit()
         return PasswordLoginChallenge(challenge_id, challenge_token, expires_at)
     except pymysql.MySQLError as error:
-        conn.rollback()
+        unit_of_work.rollback()
         raise AdminSessionStorageError("管理員登入儲存服務暫時無法使用") from error
     except Exception:
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     finally:
         conn.close()
 
 
 def complete_password_login_challenge(
-    *, challenge_id: str, challenge_token: str, factor_code: str, source_identifier: str = "unknown",
+    *, connection_factory: ConnectionFactory, challenge_id: str, challenge_token: str,
+    factor_code: str, source_identifier: str = "unknown",
 ) -> tuple[str, datetime, AdminPrincipal] | None:
     """Consume the password challenge and issue a Session only after factor proof."""
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
-        conn.begin()
+        unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             cursor.execute(
                 """SELECT c.id,c.admin_user_id,c.credential_version,c.factor_id,c.challenge_hash,c.source_hash,
@@ -904,7 +956,7 @@ def complete_password_login_challenge(
                     or not hmac.compare_digest(str(challenge["challenge_hash"]), _token_hash(challenge_token))
                     or not hmac.compare_digest(str(challenge["source_hash"]), _attempt_subject_hash(source_identifier))
                     or not challenge["enabled"] or int(challenge["credential_version"]) != int(challenge["access_control_version"])):
-                conn.commit()
+                unit_of_work.commit()
                 return None
             cursor.execute(
                 """SELECT id,seed_ciphertext,encryption_key_version,last_successful_step
@@ -913,17 +965,17 @@ def complete_password_login_challenge(
             )
             factor = cursor.fetchone()
             if factor is None:
-                conn.commit()
+                unit_of_work.commit()
                 return None
             try:
                 method = _verify_and_consume_second_factor(cursor, factor, factor_code)
             except AdminMfaReplayError:
                 _record_login_attempt(cursor, str(challenge["username"]), source_identifier, "mfa_replay")
-                conn.commit()
+                unit_of_work.commit()
                 return None
             if method is None:
                 _record_login_attempt(cursor, str(challenge["username"]), source_identifier, "failed")
-                conn.commit()
+                unit_of_work.commit()
                 return None
             cursor.execute("UPDATE admin_password_login_challenges SET consumed_at=UTC_TIMESTAMP(6) WHERE id=%s", (challenge_id,))
             row = {"id": challenge["user_id"], "username": challenge["username"], "display_name": challenge["display_name"], "role": challenge["role"], "linked_line_user_id": challenge["linked_line_user_id"], "enabled": challenge["enabled"], "access_control_version": challenge["access_control_version"], "is_root": False}
@@ -939,26 +991,28 @@ def complete_password_login_challenge(
             principal = _principal_from_row(cursor, row)
             _record_admin_audit_with_cursor(cursor, principal=principal, action="admin.login.success", result_status=200, details={"mfa_method": method})
             _record_login_attempt(cursor, str(challenge["username"]), source_identifier, "succeeded")
-        conn.commit()
+        unit_of_work.commit()
         return token, expires_at, principal
     except pymysql.MySQLError as error:
-        conn.rollback()
+        unit_of_work.rollback()
         raise AdminSessionStorageError("管理員登入儲存服務暫時無法使用") from error
     except Exception:
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     finally:
         conn.close()
 
 
 def authenticate_local_developer_root(
-    username: str, password: str, *, source_identifier: str = "local_developer_session"
+    username: str, password: str, *, connection_factory: ConnectionFactory,
+    source_identifier: str = "local_developer_session"
 ) -> tuple[str, datetime, AdminPrincipal] | None:
     """Issue a local-only root Session after DB password verification, without bypassing Session authorization."""
     normalized_username = username.strip().lower()
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
-        conn.begin()
+        unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             _require_admin_session_schema(cursor)
             cursor.execute(
@@ -972,10 +1026,10 @@ def authenticate_local_developer_root(
             )
             row = cursor.fetchone()
             if not row or not row["enabled"] or not row["is_root"]:
-                conn.commit()
+                unit_of_work.commit()
                 return None
             if not verify_admin_password(password, row["password_hash"]):
-                conn.commit()
+                unit_of_work.commit()
                 return None
             now = _utc_now_naive()
             absolute_expires_at = now + timedelta(minutes=ADMIN_SESSION_MAXIMUM_MINUTES)
@@ -993,28 +1047,30 @@ def authenticate_local_developer_root(
                 cursor, principal=principal, action="admin.development_session_issued", result_status=200,
                 details={"source": source_identifier},
             )
-        conn.commit()
+        unit_of_work.commit()
         return token, expires_at, principal
     except AdminSessionSchemaError:
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     except pymysql.MySQLError as error:
-        conn.rollback()
+        unit_of_work.rollback()
         raise AdminSessionStorageError("開發 root Session 儲存服務暫時無法使用") from error
     except Exception:
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     finally:
         conn.close()
 
 
 def complete_mfa_enrollment(
-    *, challenge_id: str, challenge_token: str, totp_code: str
+    *, connection_factory: ConnectionFactory, challenge_id: str, challenge_token: str,
+    totp_code: str
 ) -> tuple[str, ...]:
     """Activate a password-bound short-lived factor challenge without issuing a Session."""
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
-        conn.begin()
+        unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             cursor.execute(
                 """SELECT id, admin_user_id, challenge_hash, expires_at, consumed_at
@@ -1065,20 +1121,22 @@ def complete_mfa_enrollment(
             _record_admin_audit_with_cursor(
                 cursor, principal=principal, action="admin.mfa.enrollment_completed", result_status=200,
             )
-        conn.commit()
+        unit_of_work.commit()
         return codes
     except Exception:
-        conn.rollback()
+        unit_of_work.rollback()
         raise
     finally:
         conn.close()
 
 
-def get_admin_session(token: str) -> AdminPrincipal | None:
+def get_admin_session(token: str, *, connection_factory: ConnectionFactory) -> AdminPrincipal | None:
     if not token:
         return None
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
+        unit_of_work.__enter__()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             cursor.execute(
                 """
@@ -1099,6 +1157,7 @@ def get_admin_session(token: str) -> AdminPrincipal | None:
             )
             row = cursor.fetchone()
             if not row:
+                unit_of_work.rollback()
                 return None
             cursor.execute(
                 """
@@ -1115,19 +1174,22 @@ def get_admin_session(token: str) -> AdminPrincipal | None:
                 (_token_hash(token),),
             )
             principal = _principal_from_row(cursor, row)
-        conn.commit()
+        unit_of_work.commit()
         return principal
     except pymysql.MySQLError as error:
+        unit_of_work.rollback()
         raise AdminSessionStorageError("管理員 Session 服務暫時無法使用") from error
     finally:
         conn.close()
 
 
-def revoke_admin_session(token: str) -> bool:
+def revoke_admin_session(token: str, *, connection_factory: ConnectionFactory) -> bool:
     if not token:
         return False
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
+        unit_of_work.__enter__()
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -1138,21 +1200,24 @@ def revoke_admin_session(token: str) -> bool:
                 (_token_hash(token),),
             )
             changed = cursor.rowcount > 0
-        conn.commit()
+        unit_of_work.commit()
         return changed
     except pymysql.MySQLError as error:
+        unit_of_work.rollback()
         raise AdminSessionStorageError("管理員 Session 服務暫時無法使用") from error
     finally:
         conn.close()
 
 
-def renew_admin_session(token: str, *, session_minutes: int) -> datetime | None:
+def renew_admin_session(token: str, *, connection_factory: ConnectionFactory, session_minutes: int) -> datetime | None:
     """Extend a valid session without exposing or replacing its stored hash."""
     if not token:
         return None
     del session_minutes
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
+        unit_of_work.__enter__()
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -1178,9 +1243,10 @@ def renew_admin_session(token: str, *, session_minutes: int) -> datetime | None:
                     (_token_hash(token),),
                 )
                 row = cursor.fetchone()
-        conn.commit()
+        unit_of_work.commit()
         return row[0] if renewed and row else None
     except pymysql.MySQLError as error:
+        unit_of_work.rollback()
         raise AdminSessionStorageError("管理員 Session 服務暫時無法使用") from error
     finally:
         conn.close()
@@ -1432,6 +1498,7 @@ def _append_security_alert_outbox(
 
 def record_admin_audit(
     *,
+    connection_factory: ConnectionFactory,
     principal: AdminPrincipal | None,
     action: str,
     request_path: str | None = None,
@@ -1442,8 +1509,10 @@ def record_admin_audit(
     resource_id: str | None = None,
     details: dict[str, Any] | None = None,
 ) -> None:
-    conn = get_connection()
+    conn = connection_factory()
+    unit_of_work = AccessControlUnitOfWork(conn)
     try:
+        unit_of_work.__enter__()
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -1465,6 +1534,9 @@ def record_admin_audit(
                     json.dumps(mask_audit_details(details), ensure_ascii=False) if details else None,
                 ),
             )
-        conn.commit()
+        unit_of_work.commit()
+    except Exception:
+        unit_of_work.rollback()
+        raise
     finally:
         conn.close()

@@ -261,7 +261,7 @@ class MySqlLeaveSubstitutionRepository:
         with self._connection.cursor() as cursor:
             return persist_scheduling_replacement(cursor, command)
 
-    # Kept cohesive because header, outcomes, occupancy, and special pay are one fact set.
+    # Kept cohesive because header, outcomes, and occupancy are one fact set.
     def append_batch_outcomes(
         self,
         request,
@@ -286,12 +286,6 @@ class MySqlLeaveSubstitutionRepository:
                 preview,
                 scheduling_result,
                 event_ids,
-            )
-            _insert_special_pay_events(
-                cursor,
-                request,
-                preview,
-                scheduling_result,
             )
         return event_ids
 
@@ -736,46 +730,6 @@ def _insert_leave_occupancy(
         "VALUES (%s,%s,%s,%s,%s,%s,'active',1)",
         rows,
     )
-
-
-# Explicit double-pay dates are persisted only from the rebuilt assignments.
-def _insert_special_pay_events(
-    cursor,
-    request,
-    preview,
-    scheduling_result,
-):
-    for assignment in preview.candidate.scheduling.assignments:
-        assignment_id = _resolved_assignment_id(
-            scheduling_result,
-            assignment.candidate_key,
-        )
-        for service_date in assignment.double_pay_dates:
-            cursor.execute(
-                "INSERT INTO payroll_special_pay_events "
-                "(assignment_id,service_date,event_type,source_event_identity,"
-                "actor,reason,idempotency_key) "
-                "VALUES (%s,%s,'double_pay',%s,%s,%s,%s)",
-                (
-                    assignment_id,
-                    service_date,
-                    _special_pay_source_identity(request.idempotency_key),
-                    request.actor.actor_id,
-                    request.reason,
-                    _child_identity(
-                        request.idempotency_key,
-                        "special-pay",
-                        assignment.sequence,
-                        service_date,
-                    ),
-                ),
-            )
-
-
-def _special_pay_source_identity(key):
-    return "leave-special-pay:" + fingerprint_payload(
-        {"batch_key": key.value}
-    ).value
 
 
 # Expected/result versions and replay snapshot form one receipt row.

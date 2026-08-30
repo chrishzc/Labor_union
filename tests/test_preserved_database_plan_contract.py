@@ -164,6 +164,8 @@ def test_complete_restart_records_shutdown_after_all_read_smokes(tmp_path, monke
 def test_complete_restart_cli_wires_candidate_only_runtime_ports(tmp_path, monkeypatch) -> None:
     environment = tmp_path / "rehearsal.env"
     environment.write_text("DB_DATABASE=rehearsal_source\n", encoding="utf-8")
+    for evidence_name in ("source.json", "candidate.json", "principal.json", "token.json"):
+        (tmp_path / evidence_name).write_text("{}\n", encoding="utf-8")
     source = runner.DatabaseDescriptor(
         "source-read", "rehearsal_source",
         runner.DatabaseConfig("source-host", 3306, "reader", "reader-secret"),

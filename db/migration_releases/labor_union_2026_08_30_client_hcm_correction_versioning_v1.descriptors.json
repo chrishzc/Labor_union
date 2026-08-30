@@ -1,0 +1,131 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-client-hcm-correction-versioning-2026-08-30-v1",
+  "descriptors": {
+    "1017_client_hcm_correction_versioning.sql": {
+      "tables": {
+        "client_hcm_correction_events": [
+          "id",
+          "event_identity",
+          "client_id",
+          "case_no",
+          "review_identity",
+          "source_event_identity",
+          "field_path",
+          "source_fingerprint",
+          "expected_client_version",
+          "resulting_client_version",
+          "before_values",
+          "after_values",
+          "actor",
+          "reason",
+          "correlation_id",
+          "created_at"
+        ],
+        "client_hcm_correction_receipts": [
+          "id",
+          "idempotency_key",
+          "command_fingerprint",
+          "correction_event_id",
+          "result_snapshot",
+          "created_at"
+        ]
+      },
+      "indexes": {
+        "client_hcm_correction_events.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "client_hcm_correction_events.uq_client_hcm_correction_event_identity": {
+          "non_unique": 0,
+          "columns": [
+            "event_identity"
+          ]
+        },
+        "client_hcm_correction_events.idx_client_hcm_correction_event_client": {
+          "non_unique": 1,
+          "columns": [
+            "client_id",
+            "id"
+          ]
+        },
+        "client_hcm_correction_events.idx_client_hcm_correction_event_review": {
+          "non_unique": 1,
+          "columns": [
+            "review_identity",
+            "id"
+          ]
+        },
+        "client_hcm_correction_receipts.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "client_hcm_correction_receipts.uq_client_hcm_correction_receipt_key": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "client_hcm_correction_receipts.uq_client_hcm_correction_receipt_event": {
+          "non_unique": 0,
+          "columns": [
+            "correction_event_id"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "client_hcm_correction_events.fk_client_hcm_correction_event_client": {
+          "columns": [
+            "client_id"
+          ],
+          "referenced_table": "clients",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "client_hcm_correction_events.fk_client_hcm_correction_event_case": {
+          "columns": [
+            "case_no"
+          ],
+          "referenced_table": "clients",
+          "referenced_columns": [
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "client_hcm_correction_receipts.fk_client_hcm_correction_receipt_event": {
+          "columns": [
+            "correction_event_id"
+          ],
+          "referenced_table": "client_hcm_correction_events",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "client_hcm_correction_events.chk_client_hcm_correction_event_versions": "atom(resulting_client_version=expected_client_version+1)",
+        "client_hcm_correction_events.chk_client_hcm_correction_event_fingerprint": "atom(regexp_like(source_fingerprint,'^[0-9a-f]{64}$'))",
+        "client_hcm_correction_events.chk_client_hcm_correction_event_json": "and(atom(json_type(before_values)='OBJECT'),atom(json_type(after_values)='OBJECT'))",
+        "client_hcm_correction_events.chk_client_hcm_correction_event_text": "and(atom(char_length(trim(event_identity))>0),atom(char_length(trim(review_identity))>0),atom(char_length(trim(source_event_identity))>0),atom(char_length(trim(field_path))>0),atom(char_length(trim(actor))>0),atom(char_length(trim(reason))>0),atom(char_length(trim(correlation_id))>0))",
+        "client_hcm_correction_receipts.chk_client_hcm_correction_receipt_fingerprint": "atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$'))",
+        "client_hcm_correction_receipts.chk_client_hcm_correction_receipt_snapshot": "atom(json_type(result_snapshot)='OBJECT')"
+      },
+      "triggers": [
+        "trg_client_hcm_correction_events_before_update",
+        "trg_client_hcm_correction_events_before_delete",
+        "trg_client_hcm_correction_receipts_before_update",
+        "trg_client_hcm_correction_receipts_before_delete"
+      ]
+    }
+  }
+}

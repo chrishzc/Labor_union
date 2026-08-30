@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "cc7282e91852822b71eb371b7cf00aee02b4bc8fa9e13756d3ef91fa2688abd8",
+  "active_artifacts_sha256": "eae298b26b8d325db2e0485f75572aa0284e41bafa41bd00d6f8c8ed93f979c9",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -147,7 +147,11 @@
     "db/schema_parts/1011_historical_baseline_projector.sql",
     "db/schema_parts/1012_service_before_replacement.sql",
     "db/schema_parts/1013_order_lifecycle_pending_status_constraint.sql",
-    "db/schema_parts/1014_historical_baseline_projector_v2.sql"
+    "db/schema_parts/1014_historical_baseline_projector_v2.sql",
+    "db/schema_parts/1015_controlled_file_reference_finalize_leases.sql",
+    "db/schema_parts/1016_current_anomaly_issues.sql",
+    "db/schema_parts/1017_client_hcm_correction_versioning.sql",
+    "db/schema_parts/1018_hcm_resubmission_canonical_review_version.sql"
   ],
   "classifications": {
     "db/schema_parts/153_retire_empty_legacy_field_inventory.sql": "migration-only",

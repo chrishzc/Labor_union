@@ -61,7 +61,9 @@ def test_staff_entry_registry_queue_and_rollback_are_independent() -> None:
     assert len(queued) == 1
     row = queued[0]
     assert row["replacement_group"] == "staff-scheduling"
-    assert row["status"] == "review_required"
+    assert row["status"] == "active"
+    assert row["terminal_disposition"] == "active_canonical"
+    assert row["replacement"] == "ui-react:#staff"
     assert row["streamlit_entry"] == "ui:03_calendar.py"
     assert row["rollback_deep_link"] == "/?entry=scheduling&view=staff-directory"
     assert row["witnesses"] == {
@@ -71,29 +73,19 @@ def test_staff_entry_registry_queue_and_rollback_are_independent() -> None:
     assert row["source_path"] == "ui_react/src/components/MasterLayout.tsx"
 
 
-def test_staff_control_plane_is_still_streamlit_without_switch_receipts() -> None:
+def test_staff_control_plane_keeps_react_identity_metadata() -> None:
     control = _json(CONTROL_PLANE)
     targets = control.get("entry_targets", control.get("entries"))
-    receipts = control.get("receipts", control.get("switch_receipts"))
     assert isinstance(targets, list)
-    assert len(targets) == 11
-    assert receipts == []
+    assert len(targets) == 12
 
     staff_targets = [
         target for target in targets if target.get("entry_id") == "ui-react:#staff"
     ]
     assert len(staff_targets) == 1
-    assert staff_targets[0] == {
-        "entry_id": "ui-react:#staff",
-        "replacement_group": "staff-scheduling",
-        "current_target": "streamlit",
-        "streamlit_target": "/?entry=scheduling&view=staff-directory",
-        "react_target": "/admin/#staff",
-        "required_react_artifact": None,
-        "entry_revision": 1,
-    }
-    assert all(target["current_target"] == "streamlit" for target in targets)
-    assert all(target["required_react_artifact"] is None for target in targets)
+    assert staff_targets[0]["entry_id"] == "ui-react:#staff"
+    assert staff_targets[0]["react_target"] == "/admin/#staff"
+    assert staff_targets[0]["replacement_group"] == "staff-scheduling"
 
 
 def test_staff_app_page_and_clients_are_typed_and_fail_closed() -> None:
@@ -110,26 +102,13 @@ def test_staff_app_page_and_clients_are_typed_and_fail_closed() -> None:
     assert not re.search(r"\bMOCK_[A-Z0-9_]+\b", page)
     assert not re.search(r"\bfetch\s*\(", page)
     assert not re.search(r"\b(?:alert|confirm|prompt)\s*\(", page)
-    assert "STAFF_DIRECTORY_UNAVAILABLE" in page
-    assert "function DisabledButton" in page
-    disabled_helper = re.search(r"function DisabledButton[\s\S]{0,1200}", page)
-    assert disabled_helper is not None
-    assert re.search(r"\bdisabled\b", disabled_helper.group(0))
-    assert "data-control-id=\"staff.master.edit\"" in page
-    assert "readOnly" in page
-
-    unavailable_controls = (
-        "staff.master.create",
-        "staff.master.save",
-        "staff.master.attachment-upload",
-        "staff.master.certificate-approve",
-        "staff.master.bank-edit",
-        "staff.preferences.cooking-skills",
-        "staff.preferences.special-notes",
-        "staff.availability.end-pause",
-    )
-    for control_id in unavailable_controls:
-        assert control_id in page
+    assert "staffDirectoryClient.queryPage" in page
+    assert "STAFF_DIRECTORY_UNAVAILABLE" not in page
+    assert "data-control-id=\"staff.preferences.preview\"" in page
+    assert "data-control-id=\"staff.preferences.apply\"" in page
+    assert "data-control-id=\"staff.availability.create.preview\"" in page
+    assert "data-control-id=\"staff.availability.create.apply\"" in page
+    assert "data-control-id=\"staff.availability.end-pause\"" in page
 
     client_paths = {
         "directory": ROOT / "ui_react/src/api/staff_directory/staff_directory_client.ts",

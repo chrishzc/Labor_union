@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from typing import Any
+from typing import Any, Callable
 
 from domains.scheduling.waiting_deposit_lock import (
     WaitingDepositOccupancyKind,
@@ -20,9 +20,12 @@ from subsystems.scheduling.availability_lock_helpers import (
     normalize_lock_acquisition_request,
     normalize_plan_snapshot,
 )
-from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.scheduling.ports import unconfigured_connection_factory
 from subsystems.scheduling.occupancy_mutex import lock_staff_occupancy_mutex
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+
+
+get_connection = unconfigured_connection_factory
 
 
 def _close_once(resource: Any, closed: dict[str, bool]) -> None:
@@ -542,6 +545,35 @@ def _existing_result(
     return {"result": "existing", "lock_id": lock_id, "plan_id": request["plan_id"], "case_no": request["case_no"], "lock_rows": snapshot["lock_rows"]}
 
 
+def _run_in_application_uow(operation: Callable[[Any, Any], dict[str, Any]]) -> dict[str, Any]:
+    """Run one lock mutation with an Application-owned outer transaction."""
+    connection = cursor = None
+    cursor_closed = {"value": False}
+    connection_closed = {"value": False}
+    unit_of_work = None
+    try:
+        connection = get_connection()
+        unit_of_work = connection
+        cursor = connection.cursor()
+        result = operation(connection, cursor)
+        if result.get("result") != "existing" and result.get("status") != "idempotent_replay":
+            unit_of_work.commit()
+        else:
+            unit_of_work.rollback()
+        return result
+    except Exception:
+        if unit_of_work is not None:
+            try:
+                unit_of_work.rollback()
+            except BaseException:
+                pass
+        raise
+    finally:
+        # The outer application owns both resources; operation code never closes them.
+        _close_once(cursor, cursor_closed)
+        _close_once(connection, connection_closed)
+
+
 def acquire_caregiver_availability_lock(
     case_no: Any,
     plan_id: Any,
@@ -554,11 +586,21 @@ def acquire_caregiver_availability_lock(
     expected_fingerprint = _optional_preview_fingerprint(
         expected_preview_fingerprint
     )
-    connection = cursor = None
-    cursor_closed, connection_closed = {"value": False}, {"value": False}
+    return _run_in_application_uow(
+        lambda connection, cursor: _acquire_caregiver_availability_lock_in_transaction(
+            connection, cursor, request, expected_fingerprint
+        )
+    )
+
+
+def _acquire_caregiver_availability_lock_in_transaction(
+    connection: Any,
+    cursor: Any,
+    request: dict[str, Any],
+    expected_fingerprint: PreviewFingerprint | None,
+) -> dict[str, Any]:
     try:
-        connection = get_connection()
-        cursor = connection.cursor()
+        # The cursor is created and closed by the Application transaction owner.
         preliminary_plan, preliminary_segments = _load_prelock_snapshot(cursor, request["case_no"], request["plan_id"])
         preliminary_snapshot = normalize_plan_snapshot(request["case_no"], request["plan_id"], preliminary_plan, preliminary_segments)
         locked_ids = lock_staff_occupancy_mutex(cursor, list(preliminary_snapshot["staff_ids"]))
@@ -632,18 +674,9 @@ def acquire_caregiver_availability_lock(
             "(lock_id, event_type, event_key, actor, reason, payload) VALUES (%s, 'lock_acquired', %s, %s, NULL, %s)",
             (lock_id, request["event_key"], request["actor"], json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))),
         )
-        connection.commit()
         return {"result": "created", "lock_id": lock_id, "plan_id": request["plan_id"], "case_no": request["case_no"], "lock_rows": locked_snapshot["lock_rows"]}
-    except Exception:
-        if connection is not None:
-            try:
-                connection.rollback()
-            except BaseException:
-                pass
-        raise
     finally:
-        _close_once(cursor, cursor_closed)
-        _close_once(connection, connection_closed)
+        pass
 
 
 # Kept cohesive so the read snapshot and all occupancy facts share one DB view.
@@ -692,11 +725,6 @@ def preview_caregiver_availability_lock(
         conflicts = _occupancy_conflicts(cursor, snapshot)
         return _build_acquire_preview(snapshot, conflicts)
     finally:
-        if connection is not None:
-            try:
-                connection.rollback()
-            except BaseException:
-                pass
         _close_once(cursor, cursor_closed)
         _close_once(connection, connection_closed)
 

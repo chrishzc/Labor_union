@@ -9,12 +9,10 @@ import json
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
+from typing import Any, Callable
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
-
-from infrastructure.mysql.mysql_adapter import get_connection
-
 
 QUARTERLY_HEADERS = (
     "\u5e8f\u865f", "\u5e02\u5e9c\u8a02\u55ae\u865f\u78bc", "\u88dc\u52a9\u8cc7\u683c", "\u670d\u52d9\u958b\u59cb", "\u670d\u52d9\u7d50\u675f",
@@ -85,8 +83,8 @@ def extract_employer_identity_card(survey_details: object) -> str:
     return ""
 
 
-def _fetch_completed_cases() -> list[dict]:
-    conn = get_connection()
+def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
+    conn = connection_factory()
     try:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -194,11 +192,15 @@ def _build_workbook(headers: tuple[str, ...], general_rows: list[dict], subsidiz
     return output.getvalue()
 
 
-def _filtered_rows(application_year: int, claim_quarter: int | None) -> tuple[list[dict], list[dict]]:
+def _filtered_rows(
+    application_year: int,
+    claim_quarter: int | None,
+    connection_factory: Callable[[], Any],
+) -> tuple[list[dict], list[dict]]:
     if claim_quarter is not None:
         completion_year, start_month, end_month = _completion_period(application_year, claim_quarter)
     rows = []
-    for source in _fetch_completed_cases():
+    for source in _fetch_completed_cases(connection_factory):
         row = _to_register_row(source)
         if not row:
             continue
@@ -214,14 +216,18 @@ def _filtered_rows(application_year: int, claim_quarter: int | None) -> tuple[li
     return _with_serials(general), _with_serials(subsidized)
 
 
-def build_year_to_date_subsidy_rows(application_year: int, cutoff_date: date) -> dict:
+def build_year_to_date_subsidy_rows(
+    application_year: int,
+    cutoff_date: date,
+    connection_factory: Callable[[], Any],
+) -> dict:
     """Return owner-calculated rows completed from January 1 through cutoff_date."""
     if not isinstance(application_year, int) or application_year < 1912:
         raise ValueError("application_year must be a Gregorian year")
     if not isinstance(cutoff_date, date) or cutoff_date < date(application_year, 1, 1):
         raise ValueError("cutoff_date must not precede application_year")
     rows = []
-    for source in _fetch_completed_cases():
+    for source in _fetch_completed_cases(connection_factory):
         row = _to_register_row(source)
         if row is None:
             continue
@@ -236,10 +242,16 @@ def build_year_to_date_subsidy_rows(application_year: int, cutoff_date: date) ->
     }
 
 
-def build_quarterly_subsidy_register(application_year: int, quarter: int) -> dict:
+def build_quarterly_subsidy_register(
+    application_year: int,
+    quarter: int,
+    connection_factory: Callable[[], Any],
+) -> dict:
     """Build a register for the selected completion-year quarter."""
     _validate_year_and_quarter(application_year, quarter)
-    general_rows, subsidized_rows = _filtered_rows(application_year, quarter)
+    general_rows, subsidized_rows = _filtered_rows(
+        application_year, quarter, connection_factory
+    )
     return {
         "general_citizen_rows": general_rows,
         "subsidized_citizen_rows": subsidized_rows,
@@ -247,11 +259,16 @@ def build_quarterly_subsidy_register(application_year: int, quarter: int) -> dic
     }
 
 
-def build_annual_subsidy_summary(application_year: int) -> dict:
+def build_annual_subsidy_summary(
+    application_year: int,
+    connection_factory: Callable[[], Any],
+) -> dict:
     """Build a completion-year annual summary, separated by subsidy eligibility."""
     if not isinstance(application_year, int) or application_year < 1912:
         raise ValueError("application_year must be a Gregorian year")
-    general_rows, subsidized_rows = _filtered_rows(application_year, None)
+    general_rows, subsidized_rows = _filtered_rows(
+        application_year, None, connection_factory
+    )
     return {
         "general_citizen_rows": general_rows,
         "subsidized_citizen_rows": subsidized_rows,

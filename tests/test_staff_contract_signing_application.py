@@ -9,6 +9,10 @@ from pathlib import Path
 
 import pytest
 
+from infrastructure.archive.contract_documents import (
+    archive_contract_document,
+    discard_uncommitted_contract_document,
+)
 import subsystems.contract_signing.staff_contract_application as staff_signing
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 
@@ -36,7 +40,11 @@ class _Connection:
 def test_staff_signed_return_discards_new_archive_when_transaction_fails(tmp_path, monkeypatch):
     connection = _Connection()
     application = staff_signing.StaffContractSigningApplication(
-        lambda: connection, archive_root=tmp_path, now=lambda: datetime(2030, 1, 1)
+        lambda: connection,
+        archive_root=tmp_path,
+        now=lambda: datetime(2030, 1, 1),
+        archive_document=archive_contract_document,
+        discard_document=discard_uncommitted_contract_document,
     )
     monkeypatch.setattr(application, "_existing_signed_return_receipt", lambda _command: None)
     monkeypatch.setattr(staff_signing, "_staff_segment", lambda *_: {"plan_id": 3})

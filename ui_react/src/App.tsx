@@ -134,7 +134,7 @@ export const App: React.FC = () => {
         {currentPage === 'orders' && <OrdersPage />}
         {currentPage === 'scheduling' && <SchedulingPage />}
         {currentPage === 'staff' && <StaffPage />}
-        {currentPage === 'data-import' && <DataImportPage initialTab="nas-storage" />}
+        {currentPage === 'data-import' && <DataImportPage initialTab="workbook-import" />}
         {currentPage === 'reports' && <ReportsPage />}
 
         {/* LINE Hub Section */}

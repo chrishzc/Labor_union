@@ -6,6 +6,7 @@ Description: 驗證 Phase 3 scenario lineage、fixture、oracle、清單與 rece
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -258,8 +259,9 @@ def test_result_summaries_are_initial_and_do_not_fake_completion() -> None:
             assert "browser server-conflict 409 dom variant: not_run" in text
             assert "真totp：not_run" in text
         else:
-            assert "result: not_run" in text
-            assert not any(word in text for word in FORBIDDEN_RESULT_WORDS)
+            result = re.search(r"^result:\s*([^\s]+)\s*$", text, re.MULTILINE)
+            assert result is not None
+            assert result.group(1) == "not_run"
         assert "assertion count" not in text
 
 
@@ -363,10 +365,7 @@ def test_canonical_gate_report_separates_phase3_family_without_crashing() -> Non
         if error not in external_phase4_errors
     ]
     assert phase3_owned_errors == []
-    assert external_phase4_errors == {
-        "fixture validation/fixtures/phase4/react_admin_notification_rule_mutation.json has an unsupported namespace",
-        "fixture validation/fixtures/phase4/react_admin_rich_menu_publication.json has an unsupported namespace",
-    }
+    assert external_phase4_errors == set()
     assert report["fixtures"]["fixture_count"] == len(load_fixtures())
     assert report["phase3_lineage"]["scenario_count"] == 8
     assert report["phase3_lineage"]["fixture_count"] == 8

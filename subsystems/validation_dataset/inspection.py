@@ -5,13 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
-
-from infrastructure.mysql.order_contract_completion_repository import (
-    MySqlOrderContractCompletionRepository,
-)
-from shared_kernel.clock import SystemBusinessClock
-from subsystems.orders.contract_completion_workflow import ContractCompletionWorkflow
-
+from typing import Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATASET_CONTRACT = "labor-union-validation-dataset/v1"
@@ -57,7 +51,11 @@ def registered_dataset_ids() -> tuple[str, ...]:
     return tuple(sorted(_DATASET_PATHS))
 
 
-def inspect_dataset(connection, dataset_id: str = FOUNDATION_DATASET_ID) -> ValidationDatasetInspection:
+def inspect_dataset(
+    connection,
+    contract_completion_query: Callable[[str], object],
+    dataset_id: str = FOUNDATION_DATASET_ID,
+) -> ValidationDatasetInspection:
     dataset = _load_dataset(dataset_id)
     root = _required_object(dataset, "root_case")
     expected = _required_object(dataset, "expected_after_apply")
@@ -76,7 +74,7 @@ def inspect_dataset(connection, dataset_id: str = FOUNDATION_DATASET_ID) -> Vali
         connection,
         _required_object(expected, "beclass_review_open"),
     )
-    completion = _contract_completion_query(connection, case_no)
+    completion = contract_completion_query(case_no)
     blockers = tuple(blocker.value for blocker in completion.domain_blockers)
     checks += (_check("contract_completion_blockers", expected["contract_completion_blockers"], list(blockers)),)
     completed = bool(expected.get("contract_completion_completed", False))
@@ -286,15 +284,6 @@ def _beclass_review_open_checks(connection, expected) -> tuple[ValidationDataset
         for key in ("review_version", "workflow_status", "predicate_active", "beclass_record_count")
     }
     return (_check("beclass.review_open", expected_values, observed),)
-
-
-def _contract_completion_query(connection, case_no: str):
-    workflow = ContractCompletionWorkflow(MySqlOrderContractCompletionRepository(connection), _query_only_unit_of_work, SystemBusinessClock())
-    return workflow.query(case_no)
-
-
-def _query_only_unit_of_work():
-    raise RuntimeError("validation inspection query must not open a unit of work")
 
 
 def _check(check_id: str, expected: object, observed: object) -> ValidationDatasetCheck:

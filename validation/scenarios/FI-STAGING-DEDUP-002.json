@@ -40,11 +40,11 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_staging.py tests\\test_finance_import_orchestrator.py tests\\test_finance_transaction_classifier.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\finance-import\\subsystems\\finance-import\\integration\\test_finance_import_staging.py tests\\domains\\finance-import\\subsystems\\finance-import\\integration\\test_finance_import_orchestrator.py tests\\test_finance_transaction_classifier.py"
     ],
     "test_paths": [
-      "tests/test_finance_import_staging.py",
-      "tests/test_finance_import_orchestrator.py",
+      "tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_staging.py",
+      "tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_orchestrator.py",
       "tests/test_finance_transaction_classifier.py"
     ]
   }

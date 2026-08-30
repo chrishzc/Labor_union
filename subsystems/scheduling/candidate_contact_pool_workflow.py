@@ -6,14 +6,18 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
-from infrastructure.mysql.mysql_adapter import get_connection
 from shared_kernel.fingerprints import fingerprint_payload
+from subsystems.scheduling.ports import unconfigured_connection_factory
 from subsystems.line.delivery_task_workflow import enqueue_line_task
 from subsystems.scheduling.segmented_availability_query import (
     search_segmented_caregiver_availability,
 )
+
+
+get_connection = unconfigured_connection_factory
+segmented_facts_port: Any | None = None
 
 
 def _required_text(value: Any, field: str, maximum: int = 191) -> str:
@@ -173,11 +177,16 @@ def _close(resource: Any) -> None:
 
 
 def _require_full_coverage(case_no: str, staff_id: int, start_date: str, end_date: str) -> dict[str, Any]:
+    availability_kwargs = {
+        "case_no": case_no,
+        "segment_count": 1,
+        "segment_drafts": [{"staff_id": staff_id, "start_date": start_date, "end_date": end_date}],
+        "as_of": date.today().isoformat(),
+    }
+    if segmented_facts_port is not None:
+        availability_kwargs["facts_port"] = segmented_facts_port
     result = search_segmented_caregiver_availability(
-        case_no=case_no,
-        segment_count=1,
-        segment_drafts=[{"staff_id": staff_id, "start_date": start_date, "end_date": end_date}],
-        as_of=date.today().isoformat(),
+        **availability_kwargs,
     )
     candidate = next(
         (item for item in result.get("candidate_options", []) if item.get("staff_id") == staff_id),
@@ -210,6 +219,32 @@ def _event_payload(value: Any) -> dict[str, Any]:
     return dict(parsed)
 
 
+def _run_in_application_uow(operation: Callable[[Any, Any], dict[str, Any]]) -> dict[str, Any]:
+    """Own one candidate-pool mutation transaction at the Application boundary."""
+    connection = cursor = None
+    unit_of_work = None
+    try:
+        connection = get_connection()
+        unit_of_work = connection
+        cursor = connection.cursor()
+        result = operation(connection, cursor)
+        if result.get("result") != "existing" and result.get("status") != "idempotent_replay":
+            unit_of_work.commit()
+        else:
+            unit_of_work.rollback()
+        return result
+    except Exception:
+        if unit_of_work is not None:
+            try:
+                unit_of_work.rollback()
+            except BaseException:
+                pass
+        raise
+    finally:
+        _close(cursor)
+        _close(connection)
+
+
 def add_candidates(case_no: Any, candidates: Any, actor: Any, event_key: Any) -> dict[str, Any]:
     case_no = _required_text(case_no, "case_no", 50)
     actor = _required_text(actor, "actor", 100)
@@ -230,10 +265,22 @@ def add_candidates(case_no: Any, candidates: Any, actor: Any, event_key: Any) ->
         candidate = _require_full_coverage(case_no, staff_id, start_date, end_date)
         candidate["coverage_fingerprint"] = _coverage_fingerprint(case_no, candidate)
         validated.append(candidate)
-    connection = cursor = None
+    return _run_in_application_uow(
+        lambda connection, cursor: _add_candidates_in_transaction(
+            connection, cursor, case_no, validated, actor, event_key
+        )
+    )
+
+
+def _add_candidates_in_transaction(
+    connection: Any,
+    cursor: Any,
+    case_no: str,
+    validated: list[dict[str, Any]],
+    actor: str,
+    event_key: str,
+) -> dict[str, Any]:
     try:
-        connection = get_connection()
-        cursor = connection.cursor()
         cursor.execute("SELECT case_no FROM orders WHERE case_no=%s AND status='洽談中' FOR UPDATE", (case_no,))
         if not isinstance(cursor.fetchone(), Mapping):
             raise ValueError("candidate_contact_order_not_negotiating")
@@ -254,15 +301,9 @@ def add_candidates(case_no: Any, candidates: Any, actor: Any, event_key: Any) ->
             cursor.execute("INSERT INTO caregiver_candidate_contact_entries (pool_id, staff_id, service_start_date, service_end_date, coverage_fingerprint, active_marker) VALUES (%s,%s,%s,%s,%s,1)", (pool_id, candidate["staff_id"], candidate["case_period_start"], candidate["case_period_end"], candidate["coverage_fingerprint"]))
             created_ids.append(_positive_int(cursor.lastrowid, "candidate_id"))
         cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id, candidate_id, event_type, event_key, actor, payload) VALUES (%s,NULL,'candidates_added',%s,%s,%s)", (pool_id, event_key, actor, json.dumps({"candidate_ids": created_ids}, sort_keys=True)))
-        connection.commit()
         return {"pool_id": pool_id, "candidate_ids": created_ids, "status": "recorded"}
-    except Exception:
-        if connection is not None:
-            connection.rollback()
-        raise
     finally:
-        _close(cursor)
-        _close(connection)
+        pass
 
 
 def query_pool(
@@ -465,10 +506,37 @@ def apply_manual_information_confirmation(
         char not in "0123456789abcdef" for char in preview_fingerprint
     ):
         raise ValueError("preview_fingerprint_invalid")
-    connection = cursor = None
+    return _run_in_application_uow(
+        lambda connection, cursor: _apply_manual_information_confirmation_in_transaction(
+            connection,
+            cursor,
+            case_no,
+            candidate_id,
+            info_type,
+            confirmation_method,
+            reason,
+            actor,
+            expected_version,
+            preview_fingerprint,
+            event_key,
+        )
+    )
+
+
+def _apply_manual_information_confirmation_in_transaction(
+    connection: Any,
+    cursor: Any,
+    case_no: str,
+    candidate_id: int,
+    info_type: Any,
+    confirmation_method: Any,
+    reason: Any,
+    actor: str,
+    expected_version: int,
+    preview_fingerprint: str,
+    event_key: str,
+) -> dict[str, Any]:
     try:
-        connection = get_connection()
-        cursor = connection.cursor()
         cursor.execute(
             "SELECT status FROM orders WHERE case_no=%s FOR UPDATE", (case_no,)
         )
@@ -497,7 +565,6 @@ def apply_manual_information_confirmation(
                 and existing.actor == actor
                 and existing.payload_fingerprint == fingerprint_payload(payload).value
             ):
-                connection.rollback()
                 return {
                     "status": "idempotent_replay",
                     "event_id": existing.id,
@@ -536,7 +603,6 @@ def apply_manual_information_confirmation(
             ),
         )
         event_id = _positive_int(cursor.lastrowid, "event_id")
-        connection.commit()
         return {
             "status": "recorded",
             "event_id": event_id,
@@ -544,13 +610,8 @@ def apply_manual_information_confirmation(
             "delivery_status": "manually_confirmed",
             "confirmation_method": confirmation_method,
         }
-    except Exception:
-        if connection is not None:
-            connection.rollback()
-        raise
     finally:
-        _close(cursor)
-        _close(connection)
+        pass
 
 
 def send_information(case_no: Any, candidate_id: Any, info_type: Any, actor: Any, event_key: Any) -> dict[str, Any]:
@@ -560,9 +621,23 @@ def send_information(case_no: Any, candidate_id: Any, info_type: Any, actor: Any
     event_key = _required_text(event_key, "event_key", 100)
     if info_type not in {1, 2}:
         raise ValueError("info_type_invalid")
-    connection = cursor = None
+    return _run_in_application_uow(
+        lambda connection, cursor: _send_information_in_transaction(
+            connection, cursor, case_no, candidate_id, info_type, actor, event_key
+        )
+    )
+
+
+def _send_information_in_transaction(
+    connection: Any,
+    cursor: Any,
+    case_no: str,
+    candidate_id: int,
+    info_type: int,
+    actor: str,
+    event_key: str,
+) -> dict[str, Any]:
     try:
-        connection = get_connection(); cursor = connection.cursor()
         cursor.execute("SELECT p.id AS pool_id, e.staff_id, e.service_start_date, e.service_end_date, s.line_user_id FROM caregiver_candidate_contact_pools p JOIN caregiver_candidate_contact_entries e ON e.pool_id=p.id JOIN staff s ON s.id=e.staff_id WHERE p.case_no=%s AND e.id=%s AND e.active_marker=1 FOR UPDATE", (case_no, candidate_id))
         entry = cursor.fetchone()
         if not isinstance(entry, Mapping): raise ValueError("candidate_contact_not_found")
@@ -572,16 +647,13 @@ def send_information(case_no: Any, candidate_id: Any, info_type: Any, actor: Any
         cursor.execute("SELECT id FROM caregiver_candidate_contact_events WHERE event_key=%s FOR UPDATE", (event_key,))
         existing = cursor.fetchone()
         if isinstance(existing, Mapping):
-            connection.rollback(); return {"status": "idempotent_replay", "event_id": existing["id"]}
+            return {"status": "idempotent_replay", "event_id": existing["id"]}
         task_id = enqueue_line_task(cursor, to_user_id=recipient.strip(), message_content=f"訂單資訊-{info_type}\n服務期間：{entry['service_start_date']}～{entry['service_end_date']}", task_type="candidate_matching_willingness_card", payload={"case_no": case_no, "candidate_id": candidate_id, "info_type": info_type}, source_event_id=event_key, idempotency_key=event_key)
         cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,%s,%s,%s,%s)", (entry["pool_id"], candidate_id, f"info_{info_type}_sent", event_key, actor, json.dumps({"line_task_id": task_id, "delivery_status": "queued"}, sort_keys=True)))
-        event_id = _positive_int(cursor.lastrowid, "event_id"); connection.commit()
+        event_id = _positive_int(cursor.lastrowid, "event_id")
         return {"status": "queued", "event_id": event_id, "line_task_id": task_id}
-    except Exception:
-        if connection is not None: connection.rollback()
-        raise
     finally:
-        _close(cursor); _close(connection)
+        pass
 
 
 def record_willingness(case_no: Any, candidate_id: Any, willingness: Any, reason: Any, actor: Any, event_key: Any) -> dict[str, Any]:
@@ -589,22 +661,34 @@ def record_willingness(case_no: Any, candidate_id: Any, willingness: Any, reason
     actor = _required_text(actor, "actor", 100); event_key = _required_text(event_key, "event_key", 100)
     if willingness not in {"willing", "unwilling"}: raise ValueError("willingness_invalid")
     reason = _required_text(reason, "reason", 500) if willingness == "unwilling" else (str(reason or "").strip() or "人工補登願意")
-    connection = cursor = None
+    return _run_in_application_uow(
+        lambda connection, cursor: _record_willingness_in_transaction(
+            connection, cursor, case_no, candidate_id, willingness, reason, actor, event_key
+        )
+    )
+
+
+def _record_willingness_in_transaction(
+    connection: Any,
+    cursor: Any,
+    case_no: str,
+    candidate_id: int,
+    willingness: str,
+    reason: str,
+    actor: str,
+    event_key: str,
+) -> dict[str, Any]:
     try:
-        connection = get_connection(); cursor = connection.cursor()
         cursor.execute("SELECT p.id AS pool_id FROM caregiver_candidate_contact_pools p JOIN caregiver_candidate_contact_entries e ON e.pool_id=p.id WHERE p.case_no=%s AND e.id=%s AND e.active_marker=1 FOR UPDATE", (case_no, candidate_id))
         row = cursor.fetchone()
         if not isinstance(row, Mapping): raise ValueError("candidate_contact_not_found")
         cursor.execute("SELECT id FROM caregiver_candidate_contact_events WHERE event_key=%s FOR UPDATE", (event_key,))
         existing = cursor.fetchone()
-        if isinstance(existing, Mapping): connection.rollback(); return {"status":"idempotent_replay", "event_id":existing["id"]}
+        if isinstance(existing, Mapping): return {"status":"idempotent_replay", "event_id":existing["id"]}
         cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,'willingness_changed',%s,%s,%s)", (row["pool_id"], candidate_id, event_key, actor, json.dumps({"willingness": willingness, "reason": reason}, ensure_ascii=False, sort_keys=True)))
-        event_id = _positive_int(cursor.lastrowid, "event_id"); connection.commit(); return {"status":"recorded", "event_id":event_id}
-    except Exception:
-        if connection is not None: connection.rollback()
-        raise
+        event_id = _positive_int(cursor.lastrowid, "event_id"); return {"status":"recorded", "event_id":event_id}
     finally:
-        _close(cursor); _close(connection)
+        pass
 
 
 def _candidate_projection(events: list[dict[str, Any]]):

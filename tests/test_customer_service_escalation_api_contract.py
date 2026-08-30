@@ -12,9 +12,13 @@ from api.dependencies.admin_auth import require_customer_service_handler, requir
 from api.routes import customer_service
 from api.schemas.customer_service import (
     HumanEscalationClaimRequest,
+    HumanEscalationClaimApplyRequest,
     HumanEscalationCreateRequest,
+    HumanEscalationCreateApplyRequest,
     HumanEscalationHandlingRequest,
+    HumanEscalationHandlingApplyRequest,
     HumanEscalationResolveRequest,
+    HumanEscalationResolveApplyRequest,
 )
 from domains.customer_service.escalation import (
     AlertStatus,
@@ -34,8 +38,13 @@ def test_escalation_openapi_contract_is_mounted_and_typed() -> None:
     expected = {
         "/api/v1/customer-service/escalations": (
             "post",
-            "HumanEscalationCreateRequest",
+            "HumanEscalationCreateApplyRequest",
             "BaseResponse_HumanEscalationReceiptResponse_",
+        ),
+        "/api/v1/customer-service/escalations/preview": (
+            "post",
+            "HumanEscalationCreateRequest",
+            "BaseResponse_HumanEscalationPreviewResponse_",
         ),
         "/api/v1/customer-service/escalations/{escalation_id}": (
             "get",
@@ -44,18 +53,33 @@ def test_escalation_openapi_contract_is_mounted_and_typed() -> None:
         ),
         "/api/v1/customer-service/escalations/{escalation_id}/claim": (
             "post",
-            "HumanEscalationClaimRequest",
+            "HumanEscalationClaimApplyRequest",
             "BaseResponse_HumanEscalationReceiptResponse_",
+        ),
+        "/api/v1/customer-service/escalations/{escalation_id}/claim/preview": (
+            "post",
+            "HumanEscalationClaimRequest",
+            "BaseResponse_HumanEscalationPreviewResponse_",
         ),
         "/api/v1/customer-service/escalations/{escalation_id}/handling": (
             "post",
-            "HumanEscalationHandlingRequest",
+            "HumanEscalationHandlingApplyRequest",
             "BaseResponse_HumanEscalationReceiptResponse_",
+        ),
+        "/api/v1/customer-service/escalations/{escalation_id}/handling/preview": (
+            "post",
+            "HumanEscalationHandlingRequest",
+            "BaseResponse_HumanEscalationPreviewResponse_",
         ),
         "/api/v1/customer-service/escalations/{escalation_id}/resolve": (
             "post",
-            "HumanEscalationResolveRequest",
+            "HumanEscalationResolveApplyRequest",
             "BaseResponse_HumanEscalationReceiptResponse_",
+        ),
+        "/api/v1/customer-service/escalations/{escalation_id}/resolve/preview": (
+            "post",
+            "HumanEscalationResolveRequest",
+            "BaseResponse_HumanEscalationPreviewResponse_",
         ),
     }
     operation_ids = []
@@ -83,8 +107,12 @@ def test_escalation_routes_require_role_specific_dependencies() -> None:
         ("POST", "/api/v1/customer-service/escalations"): require_customer_service_handler,
         ("GET", "/api/v1/customer-service/escalations/{escalation_id}"): require_customer_service_reader,
         ("POST", "/api/v1/customer-service/escalations/{escalation_id}/claim"): require_customer_service_handler,
+        ("POST", "/api/v1/customer-service/escalations/preview"): require_customer_service_handler,
+        ("POST", "/api/v1/customer-service/escalations/{escalation_id}/claim/preview"): require_customer_service_handler,
         ("POST", "/api/v1/customer-service/escalations/{escalation_id}/handling"): require_customer_service_handler,
+        ("POST", "/api/v1/customer-service/escalations/{escalation_id}/handling/preview"): require_customer_service_handler,
         ("POST", "/api/v1/customer-service/escalations/{escalation_id}/resolve"): require_customer_service_handler,
+        ("POST", "/api/v1/customer-service/escalations/{escalation_id}/resolve/preview"): require_customer_service_handler,
     }
 
     for (method, path), dependency in expected.items():
@@ -150,7 +178,7 @@ def test_escalation_commands_are_closed_and_require_identity() -> None:
     )
     assert create.masked_context["summary_code"] == "complaint_explicit"
     with pytest.raises(ValueError):
-        HumanEscalationCreateRequest(
+        HumanEscalationCreateApplyRequest(
             source_event_identity="line-event:m4",
             source_kind="line_inbox",
             source_fingerprint="a" * 64,
@@ -161,6 +189,7 @@ def test_escalation_commands_are_closed_and_require_identity() -> None:
             hold_scope="line:conversation:m4",
             idempotency_key="m4-create-2",
             correlation_id="m4-correlation-2",
+            preview_fingerprint="b" * 64,
         )
 
 
@@ -189,10 +218,11 @@ def test_escalation_route_uses_typed_receipt_projection(monkeypatch) -> None:
     monkeypatch.setattr(customer_service, "_escalation_application", lambda: FakeApplication())
     response = customer_service.claim_escalation(
         11,
-        HumanEscalationClaimRequest(
+        HumanEscalationClaimApplyRequest(
             expected_escalation_version=0,
             idempotency_key="m4-claim-1",
             correlation_id="m4-correlation-1",
+            preview_fingerprint="b" * 64,
         ),
         _principal(),
     )

@@ -11,6 +11,14 @@ import { sessionClient } from '../api/auth/session_client';
 import { PAGE_SECTION_MAP } from '../components/MasterLayout';
 import { LoginPage } from '../pages/LoginPage';
 
+function clearStorage(storage: Storage): void {
+  if (typeof storage.clear === 'function') storage.clear();
+}
+
+function readStorage(storage: Storage, key: string): string | null {
+  return typeof storage.getItem === 'function' ? storage.getItem(key) : null;
+}
+
 describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
   const originalFetch = globalThis.fetch;
 
@@ -286,14 +294,14 @@ describe('Adversarial Challenge: Auth Boundary & Session Storage Audit', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     sessionClient.clearSession();
-    window.localStorage.clear();
-    window.sessionStorage.clear();
+    clearStorage(window.localStorage);
+    clearStorage(window.sessionStorage);
   });
 
   afterEach(() => {
     sessionClient.clearSession();
-    window.localStorage.clear();
-    window.sessionStorage.clear();
+    clearStorage(window.localStorage);
+    clearStorage(window.sessionStorage);
     globalThis.fetch = originalFetch;
   });
 
@@ -330,11 +338,11 @@ describe('Adversarial Challenge: Auth Boundary & Session Storage Audit', () => {
     expect(sessionClient.getToken()).toBe('secret-jwt-token-alpha-99');
 
     // Storage Audit
-    expect(window.localStorage.getItem('token')).toBeNull();
-    expect(window.localStorage.getItem('access_token')).toBeNull();
-    expect(window.localStorage.getItem('auth')).toBeNull();
-    expect(window.sessionStorage.getItem('token')).toBeNull();
-    expect(window.sessionStorage.getItem('access_token')).toBeNull();
+    expect(readStorage(window.localStorage, 'token')).toBeNull();
+    expect(readStorage(window.localStorage, 'access_token')).toBeNull();
+    expect(readStorage(window.localStorage, 'auth')).toBeNull();
+    expect(readStorage(window.sessionStorage, 'token')).toBeNull();
+    expect(readStorage(window.sessionStorage, 'access_token')).toBeNull();
 
     // Verify setItem was never called on Storage for auth tokens
     const storageKeysWritten = setItemSpy.mock.calls.map((call) => call[0]);

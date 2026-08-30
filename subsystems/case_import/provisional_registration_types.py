@@ -15,6 +15,10 @@ class ProvisionalRegistrationConflictError(RuntimeError):
     """The LINE identity already owns a different active registration."""
 
 
+class ProvisionalRegistrationStorageError(RuntimeError):
+    """Storage or transaction failure at the provisional-registration boundary."""
+
+
 @dataclass(frozen=True, slots=True)
 class ProvisionalRegistrationConflict:
     registration_id: int
@@ -42,6 +46,7 @@ class ProvisionalRegistrationReceipt:
 __all__ = [
     "ProvisionalRegistrationConflict",
     "ProvisionalRegistrationConflictError",
+    "ProvisionalRegistrationStorageError",
     "ProvisionalRegistrationPreview",
     "ProvisionalRegistrationReceipt",
 ]

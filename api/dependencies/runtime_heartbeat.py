@@ -1,45 +1,24 @@
-"""Persist authenticated caller runtime identity from API-owned operations."""
+"""Compose the typed runtime heartbeat application for API callers."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from api.schemas.private_operations import WorkerRuntimeIdentity
-from infrastructure.mysql.mysql_adapter import get_connection
-from infrastructure.mysql.runtime_monitor_repository import MySqlRuntimeMonitorRepository
+from functools import lru_cache
+from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
+
+from subsystems.line.runtime_alert_application import RuntimeHeartbeatApplication
 
 
-def record_runtime_heartbeat(identity: WorkerRuntimeIdentity, processed: int) -> None:
-    connection = get_connection()
-    try:
-        connection.begin()
-        write_runtime_heartbeat(connection, identity, processed)
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
-
-
-def write_runtime_heartbeat(connection, identity: WorkerRuntimeIdentity, processed: int) -> None:
-    MySqlRuntimeMonitorRepository(connection).record_heartbeat(
-        identity.service_name,
-        identity.instance_id,
-        identity.process_id,
-        identity.hostname,
-        "running",
-        _heartbeat_details(identity, processed),
-        datetime.now(timezone.utc),
+@lru_cache(maxsize=1)
+def get_runtime_heartbeat_application() -> RuntimeHeartbeatApplication:
+    return RuntimeHeartbeatApplication(
+        open_line_unit_of_work,
+        lambda unit_of_work: unit_of_work.runtime_monitor,
     )
 
 
-def _heartbeat_details(identity: WorkerRuntimeIdentity, processed: int) -> dict[str, object]:
-    return {
-        "processed_last_cycle": processed,
-        "release_version": identity.release_version,
-        "caller_started_at": identity.started_at.isoformat(),
-    }
+def record_runtime_heartbeat(identity: WorkerRuntimeIdentity, processed: int) -> None:
+    get_runtime_heartbeat_application().record(identity, processed)
 
 
-__all__ = ["record_runtime_heartbeat", "write_runtime_heartbeat"]
+__all__ = ["get_runtime_heartbeat_application", "record_runtime_heartbeat"]

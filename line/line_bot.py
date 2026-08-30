@@ -37,13 +37,15 @@ from subsystems.line.liff_identity_verification import (
     liff_token_required,
     resolve_line_user_id,
 )
-from domains.case_import.provisional_registration import ProvisionalRegistrationIntent
+from domains.case_import.provisional_registration import (
+    ProvisionalRegistrationDomainError,
+    ProvisionalRegistrationIntent,
+)
 from subsystems.case_import.provisional_registration_application import (
     ProvisionalRegistrationConflictError,
-    ProvisionalRegistrationDomainError,
-    ProvisionalRegistrationStorageError,
-    build_provisional_registration_application,
 )
+from subsystems.case_import.provisional_registration_types import ProvisionalRegistrationStorageError
+from api.dependencies.provisional_registration import build_provisional_registration_application
 from subsystems.line.user_lifecycle import (
     activate_follow,
     block_unfollow,

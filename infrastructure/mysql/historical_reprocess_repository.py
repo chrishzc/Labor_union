@@ -17,7 +17,7 @@ from infrastructure.mysql.finance_import_repository import (
     _mysql_cursor,
     _row_database_id,
 )
-from scripts.imports.finance_normalized_row import validate_normalized_row
+from domains.finance_import.normalized_row import validate_normalized_row
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
 from subsystems.finance_import.historical_reprocess_workflow import (

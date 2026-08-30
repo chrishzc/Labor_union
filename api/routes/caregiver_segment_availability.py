@@ -19,6 +19,10 @@ from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.scheduling.segmented_availability_query import (
     search_segmented_caregiver_availability,
 )
+from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.segmented_availability_repository import (
+    MySqlSegmentedAvailabilityFactsRepository,
+)
 
 
 router = APIRouter(
@@ -277,6 +281,7 @@ def check_single_caregiver_eligibility(
                 }
             ],
             as_of=request.as_of,
+            facts_port=MySqlSegmentedAvailabilityFactsRepository(get_connection),
         )
         return _response_from_service(
             result,
@@ -313,6 +318,7 @@ def search_caregiver_segment_availability(
             segment_count=request.segment_count,
             segment_drafts=[draft.model_dump(mode="json", exclude_none=True) for draft in request.segment_drafts],
             as_of=request.as_of,
+            facts_port=MySqlSegmentedAvailabilityFactsRepository(get_connection),
             filter_policy=request.filters.model_dump(),
         )
         return _response_from_service(

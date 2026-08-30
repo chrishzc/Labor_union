@@ -714,6 +714,30 @@ Typed operations：
   case 的明確關聯，採納通過驗證的 HCM-owned fields；link 只有唯一可證明時建立
 - owner review referral descriptor → 只回傳 owner command identifier、expected review version 與去敏 context
 
+#### HCM resubmission owner-command amendment（2026-08-30 人工裁決）
+
+- Client 必須有 versioned root，HCM 修正只能透過 dedicated typed
+  `ClientHcmCorrectionCommand`；不建立 generic profile／root editor，不允許 Case Import adapter
+  直接寫 `clients`。
+- `服務方式` 是 Client root fact，canonical persistence 為 `clients.service_type`；Orders 不新增
+  `service_type`。`end_date` 仍由 Orders terms／lifecycle 依其正式 root facts 衍生，Client correction
+  不得直接寫入或重算它。
+- canonical HCM review identity／version 完整取代 legacy warning occurrence／current-task identity；
+  legacy association 只供 provenance read，不得成為新 Apply 的 mutation root。
+- Preview 零寫入，`preview_fingerprint` 必須覆蓋 source、canonical review、Client、Orders
+  與必要 downstream owner versions。Apply 依 canonical ordering fresh-lock 並重建 fingerprint，
+  先查 replay，再透過 typed Client／Orders ports 執行 mutation。
+- Orders 只能呼叫 `OrderTermsWorkflow.apply_in_current_uow`或等價正式 typed command；
+  Client／Orders infrastructure adapters 只借用 caller connection，不得 commit、rollback 或建立
+  nested Unit of Work。Case Import 是唯一 outer UoW，在同一 commit 寫入 accepted
+  correction、Case Import receipt／event／outbox 與兩個 owner mutation。
+- commit 後必須 fresh-read Client 與 Orders authoritative facts。任一步驟失敗整體 rollback；
+  replay 不重複 mutation；stale owner version 零寫入；readback mismatch 回 typed
+  reconciliation blocker，不得回報成功或盲目重試。
+- Client version／event／receipt persistence 必須以 additive schema release 建立。本裁決只授權
+  本機 schema／code／test package，不授權 production／`union_db`、backfill、deployment
+  或刪除 legacy evidence。
+
 Ports：`CaseImportSourceArchive`、`CaseImportRepository`、`CaseIdentityQuery`、
 `CaseBootstrapGateway`、`CaseImportOutbox`、`CaseImportClock` 與
 `CaseImportUnitOfWork`。Apply 鎖定 source row、mapping 與 candidate version，

@@ -12,15 +12,13 @@ def test_historical_matrix_marks_target_host_acceptance_as_retired() -> None:
     ).read_text(encoding="utf-8")
 
     assert "target-host acceptance 已依決策 53 退役" in source
-    assert "target-host acceptance 已依決策 53 退役" in source
+    assert "retired-by-user-2026-08-09" in source
 
 
-def test_historical_matrix_receipt_does_not_keep_target_host_external_gate() -> None:
-    receipt = (
-        ROOT
-        / "document/架構重整/03_追蹤清單與證據/evidence"
-        / "2026-08-09_architecture_review_matrix_revalidation_receipt.md"
+def test_historical_matrix_receipt_is_recoverable_from_the_archive_entry() -> None:
+    archive = (
+        ROOT / "document/架構重整/04_已完成與上線封存/README.md"
     ).read_text(encoding="utf-8")
 
-    assert "target-host deployment、TLS／\n  HTTP2／latency、worker recovery 等 external" not in receipt
-    assert "target-host deployment、\n  TLS／HTTP2／latency acceptance 已退役" in receipt
+    assert "5c43e847e016fb8d64ada4ac63fe2bee4b4a7a65" in archive
+    assert "精準取回單一檔案" in archive

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
-
 from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,7 +24,7 @@ class AssignmentScheduleDayAdjustment(BaseModel):
 @router.post("/{assignment_id}/generate")
 def generate_assignment_schedule(
     assignment_id: int = Path(..., ge=1),
-) -> Any:
+) -> None:
     del assignment_id
     _raise_retired()
 
@@ -36,7 +34,7 @@ def adjust_assignment_schedule(
     adjustment: AssignmentScheduleDayAdjustment,
     assignment_id: int = Path(..., ge=1),
     work_date: date = Path(...),
-) -> Any:
+) -> None:
     del adjustment, assignment_id, work_date
     _raise_retired()
 

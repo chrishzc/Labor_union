@@ -1,0 +1,43 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "AC-REACT-ADMIN-ACCOUNT-CENTER",
+  "revision": 1,
+  "assertions": [
+    "Each account command returns a closed typed receipt.",
+    "Same-key replay returns the original outcome without repeating a mutation.",
+    "A stale expected version performs zero writes."
+  ],
+  "db_oracle": {
+    "applicability": "required",
+    "required": ["single outer transaction", "rollback on failure", "fresh version readback"]
+  },
+  "api_oracle": {
+    "applicability": "required",
+    "required": ["typed receipt", "identity match", "version match"]
+  },
+  "ui_oracle": {
+    "applicability": "required",
+    "required": ["root-only controls", "typed failure display", "no raw credential display"]
+  },
+  "replay_oracle": {
+    "applicability": "required",
+    "required": ["same key and fingerprint returns the stored receipt"]
+  },
+  "recovery_oracle": {
+    "applicability": "required",
+    "required": ["unknown outcome preserves idempotency identity", "stale conflict is fail-closed"]
+  },
+  "execution_limits": {
+    "provider": "not_run",
+    "browser": "not_run",
+    "database": "allowlisted lu_test_* only",
+    "production": "not_run"
+  },
+  "forbidden_observations": [
+    "raw password",
+    "TOTP seed",
+    "recovery code",
+    "raw session token",
+    "production account identifier"
+  ]
+}

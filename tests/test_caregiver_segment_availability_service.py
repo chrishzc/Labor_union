@@ -3,10 +3,13 @@ File: test_caregiver_segment_availability_service.py
 Description: 驗證月嫂分段可用性查詢的唯讀、邊界、來源與資源釋放契約。
 """
 
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import pytest
 
+from infrastructure.mysql.segmented_availability_repository import (
+    MySqlSegmentedAvailabilityFactsRepository,
+)
 from subsystems.scheduling import segmented_availability_query as service
 
 
@@ -27,6 +30,10 @@ class QueryAwareCursor:
             self.current = None if current is None else dict(current)
             if self.current is not None:
                 self.current.setdefault("requires_cooking", False)
+            return
+
+        if "FROM confirmed_service_date_versions" in statement:
+            self.current = self.fixture.get("confirmed_service_dates", [])
             return
 
         if "FROM staff s" in statement or "FROM staff WHERE" in statement:
@@ -91,7 +98,26 @@ class QueryAwareConnection:
 
 
 def _make_connection(**fixture):
+    order = fixture.get("order")
+    if (
+        "confirmed_service_dates" not in fixture
+        and isinstance(order, dict)
+        and order.get("status") == "洽談中"
+    ):
+        start = order["start_date"]
+        end = order["end_date"]
+        start = start if isinstance(start, date) else datetime.strptime(start, "%Y-%m-%d").date()
+        end = end if isinstance(end, date) else datetime.strptime(end, "%Y-%m-%d").date()
+        fixture["confirmed_service_dates"] = [
+            {"service_date": start + timedelta(days=offset)}
+            for offset in range((end - start).days + 1)
+        ]
     return QueryAwareConnection(fixture)
+
+
+def _facts_port(connection: QueryAwareConnection):
+    """Compose the typed facts port around this test's disposable connection."""
+    return MySqlSegmentedAvailabilityFactsRepository(lambda: connection)
 
 
 def _assert_readonly_no_tx(connection: QueryAwareConnection):
@@ -127,12 +153,30 @@ def test_search_segmented_case_not_in_negotiation_is_rejected(monkeypatch):
     monkeypatch.setattr(service, "get_connection", lambda: connection)
 
     with pytest.raises(ValueError, match="case is not in negotiation stage"):
-        service.search_segmented_caregiver_availability("115000001", 2, [], "2026-07-10")
+        service.search_segmented_caregiver_availability(
+            "115000001", 2, [], "2026-07-10", facts_port=_facts_port(connection)
+        )
 
     assert connection.closed
     assert connection.closed_count == 1
     assert connection.cursor_obj.closed_count == 1
     assert len(connection.cursor_obj.executed) == 1
+
+
+def test_search_segmented_requires_official_service_date_facts(monkeypatch):
+    connection = _make_connection(
+        order={"case_no": "115000001", "status": "洽談中", "start_date": "2026-07-01", "end_date": "2026-07-03"},
+        confirmed_service_dates=[],
+        staff_rows=[{"id": 1}],
+    )
+    monkeypatch.setattr(service, "get_connection", lambda: connection)
+
+    with pytest.raises(ValueError, match="official_service_dates_incomplete"):
+        service.search_segmented_caregiver_availability(
+            "115000001", 2, [], "2026-06-01", facts_port=_facts_port(connection)
+        )
+
+    _assert_readonly_no_tx(connection)
 
 
 def test_search_segmented_uses_one_connection_and_no_tx_and_not_update_planning_window(monkeypatch):
@@ -161,7 +205,10 @@ def test_search_segmented_uses_one_connection_and_no_tx_and_not_update_planning_
         },
     )
 
-    result = service.search_segmented_caregiver_availability("115000001", 2, [], "2026-06-01")
+    result = service.search_segmented_caregiver_availability(
+        "115000001", 2, [], "2026-06-01",
+        facts_port=MySqlSegmentedAvailabilityFactsRepository(get_connection),
+    )
 
     assert len(connections) == 1
     assert result["planned_start_date"] == "2026-07-01"
@@ -198,6 +245,7 @@ def test_search_segmented_filters_candidates_to_active_staff_only(monkeypatch):
         2,
         [],
         "2026-07-10",
+        facts_port=_facts_port(connection),
         filter_policy={
             "region": False,
             "preferred_service_days": False,
@@ -235,7 +283,9 @@ def test_search_segmented_ignores_as_of_for_order_boundary(monkeypatch):
     monkeypatch.setattr(service, "get_connection", lambda: connection)
     monkeypatch.setattr(service, "derive_segment_availability", fake_derive_segment_availability)
 
-    service.search_segmented_caregiver_availability("115000001", 2, [], "2026-01-01")
+    service.search_segmented_caregiver_availability(
+        "115000001", 2, [], "2026-01-01", facts_port=_facts_port(connection)
+    )
 
     assert captured["input"]["planned_start_date"] == "2026-07-01"
     assert captured["input"]["planned_end_date"] == "2026-07-02"
@@ -273,7 +323,9 @@ def test_search_segmented_blocks_assignment_reason_and_schedule_reason(monkeypat
     monkeypatch.setattr(service, "get_connection", lambda: connection)
     monkeypatch.setattr(service, "derive_segment_availability", fake_derive_segment_availability)
 
-    service.search_segmented_caregiver_availability("115000001", 2, [], "2026-07-10")
+    service.search_segmented_caregiver_availability(
+        "115000001", 2, [], "2026-07-10", facts_port=_facts_port(connection)
+    )
 
     items = {(item["staff_id"], item["work_date"], item["reason_code"]) for item in captured["assignment_schedule_days"]}
     assert (1, "2026-07-01", "assignment") in items
@@ -311,7 +363,9 @@ def test_search_segmented_passes_active_lock_rows_to_helper(monkeypatch):
     monkeypatch.setattr(service, "get_connection", lambda: connection)
     monkeypatch.setattr(service, "derive_segment_availability", fake_derive_segment_availability)
 
-    service.search_segmented_caregiver_availability("115000001", 2, [], "2026-07-10")
+    service.search_segmented_caregiver_availability(
+        "115000001", 2, [], "2026-07-10", facts_port=_facts_port(connection)
+    )
 
     rows = captured["active_lock_days"]
     assert len(rows) == 3
@@ -348,7 +402,9 @@ def test_search_segmented_normalizes_schedule_lock_dates_for_helper(monkeypatch)
     monkeypatch.setattr(service, "get_connection", lambda: connection)
     monkeypatch.setattr(service, "derive_segment_availability", fake_derive_segment_availability)
 
-    service.search_segmented_caregiver_availability("115000001", 2, [], "2026-07-10")
+    service.search_segmented_caregiver_availability(
+        "115000001", 2, [], "2026-07-10", facts_port=_facts_port(connection)
+    )
 
     assignment_schedule_rows = captured["assignment_schedule_days"]
     lock_rows = captured["active_lock_days"]
@@ -366,7 +422,9 @@ def test_search_segmented_readonly_invariants_and_sql_safety(monkeypatch):
     )
     monkeypatch.setattr(service, "get_connection", lambda: connection)
 
-    service.search_segmented_caregiver_availability("115000001", 2, [], "2026-07-10")
+    service.search_segmented_caregiver_availability(
+        "115000001", 2, [], "2026-07-10", facts_port=_facts_port(connection)
+    )
 
     _assert_readonly_no_tx(connection)
     first_stmt = connection.cursor_obj.executed[0][0]
@@ -383,7 +441,9 @@ def test_search_segmented_rejects_invalid_active_marker_via_helper(monkeypatch):
     monkeypatch.setattr(service, "get_connection", lambda: connection)
 
     with pytest.raises(ValueError, match="active_marker"):
-        service.search_segmented_caregiver_availability("115000001", 2, [], "2026-07-10")
+        service.search_segmented_caregiver_availability(
+            "115000001", 2, [], "2026-07-10", facts_port=_facts_port(connection)
+        )
     _assert_readonly_no_tx(connection)
 
 
@@ -399,7 +459,9 @@ def test_search_segmented_closes_cursor_and_connection_on_helper_exception(monke
     monkeypatch.setattr(service, "derive_segment_availability", raising_derive_segment_availability)
 
     with pytest.raises(ValueError, match="helper failed"):
-        service.search_segmented_caregiver_availability("115000001", 2, [], "2026-07-10")
+        service.search_segmented_caregiver_availability(
+            "115000001", 2, [], "2026-07-10", facts_port=_facts_port(connection)
+        )
 
     assert connection.closed_count == 1
     assert connection.cursor_obj.closed_count == 1
@@ -418,7 +480,9 @@ def test_search_segmented_closes_cursor_and_connection_on_sql_exception(monkeypa
     monkeypatch.setattr(service, "get_connection", lambda: connection)
 
     with pytest.raises(RuntimeError, match="database failed"):
-        service.search_segmented_caregiver_availability("115000001", 2, [], "2026-07-10")
+        service.search_segmented_caregiver_availability(
+            "115000001", 2, [], "2026-07-10", facts_port=_facts_port(connection)
+        )
 
     assert connection.closed_count == 1
     assert connection.closed

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -16,11 +17,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
 from shared_kernel.identities import ActorContext, IdempotencyKey
-from subsystems.anomalies.finance_import_anomaly_consumer import (
+from subsystems.finance_import.finance_import_anomaly_consumer import (
     consume_finance_import_anomaly_events,
 )
 from subsystems.finance_import.ingestion import ingest_finance_workbook
+from scripts.imports.finance_statement_normalizer import normalize_workbook
 
 
 _DATABASE_PATTERN = re.compile(r"lu_test_dataset_[a-z0-9_]+")
@@ -61,6 +64,8 @@ def _require_dataset_database() -> None:
 
     if not _DATABASE_PATTERN.fullmatch(str(DB_CONFIG["database"])):
         raise ValueError("DB_DATABASE must match lu_test_dataset_[a-z0-9_]+")
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        raise ValueError("validation dataset seed requires a development validation profile")
 
 
 def _write_unresolved_workbook(
@@ -82,8 +87,14 @@ def _write_unresolved_workbook(
 def _ingest_with_replay(workbook: Path, scenario_id: str):
     actor = ActorContext("validation-dataset-seed")
     key = IdempotencyKey(_ingestion_key(scenario_id))
-    receipt = ingest_finance_workbook(str(workbook), key, actor)
-    if ingest_finance_workbook(str(workbook), key, actor) != receipt:
+    receipt = ingest_finance_workbook(
+        str(workbook), key, actor, connection_factory=get_connection,
+        normalizer=normalize_workbook,
+    )
+    if ingest_finance_workbook(
+        str(workbook), key, actor, connection_factory=get_connection,
+        normalizer=normalize_workbook,
+    ) != receipt:
         raise RuntimeError("finance import replay returned a different receipt")
     return receipt
 
@@ -91,7 +102,9 @@ def _ingest_with_replay(workbook: Path, scenario_id: str):
 def _deliver_anomaly_projection():
     connection = get_connection()
     try:
-        result = consume_finance_import_anomaly_events(connection)
+        result = consume_finance_import_anomaly_events(
+            connection, runtime=build_anomaly_runtime()
+        )
     finally:
         connection.close()
     if result.failed_count:

@@ -18,6 +18,7 @@ from api.schemas.admin_audit import (
     AdminAuditMaskedPageView,
 )
 from api.schemas.base import BaseResponse
+from infrastructure.mysql.mysql_adapter import get_connection
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.access.security_audit_query import (
     AuditListItem,
@@ -52,6 +53,7 @@ def list_audits(
             actor_query=actor_query,
             created_from=created_from,
             created_to=created_to,
+            connection_factory=get_connection,
         )
     except AuditQueryStorageError as error:
         raise _audit_unavailable() from error
@@ -74,7 +76,7 @@ def audit_detail(
     _: AdminPrincipal = Depends(require_admin),
 ):
     try:
-        detail = get_admin_audit_detail(audit_id)
+        detail = get_admin_audit_detail(audit_id, connection_factory=get_connection)
     except AuditQueryStorageError as error:
         raise _audit_unavailable() from error
     if detail is None:

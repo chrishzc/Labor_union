@@ -6,6 +6,7 @@ Description: 編排逐列 Historical Order Preview／Apply、replay、配對 evi
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 from typing import Callable, Protocol
 
@@ -84,7 +85,22 @@ class HistoricalOrderAdoptionRepository(Protocol):
     def resolve_staff(self, name: str, *, for_update: bool) -> tuple[int, ...]: ...
     def active_assignments(self, case_no: str, *, for_update: bool) -> tuple[dict[str, object], ...]: ...
     def find_receipt(self, key: str, source_identity: str) -> dict[str, object] | None: ...
-    def persist(self, request: HistoricalOrderAdoptionRequest, preview: HistoricalOrderAdoptionPreview) -> HistoricalOrderAdoptionReceipt: ...
+    def persist(
+        self,
+        request: HistoricalOrderAdoptionRequest,
+        preview: HistoricalOrderAdoptionPreview,
+        assignment_ids: tuple[int, ...],
+    ) -> HistoricalOrderAdoptionReceipt: ...
+
+
+class SchedulingHistoricalAssignmentPort(Protocol):
+    """Append purpose-specific historical assignments in the caller's UoW."""
+
+    def append_completed_assignments(
+        self,
+        case_no: str,
+        assignments: tuple[tuple[int, date, date], ...],
+    ) -> tuple[int, ...]: ...
 
 
 class HistoricalOrderAdoptionWorkflow:
@@ -92,9 +108,11 @@ class HistoricalOrderAdoptionWorkflow:
         self,
         repository: HistoricalOrderAdoptionRepository,
         unit_of_work_factory: Callable[[], UnitOfWork],
+        scheduling_historical_assignment: SchedulingHistoricalAssignmentPort,
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
+        self._scheduling_historical_assignment = scheduling_historical_assignment
 
     def preview(self, row: HistoricalOrderWorkbookRow) -> HistoricalOrderAdoptionPreview:
         return self._build_preview(row, for_update=False)
@@ -124,7 +142,15 @@ class HistoricalOrderAdoptionWorkflow:
             raise RuntimeError("historical_order_candidate_stale")
         if preview.outcome is HistoricalOrderOutcome.UNMATCHED_CASE:
             return _unmatched_receipt(preview)
-        return self._repository.persist(request, preview)
+        assignment_ids = self._scheduling_historical_assignment.append_completed_assignments(
+            preview.case_no,
+            tuple(
+                (item.staff_id, item.start_date, item.end_date)
+                for item in preview.pairings
+                if item.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+            ),
+        )
+        return self._repository.persist(request, preview, assignment_ids)
 
     def _replay(self, request, command_fingerprint):
         stored = self._repository.find_receipt(
@@ -306,4 +332,5 @@ __all__ = [
     "HistoricalOrderAdoptionWorkflow",
     "HistoricalPairingCandidate",
     "HistoricalPairingResolution",
+    "SchedulingHistoricalAssignmentPort",
 ]

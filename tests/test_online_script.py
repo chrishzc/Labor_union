@@ -41,31 +41,37 @@ def test_online_script_resolves_its_own_working_directory_and_venv():
 def test_online_script_waits_for_database_before_launching_services():
     script = _script()
 
-    docker_start = script.index("docker-compose up -d")
+    docker_start = script.index("docker-compose up -d redis")
     wait_for_db = script.index('"%PY%" scripts/wait_for_db.py')
-    fastapi_start = script.index('"%PY%" -m uvicorn api.main:app')
+    schema_check = script.index('"%PY%" -m scripts.update_local_database --require-current')
+    supervisor_start = script.index(
+        'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0supervise_local_runtime.ps1"'
+    )
 
-    assert docker_start < wait_for_db < fastapi_start
+    assert docker_start < wait_for_db < schema_check < supervisor_start
     assert "Database connection timeout!" in script
-    assert "exit /b %errorlevel%" in script
+    assert "Local database schema is not current." in script
 
 
 def test_online_script_is_development_only_and_uses_non_destructive_entrypoints():
     script = _script()
 
-    assert '"%PY%" -m uvicorn api.main:app --host 0.0.0.0 --port 8000' in script
-    assert 'start "React Admin UI" /D "%CD%\\ui_react" cmd /k "npm.cmd run dev -- --host 0.0.0.0 --port 5173 --strictPort"' in script
+    assert "Starting owned Windows runtime supervision" in script
+    assert "-ApiPort 8000 -ReactPort 5173" in script
+    assert "supervise_local_runtime.ps1" in script
+    assert 'start "React Admin UI" /D' not in script
     assert "streamlit run" not in script
     assert "Local Development Startup Script" in script
     assert '"%PY%" -m scripts.validate_line_production_readiness' not in script
     assert "ONLINE_SKIP_PRODUCTION_READINESS" not in script
     assert "production_not_supported" not in script
     assert "ONLINE_APP_ENV" not in script
-    assert '"%PY%" -m scripts.run_line_worker' in script
-    assert '"%PY%" -m scripts.run_service_monitor' in script
-    assert '"%PY%" -m scripts.run_durable_job_worker' in script
+    # Windows delegates all child lifecycle ownership to the supervisor.
+    assert '"%PY%" -m scripts.run_line_worker' not in script
+    assert '"%PY%" -m scripts.run_service_monitor' not in script
+    assert '"%PY%" -m scripts.run_durable_job_worker' not in script
     assert '"%PY%" -m scripts.run_contract_integration_worker' not in script
-    assert '"%PY%" -m scripts.run_knowledge_worker' in script
+    assert '"%PY%" -m scripts.run_knowledge_worker' not in script
     assert '"%PY%" scripts/run_line_worker.py' not in script
     assert '"%PY%" scripts/file_watcher.py' not in script
     assert '"%PY%" scripts/run_durable_job_worker.py' not in script
@@ -81,10 +87,20 @@ def test_online_shell_script_uses_macos_venv_and_expected_entrypoints():
     assert 'cd "$SCRIPT_DIR/../.."' in script
     assert "[[ ! -x .venv/bin/python ]]" in script
     assert 'PY="$PWD/.venv/bin/python"' in script
-    assert "choose_db_port" in script
-    assert "Port 3306 is busy" in script
-    assert '"$PY" -m uvicorn api.main:app --host 0.0.0.0 --port 8000 &' in script
-    assert '(cd ui_react && npm run dev -- --host 0.0.0.0 --port 5173 --strictPort) &' in script
+    assert 'docker compose up -d redis' in script
+    assert '"$PY" scripts/wait_for_db.py' in script
+    assert '"$PY" -m scripts.update_local_database --require-current' in script
+    api_start = script.index('start_owned "FastAPI"')
+    api_ready = script.index('wait_for_http "http://127.0.0.1:8000/health"')
+    react_start = script.index('(cd ui_react && exec npm run dev -- --host 0.0.0.0 --port 5173 --strictPort) &')
+    react_ready = script.index('wait_for_http "http://127.0.0.1:5173/admin/"')
+    assert api_start < api_ready < react_start < react_ready
+    assert 'start_owned "Runtime Monitor" "$PY" -m scripts.run_service_monitor' in script
+    assert 'start_owned "Durable Background Worker" "$PY" -m scripts.run_durable_job_worker' in script
+    assert 'start_owned "Incident Maintenance Worker" "$PY" -m scripts.run_incident_worker' in script
+    assert 'trap cleanup_owned EXIT' in script
+    assert 'while true; do' in script
+    assert '(cd ui_react && exec npm run dev -- --host 0.0.0.0 --port 5173 --strictPort) &' in script
     assert "streamlit run" not in script
     assert '"$PY" scripts/file_watcher.py &' not in script
     assert "scripts/init_db.py" not in script

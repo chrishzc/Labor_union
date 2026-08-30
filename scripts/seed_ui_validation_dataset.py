@@ -13,7 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.seed_validation_dataset import DEFAULT_MANIFEST
+from scripts.seed_validation_dataset import DEFAULT_MANIFEST, require_dataset_database
 
 
 def seed(arguments) -> dict[str, object]:
@@ -42,6 +42,9 @@ def seed(arguments) -> dict[str, object]:
 
 
 def _configure_runtime_database(arguments) -> None:
+    require_dataset_database(arguments.database)
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        raise ValueError("validation dataset seed requires a development validation profile")
     settings = {
         "DB_HOST": arguments.host,
         "DB_PORT": str(arguments.port),

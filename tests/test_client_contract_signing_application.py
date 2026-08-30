@@ -5,6 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from infrastructure.archive.contract_documents import (
+    archive_contract_document,
+    discard_uncommitted_contract_document,
+)
 import subsystems.contract_signing.client_contract_application as client_signing
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 
@@ -47,7 +51,11 @@ def test_client_signed_return_rolls_back_the_entire_transaction_when_completion_
 def test_client_signed_return_discards_new_archive_when_transaction_fails(tmp_path, monkeypatch):
     connection = _Connection()
     application = client_signing.ClientContractSigningApplication(
-        lambda: connection, archive_root=tmp_path, now=lambda: datetime(2030, 1, 1)
+        lambda: connection,
+        archive_root=tmp_path,
+        now=lambda: datetime(2030, 1, 1),
+        archive_document=archive_contract_document,
+        discard_document=discard_uncommitted_contract_document,
     )
     monkeypatch.setattr(application, "_existing_signed_return_receipt", lambda _command: None)
     monkeypatch.setattr(client_signing, "_client_contract_facts", lambda *_: {"matching_plan_id": 3})

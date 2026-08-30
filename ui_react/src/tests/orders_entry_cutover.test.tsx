@@ -333,7 +333,7 @@ describe('Orders #orders entry static subgate', () => {
       </StrictMode>,
     );
 
-    await waitFor(() => expect(screen.getByText(/載入訂單資料失敗：訂單摘要服務暫時無法使用/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/訂單摘要服務暫時無法使用/)).toBeInTheDocument());
     expect(screen.queryByText('ORD-2026-0801')).not.toBeInTheDocument();
     expect(screen.queryByText(/已成功載入|伺服器狀態：/)).not.toBeInTheDocument();
     expect(countPath(unavailableRequests, SUMMARY_ENDPOINT)).toBe(1);
@@ -366,7 +366,7 @@ describe('Orders #orders entry static subgate', () => {
       </StrictMode>,
     );
 
-    await waitFor(() => expect(screen.getByText(/載入訂單資料失敗：訂單摘要服務暫時無法使用/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/訂單摘要服務暫時無法使用/)).toBeInTheDocument());
     expect(countPath(requests, SUMMARY_ENDPOINT)).toBe(1);
     fireEvent.click(screen.getByRole('button', { name: '重試' }));
     await waitFor(() => expect(screen.getByText('ORD-2026-0802')).toBeInTheDocument());

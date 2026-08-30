@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, Callable
 
 from domains.anomalies.registry import default_anomaly_registry
 from infrastructure.mysql.anomaly_registry_repository import MySqlAnomalyRepository
@@ -44,42 +44,30 @@ class ProcessReminderConsumeResult:
         return self.error is None
 
 
-class BorrowedProcessReminderUnitOfWork:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exception_type, exception, traceback):
-        return False
-
-    def commit(self):
-        return None
-
-    def rollback(self):
-        return None
-
-
 def consume_process_reminder_anomaly_sources(
-    connection: Any, *, as_of: date, owns_transaction: bool = True
+    connection: Any,
+    *,
+    as_of: date,
+    unit_of_work_factory: Callable[[], object],
 ) -> ProcessReminderConsumeResult:
+    """Scan and project reminders using the caller's outer transaction.
+
+    The MySQL source owns only root-fact reads.  The subsystem supplies the
+    UoW used by the anomaly application and owns transaction finalization.
+    """
     try:
-        if owns_transaction:
-            connection.begin()
         requests = _scan_all(connection, as_of)
         application = AnomalyApplication(
             default_anomaly_registry(),
             MySqlAnomalyRepository(connection),
-            BorrowedProcessReminderUnitOfWork,
+            unit_of_work_factory,
         )
         for request in requests:
             application.project(request)
-        if owns_transaction:
-            connection.commit()
         return ProcessReminderConsumeResult(
             len(requests), sum(request.desired.active for request in requests)
         )
     except Exception as error:
-        if owns_transaction:
-            connection.rollback()
         category = ErrorCategory.VALIDATION if isinstance(error, (TypeError, ValueError)) else ErrorCategory.INTERNAL
         code = "process_reminder_anomaly_source_invalid" if category is ErrorCategory.VALIDATION else "transaction_failed"
         message = "流程提醒異常來源資料不符合契約。" if category is ErrorCategory.VALIDATION else "流程提醒異常投影失敗。"

@@ -3,26 +3,22 @@ File: data_browser_admin.py
 Description: 提供 legacy table 管理與六來源 masked Data Browser query。
 """
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from api.dependencies.admin_auth import require_system_admin
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.errors import GlobalTypedErrorResponseView
 from api.schemas.data_browser import (
-    DataBrowserSourceCorrectionApplyRequest,
-    DataBrowserSourceCorrectionPreviewRequest,
     DataBrowserTableResponse,
     DataBrowserMaskedPageView,
 )
-from infrastructure.mysql.admin_command_repository import AdminCommandRepository
-from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql import mysql_adapter as db_service
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.data_browser_query_repository import (
     DataBrowserQueryRepository,
     DataBrowserSourceNotFound,
 )
 from subsystems.access import data_browser_maintenance
-from subsystems.access import source_data_correction
 from subsystems.access.authentication_session import AdminPrincipal
 
 router = APIRouter(prefix="/api/v1/admin/data-browser", tags=["Admin Data Browser"])
@@ -96,7 +92,12 @@ def get_data_browser_table(
 ):
     """取得資料表動態主鍵、資料列、欄位清單與權限 SSOT"""
     try:
-        data = data_browser_maintenance.get_data_browser_table_schema(table)
+        data = data_browser_maintenance.get_data_browser_table_schema(
+            table,
+            data_reader=db_service.get_table_data,
+            columns_reader=db_service.get_table_columns,
+            primary_keys=db_service.TABLE_PRIMARY_KEYS,
+        )
         return BaseResponse(data=data, message=f"成功取得資料表 {table} 中繼資料與權限 SSOT")
     except ValueError as ve:
         raise HTTPException(status_code=422, detail=str(ve))
@@ -106,12 +107,6 @@ def get_data_browser_table(
             "資料表查詢失敗。",
             "data-browser-query",
         ) from error
-
-
-def _http_status_for_data_browser_admin_error(error_message: str) -> int:
-    if "不存在" in error_message:
-        return 404
-    return 422
 
 
 @router.patch("/{table}/{row_id_str}", response_model=BaseResponse[bool])
@@ -124,40 +119,37 @@ def patch_data_browser_row(
     raise HTTPException(status_code=410, detail={"code": "data_browser_write_retired", "table": table, "row_id": row_id_str, "replacement": "Use the owning Domain typed Preview/Apply command."})
 
 
-@router.post("/{table}/{row_id}/source-correction/preview", response_model=BaseResponse[dict])
+@router.post("/{table}/{row_id}/source-correction/preview")
 def preview_source_correction(
     table: str,
     row_id: int,
-    request: DataBrowserSourceCorrectionPreviewRequest,
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
     del principal
-    connection = get_connection()
-    try:
-        return BaseResponse(data=source_data_correction.preview(AdminCommandRepository(connection), table, row_id, request.updates))
-    except ValueError as error:
-        raise HTTPException(status_code=_http_status_for_data_browser_admin_error(str(error)), detail=str(error))
-    finally:
-        connection.close()
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "data_browser_write_retired",
+            "table": table,
+            "row_id": row_id,
+            "replacement": "Use the owning Domain typed Preview/Apply command.",
+        },
+    )
 
 
-@router.post("/{table}/{row_id}/source-correction/apply", response_model=BaseResponse[dict])
+@router.post("/{table}/{row_id}/source-correction/apply")
 def apply_source_correction(
     table: str,
     row_id: int,
-    request: DataBrowserSourceCorrectionApplyRequest,
-    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    connection = get_connection()
-    try:
-        result = source_data_correction.apply(
-            AdminCommandRepository(connection), lambda: MySqlUnitOfWork(connection),
-            table, row_id, request.updates,
-            request.preview_fingerprint, idempotency_key, principal.username, request.reason,
-        )
-        return BaseResponse(data=result)
-    except ValueError as error:
-        raise HTTPException(status_code=_http_status_for_data_browser_admin_error(str(error)), detail=str(error))
-    finally:
-        connection.close()
+    del principal
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "data_browser_write_retired",
+            "table": table,
+            "row_id": row_id,
+            "replacement": "Use the owning Domain typed Preview/Apply command.",
+        },
+    )

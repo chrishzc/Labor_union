@@ -33,6 +33,14 @@ class CustomerServiceTransitionError(ValueError):
     """Raised when a ticket status transition violates the state machine."""
 
 
+class CustomerServiceTicketNotFoundError(LookupError):
+    """Raised when a requested customer-service ticket does not exist."""
+
+
+class CustomerServiceVersionConflictError(RuntimeError):
+    """Raised when a ticket mutation observes a stale version."""
+
+
 @dataclass(frozen=True, slots=True)
 class CustomerServiceTicket:
     ticket_id: int
@@ -67,6 +75,8 @@ __all__ = [
     "CustomerServiceCategory",
     "CustomerServiceStatus",
     "CustomerServiceTicket",
+    "CustomerServiceTicketNotFoundError",
     "CustomerServiceTransitionError",
+    "CustomerServiceVersionConflictError",
     "transition_ticket",
 ]

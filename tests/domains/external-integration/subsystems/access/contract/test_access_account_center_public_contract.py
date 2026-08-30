@@ -17,7 +17,7 @@ def test_account_directory_projection_excludes_roles_and_personal_metadata(monke
     monkeypatch.setattr(
         account_center,
         "list_account_center_users",
-        lambda: [AdminPrincipal(1, "root-user", "根帳號", "system_admin", is_root=True)],
+        lambda **_kwargs: [AdminPrincipal(1, "root-user", "根帳號", "system_admin", is_root=True)],
     )
 
     response = asyncio.run(account_center.list_accounts(None))

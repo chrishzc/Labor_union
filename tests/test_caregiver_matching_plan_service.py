@@ -8,6 +8,9 @@ from subsystems.scheduling import matching_plan_workflow as service
 from subsystems.scheduling.segmented_availability import derive_segment_availability
 
 
+_FACTS_PORT = object()
+
+
 class MatchingPlanServiceCursor:
     def __init__(self, fixtures):
         self.fixtures = fixtures
@@ -289,11 +292,14 @@ def test_create_matching_plan_version_created_for_1_2_3_4_segments(monkeypatch):
         segments = _segments(segment_count, staff_start=11)
         captured: dict[str, object] = {}
 
-        def fake_search_segmented(*, case_no, segment_count, segment_drafts, as_of):
+        def fake_search_segmented(
+            *, case_no, segment_count, segment_drafts, as_of, facts_port
+        ):
             captured["case_no"] = case_no
             captured["as_of"] = as_of
             captured["segment_drafts"] = segment_drafts
             captured["segment_count"] = segment_count
+            captured["facts_port"] = facts_port
             return _complete_result(segments)
 
         monkeypatch.setattr(service, "search_segmented_caregiver_availability", fake_search_segmented)
@@ -323,6 +329,7 @@ def test_create_matching_plan_version_created_for_1_2_3_4_segments(monkeypatch):
             segments=segments,
             created_by=" admin ",
             as_of="2026-07-02",
+            facts_port=_FACTS_PORT,
         )
 
         assert result["result"] == "created"
@@ -399,7 +406,7 @@ def test_real_availability_helper_zero_based_payload_is_accepted(monkeypatch):
     monkeypatch.setattr(service, "get_connection", lambda: connection)
 
     result = service.create_matching_plan_version(
-        "C-030", segments, "admin", "2026-07-02"
+        "C-030", segments, "admin", "2026-07-02", facts_port=_FACTS_PORT
     )
 
     assert result["result"] == "created"
@@ -447,6 +454,7 @@ def test_reusing_identical_active_proposed_plan_is_idempotent_no_commit(monkeypa
         segments=segments,
         created_by="admin",
         as_of="2026-07-20",
+        facts_port=_FACTS_PORT,
     )
 
     assert result["result"] == "existing"
@@ -500,6 +508,7 @@ def test_modify_segments_creates_new_version_and_supersedes_old_draft(monkeypatc
         segments=new_segments,
         created_by="ops",
         as_of="2026-07-20",
+        facts_port=_FACTS_PORT,
     )
 
     assert result["result"] == "created"
@@ -526,7 +535,7 @@ def test_modify_segments_creates_new_version_and_supersedes_old_draft(monkeypatc
 def test_input_normalization_validation_rejects_invalid_segments(monkeypatch, segments, as_of):
     monkeypatch.setattr(service, "get_connection", lambda: pytest.fail("must not hit DB on validation failure"))
     with pytest.raises(ValueError):
-        service.create_matching_plan_version("C-004", segments, "admin", as_of)
+        service.create_matching_plan_version("C-004", segments, "admin", as_of, facts_port=_FACTS_PORT)
 
 
 @pytest.mark.parametrize(
@@ -590,7 +599,7 @@ def test_input_normalization_validation_rejects_invalid_segments(monkeypatch, se
 def test_input_validation_without_db(monkeypatch, case_no, created_by, as_of, segments):
     monkeypatch.setattr(service, "get_connection", lambda: pytest.fail("should not hit DB on input validation"))
     with pytest.raises(ValueError):
-        service.create_matching_plan_version(case_no, segments, created_by, as_of)
+        service.create_matching_plan_version(case_no, segments, created_by, as_of, facts_port=_FACTS_PORT)
 
 
 def test_partial_or_mismatch_availability_rejects_without_tx(monkeypatch):
@@ -610,6 +619,7 @@ def test_partial_or_mismatch_availability_rejects_without_tx(monkeypatch):
             _segments(2),
             "admin",
             "2026-07-02",
+            facts_port=_FACTS_PORT,
         )
 
     def fake_search_mismatch(**_kwargs):
@@ -637,6 +647,7 @@ def test_partial_or_mismatch_availability_rejects_without_tx(monkeypatch):
             _segments(2, staff_start=3),
             "admin",
             "2026-07-02",
+            facts_port=_FACTS_PORT,
         )
 
 
@@ -665,7 +676,7 @@ def test_conflicts_rejects_without_tx(monkeypatch):
 
     monkeypatch.setattr(service, "get_connection", lambda: pytest.fail("should not open tx"))
     with pytest.raises(ValueError, match="complete combination"):
-        service.create_matching_plan_version("C-019", _segments(2), "admin", "2026-07-02")
+        service.create_matching_plan_version("C-019", _segments(2), "admin", "2026-07-02", facts_port=_FACTS_PORT)
 
 
 def test_reject_when_case_not_found_or_not_in_negotiation(monkeypatch):
@@ -678,7 +689,7 @@ def test_reject_when_case_not_found_or_not_in_negotiation(monkeypatch):
     connection_not_found = MatchingPlanServiceConnection({"order": None})
     monkeypatch.setattr(service, "get_connection", lambda: connection_not_found)
     with pytest.raises(ValueError, match="case not found"):
-        service.create_matching_plan_version("C-014", _segments(2), "admin", "2026-07-02")
+        service.create_matching_plan_version("C-014", _segments(2), "admin", "2026-07-02", facts_port=_FACTS_PORT)
     assert connection_not_found.rollbacks == 1
     assert connection_not_found.closed_count == 1
 
@@ -694,7 +705,7 @@ def test_reject_when_case_not_found_or_not_in_negotiation(monkeypatch):
     )
     monkeypatch.setattr(service, "get_connection", lambda: connection_non_negotiation)
     with pytest.raises(ValueError, match="negotiation"):
-        service.create_matching_plan_version("C-015", _segments(2), "admin", "2026-07-02")
+        service.create_matching_plan_version("C-015", _segments(2), "admin", "2026-07-02", facts_port=_FACTS_PORT)
     assert connection_non_negotiation.rollbacks == 1
     assert connection_non_negotiation.closed_count == 1
 
@@ -736,6 +747,7 @@ def test_db_max_version_controls_next_version(monkeypatch):
         segments=segments,
         created_by="admin",
         as_of="2026-07-02",
+        facts_port=_FACTS_PORT,
     )
 
     assert result["version"] == 13
@@ -770,7 +782,7 @@ def test_reject_when_accepted_plan_or_active_lock_exists(monkeypatch):
     )
     monkeypatch.setattr(service, "get_connection", lambda: connection_accepted)
     with pytest.raises(ValueError, match="accepted"):
-        service.create_matching_plan_version("C-016", _segments(2), "admin", "2026-07-02")
+        service.create_matching_plan_version("C-016", _segments(2), "admin", "2026-07-02", facts_port=_FACTS_PORT)
     assert connection_accepted.rollbacks == 1
     assert connection_accepted.closed_count == 1
 
@@ -789,7 +801,7 @@ def test_reject_when_accepted_plan_or_active_lock_exists(monkeypatch):
     )
     monkeypatch.setattr(service, "get_connection", lambda: connection_locked)
     with pytest.raises(ValueError, match="active availability lock"):
-        service.create_matching_plan_version("C-017", _segments(2), "admin", "2026-07-02")
+        service.create_matching_plan_version("C-017", _segments(2), "admin", "2026-07-02", facts_port=_FACTS_PORT)
     assert connection_locked.rollbacks == 1
     assert connection_locked.closed_count == 1
 
@@ -809,7 +821,7 @@ def test_reject_when_accepted_plan_or_active_lock_exists(monkeypatch):
     )
     monkeypatch.setattr(service, "get_connection", lambda: connection_locked_day_only)
     with pytest.raises(ValueError, match="active availability lock"):
-        service.create_matching_plan_version("C-025", _segments(2), "admin", "2026-07-02")
+        service.create_matching_plan_version("C-025", _segments(2), "admin", "2026-07-02", facts_port=_FACTS_PORT)
     assert connection_locked_day_only.rollbacks == 1
     assert connection_locked_day_only.closed_count == 1
 
@@ -861,7 +873,8 @@ def test_injection_failure_rolls_back(monkeypatch, label, connection_options, ra
     monkeypatch.setattr(service, "get_connection", lambda: connection)
     with pytest.raises(RuntimeError, match=raises_msg):
         service.create_matching_plan_version(
-            "C-018", _segments(2, staff_start=81), "admin", "2026-07-02"
+            "C-018", _segments(2, staff_start=81), "admin", "2026-07-02",
+            facts_port=_FACTS_PORT,
         )
 
     assert connection.commits == 0
@@ -894,7 +907,7 @@ def test_cursor_close_failure_still_closes_connection(monkeypatch):
     monkeypatch.setattr(service, "get_connection", lambda: connection)
 
     with pytest.raises(RuntimeError, match="injected cursor close failure"):
-        service.create_matching_plan_version("C-022", _segments(2, staff_start=91), "admin", "2026-07-02")
+        service.create_matching_plan_version("C-022", _segments(2, staff_start=91), "admin", "2026-07-02", facts_port=_FACTS_PORT)
 
     assert connection.closed_count == 1
 
@@ -923,7 +936,7 @@ def test_pymysql_connection_compatible_success(monkeypatch):
     monkeypatch.setattr(service, "get_connection", lambda: connection)
 
     result = service.create_matching_plan_version(
-        "C-023", _segments(2, staff_start=101), "admin", "2026-07-02"
+        "C-023", _segments(2, staff_start=101), "admin", "2026-07-02", facts_port=_FACTS_PORT
     )
 
     assert result["result"] == "created"
@@ -969,7 +982,7 @@ def test_pymysql_connection_existing_returns_existing_and_rolls_back(monkeypatch
     )
 
     result = service.create_matching_plan_version(
-        "C-024", _segments(2, staff_start=102), "admin", "2026-07-02"
+        "C-024", _segments(2, staff_start=102), "admin", "2026-07-02", facts_port=_FACTS_PORT
     )
 
     assert result["result"] == "existing"
@@ -1015,7 +1028,7 @@ def test_pymysql_connection_failure_rolls_back(monkeypatch):
 
     with pytest.raises(RuntimeError, match="injected sql failure"):
         service.create_matching_plan_version(
-            "C-025", _segments(2, staff_start=104), "admin", "2026-07-02"
+            "C-025", _segments(2, staff_start=104), "admin", "2026-07-02", facts_port=_FACTS_PORT
         )
 
     assert connection.commits == 0
@@ -1051,7 +1064,7 @@ def test_pymysql_cursor_close_failure_still_closes_connection(monkeypatch):
 
     with pytest.raises(RuntimeError, match="injected cursor close failure"):
         service.create_matching_plan_version(
-            "C-026", _segments(2, staff_start=103), "admin", "2026-07-02"
+            "C-026", _segments(2, staff_start=103), "admin", "2026-07-02", facts_port=_FACTS_PORT
         )
 
     assert connection.commits == 1
@@ -1075,7 +1088,7 @@ def test_pymysql_cursor_creation_failure_rolls_back_and_closes_connection(monkey
 
     with pytest.raises(RuntimeError, match="injected cursor creation failure"):
         service.create_matching_plan_version(
-            "C-027", segments, "admin", "2026-07-02"
+            "C-027", segments, "admin", "2026-07-02", facts_port=_FACTS_PORT
         )
 
     assert connection.rollbacks == 1
@@ -1110,7 +1123,7 @@ def test_pymysql_connection_close_failure_is_reported(monkeypatch):
 
     with pytest.raises(RuntimeError, match="injected connection close failure"):
         service.create_matching_plan_version(
-            "C-028", segments, "admin", "2026-07-02"
+            "C-028", segments, "admin", "2026-07-02", facts_port=_FACTS_PORT
         )
 
     assert connection.commits == 1
@@ -1144,7 +1157,7 @@ def test_second_segment_insert_failure_rolls_back(monkeypatch):
 
     with pytest.raises(RuntimeError, match="injected segment insert failure"):
         service.create_matching_plan_version(
-            "C-029", segments, "admin", "2026-07-02"
+            "C-029", segments, "admin", "2026-07-02", facts_port=_FACTS_PORT
         )
 
     assert connection.commits == 0

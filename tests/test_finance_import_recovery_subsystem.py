@@ -25,7 +25,6 @@ from scripts.imports.finance_statement_normalizer import normalize_workbook
 from subsystems.anomalies.finance_import_review_alert import (
     project_finance_import_review_alert,
 )
-from subsystems.anomalies.system_alert_projection import resolve_system_alert
 from domains.finance_import.transaction_classifier import classify_finance_transaction
 from infrastructure.mysql.mysql_adapter import DB_CONFIG
 
@@ -895,7 +894,17 @@ def test_bounded_cli_stdout_reports_and_apply_prevalidation(
     assert reprocess_calls == 0
     assert capsys.readouterr().out == ""
 
-    assert reprocess_cli.main(["--batch-id", "1"]) == 0
+    read_only_target = [
+        "--target-database",
+        "finance_recovery_simulation",
+        "--expected-host",
+        "mysql-test-host",
+        "--expected-server",
+        "mysql-test",
+        "--schema-fingerprint",
+        "a" * 64,
+    ]
+    assert reprocess_cli.main(["--batch-id", "1", *read_only_target]) == 0
     reprocess_summary = _captured_summary(capsys)
     assert reprocess_summary["selected"] == ASUS_DISTINCT_COUNT
     assert reprocess_summary["report_path"] is None
@@ -905,6 +914,7 @@ def test_bounded_cli_stdout_reports_and_apply_prevalidation(
         [
             "--batch-id",
             "1",
+            *read_only_target,
             "--report-path",
             str(reprocess_report),
         ]
@@ -937,7 +947,9 @@ def test_real_mysql_asus_state_dry_run_apply_replay_and_alert_lifecycle(
     )
 
     before_dry_run = _batch_snapshot(connect, batch_id)
-    dry_run = reprocess_finance_import_batch(batch_id, dry_run=True)
+    dry_run = reprocess_finance_import_batch(
+        batch_id, dry_run=True, connection_factory=connect
+    )
     assert dry_run["transaction_outcome"] == "rolled_back"
     assert dry_run["run_id"] is None
     assert dry_run["batch_manifest"]["selected_distinct_count"] == (
@@ -992,6 +1004,7 @@ def test_real_mysql_asus_state_dry_run_apply_replay_and_alert_lifecycle(
             actor="integration-test",
             dry_run=False,
             expected_plan_fingerprint=plan_fingerprint,
+            connection_factory=connect,
         )
     assert _batch_snapshot(connect, batch_id) == before_stale_apply
     _update_row(
@@ -1033,6 +1046,7 @@ def test_real_mysql_asus_state_dry_run_apply_replay_and_alert_lifecycle(
             actor="integration-test",
             dry_run=False,
             expected_plan_fingerprint=plan_fingerprint,
+            connection_factory=connect,
         )
     assert dispatch_calls == 7
     assert _batch_snapshot(connect, batch_id) == before_injected_failure
@@ -1047,6 +1061,7 @@ def test_real_mysql_asus_state_dry_run_apply_replay_and_alert_lifecycle(
         actor="integration-test",
         dry_run=False,
         expected_plan_fingerprint=plan_fingerprint,
+        connection_factory=connect,
     )
     assert applied["transaction_outcome"] == "committed"
     assert isinstance(applied["run_id"], int)
@@ -1085,6 +1100,7 @@ def test_real_mysql_asus_state_dry_run_apply_replay_and_alert_lifecycle(
         actor="integration-test",
         dry_run=False,
         expected_plan_fingerprint=plan_fingerprint,
+        connection_factory=connect,
     )
     assert replay["transaction_outcome"] == "existing"
     assert replay["run_id"] == applied["run_id"]
@@ -1128,14 +1144,6 @@ def test_real_mysql_asus_state_dry_run_apply_replay_and_alert_lifecycle(
             reopened = project_finance_import_review_alert(cursor, batch_id)
             assert reopened["alert_action"] == "reopened"
             assert reopened["summary"]["remaining_count"] == 1
-            alert_id = int(reopened["alert"]["id"])
-            manually_resolved = resolve_system_alert(
-                cursor,
-                alert_id=alert_id,
-                operator="integration-test",
-                reason="exercise scanner reopen",
-            )
-            assert manually_resolved["result"] == "resolved"
         connection.commit()
     finally:
         connection.close()
@@ -1152,5 +1160,6 @@ def test_real_mysql_asus_state_dry_run_apply_replay_and_alert_lifecycle(
             actor="integration-test",
             dry_run=False,
             expected_plan_fingerprint=plan_fingerprint,
+            connection_factory=connect,
         )
     assert _batch_snapshot(connect, batch_id) == before_partial_residual

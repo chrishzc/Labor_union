@@ -11,7 +11,7 @@ import { GovernmentOverpaymentRecoveryWorkbench, type GovernmentOverpaymentRefre
 import { StaffOverpaymentRecoveryActions } from '../components/StaffOverpaymentRecoveryActions';
 import { StaffPayoutRemediationWorkbench } from '../components/StaffPayoutRemediationWorkbench';
 import { HistoricalOrderReviewRemediationWorkbench } from '../components/HistoricalOrderReviewRemediationWorkbench';
-import { HistoricalBaselineProjectorReadback } from '../components/HistoricalBaselineProjectorReadback';
+import { HistoricalOperationalBaselineReadback } from '../components/HistoricalOperationalBaselineReadback';
 import { ClientSettlementRemediationWorkbench } from '../components/ClientSettlementRemediationWorkbench';
 import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { AnomalyValidationError } from '../api/anomalies/anomaly_query_errors';
@@ -349,7 +349,12 @@ export const AnomaliesPage: React.FC = () => {
     setWarningReferral(null);
     void Promise.allSettled([
       anomalyDetailClient.queryAnomalyDetail({ fingerprint: anomaly.fingerprint }, { signal: controller.signal }),
-      anomalyDetailClient.queryAnomalyRecovery({ fingerprint: anomaly.fingerprint }, { signal: controller.signal }),
+      anomaly.issueKey
+        ? anomalyDetailClient.queryAnomalyRecovery(
+          { issueKey: anomaly.issueKey },
+          { signal: controller.signal },
+        )
+        : Promise.reject(new AnomalyDetailError('NOT_FOUND', '目前沒有 current issue key。')),
     ])
       .then(([detailResult, recoveryResult]) => {
         if (seq === drawerRequestSeq.current && !controller.signal.aborted) {
@@ -376,8 +381,12 @@ export const AnomaliesPage: React.FC = () => {
           setCorrectionFlowStatus('idle');
           setCorrectionError(null);
           setCorrectionClassificationType(action ? correctionClassification(action) : 'client_receipt');
-          setCorrectionObligations(recovery?.root_fact_snapshot.affected_obligation_identities.join('\n') ?? '');
-          setCorrectionRefundLedgerEntry(recovery?.root_fact_snapshot.original_refund_ledger_entry_identity ?? '');
+          const actionBindings = action?.source_bindings ?? [];
+          const bindingValue = (key: string) => actionBindings.find((binding) => binding.key === key)?.value;
+          const obligationIdentities = bindingValue('target_obligation_identities');
+          setCorrectionObligations(typeof obligationIdentities === 'string' ? obligationIdentities : '');
+          const refundLedgerEntry = bindingValue('original_refund_ledger_entry_identity');
+          setCorrectionRefundLedgerEntry(typeof refundLedgerEntry === 'string' ? refundLedgerEntry : '');
           setCorrectionReason('');
           setCorrectionEvidence('');
           if (recoveryResult.status === 'rejected' && anomaly.code !== 'HISTORICAL-ORDER-001') {
@@ -1119,17 +1128,17 @@ export const AnomaliesPage: React.FC = () => {
               )}
             </div>
 
-            <div data-surface-id="anomalies.drawer.root-evidence" className="anomalies-root-evidence-card root-evidence">
+            <div data-surface-id="anomalies.drawer.current-details" className="anomalies-root-evidence-card root-evidence">
               <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1e1b19', marginBottom: '8px' }}>
                 🔍 問題判斷依據
               </h4>
               {!anomalyDetail && <div className="anomalies-detail-empty">正在等待正式資料。</div>}
-              {anomalyDetail && visibleEvidenceItems(anomalyDetail.rootFacts).map((item) => (
+              {anomalyDetail && visibleEvidenceItems(anomalyDetail.currentDetails).map((item) => (
                 <div className="anomaly-evidence-row" key={item.key}>
                   <span>{item.label}</span><span>{item.value}</span>
                 </div>
               ))}
-              {anomalyDetail && visibleEvidenceItems(anomalyDetail.rootFacts).length === 0 && (
+              {anomalyDetail && visibleEvidenceItems(anomalyDetail.currentDetails).length === 0 && (
                 <div className="anomalies-detail-empty">技術識別已保留在稽核紀錄，不顯示於日常處理畫面。</div>
               )}
             </div>
@@ -1149,8 +1158,7 @@ export const AnomaliesPage: React.FC = () => {
                     <span>依下方 Client Finance 根事實執行 Query／Preview／Apply</span>
                   </div>
                 )}
-                {!isHistoricalOrderAlert && anomalyDetail.recoveryAvailable && <div className="anomaly-recovery-metadata-row"><span>目前是否阻擋作業</span><span>{anomalyDetail.domainBlockerActive ? '是' : '否'}</span></div>}
-                {!isHistoricalOrderAlert && anomalyDetail.recoveryAvailable && <div className="anomaly-recovery-metadata-row"><span>累計偵測次數</span><span>{anomalyDetail.occurrences.length}</span></div>}
+                {!isHistoricalOrderAlert && anomalyDetail.recoveryAvailable && <div className="anomaly-recovery-metadata-row"><span>目前是否阻擋作業</span><span>{anomalyDetail.blocking ? '是' : '否'}</span></div>}
                 {!isHistoricalOrderAlert && anomalyDetail.recoveryAvailable && anomalyDetail.actions.length === 0 && <div className="anomalies-detail-empty">目前沒有可用的處理方式。</div>}
                 {isHistoricalOrderAlert && (
                   <div className="anomaly-recovery-metadata-row"><span>正式處理方式</span><span>上傳只含此 review 對應列的更正工作簿</span></div>
@@ -1172,7 +1180,7 @@ export const AnomaliesPage: React.FC = () => {
             )}
 
             {historicalBaselineCaseNo && (
-              <HistoricalBaselineProjectorReadback caseNo={historicalBaselineCaseNo} />
+              <HistoricalOperationalBaselineReadback caseNo={historicalBaselineCaseNo} />
             )}
 
             {!isHistoricalOrderAlert && financeOwnerTarget?.kind === 'government' && (

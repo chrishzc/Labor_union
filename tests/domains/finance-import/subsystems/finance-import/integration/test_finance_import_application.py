@@ -60,7 +60,10 @@ def test_snapshot_plan_prefers_actual_start_and_requires_deposit_terms(monkeypat
 
 def test_diagnostic_apply_is_rejected() -> None:
     with pytest.raises(ValueError, match="finance_import_diagnostic_is_dry_run_only"):
-        application.import_finance_workbook("input.xlsx")
+        application.import_finance_workbook(
+            "input.xlsx", connection_factory=lambda: None,
+            normalizer=lambda _path: {},
+        )
 
 
 def test_dry_run_rolls_back_and_keeps_batch_id_private(monkeypatch) -> None:
@@ -91,12 +94,6 @@ def test_dry_run_rolls_back_and_keeps_batch_id_private(monkeypatch) -> None:
             self.closed = True
 
     connection = Connection()
-    monkeypatch.setattr(application, "get_connection", lambda: connection)
-    monkeypatch.setattr(
-        application,
-        "normalize_workbook",
-        lambda _path: {"format_id": "sinopac", "sheet_name": "sheet", "header_row": 1, "normalized_rows": [{}]},
-    )
     monkeypatch.setattr(application, "load_finance_identity_maps", lambda _cursor: {})
     monkeypatch.setattr(
         application,
@@ -114,7 +111,15 @@ def test_dry_run_rolls_back_and_keeps_batch_id_private(monkeypatch) -> None:
         lambda *_args: {"alert_action": "existing"},
     )
 
-    manifest = application.import_finance_workbook("input.xlsx", dry_run=True)
+    manifest = application.import_finance_workbook(
+        "input.xlsx", dry_run=True, connection_factory=lambda: connection,
+        normalizer=lambda _path: {
+            "format_id": "sinopac",
+            "sheet_name": "sheet",
+            "header_row": 1,
+            "normalized_rows": [{}],
+        },
+    )
 
     assert manifest["batch_id"] is None
     assert manifest["transaction_outcome"] == "rolled_back"

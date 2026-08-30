@@ -16,11 +16,11 @@
     }
   },
   "staff_source": {
-    "identity": "A123456789",
+    "identity": "synthetic-staff-001",
     "name": "Task96 合成月嫂",
     "bank_code": "812",
     "branch_code": "0001",
-    "account_no": "0096000000000001"
+    "account_no": "synthetic-account-001"
   },
   "official_service_dates": [
     "2026-07-01",
@@ -41,7 +41,7 @@
       "direction": "outgoing",
       "amount_ntd": 12000,
       "transaction_date": "2026-07-15",
-      "counterparty_account": "0096000000000001"
+      "counterparty_account": "synthetic-account-001"
     }
   ],
   "forbidden_derived_roots": [

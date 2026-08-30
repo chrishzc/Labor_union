@@ -1,6 +1,6 @@
 """
 File: anomaly_recovery.py
-Description: 提供去敏異常根事實查詢、重掃描與具證據的 projector 死信人工重試 API。
+Description: 提供去敏異常根事實查詢與重掃描 API。
 """
 
 from __future__ import annotations
@@ -8,69 +8,29 @@ from __future__ import annotations
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime, time, timezone
 from enum import Enum
-from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 
 from api.dependencies.admin_auth import require_system_admin
-from api.dependencies.anomaly_recovery import (
-    get_anomaly_maintenance_application,
-    get_anomaly_recovery_application,
-)
+from api.dependencies.anomaly_recovery import get_current_anomaly_issue_repository
 from api.schemas.anomaly_recovery import (
-    AnomalyRootFactSnapshotView,
     AnomalyRecoveryContextView,
-    FinanceOccurrenceView,
-    ProjectorDeadLetterView,
     RecoveryActionView,
-    RetryAnomalyProjectorBody,
-    RetryAnomalyProjectorResultView,
-    RetryProjectorDeadLetterApplyBody,
-    RetryProjectorDeadLetterPreviewBody,
-    RetryProjectorDeadLetterPreviewView,
-    RetryProjectorDeadLetterReceiptView,
-    ScanAnomalyDefinitionBody,
-    ScanAnomalyDefinitionResultView,
-    SupersedeProjectorDeadLetterApplyBody,
-    SupersedeProjectorDeadLetterPreviewView,
-    SupersedeProjectorDeadLetterReceiptView,
 )
 from api.schemas.anomaly_registry import (
     AnomalyDisplaySnapshotView,
     AnomalySourceBindingView,
-    AnomalyTimelineEventView,
 )
+from api.routes.anomaly_registry import _evidence_payload
 from api.schemas.base import BaseResponse
-from domains.anomalies.maintenance import (
-    ProjectorDeadLetterIdentity,
-    RetryAnomalyProjectorRequest,
-    RetryProjectorDeadLetterRequest,
-    ScanAnomalyDefinitionRequest,
-    SupersedeProjectorDeadLetterRequest,
-)
 from subsystems.access.authentication_session import AdminPrincipal
-from shared_kernel.errors import ErrorCategory
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import (
-    ActorContext,
     CorrelationId,
     ExpectedVersion,
-    IdempotencyKey,
-)
-from subsystems.anomalies.maintenance_workflow import (
-    AnomalyMaintenanceApplication,
-    AnomalyMaintenanceError,
-)
-from subsystems.anomalies.root_fact_projection_workflow import (
-    RootFactProjectionApplication,
-    RootFactProjectionError,
 )
 
 router = APIRouter(prefix="/api/v1/anomaly-recovery", tags=["Anomalies"])
-_IdempotencyHeader = Annotated[
-    str,
-    Header(alias="Idempotency-Key", min_length=1, max_length=191),
-]
 _PROJECTOR_PATTERN = (
     r"^(government_overpayment|client_over_refund_recovery|"
     r"staff_overpayment_recovery)$"
@@ -80,585 +40,333 @@ _PROJECTOR_PATTERN = (
 # The typed HTTP signature remains explicit so FastAPI documents every boundary.
 @router.post(
     "/definitions/{definition_code}/scan",
-    response_model=BaseResponse[ScanAnomalyDefinitionResultView],
+    response_model=None,
 )
 def scan_anomaly_definition(
-    body: ScanAnomalyDefinitionBody,
     definition_code: str = Path(..., min_length=1, max_length=191),
-    correlation_header: str | None = Header(
-        default=None,
-        alias="X-Correlation-ID",
-    ),
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: AnomalyMaintenanceApplication = Depends(
-        get_anomaly_maintenance_application
-    ),
 ):
-    del principal
-    correlation_id = _correlation_id(
-        correlation_header,
-        f"anomaly-scan:{definition_code}",
-    )
-    request = ScanAnomalyDefinitionRequest(
-        definition_code,
-        body.maximum_items,
-        body.after_source_id,
-    )
-    return _call_maintenance(
-        lambda: _scan_result_payload(
-            application.scan_definition(request, correlation_id)
-        ),
-        "完成異常根事實分頁重掃描",
-        correlation_id,
+    del principal, definition_code
+    _raise_legacy_maintenance_retired(
+        "anomaly_definition_scan_retired",
+        "POST /api/v1/anomaly-recovery/definitions/{definition_code}/scan",
+        "Global durable anomaly.recheck job with an owner-composed bounded detector",
     )
 
 
 # The typed HTTP signature remains explicit so FastAPI documents every boundary.
 @router.post(
     "/projector/retry",
-    response_model=BaseResponse[RetryAnomalyProjectorResultView],
+    response_model=None,
 )
 def retry_anomaly_projector(
-    body: RetryAnomalyProjectorBody,
-    correlation_header: str | None = Header(
-        default=None,
-        alias="X-Correlation-ID",
-    ),
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: AnomalyMaintenanceApplication = Depends(
-        get_anomaly_maintenance_application
-    ),
 ):
     del principal
-    correlation_id = _correlation_id(
-        correlation_header,
-        "anomaly-projector-retry",
-    )
-    request = RetryAnomalyProjectorRequest(body.maximum_events)
-    return _call_maintenance(
-        lambda: _retry_result_payload(
-            application.retry_projector(request, correlation_id)
-        ),
-        "已重新排入失敗的異常 projector 事件",
-        correlation_id,
+    _raise_legacy_maintenance_retired(
+        "anomaly_projector_retry_retired",
+        "POST /api/v1/anomaly-recovery/projector/retry",
+        "Global durable-job retry/supersede mechanism",
     )
 
 
-@router.get(
-    "/projector/dead-letters",
-    response_model=BaseResponse[list[ProjectorDeadLetterView]],
-)
+@router.get("/projector/dead-letters", include_in_schema=False)
 def query_projector_dead_letters(
     maximum_items: int = Query(default=50, ge=1, le=100),
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: AnomalyMaintenanceApplication = Depends(
-        get_anomaly_maintenance_application
-    ),
 ):
-    del principal
-    return _call_maintenance(
-        lambda: [
-            _dead_letter_payload(item)
-            for item in application.query_dead_letters(maximum_items)
-        ],
-        "成功取得 projector dead-letter",
-        CorrelationId("projector-dead-letter-query"),
-    )
+    del maximum_items, principal
+    _raise_projector_dead_letter_retired("projector-dead-letter-query")
 
 
 @router.post(
     "/projector/dead-letters/{projector_identity}/{event_id}/retry/preview",
-    response_model=BaseResponse[RetryProjectorDeadLetterPreviewView],
+    include_in_schema=False,
 )
 def preview_projector_dead_letter_retry(
-    body: RetryProjectorDeadLetterPreviewBody,
     projector_identity: str = Path(..., pattern=_PROJECTOR_PATTERN),
     event_id: int = Path(..., gt=0),
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: AnomalyMaintenanceApplication = Depends(
-        get_anomaly_maintenance_application
-    ),
 ):
     del principal
-    return _call_maintenance(
-        lambda: _dead_letter_preview_payload(
-            application.preview_dead_letter_retry(
-                ProjectorDeadLetterIdentity(projector_identity, event_id),
-                body.reason,
-                body.evidence_reference,
-            )
-        ),
-        "成功預覽 projector dead-letter 重試",
-        CorrelationId(
-            f"projector-dead-letter-preview:{projector_identity}:{event_id}"
-        ),
+    _raise_projector_dead_letter_retired(
+        f"projector-dead-letter-preview:{projector_identity}:{event_id}"
     )
 
 
 @router.post(
     "/projector/dead-letters/{projector_identity}/{event_id}/retry/apply",
-    response_model=BaseResponse[RetryProjectorDeadLetterReceiptView],
+    include_in_schema=False,
 )
 def apply_projector_dead_letter_retry(
-    body: RetryProjectorDeadLetterApplyBody,
     projector_identity: str = Path(..., pattern=_PROJECTOR_PATTERN),
     event_id: int = Path(..., gt=0),
-    idempotency_key: _IdempotencyHeader = ...,
     correlation_header: str | None = Header(default=None, alias="X-Correlation-ID"),
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: AnomalyMaintenanceApplication = Depends(
-        get_anomaly_maintenance_application
-    ),
 ):
     correlation = _correlation_id(
-        correlation_header, f"projector-dead-letter-retry:{projector_identity}:{event_id}"
+        correlation_header if isinstance(correlation_header, str) else None,
+        f"projector-dead-letter-retry:{projector_identity}:{event_id}",
     )
-    request = RetryProjectorDeadLetterRequest(
-        ProjectorDeadLetterIdentity(projector_identity, event_id),
-        body.expected_attempt_count,
-        body.reason,
-        body.evidence_reference,
-        PreviewFingerprint(body.preview_fingerprint),
-        IdempotencyKey(idempotency_key),
-        ActorContext(str(principal.username or "").strip()),
-        correlation,
-    )
-    return _call_maintenance(
-        lambda: _dead_letter_receipt_payload(
-            application.apply_dead_letter_retry(request)
-        ),
-        "已重新排入 projector dead-letter",
-        correlation,
-    )
+    del principal
+    _raise_projector_dead_letter_retired(correlation.value)
 
 
 @router.post(
     "/projector/dead-letters/{projector_identity}/{event_id}/supersede/preview",
-    response_model=BaseResponse[SupersedeProjectorDeadLetterPreviewView],
+    include_in_schema=False,
 )
 def preview_projector_dead_letter_supersede(
-    body: RetryProjectorDeadLetterPreviewBody,
     projector_identity: str = Path(..., pattern=_PROJECTOR_PATTERN),
     event_id: int = Path(..., gt=0),
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: AnomalyMaintenanceApplication = Depends(
-        get_anomaly_maintenance_application
-    ),
 ):
     del principal
-    identity = ProjectorDeadLetterIdentity(projector_identity, event_id)
-    return _call_maintenance(
-        lambda: _dead_letter_supersede_preview_payload(
-            application.preview_dead_letter_supersede(
-                identity, body.reason, body.evidence_reference
-            )
-        ),
-        "成功預覽 projector dead-letter successor 處分",
-        CorrelationId(
-            f"projector-dead-letter-supersede-preview:{projector_identity}:{event_id}"
-        ),
+    _raise_projector_dead_letter_retired(
+        f"projector-dead-letter-supersede-preview:{projector_identity}:{event_id}"
     )
 
 
 @router.post(
     "/projector/dead-letters/{projector_identity}/{event_id}/supersede/apply",
-    response_model=BaseResponse[SupersedeProjectorDeadLetterReceiptView],
+    include_in_schema=False,
 )
 def apply_projector_dead_letter_supersede(
-    body: SupersedeProjectorDeadLetterApplyBody,
     projector_identity: str = Path(..., pattern=_PROJECTOR_PATTERN),
     event_id: int = Path(..., gt=0),
-    idempotency_key: _IdempotencyHeader = ...,
     correlation_header: str | None = Header(default=None, alias="X-Correlation-ID"),
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: AnomalyMaintenanceApplication = Depends(
-        get_anomaly_maintenance_application
-    ),
 ):
     correlation = _correlation_id(
-        correlation_header,
+        correlation_header if isinstance(correlation_header, str) else None,
         f"projector-dead-letter-supersede:{projector_identity}:{event_id}",
     )
-    request = SupersedeProjectorDeadLetterRequest(
-        ProjectorDeadLetterIdentity(projector_identity, event_id),
-        body.expected_attempt_count,
-        body.expected_successor_event_id,
-        body.expected_successor_source_version,
-        body.reason,
-        body.evidence_reference,
-        PreviewFingerprint(body.preview_fingerprint),
-        IdempotencyKey(idempotency_key),
-        ActorContext(str(principal.username or "").strip()),
-        correlation,
-    )
-    return _call_maintenance(
-        lambda: _dead_letter_supersede_receipt_payload(
-            application.apply_dead_letter_supersede(request)
-        ),
-        "已以驗證 successor 處分 projector dead-letter",
-        correlation,
-    )
+    del principal
+    _raise_projector_dead_letter_retired(correlation.value)
+
+
 @router.get(
-    "/{fingerprint}",
+    "/{issue_key}",
     response_model=BaseResponse[AnomalyRecoveryContextView],
 )
 def query_recovery_context(
-    fingerprint: str = Path(..., pattern=r"^[0-9a-f]{64}$"),
+    issue_key: str = Path(..., pattern=r"^(?:ci_[0-9a-f]{64}|[0-9a-f]{64})$"),
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: RootFactProjectionApplication = Depends(
-        get_anomaly_recovery_application
+    repository = Depends(
+        get_current_anomaly_issue_repository
     ),
 ):
     del principal
-    correlation_id = CorrelationId(f"anomaly-recovery:{fingerprint}")
-    return _call(
-        lambda: _context_payload(
-            application.query_recovery(
-                PreviewFingerprint(fingerprint),
-                correlation_id,
-            )
-        ),
-        "成功取得異常修復資訊",
+    correlation_id = CorrelationId(f"anomaly-recovery:{issue_key}")
+    _reject_legacy_fingerprint(issue_key, correlation_id)
+    return _call_current(
+        lambda: _current_context_payload(repository.query_current(issue_key)),
+        "成功取得目前異常資訊",
         correlation_id,
     )
 
 
 @router.get(
-    "/{fingerprint}/actions/{action_key}",
+    "/{issue_key}/actions/{action_key}",
     response_model=BaseResponse[RecoveryActionView],
 )
 def query_recovery_preview_link(
-    fingerprint: str = Path(..., pattern=r"^[0-9a-f]{64}$"),
+    issue_key: str = Path(..., pattern=r"^(?:ci_[0-9a-f]{64}|[0-9a-f]{64})$"),
     action_key: str = Path(..., min_length=1, max_length=191),
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: RootFactProjectionApplication = Depends(
-        get_anomaly_recovery_application
+    repository = Depends(
+        get_current_anomaly_issue_repository
     ),
 ):
     del principal
-    correlation_id = CorrelationId(f"recovery-action:{fingerprint}")
-    return _call(
-        lambda: _recovery_action_payload(
-            application.query_recovery_preview_link(
-                PreviewFingerprint(fingerprint),
-                action_key,
-                correlation_id,
-            )
-        ),
+    correlation_id = CorrelationId(f"recovery-action:{issue_key}")
+    _reject_legacy_fingerprint(issue_key, correlation_id)
+    def _query_action():
+        context = _current_context_payload(repository.query_current(issue_key))
+        for action in context["available_actions"]:
+            if action["action_key"] == action_key:
+                return action
+        raise ValueError("recovery_action_not_available")
+    return _call_current(
+        _query_action,
         "成功取得 owning Domain Preview 入口",
         correlation_id,
     )
 
 
-def _context_payload(context):
-    projection = context.projection
+def _current_context_payload(projection):
+    if projection is None:
+        raise ValueError("anomaly_not_found")
+    candidate = projection.candidate
+    details = dict(candidate.details)
+    if not isinstance(details, dict):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    raw_actions = details.pop("available_actions", ()) if isinstance(details, dict) else ()
+    if not isinstance(raw_actions, (tuple, list)):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    # Never expose the persisted JSON mapping.  Only the closed, redacted
+    # display projection crosses the HTTP boundary.
+    detail_snapshot = _current_display_snapshot(candidate.definition_code, details)
+    subject_snapshot = _current_display_snapshot(
+        candidate.definition_code,
+        candidate.subject_identity,
+    )
     return {
-        "fingerprint": projection.fingerprint.value,
-        "definition_code": projection.definition_code,
-        "source_domain": context.source_domain,
-        "source_identity": projection.source_identity,
-        "source_version": projection.source_version,
-        "severity": context.severity,
-        "predicate_active": projection.predicate_active,
-        "workflow_status": projection.workflow_status.value,
-        "workflow_version": projection.workflow_version,
-        "domain_blocker_active": context.domain_blocker_active,
-        "projection_freshness": context.projection_freshness,
-        "root_fact_snapshot": _root_snapshot_payload(context.root_fact_snapshot),
-        "occurrence_timeline": [
-            _occurrence_payload(item) for item in context.occurrence_timeline
-        ],
-        "workflow_timeline": [
-            _recovery_timeline_payload(item) for item in context.workflow_timeline
-        ],
-        "available_actions": [
-            _recovery_action_payload(item) for item in context.available_actions
-        ],
+        "issue_key": candidate.issue_key,
+        "definition_code": candidate.definition_code,
+        "owner_domain": candidate.owner_domain,
+        "owner_root_type": candidate.owner_root_type,
+        "subject": subject_snapshot,
+        "owner_snapshot_token": projection.owner_snapshot_token,
+        "owner_version": candidate.owner_version,
+        "severity": candidate.severity,
+        "blocking": candidate.blocking,
+        "details_version": projection.details_version,
+        "details": detail_snapshot,
+        "episode_started_at": projection.episode_started_at,
+        "last_verified_at": projection.last_verified_at,
+        "available_actions": [_recovery_action_payload(item) for item in raw_actions],
     }
 
 
-def _call(query, message, correlation):
+def _current_display_snapshot(definition_code, values):
+    if values is None:
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    if not isinstance(values, dict):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    return AnomalyDisplaySnapshotView(
+        redaction_version="anomaly-safe.v1",
+        definition_code=definition_code,
+        fields=[_current_evidence_payload(key, values[key]) for key in sorted(values)],
+    )
+
+
+def _current_evidence_payload(key: str, value: object) -> dict[str, object]:
+    """Add only current subject/detail scalar types absent from legacy views."""
+
+    if key in {"generation", "integrity_revision"}:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError("anomaly_projection_data_integrity_violation")
+        return {"kind": "integer", "key": key, "value": value}
+    if key == "subject_type":
+        if not _safe_code(value):
+            raise ValueError("anomaly_projection_data_integrity_violation")
+        return {"kind": "code", "key": key, "value": value}
+    if key == "code":
+        if not _safe_code(value):
+            raise ValueError("anomaly_projection_data_integrity_violation")
+        return {"kind": "code", "key": key, "value": value}
+    return _evidence_payload(key, value)
+
+
+def _call_current(query, message, correlation):
     try:
         return BaseResponse(data=query(), message=message)
-    except RootFactProjectionError as error:
-        raise _http_error(error) from error
-    except (TypeError, ValueError, KeyError) as error:
-        raise _contract_error(correlation) from error
-
-
-def _call_maintenance(command, message, correlation):
-    try:
-        return BaseResponse(data=command(), message=message)
-    except (AnomalyMaintenanceError, RootFactProjectionError) as error:
-        raise _http_error(error) from error
     except ValueError as error:
-        raise _maintenance_contract_error(error, correlation) from error
-    except (TypeError, KeyError) as error:
+        if str(error) == "anomaly_not_found":
+            raise _current_not_found(correlation) from error
+        if str(error) == "recovery_action_not_available":
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": {
+                        "category": "validation",
+                        "code": "recovery_action_not_available",
+                        "message": "此 current issue 沒有要求的修復入口。",
+                        "correlation_id": correlation.value,
+                        "field_errors": [],
+                        "domain_blockers": [],
+                        "retryable": False,
+                        "current_version": None,
+                    }
+                },
+            ) from error
         raise _contract_error(correlation) from error
 
 
-def _dead_letter_payload(dead_letter):
-    successor = dead_letter.successor
-    actions = ["retry_after_source_correction"]
-    if successor is not None:
-        actions.append("supersede_with_verified_successor")
-    return {
-        "projector_identity": dead_letter.identity.projector_identity,
-        "event_id": dead_letter.identity.event_id,
-        "intent_type": dead_letter.intent_type,
-        "attempt_count": dead_letter.attempt_count,
-        "error_code": dead_letter.error_code,
-        "failed_at": dead_letter.failed_at,
-        "available_actions": actions,
-        "successor_event_id": None if successor is None else successor.event_id,
-        "successor_source_version": (
-            None if successor is None else successor.source_version
-        ),
-    }
-
-
-def _dead_letter_preview_payload(preview):
-    return {
-        "projector_identity": preview.dead_letter.identity.projector_identity,
-        "event_id": preview.dead_letter.identity.event_id,
-        "intent_type": preview.dead_letter.intent_type,
-        "expected_attempt_count": preview.dead_letter.attempt_count,
-        "error_code": preview.dead_letter.error_code,
-        "reason": preview.reason,
-        "evidence_reference": preview.evidence_reference,
-        "preview_fingerprint": preview.fingerprint.value,
-    }
-
-
-def _dead_letter_receipt_payload(receipt):
-    return {
-        "projector_identity": receipt.identity.projector_identity,
-        "event_id": receipt.identity.event_id,
-        "prior_attempt_count": receipt.prior_attempt_count,
-        "resulting_status": receipt.resulting_status,
-        "receipt_identity": receipt.receipt_identity,
-        "replayed": receipt.replayed,
-    }
-
-
-def _dead_letter_supersede_preview_payload(preview):
-    return {
-        "projector_identity": preview.dead_letter.identity.projector_identity,
-        "event_id": preview.dead_letter.identity.event_id,
-        "intent_type": preview.dead_letter.intent_type,
-        "expected_attempt_count": preview.dead_letter.attempt_count,
-        "successor_event_id": preview.successor.event_id,
-        "successor_source_version": preview.successor.source_version,
-        "successor_predicate_active": preview.successor.predicate_active,
-        "reason": preview.reason,
-        "evidence_reference": preview.evidence_reference,
-        "preview_fingerprint": preview.fingerprint.value,
-    }
-
-
-def _dead_letter_supersede_receipt_payload(receipt):
-    return {
-        "projector_identity": receipt.identity.projector_identity,
-        "event_id": receipt.identity.event_id,
-        "successor_event_id": receipt.successor_event_id,
-        "successor_source_version": receipt.successor_source_version,
-        "resulting_status": receipt.resulting_status,
-        "receipt_identity": receipt.receipt_identity,
-        "replayed": receipt.replayed,
-    }
-
-
-def _maintenance_contract_error(error, correlation):
-    code = str(error)
-    status, message = {
-        "projector_dead_letter_not_found": (404, "找不到可人工重試的 projector 死信。"),
-        "projector_dead_letter_stale": (409, "死信狀態已變更，請重新預覽。"),
-        "projector_dead_letter_preview_stale": (409, "重試預覽已過期，請重新預覽。"),
-        "projector_dead_letter_successor_not_verified": (409, "尚無可驗證的較新成功投影，不能處分此死信。"),
-        "projector_dead_letter_successor_stale": (409, "較新成功投影已變更，請重新預覽。"),
-        "idempotency_conflict": (409, "此 Idempotency-Key 已用於不同的重試內容。"),
-        "projector_identity_not_supported": (422, "不支援此 projector。"),
-    }.get(
-        code,
-        (422, "projector 死信重試資料未通過驗證。"),
-    )
-    return HTTPException(
-        status_code=status,
+def _reject_legacy_fingerprint(issue_key: str, correlation: CorrelationId) -> None:
+    if issue_key.startswith("ci_"):
+        return
+    raise HTTPException(
+        status_code=410,
         detail={
             "error": {
-                "category": "validation" if status == 422 else "conflict",
-                "code": code if code in {
-                    "projector_dead_letter_not_found",
-                    "projector_dead_letter_stale",
-                    "projector_dead_letter_preview_stale",
-                    "projector_dead_letter_successor_not_verified",
-                    "projector_dead_letter_successor_stale",
-                    "idempotency_conflict",
-                    "projector_identity_not_supported",
-                } else "projector_dead_letter_request_invalid",
-                "message": message,
+                "category": "domain_blocked",
+                "code": "anomaly_recovery_fingerprint_retired",
+                "message": "舊 anomaly fingerprint 已停止 recovery 查詢。",
                 "correlation_id": correlation.value,
                 "field_errors": [],
-                "domain_blockers": [],
-                "retryable": status == 409,
+                "domain_blockers": [
+                    "replacement_identifier:GET /api/v1/anomalies/{issue_key}",
+                ],
+                "retryable": False,
+                "current_version": None,
             }
         },
     )
 
 
-_TIMELINE_ACTIONS = {"claim", "resolve", "reopen", "auto_resolve"}
-
-
-def _root_snapshot_payload(snapshot) -> AnomalyRootFactSnapshotView:
-    if not isinstance(snapshot, dict):
-        raise ValueError("root snapshot must be an object")
-    required = {
-        "occurred_at",
-        "source_version",
-        "finance_import_row_id",
-        "finance_import_batch_id",
-        "amount_delta_ntd",
-        "root_condition_active",
-        "integrity_blocker_active",
-        "affected_order_identities",
-        "affected_obligation_identities",
-        "domain_blockers",
-        "reason_codes",
-    }
-    redacted_internal = {
-        "case_no",
-        "definition_code",
-        "overpayment_identity",
-        "recovery_bindings",
-        "recovery_identity",
-        "staff_id",
-    }
-    optional_public = {"original_refund_ledger_entry_id"}
-    if not required.issubset(snapshot) or set(snapshot) - (required | redacted_internal | optional_public):
-        raise ValueError("root snapshot fields are not public")
-    order_ids = snapshot["affected_order_identities"]
-    obligation_ids = snapshot["affected_obligation_identities"]
-    blockers = snapshot["domain_blockers"]
-    reasons = snapshot["reason_codes"]
-    if not isinstance(order_ids, list) or not isinstance(obligation_ids, list):
-        raise ValueError("root snapshot identity collections are invalid")
-    if not all(_safe_identity(item) for item in order_ids + obligation_ids):
-        raise ValueError("root snapshot identities are invalid")
-    if not isinstance(blockers, list) or not isinstance(reasons, list):
-        raise ValueError("root snapshot code collections are invalid")
-    if not all(_safe_code(item) for item in blockers + reasons):
-        raise ValueError("root snapshot codes are invalid")
-    original_ledger_id = snapshot.get("original_refund_ledger_entry_id")
-    if original_ledger_id is not None and (
-        isinstance(original_ledger_id, bool)
-        or not isinstance(original_ledger_id, int)
-        or original_ledger_id <= 0
-    ):
-        raise ValueError("root snapshot original refund ledger identity is invalid")
-    return AnomalyRootFactSnapshotView(
-        occurred_at=_datetime_value(snapshot["occurred_at"]),
-        source_version=snapshot["source_version"],
-        finance_import_row_identity=_identity_value(snapshot["finance_import_row_id"]),
-        finance_import_batch_identity=_identity_value(snapshot["finance_import_batch_id"]),
-        original_refund_ledger_entry_identity=(
-            None
-            if original_ledger_id is None
-            else _identity_value(original_ledger_id)
-        ),
-        amount_delta_ntd=snapshot["amount_delta_ntd"],
-        root_condition_active=snapshot["root_condition_active"],
-        integrity_blocker_active=snapshot["integrity_blocker_active"],
-        affected_order_identities=list(order_ids),
-        affected_obligation_identities=list(obligation_ids),
-        domain_blockers=list(blockers),
-        reason_codes=list(reasons),
+def _current_not_found(correlation: CorrelationId) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={
+            "error": {
+                "category": "not_found",
+                "code": "anomaly_not_found",
+                "message": "找不到目前仍成立的異常。",
+                "correlation_id": correlation.value,
+                "field_errors": [],
+                "domain_blockers": [],
+                "retryable": False,
+                "current_version": None,
+            }
+        },
     )
 
 
-def _occurrence_payload(occurrence) -> FinanceOccurrenceView:
-    snapshot = occurrence.bounded_snapshot
-    if not isinstance(snapshot, dict):
-        raise ValueError("occurrence snapshot must be an object")
-    field_builders = {
-        "amount_delta_ntd": _money_field,
-        "domain_blockers": _code_list_field,
-        "integrity_blocker_active": _boolean_field,
-        "reason_codes": _code_list_field,
-        "root_condition_active": _boolean_field,
-        "affected_order_identities": _identity_list_field,
-        "affected_obligation_identities": _identity_list_field,
-        "occurred_at": _date_field,
-        "source_version": _integer_field,
-        "source_identity": _identity_field,
-        "finance_import_row_id": _identity_field,
-        "finance_import_batch_id": _identity_field,
-        "original_refund_ledger_entry_id": _identity_field,
-    }
-    internal_keys = {
-        "case_no",
-        "definition_code",
-        "overpayment_identity",
-        "recovery_bindings",
-        "recovery_identity",
-        "staff_id",
-    }
-    unknown_keys = set(snapshot) - set(field_builders) - internal_keys
-    if unknown_keys:
-        raise ValueError("occurrence snapshot fields are unknown")
-    fields = [
-        field_builders[key](key, snapshot[key])
-        for key in sorted(set(snapshot) - internal_keys)
-        if not (
-            key == "original_refund_ledger_entry_id"
-            and snapshot[key] is None
-        )
-    ]
-
-    return FinanceOccurrenceView(
-        occurrence_fingerprint=occurrence.occurrence_fingerprint.value,
-        definition_code=occurrence.definition_code,
-        source_event_identity=_identity_value(occurrence.source_event_identity),
-        finance_import_row_id=occurrence.finance_import_row_id,
-        finance_import_batch_id=occurrence.finance_import_batch_id,
-        source_version=occurrence.source_version,
-        occurred_at=_materialize(occurrence.occurred_at),
-        bounded_snapshot=AnomalyDisplaySnapshotView(
-            redaction_version="anomaly-safe.v1",
-            definition_code=occurrence.definition_code,
-            fields=fields,
-        ),
+def _raise_projector_dead_letter_retired(correlation_id: str) -> None:
+    """Keep unresolved public legacy URLs fail-closed until the generic replacement exists."""
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "error": {
+                "category": "domain_blocked",
+                "code": "anomaly_projector_dead_letter_endpoint_retired",
+                "message": "Projector dead-letter recovery has moved to the Global durable-job contract.",
+                "correlation_id": correlation_id,
+                "field_errors": [],
+                "domain_blockers": [
+                    "replacement_identifier:Global durable-job retry/supersede mechanism",
+                ],
+                "retryable": False,
+                "current_version": None,
+            }
+        },
     )
 
 
-def _recovery_timeline_payload(event) -> AnomalyTimelineEventView:
-    raw = _materialize(event)
-    if not isinstance(raw, dict) or set(raw) != {
-        "action",
-        "expected_workflow_version",
-        "resulting_workflow_version",
-        "actor",
-        "reason",
-        "correlation_id",
-        "created_at",
-    }:
-        raise ValueError("workflow timeline fields are invalid")
-    action = raw["action"]
-    if action not in _TIMELINE_ACTIONS:
-        raise ValueError("workflow timeline action is unknown")
-    actor = str(raw["actor"]).strip()
-    if not actor:
-        raise ValueError("workflow timeline actor is invalid")
-    correlation_id = str(raw["correlation_id"]).strip()
-    if not correlation_id or len(correlation_id) > 191:
-        raise ValueError("workflow timeline correlation is invalid")
-    return AnomalyTimelineEventView(
-        action=action,
-        expected_workflow_version=raw["expected_workflow_version"],
-        resulting_workflow_version=raw["resulting_workflow_version"],
-        actor=f"{actor[:1]}***",
-        reason=_safe_reason(action),
-        correlation_id=correlation_id,
-        created_at=raw["created_at"],
+def _raise_legacy_maintenance_retired(
+    code: str,
+    route_identity: str,
+    replacement: str,
+) -> None:
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "error": {
+                "category": "domain_blocked",
+                "code": code,
+                "message": "Legacy anomaly maintenance projection has been retired.",
+                "correlation_id": "anomaly-maintenance-retired:" + route_identity,
+                "field_errors": [],
+                "domain_blockers": [
+                    f"replacement_identifier:{replacement}",
+                    "removal_gate:blocked_external_caller_evidence",
+                ],
+                "retryable": False,
+                "current_version": None,
+            }
+        },
     )
 
 
@@ -728,71 +436,6 @@ def _source_binding_payload(key: str, value: object) -> AnomalySourceBindingView
     raise ValueError("recovery binding identity is invalid")
 
 
-def _identity_value(value: object) -> str:
-    direct_value = getattr(value, "value", value)
-    materialized = _materialize(direct_value)
-    if isinstance(materialized, bool):
-        raise ValueError("identity is invalid")
-    if isinstance(materialized, int):
-        if materialized <= 0:
-            raise ValueError("identity is invalid")
-        materialized = str(materialized)
-    if not _safe_identity(materialized):
-        raise ValueError("identity is invalid")
-    return materialized
-
-
-def _identity_field(key: str, value: object) -> dict[str, object]:
-    return {"kind": "identity", "key": key, "value": _identity_value(value)}
-
-
-def _integer_field(key: str, value: object) -> dict[str, object]:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError("integer evidence is invalid")
-    return {"kind": "integer", "key": key, "value": value}
-
-
-def _money_field(key: str, value: object) -> dict[str, object]:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("money evidence is invalid")
-    return {"kind": "money_ntd", "key": key, "value": value}
-
-
-def _boolean_field(key: str, value: object) -> dict[str, object]:
-    if not isinstance(value, bool):
-        raise ValueError("boolean evidence is invalid")
-    return {"kind": "boolean", "key": key, "value": value}
-
-
-def _date_field(key: str, value: object) -> dict[str, object]:
-    return {"kind": "datetime", "key": key, "value": _datetime_value(value)}
-
-
-def _datetime_value(value: object) -> str:
-    materialized = _materialize(value)
-    if not isinstance(materialized, str) or not materialized.strip():
-        raise ValueError("datetime evidence is invalid")
-    try:
-        parsed = datetime.fromisoformat(materialized)
-    except ValueError as error:
-        raise ValueError("datetime evidence is invalid") from error
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.isoformat()
-
-
-def _code_list_field(key: str, value: object) -> dict[str, object]:
-    if not isinstance(value, list) or not all(_safe_code(item) for item in value):
-        raise ValueError("code-list evidence is invalid")
-    return {"kind": "code_list", "key": key, "value": list(value)}
-
-
-def _identity_list_field(key: str, value: object) -> dict[str, object]:
-    if not isinstance(value, list) or not all(_safe_identity(item) for item in value):
-        raise ValueError("identity-list evidence is invalid")
-    return {"kind": "identity_list", "key": key, "value": list(value)}
-
-
 def _safe_identity(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip()) and len(value) <= 191
 
@@ -801,15 +444,6 @@ def _safe_code(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip()) and len(value) <= 191 and all(
         char.isalnum() or char in "_.:-" for char in value
     )
-
-
-def _safe_reason(action: str) -> str:
-    return {
-        "claim": "異常已進入人工確認流程。",
-        "resolve": "人工處理進度已更新；不代表根事實已修正。",
-        "reopen": "根條件仍存在，異常已重新開啟。",
-        "auto_resolve": "根條件已由來源投影解除。",
-    }[action]
 
 
 def _contract_error(correlation):
@@ -830,42 +464,8 @@ def _contract_error(correlation):
     )
 
 
-def _scan_result_payload(result):
-    return {
-        "definition_code": result.definition_code,
-        "scanned_count": result.scanned_count,
-        "active_count": result.active_count,
-        "inactive_count": result.inactive_count,
-        "next_after_source_id": result.next_after_source_id,
-        "completed": result.completed,
-    }
-
-
-def _retry_result_payload(result):
-    return {
-        "projector_identity": result.projector_identity,
-        "requeued_event_ids": list(result.requeued_event_ids),
-        "requeued_count": result.requeued_count,
-    }
-
-
 def _correlation_id(value, fallback):
     return CorrelationId(value.strip() if value and value.strip() else fallback)
-
-
-def _http_error(error):
-    status = {
-        ErrorCategory.NOT_FOUND: 404,
-        ErrorCategory.VALIDATION: 422,
-        ErrorCategory.CONFLICT: 409,
-        ErrorCategory.UNAVAILABLE: 503,
-    }.get(error.error.category, 500)
-    headers = {"Retry-After": "1"} if error.error.retryable else None
-    return HTTPException(
-        status_code=status,
-        detail={"error": _materialize(error.error)},
-        headers=headers,
-    )
 
 
 def _materialize(value):

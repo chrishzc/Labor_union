@@ -22,29 +22,31 @@ class _Result:
 
 def test_architecture_worker_delivers_subsidy_advance_recovery_events(monkeypatch):
     connection = _Connection()
-    monkeypatch.setattr(outbox_worker, "get_connection", lambda: connection)
-    monkeypatch.setattr(outbox_worker, "consume_finance_import_anomaly_events", lambda _: _Result(2, 1))
-    monkeypatch.setattr(outbox_worker, "consume_beclass_import_review_events", lambda _: _Result(3, 1))
-    monkeypatch.setattr(outbox_worker, "consume_hcm_import_review_events", lambda _: _Result(4, 2))
-    monkeypatch.setattr(outbox_worker, "consume_hcm_resubmission_outbox", lambda _: 8)
+    class _Runtime:
+        def connection(self):
+            return connection
+
+        def subsidy_advance_recovery_repository(self, _connection):
+            raise AssertionError("patched consumer must not construct a repository")
+
+    monkeypatch.setattr(outbox_worker, "require_runtime", lambda _runtime: _Runtime())
+    monkeypatch.setattr(outbox_worker, "consume_finance_import_anomaly_events", lambda *_args, **_kwargs: _Result(2, 1))
+    monkeypatch.setattr(outbox_worker, "consume_beclass_import_review_events", lambda *_args, **_kwargs: _Result(3, 1))
+    monkeypatch.setattr(outbox_worker, "consume_hcm_import_review_events", lambda *_args, **_kwargs: _Result(4, 2))
+    monkeypatch.setattr(outbox_worker, "consume_hcm_resubmission_outbox", lambda *_args, **_kwargs: 8)
     monkeypatch.setattr(
         outbox_worker,
         "consume_historical_order_adoption_review_events",
-        lambda _: _Result(6, 4),
+        lambda *_args, **_kwargs: _Result(6, 4),
     )
     monkeypatch.setattr(
         outbox_worker,
         "consume_historical_order_review_remediation_events",
-        lambda _: _Result(0, 0),
+        lambda *_args, **_kwargs: _Result(0, 0),
     )
-    monkeypatch.setattr(outbox_worker, "consume_government_subsidy_advance_events", lambda _: (5, 2))
-    monkeypatch.setattr(outbox_worker, "consume_government_overpayment_anomaly_events", lambda _: (0, 0))
-    monkeypatch.setattr(outbox_worker, "consume_client_over_refund_recovery_anomaly_events", lambda _: (0, 0))
-    monkeypatch.setattr(outbox_worker, "consume_client_refund_underpayment_anomaly_events", lambda _: (0, 0))
-    monkeypatch.setattr(outbox_worker, "consume_staff_overpayment_recovery_anomaly_events", lambda _: (0, 0))
-    monkeypatch.setattr(outbox_worker, "consume_staff_payout_difference_anomaly_events", lambda _: (0, 0))
-    monkeypatch.setattr(outbox_worker, "consume_client_finance_orders_events", lambda _: (11, 13))
-    monkeypatch.setattr(outbox_worker, "consume_security_alert_outbox", lambda _: _Result(12, 5))
+    monkeypatch.setattr(outbox_worker, "consume_government_subsidy_advance_events", lambda *_args, **_kwargs: (5, 2))
+    monkeypatch.setattr(outbox_worker, "consume_client_finance_orders_events", lambda *_args, **_kwargs: (11, 13))
+    monkeypatch.setattr(outbox_worker, "consume_security_alert_outbox", lambda *_args, **_kwargs: _Result(12, 5))
     monkeypatch.setattr(outbox_worker, "_consume_sources_if_due", lambda *_: (7, 3))
 
     result = outbox_worker._consume_once()

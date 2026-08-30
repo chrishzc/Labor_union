@@ -25,6 +25,12 @@ from api.schemas.candidate_contact_pool import (
 )
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.scheduling import candidate_contact_pool_workflow as workflow
+from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.segmented_availability_repository import MySqlSegmentedAvailabilityFactsRepository
+
+
+workflow.get_connection = get_connection
+workflow.segmented_facts_port = MySqlSegmentedAvailabilityFactsRepository(get_connection)
 
 router = APIRouter(prefix="/api/v1", tags=["Matches Candidate Contact Pool"])
 

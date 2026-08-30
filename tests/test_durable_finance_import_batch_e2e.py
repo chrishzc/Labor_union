@@ -48,13 +48,17 @@ def test_g16_durable_worker_crash_recovery_and_duplicate_delivery_apply_once(tmp
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
     from subsystems.finance_import.ingestion import ingest_finance_workbook
+    from scripts.imports.finance_statement_normalizer import normalize_workbook
     from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
 
     ingestion = ingest_finance_workbook(
         str(workbook),
         IdempotencyKey("durable-finance-ingest"),
         ActorContext("durable-test"),
+        connection_factory=get_connection,
+        normalizer=normalize_workbook,
     )
     connection = get_connection()
     try:
@@ -139,12 +143,16 @@ def test_g07_timeout_retry_enqueues_and_applies_one_cross_domain_command(tmp_pat
     from subsystems.access.authentication_session import AdminPrincipal
     from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
     from subsystems.finance_import.ingestion import ingest_finance_workbook
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from scripts.imports.finance_statement_normalizer import normalize_workbook
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
 
     ingestion = ingest_finance_workbook(
         str(workbook),
         IdempotencyKey("timeout-retry-finance-ingest"),
         ActorContext("timeout-retry-test"),
+        connection_factory=get_connection,
+        normalizer=normalize_workbook,
     )
     connection = get_connection()
     try:

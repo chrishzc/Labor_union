@@ -22,11 +22,7 @@ from infrastructure.line.messaging_api_adapter import LineMessagingApiAdapter
 from infrastructure.line.redis_wakeup import SleepingLineWakeupSubscriber
 from infrastructure.line.rich_menu_api_adapter import LineRichMenuApiAdapter
 from infrastructure.line.rich_menu_image_store import FileSystemRichMenuImageStore
-from infrastructure.mysql.line_runtime_repository import MySqlLineRuntimeRepository
 from infrastructure.mysql.line_notification_anomaly_worker import MySqlLineNotificationAnomalyWorker
-from infrastructure.mysql.line_notification_reconciliation_worker import (
-    MySqlLineNotificationReconciliationWorker,
-)
 from infrastructure.mysql.service_day_checkpoint_worker import MySqlServiceDayCheckpointWorker
 from infrastructure.mysql.scheduling_checkpoint_notification_source_worker import (
     MySqlSchedulingCheckpointNotificationSourceWorker,
@@ -39,6 +35,9 @@ from infrastructure.mysql.service_day_log_notification_stop_worker import (
 )
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.segmented_availability_repository import (
+    MySqlSegmentedAvailabilityFactsRepository,
+)
 from subsystems.customer_service.escalation_application import HumanEscalationApplication
 from subsystems.line.delivery_worker import LineDeliveryWorker
 from subsystems.line.event_dispatcher import LineEventDispatcher
@@ -62,7 +61,11 @@ from subsystems.line.service_help_application import LineServiceHelpApplication
 from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 from subsystems.line.worker_runtime import CanonicalLineWorkerRuntime
+from subsystems.line.notification_reconciliation import (
+    LineNotificationReconciliationApplication,
+)
 from subsystems.scheduling.matching_notification_application import MatchingNotificationApplication
+from api.dependencies.line_runtime import get_line_runtime_application
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -121,7 +124,13 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
         media_scheduler=schedule_line_media_archive,
         group_application=LineOrderGroupApplication(now, alert_group_registrar=register_group_alert_target),
         matching_postback_application=LineMatchingPostbackApplication(
-            MatchingNotificationApplication(open_line_unit_of_work, now)
+            MatchingNotificationApplication(
+                open_line_unit_of_work,
+                now,
+                availability_facts_port=MySqlSegmentedAvailabilityFactsRepository(
+                    get_connection
+                ),
+            )
         ),
         knowledge_question_scheduler=enqueue_line_knowledge_question,
         service_help_application=LineServiceHelpApplication(
@@ -146,7 +155,9 @@ def _additional_workers(worker_identity: str, now, images, provider) -> dict[str
         "service_day_log_notification_stops": MySqlServiceDayLogNotificationStopWorker(get_connection, now),
         "scheduling_rebuild_notification_invalidations": MySqlSchedulingRebuildNotificationInvalidationWorker(get_connection, now),
         "notification_anomalies": MySqlLineNotificationAnomalyWorker(get_connection),
-        "notification_reconciliation": MySqlLineNotificationReconciliationWorker(get_connection),
+        "notification_reconciliation": LineNotificationReconciliationApplication(
+            open_line_unit_of_work
+        ),
         "media_archives": LineMediaArchiveWorker(
             open_line_unit_of_work,
             LineMediaApiAdapter(_required_access_token()),
@@ -203,22 +214,12 @@ def _next_due_at():
             unit_of_work.outbox.next_due_at(RICH_MENU_BINDING_INTENT),
             unit_of_work.outbox.next_due_at(IDENTITY_MENU_RESET_INTENT),
         )
-        unit_of_work.commit()
     available = tuple(due_at for due_at in due_times if due_at is not None)
     return min(available) if available else None
 
 
 def _write_heartbeat(heartbeat: LineWorkerHeartbeat) -> None:
-    connection = get_connection()
-    try:
-        connection.begin()
-        MySqlLineRuntimeRepository(connection).record_heartbeat(heartbeat)
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
+    get_line_runtime_application().record_heartbeat(heartbeat)
 
 
 def _heartbeat_from_caller(

@@ -1,59 +1,54 @@
 """
 File: test_anomaly_necessity_catalog.py
-Description: 驗證異常定義生命週期的精確 34+7+1+1 分區。
+Description: 驗證 current-state successor 只註冊正式 15 個 current issue codes。
 """
 
-from domains.anomalies.registry import (
-    AnomalyDefinitionLifecycle,
-    default_anomaly_registry,
-)
+from domains.anomalies.registry import default_anomaly_registry
 
 
-EXPECTED_WORK_ITEM_CODES = {
-    "DOC-SEND-001",
-    "LINE-002",
-    "ORDER-001",
-    "ORDER-002",
-    "ORDER-003",
-    "ORDER-004",
-    "SUBSIDYADVANCE-001",
+EXPECTED_CURRENT_CODES = {
+    "SCHEDULE-006",
+    "PAYOUT-002",
+    "GOVSUB-001",
+    "GOVSUB-002",
+    "GOVSUB-003",
+    "GOVSUB-004",
+    "GOVSUB-005",
+    "GOVSUB-007",
+    "IMPORT-003",
+    "IMPORT-006",
+    "BECLASS-001",
+    "SCHEDULE-002",
+    "SCHEDULE-003",
+    "LINE-006",
+    "LINE-004",
 }
 
 
 def test_default_registry_has_exact_necessity_partition() -> None:
     registry = default_anomaly_registry()
 
-    assert len(registry.codes()) == 43
-    assert len(registry.active_codes()) == 34
+    assert set(registry.codes()) == EXPECTED_CURRENT_CODES
+    assert len(registry.codes()) == 15
+    assert len(registry.active_codes()) == 15
     assert registry.target_active_codes() == registry.active_codes()
-    assert set(registry.work_item_codes()) == EXPECTED_WORK_ITEM_CODES
-    assert registry.retired_codes() == ("SCHEDULE-005",)
-    assert registry.audit_only_codes() == ("staff_payout_overpayment",)
-    assert set(registry.reclassification_codes()) == {
-        *EXPECTED_WORK_ITEM_CODES,
-        "SCHEDULE-005",
-        "staff_payout_overpayment",
-    }
-    assert len(registry.reclassification_codes()) == 9
-
-    partitions = (
-        set(registry.active_codes()),
-        set(registry.work_item_codes()),
-        set(registry.retired_codes()),
-        set(registry.audit_only_codes()),
-    )
-    assert all(
-        left.isdisjoint(right)
-        for index, left in enumerate(partitions)
-        for right in partitions[index + 1 :]
-    )
-    assert set().union(*partitions) == set(registry.codes())
+    assert registry.work_item_codes() == ()
+    assert registry.retired_codes() == ()
+    assert registry.audit_only_codes() == ()
+    assert registry.reclassification_codes() == ()
 
 
-def test_unclassified_definitions_remain_active_by_default() -> None:
+def test_owner_work_items_are_not_runtime_anomaly_definitions() -> None:
     registry = default_anomaly_registry()
 
-    definition = registry.require("HISTORICAL-ORDER-001")
-    assert definition.lifecycle is AnomalyDefinitionLifecycle.ACTIVE
-    assert definition.target_lifecycle is AnomalyDefinitionLifecycle.ACTIVE
-    assert definition.code in registry.active_codes()
+    for code in (
+        "GOVSUB-006",
+        "client_over_refund_recovery_open",
+        "client_refund_underpayment",
+        "staff_overpayment_recovery_open",
+        "staff_payout_underpayment",
+        "staff_payout_overpayment",
+        "finance_import_manual_review",
+        "HISTORICAL-ORDER-001",
+    ):
+        assert code not in registry.codes()

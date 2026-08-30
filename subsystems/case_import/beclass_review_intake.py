@@ -9,7 +9,7 @@ from datetime import date, datetime
 import hashlib
 import math
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Protocol
 
 from domains.case_import.beclass_import_review import (
     BeClassImportSourceKind,
@@ -17,9 +17,11 @@ from domains.case_import.beclass_import_review import (
     build_review_identity,
     fingerprint_source_row,
 )
-from infrastructure.mysql.beclass_import_review_repository import (
-    MySqlBeClassImportReviewRepository,
-)
+
+
+class BeClassImportReviewRepository(Protocol):
+    def load(self, review_identity: str, *, for_update: bool): ...
+    def append_invalid_row(self, root) -> None: ...
 
 
 def record_invalid_beclass_row(
@@ -32,6 +34,7 @@ def record_invalid_beclass_row(
     masked_identifier: str,
     source_payload: Mapping[str, object],
     issue_codes,
+    repository: BeClassImportReviewRepository,
 ) -> str:
     canonical_payload = {
         str(field): _canonical_value(value) for field, value in source_payload.items()
@@ -58,7 +61,6 @@ def record_invalid_beclass_row(
             canonical_issues,
         ),
     )
-    repository = MySqlBeClassImportReviewRepository(connection)
     existing = repository.load(review_identity, for_update=False)
     if existing is None:
         repository.append_invalid_row(root)

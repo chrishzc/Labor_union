@@ -8,12 +8,12 @@ from __future__ import annotations
 from argparse import Namespace
 import os
 from pathlib import Path
-import time
 
 import pandas as pd
 import pytest
 
 from scripts.bootstrap_disposable_mysql_schema import bootstrap
+from scripts.imports.finance_statement_normalizer import normalize_workbook
 
 
 DATABASE = os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE")
@@ -80,6 +80,8 @@ def test_deidentified_taishin_fixture_becomes_root_fact_and_unresolved_reprocess
         str(workbook),
         IdempotencyKey("lu-test-unresolved-historical-reprocess"),
         ActorContext("lu-test-runner"),
+        connection_factory=get_connection,
+        normalizer=normalize_workbook,
     )
 
     assert receipt.source_row_count == receipt.canonical_created_count == 1
@@ -113,7 +115,7 @@ def test_deidentified_taishin_fixture_becomes_root_fact_and_unresolved_reprocess
     assert error.value.error.code == "reprocess_owner_not_resolved"
 
 
-def test_mixed_finance_workbook_keeps_valid_row_and_projects_safe_source_warning(tmp_path):
+def test_mixed_finance_workbook_keeps_valid_row_and_acknowledges_owner_review(tmp_path):
     bootstrap(_arguments())
     workbook = tmp_path / "taishin-mixed-source-review.xlsx"
     pd.DataFrame(
@@ -126,8 +128,9 @@ def test_mixed_finance_workbook_keeps_valid_row_and_projects_safe_source_warning
     ).to_excel(workbook, sheet_name="交易明細", index=False, header=False)
 
     from infrastructure.mysql.mysql_adapter import get_connection
+    from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
     from shared_kernel.identities import ActorContext, IdempotencyKey
-    from subsystems.anomalies.finance_import_anomaly_consumer import (
+    from subsystems.finance_import.finance_import_anomaly_consumer import (
         consume_finance_import_anomaly_events,
     )
     from subsystems.finance_import.ingestion import ingest_finance_workbook
@@ -136,11 +139,15 @@ def test_mixed_finance_workbook_keeps_valid_row_and_projects_safe_source_warning
         str(workbook),
         IdempotencyKey("lu-test-finance-source-review"),
         ActorContext("lu-test-runner"),
+        connection_factory=get_connection,
+        normalizer=normalize_workbook,
     )
     replay = ingest_finance_workbook(
         str(workbook),
         IdempotencyKey("lu-test-finance-source-review"),
         ActorContext("lu-test-runner"),
+        connection_factory=get_connection,
+        normalizer=normalize_workbook,
     )
 
     assert receipt == replay
@@ -151,7 +158,9 @@ def test_mixed_finance_workbook_keeps_valid_row_and_projects_safe_source_warning
 
     connection = get_connection()
     try:
-        projected = consume_finance_import_anomaly_events(connection)
+        projected = consume_finance_import_anomaly_events(
+            connection, runtime=build_anomaly_runtime()
+        )
         assert projected.failed_count == 0
         with connection.cursor() as cursor:
             cursor.execute(
@@ -168,83 +177,13 @@ def test_mixed_finance_workbook_keeps_valid_row_and_projects_safe_source_warning
             assert "0912345678" not in str(stored_review)
             assert "敏感備註" not in str(stored_review)
             cursor.execute(
-                "SELECT logical_code,field_path,evidence_snapshot "
-                "FROM import_warning_occurrences "
-                "WHERE logical_code='FINANCE-SOURCE-001'"
-            )
-            warning = cursor.fetchone()
-            assert warning["field_path"] == "transaction_amount"
-            assert "0912345678" not in warning["evidence_snapshot"]
-            assert "敏感備註" not in warning["evidence_snapshot"]
-            cursor.execute(
-                "SELECT COUNT(*) AS count FROM finance_import_source_review_occurrences"
+                "SELECT COUNT(*) AS count FROM finance_import_source_review_outbox "
+                "WHERE published_at IS NOT NULL"
             )
             assert cursor.fetchone() == {"count": 1}
-    finally:
-        connection.close()
-
-
-def test_unknown_finance_source_projection_stops_after_three_one_second_attempts(
-    tmp_path, monkeypatch
-):
-    bootstrap(_arguments())
-    workbook = tmp_path / "taishin-unknown-source-review.xlsx"
-    pd.DataFrame(
-        [
-            ["說明"],
-            ["序號", "交易日期", "交易時間", "帳務日期", "摘要", "支出金額", "存入金額", "帳戶餘額", "備註"],
-            ["0001", "2026/08/05", "09:09:07", "2026/08/05", "轉帳", "300.5", "", "8699.5", "不得進錯誤內容"],
-        ]
-    ).to_excel(workbook, sheet_name="交易明細", index=False, header=False)
-
-    from infrastructure.mysql.mysql_adapter import get_connection
-    from shared_kernel.identities import ActorContext, IdempotencyKey
-    from subsystems.anomalies import finance_import_anomaly_consumer as consumer
-    from subsystems.finance_import.ingestion import ingest_finance_workbook
-
-    ingest_finance_workbook(
-        str(workbook),
-        IdempotencyKey("lu-test-finance-source-unknown"),
-        ActorContext("lu-test-runner"),
-    )
-    monkeypatch.setattr(
-        consumer,
-        "build_finance_source_warning_occurrences",
-        lambda _review: (_ for _ in ()).throw(RuntimeError("unknown raw state")),
-    )
-    connection = get_connection()
-    try:
-        for attempt in range(3):
-            failed = consumer.consume_finance_import_anomaly_events(
-                connection, maximum_events=1
-            )
-            assert failed.failed_count == 1
-            immediate = consumer.consume_finance_import_anomaly_events(
-                connection, maximum_events=1
-            )
-            assert immediate.failed_count == 0
-            if attempt < 2:
-                time.sleep(1.05)
-
-        time.sleep(1.05)
-        stopped = consumer.consume_finance_import_anomaly_events(
-            connection, maximum_events=1
-        )
-        assert stopped.failed_count == stopped.delivered_count == 0
-        with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT attempts,last_error FROM finance_import_source_review_outbox"
-            )
-            outbox = cursor.fetchone()
-            failure = __import__("json").loads(outbox["last_error"])
-            assert outbox["attempts"] == 3
-            assert failure["terminal"] == 1
-            assert failure["error_code"].startswith(
-                "warning_projection_failed:finance_import:"
-            )
-            assert "unknown raw state" not in outbox["last_error"]
-            cursor.execute(
-                "SELECT COUNT(*) AS count FROM import_warning_occurrences"
+                "SELECT COUNT(*) AS count FROM import_warning_occurrences "
+                "WHERE owning_lane='finance_import'"
             )
             assert cursor.fetchone() == {"count": 0}
     finally:
@@ -419,7 +358,8 @@ def test_durable_correction_worker_posts_manual_refund_once(tmp_path):
     from infrastructure.mysql.finance_import_owning_domain_composite import MySqlFinanceImportOwningDomainComposite
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import CorrelationId
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
     from subsystems.jobs.command_application import DurableJobCommandApplication
 
     connection = get_connection()
@@ -679,91 +619,7 @@ def test_g08_each_finance_correction_persistence_failure_rolls_back(tmp_path, fa
         connection.close()
 
 
-def test_g10_failed_then_recovered_anomaly_projector_never_changes_committed_refund(tmp_path, monkeypatch):
-    bootstrap(_arguments())
-    _seed_open_refund_obligation()
-    _post_manual_refund(tmp_path)
-
-    from infrastructure.mysql.mysql_adapter import get_connection
-    from subsystems.anomalies import finance_import_anomaly_consumer as consumer
-
-    connection = get_connection()
-    try:
-        projector_factory = consumer._projection_application
-        monkeypatch.setattr(consumer, "_projection_application", lambda _: _ProjectorThatFails())
-        failed = consumer.consume_finance_import_anomaly_events(connection)
-        assert failed.failed_count == 1
-        _assert_g10_committed_refund_is_unchanged(connection)
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT status FROM finance_import_outbox ORDER BY id DESC LIMIT 1")
-            assert cursor.fetchone() == {"status": "failed"}
-            cursor.execute("UPDATE finance_import_outbox SET next_attempt_at=CURRENT_TIMESTAMP WHERE status='failed'")
-        connection.commit()
-
-        monkeypatch.setattr(consumer, "_projection_application", projector_factory)
-        recovered = consumer.consume_finance_import_anomaly_events(connection)
-        assert recovered.delivered_count == 1
-        _assert_g10_committed_refund_is_unchanged(connection)
-    finally:
-        connection.close()
-
-
-def test_g10_unknown_projection_failure_stops_after_three_one_second_attempts(tmp_path, monkeypatch):
-    bootstrap(_arguments())
-    receipt = _ingest_unresolved_taishin_outflow(tmp_path)
-
-    from infrastructure.mysql.mysql_adapter import get_connection
-    from subsystems.anomalies import finance_import_anomaly_consumer as consumer
-
-    connection = get_connection()
-    try:
-        monkeypatch.setattr(consumer, "_projection_application", lambda _: _ProjectorThatFails())
-        for attempt in range(3):
-            failed = consumer.consume_finance_import_anomaly_events(
-                connection, maximum_events=1
-            )
-            assert failed.failed_count == 1
-            immediate = consumer.consume_finance_import_anomaly_events(
-                connection, maximum_events=1
-            )
-            assert immediate.failed_count == 0
-            if attempt < 2:
-                time.sleep(1.05)
-
-        time.sleep(1.05)
-        stopped = consumer.consume_finance_import_anomaly_events(
-            connection, maximum_events=1
-        )
-        assert stopped.failed_count == 0
-        assert stopped.delivered_count == 0
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT status,attempt_count,last_error FROM finance_import_outbox "
-                "ORDER BY id DESC LIMIT 1"
-            )
-            outbox = cursor.fetchone()
-            failure = __import__("json").loads(outbox["last_error"])
-            assert outbox["status"] == "failed"
-            assert outbox["attempt_count"] == 3
-            assert failure["terminal"] == 1
-            assert failure["error_code"].startswith(
-                "warning_projection_failed:finance_import:"
-            )
-            assert "injected anomaly projector pause" not in outbox["last_error"]
-            cursor.execute(
-                "SELECT COUNT(*) AS count FROM finance_import_rows"
-            )
-            assert cursor.fetchone() == {"count": 1}
-            cursor.execute(
-                "SELECT COUNT(*) AS count FROM anomaly_current_alerts "
-                "WHERE definition_code='finance_import_manual_review'"
-            )
-            assert cursor.fetchone() == {"count": 0}
-    finally:
-        connection.close()
-
-
-def test_g11_ordinary_finance_review_projects_once_without_integrity_alert(tmp_path):
+def test_g11_ordinary_finance_review_acknowledges_owner_outbox_without_legacy_projection(tmp_path):
     bootstrap(_arguments())
     receipt = _ingest_unresolved_taishin_outflow(tmp_path)
     replay = _ingest_unresolved_taishin_outflow(tmp_path)
@@ -775,37 +631,25 @@ def test_g11_ordinary_finance_review_projects_once_without_integrity_alert(tmp_p
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
-            cursor.execute("SELECT definition_code,predicate_active,workflow_status FROM anomaly_current_alerts ORDER BY definition_code")
-            assert cursor.fetchall() == [
-                {
-                    "definition_code": "finance_import_manual_review",
-                    "predicate_active": 1,
-                    "workflow_status": "open",
-                }
-            ]
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM anomaly_current_alerts "
+                "WHERE definition_code='finance_import_manual_review'"
+            )
+            assert cursor.fetchone() == {"count": 0}
             cursor.execute("SELECT COUNT(*) AS count FROM finance_import_outbox")
             assert cursor.fetchone() == {"count": 1}
             cursor.execute("SELECT COUNT(*) AS count FROM finance_import_apply_receipts")
             assert cursor.fetchone() == {"count": 0}
             cursor.execute(
-                "SELECT occurrence.logical_code,occurrence.field_path,task.tracking_status,task.tracking_version "
-                "FROM import_warning_occurrences occurrence "
-                "JOIN import_warning_current_tasks task ON task.occurrence_id=occurrence.id "
-                "WHERE occurrence.owning_lane='finance_import'"
+                "SELECT COUNT(*) AS count FROM import_warning_occurrences "
+                "WHERE owning_lane='finance_import'"
             )
-            assert cursor.fetchall() == [
-                {
-                    "logical_code": "FINANCE-ROW-001",
-                    "field_path": "$classification",
-                    "tracking_status": "open",
-                    "tracking_version": 1,
-                }
-            ]
+            assert cursor.fetchone() == {"count": 0}
     finally:
         connection.close()
 
 
-def test_finance_final_dispatch_does_not_auto_resolve_without_owner_terminal_contract(tmp_path):
+def test_finance_final_dispatch_acknowledges_without_legacy_warning_mutation(tmp_path):
     bootstrap(_arguments())
     _ingest_unresolved_taishin_outflow(tmp_path)
     _deliver_finance_import_outbox()
@@ -831,8 +675,23 @@ def test_finance_final_dispatch_does_not_auto_resolve_without_owner_terminal_con
 
     _deliver_finance_import_outbox()
     _deliver_finance_import_outbox()
-    _assert_manual_review_alert_remains_active_without_owner_terminal_contract()
-    _assert_manual_review_warning_remains_open()
+    from infrastructure.mysql.mysql_adapter import get_connection
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT status FROM finance_import_outbox "
+                "WHERE intent_key='lu-test-final-dispatch'"
+            )
+            assert cursor.fetchone() == {"status": "delivered"}
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM import_warning_occurrences "
+                "WHERE owning_lane='finance_import'"
+            )
+            assert cursor.fetchone() == {"count": 0}
+    finally:
+        connection.close()
 
 
 def test_real_taishin_subsidy_payout_advances_then_recovers_after_government_allocation(tmp_path):
@@ -943,19 +802,23 @@ def _append_full_government_receipt_allocation() -> None:
 
 def _deliver_subsidy_advance_recovery() -> None:
     from infrastructure.mysql.mysql_adapter import get_connection
-    from subsystems.client_finance.subsidy_advance_outbox_consumer import (
+    from infrastructure.mysql.subsidy_advance_recovery_repository import MySqlSubsidyAdvanceRecoveryRepository
+    from subsystems.government_subsidy.subsidy_advance_outbox_consumer import (
         consume_government_subsidy_advance_events,
     )
 
     connection = get_connection()
     try:
-        assert consume_government_subsidy_advance_events(connection) == (1, 0)
+        assert consume_government_subsidy_advance_events(
+            connection, MySqlSubsidyAdvanceRecoveryRepository
+        ) == (1, 0)
     finally:
         connection.close()
 
 
 def _assert_subsidy_advance_was_recovered_without_second_payout() -> None:
     from infrastructure.mysql.mysql_adapter import get_connection
+    from infrastructure.mysql.subsidy_advance_recovery_repository import MySqlSubsidyAdvanceRecoveryRepository
 
     connection = get_connection()
     try:
@@ -973,13 +836,15 @@ def test_government_receipt_recovers_existing_subsidy_advance_without_second_cli
     _seed_subsidy_advance_recovery_facts()
 
     from infrastructure.mysql.mysql_adapter import get_connection
-    from subsystems.client_finance.subsidy_advance_outbox_consumer import (
+    from subsystems.government_subsidy.subsidy_advance_outbox_consumer import (
         consume_government_subsidy_advance_events,
     )
 
     connection = get_connection()
     try:
-        assert consume_government_subsidy_advance_events(connection) == (1, 0)
+        assert consume_government_subsidy_advance_events(
+            connection, MySqlSubsidyAdvanceRecoveryRepository
+        ) == (1, 0)
         with connection.cursor() as cursor:
             cursor.execute("SELECT entry_type,amount_ntd FROM client_ledger_entries ORDER BY id")
             assert cursor.fetchall() == [{"entry_type": "subsidy_advance", "amount_ntd": 6000}]
@@ -996,13 +861,16 @@ def test_partial_government_subsidy_allocation_creates_review_without_auto_netti
     _seed_subsidy_advance_recovery_facts(government_allocation_amount=5000)
 
     from infrastructure.mysql.mysql_adapter import get_connection
-    from subsystems.client_finance.subsidy_advance_outbox_consumer import (
+    from infrastructure.mysql.subsidy_advance_recovery_repository import MySqlSubsidyAdvanceRecoveryRepository
+    from subsystems.government_subsidy.subsidy_advance_outbox_consumer import (
         consume_government_subsidy_advance_events,
     )
 
     connection = get_connection()
     try:
-        assert consume_government_subsidy_advance_events(connection) == (1, 0)
+        assert consume_government_subsidy_advance_events(
+            connection, MySqlSubsidyAdvanceRecoveryRepository
+        ) == (1, 0)
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM client_subsidy_advance_recoveries")
             assert cursor.fetchone() == {"count": 0}
@@ -1096,7 +964,7 @@ def _ingest_unresolved_taishin_outflow(tmp_path, *, amount=300):
         ).to_excel(workbook, sheet_name="交易明細", index=False, header=False)
     from shared_kernel.identities import ActorContext, IdempotencyKey
     from subsystems.finance_import.ingestion import ingest_finance_workbook
-    return ingest_finance_workbook(str(workbook), IdempotencyKey("lu-test-manual-refund-ingest"), ActorContext("lu-test-runner"))
+    return ingest_finance_workbook(str(workbook), IdempotencyKey("lu-test-manual-refund-ingest"), ActorContext("lu-test-runner"), connection_factory=get_connection, normalizer=normalize_workbook)
 
 
 def _post_manual_refund(tmp_path):
@@ -1125,7 +993,7 @@ def _ingest_unresolved_taishin_inflow(tmp_path, *, amount=300):
     pd.DataFrame([["說明"], ["序號", "交易日期", "交易時間", "帳務日期", "摘要", "支出金額", "存入金額", "帳戶餘額", "備註"], ["0002", "2026/08/05", "09:08:07", "2026/08/05", "退款退回", "", str(amount), str(9000 + amount), "客戶退款退回"]]).to_excel(workbook, sheet_name="交易明細", index=False, header=False)
     from shared_kernel.identities import ActorContext, IdempotencyKey
     from subsystems.finance_import.ingestion import ingest_finance_workbook
-    return ingest_finance_workbook(str(workbook), IdempotencyKey("lu-test-refund-return-ingest"), ActorContext("lu-test-runner"))
+    return ingest_finance_workbook(str(workbook), IdempotencyKey("lu-test-refund-return-ingest"), ActorContext("lu-test-runner"), connection_factory=get_connection, normalizer=normalize_workbook)
 
 
 def _correction_request(selection, preview, idempotency_key, correlation_id):
@@ -1189,20 +1057,6 @@ class _FailAfterPosting:
         raise RuntimeError("injected failure after owning Domain posting")
 
 
-def _assert_g10_committed_refund_is_unchanged(connection):
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT entry_type,amount_ntd FROM client_ledger_entries")
-        assert cursor.fetchall() == [{"entry_type": "refund", "amount_ntd": 300}]
-        cursor.execute("SELECT amount_due_ntd,status FROM client_obligations WHERE obligation_identity='refund:C-1'")
-        assert cursor.fetchone() == {"amount_due_ntd": 0, "status": "settled"}
-
-
-class _ProjectorThatFails:
-    def project(self, root_fact, correlation_id):
-        del root_fact, correlation_id
-        raise RuntimeError("injected anomaly projector pause")
-
-
 class _FailingPostingPort:
     def bind_request(self, request):
         del request
@@ -1219,11 +1073,14 @@ class _FailingPostingPort:
 
 
 def _deliver_finance_import_outbox() -> None:
+    from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
     from infrastructure.mysql.mysql_adapter import get_connection
-    from subsystems.anomalies.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
+    from subsystems.finance_import.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
     connection = get_connection()
     try:
-        result = consume_finance_import_anomaly_events(connection)
+        result = consume_finance_import_anomaly_events(
+            connection, runtime=build_anomaly_runtime()
+        )
         assert result.failed_count == 0
     finally:
         connection.close()

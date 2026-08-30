@@ -42,12 +42,12 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_government_subsidy_claim_workflow.py tests\\test_government_subsidy_ledger_workflow.py tests\\test_staff_payout_funding.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\government-subsidy\\subsystems\\government-subsidy\\integration\\test_government_subsidy_claim_workflow.py tests\\domains\\government-subsidy\\subsystems\\government-subsidy\\integration\\test_government_subsidy_ledger_workflow.py tests\\domains\\government-subsidy\\subsystems\\government-subsidy\\integration\\test_staff_payout_funding.py"
     ],
     "test_paths": [
-      "tests/test_government_subsidy_claim_workflow.py",
-      "tests/test_government_subsidy_ledger_workflow.py",
-      "tests/test_staff_payout_funding.py"
+      "tests/domains/government-subsidy/subsystems/government-subsidy/integration/test_government_subsidy_claim_workflow.py",
+      "tests/domains/government-subsidy/subsystems/government-subsidy/integration/test_government_subsidy_ledger_workflow.py",
+      "tests/domains/government-subsidy/subsystems/government-subsidy/integration/test_staff_payout_funding.py"
     ]
   }
 }

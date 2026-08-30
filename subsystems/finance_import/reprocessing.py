@@ -15,11 +15,10 @@ import hashlib
 import json
 import re
 from time import monotonic
-from typing import Any
+from typing import Any, Callable
 
 from domains.finance_import.transaction_classifier import classify_finance_transaction
-from infrastructure.mysql.mysql_adapter import get_connection
-from scripts.imports.finance_normalized_row import validate_normalized_row
+from domains.finance_import.normalized_row import validate_normalized_row
 from subsystems.finance_import.identity_maps import load_finance_identity_maps
 
 
@@ -189,10 +188,16 @@ def _fetch_candidate_rows(cursor: Any, batch_id: int, safety_limit: int) -> list
     return rows
 
 
-def reprocess_finance_import_batch(batch_id: int, actor: str | None = None, dry_run: bool = True, expected_plan_fingerprint: str | None = None, safety_limit: int = DEFAULT_SAFETY_LIMIT) -> dict[str, Any]:
+def reprocess_finance_import_batch(
+    batch_id: int,
+    actor: str | None = None,
+    dry_run: bool = True,
+    expected_plan_fingerprint: str | None = None,
+    safety_limit: int = DEFAULT_SAFETY_LIMIT,
+    *,
+    connection_factory: Callable[[], Any],
+) -> dict[str, Any]:
     """Create the legacy reprocess dry-run report; applying is permanently retired."""
-    if not callable(get_connection):
-        raise AssertionError("database connection factory is required")
     batch_id = _positive_id(batch_id, "batch_id")
     if not isinstance(dry_run, bool):
         raise TypeError("dry_run must be a boolean")
@@ -201,7 +206,7 @@ def reprocess_finance_import_batch(batch_id: int, actor: str | None = None, dry_
     if not dry_run:
         raise ValueError("legacy_finance_import_reprocess_apply_retired")
     started = monotonic()
-    connection = get_connection()
+    connection = connection_factory()
     try:
         with connection.cursor() as cursor:
             identity = _db_identity(cursor)

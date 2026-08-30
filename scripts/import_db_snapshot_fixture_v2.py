@@ -1,10 +1,11 @@
 """Checksum-verified insert-only importer for fixture v3."""
 from __future__ import annotations
-import argparse, hashlib, json
+import argparse, hashlib, json, re
+import os
 from datetime import date,datetime
 from decimal import Decimal
 from pathlib import Path
-from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.mysql_adapter import DB_CONFIG,get_connection
 from scripts.db_snapshot_fixture_v2_serializer import SerializedTable,build_manifest
 from scripts.db_snapshot_fixture_v2_validator import validate_snapshot_fixture_v2
 from scripts.export_db_snapshot_fixture_v2 import FIXTURE_NAME,FIXTURE_VERSION,SCHEMA_VERSION,DEFAULT_OUTPUT,TABLE_NAMES,JSON_COLUMNS,KEYS
@@ -78,7 +79,106 @@ def import_fixture(directory=DEFAULT_OUTPUT,apply=False,connection_factory=get_c
     finally:
         if not committed:conn.rollback()
         conn.close()
+
+def _require_target_database(target: str) -> None:
+    configured = str(DB_CONFIG.get("database") or "")
+    if not target or target != configured:
+        raise ValueError("target database must exactly match configured DB_DATABASE")
+    if not re.fullmatch(r"lu_test_[a-z0-9_]+", target):
+        raise ValueError("target database must be an explicitly named lu_test_* database")
+    if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+        raise ValueError("production environment is not permitted for fixture import")
+
+
+def _check_connected_identity(target: str) -> None:
+    if not os.getenv("DB_HOST", "").strip():
+        raise RuntimeError("DB_HOST must be configured explicitly")
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT DATABASE() AS database_name, @@hostname AS server")
+            identity = cursor.fetchone()
+        if not identity or identity.get("database_name") != target:
+            raise RuntimeError("connected database does not match --target-database")
+        if not str(identity.get("server") or "").strip():
+            raise RuntimeError("connected MySQL server identity is unavailable")
+    finally:
+        conn.close()
+
+
+def _validate_backup(path_value: str | None, target: str) -> dict[str, object]:
+    if not path_value:
+        raise ValueError("--apply requires --backup-receipt")
+    path = Path(path_value).expanduser().resolve()
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise ValueError("backup receipt does not exist or is empty")
+    header = path.read_bytes()[:1_048_576]
+    if not header.startswith((b"-- MySQL dump", b"-- MariaDB dump")):
+        raise ValueError("backup receipt is not a MySQL dump")
+    if f"Current Database: `{target}`".encode() not in header and f"USE `{target}`".encode() not in header:
+        raise ValueError("backup receipt does not identify the target database")
+    return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "target_database": target}
+
+
+def _read_plan(path_value: str | None, target: str, checksum: str) -> dict[str, object]:
+    if not path_value:
+        raise ValueError("--apply requires --plan-receipt from a prior --dry-run")
+    path = Path(path_value).expanduser().resolve()
+    if not path.is_file():
+        raise ValueError("dry-run plan receipt does not exist")
+    try:
+        plan = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("dry-run plan receipt is not valid UTF-8 JSON") from exc
+    if plan.get("mode") != "dry-run" or plan.get("target_database") != target:
+        raise ValueError("dry-run plan receipt belongs to another target")
+    if plan.get("snapshot_checksum") != checksum:
+        raise ValueError("fixture snapshot checksum drift detected")
+    return plan
+
+
+def _write_receipt(path_value: Path | None, payload: dict[str, object]) -> None:
+    if path_value is None:
+        return
+    path_value = path_value.expanduser().resolve()
+    path_value.parent.mkdir(parents=True, exist_ok=True)
+    path_value.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+
 def main():
-    p=argparse.ArgumentParser();p.add_argument("--fixture",type=Path,default=DEFAULT_OUTPUT);p.add_argument("--apply",action="store_true");a=p.parse_args()
-    print(json.dumps(import_fixture(a.fixture,a.apply),ensure_ascii=False,indent=2));return 0
+    p = argparse.ArgumentParser()
+    p.add_argument("--fixture", type=Path, default=DEFAULT_OUTPUT)
+    p.add_argument("--target-database", required=True)
+    p.add_argument("--apply", action="store_true")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--confirm-apply")
+    p.add_argument("--plan-receipt", type=Path)
+    p.add_argument("--backup-receipt", type=Path)
+    p.add_argument("--receipt-path", type=Path)
+    a = p.parse_args()
+    if a.apply and a.dry_run:
+        p.error("--apply and --dry-run are mutually exclusive")
+    try:
+        _require_target_database(a.target_database)
+        tables, checksum = load_fixture_bundle(a.fixture)
+        if a.apply:
+            expected = f"APPLY {a.target_database}"
+            if a.confirm_apply != expected:
+                p.error(f"--confirm-apply must exactly equal {expected!r}")
+            _read_plan(a.plan_receipt, a.target_database, checksum)
+            backup = _validate_backup(a.backup_receipt, a.target_database)
+            if not a.receipt_path:
+                p.error("--apply requires --receipt-path for a terminal receipt")
+            _check_connected_identity(a.target_database)
+        else:
+            backup = None
+    except (ValueError, RuntimeError) as exc:
+        p.error(str(exc))
+    result = import_fixture(a.fixture, a.apply)
+    result["mode"] = "apply" if a.apply else "dry-run"
+    if backup is not None:
+        result["backup_receipt"] = backup
+        result["receipt_status"] = "committed"
+    _write_receipt(a.receipt_path, result)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
 if __name__=="__main__":raise SystemExit(main())

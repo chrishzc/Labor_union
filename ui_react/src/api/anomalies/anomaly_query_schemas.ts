@@ -32,6 +32,7 @@ export type AnomalyWorkflowStatus = z.infer<typeof AnomalyWorkflowStatusEnum>;
 export const AnomalySummaryViewSchema = z
   .object({
     fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+    issue_key: z.string().regex(/^ci_[0-9a-f]{64}$/).optional(),
     definition_code: z.string().min(1),
     source_domain: z.string().min(1),
     source_identity: z.string().min(1),

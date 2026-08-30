@@ -233,7 +233,8 @@ def test_assignment_plan_durable_job_crash_recovery_and_duplicate_apply():
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import CorrelationId
     from subsystems.access.authentication_session import AdminPrincipal
-    from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from api.dependencies.durable_job_handlers import default_job_handlers
+    from subsystems.jobs.durable_job_worker import DurableJobWorker
     from subsystems.jobs.command_application import DurableJobCommandApplication
     from subsystems.scheduling.assignment_plan_workflow import AssignmentPlanPreviewRequest
 

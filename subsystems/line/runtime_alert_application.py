@@ -5,12 +5,171 @@ Description: 投影 runtime health 並委派 LINE alert target 唯一 registrati
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Iterable, Protocol
 
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identities import LineGroupId, LineUserId
 from shared_kernel.identities import CorrelationId, IdempotencyKey
+from subsystems.line.runtime_contracts import LineWebhookSecurityReceipt, LineWorkerHeartbeat
+from subsystems.line.runtime_monitoring import RuntimeHealthObservation
+
+
+class _RuntimeIdentity(Protocol):
+    service_name: str
+    instance_id: str
+    process_id: int
+    hostname: str
+    release_version: str
+    started_at: datetime
+
+
+class _LineRuntimeRepository(Protocol):
+    def append_security_receipt(self, receipt: LineWebhookSecurityReceipt) -> None: ...
+
+    def record_heartbeat(self, heartbeat: LineWorkerHeartbeat) -> None: ...
+
+
+class _LineRuntimeUnitOfWork(Protocol):
+    def __enter__(self): ...
+
+    def __exit__(self, exception_type, exception, traceback) -> bool: ...
+
+    def commit(self) -> None: ...
+
+
+class LineRuntimeApplication:
+    """Own LINE runtime persistence UoWs while adapters borrow the connection."""
+
+    def __init__(self, unit_of_work_factory, repository_factory) -> None:
+        self._unit_of_work_factory = unit_of_work_factory
+        self._repository_factory = repository_factory
+
+    def record_webhook_security_receipt(
+        self,
+        request_fingerprint: str,
+        signature_present: bool,
+        outcome,
+        event_count: int,
+        correlation_id: str,
+    ) -> None:
+        receipt = LineWebhookSecurityReceipt(
+            request_fingerprint,
+            signature_present,
+            outcome,
+            event_count,
+            correlation_id,
+            datetime.now(timezone.utc),
+        )
+        with self._unit_of_work_factory() as unit_of_work:
+            self._repository_factory(unit_of_work).append_security_receipt(receipt)
+            unit_of_work.commit()
+
+    def record_heartbeat(self, heartbeat: LineWorkerHeartbeat) -> None:
+        with self._unit_of_work_factory() as unit_of_work:
+            self._repository_factory(unit_of_work).record_heartbeat(heartbeat)
+            unit_of_work.commit()
+
+
+class RuntimeHeartbeatApplication:
+    """Persist a service heartbeat in one application-owned UoW."""
+
+    def __init__(self, unit_of_work_factory, repository_factory) -> None:
+        self._unit_of_work_factory = unit_of_work_factory
+        self._repository_factory = repository_factory
+
+    def record(self, identity: _RuntimeIdentity, processed: int) -> None:
+        with self._unit_of_work_factory() as unit_of_work:
+            self._repository_factory(unit_of_work).record_heartbeat(
+                identity.service_name,
+                identity.instance_id,
+                identity.process_id,
+                identity.hostname,
+                "running",
+                _runtime_heartbeat_details(identity, processed),
+                datetime.now(timezone.utc),
+            )
+            unit_of_work.commit()
+
+
+class RuntimeMonitoringApplication:
+    """Run one monitor cycle and persist its health projection atomically."""
+
+    def __init__(
+        self,
+        unit_of_work_factory,
+        line_runtime_repository_factory,
+        delivery_task_repository_factory,
+        connection_factory,
+    ) -> None:
+        self._unit_of_work_factory = unit_of_work_factory
+        self._line_runtime_repository_factory = line_runtime_repository_factory
+        self._delivery_task_repository_factory = delivery_task_repository_factory
+        self._connection_factory = connection_factory
+
+    def record_cycle(self, runtime_identity: _RuntimeIdentity, observations: Iterable[object]):
+        from subsystems.line.runtime_monitoring_application import (
+            _database_observations,
+            _external_observations,
+            _heartbeat_details,
+            _media_storage_observation,
+            _record_observations,
+            _redis_observation,
+        )
+
+        with self._unit_of_work_factory() as unit_of_work:
+            connection = self._connection_factory(unit_of_work)
+            now = datetime.now(timezone.utc)
+            application_checks = (_redis_observation(now), _media_storage_observation(now))
+            runtime_monitor = unit_of_work.runtime_monitor
+            runtime_monitor.record_heartbeat(
+                runtime_identity.service_name,
+                runtime_identity.instance_id,
+                runtime_identity.process_id,
+                runtime_identity.hostname,
+                "running",
+                _heartbeat_details(runtime_identity, 0),
+                now,
+            )
+            projected_observations = [
+                *_external_observations(observations),
+                *_database_observations(
+                    connection, self._line_runtime_repository_factory(unit_of_work), now
+                ),
+                *application_checks,
+            ]
+            projected_count = _record_observations(
+                runtime_monitor,
+                self._delivery_task_repository_factory(unit_of_work),
+                projected_observations,
+            )
+            unit_of_work.commit()
+            return len(projected_observations), projected_count
+
+    def inspect_readiness(self) -> tuple[RuntimeHealthObservation, ...]:
+        from subsystems.line.runtime_monitoring_application import (
+            _database_readiness_observation,
+            _media_storage_observation,
+            _redis_observation,
+        )
+
+        with self._unit_of_work_factory() as unit_of_work:
+            connection = self._connection_factory(unit_of_work)
+            now = datetime.now(timezone.utc)
+            return (
+                _database_readiness_observation(connection, now),
+                _redis_observation(now),
+                _media_storage_observation(now),
+            )
+
+
+def _runtime_heartbeat_details(identity: _RuntimeIdentity, processed: int) -> dict[str, object]:
+    return {
+        "processed_last_cycle": processed,
+        "release_version": identity.release_version,
+        "caller_started_at": identity.started_at.isoformat(),
+    }
 
 
 class RuntimeLineAlertProjector:

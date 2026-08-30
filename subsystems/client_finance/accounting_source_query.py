@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-from infrastructure.mysql.mysql_adapter import get_connection
+from typing import Any, Callable
 
 
 def _case_no(value: Any) -> str:
@@ -122,9 +120,12 @@ def load_case_accounting_source_with_cursor(cursor: Any, case_no: str) -> dict[s
     return source
 
 
-def load_case_accounting_source(case_no: str) -> dict[str, Any]:
-    """Compatibility wrapper that owns a short-lived read connection."""
-    conn = get_connection()
+def load_case_accounting_source(
+    case_no: str,
+    connection_factory: Callable[[], Any],
+) -> dict[str, Any]:
+    """Load through a caller-provided short-lived read connection."""
+    conn = connection_factory()
     try:
         with conn.cursor() as cursor:
             return load_case_accounting_source_with_cursor(cursor, case_no)

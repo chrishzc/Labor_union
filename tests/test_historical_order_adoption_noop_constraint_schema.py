@@ -47,7 +47,7 @@ def test_release_and_fresh_catalog_preserve_1008_before_its_successor() -> None:
         assembly["active_bootstrap"]
     )
     assert cutover["schema_parts"]["terminal_artifact"] == (
-        "1014_historical_baseline_projector_v2.sql"
+        "1018_hcm_resubmission_canonical_review_version.sql"
     )
 
 

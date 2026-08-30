@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
 from api.dependencies.admin_auth import (
+    get_access_control_connection_factory,
     get_bearer_token,
     require_admin,
 )
@@ -43,6 +44,7 @@ from subsystems.access.authentication_session import (
     complete_mfa_enrollment,
     renew_admin_session,
     revoke_admin_session,
+    ConnectionFactory,
 )
 
 
@@ -64,8 +66,9 @@ def _client_ip(request: Request) -> str | None:
 async def login(
     payload: AdminLoginRequest,
     request: Request,
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
 ):
-    result = await _authenticate(payload, _client_ip(request))
+    result = await _authenticate(payload, _client_ip(request), connection_factory)
     if isinstance(result, MfaEnrollmentChallenge):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -82,9 +85,13 @@ async def login(
 
 
 @router.post("/login/challenges", response_model=BaseResponse[AdminPasswordChallengeResponse])
-async def issue_login_challenge(payload: AdminPasswordChallengeRequest, request: Request):
+async def issue_login_challenge(
+    payload: AdminPasswordChallengeRequest,
+    request: Request,
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
+):
     try:
-        result = await asyncio.to_thread(issue_password_login_challenge, payload.username, payload.password, source_identifier=_client_ip(request) or "unknown")
+        result = await asyncio.to_thread(issue_password_login_challenge, payload.username, payload.password, connection_factory=connection_factory, source_identifier=_client_ip(request) or "unknown")
     except AdminLoginRateLimitedError as error:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail={"code": "login_rate_limited", "message": "登入嘗試過於頻繁，請稍後再試", "retryable": True}) from error
     except (AdminSessionSchemaError, AdminSessionStorageError, AdminMfaConfigurationError) as error:
@@ -114,9 +121,14 @@ async def issue_login_challenge(payload: AdminPasswordChallengeRequest, request:
 
 
 @router.post("/login/challenges/{challenge_id}/verify", response_model=BaseResponse[AdminSessionResponse])
-async def verify_login_challenge(challenge_id: str, payload: AdminFactorVerificationRequest, request: Request):
+async def verify_login_challenge(
+    challenge_id: str,
+    payload: AdminFactorVerificationRequest,
+    request: Request,
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
+):
     try:
-        result = await asyncio.to_thread(complete_password_login_challenge, challenge_id=challenge_id, challenge_token=payload.challenge_token, factor_code=payload.factor_code, source_identifier=_client_ip(request) or "unknown")
+        result = await asyncio.to_thread(complete_password_login_challenge, connection_factory=connection_factory, challenge_id=challenge_id, challenge_token=payload.challenge_token, factor_code=payload.factor_code, source_identifier=_client_ip(request) or "unknown")
     except AdminLoginRateLimitedError as error:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail={"code": "login_rate_limited", "message": "登入嘗試過於頻繁，請稍後再試", "retryable": True}) from error
     except (AdminSessionSchemaError, AdminSessionStorageError, AdminMfaConfigurationError) as error:
@@ -128,7 +140,9 @@ async def verify_login_challenge(challenge_id: str, payload: AdminFactorVerifica
 
 
 @router.post("/development-session", response_model=BaseResponse[AdminSessionResponse])
-async def development_session():
+async def development_session(
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
+):
     """Issue a local root Session only from explicit local env credentials; production always rejects it."""
     if not _local_developer_session_enabled():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到登入端點")
@@ -136,19 +150,24 @@ async def development_session():
     password = os.getenv("DEV_ROOT_PASSWORD", "")
     if not username or not password:
         raise _login_unavailable("development_root_not_configured", "本機 root 帳密尚未設定")
-    result = await asyncio.to_thread(authenticate_local_developer_root, username, password)
+    result = await asyncio.to_thread(authenticate_local_developer_root, username, password, connection_factory=connection_factory)
     if result is None:
         raise _login_unavailable("development_root_verification_failed", "本機 root 帳密驗證失敗")
     token, expires_at, principal = result
     return _login_response(token, expires_at, principal)
 
 
-async def _authenticate(payload: AdminLoginRequest, source_identifier: str | None):
+async def _authenticate(
+    payload: AdminLoginRequest,
+    source_identifier: str | None,
+    connection_factory: ConnectionFactory,
+):
     try:
         return await asyncio.to_thread(
             authenticate_admin,
             payload.username,
             payload.password,
+            connection_factory=connection_factory,
             session_minutes=30,
             totp_code=payload.totp_code,
             source_identifier=source_identifier or "unknown",
@@ -208,11 +227,14 @@ def _login_unavailable(code: str, message: str) -> HTTPException:
     response_model=BaseResponse[MfaEnrollmentVerificationResponse],
 )
 async def verify_enrollment_challenge(
-    challenge_id: str, payload: MfaEnrollmentVerificationRequest
+    challenge_id: str,
+    payload: MfaEnrollmentVerificationRequest,
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
 ):
     try:
         recovery_codes = await asyncio.to_thread(
             complete_mfa_enrollment,
+            connection_factory=connection_factory,
             challenge_id=challenge_id,
             challenge_token=payload.challenge_token,
             totp_code=payload.totp_code,
@@ -241,12 +263,14 @@ def me(principal: AdminPrincipal = Depends(require_admin)):
 async def refresh(
     authorization: str | None = Header(default=None),
     principal: AdminPrincipal = Depends(require_admin),
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
 ):
     token = get_bearer_token(authorization)
     try:
         expires_at = await asyncio.to_thread(
             renew_admin_session,
             token,
+            connection_factory=connection_factory,
             session_minutes=30,
         )
     except AdminSessionStorageError as error:
@@ -263,10 +287,11 @@ async def refresh(
 async def logout(
     authorization: str | None = Header(default=None),
     principal: AdminPrincipal = Depends(require_admin),
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
 ):
     token = get_bearer_token(authorization)
     try:
-        await asyncio.to_thread(revoke_admin_session, token)
+        await asyncio.to_thread(revoke_admin_session, token, connection_factory=connection_factory)
     except AdminSessionStorageError as error:
         raise _login_unavailable("admin_session_storage_unavailable", str(error)) from error
     return BaseResponse(

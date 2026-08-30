@@ -14,14 +14,26 @@ from typing import Callable, Protocol
 
 import pandas as pd
 
-from infrastructure.mysql.hcm_workbook_import_repository import HcmWorkbookImportRepository
 from shared_kernel.clock import TAIPEI_TIME_ZONE
+
+
+class HcmWorkbookImportRepository(Protocol):
+    def acquire_lock(self, key: str) -> bool: ...
+    def release_lock(self, key: str) -> None: ...
+    def claim(self, key: str, digest: str, correlation_id: str) -> str: ...
+    def find_receipt(self, key: str): ...
+    def find_receipt_by_digest(self, digest: str): ...
+    def save_receipt(self, key: str, digest: str, actor: str, snapshot: dict[str, object]) -> None: ...
 
 
 class HcmRowIntake(Protocol):
     def load_frame(self, source_path: str) -> pd.DataFrame | None: ...
 
     def import_rows(self, frame: pd.DataFrame, source_path: str) -> dict[str, object]: ...
+
+    def import_rows_in_current_uow(
+        self, frame: pd.DataFrame, source_path: str
+    ) -> dict[str, object]: ...
 
     def preview_rows(self, frame: pd.DataFrame, source_path: str) -> dict[str, int]: ...
 
@@ -157,11 +169,14 @@ class HcmWorkbookImportService:
                 claim = self._repository.claim(key, digest, correlation_id)
                 if claim == "conflict":
                     raise HcmWorkbookConflict("hcm_workbook_idempotency_conflict")
-                unit_of_work.commit()
-            outcomes = self._intake.import_rows(frame, source_path)
-            _assert_terminal_row_outcomes(len(frame), outcomes)
-            receipt = _receipt(digest, len(frame), outcomes, False)
-            with self._unit_of_work_factory() as unit_of_work:
+                import_rows = getattr(
+                    self._intake,
+                    "import_rows_in_current_uow",
+                    self._intake.import_rows,
+                )
+                outcomes = import_rows(frame, source_path)
+                _assert_terminal_row_outcomes(len(frame), outcomes)
+                receipt = _receipt(digest, len(frame), outcomes, False)
                 self._repository.save_receipt(key, digest, actor, receipt.as_dict())
                 unit_of_work.commit()
             return receipt

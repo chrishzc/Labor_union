@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from typing import Any
+from typing import Any, Callable
 
 from subsystems.scheduling.availability_lock_helpers import normalize_plan_snapshot
-from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.scheduling.ports import unconfigured_connection_factory
 from subsystems.scheduling.occupancy_mutex import lock_staff_occupancy_mutex
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+
+
+get_connection = unconfigured_connection_factory
 
 
 def _close_once(resource: Any, state: dict[str, bool]) -> None:
@@ -613,11 +616,6 @@ def preview_caregiver_availability_lock_release(
             lock_days,
         )
     finally:
-        if connection is not None:
-            try:
-                connection.rollback()
-            except BaseException:  # noqa: BLE001 - read cleanup stays best effort.
-                pass
         if cursor is not None:
             _close_once(cursor, cursor_closed)
         if connection is not None:
@@ -698,6 +696,34 @@ def _existing_result(
     }
 
 
+def _run_in_application_uow(operation: Callable[[Any, Any], dict[str, Any]]) -> dict[str, Any]:
+    """Run one lock mutation with an Application-owned outer transaction."""
+    connection = cursor = None
+    cursor_closed = {"closed": False}
+    connection_closed = {"closed": False}
+    unit_of_work = None
+    try:
+        connection = get_connection()
+        unit_of_work = connection
+        cursor = connection.cursor()
+        result = operation(connection, cursor)
+        if result.get("result") != "existing" and result.get("status") != "idempotent_replay":
+            unit_of_work.commit()
+        else:
+            unit_of_work.rollback()
+        return result
+    except Exception:
+        if unit_of_work is not None:
+            try:
+                unit_of_work.rollback()
+            except BaseException:  # noqa: BLE001
+                pass
+        raise
+    finally:
+        _close_once(cursor, cursor_closed)
+        _close_once(connection, connection_closed)
+
+
 def release_caregiver_availability_lock(
     case_no: Any,
     plan_id: Any,
@@ -722,13 +748,20 @@ def release_caregiver_availability_lock(
     expected_fingerprint = _optional_preview_fingerprint(
         expected_preview_fingerprint
     )
-    connection = None
-    cursor = None
-    cursor_closed = {"closed": False}
-    connection_closed = {"closed": False}
+    return _run_in_application_uow(
+        lambda connection, cursor: _release_caregiver_availability_lock_in_transaction(
+            connection, cursor, request, expected_fingerprint
+        )
+    )
+
+
+def _release_caregiver_availability_lock_in_transaction(
+    connection: Any,
+    cursor: Any,
+    request: dict[str, Any],
+    expected_fingerprint: PreviewFingerprint | None,
+) -> dict[str, Any]:
     try:
-        connection = get_connection()
-        cursor = connection.cursor()
 
         pre_lock_row, pre_lock_rows = _load_lock_rows_for_update(cursor, request["lock_id"])
         staff_ids = _snapshot_staff_ids(pre_lock_rows)
@@ -839,8 +872,6 @@ def release_caregiver_availability_lock(
         )
         if cursor.rowcount != 1:
             raise ValueError("release event insert rowcount mismatch")
-        connection.commit()
-
         return {
             "result": "created",
             "case_no": request["case_no"],
@@ -850,15 +881,5 @@ def release_caregiver_availability_lock(
             "lock_status": "released",
             "lock_rows": snapshot["lock_rows"],
         }
-    except Exception:
-        if connection is not None:
-            try:
-                connection.rollback()
-            except BaseException:  # noqa: BLE001
-                pass
-        raise
     finally:
-        if cursor is not None:
-            _close_once(cursor, cursor_closed)
-        if connection is not None:
-            _close_once(connection, connection_closed)
+        pass

@@ -148,7 +148,7 @@ def _json_scalar(value: Any) -> str | int | float | bool | None:
 
 
 def _validated(row: dict[str, Any]) -> dict[str, Any]:
-    from scripts.imports.finance_normalized_row import validate_normalized_row
+    from domains.finance_import.normalized_row import validate_normalized_row
 
     return validate_normalized_row(row)
 

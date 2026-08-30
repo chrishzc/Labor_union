@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pymysql
+from typing import Any, Callable
 
 from subsystems.line.identity_review_workflow import (
     complete_client_binding_in_transaction,
@@ -10,24 +11,51 @@ from subsystems.line.identity_review_workflow import (
 )
 
 
-def bind_client(connection, *, name: str, phone: str, line_user_id: str, force_rebind: bool) -> dict:
+def bind_client(
+    connection,
+    *,
+    name: str,
+    phone: str,
+    line_user_id: str,
+    force_rebind: bool,
+    unit_of_work_factory: Callable[[Any], Any] | None = None,
+) -> dict:
     """Return a typed binding outcome without allowing the route to own writes."""
     normalized_phone = phone.replace(" ", "").replace("-", "")
-    try:
-        begin = getattr(connection, "begin", None)
-        if callable(begin):
-            begin()
+    unit_of_work = (
+        unit_of_work_factory(connection)
+        if unit_of_work_factory is not None
+        else _ConnectionUnitOfWork(connection)
+    )
+    with unit_of_work:
         with connection.cursor(pymysql.cursors.DictCursor) as cursor:
             client = _find_client(cursor, name, normalized_phone)
             if client is None:
-                connection.rollback()
                 return {"kind": "not_found"}
             result = _apply_binding(cursor, client, line_user_id, force_rebind)
-        connection.commit()
-        return result
-    except Exception:
-        connection.rollback()
-        raise
+        unit_of_work.commit()
+    return result
+
+
+class _ConnectionUnitOfWork:
+    """Small protocol-compatible fallback for an already borrowed connection."""
+
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def __enter__(self):
+        begin = getattr(self._connection, "begin", None)
+        if callable(begin):
+            begin()
+        return self
+
+    def __exit__(self, exception_type, exception, traceback):
+        if exception_type is not None:
+            self._connection.rollback()
+        return False
+
+    def commit(self) -> None:
+        self._connection.commit()
 
 
 def _find_client(cursor, name: str, phone: str):

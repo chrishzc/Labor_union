@@ -1,21 +1,15 @@
-"""Per-request composition for typed provisional LINE registration."""
+"""Composition root for LINE provisional registration."""
 
-from infrastructure.mysql.mysql_adapter import get_connection
-from subsystems.case_import.provisional_registration_application import (
-    ProvisionalRegistrationApplication,
-    build_provisional_registration_application,
+from infrastructure.mysql.provisional_registration_repository import (
+    MySqlProvisionalRegistrationRepository,
+    ProvisionalRegistrationMySqlUnitOfWork,
 )
+from subsystems.case_import.provisional_registration_application import ProvisionalRegistrationApplication
 
 
-def get_provisional_registration_application():
-    connection = get_connection()
-    try:
-        yield build_provisional_registration_application(connection)
-    finally:
-        connection.close()
+def build_provisional_registration_application(connection):
+    repository = MySqlProvisionalRegistrationRepository(connection)
+    return ProvisionalRegistrationApplication(repository, lambda: ProvisionalRegistrationMySqlUnitOfWork(connection))
 
 
-__all__ = [
-    "ProvisionalRegistrationApplication",
-    "get_provisional_registration_application",
-]
+__all__ = ["build_provisional_registration_application"]

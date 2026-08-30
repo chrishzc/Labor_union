@@ -28,12 +28,16 @@ from subsystems.line.rich_menu_publication_workflow import (
 )
 
 
-def test_login_reports_missing_absolute_expiry_schema(monkeypatch):
+def test_login_reports_missing_absolute_expiry_schema():
     connection = _SchemaMissingConnection()
-    monkeypatch.setattr(authentication_session, "get_connection", lambda: connection)
 
     with pytest.raises(AdminSessionSchemaError, match="absolute_expires_at"):
-        authenticate_admin("admin", "password", session_minutes=30)
+        authenticate_admin(
+            "admin",
+            "password",
+            connection_factory=lambda: connection,
+            session_minutes=30,
+        )
 
     assert connection.rolled_back
     assert connection.closed

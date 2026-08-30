@@ -15,6 +15,7 @@ from shared_kernel.clock import FixedBusinessClock
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.controlled_files.contracts import (
+    ControlledFileStorageError,
     ControlledFileStagingContent,
     ControlledFileStagingRegistrationStatus,
     ControlledFileStagingResult,
@@ -124,6 +125,7 @@ class FakeRepository:
         self.registered = 0
         self.marked = 0
         self.saved = 0
+        self.finalize_intents = []
 
     def register_staging(self, command, result, *, command_fingerprint, created_at):
         self.facts = ControlledFileStagingFacts(
@@ -171,6 +173,9 @@ class FakeRepository:
     def save_receipt(self, key, receipt, correlation_id):
         self.saved += 1
         self.receipt = receipt
+
+    def save_post_commit_finalize_intent(self, intent):
+        self.finalize_intents.append(intent)
 
     def get_readback(self, file_id):
         return None
@@ -326,6 +331,8 @@ def test_apply_fresh_locks_and_commits_once_without_locator_projection() -> None
     assert repository.owner_reads == [False, True]
     assert (repository.registered, repository.marked, repository.saved) == (1, 1, 1)
     assert unit_of_work.commits == 1
+    assert repository.finalize_intents[0].staging_id == STAGING_ID
+    assert repository.finalize_intents[0].file_id == FILE_ID
     projection = repr(receipt).casefold()
     assert "storage_locator" not in projection
     assert "file:" not in projection
@@ -336,6 +343,7 @@ def test_apply_registers_idempotent_integrity_finalize_after_commit_when_support
     class HookedUnitOfWork(FakeUnitOfWork):
         def __init__(self):
             super().__init__()
+            self._committed = False
             self.hooks = []
 
         def add_after_completion(self, hook):
@@ -343,6 +351,7 @@ def test_apply_registers_idempotent_integrity_finalize_after_commit_when_support
 
         def commit(self):
             super().commit()
+            self._committed = True
             for hook in self.hooks:
                 hook()
 
@@ -359,7 +368,17 @@ def test_apply_registers_idempotent_integrity_finalize_after_commit_when_support
 
 def test_metadata_commit_failure_retains_staging_bytes_for_reconciliation() -> None:
     class FailingUnitOfWork(FakeUnitOfWork):
+        def __init__(self):
+            super().__init__()
+            self._committed = False
+            self.hooks = []
+
+        def add_after_completion(self, hook):
+            self.hooks.append(hook)
+
         def commit(self):
+            for hook in self.hooks:
+                hook()
             raise RuntimeError("db_commit_failed")
 
     storage = FakeStorage()
@@ -373,6 +392,41 @@ def test_metadata_commit_failure_retains_staging_bytes_for_reconciliation() -> N
     assert storage.content == CONTENT
     assert storage.finalized == []
     assert unit_of_work.rollbacks == 1
+
+
+def test_post_commit_finalize_failure_is_a_typed_reconciliation_blocker() -> None:
+    class FailingFinalizeStorage(FakeStorage):
+        def finalize_staged(self, staging_id: str, *, expected_sha256: str):
+            raise ControlledFileStorageError(
+                "controlled_file_staging_not_found", "missing", retryable=False
+            )
+
+    storage = FailingFinalizeStorage()
+
+    class HookedUnitOfWork(FakeUnitOfWork):
+        def __init__(self):
+            super().__init__()
+            self._committed = False
+            self.hooks = []
+
+        def add_after_completion(self, hook):
+            self.hooks.append(hook)
+
+        def commit(self):
+            super().commit()
+            self._committed = True
+            for hook in self.hooks:
+                hook()
+
+    unit_of_work = HookedUnitOfWork()
+    workflow, _, _, _ = _workflow(storage=storage, unit_of_work=unit_of_work)
+    preview = workflow.preview(_intent())
+
+    with pytest.raises(ControlledFileWorkflowError) as captured:
+        workflow.apply(_command(preview))
+
+    assert captured.value.code == "controlled_file_post_commit_reconciliation_required"
+    assert unit_of_work.commits == 1
 
 
 def test_apply_borrowed_leaves_commit_to_outer_owner() -> None:
