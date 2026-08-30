@@ -16,6 +16,8 @@ HTTP dump、重複 candidate receipt 與 cache 放 ignored `scratch/`，完成�
 
 | 檔案 | 一句話摘要 |
 |---|---|
+| [evidence/PROV-20260830-line-anomalies-slimming-integration-receipt.md](evidence/PROV-20260830-line-anomalies-slimming-integration-receipt.md) | PR #63整合receipt：LINE #62→Anomalies #61→LINE-004 consumer→shared governance；repository-local regression與14項CI全綠，deferred owner／DB／production邊界保持不變。 |
+| [evidence/PROV-20260830-current-state-anomalies-parallel-repository-local-receipt.md](evidence/PROV-20260830-current-state-anomalies-parallel-repository-local-receipt.md) | PR #61來源lane receipt；其`WAIT_PEER_LINE_CONTRACT`與shared drift已由PR #63收斂，其餘14個owner gap仍deferred。 |
 | [evidence/task97_repository_local_closeout_receipt_a48caa8.md](evidence/task97_repository_local_closeout_receipt_a48caa8.md) | Task 97 repository-local architecture aggregate receipt：`REPO_LOCAL_BLOCKER=0`；production、DB engine與external evidence明確`NOT_RUN`／deferred，不能推導deployment或DB mutation Authority。 |
 | [evidence/2026-08-27_anomaly_necessity_migration_runtime_receipt.md](evidence/2026-08-27_anomaly_necessity_migration_runtime_receipt.md) | Task 96 ANM-NM-A／producer cutover：typed API、三個真 MySQL remediation 情境與 `SCHEDULE-005` 停產證據 PASS；DB release 1009 developer replacement 因受控 credential 未注入而 NOT_RUN。 |
 | [evidence/2026-08-26_task96_p0_import_anomaly_staff_receipt.md](evidence/2026-08-26_task96_p0_import_anomaly_staff_receipt.md) | Task 96：歷史訂單 review zero-mutation 與 Staff cursor 第二頁實機驗收已完成；歷史 anomaly UI safety 證據保留，但因使用者要求全異常人工 remediation 而重開。 |
