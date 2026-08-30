@@ -8,9 +8,14 @@
 
 ## Dependencies
 - outbound: all admin business adapters — supplies ActorContext/security boundary, not business rules。
+- outbound: caller-composed `SecurityAlertSink` — projects a committed Access alert intent without selecting or importing the Anomalies implementation。
+- inbound: `anomalies/anomalies` — central outbox worker supplies the concrete projection sink and invokes the Access-owned bounded delivery transaction。
 
 ## Contracts
 - `subsystems/access/` — Access workflows
+- `subsystems/access/security_alert_outbox.py` — Access-owned durable alert delivery state、retry與sink protocol
+- `subsystems/anomalies/outbox_worker.py` — central composition caller
+- `subsystems/anomalies/system_alert_projection.py` — Anomalies-owned `system_alerts` projection；not an Access SSOT
 - `api/` — FastAPI auth/dependency adapters
 - `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — Access contract
 

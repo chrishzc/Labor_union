@@ -1,13 +1,18 @@
 ---
 doc_type: execution-plan-amendment
-declared_status: active
+declared_status: superseded
 date: 2026-08-29
 amends: PROV-20260829-current-state-anomaly-slimming-execution-plan.md
 owner: anomalies / architecture-governance / owning-domains
 task_level: T3
+superseded_by: PROV-20260830-current-state-anomaly-task97-authority-reconciliation.md
 ---
 
 # Current-state 異常機制瘦身：前置處理後基線修訂
+
+> Historical post-prep baseline only. Current Task 97 dependency、completion boundary與下一個gate由
+> `PROV-20260830-current-state-anomaly-task97-authority-reconciliation.md`擁有；下文的
+> `TRACKED_IN_PROGRESS`／`blocked_by_task97_priority`不得再作current status。
 
 ## 1. 修訂效力
 

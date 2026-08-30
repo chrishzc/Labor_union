@@ -1,16 +1,19 @@
 ---
 doc_type: execution-inventory
 task_id: CUR-LINE-BACKEND-SLIMMING-01
-declared_status: blocked-by-task97-priority
+declared_status: blocked
 owner: LINE / Integration
 baseline_head: eaca24903197400343e72342e5f03970e0fda078
 inventory_date: 2026-08-29
+inventory_state: stale_refresh_required
+current_blocker: awaiting_user_resume_and_current_head_refresh
 ---
 
 # LINE Backend State Audit
 
-本表是 S0／S1 的 current inventory。`delete` 只代表通過 caller／registration／retention gate 後的目標，
-不授權刪除 public entry、schema、migration chain 或歷史資料。Task 97 dirty paths 保留，不把未提交變更誤寫成 release fact。
+本表是S0／S1 historical inventory與refresh輸入，不再是current exact inventory。`delete`只代表通過
+caller／registration／retention gate後的目標，不授權刪除public entry、schema、migration chain或歷史資料。
+Task 97 final artifacts已tracked；LINE續跑前必須重掃，不把本表舊counts誤寫成current fact。
 
 | item | current path | current owner | real owner | class | action | evidence |
 |---|---|---|---|---|---|---|
@@ -53,10 +56,9 @@ inventory_date: 2026-08-29
 
 ## Task 97 overlap checkpoint
 
-S0／S1 已完成，但 S2～S9 production refactor 暫停。Task 97 current checkpoint仍有 repository writer
-classification、raw-dict API、entry governance、legacy retirement與 fresh-clone global acceptance 未完成；
-任何 LINE writer／route／worker修改都會使其 candidate、entry queue及驗證 evidence失效。依 2026-08-29
-最新人工裁決，固定先完成 Task 97，再以其 final baseline重新計數並執行本 write set。
+S0／S1 historical inventory已完成，但S2～S9 production refactor仍暫停。Task 97 repository-local closeout已完成，
+其final writer／entry／transaction／retirement artifacts是下一次refresh輸入；production、DB與external acceptance
+未執行。Current blocker改為等待使用者恢復LINE計畫與current-head重掃，不再是Task 97 priority。
 
 ## Retention blockers
 

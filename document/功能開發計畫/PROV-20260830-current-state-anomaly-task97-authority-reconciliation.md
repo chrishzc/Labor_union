@@ -1,12 +1,14 @@
 ---
 doc_type: execution-authority-amendment
-declared_status: active
+declared_status: approved
 date: 2026-08-30
 amends:
   - PROV-20260829-current-state-anomaly-slimming-execution-plan.md
   - PROV-20260829-current-state-anomaly-slimming-post-prep-amendment.md
 owner: anomalies / architecture-governance / owning-domains
 task_level: T3
+task97_repository_local_status: completed
+current_next_gate: bounded_current_head_refresh_under_separate_authority
 ---
 
 # Current-state Anomalies：Task 97 Authority reconciliation
@@ -22,7 +24,7 @@ task_level: T3
 ```text
 latest human Authority
 → current formal Domain SSOT
-→ Task 97 latest active stabilization amendment
+→ Task 97 repository-local successor／final receipt
 → 本 authority reconciliation
 → 2026-08-29 anomaly slimming execution plan / post-prep amendment（僅保留未被取代內容）
 ```
@@ -31,7 +33,7 @@ latest human Authority
 
 ### 2.1 已由 Task 97 取得 authority 並可保留的 current成果
 
-以下只要 current-head stabilization證明沒有 regression，即視為已裁決 local successor／internal retirement，不重開產品設計：
+以下已由Task 97 repository-local final evidence確認，可視為已裁決local successor／internal retirement，不重開產品設計：
 
 - additive `1016_current_anomaly_issues.sql` 與 current-only projection方向。
 - generic durable `anomaly.recheck` 方向；不得建立 anomaly-specific claim／delivery history。
@@ -40,7 +42,7 @@ latest human Authority
 - legacy necessity-reclassification public entry在 external caller未知時保留 stable typed `410 Gone`，而不是 physical route deletion。
 - owner mutation＋recheck intent、projection reconcile＋intent complete的 outer-UoW原則。
 
-這些成果只在「current CI／current artifact／exact zero-reference」仍成立時保留；若 stabilization 發現 breakage，只修 defect，不藉機擴張架構。
+這些成果只在current artifact／exact zero-reference與repository-local regression仍成立時保留；未來若發現material drift，只修受影響defect，不藉機擴張架構。
 
 ### 2.2 仍未授權的效果
 
@@ -66,37 +68,42 @@ latest human Authority
 
 ## 4. Current Anomalies status
 
-在 Task 97 stabilization完成前，Anomalies 不再使用舊的單一 `blocked_spec_gap / read-only only` 描述；current status改為：
+Task 97 repository-local stabilization與closeout已完成；current status為：
 
 ```yaml
 anomalies_task97_alignment:
   product_direction: APPROVED_ADDITIVE_SUCCESSOR
-  local_successor_implementation: PRESENT_REQUIRES_STABILIZATION
+  local_successor_implementation: REPOSITORY_LOCAL_CONFIRMED
   internal_zero_reference_retirement: PARTIALLY_EXECUTED
   public_external_entries: KEEP_TYPED_410_WHEN_CALLER_UNKNOWN
   destructive_db_cleanup: NOT_AUTHORIZED
   runtime_cutover: NOT_CONFIRMED
-  task97_stabilization: REQUIRED
+  task97_repository_local: COMPLETE
+  production_acceptance: NOT_RUN
+  db_engine_acceptance: NOT_RUN
+  next_gate: BOUNDED_CURRENT_HEAD_REFRESH_REQUIRES_SEPARATE_AUTHORITY
 ```
 
 這不是把整份 Anomaly 瘦身計畫升級成 completed／approved-for-cutover；原本尚未完成的 15-code owner action、25 owner replacement、runtime detector/lock evidence、external caller、DB engine、backup/restore、deployment/cutover等 gate仍有效，只是它們不再否定已經獲得 Authority 的 bounded local successor成果。
 
 ## 5. 與 Task 97 finishing lane 的邊界
 
-在 `97B_Task97_current_head_stabilization_amendment.md` exit gate通過前：
+下列限制是stabilization完成前的historical hard stop，現已由Task 97 repository-local receipt滿足：
 
 - 不再新增 Anomaly retirement slice。
 - 不再新增 Anomaly schema part。
 - 不重新分類 15／25／3 product taxonomy。
 - 只允許修 current CI、undefined names、import/reference drift與直接 regression。
 
-stabilization通過後，Anomalies只允許處理 Task 97 已列出的 existing finishing gates：current exact writer exits、runtime detector/lock composition、DB 1016 fresh/preserve engine evidence、external/public cutover與legacy zero-reference gate。任何新設計先另列 future debt，不吸回 Task 97。
+Repository-local closeout後，不再把任何Anomalies後續吸回Task 97。若使用者另行啟動Anomalies refresh，先讀
+Task 97 final writer／entry／transaction／retirement evidence並重建current denominator；DB 1016 engine、
+external/public evidence、runtime／deployment／cutover各由獨立acceptance處理。任何新設計另列future task。
 
 ## 6. Required reconciliation evidence
 
 後續 Agent 在宣稱 Anomalies lane可繼續前必須同時證明：
 
-- current HEAD GitHub build／governance／cross-domain／12-owner preflight全綠。
+- 開始新Anomalies mutation前，current HEAD focused／governance／affected cross-domain preflight必須重新通過；Task 97 receipt不替代未來patch的驗證。
 - current Anomalies canonical tests與 affected cross-domain tests通過。
 - `1016` static manifest／descriptor／fresh assembly一致；DB engine缺 credential時維持 `BLOCKED_ENGINE_EVIDENCE`。
 - 已刪 internal source沒有 current inbound reference，且 public unknown-caller route仍按 typed 410規則存在。
@@ -106,7 +113,8 @@ stabilization通過後，Anomalies只允許處理 Task 97 已列出的 existing 
 
 ```text
 ANOMALIES_DIRECTION_NOT_REOPENED
-ANOMALIES_STABILIZATION_REQUIRED
+ANOMALIES_REPOSITORY_LOCAL_ALIGNMENT_CONFIRMED
+ANOMALIES_CURRENT_REFRESH_REQUIRES_SEPARATE_AUTHORITY
 DESTRUCTIVE_CUTOVER_NOT_AUTHORIZED
 ```
 

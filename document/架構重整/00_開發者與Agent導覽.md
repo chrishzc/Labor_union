@@ -13,11 +13,14 @@
 2. 根目錄 `README.md`：執行入口、目錄與安全界線。
 3. `01_規格基線/00_Global_共同契約.md`：跨領域共同不變量。
 4. `15_正式規格索引與裁決總表.md`、對應 Domain 規格及 `16`～`24` 中與任務相關的最新補充裁決。
-5. 只讀對應且 active 的 `02_決策與退役執行記錄/` Work Package 與 `03_追蹤清單與證據/` evidence，不整目錄載入。
-6. 歷史追溯、incident／rollback、migration/cutover、舊 release 重現或稽核時，才依 `04_已完成與上線封存/README.md` 從 Git 歷史精準取回單一文件。
-7. 最後才讀 live schema、route、subsystem、repository 與既有測試，確認規格和現況是否漂移。
+5. 需要定位source／dependency／test boundary時，從根目錄`.arch-map/index.md`進入最小affected subtree；它只提供current architecture navigation，不取代正式規格或驗收。
+6. 只讀對應且 active 的 `02_決策與退役執行記錄/` Work Package 與 `03_追蹤清單與證據/` evidence，不整目錄載入。
+7. 歷史追溯、incident／rollback、migration/cutover、舊 release 重現或稽核時，才依 `04_已完成與上線封存/README.md` 從 Git 歷史精準取回單一文件。
+8. 最後才讀 live schema、route、subsystem、repository 與既有測試，確認規格和現況是否漂移。
 
 歷史 `system_map*.md`、`system_map*.yaml` 和 ADAD 產物僅供追溯，均不是 SSOT 或實作 gate。
+Living `.arch-map/`只保存current architecture routing evidence；Task 97已scoped reconcile
+`anomalies/anomalies`與`external-integration/access`的security-alert sink／projection ownership。
 
 ## 一分鐘架構圖
 
@@ -85,6 +88,7 @@ current-state slimming 裁決；`22_銀行流水匯入與帳務異常處理正�
 
 ## 文件地圖
 
+- `.arch-map/`：living current architecture與test routing navigation；`meta.yaml`標示最近scoped observation，地圖不保存Task history也不創造Authority。
 - `00_Agent任務分級與交付規範.md`：任務大小、最小 durable artifacts、驗證範圍與失敗回送的 canonical 路由。
 - `01_規格基線/`：現行正式 Global／Domain／Application 契約；`15` 是規格收斂入口，目前正式範圍為 `15`～`24`。`16`～`24` 補足帳務衝突、外部整合／權限與部署治理，`19` 管理 entry point，`20`：LINE 客服，`21`：Contract Signing 與簽約前服務承諾，`22`：銀行流水與帳務異常處置，`23`：LINE 身分管理與解除，`24`：Staff Matching Preferences 與不可服務期間。
 - `02_決策與退役執行記錄/`：已核准的 Work Package、退役、驗收與部署決策；先確認 `declared_status`，不要把草案當授權。

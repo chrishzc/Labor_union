@@ -1,10 +1,12 @@
 ---
 doc_type: execution-plan-amendment
-declared_status: active
-date: 2026-08-29
+declared_status: blocked
+date: 2026-08-30
 task_id: CUR-LINE-BACKEND-SLIMMING-01
 amends: LINE_BACKEND_SLIMMING_PLAN.md
 owner: LINE / Integration
+task97_dependency: satisfied_repository_local
+current_blocker: awaiting_user_resume_and_current_head_refresh
 ---
 
 # LINE 後端瘦身：前置處理後基線修訂
@@ -37,17 +39,17 @@ Current disposition：
 ```text
 S0 = historical-completed / refresh-required-before-S2
 S1 = historical-completed / refresh-required-before-S2
-S2-S9 = blocked-by-task97-priority
+S2-S9 = blocked / awaiting-user-resume-and-current-head-refresh
 ```
 
 原因：
 
-1. Task 97 現已是 tracked in-progress dependency，不再是僅存在於 dirty/untracked worktree 的假設。
+1. Task 97 已完成tracked repository-local closeout；final writer／entry／transaction／retirement artifacts可作refresh輸入，但production、DB engine與external acceptance仍未執行。
 2. PR #57～#59 已改變 canonical test architecture、Contract Signing owner model、Anomalies / Scheduling relocation routing與 canonical CI coverage。
 3. LINE canonical test suite 在前置 CI 中暴露並修正了 relocation-sensitive tests與實際 production contract bug；因此舊 S0/S1 baseline 之後 repo 已有 LINE-relevant drift。
 4. `LINE_BACKEND_RESOLVED_WRITE_SET.md` 中的 rows 必須在 Task 97 terminal evidence後重新確認 path、caller、owner、replacement與gate，不能用舊 baseline直接施工。
 
-S0/S1 不需要現在整批重做；在 Task 97 尚未 terminal 前，舊 inventory繼續作 planning evidence。真正準備進 S2 時才重跑 current-head refresh。
+S0/S1 不需要在本次Task 97 closeout中整批重做；舊inventory只作planning evidence。使用者另行恢復LINE計畫、真正準備進S2時，才重跑current-head refresh。
 
 ## 4. Task 97 dependency 狀態
 
@@ -62,15 +64,18 @@ Task 97 governance / project slimming
 → re-evaluate Task 96 LINE M1-M4 closure
 ```
 
-Task 97 current state 改成明確 tracked dependency：
+Task 97 current state改為已滿足的repository-local prerequisite：
 
 ```text
 Task97 umbrella = document/架構重整/02_決策與退役執行記錄/97_架構一致性修復與全域驗收計畫.md
 Task97 post-prep amendment = document/架構重整/02_決策與退役執行記錄/97A_Task97_前置處理後基線修訂.md
-Task97 status for LINE = TRACKED_IN_PROGRESS / PRIORITY_BLOCKING_OVERLAP
+Task97 repository-local status for LINE = TASK97_REPOSITORY_LOCAL_COMPLETE
+Task97 production acceptance = NOT_RUN
+Task97 DB engine acceptance = NOT_RUN
 ```
 
-所以現在仍不應啟動 S2～S9 production refactor；但理由是 Task 97 尚未 terminal，而不是 Task 97 artifact 不存在。
+所以現在仍不應啟動S2～S9 production refactor；current blocker是使用者尚未恢復本計畫，且S0/S1與resolved
+write set尚未以Task 97 final artifacts作current-head refresh，不再是Task 97 priority blocker。
 
 ## 5. Canonical LINE test architecture
 
@@ -126,7 +131,7 @@ Task 97 terminal後、S2開始前，refresh至少必須重新確認：
 
 LINE slimmed baseline只有在以下條件都滿足後才能 freeze：
 
-- Task 97 terminal evidence已讀取並完成S0/S1 refresh。
+- Task 97 repository-local final evidence已讀取，且S0/S1 current-head refresh已完成。
 - S2～S9所有仍適用rows完成或有明確item-level blocker。
 - LINE canonical owner root在current HEAD通過。
 - affected cross-domain regression通過。

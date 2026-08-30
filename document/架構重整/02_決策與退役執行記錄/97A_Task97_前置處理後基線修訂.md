@@ -1,13 +1,17 @@
 ---
 doc_type: work-package-amendment
-declared_status: active
+declared_status: superseded
 date: 2026-08-29
 task_id: 97
 amends: 97_架構一致性修復與全域驗收計畫.md
 owner: architecture-governance / domain-owners / integration-writer
+superseded_by: 97B_Task97_current_head_stabilization_amendment.md
 ---
 
 # Task 97 前置處理後基線修訂
+
+> Historical post-prep baseline only. Current Task 97 status、terminal Authority與receipt由
+> `97B_Task97_current_head_stabilization_amendment.md`及其repository-local final receipt擁有。
 
 ## 1. 修訂範圍與效力
 

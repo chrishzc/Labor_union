@@ -1,6 +1,6 @@
 ---
 doc_type: execution-plan
-declared_status: blocked_spec_gap
+declared_status: blocked
 date: 2026-08-29
 owner: anomalies / architecture-governance / owning-domains
 task_level: T3
@@ -9,6 +9,10 @@ execution_authority: planning / read-only inventory only
 ---
 
 # Current-state 異常機制瘦身完整執行計劃
+
+> Current status owner是`PROV-20260830-current-state-anomaly-task97-authority-reconciliation.md`：
+> Task 97 repository-local prerequisite已完成；本計畫仍`NOT_READY`且等待另行授權的current-head bounded
+> refresh。下文舊base對`UNAVAILABLE_IN_BASE`／`blocked_by_task97_priority`的敘述只作historical provenance。
 
 ## 0. Current readiness、Authority 與禁止效果
 
@@ -24,7 +28,7 @@ Authority，但不構成 source replacement、刪檔、API cutover、entry retir
    navigation-only 或「尚未支援」代替。
 2. 25 個 owner work item／validation result 都有 typed Query、owner UI、completion predicate 與
    replacement readback，且不出現在 `#anomalies`。
-3. public issue identity、API、bounded recheck concurrency、Task 97 dependency、99-path inventory 與
+3. public issue identity、API、bounded recheck concurrency、Task 97 final-artifact refresh、current dependency inventory 與
    destructive rollback contract 均完成本計劃規定的 gate。
 4. 唯有 automation 能保留 `blocked_capability`；manual action 或 owner replacement 任一缺漏時，
    整體 API／DB／entry cutover 固定不得開始。

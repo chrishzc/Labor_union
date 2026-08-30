@@ -1,17 +1,22 @@
 ---
 doc_type: execution-plan
 task_id: CUR-LINE-BACKEND-SLIMMING-01
-declared_status: APPROVED_FOR_INVENTORY_AND_NON_DESTRUCTIVE_REFACTOR
+declared_status: blocked
 owner: LINE / Integration
-depends_on: Task 97 governance / project slimming
+depends_on: Task 97 repository-local final artifacts (satisfied; refresh input only)
 blocks: Task 96 LINE M1-M4 closure replanning
 conflict_priority: Task 97 wins over this task on every overlapping path or decision
 authority_date: 2026-08-29
+execution_authority: approved_for_inventory_and_non_destructive_refactor
+current_blocker: awaiting_user_resume_and_current_head_refresh
 ---
 
 # LINE 後端瘦身執行計劃
 
-> Current execution order：Task 97 governance／project slimming → 本任務 → LINE regression →
+> Current status由`LINE_BACKEND_SLIMMING_POST_PREP_AMENDMENT.md`擁有：Task 97 repository-local prerequisite
+> 已完成，但本計畫維持`blocked / awaiting-user-resume-and-current-head-refresh`；不得據此自動啟動S2～S9。
+
+> Current execution order：Task 97 final artifacts（已存在）→ 使用者恢復＋current-head refresh → 本任務 → LINE regression →
 > freeze slimmed LINE backend baseline → 重新評估 Task 96 coverage／wiring／Authority → M1～M4 closure。
 > 本任務不得順手補 Task 96 功能缺口。
 > 若執行期間與 Task 97 的 path、Authority、交易邊界、governance artifact 或驗證結論衝突，

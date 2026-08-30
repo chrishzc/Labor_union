@@ -1,18 +1,9 @@
 schema_version: 1
 system: labor-union-admin
-source_revision: e8ef9203e160235dfd82f1c063d27e3d84e98975
+source_revision: bff70a9337b0bc224b9a77ccb9bb9cfd9e442478
 status: partial
 last_reconciled_scope:
-  - system
-  - orders/orders
-  - scheduling/scheduling
-  - payroll/payroll
-  - client-finance/client-finance
-  - staff-payables/staff-payables
-  - finance-import/finance-import
-  - government-subsidy/government-subsidy
   - anomalies/anomalies
-  - case-import/case-import
   - external-integration/access
-  - external-integration/line
-  - tests
+  - tests/anomalies
+  - tests/external-integration/access

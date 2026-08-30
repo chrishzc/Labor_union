@@ -225,7 +225,7 @@ API、DB 與 entry cutover 必須等到：
 - 15-code action source map 全部 terminal-ready；
 - 25 owner replacements 的 exact Query／typed response／owner UI／completion／readback 全部可達；
 - 3 retire／merge replacements 與 absence readback 通過；
-- Task 97 正式 tracked identity、revision、WP、receipt 與 terminal gate 已精確映射；
+- Task 97 repository-local tracked identity、revision、successor與final receipt已精確映射（`TASK97_REPOSITORY_LOCAL_COMPLETE`）；production／DB／external acceptance另列deferred，不是本Domain cutover通過證據；
 - 99-path dependency inventory 每列具備 exact successor、caller、owner、readback、deletion／
   rewrite gate、focused tests 與 final zero-reference oracle；
 - entry caller inventory 完成。證明只有內部 caller 且 replacement 完成者可直接 removed；
@@ -238,10 +238,10 @@ API、DB 與 entry cutover 必須等到：
 重建。production、`union_db`、provider、deployment、entry switch 與實際 destructive target
 均不在本文 Authority 內。
 
-Task 97 conflict precedence（2026-08-29 人工裁決）：本 Domain 規格收旂與本機當前
-Task 97 若在 public contract、owner／SSOT、transaction、writer、entry disposition、shared
-write set 或驗收基線重疊，一律以 Task 97 優先，Anomalies 重疊 lane 固定
-`blocked_by_task97_priority`。此優先序不代表 untracked Task 97 已成為 canonical dependency 或完成證據。
+Task 97 conflict precedence的current disposition（2026-08-30）：Task 97 repository-local closeout已完成，
+`blocked_by_task97_priority`不再是Anomalies current blocker；其final writer／entry／transaction／retirement
+artifacts只作後續bounded refresh輸入，不自動授權Anomalies施工。Production、DB engine、external caller、
+runtime／deployment／cutover仍須各自Authority與acceptance，不得由Task 97 receipt推定PASS。
 
 ## 7. Acceptance 與 convergence
 
@@ -253,7 +253,7 @@ write set 或驗收基線重疊，一律以 Task 97 優先，Anomalies 重疊 la
 3. issue identity、pagination、details version、episode timestamps、typed errors 與 PII redaction 可機械驗證。
 4. Recheck 覆蓋 stale insert、absent row、incomplete scope、overlap、duplicate、timeout、intent loss、
    repair 與 atomic rollback，不誤刪 current row。
-5. Task 97 dependency、99-path inventory、entry caller disposition 與 destructive rollback 契約完整。
+5. Task 97 repository-local dependency已完成；後續Anomalies task仍須在current HEAD重建dependency denominator、entry caller disposition與destructive rollback契約。
 6. strict UTF-8、governance validator、reference scan 與 `git diff --check` PASS。
 
 ```yaml

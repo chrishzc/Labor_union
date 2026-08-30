@@ -9,6 +9,7 @@
 
 ## External relationships
 - depends_on: owning business Domains — self-service/webhook action only invokes typed owner commands。
+- depended_by: `anomalies` — central Anomalies worker consumes committed Access security-alert intents and supplies the injected projection sink；Access source has no concrete Anomalies dependency。
 - outbound: committed provider delivery — external failure cannot rollback committed Domain transaction。
 
 ## Contracts

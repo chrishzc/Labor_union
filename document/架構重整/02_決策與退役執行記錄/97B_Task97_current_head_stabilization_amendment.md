@@ -142,7 +142,7 @@ Stabilization package 已依下列順序完成：
 |---|---|---|
 | `97.1` inventory／governance | `repository_local_passed` | current generators、source hashes與focused validators通過；external／production deferred列仍保留。 |
 | `97.2` Clients／typed Query／UoW | `local_contract_passed` | 不重開產品設計；physical delete仍只由 external caller closure決定。 |
-| `97.3` repository／route UoW | `passed_drift_check_only` | 322／322 等數字在 current generator重跑前只作上一 checkpoint evidence；禁止重新設計。 |
+| `97.3` repository／route UoW | `passed` | current generator已綁定source revision `d7167b9`重跑，308／308 passed；禁止重新設計。 |
 | `97.4` Media／Anomaly | `repository_local_passed` | local owner／outbox／projection契約通過；DB engine、runtime、deployment與cutover分列deferred。 |
 | `97.5` scripts／entry | `repository_local_passed_with_deferred_exact_gates` | inventory與safe disposition一致；blocked exact gates只代表後續DB／production／external acceptance。 |
 | `97.6` final acceptance | `TASK97_REPOSITORY_LOCAL_COMPLETE` | local Python／React、build／lint、governance、cross-domain、owner tests與DB static contract完成；production與DB engine均未執行。 |

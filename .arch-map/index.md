@@ -21,6 +21,7 @@
 - `payroll -> scheduling` — Payroll 從 assignment／service ownership 建立薪資義務，不反向改寫排班根事實。
 - `finance-import -> client-finance | staff-payables | government-subsidy` — 匯入只保存銀行來源與分類，正式業務變更委派給 owning Domain。
 - `anomalies -> owning domains` — Anomalies 投影／追蹤 owner facts，不直接改寫 owner root；解除必須以 owner predicate 為準。
+- `anomalies -> external-integration/access` — Anomalies central worker消費已提交的Access security-alert intent，注入Anomalies-owned `system_alerts` projection sink；Access不concrete-import Anomalies。
 - `contract-signing -> scheduling | orders | client-finance | external-integration` — Contract Signing 擁有文件／簽回與簽署 session evidence；commitment／execution、Orders lifecycle、Finance roots 與 LINE binding／delivery 仍由各 owner 決定。
 - `external-integration -> owning domains` — Access／LINE 只提供 actor、identity、webhook／delivery 等邊界，業務命令仍由 owning Subsystem／Domain 決定。
 - `all mutation -> Global` — `shared_kernel/`、outer UoW、receipt/outbox/durable job 與 migration governance 提供跨域不變量。

@@ -1,15 +1,17 @@
 ---
 doc_type: resolved-write-set
 task_id: CUR-LINE-BACKEND-SLIMMING-01
-declared_status: blocked-by-task97-priority
+declared_status: blocked
 owner: LINE / Integration
-date: 2026-08-29
+date: 2026-08-30
+current_blocker: awaiting_user_resume_and_current_head_refresh
 ---
 
 # LINE Backend Resolved Write Set
 
 Production 修改只限下表。發現新 dependency 時，先補 evidence 與本表，再修改；三種正式 blocker 只停止受影響子項。
-任何 path／決策若與 Task 97 重疊，固定先保留 Task 97，該 slimming row 在 Task 97 final baseline 前不得寫入。
+Task 97 final baseline已存在，但本表仍是pre-refresh write set。任何row在使用者恢復本計畫並完成current-head
+caller／owner／replacement／gate refresh前都不得施工；Task 97已吸收的row必須從本表移除而非重做。
 
 | path | action | owner | target responsibility | dependency | gate |
 |---|---|---|---|---|---|
@@ -42,6 +44,6 @@ Production 修改只限下表。發現新 dependency 時，先補 evidence 與�
 
 ## Current stop condition
 
-`BLOCKED_BY_TASK97_PRIORITY`：Task 97 尚未完成 writer disposition、entry governance、legacy retirement與
-global acceptance。S2～S9 的所有 production rows先維持 resolved、未施工；Task 97 terminal 或人工另行
-裁決後，必須從 Task 97 final artifacts重新盤點受影響 rows，不能沿用 stale count直接修改。
+`BLOCKED / AWAITING_USER_RESUME_AND_CURRENT_HEAD_REFRESH`：Task 97 repository-local writer、entry、transaction
+與retirement evidence已完成；production／DB／external acceptance仍未執行。S2～S9所有rows維持未施工；只有
+使用者另行恢復LINE計畫後，才可從Task 97 final artifacts重新盤點受影響rows，不能沿用本表stale count直接修改。

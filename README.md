@@ -20,7 +20,8 @@ evidence 為準；不要以本 README 的文字代替實際驗收。
 > 的 348／0 數字是該次 release candidate 的歷史 snapshot，不代表 current repository 已通過 Task 97。
 > Current writer inventory為1320 identities：1085 `retain_canonical`、235 `retain_restricted`、0
 > `migrate_then_remove`、0 `needs_decision`。
-> Repository commit evidence為322／322 legitimate Application-owned outer UoW；route direct DB call與
+> Repository commit evidence為308／308 legitimate Application-owned outer UoW，綁定Task 97 source revision
+> `d7167b9`；route direct DB call與
 > Domain／Subsystem forbidden outward import均為0。
 > Production-script inventory為86 entries；classification為38 keep／1 rewrite／6 delete／38 test-only／3
 > caller-blocked；14個exact gate仍為DB／production／external deferred acceptance，沒有被提升為PASS。
@@ -90,9 +91,11 @@ worker。兩種模式都不啟動 Streamlit 或通用 File Watcher，日常檔�
 1. 先讀 [`AGENTS.md`](AGENTS.md)：工作區、dirty worktree、測試與 Git 規則。
 2. 讀 [`document/架構重整/00_開發者與Agent導覽.md`](document/架構重整/00_開發者與Agent導覽.md)：程式定位與修改邊界。
 3. 讀 [`00_Global_共同契約.md`](document/架構重整/01_規格基線/00_Global_共同契約.md) 與對應 Domain 規格。
-4. 查閱對應 Work Package／evidence，再檢查 live schema、route、workflow、repository 與測試是否有漂移。
+4. 需要定位affected source／dependency／test boundary時，從[`.arch-map/index.md`](.arch-map/index.md)進入最小subtree。
+5. 查閱對應 Work Package／evidence，再檢查 live schema、route、workflow、repository 與測試是否有漂移。
 
 `system_map*.md`、`system_map*.yaml`、ADAD 記錄與歷史文件僅供追溯，**不是** SSOT、授權或實作 gate。
+`.arch-map/`是living current architecture navigation evidence，也不取代正式規格或驗收。
 
 ## 架構速覽
 
@@ -132,6 +135,7 @@ scripts/             匯入、migration、維運 helper 與 worker process modul
 scripts/launchers/   開發者／維運人員直接執行的本機入口與 dry-run 說明
 line/                LINE adapter、Webhook 和執行程序
 tests/               Module、Subsystem、Domain、Global 層級驗證
+.arch-map/            Living current architecture與test routing navigation；不是產品Authority
 fixtures/            經核准的版本化測試資產；不得直接復活退役 fixture 或套用至正式資料
 document/架構重整/  正式規格、決策／退役記錄、追蹤清單與 evidence
 ```
@@ -341,8 +345,9 @@ fixture 或 production database 混用。
 1. 人工最新明確裁決。
 2. [`document/架構重整/01_規格基線/`](document/架構重整/01_規格基線/) 中已確認的正式規格與裁決。
 3. 既有業務規格、狀態機與欄位權威文件，作為追溯來源。
-4. live schema、production code、API、SQL writer 與 production caller，作為現況證據。
-5. [`02_決策與退役執行記錄/`](document/架構重整/02_決策與退役執行記錄/) 的 Work Package／驗收記錄與 [`03_追蹤清單與證據/`](document/架構重整/03_追蹤清單與證據/) 的 evidence，需依各自 declared status 解讀。
+4. 其他current architecture文件與`.arch-map/` navigation evidence；不創造產品Authority。
+5. [`02_決策與退役執行記錄/`](document/架構重整/02_決策與退役執行記錄/) 的 active Work Package／decision與 [`03_追蹤清單與證據/`](document/架構重整/03_追蹤清單與證據/) 的inventory／evidence，依各自declared status解讀。
+6. live schema、production code、API、SQL writer、caller與tests，作為現況／drift證據。
 
 規格與現況不一致時，必須明確揭露漂移；不得以程式目前能執行為由覆蓋已確認的業務語意。
 

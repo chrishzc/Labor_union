@@ -8,6 +8,7 @@
 
 ## External relationships
 - depends_on: `orders | scheduling | client-finance | staff-payables | finance-import | government-subsidy | case-import` — projections/rechecks use owning facts。
+- depends_on: `external-integration/access` — central worker消費已提交的Access security-alert intent；Access delivery state仍由Access擁有。
 
 ## Contracts
 - `document/架構重整/01_規格基線/06_Anomalies_Domain.md` — Anomalies Domain contract
@@ -16,5 +17,5 @@
 
 ## Verification routing
 - default_boundary: Domain
-- test_root: unknown (`layout_gap`; no `tests/domains/anomalies/` observed)
-- integration_root: unknown; resolve scoped from current `tests/`.
+- test_root: `tests/domains/anomalies/`
+- integration_root: `tests/domains/anomalies/subsystems/anomalies/integration/` (`layout_gap`: no separate Domain-level integration root observed)

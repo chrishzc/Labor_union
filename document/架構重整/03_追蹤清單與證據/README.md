@@ -16,6 +16,7 @@ HTTP dump、重複 candidate receipt 與 cache 放 ignored `scratch/`，完成�
 
 | 檔案 | 一句話摘要 |
 |---|---|
+| [evidence/task97_repository_local_closeout_receipt_a48caa8.md](evidence/task97_repository_local_closeout_receipt_a48caa8.md) | Task 97 repository-local architecture aggregate receipt：`REPO_LOCAL_BLOCKER=0`；production、DB engine與external evidence明確`NOT_RUN`／deferred，不能推導deployment或DB mutation Authority。 |
 | [evidence/2026-08-27_anomaly_necessity_migration_runtime_receipt.md](evidence/2026-08-27_anomaly_necessity_migration_runtime_receipt.md) | Task 96 ANM-NM-A／producer cutover：typed API、三個真 MySQL remediation 情境與 `SCHEDULE-005` 停產證據 PASS；DB release 1009 developer replacement 因受控 credential 未注入而 NOT_RUN。 |
 | [evidence/2026-08-26_task96_p0_import_anomaly_staff_receipt.md](evidence/2026-08-26_task96_p0_import_anomaly_staff_receipt.md) | Task 96：歷史訂單 review zero-mutation 與 Staff cursor 第二頁實機驗收已完成；歷史 anomaly UI safety 證據保留，但因使用者要求全異常人工 remediation 而重開。 |
 | [evidence/2026-08-27_historical_order_review_remediation_runtime_receipt.md](evidence/2026-08-27_historical_order_review_remediation_runtime_receipt.md) | Task 96 Historical Orders 人工 remediation：1008 no-op constraint、fresh/preserve-data MySQL、Apply/replay/outbox 與 active-list removal PASS；enabled-human Browser 與 developer replacement 仍 NOT_RUN。 |
