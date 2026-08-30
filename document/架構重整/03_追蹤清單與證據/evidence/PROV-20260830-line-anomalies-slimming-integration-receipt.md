@@ -17,10 +17,14 @@ conclusion: `PARALLEL_SLIMMING_INTEGRATION_COMPLETE`
 | LINE PR #62 head | `39d9d24cf357546fec919cf346123e7656395812` |
 | Anomalies PR #61 head | `1ad1dbb9d7fbbbcf62de28338ccde52db6cd7ba9` |
 | validated integration code head | `9bd05fd3e735d1020471c5c7d8498a7447672ef6` |
+| latest `origin/main` incorporated | `c45ecc5e870bf2fde57337c28fcd6ed49b504926` |
+| post-drift shared reconciliation tree | `75cbdaa11fcf4fe4e4a8d84a27da194a822e1ea4` |
 | integration PR | [#63](https://github.com/chrishzc/Labor_union/pull/63) |
 
 Integration order was fixed as `LINE #62 → Anomalies #61 → LINE-004 typed consumer → shared governance`.
 The two source PRs remain open; they are not merged or closed by this integration run.
+The later `main` drift only relocated case-import tests and refreshed their Arch Map routes; its scope was
+kept together with the Anomalies／LINE projections in the shared reconciliation tree.
 
 ## Integrated write set
 

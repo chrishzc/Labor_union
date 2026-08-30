@@ -1,6 +1,6 @@
 schema_version: 1
 system: labor-union-admin
-source_revision: ab8c5df34278df32e5195e0250c7b53c4a2e675b
+source_revision: 75cbdaa11fcf4fe4e4a8d84a27da194a822e1ea4
 status: partial
 last_reconciled_scope:
   - anomalies/anomalies
