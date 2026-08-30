@@ -6,10 +6,18 @@ higher_boundary: tests/domains/case_import/
 fixtures_root: tests/fixtures/
 
 # Routing notes
-Current owner-local coverage includes HCM workbook preview/apply/replay contracts and the HCM-BeClass reconciliation application/MySQL adapter transaction boundary. Tests that exercise release/migration, disposable-MySQL/E2E, or a true cross-owner workflow remain at their higher verification boundary.
+Current owner-local coverage includes HCM workbook preview/apply/replay contracts, HCM-BeClass reconciliation application/MySQL adapter transaction boundaries, and HCM resubmission domain/workbook/workflow behavior. Tests that exercise release/migration, disposable-MySQL/E2E, or a true cross-owner workflow remain at their higher verification boundary.
+
+# Placement refresh — 2026-08-30
+The following flat tests were relocated into this canonical root:
+- `test_hcm_resubmission.py`
+- `test_hcm_resubmission_workbook.py`
+- `test_hcm_resubmission_workflow.py`
+
+The source-path assertion in `test_hcm_resubmission.py` was made relocation-safe for the canonical owner root; behavior and production code are unchanged.
 
 # Exceptions
 - `tests/test_wp77_import_contracts.py` is a current protected legacy path with an external inventory consumer; status: `layout_gap`.
 
 # Flat-test audit
-The current flat-test audit found no additional high-confidence Case Import owner-local tests outside the documented protected legacy, release/migration, disposable-MySQL/E2E, or cross-owner boundaries. Admit future cases by direct SUT/current ownership rather than filename alone.
+After this refresh, no additional high-confidence Case Import owner-local HCM resubmission tests remain in the flat root. Admit future cases by direct SUT/current ownership rather than filename alone; keep release/migration, engine, protected legacy and true cross-owner coverage at its higher boundary.

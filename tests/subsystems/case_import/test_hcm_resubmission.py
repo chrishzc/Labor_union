@@ -17,7 +17,7 @@ from domains.case_import.hcm_resubmission import (
 from subsystems.case_import.hcm_resubmission_source import hcm_resubmission_target_values
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def _facts(*, code: str = "HCM-FIELD-001", field: str = "服務方式") -> HcmResubmissionFacts:
