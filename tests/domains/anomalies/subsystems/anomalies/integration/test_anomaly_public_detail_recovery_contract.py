@@ -192,6 +192,24 @@ def test_recovery_query_returns_current_issue_owner_details_and_actions() -> Non
     ]
 
 
+def test_canonical_anomalies_detail_route_reads_current_issue() -> None:
+    projection = _current_projection()
+    repository = _ReadOnlyCurrentIssueRepository(projection)
+
+    response = registry_route.query_anomaly_detail(
+        projection.issue_key,
+        AdminPrincipal(id=1, username="system_admin", display_name="Admin", role="system_admin"),
+        repository,
+    )
+    view = AnomalyRecoveryContextView.model_validate(response.data)
+
+    assert repository.calls == ["query_current"]
+    assert view.issue_key == projection.issue_key
+    assert view.definition_code == "GOVSUB-007"
+    assert not hasattr(view, "timeline")
+    assert not hasattr(view, "workflow_status")
+
+
 def _raise_projection_error(code: str) -> None:
     raise ValueError(code)
 
