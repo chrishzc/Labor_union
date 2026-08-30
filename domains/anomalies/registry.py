@@ -25,7 +25,6 @@ class AnomalySeverity(StrEnum):
 
 class AnomalyProjectionKind(StrEnum):
     CURRENT_STATE = "current_state"
-    FINANCE_OCCURRENCE = "finance_occurrence"
 
 
 class AlertWorkflowStatus(StrEnum):
@@ -1168,92 +1167,6 @@ def _beclass_import_definition(
             "source_row",
             "source_sheet",
             "version",
-        ),
-    )
-
-
-def _finance_manual_review_definition() -> AnomalyDefinition:
-    return AnomalyDefinition(
-        code="finance_import_manual_review",
-        source_domain="finance_import",
-        fingerprint_fields=("finance_import_row_id",),
-        severity=AnomalySeverity.WARNING,
-        projection_kind=AnomalyProjectionKind.FINANCE_OCCURRENCE,
-        available_actions=(
-            RecoveryActionDescriptor(
-                action_key="classify_and_post_bank_row",
-                label="分類並正式入帳銀行流水",
-                owning_domain="finance_import",
-                preview_operation="PreviewCorrectAndPostFinanceImportRow",
-                apply_operation="CorrectAndPostFinanceImportRow",
-                requires_preview=True,
-                form_schema_key="finance_import.correction.v1",
-                source_binding_keys=("finance_import_row_identity", "source_version"),
-                required_operator_inputs=(
-                    "classification_type",
-                    "evidence",
-                    "reason",
-                    "target_obligation_identities",
-                ),
-                required_capability="finance_import.correct_and_post",
-                completion_predicate="finance_import_manual_review_cleared",
-            ),
-        ),
-        display_fields=(
-            "affected_obligation_identities",
-            "affected_order_identities",
-            "amount_delta_ntd",
-            "domain_blockers",
-            "finance_import_batch_id",
-            "finance_import_row_id",
-            "integrity_blocker_active",
-            "reason_codes",
-            "root_condition_active",
-        ),
-    )
-
-
-def _client_refund_return_definition() -> AnomalyDefinition:
-    return AnomalyDefinition(
-        code="CLIENTREFUND-001",
-        source_domain="finance_import",
-        fingerprint_fields=(
-            "finance_import_row_id",
-            "original_refund_ledger_entry_id",
-        ),
-        severity=AnomalySeverity.BLOCKING,
-        projection_kind=AnomalyProjectionKind.FINANCE_OCCURRENCE,
-        available_actions=(
-            RecoveryActionDescriptor(
-                action_key="classify_client_refund_return",
-                label="處理客戶退款退匯",
-                owning_domain="finance_import",
-                preview_operation="PreviewCorrectAndPostClientRefundReturn",
-                apply_operation="CorrectAndPostClientRefundReturn",
-                requires_preview=True,
-                form_schema_key="finance_import.correction.v1",
-                source_binding_keys=("finance_import_row_identity", "source_version"),
-                required_operator_inputs=(
-                    "evidence",
-                    "reason",
-                    "refund_ledger_entry_identity",
-                    "target_obligation_identities",
-                ),
-                required_capability="finance_import.correct_and_post",
-                completion_predicate="client_refund_return_cleared",
-            ),
-        ),
-        display_fields=(
-            "affected_obligation_identities",
-            "affected_order_identities",
-            "amount_delta_ntd",
-            "domain_blockers",
-            "finance_import_batch_id",
-            "finance_import_row_id",
-            "integrity_blocker_active",
-            "original_refund_ledger_entry_id",
-            "reason_codes",
-            "root_condition_active",
         ),
     )
 

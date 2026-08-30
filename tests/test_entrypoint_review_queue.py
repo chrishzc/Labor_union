@@ -77,8 +77,8 @@ def test_task97_local_canonical_http_promotions_are_exact_identity_locked() -> N
         - set(queue.SOURCE_RETIRED_HTTP_ENTRIES)
     )
 
-    assert len(queue.SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES) == 92
-    assert len(canonical_entries) == 91
+    assert len(queue.SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES) == 93
+    assert len(canonical_entries) == 92
     for identity in canonical_entries:
         entry = entries[identity]
         assert entry["status"] == "active"
@@ -135,7 +135,7 @@ def test_task97_remaining_api_blockers_are_exact_identity_locked() -> None:
         if entry["status"] == "review_required" and entry["kind"] == "api"
     }
 
-    assert len(queue.SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES) == 24
+    assert len(queue.SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES) == 25
     assert set(review_api) == (
         queue.SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES
         | queue.SOURCE_OWNER_COMMAND_REWRITE_HTTP_ENTRIES
@@ -151,9 +151,9 @@ def test_task97_remaining_api_blockers_are_exact_identity_locked() -> None:
 def test_task97_review_queue_current_terminal_counts() -> None:
     entries = _load_queue()
 
-    assert sum(entry["status"] == "active" for entry in entries) == 488
-    assert sum(entry["status"] == "retired_410" for entry in entries) == 87
-    assert sum(entry["status"] == "review_required" for entry in entries) == 33
+    assert sum(entry["status"] == "active" for entry in entries) == 489
+    assert sum(entry["status"] == "retired_410" for entry in entries) == 86
+    assert sum(entry["status"] == "review_required" for entry in entries) == 34
     assert sum(entry["status"] == "operator_only" for entry in entries) == 75
 
 

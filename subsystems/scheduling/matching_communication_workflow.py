@@ -3,13 +3,43 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
+from domains.line.canonical_payload import canonical_line_payload_json
+from domains.line.delivery import (
+    LineDeliveryRequest,
+    LineMessageKind,
+    LineRecipient,
+    LineRecipientType,
+)
+from domains.line.identities import LineDeliveryTaskId, LineUserId
+from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.scheduling.ports import unconfigured_connection_factory
-from subsystems.line.delivery_task_workflow import enqueue_line_task
+from subsystems.line.delivery_contracts import (
+    EnqueueLineDeliveryResult,
+    LineDeliveryCommandOutcome,
+)
+from subsystems.line.ports import LineDeliveryTaskRepositoryPort
 
 
 get_connection = unconfigured_connection_factory
+
+
+LineDeliveryTaskRepositoryFactory = Callable[
+    [Any], LineDeliveryTaskRepositoryPort
+]
+
+
+def _unconfigured_line_delivery_task_repository(
+    _connection: Any,
+) -> LineDeliveryTaskRepositoryPort:
+    raise RuntimeError("LINE delivery task repository is not configured")
+
+
+get_line_delivery_task_repository: LineDeliveryTaskRepositoryFactory = (
+    _unconfigured_line_delivery_task_repository
+)
 
 
 def _positive_int(value: Any, field: str) -> int:
@@ -211,6 +241,47 @@ def _run_in_application_uow(operation: Callable[[Any, Any], dict[str, Any]]) -> 
         _close(connection)
 
 
+def _enqueue_matching_willingness_reply(
+    connection: Any,
+    *,
+    event_id: int,
+    event_key: str,
+    reply_to_user_id: str,
+    reply_message: str,
+) -> int:
+    """Enqueue the reply through the caller-owned canonical LINE repository."""
+    request = LineDeliveryRequest(
+        recipient=LineRecipient(
+            LineRecipientType.USER,
+            LineUserId(reply_to_user_id),
+        ),
+        message_kind=LineMessageKind.TEXT,
+        payload_json=canonical_line_payload_json(
+            {"type": "text", "text": reply_message}
+        ),
+        scheduled_at=datetime.now(timezone.utc),
+        idempotency_key=IdempotencyKey(
+            f"line-matching-willingness:{event_key}"
+        ),
+        correlation_id=CorrelationId(
+            f"matching-willingness:{event_key}"
+        ),
+        source_aggregate_type="matching_willingness_card",
+        source_aggregate_identity=str(event_id),
+    )
+    result = get_line_delivery_task_repository(connection).enqueue(request)
+    if not isinstance(result, EnqueueLineDeliveryResult):
+        raise TypeError("LINE delivery task enqueue returned an invalid result")
+    if result.outcome not in {
+        LineDeliveryCommandOutcome.CREATED,
+        LineDeliveryCommandOutcome.EXISTING,
+    }:
+        raise ValueError("LINE willingness reply task was not accepted")
+    if not isinstance(result.task_id, LineDeliveryTaskId):
+        raise TypeError("LINE delivery task enqueue returned an invalid task ID")
+    return result.task_id.value
+
+
 def record_matching_plan_willingness(
     case_no: Any,
     plan_id: Any,
@@ -302,15 +373,13 @@ def _record_matching_plan_willingness_in_transaction(
         event_id = _positive_int(cursor.lastrowid, "event_id")
         line_task_id = None
         if reply_to_user_id is not None:
-            line_task_id = enqueue_line_task(
-                cursor,
-                to_user_id=reply_to_user_id,
-                message_content=reply_message,
-                source_event_id=event_key,
-                idempotency_key=f"line-matching-willingness:{event_key}",
+            line_task_id = _enqueue_matching_willingness_reply(
+                connection,
+                event_id=event_id,
+                event_key=event_key,
+                reply_to_user_id=reply_to_user_id,
+                reply_message=reply_message,
             )
-            if line_task_id is None:
-                raise ValueError("LINE willingness reply task was not created")
         return {"status": "recorded", "event_id": event_id, "line_task_id": line_task_id, **payload}
     finally:
         pass

@@ -5,7 +5,11 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
-from subsystems.line.identity_management_contracts import LineIdentityRevocationStatus
+from subsystems.line.identity_management_contracts import (
+    LineIdentityCurrentFactFinding,
+    LineIdentityCurrentFactReadbackStatus,
+    LineIdentityRevocationStatus,
+)
 
 
 class _StrictModel(BaseModel):
@@ -30,6 +34,25 @@ class LineIdentityBindingPageView(_StrictModel):
     total: int
     page: int
     page_size: int
+
+
+class LineIdentityCurrentFactBindingView(_StrictModel):
+    subject_type: LineBindingSubjectType
+    subject_reference: str
+    subject_name: str
+    owner_line_user_id: str | None = None
+
+
+class LineIdentityCurrentFactReadbackView(_StrictModel):
+    line_user_id: str
+    root_status: LineIdentityBindingStatus | None = None
+    root_version: int | None = None
+    root_binding: LineIdentityCurrentFactBindingView | None = None
+    owner_projections: list[LineIdentityCurrentFactBindingView]
+    findings: list[LineIdentityCurrentFactFinding]
+    readback_status: LineIdentityCurrentFactReadbackStatus
+    manual_actions: list[str]
+    dual_role_persistence_supported: bool
 
 
 class LineIdentityRevocationPreviewView(_StrictModel):

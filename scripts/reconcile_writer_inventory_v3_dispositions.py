@@ -194,7 +194,7 @@ EXACT_SOURCE_REVIEWS: dict[
         ("scheduling", "Scheduling caregiver availability lock release inside application outer Unit of Work", "typed availability-lock release API", "retain_canonical:source-locked exact lock, day, event, and matching-plan invalidation mutations; application owns the transaction"),
     ),
     "subsystems/scheduling/matching_communication_workflow.py": (
-        "f0a613ad24164b7bc3614d54511107a8dc07bf008fa46aa948c9aff6da9a7b0f",
+        "86167e241b6982f2c92e309e7ec8d0b1b881170fd66cea7705b21336d2539a29",
         frozenset({"_cancel_matching_plan_in_transaction", "_record_matching_plan_willingness_in_transaction"}),
         ("scheduling", "Scheduling matching communication mutation inside application outer Unit of Work", "matching cancellation API and typed LINE willingness handler", "retain_canonical:source-locked exact active plan cancellation and willingness event symbols; delivery uses the replacement notification application"),
     ),

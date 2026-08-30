@@ -5,14 +5,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 from api.dependencies.durable_job_handlers import anomaly_recheck_handler, default_job_handlers
 from domains.anomalies.current_issue import (
     CURRENT_ISSUE_SUBJECT_FIELDS,
     CurrentIssueCandidate,
-    OwnerSnapshot,
     build_issue_key,
     canonical_subject_identity,
     canonical_subject_identity_for_code,
@@ -99,35 +97,24 @@ def test_generic_job_registry_contains_typed_anomaly_recheck() -> None:
     assert MySqlCurrentIssueRepository.__name__ == "MySqlCurrentIssueRepository"
 
 
-def test_mysql_projection_fails_before_sql_without_canonical_subject_identity() -> None:
-    scope = RecheckScope(
-        "scheduling",
-        "assignment",
-        "assignment",
-        ("a-1",),
-        ("scheduling:assignment:a-1",),
-    )
-    repository = MySqlCurrentIssueRepository(object())
-    repository._snapshot = OwnerSnapshot(scope, "owner-v1", 1, object())
-    candidate = CurrentIssueCandidate(
-        "ci_missing_identity",
-        "SCHEDULE-006",
-        "scheduling",
-        "assignment",
-        "assignment",
-        "a-1",
-        1,
-        "blocking",
-        True,
-        {"reason": "test"},
-    )
-
+def test_current_candidate_requires_canonical_subject_identity() -> None:
     try:
-        repository.upsert_current(candidate, datetime.now(timezone.utc))
-    except RuntimeError as error:
-        assert str(error) == "current issue upsert lacks canonical subject identity"
+        CurrentIssueCandidate(
+            issue_key="ci_missing_identity",
+            definition_code="SCHEDULE-006",
+            owner_domain="scheduling",
+            owner_root_type="assignment",
+            subject_type="assignment",
+            subject_id="a-1",
+            owner_version=1,
+            severity="blocking",
+            blocking=True,
+            details={"reason": "test"},
+        )
+    except TypeError as error:
+        assert "subject_identity" in str(error)
     else:  # pragma: no cover
-        raise AssertionError("missing canonical identity must fail before SQL")
+        raise AssertionError("missing canonical identity must fail at construction")
 
 
 def test_schema_is_one_current_projection_and_no_anomaly_history() -> None:

@@ -6,7 +6,7 @@ integration_root: tests/domains/anomalies/subsystems/anomalies/integration/
 fixtures_root: tests/fixtures/
 
 # Routing notes
-Focused Anomalies workflow, registry, projection, source and adapter contracts live here. Current owner-local coverage includes anomaly rulebook/action/recovery-context guards; finance/staff/client recovery anomaly consumers and projections; LINE-binding predicate guards; historical-order remediation outbox consumption; historical-baseline projection; historical-baseline projector API/persistence readback contracts; anomaly reclassification domain, repository and Staff Payables owner-query adapter contracts; anomaly-necessity lifecycle catalog and runtime producer cutover; and root-fact projection repository owner-binding contracts.
+Focused Anomalies workflow, registry, current-only projection, source and adapter contracts live here. Current owner-local coverage includes closed issue identity／typed 410／fresh recheck guards; anomaly rulebook/action/recovery-context guards; finance/staff/client recovery consumers; LINE-binding predicate guards; `test_line_identity_current_issue_consumer.py`對typed LINE readback、合法雙角色抑制、role-scoped conflict與redacted details的cross-subsystem oracle；以及其他owner projection contracts。
 
 Access security-alert composition is cross-subsystem: Access owner-local delivery/retry tests remain under the Access root, while `system_alerts` projection/service and schema oracles remain at the Anomalies/schema higher boundary.
 

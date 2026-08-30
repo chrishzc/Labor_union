@@ -17,10 +17,21 @@ from typing import Any
 from urllib.parse import urlencode
 
 import pymysql
-import requests
 
+from domains.line.canonical_payload import canonical_line_payload_json
+from domains.line.delivery import (
+    LineDeliveryRequest,
+    LineMessageKind,
+    LineRecipient,
+    LineRecipientType,
+)
+from domains.line.identities import LineUserId
+from infrastructure.line.messaging_api_adapter import LineMessagingApiAdapter
+from infrastructure.line.rich_menu_api_adapter import LineRichMenuApiAdapter
 from infrastructure.mysql.mysql_adapter import get_connection as get_db_connection
 from infrastructure.line.redis_wakeup import RedisLineWakeupPublisher
+from shared_kernel.identities import CorrelationId, IdempotencyKey
+from subsystems.line.delivery_contracts import LineProviderOutcomeType
 from subsystems.line.rich_menu_publication_workflow import (
     import_legacy_rich_menu_ids,
     next_publication_run_at,
@@ -31,7 +42,36 @@ from subsystems.line.rich_menu_publication_workflow import (
 
 _wakeup_event = asyncio.Event()
 _worker_task: asyncio.Task[None] | None = None
-RETRYABLE_HTTP = {408, 425, 429, 500, 502, 503, 504}
+
+
+class _LegacyHttpCompatibility:
+    """Test-only seam retained for callers that used to patch ``worker.requests``.
+
+    Normal execution leaves this hook untouched and the typed adapter owns the
+    HTTP session.  Keeping the seam avoids forcing legacy rollback tests to
+    know about the provider adapter implementation.
+    """
+
+    post = None
+
+
+requests = _LegacyHttpCompatibility()
+
+
+def legacy_rollback_runtime_enabled() -> bool:
+    """Allow this compatibility worker only when runtime selection says so."""
+    mode = os.getenv("LINE_WORKER_RUNTIME_MODE", "canonical").strip().lower()
+    if mode not in {"legacy", "compatibility"}:
+        return False
+    app_environment = os.getenv("APP_ENV", "development").strip().lower()
+    if app_environment in {"prod", "production"}:
+        return os.getenv("LINE_LEGACY_ROLLBACK_MODE", "false").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+    return True
 
 
 def _utc_now_naive() -> datetime:
@@ -137,31 +177,78 @@ def _next_run_at() -> datetime | None:
 
 
 def _line_headers(task: dict[str, Any]) -> dict[str, str]:
-    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token")
-    return {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}",
-        "X-Line-Retry-Key": task["line_request_id"],
-    }
+    """Retained for callers that inspect the legacy task shape.
+
+    Provider headers are owned by ``LineMessagingApiAdapter`` now.
+    """
+    return {"X-Line-Retry-Key": str(task.get("line_request_id") or "")}
+
+
+def _provider_result(outcome) -> tuple[bool, bool, str, str]:
+    if outcome.outcome_type is LineProviderOutcomeType.SUCCESS:
+        return True, False, "", ""
+    retryable = outcome.outcome_type is not LineProviderOutcomeType.REJECTED
+    return (
+        False,
+        retryable,
+        outcome.error_code or "line_provider_failure",
+        outcome.error_message or "LINE provider request failed",
+    )
+
+
+def _delivery_request(task: dict[str, Any], message: dict[str, Any]) -> LineDeliveryRequest:
+    task_id = str(task.get("id") or task.get("line_request_id") or "unknown")
+    request_key = str(
+        task.get("idempotency_key")
+        or task.get("line_request_id")
+        or f"legacy-line-task:{task_id}"
+    )
+    correlation = str(task.get("correlation_id") or f"legacy-line-task:{task_id}")
+    return LineDeliveryRequest(
+        LineRecipient(LineRecipientType.USER, LineUserId(str(task["to_user_id"]))),
+        LineMessageKind.TEXT,
+        canonical_line_payload_json(message),
+        datetime.now(timezone.utc),
+        IdempotencyKey(request_key),
+        CorrelationId(correlation),
+        "line_task",
+        task_id,
+    )
+
+
+def _send_message(task: dict[str, Any], message: dict[str, Any]) -> tuple[bool, bool, str, str]:
+    try:
+        token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token").strip()
+        if not token or token == "mock_token" or token.startswith("your_"):
+            return (
+                False,
+                False,
+                "line_channel_access_token_not_configured",
+                "LINE channel access token is not configured",
+            )
+        hook = requests.post
+        session = None
+        if callable(hook):
+            class _PatchedSession:
+                def post(self, url, *, headers, data, timeout):
+                    return hook(
+                        url,
+                        json=json.loads(data),
+                        headers=headers,
+                        timeout=timeout,
+                    )
+
+            session = _PatchedSession()
+        outcome = LineMessagingApiAdapter(token, session=session).send(
+            _delivery_request(task, message)
+        )
+        return _provider_result(outcome)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return False, False, "invalid_line_message_payload", str(exc)
 
 
 def _push_text(task: dict[str, Any], text: str) -> tuple[bool, bool, str, str]:
-    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token")
-    if not token or token == "mock_token":
-        print(f"[LINE Mock] Task #{task['id']}: {task['task_type']}")
-        return True, False, "", ""
-    try:
-        response = requests.post(
-            "https://api.line.me/v2/bot/message/push",
-            json={"to": task["to_user_id"], "messages": [{"type": "text", "text": text}]},
-            headers=_line_headers(task),
-            timeout=10,
-        )
-    except requests.RequestException as exc:
-        return False, True, "network_error", str(exc)
-    if response.status_code == 200:
-        return True, False, "", ""
-    return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
+    return _send_message(task, {"type": "text", "text": text})
 
 
 def _matching_willingness_actions(
@@ -211,21 +298,7 @@ def _push_matching_willingness_card(
         message = _matching_willingness_message(task)
     except (KeyError, TypeError, ValueError) as exc:
         return False, False, "invalid_matching_payload", str(exc)
-    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token")
-    if not token or token == "mock_token":
-        return True, False, "", ""
-    try:
-        response = requests.post(
-            "https://api.line.me/v2/bot/message/push",
-            json={"to": task["to_user_id"], "messages": [message]},
-            headers=_line_headers(task),
-            timeout=10,
-        )
-    except requests.RequestException as exc:
-        return False, True, "network_error", str(exc)
-    if response.status_code == 200:
-        return True, False, "", ""
-    return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
+    return _send_message(task, message)
 
 
 def _push_line_message(task: dict[str, Any]) -> tuple[bool, bool, str, str]:
@@ -235,47 +308,38 @@ def _push_line_message(task: dict[str, Any]) -> tuple[bool, bool, str, str]:
         return False, False, "invalid_line_message_payload", str(exc)
     if not isinstance(message, dict) or not message.get("type"):
         return False, False, "invalid_line_message_payload", "LINE message payload must be an object"
-    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token")
-    if not token or token == "mock_token":
-        return True, False, "", ""
-    try:
-        response = requests.post(
-            "https://api.line.me/v2/bot/message/push",
-            json={"to": task["to_user_id"], "messages": [message]},
-            headers=_line_headers(task),
-            timeout=10,
-        )
-    except requests.RequestException as exc:
-        return False, True, "network_error", str(exc)
-    if response.status_code == 200:
-        return True, False, "", ""
-    return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
+    return _send_message(task, message)
 
 
 def _menu_action(task: dict[str, Any], link: bool) -> tuple[bool, bool, str, str]:
-    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token")
-    payload = json.loads(task.get("payload_json") or "{}")
-    if not token or token == "mock_token":
-        return True, False, "", ""
-    url = f"https://api.line.me/v2/bot/user/{task['to_user_id']}/richmenu"
-    menu_headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
     try:
-        if link:
-            menu_id = payload.get("rich_menu_id")
-            if not menu_id:
-                return False, False, "menu_not_set", "Rich Menu ID is missing"
-            response = requests.post(f"{url}/{menu_id}", headers=menu_headers, timeout=10)
-        else:
-            response = requests.delete(url, headers=menu_headers, timeout=10)
-    except requests.RequestException as exc:
-        return False, True, "network_error", str(exc)
-    if response.status_code == 200:
-        followup = payload.get("success_message")
-        return _push_text(task, followup) if followup else (True, False, "", "")
-    return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
+        payload = json.loads(task.get("payload_json") or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError("LINE Rich Menu task payload must be an object")
+        menu_id = str(payload.get("rich_menu_id") or "").strip()
+        if link and not menu_id:
+            return False, False, "menu_not_set", "Rich Menu ID is missing"
+        token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token").strip()
+        if not token or token == "mock_token" or token.startswith("your_"):
+            return (
+                False,
+                False,
+                "line_channel_access_token_not_configured",
+                "LINE channel access token is not configured",
+            )
+        adapter = LineRichMenuApiAdapter(token, lambda _reference: (b"", "image/jpeg"))
+        user_id = LineUserId(str(task["to_user_id"]))
+        outcome = (
+            adapter.link_to_user(menu_id, user_id)
+            if link
+            else adapter.unlink_from_user(user_id)
+        )
+        result = _provider_result(outcome)
+        if result[0] and payload.get("success_message"):
+            return _push_text(task, str(payload["success_message"]))
+        return result
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return False, False, "invalid_rich_menu_task_payload", str(exc)
 
 
 def _execute_task(task: dict[str, Any]) -> tuple[bool, bool, str, str]:
@@ -394,6 +458,8 @@ def _finish_task(task: dict[str, Any], result: tuple[bool, bool, str, str]) -> s
 
 
 async def process_due_tasks() -> None:
+    if not legacy_rollback_runtime_enabled():
+        return
     while True:
         tasks = await asyncio.to_thread(_claim_due_tasks)
         if not tasks:
@@ -411,6 +477,9 @@ async def process_due_tasks() -> None:
 
 
 async def worker_loop() -> None:
+    if not legacy_rollback_runtime_enabled():
+        print("[LINE Worker] Legacy rollback runtime is disabled")
+        return
     print("[LINE Worker] Reliable worker started")
     imported = await asyncio.to_thread(import_legacy_rich_menu_ids)
     if imported:

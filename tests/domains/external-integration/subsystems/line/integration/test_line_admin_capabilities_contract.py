@@ -1,5 +1,7 @@
 """Focused contract checks for the typed LINE admin capability projection."""
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -128,7 +130,7 @@ def test_health_dependency_returns_typed_bounded_query_and_closes_connection(
 
 def test_health_route_does_not_own_sql_or_database_connections() -> None:
     source = line_admin.__file__
-    route_text = open(source, encoding="utf-8").read()
+    route_text = Path(source).read_text(encoding="utf-8")
 
     assert "get_connection" not in route_text
     assert "cursor.execute" not in route_text

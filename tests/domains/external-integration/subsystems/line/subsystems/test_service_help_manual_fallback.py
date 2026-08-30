@@ -103,6 +103,37 @@ def test_reply_token_is_never_used_as_a_precommit_provider_call() -> None:
     assert "reply-event-2" not in unit_of_work.delivery_tasks.requests[0].payload_json
 
 
+def test_service_help_menu_keeps_all_six_approved_categories() -> None:
+    unit_of_work = _unit_of_work()
+    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 21, tzinfo=timezone.utc))
+
+    assert application.handle(
+        _inbox("event-menu"), unit_of_work, LineUserId("U123456789"), "服務說明"
+    ) is True
+
+    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
+    cards = payload["contents"]["contents"]
+    assert [card["hero"]["contents"][0]["text"] for card in cards] == [
+        "服務流程",
+        "收費與補助",
+        "查詢服務進度",
+        "修改登記資料",
+        "月嫂身分認證",
+        "其他問題",
+    ]
+    assert cards[4]["footer"]["contents"][0]["action"]["text"] == "我是月嫂"
+
+
+def test_unknown_text_falls_through_to_canonical_knowledge_scheduler() -> None:
+    unit_of_work = _unit_of_work()
+    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 21, tzinfo=timezone.utc))
+
+    assert application.handle(
+        _inbox("event-knowledge"), unit_of_work, LineUserId("U123456789"), "育兒問題"
+    ) is False
+    assert unit_of_work.delivery_tasks.requests == []
+
+
 def test_exact_replay_keeps_the_same_durable_delivery_identity() -> None:
     first_uow = _unit_of_work()
     second_uow = _unit_of_work()

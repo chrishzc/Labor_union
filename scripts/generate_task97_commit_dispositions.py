@@ -106,11 +106,9 @@ APPLICATION_OWNED_COMMIT_SYMBOLS = {
     ("subsystems/finance_import/ingestion.py", "ingest_finance_workbook"),
     ("subsystems/jobs/command_application.py", "DurableJobCommandApplication.enqueue"),
     ("subsystems/jobs/command_application.py", "DurableJobCancellationApplication.cancel_queued"),
-    ("subsystems/line/client_binding_application.py", "_ConnectionUnitOfWork.commit"),
     ("subsystems/line/identity_review_workflow.py", "_ConnectionUnitOfWork.commit"),
     ("subsystems/line/media_archive.py", "_ConnectionUnitOfWork.commit"),
     ("subsystems/line/rich_menu_publication_workflow.py", "_ConnectionUnitOfWork.commit"),
-    ("subsystems/line/user_lifecycle.py", "_ConnectionUnitOfWork.commit"),
 }
 
 

@@ -7,7 +7,7 @@
 - `anomalies` — anomaly query/projection/remediation dispatch workers; path: `subsystems/anomalies/index.md`
 
 ## External relationships
-- depends_on: `orders | scheduling | client-finance | staff-payables | finance-import | government-subsidy | case-import` — projections/rechecks use owning facts。
+- depends_on: `orders | scheduling | client-finance | staff-payables | finance-import | government-subsidy | case-import | external-integration/line` — projections/rechecks use owning typed current facts；`LINE-004` consumes LINE Identity current-fact readback。
 - depends_on: `external-integration/access` — central worker消費已提交的Access security-alert intent；Access delivery state仍由Access擁有。
 
 ## Contracts

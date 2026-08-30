@@ -49,6 +49,7 @@ from domains.scheduling.matching_communication import (
     MatchingPlanReference,
 )
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
+from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
 from shared_kernel.fingerprints import PreviewFingerprint
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.matching_recommendation_repository import MySqlMatchingRecommendationRepository
@@ -59,6 +60,9 @@ from subsystems.scheduling import matching_communication_workflow as _matching_c
 
 _matching_plan_workflow.get_connection = get_connection
 _matching_communication_workflow.get_connection = get_connection
+_matching_communication_workflow.get_line_delivery_task_repository = (
+    MySqlLineDeliveryTaskRepository
+)
 _matching_facts_port = MySqlSegmentedAvailabilityFactsRepository(get_connection)
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.scheduling.matching_notification_application import (

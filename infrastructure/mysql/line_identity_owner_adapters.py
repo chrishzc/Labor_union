@@ -50,7 +50,6 @@ class MySqlCustomerIdentityOwnerAdapter:
             if cursor.fetchone():
                 raise RuntimeError("line_identity_already_used_by_customer")
             cursor.execute(_CUSTOMER_BIND_SQL, (line_user_id.value, customer_id))
-            _upsert_legacy_role(cursor, line_user_id, "customer")
 
     def clear_customer(self, subject_reference, line_user_id) -> None:
         _clear_owner_line_user(
@@ -98,7 +97,6 @@ class MySqlStaffIdentityOwnerAdapter:
             if current != expected_current_line_user_id:
                 raise RuntimeError("staff_identity_binding_conflict")
             cursor.execute(_STAFF_BIND_SQL, (line_user_id.value, staff_id))
-            _upsert_legacy_role(cursor, line_user_id, "staff")
 
     def clear_staff(self, subject_reference, line_user_id) -> None:
         _clear_owner_line_user(
@@ -145,7 +143,6 @@ class MySqlAdminIdentityOwnerAdapter:
             current = _optional_line_user_id(row.get("linked_line_user_id"))
             if current != expected_current_line_user_id:
                 raise RuntimeError("admin_identity_binding_conflict")
-            _upsert_legacy_role(cursor, line_user_id, "union_staff")
             cursor.execute(_ADMIN_BIND_SQL, (line_user_id.value, admin_id))
 
     def clear_admin(self, subject_reference, line_user_id) -> None:
@@ -201,10 +198,6 @@ def _numeric_subject_reference(value: str, owner: str) -> int:
     return identity
 
 
-def _upsert_legacy_role(cursor, line_user_id, role):
-    cursor.execute(_LEGACY_ROLE_UPSERT_SQL, (line_user_id.value, role))
-
-
 def _clear_owner_line_user(
     connection,
     table: str,
@@ -220,8 +213,6 @@ def _clear_owner_line_user(
         )
         if cursor.rowcount != 1:
             raise RuntimeError("line_identity_owner_projection_conflict")
-        # Legacy publication still reads this projection; downgrade prevents future relinking.
-        _upsert_legacy_role(cursor, line_user_id, "customer")
 
 
 _CUSTOMER_RESOLVE_SQL = (
@@ -266,13 +257,6 @@ _ADMIN_LINKED_SQL = (
     "CONVERT(%s USING utf8mb4) COLLATE utf8mb4_unicode_ci "
     "AND a.enabled=1 LIMIT 1"
 )
-_LEGACY_ROLE_UPSERT_SQL = (
-    "INSERT INTO line_users (line_user_id,role,status,last_event_at) "
-    "VALUES (%s,%s,'active',UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE "
-    "role=VALUES(role),status='active',last_event_at=UTC_TIMESTAMP()"
-)
-
-
 __all__ = [
     "MySqlAdminIdentityOwnerAdapter",
     "MySqlCustomerIdentityOwnerAdapter",

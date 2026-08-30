@@ -19,7 +19,10 @@ from domains.line.identity_binding import (
     transition_binding_status,
 )
 from api.schemas.base import BaseResponse
-from api.schemas.line_identity_management import LineIdentityRevocationRequestView
+from api.schemas.line_identity_management import (
+    LineIdentityCurrentFactReadbackView,
+    LineIdentityRevocationRequestView,
+)
 from shared_kernel.identities import (
     ActorContext,
     CorrelationId,
@@ -39,6 +42,9 @@ from subsystems.line.identity_management_application import (
     LineIdentityManagementApplication,
 )
 from subsystems.line.identity_management_contracts import (
+    LineIdentityCurrentFactFinding,
+    LineIdentityCurrentFactQuery,
+    LineIdentityCurrentFactReadbackStatus,
     LineIdentityRevocationRequest,
     LineIdentityRevocationStatus,
     RequestLineIdentityRevocationCommand,
@@ -261,6 +267,20 @@ def test_api_view_unwraps_domain_value_objects_at_the_boundary() -> None:
     assert response.data.pending_binding_version == 3
 
 
+def test_current_fact_api_view_is_closed_and_keeps_dual_role_limit_visible() -> None:
+    connection = _CurrentFactConnection(
+        [_root_fact(), _owner_fact("customer", "7"), _owner_fact("staff", "12")]
+    )
+    readback = MySqlLineIdentityManagementRepository(connection).current_fact(
+        LineIdentityCurrentFactQuery(LineUserId("U-dual-1"))
+    )
+
+    view = LineIdentityCurrentFactReadbackView.model_validate(readback)
+
+    assert view.dual_role_persistence_supported is False
+    assert LineIdentityCurrentFactFinding.LEGAL_CUSTOMER_STAFF_DUAL_ROLE in view.findings
+
+
 def _worker_unit_of_work():
     repository = SimpleNamespace(failures=[])
 
@@ -430,6 +450,112 @@ def test_management_defaults_use_merge_copy_and_explicit_product_names() -> None
     assert '"身分管理"' in page
 
 
-def test_owner_clear_downgrades_legacy_role_to_prevent_future_staff_relink() -> None:
+def test_identity_owner_adapters_do_not_write_legacy_line_user_role() -> None:
     source = (PROJECT_ROOT / "infrastructure/mysql/line_identity_owner_adapters.py").read_text(encoding="utf-8")
-    assert '_upsert_legacy_role(cursor, line_user_id, "customer")' in source
+    assert "_upsert_legacy_role" not in source
+    assert "_LEGACY_ROLE_UPSERT_SQL" not in source
+    assert "INSERT INTO line_users" not in source
+
+
+class _CurrentFactCursor:
+    def __init__(self, rows) -> None:
+        self.rows = rows
+        self.statement = ""
+        self.parameters = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_arguments):
+        return False
+
+    def execute(self, statement, parameters=None):
+        self.statement = statement
+        self.parameters = parameters
+
+    def fetchall(self):
+        return self.rows
+
+
+class _CurrentFactConnection:
+    def __init__(self, rows) -> None:
+        self.cursor_instance = _CurrentFactCursor(rows)
+
+    def cursor(self):
+        return self.cursor_instance
+
+
+def _root_fact(subject_type="customer", subject_reference="7", version=4):
+    return {
+        "source_kind": "root",
+        "line_user_id": "U-dual-1",
+        "binding_status": "bound",
+        "aggregate_version": version,
+        "subject_type": subject_type,
+        "subject_reference": subject_reference,
+        "subject_name": None,
+        "owner_line_user_id": None,
+    }
+
+
+def _owner_fact(subject_type, subject_reference, name="owner"):
+    return {
+        "source_kind": subject_type,
+        "line_user_id": "U-dual-1",
+        "binding_status": None,
+        "aggregate_version": None,
+        "subject_type": subject_type,
+        "subject_reference": subject_reference,
+        "subject_name": name,
+        "owner_line_user_id": "U-dual-1",
+    }
+
+
+def test_current_fact_treats_customer_staff_dual_role_as_legal_but_exposes_schema_limit() -> None:
+    connection = _CurrentFactConnection(
+        [_root_fact(), _owner_fact("customer", "7"), _owner_fact("staff", "42", "月嫂")]
+    )
+
+    readback = MySqlLineIdentityManagementRepository(connection).current_fact(
+        LineIdentityCurrentFactQuery(LineUserId("U-dual-1"))
+    )
+
+    assert LineIdentityCurrentFactFinding.LEGAL_CUSTOMER_STAFF_DUAL_ROLE in readback.findings
+    assert LineIdentityCurrentFactFinding.ROOT_OWNER_PROJECTION_MISMATCH in readback.findings
+    assert readback.readback_status is LineIdentityCurrentFactReadbackStatus.ROOT_PERSISTENCE_LIMITED
+    assert readback.dual_role_persistence_supported is False
+    assert readback.is_legal_dual_role is True
+    # The two roles are legal; the current single-row root still leaves a
+    # separately actionable root/projection mismatch.
+    assert readback.is_conflict is True
+    assert "schema_release_for_role_scoped_bindings" in readback.manual_actions
+    assert "INSERT" not in connection.cursor_instance.statement.upper()
+
+
+def test_current_fact_reports_same_type_multiple_active_projections_and_version() -> None:
+    connection = _CurrentFactConnection(
+        [_root_fact("staff", "42", version=9), _owner_fact("staff", "42"), _owner_fact("staff", "43")]
+    )
+
+    readback = MySqlLineIdentityManagementRepository(connection).current_fact(
+        LineIdentityCurrentFactQuery(LineUserId("U-dual-1"))
+    )
+
+    assert LineIdentityCurrentFactFinding.SAME_TYPE_MULTIPLE_ACTIVE_BINDING in readback.findings
+    assert LineIdentityCurrentFactFinding.ROOT_OWNER_PROJECTION_MISMATCH in readback.findings
+    assert readback.root_version == 9
+    assert readback.readback_status is LineIdentityCurrentFactReadbackStatus.PROJECTION_MULTIPLE
+    assert "review_same_type_multiple_active_bindings" in readback.manual_actions
+
+
+def test_current_fact_reports_consistent_root_and_projection_without_manual_action() -> None:
+    connection = _CurrentFactConnection([_root_fact(), _owner_fact("customer", "7")])
+
+    readback = MySqlLineIdentityManagementRepository(connection).current_fact(
+        LineIdentityCurrentFactQuery(LineUserId("U-dual-1"))
+    )
+
+    assert readback.findings == (LineIdentityCurrentFactFinding.CONSISTENT,)
+    assert readback.readback_status is LineIdentityCurrentFactReadbackStatus.COMPLETE
+    assert readback.root_version == 4
+    assert readback.manual_actions == ()

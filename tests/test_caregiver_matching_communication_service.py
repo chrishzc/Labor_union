@@ -1,5 +1,12 @@
-from datetime import date, datetime
+import json
+from datetime import date, datetime, timezone
 
+from domains.line.delivery import LineDeliveryStatus
+from domains.line.identities import LineDeliveryTaskId
+from subsystems.line.delivery_contracts import (
+    EnqueueLineDeliveryResult,
+    LineDeliveryCommandOutcome,
+)
 from subsystems.scheduling import matching_communication_workflow as service
 
 
@@ -74,6 +81,7 @@ class _Cursor:
             self._result = {
                 "status": "proposed",
                 "is_active": 1,
+                "segment_id": 71,
                 "order_status": "洽談中",
             }
         elif compact.startswith("insert into caregiver_matching_plan_events"):
@@ -109,6 +117,21 @@ class _Connection:
 
     def close(self):
         self.closed += 1
+
+
+class _DeliveryRepository:
+    def __init__(self, connection, outcome=LineDeliveryCommandOutcome.CREATED):
+        self.connection = connection
+        self.outcome = outcome
+        self.requests = []
+
+    def enqueue(self, request):
+        self.requests.append(request)
+        return EnqueueLineDeliveryResult(
+            self.outcome,
+            LineDeliveryTaskId(501),
+            LineDeliveryStatus.PENDING,
+        )
 
 
 def test_contact_state_derives_latest_per_segment_willingness_and_send_history(
@@ -165,3 +188,81 @@ def test_active_matching_plan_state_reloads_lock_and_deposit(monkeypatch):
     assert state["deposit"]["deposit_received"] == 1000
     assert [segment["segment_id"] for segment in state["segments"]] == [71, 72]
     assert not any("client_payments" in sql for sql, _ in cursor.calls)
+
+
+def test_willingness_reply_uses_canonical_delivery_port_and_same_connection(
+    monkeypatch,
+):
+    cursor = _Cursor()
+    connection = _Connection(cursor)
+    repository = _DeliveryRepository(connection)
+    factories = []
+
+    def repository_factory(received_connection):
+        factories.append(received_connection)
+        return repository
+
+    monkeypatch.setattr(service, "get_connection", lambda: connection)
+    monkeypatch.setattr(
+        service,
+        "get_line_delivery_task_repository",
+        repository_factory,
+    )
+
+    result = service.record_matching_plan_willingness(
+        "CASE-1",
+        7,
+        71,
+        "willing",
+        "line-event-1",
+        "line:U-staff",
+        reply_to_user_id="U-staff",
+        reply_message="感謝您的確認！",
+    )
+
+    assert result["status"] == "recorded"
+    assert result["line_task_id"] == 501
+    assert factories == [connection]
+    assert repository.connection is connection
+    request = repository.requests[0]
+    assert request.recipient.identity.value == "U-staff"
+    assert request.message_kind.value == "text"
+    assert json.loads(request.payload_json) == {
+        "type": "text",
+        "text": "感謝您的確認！",
+    }
+    assert request.idempotency_key.value == "line-matching-willingness:line-event-1"
+    assert request.correlation_id.value == "matching-willingness:line-event-1"
+    assert request.source_aggregate_type == "matching_willingness_card"
+    assert request.source_aggregate_identity == "101"
+    assert connection.commits == 1
+
+
+def test_willingness_reply_treats_canonical_existing_task_as_success(monkeypatch):
+    cursor = _Cursor()
+    connection = _Connection(cursor)
+    repository = _DeliveryRepository(
+        connection,
+        outcome=LineDeliveryCommandOutcome.EXISTING,
+    )
+    monkeypatch.setattr(service, "get_connection", lambda: connection)
+    monkeypatch.setattr(
+        service,
+        "get_line_delivery_task_repository",
+        lambda received_connection: repository,
+    )
+
+    result = service.record_matching_plan_willingness(
+        "CASE-1",
+        7,
+        71,
+        "willing",
+        "line-event-replay",
+        "line:U-staff",
+        reply_to_user_id="U-staff",
+        reply_message="感謝您的確認！",
+    )
+
+    assert result["status"] == "recorded"
+    assert result["line_task_id"] == 501
+    assert connection.commits == 1

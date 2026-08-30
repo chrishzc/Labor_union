@@ -33,7 +33,7 @@ def test_generic_manual_resolve_is_fail_closed_before_storage() -> None:
         (
             query_anomaly_detail,
             "anomaly_fingerprint_detail_retired",
-            "GET /api/v1/anomaly-recovery/{issue_key}",
+            "GET /api/v1/anomalies/{issue_key}",
         ),
         (
             claim_anomaly,

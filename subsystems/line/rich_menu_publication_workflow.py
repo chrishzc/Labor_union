@@ -14,21 +14,23 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import pymysql
-import requests
 
+from domains.line.canonical_payload import canonical_line_payload_json
 from subsystems.line.rich_menu_models import LineMenusConfig, RichMenuDefinition
 from domains.line.configuration import LineConfigurationKind
 from domains.line.identities import LineRichMenuPublicationId
+from infrastructure.line.rich_menu_api_adapter import LineRichMenuApiAdapter
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import IdempotencyReceipt
 from shared_kernel.ports import OutboxIntent
 from subsystems.line.ports import unconfigured_connection_factory
-from subsystems.line.delivery_task_workflow import enqueue_line_task
 from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.message_configuration import configuration_definition
 from subsystems.line.ports import LineAuditIntent, LineRichMenuPublicationPage
+from subsystems.line.rich_menu_binding import schedule_published_menu_rebindings
 from subsystems.line.rich_menu_contracts import (
     LineRichMenuPublicationQuery,
+    LineRichMenuProviderRequest,
     QueueLineRichMenuPublicationCommand,
 )
 from subsystems.line.rich_menu_definition import rich_menu_provider_definition
@@ -72,9 +74,6 @@ class _ConnectionUnitOfWork:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LEGACY_IDS_PATH = PROJECT_ROOT / "config" / "rich_menu_ids.json"
-RETRYABLE_HTTP = {408, 425, 429, 500, 502, 503, 504}
-
-
 class RichMenuPublicationNotFoundError(LookupError):
     pass
 
@@ -764,92 +763,6 @@ def _claim_publications(limit: int = 2) -> list[dict[str, Any]]:
         conn.close()
 
 
-def build_line_action(action: dict[str, Any]) -> dict[str, str]:
-    if action["type"] == "message":
-        return {"type": "message", "text": action["text"]}
-    if action["type"] == "postback":
-        return {"type": "postback", "data": action["data"]}
-    if action["type"] == "richmenuswitch":
-        return {
-            "type": "richmenuswitch",
-            "richMenuAliasId": action["rich_menu_alias_id"],
-            "data": action["data"] or action["rich_menu_alias_id"],
-        }
-    if action.get("uri_source") == "liff":
-        liff_id = os.getenv("LINE_LIFF_ID", "").strip()
-        if not liff_id:
-            raise RichMenuPublishError(
-                "liff_not_configured",
-                "LINE_LIFF_ID 尚未設定",
-                retryable=False,
-            )
-        suffix = (action.get("uri") or "").strip()
-        uri = f"https://liff.line.me/{liff_id}"
-        if suffix.startswith("?"):
-            uri += f"/{suffix}"
-        elif suffix.startswith("#"):
-            uri += suffix
-        return {"type": "uri", "uri": uri}
-    return {"type": "uri", "uri": action["uri"]}
-
-
-def build_line_menu(menu: dict[str, Any]) -> dict[str, Any]:
-    validated = RichMenuDefinition.model_validate(menu)
-    data = validated.model_dump(mode="json")
-    return {
-        "size": data["size"],
-        "selected": data.get("selected", True),
-        "name": data["name"],
-        "chatBarText": data["chat_bar_text"],
-        "areas": [
-            {"bounds": item["bounds"], "action": build_line_action(item["action"])}
-            for item in data["buttons"]
-        ],
-    }
-
-
-def _line_request(method: str, url: str, **kwargs) -> requests.Response:
-    try:
-        response = requests.request(method, url, timeout=30, **kwargs)
-    except requests.RequestException as exc:
-        raise RichMenuPublishError("network_error", str(exc), retryable=True) from exc
-    if not response.ok:
-        raise RichMenuPublishError(
-            f"http_{response.status_code}",
-            response.text[:4000],
-            retryable=response.status_code in RETRYABLE_HTTP,
-        )
-    return response
-
-
-def _set_rich_menu_alias(
-    alias_id: str | None,
-    rich_menu_id: str,
-    headers: dict[str, str],
-) -> None:
-    if not alias_id:
-        return
-    payload = {"richMenuAliasId": alias_id, "richMenuId": rich_menu_id}
-    try:
-        _line_request(
-            "POST",
-            "https://api.line.me/v2/bot/richmenu/alias",
-            headers=headers,
-            json=payload,
-        )
-    except RichMenuPublishError as exc:
-        if exc.code != "http_409" and not (
-            exc.code == "http_400" and "conflict richmenu alias id" in str(exc)
-        ):
-            raise
-        _line_request(
-            "POST",
-            f"https://api.line.me/v2/bot/richmenu/alias/{alias_id}",
-            headers=headers,
-            json={"richMenuId": rich_menu_id},
-        )
-
-
 def _publish_to_line(item: dict[str, Any]) -> tuple[str, int]:
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
     if not token or token == "mock_token" or token.startswith("your_"):
@@ -872,41 +785,36 @@ def _publish_to_line(item: dict[str, Any]) -> tuple[str, int]:
     else:
         asset = get_media_asset(int(appearance["image_asset_id"]))
     _, image_content = read_media_asset(int(asset["id"]))
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    created_id = ""
-    try:
-        created = _line_request(
-            "POST",
-            "https://api.line.me/v2/bot/richmenu",
-            headers=headers,
-            json=build_line_menu(menu),
+    image_type = str(asset.get("mime_type") or "image/jpeg")
+    provider = LineRichMenuApiAdapter(
+        token,
+        lambda _reference: (image_content, image_type),
+    )
+    outcome = provider.publish(
+        LineRichMenuProviderRequest(
+            LineRichMenuPublicationId(int(item["id"])),
+            canonical_line_payload_json(menu),
+            f"line-media-asset:{int(asset['id'])}",
         )
-        created_id = created.json()["richMenuId"]
-        _line_request(
-            "POST",
-            f"https://api-data.line.me/v2/bot/richmenu/{created_id}/content",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "image/jpeg"},
-            data=image_content,
+    )
+    if outcome.outcome_type.value != "success":
+        retryable = outcome.outcome_type.value in {
+            "rate_limited",
+            "unavailable",
+            "timeout",
+        }
+        raise RichMenuPublishError(
+            outcome.error_code or "line_rich_menu_provider_failure",
+            outcome.error_message or "LINE Rich Menu provider request failed",
+            retryable=retryable,
         )
-        if menu.get("set_as_default"):
-            _line_request(
-                "POST",
-                f"https://api.line.me/v2/bot/user/all/richmenu/{created_id}",
-                headers=headers,
-            )
-        _set_rich_menu_alias(menu.get("rich_menu_alias_id"), created_id, headers)
-        return created_id, int(asset["id"])
-    except Exception:
-        if created_id:
-            try:
-                requests.delete(
-                    f"https://api.line.me/v2/bot/richmenu/{created_id}",
-                    headers=headers,
-                    timeout=10,
-                )
-            except requests.RequestException:
-                pass
-        raise
+    if not outcome.provider_menu_id:
+        raise RichMenuPublishError(
+            "line_rich_menu_provider_id_missing",
+            "LINE Rich Menu provider success acknowledgement was incomplete",
+            retryable=True,
+        )
+    return outcome.provider_menu_id, int(asset["id"])
 
 
 def _write_legacy_id(audience_role: str, rich_menu_id: str) -> None:
@@ -967,23 +875,20 @@ def _complete_publication(item: dict[str, Any], rich_menu_id: str, asset_id: int
                     """,
                     (rich_menu_id, previous_id, asset_id, item["id"]),
                 )
-                if item["audience_role"] in {"staff", "union_staff"}:
-                    cursor.execute(
-                        """
-                        SELECT line_user_id FROM line_users
-                        WHERE role=%s AND status='active'
-                        """,
-                        (item["audience_role"],),
-                    )
-                    for user in cursor.fetchall():
-                        user_id = user["line_user_id"]
-                        enqueue_line_task(
-                            cursor,
-                            to_user_id=user_id,
-                            task_type="rich_menu_link",
-                            payload={"rich_menu_id": rich_menu_id},
-                            idempotency_key=f"rich-menu-publication:{item['id']}:{user_id}",
+                if item["audience_role"] in {"customer", "staff", "union_staff"}:
+                    if not all(
+                        getattr(unit_of_work, name, None) is not None
+                        for name in ("identities", "outbox")
+                    ):
+                        raise RuntimeError(
+                            "canonical LINE unit-of-work is required for Rich Menu rebindings"
                         )
+                    schedule_published_menu_rebindings(
+                        unit_of_work,
+                        canonical_line_payload_json(item["config_snapshot"]),
+                        LineRichMenuPublicationId(int(item["id"])),
+                        rich_menu_id,
+                    )
             unit_of_work.commit()
     finally:
         conn.close()

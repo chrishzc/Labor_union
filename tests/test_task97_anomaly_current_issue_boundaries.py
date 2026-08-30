@@ -30,7 +30,19 @@ def _scope() -> RecheckScope:
 
 
 def _candidate(key: str = "ci-a-1") -> CurrentIssueCandidate:
-    return CurrentIssueCandidate(key, "SCHEDULE-006", "scheduling", "assignment", "assignment", "a-1", 3, "blocking", True, {"code": "SCHEDULE-006"})
+    return CurrentIssueCandidate(
+        key,
+        "SCHEDULE-006",
+        "scheduling",
+        "assignment",
+        "assignment",
+        "a-1",
+        3,
+        "blocking",
+        True,
+        {"code": "SCHEDULE-006"},
+        {"case_no": "case-1", "generation": 1},
+    )
 
 
 def _intent() -> RecheckIntent:

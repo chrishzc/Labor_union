@@ -149,6 +149,17 @@ class LineRichMenuApiAdapter:
             provider_menu_id,
         )
 
+    def unlink_from_user(
+        self,
+        line_user_id: LineUserId,
+    ) -> LineRichMenuProviderOutcome:
+        """Remove a user's Rich Menu through the canonical provider boundary."""
+        return self._empty_success_operation(
+            "delete",
+            f"{_API_ROOT}/user/{line_user_id.value}/richmenu",
+            line_user_id.value,
+        )
+
     def set_default(self, provider_menu_id: str) -> LineRichMenuProviderOutcome:
         return self._empty_success_operation(
             "post",

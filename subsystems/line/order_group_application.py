@@ -119,11 +119,6 @@ class LineOrderGroupApplication:
                     CorrelationId(f"line-event:{inbox.event.event_id.value}"),
                 )
             )
-            unit_of_work.order_audiences.set_group_projection(
-                case_no,
-                group_id.value,
-                before_group_id,
-            )
         unit_of_work.order_groups.sync_participants(audience)
         unit_of_work.audit.append(
             LineAuditIntent("order_group.bind", actor.actor_id, "order", case_no)
