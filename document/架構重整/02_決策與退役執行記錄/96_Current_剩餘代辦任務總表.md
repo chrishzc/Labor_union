@@ -1,24 +1,22 @@
 ---
 doc_type: gap-register
-declared_status: blocked
+declared_status: in-progress
 date: 2026-08-25
 owner: architecture-governance / product-and-domain-owners
+priority_authority_date: 2026-08-30
 ---
 
 # Current 剩餘代辦任務總表
 
-> 2026-08-29 使用者優先序裁決：Task 96 暫停，先執行 Task 97 的架構一致性盤點、修復與全域驗收，
-> 目的是讓 Task 96 後續執行建立在更準確的 entry、writer、transaction 與 typed contract 基線上。
-> 本狀態是 `blocked-by-user-priority`，不表示 Task 96 的既有需求、完成證據或剩餘工作失效；Task 97
-> terminal completion 或使用者另行調整優先序後，才恢復本表施工。
->
-> 2026-08-30 Task 97 已依最新 Authority 完成 repository-local architecture closeout。這解除 Task 97
-> 對本表的 architecture prerequisite，但不自動啟動 Task 96，也不授權其DB、provider、deployment或
-> external effects；在使用者另行要求恢復前，本表維持 `blocked / awaiting-user-resume`。
+> 2026-08-29 使用者曾暫停 Task 96，先完成 Task 97 repository-local architecture closeout；該前置已於
+> 2026-08-30完成。2026-08-30最新人工優先序已恢復Task 96的current planning／execution priority，並固定
+> 四階段主鏈：`Local DB 1003→current → LINE backend prerequisites → 其他owner backend → Anomalies closure`。
+> 這項順序裁決不自動授權configured DB Apply、production／`union_db`、provider、deployment、entry switch
+> 或其他外部／不可逆效果；每一階段仍須服從既有exact Authority與DB／provider gates。
 
 ## 1. 用途與唯一性
 
-本表仍是 Task 96 未完成業務工作的唯一 register，但目前不具執行優先權。正式業務語意、owner、根事實與狀態機仍由
+本表仍是 Task 96 未完成業務工作的唯一 register，也是current execution order的唯一owner。正式業務語意、owner、根事實與狀態機仍由
 `01_規格基線` 擁有；本表只路由未完成工作，不複製完整規格。舊 session handoff、已完成
 Work Package、功能開發 umbrella 計畫、archive、history 或 evidence 不得重新形成 current 待辦。
 
@@ -28,8 +26,9 @@ Work Package、功能開發 umbrella 計畫、archive、history 或 evidence 不
 
 ## 2. Current 執行順序
 
-主代理優先處理營運作業；只有 write set 可隔離時才由 LINE lane 平行。2026-08-26 人工已授權全部
-current lane 進入規格補齊、本機實作與受控驗收；依賴未就緒時只跳過該步，不重跑已完成 lifecycle。
+四個stage是序列dependency；不得把Stage 2～4派成彼此獨立的平行lane。同一stage內只有owner、write set、
+acceptance與shared hot spots可隔離時才可平行。2026-08-26人工授權的規格補齊、本機實作與受控驗收仍有效；
+依賴未就緒時只跳過該步，不重跑已完成lifecycle。
 這項授權包含 `lu_test_*` 必要 schema gate 與 LINE sandbox qualification，但不省略 DB change gates、精確
 target／recipient／quota readback、rollback 或 provider receipt；未指定的 production／`union_db`／entry switch
 與不可逆 retirement 仍不得直接執行。
@@ -43,15 +42,25 @@ target／recipient／quota readback、rollback 或 provider receipt；未指定�
 `SPEC_GAP` 才回 `spec-workshop`，只有 material execution 確需跨步驟 coverage／handoff 時才更新一份
 living package。T3 邊界變更仍須 current spec、package 與人工 Authority。既有完成 evidence 不重做。
 
-2026-08-28 人工校正 Task 96 業務優先序：本任務的 terminal objective 是「完整歷史案件匯入後，依實際
-業務情況由 UI 修正 owner root，並讓衍生異常 fresh recheck」。可執行包是否較早 `PACKAGE_READY` 不得取代
-此優先序。`WP-HOB-A/B/C/D/F` 與 H/R/C/A scenario 未完成前，主代理不得跳到 Rich Menu、LINE provider、
-一般 UX 或其他附屬 lane；已產生的 Rich Menu source/test patch 保留，但 runtime／Browser 後續固定排在歷史
-異常主線與 DB 1003→current portability 之後。第二順位是另一台開發機由 exact release 1003 保留資料升至
-canonical current latest，並驗證 normal no-auth local startup；fresh reset、terminal-only migration 或 launcher
-`--dry-run` 都不能替代。Rich Menu完成後，才執行 `CUR-LINE-MODULES-1-4-CLOSURE-01`，以current canonical
-LINE模組1～4流程圖逐模組補齊backend、frontend與真UI驗收。只有前順位主線遇到明確 `BLOCKED` 且仍在等待
-必要人工裁決時，才可執行後順位包。
+2026-08-30最新人工裁決取代上述2026-08-28歷史異常先行順序。Task 96的current主鏈固定如下；後一階段
+不得以fixture、legacy writer、Anomalies-owned generic mutation或部分UI evidence繞過前一階段的owner contract：
+
+1. **Local DB 1003→current**：先完成開發DB upgrade／resume／preserve-data與normal local startup基礎。
+   fresh reset、terminal-only migration或launcher `--dry-run`都不能替代完整ordered release chain與代表資料readback。
+2. **LINE backend prerequisite closure**：在穩定DB baseline上依序收斂M1 identity／dual-role persistence、
+   M2 deterministic service backend的真正剩餘缺口、M3 candidate recipient／snapshot／token／delivery contract、
+   M4 alert／escalation／terminal delivery source；其中`LINE-006`必須完成LINE owner-side typed Query／readback，
+   不能只保留Anomalies detector或timeline projection。
+3. **其他owner backend**：完成Scheduling、Government Subsidy、Staff Payables、Import／BeClass所擁有的13個
+   deferred contracts。每個owner先提供自己的Query／Preview／Apply／receipt／fresh readback與lock／version語意，
+   Anomalies不得代寫root mutation。
+4. **Anomalies closure**：最後才消費前三階段完成的owner contracts，補detector／projection／action descriptor；
+   owner mutation與durable recheck intent必須同一outer UoW提交，worker再讀fresh owner facts。完整15-code matrix
+   只有在每碼都能「可發現、可修正、可重新驗證、predicate消失後issue可刪除」時才terminal。
+
+Rich Menu provider qualification、NAS／Contract、其他LIFF、一般UX與後置工作不得插隊此四階段主鏈；既有完成
+source／tests／receipts保留且不重做。前階段因exact external Authority明確blocked時，只可處理不依賴該效果、
+且不會改變本主鏈語意的工作，不能把後階段標為完成。
 
 2026-08-28 Task 96 暫時 terminal approval routing：需要 Host／sandbox 明確核准的終端機指令只提出一次
 精確 request。沉默不構成 Authority，且 Host 不保證5秒內把控制權返還；若 request 回傳未批准、逾時或拒絕，
@@ -65,20 +74,11 @@ tracked receipt 或重抄 commands。只有 release／migration／rollback／inc
 
 | 順序 | Lane | Current IDs | 執行裁決 |
 |---:|---|---|---|
-| P0-1 | 歷史匯入與異常修復 | `CUR-P0-HISTORICAL-IMPORT-01`、`CUR-P0-ANOMALY-RECOVERY-01` | 歷史 workbook 的 Preview／Apply 與 zero-mutation readback 維持 `completed`；但使用者已明確要求所有異常具備人工可完成的修正閉環，故 `CUR-P0-ANOMALY-RECOVERY-01` 重開。不得以 Anomalies claim／close 或 Finance 表單假結案，須由 Orders owner 的受控 Preview／Apply／recheck 契約完成。 |
-| P0-2 | Local DB 1003→current | `CUR-LOCAL-DB-1003-CURRENT-01` | 必須完整規劃並依序驗證 1004→canonical latest；保留代表性舊資料、逐 release qualification／journal／resume，升級後才驗證 normal no-auth local startup。不得因 terminal artifact exact 就跳過中間 release。 |
-| P0-3 | Staff 名冊查詢 | `CUR-P0-STAFF-QUERY-01` | `completed`：cursor continuation、debounce 與 stale-response suppression 已以第 201 筆 Browser 搜尋驗收；不只過濾初始頁。receipt 同上。 |
-| O1 | 營運儲存基礎 | `CUR-FILE-NAS-01` | 先固定 controlled-file port／discovery／reconciliation／opaque reference，再做 typed NAS Query／下載／staging；不以既有 UI mock 反推 contract。 |
-| O2 | 營運契約 | `CUR-CONTRACT-01` | 儲存基礎可驗證後，完成 PDF renderer、外部平台 completion reports、最終檔案 Preview／Apply／readback。 |
-| L1 | LINE 媒體與日誌 | `CUR-LINE-BABYLOG-MEDIA-01` | 重用 O1 storage capability，完成 verified LIFF staging、digest、版本與 cleanup；不得另建直接落檔路徑。 |
-| L2 | LIFF 資料異動 | `CUR-LIFF-PROFILE-01`、`CUR-LIFF-E2E` | 先做 schema inventory／release gates，再補 owner persistence 與 verified-token Chrome E2E。 |
-| L3 | Rich Menu／provider | `CUR-LINE-RICHMENU-01`、`CUR-LINE-RICHMENU-AUTH-01`、`CUR-LINE-PROVIDER` | 已有 source/test patch 保留；依 2026-08-28 priority gate，歷史異常與 DB portability 未完成前不得繼續 runtime／Browser。sandbox qualification 仍只在精確 target／recipient／quota 回讀後執行。 |
-| L4 | LINE 模組1～4閉環 | `CUR-LINE-MODULES-1-4-CLOSURE-01` | 以current canonical流程圖為標準逐模組建立backend／frontend／UI coverage；先經Spec Pipeline，不能把既有頁面或fixture當成完成證據。固定排在Rich Menu之後。 |
-| L4.5 | 完整雙方契約預覽/PDF | `CUR-CONTRACT-FULL-PREVIEW-01` | 依舊版訂單切換行為與`db/templates`正式模板，對齊current API欄位；完整預覽客戶契約與服務人員契約，並各自可下載PDF。先經Spec Pipeline，在未另行指定優先度前排在LINE模組1～4之後。 |
-| L5 | 客服知識 | `CUR-LINE-AI-FEEDBACK-01`、`CUR-LINE-QA` | 先補 owner／privacy／receipt 契約並唯讀盤點 QA workbook；未逐題 review 前不 publish。 |
-| Z1 | 收斂後置 | `CUR-UX-01`、`CUR-UI-01`、`CUR-PERF-01` | 功能完成後做剩餘 UX Chrome、視覺與可量測效能；不覆蓋使用者 UI dirty changes。 |
-| Z2 | 發布／退役 | `CUR-CLOUD-01`、`CUR-RETIRE-01` | 可開始 qualification、caller／replacement 與 rollback 準備；實際 external deploy／entry switch／retirement 需精確 target gate。 |
-| Z3 | 最終 UI 風格統一 | `CUR-UI-STITCH-UNIFICATION-01` | 固定為 Task 96 最後順位；待所有前順位功能 terminal 後，以 Stitch 對代表性 surface 建立設計證據，再統一 React tokens／components。LINE 新增功能為主要盤點範圍，但不得只檢查 LINE；Stitch 稿不取代真 Browser／WCAG／功能驗收。 |
+| 1 | Local DB 1003→current | `CUR-LOCAL-DB-1003-CURRENT-01`、`CUR-LOCAL-DB-PORTABILITY` | upgrade／journal／resume／preserve-data／normal startup全部穩定後才交接Stage 2；任何schema新增都必須基於這個可重播baseline。 |
+| 2 | LINE backend prerequisites | `CUR-LINE-MODULES-1-4-CLOSURE-01` | M1→M4 owner-side backend closure；M2只補direct evidence證明的缺口。`LINE-006` Query／readback是Stage 3前的必要gate。 |
+| 3 | 其他owner backend | `CUR-ANOMALY-OWNER-BACKEND-PREREQUISITES-01` | Scheduling、Government Subsidy、Staff Payables、Import／BeClass完成13碼owner operations與fresh readback；不在Anomalies內建立replacement writer。 |
+| 4 | Anomalies closure | `CUR-P0-ANOMALY-RECOVERY-01` | 只組合已完成owner contracts；補detector／projection／descriptor、mutation後fresh recheck與完整15-code terminal matrix。 |
+| 5 | 其他既有Task 96 lanes | 本表其餘active IDs | 仍受各自Authority／dependency約束；不得插隊四階段主鏈。所有功能terminal後才做`CUR-UI-STITCH-UNIFICATION-01`。 |
 
 2026-08-27 Authority closure（不新增 execution task）：服務中代班正常不要求代班月嫂獨立契約／簽回，
 也不要求客戶追加確認／變更簽署；`substitution_supplement` 只是一條人工選配 evidence 路徑，缺少
@@ -94,19 +94,20 @@ work packages 的 implementation／runtime／Browser evidence，不得以本段�
 |---|---:|---|---|---|---|
 | CUR-P0-HISTORICAL-IMPORT-01 | P0 | `completed` | Orders／`01`、`17` | 合法 review workbook 已在 Chrome Import UI 完成 Preview／Apply；MySQL readback 證明 `HISTORICAL-ORDER-001` review 已發布，但訂單 status／lifecycle version／assignment 均未變，符合 zero-mutation。未新增 public response、DB schema 或 migration。crash 後 durable resume 是 schema／migration 範圍，仍另立 Work Package。 | 已完成。final receipt：`03_追蹤清單與證據/evidence/2026-08-26_task96_p0_import_anomaly_staff_receipt.md`。 |
 | CUR-P0-HISTORICAL-STATUS-012-01 | P0 | `completed` | Orders／`01`、`17` | 六欄 historical order source status 必須精確判定 `0→取消`、`1→完成`、`2→洽談中`；numeric `0` 不得與空白共用 fingerprint，Preview／receipt／React 必須顯示守恆 counts。不得擴張成 generic status editor 或 schema 變更。 | 25 Python、15 React、build、真 MySQL、no-auth Browser Preview／Apply與fresh Luna/high獨立複驗PASS；final receipt：`03_追蹤清單與證據/evidence/2026-08-28_historical_order_six_column_status_receipt.md`。 |
-| CUR-P0-ANOMALY-RECOVERY-01 | P0 | `in-progress` | Orders／Scheduling／Client Finance／Staff Payables／Anomalies；`01`、`02`、`04`、`05`、`06`、`12`、`17` | 單列 historical review remediation 只是一個已接通 slice，不代表匯入後狀態調整完成。current 主線固定涵蓋 H-01～H-06 baseline／缺根補正、R-01～R-07 服務前換人與服務中 substitution、C-01～C-04/C-06 取消與帳務方向、A-04～A-06 stale／unknown／tracking-only safety，以及各 scenario 的 owner Q/P/A、projector、React 與 no-auth Browser。只能修改 owning Domain root；不得提供 generic status editor、直接 assignment SQL 或 anomaly close。 | `WP-HOB-A/B/C/D/F` 與 versioned H/R/C/A scenarios 全部通過 Module→Subsystem→Domain→Global、真 MySQL/API/React/no-auth Browser 後才完成。HOB-E與F-04已完成不重做；C-05仍依 ACB1 `AUTHORITY_REQUIRED` 分離，不得阻擋其他 ready scenarios。Historical review remediation source假成功已修正並由fresh Luna/high複核PASS。RPRE R-01～R-04、R-07及actual-service referral的owner Q/P/A、1012 persistence、typed API、React與no-auth true Browser matrix已`completed`；final R-07 Apply response直接顯示Step 2／0 candidate／`blocked_no_candidate`／`complete=true`，DB四個owner artifact各exactly one。HPROJ v2的1014 schema、persistence、typed API、React readback、fresh bootstrap與preserve-data engine slice已PASS；正式runtime與3→2→1→0 Browser須先完成`PKG-HISTORICAL-PAYMENT-OWNER-SETTLEMENT`，再接六owner共同durable repair-source runtime；禁止由Orders status、歷史六欄檔、DB掃描或相似event猜付款／來源。Rich Menu不得先行。HPROJ此次DB gates除configured Developer acceptance外均PASS；另一台實體電腦Developer acceptance亦NOT_RUN，總結`DB_CHANGE_NOT_READY`。 |
+| CUR-P0-ANOMALY-RECOVERY-01 | S4 | `blocked` | Anomalies消費端＋各owner；`06`及15-code source map | PR #63已完成current identity／API／UI foundation與`LINE-004` typed consumer；Stage 4只消費Stage 2／3交付的owner Query／Preview／Apply／receipt／readback，補15-code detector／projection／action descriptor。不得在Anomalies內新增generic owner writer、claim／resolve替代路徑或直接SQL。既有H／R／C／A、HPROJ及historical remediation完成證據保留，不重跑也不作為owner prerequisite完成證明。 | Stage 1～3 terminal後，逐碼證明owner mutation與`anomaly.recheck` intent同一outer UoW、worker讀fresh owner facts、predicate成立時issue可發現，合法Apply後可重新驗證並刪除。15-code matrix全部terminal才完成；`LINE-004`目前只代表typed current consumer已完成，不外推為其餘14碼或完整remediation閉環。 |
 | CUR-P0-HISTORICAL-PAYMENT-SETTLEMENT-01 | P0 | `in-progress`／`PACKAGE_READY` | Finance Import／Client Finance／Staff Payables／Anomalies／HPROJ；`04`、`05`、`06`、`16`；`PROV-20260828-historical-payment-and-owner-settlement-spec.md` | 對帳單為首要證據；只有pre-system且已採納的historical case可走owner-specific人工`paid | settled`。Client receivable、client refund、client subsidy return與staff payout分開；補助退款給客戶屬Client Finance；payment、owner settlement、Step 11不得混用。 | 2026-08-28使用者已明確授權依`PKG-HISTORICAL-PAYMENT-OWNER-SETTLEMENT`實作。完成additive DB gates、Client／Staff Q/P/A、異常頁同頁修復、later reopen、真MySQL/API/React/no-auth Browser後，再交接HPROJ驗Client terminal／Staff open時Step11 false及最終3→2→1→0；不得外推為33種異常全部完成。 |
 | CUR-ANOMALY-CATEGORY-COUNT-01 | P0 | `completed` | Anomalies React；`PROV-20260828-anomaly-category-count-import-section-ux-spec.md` | 每個分類 tab 依目前 status filter 顯示數量；匯入待辦只在「全部」或「匯入資料」顯示，其他分類不得混入。 | React focused `31 passed`、production build、`git diff --check` 與 5183 no-auth 真 Browser 均 PASS；八個分類 count 會隨 status filter 同步，無關分類 DOM 不存在 import-warning section，console error 為 0。 |
-| CUR-LOCAL-DB-1003-CURRENT-01 | P0 | `in-progress` | Global Migration／`10`、`18`；`PROV-20260828-local-db-1003-to-current-upgrade-spec.md` | exact 1003=`matching_coordination_successor`；dynamic plan、engine chain、macOS runtime與Windows supervisor source證據保留。遠端commit `a8565d4`已將1011 descriptor／manifest／qualification統一為`5f01…75f3`並縮減非必要row-scope證據；Static release、Descriptor、read-only plan與Engine現為PASS。 | 只剩另一台實體電腦的configured local developer acceptance為`NOT_RUN`，總結仍為`DB_CHANGE_NOT_READY`。2026-08-28使用者暫停Task 96施工；不得reset、`--switch`或由Agent自行對configured `union_db` Apply。 |
+| CUR-LOCAL-DB-1003-CURRENT-01 | S1 | `in-progress` | Global Migration／`10`、`18`；`PROV-20260828-local-db-1003-to-current-upgrade-spec.md` | exact 1003=`matching_coordination_successor`；dynamic plan、engine chain、macOS runtime與Windows supervisor source證據保留。遠端commit `a8565d4`已將1011 descriptor／manifest／qualification統一為`5f01…75f3`並縮減非必要row-scope證據；Static release、Descriptor、read-only plan與Engine現為PASS。 | Task 96 Stage 1：另一台實體開發機的configured local developer acceptance仍`NOT_RUN`，總結`DB_CHANGE_NOT_READY`。必須完成ordered upgrade、resume、preserve-data readback與normal startup，才能凍結供LINE M1 dual-role schema使用的baseline；不得reset、`--switch`或由Agent自行對configured `union_db` Apply。 |
 | CUR-P0-STAFF-QUERY-01 | P0 | `completed` | Staff／Global UX；`12`、`24` | Browser 實測初始 200 筆後載入下一頁，再搜尋唯一 marker 命中第 201 筆；cursor continuation、debounce、AbortController 與 generation stale suppression 維持既有合約。 | 已完成。final receipt：`03_追蹤清單與證據/evidence/2026-08-26_task96_p0_import_anomaly_staff_receipt.md`。 |
-| CUR-LOCAL-DB-PORTABILITY | P0 | `in-progress` | Global Migration／`10` §4.5 | 已移除 `lu_test_*` 名稱綁定與 shared qualification 的 reference DB／host／port／資料指紋耦合；每台機器 Apply 前改建 release-scoped local dump／receipt，DDL 前後驗 row evidence，journal 存在但原備份遺失時 fail closed。focused clean-baseline 75 passed、全專案 blocking flake8 0、launcher `--dry-run` passed；本包未執行 DB DDL。 | 由另一台 development 機器對自己的 `.env` 目標依序完成 launcher dry-run、Python 唯讀 plan、明確確認 Apply 與保留資料 readback；remote／production／MySQL system schema 負向仍須保持封鎖。 |
+| CUR-LOCAL-DB-PORTABILITY | S1 | `in-progress` | Global Migration／`10` §4.5 | 已移除 `lu_test_*` 名稱綁定與 shared qualification 的 reference DB／host／port／資料指紋耦合；每台機器 Apply 前改建 release-scoped local dump／receipt，DDL 前後驗 row evidence，journal 存在但原備份遺失時 fail closed。focused clean-baseline 75 passed、全專案 blocking flake8 0、launcher `--dry-run` passed；本包未執行 DB DDL。 | 由另一台 development 機器對自己的 `.env` 目標依序完成 launcher dry-run、Python 唯讀 plan、明確確認 Apply 與保留資料 readback；remote／production／MySQL system schema 負向仍須保持封鎖。與`CUR-LOCAL-DB-1003-CURRENT-01`共同構成Stage 1 terminal gate。 |
 | CUR-CONTRACT-01 | P0 | `in-progress` | Contract Signing／LINE；`00` §2.2、`21` 的 2026-08-25 amendment；`PROV-20260826-contract-external-platform-pdf-handoff-work-package.md` | final 1005 已補齊 immutable unsigned PDF purpose／checks；Scope、inventory、static、descriptor、read-only plan、fresh、preserve-data、resume 與 developer acceptance 均為 `PASS`，總結 `DB_CHANGE_READY`。canonical qualification：`validation/receipts/phase4/PROV-20260826-local-additive-qualification-contract-external-signing-successor.json`。 | DB gate 已完成；仍須以 enabled persisted human 的 fresh Chrome 完成未簽 PDF 下載 → staff/client completion reports → final PDF staging／Preview／Apply → receipt、metadata 與 NAS object readback。 |
 | CUR-FILE-NAS-01 | P0 | `in-progress` | Global controlled files／各文件 owner；`00` §2.2、`17`、`18`、`20`、`21` | typed storage port、owner/version metadata、staging、Preview／Apply／replay、authenticated list／download、cleanup、五種 reconciliation outcome 與 Data Center adapter 已完成。release 1004 的 static、descriptor、fresh、含代表性舊資料 preserve-data candidate、qualification receipt 與唯讀 developer plan 全部 passed；Python 115、React 15 passed。未操作 `union_db`、production、replacement 或 `--switch`。 | local-bypass 403 負向已通過；仍須 enabled human Session 的 fresh Chrome 正向 list／download。正式 NAS mount、實體搬檔、retention、backup／restore、deployment 與 entry switch 不在本包 completion 內。 |
 | CUR-LIFF-PROFILE-01 | P0 | `approved`／implementation `AUTHORITY_REQUIRED` | Client／Staff／Scheduling owner／LINE intake；`20` §6.1、`23`、`24` | 人工已裁決第一階段只做Client；Client／Staff本人一般資料、Staff媒合偏好與不可排班日期都可申請，人工確認後才寫owner root。Client建議首批9欄、條件式2欄；Staff一般資9欄與Scheduling偏好／不可排班候選已寫入`PROV-20260827-liff-profile-change-spec.md`，待逐欄裁決。不可排班強制核准的live schema／Domain缺口已立`PROV-20260827-staff-unavailability-committed-schedule-exception-spec-gap.md`。profile root/version仍待技術package；Scope／Inventory維持`BLOCKED`，其餘DB gates`NOT_RUN`，總結`DB_CHANGE_NOT_READY`。 | 先取得Client exact allowlist／enum與root/version裁決再編譯Client task pack；Staff後續獨立package。最終驗收仍包含LIFF申請→管理端diff→人工owner Apply→DB／雙端readback及拒絕、stale、replay、越權、排程衝突與rollback。 |
-| CUR-LINE-RICHMENU-01 | P1 | `in-progress` | LINE Rich Menu／Media；`17` §3.5、`20` §6 | editable no-auth runtime slice已通過；processing／published readonly source/schema/fixture/page gate已有 partial patch，backend 44、React 19、build PASS。依2026-08-28 priority correction，本 lane 現在不得繼續 Browser或provider驗收，也不得冒充 Task96異常主線完成。 | 保留目前dirty patch；等 `CUR-P0-ANOMALY-RECOVERY-01` 與 `CUR-LOCAL-DB-1003-CURRENT-01` 完成後，才以合法lineage完成processing／published Browser。不得direct seed、假發布或由publication history反推current lock。 |
-| CUR-LINE-MODULES-1-4-CLOSURE-01 | P1 | `approved`／spec `AUTHORITY_REQUIRED` | LINE／Access／相關owner；`26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`；`PROV-20260828-line-modules-1-4-closure-spec-gap.md` | 已完成四模組coverage盤點；M3 Workbench mount與M4 ops最接近ready，但M1 profile／lifecycle／mobile review、M2 catalog／feedback、M3 recipient intent、M4 safe link仍缺owner契約，full AI仍正式`REJECT`。只補current流程圖要求的owner Q/P/A，不復活直接DB更新。 | 先裁決spec gap並逐包達`SPEC_READY／PACKAGE_READY`；再做backend、React與相應真UI evidence。no-auth不得代替verified LIFF、mobile、webhook/postback或provider驗收。固定排在Rich Menu完成後。 |
+| CUR-LINE-RICHMENU-01 | P-after-S4 | `blocked` | LINE Rich Menu／Media；`17` §3.5、`20` §6 | editable no-auth runtime slice已通過；processing／published readonly source/schema/fixture/page gate已有partial evidence。最新優先序不把Rich Menu provider qualification視為M1～M4 backend prerequisite。 | 四階段主鏈完成後才以合法lineage續做Browser／provider qualification；不得direct seed、假發布或由publication history反推current lock。 |
+| CUR-LINE-MODULES-1-4-CLOSURE-01 | S2 | `blocked` | LINE／Access／相關owner；`17`、`20`、`26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`；`PROV-20260828-line-modules-1-4-closure-spec-gap.md` | Stage 1 baseline完成後依序補M1 identity／dual-role backend persistence、M2 deterministic service backend真正缺口、M3 candidate recipient／snapshot／token／delivery contract、M4 alert／escalation／terminal delivery source。只補owner-side正式契約，不復活direct DB更新或LINE平行業務狀態機。 | M1 schema如有變更須完整DB gates；M2不得重做已成立能力；M3需closed recipient snapshot與token／delivery semantics；M4須完成terminal source及`LINE-006` typed Query／readback。四模組backend regression通過後才交接Stage 3；真provider effect仍需獨立exact Authority。 |
+| CUR-ANOMALY-OWNER-BACKEND-PREREQUISITES-01 | S3 | `blocked` | Scheduling／Government Subsidy／Staff Payables／Case Import／Finance Import／Orders；`01`、`02`、`05`、`14`、`16`、`17`、`24` | `SCHEDULE-006`、`SCHEDULE-002`、`SCHEDULE-003`；`GOVSUB-001`～`005`、`GOVSUB-007`；`PAYOUT-002`；`IMPORT-003`、`IMPORT-006`、`BECLASS-001`。各Domain擁有predicate、subject universe、lock/version、Query／Preview／Apply／receipt／fresh readback；Anomalies只可成為後續consumer。 | 13碼逐碼有owner-side terminal contract與負向／stale／replay／partial-failure oracle；mutation可在同一outer UoW提交durable recheck intent。禁止以navigation-only、Query-only、legacy producer或Anomalies generic mutation標完成。Stage 2 `LINE-006` gate通過後才開始，全部terminal後交接Stage 4。 |
 | CUR-CONTRACT-FULL-PREVIEW-01 | P1 | `proposed`／Spec Pipeline `in-progress` | Contract Signing／Orders／Staff／Controlled Files；`21`與`db/templates`current inventory | 客戶契約與服務人員契約都必須依currently selected order替換正確訂單資料；允許current API欄位與舊版不同，但必須建立逐欄owner mapping。完整預覽不得被目前不完整契約草稿代替；兩種契約都要可下載PDF。 | 先完成SPEC_READY／PACKAGE_READY，並固定template identity/version、欄位authority、缺欄fail-closed、full-page render、PDF digest/download與visual QA。後續Module/API/React/Browser與rendered PNG全部通過才完成；未另行指定前排在LINE模組1～4後。 |
-| CUR-LINE-RICHMENU-AUTH-01 | P0 | `approved` | Access／LINE Rich Menu publication；`17` §4.1、`25` | authenticated enabled 使用者契約與 source tests 已完成；人工已授權 sandbox queue／provider qualification。queue 前必須回讀 exact environment、target、recipient、quota 與 worker isolation；未登入、disabled、local bypass 與 production target 仍 fail closed。 | 以 enabled `chris` Session 完成 queue → worker → provider sandbox receipt／readback；不得用 UI toast、queued 狀態或帳號名稱冒充 delivery。 |
+| CUR-LINE-RICHMENU-AUTH-01 | P-after-S4 | `blocked` | Access／LINE Rich Menu publication；`17` §4.1、`25` | authenticated enabled 使用者契約與 source tests 已完成；既有sandbox qualification Authority保留，但最新Task 96順序不允許它插隊四階段主鏈。 | Stage 4後才以enabled Session完成queue → worker → provider sandbox receipt／readback；執行前仍須回讀exact environment、target、recipient、quota與worker isolation，不得用UI toast或queued狀態冒充delivery。 |
 | CUR-UX-01 | P1 | `in-progress` | Global UX／各 owner；`00`、`12`、`15` | source／focused regression 已完成；2026-08-26 Chrome 已重新登入，原 Session blocker 解除。後段另納入訂單資料重複顯示整理：同案例的開始／結束日期、服務人員、狀態等只保留一個主要營運摘要；`assignment_id`、`staff_id`、`sequence`、raw field name與逐欄重複的source/version改為按需展開的技術細節。不刪除owner provenance，也不將不同語意的Orders日期與Scheduling assignment日期錯誤合併。 | 完成資訊階層／重複盤點與owner語意對照；主畫面不重複顯示同一根事實，來源／版本在單一details/provenance入口仍可追溯，而語意不同的日期有明確標籤。React、responsive、WCAG與真Browser驗收PASS後才完成；不得由顯示名稱或過期Session倒推root fact。 |
 | CUR-UI-01 | P2 | `approved` | React presentation；`12` 與使用者保留設計 | 人工已授權功能收斂後逐頁視覺、responsive 與 WCAG 對齊；不得恢復已放棄的營運分析／月報設計，也不得覆蓋使用者 UI dirty changes。 | 以 Chrome 與保留設計逐頁比較；功能、可達性、responsive 與 WCAG 不退步。 |
 | CUR-PERF-01 | P2 | `approved` | Global／React | 人工已授權建立可重現的載入、request 數、互動延遲與 bundle baseline，再做有量測證據的改善。 | baseline、變更前後數據、回歸測試與 build 均可重現；不得只以主觀感受宣稱改善。 |
