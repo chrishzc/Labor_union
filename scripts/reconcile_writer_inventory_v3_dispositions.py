@@ -917,6 +917,10 @@ def _task97_exact_review(
             "infrastructure/mysql/current_anomaly_issue_repository.py",
             "MySqlCurrentIssueRepository.list_current",
         ): ("anomalies", "bounded current-only anomaly projection query"),
+        (
+            "infrastructure/mysql/current_anomaly_issue_repository.py",
+            "MySqlCurrentIssueRepository.query_current_page",
+        ): ("anomalies", "bounded current-only anomaly projection query"),
     }
     if key in restricted_owner:
         owner, boundary = restricted_owner[key]

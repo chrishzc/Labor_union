@@ -79,6 +79,19 @@ def test_task97_exact_commit_receipts_leave_no_matching_writer_undecided():
     assert all(record["final_disposition"] != "needs_decision" for record in matching)
 
 
+def test_task97_current_anomaly_page_query_is_exactly_read_only_restricted():
+    path = "infrastructure/mysql/current_anomaly_issue_repository.py"
+    symbol = "MySqlCurrentIssueRepository.query_current_page"
+    review = _task97_exact_review(path, symbol)
+
+    assert review == (
+        "anomalies",
+        "bounded current-only anomaly projection query",
+        f"Task97 exact bounded read evidence for {path}::{symbol}",
+        "retain_restricted:exact owner-scoped read grants no independent mutation authority",
+    )
+
+
 def test_task97_source_locked_reviews_are_exact_and_fail_closed_for_new_symbols():
     records = _records("writer_inventory_v3_disposition.records.jsonl")
     by_identity = {record["identity"]: record for record in records}
