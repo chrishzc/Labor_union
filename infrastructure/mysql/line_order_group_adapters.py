@@ -1,4 +1,4 @@
-"""Read/write adapters connecting LINE order groups to Orders-owned projections."""
+"""Read adapter connecting LINE order groups to Orders-owned audience facts."""
 
 from __future__ import annotations
 
@@ -40,21 +40,6 @@ class MySqlOrdersLineAudienceAdapter:
             tuple(LineUserId(value) for value in staff_ids),
         )
 
-    def set_group_projection(
-        self,
-        case_no: str,
-        group_id: str,
-        expected_group_id: str | None,
-    ) -> None:
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                _ORDER_GROUP_PROJECTION_SQL,
-                (group_id, case_no, expected_group_id),
-            )
-            if cursor.rowcount != 1:
-                raise RuntimeError("order_line_group_projection_conflict")
-
-
 _ORDER_AUDIENCE_SQL = (
     "SELECT o.case_no,o.status AS order_status,c.line_user_id AS customer_line_user_id "
     "FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s FOR UPDATE"
@@ -65,10 +50,4 @@ _ASSIGNED_STAFF_SQL = (
     "AND a.status IN ('planned','active') UNION SELECT o.staff_id FROM orders o "
     "WHERE o.case_no=%s AND o.staff_id IS NOT NULL) assigned ON assigned.staff_id=s.id"
 )
-_ORDER_GROUP_PROJECTION_SQL = (
-    "UPDATE orders SET line_group_id=%s WHERE case_no=%s AND line_group_id<=>%s "
-    "AND status<>'訂單取消'"
-)
-
-
 __all__ = ["MySqlOrdersLineAudienceAdapter"]

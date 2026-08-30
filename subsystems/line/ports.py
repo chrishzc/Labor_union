@@ -868,13 +868,6 @@ class AdminIdentityOwnerPort(Protocol):
 class OrdersLineAudiencePort(Protocol):
     def get(self, case_no: str) -> OrderLineAudience | None: ...
 
-    def set_group_projection(
-        self,
-        case_no: str,
-        group_id: str,
-        expected_group_id: str | None,
-    ) -> None: ...
-
 
 class LineUnitOfWorkPort(UnitOfWork, Protocol):
     webhook_inbox: LineWebhookInboxRepositoryPort

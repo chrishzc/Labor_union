@@ -40,4 +40,9 @@ def test_repository_selects_declared_fields_for_only_one_case() -> None:
     assert row == {"case_no": "CASE-1", "start_date": date(2026, 1, 5)}
     assert connection.cursor_instance.parameters == ("CASE-1",)
     assert "SELECT *" not in connection.cursor_instance.statement
+    assert "binding.group_id AS line_group_id" in connection.cursor_instance.statement
+    assert "LEFT JOIN line_order_group_bindings binding ON binding.case_no = o.case_no" in (
+        connection.cursor_instance.statement
+    )
+    assert "o.line_group_id" not in connection.cursor_instance.statement
     assert "WHERE o.case_no = %s" in connection.cursor_instance.statement
