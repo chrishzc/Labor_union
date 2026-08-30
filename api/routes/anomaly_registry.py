@@ -18,6 +18,8 @@ from api.dependencies.anomaly_registry import (
     get_anomaly_application,
     get_current_issue_query_application,
 )
+from api.dependencies.anomaly_recovery import get_current_anomaly_issue_repository
+from api.schemas.anomaly_recovery import AnomalyRecoveryContextView
 from api.schemas.anomaly_registry import (
     AnomalyDisplaySnapshotView,
     AnomalySummaryView,
@@ -141,19 +143,28 @@ def _raise_current_query_error(
     raise error from cause
 
 
-@router.get(
-    "/{fingerprint}",
-    response_model=None,
-)
+@router.get("/{issue_key}", response_model=BaseResponse[AnomalyRecoveryContextView])
 def query_anomaly_detail(
-    fingerprint: str = Path(..., pattern=r"^[0-9a-f]{64}$"),
+    issue_key: str = Path(..., pattern=r"^(?:ci_[0-9a-f]{64}|[0-9a-f]{64})$"),
     principal: AdminPrincipal = Depends(require_system_admin),
+    repository=Depends(get_current_anomaly_issue_repository),
 ):
-    del fingerprint, principal
-    _raise_legacy_registry_retired(
-        "anomaly_fingerprint_detail_retired",
-        "GET /api/v1/anomalies/{fingerprint}",
-        "GET /api/v1/anomaly-recovery/{issue_key}",
+    del principal
+    if not issue_key.startswith("ci_"):
+        _raise_legacy_registry_retired(
+            "anomaly_fingerprint_detail_retired",
+            "GET /api/v1/anomalies/{fingerprint}",
+            "GET /api/v1/anomalies/{issue_key}",
+        )
+    # Lazy import avoids coupling the current payload builder back into the
+    # legacy registry helpers imported by the recovery router.
+    from api.routes.anomaly_recovery import _call_current, _current_context_payload
+
+    correlation_id = CorrelationId(f"anomaly-detail:{issue_key}")
+    return _call_current(
+        lambda: _current_context_payload(repository.query_current(issue_key)),
+        "成功取得目前異常資訊",
+        correlation_id,
     )
 
 

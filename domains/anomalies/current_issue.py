@@ -182,7 +182,7 @@ class CurrentIssueCandidate:
     severity: str
     blocking: bool
     details: Mapping[str, object]
-    subject_identity: Mapping[str, Any] | None = None
+    subject_identity: Mapping[str, Any]
 
     def __post_init__(self) -> None:
         for value, field_name in (
@@ -200,17 +200,13 @@ class CurrentIssueCandidate:
             raise TypeError("blocking must be boolean")
         if not isinstance(self.details, Mapping):
             raise TypeError("current issue details must be a mapping")
-        if self.subject_identity is not None:
-            canonical_subject_identity_for_code(self.definition_code, self.subject_identity)
+        canonical_subject_identity_for_code(self.definition_code, self.subject_identity)
 
     @property
     def canonical_subject_identity(self) -> str:
-        """Return the persisted identity, with a compatibility fallback."""
+        """Return the persisted closed identity for this definition."""
 
-        identity = self.subject_identity
-        if identity is None:
-            identity = {"subject_id": self.subject_id}
-        return canonical_subject_identity(identity)
+        return canonical_subject_identity(self.subject_identity)
 
 
 @dataclass(frozen=True, slots=True)

@@ -148,6 +148,7 @@ def apply_projector_dead_letter_supersede(
 @router.get(
     "/{issue_key}",
     response_model=BaseResponse[AnomalyRecoveryContextView],
+    include_in_schema=False,
 )
 def query_recovery_context(
     issue_key: str = Path(..., pattern=r"^(?:ci_[0-9a-f]{64}|[0-9a-f]{64})$"),
