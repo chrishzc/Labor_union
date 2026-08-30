@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { AnomaliesPage } from '../pages/AnomaliesPage';
+import { LegacyAnomaliesPage as AnomaliesPage } from '../pages/AnomaliesPage';
 import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
 import { anomalyDetailClient } from '../api/anomalies/anomaly_detail_client';
 import {

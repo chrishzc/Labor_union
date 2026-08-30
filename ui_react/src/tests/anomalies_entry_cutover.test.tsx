@@ -2,22 +2,51 @@
  * File: anomalies_entry_cutover.test.tsx
  * Description: 驗證 #anomalies 已認證查詢候選的 GET 預算、typed 資料與變更鎖定。
  */
-import { StrictMode } from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { sessionClient } from '../api/auth/session_client';
 import { SYSTEM_STATUS_ENDPOINT } from '../api/system/system_status_client';
-import {
-  VALID_ANOMALIES_QUERY_RESPONSE,
-  VALID_EMPTY_IMPORT_WARNING_TASKS_RESPONSE,
-  VALID_IMPORT_WARNING_REFERRAL_VIEW,
-  VALID_IMPORT_WARNING_TASKS_RESPONSE,
-} from './fixtures/anomalies/anomaly_query_contract_fixtures';
-import { VALID_ANOMALY_DETAIL_VIEW } from './fixtures/anomalies/anomaly_detail_contract_fixtures';
 
 const ANOMALY_LIST_ENDPOINT = '/api/v1/anomalies';
 const WARNING_LIST_ENDPOINT = '/api/v1/import-warning-tracking/tasks';
+const ISSUE_KEY = `ci_${'a'.repeat(64)}`;
+const CURRENT_PAGE_RESPONSE = {
+  success: true,
+  message: '成功取得目前異常清單',
+  data: {
+    items: [{
+      issue_key: ISSUE_KEY,
+      definition_code: 'SCHEDULE-006',
+      owner_domain: 'scheduling',
+      severity: 'blocking',
+      blocking: true,
+      episode_started_at: '2026-08-30T01:00:00Z',
+      last_verified_at: '2026-08-30T01:01:00Z',
+    }],
+    next_cursor: null,
+  },
+};
+const CURRENT_DETAIL_RESPONSE = {
+  success: true,
+  message: '成功取得目前異常資訊',
+  data: {
+    issue_key: ISSUE_KEY,
+    definition_code: 'SCHEDULE-006',
+    owner_domain: 'scheduling',
+    owner_root_type: 'case',
+    subject: { redaction_version: 'anomaly-safe.v1', definition_code: 'SCHEDULE-006', fields: [] },
+    owner_snapshot_token: 'owner-v3',
+    owner_version: 3,
+    severity: 'blocking',
+    blocking: true,
+    details_version: 1,
+    details: { redaction_version: 'anomaly-safe.v1', definition_code: 'SCHEDULE-006', fields: [] },
+    episode_started_at: '2026-08-30T01:00:00Z',
+    last_verified_at: '2026-08-30T01:01:00Z',
+    available_actions: [],
+  },
+};
 
 const PERFORMANCE_RESPONSE = {
   success: true,
@@ -89,7 +118,7 @@ function installFetchStub(options: FetchStubOptions = {}): {
       }
       if (path === ANOMALY_LIST_ENDPOINT) {
         return jsonResponse(
-          options.anomalyResponse ?? VALID_ANOMALIES_QUERY_RESPONSE,
+          options.anomalyResponse ?? CURRENT_PAGE_RESPONSE,
           options.anomalyStatus ?? 200
         );
       }
@@ -97,13 +126,13 @@ function installFetchStub(options: FetchStubOptions = {}): {
         return jsonResponse({
           success: true,
           message: '成功取得異常詳情',
-          data: VALID_ANOMALY_DETAIL_VIEW,
+          data: CURRENT_DETAIL_RESPONSE.data,
           error: null,
         });
       }
       if (path === WARNING_LIST_ENDPOINT) {
         return jsonResponse(
-          options.warningResponse ?? VALID_IMPORT_WARNING_TASKS_RESPONSE,
+          options.warningResponse ?? { success: true, message: 'unused', data: [] },
           options.warningStatus ?? 200
         );
       }
@@ -111,7 +140,7 @@ function installFetchStub(options: FetchStubOptions = {}): {
         return jsonResponse({
           success: true,
           message: '成功取得匯入警示導向',
-          data: VALID_IMPORT_WARNING_REFERRAL_VIEW,
+          data: {},
           error: null,
         });
       }
@@ -145,13 +174,8 @@ function expectOnlyGet(requests: readonly FetchRecord[]): void {
 }
 
 function expectInitialListBudget(requests: readonly FetchRecord[]): void {
-  const listRequests = requests.filter(({ path }) =>
-    path === ANOMALY_LIST_ENDPOINT || path === WARNING_LIST_ENDPOINT
-  );
-  expect(listRequests).toHaveLength(2);
-  expect(listRequests.map(({ path }) => path).sort()).toEqual(
-    [ANOMALY_LIST_ENDPOINT, WARNING_LIST_ENDPOINT].sort()
-  );
+  expect(requests.filter(({ path }) => path === ANOMALY_LIST_ENDPOINT)).toHaveLength(1);
+  expect(requests.some(({ path }) => path === WARNING_LIST_ENDPOINT)).toBe(false);
 }
 
 describe('Anomalies #anomalies entry cutover query candidate', () => {
@@ -167,22 +191,19 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
     vi.restoreAllMocks();
   });
 
-  it('authenticated #anomalies renders typed server data with exactly two initial list GETs', async () => {
+  it('authenticated #anomalies renders only the current page contract', async () => {
     authenticate();
     const { requests } = installFetchStub();
 
-    render(<StrictMode><App /></StrictMode>);
+    render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
-      expect(screen.getByText('缺少身分證字號')).toBeInTheDocument();
+      expect(screen.getByText('SCHEDULE-006')).toBeInTheDocument();
     });
 
     expect(window.location.hash).toBe('#anomalies');
-    expect(screen.getByText('🔴 嚴重阻擋')).toBeInTheDocument();
-    expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
-    expect(screen.queryByText(/目前 typed view 未納入/)).not.toBeInTheDocument();
-    expect(screen.queryByText('已成功載入異常')).not.toBeInTheDocument();
+    expect(screen.getByText('阻擋作業')).toBeInTheDocument();
+    expect(screen.queryByText(/claimed|resolved|occurrence|timeline/i)).not.toBeInTheDocument();
     expectInitialListBudget(requests);
     expectOnlyGet(requests);
   });
@@ -191,70 +212,37 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
     authenticate();
     const { requests } = installFetchStub({
       anomalyResponse: typedUnavailableResponse(),
-      warningResponse: VALID_EMPTY_IMPORT_WARNING_TASKS_RESPONSE,
       anomalyStatus: 503,
     });
 
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText(/載入異常資料失敗：異常查詢暫時無法使用/)).toBeInTheDocument();
-      expect(screen.getByText('目前無待追蹤之匯入警示任務。')).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toBeInTheDocument();
     });
 
-    expect(screen.queryByText('假日排班尚未確認')).not.toBeInTheDocument();
-    expect(screen.queryByText('已成功載入異常')).not.toBeInTheDocument();
+    expect(screen.queryByText('SCHEDULE-006')).not.toBeInTheDocument();
     expectInitialListBudget(requests);
     expectOnlyGet(requests);
   });
 
-  it('keeps generic claim and resolve disabled; lazy detail/referral remain GET-only', async () => {
+  it('keeps generic claim and resolve absent and reads current detail by issue key', async () => {
     authenticate();
     const { requests } = installFetchStub();
 
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument();
-      expect(screen.getByText('缺少身分證字號')).toBeInTheDocument();
+      expect(screen.getByText('SCHEDULE-006')).toBeInTheDocument();
     });
     expectInitialListBudget(requests);
-    expect(requests.some(({ path }) => path.endsWith('/referral'))).toBe(false);
-    expect(requests.some(({ path }) => path.startsWith(`${ANOMALY_LIST_ENDPOINT}/`))).toBe(false);
-
-    expect(screen.queryByRole('button', { name: /認領此案/ })).not.toBeInTheDocument();
-    expect(screen.queryByText('認領成功')).not.toBeInTheDocument();
-
-    await act(async () => {
-      fireEvent.click(screen.getAllByRole('button', { name: /查看處理方式 ➔/ })[0]);
-    });
+    fireEvent.click(screen.getByRole('button', { name: /SCHEDULE-006/ }));
     await waitFor(() => {
-      expect(screen.getByText(/問題詳情/)).toBeInTheDocument();
-      expect(screen.getByText(/已進入人工確認 ·/)).toBeInTheDocument();
-      expect(screen.queryByText(/v2 → v3/)).not.toBeInTheDocument();
+      expect(screen.getByText(/系統不會以通用 resolve 代替/)).toBeInTheDocument();
     });
-
-    expect(screen.getByText(/系統會自動重新核對異常/)).toBeVisible();
-    expect(document.querySelector('[data-surface-id="anomalies.finance-correction"]')).toBeNull();
-    expect(screen.queryByRole('button', { name: /確認排除異常/ })).not.toBeInTheDocument();
-    expect(screen.queryByText('排除成功')).not.toBeInTheDocument();
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '關閉' }));
-      fireEvent.click(screen.getAllByRole('button', { name: '查看警示詳情' })[0]);
-    });
-    await waitFor(() => {
-      expect(screen.getByText('由負責流程檢查後修正')).toBeInTheDocument();
-    });
-
-    expect(screen.getByText(/追蹤狀態不代表來源已修復/)).toBeVisible();
-    expect(screen.queryByRole('button', { name: '請依上方轉介流程處理來源資料' })).not.toBeInTheDocument();
-    expect(screen.queryByText('狀態變更成功')).not.toBeInTheDocument();
-
     const detailRequests = requests.filter(({ path }) => path.startsWith(`${ANOMALY_LIST_ENDPOINT}/`));
-    const referralRequests = requests.filter(({ path }) => path.endsWith('/referral'));
     expect(detailRequests).toHaveLength(1);
-    expect(referralRequests).toHaveLength(1);
+    expect(detailRequests[0].path).toBe(`${ANOMALY_LIST_ENDPOINT}/${ISSUE_KEY}`);
     expectOnlyGet(requests);
   });
 });
