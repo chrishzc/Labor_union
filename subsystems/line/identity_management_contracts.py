@@ -26,6 +26,97 @@ class LineIdentityRevocationStatus(StrEnum):
     MANUAL_COMPLETED = "manual_completed"
 
 
+class LineIdentityCurrentFactFinding(StrEnum):
+    """Deterministic findings from a zero-write root/projection readback."""
+
+    CONSISTENT = "consistent"
+    LEGAL_CUSTOMER_STAFF_DUAL_ROLE = "legal_customer_staff_dual_role"
+    SAME_TYPE_MULTIPLE_ACTIVE_BINDING = "same_type_multiple_active_binding"
+    ROOT_OWNER_PROJECTION_MISMATCH = "root_owner_projection_mismatch"
+
+
+class LineIdentityCurrentFactReadbackStatus(StrEnum):
+    COMPLETE = "complete"
+    ROOT_MISSING = "root_missing"
+    ROOT_PERSISTENCE_LIMITED = "root_persistence_limited"
+    PROJECTION_MISSING = "projection_missing"
+    PROJECTION_MULTIPLE = "projection_multiple"
+    MISMATCH = "mismatch"
+
+
+@dataclass(frozen=True, slots=True)
+class LineIdentityCurrentFactQuery:
+    """Read-only request for the LINE-004 current identity fact."""
+
+    line_user_id: LineUserId
+
+
+@dataclass(frozen=True, slots=True)
+class LineIdentityCurrentFactBinding:
+    """One root or owner-projection observation, never a mutation command."""
+
+    subject_type: LineBindingSubjectType
+    subject_reference: str
+    subject_name: str = "-"
+    owner_line_user_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LineIdentityCurrentFactReadback:
+    """Typed, zero-write LINE-004 diagnosis and reconciliation guidance."""
+
+    line_user_id: str
+    root_status: LineIdentityBindingStatus | None
+    root_version: int | None
+    root_binding: LineIdentityCurrentFactBinding | None
+    owner_projections: tuple[LineIdentityCurrentFactBinding, ...]
+    findings: tuple[LineIdentityCurrentFactFinding, ...]
+    readback_status: LineIdentityCurrentFactReadbackStatus
+    manual_actions: tuple[str, ...]
+    dual_role_persistence_supported: bool = False
+
+    @property
+    def primary_finding(self) -> LineIdentityCurrentFactFinding:
+        return self.findings[0]
+
+    @property
+    def classification(self) -> LineIdentityCurrentFactFinding:
+        """Primary deterministic classification for a renderer or caller."""
+
+        return self.primary_finding
+
+    @property
+    def is_legal_dual_role(self) -> bool:
+        return LineIdentityCurrentFactFinding.LEGAL_CUSTOMER_STAFF_DUAL_ROLE in self.findings
+
+    @property
+    def has_root_owner_projection_mismatch(self) -> bool:
+        return LineIdentityCurrentFactFinding.ROOT_OWNER_PROJECTION_MISMATCH in self.findings
+
+    @property
+    def is_conflict(self) -> bool:
+        """Dual-role is legal, while an independently observed drift remains actionable."""
+
+        return (
+            LineIdentityCurrentFactFinding.SAME_TYPE_MULTIPLE_ACTIVE_BINDING in self.findings
+            or self.has_root_owner_projection_mismatch
+        )
+
+    @property
+    def suggested_manual_action(self) -> str | None:
+        return self.manual_actions[0] if self.manual_actions else None
+
+    @property
+    def version(self) -> int | None:
+        """Compatibility alias for consumers rendering the root aggregate version."""
+
+        return self.root_version
+
+    @property
+    def requires_manual_action(self) -> bool:
+        return bool(self.manual_actions)
+
+
 @dataclass(frozen=True, slots=True)
 class LineIdentityBindingListQuery:
     status: LineIdentityBindingStatus | None = LineIdentityBindingStatus.BOUND
@@ -115,6 +206,11 @@ class LineIdentityRevocationRequest:
 
 
 __all__ = [
+    "LineIdentityCurrentFactBinding",
+    "LineIdentityCurrentFactFinding",
+    "LineIdentityCurrentFactQuery",
+    "LineIdentityCurrentFactReadback",
+    "LineIdentityCurrentFactReadbackStatus",
     "LineIdentityBindingListQuery",
     "LineIdentityBindingManagementView",
     "LineIdentityBindingPage",

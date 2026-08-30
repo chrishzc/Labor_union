@@ -7,9 +7,7 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -17,8 +15,6 @@ import pymysql
 
 from typing import Callable
 from subsystems.line.ports import unconfigured_connection_factory
-from subsystems.line.rich_menu_publication_workflow import get_current_rich_menu_id
-from subsystems.line.delivery_task_workflow import enqueue_line_task
 
 
 get_connection = unconfigured_connection_factory
@@ -51,7 +47,6 @@ line_unit_of_work_factory: Callable[[Any], Any] = _ConnectionUnitOfWork
 REQUEST_TYPES = {"staff_verification", "client_rebind"}
 REQUEST_STATUSES = {"pending", "approved", "rejected", "cancelled"}
 TAIPEI_TIMEZONE = ZoneInfo("Asia/Taipei")
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class LineReviewNotFoundError(LookupError):
@@ -67,6 +62,15 @@ class LineReviewStateConflictError(RuntimeError):
 
 class LineReviewDataConflictError(RuntimeError):
     pass
+
+
+class LegacyLineReviewRetiredError(RuntimeError):
+    """Legacy identity writers cannot run without the canonical application."""
+
+    code = "legacy_line_identity_workflow_retired"
+
+
+LineDeliveryEnqueuer = Callable[[object], object]
 
 
 def _as_int(value: Any) -> int:
@@ -86,59 +90,6 @@ def _utc_naive(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def _load_text_templates() -> dict[str, str]:
-    path = PROJECT_ROOT / "config" / "message_templates.json"
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return {
-        item["id"]: item["content"]
-        for item in payload.get("templates", [])
-        if item.get("enabled", True)
-        and item.get("message_type", "text") == "text"
-        and item.get("id")
-    }
-
-
-def _template(template_id: str, fallback: str, **variables: str) -> str:
-    content = _load_text_templates().get(template_id, fallback)
-    for name, value in variables.items():
-        content = content.replace("{" + name + "}", value)
-    return content
-
-
-def _staff_rich_menu_id() -> str:
-    current_id = get_current_rich_menu_id("staff")
-    if current_id:
-        return current_id
-    try:
-        payload = json.loads(
-            (PROJECT_ROOT / "config" / "rich_menu_ids.json").read_text(encoding="utf-8")
-        )
-        return str(payload.get("staff_rich_menu_id") or "")
-    except (OSError, ValueError):
-        return ""
-
-
-def _replace_pending_staff_verification(cursor, line_user_id: str) -> int:
-    cursor.execute(
-        """
-        UPDATE line_confirmation_requests SET status='cancelled', resolved_at=NOW()
-        WHERE request_type='staff_verification' AND line_user_id=%s AND status='pending'
-        """,
-        (line_user_id,),
-    )
-    cursor.execute(
-        """
-        INSERT INTO line_confirmation_requests (request_type, line_user_id)
-        VALUES ('staff_verification', %s)
-        """,
-        (line_user_id,),
-    )
-    return int(cursor.lastrowid)
-
-
 def submit_client_rebind_request_in_transaction(
     cursor,
     *,
@@ -147,26 +98,9 @@ def submit_client_rebind_request_in_transaction(
     old_line_user_id: str,
     new_line_user_id: str,
 ) -> dict[str, Any]:
-    if not new_line_user_id.strip():
-        raise ValueError("重新綁定申請缺少新的 LINE 使用者")
-    cursor.execute(
-        """
-        UPDATE line_confirmation_requests SET status='cancelled', resolved_at=NOW()
-        WHERE request_type='client_rebind' AND client_id=%s
-          AND line_user_id=%s AND status='pending'
-        """,
-        (client_id, new_line_user_id),
+    raise LegacyLineReviewRetiredError(
+        "legacy LINE client rebind submission requires the canonical identity application"
     )
-    cursor.execute(
-        """
-        INSERT INTO line_confirmation_requests (
-            request_type, line_user_id, client_id, client_name,
-            old_line_user_id, new_line_user_id
-        ) VALUES ('client_rebind', %s, %s, %s, %s, %s)
-        """,
-        (new_line_user_id, client_id, client_name, old_line_user_id, new_line_user_id),
-    )
-    return {"request_id": int(cursor.lastrowid), "worker_wakeup_required": True}
 
 
 def complete_client_binding_in_transaction(
@@ -178,20 +112,12 @@ def complete_client_binding_in_transaction(
     current_line_user_id: str | None,
     line_user_id: str,
 ) -> dict[str, Any]:
-    if not line_user_id.strip():
-        raise ValueError("客戶綁定缺少 LINE 使用者")
-    if not (current_line_user_id or "").strip():
-        cursor.execute("UPDATE clients SET line_user_id = %s WHERE id = %s", (line_user_id, client_id))
-    case_message = f"您的案件編號為：{case_no}。\n" if case_no else "您的案件編號尚待行政核發；完成核對後將主動通知您。\n"
-    enqueue_line_task(
-        cursor,
-        to_user_id=line_user_id,
-        message_content=(
-            f"【系統通知】\n服務綁定與查詢成功！您的 LINE 帳號已連結至客戶「{client_name}」的登記資料。\n"
-            f"{case_message}後續有最新媒合進度或排班通知，系統將會主動為您推播。"
-        ),
+    # The old wrapper had no verified LIFF identity or canonical Preview→Apply
+    # context, so it must never write the owner projection.  The canonical
+    # identity application owns that mutation and its delivery intent.
+    raise LegacyLineReviewRetiredError(
+        "legacy client binding requires the canonical LIFF Preview→Apply workflow"
     )
-    return {"worker_wakeup_required": True}
 
 
 def submit_staff_verification_in_transaction(
@@ -199,21 +125,11 @@ def submit_staff_verification_in_transaction(
     line_user_id: str,
     *,
     source_event_id: str | None = None,
+    delivery_callback: LineDeliveryEnqueuer | None = None,
 ) -> dict[str, Any]:
-    normalized_user_id = line_user_id.strip()
-    if not normalized_user_id:
-        raise ValueError("月嫂身分申請缺少 LINE 使用者")
-    request_id = _replace_pending_staff_verification(cursor, normalized_user_id)
-    enqueue_line_task(
-        cursor,
-        to_user_id=normalized_user_id,
-        message_content=_template(
-            "staff_verification_requested", "月嫂身分申請已送出，請等待工會人員確認。"
-        ),
-        source_event_id=source_event_id,
-        idempotency_key=f"staff-verification-request:{request_id}",
+    raise LegacyLineReviewRetiredError(
+        "legacy LINE staff review submission requires the canonical identity application"
     )
-    return {"request_id": request_id, "worker_wakeup_required": True}
 
 
 def submit_staff_verification(
@@ -221,18 +137,11 @@ def submit_staff_verification(
     *,
     source_event_id: str | None = None,
     unit_of_work_factory: Callable[[Any], Any] | None = None,
+    delivery_callback: LineDeliveryEnqueuer | None = None,
 ) -> dict[str, Any]:
-    conn = get_connection()
-    try:
-        with (unit_of_work_factory or line_unit_of_work_factory)(conn) as unit_of_work:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                result = submit_staff_verification_in_transaction(
-                    cursor, line_user_id, source_event_id=source_event_id
-                )
-            unit_of_work.commit()
-        return result
-    finally:
-        conn.close()
+    raise LegacyLineReviewRetiredError(
+        "legacy LINE staff review submission requires the canonical identity application"
+    )
 
 
 def get_line_review_summary() -> dict[str, int]:
@@ -378,48 +287,6 @@ def get_line_review(request_id: int) -> dict[str, Any]:
         conn.close()
 
 
-def _lock_pending_request(cursor, request_id: int) -> dict[str, Any]:
-    cursor.execute(
-        "SELECT * FROM line_confirmation_requests WHERE id=%s FOR UPDATE",
-        (request_id,),
-    )
-    item = cursor.fetchone()
-    if not item:
-        raise LineReviewNotFoundError(f"找不到審查申請 #{request_id}")
-    if item["status"] != "pending":
-        raise LineReviewStateConflictError(request_id, item["status"])
-    if item["request_type"] not in REQUEST_TYPES:
-        raise LineReviewDataConflictError("審查申請類型不受支援")
-    return dict(item)
-
-
-def _record_decision(
-    cursor,
-    *,
-    request_id: int,
-    status: str,
-    admin_user_id: int | None,
-    reviewer_line_user_id: str | None,
-    reason: str,
-) -> None:
-    cursor.execute(
-        """
-        UPDATE line_confirmation_requests
-        SET status=%s, reviewed_by_admin_user_id=%s,
-            reviewed_by_line_user_id=%s, decision_reason=%s,
-            reviewed_at=UTC_TIMESTAMP(), resolved_at=UTC_TIMESTAMP()
-        WHERE id=%s
-        """,
-        (
-            status,
-            admin_user_id,
-            reviewer_line_user_id or None,
-            reason.strip() or None,
-            request_id,
-        ),
-    )
-
-
 def approve_line_review(
     request_id: int,
     *,
@@ -428,94 +295,12 @@ def approve_line_review(
     reason: str = "",
     unit_of_work_factory: Callable[[Any], Any] | None = None,
 ) -> dict[str, Any]:
-    conn = get_connection()
-    try:
-        with (unit_of_work_factory or line_unit_of_work_factory)(conn) as unit_of_work:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                item = _lock_pending_request(cursor, request_id)
-                if item["request_type"] == "staff_verification":
-                    line_user_id = str(item.get("line_user_id") or "").strip()
-                    if not line_user_id:
-                        raise LineReviewDataConflictError("月嫂身分申請缺少 LINE 使用者")
-                    cursor.execute(
-                        """
-                        INSERT INTO line_users (line_user_id,role,status,last_event_at)
-                        VALUES (%s,'staff','active',UTC_TIMESTAMP())
-                        ON DUPLICATE KEY UPDATE role='staff',status='active',last_event_at=UTC_TIMESTAMP()
-                        """,
-                        (line_user_id,),
-                    )
-                    enqueue_line_task(
-                        cursor,
-                        to_user_id=line_user_id,
-                        task_type="rich_menu_link",
-                        payload={
-                            "rich_menu_id": _staff_rich_menu_id(),
-                            "success_message": _template(
-                                "staff_switch_success", "月嫂身分已由工會確認通過。"
-                            ),
-                        },
-                        idempotency_key=f"staff-review-approved:{request_id}",
-                    )
-                    message = "已核准月嫂身分並切換專屬選單"
-                else:
-                    client_id = item.get("client_id")
-                    new_line_user_id = str(item.get("new_line_user_id") or "").strip()
-                    old_line_user_id = str(item.get("old_line_user_id") or "").strip()
-                    if not client_id or not new_line_user_id:
-                        raise LineReviewDataConflictError("重新綁定申請缺少客戶或新 LINE 資料")
-                    cursor.execute(
-                        "SELECT id,name,case_no,line_user_id FROM clients WHERE id=%s FOR UPDATE",
-                        (client_id,),
-                    )
-                    client = cursor.fetchone()
-                    if not client:
-                        raise LineReviewDataConflictError("客戶資料已不存在，無法重新綁定")
-                    current_line_user_id = str(client.get("line_user_id") or "").strip()
-                    if current_line_user_id != old_line_user_id:
-                        raise LineReviewDataConflictError(
-                            "客戶目前綁定資料已在申請後變更，請重新確認後再建立申請"
-                        )
-                    cursor.execute(
-                        "SELECT id FROM clients WHERE line_user_id=%s AND id<>%s LIMIT 1 FOR UPDATE",
-                        (new_line_user_id, client_id),
-                    )
-                    if cursor.fetchone():
-                        raise LineReviewDataConflictError("新的 LINE 帳號已綁定其他客戶")
-                    cursor.execute(
-                        "UPDATE clients SET line_user_id=%s WHERE id=%s",
-                        (new_line_user_id, client_id),
-                    )
-                    client_name = str(item.get("client_name") or client.get("name") or "")
-                    enqueue_line_task(
-                        cursor,
-                        to_user_id=new_line_user_id,
-                        message_content=_template(
-                            "client_rebind_approved",
-                            "【系統通知】\n您的帳號重新綁定申請已審核通過。",
-                            client_name=client_name,
-                        ),
-                        idempotency_key=f"client-rebind-approved:{request_id}",
-                    )
-                    message = "已確認並完成重新綁定"
-                _record_decision(
-                    cursor,
-                    request_id=request_id,
-                    status="approved",
-                    admin_user_id=admin_user_id,
-                    reviewer_line_user_id=reviewer_line_user_id,
-                    reason=reason,
-                )
-            unit_of_work.commit()
-        return {
-            "request_id": request_id,
-            "request_type": item["request_type"],
-            "status": "approved",
-            "message": message,
-            "worker_wakeup_required": True,
-        }
-    finally:
-        conn.close()
+    # Approval used to mutate legacy role/projection tables and enqueue a
+    # provider-shaped Rich Menu task.  Canonical Preview→Apply owns both
+    # binding and Rich Menu intent, so this compatibility function is retired.
+    raise LegacyLineReviewRetiredError(
+        "legacy LINE review approval requires the canonical identity application"
+    )
 
 
 def reject_line_review(
@@ -525,54 +310,8 @@ def reject_line_review(
     reviewer_line_user_id: str | None = None,
     reason: str,
     unit_of_work_factory: Callable[[Any], Any] | None = None,
+    delivery_callback: LineDeliveryEnqueuer | None = None,
 ) -> dict[str, Any]:
-    reason = reason.strip()
-    if not reason:
-        raise ValueError("拒絕申請時必須填寫原因")
-    conn = get_connection()
-    try:
-        with (unit_of_work_factory or line_unit_of_work_factory)(conn) as unit_of_work:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                item = _lock_pending_request(cursor, request_id)
-                if item["request_type"] == "staff_verification":
-                    target_user_id = str(item.get("line_user_id") or "").strip()
-                    content = _template(
-                        "staff_verification_rejected",
-                        "您的月嫂身分驗證申請未通過，請聯絡工會服務人員。",
-                    )
-                    message = "已拒絕月嫂身分申請"
-                    idempotency_key = f"staff-review-rejected:{request_id}"
-                else:
-                    target_user_id = str(item.get("new_line_user_id") or "").strip()
-                    content = _template(
-                        "client_rebind_rejected",
-                        "【系統通知】\n您的帳號重新綁定申請未通過。",
-                    )
-                    message = "已拒絕重新綁定申請"
-                    idempotency_key = f"client-rebind-rejected:{request_id}"
-                if not target_user_id:
-                    raise LineReviewDataConflictError("審查申請缺少通知對象")
-                enqueue_line_task(
-                    cursor,
-                    to_user_id=target_user_id,
-                    message_content=content,
-                    idempotency_key=idempotency_key,
-                )
-                _record_decision(
-                    cursor,
-                    request_id=request_id,
-                    status="rejected",
-                    admin_user_id=admin_user_id,
-                    reviewer_line_user_id=reviewer_line_user_id,
-                    reason=reason,
-                )
-            unit_of_work.commit()
-        return {
-            "request_id": request_id,
-            "request_type": item["request_type"],
-            "status": "rejected",
-            "message": message,
-            "worker_wakeup_required": True,
-        }
-    finally:
-        conn.close()
+    raise LegacyLineReviewRetiredError(
+        "legacy LINE review rejection requires the canonical identity application"
+    )

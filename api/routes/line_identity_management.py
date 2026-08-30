@@ -17,6 +17,7 @@ from api.schemas.base import BaseResponse
 from api.schemas.line_identity_management import (
     LineIdentityBindingPageView,
     LineIdentityBindingView,
+    LineIdentityCurrentFactReadbackView,
     LineIdentityRevocationActionRequest,
     LineIdentityRevocationApplyRequest,
     LineIdentityRevocationPreviewView,
@@ -69,6 +70,17 @@ def binding_detail(
     _: AdminPrincipal = Depends(require_line_identity_binding_reader),
 ):
     return BaseResponse(data=_call(_application().detail, LineUserId(line_user_id)))
+
+
+@router.get(
+    "/{line_user_id}/current-fact",
+    response_model=BaseResponse[LineIdentityCurrentFactReadbackView],
+)
+def current_fact(
+    line_user_id: str,
+    _: AdminPrincipal = Depends(require_line_identity_binding_reader),
+):
+    return BaseResponse(data=_call(_application().current_fact, LineUserId(line_user_id)))
 
 
 @router.post(
