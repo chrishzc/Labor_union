@@ -4,28 +4,28 @@
   "generated_on": "2026-08-30",
   "source": {
     "path": "document/架構重整/03_追蹤清單與證據/evidence/entrypoint_review_queue_v1.jsonl",
-    "sha256": "a0dd2872e839e40d89383ee12a8c4e9be3707812df04125a7a3c0addb82d8645",
-    "entry_count": 683
+    "sha256": "18405295e98ad93ec01ab4faf1de319a3f13d820a9830f4cae7be81af42afc31",
+    "entry_count": 684
   },
   "summary": {
-    "total": 683,
+    "total": 684,
     "queue_status_counts": {
-      "active": 488,
+      "active": 489,
       "operator_only": 75,
-      "retired_410": 87,
-      "review_required": 33
+      "retired_410": 86,
+      "review_required": 34
     },
     "terminal_disposition_counts": {
-      "active_canonical": 488,
-      "blocked_external_evidence": 31,
+      "active_canonical": 489,
+      "blocked_external_evidence": 32,
       "operator_only_guarded": 75,
-      "retired_410": 87,
+      "retired_410": 86,
       "rewrite_to_canonical": 2
     },
     "generic_placeholder_count": 0,
-    "blocked_receipt_count": 33,
+    "blocked_receipt_count": 34,
     "repo_local_blocker_count": 0,
-    "deferred_external_evidence_count": 33,
+    "deferred_external_evidence_count": 34,
     "overall": "TASK97_REPOSITORY_LOCAL_COMPLETE",
     "production_acceptance": "NOT_RUN"
   },
@@ -731,22 +731,22 @@
       "disposition_reason": "current reviewed queue records the exact terminal disposition"
     },
     {
-      "exact_entry_identity": "api:GET /api/v1/anomalies/{fingerprint}",
+      "exact_entry_identity": "api:GET /api/v1/anomalies/{issue_key}",
       "source_path": "api/routes/anomaly_registry.py",
-      "business_scenario": "Typed HTTP contract for Anomalies.",
-      "operator": "authenticated administrator or verified external integration",
-      "runtime_registration": "api/routes/anomaly_registry.py::api:GET /api/v1/anomalies/{fingerprint}",
-      "current_inbound_callers": "runtime registration confirmed; repository static caller not found; external/operator caller evidence remains unknown",
-      "external_operator_evidence": "runtime registration confirmed; repository static caller not found; external/operator caller evidence remains unknown",
+      "business_scenario": "Execute or read the bounded Anomalies scenario identified by api:GET /api/v1/anomalies/{issue_key}.",
+      "operator": "authenticated anomaly operator",
+      "runtime_registration": "api/routes/anomaly_registry.py::api:GET /api/v1/anomalies/{issue_key}",
+      "current_inbound_callers": "runtime registration plus repository-local typed caller ui_react/src/api/anomalies/anomaly_detail_client.ts; focused canonical contract: tests/domains/anomalies/subsystems/anomalies/integration/test_anomaly_public_detail_recovery_contract.py; ui_react/src/tests/anomaly_detail_client.test.ts",
+      "external_operator_evidence": "not required for the evidenced repository-local canonical caller; production deployment or external usage is not claimed",
       "canonical_owner": "Anomalies",
-      "replacement_path_or_symbol": "api:GET /api/v1/anomaly-recovery/{issue_key}",
-      "replacement_readback": "api:GET /api/v1/anomaly-recovery/{issue_key}",
-      "deletion_410_gate": "blocked_external_evidence: remove only after external/operator caller evidence and replacement migration are complete",
-      "focused_regression": "entry queue discovery plus focused contract tests for api/routes/anomaly_registry.py",
-      "final_zero_reference_oracle": "zero inbound callers and zero runtime references to retired identity api:GET /api/v1/anomalies/{fingerprint}",
-      "queue_status": "retired_410",
-      "terminal_disposition": "retired_410",
-      "terminal_receipt": "entrypoint-review-v1:api:GET /api/v1/anomalies/{fingerprint}:retired_410",
+      "replacement_path_or_symbol": "api:GET /api/v1/anomalies/{issue_key}",
+      "replacement_readback": "typed receipt, projection, or bounded response readback through ui_react/src/api/anomalies/anomaly_detail_client.ts",
+      "deletion_410_gate": "not_applicable_active_canonical",
+      "focused_regression": "tests/domains/anomalies/subsystems/anomalies/integration/test_anomaly_public_detail_recovery_contract.py; ui_react/src/tests/anomaly_detail_client.test.ts",
+      "final_zero_reference_oracle": "not_applicable_active_canonical",
+      "queue_status": "active",
+      "terminal_disposition": "active_canonical",
+      "terminal_receipt": "entrypoint-review-v1:api:GET /api/v1/anomalies/{issue_key}:active_canonical",
       "receipt_result": "passed",
       "disposition_reason": "current reviewed queue records the exact terminal disposition"
     },
@@ -1788,6 +1788,26 @@
       "terminal_disposition": "active_canonical",
       "terminal_receipt": "entrypoint-review-v1:api:GET /api/v1/line/identity-bindings/{line_user_id}:active_canonical",
       "receipt_result": "passed",
+      "disposition_reason": "current reviewed queue records the exact terminal disposition"
+    },
+    {
+      "exact_entry_identity": "api:GET /api/v1/line/identity-bindings/{line_user_id}/current-fact",
+      "source_path": "api/routes/line_identity_management.py",
+      "business_scenario": "Execute or read the bounded LINE Identity scenario identified by api:GET /api/v1/line/identity-bindings/{line_user_id}/current-fact.",
+      "operator": "authenticated LINE identity operator",
+      "runtime_registration": "api/routes/line_identity_management.py::api:GET /api/v1/line/identity-bindings/{line_user_id}/current-fact",
+      "current_inbound_callers": "runtime-discovered exact entry api:GET /api/v1/line/identity-bindings/{line_user_id}/current-fact; repository registration is evidenced; external/operator caller evidence remains incomplete",
+      "external_operator_evidence": "runtime-discovered exact entry api:GET /api/v1/line/identity-bindings/{line_user_id}/current-fact; repository registration is evidenced; external/operator caller evidence remains incomplete",
+      "canonical_owner": "LINE Identity",
+      "replacement_path_or_symbol": "none (canonical or cutover replacement not yet evidenced)",
+      "replacement_readback": "not evidenced",
+      "deletion_410_gate": "blocked_external_evidence",
+      "focused_regression": "entry queue discovery plus focused contract tests for api/routes/line_identity_management.py",
+      "final_zero_reference_oracle": "zero inbound callers and zero runtime references to unresolved identity api:GET /api/v1/line/identity-bindings/{line_user_id}/current-fact",
+      "queue_status": "review_required",
+      "terminal_disposition": "blocked_external_evidence",
+      "terminal_receipt": "entrypoint-review-v1:api:GET /api/v1/line/identity-bindings/{line_user_id}/current-fact:blocked_external_evidence",
+      "receipt_result": "blocked",
       "disposition_reason": "current reviewed queue records the exact terminal disposition"
     },
     {

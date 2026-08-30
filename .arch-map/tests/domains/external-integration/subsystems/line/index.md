@@ -8,6 +8,8 @@ fixtures_root: tests/fixtures/
 # Routing notes
 The former `tests/line/` owner tree has moved under the canonical LINE subsystem root. Its existing `domain/`, `infrastructure/`, and `subsystems/` child names are retained as internal layout until later scoped semantic split; they no longer form a competing top-level test architecture. LINE/Scheduling boundary contracts for matching schedule confirmation and staff leave LIFF intake live under this subsystem integration root. Current additional owner-local integration coverage includes delivery-task action routes, safe configuration query/retirement guards, notification-rule mutation/query/replay routes, verified staff service-day media upload, Rich Menu image-upload typed receipt contracts, and the typed LINE admin capabilities/health contract.
 
+`tests/test_line_identity_management_first_release.py` remains a higher-boundary `layout_gap` oracle for the typed LINE-004 current-fact readback, including legal customer+staff dual-role and current schema limitation. The Anomalies consumer oracle is routed from `.arch-map/tests/domains/anomalies/subsystems/anomalies/index.md`.
+
 # Deferred / higher-boundary
 - `tests/test_staff_service_day_log_api.py` remains at the LINE/Scheduling boundary because verified LINE identity is used to issue a Scheduling service-day command.
 - `tests/test_line_customer_service_first_release.py` remains at the release/relocation-sensitive boundary because it spans Customer Service, LINE, migration manifests, schema and static UI artifacts through repo-relative paths.

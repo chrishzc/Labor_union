@@ -6,7 +6,7 @@
   "authority": "D97-PRODUCTION-SCRIPT-GOVERNANCE; Global migration spec section 9",
   "source": {
     "entrypoint_queue": "document/架構重整/03_追蹤清單與證據/evidence/entrypoint_review_queue_v1.jsonl",
-    "entrypoint_queue_sha256": "a0dd2872e839e40d89383ee12a8c4e9be3707812df04125a7a3c0addb82d8645",
+    "entrypoint_queue_sha256": "18405295e98ad93ec01ab4faf1de319a3f13d820a9830f4cae7be81af42afc31",
     "cli_count": 86,
     "queue_cli_count": 86,
     "discovery": "AST __main__ registration over current scripts/**/*.py; queue is caller-evidence input and is regenerated independently."
@@ -865,8 +865,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "47f1004fe7d52a128139040d630e4f4d5ae7261948b5d947df9a9378e9f13e99",
-        "line_count": 950,
+        "source_sha256": "755b1164d75eb2fe59587047144fad0ca2f6f2379a93c4a8d5864c3634f3ffb8",
+        "line_count": 958,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",
@@ -1121,8 +1121,8 @@
         "identity": "PROV-20260829-task97-production-script-scripts-generate_task97_commit_dispositions-py"
       },
       "evidence": {
-        "source_sha256": "3ec67b5267ada93678f79a693bd5a25c0022cec390242fc577ee8e5fe4ecae0d",
-        "line_count": 573,
+        "source_sha256": "a9878dd53e52c3bbbbf41c4c6b3793b35ba86f883235bc8b9fc5fe140865baac",
+        "line_count": 571,
         "queue_status": "operator_only",
         "owner": "Architecture Governance",
         "scenario": "Regenerate the tracked Task 97 repository-commit disposition evidence from current source.",
@@ -2953,7 +2953,7 @@
         ]
       },
       "evidence": {
-        "source_sha256": "70b62d426b4afc3b1988bde42a004ca02cb03f937bc7818200b82a00b848ba42",
+        "source_sha256": "34664e4f945286951e70ed6ccaa6926a676cc3ec455b9c617b5b29dbc83a42b9",
         "line_count": 1233,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
