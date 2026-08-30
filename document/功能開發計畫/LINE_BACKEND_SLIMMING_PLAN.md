@@ -1,24 +1,25 @@
 ---
 doc_type: execution-plan
 task_id: CUR-LINE-BACKEND-SLIMMING-01
-declared_status: blocked
+declared_status: in-progress
 owner: LINE / Integration
-depends_on: Task 97 repository-local final artifacts (satisfied; refresh input only)
-blocks: Task 96 LINE M1-M4 closure replanning
+depends_on: Task 97 repository-local final artifacts (satisfied); PR #63 review/merge
+blocks: Task 96 Stage 2 LINE backend prerequisite baseline adoption
 conflict_priority: Task 97 wins over this task on every overlapping path or decision
 authority_date: 2026-08-29
 execution_authority: approved_for_inventory_and_non_destructive_refactor
-current_blocker: awaiting_user_resume_and_current_head_refresh
+current_blocker: awaiting_pr_63_merge_before_successor_baseline_freeze
 ---
 
 # LINE 後端瘦身執行計劃
 
-> Current status由`LINE_BACKEND_SLIMMING_POST_PREP_AMENDMENT.md`擁有：Task 97 repository-local prerequisite
-> 已完成，但本計畫維持`blocked / awaiting-user-resume-and-current-head-refresh`；不得據此自動啟動S2～S9。
+> Current source lane已由PR #63整合為`LINE_BACKEND_SLIMMING_REPOSITORY_LOCAL_PARTIAL`；本瘦身scope不得重跑。
+> PR merge後由Task 96 current register接手successor順序；M1～M4缺口不是本計畫的隱含未完成S2～S9。
 
-> Current execution order：Task 97 final artifacts（已存在）→ 使用者恢復＋current-head refresh → 本任務 → LINE regression →
-> freeze slimmed LINE backend baseline → 重新評估 Task 96 coverage／wiring／Authority → M1～M4 closure。
-> 本任務不得順手補 Task 96 功能缺口。
+> Current successor order：PR #63 adoption → Task 96 Stage 1 `Local DB 1003→current` → Stage 2 LINE backend
+> prerequisite closure（M1 identity／dual-role、M2 deterministic backend gap、M3 recipient／snapshot／token／delivery、
+> M4 alert／escalation／terminal source與`LINE-006` owner Query／readback）。Stage 2不得早於Stage 1，也不得把
+> 真provider effect混入backend prerequisite。
 > 若執行期間與 Task 97 的 path、Authority、交易邊界、governance artifact 或驗證結論衝突，
 > 固定以 Task 97 為優先；受影響 slimming 結論與 patch 先標 stale，待 Task 97 current evidence 後重新推導。
 

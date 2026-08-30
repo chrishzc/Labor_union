@@ -5,22 +5,24 @@ date: 2026-08-29
 owner: anomalies / architecture-governance / owning-domains
 task_level: T3
 base_ref: eaca24903197400343e72342e5f03970e0fda078
-execution_authority: planning / read-only inventory only
+execution_authority: repository-local foundation retained; Stage 4 implementation gated by Task 96 Stages 1-3
+current_blocker: Task 96 Stages 1-3 owner prerequisites
 ---
 
 # Current-state 異常機制瘦身完整執行計劃
 
-> Current status owner是`PROV-20260830-current-state-anomaly-task97-authority-reconciliation.md`：
-> Task 97 repository-local prerequisite已完成；本計畫仍`NOT_READY`且等待另行授權的current-head bounded
-> refresh。下文舊base對`UNAVAILABLE_IN_BASE`／`blocked_by_task97_priority`的敘述只作historical provenance。
+> Current status由Task 96 register與PR #63 integration receipt共同投影：repository-local current identity／API／UI、
+> typed 410、generic recheck runtime及`LINE-004` typed consumer已完成；產品仍為
+> `ANOMALIES_REPOSITORY_LOCAL_PARTIAL / BLOCKED_BY_OWNER_PREREQUISITES`。下文舊base對
+> `UNAVAILABLE_IN_BASE`／`blocked_by_task97_priority`的敘述只作historical provenance。
 
 ## 0. Current readiness、Authority 與禁止效果
 
-本計劃目前固定為 `SPEC_GAP / NOT_READY`。第 1 節的八項人工裁決仍是產品方向
-Authority，但不構成 source replacement、刪檔、API cutover、entry retirement、schema 或 DB migration
-的執行 Authority。在本節的重新收旂 gate 全部通過前，Agent 只能修正 current SSOT、本計劃與
-執行唯讀 inventory；不得修改 production code、schema、migration、API、React、worker wiring
-或 entry-point disposition。
+本計劃目前固定為 `ANOMALIES_REPOSITORY_LOCAL_PARTIAL / BLOCKED_BY_OWNER_PREREQUISITES`。PR #63已完成
+的repository-local foundation保留，不重做也不回退；但Task 96 Stage 4之前不得再補Anomalies detector／descriptor
+來掩蓋owner缺口。先完成Stage 1 DB baseline、Stage 2 LINE backend（含`LINE-006` Query／readback）及Stage 3
+另外13碼owner Query／Preview／Apply／receipt／fresh readback。production、schema／DB Apply、provider、deployment、
+entry switch與destructive retirement仍需各自exact Authority。
 
 重新收旂必須同時滿足：
 
@@ -42,12 +44,11 @@ spec_route:
 convergence:
   status: NOT_READY
   blockers:
-    - 15-code owner action source map incomplete
+    - Task 96 Stage 1 Local DB 1003-to-current baseline incomplete
+    - LINE-006 owner Query/readback and remaining LINE M1-M4 backend prerequisites incomplete
+    - 13 non-LINE owner backend contracts incomplete
     - 25 owner replacements incomplete
-    - 15-code subject scalar normalization and public redaction views incomplete
     - recheck owner-lock and maintenance subject-universe mappings incomplete
-    - Task 97 canonical dependency unavailable in base
-    - dependency inventory lacks executable successor gates
     - destructive migration target, backup implementation and authority incomplete
 ```
 
@@ -771,26 +772,16 @@ Final proof 必須同時滿足：
 
 ## 7. 與既有全域架構瘦身計劃的協作方式
 
-本計劃目前不得以本機 untracked 的 Task 97 文件作為 formal dependency、receipt 或
-terminal evidence。在目前 base HEAD 中 Task 97 固定為 `UNAVAILABLE_IN_BASE`；只有當正式
-tracked artifact 可讀且能精確綁定 identity、revision、WP、receipt 與 terminal gate 後，才能替換
-下表的抽象依賴。在此之前，只能執行本計劃明列的 read-only inventory 與 current SSOT
-修正，不得開始 ANM-SLIM-01～07。
+Task 97 repository-local prerequisite與PR #63 shared integration均已有tracked evidence。Current dependency
+不再是Task 97，而是Task 96的四階段主鏈；Anomalies固定為Stage 4，不能與Stage 2 LINE或Stage 3 owner
+backend平行施工。Stage 2／3只在各自stage內、owner與write set隔離時平行；shared registry、API composition、
+schema assembly／manifest、entry queue、README／正式索引仍由單一integration writer收斂。
 
-2026-08-29 最新人工優先序裁決：若本計劃與本機當前 Task 97 在 public contract、
-owner／SSOT、transaction、writer、entry disposition、shared write set 或驗收基線發生衝突，
-一律以 Task 97 優先，本計劃對該重疊 lane 立即停止寫入並標記
-`blocked_by_task97_priority`。這個執行優先序來自 latest user Authority，不會將 untracked Task 97
-自動升格為本計劃的 canonical dependency、completion receipt 或 terminal evidence。
-
-取得正式 Task 97 後，本計劃才可依共享 hot spot 分流：
-
-| 可平行 | 必須等待／單一 writer |
+| 可在同一stage隔離平行 | 必須序列等待／單一writer |
 |---|---|
-| ANM-SLIM-00 規格、43-code inventory、owner predicate盤點 | `registry.py`、`api/main.py`、schema assembly／manifest、entry queue、README／正式索引 |
-| 03A～03E 各 owner pure predicate／Query 設計與測試 | 新 reconciler transaction 必須等待 repository-owned commit／route-owned transaction 收斂 |
-| React typed schema草稿與 fixture盤點 | `AnomaliesPage.tsx` final cutover由單一 integration writer |
-| 舊 API／table caller read-only inventory | writer inventory與entrypoint queue只在兩邊 source穩定後生成一次 |
+| Stage 2內M1～M4不同LINE owner ports的read-only盤點與focused oracle | M1 schema／release chain與`LINE-006` final contract composition |
+| Stage 3內Scheduling、Government Subsidy、Staff Payables、Import／BeClass owner contracts | Stage 4 detector／descriptor／runtime composition必須等待全部13碼owner backend terminal |
+| 各owner pure Query／Preview／Apply unit／contract tests | mutation＋recheck intent transaction、registry、API、shared governance與完整15-code matrix |
 
 與原八項全域計劃的 dependency：
 
