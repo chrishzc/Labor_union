@@ -1,11 +1,11 @@
 # Current-state Anomalies parallel repository-local receipt
 
-date: 2026-08-30  
-owner: Anomalies Agent  
-execution_ssot: `PROV-20260830-current-state-anomaly-parallel-execution-refresh.md`  
-base_head: `6302647afb6cb168bacd4fc2660ea0f0df5670d9`  
-branch: `anomalies/current-state-slimming-parallel`  
-implementation_head_before_receipt: `eeb9663`  
+date: 2026-08-30
+owner: Anomalies Agent
+execution_ssot: `PROV-20260830-current-state-anomaly-parallel-execution-refresh.md`
+base_head: `6302647afb6cb168bacd4fc2660ea0f0df5670d9`
+branch: `anomalies/current-state-slimming-parallel`
+implementation_head_before_receipt: `eeb9663`
 conclusion: `ANOMALIES_REPOSITORY_LOCAL_PARTIAL`
 
 ## Scope and effects
