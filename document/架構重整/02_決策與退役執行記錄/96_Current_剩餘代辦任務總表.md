@@ -37,6 +37,12 @@ target／recipient／quota readback、rollback 或 provider receipt；未指定�
 代表性測試資料寫入、Query／Preview／Apply、receipt readback 與 scoped cleanup 可直接執行，不需逐次請示。
 本裁決不涵蓋 `union_db`、production、全庫 cleanup、replacement、`--switch` 或其他不可逆外部效果。
 
+2026-08-30 人工補充 Authority：Task 96 結束前，每次為current material source／durable test補最小
+`.arch-map` Module／Model leaf，並將該owner的focused test放入leaf宣告的canonical test root，均可直接執行，
+不需逐次請示。只限current acceptance必要的owner routing與test placement；不授權藉此修改schema／migration、
+public API／entry point、transaction／Unit of Work、provider side effect、SSOT／root fact／state machine、跨Domain
+dependency或無關既有map gap。
+
 2026-08-28 人工以 [Agent 任務分級與交付規範](../00_Agent任務分級與交付規範.md) 取代逐 slice
 `SPEC_READY／PACKAGE_READY` blanket gate。T1 與依既有契約施工的 T2 直接重用 current spec；只有
 `SPEC_GAP` 才回 `spec-workshop`，只有 material execution 確需跨步驟 coverage／handoff 時才更新一份
