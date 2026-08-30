@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 
 from scripts.generate_task97_commit_dispositions import (
     APPLICATION_OWNED_COMMIT_SYMBOLS,
     EVIDENCE_PATH,
     MEDIA_STAGING_VIOLATIONS,
     READ_ONLY_APPLICATIONS,
+    REPOSITORY_ROOT,
+    SOURCE_REVISION_INPUTS,
+    _git_revision,
     build_artifact,
 )
 
@@ -103,3 +107,23 @@ def test_task97_commit_dispositions_do_not_blanket_classify_by_path() -> None:
     by_symbol = {(entry["source_path"], entry["symbol"]): entry for entry in entries}
     for identity in APPLICATION_OWNED_COMMIT_SYMBOLS:
         assert by_symbol[identity]["classification"] == "application_owned_legitimate_outer_uow"
+
+
+def test_task97_commit_disposition_source_revision_is_input_bound_and_idempotent() -> None:
+    expected = subprocess.run(
+        ["git", "log", "-1", "--format=%H", "--", *SOURCE_REVISION_INPUTS],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    first = build_artifact()
+    second = build_artifact()
+
+    assert first == second
+    assert first["source_revision"] == expected == _git_revision()
+    assert all(
+        entry["terminal_receipt"].endswith(f"source_revision={expected}")
+        for entry in first["entries"]
+    )

@@ -38,6 +38,7 @@ ROOTS = (
     "services",
     "subsystems",
 )
+SOURCE_REVISION_INPUTS = (*ROOTS, "shared_kernel/writer_inventory.py")
 EVIDENCE_PATH = (
     REPOSITORY_ROOT
     / "document"
@@ -123,14 +124,35 @@ class CommitLocation:
 
 
 def _git_revision() -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
+    dirty = subprocess.run(
+        [
+            "git",
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--",
+            *SOURCE_REVISION_INPUTS,
+        ],
         cwd=REPOSITORY_ROOT,
         check=True,
         capture_output=True,
         text=True,
     )
-    return result.stdout.strip()
+    if dirty.stdout.strip():
+        raise RuntimeError(
+            "Task 97 commit dispositions require clean, committed scanner inputs"
+        )
+    result = subprocess.run(
+        ["git", "log", "-1", "--format=%H", "--", *SOURCE_REVISION_INPUTS],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    revision = result.stdout.strip()
+    if not revision:
+        raise RuntimeError("Task 97 scanner inputs have no committed source revision")
+    return revision
 
 
 def _call_fingerprint(call: ast.Call) -> str:
