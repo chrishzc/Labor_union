@@ -9,6 +9,7 @@ global_root: layout_gap
 Owner-local tests應進 owning Domain／Subsystem canonical root；`tests/` flat root只保留有明確 higher-boundary理由的 coverage。檔名不是 ownership 證據，必須以 direct SUT、owner contract、transaction boundary與 current consumer判定。
 
 ## Canonical owner roots
+- `global/migration` — `tests/domains/global/subsystems/migration/`；map: `domains/global/index.md`
 - `orders` — `tests/domains/orders/subsystems/orders/`；map: `domains/orders/index.md`
 - `scheduling` — `tests/domains/scheduling/subsystems/scheduling/`；map: `domains/scheduling/index.md`
 - `client-finance` — `tests/domains/client-finance/subsystems/client-finance/`；map: `domains/client-finance/index.md`

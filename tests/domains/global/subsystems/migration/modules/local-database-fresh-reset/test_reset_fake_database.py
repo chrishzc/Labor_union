@@ -24,9 +24,10 @@ def _assembly(tmp_path: Path):
     })()
 
 
-def test_validate_target_requires_explicit_allowlisted_disposable_target():
-    with pytest.raises(resetter.FakeDatabaseResetError, match="lu_test"):
-        resetter.validate_target(_config("union_db"), {"APP_ENV": "development"}, "union_db")
+def test_validate_target_accepts_explicit_operator_or_disposable_target():
+    assert resetter.validate_target(
+        _config("union_db"), {"APP_ENV": "development"}, "union_db"
+    ) == "union_db"
     with pytest.raises(resetter.FakeDatabaseResetError, match="exactly match"):
         resetter.validate_target(_config("lu_test_a"), {"APP_ENV": "development"}, "lu_test_b")
     assert resetter.validate_target(
@@ -55,6 +56,109 @@ def test_preview_uses_canonical_assembly_without_connecting(monkeypatch, tmp_pat
     assert result["side_effects"] == "none"
     assert result["business_fixture_rows_loaded"] == 0
     assert result["plan_fingerprint"]
+
+
+def test_union_db_requires_explicit_operator_route(monkeypatch, tmp_path):
+    assembly = _assembly(tmp_path)
+    monkeypatch.setattr(
+        resetter,
+        "_canonical_bootstrap_contract",
+        lambda: (assembly, {"release_id": "r1"}),
+    )
+    with pytest.raises(
+        resetter.FakeDatabaseResetError, match="operator reset"
+    ):
+        resetter.reset(
+            target_database="union_db",
+            config=_config("union_db"),
+            environment={"APP_ENV": "development"},
+        )
+
+
+def test_operator_reset_uses_plan_exact_reset_and_no_backup(
+    monkeypatch, tmp_path
+):
+    assembly = _assembly(tmp_path)
+    plan_path = tmp_path / "plan.json"
+    receipt_path = tmp_path / "terminal.json"
+    config = _config("union_db")
+    monkeypatch.setattr(
+        resetter,
+        "_canonical_bootstrap_contract",
+        lambda: (assembly, {"release_id": "r1"}),
+    )
+    monkeypatch.setattr(
+        resetter,
+        "_check_connected_identity",
+        lambda *_args, **_kwargs: {
+            "database": None,
+            "server": "local",
+            "port": 3306,
+        },
+    )
+    monkeypatch.setattr(
+        resetter,
+        "rebuild_schema",
+        lambda *_args, **_kwargs: {"schema_postcheck": "pass"},
+    )
+    resetter.reset(
+        operator_reset=True,
+        target_database="union_db",
+        plan_receipt=plan_path,
+        config=config,
+        environment={"APP_ENV": "development"},
+    )
+    result = resetter.reset(
+        apply=True,
+        operator_reset=True,
+        confirm_apply="RESET",
+        target_database="union_db",
+        plan_receipt=plan_path,
+        receipt_path=receipt_path,
+        config=config,
+        environment={"APP_ENV": "development"},
+    )
+    assert result["status"] == "completed"
+    assert result["backup_receipt"]["policy"] == "explicit_discard_confirmed"
+    assert receipt_path.is_file()
+
+
+def test_connected_identity_query_uses_mapping_rows():
+    captured = {}
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, _statement):
+            return None
+
+        def fetchone(self):
+            return {
+                "database_name": None,
+                "server": "local",
+                "port": 3306,
+            }
+
+    class Connection:
+        def cursor(self, cursorclass):
+            captured["cursorclass"] = cursorclass
+            return Cursor()
+
+        def close(self):
+            return None
+
+    identity = resetter._check_connected_identity(
+        _config("lu_test_identity"),
+        "lu_test_identity",
+        lambda **_kwargs: Connection(),
+    )
+
+    assert captured["cursorclass"] is resetter.pymysql.cursors.DictCursor
+    assert identity == {"database": None, "server": "local", "port": 3306}
 
 
 def test_apply_requires_plan_backup_and_exact_confirmation_before_connect(monkeypatch, tmp_path):

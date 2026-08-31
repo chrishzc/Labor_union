@@ -37,13 +37,13 @@
     "runner": [
       ".\\.venv\\Scripts\\python.exe scripts\\verify_validation_schema_manifest.py",
       ".\\.venv\\Scripts\\python.exe scripts\\verify_validation_database.py --database lu_test_validation_v1",
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_verify_validation_schema_manifest.py tests\\test_bootstrap_disposable_mysql_schema.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_verify_validation_schema_manifest.py tests\\domains\\global\\subsystems\\migration\\modules\\local-database-fresh-reset\\test_bootstrap_disposable_mysql_schema.py"
     ],
     "test_paths": [
       "scripts/verify_validation_schema_manifest.py",
       "scripts/verify_validation_database.py",
       "tests/test_verify_validation_schema_manifest.py",
-      "tests/test_bootstrap_disposable_mysql_schema.py"
+      "tests/domains/global/subsystems/migration/modules/local-database-fresh-reset/test_bootstrap_disposable_mysql_schema.py"
     ]
   }
 }

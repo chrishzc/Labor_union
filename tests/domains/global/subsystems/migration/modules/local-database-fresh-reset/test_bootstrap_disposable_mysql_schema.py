@@ -3,11 +3,13 @@ File: test_bootstrap_disposable_mysql_schema.py
 Description: 驗證 disposable schema bootstrap 的安全邊界與前置契約。
 """
 
+from argparse import Namespace
 from pathlib import Path
 import re
 
 import pytest
 
+from scripts import bootstrap_disposable_mysql_schema as bootstrapper
 from scripts.bootstrap_disposable_mysql_schema import (
     _base_schema_for,
     _partition_base_statements,
@@ -17,6 +19,39 @@ from scripts.bootstrap_disposable_mysql_schema import (
 )
 from scripts.init_db import _schema_part_sort_key
 from scripts.verify_verification_scenarios import load_scenarios
+
+
+def test_connected_identity_query_uses_mapping_rows(monkeypatch):
+    captured = {}
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, _statement):
+            return None
+
+        def fetchone(self):
+            return {"database_name": None, "server": "local"}
+
+    class Connection:
+        def cursor(self, cursorclass):
+            captured["cursorclass"] = cursorclass
+            return Cursor()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(bootstrapper, "_connect", lambda _arguments: Connection())
+    monkeypatch.setenv("DB_HOST", "127.0.0.1")
+    bootstrapper._check_connected_identity(
+        Namespace(host="127.0.0.1"), "lu_test_identity"
+    )
+
+    assert captured["cursorclass"] is bootstrapper.pymysql.cursors.DictCursor
 
 
 def test_disposable_schema_bootstrap_requires_exact_lu_test_confirmation():
@@ -40,7 +75,12 @@ def test_disposable_bootstrap_loads_the_lifecycle_view_from_the_final_schema_par
 
     assert views == []
     assert all("CREATE OR REPLACE VIEW" not in statement for statement in statements)
-    view_part = Path(__file__).parents[1] / "db" / "schema_parts" / "999_v_order_details_view.sql"
+    view_part = (
+        Path(__file__).parents[7]
+        / "db"
+        / "schema_parts"
+        / "999_v_order_details_view.sql"
+    )
     view_sql = view_part.read_text(encoding="utf-8")
     assert "CREATE OR REPLACE VIEW v_order_details" in view_sql
     assert "lifecycle_version" in view_sql
