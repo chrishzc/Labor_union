@@ -167,6 +167,7 @@ export const OrderCancellationQuerySchema = z.strictObject({
   contracted_service_days: z.number().int().positive(),
   service_hours_per_day: z.number().int().positive(),
   service_started: z.boolean(),
+  historical_mid_service_confirmation_available: z.boolean(),
   service_data_locked: z.boolean(),
   order_version: z.number().int().nonnegative(),
   scheduling_version: z.number().int().nonnegative(),
@@ -179,6 +180,7 @@ export const OrderCancellationQuerySchema = z.strictObject({
 
 export const OrderCancellationPreviewSchema = z.strictObject({
   cancellation_date: DateOnlySchema,
+  actual_start_date: DateOnlySchema.nullable(),
   actual_end_date: DateOnlySchema.nullable(),
   confirmed_service_days: z.array(ServiceDaySchema),
   official_service_day_count: z.number().int().nonnegative(),
