@@ -168,10 +168,10 @@ def audit(root: Path) -> tuple[list[Finding], list[Finding], dict[str, int]]:
             if len(body) == 1 and is_trivial_assert(body[0]):
                 objective.append(Finding(path, f"{test.name} contains only a trivially-true assertion"))
             if len(body) == 1 and isinstance(body[0], ast.Expr) and is_pytest_skip_call(body[0].value):
-                review.append(Finding(path, f"{test.name} only calls pytest.skip()"))
+                objective.append(Finding(path, f"{test.name} only calls pytest.skip(); remove it or make the condition explicit"))
                 stats["unconditional_skip_tests"] += 1
             if any(is_unconditional_skip_decorator(dec) for dec in test.decorator_list):
-                review.append(Finding(path, f"{test.name} is unconditionally @pytest.mark.skip"))
+                objective.append(Finding(path, f"{test.name} is unconditionally @pytest.mark.skip; remove the dead test"))
                 stats["unconditional_skip_tests"] += 1
 
         integration_marked = source_has_integration_marker(source)
@@ -205,7 +205,7 @@ def print_findings(title: str, findings: list[Finding]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Audit pytest files for objective dead/duplicate tests and review-worthy classification smells."
+        description="Audit pytest files for objective dead/duplicate/permanently-skipped tests and review-worthy classification smells."
     )
     parser.add_argument("--tests-root", default="tests", type=Path)
     parser.add_argument(
@@ -223,7 +223,7 @@ def main() -> int:
     print_findings("Review candidates (semantic decision required)", review)
 
     if objective and not args.report_only:
-        print("\nAudit failed: objective dead/duplicate test problems exist.")
+        print("\nAudit failed: dead, duplicate, or permanently skipped tests exist.")
         return 1
     return 0
 
