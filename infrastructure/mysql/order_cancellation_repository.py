@@ -168,6 +168,7 @@ class MySqlOrderCancellationRepository:
             if cursor.rowcount != 1:
                 raise RuntimeError("cancellation_receipt_not_saved")
 
+
 def _insert_claim(cursor, request, command_fingerprint) -> bool:
     try:
         cursor.execute(
@@ -292,6 +293,7 @@ def _lifecycle_values(request, preview):
 def _lifecycle_facts(request, preview):
     candidate = preview.candidate
     return {
+        "actual_start_date": _optional_iso_date(candidate.actual_start_date),
         "actual_end_date": _optional_iso_date(candidate.actual_end_date),
         "cancellation": True,
         "cancellation_event_fingerprint": candidate.fingerprint.value,
@@ -303,6 +305,9 @@ def _lifecycle_facts(request, preview):
 
 def _append_lifecycle_outbox(cursor, request, preview, event_id):
     payload = {
+        "actual_start_date": _optional_iso_date(
+            preview.candidate.actual_start_date
+        ),
         "actual_end_date": _optional_iso_date(
             preview.lifecycle_impact.actual_end_date
         ),
@@ -335,6 +340,7 @@ def _child_identity(request, purpose):
 
 def _order_update_values(command):
     return (
+        command.actual_start_date,
         command.actual_end_date,
         command.lifecycle_status.value,
         command.resulting_order_version,
@@ -549,8 +555,8 @@ _LIFECYCLE_EVENT_INSERT_SQL = (
 )
 
 _ORDER_UPDATE_SQL = (
-    "UPDATE orders SET actual_end_date=%s,status=%s,lifecycle_version=%s "
-    "WHERE case_no=%s AND lifecycle_version=%s"
+    "UPDATE orders SET actual_start_date=%s,actual_end_date=%s,status=%s,"
+    "lifecycle_version=%s WHERE case_no=%s AND lifecycle_version=%s"
 )
 
 _RECEIPT_SELECT_SQL = (
