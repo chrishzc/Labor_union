@@ -34,7 +34,7 @@ from subsystems.orders.terms_workflow import CommandClaimState
 from .client_finance_terms_writer import persist_client_finance_terms_impact
 from .order_cancellation_read_model import (
     cancellation_preflight_staff_ids,
-    list_active_caregiver_options,
+    list_caregiver_options,
     load_cancellation_locked_facts,
     load_cancellation_preview_facts,
 )
@@ -54,9 +54,9 @@ class MySqlOrderCancellationRepository:
                 cursor, case_no, requested_staff_ids
             )
 
-    def list_active_caregiver_options(self):
+    def list_caregiver_options(self, case_no):
         with self._connection.cursor() as cursor:
-            return list_active_caregiver_options(cursor)
+            return list_caregiver_options(cursor, case_no)
 
     def preflight_impacted_staff_ids(self, case_no, requested_staff_ids):
         with self._connection.cursor() as cursor:
@@ -167,6 +167,7 @@ class MySqlOrderCancellationRepository:
             cursor.execute(_RECEIPT_INSERT_SQL, _receipt_values(command))
             if cursor.rowcount != 1:
                 raise RuntimeError("cancellation_receipt_not_saved")
+
 
 def _insert_claim(cursor, request, command_fingerprint) -> bool:
     try:
@@ -292,6 +293,7 @@ def _lifecycle_values(request, preview):
 def _lifecycle_facts(request, preview):
     candidate = preview.candidate
     return {
+        "actual_start_date": _optional_iso_date(candidate.actual_start_date),
         "actual_end_date": _optional_iso_date(candidate.actual_end_date),
         "cancellation": True,
         "cancellation_event_fingerprint": candidate.fingerprint.value,
@@ -303,6 +305,9 @@ def _lifecycle_facts(request, preview):
 
 def _append_lifecycle_outbox(cursor, request, preview, event_id):
     payload = {
+        "actual_start_date": _optional_iso_date(
+            preview.candidate.actual_start_date
+        ),
         "actual_end_date": _optional_iso_date(
             preview.lifecycle_impact.actual_end_date
         ),
@@ -335,6 +340,7 @@ def _child_identity(request, purpose):
 
 def _order_update_values(command):
     return (
+        command.actual_start_date,
         command.actual_end_date,
         command.lifecycle_status.value,
         command.resulting_order_version,
@@ -549,8 +555,8 @@ _LIFECYCLE_EVENT_INSERT_SQL = (
 )
 
 _ORDER_UPDATE_SQL = (
-    "UPDATE orders SET actual_end_date=%s,status=%s,lifecycle_version=%s "
-    "WHERE case_no=%s AND lifecycle_version=%s"
+    "UPDATE orders SET actual_start_date=%s,actual_end_date=%s,status=%s,"
+    "lifecycle_version=%s WHERE case_no=%s AND lifecycle_version=%s"
 )
 
 _RECEIPT_SELECT_SQL = (

@@ -59,6 +59,7 @@ def _client_finance_impact(**overrides):
 def _preview_data(*, client_finance_impact=None):
     return {
         "cancellation_date": "2026-08-03",
+        "actual_start_date": "2026-08-02",
         "actual_end_date": "2026-08-02",
         "confirmed_service_days": [
             {"service_date": "2026-08-02", "staff_id": 7, "reason": None}
@@ -84,6 +85,7 @@ def test_cancellation_client_carries_preview_versions_and_confirmed_days():
             "case_no": "C-1", "lifecycle_status": "in_service",
             "actual_start_date": "2026-08-02", "contracted_service_days": 30,
             "service_hours_per_day": 8, "service_started": True,
+            "historical_mid_service_confirmation_available": False,
             "service_data_locked": False, "order_version": 2,
             "scheduling_version": 3, "scheduling_generation": 1,
             "client_finance_version": 4, "payroll_version": 5,

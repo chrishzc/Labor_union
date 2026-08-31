@@ -137,6 +137,7 @@ class CancellationCandidate:
     expected_order_version: int
     scheduling: SchedulingGenerationCandidate
     cancellation_date: date
+    actual_start_date: date | None
     actual_end_date: date | None
     confirmed_service_days: tuple[ConfirmedServiceDay, ...]
     official_service_day_count: int
@@ -338,6 +339,7 @@ def _candidate(order, generation, cancellation_date, confirmed):
         order.order_version,
         generation,
         cancellation_date,
+        order.actual_start_date,
         service_dates[-1] if service_dates else None,
         confirmed,
         len(service_dates),

@@ -14,6 +14,7 @@ const queryFixture = {
   contracted_service_days: 25,
   service_hours_per_day: 8,
   service_started: false,
+  historical_mid_service_confirmation_available: false,
   service_data_locked: false,
   order_version: 0,
   scheduling_version: 0,
@@ -26,6 +27,7 @@ const queryFixture = {
 
 const previewFixture = {
   cancellation_date: '2026-08-23',
+  actual_start_date: null,
   actual_end_date: null,
   confirmed_service_days: [],
   official_service_day_count: 0,
@@ -96,6 +98,23 @@ describe('orderCancellationClient', () => {
       '/api/v1/orders/CASE-1/cancellation',
       expect.objectContaining({ token: 'token' }),
     );
+  });
+
+  it('opens the existing workbench only for explicit historical mid-service confirmation capability', async () => {
+    const historical = {
+      ...queryFixture,
+      lifecycle_status: '訂單取消',
+      historical_mid_service_confirmation_available: true,
+      caregiver_options: [{ staff_id: 7, display_name: 'Historical Staff' }],
+    };
+    vi.spyOn(transport, 'get').mockResolvedValue({
+      success: true, message: 'ok', data: historical, error: null,
+    });
+
+    await expect(orderCancellationClient.query('CASE-1')).resolves.toEqual({
+      ...historical,
+      service_started: true,
+    });
   });
 
   it('previews with confirmed days and a correlation identity', async () => {
@@ -195,58 +214,39 @@ describe('orderCancellationClient', () => {
 
   it('rejects a Client Finance action without the server-owned direction', async () => {
     vi.spyOn(transport, 'post').mockResolvedValueOnce({
-      success: true,
-      message: 'ok',
-      data: {
+      success: true, message: 'ok', data: {
         ...previewFixture,
         client_finance_impact: {
           ...previewFixture.client_finance_impact,
-          actions: [{
-            ...previewFixture.client_finance_impact.actions[0],
-            direction: undefined,
-          }],
+          actions: [{ ...previewFixture.client_finance_impact.actions[0], direction: undefined }],
         },
-      },
-      error: null,
+      }, error: null,
     });
     await expect(orderCancellationClient.preview('CASE-1', [])).rejects.toThrow();
   });
 
   it('rejects a financial direction with zero amount', async () => {
     vi.spyOn(transport, 'post').mockResolvedValueOnce({
-      success: true,
-      message: 'ok',
-      data: {
+      success: true, message: 'ok', data: {
         ...previewFixture,
         client_finance_impact: {
           ...previewFixture.client_finance_impact,
-          actions: [{
-            ...previewFixture.client_finance_impact.actions[0],
-            direction_amount_ntd: 0,
-          }],
+          actions: [{ ...previewFixture.client_finance_impact.actions[0], direction_amount_ntd: 0 }],
         },
-      },
-      error: null,
+      }, error: null,
     });
     await expect(orderCancellationClient.preview('CASE-1', [])).rejects.toThrow();
   });
 
   it('rejects no-finance-change with a nonzero amount', async () => {
     vi.spyOn(transport, 'post').mockResolvedValueOnce({
-      success: true,
-      message: 'ok',
-      data: {
+      success: true, message: 'ok', data: {
         ...previewFixture,
         client_finance_impact: {
           ...previewFixture.client_finance_impact,
-          actions: [{
-            ...previewFixture.client_finance_impact.actions[0],
-            direction: 'no_finance_change',
-            direction_amount_ntd: 1,
-          }],
+          actions: [{ ...previewFixture.client_finance_impact.actions[0], direction: 'no_finance_change', direction_amount_ntd: 1 }],
         },
-      },
-      error: null,
+      }, error: null,
     });
     await expect(orderCancellationClient.preview('CASE-1', [])).rejects.toThrow();
   });

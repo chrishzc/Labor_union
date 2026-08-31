@@ -97,6 +97,7 @@ class OrderCancellationQueryView(BaseModel):
     contracted_service_days: int = Field(gt=0)
     service_hours_per_day: int = Field(gt=0)
     service_started: bool
+    historical_mid_service_confirmation_available: bool
     service_data_locked: bool
     order_version: int = Field(ge=0)
     scheduling_version: int = Field(ge=0)
@@ -111,6 +112,7 @@ class OrderCancellationPreviewView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cancellation_date: date
+    actual_start_date: date | None
     actual_end_date: date | None
     confirmed_service_days: list[CancellationServiceDayView]
     official_service_day_count: int = Field(ge=0)
