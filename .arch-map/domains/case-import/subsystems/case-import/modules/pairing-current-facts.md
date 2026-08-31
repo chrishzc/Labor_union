@@ -10,6 +10,9 @@
 - `subsystems/case_import/pairing_current_facts.py`
 - `infrastructure/mysql/case_pairing_current_issue_adapter.py`
 - `infrastructure/mysql/case_pairing_anomaly_recheck_sink.py`
+- `subsystems/case_import/client_beclass_workbook_import.py`
+- `infrastructure/mysql/client_beclass_workbook_import_repository.py`
+- `api/routes/client_beclass_import.py`
 
 ## Consumers
 - `subsystems/anomalies/case_pairing_current_issue_consumer.py`

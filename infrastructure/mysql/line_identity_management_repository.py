@@ -340,6 +340,16 @@ def _fact_binding(row: dict[str, Any] | None) -> LineIdentityCurrentFactBinding 
             if row.get("owner_line_user_id") is not None
             else None
         ),
+        binding_status=(
+            LineIdentityBindingStatus(str(row["binding_status"]))
+            if row.get("binding_status") is not None
+            else None
+        ),
+        aggregate_version=(
+            int(row["aggregate_version"])
+            if row.get("aggregate_version") is not None
+            else None
+        ),
     )
 
 

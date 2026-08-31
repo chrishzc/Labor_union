@@ -197,6 +197,9 @@ class MySqlAnomalyRuntime:
             from infrastructure.mysql.case_pairing_current_issue_adapter import (
                 MySqlCasePairingCurrentIssueAdapter,
             )
+            from infrastructure.mysql.client_beclass_workbook_import_repository import (
+                ClientBeClassWorkbookImportRepository,
+            )
             from subsystems.anomalies.case_pairing_current_issue_consumer import (
                 CasePairingCurrentIssueConsumer,
             )
@@ -209,7 +212,10 @@ class MySqlAnomalyRuntime:
                 scope.owner_domain == CASE_PAIRING_ANOMALY_OWNER_DOMAIN
                 and scope.owner_root_type == CASE_PAIRING_ANOMALY_OWNER_ROOT_TYPE
             ):
-                adapter = MySqlCasePairingCurrentIssueAdapter(connection)
+                adapter = MySqlCasePairingCurrentIssueAdapter(
+                    connection,
+                    ClientBeClassWorkbookImportRepository(connection),
+                )
                 owner_snapshot_reader = adapter.read_owner_snapshot
                 detector = CasePairingCurrentIssueConsumer(
                     self.current_issue_key

@@ -10,6 +10,8 @@ qualification、candidate verification 與 developer-local DB maintenance bounda
 ## Modules
 - `local-database-fresh-reset` — explicit local canonical empty-schema reset；path:
   `modules/local-database-fresh-reset.md`
+- `task96-owner-contract-successors` — Task 96 owner-specific additive roots／exact lineage
+  terminal release；path: `modules/task96-owner-contract-successors.md`
 
 ## Contracts
 - Fresh bootstrap 與 preserve-data upgrade 分離；source／candidate／receipt／release

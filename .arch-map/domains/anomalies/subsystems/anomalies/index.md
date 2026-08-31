@@ -14,6 +14,7 @@
 - `scheduling-current-issue` — `SCHEDULE-002/003/006` typed owner predicate consumers；path: `modules/scheduling-current-issue.md`
 - `government-subsidy-current-issue` — `GOVSUB-001/002/004` typed owner predicate consumers；path: `modules/government-subsidy-current-issue.md`
 - `case-pairing-current-issue` — `BECLASS-001/IMPORT-003` typed owner predicate consumers；path: `modules/case-pairing-current-issue.md`
+- `payroll-current-issue` — `PAYOUT-002` typed Payroll owner predicate consumer；path: `modules/payroll-current-issue.md`
 
 ## Dependencies
 - outbound: owning subsystems — Query/Preview/Apply delegation and fresh predicate recheck。

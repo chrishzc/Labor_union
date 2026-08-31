@@ -12,6 +12,26 @@ from shared_kernel.validation import require_canonical_text, require_nonnegative
 _IDENTITY_MAXIMUM_LENGTH = 191
 
 
+@dataclass(frozen=True, slots=True)
+class PayrollCorrectionRecoverySource:
+    """Exact Payroll correction lineage for a Staff Payables recovery root."""
+
+    correction_identity: str
+    case_no: str
+    obligation_identity: str
+    staff_id: int
+    amount: MoneyNTD
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.correction_identity, "payroll correction identity", _IDENTITY_MAXIMUM_LENGTH)
+        require_canonical_text(self.case_no, "case number", _IDENTITY_MAXIMUM_LENGTH)
+        require_canonical_text(self.obligation_identity, "obligation identity", _IDENTITY_MAXIMUM_LENGTH)
+        if not isinstance(self.staff_id, int) or self.staff_id <= 0:
+            raise ValueError("staff_overpayment_recovery_target_ambiguous")
+        if not isinstance(self.amount, MoneyNTD) or self.amount.amount <= 0:
+            raise ValueError("staff_overpayment_recovery_amount_invalid")
+
+
 class StaffOverpaymentRecoveryStatus(StrEnum):
     OPEN = "open"
     PARTIALLY_RECOVERED = "partially_recovered"
@@ -149,4 +169,4 @@ def _adjustment_payload(recovery, adjustment_amount):
     }
 
 
-__all__ = [name for name in globals() if name.startswith("StaffOverpayment") or name.startswith("StaffRecovery") or name.startswith("build_staff")]
+__all__ = [name for name in globals() if name.startswith("StaffOverpayment") or name.startswith("StaffRecovery") or name.startswith("PayrollCorrection") or name.startswith("build_staff")]

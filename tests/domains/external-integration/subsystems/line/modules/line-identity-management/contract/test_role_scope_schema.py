@@ -38,8 +38,11 @@ def test_role_scope_release_is_hash_bound_and_terminal_in_fresh_assembly() -> No
         DESCRIPTOR_PATH.read_bytes()
     ).hexdigest()
     assert descriptor["release_id"] == manifest["release_id"]
-    assert assembly["active_bootstrap"][-1] == (
+    assert "db/schema_parts/1019_line_identity_role_scope.sql" in assembly["active_bootstrap"]
+    assert assembly["active_bootstrap"].index(
         "db/schema_parts/1019_line_identity_role_scope.sql"
+    ) < assembly["active_bootstrap"].index(
+        "db/schema_parts/1021_task96_owner_contract_successors.sql"
     )
 
 

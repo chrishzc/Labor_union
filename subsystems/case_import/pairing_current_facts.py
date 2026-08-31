@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Protocol
 
 from shared_kernel.validation import require_canonical_text, require_nonnegative_integer
 
@@ -24,6 +25,56 @@ class CasePairingCurrentFactReason(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class CasePairingAcceptedLineage:
+    """Immutable proof that a later source accepted the reviewed counterpart.
+
+    These identities remain separate typed values. A receipt key, case
+    number, display identity, or source filename cannot replace this relation.
+    """
+
+    original_review_identity: str
+    accepted_source_event_identity: str
+    accepted_result_identity: str
+
+    def __post_init__(self) -> None:
+        require_canonical_text(
+            self.original_review_identity, "original review identity", 191
+        )
+        require_canonical_text(
+            self.accepted_source_event_identity,
+            "accepted source event identity",
+            191,
+        )
+        require_canonical_text(
+            self.accepted_result_identity, "accepted result identity", 191
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CasePairingAcceptedMapping:
+    """Owner readback of a source mapping and its immutable lineage proof."""
+
+    lineage: CasePairingAcceptedLineage
+    bound_case_no: str | None
+    hcm_count: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.lineage, CasePairingAcceptedLineage):
+            raise TypeError("case pairing accepted lineage is invalid")
+        if self.bound_case_no is not None:
+            require_canonical_text(self.bound_case_no, "bound case number", 50)
+        require_nonnegative_integer(self.hcm_count, "accepted mapping HCM count")
+
+
+class CasePairingAcceptedMappingReader(Protocol):
+    """Read exact owner lineage while borrowing the caller's UoW."""
+
+    def read_accepted_mapping(
+        self, original_review_identity: str
+    ) -> CasePairingAcceptedMapping | None: ...
+
+
+@dataclass(frozen=True, slots=True)
 class HcmCounterpartCurrentFact:
     case_no: str
     owner_snapshot_token: str
@@ -31,11 +82,13 @@ class HcmCounterpartCurrentFact:
     authoritative_complete: bool
     counterpart_count: int
     accepted_mapping_consistent: bool
+    accepted_lineage: CasePairingAcceptedLineage | None = None
 
     def __post_init__(self) -> None:
         _validate_common(self.case_no, self.owner_snapshot_token, self.owner_version, self.authoritative_complete)
         require_nonnegative_integer(self.counterpart_count, "counterpart count")
         _bool(self.accepted_mapping_consistent)
+        _validate_lineage(self.accepted_lineage)
 
     @property
     def unresolved_reason_codes(self):
@@ -55,12 +108,14 @@ class BeClassCounterpartCurrentFact:
     authoritative_complete: bool
     counterpart_count: int
     accepted_mapping_consistent: bool
+    accepted_lineage: CasePairingAcceptedLineage | None = None
 
     def __post_init__(self) -> None:
         _validate_common(self.entity_kind, self.owner_snapshot_token, self.owner_version, self.authoritative_complete)
         require_canonical_text(self.review_item_id, "review item id", 191)
         require_nonnegative_integer(self.counterpart_count, "counterpart count")
         _bool(self.accepted_mapping_consistent)
+        _validate_lineage(self.accepted_lineage)
 
     @property
     def unresolved_reason_codes(self):
@@ -124,6 +179,11 @@ def _validate_common(identity, token, version, complete):
     require_canonical_text(token, "owner snapshot token", 191)
     require_nonnegative_integer(version, "owner version")
     _bool(complete)
+
+
+def _validate_lineage(value):
+    if value is not None and not isinstance(value, CasePairingAcceptedLineage):
+        raise TypeError("case pairing accepted lineage is invalid")
 
 
 def _bool(value):

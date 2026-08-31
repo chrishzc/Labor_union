@@ -197,6 +197,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_30_hcm_resubmission_canonical_review_version_v1.json",
     "labor_union_2026_08_30_line_identity_role_scope_v1.json",
     "labor_union_2026_08_31_historical_owner_payment_settlement_v1.json",
+    "labor_union_2026_08_31_task96_owner_contract_successors_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -4822,6 +4823,45 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "enum('customer','staff')", "YES"
             )
         }
+    if part_name == "1021_task96_owner_contract_successors.sql":
+        descriptor["parent_columns"]["clients"] = {
+            "client_profile_version": _column_contract(
+                "bigint unsigned", "NO", "0"
+            )
+        }
+        descriptor["parent_columns"]["client_profile_change_requests"] = {
+            "status": _column_contract(
+                "enum('pending','approved','approved_applied','partially_approved','rejected','reverted')",
+                "NO",
+                "pending",
+            ),
+            "request_version": _column_contract("bigint unsigned", "NO", "0"),
+            "client_profile_version": _column_contract("bigint unsigned", "NO", "0"),
+            "reason": _column_contract("varchar(500)", "YES"),
+            "idempotency_key": _column_contract("varchar(191)", "YES"),
+            "preview_fingerprint": _column_contract("char(64)", "YES"),
+            "command_fingerprint": _column_contract("char(64)", "YES"),
+            "correlation_id": _column_contract("varchar(191)", "YES"),
+            "review_reason": _column_contract("varchar(500)", "YES"),
+        }
+        descriptor["indexes"][(
+            "client_profile_change_requests",
+            "uq_client_profile_change_request_idempotency",
+        )] = {"non_unique": 0, "columns": ("idempotency_key",)}
+        descriptor["checks"][(
+            "client_profile_change_requests",
+            "chk_client_profile_change_request_fingerprints",
+        )] = _normalize_sql_contract(
+            "(preview_fingerprint IS NULL OR preview_fingerprint REGEXP '^[0-9a-f]{64}$') "
+            "AND (command_fingerprint IS NULL OR command_fingerprint REGEXP '^[0-9a-f]{64}$')"
+        )
+        descriptor["parent_columns"]["staff_overpayment_recoveries"] = {
+            "payroll_correction_identity": _column_contract("varchar(191)", "YES")
+        }
+        descriptor["indexes"][(
+            "staff_overpayment_recoveries",
+            "uq_staff_overpayment_payroll_correction",
+        )] = {"non_unique": 0, "columns": ("payroll_correction_identity",)}
     if part_name == "61_finance_import_reprocessing.sql":
         _remove_retired_reclassification_audit_contract(descriptor)
         descriptor["indexes"][(

@@ -18,6 +18,7 @@ from domains.case_import.client_beclass_validation import CLIENT_BECLASS_REQUIRE
 from domains.case_import.client_beclass_binding import ClientCaseBindingStatus
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.ports import UnitOfWork
+from shared_kernel.validation import require_canonical_text
 from subsystems.case_import.beclass_review_intake import masked_review_identifier, record_invalid_beclass_row
 from subsystems.case_import.pairing_current_facts import (
     CasePairingAnomalyRecheckRequest,
@@ -123,8 +124,17 @@ class ClientBeClassWorkbookImportRepositoryPort(Protocol):
     def bound_case_no_for_root(self, root_id: int | None) -> str | None: ...
     def bound_source_for_query(self, query_no: str): ...
     def bound_case_nos_for_workbook(self, digest: str) -> tuple[str, ...]: ...
-    def save_row_receipt(self, *args) -> None: ...
-    def save_workbook_receipt(self, *args) -> None: ...
+    def save_row_receipt(self, *args) -> str | None: ...
+    def append_case_pairing_lineage(
+        self,
+        original_review_identity: str,
+        accepted_source_event_identity: str,
+        accepted_result_identity: str,
+        accepted_root_id: int | None = None,
+    ) -> None: ...
+    def save_workbook_receipt(
+        self, *args, original_review_identity: str | None = None
+    ) -> None: ...
 
 
 class ClientBeClassWorkbookImportService:
@@ -151,22 +161,57 @@ class ClientBeClassWorkbookImportService:
         outcomes = Counter(self._preview_outcome(row) for _, row in workbook.rows)
         return _preview_from_outcomes(workbook, outcomes)
 
-    def apply(self, source_path: str, key: str, supplied_preview: str, actor: str, correlation_id: str) -> ClientBeClassWorkbookReceipt:
+    def apply(
+        self,
+        source_path: str,
+        key: str,
+        supplied_preview: str,
+        actor: str,
+        correlation_id: str,
+        original_review_identity: str | None = None,
+    ) -> ClientBeClassWorkbookReceipt:
+        if original_review_identity is not None:
+            require_canonical_text(
+                original_review_identity, "original review identity", 191
+            )
         if not self._repository.acquire_lock(key):
             raise ClientBeClassWorkbookUnavailable("client_beclass_workbook_coordinator_lock_timeout")
         try:
             workbook = _load_workbook(source_path)
-            replay = self._stored_replay_and_reconcile(key, workbook.digest)
+            replay = self._stored_replay_and_reconcile(
+                key, workbook.digest, original_review_identity
+            )
             if replay is not None:
                 return replay
+            if original_review_identity is not None and len(workbook.rows) != 1:
+                raise ClientBeClassWorkbookConflict(
+                    "client_beclass_lineage_requires_single_source_row"
+                )
             preview = self.preview(source_path)
             if preview.preview_fingerprint != supplied_preview:
                 raise ClientBeClassWorkbookConflict("client_beclass_preview_stale")
             self._claim_workbook(key, workbook.digest, correlation_id)
-            outcomes = Counter(self._apply_row(workbook, row_number, row, actor, correlation_id) for row_number, row in workbook.rows)
+            outcomes = Counter(
+                self._apply_row(
+                    workbook,
+                    row_number,
+                    row,
+                    actor,
+                    correlation_id,
+                    original_review_identity=original_review_identity,
+                )
+                for row_number, row in workbook.rows
+            )
             _assert_conservation(len(workbook.rows), outcomes)
             receipt = ClientBeClassWorkbookReceipt(workbook.digest, len(workbook.rows), outcomes["created"], outcomes["exact_replay"], outcomes["review_required"], outcomes["existing_conflict"], outcomes["existing_source"], False)
-            self._save_workbook_receipt(key, workbook.digest, preview.preview_fingerprint, actor, receipt)
+            self._save_workbook_receipt(
+                key,
+                workbook.digest,
+                preview.preview_fingerprint,
+                actor,
+                receipt,
+                original_review_identity=original_review_identity,
+            )
             return receipt
         finally:
             self._repository.release_lock(key)
@@ -190,7 +235,16 @@ class ClientBeClassWorkbookImportService:
         )
 
     # Why: every branch must persist the row receipt and review in the same outer row transaction.
-    def _apply_row(self, workbook: _Workbook, row_number: int, row: dict[str, Any], actor: str, correlation_id: str) -> str:
+    def _apply_row(
+        self,
+        workbook: _Workbook,
+        row_number: int,
+        row: dict[str, Any],
+        actor: str,
+        correlation_id: str,
+        *,
+        original_review_identity: str | None = None,
+    ) -> str:
         source_identity = _source_identity(workbook.digest, row_number)
         payload = _normalized_payload(row)
         fingerprint = fingerprint_payload(payload).value
@@ -204,6 +258,16 @@ class ClientBeClassWorkbookImportService:
                 )
                 if case_no is not None:
                     self._reconciliation.reconcile(case_no)
+                if (
+                    original_review_identity is not None
+                    and stored.get("outcome") in {"created", "existing_source"}
+                ):
+                    self._append_case_pairing_lineage(
+                        original_review_identity,
+                        source_identity,
+                        stored.get("accepted_result_identity"),
+                        stored.get("root_id"),
+                    )
                 unit_of_work.commit()
                 return "exact_replay"
             self._repository.claim_row(source_identity, fingerprint, correlation_id)
@@ -226,13 +290,19 @@ class ClientBeClassWorkbookImportService:
                 )
                 if bound_source is not None:
                     self._reconciliation.reconcile(bound_source["case_no"])
-                self._repository.save_row_receipt(
+                accepted_result_identity = self._repository.save_row_receipt(
                     source_identity,
                     fingerprint,
                     None if bound_source is None else bound_source["root_id"],
                     "existing_source",
                     None,
                     actor,
+                )
+                self._append_case_pairing_lineage(
+                    original_review_identity,
+                    source_identity,
+                    accepted_result_identity,
+                    None if bound_source is None else bound_source["root_id"],
                 )
                 unit_of_work.commit()
                 return "existing_source"
@@ -267,13 +337,49 @@ class ClientBeClassWorkbookImportService:
                         workbook, row_number, payload,
                         "client_beclass_source_payload_conflict",
                     )
-                self._repository.save_row_receipt(source_identity, fingerprint, None, outcome, review_identity, actor)
+                accepted_result_identity = self._repository.save_row_receipt(source_identity, fingerprint, None, outcome, review_identity, actor)
+                if outcome == "existing_source":
+                    bound_source = self._repository.bound_source_for_query(
+                        str(payload["query_no"])
+                    )
+                    self._append_case_pairing_lineage(
+                        original_review_identity,
+                        source_identity,
+                        accepted_result_identity,
+                        None if bound_source is None else bound_source["root_id"],
+                    )
                 unit_of_work.commit()
                 return outcome
             self._reconciliation.reconcile(str(bound_root["case_no"]))
-            self._repository.save_row_receipt(source_identity, fingerprint, source_id, "created", None, actor)
+            accepted_result_identity = self._repository.save_row_receipt(source_identity, fingerprint, source_id, "created", None, actor)
+            self._append_case_pairing_lineage(
+                original_review_identity,
+                source_identity,
+                accepted_result_identity,
+                source_id,
+            )
             unit_of_work.commit()
             return "created"
+
+    def _append_case_pairing_lineage(
+        self,
+        original_review_identity: str | None,
+        accepted_source_event_identity: str,
+        accepted_result_identity: str | None,
+        accepted_root_id: int | None = None,
+    ) -> None:
+        if original_review_identity is None:
+            return
+        if accepted_result_identity is None:
+            raise ClientBeClassWorkbookConflict(
+                "client_beclass_accepted_result_identity_missing"
+            )
+        self._repository.append_case_pairing_lineage(
+            original_review_identity,
+            accepted_source_event_identity,
+            accepted_result_identity,
+            accepted_root_id,
+        )
 
     def _save_review_outcome(
         self, workbook, row_number, payload, source_identity, fingerprint, actor,
@@ -313,7 +419,10 @@ class ClientBeClassWorkbookImportService:
         )
 
     def _stored_replay_and_reconcile(
-        self, key: str, digest: str
+        self,
+        key: str,
+        digest: str,
+        original_review_identity: str | None = None,
     ) -> ClientBeClassWorkbookReceipt | None:
         with self._unit_of_work_factory() as unit_of_work:
             stored = self._repository.load_workbook_receipt(key)
@@ -324,12 +433,20 @@ class ClientBeClassWorkbookImportService:
                 raise ClientBeClassWorkbookConflict(
                     "client_beclass_workbook_idempotency_conflict"
                 )
+            payload = json.loads(stored["result_snapshot"])
+            stored_review_identity = payload.pop(
+                "_lineage_original_review_identity", None
+            )
+            if stored_review_identity != original_review_identity:
+                raise ClientBeClassWorkbookConflict(
+                    "client_beclass_lineage_idempotency_conflict"
+                )
             for case_no in self._repository.bound_case_nos_for_workbook(digest):
                 self._reconciliation.reconcile(case_no)
             unit_of_work.commit()
             return ClientBeClassWorkbookReceipt(
                 **{
-                    **json.loads(stored["result_snapshot"]),
+                    **payload,
                     "replayed_workbook": True,
                 }
             )
@@ -340,9 +457,30 @@ class ClientBeClassWorkbookImportService:
                 raise ClientBeClassWorkbookConflict("client_beclass_workbook_idempotency_conflict")
             unit_of_work.commit()
 
-    def _save_workbook_receipt(self, key: str, digest: str, preview: str, actor: str, receipt: ClientBeClassWorkbookReceipt) -> None:
+    def _save_workbook_receipt(
+        self,
+        key: str,
+        digest: str,
+        preview: str,
+        actor: str,
+        receipt: ClientBeClassWorkbookReceipt,
+        *,
+        original_review_identity: str | None = None,
+    ) -> None:
         with self._unit_of_work_factory() as unit_of_work:
-            self._repository.save_workbook_receipt(key, digest, preview, actor, receipt.as_dict())
+            if original_review_identity is None:
+                self._repository.save_workbook_receipt(
+                    key, digest, preview, actor, receipt.as_dict()
+                )
+            else:
+                self._repository.save_workbook_receipt(
+                    key,
+                    digest,
+                    preview,
+                    actor,
+                    receipt.as_dict(),
+                    original_review_identity=original_review_identity,
+                )
             unit_of_work.commit()
 
 

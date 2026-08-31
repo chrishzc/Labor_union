@@ -10,6 +10,7 @@ from enum import StrEnum
 from typing import Callable, Protocol, TypeAlias
 
 from domains.staff_payables.overpayment_recovery import (
+    PayrollCorrectionRecoverySource,
     StaffOverpaymentRecovery,
     StaffOverpaymentRecoveryAdjustmentCandidate,
     StaffOverpaymentRecoveryCollectionCandidate,
@@ -103,6 +104,78 @@ class StaffOverpaymentRecoveryApplyRequest:
         require_canonical_text(self.reason, "reason", 500)
         if self.evidence_reference is not None:
             require_canonical_text(self.evidence_reference, "evidence reference", 191)
+
+
+@dataclass(frozen=True, slots=True)
+class StaffOverpaymentRecoveryCreationRequest:
+    """Owner command for creating recovery from a Payroll correction."""
+
+    source: PayrollCorrectionRecoverySource
+    idempotency_key: IdempotencyKey
+    actor: ActorContext
+    reason: str
+    correlation_id: CorrelationId
+    evidence_reference: str | None = None
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.reason, "reason", 500)
+        if self.evidence_reference is not None:
+            require_canonical_text(self.evidence_reference, "evidence reference", 191)
+
+
+@dataclass(frozen=True, slots=True)
+class StaffOverpaymentRecoveryCreationReceipt:
+    recovery_identity: str
+    payroll_correction_identity: str
+    staff_id: int
+    original_amount_ntd: int
+    recovery_version: int
+    staff_payables_version: int
+    command_fingerprint: PreviewFingerprint
+
+
+class StaffOverpaymentRecoveryCreationRepository(Protocol):
+    """Staff owner persistence; the caller supplies the outer transaction."""
+
+    def find_creation_receipt(self, key: IdempotencyKey) -> StaffOverpaymentRecoveryCreationReceipt | None: ...
+    def load_staff_payables_version(self, staff_id: int, *, for_update: bool) -> int: ...
+    def persist_creation(
+        self,
+        request: StaffOverpaymentRecoveryCreationRequest,
+        receipt: StaffOverpaymentRecoveryCreationReceipt,
+    ) -> None: ...
+
+
+class StaffOverpaymentRecoveryCreationApplication:
+    """Create one Staff Payables recovery root without committing the transaction."""
+
+    def __init__(self, repository: StaffOverpaymentRecoveryCreationRepository) -> None:
+        self._repository = repository
+
+    def create_from_payroll_correction(
+        self, request: StaffOverpaymentRecoveryCreationRequest,
+    ) -> StaffOverpaymentRecoveryCreationReceipt:
+        command_fingerprint = _creation_command_fingerprint(request)
+        stored = self._repository.find_creation_receipt(request.idempotency_key)
+        if stored is not None:
+            if stored.command_fingerprint == command_fingerprint:
+                return stored
+            raise ValueError("idempotency_conflict")
+        staff_version = self._repository.load_staff_payables_version(
+            request.source.staff_id, for_update=True,
+        )
+        recovery_identity = _payroll_recovery_identity(request.source)
+        receipt = StaffOverpaymentRecoveryCreationReceipt(
+            recovery_identity,
+            request.source.correction_identity,
+            request.source.staff_id,
+            request.source.amount.amount,
+            0,
+            staff_version + 1,
+            command_fingerprint,
+        )
+        self._repository.persist_creation(request, receipt)
+        return receipt
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +313,28 @@ def _command_fingerprint(request):
         "reason": request.reason,
         "evidence_reference": request.evidence_reference,
     })
+
+
+def _creation_command_fingerprint(request: StaffOverpaymentRecoveryCreationRequest) -> PreviewFingerprint:
+    source = request.source
+    return fingerprint_payload({
+        "payroll_correction_identity": source.correction_identity,
+        "case_no": source.case_no,
+        "obligation_identity": source.obligation_identity,
+        "staff_id": source.staff_id,
+        "amount_ntd": source.amount.amount,
+        "actor": request.actor.actor_id,
+        "reason": request.reason,
+        "evidence_reference": request.evidence_reference,
+    })
+
+
+def _payroll_recovery_identity(source: PayrollCorrectionRecoverySource) -> str:
+    digest = fingerprint_payload({
+        "payroll_correction_identity": source.correction_identity,
+        "staff_id": source.staff_id,
+    }).value
+    return f"staff-overpayment-recovery:payroll:{digest}"
 
 
 def _selection_payload(selection):

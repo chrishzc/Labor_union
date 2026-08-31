@@ -182,12 +182,16 @@ terminal-ready manual action。只有 automation 可以 `blocked_capability`；m
   由 `02` 擁有；
 - `GOVSUB-001`、`GOVSUB-002`、`GOVSUB-004` 的 matrix 由 `14` 擁有；
 - `BECLASS-001`、`IMPORT-003` 的 pairing matrix 由 `17` 的 Case Import 擁有；
-- 上述 Case pairing behavioral contract已收斂，但current roots只證明synthetic counterpart與
-  same-source accepted receipt；different-source accepted lineage仍為
-  `BOUNDARY_REQUIRED_CASE_PAIRING_LINEAGE`，不得在Anomalies推導或旁路解除；
-- `PAYOUT-002`、`GOVSUB-003`、`GOVSUB-005`、`GOVSUB-007`、`IMPORT-006` 仍為
-  `AUTHORITY_REQUIRED`：它們的 active／completion oracle 已知，但現行正式規格無法唯一決定
-  合法 correction／disposition operation。
+- Case pairing 的 different-source accepted 分支只承認 Case Import Apply 同一 owner UoW 保存的
+  `original_review_identity -> accepted_source_event_identity / accepted_result_identity` exact immutable
+  lineage；Anomalies不得以姓名、電話、檔名、status或receipt命名推導；
+- `PAYOUT-002` 由 Payroll 擁有 late source disposition；`delta>0` append obligation、`delta<0`
+  修正合法 obligation且只有已付款超額交由 Staff Payables recovery、`delta=0`保存reviewed event；
+- `IMPORT-006` 分成同 batch deterministic rebuild與accepted corrected-source successor lineage；
+  只有唯一completed／fresh／full-coverage successor可使原歷史問題不再是current issue；
+- `GOVSUB-003/005/007` 依 `14` 的三分支、versioned correction與Government-owned recovery contract；
+  其中 `GOVSUB-007` lawful payout＋excess recovery的原子建立仍為
+  `BOUNDARY_REQUIRED_GOVSUB007_ATOMIC_EXCESS_UOW`，不得以兩次commit或重複SQL繞過。
 
 上述收旂只是 owner contract 狀態，不代表 production consumer、UI 或 runtime 已實作。
 

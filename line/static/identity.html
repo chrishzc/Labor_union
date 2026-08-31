@@ -394,6 +394,7 @@ function requestedMobileAdminPage() {
   const target = parameters.get("target") || stateParameters.get("target");
   return {
     customer_service: "/line-mobile-admin?target=customer_service",
+    scheduling_review: "/line-mobile-admin?target=scheduling_review",
     staff_review: "/line-mobile-admin?target=staff_review"
   }[target] || "";
 }

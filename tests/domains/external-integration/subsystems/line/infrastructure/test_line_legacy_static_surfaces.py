@@ -22,13 +22,15 @@ def test_static_bind_redirects_to_canonical_identity_and_preserves_navigation_qu
     )
 
 
-def test_profile_update_static_design_is_read_only_until_formal_contract_exists() -> None:
+def test_profile_update_static_uses_verified_liff_preview_and_apply_contract() -> None:
     source = Path("line/static/profile_update.html").read_text(encoding="utf-8")
 
-    assert "線上申請尚未啟用" in source
-    assert "由專員人工協助" in source
+    assert "預覽異動" in source
+    assert "確認並送出申請" in source
     assert 'id="submitButton" disabled' in source
-    assert "/api/line/profile-change-requests" not in source
+    assert "/api/v1/line/client-profile/query" in source
+    assert "/api/v1/line/client-profile/preview" in source
+    assert "/api/v1/line/client-profile/apply" in source
     assert "line_user_id" not in source
     assert "liff.getProfile" not in source
-    assert "fetch(" not in source
+    assert "liff.getIDToken" in source

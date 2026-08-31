@@ -216,6 +216,31 @@ AI feedback 執行狀態（2026-08-26）：`approved-for-contract-first`。人�
 root facts、privacy、typed Query／record／receipt／readback 與 durable manual-ticket linkage；只有 formal
 contract closure gate 通過後才可實作，不得把 blanket approval 解讀成 local counter、假統計或假工單可發布。
 
+### 6.3 LINE Feedback正式契約（2026-08-31 人工裁決）
+
+Feedback由LINE Integration的bounded Feedback capability擁有，不另建Generic Feedback／Analytics Domain。
+subject固定綁定verified LINE actor／current binding、exact canonical response／interaction identity，以及存在時的
+response contract/catalog/rule revision；同一actor＋source只允許一筆terminal decision。第一版closed outcome只有
+`resolved | unresolved`：same outcome exact replay回原receipt，不同outcome固定conflict，不建立edit state machine。
+
+root保存最小identity、outcome、binding/version、business time、idempotency、command fingerprint、correlation與
+optional Customer Service ticket reference；不得保存raw prompt、provider payload、conversation dump、credential或
+為統計複製完整訊息。一般統計只回aggregate count/rate。`resolved`不建ticket；`unresolved`必須由Customer
+Service owner建立或exact-link正式ticket。Feedback root、receipt及ticket linkage由唯一outer UoW協調；若現行
+架構不能同transaction安全完成，改用committed durable intent並明示`ticket_link_pending`，不得回報假完整成功。
+正式surface至少包含feedback Query/readback、zero-write Preview、Apply、immutable receipt/readback與bounded
+aggregate statistics Query。此契約已解除owner／identity／privacy／receipt／ticket linkage Authority gap，但依
+Task 96 current priority尚未進入implementation順位。
+
+### 6.4 自然語言語意工具路由（2026-08-31 current contract）
+
+LINE輸入先匹配exact deterministic commands與security aliases；無命中才可進LLM semantic tool router。
+router只能從closed、versioned typed tool catalog選擇既有核准工具，例如`fixed_message`、`faq_answer`、
+`open_liff`、`query_case`、`query_schedule`、`open_customer_service`。正式結果只能由工具自己的owner contract
+產生，再進LINE durable delivery。LLM不得直接產生business answer、寫owner root、擴張catalog、繞過權限／
+fresh validation，或把模型文字當provider delivery success；unsupported、ambiguous或tool unavailable一律轉
+durable manual fallback。本段不授權AI provider、Phase 2 implementation或新的business tool。
+
 LINE 管理 surface 驗收狀態（2026-08-25）：`completed`。三方服務群組與事件使用 additive
 numbered Query，舊 `limit` API 保留；執行中的 FastAPI 更新至 current route 後，Chrome 實點群組頁
 顯示合法零筆狀態，未再出現 `resource_not_found`。發送任務明細已實點開啟並立即關閉，晚到結果未重開

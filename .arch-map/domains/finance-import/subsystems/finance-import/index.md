@@ -15,6 +15,9 @@
 - `subsystems/finance_import/` — Finance Import workflows
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — receipt/outbox/idempotency
 
+## Modules
+- `import006-owner-current-facts` — IMPORT-006 rebuild／exact correction successor lineage；path: `modules/import006-owner-current-facts.md`
+
 ## Verification routing
 - default_boundary: Subsystem
 - test_root: `tests/domains/finance-import/subsystems/finance-import/`

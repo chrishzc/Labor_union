@@ -216,6 +216,32 @@ def test_mobile_admin_query_routes_use_closed_typed_response_models() -> None:
         "CanonicalLineReviewResponse",
     ):
         assert f"response_model=BaseResponse[{model}]" in source
+    assert "response_model=BaseResponse[_SchedulingReviewPreviewView]" in source
+    assert "client_finance_impact" not in source
+    assert "payroll_impact" not in source
+    assert "orders_impact" not in source
+
+
+def test_mobile_scheduling_review_requires_current_session_fact_and_discards_late_forms() -> None:
+    route = (ROOT / "api" / "routes" / "line_mobile_admin.py").read_text(encoding="utf-8")
+    source = _source("mobile_admin.html")
+
+    assert "require_persisted_admin" in route
+    assert "get_line_identity_management_application" in route
+    assert "current_fact" in route
+    scheduling_auth = route.split("def _scheduling_mobile_actor", 1)[1].split(
+        "def _mobile_admin_actor", 1
+    )[0]
+    assert "line_identity_bindings" not in scheduling_auth
+    assert "ActorContext(f\"admin:{admin.admin_user_id}\"" not in scheduling_auth
+    assert "schedulingQuerySequence" in source
+    assert "schedulingPreviewSequence" in source
+    assert "schedulingFormRevision" in source
+    assert "schedulingCaseIdentity" in source
+    assert "sessionStorage.getItem(\"union_admin_session_token\")" in source
+    assert "headers.Authorization" in source
+    assert "querySequence !== schedulingQuerySequence" in source
+    assert "formRevision !== schedulingFormRevision" in source
 
 
 def test_mobile_admin_customer_and_review_pagination_use_server_metadata() -> None:
@@ -256,3 +282,28 @@ def test_mobile_admin_customer_and_review_pagination_use_server_metadata() -> No
     assert "renderPagination(root, pageData" in reviews
     assert 'reviewPageState.page = 1' in source
     assert 'reviewStatus").addEventListener("change", () =>' in source
+
+
+def test_mobile_scheduling_review_forwards_owner_query_preview_apply_and_readback() -> None:
+    source = _source("mobile_admin.html")
+    assert 'id="tabScheduling"' in source
+    assert 'id="schedulingPane"' in source
+    assert 'id="loadSchedule"' in source
+    assert "/api/v1/line/mobile-admin/scheduling-review/query" in source
+    assert "/api/v1/line/mobile-admin/scheduling-review/preview" in source
+    assert "/api/v1/line/mobile-admin/scheduling-review/apply" in source
+    preview = source.split("async function previewSchedulingReview", 1)[1].split(
+        "async function applySchedulingReview", 1
+    )[0]
+    apply = source.split("async function applySchedulingReview", 1)[1].split(
+        "async function loadReviews", 1
+    )[0]
+    assert "official_service_dates" in preview
+    assert "preview_fingerprint" in apply
+    assert "expected_order_version" in apply
+    assert "expected_scheduling_version" in apply
+    assert "expected_client_finance_version" in apply
+    assert "expected_payroll_version" in apply
+    assert "data.readback" in apply
+    assert "排班已保存，並已重新讀回目前正式排班" in apply
+    assert "innerHTML" not in source

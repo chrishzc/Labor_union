@@ -13,6 +13,7 @@
 - `line-identity-review-presentation` — LINE identity人工審核工作台的business-facing presentation；path: `modules/line-identity-review-presentation.md`
 - `notification-rules-presentation` — LINE通知規則維護的business-facing presentation；path: `modules/notification-rules-presentation.md`
 - `notification-failure-current-fact` — LINE-006 typed zero-write group readback、manual replay lineage與bounded recheck；path: `modules/notification-failure-current-fact.md`
+- `mobile-assignment-review` — persisted-human mobile transport轉接既有Scheduling Assignment Plan Q/P/A/readback；path: `modules/mobile-assignment-review.md`
 
 ## Dependencies
 - outbound: `scheduling | case-import | orders | other owning domains` — typed commands only。

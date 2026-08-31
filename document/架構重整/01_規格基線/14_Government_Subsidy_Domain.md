@@ -364,20 +364,27 @@ claim／ledger／allocation roots。
 | `GOVSUB-002` / `bank_fact_identity + batch_id` | batch 已唯一，但 partial receipt 或多個 item 候選使 allocation 無法由 approved outstanding 唯一決定 | `Preview／ApplyGovernmentSubsidyReceipt` 的 Manual Allocation intent；人員只提供 item identities 與整數 allocation | selected items 同 batch、不超過 outstanding，且 allocations 總額與 receipt amount 精確守恆 | `item_allocation_ambiguous`, `item_outstanding_exceeded`, `allocation_total_mismatch`, `owner_readback_incomplete` |
 | `GOVSUB-004` / `reversal_bank_fact_identity + source_receipt_id` | reversal target 不是唯一合法 receipt／allocation set，或 reversal amount 與可沖銷 remaining 不一致 | `Preview／ApplyGovernmentSubsidyReversal`，綁定 exact original receipt 與 selected original allocation identities | 只追加合法 reversal transaction／allocations；總額等於 reversal amount、不超過各原 allocation remaining，net allocation 與 batch status 一致 | `reversal_target_ambiguous`, `reversal_target_invalid`, `reversal_amount_exceeded`, `reversal_allocation_incomplete`, `owner_readback_incomplete` |
 
-`GOVSUB-003`、`GOVSUB-005`、`GOVSUB-007` 的 active root facts 與 completion oracle 已明確，但目前規格
-沒有唯一合法 mutation：`GOVSUB-003` 無法區分可重建 projection 與 contradictory immutable
-ledger／allocation roots 的修正路徑；`GOVSUB-005` 尚未裁決送件後 frozen claim 與後續 official
-service-fact drift 的 revision／correction command；`GOVSUB-007` 明定禁止部分入帳、自動新建
-退款單或抵扣，但尚無核准的 overpaid outgoing disposition command。這三碼因此維持
-`AUTHORITY_REQUIRED`；Query／retry／rebuild／receipt-only 都不得解除 current issue。
+2026-08-31 supersession：
+
+- `GOVSUB-003`：immutable roots內部有效且只有derived projection漂移時可deterministic rebuild；已有
+  typed reversal/correction語意時只沿用該existing append-only owner command；root structural conflict
+  fail closed，禁止generic compensation。
+- `GOVSUB-005`：frozen claim item immutable。未submit draft與已submit claim均以Government Subsidy-owned
+  versioned successor/correction lineage承接，exact綁original claim item及fresh Scheduling snapshot
+  identity/token/version；既有approval／receipt／allocation不得靜默搬移或改寫。
+- `GOVSUB-007`：合法退款部分核銷existing return obligation，actual超額部分建立Government-owned
+  versioned append-only recovery root；未來只由canonical incoming bank fact typed reconciliation核銷。
+  目前lawful payout workflow固定自行commit且拒絕`actual > remaining`，所以原子建立路徑維持
+  `BOUNDARY_REQUIRED_GOVSUB007_ATOMIC_EXCESS_UOW`；existing recovery readback/reconciliation可獨立完成，
+  不得用兩次commit、直接SQL、Client Finance抵扣或write-off冒充建立成功。
 
 ```yaml
 convergence:
   status: READY
-  ready_requirement_ids: [GOV-ANM-001, GOV-ANM-002, GOV-ANM-004, GOV-ANM-READBACK]
+  ready_requirement_ids: [GOV-ANM-001, GOV-ANM-002, GOV-ANM-003, GOV-ANM-004, GOV-ANM-005, GOV-ANM-007-READBACK, GOV-ANM-READBACK]
   acceptance_ids: [GOV-ANM-ACTIVE, GOV-ANM-OWNER-QPA, GOV-ANM-AMOUNT-CONSERVATION, GOV-ANM-TERMINAL, GOV-ANM-FAIL-CLOSED]
-  excluded_authority_required: [GOV-ANM-003, GOV-ANM-005, GOV-ANM-007]
-  blockers: []
+  excluded_authority_required: []
+  blockers: [BOUNDARY_REQUIRED_GOVSUB007_ATOMIC_EXCESS_UOW]
 ```
 
 ## 9. Legacy 遷移

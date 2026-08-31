@@ -11,14 +11,22 @@ from subsystems.case_import.pairing_current_facts import (
     CASE_PAIRING_ANOMALY_OWNER_DOMAIN,
     CASE_PAIRING_ANOMALY_OWNER_ROOT_TYPE,
     BeClassCounterpartCurrentFact,
+    CasePairingAcceptedMapping,
+    CasePairingAcceptedMappingReader,
+    CasePairingAcceptedLineage,
     CasePairingCurrentIssueCode,
     HcmCounterpartCurrentFact,
 )
 
 
 class MySqlCasePairingCurrentIssueAdapter:
-    def __init__(self, connection) -> None:
+    def __init__(
+        self,
+        connection,
+        lineage_reader: CasePairingAcceptedMappingReader | None = None,
+    ) -> None:
         self._connection = connection
+        self._lineage_reader = lineage_reader
 
     def read_owner_snapshot(self, scope: RecheckScope) -> OwnerSnapshot:
         _validate_scope(scope)
@@ -55,18 +63,56 @@ class MySqlCasePairingCurrentIssueAdapter:
         review = self._one(_REVIEW_PAIR_SQL, (review_item_id,))
         if review is None:
             return BeClassCounterpartCurrentFact(entity_kind, review_item_id, _missing(review_item_id), 0, False, 0, False)
-        source_key = _accepted_source_key(str(review["source_event_identity"]))
-        accepted = None if source_key is None else self._one(_ACCEPTED_MAPPING_SQL, (source_key,))
-        if accepted is not None and accepted["bound_case_no"] is not None:
-            count = int(accepted["hcm_count"])
-            consistent = count == 1
-            values = {"review": dict(review), "accepted": dict(accepted)}
+        mapping = self._read_accepted_mapping(review_item_id)
+        if mapping is not None:
+            lineage = mapping.lineage
+            exact_review = lineage.original_review_identity == review_item_id
+            different_source = (
+                lineage.accepted_source_event_identity
+                != str(review["source_event_identity"])
+            )
+            count = mapping.hcm_count
+            consistent = (
+                exact_review
+                and different_source
+                and count == 1
+                and mapping.bound_case_no is not None
+            )
+            values = {"review": dict(review), "accepted_mapping": _mapping_payload(mapping)}
+            if not consistent:
+                lineage = None
         else:
             issue_codes = _json_texts(review["issue_codes"])
             count = 2 if any(marker in code.lower() for code in issue_codes for marker in ("ambiguous", "duplicate", "dedup")) else 1
             consistent = False
-            values = {"review": dict(review), "accepted": None}
-        return BeClassCounterpartCurrentFact(entity_kind, review_item_id, fingerprint_payload(values).value, int(review["owner_version"]), True, count, consistent)
+            values = {"review": dict(review), "accepted_mapping": None}
+            lineage = None
+        return BeClassCounterpartCurrentFact(
+            entity_kind,
+            review_item_id,
+            fingerprint_payload(values).value,
+            int(review["owner_version"]),
+            True,
+            count,
+            consistent,
+            lineage,
+        )
+
+    def _read_accepted_mapping(
+        self, review_identity: str
+    ) -> CasePairingAcceptedMapping | None:
+        """Read explicit Case Import lineage supplied by the owning repository.
+
+        The current schema has no canonical relation for this read. In that
+        state the adapter deliberately leaves the pairing unresolved rather
+        than deriving a relation from an idempotency key or receipt name.
+        """
+        if self._lineage_reader is None:
+            return None
+        mapping = self._lineage_reader.read_accepted_mapping(review_identity)
+        if mapping is not None and not isinstance(mapping, CasePairingAcceptedMapping):
+            raise TypeError("case pairing accepted mapping readback is invalid")
+        return mapping
 
     def _one(self, sql, parameters):
         with self._connection.cursor() as cursor:
@@ -75,13 +121,6 @@ class MySqlCasePairingCurrentIssueAdapter:
         if row is not None and not isinstance(row, Mapping):
             raise TypeError("case pairing current-fact row is invalid")
         return row
-
-
-def _accepted_source_key(source_event_identity: str) -> str | None:
-    prefix = "beclass-workbook:"
-    if not source_event_identity.startswith(prefix):
-        return None
-    return "client-beclass-workbook:" + source_event_identity.removeprefix(prefix)
 
 
 def _json_texts(value) -> tuple[str, ...]:
@@ -106,7 +145,26 @@ def _missing(identity):
 
 
 def _payload(fact):
-    return {"type": type(fact).__name__, "token": fact.owner_snapshot_token, "version": fact.owner_version, "complete": fact.authoritative_complete, "active": fact.predicate_active}
+    payload = {"type": type(fact).__name__, "token": fact.owner_snapshot_token, "version": fact.owner_version, "complete": fact.authoritative_complete, "active": fact.predicate_active}
+    if fact.accepted_lineage is not None:
+        payload["accepted_lineage"] = _lineage_payload(fact.accepted_lineage)
+    return payload
+
+
+def _lineage_payload(lineage: CasePairingAcceptedLineage):
+    return {
+        "original_review_identity": lineage.original_review_identity,
+        "accepted_source_event_identity": lineage.accepted_source_event_identity,
+        "accepted_result_identity": lineage.accepted_result_identity,
+    }
+
+
+def _mapping_payload(mapping: CasePairingAcceptedMapping):
+    return {
+        "lineage": _lineage_payload(mapping.lineage),
+        "bound_case_no": mapping.bound_case_no,
+        "hcm_count": mapping.hcm_count,
+    }
 
 
 _HCM_PAIR_SQL = """
@@ -131,13 +189,4 @@ LEFT JOIN beclass_import_review_events event ON event.review_row_id=root.id
 WHERE root.review_identity=%s
 GROUP BY root.id,root.source_event_identity,root.issue_codes
 """
-_ACCEPTED_MAPPING_SQL = """
-SELECT beclass.id,beclass.bound_case_no,
-       (SELECT COUNT(*) FROM orders WHERE case_no=beclass.bound_case_no) AS hcm_count
-FROM admin_command_receipts receipt
-JOIN beclass_records beclass ON beclass.id=CAST(JSON_UNQUOTE(JSON_EXTRACT(receipt.result_snapshot,'$.root_id')) AS UNSIGNED)
-WHERE receipt.command_family='client_beclass_row_intake' AND receipt.idempotency_key=%s
-"""
-
-
 __all__ = ["MySqlCasePairingCurrentIssueAdapter"]

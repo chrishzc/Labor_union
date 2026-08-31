@@ -763,13 +763,12 @@ convergence:
   blockers: []
 ```
 
-上述`READY`代表behavioral contract已收斂，不代表current persistence與public Apply surface已足以完成
-所有lineage。Repository-local readback目前可證明synthetic counterpart與same-source accepted receipt；
-若原identity-conflict review由different-source identity的後續accepted source解除，terminal predicate
-必須具有exact immutable original-review → accepted-source lineage。現行privacy-safe review root不保存
-足以推導此關聯的case／query identity；不得以review resolved、tracking state、姓名、電話或其他模糊資料
-替代。新增或修改owner persistence／public Apply contract前維持
-`BOUNDARY_REQUIRED_CASE_PAIRING_LINEAGE`。
+上述`READY`代表behavioral contract已收斂。若原identity-conflict review由different-source identity的
+後續accepted source解除，Case Import Apply必須在同一owner UoW保存exact immutable
+`original_review_identity → accepted_source_event_identity → accepted_result_identity` lineage；不得以review
+resolved、tracking state、姓名、電話、case status、source filename或identity字串轉換推測。2026-08-31
+repository-local successor已依此契約完成，synthetic counterpart、same-source accepted receipt與different-source
+accepted lineage均由同一owner readback驗證；runtime DB engine仍須依current release gate另行驗收。
 
 #### HCM resubmission owner-command amendment（2026-08-30 人工裁決）
 

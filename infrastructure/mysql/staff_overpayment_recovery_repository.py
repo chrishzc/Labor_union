@@ -21,6 +21,7 @@ from subsystems.staff_payables.overpayment_recovery import (
     StaffOverpaymentRecoveryFacts, StaffOverpaymentRecoveryPreview,
     StaffOverpaymentRecoveryReceipt, StaffOverpaymentRecoverySelection,
     StoredStaffOverpaymentRecoveryReceipt,
+    StaffOverpaymentRecoveryCreationReceipt,
 )
 from subsystems.staff_payables.overpayment_recovery_matching import (
     StaffOverpaymentRecoveryMatchingFacts,
@@ -72,6 +73,92 @@ class MySqlStaffOverpaymentRecoveryRepository:
             payload.get("evidence_reference"),
         )
         return StoredStaffOverpaymentRecoveryReceipt(PreviewFingerprint(str(row["command_fingerprint"])), receipt)
+
+    # PAYOUT-002 creation is intentionally part of this Staff Payables owner
+    # repository and uses the additive exact-source root column.
+    def find_creation_receipt(self, key: IdempotencyKey):
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "SELECT command_fingerprint,result_snapshot "
+                "FROM staff_overpayment_recovery_apply_receipts "
+                "WHERE idempotency_key=%s FOR UPDATE",
+                (key.value,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        payload = _object(row["result_snapshot"])
+        if payload.get("command_type") != "staff-overpayment-recovery.create-from-payroll.v1":
+            return None
+        return StaffOverpaymentRecoveryCreationReceipt(
+            str(payload["recovery_identity"]),
+            str(payload["payroll_correction_identity"]),
+            int(payload["staff_id"]),
+            int(payload["original_amount_ntd"]),
+            int(payload["recovery_version"]),
+            int(payload["staff_payables_version"]),
+            PreviewFingerprint(str(row["command_fingerprint"])),
+        )
+
+    def load_staff_payables_version(self, staff_id: int, *, for_update: bool) -> int:
+        suffix = " FOR UPDATE" if for_update else ""
+        with _cursor(self._connection) as cursor:
+            return _account_version(cursor, staff_id, suffix)
+
+    def persist_creation(self, request, receipt) -> None:
+        source = request.source
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "INSERT INTO staff_overpayment_recoveries "
+                "(recovery_identity,payroll_correction_identity,staff_id,"
+                "original_amount_ntd,remaining_amount_ntd,source_bank_fact_identities,"
+                "source_payout_event_ids,source_obligation_identities,actor,reason) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    receipt.recovery_identity,
+                    source.correction_identity,
+                    source.staff_id,
+                    receipt.original_amount_ntd,
+                    receipt.original_amount_ntd,
+                    "[]",
+                    "[]",
+                    "[]",
+                    request.actor.actor_id,
+                    request.reason,
+                ),
+            )
+            cursor.execute(
+                "UPDATE staff_payable_accounts SET aggregate_version=%s "
+                "WHERE staff_id=%s AND aggregate_version=%s",
+                (
+                    receipt.staff_payables_version,
+                    source.staff_id,
+                    receipt.staff_payables_version - 1,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("staff_overpayment_recovery_stale")
+            snapshot = {
+                "command_type": "staff-overpayment-recovery.create-from-payroll.v1",
+                "recovery_identity": receipt.recovery_identity,
+                "payroll_correction_identity": receipt.payroll_correction_identity,
+                "staff_id": receipt.staff_id,
+                "original_amount_ntd": receipt.original_amount_ntd,
+                "recovery_version": receipt.recovery_version,
+                "staff_payables_version": receipt.staff_payables_version,
+            }
+            cursor.execute(
+                "INSERT INTO staff_overpayment_recovery_apply_receipts "
+                "(idempotency_key,command_fingerprint,preview_fingerprint,"
+                "recovery_identity,result_snapshot) VALUES (%s,%s,%s,%s,%s)",
+                (
+                    request.idempotency_key.value,
+                    receipt.command_fingerprint.value,
+                    receipt.command_fingerprint.value,
+                    receipt.recovery_identity,
+                    json.dumps(snapshot, sort_keys=True),
+                ),
+            )
 
     def load_matching(self, selection, *, for_update: bool):
         suffix = " FOR UPDATE" if for_update else ""
