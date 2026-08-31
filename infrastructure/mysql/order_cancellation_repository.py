@@ -34,7 +34,7 @@ from subsystems.orders.terms_workflow import CommandClaimState
 from .client_finance_terms_writer import persist_client_finance_terms_impact
 from .order_cancellation_read_model import (
     cancellation_preflight_staff_ids,
-    list_active_caregiver_options,
+    list_caregiver_options,
     load_cancellation_locked_facts,
     load_cancellation_preview_facts,
 )
@@ -54,9 +54,9 @@ class MySqlOrderCancellationRepository:
                 cursor, case_no, requested_staff_ids
             )
 
-    def list_active_caregiver_options(self):
+    def list_caregiver_options(self, case_no):
         with self._connection.cursor() as cursor:
-            return list_active_caregiver_options(cursor)
+            return list_caregiver_options(cursor, case_no)
 
     def preflight_impacted_staff_ids(self, case_no, requested_staff_ids):
         with self._connection.cursor() as cursor:
