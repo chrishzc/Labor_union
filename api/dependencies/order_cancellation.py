@@ -23,8 +23,9 @@ class OrderCancellationQueryRepository(
     CancellationWorkflowRepository,
     Protocol,
 ):
-    def list_active_caregiver_options(
+    def list_caregiver_options(
         self,
+        case_no: str,
     ) -> tuple[Mapping[str, object], ...]: ...
 
 
@@ -35,7 +36,7 @@ class OrderCancellationApplication:
 
     def query(self, case_no: str):
         facts = self.repository.load_for_preview(case_no, ())
-        options = self.repository.list_active_caregiver_options()
+        options = self.repository.list_caregiver_options(case_no)
         return OrderCancellationQueryResult(facts, options)
 
     def preview(self, case_no, confirmed_service_days):
