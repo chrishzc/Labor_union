@@ -1,0 +1,21 @@
+-- File: 1022_task96_retired_anomaly_owner_contracts.sql
+-- Classification: migration-only historical evidence; excluded from fresh bootstrap and current preserve-data execution.
+-- Purpose: preserve provenance for the mixed Task 96 owner-recovery DDL retired by the 2026-08-31 runtime-anomaly correction.
+-- Data effect: none. This artifact intentionally contains no executable DDL.
+-- Prior mixed artifact: db/schema_parts/1021_task96_owner_contract_successors.sql
+-- Prior artifact SHA256: a1da598b5b242601b16527a5eae11c1d775fdabeb2e26ec2c03e51ab3228f99e
+--
+-- Retired persistence formerly carried by the mixed artifact:
+--   case_import_pairing_accepted_lineages
+--   finance_import_source_correction_lineages
+--   payroll_late_obligation_dispositions
+--   staff_overpayment_recoveries.payroll_correction_identity
+--   government_subsidy_integrity_rebuild_events
+--   government_subsidy_claim_correction_lineages
+--   government_subsidy_recoveries
+--   government_subsidy_recovery_events
+--   government_subsidy_anomaly_apply_receipts
+-- and their anomaly/remediation-specific immutable triggers.
+--
+-- Exact historical DDL remains recoverable from Git history at the prior artifact SHA / baseline commit.
+-- It must not be reintroduced into active_bootstrap or preserve-data migration execution without a new explicit owner decision.
