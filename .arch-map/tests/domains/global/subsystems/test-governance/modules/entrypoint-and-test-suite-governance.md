@@ -6,5 +6,6 @@ test_root: tests/domains/global/subsystems/test-governance/modules/entrypoint-an
 
 # Owned verification
 - `test_entrypoint_review_queue.py` — current discovery、exact mapping 與 terminal disposition queue。
+- `test_task97_commit_dispositions.py` — input-bound source revision、stable commit identity 與 exact semantic disposition。
 - `test_task97_entry_governance_artifact.py` — tracked entry-governance evidence fresh-clone reproducibility。
 - `test_task97_production_script_governance.py` — executable script inventory、classification 與 source digest freshness。

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 import subprocess
 
@@ -110,13 +111,14 @@ def test_task97_commit_dispositions_do_not_blanket_classify_by_path() -> None:
 
 
 def test_task97_commit_disposition_source_revision_is_input_bound_and_idempotent() -> None:
-    expected = subprocess.run(
-        ["git", "log", "-1", "--format=%H", "--", *SOURCE_REVISION_INPUTS],
+    tracked_inputs = subprocess.run(
+        ["git", "ls-files", "--stage", "--", *SOURCE_REVISION_INPUTS],
         cwd=REPOSITORY_ROOT,
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
+    expected = sha256(tracked_inputs.encode("utf-8")).hexdigest()
 
     first = build_artifact()
     second = build_artifact()

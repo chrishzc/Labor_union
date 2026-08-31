@@ -12,6 +12,7 @@ entrypoint 必須在既有 canonical mapping owner 完整分類後才可更新 t
 ## Implementation
 - primary: `scripts/generate_entrypoint_review_queue.py`
 - generators:
+  - `scripts/generate_task97_commit_dispositions.py`
   - `scripts/generate_task97_entry_governance.py`
   - `scripts/generate_task97_production_script_inventory.py`
 - audit: `scripts/audit_test_suite.py`

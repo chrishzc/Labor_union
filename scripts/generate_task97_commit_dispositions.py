@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import ast
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -116,6 +116,7 @@ APPLICATION_OWNED_COMMIT_SYMBOLS = {
 class CommitLocation:
     line: int
     receiver: str
+    stable_fingerprint: str
     has_uow_context: bool
     has_connection_lifecycle: bool
     has_worker_signal: bool
@@ -141,19 +142,42 @@ def _git_revision() -> str:
             "Task 97 commit dispositions require clean, committed scanner inputs"
         )
     result = subprocess.run(
-        ["git", "log", "-1", "--format=%H", "--", *SOURCE_REVISION_INPUTS],
+        ["git", "ls-files", "--stage", "--", *SOURCE_REVISION_INPUTS],
         cwd=REPOSITORY_ROOT,
         check=True,
         capture_output=True,
         text=True,
     )
-    revision = result.stdout.strip()
-    if not revision:
+    tracked_inputs = result.stdout.strip()
+    if not tracked_inputs:
         raise RuntimeError("Task 97 scanner inputs have no committed source revision")
-    return revision
+    return sha256(tracked_inputs.encode("utf-8")).hexdigest()
+
+
+def _stable_ast_payload(value: object) -> object:
+    if isinstance(value, ast.AST):
+        return [
+            value.__class__.__name__,
+            [
+                [field, _stable_ast_payload(getattr(value, field))]
+                for field in value._fields
+            ],
+        ]
+    if isinstance(value, list):
+        return [_stable_ast_payload(item) for item in value]
+    return value
 
 
 def _call_fingerprint(call: ast.Call) -> str:
+    payload = json.dumps(
+        _stable_ast_payload(call),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _runtime_call_fingerprint(call: ast.Call) -> str:
     return sha256(ast.dump(call, include_attributes=False).encode("utf-8")).hexdigest()[:16]
 
 
@@ -200,11 +224,12 @@ class _CommitLocator(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         if isinstance(node.func, ast.Attribute) and node.func.attr == "commit":
             symbol = ".".join(self.symbol_stack) or "<module>"
-            key = (symbol, _call_fingerprint(node))
+            key = (symbol, _runtime_call_fingerprint(node))
             self.occurrences[key] += 1
             self.locations[(symbol, key[1], self.occurrences[key])] = CommitLocation(
                 node.lineno,
                 _receiver(node),
+                _call_fingerprint(node),
                 *(self.context_stack[-1] if self.context_stack else (False, False, False)),
             )
         self.generic_visit(node)
@@ -492,20 +517,27 @@ def _zero_reference_oracle(finding: WriterFinding, classification: str) -> str:
 
 def build_artifact() -> dict[str, Any]:
     source_revision = _git_revision()
-    findings = tuple(
+    runtime_findings = tuple(
         finding
         for finding in scan_production_writers(REPOSITORY_ROOT, ROOTS)
         if finding.operation == "COMMIT"
     )
     by_path: dict[str, dict[tuple[str, str, int], CommitLocation]] = {
-        path: _locations(path) for path in {finding.relative_path for finding in findings}
+        path: _locations(path) for path in {finding.relative_path for finding in runtime_findings}
     }
-    entries: list[dict[str, Any]] = []
-    for finding in findings:
-        locations = by_path[finding.relative_path]
-        location = locations.get((finding.symbol, finding.fingerprint, finding.occurrence))
+    resolved_findings: list[tuple[WriterFinding, CommitLocation]] = []
+    for finding in runtime_findings:
+        location = by_path[finding.relative_path].get(
+            (finding.symbol, finding.fingerprint, finding.occurrence)
+        )
         if location is None:
             raise RuntimeError(f"commit location not found for {finding.identity}")
+        resolved_findings.append(
+            (replace(finding, fingerprint=location.stable_fingerprint), location)
+        )
+    findings = tuple(finding for finding, _ in resolved_findings)
+    entries: list[dict[str, Any]] = []
+    for finding, location in resolved_findings:
         owner, layer = _semantic_owner(finding.relative_path, finding.symbol)
         classification, basis, remediation, blocker = _classify(finding, location)
         assert classification in CLASSIFICATIONS
