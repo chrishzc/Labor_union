@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import date
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -95,6 +94,7 @@ def _is_generic_placeholder(record: dict[str, object]) -> bool:
 
 def build_artifact() -> dict[str, object]:
     queue_bytes = QUEUE.read_bytes()
+    prior = json.loads(OUTPUT.read_text(encoding="utf-8")) if OUTPUT.exists() else {}
     entries = [
         json.loads(line)
         for line in queue_bytes.decode("utf-8").splitlines()
@@ -106,7 +106,7 @@ def build_artifact() -> dict[str, object]:
     return {
         "contract": "task97-entry-governance/v1",
         "artifact_status": "current",
-        "generated_on": date.today().isoformat(),
+        "generated_on": prior.get("generated_on", "not evidenced"),
         "source": {
             "path": QUEUE.relative_to(ROOT).as_posix(),
             "sha256": sha256(queue_bytes).hexdigest(),
