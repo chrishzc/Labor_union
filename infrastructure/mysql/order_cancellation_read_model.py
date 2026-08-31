@@ -102,8 +102,8 @@ def load_cancellation_locked_facts(
     historical_origin = _historical_cancellation_origin(cursor, case_no)
     _lock_staff(
         cursor,
-        case_no,
         preflight_staff_ids,
+        case_no=case_no,
         historical_origin=historical_origin,
     )
     return _assemble_cancellation_facts(
@@ -242,14 +242,16 @@ def _cancellation_assignment(value):
 
 def _lock_staff(
     cursor,
-    case_no,
     staff_ids,
     *,
-    historical_origin,
+    case_no=None,
+    historical_origin=False,
 ) -> None:
     locked_ids = tuple(lock_staff_occupancy_mutex(cursor, list(staff_ids)))
     if locked_ids != staff_ids:
         raise ValueError("scheduling_staff_not_found")
+    if historical_origin and not isinstance(case_no, str):
+        raise ValueError("historical cancellation case number is required")
     _require_selectable_staff(
         cursor,
         case_no,
