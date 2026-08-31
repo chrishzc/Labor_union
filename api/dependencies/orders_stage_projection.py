@@ -7,11 +7,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from infrastructure.mysql.historical_orders_stage_projection_repository import (
+    MySqlHistoricalAwareOrdersStageProjectionRepository,
+)
 from infrastructure.mysql.historical_stage_baseline_repository import (
     MySqlHistoricalStageBaselineRepository,
 )
 from infrastructure.mysql.mysql_adapter import get_connection
-from infrastructure.mysql.orders_stage_projection_repository import MySqlOrdersStageProjectionRepository
 from shared_kernel.clock import SystemBusinessClock
 from subsystems.orders.historical_stage_baseline_overlay import (
     HistoricalStageBaselineOverlayService,
@@ -32,7 +34,7 @@ def get_orders_stage_projection_application():
     connection = get_connection()
     try:
         base = OrderStageProjectionQueryService(
-            MySqlOrdersStageProjectionRepository(connection),
+            MySqlHistoricalAwareOrdersStageProjectionRepository(connection),
             SystemBusinessClock(),
         )
         yield OrdersStageProjectionApplication(
