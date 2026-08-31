@@ -88,6 +88,18 @@ def test_incomplete_owner_interpretation_is_closed_and_cannot_authorize_removal(
     assert readback.predicate_active is True
 
 
+def test_incomplete_empty_readback_remains_active_and_cannot_look_resolved() -> None:
+    readback = _evaluate(complete=False)
+
+    assert readback.authoritative_complete is False
+    assert readback.applicable_source_count == 0
+    assert readback.unresolved_source_count == 0
+    assert readback.unresolved_reason_codes == (
+        LineNotificationUnresolvedReason.OWNER_READBACK_INCOMPLETE,
+    )
+    assert readback.predicate_active is True
+
+
 class _Cursor:
     def __init__(self, *, one_rows=(), all_rows=()):
         self.one_rows = list(one_rows)

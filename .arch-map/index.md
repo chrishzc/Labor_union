@@ -4,6 +4,7 @@
 為工會地端行政系統提供 current architecture 導航：React 管理端與 LINE／檔案等入口經 FastAPI／typed adapters 進入 Subsystem Query／Preview／Apply workflow，由 Domain 擁有根事實與業務規則，Infrastructure 實作 MySQL／外部 provider ports；mutation 受 Global outer Unit of Work、receipt、outbox、idempotency 與 typed error 契約約束。
 
 ## Domains
+- `global` — 跨 Domain shared contracts、migration／release 與 runtime governance；path: `domains/global/index.md`
 - `orders` — 訂單條款與 lifecycle；path: `domains/orders/index.md`
 - `scheduling` — assignment、服務日、檔期、請假／代班與 matching；path: `domains/scheduling/index.md`
 - `payroll` — assignment-owned 薪資義務與調整；path: `domains/payroll/index.md`

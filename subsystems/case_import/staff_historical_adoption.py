@@ -82,9 +82,7 @@ def record_staff_adoption_outcome(
     source_identity = f"staff-workbook:{source_content_digest}:row:{source_row}"
     source_fingerprint = fingerprint_payload(historical_record).value
     key = f"staff-historical-adoption:{source_content_digest}:row:{source_row}"
-    command_fingerprint = fingerprint_payload(
-        {"source_identity": source_identity, "source_fingerprint": source_fingerprint}
-    ).value
+    command_fingerprint = _command_fingerprint(source_identity, source_fingerprint)
     if not repository.claim(key, command_fingerprint, source_identity):
         receipt = repository.find_receipt(key)
         if receipt is None or str(receipt["command_fingerprint"]) != command_fingerprint:
@@ -142,9 +140,14 @@ def adopt_existing_staff(
     with uow_factory() as unit_of_work:
         receipt = repository.find_receipt(key)
         if receipt is not None:
-            if str(receipt["command_fingerprint"]) != command_fingerprint:
-                raise RuntimeError("staff_historical_adoption_idempotency_conflict")
             stored_outcome = str(receipt["outcome"])
+            if (
+                str(receipt["command_fingerprint"]) != command_fingerprint
+                and not _matches_created_row_replay(
+                    receipt, source_identity, historical_record
+                )
+            ):
+                raise RuntimeError("staff_historical_adoption_idempotency_conflict")
             if stored_outcome in {"created", "adopted_existing"}:
                 _require_matching_replay_root(repository, receipt, historical_record)
             unit_of_work.commit()
@@ -236,6 +239,21 @@ def adopt_existing_staff(
         tuple(sorted(merge.patch)),
         tuple(sorted(set(merge.conflict_fields + tuple(relation_conflicts)))),
     )
+
+
+def _matches_created_row_replay(receipt, source_identity: str, historical_record) -> bool:
+    if str(receipt.get("outcome")) != "created":
+        return False
+    historical_fingerprint = fingerprint_payload(historical_record).value
+    return str(receipt.get("command_fingerprint")) == _command_fingerprint(
+        source_identity, historical_fingerprint
+    )
+
+
+def _command_fingerprint(source_identity: str, source_fingerprint: str) -> str:
+    return fingerprint_payload(
+        {"source_identity": source_identity, "source_fingerprint": source_fingerprint}
+    ).value
 
 
 def _require_matching_replay_root(repository, receipt, historical_record) -> None:

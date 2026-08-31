@@ -103,7 +103,7 @@ def _check_connected_identity(arguments, database: str) -> None:
     _require_configured_host(arguments.host)
     connection = _connect(arguments)
     try:
-        with connection.cursor() as cursor:
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
             cursor.execute("SELECT DATABASE() AS database_name, @@hostname AS server")
             identity = cursor.fetchone()
         if identity and identity.get("database_name") not in (None, database):

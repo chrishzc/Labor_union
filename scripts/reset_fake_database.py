@@ -1,10 +1,10 @@
-"""Canonical, test-only disposable MySQL schema reset runner.
+"""Canonical local MySQL schema reset runner.
 
-The module intentionally has a narrow destructive surface.  It never chooses
-the configured database implicitly: callers must name a ``lu_test_*`` target,
-record a dry-run plan, provide a target-matching backup, and confirm the exact
-apply command.  Dry-run, verify, and replay paths do not open a database
-connection.
+The module keeps two explicit destructive surfaces: disposable ``lu_test_*``
+targets require a target-matching backup, while the operator-only ``union_db``
+route requires an exact ``RESET`` discard confirmation.  Both routes require
+a prior dry-run plan and a terminal receipt.  Dry-run, verify, and replay paths
+do not open a database connection.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ class FakeDatabaseResetError(RuntimeError):
 
 
 _TARGET_PATTERN = re.compile(r"lu_test_[a-z0-9_]+\Z")
+_OPERATOR_TARGET = "union_db"
 _LOCAL_PROFILES = frozenset(
     {"development", "dev", "local", "test", "testing", "validation"}
 )
@@ -58,9 +59,10 @@ def validate_target(
     requested_host = str(host if host is not None else configured_host).strip()
     if not target:
         raise FakeDatabaseResetError("explicit --target-database is required")
-    if not _TARGET_PATTERN.fullmatch(target):
+    if target != _OPERATOR_TARGET and not _TARGET_PATTERN.fullmatch(target):
         raise FakeDatabaseResetError(
-            "target database must be an explicitly named lu_test_* database"
+            "target database must be union_db or an explicitly named "
+            "lu_test_* database"
         )
     if configured_database != target:
         raise FakeDatabaseResetError(
@@ -98,10 +100,14 @@ def _canonical_bootstrap_contract(
 
 
 def _base_schema_for(path: Path, database: str) -> str:
-    """Render the canonical base schema for one validated disposable name."""
+    """Render the canonical base schema for one validated local target."""
     source = path.read_text(encoding="utf-8")
+    if database == _OPERATOR_TARGET:
+        return source
     if not _TARGET_PATTERN.fullmatch(database):
-        raise FakeDatabaseResetError("base schema requires a disposable lu_test_* target")
+        raise FakeDatabaseResetError(
+            "base schema requires union_db or a disposable lu_test_* target"
+        )
     return source.replace("union_db", database)
 
 
@@ -244,7 +250,7 @@ def _check_connected_identity(
 ) -> dict[str, object]:
     connection = connection_factory(**_server_config(config))
     try:
-        with connection.cursor() as cursor:
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
             cursor.execute(
                 "SELECT DATABASE() AS database_name, @@hostname AS server, @@port AS port"
             )
@@ -354,12 +360,21 @@ def reset(
     receipt_path: str | Path | None = None,
     verify: bool = False,
     replay: bool = False,
+    operator_reset: bool = False,
     config: dict[str, object] | None = None,
     environment: dict[str, str] | None = None,
     connection_factory: Callable[..., Any] = pymysql.connect,
 ) -> dict[str, object]:
     config = DB_CONFIG if config is None else config
     target = validate_target(config, environment, target_database)
+    if operator_reset and target != _OPERATOR_TARGET:
+        raise FakeDatabaseResetError(
+            "operator reset is restricted to union_db"
+        )
+    if target == _OPERATOR_TARGET and not operator_reset:
+        raise FakeDatabaseResetError(
+            "union_db requires the explicit operator reset route"
+        )
     assembly, manifest = _canonical_bootstrap_contract()
     plan = _plan_payload(assembly, manifest, target, config)
     if verify or replay:
@@ -373,23 +388,36 @@ def reset(
             _write_json(resolved, plan)
             result["plan_receipt"] = str(resolved)
         return result
-    if confirm_database != target:
-        if confirm_database is not None:
-            raise FakeDatabaseResetError("apply requires exact --confirm-database target")
-    if confirm_apply is not None and confirm_apply != f"APPLY {target}":
+    expected_confirmation = "RESET" if operator_reset else f"APPLY {target}"
+    if confirm_database != target and confirm_database is not None:
         raise FakeDatabaseResetError(
-            f"--confirm-apply must exactly equal 'APPLY {target}'"
+            "apply requires exact --confirm-database target"
+        )
+    if confirm_apply is not None and confirm_apply != expected_confirmation:
+        raise FakeDatabaseResetError(
+            f"--confirm-apply must exactly equal '{expected_confirmation}'"
         )
     if confirm_apply is None and confirm_database is None:
         raise FakeDatabaseResetError(
-            f"apply requires exact confirmation 'APPLY {target}'"
+            f"apply requires exact confirmation '{expected_confirmation}'"
+        )
+    if operator_reset and confirm_apply != "RESET":
+        raise FakeDatabaseResetError(
+            "operator reset requires exact RESET confirmation"
         )
     if not receipt_path:
         raise FakeDatabaseResetError(
             "--apply requires --receipt-path for terminal receipt"
         )
     _read_prior_plan(plan_receipt, plan)
-    backup = _validate_backup(backup_receipt, target)
+    backup = (
+        {
+            "policy": "explicit_discard_confirmed",
+            "target_database": target,
+        }
+        if operator_reset
+        else _validate_backup(backup_receipt, target)
+    )
     identity = _check_connected_identity(config, target, connection_factory)
     report = rebuild_schema(
         assembly,
@@ -417,6 +445,7 @@ def reset(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target-database", required=True)
+    parser.add_argument("--operator-reset", action="store_true")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Plan only (the default).")
     parser.add_argument("--verify", action="store_true")
@@ -442,6 +471,7 @@ def main(argv: list[str] | None = None) -> int:
             receipt_path=args.receipt_path,
             verify=args.verify,
             replay=args.replay,
+            operator_reset=args.operator_reset,
         )
     except (FakeDatabaseResetError, OSError, ValueError) as exc:
         print(

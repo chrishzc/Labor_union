@@ -137,6 +137,7 @@ def evaluate_line_notification_failure_current_fact(
     if not complete:
         unresolved.append(LineNotificationUnresolvedReason.OWNER_READBACK_INCOMPLETE)
     reasons = tuple(sorted(set(unresolved), key=lambda item: item.value))
+    predicate_active = unresolved_count > 0 or not complete
     payload = {
         "case_no": query.case_no,
         "notification_reason": query.notification_reason.value,
@@ -145,7 +146,7 @@ def evaluate_line_notification_failure_current_fact(
         "applicable_source_count": len(applicable),
         "unresolved_source_count": unresolved_count,
         "unresolved_reason_codes": [item.value for item in reasons],
-        "predicate_active": unresolved_count > 0,
+        "predicate_active": predicate_active,
         "source_state": [
             {
                 "source_event_id": source.source_event_id,
@@ -173,7 +174,7 @@ def evaluate_line_notification_failure_current_fact(
         applicable_source_count=len(applicable),
         unresolved_source_count=unresolved_count,
         unresolved_reason_codes=reasons,
-        predicate_active=unresolved_count > 0,
+        predicate_active=predicate_active,
     )
 
 
