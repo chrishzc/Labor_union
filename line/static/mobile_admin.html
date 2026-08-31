@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
 File: mobile_admin.html
-Description: 提供 LINE 工會人員手機端客服與月嫂審核，清單採伺服器編號分頁。
+Description: 提供 LINE 工會人員手機端客服、排班審核與月嫂審核，清單採伺服器編號分頁。
 -->
 <html lang="zh-Hant-TW">
 <head>
@@ -45,6 +45,7 @@ Description: 提供 LINE 工會人員手機端客服與月嫂審核，清單採�
   <p class="caption" id="subtitle">正在確認您的 LINE 工會人員身分。</p>
   <div class="tabs">
     <button class="tab" id="tabCustomer" type="button">客服中心</button>
+    <button class="tab" id="tabScheduling" type="button">排班審核</button>
     <button class="tab" id="tabReview" type="button">月嫂驗證</button>
   </div>
   <div id="status" class="info">載入中...</div>
@@ -71,6 +72,13 @@ Description: 提供 LINE 工會人員手機端客服與月嫂審核，清單採�
     </div>
     <div id="reviews"></div>
   </section>
+  <section id="schedulingPane" class="hidden">
+    <div class="toolbar">
+      <input id="scheduleCaseNo" type="text" maxlength="50" placeholder="輸入案件編號，例如 115000008">
+      <button type="button" id="loadSchedule">查詢排班</button>
+    </div>
+    <div id="scheduleReview"></div>
+  </section>
 </main>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
@@ -78,6 +86,12 @@ let idToken = "";
 let target = "customer_service";
 const reviewPreviews = new Map();
 const replyPreviews = new Map();
+let schedulingQuery = null;
+let schedulingPreview = null;
+let schedulingQuerySequence = 0;
+let schedulingPreviewSequence = 0;
+let schedulingFormRevision = 0;
+let schedulingCaseIdentity = "";
 const ticketPageState = {page: 1, pageSize: 0, total: 0};
 const reviewPageState = {page: 1, pageSize: 50, total: 0};
 let ticketQuerySequence = 0;
@@ -85,6 +99,7 @@ let reviewQuerySequence = 0;
 const statusBox = document.getElementById("status");
 const panes = {
   customer_service: document.getElementById("customerPane"),
+  scheduling_review: document.getElementById("schedulingPane"),
   staff_review: document.getElementById("reviewPane"),
 };
 
@@ -99,6 +114,23 @@ function targetFromUrl() {
   const params = new URLSearchParams(location.search);
   const state = liffStateParams();
   return params.get("target") || state.get("target") || "customer_service";
+}
+
+function targetForIdentityRedirect() {
+  const requested = targetFromUrl();
+  // Keep the existing staff-review redirect contract while allowing the Scheduling tab.
+  return requested === "scheduling_review"
+    ? "scheduling_review"
+    : (targetFromUrl() === "staff_review" ? "staff_review" : "customer_service");
+}
+
+function adminSessionToken() {
+  return sessionStorage.getItem("union_admin_session_token") || "";
+}
+
+function redirectToAdminLogin() {
+  // Closed return identity only.  No token or caller-provided URL crosses navigation.
+  location.assign("/#login?return_target=scheduling_review");
 }
 
 function showStatus(message, isError=false) {
@@ -183,19 +215,26 @@ function safeErrorCode(result) {
 function reauthenticateLine() {
   try { liff.logout(); } catch (_) {}
   const redirect = new URL("/line-identity", location.origin);
-  redirect.searchParams.set("target", targetFromUrl() === "staff_review" ? "staff_review" : "customer_service");
+  redirect.searchParams.set("target", targetForIdentityRedirect());
   liff.login({redirectUri: redirect.toString()});
 }
 
 async function postJson(url, body) {
+  const sessionToken = adminSessionToken();
+  const headers = {"Content-Type":"application/json"};
+  if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
   const response = await fetch(url, {
     method: "POST",
-    headers: {"Content-Type":"application/json"},
+    headers,
     body: JSON.stringify({...body, line_id_token: idToken}),
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const code = safeErrorCode(result);
+    if (target === "scheduling_review" && response.status === 401 && !code.startsWith("liff_")) {
+      redirectToAdminLogin();
+      throw new Error("內部使用者登入已失效，正在返回既有登入流程。");
+    }
     document.getElementById("reauthenticate").classList.toggle("hidden", !code.startsWith("liff_"));
     throw new Error(safeErrorMessage(result, "操作失敗"));
   }
@@ -204,7 +243,7 @@ async function postJson(url, body) {
 
 async function init() {
   try {
-    target = targetFromUrl() === "staff_review" ? "staff_review" : "customer_service";
+    target = ["staff_review", "scheduling_review"].includes(targetFromUrl()) ? targetFromUrl() : "customer_service";
     const configResponse = await fetch("/api/v1/line/identity/runtime-config");
     const configResult = await configResponse.json();
     const liffId = configResult.data?.liff_id;
@@ -212,13 +251,22 @@ async function init() {
     await liff.init({liffId});
     if (!liff.isLoggedIn()) {
       const redirect = new URL("/line-identity", location.origin);
-      redirect.searchParams.set("target", targetFromUrl() === "staff_review" ? "staff_review" : "customer_service");
+      redirect.searchParams.set("target", ["staff_review", "scheduling_review"].includes(targetFromUrl()) ? targetFromUrl() : "customer_service");
       liff.login({redirectUri: redirect.toString()});
       return;
     }
     idToken = liff.getIDToken() || "";
     if (!idToken) throw new Error("無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。");
     const profile = await postJson("/api/v1/line/mobile-admin/profile", {});
+    if (target === "scheduling_review") {
+      if (!adminSessionToken()) {
+        redirectToAdminLogin();
+        return;
+      }
+      document.getElementById("subtitle").textContent = "排班審核需要已登入的內部使用者 Session。";
+      switchPane(target);
+      return;
+    }
     document.getElementById("subtitle").textContent = `登入人員：${profile.display_name}`;
     switchPane(target);
   } catch (error) {
@@ -229,11 +277,14 @@ async function init() {
 function switchPane(next) {
   target = next;
   document.getElementById("tabCustomer").classList.toggle("active", target === "customer_service");
+  document.getElementById("tabScheduling").classList.toggle("active", target === "scheduling_review");
   document.getElementById("tabReview").classList.toggle("active", target === "staff_review");
   panes.customer_service.classList.toggle("hidden", target !== "customer_service");
+  panes.scheduling_review.classList.toggle("hidden", target !== "scheduling_review");
   panes.staff_review.classList.toggle("hidden", target !== "staff_review");
-  showStatus(target === "customer_service" ? "客服案件列表" : "月嫂驗證待確認申請");
+  showStatus(target === "customer_service" ? "客服案件列表" : target === "scheduling_review" ? "排班審核" : "月嫂驗證待確認申請");
   if (target === "customer_service") loadTickets();
+  else if (target === "scheduling_review") renderSchedulingReview();
   else loadReviews();
 }
 
@@ -454,6 +505,253 @@ async function applyTicketReply(ticket) {
   } catch (error) { showStatus(error.message, true); }
 }
 
+function requireSchedulingQuery(data, caseNo) {
+  if (!data || data.case_no !== caseNo
+      || !Number.isInteger(data.order_version) || data.order_version < 0
+      || !Number.isInteger(data.scheduling_version) || data.scheduling_version < 0
+      || !Number.isInteger(data.client_finance_version) || data.client_finance_version < 0
+      || !Number.isInteger(data.payroll_version) || data.payroll_version < 0
+      || !Array.isArray(data.assignments)) {
+    throw new Error("排班查詢格式不完整，未顯示不完整資料。");
+  }
+  return data;
+}
+
+function schedulingSegmentsFromForm() {
+  return [...document.querySelectorAll("[data-scheduling-segment]")].map((root) => ({
+    staff_id: Number(root.querySelector("[data-field='staff_id']").value),
+    assigned_start_date: root.querySelector("[data-field='assigned_start_date']").value,
+    assigned_end_date: root.querySelector("[data-field='assigned_end_date']").value,
+    official_service_dates: root.querySelector("[data-field='official_service_dates']").value
+      .split(",").map((value) => value.trim()).filter(Boolean),
+  }));
+}
+
+function renderSchedulingReview() {
+  const root = document.getElementById("scheduleReview");
+  root.replaceChildren();
+  if (!schedulingQuery) {
+    showEmpty(root, "請先輸入案件編號並查詢目前正式排班。");
+    return;
+  }
+  const summary = document.createElement("div");
+  summary.className = "info";
+  summary.textContent = `案件 ${schedulingQuery.case_no}｜目前 ${schedulingQuery.assignments.length} 段排班。編輯後請先預覽，確認後才會套用。`;
+  root.appendChild(summary);
+  if (!schedulingQuery.assignments.length) {
+    showEmpty(root, "目前沒有可供審核的正式排班段落。");
+    return;
+  }
+  schedulingQuery.assignments.forEach((assignment, index) => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.dataset.schedulingSegment = "true";
+    const title = document.createElement("strong");
+    title.textContent = `排班段落 ${index + 1}`;
+    const staff = document.createElement("input");
+    staff.type = "number";
+    staff.min = "1";
+    staff.dataset.field = "staff_id";
+    staff.value = assignment.staff_id;
+    staff.setAttribute("aria-label", `排班段落 ${index + 1} 月嫂編號`);
+    const start = document.createElement("input");
+    start.type = "date";
+    start.dataset.field = "assigned_start_date";
+    start.value = assignment.assigned_start_date;
+    start.setAttribute("aria-label", `排班段落 ${index + 1} 起始日`);
+    const end = document.createElement("input");
+    end.type = "date";
+    end.dataset.field = "assigned_end_date";
+    end.value = assignment.assigned_end_date;
+    end.setAttribute("aria-label", `排班段落 ${index + 1} 結束日`);
+    const dates = document.createElement("input");
+    dates.type = "text";
+    dates.dataset.field = "official_service_dates";
+    dates.value = (assignment.official_service_dates || []).join(", ");
+    dates.placeholder = "正式服務日，以逗號分隔";
+    dates.setAttribute("aria-label", `排班段落 ${index + 1} 正式服務日`);
+    const fields = document.createElement("div");
+    fields.style.display = "grid";
+    fields.style.gap = "8px";
+    fields.style.marginTop = "10px";
+    fields.append(staff, start, end, dates);
+    card.append(title, fields);
+    [staff, start, end, dates].forEach((field) => field.addEventListener("input", invalidateSchedulingPreview));
+    root.appendChild(card);
+  });
+  const reason = document.createElement("textarea");
+  reason.id = "schedulingReason";
+  reason.placeholder = "輸入本次排班調整原因（套用時必填）";
+  reason.addEventListener("input", invalidateSchedulingPreview);
+  root.appendChild(reason);
+  const actions = document.createElement("div");
+  actions.style.marginTop = "10px";
+  const previewButton = document.createElement("button");
+  previewButton.type = "button";
+  previewButton.textContent = "預覽排班調整";
+  previewButton.addEventListener("click", previewSchedulingReview);
+  actions.appendChild(previewButton);
+  root.appendChild(actions);
+  if (schedulingPreview) renderSchedulingPreview();
+}
+
+function invalidateSchedulingPreview() {
+  schedulingPreviewSequence += 1;
+  schedulingFormRevision += 1;
+  schedulingPreview = null;
+  const root = document.getElementById("schedulingPreview");
+  if (root) { root.replaceChildren(); root.classList.add("hidden"); }
+}
+
+function requireSchedulingPreview(data, caseNo) {
+  if (!data || data.case_no !== caseNo
+      || !Number.isInteger(data.order_version) || data.order_version < 0
+      || !Number.isInteger(data.scheduling_version) || data.scheduling_version < 0
+      || !Number.isInteger(data.scheduling_generation) || data.scheduling_generation < 0
+      || !Number.isInteger(data.client_finance_version) || data.client_finance_version < 0
+      || !Number.isInteger(data.payroll_version) || data.payroll_version < 0
+      || !Array.isArray(data.assignments) || data.assignments.length < 1
+      || typeof data.preview_fingerprint !== "string"
+      || !/^[0-9a-f]{64}$/.test(data.preview_fingerprint)) {
+    throw new Error("排班預覽格式不完整，未執行套用。");
+  }
+  return data;
+}
+
+function renderSchedulingPreview() {
+  let root = document.getElementById("schedulingPreview");
+  if (!root) {
+    root = document.createElement("div");
+    root.id = "schedulingPreview";
+    root.className = "preview";
+    document.getElementById("scheduleReview").appendChild(root);
+  }
+  root.replaceChildren();
+  root.classList.remove("hidden");
+  const summary = document.createElement("div");
+  summary.textContent = [
+    `案件：${schedulingPreview.preview.case_no}`,
+    `預覽結果：${schedulingPreview.preview.assignments.length} 段排班，請確認後才會寫入。`,
+    "套用後會重新讀回目前正式排班；若版本過期，請重新查詢與預覽。",
+  ].join("\n");
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.textContent = "確認套用此排班預覽";
+  confirm.addEventListener("click", applySchedulingReview);
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "secondary";
+  cancel.textContent = "取消預覽";
+  cancel.addEventListener("click", invalidateSchedulingPreview);
+  root.append(summary, confirm, cancel);
+}
+
+async function loadSchedulingReview() {
+  const caseNo = document.getElementById("scheduleCaseNo").value.trim();
+  if (!caseNo) { showStatus("請先輸入案件編號。", true); return; }
+  const querySequence = ++schedulingQuerySequence;
+  schedulingCaseIdentity = caseNo;
+  schedulingQuery = null;
+  schedulingPreview = null;
+  schedulingFormRevision += 1;
+  renderSchedulingReview();
+  try {
+    const data = await postJson("/api/v1/line/mobile-admin/scheduling-review/query", {case_no: caseNo});
+    if (querySequence !== schedulingQuerySequence
+        || schedulingCaseIdentity !== caseNo
+        || document.getElementById("scheduleCaseNo").value.trim() !== caseNo) return;
+    schedulingQuery = requireSchedulingQuery(data, caseNo);
+    renderSchedulingReview();
+    showStatus("已讀回目前正式排班；編輯後請先預覽。 ");
+  } catch (error) {
+    if (querySequence === schedulingQuerySequence
+        && schedulingCaseIdentity === caseNo
+        && document.getElementById("scheduleCaseNo").value.trim() === caseNo) showStatus(error.message, true);
+  }
+}
+
+async function previewSchedulingReview() {
+  if (!schedulingQuery) { showStatus("請先查詢目前正式排班。", true); return; }
+  const segments = schedulingSegmentsFromForm();
+  if (!segments.length || segments.some((segment) => !segment.staff_id || !segment.assigned_start_date || !segment.assigned_end_date || !segment.official_service_dates.length)) {
+    showStatus("請完整填寫排班段落與正式服務日。", true);
+    return;
+  }
+  const caseNo = schedulingQuery.case_no;
+  const reason = document.getElementById("schedulingReason").value.trim();
+  const formRevision = schedulingFormRevision;
+  const previewSequence = ++schedulingPreviewSequence;
+  const formIdentity = JSON.stringify({case_no: caseNo, segments, reason});
+  try {
+    const data = await postJson("/api/v1/line/mobile-admin/scheduling-review/preview", {
+      case_no: caseNo,
+      segments,
+    });
+    if (previewSequence !== schedulingPreviewSequence
+        || formRevision !== schedulingFormRevision
+        || schedulingCaseIdentity !== caseNo
+        || document.getElementById("scheduleCaseNo").value.trim() !== caseNo
+        || JSON.stringify({case_no: caseNo, segments: schedulingSegmentsFromForm(), reason: document.getElementById("schedulingReason")?.value.trim() || ""}) !== formIdentity) return;
+    schedulingPreview = {
+      preview: requireSchedulingPreview(data, caseNo),
+      segments,
+      reason,
+      formRevision,
+      formIdentity,
+      idempotencyKey: globalThis.crypto?.randomUUID
+        ? `mobile-scheduling-review:${caseNo}:${globalThis.crypto.randomUUID()}`
+        : `mobile-scheduling-review:${caseNo}:${Date.now().toString(36)}`,
+    };
+    renderSchedulingPreview();
+    showStatus("排班預覽已建立；尚未寫入。 ");
+  } catch (error) {
+    if (previewSequence === schedulingPreviewSequence
+        && formRevision === schedulingFormRevision
+        && schedulingCaseIdentity === caseNo) showStatus(error.message, true);
+  }
+}
+
+async function applySchedulingReview() {
+  if (!schedulingPreview) { showStatus("排班預覽已失效，請重新預覽。", true); return; }
+  const state = schedulingPreview;
+  const reason = document.getElementById("schedulingReason")?.value.trim() || state.reason;
+  if (!reason) { showStatus("套用排班調整時請輸入原因。", true); return; }
+  const preview = state.preview;
+  if (state.formRevision !== schedulingFormRevision
+      || schedulingCaseIdentity !== preview.case_no
+      || document.getElementById("scheduleCaseNo").value.trim() !== preview.case_no
+      || JSON.stringify({case_no: preview.case_no, segments: schedulingSegmentsFromForm(), reason}) !== state.formIdentity) {
+    invalidateSchedulingPreview();
+    showStatus("排班表單已變更，請重新預覽。", true);
+    return;
+  }
+  try {
+    const data = await postJson("/api/v1/line/mobile-admin/scheduling-review/apply", {
+      case_no: preview.case_no,
+      segments: state.segments,
+      expected_order_version: preview.order_version,
+      expected_scheduling_version: preview.scheduling_version,
+      expected_client_finance_version: preview.client_finance_version,
+      expected_payroll_version: preview.payroll_version,
+      preview_fingerprint: preview.preview_fingerprint,
+      idempotency_key: state.idempotencyKey,
+      reason,
+    });
+    if (state !== schedulingPreview
+        || state.formRevision !== schedulingFormRevision
+        || schedulingCaseIdentity !== preview.case_no
+        || document.getElementById("scheduleCaseNo").value.trim() !== preview.case_no) return;
+    if (!data?.receipt || data.receipt.case_no !== preview.case_no
+        || !data.readback || data.readback.case_no !== preview.case_no) {
+      throw new Error("排班套用結果驗證資料不完整，請勿重複送出並聯絡工會確認。");
+    }
+    schedulingQuery = requireSchedulingQuery(data.readback, preview.case_no);
+    schedulingPreview = null;
+    renderSchedulingReview();
+    showStatus("排班已保存，並已重新讀回目前正式排班。 ");
+  } catch (error) { showStatus(error.message, true); }
+}
+
 async function loadReviews() {
   const requestedPage = reviewPageState.page;
   const requestedStatus = document.getElementById("reviewStatus").value;
@@ -616,9 +914,18 @@ async function applyReviewDecision(review) {
 }
 
 document.getElementById("tabCustomer").addEventListener("click", () => switchPane("customer_service"));
+document.getElementById("tabScheduling").addEventListener("click", () => switchPane("scheduling_review"));
 document.getElementById("tabReview").addEventListener("click", () => switchPane("staff_review"));
 document.getElementById("refreshTickets").addEventListener("click", loadTickets);
 document.getElementById("refreshReviews").addEventListener("click", loadReviews);
+document.getElementById("loadSchedule").addEventListener("click", loadSchedulingReview);
+document.getElementById("scheduleCaseNo").addEventListener("input", () => {
+  schedulingQuerySequence += 1;
+  schedulingCaseIdentity = document.getElementById("scheduleCaseNo").value.trim();
+  schedulingQuery = null;
+  invalidateSchedulingPreview();
+  renderSchedulingReview();
+});
 document.getElementById("ticketStatus").addEventListener("change", () => {
   ticketPageState.page = 1;
   loadTickets();

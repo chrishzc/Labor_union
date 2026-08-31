@@ -68,6 +68,8 @@ class LineIdentityCurrentFactBinding:
     subject_reference: str
     subject_name: str = "-"
     owner_line_user_id: str | None = None
+    binding_status: LineIdentityBindingStatus | None = None
+    aggregate_version: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

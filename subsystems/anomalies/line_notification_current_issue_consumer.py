@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import asdict, replace
 
 from domains.anomalies.current_issue import CurrentIssueCandidate, OwnerSnapshot
+from domains.anomalies.registry import default_anomaly_registry
 from subsystems.line.notification_failure_current_fact import (
     LINE_NOTIFICATION_FAILURE_OWNER_DOMAIN,
     LINE_NOTIFICATION_FAILURE_OWNER_ROOT_TYPE,
@@ -81,9 +83,26 @@ class LineNotificationCurrentIssueConsumer:
                     item.value for item in readback.unresolved_reason_codes
                 ),
                 "root_condition_active": True,
+                "available_actions": (_manual_replay_action(readback),),
             },
             subject_identity=subject_identity,
         )
+
+
+def _manual_replay_action(readback: LineNotificationFailureCurrentFactReadback):
+    descriptor = default_anomaly_registry().available_actions(
+        LINE_NOTIFICATION_FAILURE_DEFINITION_CODE
+    )[0]
+    return asdict(
+        replace(
+            descriptor,
+            source_bindings={
+                "case_no": readback.case_no,
+                "notification_reason": readback.notification_reason.value,
+                "source_version": readback.owner_version,
+            },
+        )
+    )
 
 
 __all__ = [

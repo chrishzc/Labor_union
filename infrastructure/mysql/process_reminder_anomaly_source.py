@@ -16,7 +16,6 @@ from shared_kernel.identities import CorrelationId
 from subsystems.anomalies.alert_workflow import AnomalyApplication
 from subsystems.anomalies.process_reminder_anomaly_source import (
     build_beclass_missing_requests,
-    build_hcm_missing_requests,
     build_client_missing_line_requests,
     build_client_payable_requests,
     build_client_receivable_requests,
@@ -80,7 +79,6 @@ def _scan_all(connection, as_of: date) -> tuple:
     with connection.cursor() as cursor:
         order_rows = _fetch(cursor, _ORDER_SQL)
         beclass_rows = _fetch(cursor, _BECLASS_SQL)
-        hcm_missing_rows = _fetch(cursor, _HCM_MISSING_SQL)
         resume_rows = _fetch(cursor, _RESUME_SQL)
         client_candidate_rows = _fetch(cursor, _CLIENT_OBLIGATION_CANDIDATE_CASES_SQL)
         client_case_nos = _candidate_case_nos(client_candidate_rows)
@@ -105,7 +103,6 @@ def _scan_all(connection, as_of: date) -> tuple:
     return (
         build_order_matching_requests(order_rows, as_of=as_of)
         + build_beclass_missing_requests(beclass_rows, as_of=as_of)
-        + build_hcm_missing_requests(hcm_missing_rows, as_of=as_of)
         + build_resume_not_sent_requests(resume_rows, as_of=as_of)
         + build_client_receivable_requests(client_obligation_rows, as_of=as_of)
         + build_client_payable_requests(client_obligation_rows, as_of=as_of)
@@ -224,15 +221,6 @@ _ORDER_SQL = (
 _BECLASS_SQL = (
     "SELECT o.case_no, b.id AS beclass_id "
     "FROM orders o LEFT JOIN beclass_records b ON b.query_no = o.case_no"
-)
-_HCM_MISSING_SQL = (
-    "SELECT candidates.query_no,b.id AS beclass_id,o.case_no AS hcm_case_no FROM ("
-    "SELECT query_no FROM beclass_records WHERE query_no IS NOT NULL "
-    "UNION SELECT SUBSTRING(source_identity,21) AS query_no "
-    "FROM anomaly_current_alerts WHERE definition_code='IMPORT-003' "
-    "AND source_identity LIKE 'beclass-counterpart:%'"
-    ") candidates LEFT JOIN beclass_records b ON b.query_no=candidates.query_no "
-    "LEFT JOIN orders o ON o.case_no=candidates.query_no"
 )
 _RESUME_SQL = (
     "SELECT o.case_no, o.staff_id, "

@@ -56,6 +56,19 @@ total_payable = service_salary + floor_fee_allocated + effective_adjustments
 
 未核銷的 `staff_obligations` current projection 可依新根事實重建；已有正式付款歷史時不得覆寫，改追加 immutable adjustment／reversal obligation event。`staff_payments` 若存在只可由這些 canonical obligation 投影為 compatibility read model，不得回寫 Payroll SSOT。Orders 在第一次形成正式 `actual_end_date` 時，以 `calculate_staff_payment_due_date` 建立 `staff_payment_due_date`。該日期只讀取 Client Finance 的衍生 `client_payable_amount` 與「全補助訂單」判定：金額大於 0 時為結案後次一曆月 15 日；金額為 0 且本案實際服務時數未超過補助市民 120 小時上限、樓層費及其他自費項目皆為 0 時，才是全補助訂單並為結案後第二曆月 15 日。補助資格本身不是付款日分支；第 121 小時起以每小時 350 元、任何樓層費均形成客戶應收。後者不建立 Client Finance 收款核銷；若政府款尚未入帳而月嫂款到期，由 Government Subsidy／工會墊付流程處理。原日形成後不因取消、實際服務日更正或晚形成差額自動改到下一個 15 日。
 
+### PAYOUT-002 late obligation disposition（2026-08-31 人工裁決）
+
+`PAYOUT-002` 是 Payroll obligation／lineage 完整性，不是 Staff Payables 薪資計算。每筆 late source
+只能由 Payroll 追加唯一 immutable disposition：`delta>0` 追加 source-bound adjustment obligation；
+`delta<0` 追加 reduction／reversal obligation；`delta=0` 仍保存 reviewed/disposition event，證明已正式
+重算且無金額影響。舊 obligation event 永不改寫。
+
+若 `delta<0` 且既有 payout 已使 actual paid 超過修正後合法 amount，Payroll 先完成合法 obligation
+correction，再以 exact `payroll_correction_identity` 建立 Staff Payables overpayment recovery；未實際收回
+不阻擋 `PAYOUT-002` terminal，後續由 Staff Payables recovery 自己追蹤。完成條件是 late source 已有唯一
+正式 disposition/correction、current obligation version、delta consequence 與 fresh owner readback一致；
+Anomalies 不得自行計算 delta 或寫 Payroll／Staff Payables root。
+
 ## 4. Modules
 
 - `EffectiveAssignmentSelector`

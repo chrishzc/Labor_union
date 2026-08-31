@@ -1,7 +1,7 @@
 # Agent 任務分級與交付規範
 
-狀態：current governance  
-適用：本 repository 的人工與 Agent 工作  
+狀態：current governance
+適用：本 repository 的人工與 Agent 工作
 邊界：本文件只決定執行路由、工程 guard 與最小 durable artifacts；業務語意仍由 owning current spec 與最新人工裁決擁有。
 
 ## 1. 先判斷是否改變契約

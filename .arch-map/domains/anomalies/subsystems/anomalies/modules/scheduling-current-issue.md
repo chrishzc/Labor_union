@@ -8,6 +8,8 @@
 
 ## Implementation
 - `subsystems/anomalies/scheduling_current_issue_consumer.py`
+- `subsystems/scheduling/current_anomaly_facts.py`
+- `infrastructure/mysql/scheduling_current_issue_adapter.py`
 
 ## Verification
 - test_root: `tests/domains/anomalies/subsystems/anomalies/modules/scheduling-current-issue/`

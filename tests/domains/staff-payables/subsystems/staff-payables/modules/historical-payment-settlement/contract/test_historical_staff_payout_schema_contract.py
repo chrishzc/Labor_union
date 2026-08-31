@@ -25,7 +25,9 @@ def test_staff_historical_payout_release_is_hash_bound_and_terminal() -> None:
         (ROOT / "db/schema_parts" / PART_NAME).resolve(),
     )
     assert manifest.backfills == ()
-    assert load_schema_assembly().active_artifact_paths[-1].name == PART_NAME
+    names = tuple(path.name for path in load_schema_assembly().active_artifact_paths)
+    assert PART_NAME in names
+    assert names.index(PART_NAME) < names.index("1021_task96_owner_contract_successors.sql")
 
     released = manifest.owned_object_descriptors(ROOT)[PART_NAME]
     canonical = migration._canonical_artifact_descriptor(PART_NAME)

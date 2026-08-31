@@ -26,6 +26,6 @@
 
 ## Verification routing
 - default_boundary: Subsystem
-- test_root: unknown (`layout_gap`; focused tests currently live under flat `tests/`)
+- test_root: `tests/domains/scheduling/subsystems/scheduling/`
 - integration_root: `tests/integration/`
 - routing: `.arch-map/tests/domains/scheduling/subsystems/scheduling/index.md`.

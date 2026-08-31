@@ -34,6 +34,8 @@ class SchedulingCurrentFactReason(StrEnum):
 @dataclass(frozen=True, slots=True)
 class SchedulingReplacementCurrentFact:
     assignment_id: int
+    case_no: str | None
+    service_started: bool | None
     owner_snapshot_token: str
     owner_version: int
     authoritative_complete: bool
@@ -45,6 +47,11 @@ class SchedulingReplacementCurrentFact:
 
     def __post_init__(self) -> None:
         require_positive_integer(self.assignment_id, "assignment id")
+        if self.authoritative_complete:
+            require_canonical_text(self.case_no, "assignment case number", 50)
+            _validate_flags(self.service_started)
+        elif self.case_no is not None or self.service_started is not None:
+            raise ValueError("incomplete replacement fact cannot expose action context")
         _validate_common(self.owner_snapshot_token, self.owner_version, self.authoritative_complete)
         _validate_flags(self.exact_successor, self.daily_outcomes_complete, self.service_ownership_complete, self.payroll_impact_complete, self.finance_impact_complete)
 
@@ -73,6 +80,8 @@ class SchedulingReplacementCurrentFact:
 class SchedulingOverlapCurrentFact:
     assignment_id_a: int
     assignment_id_b: int
+    case_no_a: str | None
+    case_no_b: str | None
     owner_snapshot_token: str
     owner_version: int
     authoritative_complete: bool
@@ -83,6 +92,11 @@ class SchedulingOverlapCurrentFact:
         require_positive_integer(self.assignment_id_b, "second assignment id")
         if self.assignment_id_a >= self.assignment_id_b:
             raise ValueError("assignment overlap identity is not canonical")
+        if self.authoritative_complete:
+            require_canonical_text(self.case_no_a, "first assignment case number", 50)
+            require_canonical_text(self.case_no_b, "second assignment case number", 50)
+        elif self.case_no_a is not None or self.case_no_b is not None:
+            raise ValueError("incomplete assignment overlap cannot expose case context")
         _validate_common(self.owner_snapshot_token, self.owner_version, self.authoritative_complete)
         _validate_flags(self.current_effective_overlap)
 

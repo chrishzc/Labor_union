@@ -363,3 +363,26 @@ production／`union_db`、external deployment 與 entry switch 仍需精確 targ
 M3 Matching Coordination 可保存 customer acceptance decision 與其 criteria／candidate lineage，但 `accepted` 不等於 Contract Completion、contract identity、formal assignment、official service day 或 Payroll obligation。M3 只能在 fresh downstream facts 後產生 typed `AssignmentConversionRequested`／rematch reference；Orders、Assignment／Scheduling 與 Payroll 各自保留 root writer、Preview／Apply、lock 與 receipt。
 
 任何 conversion mismatch、stale service date、leave／availability conflict 或缺少 Assignment conversion receipt 均 fail closed、零 partial write；本 amendment 不授權 production code、schema／DB、LINE provider、deployment 或 cutover。
+
+## 2026-08-31 Full Contract Preview owner projection與public entry裁決
+
+兩份XLSX維持static legal/content/layout baseline。Client target固定exact case＋client scope；Staff target固定
+exact case＋exact assignment/segment＋staff scope。Contract Signing／renderer只組合closed typed owner
+projections，不擁有動態business facts，也不得新增金額、日期或INFO12公式。
+
+Client Finance、Payroll、Staff Payables各自提供契約需要的current typed money／business-date／payment-destination
+projection；Payroll計算obligation，Staff Payables不得重算，renderer也不得跨owner加總成新公式。Client預定
+服務日期由Scheduling Commitment projection提供exact commitment identity/version、start/end及owner計算的
+service-day count；Staff使用exact assignment/segment Scheduling projection。INFO12欄位只能由其current owner的
+typed projection提供，不得讀raw survey、legacy column、UI state或XLSX formula。
+
+每個mapping row requiredness固定為`required | conditional | optional`。required缺值、stale或source unavailable
+fail closed；conditional只在owner-defined condition成立時required；optional僅接受owner明確合法absence。
+unavailable、unresolved或ambiguous不得當optional null。
+
+核准authenticated internal bounded public API：client preview target為exact case；staff preview target為exact
+case＋assignment/segment。Preview零寫入，fresh-read owner snapshots並回target、template version、owner
+fingerprint、blockers、preview fingerprint與PDF result。正式document persistence仍走既有Apply/Generate；Download
+只讀opaque document version／controlled-file object並重新authorization，不暴露filesystem/NAS locator、raw URL，
+也不重新計算business facts。preview與正式download bytes/digest依既有version contract保持一致可追溯。
+本裁決解除public-entry及owner-projection blocker，但依Task 96 priority尚未開始此後順位implementation。

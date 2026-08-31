@@ -18,6 +18,10 @@ from domains.finance_import.ingestion import (
     InitialClassificationFacts,
     build_initial_classification,
 )
+from domains.finance_import.anomaly_remediation import (
+    FinanceImportSourceCorrectionApplyRequest,
+    FinanceImportSourceCorrectionIntent,
+)
 from domains.finance_import.source_warning_review import (
     build_finance_source_review,
 )
@@ -55,11 +59,16 @@ def ingest_finance_workbook(
     *,
     connection_factory: Callable[[], Any],
     normalizer: Callable[[str], Mapping[str, Any]],
+    source_correction: FinanceImportSourceCorrectionIntent | None = None,
 ) -> FinanceWorkbookIngestionReceipt:
     # Kept cohesive: the primary UoW rollback and independent attempt audit are one boundary.
     source_path = _validated_source_path(excel_path)
     source_digest = _source_digest(source_path)
-    command_fingerprint = _command_fingerprint(source_digest, actor)
+    if source_correction is not None and not isinstance(
+        source_correction, FinanceImportSourceCorrectionIntent
+    ):
+        raise TypeError("Finance Import source correction intent is invalid")
+    command_fingerprint = _command_fingerprint(source_digest, actor, source_correction)
     started_at = _utc_timestamp()
     progress = _IngestionProgress()
     connection = connection_factory()
@@ -77,6 +86,7 @@ def ingest_finance_workbook(
             idempotency_key,
             actor,
             progress,
+            source_correction,
         )
         with connection.cursor() as cursor:
             _save_success_attempt(
@@ -119,6 +129,7 @@ def _ingest_or_replay(
     idempotency_key: IdempotencyKey,
     actor: ActorContext,
     progress: _IngestionProgress,
+    source_correction: FinanceImportSourceCorrectionIntent | None = None,
 ) -> FinanceWorkbookIngestionReceipt:
     with connection.cursor() as cursor:
         replay = _find_replay(cursor, idempotency_key, command_fingerprint)
@@ -138,9 +149,18 @@ def _ingest_or_replay(
             source_digest,
             actor,
         )
-        progress.phase = "receipt"
+    if source_correction is not None:
+        progress.phase = "source_correction_lineage"
+        _append_source_correction_lineage(
+            connection,
+            receipt,
+            source_correction,
+            actor,
+        )
+    progress.phase = "receipt"
+    with connection.cursor() as cursor:
         _save_receipt(cursor, idempotency_key, command_fingerprint, receipt)
-        return receipt
+    return receipt
 
 
 def _persist_ingestion(
@@ -175,6 +195,30 @@ def _persist_ingestion(
         source_warning_count,
         source_warning_created_count,
     )
+
+
+def _append_source_correction_lineage(
+    connection: Any,
+    receipt: FinanceWorkbookIngestionReceipt,
+    source_correction: FinanceImportSourceCorrectionIntent,
+    actor: ActorContext,
+) -> str:
+    from infrastructure.mysql.finance_import_current_issue_adapter import (
+        MySqlFinanceImportCurrentIssueAdapter,
+    )
+
+    owner = MySqlFinanceImportCurrentIssueAdapter(connection)
+    successor = owner.read_integrity(receipt.batch_identity, for_update=True)
+    request = FinanceImportSourceCorrectionApplyRequest(
+        source_correction.original_batch_identity,
+        source_correction.original_batch_version,
+        receipt.batch_identity,
+        successor.batch_version,
+        actor.actor_id,
+        source_correction.reason,
+        source_correction.evidence_reference,
+    )
+    return owner.append_source_correction_lineage(request)
 
 
 def _append_source_reviews(
@@ -575,10 +619,26 @@ def _source_digest(source_path: Path) -> str:
     return digest.hexdigest()
 
 
-def _command_fingerprint(source_digest: str, actor: ActorContext) -> str:
-    return fingerprint_payload(
-        {"source_content_digest": source_digest, "actor_id": actor.actor_id}
-    ).value
+def _command_fingerprint(
+    source_digest: str,
+    actor: ActorContext,
+    source_correction: FinanceImportSourceCorrectionIntent | None = None,
+) -> str:
+    correction_payload = None
+    if source_correction is not None:
+        correction_payload = {
+            "original_batch_identity": source_correction.original_batch_identity,
+            "original_batch_version": source_correction.original_batch_version,
+            "reason": source_correction.reason,
+            "evidence_reference": source_correction.evidence_reference,
+        }
+    payload = {
+        "source_content_digest": source_digest,
+        "actor_id": actor.actor_id,
+    }
+    if correction_payload is not None:
+        payload["source_correction"] = correction_payload
+    return fingerprint_payload(payload).value
 
 
 def _canonical_json(payload: Any) -> str:

@@ -39,11 +39,13 @@ def test_role_scope_release_is_hash_bound_and_ordered_in_fresh_assembly() -> Non
     ).hexdigest()
     assert descriptor["release_id"] == manifest["release_id"]
     role_scope = "db/schema_parts/1019_line_identity_role_scope.sql"
-    current_terminal = "db/schema_parts/1020_historical_owner_payment_settlement.sql"
+    current_terminal = "db/schema_parts/1021_task96_owner_contract_successors.sql"
     assert role_scope in assembly["active_bootstrap"]
-    assert assembly["active_bootstrap"].index(role_scope) < assembly[
-        "active_bootstrap"
-    ].index(current_terminal)
+    assert assembly["active_bootstrap"].index(
+        role_scope
+    ) < assembly["active_bootstrap"].index(
+        current_terminal
+    )
 
 
 def test_schema_has_one_shared_role_root_event_stream_active_role_and_streak() -> None:

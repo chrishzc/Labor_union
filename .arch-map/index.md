@@ -9,6 +9,7 @@
 - `scheduling` — assignment、服務日、檔期、請假／代班與 matching；path: `domains/scheduling/index.md`
 - `payroll` — assignment-owned 薪資義務與調整；path: `domains/payroll/index.md`
 - `client-finance` — 客戶應收、收款、退款／沖正、調整與核銷；path: `domains/client-finance/index.md`
+- `clients` — Client profile root與異動workflow；path: `domains/clients/index.md`
 - `staff-payables` — 月嫂應付、出款與退匯／沖正；path: `domains/staff-payables/index.md`
 - `staff` — 月嫂 lifecycle 根事實與 owner workflows；path: `domains/staff/index.md`
 - `finance-import` — 銀行來源事實、分類與 owner delegation；path: `domains/finance-import/index.md`

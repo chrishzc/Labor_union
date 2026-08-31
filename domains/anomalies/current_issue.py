@@ -28,21 +28,8 @@ _ISSUE_KEY_VERSION = 1
 # The subject object is closed per definition.  A detector with no entry here
 # must not fall back to a generic anomaly row.
 CURRENT_ISSUE_SUBJECT_FIELDS: dict[str, tuple[str, ...]] = {
-    "BECLASS-001": ("case_no",),
-    "GOVSUB-001": ("bank_fact_identity",),
-    "GOVSUB-002": ("bank_fact_identity", "batch_id"),
-    "GOVSUB-003": ("batch_id", "integrity_revision"),
-    "GOVSUB-004": ("reversal_bank_fact_identity", "source_receipt_id"),
-    "GOVSUB-005": ("assignment_id", "batch_id", "claim_item_id"),
     "GOVSUB-007": ("payable_identity",),
-    "IMPORT-003": ("entity_kind", "review_item_id"),
-    "IMPORT-006": ("batch_id",),
-    "LINE-004": ("subject_type", "line_user_id"),
     "LINE-006": ("case_no", "notification_reason"),
-    "PAYOUT-002": ("obligation_identity", "source_event_identity"),
-    "SCHEDULE-002": ("assignment_id",),
-    "SCHEDULE-003": ("assignment_id_a", "assignment_id_b"),
-    "SCHEDULE-006": ("case_no", "generation"),
 }
 
 
@@ -57,11 +44,6 @@ def canonical_subject_identity_for_code(
         raise ValueError("anomaly subject schema is unavailable") from error
     if set(subject_identity) != set(expected):
         raise ValueError("anomaly subject identity fields are not closed")
-    if definition_code == "SCHEDULE-003":
-        left = subject_identity["assignment_id_a"]
-        right = subject_identity["assignment_id_b"]
-        if not isinstance(left, str) or not isinstance(right, str) or left >= right:
-            raise ValueError("SCHEDULE-003 assignment identity is not canonical")
     return canonical_subject_identity(subject_identity)
 
 

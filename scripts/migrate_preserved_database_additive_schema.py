@@ -197,6 +197,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_30_hcm_resubmission_canonical_review_version_v1.json",
     "labor_union_2026_08_30_line_identity_role_scope_v1.json",
     "labor_union_2026_08_31_historical_owner_payment_settlement_v1.json",
+    "labor_union_2026_08_31_task96_owner_contract_successors_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -1983,6 +1984,19 @@ def _modified_parent_predecessor_absent_state(
                     "column_type": "bigint",
                     "is_nullable": "NO",
                     "column_default": None,
+                    "extra": "",
+                },
+            },
+        },
+        "1021_task96_owner_contract_successors.sql": {
+            "client_profile_change_requests": {
+                "status": {
+                    "column_type": (
+                        "enum('pending','approved','partially_approved',"
+                        "'rejected','reverted')"
+                    ),
+                    "is_nullable": "NO",
+                    "column_default": "pending",
                     "extra": "",
                 },
             },
@@ -4890,6 +4904,45 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "enum('customer','staff')", "YES"
             )
         }
+    if part_name == "1021_task96_owner_contract_successors.sql":
+        descriptor["parent_columns"]["clients"] = {
+            "client_profile_version": _column_contract(
+                "bigint unsigned", "NO", "0"
+            )
+        }
+        descriptor["parent_columns"]["client_profile_change_requests"] = {
+            "status": _column_contract(
+                "enum('pending','approved','approved_applied','partially_approved','rejected','reverted')",
+                "NO",
+                "pending",
+            ),
+            "request_version": _column_contract("bigint unsigned", "NO", "0"),
+            "client_profile_version": _column_contract("bigint unsigned", "NO", "0"),
+            "reason": _column_contract("varchar(500)", "YES"),
+            "idempotency_key": _column_contract("varchar(191)", "YES"),
+            "preview_fingerprint": _column_contract("char(64)", "YES"),
+            "command_fingerprint": _column_contract("char(64)", "YES"),
+            "correlation_id": _column_contract("varchar(191)", "YES"),
+            "review_reason": _column_contract("varchar(500)", "YES"),
+        }
+        descriptor["indexes"][(
+            "client_profile_change_requests",
+            "uq_client_profile_change_request_idempotency",
+        )] = {"non_unique": 0, "columns": ("idempotency_key",)}
+        descriptor["checks"][(
+            "client_profile_change_requests",
+            "chk_client_profile_change_request_fingerprints",
+        )] = _normalize_sql_contract(
+            "(preview_fingerprint IS NULL OR preview_fingerprint REGEXP '^[0-9a-f]{64}$') "
+            "AND (command_fingerprint IS NULL OR command_fingerprint REGEXP '^[0-9a-f]{64}$')"
+        )
+        descriptor["parent_columns"]["staff_overpayment_recoveries"] = {
+            "payroll_correction_identity": _column_contract("varchar(191)", "YES")
+        }
+        descriptor["indexes"][(
+            "staff_overpayment_recoveries",
+            "uq_staff_overpayment_payroll_correction",
+        )] = {"non_unique": 0, "columns": ("payroll_correction_identity",)}
     if part_name == "61_finance_import_reprocessing.sql":
         _remove_retired_reclassification_audit_contract(descriptor)
         descriptor["indexes"][(
@@ -5126,15 +5179,25 @@ def _release_descriptor_metadata_state(
 ) -> str:
     """Fail closed unless released metadata equals the canonical SQL contract."""
     canonical = _canonical_artifact_descriptor(part_name)
+    parent_tables = set(canonical.get("parent_columns", {}))
+
+    def released_projection(kind: str) -> dict[Any, Any]:
+        released_contracts = released.get(kind, {})
+        return {
+            key: value
+            for key, value in canonical[kind].items()
+            if key in released_contracts or key[0] not in parent_tables
+        }
+
     projections = {
         "tables": {
             table: set(columns)
             for table, columns in canonical["tables"].items()
         },
         "triggers": set(canonical["triggers"]),
-        "indexes": canonical["indexes"],
-        "foreign_keys": canonical["foreign_keys"],
-        "checks": canonical["checks"],
+        "indexes": released_projection("indexes"),
+        "foreign_keys": released_projection("foreign_keys"),
+        "checks": released_projection("checks"),
     }
     for kind, expected in projections.items():
         if released.get(kind) != expected:
@@ -5378,6 +5441,28 @@ def _contract_external_signing_successor_state(
             "controlled_file_objects",
         }
     }
+    if not purpose_rows:
+        predecessor = deepcopy(descriptor)
+        parent_tables = set(predecessor["parent_columns"])
+        predecessor["parent_columns"] = {}
+        for kind in ("indexes", "foreign_keys", "checks"):
+            predecessor[kind] = {
+                key: contract
+                for key, contract in predecessor[kind].items()
+                if key[0] not in parent_tables
+            }
+        predecessor["triggers"] = {
+            name: contract
+            for name, contract in predecessor["triggers"].items()
+            if contract["event_object_table"] not in parent_tables
+        }
+        predecessor_state = _artifact_metadata_state(
+            snapshot,
+            predecessor,
+            "1005_contract_external_signing_successor.sql",
+            defer_missing_triggers=defer_missing_triggers,
+        )
+        return "absent" if predecessor_state == "absent" else "drift"
     if len(purpose_rows) != 2 or any(
         _normalize_column_type_contract(row["column_type"])
         not in {predecessor_type, successor_type}

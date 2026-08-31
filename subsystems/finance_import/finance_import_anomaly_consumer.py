@@ -69,11 +69,6 @@ def _consume_next(connection, runtime: FinanceImportRuntime):
         if event is None:
             connection.rollback()
             return None
-        if (
-            event.get("outbox_kind") != "source_review"
-            and event["intent_type"] == "historical_reprocess_completed"
-        ):
-            _project_historical_reprocess_integrity(connection, event, runtime)
         _mark_delivered(connection, event)
         connection.commit()
         return True

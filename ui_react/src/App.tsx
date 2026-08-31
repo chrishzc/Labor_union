@@ -53,6 +53,14 @@ function getPageFromHash(): PageType {
   return 'order-tracker';
 }
 
+export function getMobileAdminReturnPathFromHash(hash: string): string | null {
+  const query = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '';
+  const returnTarget = new URLSearchParams(query).get('return_target');
+  return returnTarget === 'scheduling_review'
+    ? '/line-mobile-admin?target=scheduling_review'
+    : null;
+}
+
 export const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => sessionClient.isAuthenticated());
   const [currentPage, setCurrentPage] = useState<PageType>(() => getPageFromHash());
@@ -102,6 +110,11 @@ export const App: React.FC = () => {
 
   const handleLoginSuccess = (_username: string) => {
     setIsLoggedIn(true);
+    const mobileAdminReturnPath = getMobileAdminReturnPathFromHash(window.location.hash);
+    if (mobileAdminReturnPath) {
+      window.location.replace(mobileAdminReturnPath);
+      return;
+    }
     const targetPage = getPageFromHash();
     window.location.hash = `#${targetPage}`;
   };

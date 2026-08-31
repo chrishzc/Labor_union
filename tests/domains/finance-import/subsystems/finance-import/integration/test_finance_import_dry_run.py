@@ -90,12 +90,6 @@ def test_exact_historical_statement_runs_full_dry_run_and_rolls_back(monkeypatch
             "finance_alert_action": None,
         },
     )
-    monkeypatch.setattr(
-        importer,
-        "project_finance_import_review_alert",
-        lambda *args, **kwargs: None,
-    )
-
     result = importer.import_finance_workbook(
         str(SAMPLE), dry_run=True, connection_factory=lambda: connection,
         normalizer=normalize_workbook,

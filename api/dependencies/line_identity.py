@@ -9,6 +9,7 @@ from functools import lru_cache
 from infrastructure.line.liff_token_verifier import LineLoginTokenVerifier
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from subsystems.line.identity_application import LineIdentityApplication
+from subsystems.line.identity_management_application import LineIdentityManagementApplication
 from subsystems.line.identity_review_application import LineIdentityReviewApplication
 
 
@@ -20,6 +21,12 @@ def get_line_identity_application() -> LineIdentityApplication:
 @lru_cache(maxsize=1)
 def get_line_identity_review_application() -> LineIdentityReviewApplication:
     return LineIdentityReviewApplication(open_line_unit_of_work, _utc_now)
+
+
+@lru_cache(maxsize=1)
+def get_line_identity_management_application() -> LineIdentityManagementApplication:
+    """Compose the role-scoped current-fact reader at the API boundary."""
+    return LineIdentityManagementApplication(open_line_unit_of_work, _utc_now)
 
 
 @lru_cache(maxsize=1)
@@ -35,5 +42,6 @@ def _utc_now() -> datetime:
 __all__ = [
     "get_liff_token_verifier",
     "get_line_identity_application",
+    "get_line_identity_management_application",
     "get_line_identity_review_application",
 ]

@@ -40,6 +40,7 @@ def _scope(code, subject, root):
 
 def test_receipt_terminal_requires_full_allocation_conservation() -> None:
     row = {
+        "finance_import_row_id": 11,
         "classification_type": "government_subsidy", "owner_version": 3,
         "eligible_batch_count": 1, "claim_batch_id": 5,
         "transaction_status": "succeeded", "transaction_amount_ntd": 5600,
@@ -54,6 +55,7 @@ def test_receipt_terminal_requires_full_allocation_conservation() -> None:
 
 def test_manual_allocation_over_limit_stays_active() -> None:
     row = {
+        "finance_import_row_id": 11,
         "classification_type": "government_subsidy", "owner_version": 4,
         "claim_batch_id": 5, "transaction_status": "succeeded",
         "transaction_amount_ntd": 5600, "bank_amount_ntd": 5600,
@@ -69,6 +71,7 @@ def test_manual_allocation_over_limit_stays_active() -> None:
 
 def test_reversal_terminal_requires_exact_source_and_complete_allocations() -> None:
     row = {
+        "finance_import_row_id": 12,
         "classification_type": "government_subsidy", "owner_version": 8,
         "target_count": 1, "source_transaction_type": "receipt",
         "source_transaction_status": "succeeded",

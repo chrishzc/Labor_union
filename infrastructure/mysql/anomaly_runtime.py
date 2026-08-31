@@ -19,11 +19,9 @@ from infrastructure.mysql.current_anomaly_issue_repository import (
     MySqlCurrentIssueRepository,
 )
 from infrastructure.mysql.beclass_import_review_anomaly_source import project_beclass_import_review_page
-from infrastructure.mysql.government_return_outbound_overage_anomaly_source import project_government_return_outbound_overage_page
 from infrastructure.mysql.government_subsidy_anomaly_source import project_government_subsidy_anomaly_page
-from infrastructure.mysql.government_subsidy_assignment_drift_anomaly_source import project_government_subsidy_assignment_drift_page
-from infrastructure.mysql.government_subsidy_integrity_anomaly_source import project_government_subsidy_integrity_page
 from infrastructure.mysql.government_subsidy_reversal_anomaly_source import project_government_subsidy_reversal_anomaly_page
+from infrastructure.mysql.government_return_outbound_overage_anomaly_source import project_government_return_outbound_overage_page
 from infrastructure.mysql.hcm_resubmission_repository import MySqlHcmResubmissionRepository
 from infrastructure.mysql.import_warning_auto_resolution import (
     HCM_FIELD_CORRECTION_TERMINAL_PREDICATE,
@@ -35,7 +33,6 @@ from infrastructure.mysql.process_reminder_anomaly_source import consume_process
 from infrastructure.mysql.scheduling_coverage_anomaly_source import MySqlSchedulingCoverageAnomalySource
 from infrastructure.mysql.subsidy_advance_recovery_repository import MySqlSubsidyAdvanceRecoveryRepository
 from subsystems.anomalies.alert_workflow import AnomalyApplication
-from subsystems.anomalies.finance_import_review_alert import project_finance_import_review_alert
 from subsystems.anomalies.ports import AnomalyRuntime
 from subsystems.anomalies.current_issue_recheck import CurrentIssueApplication
 from domains.anomalies.current_issue import (
@@ -110,25 +107,6 @@ class MySqlAnomalyRuntime:
         )
         owner_snapshot_reader = self._owner_snapshot_reader
         if detector is None:
-            from infrastructure.mysql.line_identity_current_issue_adapter import (
-                MySqlLineIdentityCurrentIssueAdapter,
-            )
-            from subsystems.anomalies.line_identity_current_issue_consumer import (
-                LINE_IDENTITY_OWNER_DOMAIN,
-                LINE_IDENTITY_OWNER_ROOT_TYPE,
-                LineIdentityCurrentIssueConsumer,
-            )
-
-            if (
-                scope.owner_domain == LINE_IDENTITY_OWNER_DOMAIN
-                and scope.owner_root_type == LINE_IDENTITY_OWNER_ROOT_TYPE
-            ):
-                adapter = MySqlLineIdentityCurrentIssueAdapter(connection)
-                owner_snapshot_reader = adapter.read_owner_snapshot
-                detector = LineIdentityCurrentIssueConsumer(
-                    self.current_issue_key
-                ).detect
-        if detector is None:
             from infrastructure.mysql.line_notification_current_issue_adapter import (
                 MySqlLineNotificationCurrentIssueAdapter,
             )
@@ -151,70 +129,6 @@ class MySqlAnomalyRuntime:
                     self.current_issue_key
                 ).detect
         if detector is None:
-            from infrastructure.mysql.scheduling_current_issue_adapter import (
-                MySqlSchedulingCurrentIssueAdapter,
-            )
-            from subsystems.anomalies.scheduling_current_issue_consumer import (
-                SchedulingCurrentIssueConsumer,
-            )
-            from subsystems.scheduling.current_anomaly_facts import (
-                SCHEDULING_ANOMALY_OWNER_DOMAIN,
-                SCHEDULING_ANOMALY_OWNER_ROOT_TYPE,
-            )
-
-            if (
-                scope.owner_domain == SCHEDULING_ANOMALY_OWNER_DOMAIN
-                and scope.owner_root_type == SCHEDULING_ANOMALY_OWNER_ROOT_TYPE
-            ):
-                adapter = MySqlSchedulingCurrentIssueAdapter(connection)
-                owner_snapshot_reader = adapter.read_owner_snapshot
-                detector = SchedulingCurrentIssueConsumer(
-                    self.current_issue_key
-                ).detect
-        if detector is None:
-            from infrastructure.mysql.government_subsidy_current_issue_adapter import (
-                MySqlGovernmentSubsidyCurrentIssueAdapter,
-            )
-            from subsystems.anomalies.government_subsidy_current_issue_consumer import (
-                GovernmentSubsidyCurrentIssueConsumer,
-            )
-            from subsystems.government_subsidy.current_anomaly_facts import (
-                GOVERNMENT_SUBSIDY_ANOMALY_OWNER_DOMAIN,
-                GOVERNMENT_SUBSIDY_ANOMALY_OWNER_ROOT_TYPE,
-            )
-
-            if (
-                scope.owner_domain == GOVERNMENT_SUBSIDY_ANOMALY_OWNER_DOMAIN
-                and scope.owner_root_type
-                == GOVERNMENT_SUBSIDY_ANOMALY_OWNER_ROOT_TYPE
-            ):
-                adapter = MySqlGovernmentSubsidyCurrentIssueAdapter(connection)
-                owner_snapshot_reader = adapter.read_owner_snapshot
-                detector = GovernmentSubsidyCurrentIssueConsumer(
-                    self.current_issue_key
-                ).detect
-        if detector is None:
-            from infrastructure.mysql.case_pairing_current_issue_adapter import (
-                MySqlCasePairingCurrentIssueAdapter,
-            )
-            from subsystems.anomalies.case_pairing_current_issue_consumer import (
-                CasePairingCurrentIssueConsumer,
-            )
-            from subsystems.case_import.pairing_current_facts import (
-                CASE_PAIRING_ANOMALY_OWNER_DOMAIN,
-                CASE_PAIRING_ANOMALY_OWNER_ROOT_TYPE,
-            )
-
-            if (
-                scope.owner_domain == CASE_PAIRING_ANOMALY_OWNER_DOMAIN
-                and scope.owner_root_type == CASE_PAIRING_ANOMALY_OWNER_ROOT_TYPE
-            ):
-                adapter = MySqlCasePairingCurrentIssueAdapter(connection)
-                owner_snapshot_reader = adapter.read_owner_snapshot
-                detector = CasePairingCurrentIssueConsumer(
-                    self.current_issue_key
-                ).detect
-        if detector is None:
             raise RuntimeError("anomaly_recheck_owner_detector_not_composed")
         intent = recheck_intent_from_payload(payload)
         result = self.current_issue_application(
@@ -234,14 +148,6 @@ class MySqlAnomalyRuntime:
     def subsidy_advance_recovery_repository(self, connection):
         return MySqlSubsidyAdvanceRecoveryRepository(connection)
 
-    def project_finance_import_review_alert(self, cursor, batch_id: int, **kwargs):
-        return project_finance_import_review_alert(cursor, batch_id, runtime=self, **kwargs)
-
-    def consume_staff_payables_anomaly_sources(self, connection, **kwargs):
-        from subsystems.anomalies.staff_payables_anomaly_source import consume_staff_payables_anomaly_sources
-
-        return consume_staff_payables_anomaly_sources(connection, runtime=self, **kwargs)
-
     def consume_process_reminder_anomaly_sources(self, connection, **kwargs):
         from subsystems.anomalies.outbox_worker import BorrowedAnomalyUnitOfWork
 
@@ -256,12 +162,6 @@ class MySqlAnomalyRuntime:
 
     def project_government_subsidy_anomaly_page(self, connection, request):
         return project_government_subsidy_anomaly_page(connection, request)
-
-    def project_government_subsidy_assignment_drift_page(self, connection, request):
-        return project_government_subsidy_assignment_drift_page(connection, request)
-
-    def project_government_subsidy_integrity_page(self, connection, request):
-        return project_government_subsidy_integrity_page(connection, request)
 
     def project_government_subsidy_reversal_page(self, connection, request):
         return project_government_subsidy_reversal_anomaly_page(connection, request)

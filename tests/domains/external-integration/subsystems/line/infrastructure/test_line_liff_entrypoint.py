@@ -167,6 +167,7 @@ def test_identity_page_routes_mobile_admin_targets_without_opening_staff_flow() 
     initialize_source = source.split("async function initialize()", 1)[1]
 
     assert 'customer_service: "/line-mobile-admin?target=customer_service"' in mobile_admin_route
+    assert 'scheduling_review: "/line-mobile-admin?target=scheduling_review"' in mobile_admin_route
     assert 'staff_review: "/line-mobile-admin?target=staff_review"' in mobile_admin_route
     assert "location.replace(mobileAdminPage);" in initialize_source
     assert initialize_source.index("location.replace(mobileAdminPage);") < initialize_source.index(

@@ -47,7 +47,7 @@ def test_release_and_fresh_catalog_preserve_1008_before_its_successor() -> None:
         assembly["active_bootstrap"]
     )
     assert cutover["schema_parts"]["terminal_artifact"] == (
-        "1020_historical_owner_payment_settlement.sql"
+        "1021_task96_owner_contract_successors.sql"
     )
 
 

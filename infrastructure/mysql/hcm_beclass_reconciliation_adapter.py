@@ -25,12 +25,6 @@ from subsystems.case_import.beclass_review_intake import (
 from subsystems.case_import.hcm_beclass_reconciliation import (
     reconcile_hcm_beclass_cooking as reconcile_with_port,
 )
-from subsystems.case_import.pairing_current_facts import (
-    CasePairingCurrentIssueCode,
-    beclass_counterpart_recheck,
-    case_pairing_recheck_identity,
-    hcm_counterpart_recheck,
-)
 from subsystems.orders.terms_workflow import (
     OrderTermsApplyRequest,
     OrderTermsWorkflow,
@@ -47,37 +41,7 @@ class MySqlHcmBeClassReconciliationAdapter:
         self._pairing_rechecks = pairing_rechecks
 
     def reconcile(self, case_no: str):
-        result = reconcile_with_port(self, case_no)
-        if self._pairing_rechecks is not None:
-            facts = self.load_pair_facts(case_no)
-            token = fingerprint_payload({"case_no": case_no, "facts": dict(facts)}).value
-            version = max(int(facts.get("beclass_id") or 0), int(facts.get("hcm_version") or 0))
-            self._pairing_rechecks.append_case_pairing_recheck(
-                hcm_counterpart_recheck(
-                    case_no,
-                    version,
-                    token,
-                    case_pairing_recheck_identity(
-                        token, CasePairingCurrentIssueCode.HCM_COUNTERPART_MISSING
-                    ),
-                )
-            )
-            query_no = facts.get("query_no")
-            if isinstance(query_no, str) and query_no:
-                review_item_id = "counterpart:" + query_no
-                self._pairing_rechecks.append_case_pairing_recheck(
-                    beclass_counterpart_recheck(
-                        "client_counterpart",
-                        review_item_id,
-                        version,
-                        token,
-                        case_pairing_recheck_identity(
-                            token,
-                            CasePairingCurrentIssueCode.BECLASS_COUNTERPART_MISSING,
-                        ),
-                    )
-                )
-        return result
+        return reconcile_with_port(self, case_no)
 
     def load_pair_facts(self, case_no: str):
         with self._connection.cursor() as cursor:

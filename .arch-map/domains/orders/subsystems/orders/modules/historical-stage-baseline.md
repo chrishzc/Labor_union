@@ -11,6 +11,7 @@
 - primary:
   - `subsystems/orders/historical_stage_baseline_overlay.py`
   - `infrastructure/mysql/historical_stage_baseline_repository.py`
+  - `infrastructure/mysql/historical_orders_stage_projection_repository.py`
 - entrypoints:
   - `api/dependencies/orders_stage_projection.py`
 
@@ -27,6 +28,7 @@
 ## Provenance
 - Baseline ownership and predecessor-bypass boundary — `architecture_declared` — `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.8。
 - Query overlay and repository paths — `source_observed` — current source。
+- Owner-local test routing — `architecture_declared` — this leaf。
 
 ## Change triggers
 Reconcile when baseline source identity, selected-step mapping, stage/SOP projection relationship, repository read model or verification root changes.

@@ -15,6 +15,7 @@ class GovernmentSubsidyCurrentIssueCode(StrEnum):
     RECEIPT_UNMATCHED = "GOVSUB-001"
     RECEIPT_ALLOCATION_AMBIGUOUS = "GOVSUB-002"
     REVERSAL_INVALID = "GOVSUB-004"
+    RETURN_OUTGOING_OVERAGE = "GOVSUB-007"
 
 
 class GovernmentSubsidyCurrentFactReason(StrEnum):
@@ -34,6 +35,7 @@ class GovernmentSubsidyCurrentFactReason(StrEnum):
 @dataclass(frozen=True, slots=True)
 class GovernmentSubsidyReceiptCurrentFact:
     bank_fact_identity: str
+    finance_import_row_id: int | None
     owner_snapshot_token: str
     owner_version: int
     authoritative_complete: bool
@@ -43,6 +45,7 @@ class GovernmentSubsidyReceiptCurrentFact:
 
     def __post_init__(self) -> None:
         _validate_common(self.bank_fact_identity, self.owner_snapshot_token, self.owner_version, self.authoritative_complete)
+        _validate_row_context(self.finance_import_row_id, self.authoritative_complete)
         _validate_flags(self.approved_batch_unique, self.receipt_allocation_complete, self.amount_conserved)
 
     @property
@@ -65,6 +68,7 @@ class GovernmentSubsidyReceiptCurrentFact:
 class GovernmentSubsidyAllocationCurrentFact:
     bank_fact_identity: str
     batch_id: int
+    finance_import_row_id: int | None
     owner_snapshot_token: str
     owner_version: int
     authoritative_complete: bool
@@ -75,6 +79,7 @@ class GovernmentSubsidyAllocationCurrentFact:
     def __post_init__(self) -> None:
         _validate_common(self.bank_fact_identity, self.owner_snapshot_token, self.owner_version, self.authoritative_complete)
         require_positive_integer(self.batch_id, "claim batch id")
+        _validate_row_context(self.finance_import_row_id, self.authoritative_complete)
         _validate_flags(self.item_allocation_unambiguous, self.item_outstanding_valid, self.allocation_total_matches)
 
     @property
@@ -97,6 +102,7 @@ class GovernmentSubsidyAllocationCurrentFact:
 class GovernmentSubsidyReversalCurrentFact:
     reversal_bank_fact_identity: str
     source_receipt_id: int
+    finance_import_row_id: int | None
     owner_snapshot_token: str
     owner_version: int
     authoritative_complete: bool
@@ -108,6 +114,7 @@ class GovernmentSubsidyReversalCurrentFact:
     def __post_init__(self) -> None:
         _validate_common(self.reversal_bank_fact_identity, self.owner_snapshot_token, self.owner_version, self.authoritative_complete)
         require_positive_integer(self.source_receipt_id, "source receipt id")
+        _validate_row_context(self.finance_import_row_id, self.authoritative_complete)
         _validate_flags(self.reversal_target_unique, self.reversal_target_valid, self.reversal_amount_valid, self.reversal_allocation_complete)
 
     @property
@@ -193,6 +200,13 @@ def _validate_common(identity, token, version, complete) -> None:
 def _validate_flags(*values) -> None:
     if any(type(value) is not bool for value in values):
         raise TypeError("government subsidy current-fact flags must be bool")
+
+
+def _validate_row_context(value: int | None, complete: bool) -> None:
+    if complete:
+        require_positive_integer(value, "finance import row id")
+    elif value is not None:
+        raise ValueError("incomplete government subsidy fact cannot expose bank row")
 
 
 def _incomplete(complete: bool) -> list[GovernmentSubsidyCurrentFactReason]:

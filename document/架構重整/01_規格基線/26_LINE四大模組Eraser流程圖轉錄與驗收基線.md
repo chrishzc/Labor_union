@@ -339,12 +339,12 @@ Auto_Payroll_Engine（依正式出勤與補助規則產生結算）。
 | Gateway 直接查 clients，吻合後直接升級角色 | verified token 進 LINE Identity application；line_identity_bindings 是唯一 binding writer，onboarding 是 projection outcome，不是 role promotion | superseded-by-current-spec | 17、23 |
 | query-string userId 或頁面參數可作授權 | query string 只可導航；授權必須由 server verified token／session 衍生 | superseded-by-current-spec | 17、20、23 |
 | provisional registration 由 LINE 擁有 | provisional registration 由 Case Import 擁有，LINE 只保存平台身分與驗證 evidence | superseded-by-current-spec | 17 |
-| profile_update 核准後直接更新 clients | 必須由 Client owner 的 typed Query／Preview／Apply／receipt／readback 執行；目前 persistence/schema capability 未完成 | blocked | 20 §6.1、23、96 CUR-LIFF-PROFILE-01 |
+| profile_update 核准後直接更新 clients | 已由 Client owner 的 typed Query／Preview／Apply／receipt／readback承接；LINE只驗token／binding與轉送，1021 additive successor已形成，runtime DB／verified-token Browser另依gate驗收 | repository-local-complete | 20 §6.1、23、96 CUR-LIFF-PROFILE-01 |
 | Staff LIFF 請假直接更新班表／end_date | LIFF 只建立 Scheduling request evidence；正式順延／代班須由 Scheduling Preview／Apply fresh-lock | superseded-by-current-spec | 02、17 |
 | Admin 綁定即「升級 union_staff」 | 綁定只建立 Access／LINE identity projection；不得由 LIFF 自行變更業務角色根事實 | superseded-by-current-spec | 17、23、25 |
 | production full AI、置信度路由與自動回答 | 目前 reject production full AI；只核准 deterministic Tier 1＋durable manual fallback，Tier 2 proposed | blocked | 17 M2 amendment、20 |
 | AI 事件規則零代碼即時發布 | 本機規則編輯／預覽不等於正式 publication；正式 catalog Query／Preview／Apply 與 Knowledge source contract 尚缺 | blocked | 17、20、96 CUR-LINE-QA |
-| 滿意度直接寫資料庫並統計 | 正式 feedback Query／record／receipt、privacy、ticket linkage 尚缺；本機點擊不得假造 | blocked | 20、96 CUR-LINE-AI-FEEDBACK-01 |
+| 滿意度直接寫資料庫並統計 | Feedback owner、exact response subject、`resolved|unresolved`、receipt、privacy與Customer Service linkage契約已裁決；尚未到Task 96 implementation順位，本機點擊不得假造 | contract-ready | 20 §6.3、96 CUR-LINE-AI-FEEDBACK-01 |
 | 客戶同意降維後自動更新訂單並派案 | M3 只保存 criteria／candidate／decision lineage；accepted 後 fresh-read，產生 Assignment conversion／rematch request，不寫 Orders／Assignment | superseded-by-current-spec | 02、17 |
 | 月嫂同意改期後自動更新合約與日期 | 必須分別由 Contract／Orders／Scheduling owner 依 typed command 與 fresh facts 推進，M3 不跨 owner 寫入 | superseded-by-current-spec | 02、17、21 |
 | alert_group_id 重設為 NULL | current runtime target 採 history-preserving disable、active singleton、opaque CAS，不清除歷史 root | superseded-by-current-spec | 17 M4 amendment |

@@ -468,17 +468,25 @@ Refresh（2026-08-29 current-state anomaly slimming supersession）：
 - 一般 Query 不 scan；
 - rescan 不 reclassify、不 dispatch、不新增 finance occurrence。
 
-Active predicate：
+Active predicate（2026-08-31 source-correction supersession）：
 
 ```text
-active = integrity_inconsistent_count > 0
+active = owner_readback_incomplete
+         OR structural_ambiguity
+         OR (integrity_inconsistent_count > 0 AND no_terminal_correction_successor)
 ```
 
 普通待分類筆數不啟動 `IMPORT-006`，只產生 6.1 的帳務待確認。Projection query 必須由
 occurrence membership CTE、bounded aggregate、grouped counts、`LIMIT 20` sample 及
 latest-run query 組成，不得把整批 canonical rows 載入記憶體。
 
-`integrity_inconsistent_count = 0` 且 bounded recheck authoritative complete 時直接刪除
+canonical source/root正確時只允許同batch/version owner deterministic rebuild。若人工確認original source
+本身錯誤，原batch／canonical rows／occurrences immutable，由新accepted batch在同一ingestion UoW保存
+exact `original_batch_identity + version -> corrected_successor_batch_identity + version` lineage；不得用filename、
+金額、姓名、row similarity或時間推測。successor必須唯一、completed、fresh verified且完整承接所有current
+integrity problems，否則原issue保持active。
+
+`integrity_inconsistent_count = 0` 或上述terminal successor成立，且 bounded recheck authoritative complete 時直接刪除
 current row。問題再次出現時以相同 stable `issue_key` 建立新 episode；不存在人工
 resolve、reopen 或 claimed metadata。Finance Import batch、canonical bank facts、owner occurrences、
 classification、ledger／allocation 與 receipts 仍保留在 Finance owner，不得被 anomaly cleanup 刪除。

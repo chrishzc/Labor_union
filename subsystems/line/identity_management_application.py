@@ -62,7 +62,7 @@ class LineIdentityManagementApplication:
             return unit_of_work.identity_management.detail(line_user_id)
 
     def current_fact(self, line_user_id: LineUserId) -> LineIdentityCurrentFactReadback:
-        """Return a zero-write LINE-004 root/projection diagnosis."""
+        """Return the zero-write LINE identity owner readback."""
 
         query = LineIdentityCurrentFactQuery(line_user_id)
         with self._unit_of_work_factory() as unit_of_work:
@@ -211,7 +211,11 @@ class LineIdentityManagementApplication:
                 command.correlation_id.value,
             )
             _clear_binding_owner(unit_of_work, current)
-            _bind_replacement_owner(unit_of_work, resulting)
+            _bind_replacement_owner(
+                unit_of_work,
+                resulting,
+                _candidate_line_user_id(candidate),
+            )
             unit_of_work.audit.append(
                 LineAuditIntent(
                     "line.identity.binding.replaced",
@@ -439,9 +443,25 @@ def _replacement_blockers(binding, candidate, target_reference) -> tuple[str, ..
         blockers.append("line_identity_subject_unchanged")
     if candidate is None:
         blockers.append("line_identity_replacement_subject_not_found")
-    elif str(candidate.get("line_user_id") or "").strip():
+    elif (
+        (candidate_line_user_id := _candidate_line_user_id(candidate)) is not None
+        and candidate_line_user_id != _binding_line_user_id(binding)
+    ):
         blockers.append("line_identity_replacement_subject_already_bound")
     return tuple(blockers)
+
+
+def _candidate_line_user_id(candidate) -> LineUserId | None:
+    raw_value = (candidate or {}).get("line_user_id")
+    if isinstance(raw_value, LineUserId):
+        return raw_value
+    value = str(raw_value or "").strip()
+    return LineUserId(value) if value else None
+
+
+def _binding_line_user_id(binding) -> LineUserId:
+    raw_value = binding.line_user_id
+    return raw_value if isinstance(raw_value, LineUserId) else LineUserId(str(raw_value))
 
 
 def _menu_reset_intent(request, retry_number: int = 0) -> OutboxIntent:
@@ -530,7 +550,7 @@ def _clear_owner_projection(unit_of_work, request) -> None:
 
 
 def _clear_binding_owner(unit_of_work, binding) -> None:
-    line_user_id = LineUserId(binding.line_user_id)
+    line_user_id = _binding_line_user_id(binding)
     if binding.subject_type.value == "customer":
         unit_of_work.customers.clear_customer(binding.subject_reference, line_user_id)
         return
@@ -540,25 +560,29 @@ def _clear_binding_owner(unit_of_work, binding) -> None:
     unit_of_work.admins.clear_admin(binding.subject_reference, line_user_id)
 
 
-def _bind_replacement_owner(unit_of_work, binding) -> None:
+def _bind_replacement_owner(
+    unit_of_work,
+    binding,
+    expected_current_line_user_id: LineUserId | None,
+) -> None:
     if binding.subject_type.value == "customer":
         unit_of_work.customers.bind_customer(
             binding.subject_reference,
             binding.line_user_id,
-            None,
+            expected_current_line_user_id,
         )
         return
     if binding.subject_type.value == "staff":
         unit_of_work.staff.bind_staff(
             binding.subject_reference,
             binding.line_user_id,
-            None,
+            expected_current_line_user_id,
         )
         return
     unit_of_work.admins.bind_admin(
         binding.subject_reference,
         binding.line_user_id,
-        None,
+        expected_current_line_user_id,
     )
 
 

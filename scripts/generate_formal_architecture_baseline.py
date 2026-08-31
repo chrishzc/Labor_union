@@ -58,7 +58,12 @@ def _legacy_field_callers(paths: tuple[Path, ...]) -> list[str]:
 
 
 def _legacy_module_callers(paths: tuple[Path, ...]) -> list[str]:
-    tokens = ("subsidy_return_reconciliation", "record_client_subsidy_return")
+    # Match the retired module/function boundary, not a current business
+    # operation whose descriptive name happens to contain the same words.
+    tokens = (
+        "subsystems.client_finance.subsidy_return_reconciliation",
+        "record_client_subsidy_return(",
+    )
     return [path.relative_to(PROJECT_ROOT).as_posix() for path in paths if path.relative_to(PROJECT_ROOT).as_posix() not in EVIDENCE_ONLY_PATHS | {LEGACY_MODULE} and any(token in path.read_text(encoding="utf-8") for token in tokens)]
 
 

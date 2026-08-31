@@ -35,6 +35,7 @@ from api.routes import (
     assignment_schedule_rest_dates,
     beclass_import_review,
     client_beclass_import,
+    client_profile,
     case_architecture_bootstrap,
     client_deposit_reversal,
     client_receipt_reconciliation,
@@ -308,6 +309,8 @@ app.include_router(controlled_files.router)
 app.include_router(finance_import.router)
 app.include_router(hcm_import.router)
 app.include_router(client_beclass_import.router)
+app.include_router(client_profile.router)
+app.include_router(client_profile.review_router)
 app.include_router(historical_order_adoption.router)
 app.include_router(historical_baseline_projector.router)
 app.include_router(historical_completion.router)

@@ -16,7 +16,6 @@ from subsystems.case_import.hcm_beclass_reconciliation import (
     CaseImportReconciliationApplication,
     reconcile_hcm_beclass_cooking,
 )
-from subsystems.jobs.contracts import validate_command_key
 
 
 class _Connection:
@@ -214,7 +213,7 @@ def test_reconciliation_replay_does_not_repeat_typed_terms_apply():
     assert port.apply_count == 1
 
 
-def test_pairing_recheck_identities_are_valid_durable_command_keys(monkeypatch):
+def test_reconciliation_does_not_create_retired_anomaly_rechecks(monkeypatch):
     requests = []
 
     class PairingRechecks:
@@ -243,7 +242,4 @@ def test_pairing_recheck_identities_are_valid_durable_command_keys(monkeypatch):
 
     reconciliation.reconcile("115990823")
 
-    assert len(requests) == 2
-    assert [validate_command_key(request.intent_identity) for request in requests] == [
-        request.intent_identity for request in requests
-    ]
+    assert requests == []

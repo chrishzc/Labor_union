@@ -65,11 +65,6 @@ def _run(monkeypatch, staged_rows):
         }
 
     monkeypatch.setattr(importer, "dispatch_finance_import_row", dispatch)
-    monkeypatch.setattr(
-        importer,
-        "project_finance_import_review_alert",
-        lambda cursor, batch_id: None,
-    )
     return importer.import_finance_workbook(
         "renamed-and-overlapping.xlsx",
         dry_run=True,

@@ -20,13 +20,10 @@ from subsystems.orders.historical_order_review_remediation_outbox_consumer impor
     consume_historical_order_review_remediation_events,
 )
 from subsystems.finance_import.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
-from subsystems.anomalies.government_subsidy_anomaly_source import GovernmentSubsidyAnomalyScanRequest
-from subsystems.anomalies.government_subsidy_assignment_drift_anomaly_source import GovernmentSubsidyAssignmentDriftScanRequest
-from subsystems.anomalies.government_subsidy_integrity_anomaly_source import GovernmentSubsidyIntegrityScanRequest
-from subsystems.anomalies.government_subsidy_reversal_anomaly_source import GovernmentSubsidyReversalScanRequest
 from subsystems.anomalies.government_return_outbound_overage_anomaly_source import GovernmentReturnOutboundOverageScanRequest
+from subsystems.anomalies.government_subsidy_anomaly_source import GovernmentSubsidyAnomalyScanRequest
+from subsystems.anomalies.government_subsidy_reversal_anomaly_source import GovernmentSubsidyReversalScanRequest
 from subsystems.anomalies.scheduling_coverage_anomaly_consumer import SchedulingCoverageScanRequest
-from subsystems.anomalies.staff_payables_anomaly_source import StaffPayablesAnomalyScanCursors, consume_staff_payables_anomaly_sources
 from subsystems.anomalies.ports import AnomalyRuntime, require_runtime
 from subsystems.government_subsidy.subsidy_advance_outbox_consumer import (
     consume_government_subsidy_advance_events,
@@ -52,31 +49,25 @@ class ArchitectureDeliveryResult:
 
 @dataclass(slots=True)
 class ArchitectureSourceScanState:
-    staff_payables: StaffPayablesAnomalyScanCursors
     scheduling_after_source_identity: str | None
     scheduling_exhausted: bool
     government_subsidy_after_row_id: int
     government_subsidy_exhausted: bool
-    government_subsidy_integrity_after_batch_id: int
-    government_subsidy_integrity_exhausted: bool
     government_subsidy_reversal_after_row_id: int
     government_subsidy_reversal_exhausted: bool
-    government_subsidy_assignment_drift_after_claim_item_id: int
-    government_subsidy_assignment_drift_exhausted: bool
-    government_return_outbound_overage_after_row_id: int
-    government_return_outbound_overage_exhausted: bool
     process_reminder_exhausted: bool
     beclass_review_after_row_id: int
     beclass_review_exhausted: bool
+    government_return_outbound_overage_after_row_id: int
+    government_return_outbound_overage_exhausted: bool
     next_cycle_at: float
 
     @classmethod
     def start(cls):
-        return cls(StaffPayablesAnomalyScanCursors.start(), None, False, 0, False, 0, False, 0, False, 0, False, 0, False, False, 0, False, 0.0)
+        return cls(None, True, 0, True, 0, True, True, 0, True, 0, False, 0.0)
 
     def cycle_complete(self) -> bool:
-        staff_exhausted = all(cursor is None for cursor in (self.staff_payables.overdue_after_obligation_identity, self.staff_payables.late_change_after_event_id, self.staff_payables.bank_master_after_staff_id))
-        return staff_exhausted and self.scheduling_exhausted and self.government_subsidy_exhausted and self.government_subsidy_integrity_exhausted and self.government_subsidy_reversal_exhausted and self.government_subsidy_assignment_drift_exhausted and self.government_return_outbound_overage_exhausted and self.process_reminder_exhausted and self.beclass_review_exhausted
+        return self.government_return_outbound_overage_exhausted
 
 
 class BorrowedAnomalyUnitOfWork:
@@ -148,15 +139,12 @@ def _consume_sources_if_due(connection, state, runtime: AnomalyRuntime):
 
 
 def _consume_source_pages(connection, state, runtime):
-    return (_consume_staff_source(connection, state, runtime), _consume_scheduling_source(connection, state, runtime), _consume_government_subsidy_source(connection, state, runtime), _consume_government_subsidy_integrity_source(connection, state, runtime), _consume_government_subsidy_reversal_source(connection, state, runtime), _consume_government_subsidy_assignment_drift_source(connection, state, runtime), _consume_government_return_outbound_overage_source(connection, state, runtime), _consume_process_reminder_source(connection, state, runtime), _consume_beclass_review_source(connection, state, runtime))
+    return (_consume_government_return_outbound_overage_source(connection, state, runtime),)
 
 
 def _restart_source_cycle(state):
-    state.staff_payables = StaffPayablesAnomalyScanCursors.start(); state.scheduling_after_source_identity = None; state.scheduling_exhausted = False
-    state.government_subsidy_after_row_id = 0; state.government_subsidy_exhausted = False; state.government_subsidy_integrity_after_batch_id = 0; state.government_subsidy_integrity_exhausted = False
-    state.government_subsidy_reversal_after_row_id = 0; state.government_subsidy_reversal_exhausted = False; state.government_subsidy_assignment_drift_after_claim_item_id = 0; state.government_subsidy_assignment_drift_exhausted = False; state.government_return_outbound_overage_after_row_id = 0; state.government_return_outbound_overage_exhausted = False
-    state.process_reminder_exhausted = False
-    state.beclass_review_after_row_id = 0; state.beclass_review_exhausted = False
+    state.government_return_outbound_overage_after_row_id = 0
+    state.government_return_outbound_overage_exhausted = False
 
 
 def _consume_process_reminder_source(connection, state, runtime):
@@ -196,15 +184,6 @@ def _consume_beclass_review_source(connection, state, runtime):
     return result.projected_count, 0
 
 
-def _consume_staff_source(connection, state, runtime):
-    result = runtime.consume_staff_payables_anomaly_sources(connection, as_of=current_business_instant().date(), maximum_items=_SOURCE_SCAN_PAGE_SIZE, cursors=state.staff_payables)
-    if result.succeeded:
-        state.staff_payables = result.cursors
-        return result.projected_count, 0
-    state.staff_payables = StaffPayablesAnomalyScanCursors(None, None, None, current_business_instant().date())
-    return 0, 1
-
-
 def _consume_scheduling_source(connection, state, runtime):
     if state.scheduling_exhausted: return 0, 0
     try:
@@ -218,10 +197,22 @@ def _consume_scheduling_source(connection, state, runtime):
 
 
 def _consume_government_subsidy_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentSubsidyAnomalyScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_after_row_id), runtime.project_government_subsidy_anomaly_page, "next_finance_import_row_id", "government_subsidy_after_row_id", "government_subsidy_exhausted")
-def _consume_government_subsidy_integrity_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentSubsidyIntegrityScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_integrity_after_batch_id), runtime.project_government_subsidy_integrity_page, "next_batch_id", "government_subsidy_integrity_after_batch_id", "government_subsidy_integrity_exhausted")
 def _consume_government_subsidy_reversal_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentSubsidyReversalScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_reversal_after_row_id), runtime.project_government_subsidy_reversal_page, "next_finance_import_row_id", "government_subsidy_reversal_after_row_id", "government_subsidy_reversal_exhausted")
-def _consume_government_subsidy_assignment_drift_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentSubsidyAssignmentDriftScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_assignment_drift_after_claim_item_id), runtime.project_government_subsidy_assignment_drift_page, "next_claim_item_id", "government_subsidy_assignment_drift_after_claim_item_id", "government_subsidy_assignment_drift_exhausted")
-def _consume_government_return_outbound_overage_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentReturnOutboundOverageScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_return_outbound_overage_after_row_id), runtime.project_government_return_outbound_overage_page, "next_finance_import_row_id", "government_return_outbound_overage_after_row_id", "government_return_outbound_overage_exhausted")
+
+
+def _consume_government_return_outbound_overage_source(connection, state, runtime):
+    return _consume_bounded_source(
+        connection,
+        state,
+        GovernmentReturnOutboundOverageScanRequest(
+            _SOURCE_SCAN_PAGE_SIZE,
+            state.government_return_outbound_overage_after_row_id,
+        ),
+        runtime.project_government_return_outbound_overage_page,
+        "next_finance_import_row_id",
+        "government_return_outbound_overage_after_row_id",
+        "government_return_outbound_overage_exhausted",
+    )
 
 
 def _consume_bounded_source(connection, state, request, projector, next_cursor_field, state_cursor_field, exhausted_field):

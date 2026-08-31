@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-2026-08-31-v22",
+  "release_id": "labor-union-validation-schema-2026-08-31-v23",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,13 +8,13 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 147,
-    "ordered_digest_sha256": "b8037c511e4b2eb38cb094221196dd18c30739832f1a99e751f209d266cfe8b7",
-    "terminal_artifact": "1020_historical_owner_payment_settlement.sql"
+    "expected_count": 148,
+    "ordered_digest_sha256": "03eb1d94ec75e565de758ea9d161ca29a1f7e124a02c0ae67b23fc746a8c53b3",
+    "terminal_artifact": "1021_task96_owner_contract_successors.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "73653d73f28300dffaf102611035b7175fa43963e06b1a8f1c3848d0f5e92bb9"
+    "sha256": "65f58292002408997fae0780e78d72eaac1583ed9649aefcc14264926b09cac8"
   },
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_v1.sql",
@@ -25,7 +25,7 @@
     "required_views": [
       "v_order_details"
     ],
-    "minimum_trigger_count": 269,
+    "minimum_trigger_count": 283,
     "require_no_missing_versioned_tables": true
   },
   "database_safety": {

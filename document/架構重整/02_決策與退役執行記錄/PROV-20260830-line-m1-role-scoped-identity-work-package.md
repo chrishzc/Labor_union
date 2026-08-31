@@ -1,7 +1,7 @@
 # M1 role-scoped LINE identity work package
 
 - `package_id`: `PKG-20260830-LINE-M1-ROLE-SCOPED-IDENTITY`
-- `declared_status`: `approved`
+- `declared_status`: `completed`
 - `task_id`: `CUR-LINE-MODULES-1-4-CLOSURE-01`
 - `semantic_owner`: LINE Identity
 - `canonical_spec`: `01_規格基線/23_LINE身分管理與解除正式規格.md` §9
@@ -97,11 +97,9 @@ public API／entry point、legacy `line/line_bot.py` workflow、Staff retirement
 
 ## 6. Completion 與現行 blocker
 
-repository-local completion需WP1～WP4靜態與focused oracle全部`passed`，且final diff沒有本包以外
-production source。Current host已有可執行project `.venv`，但尚無明確configured disposable MySQL
-與legal `lu_test_*` target，DB gate 6 Engine verification與7 Developer acceptance目前為`BLOCKED`；
-在該環境出現前只能宣稱repository-local partial completion與`DB_CHANGE_NOT_READY`，不能宣稱
-M1 runtime terminal。
+WP1～WP4靜態與focused oracle、representative-data preserve migration、current DB readback與normal
+local runtime均已`passed`。M1 backend prerequisite已terminal；provider、verified-token LIFF、Rich Menu
+qualification與其他LINE surface仍由Task 96 register的獨立後順位項目管理，不由本包外推。
 
 ## 7. Current execution evidence（2026-08-31）
 
@@ -130,5 +128,13 @@ M1 runtime terminal。
 | 6 Engine verification | BLOCKED | 無合法disposable／preserve-data MySQL target與engine evidence；607個repository tests不能替代。 |
 | 7 Developer acceptance | NOT_RUN | Gate 5／6未PASS，不得執行launcher acceptance、switch或任何DB mutation。 |
 
-Current DB conclusion：`DB_CHANGE_NOT_READY`。這不否定repository-local `passed`，也不授權
+2026-08-31 current supersession：Gate 5～7已由Stage 1後的可解析Docker test target收旂。
+
+| Gate | Status | Current evidence |
+|---|---|---|
+| 5 Read-only plan | PASS | 獨立`lu_test_task96_m1_source_r1`由verified 1003 backup還原；plan證明1019～1021 absent、candidate absent與ordered current chain ready。 |
+| 6 Engine verification | PASS | source加入一組合成legacy customer binding／event後，canonical backup→restore→1004～1021 apply→verify為`verified`；1019 owned object exact、view mismatch 0，legacy root／event與role successor逐欄一致，source仍無successor tables。 |
+| 7 Developer acceptance | PASS | official same-name replacement後`--require-current`=1021；normal no-auth launcher的FastAPI／React、monitor、durable worker與incident worker通過，Browser `/admin/`與same-origin API GET皆200 evidence已在Task 96 register收旂。 |
+
+Current DB conclusion：`DB_CHANGE_READY`。一次性source／candidate已scoped cleanup；未操作
 production／`union_db`／provider／deployment。

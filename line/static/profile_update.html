@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
 File: profile_update.html
-Description: 保留客戶資料異動原始版面，但在正式 Query／Preview／Apply 契約完成前只提供人工辦理指引。
+Description: 以 server 驗證的 LIFF token 提出 Client 資料異動申請，經 Preview／確認後送出 pending request。
 -->
 <html lang="zh-Hant-TW">
 <head>
@@ -89,6 +89,7 @@ Description: 保留客戶資料異動原始版面，但在正式 Query／Preview
         .success-icon { font-size: 48px; color: var(--success); margin-bottom: 12px; }
         .success-title { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
         .success-desc { color: var(--muted); line-height: 1.7; }
+        .readback-card { display: none; background: rgba(47,133,90,.08); border: 1px solid rgba(47,133,90,.2); border-radius: 12px; padding: 13px; margin: 16px 0; line-height: 1.7; }
         .loader {
             display: none;
             position: fixed;
@@ -107,52 +108,121 @@ Description: 保留客戶資料異動原始版面，但在正式 Query／Preview
     <div id="formArea">
         <div class="logo" id="logo">新竹市月子工會</div>
         <h1>修改登記資料申請</h1>
-        <div class="subtitle">線上異動申請仍在建置中。目前請直接在 LINE 對話留下想修改的項目與內容，由工會人員人工核對與補登。</div>
+        <div class="subtitle">身分由伺服器驗證。你可以修改自己的基本資料；送出後由工會人員核准，核准前不會直接變更資料。</div>
         <div id="status" class="status"></div>
+        <div id="submissionReadback" class="readback-card" aria-live="polite"></div>
         <form id="changeForm">
-            <div class="section-title">1. 勾選要修改的項目</div>
+            <div class="section-title">目前登記資料</div>
+            <div id="currentValues" class="field-card">正在讀取…</div>
+            <div class="section-title">選擇要修改的項目</div>
             <div id="fieldOptions"></div>
-            <div class="section-title">2. 填寫修改後內容</div>
+            <div class="section-title">填寫修改後內容</div>
             <div id="fieldInputs"></div>
-            <button type="submit" id="submitButton" disabled>線上申請尚未啟用</button>
+            <button type="submit" id="submitButton" disabled>預覽異動</button>
+            <button type="button" class="secondary" id="applyButton" hidden>確認並送出申請</button>
         </form>
     </div>
 </div>
 
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
     const fields = [
-        { id: "name", label: "姓名", help: "由工會核對身分後人工更新。" },
-        { id: "phone", label: "聯絡電話", help: "請在 LINE 對話提供可聯絡的電話。" },
-        { id: "expected_date", label: "預產期／生產日", help: "請提供正確日期與異動原因。" },
-        { id: "service_days", label: "服務天數", help: "服務條件異動須由工會確認案件狀態。" },
-        { id: "address", label: "服務地址", help: "請勿在公開群組留下完整地址。" }
-    ];
+        ["name", "姓名"], ["gender", "性別"], ["phone", "聯絡電話"], ["city", "縣市"],
+        ["address", "地址"], ["residence_type", "居住型態"], ["delivery_type", "生產方式"],
+        ["baby_info", "寶寶資訊"], ["notes", "其他事項"]
+    ].map(([id, label]) => ({id, label}));
+    let lineIdToken = "";
+    let profile = null;
+    let preview = null;
+    const correlationId = `liff-profile-${Date.now()}`;
 
-    function init() {
+    async function init() {
         renderOptions();
-        const status = document.getElementById("status");
-        status.textContent = "這個入口目前不會送出或修改正式資料。請回到 LINE 對話聯絡工會，由專員人工協助。";
-        status.className = "status notice";
+        try {
+            const config = await fetch('/api/config/liff/runtime?page=profile_update');
+            const configBody = await config.json();
+            const liffId = configBody.data?.liff_id;
+            if (!config.ok || !liffId) throw new Error('LIFF 尚未完成設定。');
+            await liff.init({liffId});
+            if (!liff.isLoggedIn()) { liff.login({redirectUri: location.href}); return; }
+            lineIdToken = liff.getIDToken() || "";
+            if (!lineIdToken) throw new Error('無法取得 LINE 登入憑證，請重新開啟此頁。');
+            const result = await request('/api/v1/line/client-profile/query', {line_id_token: lineIdToken});
+            profile = result.data;
+            renderCurrent(profile);
+            document.getElementById("submitButton").disabled = false;
+            showStatus("已載入目前資料。選擇欄位後可先預覽，預覽不會寫入資料。", "notice");
+        } catch (error) { showStatus(error.message || "目前無法載入資料，請稍後再試。", "error"); }
     }
 
     function renderOptions() {
         const container = document.getElementById("fieldOptions");
         container.innerHTML = fields.map(field => `
             <div class="option">
-                <input type="checkbox" id="pick_${field.id}" value="${field.id}" disabled>
+                <input type="checkbox" id="pick_${field.id}" value="${field.id}">
                 <div>
                     <label for="pick_${field.id}">${escapeHtml(field.label)}</label>
-                    <div class="help">${escapeHtml(field.help)}</div>
+                    <div class="help">送出後由工會人員核准。</div>
                 </div>
             </div>
         `).join("");
-        document.getElementById("fieldInputs").innerHTML = '<div class="help">正式查詢、異動預覽與送出流程完成後，才會在此載入目前資料。</div>';
+        container.querySelectorAll("input").forEach(input => input.addEventListener("change", renderInputs));
     }
 
-    document.getElementById("changeForm").addEventListener("submit", event => {
+    function renderCurrent(view) {
+        document.getElementById("currentValues").innerHTML = fields.map(field => `<div><strong>${escapeHtml(field.label)}</strong>：${escapeHtml(view.values[field.id] || "")}</div>`).join("");
+    }
+    function renderInputs() {
+        const selected = [...document.querySelectorAll("#fieldOptions input:checked")].map(input => input.value);
+        document.getElementById("fieldInputs").innerHTML = selected.length ? selected.map(id => `<div class="field-card"><label for="value_${id}">${escapeHtml(fields.find(field => field.id === id).label)}</label><input id="value_${id}" data-profile-field="${id}" value="${escapeHtml(profile?.values[id] || "")}" required></div>`).join("") : '<div class="help">請先選擇至少一個欄位。</div>';
+    }
+    document.getElementById("changeForm").addEventListener("submit", async event => {
         event.preventDefault();
-        return false;
+        const changes = Object.fromEntries([...document.querySelectorAll("[data-profile-field]")].map(input => [input.dataset.profileField, input.value]));
+        try {
+            const result = await request('/api/v1/line/client-profile/preview', {line_id_token: lineIdToken, changes, expected_version: profile.version, reason: 'LIFF 本人資料異動申請'});
+            preview = result.data;
+            showStatus(`請確認異動欄位：${Object.keys(preview.requested).join('、')}。目前尚未送出。`, "notice");
+            document.getElementById("applyButton").hidden = false;
+            document.getElementById("submitButton").hidden = true;
+        } catch (error) { showStatus(error.message || "無法建立預覽，請重新載入。", "error"); }
     });
+    document.getElementById("applyButton").addEventListener("click", async () => {
+        if (!preview || !confirm("確認送出資料異動申請？送出後將等待工會人員審核。")) return;
+        try {
+            const result = await request('/api/v1/line/client-profile/apply', {line_id_token: lineIdToken, changes: preview.requested, expected_version: preview.current_version, reason: 'LIFF 本人資料異動申請', preview_fingerprint: preview.preview_fingerprint, idempotency_key: `liff-profile-${crypto.randomUUID()}`, correlation_id: correlationId});
+            const receipt = result.data;
+            if (receipt?.readback) {
+                profile = receipt.readback;
+                renderCurrent(profile);
+            }
+            renderSubmissionReceipt(receipt);
+            showStatus(`申請已送出，目前狀態：${receipt?.request?.status || "pending"}。上方已顯示伺服器讀回資料。`, "notice");
+            document.getElementById("applyButton").hidden = true;
+            document.getElementById("changeForm").querySelectorAll("input,button").forEach(control => control.disabled = true);
+        } catch (error) { showStatus(error.message || "申請未送出，請重新預覽。", "error"); }
+    });
+    async function request(url, payload) {
+        const response = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.detail?.error?.message || body.detail?.message || '操作未完成。');
+        return body;
+    }
+    function showStatus(message, kind) { const status = document.getElementById("status"); status.textContent = message; status.className = `status ${kind}`; }
+
+    function renderSubmissionReceipt(receipt) {
+        const card = document.getElementById("submissionReadback");
+        if (!receipt?.request || !receipt?.readback) return;
+        card.textContent = "";
+        const title = document.createElement("strong");
+        title.textContent = `申請單 #${receipt.request.request_id}（${receipt.request.status}）`;
+        card.appendChild(title);
+        card.appendChild(document.createElement("br"));
+        const detail = document.createElement("span");
+        detail.textContent = fields.map(field => `${field.label}：${receipt.readback.values?.[field.id] || ""}`).join("；");
+        card.appendChild(detail);
+        card.style.display = "block";
+    }
 
     function escapeHtml(value) {
         return String(value || "").replace(/[&<>"']/g, char => ({

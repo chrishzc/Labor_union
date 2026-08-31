@@ -334,21 +334,8 @@ def resolve_alert_workflow(
 def default_anomaly_registry() -> AnomalyDefinitionRegistry:
     return AnomalyDefinitionRegistry(
         (
-            _schedule_coverage_definition(),
-            _staff_payout_late_change_definition(),
-            _government_subsidy_no_unique_batch_definition(),
-            _government_subsidy_ambiguous_allocation_definition(),
-            _government_subsidy_integrity_definition(),
-            _government_subsidy_reversal_definition(),
-            _government_subsidy_assignment_drift_definition(),
             _government_return_outbound_overage_definition(),
-            _beclass_identity_conflict_definition(),
-            _finance_integrity_definition(),
-            _beclass_missing_definition(),
-            _schedule_replaced_assignment_definition(),
-            _schedule_overlap_definition(),
             _line_notification_delivery_definition(),
-            _line_identity_conflict_definition(),
         )
     )
 
@@ -380,7 +367,20 @@ def _beclass_missing_definition() -> AnomalyDefinition:
         fingerprint_fields=("case_no",),
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
-        available_actions=(),
+        available_actions=(
+            RecoveryActionDescriptor(
+                action_key="import_client_beclass_counterpart",
+                label="匯入對應的客戶BeClass資料",
+                owning_domain="case_import",
+                preview_operation="PreviewClientBeClassWorkbook",
+                apply_operation="ApplyClientBeClassWorkbook",
+                requires_preview=True,
+                form_schema_key="case_import.client_beclass_workbook.v1",
+                source_binding_keys=("case_no", "source_version"),
+                required_operator_inputs=("workbook",),
+                completion_predicate="case_import_pairing_unique_and_consistent",
+            ),
+        ),
         display_fields=("case_no",),
     )
 
@@ -564,7 +564,32 @@ def _schedule_replaced_assignment_definition() -> AnomalyDefinition:
         fingerprint_fields=("assignment_id",),
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
-        available_actions=(),
+        available_actions=(
+            RecoveryActionDescriptor(
+                action_key="rebuild_replacement_assignment_plan",
+                label="重建尚未開始服務的人力配置",
+                owning_domain="scheduling",
+                preview_operation="PreviewAssignmentPlan",
+                apply_operation="ApplyAssignmentPlan",
+                requires_preview=True,
+                form_schema_key="scheduling.assignment_plan.v1",
+                source_binding_keys=("assignment_id", "case_no", "source_version"),
+                required_operator_inputs=("reason", "segments"),
+                completion_predicate="scheduling_replacement_lineage_complete",
+            ),
+            RecoveryActionDescriptor(
+                action_key="complete_replacement_leave_substitution",
+                label="完成已開始服務的請假代班",
+                owning_domain="scheduling",
+                preview_operation="PreviewLeaveSubstitutionBatch",
+                apply_operation="ApplyLeaveSubstitutionBatch",
+                requires_preview=True,
+                form_schema_key="scheduling.leave_substitution.v1",
+                source_binding_keys=("assignment_id", "case_no", "source_version"),
+                required_operator_inputs=("items", "reason"),
+                completion_predicate="scheduling_replacement_lineage_complete",
+            ),
+        ),
         display_fields=("assignment_id", "case_no", "staff_id"),
     )
 
@@ -576,7 +601,26 @@ def _schedule_overlap_definition() -> AnomalyDefinition:
         fingerprint_fields=("assignment_id_a", "assignment_id_b"),
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
-        available_actions=(),
+        available_actions=(
+            RecoveryActionDescriptor(
+                action_key="rebuild_overlapping_assignment_plan",
+                label="修正重疊的人力配置",
+                owning_domain="scheduling",
+                preview_operation="PreviewAssignmentPlan",
+                apply_operation="ApplyAssignmentPlan",
+                requires_preview=True,
+                form_schema_key="scheduling.assignment_overlap_correction.v1",
+                source_binding_keys=(
+                    "assignment_id_a",
+                    "assignment_id_b",
+                    "case_no_a",
+                    "case_no_b",
+                    "source_version",
+                ),
+                required_operator_inputs=("correction_case_no", "reason", "segments"),
+                completion_predicate="scheduling_assignment_pair_no_longer_overlaps",
+            ),
+        ),
         display_fields=("assignment_id_a", "assignment_id_b", "staff_id", "staff_name"),
     )
 
@@ -626,11 +670,18 @@ def _line_notification_delivery_definition() -> AnomalyDefinition:
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(
-            DomainActionLink(
-                "review_notification_timeline",
-                "line_notification",
-                "QueryLineNotificationTimeline",
-                False,
+            RecoveryActionDescriptor(
+                action_key="manual_replay_failed_notification",
+                label="重新發送失敗的LINE通知",
+                owning_domain="line_notification",
+                preview_operation="PreviewLineNotificationManualReplay",
+                apply_operation="ApplyLineNotificationManualReplay",
+                requires_preview=True,
+                form_schema_key="line_notification.manual_replay.v1",
+                source_binding_keys=("case_no", "notification_reason", "source_version"),
+                required_operator_inputs=("reason", "source_event_id"),
+                required_capability="line.config.manage",
+                completion_predicate="line_notification_failed_sources_have_terminal_replay_successors",
             ),
         ),
         display_fields=("case_no", "notification_reason"),
@@ -657,7 +708,27 @@ def _line_identity_conflict_definition() -> AnomalyDefinition:
         fingerprint_fields=("line_user_id",),
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
-        available_actions=(),
+        available_actions=(
+            RecoveryActionDescriptor(
+                action_key="replace_same_type_line_identity_subject",
+                label="將LINE身分改綁至目前案件",
+                owning_domain="line_identity",
+                preview_operation="PreviewLineIdentitySubjectReplacement",
+                apply_operation="ApplyLineIdentitySubjectReplacement",
+                requires_preview=True,
+                form_schema_key="line_identity.same_type_replacement.v1",
+                source_binding_keys=(
+                    "line_user_id",
+                    "source_version",
+                    "subject_type",
+                ),
+                required_operator_inputs=("reason", "target_subject_reference"),
+                required_capability="line.identity.binding.manage",
+                completion_predicate=(
+                    "line_identity_same_type_projection_unique_and_root_consistent"
+                ),
+            ),
+        ),
         display_fields=("line_user_id",),
     )
 
@@ -670,11 +741,17 @@ def _schedule_coverage_definition() -> AnomalyDefinition:
         severity=AnomalySeverity.BLOCKING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(
-            DomainActionLink(
-                "correct_official_service_dates",
-                "scheduling",
-                "PreviewCorrectOfficialServiceDates",
-                True,
+            RecoveryActionDescriptor(
+                action_key="rebuild_assignment_plan",
+                label="重建正式人力配置",
+                owning_domain="scheduling",
+                preview_operation="PreviewAssignmentPlan",
+                apply_operation="ApplyAssignmentPlan",
+                requires_preview=True,
+                form_schema_key="scheduling.assignment_plan.v1",
+                source_binding_keys=("case_no", "source_version"),
+                required_operator_inputs=("reason", "segments"),
+                completion_predicate="scheduling_effective_generation_complete",
             ),
         ),
         display_fields=(
@@ -782,24 +859,40 @@ def _staff_payables_definition(
 
 
 def _government_subsidy_no_unique_batch_definition():
-    return _government_subsidy_definition(
-        "GOVSUB-001",
-        ("bank_fact_identity",),
-        ("bank_fact_identity", "candidate_batch_ids"),
-        "review_government_subsidy_receipt",
-        "PreviewGovernmentSubsidyReceipt",
-        True,
+    return AnomalyDefinition(
+        code="GOVSUB-001",
+        source_domain="government_subsidy",
+        fingerprint_fields=("bank_fact_identity",),
+        severity=AnomalySeverity.BLOCKING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(RecoveryActionDescriptor(
+            action_key="review_government_subsidy_receipt", label="核對並入帳政府補助款",
+            owning_domain="government_subsidy", preview_operation="PreviewGovernmentSubsidyReceipt",
+            apply_operation="ApplyGovernmentSubsidyReceipt", requires_preview=True,
+            form_schema_key="government_subsidy.receipt.v1",
+            source_binding_keys=("bank_fact_identity", "finance_import_row_id", "source_version"),
+            required_operator_inputs=("allocations", "batch_id", "reason"),
+            completion_predicate="government_subsidy_receipt_fully_reconciled",
+        ),),
+        display_fields=("bank_fact_identity", "candidate_batch_ids"),
     )
 
 
 def _government_subsidy_ambiguous_allocation_definition():
-    return _government_subsidy_definition(
-        "GOVSUB-002",
-        ("bank_fact_identity", "batch_id"),
-        ("bank_fact_identity", "batch_id", "item_outstanding"),
-        "allocate_government_subsidy_receipt",
-        "PreviewGovernmentSubsidyReceipt",
-        True,
+    return AnomalyDefinition(
+        code="GOVSUB-002", source_domain="government_subsidy",
+        fingerprint_fields=("bank_fact_identity", "batch_id"), severity=AnomalySeverity.BLOCKING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(RecoveryActionDescriptor(
+            action_key="allocate_government_subsidy_receipt", label="指定政府補助款分配",
+            owning_domain="government_subsidy", preview_operation="PreviewGovernmentSubsidyReceipt",
+            apply_operation="ApplyGovernmentSubsidyReceipt", requires_preview=True,
+            form_schema_key="government_subsidy.receipt_allocation.v1",
+            source_binding_keys=("bank_fact_identity", "batch_id", "finance_import_row_id", "source_version"),
+            required_operator_inputs=("allocations", "reason"),
+            completion_predicate="government_subsidy_receipt_allocation_conserved",
+        ),),
+        display_fields=("bank_fact_identity", "batch_id", "item_outstanding"),
     )
 
 
@@ -815,17 +908,20 @@ def _government_subsidy_integrity_definition():
 
 
 def _government_subsidy_reversal_definition():
-    return _government_subsidy_definition(
-        "GOVSUB-004",
-        ("reversal_bank_fact_identity", "source_receipt_id"),
-        (
-            "remaining_reversible_ntd",
-            "reversal_bank_fact_identity",
-            "source_receipt_id",
-        ),
-        "review_government_subsidy_reversal",
-        "PreviewGovernmentSubsidyReversal",
-        True,
+    return AnomalyDefinition(
+        code="GOVSUB-004", source_domain="government_subsidy",
+        fingerprint_fields=("reversal_bank_fact_identity", "source_receipt_id"),
+        severity=AnomalySeverity.BLOCKING, projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(RecoveryActionDescriptor(
+            action_key="review_government_subsidy_reversal", label="核對政府補助沖銷",
+            owning_domain="government_subsidy", preview_operation="PreviewGovernmentSubsidyReversal",
+            apply_operation="ApplyGovernmentSubsidyReversal", requires_preview=True,
+            form_schema_key="government_subsidy.reversal.v1",
+            source_binding_keys=("finance_import_row_id", "reversal_bank_fact_identity", "source_receipt_id", "source_version"),
+            required_operator_inputs=("allocations", "reason"),
+            completion_predicate="government_subsidy_reversal_fully_reconciled",
+        ),),
+        display_fields=("remaining_reversible_ntd", "reversal_bank_fact_identity", "source_receipt_id"),
     )
 
 
@@ -1132,10 +1228,14 @@ def _beclass_validation_definition() -> AnomalyDefinition:
 
 
 def _beclass_identity_conflict_definition() -> AnomalyDefinition:
-    return _beclass_import_definition(
+    return AnomalyDefinition(
         code="IMPORT-003",
+        source_domain="case_import",
+        fingerprint_fields=("entity_kind", "review_item_id"),
         severity=AnomalySeverity.WARNING,
-        action_code="review_import_identity_conflict",
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("entity_kind", "error_codes", "masked_identifier", "review_item_id", "source_row", "source_sheet", "version"),
     )
 
 
@@ -1238,12 +1338,7 @@ def _validate_identity(value: str, field_name: str) -> None:
     require_canonical_text(value, field_name, _IDENTITY_MAXIMUM_LENGTH)
 
 
-_AUTO_RESOLUTION_CONTRACTS = {
-    "GOVSUB-003": AutoResolutionContract(
-        "14_Government_Subsidy_Domain.md §6",
-        "government_subsidy_current_revision_integrity_clear",
-    ),
-}
+_AUTO_RESOLUTION_CONTRACTS = {}
 
 
 def _validate_recovery_action_keys(definitions: tuple[AnomalyDefinition, ...]) -> None:

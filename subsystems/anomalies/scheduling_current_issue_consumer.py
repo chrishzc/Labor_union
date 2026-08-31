@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import asdict, replace
 
 from domains.anomalies.current_issue import CurrentIssueCandidate, OwnerSnapshot
+from domains.anomalies.registry import default_anomaly_registry
 from subsystems.scheduling.current_anomaly_facts import (
     SCHEDULING_ANOMALY_OWNER_DOMAIN, SCHEDULING_ANOMALY_OWNER_ROOT_TYPE,
     SchedulingCoverageCurrentFact, SchedulingCurrentFact, SchedulingCurrentIssueCode,
@@ -40,7 +42,11 @@ class SchedulingCurrentIssueConsumer:
             owner_domain=SCHEDULING_ANOMALY_OWNER_DOMAIN, owner_root_type=SCHEDULING_ANOMALY_OWNER_ROOT_TYPE,
             subject_type=code.value, subject_id=subject_id, owner_version=fact.owner_version,
             severity="blocking", blocking=True,
-            details={"unresolved_reason_codes": tuple(item.value for item in fact.unresolved_reason_codes), "root_condition_active": True},
+            details={
+                "unresolved_reason_codes": tuple(item.value for item in fact.unresolved_reason_codes),
+                "root_condition_active": True,
+                **_available_actions(fact, code),
+            },
             subject_identity=subject_identity,
         )
 
@@ -54,6 +60,62 @@ def _identity(fact: SchedulingCurrentFact):
         return SchedulingCurrentIssueCode.ASSIGNMENT_OVERLAP, left + ":" + right, {"assignment_id_a": left, "assignment_id_b": right}
     value = fact.case_no + ":" + str(fact.generation)
     return SchedulingCurrentIssueCode.COVERAGE_INVALID, value, {"case_no": fact.case_no, "generation": str(fact.generation)}
+
+
+def _available_actions(
+    fact: SchedulingCurrentFact,
+    code: SchedulingCurrentIssueCode,
+) -> dict[str, object]:
+    if code is SchedulingCurrentIssueCode.REPLACEMENT_INCOMPLETE:
+        if not isinstance(fact, SchedulingReplacementCurrentFact):
+            raise TypeError("Scheduling replacement action fact is invalid")
+        action_key = (
+            "complete_replacement_leave_substitution"
+            if fact.service_started
+            else "rebuild_replacement_assignment_plan"
+        )
+        descriptor = next(
+            action
+            for action in default_anomaly_registry().available_actions(code.value)
+            if action.action_key == action_key
+        )
+        bound = replace(
+            descriptor,
+            source_bindings={
+                "assignment_id": fact.assignment_id,
+                "case_no": fact.case_no,
+                "source_version": fact.owner_version,
+            },
+        )
+        return {"available_actions": (asdict(bound),)}
+    if code is SchedulingCurrentIssueCode.ASSIGNMENT_OVERLAP:
+        if not isinstance(fact, SchedulingOverlapCurrentFact):
+            raise TypeError("Scheduling overlap action fact is invalid")
+        descriptor = default_anomaly_registry().available_actions(code.value)[0]
+        bound = replace(
+            descriptor,
+            source_bindings={
+                "assignment_id_a": fact.assignment_id_a,
+                "assignment_id_b": fact.assignment_id_b,
+                "case_no_a": fact.case_no_a,
+                "case_no_b": fact.case_no_b,
+                "source_version": fact.owner_version,
+            },
+        )
+        return {"available_actions": (asdict(bound),)}
+    if code is not SchedulingCurrentIssueCode.COVERAGE_INVALID:
+        return {}
+    if not isinstance(fact, SchedulingCoverageCurrentFact):
+        raise TypeError("Scheduling coverage action fact is invalid")
+    descriptor = default_anomaly_registry().available_actions(code.value)[0]
+    bound = replace(
+        descriptor,
+        source_bindings={
+            "case_no": fact.case_no,
+            "source_version": fact.owner_version,
+        },
+    )
+    return {"available_actions": (asdict(bound),)}
 
 
 __all__ = ["SchedulingCurrentIssueConsumer"]

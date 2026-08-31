@@ -106,10 +106,10 @@ Staff generic profile明確排除：`identity_card`、`line_user_id`、lifecycle
 |---|---|---|
 | Scope gate | `PASS` | 最新人工裁決固定Client第一階段九欄、closed validation、root=`client_id`、專用version及request/review application contract；Staff不在本包。 |
 | Change inventory | `PASS` | `schema-only`：`clients.client_profile_version`、既有`client_profile_change_requests`的typed concurrency/idempotency欄位，以及Client-owned event／receipt／outbox；`system-seed`／`business-row-backfill`／`destructive`皆none。既有row以column default 0供fresh owner Query，無row rewrite。 |
-| Static release gate | `NOT_RUN` | 尚無合法 release candidate。 |
-| Descriptor gate | `NOT_RUN` | target object contract 尚未確定。 |
-| Read-only plan gate | `NOT_RUN` | 尚無 release artifact 可列入 plan。 |
-| Engine verification gate | `NOT_RUN` | 尚未進入 schema implementation。 |
+| Static release gate | `PASS` | 1021 additive successor已納入fresh assembly與validation release，affected terminal baseline完成最小propagation。 |
+| Descriptor gate | `PASS` | 1021 descriptor與Client profile request/event/receipt/outbox及version欄位一致。 |
+| Read-only plan gate | `BLOCKED` | Current host無可解析test DB target／credential；repository artifact本身已可由既有runner列入ordered plan。 |
+| Engine verification gate | `NOT_RUN` | 1021 repository candidate已形成，但current host無可解析test DB engine target。 |
 | Developer acceptance gate | `NOT_RUN` | 前置 gates 未通過。 |
 
 總結：`DB_CHANGE_NOT_READY`。本文已授權上述bounded additive local schema candidate及完整DB gates；不授權
@@ -127,10 +127,14 @@ seed、business-row backfill、destructive、reset、replacement、`union_db`或
 
 ```yaml
 convergence:
-  status: CLIENT_SLICE_READY
+  status: CLIENT_REPOSITORY_LOCAL_PASS
   blockers:
+    - CLIENT_PROFILE_TEST_DB_ENGINE_NOT_RUN
+    - CLIENT_PROFILE_VERIFIED_BROWSER_NOT_RUN
     - LIFF-PROFILE-STAFF-ROOT
     - LIFF-PROFILE-STAFF-FIELD-CANDIDATE-REVIEW
 ```
 
-結果：Client第一階段`EXECUTION_AUTHORIZED`；Staff維持deferred且不得與Client slice綁定。
+結果：Client第一階段bounded public Query／Preview／Apply／readback、1021 schema candidate與LIFF surface已
+repository-local完成；Staff維持deferred且不得與Client slice綁定。Existing test DB ordered engine／preserve-data
+與verified applicant／enabled reviewer Browser仍`NOT_RUN`，不得由focused tests外推。
