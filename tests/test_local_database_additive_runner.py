@@ -592,6 +592,90 @@ def test_ordered_chain_resumes_from_first_absent_after_exact_prefix(
     ]
 
 
+def test_ordered_chain_keeps_exact_backfill_release_in_current_projection(
+    monkeypatch, tmp_path
+) -> None:
+    entries = (
+        {
+            "release_id": "baseline",
+            "release_fingerprint": "f0",
+            "data_effect": "schema_only",
+            "artifact": {"name": "1003_base.sql"},
+            "descriptor": {},
+        },
+        {
+            "release_id": "role-scope",
+            "release_fingerprint": "f1",
+            "data_effect": "schema_and_deterministic_backfill",
+            "artifact": {"name": "1019_role_scope.sql"},
+            "descriptor": {},
+        },
+        {
+            "release_id": "latest",
+            "release_fingerprint": "f2",
+            "data_effect": "schema_only",
+            "artifact": {"name": "1020_latest.sql"},
+            "descriptor": {},
+        },
+    )
+    states = iter(("exact", "exact", "absent"))
+    monkeypatch.setattr(migration, "_local_ordered_upgrade_entries", lambda: entries)
+    monkeypatch.setattr(
+        migration, "local_additive_target_state", lambda *_args, **_kwargs: {"state": next(states)}
+    )
+    monkeypatch.setattr(
+        migration,
+        "_local_discover_qualification",
+        lambda _path=None, *, release_id=None, **_kwargs: {
+            "release_id": release_id,
+            "release_fingerprint": "f2",
+            "_path": tmp_path / "q1020.json",
+        },
+    )
+    monkeypatch.setattr(migration, "_local_verify_hashes", lambda _value: None)
+
+    result = migration._local_ordered_chain_plan(
+        SimpleNamespace(), "lu_test_dataset", {"sha256": "a" * 64}
+    )
+
+    assert result["artifacts"][1]["data_effect"] == "schema_and_deterministic_backfill"
+    assert result["artifacts"][1]["state"] == "exact"
+    assert [item["release_id"] for item in result["pending_releases"]] == ["latest"]
+
+
+def test_ordered_chain_routes_missing_backfill_release_to_replacement(monkeypatch) -> None:
+    entries = (
+        {
+            "release_id": "baseline",
+            "release_fingerprint": "f0",
+            "data_effect": "schema_only",
+            "artifact": {"name": "1003_base.sql"},
+            "descriptor": {},
+        },
+        {
+            "release_id": "role-scope",
+            "release_fingerprint": "f1",
+            "data_effect": "schema_and_deterministic_backfill",
+            "artifact": {"name": "1019_role_scope.sql"},
+            "descriptor": {},
+        },
+    )
+    states = iter(("exact", "absent"))
+    monkeypatch.setattr(migration, "_local_ordered_upgrade_entries", lambda: entries)
+    monkeypatch.setattr(
+        migration, "local_additive_target_state", lambda *_args, **_kwargs: {"state": next(states)}
+    )
+
+    with pytest.raises(migration.LocalAdditiveBlocked) as error:
+        migration._local_ordered_chain_plan(
+            SimpleNamespace(), "lu_test_dataset", {"sha256": "a" * 64}
+        )
+
+    assert error.value.code == "replacement_required"
+    assert error.value.details["artifact"] == "1019_role_scope.sql"
+    assert error.value.details["data_effect"] == "schema_and_deterministic_backfill"
+
+
 def test_target_profile_blocks_mysql_system_schema_without_connecting() -> None:
     with pytest.raises(additive.LocalAdditiveBlocked) as error:
         additive.plan(SimpleNamespace(), "mysql", receipt_root=Path("scratch"))
@@ -1163,6 +1247,12 @@ def test_modified_parent_release_recognizes_exact_predecessor_as_absent(
 
     assert migration.local_additive_descriptor_state(
         snapshot, descriptor, artifact
+    ) == "absent"
+
+    assert migration._release_descriptor_metadata_state(
+        snapshot,
+        artifact,
+        migration.OWNED_OBJECTS[artifact],
     ) == "absent"
 
 

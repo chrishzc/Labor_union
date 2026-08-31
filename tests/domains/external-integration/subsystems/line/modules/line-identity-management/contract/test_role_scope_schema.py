@@ -22,7 +22,7 @@ DESCRIPTOR_PATH = (
 )
 
 
-def test_role_scope_release_is_hash_bound_and_terminal_in_fresh_assembly() -> None:
+def test_role_scope_release_is_hash_bound_and_ordered_in_fresh_assembly() -> None:
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     descriptor = json.loads(DESCRIPTOR_PATH.read_text(encoding="utf-8"))
     assembly = json.loads(
@@ -38,11 +38,13 @@ def test_role_scope_release_is_hash_bound_and_terminal_in_fresh_assembly() -> No
         DESCRIPTOR_PATH.read_bytes()
     ).hexdigest()
     assert descriptor["release_id"] == manifest["release_id"]
-    assert "db/schema_parts/1019_line_identity_role_scope.sql" in assembly["active_bootstrap"]
+    role_scope = "db/schema_parts/1019_line_identity_role_scope.sql"
+    current_terminal = "db/schema_parts/1021_task96_owner_contract_successors.sql"
+    assert role_scope in assembly["active_bootstrap"]
     assert assembly["active_bootstrap"].index(
-        "db/schema_parts/1019_line_identity_role_scope.sql"
+        role_scope
     ) < assembly["active_bootstrap"].index(
-        "db/schema_parts/1021_task96_owner_contract_successors.sql"
+        current_terminal
     )
 
 
@@ -64,6 +66,8 @@ def test_schema_has_one_shared_role_root_event_stream_active_role_and_streak() -
     assert "CREATE TABLE IF NOT EXISTS line_identity_binding_failure_streaks" in sql
     assert "line_user_id VARCHAR(191) PRIMARY KEY" in sql
     assert "candidate_scope VARCHAR(191) NOT NULL" in sql
+    assert "escalation_id BIGINT NULL" in sql
+    assert "escalation_id BIGINT UNSIGNED" not in sql
     assert "CHECK (failure_count BETWEEN 0 AND 2)" in sql
 
     assert "FROM clients" not in sql

@@ -52,6 +52,7 @@ def test_staff_historical_payout_keeps_exact_staff_owner_evidence() -> None:
     assert "payee_role ENUM('staff') NOT NULL" in sql
     assert "payment_date IS NULL AND CHAR_LENGTH(TRIM(payment_date_unknown_reason)) > 0" in sql
     assert "REFERENCES historical_order_adoption_receipts(id)" in sql
+    assert "historical_adoption_receipt_id BIGINT UNSIGNED NOT NULL" in sql
     assert "REFERENCES staff_obligations(obligation_identity)" in sql
     assert "CREATE TABLE IF NOT EXISTS staff_payables_apply_receipts" not in sql
     assert "finance_import_row_id" not in sql

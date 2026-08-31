@@ -16,6 +16,12 @@ SCRIPT = (
     / "launchers"
     / "update_local_database.bat"
 ).read_text(encoding="utf-8")
+SHELL_SCRIPT = (
+    Path(__file__).parents[1]
+    / "scripts"
+    / "launchers"
+    / "update_local_database.sh"
+).read_text(encoding="utf-8")
 
 
 def test_double_click_previews_before_preserve_data_update() -> None:
@@ -23,6 +29,22 @@ def test_double_click_previews_before_preserve_data_update() -> None:
         "--apply --confirm-configured-database"
     )
     assert "Type UPDATE to continue" in SCRIPT
+
+
+def test_launcher_requires_explicit_confirmation_for_replacement_fallback() -> None:
+    replacement_preview = "--strategy replacement --allow-long-run"
+    replacement_apply = (
+        "--strategy replacement --allow-long-run --apply "
+        "--confirm-configured-database"
+    )
+    for launcher in (SCRIPT, SHELL_SCRIPT):
+        assert launcher.index(replacement_preview) < launcher.index(
+            "Type REPLACE to continue"
+        )
+        assert launcher.index("Type REPLACE to continue") < launcher.index(
+            replacement_apply
+        )
+        assert "Both additive and preserve-data replacement preflight failed" in launcher
 
 
 def test_launcher_dry_run_only_checks_wiring() -> None:

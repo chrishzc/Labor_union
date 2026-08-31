@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS line_identity_binding_failure_streaks (
     streak_generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
     failure_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
     last_failure_fingerprint CHAR(64) NULL,
-    escalation_id BIGINT UNSIGNED NULL,
+    escalation_id BIGINT NULL,
     aggregate_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
     created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)

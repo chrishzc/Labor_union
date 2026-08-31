@@ -1087,7 +1087,26 @@ def _show_create_owned_table_names() -> set[str]:
     }
 
 
-def _schema_snapshot(config: DatabaseConfig, database: str) -> dict[str, Any]:
+def _schema_snapshot(
+    config: DatabaseConfig,
+    database: str,
+    *,
+    owned_part: str | None = None,
+) -> dict[str, Any]:
+    scoped_tables: set[str] | None = None
+    scoped_triggers: set[str] | None = None
+    scoped_views: set[str] | None = None
+    if owned_part is not None:
+        expected = OWNED_OBJECTS[owned_part]
+        scoped_tables = set(expected.get("tables", {}))
+        scoped_tables.update(expected.get("parent_columns", {}))
+        for contract_name in ("indexes", "foreign_keys", "checks"):
+            scoped_tables.update(
+                table_name
+                for table_name, _ in expected.get(contract_name, {})
+            )
+        scoped_triggers = set(expected.get("triggers", {}))
+        scoped_views = set(expected.get("views", {}))
     connection = config.connect(database)
     try:
         with connection.cursor() as cursor:
@@ -1099,6 +1118,11 @@ def _schema_snapshot(config: DatabaseConfig, database: str) -> dict[str, Any]:
                 (database,),
             )
             columns = [_normalized_row(row) for row in cursor.fetchall()]
+            if scoped_tables is not None:
+                columns = [
+                    row for row in columns
+                    if row["table_name"] in scoped_tables
+                ]
             cursor.execute(
                 "SELECT table_name,index_name,non_unique,"
                 "GROUP_CONCAT(column_name ORDER BY seq_in_index) AS columns "
@@ -1108,6 +1132,11 @@ def _schema_snapshot(config: DatabaseConfig, database: str) -> dict[str, Any]:
                 (database,),
             )
             indexes = [_normalized_row(row) for row in cursor.fetchall()]
+            if scoped_tables is not None:
+                indexes = [
+                    row for row in indexes
+                    if row["table_name"] in scoped_tables
+                ]
             cursor.execute(
                 "SELECT trigger_name,event_manipulation,event_object_table,"
                 "action_timing,action_statement FROM information_schema.triggers "
@@ -1115,12 +1144,23 @@ def _schema_snapshot(config: DatabaseConfig, database: str) -> dict[str, Any]:
                 (database,),
             )
             triggers = [_normalized_row(row) for row in cursor.fetchall()]
+            if scoped_tables is not None and scoped_triggers is not None:
+                triggers = [
+                    row for row in triggers
+                    if row["trigger_name"] in scoped_triggers
+                    or row["event_object_table"] in scoped_tables
+                ]
             cursor.execute(
                 "SELECT table_name,view_definition FROM information_schema.views "
                 "WHERE table_schema=%s ORDER BY table_name",
                 (database,),
             )
             views = [_normalized_row(row) for row in cursor.fetchall()]
+            if scoped_views is not None:
+                views = [
+                    row for row in views
+                    if row["table_name"] in scoped_views
+                ]
             cursor.execute(
                 "SELECT tc.table_name,tc.constraint_name,tc.constraint_type,"
                 "tc.enforced,cc.check_clause "
@@ -1135,6 +1175,11 @@ def _schema_snapshot(config: DatabaseConfig, database: str) -> dict[str, Any]:
             constraints = [
                 _normalized_row(row) for row in cursor.fetchall()
             ]
+            if scoped_tables is not None:
+                constraints = [
+                    row for row in constraints
+                    if row["table_name"] in scoped_tables
+                ]
             cursor.execute(
                 "SELECT table_name,constraint_name,column_name,"
                 "ordinal_position,referenced_table_name,"
@@ -1147,6 +1192,11 @@ def _schema_snapshot(config: DatabaseConfig, database: str) -> dict[str, Any]:
             key_columns = [
                 _normalized_row(row) for row in cursor.fetchall()
             ]
+            if scoped_tables is not None:
+                key_columns = [
+                    row for row in key_columns
+                    if row["table_name"] in scoped_tables
+                ]
             cursor.execute(
                 "SELECT table_name,constraint_name,update_rule,delete_rule "
                 "FROM information_schema.referential_constraints "
@@ -1157,7 +1207,16 @@ def _schema_snapshot(config: DatabaseConfig, database: str) -> dict[str, Any]:
             foreign_keys = [
                 _normalized_row(row) for row in cursor.fetchall()
             ]
-            owned_table_names = _show_create_owned_table_names()
+            if scoped_tables is not None:
+                foreign_keys = [
+                    row for row in foreign_keys
+                    if row["table_name"] in scoped_tables
+                ]
+            owned_table_names = (
+                scoped_tables
+                if scoped_tables is not None
+                else _show_create_owned_table_names()
+            )
             table_names = sorted(
                 {
                     row["table_name"] for row in columns
@@ -2614,15 +2673,10 @@ def _local_ordered_upgrade_entries() -> tuple[dict[str, Any], ...]:
                 baseline_found = True
             if not baseline_found:
                 continue
-            if item.data_effect != "schema_only":
-                raise LocalAdditiveBlocked(
-                    f"release chain contains non-schema-only artifact: {artifact.name}",
-                    code="release_chain_invalid",
-                    details={"release_id": manifest.release_id, "artifact": artifact.name},
-                )
             entries.append({
                 "release_id": manifest.release_id,
                 "release_fingerprint": manifest.fingerprint,
+                "data_effect": item.data_effect,
                 "artifact": {
                     "name": artifact.name,
                     "relative_path": artifact.relative_path,
@@ -2707,7 +2761,7 @@ def _local_ordered_chain_plan(
             "release_fingerprint": entry["release_fingerprint"],
             "name": artifact["name"],
             "state": state,
-            "data_effect": "schema_only",
+            "data_effect": entry.get("data_effect", "schema_only"),
             "qualification": "not_required" if state == "exact" else "pending",
             "blocked_reason": None,
         }
@@ -2774,6 +2828,20 @@ def _local_ordered_chain_plan(
     for projected, entry in zip(artifacts, entries, strict=True):
         if projected["state"] not in {"absent", "dependency_pending"}:
             continue
+        if projected["data_effect"] != "schema_only":
+            projected["qualification"] = "not_eligible"
+            projected["blocked_reason"] = "replacement_required"
+            raise LocalAdditiveBlocked(
+                f"{entry['artifact']['name']} requires the preserve-data replacement route",
+                code="replacement_required",
+                details={
+                    **chain_details,
+                    "release_id": entry["release_id"],
+                    "artifact": entry["artifact"]["name"],
+                    "state": projected["state"],
+                    "data_effect": projected["data_effect"],
+                },
+            )
         try:
             qualification = _local_discover_qualification(
                 qualification_path
@@ -5098,15 +5166,25 @@ def _release_descriptor_metadata_state(
 ) -> str:
     """Fail closed unless released metadata equals the canonical SQL contract."""
     canonical = _canonical_artifact_descriptor(part_name)
+    parent_tables = set(canonical.get("parent_columns", {}))
+
+    def released_projection(kind: str) -> dict[Any, Any]:
+        released_contracts = released.get(kind, {})
+        return {
+            key: value
+            for key, value in canonical[kind].items()
+            if key in released_contracts or key[0] not in parent_tables
+        }
+
     projections = {
         "tables": {
             table: set(columns)
             for table, columns in canonical["tables"].items()
         },
         "triggers": set(canonical["triggers"]),
-        "indexes": canonical["indexes"],
-        "foreign_keys": canonical["foreign_keys"],
-        "checks": canonical["checks"],
+        "indexes": released_projection("indexes"),
+        "foreign_keys": released_projection("foreign_keys"),
+        "checks": released_projection("checks"),
     }
     for kind, expected in projections.items():
         if released.get(kind) != expected:
@@ -5135,6 +5213,14 @@ def _release_descriptor_metadata_state(
             canonical,
             defer_missing_triggers=defer_missing_triggers,
         )
+    predecessor_state = _modified_parent_predecessor_absent_state(
+        snapshot,
+        canonical,
+        part_name,
+        defer_missing_triggers=defer_missing_triggers,
+    )
+    if predecessor_state is not None:
+        return predecessor_state
     state = _artifact_metadata_state(
         snapshot,
         canonical,
@@ -5578,6 +5664,7 @@ def _artifact_metadata_state(
         }
         if row["constraint_type"] != "FOREIGN KEY" or actual != expected:
             return "drift"
+    allowed_later_checks = _allowed_later_artifact_checks(part_name)
     for key, expected_clause in descriptor["checks"].items():
         row = constraints.get(key)
         owned_presence.append(row is not None)
@@ -5587,11 +5674,14 @@ def _artifact_metadata_state(
         if (
             row["constraint_type"] != "CHECK"
             or str(row.get("enforced") or "YES").upper() != "YES"
-            or (
-                actual_clause != expected_clause
-                and _normalize_check_contract(actual_clause)
-                != _normalize_check_contract(expected_clause)
-            )
+            or _normalize_check_contract(actual_clause) not in {
+                _normalize_check_contract(expected_clause),
+                *(
+                    [_normalize_check_contract(allowed_later_checks[key])]
+                    if key in allowed_later_checks
+                    else []
+                ),
+            }
         ):
             return "drift"
     expected_checks = {key for key in descriptor["checks"] if key[0] in owned_tables}
@@ -5811,6 +5901,18 @@ def _allowed_later_artifact_indexes(
                 "columns": ("source_identity",),
             }
         }
+    return {}
+
+
+def _allowed_later_artifact_checks(
+    part_name: str,
+) -> dict[tuple[str, str], str]:
+    """Return checks whose exact shape is owned by a declared successor."""
+    if part_name == "104_order_lifecycle_state_history.sql":
+        successor = _canonical_artifact_descriptor(
+            "1013_order_lifecycle_pending_status_constraint.sql"
+        )
+        return dict(successor["checks"])
     return {}
 
 
@@ -6222,32 +6324,16 @@ def apply_schema(
                     )
                     write_receipt(operation_receipt_path, receipt)
                     continue
+                part_before = _schema_snapshot(
+                    config, candidate, owned_part=part.name
+                )
+                before_state = _owned_classification(part_before)[part.name]
+                if before_state == "drift":
+                    raise UpgradeBlocked(
+                        f"candidate schema drift before {part.name}"
+                    )
+                part_steps: list[dict[str, Any]] = []
                 for index, statement in enumerate(statements, start=1):
-                    statement_before = _schema_snapshot(config, candidate)
-                    before_state = _owned_classification(
-                        statement_before
-                    )[part.name]
-                    if before_state == "exact":
-                        steps.append(
-                            {
-                                "part": part.name,
-                                "index": index,
-                                "status": "exact",
-                                "outcome": "remaining_part_skipped",
-                                "before_schema_sha256": (
-                                    statement_before["sha256"]
-                                ),
-                                "before_part_state": before_state,
-                                "verified_at": _now(),
-                            }
-                        )
-                        write_receipt(operation_receipt_path, receipt)
-                        break
-                    if before_state == "drift":
-                        raise UpgradeBlocked(
-                            f"candidate schema drift before "
-                            f"{part.name}:{index}"
-                        )
                     step = {
                         "part": part.name,
                         "index": index,
@@ -6255,17 +6341,20 @@ def apply_schema(
                             statement.encode("utf-8")
                         ),
                         "status": "prepared",
-                        "before_schema_sha256": statement_before["sha256"],
+                        "before_schema_sha256": part_before["sha256"],
                         "before_part_state": before_state,
                         "prepared_at": _now(),
                     }
                     steps.append(step)
+                    part_steps.append(step)
                     receipt.update(status="partial", phase="schema_apply")
                     write_receipt(operation_receipt_path, receipt)
                     try:
                         cursor.execute(statement)
                     except Exception as exc:
-                        statement_after = _schema_snapshot(config, candidate)
+                        statement_after = _schema_snapshot(
+                            config, candidate, owned_part=part.name
+                        )
                         after_state = _owned_classification(
                             statement_after
                         )[part.name]
@@ -6278,42 +6367,35 @@ def apply_schema(
                         )
                         write_receipt(operation_receipt_path, receipt)
                         raise
-                    statement_after = _schema_snapshot(config, candidate)
-                    after_state = _owned_classification(
-                        statement_after
-                    )[part.name]
-                    if after_state == "drift":
-                        step.update(
-                            status="failed",
-                            verification_status="drift",
-                            after_schema_sha256=statement_after["sha256"],
-                            after_part_state=after_state,
-                            failed_at=_now(),
-                        )
-                        write_receipt(operation_receipt_path, receipt)
-                        raise UpgradeBlocked(
-                            f"candidate schema drift after "
-                            f"{part.name}:{index}"
-                        )
                     step.update(
-                        status=(
-                            "exact" if after_state == "exact" else "applied"
-                        ),
+                        status="applied",
+                        verification_status="pending_part_completion",
+                        applied_at=_now(),
+                    )
+                    write_receipt(operation_receipt_path, receipt)
+                part_after = _schema_snapshot(
+                    config, candidate, owned_part=part.name
+                )
+                after_state = _owned_classification(part_after)[part.name]
+                if part_steps:
+                    part_steps[-1].update(
+                        status=("exact" if after_state == "exact" else "applied"),
                         verification_status=(
                             "exact"
                             if after_state == "exact"
                             else "pending_part_completion"
                         ),
-                        after_schema_sha256=statement_after["sha256"],
+                        after_schema_sha256=part_after["sha256"],
                         after_part_state=after_state,
                         verified_at=(
                             _now() if after_state == "exact" else None
                         ),
-                        applied_at=_now(),
                     )
-                    write_receipt(operation_receipt_path, receipt)
-                    if after_state == "exact":
-                        break
+                write_receipt(operation_receipt_path, receipt)
+                if after_state == "drift":
+                    raise UpgradeBlocked(
+                        f"candidate schema drift after {part.name}"
+                    )
     finally:
         connection.close()
     after = _schema_snapshot(config, candidate)
