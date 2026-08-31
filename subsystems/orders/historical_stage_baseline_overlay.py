@@ -83,15 +83,20 @@ class HistoricalStageBaselineOverlayService:
 def historical_baseline_step(facts: HistoricalStageBaselineFacts) -> int | None:
     """Map only unambiguous historical states to a current operational step."""
 
-    if facts.lifecycle_status is OrderLifecycleStatus.ESTABLISHED:
-        return 9
     if facts.lifecycle_status is OrderLifecycleStatus.COMPLETED:
         return 11
     if (
-        facts.lifecycle_status is OrderLifecycleStatus.DISCUSSION
-        and facts.actual_start_date is not None
+        facts.actual_start_date is not None
+        and facts.lifecycle_status
+        in {
+            OrderLifecycleStatus.DISCUSSION,
+            OrderLifecycleStatus.ESTABLISHED,
+            OrderLifecycleStatus.IN_SERVICE,
+        }
     ):
         return 10
+    if facts.lifecycle_status is OrderLifecycleStatus.ESTABLISHED:
+        return 9
     return None
 
 
