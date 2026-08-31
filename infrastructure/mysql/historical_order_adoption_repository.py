@@ -29,7 +29,8 @@ class MySqlHistoricalOrderAdoptionRepository:
         suffix = " FOR UPDATE" if for_update else ""
         with _cursor(self._connection) as cursor:
             cursor.execute(
-                "SELECT o.case_no,o.status,o.lifecycle_version,o.actual_start_date,o.actual_end_date,c.name "
+                "SELECT o.case_no,o.status,o.lifecycle_version,o.start_date,"
+                "o.actual_start_date,o.actual_end_date,c.name "
                 "FROM orders o JOIN clients c ON c.id=o.client_id "
                 "WHERE o.case_no=%s AND c.name=%s" + suffix,
                 (case_no, client_name),
@@ -43,6 +44,7 @@ class MySqlHistoricalOrderAdoptionRepository:
             str(row["name"]),
             OrderLifecycleStatus(str(row["status"])),
             int(row["lifecycle_version"]),
+            _optional_date(row.get("start_date")),
             _optional_date(row.get("actual_start_date")),
             _optional_date(row.get("actual_end_date")),
         )
@@ -131,15 +133,17 @@ class MySqlHistoricalOrderAdoptionRepository:
         ):
             return None
         date_patch = dict(preview.date_patch)
+        has_actual_start_patch = "actual_start_date" in date_patch
         with _cursor(self._connection) as cursor:
             cursor.execute(
-                "UPDATE orders SET status=%s,actual_start_date=COALESCE(%s,actual_start_date),"
-                "actual_end_date=COALESCE(%s,actual_end_date),lifecycle_version=%s "
+                "UPDATE orders SET status=%s,"
+                "actual_start_date=CASE WHEN %s=1 THEN %s ELSE actual_start_date END,"
+                "lifecycle_version=%s "
                 "WHERE case_no=%s AND lifecycle_version=%s",
                 (
                     preview.after_status,
+                    int(has_actual_start_patch),
                     date_patch.get("actual_start_date"),
-                    date_patch.get("actual_end_date"),
                     preview.resulting_version,
                     preview.case_no,
                     preview.expected_version,
@@ -270,7 +274,10 @@ def _event_snapshot(request, preview):
         "source_identity": request.row.source_identity,
         "source_fingerprint": request.row.source_fingerprint,
         "resulting_version": preview.resulting_version,
-        "date_patch": tuple((field, value.isoformat()) for field, value in preview.date_patch),
+        "date_patch": tuple(
+            (field, value.isoformat() if value is not None else None)
+            for field, value in preview.date_patch
+        ),
         "issue_codes": preview.issue_codes,
         "side_effects_suppressed": True,
     }

@@ -34,6 +34,7 @@ class HistoricalOrderCurrentFacts:
     client_name: str
     status: OrderLifecycleStatus
     lifecycle_version: int
+    planned_start_date: date | None
     actual_start_date: date | None
     actual_end_date: date | None
 
@@ -43,7 +44,7 @@ class HistoricalOrderAdoptionCandidate:
     outcome: HistoricalOrderOutcome
     after_status: OrderLifecycleStatus
     resulting_version: int
-    date_patch: tuple[tuple[str, date], ...]
+    date_patch: tuple[tuple[str, date | None], ...]
     issue_codes: tuple[str, ...]
     order_changed: bool
     fingerprint: PreviewFingerprint
@@ -71,7 +72,10 @@ def build_historical_order_candidate(
         "after_status": after_status.value,
         "expected_version": current.lifecycle_version,
         "resulting_version": resulting_version,
-        "date_patch": tuple((field, value.isoformat()) for field, value in date_patch),
+        "date_patch": tuple(
+            (field, value.isoformat() if value is not None else None)
+            for field, value in date_patch
+        ),
         "issue_codes": tuple(sorted(issues)),
         "outcome": outcome.value,
     }
@@ -95,21 +99,19 @@ def _outcome(current_status, asserted_status, issues):
 
 
 def _date_patch(current, source, issues, outcome):
+    del issues
     if outcome is not HistoricalOrderOutcome.ADOPTED:
         return ()
-    patch: list[tuple[str, date]] = []
-    invalid_range = "historical_order_date_range_invalid" in issues
-    _append_date_patch(patch, issues, "actual_start_date", current.actual_start_date, None if invalid_range else source.actual_start_date)
-    _append_date_patch(patch, issues, "actual_end_date", current.actual_end_date, None if invalid_range else source.actual_end_date)
-    return tuple(patch)
-
-
-def _append_date_patch(patch, issues, field, current, incoming):
-    del issues
-    if incoming is None:
-        return
-    if current != incoming:
-        patch.append((field, incoming))
+    if source.actual_start_date is None:
+        return ()
+    actual_start = (
+        None
+        if source.actual_start_date == current.planned_start_date
+        else source.actual_start_date
+    )
+    if current.actual_start_date == actual_start:
+        return ()
+    return (("actual_start_date", actual_start),)
 
 
 __all__ = [

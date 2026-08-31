@@ -6,7 +6,7 @@ Description: 協調訂單歷史 workbook Preview、Apply、replay 與逐列 Orde
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -137,15 +137,24 @@ class HistoricalOrderWorkbookImportService:
             raise HistoricalOrderWorkbookUnavailable("historical_order_workbook_coordinator_lock_timeout")
         try:
             workbook = load_historical_order_workbook(source_path)
+            row_previews = tuple(self._workflow.preview(row) for row in workbook.rows)
             replay = self._stored_replay(key, workbook)
-            if replay is not None:
+            if replay is not None and not _requires_replay_refresh(row_previews):
                 return replay
-            preview = self._preview_or_stale(workbook, supplied_preview_fingerprint)
+            preview = self._require_preview(
+                workbook, row_previews, supplied_preview_fingerprint
+            )
+            if replay is not None:
+                return self._apply_rows(
+                    workbook, key, actor, correlation_id, row_previews
+                )
             with self._unit_of_work_factory() as unit_of_work:
                 if self._repository.claim(key, workbook.content_digest, correlation_id) == "conflict":
                     raise HistoricalOrderWorkbookConflict("historical_order_workbook_idempotency_conflict")
                 unit_of_work.commit()
-            receipt = self._apply_rows(workbook, key, actor, correlation_id)
+            receipt = self._apply_rows(
+                workbook, key, actor, correlation_id, row_previews
+            )
             with self._unit_of_work_factory() as unit_of_work:
                 self._repository.save_receipt(key, workbook.content_digest, preview.preview_fingerprint, actor, receipt.as_dict())
                 unit_of_work.commit()
@@ -153,20 +162,39 @@ class HistoricalOrderWorkbookImportService:
         finally:
             self._repository.release_lock(key)
 
-    def _preview_or_stale(self, workbook: HistoricalOrderWorkbook, supplied: str) -> HistoricalOrderWorkbookPreview:
-        preview = _preview(workbook, tuple(self._workflow.preview(row) for row in workbook.rows))
+    def _require_preview(self, workbook, row_previews, supplied):
+        preview = _preview(workbook, row_previews)
         if preview.preview_fingerprint != supplied:
             raise ValueError("historical_order_preview_stale")
         return preview
 
-    def _apply_rows(self, workbook, key, actor, correlation_id) -> HistoricalOrderWorkbookReceipt:
+    def _apply_rows(
+        self, workbook, key, actor, correlation_id, row_previews
+    ) -> HistoricalOrderWorkbookReceipt:
         outcomes: Counter[str] = Counter()
         assignments_created = 0
         replayed_rows = 0
         review_rows = 0
-        for row in workbook.rows:
-            row_preview = self._workflow.preview(row)
+        for row, row_preview in zip(workbook.rows, row_previews, strict=True):
             receipt = self._workflow.apply(_row_request(row, row_preview.fingerprint, key, actor, correlation_id))
+            if receipt.replayed and _requires_replay_refresh((row_preview,)):
+                refresh_row = replace(
+                    row,
+                    source_identity=(
+                        f"{row.source_identity}:refresh:{row_preview.fingerprint.value}"
+                    ),
+                )
+                refresh_preview = self._workflow.preview(refresh_row)
+                if _requires_replay_refresh((refresh_preview,)):
+                    receipt = self._workflow.apply(
+                        _row_request(
+                            refresh_row,
+                            refresh_preview.fingerprint,
+                            key,
+                            actor,
+                            correlation_id,
+                        )
+                    )
             outcomes[receipt.outcome.value] += 1
             assignments_created += 0 if receipt.replayed else receipt.assignment_count
             replayed_rows += int(receipt.replayed)
@@ -227,6 +255,22 @@ def _status_counts(workbook: HistoricalOrderWorkbook) -> HistoricalOrderStatusCo
     if result.total != len(workbook.rows):
         raise RuntimeError("historical_order_status_counts_not_conserved")
     return result
+
+
+def _requires_replay_refresh(row_previews) -> bool:
+    return any(
+        (
+            getattr(preview, "expected_version", None) is not None
+            and getattr(preview, "resulting_version", None)
+            != getattr(preview, "expected_version", None)
+        )
+        or bool(getattr(preview, "date_patch", ()))
+        or any(
+            pairing.resolution.value == "assignment_candidate"
+            for pairing in preview.pairings
+        )
+        for preview in row_previews
+    )
 
 
 def _row_request(row, fingerprint: PreviewFingerprint, workbook_key: str, actor: str, correlation_id: str) -> HistoricalOrderAdoptionRequest:

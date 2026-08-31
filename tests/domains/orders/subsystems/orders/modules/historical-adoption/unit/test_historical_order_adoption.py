@@ -6,6 +6,7 @@ Description: 驗證歷史狀態、nullable日期、六欄工作簿、精確案�
 from __future__ import annotations
 
 from datetime import date
+from types import SimpleNamespace
 
 from openpyxl import Workbook
 from openpyxl.utils.datetime import MAC_EPOCH
@@ -97,19 +98,52 @@ def test_valid_status_is_adopted_when_dates_are_null():
     assert candidate.resulting_version == 4
 
 
-def test_valid_historical_date_overwrites_current_value_without_false_warning():
-    current = _current(OrderLifecycleStatus.DISCUSSION, actual_start=date(2025, 1, 2))
+def test_historical_start_matching_hcm_plan_does_not_create_actual_start():
+    current = _current(OrderLifecycleStatus.DISCUSSION, planned_start=date(2025, 1, 3))
     source = HistoricalOrderSourceFacts(
         OrderLifecycleStatus.COMPLETED,
         date(2025, 1, 3),
-        None,
+        date(2025, 1, 31),
     )
 
     candidate = build_historical_order_candidate(current, source)
 
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
-    assert candidate.date_patch == (("actual_start_date", date(2025, 1, 3)),)
+    assert candidate.date_patch == ()
     assert candidate.issue_codes == ()
+
+
+def test_historical_start_different_from_hcm_plan_becomes_actual_start():
+    current = _current(OrderLifecycleStatus.COMPLETED, planned_start=date(2025, 1, 2))
+    source = HistoricalOrderSourceFacts(
+        OrderLifecycleStatus.COMPLETED,
+        date(2025, 1, 3),
+        date(2025, 1, 31),
+    )
+
+    candidate = build_historical_order_candidate(current, source)
+
+    assert candidate.date_patch == (("actual_start_date", date(2025, 1, 3)),)
+    assert all(field != "actual_end_date" for field, _value in candidate.date_patch)
+
+
+def test_matching_hcm_plan_clears_previously_inferred_actual_start():
+    current = _current(
+        OrderLifecycleStatus.COMPLETED,
+        planned_start=date(2025, 1, 2),
+        actual_start=date(2025, 1, 2),
+    )
+
+    candidate = build_historical_order_candidate(
+        current,
+        HistoricalOrderSourceFacts(
+            OrderLifecycleStatus.COMPLETED,
+            date(2025, 1, 2),
+            date(2025, 1, 31),
+        ),
+    )
+
+    assert candidate.date_patch == (("actual_start_date", None),)
 
 
 def test_valid_historical_status_overwrites_current_value_without_false_warning():
@@ -157,6 +191,58 @@ def test_repository_skips_lifecycle_write_for_unchanged_adoption_preview():
         )
         is None
     )
+
+
+def test_repository_can_clear_actual_start_without_writing_actual_end():
+    class Cursor:
+        rowcount = 1
+        lastrowid = 81
+
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, statement, parameters):
+            self.calls.append((statement, parameters))
+
+        def close(self):
+            return None
+
+    class Connection:
+        def __init__(self, cursor):
+            self._cursor = cursor
+
+        def cursor(self):
+            return self._cursor
+
+    cursor = Cursor()
+    preview = SimpleNamespace(
+        outcome=HistoricalOrderOutcome.ADOPTED,
+        expected_version=3,
+        resulting_version=4,
+        after_status=OrderLifecycleStatus.COMPLETED,
+        before_status=OrderLifecycleStatus.COMPLETED.value,
+        case_no="CASE-1",
+        date_patch=(("actual_start_date", None),),
+        issue_codes=(),
+    )
+    request = SimpleNamespace(
+        actor="operator",
+        idempotency_key="historical-row:key",
+        row=SimpleNamespace(
+            source_identity="historical-orders:digest:row:2",
+            source_fingerprint="f" * 64,
+        ),
+    )
+
+    event_id = MySqlHistoricalOrderAdoptionRepository(
+        Connection(cursor)
+    )._apply_order(request, preview)
+
+    update_sql, update_parameters = cursor.calls[0]
+    assert event_id == 81
+    assert "actual_end_date" not in update_sql
+    assert "actual_start_date=CASE" in update_sql
+    assert update_parameters[1:3] == (1, None)
 
 
 def test_columns_after_canonical_six_are_ignored(tmp_path):
@@ -306,8 +392,16 @@ def test_multiple_matching_sheets_fail_closed(tmp_path):
         load_historical_order_workbook(path)
 
 
-def _current(status, actual_start=None):
-    return HistoricalOrderCurrentFacts("CASE-1", "客戶甲", status, 3, actual_start, None)
+def _current(status, planned_start=None, actual_start=None, actual_end=None):
+    return HistoricalOrderCurrentFacts(
+        "CASE-1",
+        "客戶甲",
+        status,
+        3,
+        planned_start,
+        actual_start,
+        actual_end,
+    )
 
 
 def _workbook(tmp_path, headers, values):

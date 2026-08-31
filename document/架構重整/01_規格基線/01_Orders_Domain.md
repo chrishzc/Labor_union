@@ -368,8 +368,12 @@ Preview與Apply receipt必須由Orders回傳`0／1／2／invalid`守恆數量，
 不得由前端重算或提供target status editor。完整契約與驗收位於
 `PROV-20260828-historical-order-six-column-status-observability-spec-gap.md`。
 
-`actual_start_date`、`actual_end_date` 永遠允許 `NULL`。精確配對且可解析的有效歷史來源值直接寫入，
-不比較 current value 或 source time，也不產生 `current_conflict`。來源 terminal assertion 可在缺日期、取消原因、排班或付款時成立，
+`actual_start_date`、`actual_end_date` 永遠允許 `NULL`。2026-08-31 人工裁決：歷史來源開始日若與
+HCM／Orders `start_date` 預期開始日相同，代表尚無實際服務開始日，`actual_start_date` 維持
+`NULL`；兩者不同時，才以歷史來源開始日寫入 `actual_start_date`。歷史來源結束日不得寫入
+Orders `actual_end_date`；正式結束日以後續服務天數精算結果為準。此限制不移除 canonical 六欄
+工作簿的結束日期，也不妨礙該日期作為單一月嫂歷史 assignment 服務區間的來源 evidence。
+來源 terminal assertion 可在缺日期、取消原因、排班或付款時成立，
 但不得觸發現行通知、訂金、收付款或自動帳務；immutable lifecycle event／receipt 必須標示
 historical origin。無法精確配對、欄位不可解析或違反 Orders invariant 時建立 typed warning 並 fail closed。
 此受限斷言只授權 Orders-owned historical adoption command，不授權一般 adapter 或 UI 寫入。Preview 零寫入，Apply 每列鎖定 fresh
