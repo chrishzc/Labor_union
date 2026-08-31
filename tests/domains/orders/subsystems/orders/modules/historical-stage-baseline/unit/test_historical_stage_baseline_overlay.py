@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 
 from domains.orders.lifecycle import OrderLifecycleScope, OrderLifecycleStatus
@@ -96,6 +97,39 @@ def _timeline(*, settlement_status: str = "blocked") -> OrderOperationalTimeline
     return OrderOperationalTimeline("CASE-1", 3, None, stages, steps, "before")
 
 
+def _timeline_with_statuses(
+    *,
+    step_statuses: dict[int, str],
+    stage_statuses: dict[int, str] | None = None,
+) -> OrderOperationalTimeline:
+    original = _timeline()
+    steps = tuple(
+        replace(
+            item,
+            status=step_statuses.get(item.ordinal, item.status),
+            availability_reason=(
+                "missing"
+                if step_statuses.get(item.ordinal, item.status) == "unavailable"
+                else None
+            ),
+        )
+        for item in original.sop_steps
+    )
+    stages = tuple(
+        replace(
+            item,
+            status=(stage_statuses or {}).get(item.ordinal, item.status),
+            availability_reason=(
+                "missing"
+                if (stage_statuses or {}).get(item.ordinal, item.status) == "unavailable"
+                else None
+            ),
+        )
+        for item in original.stages
+    )
+    return replace(original, sop_steps=steps, stages=stages)
+
+
 def _query(facts, timeline=None):
     service = HistoricalStageBaselineOverlayService(
         _Base(timeline or _timeline()),
@@ -175,6 +209,79 @@ def test_discussion_with_actual_start_enters_formal_service() -> None:
     assert result.stages[5].status == "unavailable"
     assert all(step.status == "completed" for step in result.sop_steps[:9])
     assert result.sop_steps[9].status == "unavailable"
+
+
+def test_formal_baseline_step_is_immutable_while_owner_roots_progress_forward() -> None:
+    facts = HistoricalStageBaselineFacts(
+        "CASE-1",
+        108,
+        OrderLifecycleStatus.COMPLETED,
+        date(2025, 2, 3),
+        selected_step=9,
+        baseline_event_identity="historical-operational-baseline-event:abc",
+        baseline_event_version=41,
+    )
+    timeline = _timeline_with_statuses(
+        step_statuses={9: "completed", 10: "in_progress", 11: "unavailable"},
+        stage_statuses={5: "completed", 6: "in_progress", 7: "unavailable"},
+    )
+
+    result = _query(facts, timeline)
+
+    assert historical_baseline_step(facts) == 9
+    assert result.current_stage_code == "active_service"
+    assert all(step.status == "completed" for step in result.sop_steps[:9])
+    assert result.sop_steps[9].status == "in_progress"
+    assert result.sop_steps[0].owner == "Historical Orders"
+    assert result.stages[0].source.identity == "historical-operational-baseline-event:abc"
+    assert result.stages[0].source.version == 41
+
+
+def test_concrete_predecessor_owner_state_can_regress_current_step_without_rewriting_baseline() -> None:
+    facts = HistoricalStageBaselineFacts(
+        "CASE-1",
+        109,
+        OrderLifecycleStatus.IN_SERVICE,
+        date(2025, 2, 3),
+        selected_step=10,
+        baseline_event_identity="historical-operational-baseline-event:def",
+        baseline_event_version=42,
+    )
+    timeline = _timeline_with_statuses(
+        step_statuses={9: "blocked", 10: "unavailable", 11: "unavailable"},
+        stage_statuses={5: "blocked", 6: "unavailable", 7: "unavailable"},
+    )
+
+    result = _query(facts, timeline)
+
+    assert historical_baseline_step(facts) == 10
+    assert result.current_stage_code == "date_confirmation"
+    assert all(step.status == "completed" for step in result.sop_steps[:8])
+    assert result.sop_steps[8].status == "blocked"
+    assert result.sop_steps[9].status == "unavailable"
+
+
+def test_unavailable_predecessor_does_not_fake_h06_invalidation() -> None:
+    facts = HistoricalStageBaselineFacts(
+        "CASE-1",
+        110,
+        OrderLifecycleStatus.IN_SERVICE,
+        date(2025, 2, 3),
+        selected_step=10,
+        baseline_event_identity="historical-operational-baseline-event:ghi",
+        baseline_event_version=43,
+    )
+    timeline = _timeline_with_statuses(
+        step_statuses={9: "unavailable", 10: "in_progress", 11: "unavailable"},
+        stage_statuses={5: "unavailable", 6: "in_progress", 7: "unavailable"},
+    )
+
+    result = _query(facts, timeline)
+
+    assert historical_baseline_step(facts) == 10
+    assert result.current_stage_code == "active_service"
+    assert result.sop_steps[8].status == "completed"
+    assert result.sop_steps[9].status == "in_progress"
 
 
 def test_discussion_without_actual_start_keeps_normal_projection() -> None:
