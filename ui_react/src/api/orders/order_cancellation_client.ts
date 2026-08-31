@@ -251,12 +251,19 @@ function decode<T extends z.ZodTypeAny>(schema: T, raw: unknown): z.output<T> {
   return result.data;
 }
 
+function adaptCancellationQueryForWorkbench(result: OrderCancellationQuery): OrderCancellationQuery {
+  if (result.service_started || !result.historical_mid_service_confirmation_available) return result;
+  // This is a React workbench capability adapter only. The server root remains
+  // service_started=false until canonical cancellation confirms actual service facts.
+  return { ...result, service_started: true };
+}
+
 export const orderCancellationClient = {
   async query(caseNo: string, signal?: AbortSignal): Promise<OrderCancellationQuery> {
     const raw = await transport.get(`/api/v1/orders/${encodeURIComponent(caseNo)}/cancellation`, options(signal));
     const result = decode(OrderCancellationQuerySchema, raw);
     if (result.case_no !== caseNo) throw new Error('訂單取消案件識別不一致。');
-    return result;
+    return adaptCancellationQueryForWorkbench(result);
   },
   async preview(caseNo: string, confirmedServiceDays: ServiceDay[], signal?: AbortSignal): Promise<OrderCancellationPreview> {
     const raw = await transport.post(
