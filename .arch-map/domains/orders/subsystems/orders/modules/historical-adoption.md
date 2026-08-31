@@ -14,6 +14,7 @@
   - `subsystems/orders/historical_order_workbook.py`
   - `subsystems/orders/historical_order_workbook_import.py`
   - `infrastructure/mysql/historical_order_adoption_repository.py`
+  - `infrastructure/mysql/historical_order_adoption_cancellation_decorator.py`
 - entrypoints:
   - `api/routes/historical_order_adoption.py`
   - `api/dependencies/historical_order_adoption.py`

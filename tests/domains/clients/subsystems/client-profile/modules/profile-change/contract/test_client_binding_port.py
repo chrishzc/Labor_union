@@ -53,4 +53,3 @@ def test_legal_customer_staff_dual_role_uses_customer_role_binding():
     assert evidence.binding_version == 4
     assert evidence.roles == ("customer", "staff")
     assert evidence.legal_customer_staff_dual_role is True
-
