@@ -109,7 +109,7 @@ describe('OrdersPage zero fake mutation', () => {
       payroll_version: 0,
       scheduling: { case_no: 'ORD-2026-0801', generation_number: 1, expected_aggregate_version: 0, resulting_aggregate_version: 1, cancelled_assignment_ids: [], assignments: [], buffers: [] },
       client_finance_impact: { case_no: 'ORD-2026-0801', expected_account_version: 0, resulting_account_version: 1, stage_plans: [], actions: [], settlement: { deposit_settled: false, all_formal_obligations_settled: false, fingerprint: 'b'.repeat(64) }, blockers: [], fingerprint: 'c'.repeat(64) },
-      payroll_impact: { case_no: 'ORD-2026-0801', expected_payroll_version: 0, resulting_payroll_version: 1, payroll: { assignments: [], earned_floor_fee: { amount: 0 }, total_payable: { amount: 0 }, fingerprint: 'd'.repeat(64) }, carried_rate_snapshots: [], actions: [], blockers: [], fingerprint: 'e'.repeat(64) },
+      payroll_impact: { case_no: 'ORD-2026-0801', expected_payroll_version: 0, resulting_payroll_version: 1, payroll: { assignments: [], earned_floor_fee: { amount: 0 }, total_payable: { amount: 0 }, fingerprint: 'd'.repeat(64) }, carried_rate_snapshots: [], actions: [], special_pay_events: [], blockers: [], fingerprint: 'e'.repeat(64) },
       lifecycle_impact: { case_no: 'ORD-2026-0801', before_status: '訂單成立', after_status: '訂單取消', actual_end_date: null, cancellation_effective: true, fingerprint: 'f'.repeat(64) }, preview_fingerprint: 'a'.repeat(64),
     });
     vi.spyOn(orderCancellationClient, 'apply').mockResolvedValue({
