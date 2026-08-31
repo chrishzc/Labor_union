@@ -1182,8 +1182,8 @@
         "identity": "PROV-20260829-task97-production-script-scripts-generate_task97_commit_dispositions-py"
       },
       "evidence": {
-        "source_sha256": "a9878dd53e52c3bbbbf41c4c6b3793b35ba86f883235bc8b9fc5fe140865baac",
-        "line_count": 571,
+        "source_sha256": "d0906e03cb6285aedf02ae06fbbf0da6ad301546d6c3967152cf2c6a623bba14",
+        "line_count": 603,
         "queue_status": "operator_only",
         "owner": "Architecture Governance",
         "scenario": "Regenerate the tracked Task 97 repository-commit disposition evidence from current source.",
@@ -1243,7 +1243,7 @@
         "identity": "PROV-20260829-task97-production-script-scripts-generate_task97_entry_governance-py"
       },
       "evidence": {
-        "source_sha256": "659bce224b84c88a30abe3a7c454d36a3c57af4d103cf32c9d7aef56d52d6eed",
+        "source_sha256": "cdbdc5e42d5ff2e3c2416475269d0a87e2e26075bde2ceb7ada08da1ab127de5",
         "line_count": 149,
         "queue_status": "operator_only",
         "owner": "Architecture Governance",
