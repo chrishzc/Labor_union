@@ -630,7 +630,7 @@ def cancel_caregiver_availability_lock_for_order(
         return _existing_result(request, state, locked_event)
 
     if (
-        state["plan_row"]["status"] != "accepted"
+        state["plan_row"]["status"] not in {"proposed", "accepted"}
         or state["plan_row"]["is_active"] != 1
     ):
         raise ValueError("plan is not accepted and active for lock cancellation")
@@ -716,5 +716,4 @@ def cancel_caregiver_availability_lock_for_order(
         "cancel_reason": request["cancel_reason"],
         "lock_rows": preflight["lock_rows"],
     }
-
 

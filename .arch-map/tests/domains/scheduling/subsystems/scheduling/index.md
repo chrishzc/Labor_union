@@ -17,6 +17,8 @@ modules:
     test_root: tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/
   current-anomaly-facts:
     test_root: tests/domains/scheduling/subsystems/scheduling/modules/current-anomaly-facts/
+  waiting-deposit-lock:
+    test_root: tests/domains/scheduling/subsystems/scheduling/modules/waiting-deposit-lock/
   service-before-replacement-presentation:
     layout_status: custom_current
     test_root: ui_react/src/tests/service_before_replacement_actions.test.tsx
