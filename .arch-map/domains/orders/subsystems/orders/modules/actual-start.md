@@ -18,7 +18,7 @@
 - outbound: `scheduling/scheduling` — replacement generation 擁有正式服務日期與 assignment lineage。
 - outbound: `client-finance/client-finance` — 重算未結清的客戶帳務日期與 projection。
 - outbound: `payroll/payroll` — 重算 assignment-owned payroll obligation。
-- inbound: `orders/historical-adoption` — 歷史完成列的 actual-start assertion 經 typed delegation 進入。
+- inbound: `orders/historical-adoption` — 已付訂金且來源開始日異於 HCM 預定開始日的 historical actual-start assertion 經 typed delegation 進入。
 
 ## Contracts
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — Actual Start、歷史來源與 completion instant 語意。

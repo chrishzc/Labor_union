@@ -1,3 +1,5 @@
+"""Owner-local tests for Historical Orders operational stage baselines."""
+
 from __future__ import annotations
 
 from datetime import date
@@ -116,6 +118,21 @@ def test_completed_historical_order_enters_step_11_without_completing_settlement
     assert all(step.status == "completed" for step in result.sop_steps[:10])
     assert result.sop_steps[10].status == "blocked"
     assert result.sop_steps[0].warnings[0].code == "historical_baseline_completed"
+
+
+def test_deposit_paid_historical_order_enters_date_confirmation() -> None:
+    facts = HistoricalStageBaselineFacts(
+        "CASE-1", 105, OrderLifecycleStatus.ESTABLISHED, None
+    )
+
+    result = _query(facts)
+
+    assert historical_baseline_step(facts) == 9
+    assert result.current_stage_code == "date_confirmation"
+    assert all(stage.status == "completed" for stage in result.stages[:4])
+    assert result.stages[4].status == "unavailable"
+    assert all(step.status == "completed" for step in result.sop_steps[:8])
+    assert result.sop_steps[8].status == "unavailable"
 
 
 def test_discussion_with_actual_start_enters_formal_service() -> None:

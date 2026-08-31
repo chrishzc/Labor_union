@@ -20,9 +20,15 @@ class HistoricalOrderOutcome(StrEnum):
     UNMATCHED_CASE = "unmatched_case"
 
 
+class HistoricalOrderSourceStatus(StrEnum):
+    CANCELLED = "cancelled"
+    DEPOSIT_PAID = "deposit_paid"
+    DISCUSSION = "discussion"
+
+
 @dataclass(frozen=True, slots=True)
 class HistoricalOrderSourceFacts:
-    asserted_status: OrderLifecycleStatus | None
+    asserted_status: HistoricalOrderSourceStatus | None
     actual_start_date: date | None
     actual_end_date: date | None
     issue_codes: tuple[str, ...] = ()
@@ -61,7 +67,11 @@ def build_historical_order_candidate(
     issues = set(source.issue_codes)
     outcome = _outcome(current.status, source.asserted_status, issues)
     date_patch = _date_patch(current, source, issues, outcome)
-    after_status = source.asserted_status if outcome is HistoricalOrderOutcome.ADOPTED else current.status
+    after_status = (
+        _lifecycle_status(source.asserted_status)
+        if outcome is HistoricalOrderOutcome.ADOPTED
+        else current.status
+    )
     order_changed = outcome is HistoricalOrderOutcome.ADOPTED and (
         after_status != current.status or bool(date_patch)
     )
@@ -98,6 +108,14 @@ def _outcome(current_status, asserted_status, issues):
     return HistoricalOrderOutcome.ADOPTED
 
 
+def _lifecycle_status(source_status: HistoricalOrderSourceStatus) -> OrderLifecycleStatus:
+    return {
+        HistoricalOrderSourceStatus.CANCELLED: OrderLifecycleStatus.CANCELLED,
+        HistoricalOrderSourceStatus.DEPOSIT_PAID: OrderLifecycleStatus.ESTABLISHED,
+        HistoricalOrderSourceStatus.DISCUSSION: OrderLifecycleStatus.DISCUSSION,
+    }[source_status]
+
+
 def _date_patch(current, source, issues, outcome):
     del issues
     if outcome is not HistoricalOrderOutcome.ADOPTED:
@@ -118,6 +136,7 @@ __all__ = [
     "HistoricalOrderAdoptionCandidate",
     "HistoricalOrderCurrentFacts",
     "HistoricalOrderOutcome",
+    "HistoricalOrderSourceStatus",
     "HistoricalOrderSourceFacts",
     "build_historical_order_candidate",
 ]

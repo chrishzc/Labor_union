@@ -3,7 +3,7 @@
 from datetime import date
 import json
 
-from domains.orders.historical_adoption import HistoricalOrderOutcome
+from domains.orders.historical_adoption import HistoricalOrderOutcome, HistoricalOrderSourceStatus
 from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.orders import historical_order_workbook_import as module
@@ -31,7 +31,7 @@ def test_terminal_replay_refreshes_status_actual_start_and_resolvable_staff(
         "b" * 64,
         "CASE-1",
         "客戶甲",
-        OrderLifecycleStatus.CANCELLED,
+        HistoricalOrderSourceStatus.CANCELLED,
         date(2025, 1, 2),
         date(2025, 1, 31),
         (),
@@ -44,7 +44,7 @@ def test_terminal_replay_refreshes_status_actual_start_and_resolvable_staff(
         "e" * 64,
         "CASE-2",
         "客戶乙",
-        OrderLifecycleStatus.COMPLETED,
+        HistoricalOrderSourceStatus.DEPOSIT_PAID,
         date(2025, 2, 2),
         date(2025, 2, 28),
         (
@@ -66,7 +66,7 @@ def test_terminal_replay_refreshes_status_actual_start_and_resolvable_staff(
         "f" * 64,
         "CASE-3",
         "客戶丙",
-        OrderLifecycleStatus.COMPLETED,
+        HistoricalOrderSourceStatus.DEPOSIT_PAID,
         date(2025, 3, 3),
         date(2025, 3, 31),
         (),

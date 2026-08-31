@@ -365,7 +365,10 @@ AutoComplete 與 Scheduling leave-substitution Apply 必須序列化於同一 Or
 restricted historical source 只能補登既有 Order，不建立 Client／Order。唯一匹配鍵為唯一的
 `case_no`；非空的 `client_name` 只作來源 evidence，姓名差異建立 review evidence但不阻擋採納。案號或姓名空白、
 案號找不到或不唯一固定為 `unmatched_case`，零 Domain mutation且不建立警示。
-source profile v1 只接受 0→取消、1→完成、2→洽談中；空白／其他值保存 review evidence。
+source profile v1 只接受 0→取消、1→已付訂金、2→洽談中；空白／其他值保存 review evidence。
+來源狀態是獨立歷史語意，不得直接視為 Orders lifecycle enum：`1` 表示客戶已付訂金，
+採納後 Orders lifecycle 為 `訂單成立`，Historical Operational Baseline 推進到第 5 步「確認事前服務日期」，
+不得因 `1` 直接標記完成服務或結案。
 
 2026-08-28 狀態判定補充裁決：numeric `0`不得因falsy正規化而與空白共用row fingerprint；
 Preview與Apply receipt必須由Orders回傳`0／1／2／invalid`守恆數量，管理端只顯示該typed結果，
@@ -377,8 +380,8 @@ HCM／Orders `start_date` 預期開始日相同，代表尚無實際服務開始
 `NULL`；兩者不同時，才以歷史來源開始日寫入 `actual_start_date`。歷史來源結束日不得寫入
 Orders `actual_end_date`；正式結束日以後續服務天數精算結果為準。此限制不移除 canonical 六欄
 工作簿的結束日期，也不妨礙該日期作為單一月嫂歷史 assignment 服務區間的來源 evidence。
-來源 terminal assertion 可在缺日期、取消原因、排班或付款時成立。2026-08-31 人工裁決補充：若可採納的
-`訂單完成`來源列將歷史開始日寫為非空 `actual_start_date`，Apply 必須以該案件既有的
+來源狀態斷言可在缺日期、取消原因或排班時成立。2026-08-31 人工裁決補充：若可採納的
+`1→已付訂金`來源列將歷史開始日寫為非空 `actual_start_date`，Apply 必須以該案件既有的
 `週休1日／週休2日／連續服務`與 canonical holiday calendar 重算正式服務日；歷史結束日仍不得直接寫入。
 同一 outer UoW 必須再由 Actual Start canonical writer 重建有效 Scheduling generation、由最後正式服務日
 得出 `actual_end_date`，並重算尚未結清的 Client Finance／Payroll projection 與日期。完整 service-time tuple

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from domains.orders.historical_adoption import HistoricalOrderOutcome
+from domains.orders.historical_adoption import HistoricalOrderOutcome, HistoricalOrderSourceStatus
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.orders import historical_order_workbook_import as module
 from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbook, HistoricalOrderWorkbookRow
@@ -199,7 +199,7 @@ def test_preview_and_receipt_expose_conserved_zero_one_two_status_counts(monkeyp
 
     assert preview.status_counts.as_dict() == {
         "cancelled_0": 1,
-        "completed_1": 1,
+        "deposit_paid_1": 1,
         "discussion_2": 1,
         "invalid_or_blank": 1,
     }
@@ -221,6 +221,12 @@ def test_legacy_stored_receipt_replay_derives_status_counts_from_same_workbook(m
             "assignments_created": 0,
             "replayed_rows": 0,
             "replayed_workbook": False,
+            "status_counts": {
+                "cancelled_0": 1,
+                "completed_1": 1,
+                "discussion_2": 1,
+                "invalid_or_blank": 1,
+            },
         }),
     }
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda path: workbook)
@@ -231,6 +237,7 @@ def test_legacy_stored_receipt_replay_derives_status_counts_from_same_workbook(m
 
     assert replay.replayed_workbook is True
     assert replay.status_counts.total == 4
+    assert replay.status_counts.deposit_paid_1 == 1
 
 
 def _workbook(digest: str) -> HistoricalOrderWorkbook:
@@ -240,9 +247,9 @@ def _workbook(digest: str) -> HistoricalOrderWorkbook:
 
 def _workbook_with_statuses() -> HistoricalOrderWorkbook:
     statuses = (
-        module.OrderLifecycleStatus.CANCELLED,
-        module.OrderLifecycleStatus.COMPLETED,
-        module.OrderLifecycleStatus.DISCUSSION,
+        HistoricalOrderSourceStatus.CANCELLED,
+        HistoricalOrderSourceStatus.DEPOSIT_PAID,
+        HistoricalOrderSourceStatus.DISCUSSION,
         None,
     )
     rows = tuple(
@@ -271,7 +278,7 @@ def _workbook_with_repeated_case() -> HistoricalOrderWorkbook:
             str(source_row) * 64,
             "CASE-REPEATED",
             "客戶甲",
-            module.OrderLifecycleStatus.COMPLETED,
+            HistoricalOrderSourceStatus.DEPOSIT_PAID,
             None,
             None,
             (),

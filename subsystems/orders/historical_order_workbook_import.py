@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Callable, NoReturn, Protocol
 
-from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.orders.historical_adoption import HistoricalOrderSourceStatus
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from subsystems.orders.historical_adoption_workflow import HistoricalOrderAdoptionRequest, HistoricalOrderAdoptionWorkflow
 from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbook, load_historical_order_workbook
@@ -27,7 +27,7 @@ class HistoricalOrderWorkbookRepository(Protocol):
 @dataclass(frozen=True, slots=True)
 class HistoricalOrderStatusCounts:
     cancelled_0: int
-    completed_1: int
+    deposit_paid_1: int
     discussion_2: int
     invalid_or_blank: int
 
@@ -42,7 +42,7 @@ class HistoricalOrderStatusCounts:
     def as_dict(self) -> dict[str, int]:
         return {
             "cancelled_0": self.cancelled_0,
-            "completed_1": self.completed_1,
+            "deposit_paid_1": self.deposit_paid_1,
             "discussion_2": self.discussion_2,
             "invalid_or_blank": self.invalid_or_blank,
         }
@@ -275,6 +275,12 @@ class HistoricalOrderWorkbookImportService:
             raise HistoricalOrderWorkbookConflict("historical_order_workbook_idempotency_conflict")
         snapshot = {**json.loads(stored["result_snapshot"]), "replayed_workbook": True}
         stored_counts = snapshot.get("status_counts")
+        if stored_counts is not None and "completed_1" in stored_counts:
+            stored_counts = {
+                **stored_counts,
+                "deposit_paid_1": stored_counts["completed_1"],
+            }
+            stored_counts.pop("completed_1", None)
         snapshot["status_counts"] = (
             HistoricalOrderStatusCounts(**stored_counts)
             if stored_counts is not None
@@ -308,9 +314,9 @@ def _preview(workbook: HistoricalOrderWorkbook, row_previews) -> HistoricalOrder
 def _status_counts(workbook: HistoricalOrderWorkbook) -> HistoricalOrderStatusCounts:
     counts = Counter(row.asserted_status for row in workbook.rows)
     result = HistoricalOrderStatusCounts(
-        cancelled_0=counts[OrderLifecycleStatus.CANCELLED],
-        completed_1=counts[OrderLifecycleStatus.COMPLETED],
-        discussion_2=counts[OrderLifecycleStatus.DISCUSSION],
+        cancelled_0=counts[HistoricalOrderSourceStatus.CANCELLED],
+        deposit_paid_1=counts[HistoricalOrderSourceStatus.DEPOSIT_PAID],
+        discussion_2=counts[HistoricalOrderSourceStatus.DISCUSSION],
         invalid_or_blank=counts[None],
     )
     if result.total != len(workbook.rows):

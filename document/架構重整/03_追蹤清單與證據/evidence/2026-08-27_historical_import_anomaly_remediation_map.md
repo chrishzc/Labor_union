@@ -48,7 +48,7 @@ predicate recheck`。禁止 tracking close、generic resolve、任意 status edi
 | `HISTORICAL-ORDER-001` source review | Orders historical review Query／Preview／Apply | MySQL Apply／replay／outbox／active removal passed；no-auth Browser 尚須以正式 versioned scenario重驗 |
 | 無 actual service，要更換月嫂 | WP-HOB-B replacement successor | approved；workflow／persistence／API／React/runtime仍未完成 |
 | 已有 actual service，要更換月嫂 | WP-HOB-C Scheduling substitution | 核心規則已核准；不得要求新契約／簽回，runtime與 optional-note DB slice仍未完成 |
-| status=完成／要進 Step 11 | WP-HOB-E owner-terminal completion | F-04 terminal scenario passed；其他 missing-root correction與H-03/A-02等scenario仍未完成 |
+| canonical Orders已完成服務／要進 Step 11 | WP-HOB-E owner-terminal completion | Historical source status `1`僅代表已付訂金，不得作為本列證據；F-04 terminal scenario passed，其他 missing-root correction與H-03/A-02等scenario仍未完成 |
 | 取消 | WP-HOB-D cancellation owner flow | 三分支與Finance direction已核准；完整真MySQL/API/Browser仍未完成 |
 | Scheduling 真衝突 | Scheduling-specific owner Q/P/A | `SCHEDULE-001/002/003/006`仍有SPEC_GAP或缺Apply，不得用現有導航冒充修復 |
 

@@ -16,6 +16,7 @@ from domains.orders.historical_adoption import (
     HistoricalOrderCurrentFacts,
     HistoricalOrderOutcome,
     HistoricalOrderSourceFacts,
+    HistoricalOrderSourceStatus,
     build_historical_order_candidate,
 )
 from domains.orders.actual_start import calculate_service_dates
@@ -42,9 +43,9 @@ from subsystems.orders.historical_order_workbook import (
 
 
 def test_status_profile_accepts_only_zero_one_two():
-    assert parse_historical_status(0) is OrderLifecycleStatus.CANCELLED
-    assert parse_historical_status("1.0") is OrderLifecycleStatus.COMPLETED
-    assert parse_historical_status(2) is OrderLifecycleStatus.DISCUSSION
+    assert parse_historical_status(0) is HistoricalOrderSourceStatus.CANCELLED
+    assert parse_historical_status("1.0") is HistoricalOrderSourceStatus.DEPOSIT_PAID
+    assert parse_historical_status(2) is HistoricalOrderSourceStatus.DISCUSSION
     assert parse_historical_status(None) is None
     assert parse_historical_status(3) is None
     assert parse_historical_status("訂單完成") is None
@@ -66,7 +67,7 @@ def test_numeric_zero_status_has_a_distinct_source_fingerprint_from_blank(tmp_pa
     zero = load_historical_order_workbook(zero_path).rows[0]
     blank = load_historical_order_workbook(blank_path).rows[0]
 
-    assert zero.asserted_status is OrderLifecycleStatus.CANCELLED
+    assert zero.asserted_status is HistoricalOrderSourceStatus.CANCELLED
     assert blank.asserted_status is None
     assert zero.source_fingerprint != blank.source_fingerprint
 
@@ -83,21 +84,21 @@ def test_six_column_workbook_distinguishes_zero_one_two_and_invalid_statuses(tmp
     rows = load_historical_order_workbook(path).rows
 
     assert tuple(row.asserted_status for row in rows) == (
-        OrderLifecycleStatus.CANCELLED,
-        OrderLifecycleStatus.COMPLETED,
-        OrderLifecycleStatus.DISCUSSION,
+        HistoricalOrderSourceStatus.CANCELLED,
+        HistoricalOrderSourceStatus.DEPOSIT_PAID,
+        HistoricalOrderSourceStatus.DISCUSSION,
         None,
     )
 
 
 def test_valid_status_is_adopted_when_dates_are_null():
     current = _current(OrderLifecycleStatus.DISCUSSION)
-    source = HistoricalOrderSourceFacts(OrderLifecycleStatus.COMPLETED, None, None)
+    source = HistoricalOrderSourceFacts(HistoricalOrderSourceStatus.DEPOSIT_PAID, None, None)
 
     candidate = build_historical_order_candidate(current, source)
 
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
-    assert candidate.after_status is OrderLifecycleStatus.COMPLETED
+    assert candidate.after_status is OrderLifecycleStatus.ESTABLISHED
     assert candidate.date_patch == ()
     assert candidate.resulting_version == 4
 
@@ -105,7 +106,7 @@ def test_valid_status_is_adopted_when_dates_are_null():
 def test_historical_start_matching_hcm_plan_does_not_create_actual_start():
     current = _current(OrderLifecycleStatus.DISCUSSION, planned_start=date(2025, 1, 3))
     source = HistoricalOrderSourceFacts(
-        OrderLifecycleStatus.COMPLETED,
+        HistoricalOrderSourceStatus.DEPOSIT_PAID,
         date(2025, 1, 3),
         date(2025, 1, 31),
     )
@@ -120,7 +121,7 @@ def test_historical_start_matching_hcm_plan_does_not_create_actual_start():
 def test_historical_start_different_from_hcm_plan_becomes_actual_start():
     current = _current(OrderLifecycleStatus.COMPLETED, planned_start=date(2025, 1, 2))
     source = HistoricalOrderSourceFacts(
-        OrderLifecycleStatus.COMPLETED,
+        HistoricalOrderSourceStatus.DEPOSIT_PAID,
         date(2025, 1, 3),
         date(2025, 1, 31),
     )
@@ -154,7 +155,7 @@ def test_matching_hcm_plan_clears_previously_inferred_actual_start():
     candidate = build_historical_order_candidate(
         current,
         HistoricalOrderSourceFacts(
-            OrderLifecycleStatus.COMPLETED,
+            HistoricalOrderSourceStatus.DEPOSIT_PAID,
             date(2025, 1, 2),
             date(2025, 1, 31),
         ),
@@ -166,20 +167,20 @@ def test_matching_hcm_plan_clears_previously_inferred_actual_start():
 def test_valid_historical_status_overwrites_current_value_without_false_warning():
     candidate = build_historical_order_candidate(
         _current(OrderLifecycleStatus.CANCELLED),
-        HistoricalOrderSourceFacts(OrderLifecycleStatus.COMPLETED, None, None),
+        HistoricalOrderSourceFacts(HistoricalOrderSourceStatus.DEPOSIT_PAID, None, None),
     )
 
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
-    assert candidate.after_status is OrderLifecycleStatus.COMPLETED
+    assert candidate.after_status is OrderLifecycleStatus.ESTABLISHED
     assert candidate.resulting_version == 4
     assert candidate.issue_codes == ()
 
 
 def test_same_status_and_dates_do_not_repeat_order_lifecycle_version():
-    current = _current(OrderLifecycleStatus.COMPLETED)
+    current = _current(OrderLifecycleStatus.ESTABLISHED)
     candidate = build_historical_order_candidate(
         current,
-        HistoricalOrderSourceFacts(OrderLifecycleStatus.COMPLETED, None, None),
+        HistoricalOrderSourceFacts(HistoricalOrderSourceStatus.DEPOSIT_PAID, None, None),
     )
 
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
@@ -281,19 +282,19 @@ def test_columns_after_canonical_six_are_ignored(tmp_path):
     assert row.actual_end_date == date(1904, 1, 3)
     assert tuple(item.name for item in row.caregivers) == ("月嫂甲",)
     assert tuple(item.resolution for item in preview.pairings) == (
-        HistoricalPairingResolution.ASSIGNMENT_CANDIDATE,
+        HistoricalPairingResolution.ASSIGNMENT_CONFLICT,
     )
-    assert preview.issue_codes == ()
+    assert preview.issue_codes == ("historical_assignment_conflict",)
 
 
-def test_single_unique_caregiver_with_interval_builds_completed_assignment_candidate(tmp_path):
+def test_deposit_paid_row_does_not_build_completed_assignment_candidate(tmp_path):
     path = _workbook(tmp_path, ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"], ["客戶甲", "CASE-1", 45937, 45978, 1, "月嫂甲"])
     row = load_historical_order_workbook(path).rows[0]
 
     preview = HistoricalOrderAdoptionWorkflow(_Repository(row), _UnitOfWork, _SchedulingHistoricalAssignment()).preview(row)
 
     assert preview.outcome is HistoricalOrderOutcome.ADOPTED
-    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CONFLICT
 
 
 def test_unique_case_number_adopts_client_name_suffix_with_review_evidence(tmp_path):

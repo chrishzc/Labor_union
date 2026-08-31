@@ -15,6 +15,7 @@ from domains.orders.historical_adoption import (
     HistoricalOrderCurrentFacts,
     HistoricalOrderOutcome,
     HistoricalOrderSourceFacts,
+    HistoricalOrderSourceStatus,
     build_historical_order_candidate,
 )
 from domains.orders.lifecycle import OrderLifecycleStatus
@@ -173,8 +174,8 @@ class HistoricalOrderAdoptionWorkflow:
             return
         if (
             preview.outcome is not HistoricalOrderOutcome.ADOPTED
-            or preview.after_status != OrderLifecycleStatus.COMPLETED.value
             or preview.case_no is None
+            or request.row.asserted_status is not HistoricalOrderSourceStatus.DEPOSIT_PAID
         ):
             return
         actual_start_date = request.row.actual_start_date

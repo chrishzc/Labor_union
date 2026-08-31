@@ -83,6 +83,8 @@ class HistoricalStageBaselineOverlayService:
 def historical_baseline_step(facts: HistoricalStageBaselineFacts) -> int | None:
     """Map only unambiguous historical states to a current operational step."""
 
+    if facts.lifecycle_status is OrderLifecycleStatus.ESTABLISHED:
+        return 9
     if facts.lifecycle_status is OrderLifecycleStatus.COMPLETED:
         return 11
     if (
@@ -105,7 +107,7 @@ def _overlay(
     if selected_step is None:
         return timeline
 
-    selected_stage = 7 if selected_step == 11 else 6
+    selected_stage = {9: 5, 10: 6, 11: 7}[selected_step]
     stages = tuple(
         _baseline_stage(stage, facts)
         if stage.ordinal < selected_stage and stage.status != "completed"
@@ -118,13 +120,11 @@ def _overlay(
         else step
         for step in timeline.sop_steps
     )
-    current_stage_code = (
-        "settlement_payout"
-        if selected_step == 11
-        else "settlement_payout"
-        if stages[5].status == "completed"
-        else "active_service"
-    )
+    current_stage_code = {
+        9: "date_confirmation",
+        10: "settlement_payout" if stages[5].status == "completed" else "active_service",
+        11: "settlement_payout",
+    }[selected_step]
     return _with_projection_digest(
         timeline,
         current_stage_code=current_stage_code,

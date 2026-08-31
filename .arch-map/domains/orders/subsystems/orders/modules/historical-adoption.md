@@ -27,7 +27,7 @@
 
 ## Dependencies
 - outbound: `anomalies/anomalies` — committed review evidence can be projected by `subsystems/anomalies/historical_order_adoption_outbox_consumer.py`.
-- outbound: `orders/actual-start` — completed historical actual-start assertions rebuild current official service facts through the canonical writer in the same outer UoW.
+- outbound: `orders/actual-start` — deposit-paid historical rows whose source date differs from the HCM planned start rebuild current official service facts through the canonical writer in the same outer UoW; source status `1` alone never triggers this path.
 - inbound: Case Import / operator import entry — only through typed source/workflow boundary.
 
 ## Contracts
@@ -38,9 +38,6 @@
 - static:
   - `db/schema_parts/1008_historical_order_adoption_noop_constraint.sql`
 - test_root: `tests/domains/orders/subsystems/orders/modules/historical-adoption/`
-- higher_boundary:
-  - `tests/integration/test_historical_order_workbook.py`
-- layout_gap: disposable-MySQL workbook integration remains at `tests/integration/test_historical_order_workbook.py`; it is a higher-boundary oracle and has repo-root fixture resolution.
 
 ## Provenance
 - Orders ownership and historical adoption contract — `architecture_declared` — `01_Orders_Domain.md`.
