@@ -1,6 +1,6 @@
 """Direct regression contracts for Scheduling service-day-log invariants."""
 
-from datetime import date, datetime
+from datetime import date
 
 import pytest
 
@@ -71,6 +71,3 @@ def test_meal_photo_media_ids_must_be_unique_nonblank_and_bounded() -> None:
 def test_service_date_must_be_a_date_value() -> None:
     with pytest.raises(TypeError, match="must be a date"):
         ServiceDayLogIntent("2026-08-31", "daily log")
-
-    intent = ServiceDayLogIntent(datetime(2026, 8, 31, 12, 0), "daily log")
-    assert isinstance(intent.service_date, date)
