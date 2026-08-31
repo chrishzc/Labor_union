@@ -89,13 +89,25 @@ def _assemble_cancellation_facts(
     assignments = _load_cancellation_assignments(
         cursor, aggregate_row, lock=lock
     )
+    historical_origin = _historical_cancellation_origin(
+        cursor,
+        str(order_row["case_no"]),
+    )
     return _cancellation_facts(
-        terms_facts, assignments, terms_facts.payroll
+        terms_facts,
+        assignments,
+        terms_facts.payroll,
+        historical_origin,
     )
 
 
 # Kept cohesive because this is the single row-to-Domain assembly boundary.
-def _cancellation_facts(terms_facts, assignments, payroll):
+def _cancellation_facts(
+    terms_facts,
+    assignments,
+    payroll,
+    historical_cancellation_origin=False,
+):
     order = terms_facts.order
     lifecycle = terms_facts.lifecycle
     return CancellationWorkflowFacts(
@@ -118,6 +130,27 @@ def _cancellation_facts(terms_facts, assignments, payroll):
         terms_facts.client_finance,
         payroll,
         lifecycle,
+        historical_cancellation_origin,
+    )
+
+
+def _historical_cancellation_origin(cursor, case_no) -> bool:
+    cursor.execute(
+        "SELECT "
+        "EXISTS(SELECT 1 FROM order_lifecycle_control_events e "
+        "WHERE e.case_no=%s AND e.control_type='cancellation' "
+        "AND e.action='activate' "
+        "AND e.reason LIKE 'historical_order_adoption:%%') "
+        "AS historical_control_exists,"
+        "EXISTS(SELECT 1 FROM order_cancellation_events c "
+        "WHERE c.case_no=%s) AS canonical_cancellation_exists",
+        (case_no, case_no),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        raise RuntimeError("historical_cancellation_origin_readback_missing")
+    return bool(row["historical_control_exists"]) and not bool(
+        row["canonical_cancellation_exists"]
     )
 
 
