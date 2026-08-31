@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Callable, Protocol
 
@@ -54,10 +54,13 @@ class CancellationWorkflowFacts:
     client_finance: ClientFinanceTermsSourceFacts
     payroll: PayrollTermsSourceFacts
     lifecycle: OrderLifecycleRootFacts
+    historical_cancellation_origin: bool = False
 
     def __post_init__(self) -> None:
         if len({self.order.case_no, self.scheduling.case_no, self.client_finance.case_no, self.payroll.case_no, self.lifecycle.case_no}) != 1:
             raise ValueError("cancellation_workflow_case_mismatch")
+        if not isinstance(self.historical_cancellation_origin, bool):
+            raise TypeError("historical cancellation origin must be bool")
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +135,7 @@ class CancellationOrderPersistenceCommand:
     case_no: str
     expected_order_version: int
     resulting_order_version: int
+    actual_start_date: date | None
     actual_end_date: date | None
     lifecycle_status: OrderLifecycleStatus
 
@@ -220,8 +224,9 @@ class OrderCancellationWorkflow:
         return preview
 
     def _build_preview(self, facts: CancellationWorkflowFacts, confirmed_service_days: tuple[ConfirmedServiceDay, ...]) -> OrderCancellationPreview:
+        effective_order = _effective_order_facts(facts, confirmed_service_days)
         try:
-            candidate = build_cancellation_candidate(facts.order, facts.scheduling, self._clock.now().date(), confirmed_service_days)
+            candidate = build_cancellation_candidate(effective_order, facts.scheduling, self._clock.now().date(), confirmed_service_days)
             finance, payroll = _build_impacts(facts, candidate)
         except ValueError as error:
             if str(error) != "payroll_rate_policy_not_found":
@@ -236,8 +241,24 @@ class OrderCancellationWorkflow:
         _persist_finance_and_payroll(self._repository, request, preview, event_id, scheduling)
         control_event_id = self._repository.activate_cancellation_control(request, event_id)
         lifecycle_event_id = self._repository.persist_cancellation_lifecycle(request, preview, control_event_id)
-        self._repository.update_cancelled_order(CancellationOrderPersistenceCommand(request.case_no, preview.order_version, receipt.order_version, receipt.actual_end_date, receipt.lifecycle_status))
+        self._repository.update_cancelled_order(CancellationOrderPersistenceCommand(request.case_no, preview.order_version, receipt.order_version, preview.candidate.actual_start_date, receipt.actual_end_date, receipt.lifecycle_status))
         self._repository.save_receipt(CancellationReceiptPersistenceCommand(request.idempotency_key, StoredCancellationReceipt(command_fingerprint, receipt), event_id, scheduling.scheduling_receipt_id, control_event_id, lifecycle_event_id, request.correlation_id))
+
+
+def _effective_order_facts(facts, confirmed_service_days):
+    order = facts.order
+    if order.service_started or not confirmed_service_days:
+        return order
+    if not facts.historical_cancellation_origin:
+        return order
+    if facts.lifecycle.current_status is not OrderLifecycleStatus.CANCELLED:
+        return order
+    actual_start_date = min(item.service_date for item in confirmed_service_days)
+    return replace(
+        order,
+        actual_start_date=actual_start_date,
+        service_started=True,
+    )
 
 
 def _build_impacts(facts, candidate):
@@ -252,7 +273,7 @@ def _confirmed_staff_ids(confirmed_service_days):
 
 
 def _build_lifecycle_impact(facts, candidate):
-    payload = {"case_no": facts.order.case_no, "before_status": facts.lifecycle.current_status.value, "after_status": OrderLifecycleStatus.CANCELLED.value, "actual_end_date": candidate.actual_end_date.isoformat() if candidate.actual_end_date else None, "cancellation_fingerprint": candidate.fingerprint.value}
+    payload = {"case_no": facts.order.case_no, "before_status": facts.lifecycle.current_status.value, "after_status": OrderLifecycleStatus.CANCELLED.value, "actual_start_date": candidate.actual_start_date.isoformat() if candidate.actual_start_date else None, "actual_end_date": candidate.actual_end_date.isoformat() if candidate.actual_end_date else None, "cancellation_fingerprint": candidate.fingerprint.value}
     return CancellationLifecycleImpact(facts.order.case_no, facts.lifecycle.current_status, OrderLifecycleStatus.CANCELLED, candidate.actual_end_date, True, fingerprint_payload(payload))
 
 
