@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable, NoReturn, Protocol
 
 from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -175,8 +175,19 @@ class HistoricalOrderWorkbookImportService:
         assignments_created = 0
         replayed_rows = 0
         review_rows = 0
+        processed_case_numbers: set[str] = set()
         for row, row_preview in zip(workbook.rows, row_previews, strict=True):
-            receipt = self._workflow.apply(_row_request(row, row_preview.fingerprint, key, actor, correlation_id))
+            refresh_current_facts = (
+                row.case_no is not None and row.case_no in processed_case_numbers
+            )
+            receipt = self._apply_row(
+                row,
+                row_preview.fingerprint,
+                key,
+                actor,
+                correlation_id,
+                refresh_current_facts=refresh_current_facts,
+            )
             if receipt.replayed and _requires_replay_refresh((row_preview,)):
                 refresh_row = replace(
                     row,
@@ -186,25 +197,75 @@ class HistoricalOrderWorkbookImportService:
                 )
                 refresh_preview = self._workflow.preview(refresh_row)
                 if _requires_replay_refresh((refresh_preview,)):
-                    receipt = self._workflow.apply(
-                        _row_request(
-                            refresh_row,
-                            refresh_preview.fingerprint,
-                            key,
-                            actor,
-                            correlation_id,
-                        )
+                    receipt = self._apply_row(
+                        refresh_row,
+                        refresh_preview.fingerprint,
+                        key,
+                        actor,
+                        correlation_id,
+                        refresh_current_facts=True,
                     )
             outcomes[receipt.outcome.value] += 1
             assignments_created += 0 if receipt.replayed else receipt.assignment_count
             replayed_rows += int(receipt.replayed)
             review_rows += int(getattr(receipt, "review_identity", None) is not None)
+            if row.case_no is not None:
+                processed_case_numbers.add(row.case_no)
         _assert_conservation(len(workbook.rows), outcomes)
         return HistoricalOrderWorkbookReceipt(
             workbook.content_digest, len(workbook.rows), outcomes["adopted"], outcomes["unmatched_case"],
             review_rows, outcomes["current_conflict"], assignments_created, replayed_rows, False,
             _status_counts(workbook),
         )
+
+    def _apply_row(
+        self,
+        row,
+        preview_fingerprint,
+        key,
+        actor,
+        correlation_id,
+        *,
+        refresh_current_facts: bool,
+    ):
+        request = _row_request(
+            row, preview_fingerprint, key, actor, correlation_id
+        )
+        try:
+            return self._workflow.apply(request)
+        except RuntimeError as error:
+            if not (
+                refresh_current_facts
+                and str(error) == "historical_order_candidate_stale"
+            ):
+                self._raise_workbook_conflict(error)
+        try:
+            with self._unit_of_work_factory() as unit_of_work:
+                locked_preview = self._workflow.preview_in_current_unit_of_work(
+                    row, for_update=True
+                )
+                receipt = self._workflow.apply_in_current_unit_of_work(
+                    _row_request(
+                        row,
+                        locked_preview.fingerprint,
+                        key,
+                        actor,
+                        correlation_id,
+                    )
+                )
+                unit_of_work.commit()
+                return receipt
+        except RuntimeError as error:
+            self._raise_workbook_conflict(error)
+
+    @staticmethod
+    def _raise_workbook_conflict(error: RuntimeError) -> NoReturn:
+        if str(error) in {
+            "historical_order_candidate_stale",
+            "historical_order_idempotency_conflict",
+        }:
+            raise HistoricalOrderWorkbookConflict(str(error)) from error
+        raise error
 
     def _stored_replay(self, key: str, workbook: HistoricalOrderWorkbook) -> HistoricalOrderWorkbookReceipt | None:
         stored = self._repository.load_receipt(key)

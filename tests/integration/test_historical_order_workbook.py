@@ -117,6 +117,35 @@ def test_six_column_workbook_applies_zero_one_two_as_distinct_order_statuses(tmp
         connection.close()
 
 
+def test_workbook_refreshes_a_later_row_for_the_same_case_after_its_own_write(tmp_path):
+    token = uuid4().hex
+    connection = get_connection()
+    try:
+        case_no, _ = _seed_case(connection, token, "repeated")
+        workbook_path = _write_status_workbook(
+            tmp_path / "repeated-case.xlsx",
+            ((case_no, 1), (case_no, 1)),
+        )
+        service = _service(connection)
+
+        preview = service.preview(str(workbook_path))
+        receipt = service.apply(
+            str(workbook_path),
+            f"historical-workbook:repeated:{token}",
+            preview.preview_fingerprint,
+            "historical-workbook-test",
+            token,
+        )
+
+        assert receipt.source_row_count == 2
+        assert receipt.adopted_count == 2
+        assert _order_status(connection, case_no) == "訂單完成"
+        assert _count(connection, "order_lifecycle_state_events", case_no) == 1
+        assert _count(connection, "historical_order_adoption_receipts", case_no) == 2
+    finally:
+        connection.close()
+
+
 def test_six_column_workbook_adopts_pending_orders_with_truthful_before_status(tmp_path):
     token = uuid4().hex
     connection = get_connection()

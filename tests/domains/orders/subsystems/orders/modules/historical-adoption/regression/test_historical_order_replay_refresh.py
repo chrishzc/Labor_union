@@ -166,6 +166,13 @@ class _Workflow:
             request.preview_fingerprint,
         )
 
+    def preview_in_current_unit_of_work(self, row, *, for_update):
+        assert for_update is True
+        return self.preview(row)
+
+    def apply_in_current_unit_of_work(self, request):
+        return self.apply(request)
+
 
 class _Repository:
     def __init__(self, digest: str) -> None:

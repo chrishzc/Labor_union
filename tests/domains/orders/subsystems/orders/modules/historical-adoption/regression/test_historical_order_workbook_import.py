@@ -72,6 +72,47 @@ class _Workflow:
         return SimpleNamespace(outcome=HistoricalOrderOutcome.ADOPTED, replayed=False, assignment_count=0)
 
 
+class _StatefulWorkflow(_Workflow):
+    def __init__(self) -> None:
+        super().__init__()
+        self.versions: dict[str, int] = {}
+
+    def preview(self, row):
+        version = self.versions.get(row.case_no, 0)
+        return SimpleNamespace(
+            source_identity=row.source_identity,
+            source_fingerprint=row.source_fingerprint,
+            outcome=HistoricalOrderOutcome.ADOPTED,
+            pairings=(),
+            fingerprint=PreviewFingerprint(f"{version:064x}"),
+        )
+
+    def apply(self, request):
+        return self.apply_in_current_unit_of_work(request)
+
+    def preview_in_current_unit_of_work(self, row, *, for_update):
+        assert for_update is True
+        return self.preview(row)
+
+    def apply_in_current_unit_of_work(self, request):
+        current = self.preview(request.row)
+        if current.fingerprint != request.preview_fingerprint:
+            raise RuntimeError("historical_order_candidate_stale")
+        self.apply_calls += 1
+        self.versions[request.row.case_no] = self.versions.get(request.row.case_no, 0) + 1
+        return SimpleNamespace(
+            outcome=HistoricalOrderOutcome.ADOPTED,
+            replayed=False,
+            assignment_count=0,
+            review_identity=None,
+        )
+
+
+class _StaleWorkflow(_Workflow):
+    def apply(self, request):
+        raise RuntimeError("historical_order_candidate_stale")
+
+
 def test_workbook_apply_replays_terminal_receipt_and_conflicts_before_row_apply(monkeypatch):
     original = _workbook("a" * 64)
     different = _workbook("b" * 64)
@@ -101,6 +142,49 @@ def test_apply_rejects_a_stale_preview_before_row_apply(monkeypatch):
         service.apply("first.xlsx", "workbook-key", "0" * 64, "operator", "correlation")
 
     assert workflow.apply_calls == 0
+
+
+def test_apply_refreshes_a_later_row_after_the_same_case_was_changed_by_this_workbook(monkeypatch):
+    workbook = _workbook_with_repeated_case()
+    monkeypatch.setattr(module, "load_historical_order_workbook", lambda path: workbook)
+    workflow = _StatefulWorkflow()
+    service = module.HistoricalOrderWorkbookImportService(
+        _Repository(), workflow, _UnitOfWork
+    )
+    preview = service.preview("repeated-case.xlsx")
+
+    receipt = service.apply(
+        "repeated-case.xlsx",
+        "repeated-case-key",
+        preview.preview_fingerprint,
+        "operator",
+        "correlation",
+    )
+
+    assert receipt.source_row_count == 2
+    assert receipt.adopted_count == 2
+    assert workflow.apply_calls == 2
+
+
+def test_row_stale_is_exposed_as_a_workbook_conflict_instead_of_an_internal_error(monkeypatch):
+    workbook = _workbook("7" * 64)
+    monkeypatch.setattr(module, "load_historical_order_workbook", lambda path: workbook)
+    service = module.HistoricalOrderWorkbookImportService(
+        _Repository(), _StaleWorkflow(), _UnitOfWork
+    )
+    preview = service.preview("stale.xlsx")
+
+    with pytest.raises(
+        module.HistoricalOrderWorkbookConflict,
+        match="historical_order_candidate_stale",
+    ):
+        service.apply(
+            "stale.xlsx",
+            "stale-key",
+            preview.preview_fingerprint,
+            "operator",
+            "correlation",
+        )
 
 
 def test_preview_and_receipt_expose_conserved_zero_one_two_status_counts(monkeypatch):
@@ -177,3 +261,22 @@ def _workbook_with_statuses() -> HistoricalOrderWorkbook:
         for index, status in enumerate(statuses)
     )
     return HistoricalOrderWorkbook("f" * 64, "e" * 64, "任意名稱", rows)
+
+
+def _workbook_with_repeated_case() -> HistoricalOrderWorkbook:
+    rows = tuple(
+        HistoricalOrderWorkbookRow(
+            source_row,
+            f"historical-orders:{'9' * 64}:row:{source_row}",
+            str(source_row) * 64,
+            "CASE-REPEATED",
+            "客戶甲",
+            module.OrderLifecycleStatus.COMPLETED,
+            None,
+            None,
+            (),
+            (),
+        )
+        for source_row in (2, 3)
+    )
+    return HistoricalOrderWorkbook("9" * 64, "8" * 64, "任意名稱", rows)
