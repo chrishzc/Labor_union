@@ -355,6 +355,7 @@ REVIEW_REQUIRED_PATH_GOVERNANCE = {
     "api/routes/anomaly_recovery.py": ("Anomalies / Global Durable Jobs", "authenticated anomaly recovery operator"),
     "api/routes/anomaly_registry.py": ("Anomalies", "authenticated anomaly operator"),
     "api/routes/candidate_contact_pool.py": ("Scheduling Candidate Contact", "authenticated scheduling operator"),
+    "api/routes/client_payments.py": ("Client Finance", "authenticated client-finance operator"),
     "api/routes/client_refund_reversal.py": ("Client Finance", "authenticated client-finance operator"),
     "api/routes/contract_external_signing.py": ("Contract Signing", "authenticated contract-signing operator or verified external signing integration"),
     "api/routes/contract_signing.py": ("Contract Signing", "authenticated contract-signing operator"),
