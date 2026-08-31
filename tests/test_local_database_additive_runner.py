@@ -1126,6 +1126,82 @@ def test_descriptor_state_rejects_owned_extra_indexes() -> None:
     assert migration.local_additive_descriptor_state(snapshot, descriptor, "1001_line_rich_menu_publication_step_saga.sql") == "drift"
 
 
+@pytest.mark.parametrize(
+    ("artifact", "table", "column"),
+    (
+        (
+            "1015_controlled_file_reference_finalize_leases.sql",
+            "scheduling_service_day_log_attachments",
+            "provider_media_id",
+        ),
+        (
+            "1018_hcm_resubmission_canonical_review_version.sql",
+            "case_import_hcm_correction_events",
+            "prior_occurrence_id",
+        ),
+    ),
+)
+def test_modified_parent_release_recognizes_exact_predecessor_as_absent(
+    artifact, table, column,
+) -> None:
+    descriptor = migration._canonical_artifact_descriptor(artifact)
+    predecessor = {
+        "provider_media_id": {
+            "column_type": "varchar(191)", "is_nullable": "NO",
+            "column_default": None, "extra": "",
+        },
+        "prior_occurrence_id": {
+            "column_type": "bigint", "is_nullable": "NO",
+            "column_default": None, "extra": "",
+        },
+    }[column]
+    snapshot = {
+        "columns": [{"table_name": table, "column_name": column, **predecessor}],
+        "indexes": [], "constraints": [], "key_columns": [],
+        "foreign_keys": [], "triggers": [], "show_create_tables": {}, "views": [],
+    }
+
+    assert migration.local_additive_descriptor_state(
+        snapshot, descriptor, artifact
+    ) == "absent"
+
+
+@pytest.mark.parametrize(
+    ("artifact", "table", "column", "column_type"),
+    (
+        (
+            "1015_controlled_file_reference_finalize_leases.sql",
+            "scheduling_service_day_log_attachments",
+            "provider_media_id",
+            "varchar(190)",
+        ),
+        (
+            "1018_hcm_resubmission_canonical_review_version.sql",
+            "case_import_hcm_correction_events",
+            "prior_occurrence_id",
+            "bigint unsigned",
+        ),
+    ),
+)
+def test_modified_parent_release_rejects_noncanonical_predecessor(
+    artifact, table, column, column_type,
+) -> None:
+    descriptor = migration._canonical_artifact_descriptor(artifact)
+    snapshot = {
+        "columns": [{
+            "table_name": table, "column_name": column,
+            "column_type": column_type, "is_nullable": "NO",
+            "column_default": None, "extra": "",
+        }],
+        "indexes": [], "constraints": [], "key_columns": [],
+        "foreign_keys": [], "triggers": [], "show_create_tables": {}, "views": [],
+    }
+
+    assert migration.local_additive_descriptor_state(
+        snapshot, descriptor, artifact
+    ) == "drift"
+
+
 def test_local_descriptor_state_does_not_defer_missing_owned_trigger() -> None:
     artifact = "1001_line_rich_menu_publication_step_saga.sql"
     descriptor = migration._canonical_artifact_descriptor(artifact)

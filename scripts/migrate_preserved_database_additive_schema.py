@@ -1897,6 +1897,75 @@ def local_additive_descriptor_state(
     )
 
 
+def _modified_parent_predecessor_absent_state(
+    snapshot: Mapping[str, Any],
+    descriptor: dict[str, Any],
+    artifact: str,
+    *,
+    defer_missing_triggers: bool,
+) -> str | None:
+    """Recognize the exact predecessor before an additive parent-column MODIFY."""
+    predecessor_columns = {
+        "1015_controlled_file_reference_finalize_leases.sql": {
+            "scheduling_service_day_log_attachments": {
+                "provider_media_id": {
+                    "column_type": "varchar(191)",
+                    "is_nullable": "NO",
+                    "column_default": None,
+                    "extra": "",
+                },
+            },
+        },
+        "1018_hcm_resubmission_canonical_review_version.sql": {
+            "case_import_hcm_correction_events": {
+                "prior_occurrence_id": {
+                    "column_type": "bigint",
+                    "is_nullable": "NO",
+                    "column_default": None,
+                    "extra": "",
+                },
+            },
+        },
+    }.get(artifact)
+    if predecessor_columns is None:
+        return None
+
+    columns = {
+        (row["table_name"], row["column_name"]): row
+        for row in snapshot["columns"]
+    }
+    for table, expected_columns in predecessor_columns.items():
+        for name, expected in expected_columns.items():
+            row = columns.get((table, name))
+            if row is None:
+                return None
+            actual_default = row["column_default"]
+            if isinstance(actual_default, str):
+                actual_default = actual_default.casefold()
+            actual_extra = re.sub(r"\s+", " ", str(row["extra"] or "")).casefold()
+            if (
+                _normalize_column_type_contract(row["column_type"])
+                != expected["column_type"]
+                or row["is_nullable"] != expected["is_nullable"]
+                or actual_default != expected["column_default"]
+                or actual_extra != expected["extra"]
+            ):
+                return None
+
+    successor_only = deepcopy(descriptor)
+    for table, expected_columns in predecessor_columns.items():
+        for name in expected_columns:
+            successor_only["parent_columns"][table].pop(name, None)
+    if _artifact_metadata_state(
+        snapshot,
+        successor_only,
+        artifact,
+        defer_missing_triggers=defer_missing_triggers,
+    ) == "absent":
+        return "absent"
+    return None
+
+
 def _metadata_state_for_artifact(
     snapshot: Mapping[str, Any],
     descriptor: dict[str, Any],
@@ -1932,6 +2001,14 @@ def _metadata_state_for_artifact(
             descriptor,
             defer_missing_triggers=defer_missing_triggers,
         )
+    predecessor_state = _modified_parent_predecessor_absent_state(
+        snapshot,
+        descriptor,
+        artifact,
+        defer_missing_triggers=defer_missing_triggers,
+    )
+    if predecessor_state is not None:
+        return predecessor_state
     return _artifact_metadata_state(
         snapshot,
         descriptor,
