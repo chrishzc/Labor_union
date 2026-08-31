@@ -668,16 +668,17 @@ def _replay_existing_hcm_case(
             {"case_import": "case_import_existing_source_conflict"},
         )
         return "review_required"
-    command = ApplyCaseImport(
-        intent,
-        ExpectedVersion(0),
-        stored.receipt.preview_fingerprint,
-        key,
-        ActorContext("import-client-hcm"),
-        f"Import negotiated HCM case from {os.path.basename(excel_path)}.",
-        correlation,
-    )
-    _apply_case_import(application, command, current_uow=current_uow)
+    if not current_uow:
+        command = ApplyCaseImport(
+            intent,
+            ExpectedVersion(0),
+            stored.receipt.preview_fingerprint,
+            key,
+            ActorContext("import-client-hcm"),
+            f"Import negotiated HCM case from {os.path.basename(excel_path)}.",
+            correlation,
+        )
+        _apply_case_import(application, command, current_uow=False)
     if current_uow:
         _reconcile_without_rolling_back_hcm(
             connection, intent.case_no, in_current_uow=True,
