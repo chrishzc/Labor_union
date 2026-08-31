@@ -42,7 +42,7 @@ entry 的 execution approval。任一資訊缺失固定 fail closed。
 ## 4. Automated boundary
 
 `scripts/generate_entrypoint_review_queue.py` 從 FastAPI decorators、Streamlit title pages 與
-`__main__` CLI 產生 discovery queue。`tests/test_entrypoint_review_queue.py` 會拒絕：
+`__main__` CLI 產生 discovery queue。`tests/domains/global/subsystems/test-governance/modules/entrypoint-and-test-suite-governance/contract/test_entrypoint_review_queue.py` 會拒絕：
 
 - source entry 與 queue 不一致；
 - duplicate entry id；

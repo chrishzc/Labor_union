@@ -7,7 +7,7 @@ from scripts.generate_entrypoint_review_queue import build_review_queue
 from scripts.generate_task97_entry_governance import build_artifact
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[8]
 ARTIFACT = ROOT / "document/架構重整/03_追蹤清單與證據/evidence/task97_entry_governance_v1.json"
 
 
@@ -16,20 +16,20 @@ def test_task97_entry_governance_is_fresh_clone_reproducible():
     artifact = build_artifact()
     persisted = json.loads(ARTIFACT.read_text(encoding="utf-8"))
 
-    assert len(queue) == 684
+    assert len(queue) == 693
     assert artifact == persisted
-    assert artifact["source"]["entry_count"] == 684
+    assert artifact["source"]["entry_count"] == 693
     assert artifact["summary"]["generic_placeholder_count"] == 0
     assert artifact["summary"]["queue_status_counts"] == {
-        "active": 489,
-        "operator_only": 75,
+        "active": 497,
+        "operator_only": 76,
         "retired_410": 86,
         "review_required": 34,
     }
     assert artifact["summary"]["terminal_disposition_counts"] == {
-        "active_canonical": 489,
+        "active_canonical": 497,
         "blocked_external_evidence": 32,
-        "operator_only_guarded": 75,
+        "operator_only_guarded": 76,
         "retired_410": 86,
         "rewrite_to_canonical": 2,
     }

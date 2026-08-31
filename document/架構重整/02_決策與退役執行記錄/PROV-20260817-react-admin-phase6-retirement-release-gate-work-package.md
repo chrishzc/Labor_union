@@ -114,7 +114,7 @@ React逐頁query completion不要求本validator或global DB engine；bounded mu
 .venv\Scripts\python.exe -m pytest -W error -p no:cacheprovider `
   --basetemp .pytest_tmp/phase6-retirement -q `
   tests/test_streamlit_retirement_readiness.py `
-  tests/test_entrypoint_review_queue.py `
+  tests/domains/global/subsystems/test-governance/modules/entrypoint-and-test-suite-governance/contract/test_entrypoint_review_queue.py `
   tests/test_launcher_inventory.py `
   tests/test_local_development_launcher_smoke.py `
   tests/test_online_script.py `

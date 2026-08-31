@@ -77,8 +77,8 @@ def test_task97_local_canonical_http_promotions_are_exact_identity_locked() -> N
         - set(queue.SOURCE_RETIRED_HTTP_ENTRIES)
     )
 
-    assert len(queue.SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES) == 93
-    assert len(canonical_entries) == 92
+    assert len(queue.SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES) == 101
+    assert len(canonical_entries) == 100
     for identity in canonical_entries:
         entry = entries[identity]
         assert entry["status"] == "active"
@@ -151,10 +151,10 @@ def test_task97_remaining_api_blockers_are_exact_identity_locked() -> None:
 def test_task97_review_queue_current_terminal_counts() -> None:
     entries = _load_queue()
 
-    assert sum(entry["status"] == "active" for entry in entries) == 489
+    assert sum(entry["status"] == "active" for entry in entries) == 497
     assert sum(entry["status"] == "retired_410" for entry in entries) == 86
     assert sum(entry["status"] == "review_required" for entry in entries) == 34
-    assert sum(entry["status"] == "operator_only" for entry in entries) == 75
+    assert sum(entry["status"] == "operator_only" for entry in entries) == 76
 
 
 def test_local_mysql_forward_is_owned_by_the_exact_local_bridge_launcher() -> None:

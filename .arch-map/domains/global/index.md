@@ -9,6 +9,8 @@ outbox 與 runtime governance；不擁有各 business Domain 的根事實或公�
 - `reporting` — 跨Domain唯讀營運報表協調與typed presentation；path: `subsystems/reporting/index.md`
 - `migration` — fresh bootstrap、preserve-data upgrade、release qualification 與
   cutover governance；path: `subsystems/migration/index.md`
+- `test-governance` — executable entrypoint inventory、test-suite audit 與 tracked
+  governance evidence；path: `subsystems/test-governance/index.md`
 
 ## External relationships
 - depended_by: `all domains` — schema／release 與跨域 mutation governance。

@@ -239,7 +239,7 @@ TERMINAL_TEST_ONLY_EVIDENCE = {
         "test": {
             "status": "passed",
             "focused": (
-                "tests/test_task97_production_script_governance.py; "
+                "tests/domains/global/subsystems/test-governance/modules/entrypoint-and-test-suite-governance/contract/test_task97_production_script_governance.py; "
                 "tests/test_task97_script_guards_lane_c.py"
             ),
             "oracle": (
@@ -269,7 +269,7 @@ TERMINAL_OPERATOR_EVIDENCE = {
         "test": {
             "status": "passed",
             "focused": (
-                "tests/test_task97_production_script_governance.py; "
+                "tests/domains/global/subsystems/test-governance/modules/entrypoint-and-test-suite-governance/contract/test_task97_production_script_governance.py; "
                 "tests/test_task97_operator_script_guards.py"
             ),
             "oracle": (
@@ -291,7 +291,7 @@ TERMINAL_OPERATOR_EVIDENCE = {
             "status": "passed",
             "focused": (
                 "tests/test_cloud_run_compat_launcher_contracts.py; "
-                "tests/test_task97_production_script_governance.py"
+                "tests/domains/global/subsystems/test-governance/modules/entrypoint-and-test-suite-governance/contract/test_task97_production_script_governance.py"
             ),
             "oracle": "read-only mount, container invocation, and 127.0.0.1 host publication remain exact",
         },
@@ -723,7 +723,7 @@ def _record(path: Path, prior: dict[str, Any], queue: dict[str, Any]) -> dict[st
             "repository_search": [caller["caller"]],
         },
         "replacement": f"cli:{relative}",
-        "test": {"status": "not_run", "focused": "tests/test_task97_production_script_governance.py", "oracle": "source digest and exact identity remain stable"},
+        "test": {"status": "not_run", "focused": "tests/domains/global/subsystems/test-governance/modules/entrypoint-and-test-suite-governance/contract/test_task97_production_script_governance.py", "oracle": "source digest and exact identity remain stable"},
         "oracle": "exit 0 with no unauthorized database or external writes",
         "receipt": {"status": "not_run", "identity": f"task97:cli:{relative}"},
     }

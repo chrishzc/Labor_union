@@ -38,6 +38,6 @@
   ],
   "execution": {
     "runner": [".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_entrypoint_review_queue.py"],
-    "test_paths": ["tests/test_entrypoint_review_queue.py"]
+    "test_paths": ["tests/domains/global/subsystems/test-governance/modules/entrypoint-and-test-suite-governance/contract/test_entrypoint_review_queue.py"]
   }
 }

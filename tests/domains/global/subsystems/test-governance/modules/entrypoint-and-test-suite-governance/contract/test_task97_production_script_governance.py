@@ -9,7 +9,7 @@ from pathlib import Path
 from scripts.generate_task97_production_script_inventory import discover_scripts
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[8]
 INVENTORY = (
     ROOT
     / "document/架構重整/03_追蹤清單與證據/evidence/"
@@ -31,7 +31,7 @@ REQUIRED_ENTRY_FIELDS = {
     "receipt",
 }
 EXPECTED_COUNTS = {
-    "keep-operator-only": 38,
+    "keep-operator-only": 39,
     "test-only": 38,
     "rewrite-to-canonical-runner": 1,
     "delete-executable": 6,
@@ -48,15 +48,15 @@ def test_task97_script_inventory_is_complete_and_current() -> None:
     entries = inventory["entries"]
 
     assert inventory["contract"] == "task97-production-script-inventory/v1"
-    assert inventory["source"]["cli_count"] == len(discover_scripts()) == 86
-    assert len(entries) == 86
-    assert inventory["summary"]["total"] == 86
-    assert inventory["source"]["queue_cli_count"] == 86
+    assert inventory["source"]["cli_count"] == len(discover_scripts()) == 87
+    assert len(entries) == 87
+    assert inventory["summary"]["total"] == 87
+    assert inventory["source"]["queue_cli_count"] == 87
 
     identities = [entry["exact_id"] for entry in entries]
     paths = [entry["path"] for entry in entries]
-    assert len(set(identities)) == 86
-    assert len(set(paths)) == 86
+    assert len(set(identities)) == 87
+    assert len(set(paths)) == 87
     assert all(entry.keys() >= REQUIRED_ENTRY_FIELDS for entry in entries)
 
     observed_counts = {

@@ -152,6 +152,8 @@ SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES = frozenset(
         "api:GET /api/v1/anomaly-recovery/{issue_key}/actions/{action_key}",
         "api:GET /api/v1/admin/data-browser/sources/{source_id}",
         "api:GET /api/v1/case-import/hcm/workbooks/results",
+        "api:GET /api/v1/client-payments/historical-payments/{case_no}",
+        "api:GET /api/v1/client-payments/historical-payments/{case_no}/readback",
         "api:GET /api/v1/customer-service/escalations/{escalation_id}",
         "api:GET /api/v1/finance-import/jobs/{job_id}/batch-outcome",
         "api:GET /api/v1/finance-import/jobs/{job_id}/correction-outcome",
@@ -179,6 +181,8 @@ SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES = frozenset(
         "api:GET /api/v1/orders/{case_no}/historical-completion",
         "api:GET /api/v1/orders/{case_no}/service-before-replacement",
         "api:GET /api/v1/staff-payables/overpayment-recoveries/{staff_id}/{recovery_identity}",
+        "api:GET /api/v1/staff-payables/historical-payouts/{case_no}/{staff_id}",
+        "api:GET /api/v1/staff-payables/historical-payouts/{case_no}/{staff_id}/readback",
         "api:GET /internal/v1/runtime/react-admin/artifact-health",
         "api:POST /api/v1/admin/auth/login/challenges",
         "api:POST /api/v1/admin/auth/login/challenges/{challenge_id}/verify",
@@ -194,6 +198,8 @@ SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES = frozenset(
         "api:POST /api/v1/customer-service/tickets/{ticket_id}/reply/preview",
         "api:POST /api/v1/customer-service/tickets/{ticket_id}/update/apply",
         "api:POST /api/v1/customer-service/tickets/{ticket_id}/update/preview",
+        "api:POST /api/v1/client-payments/historical-payments/apply",
+        "api:POST /api/v1/client-payments/historical-payments/preview",
         "api:POST /api/v1/line/identity/reviews/{request_id}/{decision}/apply",
         "api:POST /api/v1/line/identity/reviews/{request_id}/{decision}/preview",
         "api:POST /api/v1/line/rich-menus/draft/preview",
@@ -217,6 +223,8 @@ SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES = frozenset(
         "api:POST /api/v1/matching-coordination/{case_no}/query",
         "api:POST /api/v1/orders/historical-review-remediations/apply",
         "api:POST /api/v1/orders/historical-review-remediations/preview",
+        "api:POST /api/v1/staff-payables/historical-payouts/apply",
+        "api:POST /api/v1/staff-payables/historical-payouts/preview",
         "api:POST /api/v1/orders/{case_no}/candidate-contact-pool/candidates/{candidate_id}/information/manual-confirmation",
         "api:POST /api/v1/orders/{case_no}/candidate-contact-pool/candidates/{candidate_id}/information/manual-confirmation/preview",
         "api:POST /api/v1/orders/{case_no}/contract-external-signing/client/completion-reports",
@@ -302,6 +310,11 @@ SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES = frozenset(
     }
 )
 SOURCE_CANONICAL_OPERATOR_ENTRIES = {
+    "cli:scripts/audit_test_suite.py": (
+        "Test Suite Governance",
+        "Audit the repository pytest inventory for dead, duplicate, permanently skipped, or misclassified tests.",
+        "GitHub Actions test-suite-audit job or authorized repository test-governance operator",
+    ),
     "cli:scripts/generate_task97_commit_dispositions.py": (
         "Architecture Governance",
         "Regenerate the tracked Task 97 repository-commit disposition evidence from current source.",
@@ -334,6 +347,10 @@ SOURCE_CANONICAL_OPERATOR_ENTRIES = {
     ),
 }
 SOURCE_CANONICAL_OPERATOR_CALLER_EVIDENCE = {
+    "cli:scripts/audit_test_suite.py": (
+        ".github/workflows/python-app.yml invokes this read-only audit in the "
+        "test-suite-audit job"
+    ),
     "cli:scripts/launchers/local_mysql_tcp_forward.py": (
         "scripts/launchers/manage_gcp_cloud_run_db_bridge.ps1 mounts the file "
         "read-only and invokes it inside the dedicated forward container; the "
@@ -428,6 +445,10 @@ LOCAL_CANONICAL_EVIDENCE_BY_SOURCE = {
     ),
     "api/routes/admin_auth.py": ("ui_react/src/api/auth/session_client.ts", "tests/test_admin_auth_runtime.py; tests/test_admin_auth_security.py"),
     "api/routes/candidate_contact_pool.py": ("ui_react/src/api/scheduling/candidate_contact_pool_client.ts", "tests/test_candidate_contact_pool_workflow.py; ui_react/src/tests/candidate_contact_pool_client.test.ts"),
+    "api/routes/client_payments.py": (
+        "ui_react/src/api/client_finance/historical_client_payment_client.ts",
+        "tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement/contract/test_historical_client_payment_api.py; ui_react/src/tests/historical_client_payment_workbench.test.tsx",
+    ),
     "api/routes/client_refund_reversal.py": ("ui_react/src/api/client_finance/client_over_refund_recovery_client.ts", "tests/test_client_refund_reversal_route.py; tests/domains/client-finance/subsystems/client-finance/integration/test_client_refund_overage.py"),
     "api/routes/contract_external_signing.py": ("ui_react/src/api/orders/contract_external_signing_client.ts", "tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_external_signing_api.py; ui_react/src/tests/contract_external_signing_client.test.ts"),
     "api/routes/contract_signing.py": ("ui_react/src/api/orders/contract_signing_mutation_client.ts", "tests/test_client_contract_signing_application.py; tests/test_staff_contract_signing_application.py; ui_react/src/tests/contract_signing_mutation_client.test.ts"),
@@ -454,7 +475,10 @@ LOCAL_CANONICAL_EVIDENCE_BY_SOURCE = {
     "api/routes/private_operations.py": ("internal runtime startup and artifact-health observer", "tests/test_react_admin_artifact_health.py; tests/test_private_runtime_operations.py"),
     "api/routes/runtime_health.py": ("ui_react runtime alert target typed client", "tests/test_runtime_alert_target_admin_contract.py; tests/domains/external-integration/subsystems/line/subsystems/test_runtime_alert_target_application.py"),
     "api/routes/service_before_replacement.py": ("ui_react/src/api/orders/service_before_replacement_client.ts", "tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/contract/test_service_before_replacement_api.py; ui_react/src/tests/service_before_replacement_actions.test.tsx"),
-    "api/routes/staff_payout.py": ("ui_react/src/api/staff_payables/staff_overpayment_recovery_client.ts", "tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_overpayment_recovery.py; ui_react/src/tests/staff_overpayment_recovery_client.test.ts"),
+    "api/routes/staff_payout.py": (
+        "ui_react/src/api/staff_payables/staff_overpayment_recovery_client.ts and historical_staff_payout_client.ts",
+        "tests/domains/staff-payables/subsystems/staff-payables/integration/test_staff_overpayment_recovery.py; tests/domains/staff-payables/subsystems/staff-payables/modules/historical-payment-settlement/contract/test_historical_staff_payout_api.py; ui_react/src/tests/staff_overpayment_recovery_client.test.ts; ui_react/src/tests/historical_staff_payout_workbench.test.tsx",
+    ),
 }
 
 
@@ -554,7 +578,7 @@ def _apply_source_retirement(entry: dict[str, object]) -> dict[str, object]:
             "replacement": identity,
             "replacement_readback": "task97_entry_governance_v1.json source hash and record counts",
             "deletion_gate": "not_applicable_operator_only_guarded",
-            "focused_regression": "tests/test_task97_entry_governance_artifact.py",
+            "focused_regression": "tests/domains/global/subsystems/test-governance/modules/entrypoint-and-test-suite-governance/contract/test_task97_entry_governance_artifact.py",
             "final_zero_reference_oracle": "not_applicable_operator_only_guarded",
         }
     replacement = SOURCE_RETIRED_HTTP_ENTRIES.get(identity)

@@ -21,6 +21,7 @@
 ## Global modules
 - `react-application-shell` — React navigation、session/auth composition與closed ErrorBoundary recovery；path: `domains/global/subsystems/application-shell/modules/react-application-shell.md`
 - `weekly-operations-report` — 跨Domain唯讀營運週報、週界協調與三分頁呈現；path: `domains/global/subsystems/reporting/modules/weekly-operations-report.md`
+- `entrypoint-and-test-suite-governance` — runtime entrypoint inventory、pytest suite audit 與 Task 97 governance evidence；path: `domains/global/subsystems/test-governance/modules/entrypoint-and-test-suite-governance.md`
 
 ## Cross-domain relationships
 - `scheduling -> orders` — Scheduling 以既有 case/order lifecycle 與服務日期邊界作為協調前提。

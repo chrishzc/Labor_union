@@ -6,9 +6,9 @@
   "authority": "D97-PRODUCTION-SCRIPT-GOVERNANCE; Global migration spec section 9",
   "source": {
     "entrypoint_queue": "document/架構重整/03_追蹤清單與證據/evidence/entrypoint_review_queue_v1.jsonl",
-    "entrypoint_queue_sha256": "18405295e98ad93ec01ab4faf1de319a3f13d820a9830f4cae7be81af42afc31",
-    "cli_count": 86,
-    "queue_cli_count": 86,
+    "entrypoint_queue_sha256": "33d329867e7d19b1018b751d5870843ab5cb8f5a151b2081b5411a321fa549cf",
+    "cli_count": 87,
+    "queue_cli_count": 87,
     "discovery": "AST __main__ registration over current scripts/**/*.py; queue is caller-evidence input and is regenerated independently."
   },
   "required_guard_contract": [
@@ -25,17 +25,17 @@
     "production_authority_credential_gate"
   ],
   "summary": {
-    "total": 86,
+    "total": 87,
     "classification_counts": {
       "blocked-caller-evidence": 3,
       "delete-executable": 6,
-      "keep-operator-only": 38,
+      "keep-operator-only": 39,
       "rewrite-to-canonical-runner": 1,
       "test-only": 38
     },
     "queue_status_counts": {
       "active": 4,
-      "operator_only": 75,
+      "operator_only": 76,
       "review_required": 7
     },
     "repo_local_blocker_count": 0,
@@ -170,6 +170,67 @@
       "required_guards": []
     },
     {
+      "exact_id": "cli:scripts/audit_test_suite.py",
+      "path": "scripts/audit_test_suite.py",
+      "runtime": "python-cli",
+      "callers": {
+        "runtime_registration": [
+          "scripts/audit_test_suite.py::cli:scripts/audit_test_suite.py (entrypoint_review_queue_v1)"
+        ],
+        "repository_search": [
+          ".github/workflows/python-app.yml invokes this read-only audit in the test-suite-audit job"
+        ]
+      },
+      "replacement": "cli:scripts/audit_test_suite.py",
+      "test": {
+        "status": "not_run",
+        "focused": "tests/test_task97_production_script_governance.py",
+        "oracle": "source digest and exact identity remain stable"
+      },
+      "oracle": "exit 0 with no unauthorized database or external writes",
+      "receipt": {
+        "status": "not_run",
+        "identity": "task97:cli:scripts/audit_test_suite.py"
+      },
+      "evidence": {
+        "source_sha256": "8569b87e57f01f36f7b6133a7c89f267d4ede91155f1eb4cac4c13ca5f6de212",
+        "line_count": 232,
+        "queue_status": "operator_only",
+        "owner": "Test Suite Governance",
+        "scenario": "Audit the repository pytest inventory for dead, duplicate, permanently skipped, or misclassified tests.",
+        "operator": "GitHub Actions test-suite-audit job or authorized repository test-governance operator",
+        "observed": {
+          "dry_run": false,
+          "explicit_db": false,
+          "host_check": false,
+          "schema_fingerprint": false,
+          "prior_dry_run_receipt": false,
+          "backup_receipt": false,
+          "explicit_apply": false,
+          "verify": false,
+          "resume_replay": false,
+          "terminal_receipt": false,
+          "production_authority": false
+        }
+      },
+      "classification": "keep-operator-only",
+      "capabilities": {
+        "kind": "read-only-validator",
+        "database": "none",
+        "production_mutation": false,
+        "data_import": false,
+        "process_launch": false
+      },
+      "required_guards": [],
+      "guard_gap": [
+        "none_required"
+      ],
+      "gate": {
+        "status": "PASS",
+        "reason": "capability requires no destructive DB backup/apply guards"
+      }
+    },
+    {
       "exact_id": "cli:scripts/backfill_canonical_accounting_projections.py",
       "path": "scripts/backfill_canonical_accounting_projections.py",
       "runtime": "python-cli",
@@ -248,7 +309,7 @@
         ]
       },
       "evidence": {
-        "source_sha256": "70d10af01b7bdd798762822c82e993882878cb34d5bcc2159ab104d9f8673789",
+        "source_sha256": "becc2b8f09a45eedb5557f11d693a21759e77ed2653f1295231d004e81614557",
         "line_count": 285,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
@@ -865,8 +926,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "755b1164d75eb2fe59587047144fad0ca2f6f2379a93c4a8d5864c3634f3ffb8",
-        "line_count": 958,
+        "source_sha256": "306abd24af3cc6e1d73e5d426de134204c07fc324a513526ce1fd46d140b63f4",
+        "line_count": 983,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",
@@ -1243,7 +1304,7 @@
         "identity": "PROV-20260829-task97-production-script-scripts-generate_task97_production_script_inventory-py"
       },
       "evidence": {
-        "source_sha256": "d1ff70210a89bbe98c1fcab75a761557de4f9dceeeb45882d1a4548f3d61b990",
+        "source_sha256": "81f4b818acaeba84cb22ce1df51af4f726d40982ba0df0ed56eb1db4737c6f72",
         "line_count": 865,
         "queue_status": "operator_only",
         "owner": "Architecture Governance",
@@ -1487,8 +1548,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "451eb3daa0146c374d3f072ffe5f98cd88f4031a18b8638b07df4447e9c4d2fb",
-        "line_count": 251,
+        "source_sha256": "2c922a4dde255e9be6c27262677797f7c96c330dbc77a5241126be15c706823a",
+        "line_count": 257,
         "queue_status": "operator_only",
         "owner": "Case Historical Import",
         "scenario": "Restricted Client BeClass historical source parser; current registration is LIFF typed API and historical mutation remains fail-closed pending HistoricalAdoption.",
@@ -1846,7 +1907,7 @@
       },
       "test": {
         "status": "passed",
-        "focused": "tests/test_task97_production_script_governance.py; tests/test_task97_operator_script_guards.py",
+        "focused": "tests/domains/global/subsystems/test-governance/modules/entrypoint-and-test-suite-governance/contract/test_task97_production_script_governance.py; tests/test_task97_operator_script_guards.py",
         "oracle": "the executable returns a stable blocked result without opening a database; importable helpers remain caller-owned"
       },
       "oracle": "old runbooks cannot execute schema writes through scripts.init_db; current callers only import the bounded helper functions",
@@ -1968,7 +2029,7 @@
       },
       "test": {
         "status": "passed",
-        "focused": "tests/test_cloud_run_compat_launcher_contracts.py; tests/test_task97_production_script_governance.py",
+        "focused": "tests/test_cloud_run_compat_launcher_contracts.py; tests/domains/global/subsystems/test-governance/modules/entrypoint-and-test-suite-governance/contract/test_task97_production_script_governance.py",
         "oracle": "read-only mount, container invocation, and 127.0.0.1 host publication remain exact"
       },
       "oracle": "do not execute or delete until exact caller evidence, owner, replacement, and terminal gate are recorded",
@@ -2465,8 +2526,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "ab69ed0fa637b387fa7f3b3e34fa3fc3375d2393da9bf06f9fcac0d599a79c79",
-        "line_count": 7632,
+        "source_sha256": "71d534869edf3fb2c4f113e4a15cf8dc26a90738e105e9d8ef966698db37e5b4",
+        "line_count": 7789,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",
@@ -2923,7 +2984,7 @@
       },
       "test": {
         "status": "passed",
-        "focused": "tests/test_task97_production_script_governance.py; tests/test_task97_script_guards_lane_c.py",
+        "focused": "tests/domains/global/subsystems/test-governance/modules/entrypoint-and-test-suite-governance/contract/test_task97_production_script_governance.py; tests/test_task97_script_guards_lane_c.py",
         "oracle": "dry-run requires an exact configured lu_test_* target; apply, verify, replay, union_db, and production targets fail closed"
       },
       "oracle": "no executable path can mutate a database; non-disposable targets are rejected before connection",
@@ -3016,8 +3077,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "ec0959447a6a1f0e47cbb4b792dcff6ee8c6a0f64a86fe647d2ec7fff5e4cc0a",
-        "line_count": 464,
+        "source_sha256": "523af4e83a8cf69ed50930149d93e4de0f7c5aa216d3b884b9d47cadd0ff28bd",
+        "line_count": 494,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",
