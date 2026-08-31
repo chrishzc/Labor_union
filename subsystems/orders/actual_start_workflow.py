@@ -372,14 +372,26 @@ def _persist_order_projection(repository, request, preview, receipt):
 
 
 def _staff_payment_due_date(preview):
+    return _calculated_staff_payment_due_date(
+        preview.actual_start.actual_end_date,
+        preview.client_finance_impact,
+        preview.is_full_subsidy_order,
+    )
+
+
+def _calculated_staff_payment_due_date(
+    actual_end_date,
+    client_finance_impact,
+    is_full_subsidy_order,
+):
     client_payable_amount = sum(
-        (stage_plan.amount.amount for stage_plan in preview.client_finance_impact.stage_plans),
+        (stage_plan.amount.amount for stage_plan in client_finance_impact.stage_plans),
         0,
     )
     return calculate_staff_payment_due_date(
-        preview.actual_start.actual_end_date,
+        actual_end_date,
         client_payable_amount,
-        preview.is_full_subsidy_order,
+        is_full_subsidy_order,
     )
 
 
@@ -410,7 +422,24 @@ def _actual_start_assignments(facts):
 
 def _downstream_impacts(facts, actual_start, scheduling):
     change_identity = f"actual-start:{actual_start.fingerprint.value}"
-    return _client_finance_impact(facts, actual_start, scheduling, change_identity), _payroll_impact(facts, scheduling, change_identity)
+    client = _client_finance_impact(
+        facts,
+        actual_start,
+        scheduling,
+        change_identity,
+    )
+    coverage = _subsidy_coverage(facts)
+    staff_payment_due_date = _calculated_staff_payment_due_date(
+        actual_start.actual_end_date,
+        client,
+        coverage.is_full_subsidy_order,
+    )
+    return client, _payroll_impact(
+        facts,
+        scheduling,
+        change_identity,
+        staff_payment_due_date,
+    )
 
 
 def _client_finance_impact(facts, actual_start, scheduling, change_identity):
@@ -419,18 +448,34 @@ def _client_finance_impact(facts, actual_start, scheduling, change_identity):
     return build_client_finance_terms_impact(client_source, facts.order.terms, scheduling, change_identity)
 
 
-def _payroll_impact(facts, scheduling, change_identity):
-    payroll_source = replace(facts.payroll, source_terms=tuple(replace(item, double_pay_dates=()) for item in facts.payroll.source_terms))
+def _payroll_impact(
+    facts,
+    scheduling,
+    change_identity,
+    staff_payment_due_date,
+):
+    payroll_source = replace(
+        facts.payroll,
+        staff_payment_due_date=staff_payment_due_date,
+        source_terms=tuple(
+            replace(item, double_pay_dates=())
+            for item in facts.payroll.source_terms
+        ),
+    )
     return build_payroll_terms_impact(payroll_source, scheduling, facts.order.terms, change_identity)
 
 
-def _preview_result(facts, actual_start, scheduling, client, payroll, lifecycle, reconfirmation):
-    payload = _preview_fingerprint_payload(facts, actual_start, client, payroll, lifecycle, reconfirmation)
-    coverage = derive_subsidy_coverage(
+def _subsidy_coverage(facts):
+    return derive_subsidy_coverage(
         facts.order.client_identity_status,
         Decimal(facts.order.terms.service_days * facts.order.terms.service_hours_per_day),
         Decimal(facts.order.terms.floor_fee.amount),
     )
+
+
+def _preview_result(facts, actual_start, scheduling, client, payroll, lifecycle, reconfirmation):
+    payload = _preview_fingerprint_payload(facts, actual_start, client, payroll, lifecycle, reconfirmation)
+    coverage = _subsidy_coverage(facts)
     return ActualStartPreview(facts.lifecycle.actual_start_date, actual_start.new_actual_start_date, actual_start, scheduling, facts.order.version, facts.scheduling.aggregate_version, facts.scheduling.generation_number, facts.client_finance.account_version, facts.payroll.payroll_version, client, payroll, lifecycle, reconfirmation, facts.order.client_identity_status, coverage.is_full_subsidy_order, fingerprint_payload(payload))
 
 
