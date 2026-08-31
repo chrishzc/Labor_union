@@ -46,6 +46,19 @@ class HistoricalActualStartRebuilder:
             actual_start_date,
             for_update=True,
         )
+        prepare_source_generation = getattr(
+            self.service_date_planner,
+            "prepare_source_generation",
+            None,
+        )
+        if prepare_source_generation is not None:
+            prepare_source_generation(
+                case_no,
+                service_dates,
+                source_identity=source_identity,
+                actor=actor,
+                correlation_id=correlation_id,
+            )
         preview = self.actual_start_workflow.preview(
             case_no,
             actual_start_date,
