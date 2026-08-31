@@ -37,6 +37,69 @@ jobs:
       if: ${{ always() }}
       run: python scripts/validate_agent_governance.py
 
+  react-cancellation-regression:
+    name: react cancellation regression
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Node.js 22
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+        cache: npm
+        cache-dependency-path: ui_react/package-lock.json
+    - name: Install React dependencies
+      working-directory: ui_react
+      run: npm ci
+    - name: Run cancellation client regression
+      working-directory: ui_react
+      run: npm test -- src/tests/order_cancellation_client.test.ts
+
+  historical-cancellation-mysql-regression:
+    name: historical cancellation disposable MySQL
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      APP_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3306"
+      DB_USER: root
+      DB_PASSWORD: ci-root-password
+      DB_DATABASE: lu_test_historical_mid_service_cancellation
+      DB_SSL_MODE: disabled
+      LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
+      LABOR_UNION_TEST_MYSQL_PORT: "3306"
+      LABOR_UNION_TEST_MYSQL_USER: root
+      LABOR_UNION_TEST_MYSQL_PASSWORD: ci-root-password
+      LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_historical_mid_service_cancellation
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.11"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Run historical mid-service cancellation MySQL E2E
+      run: python -m pytest -q tests/test_historical_mid_service_cancellation_disposable_mysql_e2e.py
+
   canonical-tests:
     name: canonical tests (${{ matrix.owner }})
     runs-on: ubuntu-latest
