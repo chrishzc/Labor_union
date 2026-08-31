@@ -20,7 +20,7 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — idempotency/receipt/outbox
 
 ## Modules
-- `pairing-current-facts` — `BECLASS-001/IMPORT-003` exact pairing readback與bounded recheck；path: `modules/pairing-current-facts.md`
+- `pairing-current-facts` — `BECLASS-001` owner follow-up facts；`IMPORT-003`不再形成 anomaly recheck；path: `modules/pairing-current-facts.md`
 
 ## Verification routing
 - default_boundary: Subsystem

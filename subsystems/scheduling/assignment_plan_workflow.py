@@ -30,12 +30,6 @@ from shared_kernel.identities import (
 from shared_kernel.ports import UnitOfWork
 from shared_kernel.validation import require_canonical_text
 from subsystems.payroll.terms_impact import PayrollTermsSourceFacts
-from subsystems.scheduling.current_anomaly_facts import (
-    SchedulingAnomalyRecheckRequest,
-    SchedulingOverlapRecheckRequest,
-    build_scheduling_coverage_recheck_request,
-    build_scheduling_replacement_recheck_request,
-)
 
 _CASE_NUMBER_MAXIMUM_LENGTH = 50
 _REASON_MAXIMUM_LENGTH = 500
@@ -167,11 +161,6 @@ class OrdersAssignmentImpactPort(Protocol):
     def persist_assignment_plan(self, candidate: VersionedImpactCandidate, context: AssignmentPlanPersistenceContext, scheduling_result: object) -> None: ...
 
 
-class AssignmentPlanAnomalyRecheckPort(Protocol):
-    def append_scheduling_recheck(self, request: SchedulingAnomalyRecheckRequest) -> None: ...
-    def append_scheduling_overlap_rechecks(self, request: SchedulingOverlapRecheckRequest) -> None: ...
-
-
 class AssignmentPlanWorkflowError(Exception):
     def __init__(self, error: TypedError) -> None:
         super().__init__(error.message)
@@ -179,13 +168,12 @@ class AssignmentPlanWorkflowError(Exception):
 
 
 class AssignmentPlanWorkflow:
-    def __init__(self, repository: AssignmentPlanRepository, client_finance_port: ClientFinanceAssignmentImpactPort, payroll_port: PayrollAssignmentImpactPort, orders_port: OrdersAssignmentImpactPort, unit_of_work_factory: Callable[[], UnitOfWork], anomaly_rechecks: AssignmentPlanAnomalyRecheckPort | None = None) -> None:
+    def __init__(self, repository: AssignmentPlanRepository, client_finance_port: ClientFinanceAssignmentImpactPort, payroll_port: PayrollAssignmentImpactPort, orders_port: OrdersAssignmentImpactPort, unit_of_work_factory: Callable[[], UnitOfWork]) -> None:
         self._repository = repository
         self._client_finance_port = client_finance_port
         self._payroll_port = payroll_port
         self._orders_port = orders_port
         self._unit_of_work_factory = unit_of_work_factory
-        self._anomaly_rechecks = anomaly_rechecks
 
     def query(self, case_no: str) -> AssignmentPlanWorkflowFacts:
         _validate_case_number(case_no)
@@ -267,47 +255,6 @@ class AssignmentPlanWorkflow:
         self._payroll_port.persist_assignment_plan(preview.payroll_impact, context, scheduling_result)
         self._orders_port.persist_assignment_plan(preview.orders_impact, context, scheduling_result)
         self._repository.save_receipt(request.idempotency_key, StoredAssignmentPlanReceipt(command_fingerprint, receipt), scheduling_result, context)
-        if self._anomaly_rechecks is not None:
-            resolution = scheduling_result.assignment_resolution
-            created_ids = tuple(
-                sorted(getattr(resolution, "assignment_id_by_candidate_key", {}).values())
-            )
-            affected_ids = tuple(sorted(set((*receipt.cancelled_assignment_ids, *created_ids))))
-            affected_staff_ids = tuple(
-                sorted({assignment.staff_id for assignment in preview.candidate.scheduling.assignments})
-            )
-            if affected_ids or affected_staff_ids:
-                self._anomaly_rechecks.append_scheduling_overlap_rechecks(
-                    SchedulingOverlapRecheckRequest(
-                        affected_ids,
-                        affected_staff_ids,
-                        receipt.scheduling_version,
-                        preview.fingerprint.value,
-                        "assignment-plan:"
-                        + request.idempotency_key.value
-                        + ":SCHEDULE-003",
-                    )
-                )
-            for assignment_id in receipt.cancelled_assignment_ids:
-                self._anomaly_rechecks.append_scheduling_recheck(
-                    build_scheduling_replacement_recheck_request(
-                        assignment_id,
-                        receipt.scheduling_version,
-                        preview.fingerprint.value,
-                        "assignment-plan:"
-                        + request.idempotency_key.value
-                        + ":SCHEDULE-002:"
-                        + str(assignment_id),
-                    )
-                )
-            self._anomaly_rechecks.append_scheduling_recheck(
-                build_scheduling_coverage_recheck_request(
-                    receipt.case_no,
-                    receipt.scheduling_generation,
-                    receipt.scheduling_version,
-                    "assignment-plan:" + request.idempotency_key.value + ":SCHEDULE-006",
-                )
-            )
 
 
 def _preview_result(facts: AssignmentPlanFacts, candidate: AssignmentPlanCandidate, client_finance: VersionedImpactCandidate, payroll: VersionedImpactCandidate, orders: VersionedImpactCandidate) -> AssignmentPlanPreview:

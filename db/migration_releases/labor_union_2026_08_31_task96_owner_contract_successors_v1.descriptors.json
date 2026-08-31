@@ -2,591 +2,293 @@
   "contract": "migration-owned-object-descriptors/v1",
   "descriptors": {
     "1021_task96_owner_contract_successors.sql": {
-      "checks": {
-        "client_profile_change_apply_receipts.chk_client_profile_change_receipt_fingerprints": "and(atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$')))",
-        "client_profile_change_apply_receipts.chk_client_profile_change_receipt_result": "atom(json_type(result_json)='OBJECT')",
-        "client_profile_change_events.chk_client_profile_change_event_payload": "and(atom(json_type(before_values_json)='OBJECT'),atom(json_type(after_values_json)='OBJECT'))",
-        "client_profile_change_outbox.chk_client_profile_change_outbox_payload": "atom(json_type(payload_json)='OBJECT')",
-        "finance_import_source_correction_lineages.chk_finance_import_source_correction_distinct": "atom(original_batch_id<>corrected_successor_batch_id)",
-        "government_subsidy_anomaly_apply_receipts.chk_government_anomaly_receipt_fingerprints": "and(atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$')))",
-        "government_subsidy_anomaly_apply_receipts.chk_government_anomaly_receipt_result": "atom(json_type(result_snapshot)='OBJECT')",
-        "government_subsidy_claim_correction_lineages.chk_government_claim_correction_fingerprint": "atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$'))",
-        "government_subsidy_claim_correction_lineages.chk_government_claim_correction_version": "atom(resulting_owner_version=expected_owner_version+1)",
-        "government_subsidy_integrity_rebuild_events.chk_government_integrity_rebuild_fingerprint": "atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$'))",
-        "government_subsidy_integrity_rebuild_events.chk_government_integrity_rebuild_version": "atom(resulting_owner_version=expected_owner_version+1)",
-        "government_subsidy_recoveries.chk_government_recovery_amounts": "and(atom(lawful_amount_ntd>=0),atom(actual_amount_ntd>lawful_amount_ntd),atom(excess_amount_ntd=actual_amount_ntd-lawful_amount_ntd),atom(remaining_excess_ntd>=0),atom(remaining_excess_ntd<=excess_amount_ntd))",
-        "government_subsidy_recoveries.chk_government_recovery_status": "or(and(atom(status='open'),atom(remaining_excess_ntd=excess_amount_ntd)),and(atom(status='partially_reconciled'),atom(remaining_excess_ntd>0),atom(remaining_excess_ntd<excess_amount_ntd)),and(atom(status='reconciled'),atom(remaining_excess_ntd=0)))",
-        "government_subsidy_recovery_events.chk_government_recovery_event_amount": "and(atom(amount_ntd>0),atom(before_remaining_ntd>0),atom(after_remaining_ntd=before_remaining_ntd-amount_ntd),atom(after_remaining_ntd>=0))",
-        "government_subsidy_recovery_events.chk_government_recovery_event_fingerprint": "atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$'))",
-        "government_subsidy_recovery_events.chk_government_recovery_event_version": "atom(resulting_version=expected_version+1)",
-        "payroll_late_obligation_dispositions.chk_payroll_late_disposition_fingerprints": "and(atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$')))",
-        "payroll_late_obligation_dispositions.chk_payroll_late_disposition_versions": "and(atom(resulting_payroll_version=expected_payroll_version+1),atom(resulting_obligation_version=expected_obligation_version+1))"
+      "tables": {
+        "client_profile_change_events": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "request_id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "client_id": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "event_type": {
+            "column_type": "enum('approved_applied','rejected')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "resulting_profile_version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor_id": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "idempotency_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "correlation_id": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "before_values_json": {
+            "column_type": "json",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "after_values_json": {
+            "column_type": "json",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at_utc": {
+            "column_type": "datetime",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        },
+        "client_profile_change_apply_receipts": {
+          "idempotency_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "command_fingerprint": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "preview_fingerprint": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "result_json": {
+            "column_type": "json",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at_utc": {
+            "column_type": "datetime",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        },
+        "client_profile_change_outbox": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "request_id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "event_type": {
+            "column_type": "enum('client_profile.approved')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "idempotency_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "correlation_id": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "payload_json": {
+            "column_type": "json",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "status": {
+            "column_type": "enum('pending','processing','delivered','failed')",
+            "is_nullable": "NO",
+            "column_default": "pending",
+            "extra": ""
+          },
+          "attempt_count": {
+            "column_type": "int unsigned",
+            "is_nullable": "NO",
+            "column_default": "0",
+            "extra": ""
+          },
+          "next_attempt_at_utc": {
+            "column_type": "datetime",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          },
+          "delivered_at_utc": {
+            "column_type": "datetime",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "last_error_code": {
+            "column_type": "varchar(100)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at_utc": {
+            "column_type": "datetime",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          },
+          "updated_at_utc": {
+            "column_type": "datetime",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated on update current_timestamp"
+          }
+        }
+      },
+      "indexes": {
+        "client_profile_change_events.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "client_profile_change_events.uq_client_profile_change_event_key": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "client_profile_change_events.idx_client_profile_change_event_request": {
+          "non_unique": 1,
+          "columns": [
+            "request_id",
+            "id"
+          ]
+        },
+        "client_profile_change_apply_receipts.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "client_profile_change_outbox.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "client_profile_change_outbox.uq_client_profile_change_outbox_key": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key",
+            "event_type"
+          ]
+        },
+        "client_profile_change_outbox.idx_client_profile_change_outbox_due": {
+          "non_unique": 1,
+          "columns": [
+            "status",
+            "next_attempt_at_utc",
+            "id"
+          ]
+        },
+        "client_profile_change_requests.uq_client_profile_change_request_idempotency": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        }
       },
       "foreign_keys": {
-        "case_import_pairing_accepted_lineages.fk_case_pairing_lineage_review": {
+        "client_profile_change_events.fk_client_profile_change_event_request": {
           "columns": [
-            "original_review_identity"
+            "request_id"
           ],
-          "delete_rule": "RESTRICT",
-          "referenced_columns": [
-            "review_identity"
-          ],
-          "referenced_table": "beclass_import_review_rows",
-          "update_rule": "RESTRICT"
-        },
-        "case_import_pairing_accepted_lineages.fk_case_pairing_lineage_root": {
-          "columns": [
-            "accepted_root_id"
-          ],
-          "delete_rule": "RESTRICT",
+          "referenced_table": "client_profile_change_requests",
           "referenced_columns": [
             "id"
           ],
-          "referenced_table": "beclass_records",
-          "update_rule": "RESTRICT"
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
         },
         "client_profile_change_events.fk_client_profile_change_event_client": {
           "columns": [
             "client_id"
           ],
-          "delete_rule": "RESTRICT",
-          "referenced_columns": [
-            "id"
-          ],
           "referenced_table": "clients",
-          "update_rule": "RESTRICT"
-        },
-        "client_profile_change_events.fk_client_profile_change_event_request": {
-          "columns": [
-            "request_id"
-          ],
-          "delete_rule": "RESTRICT",
           "referenced_columns": [
             "id"
           ],
-          "referenced_table": "client_profile_change_requests",
-          "update_rule": "RESTRICT"
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
         },
         "client_profile_change_outbox.fk_client_profile_change_outbox_request": {
           "columns": [
             "request_id"
           ],
-          "delete_rule": "RESTRICT",
-          "referenced_columns": [
-            "id"
-          ],
           "referenced_table": "client_profile_change_requests",
-          "update_rule": "RESTRICT"
-        },
-        "finance_import_source_correction_lineages.fk_finance_import_source_correction_original": {
-          "columns": [
-            "original_batch_id"
-          ],
-          "delete_rule": "RESTRICT",
           "referenced_columns": [
             "id"
           ],
-          "referenced_table": "finance_import_batches",
-          "update_rule": "RESTRICT"
-        },
-        "finance_import_source_correction_lineages.fk_finance_import_source_correction_successor": {
-          "columns": [
-            "corrected_successor_batch_id"
-          ],
-          "delete_rule": "RESTRICT",
-          "referenced_columns": [
-            "id"
-          ],
-          "referenced_table": "finance_import_batches",
-          "update_rule": "RESTRICT"
-        },
-        "government_subsidy_claim_correction_lineages.fk_government_claim_correction_item": {
-          "columns": [
-            "original_claim_item_id",
-            "original_batch_id"
-          ],
-          "delete_rule": "RESTRICT",
-          "referenced_columns": [
-            "id",
-            "batch_id"
-          ],
-          "referenced_table": "subsidy_claim_batch_items",
-          "update_rule": "RESTRICT"
-        },
-        "government_subsidy_integrity_rebuild_events.fk_government_integrity_rebuild_batch": {
-          "columns": [
-            "batch_id"
-          ],
-          "delete_rule": "RESTRICT",
-          "referenced_columns": [
-            "batch_id"
-          ],
-          "referenced_table": "government_subsidy_batch_accounts",
-          "update_rule": "RESTRICT"
-        },
-        "government_subsidy_recovery_events.fk_government_recovery_event_root": {
-          "columns": [
-            "recovery_identity"
-          ],
-          "delete_rule": "RESTRICT",
-          "referenced_columns": [
-            "recovery_identity"
-          ],
-          "referenced_table": "government_subsidy_recoveries",
-          "update_rule": "RESTRICT"
-        },
-        "payroll_late_obligation_dispositions.fk_payroll_late_disposition_assignment": {
-          "columns": [
-            "assignment_id"
-          ],
-          "delete_rule": "RESTRICT",
-          "referenced_columns": [
-            "id"
-          ],
-          "referenced_table": "case_staff_assignments",
-          "update_rule": "RESTRICT"
-        },
-        "payroll_late_obligation_dispositions.fk_payroll_late_disposition_obligation": {
-          "columns": [
-            "obligation_identity"
-          ],
-          "delete_rule": "RESTRICT",
-          "referenced_columns": [
-            "obligation_identity"
-          ],
-          "referenced_table": "staff_obligations",
-          "update_rule": "RESTRICT"
-        },
-        "payroll_late_obligation_dispositions.fk_payroll_late_disposition_order": {
-          "columns": [
-            "case_no"
-          ],
-          "delete_rule": "RESTRICT",
-          "referenced_columns": [
-            "case_no"
-          ],
-          "referenced_table": "orders",
-          "update_rule": "RESTRICT"
-        },
-        "payroll_late_obligation_dispositions.fk_payroll_late_disposition_staff": {
-          "columns": [
-            "staff_id"
-          ],
-          "delete_rule": "RESTRICT",
-          "referenced_columns": [
-            "id"
-          ],
-          "referenced_table": "staff",
-          "update_rule": "RESTRICT"
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
         }
       },
-      "indexes": {
-        "case_import_pairing_accepted_lineages.PRIMARY": {
-          "columns": [
-            "id"
-          ],
-          "non_unique": 0
-        },
-        "case_import_pairing_accepted_lineages.uq_case_pairing_lineage_original": {
-          "columns": [
-            "original_review_identity"
-          ],
-          "non_unique": 0
-        },
-        "case_import_pairing_accepted_lineages.uq_case_pairing_lineage_result": {
-          "columns": [
-            "accepted_result_identity"
-          ],
-          "non_unique": 0
-        },
-        "case_import_pairing_accepted_lineages.uq_case_pairing_lineage_source": {
-          "columns": [
-            "accepted_source_event_identity"
-          ],
-          "non_unique": 0
-        },
-        "client_profile_change_apply_receipts.PRIMARY": {
-          "columns": [
-            "idempotency_key"
-          ],
-          "non_unique": 0
-        },
-        "client_profile_change_events.PRIMARY": {
-          "columns": [
-            "id"
-          ],
-          "non_unique": 0
-        },
-        "client_profile_change_events.idx_client_profile_change_event_request": {
-          "columns": [
-            "request_id",
-            "id"
-          ],
-          "non_unique": 1
-        },
-        "client_profile_change_events.uq_client_profile_change_event_key": {
-          "columns": [
-            "idempotency_key"
-          ],
-          "non_unique": 0
-        },
-        "client_profile_change_outbox.PRIMARY": {
-          "columns": [
-            "id"
-          ],
-          "non_unique": 0
-        },
-        "client_profile_change_outbox.idx_client_profile_change_outbox_due": {
-          "columns": [
-            "status",
-            "next_attempt_at_utc",
-            "id"
-          ],
-          "non_unique": 1
-        },
-        "client_profile_change_outbox.uq_client_profile_change_outbox_key": {
-          "columns": [
-            "idempotency_key",
-            "event_type"
-          ],
-          "non_unique": 0
-        },
-        "finance_import_source_correction_lineages.PRIMARY": {
-          "columns": [
-            "id"
-          ],
-          "non_unique": 0
-        },
-        "finance_import_source_correction_lineages.uq_finance_import_source_correction_original": {
-          "columns": [
-            "original_batch_id",
-            "original_batch_version"
-          ],
-          "non_unique": 0
-        },
-        "finance_import_source_correction_lineages.uq_finance_import_source_correction_original_identity": {
-          "columns": [
-            "original_batch_identity",
-            "original_batch_version"
-          ],
-          "non_unique": 0
-        },
-        "finance_import_source_correction_lineages.uq_finance_import_source_correction_successor": {
-          "columns": [
-            "corrected_successor_batch_id"
-          ],
-          "non_unique": 0
-        },
-        "finance_import_source_correction_lineages.uq_finance_import_source_correction_successor_identity": {
-          "columns": [
-            "corrected_successor_batch_identity",
-            "corrected_successor_batch_version"
-          ],
-          "non_unique": 0
-        },
-        "government_subsidy_anomaly_apply_receipts.PRIMARY": {
-          "columns": [
-            "idempotency_key"
-          ],
-          "non_unique": 0
-        },
-        "government_subsidy_claim_correction_lineages.PRIMARY": {
-          "columns": [
-            "id"
-          ],
-          "non_unique": 0
-        },
-        "government_subsidy_claim_correction_lineages.uq_government_claim_correction_key": {
-          "columns": [
-            "idempotency_key"
-          ],
-          "non_unique": 0
-        },
-        "government_subsidy_claim_correction_lineages.uq_government_claim_correction_snapshot": {
-          "columns": [
-            "original_claim_item_id",
-            "scheduling_snapshot_identity",
-            "scheduling_snapshot_version"
-          ],
-          "non_unique": 0
-        },
-        "government_subsidy_claim_correction_lineages.uq_government_claim_correction_successor": {
-          "columns": [
-            "successor_revision_identity"
-          ],
-          "non_unique": 0
-        },
-        "government_subsidy_integrity_rebuild_events.PRIMARY": {
-          "columns": [
-            "id"
-          ],
-          "non_unique": 0
-        },
-        "government_subsidy_integrity_rebuild_events.idx_government_integrity_rebuild_batch": {
-          "columns": [
-            "batch_id",
-            "id"
-          ],
-          "non_unique": 1
-        },
-        "government_subsidy_integrity_rebuild_events.uq_government_integrity_rebuild_key": {
-          "columns": [
-            "idempotency_key"
-          ],
-          "non_unique": 0
-        },
-        "government_subsidy_recoveries.PRIMARY": {
-          "columns": [
-            "recovery_identity"
-          ],
-          "non_unique": 0
-        },
-        "government_subsidy_recoveries.uq_government_recovery_key": {
-          "columns": [
-            "idempotency_key"
-          ],
-          "non_unique": 0
-        },
-        "government_subsidy_recoveries.uq_government_recovery_outgoing_fact": {
-          "columns": [
-            "source_outgoing_bank_fact_identity"
-          ],
-          "non_unique": 0
-        },
-        "government_subsidy_recovery_events.PRIMARY": {
-          "columns": [
-            "id"
-          ],
-          "non_unique": 0
-        },
-        "government_subsidy_recovery_events.idx_government_recovery_event_root": {
-          "columns": [
-            "recovery_identity",
-            "id"
-          ],
-          "non_unique": 1
-        },
-        "government_subsidy_recovery_events.uq_government_recovery_event_bank_fact": {
-          "columns": [
-            "incoming_bank_fact_identity"
-          ],
-          "non_unique": 0
-        },
-        "government_subsidy_recovery_events.uq_government_recovery_event_key": {
-          "columns": [
-            "idempotency_key"
-          ],
-          "non_unique": 0
-        },
-        "payroll_late_obligation_dispositions.PRIMARY": {
-          "columns": [
-            "id"
-          ],
-          "non_unique": 0
-        },
-        "payroll_late_obligation_dispositions.idx_payroll_late_disposition_case": {
-          "columns": [
-            "case_no",
-            "id"
-          ],
-          "non_unique": 1
-        },
-        "payroll_late_obligation_dispositions.uq_payroll_late_disposition_identity": {
-          "columns": [
-            "correction_identity"
-          ],
-          "non_unique": 0
-        },
-        "payroll_late_obligation_dispositions.uq_payroll_late_disposition_key": {
-          "columns": [
-            "idempotency_key"
-          ],
-          "non_unique": 0
-        },
-        "payroll_late_obligation_dispositions.uq_payroll_late_disposition_source": {
-          "columns": [
-            "obligation_identity",
-            "source_event_identity"
-          ],
-          "non_unique": 0
-        }
-      },
-      "tables": {
-        "case_import_pairing_accepted_lineages": [
-          "id",
-          "original_review_identity",
-          "accepted_source_event_identity",
-          "accepted_result_identity",
-          "accepted_root_id",
-          "created_at_utc"
-        ],
-        "client_profile_change_apply_receipts": [
-          "idempotency_key",
-          "command_fingerprint",
-          "preview_fingerprint",
-          "result_json",
-          "created_at_utc"
-        ],
-        "client_profile_change_events": [
-          "id",
-          "request_id",
-          "client_id",
-          "event_type",
-          "resulting_profile_version",
-          "actor_id",
-          "reason",
-          "idempotency_key",
-          "correlation_id",
-          "before_values_json",
-          "after_values_json",
-          "created_at_utc"
-        ],
-        "client_profile_change_outbox": [
-          "id",
-          "request_id",
-          "event_type",
-          "idempotency_key",
-          "correlation_id",
-          "payload_json",
-          "status",
-          "attempt_count",
-          "next_attempt_at_utc",
-          "delivered_at_utc",
-          "last_error_code",
-          "created_at_utc",
-          "updated_at_utc"
-        ],
-        "finance_import_source_correction_lineages": [
-          "id",
-          "original_batch_id",
-          "original_batch_identity",
-          "original_batch_version",
-          "corrected_successor_batch_id",
-          "corrected_successor_batch_identity",
-          "corrected_successor_batch_version",
-          "actor",
-          "reason",
-          "evidence_reference",
-          "accepted_at_utc"
-        ],
-        "government_subsidy_anomaly_apply_receipts": [
-          "idempotency_key",
-          "command_fingerprint",
-          "preview_fingerprint",
-          "operation_type",
-          "subject_identity",
-          "result_snapshot",
-          "created_at_utc"
-        ],
-        "government_subsidy_claim_correction_lineages": [
-          "id",
-          "original_claim_item_id",
-          "original_batch_id",
-          "correction_path",
-          "scheduling_snapshot_identity",
-          "scheduling_snapshot_version",
-          "scheduling_snapshot_token",
-          "successor_revision_identity",
-          "financial_consequence_reference",
-          "expected_owner_version",
-          "resulting_owner_version",
-          "idempotency_key",
-          "preview_fingerprint",
-          "actor",
-          "reason",
-          "correlation_id",
-          "created_at_utc"
-        ],
-        "government_subsidy_integrity_rebuild_events": [
-          "id",
-          "batch_id",
-          "expected_owner_version",
-          "resulting_owner_version",
-          "source_snapshot_token",
-          "idempotency_key",
-          "preview_fingerprint",
-          "actor",
-          "reason",
-          "correlation_id",
-          "created_at_utc"
-        ],
-        "government_subsidy_recoveries": [
-          "recovery_identity",
-          "source_outgoing_bank_fact_identity",
-          "original_return_obligation_identity",
-          "lawful_amount_ntd",
-          "actual_amount_ntd",
-          "excess_amount_ntd",
-          "remaining_excess_ntd",
-          "government_payer_identity",
-          "aggregate_version",
-          "status",
-          "actor",
-          "reason",
-          "evidence_reference",
-          "idempotency_key",
-          "receipt_reference",
-          "created_at_utc",
-          "updated_at_utc"
-        ],
-        "government_subsidy_recovery_events": [
-          "id",
-          "recovery_identity",
-          "incoming_bank_fact_identity",
-          "amount_ntd",
-          "before_remaining_ntd",
-          "after_remaining_ntd",
-          "expected_version",
-          "resulting_version",
-          "resulting_status",
-          "idempotency_key",
-          "preview_fingerprint",
-          "actor",
-          "reason",
-          "correlation_id",
-          "created_at_utc"
-        ],
-        "payroll_late_obligation_dispositions": [
-          "id",
-          "correction_identity",
-          "case_no",
-          "obligation_identity",
-          "source_event_identity",
-          "assignment_id",
-          "staff_id",
-          "disposition",
-          "before_amount_ntd",
-          "corrected_amount_ntd",
-          "delta_amount_ntd",
-          "recovery_amount_ntd",
-          "expected_payroll_version",
-          "resulting_payroll_version",
-          "expected_obligation_version",
-          "resulting_obligation_version",
-          "idempotency_key",
-          "command_fingerprint",
-          "preview_fingerprint",
-          "actor",
-          "reason",
-          "correlation_id",
-          "created_at_utc"
-        ]
+      "checks": {
+        "client_profile_change_events.chk_client_profile_change_event_payload": "and(atom(json_type(before_values_json)='OBJECT'),atom(json_type(after_values_json)='OBJECT'))",
+        "client_profile_change_apply_receipts.chk_client_profile_change_receipt_fingerprints": "and(atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$')))",
+        "client_profile_change_apply_receipts.chk_client_profile_change_receipt_result": "atom(json_type(result_json)='OBJECT')",
+        "client_profile_change_outbox.chk_client_profile_change_outbox_payload": "atom(json_type(payload_json)='OBJECT')",
+        "client_profile_change_requests.chk_client_profile_change_request_fingerprints": "and(or(atom(preview_fingerprintisnull),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$'))),or(atom(command_fingerprintisnull),atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$'))))"
       },
       "triggers": [
-        "trg_client_profile_change_events_before_update",
         "trg_client_profile_change_events_before_delete",
-        "trg_case_pairing_lineages_before_update",
-        "trg_case_pairing_lineages_before_delete",
-        "trg_finance_source_correction_before_update",
-        "trg_finance_source_correction_before_delete",
-        "trg_payroll_late_dispositions_before_update",
-        "trg_payroll_late_dispositions_before_delete",
-        "trg_government_integrity_rebuild_before_update",
-        "trg_government_integrity_rebuild_before_delete",
-        "trg_government_claim_correction_before_update",
-        "trg_government_claim_correction_before_delete",
-        "trg_government_recovery_events_before_update",
-        "trg_government_recovery_events_before_delete"
+        "trg_client_profile_change_events_before_update"
       ]
     }
   },

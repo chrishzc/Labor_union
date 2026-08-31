@@ -11,27 +11,27 @@ describe('CurrentAnomaliesPage', () => {
     vi.spyOn(currentAnomalyQueryClient, 'queryCurrentAnomalies').mockResolvedValue({
       items: [{
         issue_key: issueKey,
-        definition_code: 'SCHEDULE-006',
-        owner_domain: 'scheduling',
-        severity: 'blocking',
-        blocking: true,
+        definition_code: 'LINE-006',
+        owner_domain: 'line',
+        severity: 'warning',
+        blocking: false,
         episode_started_at: '2026-08-30T01:00:00Z',
         last_verified_at: '2026-08-30T01:01:00Z',
       }],
       next_cursor: null,
     });
-    vi.spyOn(anomalyDetailClient, 'queryAnomalyRecovery').mockResolvedValue({
+    vi.spyOn(anomalyDetailClient, 'queryCurrentAnomalyRecovery').mockResolvedValue({
       issue_key: issueKey,
-      definition_code: 'SCHEDULE-006',
-      owner_domain: 'scheduling',
-      owner_root_type: 'case',
-      subject: { redaction_version: 'anomaly-safe.v1', definition_code: 'SCHEDULE-006', fields: [] },
+      definition_code: 'LINE-006',
+      owner_domain: 'line',
+      owner_root_type: 'notification_failure',
+      subject: { redaction_version: 'anomaly-safe.v1', definition_code: 'LINE-006', fields: [] },
       owner_snapshot_token: 'owner-v1',
       owner_version: 3,
-      severity: 'blocking',
-      blocking: true,
+      severity: 'warning',
+      blocking: false,
       details_version: 1,
-      details: { redaction_version: 'anomaly-safe.v1', definition_code: 'SCHEDULE-006', fields: [] },
+      details: { redaction_version: 'anomaly-safe.v1', definition_code: 'LINE-006', fields: [] },
       episode_started_at: '2026-08-30T01:00:00Z',
       last_verified_at: '2026-08-30T01:01:00Z',
       available_actions: [],
@@ -41,13 +41,13 @@ describe('CurrentAnomaliesPage', () => {
   it('renders only current state and performs current detail readback', async () => {
     render(<CurrentAnomaliesPage />);
 
-    const issue = await screen.findByRole('button', { name: /SCHEDULE-006/ });
+    const issue = await screen.findByRole('button', { name: /LINE-006/ });
     expect(screen.queryByText(/claimed|resolved|timeline|occurrence/i)).not.toBeInTheDocument();
     fireEvent.click(issue);
 
-    await waitFor(() => expect(anomalyDetailClient.queryAnomalyRecovery).toHaveBeenCalledWith({ issueKey }));
+    await waitFor(() => expect(anomalyDetailClient.queryCurrentAnomalyRecovery).toHaveBeenCalledWith({ issueKey }));
     expect(await screen.findByText(/系統不會用通用結案取代業務修正/)).toBeInTheDocument();
-    expect(screen.getAllByText('排班管理').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('LINE 管理').length).toBeGreaterThan(0);
     expect(screen.getByText(/資料版本：3/)).not.toBeVisible();
     expect(screen.queryByText(/owner facts|closed owner action|通用 resolve/)).not.toBeInTheDocument();
   });

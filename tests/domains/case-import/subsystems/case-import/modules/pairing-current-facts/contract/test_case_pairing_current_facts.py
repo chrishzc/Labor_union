@@ -1,6 +1,5 @@
 from subsystems.case_import.pairing_current_facts import (
     BeClassCounterpartCurrentFact,
-    CasePairingAcceptedLineage,
     CasePairingCurrentFactReason,
     HcmCounterpartCurrentFact,
 )
@@ -25,13 +24,3 @@ def test_incomplete_readback_is_fail_closed() -> None:
         "client", "beclass-review:abc", "snapshot-4", 0, False, 0, False
     )
     assert fact.unresolved_reason_codes[0] is CasePairingCurrentFactReason.OWNER_READBACK_INCOMPLETE
-
-
-def test_lineage_keeps_review_source_and_acceptance_result_separate() -> None:
-    lineage = CasePairingAcceptedLineage(
-        "beclass-review:original",
-        "beclass-workbook:" + "c" * 64 + ":row:8",
-        "client-beclass-apply-event:result-8",
-    )
-    assert lineage.original_review_identity != lineage.accepted_source_event_identity
-    assert lineage.accepted_source_event_identity != lineage.accepted_result_identity

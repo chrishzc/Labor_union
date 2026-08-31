@@ -11,7 +11,7 @@
 - `matching-schedule-confirmation` — current 日期版本的 recipient snapshot／LINE delivery intent／postback readback／正式排班 gate; path: `modules/matching-schedule-confirmation.md`
 - `leave-substitution` — 請假／代班 Query／Preview／Apply 與 committed Staff Payables readback; path: `modules/leave-substitution.md`
 - `service-before-replacement` — 正式服務前 successor/replacement workflow; path: `modules/service-before-replacement.md`
-- `current-anomaly-facts` — `SCHEDULE-002/003/006` typed zero-write current-fact readback; path: `modules/current-anomaly-facts.md`
+- `current-anomaly-facts` — retired anomaly validation／migration readback only；path: `modules/current-anomaly-facts.md`
 - `current-service-projection` — effective assignment service-period status projection；path: `modules/current-service-projection.md`
 - `waiting-deposit-lock` — waiting-deposit 檔期鎖的取得、釋放與訂單取消收斂；path: `modules/waiting-deposit-lock.md`
 

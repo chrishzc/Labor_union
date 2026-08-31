@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "03eb1d94ec75e565de758ea9d161ca29a1f7e124a02c0ae67b23fc746a8c53b3",
+  "active_artifacts_sha256": "2f90e8ef451fd8d1dfbd61a4056848c8af9c6902dec707848438f367b57d7738",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -157,11 +157,21 @@
     "db/schema_parts/1021_task96_owner_contract_successors.sql"
   ],
   "classifications": {
+    "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": "retired",
     "db/schema_parts/153_retire_empty_legacy_field_inventory.sql": "migration-only",
     "db/schema_parts/189_client_refund_recipient_snapshot_local_upgrade.sql": "migration-only",
     "db/schema_parts/190_government_subsidy_overpayment_disposition_local_upgrade.sql": "migration-only"
   },
   "retirement_contracts": {
+    "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": {
+      "source_object": "historical mixed Task 96 anomaly/recovery owner contracts listed in the retired provenance artifact",
+      "successor": "Client Profile-only 1021 plus each owning Domain's normal canonical contract; no anomaly-recovery framework successor",
+      "terminal_schema_evidence": "1022 is excluded from fresh bootstrap and preserve-data executable migration; only active 1021 is the terminal Client Profile schema artifact",
+      "data_effect": "none; historical provenance only and no table, column, index, constraint, or trigger is executed",
+      "replay": "never replay 1022; fresh bootstrap and preserve-data migration execute only active classified artifacts",
+      "rollback": "retain the versioned provenance bytes; rollback of executable schema uses the preserve-data candidate/source backup contract",
+      "unresolved_policy": "any request to reintroduce retired anomaly persistence is blocked pending a new explicit owner decision and replacement release"
+    },
     "db/schema_parts/153_retire_empty_legacy_field_inventory.sql": {
       "source_object": "finance_import_reclassification_events and its immutable triggers",
       "successor": "db/schema_parts/199_retire_finance_import_reclassification_events.sql",

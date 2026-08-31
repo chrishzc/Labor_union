@@ -29,7 +29,7 @@
 - `finance-import -> client-finance | staff-payables | government-subsidy` — 匯入只保存銀行來源與分類，正式業務變更委派給 owning Domain。
 - `anomalies -> owning domains` — Anomalies 投影／追蹤 owner facts，不直接改寫 owner root；解除必須以 owner predicate 為準。
 - `anomalies -> external-integration/access` — Anomalies central worker消費已提交的Access security-alert intent，注入Anomalies-owned `system_alerts` projection sink；Access不concrete-import Anomalies。
-- `anomalies -> external-integration/line` — LINE-004只消費LINE Identity typed current-fact readback並維護current projection；LINE仍擁有root、projection、version與合法雙角色判讀。
+- `anomalies -> external-integration/line` — Anomalies只消費LINE-006 notification-failure typed current-fact readback並維護current projection；LINE仍擁有identity root、projection、version與合法雙角色判讀。
 - `contract-signing -> scheduling | orders | client-finance | external-integration` — Contract Signing 擁有文件／簽回與簽署 session evidence；commitment／execution、Orders lifecycle、Finance roots 與 LINE binding／delivery 仍由各 owner 決定。
 - `external-integration -> owning domains` — Access／LINE 只提供 actor、identity、webhook／delivery 等邊界，業務命令仍由 owning Subsystem／Domain 決定。
 - `all mutation -> Global` — `shared_kernel/`、outer UoW、receipt/outbox/durable job 與 migration governance 提供跨域不變量。
@@ -46,6 +46,8 @@ Current higher-boundary living schema／release baselines remain at their path-s
 - integration_root: `tests/test_service_before_replacement_schema_contract.py`
 - integration_root: `tests/test_task97_additive_release_chain.py`
 - integration_root: `tests/test_line_identity_management_first_release.py`
+- integration_root: `tests/test_verify_verification_baseline.py`
+- integration_root: `tests/test_phase3_scenario_lineage.py`
 
 Current canonical owner roots are:
 

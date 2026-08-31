@@ -6,9 +6,9 @@
 ## Responsibility
 協調正式服務中的請假／代班 Query、Preview、Apply 與 committed-result readback；完成後只透過既有 Staff Payables typed GET 顯示受影響服務人員的本案應付款。
 
-## Sources
+## Implementation
 - `domains/scheduling/leave_substitution.py`
-- `subsystems/scheduling/leave_substitution_service.py`
+- `subsystems/scheduling/leave_substitution_workflow.py`
 - `api/routes/staff_leave_management.py`
 - `ui_react/src/api/scheduling/leave_substitution_client.ts`
 - `ui_react/src/adapters/scheduling/leave_substitution_flow_adapter.ts`

@@ -9,12 +9,12 @@
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
     "expected_count": 148,
-    "ordered_digest_sha256": "03eb1d94ec75e565de758ea9d161ca29a1f7e124a02c0ae67b23fc746a8c53b3",
+    "ordered_digest_sha256": "2f90e8ef451fd8d1dfbd61a4056848c8af9c6902dec707848438f367b57d7738",
     "terminal_artifact": "1021_task96_owner_contract_successors.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "65f58292002408997fae0780e78d72eaac1583ed9649aefcc14264926b09cac8"
+    "sha256": "c673202cf790bed449c795c5f2860e42ca3f6153881b6a3863afcc12a8b3a666"
   },
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_v1.sql",
@@ -25,7 +25,7 @@
     "required_views": [
       "v_order_details"
     ],
-    "minimum_trigger_count": 283,
+    "minimum_trigger_count": 393,
     "require_no_missing_versioned_tables": true
   },
   "database_safety": {

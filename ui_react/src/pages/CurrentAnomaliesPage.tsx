@@ -4,7 +4,7 @@ import './AnomaliesPage.css';
 import { Drawer } from '../components/Drawer';
 import { currentAnomalyQueryClient } from '../api/anomalies/current_anomaly_query_client';
 import { anomalyDetailClient } from '../api/anomalies/anomaly_detail_client';
-import type { AnomalyRecoveryContextView } from '../api/anomalies/anomaly_detail_schemas';
+import type { CurrentAnomalyRecoveryContextView } from '../api/anomalies/anomaly_detail_schemas';
 import {
   adaptCurrentAnomalySummary,
   type CurrentAnomalyRowViewModel,
@@ -44,7 +44,7 @@ export const CurrentAnomaliesPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<CurrentAnomalyRowViewModel | null>(null);
-  const [detail, setDetail] = useState<AnomalyRecoveryContextView | null>(null);
+  const [detail, setDetail] = useState<CurrentAnomalyRecoveryContextView | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const requestSequence = useRef(0);
@@ -82,7 +82,7 @@ export const CurrentAnomaliesPage: React.FC = () => {
     setDetailError(null);
     setDetailLoading(true);
     try {
-      const current = await anomalyDetailClient.queryAnomalyRecovery({ issueKey: item.issueKey });
+      const current = await anomalyDetailClient.queryCurrentAnomalyRecovery({ issueKey: item.issueKey });
       setDetail(current);
     } catch (caught) {
       setDetailError(displayError(caught));

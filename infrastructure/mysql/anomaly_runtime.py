@@ -18,10 +18,6 @@ from infrastructure.mysql.current_anomaly_issue_repository import (
     CurrentIssueMySqlUnitOfWork,
     MySqlCurrentIssueRepository,
 )
-from infrastructure.mysql.beclass_import_review_anomaly_source import project_beclass_import_review_page
-from infrastructure.mysql.government_subsidy_anomaly_source import project_government_subsidy_anomaly_page
-from infrastructure.mysql.government_subsidy_reversal_anomaly_source import project_government_subsidy_reversal_anomaly_page
-from infrastructure.mysql.government_return_outbound_overage_anomaly_source import project_government_return_outbound_overage_page
 from infrastructure.mysql.hcm_resubmission_repository import MySqlHcmResubmissionRepository
 from infrastructure.mysql.import_warning_auto_resolution import (
     HCM_FIELD_CORRECTION_TERMINAL_PREDICATE,
@@ -29,8 +25,6 @@ from infrastructure.mysql.import_warning_auto_resolution import (
     load_import_warning_review_resolution_state,
 )
 from infrastructure.mysql.mysql_adapter import get_connection
-from infrastructure.mysql.process_reminder_anomaly_source import consume_process_reminder_anomaly_sources
-from infrastructure.mysql.scheduling_coverage_anomaly_source import MySqlSchedulingCoverageAnomalySource
 from infrastructure.mysql.subsidy_advance_recovery_repository import MySqlSubsidyAdvanceRecoveryRepository
 from subsystems.anomalies.alert_workflow import AnomalyApplication
 from subsystems.anomalies.ports import AnomalyRuntime
@@ -147,35 +141,6 @@ class MySqlAnomalyRuntime:
 
     def subsidy_advance_recovery_repository(self, connection):
         return MySqlSubsidyAdvanceRecoveryRepository(connection)
-
-    def consume_process_reminder_anomaly_sources(self, connection, **kwargs):
-        from subsystems.anomalies.outbox_worker import BorrowedAnomalyUnitOfWork
-
-        return consume_process_reminder_anomaly_sources(
-            connection,
-            unit_of_work_factory=BorrowedAnomalyUnitOfWork,
-            **kwargs,
-        )
-
-    def project_beclass_import_review_page(self, connection, **kwargs):
-        return project_beclass_import_review_page(connection, **kwargs)
-
-    def project_government_subsidy_anomaly_page(self, connection, request):
-        return project_government_subsidy_anomaly_page(connection, request)
-
-    def project_government_subsidy_reversal_page(self, connection, request):
-        return project_government_subsidy_reversal_anomaly_page(connection, request)
-
-    def project_government_return_outbound_overage_page(self, connection, request):
-        return project_government_return_outbound_overage_page(connection, request)
-
-    def scheduling_coverage_consumer(self, connection):
-        from subsystems.anomalies.scheduling_coverage_anomaly_consumer import SchedulingCoverageAnomalyConsumer
-
-        return SchedulingCoverageAnomalyConsumer(
-            MySqlSchedulingCoverageAnomalySource(connection),
-            self.anomaly_application(connection),
-        )
 
     def auto_resolve_import_warning_occurrence(self, connection, **kwargs):
         return auto_resolve_import_warning_occurrence(connection, **kwargs)

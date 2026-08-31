@@ -19,7 +19,7 @@
 - `historical-payment-settlement-presentation` — owner-page exact staff/case historical payout Q/P/A and fresh readback; path: `modules/historical-payment-settlement-presentation.md`
 - `payout-remediation-presentation` — 逾期應付款核銷的既有安全 workflow 與 business-first React projection; path: `modules/payout-remediation-presentation.md`
 - `overpayment-recovery-presentation` — 月嫂超額付款追償的既有安全 workflow 與 business-first React projection; path: `modules/overpayment-recovery-presentation.md`
-- `payroll-correction-recovery` — negative paid Payroll correction的exact Staff recovery linkage；path: `modules/payroll-correction-recovery.md`
+- `overpayment-recovery` — Staff Payables owner overpayment collection／adjustment；path: `modules/overpayment-recovery.md`
 
 ## Verification routing
 - default_boundary: Subsystem

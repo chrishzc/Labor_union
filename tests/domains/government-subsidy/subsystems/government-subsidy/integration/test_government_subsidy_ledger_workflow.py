@@ -91,14 +91,6 @@ class _Repository:
         self.receipt = command.stored_receipt
 
 
-class _RecheckSink:
-    def __init__(self):
-        self.requests = []
-
-    def append_government_subsidy_recheck(self, request):
-        self.requests.append(request)
-
-
 def _request(preview):
     return GovernmentSubsidyReceiptApplyRequest(
         ReceiptIntent(81, 5),
@@ -138,19 +130,3 @@ def test_receipt_apply_replays_matching_idempotency_without_new_writes():
 
     assert second == first
     assert len(repository.writes) == 6
-
-
-def test_receipt_apply_appends_exact_owner_rechecks_before_outer_commit():
-    repository = _Repository()
-    sink = _RecheckSink()
-    workflow = GovernmentSubsidyLedgerWorkflow(repository, _UnitOfWork, sink)
-    preview = workflow.preview_receipt(ReceiptIntent(81, 5))
-
-    workflow.apply_receipt(_request(preview))
-
-    assert tuple(request.definition_code.value for request in sink.requests) == (
-        "GOVSUB-001",
-        "GOVSUB-002",
-    )
-    assert sink.requests[0].subject_ids == ("bank-fact-81",)
-    assert sink.requests[1].subject_ids == ("bank-fact-81:5",)

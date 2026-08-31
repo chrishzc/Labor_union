@@ -18,6 +18,7 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — Global mutation contract
 
 ## Verification routing
+- layout_status: `custom_current`
 - default_boundary: Domain
 - test_root: `tests/domains/finance-import/`
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/`; see Test Map.

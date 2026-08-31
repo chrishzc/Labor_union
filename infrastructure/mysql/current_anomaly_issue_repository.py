@@ -103,7 +103,8 @@ class MySqlCurrentIssueRepository:
             "owner_version, severity, blocking, details_version, details, "
             "episode_started_at, last_verified_at "
             "FROM current_anomaly_issues WHERE owner_domain=%s AND owner_root_type=%s "
-            "AND subject_type=%s AND subject_id IN (" + placeholders + ") ORDER BY issue_key"
+            "AND subject_type=%s AND subject_id IN (" + placeholders + ") "
+            "AND definition_code='LINE-006' ORDER BY issue_key"
         )
         with _cursor(self._connection) as cursor:
             cursor.execute(sql, (scope.owner_domain, scope.owner_root_type, scope.subject_type, *scope.subject_ids))
@@ -126,7 +127,7 @@ class MySqlCurrentIssueRepository:
                 "subject_type, subject_id, subject_identity, owner_snapshot_token, "
                 "owner_version, severity, blocking, details_version, details, "
                 "episode_started_at, last_verified_at "
-                "FROM current_anomaly_issues WHERE issue_key=%s",
+                "FROM current_anomaly_issues WHERE issue_key=%s AND definition_code='LINE-006'",
                 (issue_key,),
             )
             row = cursor.fetchone()
@@ -136,6 +137,9 @@ class MySqlCurrentIssueRepository:
         """Read one bounded keyset page from the current-only projection."""
         conditions: list[str] = []
         parameters: list[object] = []
+        # Current public projection is closed to LINE-006. Older rows remain
+        # migration evidence, but never become visible through this query.
+        conditions.append("definition_code='LINE-006'")
         if request.definition_code is not None:
             conditions.append("definition_code=%s")
             parameters.append(request.definition_code)

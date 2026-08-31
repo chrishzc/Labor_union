@@ -16,7 +16,7 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — receipt/outbox/idempotency
 
 ## Modules
-- `import006-owner-current-facts` — IMPORT-006 rebuild／exact correction successor lineage；path: `modules/import006-owner-current-facts.md`
+- `import006-owner-current-facts` — retired IMPORT-006 owner-validation／migration evidence only；path: `modules/import006-owner-current-facts.md`
 
 ## Verification routing
 - default_boundary: Subsystem

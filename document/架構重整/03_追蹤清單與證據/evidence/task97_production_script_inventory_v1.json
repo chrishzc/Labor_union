@@ -248,7 +248,7 @@
         ]
       },
       "evidence": {
-        "source_sha256": "70d10af01b7bdd798762822c82e993882878cb34d5bcc2159ab104d9f8673789",
+        "source_sha256": "becc2b8f09a45eedb5557f11d693a21759e77ed2653f1295231d004e81614557",
         "line_count": 285,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
@@ -988,8 +988,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "d2d5e25a49b6c37e2e152d0908fcaae888dc3c6f4cfae6292fb113fac4d1865d",
-        "line_count": 108,
+        "source_sha256": "b3048686f1375f52da2adeaca163cbba40e605ace8864acbe1c71914ab30f945",
+        "line_count": 113,
         "queue_status": "operator_only",
         "owner": "LINE Integration / Access Control",
         "scenario": "Controlled LINE Integration / Access Control maintenance or release operation.",
@@ -1487,8 +1487,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "451eb3daa0146c374d3f072ffe5f98cd88f4031a18b8638b07df4447e9c4d2fb",
-        "line_count": 251,
+        "source_sha256": "2c922a4dde255e9be6c27262677797f7c96c330dbc77a5241126be15c706823a",
+        "line_count": 257,
         "queue_status": "operator_only",
         "owner": "Case Historical Import",
         "scenario": "Restricted Client BeClass historical source parser; current registration is LIFF typed API and historical mutation remains fail-closed pending HistoricalAdoption.",
@@ -2465,8 +2465,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "ab69ed0fa637b387fa7f3b3e34fa3fc3375d2393da9bf06f9fcac0d599a79c79",
-        "line_count": 7632,
+        "source_sha256": "435439d1a1bd4930d3e5af7d089d49f9d268b0636424eaa8f570eb1343550e01",
+        "line_count": 7867,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",
@@ -3016,8 +3016,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "ec0959447a6a1f0e47cbb4b792dcff6ee8c6a0f64a86fe647d2ec7fff5e4cc0a",
-        "line_count": 464,
+        "source_sha256": "523af4e83a8cf69ed50930149d93e4de0f7c5aa216d3b884b9d47cadd0ff28bd",
+        "line_count": 494,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",

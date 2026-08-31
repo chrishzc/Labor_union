@@ -4,12 +4,11 @@
 - subsystem: `anomalies`
 
 ## Responsibility
-只消費 Scheduling typed current-fact readbacks，建立 `SCHEDULE-002/003/006` current candidates；不查 Scheduling tables、不重算 owner rules、不執行修正。
-
-## Implementation
-- `subsystems/anomalies/scheduling_current_issue_consumer.py`
-- `subsystems/scheduling/current_anomaly_facts.py`
-- `infrastructure/mysql/scheduling_current_issue_adapter.py`
+`SCHEDULE-002/003/006`已退出 runtime Anomalies。本 leaf只保留 Scheduling owner validation／migration
+readback導覽，不建立 current candidates、不查 Scheduling tables、不重算 owner rules、不執行修正。
 
 ## Verification
 - test_root: `tests/domains/anomalies/subsystems/anomalies/modules/scheduling-current-issue/`
+
+## Lifecycle
+- `superseded_candidate`: 無 current runtime anomaly consumer；若 source／test retirement完成，移除本 leaf及其 inbound route。

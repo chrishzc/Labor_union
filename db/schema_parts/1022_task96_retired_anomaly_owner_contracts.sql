@@ -1,5 +1,5 @@
 -- File: 1022_task96_retired_anomaly_owner_contracts.sql
--- Classification: migration-only historical evidence; excluded from fresh bootstrap and current preserve-data execution.
+-- Classification: retired historical evidence; excluded from fresh bootstrap and current preserve-data execution.
 -- Purpose: preserve provenance for the mixed Task 96 owner-recovery DDL retired by the 2026-08-31 runtime-anomaly correction.
 -- Data effect: none. This artifact intentionally contains no executable DDL.
 -- Prior mixed artifact: db/schema_parts/1021_task96_owner_contract_successors.sql

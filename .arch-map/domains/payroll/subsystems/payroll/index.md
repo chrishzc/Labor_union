@@ -15,7 +15,7 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — transaction/replay contract
 
 ## Modules
-- `late-obligation-disposition` — PAYOUT-002 source-bound immutable disposition／correction；path: `modules/late-obligation-disposition.md`
+- `late-obligation-disposition` — retired PAYOUT-002 owner validation／historical settlement evidence；path: `modules/late-obligation-disposition.md`
 
 ## Verification routing
 - default_boundary: Subsystem

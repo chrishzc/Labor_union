@@ -8,9 +8,11 @@ import { transport, type RequestOptions } from '../shared/transport';
 import { AnomalyDetailError, mapAnomalyDetailError } from './anomaly_detail_errors';
 import {
   AnomalyDetailResponseSchema,
-  AnomalyRecoveryResponseSchema,
+  AnomalyRecoveryContextViewSchema,
+  CurrentAnomalyRecoveryContextViewSchema,
   type AnomalyDetailView,
   type AnomalyRecoveryContextView,
+  type CurrentAnomalyRecoveryContextView,
 } from './anomaly_detail_schemas';
 
 export interface AnomalyDetailOptions {
@@ -69,7 +71,36 @@ export function queryAnomalyDetail(params: AnomalyDetailParams, options?: Anomal
 }
 
 export function queryAnomalyRecovery(params: AnomalyRecoveryParams, options?: AnomalyDetailOptions): Promise<AnomalyRecoveryContextView> {
-  return getData(currentIssueEndpoint(params.issueKey), AnomalyRecoveryResponseSchema, options);
+  return getData(
+    currentIssueEndpoint(params.issueKey),
+    z.object({
+      success: z.literal(true),
+      message: z.string(),
+      data: AnomalyRecoveryContextViewSchema,
+      error: z.string().nullable().optional(),
+    }).strict(),
+    options,
+  );
 }
 
-export const anomalyDetailClient = { queryAnomalyDetail, queryAnomalyRecovery };
+export function queryCurrentAnomalyRecovery(
+  params: AnomalyRecoveryParams,
+  options?: AnomalyDetailOptions,
+): Promise<CurrentAnomalyRecoveryContextView> {
+  return getData(
+    currentIssueEndpoint(params.issueKey),
+    z.object({
+      success: z.literal(true),
+      message: z.string(),
+      data: CurrentAnomalyRecoveryContextViewSchema,
+      error: z.string().nullable().optional(),
+    }).strict(),
+    options,
+  );
+}
+
+export const anomalyDetailClient = {
+  queryAnomalyDetail,
+  queryAnomalyRecovery,
+  queryCurrentAnomalyRecovery,
+};

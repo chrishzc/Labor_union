@@ -12,7 +12,6 @@ from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.staff_payout import get_staff_overpayment_recovery_matching_application
 from api.main import app
 from domains.staff_payables.overpayment_recovery import (
-    PayrollCorrectionRecoverySource,
     StaffOverpaymentRecovery,
     StaffOverpaymentRecoveryStatus,
     StaffRecoveryIncomingBankFact,
@@ -30,15 +29,10 @@ from subsystems.staff_payables.overpayment_recovery import (
     StaffOverpaymentRecoveryError,
     StaffOverpaymentRecoverySelection,
     StaffOverpaymentRecoveryWorkflow,
-    StaffOverpaymentRecoveryCreationApplication,
-    StaffOverpaymentRecoveryCreationRequest,
-    StaffOverpaymentRecoveryCreationReceipt,
 )
 from subsystems.staff_payables.overpayment_recovery_query import (
     StaffOverpaymentRecoveryQueryView,
-)
-
-
+        )
 def _recovery(amount: int = 1_000, version: int = 4) -> StaffOverpaymentRecovery:
     return StaffOverpaymentRecovery(
         "staff-overpayment-recovery:1",
@@ -213,105 +207,3 @@ def test_query_rejects_status_remaining_contradiction(status, remaining) -> None
         StaffOverpaymentRecoveryQueryView(
             7, "recovery-1", remaining, status, 2, 8, (), (), (), (),
         )
-
-
-class _CreationRepository:
-    def __init__(self, version=8):
-        self.version = version
-        self.receipt = None
-        self.persisted = []
-        self.lock_modes = []
-
-    def find_creation_receipt(self, _key):
-        return self.receipt
-
-    def load_staff_payables_version(self, _staff_id, *, for_update):
-        self.lock_modes.append(for_update)
-        return self.version
-
-    def persist_creation(self, request, receipt):
-        self.persisted.append((request, receipt))
-        self.receipt = receipt
-
-
-def _payroll_creation_request(key="staff-recovery-create-1", amount=300):
-    return StaffOverpaymentRecoveryCreationRequest(
-        PayrollCorrectionRecoverySource(
-            "payroll-correction:abc", "CASE-1", "obligation:1", 7, MoneyNTD(amount)
-        ),
-        IdempotencyKey(key), ActorContext("operator"), "PAYOUT-002 correction",
-        CorrelationId("staff-recovery-create"),
-    )
-
-
-def test_payroll_creation_owner_contract_is_source_bound_and_borrowed_transaction_safe():
-    repository = _CreationRepository()
-    application = StaffOverpaymentRecoveryCreationApplication(repository)
-
-    receipt = application.create_from_payroll_correction(_payroll_creation_request())
-
-    assert receipt.payroll_correction_identity == "payroll-correction:abc"
-    assert receipt.original_amount_ntd == 300
-    assert receipt.recovery_version == 0
-    assert receipt.staff_payables_version == 9
-    assert repository.lock_modes == [True]
-    assert len(repository.persisted) == 1
-
-
-def test_payroll_creation_replays_by_existing_owner_receipt_and_rejects_changed_command():
-    repository = _CreationRepository()
-    application = StaffOverpaymentRecoveryCreationApplication(repository)
-    request = _payroll_creation_request()
-    first = application.create_from_payroll_correction(request)
-
-    assert application.create_from_payroll_correction(request) == first
-    assert len(repository.persisted) == 1
-
-    with pytest.raises(ValueError, match="idempotency_conflict"):
-        application.create_from_payroll_correction(_payroll_creation_request(amount=301))
-
-
-def test_mysql_payroll_creation_uses_exact_source_column_and_borrowed_connection():
-    class _WriteCursor:
-        def __init__(self):
-            self.statements = []
-            self.rowcount = 1
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def execute(self, statement, _params=()):
-            self.statements.append(statement)
-
-        def fetchone(self):
-            if any("staff_overpayment_recovery_apply_receipts" in item for item in self.statements[-1:]):
-                return None
-            return {"aggregate_version": 8}
-
-    class _Connection:
-        def __init__(self):
-            self.cursor_value = _WriteCursor()
-            self.commits = 0
-
-        def cursor(self):
-            return self.cursor_value
-
-        def commit(self):
-            self.commits += 1
-
-    from infrastructure.mysql.staff_overpayment_recovery_repository import (
-        MySqlStaffOverpaymentRecoveryRepository,
-    )
-
-    connection = _Connection()
-    application = StaffOverpaymentRecoveryCreationApplication(
-        MySqlStaffOverpaymentRecoveryRepository(connection)
-    )
-    application.create_from_payroll_correction(_payroll_creation_request())
-
-    statements = connection.cursor_value.statements
-    assert any("payroll_correction_identity" in item for item in statements)
-    assert connection.commits == 0

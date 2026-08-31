@@ -30,8 +30,8 @@ async def preview_client_beclass_workbook(workbook: UploadFile = File(...), prin
 
 
 @router.post("/apply", response_model=BaseResponse[ClientBeClassWorkbookReceiptView])
-async def apply_client_beclass_workbook(workbook: UploadFile = File(...), preview_fingerprint: str = Form(..., min_length=64, max_length=64), original_review_identity: str | None = Form(None, min_length=1, max_length=191), idempotency_key: _IdempotencyHeader = ..., correlation_id: _CorrelationHeader = ..., principal: AdminPrincipal = Depends(require_admin), service=Depends(get_client_beclass_workbook_import_service)):
-    return await _with_workbook(workbook, lambda path: service.apply(str(path), idempotency_key, preview_fingerprint, str(principal.username or "admin"), correlation_id, original_review_identity), "Client BeClass Apply 已完成")
+async def apply_client_beclass_workbook(workbook: UploadFile = File(...), preview_fingerprint: str = Form(..., min_length=64, max_length=64), idempotency_key: _IdempotencyHeader = ..., correlation_id: _CorrelationHeader = ..., principal: AdminPrincipal = Depends(require_admin), service=Depends(get_client_beclass_workbook_import_service)):
+    return await _with_workbook(workbook, lambda path: service.apply(str(path), idempotency_key, preview_fingerprint, str(principal.username or "admin"), correlation_id), "Client BeClass Apply 已完成")
 
 
 async def _with_workbook(workbook: UploadFile, operation, message: str):

@@ -7,4 +7,4 @@
 - `tests/domains/government-subsidy/subsystems/government-subsidy/modules/current-anomaly-facts/`
 
 ## Oracle
-- owner predicates、closed unresolved reasons、fail-closed readback與same-UoW recheck request。
+- Government Subsidy owner validation、closed unresolved evidence與fail-closed migration readback；不驗證 runtime Anomalies producer或recheck request。

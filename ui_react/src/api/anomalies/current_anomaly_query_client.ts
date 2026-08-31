@@ -3,6 +3,7 @@ import { sessionClient } from '../auth/session_client';
 import { transport, type RequestOptions } from '../shared/transport';
 import {
   CurrentAnomalyPageResponseSchema,
+  type CurrentAnomalyDefinitionCode,
   type CurrentAnomalyPage,
 } from './current_anomaly_query_schemas';
 import {
@@ -20,7 +21,7 @@ export interface CurrentAnomalyQueryOptions {
 }
 
 export interface CurrentAnomalyQueryParams {
-  definitionCode?: string;
+  definitionCode?: CurrentAnomalyDefinitionCode;
   ownerDomain?: string;
   blocking?: boolean;
   limit?: number;

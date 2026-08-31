@@ -14,8 +14,7 @@ from domains.case_import.beclass_import_review import (
     BeClassImportReviewStatus,
     BeClassImportSourceKind,
     InvalidBeClassImportRow,
-    pending_anomaly_snapshot,
-    resolved_anomaly_snapshot,
+    review_outbox_snapshot,
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -76,7 +75,7 @@ class MySqlBeClassImportReviewRepository:
                     None,
                     _opened_intent_key(root),
                     "review_opened",
-                    _canonical_json(pending_anomaly_snapshot(root)),
+                    _canonical_json(review_outbox_snapshot(root)),
                 ),
             )
         return review_row_id
@@ -154,7 +153,7 @@ class MySqlBeClassImportReviewRepository:
                     review_event_id,
                     _resolved_intent_key(candidate),
                     "review_resolved",
-                    _canonical_json(resolved_anomaly_snapshot(candidate)),
+                    _canonical_json(review_outbox_snapshot(candidate)),
                 ),
             )
             outbox_id = int(cursor.lastrowid or 0)

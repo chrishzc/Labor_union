@@ -21,12 +21,6 @@ from subsystems.scheduling.holiday_calendar_query import (
     HolidayCalendarUnavailable,
     SchedulingHolidayQuery,
 )
-from subsystems.scheduling.current_anomaly_facts import (
-    SchedulingAnomalyRecheckRequest,
-    SchedulingOverlapRecheckRequest,
-    build_scheduling_coverage_recheck_request,
-    build_scheduling_replacement_recheck_request,
-)
 
 _CASE_NUMBER_MAXIMUM_LENGTH = 50
 _REASON_MAXIMUM_LENGTH = 500
@@ -233,21 +227,15 @@ class LeaveOrdersImpactPort(Protocol):
     def persist_leave_substitution(self, candidate: VersionedImpactCandidate, context: AssignmentPlanPersistenceContext, scheduling_result: object) -> None: ...
 
 
-class LeaveSubstitutionAnomalyRecheckPort(Protocol):
-    def append_scheduling_recheck(self, request: SchedulingAnomalyRecheckRequest) -> None: ...
-    def append_scheduling_overlap_rechecks(self, request: SchedulingOverlapRecheckRequest) -> None: ...
-
-
 class LeaveSubstitutionWorkflowError(Exception):
     def __init__(self, error: TypedError) -> None:
         super().__init__(error.message); self.error = error
 
 
 class LeaveSubstitutionWorkflow:
-    def __init__(self, repository: LeaveSubstitutionRepository, client_finance_port: LeaveClientFinanceImpactPort, payroll_port: LeavePayrollImpactPort, orders_port: LeaveOrdersImpactPort, holiday_query: SchedulingHolidayQuery, unit_of_work_factory: Callable[[], UnitOfWork], linked_request_resolver: LeaveLinkedRequestResolver | None = None, anomaly_rechecks: LeaveSubstitutionAnomalyRecheckPort | None = None) -> None:
+    def __init__(self, repository: LeaveSubstitutionRepository, client_finance_port: LeaveClientFinanceImpactPort, payroll_port: LeavePayrollImpactPort, orders_port: LeaveOrdersImpactPort, holiday_query: SchedulingHolidayQuery, unit_of_work_factory: Callable[[], UnitOfWork], linked_request_resolver: LeaveLinkedRequestResolver | None = None) -> None:
         self._repository = repository; self._client_finance_port = client_finance_port; self._payroll_port = payroll_port; self._orders_port = orders_port; self._holiday_query = holiday_query; self._unit_of_work_factory = unit_of_work_factory
         self._linked_request_resolver = linked_request_resolver or _NoLinkedRequestResolver()
-        self._anomaly_rechecks = anomaly_rechecks
 
     def preview(self, request: LeaveSubstitutionPreviewRequest) -> LeaveSubstitutionPreview:
         facts = self._repository.load_for_preview(request.case_no, request.intent)
@@ -387,47 +375,6 @@ class LeaveSubstitutionWorkflow:
         receipt = _build_receipt(request, preview, event_ids, linked_result)
         result_snapshot = _receipt_snapshot(receipt)
         self._repository.save_receipt(StoredLeaveSubstitutionReceipt(command_fingerprint, receipt, result_snapshot), scheduling_result, context)
-        if self._anomaly_rechecks is not None:
-            resolution = scheduling_result.assignment_resolution
-            created_ids = tuple(
-                sorted(getattr(resolution, "assignment_id_by_candidate_key", {}).values())
-            )
-            affected_ids = tuple(
-                sorted(set((request.intent.original_assignment_id, *created_ids)))
-            )
-            affected_staff_ids = tuple(
-                sorted({assignment.staff_id for assignment in preview.candidate.scheduling.assignments})
-            )
-            self._anomaly_rechecks.append_scheduling_overlap_rechecks(
-                SchedulingOverlapRecheckRequest(
-                    affected_ids,
-                    affected_staff_ids,
-                    receipt.scheduling_version,
-                    preview.fingerprint.value,
-                    "leave-substitution:"
-                    + request.idempotency_key.value
-                    + ":SCHEDULE-003",
-                )
-            )
-            self._anomaly_rechecks.append_scheduling_recheck(
-                build_scheduling_replacement_recheck_request(
-                    request.intent.original_assignment_id,
-                    receipt.scheduling_version,
-                    preview.fingerprint.value,
-                    "leave-substitution:"
-                    + request.idempotency_key.value
-                    + ":SCHEDULE-002:"
-                    + str(request.intent.original_assignment_id),
-                )
-            )
-            self._anomaly_rechecks.append_scheduling_recheck(
-                build_scheduling_coverage_recheck_request(
-                    receipt.case_no,
-                    receipt.scheduling_generation,
-                    receipt.scheduling_version,
-                    "leave-substitution:" + request.idempotency_key.value + ":SCHEDULE-006",
-                )
-            )
         return receipt
 
 

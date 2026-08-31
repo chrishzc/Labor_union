@@ -21,11 +21,12 @@ Anomalies 只保留「實際可發生，而且發生後需要人處理」的業�
 Canonical current issue exact set：
 
 ```text
-GOVSUB-007
 LINE-006
 ```
 
-`BECLASS-001` 改為 Case Import／Client owner follow-up。其餘原 15-code target 中 12 碼退出 runtime anomaly。
+因此 runtime Anomalies exact set = `{LINE-006}`。
+
+`GOVSUB-007` 退出 runtime Anomalies，改由 Government Subsidy 正常 accounting／review／correction flow 承接；`BECLASS-001` 改為 Case Import／Client owner follow-up。其餘原 15-code target 中 13 碼退出 runtime anomaly。
 
 正式產品語意以 `document/架構重整/01_規格基線/06_Anomalies_Domain.md` 的 2026-08-31 amendment 為準。
 
@@ -33,7 +34,7 @@ LINE-006
 
 | Code | Target | 理由／承接 |
 |---|---|---|
-| `GOVSUB-007` | current issue | 實際系統外政府退款可能超額；外部真實付款錯誤需要人工 disposition |
+| `GOVSUB-007` | retire from anomaly | 政府退款超額處置屬 Government Subsidy 正常 owner flow，不形成 Anomalies current issue；保留正常 owner accounting／review／correction與必要 validation |
 | `LINE-006` | current issue | 外部 recipient／binding／configuration／provider delivery 在 bounded retry 後可能仍需要人工處理 |
 | `BECLASS-001` | owner work item | HCM／Client BeClass 是合法獨立 intake；缺 counterpart 是正常先後，必要時由 owner follow-up |
 | `PAYOUT-002` | retire from anomaly | late obligation scenario 不屬目前實際業務；薪資以正式服務天數為根 |
@@ -69,13 +70,12 @@ LINE-006
 
 readback unavailable若已有真實 business issue，可以 fail closed保留舊 row；不得以 incomplete本身合成新 issue。
 
-## 4. `GOVSUB-007` target behavior
+## 4. `GOVSUB-007` runtime exit
 
-只表示 canonical outgoing government refund 已唯一對應既有政府退款 payable，但實際出款超過當時可合法核銷 remaining。
+`GOVSUB-007` 不再是 runtime Anomalies current issue，也不再由 Anomalies detector、public definition、React mapping 或 current projection 表達。政府退款超額若需處理，仍由 Government Subsidy 正常 accounting／review／correction flow 承接。
 
-它不是政府補助季別公式、claim aggregate或projection integrity檢查。沒有實際超額 outgoing bank fact就不得建立。
+Government Subsidy 的正常 claim、receipt、allocation、reversal、review與必要 owner correction保留；Anomalies不修改 payable、allocation或ledger，也不建立 anomaly-owned recovery framework。
 
-人工 disposition仍由 Government Subsidy owner擁有；Anomalies不修改 payable、allocation或ledger。
 
 ## 5. LINE identity target behavior
 
@@ -90,7 +90,7 @@ readback unavailable若已有真實 business issue，可以 fail closed保留舊
 
 Write set：`06_Anomalies_Domain.md`、Task 96 current register、本計劃與 current parallel refresh。
 
-Acceptance：所有 current planning文件使用 exact 2-code denominator；不再要求為12個 retired codes或`BECLASS-001`建立manual recovery Q/P/A。
+Acceptance：所有 current planning文件使用 exact one-code denominator `{LINE-006}`；不再要求為`GOVSUB-007`、其餘12個 retired codes或`BECLASS-001`建立manual recovery Q/P/A。
 
 ### ANM-PRUNE-01 — Registry／typed contract shrink
 
@@ -98,9 +98,9 @@ Acceptance：所有 current planning文件使用 exact 2-code denominator；不�
 
 未來取得 source edit Authority 後：
 
-- runtime registry exact set改為 `{GOVSUB-007, LINE-006}`；
-- public details／subject union只保留兩碼；
-- 12碼 definition／producer／consumer／React mapping逐項移除或改為 owner-validation/migration-only evidence；
+- runtime registry exact set改為 `{LINE-006}`；
+- public details／subject union只保留 `LINE-006`；
+- `GOVSUB-007`與其餘12碼 definition／producer／consumer／React mapping逐項移除或改為 owner-validation/migration-only evidence；
 - `BECLASS-001`改接 owner follow-up query。
 
 不為 retired code建立 adapter、fallback、replacement remediation framework。
@@ -112,16 +112,15 @@ Acceptance：所有 current planning文件使用 exact 2-code denominator；不�
 - terminal manual-required才產生；
 - owner修正後仍需fresh validation＋delivery success或source no longer applicable才刪除。
 
-### ANM-PRUNE-03 — `GOVSUB-007` owner closure
+### ANM-PRUNE-03 — `GOVSUB-007` runtime exit
 
-- 保留 exact external overpayment detector；
-- 只消費actual outgoing fact＋existing payable remaining；
-- 不重建其餘 GOVSUB anomaly family；
-- owner disposition尚未具正式 command時保持該單一 code blocker，不擴張成 generic government recovery framework。
+- 移除 runtime producer與public current definition；
+- Government Subsidy正常 accounting／review／correction flow保留，必要 owner validation與migration readback不受影響；
+- 不重建 GOVSUB anomaly family或generic government recovery framework。
 
 ### ANM-PRUNE-04 — API／React alignment
 
-- `#anomalies`只顯示兩碼；
+- `#anomalies`只顯示 `LINE-006`；
 - owner work item不重新聚合進Anomalies；
 -無claim／resolve／history／tracking UI；
 - retired code的舊頁面、fixtures、KPI若只服務舊語意則刪除，不保留compatibility shell。
@@ -130,7 +129,7 @@ Acceptance：所有 current planning文件使用 exact 2-code denominator；不�
 
 只有取得 exact source／DB／entry Authority後才執行。
 
-- fresh current projection只由兩碼owner facts重建；
+- fresh current projection只由 `LINE-006` owner facts重建；
 - 舊 schema artifact若是immutable migration provenance可保留檔案，但current runtime零引用；
 - destructive table drop、entry retirement、configured DB Apply仍需各自Authority；
 - 不因 anomaly pruning刪除 owner Domain正式business history。
@@ -139,14 +138,13 @@ Acceptance：所有 current planning文件使用 exact 2-code denominator；不�
 
 最低充分 oracle：
 
-1. registry exact 2-code set；
+1. registry exact one-code set `{LINE-006}`；
 2. `BECLASS-001` owner follow-up可達且不在 `#anomalies`；
-3. 12 retired codes零runtime producer／public definition／React current mapping；
+3. `GOVSUB-007`與其餘12 retired codes零runtime producer／public definition／React current mapping；
 4. `LINE-006` automatic in-progress/retry/readback-only negative cases不產生issue；manual-required positive case產生；
-5. `GOVSUB-007`只由actual external overpayment產生；
-6. customer＋staff dual-role、多案件same Client與normal same-type replacement不產生`LINE-004`；
-7. predicate false＋authoritative complete時row實際delete；
-8. focused tests、strict UTF-8、governance/reference scan、`git diff --check` PASS。
+5. customer＋staff dual-role、多案件same Client與normal same-type replacement不產生`LINE-004`；
+6. predicate false＋authoritative complete時row實際delete；
+7. focused tests、strict UTF-8、governance/reference scan、`git diff --check` PASS。
 
 ## 7. Explicit non-goals
 
@@ -167,8 +165,8 @@ Acceptance：所有 current planning文件使用 exact 2-code denominator；不�
 
 本計劃只有在產品與runtime都符合下列條件才可標 `completed`：
 
-- current anomaly product exact 2 codes；
+- current anomaly product exact one code `LINE-006`；
 -所有被剃除情境仍由其真正owner validation／test／normal workflow或operations保護，沒有功能斷線；
 -沒有為理論上「程式自己算錯」的情境留下人工 recovery surface；
--外部真實 effect 的兩碼各有current detection、owner action boundary與fresh removal oracle；
+- `LINE-006`具current detection、owner action boundary與fresh removal oracle；
 -未越權執行 production／`union_db`／provider／deployment／entry switch／destructive DB cleanup。

@@ -13,7 +13,7 @@ from domains.case_import.beclass_import_review import (
     BeClassImportReviewIntent,
     BeClassImportReviewIssue,
     build_beclass_import_review_candidate,
-    resolved_anomaly_snapshot,
+    review_outbox_snapshot,
 )
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -260,7 +260,7 @@ def _preview(candidate, expected_version) -> BeClassImportReviewPreview:
         {
             "candidate_fingerprint": candidate.fingerprint.value,
             "expected_version": expected_version,
-            "bounded_anomaly_snapshot": resolved_anomaly_snapshot(candidate),
+            "review_outbox_snapshot": review_outbox_snapshot(candidate),
         }
     )
     return BeClassImportReviewPreview(

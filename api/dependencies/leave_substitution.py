@@ -22,7 +22,6 @@ from infrastructure.mysql.staff_leave_intake_repository import (
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.mysql_adapter import get_connection
-from infrastructure.mysql.scheduling_anomaly_recheck_sink import MySqlSchedulingAnomalyRecheckSink
 from shared_kernel.clock import SystemBusinessClock
 from subsystems.scheduling.leave_substitution_workflow import (
     LeaveSubstitutionWorkflow,
@@ -63,7 +62,6 @@ def get_leave_substitution_application():
             MySqlLineDeliveryTaskRepository(connection),
             SystemBusinessClock(),
         ),
-        MySqlSchedulingAnomalyRecheckSink(connection),
     )
     try:
         yield LeaveSubstitutionApplication(connection, repository, workflow)

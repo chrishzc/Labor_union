@@ -1,9 +1,12 @@
 /** Strict current-state contracts for GET /api/v1/anomalies. */
 import { z } from 'zod';
 
+export const CURRENT_ANOMALY_DEFINITION_CODES = ['LINE-006'] as const;
+export type CurrentAnomalyDefinitionCode = (typeof CURRENT_ANOMALY_DEFINITION_CODES)[number];
+
 export const CurrentAnomalySummarySchema = z.strictObject({
   issue_key: z.string().regex(/^ci_[0-9a-f]{64}$/),
-  definition_code: z.string().trim().min(1).max(191),
+  definition_code: z.literal('LINE-006'),
   owner_domain: z.string().trim().min(1).max(191),
   severity: z.enum(['warning', 'blocking']),
   blocking: z.boolean(),

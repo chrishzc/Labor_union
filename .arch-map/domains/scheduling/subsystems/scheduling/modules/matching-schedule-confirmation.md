@@ -10,6 +10,7 @@
 ## Implementation
 - primary:
   - `subsystems/scheduling/matching_schedule_confirmation.py`
+  - `subsystems/scheduling/assignment_plan_workflow.py`
   - `infrastructure/mysql/matching_schedule_confirmation_repository.py`
 - entrypoints:
   - `api/routes/matching_schedule_confirmation.py`

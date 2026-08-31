@@ -5,7 +5,7 @@
     "release_name": "Labor Union Task 96 owner contract successors",
     "application_version": "task96-owner-contract-successors-v1",
     "published_at": "2026-08-31",
-    "description": "Add exact Client profile, Case Import, Payroll, Finance Import and Government Subsidy owner lineage contracts"
+    "description": "Add exact Client Profile owner successor schema"
   },
   "source_baseline": {
     "minimum_mysql_version": "8.0",
@@ -19,7 +19,7 @@
   "artifacts": [{
     "name": "1021_task96_owner_contract_successors.sql",
     "relative_path": "db/schema_parts/1021_task96_owner_contract_successors.sql",
-    "sha256": "a1da598b5b242601b16527a5eae11c1d775fdabeb2e26ec2c03e51ab3228f99e",
+    "sha256": "89516aec21fd4fb1fb5254f8ca904ae6461d0f34e7dc1931e6ee884441e5d741",
     "dependencies": [],
     "data_effect": "schema_only",
     "rollback_policy": "forward-only-preserve-task96-owner-roots-and-lineage",
@@ -43,7 +43,7 @@
   "descriptor_artifact": {
     "name": "labor_union_2026_08_31_task96_owner_contract_successors_v1.descriptors.json",
     "relative_path": "db/migration_releases/labor_union_2026_08_31_task96_owner_contract_successors_v1.descriptors.json",
-    "sha256": "1668ec9d0b7af2aff73cbb27f5cf0a709e1e1062b643a681aa2a57fdaec93d14",
+    "sha256": "1347c2368d15920c00047ec961173d92ff877eee06b664d368d2df6f0d94fe2a",
     "dependencies": []
   },
   "tool_archive_policy": {

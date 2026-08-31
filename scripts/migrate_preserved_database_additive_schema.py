@@ -4936,13 +4936,6 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             "(preview_fingerprint IS NULL OR preview_fingerprint REGEXP '^[0-9a-f]{64}$') "
             "AND (command_fingerprint IS NULL OR command_fingerprint REGEXP '^[0-9a-f]{64}$')"
         )
-        descriptor["parent_columns"]["staff_overpayment_recoveries"] = {
-            "payroll_correction_identity": _column_contract("varchar(191)", "YES")
-        }
-        descriptor["indexes"][(
-            "staff_overpayment_recoveries",
-            "uq_staff_overpayment_payroll_correction",
-        )] = {"non_unique": 0, "columns": ("payroll_correction_identity",)}
     if part_name == "61_finance_import_reprocessing.sql":
         _remove_retired_reclassification_audit_contract(descriptor)
         descriptor["indexes"][(

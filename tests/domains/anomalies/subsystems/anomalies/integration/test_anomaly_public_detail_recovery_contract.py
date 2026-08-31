@@ -48,24 +48,25 @@ class _ReadOnlyCurrentIssueRepository:
 
 def _action(*, bound: bool) -> RecoveryActionDescriptor:
     return RecoveryActionDescriptor(
-        action_key="review_safe_projection",
-        label="Review safe projection",
-        owning_domain="finance_import",
-        form_schema_key="finance_import.review.v1",
-        source_binding_keys=("finance_import_row_identity", "source_version"),
+        action_key="manual_replay_failed_notification",
+        label="Replay failed LINE notification",
+        owning_domain="line_notification",
+        form_schema_key="line_notification.manual_replay.v1",
+        source_binding_keys=("case_no", "notification_reason", "source_version"),
         source_bindings=(
             {
-                "finance_import_row_identity": "finance-row:42",
+                "case_no": "CASE-42",
+                "notification_reason": "recipient_unavailable",
                 "source_version": 7,
             }
             if bound
             else None
         ),
         required_operator_inputs=("evidence", "reason"),
-        preview_operation="PreviewSafeProjection",
-        apply_operation="ApplySafeProjection",
-        required_capability="finance_import.review",
-        completion_predicate="source_predicate_cleared",
+        preview_operation="PreviewLineNotificationManualReplay",
+        apply_operation="ApplyLineNotificationManualReplay",
+        required_capability="line.config.manage",
+        completion_predicate="line_notification_failed_sources_have_terminal_replay_successors",
         action_contract_version=1,
         requires_preview=True,
     )
@@ -74,20 +75,20 @@ def _action(*, bound: bool) -> RecoveryActionDescriptor:
 def _current_projection() -> CurrentIssueProjection:
     candidate = CurrentIssueCandidate(
         issue_key="ci_" + "c" * 64,
-        definition_code="GOVSUB-007",
-        owner_domain="government_subsidy",
-        owner_root_type="overpayment",
-        subject_type="payable",
-        subject_id="payable:42",
+        definition_code="LINE-006",
+        owner_domain="line",
+        owner_root_type="notification_failure",
+        subject_type="recipient_unavailable",
+        subject_id="CASE-42",
         owner_version=7,
         severity=AnomalySeverity.WARNING.value,
-        blocking=True,
+        blocking=False,
         details={
-            "amount_delta_ntd": 1200,
+            "notification_reason": "recipient_unavailable",
             "root_condition_active": True,
             "available_actions": (_action(bound=True),),
         },
-        subject_identity={"payable_identity": "payable:42"},
+        subject_identity={"case_no": "CASE-42", "notification_reason": "recipient_unavailable"},
     )
     return CurrentIssueProjection(
         candidate=candidate,
@@ -173,21 +174,23 @@ def test_recovery_query_returns_current_issue_owner_details_and_actions() -> Non
 
     assert application.calls == ["query_current"]
     assert view.issue_key == projection.issue_key
-    assert view.owner_domain == "government_subsidy"
-    assert view.owner_root_type == "overpayment"
+    assert view.owner_domain == "line"
+    assert view.owner_root_type == "notification_failure"
     assert [(item.kind, item.key, item.value) for item in view.subject.fields] == [
-        ("identity", "payable_identity", "payable:42"),
+        ("identity", "case_no", "CASE-42"),
+        ("code", "notification_reason", "recipient_unavailable"),
     ]
     assert [(item.kind, item.key, item.value) for item in view.details.fields] == [
-        ("money_ntd", "amount_delta_ntd", 1200),
+        ("code", "notification_reason", "recipient_unavailable"),
         ("boolean", "root_condition_active", True),
     ]
     assert view.owner_snapshot_token == "owner-snapshot:7"
     assert view.owner_version == 7
-    assert view.blocking is True
+    assert view.blocking is False
     bindings = view.available_actions[0].source_bindings
     assert [(item.kind, item.key, item.value) for item in bindings] == [
-        ("identity", "finance_import_row_identity", "finance-row:42"),
+        ("identity", "case_no", "CASE-42"),
+        ("identity", "notification_reason", "recipient_unavailable"),
         ("version", "source_version", 7),
     ]
 
@@ -205,7 +208,7 @@ def test_canonical_anomalies_detail_route_reads_current_issue() -> None:
 
     assert repository.calls == ["query_current"]
     assert view.issue_key == projection.issue_key
-    assert view.definition_code == "GOVSUB-007"
+    assert view.definition_code == "LINE-006"
     assert not hasattr(view, "timeline")
     assert not hasattr(view, "workflow_status")
 
@@ -253,7 +256,7 @@ def test_unknown_definition_or_action_fails_closed_as_typed_422(route, code: str
             ["unknown_binding"], {"unknown_binding": "CASE-42"}
         ),
         lambda: recovery_route._current_display_snapshot(
-            "GOVSUB-007", {"unexpected": "snapshot"}
+            "LINE-006", {"unexpected": "snapshot"}
         ),
         lambda: recovery_route._recovery_action_payload({"action_key": "missing-required-fields"}),
         lambda: recovery_route._source_binding_payload("source_version", True),

@@ -18,5 +18,8 @@
 - test_root: `ui_react/src/tests/anomalies_finance_correction_flow.test.tsx`
 - routing: `.arch-map/tests/domains/anomalies/subsystems/anomalies/modules/finance-correction-presentation.md`
 
+## Lifecycle
+- `superseded_candidate`: retired anomaly presentation；若 source／test retirement完成，移除本 leaf及其 inbound route。
+
 ## Change triggers
 Reconcile when Finance correction presentation、fresh recheck completion oracle或focused test location changes。

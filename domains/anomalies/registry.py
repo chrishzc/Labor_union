@@ -334,7 +334,6 @@ def resolve_alert_workflow(
 def default_anomaly_registry() -> AnomalyDefinitionRegistry:
     return AnomalyDefinitionRegistry(
         (
-            _government_return_outbound_overage_definition(),
             _line_notification_delivery_definition(),
         )
     )
@@ -979,19 +978,6 @@ def _government_subsidy_overpayment_definition():
             "reason_codes",
             "root_condition_active",
         ),
-    )
-
-
-def _government_return_outbound_overage_definition() -> AnomalyDefinition:
-    return AnomalyDefinition(
-        code="GOVSUB-007",
-        source_domain="government_subsidy",
-        fingerprint_fields=("payable_identity",),
-        severity=AnomalySeverity.BLOCKING,
-        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
-        available_actions=(),
-        no_automated_recovery=True,
-        display_fields=("bank_amount_ntd", "excess_amount_ntd", "overpayment_identity", "payable_identity"),
     )
 
 

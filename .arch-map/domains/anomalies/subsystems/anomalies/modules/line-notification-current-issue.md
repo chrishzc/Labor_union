@@ -5,7 +5,7 @@
 - subsystem: `anomalies`
 
 ## Responsibility
-只消費LINE-owned typed LINE-006 current-fact predicate，維持公開subject `case_no + notification_reason`；readback incomplete／unavailable時fail closed，不查LINE tables、不重算Delivery狀態、不寫LINE root。
+只消費LINE-owned typed LINE-006 current-fact predicate，維持公開subject `case_no + notification_reason`；readback incomplete／unavailable時fail closed，不查LINE tables、不重算Delivery狀態、不寫LINE root。這是目前唯一 runtime anomaly consumer。
 
 ## Implementation
 - primary:

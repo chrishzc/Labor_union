@@ -141,6 +141,12 @@ export type AnomalyRecoveryContextView = z.infer<
   typeof AnomalyRecoveryContextViewSchema
 >;
 
+export const CurrentAnomalyRecoveryContextViewSchema =
+  AnomalyRecoveryContextViewSchema.extend({ definition_code: z.literal('LINE-006') }).strict();
+export type CurrentAnomalyRecoveryContextView = z.infer<
+  typeof CurrentAnomalyRecoveryContextViewSchema
+>;
+
 function strictEnvelope<T extends z.ZodTypeAny>(data: T) {
   return z.strictObject({
     success: z.literal(true),

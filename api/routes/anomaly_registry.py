@@ -19,7 +19,7 @@ from api.dependencies.anomaly_registry import (
     get_current_issue_query_application,
 )
 from api.dependencies.anomaly_recovery import get_current_anomaly_issue_repository
-from api.schemas.anomaly_recovery import AnomalyRecoveryContextView
+from api.schemas.anomaly_recovery import CurrentAnomalyRecoveryContextView
 from api.schemas.anomaly_registry import (
     AnomalyDisplaySnapshotView,
     AnomalySummaryView,
@@ -48,6 +48,7 @@ router = APIRouter(prefix="/api/v1/anomalies", tags=["Anomalies"])
 _CURRENT_QUERY_PARAMETERS = frozenset(
     {"definition_code", "owner_domain", "blocking", "limit", "cursor"}
 )
+_CURRENT_DEFINITION_CODE = "LINE-006"
 
 
 @router.get("", response_model=BaseResponse[CurrentAnomalyPageView])
@@ -94,6 +95,12 @@ def query_anomalies(
             retryable=True,
             cause=error,
         )
+    # The persistence table may still contain rows from an older repository
+    # revision. Those rows are not current public definitions and must not
+    # cross the API boundary while historical cleanup remains governed.
+    current_items = [
+        item for item in page.items if item.definition_code == _CURRENT_DEFINITION_CODE
+    ]
     return BaseResponse(
         success=True,
         message="成功取得目前異常清單",
@@ -108,7 +115,7 @@ def query_anomalies(
                     "episode_started_at": item.episode_started_at,
                     "last_verified_at": item.last_verified_at,
                 }
-                for item in page.items
+                for item in current_items
             ],
             "next_cursor": page.next_cursor,
         },
@@ -143,7 +150,7 @@ def _raise_current_query_error(
     raise error from cause
 
 
-@router.get("/{issue_key}", response_model=BaseResponse[AnomalyRecoveryContextView])
+@router.get("/{issue_key}", response_model=BaseResponse[CurrentAnomalyRecoveryContextView])
 def query_anomaly_detail(
     issue_key: str = Path(..., pattern=r"^(?:ci_[0-9a-f]{64}|[0-9a-f]{64})$"),
     principal: AdminPrincipal = Depends(require_system_admin),

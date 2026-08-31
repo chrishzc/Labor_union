@@ -90,6 +90,12 @@ def test_checked_in_scenarios_follow_the_dual_track_contract():
     assert verify_scenarios(load_scenarios()) == []
 
 
+def test_retired_scheduling_anomaly_scenario_is_not_current():
+    assert "ANOM-SCHEDULING-CLOSED-LOOP-002" not in {
+        scenario["scenario_id"] for scenario in load_scenarios()
+    }
+
+
 def test_scenario_coverage_reports_contract_coverage_without_claiming_execution():
     report = scenario_coverage_report(load_scenarios())
 
@@ -323,7 +329,7 @@ def test_gate_report_separates_complete_contracts_from_unverified_execution():
     assert report["errors"]["field_authority"] == []
     assert report["field_authority"]["mappings"][0]["unexpected_legacy_references"] == []
     assert report["business_matrix"] == {"required": 127, "missing": []}
-    assert report["fixtures"]["fixture_count"] == 38
+    assert report["fixtures"]["fixture_count"] == 37
     assert report["fixtures"]["valid"] is True
     assert report["fixtures"]["all_a_scenarios_have_fixture"] is True
     assert all(not track["suites_missing_contract"] for track in report["tracks"])
@@ -331,7 +337,6 @@ def test_gate_report_separates_complete_contracts_from_unverified_execution():
     assert report["database_execution"]["execution_evidence_recorded"] is True
     assert report["database_execution"]["passed_disposable_database_scenarios"] == [
         "AC-CAPABILITY-SESSION-002",
-        "ANOM-SCHEDULING-CLOSED-LOOP-002",
         "CF-EXPLICIT-REFUND-RECOVERY-002",
         "CI-CANONICAL-ROOTS-002",
         "FI-CANONICAL-STAGING-003",
@@ -344,7 +349,6 @@ def test_gate_report_separates_complete_contracts_from_unverified_execution():
     assert report["database_execution"]["passed_by_execution_mode"] == {
         "persistent_append_only": [
             "AC-CAPABILITY-SESSION-002",
-            "ANOM-SCHEDULING-CLOSED-LOOP-002",
             "CF-EXPLICIT-REFUND-RECOVERY-002",
             "CI-CANONICAL-ROOTS-002",
             "FI-CANONICAL-STAGING-003",
@@ -482,7 +486,7 @@ def test_fixture_validator_rejects_an_unknown_or_duplicate_a_fixture():
 def test_fixture_coverage_proves_every_a_scenario_has_root_data_contract():
     report = fixture_coverage_report(load_fixtures())
 
-    assert report["required_a_scenario_count"] == 38
+    assert report["required_a_scenario_count"] == 37
     assert report["scenarios_without_fixture"] == []
     assert report["all_a_scenarios_have_fixture"] is True
     assert "CF-REFUND-RECOVERY-001" not in report["scenarios_without_fixture"]

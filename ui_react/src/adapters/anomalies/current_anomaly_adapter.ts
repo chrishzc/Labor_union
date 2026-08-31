@@ -1,9 +1,12 @@
 /** Current-only presentation adapter; it cannot synthesize workflow state. */
-import type { CurrentAnomalySummary } from '../../api/anomalies/current_anomaly_query_schemas';
+import type {
+  CurrentAnomalyDefinitionCode,
+  CurrentAnomalySummary,
+} from '../../api/anomalies/current_anomaly_query_schemas';
 
 export interface CurrentAnomalyRowViewModel {
   issueKey: string;
-  definitionCode: string;
+  definitionCode: CurrentAnomalyDefinitionCode;
   ownerDomain: string;
   severity: 'warning' | 'blocking';
   blocking: boolean;

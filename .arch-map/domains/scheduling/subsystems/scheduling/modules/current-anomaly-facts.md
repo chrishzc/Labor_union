@@ -4,12 +4,8 @@
 - subsystem: `scheduling`
 
 ## Responsibility
-提供 `SCHEDULE-002`、`SCHEDULE-003`、`SCHEDULE-006` 的 typed、zero-write current-fact readback、closed unresolved reasons與Scheduling-owned bounded recheck request；不寫Anomalies projection，不取代Assignment Plan或Leave／Substitution owner workflow。外層MySQL composition才把request轉成既有Anomalies intent。
-
-## Implementation
-- `subsystems/scheduling/current_anomaly_facts.py`
-- `infrastructure/mysql/scheduling_current_issue_adapter.py`
-- `infrastructure/mysql/scheduling_anomaly_recheck_sink.py`
+`SCHEDULE-002/003/006`已退出 runtime Anomalies。本 module只保留 Scheduling owner invariant validation、
+closed unresolved evidence與migration readback；不寫Anomalies projection、不建立bounded anomaly recheck，也不取代Assignment Plan或Leave／Substitution owner workflow。
 
 ## Consumers
 - `subsystems/anomalies/scheduling_current_issue_consumer.py`

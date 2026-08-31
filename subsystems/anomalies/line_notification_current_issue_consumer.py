@@ -40,6 +40,11 @@ class LineNotificationCurrentIssueConsumer:
             for item in snapshot.facts
         ):
             raise TypeError("LINE-006 owner facts are invalid")
+        # An incomplete readback is operationally unsafe. It can preserve an
+        # already persisted issue through the application gate, but it must
+        # never synthesize a new current issue candidate.
+        if not snapshot.authoritative_complete:
+            return ()
         by_case = {item.case_no: item for item in snapshot.facts}
         if len(by_case) != len(snapshot.facts) or set(by_case) != set(scope.subject_ids):
             raise ValueError("LINE-006 owner facts are incomplete")

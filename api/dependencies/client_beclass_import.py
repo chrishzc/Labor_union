@@ -8,9 +8,6 @@ from infrastructure.mysql.beclass_import_review_repository import MySqlBeClassIm
 from infrastructure.mysql.hcm_beclass_reconciliation_adapter import (
     MySqlHcmBeClassReconciliationAdapter,
 )
-from infrastructure.mysql.case_pairing_anomaly_recheck_sink import (
-    MySqlCasePairingAnomalyRecheckSink,
-)
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.case_import.client_beclass_workbook_import import ClientBeClassWorkbookImportService
@@ -22,12 +19,9 @@ def get_client_beclass_workbook_import_service():
     try:
         yield ClientBeClassWorkbookImportService(
             ClientBeClassWorkbookImportRepository(connection),
-            MySqlHcmBeClassReconciliationAdapter(
-                connection, MySqlCasePairingAnomalyRecheckSink(connection)
-            ),
+            MySqlHcmBeClassReconciliationAdapter(connection),
             lambda: MySqlUnitOfWork(connection),
             review_recorder=lambda conn, **kwargs: record_invalid_beclass_row(conn, repository=MySqlBeClassImportReviewRepository(conn), **kwargs),
-            pairing_rechecks=MySqlCasePairingAnomalyRecheckSink(connection),
         )
     finally:
         connection.close()

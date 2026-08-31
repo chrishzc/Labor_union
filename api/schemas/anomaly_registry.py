@@ -172,11 +172,14 @@ class AnomalySummaryView(_StrictModel):
     staff_calendar_navigation: StaffCalendarNavigationView | None = None
 
 
+CurrentAnomalyDefinitionCode = Literal["LINE-006"]
+
+
 class CurrentAnomalySummaryView(_StrictModel):
     """Bounded current-only list item; no owner identity or workflow history."""
 
     issue_key: str = Field(pattern=r"^ci_[0-9a-f]{64}$")
-    definition_code: str = Field(min_length=1, max_length=191)
+    definition_code: CurrentAnomalyDefinitionCode
     owner_domain: str = Field(min_length=1, max_length=191)
     severity: AnomalySeverity
     blocking: bool
@@ -249,6 +252,7 @@ __all__ = [
     "AnomalySourceBindingView",
     "AnomalySummaryView",
     "CurrentAnomalyPageView",
+    "CurrentAnomalyDefinitionCode",
     "CurrentAnomalySummaryView",
     "AnomalyTimelineEventView",
     "AnomalyTypedErrorView",

@@ -26,10 +26,11 @@ Current product rule：Anomalies 只保留「實際可發生且發生後需要�
 
 原本 15 current definitions 不再是 current target。
 
-Current runtime issue exact set：
+Current runtime issue exact set = `{LINE-006}`：
 
-- `GOVSUB-007`
 - `LINE-006`，且只有 automatic path 已無法繼續、確實需要人工處理時才 active。
+
+`GOVSUB-007` 已退出 runtime Anomalies；政府退款超額若需處理，回到 Government Subsidy 正常 accounting／review／correction flow，不保留 anomaly producer或public current mapping。
 
 移出 Anomalies：
 

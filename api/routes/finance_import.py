@@ -69,7 +69,6 @@ from api.schemas.finance_import import (
 )
 from domains.client_finance.refund_return_review import RefundReturnReviewSelection
 from domains.finance_import.correction import FinanceImportCorrectionSelection
-from domains.finance_import.anomaly_remediation import FinanceImportSourceCorrectionIntent
 from domains.finance_import.planning import FinanceClassificationType
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.finance_import.query import FinanceImportQueryNotFound
@@ -374,10 +373,6 @@ def list_finance_import_reprocess_runs(
 # Kept cohesive so authentication, bounded upload, cleanup, and actor stay one boundary.
 async def ingest_finance_import_workbook(
     workbook: UploadFile = File(...),
-    source_correction_original_batch_identity: str | None = Form(default=None),
-    source_correction_original_batch_version: int | None = Form(default=None),
-    source_correction_reason: str | None = Form(default=None),
-    source_correction_evidence_reference: str | None = Form(default=None),
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_admin),
@@ -391,12 +386,6 @@ async def ingest_finance_import_workbook(
             str(upload_path),
             IdempotencyKey(idempotency_key),
             ActorContext(str(principal.username or "").strip()),
-            source_correction=_source_correction_intent(
-                source_correction_original_batch_identity,
-                source_correction_original_batch_version,
-                source_correction_reason,
-                source_correction_evidence_reference,
-            ),
         )
         return BaseResponse(
             data=_materialize(receipt),
@@ -1066,30 +1055,6 @@ def _materialize_summary(summary):
     payload = _materialize(summary)
     payload["created_at"] = summary.created_at.isoformat()
     return payload
-
-
-def _source_correction_intent(
-    original_batch_identity: str | None,
-    original_batch_version: int | None,
-    reason: str | None,
-    evidence_reference: str | None,
-) -> FinanceImportSourceCorrectionIntent | None:
-    supplied = (
-        original_batch_identity,
-        original_batch_version,
-        reason,
-        evidence_reference,
-    )
-    if all(value is None for value in supplied):
-        return None
-    if any(value is None for value in supplied):
-        raise ValueError("finance_import_source_correction_fields_incomplete")
-    return FinanceImportSourceCorrectionIntent(
-        str(original_batch_identity).strip(),
-        int(original_batch_version),
-        str(reason).strip(),
-        str(evidence_reference).strip(),
-    )
 
 
 async def _persist_uploaded_workbook(workbook):

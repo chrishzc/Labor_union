@@ -6,6 +6,8 @@ Description: 定義異常根事實修復查詢與維運操作的嚴格 HTTP 契�
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.schemas.anomaly_registry import (
@@ -40,7 +42,7 @@ class RecoveryActionView(_StrictModel):
 
 
 class AnomalyRecoveryContextView(_StrictModel):
-    """Current-only recovery context; no legacy snapshot or lifecycle history."""
+    """Generic recovery context shared by current and compatibility callers."""
 
     issue_key: str = Field(pattern=r"^ci_[0-9a-f]{64}$")
     definition_code: str
@@ -75,8 +77,15 @@ class AnomalyRecoveryFieldErrorView(_StrictModel):
     message: str = Field(min_length=1, max_length=500)
 
 
+class CurrentAnomalyRecoveryContextView(AnomalyRecoveryContextView):
+    """Closed current public recovery payload for the LINE-006 registry."""
+
+    definition_code: Literal["LINE-006"]
+
+
 __all__ = [
     "AnomalyRecoveryContextView",
+    "CurrentAnomalyRecoveryContextView",
     "AnomalyRecoveryFieldErrorView",
     "AnomalyRecoveryTypedErrorView",
     "RecoveryActionView",

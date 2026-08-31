@@ -8,70 +8,11 @@ from typing import Protocol
 
 from shared_kernel.validation import require_canonical_text, require_nonnegative_integer
 
-CASE_PAIRING_ANOMALY_OWNER_DOMAIN = "case_import"
-CASE_PAIRING_ANOMALY_OWNER_ROOT_TYPE = "case_pairing_current_fact"
-
-
-class CasePairingCurrentIssueCode(StrEnum):
-    HCM_COUNTERPART_MISSING = "BECLASS-001"
-    BECLASS_COUNTERPART_MISSING = "IMPORT-003"
-
-
 class CasePairingCurrentFactReason(StrEnum):
     COUNTERPART_MISSING = "counterpart_missing"
     COUNTERPART_AMBIGUOUS = "counterpart_ambiguous"
     MAPPING_CONFLICT = "mapping_conflict"
     OWNER_READBACK_INCOMPLETE = "owner_readback_incomplete"
-
-
-@dataclass(frozen=True, slots=True)
-class CasePairingAcceptedLineage:
-    """Immutable proof that a later source accepted the reviewed counterpart.
-
-    These identities remain separate typed values. A receipt key, case
-    number, display identity, or source filename cannot replace this relation.
-    """
-
-    original_review_identity: str
-    accepted_source_event_identity: str
-    accepted_result_identity: str
-
-    def __post_init__(self) -> None:
-        require_canonical_text(
-            self.original_review_identity, "original review identity", 191
-        )
-        require_canonical_text(
-            self.accepted_source_event_identity,
-            "accepted source event identity",
-            191,
-        )
-        require_canonical_text(
-            self.accepted_result_identity, "accepted result identity", 191
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class CasePairingAcceptedMapping:
-    """Owner readback of a source mapping and its immutable lineage proof."""
-
-    lineage: CasePairingAcceptedLineage
-    bound_case_no: str | None
-    hcm_count: int
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.lineage, CasePairingAcceptedLineage):
-            raise TypeError("case pairing accepted lineage is invalid")
-        if self.bound_case_no is not None:
-            require_canonical_text(self.bound_case_no, "bound case number", 50)
-        require_nonnegative_integer(self.hcm_count, "accepted mapping HCM count")
-
-
-class CasePairingAcceptedMappingReader(Protocol):
-    """Read exact owner lineage while borrowing the caller's UoW."""
-
-    def read_accepted_mapping(
-        self, original_review_identity: str
-    ) -> CasePairingAcceptedMapping | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,13 +23,11 @@ class HcmCounterpartCurrentFact:
     authoritative_complete: bool
     counterpart_count: int
     accepted_mapping_consistent: bool
-    accepted_lineage: CasePairingAcceptedLineage | None = None
 
     def __post_init__(self) -> None:
         _validate_common(self.case_no, self.owner_snapshot_token, self.owner_version, self.authoritative_complete)
         require_nonnegative_integer(self.counterpart_count, "counterpart count")
         _bool(self.accepted_mapping_consistent)
-        _validate_lineage(self.accepted_lineage)
 
     @property
     def unresolved_reason_codes(self):
@@ -108,14 +47,12 @@ class BeClassCounterpartCurrentFact:
     authoritative_complete: bool
     counterpart_count: int
     accepted_mapping_consistent: bool
-    accepted_lineage: CasePairingAcceptedLineage | None = None
 
     def __post_init__(self) -> None:
         _validate_common(self.entity_kind, self.owner_snapshot_token, self.owner_version, self.authoritative_complete)
         require_canonical_text(self.review_item_id, "review item id", 191)
         require_nonnegative_integer(self.counterpart_count, "counterpart count")
         _bool(self.accepted_mapping_consistent)
-        _validate_lineage(self.accepted_lineage)
 
     @property
     def unresolved_reason_codes(self):
@@ -127,43 +64,6 @@ class BeClassCounterpartCurrentFact:
 
 
 CasePairingCurrentFact = HcmCounterpartCurrentFact | BeClassCounterpartCurrentFact
-
-
-@dataclass(frozen=True, slots=True)
-class CasePairingAnomalyRecheckRequest:
-    definition_code: CasePairingCurrentIssueCode
-    subject_ids: tuple[str, ...]
-    owner_root_ids: tuple[str, ...]
-    owner_version: int
-    owner_snapshot_token: str
-    intent_identity: str
-
-    def __post_init__(self) -> None:
-        if not self.subject_ids or self.subject_ids != tuple(sorted(set(self.subject_ids))):
-            raise ValueError("case pairing recheck subjects must be sorted and unique")
-        if not self.owner_root_ids or self.owner_root_ids != tuple(sorted(set(self.owner_root_ids))):
-            raise ValueError("case pairing recheck roots must be sorted and unique")
-        for value in (*self.subject_ids, *self.owner_root_ids):
-            require_canonical_text(value, "case pairing recheck identity", 191)
-        require_nonnegative_integer(self.owner_version, "owner version")
-        require_canonical_text(self.owner_snapshot_token, "owner snapshot token", 191)
-        require_canonical_text(self.intent_identity, "recheck intent identity", 191)
-
-
-def hcm_counterpart_recheck(case_no: str, version: int, token: str, identity: str):
-    require_canonical_text(case_no, "case number", 50)
-    return CasePairingAnomalyRecheckRequest(CasePairingCurrentIssueCode.HCM_COUNTERPART_MISSING, (case_no,), ("case:" + case_no,), version, token, identity)
-
-
-def beclass_counterpart_recheck(entity_kind: str, review_item_id: str, version: int, token: str, identity: str):
-    require_canonical_text(entity_kind, "entity kind", 50)
-    require_canonical_text(review_item_id, "review item id", 191)
-    return CasePairingAnomalyRecheckRequest(CasePairingCurrentIssueCode.BECLASS_COUNTERPART_MISSING, (entity_kind + ":" + review_item_id,), ("review:" + review_item_id,), version, token, identity)
-
-
-def case_pairing_recheck_identity(source_identity: str, definition_code: CasePairingCurrentIssueCode) -> str:
-    require_canonical_text(source_identity, "case pairing recheck source identity", 160)
-    return f"case-pairing:{source_identity}:{definition_code.value.lower()}"
 
 
 def _reasons(complete, count, consistent):
@@ -186,14 +86,9 @@ def _validate_common(identity, token, version, complete):
     _bool(complete)
 
 
-def _validate_lineage(value):
-    if value is not None and not isinstance(value, CasePairingAcceptedLineage):
-        raise TypeError("case pairing accepted lineage is invalid")
-
-
 def _bool(value):
     if type(value) is not bool:
         raise TypeError("case pairing current-fact flags must be bool")
 
 
-__all__ = [name for name in globals() if name.startswith("Case") or name.startswith("Hcm") or name.startswith("BeClass") or name.startswith("CASE_") or name.endswith("_recheck")]
+__all__ = [name for name in globals() if name.startswith("Case") or name.startswith("Hcm") or name.startswith("BeClass")]

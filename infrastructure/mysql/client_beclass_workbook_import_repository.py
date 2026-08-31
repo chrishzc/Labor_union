@@ -9,10 +9,6 @@ import json
 from hashlib import sha256
 
 from domains.case_import.client_beclass_binding import classify_client_case_binding
-from subsystems.case_import.pairing_current_facts import (
-    CasePairingAcceptedLineage,
-    CasePairingAcceptedMapping,
-)
 
 
 class ClientBeClassWorkbookImportRepository:
@@ -176,8 +172,6 @@ class ClientBeClassWorkbookImportRepository:
         preview: str,
         actor: str,
         result: dict[str, object],
-        *,
-        original_review_identity: str | None = None,
     ) -> None:
         self._save_receipt(
             self._WORKBOOK_FAMILY,
@@ -187,95 +181,10 @@ class ClientBeClassWorkbookImportRepository:
             actor,
             result,
             None,
-            original_review_identity=original_review_identity,
         )
 
     def save_row_receipt(self, key: str, fingerprint: str, root_id: int | None, outcome: str, review_identity: str | None, actor: str) -> str:
         return self._save_receipt(self._ROW_FAMILY, key, fingerprint, fingerprint, actor, {"outcome": outcome, "root_id": root_id, "review_identity": review_identity}, root_id)
-
-    def append_case_pairing_lineage(
-        self,
-        original_review_identity: str,
-        accepted_source_event_identity: str,
-        accepted_result_identity: str,
-        accepted_root_id: int | None = None,
-    ) -> None:
-        """Persist exact cross-source lineage in the caller-owned transaction.
-
-        ``case_import_pairing_accepted_lineage`` is an additive schema
-        successor owned by Case Import. It is intentionally not represented
-        in ``admin_command_receipts.result_snapshot``: that generic payload is
-        replay evidence, not the lineage source of truth. A missing accepted
-        root is retained as incomplete lineage and therefore cannot close the
-        pairing predicate during readback.
-        """
-        lineage = CasePairingAcceptedLineage(
-            original_review_identity,
-            accepted_source_event_identity,
-            accepted_result_identity,
-        )
-        with self.connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT original_review_identity,accepted_source_event_identity,"
-                "accepted_result_identity,accepted_root_id "
-                "FROM case_import_pairing_accepted_lineage "
-                "WHERE original_review_identity=%s OR accepted_result_identity=%s "
-                "FOR UPDATE",
-                (
-                    lineage.original_review_identity,
-                    lineage.accepted_result_identity,
-                ),
-            )
-            rows = tuple(cursor.fetchall() or ())
-            if rows:
-                if len(rows) != 1 or not _same_pairing_lineage(
-                    rows[0], lineage, accepted_root_id
-                ):
-                    raise RuntimeError("case_pairing_lineage_conflict")
-                return
-            cursor.execute(
-                "INSERT INTO case_import_pairing_accepted_lineage "
-                "(original_review_identity,accepted_source_event_identity,"
-                "accepted_result_identity,accepted_root_id) VALUES (%s,%s,%s,%s)",
-                (
-                    lineage.original_review_identity,
-                    lineage.accepted_source_event_identity,
-                    lineage.accepted_result_identity,
-                    accepted_root_id,
-                ),
-            )
-
-    def read_accepted_mapping(self, original_review_identity: str):
-        """Read one exact lineage row and fresh accepted-root ownership facts."""
-        with self.connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT lineage.original_review_identity,"
-                "lineage.accepted_source_event_identity,"
-                "lineage.accepted_result_identity,"
-                "source.bound_case_no,"
-                "(SELECT COUNT(*) FROM orders WHERE case_no=source.bound_case_no) "
-                "AS hcm_count "
-                "FROM case_import_pairing_accepted_lineage lineage "
-                "LEFT JOIN beclass_records source "
-                "ON source.id=lineage.accepted_root_id "
-                "WHERE lineage.original_review_identity=%s FOR UPDATE",
-                (original_review_identity,),
-            )
-            rows = cursor.fetchall()
-        if not rows:
-            return None
-        if len(rows) != 1:
-            raise RuntimeError("case_pairing_lineage_conflict")
-        row = rows[0]
-        return CasePairingAcceptedMapping(
-            CasePairingAcceptedLineage(
-                row["original_review_identity"],
-                row["accepted_source_event_identity"],
-                row["accepted_result_identity"],
-            ),
-            None if row["bound_case_no"] is None else str(row["bound_case_no"]),
-            int(row["hcm_count"] or 0),
-        )
 
     def _load_receipt(self, family: str, key: str):
         with self.connection.cursor() as cursor:
@@ -284,13 +193,6 @@ class ClientBeClassWorkbookImportRepository:
         if row is not None:
             result = json.loads(row["result_snapshot"])
             row["root_id"] = result.get("root_id")
-            if family == self._ROW_FAMILY and result.get("outcome") in {
-                "created",
-                "existing_source",
-            }:
-                row["accepted_result_identity"] = (
-                    f"admin_command_receipt:{int(row['id'])}"
-                )
         return row
 
     def _claim(self, key: str, family: str, fingerprint: str, correlation_id: str) -> str:
@@ -311,13 +213,9 @@ class ClientBeClassWorkbookImportRepository:
         actor: str,
         result: dict[str, object],
         root_id: int | None,
-        *,
-        original_review_identity: str | None = None,
     ) -> str:
         del root_id
         persisted_result = dict(result)
-        if original_review_identity is not None:
-            persisted_result["_lineage_original_review_identity"] = original_review_identity
         with self.connection.cursor() as cursor:
             cursor.execute("INSERT INTO admin_command_receipts (command_family,idempotency_key,request_fingerprint,preview_fingerprint,actor,reason,result_snapshot) VALUES (%s,%s,%s,%s,%s,%s,%s)", (family, key, fingerprint, preview, actor, "Client BeClass workbook intake", json.dumps(persisted_result, ensure_ascii=False, sort_keys=True, separators=(",", ":"))))
             receipt_id = int(cursor.lastrowid or 0)
@@ -336,22 +234,6 @@ def _comparable_source(payload: dict[str, object]) -> dict[str, object]:
         for column in ClientBeClassWorkbookImportRepository._SOURCE_COLUMNS
     }
     return result
-
-
-def _same_pairing_lineage(row, lineage, accepted_root_id) -> bool:
-    stored_root_id = row.get("accepted_root_id")
-    return (
-        str(row.get("original_review_identity"))
-        == lineage.original_review_identity
-        and str(row.get("accepted_source_event_identity"))
-        == lineage.accepted_source_event_identity
-        and str(row.get("accepted_result_identity"))
-        == lineage.accepted_result_identity
-        and (
-            None if stored_root_id is None else int(stored_root_id)
-        )
-        == accepted_root_id
-    )
 
 
 def _comparable_value(column: str, value: object) -> object:

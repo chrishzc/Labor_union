@@ -1,6 +1,6 @@
 schema_version: 1
 system: labor-union-admin
-source_revision: 75cbdaad8b879dbc5f7206bb7ea203fed7835654
+source_revision: d9696f8c60c9564d4d13897e6cf59f59b5887a3e
 status: partial
 last_reconciled_scope:
   - anomalies/anomalies
@@ -13,3 +13,8 @@ last_reconciled_scope:
   - case-import/case-import
   - tests
   - tests/case-import
+  - global/migration/task96-owner-contract-successors
+  - government-subsidy/government-subsidy
+  - finance-import/finance-import
+  - scheduling/scheduling
+  - payroll/payroll

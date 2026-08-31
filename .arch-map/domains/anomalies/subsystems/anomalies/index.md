@@ -8,14 +8,13 @@
 
 ## Modules
 - `anomaly-registry` — closed definition、source-bound recovery descriptor與public detail contract；path: `modules/anomaly-registry.md`
-- `current-issue-presentation` — 2-code current-only清單／detail的business-first React projection; path: `modules/current-issue-presentation.md`
-- `finance-correction-presentation` — Finance Import 更正的既有安全 readback 與 closed 業務錯誤投影; path: `modules/finance-correction-presentation.md`
+- `current-issue-presentation` — LINE-006 current-only清單／detail的business-first React projection; path: `modules/current-issue-presentation.md`
 - `anomaly-detail-presentation` — 異常詳情、處理方式與排班導向的業務資訊層級; path: `modules/anomaly-detail-presentation.md`
 - `line-notification-current-issue` — LINE-006 typed owner predicate consumer與fail-closed reconcile；path: `modules/line-notification-current-issue.md`
 - `current-issue-runtime-composition` — durable recheck runtime的owner reader／consumer組合；path: `modules/current-issue-runtime-composition.md`
 
 ## Dependencies
-- outbound: owning subsystems — Query/Preview/Apply delegation and fresh predicate recheck。
+- outbound: `external-integration/line` — LINE-006 Query/readback/recheck delegation only；退役碼回各自 owner validation／migration boundary。
 - outbound: `external-integration/line` — `LINE-006`只消費 typed notification-failure current-fact readback；不查LINE tables或重算delivery／applicability。
 - outbound: `external-integration/access` — `outbox_worker.py`消費已提交的Access alert intent並注入projection sink。
 - inbound: `external-integration/access` — 只透過`SecurityAlertSink` protocol接受投影payload，不讓Access依賴Anomalies concrete implementation。

@@ -9,7 +9,6 @@ import asyncio
 from dataclasses import dataclass
 import time
 
-from shared_kernel.business_time import current_business_instant
 from subsystems.case_import.beclass_import_outbox_consumer import consume_beclass_import_review_events
 from subsystems.anomalies.hcm_import_review_outbox_consumer import consume_hcm_import_review_events
 from subsystems.case_import.hcm_resubmission_outbox_consumer import consume_hcm_resubmission_outbox
@@ -20,10 +19,6 @@ from subsystems.orders.historical_order_review_remediation_outbox_consumer impor
     consume_historical_order_review_remediation_events,
 )
 from subsystems.finance_import.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
-from subsystems.anomalies.government_return_outbound_overage_anomaly_source import GovernmentReturnOutboundOverageScanRequest
-from subsystems.anomalies.government_subsidy_anomaly_source import GovernmentSubsidyAnomalyScanRequest
-from subsystems.anomalies.government_subsidy_reversal_anomaly_source import GovernmentSubsidyReversalScanRequest
-from subsystems.anomalies.scheduling_coverage_anomaly_consumer import SchedulingCoverageScanRequest
 from subsystems.anomalies.ports import AnomalyRuntime, require_runtime
 from subsystems.government_subsidy.subsidy_advance_outbox_consumer import (
     consume_government_subsidy_advance_events,
@@ -58,16 +53,14 @@ class ArchitectureSourceScanState:
     process_reminder_exhausted: bool
     beclass_review_after_row_id: int
     beclass_review_exhausted: bool
-    government_return_outbound_overage_after_row_id: int
-    government_return_outbound_overage_exhausted: bool
     next_cycle_at: float
 
     @classmethod
     def start(cls):
-        return cls(None, True, 0, True, 0, True, True, 0, True, 0, False, 0.0)
+        return cls(None, True, 0, True, 0, True, True, 0, True, 0.0)
 
     def cycle_complete(self) -> bool:
-        return self.government_return_outbound_overage_exhausted
+        return True
 
 
 class BorrowedAnomalyUnitOfWork:
@@ -129,98 +122,23 @@ def consume_architecture_outbox_once(
 
 
 def _consume_sources_if_due(connection, state, runtime: AnomalyRuntime):
-    if state is None: return 0, 0
+    if state is None:
+        return 0, 0
     now = time.monotonic()
-    if state.cycle_complete() and now < state.next_cycle_at: return 0, 0
-    if state.cycle_complete(): _restart_source_cycle(state)
-    results = _consume_source_pages(connection, state, runtime)
-    if state.cycle_complete(): state.next_cycle_at = now + _SOURCE_SCAN_INTERVAL_SECONDS
-    return tuple(sum(result[index] for result in results) for index in (0, 1))
+    if now < state.next_cycle_at:
+        return 0, 0
+    # The former periodic producers are retired. Keep the bounded scheduler
+    # state so callers retain a stable worker contract, but do no source I/O.
+    state.next_cycle_at = now + _SOURCE_SCAN_INTERVAL_SECONDS
+    return 0, 0
 
 
 def _consume_source_pages(connection, state, runtime):
-    return (_consume_government_return_outbound_overage_source(connection, state, runtime),)
-
-
-def _restart_source_cycle(state):
-    state.government_return_outbound_overage_after_row_id = 0
-    state.government_return_outbound_overage_exhausted = False
-
-
-def _consume_process_reminder_source(connection, state, runtime):
-    if state.process_reminder_exhausted:
-        return 0, 0
-    try:
-        with runtime.failure_unit_of_work(connection) as unit_of_work:
-            result = runtime.consume_process_reminder_anomaly_sources(
-                connection,
-                as_of=current_business_instant().date(),
-            )
-            if not result.succeeded:
-                state.process_reminder_exhausted = True
-                return 0, 1
-            unit_of_work.commit()
-    except Exception:
-        state.process_reminder_exhausted = True
-        return 0, 1
-    state.process_reminder_exhausted = True
-    return result.projected_count, 0
-
-
-def _consume_beclass_review_source(connection, state, runtime):
-    if state.beclass_review_exhausted:
-        return 0, 0
-    try:
-        result = runtime.project_beclass_import_review_page(
-            connection,
-            after_review_row_id=state.beclass_review_after_row_id,
-            limit=_SOURCE_SCAN_PAGE_SIZE,
-        )
-    except Exception:
-        state.beclass_review_exhausted = True
-        return 0, 1
-    state.beclass_review_after_row_id = result.next_review_row_id or 0
-    state.beclass_review_exhausted = result.next_review_row_id is None
-    return result.projected_count, 0
-
-
-def _consume_scheduling_source(connection, state, runtime):
-    if state.scheduling_exhausted: return 0, 0
-    try:
-        with runtime.failure_unit_of_work(connection) as unit_of_work:
-            result = runtime.scheduling_coverage_consumer(connection).scan_page(SchedulingCoverageScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.scheduling_after_source_identity))
-            unit_of_work.commit()
-    except Exception:
-        state.scheduling_exhausted = True; return 0, 1
-    state.scheduling_after_source_identity = result.next_source_identity; state.scheduling_exhausted = result.next_source_identity is None
-    return len(result.projections), 0
-
-
-def _consume_government_subsidy_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentSubsidyAnomalyScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_after_row_id), runtime.project_government_subsidy_anomaly_page, "next_finance_import_row_id", "government_subsidy_after_row_id", "government_subsidy_exhausted")
-def _consume_government_subsidy_reversal_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentSubsidyReversalScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_reversal_after_row_id), runtime.project_government_subsidy_reversal_page, "next_finance_import_row_id", "government_subsidy_reversal_after_row_id", "government_subsidy_reversal_exhausted")
-
-
-def _consume_government_return_outbound_overage_source(connection, state, runtime):
-    return _consume_bounded_source(
-        connection,
-        state,
-        GovernmentReturnOutboundOverageScanRequest(
-            _SOURCE_SCAN_PAGE_SIZE,
-            state.government_return_outbound_overage_after_row_id,
-        ),
-        runtime.project_government_return_outbound_overage_page,
-        "next_finance_import_row_id",
-        "government_return_outbound_overage_after_row_id",
-        "government_return_outbound_overage_exhausted",
-    )
-
-
-def _consume_bounded_source(connection, state, request, projector, next_cursor_field, state_cursor_field, exhausted_field):
-    if getattr(state, exhausted_field): return 0, 0
-    try: result = projector(connection, request)
-    except Exception: setattr(state, exhausted_field, True); return 0, 1
-    next_cursor = getattr(result, next_cursor_field); setattr(state, state_cursor_field, next_cursor or 0); setattr(state, exhausted_field, next_cursor is None)
-    return len(result.projections), 0
+    # Current Anomalies are refreshed by typed ``anomaly.recheck`` jobs after
+    # an owner commit.  Periodic source scans are deliberately not a producer
+    # path for retired anomaly definitions.
+    del connection, state, runtime
+    return ()
 
 
 async def architecture_outbox_worker_loop(runtime: AnomalyRuntime) -> None:

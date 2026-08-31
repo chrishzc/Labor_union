@@ -2,8 +2,8 @@
 
 The review row is the canonical source of evidence.  Delivery only validates
 that the bounded outbox snapshot still refers to that immutable row, then
-acknowledges (or retries) the Case Import outbox.  It deliberately does not
-materialize anomaly occurrences or anomaly current-task rows.
+acknowledges (or retries) the Case Import owner outbox.  It deliberately does
+not materialize a second issue projection or recovery task.
 """
 
 from __future__ import annotations
@@ -106,7 +106,7 @@ def _load_canonical_review_evidence(connection, event, snapshot) -> Mapping[str,
     """Read and validate the immutable Case Import review root for delivery.
 
     The outbox snapshot is only a bounded delivery envelope.  It cannot make
-    an anomaly decision or replace the review root.  Any missing, mismatched,
+    an owner decision or replace the review root.  Any missing, mismatched,
     or malformed canonical fact fails closed and is retried.
     """
 
@@ -181,44 +181,32 @@ def _validate_snapshot(
     intent_type: str,
 ) -> None:
     required = {
-        "definition_code",
-        "review_item_id",
-        "entity_kind",
+        "review_identity",
+        "source_kind",
         "source_sheet",
         "source_row",
-        "error_codes",
+        "issue_codes",
         "version",
         "masked_identifier",
         "active",
     }
     if set(snapshot) != required:
         raise ValueError("beclass_import_review_outbox_snapshot_invalid")
-    if snapshot["review_item_id"] != review_identity:
+    if snapshot["review_identity"] != review_identity:
         raise ValueError("beclass_import_review_outbox_review_identity_mismatch")
-    if snapshot["entity_kind"] != source_kind.value:
+    if snapshot["source_kind"] != source_kind.value:
         raise ValueError("beclass_import_review_outbox_source_kind_mismatch")
     if snapshot["source_sheet"] != source_sheet or snapshot["source_row"] != source_row:
         raise ValueError("beclass_import_review_outbox_source_location_mismatch")
     if snapshot["masked_identifier"] != masked_identifier:
         raise ValueError("beclass_import_review_outbox_masked_identifier_mismatch")
-    if _text_tuple(snapshot["error_codes"]) != issue_codes:
+    if _text_tuple(snapshot["issue_codes"]) != issue_codes:
         raise ValueError("beclass_import_review_outbox_issue_codes_mismatch")
     expected_snapshot = (
         (0, True) if intent_type == "review_opened" else (1, False)
     )
     if (snapshot["version"], snapshot["active"]) != expected_snapshot:
         raise ValueError("beclass_import_review_outbox_snapshot_state_invalid")
-    expected_definition = (
-        "IMPORT-003"
-        if any(
-            marker in issue_code.lower()
-            for issue_code in issue_codes
-            for marker in ("conflict", "dedup", "duplicate", "mismatch")
-        )
-        else "IMPORT-001"
-    )
-    if snapshot["definition_code"] != expected_definition:
-        raise ValueError("beclass_import_review_outbox_definition_invalid")
 
 
 def _validate_event_shape(connection, event, review_row_id: int, review_identity: str, snapshot) -> None:
@@ -250,9 +238,9 @@ def _validate_event_shape(connection, event, review_row_id: int, review_identity
         raise ValueError("beclass_import_review_resolution_event_invalid")
     if not isinstance(_json_object(review_event["corrected_payload"]), dict):
         raise ValueError("beclass_import_review_corrected_payload_invalid")
-    if _text_tuple(review_event["resolved_issue_codes"]) != _text_tuple(snapshot["error_codes"]):
+    if _text_tuple(review_event["resolved_issue_codes"]) != _text_tuple(snapshot["issue_codes"]):
         raise ValueError("beclass_import_review_resolution_issue_codes_mismatch")
-    if snapshot["review_item_id"] != review_identity:
+    if snapshot["review_identity"] != review_identity:
         raise ValueError("beclass_import_review_resolution_identity_mismatch")
 
 

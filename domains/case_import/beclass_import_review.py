@@ -14,9 +14,6 @@ from shared_kernel.validation import (
 
 _IDENTITY_MAXIMUM_LENGTH = 191
 _REVIEW_IDENTITY_PREFIX = "beclass-review:"
-_IMPORT_VALIDATION_DEFINITION = "IMPORT-001"
-_IMPORT_IDENTITY_CONFLICT_DEFINITION = "IMPORT-003"
-_IDENTITY_CONFLICT_MARKERS = ("conflict", "dedup", "duplicate", "mismatch")
 
 
 class BeClassImportSourceKind(StrEnum):
@@ -194,33 +191,45 @@ def build_beclass_import_review_candidate(
     )
 
 
-def pending_anomaly_snapshot(root: InvalidBeClassImportRow) -> dict[str, object]:
-    return {
-        "definition_code": _definition_code(root.issue_codes),
-        "review_item_id": root.review_identity,
-        "entity_kind": root.source_kind.value,
-        "source_sheet": root.source_sheet,
-        "source_row": root.source_row,
-        "error_codes": root.issue_codes,
-        "version": 0,
-        "masked_identifier": root.masked_identifier,
-        "active": True,
-    }
-
-
-def resolved_anomaly_snapshot(
-    candidate: BeClassImportReviewCandidate,
+def review_outbox_snapshot(
+    root: InvalidBeClassImportRow | BeClassImportReviewCandidate,
+    *,
+    version: int | None = None,
+    active: bool | None = None,
 ) -> dict[str, object]:
+    """Return the owner review envelope used by Case Import delivery.
+
+    This is deliberately an owner snapshot, not an Anomalies definition or
+    current-issue payload.  The review root and its resolution event remain
+    the authoritative follow-up facts.
+    """
+    if isinstance(root, InvalidBeClassImportRow):
+        review_identity = root.review_identity
+        source_kind = root.source_kind
+        source_sheet = root.source_sheet
+        source_row = root.source_row
+        masked_identifier = root.masked_identifier
+        issue_codes = root.issue_codes
+        snapshot_version = 0 if version is None else version
+        snapshot_active = True if active is None else active
+    else:
+        review_identity = root.review_identity
+        source_kind = root.source_kind
+        source_sheet = root.source_sheet
+        source_row = root.source_row
+        masked_identifier = root.masked_identifier
+        issue_codes = root.resolved_issue_codes
+        snapshot_version = root.resulting_version if version is None else version
+        snapshot_active = False if active is None else active
     return {
-        "definition_code": _definition_code(candidate.resolved_issue_codes),
-        "review_item_id": candidate.review_identity,
-        "entity_kind": candidate.source_kind.value,
-        "source_sheet": candidate.source_sheet,
-        "source_row": candidate.source_row,
-        "error_codes": candidate.resolved_issue_codes,
-        "version": candidate.resulting_version,
-        "masked_identifier": candidate.masked_identifier,
-        "active": False,
+        "review_identity": review_identity,
+        "source_kind": source_kind.value,
+        "source_sheet": source_sheet,
+        "source_row": source_row,
+        "issue_codes": issue_codes,
+        "version": snapshot_version,
+        "masked_identifier": masked_identifier,
+        "active": snapshot_active,
     }
 
 
@@ -289,16 +298,6 @@ def _validate_issue_codes(issue_codes) -> None:
         _raise_invalid("issue codes must be non-empty, sorted, and unique")
 
 
-def _definition_code(issue_codes) -> str:
-    if any(
-        marker in issue_code.lower()
-        for issue_code in issue_codes
-        for marker in _IDENTITY_CONFLICT_MARKERS
-    ):
-        return _IMPORT_IDENTITY_CONFLICT_DEFINITION
-    return _IMPORT_VALIDATION_DEFINITION
-
-
 def _validate_source_row(value) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         _raise_invalid("source row must be a positive integer")
@@ -343,6 +342,5 @@ __all__ = [
     "build_beclass_import_review_candidate",
     "build_review_identity",
     "fingerprint_source_row",
-    "pending_anomaly_snapshot",
-    "resolved_anomaly_snapshot",
+    "review_outbox_snapshot",
 ]

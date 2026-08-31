@@ -28,9 +28,12 @@ _ISSUE_KEY_VERSION = 1
 # The subject object is closed per definition.  A detector with no entry here
 # must not fall back to a generic anomaly row.
 CURRENT_ISSUE_SUBJECT_FIELDS: dict[str, tuple[str, ...]] = {
-    "GOVSUB-007": ("payable_identity",),
     "LINE-006": ("case_no", "notification_reason"),
 }
+
+# Public current issue identity is intentionally closed. Owner-specific
+# correctness/review facts must not be projected through this contract.
+CURRENT_ISSUE_DEFINITION_CODES = frozenset(CURRENT_ISSUE_SUBJECT_FIELDS)
 
 
 def canonical_subject_identity_for_code(
@@ -314,6 +317,7 @@ __all__ = [
     "build_owner_lock_key",
     "canonical_subject_identity",
     "canonical_subject_identity_for_code",
+    "CURRENT_ISSUE_DEFINITION_CODES",
     "CURRENT_ISSUE_SUBJECT_FIELDS",
     "CurrentIssueCandidate",
     "CurrentIssueProjection",

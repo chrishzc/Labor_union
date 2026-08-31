@@ -15,10 +15,10 @@ describe('current anomaly query client', () => {
       data: {
         items: [{
           issue_key: `ci_${'a'.repeat(64)}`,
-          definition_code: 'SCHEDULE-006',
-          owner_domain: 'scheduling',
-          severity: 'blocking',
-          blocking: true,
+          definition_code: 'LINE-006',
+          owner_domain: 'line',
+          severity: 'warning',
+          blocking: false,
           episode_started_at: '2026-08-30T01:00:00Z',
           last_verified_at: '2026-08-30T01:01:00Z',
         }],
@@ -26,15 +26,15 @@ describe('current anomaly query client', () => {
       },
     });
 
-    const page = await queryCurrentAnomalies({ ownerDomain: 'scheduling', blocking: true, limit: 50 });
+    const page = await queryCurrentAnomalies({ ownerDomain: 'line', blocking: false, limit: 50 });
 
     expect(page.items[0].issue_key).toMatch(/^ci_/);
     expect(page.next_cursor).toBe('signed-cursor');
     expect(get).toHaveBeenCalledWith('/api/v1/anomalies', expect.objectContaining({
       params: {
         definition_code: undefined,
-        owner_domain: 'scheduling',
-        blocking: true,
+        owner_domain: 'line',
+        blocking: false,
         limit: 50,
         cursor: undefined,
       },

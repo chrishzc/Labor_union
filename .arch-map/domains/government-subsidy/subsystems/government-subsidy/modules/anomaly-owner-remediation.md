@@ -5,17 +5,15 @@
 - subsystem: `government-subsidy`
 
 ## Responsibility
-提供GOVSUB-003 deterministic rebuild、GOVSUB-005 versioned exact Scheduling lineage，以及GOVSUB-007
-return-with-excess原子核銷／recovery readback／reconciliation；structural ambiguity與不完整owner facts fail closed。
+提供 Government Subsidy normal accounting／review／correction 的 deterministic validation與 owner readback；
+`GOVSUB-003/005/007`均不形成 runtime Anomalies current issue，structural ambiguity與不完整owner facts fail closed。
 
 ## Implementation
-- `domains/government_subsidy/anomaly_remediation.py`
-- `subsystems/government_subsidy/anomaly_owner_readback.py`
-- `subsystems/government_subsidy/anomaly_recovery_workflow.py`
-- `infrastructure/mysql/government_subsidy_anomaly_owner_repository.py`
+- `subsystems/government_subsidy/ledger_workflow.py`
+- `subsystems/government_subsidy/overpayment_workflow.py`
 
 ## Verification
 - test_root: `tests/domains/government-subsidy/subsystems/government-subsidy/modules/anomaly-owner-remediation/`
 
 ## Transaction boundary
-- GOVSUB-007 `actual > lawful remaining`只可由專用Preview／Confirm／Apply在單一Government Subsidy outer UoW同時核銷lawful return、建立excess recovery、append receipt/outbox/recheck並commit；normal／partial reconciliation維持既有workflow。
+- Government Subsidy normal owner Query／Preview／Apply維持單一outer UoW與fresh readback；不得新增GOVSUB-007 anomaly recovery或Anomalies recheck。

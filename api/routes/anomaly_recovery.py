@@ -15,6 +15,7 @@ from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.anomaly_recovery import get_current_anomaly_issue_repository
 from api.schemas.anomaly_recovery import (
     AnomalyRecoveryContextView,
+    CurrentAnomalyRecoveryContextView,
     RecoveryActionView,
 )
 from api.schemas.anomaly_registry import (
@@ -35,6 +36,7 @@ _PROJECTOR_PATTERN = (
     r"^(government_overpayment|client_over_refund_recovery|"
     r"staff_overpayment_recovery)$"
 )
+_CURRENT_DEFINITION_CODE = "LINE-006"
 
 
 # The typed HTTP signature remains explicit so FastAPI documents every boundary.
@@ -147,7 +149,7 @@ def apply_projector_dead_letter_supersede(
 
 @router.get(
     "/{issue_key}",
-    response_model=BaseResponse[AnomalyRecoveryContextView],
+    response_model=BaseResponse[CurrentAnomalyRecoveryContextView],
     include_in_schema=False,
 )
 def query_recovery_context(
@@ -199,6 +201,8 @@ def _current_context_payload(projection):
     if projection is None:
         raise ValueError("anomaly_not_found")
     candidate = projection.candidate
+    if candidate.definition_code != _CURRENT_DEFINITION_CODE:
+        raise ValueError("anomaly_not_found")
     details = dict(candidate.details)
     if not isinstance(details, dict):
         raise ValueError("anomaly_projection_data_integrity_violation")

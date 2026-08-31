@@ -15,9 +15,7 @@ from domains.case_import.client_beclass_binding import (
     ClientCaseBindingStatus,
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
-from infrastructure.mysql import hcm_beclass_reconciliation_adapter as reconciliation_adapter
 from subsystems.case_import import client_beclass_workbook_import as intake
-from subsystems.jobs.contracts import validate_command_key
 
 
 _DIGEST = "a" * 64
@@ -50,7 +48,6 @@ class _Repository:
         self.locks = []
         self.binding_lock_modes = []
         self.replay_bound_cases = ()
-        self.lineage = []
         self.binding_resolution = ClientCaseBindingResolution(
             ClientCaseBindingStatus.UNIQUE, 1, 1, 7, "HCM-0007"
         )
@@ -118,24 +115,8 @@ class _Repository:
         }
         return result_identity
 
-    def append_case_pairing_lineage(self, original_review_identity, accepted_source_event_identity, accepted_result_identity, accepted_root_id=None):
-        self.lineage.append(
-            (
-                original_review_identity,
-                accepted_source_event_identity,
-                accepted_result_identity,
-                accepted_root_id,
-                self.connection.commits,
-            )
-        )
-
-    def save_workbook_receipt(self, key, fingerprint, preview, actor, result, *, original_review_identity=None):
+    def save_workbook_receipt(self, key, fingerprint, preview, actor, result):
         self.saved_workbook = result
-        if original_review_identity is not None:
-            result = {
-                **result,
-                "_lineage_original_review_identity": original_review_identity,
-            }
         self.workbook_receipts[key] = {
             "request_fingerprint": fingerprint,
             "result_snapshot": json.dumps(result),
@@ -165,12 +146,11 @@ class _Reconciliation:
         return SimpleNamespace(status="reconciled")
 
 
-def _service(repository, reconciliation=None, pairing_rechecks=None):
+def _service(repository, reconciliation=None):
     return intake.ClientBeClassWorkbookImportService(
         repository,
         reconciliation or _Reconciliation(),
         lambda: MySqlUnitOfWork(repository.connection),
-        pairing_rechecks=pairing_rechecks,
     )
 
 
@@ -234,180 +214,6 @@ def test_apply_creates_valid_row_and_records_invalid_review(monkeypatch):
     assert "CASE-1" not in reconciliation.calls
     assert repository.saved_workbook == receipt.as_dict()
     assert repository.locks == []
-
-
-def test_apply_persists_explicit_cross_source_lineage_in_row_uow(monkeypatch):
-    repository = _Repository()
-    service = _service(repository)
-    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row()))
-    preview = service.preview("ignored.xlsx")
-
-    receipt = service.apply(
-        "ignored.xlsx", "lineage-key", preview.preview_fingerprint,
-        "admin", "corr", "beclass-review:original",
-    )
-
-    assert receipt.created_count == 1
-    assert repository.lineage == [
-        (
-            "beclass-review:original",
-            f"client-beclass-workbook:{_DIGEST}:row:2",
-            "admin_command_receipt:1",
-            1,
-            2,
-        )
-    ]
-
-
-def test_reconciliation_does_not_append_retired_hcm_pairing_anomaly_recheck(
-    monkeypatch,
-):
-    connection = _Connection()
-    requests = []
-    sink = SimpleNamespace(
-        append_case_pairing_recheck=lambda request: requests.append(request)
-    )
-    adapter = reconciliation_adapter.MySqlHcmBeClassReconciliationAdapter(
-        connection,
-        sink,
-    )
-    monkeypatch.setattr(
-        reconciliation_adapter,
-        "reconcile_with_port",
-        lambda _port, case_no: SimpleNamespace(status="reconciled", case_no=case_no),
-    )
-    monkeypatch.setattr(
-        adapter,
-        "load_pair_facts",
-        lambda _case_no: {
-            "hcm_count": 1,
-            "beclass_count": 1,
-            "hcm_version": 4,
-            "beclass_id": 8,
-            "query_no": "Q-8",
-        },
-    )
-
-    result = adapter.reconcile("HCM-0007")
-
-    assert result.status == "reconciled"
-    assert requests == []
-    assert connection.commits == 0
-
-
-def test_apply_does_not_infer_lineage_for_missing_original_review(monkeypatch):
-    repository = _Repository()
-    service = _service(repository)
-    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row()))
-    preview = service.preview("ignored.xlsx")
-
-    service.apply("ignored.xlsx", "no-lineage-key", preview.preview_fingerprint, "admin", "corr")
-
-    assert repository.lineage == []
-
-
-def test_exact_replay_does_not_append_duplicate_lineage(monkeypatch):
-    repository = _Repository()
-    service = _service(repository)
-    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row()))
-    preview = service.preview("ignored.xlsx")
-
-    first = service.apply(
-        "ignored.xlsx", "lineage-replay-key", preview.preview_fingerprint,
-        "admin", "corr", "beclass-review:original",
-    )
-    replay = service.apply(
-        "ignored.xlsx", "lineage-replay-key", preview.preview_fingerprint,
-        "admin", "corr", "beclass-review:original",
-    )
-
-    assert first.created_count == 1
-    assert replay.replayed_workbook is True
-    assert len(repository.lineage) == 1
-
-
-def test_existing_row_replay_can_link_later_explicit_review(monkeypatch):
-    repository = _Repository()
-    service = _service(repository)
-    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row()))
-    preview = service.preview("ignored.xlsx")
-
-    service.apply(
-        "ignored.xlsx", "row-replay-without-lineage", preview.preview_fingerprint,
-        "admin", "corr",
-    )
-    service.apply(
-        "ignored.xlsx", "row-replay-with-lineage", preview.preview_fingerprint,
-        "admin", "corr", "beclass-review:original",
-    )
-
-    assert repository.lineage == [
-        (
-            "beclass-review:original",
-            f"client-beclass-workbook:{_DIGEST}:row:2",
-            "admin_command_receipt:1",
-            1,
-            6,
-        )
-    ]
-
-
-def test_same_workbook_key_with_different_review_identity_conflicts(monkeypatch):
-    repository = _Repository()
-    service = _service(repository)
-    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row()))
-    preview = service.preview("ignored.xlsx")
-
-    service.apply(
-        "ignored.xlsx", "lineage-conflicting-key", preview.preview_fingerprint,
-        "admin", "corr", "beclass-review:original",
-    )
-
-    with pytest.raises(
-        intake.ClientBeClassWorkbookConflict,
-        match="client_beclass_lineage_idempotency_conflict",
-    ):
-        service.apply(
-            "ignored.xlsx", "lineage-conflicting-key", preview.preview_fingerprint,
-            "admin", "corr", "beclass-review:other",
-        )
-
-    assert len(repository.lineage) == 1
-
-
-def test_lineage_requires_durable_accepted_result_identity(monkeypatch):
-    repository = _MissingReceiptIdentityRepository()
-    service = _service(repository)
-    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row()))
-    preview = service.preview("ignored.xlsx")
-
-    with pytest.raises(
-        intake.ClientBeClassWorkbookConflict,
-        match="client_beclass_accepted_result_identity_missing",
-    ):
-        service.apply(
-            "ignored.xlsx", "lineage-missing-result", preview.preview_fingerprint,
-            "admin", "corr", "beclass-review:original",
-        )
-
-    assert repository.lineage == []
-    assert repository.connection.rollbacks == 1
-
-
-def test_conflicting_row_with_original_review_remains_review_without_lineage(monkeypatch):
-    repository = _Repository()
-    service = _service(repository)
-    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row("CHANGED-1")))
-    monkeypatch.setattr(intake, "record_invalid_beclass_row", lambda *args, **kwargs: "beclass-review:conflict")
-    preview = service.preview("ignored.xlsx")
-
-    receipt = service.apply(
-        "ignored.xlsx", "lineage-conflict-key", preview.preview_fingerprint,
-        "admin", "corr", "beclass-review:original",
-    )
-
-    assert receipt.existing_conflict_count == 1
-    assert repository.lineage == []
 
 
 def test_apply_rejects_preview_fingerprint_drift(monkeypatch):
@@ -488,38 +294,9 @@ def test_existing_query_number_is_reported_as_existing_source_not_a_binding_conf
     assert repository.created == []
 
 
-def test_existing_exact_accepted_source_can_link_explicit_review(monkeypatch):
-    repository = _Repository()
-    service = _service(repository)
-    monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row("EXISTING-1")))
-    preview = service.preview("ignored.xlsx")
-
-    receipt = service.apply(
-        "ignored.xlsx", "existing-lineage-key", preview.preview_fingerprint,
-        "admin", "corr", "beclass-review:original",
-    )
-
-    assert receipt.existing_source_count == 1
-    assert repository.lineage == [
-        (
-            "beclass-review:original",
-            f"client-beclass-workbook:{_DIGEST}:row:2",
-            "admin_command_receipt:1",
-            77,
-            2,
-        )
-    ]
-
-
 def test_existing_query_number_with_changed_payload_creates_review(monkeypatch):
     repository = _Repository()
-    recheck_identities = []
-
-    class PairingRechecks:
-        def append_case_pairing_recheck(self, request):
-            recheck_identities.append(validate_command_key(request.intent_identity))
-
-    service = _service(repository, pairing_rechecks=PairingRechecks())
+    service = _service(repository)
     monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row("CHANGED-1")))
     monkeypatch.setattr(intake, "record_invalid_beclass_row", lambda *args, **kwargs: "beclass-review:changed")
     preview = service.preview("ignored.xlsx")
@@ -536,8 +313,6 @@ def test_existing_query_number_with_changed_payload_creates_review(monkeypatch):
     assert receipt.existing_conflict_count == 1
     assert receipt.existing_source_count == 0
     assert repository.created == []
-    assert len(recheck_identities) == 1
-    assert recheck_identities[0].endswith(":import-003")
 
 
 @pytest.mark.parametrize(

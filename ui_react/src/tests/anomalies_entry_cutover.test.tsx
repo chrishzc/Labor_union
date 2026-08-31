@@ -17,10 +17,10 @@ const CURRENT_PAGE_RESPONSE = {
   data: {
     items: [{
       issue_key: ISSUE_KEY,
-      definition_code: 'SCHEDULE-006',
-      owner_domain: 'scheduling',
-      severity: 'blocking',
-      blocking: true,
+      definition_code: 'LINE-006',
+      owner_domain: 'line',
+      severity: 'warning',
+      blocking: false,
       episode_started_at: '2026-08-30T01:00:00Z',
       last_verified_at: '2026-08-30T01:01:00Z',
     }],
@@ -32,16 +32,16 @@ const CURRENT_DETAIL_RESPONSE = {
   message: '成功取得目前異常資訊',
   data: {
     issue_key: ISSUE_KEY,
-    definition_code: 'SCHEDULE-006',
-    owner_domain: 'scheduling',
-    owner_root_type: 'case',
-    subject: { redaction_version: 'anomaly-safe.v1', definition_code: 'SCHEDULE-006', fields: [] },
+    definition_code: 'LINE-006',
+    owner_domain: 'line',
+    owner_root_type: 'notification_failure',
+    subject: { redaction_version: 'anomaly-safe.v1', definition_code: 'LINE-006', fields: [] },
     owner_snapshot_token: 'owner-v3',
     owner_version: 3,
-    severity: 'blocking',
-    blocking: true,
+    severity: 'warning',
+    blocking: false,
     details_version: 1,
-    details: { redaction_version: 'anomaly-safe.v1', definition_code: 'SCHEDULE-006', fields: [] },
+    details: { redaction_version: 'anomaly-safe.v1', definition_code: 'LINE-006', fields: [] },
     episode_started_at: '2026-08-30T01:00:00Z',
     last_verified_at: '2026-08-30T01:01:00Z',
     available_actions: [],
@@ -198,11 +198,11 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('SCHEDULE-006')).toBeInTheDocument();
+      expect(screen.getByText('LINE-006')).toBeInTheDocument();
     });
 
     expect(window.location.hash).toBe('#anomalies');
-    expect(screen.getByText('阻擋作業')).toBeInTheDocument();
+    expect(screen.getByText('需要處理')).toBeInTheDocument();
     expect(screen.queryByText(/claimed|resolved|occurrence|timeline/i)).not.toBeInTheDocument();
     expectInitialListBudget(requests);
     expectOnlyGet(requests);
@@ -221,7 +221,7 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
       expect(screen.getByRole('alert')).toBeInTheDocument();
     });
 
-    expect(screen.queryByText('SCHEDULE-006')).not.toBeInTheDocument();
+    expect(screen.queryByText('LINE-006')).not.toBeInTheDocument();
     expectInitialListBudget(requests);
     expectOnlyGet(requests);
   });
@@ -233,12 +233,12 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('SCHEDULE-006')).toBeInTheDocument();
+      expect(screen.getByText('LINE-006')).toBeInTheDocument();
     });
     expectInitialListBudget(requests);
-    fireEvent.click(screen.getByRole('button', { name: /SCHEDULE-006/ }));
+    fireEvent.click(screen.getByRole('button', { name: /LINE-006/ }));
     await waitFor(() => {
-      expect(screen.getByText(/系統不會以通用 resolve 代替/)).toBeInTheDocument();
+      expect(screen.getByText(/系統不會用通用結案取代業務修正/)).toBeInTheDocument();
     });
     const detailRequests = requests.filter(({ path }) => path.startsWith(`${ANOMALY_LIST_ENDPOINT}/`));
     expect(detailRequests).toHaveLength(1);

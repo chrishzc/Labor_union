@@ -14,7 +14,6 @@ from infrastructure.mysql.assignment_plan_repository import (
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.mysql_adapter import get_connection
-from infrastructure.mysql.scheduling_anomaly_recheck_sink import MySqlSchedulingAnomalyRecheckSink
 from shared_kernel.clock import SystemBusinessClock
 from subsystems.scheduling.assignment_plan_workflow import AssignmentPlanWorkflow
 
@@ -52,6 +51,5 @@ def build_assignment_plan_application(connection):
         MySqlPayrollAssignmentImpactPort(connection),
         MySqlOrdersAssignmentImpactPort(connection, clock),
         lambda: MySqlUnitOfWork(connection),
-        MySqlSchedulingAnomalyRecheckSink(connection),
     )
     return AssignmentPlanApplication(connection, workflow)

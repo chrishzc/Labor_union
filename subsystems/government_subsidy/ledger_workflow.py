@@ -27,10 +27,6 @@ from shared_kernel.identities import (
 )
 from shared_kernel.ports import UnitOfWork
 from shared_kernel.validation import require_canonical_text
-from subsystems.government_subsidy.current_anomaly_facts import (
-    GovernmentSubsidyAnomalyRecheckRequest,
-    build_government_subsidy_recheck_requests,
-)
 
 _REASON_MAXIMUM_LENGTH = 500
 
@@ -181,12 +177,6 @@ class GovernmentSubsidyWorkflowRepository(Protocol):
     ) -> None: ...
 
 
-class GovernmentSubsidyAnomalyRecheckPort(Protocol):
-    def append_government_subsidy_recheck(
-        self, request: GovernmentSubsidyAnomalyRecheckRequest
-    ) -> None: ...
-
-
 class GovernmentSubsidyWorkflowError(Exception):
     def __init__(self, error: TypedError) -> None:
         super().__init__(error.message)
@@ -198,11 +188,9 @@ class GovernmentSubsidyLedgerWorkflow:
         self,
         repository: GovernmentSubsidyWorkflowRepository,
         unit_of_work_factory: Callable[[], UnitOfWork],
-        anomaly_rechecks: GovernmentSubsidyAnomalyRecheckPort | None = None,
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
-        self._anomaly_rechecks = anomaly_rechecks
 
     def query_batch(self, batch_id: int) -> ClaimBatchFacts:
         return self._repository.load_batch(batch_id)
@@ -316,13 +304,6 @@ class GovernmentSubsidyLedgerWorkflow:
                 StoredGovernmentSubsidyReceipt(command_fingerprint, receipt),
             )
         )
-        if self._anomaly_rechecks is not None:
-            for recheck in build_government_subsidy_recheck_requests(
-                request,
-                receipt,
-                "government-subsidy:" + request.idempotency_key.value,
-            ):
-                self._anomaly_rechecks.append_government_subsidy_recheck(recheck)
         return receipt
 
 

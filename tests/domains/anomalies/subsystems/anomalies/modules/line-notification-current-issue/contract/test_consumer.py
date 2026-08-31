@@ -85,6 +85,13 @@ def test_inactive_complete_owner_predicate_emits_no_candidate() -> None:
     assert consumer.detect(snapshot) == ()
 
 
+def test_incomplete_owner_readback_never_synthesizes_a_new_candidate() -> None:
+    snapshot = OwnerSnapshot(_scope(), "snapshot", 8, (_readback(complete=False),), False)
+    consumer = LineNotificationCurrentIssueConsumer(lambda _code, _subject: "unused")
+
+    assert consumer.detect(snapshot) == ()
+
+
 def test_adapter_propagates_owner_completeness_for_fail_closed_reconcile() -> None:
     class Repository:
         def current_failure_fact(self, _query):
