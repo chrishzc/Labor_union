@@ -63,6 +63,27 @@ jobs:
     - name: Run fixed regression suite
       run: python -m pytest -q --strict-markers -m "not integration" tests
 
+  shared-kernel-contract-tests:
+    name: shared kernel contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.11"
+        cache: pip
+        cache-dependency-path: requirements.txt
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Run shared kernel regression contracts
+      run: python -m pytest -q tests/test_shared_kernel_regression_contracts.py
+
   canonical-tests:
     name: canonical tests (${{ matrix.owner }})
     runs-on: ubuntu-latest
