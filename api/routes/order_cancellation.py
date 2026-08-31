@@ -213,6 +213,11 @@ def _query_payload(result) -> dict[str, Any]:
         "contracted_service_days": facts.order.contracted_service_days,
         "service_hours_per_day": facts.order.service_hours_per_day,
         "service_started": facts.order.service_started,
+        "historical_mid_service_confirmation_available": (
+            facts.historical_cancellation_origin
+            and not facts.order.service_started
+            and facts.lifecycle.current_status.value == "訂單取消"
+        ),
         "service_data_locked": facts.order.service_data_locked,
         "order_version": facts.order.order_version,
         "scheduling_version": facts.scheduling.aggregate_version,
@@ -255,6 +260,7 @@ def _preview_payload(preview) -> dict[str, Any]:
 def _preview_business_payload(candidate):
     return {
         "cancellation_date": candidate.cancellation_date,
+        "actual_start_date": candidate.actual_start_date,
         "actual_end_date": candidate.actual_end_date,
         "confirmed_service_days": _materialize(
             candidate.confirmed_service_days
