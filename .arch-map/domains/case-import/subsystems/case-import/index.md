@@ -6,6 +6,9 @@
 ## Responsibility
 編排 typed source intake、validation、review、dedupe、Preview／Apply 與 bootstrap；來源不完整或 ambiguous 時 fail closed／review，不猜 owner roots。
 
+## Modules
+- `staff-historical-workbook-adoption` — 月嫂歷史 workbook Preview／Apply、review intake、idempotency 與 receipt；path: `modules/staff-historical-workbook-adoption.md`
+
 ## Dependencies
 - outbound: `orders` — formal bootstrap。
 - outbound: `anomalies` — review/projection evidence only。

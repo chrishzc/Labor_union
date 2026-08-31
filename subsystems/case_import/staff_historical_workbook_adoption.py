@@ -79,22 +79,27 @@ class StaffHistoricalWorkbookService:
     def _record_review(self, **kwargs):
         if self._review_recorder is None:
             raise RuntimeError("beclass_review_recorder_not_configured")
-        return self._review_recorder(self._connection, repository=self._adoption_repository(), **kwargs)
+        return _record_review(
+            self._connection,
+            recorder=self._review_recorder,
+            repository=self._adoption_repository(),
+            **kwargs,
+        )
 
     def preview(self, source_path: str, source_revision: str | None = None) -> StaffHistoricalWorkbookPreview:
         return self._preview(load_staff_historical_workbook(source_path, source_revision))
 
     def apply(self, source_path: str, source_revision: str | None, preview_fingerprint: str, key: str, actor: str, correlation_id: str) -> StaffHistoricalWorkbookReceipt:
         workbook = load_staff_historical_workbook(source_path, source_revision)
-        preview = self._preview(workbook)
-        if preview.preview_fingerprint != preview_fingerprint:
-            raise StaffHistoricalWorkbookConflict("staff_historical_workbook_preview_stale")
         if not self._workbook_repository.acquire_lock(key):
             raise StaffHistoricalWorkbookUnavailable("staff_historical_workbook_lock_timeout")
         try:
             replay = self._workbook_repository.load_receipt(key)
             if replay is not None:
                 return self._replay(replay, workbook.source_content_digest)
+            preview = self._preview(workbook)
+            if preview.preview_fingerprint != preview_fingerprint:
+                raise StaffHistoricalWorkbookConflict("staff_historical_workbook_preview_stale")
             fresh_preview = self._preview(workbook)
             if fresh_preview.preview_fingerprint != preview.preview_fingerprint:
                 raise StaffHistoricalWorkbookConflict("staff_historical_workbook_preview_stale")
