@@ -20,8 +20,10 @@ from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.ports import UnitOfWork
 from subsystems.case_import.beclass_review_intake import masked_review_identifier, record_invalid_beclass_row
 from subsystems.case_import.pairing_current_facts import (
+    CasePairingCurrentIssueCode,
     CasePairingAnomalyRecheckRequest,
     beclass_counterpart_recheck,
+    case_pairing_recheck_identity,
 )
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 
@@ -293,7 +295,10 @@ class ClientBeClassWorkbookImportService:
                     review_identity,
                     0,
                     fingerprint,
-                    "case-pairing:" + source_identity + ":IMPORT-003",
+                    case_pairing_recheck_identity(
+                        source_identity,
+                        CasePairingCurrentIssueCode.BECLASS_COUNTERPART_MISSING,
+                    ),
                 )
             )
         return "existing_conflict"

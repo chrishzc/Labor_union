@@ -16,6 +16,7 @@ from subsystems.case_import.hcm_beclass_reconciliation import (
     CaseImportReconciliationApplication,
     reconcile_hcm_beclass_cooking,
 )
+from subsystems.jobs.contracts import validate_command_key
 
 
 class _Connection:
@@ -211,3 +212,38 @@ def test_reconciliation_replay_does_not_repeat_typed_terms_apply():
 
     assert first.requires_cooking is replay.requires_cooking is True
     assert port.apply_count == 1
+
+
+def test_pairing_recheck_identities_are_valid_durable_command_keys(monkeypatch):
+    requests = []
+
+    class PairingRechecks:
+        def append_case_pairing_recheck(self, request):
+            requests.append(request)
+
+    monkeypatch.setattr(
+        adapter,
+        "reconcile_with_port",
+        lambda _port, _case_no: SimpleNamespace(status="reconciled"),
+    )
+    reconciliation = adapter.MySqlHcmBeClassReconciliationAdapter(
+        object(), PairingRechecks()
+    )
+    monkeypatch.setattr(
+        reconciliation,
+        "load_pair_facts",
+        lambda _case_no: {
+            "hcm_count": 1,
+            "hcm_version": 3,
+            "beclass_count": 1,
+            "beclass_id": 7,
+            "query_no": "CLIENT-001",
+        },
+    )
+
+    reconciliation.reconcile("115990823")
+
+    assert len(requests) == 2
+    assert [validate_command_key(request.intent_identity) for request in requests] == [
+        request.intent_identity for request in requests
+    ]

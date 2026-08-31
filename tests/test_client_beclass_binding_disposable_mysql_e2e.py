@@ -15,6 +15,8 @@ import pytest
 from infrastructure.mysql.client_beclass_workbook_import_repository import (
     ClientBeClassWorkbookImportRepository,
 )
+from infrastructure.mysql.beclass_import_review_repository import MySqlBeClassImportReviewRepository
+from infrastructure.mysql.case_pairing_anomaly_recheck_sink import MySqlCasePairingAnomalyRecheckSink
 from infrastructure.mysql.hcm_beclass_reconciliation_adapter import (
     MySqlHcmBeClassReconciliationAdapter,
 )
@@ -26,6 +28,7 @@ from subsystems.case_import.client_beclass_workbook_import import (
     ClientBeClassWorkbookConflict,
     ClientBeClassWorkbookImportService,
 )
+from subsystems.case_import.beclass_review_intake import record_invalid_beclass_row
 
 
 DATABASE = os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE")
@@ -122,8 +125,16 @@ def test_typed_workbook_apply_isolates_dirty_rows_replays_and_conflicts(tmp_path
         _create_case(connection, case_no, client_name, client_phone)
         service = ClientBeClassWorkbookImportService(
             ClientBeClassWorkbookImportRepository(connection),
-            MySqlHcmBeClassReconciliationAdapter(connection),
+            MySqlHcmBeClassReconciliationAdapter(
+                connection, MySqlCasePairingAnomalyRecheckSink(connection)
+            ),
             lambda: MySqlUnitOfWork(connection),
+            review_recorder=lambda conn, **kwargs: record_invalid_beclass_row(
+                conn,
+                repository=MySqlBeClassImportReviewRepository(conn),
+                **kwargs,
+            ),
+            pairing_rechecks=MySqlCasePairingAnomalyRecheckSink(connection),
         )
         workbook = _write_workbook(
             tmp_path / "client-beclass.xlsx",
@@ -170,7 +181,7 @@ def test_typed_workbook_apply_isolates_dirty_rows_replays_and_conflicts(tmp_path
                 "WHERE review.source_event_identity LIKE %s AND outbox.published_at IS NOT NULL",
                 (f"beclass-workbook:{first.source_content_digest}:%",),
             )
-            assert cursor.fetchone() == {"count": 1}
+            assert cursor.fetchone() == {"count": 2}
         with pytest.raises(
             ClientBeClassWorkbookConflict,
             match="client_beclass_workbook_idempotency_conflict",

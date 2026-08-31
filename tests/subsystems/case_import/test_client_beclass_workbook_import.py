@@ -16,6 +16,7 @@ from domains.case_import.client_beclass_binding import (
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.case_import import client_beclass_workbook_import as intake
+from subsystems.jobs.contracts import validate_command_key
 
 
 _DIGEST = "a" * 64
@@ -133,11 +134,12 @@ class _Reconciliation:
         return SimpleNamespace(status="reconciled")
 
 
-def _service(repository, reconciliation=None):
+def _service(repository, reconciliation=None, pairing_rechecks=None):
     return intake.ClientBeClassWorkbookImportService(
         repository,
         reconciliation or _Reconciliation(),
         lambda: MySqlUnitOfWork(repository.connection),
+        pairing_rechecks=pairing_rechecks,
     )
 
 
@@ -283,7 +285,13 @@ def test_existing_query_number_is_reported_as_existing_source_not_a_binding_conf
 
 def test_existing_query_number_with_changed_payload_creates_review(monkeypatch):
     repository = _Repository()
-    service = _service(repository)
+    recheck_identities = []
+
+    class PairingRechecks:
+        def append_case_pairing_recheck(self, request):
+            recheck_identities.append(validate_command_key(request.intent_identity))
+
+    service = _service(repository, pairing_rechecks=PairingRechecks())
     monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row("CHANGED-1")))
     monkeypatch.setattr(intake, "record_invalid_beclass_row", lambda *args, **kwargs: "beclass-review:changed")
     preview = service.preview("ignored.xlsx")
@@ -300,6 +308,8 @@ def test_existing_query_number_with_changed_payload_creates_review(monkeypatch):
     assert receipt.existing_conflict_count == 1
     assert receipt.existing_source_count == 0
     assert repository.created == []
+    assert len(recheck_identities) == 1
+    assert recheck_identities[0].endswith(":import-003")
 
 
 @pytest.mark.parametrize(

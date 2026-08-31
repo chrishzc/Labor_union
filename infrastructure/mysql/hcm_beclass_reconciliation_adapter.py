@@ -26,7 +26,9 @@ from subsystems.case_import.hcm_beclass_reconciliation import (
     reconcile_hcm_beclass_cooking as reconcile_with_port,
 )
 from subsystems.case_import.pairing_current_facts import (
+    CasePairingCurrentIssueCode,
     beclass_counterpart_recheck,
+    case_pairing_recheck_identity,
     hcm_counterpart_recheck,
 )
 from subsystems.orders.terms_workflow import (
@@ -55,7 +57,9 @@ class MySqlHcmBeClassReconciliationAdapter:
                     case_no,
                     version,
                     token,
-                    "case-pairing:" + token + ":BECLASS-001",
+                    case_pairing_recheck_identity(
+                        token, CasePairingCurrentIssueCode.HCM_COUNTERPART_MISSING
+                    ),
                 )
             )
             query_no = facts.get("query_no")
@@ -67,7 +71,10 @@ class MySqlHcmBeClassReconciliationAdapter:
                         review_item_id,
                         version,
                         token,
-                        "case-pairing:" + token + ":IMPORT-003",
+                        case_pairing_recheck_identity(
+                            token,
+                            CasePairingCurrentIssueCode.BECLASS_COUNTERPART_MISSING,
+                        ),
                     )
                 )
         return result
