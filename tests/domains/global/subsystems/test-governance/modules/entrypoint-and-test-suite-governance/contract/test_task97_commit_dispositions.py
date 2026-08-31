@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 from hashlib import sha256
 from pathlib import Path
@@ -14,6 +15,7 @@ from scripts.generate_task97_commit_dispositions import (
     READ_ONLY_APPLICATIONS,
     REPOSITORY_ROOT,
     SOURCE_REVISION_INPUTS,
+    _call_fingerprint,
     _git_revision,
     build_artifact,
 )
@@ -35,6 +37,13 @@ REQUIRED_ENTRY_FIELDS = {
     "zero_reference_oracle",
     "terminal_receipt",
 }
+
+
+def test_task97_commit_identity_matches_canonical_writer_inventory_format() -> None:
+    call = ast.parse("unit_of_work.commit()").body[0].value
+
+    assert isinstance(call, ast.Call)
+    assert _call_fingerprint(call) == "0c1170199b2f5f58"
 
 
 def test_task97_commit_dispositions_cover_fresh_scan_and_preserve_exact_semantics() -> None:

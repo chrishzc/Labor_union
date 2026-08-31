@@ -154,27 +154,24 @@ def _git_revision() -> str:
     return sha256(tracked_inputs.encode("utf-8")).hexdigest()
 
 
-def _stable_ast_payload(value: object) -> object:
+def _stable_ast_dump(value: object) -> str:
+    """Render the pre-3.14 ``ast.dump`` identity format deterministically."""
+
     if isinstance(value, ast.AST):
-        return [
-            value.__class__.__name__,
-            [
-                [field, _stable_ast_payload(getattr(value, field))]
-                for field in value._fields
-            ],
-        ]
+        fields = []
+        for field in value._fields:
+            child = getattr(value, field)
+            if child is None or child == []:
+                continue
+            fields.append(f"{field}={_stable_ast_dump(child)}")
+        return f"{value.__class__.__name__}({', '.join(fields)})"
     if isinstance(value, list):
-        return [_stable_ast_payload(item) for item in value]
-    return value
+        return f"[{', '.join(_stable_ast_dump(item) for item in value)}]"
+    return repr(value)
 
 
 def _call_fingerprint(call: ast.Call) -> str:
-    payload = json.dumps(
-        _stable_ast_payload(call),
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    return sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return sha256(_stable_ast_dump(call).encode("utf-8")).hexdigest()[:16]
 
 
 def _runtime_call_fingerprint(call: ast.Call) -> str:
