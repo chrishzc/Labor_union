@@ -103,6 +103,7 @@ READ_ONLY_APPLICATIONS = {
 # alone is never evidence that a commit is legitimate.
 APPLICATION_OWNED_COMMIT_SYMBOLS = {
     ("subsystems/access/authentication_session.py", "AccessControlUnitOfWork.commit"),
+    ("subsystems/client_profile/mysql_unit_of_work.py", "ClientProfileUnitOfWork.commit"),
     ("subsystems/finance_import/ingestion.py", "ingest_finance_workbook"),
     ("subsystems/jobs/command_application.py", "DurableJobCommandApplication.enqueue"),
     ("subsystems/jobs/command_application.py", "DurableJobCancellationApplication.cancel_queued"),
