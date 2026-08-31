@@ -82,7 +82,10 @@ jobs:
         pip install pytest
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Run shared kernel regression contracts
-      run: python -m pytest -q tests/test_shared_kernel_regression_contracts.py
+      run: |
+        python -m pytest -q \
+          tests/test_shared_kernel_regression_contracts.py \
+          tests/test_shared_kernel_job_contracts.py
 
   canonical-tests:
     name: canonical tests (${{ matrix.owner }})
