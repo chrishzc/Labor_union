@@ -123,6 +123,15 @@ function matchingAvailabilityErrorMessage(caught: unknown, fallback: string): st
   return caught instanceof Error ? caught.message : fallback;
 }
 
+function cancellationPreviewErrorMessage(caught: unknown): string {
+  if (caught instanceof ApiHttpError) {
+    return caught.message;
+  }
+  return caught instanceof Error
+    ? caught.message
+    : '取消預覽未通過，請確認案件狀態與服務日資料。';
+}
+
 interface OrderTermsDraft {
   plannedStartDate: string;
   serviceDays: string;
@@ -1689,9 +1698,9 @@ export const OrdersPage: React.FC = () => {
       setCancellationReceipt(null);
       setCancellationConfirmed(false);
       setCancellationStatus('idle');
-    } catch {
+    } catch (caught) {
       if (controller.signal.aborted || requestId !== currentDrawerRequestRef.current) return;
-      setCancellationError('取消預覽未通過，請確認案件狀態與服務日資料。');
+      setCancellationError(cancellationPreviewErrorMessage(caught));
       setCancellationStatus('idle');
     }
   };

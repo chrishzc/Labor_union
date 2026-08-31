@@ -889,6 +889,28 @@ describe('OrdersPage query real-data slice', () => {
     expect(ordersQueryClient.getAssignmentPlan).not.toHaveBeenCalled();
   });
 
+  it('shows the backend cancellation preview blocker instead of a generic failure', async () => {
+    useOperableSummary();
+    vi.mocked(orderCancellationClient.preview).mockRejectedValueOnce(
+      new ApiHttpError(
+        409,
+        'cancellation_actual_service_facts_required',
+        '服務已開始時，請先確認至少一日實際服務資料。',
+      ),
+    );
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
+    await screen.findByText(/實際開始日：尚未開始/);
+    fireEvent.click(screen.getByRole('button', { name: /預覽取消與退款試算/ }));
+
+    expect(
+      await screen.findByText('服務已開始時，請先確認至少一日實際服務資料。'),
+    ).toBeInTheDocument();
+  });
+
   it('locks the cancellation drawer while Apply is unresolved and rejects case switching', async () => {
     useOperableSummary();
     let resolveApply: ((value: Awaited<ReturnType<typeof orderCancellationClient.apply>>) => void) | undefined;
