@@ -1,5 +1,5 @@
 # This workflow installs Python dependencies, validates repository governance,
-# and runs the project's fixed regression suite on every main push / pull request.
+# audits the test inventory, and runs the fixed regression suite on every main push / pull request.
 
 name: Python application
 
@@ -41,6 +41,20 @@ jobs:
     - name: Validate Agent governance routing
       if: ${{ always() }}
       run: python scripts/validate_agent_governance.py
+
+  test-suite-audit:
+    name: test suite audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.11"
+    - name: Audit pytest inventory
+      run: python scripts/audit_test_suite.py
 
   regression-tests:
     name: regression suite (shard ${{ matrix.shard }}/8)
