@@ -26,14 +26,15 @@ class MySqlHistoricalOrderAdoptionRepository:
         self._connection = connection
 
     def load_order(self, case_no, client_name, *, for_update):
+        del client_name
         suffix = " FOR UPDATE" if for_update else ""
         with _cursor(self._connection) as cursor:
             cursor.execute(
                 "SELECT o.case_no,o.status,o.lifecycle_version,o.start_date,"
                 "o.actual_start_date,o.actual_end_date,c.name "
                 "FROM orders o JOIN clients c ON c.id=o.client_id "
-                "WHERE o.case_no=%s AND c.name=%s" + suffix,
-                (case_no, client_name),
+                "WHERE o.case_no=%s" + suffix,
+                (case_no,),
             )
             rows = cursor.fetchall()
         if len(rows) != 1:

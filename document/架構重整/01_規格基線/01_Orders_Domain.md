@@ -174,7 +174,9 @@ pairing evidence或 assignment candidate；原檔 bytes 仍參與 content digest
 歷史訂單採納列若已唯一匹配既有 Order、但 status、月嫂或其他來源欄位仍有 issue，安全可採納欄位
 照既有規則保存，同時建立 immutable review evidence；不因 review 回滾同列合法 status／日期或配對
 evidence。Orders outbox 將 review 投影為 `HISTORICAL-ORDER-001`，identity 為 review identity，僅顯示
-遮罩案件識別與 issue codes。`case_no + client_name` 未匹配列固定不寫 Orders、review、outbox 或 anomaly。
+遮罩案件識別與 issue codes。案號空白、找不到或對到多筆 Order 的列固定不寫 Orders、review、outbox 或 anomaly；
+案號唯一時，`client_name` 僅為來源 evidence。即使姓名包含歷史次序尾碼（如 `-2`、`-3`）、多餘空白或舊拼寫
+而與 HCM 不同，仍採納該唯一案號的列，並保存 `historical_client_name_mismatch` review evidence。
 
 ### 歷史 review 更正來源重新匯入（2026-08-26，已人工確認）
 
@@ -359,8 +361,9 @@ AutoComplete 與 Scheduling leave-substitution Apply 必須序列化於同一 Or
 
 ### 3.7 Historical Order Adoption
 
-restricted historical source 只能補登既有 Order，不建立 Client／Order。唯一匹配鍵為
-`case_no + client_name` 精確相符；找不到固定為 `unmatched_case`，零 Domain mutation且不建立警示。
+restricted historical source 只能補登既有 Order，不建立 Client／Order。唯一匹配鍵為唯一的
+`case_no`；`client_name` 只作來源 evidence，姓名差異建立 review evidence但不阻擋採納。案號空白、
+找不到或不唯一固定為 `unmatched_case`，零 Domain mutation且不建立警示。
 source profile v1 只接受 0→取消、1→完成、2→洽談中；空白／其他值保存 review evidence。
 
 2026-08-28 狀態判定補充裁決：numeric `0`不得因falsy正規化而與空白共用row fingerprint；

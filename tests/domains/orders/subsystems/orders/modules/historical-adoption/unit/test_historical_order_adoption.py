@@ -1,6 +1,6 @@
 """
 File: tests/domains/orders/test_historical_order_adoption.py
-Description: 驗證歷史狀態、nullable日期、六欄工作簿、精確案件匹配與 replay 契約。
+Description: 驗證歷史狀態、nullable日期、六欄工作簿、唯一案號匹配與 replay 契約。
 """
 
 from __future__ import annotations
@@ -277,6 +277,71 @@ def test_single_unique_caregiver_with_interval_builds_completed_assignment_candi
 
     assert preview.outcome is HistoricalOrderOutcome.ADOPTED
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+
+
+def test_unique_case_number_adopts_client_name_suffix_with_review_evidence(tmp_path):
+    path = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "狀態"],
+        ["客戶甲-2", "CASE-1", 1],
+    )
+    row = load_historical_order_workbook(path).rows[0]
+
+    class CaseNumberRepository(_Repository):
+        def load_order(self, case_no, client_name, *, for_update):
+            del client_name, for_update
+            return _current(OrderLifecycleStatus.DISCUSSION) if case_no == "CASE-1" else None
+
+    preview = HistoricalOrderAdoptionWorkflow(
+        CaseNumberRepository(row), _UnitOfWork, _SchedulingHistoricalAssignment()
+    ).preview(row)
+
+    assert preview.outcome is HistoricalOrderOutcome.ADOPTED
+    assert preview.issue_codes == ("historical_client_name_mismatch",)
+
+
+def test_repository_loads_a_unique_case_without_using_source_client_name():
+    class Cursor:
+        def __init__(self):
+            self.statement = ""
+            self.parameters = ()
+
+        def execute(self, statement, parameters):
+            self.statement = statement
+            self.parameters = parameters
+
+        def fetchall(self):
+            return [{
+                "case_no": "CASE-1",
+                "name": "客戶甲",
+                "status": OrderLifecycleStatus.DISCUSSION.value,
+                "lifecycle_version": 3,
+                "start_date": None,
+                "actual_start_date": None,
+                "actual_end_date": None,
+            }]
+
+        def close(self):
+            return None
+
+    class Connection:
+        def __init__(self):
+            self.cursor_value = Cursor()
+
+        def cursor(self):
+            return self.cursor_value
+
+    connection = Connection()
+
+    current = MySqlHistoricalOrderAdoptionRepository(connection).load_order(
+        "CASE-1", "客戶甲-2", for_update=True
+    )
+
+    assert current is not None
+    assert current.client_name == "客戶甲"
+    assert connection.cursor_value.parameters == ("CASE-1",)
+    assert "c.name=%s" not in connection.cursor_value.statement
+    assert connection.cursor_value.statement.endswith("FOR UPDATE")
 
 
 def test_existing_assignment_never_builds_duplicate_assignment_candidate(tmp_path):

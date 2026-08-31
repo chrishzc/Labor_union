@@ -177,11 +177,16 @@ class HistoricalOrderAdoptionWorkflow:
         current = self._repository.load_order(row.case_no, row.client_name, for_update=for_update)
         if current is None:
             return _unmatched_preview(row)
+        source_issues = row.issue_codes
+        if current.client_name != row.client_name:
+            source_issues = tuple(
+                sorted(set(source_issues + ("historical_client_name_mismatch",)))
+            )
         source = HistoricalOrderSourceFacts(
             row.asserted_status,
             row.actual_start_date,
             row.actual_end_date,
-            row.issue_codes,
+            source_issues,
         )
         candidate = build_historical_order_candidate(current, source)
         pairings = self._pairings(row, current.case_no, candidate, for_update)
