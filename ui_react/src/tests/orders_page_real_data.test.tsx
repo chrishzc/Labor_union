@@ -197,6 +197,24 @@ describe('OrdersPage query real-data slice', () => {
     expect(screen.queryByText(/合約總額：/)).not.toBeInTheDocument();
   });
 
+  it('keeps summary orders usable when stage projection includes a stage-only historical case', async () => {
+    const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue({
+      ...stagePage,
+      items: [
+        ...stagePage.items,
+        { ...stagePage.items[0], case_no: 'LEGACY-STAGE-ONLY' },
+      ],
+    });
+
+    render(<OrdersPage />);
+
+    await screen.findByText('ORD-2026-0801');
+    expect(screen.getByText('ORD-2026-0802')).toBeInTheDocument();
+    expect(screen.queryByText(/訂單階段資料載入失敗/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /1\. 進件與補件/ })).toBeEnabled();
+  });
+
   it('automatically continues to terminal, deduplicates summaries and removes the manual next-page gate', async () => {
     const firstPage = {
       ...realisticOrderSummaryPage,

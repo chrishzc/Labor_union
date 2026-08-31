@@ -1,6 +1,6 @@
 /**
  * File: order_stage_projection_adapter.ts
- * Description: 將已驗證的 Orders stage projection 映射為可呈現資料，拒絕 identity 漂移。
+ * Description: 將已驗證的 Orders stage projection 映射到 Summary 可見案件，拒絕缺漏與重複 identity。
  */
 import type { OrderSummaryPage } from '../../api/orders/order_query_schemas';
 import type {
@@ -24,18 +24,23 @@ export function indexOperationalTimelines(
 ): ReadonlyMap<string, OrderOperationalTimeline> {
   const expected = summary.items.map((item) => item.case_no);
   if (new Set(expected).size !== expected.length) throw new OrderStageProjectionIdentityError('摘要案件識別重複。');
+  const expectedSet = new Set(expected);
   const seen = new Set<string>();
   for (const item of page.items) {
     if (seen.has(item.case_no)) throw new OrderStageProjectionIdentityError('stage projection 案件識別重複。');
     seen.add(item.case_no);
   }
-  if (seen.size !== expected.length || expected.some((caseNo) => !seen.has(caseNo))) {
-    throw new OrderStageProjectionIdentityError('stage projection 缺少或多出摘要案件。');
+  if (expected.some((caseNo) => !seen.has(caseNo))) {
+    throw new OrderStageProjectionIdentityError('stage projection 缺少摘要案件。');
   }
   if (page.next_cursor !== null && page.items.length === 0) {
     throw new OrderStageProjectionIdentityError('空頁不得帶有 next_cursor。');
   }
-  return new Map(page.items.map((item) => [item.case_no, item]));
+  return new Map(
+    page.items
+      .filter((item) => expectedSet.has(item.case_no))
+      .map((item) => [item.case_no, item]),
+  );
 }
 
 export function stageCount(page: OrderOperationalTimelinePage, code: string): number | null {
