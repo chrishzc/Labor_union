@@ -19,7 +19,7 @@
   "artifacts": [{
     "name": "1020_historical_owner_payment_settlement.sql",
     "relative_path": "db/schema_parts/1020_historical_owner_payment_settlement.sql",
-    "sha256": "c5cfb3e97d2845a7b13ee6c95d8ea61ec744ab61b43ea7973b64035e998026bb",
+    "sha256": "6ec7dc3caeffb878b2b5eb9c3c321f4c60bd59716f210df3b2ededf49ad6b4fe",
     "dependencies": [],
     "data_effect": "schema_only",
     "rollback_policy": "forward-only-preserve-owner-historical-payment-evidence",

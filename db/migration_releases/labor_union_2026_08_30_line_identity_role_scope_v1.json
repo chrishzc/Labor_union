@@ -19,7 +19,7 @@
   "artifacts": [{
     "name": "1019_line_identity_role_scope.sql",
     "relative_path": "db/schema_parts/1019_line_identity_role_scope.sql",
-    "sha256": "e31ce7e8b2b80f27a4577514651b177e6a3b8a4d1d6b30cd7de977ebfcc36f14",
+    "sha256": "b5e670051b082956f3fc042bdd3c24f96808cbe90c61498c136a5e62d1160aba",
     "dependencies": [],
     "data_effect": "schema_and_deterministic_backfill",
     "rollback_policy": "code-rollback-preserve-role-binding-successor-and-legacy-roots",

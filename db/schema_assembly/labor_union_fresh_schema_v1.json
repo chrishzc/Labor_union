@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "7419e6a02b52807db1184b7fc9d7458ae53240124f2ac8df3e5dece26c3f0803",
+  "active_artifacts_sha256": "b8037c511e4b2eb38cb094221196dd18c30739832f1a99e751f209d266cfe8b7",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",

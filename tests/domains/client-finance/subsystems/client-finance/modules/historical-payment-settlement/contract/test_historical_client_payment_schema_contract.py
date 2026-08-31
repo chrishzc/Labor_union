@@ -50,6 +50,7 @@ def test_client_historical_payment_keeps_owner_direction_and_evidence_distinct()
     assert "direction = 'payable_to_client' AND payer_role = 'union' AND payee_role = 'client'" in sql
     assert "payment_date IS NULL AND CHAR_LENGTH(TRIM(payment_date_unknown_reason)) > 0" in sql
     assert "REFERENCES historical_order_adoption_receipts(id)" in sql
+    assert "historical_adoption_receipt_id BIGINT UNSIGNED NOT NULL" in sql
     assert "REFERENCES client_obligations(obligation_identity)" in sql
     assert "CREATE TABLE IF NOT EXISTS client_finance_apply_receipts" not in sql
     assert "finance_import_row_id" not in sql

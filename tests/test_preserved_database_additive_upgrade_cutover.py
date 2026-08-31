@@ -152,7 +152,7 @@ def _configure_fake_apply(
         },
     )
     monkeypatch.setattr(
-        migration, "_schema_snapshot", lambda *args: next(snapshots)
+        migration, "_schema_snapshot", lambda *args, **kwargs: next(snapshots)
     )
     monkeypatch.setattr(
         migration,
@@ -225,8 +225,9 @@ def test_statement_interruption_receipt_never_claims_partial_schema_exact(
     assert first["status"] == "applied"
     assert first["verification_status"] == "pending_part_completion"
     assert first["before_schema_sha256"] == "schema-2"
-    assert first["after_schema_sha256"] == "schema-3"
+    assert "after_schema_sha256" not in first
     assert interrupted["status"] == "failed"
+    assert interrupted["after_schema_sha256"] == "schema-3"
     assert interrupted["after_part_state"] == "partial"
     assert all(step["status"] != "exact" for step in receipt["schema_steps"])
 
@@ -277,7 +278,7 @@ def test_exact_part_replay_is_idempotently_skipped(
     assert receipt["schema_steps"][0]["outcome"] == "existing_part_skipped"
 
 
-def test_partial_statement_receipt_continues_until_part_is_exact(
+def test_artifact_receipt_verifies_once_after_all_statements(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     schema_part = tmp_path / "part.sql"
@@ -285,7 +286,7 @@ def test_partial_statement_receipt_continues_until_part_is_exact(
     _configure_fake_apply(
         monkeypatch,
         schema_part,
-        ["absent", "absent", "partial", "partial", "exact", "exact"],
+        ["absent", "partial", "exact", "exact"],
     )
     plan_path, operation_path = _write_fake_apply_receipts(
         tmp_path, schema_part
@@ -301,10 +302,41 @@ def test_partial_statement_receipt_continues_until_part_is_exact(
     first, second = receipt["schema_steps"]
     assert first["status"] == "applied"
     assert first["verification_status"] == "pending_part_completion"
-    assert first["after_part_state"] == "partial"
+    assert "after_part_state" not in first
     assert second["status"] == "exact"
     assert second["verification_status"] == "exact"
     assert cursor.executed == ["SELECT 1", "SELECT 2"]
+
+
+def test_deterministic_backfill_suffix_runs_after_schema_becomes_exact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    schema_part = tmp_path / "part.sql"
+    schema_part.write_text("SELECT 1; SELECT 2;", encoding="utf-8")
+    _configure_fake_apply(
+        monkeypatch,
+        schema_part,
+        ["absent", "absent", "exact", "exact", "exact", "exact"],
+    )
+    plan_path, operation_path = _write_fake_apply_receipts(
+        tmp_path, schema_part
+    )
+    cursor = _FakeApplyCursor("candidate_db")
+
+    receipt = apply_schema(
+        _FakeApplyConfig(cursor),
+        "source_db",
+        "candidate_db",
+        plan_path,
+        operation_path,
+    )
+
+    assert receipt["status"] == "schema_applied"
+    assert cursor.executed == ["SELECT 1", "SELECT 2"]
+    assert [step["status"] for step in receipt["schema_steps"]] == [
+        "applied",
+        "exact",
+    ]
 
 
 def _snapshot_from_descriptor(descriptor: dict[str, object]):
@@ -979,6 +1011,25 @@ def test_show_create_clause_overrides_information_schema_mojibake() -> None:
     assert migration._canonical_artifact_metadata_state(
         snapshot, part
     ) == "drift"
+
+
+def test_104_accepts_exact_1013_check_successor() -> None:
+    predecessor = "104_order_lifecycle_state_history.sql"
+    successor = "1013_order_lifecycle_pending_status_constraint.sql"
+    snapshot = _snapshot_from_descriptor(
+        migration._canonical_artifact_descriptor(predecessor)
+    )
+    successor_checks = migration._canonical_artifact_descriptor(successor)[
+        "checks"
+    ]
+    for row in snapshot["constraints"]:
+        key = (row["table_name"], row["constraint_name"])
+        if key in successor_checks:
+            row["check_clause"] = successor_checks[key]
+
+    assert migration._canonical_artifact_metadata_state(
+        snapshot, predecessor
+    ) == "exact"
 
 
 @pytest.mark.parametrize(

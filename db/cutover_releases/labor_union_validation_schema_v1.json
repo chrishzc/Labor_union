@@ -9,12 +9,12 @@
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
     "expected_count": 147,
-    "ordered_digest_sha256": "7419e6a02b52807db1184b7fc9d7458ae53240124f2ac8df3e5dece26c3f0803",
+    "ordered_digest_sha256": "b8037c511e4b2eb38cb094221196dd18c30739832f1a99e751f209d266cfe8b7",
     "terminal_artifact": "1020_historical_owner_payment_settlement.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "71743313678881f282ffae8b72caa062679122685033d9f6267cc9d9963132ce"
+    "sha256": "73653d73f28300dffaf102611035b7175fa43963e06b1a8f1c3848d0f5e92bb9"
   },
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_v1.sql",
