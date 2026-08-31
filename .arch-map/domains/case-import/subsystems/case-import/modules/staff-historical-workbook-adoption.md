@@ -10,6 +10,7 @@
 ## Implementation
 - primary:
   - `subsystems/case_import/staff_historical_workbook_adoption.py`
+  - `subsystems/case_import/staff_historical_adoption.py`
   - `subsystems/case_import/staff_historical_workbook.py`
   - `infrastructure/mysql/staff_historical_workbook_repository.py`
   - `infrastructure/mysql/staff_historical_adoption_repository.py`

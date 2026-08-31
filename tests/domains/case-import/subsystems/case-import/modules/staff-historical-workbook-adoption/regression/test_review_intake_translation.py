@@ -10,7 +10,9 @@ from types import SimpleNamespace
 
 from api.dependencies import staff_historical_workbook as dependency
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
+from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.case_import.beclass_review_intake import record_invalid_beclass_row
+from subsystems.case_import.staff_historical_adoption import adopt_existing_staff
 from subsystems.case_import.staff_historical_workbook_adoption import (
     StaffHistoricalWorkbookReceipt,
     StaffHistoricalWorkbookService,
@@ -149,3 +151,64 @@ def test_staff_historical_exact_replay_precedes_fresh_preview_check(monkeypatch)
 
     assert replay.replayed_workbook is True
     assert replay.source_content_digest == digest
+
+
+def test_created_row_receipt_replays_when_retry_now_routes_to_existing_staff():
+    digest = "e" * 64
+    source_identity = f"staff-workbook:{digest}:row:2"
+    historical_record = {
+        "identity_card": "A123456789",
+        "name": "測試月嫂",
+        "email": None,
+    }
+    historical_fingerprint = fingerprint_payload(historical_record).value
+    created_command_fingerprint = fingerprint_payload(
+        {
+            "source_identity": source_identity,
+            "source_fingerprint": historical_fingerprint,
+        }
+    ).value
+
+    class Repository:
+        def find_receipt(self, _key):
+            return {
+                "command_fingerprint": created_command_fingerprint,
+                "outcome": "created",
+                "staff_id": 9,
+            }
+
+        def load_staff(self, identity_card, *, for_update):
+            assert identity_card == "A123456789"
+            assert for_update is True
+            return [{"id": 9, "identity_card": identity_card, "name": "測試月嫂"}]
+
+        def claim(self, *_args):
+            raise AssertionError("created receipt replay must not claim again")
+
+    class UnitOfWork:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def commit(self):
+            return None
+
+    result = adopt_existing_staff(
+        object(),
+        source_content_digest=digest,
+        source_row=2,
+        identity_card="A123456789",
+        historical_record=historical_record,
+        source_sheet="月嫂歷史",
+        review_payload={"has_identity_card": True},
+        bank_accounts=(("001", "0001", "1234567890", True),),
+        relations={"staff_regions": (("北區", None),)},
+        repository=Repository(),
+        unit_of_work_factory=UnitOfWork,
+    )
+
+    assert result.outcome == "created"
+    assert result.staff_id == 9
+    assert result.replayed is True
