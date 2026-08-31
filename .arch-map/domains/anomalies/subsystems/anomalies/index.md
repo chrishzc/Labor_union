@@ -7,14 +7,15 @@
 組合 current-only issue query/detail、owner-fact detector、projection reconciliation 與 durable recheck consumer；owner root mutation 必須回 owning Subsystem。
 
 ## Modules
-- `current-issue-presentation` — 15-code current-only清單／detail的business-first React projection; path: `modules/current-issue-presentation.md`
+- `anomaly-registry` — closed definition、source-bound recovery descriptor與public detail contract；path: `modules/anomaly-registry.md`
+- `current-issue-presentation` — 9-code current-only清單／detail的business-first React projection; path: `modules/current-issue-presentation.md`
 - `finance-correction-presentation` — Finance Import 更正的既有安全 readback 與 closed 業務錯誤投影; path: `modules/finance-correction-presentation.md`
 - `anomaly-detail-presentation` — 異常詳情、處理方式與排班導向的業務資訊層級; path: `modules/anomaly-detail-presentation.md`
 - `line-notification-current-issue` — LINE-006 typed owner predicate consumer與fail-closed reconcile；path: `modules/line-notification-current-issue.md`
 - `scheduling-current-issue` — `SCHEDULE-002/003/006` typed owner predicate consumers；path: `modules/scheduling-current-issue.md`
 - `government-subsidy-current-issue` — `GOVSUB-001/002/004` typed owner predicate consumers；path: `modules/government-subsidy-current-issue.md`
-- `case-pairing-current-issue` — `BECLASS-001/IMPORT-003` typed owner predicate consumers；path: `modules/case-pairing-current-issue.md`
-- `payroll-current-issue` — `PAYOUT-002` typed Payroll owner predicate consumer；path: `modules/payroll-current-issue.md`
+- `case-pairing-current-issue` — `BECLASS-001` typed owner predicate consumer；path: `modules/case-pairing-current-issue.md`
+- `current-issue-runtime-composition` — durable recheck runtime的owner reader／consumer組合；path: `modules/current-issue-runtime-composition.md`
 
 ## Dependencies
 - outbound: owning subsystems — Query/Preview/Apply delegation and fresh predicate recheck。
@@ -26,7 +27,7 @@
 ## Contracts
 - `domains/anomalies/` — Anomaly definitions/rules
 - `subsystems/anomalies/` — projection/workers/remediation routing
-- `subsystems/anomalies/line_identity_current_issue_consumer.py` — LINE-004 role-scoped current predicate；只產生 closed subject／redacted details，沒有 Anomalies-owned repair action
+- `subsystems/anomalies/line_identity_current_issue_consumer.py` — LINE-004 role-scoped current predicate；只綁定既有 LINE Identity 同類身分替換操作，不擁有 repair mutation
 - `infrastructure/mysql/line_identity_current_issue_adapter.py` — 將 LINE repository typed readback組成 complete `OwnerSnapshot`，不直接查 LINE private tables
 - `subsystems/anomalies/line_notification_current_issue_consumer.py`與`infrastructure/mysql/line_notification_current_issue_adapter.py` — LINE-006 public identity不變的typed predicate consumer／adapter。
 - `domains/anomalies/current_issue.py` — closed current issue identity、opaque issue key與recheck scope

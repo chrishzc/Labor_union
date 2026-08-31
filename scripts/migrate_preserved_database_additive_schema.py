@@ -1988,6 +1988,19 @@ def _modified_parent_predecessor_absent_state(
                 },
             },
         },
+        "1021_task96_owner_contract_successors.sql": {
+            "client_profile_change_requests": {
+                "status": {
+                    "column_type": (
+                        "enum('pending','approved','partially_approved',"
+                        "'rejected','reverted')"
+                    ),
+                    "is_nullable": "NO",
+                    "column_default": "pending",
+                    "extra": "",
+                },
+            },
+        },
     }.get(artifact)
     if predecessor_columns is None:
         return None
@@ -5428,6 +5441,28 @@ def _contract_external_signing_successor_state(
             "controlled_file_objects",
         }
     }
+    if not purpose_rows:
+        predecessor = deepcopy(descriptor)
+        parent_tables = set(predecessor["parent_columns"])
+        predecessor["parent_columns"] = {}
+        for kind in ("indexes", "foreign_keys", "checks"):
+            predecessor[kind] = {
+                key: contract
+                for key, contract in predecessor[kind].items()
+                if key[0] not in parent_tables
+            }
+        predecessor["triggers"] = {
+            name: contract
+            for name, contract in predecessor["triggers"].items()
+            if contract["event_object_table"] not in parent_tables
+        }
+        predecessor_state = _artifact_metadata_state(
+            snapshot,
+            predecessor,
+            "1005_contract_external_signing_successor.sql",
+            defer_missing_triggers=defer_missing_triggers,
+        )
+        return "absent" if predecessor_state == "absent" else "drift"
     if len(purpose_rows) != 2 or any(
         _normalize_column_type_contract(row["column_type"])
         not in {predecessor_type, successor_type}

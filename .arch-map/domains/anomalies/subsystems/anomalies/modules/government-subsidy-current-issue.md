@@ -8,6 +8,8 @@
 
 ## Implementation
 - `subsystems/anomalies/government_subsidy_current_issue_consumer.py`
+- `subsystems/government_subsidy/current_anomaly_facts.py`
+- `infrastructure/mysql/government_subsidy_current_issue_adapter.py`
 - `infrastructure/mysql/anomaly_runtime.py`
 
 ## Verification

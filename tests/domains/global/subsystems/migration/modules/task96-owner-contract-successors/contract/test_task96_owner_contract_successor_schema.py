@@ -46,3 +46,41 @@ def test_task96_owner_successor_keeps_exact_owner_boundaries() -> None:
     assert "UPDATE finance_import_batches" not in sql
     assert "UPDATE subsidy_claim_batch_items" not in sql
     assert "UPDATE payroll_late_obligation_dispositions" not in sql
+    assert "assignment_id BIGINT NOT NULL" in sql
+
+
+def test_task96_owner_successor_recognizes_exact_status_predecessor() -> None:
+    descriptor = migration._canonical_artifact_descriptor(PART_NAME)
+    predecessor = {
+        "columns": [{
+            "table_name": "client_profile_change_requests",
+            "column_name": "status",
+            "column_type": (
+                "enum('pending','approved','partially_approved','rejected','reverted')"
+            ),
+            "is_nullable": "NO",
+            "column_default": "pending",
+            "extra": "",
+        }],
+        "indexes": [],
+        "constraints": [],
+        "key_columns": [],
+        "foreign_keys": [],
+        "triggers": [],
+        "show_create_tables": {},
+        "views": [],
+    }
+
+    assert migration.local_additive_descriptor_state(
+        predecessor, descriptor, PART_NAME
+    ) == "absent"
+    assert migration._release_descriptor_metadata_state(
+        predecessor,
+        PART_NAME,
+        migration.OWNED_OBJECTS[PART_NAME],
+    ) == "absent"
+
+    predecessor["columns"][0]["column_type"] = "enum('pending','approved')"
+    assert migration.local_additive_descriptor_state(
+        predecessor, descriptor, PART_NAME
+    ) == "drift"

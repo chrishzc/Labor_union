@@ -80,12 +80,6 @@ def test_pipeline_dispatches_only_inserted_rows_and_completes_batch(monkeypatch)
         }
 
     monkeypatch.setattr(importer, "dispatch_finance_import_row", dispatch)
-    monkeypatch.setattr(
-        importer,
-        "project_finance_import_review_alert",
-        lambda cursor, batch_id: None,
-    )
-
     result = importer.import_finance_workbook(
         "renamed.xlsx", dry_run=True, connection_factory=lambda: connection,
         normalizer=lambda _path: normalized,

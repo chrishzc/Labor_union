@@ -26,7 +26,6 @@ from subsystems.case_import.hcm_beclass_reconciliation import (
     reconcile_hcm_beclass_cooking as reconcile_with_port,
 )
 from subsystems.case_import.pairing_current_facts import (
-    beclass_counterpart_recheck,
     hcm_counterpart_recheck,
 )
 from subsystems.orders.terms_workflow import (
@@ -58,18 +57,6 @@ class MySqlHcmBeClassReconciliationAdapter:
                     "case-pairing:" + token + ":BECLASS-001",
                 )
             )
-            query_no = facts.get("query_no")
-            if isinstance(query_no, str) and query_no:
-                review_item_id = "counterpart:" + query_no
-                self._pairing_rechecks.append_case_pairing_recheck(
-                    beclass_counterpart_recheck(
-                        "client_counterpart",
-                        review_item_id,
-                        version,
-                        token,
-                        "case-pairing:" + token + ":IMPORT-003",
-                    )
-                )
         return result
 
     def load_pair_facts(self, case_no: str):

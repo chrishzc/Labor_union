@@ -15,6 +15,7 @@ from domains.case_import.client_beclass_binding import (
     ClientCaseBindingStatus,
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql import hcm_beclass_reconciliation_adapter as reconciliation_adapter
 from subsystems.case_import import client_beclass_workbook_import as intake
 
 
@@ -254,6 +255,43 @@ def test_apply_persists_explicit_cross_source_lineage_in_row_uow(monkeypatch):
             2,
         )
     ]
+
+
+def test_reconciliation_appends_only_current_hcm_pairing_recheck_in_borrowed_uow(
+    monkeypatch,
+):
+    connection = _Connection()
+    requests = []
+    sink = SimpleNamespace(
+        append_case_pairing_recheck=lambda request: requests.append(request)
+    )
+    adapter = reconciliation_adapter.MySqlHcmBeClassReconciliationAdapter(
+        connection,
+        sink,
+    )
+    monkeypatch.setattr(
+        reconciliation_adapter,
+        "reconcile_with_port",
+        lambda _port, case_no: SimpleNamespace(status="reconciled", case_no=case_no),
+    )
+    monkeypatch.setattr(
+        adapter,
+        "load_pair_facts",
+        lambda _case_no: {
+            "hcm_count": 1,
+            "beclass_count": 1,
+            "hcm_version": 4,
+            "beclass_id": 8,
+            "query_no": "Q-8",
+        },
+    )
+
+    result = adapter.reconcile("HCM-0007")
+
+    assert result.status == "reconciled"
+    assert [request.definition_code.value for request in requests] == ["BECLASS-001"]
+    assert requests[0].subject_ids == ("HCM-0007",)
+    assert connection.commits == 0
 
 
 def test_apply_does_not_infer_lineage_for_missing_original_review(monkeypatch):

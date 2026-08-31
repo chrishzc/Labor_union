@@ -118,14 +118,18 @@ def test_same_type_multiple_active_binding_emits_closed_redacted_candidate() -> 
     }
     assert candidate.subject_id == "U-line-1"
     assert candidate.owner_version == 7
-    assert candidate.details == {
-        "reason_codes": (
-            "root_owner_projection_mismatch",
-            "same_type_multiple_active_binding",
-        ),
-        "root_condition_active": True,
+    assert candidate.details["reason_codes"] == (
+        "root_owner_projection_mismatch",
+        "same_type_multiple_active_binding",
+    )
+    assert candidate.details["root_condition_active"] is True
+    action = candidate.details["available_actions"][0]
+    assert action["action_key"] == "replace_same_type_line_identity_subject"
+    assert action["source_bindings"] == {
+        "line_user_id": "U-line-1",
+        "source_version": 7,
+        "subject_type": "customer",
     }
-    assert "available_actions" not in candidate.details
 
 
 def test_root_projection_mismatch_emits_only_the_affected_subject_type() -> None:

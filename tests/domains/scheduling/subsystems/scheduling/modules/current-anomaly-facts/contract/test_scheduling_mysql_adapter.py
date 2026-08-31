@@ -84,7 +84,9 @@ def test_missing_generation_is_incomplete_and_never_authoritative_delete() -> No
 def test_replaced_assignment_closes_only_with_effective_lineage_and_owner_receipt() -> None:
     row = {
         "source_assignment_id": 7,
+        "case_no": "CASE-7",
         "source_status": "replaced",
+        "actual_start_date": None,
         "aggregate_version": 9,
         "successor_count": 1,
         "invalid_successor_count": 0,
@@ -97,4 +99,6 @@ def test_replaced_assignment_closes_only_with_effective_lineage_and_owner_receip
     assert fact.exact_successor is True
     assert fact.payroll_impact_complete is True
     assert fact.finance_impact_complete is True
+    assert fact.case_no == "CASE-7"
+    assert fact.service_started is False
     assert fact.predicate_active is False

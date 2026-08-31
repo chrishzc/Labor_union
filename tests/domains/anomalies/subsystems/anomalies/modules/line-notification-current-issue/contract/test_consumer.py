@@ -68,6 +68,14 @@ def test_consumer_preserves_public_case_and_notification_reason_identity() -> No
     assert candidate.details["unresolved_reason_codes"] == (
         "exact_replay_successor_missing",
     )
+    action = candidate.details["available_actions"][0]
+    assert action["preview_operation"] == "PreviewLineNotificationManualReplay"
+    assert action["apply_operation"] == "ApplyLineNotificationManualReplay"
+    assert action["source_bindings"] == {
+        "case_no": "CASE-006",
+        "notification_reason": "recipient_unavailable",
+        "source_version": 8,
+    }
 
 
 def test_inactive_complete_owner_predicate_emits_no_candidate() -> None:

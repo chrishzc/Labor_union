@@ -105,12 +105,6 @@ def test_dry_run_rolls_back_and_keeps_batch_id_private(monkeypatch) -> None:
         "dispatch_finance_import_row",
         lambda *_args: {"result": "reconciled"},
     )
-    monkeypatch.setattr(
-        application,
-        "project_finance_import_review_alert",
-        lambda *_args: {"alert_action": "existing"},
-    )
-
     manifest = application.import_finance_workbook(
         "input.xlsx", dry_run=True, connection_factory=lambda: connection,
         normalizer=lambda _path: {

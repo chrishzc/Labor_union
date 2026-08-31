@@ -19,7 +19,7 @@
   "artifacts": [{
     "name": "1021_task96_owner_contract_successors.sql",
     "relative_path": "db/schema_parts/1021_task96_owner_contract_successors.sql",
-    "sha256": "e17c9cc2e65e955251fc8a452fa13d6ee5a41de5efeae2a05e52795196ac3002",
+    "sha256": "a1da598b5b242601b16527a5eae11c1d775fdabeb2e26ec2c03e51ab3228f99e",
     "dependencies": [],
     "data_effect": "schema_only",
     "rollback_policy": "forward-only-preserve-task96-owner-roots-and-lineage",

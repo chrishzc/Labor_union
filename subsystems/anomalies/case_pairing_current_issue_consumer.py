@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import asdict, replace
 
 from domains.anomalies.current_issue import CurrentIssueCandidate, OwnerSnapshot
+from domains.anomalies.registry import default_anomaly_registry
 from subsystems.case_import.pairing_current_facts import (
     CASE_PAIRING_ANOMALY_OWNER_DOMAIN,
     CASE_PAIRING_ANOMALY_OWNER_ROOT_TYPE,
@@ -38,7 +40,11 @@ class CasePairingCurrentIssueConsumer:
             self._issue_key_builder(code.value, identity), code.value,
             CASE_PAIRING_ANOMALY_OWNER_DOMAIN, CASE_PAIRING_ANOMALY_OWNER_ROOT_TYPE,
             code.value, subject_id, fact.owner_version, "blocking", True,
-            {"unresolved_reason_codes": tuple(reason.value for reason in fact.unresolved_reason_codes), "root_condition_active": True},
+            {
+                "unresolved_reason_codes": tuple(reason.value for reason in fact.unresolved_reason_codes),
+                "root_condition_active": True,
+                **_available_actions(fact, code),
+            },
             identity,
         )
 
@@ -48,6 +54,21 @@ def _identity(fact: CasePairingCurrentFact):
         return CasePairingCurrentIssueCode.HCM_COUNTERPART_MISSING, fact.case_no, {"case_no": fact.case_no}
     subject = fact.entity_kind + ":" + fact.review_item_id
     return CasePairingCurrentIssueCode.BECLASS_COUNTERPART_MISSING, subject, {"entity_kind": fact.entity_kind, "review_item_id": fact.review_item_id}
+
+
+def _available_actions(
+    fact: CasePairingCurrentFact,
+    code: CasePairingCurrentIssueCode,
+) -> dict[str, object]:
+    if not isinstance(fact, HcmCounterpartCurrentFact):
+        return {}
+    descriptor = default_anomaly_registry().available_actions(code.value)[0]
+    bindings = {"case_no": fact.case_no, "source_version": fact.owner_version}
+    return {
+        "available_actions": (
+            asdict(replace(descriptor, source_bindings=bindings)),
+        )
+    }
 
 
 __all__ = ["CasePairingCurrentIssueConsumer"]

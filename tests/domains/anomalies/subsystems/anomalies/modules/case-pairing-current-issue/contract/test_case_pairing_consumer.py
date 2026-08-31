@@ -18,6 +18,10 @@ def test_consumer_projects_only_owner_active_fact() -> None:
         OwnerSnapshot(_scope(), "snapshot-1", 1, (fact,), True)
     )
     assert issues[0].subject_identity == {"case_no": "CASE-1"}
+    action = issues[0].details["available_actions"][0]
+    assert action["preview_operation"] == "PreviewClientBeClassWorkbook"
+    assert action["apply_operation"] == "ApplyClientBeClassWorkbook"
+    assert action["source_bindings"] == {"case_no": "CASE-1", "source_version": 1}
 
 
 def test_consumer_never_deletes_from_incomplete_readback() -> None:

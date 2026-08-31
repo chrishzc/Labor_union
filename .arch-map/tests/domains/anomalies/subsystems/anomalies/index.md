@@ -5,6 +5,9 @@ test_root: tests/domains/anomalies/subsystems/anomalies/
 integration_root: tests/domains/anomalies/subsystems/anomalies/integration/
 fixtures_root: tests/fixtures/
 modules:
+  anomaly-registry:
+    layout_status: canonical
+    test_root: tests/domains/anomalies/subsystems/anomalies/modules/anomaly-registry/
   current-issue-presentation:
     layout_status: custom_current
     test_root: ui_react/src/tests/current_anomalies_page.test.tsx
@@ -26,6 +29,9 @@ modules:
   case-pairing-current-issue:
     layout_status: canonical
     test_root: tests/domains/anomalies/subsystems/anomalies/modules/case-pairing-current-issue/
+  current-issue-runtime-composition:
+    layout_status: canonical
+    test_root: tests/domains/anomalies/subsystems/anomalies/modules/current-issue-runtime-composition/
 
 # Routing notes
 Focused Anomalies workflow, registry, current-only projection, source and adapter contracts live here. Current owner-local coverage includes closed issue identity／typed 410／fresh recheck guards; anomaly rulebook/action/recovery-context guards; finance/staff/client recovery consumers; LINE-binding predicate guards; `test_line_identity_current_issue_consumer.py`對typed LINE identity readback，以及`modules/line-notification-current-issue.md`對LINE-006 typed owner predicate／fail-closed reconcile的cross-subsystem oracle；以及其他owner projection contracts。

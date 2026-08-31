@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import asdict, replace
 
 from domains.anomalies.current_issue import CurrentIssueCandidate, OwnerSnapshot
+from domains.anomalies.registry import default_anomaly_registry
 from domains.line.identity_binding import LineBindingSubjectType
 from subsystems.line.identity_management_contracts import (
     LineIdentityCurrentFactFinding,
@@ -102,6 +104,20 @@ class LineIdentityCurrentIssueConsumer:
             details={
                 "reason_codes": tuple(sorted(set(reasons))),
                 "root_condition_active": True,
+                "available_actions": (
+                    asdict(
+                        replace(
+                            default_anomaly_registry().available_actions(
+                                LINE_IDENTITY_DEFINITION_CODE
+                            )[0],
+                            source_bindings={
+                                "line_user_id": readback.line_user_id,
+                                "source_version": readback.root_version or 0,
+                                "subject_type": subject_type.value,
+                            },
+                        )
+                    ),
+                ),
             },
             subject_identity=subject_identity,
         )

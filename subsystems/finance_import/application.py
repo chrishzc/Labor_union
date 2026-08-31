@@ -11,9 +11,6 @@ from decimal import Decimal
 from typing import Any, Callable
 
 from domains.client_finance.order_amount_calculation import calculate_order_amounts
-from subsystems.anomalies.finance_import_review_alert import (
-    project_finance_import_review_alert,
-)
 from subsystems.finance_import.identity_maps import load_finance_identity_maps
 from subsystems.finance_import.reconciliation_dispatch import dispatch_finance_import_row
 from subsystems.finance_import.staging import stage_finance_rows
@@ -161,7 +158,7 @@ def _complete_diagnostic_dry_run(cursor: Any, staging: dict[str, Any]) -> dict[s
         "reconciled_counts": reconciled_counts,
         "pending_rows": pending_rows,
         "row_results": row_results,
-        "alert_action": project_finance_import_review_alert(cursor, batch_id),
+        "alert_action": None,
     }
 
 

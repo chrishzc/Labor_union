@@ -2,7 +2,7 @@
 
 狀態：`current_projection_and_additive_successor_approved`；`runtime_cutover_pending_db_and_runtime_evidence`
 
-最新人工裁決：2026-08-29 current-state 異常瘦身
+最新人工裁決：2026-08-31 current-state 異常真實情境收斂
 
 執行邊界：2026-08-30 Task 97 最新人工裁決已授權本機 current-only typed Domain／
 Application contract、bounded recheck／intent transaction contract、additive `current_anomaly_issues`
@@ -29,7 +29,7 @@ Anomalies 是各 owning Domain 根事實之上的 current-state protection proje
    review／work queue，不轉成永久 anomaly occurrence。
 6. 只有結果唯一、安全、可重播且使用同一 owner predicate 的流程才可自動化。
    自動化能力不存在時可標 `blocked_capability`，但人工閉環不可缺席。
-7. `#anomalies` 只顯示 15 個 current issue，並在 Drawer 內透過 bounded typed owner
+7. `#anomalies` 只顯示 9 個 current issue，並在 Drawer 內透過 bounded typed owner
    clients 完成人工操作。25 個一般 owner work item 只顯示在各自 owner page。
 8. UI、route、worker、detector 都不得直接讀寫 current table 或旁路 owning Domain。
 
@@ -41,7 +41,7 @@ import-warning 六狀態 tracking、necessity reclassification disposition 與 h
 
 Anomalies 只擁有：
 
-1. 15 個 current issue definition 的 code、owner、subject schema、severity、blocking、details contract
+1. 9 個 current issue definition 的 code、owner、subject schema、severity、blocking、details contract
    與 owner action descriptor。
 2. 可由 owner facts 完整重建的 `current_anomaly_issues` current projection。
 3. bounded recheck 與 current-only Query 契約。
@@ -52,9 +52,8 @@ blocking 與 UI state 不得成為 Domain command gate。
 
 ### 2.1 Runtime 分類
 
-- 15 current issue codes：`SCHEDULE-006`、`PAYOUT-002`、`GOVSUB-001`～`GOVSUB-005`、
-  `GOVSUB-007`、`IMPORT-003`、`IMPORT-006`、`BECLASS-001`、`SCHEDULE-002`、
-  `SCHEDULE-003`、`LINE-006`、`LINE-004`。
+- 9 current issue codes：`SCHEDULE-006`、`GOVSUB-001`、`GOVSUB-002`、`GOVSUB-004`、
+  `BECLASS-001`、`SCHEDULE-002`、`SCHEDULE-003`、`LINE-006`、`LINE-004`。
 - 25 owner work item／validation results：`PAYOUT-001`、`PAYOUT-003`、`GOVSUB-006`、
   `client_over_refund_recovery_open`、`client_refund_underpayment`、
   `staff_overpayment_recovery_open`、`staff_payout_underpayment`、`IMPORT-001`、
@@ -64,15 +63,15 @@ blocking 與 UI state 不得成為 Domain command gate。
 - 3 retire／merge codes：`staff_payout_overpayment`、`HISTORICAL-BASELINE-ROOTS-001`、
   `SCHEDULE-005`。
 
-這是產品目標，不是 live runtime 已 cut over 的證據。在 15-code action map、25-item
+這是產品目標，不是 live runtime 已 cut over 的證據。在 9-code action map、25-item
 replacement map、3-code replacement／absence readback 與 destructive migration gates 通過前，不得
 停止舊 writer、隱藏舊 row、刪 registry code 或退役入口。
 
 ### 2.2 Case Import 方向
 
 - `BECLASS-001`：HCM 已存在，但沒有唯一且一致的 Client BeClass counterpart。
-- `IMPORT-003`：Client BeClass 已存在，但沒有 HCM counterpart。
-- 兩者只在 owner 驗證後形成唯一、一致、可追溯的 accepted mapping 時解除。
+- 客戶個人資料修正沿用 Client owner 的既有修改流程，不建立 HCM 補件或 `IMPORT-003`。
+- `BECLASS-001` 只在 owner 驗證後形成唯一、一致、可追溯的 accepted mapping 時解除。
 - 異常頁不得任意挑選候選資料、用姓名／電話模糊比對、merge roots 或直接修改
   mapping／root。人工入口只能送交 owner 能驗證的 evidence 與 typed command。
 
@@ -85,16 +84,10 @@ replacement map、3-code replacement／absence readback 與 destructive migratio
 | Code | Subject identity |
 |---|---|
 | `SCHEDULE-006` | `case_no + generation` |
-| `PAYOUT-002` | `obligation_identity + source_event_identity` |
 | `GOVSUB-001` | `bank_fact_identity` |
 | `GOVSUB-002` | `bank_fact_identity + batch_id` |
-| `GOVSUB-003` | `batch_id + integrity_revision` |
 | `GOVSUB-004` | `reversal_bank_fact_identity + source_receipt_id` |
-| `GOVSUB-005` | `assignment_id + batch_id + claim_item_id` |
-| `GOVSUB-007` | `payable_identity` |
-| `IMPORT-003` | `entity_kind + review_item_id` |
 | `BECLASS-001` | `case_no` |
-| `IMPORT-006` | `batch_id` |
 | `SCHEDULE-002` | `assignment_id` |
 | `SCHEDULE-003` | canonical sorted `assignment_id_a + assignment_id_b` |
 | `LINE-006` | `case_no + notification_reason` |
@@ -148,7 +141,7 @@ codes，不接收raw recipient、provider payload、message body、credential或
   將一次翻頁結果表示為 snapshot-complete。
 - `GET /api/v1/anomalies/{issue_key}`：回 current details、owner evidence、blocking effect 與
   manual-action descriptors；無 occurrence／timeline／claimed／resolved fields。
-- `#anomalies` 只渲染 15 個 current issue。Drawer 依 closed action descriptor 呼叫單一
+- `#anomalies` 只渲染 9 個 current issue。Drawer 依 closed action descriptor 呼叫單一
   bounded owner client；不接 raw endpoint、raw dict 或 generic mutation payload。
 - action 成功但 recheck 失敗時，UI 只顯示「owner 操作已提交、目前狀態待重新查詢」；
   不得先移除 issue。
@@ -162,7 +155,7 @@ cursor 邊界另固定 `anomaly_cursor_invalid`。
 
 ## 4. Owner action contract
 
-每個 current issue 必須在 owning Domain 正式規格與 15-code source map 同時固定：
+每個 current issue 必須在 owning Domain 正式規格與 9-code source map 同時固定：
 
 1. owner predicate 使用的 root facts、subject identity、blocking effect 與 completion predicate；
 2. typed Query、Preview、Apply 的 exact operation、version 與 closed input／output；
@@ -174,26 +167,24 @@ navigation-only、Query-only、projector retry、generic resolve、`available_ac
 terminal-ready manual action。只有 automation 可以 `blocked_capability`；manual action 缺漏時該 code
 與整體 cutover 都保持 `SPEC_GAP`。
 
-### 4.1 Thirteen-code owner convergence（2026-08-31）
+### 4.1 Current owner convergence（2026-08-31）
 
-依 current owning specs 與最新人工裁決，13 碼不再整批視為 `BOUNDARY_REQUIRED`：
+現行9碼均沿用既有owner operation：`SCHEDULE-002/003/006`、`GOVSUB-001/002/004`、
+`BECLASS-001`、`LINE-006`、`LINE-004`。每個action均包含closed source bindings、owner
+Preview／Apply operation、operator inputs、capability（如適用）與completion predicate；Anomalies只投影
+descriptor，不執行owner mutation。owner Apply在既有outer UoW追加bounded `anomaly.recheck` intent，
+worker fresh-read typed owner fact，只有authoritative complete的predicate absence才刪除current issue。
 
-- `SCHEDULE-002`、`SCHEDULE-003`、`SCHEDULE-006` 的 owner predicate／operation／terminal matrix
-  由 `02` 擁有；
-- `GOVSUB-001`、`GOVSUB-002`、`GOVSUB-004` 的 matrix 由 `14` 擁有；
-- `BECLASS-001`、`IMPORT-003` 的 pairing matrix 由 `17` 的 Case Import 擁有；
-- Case pairing 的 different-source accepted 分支只承認 Case Import Apply 同一 owner UoW 保存的
-  `original_review_identity -> accepted_source_event_identity / accepted_result_identity` exact immutable
-  lineage；Anomalies不得以姓名、電話、檔名、status或receipt命名推導；
-- `PAYOUT-002` 由 Payroll 擁有 late source disposition；`delta>0` append obligation、`delta<0`
-  修正合法 obligation且只有已付款超額交由 Staff Payables recovery、`delta=0`保存reviewed event；
-- `IMPORT-006` 分成同 batch deterministic rebuild與accepted corrected-source successor lineage；
-  只有唯一completed／fresh／full-coverage successor可使原歷史問題不再是current issue；
-- `GOVSUB-003/005/007` 依 `14` 的三分支、versioned correction與Government-owned recovery contract；
-  其中 `GOVSUB-007` lawful payout＋excess recovery的原子建立仍為
-  `BOUNDARY_REQUIRED_GOVSUB007_ATOMIC_EXCESS_UOW`，不得以兩次commit或重複SQL繞過。
+`LINE-004`以`subject_type + line_user_id`為identity。同一LINE帳號可同時保有一筆customer role與一筆
+staff role；替換新客戶案件只改customer role並清除舊customer projection，不得清除staff role。新案件
+若已保存相同LINE ID屬合法替換，不是collision。已建立的舊案件delivery不追改；替換完成後的新delivery
+使用新案件binding。
 
-上述收旂只是 owner contract 狀態，不代表 production consumer、UI 或 runtime 已實作。
+`PAYOUT-002`、`GOVSUB-003/005/007`、`IMPORT-003/006`依最新人工裁決不是current anomaly情境，
+不進入registry、掃描器、recheck或UI，也不得轉建generic remediation。薪資只依正式服務天數等owner facts
+計算；政府補助季別加總與Finance Import整理公式以發布前deterministic tests保護；客戶資料修改走Client
+owner既有流程。已發布1021保持immutable且不建立1022；其中未再使用的additive structures只列技術債，
+不作為current SSOT或runtime consumer。
 
 ## 5. Bounded recheck 與 transaction
 
@@ -255,7 +246,7 @@ Repository 不得 commit／rollback；route、worker、detector 不得直接寫 
 
 API、DB 與 entry cutover 必須等到：
 
-- 15-code action source map 全部 terminal-ready；
+- 9-code action source map 全部 terminal-ready；
 - 25 owner replacements 的 exact Query／typed response／owner UI／completion／readback 全部可達；
 - 3 retire／merge replacements 與 absence readback 通過；
 - Task 97 repository-local tracked identity、revision、successor與final receipt已精確映射（`TASK97_REPOSITORY_LOCAL_COMPLETE`）；production／DB／external acceptance另列deferred，不是本Domain cutover通過證據；
@@ -280,8 +271,8 @@ runtime／deployment／cutover仍須各自Authority與acceptance，不得由Task
 
 規格重新收旂前，read-only review 必須證明：
 
-1. 15／25／3 分類精確，Case Import 方向與 `#anomalies` UI 邊界無衝突。
-2. 15 個 manual action 與 25 個 replacement 無 `SPEC_GAP`、generic resolve、navigation-only 或
+1. 9／25／3 分類精確，Case Import 方向與 `#anomalies` UI 邊界無衝突。
+2. 9 個 manual action 與 25 個 replacement 無 `SPEC_GAP`、generic resolve、navigation-only 或
    ownerless outcome。
 3. issue identity、pagination、details version、episode timestamps、typed errors 與 PII redaction 可機械驗證。
 4. Recheck 覆蓋 stale insert、absent row、incomplete scope、overlap、duplicate、timeout、intent loss、
@@ -295,14 +286,21 @@ spec_route:
 convergence:
   status: NOT_READY
   blockers:
-    - 15-code owner action source map incomplete
+    - 9-code typed current-fact consumer composition and owner action descriptors have local implementation evidence; runtime cutover remains incomplete
     - 25 owner replacements incomplete
-    - 15-code subject scalar normalization and public redaction views require implementation evidence
+    - 9-code subject scalar normalization and public redaction views require implementation evidence
     - recheck owner-lock and maintenance subject-universe mappings require runtime evidence
     - dependency inventory lacks executable successor gates
-    - additive schema release and disposable fresh/preserve-data engine evidence incomplete
+    - owner mutation plus anomaly.recheck same-UoW and post-Apply fresh-removal matrix evidence remains incomplete
     - destructive migration remains unauthorized
 ```
+
+2026-08-31 current implementation evidence：9碼typed current-fact consumer／runtime detector composition
+已在local workspace形成並通過focused verification；其中Anomalies只消費owner typed facts。此證據只解除
+consumer composition漂移，不解除上述action／entry、owner mutation＋recheck atomicity、subject/public view或
+dependency gates。1021同名canonical replacement已在disposable MySQL 8.0 `lu_test_*`完成fresh／preserve-data
+engine驗證，因此原「additive schema release and engine evidence incomplete」不再是current blocker；不建立1022。
+依人工指示，本slice完成後暫停等待review。
 
 只有上述 blocker 全部解除且 read-only review PASS，才可依 2026-08-29 人工條件式授權
 將規格與執行計劃恢復為 `approved`。

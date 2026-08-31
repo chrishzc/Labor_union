@@ -38,27 +38,27 @@ class MySqlGovernmentSubsidyCurrentIssueAdapter:
     def _read_receipt(self, bank_identity: str):
         row = self._one(_RECEIPT_FACT_SQL, (bank_identity,))
         if row is None:
-            return GovernmentSubsidyReceiptCurrentFact(bank_identity, _missing_token(bank_identity), 0, False, False, False, False)
+            return GovernmentSubsidyReceiptCurrentFact(bank_identity, None, _missing_token(bank_identity), 0, False, False, False, False)
         applicable = row["classification_type"] == "government_subsidy"
         terminal = _terminal_receipt(row)
         flags = (not applicable or terminal or int(row["eligible_batch_count"]) == 1, not applicable or terminal, not applicable or terminal)
-        return GovernmentSubsidyReceiptCurrentFact(bank_identity, _token(row), int(row["owner_version"]), True, *flags)
+        return GovernmentSubsidyReceiptCurrentFact(bank_identity, int(row["finance_import_row_id"]), _token(row), int(row["owner_version"]), True, *flags)
 
     def _read_allocation(self, bank_identity: str, batch_id: int):
         row = self._one(_ALLOCATION_FACT_SQL, (batch_id, bank_identity))
         if row is None:
-            return GovernmentSubsidyAllocationCurrentFact(bank_identity, batch_id, _missing_token(bank_identity + ":" + str(batch_id)), 0, False, False, False, False)
+            return GovernmentSubsidyAllocationCurrentFact(bank_identity, batch_id, None, _missing_token(bank_identity + ":" + str(batch_id)), 0, False, False, False, False)
         applicable = row["classification_type"] == "government_subsidy"
         terminal = _terminal_receipt(row) and int(row["claim_batch_id"] or 0) == batch_id
         unambiguous = not applicable or terminal
         within = not applicable or terminal and int(row["invalid_item_count"]) == 0
         total = not applicable or terminal
-        return GovernmentSubsidyAllocationCurrentFact(bank_identity, batch_id, _token(row), int(row["owner_version"]), True, unambiguous, within, total)
+        return GovernmentSubsidyAllocationCurrentFact(bank_identity, batch_id, int(row["finance_import_row_id"]), _token(row), int(row["owner_version"]), True, unambiguous, within, total)
 
     def _read_reversal(self, bank_identity: str, source_receipt_id: int):
         row = self._one(_REVERSAL_FACT_SQL, (source_receipt_id, source_receipt_id, bank_identity))
         if row is None:
-            return GovernmentSubsidyReversalCurrentFact(bank_identity, source_receipt_id, _missing_token(bank_identity + ":" + str(source_receipt_id)), 0, False, False, False, False, False)
+            return GovernmentSubsidyReversalCurrentFact(bank_identity, source_receipt_id, None, _missing_token(bank_identity + ":" + str(source_receipt_id)), 0, False, False, False, False, False)
         applicable = row["classification_type"] == "government_subsidy"
         target_unique = not applicable or int(row["target_count"]) == 1
         target_valid = not applicable or (row["source_transaction_type"] == "receipt" and row["source_transaction_status"] == "succeeded")
@@ -71,7 +71,7 @@ class MySqlGovernmentSubsidyCurrentIssueAdapter:
                 and int(row["invalid_reversal_count"]) == 0
             )
         )
-        return GovernmentSubsidyReversalCurrentFact(bank_identity, source_receipt_id, _token(row), int(row["owner_version"]), True, target_unique, target_valid, terminal, terminal)
+        return GovernmentSubsidyReversalCurrentFact(bank_identity, source_receipt_id, int(row["finance_import_row_id"]), _token(row), int(row["owner_version"]), True, target_unique, target_valid, terminal, terminal)
 
     def _one(self, sql, parameters):
         with self._connection.cursor() as cursor:
@@ -123,7 +123,7 @@ def _fact_payload(fact):
 
 
 _RECEIPT_FACT_SQL = """
-SELECT bank.dedup_fingerprint AS bank_fact_identity,bank.credit AS bank_amount_ntd,
+SELECT bank.id AS finance_import_row_id,bank.dedup_fingerprint AS bank_fact_identity,bank.credit AS bank_amount_ntd,
  classification.id AS owner_version,classification.classification_type,
  (SELECT COUNT(*) FROM government_subsidy_batch_accounts account JOIN subsidy_claim_batches batch ON batch.id=account.batch_id
    WHERE batch.submitted_at IS NOT NULL AND batch.approved_at IS NOT NULL
@@ -141,7 +141,7 @@ GROUP BY bank.id,bank.dedup_fingerprint,bank.credit,classification.id,classifica
 """
 
 _ALLOCATION_FACT_SQL = """
-SELECT bank.dedup_fingerprint AS bank_fact_identity,bank.credit AS bank_amount_ntd,
+SELECT bank.id AS finance_import_row_id,bank.dedup_fingerprint AS bank_fact_identity,bank.credit AS bank_amount_ntd,
  classification.id AS owner_version,classification.classification_type,
  receipt.claim_batch_id,receipt.transaction_status,receipt.amount AS transaction_amount_ntd,
  overpayment.original_amount_ntd AS overpayment_original_ntd,overpayment.remaining_amount_ntd AS overpayment_remaining_ntd,overpayment.status AS overpayment_status,
@@ -158,7 +158,7 @@ GROUP BY bank.id,bank.dedup_fingerprint,bank.credit,classification.id,classifica
 """
 
 _REVERSAL_FACT_SQL = """
-SELECT bank.dedup_fingerprint AS bank_fact_identity,bank.debit AS bank_amount_ntd,
+SELECT bank.id AS finance_import_row_id,bank.dedup_fingerprint AS bank_fact_identity,bank.debit AS bank_amount_ntd,
  classification.id AS owner_version,classification.classification_type,
  source.transaction_type AS source_transaction_type,source.transaction_status AS source_transaction_status,
  (SELECT COUNT(*) FROM government_subsidy_transactions target WHERE target.id=%s AND target.transaction_type='receipt') AS target_count,

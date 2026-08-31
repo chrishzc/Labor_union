@@ -5,7 +5,7 @@
 - subsystem: `line`
 
 ## Responsibility
-持久化同一套 role-scoped canonical LINE identity binding、event、readback 與 application contract；customer／staff 可並存，admin 維持排他。此 Module 只擁有一個 nullable selected-role 狀態與一個 bounded binding-failure streak，第二次失敗以既有 Customer Service typed application 冪等建立客服單。
+持久化同一套 role-scoped canonical LINE identity binding、event、readback 與 application contract；customer／staff 可並存，admin 維持排他。同類客戶案件替換只更新 customer role，保留 staff role，並在既有 outer UoW 追加 LINE-004 recheck。此 Module 只擁有一個 nullable selected-role 狀態與一個 bounded binding-failure streak，第二次失敗以既有 Customer Service typed application 冪等建立客服單。
 
 ## Implementation
 - primary:
@@ -27,6 +27,7 @@
 - outbound: `external-integration/line` — implements the LINE identity typed repository port used by the identity management application.
 - outbound: `customer-service` — on the bounded second binding failure only, invokes the existing typed escalation application inside the caller-owned Unit of Work.
 - inbound: `subsystems/line/identity_management_application.py` — coordinates replacement validation, owner projections, audit and the outer Unit of Work.
+- outbound: `anomalies` — same-type replacement完成後只追加bounded LINE-004 recheck intent；Anomalies不寫LINE root。
 - inbound: `staff/module:staff-retirement` — only after a committed Staff retirement candidate, through the typed effect port and shared outer UoW.
 
 ## Contracts

@@ -20468,7 +20468,7 @@ CREATE TABLE IF NOT EXISTS payroll_late_obligation_dispositions (
     case_no VARCHAR(50) NOT NULL,
     obligation_identity VARCHAR(191) NOT NULL,
     source_event_identity VARCHAR(191) NOT NULL,
-    assignment_id INT NOT NULL,
+    assignment_id BIGINT NOT NULL,
     staff_id INT NOT NULL,
     disposition ENUM('increase_obligation','reduce_unpaid_obligation','correct_paid_obligation','reviewed_no_change') NOT NULL,
     before_amount_ntd BIGINT NOT NULL,

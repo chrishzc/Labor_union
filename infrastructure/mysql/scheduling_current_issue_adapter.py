@@ -55,13 +55,15 @@ class MySqlSchedulingCurrentIssueAdapter:
             row = _mapping_row(cursor.fetchone())
         if row is None:
             token = fingerprint_payload({"assignment_id": assignment_id, "missing": True}).value
-            return SchedulingReplacementCurrentFact(assignment_id, token, 0, False, False, False, False, False, False)
+            return SchedulingReplacementCurrentFact(assignment_id, None, None, token, 0, False, False, False, False, False, False)
         source_replaced = row["source_status"] == "replaced"
         successor_complete = source_replaced and int(row["successor_count"]) > 0 and int(row["invalid_successor_count"]) == 0
         owner_receipt_complete = successor_complete and int(row["receipt_count"]) > 0
         payload = _canonical_row(row)
         return SchedulingReplacementCurrentFact(
             assignment_id,
+            str(row["case_no"]),
+            row["actual_start_date"] is not None,
             fingerprint_payload(payload).value,
             int(row["aggregate_version"]),
             True,
@@ -81,7 +83,16 @@ class MySqlSchedulingCurrentIssueAdapter:
         active = complete and _effective_assignment(rows[0]) and _effective_assignment(rows[1]) and _intervals_overlap(rows[0], rows[1])
         version = max((int(row["aggregate_version"]) for row in rows), default=0)
         payload = {"subject": subject_id, "rows": _canonical_rows(rows), "complete": complete, "active": active}
-        return SchedulingOverlapCurrentFact(left, right, fingerprint_payload(payload).value, version, complete, active)
+        return SchedulingOverlapCurrentFact(
+            left,
+            right,
+            str(rows[0]["case_no"]) if complete else None,
+            str(rows[1]["case_no"]) if complete else None,
+            fingerprint_payload(payload).value,
+            version,
+            complete,
+            active,
+        )
 
     def _read_coverage(self, subject_id: str) -> SchedulingCoverageCurrentFact:
         case_no, generation = _case_generation(subject_id)
@@ -240,17 +251,19 @@ _OVERLAP_FACT_SQL = (
     "JOIN scheduling_aggregates sa ON sa.case_no=a.case_no WHERE a.id IN (%s,%s) ORDER BY a.id"
 )
 _REPLACEMENT_FACT_SQL = (
-    "SELECT source.id AS source_assignment_id,source.status AS source_status,sa.aggregate_version,"
+    "SELECT source.id AS source_assignment_id,source.case_no,source.status AS source_status,"
+    "orders.actual_start_date,sa.aggregate_version,"
     "COUNT(DISTINCT lineage.new_assignment_id) AS successor_count,"
     "COALESCE(SUM(CASE WHEN lineage.new_assignment_id IS NOT NULL AND (successor.status NOT IN ('planned','active') "
     "OR successor.generation_id<>sa.effective_generation_id OR generation.status<>'effective' OR generation.effective_marker<>1) THEN 1 ELSE 0 END),0) AS invalid_successor_count,"
     "COUNT(DISTINCT receipt.id) AS receipt_count "
     "FROM case_staff_assignments source JOIN scheduling_aggregates sa ON sa.case_no=source.case_no "
+    "JOIN orders ON orders.case_no=source.case_no "
     "LEFT JOIN scheduling_rebuild_lineage lineage ON lineage.old_assignment_identity=CONCAT('assignment:',source.id) "
     "LEFT JOIN case_staff_assignments successor ON successor.id=lineage.new_assignment_id "
     "LEFT JOIN scheduling_generations generation ON generation.id=successor.generation_id "
     "LEFT JOIN scheduling_command_receipts receipt ON receipt.rebuild_event_id=lineage.rebuild_event_id "
-    "WHERE source.id=%s GROUP BY source.id,source.status,sa.aggregate_version"
+    "WHERE source.id=%s GROUP BY source.id,source.case_no,source.status,orders.actual_start_date,sa.aggregate_version"
 )
 _GENERATION_FACT_SQL = (
     "SELECT g.id AS generation_id,g.generation_number,g.status AS generation_status,g.effective_marker,"
