@@ -3,7 +3,9 @@ File: historical_order_adoption.py
 Description: 組合 Orders historical workbook coordinator、repository 與單一 MySQL 交易邊界。
 """
 
-from infrastructure.mysql.historical_order_adoption_repository import MySqlHistoricalOrderAdoptionRepository
+from infrastructure.mysql.historical_order_adoption_cancellation_decorator import (
+    MySqlHistoricalOrderAdoptionCancellationDecorator,
+)
 from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
 from infrastructure.mysql.historical_order_workbook_import_repository import HistoricalOrderWorkbookImportRepository
 from infrastructure.mysql.mysql_adapter import get_connection
@@ -24,7 +26,7 @@ def get_historical_order_workbook_import_service():
         ) from error
     try:
         workflow = HistoricalOrderAdoptionWorkflow(
-            MySqlHistoricalOrderAdoptionRepository(connection),
+            MySqlHistoricalOrderAdoptionCancellationDecorator(connection),
             lambda: MySqlUnitOfWork(connection),
             MySqlHistoricalAssignmentWriter(connection),
         )
