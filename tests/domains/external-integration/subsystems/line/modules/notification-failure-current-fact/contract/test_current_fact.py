@@ -55,7 +55,7 @@ def test_configuration_correction_alone_does_not_replace_manual_replay() -> None
     )
 
 
-def test_only_latest_exact_replay_lineage_can_satisfy_terminal_predicate() -> None:
+def test_replay_in_progress_is_not_a_new_business_issue() -> None:
     readback = _evaluate(
         _source(
             _replay(20, ("sent",)),
@@ -63,10 +63,8 @@ def test_only_latest_exact_replay_lineage_can_satisfy_terminal_predicate() -> No
         )
     )
 
-    assert readback.predicate_active is True
-    assert readback.unresolved_reason_codes == (
-        LineNotificationUnresolvedReason.REPLAY_IN_PROGRESS,
-    )
+    assert readback.predicate_active is False
+    assert readback.unresolved_reason_codes == ()
 
 
 def test_exact_fresh_replay_with_terminal_delivery_success_is_inactive() -> None:
@@ -88,7 +86,7 @@ def test_incomplete_owner_interpretation_is_closed_and_cannot_authorize_removal(
     assert readback.predicate_active is True
 
 
-def test_incomplete_empty_readback_remains_active_and_cannot_look_resolved() -> None:
+def test_incomplete_empty_readback_does_not_create_a_new_business_issue() -> None:
     readback = _evaluate(complete=False)
 
     assert readback.authoritative_complete is False
@@ -97,7 +95,7 @@ def test_incomplete_empty_readback_remains_active_and_cannot_look_resolved() -> 
     assert readback.unresolved_reason_codes == (
         LineNotificationUnresolvedReason.OWNER_READBACK_INCOMPLETE,
     )
-    assert readback.predicate_active is True
+    assert readback.predicate_active is False
 
 
 class _Cursor:

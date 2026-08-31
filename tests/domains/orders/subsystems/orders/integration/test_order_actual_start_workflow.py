@@ -18,6 +18,13 @@ from shared_kernel.identities import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint
 from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus, _lifecycle_status
+from domains.orders.actual_start import (
+    ActualStartAssignmentFacts,
+    ActualStartOrderFacts,
+    ActualStartSchedulingFacts,
+    build_actual_start_candidate,
+)
+from domains.orders.terms import ServiceTimeTerms
 from subsystems.orders.actual_start_workflow import ActualStartApplyRequest
 from infrastructure.mysql.order_actual_start_repository import (
     _is_effective_staff_date_conflict,
@@ -90,3 +97,44 @@ def test_actual_start_maps_effective_staff_date_duplicate_to_typed_conflict() ->
         )
     ) is True
     assert _is_effective_staff_date_conflict(IntegrityError(1062, "other")) is False
+
+
+def test_actual_start_can_replace_legacy_dates_with_recalculated_official_dates() -> None:
+    order = ActualStartOrderFacts(
+        "CASE-1",
+        3,
+        None,
+        False,
+        ServiceTimeTerms(None, None, None),
+    )
+    scheduling = ActualStartSchedulingFacts(
+        "CASE-1",
+        5,
+        1,
+        date(2026, 8, 1),
+        (
+            ActualStartAssignmentFacts(
+                11,
+                22,
+                1,
+                date(2026, 8, 1),
+                date(2026, 8, 3),
+                (date(2026, 8, 1), date(2026, 8, 2), date(2026, 8, 3)),
+            ),
+        ),
+    )
+
+    candidate = build_actual_start_candidate(
+        order,
+        scheduling,
+        date(2026, 8, 8),
+        8,
+        (date(2026, 8, 8), date(2026, 8, 11), date(2026, 8, 12)),
+    )
+
+    assert candidate.official_service_dates == (
+        date(2026, 8, 8),
+        date(2026, 8, 11),
+        date(2026, 8, 12),
+    )
+    assert candidate.actual_end_date == date(2026, 8, 12)

@@ -1,8 +1,6 @@
-"""The durable recheck runtime composes every existing owner-specific consumer."""
+"""The durable recheck runtime composes the current LINE-006 consumer."""
 
 from __future__ import annotations
-
-import pytest
 
 from domains.anomalies.current_issue import build_owner_lock_key
 from infrastructure.mysql.anomaly_runtime import MySqlAnomalyRuntime
@@ -37,59 +35,11 @@ class _CaptureRuntime(MySqlAnomalyRuntime):
         )
 
 
-@pytest.mark.parametrize(
-    ("owner_domain", "owner_root_type", "subject_type", "subject_id", "reader", "consumer"),
-    (
-        (
-            "line",
-            "identity_binding",
-            "customer",
-            "U-line-1",
-            "MySqlLineIdentityCurrentIssueAdapter",
-            "LineIdentityCurrentIssueConsumer",
-        ),
-        (
-            "line",
-            "notification_failure",
-            "LINE-006",
-            "CASE-1:service_date_change",
-            "MySqlLineNotificationCurrentIssueAdapter",
-            "LineNotificationCurrentIssueConsumer",
-        ),
-        (
-            "scheduling",
-            "scheduling_current_fact",
-            "SCHEDULE-006",
-            "CASE-1:3",
-            "MySqlSchedulingCurrentIssueAdapter",
-            "SchedulingCurrentIssueConsumer",
-        ),
-        (
-            "government_subsidy",
-            "government_subsidy_current_fact",
-            "GOVSUB-001",
-            "bank-fact:7",
-            "MySqlGovernmentSubsidyCurrentIssueAdapter",
-            "GovernmentSubsidyCurrentIssueConsumer",
-        ),
-        (
-            "case_import",
-            "case_pairing_current_fact",
-            "BECLASS-001",
-            "CASE-1",
-            "MySqlCasePairingCurrentIssueAdapter",
-            "CasePairingCurrentIssueConsumer",
-        ),
-    ),
-)
-def test_runtime_composes_owner_reader_and_detector(
-    owner_domain,
-    owner_root_type,
-    subject_type,
-    subject_id,
-    reader,
-    consumer,
-) -> None:
+def test_runtime_composes_line006_owner_reader_and_detector() -> None:
+    owner_domain = "line"
+    owner_root_type = "notification_failure"
+    subject_type = "recipient_unavailable"
+    subject_id = "CASE-1"
     lock = build_owner_lock_key(owner_domain, owner_root_type, subject_id)
     payload = {
         "intent_identity": f"runtime:{subject_type}:1",
@@ -102,7 +52,10 @@ def test_runtime_composes_owner_reader_and_detector(
         "payload_fingerprint": "a" * 64,
     }
 
-    result = _CaptureRuntime(reader, consumer).run_current_issue_recheck(
+    result = _CaptureRuntime(
+        "MySqlLineNotificationCurrentIssueAdapter",
+        "LineNotificationCurrentIssueConsumer",
+    ).run_current_issue_recheck(
         object(),
         payload,
     )

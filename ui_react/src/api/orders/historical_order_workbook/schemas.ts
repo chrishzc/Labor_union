@@ -8,7 +8,7 @@ export const HistoricalOrderSha256Schema = z.string().regex(/^[0-9a-f]{64}$/, 'é
 
 export const HistoricalOrderStatusCountsSchema = z.object({
   cancelled_0: z.number().int().min(0),
-  completed_1: z.number().int().min(0),
+  deposit_paid_1: z.number().int().min(0),
   discussion_2: z.number().int().min(0),
   invalid_or_blank: z.number().int().min(0),
 }).strict();

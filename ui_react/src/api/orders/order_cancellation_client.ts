@@ -131,6 +131,11 @@ const PayrollActionSchema = z.strictObject({
   amount: MoneySchema,
   due_date: DateOnlySchema.nullable(),
 });
+const PayrollSpecialPayEventSchema = z.strictObject({
+  assignment_identity: z.string().min(1),
+  assignment_sequence: z.number().int().positive(),
+  service_dates: z.array(DateOnlySchema),
+});
 const PayrollImpactSchema = z.strictObject({
   case_no: z.string().min(1),
   expected_payroll_version: z.number().int().nonnegative(),
@@ -138,6 +143,7 @@ const PayrollImpactSchema = z.strictObject({
   payroll: PayrollCandidateSchema,
   carried_rate_snapshots: z.array(PayrollRateSnapshotSchema),
   actions: z.array(PayrollActionSchema),
+  special_pay_events: z.array(PayrollSpecialPayEventSchema),
   blockers: z.array(z.string()),
   fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
 });

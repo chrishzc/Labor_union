@@ -88,6 +88,20 @@ def test_effective_generation_facts_ignore_historical_cancelled_assignments():
     assert "WHERE case_no" not in assignment_lock
 
 
+def test_date_only_service_terms_complete_at_taipei_day_end():
+    order = _order()
+    order.update(
+        service_start_time=None,
+        service_end_time=None,
+        service_end_day_offset=None,
+    )
+
+    facts = _facts(_Cursor(_rows(order=order)))
+
+    assert facts["completion_facts_consistent"] is True
+    assert facts["completion_instant"] == "2026-08-04T23:59:59.999999+08:00"
+
+
 @pytest.mark.parametrize(
     "rows, expected_blockers",
     [

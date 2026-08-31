@@ -15,7 +15,7 @@ canonical workbook 固定為前六欄：`client_name`、`case_no`、`start_date`
 | source status | Orders asserted status |
 |---|---|
 | `0` | `訂單取消` |
-| `1` | `訂單完成` |
+| `1` | 來源語意為已付訂金；Orders lifecycle 為`訂單成立` |
 | `2` | `洽談中` |
 | 空白／其他 | 無 asserted status；建立既有 typed review evidence |
 
@@ -33,19 +33,20 @@ live drift 有兩項：
 - `HOS-R2`: parser 必須接受numeric／文字的 `0／1／2`，以及Excel常見的`0.0／1.0／2.0`；
   其他值維持invalid，不推測中文或其他生命週期。
 - `HOS-R3`: Preview與Apply receipt必須回傳strict `status_counts`：`cancelled_0`、
-  `completed_1`、`discussion_2`、`invalid_or_blank`。四者總和必須等於`source_row_count`。
+  `deposit_paid_1`、`discussion_2`、`invalid_or_blank`。四者總和必須等於`source_row_count`。
 - `HOS-R4`: React資料匯入卡顯示四項判定數量；不得在前端重算status或修改Orders。
 - `HOS-R5`: Apply仍沿用既有row-atomic Orders Q/P/A、fresh version、event、receipt與outbox；
-  不新增schema、不觸發現行通知／帳務、不提供generic status editor。
+  不新增schema、不因status `1`本身觸發現行通知／帳務、不提供generic status editor。只有來源開始日
+  異於HCM預定開始日的受控列，才依Orders Actual Start canonical writer重算既有下游projection。
 - `HOS-R6`: same key＋same workbook replay回相同status counts；same key＋different workbook維持conflict。
 
 ## 3. Acceptance
 
 | ID | Acceptance |
 |---|---|
-| `HOS-A1` | 六欄三列 `0／1／2` Preview回counts各1、invalid 0；逐列asserted status為取消／完成／洽談中。 |
+| `HOS-A1` | 六欄三列 `0／1／2` Preview回counts各1、invalid 0；逐列asserted status為取消／已付訂金（Orders訂單成立）／洽談中。 |
 | `HOS-A2` | 相同其餘五欄的status `0`與空白，其row fingerprint不同；空白列為invalid review。 |
-| `HOS-A3` | 真`lu_test_*` MySQL Apply後三個既有Order分別回讀取消／完成／洽談中，並各有exact lifecycle event／receipt。 |
+| `HOS-A3` | 真`lu_test_*` MySQL Apply後三個既有Order分別回讀取消／訂單成立／洽談中，並各有exact lifecycle event／receipt。 |
 | `HOS-A4` | API Pydantic、React Zod與adapter拒絕counts不守恆；Browser可見四項counts。 |
 | `HOS-A5` | replay counts相同且row counts不增加；different payload conflict零新增。 |
 

@@ -9,7 +9,6 @@ from typing import Callable
 from domains.line.identities import LineUserId
 from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
 from domains.line.identity_binding import LineIdentityClaim
-from domains.anomalies.current_issue import RecheckIntent, RecheckScope, build_owner_lock_key
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import (
     ActorContext,
@@ -63,7 +62,7 @@ class LineIdentityManagementApplication:
             return unit_of_work.identity_management.detail(line_user_id)
 
     def current_fact(self, line_user_id: LineUserId) -> LineIdentityCurrentFactReadback:
-        """Return a zero-write LINE-004 root/projection diagnosis."""
+        """Return the zero-write LINE identity owner readback."""
 
         query = LineIdentityCurrentFactQuery(line_user_id)
         with self._unit_of_work_factory() as unit_of_work:
@@ -226,9 +225,6 @@ class LineIdentityManagementApplication:
                 )
             )
             result = unit_of_work.identity_management.detail(command.line_user_id)
-            unit_of_work.anomaly_rechecks.append_recheck_intent(
-                _line_identity_recheck_intent(resulting, command)
-            )
             unit_of_work.commit()
         return result
 
@@ -466,36 +462,6 @@ def _candidate_line_user_id(candidate) -> LineUserId | None:
 def _binding_line_user_id(binding) -> LineUserId:
     raw_value = binding.line_user_id
     return raw_value if isinstance(raw_value, LineUserId) else LineUserId(str(raw_value))
-
-
-def _line_identity_recheck_intent(binding, command) -> RecheckIntent:
-    line_user_id = _binding_line_user_id(binding)
-    scope = RecheckScope(
-        "line",
-        "identity_binding",
-        binding.subject_type.value,
-        (line_user_id.value,),
-        (build_owner_lock_key("line", "identity_binding", line_user_id.value),),
-    )
-    payload_fingerprint = fingerprint_payload(
-        {
-            "cause_identity": command.idempotency_key.value,
-            "scope": {
-                "owner_domain": scope.owner_domain,
-                "owner_root_type": scope.owner_root_type,
-                "subject_type": scope.subject_type,
-                "subject_ids": list(scope.subject_ids),
-                "owner_lock_keys": list(scope.owner_lock_keys),
-            },
-            "owner_version": binding.version.value,
-        }
-    )
-    return RecheckIntent(
-        "line004-recheck:" + payload_fingerprint.value[:48],
-        scope,
-        binding.version.value,
-        payload_fingerprint,
-    )
 
 
 def _menu_reset_intent(request, retry_number: int = 0) -> OutboxIntent:

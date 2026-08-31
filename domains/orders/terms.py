@@ -41,10 +41,21 @@ class ServiceTimeTerms:
         return self.start_time is not None
 
     def completion_instant(self, service_date: date) -> datetime:
+        if not isinstance(service_date, date):
+            raise TypeError("service date must be a date")
         if not self.complete:
-            raise ValueError("service time terms are incomplete")
+            return datetime.combine(service_date, time.max, tzinfo=_TAIPEI)
         completion_date = service_date + timedelta(days=self.end_day_offset)
         return datetime.combine(completion_date, self.end_time, tzinfo=_TAIPEI)
+
+    def service_start_instant(self, service_date: date) -> datetime:
+        if not isinstance(service_date, date):
+            raise TypeError("service date must be a date")
+        return datetime.combine(
+            service_date,
+            self.start_time or time.min,
+            tzinfo=_TAIPEI,
+        )
 
     def canonical_payload(self) -> dict[str, object]:
         return {

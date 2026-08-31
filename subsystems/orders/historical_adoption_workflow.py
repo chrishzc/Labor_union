@@ -15,11 +15,14 @@ from domains.orders.historical_adoption import (
     HistoricalOrderCurrentFacts,
     HistoricalOrderOutcome,
     HistoricalOrderSourceFacts,
+    HistoricalOrderSourceStatus,
     build_historical_order_candidate,
 )
-from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.ports import UnitOfWork
+from subsystems.orders.historical_actual_start_rebuild import (
+    HistoricalActualStartRebuilder,
+)
 from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbookRow
 
 
@@ -109,10 +112,12 @@ class HistoricalOrderAdoptionWorkflow:
         repository: HistoricalOrderAdoptionRepository,
         unit_of_work_factory: Callable[[], UnitOfWork],
         scheduling_historical_assignment: SchedulingHistoricalAssignmentPort,
+        actual_start_rebuilder: HistoricalActualStartRebuilder | None = None,
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
         self._scheduling_historical_assignment = scheduling_historical_assignment
+        self._actual_start_rebuilder = actual_start_rebuilder
 
     def preview(self, row: HistoricalOrderWorkbookRow) -> HistoricalOrderAdoptionPreview:
         return self._build_preview(row, for_update=False)
@@ -136,13 +141,30 @@ class HistoricalOrderAdoptionWorkflow:
         command_fingerprint = _command_fingerprint(request)
         replay = self._replay(request, command_fingerprint)
         if replay is not None:
+            # Older status-1 receipts can predate the service-evidence bridge.
+            # Re-evaluate the immutable source, append only missing historical
+            # assignment evidence, then let the delegated canonical command
+            # repair Scheduling/Actual Start under its own idempotency key.
+            preview = self._build_preview(request.row, for_update=True)
+            self._append_assignment_candidates(preview)
+            self._rebuild_actual_service_period(request, preview)
             return replay
         preview = self._build_preview(request.row, for_update=True)
         if preview.fingerprint != request.preview_fingerprint:
             raise RuntimeError("historical_order_candidate_stale")
         if preview.outcome is HistoricalOrderOutcome.UNMATCHED_CASE:
             return _unmatched_receipt(preview)
-        assignment_ids = self._scheduling_historical_assignment.append_completed_assignments(
+        assignment_ids = self._append_assignment_candidates(preview)
+        receipt = self._repository.persist(request, preview, assignment_ids)
+        self._rebuild_actual_service_period(request, preview)
+        return receipt
+
+    def _append_assignment_candidates(
+        self, preview: HistoricalOrderAdoptionPreview
+    ) -> tuple[int, ...]:
+        if preview.case_no is None:
+            return ()
+        return self._scheduling_historical_assignment.append_completed_assignments(
             preview.case_no,
             tuple(
                 (item.staff_id, item.start_date, item.end_date)
@@ -150,7 +172,37 @@ class HistoricalOrderAdoptionWorkflow:
                 if item.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
             ),
         )
-        return self._repository.persist(request, preview, assignment_ids)
+
+    def _rebuild_actual_service_period(self, request, preview) -> None:
+        if self._actual_start_rebuilder is None:
+            return
+        if (
+            preview.outcome is not HistoricalOrderOutcome.ADOPTED
+            or preview.case_no is None
+            or request.row.asserted_status is not HistoricalOrderSourceStatus.DEPOSIT_PAID
+        ):
+            return
+        actual_start_date = request.row.actual_start_date
+        if not isinstance(actual_start_date, date):
+            return
+        current = self._repository.load_order(
+            preview.case_no,
+            request.row.client_name,
+            for_update=True,
+        )
+        if (
+            current is None
+            or not isinstance(current.planned_start_date, date)
+            or current.planned_start_date == actual_start_date
+        ):
+            return
+        self._actual_start_rebuilder.apply_in_current_unit_of_work(
+            case_no=preview.case_no,
+            actual_start_date=actual_start_date,
+            source_identity=request.row.source_identity,
+            actor=request.actor,
+            correlation_id=request.correlation_id,
+        )
 
     def _replay(self, request, command_fingerprint):
         stored = self._repository.find_receipt(
@@ -177,25 +229,50 @@ class HistoricalOrderAdoptionWorkflow:
         current = self._repository.load_order(row.case_no, row.client_name, for_update=for_update)
         if current is None:
             return _unmatched_preview(row)
+        source_issues = row.issue_codes
+        if current.client_name != row.client_name:
+            source_issues = tuple(
+                sorted(set(source_issues + ("historical_client_name_mismatch",)))
+            )
         source = HistoricalOrderSourceFacts(
             row.asserted_status,
             row.actual_start_date,
             row.actual_end_date,
-            row.issue_codes,
+            source_issues,
         )
         candidate = build_historical_order_candidate(current, source)
-        pairings = self._pairings(row, current.case_no, candidate, for_update)
+        pairings = self._pairings(row, current, candidate, for_update)
         issues = tuple(sorted(set(candidate.issue_codes + tuple(code for item in pairings for code in item.issue_codes))))
         return _preview(row, current, candidate, pairings, issues)
 
-    def _pairings(self, row, case_no, candidate, for_update):
-        existing = self._repository.active_assignments(case_no, for_update=for_update)
+    def _pairings(self, row, current, candidate, for_update):
+        existing = self._repository.active_assignments(
+            current.case_no, for_update=for_update
+        )
+        service_assignment_allowed = _service_assignment_allowed(
+            row, current, candidate
+        )
         result = []
         for source in row.caregivers:
-            result.append(self._pairing(source, existing, candidate, for_update))
+            result.append(
+                self._pairing(
+                    source,
+                    existing,
+                    candidate,
+                    service_assignment_allowed,
+                    for_update,
+                )
+            )
         return tuple(result)
 
-    def _pairing(self, source, existing, candidate, for_update):
+    def _pairing(
+        self,
+        source,
+        existing,
+        candidate,
+        service_assignment_allowed,
+        for_update,
+    ):
         masked = _mask_name(source.name)
         if not source.name:
             return HistoricalPairingCandidate(source.ordinal, masked, None, source.start_date, source.end_date, HistoricalPairingResolution.BLANK, ())
@@ -218,9 +295,24 @@ class HistoricalOrderAdoptionWorkflow:
                 "historical_assignment_evidence_insufficient",
                 staff_ids[0],
             )
-        if candidate.outcome is not HistoricalOrderOutcome.ADOPTED or candidate.after_status is not OrderLifecycleStatus.COMPLETED or existing:
+        if (
+            candidate.outcome is not HistoricalOrderOutcome.ADOPTED
+            or not service_assignment_allowed
+            or existing
+        ):
             return _pairing_issue(source, masked, HistoricalPairingResolution.ASSIGNMENT_CONFLICT, "historical_assignment_conflict", staff_ids[0])
         return HistoricalPairingCandidate(source.ordinal, masked, staff_ids[0], source.start_date, source.end_date, HistoricalPairingResolution.ASSIGNMENT_CANDIDATE, source.issue_codes)
+
+
+def _service_assignment_allowed(row, current, candidate) -> bool:
+    """Status 1 is deposit-paid; service evidence requires a known HCM baseline."""
+    return (
+        candidate.outcome is HistoricalOrderOutcome.ADOPTED
+        and row.asserted_status is HistoricalOrderSourceStatus.DEPOSIT_PAID
+        and isinstance(current.planned_start_date, date)
+        and isinstance(row.actual_start_date, date)
+        and row.actual_start_date != current.planned_start_date
+    )
 
 
 def _preview(row, current, candidate, pairings, issues):

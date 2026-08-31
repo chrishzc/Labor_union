@@ -26,14 +26,15 @@ class MySqlHistoricalOrderAdoptionRepository:
         self._connection = connection
 
     def load_order(self, case_no, client_name, *, for_update):
+        del client_name
         suffix = " FOR UPDATE" if for_update else ""
         with _cursor(self._connection) as cursor:
             cursor.execute(
                 "SELECT o.case_no,o.status,o.lifecycle_version,o.start_date,"
                 "o.actual_start_date,o.actual_end_date,c.name "
                 "FROM orders o JOIN clients c ON c.id=o.client_id "
-                "WHERE o.case_no=%s AND c.name=%s" + suffix,
-                (case_no, client_name),
+                "WHERE o.case_no=%s" + suffix,
+                (case_no,),
             )
             rows = cursor.fetchall()
         if len(rows) != 1:
@@ -173,7 +174,8 @@ class MySqlHistoricalOrderAdoptionRepository:
         snapshot = {
             "outcome": preview.outcome.value,
             "issue_codes": preview.issue_codes,
-            "payroll_rebuild_status": "blocked_missing_official_service_facts",
+            "payroll_rebuild_status": "delegated_to_actual_start_when_required",
+            **_operational_baseline_snapshot(request, preview),
         }
         with _cursor(self._connection) as cursor:
             cursor.execute(
@@ -281,6 +283,39 @@ def _event_snapshot(request, preview):
         "issue_codes": preview.issue_codes,
         "side_effects_suppressed": True,
     }
+
+
+def _operational_baseline_snapshot(request, preview):
+    source_status = getattr(request.row.asserted_status, "value", None)
+    step, actual_start = _operational_baseline_step(preview)
+    return {
+        "historical_source_status": source_status,
+        "operational_baseline_step": step,
+        "operational_baseline_actual_start_date": (
+            actual_start.isoformat() if actual_start is not None else None
+        ),
+    }
+
+
+def _operational_baseline_step(preview):
+    if preview.outcome is not HistoricalOrderOutcome.ADOPTED:
+        return None, None
+    status = OrderLifecycleStatus(str(preview.after_status))
+    date_patch = dict(preview.date_patch)
+    actual_start = date_patch.get("actual_start_date")
+    if status is OrderLifecycleStatus.CANCELLED:
+        return None, None
+    if status is OrderLifecycleStatus.COMPLETED:
+        return 11, _optional_date(actual_start)
+    if actual_start is not None and status in {
+        OrderLifecycleStatus.DISCUSSION,
+        OrderLifecycleStatus.ESTABLISHED,
+        OrderLifecycleStatus.IN_SERVICE,
+    }:
+        return 10, _optional_date(actual_start)
+    if status is OrderLifecycleStatus.ESTABLISHED:
+        return 9, None
+    return None, None
 
 
 def _optional_date(value):

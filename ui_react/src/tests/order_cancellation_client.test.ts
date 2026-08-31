@@ -53,7 +53,10 @@ const previewFixture = {
   payroll_impact: {
     case_no: 'CASE-1', expected_payroll_version: 0, resulting_payroll_version: 1,
     payroll: { assignments: [], earned_floor_fee: { amount: 0 }, total_payable: { amount: 0 }, fingerprint: 'd'.repeat(64) },
-    carried_rate_snapshots: [], actions: [], blockers: [], fingerprint: 'e'.repeat(64),
+    carried_rate_snapshots: [], actions: [], special_pay_events: [{
+      assignment_identity: 'CASE-1:g2:a1', assignment_sequence: 1,
+      service_dates: ['2026-08-08'],
+    }], blockers: [], fingerprint: 'e'.repeat(64),
   },
   lifecycle_impact: {
     case_no: 'CASE-1', before_status: '訂單成立', after_status: '訂單取消', actual_end_date: null,

@@ -1,9 +1,11 @@
-"""Overlay immutable historical-order terminal assertions onto the operational timeline.
+"""Overlay immutable Historical Orders baselines onto the operational timeline.
 
-This is intentionally query-only.  It never fabricates Matching, Contract,
-Finance, or Scheduling owner roots; it only marks missing predecessor stages as
-historically bypassed when an adopted historical order already proves a later
-operational position.
+Historical evidence may complete predecessor steps, but it never fabricates an
+owning Domain root.  Once a baseline exists, the selected baseline step remains
+immutable while current/future owner facts decide normal forward progression.
+A concrete non-terminal predecessor owner fact may also move the current step
+backward; a merely unavailable predecessor remains a historical gap and is not
+interpreted as a new invalidation.
 """
 
 from __future__ import annotations
@@ -32,6 +34,9 @@ class HistoricalStageBaselineFacts:
     adoption_receipt_id: int
     lifecycle_status: OrderLifecycleStatus
     actual_start_date: date | None
+    selected_step: int | None = None
+    baseline_event_identity: str | None = None
+    baseline_event_version: int | None = None
 
 
 class HistoricalStageBaselineRepository(Protocol):
@@ -45,7 +50,7 @@ class OperationalTimelineQueryPort(Protocol):
 
 
 class HistoricalStageBaselineOverlayService:
-    """Keep the normal timeline intact and fill only historical predecessor gaps."""
+    """Keep immutable historical predecessors and fresh owner progression together."""
 
     def __init__(
         self,
@@ -71,7 +76,12 @@ class HistoricalStageBaselineOverlayService:
         etag = _digest(
             {
                 "items": tuple(
-                    (item.case_no, item.base_revision, item.current_stage_code, item.projection_digest)
+                    (
+                        item.case_no,
+                        item.base_revision,
+                        item.current_stage_code,
+                        item.projection_digest,
+                    )
                     for item in items
                 ),
                 "next_cursor": page.next_cursor,
@@ -81,15 +91,26 @@ class HistoricalStageBaselineOverlayService:
 
 
 def historical_baseline_step(facts: HistoricalStageBaselineFacts) -> int | None:
-    """Map only unambiguous historical states to a current operational step."""
+    """Return the immutable selected step, falling back only for legacy adoption rows."""
 
+    if facts.selected_step is not None:
+        if isinstance(facts.selected_step, bool) or not 1 <= facts.selected_step <= 11:
+            raise ValueError("historical_stage_baseline_step_invalid")
+        return facts.selected_step
     if facts.lifecycle_status is OrderLifecycleStatus.COMPLETED:
         return 11
     if (
-        facts.lifecycle_status is OrderLifecycleStatus.DISCUSSION
-        and facts.actual_start_date is not None
+        facts.actual_start_date is not None
+        and facts.lifecycle_status
+        in {
+            OrderLifecycleStatus.DISCUSSION,
+            OrderLifecycleStatus.ESTABLISHED,
+            OrderLifecycleStatus.IN_SERVICE,
+        }
     ):
         return 10
+    if facts.lifecycle_status is OrderLifecycleStatus.ESTABLISHED:
+        return 9
     return None
 
 
@@ -99,32 +120,29 @@ def _overlay(
 ) -> OrderOperationalTimeline:
     if facts is None:
         return timeline
-    if facts.lifecycle_status is OrderLifecycleStatus.CANCELLED:
+    if facts.selected_step is None and facts.lifecycle_status is OrderLifecycleStatus.CANCELLED:
         return _cancelled_timeline(timeline, facts)
     selected_step = historical_baseline_step(facts)
     if selected_step is None:
         return timeline
 
-    selected_stage = 7 if selected_step == 11 else 6
-    stages = tuple(
-        _baseline_stage(stage, facts)
-        if stage.ordinal < selected_stage and stage.status != "completed"
-        else stage
-        for stage in timeline.stages
-    )
+    current_step = _current_step(timeline.sop_steps, selected_step)
+    historical_cutoff = min(selected_step, current_step)
+    current_stage_ordinal = _stage_ordinal_for_step(current_step)
+
     steps = tuple(
         _baseline_step(step, facts)
-        if step.ordinal < selected_step and step.status != "completed"
+        if step.ordinal < historical_cutoff and step.status != "completed"
         else step
         for step in timeline.sop_steps
     )
-    current_stage_code = (
-        "settlement_payout"
-        if selected_step == 11
-        else "settlement_payout"
-        if stages[5].status == "completed"
-        else "active_service"
+    stages = tuple(
+        _baseline_stage(stage, facts)
+        if stage.ordinal < current_stage_ordinal and stage.status != "completed"
+        else stage
+        for stage in timeline.stages
     )
+    current_stage_code = timeline.stages[current_stage_ordinal - 1].code
     return _with_projection_digest(
         timeline,
         current_stage_code=current_stage_code,
@@ -133,7 +151,56 @@ def _overlay(
     )
 
 
+def _current_step(
+    steps: tuple[SopStepProjection, ...],
+    selected_step: int,
+) -> int:
+    """Project current work without treating old missing history as a new regression.
+
+    Before the immutable baseline, only a concrete current owner state
+    (not_started/in_progress/blocked) may reopen a step.  ``unavailable`` alone
+    remains an allowed historical predecessor gap because H-06 requires a typed
+    owner invalidation rather than inference from missing lineage.  From the
+    selected step onward, the first non-completed owner projection is current.
+    """
+
+    if tuple(step.ordinal for step in steps) != tuple(range(1, 12)):
+        raise ValueError("historical_stage_baseline_steps_invalid")
+    for step in steps:
+        if step.ordinal < selected_step:
+            if step.status in {"not_started", "in_progress", "blocked"}:
+                return step.ordinal
+            continue
+        if step.status != "completed":
+            return step.ordinal
+    return 11
+
+
+def _stage_ordinal_for_step(step: int) -> int:
+    if step == 1:
+        return 1
+    if 2 <= step <= 4:
+        return 2
+    if step == 5:
+        return 3
+    if 6 <= step <= 8:
+        return 4
+    if step == 9:
+        return 5
+    if step == 10:
+        return 6
+    if step == 11:
+        return 7
+    raise ValueError("historical_stage_baseline_step_invalid")
+
+
 def _baseline_source(facts: HistoricalStageBaselineFacts) -> SourceLineage:
+    if facts.baseline_event_identity is not None:
+        return SourceLineage(
+            "Historical Orders",
+            facts.baseline_event_identity,
+            facts.baseline_event_version,
+        )
     return SourceLineage(
         "Historical Orders",
         f"historical-order-adoption-receipt:{facts.adoption_receipt_id}",

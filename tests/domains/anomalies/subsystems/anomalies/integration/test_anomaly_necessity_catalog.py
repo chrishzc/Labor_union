@@ -1,21 +1,14 @@
 """
 File: test_anomaly_necessity_catalog.py
-Description: 驗證 current-state successor 只註冊仍具真實營運情境的 9 個 current issue codes。
+Description: 驗證 current-state successor 只註冊仍具真實營運情境的 2 個 current issue codes。
 """
 
 from domains.anomalies.registry import default_anomaly_registry
 
 
 EXPECTED_CURRENT_CODES = {
-    "SCHEDULE-006",
-    "GOVSUB-001",
-    "GOVSUB-002",
-    "GOVSUB-004",
-    "BECLASS-001",
-    "SCHEDULE-002",
-    "SCHEDULE-003",
+    "GOVSUB-007",
     "LINE-006",
-    "LINE-004",
 }
 
 
@@ -23,8 +16,8 @@ def test_default_registry_has_exact_necessity_partition() -> None:
     registry = default_anomaly_registry()
 
     assert set(registry.codes()) == EXPECTED_CURRENT_CODES
-    assert len(registry.codes()) == 9
-    assert len(registry.active_codes()) == 9
+    assert len(registry.codes()) == 2
+    assert len(registry.active_codes()) == 2
     assert registry.target_active_codes() == registry.active_codes()
     assert registry.work_item_codes() == ()
     assert registry.retired_codes() == ()

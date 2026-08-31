@@ -17,7 +17,7 @@ export interface HistoricalOrderWorkbookPreviewModel {
   evidenceOnlyPairingCount: number;
   statusCounts: {
     cancelled0: number;
-    completed1: number;
+    depositPaid1: number;
     discussion2: number;
     invalidOrBlank: number;
   };
@@ -51,7 +51,7 @@ export function adaptHistoricalOrderWorkbookPreview(
     evidenceOnlyPairingCount: preview.evidence_only_pairing_count,
     statusCounts: {
       cancelled0: preview.status_counts.cancelled_0,
-      completed1: preview.status_counts.completed_1,
+      depositPaid1: preview.status_counts.deposit_paid_1,
       discussion2: preview.status_counts.discussion_2,
       invalidOrBlank: preview.status_counts.invalid_or_blank,
     },

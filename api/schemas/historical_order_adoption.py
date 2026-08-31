@@ -10,13 +10,13 @@ class HistoricalOrderStatusCountsView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     cancelled_0: int = Field(ge=0)
-    completed_1: int = Field(ge=0)
+    deposit_paid_1: int = Field(ge=0)
     discussion_2: int = Field(ge=0)
     invalid_or_blank: int = Field(ge=0)
 
     @property
     def total(self) -> int:
-        return self.cancelled_0 + self.completed_1 + self.discussion_2 + self.invalid_or_blank
+        return self.cancelled_0 + self.deposit_paid_1 + self.discussion_2 + self.invalid_or_blank
 
 
 class HistoricalOrderWorkbookPreviewView(BaseModel):

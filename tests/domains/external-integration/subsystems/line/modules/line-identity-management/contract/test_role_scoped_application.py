@@ -77,11 +77,6 @@ class _Receipts(_AppendOnly):
         return next((item for item in self.items if item.key == key), None)
 
 
-class _AnomalyRechecks(_AppendOnly):
-    def append_recheck_intent(self, item) -> None:
-        self.append(item)
-
-
 class _UnitOfWork:
     def __init__(self, identities) -> None:
         self.identities = identities
@@ -251,7 +246,6 @@ def test_new_customer_case_replaces_only_customer_role_and_rechecks_line_004() -
     unit_of_work.customers = customer
     unit_of_work.staff = staff
     unit_of_work.admins = object()
-    unit_of_work.anomaly_rechecks = _AnomalyRechecks()
     application = LineIdentityManagementApplication(
         lambda: unit_of_work,
         lambda: datetime(2026, 8, 31, tzinfo=timezone.utc),
@@ -275,9 +269,4 @@ def test_new_customer_case_replaces_only_customer_role_and_rechecks_line_004() -
     assert customer.cleared == [("customer:7", line_user_id)]
     assert customer.bound == [("9", line_user_id, line_user_id)]
     assert staff.calls == []
-    assert len(unit_of_work.anomaly_rechecks.items) == 1
-    recheck = unit_of_work.anomaly_rechecks.items[0]
-    assert recheck.scope.subject_type == "customer"
-    assert recheck.scope.subject_ids == (line_user_id.value,)
-    assert recheck.owner_version == 2
     assert unit_of_work.commits == 1

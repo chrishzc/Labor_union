@@ -14,7 +14,7 @@ import re
 from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
 
-from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.orders.historical_adoption import HistoricalOrderSourceStatus
 from shared_kernel.fingerprints import fingerprint_payload
 
 
@@ -27,9 +27,9 @@ _FIELD_ALIASES = {
 }
 _STAFF_HEADER = re.compile(r"^(staff_name|服務人員|月嫂|月嫂姓名)$")
 _STATUS_MAP = {
-    "0": OrderLifecycleStatus.CANCELLED,
-    "1": OrderLifecycleStatus.COMPLETED,
-    "2": OrderLifecycleStatus.DISCUSSION,
+    "0": HistoricalOrderSourceStatus.CANCELLED,
+    "1": HistoricalOrderSourceStatus.DEPOSIT_PAID,
+    "2": HistoricalOrderSourceStatus.DISCUSSION,
 }
 
 
@@ -50,7 +50,7 @@ class HistoricalOrderWorkbookRow:
     source_fingerprint: str
     case_no: str | None
     client_name: str | None
-    asserted_status: OrderLifecycleStatus | None
+    asserted_status: HistoricalOrderSourceStatus | None
     actual_start_date: date | None
     actual_end_date: date | None
     caregivers: tuple[HistoricalCaregiverSource, ...]
@@ -83,7 +83,7 @@ def load_historical_order_workbook(path: str | Path, sheet: str | None = None) -
     )
 
 
-def parse_historical_status(value) -> OrderLifecycleStatus | None:
+def parse_historical_status(value) -> HistoricalOrderSourceStatus | None:
     if _blank(value):
         return None
     text = str(value).strip()

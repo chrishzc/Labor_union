@@ -1,6 +1,6 @@
 """
 File: tests/domains/orders/test_historical_order_adoption.py
-Description: 驗證歷史狀態、nullable日期、六欄工作簿、精確案件匹配與 replay 契約。
+Description: 驗證歷史狀態、nullable日期、六欄工作簿、唯一案號匹配與 replay 契約。
 """
 
 from __future__ import annotations
@@ -16,8 +16,10 @@ from domains.orders.historical_adoption import (
     HistoricalOrderCurrentFacts,
     HistoricalOrderOutcome,
     HistoricalOrderSourceFacts,
+    HistoricalOrderSourceStatus,
     build_historical_order_candidate,
 )
+from domains.orders.actual_start import calculate_service_dates
 from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.fingerprints import fingerprint_payload
 from infrastructure.mysql.historical_order_adoption_repository import (
@@ -31,6 +33,9 @@ from subsystems.orders.historical_adoption_workflow import (
     HistoricalOrderAdoptionWorkflow,
     HistoricalPairingResolution,
 )
+from subsystems.orders.historical_actual_start_rebuild import (
+    HistoricalActualStartRebuilder,
+)
 from subsystems.orders.historical_order_workbook import (
     load_historical_order_workbook,
     parse_historical_status,
@@ -38,9 +43,9 @@ from subsystems.orders.historical_order_workbook import (
 
 
 def test_status_profile_accepts_only_zero_one_two():
-    assert parse_historical_status(0) is OrderLifecycleStatus.CANCELLED
-    assert parse_historical_status("1.0") is OrderLifecycleStatus.COMPLETED
-    assert parse_historical_status(2) is OrderLifecycleStatus.DISCUSSION
+    assert parse_historical_status(0) is HistoricalOrderSourceStatus.CANCELLED
+    assert parse_historical_status("1.0") is HistoricalOrderSourceStatus.DEPOSIT_PAID
+    assert parse_historical_status(2) is HistoricalOrderSourceStatus.DISCUSSION
     assert parse_historical_status(None) is None
     assert parse_historical_status(3) is None
     assert parse_historical_status("訂單完成") is None
@@ -62,7 +67,7 @@ def test_numeric_zero_status_has_a_distinct_source_fingerprint_from_blank(tmp_pa
     zero = load_historical_order_workbook(zero_path).rows[0]
     blank = load_historical_order_workbook(blank_path).rows[0]
 
-    assert zero.asserted_status is OrderLifecycleStatus.CANCELLED
+    assert zero.asserted_status is HistoricalOrderSourceStatus.CANCELLED
     assert blank.asserted_status is None
     assert zero.source_fingerprint != blank.source_fingerprint
 
@@ -79,21 +84,21 @@ def test_six_column_workbook_distinguishes_zero_one_two_and_invalid_statuses(tmp
     rows = load_historical_order_workbook(path).rows
 
     assert tuple(row.asserted_status for row in rows) == (
-        OrderLifecycleStatus.CANCELLED,
-        OrderLifecycleStatus.COMPLETED,
-        OrderLifecycleStatus.DISCUSSION,
+        HistoricalOrderSourceStatus.CANCELLED,
+        HistoricalOrderSourceStatus.DEPOSIT_PAID,
+        HistoricalOrderSourceStatus.DISCUSSION,
         None,
     )
 
 
 def test_valid_status_is_adopted_when_dates_are_null():
     current = _current(OrderLifecycleStatus.DISCUSSION)
-    source = HistoricalOrderSourceFacts(OrderLifecycleStatus.COMPLETED, None, None)
+    source = HistoricalOrderSourceFacts(HistoricalOrderSourceStatus.DEPOSIT_PAID, None, None)
 
     candidate = build_historical_order_candidate(current, source)
 
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
-    assert candidate.after_status is OrderLifecycleStatus.COMPLETED
+    assert candidate.after_status is OrderLifecycleStatus.ESTABLISHED
     assert candidate.date_patch == ()
     assert candidate.resulting_version == 4
 
@@ -101,7 +106,7 @@ def test_valid_status_is_adopted_when_dates_are_null():
 def test_historical_start_matching_hcm_plan_does_not_create_actual_start():
     current = _current(OrderLifecycleStatus.DISCUSSION, planned_start=date(2025, 1, 3))
     source = HistoricalOrderSourceFacts(
-        OrderLifecycleStatus.COMPLETED,
+        HistoricalOrderSourceStatus.DEPOSIT_PAID,
         date(2025, 1, 3),
         date(2025, 1, 31),
     )
@@ -116,7 +121,7 @@ def test_historical_start_matching_hcm_plan_does_not_create_actual_start():
 def test_historical_start_different_from_hcm_plan_becomes_actual_start():
     current = _current(OrderLifecycleStatus.COMPLETED, planned_start=date(2025, 1, 2))
     source = HistoricalOrderSourceFacts(
-        OrderLifecycleStatus.COMPLETED,
+        HistoricalOrderSourceStatus.DEPOSIT_PAID,
         date(2025, 1, 3),
         date(2025, 1, 31),
     )
@@ -125,6 +130,19 @@ def test_historical_start_different_from_hcm_plan_becomes_actual_start():
 
     assert candidate.date_patch == (("actual_start_date", date(2025, 1, 3)),)
     assert all(field != "actual_end_date" for field, _value in candidate.date_patch)
+
+
+def test_historical_actual_start_rebuild_uses_order_rest_days_and_holidays():
+    assert calculate_service_dates(
+        date(2026, 8, 8),
+        3,
+        "週休1日",
+        (date(2026, 8, 10),),
+    ) == (
+        date(2026, 8, 8),
+        date(2026, 8, 11),
+        date(2026, 8, 12),
+    )
 
 
 def test_matching_hcm_plan_clears_previously_inferred_actual_start():
@@ -137,7 +155,7 @@ def test_matching_hcm_plan_clears_previously_inferred_actual_start():
     candidate = build_historical_order_candidate(
         current,
         HistoricalOrderSourceFacts(
-            OrderLifecycleStatus.COMPLETED,
+            HistoricalOrderSourceStatus.DEPOSIT_PAID,
             date(2025, 1, 2),
             date(2025, 1, 31),
         ),
@@ -149,20 +167,20 @@ def test_matching_hcm_plan_clears_previously_inferred_actual_start():
 def test_valid_historical_status_overwrites_current_value_without_false_warning():
     candidate = build_historical_order_candidate(
         _current(OrderLifecycleStatus.CANCELLED),
-        HistoricalOrderSourceFacts(OrderLifecycleStatus.COMPLETED, None, None),
+        HistoricalOrderSourceFacts(HistoricalOrderSourceStatus.DEPOSIT_PAID, None, None),
     )
 
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
-    assert candidate.after_status is OrderLifecycleStatus.COMPLETED
+    assert candidate.after_status is OrderLifecycleStatus.ESTABLISHED
     assert candidate.resulting_version == 4
     assert candidate.issue_codes == ()
 
 
 def test_same_status_and_dates_do_not_repeat_order_lifecycle_version():
-    current = _current(OrderLifecycleStatus.COMPLETED)
+    current = _current(OrderLifecycleStatus.ESTABLISHED)
     candidate = build_historical_order_candidate(
         current,
-        HistoricalOrderSourceFacts(OrderLifecycleStatus.COMPLETED, None, None),
+        HistoricalOrderSourceFacts(HistoricalOrderSourceStatus.DEPOSIT_PAID, None, None),
     )
 
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
@@ -264,19 +282,84 @@ def test_columns_after_canonical_six_are_ignored(tmp_path):
     assert row.actual_end_date == date(1904, 1, 3)
     assert tuple(item.name for item in row.caregivers) == ("月嫂甲",)
     assert tuple(item.resolution for item in preview.pairings) == (
-        HistoricalPairingResolution.ASSIGNMENT_CANDIDATE,
+        HistoricalPairingResolution.ASSIGNMENT_CONFLICT,
     )
-    assert preview.issue_codes == ()
+    assert preview.issue_codes == ("historical_assignment_conflict",)
 
 
-def test_single_unique_caregiver_with_interval_builds_completed_assignment_candidate(tmp_path):
+def test_deposit_paid_row_does_not_build_completed_assignment_candidate(tmp_path):
     path = _workbook(tmp_path, ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"], ["客戶甲", "CASE-1", 45937, 45978, 1, "月嫂甲"])
     row = load_historical_order_workbook(path).rows[0]
 
     preview = HistoricalOrderAdoptionWorkflow(_Repository(row), _UnitOfWork, _SchedulingHistoricalAssignment()).preview(row)
 
     assert preview.outcome is HistoricalOrderOutcome.ADOPTED
-    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CONFLICT
+
+
+def test_unique_case_number_adopts_client_name_suffix_with_review_evidence(tmp_path):
+    path = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "狀態"],
+        ["客戶甲-2", "CASE-1", 1],
+    )
+    row = load_historical_order_workbook(path).rows[0]
+
+    class CaseNumberRepository(_Repository):
+        def load_order(self, case_no, client_name, *, for_update):
+            del client_name, for_update
+            return _current(OrderLifecycleStatus.DISCUSSION) if case_no == "CASE-1" else None
+
+    preview = HistoricalOrderAdoptionWorkflow(
+        CaseNumberRepository(row), _UnitOfWork, _SchedulingHistoricalAssignment()
+    ).preview(row)
+
+    assert preview.outcome is HistoricalOrderOutcome.ADOPTED
+    assert preview.issue_codes == ("historical_client_name_mismatch",)
+
+
+def test_repository_loads_a_unique_case_without_using_source_client_name():
+    class Cursor:
+        def __init__(self):
+            self.statement = ""
+            self.parameters = ()
+
+        def execute(self, statement, parameters):
+            self.statement = statement
+            self.parameters = parameters
+
+        def fetchall(self):
+            return [{
+                "case_no": "CASE-1",
+                "name": "客戶甲",
+                "status": OrderLifecycleStatus.DISCUSSION.value,
+                "lifecycle_version": 3,
+                "start_date": None,
+                "actual_start_date": None,
+                "actual_end_date": None,
+            }]
+
+        def close(self):
+            return None
+
+    class Connection:
+        def __init__(self):
+            self.cursor_value = Cursor()
+
+        def cursor(self):
+            return self.cursor_value
+
+    connection = Connection()
+
+    current = MySqlHistoricalOrderAdoptionRepository(connection).load_order(
+        "CASE-1", "客戶甲-2", for_update=True
+    )
+
+    assert current is not None
+    assert current.client_name == "客戶甲"
+    assert connection.cursor_value.parameters == ("CASE-1",)
+    assert "c.name=%s" not in connection.cursor_value.statement
+    assert connection.cursor_value.statement.endswith("FOR UPDATE")
 
 
 def test_existing_assignment_never_builds_duplicate_assignment_candidate(tmp_path):
@@ -341,6 +424,119 @@ def test_unmatched_case_apply_is_a_zero_write_skip(tmp_path):
     assert repository.persist_count == 0
 
 
+def test_completed_historical_actual_start_delegates_formal_rebuild(tmp_path):
+    path = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態"],
+        ["客戶甲", "CASE-1", date(2026, 8, 7), date(1999, 1, 1), 1],
+    )
+    row = load_historical_order_workbook(path).rows[0]
+
+    class PersistingRepository(_Repository):
+        def load_order(self, case_no, client_name, *, for_update):
+            del case_no, client_name, for_update
+            return _current(
+                OrderLifecycleStatus.DISCUSSION,
+                planned_start=date(2026, 8, 6),
+            )
+
+        def persist(self, request, preview, assignment_ids):
+            self.persist_count += 1
+            return SimpleNamespace(
+                outcome=preview.outcome,
+                case_no=preview.case_no,
+                resulting_version=preview.resulting_version,
+                assignment_count=len(assignment_ids),
+                review_identity=None,
+                replayed=False,
+                preview_fingerprint=preview.fingerprint,
+            )
+
+    class Rebuilder:
+        def __init__(self):
+            self.calls = []
+
+        def apply_in_current_unit_of_work(self, **values):
+            self.calls.append(values)
+
+    repository = PersistingRepository(row)
+    rebuilder = Rebuilder()
+    workflow = HistoricalOrderAdoptionWorkflow(
+        repository,
+        _UnitOfWork,
+        _SchedulingHistoricalAssignment(),
+        rebuilder,
+    )
+    preview = workflow.preview(row)
+
+    workflow.apply(
+        HistoricalOrderAdoptionRequest(
+            row,
+            preview.fingerprint,
+            "historical-order:actual-start-rebuild",
+            "test-operator",
+            "verify formal rebuild delegation",
+            "historical-order:actual-start-rebuild:correlation",
+        )
+    )
+
+    assert repository.persist_count == 1
+    assert rebuilder.calls == [{
+        "case_no": "CASE-1",
+        "actual_start_date": date(2026, 8, 7),
+        "source_identity": row.source_identity,
+        "actor": "test-operator",
+        "correlation_id": "historical-order:actual-start-rebuild:correlation",
+    }]
+
+
+def test_historical_rebuilder_passes_recalculated_dates_to_canonical_actual_start():
+    class Planner:
+        def calculate(self, case_no, actual_start_date, *, for_update):
+            assert (case_no, actual_start_date, for_update) == (
+                "CASE-1",
+                date(2026, 8, 8),
+                True,
+            )
+            return (date(2026, 8, 8), date(2026, 8, 11))
+
+    class ActualStart:
+        def __init__(self):
+            self.applied = []
+
+        def preview(self, case_no, actual_start_date, *, recalculated_service_dates):
+            assert (case_no, actual_start_date, recalculated_service_dates) == (
+                "CASE-1",
+                date(2026, 8, 8),
+                (date(2026, 8, 8), date(2026, 8, 11)),
+            )
+            return SimpleNamespace(
+                order_version=4,
+                scheduling_version=5,
+                client_finance_version=6,
+                payroll_version=7,
+                fingerprint=fingerprint_payload({"preview": "historical"}),
+            )
+
+        def apply_in_current_unit_of_work(self, request, *, recalculated_service_dates):
+            self.applied.append((request, recalculated_service_dates))
+
+    actual_start = ActualStart()
+    HistoricalActualStartRebuilder(actual_start, Planner()).apply_in_current_unit_of_work(
+        case_no="CASE-1",
+        actual_start_date=date(2026, 8, 8),
+        source_identity="historical-orders:digest:row:5",
+        actor="test-operator",
+        correlation_id="historical-rebuild-correlation",
+    )
+
+    request, service_dates = actual_start.applied[0]
+    assert request.new_actual_start_date == date(2026, 8, 8)
+    assert request.expected_order_version.value == 4
+    assert request.idempotency_key.value.startswith("historical-actual-start:")
+    assert service_dates == (date(2026, 8, 8), date(2026, 8, 11))
+
+
 def test_same_source_and_fingerprint_replays_across_operator_metadata(tmp_path):
     path = _workbook(
         tmp_path,
@@ -376,6 +572,67 @@ def test_same_source_and_fingerprint_replays_across_operator_metadata(tmp_path):
 
     assert receipt.replayed is True
     assert repository.persist_count == 0
+
+
+def test_replayed_historical_actual_start_repairs_a_predelegation_receipt(tmp_path):
+    path = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態"],
+        ["客戶甲", "CASE-1", date(2026, 8, 8), None, 1],
+    )
+    row = load_historical_order_workbook(path).rows[0]
+
+    class ExistingReceiptRepository(_Repository):
+        def load_order(self, case_no, client_name, *, for_update):
+            del case_no, client_name, for_update
+            return _current(
+                OrderLifecycleStatus.COMPLETED,
+                planned_start=date(2026, 8, 7),
+                actual_start=date(2026, 8, 8),
+            )
+
+    class Rebuilder:
+        def __init__(self):
+            self.calls = []
+
+        def apply_in_current_unit_of_work(self, **values):
+            self.calls.append(values)
+
+    repository = ExistingReceiptRepository(row)
+    rebuilder = Rebuilder()
+    workflow = HistoricalOrderAdoptionWorkflow(
+        repository,
+        _UnitOfWork,
+        _SchedulingHistoricalAssignment(),
+        rebuilder,
+    )
+    preview = workflow.preview(row)
+    repository.receipt = {
+        "command_fingerprint": fingerprint_payload({
+            "source_identity": row.source_identity,
+            "source_fingerprint": row.source_fingerprint,
+        }).value,
+        "outcome": "adopted",
+        "case_no": "CASE-1",
+        "resulting_version": 4,
+        "assignment_count": 0,
+        "review_identity": None,
+        "preview_fingerprint": preview.fingerprint.value,
+    }
+    receipt = workflow.apply(
+        HistoricalOrderAdoptionRequest(
+            row,
+            preview.fingerprint,
+            "historical-order:replay-predelegation",
+            "test-operator",
+            "repair predelegation historical receipt",
+            "historical-order:replay-predelegation:correlation",
+        )
+    )
+
+    assert receipt.replayed is True
+    assert repository.persist_count == 0
+    assert rebuilder.calls[0]["actual_start_date"] == date(2026, 8, 8)
 
 
 def test_multiple_matching_sheets_fail_closed(tmp_path):

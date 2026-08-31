@@ -26,23 +26,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_subject_identity_and_key_are_collation_independent() -> None:
-    subject = {"batch_id": 7, "bank_fact_identity": "bf-1"}
-    canonical = canonical_subject_identity({"bank_fact_identity": "bf-1", "batch_id": 7})
-    assert canonical == '{"bank_fact_identity":"bf-1","batch_id":7}'
+    subject = {"payable_identity": "payable-7"}
+    canonical = canonical_subject_identity(subject)
+    assert canonical == '{"payable_identity":"payable-7"}'
     payload = json.dumps(
-        {"v": 1, "definition_code": "GOVSUB-002", "subject_identity": subject},
+        {"v": 1, "definition_code": "GOVSUB-007", "subject_identity": subject},
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
     expected = "ci_" + hmac.new(b"test-secret", payload, hashlib.sha256).hexdigest()
-    assert build_issue_key("test-secret", "GOVSUB-002", subject) == expected
-    assert build_issue_key("test-secret", "GOVSUB-002", dict(reversed(tuple(subject.items())))) == expected
+    assert build_issue_key("test-secret", "GOVSUB-007", subject) == expected
+    assert build_issue_key("test-secret", "GOVSUB-007", dict(reversed(tuple(subject.items())))) == expected
 
 
 def test_issue_key_requires_injected_secret() -> None:
     try:
-        build_issue_key("", "GOVSUB-002", {"bank_fact_identity": "bf-1"})
+        build_issue_key("", "GOVSUB-007", {"payable_identity": "payable-7"})
     except ValueError as error:
         assert str(error) == "issue identity secret is required"
     else:  # pragma: no cover - assertion form keeps the failure explicit
@@ -51,23 +51,23 @@ def test_issue_key_requires_injected_secret() -> None:
 
 def test_runtime_secret_is_only_used_through_key_composition() -> None:
     runtime = MySqlAnomalyRuntime(issue_identity_secret="test-secret")
-    assert runtime.current_issue_key("GOVSUB-001", {"bank_fact_identity": "bf-1"}).startswith("ci_")
+    assert runtime.current_issue_key("GOVSUB-007", {"payable_identity": "payable-7"}).startswith("ci_")
     try:
-        MySqlAnomalyRuntime().current_issue_key("GOVSUB-001", {"bank_fact_identity": "bf-1"})
+        MySqlAnomalyRuntime().current_issue_key("GOVSUB-007", {"payable_identity": "payable-7"})
     except RuntimeError as error:
         assert str(error) == "anomaly issue identity secret not composed"
     else:  # pragma: no cover
         raise AssertionError("runtime without a secret must fail closed")
 
 
-def test_subject_schema_is_closed_for_all_fifteen_target_codes() -> None:
-    assert len(CURRENT_ISSUE_SUBJECT_FIELDS) == 15
-    identity = {"assignment_id_a": "a-1", "assignment_id_b": "a-2"}
-    assert canonical_subject_identity_for_code("SCHEDULE-003", identity) == (
-        '{"assignment_id_a":"a-1","assignment_id_b":"a-2"}'
+def test_subject_schema_is_closed_for_both_current_codes() -> None:
+    assert set(CURRENT_ISSUE_SUBJECT_FIELDS) == {"GOVSUB-007", "LINE-006"}
+    identity = {"case_no": "CASE-1", "notification_reason": "recipient_unavailable"}
+    assert canonical_subject_identity_for_code("LINE-006", identity) == (
+        '{"case_no":"CASE-1","notification_reason":"recipient_unavailable"}'
     )
     try:
-        canonical_subject_identity_for_code("SCHEDULE-003", {**identity, "extra": "x"})
+        canonical_subject_identity_for_code("LINE-006", {**identity, "extra": "x"})
     except ValueError as error:
         assert str(error) == "anomaly subject identity fields are not closed"
     else:  # pragma: no cover

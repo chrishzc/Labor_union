@@ -12,6 +12,9 @@ modules:
     test_root: tests/domains/orders/subsystems/orders/modules/historical-adoption/
   historical-stage-baseline:
     test_root: tests/domains/orders/subsystems/orders/modules/historical-stage-baseline/
+  historical-adoption-presentation:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/historical_order_workbook_client.test.ts
   historical-completion:
     layout_status: custom_current
     test_root: ui_react/src/tests/historical_completion.test.tsx
@@ -29,7 +32,6 @@ modules:
     test_root: ui_react/src/tests/order_service_completion_actions.test.tsx
 
 # Exceptions
-- `historical-adoption` — disposable-MySQL workbook integration remains at `tests/integration/test_historical_order_workbook.py`; it is a higher-boundary `layout_gap`, not duplicate owner-local coverage.
 - Current owner-local coverage includes Historical Adoption; cancellation route/read-model; actual-start workflow; calendar/detail/summary queries; lifecycle authoritative facts/loaders; reopen workflow/router; auto-completion API/routes/workflow; lifecycle control/deposit/impact-writer contracts; card/stage projections; historical review remediation API/workflow/repository; historical completion API/oracle/projector/query; service-date confirmation domain/router; historical operational baseline domain/catalog/API/workflow/repository/owner-vector; historical warning mapping; the historical baseline Orders owner adapter and six-owner adapter composition; the contract committed-day read-model helper; and the order-terms empty-staff mutex read-model guard.
 - Legacy Streamlit/UI API-client and UI-boundary tests under flat `tests/` remain deferred to UI retirement rather than being misfiled as current Orders owner-local coverage.
 - Cross-domain cancellation, terms-correction, and contract-completion flows that prove Scheduling, Client Finance, or Payroll impacts remain at their higher verification boundary; owner-local infrastructure helper guards may be extracted when their direct SUT belongs to one owner.

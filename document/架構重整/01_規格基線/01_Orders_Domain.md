@@ -174,7 +174,10 @@ pairing evidence或 assignment candidate；原檔 bytes 仍參與 content digest
 歷史訂單採納列若已唯一匹配既有 Order、但 status、月嫂或其他來源欄位仍有 issue，安全可採納欄位
 照既有規則保存，同時建立 immutable review evidence；不因 review 回滾同列合法 status／日期或配對
 evidence。Orders outbox 將 review 投影為 `HISTORICAL-ORDER-001`，identity 為 review identity，僅顯示
-遮罩案件識別與 issue codes。`case_no + client_name` 未匹配列固定不寫 Orders、review、outbox 或 anomaly。
+遮罩案件識別與 issue codes。案號空白、找不到或對到多筆 Order 的列固定不寫 Orders、review、outbox 或 anomaly；
+案號唯一且 `client_name` 非空時，`client_name` 僅為來源 evidence。即使姓名包含歷史次序尾碼（如 `-2`、`-3`）、
+多餘空白或舊拼寫而與 HCM 不同，仍採納該唯一案號的列，並保存 `historical_client_name_mismatch` review evidence；
+姓名空白固定捨棄。
 
 ### 歷史 review 更正來源重新匯入（2026-08-26，已人工確認）
 
@@ -359,9 +362,13 @@ AutoComplete 與 Scheduling leave-substitution Apply 必須序列化於同一 Or
 
 ### 3.7 Historical Order Adoption
 
-restricted historical source 只能補登既有 Order，不建立 Client／Order。唯一匹配鍵為
-`case_no + client_name` 精確相符；找不到固定為 `unmatched_case`，零 Domain mutation且不建立警示。
-source profile v1 只接受 0→取消、1→完成、2→洽談中；空白／其他值保存 review evidence。
+restricted historical source 只能補登既有 Order，不建立 Client／Order。唯一匹配鍵為唯一的
+`case_no`；非空的 `client_name` 只作來源 evidence，姓名差異建立 review evidence但不阻擋採納。案號或姓名空白、
+案號找不到或不唯一固定為 `unmatched_case`，零 Domain mutation且不建立警示。
+source profile v1 只接受 0→取消、1→已付訂金、2→洽談中；空白／其他值保存 review evidence。
+來源狀態是獨立歷史語意，不得直接視為 Orders lifecycle enum：`1` 表示客戶已付訂金，
+採納後 Orders lifecycle 為 `訂單成立`，Historical Operational Baseline 推進到第 5 步「確認事前服務日期」，
+不得因 `1` 直接標記完成服務或結案。
 
 2026-08-28 狀態判定補充裁決：numeric `0`不得因falsy正規化而與空白共用row fingerprint；
 Preview與Apply receipt必須由Orders回傳`0／1／2／invalid`守恆數量，管理端只顯示該typed結果，
@@ -373,9 +380,14 @@ HCM／Orders `start_date` 預期開始日相同，代表尚無實際服務開始
 `NULL`；兩者不同時，才以歷史來源開始日寫入 `actual_start_date`。歷史來源結束日不得寫入
 Orders `actual_end_date`；正式結束日以後續服務天數精算結果為準。此限制不移除 canonical 六欄
 工作簿的結束日期，也不妨礙該日期作為單一月嫂歷史 assignment 服務區間的來源 evidence。
-來源 terminal assertion 可在缺日期、取消原因、排班或付款時成立，
-但不得觸發現行通知、訂金、收付款或自動帳務；immutable lifecycle event／receipt 必須標示
-historical origin。無法精確配對、欄位不可解析或違反 Orders invariant 時建立 typed warning 並 fail closed。
+來源狀態斷言可在缺日期、取消原因或排班時成立。2026-08-31 人工裁決補充：若可採納的
+`1→已付訂金`來源列將歷史開始日寫為非空 `actual_start_date`，Apply 必須以該案件既有的
+`週休1日／週休2日／連續服務`與 canonical holiday calendar 重算正式服務日；歷史結束日仍不得直接寫入。
+同一 outer UoW 必須再由 Actual Start canonical writer 重建有效 Scheduling generation、由最後正式服務日
+得出 `actual_end_date`，並重算尚未結清的 Client Finance／Payroll projection 與日期。完整 service-time tuple
+沿用其精確 completion instant；缺失時以 Asia/Taipei 最後正式服務日的日終作為 completion instant。此重建
+不得建立付款、收款、訂金或現行通知事實，且 immutable lifecycle event／receipt 必須標示 historical origin。
+無法精確配對、欄位不可解析或違反 Orders invariant 時建立 typed warning 並 fail closed。
 此受限斷言只授權 Orders-owned historical adoption command，不授權一般 adapter 或 UI 寫入。Preview 零寫入，Apply 每列鎖定 fresh
 Order、驗證 version／fingerprint，並以單一 UoW 保存 projection、event、receipt、outbox及跨域 evidence。
 

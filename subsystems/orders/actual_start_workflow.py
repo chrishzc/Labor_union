@@ -199,22 +199,55 @@ class ActualStartWorkflow:
         self._unit_of_work_factory = unit_of_work_factory
         self._clock = clock
 
-    def preview(self, case_no: str, new_date: date) -> ActualStartPreview:
-        return self._build_preview(self._repository.load_for_preview(case_no), new_date)
+    def preview(
+        self,
+        case_no: str,
+        new_date: date,
+        *,
+        recalculated_service_dates: tuple[date, ...] | None = None,
+    ) -> ActualStartPreview:
+        return self._build_preview(
+            self._repository.load_for_preview(case_no),
+            new_date,
+            recalculated_service_dates,
+        )
 
-    def apply(self, request: ActualStartApplyRequest) -> OrderTermsReceipt:
-        command_fingerprint = _command_fingerprint(request)
-        staff_ids = self._repository.preflight_impacted_staff_ids(request.case_no)
+    def apply(
+        self,
+        request: ActualStartApplyRequest,
+        *,
+        recalculated_service_dates: tuple[date, ...] | None = None,
+    ) -> OrderTermsReceipt:
         with self._unit_of_work_factory() as unit_of_work:
-            replay = self._claim_or_replay(request, command_fingerprint)
-            if replay is not None:
-                return replay
-            context = self._repository.load_for_apply(request.case_no, staff_ids)
-            preview = self._fresh_preview(request, context, staff_ids)
-            receipt = _build_receipt(preview)
-            self._persist(request, preview, command_fingerprint, receipt)
+            receipt = self.apply_in_current_unit_of_work(
+                request,
+                recalculated_service_dates=recalculated_service_dates,
+            )
             unit_of_work.commit()
             return receipt
+
+    def apply_in_current_unit_of_work(
+        self,
+        request: ActualStartApplyRequest,
+        *,
+        recalculated_service_dates: tuple[date, ...] | None = None,
+    ) -> OrderTermsReceipt:
+        """Apply under a caller-owned outer transaction without a nested commit."""
+        command_fingerprint = _command_fingerprint(request)
+        staff_ids = self._repository.preflight_impacted_staff_ids(request.case_no)
+        replay = self._claim_or_replay(request, command_fingerprint)
+        if replay is not None:
+            return replay
+        context = self._repository.load_for_apply(request.case_no, staff_ids)
+        preview = self._fresh_preview(
+            request,
+            context,
+            staff_ids,
+            recalculated_service_dates,
+        )
+        receipt = _build_receipt(preview)
+        self._persist(request, preview, command_fingerprint, receipt)
+        return receipt
 
     def _claim_or_replay(self, request, command_fingerprint):
         state = self._repository.claim_actual_start_command(request, command_fingerprint)
@@ -227,19 +260,33 @@ class ActualStartWorkflow:
             _raise_missing_receipt(request)
         return None
 
-    def _fresh_preview(self, request, context, staff_ids):
+    def _fresh_preview(
+        self,
+        request,
+        context,
+        staff_ids,
+        recalculated_service_dates=None,
+    ):
         _validate_locked_staff_set(request, context.shared_facts, staff_ids)
         _validate_versions(request, context.shared_facts)
-        preview = self._build_preview(context, request.new_actual_start_date)
+        preview = self._build_preview(
+            context,
+            request.new_actual_start_date,
+            recalculated_service_dates,
+        )
         if preview.fingerprint != request.preview_fingerprint:
             raise _workflow_error(request, ErrorCategory.CONFLICT, "stale_preview", "The business facts changed after Preview.")
         _raise_if_impacts_blocked(request, preview)
         return preview
 
-    def _build_preview(self, context, new_date):
+    def _build_preview(self, context, new_date, recalculated_service_dates=None):
         facts = context.shared_facts
         reconfirmation = build_actual_start_reconfirmation_candidate(context.reconfirmation)
-        actual_start, scheduling = _actual_start_candidates(facts, new_date)
+        actual_start, scheduling = _actual_start_candidates(
+            facts,
+            new_date,
+            recalculated_service_dates,
+        )
         client_finance, payroll = _downstream_impacts(facts, actual_start, scheduling)
         lifecycle = _actual_start_lifecycle(facts, new_date, scheduling, client_finance, self._clock)
         return _preview_result(facts, actual_start, scheduling, client_finance, payroll, lifecycle, reconfirmation)
@@ -254,12 +301,13 @@ class ActualStartWorkflow:
         _persist_receipt(self._repository, request, command_fingerprint, receipt, event_id, scheduling_result.scheduling_receipt_id, lifecycle_id, control_event_id)
 
 
-def _actual_start_candidates(facts, new_date):
+def _actual_start_candidates(facts, new_date, recalculated_service_dates=None):
     actual_start = build_actual_start_candidate(
         _actual_start_order_facts(facts),
         _actual_start_scheduling_facts(facts),
         new_date,
         facts.order.terms.service_hours_per_day,
+        recalculated_service_dates,
     )
     return actual_start, to_scheduling_generation_candidate(actual_start)
 
@@ -324,14 +372,26 @@ def _persist_order_projection(repository, request, preview, receipt):
 
 
 def _staff_payment_due_date(preview):
+    return _calculated_staff_payment_due_date(
+        preview.actual_start.actual_end_date,
+        preview.client_finance_impact,
+        preview.is_full_subsidy_order,
+    )
+
+
+def _calculated_staff_payment_due_date(
+    actual_end_date,
+    client_finance_impact,
+    is_full_subsidy_order,
+):
     client_payable_amount = sum(
-        (stage_plan.amount.amount for stage_plan in preview.client_finance_impact.stage_plans),
+        (stage_plan.amount.amount for stage_plan in client_finance_impact.stage_plans),
         0,
     )
     return calculate_staff_payment_due_date(
-        preview.actual_start.actual_end_date,
+        actual_end_date,
         client_payable_amount,
-        preview.is_full_subsidy_order,
+        is_full_subsidy_order,
     )
 
 
@@ -362,7 +422,24 @@ def _actual_start_assignments(facts):
 
 def _downstream_impacts(facts, actual_start, scheduling):
     change_identity = f"actual-start:{actual_start.fingerprint.value}"
-    return _client_finance_impact(facts, actual_start, scheduling, change_identity), _payroll_impact(facts, scheduling, change_identity)
+    client = _client_finance_impact(
+        facts,
+        actual_start,
+        scheduling,
+        change_identity,
+    )
+    coverage = _subsidy_coverage(facts)
+    staff_payment_due_date = _calculated_staff_payment_due_date(
+        actual_start.actual_end_date,
+        client,
+        coverage.is_full_subsidy_order,
+    )
+    return client, _payroll_impact(
+        facts,
+        scheduling,
+        change_identity,
+        staff_payment_due_date,
+    )
 
 
 def _client_finance_impact(facts, actual_start, scheduling, change_identity):
@@ -371,18 +448,34 @@ def _client_finance_impact(facts, actual_start, scheduling, change_identity):
     return build_client_finance_terms_impact(client_source, facts.order.terms, scheduling, change_identity)
 
 
-def _payroll_impact(facts, scheduling, change_identity):
-    payroll_source = replace(facts.payroll, source_terms=tuple(replace(item, double_pay_dates=()) for item in facts.payroll.source_terms))
+def _payroll_impact(
+    facts,
+    scheduling,
+    change_identity,
+    staff_payment_due_date,
+):
+    payroll_source = replace(
+        facts.payroll,
+        staff_payment_due_date=staff_payment_due_date,
+        source_terms=tuple(
+            replace(item, double_pay_dates=())
+            for item in facts.payroll.source_terms
+        ),
+    )
     return build_payroll_terms_impact(payroll_source, scheduling, facts.order.terms, change_identity)
 
 
-def _preview_result(facts, actual_start, scheduling, client, payroll, lifecycle, reconfirmation):
-    payload = _preview_fingerprint_payload(facts, actual_start, client, payroll, lifecycle, reconfirmation)
-    coverage = derive_subsidy_coverage(
+def _subsidy_coverage(facts):
+    return derive_subsidy_coverage(
         facts.order.client_identity_status,
         Decimal(facts.order.terms.service_days * facts.order.terms.service_hours_per_day),
         Decimal(facts.order.terms.floor_fee.amount),
     )
+
+
+def _preview_result(facts, actual_start, scheduling, client, payroll, lifecycle, reconfirmation):
+    payload = _preview_fingerprint_payload(facts, actual_start, client, payroll, lifecycle, reconfirmation)
+    coverage = _subsidy_coverage(facts)
     return ActualStartPreview(facts.lifecycle.actual_start_date, actual_start.new_actual_start_date, actual_start, scheduling, facts.order.version, facts.scheduling.aggregate_version, facts.scheduling.generation_number, facts.client_finance.account_version, facts.payroll.payroll_version, client, payroll, lifecycle, reconfirmation, facts.order.client_identity_status, coverage.is_full_subsidy_order, fingerprint_payload(payload))
 
 

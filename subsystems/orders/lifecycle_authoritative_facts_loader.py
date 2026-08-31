@@ -241,6 +241,8 @@ def _completion_root_blockers(
 def _completion_instant(actual_end_date: date | None, start: time | None, end: time | None, offset: object) -> tuple[datetime | None, list[str]]:
     if actual_end_date is None:
         return None, ["auto_complete.actual_end_date_missing"]
+    if start is None and end is None and offset is None:
+        return datetime.combine(actual_end_date, time.max, _TAIPEI), []
     if start is None or end is None or offset not in {0, 1}:
         return None, ["auto_complete.service_time_terms_incomplete"]
     return datetime.combine(actual_end_date + timedelta(days=offset), end, _TAIPEI), []

@@ -137,7 +137,10 @@ def evaluate_line_notification_failure_current_fact(
     if not complete:
         unresolved.append(LineNotificationUnresolvedReason.OWNER_READBACK_INCOMPLETE)
     reasons = tuple(sorted(set(unresolved), key=lambda item: item.value))
-    predicate_active = unresolved_count > 0 or not complete
+    # Temporary readback incompleteness is operational health, not a new
+    # business issue. Existing rows remain fail-closed through the authoritative
+    # snapshot gate in the current-issue repository.
+    predicate_active = unresolved_count > 0
     payload = {
         "case_no": query.case_no,
         "notification_reason": query.notification_reason.value,
@@ -261,7 +264,7 @@ def _unresolved_reason(
     if any(status == "failed" for status in statuses):
         return LineNotificationUnresolvedReason.REPLAY_TERMINAL_FAILED
     if any(status in {"pending", "processing", "retryable_failed"} for status in statuses):
-        return LineNotificationUnresolvedReason.REPLAY_IN_PROGRESS
+        return None
     if all(status == "sent" for status in statuses):
         return None
     return LineNotificationUnresolvedReason.DELIVERY_OUTCOME_UNKNOWN

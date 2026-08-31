@@ -334,15 +334,8 @@ def resolve_alert_workflow(
 def default_anomaly_registry() -> AnomalyDefinitionRegistry:
     return AnomalyDefinitionRegistry(
         (
-            _schedule_coverage_definition(),
-            _government_subsidy_no_unique_batch_definition(),
-            _government_subsidy_ambiguous_allocation_definition(),
-            _government_subsidy_reversal_definition(),
-            _beclass_missing_definition(),
-            _schedule_replaced_assignment_definition(),
-            _schedule_overlap_definition(),
+            _government_return_outbound_overage_definition(),
             _line_notification_delivery_definition(),
-            _line_identity_conflict_definition(),
         )
     )
 

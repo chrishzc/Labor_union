@@ -17,6 +17,7 @@ from domains.case_import.client_beclass_binding import (
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql import hcm_beclass_reconciliation_adapter as reconciliation_adapter
 from subsystems.case_import import client_beclass_workbook_import as intake
+from subsystems.jobs.contracts import validate_command_key
 
 
 _DIGEST = "a" * 64
@@ -164,11 +165,12 @@ class _Reconciliation:
         return SimpleNamespace(status="reconciled")
 
 
-def _service(repository, reconciliation=None):
+def _service(repository, reconciliation=None, pairing_rechecks=None):
     return intake.ClientBeClassWorkbookImportService(
         repository,
         reconciliation or _Reconciliation(),
         lambda: MySqlUnitOfWork(repository.connection),
+        pairing_rechecks=pairing_rechecks,
     )
 
 
@@ -257,7 +259,7 @@ def test_apply_persists_explicit_cross_source_lineage_in_row_uow(monkeypatch):
     ]
 
 
-def test_reconciliation_appends_only_current_hcm_pairing_recheck_in_borrowed_uow(
+def test_reconciliation_does_not_append_retired_hcm_pairing_anomaly_recheck(
     monkeypatch,
 ):
     connection = _Connection()
@@ -289,8 +291,7 @@ def test_reconciliation_appends_only_current_hcm_pairing_recheck_in_borrowed_uow
     result = adapter.reconcile("HCM-0007")
 
     assert result.status == "reconciled"
-    assert [request.definition_code.value for request in requests] == ["BECLASS-001"]
-    assert requests[0].subject_ids == ("HCM-0007",)
+    assert requests == []
     assert connection.commits == 0
 
 
@@ -512,7 +513,13 @@ def test_existing_exact_accepted_source_can_link_explicit_review(monkeypatch):
 
 def test_existing_query_number_with_changed_payload_creates_review(monkeypatch):
     repository = _Repository()
-    service = _service(repository)
+    recheck_identities = []
+
+    class PairingRechecks:
+        def append_case_pairing_recheck(self, request):
+            recheck_identities.append(validate_command_key(request.intent_identity))
+
+    service = _service(repository, pairing_rechecks=PairingRechecks())
     monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row("CHANGED-1")))
     monkeypatch.setattr(intake, "record_invalid_beclass_row", lambda *args, **kwargs: "beclass-review:changed")
     preview = service.preview("ignored.xlsx")
@@ -529,6 +536,8 @@ def test_existing_query_number_with_changed_payload_creates_review(monkeypatch):
     assert receipt.existing_conflict_count == 1
     assert receipt.existing_source_count == 0
     assert repository.created == []
+    assert len(recheck_identities) == 1
+    assert recheck_identities[0].endswith(":import-003")
 
 
 @pytest.mark.parametrize(

@@ -7,9 +7,18 @@ from infrastructure.mysql.historical_order_adoption_cancellation_decorator impor
     MySqlHistoricalOrderAdoptionCancellationDecorator,
 )
 from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
+from infrastructure.mysql.historical_actual_start_date_planner import (
+    MySqlHistoricalActualStartDatePlanner,
+)
 from infrastructure.mysql.historical_order_workbook_import_repository import HistoricalOrderWorkbookImportRepository
+from infrastructure.mysql.order_actual_start_repository import MySqlOrderActualStartRepository
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from shared_kernel.clock import SystemBusinessClock
+from subsystems.orders.actual_start_workflow import ActualStartWorkflow
+from subsystems.orders.historical_actual_start_rebuild import (
+    HistoricalActualStartRebuilder,
+)
 from subsystems.orders.historical_adoption_workflow import HistoricalOrderAdoptionWorkflow
 from subsystems.orders.historical_order_workbook_import import HistoricalOrderWorkbookImportService
 import pymysql
@@ -29,6 +38,14 @@ def get_historical_order_workbook_import_service():
             MySqlHistoricalOrderAdoptionCancellationDecorator(connection),
             lambda: MySqlUnitOfWork(connection),
             MySqlHistoricalAssignmentWriter(connection),
+            HistoricalActualStartRebuilder(
+                ActualStartWorkflow(
+                    MySqlOrderActualStartRepository(connection),
+                    lambda: MySqlUnitOfWork(connection),
+                    SystemBusinessClock(),
+                ),
+                MySqlHistoricalActualStartDatePlanner(connection),
+            ),
         )
         yield HistoricalOrderWorkbookImportService(
             HistoricalOrderWorkbookImportRepository(connection),

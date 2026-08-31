@@ -64,7 +64,7 @@ def test_typed_error_is_preserved():
 def test_preview_and_receipt_reject_non_conserved_status_counts():
     preview_payload = _preview_payload()
     preview_payload["status_counts"] = {
-        "cancelled_0": 0, "completed_1": 0, "discussion_2": 0, "invalid_or_blank": 0,
+        "cancelled_0": 0, "deposit_paid_1": 0, "discussion_2": 0, "invalid_or_blank": 0,
     }
     client = HistoricalOrderAdoptionApiClient(
         base_url="http://api", headers={}, session=_Session(_Response(200, {"success": True, "data": preview_payload})),
@@ -74,7 +74,7 @@ def test_preview_and_receipt_reject_non_conserved_status_counts():
 
     receipt_payload = _receipt_payload()
     receipt_payload["status_counts"] = {
-        "cancelled_0": 0, "completed_1": 0, "discussion_2": 0, "invalid_or_blank": 0,
+        "cancelled_0": 0, "deposit_paid_1": 0, "discussion_2": 0, "invalid_or_blank": 0,
     }
     receipt_client = HistoricalOrderAdoptionApiClient(
         base_url="http://api", headers={}, session=_Session(_Response(200, {"success": True, "data": receipt_payload})),
@@ -91,7 +91,7 @@ def _preview_payload():
         "source_content_digest": "0" * 64, "sheet_identity": "1" * 64, "source_row_count": 1,
         "adopted_count": 1, "unmatched_case_count": 0, "review_required_count": 0, "current_conflict_count": 0,
         "assignment_candidate_count": 0, "evidence_only_pairing_count": 0,
-        "status_counts": {"cancelled_0": 0, "completed_1": 1, "discussion_2": 0, "invalid_or_blank": 0},
+        "status_counts": {"cancelled_0": 0, "deposit_paid_1": 1, "discussion_2": 0, "invalid_or_blank": 0},
         "preview_fingerprint": "2" * 64,
     }
 
@@ -101,5 +101,5 @@ def _receipt_payload():
         "source_content_digest": "0" * 64, "source_row_count": 1, "adopted_count": 1,
         "unmatched_case_count": 0, "review_required_count": 0, "current_conflict_count": 0,
         "assignments_created": 0, "replayed_rows": 0, "replayed_workbook": False,
-        "status_counts": {"cancelled_0": 0, "completed_1": 1, "discussion_2": 0, "invalid_or_blank": 0},
+        "status_counts": {"cancelled_0": 0, "deposit_paid_1": 1, "discussion_2": 0, "invalid_or_blank": 0},
     }

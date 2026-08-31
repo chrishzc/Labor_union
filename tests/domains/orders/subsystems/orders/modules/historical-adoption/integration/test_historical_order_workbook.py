@@ -13,6 +13,7 @@ from uuid import uuid4
 from openpyxl import Workbook
 import pytest
 
+from domains.orders.historical_adoption import HistoricalOrderSourceStatus
 from domains.orders.lifecycle import OrderLifecycleStatus
 from infrastructure.mysql.historical_order_adoption_repository import MySqlHistoricalOrderAdoptionRepository
 from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
@@ -61,7 +62,7 @@ def test_workbook_apply_uses_only_the_canonical_six_columns(tmp_path):
         replay = service.apply(str(workbook_path), f"historical-workbook:{token}", preview.preview_fingerprint, "historical-workbook-test", token)
 
         assert receipt.adopted_count == 2
-        assert receipt.assignments_created == 2
+        assert receipt.assignments_created == 0
         assert replay.replayed_workbook is True
         _assert_assignment_and_evidence(connection, first_case, second_case)
     finally:
@@ -99,7 +100,7 @@ def test_six_column_workbook_applies_zero_one_two_as_distinct_order_statuses(tmp
 
         expected_counts = {
             "cancelled_0": 1,
-            "completed_1": 1,
+            "deposit_paid_1": 1,
             "discussion_2": 1,
             "invalid_or_blank": 0,
         }
@@ -108,11 +109,40 @@ def test_six_column_workbook_applies_zero_one_two_as_distinct_order_statuses(tmp
         assert replay.status_counts.as_dict() == expected_counts
         assert replay.replayed_workbook is True
         assert _order_status(connection, cancelled_case) == "訂單取消"
-        assert _order_status(connection, completed_case) == "訂單完成"
+        assert _order_status(connection, completed_case) == "訂單成立"
         assert _order_status(connection, discussion_case) == "洽談中"
         for case_no in (cancelled_case, completed_case, discussion_case):
             assert _count(connection, "order_lifecycle_state_events", case_no) == 1
             assert _count(connection, "historical_order_adoption_receipts", case_no) == 1
+    finally:
+        connection.close()
+
+
+def test_workbook_refreshes_a_later_row_for_the_same_case_after_its_own_write(tmp_path):
+    token = uuid4().hex
+    connection = get_connection()
+    try:
+        case_no, _ = _seed_case(connection, token, "repeated")
+        workbook_path = _write_status_workbook(
+            tmp_path / "repeated-case.xlsx",
+            ((case_no, 1), (case_no, 1)),
+        )
+        service = _service(connection)
+
+        preview = service.preview(str(workbook_path))
+        receipt = service.apply(
+            str(workbook_path),
+            f"historical-workbook:repeated:{token}",
+            preview.preview_fingerprint,
+            "historical-workbook-test",
+            token,
+        )
+
+        assert receipt.source_row_count == 2
+        assert receipt.adopted_count == 2
+        assert _order_status(connection, case_no) == "訂單成立"
+        assert _count(connection, "order_lifecycle_state_events", case_no) == 1
+        assert _count(connection, "historical_order_adoption_receipts", case_no) == 2
     finally:
         connection.close()
 
@@ -158,7 +188,7 @@ def test_six_column_workbook_adopts_pending_orders_with_truthful_before_status(t
         assert replay.replayed_workbook is True
         expected_after = {
             cancelled_case: "訂單取消",
-            completed_case: "訂單完成",
+            completed_case: "訂單成立",
             discussion_case: "洽談中",
         }
         with connection.cursor() as cursor:
@@ -198,7 +228,7 @@ def test_workbook_conflict_rejects_changed_source_before_row_apply(tmp_path):
         with pytest.raises(HistoricalOrderWorkbookConflict):
             service.apply(str(changed_path), f"historical-workbook:conflict:{token}", changed_preview.preview_fingerprint, "historical-workbook-test", token)
 
-        assert _order_status(connection, case_no) == "訂單完成"
+        assert _order_status(connection, case_no) == "訂單成立"
     finally:
         connection.close()
 
@@ -237,7 +267,7 @@ def test_valid_historical_values_replace_current_values_without_false_conflict(t
                 (case_no,),
             )
             assert cursor.fetchone() == {
-                "status": "訂單完成",
+                "status": "訂單成立",
                 "lifecycle_version": 4,
                 "actual_start_date": date(2025, 1, 2),
                 "actual_end_date": date(2025, 1, 31),
@@ -280,7 +310,7 @@ def test_matched_dirty_row_acknowledges_orders_historical_review_outbox():
             "a" * 64,
             case_no,
             _client_name(case_no),
-            OrderLifecycleStatus.COMPLETED,
+            HistoricalOrderSourceStatus.DEPOSIT_PAID,
             None,
             None,
             (HistoricalCaregiverSource(1, f"missing-{token[:8]}", None, None, False, ("staff_missing",)),),
@@ -319,7 +349,7 @@ def test_historical_unknown_issue_remains_an_orders_review_and_is_acknowledged()
             "b" * 64,
             case_no,
             _client_name(case_no),
-            OrderLifecycleStatus.COMPLETED,
+            HistoricalOrderSourceStatus.DEPOSIT_PAID,
             None,
             None,
             (),
@@ -363,7 +393,7 @@ def test_historical_unknown_issue_remains_an_orders_review_and_is_acknowledged()
 
 
 def test_controlled_deidentified_historical_workbook_rebuilds_and_replays():
-    workbook_path = Path(__file__).resolve().parents[2] / "document" / "資料庫、資料處理" / "假資料_歷史訂單.xlsx"
+    workbook_path = Path(__file__).resolve().parents[8] / "document" / "資料庫、資料處理" / "假資料_歷史訂單.xlsx"
     parsed = load_historical_order_workbook(str(workbook_path))
     assert len(parsed.rows) == 1
     source_row = parsed.rows[0]
@@ -386,7 +416,7 @@ def test_controlled_deidentified_historical_workbook_rebuilds_and_replays():
         assert preview.source_row_count == 1
         assert receipt.adopted_count == 1
         assert replay.replayed_workbook is True
-        assert _order_status(connection, source_row.case_no) == "訂單完成"
+        assert _order_status(connection, source_row.case_no) == "訂單成立"
     finally:
         connection.close()
 
@@ -487,8 +517,8 @@ def _seed_staff(connection, token, suffix):
 
 
 def _assert_assignment_and_evidence(connection, first_case, second_case):
-    assert _count(connection, "case_staff_assignments", first_case) == 1
-    assert _count(connection, "case_staff_assignments", second_case) == 1
+    assert _count(connection, "case_staff_assignments", first_case) == 0
+    assert _count(connection, "case_staff_assignments", second_case) == 0
     assert _count(connection, "historical_order_pairing_evidence", first_case, via_receipt=True) == 1
     assert _count(connection, "historical_order_pairing_evidence", second_case, via_receipt=True) == 1
 

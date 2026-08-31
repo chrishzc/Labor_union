@@ -211,3 +211,35 @@ def test_reconciliation_replay_does_not_repeat_typed_terms_apply():
 
     assert first.requires_cooking is replay.requires_cooking is True
     assert port.apply_count == 1
+
+
+def test_reconciliation_does_not_create_retired_anomaly_rechecks(monkeypatch):
+    requests = []
+
+    class PairingRechecks:
+        def append_case_pairing_recheck(self, request):
+            requests.append(request)
+
+    monkeypatch.setattr(
+        adapter,
+        "reconcile_with_port",
+        lambda _port, _case_no: SimpleNamespace(status="reconciled"),
+    )
+    reconciliation = adapter.MySqlHcmBeClassReconciliationAdapter(
+        object(), PairingRechecks()
+    )
+    monkeypatch.setattr(
+        reconciliation,
+        "load_pair_facts",
+        lambda _case_no: {
+            "hcm_count": 1,
+            "hcm_version": 3,
+            "beclass_count": 1,
+            "beclass_id": 7,
+            "query_no": "CLIENT-001",
+        },
+    )
+
+    reconciliation.reconcile("115990823")
+
+    assert requests == []

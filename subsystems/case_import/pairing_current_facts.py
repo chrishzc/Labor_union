@@ -161,6 +161,11 @@ def beclass_counterpart_recheck(entity_kind: str, review_item_id: str, version: 
     return CasePairingAnomalyRecheckRequest(CasePairingCurrentIssueCode.BECLASS_COUNTERPART_MISSING, (entity_kind + ":" + review_item_id,), ("review:" + review_item_id,), version, token, identity)
 
 
+def case_pairing_recheck_identity(source_identity: str, definition_code: CasePairingCurrentIssueCode) -> str:
+    require_canonical_text(source_identity, "case pairing recheck source identity", 160)
+    return f"case-pairing:{source_identity}:{definition_code.value.lower()}"
+
+
 def _reasons(complete, count, consistent):
     reasons = []
     if not complete:

@@ -321,14 +321,10 @@ def project_service_period_status(
     _require_date(last_service_date, "last service date")
     if last_service_date < first_service_date:
         raise ValueError("service period is inverted")
-    if not isinstance(service_time_terms, ServiceTimeTerms) or not service_time_terms.complete:
-        raise ValueError("service time terms must be complete")
+    if not isinstance(service_time_terms, ServiceTimeTerms):
+        raise ValueError("service time terms are invalid")
     _validate_evaluation_instant(evaluated_at)
-    first_service_at = datetime.combine(
-        first_service_date,
-        service_time_terms.start_time,
-        tzinfo=TAIPEI_TIME_ZONE,
-    )
+    first_service_at = service_time_terms.service_start_instant(first_service_date)
     if evaluated_at < first_service_at:
         return AssignmentLifecycleStatus.PLANNED
     if evaluated_at < service_time_terms.completion_instant(last_service_date):
@@ -819,19 +815,14 @@ def _validate_evaluation_instant(value):
 
 
 def _first_service_at(assignment):
-    start_time = assignment.service_time_terms.start_time
-    return datetime.combine(
-        assignment.official_service_dates[0],
-        start_time,
-        tzinfo=TAIPEI_TIME_ZONE,
+    return assignment.service_time_terms.service_start_instant(
+        assignment.official_service_dates[0]
     )
 
 
 def _case_first_service_at(assignment):
-    return datetime.combine(
-        assignment.case_first_service_date,
-        assignment.service_time_terms.start_time,
-        tzinfo=TAIPEI_TIME_ZONE,
+    return assignment.service_time_terms.service_start_instant(
+        assignment.case_first_service_date
     )
 
 

@@ -20,6 +20,7 @@ from subsystems.orders.historical_order_review_remediation_outbox_consumer impor
     consume_historical_order_review_remediation_events,
 )
 from subsystems.finance_import.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
+from subsystems.anomalies.government_return_outbound_overage_anomaly_source import GovernmentReturnOutboundOverageScanRequest
 from subsystems.anomalies.government_subsidy_anomaly_source import GovernmentSubsidyAnomalyScanRequest
 from subsystems.anomalies.government_subsidy_reversal_anomaly_source import GovernmentSubsidyReversalScanRequest
 from subsystems.anomalies.scheduling_coverage_anomaly_consumer import SchedulingCoverageScanRequest
@@ -57,14 +58,16 @@ class ArchitectureSourceScanState:
     process_reminder_exhausted: bool
     beclass_review_after_row_id: int
     beclass_review_exhausted: bool
+    government_return_outbound_overage_after_row_id: int
+    government_return_outbound_overage_exhausted: bool
     next_cycle_at: float
 
     @classmethod
     def start(cls):
-        return cls(None, False, 0, False, 0, False, False, 0, False, 0.0)
+        return cls(None, True, 0, True, 0, True, True, 0, True, 0, False, 0.0)
 
     def cycle_complete(self) -> bool:
-        return self.scheduling_exhausted and self.government_subsidy_exhausted and self.government_subsidy_reversal_exhausted and self.process_reminder_exhausted and self.beclass_review_exhausted
+        return self.government_return_outbound_overage_exhausted
 
 
 class BorrowedAnomalyUnitOfWork:
@@ -136,15 +139,12 @@ def _consume_sources_if_due(connection, state, runtime: AnomalyRuntime):
 
 
 def _consume_source_pages(connection, state, runtime):
-    return (_consume_scheduling_source(connection, state, runtime), _consume_government_subsidy_source(connection, state, runtime), _consume_government_subsidy_reversal_source(connection, state, runtime), _consume_process_reminder_source(connection, state, runtime), _consume_beclass_review_source(connection, state, runtime))
+    return (_consume_government_return_outbound_overage_source(connection, state, runtime),)
 
 
 def _restart_source_cycle(state):
-    state.scheduling_after_source_identity = None; state.scheduling_exhausted = False
-    state.government_subsidy_after_row_id = 0; state.government_subsidy_exhausted = False
-    state.government_subsidy_reversal_after_row_id = 0; state.government_subsidy_reversal_exhausted = False
-    state.process_reminder_exhausted = False
-    state.beclass_review_after_row_id = 0; state.beclass_review_exhausted = False
+    state.government_return_outbound_overage_after_row_id = 0
+    state.government_return_outbound_overage_exhausted = False
 
 
 def _consume_process_reminder_source(connection, state, runtime):
@@ -198,6 +198,21 @@ def _consume_scheduling_source(connection, state, runtime):
 
 def _consume_government_subsidy_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentSubsidyAnomalyScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_after_row_id), runtime.project_government_subsidy_anomaly_page, "next_finance_import_row_id", "government_subsidy_after_row_id", "government_subsidy_exhausted")
 def _consume_government_subsidy_reversal_source(connection, state, runtime): return _consume_bounded_source(connection, state, GovernmentSubsidyReversalScanRequest(_SOURCE_SCAN_PAGE_SIZE, state.government_subsidy_reversal_after_row_id), runtime.project_government_subsidy_reversal_page, "next_finance_import_row_id", "government_subsidy_reversal_after_row_id", "government_subsidy_reversal_exhausted")
+
+
+def _consume_government_return_outbound_overage_source(connection, state, runtime):
+    return _consume_bounded_source(
+        connection,
+        state,
+        GovernmentReturnOutboundOverageScanRequest(
+            _SOURCE_SCAN_PAGE_SIZE,
+            state.government_return_outbound_overage_after_row_id,
+        ),
+        runtime.project_government_return_outbound_overage_page,
+        "next_finance_import_row_id",
+        "government_return_outbound_overage_after_row_id",
+        "government_return_outbound_overage_exhausted",
+    )
 
 
 def _consume_bounded_source(connection, state, request, projector, next_cursor_field, state_cursor_field, exhausted_field):
