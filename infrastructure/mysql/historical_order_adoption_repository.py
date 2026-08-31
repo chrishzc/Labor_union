@@ -174,7 +174,7 @@ class MySqlHistoricalOrderAdoptionRepository:
         snapshot = {
             "outcome": preview.outcome.value,
             "issue_codes": preview.issue_codes,
-            "payroll_rebuild_status": "blocked_missing_official_service_facts",
+            "payroll_rebuild_status": "delegated_to_actual_start_when_required",
         }
         with _cursor(self._connection) as cursor:
             cursor.execute(

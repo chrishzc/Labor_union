@@ -517,7 +517,7 @@ def _optional_date(row: Mapping[str, object], field: str) -> date | None:
 def _service_time_terms(row: Mapping[str, object]) -> ServiceTimeTerms | None:
     values = (row["service_start_seconds"], row["service_end_seconds"], row["service_end_day_offset"])
     if all(value is None for value in values):
-        return None
+        return ServiceTimeTerms(None, None, None)
     if any(value is None for value in values):
         raise OrderStageProjectionContractError("service time tuple is partial")
     start = _seconds_to_time(_nonnegative_int(row, "service_start_seconds"), "service_start_seconds")

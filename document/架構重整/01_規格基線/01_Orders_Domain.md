@@ -377,9 +377,14 @@ HCM／Orders `start_date` 預期開始日相同，代表尚無實際服務開始
 `NULL`；兩者不同時，才以歷史來源開始日寫入 `actual_start_date`。歷史來源結束日不得寫入
 Orders `actual_end_date`；正式結束日以後續服務天數精算結果為準。此限制不移除 canonical 六欄
 工作簿的結束日期，也不妨礙該日期作為單一月嫂歷史 assignment 服務區間的來源 evidence。
-來源 terminal assertion 可在缺日期、取消原因、排班或付款時成立，
-但不得觸發現行通知、訂金、收付款或自動帳務；immutable lifecycle event／receipt 必須標示
-historical origin。無法精確配對、欄位不可解析或違反 Orders invariant 時建立 typed warning 並 fail closed。
+來源 terminal assertion 可在缺日期、取消原因、排班或付款時成立。2026-08-31 人工裁決補充：若可採納的
+`訂單完成`來源列將歷史開始日寫為非空 `actual_start_date`，Apply 必須以該案件既有的
+`週休1日／週休2日／連續服務`與 canonical holiday calendar 重算正式服務日；歷史結束日仍不得直接寫入。
+同一 outer UoW 必須再由 Actual Start canonical writer 重建有效 Scheduling generation、由最後正式服務日
+得出 `actual_end_date`，並重算尚未結清的 Client Finance／Payroll projection 與日期。完整 service-time tuple
+沿用其精確 completion instant；缺失時以 Asia/Taipei 最後正式服務日的日終作為 completion instant。此重建
+不得建立付款、收款、訂金或現行通知事實，且 immutable lifecycle event／receipt 必須標示 historical origin。
+無法精確配對、欄位不可解析或違反 Orders invariant 時建立 typed warning 並 fail closed。
 此受限斷言只授權 Orders-owned historical adoption command，不授權一般 adapter 或 UI 寫入。Preview 零寫入，Apply 每列鎖定 fresh
 Order、驗證 version／fingerprint，並以單一 UoW 保存 projection、event、receipt、outbox及跨域 evidence。
 

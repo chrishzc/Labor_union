@@ -20,6 +20,9 @@ from domains.orders.historical_adoption import (
 from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.ports import UnitOfWork
+from subsystems.orders.historical_actual_start_rebuild import (
+    HistoricalActualStartRebuilder,
+)
 from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbookRow
 
 
@@ -109,10 +112,12 @@ class HistoricalOrderAdoptionWorkflow:
         repository: HistoricalOrderAdoptionRepository,
         unit_of_work_factory: Callable[[], UnitOfWork],
         scheduling_historical_assignment: SchedulingHistoricalAssignmentPort,
+        actual_start_rebuilder: HistoricalActualStartRebuilder | None = None,
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
         self._scheduling_historical_assignment = scheduling_historical_assignment
+        self._actual_start_rebuilder = actual_start_rebuilder
 
     def preview(self, row: HistoricalOrderWorkbookRow) -> HistoricalOrderAdoptionPreview:
         return self._build_preview(row, for_update=False)
@@ -136,6 +141,15 @@ class HistoricalOrderAdoptionWorkflow:
         command_fingerprint = _command_fingerprint(request)
         replay = self._replay(request, command_fingerprint)
         if replay is not None:
+            # Releases before the canonical actual-start delegation produced a
+            # historical receipt without the formal service-period rebuild.
+            # Replaying the immutable source is safe: the delegated command
+            # has its own source-derived idempotency key and therefore either
+            # creates the missing rebuild or returns its existing receipt.
+            self._rebuild_actual_service_period(
+                request,
+                self._build_preview(request.row, for_update=True),
+            )
             return replay
         preview = self._build_preview(request.row, for_update=True)
         if preview.fingerprint != request.preview_fingerprint:
@@ -150,7 +164,39 @@ class HistoricalOrderAdoptionWorkflow:
                 if item.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
             ),
         )
-        return self._repository.persist(request, preview, assignment_ids)
+        receipt = self._repository.persist(request, preview, assignment_ids)
+        self._rebuild_actual_service_period(request, preview)
+        return receipt
+
+    def _rebuild_actual_service_period(self, request, preview) -> None:
+        if self._actual_start_rebuilder is None:
+            return
+        if (
+            preview.outcome is not HistoricalOrderOutcome.ADOPTED
+            or preview.after_status != OrderLifecycleStatus.COMPLETED.value
+            or preview.case_no is None
+        ):
+            return
+        actual_start_date = request.row.actual_start_date
+        if not isinstance(actual_start_date, date):
+            return
+        current = self._repository.load_order(
+            preview.case_no,
+            request.row.client_name,
+            for_update=True,
+        )
+        if (
+            current is None
+            or current.planned_start_date == actual_start_date
+        ):
+            return
+        self._actual_start_rebuilder.apply_in_current_unit_of_work(
+            case_no=preview.case_no,
+            actual_start_date=actual_start_date,
+            source_identity=request.row.source_identity,
+            actor=request.actor,
+            correlation_id=request.correlation_id,
+        )
 
     def _replay(self, request, command_fingerprint):
         stored = self._repository.find_receipt(

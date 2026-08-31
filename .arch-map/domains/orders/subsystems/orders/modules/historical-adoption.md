@@ -13,7 +13,9 @@
   - `subsystems/orders/historical_adoption_workflow.py`
   - `subsystems/orders/historical_order_workbook.py`
   - `subsystems/orders/historical_order_workbook_import.py`
+  - `subsystems/orders/historical_actual_start_rebuild.py`
   - `infrastructure/mysql/historical_order_adoption_repository.py`
+  - `infrastructure/mysql/historical_actual_start_date_planner.py`
 - entrypoints:
   - `api/routes/historical_order_adoption.py`
   - `api/dependencies/historical_order_adoption.py`
@@ -25,6 +27,7 @@
 
 ## Dependencies
 - outbound: `anomalies/anomalies` — committed review evidence can be projected by `subsystems/anomalies/historical_order_adoption_outbox_consumer.py`.
+- outbound: `orders/actual-start` — completed historical actual-start assertions rebuild current official service facts through the canonical writer in the same outer UoW.
 - inbound: Case Import / operator import entry — only through typed source/workflow boundary.
 
 ## Contracts

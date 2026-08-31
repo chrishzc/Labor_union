@@ -231,12 +231,17 @@ def build_actual_start_candidate(
     scheduling: ActualStartSchedulingFacts,
     new_actual_start_date: date,
     service_hours_per_day: int,
+    recalculated_service_dates: tuple[date, ...] | None = None,
 ) -> ActualStartCandidate:
     _validate_candidate_roots(order, scheduling, new_actual_start_date)
     require_positive_integer(service_hours_per_day, "service hours per day")
     shift_days = (new_actual_start_date - scheduling.root_date).days
-    assignments = _shift_assignments(
-        scheduling, shift_days, service_hours_per_day
+    assignments = (
+        _recalculate_assignments(
+            scheduling, recalculated_service_dates, service_hours_per_day
+        )
+        if recalculated_service_dates is not None
+        else _shift_assignments(scheduling, shift_days, service_hours_per_day)
     )
     service_dates = _official_service_dates(assignments)
     return _build_candidate(
@@ -368,10 +373,6 @@ def _validate_candidate_roots(
     _require_date(new_actual_start_date, "new actual start date")
     if order.service_data_locked:
         raise ActualStartCandidateError(ActualStartBlocker.SERVICE_DATA_LOCKED)
-    if not order.service_time.complete:
-        raise ActualStartCandidateError(
-            ActualStartBlocker.SERVICE_TIME_TERMS_INCOMPLETE
-        )
     if order.case_no != scheduling.case_no:
         raise ActualStartCandidateError(ActualStartBlocker.SCHEDULING_CASE_MISMATCH)
     if not scheduling.assignments:
@@ -438,6 +439,72 @@ def _shift_assignment(
         service_dates=service_dates,
         actual_hours=len(service_dates) * service_hours_per_day,
     )
+
+
+def calculate_service_dates(
+    actual_start_date: date,
+    service_days: int,
+    service_mode: str,
+    holiday_dates: tuple[date, ...],
+) -> tuple[date, ...]:
+    """Calculate official work days from one order's rest mode and holidays."""
+
+    _require_date(actual_start_date, "actual start date")
+    require_positive_integer(service_days, "service days")
+    if service_mode not in {"週休1日", "週休2日", "連續服務"}:
+        raise ValueError("service mode is unsupported")
+    if holiday_dates != tuple(sorted(set(holiday_dates))):
+        raise ValueError("holiday dates must be canonically ordered")
+    if any(type(value) is not date for value in holiday_dates):
+        raise TypeError("holiday dates must contain dates")
+    rest_weekdays = {
+        "週休1日": {6},
+        "週休2日": {5, 6},
+        "連續服務": set(),
+    }[service_mode]
+    holidays = set(holiday_dates)
+    service_dates: list[date] = []
+    current = actual_start_date
+    while len(service_dates) < service_days:
+        if current.weekday() not in rest_weekdays and current not in holidays:
+            service_dates.append(current)
+        current += timedelta(days=1)
+    return tuple(service_dates)
+
+
+def _recalculate_assignments(
+    scheduling: ActualStartSchedulingFacts,
+    service_dates: tuple[date, ...],
+    service_hours_per_day: int,
+) -> tuple[ActualStartAssignmentCandidate, ...]:
+    assignments = _ordered_assignments(scheduling)
+    if service_dates != tuple(sorted(set(service_dates))) or not service_dates:
+        raise ActualStartCandidateError(
+            ActualStartBlocker.SCHEDULING_SERVICE_DATES_INVALID
+        )
+    expected_count = sum(len(item.service_dates) for item in assignments)
+    if len(service_dates) != expected_count:
+        raise ActualStartCandidateError(
+            ActualStartBlocker.SCHEDULING_SERVICE_DATES_INVALID
+        )
+    offset = 0
+    result: list[ActualStartAssignmentCandidate] = []
+    for assignment in assignments:
+        count = len(assignment.service_dates)
+        assigned_dates = service_dates[offset:offset + count]
+        offset += count
+        result.append(
+            ActualStartAssignmentCandidate(
+                source_assignment_id=assignment.assignment_id,
+                staff_id=assignment.staff_id,
+                sequence=assignment.sequence,
+                assigned_start_date=assigned_dates[0],
+                assigned_end_date=assigned_dates[-1],
+                service_dates=assigned_dates,
+                actual_hours=len(assigned_dates) * service_hours_per_day,
+            )
+        )
+    return tuple(result)
 
 
 def _official_service_dates(
@@ -585,6 +652,7 @@ __all__ = [
     "ActualStartReconfirmationState",
     "ActualStartSchedulingFacts",
     "build_actual_start_candidate",
+    "calculate_service_dates",
     "build_actual_start_reconfirmation_candidate",
     "to_scheduling_generation_candidate",
 ]

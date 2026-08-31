@@ -125,6 +125,23 @@ def test_projection_keeps_seven_stages_eleven_steps_and_three_settlement_owners(
     assert page.stage_counts["settlement_payout"] == 1
 
 
+def test_date_only_service_period_remains_available_until_last_service_day_ends() -> None:
+    row = _row()
+    row.update(
+        assignment_first_service_date=date(2026, 8, 20),
+        assignment_last_service_date=date(2026, 8, 21),
+        service_start_seconds=None,
+        service_end_seconds=None,
+        service_end_day_offset=None,
+    )
+
+    item = OrderStageProjectionQueryService(
+        _Repository((row,)), BUSINESS_CLOCK
+    ).query(StageProjectionQuery(50)).items[0]
+
+    assert item.stages[5].status == "in_progress"
+
+
 def test_missing_owner_fact_is_local_unavailable_and_never_copies_prior_stage() -> None:
     row = _row()
     row.update({"confirmed_version_id": None, "confirmed_version": None, "confirmed_at": None, "client_obligation_count": 0, "client_updated_at": None})

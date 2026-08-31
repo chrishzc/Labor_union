@@ -18,6 +18,7 @@ from domains.orders.historical_adoption import (
     HistoricalOrderSourceFacts,
     build_historical_order_candidate,
 )
+from domains.orders.actual_start import calculate_service_dates
 from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.fingerprints import fingerprint_payload
 from infrastructure.mysql.historical_order_adoption_repository import (
@@ -30,6 +31,9 @@ from subsystems.orders.historical_adoption_workflow import (
     HistoricalOrderAdoptionRequest,
     HistoricalOrderAdoptionWorkflow,
     HistoricalPairingResolution,
+)
+from subsystems.orders.historical_actual_start_rebuild import (
+    HistoricalActualStartRebuilder,
 )
 from subsystems.orders.historical_order_workbook import (
     load_historical_order_workbook,
@@ -125,6 +129,19 @@ def test_historical_start_different_from_hcm_plan_becomes_actual_start():
 
     assert candidate.date_patch == (("actual_start_date", date(2025, 1, 3)),)
     assert all(field != "actual_end_date" for field, _value in candidate.date_patch)
+
+
+def test_historical_actual_start_rebuild_uses_order_rest_days_and_holidays():
+    assert calculate_service_dates(
+        date(2026, 8, 8),
+        3,
+        "週休1日",
+        (date(2026, 8, 10),),
+    ) == (
+        date(2026, 8, 8),
+        date(2026, 8, 11),
+        date(2026, 8, 12),
+    )
 
 
 def test_matching_hcm_plan_clears_previously_inferred_actual_start():
@@ -406,6 +423,119 @@ def test_unmatched_case_apply_is_a_zero_write_skip(tmp_path):
     assert repository.persist_count == 0
 
 
+def test_completed_historical_actual_start_delegates_formal_rebuild(tmp_path):
+    path = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態"],
+        ["客戶甲", "CASE-1", date(2026, 8, 7), date(1999, 1, 1), 1],
+    )
+    row = load_historical_order_workbook(path).rows[0]
+
+    class PersistingRepository(_Repository):
+        def load_order(self, case_no, client_name, *, for_update):
+            del case_no, client_name, for_update
+            return _current(
+                OrderLifecycleStatus.DISCUSSION,
+                planned_start=date(2026, 8, 6),
+            )
+
+        def persist(self, request, preview, assignment_ids):
+            self.persist_count += 1
+            return SimpleNamespace(
+                outcome=preview.outcome,
+                case_no=preview.case_no,
+                resulting_version=preview.resulting_version,
+                assignment_count=len(assignment_ids),
+                review_identity=None,
+                replayed=False,
+                preview_fingerprint=preview.fingerprint,
+            )
+
+    class Rebuilder:
+        def __init__(self):
+            self.calls = []
+
+        def apply_in_current_unit_of_work(self, **values):
+            self.calls.append(values)
+
+    repository = PersistingRepository(row)
+    rebuilder = Rebuilder()
+    workflow = HistoricalOrderAdoptionWorkflow(
+        repository,
+        _UnitOfWork,
+        _SchedulingHistoricalAssignment(),
+        rebuilder,
+    )
+    preview = workflow.preview(row)
+
+    workflow.apply(
+        HistoricalOrderAdoptionRequest(
+            row,
+            preview.fingerprint,
+            "historical-order:actual-start-rebuild",
+            "test-operator",
+            "verify formal rebuild delegation",
+            "historical-order:actual-start-rebuild:correlation",
+        )
+    )
+
+    assert repository.persist_count == 1
+    assert rebuilder.calls == [{
+        "case_no": "CASE-1",
+        "actual_start_date": date(2026, 8, 7),
+        "source_identity": row.source_identity,
+        "actor": "test-operator",
+        "correlation_id": "historical-order:actual-start-rebuild:correlation",
+    }]
+
+
+def test_historical_rebuilder_passes_recalculated_dates_to_canonical_actual_start():
+    class Planner:
+        def calculate(self, case_no, actual_start_date, *, for_update):
+            assert (case_no, actual_start_date, for_update) == (
+                "CASE-1",
+                date(2026, 8, 8),
+                True,
+            )
+            return (date(2026, 8, 8), date(2026, 8, 11))
+
+    class ActualStart:
+        def __init__(self):
+            self.applied = []
+
+        def preview(self, case_no, actual_start_date, *, recalculated_service_dates):
+            assert (case_no, actual_start_date, recalculated_service_dates) == (
+                "CASE-1",
+                date(2026, 8, 8),
+                (date(2026, 8, 8), date(2026, 8, 11)),
+            )
+            return SimpleNamespace(
+                order_version=4,
+                scheduling_version=5,
+                client_finance_version=6,
+                payroll_version=7,
+                fingerprint=fingerprint_payload({"preview": "historical"}),
+            )
+
+        def apply_in_current_unit_of_work(self, request, *, recalculated_service_dates):
+            self.applied.append((request, recalculated_service_dates))
+
+    actual_start = ActualStart()
+    HistoricalActualStartRebuilder(actual_start, Planner()).apply_in_current_unit_of_work(
+        case_no="CASE-1",
+        actual_start_date=date(2026, 8, 8),
+        source_identity="historical-orders:digest:row:5",
+        actor="test-operator",
+        correlation_id="historical-rebuild-correlation",
+    )
+
+    request, service_dates = actual_start.applied[0]
+    assert request.new_actual_start_date == date(2026, 8, 8)
+    assert request.expected_order_version.value == 4
+    assert request.idempotency_key.value.startswith("historical-actual-start:")
+    assert service_dates == (date(2026, 8, 8), date(2026, 8, 11))
+
+
 def test_same_source_and_fingerprint_replays_across_operator_metadata(tmp_path):
     path = _workbook(
         tmp_path,
@@ -441,6 +571,67 @@ def test_same_source_and_fingerprint_replays_across_operator_metadata(tmp_path):
 
     assert receipt.replayed is True
     assert repository.persist_count == 0
+
+
+def test_replayed_historical_actual_start_repairs_a_predelegation_receipt(tmp_path):
+    path = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態"],
+        ["客戶甲", "CASE-1", date(2026, 8, 8), None, 1],
+    )
+    row = load_historical_order_workbook(path).rows[0]
+
+    class ExistingReceiptRepository(_Repository):
+        def load_order(self, case_no, client_name, *, for_update):
+            del case_no, client_name, for_update
+            return _current(
+                OrderLifecycleStatus.COMPLETED,
+                planned_start=date(2026, 8, 7),
+                actual_start=date(2026, 8, 8),
+            )
+
+    class Rebuilder:
+        def __init__(self):
+            self.calls = []
+
+        def apply_in_current_unit_of_work(self, **values):
+            self.calls.append(values)
+
+    repository = ExistingReceiptRepository(row)
+    rebuilder = Rebuilder()
+    workflow = HistoricalOrderAdoptionWorkflow(
+        repository,
+        _UnitOfWork,
+        _SchedulingHistoricalAssignment(),
+        rebuilder,
+    )
+    preview = workflow.preview(row)
+    repository.receipt = {
+        "command_fingerprint": fingerprint_payload({
+            "source_identity": row.source_identity,
+            "source_fingerprint": row.source_fingerprint,
+        }).value,
+        "outcome": "adopted",
+        "case_no": "CASE-1",
+        "resulting_version": 4,
+        "assignment_count": 0,
+        "review_identity": None,
+        "preview_fingerprint": preview.fingerprint.value,
+    }
+    receipt = workflow.apply(
+        HistoricalOrderAdoptionRequest(
+            row,
+            preview.fingerprint,
+            "historical-order:replay-predelegation",
+            "test-operator",
+            "repair predelegation historical receipt",
+            "historical-order:replay-predelegation:correlation",
+        )
+    )
+
+    assert receipt.replayed is True
+    assert repository.persist_count == 0
+    assert rebuilder.calls[0]["actual_start_date"] == date(2026, 8, 8)
 
 
 def test_multiple_matching_sheets_fail_closed(tmp_path):
