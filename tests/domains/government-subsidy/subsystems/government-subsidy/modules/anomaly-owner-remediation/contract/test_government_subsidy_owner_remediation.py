@@ -1,4 +1,5 @@
 import pytest
+from datetime import date
 
 from domains.government_subsidy.anomaly_remediation import (
     GovernmentSubsidyClaimDriftOwnerFact,
@@ -8,8 +9,12 @@ from domains.government_subsidy.anomaly_remediation import (
     GovernmentSubsidyIntegrityRepairPath,
     GovernmentSubsidyRecoveryRoot,
     GovernmentSubsidyRecoveryStatus,
+    GovernmentSubsidyOutgoingReturnFact,
+    GovernmentSubsidyReturnObligationFact,
+    build_return_reconciliation_with_excess_candidate,
     build_recovery_reconciliation_candidate,
 )
+from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import IdempotencyKey
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion
 from shared_kernel.money import MoneyNTD
@@ -19,11 +24,15 @@ from infrastructure.mysql.government_subsidy_anomaly_owner_repository import (
     MySqlGovernmentSubsidyAnomalyRecoveryRepository,
 )
 from subsystems.government_subsidy.anomaly_recovery_workflow import (
+    ApplyGovernmentSubsidyReturnReconciliationWithExcess,
     ClaimDriftCorrectionApplyRequest,
+    ConfirmGovernmentSubsidyReturnReconciliationWithExcess,
     GovernmentSubsidyAnomalyRecoveryApplication,
+    GovernmentSubsidyReturnReconciliationWithExcessReceipt,
     IntegrityRepairApplyRequest,
     RecoveryCreateApplyRequest,
     RecoveryReconcileApplyRequest,
+    return_reconciliation_with_excess_command_fingerprint,
 )
 from subsystems.government_subsidy.anomaly_owner_readback import (
     GovernmentSubsidyAnomalyOwnerReadback,
@@ -96,6 +105,29 @@ def test_government_recovery_root_only_reconciles_with_typed_incoming_fact() -> 
         build_recovery_reconciliation_candidate(
             root,
             GovernmentSubsidyIncomingRecoveryFact("incoming-19", MoneyNTD(250), "other-payer"),
+        )
+
+
+def test_return_excess_candidate_is_only_available_when_actual_exceeds_lawful() -> None:
+    obligation, outgoing = _return_excess_context()
+    candidate = build_return_reconciliation_with_excess_candidate(obligation, outgoing)
+    assert candidate.lawful_amount_ntd == MoneyNTD(500)
+    assert candidate.actual_amount_ntd == MoneyNTD(750)
+    assert candidate.excess_amount_ntd == MoneyNTD(250)
+    assert candidate.recovery_identity == "government-subsidy-recovery:outgoing-excess-1"
+
+    with pytest.raises(ValueError, match="operation_not_applicable"):
+        build_return_reconciliation_with_excess_candidate(
+            obligation,
+            GovernmentSubsidyOutgoingReturnFact(
+                18,
+                "outgoing-normal-1",
+                "outgoing",
+                date(2026, 8, 31),
+                MoneyNTD(500),
+                "hccg",
+                obligation.recipient_snapshot_token,
+            ),
         )
 
 
@@ -203,6 +235,51 @@ def test_recovery_application_reconciles_only_typed_incoming_fact() -> None:
     assert _Uow.commits == 1
 
 
+def test_return_excess_application_commits_lawful_allocation_and_recovery_once() -> None:
+    repository = _ApplicationRepository()
+    rechecks = _Rechecks()
+    application = GovernmentSubsidyAnomalyRecoveryApplication(
+        repository,
+        _uow,
+        rechecks,
+    )
+    preview = application.preview_return_reconciliation_with_excess("return-1", 17)
+    candidate = preview.candidate
+    request = ApplyGovernmentSubsidyReturnReconciliationWithExcess(
+        candidate.overpayment_identity,
+        candidate.payable_identity,
+        candidate.finance_import_row_id,
+        ExpectedVersion(candidate.expected_overpayment_version),
+        ExpectedVersion(candidate.expected_payable_version),
+        ConfirmGovernmentSubsidyReturnReconciliationWithExcess(
+            candidate.fingerprint,
+            True,
+        ),
+        IdempotencyKey("return-excess-1"),
+        ActorContext("admin:1"),
+        "confirm canonical outgoing excess",
+        "bank-evidence-17",
+        CorrelationId("return-excess-correlation-1"),
+    )
+    result = application.apply_return_reconciliation_with_excess(request)
+
+    assert result.receipt.lawful_amount_ntd == 500
+    assert result.receipt.excess_amount_ntd == 250
+    assert result.readback.recovery_identity == candidate.recovery_identity
+    assert repository.return_excess_locks == [False, True]
+    assert repository.return_excess_applies == 1
+    assert _Uow.commits == 1
+    assert rechecks.requests[0].definition_code.value == "GOVSUB-007"
+    assert rechecks.requests[0].subject_ids == ("return-1",)
+
+    replay = application.apply_return_reconciliation_with_excess(request)
+    assert replay.receipt == result.receipt
+    assert replay.readback == result.readback
+    assert repository.return_excess_applies == 1
+    assert repository.return_excess_locks == [False, True]
+    assert _Uow.commits == 0
+
+
 def test_claim_correction_binds_exact_fresh_scheduling_snapshot() -> None:
     repository = _ApplicationRepository()
     application = GovernmentSubsidyAnomalyRecoveryApplication(repository, _uow)
@@ -303,6 +380,95 @@ def test_mysql_existing_recovery_reconcile_validates_bank_and_appends_event() ->
     assert any("government_subsidy_anomaly_apply_receipts" in sql for sql, _ in connection.executed)
 
 
+def test_mysql_return_excess_uses_exact_bank_lineage_and_one_owner_write_set() -> None:
+    obligation, outgoing = _return_excess_context()
+    token = obligation.recipient_snapshot_token
+    context_connection = _Connection(
+        [
+            {
+                "overpayment_identity": "overpayment-1",
+                "payer_identity": "hccg",
+                "overpayment_remaining_ntd": 500,
+                "overpayment_status": "return_payable",
+                "overpayment_version": 4,
+                "payable_identity": "return-1",
+                "lawful_remaining_ntd": 500,
+                "payable_status": "payable",
+                "payable_version": 2,
+                "agency_identity": "hccg",
+                "recipient_snapshot_token": token,
+            },
+            {
+                "finance_import_row_id": 17,
+                "bank_fact_identity": "outgoing-excess-1",
+                "direction": "outgoing",
+                "debit": 750,
+                "credit": 0,
+                "transaction_date": date(2026, 8, 31),
+                "classification_type": "government_subsidy",
+                "resolved_counterparty_account": "1234567890",
+                "existing_payout_id": None,
+                "existing_recovery_identity": None,
+            },
+            [
+                {
+                    "bank_code": "812",
+                    "account_number": "1234567890",
+                    "account_name": "新竹市政府",
+                    "effective_from": date(2026, 1, 1),
+                }
+            ],
+        ]
+    )
+    repository = MySqlGovernmentSubsidyAnomalyRecoveryRepository(context_connection)
+    loaded_obligation, loaded_outgoing = repository.load_return_reconciliation_with_excess_context(
+        "return-1",
+        17,
+        for_update=True,
+    )
+    candidate = build_return_reconciliation_with_excess_candidate(
+        loaded_obligation,
+        loaded_outgoing,
+    )
+    request = ApplyGovernmentSubsidyReturnReconciliationWithExcess(
+        "overpayment-1",
+        "return-1",
+        17,
+        ExpectedVersion(4),
+        ExpectedVersion(2),
+        ConfirmGovernmentSubsidyReturnReconciliationWithExcess(
+            candidate.fingerprint,
+            True,
+        ),
+        IdempotencyKey("return-excess-mysql-1"),
+        ActorContext("admin:1"),
+        "confirmed outgoing excess",
+        "bank-evidence-17",
+        CorrelationId("return-excess-mysql-correlation"),
+    )
+    write_connection = _Connection(
+        [{"batch_id": 7, "transaction_id": 8, "projection_event_id": 9}]
+    )
+    write_repository = MySqlGovernmentSubsidyAnomalyRecoveryRepository(
+        write_connection
+    )
+    receipt = write_repository.apply_return_reconciliation_with_excess(
+        request,
+        candidate,
+        return_reconciliation_with_excess_command_fingerprint(request),
+    )
+
+    assert receipt.excess_amount_ntd == 250
+    statements = [sql for sql, _ in write_connection.executed]
+    assert any("UPDATE government_overpayment_return_payables" in sql for sql in statements)
+    assert any("UPDATE government_subsidy_overpayments" in sql for sql in statements)
+    assert any("INSERT INTO government_overpayment_return_payouts" in sql for sql in statements)
+    assert any("INSERT INTO government_subsidy_recoveries" in sql for sql in statements)
+    assert any("INSERT INTO government_subsidy_outbox" in sql for sql in statements)
+    assert any("government_subsidy_anomaly_apply_receipts" in sql for sql in statements)
+    assert not any("UPDATE finance_import_rows" in sql for sql in statements)
+
+
 class _Uow:
     def __enter__(self):
         return self
@@ -327,6 +493,9 @@ class _ApplicationRepository(_Repository):
         self.projection_consistent = False
         self.integrity_locks = []
         self.claim_locks = []
+        self.return_excess_locks = []
+        self.return_excess_applies = 0
+        self.return_excess_receipt = None
         self.commits = 0
         self.recovery = GovernmentSubsidyRecoveryRoot(
             "recovery-1", "outgoing-1", "return-1", MoneyNTD(500), MoneyNTD(600),
@@ -374,8 +543,95 @@ class _ApplicationRepository(_Repository):
     def persist_recovery_reconciliation(self, request, candidate):
         return "reconcile-receipt-1"
 
+    def load_return_reconciliation_with_excess_context(
+        self, payable_identity, finance_import_row_id, *, for_update
+    ):
+        assert payable_identity == "return-1"
+        assert finance_import_row_id == 17
+        self.return_excess_locks.append(for_update)
+        return _return_excess_context()
+
+    def find_return_reconciliation_with_excess_receipt(self, key, command_fingerprint):
+        return self.return_excess_receipt
+
+    def apply_return_reconciliation_with_excess(
+        self, request, candidate, command_fingerprint
+    ):
+        self.return_excess_applies += 1
+        self.recovery = GovernmentSubsidyRecoveryRoot(
+            candidate.recovery_identity,
+            candidate.bank_fact_identity,
+            candidate.payable_identity,
+            candidate.lawful_amount_ntd,
+            candidate.actual_amount_ntd,
+            candidate.government_payer_identity,
+            0,
+            GovernmentSubsidyRecoveryStatus.OPEN,
+            request.actor.actor_id,
+            request.reason,
+            request.evidence_reference,
+            request.idempotency_key,
+            "government-subsidy-return-excess:return-excess-1",
+        )
+        self.return_excess_receipt = GovernmentSubsidyReturnReconciliationWithExcessReceipt(
+            "government-subsidy-return-excess:return-excess-1",
+            candidate.recovery_identity,
+            candidate.overpayment_identity,
+            candidate.payable_identity,
+            candidate.bank_fact_identity,
+            candidate.lawful_amount_ntd.amount,
+            candidate.actual_amount_ntd.amount,
+            candidate.excess_amount_ntd.amount,
+            candidate.expected_overpayment_version + 1,
+            candidate.expected_payable_version + 1,
+        )
+        return self.return_excess_receipt
+
     def find_receipt(self, key, command_fingerprint):
         return None
+
+
+class _Rechecks:
+    def __init__(self):
+        self.requests = []
+
+    def append_government_subsidy_recheck(self, request):
+        self.requests.append(request)
+
+
+def _return_excess_context():
+    token = fingerprint_payload(
+        {
+            "payer_identity": "hccg",
+            "bank_code": "812",
+            "account_number": "1234567890",
+            "account_name": "新竹市政府",
+            "effective_date": "2026-01-01",
+        }
+    ).value
+    return (
+        GovernmentSubsidyReturnObligationFact(
+            "overpayment-1",
+            "return-1",
+            4,
+            2,
+            MoneyNTD(500),
+            MoneyNTD(500),
+            "hccg",
+            token,
+            "return_payable",
+            "payable",
+        ),
+        GovernmentSubsidyOutgoingReturnFact(
+            17,
+            "outgoing-excess-1",
+            "outgoing",
+            date(2026, 8, 31),
+            MoneyNTD(750),
+            "hccg",
+            token,
+        ),
+    )
 
 
 class _Connection:

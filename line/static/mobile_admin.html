@@ -124,6 +124,15 @@ function targetForIdentityRedirect() {
     : (targetFromUrl() === "staff_review" ? "staff_review" : "customer_service");
 }
 
+function adminSessionToken() {
+  return sessionStorage.getItem("union_admin_session_token") || "";
+}
+
+function redirectToAdminLogin() {
+  // Closed return identity only.  No token or caller-provided URL crosses navigation.
+  location.assign("/#login?return_target=scheduling_review");
+}
+
 function showStatus(message, isError=false) {
   statusBox.textContent = message;
   statusBox.className = isError ? "error" : "info";
@@ -211,7 +220,7 @@ function reauthenticateLine() {
 }
 
 async function postJson(url, body) {
-  const sessionToken = sessionStorage.getItem("union_admin_session_token") || "";
+  const sessionToken = adminSessionToken();
   const headers = {"Content-Type":"application/json"};
   if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
   const response = await fetch(url, {
@@ -222,6 +231,10 @@ async function postJson(url, body) {
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const code = safeErrorCode(result);
+    if (target === "scheduling_review" && response.status === 401 && !code.startsWith("liff_")) {
+      redirectToAdminLogin();
+      throw new Error("內部使用者登入已失效，正在返回既有登入流程。");
+    }
     document.getElementById("reauthenticate").classList.toggle("hidden", !code.startsWith("liff_"));
     throw new Error(safeErrorMessage(result, "操作失敗"));
   }
@@ -244,12 +257,16 @@ async function init() {
     }
     idToken = liff.getIDToken() || "";
     if (!idToken) throw new Error("無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。");
+    const profile = await postJson("/api/v1/line/mobile-admin/profile", {});
     if (target === "scheduling_review") {
+      if (!adminSessionToken()) {
+        redirectToAdminLogin();
+        return;
+      }
       document.getElementById("subtitle").textContent = "排班審核需要已登入的內部使用者 Session。";
       switchPane(target);
       return;
     }
-    const profile = await postJson("/api/v1/line/mobile-admin/profile", {});
     document.getElementById("subtitle").textContent = `登入人員：${profile.display_name}`;
     switchPane(target);
   } catch (error) {

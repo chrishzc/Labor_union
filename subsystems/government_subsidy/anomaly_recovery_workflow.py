@@ -19,14 +19,24 @@ from domains.government_subsidy.anomaly_remediation import (
     GovernmentSubsidyRecoveryReconciliationCandidate,
     GovernmentSubsidyRecoveryRoot,
     GovernmentSubsidyRecoveryStatus,
+    GovernmentSubsidyReturnReconciliationWithExcessCandidate,
+    build_return_reconciliation_with_excess_candidate,
     build_recovery_reconciliation_candidate,
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.ports import UnitOfWork
-from shared_kernel.validation import require_canonical_text, require_positive_integer
+from shared_kernel.validation import (
+    require_canonical_text,
+    require_nonnegative_integer,
+    require_positive_integer,
+)
 from subsystems.government_subsidy.anomaly_owner_readback import (
     GovernmentSubsidyAnomalyOwnerReadback,
+)
+from subsystems.government_subsidy.current_anomaly_facts import (
+    GovernmentSubsidyAnomalyRecheckRequest,
+    GovernmentSubsidyCurrentIssueCode,
 )
 
 
@@ -149,6 +159,102 @@ class RecoveryReconcileApplyRequest:
         require_canonical_text(self.reason, "reason", 500)
 
 
+@dataclass(frozen=True, slots=True)
+class PreviewGovernmentSubsidyReturnReconciliationWithExcess:
+    candidate: GovernmentSubsidyReturnReconciliationWithExcessCandidate
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmGovernmentSubsidyReturnReconciliationWithExcess:
+    preview_fingerprint: PreviewFingerprint
+    confirmed: bool
+
+    def __post_init__(self) -> None:
+        if type(self.confirmed) is not bool:
+            raise TypeError("government subsidy return excess confirmation must be bool")
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyGovernmentSubsidyReturnReconciliationWithExcess:
+    overpayment_identity: str
+    payable_identity: str
+    finance_import_row_id: int
+    expected_overpayment_version: ExpectedVersion
+    expected_payable_version: ExpectedVersion
+    confirmation: ConfirmGovernmentSubsidyReturnReconciliationWithExcess
+    idempotency_key: IdempotencyKey
+    actor: ActorContext
+    reason: str
+    evidence_reference: str
+    correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.overpayment_identity, "overpayment identity", 191)
+        require_canonical_text(self.payable_identity, "return obligation identity", 191)
+        require_positive_integer(self.finance_import_row_id, "finance import row id")
+        require_canonical_text(self.reason, "reason", 500)
+        require_canonical_text(self.evidence_reference, "evidence reference", 191)
+        if not isinstance(
+            self.confirmation,
+            ConfirmGovernmentSubsidyReturnReconciliationWithExcess,
+        ) or not self.confirmation.confirmed:
+            raise ValueError("government_subsidy_return_excess_confirmation_required")
+
+
+@dataclass(frozen=True, slots=True)
+class GovernmentSubsidyReturnReconciliationWithExcessReceipt:
+    receipt_reference: str
+    recovery_identity: str
+    overpayment_identity: str
+    payable_identity: str
+    bank_fact_identity: str
+    lawful_amount_ntd: int
+    actual_amount_ntd: int
+    excess_amount_ntd: int
+    resulting_overpayment_version: int
+    resulting_payable_version: int
+
+    def __post_init__(self) -> None:
+        for value, label in (
+            (self.receipt_reference, "receipt reference"),
+            (self.recovery_identity, "recovery identity"),
+            (self.overpayment_identity, "overpayment identity"),
+            (self.payable_identity, "return obligation identity"),
+            (self.bank_fact_identity, "outgoing bank fact identity"),
+        ):
+            require_canonical_text(value, label, 191)
+        require_positive_integer(self.lawful_amount_ntd, "lawful return amount")
+        require_positive_integer(self.actual_amount_ntd, "actual outgoing amount")
+        require_positive_integer(self.excess_amount_ntd, "excess recovery amount")
+        require_nonnegative_integer(
+            self.resulting_overpayment_version,
+            "resulting overpayment version",
+        )
+        require_nonnegative_integer(
+            self.resulting_payable_version,
+            "resulting return obligation version",
+        )
+        if (
+            self.actual_amount_ntd <= self.lawful_amount_ntd
+            or self.excess_amount_ntd
+            != self.actual_amount_ntd - self.lawful_amount_ntd
+        ):
+            raise ValueError("government subsidy return excess receipt is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class GovernmentSubsidyReturnReconciliationWithExcessResult:
+    receipt: GovernmentSubsidyReturnReconciliationWithExcessReceipt
+    readback: GovernmentSubsidyRecoveryRoot
+
+
+class GovernmentSubsidyReturnExcessRecheckPort(Protocol):
+    def append_government_subsidy_recheck(
+        self,
+        request: GovernmentSubsidyAnomalyRecheckRequest,
+    ) -> None: ...
+
+
 class GovernmentSubsidyAnomalyRecoveryRepository(Protocol):
     def read_integrity(self, batch_id: int) -> GovernmentSubsidyIntegrityOwnerFact: ...
     def read_claim_drift(self, claim_item_id: int) -> GovernmentSubsidyClaimDriftOwnerFact: ...
@@ -160,6 +266,24 @@ class GovernmentSubsidyAnomalyRecoveryRepository(Protocol):
     def create_recovery_root(self, request: RecoveryCreateApplyRequest) -> str: ...
     def load_recovery(self, recovery_identity: str, *, for_update: bool) -> GovernmentSubsidyRecoveryRoot: ...
     def persist_recovery_reconciliation(self, request: RecoveryReconcileApplyRequest, candidate: GovernmentSubsidyRecoveryReconciliationCandidate) -> str: ...
+    def load_return_reconciliation_with_excess_context(
+        self,
+        payable_identity: str,
+        finance_import_row_id: int,
+        *,
+        for_update: bool,
+    ): ...
+    def apply_return_reconciliation_with_excess(
+        self,
+        request: ApplyGovernmentSubsidyReturnReconciliationWithExcess,
+        candidate: GovernmentSubsidyReturnReconciliationWithExcessCandidate,
+        command_fingerprint: PreviewFingerprint,
+    ) -> GovernmentSubsidyReturnReconciliationWithExcessReceipt: ...
+    def find_return_reconciliation_with_excess_receipt(
+        self,
+        idempotency_key: IdempotencyKey,
+        command_fingerprint: PreviewFingerprint,
+    ) -> GovernmentSubsidyReturnReconciliationWithExcessReceipt | None: ...
     def find_receipt(
         self,
         idempotency_key: IdempotencyKey,
@@ -168,9 +292,15 @@ class GovernmentSubsidyAnomalyRecoveryRepository(Protocol):
 
 
 class GovernmentSubsidyAnomalyRecoveryApplication:
-    def __init__(self, repository: GovernmentSubsidyAnomalyRecoveryRepository, unit_of_work_factory: Callable[[], UnitOfWork]) -> None:
+    def __init__(
+        self,
+        repository: GovernmentSubsidyAnomalyRecoveryRepository,
+        unit_of_work_factory: Callable[[], UnitOfWork],
+        anomaly_rechecks: GovernmentSubsidyReturnExcessRecheckPort | None = None,
+    ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
+        self._anomaly_rechecks = anomaly_rechecks
 
     def query(self, definition_code: str, subject_identity: str):
         return GovernmentSubsidyAnomalyOwnerReadback(self._repository).read(definition_code, subject_identity)
@@ -284,6 +414,87 @@ class GovernmentSubsidyAnomalyRecoveryApplication:
             receipt = self._repository.persist_recovery_reconciliation(request, candidate)
             uow.commit()
             return receipt
+
+    def preview_return_reconciliation_with_excess(
+        self,
+        payable_identity: str,
+        finance_import_row_id: int,
+    ) -> PreviewGovernmentSubsidyReturnReconciliationWithExcess:
+        obligation, outgoing = self._repository.load_return_reconciliation_with_excess_context(
+            payable_identity,
+            finance_import_row_id,
+            for_update=False,
+        )
+        return PreviewGovernmentSubsidyReturnReconciliationWithExcess(
+            build_return_reconciliation_with_excess_candidate(obligation, outgoing)
+        )
+
+    def apply_return_reconciliation_with_excess(
+        self,
+        request: ApplyGovernmentSubsidyReturnReconciliationWithExcess,
+    ) -> GovernmentSubsidyReturnReconciliationWithExcessResult:
+        command_fingerprint = return_reconciliation_with_excess_command_fingerprint(
+            request
+        )
+        with self._unit_of_work_factory() as uow:
+            receipt = self._repository.find_return_reconciliation_with_excess_receipt(
+                request.idempotency_key,
+                command_fingerprint,
+            )
+            if receipt is None:
+                obligation, outgoing = self._repository.load_return_reconciliation_with_excess_context(
+                    request.payable_identity,
+                    request.finance_import_row_id,
+                    for_update=True,
+                )
+                candidate = build_return_reconciliation_with_excess_candidate(
+                    obligation,
+                    outgoing,
+                )
+                if (
+                    request.overpayment_identity != candidate.overpayment_identity
+                    or request.expected_overpayment_version.value
+                    != candidate.expected_overpayment_version
+                    or request.expected_payable_version.value
+                    != candidate.expected_payable_version
+                    or request.confirmation.preview_fingerprint != candidate.fingerprint
+                ):
+                    raise ValueError("government_subsidy_return_excess_stale")
+                receipt = self._repository.apply_return_reconciliation_with_excess(
+                    request,
+                    candidate,
+                    command_fingerprint,
+                )
+                if self._anomaly_rechecks is not None:
+                    self._anomaly_rechecks.append_government_subsidy_recheck(
+                        GovernmentSubsidyAnomalyRecheckRequest(
+                            GovernmentSubsidyCurrentIssueCode.RETURN_OUTGOING_OVERAGE,
+                            (candidate.payable_identity,),
+                            tuple(
+                                sorted(
+                                    (
+                                        "bank:" + candidate.bank_fact_identity,
+                                        "payable:" + candidate.payable_identity,
+                                        "recovery:" + candidate.recovery_identity,
+                                    )
+                                )
+                            ),
+                            receipt.resulting_overpayment_version,
+                            candidate.fingerprint.value,
+                            "government-subsidy-return-excess:"
+                            + request.idempotency_key.value
+                            + ":GOVSUB-007",
+                        )
+                    )
+                uow.commit()
+        readback = self._repository.load_recovery(
+            receipt.recovery_identity,
+            for_update=False,
+        )
+        return GovernmentSubsidyReturnReconciliationWithExcessResult(
+            receipt,
+            readback,
+        )
 
 
 def _verify_integrity(request, fact):
@@ -405,13 +616,40 @@ def recovery_reconcile_command_fingerprint(
     )
 
 
+def return_reconciliation_with_excess_command_fingerprint(
+    request: ApplyGovernmentSubsidyReturnReconciliationWithExcess,
+) -> PreviewFingerprint:
+    return fingerprint_payload(
+        {
+            "operation": "government_subsidy_return_reconciliation_with_excess",
+            "overpayment_identity": request.overpayment_identity,
+            "payable_identity": request.payable_identity,
+            "finance_import_row_id": request.finance_import_row_id,
+            "expected_overpayment_version": request.expected_overpayment_version.value,
+            "expected_payable_version": request.expected_payable_version.value,
+            "preview_fingerprint": request.confirmation.preview_fingerprint.value,
+            "confirmed": request.confirmation.confirmed,
+            "actor": request.actor.actor_id,
+            "reason": request.reason,
+            "evidence_reference": request.evidence_reference,
+            "correlation_id": request.correlation_id.value,
+        }
+    )
+
+
 __all__ = [
+    "ApplyGovernmentSubsidyReturnReconciliationWithExcess",
     "ClaimDriftCorrectionApplyRequest", "ClaimDriftCorrectionPreview",
+    "ConfirmGovernmentSubsidyReturnReconciliationWithExcess",
     "GovernmentSubsidyAnomalyRecoveryApplication", "GovernmentSubsidyAnomalyRecoveryRepository",
+    "GovernmentSubsidyReturnReconciliationWithExcessReceipt",
+    "GovernmentSubsidyReturnReconciliationWithExcessResult",
     "IntegrityRepairApplyRequest", "IntegrityRepairPreview", "RecoveryCreateApplyRequest",
+    "PreviewGovernmentSubsidyReturnReconciliationWithExcess",
     "RecoveryReconcileApplyRequest", "RecoveryReconcilePreview",
     "claim_correction_command_fingerprint",
     "integrity_repair_command_fingerprint",
     "recovery_create_command_fingerprint",
     "recovery_reconcile_command_fingerprint",
+    "return_reconciliation_with_excess_command_fingerprint",
 ]

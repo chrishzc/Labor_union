@@ -9,6 +9,7 @@ contract.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -264,6 +265,144 @@ class GovernmentSubsidyRecoveryReconciliationCandidate:
     fingerprint: PreviewFingerprint
 
 
+@dataclass(frozen=True, slots=True)
+class GovernmentSubsidyReturnObligationFact:
+    """Locked Government-owned return obligation used by GOVSUB-007."""
+
+    overpayment_identity: str
+    payable_identity: str
+    overpayment_version: int
+    payable_version: int
+    overpayment_remaining_ntd: MoneyNTD
+    lawful_remaining_ntd: MoneyNTD
+    government_payer_identity: str
+    recipient_snapshot_token: str
+    overpayment_status: str
+    payable_status: str
+
+    def __post_init__(self) -> None:
+        for value, label in (
+            (self.overpayment_identity, "overpayment identity"),
+            (self.payable_identity, "return obligation identity"),
+            (self.government_payer_identity, "government payer identity"),
+            (self.recipient_snapshot_token, "recipient snapshot token"),
+            (self.overpayment_status, "overpayment status"),
+            (self.payable_status, "return obligation status"),
+        ):
+            require_canonical_text(value, label, 191)
+        require_nonnegative_integer(self.overpayment_version, "overpayment version")
+        require_nonnegative_integer(self.payable_version, "return obligation version")
+        if (
+            not isinstance(self.overpayment_remaining_ntd, MoneyNTD)
+            or not isinstance(self.lawful_remaining_ntd, MoneyNTD)
+            or self.lawful_remaining_ntd.amount <= 0
+            or self.overpayment_remaining_ntd != self.lawful_remaining_ntd
+        ):
+            raise ValueError("government_overpayment_return_lineage_inconsistent")
+        if self.overpayment_status not in {"return_payable", "partially_returned"}:
+            raise ValueError("government_overpayment_return_not_open")
+        if self.payable_status not in {"payable", "partially_paid"}:
+            raise ValueError("government_overpayment_return_not_open")
+
+
+@dataclass(frozen=True, slots=True)
+class GovernmentSubsidyOutgoingReturnFact:
+    """Fresh immutable Finance Import fact projected for one owner command."""
+
+    finance_import_row_id: int
+    bank_fact_identity: str
+    direction: str
+    occurred_on: date
+    amount_ntd: MoneyNTD
+    government_payer_identity: str
+    recipient_snapshot_token: str
+
+    def __post_init__(self) -> None:
+        require_positive_integer(self.finance_import_row_id, "finance import row id")
+        for value, label in (
+            (self.bank_fact_identity, "outgoing bank fact identity"),
+            (self.direction, "bank fact direction"),
+            (self.government_payer_identity, "government payer identity"),
+            (self.recipient_snapshot_token, "recipient snapshot token"),
+        ):
+            require_canonical_text(value, label, 191)
+        if self.direction != "outgoing":
+            raise ValueError("government_subsidy_bank_fact_invalid")
+        if not isinstance(self.occurred_on, date):
+            raise TypeError("government subsidy bank fact date is invalid")
+        if not isinstance(self.amount_ntd, MoneyNTD) or self.amount_ntd.amount <= 0:
+            raise ValueError("government_subsidy_bank_fact_invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class GovernmentSubsidyReturnReconciliationWithExcessCandidate:
+    overpayment_identity: str
+    payable_identity: str
+    recovery_identity: str
+    finance_import_row_id: int
+    bank_fact_identity: str
+    expected_overpayment_version: int
+    expected_payable_version: int
+    lawful_amount_ntd: MoneyNTD
+    actual_amount_ntd: MoneyNTD
+    excess_amount_ntd: MoneyNTD
+    government_payer_identity: str
+    recipient_snapshot_token: str
+    occurred_on: date
+    fingerprint: PreviewFingerprint
+
+
+def build_return_reconciliation_with_excess_candidate(
+    obligation: GovernmentSubsidyReturnObligationFact,
+    outgoing: GovernmentSubsidyOutgoingReturnFact,
+) -> GovernmentSubsidyReturnReconciliationWithExcessCandidate:
+    """Build only the approved actual-greater-than-lawful GOVSUB-007 branch."""
+
+    if outgoing.government_payer_identity != obligation.government_payer_identity:
+        raise ValueError("government_overpayment_return_payer_mismatch")
+    if outgoing.recipient_snapshot_token != obligation.recipient_snapshot_token:
+        raise ValueError("government_overpayment_return_recipient_mismatch")
+    if outgoing.amount_ntd.amount <= obligation.lawful_remaining_ntd.amount:
+        raise ValueError("government_overpayment_return_excess_operation_not_applicable")
+    excess = MoneyNTD(
+        outgoing.amount_ntd.amount - obligation.lawful_remaining_ntd.amount
+    )
+    recovery_identity = f"government-subsidy-recovery:{outgoing.bank_fact_identity}"
+    fingerprint = fingerprint_payload(
+        {
+            "operation": "government_subsidy_return_reconciliation_with_excess",
+            "overpayment_identity": obligation.overpayment_identity,
+            "payable_identity": obligation.payable_identity,
+            "overpayment_version": obligation.overpayment_version,
+            "payable_version": obligation.payable_version,
+            "finance_import_row_id": outgoing.finance_import_row_id,
+            "bank_fact_identity": outgoing.bank_fact_identity,
+            "bank_fact_date": outgoing.occurred_on.isoformat(),
+            "lawful_amount_ntd": obligation.lawful_remaining_ntd.amount,
+            "actual_amount_ntd": outgoing.amount_ntd.amount,
+            "excess_amount_ntd": excess.amount,
+            "government_payer_identity": obligation.government_payer_identity,
+            "recipient_snapshot_token": obligation.recipient_snapshot_token,
+        }
+    )
+    return GovernmentSubsidyReturnReconciliationWithExcessCandidate(
+        obligation.overpayment_identity,
+        obligation.payable_identity,
+        recovery_identity,
+        outgoing.finance_import_row_id,
+        outgoing.bank_fact_identity,
+        obligation.overpayment_version,
+        obligation.payable_version,
+        obligation.lawful_remaining_ntd,
+        outgoing.amount_ntd,
+        excess,
+        obligation.government_payer_identity,
+        obligation.recipient_snapshot_token,
+        outgoing.occurred_on,
+        fingerprint,
+    )
+
+
 def build_recovery_reconciliation_candidate(
     root: GovernmentSubsidyRecoveryRoot,
     incoming: GovernmentSubsidyIncomingRecoveryFact,
@@ -315,5 +454,9 @@ __all__ = [
     "GovernmentSubsidyRecoveryReconciliationCandidate",
     "GovernmentSubsidyRecoveryRoot",
     "GovernmentSubsidyRecoveryStatus",
+    "GovernmentSubsidyOutgoingReturnFact",
+    "GovernmentSubsidyReturnObligationFact",
+    "GovernmentSubsidyReturnReconciliationWithExcessCandidate",
+    "build_return_reconciliation_with_excess_candidate",
     "build_recovery_reconciliation_candidate",
 ]

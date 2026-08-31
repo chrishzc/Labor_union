@@ -7,6 +7,8 @@
 ## Responsibility
 以persisted-human Session/capability及role-scoped LINE current fact驗證mobile actor，薄轉接既有Scheduling
 Assignment Plan Query／Preview／Apply／readback；不建立mobile business state、approval root或writer。
+缺Admin Session時只導向既有React password／MFA登入，使用closed `scheduling_review` return identity回到同一
+mobile route；LINE binding不簽發或傳遞Admin token。
 
 ## Implementation
 - `api/routes/line_mobile_admin.py`

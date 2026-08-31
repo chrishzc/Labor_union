@@ -15,6 +15,7 @@ class GovernmentSubsidyCurrentIssueCode(StrEnum):
     RECEIPT_UNMATCHED = "GOVSUB-001"
     RECEIPT_ALLOCATION_AMBIGUOUS = "GOVSUB-002"
     REVERSAL_INVALID = "GOVSUB-004"
+    RETURN_OUTGOING_OVERAGE = "GOVSUB-007"
 
 
 class GovernmentSubsidyCurrentFactReason(StrEnum):

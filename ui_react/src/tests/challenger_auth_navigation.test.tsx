@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React, { useState } from 'react';
-import { App } from '../App';
+import { App, getMobileAdminReturnPathFromHash } from '../App';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { sessionClient } from '../api/auth/session_client';
 import { PAGE_SECTION_MAP } from '../components/MasterLayout';
@@ -61,6 +61,21 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
       capabilities: ['system.administration'],
     });
   };
+
+  it('[Hash-0] mobile admin 登入返回只接受 closed Scheduling identity', () => {
+    expect(
+      getMobileAdminReturnPathFromHash('#login?return_target=scheduling_review')
+    ).toBe('/line-mobile-admin?target=scheduling_review');
+    expect(
+      getMobileAdminReturnPathFromHash('#login?return_target=https://evil.example')
+    ).toBeNull();
+    expect(
+      getMobileAdminReturnPathFromHash('#login?return_target=%2F%2Fevil.example')
+    ).toBeNull();
+    expect(
+      getMobileAdminReturnPathFromHash('#login?return_target=customer_service')
+    ).toBeNull();
+  });
 
   it('[Hash-1] 空 Hash (#) 與空字串應乾淨回退至預設待辦看板 (#order-tracker)', async () => {
     authenticateSession();

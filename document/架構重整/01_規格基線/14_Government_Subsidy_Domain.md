@@ -374,9 +374,13 @@ claim／ledger／allocation roots。
   identity/token/version；既有approval／receipt／allocation不得靜默搬移或改寫。
 - `GOVSUB-007`：合法退款部分核銷existing return obligation，actual超額部分建立Government-owned
   versioned append-only recovery root；未來只由canonical incoming bank fact typed reconciliation核銷。
-  目前lawful payout workflow固定自行commit且拒絕`actual > remaining`，所以原子建立路徑維持
-  `BOUNDARY_REQUIRED_GOVSUB007_ATOMIC_EXCESS_UOW`；existing recovery readback/reconciliation可獨立完成，
-  不得用兩次commit、直接SQL、Client Finance抵扣或write-off冒充建立成功。
+  `actual > lawful remaining`固定使用專用
+  `PreviewGovernmentSubsidyReturnReconciliationWithExcess → Confirm → Apply → receipt → fresh readback`。
+  Apply在單一Government Subsidy outer UoW fresh-lock原return obligation、fresh-read immutable canonical
+  outgoing bank fact，驗payer／recipient／direction／lineage後，以lawful remaining核銷原return並對正差額建立
+  專屬recovery root，append exact bank→payout→recovery lineage、owner event、receipt、outbox及bounded
+  anomaly recheck後一次commit。同一bank fact不得再次reconcile；same-key same-payload replay回原receipt，
+  different payload固定conflict。`actual <= lawful remaining`仍走既有normal／partial reconciliation。
 
 ```yaml
 convergence:
@@ -384,7 +388,7 @@ convergence:
   ready_requirement_ids: [GOV-ANM-001, GOV-ANM-002, GOV-ANM-003, GOV-ANM-004, GOV-ANM-005, GOV-ANM-007-READBACK, GOV-ANM-READBACK]
   acceptance_ids: [GOV-ANM-ACTIVE, GOV-ANM-OWNER-QPA, GOV-ANM-AMOUNT-CONSERVATION, GOV-ANM-TERMINAL, GOV-ANM-FAIL-CLOSED]
   excluded_authority_required: []
-  blockers: [BOUNDARY_REQUIRED_GOVSUB007_ATOMIC_EXCESS_UOW]
+  blockers: []
 ```
 
 ## 9. Legacy 遷移

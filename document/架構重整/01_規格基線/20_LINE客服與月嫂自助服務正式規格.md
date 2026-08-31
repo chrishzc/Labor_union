@@ -241,6 +241,19 @@ router只能從closed、versioned typed tool catalog選擇既有核准工具，�
 fresh validation，或把模型文字當provider delivery success；unsupported、ambiguous或tool unavailable一律轉
 durable manual fallback。本段不授權AI provider、Phase 2 implementation或新的business tool。
 
+### 6.5 Scheduling mobile Admin Session（2026-08-31 人工裁決）
+
+Scheduling mobile review沿用既有Admin Auth／React password、MFA與Session contract。LIFF先以server-verified
+LINE token／current admin binding確認入口資格；缺少或失效Admin Session時，只以closed
+`scheduling_review` return identity導向同origin既有React登入，成功後由既有Session lifecycle回到
+`/line-mobile-admin?target=scheduling_review`，再由Scheduling endpoint重新驗capability與current role-scoped
+LINE fact。return target只接受此已知internal route identity；arbitrary URL固定不採用。
+
+不得建立LINE-specific Session、mobile帳密／MFA、binding-to-session交換或query-string authentication；Bearer
+token不得進query、fragment、LINE message或postback。mobile adapter不複製refresh／logout／MFA，也不擁有
+Scheduling root；正式mutation仍完整沿用Scheduling Query／Preview／Confirm／Apply、version、lock、fingerprint、
+receipt與fresh readback。
+
 LINE 管理 surface 驗收狀態（2026-08-25）：`completed`。三方服務群組與事件使用 additive
 numbered Query，舊 `limit` API 保留；執行中的 FastAPI 更新至 current route 後，Chrome 實點群組頁
 顯示合法零筆狀態，未再出現 `resource_not_found`。發送任務明細已實點開啟並立即關閉，晚到結果未重開

@@ -240,6 +240,15 @@ def test_mobile_scheduling_review_requires_current_session_fact_and_discards_lat
     assert "schedulingCaseIdentity" in source
     assert "sessionStorage.getItem(\"union_admin_session_token\")" in source
     assert "headers.Authorization" in source
+    assert 'location.assign("/#login?return_target=scheduling_review")' in source
+    assert "const profile = await postJson(\"/api/v1/line/mobile-admin/profile\", {});" in source
+    assert source.index('const profile = await postJson("/api/v1/line/mobile-admin/profile", {});') < source.index('if (!adminSessionToken())')
+    login_redirect = source.split("function redirectToAdminLogin", 1)[1].split(
+        "function showStatus", 1
+    )[0]
+    assert "union_admin_session_token" not in login_redirect
+    assert "idToken" not in login_redirect
+    assert "location.search" not in login_redirect
     assert "querySequence !== schedulingQuerySequence" in source
     assert "formRevision !== schedulingFormRevision" in source
 

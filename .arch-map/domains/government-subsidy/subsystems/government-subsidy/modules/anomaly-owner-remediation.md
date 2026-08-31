@@ -5,7 +5,8 @@
 - subsystem: `government-subsidy`
 
 ## Responsibility
-提供GOVSUB-003 deterministic rebuild、GOVSUB-005 versioned exact Scheduling lineage，以及GOVSUB-007 recovery readback／reconciliation；structural ambiguity與不完整owner facts fail closed。
+提供GOVSUB-003 deterministic rebuild、GOVSUB-005 versioned exact Scheduling lineage，以及GOVSUB-007
+return-with-excess原子核銷／recovery readback／reconciliation；structural ambiguity與不完整owner facts fail closed。
 
 ## Implementation
 - `domains/government_subsidy/anomaly_remediation.py`
@@ -16,5 +17,5 @@
 ## Verification
 - test_root: `tests/domains/government-subsidy/subsystems/government-subsidy/modules/anomaly-owner-remediation/`
 
-## Known boundary
-- GOVSUB-007 lawful payout＋excess recovery atomic creation remains `BOUNDARY_REQUIRED_GOVSUB007_ATOMIC_EXCESS_UOW`.
+## Transaction boundary
+- GOVSUB-007 `actual > lawful remaining`只可由專用Preview／Confirm／Apply在單一Government Subsidy outer UoW同時核銷lawful return、建立excess recovery、append receipt/outbox/recheck並commit；normal／partial reconciliation維持既有workflow。
