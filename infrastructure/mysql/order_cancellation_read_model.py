@@ -26,9 +26,32 @@ class CaregiverOptionRow(TypedDict):
 
 
 def list_active_caregiver_options(cursor: Any) -> tuple[CaregiverOptionRow, ...]:
+    """Backward-compatible active-only caregiver query."""
+
     cursor.execute(
         "SELECT id,name FROM staff WHERE status='active' ORDER BY id",
         (),
+    )
+    return tuple(_caregiver_option(row) for row in cursor.fetchall())
+
+
+def list_caregiver_options(
+    cursor: Any,
+    case_no: str,
+) -> tuple[CaregiverOptionRow, ...]:
+    """Include inactive staff only when this historical case proves the pairing."""
+
+    if not _historical_cancellation_origin(cursor, case_no):
+        return list_active_caregiver_options(cursor)
+    cursor.execute(
+        "SELECT s.id,s.name,MAX(CASE WHEN a.id IS NULL THEN 0 ELSE 1 END) "
+        "AS historical_evidence FROM staff s "
+        "LEFT JOIN case_staff_assignments a ON a.staff_id=s.id "
+        "AND a.case_no=%s AND a.generation_id IS NULL "
+        "AND a.status='completed' "
+        "WHERE s.status='active' OR a.id IS NOT NULL "
+        "GROUP BY s.id,s.name ORDER BY historical_evidence DESC,s.id",
+        (case_no,),
     )
     return tuple(_caregiver_option(row) for row in cursor.fetchall())
 
@@ -50,11 +73,21 @@ def load_cancellation_preview_facts(
     requested_staff_ids: tuple[int, ...],
 ) -> CancellationWorkflowFacts:
     _require_canonical_staff_ids(requested_staff_ids)
-    _require_active_staff(cursor, requested_staff_ids, lock=False)
     order_row = select_order(cursor, case_no, lock=False)
+    historical_origin = _historical_cancellation_origin(cursor, case_no)
+    _require_selectable_staff(
+        cursor,
+        case_no,
+        requested_staff_ids,
+        historical_origin=historical_origin,
+    )
     aggregate_row = select_scheduling_aggregate(cursor, case_no, lock=False)
     return _assemble_cancellation_facts(
-        cursor, order_row, aggregate_row, lock=False
+        cursor,
+        order_row,
+        aggregate_row,
+        lock=False,
+        historical_origin=historical_origin,
     )
 
 
@@ -66,9 +99,19 @@ def load_cancellation_locked_facts(
     _require_canonical_staff_ids(preflight_staff_ids)
     order_row = select_order(cursor, case_no, lock=True)
     aggregate_row = select_scheduling_aggregate(cursor, case_no, lock=True)
-    _lock_staff(cursor, preflight_staff_ids)
+    historical_origin = _historical_cancellation_origin(cursor, case_no)
+    _lock_staff(
+        cursor,
+        case_no,
+        preflight_staff_ids,
+        historical_origin=historical_origin,
+    )
     return _assemble_cancellation_facts(
-        cursor, order_row, aggregate_row, lock=True
+        cursor,
+        order_row,
+        aggregate_row,
+        lock=True,
+        historical_origin=historical_origin,
     )
 
 
@@ -83,16 +126,22 @@ def cancellation_preflight_staff_ids(
 
 
 def _assemble_cancellation_facts(
-    cursor, order_row, aggregate_row, *, lock
+    cursor,
+    order_row,
+    aggregate_row,
+    *,
+    lock,
+    historical_origin=None,
 ):
     terms_facts = _assemble_facts(cursor, order_row, aggregate_row, lock=lock)
     assignments = _load_cancellation_assignments(
         cursor, aggregate_row, lock=lock
     )
-    historical_origin = _historical_cancellation_origin(
-        cursor,
-        str(order_row["case_no"]),
-    )
+    if historical_origin is None:
+        historical_origin = _historical_cancellation_origin(
+            cursor,
+            str(order_row["case_no"]),
+        )
     return _cancellation_facts(
         terms_facts,
         assignments,
@@ -137,11 +186,11 @@ def _cancellation_facts(
 def _historical_cancellation_origin(cursor, case_no) -> bool:
     cursor.execute(
         "SELECT "
-        "EXISTS(SELECT 1 FROM order_lifecycle_control_events e "
-        "WHERE e.case_no=%s AND e.control_type='cancellation' "
-        "AND e.action='activate' "
-        "AND e.reason LIKE 'historical_order_adoption:%%') "
-        "AS historical_control_exists,"
+        "EXISTS(SELECT 1 FROM order_lifecycle_control_state s "
+        "WHERE s.case_no=%s AND s.control_type='cancellation' "
+        "AND s.control_key='order_cancelled' AND s.state='active' "
+        "AND s.reason LIKE 'historical_order_adoption:%%') "
+        "AS historical_control_active,"
         "EXISTS(SELECT 1 FROM order_cancellation_events c "
         "WHERE c.case_no=%s) AS canonical_cancellation_exists",
         (case_no, case_no),
@@ -149,7 +198,7 @@ def _historical_cancellation_origin(cursor, case_no) -> bool:
     row = cursor.fetchone()
     if row is None:
         raise RuntimeError("historical_cancellation_origin_readback_missing")
-    return bool(row["historical_control_exists"]) and not bool(
+    return bool(row["historical_control_active"]) and not bool(
         row["canonical_cancellation_exists"]
     )
 
@@ -191,22 +240,49 @@ def _cancellation_assignment(value):
     )
 
 
-def _lock_staff(cursor, staff_ids) -> None:
+def _lock_staff(
+    cursor,
+    case_no,
+    staff_ids,
+    *,
+    historical_origin,
+) -> None:
     locked_ids = tuple(lock_staff_occupancy_mutex(cursor, list(staff_ids)))
     if locked_ids != staff_ids:
         raise ValueError("scheduling_staff_not_found")
-    _require_active_staff(cursor, staff_ids, lock=False)
+    _require_selectable_staff(
+        cursor,
+        case_no,
+        staff_ids,
+        historical_origin=historical_origin,
+    )
 
 
-def _require_active_staff(cursor, staff_ids, *, lock) -> None:
+def _require_selectable_staff(
+    cursor,
+    case_no,
+    staff_ids,
+    *,
+    historical_origin,
+) -> None:
     if not staff_ids:
         return
     placeholders = ",".join("%s" for _ in staff_ids)
-    cursor.execute(
-        f"SELECT id FROM staff WHERE id IN ({placeholders}) "
-        f"AND status='active' ORDER BY id{_lock_clause(lock)}",
-        staff_ids,
-    )
+    if historical_origin:
+        cursor.execute(
+            f"SELECT s.id FROM staff s WHERE s.id IN ({placeholders}) "
+            "AND (s.status='active' OR EXISTS(SELECT 1 "
+            "FROM case_staff_assignments a WHERE a.case_no=%s "
+            "AND a.staff_id=s.id AND a.generation_id IS NULL "
+            "AND a.status='completed')) ORDER BY s.id",
+            (*staff_ids, case_no),
+        )
+    else:
+        cursor.execute(
+            f"SELECT id FROM staff WHERE id IN ({placeholders}) "
+            "AND status='active' ORDER BY id",
+            staff_ids,
+        )
     locked_ids = tuple(int(row["id"]) for row in cursor.fetchall())
     if locked_ids != staff_ids:
         raise ValueError("scheduling_staff_not_found")
@@ -237,6 +313,7 @@ __all__ = [
     "CaregiverOptionRow",
     "cancellation_preflight_staff_ids",
     "list_active_caregiver_options",
+    "list_caregiver_options",
     "load_cancellation_locked_facts",
     "load_cancellation_preview_facts",
 ]
