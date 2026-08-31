@@ -192,6 +192,7 @@ class HistoricalOrderAdoptionWorkflow:
         )
         if (
             current is None
+            or not isinstance(current.planned_start_date, date)
             or current.planned_start_date == actual_start_date
         ):
             return
@@ -304,10 +305,11 @@ class HistoricalOrderAdoptionWorkflow:
 
 
 def _service_assignment_allowed(row, current, candidate) -> bool:
-    """Status 1 is deposit-paid; service evidence comes from actual-start facts."""
+    """Status 1 is deposit-paid; service evidence requires a known HCM baseline."""
     return (
         candidate.outcome is HistoricalOrderOutcome.ADOPTED
         and row.asserted_status is HistoricalOrderSourceStatus.DEPOSIT_PAID
+        and isinstance(current.planned_start_date, date)
         and isinstance(row.actual_start_date, date)
         and row.actual_start_date != current.planned_start_date
     )
