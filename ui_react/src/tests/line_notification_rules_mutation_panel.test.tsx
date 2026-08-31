@@ -6,6 +6,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LineNotificationRulesCatalog } from '../api/line_configuration/line_configuration_query_schemas';
 import type { LineNotificationRulesMutationClient } from '../api/line_notification_rules/line_notification_rules_mutation_client';
+import { LineNotificationRulesMutationError } from '../api/line_notification_rules/line_notification_rules_mutation_errors';
 import { LineNotificationRulesMutationPanel } from '../components/LineNotificationRulesMutationPanel';
 
 const FINGERPRINT = '0123456789abcdef'.repeat(4);
@@ -154,5 +155,26 @@ describe('LINE notification rules mutation panel', () => {
 
     expect(screen.getByRole('button', { name: '預覽刪除規則' })).toBeDisabled();
     expect(screen.getByText(/有未儲存編輯時，刪除功能會鎖定/)).toBeInTheDocument();
+  });
+
+  it('不將 typed error code 或後端訊息穿透到一般通知規則畫面', async () => {
+    const client: LineNotificationRulesMutationClient = {
+      preview: vi.fn().mockRejectedValue(new LineNotificationRulesMutationError(
+        'raw_rule_failure',
+        'raw provider detail must stay closed',
+      )),
+      save: vi.fn(),
+      deleteRule: vi.fn(),
+    };
+    render(<LineNotificationRulesMutationPanel catalog={CATALOG} client={client} />);
+
+    fireEvent.change(screen.getByRole('textbox', { name: '訊息模板 ID' }), {
+      target: { value: 'deposit_template_v2' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '預覽儲存變更' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('LINE 通知規則操作未完成，請重新載入最新規則後再試。');
+    expect(document.body.textContent).not.toContain('raw_rule_failure');
+    expect(document.body.textContent).not.toContain('raw provider detail');
   });
 });

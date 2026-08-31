@@ -5,7 +5,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import { weeklyOperationsReportExportClient } from '../api/reports/weekly_operations_report_export_client';
-import { weeklyOperationsReportQueryClient } from '../api/reports/weekly_operations_report_query_client';
+import {
+  weeklyOperationsReportQueryClient,
+  weeklyReportIsoWeek,
+  weeklyReportWeekStart,
+} from '../api/reports/weekly_operations_report_query_client';
 import {
   WEEKLY_OPERATIONS_REPORT,
   WEEKLY_OPERATIONS_RESPONSE,
@@ -45,6 +49,14 @@ describe('weekly operations report clients', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch');
     await expect(weeklyOperationsReportQueryClient.query('2026-08-18')).rejects.toThrow('星期一');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('在 ISO 週別與 canonical 週一間互轉，包含跨年週', () => {
+    expect(weeklyReportIsoWeek('2026-08-17')).toBe('2026-W34');
+    expect(weeklyReportWeekStart('2026-W34')).toBe('2026-08-17');
+    expect(weeklyReportIsoWeek('2020-12-28')).toBe('2020-W53');
+    expect(weeklyReportWeekStart('2020-W53')).toBe('2020-12-28');
+    expect(() => weeklyReportWeekStart('2021-W53')).toThrow('週別');
   });
 
   it('拒絕 aggregate 漂移、未遮罩姓名與 unknown 欄位', async () => {

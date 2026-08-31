@@ -788,6 +788,47 @@ describe('OrdersPage query real-data slice', () => {
     expect(surface).not.toHaveTextContent('目前尚無正式指派分段。');
   });
 
+  it('keeps one operational assignment summary and places identifiers and provenance in collapsed technical details', async () => {
+    useOperableSummary();
+    const projection = unavailableCardProjection('ORD-2026-0801');
+    const field = <T,>(owner: string, value: T) => ({
+      value,
+      owner,
+      source_identity: `fixture:assignment:${owner}`,
+      source_version: '7',
+      availability: 'available' as const,
+      availability_reason: null,
+    });
+    projection.assignment_segments = field('Scheduling', [{
+      assignment_id: field('Scheduling', 501),
+      staff_id: field('Staff', 101),
+      staff_name: field('Staff', '王小美'),
+      sequence: field('Scheduling', 1),
+      assigned_start_date: field('Scheduling', '2026-08-01'),
+      assigned_end_date: field('Scheduling', '2026-08-30'),
+      status: field('Scheduling', 'active'),
+    }]);
+    vi.mocked(orderCardProjectionClient.getCardProjection).mockResolvedValueOnce(projection);
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+
+    const surface = await waitFor(() => document.querySelector('[data-surface-id="orders.card-projection"]'));
+    if (!surface) throw new Error('找不到案件投影。');
+    expect(surface).toHaveTextContent('服務人員：王小美');
+    expect(surface).toHaveTextContent('正式服務期間：2026-08-01 ～ 2026-08-30');
+    expect(surface).toHaveTextContent('指派狀態：正式服務中');
+    expect(surface.querySelectorAll('.card-projection-segment-row')).toHaveLength(3);
+
+    const technicalDetails = surface.querySelector('.card-projection-technical-details');
+    expect(technicalDetails).not.toHaveAttribute('open');
+    expect(technicalDetails).toHaveTextContent('assignment_id：501');
+    expect(technicalDetails).toHaveTextContent('staff_id：101');
+    expect(technicalDetails).toHaveTextContent('sequence：1');
+    expect(technicalDetails).toHaveTextContent('資料來源：Scheduling；版本：7');
+  });
+
   it('creates a zero-write terms Preview from editable typed fields', async () => {
     useOperableSummary();
     render(<OrdersPage />);
@@ -795,7 +836,8 @@ describe('OrdersPage query real-data slice', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
     await screen.findByDisplayValue('2026-09-01');
     fireEvent.click(screen.getByRole('button', { name: /檢查訂單條款變更/ }));
-    await screen.findByText(/條款變更比對/);
+    await screen.findByText(/條款變更前後/);
+    expect(screen.getByText('變更原因（稽核必填）')).toBeInTheDocument();
     expect(orderTermsMutationClient.preview).toHaveBeenCalledWith(
       'ORD-2026-0801',
       expect.objectContaining({
@@ -820,6 +862,9 @@ describe('OrdersPage query real-data slice', () => {
     fireEvent.click(screen.getByRole('button', { name: /預覽取消與退款試算/ }));
     await screen.findByText(/取消影響預覽/);
     expect(orderCancellationClient.preview).toHaveBeenCalledWith('ORD-2026-0801', [], expect.any(AbortSignal));
+    expect(screen.getByText(/客戶帳務：0 筆調整/)).toBeInTheDocument();
+    expect(screen.getByText(/服務人員薪資：0 筆調整/)).toBeInTheDocument();
+    expect(screen.getByText(/客戶帳務：0 筆調整/).closest('.cancellation-calc-box')?.querySelector('details')).not.toHaveAttribute('open');
     expect(screen.getByRole('button', { name: /確認執行取消/ })).toBeDisabled();
     expect(document.body.textContent).not.toContain('preview_fingerprint');
     expect(document.body.textContent).not.toContain('NT$ 18,000');
@@ -887,9 +932,10 @@ describe('OrdersPage query real-data slice', () => {
     fireEvent.change(screen.getByLabelText('人工取消原因'), { target: { value: '客戶電話確認取消' } });
     fireEvent.click(screen.getByRole('checkbox', { name: /我已核對本次取消日期/ }));
     fireEvent.click(screen.getByRole('button', { name: /確認執行取消/ }));
-    await screen.findByText(/取消結果未明/);
+    const unknownResult = await screen.findByText(/取消結果未明/);
+    expect(unknownResult).not.toHaveTextContent(/receipt|Idempotency|Apply/i);
     const firstCall = vi.mocked(orderCancellationClient.apply).mock.calls[0];
-    fireEvent.click(screen.getByRole('button', { name: /以相同命令重試取消/ }));
+    fireEvent.click(screen.getByRole('button', { name: /以相同內容重新確認取消/ }));
     await screen.findByText(/訂單取消已完成/);
     const secondCall = vi.mocked(orderCancellationClient.apply).mock.calls[1];
     expect(secondCall?.[2].idempotencyKey).toBe(firstCall?.[2].idempotencyKey);
@@ -922,7 +968,7 @@ describe('OrdersPage query real-data slice', () => {
 
     const apply = vi.mocked(orderCancellationClient.apply);
     const firstApply = apply.mock.calls.length;
-    fireEvent.click(screen.getByRole('button', { name: /以相同命令重試取消/ }));
+    fireEvent.click(screen.getByRole('button', { name: /以相同內容重新確認取消/ }));
     await screen.findByText(/訂單取消已完成/);
     expect(orderCancellationClient.receipt).toHaveBeenCalledWith(
       'ORD-2026-0801',
@@ -955,8 +1001,9 @@ describe('OrdersPage query real-data slice', () => {
     await screen.findByText(/取消結果未明/);
     const applyCalls = vi.mocked(orderCancellationClient.apply).mock.calls.length;
 
-    fireEvent.click(screen.getByRole('button', { name: /以相同命令重試取消/ }));
-    await screen.findByText(/receipt 尚未可讀取/);
+    fireEvent.click(screen.getByRole('button', { name: /以相同內容重新確認取消/ }));
+    const unresolvedResult = await screen.findByText(/尚無法確認原操作結果/);
+    expect(unresolvedResult).not.toHaveTextContent(/receipt|Idempotency|Apply/i);
     expect(vi.mocked(orderCancellationClient.apply)).toHaveBeenCalledTimes(applyCalls);
     expect(screen.queryByText(/訂單取消已完成/)).not.toBeInTheDocument();
   });
@@ -1007,6 +1054,7 @@ describe('OrdersPage query real-data slice', () => {
     await screen.findByDisplayValue('2026-09-01');
     fireEvent.click(screen.getByRole('button', { name: '預覽實際開工日變更' }));
     await screen.findByText('實際開工日影響已確認');
+    expect(screen.getByText('套用原因（稽核必填）')).toBeInTheDocument();
     expect(orderActualStartClient.preview).toHaveBeenCalledWith(
       'ORD-2026-0801',
       { new_actual_start_date: '2026-09-01' },

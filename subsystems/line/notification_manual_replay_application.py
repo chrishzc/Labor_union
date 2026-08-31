@@ -11,6 +11,9 @@ from typing import Callable
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
+from subsystems.line.notification_failure_current_fact import (
+    append_line_notification_failure_rechecks,
+)
 
 
 class LineNotificationManualReplayApplication:
@@ -30,6 +33,14 @@ class LineNotificationManualReplayApplication:
         with self._unit_of_work_factory() as unit_of_work:
             replayed_source_id = unit_of_work.notification_rules.manual_replay_source(
                 source_event_id, f"manual-replay:{source_event_id}:{idempotency_key.value}", self._now()
+            )
+            targets = unit_of_work.notification_rules.line006_recheck_targets_for_source(
+                source_event_id
+            )
+            append_line_notification_failure_rechecks(
+                unit_of_work,
+                targets,
+                cause_identity=f"manual-replay:{source_event_id}:{idempotency_key.value}",
             )
             unit_of_work.audit.append(LineAuditIntent(
                 "line.notification.manual_replay", actor.actor_id,

@@ -14,9 +14,10 @@ priority: P3
 已通過權限驗證的工會內部人員，在管理 UI 執行日常業務時，所有畫面需要的一般業務資料不再做
 遮蔽顯示。目標是防止外部攻擊者批量取得資料，不是防止具業務權限的工會人員查看工作所需資料。
 
-本項優先度低，排在 Task 96 的 P0／P1 功能與異常閉環之後。需求 Authority 已確認；目前尚未完成
-全 surface inventory、exact field／permission contract 與可隔離 task pack，因此 production code 狀態仍是
-`proposed`，不得直接做 repository-wide replace 或刪除安全測試。
+本項優先度低，排在 Task 96 的 P0／P1 功能與異常閉環之後。需求 Authority 已確認；2026-08-31
+最新人工裁決進一步固定：授權內部 UI 與 verified applicant 查看自己資料的 LIFF／自助 readback，
+先直接顯示 owner typed Query 的完整一般業務值，遮罩功能延後到真實測試後另行裁決。既有 surface
+仍須先完成 inventory 與 bounded package，不得直接做 repository-wide replace 或刪除安全測試。
 
 ## 2. Scope interpretation
 
@@ -30,7 +31,8 @@ priority: P3
 
 ### Out of scope／仍須保護
 
-- LINE 對客／群組訊息、Client／Staff LIFF、自助頁、公開頁、未登入或 disabled session。
+- LINE 對客／群組訊息、公開頁、未登入或 disabled session，以及非本人或未通過 verified identity 的
+  Client／Staff LIFF／自助 readback。verified applicant 查看自己的 bounded 資料屬完整值顯示範圍。
 - credential、secret、MFA material、完整銀行驗證資料、raw provider payload、NAS／filesystem 實體 locator、
   raw request／exception／log／receipt／evidence與非業務必要 technical identity。
 - 未具 owner permission 的跨域資料、任意整表 dump、client-selected fields、任意 SQL、無範圍 export或
@@ -71,7 +73,8 @@ writer；其他 lane 只處理明確隔離 surface。
 - enabled human＋正確 permission：畫面與 copy/export（若該功能另有 capability）顯示 canonical 完整值。
 - 未登入、disabled、權限不足、跨 owner、過期 session：完整值零洩漏；late response不得覆蓋新 session。
 - list仍 bounded、可續頁、可取消 stale request；不得新增全表一次載入。
-- external LINE／LIFF／self-service contract regression維持其 recipient-specific資料最小化。
+- external LINE訊息與非本人LIFF／self-service contract維持recipient-specific資料最小化；verified applicant
+  查看自己的bounded一般業務值時顯示完整值。
 - raw secrets、storage locator、technical-only identifiers、log／receipt／evidence不得因本項出現在 UI。
 - 每包完成 focused backend／React、authorization negative、TypeScript、build、strict UTF-8、diff check，最後
   使用真 FastAPI＋allowlisted `lu_test_*`＋enabled persisted-human Chrome逐頁驗收。

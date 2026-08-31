@@ -1234,6 +1234,40 @@ button.calendar-date-cell {
   color: #a89087;
 }
 
+.card-projection-technical-details {
+  margin-top: 14px;
+  border-top: 1px dashed #fed9b8;
+  padding-top: 10px;
+  color: #74593f;
+  font-size: 0.78rem;
+}
+
+.card-projection-technical-details > summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.card-projection-technical-content {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.card-projection-technical-content > div,
+.card-projection-technical-content section > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.card-projection-technical-content section {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid #f4e4de;
+  padding-top: 8px;
+}
+
 /* ==========================================================================
    Contract Document Live Preview & 3-Tab Layout Enhancements
    ========================================================================== */
@@ -1781,5 +1815,4 @@ button.calendar-date-cell {
   border: 1px solid #bbf7d0;
   color: #166534;
 }
-
 

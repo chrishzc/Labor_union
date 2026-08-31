@@ -18,6 +18,7 @@ from pymysql.err import OperationalError
 from api.dependencies.admin_auth import require_admin, require_capability, require_system_admin
 from api.dependencies.staff_payout import (
     StaffPayoutApplication,
+    get_historical_staff_payout_workflow,
     get_staff_overpayment_recovery_application,
     get_staff_overpayment_recovery_matching_application,
     get_staff_overpayment_recovery_query_application,
@@ -60,6 +61,19 @@ from api.schemas.staff_payout import (
     StaffOverpaymentRecoveryPreviewView,
     StaffOverpaymentRecoveryReceiptView,
     StaffOverpaymentRecoveryQueryView,
+    HistoricalStaffObligationView,
+    HistoricalStaffPayoutApplyBody,
+    HistoricalStaffPayoutIntentBody,
+    HistoricalStaffPayoutPreviewView,
+    HistoricalStaffPayoutProjectionView,
+    HistoricalStaffPayoutQueryView,
+    HistoricalStaffPayoutReadbackView,
+    HistoricalStaffPayoutReceiptView,
+)
+from domains.staff_payables.historical_payout import (
+    HistoricalStaffConfirmationKind,
+    HistoricalStaffPayoutIntent,
+    HistoricalStaffSourceAvailability,
 )
 from domains.staff_payables.reconciliation import StaffPayoutDifferenceMode, StaffPayoutEventType
 from infrastructure.mysql.staff_payout_repository import (
@@ -95,6 +109,11 @@ from subsystems.staff_payables.overpayment_recovery_matching import (
     StaffOverpaymentRecoveryMatchingWorkflow,
 )
 from subsystems.staff_payables.overpayment_recovery_query import StaffOverpaymentRecoveryQueryService
+from subsystems.staff_payables.historical_payment_settlement import (
+    ApplyHistoricalStaffPayout,
+    HistoricalStaffPayoutError,
+    HistoricalStaffPayoutWorkflow,
+)
 
 router = APIRouter(prefix="/api/v1/staff-payables", tags=["Staff Payables"])
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
@@ -306,6 +325,102 @@ def query_staff_payables(
         lambda: application.query(staff_id),
         "成功取得月嫂應付款與付款事件",
         CorrelationId(f"staff-payables-query:{staff_id}"),
+    )
+
+
+@router.get(
+    "/historical-payouts/{case_no}/{staff_id}",
+    response_model=BaseResponse[HistoricalStaffPayoutQueryView],
+)
+def query_historical_staff_payout(
+    case_no: str = Path(..., min_length=1, max_length=50),
+    staff_id: int = Path(..., gt=0),
+    principal: AdminPrincipal = Depends(require_admin),
+    application: HistoricalStaffPayoutWorkflow = Depends(
+        get_historical_staff_payout_workflow
+    ),
+):
+    del principal
+    correlation = CorrelationId(f"historical-staff-query:{case_no}:{staff_id}")
+    return _call_historical_staff_endpoint(
+        lambda: _historical_staff_query_view(application.query(case_no, staff_id)),
+        "成功取得歷史月嫂付款候選",
+        correlation,
+    )
+
+
+@router.post(
+    "/historical-payouts/preview",
+    response_model=BaseResponse[HistoricalStaffPayoutPreviewView],
+)
+def preview_historical_staff_payout(
+    body: HistoricalStaffPayoutIntentBody,
+    principal: AdminPrincipal = Depends(require_admin),
+    application: HistoricalStaffPayoutWorkflow = Depends(
+        get_historical_staff_payout_workflow
+    ),
+):
+    del principal
+    correlation = CorrelationId(f"historical-staff-preview:{body.case_no}:{body.staff_id}")
+    return _call_historical_staff_endpoint(
+        lambda: _historical_staff_preview_view(application.preview(_historical_staff_intent(body))),
+        "成功預覽歷史月嫂付款確認",
+        correlation,
+    )
+
+
+@router.post(
+    "/historical-payouts/apply",
+    response_model=BaseResponse[HistoricalStaffPayoutReceiptView],
+)
+def apply_historical_staff_payout(
+    body: HistoricalStaffPayoutApplyBody,
+    idempotency_key: _IdempotencyHeader = ...,
+    correlation_id: _CorrelationHeader = ...,
+    principal: AdminPrincipal = Depends(require_admin),
+    application: HistoricalStaffPayoutWorkflow = Depends(
+        get_historical_staff_payout_workflow
+    ),
+):
+    correlation = CorrelationId(correlation_id)
+    return _call_historical_staff_endpoint(
+        lambda: _historical_staff_receipt_view(
+            application.apply(
+                ApplyHistoricalStaffPayout(
+                    _historical_staff_intent(body),
+                    ExpectedVersion(body.expected_staff_payables_version),
+                    body.expected_adoption_receipt_id,
+                    PreviewFingerprint(body.preview_fingerprint),
+                    IdempotencyKey(idempotency_key),
+                    ActorContext(str(principal.username or "").strip()),
+                    body.reason.strip(),
+                    correlation,
+                )
+            )
+        ),
+        "歷史月嫂付款確認已提交",
+        correlation,
+    )
+
+
+@router.get(
+    "/historical-payouts/{case_no}/{staff_id}/readback",
+    response_model=BaseResponse[HistoricalStaffPayoutReadbackView],
+)
+def readback_historical_staff_payout(
+    case_no: str = Path(..., min_length=1, max_length=50),
+    staff_id: int = Path(..., gt=0),
+    principal: AdminPrincipal = Depends(require_admin),
+    application: HistoricalStaffPayoutWorkflow = Depends(
+        get_historical_staff_payout_workflow
+    ),
+):
+    del principal
+    correlation = CorrelationId(f"historical-staff-readback:{case_no}:{staff_id}")
+    return _call_historical_staff_endpoint(
+        lambda: _historical_staff_readback_view(application.readback(case_no, staff_id)),
+        "成功重新讀取歷史月嫂付款狀態",
+        correlation,
     )
 
 
@@ -827,6 +942,99 @@ def _materialize_collection(value):
     if isinstance(value, (tuple, list)):
         return [_materialize(item) for item in value]
     return value
+
+
+def _historical_staff_intent(body: HistoricalStaffPayoutIntentBody):
+    return HistoricalStaffPayoutIntent(
+        body.case_no,
+        body.staff_id,
+        HistoricalStaffConfirmationKind(body.confirmation_kind),
+        tuple(body.obligation_identities),
+        body.payment_date,
+        body.payment_date_unknown_reason,
+        HistoricalStaffSourceAvailability(body.source_availability),
+        body.evidence_reference,
+    )
+
+
+def _historical_staff_obligation_view(item):
+    return HistoricalStaffObligationView(
+        obligation_identity=item.identity,
+        case_no=item.case_no,
+        staff_id=item.staff_id,
+        amount_due_ntd=item.amount_due_ntd,
+        payroll_version=item.payroll_version,
+        direction=item.direction,
+        status=item.status,
+    )
+
+
+def _historical_staff_query_view(facts):
+    return HistoricalStaffPayoutQueryView(
+        case_no=facts.case_no,
+        staff_id=facts.staff_id,
+        staff_payables_version=facts.staff_payables_version,
+        adoption_receipt_id=facts.adoption_receipt_id,
+        adopted=facts.adopted,
+        normal_bank_candidate_identities=list(facts.normal_bank_candidate_identities),
+        obligations=[_historical_staff_obligation_view(item) for item in facts.obligations],
+    )
+
+
+def _historical_staff_preview_view(preview):
+    candidate = preview.candidate
+    return HistoricalStaffPayoutPreviewView(
+        case_no=candidate.intent.case_no,
+        staff_id=candidate.intent.staff_id,
+        staff_payables_version=candidate.staff_payables_version,
+        adoption_receipt_id=candidate.adoption_receipt_id,
+        obligations=[_historical_staff_obligation_view(item) for item in candidate.obligations],
+        amount_snapshot_ntd=candidate.amount_snapshot_ntd,
+        blockers=list(candidate.blockers),
+        can_apply=candidate.can_apply,
+        preview_fingerprint=candidate.fingerprint.value,
+    )
+
+
+def _historical_staff_receipt_view(receipt):
+    return HistoricalStaffPayoutReceiptView(
+        event_identity=receipt.event_identity,
+        case_no=receipt.case_no,
+        staff_id=receipt.staff_id,
+        obligation_identities=list(receipt.obligation_identities),
+        amount_snapshot_ntd=receipt.amount_snapshot_ntd,
+        resulting_staff_payables_version=receipt.resulting_staff_payables_version,
+        preview_fingerprint=receipt.preview_fingerprint.value,
+    )
+
+
+def _historical_staff_readback_view(readback):
+    return HistoricalStaffPayoutReadbackView(
+        case_no=readback.facts.case_no,
+        staff_id=readback.facts.staff_id,
+        staff_payables_version=readback.facts.staff_payables_version,
+        obligations=[
+            _historical_staff_obligation_view(item) for item in readback.facts.obligations
+        ],
+        projections=[
+            HistoricalStaffPayoutProjectionView(
+                obligation_identity=item.obligation_identity,
+                amount_snapshot_ntd=item.amount_snapshot_ntd,
+                obligation_payroll_version=item.obligation_payroll_version,
+            )
+            for item in readback.projections
+        ],
+        owner_terminal=readback.owner_terminal,
+    )
+
+
+def _call_historical_staff_endpoint(command, message, correlation_id):
+    try:
+        return BaseResponse(data=command(), message=message)
+    except HistoricalStaffPayoutError as error:
+        _raise_typed_error(error.error)
+    except ValueError as error:
+        _raise_value_error(error, correlation_id)
 
 
 __all__ = ["router"]

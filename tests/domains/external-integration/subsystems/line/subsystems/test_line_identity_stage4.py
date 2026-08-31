@@ -355,7 +355,8 @@ class PendingIdentityRepository:
     def get_by_subject(self, *_):
         return None
 
-    def get(self, _):
+    def get(self, _, subject_type=None):
+        assert subject_type in {None, LineBindingSubjectType.STAFF}
         return None
 
     def save_claim(self, claim, _):
@@ -415,8 +416,22 @@ class ApprovalIdentityRepository:
     def get_by_subject(self, *_):
         return self.pending
 
-    def get(self, _):
+    def get(self, _, subject_type=None):
+        assert subject_type in {None, LineBindingSubjectType.STAFF}
         return self.pending
+
+    def list_by_user(self, _):
+        if not self.bound:
+            return (self.pending,)
+        return (
+            LineIdentityBindingSnapshot(
+                self.pending.line_user_id,
+                LineIdentityBindingStatus.BOUND,
+                ExpectedVersion(2),
+                self.pending.subject_type,
+                self.pending.subject_reference,
+            ),
+        )
 
     def bind(self, claim, expected_version, *_):
         assert expected_version == ExpectedVersion(1)

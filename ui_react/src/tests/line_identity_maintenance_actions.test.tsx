@@ -5,6 +5,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
+import { LineIdentityClientError } from '../api/line_identity/line_identity_errors';
 import { LineIdentityMaintenanceActions } from '../components/LineIdentityMaintenanceActions';
 import {
   BOUND_IDENTITY_FIXTURE,
@@ -180,5 +181,30 @@ describe('LINE 身分維護操作', () => {
 
     expect(screen.getByText(/只提供具 LINE 身分人工處理權限/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '人工完成解除' })).not.toBeInTheDocument();
+  });
+
+  it('不將 typed error code 或後端訊息穿透到一般身分維護畫面', async () => {
+    const client = maintenanceClient({
+      previewReplacement: vi.fn().mockRejectedValue(new LineIdentityClientError(
+        'BACKEND_REJECTED',
+        'raw provider detail must stay closed',
+      )),
+    });
+    render(
+      <LineIdentityMaintenanceActions
+        lineUserId={FIXTURE_LINE_USER_ID}
+        binding={BOUND_IDENTITY_FIXTURE}
+        client={client}
+      />
+    );
+
+    fireEvent.change(screen.getByRole('textbox', { name: '更正對象識別值' }), {
+      target: { value: 'CLIENT-TARGET-002' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '預覽對象更正' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('LINE 身分維護服務目前無法安全完成這項操作，請稍後再試。');
+    expect(document.body.textContent).not.toContain('BACKEND_REJECTED');
+    expect(document.body.textContent).not.toContain('raw provider detail');
   });
 });

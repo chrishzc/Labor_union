@@ -19,6 +19,10 @@ from domains.case_import.client_beclass_binding import ClientCaseBindingStatus
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.ports import UnitOfWork
 from subsystems.case_import.beclass_review_intake import masked_review_identifier, record_invalid_beclass_row
+from subsystems.case_import.pairing_current_facts import (
+    CasePairingAnomalyRecheckRequest,
+    beclass_counterpart_recheck,
+)
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 
 
@@ -99,6 +103,12 @@ class BoundCaseCookingReconciliationPort(Protocol):
     def reconcile(self, case_no: str) -> object: ...
 
 
+class CasePairingAnomalyRecheckPort(Protocol):
+    def append_case_pairing_recheck(
+        self, request: CasePairingAnomalyRecheckRequest
+    ) -> None: ...
+
+
 class ClientBeClassWorkbookImportRepositoryPort(Protocol):
     def acquire_lock(self, key: str) -> bool: ...
     def release_lock(self, key: str) -> None: ...
@@ -124,11 +134,13 @@ class ClientBeClassWorkbookImportService:
         reconciliation: BoundCaseCookingReconciliationPort,
         unit_of_work_factory: Callable[[], UnitOfWork],
         review_recorder: Callable[..., str] | None = None,
+        pairing_rechecks: CasePairingAnomalyRecheckPort | None = None,
     ) -> None:
         self._repository = repository
         self._reconciliation = reconciliation
         self._unit_of_work_factory = unit_of_work_factory
         self._review_recorder = review_recorder
+        self._pairing_rechecks = pairing_rechecks
 
     def _persist_review(self, connection, **kwargs):
         recorder = self._review_recorder or record_invalid_beclass_row
@@ -274,6 +286,16 @@ class ClientBeClassWorkbookImportService:
             source_identity, fingerprint, None, "existing_conflict",
             review_identity, actor,
         )
+        if self._pairing_rechecks is not None:
+            self._pairing_rechecks.append_case_pairing_recheck(
+                beclass_counterpart_recheck(
+                    "client",
+                    review_identity,
+                    0,
+                    fingerprint,
+                    "case-pairing:" + source_identity + ":IMPORT-003",
+                )
+            )
         return "existing_conflict"
 
     def _record_review(

@@ -2,11 +2,29 @@ subsystem: orders
 parent_domain: orders
 architecture: ../../../../../domains/orders/subsystems/orders/index.md
 test_root: tests/domains/orders/subsystems/orders/
+
+# Custom current presentation routing
+- Order Tracker summary/retry presentation: `modules/order-tracker-presentation.md`.
 integration_root: tests/domains/orders/subsystems/orders/integration/
 fixtures_root: tests/fixtures/
 modules:
   historical-adoption:
     test_root: tests/domains/orders/subsystems/orders/modules/historical-adoption/
+  historical-completion:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/historical_completion.test.tsx
+  historical-baseline-presentation:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/historical_operational_baseline_readback.test.tsx
+  historical-review-remediation-presentation:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/historical_order_review_remediation.test.tsx
+  order-card-projection:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/orders_page_real_data.test.tsx
+  service-completion-presentation:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/order_service_completion_actions.test.tsx
 
 # Exceptions
 - `historical-adoption` — disposable-MySQL workbook integration remains at `tests/integration/test_historical_order_workbook.py`; it is a higher-boundary `layout_gap`, not duplicate owner-local coverage.

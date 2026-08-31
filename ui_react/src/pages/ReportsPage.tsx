@@ -6,7 +6,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import './ReportsPage.css';
 import { subsidyReportQueryClient } from '../api/reports/subsidy_report_query_client';
 import { subsidyReportExportClient } from '../api/reports/subsidy_report_export_client';
-import { weeklyOperationsReportQueryClient } from '../api/reports/weekly_operations_report_query_client';
+import {
+  weeklyOperationsReportQueryClient,
+  weeklyReportIsoWeek,
+  weeklyReportWeekStart,
+} from '../api/reports/weekly_operations_report_query_client';
 import { weeklyOperationsReportExportClient } from '../api/reports/weekly_operations_report_export_client';
 import { adaptSubsidyReport } from '../adapters/reports/subsidy_report_query_adapter';
 import {
@@ -101,10 +105,10 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
 
 const WeeklySubsidyView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
   <section className="reports-kpi-grid" data-surface-id="reports.weekly.subsidy-kpis">
-    <article><span>統計範圍</span><strong>{report.period.week_start.slice(0, 4)} 年初至本週</strong></article>
+    <article><span>統計範圍</span><strong>{report.period.week_start}～{report.period.week_end}</strong></article>
     <article><span>核銷筆數</span><strong>{report.subsidy.totalRows}</strong></article>
     <article><span>補助總額</span><strong>{report.subsidy.totalAmount}</strong></article>
-    <article><span>截止日</span><strong>{report.period.week_end}</strong></article>
+    <article><span>週別</span><strong>{weeklyReportIsoWeek(report.period.week_start)}</strong></article>
   </section>
   <SubsidyPartitionsView partitions={report.subsidy.partitions} />
 </>;
@@ -264,8 +268,8 @@ export const ReportsPage: React.FC = () => {
             <option value="weekly">營運週報</option><option value="quarterly">季度補助</option><option value="annual">年度補助</option>
           </select>
         </label>
-        {reportKind === 'weekly' ? <label>週起日（週一）
-          <input type="date" value={weekStart} onChange={(event) => changeWeekStart(event.target.value)} />
+        {reportKind === 'weekly' ? <label>週別
+          <input type="week" value={weeklyReportIsoWeek(weekStart)} onChange={(event) => changeWeekStart(weeklyReportWeekStart(event.target.value))} />
         </label> : <label>年度
           <input type="number" min="1912" value={year} onChange={(event) => changeYear(Number(event.target.value))} />
         </label>}

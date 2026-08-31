@@ -61,9 +61,12 @@ import {
   type LeaveInboxStatus,
 } from '../api/scheduling/staff_leave_inbox_client';
 import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
+import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
+import { adaptStaffPayablesQuery } from '../adapters/finance/staff_payables_query_adapter';
 import { Drawer } from '../components/Drawer';
+import { MatchingCoordinationWorkbench } from '../components/MatchingCoordinationWorkbench';
 
-type SchedulingTab = 'calendar' | 'leave_sub' | 'holidays';
+type SchedulingTab = 'calendar' | 'leave_sub' | 'holidays' | 'matching';
 type StatusFilter = 'all' | 'active' | 'waiting' | 'leave';
 
 interface SchedulingDeepLink {
@@ -686,6 +689,13 @@ function LeaveSubstitutionWorkspace({
   const [inboxReasonById, setInboxReasonById] = useState<Record<number, string>>({});
   const inboxQueryGenerationRef = useRef(0);
   const observedInboxReceiptRef = useRef<string | null>(null);
+  const [payablesReadback, setPayablesReadback] = useState<ReadonlyArray<{
+    staffId: number;
+    obligations: ReturnType<typeof adaptStaffPayablesQuery>['obligations'];
+  }> | null>(null);
+  const [payablesBusy, setPayablesBusy] = useState(false);
+  const [payablesError, setPayablesError] = useState<string | null>(null);
+  const payablesQueryGenerationRef = useRef(0);
 
   const loadInbox = useCallback(async () => {
     const generation = ++inboxQueryGenerationRef.current;
@@ -806,6 +816,53 @@ function LeaveSubstitutionWorkspace({
   const selectedSchedule = schedules.find((item) => item.schedule_id === scheduleId) ?? null;
   const busy = ['query_loading', 'preview_loading', 'apply_pending', 'receipt_received', 'requery_loading', 'outcome_unknown', 'observation_failed']
     .includes(machine.type);
+  const payablesStaffIds = useMemo(() => {
+    if (!observedReceipt || !draft?.preview) return [];
+    const ids = draft.preview.outcomes.flatMap((outcome) => [
+      outcome.original_staff_id,
+      outcome.resulting_staff_id,
+    ]);
+    return [...new Set(ids)].sort((left, right) => left - right);
+  }, [draft?.preview, observedReceipt]);
+
+  const loadPayablesReadback = useCallback(async () => {
+    if (!observedReceipt || payablesStaffIds.length === 0) return;
+    const generation = ++payablesQueryGenerationRef.current;
+    setPayablesBusy(true);
+    setPayablesError(null);
+    try {
+      const rows = await Promise.all(payablesStaffIds.map(async (staffId) => {
+        const view = adaptStaffPayablesQuery(await staffPayablesQueryClient.query(staffId));
+        return {
+          staffId,
+          obligations: view.obligations.filter((obligation) => obligation.caseNo === normalizedCaseNo),
+        };
+      }));
+      if (generation === payablesQueryGenerationRef.current) {
+        setPayablesReadback(rows);
+      }
+    } catch {
+      if (generation === payablesQueryGenerationRef.current) {
+        setPayablesReadback(null);
+        setPayablesError('代班變更已完成，但薪資／應付款回讀失敗；可重新查詢，不會重送代班變更。');
+      }
+    } finally {
+      if (generation === payablesQueryGenerationRef.current) {
+        setPayablesBusy(false);
+      }
+    }
+  }, [normalizedCaseNo, observedReceipt, payablesStaffIds]);
+
+  useEffect(() => {
+    if (!observedReceipt) {
+      payablesQueryGenerationRef.current += 1;
+      setPayablesReadback(null);
+      setPayablesError(null);
+      setPayablesBusy(false);
+      return;
+    }
+    void loadPayablesReadback();
+  }, [loadPayablesReadback, observedReceipt]);
 
   useEffect(() => {
     const linkedRequest = observedReceipt?.linked_request;
@@ -1351,6 +1408,38 @@ function LeaveSubstitutionWorkspace({
             <p>本次為人工／電話調度，未關聯 LINE 請假待辦。</p>
           )}
           <p>{machine.type === 'observed' ? '已重新查詢並確認最新正式指派。' : '變更已受理，正在確認最新正式指派。'}</p>
+        </section>
+      )}
+
+      {observedReceipt && (
+        <section className="leave-substitution-receipt" aria-label="代班薪資與應付款回讀" aria-live="polite">
+          <h3>代班薪資與應付款回讀</h3>
+          <p>以下為已提交薪資義務的 Staff Payables 最新唯讀資料；本區不會發動付款、匯出或再次套用代班。</p>
+          {payablesBusy && <p>正在查詢受影響服務人員的最新應付款…</p>}
+          {payablesError && (
+            <>
+              <p className="leave-substitution-notice error" role="alert">{payablesError}</p>
+              <button type="button" onClick={() => void loadPayablesReadback()}>
+                重新查詢薪資與應付款
+              </button>
+            </>
+          )}
+          {payablesReadback && payablesReadback.map((row) => (
+            <div key={row.staffId}>
+              <strong>{staffList.find((staff) => staff.id === row.staffId)?.displayName ?? `服務人員 ${row.staffId}`}</strong>
+              {row.obligations.length === 0 ? (
+                <p>本案目前無未結應付款。</p>
+              ) : (
+                <ul>
+                  {row.obligations.map((obligation) => (
+                    <li key={obligation.id}>
+                      應付 {obligation.amountDue}｜未結 {obligation.balance}｜到期日 {obligation.dueDate}｜{obligation.payoutStatus}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
         </section>
       )}
 
@@ -2261,7 +2350,17 @@ export const SchedulingPage: React.FC = () => {
         >
           🗓️ 3. 國定假日政策
         </button>
+        <button
+          data-surface-id="scheduling.tab.matching"
+          className={`scheduling-tab-btn ${activeTab === 'matching' ? 'active' : ''}`}
+          aria-current={activeTab === 'matching' ? 'page' : undefined}
+          onClick={() => setActiveTab('matching')}
+        >
+          🤝 4. 媒合協調
+        </button>
       </nav>
+
+      {activeTab === 'matching' && <MatchingCoordinationWorkbench />}
 
       {activeTab === 'calendar' && (
         <section

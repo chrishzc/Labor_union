@@ -50,9 +50,14 @@ function operationIdentity(prefix: string): string {
 }
 
 function safeError(error: unknown, fallback: string): string {
-  return error instanceof LineIdentityClientError
-    ? `${error.code}：${error.message}`
-    : fallback;
+  if (!(error instanceof LineIdentityClientError)) return fallback;
+  if (error.outcomeUnknown) return '操作結果尚未確認，請先重新查詢最新狀態，不要再次提交。';
+  if (error.code === 'UNAUTHENTICATED') return '登入已失效，請重新登入後再試。';
+  if (error.code === 'FORBIDDEN') return '目前帳號沒有執行這項 LINE 身分維護的權限。';
+  if (error.code === 'NOT_FOUND') return '找不到這筆 LINE 身分資料，請重新查詢。';
+  if (error.code === 'CONFLICT') return 'LINE 身分資料已變更，請重新查詢後再次確認。';
+  if (error.code === 'REQUEST_INVALID') return '維護資料不完整，請檢查後再試。';
+  return 'LINE 身分維護服務目前無法安全完成這項操作，請稍後再試。';
 }
 
 export function LineIdentityMaintenanceActions({

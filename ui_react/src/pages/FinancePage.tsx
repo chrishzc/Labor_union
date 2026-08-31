@@ -16,6 +16,8 @@ import { accountsPayableQueryClient } from '../api/accounts_payable/accounts_pay
 import { adaptAccountsPayablePreview } from '../adapters/finance/accounts_payable_query_adapter';
 import { financeImportBlockerMessage } from '../adapters/finance/finance_import_query_adapter';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
+import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
+import { HistoricalStaffPayoutWorkbench } from '../components/HistoricalStaffPayoutWorkbench';
 
 type FinanceTab = 'client-receipts' | 'staff-payables' | 'accounts-payable' | 'finance-import';
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
@@ -67,6 +69,7 @@ export const FinancePage: React.FC = () => {
   const [staff, setStaff] = useState<{ id: number; label: string }[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<number | null>(null);
   const [payables, setPayables] = useState<LoadState<ReturnType<typeof adaptStaffPayablesQuery>>>({ kind: 'idle' });
+  const [historicalStaffCase, setHistoricalStaffCase] = useState('');
   const [targetMonth, setTargetMonth] = useState(currentMonth);
   const [accountsPayable, setAccountsPayable] = useState<LoadState<ReturnType<typeof adaptAccountsPayablePreview>>>({ kind: 'idle' });
   const [financeWorkbook, setFinanceWorkbook] = useState<File | null>(null);
@@ -171,6 +174,12 @@ export const FinancePage: React.FC = () => {
         .catch((error: unknown) => { if (current('payables', request.sequence, request.controller)) setPayables({ kind: 'error', message: financeErrorMessage(error, '月嫂應付款查詢失敗，請重新整理。') }); });
     });
   }, [activeTab, selectedStaff, reload]);
+
+  useEffect(() => {
+    if (payables.kind !== 'ready') { setHistoricalStaffCase(''); return; }
+    const caseNos = [...new Set(payables.data.obligations.map((item) => item.caseNo))];
+    setHistoricalStaffCase((value) => caseNos.includes(value) ? value : caseNos[0] ?? '');
+  }, [payables]);
 
   useEffect(() => {
     if (activeTab !== 'accounts-payable') return;
@@ -376,6 +385,7 @@ export const FinancePage: React.FC = () => {
                   </table>
                 </div>
               </div>
+              <HistoricalClientPaymentWorkbench caseNo={selectedCase} />
             </>
           )}
         </section>
@@ -481,6 +491,19 @@ export const FinancePage: React.FC = () => {
                   </table>
                 </div>
               </div>
+              <div className="finance-filter-bar">
+                <label>
+                  歷史付款案件
+                  <select value={historicalStaffCase} onChange={(event) => setHistoricalStaffCase(event.target.value)}>
+                    {[...new Set(payables.data.obligations.map((item) => item.caseNo))].map((caseNo) => (
+                      <option key={caseNo} value={caseNo}>{caseNo}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {selectedStaff !== null && historicalStaffCase && (
+                <HistoricalStaffPayoutWorkbench caseNo={historicalStaffCase} staffId={selectedStaff} />
+              )}
             </>
           )}
         </section>

@@ -60,20 +60,6 @@ export class ErrorBoundary extends Component<Props, State> {
           <p style={{ fontSize: '0.9rem', color: '#7c2d12', maxWidth: '480px', marginBottom: '16px', lineHeight: 1.5 }}>
             系統在此區域遇到意外錯誤。您可以點擊下方按鈕重試，或重新整理頁面。
           </p>
-          {this.state.error && (
-            <pre style={{
-              backgroundColor: '#fee2e2',
-              color: '#991b1b',
-              padding: '10px 14px',
-              borderRadius: '8px',
-              fontSize: '0.8rem',
-              maxWidth: '90%',
-              overflowX: 'auto',
-              marginBottom: '20px',
-            }}>
-              {this.state.error.message}
-            </pre>
-          )}
           <div style={{ display: 'flex', gap: '12px' }}>
             <button
               onClick={this.handleReset}

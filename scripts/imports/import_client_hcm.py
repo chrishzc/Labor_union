@@ -45,6 +45,9 @@ from subsystems.case_import.hcm_adapter import (
 from infrastructure.mysql.hcm_beclass_reconciliation_adapter import (
     MySqlHcmBeClassReconciliationAdapter,
 )
+from infrastructure.mysql.case_pairing_anomaly_recheck_sink import (
+    MySqlCasePairingAnomalyRecheckSink,
+)
 from shared_kernel.identities import (
     ActorContext,
     CorrelationId,
@@ -601,7 +604,9 @@ def _reconcile_without_rolling_back_hcm(connection, case_no, *, in_current_uow=F
         return "not_run"
     try:
         reconciliation = CaseImportReconciliationApplication(
-            MySqlHcmBeClassReconciliationAdapter(connection),
+            MySqlHcmBeClassReconciliationAdapter(
+                connection, MySqlCasePairingAnomalyRecheckSink(connection)
+            ),
             # The current-UoW path never evaluates this factory.  The
             # fallback is retained for private legacy callers and keeps the
             # transaction owner in the Case Import application layer.

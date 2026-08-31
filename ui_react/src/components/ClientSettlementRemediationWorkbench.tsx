@@ -31,6 +31,23 @@ function previewAmount(preview: Preview): number {
     ? preview.value.candidate.obligation_total.amount
     : preview.value.candidate.amount.amount;
 }
+function paymentStageLabel(stage: ClientPaymentStage): string {
+  return ({ deposit: '訂金', first: '第一期', second: '第二期', adjustment: '調整款' })[stage];
+}
+function obligationTypeLabel(type: 'adjustment' | 'refund' | 'subsidy_return'): string {
+  return type === 'adjustment' ? '調整款' : type === 'refund' ? '一般退款' : '補助退還';
+}
+function settlementErrorMessage(error: unknown): string {
+  const typed = error instanceof ClientSettlementRemediationError ? error : null;
+  const code = typed?.code.toUpperCase() ?? '';
+  if (typed?.status === 401 || code.includes('UNAUTHENTICATED')) return '登入狀態已失效，請重新登入後再操作。';
+  if (typed?.status === 403 || code.includes('FORBIDDEN')) return '目前帳號沒有處理這筆客戶帳務的權限。';
+  if (typed?.status === 404 || code.includes('NOT_FOUND')) return '找不到這筆客戶帳務資料，請返回清單重新查詢。';
+  if (typed?.status === 409 || code.includes('STALE') || code.includes('CONFLICT')) return '案件資料已變更，請重新查詢並再次預覽。';
+  if (typed?.status === 422 || code.includes('INVALID') || code.includes('BLOCK')) return '所選義務或銀行流水未通過檢核，請調整選擇後再預覽。';
+  if (typed?.retryable) return '結果尚未確認；請先重新查詢，再安全重試原操作。';
+  return '客戶帳務目前無法完成，請稍後再試。';
+}
 
 export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
   target, onResolved, client = clientSettlementRemediationClient, requestOptions = {},
@@ -72,8 +89,8 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
       }
       setQuery(fresh);
       const remaining = target.kind === 'receivable' ? fresh.receivable_obligations : target.kind === 'refund' ? fresh.refund_obligations : fresh.subsidy_return_obligations;
-      if (!remaining.length) { setNotice('根據 Client Finance current root，此碼已無逾期未清義務，異常可解除。'); await onResolved?.(); }
-    } catch (caught) { setQuery(null); setError(caught instanceof Error ? caught.message : '無法取得 Client Finance 根事實。'); }
+      if (!remaining.length) { setNotice('重新查詢後已無這類逾期未清義務，提醒可解除。'); await onResolved?.(); }
+    } catch (caught) { setQuery(null); setError(settlementErrorMessage(caught)); }
     finally { setBusy(null); }
   };
 
@@ -94,7 +111,7 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
         if (value.account_version !== query.account_version) throw new ClientSettlementRemediationError('client_finance_candidate_stale', 'Preview 版本與 Query 不一致。');
         setPreview({ kind: 'payable', value });
       }
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Preview 失敗。'); setPreview(null); }
+    } catch (caught) { setError(settlementErrorMessage(caught)); setPreview(null); }
     finally { setBusy(null); }
   };
   const applyAction = async () => {
@@ -110,24 +127,25 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
       } else throw new ClientSettlementRemediationError('CLIENT_SETTLEMENT_BRANCH_MISMATCH', '異常分支與 Preview 不一致。');
       setUnknownOutcome(false); setObligationIds([]); setBankIds([]); setPreview(null); setConfirmed(false);
       await reload(false);
-      setNotice((current) => current ?? '本次核銷已回讀；若仍有其他同碼逾期義務，異常會保留。');
+      setNotice((current) => current ?? '本次核銷已重新查詢確認；若仍有其他同類逾期義務，提醒會保留。');
     } catch (caught) {
       const typed = caught instanceof ClientSettlementRemediationError ? caught : null;
-      setUnknownOutcome(Boolean(typed?.retryable)); setError(caught instanceof Error ? caught.message : 'Apply 失敗。');
+      setUnknownOutcome(Boolean(typed?.retryable)); setError(settlementErrorMessage(caught));
     } finally { setBusy(null); }
   };
 
-  if (!query) return <section aria-label={`${title(target.kind)}人工處理`}><h3>{title(target.kind)}人工處理</h3>{busy === 'query' && <p role="status">正在讀取 Client Finance 根事實…</p>}{error && <div role="alert">{error}</div>}<button type="button" disabled={busy !== null} onClick={() => void reload(true)}>重新讀取</button></section>;
+  if (!query) return <section aria-label={`${title(target.kind)}人工處理`}><h3>{title(target.kind)}人工處理</h3>{busy === 'query' && <p role="status">正在讀取客戶帳務資料…</p>}{error && <div role="alert">{error}</div>}<button type="button" disabled={busy !== null} onClick={() => void reload(true)}>重新查詢</button></section>;
   return <section aria-label={`${title(target.kind)}人工處理`} data-surface-id="client-settlement-remediation" style={{ border: '1px solid #fed7aa', borderRadius: 12, padding: 16, marginTop: 12 }}>
-    <h3>{title(target.kind)}人工處理</h3><p>案件：{query.case_no}｜根事實日：{query.as_of}｜版本：{query.account_version}</p>
-    <p><strong>解除條件：</strong>本碼所有逾期義務餘額歸零；電話、LINE、receipt 或追蹤狀態都不能代替。</p>
+    <h3>{title(target.kind)}人工處理</h3><p>案件：{query.case_no}｜帳務資料日期：{query.as_of}</p>
+    <p><strong>解除條件：</strong>這類逾期義務餘額全部歸零；電話、LINE 或追蹤狀態都不能代替正式核銷。</p>
+    <details><summary>技術詳情與資料來源</summary><p>帳務版本：{query.account_version}</p></details>
     {target.kind === 'receivable' && <label>核銷期別 <select value={stage} disabled={busy !== null} onChange={(event) => { setStage(event.target.value as ClientPaymentStage); setObligationIds([]); invalidate(); }}><option value="deposit">訂金</option><option value="first">第一期</option><option value="second">第二期</option><option value="adjustment">調整款</option></select></label>}
-    <fieldset disabled={busy !== null}><legend>具體逾期義務</legend>{visibleObligations.map((item) => <label key={item.obligation_identity} style={{ display: 'block' }}><input type="checkbox" checked={obligationIds.includes(item.obligation_identity)} onChange={() => toggleObligation(item.obligation_identity)} /> {item.obligation_identity}｜{'payment_stage' in item ? item.payment_stage : item.obligation_type}｜到期 {item.due_date}｜NT$ {item.amount_due_ntd.toLocaleString('zh-TW')}</label>)}{!visibleObligations.length && <p>目前沒有此分支的逾期義務。</p>}</fieldset>
-    <fieldset disabled={busy !== null}><legend>Canonical 銀行流水</legend>{banks.map((item) => <label key={item.finance_import_row_id} style={{ display: 'block' }}><input type="checkbox" checked={bankIds.includes(item.finance_import_row_id)} onChange={() => toggleBank(item.finance_import_row_id)} /> #{item.finance_import_row_id}｜{item.transaction_date}｜NT$ {item.amount_ntd.toLocaleString('zh-TW')}</label>)}{!banks.length && <p role="alert">尚無符合方向、分類、對方帳戶與未核銷條件的銀行流水；異常保留。</p>}</fieldset>
+    <fieldset disabled={busy !== null}><legend>具體逾期義務</legend>{visibleObligations.map((item, index) => <div key={item.obligation_identity}><label style={{ display: 'block' }}><input type="checkbox" checked={obligationIds.includes(item.obligation_identity)} onChange={() => toggleObligation(item.obligation_identity)} /> 第 {index + 1} 筆｜{'payment_stage' in item ? paymentStageLabel(item.payment_stage) : obligationTypeLabel(item.obligation_type)}｜到期 {item.due_date}｜NT$ {item.amount_due_ntd.toLocaleString('zh-TW')}</label><details><summary>義務技術詳情</summary><p>義務識別：{item.obligation_identity}</p></details></div>)}{!visibleObligations.length && <p>目前沒有此分支的逾期義務。</p>}</fieldset>
+    <fieldset disabled={busy !== null}><legend>可核對的銀行流水</legend>{banks.map((item, index) => <div key={item.finance_import_row_id}><label style={{ display: 'block' }}><input type="checkbox" checked={bankIds.includes(item.finance_import_row_id)} onChange={() => toggleBank(item.finance_import_row_id)} /> 第 {index + 1} 筆｜{item.transaction_date}｜NT$ {item.amount_ntd.toLocaleString('zh-TW')}</label><details><summary>銀行流水技術詳情</summary><p>來源資料列：{item.finance_import_row_id}</p></details></div>)}{!banks.length && <p role="alert">尚無符合方向、分類、對方帳戶與未核銷條件的銀行流水；提醒保留。</p>}</fieldset>
     <label style={{ display: 'block' }}>人工核對理由<textarea value={reason} disabled={busy !== null} maxLength={500} onChange={(event) => { setReason(event.target.value); invalidate(); }} /></label>
     <button type="button" disabled={busy !== null || !obligationIds.length || !bankIds.length} onClick={() => void previewAction()}>{busy === 'preview' ? '檢查中…' : '檢查核銷影響'}</button>
-    {preview && <div data-surface-id="client-settlement-preview"><p>Preview 金額：NT$ {previewAmount(preview).toLocaleString('zh-TW')}</p><label><input type="checkbox" checked={confirmed} disabled={busy !== null} onChange={(event) => setConfirmed(event.target.checked)} /> 我已核對 owner Query 與規則書，確認套用此核銷。</label><button type="button" disabled={!confirmed || !reason.trim() || busy !== null} onClick={() => void applyAction()}>確認並套用</button></div>}
-    {unknownOutcome && <div role="alert">Apply 結果未知；不得產生新命令。<button type="button" disabled={busy !== null} onClick={() => void reload(false)}>以 owner root 調和結果</button>{preview && <button type="button" disabled={busy !== null} onClick={() => void applyAction()}>使用原 Idempotency-Key 安全重試</button>}</div>}
+    {preview && <div data-surface-id="client-settlement-preview"><p>預覽核銷金額：NT$ {previewAmount(preview).toLocaleString('zh-TW')}</p><label><input type="checkbox" checked={confirmed} disabled={busy !== null} onChange={(event) => setConfirmed(event.target.checked)} /> 我已核對案件、逾期義務、銀行流水與預覽結果，確認套用此核銷。</label><button type="button" disabled={!confirmed || !reason.trim() || busy !== null} onClick={() => void applyAction()}>確認並套用</button></div>}
+    {unknownOutcome && <div role="alert">套用結果尚未確認；原操作已保留，不會建立第二筆操作。<button type="button" disabled={busy !== null} onClick={() => void reload(false)}>重新查詢結果</button>{preview && <button type="button" disabled={busy !== null} onClick={() => void applyAction()}>安全重試原操作</button>}</div>}
     {notice && <div role="status">{notice}</div>}{error && <div role="alert">{error}</div>}
   </section>;
 };

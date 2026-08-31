@@ -191,17 +191,25 @@ class _CustomerRepository:
 
 
 class _IdentityRepository:
-    def get(self, _line_user_id):
-        return None
+    def __init__(self) -> None:
+        self.current = None
+
+    def get(self, _line_user_id, subject_type=None):
+        assert subject_type in {None, LineBindingSubjectType.CUSTOMER}
+        return self.current
+
+    def list_by_user(self, _line_user_id):
+        return () if self.current is None else (self.current,)
 
     def bind(self, claim, *_):
-        return LineIdentityBindingSnapshot(
+        self.current = LineIdentityBindingSnapshot(
             claim.line_user_id,
             LineIdentityBindingStatus.BOUND,
             ExpectedVersion(1),
             claim.subject_type,
             claim.subject_reference,
         )
+        return self.current
 
 
 class _ListRepository:

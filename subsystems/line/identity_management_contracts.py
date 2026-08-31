@@ -17,6 +17,7 @@ from shared_kernel.identities import (
     ExpectedVersion,
     IdempotencyKey,
 )
+from shared_kernel.fingerprints import PreviewFingerprint
 
 
 class LineIdentityRevocationStatus(StrEnum):
@@ -42,6 +43,14 @@ class LineIdentityCurrentFactReadbackStatus(StrEnum):
     PROJECTION_MISSING = "projection_missing"
     PROJECTION_MULTIPLE = "projection_multiple"
     MISMATCH = "mismatch"
+
+
+class LineIdentityRoleContextStatus(StrEnum):
+    NO_BINDING = "no_binding"
+    SINGLE_ROLE = "single_role"
+    SELECTION_REQUIRED = "selection_required"
+    SELECTED = "selected"
+    STALE_SELECTION = "stale_selection"
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +82,7 @@ class LineIdentityCurrentFactReadback:
     findings: tuple[LineIdentityCurrentFactFinding, ...]
     readback_status: LineIdentityCurrentFactReadbackStatus
     manual_actions: tuple[str, ...]
+    root_bindings: tuple[LineIdentityCurrentFactBinding, ...] = ()
     dual_role_persistence_supported: bool = False
 
     @property
@@ -149,6 +159,42 @@ class LineIdentityBindingPage:
 
 
 @dataclass(frozen=True, slots=True)
+class LineIdentityRoleContextReadback:
+    line_user_id: LineUserId
+    available_roles: tuple[LineBindingSubjectType, ...]
+    selected_role: LineBindingSubjectType | None
+    effective_role: LineBindingSubjectType | None
+    context_version: ExpectedVersion
+    status: LineIdentityRoleContextStatus
+
+
+@dataclass(frozen=True, slots=True)
+class LineIdentityRoleSelectionPreview:
+    readback: LineIdentityRoleContextReadback
+    target_role: LineBindingSubjectType
+    preview_fingerprint: PreviewFingerprint
+    blockers: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SelectLineIdentityRoleCommand:
+    line_user_id: LineUserId
+    target_role: LineBindingSubjectType
+    expected_context_version: ExpectedVersion
+    preview_fingerprint: PreviewFingerprint
+    actor: ActorContext
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+
+@dataclass(frozen=True, slots=True)
+class LineIdentityRoleSelectionReceipt:
+    readback: LineIdentityRoleContextReadback
+    replayed: bool
+    receipt_identity: str
+
+
+@dataclass(frozen=True, slots=True)
 class LineIdentityRevocationPreview:
     binding: LineIdentityBindingManagementView
     default_menu_publication_id: int | None
@@ -214,10 +260,15 @@ __all__ = [
     "LineIdentityBindingListQuery",
     "LineIdentityBindingManagementView",
     "LineIdentityBindingPage",
+    "LineIdentityRoleContextReadback",
+    "LineIdentityRoleContextStatus",
+    "LineIdentityRoleSelectionPreview",
+    "LineIdentityRoleSelectionReceipt",
     "LineIdentityRevocationPreview",
     "LineIdentityReplacementPreview",
     "LineIdentityRevocationRequest",
     "LineIdentityRevocationStatus",
     "RequestLineIdentityRevocationCommand",
     "ReplaceLineIdentitySubjectCommand",
+    "SelectLineIdentityRoleCommand",
 ]

@@ -351,6 +351,35 @@ Stable errors：
 異常中心顯示 bank fact、候選批次、item outstanding、既有 allocation 與合法 action。
 人員 action 只能導航至本 Domain Preview，不得直接寫 allocation、paid amount 或 status。
 
+### 8.1 Current anomaly owner decision matrix（2026-08-31）
+
+共同 owner readback 以 Government Subsidy aggregate version、batch／item versions 與相關 immutable
+ledger／allocation identities 形成 snapshot token，並回報 `authoritative_complete`。既有 Q／P／A
+成功後在同一 outer UoW 寫入 bounded `anomaly.recheck` intent；Anomalies 不重算金額或修改
+claim／ledger／allocation roots。
+
+| Code／subject | Active predicate（current roots） | 唯一合法 owner operation | Completion predicate | Closed unresolved reasons |
+|---|---|---|---|---|
+| `GOVSUB-001` / `bank_fact_identity` | canonical government incoming bank fact 沒有唯一 approved outstanding batch，或尚未形成該唯一 batch 的完整 receipt allocation | `Preview／ApplyGovernmentSubsidyReceipt`；需人員指定 item allocation 時仍沿用同一 receipt Preview／Apply 的 Manual Allocation intent | bank fact 唯一綁定 approved batch，全額以合法 claim allocations 或已核准 overage disposition 守恆，receipt／allocation／projection 一致 | `approved_batch_not_unique`, `receipt_allocation_incomplete`, `amount_not_conserved`, `owner_readback_incomplete` |
+| `GOVSUB-002` / `bank_fact_identity + batch_id` | batch 已唯一，但 partial receipt 或多個 item 候選使 allocation 無法由 approved outstanding 唯一決定 | `Preview／ApplyGovernmentSubsidyReceipt` 的 Manual Allocation intent；人員只提供 item identities 與整數 allocation | selected items 同 batch、不超過 outstanding，且 allocations 總額與 receipt amount 精確守恆 | `item_allocation_ambiguous`, `item_outstanding_exceeded`, `allocation_total_mismatch`, `owner_readback_incomplete` |
+| `GOVSUB-004` / `reversal_bank_fact_identity + source_receipt_id` | reversal target 不是唯一合法 receipt／allocation set，或 reversal amount 與可沖銷 remaining 不一致 | `Preview／ApplyGovernmentSubsidyReversal`，綁定 exact original receipt 與 selected original allocation identities | 只追加合法 reversal transaction／allocations；總額等於 reversal amount、不超過各原 allocation remaining，net allocation 與 batch status 一致 | `reversal_target_ambiguous`, `reversal_target_invalid`, `reversal_amount_exceeded`, `reversal_allocation_incomplete`, `owner_readback_incomplete` |
+
+`GOVSUB-003`、`GOVSUB-005`、`GOVSUB-007` 的 active root facts 與 completion oracle 已明確，但目前規格
+沒有唯一合法 mutation：`GOVSUB-003` 無法區分可重建 projection 與 contradictory immutable
+ledger／allocation roots 的修正路徑；`GOVSUB-005` 尚未裁決送件後 frozen claim 與後續 official
+service-fact drift 的 revision／correction command；`GOVSUB-007` 明定禁止部分入帳、自動新建
+退款單或抵扣，但尚無核准的 overpaid outgoing disposition command。這三碼因此維持
+`AUTHORITY_REQUIRED`；Query／retry／rebuild／receipt-only 都不得解除 current issue。
+
+```yaml
+convergence:
+  status: READY
+  ready_requirement_ids: [GOV-ANM-001, GOV-ANM-002, GOV-ANM-004, GOV-ANM-READBACK]
+  acceptance_ids: [GOV-ANM-ACTIVE, GOV-ANM-OWNER-QPA, GOV-ANM-AMOUNT-CONSERVATION, GOV-ANM-TERMINAL, GOV-ANM-FAIL-CLOSED]
+  excluded_authority_required: [GOV-ANM-003, GOV-ANM-005, GOV-ANM-007]
+  blockers: []
+```
+
 ## 9. Legacy 遷移
 
 可保留並吸收：

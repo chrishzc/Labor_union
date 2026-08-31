@@ -37,12 +37,22 @@ type Operation = 'query' | 'preview' | 'apply' | 'reconcile';
 
 function displayError(error: unknown): string {
   if (error instanceof StaffOverpaymentRecoveryError) {
-    if (error.code === 'STAFF_RECOVERY_SCHEMA_MISMATCH') return 'Staff recovery 回應契約不完整，已停止操作。';
-    if (error.code === 'STAFF_RECOVERY_OWNER_MISMATCH' || error.code.includes('OWNER_MISMATCH')) return 'owner identity 不一致，已停止操作。';
-    if (error.code.includes('STALE')) return '資料版本已變更，請重新查詢後再 Preview。';
-    return `${error.code}：${error.message}`;
+    if (error.code === 'STAFF_RECOVERY_SCHEMA_MISMATCH') return '追償資料目前不完整，已停止操作。';
+    if (error.code === 'STAFF_RECOVERY_OWNER_MISMATCH' || error.code.includes('OWNER_MISMATCH')) return '追償資料與目前處理對象不一致，已停止操作。';
+    if (error.code.includes('STALE')) return '追償資料已變更，請重新查詢後再檢查處理影響。';
+    return '月嫂超額付款追償目前無法完成，異常仍會保留；請確認資料後再試。';
   }
-  return error instanceof Error ? error.message : 'Staff recovery 操作失敗，請重新查詢。';
+  return '月嫂超額付款追償目前無法完成，異常仍會保留；請重新查詢後再試。';
+}
+
+function recoveryStatusLabel(status: StaffOverpaymentRecoveryQuery['status']): string {
+  const labels: Record<StaffOverpaymentRecoveryQuery['status'], string> = {
+    open: '待處理',
+    partially_recovered: '部分收回',
+    recovered: '已收回',
+    adjusted: '已完成授權調整',
+  };
+  return labels[status];
 }
 
 function isOutcomeUnknown(error: unknown): boolean {
@@ -180,17 +190,17 @@ export function StaffOverpaymentRecoveryActions({
       identities.current.delete(`${preview.kind}-apply`);
       const readback = await loadQuery();
       if (terminal && (readback.status === 'recovered' || readback.status === 'adjusted') && readback.remaining_amount_ntd === 0) {
-        setNotice('Staff recovery 已由 owner root readback 確認解除。');
+        setNotice('已重新確認追償餘額歸零且完成處理，異常可解除。');
         await onCommitted?.();
       } else if (terminal) {
         setNotice(`Staff recovery 仍在處理中，剩餘 NT$ ${readback.remaining_amount_ntd.toLocaleString('en-US')}；異常保留。`);
       } else {
-        setNotice('入款配對已建立；配對本身不解除異常，請依 owner Query 繼續收款。');
+        setNotice('入款配對已建立；配對本身不解除異常，請依最新追償資料繼續收款。');
       }
     } catch (cause) {
       if (isOutcomeUnknown(cause)) {
         setOutcomeUnknown(true);
-        setError('Apply 結果未明，禁止重送；請以相同命令識別重新查詢 owner root 與 receipt。');
+        setError('操作結果目前無法安全確認，禁止重複送出；請使用原操作重新查詢。');
       } else setError(displayError(cause));
     } finally {
       setOperation('query');
@@ -204,11 +214,11 @@ export function StaffOverpaymentRecoveryActions({
     try {
       const readback = await loadQuery();
       if (readback.remaining_amount_ntd === 0 && (readback.status === 'recovered' || readback.status === 'adjusted')) {
-        setNotice('owner root readback 已確認解除；請保留原命令 receipt 供稽核。');
+        setNotice('已由最新追償資料確認完成，異常可解除；原操作紀錄仍會保留供稽核。');
         setOutcomeUnknown(false);
         await onCommitted?.();
       } else {
-        setNotice('尚未觀察到 terminal owner root；不會重送 Apply，異常仍保留。');
+        setNotice('最新追償資料仍未完成；系統不會重複送出操作，異常仍會保留。');
       }
     } catch (cause) {
       setError(displayError(cause));
@@ -217,19 +227,19 @@ export function StaffOverpaymentRecoveryActions({
     }
   };
 
-  if (!query && !error) return <section aria-label="月嫂超額付款追償"><p role="status">正在查詢 Staff recovery owner root…</p></section>;
+  if (!query && !error) return <section aria-label="月嫂超額付款追償"><p role="status">正在查詢最新追償資料…</p></section>;
 
   return (
     <section aria-label="月嫂超額付款追償" data-control-id="staff-payables.overpayment-recovery.actions" style={{ display: 'grid', gap: 12, border: '1px solid #dec0b6', borderRadius: 12, padding: 16, background: '#fffaf8' }}>
       <header>
         <h3 style={{ margin: 0 }}>月嫂超額付款追償</h3>
-        {query && <p style={{ margin: '6px 0 0' }}>目前狀態：{query.status}｜剩餘 NT$ {query.remaining_amount_ntd.toLocaleString('en-US')}｜版本 {query.recovery_version}</p>}
+        {query && <p style={{ margin: '6px 0 0' }}>目前狀態：{recoveryStatusLabel(query.status)}｜剩餘 NT$ {query.remaining_amount_ntd.toLocaleString('en-US')}</p>}
       </header>
       {error && <div role="alert" style={{ color: '#9f1239' }}>{error}</div>}
       {notice && <div role="status">{notice}</div>}
-      {outcomeUnknown && <button type="button" onClick={() => void reconcileUnknown()} disabled={operation === 'reconcile'}>重新查詢 owner root／receipt</button>}
-      {query && !active && <div role="status">此 Staff recovery 已是 terminal 狀態；只有 owner root readback 確認後才可移除異常。</div>}
-      {query && active && multipleMatchings && <div role="alert">目前有多筆 matching，收款目標不唯一；請人工整理 owner root 後再操作。</div>}
+      {outcomeUnknown && <button type="button" onClick={() => void reconcileUnknown()} disabled={operation === 'reconcile'}>重新查詢原操作結果</button>}
+      {query && !active && <div role="status">此筆追償已完成；只有最新追償資料確認後才可移除異常。</div>}
+      {query && active && multipleMatchings && <div role="alert">目前有多筆入款配對，收款目標不唯一；請先人工整理配對資料。</div>}
       {query && active && query.matchings.length === 0 && (
         <>
           <fieldset disabled={busy || outcomeUnknown} style={{ display: 'grid', gap: 8 }}>
@@ -239,32 +249,32 @@ export function StaffOverpaymentRecoveryActions({
           </fieldset>
           <fieldset disabled={busy || outcomeUnknown} style={{ display: 'grid', gap: 8 }}>
             <legend>人工調整（一次精確結清）</legend>
-            <p>依正式 Staff Payables 規則，調整金額固定為目前 fresh remaining：NT$ {query.remaining_amount_ntd.toLocaleString('en-US')}，不可自行輸入部分金額。</p>
-            <button type="button" disabled={!adjustmentReady} onClick={() => void runPreview('adjustment')}>Preview 精確調整（零寫入）</button>
+            <p>依正式應付款規則，調整金額固定為目前剩餘追償額：NT$ {query.remaining_amount_ntd.toLocaleString('en-US')}，不可自行輸入部分金額。</p>
+            <button type="button" disabled={!adjustmentReady} onClick={() => void runPreview('adjustment')}>檢查精確調整影響</button>
           </fieldset>
         </>
       )}
       {query && active && uniqueMatching && !multipleMatchings && (
         <fieldset disabled={busy || outcomeUnknown} style={{ display: 'grid', gap: 8 }}>
           <legend>核銷已配對退回入款</legend>
-          <p>matching：{uniqueMatching.matching_identity}（版本 {uniqueMatching.matching_version}）</p>
-          {collectionRowId === null && <p role="alert">owner Query 僅提供去敏 bank identity，缺少可提交的 owner numeric bank binding；已 fail closed。</p>}
-          {collectionRowId !== null && <p>銀行流水編號（owner binding）：{collectionRowId}</p>}
-          <button type="button" disabled={!collectionReady} onClick={() => void runPreview('collection')}>Preview 收款核銷（零寫入）</button>
+          <details><summary>技術操作欄位</summary><p>配對識別值：{uniqueMatching.matching_identity}（資料版本 {uniqueMatching.matching_version}）</p></details>
+          {collectionRowId === null && <p role="alert">目前配對缺少可提交的銀行流水編號，已停止操作。</p>}
+          {collectionRowId !== null && <p>銀行流水編號：{collectionRowId}</p>}
+          <button type="button" disabled={!collectionReady} onClick={() => void runPreview('collection')}>檢查收款核銷影響</button>
         </fieldset>
       )}
       {query && active && (
         <fieldset disabled={busy || outcomeUnknown} style={{ display: 'grid', gap: 8 }}>
           <legend>人工操作說明與獨立佐證</legend>
           <label>處理理由<textarea aria-label="處理理由" value={reason} maxLength={500} onChange={(event) => { setReason(event.target.value); invalidatePreview(); }} /></label>
-          <label>evidence reference<textarea aria-label="evidence reference" value={evidenceReference} maxLength={191} onChange={(event) => { setEvidenceReference(event.target.value); invalidatePreview(); }} /></label>
+          <label>佐證紀錄<textarea aria-label="佐證紀錄" value={evidenceReference} maxLength={191} onChange={(event) => { setEvidenceReference(event.target.value); invalidatePreview(); }} /></label>
         </fieldset>
       )}
       {preview && (
         <div data-surface-id="staff-payables.overpayment-recovery.preview" style={{ border: '1px solid #b7d8d1', padding: 10, borderRadius: 8 }}>
-          <strong>Preview 已完成（尚未寫入）</strong>
-          <div>{preview.kind === 'matching' ? '配對只建立 matching' : preview.kind === 'collection' ? `收款後剩餘 NT$ ${preview.value.remaining_after_ntd.toLocaleString('en-US')}` : `精確調整 NT$ ${preview.value.adjustment_amount_ntd.toLocaleString('en-US')} 後結清`}</div>
-          <button type="button" disabled={busy || outcomeUnknown || !inputReady} onClick={() => void runApply()}>確認並 Apply</button>
+          <strong>處理影響已確認（尚未寫入）</strong>
+          <div>{preview.kind === 'matching' ? '只建立入款配對，不會解除異常' : preview.kind === 'collection' ? `收款後剩餘 NT$ ${preview.value.remaining_after_ntd.toLocaleString('en-US')}` : `精確調整 NT$ ${preview.value.adjustment_amount_ntd.toLocaleString('en-US')} 後結清`}</div>
+          <button type="button" disabled={busy || outcomeUnknown || !inputReady} onClick={() => void runApply()}>確認並提交</button>
         </div>
       )}
     </section>

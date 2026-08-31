@@ -38,12 +38,13 @@
   - `db/schema_parts/1012_service_before_replacement.sql`
   - `db/migration_releases/labor_union_2026_08_28_service_before_replacement_v1.json`
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/`
+- layout_status: `custom_current`
+- test_root: `ui_react/src/tests/service_before_replacement_actions.test.tsx`
 - higher_boundary:
   - `tests/integration/`
 - cross_owner:
   - `tests/domains/anomalies/subsystems/anomalies/integration/test_service_before_replacement_projection.py` — Anomalies-owned projection contract.
-- layout_gap:
-  - `tests/test_service_before_replacement_schema_contract.py` — relocation-sensitive schema lookup remains at observed path.
+- higher_boundary_schema_release: current path-sensitive oracle is classified by the Global Arch Map routing.
 - routing: `.arch-map/tests/domains/scheduling/subsystems/scheduling/index.md`.
 
 ## Provenance
@@ -53,4 +54,4 @@
 - Remaining schema exception and Anomalies projection boundary — `source_observed` — current test roots.
 
 ## Change triggers
-Reconcile when scenario ownership, actual-service referral boundary, matching dependency, route/schema, persistence/migration or test roots change.
+Reconcile when scenario ownership, actual-service referral boundary, matching dependency, route/schema, persistence/migration, presentation hierarchy or test roots change.

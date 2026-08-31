@@ -188,7 +188,7 @@ export function ServiceBeforeReplacementActions({
           type: 'outcome_unknown',
           request,
           identity,
-          message: '提交結果尚未確認。系統不會建立新命令，只能用原內容與原 Idempotency-Key 對帳。',
+          message: '提交結果尚未確認。系統會沿用原操作安全地確認結果，不會重複建立換人。',
         });
         return;
       }
@@ -243,20 +243,20 @@ export function ServiceBeforeReplacementActions({
             <dt>受影響根事實</dt><dd>{query.impacted_roots.length} 筆</dd>
             <dt>保留歷史</dt><dd>{query.retained_roots.length} 筆</dd>
           </dl>
-          {query.actual_service_proof && (
-            <div>正式服務 proof：{query.actual_service_proof.source_identity}，版本 {query.actual_service_proof.source_version}</div>
-          )}
-          {query.candidate_pool_reuse_proof && (
-            <div>
-              候選池 reuse proof：{query.candidate_pool_reuse_proof.pool_identity}／{query.candidate_pool_reuse_proof.round_identity}；
-              coverage {query.candidate_pool_reuse_proof.coverage_version}、availability {query.candidate_pool_reuse_proof.availability_version}、willingness {query.candidate_pool_reuse_proof.willingness_version}；
-              generation {query.candidate_pool_reuse_proof.generation_version}、event {query.candidate_pool_reuse_proof.event_version}；
-              candidate {query.candidate_pool_reuse_proof.candidate_identity}；{query.candidate_pool_reuse_proof.fresh ? 'fresh' : 'not fresh'}；
-              fingerprint {query.candidate_pool_reuse_proof.fingerprint}
-            </div>
-          )}
           <details>
-            <summary>檢視 root identities</summary>
+            <summary>技術詳情與資料來源</summary>
+            {query.actual_service_proof && (
+              <div>正式服務 proof：{query.actual_service_proof.source_identity}，版本 {query.actual_service_proof.source_version}</div>
+            )}
+            {query.candidate_pool_reuse_proof && (
+              <div>
+                候選池 reuse proof：{query.candidate_pool_reuse_proof.pool_identity}／{query.candidate_pool_reuse_proof.round_identity}；
+                coverage {query.candidate_pool_reuse_proof.coverage_version}、availability {query.candidate_pool_reuse_proof.availability_version}、willingness {query.candidate_pool_reuse_proof.willingness_version}；
+                generation {query.candidate_pool_reuse_proof.generation_version}、event {query.candidate_pool_reuse_proof.event_version}；
+                candidate {query.candidate_pool_reuse_proof.candidate_identity}；{query.candidate_pool_reuse_proof.fresh ? 'fresh' : 'not fresh'}；
+                fingerprint {query.candidate_pool_reuse_proof.fingerprint}
+              </div>
+            )}
             <strong>受影響 roots</strong>
             <ul>{query.impacted_roots.map((root) => <li key={root.root_id}>{root.kind}｜{root.root_id}</li>)}</ul>
             <strong>保留 roots</strong>
@@ -297,9 +297,11 @@ export function ServiceBeforeReplacementActions({
       {uiState.type === 'preview_ready' && (
         <section aria-label="服務前換人預覽" style={{ border: '1px solid #f2a27b', borderRadius: '10px', padding: '12px' }}>
           <strong>{uiState.preview.outcome === 'ready' ? '預覽完成，尚未寫入' : '此預覽不可套用'}</strong>
-          <p>後端續跑位置：{stepLabels[uiState.preview.resume_step]}</p>
-          <p>將停用目前關聯 {uiState.preview.superseded_roots.length} 筆，建立 successor 根事實 {uiState.preview.created_roots.length} 筆。</p>
-          <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 12px' }}>
+          <p>後續處理位置：{stepLabels[uiState.preview.resume_step]}</p>
+          <p>將停用目前關聯 {uiState.preview.superseded_roots.length} 筆，建立新版正式資料 {uiState.preview.created_roots.length} 筆。</p>
+          <details>
+            <summary>技術詳情與資料來源</summary>
+            <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 12px' }}>
             <dt>Prior generation／event／aggregate</dt>
             <dd>{uiState.preview.prior_generation_identity ?? '—'}／{uiState.preview.prior_event_identity ?? '—'}／{uiState.preview.prior_aggregate_identity ?? '—'}</dd>
             <dt>Replacement generation／event</dt>
@@ -310,14 +312,14 @@ export function ServiceBeforeReplacementActions({
             <dt>Aggregate version</dt><dd>expected {uiState.preview.expected_aggregate_version}／resulting {uiState.preview.resulting_aggregate_version}</dd>
             <dt>Projection kind</dt><dd>{uiState.preview.projection_kind}</dd>
             <dt>Preview fingerprint</dt><dd>{uiState.preview.preview_fingerprint}</dd>
-          </dl>
-          {uiState.preview.actual_service_proof ? (
+            </dl>
+            {uiState.preview.actual_service_proof ? (
             <div>
               Actual-service proof：{uiState.preview.actual_service_proof.source_identity}，版本 {uiState.preview.actual_service_proof.source_version}；
               日期 {uiState.preview.actual_service_proof.service_dates.join('、') || '無'}；fingerprint {uiState.preview.actual_service_proof.fingerprint}
             </div>
-          ) : <div>Actual-service proof：無</div>}
-          {uiState.preview.candidate_pool_reuse_proof ? (
+            ) : <div>Actual-service proof：無</div>}
+            {uiState.preview.candidate_pool_reuse_proof ? (
             <div>
               Candidate reuse proof：pool {uiState.preview.candidate_pool_reuse_proof.pool_identity}／round {uiState.preview.candidate_pool_reuse_proof.round_identity}／
               successor {uiState.preview.candidate_pool_reuse_proof.successor_round_identity}／candidate {uiState.preview.candidate_pool_reuse_proof.candidate_identity}；
@@ -328,16 +330,15 @@ export function ServiceBeforeReplacementActions({
               fresh {String(uiState.preview.candidate_pool_reuse_proof.fresh)}／accepted {String(uiState.preview.candidate_pool_reuse_proof.accepted_candidate)}；
               fingerprint {uiState.preview.candidate_pool_reuse_proof.fingerprint}
             </div>
-          ) : <div>Candidate reuse proof：無</div>}
-          {uiState.preview.successor_round ? (
+            ) : <div>Candidate reuse proof：無</div>}
+            {uiState.preview.successor_round ? (
             <div>
               Successor proof：{uiState.preview.successor_round.round_identity}／{uiState.preview.successor_round.generation_identity}／{uiState.preview.successor_round.event_identity}；
               generation {uiState.preview.successor_round.generation_version}／event {uiState.preview.successor_round.event_version}／candidates {uiState.preview.successor_round.candidate_count}／
               disposition {uiState.preview.successor_round.zero_candidate_disposition ?? '—'}；fingerprint {uiState.preview.successor_round.fingerprint}
             </div>
-          ) : <div>Successor proof：無</div>}
-          <details open>
-            <summary>完整 Preview roots</summary>
+            ) : <div>Successor proof：無</div>}
+            <strong>完整 Preview roots</strong>
             {([
               ['retained', uiState.preview.retained_roots],
               ['superseded', uiState.preview.superseded_roots],
@@ -376,34 +377,35 @@ export function ServiceBeforeReplacementActions({
       {uiState.type === 'outcome_unknown' && (
         <div role="alert">
           <div>{uiState.message}</div>
-          <button type="button" onClick={() => void apply(uiState.request, uiState.identity)}>以原命令對帳 receipt／readback</button>
+          <button type="button" onClick={() => void apply(uiState.request, uiState.identity)}>重新確認原操作結果</button>
         </div>
       )}
       {uiState.type === 'observed' && (
         <div role="status">
-          <strong>換人 successor 已完成 owner readback（{uiState.result.status === 'replayed' ? '既有結果已對帳' : '已套用'}）</strong>
-          <div>本次 Apply 已由後端完成 post-commit owner readback；若要處理另一種情境，請重新選擇情境後查詢。</div>
-          <div>Active anomaly：Apply readback 未提供 occurrence active 欄位，UI 不會以 receipt 或 blocker 假推定。</div>
-          <div>Generation／event／aggregate：{uiState.result.readback.generation_version}／{uiState.result.readback.event_version}／{uiState.result.readback.aggregate_version}</div>
+          <strong>換人處理已完成並回讀（{uiState.result.status === 'replayed' ? '已確認既有結果' : '已套用'}）</strong>
+          <div>正式資料已完成回讀；若要處理另一種情境，請重新選擇情境後查詢。</div>
+          <div>異常追蹤狀態需回到異常處理頁確認；本結果不自行推定異常已解除。</div>
           <div>後端完成位置：{stepLabels[uiState.result.readback.resume_step]}</div>
-          <div>Successor 候選數：{uiState.result.readback.candidate_count}</div>
+          <div>新版候選數：{uiState.result.readback.candidate_count}</div>
           {uiState.result.readback.zero_candidate_disposition === 'blocked_no_candidate' ? (
             <div role="status">
-              <strong>目前仍停在 Step 2：沒有可用候選（blocked_no_candidate）</strong>
+              <strong>目前仍停在步驟 2：沒有可用候選</strong>
               <div>這次只完成換人 lineage 記錄，不代表異常已解除，也不會復活舊月嫂。</div>
             </div>
           ) : null}
-          <div>Generation identity：{uiState.result.readback.generation_identity}</div>
-          <div>Event identity：{uiState.result.readback.event_identity}</div>
-          <div>Successor round：{uiState.result.readback.successor_round_identity}</div>
-          <div>Outbox：{uiState.result.readback.outbox_identity}</div>
-          <div>Readback complete：{uiState.result.readback.complete ? 'true' : 'false'}</div>
-          <div>Matching package lineage／event：{uiState.result.readback.matching_package_lineage_id ?? '—'}／{uiState.result.readback.matching_event_id ?? '—'}</div>
-          <div>Receipt：{uiState.result.receipt.receipt_identity}</div>
-          <div>Command fingerprint：{uiState.result.receipt.command_fingerprint}</div>
-          <div>Preview fingerprint：{uiState.result.receipt.preview_fingerprint}</div>
           <details>
-            <summary>完整 receipt／readback roots 與 digests</summary>
+            <summary>技術詳情與資料來源</summary>
+            <div>Generation／event／aggregate：{uiState.result.readback.generation_version}／{uiState.result.readback.event_version}／{uiState.result.readback.aggregate_version}</div>
+            <div>Generation identity：{uiState.result.readback.generation_identity}</div>
+            <div>Event identity：{uiState.result.readback.event_identity}</div>
+            <div>Successor round：{uiState.result.readback.successor_round_identity}</div>
+            <div>Outbox：{uiState.result.readback.outbox_identity}</div>
+            <div>Readback complete：{uiState.result.readback.complete ? 'true' : 'false'}</div>
+            <div>Matching package lineage／event：{uiState.result.readback.matching_package_lineage_id ?? '—'}／{uiState.result.readback.matching_event_id ?? '—'}</div>
+            <div>Receipt：{uiState.result.receipt.receipt_identity}</div>
+            <div>Command fingerprint：{uiState.result.receipt.command_fingerprint}</div>
+            <div>Preview fingerprint：{uiState.result.receipt.preview_fingerprint}</div>
+            <strong>完整 receipt／readback roots 與 digests</strong>
             {(['retained', 'superseded', 'created'] as const).map((kind, index) => (
               <div key={kind}>
                 <strong>{kind}</strong>

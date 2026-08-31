@@ -44,6 +44,55 @@ def schedule_rich_menu_binding(unit_of_work, binding: LineIdentityBindingSnapsho
     unit_of_work.outbox.append(_binding_intent(binding))
 
 
+def schedule_resolved_identity_menu(unit_of_work, line_user_id) -> bool:
+    """Queue one menu only when the LINE-owned active role is unambiguous."""
+
+    binding = _resolved_identity_binding(unit_of_work, line_user_id)
+    if binding is None:
+        return False
+    unit_of_work.outbox.append(_binding_intent(binding, role_scoped=True))
+    return True
+
+
+def schedule_revocation_successor_menu(unit_of_work, line_user_id, request_id) -> bool:
+    """Queue one post-revocation menu without colliding with an older role bind."""
+
+    binding = _resolved_identity_binding(unit_of_work, line_user_id)
+    if binding is None:
+        return False
+    unit_of_work.outbox.append(
+        _binding_intent(
+            binding,
+            role_scoped=True,
+            revocation_request_id=request_id,
+        )
+    )
+    return True
+
+
+def _resolved_identity_binding(unit_of_work, line_user_id):
+    scoped = tuple(
+        binding
+        for binding in unit_of_work.identities.list_by_user(line_user_id)
+        if binding.status is LineIdentityBindingStatus.BOUND
+    )
+    if not scoped:
+        return None
+    if len(scoped) == 1:
+        return scoped[0]
+    if any(binding.subject_type is LineBindingSubjectType.ADMIN for binding in scoped):
+        raise RuntimeError("line_identity_admin_role_exclusive")
+    selected_role, _ = unit_of_work.identities.selected_role(line_user_id)
+    if selected_role is None:
+        return None
+    selected = tuple(
+        binding for binding in scoped if binding.subject_type is selected_role
+    )
+    if len(selected) != 1:
+        raise RuntimeError("line_identity_selected_role_stale")
+    return selected[0]
+
+
 def schedule_published_menu_rebindings(
     unit_of_work,
     definition_json: str,
@@ -67,14 +116,21 @@ def schedule_published_menu_rebindings(
     return len(bindings)
 
 
-def _binding_intent(binding):
+def _binding_intent(binding, *, role_scoped=False, revocation_request_id=None):
     menu_definition_id = _MENU_BY_SUBJECT[binding.subject_type]
+    role_segment = f":{binding.subject_type.value}" if role_scoped else ""
+    revocation_segment = (
+        f":revocation:{revocation_request_id}"
+        if revocation_request_id is not None
+        else ""
+    )
     return OutboxIntent(
         "line_identity",
         binding.line_user_id.value,
         RICH_MENU_BINDING_INTENT,
         _binding_payload(binding, menu_definition_id),
-        f"rich-menu-bind:{binding.line_user_id.value}:{binding.version.value}",
+        f"rich-menu-bind:{binding.line_user_id.value}{role_segment}:"
+        f"{binding.version.value}{revocation_segment}",
     )
 
 
@@ -207,4 +263,6 @@ __all__ = [
     "RICH_MENU_BINDING_INTENT",
     "schedule_published_menu_rebindings",
     "schedule_rich_menu_binding",
+    "schedule_resolved_identity_menu",
+    "schedule_revocation_successor_menu",
 ]

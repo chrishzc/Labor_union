@@ -122,6 +122,18 @@ exact migration contract 與 Authority。每次重新成立仍建立新 current 
 episode timestamps 只隨 current row 存在；predicate false 刪除 row 後不另行保存。
 未知 code／version、缺欄、額外欄位、PII 穿透或 malformed subject 固定 fail closed。
 
+#### LINE-006 owner predicate consumer（2026-08-31）
+
+Anomalies只消費LINE Integration提供的typed `LINE-006` current-fact readback，公開identity仍是
+`case_no + notification_reason`；不得直接查LINE tables、判斷notification source applicability、重算
+Delivery task／attempt狀態或寫入LINE root。readback `predicate_active=true`時upsert／更新current issue；
+只有`predicate_active=false`且`authoritative_complete=true`才可刪除。readback incomplete、unavailable、
+stale或lineage ambiguous一律fail closed，不移除current issue。
+
+LINE Notification／Delivery owner mutation與bounded `anomaly.recheck` intent在owner既有outer UoW提交；
+worker再fresh讀取typed owner readback。Anomalies detail只保存applicable／unresolved counts與closed reason
+codes，不接收raw recipient、provider payload、message body、credential或完整delivery error。
+
 ### 3.3 API 與 React
 
 - `GET /api/v1/anomalies`：只回 current rows。可用 filters 限
@@ -161,6 +173,23 @@ cursor 邊界另固定 `anomaly_cursor_invalid`。
 navigation-only、Query-only、projector retry、generic resolve、`available_actions=[]` 或「尚未支援」都不是
 terminal-ready manual action。只有 automation 可以 `blocked_capability`；manual action 缺漏時該 code
 與整體 cutover 都保持 `SPEC_GAP`。
+
+### 4.1 Thirteen-code owner convergence（2026-08-31）
+
+依 current owning specs 與最新人工裁決，13 碼不再整批視為 `BOUNDARY_REQUIRED`：
+
+- `SCHEDULE-002`、`SCHEDULE-003`、`SCHEDULE-006` 的 owner predicate／operation／terminal matrix
+  由 `02` 擁有；
+- `GOVSUB-001`、`GOVSUB-002`、`GOVSUB-004` 的 matrix 由 `14` 擁有；
+- `BECLASS-001`、`IMPORT-003` 的 pairing matrix 由 `17` 的 Case Import 擁有；
+- 上述 Case pairing behavioral contract已收斂，但current roots只證明synthetic counterpart與
+  same-source accepted receipt；different-source accepted lineage仍為
+  `BOUNDARY_REQUIRED_CASE_PAIRING_LINEAGE`，不得在Anomalies推導或旁路解除；
+- `PAYOUT-002`、`GOVSUB-003`、`GOVSUB-005`、`GOVSUB-007`、`IMPORT-006` 仍為
+  `AUTHORITY_REQUIRED`：它們的 active／completion oracle 已知，但現行正式規格無法唯一決定
+  合法 correction／disposition operation。
+
+上述收旂只是 owner contract 狀態，不代表 production consumer、UI 或 runtime 已實作。
 
 ## 5. Bounded recheck 與 transaction
 

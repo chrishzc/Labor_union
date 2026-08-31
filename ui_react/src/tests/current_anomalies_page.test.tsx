@@ -46,6 +46,17 @@ describe('CurrentAnomaliesPage', () => {
     fireEvent.click(issue);
 
     await waitFor(() => expect(anomalyDetailClient.queryAnomalyRecovery).toHaveBeenCalledWith({ issueKey }));
-    expect(await screen.findByText(/系統不會以通用 resolve 代替/)).toBeInTheDocument();
+    expect(await screen.findByText(/系統不會用通用結案取代業務修正/)).toBeInTheDocument();
+    expect(screen.getAllByText('排班管理').length).toBeGreaterThan(0);
+    expect(screen.getByText(/資料版本：3/)).not.toBeVisible();
+    expect(screen.queryByText(/owner facts|closed owner action|通用 resolve/)).not.toBeInTheDocument();
+  });
+
+  it('maps unexpected list failures to a closed business error', async () => {
+    vi.mocked(currentAnomalyQueryClient.queryCurrentAnomalies).mockRejectedValueOnce(new Error('raw database host detail'));
+    render(<CurrentAnomaliesPage />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('目前異常資料暫時無法使用，請稍後重試。');
+    expect(screen.queryByText(/raw database host detail/)).not.toBeInTheDocument();
   });
 });

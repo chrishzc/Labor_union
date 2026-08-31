@@ -14,6 +14,12 @@
 - `subsystems/staff_payables/` — Staff Payables workflows
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — transaction/replay contract
 
+## Modules
+- `historical-payment-settlement` — adopted pre-system historical Staff payout evidence and exact obligation settlement overlay; path: `modules/historical-payment-settlement.md`
+- `historical-payment-settlement-presentation` — owner-page exact staff/case historical payout Q/P/A and fresh readback; path: `modules/historical-payment-settlement-presentation.md`
+- `payout-remediation-presentation` — 逾期應付款核銷的既有安全 workflow 與 business-first React projection; path: `modules/payout-remediation-presentation.md`
+- `overpayment-recovery-presentation` — 月嫂超額付款追償的既有安全 workflow 與 business-first React projection; path: `modules/overpayment-recovery-presentation.md`
+
 ## Verification routing
 - default_boundary: Subsystem
 - test_root: `tests/domains/staff-payables/subsystems/staff-payables/`

@@ -211,7 +211,7 @@ describe('Adversarial Challenge: ErrorBoundary Component', () => {
     return <div data-testid="healthy-child">Healthy Content Rendered</div>;
   };
 
-  it('[EB-1] 子元件拋出渲染例外時，ErrorBoundary 應成功捕獲並呈現防護降級 UI 與錯誤訊息', () => {
+  it('[EB-1] 子元件拋出渲染例外時，ErrorBoundary 應呈現 closed 防護 UI 且不洩漏錯誤訊息', () => {
     render(
       <ErrorBoundary>
         <BuggyChild shouldThrow={true} errorMessage="Adversarial Failure Mode" />
@@ -219,7 +219,7 @@ describe('Adversarial Challenge: ErrorBoundary Component', () => {
     );
 
     expect(screen.getByText('畫面載入發生異常')).toBeInTheDocument();
-    expect(screen.getByText('Adversarial Failure Mode')).toBeInTheDocument();
+    expect(screen.queryByText('Adversarial Failure Mode')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重新嘗試' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重新載入頁面' })).toBeInTheDocument();
     expect(screen.queryByTestId('healthy-child')).not.toBeInTheDocument();
@@ -283,7 +283,7 @@ describe('Adversarial Challenge: ErrorBoundary Component', () => {
     );
 
     expect(screen.getByTestId('outer-healthy-area')).toBeInTheDocument();
-    expect(screen.getByText('Inner Crash')).toBeInTheDocument();
+    expect(screen.queryByText('Inner Crash')).not.toBeInTheDocument();
     expect(screen.getByText('畫面載入發生異常')).toBeInTheDocument();
   });
 });

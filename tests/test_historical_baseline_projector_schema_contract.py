@@ -89,7 +89,7 @@ def test_fresh_assembly_orders_1011_before_1012() -> None:
     assert names.index("1011_historical_baseline_projector.sql") < names.index(
         "1012_service_before_replacement.sql"
     )
-    assert names[-1] == "1018_hcm_resubmission_canonical_review_version.sql"
+    assert names[-1] == "1020_historical_owner_payment_settlement.sql"
 
 
 def _table_block(sql: str, table: str) -> str:

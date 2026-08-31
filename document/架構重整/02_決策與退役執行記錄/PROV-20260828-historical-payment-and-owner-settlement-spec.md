@@ -35,7 +35,7 @@
 | `HPS-04` | Staff payout只由Staff Payables exact staff／case／obligations處理 |
 | `HPS-05` | owner historical Query／Preview／Apply具fresh lock、receipt、replay與同UoW outbox |
 | `HPS-06` | historical source不得偽造bank row／allocation／date；later owner event可更新或重開 |
-| `HPS-07` | Anomalies頁顯示原因、消除方式及同頁owner typed修復，禁止generic close/editor |
+| `HPS-07` | Client Finance／Staff Payables owner page顯示原因、消除方式及同頁owner typed修復，禁止generic close/editor；`#anomalies`依較新`06`只保留15個current issue |
 | `HPS-08` | HPROJ只組合owner terminal readback；Client與Staff皆terminal才可完成Step 11 |
 | `HPS-09` | 正式操作使用既有enabled internal frontend account能力；local no-auth只可作development驗收 |
 
@@ -99,11 +99,15 @@ audit 與 HPROJ source envelope 必須由同一 owner outer Unit of Work 一次�
 - true ledger integrity conflict 可保留獨立 integrity anomaly；不得因付款或 owner settlement 成立就刪除
   不同根因的 alert。
 
-## 5. Anomalies React repair hub
+## 5. Owner React repair hub
 
-異常頁是主要人工入口，但不是 root editor。每筆 alert detail 必須顯示 owner、付款方向、payer／payee、
-exact obligations、金額／到期日、已找到的 bank candidates、正常核銷 blocker、歷史 eligibility、解除條件及
-Apply 後 fresh readback。頁內 drawer 依 typed action 提供：
+2026-08-29較新`06_Anomalies_Domain.md`已將`RECEIVABLE-001`、`RETURN-001`與`PAYOUT-001`
+分類為owner work item，固定只顯示在各自owner page，不得重新加入只含15個current issue的`#anomalies`。
+這是既有HPS UI位置的`BASELINE_PROPAGATION`，不改變付款、eligibility或terminal business oracle。
+
+Client Finance／Staff Payables owner page必須顯示 owner、付款方向、payer／payee、exact obligations、
+金額／到期日、已找到的 bank candidates、正常核銷 blocker、歷史 eligibility、解除條件及Apply後fresh
+readback。頁內bounded workbench依owner typed contract提供：
 
 1. `使用對帳單核銷`：呼叫現有 owner reconciliation；
 2. `歷史人工確認已付款／已結清`：只在本規格 eligibility 成立時出現，呼叫對應 owner historical Q/P/A。
@@ -133,7 +137,7 @@ observations terminal 且其他 completion roots 成立，active historical memb
   unavailable均零假成功。
 - `HPS-A9`：後續退款、退匯、reversal或新義務以較新owner event重開／更新對應alert，舊history immutable。
 - `HPS-A10`：Client terminal、Staff未terminal時Step 11保持未完成；兩邊與其他completion roots全terminal才完成。
-- `HPS-A11`：Anomalies頁完整顯示原因、消除方式及同頁typed修復；不得generic close或直接欄位／SQL寫入。
+- `HPS-A11`：Client Finance／Staff Payables owner page完整顯示原因、消除方式及同頁typed修復；不得generic close、直接欄位／SQL寫入或將owner work item放回`#anomalies`。
 - `HPS-A12`：additive schema完整通過DB 3.1 gates及另一台configured developer acceptance；未通過時固定
   `DB_CHANGE_NOT_READY`。
 - `HPS-A13`：一般enabled internal前端帳號可走相同typed修復；development no-auth可驗收相同行為但不改變

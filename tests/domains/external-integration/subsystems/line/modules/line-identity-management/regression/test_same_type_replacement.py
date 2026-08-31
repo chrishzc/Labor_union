@@ -43,6 +43,8 @@ def test_bound_identity_replacement_updates_same_type_and_appends_one_rebound_ev
     cursor = ScriptedCursor(
         one_rows=(
             None,
+            {"line_user_id": "U-staff"},
+            {"admin_count": 0, "nonadmin_count": 1},
             {
                 "line_user_id": "U-staff",
                 "binding_status": "bound",
@@ -70,13 +72,13 @@ def test_bound_identity_replacement_updates_same_type_and_appends_one_rebound_ev
     assert result.subject_type is LineBindingSubjectType.STAFF
     assert result.subject_reference == "staff:8"
     assert result.version == ExpectedVersion(4)
-    update_sql, update_parameters = cursor.executed[2]
-    assert update_sql.startswith("UPDATE line_identity_bindings")
-    assert update_parameters == ("bound", "staff", "staff:8", 4, "U-staff", 3)
+    update_sql, update_parameters = cursor.executed[4]
+    assert update_sql.startswith("UPDATE line_identity_role_bindings")
+    assert update_parameters == ("bound", "staff:8", 4, "U-staff", "staff", 3)
     event_statements = [
         (sql, parameters)
         for sql, parameters in cursor.executed
-        if sql.startswith("INSERT INTO line_identity_binding_events")
+        if sql.startswith("INSERT INTO line_identity_role_binding_events")
     ]
     assert len(event_statements) == 1
     assert event_statements[0][1][:7] == (
@@ -98,6 +100,8 @@ def test_bound_identity_replacement_rejects_unchanged_reference() -> None:
     cursor = ScriptedCursor(
         one_rows=(
             None,
+            {"line_user_id": "U-staff"},
+            {"admin_count": 0, "nonadmin_count": 1},
             {
                 "line_user_id": "U-staff",
                 "binding_status": "bound",
@@ -126,6 +130,8 @@ def test_bound_identity_replacement_rejects_cross_type_claim() -> None:
     cursor = ScriptedCursor(
         one_rows=(
             None,
+            {"line_user_id": "U-staff"},
+            {"admin_count": 0, "nonadmin_count": 1},
             {
                 "line_user_id": "U-staff",
                 "binding_status": "bound",

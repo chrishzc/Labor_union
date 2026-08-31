@@ -8,6 +8,7 @@ import {
   LineIdentityReviewWorkbench,
   type LineIdentityReviewClient,
 } from '../components/LineIdentityReviewWorkbench';
+import { LineIdentityClientError } from '../api/line_identity/line_identity_errors';
 
 const PENDING_REVIEW = {
   request_id: 71,
@@ -109,7 +110,8 @@ describe('LINE 身分人工審核工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新查詢審核結果' }));
     await waitFor(() => expect(client.getReview).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getAllByText('已核准').length).toBeGreaterThan(0));
-    expect(screen.getByText(/此審核已是 已核准/)).toBeInTheDocument();
+    expect(screen.getByText('此審核已是 已核准，不可再提交決定；可保留明細作為最新審核結果。')).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('readback');
   });
 
   it('修改 reason 後廢止既有 Preview，不可使用 stale fingerprint Apply', async () => {
@@ -157,5 +159,26 @@ describe('LINE 身分人工審核工作台', () => {
       expect.any(Object),
     ));
     await screen.findByText('顯示 1-25 / 26 件');
+  });
+
+  it('不將 typed error code 或後端訊息穿透到一般審核畫面', async () => {
+    const client = reviewClient();
+    client.previewReviewDecision.mockRejectedValueOnce(new LineIdentityClientError(
+      'BACKEND_REJECTED',
+      'raw provider detail must stay closed',
+    ));
+    render(<LineIdentityReviewWorkbench client={client} />);
+
+    await screen.findByText('待審月嫂甲');
+    fireEvent.click(screen.getByRole('button', { name: '查看審核 #71' }));
+    await screen.findByRole('heading', { name: /審核 #71/ });
+    fireEvent.change(screen.getByRole('textbox', { name: '審核原因' }), {
+      target: { value: '管理員已人工核對資料' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '預覽審核決定' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('LINE 身分審核服務目前無法安全完成這項操作，請稍後再試。');
+    expect(document.body.textContent).not.toContain('BACKEND_REJECTED');
+    expect(document.body.textContent).not.toContain('raw provider detail');
   });
 });

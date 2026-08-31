@@ -14,6 +14,9 @@ from domains.government_subsidy.overpayment import build_receipt_with_overage_ca
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+from subsystems.government_subsidy.current_anomaly_facts import (
+    GovernmentSubsidyOverpaymentRecheckRequest,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,8 +46,14 @@ class Repository(Protocol):
     def persist_return_reconciliation(self, request: ReturnReconciliationApplyRequest, candidate) -> dict: ...
 
 
+class GovernmentSubsidyOverpaymentAnomalyRecheckPort(Protocol):
+    def append_government_subsidy_overpayment_rechecks(
+        self, request: GovernmentSubsidyOverpaymentRecheckRequest
+    ) -> None: ...
+
+
 class GovernmentSubsidyOverpaymentWorkflow:
-    def __init__(self, repository: Repository, unit_of_work_factory: Callable): self._repository, self._uow = repository, unit_of_work_factory
+    def __init__(self, repository: Repository, unit_of_work_factory: Callable, anomaly_rechecks: GovernmentSubsidyOverpaymentAnomalyRecheckPort | None = None): self._repository, self._uow, self._anomaly_rechecks = repository, unit_of_work_factory, anomaly_rechecks
 
     def preview_offset(self, identity, intents):
         return build_overpayment_offset_candidate(self._repository.load_overpayment(identity, lock=False), self._repository.load_offset_targets(intents, lock=False), intents)
@@ -64,6 +73,12 @@ class GovernmentSubsidyOverpaymentWorkflow:
             if request.expected_version.value != batch.aggregate_version: raise ValueError("government_subsidy_overpayment_version_conflict")
             if request.preview_fingerprint != candidate.fingerprint: raise ValueError("government_subsidy_overpayment_preview_stale")
             receipt = self._repository.persist_receipt_with_overage(request, candidate, bank, batch)
+            self._append_rechecks(
+                "government-overpayment:" + bank.bank_fact_identity,
+                batch.aggregate_version + 1,
+                candidate.fingerprint,
+                request.idempotency_key,
+            )
             unit_of_work.commit()
             return receipt
 
@@ -76,6 +91,7 @@ class GovernmentSubsidyOverpaymentWorkflow:
             _verify(request, root, candidate)
             receipt = self._repository.persist_offset(request, candidate)
             _save_receipt(self._repository, request, candidate, receipt, "offset")
+            self._append_rechecks(request.identity, request.expected_version.value + 1, candidate.fingerprint, request.idempotency_key)
             unit_of_work.commit()
             return receipt
 
@@ -91,6 +107,7 @@ class GovernmentSubsidyOverpaymentWorkflow:
             _verify(request, root, candidate)
             receipt = self._repository.persist_return(request, candidate, recipient)
             _save_receipt(self._repository, request, candidate, receipt, "return")
+            self._append_rechecks(request.identity, request.expected_version.value + 1, candidate.fingerprint, request.idempotency_key)
             unit_of_work.commit()
             return receipt
 
@@ -112,8 +129,21 @@ class GovernmentSubsidyOverpaymentWorkflow:
             _verify(request, root, candidate)
             receipt = self._repository.persist_return_reconciliation(request, candidate)
             _save_receipt(self._repository, request, candidate, receipt, "return_reconciliation")
+            self._append_rechecks(request.identity, request.expected_version.value + 1, candidate.fingerprint, request.idempotency_key)
             unit_of_work.commit()
             return receipt
+
+    def _append_rechecks(self, identity, version, fingerprint, idempotency_key):
+        if self._anomaly_rechecks is None:
+            return
+        self._anomaly_rechecks.append_government_subsidy_overpayment_rechecks(
+            GovernmentSubsidyOverpaymentRecheckRequest(
+                identity,
+                version,
+                fingerprint.value,
+                "government-subsidy-overpayment:" + idempotency_key.value,
+            )
+        )
 
 def _verify(request, root, candidate):
     if request.expected_version.value != root.version: raise ValueError("government_subsidy_overpayment_version_conflict")

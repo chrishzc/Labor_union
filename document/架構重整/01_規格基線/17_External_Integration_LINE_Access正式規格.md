@@ -233,6 +233,35 @@ intent→task lineage 均 strict fail closed；不得以 coercion、去重或重
 不得呼叫 provider或 wakeup；worker/provider 執行前仍需重讀 cancellation。Manual replay 會建立新 intent，
 不屬於本契約，也不得因本節完成而開放 React 呼叫。
 
+#### LINE-006 current-fact readback 與 manual replay terminal predicate（2026-08-31）
+
+`LINE-006`的公開subject固定為`case_no + notification_reason`。LINE Notification擁有notification
+source、decision／intent、`manual-replay:{source_event_id}:{idempotency_key}` immutable successor
+lineage與source applicability interpretation；LINE Delivery繼續擁有task、attempt、retry與terminal
+delivery result。LINE Integration只以typed、zero-write readback組合這些既有facts，不新增LINE-006
+aggregate table，也不把Delivery root或terminal success搬入Notification。
+
+同一subject是一個logical current group，可含多筆source／decision；只有Notification owner可證明
+currently applicable的failed source參與predicate。合法cancelled、obsolete、superseded或不再適用的
+source不需重送；無法完整判定applicability、lineage或delivery outcome時readback固定
+`authoritative_complete=false`並fail closed。typed readback至少包含case、reason、owner snapshot
+token／version、complete flag、applicable／unresolved source counts、closed unresolved reason codes與
+`predicate_active`，不得輸出raw recipient、payload、message body、credential或完整delivery error。
+
+每筆currently-applicable failed source必須以exact original source ID找到目前lineage中的manual replay
+successor；replay建立新immutable source，原source不改寫、不新增`superseded_by`欄位。
+recipient binding或configuration修正本身不解除predicate，只讓新的manual replay可執行。建立intent且
+provider送出前都必須fresh驗證exact recipient、current binding、required notification configuration與
+source applicability；intent／task保存當時rule／template／recipient snapshot。terminal delivery success
+後，後續正常configuration revision不得回溯使該success失效，除非receipt／lineage被證明不合法或形成
+新的currently-applicable failure。
+
+`predicate_active=true`當且僅當complete current source set中至少一筆applicable failure沒有合格terminal
+successor。missing successor、pending／processing／retryable、terminal failed、outcome unknown、ambiguous
+lineage、fresh validation failure或owner readback incomplete／unavailable都不得解除；沒有applicable failed
+source時predicate為false。Notification／Delivery相關mutation在既有outer UoW／outbox邊界內追加既有
+`anomaly.recheck` intent；不得建立另一套replay、remediation或escalation framework。
+
 ### 3.4 Subsystem：LINE Identity／Review
 
 State：
@@ -713,6 +742,34 @@ Typed operations：
 - `PreviewHcmResubmission`／`ApplyHcmResubmission` → 驗證完整修正來源、prior owner review 與 canonical
   case 的明確關聯，採納通過驗證的 HCM-owned fields；link 只有唯一可證明時建立
 - owner review referral descriptor → 只回傳 owner command identifier、expected review version 與去敏 context
+
+#### Case pairing current anomaly decision matrix（2026-08-31）
+
+`BECLASS-001`與`IMPORT-003`共用 Case Import 既有 source intake／Preview／Apply／accepted-mapping
+contract，不建立平行 linking framework。owner readback 以 exact lane source identities、current review／mapping
+versions 與 case identity 形成 snapshot token，並回報 `authoritative_complete`。新來源 Apply 或 mapping
+reconciliation 在既有 outer UoW 內一併寫入 bounded `anomaly.recheck` intent。
+
+| Code／subject | Active predicate（current roots） | 唯一合法 owner operation | Completion predicate | Closed unresolved reasons |
+|---|---|---|---|---|
+| `BECLASS-001` / `case_no` | HCM case source 已存在，但沒有唯一、一致的 Client BeClass counterpart accepted mapping | 正確 counterpart 以 `IngestCaseImportSource` 進入後，沿用 `Preview／ApplyCaseImport`驗證與採納；歧義或衝突只能保留 owner review，不得在 Anomalies 選候選或模糊比對 | exact HCM 與 Client BeClass sources 形成唯一、一致、可追溯 accepted mapping，owner fresh readback 完整 | `counterpart_missing`, `counterpart_ambiguous`, `mapping_conflict`, `owner_readback_incomplete` |
+| `IMPORT-003` / `entity_kind + review_item_id` | Client BeClass source 已存在，但沒有唯一、一致的 HCM counterpart accepted mapping | 正確 counterpart 以 `IngestCaseImportSource` 進入後，沿用 `Preview／ApplyCaseImport`驗證與採納；人工聯絡、tracking closed 或姓名／電話相似都不是 completion | exact Client BeClass 與 HCM sources 形成唯一、一致、可追溯 accepted mapping，owner fresh readback 完整 | `counterpart_missing`, `counterpart_ambiguous`, `mapping_conflict`, `owner_readback_incomplete` |
+
+```yaml
+convergence:
+  status: READY
+  requirement_ids: [CASE-ANM-BECLASS-001, CASE-ANM-IMPORT-003, CASE-ANM-PAIRING-READBACK]
+  acceptance_ids: [CASE-ANM-ACTIVE, CASE-ANM-OWNER-QPA, CASE-ANM-TERMINAL, CASE-ANM-FAIL-CLOSED]
+  blockers: []
+```
+
+上述`READY`代表behavioral contract已收斂，不代表current persistence與public Apply surface已足以完成
+所有lineage。Repository-local readback目前可證明synthetic counterpart與same-source accepted receipt；
+若原identity-conflict review由different-source identity的後續accepted source解除，terminal predicate
+必須具有exact immutable original-review → accepted-source lineage。現行privacy-safe review root不保存
+足以推導此關聯的case／query identity；不得以review resolved、tracking state、姓名、電話或其他模糊資料
+替代。新增或修改owner persistence／public Apply contract前維持
+`BOUNDARY_REQUIRED_CASE_PAIRING_LINEAGE`。
 
 #### HCM resubmission owner-command amendment（2026-08-30 人工裁決）
 

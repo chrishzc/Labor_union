@@ -97,6 +97,18 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
     }
   };
 
+  const sendSchedule = async () => {
+    setScheduleBusy('send');
+    setScheduleError(null);
+    try {
+      setSchedule(await matchingScheduleConfirmationClient.send(caseNo, planId));
+    } catch (error) {
+      setScheduleError(message(error, '無法將日期表排入 LINE 發送佇列。'));
+    } finally {
+      setScheduleBusy(null);
+    }
+  };
+
   const applyManual = async () => {
     if (!manualPreview) return;
     setScheduleBusy('manual-apply');
@@ -198,7 +210,10 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
       {scheduleError && <div role="alert" className="mutation-error-banner">{scheduleError}</div>}
       {schedule.snapshot_status === 'not_sent' && (
         <div style={{ display: 'grid', gap: '8px' }}>
-          <div role="status">尚未建立日期表確認快照；可等待 LINE 綁定，或以電話／現場／紙本證據人工確認。</div>
+          <div role="status">尚未建立日期表確認快照；可透過 LINE 發送目前日期版本，或以電話／現場／紙本證據人工確認。</div>
+          <button type="button" className="orders-load-more-btn" disabled={scheduleBusy !== null} onClick={() => void sendSchedule()}>
+            {scheduleBusy === 'send' ? '正在排入 LINE 發送佇列…' : '透過 LINE 發送日期表'}
+          </button>
           <button type="button" className="matching-action-btn-sm" disabled={scheduleBusy !== null} onClick={() => void previewManual()}>
             {scheduleBusy === 'manual-preview' ? '正在檢查日期表影響…' : '檢查人工日期表確認影響'}
           </button>

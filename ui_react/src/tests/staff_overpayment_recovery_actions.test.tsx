@@ -36,7 +36,7 @@ describe('StaffOverpaymentRecoveryActions', () => {
 
   function fillExplanation() {
     fireEvent.change(screen.getByLabelText('處理理由'), { target: { value: '人工電話確認已完成追償。' } });
-    fireEvent.change(screen.getByLabelText('evidence reference'), { target: { value: '電話紀錄:case-1' } });
+    fireEvent.change(screen.getByLabelText('佐證紀錄'), { target: { value: '電話紀錄:case-1' } });
   }
 
   it('open recovery exposes matching and exact adjustment, and invalidates Preview on input change', async () => {
@@ -51,15 +51,16 @@ describe('StaffOverpaymentRecoveryActions', () => {
     vi.spyOn(staffOverpaymentRecoveryClient, 'applyMatching');
     const onCommitted = vi.fn();
     render(<StaffOverpaymentRecoveryActions staffId={7} recoveryIdentity={openQuery.recovery_identity} onCommitted={onCommitted} />);
-    await waitFor(() => expect(screen.getByText(/目前狀態：open/)).toBeInTheDocument());
-    expect(screen.getByText(/調整金額固定為目前 fresh remaining/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/目前狀態：待處理/)).toBeInTheDocument());
+    expect(screen.getByText(/調整金額固定為目前剩餘追償額/)).toBeInTheDocument();
+    expect(screen.queryByText(/版本 3|owner root|receipt|staff-overpayment-recovery:1/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/調整金額/)).not.toBeInTheDocument();
     fillExplanation();
-    fireEvent.click(screen.getByRole('button', { name: /Preview 精確調整/ }));
-    await waitFor(() => expect(screen.getByText('Preview 已完成（尚未寫入）')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: '確認並 Apply' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /檢查精確調整影響/ }));
+    await waitFor(() => expect(screen.getByText('處理影響已確認（尚未寫入）')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '確認並提交' })).toBeEnabled();
     fireEvent.change(screen.getByLabelText('處理理由'), { target: { value: '改寫理由使舊 Preview 失效。' } });
-    expect(screen.queryByText('Preview 已完成（尚未寫入）')).not.toBeInTheDocument();
+    expect(screen.queryByText('處理影響已確認（尚未寫入）')).not.toBeInTheDocument();
     expect(onCommitted).not.toHaveBeenCalled();
   });
 
@@ -75,12 +76,12 @@ describe('StaffOverpaymentRecoveryActions', () => {
     });
     const onCommitted = vi.fn();
     render(<StaffOverpaymentRecoveryActions staffId={7} recoveryIdentity={openQuery.recovery_identity} initialFinanceImportRowId={11} onCommitted={onCommitted} />);
-    await waitFor(() => expect(screen.getByText(/目前狀態：open/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/目前狀態：待處理/)).toBeInTheDocument());
     fillExplanation();
-    fireEvent.click(screen.getByRole('button', { name: /Preview 收款核銷/ }));
+    fireEvent.click(screen.getByRole('button', { name: /檢查收款核銷影響/ }));
     await waitFor(() => expect(screen.getByText(/收款後剩餘 NT\$ 0/)).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '確認並 Apply' }));
-    await waitFor(() => expect(screen.getByText('Staff recovery 已由 owner root readback 確認解除。')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '確認並提交' }));
+    await waitFor(() => expect(screen.getByText('已重新確認追償餘額歸零且完成處理，異常可解除。')).toBeInTheDocument());
     expect(apply).toHaveBeenCalledWith(collectionPreview, expect.objectContaining({ finance_import_row_id: 11, matching_identity: 'staff-recovery-match:1', matching_version: 1 }), expect.anything());
     expect(query).toHaveBeenCalledTimes(2);
     expect(onCommitted).toHaveBeenCalledTimes(1);
@@ -92,7 +93,7 @@ describe('StaffOverpaymentRecoveryActions', () => {
       matchings: [...matchedQuery.matchings, { matching_identity: 'staff-recovery-match:2', matching_version: 1, finance_import_row_identity: 'redacted:incoming-2' }],
     });
     render(<StaffOverpaymentRecoveryActions staffId={7} recoveryIdentity={openQuery.recovery_identity} initialFinanceImportRowId={11} />);
-    await waitFor(() => expect(screen.getByText(/目前有多筆 matching/)).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: /Preview 收款核銷/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/目前有多筆入款配對/)).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /檢查收款核銷影響/ })).not.toBeInTheDocument();
   });
 });

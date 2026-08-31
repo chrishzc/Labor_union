@@ -62,8 +62,11 @@ type QueryState =
   | { status: 'error'; page: null; message: string };
 
 function displayError(error: unknown): string {
-  if (error instanceof LineDeliveryQueryError) return error.message;
-  if (error instanceof Error && error.message.trim()) return error.message;
+  if (error instanceof LineDeliveryQueryError) {
+    if (error.status === 401) return '登入已失效，請重新登入後再試。';
+    if (error.status === 403) return '目前帳號沒有查看 LINE 發送任務的權限。';
+    if (error.retryable) return 'LINE 發送任務服務暫時無法使用，請稍後重新整理。';
+  }
   return '發送任務清單載入失敗，請稍後重新整理。';
 }
 

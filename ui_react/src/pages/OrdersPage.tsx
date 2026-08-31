@@ -493,7 +493,6 @@ export const OrdersPage: React.FC = () => {
                   )}
                 </div>
                 <div className="card-projection-item-value">{item.valueText}</div>
-                <small className="card-projection-item-meta">{item.metadataText}</small>
               </div>
             ))}
           </div>
@@ -514,21 +513,55 @@ export const OrdersPage: React.FC = () => {
                       <span>正式分段 #{sIdx + 1}</span>
                     </div>
                     <div className="card-projection-segment-fields">
-                      {segment.rows.map((item) => (
-                        <div key={item.key} className="card-projection-segment-row">
-                          <div>
-                            <span className="card-projection-segment-label">{item.label}：</span>
-                            <span className="card-projection-segment-val">{item.valueText}</span>
-                          </div>
-                          <small className="card-projection-segment-meta">{item.metadataText}</small>
-                        </div>
-                      ))}
+                      <div className="card-projection-segment-row">
+                        <span className="card-projection-segment-label">服務人員：</span>
+                        <span className="card-projection-segment-val">
+                          {segment.rows.find((item) => item.key.endsWith('.staff_name'))?.valueText ?? '尚未登錄（服務人員）'}
+                        </span>
+                      </div>
+                      <div className="card-projection-segment-row">
+                        <span className="card-projection-segment-label">正式服務期間：</span>
+                        <span className="card-projection-segment-val">
+                          {segment.rows.find((item) => item.key.endsWith('.assigned_start_date'))?.valueText ?? '尚未登錄（開始日）'}
+                          {' ～ '}
+                          {segment.rows.find((item) => item.key.endsWith('.assigned_end_date'))?.valueText ?? '尚未登錄（結束日）'}
+                        </span>
+                      </div>
+                      <div className="card-projection-segment-row">
+                        <span className="card-projection-segment-label">指派狀態：</span>
+                        <span className="card-projection-segment-val">
+                          {segment.rows.find((item) => item.key.endsWith('.status'))?.valueText ?? '尚未登錄（指派狀態）'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
+
+          <details className="card-projection-technical-details">
+            <summary>技術詳情與資料來源</summary>
+            <div className="card-projection-technical-content">
+              {cardProjection.rows.map((item) => (
+                <div key={`technical.${item.key}`}>
+                  <strong>{item.label}</strong>
+                  <span>{item.metadataText}</span>
+                </div>
+              ))}
+              {cardProjection.assignmentSegments.map((segment, segmentIndex) => (
+                <section key={`technical.${segment.key}`} aria-label={`正式分段 ${segmentIndex + 1} 技術詳情`}>
+                  <strong>正式分段 #{segmentIndex + 1}</strong>
+                  {segment.rows.map((item) => (
+                    <div key={`technical.${item.key}`}>
+                      <span>{item.label}：{item.valueText}</span>
+                      <span>{item.metadataText}</span>
+                    </div>
+                  ))}
+                </section>
+              ))}
+            </div>
+          </details>
         </>
       )}
     </section>
@@ -1681,7 +1714,7 @@ export const OrdersPage: React.FC = () => {
       || !sameCancellationApplyPayload(existingAttempt.payload, payload)
     )) {
       setCancellationRetryMode(true);
-      setCancellationError('上一個取消命令的結果尚未確認，且目前內容已不同；請先用原內容完成同一命令 reconciliation，系統不會產生新的 Idempotency-Key。');
+      setCancellationError('上一次取消結果尚未確認，且目前內容已不同；請先使用原內容重新確認，系統不會送出新的取消操作。');
       return;
     }
     const attempt = existingAttempt ?? {
@@ -1712,7 +1745,7 @@ export const OrdersPage: React.FC = () => {
           if (!(caught instanceof ApiHttpError) || caught.status !== 404) {
             if (!isCurrentDrawer()) return;
             setCancellationRetryMode(true);
-            setCancellationError('取消結果未明；receipt 尚未可讀取，系統不會重送取消命令。');
+            setCancellationError('取消結果未明；尚無法確認原操作結果，系統不會重送取消。');
             return;
           }
           receipt = await orderCancellationClient.apply(
@@ -1753,10 +1786,12 @@ export const OrdersPage: React.FC = () => {
         setCancellationRetryMode(false);
         setCancellationPreview(null);
         setCancellationConfirmed(false);
-        setCancellationError(caught.message);
+        setCancellationError(caught.status === 409
+          ? '訂單或後續資料已變更，請重新查詢後再檢查取消影響。'
+          : '這筆取消未通過檢查，請重新查詢案件狀態。');
       } else {
         setCancellationRetryMode(true);
-        setCancellationError('取消結果未明；系統保留同一命令與 Idempotency-Key，只能用相同內容重試，尚未收到 receipt 前不視為成功。');
+        setCancellationError('取消結果未明；系統保留原操作，只能用相同內容重新確認，結果確認前不視為成功。');
       }
     } finally {
       cancellationApplyInFlightRef.current = false;
@@ -2963,14 +2998,14 @@ export const OrdersPage: React.FC = () => {
 
                       {termsPreview && (
                         <div style={{ marginTop: '14px', padding: '14px', backgroundColor: '#fffdfb', border: '1px solid #fed9b8', borderRadius: '10px' }}>
-                          <div style={{ fontWeight: 700, color: '#ff7f50', fontSize: '0.9rem', marginBottom: '8px' }}>✨ 條款變更比對 (Diff)</div>
+                          <div style={{ fontWeight: 700, color: '#ff7f50', fontSize: '0.9rem', marginBottom: '8px' }}>✨ 條款變更前後</div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.84rem', color: '#57423b' }}>
                             <div>服務天數：{termsPreview.before.service_days} 天 ➔ <strong>{termsPreview.after.service_days} 天</strong></div>
                             <div>時段：{termsPreview.before.service_time.start_time}～{termsPreview.before.service_time.end_time} ➔ <strong>{termsPreview.after.service_time.start_time}～{termsPreview.after.service_time.end_time}</strong></div>
                             <div>下廚需求：{termsPreview.before.requires_cooking ? '需要' : '不需'} ➔ <strong>{termsPreview.after.requires_cooking ? '需要' : '不需'}</strong></div>
                           </div>
                           <label style={{ display: 'block', marginTop: '10px', fontWeight: 700, fontSize: '0.82rem' }}>
-                            變更原因 (Audit Log 必填)
+                            變更原因（稽核必填）
                             <textarea
                               rows={2}
                               maxLength={500}
@@ -3370,7 +3405,7 @@ export const OrdersPage: React.FC = () => {
                           )}
 
                           <label style={{ display: 'block', fontWeight: 700, fontSize: '0.84rem' }}>
-                            服務日期確認原因 (Audit Log 必填)
+                            服務日期確認原因（稽核必填）
                             <input
                               type="text"
                               className="mutation-reason-input"
@@ -3520,7 +3555,7 @@ export const OrdersPage: React.FC = () => {
                       <div style={{ fontSize: '0.86rem', color: '#57423b' }}>正式服務日：{actualStartPreview.actual_start.official_service_dates.length} 天</div>
                       <div style={{ fontSize: '0.86rem', color: '#57423b' }}>重建指派：{actualStartPreview.scheduling.assignments.length} 段</div>
                       <label style={{ display: 'block', marginTop: '10px', fontWeight: 700, fontSize: '0.84rem' }}>
-                        套用原因 (Audit Log)
+                        套用原因（稽核必填）
                         <textarea
                           rows={2}
                           maxLength={500}
@@ -3605,7 +3640,7 @@ export const OrdersPage: React.FC = () => {
                             : '服務尚未開始：實際服務日固定為 0 天，不得把未來排班當作已服務事實。'}
                         </div>
                         {cancellationQuery.service_started && cancellationDays.length >= cancellationQuery.contracted_service_days && (
-                          <div role="alert" style={{ color: '#991b1b' }}>已達完整服務天數；依正式規則不可執行取消，Apply 維持零寫入。</div>
+                          <div role="alert" style={{ color: '#991b1b' }}>已達完整服務天數；依正式規則不可執行取消，系統不會寫入變更。</div>
                         )}
                         {cancellationQuery.service_started && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #f3d8c8', paddingTop: '10px' }}>
@@ -3694,22 +3729,34 @@ export const OrdersPage: React.FC = () => {
                           不另加收額外費用；客戶帳務與月嫂薪資只依正式根事實產生影響。
                         </div>
                         <div style={{ marginTop: '8px', fontSize: '0.78rem', color: '#57423b' }}>
-                          Client Finance：{cancellationPreview.client_finance_impact.actions?.length ?? 0} 筆帳務動作，阻擋 {cancellationPreview.client_finance_impact.blockers?.length ?? 0} 項。
+                          客戶帳務：{cancellationPreview.client_finance_impact.actions?.length ?? 0} 筆調整，待處理阻擋 {cancellationPreview.client_finance_impact.blockers?.length ?? 0} 項。
                         </div>
                         <div style={{ fontSize: '0.78rem', color: '#57423b' }}>
-                          Payroll：{cancellationPreview.payroll_impact.actions?.length ?? 0} 筆薪資動作，阻擋 {cancellationPreview.payroll_impact.blockers?.length ?? 0} 項。
+                          服務人員薪資：{cancellationPreview.payroll_impact.actions?.length ?? 0} 筆調整，待處理阻擋 {cancellationPreview.payroll_impact.blockers?.length ?? 0} 項。
                         </div>
                         {cancellationPreview.client_finance_impact.actions?.slice(0, 3).map((action) => (
                           <div key={`client-${action.obligation_identity}`} style={{ fontSize: '0.76rem', color: '#57423b' }}>
-                            Client Finance／{action.action}：{action.obligation_identity}，
-                            {clientFinanceDirectionLabel(action.direction)}（{action.direction}）NT$ {action.direction_amount_ntd}
+                            客戶帳務：{clientFinanceDirectionLabel(action.direction)} NT$ {action.direction_amount_ntd.toLocaleString()}
                           </div>
                         ))}
                         {cancellationPreview.payroll_impact.actions?.slice(0, 3).map((action) => (
                           <div key={`payroll-${action.obligation_identity}`} style={{ fontSize: '0.76rem', color: '#57423b' }}>
-                            Payroll／{action.action}：{action.obligation_identity}，NT$ {action.amount.amount}
+                            服務人員薪資調整：NT$ {action.amount.amount.toLocaleString()}
                           </div>
                         ))}
+                        <details style={{ marginTop: '8px', fontSize: '0.76rem', color: '#74593f' }}>
+                          <summary>技術詳情與資料來源</summary>
+                          <div>
+                            訂單版本 {cancellationPreview.order_version}｜排班版本 {cancellationPreview.scheduling_version}｜
+                            客戶帳務版本 {cancellationPreview.client_finance_version}｜薪資版本 {cancellationPreview.payroll_version}
+                          </div>
+                          {cancellationPreview.client_finance_impact.actions?.slice(0, 3).map((action) => (
+                            <div key={`client-technical-${action.obligation_identity}`}>客戶帳務／{action.action}：{action.obligation_identity}（{action.direction}）</div>
+                          ))}
+                          {cancellationPreview.payroll_impact.actions?.slice(0, 3).map((action) => (
+                            <div key={`payroll-technical-${action.obligation_identity}`}>薪資／{action.action}：{action.obligation_identity}（{action.direction}）</div>
+                          ))}
+                        </details>
                       </div>
                     )}
 
@@ -3741,7 +3788,11 @@ export const OrdersPage: React.FC = () => {
 
                     {cancellationReceipt && (
                       <div role="status" style={{ marginTop: '12px', color: '#166534', fontSize: '0.84rem', fontWeight: 700 }}>
-                        訂單取消已完成；最新狀態：{cancellationReceipt.lifecycle_status}，正式服務量為 {cancellationReceipt.official_service_day_count} 天／{cancellationReceipt.official_service_hours} 小時；Orders、Client Finance、Payroll 版本已回讀為 {cancellationReceipt.order_version}／{cancellationReceipt.client_finance_version}／{cancellationReceipt.payroll_version}。
+                        訂單取消已完成；最新狀態：{cancellationReceipt.lifecycle_status}，正式服務量為 {cancellationReceipt.official_service_day_count} 天／{cancellationReceipt.official_service_hours} 小時。
+                        <details style={{ marginTop: '4px', color: '#74593f', fontWeight: 400 }}>
+                          <summary>技術詳情與資料來源</summary>
+                          <div>訂單、客戶帳務、薪資版本已回讀為 {cancellationReceipt.order_version}／{cancellationReceipt.client_finance_version}／{cancellationReceipt.payroll_version}。</div>
+                        </details>
                       </div>
                     )}
                   </div>
@@ -3755,7 +3806,7 @@ export const OrdersPage: React.FC = () => {
                       disabled={!cancellationQuery || cancellationStatus !== 'idle' || (cancellationQuery.service_started && cancellationDays.length >= cancellationQuery.contracted_service_days)}
                       onClick={() => void previewCancellation()}
                     >
-                      {cancellationStatus === 'previewing' ? '正在試算取消影響…' : '🔍 預覽取消與退款試算（取消影響）'}
+                      {cancellationStatus === 'previewing' ? '正在試算取消影響…' : '🔍 預覽取消與退款試算（檢查取消影響）'}
                     </button>
                     <button
                       type="button"
@@ -3767,7 +3818,7 @@ export const OrdersPage: React.FC = () => {
                     >
                       {cancellationStatus === 'applying'
                         ? '正在套用取消…'
-                        : cancellationRetryMode ? '以相同命令重試取消' : '確認執行取消'}
+                        : cancellationRetryMode ? '以相同內容重新確認取消' : '確認執行取消'}
                     </button>
                   </div>
                 </div>

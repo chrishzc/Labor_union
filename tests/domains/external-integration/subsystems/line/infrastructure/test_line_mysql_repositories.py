@@ -638,16 +638,12 @@ def test_webhook_claim_recovers_exhausted_leases_and_binds_due_clocks() -> None:
     assert due_parameters[3] == 10
 
 
-def test_existing_unbound_identity_is_updated_not_inserted() -> None:
+def test_role_claim_inserts_when_successor_role_is_absent() -> None:
     cursor = ScriptedCursor(
         one_rows=(
-            {
-                "line_user_id": "U-staff",
-                "binding_status": "unbound",
-                "subject_type": None,
-                "subject_reference": None,
-                "aggregate_version": 0,
-            },
+            {"line_user_id": "U-staff"},
+            {"admin_count": 0, "nonadmin_count": 0},
+            None,
         )
     )
     repository = MySqlLineIdentityRepository(FakeConnection(cursor))
@@ -663,8 +659,8 @@ def test_existing_unbound_identity_is_updated_not_inserted() -> None:
 
     statements = [sql for sql, _parameters in cursor.executed]
     assert result.version == ExpectedVersion(1)
-    assert any(sql.startswith("UPDATE line_identity_bindings") for sql in statements)
-    assert not any(sql.startswith("INSERT INTO line_identity_bindings ") for sql in statements)
+    assert any(sql.startswith("INSERT INTO line_identity_role_bindings ") for sql in statements)
+    assert not any(sql.startswith("UPDATE line_identity_role_bindings") for sql in statements)
 
 
 def test_identity_repository_lists_only_bound_subject_audience() -> None:

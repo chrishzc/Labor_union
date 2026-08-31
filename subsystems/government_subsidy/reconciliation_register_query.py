@@ -1,6 +1,6 @@
 """
 File: reconciliation_register_query.py
-Description: 依既有補助公式建立季度、年度及截止日唯讀核銷資料。
+Description: 依既有補助公式建立季度、年度及指定完成期間的唯讀核銷資料。
 """
 
 from __future__ import annotations
@@ -233,6 +233,33 @@ def build_year_to_date_subsidy_rows(
             continue
         completion = row["服務結束"]
         if completion.year == application_year and completion <= cutoff_date:
+            rows.append(row)
+    rows.sort(key=lambda row: row["市府訂單號碼"])
+    general, subsidized = _partition_rows(rows)
+    return {
+        "general_citizen_rows": _with_serials(general),
+        "subsidized_citizen_rows": _with_serials(subsidized),
+    }
+
+
+def build_completion_period_subsidy_rows(
+    period_start: date,
+    period_end: date,
+    connection_factory: Callable[[], Any],
+) -> dict:
+    """Return owner-calculated rows whose service completion is inside the period."""
+    if (
+        not isinstance(period_start, date)
+        or not isinstance(period_end, date)
+        or period_start > period_end
+    ):
+        raise ValueError("period_start must not follow period_end")
+    rows = []
+    for source in _fetch_completed_cases(connection_factory):
+        row = _to_register_row(source)
+        if row is None:
+            continue
+        if period_start <= row["服務結束"] <= period_end:
             rows.append(row)
     rows.sort(key=lambda row: row["市府訂單號碼"])
     general, subsidized = _partition_rows(rows)

@@ -48,9 +48,14 @@ const errorState = <T,>(error: string): QueryState<T> => ({ status: 'error', val
 function safeError(error: unknown, fallback: string): string {
   if (error instanceof LineIdentityClientError) {
     if (error.outcomeUnknown) {
-      return `${error.code}：結果未知，請先重新查詢審核紀錄，不要盲目重送。`;
+      return '審核結果尚未確認，請先重新查詢最新結果，不要再次提交。';
     }
-    return `${error.code}：${error.message}`;
+    if (error.code === 'UNAUTHENTICATED') return '登入已失效，請重新登入後再試。';
+    if (error.code === 'FORBIDDEN') return '目前帳號沒有執行此審核的權限。';
+    if (error.code === 'NOT_FOUND') return '找不到這筆審核紀錄，請重新整理審核佇列。';
+    if (error.code === 'CONFLICT') return '審核紀錄已變更，請重新查詢後再次確認。';
+    if (error.code === 'REQUEST_INVALID') return '審核資料不完整，請檢查後再試。';
+    return 'LINE 身分審核服務目前無法安全完成這項操作，請稍後再試。';
   }
   return fallback;
 }
@@ -241,7 +246,7 @@ function ReviewDetailPanel(props: ReviewDetailPanelProps) {
       <p>{detail.value.displayName}｜{detail.value.subjectTypeLabel}｜<code>{detail.value.maskedLineUserId}</code></p>
       <p>目前狀態：<strong>{detail.value.statusLabel}</strong></p>
       {detail.value.status !== 'pending' ? (
-        <div className="line-scope-note" role="status">此審核已是 {detail.value.statusLabel}，不可再提交決定；可保留明細作為 readback。</div>
+        <div className="line-scope-note" role="status">此審核已是 {detail.value.statusLabel}，不可再提交決定；可保留明細作為最新審核結果。</div>
       ) : (
         <>
           <label htmlFor="line-identity-review-decision">人工決定</label>

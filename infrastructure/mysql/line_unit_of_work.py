@@ -72,6 +72,9 @@ from infrastructure.mysql.provisional_registration_repository import (
 from infrastructure.mysql.matching_schedule_confirmation_repository import (
     MySqlMatchingScheduleConfirmationRepository,
 )
+from infrastructure.mysql.current_anomaly_issue_repository import (
+    MySqlCurrentIssueRepository,
+)
 
 
 class LineMySqlUnitOfWork(MySqlUnitOfWork):
@@ -87,6 +90,7 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.admins = MySqlAdminIdentityOwnerAdapter(connection)
         self.delivery_tasks = MySqlLineDeliveryTaskRepository(connection)
         self.notification_rules = MySqlLineNotificationRepository(connection)
+        self.anomaly_rechecks = MySqlCurrentIssueRepository(connection)
         self.configurations = MySqlLineConfigurationRepository(connection)
         self.rich_menu_publications = MySqlLineRichMenuPublicationRepository(connection)
         self.rich_menu_media_assets = MySqlLineRichMenuMediaAssetQueryRepository(connection)

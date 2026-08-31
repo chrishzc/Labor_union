@@ -97,6 +97,41 @@ describe('HistoricalOrderReviewRemediationWorkbench', () => {
     expect(owner.apply).toHaveBeenCalledOnce();
   });
 
+  it('keeps technical identities and raw outcomes out of the default business layer', async () => {
+    const owner = fakeClient();
+    render(<HistoricalOrderReviewRemediationWorkbench reviewIdentity={context.review_identity} client={owner} />);
+    await waitFor(() => expect(screen.getByText(/CASE-\*\*\*1/)).toBeInTheDocument());
+
+    expect(screen.getByText('更正檔案要求')).toBeInTheDocument();
+    expect(screen.getByText(/請上傳單列 \.xlsx/)).toBeInTheDocument();
+    expect(screen.queryByText(/review 版本/)).not.toBeInTheDocument();
+    expect(screen.getByText(/historical_status_invalid/)).not.toBeVisible();
+
+    fireEvent.change(screen.getByLabelText(/處理原因/), { target: { value: '電話確認' } });
+    fireEvent.change(screen.getByLabelText(/佐證/), { target: { value: 'record:visible-layer' } });
+    fireEvent.change(screen.getByLabelText(/單列更正/), { target: { files: [new File(['xlsx'], 'correction.xlsx')] } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Preview 更正結果' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Preview 更正結果' }));
+
+    await waitFor(() => expect(screen.getByText('預計處理：更正資料可採用')).toBeInTheDocument());
+    expect(screen.getByText(new RegExp(preview.preview_fingerprint))).not.toBeVisible();
+    expect(screen.queryByText('corrected_source_adopted')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '確認套用更正' }));
+    await waitFor(() => expect(screen.getByText('處理結果：更正資料可採用')).toBeInTheDocument());
+    expect(screen.getByText(/receipt:1/)).not.toBeVisible();
+    expect(screen.queryByText('corrected_source_adopted')).not.toBeInTheDocument();
+  });
+
+  it('maps unexpected failures to a closed business error', async () => {
+    const owner = fakeClient({ query: vi.fn().mockRejectedValue(new Error('raw database host detail')) });
+    render(<HistoricalOrderReviewRemediationWorkbench reviewIdentity={context.review_identity} client={owner} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('歷史訂單欄位衝突目前無法完成，請稍後再試。');
+    expect(screen.queryByText(/raw database host detail/)).not.toBeInTheDocument();
+  });
+
   it('invalidates Preview when reason changes', async () => {
     const owner = fakeClient();
     render(<HistoricalOrderReviewRemediationWorkbench reviewIdentity={context.review_identity} client={owner} />);

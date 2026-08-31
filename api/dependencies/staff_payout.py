@@ -12,6 +12,10 @@ from infrastructure.mysql.staff_payout_repository import (
     StaffPayoutMySqlUnitOfWork,
 )
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.historical_staff_payout_repository import (
+    HistoricalStaffPayoutMySqlUnitOfWork,
+    MySqlHistoricalStaffPayoutRepository,
+)
 from infrastructure.mysql.staff_overpayment_recovery_repository import MySqlStaffOverpaymentRecoveryRepository
 from subsystems.staff_payables.overpayment_recovery import StaffOverpaymentRecoveryWorkflow
 from subsystems.staff_payables.overpayment_recovery_matching import StaffOverpaymentRecoveryMatchingWorkflow
@@ -20,6 +24,9 @@ from subsystems.staff_payables.payout_reconciliation import (
     StaffPayoutApplyRequest,
     StaffPayoutReconciliationWorkflow,
     StaffPayoutSelection,
+)
+from subsystems.staff_payables.historical_payment_settlement import (
+    HistoricalStaffPayoutWorkflow,
 )
 
 
@@ -49,6 +56,18 @@ def get_staff_payout_application():
     connection = get_connection()
     try:
         yield build_staff_payout_application(connection)
+    finally:
+        connection.close()
+
+
+def get_historical_staff_payout_workflow():
+    connection = get_connection()
+    repository = MySqlHistoricalStaffPayoutRepository(connection)
+    try:
+        yield HistoricalStaffPayoutWorkflow(
+            repository,
+            lambda: HistoricalStaffPayoutMySqlUnitOfWork(connection),
+        )
     finally:
         connection.close()
 
@@ -98,5 +117,6 @@ __all__ = [
     "StaffPayoutApplication",
     "build_staff_payout_application",
     "get_staff_payout_application",
+    "get_historical_staff_payout_workflow",
     "get_staff_overpayment_recovery_query_application",
 ]

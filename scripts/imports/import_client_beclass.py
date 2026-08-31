@@ -51,6 +51,9 @@ from subsystems.case_import.beclass_review_intake import fingerprint_workbook
 from infrastructure.mysql.hcm_beclass_reconciliation_adapter import (
     MySqlHcmBeClassReconciliationAdapter,
 )
+from infrastructure.mysql.case_pairing_anomaly_recheck_sink import (
+    MySqlCasePairingAnomalyRecheckSink,
+)
 from infrastructure.mysql.client_beclass_workbook_import_repository import (
     ClientBeClassWorkbookImportRepository,
 )
@@ -164,9 +167,12 @@ def _typed_historical_import(excel_path):
     try:
         service = ClientBeClassWorkbookImportService(
             ClientBeClassWorkbookImportRepository(connection),
-            MySqlHcmBeClassReconciliationAdapter(connection),
+            MySqlHcmBeClassReconciliationAdapter(
+                connection, MySqlCasePairingAnomalyRecheckSink(connection)
+            ),
             lambda: MySqlUnitOfWork(connection),
             review_recorder=lambda conn, **kwargs: record_invalid_beclass_row(conn, repository=MySqlBeClassImportReviewRepository(conn), **kwargs),
+            pairing_rechecks=MySqlCasePairingAnomalyRecheckSink(connection),
         )
         preview = service.preview(excel_path)
         digest = fingerprint_workbook(excel_path)

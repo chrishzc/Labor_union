@@ -195,6 +195,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_30_current_anomaly_issues_v1.json",
     "labor_union_2026_08_30_client_hcm_correction_versioning_v1.json",
     "labor_union_2026_08_30_hcm_resubmission_canonical_review_version_v1.json",
+    "labor_union_2026_08_30_line_identity_role_scope_v1.json",
+    "labor_union_2026_08_31_historical_owner_payment_settlement_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -4814,6 +4816,12 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             "AND expected_review_version IS NOT NULL "
             "AND resulting_review_version = expected_review_version + 1)"
         )
+    if part_name == "1019_line_identity_role_scope.sql":
+        descriptor["parent_columns"]["line_platform_users"] = {
+            "selected_identity_role": _column_contract(
+                "enum('customer','staff')", "YES"
+            )
+        }
     if part_name == "61_finance_import_reprocessing.sql":
         _remove_retired_reclassification_audit_contract(descriptor)
         descriptor["indexes"][(

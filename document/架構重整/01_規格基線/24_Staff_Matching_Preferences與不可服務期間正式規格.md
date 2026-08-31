@@ -149,6 +149,14 @@ focused tests 與 React build 通過，畫面不含 raw workbook／JSON、來源
 - 復職必須經 Staff owner 的獨立 typed `ReactivateStaff` command；不得自動恢復過期 availability、偏好、
   邀請或 candidate，重新通過當下資格與必要資料驗證後才可進入 Matching。
 - Staff、BeClass、Orders、Payroll、歷史配對及 audit 資料必須保留並可依權限查詢。
+- `active -> retired` Apply 必須在 Staff owner 的同一 outer Unit of Work，經 typed effect port 呼叫
+  既有 LINE Identity application contract，僅解除 exact staff role；Staff workflow 不直接寫 LINE
+  repository、不呼叫 provider，也不解除仍有效的 customer role。
+- Staff transition 與 LINE revocation request／outbox 必須原子提交；LINE 邊界失敗時 Staff transition
+  不得單獨成功。exact replay 回原 Staff receipt，不建立第二筆解除 request。
+- LINE 解除完成後，若同一 LINE user 仍有 active customer role，追加一筆綁定該 revocation request
+  identity 的 customer menu intent；若沒有其他 role，沿用既有 default-menu reset。這不改既有解除
+  saga 的 retry、provider-success 或 manual-completion 判定。
 
 ## 6. Typed errors
 

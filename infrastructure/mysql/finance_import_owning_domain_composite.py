@@ -41,6 +41,9 @@ from infrastructure.mysql.client_refund_reversal_repository import (
 from infrastructure.mysql.government_subsidy_repository import (
     MySqlGovernmentSubsidyRepository,
 )
+from infrastructure.mysql.government_subsidy_anomaly_recheck_sink import (
+    MySqlGovernmentSubsidyAnomalyRecheckSink,
+)
 from infrastructure.mysql.staff_payout_repository import (
     MySqlStaffPayoutRepository,
 )
@@ -289,6 +292,7 @@ class MySqlFinanceImportOwningDomainComposite:
         workflow = GovernmentSubsidyLedgerWorkflow(
             repository,
             BorrowedTransactionUnitOfWork,
+            MySqlGovernmentSubsidyAnomalyRecheckSink(self._connection),
         )
         preview = workflow.preview_receipt(intent)
         request = _government_subsidy_request(

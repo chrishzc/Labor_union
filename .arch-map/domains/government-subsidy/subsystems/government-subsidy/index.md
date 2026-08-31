@@ -14,6 +14,11 @@
 - `subsystems/government_subsidy/` — Subsidy workflows
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — transaction/replay contract
 
+## Modules
+- `overpayment-recovery-presentation` — GOVSUB-006既有處置workflow的business-first React projection; path: `modules/overpayment-recovery-presentation.md`
+- `current-anomaly-facts` — `GOVSUB-001/002/004` owner current-fact readback與bounded recheck request；path: `modules/current-anomaly-facts.md`
+- `reconciliation-register-query` — 依服務完成期間產生owner-calculated補助核銷rows；path: `modules/reconciliation-register-query.md`
+
 ## Verification routing
 - default_boundary: Subsystem
 - test_root: `tests/domains/government-subsidy/subsystems/government-subsidy/`

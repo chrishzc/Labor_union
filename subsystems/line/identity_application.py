@@ -5,6 +5,7 @@ Description: 編排 verified LINE platform root、身分流程、原子登記、
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Callable
 
@@ -24,14 +25,25 @@ from domains.line.identity_binding import (
     LineBindingSubjectType,
     LineIdentityBindingStatus,
     LineIdentityClaim,
+    advance_binding_failure_streak,
 )
+from domains.customer_service.escalation import MaskedContext, TriggerCode
+from domains.customer_service.ticket import CustomerServiceCategory
 from domains.line.identity_flow import (
     LineIdentityFlowPurpose,
     validate_identity_flow,
 )
 from domains.line.review import LineReviewType
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
-from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
+from shared_kernel.identities import (
+    ActorContext,
+    CorrelationId,
+    ExpectedVersion,
+    IdempotencyKey,
+)
+from subsystems.customer_service.escalation_application import HumanEscalationApplication
+from subsystems.customer_service.escalation_contracts import CreateHumanEscalation
+from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from subsystems.line.identity_contracts import (
     AdminCredentialProof,
     CustomerIdentityProof,
@@ -45,7 +57,7 @@ from subsystems.line.identity_contracts import (
 )
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 from subsystems.line.review_contracts import CreateLineReviewCommand
-from subsystems.line.rich_menu_binding import schedule_rich_menu_binding
+from subsystems.line.rich_menu_binding import schedule_resolved_identity_menu
 from subsystems.case_import.provisional_registration_types import (
     ProvisionalRegistrationConflict,
     ProvisionalRegistrationConflictError,
@@ -132,38 +144,53 @@ class LineIdentityApplication:
         preview_fingerprint,
         correlation_id,
     ):
-        with self._unit_of_work_factory() as unit_of_work:
-            _require_flow(
-                unit_of_work,
+        try:
+            with self._unit_of_work_factory() as unit_of_work:
+                _require_flow(
+                    unit_of_work,
+                    flow_id,
+                    LineIdentityFlowPurpose.CUSTOMER_BINDING,
+                    line_user_id,
+                    self._now(),
+                )
+                candidate = unit_of_work.customers.resolve_customer(proof)
+                if candidate is None:
+                    raise LineIdentityNotFoundError("找不到相符的客戶資料")
+                preview = _with_identity_preview_fingerprint(
+                    "customer",
+                    flow_id,
+                    _customer_proof_fingerprint(proof),
+                    _customer_preview(unit_of_work, line_user_id, candidate),
+                )
+                _require_identity_preview(preview, expected_version, preview_fingerprint)
+                unit_of_work.identity_flows.consume(
+                    flow_id,
+                    LineIdentityFlowPurpose.CUSTOMER_BINDING,
+                    line_user_id,
+                    self._now(),
+                )
+                result = self._apply_customer_candidate(
+                    unit_of_work,
+                    flow_id,
+                    preview,
+                    proof,
+                    correlation_id,
+                )
+                if result.status is not LineIdentityApplyStatus.PENDING_REVIEW:
+                    unit_of_work.identities.reset_failure_streak(
+                        line_user_id,
+                        flow_id,
+                    )
+                unit_of_work.commit()
+        except LineIdentityNotFoundError:
+            self._record_binding_failure(
                 flow_id,
-                LineIdentityFlowPurpose.CUSTOMER_BINDING,
                 line_user_id,
-                self._now(),
-            )
-            candidate = unit_of_work.customers.resolve_customer(proof)
-            if candidate is None:
-                raise LineIdentityNotFoundError("找不到相符的客戶資料")
-            preview = _with_identity_preview_fingerprint(
-                "customer",
-                flow_id,
-                _customer_proof_fingerprint(proof),
-                _customer_preview(unit_of_work, line_user_id, candidate),
-            )
-            _require_identity_preview(preview, expected_version, preview_fingerprint)
-            unit_of_work.identity_flows.consume(
-                flow_id,
-                LineIdentityFlowPurpose.CUSTOMER_BINDING,
-                line_user_id,
-                self._now(),
-            )
-            result = self._apply_customer_candidate(
-                unit_of_work,
-                flow_id,
-                preview,
-                proof,
+                LineBindingSubjectType.CUSTOMER,
+                _customer_proof_fingerprint(proof).value,
                 correlation_id,
             )
-            unit_of_work.commit()
+            raise
         return result
 
     def preview_registration(
@@ -184,7 +211,10 @@ class LineIdentityApplication:
                     line_user_id,
                     self._now(),
                 )
-            binding = unit_of_work.identities.get(line_user_id)
+            binding = unit_of_work.identities.get(
+                line_user_id,
+                LineBindingSubjectType.CUSTOMER,
+            )
         expected_version = binding.version if binding else ExpectedVersion(0)
         return ProvisionalRegistrationPreview(
             "ready",
@@ -221,7 +251,10 @@ class LineIdentityApplication:
                     line_user_id,
                     self._now(),
                 )
-            binding = unit_of_work.identities.get(line_user_id)
+            binding = unit_of_work.identities.get(
+                line_user_id,
+                LineBindingSubjectType.CUSTOMER,
+            )
             current_binding_version = binding.version if binding else ExpectedVersion(0)
             if current_binding_version != expected_binding_version:
                 raise LineIdentityConflictError("registration_preview_stale")
@@ -242,7 +275,10 @@ class LineIdentityApplication:
             # the customer root in this same UoW.  Registration must therefore
             # not perform a proof lookup that assumes a pre-existing customer;
             # the receipt's client ID is the fresh root reference.
-            current_binding = unit_of_work.identities.get(line_user_id)
+            current_binding = unit_of_work.identities.get(
+                line_user_id,
+                LineBindingSubjectType.CUSTOMER,
+            )
             currently_bound = None
             if (
                 current_binding
@@ -303,40 +339,133 @@ class LineIdentityApplication:
         preview_fingerprint,
         correlation_id,
     ):
-        with self._unit_of_work_factory() as unit_of_work:
-            _require_flow(
-                unit_of_work,
+        try:
+            with self._unit_of_work_factory() as unit_of_work:
+                _require_flow(
+                    unit_of_work,
+                    flow_id,
+                    LineIdentityFlowPurpose.STAFF_VERIFICATION,
+                    line_user_id,
+                    self._now(),
+                )
+                candidate = unit_of_work.staff.resolve_staff(proof)
+                if candidate is None:
+                    raise LineIdentityNotFoundError("找不到相符的月嫂資料")
+                preview = _with_identity_preview_fingerprint(
+                    "staff",
+                    flow_id,
+                    _staff_proof_fingerprint(proof),
+                    _staff_preview(unit_of_work, line_user_id, candidate),
+                )
+                _require_identity_preview(preview, expected_version, preview_fingerprint)
+                unit_of_work.identity_flows.consume(
+                    flow_id,
+                    LineIdentityFlowPurpose.STAFF_VERIFICATION,
+                    line_user_id,
+                    self._now(),
+                )
+                result = _apply_staff_candidate(
+                    unit_of_work,
+                    flow_id,
+                    preview,
+                    proof,
+                    correlation_id,
+                )
+                _enqueue_result_message(unit_of_work, result, correlation_id, self._now())
+                if result.status is not LineIdentityApplyStatus.PENDING_REVIEW:
+                    unit_of_work.identities.reset_failure_streak(
+                        line_user_id,
+                        flow_id,
+                    )
+                unit_of_work.commit()
+        except LineIdentityNotFoundError:
+            self._record_binding_failure(
                 flow_id,
-                LineIdentityFlowPurpose.STAFF_VERIFICATION,
                 line_user_id,
-                self._now(),
-            )
-            candidate = unit_of_work.staff.resolve_staff(proof)
-            if candidate is None:
-                raise LineIdentityNotFoundError("找不到相符的月嫂資料")
-            preview = _with_identity_preview_fingerprint(
-                "staff",
-                flow_id,
-                _staff_proof_fingerprint(proof),
-                _staff_preview(unit_of_work, line_user_id, candidate),
-            )
-            _require_identity_preview(preview, expected_version, preview_fingerprint)
-            unit_of_work.identity_flows.consume(
-                flow_id,
-                LineIdentityFlowPurpose.STAFF_VERIFICATION,
-                line_user_id,
-                self._now(),
-            )
-            result = _apply_staff_candidate(
-                unit_of_work,
-                flow_id,
-                preview,
-                proof,
+                LineBindingSubjectType.STAFF,
+                _staff_proof_fingerprint(proof).value,
                 correlation_id,
             )
-            _enqueue_result_message(unit_of_work, result, correlation_id, self._now())
-            unit_of_work.commit()
+            raise
         return result
+
+    def _record_binding_failure(
+        self,
+        flow_id,
+        line_user_id,
+        subject_type,
+        candidate_scope,
+        correlation_id,
+    ) -> None:
+        with self._unit_of_work_factory() as unit_of_work:
+            current = unit_of_work.identities.get_failure_streak(
+                line_user_id,
+                lock=True,
+            )
+            streak, threshold = advance_binding_failure_streak(
+                current,
+                line_user_id=line_user_id,
+                identity_flow_id=flow_id.value,
+                candidate_subject_type=subject_type,
+                candidate_scope=candidate_scope,
+                failure_identity=correlation_id.value,
+            )
+            if streak is current:
+                unit_of_work.commit()
+                return
+            if threshold:
+                source_identity = (
+                    f"binding-failure:{streak.scope_fingerprint}:"
+                    f"{streak.generation}"
+                )
+                source_fingerprint = fingerprint_payload(
+                    {
+                        "scope_fingerprint": streak.scope_fingerprint,
+                        "generation": streak.generation,
+                        "failure_count": 2,
+                    }
+                ).value
+                escalation_command = CreateHumanEscalation(
+                    source_event_identity=source_identity,
+                    source_kind="binding_failure",
+                    source_fingerprint=source_fingerprint,
+                    trigger_code=TriggerCode.BINDING_FAILURE_THRESHOLD_2,
+                    trigger_policy_version="identity.v1",
+                    ticket_category=CustomerServiceCategory.CONTACT_UNION,
+                    masked_context=MaskedContext(
+                        (
+                            "customer_binding_failure_threshold_2"
+                            if subject_type is LineBindingSubjectType.CUSTOMER
+                            else "staff_verification_failure_threshold_2"
+                        ),
+                        "identity.v1",
+                        "other",
+                        "m1-mask.v1",
+                    ),
+                    hold_scope=source_identity,
+                    idempotency_key=IdempotencyKey(source_identity),
+                    correlation_id=correlation_id,
+                    actor=ActorContext("system:line-identity"),
+                )
+                ticket = unit_of_work.customer_service.create_or_append(
+                    CreateCustomerServiceMessage(
+                        line_user_id.value,
+                        CustomerServiceCategory.CONTACT_UNION,
+                        "binding_failure_threshold_2",
+                        source_identity,
+                    )
+                )
+                receipt = HumanEscalationApplication(
+                    self._unit_of_work_factory,
+                    self._now,
+                ).create_for_ticket(
+                    escalation_command,
+                    ticket,
+                    unit_of_work,
+                )
+                streak = replace(streak, escalation_id=receipt.escalation_id)
+            unit_of_work.identities.save_failure_streak(streak)
+            unit_of_work.commit()
 
     def preview_admin(self, flow_id, line_user_id, proof):
         # Password verification is intentionally deferred to Apply so Preview
@@ -349,7 +478,10 @@ class LineIdentityApplication:
                 line_user_id,
                 self._now(),
             )
-            binding = unit_of_work.identities.get(line_user_id)
+            binding = unit_of_work.identities.get(
+                line_user_id,
+                LineBindingSubjectType.ADMIN,
+            )
         preview = LineIdentityPreview(
             LineIdentityPreviewStatus.AUTHENTICATION_PENDING,
             line_user_id,
@@ -383,7 +515,10 @@ class LineIdentityApplication:
                 line_user_id,
                 self._now(),
             )
-            binding = unit_of_work.identities.get(line_user_id)
+            binding = unit_of_work.identities.get(
+                line_user_id,
+                LineBindingSubjectType.ADMIN,
+            )
             current_preview = _with_identity_preview_fingerprint(
                 "admin",
                 flow_id,
@@ -560,7 +695,10 @@ def _require_identity_preview(
 
 
 def _customer_preview(unit_of_work, line_user_id, candidate):
-    binding = unit_of_work.identities.get(line_user_id)
+    binding = unit_of_work.identities.get(
+        line_user_id,
+        LineBindingSubjectType.CUSTOMER,
+    )
     version = binding.version if binding else ExpectedVersion(0)
     if candidate is None:
         return LineIdentityPreview(
@@ -588,7 +726,10 @@ def _customer_preview(unit_of_work, line_user_id, candidate):
 
 
 def _staff_preview(unit_of_work, line_user_id, candidate):
-    binding = unit_of_work.identities.get(line_user_id)
+    binding = unit_of_work.identities.get(
+        line_user_id,
+        LineBindingSubjectType.STAFF,
+    )
     version = binding.version if binding else ExpectedVersion(0)
     if candidate is None:
         status = LineIdentityPreviewStatus.NOT_FOUND
@@ -644,7 +785,7 @@ def _bind_result(unit_of_work, line_user_id, candidate, correlation_id):
             line_user_id.value,
         )
     )
-    schedule_rich_menu_binding(unit_of_work, snapshot)
+    schedule_resolved_identity_menu(unit_of_work, snapshot.line_user_id)
     status = (
         LineIdentityApplyStatus.EXISTING
         if snapshot.status is LineIdentityBindingStatus.BOUND
@@ -663,7 +804,10 @@ def _bind_result(unit_of_work, line_user_id, candidate, correlation_id):
 
 
 def _bind_claim(unit_of_work, claim, correlation_id):
-    current = unit_of_work.identities.get(claim.line_user_id)
+    current = unit_of_work.identities.get(
+        claim.line_user_id,
+        claim.subject_type,
+    )
     if current and current.status is LineIdentityBindingStatus.BOUND:
         if current.subject_type is claim.subject_type and current.subject_reference == claim.subject_reference:
             return current
@@ -683,7 +827,10 @@ def _bind_claim(unit_of_work, claim, correlation_id):
 def _save_pending_claim_if_available(unit_of_work, line_user_id, candidate):
     if unit_of_work.identities.get_by_subject(candidate.subject_type, candidate.subject_reference):
         return
-    current = unit_of_work.identities.get(line_user_id)
+    current = unit_of_work.identities.get(
+        line_user_id,
+        candidate.subject_type,
+    )
     if current and current.status not in {
         LineIdentityBindingStatus.UNBOUND,
         LineIdentityBindingStatus.REVOKED,

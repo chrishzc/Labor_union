@@ -21,6 +21,20 @@ export interface HistoricalOperationalBaselineReadbackProps {
   client?: HistoricalOperationalBaselineClient;
 }
 
+function stepStateLabel(state: string): string {
+  if (state === 'historical_baseline_completed') return '歷史資料已確認';
+  if (state === 'in_progress') return '目前進行中';
+  return '狀態待確認';
+}
+
+function unavailableMessage(error: HistoricalOperationalBaselineUnavailableError): string {
+  if (error.status === 401) return '請先登入再讀取歷史案件作業基準。';
+  if (error.status === 403) return '目前帳號無權讀取這筆歷史案件作業基準。';
+  return error.retryable
+    ? '歷史案件作業基準暫時無法讀取，請稍後重試。'
+    : '歷史案件作業基準目前無法使用。';
+}
+
 export function HistoricalOperationalBaselineReadback({
   caseNo,
   client = historicalOperationalBaselineClient,
@@ -62,7 +76,7 @@ export function HistoricalOperationalBaselineReadback({
   if (state.kind === 'unavailable') {
     return <section aria-label="歷史案件作業基準" className="anomalies-recovery-card recovery">
       <div className="anomalies-detail-error" role="alert">
-        歷史案件作業基準目前無法使用（{state.error.code}）。
+        {unavailableMessage(state.error)}
       </div>
       <button className="anomalies-retry-btn" type="button" onClick={() => query()}>
         重新讀取
@@ -85,25 +99,19 @@ export function HistoricalOperationalBaselineReadback({
       <code>{baseline.case_no}</code>
     </div>
     <div className="anomaly-recovery-metadata-row">
-      <span>Orders identity</span>
-      <code>{baseline.order_identity}</code>
-    </div>
-    <div className="anomaly-recovery-metadata-row">
-      <span>目前 Orders version</span>
-      <code>{baseline.current_orders_version}</code>
-    </div>
-    <div className="anomaly-recovery-metadata-row">
       <span>目前作業基準</span>
-      <span>{current === null ? '尚未設定' : `Step ${current.selected_step}`}</span>
+      <span>{current === null ? '尚未設定' : `作業步驟 ${current.selected_step}`}</span>
     </div>
-    <div className="anomaly-recovery-metadata-row">
-      <span>歷史來源</span>
-      <span><code>{baseline.historical_provenance.source_event_identity}</code>（v{baseline.historical_provenance.source_version}）</span>
-    </div>
-    {current === null ? <div className="anomalies-detail-empty">Orders 尚未設定歷史案件作業基準。</div> : <div>
+    <details className="anomaly-recovery-technical-details">
+      <summary>技術詳情與資料來源</summary>
+      <div>Orders identity：<code>{baseline.order_identity}</code></div>
+      <div>Orders version：<code>{baseline.current_orders_version}</code></div>
+      <div>歷史來源：<code>{baseline.historical_provenance.source_event_identity}</code>（v{baseline.historical_provenance.source_version}）</div>
+    </details>
+    {current === null ? <div className="anomalies-detail-empty">尚未設定歷史案件作業基準。</div> : <div>
       <h4>作業步驟投影</h4>
       <ul aria-label="歷史案件作業步驟">
-        {current.step_projection.map((step) => <li key={step.step}>Step {step.step}：<code>{step.state}</code></li>)}
+        {current.step_projection.map((step) => <li key={step.step}>作業步驟 {step.step}：{stepStateLabel(step.state)}</li>)}
       </ul>
     </div>}
   </section>;

@@ -1,0 +1,57 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-line-identity-role-scope-2026-08-30-v1",
+  "release_metadata": {
+    "release_name": "Labor Union LINE identity role scope",
+    "application_version": "line-identity-role-scope-v1",
+    "published_at": "2026-08-30",
+    "description": "Add one shared role-scoped LINE identity root/event stream, one selected role state and one bounded binding-failure streak"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-schema-assembly-2026-08-15-v1"
+  },
+  "artifacts": [{
+    "name": "1019_line_identity_role_scope.sql",
+    "relative_path": "db/schema_parts/1019_line_identity_role_scope.sql",
+    "sha256": "e31ce7e8b2b80f27a4577514651b177e6a3b8a4d1d6b30cd7de977ebfcc36f14",
+    "dependencies": [],
+    "data_effect": "schema_and_deterministic_backfill",
+    "rollback_policy": "code-rollback-preserve-role-binding-successor-and-legacy-roots",
+    "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+  }],
+  "backfills": [],
+  "verification_contracts": [{
+    "verification_id": "line-identity-role-scope-owned-objects",
+    "phase": "post-schema",
+    "policy": "candidate-owned-objects-exact",
+    "read_only": true,
+    "blocking": true
+  }],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["line-identity-role-scope-v1"],
+    "required_restart_targets": ["api", "worker"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["line-identity-role-scope-owned-objects"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_30_line_identity_role_scope_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_30_line_identity_role_scope_v1.descriptors.json",
+    "sha256": "29984a968ef98de9742ac30d6ad423d95f3ddbb1e6a551445730316695a06e86",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

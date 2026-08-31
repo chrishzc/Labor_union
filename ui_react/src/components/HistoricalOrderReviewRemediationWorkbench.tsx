@@ -30,12 +30,19 @@ function commandId(prefix: string): string {
 
 function errorMessage(error: unknown): string {
   const typed = mapHistoricalReviewRemediationError(error);
-  if (typed.retryable) return '結果尚未確認；請先重新查詢 owner 根事實，再以相同 Idempotency-Key 重試。';
-  return typed.message || '歷史訂單 review 更正失敗，請依阻擋原因修正。';
+  if (typed.status === 401) return '登入狀態已失效，請重新登入後再操作。';
+  if (typed.status === 403) return '目前帳號沒有處理歷史訂單欄位衝突的權限。';
+  if (typed.status === 404) return '找不到這筆歷史訂單待確認案件，請返回清單重新查詢。';
+  if (typed.status === 409) return '案件資料已變更，請重新查詢並再次預覽。';
+  if (typed.status === 422) return '更正資料未通過檢核，請依欄位衝突修正後再預覽。';
+  if (typed.retryable) return '結果尚未確認；請先重新查詢，再以相同操作安全重試。';
+  return '歷史訂單欄位衝突目前無法完成，請稍後再試。';
 }
 
-function issueLabel(issue: HistoricalReviewIssue): string {
-  return `${issue.field_label}（${issue.field_path}）`;
+function dispositionLabel(disposition: HistoricalReviewApply['disposition'] | HistoricalReviewPreview['outcome']): string {
+  return disposition === 'corrected_source_adopted'
+    ? '更正資料可採用'
+    : '仍有欄位需要後續確認';
 }
 
 function renderIssues(issues: HistoricalReviewIssue[], title: string): React.ReactNode {
@@ -43,11 +50,12 @@ function renderIssues(issues: HistoricalReviewIssue[], title: string): React.Rea
     <h4>{title}</h4>
     {issues.length === 0 ? <p>沒有剩餘欄位衝突。</p> : <ul>
       {issues.map((issue) => <li key={`${issue.issue_code}:${issue.field_path}`}>
-        <strong>{issueLabel(issue)}</strong>：{issue.issue_code}
+        <strong>{issue.field_label}</strong>
         <div>來源值：{issue.masked_source_value || '（空白）'}｜目前值：{issue.masked_current_value || '（空白）'}</div>
         <div>規則：{issue.rule}</div>
         <div>可採用值：{issue.allowed_values.length ? issue.allowed_values.join('、') : '依規則判定'}</div>
         <div>流程阻擋：{issue.process_blocker}</div>
+        <details><summary>技術詳情</summary><p>欄位：{issue.field_path}｜問題類型：{issue.issue_code}</p></details>
       </li>)}
     </ul>}
   </div>;
@@ -236,13 +244,27 @@ export const HistoricalOrderReviewRemediationWorkbench: React.FC<HistoricalOrder
 
   return <section aria-label="歷史訂單 review 更正" data-review-identity={context.review_identity}>
     <h3>歷史訂單欄位衝突更正</h3>
-    <p>案件：{context.masked_case_identity}｜review 版本：{context.review_version}｜更正版本：{context.remediation_version}</p>
+    <p>案件：{context.masked_case_identity}</p>
     <p>完成條件：{context.completion_condition}</p>
     {renderIssues(context.issues, '目前欄位衝突')}
-    <details><summary>更正工作簿契約</summary><pre>{JSON.stringify(context.workbook_contract, null, 2)}</pre></details>
+    <div aria-label="更正檔案要求">
+      <h4>更正檔案要求</h4>
+      <p>請上傳單列 .{context.workbook_contract.file_extension}，欄位需包含：{context.workbook_contract.required_columns.join('、')}。</p>
+    </div>
+    <details><summary>技術詳情與資料來源</summary>
+      <p>待確認案件識別：{context.review_identity}</p>
+      <p>待確認版本：{context.review_version}｜更正版本：{context.remediation_version}</p>
+      <p>檔案契約：{context.workbook_contract.contract_key} v{context.workbook_contract.contract_version}</p>
+    </details>
     {applyResult ? <div role="status">
       <h4>{applyResult.prior_alert_active ? '更正已提交，等待異常重新檢核' : '原警示已解除'}</h4>
-      <p>處置：{applyResult.disposition}｜收據：{applyResult.receipt.remediation_receipt_identity}</p>
+      <p>處理結果：{dispositionLabel(applyResult.disposition)}</p>
+      <details><summary>技術操作紀錄</summary>
+        <p>更正紀錄：{applyResult.receipt.remediation_receipt_identity}</p>
+        <p>來源摘要：{applyResult.receipt.source_content_digest}</p>
+        <p>預覽核對值：{applyResult.receipt.preview_fingerprint}</p>
+        <p>更正版本：{applyResult.receipt.resulting_remediation_version}</p>
+      </details>
       {applyResult.prior_alert_active && renderIssues(
         applyResult.readback.remaining_issues,
         '原 review 尚未解除的欄位衝突',
@@ -251,20 +273,24 @@ export const HistoricalOrderReviewRemediationWorkbench: React.FC<HistoricalOrder
       {applyResult.successor ? <div>{renderIssues(applyResult.successor.issues, `後續 review：${applyResult.successor.masked_case_identity}`)}<p>請使用後續 review 的新修正入口。</p></div> : <p>後續流程可繼續推進；原 review 僅保留於歷史紀錄。</p>}
     </div> : <>
       <label>單列更正 .xlsx（必須符合上述契約）<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void selectWorkbook(event)} disabled={busy} /></label>
-      {fileName && <p>已選檔案：{fileName}{snapshot ? `｜SHA-256：${snapshot.sha256}` : ''}</p>}
+      {fileName && <><p>已選檔案：{fileName}</p>{snapshot && <details><summary>檔案技術詳情</summary><p>內容摘要：{snapshot.sha256}</p></details>}</>}
       <label>處理原因（必填）<textarea value={reason} onChange={(event) => invalidate(() => setReason(event.target.value))} /></label>
       <label>佐證（必填，可填電話或紙本紀錄索引）<textarea value={evidence} onChange={(event) => invalidate(() => setEvidence(event.target.value))} /></label>
       <div><button type="button" onClick={() => void previewAction()} disabled={!canPreview}>{busy ? '處理中…' : 'Preview 更正結果'}</button></div>
       {previewCurrent && preview && <div aria-label="更正 Preview">
         <h4>Preview 結果</h4>
-        <p>來源摘要：{preview.source_content_digest}｜fingerprint：{preview.preview_fingerprint}</p>
-        <p>預計處置：{preview.outcome}｜版本：{preview.review_version}/{preview.remediation_version}</p>
+        <p>預計處理：{dispositionLabel(preview.outcome)}</p>
         {renderIssues(preview.remaining_issues, '套用後剩餘欄位衝突')}
+        <details><summary>預覽技術詳情</summary>
+          <p>來源摘要：{preview.source_content_digest}</p>
+          <p>預覽核對值：{preview.preview_fingerprint}</p>
+          <p>待確認版本：{preview.review_version}｜更正版本：{preview.remediation_version}</p>
+        </details>
         <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我已確認檔案、原因、佐證與 Preview 結果，明確確認套用</label>
         <button type="button" onClick={() => void applyAction()} disabled={!confirmed || busy}>確認套用更正</button>
       </div>}
     </>}
-    {unknownOutcome && <div role="alert"><p>Apply 結果尚未確認；相同命令仍保留，可先重新查詢再重試。</p><button type="button" onClick={() => void readOwner()} disabled={busy}>重新讀取 owner 結果</button>{previewCurrent && <button type="button" onClick={() => void applyAction()} disabled={!confirmed || busy}>以相同 Idempotency-Key 重試</button>}</div>}
+    {unknownOutcome && <div role="alert"><p>套用結果尚未確認；原操作已保留，可先重新查詢再安全重試。</p><button type="button" onClick={() => void readOwner()} disabled={busy}>重新查詢結果</button>{previewCurrent && <button type="button" onClick={() => void applyAction()} disabled={!confirmed || busy}>安全重試原操作</button>}</div>}
     {notice && <p role="status">{notice}</p>}
     {error && <p role="alert">{error}</p>}
     {queryError && <p role="alert">{queryError}</p>}

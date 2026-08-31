@@ -1,0 +1,146 @@
+"""Repository-level negative contracts for role-scoped LINE identity."""
+
+from __future__ import annotations
+
+import pytest
+
+from domains.line.identities import LineUserId
+from domains.line.identity_binding import LineBindingSubjectType, LineIdentityClaim
+from infrastructure.mysql.line_identity_review_repository import (
+    MySqlLineIdentityRepository,
+)
+from infrastructure.mysql.line_identity_management_repository import (
+    MySqlLineIdentityManagementRepository,
+)
+from shared_kernel.identities import ExpectedVersion
+
+
+def _binding(subject_type, reference, *, status="bound", version=1):
+    return {
+        "line_user_id": "U-role-negative",
+        "binding_status": status,
+        "subject_type": subject_type,
+        "subject_reference": reference,
+        "aggregate_version": version,
+    }
+
+
+class _Cursor:
+    def __init__(self, *, one_rows=(), all_rows=()) -> None:
+        self.one_rows = list(one_rows)
+        self.all_rows = list(all_rows)
+        self.executed = []
+        self.rowcount = 1
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def execute(self, statement, parameters=()):
+        parameters = tuple(parameters)
+        assert statement.count("%s") == len(parameters)
+        self.executed.append((statement, parameters))
+
+    def fetchone(self):
+        return self.one_rows.pop(0) if self.one_rows else None
+
+    def fetchall(self):
+        return self.all_rows.pop(0) if self.all_rows else ()
+
+
+class _Connection:
+    def __init__(self, cursor) -> None:
+        self.cursor_instance = cursor
+
+    def cursor(self):
+        return self.cursor_instance
+
+
+def test_dual_role_without_selection_fails_closed_and_selected_role_resolves() -> None:
+    rows = (
+        _binding("customer", "customer:7"),
+        _binding("staff", "staff:8"),
+    )
+    unselected = MySqlLineIdentityRepository(
+        _Connection(
+            _Cursor(
+                all_rows=(rows,),
+                one_rows=({"selected_identity_role": None, "aggregate_version": 4},),
+            )
+        )
+    )
+    with pytest.raises(RuntimeError, match="line_identity_role_selection_required"):
+        unselected.get(LineUserId("U-role-negative"))
+
+    selected = MySqlLineIdentityRepository(
+        _Connection(
+            _Cursor(
+                all_rows=(rows,),
+                one_rows=({"selected_identity_role": "staff", "aggregate_version": 4},),
+            )
+        )
+    ).get(LineUserId("U-role-negative"))
+    assert selected is not None
+    assert selected.subject_type is LineBindingSubjectType.STAFF
+    assert selected.subject_reference == "staff:8"
+
+
+def test_management_detail_ignores_revoked_history_when_one_role_is_active() -> None:
+    cursor = _Cursor(
+        all_rows=((
+            _binding("customer", "customer:7"),
+            _binding("staff", "staff:8", status="revoked"),
+        ),)
+    )
+    detail = MySqlLineIdentityManagementRepository(
+        _Connection(cursor)
+    ).detail(LineUserId("U-role-negative"))
+
+    assert detail.subject_type is LineBindingSubjectType.CUSTOMER
+    assert detail.subject_reference == "customer:7"
+    assert len(cursor.executed) == 1
+
+
+@pytest.mark.parametrize(
+    ("subject_type", "counts"),
+    (
+        (LineBindingSubjectType.ADMIN, {"admin_count": 0, "nonadmin_count": 1}),
+        (LineBindingSubjectType.STAFF, {"admin_count": 1, "nonadmin_count": 0}),
+    ),
+)
+def test_admin_and_customer_staff_roles_are_mutually_exclusive(subject_type, counts) -> None:
+    cursor = _Cursor(
+        one_rows=(
+            {"line_user_id": "U-role-negative"},
+            counts,
+        )
+    )
+    repository = MySqlLineIdentityRepository(_Connection(cursor))
+
+    with pytest.raises(RuntimeError, match="line_identity_admin_role_exclusive"):
+        repository.save_claim(
+            LineIdentityClaim(
+                LineUserId("U-role-negative"),
+                subject_type,
+                f"{subject_type.value}:9",
+            ),
+            ExpectedVersion(0),
+        )
+
+
+def test_revoked_role_cannot_be_selected() -> None:
+    cursor = _Cursor(one_rows=(_binding("staff", "staff:8", status="revoked"),))
+    repository = MySqlLineIdentityRepository(_Connection(cursor))
+
+    with pytest.raises(RuntimeError, match="line_identity_selected_role_not_bound"):
+        repository.select_role(
+            LineUserId("U-role-negative"),
+            LineBindingSubjectType.STAFF,
+            ExpectedVersion(4),
+        )
+    assert not any(
+        statement.startswith("UPDATE line_platform_users")
+        for statement, _parameters in cursor.executed
+    )

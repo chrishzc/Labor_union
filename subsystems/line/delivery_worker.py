@@ -17,6 +17,9 @@ from subsystems.line.delivery_contracts import (
     RecordLineDeliveryAttemptCommand,
 )
 from subsystems.line.ports import LineMessagingProviderPort, LineUnitOfWorkPort
+from subsystems.line.notification_failure_current_fact import (
+    append_line_notification_failure_rechecks,
+)
 
 
 class LineDeliveryWorker:
@@ -39,7 +42,16 @@ class LineDeliveryWorker:
         for task in claimed:
             if not self._still_sendable(task):
                 continue
-            outcome = self._send(task)
+            validation_failure = self._manual_replay_validation_failure(task)
+            outcome = (
+                LineProviderOutcome(
+                    LineProviderOutcomeType.REJECTED,
+                    error_code=validation_failure,
+                    error_message="manual replay fresh validation failed",
+                )
+                if validation_failure is not None
+                else self._send(task)
+            )
             self._record(task, outcome)
         return len(claimed)
 
@@ -78,6 +90,18 @@ class LineDeliveryWorker:
             and current.lease.acquired_at == task.lease.acquired_at
         )
 
+    def _manual_replay_validation_failure(
+        self, task: LineDeliveryTaskSnapshot
+    ) -> str | None:
+        with self._unit_of_work_factory() as unit_of_work:
+            notification_rules = getattr(unit_of_work, "notification_rules", None)
+            validator = getattr(
+                notification_rules,
+                "manual_replay_delivery_validation_failure",
+                None,
+            )
+            return validator(task.task_id.value) if callable(validator) else None
+
     def _record(self, task, outcome: LineProviderOutcome) -> None:
         if task.lease is None:
             raise RuntimeError("claimed LINE delivery task has no lease")
@@ -91,13 +115,28 @@ class LineDeliveryWorker:
         )
         with self._unit_of_work_factory() as unit_of_work:
             unit_of_work.delivery_tasks.record_attempt(command)
+            notification_rules = getattr(unit_of_work, "notification_rules", None)
             if outcome.outcome_type is LineProviderOutcomeType.SUCCESS:
-                notification_rules = getattr(unit_of_work, "notification_rules", None)
                 mark_accepted = getattr(
                     notification_rules, "mark_delivery_task_provider_accepted", None
                 )
                 if callable(mark_accepted):
                     mark_accepted(task.task_id.value)
+            target_reader = getattr(
+                notification_rules,
+                "line006_recheck_targets_for_delivery_task",
+                None,
+            )
+            targets = (
+                target_reader(task.task_id.value)
+                if callable(target_reader)
+                else ()
+            )
+            append_line_notification_failure_rechecks(
+                unit_of_work,
+                targets,
+                cause_identity=command.idempotency_key.value,
+            )
             unit_of_work.commit()
 
 

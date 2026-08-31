@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-08-30-v20
+-- Release: labor-union-validation-schema-2026-08-31-v22
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -19848,3 +19848,493 @@ ALTER TABLE case_import_hcm_correction_events
              AND resulting_review_version = expected_review_version + 1)
         );
 -- END SOURCE: db/schema_parts/1018_hcm_resubmission_canonical_review_version.sql
+
+-- BEGIN SOURCE: db/schema_parts/1019_line_identity_role_scope.sql
+-- File: 1019_line_identity_role_scope.sql
+-- Description: Shared role-scoped LINE identity roots and bounded failure streak.
+-- Additive successor only; legacy roots/events remain compatibility read surfaces.
+
+-- Replaying this released part after a later statement fails must not collide
+-- with the already-added parent column. Incompatible pre-existing shapes fail
+-- closed instead of being silently rewritten.
+SET @line_selected_role_column_any = (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'line_platform_users'
+      AND COLUMN_NAME = 'selected_identity_role'
+);
+SET @line_selected_role_column_exact = (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'line_platform_users'
+      AND COLUMN_NAME = 'selected_identity_role'
+      AND DATA_TYPE = 'enum'
+      AND COLUMN_TYPE = 'enum(''customer'',''staff'')'
+      AND IS_NULLABLE = 'YES'
+      AND COLUMN_DEFAULT IS NULL
+      AND EXTRA = ''
+      AND COALESCE(GENERATION_EXPRESSION, '') = ''
+);
+SET @line_selected_role_column_sql = IF(
+    @line_selected_role_column_any = 0,
+    'ALTER TABLE line_platform_users ADD COLUMN selected_identity_role ENUM(''customer'',''staff'') NULL AFTER aggregate_version',
+    IF(
+        @line_selected_role_column_any = 1
+        AND @line_selected_role_column_exact = 1,
+        'SELECT 1',
+        'SELECT * FROM `FAIL_CLOSED_LINE_SELECTED_ROLE_INVALID_SPEC`'
+    )
+);
+PREPARE line_selected_role_column_stmt FROM @line_selected_role_column_sql;
+EXECUTE line_selected_role_column_stmt;
+DEALLOCATE PREPARE line_selected_role_column_stmt;
+
+CREATE TABLE IF NOT EXISTS line_identity_role_bindings (
+    line_user_id VARCHAR(191) NOT NULL,
+    subject_type ENUM('customer','staff','admin') NOT NULL,
+    binding_status ENUM(
+        'pending_review','bound','revocation_pending','revoked'
+    ) NOT NULL,
+    subject_reference VARCHAR(191) NOT NULL,
+    aggregate_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    active_subject_key VARCHAR(400) GENERATED ALWAYS AS (
+        CASE
+            WHEN binding_status IN ('pending_review','bound','revocation_pending')
+            THEN CONCAT(subject_type, ':', subject_reference)
+            ELSE NULL
+        END
+    ) STORED,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (line_user_id, subject_type),
+    UNIQUE KEY uq_line_identity_role_active_subject (active_subject_key),
+    INDEX idx_line_identity_role_status (
+        subject_type, binding_status, updated_at_utc, line_user_id
+    ),
+    CONSTRAINT fk_line_identity_role_platform_user
+        FOREIGN KEY (line_user_id) REFERENCES line_platform_users(line_user_id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_line_identity_role_subject_reference
+        CHECK (CHAR_LENGTH(TRIM(subject_reference)) > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS line_identity_role_binding_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    line_user_id VARCHAR(191) NOT NULL,
+    subject_type ENUM('customer','staff','admin') NOT NULL,
+    action ENUM(
+        'claim_submitted','bound','revocation_requested','revoked','rebound',
+        'legacy_imported'
+    ) NOT NULL,
+    subject_reference VARCHAR(191) NOT NULL,
+    expected_version BIGINT UNSIGNED NOT NULL,
+    resulting_version BIGINT UNSIGNED NOT NULL,
+    actor_id VARCHAR(191) NOT NULL,
+    payload_fingerprint CHAR(64) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    occurred_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_line_identity_role_event_idempotency (idempotency_key),
+    INDEX idx_line_identity_role_event_stream (
+        line_user_id, subject_type, id
+    ),
+    CONSTRAINT fk_line_identity_role_event_binding
+        FOREIGN KEY (line_user_id, subject_type)
+        REFERENCES line_identity_role_bindings(line_user_id, subject_type)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_line_identity_role_event_fingerprint
+        CHECK (payload_fingerprint REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_line_identity_role_event_version
+        CHECK (resulting_version = expected_version + 1),
+    CONSTRAINT chk_line_identity_role_event_text
+        CHECK (
+            CHAR_LENGTH(TRIM(subject_reference)) > 0
+            AND CHAR_LENGTH(TRIM(actor_id)) > 0
+            AND CHAR_LENGTH(TRIM(idempotency_key)) > 0
+            AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS line_identity_binding_failure_streaks (
+    line_user_id VARCHAR(191) PRIMARY KEY,
+    identity_flow_id CHAR(36) NOT NULL,
+    candidate_subject_type ENUM('customer','staff') NOT NULL,
+    candidate_scope VARCHAR(191) NOT NULL,
+    scope_fingerprint CHAR(64) NOT NULL,
+    streak_generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    failure_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    last_failure_fingerprint CHAR(64) NULL,
+    escalation_id BIGINT UNSIGNED NULL,
+    aggregate_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    INDEX idx_line_identity_failure_flow (
+        identity_flow_id, candidate_subject_type, candidate_scope
+    ),
+    INDEX idx_line_identity_failure_escalation (escalation_id),
+    CONSTRAINT fk_line_identity_failure_platform_user
+        FOREIGN KEY (line_user_id) REFERENCES line_platform_users(line_user_id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_line_identity_failure_flow
+        FOREIGN KEY (identity_flow_id) REFERENCES line_identity_flows(flow_id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_line_identity_failure_escalation
+        FOREIGN KEY (escalation_id) REFERENCES customer_service_escalations(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_line_identity_failure_scope
+        CHECK (
+            scope_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND CHAR_LENGTH(TRIM(candidate_scope)) > 0
+        ),
+    CONSTRAINT chk_line_identity_failure_count
+        CHECK (failure_count BETWEEN 0 AND 2),
+    CONSTRAINT chk_line_identity_failure_shape
+        CHECK (
+            (failure_count = 0
+             AND last_failure_fingerprint IS NULL
+             AND escalation_id IS NULL)
+            OR
+            (failure_count = 1
+             AND last_failure_fingerprint REGEXP '^[0-9a-f]{64}$'
+             AND escalation_id IS NULL)
+            OR
+            (failure_count = 2
+             AND last_failure_fingerprint REGEXP '^[0-9a-f]{64}$'
+             AND escalation_id IS NOT NULL)
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO line_identity_role_bindings (
+    line_user_id, subject_type, binding_status, subject_reference,
+    aggregate_version, created_at_utc, updated_at_utc
+)
+SELECT
+    legacy.line_user_id,
+    legacy.subject_type,
+    legacy.binding_status,
+    legacy.subject_reference,
+    legacy.aggregate_version,
+    legacy.created_at_utc,
+    legacy.updated_at_utc
+FROM line_identity_bindings AS legacy
+INNER JOIN line_platform_users AS platform_user
+    ON platform_user.line_user_id = legacy.line_user_id
+WHERE legacy.subject_type IS NOT NULL
+  AND legacy.subject_reference IS NOT NULL
+  AND legacy.binding_status <> 'unbound';
+
+INSERT IGNORE INTO line_identity_role_binding_events (
+    id, line_user_id, subject_type, action, subject_reference,
+    expected_version, resulting_version, actor_id, payload_fingerprint,
+    idempotency_key, correlation_id, occurred_at_utc
+)
+SELECT
+    legacy_event.id,
+    legacy_event.line_user_id,
+    legacy_event.subject_type,
+    legacy_event.action,
+    legacy_event.subject_reference,
+    legacy_event.expected_version,
+    legacy_event.resulting_version,
+    legacy_event.actor_id,
+    legacy_event.payload_fingerprint,
+    legacy_event.idempotency_key,
+    legacy_event.correlation_id,
+    legacy_event.occurred_at_utc
+FROM line_identity_binding_events AS legacy_event
+INNER JOIN line_identity_role_bindings AS role_binding
+    ON role_binding.line_user_id = legacy_event.line_user_id
+   AND role_binding.subject_type = legacy_event.subject_type
+WHERE legacy_event.subject_type IS NOT NULL
+  AND legacy_event.subject_reference IS NOT NULL;
+-- END SOURCE: db/schema_parts/1019_line_identity_role_scope.sql
+
+-- BEGIN SOURCE: db/schema_parts/1020_historical_owner_payment_settlement.sql
+-- File: 1020_historical_owner_payment_settlement.sql
+-- Description: Owner-specific historical payment evidence and settlement overlays.
+-- Additive only; no seed, backfill, existing-row rewrite, or bank-ledger fabrication.
+
+CREATE TABLE IF NOT EXISTS historical_client_payment_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_identity VARCHAR(191) NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    direction ENUM('receivable_from_client','payable_to_client') NOT NULL,
+    confirmation_kind ENUM('paid','settled') NOT NULL,
+    payer_role ENUM('client','union') NOT NULL,
+    payee_role ENUM('client','union') NOT NULL,
+    payment_date DATE NULL,
+    payment_date_unknown_reason VARCHAR(500) NULL,
+    source_availability ENUM('missing','ambiguous','unrecoverable') NOT NULL,
+    evidence_reference VARCHAR(191) NULL,
+    historical_adoption_receipt_id BIGINT NOT NULL,
+    expected_account_version BIGINT UNSIGNED NOT NULL,
+    resulting_account_version BIGINT UNSIGNED NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    actor_id VARCHAR(191) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_historical_client_payment_event_identity (event_identity),
+    UNIQUE KEY uq_historical_client_payment_event_idempotency (idempotency_key),
+    INDEX idx_historical_client_payment_case (case_no, id),
+    CONSTRAINT fk_historical_client_payment_order
+        FOREIGN KEY (case_no) REFERENCES orders(case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_client_payment_adoption
+        FOREIGN KEY (historical_adoption_receipt_id)
+        REFERENCES historical_order_adoption_receipts(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_client_payment_version
+        CHECK (resulting_account_version = expected_account_version + 1),
+    CONSTRAINT chk_historical_client_payment_direction
+        CHECK (
+            (direction = 'receivable_from_client' AND payer_role = 'client' AND payee_role = 'union')
+            OR
+            (direction = 'payable_to_client' AND payer_role = 'union' AND payee_role = 'client')
+        ),
+    CONSTRAINT chk_historical_client_payment_date
+        CHECK (
+            (payment_date IS NOT NULL AND payment_date_unknown_reason IS NULL)
+            OR
+            (payment_date IS NULL AND CHAR_LENGTH(TRIM(payment_date_unknown_reason)) > 0)
+        ),
+    CONSTRAINT chk_historical_client_payment_text
+        CHECK (
+            CHAR_LENGTH(TRIM(event_identity)) > 0
+            AND CHAR_LENGTH(TRIM(idempotency_key)) > 0
+            AND CHAR_LENGTH(TRIM(actor_id)) > 0
+            AND CHAR_LENGTH(TRIM(reason)) > 0
+            AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_client_payment_obligation_links (
+    event_id BIGINT UNSIGNED NOT NULL,
+    obligation_identity VARCHAR(191) NOT NULL,
+    amount_snapshot_ntd BIGINT NOT NULL,
+    obligation_type ENUM('deposit','first','second','refund','subsidy_return','adjustment') NOT NULL,
+    obligation_direction ENUM('receivable_from_client','payable_to_client') NOT NULL,
+    obligation_projection_version BIGINT UNSIGNED NOT NULL,
+    link_ordinal INT UNSIGNED NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (event_id, obligation_identity),
+    UNIQUE KEY uq_historical_client_payment_link_ordinal (event_id, link_ordinal),
+    INDEX idx_historical_client_payment_link_obligation (obligation_identity, event_id),
+    CONSTRAINT fk_historical_client_payment_link_event
+        FOREIGN KEY (event_id) REFERENCES historical_client_payment_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_client_payment_link_obligation
+        FOREIGN KEY (obligation_identity) REFERENCES client_obligations(obligation_identity)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_client_payment_link_amount CHECK (amount_snapshot_ntd > 0),
+    CONSTRAINT chk_historical_client_payment_link_ordinal CHECK (link_ordinal > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_client_payment_projections (
+    obligation_identity VARCHAR(191) PRIMARY KEY,
+    case_no VARCHAR(50) NOT NULL,
+    current_event_id BIGINT UNSIGNED NOT NULL,
+    confirmation_kind ENUM('paid','settled') NOT NULL,
+    amount_snapshot_ntd BIGINT NOT NULL,
+    obligation_projection_version BIGINT UNSIGNED NOT NULL,
+    account_version BIGINT UNSIGNED NOT NULL,
+    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    INDEX idx_historical_client_payment_projection_case (case_no, obligation_identity),
+    CONSTRAINT fk_historical_client_payment_projection_obligation
+        FOREIGN KEY (obligation_identity) REFERENCES client_obligations(obligation_identity)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_client_payment_projection_event
+        FOREIGN KEY (current_event_id) REFERENCES historical_client_payment_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_client_payment_projection_amount CHECK (amount_snapshot_ntd > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_client_payment_source_outbox (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_id BIGINT UNSIGNED NOT NULL,
+    intent_key VARCHAR(191) NOT NULL,
+    payload_snapshot JSON NOT NULL,
+    status ENUM('pending','processing','delivered','failed') NOT NULL DEFAULT 'pending',
+    attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+    next_attempt_at DATETIME NULL,
+    delivered_at DATETIME NULL,
+    last_error VARCHAR(1000) NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_historical_client_payment_outbox_intent (intent_key),
+    INDEX idx_historical_client_payment_outbox_delivery (status, next_attempt_at, id),
+    CONSTRAINT fk_historical_client_payment_outbox_event
+        FOREIGN KEY (event_id) REFERENCES historical_client_payment_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_client_payment_outbox_payload
+        CHECK (JSON_TYPE(payload_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_staff_payout_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_identity VARCHAR(191) NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    staff_id INT NOT NULL,
+    confirmation_kind ENUM('paid','settled') NOT NULL,
+    payer_role ENUM('union') NOT NULL,
+    payee_role ENUM('staff') NOT NULL,
+    payment_date DATE NULL,
+    payment_date_unknown_reason VARCHAR(500) NULL,
+    source_availability ENUM('missing','ambiguous','unrecoverable') NOT NULL,
+    evidence_reference VARCHAR(191) NULL,
+    historical_adoption_receipt_id BIGINT NOT NULL,
+    expected_staff_payables_version BIGINT UNSIGNED NOT NULL,
+    resulting_staff_payables_version BIGINT UNSIGNED NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    actor_id VARCHAR(191) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_historical_staff_payout_event_identity (event_identity),
+    UNIQUE KEY uq_historical_staff_payout_event_idempotency (idempotency_key),
+    INDEX idx_historical_staff_payout_case_staff (case_no, staff_id, id),
+    CONSTRAINT fk_historical_staff_payout_order
+        FOREIGN KEY (case_no) REFERENCES orders(case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_staff_payout_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_staff_payout_adoption
+        FOREIGN KEY (historical_adoption_receipt_id)
+        REFERENCES historical_order_adoption_receipts(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_staff_payout_version
+        CHECK (resulting_staff_payables_version = expected_staff_payables_version + 1),
+    CONSTRAINT chk_historical_staff_payout_date
+        CHECK (
+            (payment_date IS NOT NULL AND payment_date_unknown_reason IS NULL)
+            OR
+            (payment_date IS NULL AND CHAR_LENGTH(TRIM(payment_date_unknown_reason)) > 0)
+        ),
+    CONSTRAINT chk_historical_staff_payout_text
+        CHECK (
+            CHAR_LENGTH(TRIM(event_identity)) > 0
+            AND CHAR_LENGTH(TRIM(idempotency_key)) > 0
+            AND CHAR_LENGTH(TRIM(actor_id)) > 0
+            AND CHAR_LENGTH(TRIM(reason)) > 0
+            AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_staff_payout_obligation_links (
+    event_id BIGINT UNSIGNED NOT NULL,
+    obligation_identity VARCHAR(191) NOT NULL,
+    amount_snapshot_ntd BIGINT NOT NULL,
+    obligation_payroll_version BIGINT UNSIGNED NOT NULL,
+    link_ordinal INT UNSIGNED NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (event_id, obligation_identity),
+    UNIQUE KEY uq_historical_staff_payout_link_ordinal (event_id, link_ordinal),
+    INDEX idx_historical_staff_payout_link_obligation (obligation_identity, event_id),
+    CONSTRAINT fk_historical_staff_payout_link_event
+        FOREIGN KEY (event_id) REFERENCES historical_staff_payout_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_staff_payout_link_obligation
+        FOREIGN KEY (obligation_identity) REFERENCES staff_obligations(obligation_identity)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_staff_payout_link_amount CHECK (amount_snapshot_ntd > 0),
+    CONSTRAINT chk_historical_staff_payout_link_ordinal CHECK (link_ordinal > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_staff_payout_projections (
+    obligation_identity VARCHAR(191) PRIMARY KEY,
+    case_no VARCHAR(50) NOT NULL,
+    staff_id INT NOT NULL,
+    current_event_id BIGINT UNSIGNED NOT NULL,
+    confirmation_kind ENUM('paid','settled') NOT NULL,
+    amount_snapshot_ntd BIGINT NOT NULL,
+    obligation_payroll_version BIGINT UNSIGNED NOT NULL,
+    staff_payables_version BIGINT UNSIGNED NOT NULL,
+    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    INDEX idx_historical_staff_payout_projection_case (case_no, staff_id, obligation_identity),
+    CONSTRAINT fk_historical_staff_payout_projection_obligation
+        FOREIGN KEY (obligation_identity) REFERENCES staff_obligations(obligation_identity)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_staff_payout_projection_event
+        FOREIGN KEY (current_event_id) REFERENCES historical_staff_payout_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_staff_payout_projection_amount CHECK (amount_snapshot_ntd > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_staff_payout_source_outbox (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_id BIGINT UNSIGNED NOT NULL,
+    intent_key VARCHAR(191) NOT NULL,
+    payload_snapshot JSON NOT NULL,
+    status ENUM('pending','processing','delivered','failed') NOT NULL DEFAULT 'pending',
+    attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+    next_attempt_at DATETIME NULL,
+    delivered_at DATETIME NULL,
+    last_error VARCHAR(1000) NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_historical_staff_payout_outbox_intent (intent_key),
+    INDEX idx_historical_staff_payout_outbox_delivery (status, next_attempt_at, id),
+    CONSTRAINT fk_historical_staff_payout_outbox_event
+        FOREIGN KEY (event_id) REFERENCES historical_staff_payout_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_staff_payout_outbox_payload
+        CHECK (JSON_TYPE(payload_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_historical_client_payment_events_before_update;
+CREATE TRIGGER trg_historical_client_payment_events_before_update
+BEFORE UPDATE ON historical_client_payment_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_client_payment_events records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_historical_client_payment_events_before_delete;
+CREATE TRIGGER trg_historical_client_payment_events_before_delete
+BEFORE DELETE ON historical_client_payment_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_client_payment_events records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_historical_client_payment_links_before_update;
+CREATE TRIGGER trg_historical_client_payment_links_before_update
+BEFORE UPDATE ON historical_client_payment_obligation_links
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_client_payment_obligation_links records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_historical_client_payment_links_before_delete;
+CREATE TRIGGER trg_historical_client_payment_links_before_delete
+BEFORE DELETE ON historical_client_payment_obligation_links
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_client_payment_obligation_links records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_historical_staff_payout_events_before_update;
+CREATE TRIGGER trg_historical_staff_payout_events_before_update
+BEFORE UPDATE ON historical_staff_payout_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_staff_payout_events records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_historical_staff_payout_events_before_delete;
+CREATE TRIGGER trg_historical_staff_payout_events_before_delete
+BEFORE DELETE ON historical_staff_payout_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_staff_payout_events records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_historical_staff_payout_links_before_update;
+CREATE TRIGGER trg_historical_staff_payout_links_before_update
+BEFORE UPDATE ON historical_staff_payout_obligation_links
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_staff_payout_obligation_links records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_historical_staff_payout_links_before_delete;
+CREATE TRIGGER trg_historical_staff_payout_links_before_delete
+BEFORE DELETE ON historical_staff_payout_obligation_links
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_staff_payout_obligation_links records cannot be deleted';
+-- END SOURCE: db/schema_parts/1020_historical_owner_payment_settlement.sql

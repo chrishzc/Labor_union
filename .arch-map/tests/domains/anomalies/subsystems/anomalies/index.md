@@ -4,9 +4,31 @@ architecture: ../../../../../domains/anomalies/subsystems/anomalies/index.md
 test_root: tests/domains/anomalies/subsystems/anomalies/
 integration_root: tests/domains/anomalies/subsystems/anomalies/integration/
 fixtures_root: tests/fixtures/
+modules:
+  current-issue-presentation:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/current_anomalies_page.test.tsx
+  finance-correction-presentation:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/anomalies_finance_correction_flow.test.tsx
+  anomaly-detail-presentation:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/anomalies_page_real_data.test.tsx
+  line-notification-current-issue:
+    layout_status: canonical
+    test_root: tests/domains/anomalies/subsystems/anomalies/modules/line-notification-current-issue/
+  scheduling-current-issue:
+    layout_status: canonical
+    test_root: tests/domains/anomalies/subsystems/anomalies/modules/scheduling-current-issue/
+  government-subsidy-current-issue:
+    layout_status: canonical
+    test_root: tests/domains/anomalies/subsystems/anomalies/modules/government-subsidy-current-issue/
+  case-pairing-current-issue:
+    layout_status: canonical
+    test_root: tests/domains/anomalies/subsystems/anomalies/modules/case-pairing-current-issue/
 
 # Routing notes
-Focused Anomalies workflow, registry, current-only projection, source and adapter contracts live here. Current owner-local coverage includes closed issue identity／typed 410／fresh recheck guards; anomaly rulebook/action/recovery-context guards; finance/staff/client recovery consumers; LINE-binding predicate guards; `test_line_identity_current_issue_consumer.py`對typed LINE readback、合法雙角色抑制、role-scoped conflict與redacted details的cross-subsystem oracle；以及其他owner projection contracts。
+Focused Anomalies workflow, registry, current-only projection, source and adapter contracts live here. Current owner-local coverage includes closed issue identity／typed 410／fresh recheck guards; anomaly rulebook/action/recovery-context guards; finance/staff/client recovery consumers; LINE-binding predicate guards; `test_line_identity_current_issue_consumer.py`對typed LINE identity readback，以及`modules/line-notification-current-issue.md`對LINE-006 typed owner predicate／fail-closed reconcile的cross-subsystem oracle；以及其他owner projection contracts。
 
 Access security-alert composition is cross-subsystem: Access owner-local delivery/retry tests remain under the Access root, while `system_alerts` projection/service and schema oracles remain at the Anomalies/schema higher boundary.
 

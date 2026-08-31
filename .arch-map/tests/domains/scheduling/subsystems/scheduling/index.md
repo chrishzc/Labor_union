@@ -7,8 +7,22 @@ fixtures_root: tests/fixtures/
 modules:
   matching-coordination:
     test_root: tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/
+  matching-schedule-confirmation:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/matching_schedule_confirmation_actions.test.tsx
+  leave-substitution:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/substitution_payables_readback.test.tsx
   service-before-replacement:
     test_root: tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/
+  current-anomaly-facts:
+    test_root: tests/domains/scheduling/subsystems/scheduling/modules/current-anomaly-facts/
+  service-before-replacement-presentation:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/service_before_replacement_actions.test.tsx
+  matching-coordination-presentation:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/matching_coordination_workbench.test.tsx
 
 # Exceptions
 - Current owner-local coverage includes holiday maintenance/router; multi-caregiver schedule read and assignment-list routes; the historical-baseline Scheduling owner adapter; Matching coordination compatibility/owner-adapter/repository contracts; and the scheduling replacement-writer empty-resolution compatibility guard used by Orders terms rebuilds.

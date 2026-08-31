@@ -68,11 +68,15 @@ function operationIdentity(prefix: string): string {
 
 function displayError(error: unknown): string {
   if (error instanceof LineNotificationRulesMutationError) {
-    return `${error.code}：${error.message}`;
+    if (error.status === 401) return '登入已失效，請重新登入後再試。';
+    if (error.status === 403) return '目前帳號沒有維護 LINE 通知規則的權限。';
+    if (error.status === 404) return '找不到這筆通知規則，請重新載入最新規則。';
+    if (error.status === 409) return '通知規則已變更，請重新載入並再次檢查影響。';
+    if (error.status === 422) return '通知規則內容不完整，請檢查欄位後再試。';
+    if (error.retryable) return 'LINE 通知規則服務暫時無法使用，請重新載入最新規則後再試。';
+    return 'LINE 通知規則操作未完成，請重新載入最新規則後再試。';
   }
-  return error instanceof Error
-    ? error.message
-    : 'LINE 通知規則操作失敗，請重新整理後再試。';
+  return 'LINE 通知規則操作未完成，請重新載入最新規則後再試。';
 }
 
 function nextRuleId(definition: LineNotificationRulesMutationDefinition): string {

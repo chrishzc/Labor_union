@@ -305,6 +305,28 @@ waiting deposit、全案條款重建、局部請假、順延、代班、buffer �
 Calendar Query 必須驗證 completed assignment 在缺少 assignment-owned daily schedule 時仍回傳
 唯讀 `historical_assignment`，且不覆蓋同日的 current ownership／lock／buffer，也不顯示為可接案。
 
+### Current anomaly owner decision matrix（2026-08-31）
+
+下表只組合本 Domain 已有的 Assignment Plan 與 Leave／Substitution Q／P／A；不新增
+generic remediation 或 Anomalies writer。共同 owner readback 必須綁定 current Scheduling aggregate
+version／effective generation，回報 `authoritative_complete`；owner Apply 在既有 outer UoW 內與
+receipt／outbox 一併寫入 bounded `anomaly.recheck` intent。readback 不完整、stale 或 unavailable
+一律 fail closed。
+
+| Code／subject | Active predicate（current roots） | 唯一合法 owner operation | Completion predicate | Closed unresolved reasons |
+|---|---|---|---|---|
+| `SCHEDULE-002` / `assignment_id` | current replacement／substitution lineage 不完整：既有 assignment 已失效，但 exact successor、受影響每日 outcome、official ownership 或必要 Payroll／Finance impact 仍有缺口 | 未有任何正式服務日時使用 `Preview／ApplyAssignmentPlan`建立新 effective generation；已有正式服務日時使用 `Preview／ApplyLeaveSubstitutionBatch`只重建受影響 family | exact old/new lineage 存在，每日 outcome、official ownership、全案 coverage／hours 與必要 Payroll／Finance impacts 全部完整 | `replacement_successor_missing`, `daily_outcome_incomplete`, `service_ownership_incomplete`, `payroll_impact_incomplete`, `finance_impact_incomplete`, `owner_readback_incomplete` |
+| `SCHEDULE-003` / sorted `assignment_id_a + assignment_id_b` | 兩個 current effective assignments 使同一 staff 的完整占用區間重疊 | 人員在 `Preview／ApplyAssignmentPlan` 明確選定受修正案件與 candidate；Apply 仍以 cancel-old／create-new 重建該案 current generation，並 fresh 驗證另一 assignment 的占用 | 該 canonical pair 在 current effective generations 不再重疊，兩案 coverage／ownership／hours 仍合法 | `correction_target_not_selected`, `staff_occupancy_conflict`, `coverage_incomplete`, `owner_readback_incomplete` |
+| `SCHEDULE-006` / `case_no + generation` | current effective generation 的 official service dates、daily ownership、coverage、hours 或 staff occupancy 任一違反本規格，或有效服務量不等於 Orders 契約服務量 | `Preview／ApplyAssignmentPlan` 以 current Orders terms 與 Scheduling roots 重建完整 generation | 同一 current snapshot 下 official dates、ownership、coverage、hours、occupancy 與唯一 effective generation 全部合法 | `official_service_dates_invalid`, `service_ownership_conflict`, `coverage_incomplete`, `hours_mismatch`, `staff_occupancy_conflict`, `generation_conflict`, `owner_readback_incomplete` |
+
+```yaml
+convergence:
+  status: READY
+  requirement_ids: [SCH-ANM-002, SCH-ANM-003, SCH-ANM-006, SCH-ANM-READBACK]
+  acceptance_ids: [SCH-ANM-ACTIVE, SCH-ANM-OWNER-QPA, SCH-ANM-TERMINAL, SCH-ANM-FAIL-CLOSED]
+  blockers: []
+```
+
 ## 9. Typed Commands／Ports／Errors
 
 Commands：

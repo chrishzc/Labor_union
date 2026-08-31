@@ -64,10 +64,10 @@ class MySqlWeeklyOperationsReportQueryAdapter:
             for row in rows
         ]
 
-    def list_subsidy_facts(self, application_year: int, cutoff_date: date) -> SubsidyFacts:
-        report = reconciliation_register_query.build_year_to_date_subsidy_rows(
-            application_year,
-            cutoff_date,
+    def list_subsidy_facts(self, week_start: date, week_end: date) -> SubsidyFacts:
+        report = reconciliation_register_query.build_completion_period_subsidy_rows(
+            week_start,
+            week_end,
             get_connection,
         )
         return SubsidyFacts(

@@ -12,7 +12,7 @@ from typing import Protocol
 
 
 SCHEMA_VERSION = "weekly-operations-report.v1"
-SOURCE_REVISION = "weekly_operations_report_query_v1"
+SOURCE_REVISION = "weekly_operations_report_query_v2"
 TIMEZONE = "Asia/Taipei"
 GENERAL_CITIZEN = "一般市民"
 SUBSIDIZED_CITIZEN = "補助市民"
@@ -77,7 +77,7 @@ class WeeklyOperationsReportFacts(Protocol):
 
     def list_service_facts(self, week_start: date, week_end: date) -> list[WeeklyServiceFact]: ...
 
-    def list_subsidy_facts(self, application_year: int, cutoff_date: date) -> SubsidyFacts: ...
+    def list_subsidy_facts(self, week_start: date, week_end: date) -> SubsidyFacts: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,7 +194,7 @@ class WeeklyOperationsReportQuery:
         )
         service_rows = tuple(row for row in service_candidates if row is not None)
         incomplete_service_count = len(service_candidates) - len(service_rows)
-        subsidies = self._facts.list_subsidy_facts(week_start.year, week_end)
+        subsidies = self._facts.list_subsidy_facts(week_start, week_end)
         subsidy_partitions = (
             self._subsidy_partition("general", subsidies.general),
             self._subsidy_partition("subsidized", subsidies.subsidized),

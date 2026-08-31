@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Path
-from typing import Literal, Optional
+from fastapi import APIRouter, Depends, Header, HTTPException, Path
+from typing import Annotated, Literal, Optional
 from datetime import date
 from pydantic import BaseModel, Field, field_validator, model_validator
 from api.dependencies.client_payments import (
     get_client_finance_query_application,
+    get_historical_client_payment_workflow,
 )
 from api.schemas.base import BaseResponse
 from api.schemas.client_payments import (
@@ -13,6 +14,14 @@ from api.schemas.client_payments import (
     ClientFinanceObligationView,
     ClientFinancePageView,
     ClientFinanceCaseSummaryView,
+    HistoricalClientObligationView,
+    HistoricalClientPaymentApplyBody,
+    HistoricalClientPaymentIntentBody,
+    HistoricalClientPaymentPreviewView,
+    HistoricalClientPaymentProjectionView,
+    HistoricalClientPaymentQueryView,
+    HistoricalClientPaymentReadbackView,
+    HistoricalClientPaymentReceiptView,
 )
 from api.dependencies.admin_auth import require_admin, require_system_admin
 from subsystems.access.authentication_session import AdminPrincipal
@@ -22,8 +31,28 @@ from subsystems.client_finance.client_payments_query import (
 from infrastructure.mysql.client_payments_query_repository import (
     ClientFinanceCaseNotFound,
 )
+from domains.client_finance.historical_payment import (
+    HistoricalClientConfirmationKind,
+    HistoricalClientDirection,
+    HistoricalClientPaymentIntent,
+    HistoricalClientSourceAvailability,
+)
+from shared_kernel.errors import ErrorCategory
+from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+from subsystems.client_finance.historical_payment_settlement import (
+    ApplyHistoricalClientPayment,
+    HistoricalClientPaymentError,
+    HistoricalClientPaymentWorkflow,
+)
 
 router = APIRouter(prefix="/api/v1/client-payments", tags=["Client Payments 客戶帳務"])
+_CorrelationHeader = Annotated[
+    str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)
+]
+_IdempotencyHeader = Annotated[
+    str, Header(alias="Idempotency-Key", min_length=1, max_length=191)
+]
 
 
 class ClientTransactionCreate(BaseModel):
@@ -164,6 +193,98 @@ def get_client_payment_by_case_no(
         raise HTTPException(status_code=500, detail="client_finance_query_failed") from error
 
 
+@router.get(
+    "/historical-payments/{case_no}",
+    response_model=BaseResponse[HistoricalClientPaymentQueryView],
+)
+def query_historical_client_payment(
+    case_no: str = Path(..., min_length=1, max_length=50),
+    principal: AdminPrincipal = Depends(require_admin),
+    application: HistoricalClientPaymentWorkflow = Depends(
+        get_historical_client_payment_workflow
+    ),
+):
+    del principal
+    return _historical_call(
+        lambda: _historical_client_query_view(application.query(case_no)),
+        "成功取得歷史客戶付款候選",
+        CorrelationId(f"historical-client-query:{case_no}"),
+    )
+
+
+@router.post(
+    "/historical-payments/preview",
+    response_model=BaseResponse[HistoricalClientPaymentPreviewView],
+)
+def preview_historical_client_payment(
+    body: HistoricalClientPaymentIntentBody,
+    principal: AdminPrincipal = Depends(require_admin),
+    application: HistoricalClientPaymentWorkflow = Depends(
+        get_historical_client_payment_workflow
+    ),
+):
+    del principal
+    correlation = CorrelationId(f"historical-client-preview:{body.case_no}")
+    return _historical_call(
+        lambda: _historical_client_preview_view(application.preview(_historical_client_intent(body))),
+        "成功預覽歷史客戶付款確認",
+        correlation,
+    )
+
+
+@router.post(
+    "/historical-payments/apply",
+    response_model=BaseResponse[HistoricalClientPaymentReceiptView],
+)
+def apply_historical_client_payment(
+    body: HistoricalClientPaymentApplyBody,
+    idempotency_key: _IdempotencyHeader = ...,
+    correlation_id: _CorrelationHeader = ...,
+    principal: AdminPrincipal = Depends(require_admin),
+    application: HistoricalClientPaymentWorkflow = Depends(
+        get_historical_client_payment_workflow
+    ),
+):
+    correlation = CorrelationId(correlation_id)
+    return _historical_call(
+        lambda: _historical_client_receipt_view(
+            application.apply(
+                ApplyHistoricalClientPayment(
+                    _historical_client_intent(body),
+                    ExpectedVersion(body.expected_account_version),
+                    body.expected_adoption_receipt_id,
+                    PreviewFingerprint(body.preview_fingerprint),
+                    IdempotencyKey(idempotency_key),
+                    ActorContext(str(principal.username or "").strip()),
+                    body.reason.strip(),
+                    correlation,
+                )
+            )
+        ),
+        "歷史客戶付款確認已提交",
+        correlation,
+    )
+
+
+@router.get(
+    "/historical-payments/{case_no}/readback",
+    response_model=BaseResponse[HistoricalClientPaymentReadbackView],
+)
+def readback_historical_client_payment(
+    case_no: str = Path(..., min_length=1, max_length=50),
+    principal: AdminPrincipal = Depends(require_admin),
+    application: HistoricalClientPaymentWorkflow = Depends(
+        get_historical_client_payment_workflow
+    ),
+):
+    del principal
+    return _historical_call(
+        lambda: _historical_client_readback_view(application.readback(case_no)),
+        "成功重新讀取歷史客戶付款狀態",
+        CorrelationId(f"historical-client-readback:{case_no}"),
+    )
+
+
 @router.post("/due-dates/backfill")
 def backfill_client_payment_due_dates(
     case_no: Optional[str] = None,
@@ -188,3 +309,129 @@ def create_client_transaction(
         status_code=410,
         detail="use_client_finance_preview_apply",
     )
+
+
+def _historical_client_intent(body: HistoricalClientPaymentIntentBody):
+    return HistoricalClientPaymentIntent(
+        body.case_no,
+        HistoricalClientDirection(body.direction),
+        HistoricalClientConfirmationKind(body.confirmation_kind),
+        tuple(body.obligation_identities),
+        body.payment_date,
+        body.payment_date_unknown_reason,
+        HistoricalClientSourceAvailability(body.source_availability),
+        body.evidence_reference,
+    )
+
+
+def _historical_client_obligation_view(item):
+    return HistoricalClientObligationView(
+        obligation_identity=item.identity,
+        case_no=item.case_no,
+        obligation_type=item.obligation_type,
+        direction=item.direction.value,
+        amount_due_ntd=item.amount_due_ntd,
+        projection_version=item.projection_version,
+        status=item.status,
+    )
+
+
+def _historical_client_query_view(facts):
+    return HistoricalClientPaymentQueryView(
+        case_no=facts.case_no,
+        account_version=facts.account_version,
+        adoption_receipt_id=facts.adoption_receipt_id,
+        adopted=facts.adopted,
+        normal_bank_candidate_identities=list(facts.normal_bank_candidate_identities),
+        obligations=[_historical_client_obligation_view(item) for item in facts.obligations],
+    )
+
+
+def _historical_client_preview_view(preview):
+    candidate = preview.candidate
+    return HistoricalClientPaymentPreviewView(
+        case_no=candidate.intent.case_no,
+        account_version=candidate.account_version,
+        adoption_receipt_id=candidate.adoption_receipt_id,
+        obligations=[_historical_client_obligation_view(item) for item in candidate.obligations],
+        amount_snapshot_ntd=candidate.amount_snapshot_ntd,
+        blockers=list(candidate.blockers),
+        can_apply=candidate.can_apply,
+        preview_fingerprint=candidate.fingerprint.value,
+    )
+
+
+def _historical_client_receipt_view(receipt):
+    return HistoricalClientPaymentReceiptView(
+        event_identity=receipt.event_identity,
+        case_no=receipt.case_no,
+        obligation_identities=list(receipt.obligation_identities),
+        amount_snapshot_ntd=receipt.amount_snapshot_ntd,
+        resulting_account_version=receipt.resulting_account_version,
+        preview_fingerprint=receipt.preview_fingerprint.value,
+    )
+
+
+def _historical_client_readback_view(readback):
+    return HistoricalClientPaymentReadbackView(
+        case_no=readback.facts.case_no,
+        account_version=readback.facts.account_version,
+        obligations=[
+            _historical_client_obligation_view(item) for item in readback.facts.obligations
+        ],
+        projections=[
+            HistoricalClientPaymentProjectionView(
+                obligation_identity=item.obligation_identity,
+                amount_snapshot_ntd=item.amount_snapshot_ntd,
+                obligation_projection_version=item.obligation_projection_version,
+            )
+            for item in readback.projections
+        ],
+        owner_terminal=readback.owner_terminal,
+    )
+
+
+def _historical_call(command, message, correlation_id):
+    try:
+        return BaseResponse(data=command(), message=message)
+    except HistoricalClientPaymentError as error:
+        status_code = {
+            ErrorCategory.VALIDATION: 422,
+            ErrorCategory.FORBIDDEN: 403,
+            ErrorCategory.NOT_FOUND: 404,
+            ErrorCategory.DOMAIN_BLOCKED: 409,
+            ErrorCategory.CONFLICT: 409,
+            ErrorCategory.IDEMPOTENCY_MISMATCH: 409,
+            ErrorCategory.UNAVAILABLE: 503,
+            ErrorCategory.INTERNAL: 500,
+        }[error.error.category]
+        raise HTTPException(
+            status_code=status_code,
+            detail={
+                "error": {
+                    "category": error.error.category.value,
+                    "code": error.error.code,
+                    "message": error.error.message,
+                    "correlation_id": error.error.correlation_id.value,
+                    "domain_blockers": list(error.error.domain_blockers),
+                    "retryable": error.error.retryable,
+                    "current_version": (
+                        None
+                        if error.error.current_version is None
+                        else error.error.current_version.value
+                    ),
+                }
+            },
+        ) from error
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "category": "validation",
+                    "code": str(error) or "historical_client_payment_invalid",
+                    "message": "歷史客戶付款請求未通過驗證。",
+                    "correlation_id": correlation_id.value,
+                }
+            },
+        ) from error

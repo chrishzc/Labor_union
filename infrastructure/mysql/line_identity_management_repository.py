@@ -42,21 +42,38 @@ class MySqlLineIdentityManagementRepository:
     def detail(self, line_user_id: LineUserId) -> LineIdentityBindingManagementView:
         with self._connection.cursor() as cursor:
             cursor.execute(_DETAIL_SQL, (line_user_id.value,))
-            row = cursor.fetchone()
-        if not row:
+            rows = tuple(cursor.fetchall() or ())
+            active_rows = tuple(
+                row for row in rows
+                if str(row["binding_status"]) != LineIdentityBindingStatus.REVOKED.value
+            )
+            candidates = active_rows or rows
+            if len(candidates) > 1:
+                cursor.execute(_SELECTED_ROLE_SQL, (line_user_id.value,))
+                selection = cursor.fetchone() or {}
+            else:
+                selection = {}
+        if not rows:
             raise LookupError("line_identity_binding_not_found")
-        return _binding_view(row)
+        if len(candidates) == 1:
+            return _binding_view(candidates[0])
+        selected_role = selection.get("selected_identity_role")
+        if selected_role is None:
+            raise RuntimeError("line_identity_role_selection_required")
+        selected = tuple(
+            row
+            for row in candidates
+            if str(row["subject_type"]) == str(selected_role)
+        )
+        if len(selected) != 1:
+            raise RuntimeError("line_identity_selected_role_stale")
+        return _binding_view(selected[0])
 
     def current_fact(
         self,
         query: LineIdentityCurrentFactQuery,
     ) -> LineIdentityCurrentFactReadback:
-        """Read the canonical root and all owner projections without writing.
-
-        The current schema has one row per ``line_user_id``.  The query therefore
-        deliberately reports a customer+staff dual role as legal while exposing
-        that the single-row root cannot persist both role-scoped bindings.
-        """
+        """Read all role-scoped roots and owner projections without writing."""
 
         with self._connection.cursor() as cursor:
             cursor.execute(_CURRENT_FACT_SQL, (query.line_user_id.value,) * 4)
@@ -236,8 +253,13 @@ def _current_fact_readback(
     rows: tuple[dict[str, Any], ...],
 ) -> LineIdentityCurrentFactReadback:
     roots = tuple(row for row in rows if row.get("source_kind") == "root")
-    root = roots[0] if roots else None
-    root_binding = _fact_binding(root) if root and root.get("subject_type") else None
+    root = roots[0] if len(roots) == 1 else None
+    root_bindings = tuple(
+        binding
+        for binding in (_fact_binding(row) for row in roots)
+        if binding is not None
+    )
+    root_binding = root_bindings[0] if len(root_bindings) == 1 else None
     owner_projections = tuple(
         binding
         for binding in (_fact_binding(row) for row in rows if row.get("source_kind") != "root")
@@ -249,23 +271,24 @@ def _current_fact_readback(
         by_type[projection.subject_type] = by_type.get(projection.subject_type, 0) + 1
     duplicate_type = any(count > 1 for count in by_type.values())
     role_types = set(by_type)
+    root_role_types = {binding.subject_type for binding in root_bindings}
     legal_dual_role = (
         role_types
         == {
             LineBindingSubjectType.CUSTOMER,
             LineBindingSubjectType.STAFF,
         }
+        and root_role_types == role_types
         and not duplicate_type
     )
-    root_key = _fact_key(root_binding)
+    root_keys = {_fact_key(binding) for binding in root_bindings}
     owner_keys = {_fact_key(projection) for projection in owner_projections}
-    projection_mismatch = ({root_key} if root_key is not None else set()) != owner_keys
+    projection_mismatch = root_keys != owner_keys
 
     findings: list[LineIdentityCurrentFactFinding] = []
     manual_actions: list[str] = []
     if legal_dual_role:
         findings.append(LineIdentityCurrentFactFinding.LEGAL_CUSTOMER_STAFF_DUAL_ROLE)
-        manual_actions.append("schema_release_for_role_scoped_bindings")
     if duplicate_type:
         findings.append(LineIdentityCurrentFactFinding.SAME_TYPE_MULTIPLE_ACTIVE_BINDING)
         manual_actions.append("review_same_type_multiple_active_bindings")
@@ -275,10 +298,8 @@ def _current_fact_readback(
     if not findings:
         findings.append(LineIdentityCurrentFactFinding.CONSISTENT)
 
-    if root is None:
+    if not roots:
         readback_status = LineIdentityCurrentFactReadbackStatus.ROOT_MISSING
-    elif legal_dual_role:
-        readback_status = LineIdentityCurrentFactReadbackStatus.ROOT_PERSISTENCE_LIMITED
     elif duplicate_type:
         readback_status = LineIdentityCurrentFactReadbackStatus.PROJECTION_MULTIPLE
     elif not owner_projections:
@@ -302,7 +323,8 @@ def _current_fact_readback(
         findings=tuple(findings),
         readback_status=readback_status,
         manual_actions=tuple(dict.fromkeys(manual_actions)),
-        dual_role_persistence_supported=False,
+        root_bindings=root_bindings,
+        dual_role_persistence_supported=True,
     )
 
 
@@ -333,7 +355,7 @@ _SUBJECT_NAME_SQL = (
 _CURRENT_FACT_SQL = (
     "SELECT 'root' AS source_kind,b.line_user_id,b.binding_status,"
     "b.aggregate_version,b.subject_type,b.subject_reference,NULL AS subject_name,"
-    "NULL AS owner_line_user_id FROM line_identity_bindings b WHERE b.line_user_id=%s "
+    "NULL AS owner_line_user_id FROM line_identity_role_bindings b WHERE b.line_user_id=%s "
     "UNION ALL "
     "SELECT 'customer' AS source_kind,c.line_user_id,NULL AS binding_status,"
     "NULL AS aggregate_version,'customer' AS subject_type,CAST(c.id AS CHAR) "
@@ -356,9 +378,10 @@ _BASE_SELECT = (
     "b.subject_reference,b.updated_at_utc,"
     + _SUBJECT_NAME_SQL
     + " AS subject_name,r.id AS revocation_request_id,r.request_status,"
-    "(SELECT MAX(e.occurred_at_utc) FROM line_identity_binding_events e "
-    "WHERE e.line_user_id=b.line_user_id AND e.action='revoked') AS revoked_at_utc "
-    "FROM line_identity_bindings b "
+    "(SELECT MAX(e.occurred_at_utc) FROM line_identity_role_binding_events e "
+    "WHERE e.line_user_id=b.line_user_id AND e.subject_type=b.subject_type "
+    "AND e.action='revoked') AS revoked_at_utc "
+    "FROM line_identity_role_bindings b "
     "LEFT JOIN clients c ON b.subject_type='customer' AND c.id=CAST(b.subject_reference AS UNSIGNED) "
     "LEFT JOIN staff s ON b.subject_type='staff' AND s.id=CAST(b.subject_reference AS UNSIGNED) "
     "LEFT JOIN admin_users a ON b.subject_type='admin' AND a.id=CAST(b.subject_reference AS UNSIGNED) "
@@ -367,6 +390,9 @@ _BASE_SELECT = (
 )
 _LIST_SQL = _BASE_SELECT + "WHERE {where} ORDER BY b.updated_at_utc DESC LIMIT %s OFFSET %s"
 _DETAIL_SQL = _BASE_SELECT + "WHERE b.line_user_id=%s"
+_SELECTED_ROLE_SQL = (
+    "SELECT selected_identity_role FROM line_platform_users WHERE line_user_id=%s"
+)
 _COUNT_SQL = "SELECT COUNT(*) total FROM (" + _BASE_SELECT + "WHERE {where}) counted"
 _DEFAULT_MENU_SQL = (
     "SELECT id,provider_menu_id AS line_rich_menu_id "

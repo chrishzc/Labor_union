@@ -19,6 +19,7 @@
   - `api/schemas/matching_coordination.py`
   - `ui_react/src/api/matching_coordination/matching_coordination_client.ts`
   - `ui_react/src/components/MatchingCoordinationWorkbench.tsx`
+  - `ui_react/src/pages/SchedulingPage.tsx`
 
 ## Dependencies
 - outbound: `orders/orders` — case/lifecycle boundary.
@@ -30,6 +31,8 @@
 
 ## Verification
 - test_root: `tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/`
+- layout_status: `custom_current`
+- test_root: `ui_react/src/tests/matching_coordination_workbench.test.tsx`
 - higher_boundary:
   - `tests/integration/`
 - layout_gap:
@@ -40,7 +43,8 @@
 - Domain ownership — `architecture_declared` — Scheduling specs.
 - Source/API/UI paths — `source_observed` — current repository search.
 - Module-owned contract/domain/workflow/facts/API-route tests — `source_observed` — architecture-aligned test root.
+- Scheduling React entry contract — `source_observed` — same architecture-aligned module test root.
 - Repository test exception — `source_observed` — current flat path with relocation-sensitive schema lookup.
 
 ## Change triggers
-Reconcile when coordination owner, package/event contract, API route/schema, persistence adapter or focused test root moves.
+Reconcile when coordination owner, package/event contract, presentation hierarchy, API route/schema, persistence adapter or focused test root moves.

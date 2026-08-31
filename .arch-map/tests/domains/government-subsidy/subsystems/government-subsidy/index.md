@@ -4,6 +4,16 @@ architecture: ../../../../../domains/government-subsidy/subsystems/government-su
 test_root: tests/domains/government-subsidy/subsystems/government-subsidy/
 integration_root: tests/domains/government-subsidy/subsystems/government-subsidy/integration/
 fixtures_root: tests/fixtures/
+modules:
+  current-anomaly-facts:
+    layout_status: canonical
+    test_root: tests/domains/government-subsidy/subsystems/government-subsidy/modules/current-anomaly-facts/
+  overpayment-recovery-presentation:
+    layout_status: custom_current
+    test_root: ui_react/src/tests/government_overpayment_recovery_workbench.test.tsx
+  reconciliation-register-query:
+    layout_status: canonical
+    test_root: tests/domains/government-subsidy/subsystems/government-subsidy/modules/reconciliation-register-query/
 
 # Routing notes
 Focused Government Subsidy owner domain/workflow/query/repository/API, owner-specific schema, payer-master, staff-payout funding and repository outbox-payload contracts live here. Anomaly projections sourced from subsidy roots stay under the Anomalies verification boundary; UI/legacy adapters, cross-boundary durable-job acceptance and disposable-MySQL tests remain at their higher owner boundary.

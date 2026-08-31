@@ -9,12 +9,17 @@
 - `payroll` — assignment-owned 薪資義務與調整；path: `domains/payroll/index.md`
 - `client-finance` — 客戶應收、收款、退款／沖正、調整與核銷；path: `domains/client-finance/index.md`
 - `staff-payables` — 月嫂應付、出款與退匯／沖正；path: `domains/staff-payables/index.md`
+- `staff` — 月嫂 lifecycle 根事實與 owner workflows；path: `domains/staff/index.md`
 - `finance-import` — 銀行來源事實、分類與 owner delegation；path: `domains/finance-import/index.md`
 - `government-subsidy` — 補助申請、核准、撥款、allocation 與 reversal；path: `domains/government-subsidy/index.md`
 - `anomalies` — 異常 projection、告警與 owner-specific remediation routing；path: `domains/anomalies/index.md`
 - `case-import` — BeClass／HCM intake、review 與 formal case bootstrap；path: `domains/case-import/index.md`
 - `contract-signing` — 核准契約文件版本、簽回 evidence、external-signing session 與 final signed document lineage；path: `domains/contract-signing/index.md`
 - `external-integration` — Access 與 LINE transport／identity／delivery boundaries；path: `domains/external-integration/index.md`
+
+## Global modules
+- `react-application-shell` — React navigation、session/auth composition與closed ErrorBoundary recovery；path: `domains/global/subsystems/application-shell/modules/react-application-shell.md`
+- `weekly-operations-report` — 跨Domain唯讀營運週報、週界協調與三分頁呈現；path: `domains/global/subsystems/reporting/modules/weekly-operations-report.md`
 
 ## Cross-domain relationships
 - `scheduling -> orders` — Scheduling 以既有 case/order lifecycle 與服務日期邊界作為協調前提。
@@ -28,6 +33,18 @@
 - `all mutation -> Global` — `shared_kernel/`、outer UoW、receipt/outbox/durable job 與 migration governance 提供跨域不變量。
 
 ## Verification routing
+layout_status: `custom_current`
+
+Current higher-boundary living schema／release baselines remain at their path-sensitive flat roots:
+
+- integration_root: `tests/test_contract_external_signing_schema_contract.py`
+- integration_root: `tests/test_historical_baseline_projector_schema_contract.py`
+- integration_root: `tests/test_historical_baseline_projector_v2_schema_contract.py`
+- integration_root: `tests/test_historical_order_adoption_noop_constraint_schema.py`
+- integration_root: `tests/test_service_before_replacement_schema_contract.py`
+- integration_root: `tests/test_task97_additive_release_chain.py`
+- integration_root: `tests/test_line_identity_management_first_release.py`
+
 Current canonical owner roots are:
 
 - Orders — `tests/domains/orders/subsystems/orders/`
@@ -46,4 +63,4 @@ Current canonical owner roots are:
 `tests/` flat root不是 owner-local 測試的預設目的地。只有 application composition/OpenAPI、真正 cross-domain、release/schema/migration、disposable-MySQL/engine、Task97/governance、或有明確 compatibility/path consumer 的 higher-boundary coverage 才應留在 flat/higher roots。詳細路由見 `tests/index.md`。
 
 ## Navigation notes
-本地圖是 current architecture routing evidence，不是產品需求 Authority、architecture compliance/completion claim 或 source/test 的替代品。正式語意先讀 `AGENTS.md`、`document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` 與 owning spec，再用此圖縮小 source/test scope。`api/`、`ui_react/`、legacy `ui/`、`line/`、`infrastructure/`、`scripts/`、`db/` 是 adapters／runtime／release locations，不因資料夾存在而自動成為 Domain。`contract_integration`、`customer_service`、`knowledge_retrieval`、`staff`、`bootstrap`、`controlled_files`、`reporting`、`jobs` 等 current source 邊界尚未在第一版完整建模；需要時依 current spec/source scoped 擴張。不得以此地圖復活 legacy `system_map*`／`scripts_map.md` gate。
+本地圖是 current architecture routing evidence，不是產品需求 Authority、architecture compliance/completion claim 或 source/test 的替代品。正式語意先讀 `AGENTS.md`、`document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` 與 owning spec，再用此圖縮小 source/test scope。`api/`、`ui_react/`、legacy `ui/`、`line/`、`infrastructure/`、`scripts/`、`db/` 是 adapters／runtime／release locations，不因資料夾存在而自動成為 Domain。`contract_integration`、`customer_service`、`knowledge_retrieval`、`bootstrap`、`controlled_files`、`reporting`、`jobs` 等 current source 邊界尚未在第一版完整建模；需要時依 current spec/source scoped 擴張。不得以此地圖復活 legacy `system_map*`／`scripts_map.md` gate。

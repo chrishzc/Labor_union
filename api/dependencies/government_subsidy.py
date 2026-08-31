@@ -108,11 +108,15 @@ def build_government_subsidy_application(connection):
     from infrastructure.mysql.government_subsidy_repository import (
         MySqlGovernmentSubsidyRepository,
     )
+    from infrastructure.mysql.government_subsidy_anomaly_recheck_sink import (
+        MySqlGovernmentSubsidyAnomalyRecheckSink,
+    )
 
     repository = MySqlGovernmentSubsidyRepository(connection)
     ledger_workflow = GovernmentSubsidyLedgerWorkflow(
         repository,
         lambda: MySqlUnitOfWork(connection),
+        MySqlGovernmentSubsidyAnomalyRecheckSink(connection),
     )
     claim_workflow = GovernmentSubsidyClaimWorkflow(
         repository,
@@ -122,7 +126,11 @@ def build_government_subsidy_application(connection):
         repository,
         ledger_workflow,
         claim_workflow,
-        GovernmentSubsidyOverpaymentWorkflow(repository, lambda: MySqlUnitOfWork(connection)),
+        GovernmentSubsidyOverpaymentWorkflow(
+            repository,
+            lambda: MySqlUnitOfWork(connection),
+            MySqlGovernmentSubsidyAnomalyRecheckSink(connection),
+        ),
         GovernmentSubsidyOverpaymentQueryWorkflow(repository),
     )
 

@@ -357,7 +357,7 @@ Public identity 固定為：
 | `SCHEDULE-005` | retired | retire | 偏好不是 hard anomaly；不得再產生 | 禁止重建 |
 | `LINE-001` | active | owner work item | 只有 pending workflow 需要通知且 Client 未綁定時顯示 binding task | 不需要 |
 | `LINE-005` | active | owner work item | 只有 pending workflow 需要通知且 Staff 未綁定時顯示 binding task | 不需要 |
-| `LINE-006` | active | current issue | 只代表 terminal delivery／configuration failure；成功或設定修正後消失 | 安全 retry 可自動 |
+| `LINE-006` | active | current issue | currently-applicable failure 尚無 exact manual-replay successor，或 successor 未取得 validated LINE Delivery terminal success 時維持 active；設定修正只解除 replay blocker，不單獨使 issue 消失 | 只沿用既有 manual replay |
 | `LINE-002` | work_item | owner work item | LINE 等待回覆 task；回覆或 owner 結束等待後移除 | SLA 未裁決前不升級 |
 | `LINE-004` | active | current issue | 同 subject type 多重有效 binding 或 projection 矛盾；修正後消失；client＋staff 雙角色合法 | 不先做 |
 
@@ -370,20 +370,20 @@ symbol 或舊 test 自動補成正式契約。
 
 | Code | Owner／subject identity | Predicate／completion | Current contract evidence | Readiness |
 |---|---|---|---|---|
-| `SCHEDULE-006` | Scheduling；`case_no + generation` | official service dates／coverage 違反 owner oracle；修正後 clear | 只有 Preview candidate；Apply、receipt、readback 尚未在 owner spec 完整綁定 | `SPEC_GAP` |
+| `SCHEDULE-006` | Scheduling；`case_no + generation` | official service dates／coverage 違反 owner oracle；修正後 clear | typed zero-write coverage readback、既有 owner Apply 與 same-UoW bounded recheck 已完成 | `READY_REPOSITORY_LOCAL` |
 | `PAYOUT-002` | Staff Payables；`obligation_identity + source_event_identity` | 到期後義務變動且差額未合法處置；owner 一致後 clear | live 僅 Query-style action；差額處置選項、Apply 與 terminal receipt 不完整 | `SPEC_GAP` |
-| `GOVSUB-001` | Government Subsidy；`bank_fact_identity` | 無唯一合法 batch；accepted batch mapping 成立後 clear | 有 Preview candidate；Apply／readback 綁定尚未完整 | `SPEC_GAP` |
-| `GOVSUB-002` | Government Subsidy；`bank_fact_identity + batch_id` | allocation 不唯一或不守恆；item allocation 守恆後 clear | 有 Preview candidate；Apply／receipt／negative outcomes 尚未完整 | `SPEC_GAP` |
+| `GOVSUB-001` | Government Subsidy；`bank_fact_identity` | 無唯一合法 batch；accepted batch mapping 成立後 clear | typed zero-write batch readback、既有 receipt／allocation Apply 與 same-UoW bounded recheck 已完成 | `READY_REPOSITORY_LOCAL` |
+| `GOVSUB-002` | Government Subsidy；`bank_fact_identity + batch_id` | allocation 不唯一或不守恆；item allocation 守恆後 clear | typed zero-write allocation readback、既有 manual-allocation Apply／receipt、closed negatives 與 same-UoW bounded recheck 已完成 | `READY_REPOSITORY_LOCAL` |
 | `GOVSUB-003` | Government Subsidy；`batch_id + integrity_revision` | batch／allocation／ledger integrity 矛盾；fresh integrity clear | live 僅 Query-style action；manual repair 與可選 deterministic rebuild 契約尚未完整 | `SPEC_GAP` |
-| `GOVSUB-004` | Government Subsidy；`reversal_bank_fact_identity + source_receipt_id` | reversal target／amount 不合法；validated linkage 成立後 clear | 有 Preview candidate；Apply／receipt／readback 尚未完整 | `SPEC_GAP` |
+| `GOVSUB-004` | Government Subsidy；`reversal_bank_fact_identity + source_receipt_id` | reversal target／amount 不合法；validated linkage 成立後 clear | typed zero-write reversal readback、既有 reversal Apply／receipt 與 same-UoW bounded recheck 已完成 | `READY_REPOSITORY_LOCAL` |
 | `GOVSUB-005` | Government Subsidy；`assignment_id + batch_id + claim_item_id` | frozen claim 與正式服務事實 drift；一致或合法 revision 後 clear | live 僅 Query-style action；legal revision command 與禁止結果尚未完整 | `SPEC_GAP` |
 | `GOVSUB-007` | Government Subsidy；`payable_identity` | 政府退款實際超額；合法 payable／allocation 後 clear | 明確禁止自動，但 owner-specific 人工 Q／P／A 尚未定義 | `SPEC_GAP` |
-| `IMPORT-003` | Case Import；`entity_kind + review_item_id` | Client BeClass 已存在但無 HCM；validated accepted mapping 成立後 clear | 不得任意選 candidate；evidence-verification Q／P／A 尚未完整 | `SPEC_GAP` |
-| `BECLASS-001` | Case Import／Orders；`case_no` | HCM 已存在但無唯一一致 Client BeClass；validated accepted mapping 成立後 clear | 不得任意選 candidate；evidence-verification Q／P／A 尚未完整 | `SPEC_GAP` |
+| `IMPORT-003` | Case Import；`entity_kind + review_item_id` | Client BeClass 已存在但無 HCM；validated accepted mapping 成立後 clear | typed zero-write pairing readback、synthetic counterpart及same-source accepted receipt已完成；different-source accepted lineage仍未獲授權 | `PARTIAL_REPOSITORY_LOCAL / BOUNDARY_REQUIRED_CASE_PAIRING_LINEAGE` |
+| `BECLASS-001` | Case Import／Orders；`case_no` | HCM 已存在但無唯一一致 Client BeClass；validated accepted mapping 成立後 clear | typed zero-write pairing readback、exact `bound_case_no`及same-source accepted receipt已完成；different-source accepted lineage仍未獲授權 | `PARTIAL_REPOSITORY_LOCAL / BOUNDARY_REQUIRED_CASE_PAIRING_LINEAGE` |
 | `IMPORT-006` | Finance Import；`batch_id` | batch integrity 矛盾；owner readback 完整一致後 clear | 舊 `RetryAnomalyProjector` 不是 remediation；owner repair／deterministic rebuild contract 尚未完整 | `SPEC_GAP` |
-| `SCHEDULE-002` | Scheduling；`assignment_id` | replacement／substitution lineage 或必要 split 不完整；owner lineage complete | owner repair Q／P／A 尚未完整 | `SPEC_GAP` |
-| `SCHEDULE-003` | Scheduling；canonical sorted `assignment_id_a + assignment_id_b` | effective assignment／official dates 實際 overlap；無 overlap 後 clear | owner reschedule／correction Q／P／A 尚未完整 | `SPEC_GAP` |
-| `LINE-006` | LINE Delivery；`case_no + notification_reason` | terminal delivery／configuration failure；success 或設定修正後 clear | durable retry 能力需重驗；manual retry／configuration action contract 尚未完整 | `SPEC_GAP` |
+| `SCHEDULE-002` | Scheduling；`assignment_id` | replacement／substitution lineage 或必要 split 不完整；owner lineage complete | typed zero-write replacement readback、既有 Assignment／Leave Apply 與 same-UoW bounded recheck 已完成 | `READY_REPOSITORY_LOCAL` |
+| `SCHEDULE-003` | Scheduling；canonical sorted `assignment_id_a + assignment_id_b` | effective assignment／official dates 實際 overlap；無 overlap 後 clear | typed zero-write overlap readback、既有 Assignment／Leave correction Apply 與 same-UoW bounded recheck 已完成 | `READY_REPOSITORY_LOCAL` |
+| `LINE-006` | LINE Notification／Delivery／Integration；`case_no + notification_reason` | authoritative complete current source set 中，每筆 currently-applicable failed source 都有 exact manual-replay successor，且 successor 綁定 fresh recipient／configuration validation 並取得 Delivery terminal success 後 clear；incomplete／unavailable／ambiguous 均 fail closed | typed zero-write owner readback，exact immutable lineage，same-UoW bounded recheck 已 repository-local 完成 | `READY_REPOSITORY_LOCAL` |
 | `LINE-004` | LINE Identity；`subject_type + line_user_id` | 同 subject type 多重 active binding 或 root／projection 矛盾；identity integrity clear | 雙角色合法；owner identity correction Q／P／A 尚未完整 | `SPEC_GAP` |
 
 ### 5.2 25-item owner replacement map
@@ -522,6 +522,14 @@ Acceptance：
 
 Acceptance：新 LIFF／Web input 格式錯誤在 intake 422／review result 處結束；歷史錯誤可人工處理；HCM／BeClass 無唯一配對才進 current issue；配對成功後 row 被刪除。
 
+**Current bounded package `ANM-SLIM-03A-PAIRING`**：`PACKAGE_REUSED`。只納入
+`CASE-ANM-BECLASS-001`、`CASE-ANM-IMPORT-003`、`CASE-ANM-PAIRING-READBACK`；第1、3～5項
+不屬本包。重用 Case Import 既有 intake／Preview／Apply／accepted-mapping receipt，補齊
+zero-write typed current-fact Query、owner snapshot／complete flag、same-UoW recheck intent 與 Anomalies typed
+consumer。驗收直接覆蓋 missing／ambiguous／conflict 保持 active、exact accepted mapping 刪除、
+stale／incomplete 零 delete，replay 不重複 mutation。禁止新 schema／public API／generic linker／
+Anomalies direct SQL／模糊比對。
+
 ### ANM-SLIM-03B：Orders／Scheduling lane
 
 **Owner**：Orders／Scheduling／Document Delivery
@@ -538,9 +546,16 @@ Acceptance：新 LIFF／Web input 格式錯誤在 intake 422／review result 處
 
 Acceptance：正常等待／正常 replacement／偏好不產生 issue；真 overlap、lineage 缺漏、coverage conflict 產生 issue；修正後刪除。
 
+**Current bounded package `ANM-SLIM-03B-SCHEDULING-CURRENT-ISSUES`**：`PACKAGE_REUSED`。只納入
+`SCH-ANM-002/003/006`與`SCH-ANM-READBACK`；第1～2項不屬本包。重用既有 Assignment
+Plan 與 Leave／Substitution Q／P／A，補齊三碼 typed current-fact Query、owner snapshot／complete
+flag、same-UoW recheck intent 與 Anomalies typed consumers。驗收直接覆蓋合法 replacement 不出現、
+lineage／actual overlap／coverage 各自出現、既有 owner Apply 後刪除，以及 stale／incomplete／
+conflict 零 delete。禁止新 schema／public API／跨案 generic correction／Anomalies root writer。
+
 ### ANM-SLIM-03C：LINE lane
 
-**Owner**：LINE Identity／Delivery
+**Owner**：LINE Identity／Notification／Delivery／Integration
 **Dependencies**：ANM-SLIM-01
 **Write set**：LINE owner queues、identity/delivery predicates、tests
 
@@ -549,10 +564,10 @@ Acceptance：正常等待／正常 replacement／偏好不產生 issue；真 ove
 1. `LINE-001`、`LINE-005` 改為只有 pending owner workflow 真正需要通知時才出現的 binding work items。
 2. `LINE-002` 留在 LINE task Query；無 SLA 前不得升級 anomaly。
 3. `LINE-004` 只檢查同 subject type 多重 active binding、root/projection mismatch、replacement/revocation 未完成；client＋staff 雙角色為合法。
-4. `LINE-006` 只代表 terminal delivery／configuration failure；queued、running、retry_pending 不產生 issue。
-5. 若現有 durable delivery retry 已滿足 idempotency／recipient／timeout 契約，接通自動 retry；否則保留 manual retry 並標 `blocked_capability`。
+4. `LINE-006` 只由 authoritative complete owner readback 判定；currently-applicable failed source 尚無 exact replay successor，或 replay 仍為 pending／processing／retry_pending／failed／outcome-unknown／lineage-ambiguous 時維持 active。
+5. 只沿用 `manual-replay:{source_event_id}:{idempotency_key}` immutable successor。設定或 recipient correction 只解除 blocker；replay 建立／送出前必須 fresh 驗證 exact recipient、current binding、required configuration 與 source applicability，並取得 Delivery terminal success 才可完成。
 
-Acceptance：合法雙角色、一般等待、retry pending 都不出現在異常頁；terminal failure 出現且成功 retry／修正設定後刪除。
+Acceptance：合法雙角色與沒有 currently-applicable failed source 時不出現；applicable failure 及其未完成 replay 維持 current issue；只有 authoritative complete readback 證明所有 required successor 均已 validated 且 Delivery terminal success 才刪除。
 
 ### ANM-SLIM-03D：Finance／Payables lane
 
@@ -584,6 +599,38 @@ Acceptance：一般到期、remaining、追收、退匯 review 都只在 owner q
 4. `GOVSUB-003` 只有 deterministic、完整且可 rollback 的 rebuild 才可自動化；`GOVSUB-007` 明確禁止自動 disposition。
 
 Acceptance：所有金額保持 owner 守恆；ambiguous／invalid 不自動猜；合法 allocation／reversal／revision 後 current issue 刪除。
+
+**Current bounded package `ANM-SLIM-03E-GOVSUB-ALLOC-REVERSAL`**：`PACKAGE_REUSED`。只納入
+`GOV-ANM-001/002/004`與`GOV-ANM-READBACK`；`GOVSUB-003/005/007`不屬本包且維持
+`AUTHORITY_REQUIRED`。重用既有 receipt／manual-allocation／reversal Q／P／A／receipt／UoW，補齊
+三碼 typed current-fact Query、owner snapshot／complete flag、same-UoW recheck intent 與 Anomalies typed
+consumers。驗收直接覆蓋 ambiguous／partial／invalid／over-limit 保持 active、exact allocation／
+reversal 刪除、金額守恆、stale／incomplete 零 delete與 exact replay。禁止新 schema／public API／
+generic finance mutation／Anomalies 重算金額或直寫 roots。
+
+#### Current bounded package coverage（2026-08-31）
+
+| Requirement／Acceptance | Source | Package step | Direct oracle |
+|---|---|---|---|
+| `SCH-ANM-002/003/006`、`SCH-ANM-ACTIVE` | `02` current anomaly matrix | Scheduling typed readbacks／consumers | 合法 negative 不產生；三種 exact root failure 產生 canonical subject |
+| `SCH-ANM-OWNER-QPA/TERMINAL/FAIL-CLOSED` | `02` 既有 Assignment／Leave Q／P／A | owner recheck wiring | Apply 同 UoW 寫 intent；fresh false+complete 刪除；stale／incomplete 零 delete |
+| `CASE-ANM-BECLASS-001/IMPORT-003`、`CASE-ANM-ACTIVE` | `17` pairing matrix | Case Import typed readbacks／consumers | exact missing 出現；ambiguous／conflict 保持；不用姓名／電話模糊比對 |
+| `CASE-ANM-OWNER-QPA/TERMINAL/FAIL-CLOSED` | `17` intake／Case Import Q／P／A | accepted-mapping recheck wiring | accepted mapping receipt 後 fresh delete；replay 幂等；incomplete 零 delete |
+| `GOV-ANM-001/002/004`、`GOV-ANM-ACTIVE` | `14` current anomaly matrix | Subsidy typed readbacks／consumers | batch／item／reversal 各自 exact positive與negative predicate |
+| `GOV-ANM-OWNER-QPA/AMOUNT-CONSERVATION/TERMINAL/FAIL-CLOSED` | `14` receipt／manual allocation／reversal Q／P／A | owner recheck wiring | receipt amount 與 allocations守恆；valid Apply 後 delete；over-limit／stale／incomplete 零 delete |
+
+三個 bounded packages 的共同 effect ceiling 是 repository-local source、canonical tests 與既有 Authority 內
+的本機驗收。任一步需要 schema／migration、public API／entry、新 owner root／SSOT／UoW、
+external effect 或超出對應 owner package write set，立即 `BOUNDARY_REQUIRED`。
+
+**Repository-local execution status（2026-08-31）**：三包的owner-typed readback、consumer、bounded
+recheck composition與canonical tests已完成，合併affected suite `109 passed`；formal baseline與diff check
+passed。Case Import仍有一個不可外推的terminal gap：current roots可證明synthetic counterpart與same-source
+accepted receipt，但無法從privacy-safe original identity-conflict review精確連到「不同source identity」的
+後來accepted source。建立該immutable lineage會修改owner persistence或public Apply contract，因此標記
+`BOUNDARY_REQUIRED_CASE_PAIRING_LINEAGE`，不以review resolved、姓名／電話或tracking state替代。
+MySQL engine因current host無configured `lu_test_*`為`not_run`；Arch Map scoped新增leaf無錯，全域validator
+仍有既有duplicate-root inventory，不在本包整理。
 
 ### ANM-SLIM-04：API 與 React cutover
 

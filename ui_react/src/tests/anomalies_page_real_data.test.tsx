@@ -295,7 +295,8 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     expect(navLink).toBeInTheDocument();
     expect(navLink).toHaveAttribute('href', '#scheduling');
     expect(screen.getByText(/目標日期: 2026-08-20/)).toBeInTheDocument();
-    expect(screen.getByText(/月嫂 ID: #14/)).toBeInTheDocument();
+    expect(screen.getByText(/服務人員: 已指定/)).toBeInTheDocument();
+    expect(screen.queryByText(/月嫂 ID: #14/)).not.toBeInTheDocument();
   });
 
   it('opens Drawer for anomaly without calendar navigation and renders gap fallback', async () => {

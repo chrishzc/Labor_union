@@ -110,7 +110,7 @@ describe('Anomalies Finance Import correction flow', () => {
     expect(document.querySelector('[data-control-id="anomalies.finance-correction.classification"]')).toHaveAttribute('aria-describedby', 'anomalies-correction-classification-reason');
     fireEvent.click(screen.getByRole('button', { name: '確認並提交更正' }));
 
-    await waitFor(() => expect(screen.getByText('帳務更正已提交，來源異常仍待核對；根因條件仍成立，請以同一 job/root 重新查詢。')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('帳務更正已提交，但來源異常仍待核對；根因條件仍成立，請重新查詢更正結果。')).toBeInTheDocument());
     expect(screen.queryByText('帳務更正完成')).not.toBeInTheDocument();
     expect(anomalyDetailClient.queryAnomalyDetail).toHaveBeenLastCalledWith({ fingerprint: selectedFingerprint });
     expect(anomalyQueryClient.queryAnomalies).toHaveBeenCalledTimes(1);
@@ -129,7 +129,7 @@ describe('Anomalies Finance Import correction flow', () => {
     fireEvent.click(screen.getByRole('button', { name: '確認並提交更正' }));
 
     await waitFor(() => expect(screen.getByText('帳務更正完成')).toBeInTheDocument());
-    expect(screen.queryByText('帳務更正已提交，來源異常仍待核對；根因條件仍成立，請以同一 job/root 重新查詢。')).not.toBeInTheDocument();
+    expect(screen.queryByText('帳務更正已提交，但來源異常仍待核對；根因條件仍成立，請重新查詢更正結果。')).not.toBeInTheDocument();
     expect(anomalyDetailClient.queryAnomalyDetail).toHaveBeenLastCalledWith({ fingerprint: selectedFingerprint });
     expect(query).toHaveBeenCalledTimes(2);
   });
@@ -145,7 +145,8 @@ describe('Anomalies Finance Import correction flow', () => {
 
     await openAndPreview();
     fireEvent.click(screen.getByRole('button', { name: '確認並提交更正' }));
-    await waitFor(() => expect(screen.getByText('exact anomaly detail unavailable')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('帳務更正已提交，但來源異常目前無法重新核對；請重新查詢更正結果。')).toBeInTheDocument());
+    expect(screen.queryByText('exact anomaly detail unavailable')).not.toBeInTheDocument();
     expect(screen.queryByText('帳務更正完成')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重新查詢更正結果' })).toBeInTheDocument();
 
@@ -166,13 +167,13 @@ describe('Anomalies Finance Import correction flow', () => {
     await openAndPreview();
     fireEvent.click(screen.getByRole('button', { name: '確認並提交更正' }));
 
-    await waitFor(() => expect(screen.getByText('異常詳情與原 fingerprint 不一致，已停止完成判定；請以同一 job/root 重新查詢。')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('帳務更正已提交，但來源異常目前無法重新核對；請重新查詢更正結果。')).toBeInTheDocument());
     expect(screen.queryByText('帳務更正完成')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重新查詢更正結果' })).toBeInTheDocument();
     expect(anomalyQueryClient.queryAnomalies).toHaveBeenCalledTimes(1);
     expect(apply).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: '重新查詢更正結果' }));
-    await waitFor(() => expect(screen.getByText('異常詳情與原 fingerprint 不一致，已停止完成判定；請以同一 job/root 重新查詢。')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('帳務更正已提交，但來源異常目前無法重新核對；請重新查詢更正結果。')).toBeInTheDocument());
     expect(apply).toHaveBeenCalledTimes(1);
   });
 
@@ -187,7 +188,7 @@ describe('Anomalies Finance Import correction flow', () => {
 
     await openAndPreview();
     fireEvent.click(screen.getByRole('button', { name: '確認並提交更正' }));
-    await waitFor(() => expect(screen.getByText('帳務更正已提交，來源異常仍待核對；最新異常清單查詢失敗，請以同一 job/root 重新查詢。')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('帳務更正已提交，但來源異常目前無法重新核對；請重新查詢更正結果。')).toBeInTheDocument());
     expect(screen.queryByText('帳務更正完成')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重新查詢更正結果' })).toBeInTheDocument();
 
@@ -227,6 +228,47 @@ describe('Anomalies Finance Import correction flow', () => {
     expect(screen.queryByText('帳務更正完成')).not.toBeInTheDocument();
     expect(outcomeQuery).toHaveBeenCalledWith(accepted.job_id);
     expect(apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('Preview failure 只顯示 closed 業務訊息', async () => {
+    vi.spyOn(financeImportCorrectionClient, 'preview').mockRejectedValue(new Error('preview job identity unavailable'));
+
+    render(<AnomaliesPage />);
+    await waitFor(() => expect(screen.getByText('假日排班尚未確認')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /查看處理方式 ➔/ }));
+    await waitFor(() => expect(document.querySelector('[data-surface-id="anomalies.finance-correction"]')).not.toBeNull());
+    fireEvent.change(document.querySelector('[data-control-id="anomalies.finance-correction.obligations"]')!, { target: { value: 'obligation:SYNTH-19' } });
+    fireEvent.change(document.querySelector('[data-control-id="anomalies.finance-correction.refund-ledger"]')!, { target: { value: 'ledger-refund:SYNTH-42' } });
+    fireEvent.change(document.querySelector('[data-control-id="anomalies.finance-correction.reason"]')!, { target: { value: '核對退匯' } });
+    fireEvent.change(document.querySelector('[data-control-id="anomalies.finance-correction.evidence"]')!, { target: { value: 'receipt:42' } });
+    fireEvent.click(screen.getByRole('button', { name: '檢查更正影響' }));
+
+    await waitFor(() => expect(screen.getByText('帳務更正影響目前無法檢查，請稍後重試。')).toBeInTheDocument());
+    expect(screen.queryByText('preview job identity unavailable')).not.toBeInTheDocument();
+  });
+
+  it('Apply failure 只顯示 closed 業務訊息', async () => {
+    vi.spyOn(financeImportCorrectionClient, 'preview').mockResolvedValue(correctionPreview);
+    vi.spyOn(financeImportCorrectionClient, 'apply').mockRejectedValue(new Error('apply receipt transport unavailable'));
+
+    await openAndPreview();
+    fireEvent.click(screen.getByRole('button', { name: '確認並提交更正' }));
+
+    await waitFor(() => expect(screen.getByText('帳務更正目前無法提交，請稍後重試。')).toBeInTheDocument());
+    expect(screen.queryByText('apply receipt transport unavailable')).not.toBeInTheDocument();
+  });
+
+  it('結果查詢 failure 只顯示 closed 業務訊息並保留重查入口', async () => {
+    vi.spyOn(financeImportCorrectionClient, 'preview').mockResolvedValue(correctionPreview);
+    vi.spyOn(financeImportCorrectionClient, 'apply').mockResolvedValue(accepted);
+    vi.spyOn(financeImportCorrectionClient, 'queryOutcome').mockRejectedValue(new Error('outcome job receipt unavailable'));
+
+    await openAndPreview();
+    fireEvent.click(screen.getByRole('button', { name: '確認並提交更正' }));
+
+    await waitFor(() => expect(screen.getByText('帳務更正結果目前無法取得，請重新查詢更正結果。')).toBeInTheDocument());
+    expect(screen.queryByText('outcome job receipt unavailable')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新查詢更正結果' })).toBeInTheDocument();
   });
 
   it('operator 在 Preview 等待期間修改輸入時必須作廢 stale response', async () => {

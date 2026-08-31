@@ -36,7 +36,36 @@ type WorkStatus = 'loading' | 'ready' | 'previewing' | 'applying' | 'failed' | '
 type TargetAmounts = Record<number, string>;
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '政府溢撥處置失敗。';
+  const typed = error instanceof GovernmentOverpaymentRecoveryError ? error : null;
+  const code = typed?.code.toUpperCase() ?? '';
+  if (typed?.status === 401 || code.includes('UNAUTHENTICATED')) return '登入狀態已失效，請重新登入後再操作。';
+  if (typed?.status === 403 || code.includes('FORBIDDEN')) return '目前帳號沒有處理政府溢撥的權限。';
+  if (typed?.status === 404 || code.includes('NOT_FOUND')) return '找不到這筆政府溢撥資料，請返回清單重新查詢。';
+  if (typed?.status === 409 || /(stale|conflict|version)/i.test(code)) return '資料已變更，請重新查詢並再次檢查處置影響。';
+  if (typed?.status === 422 || code.includes('INVALID') || code.includes('BLOCK')) return '所選處置未通過檢核，請依畫面提示調整後再試。';
+  if (typed?.retryable) return '結果尚未確認；請先重新查詢，再安全確認原操作。';
+  return '政府溢撥目前無法處理，請稍後再試。';
+}
+
+function statusLabel(status: GovernmentOverpaymentQuery['status']): string {
+  return ({
+    pending_review: '待人工判定',
+    offset_reserved: '抵扣處理中',
+    offset_applied: '抵扣已完成',
+    return_payable: '已建立政府退還款',
+    partially_returned: '政府退還款部分完成',
+    returned: '政府退還款已完成',
+  })[status];
+}
+
+function dispositionLabel(disposition: GovernmentOverpaymentDisposition): string {
+  return disposition === 'offset' ? '抵扣合法補助標的' : '建立政府退還款';
+}
+
+function blockerLabel(blocker: string): string {
+  return blocker === 'government_subsidy_recipient_account_missing'
+    ? '政府退款帳戶尚未準備完成'
+    : '必要資料尚未準備完成';
 }
 
 function applyOutcomeUnknown(error: unknown): boolean {
@@ -197,7 +226,7 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
       setCompletionVerified(false);
       setNeedsRecheck(true);
       setStatus('ready');
-      setError('owner root 已離開 pending_review，但原 GOVSUB-006 anomaly predicate 尚未解除；異常仍保留。');
+      setError('政府溢撥已完成處置，但最新問題清單尚未確認解除；提醒仍保留。');
       return false;
     }
 
@@ -209,8 +238,8 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
       setNeedsRecheck(true);
       setStatus('ready');
       setError(refresh?.originalFingerprintPresent
-        ? 'owner root 已更新，但最新 active anomaly list 仍包含原 GOVSUB-006 fingerprint；異常仍保留。'
-        : 'owner root 已更新，但最新 active anomaly list 查詢未成功；異常仍保留。');
+        ? '處置資料已更新，但最新問題清單仍包含這筆提醒；提醒仍保留。'
+        : '處置資料已更新，但最新問題清單查詢未成功；提醒仍保留。');
       return false;
     }
     setCompletionVerified(true);
@@ -253,7 +282,7 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
         setNeedsRecheck(false);
         setCompletionVerified(false);
         setStaleOwnerRefreshRequired(true);
-        setError('Apply 使用的 owner version 已過期；正在重新查詢最新 owner 根事實，請重新檢查 Preview。');
+        setError('資料已變更；正在重新查詢最新資料，請重新檢查處置影響。');
         try {
           const freshOwner = await client.query(overpaymentIdentity, requestOptions);
           if (freshOwner.overpayment_identity !== overpaymentIdentity) {
@@ -266,7 +295,7 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
           setError('資料已更新；舊 Preview 已清除，請重新檢查處置影響後再套用。');
         } catch (readbackError) {
           setStatus('failed');
-          setError(`資料已更新，但最新 owner Query 失敗；請重新查詢後再 Preview。${errorMessage(readbackError)}`);
+          setError(`資料已更新，但最新資料查詢失敗；請重新查詢後再檢查處置影響。${errorMessage(readbackError)}`);
         }
         return;
       }
@@ -310,24 +339,23 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
   const commandLocked = receipt !== null || outcomeUnknown || readbackUnavailable || needsRecheck || completionVerified || staleOwnerRefreshRequired;
   const effectiveReadback = readback ?? query;
 
-  if (status === 'loading' && !query) return <section aria-label="政府溢撥處置" data-surface-id="government-overpayment-recovery-loading">正在讀取政府溢撥根事實…</section>;
-  if (!query) return <section aria-label="政府溢撥處置" data-surface-id="government-overpayment-recovery-error"><div role="alert">{error ?? '政府溢撥根事實無法讀取。'}</div><button type="button" onClick={() => void reload()}>重新讀取</button></section>;
+  if (status === 'loading' && !query) return <section aria-label="政府溢撥處置" data-surface-id="government-overpayment-recovery-loading">正在讀取政府溢撥資料…</section>;
+  if (!query) return <section aria-label="政府溢撥處置" data-surface-id="government-overpayment-recovery-error"><div role="alert">{error ?? '政府溢撥資料無法讀取。'}</div><button type="button" onClick={() => void reload()}>重新查詢</button></section>;
 
   return (
     <section aria-label="政府溢撥人工處置" data-surface-id="government-overpayment-recovery-workbench" style={{ border: '1px solid #fed7aa', borderRadius: 12, padding: 16, marginTop: 12 }}>
       <h3 style={{ marginTop: 0 }}>政府溢撥人工處置</h3>
       <div data-surface-id="government-overpayment-recovery-root-evidence">
-        <div>目前狀態：<strong>{query.status}</strong></div>
+        <div>目前狀態：<strong>{statusLabel(query.status)}</strong></div>
         <div>目前剩餘：<strong>{query.remaining_amount_ntd.toLocaleString('zh-TW')} 元</strong></div>
-        <div>根事實版本：{query.overpayment_version}</div>
-        <div>來源：{query.source_bank_fact_reference}／{query.source_transaction_reference}</div>
-        {query.blockers.length > 0 && <div role="alert">阻擋原因：{query.blockers.join('、')}</div>}
+        <details><summary>技術詳情與資料來源</summary><div>資料版本：{query.overpayment_version}</div><div>來源：{query.source_bank_fact_reference}／{query.source_transaction_reference}</div></details>
+        {query.blockers.length > 0 && <div role="alert">阻擋原因：{query.blockers.map(blockerLabel).join('、')}</div>}
       </div>
 
       {status === 'completed' && completionVerified ? (
-        <div role="status" style={{ color: '#166534', fontWeight: 700, marginTop: 12 }}>異常已依 owner root 與原 GOVSUB-006 predicate 回讀確認解除，active list 已刷新。</div>
+        <div role="status" style={{ color: '#166534', fontWeight: 700, marginTop: 12 }}>處置已完成，重新查詢也確認這筆提醒已從最新問題清單解除。</div>
       ) : terminalPredicate(query) && !receipt ? (
-        <div role="status" style={{ color: '#166534', fontWeight: 700, marginTop: 12 }}>政府溢撥處置已離開待人工判定狀態；已依 owner 根事實回讀。</div>
+        <div role="status" style={{ color: '#166534', fontWeight: 700, marginTop: 12 }}>政府溢撥已離開待人工判定狀態，最新資料已重新查詢確認。</div>
       ) : (
         <>
           <fieldset disabled={busy || commandLocked} style={{ border: 0, padding: 0, margin: '14px 0' }}>
@@ -337,7 +365,7 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
           </fieldset>
 
           {disposition === 'offset' && canOffset && <div>
-            <div style={{ fontWeight: 700 }}>合法抵扣標的（由 Government Subsidy Query 提供）</div>
+            <div style={{ fontWeight: 700 }}>可抵扣的已核准補助標的</div>
             {query.offset_targets.length === 0 ? <div role="alert">目前沒有合法抵扣標的，不能猜測未來案件。</div> : query.offset_targets.map((target) => (
               <label key={target.claim_item_id} style={{ display: 'block', marginTop: 8 }}>
                 {target.claim_item_id}／批次 {target.claim_batch_id}（最多 {target.outstanding_amount_ntd.toLocaleString('zh-TW')} 元）
@@ -361,21 +389,21 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
           <button type="button" style={{ marginTop: 12 }} disabled={!request || !reason.trim() || busy || commandLocked} onClick={() => void previewDisposition()}>{status === 'previewing' ? '正在檢查處置影響…' : '檢查處置影響'}</button>
 
           {preview && <div style={{ background: '#fff7ed', borderRadius: 8, padding: 12, marginTop: 12 }} data-surface-id="government-overpayment-recovery-preview">
-            <div>Preview：{preview.disposition_kind}，{preview.disposition_amount_ntd.toLocaleString('zh-TW')} 元</div>
-            <div>套用後狀態：{preview.resulting_status}；剩餘 {preview.remaining_after_ntd.toLocaleString('zh-TW')} 元</div>
-            <label style={{ display: 'block', marginTop: 8 }}><input type="checkbox" checked={confirmed} disabled={busy || commandLocked} onChange={(event) => setConfirmed(event.target.checked)} /> 我已核對 owner Query 與正式規則書，確認執行此處置。</label>
+            <div>預計處置：{dispositionLabel(preview.disposition_kind)}，{preview.disposition_amount_ntd.toLocaleString('zh-TW')} 元</div>
+            <div>套用後狀態：{statusLabel(preview.resulting_status)}；剩餘 {preview.remaining_after_ntd.toLocaleString('zh-TW')} 元</div>
+            <label style={{ display: 'block', marginTop: 8 }}><input type="checkbox" checked={confirmed} disabled={busy || commandLocked} onChange={(event) => setConfirmed(event.target.checked)} /> 我已核對目前金額、合法標的、證據與預覽結果，確認執行此處置。</label>
             <button type="button" style={{ marginTop: 8 }} disabled={!confirmed || !reason.trim() || busy || commandLocked} onClick={() => void applyDisposition()}>{status === 'applying' ? '處置套用中…' : '確認套用處置'}</button>
           </div>}
         </>
       )}
 
-      {receipt && <div data-surface-id="government-overpayment-recovery-receipt" style={{ marginTop: 12 }}>已取得 immutable receipt；正在以 owner Query 回讀確認。</div>}
-      {outcomeUnknown && <div role="alert" style={{ marginTop: 12 }}>Apply 結果未明；保留同一 command identity，先查回 owner root 與原 anomaly predicate；不會再次送出 Apply。<button type="button" disabled={busy} onClick={() => void reconcileOutcome()}>重新查詢並安全確認結果</button></div>}
-      {readbackUnavailable && <div role="alert" style={{ marginTop: 12 }}>已取得 immutable receipt，但 owner／anomaly readback 暫時失敗；異常仍保留，請只重新查詢確認結果。<button type="button" disabled={busy} onClick={() => void reconcileOutcome()}>重新查詢 owner 與 anomaly</button></div>}
-      {staleOwnerRefreshRequired && <div role="alert" style={{ marginTop: 12 }}>Apply 使用的版本已過期；必須先取得最新 owner Query，舊 Preview 已清除，禁止自動 Apply。<button type="button" disabled={busy} onClick={() => void reload()}>重新查詢最新 owner</button></div>}
-      {needsRecheck && !outcomeUnknown && !readbackUnavailable && !completionVerified && <div role="alert" style={{ marginTop: 12 }}>處置 receipt 已保留，但尚未以 owner root 與原 anomaly predicate 完成雙重確認；異常仍保留。<button type="button" disabled={busy} onClick={() => void reconcileOutcome()}>重新查詢 owner 與 anomaly</button></div>}
+      {receipt && <div data-surface-id="government-overpayment-recovery-receipt" style={{ marginTop: 12 }}>處置已受理，正在重新查詢最新資料與問題清單。</div>}
+      {outcomeUnknown && <div role="alert" style={{ marginTop: 12 }}>套用結果尚未確認；原操作已保留，系統只會重新查詢，不會再次送出處置。<button type="button" disabled={busy} onClick={() => void reconcileOutcome()}>重新查詢並安全確認結果</button></div>}
+      {readbackUnavailable && <div role="alert" style={{ marginTop: 12 }}>處置已受理，但最新資料或問題清單暫時無法確認；提醒仍保留。<button type="button" disabled={busy} onClick={() => void reconcileOutcome()}>重新查詢結果</button></div>}
+      {staleOwnerRefreshRequired && <div role="alert" style={{ marginTop: 12 }}>資料版本已更新；舊預覽已清除，請取得最新資料後重新檢查處置影響。<button type="button" disabled={busy} onClick={() => void reload()}>重新查詢最新資料</button></div>}
+      {needsRecheck && !outcomeUnknown && !readbackUnavailable && !completionVerified && <div role="alert" style={{ marginTop: 12 }}>處置已受理，但最新資料與問題清單尚未完成雙重確認；提醒仍保留。<button type="button" disabled={busy} onClick={() => void reconcileOutcome()}>重新查詢結果</button></div>}
       {effectiveReadback && receipt && <div role="status" data-surface-id="government-overpayment-recovery-readback" style={{ marginTop: 8, color: completionVerified ? '#166534' : '#92400e', fontWeight: 700 }}>
-        回讀狀態：{effectiveReadback.status}；剩餘 {effectiveReadback.remaining_amount_ntd.toLocaleString('zh-TW')} 元。{completionVerified ? '原 GOVSUB-006 predicate 已由 exact anomaly GET 確認解除。' : '尚未完成 owner 與 anomaly predicate 雙重回讀，異常保留。'}
+        最新狀態：{statusLabel(effectiveReadback.status)}；剩餘 {effectiveReadback.remaining_amount_ntd.toLocaleString('zh-TW')} 元。{completionVerified ? '最新問題清單已確認解除這筆提醒。' : '最新資料與問題清單尚未完成雙重確認，提醒保留。'}
       </div>}
       {error && <div role="alert" style={{ color: '#b91c1c', marginTop: 8 }}>{error}</div>}
     </section>

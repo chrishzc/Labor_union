@@ -7,10 +7,16 @@ from datetime import datetime
 from typing import Callable
 
 from domains.line.identities import LineUserId
-from domains.line.identity_binding import LineIdentityBindingStatus
+from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
 from domains.line.identity_binding import LineIdentityClaim
 from shared_kernel.fingerprints import fingerprint_payload
-from shared_kernel.identities import ExpectedVersion, IdempotencyKey
+from shared_kernel.identities import (
+    ActorContext,
+    CorrelationId,
+    ExpectedVersion,
+    IdempotencyKey,
+    IdempotencyReceipt,
+)
 from shared_kernel.ports import OutboxIntent
 from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.identity_management_contracts import (
@@ -19,11 +25,20 @@ from subsystems.line.identity_management_contracts import (
     LineIdentityCurrentFactReadback,
     LineIdentityRevocationPreview,
     LineIdentityReplacementPreview,
+    LineIdentityRoleContextReadback,
+    LineIdentityRoleContextStatus,
+    LineIdentityRoleSelectionPreview,
+    LineIdentityRoleSelectionReceipt,
     LineIdentityRevocationStatus,
     RequestLineIdentityRevocationCommand,
     ReplaceLineIdentitySubjectCommand,
+    SelectLineIdentityRoleCommand,
 )
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
+from subsystems.line.rich_menu_binding import (
+    schedule_resolved_identity_menu,
+    schedule_revocation_successor_menu,
+)
 
 
 IDENTITY_MENU_RESET_INTENT = "line.identity.revocation.menu_reset"
@@ -52,6 +67,80 @@ class LineIdentityManagementApplication:
         query = LineIdentityCurrentFactQuery(line_user_id)
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.identity_management.current_fact(query)
+
+    def role_context(self, line_user_id: LineUserId) -> LineIdentityRoleContextReadback:
+        with self._unit_of_work_factory() as unit_of_work:
+            return _role_context(unit_of_work, line_user_id)
+
+    def preview_role_selection(
+        self,
+        line_user_id: LineUserId,
+        target_role: LineBindingSubjectType,
+    ) -> LineIdentityRoleSelectionPreview:
+        with self._unit_of_work_factory() as unit_of_work:
+            readback = _role_context(unit_of_work, line_user_id)
+        blockers = _role_selection_blockers(readback, target_role)
+        return LineIdentityRoleSelectionPreview(
+            readback,
+            target_role,
+            _role_selection_fingerprint(readback, target_role),
+            blockers,
+        )
+
+    def select_role(
+        self,
+        command: SelectLineIdentityRoleCommand,
+    ) -> LineIdentityRoleSelectionReceipt:
+        with self._unit_of_work_factory() as unit_of_work:
+            existing = unit_of_work.receipts.get(command.idempotency_key)
+            if existing is not None:
+                if existing.payload_fingerprint != command.preview_fingerprint:
+                    raise RuntimeError("line_identity_role_selection_idempotency_conflict")
+                result = _role_context(unit_of_work, command.line_user_id)
+                unit_of_work.commit()
+                return LineIdentityRoleSelectionReceipt(
+                    result,
+                    True,
+                    existing.result_reference,
+                )
+            readback = _role_context(unit_of_work, command.line_user_id)
+            fingerprint = _role_selection_fingerprint(readback, command.target_role)
+            if (
+                readback.context_version != command.expected_context_version
+                or fingerprint != command.preview_fingerprint
+            ):
+                raise RuntimeError("line_identity_role_selection_stale")
+            blockers = _role_selection_blockers(readback, command.target_role)
+            if blockers:
+                raise RuntimeError(blockers[0])
+            resulting_version = unit_of_work.identities.select_role(
+                command.line_user_id,
+                command.target_role,
+                command.expected_context_version,
+            )
+            receipt_identity = (
+                f"line-identity-role:{command.line_user_id.value}:"
+                f"{command.target_role.value}:{resulting_version.value}"
+            )
+            unit_of_work.receipts.append(
+                IdempotencyReceipt(
+                    command.idempotency_key,
+                    fingerprint,
+                    receipt_identity,
+                )
+            )
+            unit_of_work.audit.append(
+                LineAuditIntent(
+                    "line.identity.role.selected",
+                    command.actor.actor_id,
+                    "line_identity_role_context",
+                    command.line_user_id.value,
+                )
+            )
+            schedule_resolved_identity_menu(unit_of_work, command.line_user_id)
+            result = _role_context(unit_of_work, command.line_user_id)
+            unit_of_work.commit()
+        return LineIdentityRoleSelectionReceipt(result, False, receipt_identity)
 
     def preview_revocation(
         self,
@@ -92,7 +181,9 @@ class LineIdentityManagementApplication:
         require_line_capability(command.actor, LineCapability.IDENTITY_BINDING_MANAGE)
         _require_reason(command.reason)
         with self._unit_of_work_factory() as unit_of_work:
-            current = unit_of_work.identity_management.detail(command.line_user_id)
+            current = unit_of_work.identities.get(command.line_user_id)
+            if current is None or current.subject_type is None:
+                raise LookupError("line_identity_binding_not_found")
             if current.subject_reference == command.target_subject_reference:
                 unit_of_work.commit()
                 return current
@@ -138,30 +229,7 @@ class LineIdentityManagementApplication:
         require_line_capability(command.actor, LineCapability.IDENTITY_BINDING_MANAGE)
         _require_reason(command.reason)
         with self._unit_of_work_factory() as unit_of_work:
-            replay = unit_of_work.identity_management.get_request_by_key(
-                command.idempotency_key.value
-            )
-            if replay is not None:
-                _require_same_request(replay, command)
-                unit_of_work.commit()
-                return replay
-            publication = unit_of_work.identity_management.default_menu_publication()
-            if publication is None:
-                raise RuntimeError("line_identity_default_menu_not_published")
-            pending = unit_of_work.identities.request_revocation(
-                command.line_user_id,
-                command.expected_version,
-                command.actor.actor_id,
-                _derived_key(command.idempotency_key, "pending"),
-                command.correlation_id.value,
-            )
-            request = unit_of_work.identity_management.create_request(
-                command,
-                pending,
-                publication,
-            )
-            unit_of_work.outbox.append(_menu_reset_intent(request))
-            unit_of_work.audit.append(_audit("requested", command.actor.actor_id, request))
+            request = _request_revocation_in_uow(unit_of_work, command)
             unit_of_work.commit()
         return request
 
@@ -200,6 +268,7 @@ class LineIdentityManagementApplication:
                 actor_id,
                 _completion_key(request, manual),
                 f"line-identity-revocation:{request.request_id}",
+                request.subject_type,
             )
             _clear_owner_projection(unit_of_work, request)
             unit_of_work.identity_management.complete(
@@ -210,9 +279,80 @@ class LineIdentityManagementApplication:
                 reason=reason,
             )
             unit_of_work.audit.append(_audit("completed", actor_id, request))
+            schedule_revocation_successor_menu(
+                unit_of_work,
+                request.line_user_id,
+                request.request_id,
+            )
             result = unit_of_work.identity_management.get_request(request_id)
             unit_of_work.commit()
         return result
+
+
+def request_staff_retirement_revocation(
+    unit_of_work,
+    *,
+    staff_id: int,
+    lifecycle_version: int,
+    correlation_id: CorrelationId,
+) -> bool:
+    """Request exact Staff-role revocation inside the Staff outer transaction."""
+
+    current = unit_of_work.identities.get_by_subject(
+        LineBindingSubjectType.STAFF,
+        str(staff_id),
+    )
+    if current is None or current.status is LineIdentityBindingStatus.REVOKED:
+        return False
+    if current.status is not LineIdentityBindingStatus.BOUND:
+        raise RuntimeError("line_identity_staff_retirement_revocation_blocked")
+    command = RequestLineIdentityRevocationCommand(
+        current.line_user_id,
+        current.version,
+        ActorContext("system:staff-retirement"),
+        "Staff lifecycle 已正式退役，解除 staff role。",
+        IdempotencyKey(
+            f"staff-retirement-line-revoke:{staff_id}:{lifecycle_version}"
+        ),
+        correlation_id,
+    )
+    _request_revocation_in_uow(
+        unit_of_work,
+        command,
+        subject_type=LineBindingSubjectType.STAFF,
+    )
+    return True
+
+
+def _request_revocation_in_uow(unit_of_work, command, *, subject_type=None):
+    replay = unit_of_work.identity_management.get_request_by_key(
+        command.idempotency_key.value
+    )
+    if replay is not None:
+        _require_same_request(replay, command)
+        return replay
+    publication = unit_of_work.identity_management.default_menu_publication()
+    if publication is None:
+        raise RuntimeError("line_identity_default_menu_not_published")
+    current = unit_of_work.identities.get(command.line_user_id, subject_type)
+    if current is None or current.subject_type is None:
+        raise LookupError("line_identity_binding_not_found")
+    pending = unit_of_work.identities.request_revocation(
+        command.line_user_id,
+        command.expected_version,
+        command.actor.actor_id,
+        _derived_key(command.idempotency_key, "pending"),
+        command.correlation_id.value,
+        current.subject_type,
+    )
+    request = unit_of_work.identity_management.create_request(
+        command,
+        pending,
+        publication,
+    )
+    unit_of_work.outbox.append(_menu_reset_intent(request))
+    unit_of_work.audit.append(_audit("requested", command.actor.actor_id, request))
+    return request
 
 
 def _revocation_blockers(status, publication) -> tuple[str, ...]:
@@ -222,6 +362,73 @@ def _revocation_blockers(status, publication) -> tuple[str, ...]:
     if publication is None:
         blockers.append("line_identity_default_menu_not_published")
     return tuple(blockers)
+
+
+def _role_context(unit_of_work, line_user_id):
+    available = tuple(
+        sorted(
+            (
+                binding.subject_type
+                for binding in unit_of_work.identities.list_by_user(line_user_id)
+                if binding.status is LineIdentityBindingStatus.BOUND
+                and binding.subject_type in {
+                    LineBindingSubjectType.CUSTOMER,
+                    LineBindingSubjectType.STAFF,
+                }
+            ),
+            key=lambda role: role.value,
+        )
+    )
+    selected, version = unit_of_work.identities.selected_role(line_user_id)
+    if not available:
+        status = LineIdentityRoleContextStatus.NO_BINDING
+        effective = None
+    elif len(available) == 1:
+        status = LineIdentityRoleContextStatus.SINGLE_ROLE
+        effective = available[0]
+    elif selected is None:
+        status = LineIdentityRoleContextStatus.SELECTION_REQUIRED
+        effective = None
+    elif selected not in available:
+        status = LineIdentityRoleContextStatus.STALE_SELECTION
+        effective = None
+    else:
+        status = LineIdentityRoleContextStatus.SELECTED
+        effective = selected
+    return LineIdentityRoleContextReadback(
+        line_user_id,
+        available,
+        selected,
+        effective,
+        version,
+        status,
+    )
+
+
+def _role_selection_blockers(readback, target_role):
+    blockers = []
+    if target_role not in {
+        LineBindingSubjectType.CUSTOMER,
+        LineBindingSubjectType.STAFF,
+    }:
+        blockers.append("line_identity_selected_role_invalid")
+    elif target_role not in readback.available_roles:
+        blockers.append("line_identity_selected_role_not_bound")
+    return tuple(blockers)
+
+
+def _role_selection_fingerprint(readback, target_role):
+    return fingerprint_payload(
+        {
+            "line_user_id": readback.line_user_id.value,
+            "available_roles": tuple(role.value for role in readback.available_roles),
+            "selected_role": (
+                readback.selected_role.value if readback.selected_role else None
+            ),
+            "context_version": readback.context_version.value,
+            "target_role": target_role.value,
+        }
+    )
 
 
 def _replacement_blockers(binding, candidate, target_reference) -> tuple[str, ...]:

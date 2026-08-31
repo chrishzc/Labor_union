@@ -25,6 +25,10 @@ from subsystems.case_import.beclass_review_intake import (
 from subsystems.case_import.hcm_beclass_reconciliation import (
     reconcile_hcm_beclass_cooking as reconcile_with_port,
 )
+from subsystems.case_import.pairing_current_facts import (
+    beclass_counterpart_recheck,
+    hcm_counterpart_recheck,
+)
 from subsystems.orders.terms_workflow import (
     OrderTermsApplyRequest,
     OrderTermsWorkflow,
@@ -36,25 +40,52 @@ def _nested_uow_forbidden():
 
 
 class MySqlHcmBeClassReconciliationAdapter:
-    def __init__(self, connection) -> None:
+    def __init__(self, connection, pairing_rechecks=None) -> None:
         self._connection = connection
+        self._pairing_rechecks = pairing_rechecks
 
     def reconcile(self, case_no: str):
-        return reconcile_with_port(self, case_no)
+        result = reconcile_with_port(self, case_no)
+        if self._pairing_rechecks is not None:
+            facts = self.load_pair_facts(case_no)
+            token = fingerprint_payload({"case_no": case_no, "facts": dict(facts)}).value
+            version = max(int(facts.get("beclass_id") or 0), int(facts.get("hcm_version") or 0))
+            self._pairing_rechecks.append_case_pairing_recheck(
+                hcm_counterpart_recheck(
+                    case_no,
+                    version,
+                    token,
+                    "case-pairing:" + token + ":BECLASS-001",
+                )
+            )
+            query_no = facts.get("query_no")
+            if isinstance(query_no, str) and query_no:
+                review_item_id = "counterpart:" + query_no
+                self._pairing_rechecks.append_case_pairing_recheck(
+                    beclass_counterpart_recheck(
+                        "client_counterpart",
+                        review_item_id,
+                        version,
+                        token,
+                        "case-pairing:" + token + ":IMPORT-003",
+                    )
+                )
+        return result
 
     def load_pair_facts(self, case_no: str):
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT (SELECT COUNT(*) FROM orders WHERE case_no=%s) AS hcm_count,"
+                "(SELECT lifecycle_version FROM orders WHERE case_no=%s) AS hcm_version,"
                 "(SELECT COUNT(*) FROM beclass_records "
                 "WHERE bound_case_no=%s) AS beclass_count",
-                (case_no, case_no),
+                (case_no, case_no, case_no),
             )
             counts = cursor.fetchone()
             if int(counts["hcm_count"]) != 1 or int(counts["beclass_count"]) != 1:
                 return counts
             cursor.execute(
-                "SELECT o.requires_cooking,b.id AS beclass_id,b.survey_details "
+                "SELECT o.requires_cooking,b.id AS beclass_id,b.query_no,b.survey_details "
                 "FROM orders o JOIN beclass_records b "
                 "ON b.bound_case_no=o.case_no WHERE o.case_no=%s",
                 (case_no,),

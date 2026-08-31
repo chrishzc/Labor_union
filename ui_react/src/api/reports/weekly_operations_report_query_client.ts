@@ -37,6 +37,43 @@ export function weeklyReportWeekEnd(weekStart: string): string {
   return start.toISOString().slice(0, 10);
 }
 
+const ISO_WEEK_PATTERN = /^(\d{4})-W(\d{2})$/;
+const WEEK_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
+
+function firstIsoMonday(year: number): Date {
+  const januaryFourth = new Date(Date.UTC(year, 0, 4));
+  januaryFourth.setUTCDate(januaryFourth.getUTCDate() - ((januaryFourth.getUTCDay() + 6) % 7));
+  return januaryFourth;
+}
+
+export function weeklyReportIsoWeek(weekStart: string): string {
+  const monday = validateWeeklyReportWeekStart(weekStart);
+  const thursday = new Date(monday);
+  thursday.setUTCDate(thursday.getUTCDate() + 3);
+  const isoYear = thursday.getUTCFullYear();
+  const week = Math.floor((monday.getTime() - firstIsoMonday(isoYear).getTime()) / WEEK_MILLISECONDS) + 1;
+  return `${isoYear}-W${String(week).padStart(2, '0')}`;
+}
+
+export function weeklyReportWeekStart(isoWeek: string): string {
+  const match = ISO_WEEK_PATTERN.exec(isoWeek);
+  if (!match) {
+    throw new WeeklyOperationsReportError('WEEKLY_REPORT_VALIDATION', '週別必須是有效的 ISO 週。');
+  }
+  const isoYear = Number(match[1]);
+  const week = Number(match[2]);
+  if (week < 1 || week > 53) {
+    throw new WeeklyOperationsReportError('WEEKLY_REPORT_VALIDATION', '週別必須是有效的 ISO 週。');
+  }
+  const monday = firstIsoMonday(isoYear);
+  monday.setUTCDate(monday.getUTCDate() + ((week - 1) * 7));
+  const weekStart = monday.toISOString().slice(0, 10);
+  if (weeklyReportIsoWeek(weekStart) !== isoWeek) {
+    throw new WeeklyOperationsReportError('WEEKLY_REPORT_VALIDATION', '週別必須是有效的 ISO 週。');
+  }
+  return weekStart;
+}
+
 function isMasked(value: string): boolean {
   return value === '—' || value.includes('*');
 }

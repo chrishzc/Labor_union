@@ -89,7 +89,7 @@ def test_fresh_assembly_orders_1012_before_projector_v2_successor() -> None:
     assert names.index("1012_service_before_replacement.sql") < names.index(
         "1014_historical_baseline_projector_v2.sql"
     )
-    assert names[-1] == "1018_hcm_resubmission_canonical_review_version.sql"
+    assert names[-1] == "1020_historical_owner_payment_settlement.sql"
 
 
 def _sql() -> str:

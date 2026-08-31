@@ -58,6 +58,18 @@ function row<T>(key: string, label: string, field: OrdersCardProjectionField<T>,
 
 function dateText(value: string): string { return value; }
 
+const ASSIGNMENT_STATUS_LABELS: Readonly<Record<string, string>> = {
+  planned: '已排定',
+  active: '正式服務中',
+  completed: '已完成',
+  replaced: '已由替代人員接手',
+  cancelled: '已取消',
+};
+
+function assignmentStatusText(value: string): string {
+  return ASSIGNMENT_STATUS_LABELS[value] ?? '狀態待確認';
+}
+
 function assignmentRows(segment: OrdersCardAssignmentSegment, key: string): OrdersCardAssignmentViewModel {
   return {
     key,
@@ -68,7 +80,7 @@ function assignmentRows(segment: OrdersCardAssignmentSegment, key: string): Orde
       row(`${key}.sequence`, 'sequence', segment.sequence, String),
       row(`${key}.assigned_start_date`, 'assigned_start_date', segment.assigned_start_date, dateText),
       row(`${key}.assigned_end_date`, 'assigned_end_date', segment.assigned_end_date, dateText),
-      row(`${key}.status`, 'status', segment.status, String),
+      row(`${key}.status`, 'status', segment.status, assignmentStatusText),
     ],
   };
 }

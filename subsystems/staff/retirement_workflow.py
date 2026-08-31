@@ -51,11 +51,22 @@ class StaffLifecycleRepository(Protocol):
     def persist(self, request: StaffLifecycleApplyRequest, preview: StaffLifecyclePreview, receipt: StaffLifecycleReceipt, command_fingerprint: PreviewFingerprint) -> None: ...
 
 
+class StaffLifecycleEffectPort(Protocol):
+    def on_transition(
+        self,
+        unit_of_work: UnitOfWork,
+        request: StaffLifecycleApplyRequest,
+        preview: StaffLifecyclePreview,
+        receipt: StaffLifecycleReceipt,
+    ) -> None: ...
+
+
 class StaffLifecycleWorkflow:
-    def __init__(self, repository: StaffLifecycleRepository, unit_of_work_factory: Callable[[], UnitOfWork], clock: BusinessClock) -> None:
+    def __init__(self, repository: StaffLifecycleRepository, unit_of_work_factory: Callable[[], UnitOfWork], clock: BusinessClock, effect: StaffLifecycleEffectPort | None = None) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
         self._clock = clock
+        self._effect = effect
 
     def query(self, staff_id: int) -> StaffLifecycleFact:
         return self._repository.load(staff_id, lock=False)
@@ -105,6 +116,8 @@ class StaffLifecycleWorkflow:
                 request.idempotency_key,
             )
             self._repository.persist(request, preview, receipt, command_fingerprint)
+            if self._effect is not None and not preview.candidate.is_noop:
+                self._effect.on_transition(unit_of_work, request, preview, receipt)
             unit_of_work.commit()
             return receipt
 

@@ -25,6 +25,9 @@ from shared_kernel.identities import (
 from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.configuration_contracts import ApplyLineConfigurationCommand
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
+from subsystems.line.notification_failure_current_fact import (
+    append_line_notification_failure_rechecks,
+)
 
 
 class LineNotificationRuleMutationError(ValueError):
@@ -183,6 +186,7 @@ class LineNotificationRuleAdministration:
                     "notification rule preview fingerprint is stale",
                 )
             cancellation_ids = _rules_requiring_cancellation(previous, resulting)
+            affected_event_codes = _affected_event_codes(previous, resulting)
             result = unit_of_work.configurations.apply(
                 ApplyLineConfigurationCommand(
                     candidate, actor, reason, idempotency_key, correlation_id
@@ -206,6 +210,21 @@ class LineNotificationRuleAdministration:
                     )
                 cancelled_intents += len(lineage.intent_ids)
                 cancelled_tasks += len(task_ids)
+            target_reader = getattr(
+                unit_of_work.notification_rules,
+                "line006_recheck_targets_for_event_codes",
+                None,
+            )
+            targets = (
+                target_reader(affected_event_codes)
+                if callable(target_reader)
+                else ()
+            )
+            append_line_notification_failure_rechecks(
+                unit_of_work,
+                targets,
+                cause_identity=f"notification-rules:{idempotency_key.value}",
+            )
             receipt = IdempotencyReceipt(
                 idempotency_key,
                 command_fingerprint,
@@ -254,6 +273,25 @@ def _rules_requiring_cancellation(
         if identifier not in after
         or (rule["enabled"] is True and after[identifier]["enabled"] is False)
     ))
+
+
+def _affected_event_codes(
+    previous: Mapping[str, object],
+    resulting: Mapping[str, object],
+) -> tuple[str, ...]:
+    before = {rule["id"]: rule for rule in previous["rules"]}
+    after = {rule["id"]: rule for rule in resulting["rules"]}
+    changed_ids = {
+        identifier
+        for identifier in set(before) | set(after)
+        if before.get(identifier) != after.get(identifier)
+    }
+    return tuple(sorted({
+        str(rule["event_code"])
+        for identifier in changed_ids
+        for rule in (before.get(identifier), after.get(identifier))
+        if isinstance(rule, Mapping) and isinstance(rule.get("event_code"), str)
+    }))
 
 
 def _materialize_current_definition(definition_json: str) -> dict[str, object]:

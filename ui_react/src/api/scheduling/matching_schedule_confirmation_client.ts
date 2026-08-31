@@ -94,6 +94,14 @@ export const matchingScheduleConfirmationClient = {
     const raw = await transport.get<unknown>(planPath(caseNo, planId), requestOptions());
     return assertIdentity(decode(StateSchema, raw, '查詢'), caseNo, planId);
   },
+  async send(caseNo: string, planId: number): Promise<MatchingScheduleState> {
+    const raw = await transport.post<unknown>(
+      `${planPath(caseNo, planId)}/send`,
+      undefined,
+      requestOptions(`matching-schedule-send-${caseNo}-${planId}-${crypto.randomUUID()}`),
+    );
+    return assertIdentity(decode(StateSchema, raw, '發送'), caseNo, planId);
+  },
   async previewManual(caseNo: string, planId: number): Promise<MatchingScheduleManualPreview> {
     const raw = await transport.post<unknown>(`${planPath(caseNo, planId)}/manual-preview`, undefined, requestOptions());
     return assertIdentity(decode(ManualPreviewSchema, raw, '人工 Preview'), caseNo, planId);

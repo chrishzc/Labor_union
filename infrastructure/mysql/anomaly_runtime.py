@@ -129,6 +129,92 @@ class MySqlAnomalyRuntime:
                     self.current_issue_key
                 ).detect
         if detector is None:
+            from infrastructure.mysql.line_notification_current_issue_adapter import (
+                MySqlLineNotificationCurrentIssueAdapter,
+            )
+            from subsystems.anomalies.line_notification_current_issue_consumer import (
+                LineNotificationCurrentIssueConsumer,
+            )
+            from subsystems.line.notification_failure_current_fact import (
+                LINE_NOTIFICATION_FAILURE_OWNER_DOMAIN,
+                LINE_NOTIFICATION_FAILURE_OWNER_ROOT_TYPE,
+            )
+
+            if (
+                scope.owner_domain == LINE_NOTIFICATION_FAILURE_OWNER_DOMAIN
+                and scope.owner_root_type
+                == LINE_NOTIFICATION_FAILURE_OWNER_ROOT_TYPE
+            ):
+                adapter = MySqlLineNotificationCurrentIssueAdapter(connection)
+                owner_snapshot_reader = adapter.read_owner_snapshot
+                detector = LineNotificationCurrentIssueConsumer(
+                    self.current_issue_key
+                ).detect
+        if detector is None:
+            from infrastructure.mysql.scheduling_current_issue_adapter import (
+                MySqlSchedulingCurrentIssueAdapter,
+            )
+            from subsystems.anomalies.scheduling_current_issue_consumer import (
+                SchedulingCurrentIssueConsumer,
+            )
+            from subsystems.scheduling.current_anomaly_facts import (
+                SCHEDULING_ANOMALY_OWNER_DOMAIN,
+                SCHEDULING_ANOMALY_OWNER_ROOT_TYPE,
+            )
+
+            if (
+                scope.owner_domain == SCHEDULING_ANOMALY_OWNER_DOMAIN
+                and scope.owner_root_type == SCHEDULING_ANOMALY_OWNER_ROOT_TYPE
+            ):
+                adapter = MySqlSchedulingCurrentIssueAdapter(connection)
+                owner_snapshot_reader = adapter.read_owner_snapshot
+                detector = SchedulingCurrentIssueConsumer(
+                    self.current_issue_key
+                ).detect
+        if detector is None:
+            from infrastructure.mysql.government_subsidy_current_issue_adapter import (
+                MySqlGovernmentSubsidyCurrentIssueAdapter,
+            )
+            from subsystems.anomalies.government_subsidy_current_issue_consumer import (
+                GovernmentSubsidyCurrentIssueConsumer,
+            )
+            from subsystems.government_subsidy.current_anomaly_facts import (
+                GOVERNMENT_SUBSIDY_ANOMALY_OWNER_DOMAIN,
+                GOVERNMENT_SUBSIDY_ANOMALY_OWNER_ROOT_TYPE,
+            )
+
+            if (
+                scope.owner_domain == GOVERNMENT_SUBSIDY_ANOMALY_OWNER_DOMAIN
+                and scope.owner_root_type
+                == GOVERNMENT_SUBSIDY_ANOMALY_OWNER_ROOT_TYPE
+            ):
+                adapter = MySqlGovernmentSubsidyCurrentIssueAdapter(connection)
+                owner_snapshot_reader = adapter.read_owner_snapshot
+                detector = GovernmentSubsidyCurrentIssueConsumer(
+                    self.current_issue_key
+                ).detect
+        if detector is None:
+            from infrastructure.mysql.case_pairing_current_issue_adapter import (
+                MySqlCasePairingCurrentIssueAdapter,
+            )
+            from subsystems.anomalies.case_pairing_current_issue_consumer import (
+                CasePairingCurrentIssueConsumer,
+            )
+            from subsystems.case_import.pairing_current_facts import (
+                CASE_PAIRING_ANOMALY_OWNER_DOMAIN,
+                CASE_PAIRING_ANOMALY_OWNER_ROOT_TYPE,
+            )
+
+            if (
+                scope.owner_domain == CASE_PAIRING_ANOMALY_OWNER_DOMAIN
+                and scope.owner_root_type == CASE_PAIRING_ANOMALY_OWNER_ROOT_TYPE
+            ):
+                adapter = MySqlCasePairingCurrentIssueAdapter(connection)
+                owner_snapshot_reader = adapter.read_owner_snapshot
+                detector = CasePairingCurrentIssueConsumer(
+                    self.current_issue_key
+                ).detect
+        if detector is None:
             raise RuntimeError("anomaly_recheck_owner_detector_not_composed")
         intent = recheck_intent_from_payload(payload)
         result = self.current_issue_application(

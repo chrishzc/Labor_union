@@ -5,6 +5,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { LineDeliveryPage } from '../api/line_delivery/line_delivery_query_schemas';
+import { LineDeliveryQueryError } from '../api/line_delivery/line_delivery_query_errors';
 import {
   LineDeliveryTaskWorkbench,
   type LineDeliveryTaskWorkbenchClient,
@@ -113,5 +114,19 @@ describe('LineDeliveryTaskWorkbench', () => {
     pageTwo.resolve(page(2, 26));
     await Promise.resolve();
     expect(screen.queryByText(/第 2／2 頁/)).not.toBeInTheDocument();
+  });
+
+  it('不將 query error code 或後端訊息穿透到一般發送任務畫面', async () => {
+    const client: LineDeliveryTaskWorkbenchClient = {
+      list: vi.fn().mockRejectedValue(new LineDeliveryQueryError(
+        'RAW_DELIVERY_FAILURE',
+        'raw provider detail must stay closed',
+      )),
+    };
+    render(<LineDeliveryTaskWorkbench client={client} onOpenTask={vi.fn()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('發送任務清單載入失敗，請稍後重新整理。');
+    expect(document.body.textContent).not.toContain('RAW_DELIVERY_FAILURE');
+    expect(document.body.textContent).not.toContain('raw provider detail');
   });
 });

@@ -54,11 +54,14 @@ function activeObligation(query: StaffPayablesQuery | null, target: StaffPayoutR
 
 function displayError(error: unknown): string {
   if (error instanceof StaffPayoutRemediationError) {
-    if (error.code.includes('STALE')) return '根事實版本已變更，請重新查詢後再 Preview。';
-    if (error.code === 'STAFF_PAYOUT_SCHEMA_MISMATCH') return 'PAYOUT 回應契約不完整，已停止操作。';
-    return `${error.code}：${error.message}`;
+    if (error.code.toLowerCase().includes('stale')) return '應付款資料已更新，請重新查詢後再檢查核銷影響。';
+    if (error.code === 'STAFF_PAYOUT_SCHEMA_MISMATCH') return '應付款核銷資料目前不完整，已停止操作。';
+    if (['STAFF_PAYOUT_TIMEOUT', 'STAFF_PAYOUT_NETWORK', 'STAFF_PAYOUT_ABORTED', 'STAFF_PAYOUT_UNKNOWN', 'STAFF_PAYOUT_JOB_TIMEOUT'].includes(error.code)) {
+      return '核銷結果目前無法安全確認；請使用原操作重新查詢或安全重試。';
+    }
+    return '應付款核銷目前無法完成，異常仍會保留；請重新整理後再試。';
   }
-  return error instanceof Error ? error.message : 'PAYOUT 核銷失敗，異常仍保留。';
+  return '應付款核銷目前無法完成，異常仍會保留；請重新整理後再試。';
 }
 
 function isStaleApplyError(error: unknown): boolean {
@@ -72,9 +75,30 @@ function isUnknownApplyOutcome(error: unknown): boolean {
 }
 
 function terminalMessage(job: StaffPayoutJob): string {
-  if (job.status === 'failed') return `背景核銷失敗：${job.outcome?.kind === 'failure' ? job.outcome.error.message : '未提供錯誤原因'}；異常仍保留。`;
+  if (job.status === 'failed') return '核銷處理未完成，異常仍會保留；請確認資料後再試。';
   if (job.status === 'cancelled') return '背景核銷已取消；異常仍保留。';
   return '背景核銷尚未完成；異常仍保留。';
+}
+
+function payoutStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    payable: '待付款',
+    partially_paid: '部分付款',
+    completed: '已結清',
+    overdue: '逾期待處理',
+  };
+  return labels[status] ?? '待確認';
+}
+
+function jobStatusLabel(status: StaffPayoutJob['status']): string {
+  const labels: Record<StaffPayoutJob['status'], string> = {
+    queued: '等待處理',
+    running: '處理中',
+    succeeded: '處理完成，正在核對應付款',
+    failed: '處理未完成',
+    cancelled: '已取消',
+  };
+  return labels[status];
 }
 
 function waitForPoll(ms: number): Promise<void> {
@@ -127,7 +151,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
       if (current === generation.current && mounted.current) {
         setQuery(fresh);
         if (resolveOnSettled && obligation.balance_ntd === 0 && obligation.payout_status === 'completed') {
-          setNotice('fresh Staff Payables root 已確認原義務結清。');
+          setNotice('已重新確認原逾期應付款結清。');
           await onResolved?.();
         }
       }
@@ -177,10 +201,10 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     const fresh = await loadQuery(true);
     const current = activeObligation(fresh, target);
     if (!current || current.balance_ntd !== 0 || current.payout_status !== 'completed') {
-      setNotice(`owner root 仍未結清（餘額 NT$ ${(current?.balance_ntd ?? 0).toLocaleString('zh-TW')}、狀態 ${current?.payout_status ?? 'unknown'}）；異常保留。`);
+      setNotice(`最新應付款仍未結清（餘額 NT$ ${(current?.balance_ntd ?? 0).toLocaleString('zh-TW')}、狀態 ${payoutStatusLabel(current?.payout_status ?? '')}）；異常仍會保留。`);
       return;
     }
-    setNotice('owner root 已確認原逾期義務 balance=0 且 completed，異常可解除。');
+    setNotice('已重新確認原逾期應付款餘額歸零且完成結清，異常可解除。');
   };
 
   const retryOwnerQuery = async (): Promise<void> => {
@@ -231,7 +255,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
         if (isStaleApplyError(caught)) {
           try {
             await loadQuery(false);
-            setNotice('Staff Payables 根事實已更新；請依最新餘額重新 Preview。');
+            setNotice('應付款資料已更新；請依最新餘額重新檢查核銷影響。');
           } catch (queryError) {
             setError(displayError(queryError));
           }
@@ -258,17 +282,17 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     finally { if (mounted.current) setBusy(null); }
   };
 
-  if (!query) return <section aria-label="逾期月嫂應付款人工核銷"><h3>逾期月嫂應付款人工核銷</h3>{busy === 'query' && <p role="status">正在讀取 Staff Payables 根事實…</p>}{error && <div role="alert">{error}</div>}<button type="button" disabled={busy !== null} onClick={() => void retryOwnerQuery()}>重新讀取</button></section>;
+  if (!query) return <section aria-label="逾期月嫂應付款人工核銷"><h3>逾期月嫂應付款人工核銷</h3>{busy === 'query' && <p role="status">正在讀取最新應付款資料…</p>}{error && <div role="alert">{error}</div>}<button type="button" disabled={busy !== null} onClick={() => void retryOwnerQuery()}>重新讀取</button></section>;
 
   return <section aria-label="逾期月嫂應付款人工核銷" data-surface-id="staff-payout-remediation" style={{ display: 'grid', gap: 12, border: '1px solid #dec0b6', borderRadius: 12, padding: 16, background: '#fffaf8' }}>
-    <header><h3 style={{ margin: 0 }}>逾期月嫂應付款人工核銷</h3><p>Staff #{query.staff_id}｜義務 {target.obligationIdentity}｜版本 {query.staff_payables_version}</p></header>
-    <p><strong>解除條件：</strong>只核銷既有 canonical Finance Import 銀行事實；不會發動銀行匯款。Job 成功不是解除條件，必須 fresh owner root 證明 balance=0 且 completed。</p>
-    {obligation && <div data-surface-id="staff-payout-obligation"><strong>原逾期義務</strong><p>案件 {obligation.case_no}｜到期 {obligation.due_date ?? '未設定'}｜應付 NT$ {obligation.amount_due_ntd.toLocaleString('zh-TW')}｜餘額 NT$ {obligation.balance_ntd.toLocaleString('zh-TW')}｜狀態 {obligation.payout_status}</p></div>}
+    <header><h3 style={{ margin: 0 }}>逾期月嫂應付款人工核銷</h3><p>服務人員：已指定{obligation ? `｜案件 ${obligation.case_no}` : ''}</p></header>
+    <p><strong>解除條件：</strong>只核對既有銀行入帳資料，不會發動銀行匯款。核銷處理完成後，系統仍會重新確認此筆應付款已結清。</p>
+    {obligation && <div data-surface-id="staff-payout-obligation"><strong>原逾期應付款</strong><p>到期 {obligation.due_date ?? '未設定'}｜應付 NT$ {obligation.amount_due_ntd.toLocaleString('zh-TW')}｜餘額 NT$ {obligation.balance_ntd.toLocaleString('zh-TW')}｜狀態 {payoutStatusLabel(obligation.payout_status)}</p></div>}
     {error && <div role="alert">{error}</div>}{notice && <div role="status">{notice}</div>}
-    <fieldset disabled={busy !== null || unknownOutcome || accepted !== null || !active} style={{ display: 'grid', gap: 8 }}><legend>既有銀行事實</legend><label>Finance Import row IDs（可用逗號或空白分隔）<input aria-label="Finance Import row IDs" inputMode="numeric" value={rowIdsText} onChange={(event) => { setRowIdsText(event.target.value); invalidatePreview(); }} /></label><label>人工核對理由<textarea aria-label="人工核對理由" maxLength={500} value={reason} onChange={(event) => { setReason(event.target.value); invalidatePreview(); }} /></label><button type="button" disabled={!selection() || !reason.trim()} onClick={() => void runPreview()}>Preview 核銷（零寫入）</button></fieldset>
-    {preview && payoutCandidate && <div data-surface-id="staff-payout-remediation-preview" style={{ border: '1px solid #b7d8d1', padding: 10, borderRadius: 8 }}><strong>Preview 已完成，尚未寫入</strong><p>銀行總額 NT$ {payoutCandidate.bank_total.amount.toLocaleString('zh-TW')}｜義務總額 NT$ {payoutCandidate.obligation_total.amount.toLocaleString('zh-TW')}</p><label><input type="checkbox" aria-label="確認核銷 Preview" checked={confirmed} disabled={busy !== null || accepted !== null} onChange={(event) => setConfirmed(event.target.checked)} /> 我已核對規則書、原義務與 canonical 銀行事實，確認套用。</label><button type="button" disabled={!confirmed || !reason.trim() || busy !== null || accepted !== null} onClick={() => void runApply()}>確認並 Apply</button></div>}
-    {accepted && <div data-surface-id="staff-payout-job"><p>Apply 已接受，Job：{accepted.job_id}。正在等待 terminal 並重新讀取 owner root。</p>{job && <p>Job 狀態：{job.status}</p>}{(unknownOutcome || (job !== null && (job.status === 'queued' || job.status === 'running' || job.status === 'succeeded'))) && <button type="button" disabled={busy !== null} onClick={() => void reconcile()}>重新查詢原 Job／owner root</button>}</div>}
-    {unknownOutcome && !accepted && <div role="alert">Apply 結果未明，禁止產生新命令。<button type="button" disabled={busy !== null} onClick={() => void runApply()}>使用原 Idempotency-Key 安全重試 Apply</button></div>}
-    {!active && !accepted && <div role="status">目前義務已非逾期 active；本工作台不會以 tracking 狀態代替 root readback。</div>}
+    <fieldset disabled={busy !== null || unknownOutcome || accepted !== null || !active} style={{ display: 'grid', gap: 8 }}><legend>既有銀行入帳資料</legend><label>銀行流水紀錄編號（可用逗號或空白分隔）<input aria-label="銀行流水紀錄編號" inputMode="numeric" value={rowIdsText} onChange={(event) => { setRowIdsText(event.target.value); invalidatePreview(); }} /></label><label>人工核對理由<textarea aria-label="人工核對理由" maxLength={500} value={reason} onChange={(event) => { setReason(event.target.value); invalidatePreview(); }} /></label><button type="button" disabled={!selection() || !reason.trim()} onClick={() => void runPreview()}>檢查核銷影響</button></fieldset>
+    {preview && payoutCandidate && <div data-surface-id="staff-payout-remediation-preview" style={{ border: '1px solid #b7d8d1', padding: 10, borderRadius: 8 }}><strong>核銷影響已確認，尚未寫入</strong><p>銀行總額 NT$ {payoutCandidate.bank_total.amount.toLocaleString('zh-TW')}｜應付款總額 NT$ {payoutCandidate.obligation_total.amount.toLocaleString('zh-TW')}</p><label><input type="checkbox" aria-label="確認核銷影響" checked={confirmed} disabled={busy !== null || accepted !== null} onChange={(event) => setConfirmed(event.target.checked)} /> 我已核對規則、原應付款與銀行入帳資料，確認套用。</label><button type="button" disabled={!confirmed || !reason.trim() || busy !== null || accepted !== null} onClick={() => void runApply()}>確認並提交核銷</button></div>}
+    {accepted && <div data-surface-id="staff-payout-job"><p>核銷已受理，正在處理並重新確認應付款狀態。</p>{job && <p>處理狀態：{jobStatusLabel(job.status)}</p>}{(unknownOutcome || (job !== null && (job.status === 'queued' || job.status === 'running' || job.status === 'succeeded'))) && <button type="button" disabled={busy !== null} onClick={() => void reconcile()}>重新查詢核銷結果</button>}</div>}
+    {unknownOutcome && !accepted && <div role="alert">核銷結果目前無法安全確認，禁止產生新操作。<button type="button" disabled={busy !== null} onClick={() => void runApply()}>使用原操作安全重試</button></div>}
+    {!active && !accepted && <div role="status">目前應付款已非逾期待處理；系統會依最新應付款資料判斷是否解除異常。</div>}
   </section>;
 };

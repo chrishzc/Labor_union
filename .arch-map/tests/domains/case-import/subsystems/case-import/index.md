@@ -4,6 +4,10 @@ architecture: ../../../../../domains/case-import/subsystems/case-import/index.md
 test_root: tests/subsystems/case_import/
 higher_boundary: tests/domains/case_import/
 fixtures_root: tests/fixtures/
+modules:
+  pairing-current-facts:
+    layout_status: canonical
+    test_root: tests/domains/case-import/subsystems/case-import/modules/pairing-current-facts/
 
 # Routing notes
 Current owner-local coverage includes HCM workbook preview/apply/replay contracts, HCM-BeClass reconciliation application/MySQL adapter transaction boundaries, and HCM resubmission domain/workbook/workflow behavior. Tests that exercise release/migration, disposable-MySQL/E2E, or a true cross-owner workflow remain at their higher verification boundary.

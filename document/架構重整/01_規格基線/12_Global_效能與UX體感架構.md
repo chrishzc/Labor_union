@@ -127,14 +127,18 @@ digest 全值、Preview fingerprint、raw cursor 或其他非業務必要雜訊�
 
 - 已認證、enabled 且具對應 owner permission 的工會內部管理 UI，對畫面實際需要的一般業務資料使用
   canonical 完整值，不再以遮罩防止內部人員查看。
+- 2026-08-31 最新人工裁決固定「先不使用個資遮罩」：上述授權內部 UI，以及verified applicant查看
+  自己資料的LIFF／自助readback，均直接呈現owner typed Query提供的完整一般業務值。遮罩功能
+  `deferred`，只有真實測試後人工確認確有需要才另行新增；不得把現有遮罩當成Task 96完成條件。
 - 完整值顯示不等於 unrestricted dump：API 仍只回該 ViewModel 需要的 typed fields，維持 cursor
   pagination、bounded page size、rate limit、audit、download/export capability 與 server-side filtering。
-- LINE 對客／群組訊息、Client／Staff LIFF、自助／公開頁面仍依各自 recipient 與 privacy 契約，不受本
-  裁決自動改成完整值。
+- LINE 對客／群組訊息與非本人公開頁面仍依各自 recipient 與 privacy 契約；verified applicant只可看
+  自己owner scope內的完整值，不得看他人資料。
 - credential、secret、完整銀行驗證資料、raw provider payload、NAS 實體 locator、raw error／log／receipt／
   evidence 與純技術 identity 不是「一般 UI 去敏」範圍，仍禁止顯示。
-- 每個既有 masked surface 必須先盤點 API owner、permission、欄位、copy/export/download、cache 與測試，
-  再由 bounded package 修改；不得以 browser-side unmask、額外 raw endpoint 或 client-selected fields 實作。
+- 既有 masked surface依API owner、permission、欄位、copy/export/download、cache與測試分批改為完整值；
+  owner typed contract已具備完整值時直接使用，不得以browser-side unmask、額外raw endpoint或
+  client-selected fields繞過owner與權限。
 
 ### 4.1 Payload contract
 
@@ -174,7 +178,7 @@ digest 全值、Preview fingerprint、raw cursor 或其他非業務必要雜訊�
 可以快取：
 
 - immutable static assets；
-- 已遮蔽、具授權範圍的 Query ViewModel；
+- 具授權範圍、bounded 且 typed 的 Query ViewModel；
 - 由完整 facts version、contract version、actor permission scope 與 canonical input
   組成 key 的 pure Preview 計算結果；
 - bounded reference data。
@@ -366,6 +370,65 @@ worker unavailable 才回 typed unavailable。UI 不得依 error message 字串�
   typed contract／命令安全邊界。合法 403 必須明示「僅唯一啟用 root 可管理」，不得以 generic disabled
   或任意 server message 取代。本項仍為 `in-progress`，
   不代表其他頁面已完成全站盤點。
+- 2026-08-31 Orders 案件投影的 current 資訊層級固定為：每個正式指派分段在主畫面只呈現一次
+  服務人員、正式服務期間與 closed business status；`assignment_id`、`staff_id`、`sequence`、raw field
+  name 及逐欄 owner/version 收在同一個預設收合的「技術詳情與資料來源」。Orders lifecycle 的實際
+  起訖與 Scheduling assignment 的正式服務期間維持不同標籤，不因版面去重而合併 root facts。
+- 2026-08-31 Historical Orders review更正沿用既有strict identity binding、Preview／Confirm／Apply、
+  fresh alert readback與原操作安全重試；一般畫面只呈現案件、欄位衝突、檔案要求與closed處理結果。
+  review／remediation version、digest、fingerprint、receipt identity與issue code只留在預設收合的技術詳情，
+  未分類runtime error不得穿透畫面。
+- 2026-08-31 Client Finance三碼settlement remediation沿用既有exact dispatcher、Query／Preview／Apply、
+  partial-retain與fresh terminal readback。一般畫面只呈現案件、義務類型、日期、金額、可核對銀行流水
+  與closed結果；account version、obligation identity與bank row identity只留在預設收合技術詳情，
+  owner／root／Idempotency術語及未分類runtime error不得穿透畫面。
+- 2026-08-31 Government Subsidy GOVSUB-006沿用既有offset／return互斥、Preview失效、stale只查最新資料、
+  receipt-only不完成、不重送Apply及owner＋current-issue雙重readback。一般畫面只呈現closed狀態、剩餘
+  金額、合法處置、標的與政府退款對象；owner version與source references只留在預設收合技術詳情，
+  raw blocker/error及owner／predicate／receipt術語不得穿透畫面。
+- 2026-08-31 Current Anomalies canonical live page沿用15-code current-only list/detail、no generic resolve
+  與recheck removal。一般畫面只呈現問題代碼、負責流程、影響、必要判斷資料及closed安全處理說明；
+  owner domain/version與Preview／Apply／completion predicate只留在預設收合技術詳情，未分類runtime
+  error不得穿透畫面。
+- 2026-08-31 Contract Signing external signing沿用既有completion report、legacy recovery、final PDF
+  Query／Preview／Confirm／Apply／readback、strict evidence lineage及未知結果不得重送。一般畫面
+  只呈現簽約進度、簽回證據完整性、影響檢查、阻擋與完成結果；status version、session、
+  event、receipt、digest、fingerprint與原命令等技術資料只留在typed contract、安全比對或預設
+  收合詳情，不得作為一般操作文案。
+- 2026-08-31 Orders cancellation沿用既有跨owner Preview／Confirm／Apply、同一操作未知結果確認與
+  fresh Orders／Client Finance／Payroll readback。一般畫面只呈現取消基準日、正式服務量、客戶帳務與
+  服務人員薪資調整、阻擋及closed結果；raw action／direction、obligation identity、owner version、
+  receipt與idempotency術語只留在typed contract、安全流程或預設收合技術詳情，既有取消規則與跨owner
+  root facts不得因呈現收斂而改變。
+- 2026-08-31 Orders條款、服務日期與實際開工日的既有Preview／Apply表單，以「變更前後」及「稽核
+  必填」呈現原因與影響，不在一般欄位顯示Diff／Audit Log等工程術語；原有reason gate、zero-write
+  Preview、fresh Apply與readback契約不變。
+- 2026-08-31 Orders service completion沿用既有Preview／Confirm／Apply、完成事件與fresh owner
+  readback；一般畫面只呈現目前狀態、正式服務日、完成時刻、確認條件及closed結果。Client Finance／
+  Staff Payables owner、lifecycle controls、fingerprint、idempotency、receipt與未分類runtime error
+  不得穿透；服務完成eligibility、Orders state machine及後續結算責任不變。
+- 2026-08-31 Historical Operational Baseline readback維持Orders-owned唯讀Query、案件切換stale
+  response discard及零mutation。一般畫面只呈現案件、目前作業步驟與closed步驟狀態；Orders identity／
+  version、historical source event/version只留在預設收合技術詳情，typed unavailable code不得穿透。
+- 2026-08-31 LINE Identity Review沿用既有待審list／detail、Preview失效、明確Confirm、Apply、receipt
+  與fresh result readback。一般畫面以審核對象、人工決定、狀態與closed結果說明操作；typed error code、
+  provider detail及readback工程術語不得穿透，role-scoped binding、審核決定、provider delivery與receipt
+  語意不變。
+- 2026-08-31 LINE notification rules沿用既有欄位編輯、zero-write Preview、人工Confirm、Save／Delete
+  與提交後取消待發通知及工作。一般畫面不得顯示typed error code、raw backend／provider detail；
+  revision、fingerprint、idempotency、規則定義及既有delivery責任不變。
+- 2026-08-31 LINE identity maintenance沿用既有replacement Preview／Confirm／Apply、解除retry及
+  manual-completion資格與雙重確認。一般畫面不得顯示typed error code或raw backend／provider detail；
+  既有解除saga、Rich Menu provider邊界與callback語意不變。
+- 2026-08-31 LINE delivery task workbench沿用既有server pagination、allowlisted filters、bounded typed item、
+  stale response suppression與detail navigation。一般畫面不得顯示query error code或raw backend／
+  provider detail；delivery intent／receipt、worker、retry及provider transport責任不變。
+- 2026-08-31 Orders Order Tracker主清單沿用既有summary query、explicit retry request budget與stale
+  response suppression。一般錯誤不得顯示raw runtime detail；跨owner stage projection、drawer資料及
+  LINE notification timeline語意不變。
+- 2026-08-31 Global React ErrorBoundary沿用既有區域隔離、自訂fallback、重新嘗試與整頁重載。
+  預設crash畫面只呈現closed復原指引，不得顯示render exception message；既有auth/navigation與
+  nested boundary行為不變。
 - 實際頁面驗證 first feedback、skeleton、loading、empty、stale、success、typed error。
 - Anomalies 的分類、Preview、Apply、Drawer 關閉與背景篩選若因正式 action、未填理由、尚未 Preview、
   Preview 失效、提交中或結果確認中而不可操作，必須常駐顯示 closed 業務原因並以

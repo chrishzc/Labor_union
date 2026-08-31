@@ -1,9 +1,9 @@
 # LIFF 資料異動申請與管理核准：規格收斂紀錄
 
 - `doc_type`: `specification`
-- `declared_status`: `proposed`
+- `declared_status`: `approved_client_slice_execution_authorized`
 - Current item: `CUR-LIFF-PROFILE-01`
-- Current terminal: `AUTHORITY_REQUIRED`
+- Current terminal: `CLIENT_SLICE_IN_PROGRESS`
 - Controlling authority: `20_LINE客服與月嫂自助服務正式規格.md` §6.1
 
 ## 已確認的 observable contract
@@ -35,16 +35,29 @@
    標記既有 assignment 為不上班；衝突日期保存為`committed_schedule_exception` lineage，不可排班事實只
    約束未來媒合／尚未承諾時段，既有服務異動仍須另走substitution／leave／cancellation正式流程。
 
-### Client 欄位候選（待人工逐欄裁決）
+### Client 第一階段 exact 欄位（2026-08-31 人工裁決）
 
 | 等級 | 候選欄位 | 邊界／限制 |
 |---|---|---|
-| 建議第一批 | `name`、`gender`、`phone`、`city`、`address`、`residence_type`、`delivery_type`、`baby_info`、`notes` | 只更新Client profile root；地址、生產方式與寶寶資訊不得自動推進Orders／Scheduling或財務。`residence_type`與`delivery_type`現有enum存在live-drift，實作前必須先確認字彙。 |
-| 條件式第二批 | `due_month`、`line_id` | `due_month`只可作profile資料；若影響服務日、排班或薪資，改走Orders command。`line_id`只是聯絡文字，不得等同或變更`line_user_id`綁定。 |
+| 第一階段 exact allowlist | `name`、`gender`、`phone`、`city`、`address`、`residence_type`、`delivery_type`、`baby_info`、`notes` | 只更新Client profile root；地址、生產方式與寶寶資訊不得自動推進Orders／Scheduling或財務。 |
+| 延後 | `due_month`、`line_id` | 不阻塞第一階段；`line_id`不得等同或變更`line_user_id`綁定。 |
+
+Closed validation固定為：`name` trim後1～100；`gender=女|男`；`phone=^09[0-9]{8}$`；
+`city`重用current central valid-city allowlist；`address` trim後1～255；
+`residence_type=電梯大樓|公寓|透天|其他`；`delivery_type=自然產|剖腹產|未定`；
+`baby_info` trim後1～255；`notes` trim後1～1000。第一階段不支援清空或NULL；未出現在closed
+typed request的欄位表示不修改。
+
+Client profile canonical root為`client_id`，使用專用monotonic `client_profile_version`，不得借用
+timestamp或`client_hcm_correction_version`。Preview保存exact requested-field before-values fingerprint；
+Apply fresh-read binding、subject與Client facts，驗request／preview／idempotency及requested-field fingerprint。
+同一requested field變更必須stale；無關欄位變更不得使request永久失效，owner approval可在fresh Query後
+以相同requested-field before-values重新Preview。owner Apply以當下fresh profile version產生下一版。
 
 每個允許欄位共用verified LIFF identity、current/requested diff、owner version、reason、idempotency、
-receipt/readback與最小揭露／遮罩證據。`phone`目前規則為`^09[0-9]{8}$`，不是唯一身分key；
-`city`必須為central valid city；`name`必填且trim。其餘exact length／enum／masking必須在task pack前固定。
+receipt/readback與最小揭露證據。verified applicant可看自己的完整值，具owner permission的internal reviewer
+可看完整diff；不另建UI遮罩。`phone`規則為`^09[0-9]{8}$`，不是唯一身分key；`city`使用central valid-city
+allowlist；其餘exact validation依2026-08-31人工裁決固定。
 
 Client generic profile明確排除：`id`、`case_no`、所有created/updated技術時間、`ip_address`、
 `seq_num`、`reject_reason`、`admin_notes`、`identity_status`、`service_time`、`service_start_date`、
@@ -55,7 +68,7 @@ BeClass退款帳戶／raw source欄位。
 
 | 類別 | 候選欄位 | 邊界／限制 |
 |---|---|---|
-| 一般個人資料 | `name`、`phone`、`tel`、`tel_ext`、`email`、`birthday`、`city`、`zip_code`、`address` | 申請後人工確認才由Staff owner寫入；exact validation、masking、profile root/version尚待技術package確認。 |
+| 一般個人資料 | `name`、`phone`、`tel`、`tel_ext`、`email`、`birthday`、`city`、`zip_code`、`address` | 申請後人工確認才由Staff owner寫入；exact validation與profile root/version尚待技術package確認；verified applicant與授權reviewer顯示完整一般業務值，遮罩延後。 |
 | 媒合偏好 | range `minimum`／`maximum`；set `values` | 沿用Scheduling typed preference definition／value與profile version；偏好只影響媒合排序與說明，不是硬性異常或排除。 |
 | 不可排班 | `kind`、`start_date`、`end_date`、`reason` | `kind`=`long_leave | paused_service`。衝突日顯示exact case／assignment；人工強制核准後既有訂單排程優先，另存`committed_schedule_exception` lineage，新媒合仍受不可排班約束。 |
 
@@ -68,8 +81,8 @@ Staff generic profile明確排除：`identity_card`、`line_user_id`、lifecycle
 
 | Decision ID | 必要裁決 | 為何不能由 live schema／UI 推定 |
 |---|---|---|
-| `LIFF-PROFILE-CLIENT-FIELDS` | Client 可人工與 LIFF 申請修改的 exact field allowlist、每欄 validation、遮罩與 evidence | `clients` 欄位存在不代表可由 profile mutation 改；部分欄位屬 Orders、Finance、LINE binding 或歷史 projection。 |
-| `LIFF-PROFILE-CLIENT-ROOT` | Client profile canonical root identity、aggregate version 與 repository contract | 現行 `clients` 沒有正式 profile aggregate version；直接使用 row timestamp／任意欄位會破壞 stale contract。 |
+| `LIFF-PROFILE-CLIENT-FIELDS` | `RESOLVED`：Client第一階段exact九欄、closed enum、validation、完整值visibility與evidence依2026-08-31人工裁決固定；`due_month`／`line_id`延後。 | `clients` 欄位存在不代表可由 profile mutation 改；部分欄位屬 Orders、Finance、LINE binding 或歷史 projection。 |
+| `LIFF-PROFILE-CLIENT-ROOT` | `RESOLVED`：canonical root=`client_id`；新增專用monotonic `client_profile_version`與Client-owned repository/application/UoW，不借用timestamp或HCM correction version。 | 現行 `clients` 沒有正式 profile aggregate version；直接使用 row timestamp／任意欄位會破壞 stale contract。 |
 | `LIFF-PROFILE-STAFF-SCOPE` | `RESOLVED`：一般個資、媒合偏好與不可排班日期都可申請；後兩者仍由 Scheduling owner套用，且既有有效訂單排程優先。exact fields待規則書清單逐欄裁決。 | 不把 Scheduling aggregate錯當Staff master；衝突時不得由profile request旁路取消既有assignment。 |
 | `LIFF-PROFILE-STAFF-ROOT` | Staff profile owner、root identity、aggregate version、typed commands 與 transaction boundary | 歷史 adoption writer 是 restricted historical source，不能升格為 current profile owner。 |
 | `LIFF-PROFILE-DELIVERY-SLICE` | `RESOLVED`：第一階段只交付 Client；Staff 後續獨立 package。 | 避免兩個 owner 的 schema、測試資料與驗收拓撲互相阻擋。 |
@@ -81,7 +94,7 @@ Staff generic profile明確排除：`identity_card`、`line_user_id`、lifecycle
 
 - `LIFF-PROFILE-A1`: verified LIFF 使用者只能讀寫自己的 bounded request，且不能以 URL identity 越權。
 - `LIFF-PROFILE-A2`: applicant Preview 零寫入，Apply 只建立 immutable pending request。
-- `LIFF-PROFILE-A3`: 管理端顯示 owner current/requested diff、版本、遮罩 evidence 與 blocker。
+- `LIFF-PROFILE-A3`: 管理端對具owner permission的reviewer顯示完整current/requested diff、版本、最小evidence與blocker。
 - `LIFF-PROFILE-A4`: owner approval Apply 成功後，DB、管理端與 LIFF readback 一致。
 - `LIFF-PROFILE-A5`: reject、stale、replay、permission、rollback、receipt committed/readback unavailable 均有
   typed outcome，且不會重複 mutation。
@@ -91,16 +104,16 @@ Staff generic profile明確排除：`identity_card`、`line_user_id`、lifecycle
 
 | Gate | 結果 | 證據／原因 |
 |---|---|---|
-| Scope gate | `BLOCKED` | 首個 delivery slice 已固定Client，但Client exact owner fields與root/version尚未裁決，無法形成 bounded write set。 |
-| Change inventory | `BLOCKED` | request/decision persistence 與 Client／Staff aggregate version 的 target objects 仍取決於上述裁決。 |
+| Scope gate | `PASS` | 最新人工裁決固定Client第一階段九欄、closed validation、root=`client_id`、專用version及request/review application contract；Staff不在本包。 |
+| Change inventory | `PASS` | `schema-only`：`clients.client_profile_version`、既有`client_profile_change_requests`的typed concurrency/idempotency欄位，以及Client-owned event／receipt／outbox；`system-seed`／`business-row-backfill`／`destructive`皆none。既有row以column default 0供fresh owner Query，無row rewrite。 |
 | Static release gate | `NOT_RUN` | 尚無合法 release candidate。 |
 | Descriptor gate | `NOT_RUN` | target object contract 尚未確定。 |
 | Read-only plan gate | `NOT_RUN` | 尚無 release artifact 可列入 plan。 |
 | Engine verification gate | `NOT_RUN` | 尚未進入 schema implementation。 |
 | Developer acceptance gate | `NOT_RUN` | 前置 gates 未通過。 |
 
-總結：`DB_CHANGE_NOT_READY`。本文件不授權任何 DDL、migration、seed、backfill、reset、replacement 或
-`union_db` 操作。
+總結：`DB_CHANGE_NOT_READY`。本文已授權上述bounded additive local schema candidate及完整DB gates；不授權
+seed、business-row backfill、destructive、reset、replacement、`union_db`或production操作。
 
 ## DDH 動態執行紀錄
 
@@ -114,13 +127,10 @@ Staff generic profile明確排除：`identity_card`、`line_user_id`、lifecycle
 
 ```yaml
 convergence:
-  status: NOT_READY
+  status: CLIENT_SLICE_READY
   blockers:
-    - LIFF-PROFILE-CLIENT-FIELDS
-    - LIFF-PROFILE-CLIENT-ROOT
     - LIFF-PROFILE-STAFF-ROOT
-    - LIFF-PROFILE-CLIENT-FIELD-CANDIDATE-REVIEW
     - LIFF-PROFILE-STAFF-FIELD-CANDIDATE-REVIEW
 ```
 
-結果：`AUTHORITY_REQUIRED`。在 owner 規則書完成上述裁決後，才可編譯 task pack 與執行 DB gates。
+結果：Client第一階段`EXECUTION_AUTHORIZED`；Staff維持deferred且不得與Client slice綁定。

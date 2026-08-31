@@ -36,7 +36,11 @@ def test_task97_releases_are_separate_hash_bound_and_ordered() -> None:
     assert positions == tuple(range(positions[0], positions[0] + len(RELEASES)))
 
     assembly_names = tuple(path.name for path in load_schema_assembly().active_artifact_paths)
-    assert assembly_names[-4:] == tuple(artifact_name for _, artifact_name in RELEASES)
+    artifact_names = tuple(artifact_name for _, artifact_name in RELEASES)
+    assembly_positions = tuple(assembly_names.index(name) for name in artifact_names)
+    assert assembly_positions == tuple(
+        range(assembly_positions[0], assembly_positions[0] + len(artifact_names))
+    )
 
     for manifest_name, artifact_name in RELEASES:
         manifest_path = ROOT / "db" / "migration_releases" / manifest_name

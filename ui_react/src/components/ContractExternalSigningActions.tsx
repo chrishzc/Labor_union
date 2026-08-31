@@ -57,13 +57,21 @@ function safeErrorMessage(error: unknown): string {
   const fallback = '外部簽約操作失敗，請重新查詢目前狀態。';
   const message = error instanceof Error ? error.message : fallback;
   if (unsafePublicText.test(message)) return fallback;
-  if (error instanceof ApiHttpError) return `${error.code}：${message}`;
+  if (error instanceof ApiTimeoutError || error instanceof ApiNetworkError) {
+    return '連線暫時中斷，結果可能尚未確認，請使用原操作重新確認。';
+  }
+  if (error instanceof ApiHttpError) {
+    if (error.status === 401 || error.status === 403) return '目前帳號無權處理這筆外部簽約。';
+    if (error.status === 409) return '簽約資料已變更，請重新查詢後再檢查影響。';
+    if (error.retryable || error.status >= 500) return '簽約服務暫時無法使用，請稍後重新查詢。';
+    return '這筆操作未通過簽約檢查，請重新查詢目前狀態。';
+  }
   return message || fallback;
 }
 
 function assertFinalReadbackMatchesCase(caseNo: string, readback: FinalDocumentReadback): void {
   if (readback.case_no !== caseNo.trim()) {
-    throw new Error('最終 PDF readback 案件識別不一致。');
+    throw new Error('最終 PDF 的案件識別不一致。');
   }
 }
 
@@ -156,7 +164,7 @@ function assertRecoveryPreviewMatches(
     || preview.current_commitment_id !== recovery.commitment_id
     || preview.legacy_media_sha256 !== target.legacy_media_sha256
   ) {
-    throw new Error('歷史簽回修復 Preview 血緣不一致，請重新查詢。');
+    throw new Error('歷史簽回修復與目前文件證據不一致，請重新查詢。');
   }
 }
 
@@ -202,10 +210,10 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         const readback = await contractExternalSigningClient.getFinalDocumentReadback(caseNo, controller.signal);
         assertFinalReadbackMatchesCase(caseNo, readback);
         if (readback.session_id !== value.session_id) {
-          throw new Error('最終 PDF readback 簽約工作識別不一致。');
+          throw new Error('最終 PDF 與目前簽約工作不一致。');
         }
         if (!controller.signal.aborted) {
-          setNotice(`最終 PDF 第 ${readback.version_number} 版已完成 readback，完整性驗證通過。`);
+          setNotice(`最終 PDF 第 ${readback.version_number} 版已確認完成，完整性驗證通過。`);
           setUiState({ type: 'ready' });
         }
       } catch (error) {
@@ -263,7 +271,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         || receipt.matching_segment_id !== staffSegmentId
         || receipt.resulting_status_version !== query!.status_version + 1
       ) {
-        throw new Error('完成回報 receipt 與原命令或目前狀態不一致；不得視為完成。');
+        throw new Error('完成回報與原操作或目前狀態不一致；不得視為完成。');
       }
       identities.current.delete(key);
       setNotice(receipt.replayed ? '完成回報已安全重播，正在重新查詢。' : '完成回報已記錄，正在重新查詢。');
@@ -280,7 +288,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
             matchingSegmentId: segmentId,
             resultingStatusVersion: query!.status_version + 1,
           },
-          message: '完成回報結果未明；只可用原命令識別查詢 receipt。',
+          message: '完成回報結果未明；請使用原操作重新確認，不要重送。',
         });
       } else {
         setUiState({ type: 'error', message: safeErrorMessage(error) });
@@ -335,7 +343,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         || receipt.matching_segment_id !== target.matching_segment_id
         || receipt.resulting_status_version !== preview.expected_status_version + 1
       ) {
-        throw new Error('歷史簽回修復 receipt 血緣不一致；不得視為完成。');
+        throw new Error('歷史簽回修復與原操作證據不一致；不得視為完成。');
       }
       identities.current.delete(key);
       setNotice(receipt.replayed ? '歷史簽回修復已安全重播，正在重新查詢。' : '歷史簽回修復已記錄，正在重新查詢。');
@@ -351,7 +359,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
             matchingSegmentId: target.matching_segment_id,
             resultingStatusVersion: preview.expected_status_version + 1,
           },
-          message: '歷史簽回修復結果未明；不得重送，只能以原命令查詢 receipt。',
+          message: '歷史簽回修復結果未明；不得重送，請使用原操作重新確認。',
         });
       } else {
         setUiState({ type: 'error', message: safeErrorMessage(error) });
@@ -379,12 +387,12 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
   };
 
   const observeFinalReceipt = async (receipt: ExternalSigningReceipt) => {
-    setUiState({ type: 'receipt_committed', receipt, message: 'Apply receipt 已提交；正在核對最終文件 readback。' });
+    setUiState({ type: 'receipt_committed', receipt, message: '最終文件已受理；正在確認簽約完成結果。' });
     try {
       const readback = await contractExternalSigningClient.getFinalDocumentReadback(caseNo);
       assertFinalReadbackMatchesCase(caseNo, readback);
       if (receipt.final_document_id !== readback.final_document_id || receipt.session_id !== readback.session_id) {
-        throw new Error('最終 PDF receipt 與 readback identity 不一致。');
+        throw new Error('最終 PDF 的受理結果與回讀文件不一致。');
       }
       setUiState({ type: 'observed', receipt, readback });
       const refreshed = await loadQuery();
@@ -393,15 +401,15 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         || refreshed.state !== 'completed'
         || refreshed.status_version !== receipt.resulting_status_version
       ) {
-        throw new Error('最終 PDF readback 後的簽約狀態尚未完成；不得重送 Apply。');
+        throw new Error('最終 PDF 回讀後的簽約狀態尚未完成；不得重送。');
       }
-      setNotice(`契約完成，最終 PDF 已完成 readback（第 ${readback.version_number} 版，完整性驗證通過）。`);
+      setNotice(`契約完成，最終 PDF 第 ${readback.version_number} 版已確認，完整性驗證通過。`);
       await onCommitted?.();
     } catch (error) {
       setUiState({
         type: 'receipt_committed',
         receipt,
-        message: `Apply receipt 已提交，但 readback 尚未確認；不要重送 Apply。${safeErrorMessage(error)}`,
+        message: `最終文件已受理，但完成結果尚未確認；不要重送。${safeErrorMessage(error)}`,
       });
     }
   };
@@ -425,7 +433,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         || receipt.matching_segment_id !== null
         || receipt.resulting_status_version !== query.status_version + 1
       ) {
-        throw new Error('最終 PDF receipt 與原命令或目前狀態不一致；不得視為完成。');
+        throw new Error('最終 PDF 受理結果與原操作或目前狀態不一致；不得視為完成。');
       }
       identities.current.delete('final-apply');
       await observeFinalReceipt(receipt);
@@ -440,7 +448,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
             matchingSegmentId: null,
             resultingStatusVersion: query.status_version + 1,
           },
-          message: '最終 PDF Apply 結果未明；不得重送，只能以原命令查 receipt。',
+          message: '最終 PDF 處理結果未明；不得重送，請使用原操作重新確認。',
         });
       } else {
         setUiState({ type: 'error', message: safeErrorMessage(error) });
@@ -462,7 +470,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         || receipt.matching_segment_id !== expected.matchingSegmentId
         || receipt.resulting_status_version !== expected.resultingStatusVersion
       ) {
-        throw new Error('receipt 與原命令識別不一致；不得視為完成。');
+        throw new Error('受理結果與原操作識別不一致；不得視為完成。');
       }
       if (receipt.command_type === 'apply_final_signed_contract') {
         identities.current.delete('final-apply');
@@ -475,7 +483,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         type: 'outcome_unknown',
         identity,
         expected,
-        message: `receipt 尚未可觀察；請稍後仍以原命令查詢。${safeErrorMessage(error)}`,
+        message: `尚無法確認原操作結果；請稍後使用同一操作重新確認。${safeErrorMessage(error)}`,
       });
     }
   };
@@ -512,7 +520,10 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
       {query && (
         <div role="status" style={{ padding: '10px 12px', border: '1px solid #fed7aa', borderRadius: '10px', background: '#fff8f6' }}>
           <strong>{stateLabel(query)}</strong>
-          <div style={{ fontSize: '0.8rem', color: '#74593f' }}>狀態版本 {query.status_version}</div>
+          <details style={{ fontSize: '0.8rem', color: '#74593f', marginTop: '4px' }}>
+            <summary>技術詳情與資料來源</summary>
+            <div>狀態版本 {query.status_version}</div>
+          </details>
         </div>
       )}
 
@@ -521,11 +532,12 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
           <header>
             <strong>🧾 歷史簽回人工修復</strong>
             <div style={{ fontSize: '0.82rem', color: '#74593f', marginTop: '4px' }}>
-              尚有 {pendingRecoveryTargets.length} 個未完成對象。每筆都必須先核對歷史血緣並 Preview；月嫂完成後才可修復客戶。
+              尚有 {pendingRecoveryTargets.length} 個未完成對象。每筆都必須先核對歷史簽回證據並檢查影響；月嫂完成後才可修復客戶。
             </div>
-            <div style={{ fontSize: '0.78rem', color: '#74593f' }}>
-              Session {recoveryQuery.session_id}｜狀態版本 {recoveryQuery.status_version}｜配對方案 {recoveryQuery.matching_plan_id}
-            </div>
+            <details style={{ fontSize: '0.78rem', color: '#74593f' }}>
+              <summary>技術詳情與資料來源</summary>
+              <div>Session {recoveryQuery.session_id}｜狀態版本 {recoveryQuery.status_version}｜配對方案 {recoveryQuery.matching_plan_id}</div>
+            </details>
           </header>
 
           {pendingRecoveryTargets.map((target) => {
@@ -540,12 +552,18 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
               <article key={key} aria-label={`${target.scope === 'staff' ? '月嫂' : '客戶'} ${target.target_subject_reference} 歷史簽回修復`} style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px', display: 'grid', gap: '8px' }}>
                 <strong>{target.scope === 'staff' ? '月嫂' : '客戶'} {target.target_subject_reference}</strong>
                 <div style={{ fontSize: '0.8rem', color: '#74593f' }}>
-                  現行文件版本 {target.current_document_version_id}
-                  {lineageComplete
-                    ? `｜歷史文件 ${target.legacy_document_version_id}／事件 ${target.signing_event_id}／receipt ${target.command_receipt_id}／證據 ${target.legacy_media_sha256!.slice(0, 8)}…`
-                    : '｜找不到完整歷史簽回證據，無法建立 Preview'}
+                  {lineageComplete ? '歷史簽回證據完整，可檢查修復影響。' : '找不到完整歷史簽回證據，無法檢查修復影響。'}
                 </div>
-                {clientBlocked && <div role="status">需先完成所有月嫂修復並取得現行 commitment。</div>}
+                <details style={{ fontSize: '0.78rem', color: '#74593f' }}>
+                  <summary>簽回證據技術詳情</summary>
+                  <div>
+                    現行文件版本 {target.current_document_version_id}
+                    {lineageComplete
+                      ? `｜歷史文件 ${target.legacy_document_version_id}／事件 ${target.signing_event_id}／receipt ${target.command_receipt_id}／證據 ${target.legacy_media_sha256!.slice(0, 8)}…`
+                      : '｜歷史簽回證據不完整'}
+                  </div>
+                </details>
+                {clientBlocked && <div role="status">需先完成所有月嫂修復，並由系統確認最新簽約狀態。</div>}
                 <label style={{ display: 'grid', gap: '4px' }}>
                   修復原因與人工核對依據
                   <input
@@ -564,11 +582,15 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
                   disabled={busy || clientBlocked || !lineageComplete || !(recoveryReasons[key] ?? '').trim()}
                   onClick={() => void previewLegacyRecovery(target)}
                 >
-                  Preview {target.scope === 'staff' ? '月嫂' : '客戶'}歷史簽回修復
+                  檢查{target.scope === 'staff' ? '月嫂' : '客戶'}歷史簽回修復影響
                 </button>
                 {activePreview && (
                   <div style={{ padding: '10px', background: '#fffbeb', borderRadius: '8px', display: 'grid', gap: '6px' }}>
-                    <div>Preview 已綁定現行文件版本 {activePreview.preview.current_document_version_id} 與歷史證據 {activePreview.preview.legacy_media_sha256.slice(0, 8)}…</div>
+                    <div>現行文件與歷史簽回證據已完成一致性檢查。</div>
+                    <details style={{ fontSize: '0.78rem', color: '#74593f' }}>
+                      <summary>檢查技術詳情</summary>
+                      <div>Preview 已綁定現行文件版本 {activePreview.preview.current_document_version_id} 與歷史證據 {activePreview.preview.legacy_media_sha256.slice(0, 8)}…</div>
+                    </details>
                     {activePreview.preview.blockers.length > 0 && (
                       <ul>{activePreview.preview.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
                     )}
@@ -581,7 +603,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
                           recovery: { ...activePreview, confirmed: event.target.checked },
                         })}
                       />
-                      我已核對案件、對象、現行文件與歷史 event／receipt 血緣
+                      我已核對案件、對象、現行文件與歷史簽回證據
                     </label>
                     <button
                       type="button"
@@ -733,7 +755,7 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
           {uiState.type === 'preview_ready' && (
             <div style={{ padding: '10px', background: '#f0fdf4', borderRadius: '8px' }}>
               <div>{uiState.preview.filename}｜{uiState.preview.size_bytes.toLocaleString()} bytes</div>
-              <div>PDF 類型與完整性已由後端驗證；完整 digest 與 Preview fingerprint 不顯示於一般 UI。</div>
+              <div>PDF 類型與完整性已確認。</div>
               {uiState.preview.blockers.length > 0 && (
                 <ul>{uiState.preview.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
               )}
@@ -757,18 +779,18 @@ export function ContractExternalSigningActions({ caseNo, onCommitted }: Contract
         </section>
       )}
 
-      {uiState.type === 'working' && <div role="status">正在處理外部簽約命令…</div>}
+      {uiState.type === 'working' && <div role="status">正在處理外部簽約操作…</div>}
       {uiState.type === 'error' && <div role="alert">{uiState.message}</div>}
       {uiState.type === 'outcome_unknown' && (
         <div role="alert">
           <div>{uiState.message}</div>
-          <button type="button" onClick={() => void reconcileUnknown()}>以原命令查詢 receipt</button>
+          <button type="button" onClick={() => void reconcileUnknown()}>重新確認原操作結果</button>
         </div>
       )}
       {uiState.type === 'receipt_committed' && (
         <div role="status">
           <div>{uiState.message}</div>
-          <button type="button" onClick={() => void retryReadback()}>重新查詢最終 PDF readback</button>
+          <button type="button" onClick={() => void retryReadback()}>重新確認最終 PDF</button>
         </div>
       )}
       {notice && <div role="status">{notice}</div>}

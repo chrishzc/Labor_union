@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "eae298b26b8d325db2e0485f75572aa0284e41bafa41bd00d6f8c8ed93f979c9",
+  "active_artifacts_sha256": "7419e6a02b52807db1184b7fc9d7458ae53240124f2ac8df3e5dece26c3f0803",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -151,7 +151,9 @@
     "db/schema_parts/1015_controlled_file_reference_finalize_leases.sql",
     "db/schema_parts/1016_current_anomaly_issues.sql",
     "db/schema_parts/1017_client_hcm_correction_versioning.sql",
-    "db/schema_parts/1018_hcm_resubmission_canonical_review_version.sql"
+    "db/schema_parts/1018_hcm_resubmission_canonical_review_version.sql",
+    "db/schema_parts/1019_line_identity_role_scope.sql",
+    "db/schema_parts/1020_historical_owner_payment_settlement.sql"
   ],
   "classifications": {
     "db/schema_parts/153_retire_empty_legacy_field_inventory.sql": "migration-only",

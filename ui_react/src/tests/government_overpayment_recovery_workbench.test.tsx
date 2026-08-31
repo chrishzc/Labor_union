@@ -77,11 +77,11 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
     fireEvent.click(screen.getByRole('checkbox'));
     expect(applyButton).toBeEnabled();
     fireEvent.change(screen.getByLabelText('人工處置原因'), { target: { value: '改用電話補充證據' } });
-    expect(screen.queryByText(/套用後狀態：offset_applied/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/套用後狀態：抵扣已完成/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '檢查處置影響' }));
     await waitFor(() => expect(client.preview).toHaveBeenCalledTimes(2));
     fireEvent.change(evidence, { target: { value: 'phone-call:case-12' } });
-    expect(screen.queryByText(/套用後狀態：offset_applied/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/套用後狀態：抵扣已完成/)).not.toBeInTheDocument();
 
     fireEvent.change(evidence, { target: { value: 'phone-call:case-11' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查處置影響' }));
@@ -90,7 +90,7 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '確認套用處置' }));
     await waitFor(() => expect(client.apply).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
-    expect(screen.getByText(/異常已依 owner root 與原 GOVSUB-006 predicate/)).toBeInTheDocument();
+    expect(screen.getByText(/已從最新問題清單解除/)).toBeInTheDocument();
   });
 
   it('owner query 沒有合法標的或退款對象時顯示 blocker，不產生假 action', async () => {
@@ -116,7 +116,7 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
       apply: vi.fn(),
     };
     render(<GovernmentOverpaymentRecoveryWorkbench overpaymentIdentity={identity} anomalyFingerprint={anomalyFingerprint} client={client} />);
-    await screen.findByText(/government_subsidy_recipient_account_missing/);
+    await screen.findByText(/政府退款帳戶尚未準備完成/);
     expect(screen.getByRole('button', { name: '檢查處置影響' })).toBeDisabled();
     expect(client.preview).not.toHaveBeenCalled();
   });
@@ -146,17 +146,17 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
     fireEvent.change(screen.getByLabelText('人工處置原因'), { target: { value: '依電話補件確認' } });
     fireEvent.change(screen.getByLabelText('抵扣標的 31 金額'), { target: { value: '900' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查處置影響' }));
-    await screen.findByText(/套用後狀態：offset_applied/);
+    await screen.findByText(/套用後狀態：抵扣已完成/);
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: '確認套用處置' }));
-    await screen.findByText(/Apply 結果未明/);
+    await screen.findByText(/套用結果尚未確認/);
     const firstKey = client.apply.mock.calls[0][1].idempotencyKey;
 
     fireEvent.click(screen.getByRole('button', { name: '重新查詢並安全確認結果' }));
     await waitFor(() => expect(client.apply).toHaveBeenCalledTimes(1));
     expect(client.apply.mock.calls[0][1].idempotencyKey).toBe(firstKey);
     await waitFor(() => expect(client.query).toHaveBeenCalledTimes(2));
-    expect(screen.getByText(/異常已依 owner root 與原 GOVSUB-006 predicate/)).toBeInTheDocument();
+    expect(screen.getByText(/已從最新問題清單解除/)).toBeInTheDocument();
   });
 
   it('receipt-only 或 anomaly predicate 仍 active 時不宣告完成', async () => {
@@ -185,12 +185,12 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
     fireEvent.change(screen.getByLabelText('人工處置原因'), { target: { value: '根因仍待投影確認' } });
     fireEvent.change(screen.getByLabelText('抵扣標的 31 金額'), { target: { value: '900' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查處置影響' }));
-    await screen.findByText(/套用後狀態：offset_applied/);
+    await screen.findByText(/套用後狀態：抵扣已完成/);
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: '確認套用處置' }));
     await waitFor(() => expect(client.apply).toHaveBeenCalledTimes(1));
     expect(onResolved).not.toHaveBeenCalled();
-    expect(screen.getByText(/尚未完成 owner 與 anomaly predicate 雙重回讀/)).toBeInTheDocument();
+    expect(screen.getAllByText(/最新資料與問題清單尚未完成雙重確認/).length).toBeGreaterThan(0);
   });
 
   it('receipt 後 owner readback 暫時失敗可恢復，且只重做 GET', async () => {
@@ -216,11 +216,11 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
     fireEvent.change(screen.getByLabelText('人工處置原因'), { target: { value: '重新查詢 owner 根事實' } });
     fireEvent.change(screen.getByLabelText('抵扣標的 31 金額'), { target: { value: '900' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查處置影響' }));
-    await screen.findByText(/套用後狀態：offset_applied/);
+    await screen.findByText(/套用後狀態：抵扣已完成/);
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: '確認套用處置' }));
-    await screen.findByText(/owner／anomaly readback 暫時失敗/);
-    fireEvent.click(screen.getByRole('button', { name: '重新查詢 owner 與 anomaly' }));
+    await screen.findByText(/最新資料或問題清單暫時無法確認/);
+    fireEvent.click(screen.getByRole('button', { name: '重新查詢結果' }));
     await waitFor(() => expect(client.apply).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(client.query).toHaveBeenCalledTimes(3));
     expect(onResolved).toHaveBeenCalledTimes(1);
@@ -244,12 +244,12 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
     fireEvent.change(screen.getByLabelText('人工處置原因'), { target: { value: '重新核對最新版本' } });
     fireEvent.change(screen.getByLabelText('抵扣標的 31 金額'), { target: { value: '900' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查處置影響' }));
-    await screen.findByText(/套用後狀態：offset_applied/);
+    await screen.findByText(/套用後狀態：抵扣已完成/);
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: '確認套用處置' }));
     await waitFor(() => expect(client.apply).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(client.query).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText(/套用後狀態：offset_applied/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/套用後狀態：抵扣已完成/)).not.toBeInTheDocument();
     expect(screen.getByText(/舊 Preview 已清除，請重新檢查處置影響/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '檢查處置影響' })).toBeEnabled();
     expect(client.apply).toHaveBeenCalledTimes(1);
@@ -282,12 +282,26 @@ describe('GovernmentOverpaymentRecoveryWorkbench', () => {
       fireEvent.change(screen.getByLabelText('人工處置原因'), { target: { value: '重新核對清單' } });
       fireEvent.change(screen.getByLabelText('抵扣標的 31 金額'), { target: { value: '900' } });
       fireEvent.click(screen.getByRole('button', { name: '檢查處置影響' }));
-      await screen.findByText(/套用後狀態：offset_applied/);
+      await screen.findByText(/套用後狀態：抵扣已完成/);
       fireEvent.click(screen.getByRole('checkbox'));
       fireEvent.click(screen.getByRole('button', { name: '確認套用處置' }));
       await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
-      expect(screen.queryByText(/異常已依 owner root 與原 GOVSUB-006 predicate/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/已從最新問題清單解除/)).not.toBeInTheDocument();
       unmount();
     }
+  });
+
+  it('keeps technical source data collapsed and maps unexpected errors to a closed message', async () => {
+    const client = { query: vi.fn().mockResolvedValue(query), preview: vi.fn(), apply: vi.fn() };
+    const { unmount } = render(<GovernmentOverpaymentRecoveryWorkbench overpaymentIdentity={identity} anomalyFingerprint={anomalyFingerprint} client={client} />);
+    await screen.findByText('目前狀態：');
+    expect(screen.getByText(/資料版本：2/)).not.toBeVisible();
+    expect(screen.getByText(/finance-import-row:11/)).not.toBeVisible();
+    unmount();
+
+    const failed = { query: vi.fn().mockRejectedValue(new Error('raw database host detail')), preview: vi.fn(), apply: vi.fn() };
+    render(<GovernmentOverpaymentRecoveryWorkbench overpaymentIdentity={identity} anomalyFingerprint={anomalyFingerprint} client={failed} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('政府溢撥目前無法處理，請稍後再試。');
+    expect(screen.queryByText(/raw database host detail/)).not.toBeInTheDocument();
   });
 });

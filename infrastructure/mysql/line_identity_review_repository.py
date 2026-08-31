@@ -6,11 +6,13 @@ from typing import Any
 
 from domains.line.identities import LineReviewRequestId, LineUserId
 from domains.line.identity_binding import (
+    LineIdentityBindingFailureStreak,
     LineBindingSubjectType,
     LineIdentityBindingSnapshot,
     LineIdentityBindingStatus,
     LineIdentityClaim,
     transition_binding_status,
+    reset_binding_failure_streak,
 )
 from domains.line.review import (
     LineReviewDecisionCandidate,
@@ -37,11 +39,121 @@ class MySqlLineIdentityRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
-    def get(self, line_user_id: LineUserId) -> LineIdentityBindingSnapshot | None:
+    def get(self, line_user_id: LineUserId, subject_type=None) -> LineIdentityBindingSnapshot | None:
+        if subject_type is None:
+            bindings = tuple(
+                binding
+                for binding in self.list_by_user(line_user_id)
+                if binding.status is not LineIdentityBindingStatus.REVOKED
+            )
+            if not bindings:
+                return None
+            if len(bindings) == 1:
+                return bindings[0]
+            selected_role, _ = self.selected_role(line_user_id)
+            if selected_role is None:
+                raise RuntimeError("line_identity_role_selection_required")
+            selected = tuple(
+                binding for binding in bindings if binding.subject_type is selected_role
+            )
+            if len(selected) != 1:
+                raise RuntimeError("line_identity_selected_role_stale")
+            return selected[0]
         with self._connection.cursor() as cursor:
-            cursor.execute(_IDENTITY_SELECT_SQL, (line_user_id.value,))
+            cursor.execute(
+                _IDENTITY_SELECT_BY_ROLE_SQL,
+                (line_user_id.value, subject_type.value),
+            )
             row = optional_row(cursor.fetchone())
         return None if row is None else _identity_snapshot(row)
+
+    def list_by_user(self, line_user_id):
+        with self._connection.cursor() as cursor:
+            cursor.execute(_IDENTITY_LIST_BY_USER_SQL, (line_user_id.value,))
+            rows = tuple(cursor.fetchall() or ())
+        return tuple(_identity_snapshot(row) for row in rows)
+
+    def selected_role(self, line_user_id):
+        with self._connection.cursor() as cursor:
+            cursor.execute(_IDENTITY_SELECTED_ROLE_SQL, (line_user_id.value,))
+            row = optional_row(cursor.fetchone())
+        if row is None:
+            raise LookupError("line_platform_user_not_found")
+        selected = row.get("selected_identity_role")
+        return (
+            LineBindingSubjectType(str(selected)) if selected is not None else None,
+            ExpectedVersion(int(row["aggregate_version"])),
+        )
+
+    def select_role(self, line_user_id, subject_type, expected_version):
+        if subject_type not in {
+            LineBindingSubjectType.CUSTOMER,
+            LineBindingSubjectType.STAFF,
+        }:
+            raise ValueError("line_identity_selected_role_invalid")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _IDENTITY_SELECT_BY_ROLE_SQL + " FOR UPDATE",
+                (line_user_id.value, subject_type.value),
+            )
+            row = optional_row(cursor.fetchone())
+            if row is None or _identity_snapshot(row).status is not LineIdentityBindingStatus.BOUND:
+                raise RuntimeError("line_identity_selected_role_not_bound")
+            cursor.execute(
+                _IDENTITY_SELECTED_ROLE_UPDATE_SQL,
+                (
+                    subject_type.value,
+                    expected_version.value + 1,
+                    line_user_id.value,
+                    expected_version.value,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("line_identity_selected_role_version_conflict")
+        return ExpectedVersion(expected_version.value + 1)
+
+    def get_failure_streak(self, line_user_id, *, lock=False):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _IDENTITY_FAILURE_STREAK_SELECT_SQL + (" FOR UPDATE" if lock else ""),
+                (line_user_id.value,),
+            )
+            row = optional_row(cursor.fetchone())
+        return None if row is None else _failure_streak_snapshot(row)
+
+    def save_failure_streak(self, streak):
+        expected_version = streak.version.value - 1
+        with self._connection.cursor() as cursor:
+            if expected_version == 0:
+                cursor.execute(
+                    _IDENTITY_FAILURE_STREAK_INSERT_SQL,
+                    _failure_streak_parameters(streak),
+                )
+                return
+            cursor.execute(
+                _IDENTITY_FAILURE_STREAK_UPDATE_SQL,
+                (
+                    streak.identity_flow_id,
+                    streak.candidate_subject_type.value,
+                    streak.candidate_scope,
+                    streak.scope_fingerprint,
+                    streak.generation,
+                    streak.failure_count,
+                    streak.last_failure_fingerprint,
+                    streak.escalation_id,
+                    streak.version.value,
+                    streak.line_user_id.value,
+                    expected_version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("line_identity_failure_streak_version_conflict")
+
+    def reset_failure_streak(self, line_user_id, identity_flow_id):
+        current = self.get_failure_streak(line_user_id, lock=True)
+        reset = reset_binding_failure_streak(current, identity_flow_id.value)
+        if reset is not None:
+            self.save_failure_streak(reset)
 
     def get_by_subject(self, subject_type, subject_reference):
         with self._connection.cursor() as cursor:
@@ -65,7 +177,11 @@ class MySqlLineIdentityRepository:
         expected_version: ExpectedVersion,
     ) -> LineIdentityBindingSnapshot:
         with self._connection.cursor() as cursor:
-            cursor.execute(_IDENTITY_SELECT_SQL + " FOR UPDATE", (claim.line_user_id.value,))
+            self._lock_role_scope(cursor, claim)
+            cursor.execute(
+                _IDENTITY_SELECT_BY_ROLE_SQL + " FOR UPDATE",
+                (claim.line_user_id.value, claim.subject_type.value),
+            )
             row = optional_row(cursor.fetchone())
             snapshot = _initial_identity(claim.line_user_id) if row is None else _identity_snapshot(row)
             if _claim_already_saved(snapshot, claim):
@@ -111,6 +227,7 @@ class MySqlLineIdentityRepository:
         actor_id,
         idempotency_key,
         correlation_id,
+        subject_type=None,
     ):
         return self._transition_status(
             line_user_id,
@@ -120,6 +237,7 @@ class MySqlLineIdentityRepository:
             actor_id,
             idempotency_key,
             correlation_id,
+            subject_type,
         )
 
     def request_revocation(
@@ -129,6 +247,7 @@ class MySqlLineIdentityRepository:
         actor_id,
         idempotency_key,
         correlation_id,
+        subject_type=None,
     ):
         return self._transition_status(
             line_user_id,
@@ -138,6 +257,7 @@ class MySqlLineIdentityRepository:
             actor_id,
             idempotency_key,
             correlation_id,
+            subject_type,
         )
 
     def complete_revocation(
@@ -147,6 +267,7 @@ class MySqlLineIdentityRepository:
         actor_id,
         idempotency_key,
         correlation_id,
+        subject_type=None,
     ):
         return self._transition_status(
             line_user_id,
@@ -156,6 +277,7 @@ class MySqlLineIdentityRepository:
             actor_id,
             idempotency_key,
             correlation_id,
+            subject_type,
         )
 
     # Kept cohesive because subject correction must preserve one locked aggregate event.
@@ -170,7 +292,7 @@ class MySqlLineIdentityRepository:
         with self._connection.cursor() as cursor:
             existing = self._existing_event(cursor, idempotency_key.value)
             if existing is not None:
-                snapshot = self.get(claim.line_user_id)
+                snapshot = self.get(claim.line_user_id, claim.subject_type)
                 if snapshot is None:
                     raise RuntimeError("line_identity_binding_missing")
                 replay = LineIdentityBindingSnapshot(
@@ -188,7 +310,11 @@ class MySqlLineIdentityRepository:
                     actor_id,
                 )
                 return snapshot
-            cursor.execute(_IDENTITY_SELECT_SQL + " FOR UPDATE", (claim.line_user_id.value,))
+            self._lock_role_scope(cursor, claim)
+            cursor.execute(
+                _IDENTITY_SELECT_BY_ROLE_SQL + " FOR UPDATE",
+                (claim.line_user_id.value, claim.subject_type.value),
+            )
             row = optional_row(cursor.fetchone())
             if row is None:
                 raise LookupError("line_identity_binding_not_found")
@@ -199,10 +325,10 @@ class MySqlLineIdentityRepository:
                 _IDENTITY_UPDATE_SQL,
                 (
                     LineIdentityBindingStatus.BOUND.value,
-                    claim.subject_type.value,
                     claim.subject_reference,
                     resulting_version,
                     claim.line_user_id.value,
+                    claim.subject_type.value,
                     expected_version.value,
                 ),
             )
@@ -242,11 +368,18 @@ class MySqlLineIdentityRepository:
         actor_id,
         idempotency_key,
         correlation_id,
+        subject_type=None,
     ):
+        resolved_type = subject_type
+        if resolved_type is None:
+            current = self.get(line_user_id)
+            if current is None or current.subject_type is None:
+                raise LookupError("line_identity_binding_not_found")
+            resolved_type = current.subject_type
         with self._connection.cursor() as cursor:
             existing = self._existing_event(cursor, idempotency_key.value)
             if existing is not None:
-                snapshot = self.get(line_user_id)
+                snapshot = self.get(line_user_id, resolved_type)
                 if snapshot is None:
                     raise RuntimeError("line_identity_binding_missing")
                 _require_same_transition_event(
@@ -257,7 +390,10 @@ class MySqlLineIdentityRepository:
                     actor_id,
                 )
                 return snapshot
-            cursor.execute(_IDENTITY_SELECT_SQL + " FOR UPDATE", (line_user_id.value,))
+            cursor.execute(
+                _IDENTITY_SELECT_BY_ROLE_SQL + " FOR UPDATE",
+                (line_user_id.value, resolved_type.value),
+            )
             row = optional_row(cursor.fetchone())
             if row is None:
                 raise LookupError("line_identity_binding_not_found")
@@ -270,7 +406,13 @@ class MySqlLineIdentityRepository:
             resulting_version = expected_version.value + 1
             cursor.execute(
                 _IDENTITY_STATUS_UPDATE_SQL,
-                (target.value, resulting_version, line_user_id.value, expected_version.value),
+                (
+                    target.value,
+                    resulting_version,
+                    line_user_id.value,
+                    resolved_type.value,
+                    expected_version.value,
+                ),
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("line_identity_binding_conflict")
@@ -305,7 +447,7 @@ class MySqlLineIdentityRepository:
         with self._connection.cursor() as cursor:
             existing = self._existing_event(cursor, idempotency_key.value)
             if existing is not None:
-                snapshot = self.get(claim.line_user_id)
+                snapshot = self.get(claim.line_user_id, claim.subject_type)
                 if snapshot is None:
                     raise RuntimeError("line_identity_binding_missing")
                 replay_snapshot = LineIdentityBindingSnapshot(
@@ -323,7 +465,11 @@ class MySqlLineIdentityRepository:
                     actor_id,
                 )
                 return snapshot
-            cursor.execute(_IDENTITY_SELECT_SQL + " FOR UPDATE", (claim.line_user_id.value,))
+            self._lock_role_scope(cursor, claim)
+            cursor.execute(
+                _IDENTITY_SELECT_BY_ROLE_SQL + " FOR UPDATE",
+                (claim.line_user_id.value, claim.subject_type.value),
+            )
             row = optional_row(cursor.fetchone())
             snapshot = _initial_identity(claim.line_user_id) if row is None else _identity_snapshot(row)
             if snapshot.status is target and _claim_already_saved(snapshot, claim):
@@ -357,6 +503,25 @@ class MySqlLineIdentityRepository:
             claim.subject_reference,
         )
 
+    def _lock_role_scope(self, cursor, claim):
+        cursor.execute(
+            _IDENTITY_ROLE_SCOPE_LOCK_SQL,
+            (claim.line_user_id.value,),
+        )
+        if optional_row(cursor.fetchone()) is None:
+            raise LookupError("line_platform_user_not_found")
+        cursor.execute(
+            _IDENTITY_ROLE_SCOPE_COUNTS_SQL,
+            (claim.line_user_id.value,),
+        )
+        counts = optional_row(cursor.fetchone()) or {}
+        admin_count = int(counts.get("admin_count") or 0)
+        nonadmin_count = int(counts.get("nonadmin_count") or 0)
+        if claim.subject_type is LineBindingSubjectType.ADMIN and nonadmin_count:
+            raise RuntimeError("line_identity_admin_role_exclusive")
+        if claim.subject_type is not LineBindingSubjectType.ADMIN and admin_count:
+            raise RuntimeError("line_identity_admin_role_exclusive")
+
     def _persist_binding_transition(self, cursor, snapshot, claim, target, version, is_new):
         if is_new:
             cursor.execute(
@@ -366,8 +531,14 @@ class MySqlLineIdentityRepository:
             return
         cursor.execute(
             _IDENTITY_UPDATE_SQL,
-            (target.value, claim.subject_type.value, claim.subject_reference, version,
-             claim.line_user_id.value, snapshot.version.value),
+            (
+                target.value,
+                claim.subject_reference,
+                version,
+                claim.line_user_id.value,
+                claim.subject_type.value,
+                snapshot.version.value,
+            ),
         )
         if cursor.rowcount != 1:
             raise RuntimeError("line_identity_binding_conflict")
@@ -416,10 +587,10 @@ class MySqlLineIdentityRepository:
                 _IDENTITY_UPDATE_SQL,
                 (
                     target.value,
-                    claim.subject_type.value,
                     claim.subject_reference,
                     resulting_version,
                     claim.line_user_id.value,
+                    claim.subject_type.value,
                     snapshot.version.value,
                 ),
             )
@@ -622,6 +793,36 @@ def _identity_snapshot(row):
     )
 
 
+def _failure_streak_snapshot(row):
+    return LineIdentityBindingFailureStreak(
+        LineUserId(str(row["line_user_id"])),
+        str(row["identity_flow_id"]),
+        LineBindingSubjectType(str(row["candidate_subject_type"])),
+        str(row["candidate_scope"]),
+        str(row["scope_fingerprint"]),
+        int(row["streak_generation"]),
+        int(row["failure_count"]),
+        _optional_text(row.get("last_failure_fingerprint")),
+        int(row["escalation_id"]) if row.get("escalation_id") is not None else None,
+        ExpectedVersion(int(row["aggregate_version"])),
+    )
+
+
+def _failure_streak_parameters(streak):
+    return (
+        streak.line_user_id.value,
+        streak.identity_flow_id,
+        streak.candidate_subject_type.value,
+        streak.candidate_scope,
+        streak.scope_fingerprint,
+        streak.generation,
+        streak.failure_count,
+        streak.last_failure_fingerprint,
+        streak.escalation_id,
+        streak.version.value,
+    )
+
+
 def _review_snapshot(row):
     return LineReviewSnapshot(
         LineReviewRequestId(int(row["id"])),
@@ -709,47 +910,93 @@ def _require_same_review_request(existing, command):
         raise RuntimeError("line_review_request_idempotency_conflict")
 
 
-_IDENTITY_SELECT_SQL = (
+_IDENTITY_SELECT_BY_ROLE_SQL = (
     "SELECT line_user_id,binding_status,subject_type,subject_reference,"
-    "aggregate_version FROM line_identity_bindings WHERE line_user_id=%s"
+    "aggregate_version FROM line_identity_role_bindings "
+    "WHERE line_user_id=%s AND subject_type=%s"
+)
+_IDENTITY_LIST_BY_USER_SQL = (
+    "SELECT line_user_id,binding_status,subject_type,subject_reference,"
+    "aggregate_version FROM line_identity_role_bindings WHERE line_user_id=%s "
+    "ORDER BY subject_type"
 )
 _IDENTITY_SELECT_BY_SUBJECT_SQL = (
-    _IDENTITY_SELECT_SQL.replace("WHERE line_user_id=%s", "WHERE subject_type=%s AND subject_reference=%s ")
-    + "AND binding_status IN ('pending_review','bound') LIMIT 1"
+    "SELECT line_user_id,binding_status,subject_type,subject_reference,"
+    "aggregate_version FROM line_identity_role_bindings "
+    "WHERE subject_type=%s AND subject_reference=%s "
+    "AND binding_status IN ('pending_review','bound') LIMIT 1"
 )
 _IDENTITY_LIST_BOUND_SQL = (
     "SELECT line_user_id,binding_status,subject_type,subject_reference,"
-    "aggregate_version FROM line_identity_bindings "
+    "aggregate_version FROM line_identity_role_bindings "
     "WHERE subject_type=%s AND binding_status='bound' ORDER BY line_user_id"
 )
 _IDENTITY_INSERT_SQL = (
-    "INSERT INTO line_identity_bindings (line_user_id,binding_status,subject_type,"
+    "INSERT INTO line_identity_role_bindings (line_user_id,binding_status,subject_type,"
     "subject_reference,aggregate_version) VALUES (%s,%s,%s,%s,%s)"
 )
 _IDENTITY_UPDATE_SQL = (
-    "UPDATE line_identity_bindings SET binding_status=%s,subject_type=%s,"
+    "UPDATE line_identity_role_bindings SET binding_status=%s,"
     "subject_reference=%s,aggregate_version=%s WHERE line_user_id=%s "
-    "AND aggregate_version=%s"
+    "AND subject_type=%s AND aggregate_version=%s"
 )
 _IDENTITY_STATUS_UPDATE_SQL = (
-    "UPDATE line_identity_bindings SET binding_status=%s,aggregate_version=%s "
-    "WHERE line_user_id=%s AND aggregate_version=%s"
+    "UPDATE line_identity_role_bindings SET binding_status=%s,aggregate_version=%s "
+    "WHERE line_user_id=%s AND subject_type=%s AND aggregate_version=%s"
 )
 _IDENTITY_EVENT_SELECT_SQL = (
-    "SELECT line_user_id,payload_fingerprint FROM line_identity_binding_events "
+    "SELECT line_user_id,payload_fingerprint FROM line_identity_role_binding_events "
     "WHERE idempotency_key=%s"
 )
 _IDENTITY_TRANSITION_EVENT_INSERT_SQL = (
-    "INSERT INTO line_identity_binding_events (line_user_id,action,subject_type,"
+    "INSERT INTO line_identity_role_binding_events (line_user_id,action,subject_type,"
     "subject_reference,expected_version,resulting_version,actor_id,"
     "payload_fingerprint,idempotency_key,correlation_id) "
     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 _IDENTITY_EVENT_INSERT_SQL = (
-    "INSERT INTO line_identity_binding_events (line_user_id,action,subject_type,"
+    "INSERT INTO line_identity_role_binding_events (line_user_id,action,subject_type,"
     "subject_reference,expected_version,resulting_version,actor_id,"
     "payload_fingerprint,idempotency_key,correlation_id) "
     "VALUES (%s,'claim_submitted',%s,%s,%s,%s,'line-platform',%s,%s,%s)"
+)
+_IDENTITY_SELECTED_ROLE_SQL = (
+    "SELECT selected_identity_role,aggregate_version FROM line_platform_users "
+    "WHERE line_user_id=%s"
+)
+_IDENTITY_SELECTED_ROLE_UPDATE_SQL = (
+    "UPDATE line_platform_users SET selected_identity_role=%s,aggregate_version=%s "
+    "WHERE line_user_id=%s AND aggregate_version=%s"
+)
+_IDENTITY_ROLE_SCOPE_LOCK_SQL = (
+    "SELECT line_user_id FROM line_platform_users WHERE line_user_id=%s FOR UPDATE"
+)
+_IDENTITY_ROLE_SCOPE_COUNTS_SQL = (
+    "SELECT SUM(subject_type='admin' AND binding_status IN "
+    "('pending_review','bound','revocation_pending')) AS admin_count,"
+    "SUM(subject_type IN ('customer','staff') AND binding_status IN "
+    "('pending_review','bound','revocation_pending')) AS nonadmin_count "
+    "FROM line_identity_role_bindings WHERE line_user_id=%s"
+)
+_IDENTITY_FAILURE_STREAK_SELECT_SQL = (
+    "SELECT line_user_id,identity_flow_id,candidate_subject_type,"
+    "candidate_scope,scope_fingerprint,streak_generation,"
+    "failure_count,last_failure_fingerprint,escalation_id,aggregate_version "
+    "FROM line_identity_binding_failure_streaks WHERE line_user_id=%s"
+)
+_IDENTITY_FAILURE_STREAK_INSERT_SQL = (
+    "INSERT INTO line_identity_binding_failure_streaks "
+    "(line_user_id,identity_flow_id,candidate_subject_type,"
+    "candidate_scope,scope_fingerprint,streak_generation,"
+    "failure_count,last_failure_fingerprint,escalation_id,aggregate_version) "
+    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+)
+_IDENTITY_FAILURE_STREAK_UPDATE_SQL = (
+    "UPDATE line_identity_binding_failure_streaks SET identity_flow_id=%s,"
+    "candidate_subject_type=%s,candidate_scope=%s,scope_fingerprint=%s,"
+    "streak_generation=%s,failure_count=%s,last_failure_fingerprint=%s,"
+    "escalation_id=%s,aggregate_version=%s WHERE line_user_id=%s "
+    "AND aggregate_version=%s"
 )
 _REVIEW_SELECT_SQL = (
     "SELECT id,review_type,review_status,aggregate_version,line_user_id,"

@@ -9,6 +9,7 @@ import {
   type OrderServiceCompletionPreview,
   type OrderServiceCompletionReceipt,
 } from '../api/orders/order_service_completion_client';
+import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
 
 interface Props {
   caseNo: string;
@@ -17,6 +18,19 @@ interface Props {
 }
 
 type MutationStatus = 'idle' | 'previewing' | 'previewed' | 'applying' | 'completed' | 'failed';
+
+function completionErrorMessage(caught: unknown): string {
+  if (caught instanceof ApiTimeoutError || caught instanceof ApiNetworkError) {
+    return '連線暫時中斷，請重新查詢案件狀態後再確認。';
+  }
+  if (caught instanceof ApiHttpError) {
+    if (caught.status === 401 || caught.status === 403) return '目前帳號無權處理這筆服務完成。';
+    if (caught.status === 409) return '案件資料已變更，請重新查詢後再檢查完工影響。';
+    if (caught.retryable || caught.status >= 500) return '服務完成處理暫時無法使用，請稍後重新查詢。';
+    return '這筆操作未通過完工檢查，請核對目前案件狀態。';
+  }
+  return '無法處理服務完成，請重新查詢後再試。';
+}
 
 export const OrderServiceCompletionActions: React.FC<Props> = ({
   caseNo,
@@ -42,7 +56,7 @@ export const OrderServiceCompletionActions: React.FC<Props> = ({
       setPreview(result);
       setStatus('previewed');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '無法檢查服務完成影響。');
+      setError(completionErrorMessage(caught));
       setStatus('failed');
     }
   };
@@ -66,7 +80,7 @@ export const OrderServiceCompletionActions: React.FC<Props> = ({
       setStatus('completed');
       await onCompleted();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '無法確認完成服務。');
+      setError(completionErrorMessage(caught));
       setStatus('failed');
     }
   };
@@ -82,7 +96,7 @@ export const OrderServiceCompletionActions: React.FC<Props> = ({
 
       {orderStatus === '訂單完成' ? (
         <div role="status" style={{ color: '#166534', fontWeight: 700 }}>
-          本案已有正式服務完成事件；後續請依 Client Finance 與 Staff Payables owner 處理結算。
+          本案已有正式服務完成事件；後續請至客戶帳務與服務人員款項流程處理結算。
         </div>
       ) : orderStatus !== '服務中' ? (
         <div role="status" style={{ color: '#92400e' }}>
@@ -91,7 +105,7 @@ export const OrderServiceCompletionActions: React.FC<Props> = ({
       ) : (
         <>
           <p style={{ margin: '0 0 10px', color: '#57423b', fontSize: '0.86rem' }}>
-            系統會重新鎖定正式排班、完整服務日、服務結束時刻與 lifecycle controls；不接受手動指定目標狀態。
+            系統會重新核對正式排班、完整服務日、服務結束時刻與可完成條件；不接受手動指定目標狀態。
           </p>
           <button
             type="button"

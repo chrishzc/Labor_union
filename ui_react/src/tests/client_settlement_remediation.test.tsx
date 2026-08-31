@@ -73,17 +73,19 @@ describe('client settlement anomaly remediation', () => {
     const client = owner(partial);
     const onResolved = vi.fn();
     render(<ClientSettlementRemediationWorkbench target={{ kind: 'refund', caseNo: 'CASE-1', accountVersion: 3 }} client={client} onResolved={onResolved} />);
-    await waitFor(() => expect(screen.getByText(/refund:1/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/第 1 筆｜一般退款/)).toBeInTheDocument());
+    expect(screen.getByText(/義務識別：refund:1/)).not.toBeVisible();
+    expect(screen.getByText(/來源資料列：11/)).not.toBeVisible();
     const checkboxes = screen.getAllByRole('checkbox');
     fireEvent.click(checkboxes[0]); fireEvent.click(checkboxes[2]);
     fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '客戶以電話確認退款帳戶，已核對銀行流水' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查核銷影響' }));
-    await waitFor(() => expect(screen.getByText(/Preview 金額/)).toBeInTheDocument());
-    fireEvent.click(screen.getByLabelText(/我已核對 owner Query/));
+    await waitFor(() => expect(screen.getByText(/預覽核銷金額/)).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText(/我已核對案件、逾期義務/));
     fireEvent.click(screen.getByRole('button', { name: '確認並套用' }));
-    await waitFor(() => expect(screen.getByText(/adjustment:2/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/第 1 筆｜調整款/)).toBeInTheDocument());
     expect(onResolved).not.toHaveBeenCalled();
-    expect(screen.getByText(/若仍有其他同碼逾期義務/)).toBeInTheDocument();
+    expect(screen.getByText(/若仍有其他同類逾期義務/)).toBeInTheDocument();
   });
 
   it('reports resolution only after fresh owner query has no same-code overdue obligations', async () => {
@@ -91,12 +93,21 @@ describe('client settlement anomaly remediation', () => {
     const client = owner(terminal);
     const onResolved = vi.fn();
     render(<ClientSettlementRemediationWorkbench target={{ kind: 'refund', caseNo: 'CASE-1', accountVersion: 3 }} client={client} onResolved={onResolved} />);
-    await waitFor(() => expect(screen.getByText(/refund:1/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/第 1 筆｜一般退款/)).toBeInTheDocument());
     const checkboxes = screen.getAllByRole('checkbox'); fireEvent.click(checkboxes[0]); fireEvent.click(checkboxes[2]);
     fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '電話補充帳戶後已核對正式出款' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查核銷影響' }));
-    await waitFor(() => screen.getByText(/Preview 金額/)); fireEvent.click(screen.getByLabelText(/我已核對 owner Query/)); fireEvent.click(screen.getByRole('button', { name: '確認並套用' }));
+    await waitFor(() => screen.getByText(/預覽核銷金額/)); fireEvent.click(screen.getByLabelText(/我已核對案件、逾期義務/)); fireEvent.click(screen.getByRole('button', { name: '確認並套用' }));
     await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
-    expect(screen.getByText(/此碼已無逾期未清義務/)).toBeInTheDocument();
+    expect(screen.getByText(/已無這類逾期未清義務/)).toBeInTheDocument();
+  });
+
+  it('maps unexpected owner failures to a closed business error', async () => {
+    const client = owner(firstQuery);
+    client.query = vi.fn().mockRejectedValue(new Error('raw database host detail'));
+    render(<ClientSettlementRemediationWorkbench target={{ kind: 'refund', caseNo: 'CASE-1', accountVersion: 3 }} client={client} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('客戶帳務目前無法完成，請稍後再試。');
+    expect(screen.queryByText(/raw database host detail/)).not.toBeInTheDocument();
   });
 });

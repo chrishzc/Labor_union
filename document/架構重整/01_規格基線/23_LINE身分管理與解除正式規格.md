@@ -9,6 +9,10 @@
 - 2026-08-21 M1 Alternative A amendment：`line_identity_bindings` 唯一 writer、Case Import 擁有 provisional
   registration、onboarding 是 binding projection outcome 而非 role promotion；implementation、schema／DB、
   provider 與真實 E2E 仍須另案 gate。
+- 2026-08-30 M1 role-scoped amendment：customer／staff 共用同一 binding root、event stream、
+  readback 與 application contract；只新增一個 LINE-owned 目前角色狀態與一筆 bounded
+  binding-failure streak。不建立平行 customer／staff 架構、session／preference framework
+  或 generic escalation engine。
 
 ## 2. Global 與 Domain 邊界
 
@@ -89,3 +93,73 @@ LINE 管理中心新增「身分管理」，並將「LINE 下方選單」改名�
 - `provisional_client_registrations` 的 provisional registration 由 Case Import 擁有；LIFF onboarding 成功只表示 binding／projection outcome，不得直接 promotion customer／staff／admin role，也不得覆蓋其他 Domain root。
 - legacy direct writers、舊 approve writer 與 `bind.html` 必須 guarded／readonly 或 `410`，逐 caller 建立 replacement、focused regression 與 restore trigger 後退出。Customer Service 的 `binding_failed_assistance` 可提供人工協助；dual-role 依 §2 明定為合法多 binding，後續實作必須補角色選擇、同 type conflict 與 two-failure escalation，不得把雙角色本身投影為 `LINE-004`。
 - 真實 verified-token／LIFF browser／registration／binding／Rich Menu E2E 仍需 sandbox config；本正式規格同步不把現況 evidence 宣稱為 PASS，也不授權 provider、schema／DB 或 route cutover。
+
+## 9. 2026-08-30 M1 role-scoped identity amendment
+
+### 9.1 唯一 root 與共用契約
+
+1. LINE Identity 以 `(line_user_id, subject_type)` 為 role-scoped binding identity。customer 與 staff
+   可同時各有一個 active binding；同一 subject type 仍只允許一個 active subject。admin
+   沿用同一 persistence／event／readback contract，但與 customer／staff 維持既有互斥規則。
+2. customer／staff 不得各自新增 repository、application、event type 或 read model。所有角色
+   共用一套 typed Query／Preview／Apply／receipt／fresh readback，差異只由
+   `subject_type` 與既有 owner projection port 表達。
+3. 每個 role binding 擁有自己的 version、status、subject reference 與 event lineage。查詢同一
+   LINE User ID 必須回傳全部 role bindings，不再以單一 root row 代表雙角色。
+4. additive successor 只從舊 canonical binding root 搬運已有角色與版本；不得從
+   `clients.line_user_id`、`staff.line_user_id` 或 admin projection 自動補造第二個 root。無法由舊 root
+   唯一重建的狀態維持 fail closed，留給既有 review／reconciliation 邊界處理。
+5. 舊 `line_identity_bindings` 只得作 migration／compatibility surface，不得成為第二個
+   writer 或角色判定來源。
+
+### 9.2 目前選定角色
+
+1. 目前選定角色由 LINE Identity 擁有，每個 LINE User ID 最多只有一個 nullable
+   `customer | staff` 狀態。它不是一般 session、偏好、多裝置或任意 key-value 設定。
+2. 只有同時具有 active customer 與 staff binding 時才需明確選擇。雙角色且未選擇時
+   fail closed 並要求選擇；Orders、Scheduling、LIFF route、worker 或 Rich Menu adapter 不得根據
+   訂單、排班、前一頁或 provider 現況猜測角色。
+3. 選擇 Apply 必須重讀該 role binding 仍為 active 後，在既有 LINE outer Unit of Work
+   寫入狀態、audit／receipt 與必要 Rich Menu binding intent。不新增 public route／entry point，
+   也不改 Rich Menu provider transport／worker boundary。
+4. 選定角色已不再 active 時，readback 不得把 stale 狀態當授權；若只剩一個
+   customer／staff role，後續的 canonical LINE application 使用該唯一角色並產生對應
+   menu intent。這項適配不改變既有解除 saga 狀態機、retry、manual completion 或
+   provider-success 判定。
+
+### 9.3 雙次失敗的 bounded streak
+
+1. LINE Identity 每個 LINE User ID 最多保留一筆 current binding-failure streak。scope 固定為
+   同一 verified identity flow 與同一 candidate `(subject_type, subject_reference)`；尚未解析出
+   root reference 的 not-found 路徑以 normalized proof fingerprint 作為 opaque candidate scope，
+   不保存 raw proof。更換 scope 時取代舊 current streak，不累積歷史、window 或通用規則。
+2. 第一次失敗只將 count 記為 `1`。同 scope 的第二次連續失敗將 count 記為 `2`，
+   並且只呼叫既有 Customer Service `CreateHumanEscalation` typed application 一次；不建立
+   generic escalation engine。
+3. 同 scope 的綁定成功將 count 歸零並推進單一 streak generation。第二次失敗
+   的 ticket source identity／idempotency key 由 scope 與 generation 決定；replay 只回傳原 ticket，
+   不重複開單。
+4. 原 binding Apply 失敗仍 rollback。失敗記錄使用既有 LINE-owned failure-recording outer
+   Unit of Work，在同一 commit 更新 streak 並透過既有 Customer Service typed gateway 建立
+   幂等客服單，不新增 provider side effect 或 hidden commit。
+5. failure event 與 escalation context 只保存 masked evidence／fingerprint、flow purpose、candidate
+   subject type 與 policy version；不寫入姓名、電話、身分證、raw LIFF payload 或 token。既有
+   Customer Service ticket root 仍依其 owner contract 保存 canonical requester LINE User ID，
+   本 amendment 不另造匿名 ticket schema 或第二套客服 identity。
+
+### 9.4 本 amendment 的非目標與驗收
+
+- 不變更既有解除 saga 的 retry、provider-success、manual-completion 狀態判定、Rich Menu provider
+  boundary、`LINE-006`或其他 M1～M4 語意。Staff retirement 只能由 Staff owner 的正式 transition
+  在同一 outer Unit of Work 呼叫既有 LINE revocation application contract；只解除 staff role。
+- staff role 解除完成後，若仍有 active customer role，LINE 追加以 revocation request ID 冪等識別的
+  customer menu intent；否則既有 default-menu reset 即為 terminal menu。不得重用較早 role-bind intent
+  identity 而讓恢復選單被去重。
+- 不新增 public API／entry point／LIFF route／legacy `line/line_bot.py` workflow，不實作
+  provider qualification、production／`union_db` 變更或 deployment。
+- 最低驗收：同一 User ID 的 customer／staff 可同時建立、獨立 version／event／readback；
+  同 type conflict 與 admin 互斥 fail closed；雙角色未選擇不能越權；選擇 replay 幂等且只產生
+  一個 menu intent；失敗 `1 → 2` 只建一張客服單，success reset 後的新 streak
+  可在再次兩次失敗時建立新單；Staff retirement 與 staff-role解除同一 commit，customer role保留且
+  successor menu intent不與舊bind intent碰撞；既有 revocation／provider／`LINE-006` focused
+  regression 不退步。

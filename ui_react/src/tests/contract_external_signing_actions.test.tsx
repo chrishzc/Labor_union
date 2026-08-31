@@ -234,14 +234,14 @@ describe('ContractExternalSigningActions', () => {
     fireEvent.change(screen.getByLabelText('最終簽署 PDF'), { target: { files: fileList(file) } });
     fireEvent.click(screen.getByRole('button', { name: '建立最終 PDF 預覽' }));
 
-    await screen.findByText(/完整性已由後端驗證/);
+    await screen.findByText(/PDF 類型與完整性已確認/);
     const apply = screen.getByRole('button', { name: '確認套用最終簽署 PDF' });
     expect(apply).toBeDisabled();
     fireEvent.click(screen.getByLabelText('我已核對案件、檔名、PDF 類型與版本'));
     expect(apply).toBeEnabled();
     fireEvent.click(apply);
 
-    await screen.findByText(/契約完成，最終 PDF 已完成 readback/);
+    await screen.findByText(/契約完成，最終 PDF 第 1 版已確認/);
     expect(contractExternalSigningClient.applyFinalDocument).toHaveBeenCalledWith(
       'CASE-001',
       expect.objectContaining({
@@ -271,7 +271,7 @@ describe('ContractExternalSigningActions', () => {
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/案件識別不一致/);
-    expect(screen.queryByText(/最終 PDF 第 1 版已完成 readback/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/最終 PDF 第 1 版已確認完成/)).not.toBeInTheDocument();
   });
 
   it('fails closed when the initial completed readback belongs to another signing session', async () => {
@@ -284,8 +284,8 @@ describe('ContractExternalSigningActions', () => {
 
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/簽約工作識別不一致/);
-    expect(screen.queryByText(/最終 PDF 第 1 版已完成 readback/)).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(/與目前簽約工作不一致/);
+    expect(screen.queryByText(/最終 PDF 第 1 版已確認完成/)).not.toBeInTheDocument();
   });
 
   it('fails closed when the post-Apply readback belongs to another case', async () => {
@@ -298,12 +298,12 @@ describe('ContractExternalSigningActions', () => {
     const file = new File(['%PDF-1.7\ncontract\n%%EOF'], 'final-signed.pdf', { type: 'application/pdf' });
     fireEvent.change(screen.getByLabelText('最終簽署 PDF'), { target: { files: fileList(file) } });
     fireEvent.click(screen.getByRole('button', { name: '建立最終 PDF 預覽' }));
-    await screen.findByText(/完整性已由後端驗證/);
+    await screen.findByText(/PDF 類型與完整性已確認/);
     fireEvent.click(screen.getByLabelText('我已核對案件、檔名、PDF 類型與版本'));
     fireEvent.click(screen.getByRole('button', { name: '確認套用最終簽署 PDF' }));
 
-    expect(await screen.findByText(/readback 尚未確認/)).toBeInTheDocument();
-    expect(screen.queryByText(/契約完成，最終 PDF 已完成 readback/)).not.toBeInTheDocument();
+    expect(await screen.findByText(/完成結果尚未確認/)).toBeInTheDocument();
+    expect(screen.queryByText(/契約完成，最終 PDF 第 1 版已確認/)).not.toBeInTheDocument();
   });
 
   it('invalidates a final Preview when the selected file changes', async () => {
@@ -314,7 +314,7 @@ describe('ContractExternalSigningActions', () => {
     const input = screen.getByLabelText('最終簽署 PDF');
     fireEvent.change(input, { target: { files: fileList(first) } });
     fireEvent.click(screen.getByRole('button', { name: '建立最終 PDF 預覽' }));
-    await screen.findByText(/完整性已由後端驗證/);
+    await screen.findByText(/PDF 類型與完整性已確認/);
 
     fireEvent.change(input, { target: { files: fileList(second) } });
     expect(screen.queryByRole('button', { name: '確認套用最終簽署 PDF' })).not.toBeInTheDocument();
@@ -334,13 +334,13 @@ describe('ContractExternalSigningActions', () => {
     const file = new File(['%PDF-1.7\ncontract\n%%EOF'], 'final-signed.pdf', { type: 'application/pdf' });
     fireEvent.change(screen.getByLabelText('最終簽署 PDF'), { target: { files: fileList(file) } });
     fireEvent.click(screen.getByRole('button', { name: '建立最終 PDF 預覽' }));
-    await screen.findByText(/完整性已由後端驗證/);
+    await screen.findByText(/PDF 類型與完整性已確認/);
     fireEvent.click(screen.getByLabelText('我已核對案件、檔名、PDF 類型與版本'));
     fireEvent.click(screen.getByRole('button', { name: '確認套用最終簽署 PDF' }));
 
     await screen.findByText(/結果未明/);
-    fireEvent.click(screen.getByRole('button', { name: '以原命令查詢 receipt' }));
-    await screen.findByText(/契約完成，最終 PDF 已完成 readback/);
+    fireEvent.click(screen.getByRole('button', { name: '重新確認原操作結果' }));
+    await screen.findByText(/契約完成，最終 PDF 第 1 版已確認/);
     expect(contractExternalSigningClient.applyFinalDocument).toHaveBeenCalledTimes(1);
     expect(contractExternalSigningClient.getReceipt).toHaveBeenCalledTimes(1);
     expect(contractExternalSigningClient.getReceipt).toHaveBeenCalledWith(
@@ -361,14 +361,14 @@ describe('ContractExternalSigningActions', () => {
     const file = new File(['%PDF-1.7\ncontract\n%%EOF'], 'final-signed.pdf', { type: 'application/pdf' });
     fireEvent.change(screen.getByLabelText('最終簽署 PDF'), { target: { files: fileList(file) } });
     fireEvent.click(screen.getByRole('button', { name: '建立最終 PDF 預覽' }));
-    await screen.findByText(/完整性已由後端驗證/);
+    await screen.findByText(/PDF 類型與完整性已確認/);
     fireEvent.click(screen.getByLabelText('我已核對案件、檔名、PDF 類型與版本'));
     fireEvent.click(screen.getByRole('button', { name: '確認套用最終簽署 PDF' }));
 
     await screen.findByText(/結果未明/);
-    fireEvent.click(screen.getByRole('button', { name: '以原命令查詢 receipt' }));
+    fireEvent.click(screen.getByRole('button', { name: '重新確認原操作結果' }));
 
-    expect(await screen.findByText(/receipt 與原命令識別不一致/)).toBeInTheDocument();
+    expect(await screen.findByText(/受理結果與原操作識別不一致/)).toBeInTheDocument();
     expect(contractExternalSigningClient.applyFinalDocument).toHaveBeenCalledTimes(1);
     expect(contractExternalSigningClient.getReceipt).toHaveBeenCalledTimes(1);
     expect(contractExternalSigningClient.getFinalDocumentReadback).not.toHaveBeenCalled();
@@ -464,18 +464,18 @@ describe('ContractExternalSigningActions', () => {
 
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
     const staffRegion = await screen.findByRole('article', { name: '月嫂 STAFF-009 歷史簽回修復' });
-    expect(screen.getByRole('button', { name: 'Preview 客戶歷史簽回修復' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '檢查客戶歷史簽回修復影響' })).toBeDisabled();
     fireEvent.change(screen.getAllByLabelText('修復原因與人工核對依據')[0], { target: { value: '依受控歷史紙本核對完成' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Preview 月嫂歷史簽回修復' }));
+    fireEvent.click(screen.getByRole('button', { name: '檢查月嫂歷史簽回修復影響' }));
     await screen.findByText(/Preview 已綁定現行文件版本 31/);
-    fireEvent.click(screen.getByLabelText('我已核對案件、對象、現行文件與歷史 event／receipt 血緣'));
+    fireEvent.click(screen.getByLabelText('我已核對案件、對象、現行文件與歷史簽回證據'));
     fireEvent.click(screen.getByRole('button', { name: '確認套用此筆歷史簽回修復' }));
 
     await waitFor(() => expect(screen.getByRole('article', { name: '客戶 CLIENT-001 歷史簽回修復' })).toBeInTheDocument());
     const clientReasonInput = screen.getByLabelText('修復原因與人工核對依據');
     expect(clientReasonInput).toBeEnabled();
     fireEvent.change(clientReasonInput, { target: { value: '依受控歷史客戶簽回核對完成' } });
-    expect(screen.getByRole('button', { name: 'Preview 客戶歷史簽回修復' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '檢查客戶歷史簽回修復影響' })).toBeEnabled();
     expect(staffRegion).not.toBeInTheDocument();
     expect(contractExternalSigningClient.query).toHaveBeenCalledTimes(2);
     expect(contractExternalSigningClient.queryLegacyRecovery).toHaveBeenCalledTimes(2);
@@ -527,12 +527,12 @@ describe('ContractExternalSigningActions', () => {
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
     await screen.findByRole('article', { name: '月嫂 STAFF-009 歷史簽回修復' });
     fireEvent.change(screen.getAllByLabelText('修復原因與人工核對依據')[0], { target: { value: '核對完成' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Preview 月嫂歷史簽回修復' }));
+    fireEvent.click(screen.getByRole('button', { name: '檢查月嫂歷史簽回修復影響' }));
     await screen.findByText(/Preview 已綁定現行文件版本 31/);
-    fireEvent.click(screen.getByLabelText('我已核對案件、對象、現行文件與歷史 event／receipt 血緣'));
+    fireEvent.click(screen.getByLabelText('我已核對案件、對象、現行文件與歷史簽回證據'));
     fireEvent.click(screen.getByRole('button', { name: '確認套用此筆歷史簽回修復' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/receipt 血緣不一致/);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/與原操作證據不一致/);
     expect(contractExternalSigningClient.query).toHaveBeenCalledTimes(1);
   });
 
@@ -571,10 +571,10 @@ describe('ContractExternalSigningActions', () => {
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
     await screen.findByRole('article', { name: '月嫂 STAFF-009 歷史簽回修復' });
     fireEvent.change(screen.getAllByLabelText('修復原因與人工核對依據')[0], { target: { value: '核對完成' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Preview 月嫂歷史簽回修復' }));
+    fireEvent.click(screen.getByRole('button', { name: '檢查月嫂歷史簽回修復影響' }));
 
     await screen.findByRole('alert');
-    expect(screen.getByRole('alert')).toHaveTextContent(/Preview 血緣不一致/);
+    expect(screen.getByRole('alert')).toHaveTextContent(/與目前文件證據不一致/);
     expect(contractExternalSigningClient.applyLegacyRecovery).not.toHaveBeenCalled();
   });
 
@@ -641,7 +641,7 @@ describe('ContractExternalSigningActions', () => {
     fireEvent.change(screen.getByLabelText('月嫂完成證據'), { target: { value: '電話核對完成' } });
     fireEvent.click(screen.getByRole('button', { name: '記錄月嫂 STAFF-009 完成回報' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/receipt 與原命令/);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/完成回報與原操作/);
     expect(contractExternalSigningClient.query).toHaveBeenCalledTimes(1);
   });
 });

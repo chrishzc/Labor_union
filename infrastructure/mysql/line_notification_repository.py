@@ -24,6 +24,23 @@ from subsystems.line.notification_policy import NotificationSourceEvent
 from subsystems.line.notification_schedule import schedule_notification_occurrences
 from subsystems.anomalies.line_notification_anomaly_projector import NotificationDecisionSource
 from subsystems.line.ports import LineNotificationCancellationLineage
+from subsystems.line.notification_failure_current_fact import (
+    LineNotificationFailedSourceFact,
+    LineNotificationFailureCurrentFactQuery,
+    LineNotificationFailureCurrentFactReadback,
+    LineNotificationFailureReason,
+    LineNotificationFailureRecheckTarget,
+    LineNotificationReplaySuccessorFact,
+    evaluate_line_notification_failure_current_fact,
+)
+
+
+class LineNotificationManualReplayValidationError(ValueError):
+    """The original source is not presently eligible for a fresh manual replay."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
 
 
 class MySqlLineNotificationRepository:
@@ -134,6 +151,231 @@ class MySqlLineNotificationRepository:
             if isinstance(row, dict) and row.get("case_no")
         )
 
+    def current_failure_fact(
+        self, query: LineNotificationFailureCurrentFactQuery
+    ) -> LineNotificationFailureCurrentFactReadback:
+        """Return the complete logical LINE-006 group without writing an aggregate."""
+
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _LINE006_FAILED_SOURCES_SQL,
+                (query.case_no, query.notification_reason.value),
+            )
+            rows = _strict_dict_rows(
+                tuple(cursor.fetchall() or ()),
+                "line006_failed_source_readback_invalid",
+            )
+        if not rows:
+            return evaluate_line_notification_failure_current_fact(
+                query, (), owner_version=0, authoritative_complete=True
+            )
+
+        source_rows: dict[int, list[dict[str, object]]] = {}
+        for row in rows:
+            source_rows.setdefault(int(row["source_event_id"]), []).append(row)
+        source_ids = tuple(sorted(source_rows))
+        replay_rows = self._line006_replay_rows(source_ids)
+        replay_by_original: dict[int, list[LineNotificationReplaySuccessorFact]] = {
+            source_id: [] for source_id in source_ids
+        }
+        maximum_version = max(source_ids)
+        for original_id in source_ids:
+            successors = _line006_replay_facts(
+                original_id,
+                source_rows[original_id][0],
+                replay_rows,
+            )
+            replay_by_original[original_id].extend(successors)
+            for successor in successors:
+                maximum_version = max(maximum_version, successor.source_event_id)
+
+        rule_snapshot = self._current_configuration("notification_rules")
+        rules = None if rule_snapshot is None else rule_snapshot[1].get("rules")
+        authoritative_complete = isinstance(rules, list)
+        if rule_snapshot is not None:
+            maximum_version = max(maximum_version, rule_snapshot[0])
+
+        sources: list[LineNotificationFailedSourceFact] = []
+        for source_id in source_ids:
+            row = source_rows[source_id][0]
+            facts = _json_object(row["facts_snapshot"])
+            current_rule_applies = False
+            if isinstance(rules, list):
+                current_rule_applies = any(
+                    isinstance(rule, dict)
+                    and rule.get("event_code") == row["event_code"]
+                    and rule.get("enabled") is True
+                    and _predicates_match(rule.get("predicates"), facts)
+                    for rule in rules
+                )
+            sources.append(
+                LineNotificationFailedSourceFact(
+                    source_event_id=source_id,
+                    currently_applicable=bool(row["is_latest_source_version"])
+                    and current_rule_applies,
+                    applicability_complete=authoritative_complete,
+                    replay_successors=tuple(replay_by_original[source_id]),
+                )
+            )
+        return evaluate_line_notification_failure_current_fact(
+            query,
+            tuple(sources),
+            owner_version=maximum_version,
+            authoritative_complete=authoritative_complete,
+        )
+
+    def line006_recheck_targets_for_source(
+        self, source_event_id: int
+    ) -> tuple[LineNotificationFailureRecheckTarget, ...]:
+        if source_event_id <= 0:
+            raise ValueError("notification source event ID is invalid")
+        with self._connection.cursor() as cursor:
+            cursor.execute(_LINE006_RECHECK_TARGETS_FOR_SOURCE_SQL, (source_event_id,))
+            rows = tuple(cursor.fetchall() or ())
+        return _line006_recheck_targets(rows)
+
+    def list_line006_recheck_targets(
+        self, *, limit: int = 100
+    ) -> tuple[LineNotificationFailureRecheckTarget, ...]:
+        if limit <= 0:
+            raise ValueError("LINE-006 recheck target limit is invalid")
+        with self._connection.cursor() as cursor:
+            cursor.execute(_LINE006_RECHECK_TARGETS_SQL, (limit,))
+            rows = tuple(cursor.fetchall() or ())
+        return _line006_recheck_targets(rows)
+
+    def line006_recheck_targets_for_delivery_task(
+        self, delivery_task_id: int
+    ) -> tuple[LineNotificationFailureRecheckTarget, ...]:
+        if delivery_task_id <= 0:
+            raise ValueError("LINE delivery task ID is invalid")
+        with self._connection.cursor() as cursor:
+            cursor.execute(_LINE006_REPLAY_IDENTITY_FOR_TASK_SQL, (delivery_task_id,))
+            row = cursor.fetchone()
+        if not isinstance(row, dict):
+            return ()
+        original_source_id = _manual_replay_original_source_id(
+            str(row.get("source_event_identity", ""))
+        )
+        if original_source_id is None:
+            return ()
+        return self.line006_recheck_targets_for_source(original_source_id)
+
+    def manual_replay_delivery_validation_failure(
+        self, delivery_task_id: int
+    ) -> str | None:
+        """Freshly validate a replay task immediately before provider delivery."""
+
+        if delivery_task_id <= 0:
+            raise ValueError("LINE delivery task ID is invalid")
+        with self._connection.cursor() as cursor:
+            cursor.execute(_MANUAL_REPLAY_TASK_VALIDATION_SQL, (delivery_task_id,))
+            row = cursor.fetchone()
+        if not isinstance(row, dict):
+            return None
+        original_source_id = _manual_replay_original_source_id(
+            str(row.get("source_event_identity", ""))
+        )
+        if original_source_id is None:
+            return "replay_lineage_ambiguous"
+        original = self._source_event(original_source_id)
+        if original is None:
+            return "replay_lineage_ambiguous"
+        replay_facts = _json_object(row["facts_snapshot"])
+        if (
+            row.get("event_code") != original.event_code
+            or row.get("source_aggregate_type") != original.source_aggregate_type
+            or row.get("source_aggregate_identity") != original.source_aggregate_identity
+            or int(row.get("source_version", -1)) != original.source_version
+            or _canonical_json(replay_facts) != _canonical_json(original.facts)
+        ):
+            return "replay_lineage_ambiguous"
+        if self._source_has_newer_version(original):
+            return "notification_source_not_currently_applicable"
+        rule_snapshot = self._current_configuration("notification_rules")
+        template_snapshot = self._current_configuration("message_templates")
+        if rule_snapshot is None or template_snapshot is None:
+            return "notification_configuration_unavailable"
+        rules = rule_snapshot[1].get("rules")
+        rule = next(
+            (
+                item
+                for item in rules
+                if isinstance(item, dict)
+                and item.get("id") == row.get("rule_id")
+                and item.get("event_code") == original.event_code
+                and item.get("enabled") is True
+                and _predicates_match(item.get("predicates"), original.facts)
+            ),
+            None,
+        ) if isinstance(rules, list) else None
+        if rule is None:
+            return "notification_source_not_currently_applicable"
+        recipient = self._resolve_recipient(str(rule.get("recipient_selector")), original.facts)
+        if recipient is None:
+            return "recipient_unavailable"
+        expected_recipient = (
+            recipient.recipient_type.value,
+            recipient.identity.value,
+        )
+        if expected_recipient not in {
+            (
+                str(row.get("recipient_type")),
+                str(row.get("recipient_identity")),
+            ),
+            (
+                str(row.get("task_recipient_type")),
+                str(row.get("task_recipient_identity")),
+            ),
+        } or (
+            str(row.get("recipient_type")),
+            str(row.get("recipient_identity")),
+        ) != (
+            str(row.get("task_recipient_type")),
+            str(row.get("task_recipient_identity")),
+        ):
+            return "recipient_binding_changed"
+        if rule.get("template_id") != row.get("template_id"):
+            return "notification_configuration_changed"
+        try:
+            render_message_template(
+                template_snapshot[1],
+                str(rule["template_id"]),
+                _template_variables(original.facts),
+            )
+        except (KeyError, ValueError):
+            return "template_or_schedule_invalid"
+        return None
+
+    def line006_recheck_targets_for_event_codes(
+        self, event_codes: tuple[str, ...]
+    ) -> tuple[LineNotificationFailureRecheckTarget, ...]:
+        normalized = tuple(sorted(set(event_codes)))
+        if not normalized:
+            return ()
+        placeholders = ",".join("%s" for _ in normalized)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _line006_recheck_targets_for_event_codes_sql(placeholders),
+                normalized,
+            )
+            rows = tuple(cursor.fetchall() or ())
+        return _line006_recheck_targets(rows)
+
+    def _line006_replay_rows(
+        self, original_source_ids: tuple[int, ...]
+    ) -> tuple[dict[str, object], ...]:
+        if not original_source_ids:
+            return ()
+        conditions = " OR ".join(
+            "replay.source_event_identity LIKE %s" for _ in original_source_ids
+        )
+        patterns = tuple(f"manual-replay:{source_id}:%" for source_id in original_source_ids)
+        with self._connection.cursor() as cursor:
+            cursor.execute(_line006_replay_rows_sql(conditions), patterns)
+            rows = tuple(cursor.fetchall() or ())
+        return _strict_dict_rows(rows, "line006_replay_readback_invalid")
+
     def list_sources_without_decisions(
         self, *, limit: int = 100
     ) -> tuple[NotificationSourceEvent, ...]:
@@ -199,7 +441,113 @@ class MySqlLineNotificationRepository:
             source_version=source.source_version,
             occurred_at=occurred_at,
         )
+        existing_id = self._existing_source_event_id(replay)
+        if existing_id is not None:
+            return existing_id
+        self._validate_manual_replay(source_event_id, source, occurred_at)
         return self.register_and_project(replay)
+
+    def _existing_source_event_id(
+        self, event: NotificationSourceEvent
+    ) -> int | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _SOURCE_EVENT_EXISTING_SQL,
+                (event.source_domain, event.event_code, event.identity),
+            )
+            row = cursor.fetchone()
+        if not isinstance(row, dict):
+            return None
+        actual = (
+            str(row["source_aggregate_type"]),
+            str(row["source_aggregate_identity"]),
+            int(row["source_version"]),
+            bool(row["historical_silent"]),
+            _canonical_json(_json_object(row["facts_snapshot"])),
+        )
+        expected = (
+            event.source_aggregate_type,
+            event.source_aggregate_identity,
+            event.source_version,
+            event.historical_silent,
+            _canonical_json(event.facts),
+        )
+        if actual != expected:
+            raise RuntimeError("line_notification_source_event_conflict")
+        return int(row["id"])
+
+    def _validate_manual_replay(
+        self,
+        source_event_id: int,
+        source: NotificationSourceEvent,
+        occurred_at: datetime,
+    ) -> None:
+        if source.source_domain == "manual_replay":
+            raise LineNotificationManualReplayValidationError(
+                "manual_replay_source_must_be_original"
+            )
+        if self._source_has_newer_version(source):
+            raise LineNotificationManualReplayValidationError(
+                "notification_source_not_currently_applicable"
+            )
+        rule_snapshot = self._current_configuration("notification_rules")
+        template_snapshot = self._current_configuration("message_templates")
+        if rule_snapshot is None or template_snapshot is None:
+            raise LineNotificationManualReplayValidationError(
+                "notification_configuration_unavailable"
+            )
+        rules = rule_snapshot[1].get("rules")
+        templates = template_snapshot[1]
+        matching = tuple(
+            rule
+            for rule in rules
+            if isinstance(rule, dict)
+            and rule.get("event_code") == source.event_code
+            and rule.get("enabled") is True
+            and _predicates_match(rule.get("predicates"), source.facts)
+        ) if isinstance(rules, list) else ()
+        if not matching:
+            raise LineNotificationManualReplayValidationError(
+                "notification_source_not_currently_applicable"
+            )
+        for rule in matching:
+            selector = rule.get("recipient_selector")
+            recipient = self._resolve_recipient(str(selector), source.facts)
+            if recipient is None:
+                raise LineNotificationManualReplayValidationError(
+                    "recipient_unavailable"
+                )
+            try:
+                render_message_template(
+                    templates, str(rule["template_id"]), _template_variables(source.facts)
+                )
+                occurrences = schedule_notification_occurrences(
+                    occurred_at=occurred_at,
+                    schedule=_object(rule.get("schedule")),
+                    frequency=_object(rule.get("frequency"), default={"kind": "once"}),
+                )
+            except (KeyError, ValueError) as error:
+                raise LineNotificationManualReplayValidationError(
+                    "template_or_schedule_invalid"
+                ) from error
+            if not occurrences:
+                raise LineNotificationManualReplayValidationError(
+                    "template_or_schedule_invalid"
+                )
+
+    def _source_has_newer_version(self, source: NotificationSourceEvent) -> bool:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _SOURCE_HAS_NEWER_VERSION_SQL,
+                (
+                    source.source_domain,
+                    source.event_code,
+                    source.source_aggregate_type,
+                    source.source_aggregate_identity,
+                    source.source_version,
+                ),
+            )
+            return cursor.fetchone() is not None
 
     def _source_event(self, source_event_id: int) -> NotificationSourceEvent | None:
         if source_event_id <= 0:
@@ -506,6 +854,69 @@ _NOTIFICATION_ANOMALY_SOURCES_SQL = (
     "ORDER BY decision.id LIMIT %s"
 )
 
+_LINE006_FAILED_SOURCES_SQL = (
+    "SELECT source.id AS source_event_id,source.source_domain,source.event_code,"
+    "source.source_event_identity,source.source_aggregate_type,"
+    "source.source_aggregate_identity,source.source_version,source.facts_snapshot,"
+    "decision.rule_id,decision.reason_code,"
+    "NOT EXISTS (SELECT 1 FROM line_notification_source_events newer "
+    "WHERE newer.source_domain=source.source_domain AND newer.event_code=source.event_code "
+    "AND newer.source_aggregate_type=source.source_aggregate_type "
+    "AND newer.source_aggregate_identity=source.source_aggregate_identity "
+    "AND newer.source_domain<>'manual_replay' AND newer.source_version>source.source_version) "
+    "AS is_latest_source_version "
+    "FROM line_notification_source_events source "
+    "JOIN line_notification_decisions decision ON decision.source_event_id=source.id "
+    "WHERE source.source_domain<>'manual_replay' "
+    "AND JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.case_no'))=%s "
+    "AND decision.reason_code=%s ORDER BY source.id,decision.id"
+)
+
+_LINE006_RECHECK_TARGETS_FOR_SOURCE_SQL = (
+    "SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.case_no')) AS case_no,"
+    "decision.reason_code FROM line_notification_source_events source "
+    "JOIN line_notification_decisions decision ON decision.source_event_id=source.id "
+    "WHERE source.id=%s AND source.source_domain<>'manual_replay' "
+    "AND decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
+    "ORDER BY case_no,decision.reason_code"
+)
+
+_LINE006_RECHECK_TARGETS_SQL = (
+    "SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.case_no')) AS case_no,"
+    "decision.reason_code FROM line_notification_source_events source "
+    "JOIN line_notification_decisions decision ON decision.source_event_id=source.id "
+    "WHERE source.source_domain<>'manual_replay' "
+    "AND decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
+    "ORDER BY case_no,decision.reason_code LIMIT %s"
+)
+
+_LINE006_REPLAY_IDENTITY_FOR_TASK_SQL = (
+    "SELECT source.source_event_identity FROM line_delivery_tasks task "
+    "JOIN line_notification_intents intent ON intent.delivery_task_id=task.id "
+    "JOIN line_notification_decisions decision ON decision.id=intent.decision_id "
+    "JOIN line_notification_source_events source ON source.id=decision.source_event_id "
+    "WHERE task.id=%s AND source.source_domain='manual_replay'"
+)
+
+_MANUAL_REPLAY_TASK_VALIDATION_SQL = (
+    "SELECT replay.source_event_identity,replay.event_code,replay.source_aggregate_type,"
+    "replay.source_aggregate_identity,replay.source_version,replay.facts_snapshot,"
+    "decision.rule_id,decision.recipient_type,decision.recipient_identity,"
+    "intent.template_id,task.recipient_type AS task_recipient_type,"
+    "task.recipient_identity AS task_recipient_identity "
+    "FROM line_delivery_tasks task "
+    "JOIN line_notification_intents intent ON intent.delivery_task_id=task.id "
+    "JOIN line_notification_decisions decision ON decision.id=intent.decision_id "
+    "JOIN line_notification_source_events replay ON replay.id=decision.source_event_id "
+    "WHERE task.id=%s AND replay.source_domain='manual_replay'"
+)
+
+_SOURCE_HAS_NEWER_VERSION_SQL = (
+    "SELECT id FROM line_notification_source_events WHERE source_domain=%s AND event_code=%s "
+    "AND source_aggregate_type=%s AND source_aggregate_identity=%s "
+    "AND source_domain<>'manual_replay' AND source_version>%s LIMIT 1"
+)
+
 
 def _sources_without_decisions_sql(placeholders: str) -> str:
     return (
@@ -516,6 +927,34 @@ def _sources_without_decisions_sql(placeholders: str) -> str:
         "LEFT JOIN line_notification_decisions decision ON decision.source_event_id=source.id "
         f"WHERE source.event_code IN ({placeholders}) AND decision.id IS NULL "
         "ORDER BY source.id LIMIT %s"
+    )
+
+
+def _line006_replay_rows_sql(conditions: str) -> str:
+    return (
+        "SELECT replay.id AS replay_source_event_id,replay.source_event_identity,"
+        "replay.event_code,replay.source_aggregate_type,replay.source_aggregate_identity,"
+        "replay.source_version,replay.facts_snapshot,decision.id AS decision_id,"
+        "decision.decision_status,decision.reason_code,intent.id AS intent_id,"
+        "task.processing_status AS delivery_status,task.id AS delivery_task_id "
+        "FROM line_notification_source_events replay "
+        "LEFT JOIN line_notification_decisions decision ON decision.source_event_id=replay.id "
+        "LEFT JOIN line_notification_intents intent ON intent.decision_id=decision.id "
+        "LEFT JOIN line_delivery_tasks task ON task.id=intent.delivery_task_id "
+        "WHERE replay.source_domain='manual_replay' AND (" + conditions + ") "
+        "ORDER BY replay.id,decision.id,intent.id"
+    )
+
+
+def _line006_recheck_targets_for_event_codes_sql(placeholders: str) -> str:
+    return (
+        "SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.case_no')) AS case_no,"
+        "decision.reason_code FROM line_notification_source_events source "
+        "JOIN line_notification_decisions decision ON decision.source_event_id=source.id "
+        "WHERE source.source_domain<>'manual_replay' "
+        f"AND source.event_code IN ({placeholders}) "
+        "AND decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
+        "ORDER BY case_no,decision.reason_code"
     )
 
 
@@ -544,6 +983,101 @@ def _source_event_from_row(row: dict[str, object]) -> NotificationSourceEvent:
         source_version=int(row["source_version"]),
         occurred_at=aware_utc(row["occurred_at_utc"]),
     )
+
+
+def _line006_replay_facts(
+    original_source_id: int,
+    original: dict[str, object],
+    rows: tuple[dict[str, object], ...],
+) -> tuple[LineNotificationReplaySuccessorFact, ...]:
+    grouped: dict[int, list[dict[str, object]]] = {}
+    for row in rows:
+        if _manual_replay_original_source_id(
+            str(row.get("source_event_identity", ""))
+        ) == original_source_id:
+            grouped.setdefault(int(row["replay_source_event_id"]), []).append(row)
+    result: list[LineNotificationReplaySuccessorFact] = []
+    for replay_source_id, replay_rows in sorted(grouped.items()):
+        first = replay_rows[0]
+        exact_lineage = (
+            first.get("event_code") == original.get("event_code")
+            and first.get("source_aggregate_type") == original.get("source_aggregate_type")
+            and first.get("source_aggregate_identity") == original.get("source_aggregate_identity")
+            and int(first.get("source_version", -1)) == int(original.get("source_version", -2))
+            and _canonical_json(_json_object(first["facts_snapshot"]))
+            == _canonical_json(_json_object(original["facts_snapshot"]))
+        )
+        failed_validation = any(
+            row.get("reason_code")
+            in {"recipient_unavailable", "template_or_schedule_invalid"}
+            for row in replay_rows
+        )
+        created_rows = tuple(
+            row for row in replay_rows if row.get("decision_status") == "intent_created"
+        )
+        fresh_validation_valid: bool | None
+        if failed_validation:
+            fresh_validation_valid = False
+        elif not created_rows:
+            fresh_validation_valid = None
+        else:
+            fresh_validation_valid = all(
+                row.get("intent_id") is not None
+                and row.get("delivery_task_id") is not None
+                for row in created_rows
+            )
+        statuses = tuple(
+            sorted(
+                str(row["delivery_status"])
+                for row in created_rows
+                if row.get("delivery_status") is not None
+            )
+        )
+        result.append(
+            LineNotificationReplaySuccessorFact(
+                replay_source_id,
+                exact_lineage,
+                fresh_validation_valid,
+                statuses,
+            )
+        )
+    return tuple(result)
+
+
+def _manual_replay_original_source_id(identity: str) -> int | None:
+    prefix = "manual-replay:"
+    if not identity.startswith(prefix):
+        return None
+    source_id, separator, idempotency_key = identity[len(prefix):].partition(":")
+    if not separator or not idempotency_key or not source_id.isdigit():
+        return None
+    value = int(source_id)
+    return value if value > 0 else None
+
+
+def _line006_recheck_targets(
+    rows: tuple[object, ...],
+) -> tuple[LineNotificationFailureRecheckTarget, ...]:
+    targets: set[LineNotificationFailureRecheckTarget] = set()
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("case_no"), str):
+            raise RuntimeError("line006_recheck_target_readback_invalid")
+        try:
+            reason = LineNotificationFailureReason(str(row.get("reason_code")))
+        except ValueError as error:
+            raise RuntimeError("line006_recheck_target_readback_invalid") from error
+        targets.add(LineNotificationFailureRecheckTarget(row["case_no"], reason))
+    return tuple(
+        sorted(targets, key=lambda item: (item.case_no, item.notification_reason.value))
+    )
+
+
+def _strict_dict_rows(
+    rows: tuple[object, ...], error_code: str
+) -> tuple[dict[str, object], ...]:
+    if not all(isinstance(row, dict) for row in rows):
+        raise RuntimeError(error_code)
+    return tuple(rows)  # type: ignore[return-value]
 
 
 def _object(value: object, *, default: dict[str, object] | None = None) -> dict[str, object]:
@@ -611,4 +1145,7 @@ def _cancellation_row(row: object) -> tuple[int, int | None]:
         raise RuntimeError("line_notification_intent_cancellation_lineage_invalid")
     return intent_id, task_id
 
-__all__ = ["MySqlLineNotificationRepository"]
+__all__ = [
+    "LineNotificationManualReplayValidationError",
+    "MySqlLineNotificationRepository",
+]

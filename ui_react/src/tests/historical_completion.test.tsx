@@ -1,6 +1,6 @@
 /**
  * File: historical_completion.test.tsx
- * Description: 驗證 HOB-E strict decode、owner referral 與 Step 11 不假完成顯示。
+ * Description: 驗證 HOB-E strict decode、closed owner referral、收合技術證據與 Step 11 不假完成顯示。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -41,9 +41,10 @@ describe('HistoricalCompletionPanel', () => {
   it('keeps Step 11 open and displays exact owner referral', async () => {
     render(<HistoricalCompletionPanel caseNo="CASE-1" client={client(blocked)} />);
 
-    await waitFor(() => expect(screen.getByText(/尚有 1 項 owner 根事實/)).toBeInTheDocument());
-    expect(screen.getByText(/Client Finance 尚有未結清義務/).closest('li')).toHaveTextContent('客戶帳務');
-    expect(screen.getByText(/client_finance.settlement/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/尚有 1 項必要資料/)).toBeInTheDocument());
+    expect(screen.getByText(/客戶帳務結清/).closest('li')).toHaveTextContent('客戶帳務');
+    expect(screen.getByText(/client_finance_settlement_open/).closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText(/source fingerprint/).closest('details')).not.toHaveAttribute('open');
   });
 
   it('shows completion only when all terminal flags and alerts agree', async () => {
@@ -57,8 +58,16 @@ describe('HistoricalCompletionPanel', () => {
     };
     render(<HistoricalCompletionPanel caseNo="CASE-1" client={client(completed)} />);
 
-    await waitFor(() => expect(screen.getByText(/共同確認完成/)).toBeInTheDocument());
-    expect(screen.queryByRole('list', { name: '待處理 owner 根事實' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/皆已確認完成/)).toBeInTheDocument());
+    expect(screen.queryByRole('list', { name: '待處理項目' })).not.toBeInTheDocument();
+  });
+
+  it('does not expose an unclassified runtime error', async () => {
+    const failingClient: HistoricalCompletionClient = { query: vi.fn().mockRejectedValue(new Error('raw transport detail')) };
+    render(<HistoricalCompletionPanel caseNo="CASE-1" client={failingClient} />);
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('歷史案件完成狀態目前無法載入。'));
+    expect(screen.queryByText('raw transport detail')).not.toBeInTheDocument();
   });
 
   it('strict decoder rejects extra fields instead of passing raw dictionaries', async () => {

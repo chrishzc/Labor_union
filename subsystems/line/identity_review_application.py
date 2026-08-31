@@ -36,7 +36,7 @@ from subsystems.line.review_contracts import (
     PreviewLineReviewDecisionCommand,
     PreviewLineReviewDecisionResult,
 )
-from subsystems.line.rich_menu_binding import schedule_rich_menu_binding
+from subsystems.line.rich_menu_binding import schedule_resolved_identity_menu
 
 
 class LineReviewNotFoundError(LookupError):
@@ -188,10 +188,11 @@ def _apply_approval(unit_of_work, snapshot, command):
             command.actor.actor_id,
             _derived_key(command, "revoke-old"),
             command.correlation_id.value,
+            snapshot.subject_type,
         )
     _bind_owner_projection(unit_of_work, snapshot, old_line_user_id)
     binding = _bind_review_claim(unit_of_work, snapshot, command)
-    schedule_rich_menu_binding(unit_of_work, binding)
+    schedule_resolved_identity_menu(unit_of_work, binding.line_user_id)
 
 
 def _bind_owner_projection(unit_of_work, snapshot, old_line_user_id):
@@ -223,7 +224,10 @@ def _bind_review_claim(unit_of_work, snapshot, command):
         snapshot.subject_type,
         snapshot.subject_reference,
     )
-    current = unit_of_work.identities.get(snapshot.line_user_id)
+    current = unit_of_work.identities.get(
+        snapshot.line_user_id,
+        snapshot.subject_type,
+    )
     if current and current.status is LineIdentityBindingStatus.BOUND:
         if current.subject_type is claim.subject_type and current.subject_reference == claim.subject_reference:
             return current
@@ -242,7 +246,10 @@ def _bind_review_claim(unit_of_work, snapshot, command):
 
 def _apply_rejection(unit_of_work, snapshot, command):
     _require_review_identity(snapshot)
-    current = unit_of_work.identities.get(snapshot.line_user_id)
+    current = unit_of_work.identities.get(
+        snapshot.line_user_id,
+        snapshot.subject_type,
+    )
     if not current or current.status is not LineIdentityBindingStatus.PENDING_REVIEW:
         return
     if current.subject_type is not snapshot.subject_type:
@@ -255,6 +262,7 @@ def _apply_rejection(unit_of_work, snapshot, command):
         command.actor.actor_id,
         _derived_key(command, "reject-claim"),
         command.correlation_id.value,
+        snapshot.subject_type,
     )
 
 

@@ -33,6 +33,7 @@ from domains.line.identities import (
     LineWebhookEventId,
 )
 from domains.line.identity_binding import (
+    LineIdentityBindingFailureStreak,
     LineBindingSubjectType,
     LineIdentityBindingSnapshot,
     LineIdentityClaim,
@@ -55,6 +56,7 @@ from domains.line.webhook import (
     LineWebhookInboxSnapshot,
     LineWebhookProcessingStatus,
 )
+from domains.anomalies.current_issue import RecheckIntent
 from shared_kernel.clock import BusinessClock
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import (
@@ -119,6 +121,11 @@ from subsystems.line.order_group_contracts import (
     LineOrderGroupPage,
     LinkedLineAdmin,
     OrderLineAudience,
+)
+from subsystems.line.notification_failure_current_fact import (
+    LineNotificationFailureCurrentFactQuery,
+    LineNotificationFailureCurrentFactReadback,
+    LineNotificationFailureRecheckTarget,
 )
 from subsystems.line.review_contracts import (
     CreateLineReviewCommand,
@@ -400,7 +407,16 @@ class LineRuntimeRepositoryPort(Protocol):
 
 
 class LineIdentityRepositoryPort(Protocol):
-    def get(self, line_user_id: LineUserId) -> LineIdentityBindingSnapshot | None: ...
+    def get(
+        self,
+        line_user_id: LineUserId,
+        subject_type: LineBindingSubjectType | None = None,
+    ) -> LineIdentityBindingSnapshot | None: ...
+
+    def list_by_user(
+        self,
+        line_user_id: LineUserId,
+    ) -> tuple[LineIdentityBindingSnapshot, ...]: ...
 
     def list_bound_by_subject_type(
         self,
@@ -429,6 +445,7 @@ class LineIdentityRepositoryPort(Protocol):
         actor_id: str,
         idempotency_key: IdempotencyKey,
         correlation_id: str,
+        subject_type: LineBindingSubjectType | None = None,
     ) -> LineIdentityBindingSnapshot: ...
 
     def request_revocation(
@@ -438,6 +455,7 @@ class LineIdentityRepositoryPort(Protocol):
         actor_id: str,
         idempotency_key: IdempotencyKey,
         correlation_id: str,
+        subject_type: LineBindingSubjectType | None = None,
     ) -> LineIdentityBindingSnapshot: ...
 
     def complete_revocation(
@@ -447,6 +465,7 @@ class LineIdentityRepositoryPort(Protocol):
         actor_id: str,
         idempotency_key: IdempotencyKey,
         correlation_id: str,
+        subject_type: LineBindingSubjectType | None = None,
     ) -> LineIdentityBindingSnapshot: ...
 
     def replace_subject(
@@ -463,6 +482,36 @@ class LineIdentityRepositoryPort(Protocol):
         subject_type: LineBindingSubjectType,
         subject_reference: str,
     ) -> LineIdentityBindingSnapshot | None: ...
+
+    def selected_role(
+        self,
+        line_user_id: LineUserId,
+    ) -> tuple[LineBindingSubjectType | None, ExpectedVersion]: ...
+
+    def select_role(
+        self,
+        line_user_id: LineUserId,
+        subject_type: LineBindingSubjectType,
+        expected_version: ExpectedVersion,
+    ) -> ExpectedVersion: ...
+
+    def get_failure_streak(
+        self,
+        line_user_id: LineUserId,
+        *,
+        lock: bool = False,
+    ) -> LineIdentityBindingFailureStreak | None: ...
+
+    def save_failure_streak(
+        self,
+        streak: LineIdentityBindingFailureStreak,
+    ) -> None: ...
+
+    def reset_failure_streak(
+        self,
+        line_user_id: LineUserId,
+        identity_flow_id: LineIdentityFlowId,
+    ) -> None: ...
 
 
 class LinePlatformUserRepositoryPort(Protocol):
@@ -578,6 +627,34 @@ class LineNotificationRuleRepositoryPort(Protocol):
     ) -> LineNotificationCancellationLineage: ...
 
     def register_source_event(self, event: object) -> int: ...
+
+    def current_failure_fact(
+        self, query: LineNotificationFailureCurrentFactQuery
+    ) -> LineNotificationFailureCurrentFactReadback: ...
+
+    def list_line006_recheck_targets(
+        self, *, limit: int = 100
+    ) -> tuple[LineNotificationFailureRecheckTarget, ...]: ...
+
+    def line006_recheck_targets_for_source(
+        self, source_event_id: int
+    ) -> tuple[LineNotificationFailureRecheckTarget, ...]: ...
+
+    def line006_recheck_targets_for_delivery_task(
+        self, delivery_task_id: int
+    ) -> tuple[LineNotificationFailureRecheckTarget, ...]: ...
+
+    def manual_replay_delivery_validation_failure(
+        self, delivery_task_id: int
+    ) -> str | None: ...
+
+    def line006_recheck_targets_for_event_codes(
+        self, event_codes: tuple[str, ...]
+    ) -> tuple[LineNotificationFailureRecheckTarget, ...]: ...
+
+
+class LineAnomalyRecheckPort(Protocol):
+    def append_recheck_intent(self, intent: RecheckIntent) -> None: ...
 
 
 class LineConfigurationRepositoryPort(Protocol):
@@ -880,6 +957,7 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     admins: AdminIdentityOwnerPort
     delivery_tasks: LineDeliveryTaskRepositoryPort
     notification_rules: LineNotificationRuleRepositoryPort
+    anomaly_rechecks: LineAnomalyRecheckPort
     configurations: LineConfigurationRepositoryPort
     rich_menu_publications: LineRichMenuPublicationRepositoryPort
     rich_menu_media_assets: LineRichMenuMediaAssetQueryRepositoryPort
@@ -902,6 +980,7 @@ __all__ = [
     "CustomerIdentityOwnerPort",
     "LineAuditIntent",
     "LineAuditPort",
+    "LineAnomalyRecheckPort",
     "LineConfigurationRepositoryPort",
     "LineDeliveryTaskRepositoryPort",
     "LineIdentityRepositoryPort",

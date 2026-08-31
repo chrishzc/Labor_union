@@ -1,0 +1,133 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-line-identity-role-scope-2026-08-30-v1",
+  "descriptors": {
+    "1019_line_identity_role_scope.sql": {
+      "tables": {
+        "line_identity_role_bindings": [
+          "line_user_id",
+          "subject_type",
+          "binding_status",
+          "subject_reference",
+          "aggregate_version",
+          "active_subject_key",
+          "created_at_utc",
+          "updated_at_utc"
+        ],
+        "line_identity_role_binding_events": [
+          "id",
+          "line_user_id",
+          "subject_type",
+          "action",
+          "subject_reference",
+          "expected_version",
+          "resulting_version",
+          "actor_id",
+          "payload_fingerprint",
+          "idempotency_key",
+          "correlation_id",
+          "occurred_at_utc"
+        ],
+        "line_identity_binding_failure_streaks": [
+          "line_user_id",
+          "identity_flow_id",
+          "candidate_subject_type",
+          "candidate_scope",
+          "scope_fingerprint",
+          "streak_generation",
+          "failure_count",
+          "last_failure_fingerprint",
+          "escalation_id",
+          "aggregate_version",
+          "created_at_utc",
+          "updated_at_utc"
+        ]
+      },
+      "indexes": {
+        "line_identity_role_bindings.PRIMARY": {
+          "non_unique": 0,
+          "columns": ["line_user_id", "subject_type"]
+        },
+        "line_identity_role_bindings.uq_line_identity_role_active_subject": {
+          "non_unique": 0,
+          "columns": ["active_subject_key"]
+        },
+        "line_identity_role_bindings.idx_line_identity_role_status": {
+          "non_unique": 1,
+          "columns": ["subject_type", "binding_status", "updated_at_utc", "line_user_id"]
+        },
+        "line_identity_role_binding_events.PRIMARY": {
+          "non_unique": 0,
+          "columns": ["id"]
+        },
+        "line_identity_role_binding_events.uq_line_identity_role_event_idempotency": {
+          "non_unique": 0,
+          "columns": ["idempotency_key"]
+        },
+        "line_identity_role_binding_events.idx_line_identity_role_event_stream": {
+          "non_unique": 1,
+          "columns": ["line_user_id", "subject_type", "id"]
+        },
+        "line_identity_binding_failure_streaks.PRIMARY": {
+          "non_unique": 0,
+          "columns": ["line_user_id"]
+        },
+        "line_identity_binding_failure_streaks.idx_line_identity_failure_flow": {
+          "non_unique": 1,
+          "columns": ["identity_flow_id", "candidate_subject_type", "candidate_scope"]
+        },
+        "line_identity_binding_failure_streaks.idx_line_identity_failure_escalation": {
+          "non_unique": 1,
+          "columns": ["escalation_id"]
+        }
+      },
+      "foreign_keys": {
+        "line_identity_role_bindings.fk_line_identity_role_platform_user": {
+          "columns": ["line_user_id"],
+          "referenced_table": "line_platform_users",
+          "referenced_columns": ["line_user_id"],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "line_identity_role_binding_events.fk_line_identity_role_event_binding": {
+          "columns": ["line_user_id", "subject_type"],
+          "referenced_table": "line_identity_role_bindings",
+          "referenced_columns": ["line_user_id", "subject_type"],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "line_identity_binding_failure_streaks.fk_line_identity_failure_platform_user": {
+          "columns": ["line_user_id"],
+          "referenced_table": "line_platform_users",
+          "referenced_columns": ["line_user_id"],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "line_identity_binding_failure_streaks.fk_line_identity_failure_flow": {
+          "columns": ["identity_flow_id"],
+          "referenced_table": "line_identity_flows",
+          "referenced_columns": ["flow_id"],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "line_identity_binding_failure_streaks.fk_line_identity_failure_escalation": {
+          "columns": ["escalation_id"],
+          "referenced_table": "customer_service_escalations",
+          "referenced_columns": ["id"],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "line_identity_role_bindings.chk_line_identity_role_subject_reference": "atom(char_length(trim(subject_reference))>0)",
+        "line_identity_role_binding_events.chk_line_identity_role_event_fingerprint": "atom(regexp_like(payload_fingerprint,'^[0-9a-f]{64}$'))",
+        "line_identity_role_binding_events.chk_line_identity_role_event_version": "atom(resulting_version=expected_version+1)",
+        "line_identity_role_binding_events.chk_line_identity_role_event_text": "and(atom(char_length(trim(subject_reference))>0),atom(char_length(trim(actor_id))>0),atom(char_length(trim(idempotency_key))>0),atom(char_length(trim(correlation_id))>0))",
+        "line_identity_binding_failure_streaks.chk_line_identity_failure_scope": "and(atom(regexp_like(scope_fingerprint,'^[0-9a-f]{64}$')),atom(char_length(trim(candidate_scope))>0))",
+        "line_identity_binding_failure_streaks.chk_line_identity_failure_count": "and(atom(failure_countbetween0),atom(2))",
+        "line_identity_binding_failure_streaks.chk_line_identity_failure_shape": "or(and(atom(failure_count=0),atom(last_failure_fingerprintisnull),atom(escalation_idisnull)),and(atom(failure_count=1),atom(regexp_like(last_failure_fingerprint,'^[0-9a-f]{64}$')),atom(escalation_idisnull)),and(atom(failure_count=2),atom(regexp_like(last_failure_fingerprint,'^[0-9a-f]{64}$')),atom(escalation_idisnotnull)))"
+      },
+      "triggers": []
+    }
+  }
+}

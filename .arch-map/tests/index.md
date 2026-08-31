@@ -21,6 +21,7 @@ Owner-local tests應進 owning Domain／Subsystem canonical root；`tests/` flat
 - `access` — `tests/domains/external-integration/subsystems/access/`；map: `domains/external-integration/index.md`
 - `line` — `tests/domains/external-integration/subsystems/line/`；map: `domains/external-integration/index.md`
 - `contract-signing` — `tests/domains/contract-signing/subsystems/contract-signing/`；map: `domains/contract-signing/index.md`
+- `global-reporting` — `tests/test_weekly_operations_report_contract.py`（path-sensitive cross-domain contract）；map: `domains/global/subsystems/reporting/index.md`
 
 ## Higher-boundary routing
 Keep tests outside an owner root only when the test itself proves one of these boundaries:
@@ -31,6 +32,8 @@ Keep tests outside an owner root only when the test itself proves one of these b
 - disposable-MySQL or engine acceptance whose target spans more than one owner or release boundary;
 - Task97／entry／writer／commit／CI governance;
 - legacy UI or compatibility behavior with a documented current consumer/path-sensitive gate.
+
+`ui_react/src/tests/challenger_auth_navigation.test.tsx` remains a Global application-shell higher-boundary test because one file jointly protects hash navigation、session/auth boundaries、nested ErrorBoundary isolation及closed crash presentation；它不是任何單一Domain owner-local root，也不得因其中一個oracle更新而重包。
 
 Physical roots currently used for those cases include `tests/integration/`, `tests/e2e/`, `tests/hurl/` and selected documented flat `tests/test_*.py` files. `tests/fixtures/` remains shared legacy fixture storage; ownership must be resolved from consumers before moving/removing it. `tests/global/` is not currently present (`layout_gap`).
 

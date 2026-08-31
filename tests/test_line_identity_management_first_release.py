@@ -73,6 +73,12 @@ class IdentityRepository:
         self.calls.append("binding_pending")
         return _binding_snapshot(LineIdentityBindingStatus.REVOCATION_PENDING, 3)
 
+    def get(self, _line_user_id, _subject_type=None):
+        return _binding_snapshot(LineIdentityBindingStatus.BOUND, 2)
+
+    def list_by_user(self, _line_user_id):
+        return ()
+
     def complete_revocation(self, *arguments):
         self.calls.append("binding_revoked")
         return _binding_snapshot(LineIdentityBindingStatus.REVOKED, 4)
@@ -267,9 +273,14 @@ def test_api_view_unwraps_domain_value_objects_at_the_boundary() -> None:
     assert response.data.pending_binding_version == 3
 
 
-def test_current_fact_api_view_is_closed_and_keeps_dual_role_limit_visible() -> None:
+def test_current_fact_api_view_is_closed_and_exposes_role_scoped_support() -> None:
     connection = _CurrentFactConnection(
-        [_root_fact(), _owner_fact("customer", "7"), _owner_fact("staff", "12")]
+        [
+            _root_fact(),
+            _root_fact("staff", "12"),
+            _owner_fact("customer", "7"),
+            _owner_fact("staff", "12"),
+        ]
     )
     readback = MySqlLineIdentityManagementRepository(connection).current_fact(
         LineIdentityCurrentFactQuery(LineUserId("U-dual-1"))
@@ -277,7 +288,7 @@ def test_current_fact_api_view_is_closed_and_keeps_dual_role_limit_visible() -> 
 
     view = LineIdentityCurrentFactReadbackView.model_validate(readback)
 
-    assert view.dual_role_persistence_supported is False
+    assert view.dual_role_persistence_supported is True
     assert LineIdentityCurrentFactFinding.LEGAL_CUSTOMER_STAFF_DUAL_ROLE in view.findings
 
 
@@ -511,9 +522,14 @@ def _owner_fact(subject_type, subject_reference, name="owner"):
     }
 
 
-def test_current_fact_treats_customer_staff_dual_role_as_legal_but_exposes_schema_limit() -> None:
+def test_current_fact_treats_persisted_customer_staff_dual_role_as_legal() -> None:
     connection = _CurrentFactConnection(
-        [_root_fact(), _owner_fact("customer", "7"), _owner_fact("staff", "42", "月嫂")]
+        [
+            _root_fact(),
+            _root_fact("staff", "42"),
+            _owner_fact("customer", "7"),
+            _owner_fact("staff", "42", "月嫂"),
+        ]
     )
 
     readback = MySqlLineIdentityManagementRepository(connection).current_fact(
@@ -521,14 +537,12 @@ def test_current_fact_treats_customer_staff_dual_role_as_legal_but_exposes_schem
     )
 
     assert LineIdentityCurrentFactFinding.LEGAL_CUSTOMER_STAFF_DUAL_ROLE in readback.findings
-    assert LineIdentityCurrentFactFinding.ROOT_OWNER_PROJECTION_MISMATCH in readback.findings
-    assert readback.readback_status is LineIdentityCurrentFactReadbackStatus.ROOT_PERSISTENCE_LIMITED
-    assert readback.dual_role_persistence_supported is False
+    assert LineIdentityCurrentFactFinding.ROOT_OWNER_PROJECTION_MISMATCH not in readback.findings
+    assert readback.readback_status is LineIdentityCurrentFactReadbackStatus.COMPLETE
+    assert readback.dual_role_persistence_supported is True
     assert readback.is_legal_dual_role is True
-    # The two roles are legal; the current single-row root still leaves a
-    # separately actionable root/projection mismatch.
-    assert readback.is_conflict is True
-    assert "schema_release_for_role_scoped_bindings" in readback.manual_actions
+    assert readback.is_conflict is False
+    assert readback.manual_actions == ()
     assert "INSERT" not in connection.cursor_instance.statement.upper()
 
 

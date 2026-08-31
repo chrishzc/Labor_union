@@ -200,12 +200,12 @@ export const OrderTrackerPage: React.FC = () => {
           message: ORDER_STAGE_PROJECTION_UNAVAILABLE,
         });
       }
-    } catch (error) {
+    } catch {
       if (controller.signal.aborted || generation !== generationRef.current) return;
       setStageProjectionState({ kind: 'unavailable', message: ORDER_STAGE_PROJECTION_UNAVAILABLE });
       setQueryState({
         kind: 'error',
-        message: `訂單清單載入未完成：${error instanceof Error ? error.message : '載入訂單摘要失敗'}`,
+        message: '訂單清單載入未完成，請稍後重新載入摘要。',
       });
     } finally {
       if (abortRef.current === controller) abortRef.current = null;

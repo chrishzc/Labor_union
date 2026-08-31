@@ -35,7 +35,7 @@
 
 Customer Service 擁有客服需求、對話事件、處理狀態、處理人與版本。LINE user、client、case 只保存可追溯 reference；正式客戶與訂單資料仍由其原 Domain 擁有。
 
-根事實：ticket ID、LINE user ID、category、client/case reference、原始訊息、status、version、actor、created/updated/resolved time。衍生值包含狀態標籤、今日統計與遮罩顯示值。
+根事實：ticket ID、LINE user ID、category、client/case reference、原始訊息、status、version、actor、created/updated/resolved time。衍生值包含狀態標籤、今日統計與授權範圍顯示值。
 
 ### 3.2 狀態機
 
@@ -232,12 +232,13 @@ numbered pagination regression 覆蓋；不得為取得 Chrome 正向頁面而�
 
 1. LIFF 只接受 server 驗證的 ID token 與 current binding；query-string `userId` 只能保留導航資訊，
    不得決定申請人、subject、權限或 DB target。
-2. 申請 payload 必須是 owner 核准的欄位 allowlist、目前 owner version、requested values、去敏原因與
+2. 申請 payload 必須是 owner 核准的欄位 allowlist、目前 owner version、requested values、申請原因與
    idempotency identity。LINE Integration 只擁有 intake／binding evidence，不得直接更新 Client／Staff root。
 3. 提交採 `PreviewProfileChangeRequest` → 使用者明確確認 → `ApplyProfileChangeRequest` → applicant-scoped
    receipt/readback；Preview 零寫入，Apply 只建立 immutable pending request，不代表資料已修改。
-4. 管理端必須顯示 current value 與 requested value 的人可讀差異、subject、request version、必要 evidence
-   與明確業務 blocker；一般 UI 不顯示 fingerprint、raw token、binding id、SQL、storage locator 或完整敏感值。
+4. verified applicant可看自己的完整current/requested values；authenticated、enabled且具對應owner
+   permission的管理端reviewer可看完整diff、subject、request version、必要evidence與明確業務blocker。
+   一般UI仍不得顯示fingerprint、raw token、binding id、SQL、storage locator、secret或credential。
 5. 核准採 owner-specific `PreviewApproveProfileChange` → 管理員明確確認 → `ApplyApproveProfileChange`。
    Apply 在單一 outer UoW fresh-lock request、binding、subject 與 owner version，由 owning repository 更新
    canonical DB root、append approval event／receipt／outbox 並 commit；route、LIFF、LINE callback 與 UI
@@ -303,8 +304,9 @@ projection composition、postback、delivery、provider 或 26 的 deferred-afte
   idempotency與typed receipt，resolve後才解除hold。
 - `reply_provider` direct path已由durable delivery task取代；Service Help只enqueue，不在webhook transaction呼叫
   provider。LINE provider仍只能由已提交task的worker執行；本規格不授權AI provider、deployment或新的外部副作用。
-- runtime／LINE管理畫面的audit清單只能使用closed masked typed view；raw details、token、完整identity或額外欄位
-  一律在API client boundary fail closed，不得穿透Streamlit／React render。
+- runtime／LINE管理畫面的audit清單只能使用closed bounded typed view；具owner permission的普通業務值
+  不遮罩，但raw details、token、secret、credential、storage locator或額外欄位一律在API client boundary
+  fail closed，不得穿透Streamlit／React render。
 
 ## 2026-08-26 current execution authorization amendment
 

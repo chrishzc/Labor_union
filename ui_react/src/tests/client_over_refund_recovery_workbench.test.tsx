@@ -26,9 +26,10 @@ describe('ClientOverRefundRecoveryWorkbench', () => {
     await waitFor(() => expect(screen.getByText(/目前餘額：500/)).toBeInTheDocument());
     expect(screen.getByText(/配對不會解除異常/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '確認套用' })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText(/canonical 入款流水 ID/), { target: { value: '10' } });
+    expect(screen.queryByText(/bank:10|版本：3|狀態：open/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/入款流水紀錄編號/), { target: { value: '10' } });
     fireEvent.change(screen.getByLabelText(/處理原因/), { target: { value: '電話確認' } });
-    fireEvent.change(screen.getByLabelText(/佐證 reference/), { target: { value: 'phone-log:1' } });
+    fireEvent.change(screen.getByLabelText(/佐證紀錄/), { target: { value: 'phone-log:1' } });
     expect(screen.getByRole('button', { name: '預覽處理影響' })).toBeEnabled();
   });
 
@@ -42,7 +43,7 @@ describe('ClientOverRefundRecoveryWorkbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '授權人工調整' }));
     fireEvent.change(screen.getByLabelText(/調整金額/), { target: { value: '500' } });
     fireEvent.change(screen.getByLabelText(/處理原因/), { target: { value: '電話確認後授權調整' } });
-    fireEvent.change(screen.getByLabelText(/佐證 reference/), { target: { value: 'phone-log:1' } });
+    fireEvent.change(screen.getByLabelText(/佐證紀錄/), { target: { value: 'phone-log:1' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽處理影響' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '確認套用' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '確認套用' }));
@@ -54,6 +55,8 @@ describe('ClientOverRefundRecoveryWorkbench', () => {
     render(<ClientOverRefundRecoveryWorkbench caseNo="CASE-1" recoveryIdentity="recovery:1" client={owner} />);
     await waitFor(() => expect(screen.getByText(/目前餘額：500/)).toBeInTheDocument());
     expect(screen.getByRole('button', { name: '核銷已配對入款' })).toBeInTheDocument();
+    expect(screen.getByText('技術操作欄位')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('match:1')).not.toBeVisible();
     expect(screen.queryByRole('button', { name: /解除異常/ })).not.toBeInTheDocument();
   });
 });

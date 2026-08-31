@@ -624,7 +624,7 @@ export const LegacyAnomaliesPage: React.FC = () => {
   const previewCorrection = async () => {
     const request = correctionRequest();
     if (!request) {
-      setCorrectionError('請填寫分類、至少一筆義務識別、理由與佐證。');
+      setCorrectionError('請填寫分類、至少一筆對應收付款紀錄、理由與佐證。');
       return;
     }
     const seq = ++correctionFlowSeq.current;
@@ -636,11 +636,11 @@ export const LegacyAnomaliesPage: React.FC = () => {
       if (preview.candidate.row_identity !== request.row_identity || preview.candidate.classification_type !== request.classification_type) throw new Error('Preview 與目前 Finance Import 更正輸入不一致。');
       setCorrectionPreview(preview);
       setCorrectionFlowStatus('preview_ready');
-    } catch (error) {
+    } catch {
       if (seq !== correctionFlowSeq.current) return;
       setCorrectionPreview(null);
       setCorrectionFlowStatus('typed_error');
-      setCorrectionError(error instanceof Error ? error.message : 'Finance Import 更正 Preview 無法完成。');
+      setCorrectionError('帳務更正影響目前無法檢查，請稍後重試。');
     }
   };
 
@@ -670,7 +670,7 @@ export const LegacyAnomaliesPage: React.FC = () => {
           }
           if (terminalDetail.summary.predicate_active) {
             setCorrectionFlowStatus('accepted');
-            setCorrectionError('帳務更正已提交，來源異常仍待核對；根因條件仍成立，請以同一 job/root 重新查詢。');
+            setCorrectionError('帳務更正已提交，但來源異常仍待核對；根因條件仍成立，請重新查詢更正結果。');
             return;
           }
 
@@ -682,25 +682,23 @@ export const LegacyAnomaliesPage: React.FC = () => {
           }
           if (refreshedAnomalies.snapshot.some((anomaly) => anomaly.fingerprint === originalFingerprint)) {
             setCorrectionFlowStatus('accepted');
-            setCorrectionError('帳務更正已提交，來源異常仍待核對；最新清單仍顯示原異常，請以同一 job/root 重新查詢。');
+            setCorrectionError('帳務更正已提交，但最新清單仍顯示此異常；請重新查詢更正結果。');
             return;
           }
           setCorrectionFlowStatus('completed');
           setCorrectionError(null);
-        } catch (error) {
+        } catch {
           if (seq !== correctionFlowSeq.current) return;
           setCorrectionFlowStatus('accepted');
-          setCorrectionError(error instanceof Error
-            ? error.message
-            : '帳務更正已提交，來源異常仍待核對；根因查詢失敗，請以同一 job/root 重新查詢。');
+          setCorrectionError('帳務更正已提交，但來源異常目前無法重新核對；請重新查詢更正結果。');
         }
       } else {
         setCorrectionFlowStatus('accepted');
       }
-    } catch (error) {
+    } catch {
       if (seq !== correctionFlowSeq.current) return;
       setCorrectionFlowStatus('typed_error');
-      setCorrectionError(error instanceof Error ? error.message : 'Finance Import 更正 receipt 暫時無法取得。');
+      setCorrectionError('帳務更正結果目前無法取得，請重新查詢更正結果。');
     }
   };
 
@@ -716,10 +714,10 @@ export const LegacyAnomaliesPage: React.FC = () => {
       setCorrectionAccepted(accepted);
       setCorrectionFlowStatus('accepted');
       await observeCorrectionOutcome(accepted, seq);
-    } catch (error) {
+    } catch {
       if (seq !== correctionFlowSeq.current) return;
       setCorrectionFlowStatus('typed_error');
-      setCorrectionError(error instanceof Error ? error.message : 'Finance Import 更正 Apply 無法完成。');
+      setCorrectionError('帳務更正目前無法提交，請稍後重試。');
     }
   };
 
@@ -1148,7 +1146,7 @@ export const LegacyAnomaliesPage: React.FC = () => {
               <h4>🎯 可採取的處理方式</h4>
               {selectedAnomaly.staffCalendarNavigation && (
                 <a href="#scheduling">
-                  前往排班調度 ➔（目標日期: {selectedAnomaly.staffCalendarNavigation.target_date}，月嫂 ID: #{selectedAnomaly.staffCalendarNavigation.staff_id}）
+                  前往排班調度 ➔（目標日期: {selectedAnomaly.staffCalendarNavigation.target_date}，服務人員: 已指定）
                 </a>
               )}
               {anomalyRecoveryError && !clientSettlement && !financeOwnerTarget && <div className="anomalies-detail-error">{anomalyRecoveryError}</div>}

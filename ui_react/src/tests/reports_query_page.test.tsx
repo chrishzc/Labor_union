@@ -36,6 +36,8 @@ describe('ReportsPage query-only presentation', () => {
     fireEvent.click(screen.getByRole('tab', { name: '補助案件統計表' }));
     expect(screen.getByText('CASE-RPT-001')).toBeInTheDocument();
     expect(screen.getAllByText('NT$ 12,000').length).toBeGreaterThan(0);
+    expect(screen.getByText(/^\d{4}-\d{2}-\d{2}～\d{4}-\d{2}-\d{2}$/)).toBeInTheDocument();
+    expect(screen.queryByText(/年初至本週/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
     expect(screen.getByText('陳**')).toBeInTheDocument();
 
@@ -56,15 +58,20 @@ describe('ReportsPage query-only presentation', () => {
     expect(screen.queryByText(/未開放|後端尚未提供/)).not.toBeInTheDocument();
   });
 
-  it('週起日與 reload 變更會清除 stale export success', async () => {
+  it('週別與 reload 變更會清除 stale export success', async () => {
     render(<ReportsPage />);
     await screen.findByText('CASE-WEEK-001');
     fireEvent.click(screen.getByRole('button', { name: '下載週報完整 XLSX' }));
     await screen.findByText('XLSX 已產生並開始下載。');
 
-    fireEvent.change(screen.getByLabelText('週起日（週一）'), { target: { value: '2026-08-10' } });
+    const weekInput = screen.getByLabelText('週別');
+    expect(weekInput).toHaveAttribute('type', 'week');
+    fireEvent.change(weekInput, { target: { value: '2026-W33' } });
     expect(screen.queryByText('XLSX 已產生並開始下載。')).not.toBeInTheDocument();
-    await waitFor(() => expect(weeklyOperationsReportQueryClient.query).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(weeklyOperationsReportQueryClient.query).toHaveBeenLastCalledWith(
+      '2026-08-10',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
 
     fireEvent.click(screen.getByRole('button', { name: '下載週報完整 XLSX' }));
     await screen.findByText('XLSX 已產生並開始下載。');

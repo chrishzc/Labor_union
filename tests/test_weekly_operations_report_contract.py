@@ -48,8 +48,8 @@ class _Facts:
             ),
         ]
 
-    def list_subsidy_facts(self, application_year, cutoff_date):
-        assert (application_year, cutoff_date) == (2026, date(2026, 8, 23))
+    def list_subsidy_facts(self, week_start, week_end):
+        assert (week_start, week_end) == (date(2026, 8, 17), date(2026, 8, 23))
         return SubsidyFacts(
             general=(
                 SubsidyFact(

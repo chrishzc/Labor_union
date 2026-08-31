@@ -16,5 +16,5 @@
 
 ## Verification routing
 - default_boundary: Domain
-- test_root: unknown (`layout_gap`; no `tests/domains/client_finance/` observed)
-- integration_root: unknown; resolve scoped from current `tests/`.
+- higher_boundary: shared acceptance/disposable-MySQL suites remain under their current higher roots.
+- routing: `.arch-map/tests/domains/client-finance/index.md`; current material module roots are declared by their lowest owner leaf.

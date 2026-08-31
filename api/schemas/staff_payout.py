@@ -328,6 +328,81 @@ class StaffPayoutTypedErrorView(_StrictModel):
     current_version: int | None = None
 
 
+class HistoricalStaffPayoutIntentBody(_StrictModel):
+    case_no: str = Field(min_length=1, max_length=50)
+    staff_id: int = Field(gt=0)
+    confirmation_kind: Literal["paid", "settled"]
+    obligation_identities: list[str] = Field(min_length=1)
+    payment_date: date | None = None
+    payment_date_unknown_reason: str | None = Field(default=None, min_length=1, max_length=500)
+    source_availability: Literal["missing", "ambiguous", "unrecoverable"]
+    evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
+
+
+class HistoricalStaffPayoutApplyBody(HistoricalStaffPayoutIntentBody):
+    expected_staff_payables_version: int = Field(ge=0)
+    expected_adoption_receipt_id: int = Field(gt=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class HistoricalStaffObligationView(_StrictModel):
+    obligation_identity: str
+    case_no: str
+    staff_id: int = Field(gt=0)
+    amount_due_ntd: int = Field(gt=0)
+    payroll_version: int = Field(ge=0)
+    direction: Literal["payable_to_staff", "receivable_from_staff"]
+    status: Literal["open", "settled", "cancelled"]
+
+
+class HistoricalStaffPayoutQueryView(_StrictModel):
+    case_no: str
+    staff_id: int = Field(gt=0)
+    staff_payables_version: int = Field(ge=0)
+    adoption_receipt_id: int | None = Field(default=None, gt=0)
+    adopted: bool
+    normal_bank_candidate_identities: list[str]
+    obligations: list[HistoricalStaffObligationView]
+
+
+class HistoricalStaffPayoutPreviewView(_StrictModel):
+    case_no: str
+    staff_id: int = Field(gt=0)
+    staff_payables_version: int = Field(ge=0)
+    adoption_receipt_id: int | None = Field(default=None, gt=0)
+    obligations: list[HistoricalStaffObligationView]
+    amount_snapshot_ntd: int = Field(ge=0)
+    blockers: list[str]
+    can_apply: bool
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HistoricalStaffPayoutReceiptView(_StrictModel):
+    event_identity: str
+    case_no: str
+    staff_id: int = Field(gt=0)
+    obligation_identities: list[str]
+    amount_snapshot_ntd: int = Field(gt=0)
+    resulting_staff_payables_version: int = Field(ge=1)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HistoricalStaffPayoutProjectionView(_StrictModel):
+    obligation_identity: str
+    amount_snapshot_ntd: int = Field(gt=0)
+    obligation_payroll_version: int = Field(ge=0)
+
+
+class HistoricalStaffPayoutReadbackView(_StrictModel):
+    case_no: str
+    staff_id: int = Field(gt=0)
+    staff_payables_version: int = Field(ge=0)
+    obligations: list[HistoricalStaffObligationView]
+    projections: list[HistoricalStaffPayoutProjectionView]
+    owner_terminal: bool
+
+
 __all__ = [
     "PayoutApplyBody",
     "PayoutDifferenceApplyBody",
@@ -359,4 +434,12 @@ __all__ = [
     "StaffOverpaymentRecoveryReceiptView",
     "StaffOverpaymentRecoveryMatchingQueryView",
     "StaffOverpaymentRecoveryQueryView",
+    "HistoricalStaffObligationView",
+    "HistoricalStaffPayoutApplyBody",
+    "HistoricalStaffPayoutIntentBody",
+    "HistoricalStaffPayoutPreviewView",
+    "HistoricalStaffPayoutProjectionView",
+    "HistoricalStaffPayoutQueryView",
+    "HistoricalStaffPayoutReadbackView",
+    "HistoricalStaffPayoutReceiptView",
 ]

@@ -1,6 +1,6 @@
 /**
  * File: service_before_replacement_actions.test.tsx
- * Description: 驗證 RPRE 明確情境、完整 fingerprint、Apply fresh readback、實際服務轉介與同鍵結果對帳。
+ * Description: 驗證 RPRE 明確情境、收合技術證據、Apply fresh readback、實際服務轉介與同鍵結果對帳。
  */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -196,6 +196,8 @@ describe('ServiceBeforeReplacementActions', () => {
     fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
 
     await screen.findByText('預覽完成，尚未寫入');
+    const previewTechnicalDetails = screen.getAllByText('技術詳情與資料來源')[1].closest('details');
+    expect(previewTechnicalDetails).not.toHaveAttribute('open');
     expect(screen.getByText(`Preview fingerprint`)).toBeInTheDocument();
     expect(screen.getByText(fingerprint)).toBeInTheDocument();
     expect(screen.getByText(/generation:7.*event:7.*aggregate:7/)).toBeInTheDocument();
@@ -222,7 +224,7 @@ describe('ServiceBeforeReplacementActions', () => {
     fireEvent.click(screen.getByLabelText('我已核對案件、情境、原因、證據與影響範圍'));
     fireEvent.click(applyButton);
 
-    await screen.findByText(/已完成 owner readback/);
+    await screen.findByText(/換人處理已完成並回讀/);
     expect(serviceBeforeReplacementClient.apply).toHaveBeenCalledWith(
       'CASE-RPRE-001',
       expect.objectContaining({
@@ -289,10 +291,10 @@ describe('ServiceBeforeReplacementActions', () => {
     fireEvent.click(screen.getByLabelText('我已核對案件、情境、原因、證據與影響範圍'));
     fireEvent.click(screen.getByRole('button', { name: '確認建立換人 successor' }));
 
-    await screen.findByText(/只能用原內容與原 Idempotency-Key 對帳/);
+    await screen.findByText(/沿用原操作安全地確認結果，不會重複建立換人/);
     const firstCall = vi.mocked(serviceBeforeReplacementClient.apply).mock.calls[0];
-    fireEvent.click(screen.getByRole('button', { name: '以原命令對帳 receipt／readback' }));
-    await screen.findByText(/既有結果已對帳/);
+    fireEvent.click(screen.getByRole('button', { name: '重新確認原操作結果' }));
+    await screen.findByText(/已確認既有結果/);
     const secondCall = vi.mocked(serviceBeforeReplacementClient.apply).mock.calls[1];
     expect(secondCall[1]).toEqual(firstCall[1]);
     expect(secondCall[2]).toBe(firstCall[2]);
@@ -326,7 +328,7 @@ describe('ServiceBeforeReplacementActions', () => {
     await screen.findByText('預覽完成，尚未寫入');
     fireEvent.click(screen.getByLabelText('我已核對案件、情境、原因、證據與影響範圍'));
     fireEvent.click(screen.getByRole('button', { name: '確認建立換人 successor' }));
-    await screen.findByText(/已完成 owner readback/);
+    await screen.findByText(/換人處理已完成並回讀/);
     expect(screen.queryByText('parent refresh failed')).not.toBeInTheDocument();
   });
 
@@ -339,9 +341,10 @@ describe('ServiceBeforeReplacementActions', () => {
     await screen.findByText('預覽完成，尚未寫入');
     fireEvent.click(screen.getByLabelText('我已核對案件、情境、原因、證據與影響範圍'));
     fireEvent.click(screen.getByRole('button', { name: '確認建立換人 successor' }));
-    await screen.findByText(/後端完成 post-commit owner readback/);
+    await screen.findByText(/正式資料已完成回讀/);
     expect(serviceBeforeReplacementClient.query).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/Apply readback 未提供 occurrence active 欄位/)).toBeInTheDocument();
+    expect(screen.getByText(/本結果不自行推定異常已解除/)).toBeInTheDocument();
+    expect(screen.getAllByText('技術詳情與資料來源').at(-1)?.closest('details')).not.toHaveAttribute('open');
     expect(screen.getByText('Readback complete：true')).toBeInTheDocument();
   });
 
@@ -366,10 +369,10 @@ describe('ServiceBeforeReplacementActions', () => {
     fireEvent.click(screen.getByLabelText('我已核對案件、情境、原因、證據與影響範圍'));
     fireEvent.click(screen.getByRole('button', { name: '確認建立換人 successor' }));
 
-    await screen.findByText(/目前仍停在 Step 2：沒有可用候選/);
-    expect(screen.getByText(/blocked_no_candidate/)).toBeInTheDocument();
+    await screen.findByText(/目前仍停在步驟 2：沒有可用候選/);
+    expect(screen.queryByText(/blocked_no_candidate/)).not.toBeInTheDocument();
     expect(screen.getByText(/不代表異常已解除，也不會復活舊月嫂/)).toBeInTheDocument();
-    expect(screen.getByText(/Successor 候選數：.*0/)).toBeInTheDocument();
+    expect(screen.getByText(/新版候選數：.*0/)).toBeInTheDocument();
     expect(serviceBeforeReplacementClient.query).toHaveBeenCalledTimes(1);
   });
 });

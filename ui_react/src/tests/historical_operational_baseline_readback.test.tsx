@@ -15,17 +15,21 @@ import {
 } from './fixtures/orders/historical_operational_baseline_contract_fixtures';
 
 describe('HistoricalOperationalBaselineReadback Orders owner', () => {
-  it('顯示 Orders identity、version、selected step 與 typed step projection', async () => {
+  it('顯示案件、目前作業步驟與 closed step projection，技術來源預設收合', async () => {
     const client: HistoricalOperationalBaselineClient = {
       queryByCase: vi.fn().mockResolvedValue(HISTORICAL_OPERATIONAL_BASELINE_VIEW),
     };
     render(<HistoricalOperationalBaselineReadback caseNo={HISTORICAL_BASELINE_CASE_NO} client={client} />);
 
-    await waitFor(() => expect(screen.getByText('Step 3')).toBeInTheDocument());
-    expect(screen.getByText('order:CASE-HOB-1')).toBeInTheDocument();
-    expect(screen.getByText('4')).toBeInTheDocument();
-    expect(screen.getAllByText('historical_baseline_completed')).toHaveLength(2);
-    expect(screen.getByText('in_progress')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('作業步驟 3')).toBeInTheDocument());
+    expect(screen.getByText('作業步驟 1：歷史資料已確認')).toBeInTheDocument();
+    expect(screen.getByText('作業步驟 2：歷史資料已確認')).toBeInTheDocument();
+    expect(screen.getByText('作業步驟 3：目前進行中')).toBeInTheDocument();
+    const technical = screen.getByText('技術詳情與資料來源').closest('details');
+    expect(technical).not.toHaveAttribute('open');
+    expect(technical).toHaveTextContent('order:CASE-HOB-1');
+    expect(technical).toHaveTextContent('Orders version：4');
+    expect(technical).toHaveTextContent('historical-orders:source:1');
     expect(screen.queryByRole('button', { name: /resolve|reconcile|排除|確認套用/i })).not.toBeInTheDocument();
     expect(Object.keys(client)).toEqual(['queryByCase']);
   });
@@ -44,9 +48,10 @@ describe('HistoricalOperationalBaselineReadback Orders owner', () => {
       client={{ queryByCase }}
     />);
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('historical_operational_baseline_unavailable'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('暫時無法讀取'));
+    expect(screen.getByRole('alert')).not.toHaveTextContent('historical_operational_baseline_unavailable');
     fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
-    await waitFor(() => expect(screen.getByText('Step 3')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('作業步驟 3')).toBeInTheDocument());
     expect(queryByCase).toHaveBeenCalledTimes(2);
     expect(queryByCase).toHaveBeenNthCalledWith(1, HISTORICAL_BASELINE_CASE_NO, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(queryByCase).toHaveBeenNthCalledWith(2, HISTORICAL_BASELINE_CASE_NO, expect.objectContaining({ signal: expect.any(AbortSignal) }));

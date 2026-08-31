@@ -1,17 +1,17 @@
 """
 File: line_notification_anomaly_worker.py
-Description: 從 immutable LINE 通知 decision 投影 LINE-006，使用異常中心既有 checkpoint 冪等重跑。
+Description: 掃描 LINE-006 logical groups，提交既有 bounded anomaly.recheck intent。
 """
 
 from __future__ import annotations
 
 from typing import Callable
 
-from domains.anomalies.registry import default_anomaly_registry
-from infrastructure.mysql.anomaly_registry_repository import AnomalyMySqlUnitOfWork, MySqlAnomalyRepository
-from infrastructure.mysql.line_notification_repository import MySqlLineNotificationRepository
-from subsystems.anomalies.alert_workflow import AnomalyApplication
-from subsystems.anomalies.line_notification_anomaly_projector import LineNotificationAnomalyProjector
+from infrastructure.mysql.line_unit_of_work import LineMySqlUnitOfWork
+from subsystems.line.notification_failure_current_fact import (
+    LineNotificationFailureCurrentFactQuery,
+    append_line_notification_failure_rechecks,
+)
 
 
 class MySqlLineNotificationAnomalyWorker:
@@ -19,21 +19,27 @@ class MySqlLineNotificationAnomalyWorker:
         self._connection_factory = connection_factory
 
     def run_once(self, *, limit: int = 100) -> int:
-        source_connection = self._connection_factory()
+        connection = self._connection_factory()
         try:
-            sources = MySqlLineNotificationRepository(source_connection).list_anomaly_sources(limit=limit)
+            with LineMySqlUnitOfWork(connection) as unit_of_work:
+                targets = unit_of_work.notification_rules.list_line006_recheck_targets(
+                    limit=limit
+                )
+                for target in targets:
+                    readback = unit_of_work.notification_rules.current_failure_fact(
+                        LineNotificationFailureCurrentFactQuery(
+                            target.case_no, target.notification_reason
+                        )
+                    )
+                    append_line_notification_failure_rechecks(
+                        unit_of_work,
+                        (target,),
+                        cause_identity=f"line006-scan:{readback.owner_snapshot_token}",
+                    )
+                unit_of_work.commit()
         finally:
-            source_connection.close()
-        projected = 0
-        for source in sources:
-            connection = self._connection_factory()
-            try:
-                application = AnomalyApplication(default_anomaly_registry(), MySqlAnomalyRepository(connection), lambda: AnomalyMySqlUnitOfWork(connection))
-                if LineNotificationAnomalyProjector(application).project(source):
-                    projected += 1
-            finally:
-                connection.close()
-        return projected
+            connection.close()
+        return len(targets)
 
 
 __all__ = ["MySqlLineNotificationAnomalyWorker"]
