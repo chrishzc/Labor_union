@@ -2,303 +2,163 @@
 
 狀態：`current_projection_and_additive_successor_approved`；`runtime_cutover_pending_db_and_runtime_evidence`
 
-最新人工裁決：2026-08-29 current-state 異常瘦身
-
-執行邊界：2026-08-30 Task 97 最新人工裁決已授權本機 current-only typed Domain／
-Application contract、bounded recheck／intent transaction contract、additive `current_anomaly_issues`
-successor release 與 generic durable-job 接線。仍不授權 production／`union_db`、provider effect、
-deployment、entry switch、legacy table drop 或任何 destructive migration。在 static release、descriptor、
-disposable fresh／preserve-data engine 與 runtime cutover evidence 通過前，新 contract 必須 fail closed，
-不得透過 placeholder adapter 或 anomaly-specific claim／delivery state 偽裝 cutover 完成。
+最新人工裁決：2026-08-31 business-reachability pruning。
 
 ## 1. Domain 定位與最新裁決
 
-Anomalies 是各 owning Domain 根事實之上的 current-state protection projection，不是
-其他 Domain 的控制中心、歷史事件庫、通用待辦系統或 generic root editor。
+Anomalies 只表達「目前確實可能發生、而且狀態成立後需要工會人員介入」的業務異常。它不是程式 correctness dashboard、資料庫 invariant monitor、migration repair queue、一般 owner 待辦或自動 retry 狀態頁。
 
-2026-08-29 人工裁決固定：
+2026-08-31 人工裁決固定：
 
-1. 異常只表達當下仍成立的問題；Anomalies 不永久保存 occurrence、workflow、tracking、
-   reclassification 或 reopen history。
-2. 每次 owner 狀態改變後以 fresh owner facts 重查 predicate。predicate 不成立時
-   直接刪除 current row，不寫 resolved row 或 auto-resolve event。
-3. claim、resolve、tracking close 不是 root repair，且不得作為 current issue 的生命週期。
-4. 需要人工判斷的 current issue 必須有 owner-specific Query → Preview → Confirm →
-   Apply → fresh readback → recheck 閉環。
-5. 新輸入的格式錯誤由 LIFF／backend validation 阻止；既有或歷史資料留在 owner
-   review／work queue，不轉成永久 anomaly occurrence。
-6. 只有結果唯一、安全、可重播且使用同一 owner predicate 的流程才可自動化。
-   自動化能力不存在時可標 `blocked_capability`，但人工閉環不可缺席。
-7. `#anomalies` 只顯示 15 個 current issue，並在 Drawer 內透過 bounded typed owner
-   clients 完成人工操作。25 個一般 owner work item 只顯示在各自 owner page。
-8. UI、route、worker、detector 都不得直接讀寫 current table 或旁路 owning Domain。
+1. 純系統公式、deterministic projection、aggregate、季別加總、金額 reducer、transaction invariant 或資料結構一致性若出錯，視為 implementation／test／migration correctness failure，不建立日常 runtime recovery product。
+2. 正式 owner Apply 已以 fresh validation、single outer UoW、constraint 或 deterministic reducer 保證不可產生的狀態，不得再為「如果程式自己寫壞」建立第二套人工 anomaly repair。
+3. 正常等待、來源先後到達、automatic retry、replay in progress、readback temporarily unavailable、maintenance scan incomplete 都不是業務異常；它們分別留在 owner work queue、durable job 或 operational health。
+4. 只有外部真實世界效果、外部資料或 identity 狀態可能合法越過系統預防邊界，而且發生後不能由 deterministic 自動流程安全完成時，才進 `#anomalies`。
+5. current issue predicate false 時直接刪除 current row；不保存 anomaly-owned occurrence、claim、resolve、tracking、reopen 或 reclassification history。
+6. Anomalies 不修改 owner root。人工處理仍由 owning Domain 的 typed Query／Preview／Apply／receipt／fresh readback 完成。
+7. customer＋staff 同一 LINE User ID 是合法雙角色，不是異常；同一 customer 因每年新案件不建立新的 LINE customer identity，LINE customer binding 綁 Client root，不綁 case number。
+8. 本裁決 supersede 本檔、`15_正式規格索引與裁決總表.md` §16、Task 96、current-state anomaly execution plans，以及各 owner spec 中仍把下列 retired codes 當 runtime current issue 的較早文字。較早條文只保留 provenance／test evidence，不再形成 current product requirement。
 
-本節完整取代本文較早 revision 的 finance immutable occurrence、generic claim／resolve workflow、
-import-warning 六狀態 tracking、necessity reclassification disposition 與 historical-baseline umbrella
-契約。舊 source、schema 與測試仍是 live-drift evidence；在後續 cutover gate 完成前不得刪除。
+## 2. Current 產品分類
 
-## 2. SSOT 與產品分類
+### 2.1 Runtime current issues：只保留 2 碼
 
-Anomalies 只擁有：
+| Code | 為何實際可發生 | 需要人工的原因 |
+|---|---|---|
+| `GOVSUB-007` | 系統外實際政府退款可能由會計匯出超過既有 government refund payable remaining；這是外部真實付款結果，不是 reducer 算錯 | 已發生的超額出款不能靠重算消失，需要 Government Subsidy owner 明確處置 |
+| `LINE-006` | LINE recipient／binding／configuration 或 provider delivery 是外部邊界；自動 delivery 可能在 bounded retry 後仍 terminal failed | 只有 automatic path 已無法繼續且需要人修正 recipient／binding／configuration 或執行人工 replay 時才成立 |
 
-1. 15 個 current issue definition 的 code、owner、subject schema、severity、blocking、details contract
-   與 owner action descriptor。
-2. 可由 owner facts 完整重建的 `current_anomaly_issues` current projection。
-3. bounded recheck 與 current-only Query 契約。
+### 2.2 移出 Anomalies、保留為 owner work item
 
-異常條件、金額、日期、identity mapping、assignment lineage、payment／allocation、delivery
-與 correction 仍由各 owning Domain 根事實及正式事件擁有。Anomalies 的 details、severity、
-blocking 與 UI state 不得成為 Domain command gate。
+- `BECLASS-001`：HCM 先到、Client BeClass 尚未到是兩條合法 intake lane 的正常先後順序，不是異常。若業務流程到了需要 BeClass 資料但仍缺少，顯示在 Case Import／Client owner follow-up queue，由工會聯絡客戶或引導完成正常資料流程；不得建立 anomaly recovery lineage。
 
-### 2.1 Runtime 分類
+### 2.3 從 runtime anomaly 退役的 12 碼
 
-- 15 current issue codes：`SCHEDULE-006`、`PAYOUT-002`、`GOVSUB-001`～`GOVSUB-005`、
-  `GOVSUB-007`、`IMPORT-003`、`IMPORT-006`、`BECLASS-001`、`SCHEDULE-002`、
-  `SCHEDULE-003`、`LINE-006`、`LINE-004`。
-- 25 owner work item／validation results：`PAYOUT-001`、`PAYOUT-003`、`GOVSUB-006`、
-  `client_over_refund_recovery_open`、`client_refund_underpayment`、
-  `staff_overpayment_recovery_open`、`staff_payout_underpayment`、`IMPORT-001`、
-  `finance_import_manual_review`、`CLIENTREFUND-001`、`IMPORT-004`、`HISTORICAL-ORDER-001`、
-  `ORDER-001`～`ORDER-004`、`DOC-SEND-001`、`RECEIVABLE-001`、`CLIENTPAYABLE-001`、
-  `RETURN-001`、`SUBSIDYADVANCE-001`、`SCHEDULE-001`、`LINE-001`、`LINE-005`、`LINE-002`。
-- 3 retire／merge codes：`staff_payout_overpayment`、`HISTORICAL-BASELINE-ROOTS-001`、
-  `SCHEDULE-005`。
+| Code | 退役理由 | 正式承接方式 |
+|---|---|---|
+| `PAYOUT-002` | 「付款到期很久後才形成薪資義務」不是目前實際業務流程；薪資以正式服務天數為根 | Payroll／Scheduling correctness tests；正常服務日更正走既有 owner command |
+| `GOVSUB-001` | 季別／批次判定屬 deterministic owner／Finance Import reconciliation | 正常 reconciliation 或 Finance owner review；不建立 anomaly |
+| `GOVSUB-002` | item allocation ambiguity 不作為獨立 anomaly product | owner Preview／manual allocation 若真的需要；不進 `#anomalies` |
+| `GOVSUB-003` | receipt／allocation／projection 自己不一致只可能是 implementation／migration integrity failure | deterministic validation、tests、migration readback |
+| `GOVSUB-004` | reversal target／amount validation 由正式 Preview／Apply 阻止非法結果 | Government Subsidy normal owner operation；不建立第二套 recovery |
+| `GOVSUB-005` | frozen claim 與 service facts 的合法變更應走正常 revision；非法 drift 是 correctness failure | owner revision／validation tests |
+| `IMPORT-003` | Client BeClass 與 HCM 可合法獨立先後到達；不存在 HCM「補件解除 anomaly」產品流程 | HCM 正常 intake；客戶資料修改走 Client owner profile change |
+| `IMPORT-006` | bank import batch integrity、parser、aggregate、fingerprint correctness 應在上線前與每次 Apply 由 deterministic contract 驗證 | Finance Import tests／validation／operational failure；不做 runtime recovery workbench |
+| `SCHEDULE-002` | 正式 replacement／substitution transaction 應原子保存 successor、daily outcome 與跨域 impacts | Scheduling transaction／migration tests；非法 partial lineage 不作日常產品情境 |
+| `SCHEDULE-003` | effective assignment overlap 應在 Preview／Apply occupancy validation 與 constraint 前被阻止 | Scheduling validation；若 legacy migration 發現則走 migration correction，不進日常 anomaly |
+| `SCHEDULE-006` | coverage、hours、official dates、ownership 等都是 canonical Apply invariant | module／subsystem／migration correctness oracle |
+| `LINE-004` | same-type duplicate 的 current business rule 已固定為合法 same-type replacement；customer＋staff 雙角色合法 | LINE Identity normal replacement／role-selection contract；不建立 anomaly lifecycle |
 
-這是產品目標，不是 live runtime 已 cut over 的證據。在 15-code action map、25-item
-replacement map、3-code replacement／absence readback 與 destructive migration gates 通過前，不得
-停止舊 writer、隱藏舊 row、刪 registry code 或退役入口。
+以上退役是「退出 runtime anomaly product」，不代表刪除 owner 正式 business events、receipts、validation 或 migration evidence。任何舊資料 cleanup、schema drop、entry retirement 仍受各自 DB／cutover Authority 約束。
 
-### 2.2 Case Import 方向
+## 3. Current issue identity 與 projection
 
-- `BECLASS-001`：HCM 已存在，但沒有唯一且一致的 Client BeClass counterpart。
-- `IMPORT-003`：Client BeClass 已存在，但沒有 HCM counterpart。
-- 兩者只在 owner 驗證後形成唯一、一致、可追溯的 accepted mapping 時解除。
-- 異常頁不得任意挑選候選資料、用姓名／電話模糊比對、merge roots 或直接修改
-  mapping／root。人工入口只能送交 owner 能驗證的 evidence 與 typed command。
-
-## 3. Public current-issue contract
-
-### 3.1 Subject identity 與 issue key
-
-`subject_identity` 是每個 definition code 的 closed typed object。下列欄位順序是 canonical：
+### 3.1 Subject identity
 
 | Code | Subject identity |
 |---|---|
-| `SCHEDULE-006` | `case_no + generation` |
-| `PAYOUT-002` | `obligation_identity + source_event_identity` |
-| `GOVSUB-001` | `bank_fact_identity` |
-| `GOVSUB-002` | `bank_fact_identity + batch_id` |
-| `GOVSUB-003` | `batch_id + integrity_revision` |
-| `GOVSUB-004` | `reversal_bank_fact_identity + source_receipt_id` |
-| `GOVSUB-005` | `assignment_id + batch_id + claim_item_id` |
 | `GOVSUB-007` | `payable_identity` |
-| `IMPORT-003` | `entity_kind + review_item_id` |
-| `BECLASS-001` | `case_no` |
-| `IMPORT-006` | `batch_id` |
-| `SCHEDULE-002` | `assignment_id` |
-| `SCHEDULE-003` | canonical sorted `assignment_id_a + assignment_id_b` |
 | `LINE-006` | `case_no + notification_reason` |
-| `LINE-004` | `subject_type + line_user_id` |
 
-`issue_key` 固定為 `ci_` 加上對
-`{"v":1,"definition_code":...,"subject_identity":...}` 的 UTF-8、sorted-key、compact JSON，
-使用專用、可注入測試的 `issue_identity_key_v1` 取 HMAC-SHA-256 lowercase hex。
-不得 fallback 成可枚舉低熵 identity 的無密鑰 hash。API 不回傳 raw `subject_identity`、
-HMAC input 或 key version，只回各 code 的 closed redacted subject view。
-2026-08-29 人工裁決：同一 canonical code＋subject 跨多次 episode 永遠使用同一 key；
-一般 key rotation 不得改變公開 identity，需更換時必須另有保持舊 key 穩定性的
-exact migration contract 與 Authority。每次重新成立仍建立新 current episode。
+`issue_key` 固定為 `ci_` 加上對 `{"v":1,"definition_code":...,"subject_identity":...}` 的 UTF-8、sorted-key、compact JSON 使用 `issue_identity_key_v1` HMAC-SHA-256 lowercase hex。不得 fallback 成可枚舉低熵 identity 的無密鑰 hash。API 不回傳 raw HMAC input 或 secret。
 
 ### 3.2 Current projection
 
 `CurrentIssueProjection` 至少包含：
 
 - `issue_key`、`definition_code`、`owner_domain`、closed `subject_identity`；
-- `owner_snapshot_token`、`severity`、`blocking`；
-- `details_version=1` 與以 definition code 為 discriminator 的 closed typed details；
+- `owner_snapshot_token`／owner version；
+- `severity`、`blocking`；
+- closed typed details；
 - `episode_started_at`、`last_verified_at`；
-- closed manual-action descriptors 與 automation availability。
+- closed owner action descriptor。
 
-episode timestamps 只隨 current row 存在；predicate false 刪除 row 後不另行保存。
-未知 code／version、缺欄、額外欄位、PII 穿透或 malformed subject 固定 fail closed。
+predicate false 後直接刪除 row；同一 canonical subject 日後再次成立時可使用同一 stable `issue_key` 建立新 current episode。不存在 claimed／resolved／reopen history。
 
-#### LINE-006 owner predicate consumer（2026-08-31）
+## 4. `GOVSUB-007` current contract
 
-Anomalies只消費LINE Integration提供的typed `LINE-006` current-fact readback，公開identity仍是
-`case_no + notification_reason`；不得直接查LINE tables、判斷notification source applicability、重算
-Delivery task／attempt狀態或寫入LINE root。readback `predicate_active=true`時upsert／更新current issue；
-只有`predicate_active=false`且`authoritative_complete=true`才可刪除。readback incomplete、unavailable、
-stale或lineage ambiguous一律fail closed，不移除current issue。
+Active predicate：canonical outgoing government refund bank fact 已唯一對應既有 `government_overpayment_return` payable，且實際出款大於該 payable 當時可合法核銷的 remaining。
 
-LINE Notification／Delivery owner mutation與bounded `anomaly.recheck` intent在owner既有outer UoW提交；
-worker再fresh讀取typed owner readback。Anomalies detail只保存applicable／unresolved counts與closed reason
-codes，不接收raw recipient、provider payload、message body、credential或完整delivery error。
+這個狀態來自實際外部付款，因此即使發生機率低仍是可達的業務異常。Anomalies 只呈現 source bank fact、payable identity、超額結果與 Government Subsidy owner action；不得部分核銷、建立虛構 claim receipt、直接改 payable amount 或自動 offset。
 
-### 3.3 API 與 React
+Completion：Government Subsidy owner 以另行核准的正式處置完成超額出款 disposition，fresh owner readback 明確證明原 `GOVSUB-007` predicate 不再成立。若正式 disposition command 尚未完成，issue 保持 current；不得用 tracking／receipt-only／projection rebuild 關閉。
 
-- `GET /api/v1/anomalies`：只回 current rows。可用 filters 限
-  `definition_code | owner_domain | blocking | limit | cursor`。
-- `limit` 預設 50、上限 100。排序為 blocking 優先、severity 由高到低、
-  `episode_started_at` 舊到新、`issue_key` ascending。cursor 是有 version、不可竄改的
-  opaque token，必須綁定相同 filters、limit 與最後排序 tuple。malformed、簽章
-  錯誤、版本不支援或 binding 不符回 `anomaly_cursor_invalid`。
-- 2026-08-29 人工裁決為 live best-effort pagination：cursor 不綁 snapshot，每頁
-  讀取當下 current rows。翻頁期間 insert、delete 或排序欄位變動可導致漏列或重複；
-  client 以 `issue_key` 去重，需最新 authoritative view 時從第一頁重查。UI 不得
-  將一次翻頁結果表示為 snapshot-complete。
-- `GET /api/v1/anomalies/{issue_key}`：回 current details、owner evidence、blocking effect 與
-  manual-action descriptors；無 occurrence／timeline／claimed／resolved fields。
-- `#anomalies` 只渲染 15 個 current issue。Drawer 依 closed action descriptor 呼叫單一
-  bounded owner client；不接 raw endpoint、raw dict 或 generic mutation payload。
-- action 成功但 recheck 失敗時，UI 只顯示「owner 操作已提交、目前狀態待重新查詢」；
-  不得先移除 issue。
+## 5. `LINE-006` current contract
 
-Stable errors 沿用 Global typed error envelope，至少包含：
-`anomaly_not_found`、`anomaly_definition_not_found`、`anomaly_version_conflict`、
-`anomaly_projection_stale`、`anomaly_projection_data_integrity_violation`、
-`recovery_action_not_available`、`recovery_action_contract_version_mismatch`、
-`recovery_source_binding_incomplete`、`owner_snapshot_unavailable`、`transaction_failed`。
-cursor 邊界另固定 `anomaly_cursor_invalid`。
+### 5.1 只有需要人工時才建立 issue
 
-## 4. Owner action contract
+`LINE-006` 不再把 automatic retry／replay lifecycle 本身當異常。以下狀態單獨存在時不得建立新的 current issue：
 
-每個 current issue 必須在 owning Domain 正式規格與 15-code source map 同時固定：
+- delivery `pending`／`processing`；
+- retryable failure 尚在 bounded retry；
+- manual replay 已建立且仍在正常處理；
+- owner readback temporarily unavailable／incomplete；
+- maintenance scan incomplete；
+- source 已不再 applicable。
 
-1. owner predicate 使用的 root facts、subject identity、blocking effect 與 completion predicate；
-2. typed Query、Preview、Apply 的 exact operation、version 與 closed input／output；
-3. actor capability、reason、evidence、fresh owner version、preview fingerprint、idempotency 與 receipt；
-4. 合法 outcome、禁止 outcome、stale、timeout、partial failure 與 outcome-unknown reconciliation；
-5. Apply 後 owner readback、durable recheck intent 與 Drawer renderer。
+Operational／readback failure 需由 durable-job／runtime health 處理；若 DB 內已存在一筆真正 business `LINE-006`，readback 不完整時可以 fail closed 保留舊 row，但不得因「readback incomplete」本身合成新的業務 issue。
 
-navigation-only、Query-only、projector retry、generic resolve、`available_actions=[]` 或「尚未支援」都不是
-terminal-ready manual action。只有 automation 可以 `blocked_capability`；manual action 缺漏時該 code
-與整體 cutover 都保持 `SPEC_GAP`。
+### 5.2 Active predicate
 
-### 4.1 Thirteen-code owner convergence（2026-08-31）
+對目前仍 applicable、確實需要通知的 source，只有下列至少一項成立才為 current issue：
 
-依 current owning specs 與最新人工裁決，13 碼不再整批視為 `BOUNDARY_REQUIRED`：
+1. exact recipient／current binding／required configuration 缺失或無效，automatic delivery 無法合法繼續，需要人修正；
+2. automatic delivery 的 bounded retry 已耗盡並得到 terminal failed，需要人工 replay／處置；
+3. provider outcome 經既有 bounded reconciliation 後仍無法確定，且已進入正式人工處理邊界。
 
-- `SCHEDULE-002`、`SCHEDULE-003`、`SCHEDULE-006` 的 owner predicate／operation／terminal matrix
-  由 `02` 擁有；
-- `GOVSUB-001`、`GOVSUB-002`、`GOVSUB-004` 的 matrix 由 `14` 擁有；
-- `BECLASS-001`、`IMPORT-003` 的 pairing matrix 由 `17` 的 Case Import 擁有；
-- 上述 Case pairing behavioral contract已收斂，但current roots只證明synthetic counterpart與
-  same-source accepted receipt；different-source accepted lineage仍為
-  `BOUNDARY_REQUIRED_CASE_PAIRING_LINEAGE`，不得在Anomalies推導或旁路解除；
-- `PAYOUT-002`、`GOVSUB-003`、`GOVSUB-005`、`GOVSUB-007`、`IMPORT-006` 仍為
-  `AUTHORITY_REQUIRED`：它們的 active／completion oracle 已知，但現行正式規格無法唯一決定
-  合法 correction／disposition operation。
+人工修正設定或 binding 後不得直接刪 issue；owner 必須 fresh 驗證 source仍 applicable、recipient／binding／configuration 都合法，並由正式 delivery／manual replay 取得 terminal success，或 authoritative owner facts 證明該通知已不再需要。
 
-上述收旂只是 owner contract 狀態，不代表 production consumer、UI 或 runtime 已實作。
+## 6. LINE Identity 非異常規則
 
-## 5. Bounded recheck 與 transaction
+1. `customer + staff` 雙角色合法；需要時使用既有 role selection，不投影 `LINE-004`。
+2. customer binding 的 `subject_reference` 是 Client root identity，不是 `case_no`。同一 Client 每年新增案件不改 LINE identity binding。
+3. 若 legacy／匯入資料真的把同一人形成兩個 customer roots，LINE Identity 依人工裁決使用 same-type replacement：確認 current／新 Client root 後，以正式 replacement command 讓新 root 取代舊 root，並清除舊 owner projection；不刪舊案件／Client history。
+4. staff role 若同時存在，customer replacement 不影響 staff binding。
+5. replacement ambiguity 若無法由 owner identity evidence 唯一決定，停在 LINE Identity owner review；它不是 Anomalies lifecycle。
 
-Recheck 固定依下列步驟執行：
+## 7. Bounded recheck 與 transaction
 
-1. 建立 canonical bounded scope，明確列出 definition codes、subject type 與 canonical sorted
-   unique subject IDs。
-2. 每個 definition 將 subject 映射為 closed `owner_lock_keys`，key 為
-   `(owner_domain, owner_root_type, canonical_owner_root_id)`；依 tuple 的 canonical UTF-8 byte
-   ordering 取得 owner／scope lock。不同 code／subject type 只要指向同一 owner root，必須產生
-   相同 lock key。映射不完整固定 `SPEC_GAP`；不得只鎖現有 current rows。
-3. 取得 lock 後讀取 owner facts，並取得覆蓋整個 scope 的 monotonic owner version 或
-   snapshot token。
-4. 只使用該 snapshot 計算完整 candidate set，並回報 `authoritative_complete`。
-5. 寫入前在同一 outer transaction 重新驗證 owner token；過期時整批零寫入。
-6. token 仍 current 且 scope 完整時，才對精確 scope 執行 present upsert、absent
-   delete，再一次 commit。
-7. 重疊 scope 使用相同 lock ordering 與 token validation。duplicate candidate、non-canonical
-   subject 或 ordering 固定 fail closed。
-8. 每個改變 owner root 的 transaction 在同一 commit 寫入通用 durable recheck intent。
-   intent append 失敗時 owner mutation 整體零提交；只有已 committed intent 的後續處理失敗或
-   結果不明才由 replay 及 bounded maintenance repair 補回。
-9. maintenance subject universe 是 owner 可枚舉 candidate-relevant subjects 與 current projection
-   已有 subjects 的 canonical union；兩側各用 deterministic bounded cursor／watermark。只掃一側、
-   任一側 incomplete 或無法 authoritative readback 時都不得宣稱 complete，且零 delete。
-10. repair 只重查目前 owner facts，不從舊 alert snapshot 復原，不建立 anomaly
-   occurrence／workflow／tracking／reclassification history。
+保留既有 current-only successor原則：
 
-`authoritative_complete=false`、timeout、owner unavailable、schema drift、stale token、duplicate
-candidate、重疊 scope lock failure 或 durable intent processing failure 都不得刪除 current row。
-Repository 不得 commit／rollback；route、worker、detector 不得直接寫 projection。
+1. owner mutation與 bounded `anomaly.recheck` intent 必須在同一 owner outer UoW commit。
+2. worker只在 commit 後 fresh 讀 owner facts。
+3. 對 authoritative complete scope 計算 present set；只有完整 readback 才能 delete absent current row。
+4. stale token、timeout、owner unavailable、duplicate candidate、schema drift時零 delete。
+5. repository不得 hidden commit；route／worker／detector不得直接寫 owner root。
+6. maintenance recheck只為兩個 current issue及其 current projection服務；不得重新掃描已退役12碼並建立 runtime issue。
 
-## 6. Cutover、entry 與 migration gate
+## 8. API／React
 
-### 6.1 Additive successor 裁決（2026-08-30）
+- `GET /api/v1/anomalies` 只回 `GOVSUB-007`、`LINE-006` current rows。
+- `GET /api/v1/anomalies/{issue_key}` 只回 current details、owner evidence、blocking effect與合法 owner action descriptor。
+- `#anomalies` 不再顯示 12 個 correctness／invariant codes，也不顯示 `BECLASS-001`。
+- owner work item、normal review、retry／job狀態留在 owning page。
+- 不提供 generic resolve、claim、tracking close、raw mutation payload或直接 SQL action。
 
-1. 新 runtime 唯一 projection table 為 `current_anomaly_issues`，只保存當下仍成立的 row；
-   action descriptors 保存於 `details_version=1` 的 closed typed details，不新增 occurrence、
-   workflow、claim、resolve、reclassification、timeline 或 history table。
-2. `subject_identity` 使用本規格§3.1的 per-code closed object，以 UTF-8 sorted-key compact JSON
-   保存；SQL collation 不得影響 canonical bytes。`issue_key` 依§3.1的 `ci_` + HMAC-SHA-256
-   產生，runtime secret 只由 composition 注入，不寫入 schema、log 或 receipt。一般 key rotation
-   不得改變已公開 identity；需更換時必須另有 exact migration Authority。
-3. owner-root／lock mapping 依§5的 canonical tuple 實作；任一 code 缺 subject schema、
-   severity／details discriminator、owner root 或 authoritative-complete predicate 時該 code fail closed，
-   不得用 generic row 承接。
-4. recheck intent 重用 generic `background_jobs` 的 typed `anomaly.recheck` command。owner mutation
-   與 append intent 同一 owner transaction；worker claim／lease是獨立短交易；projection reconcile
-   與該 intent complete 同一 Application-owned transaction。intent 只保留 replay、bounded retry、
-   terminal delivery 所需的通用 job evidence，不擴張為 anomaly history。
-5. external provider call 固定在 DB transaction 之外，結果另由通用 delivery mechanism 完成；
-   provider 失敗不回滾已提交的 owner mutation 或偽裝 projection complete。
-6. legacy 6 個 immutable schema parts 與 25 張 tables 只作 migration provenance。本次先建立
-   additive successor 並允許 coexistence；新 fresh successor assembly 最終排除 legacy parts 的時點，
-   必須等 runtime successor、zero-reference、backup／restore、cutback 與 release gate 完成。
-   preserve-data 只由 fresh owner facts recheck 重建 current projection，不從 legacy snapshot backfill。
-7. destructive drop 是未來獨立 package；本裁決不包含 production DB、deployment、provider、
-   entry retirement 或實體刪除 Authority。
+## 9. Cutover 與退役邊界
 
-API、DB 與 entry cutover 必須等到：
+本裁決授權的是正式產品語意與規格／計劃修正；不因文件修正自動授權 production source deletion、schema migration、configured DB Apply、entry switch、provider實送或 destructive cleanup。
 
-- 15-code action source map 全部 terminal-ready；
-- 25 owner replacements 的 exact Query／typed response／owner UI／completion／readback 全部可達；
-- 3 retire／merge replacements 與 absence readback 通過；
-- Task 97 repository-local tracked identity、revision、successor與final receipt已精確映射（`TASK97_REPOSITORY_LOCAL_COMPLETE`）；production／DB／external acceptance另列deferred，不是本Domain cutover通過證據；
-- 99-path dependency inventory 每列具備 exact successor、caller、owner、readback、deletion／
-  rewrite gate、focused tests 與 final zero-reference oracle；
-- entry caller inventory 完成。證明只有內部 caller 且 replacement 完成者可直接 removed；
-  外部或未知 caller 先回 typed `410 Gone`。
+Repository-local後續最小工作只需：
 
-任何 preserve-data target 要 drop legacy anomaly tables 前，必須先建立加密、限時、
-可驗證且具 rollback owner 的 source backup，並實際驗證 schema／data／source-version
-一致還原。無 backup、expiry、restore evidence 或 exact target Authority 時固定
-`DB_CHANGE_NOT_READY`。不得由舊 alert snapshot backfill 新 current rows；只能以 fresh owner recheck
-重建。production、`union_db`、provider、deployment、entry switch 與實際 destructive target
-均不在本文 Authority 內。
+1. registry／typed union／React mapping收斂到2碼；
+2. `LINE-006` predicate排除 automatic in-progress／retry/readback-only 狀態；
+3. `GOVSUB-007`保留 current detector與 owner action boundary；
+4. `BECLASS-001`改接 Case Import owner follow-up；
+5. 12碼 producer／consumer／tests逐項判斷為 delete、owner-validation keep或 migration-only keep，不建立 replacement recovery framework；
+6. fresh owner recheck只重建2碼 current rows。
 
-Task 97 conflict precedence的current disposition（2026-08-30）：Task 97 repository-local closeout已完成，
-`blocked_by_task97_priority`不再是Anomalies current blocker；其final writer／entry／transaction／retirement
-artifacts只作後續bounded refresh輸入，不自動授權Anomalies施工。Production、DB engine、external caller、
-runtime／deployment／cutover仍須各自Authority與acceptance，不得由Task 97 receipt推定PASS。
+舊 schema／source若已發布且必須作 migration provenance，可保留 artifact，但不得再形成 current runtime requirement。
 
-## 7. Acceptance 與 convergence
+## 10. Acceptance
 
-規格重新收旂前，read-only review 必須證明：
+完成本輪 anomaly pruning 必須證明：
 
-1. 15／25／3 分類精確，Case Import 方向與 `#anomalies` UI 邊界無衝突。
-2. 15 個 manual action 與 25 個 replacement 無 `SPEC_GAP`、generic resolve、navigation-only 或
-   ownerless outcome。
-3. issue identity、pagination、details version、episode timestamps、typed errors 與 PII redaction 可機械驗證。
-4. Recheck 覆蓋 stale insert、absent row、incomplete scope、overlap、duplicate、timeout、intent loss、
-   repair 與 atomic rollback，不誤刪 current row。
-5. Task 97 repository-local dependency已完成；後續Anomalies task仍須在current HEAD重建dependency denominator、entry caller disposition與destructive rollback契約。
-6. strict UTF-8、governance validator、reference scan 與 `git diff --check` PASS。
-
-```yaml
-spec_route:
-  status: APPROVED_ADDITIVE_SUCCESSOR
-convergence:
-  status: NOT_READY
-  blockers:
-    - 15-code owner action source map incomplete
-    - 25 owner replacements incomplete
-    - 15-code subject scalar normalization and public redaction views require implementation evidence
-    - recheck owner-lock and maintenance subject-universe mappings require runtime evidence
-    - dependency inventory lacks executable successor gates
-    - additive schema release and disposable fresh/preserve-data engine evidence incomplete
-    - destructive migration remains unauthorized
-```
-
-只有上述 blocker 全部解除且 read-only review PASS，才可依 2026-08-29 人工條件式授權
-將規格與執行計劃恢復為 `approved`。
+- runtime current issue exact set = `{GOVSUB-007, LINE-006}`；
+- `BECLASS-001`只存在 Case Import／Client owner follow-up，不出現在 `#anomalies`；
+- 12 個退役碼不再有 runtime producer／public current definition／React current mapping；
+- Scheduling、Payroll、Government aggregate／allocation、Finance Import integrity等 correctness仍由 focused tests、fresh validation、transaction rollback與migration readback保護；
+- `LINE-006` pending／processing／retryable／readback-incomplete本身不產生 issue，只有需要人工介入才產生；
+- legal customer＋staff dual-role與同一Client多案件不產生 `LINE-004`；same-type replacement走 LINE Identity normal operation；
+- predicate false且authoritative complete時 current row實際刪除；
+- strict UTF-8、focused tests、governance／reference scan與`git diff --check`通過後，才可宣稱repository-local anomaly product alignment完成。
