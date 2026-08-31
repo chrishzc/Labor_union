@@ -135,6 +135,33 @@ def test_deposit_paid_historical_order_enters_date_confirmation() -> None:
     assert result.sop_steps[8].status == "unavailable"
 
 
+def test_deposit_paid_with_actual_start_enters_formal_service() -> None:
+    facts = HistoricalStageBaselineFacts(
+        "CASE-1", 106, OrderLifecycleStatus.ESTABLISHED, date(2025, 2, 3)
+    )
+
+    result = _query(facts)
+
+    assert historical_baseline_step(facts) == 10
+    assert result.current_stage_code == "active_service"
+    assert all(stage.status == "completed" for stage in result.stages[:5])
+    assert result.stages[5].status == "unavailable"
+    assert all(step.status == "completed" for step in result.sop_steps[:9])
+    assert result.sop_steps[9].status == "unavailable"
+
+
+def test_in_service_status_keeps_historical_predecessors_completed() -> None:
+    facts = HistoricalStageBaselineFacts(
+        "CASE-1", 107, OrderLifecycleStatus.IN_SERVICE, date(2025, 2, 3)
+    )
+
+    result = _query(facts)
+
+    assert historical_baseline_step(facts) == 10
+    assert result.current_stage_code == "active_service"
+    assert all(stage.status == "completed" for stage in result.stages[:5])
+
+
 def test_discussion_with_actual_start_enters_formal_service() -> None:
     facts = HistoricalStageBaselineFacts(
         "CASE-1", 102, OrderLifecycleStatus.DISCUSSION, date(2025, 2, 3)
