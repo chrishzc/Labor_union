@@ -43,9 +43,13 @@ jobs:
       run: python scripts/validate_agent_governance.py
 
   regression-tests:
-    name: required regression suite
+    name: regression suite (shard ${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
 
     steps:
     - uses: actions/checkout@v6
@@ -60,8 +64,29 @@ jobs:
         python -m pip install --upgrade pip
         pip install pytest
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    - name: Run fixed regression suite
-      run: python -m pytest -q --strict-markers -m "not integration" tests
+    - name: Run fixed regression shard
+      env:
+        SHARD_INDEX: ${{ matrix.shard }}
+        SHARD_COUNT: 8
+      shell: bash
+      run: |
+        set -euo pipefail
+        mapfile -t all_test_files < <(
+          find tests -type f \( -name 'test_*.py' -o -name '*_test.py' \) | sort
+        )
+        selected_test_files=()
+        for index in "${!all_test_files[@]}"; do
+          if (( index % SHARD_COUNT == SHARD_INDEX - 1 )); then
+            selected_test_files+=("${all_test_files[$index]}")
+          fi
+        done
+        echo "pytest files total: ${#all_test_files[@]}"
+        echo "pytest files in shard ${SHARD_INDEX}/${SHARD_COUNT}: ${#selected_test_files[@]}"
+        if (( ${#selected_test_files[@]} == 0 )); then
+          echo "No pytest files selected for shard ${SHARD_INDEX}/${SHARD_COUNT}" >&2
+          exit 1
+        fi
+        python -m pytest -q --strict-markers -m "not integration" "${selected_test_files[@]}"
 
   shared-kernel-contract-tests:
     name: shared kernel contracts
