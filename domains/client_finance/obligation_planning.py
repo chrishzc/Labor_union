@@ -597,9 +597,10 @@ def _expected_direction(
         return ClientFinanceDirection.ADDITIONAL_CHARGE_DUE, after_amount.amount
     if action is ClientObligationActionKind.REPLACE_OPEN:
         difference = after_amount.amount - before_amount.amount
-        if difference == 0:
-            raise ValueError("client_finance_direction_mapping_invalid")
-        if difference < 0:
+        # An open obligation can be replaced solely to update its due date.
+        # That preserves the obligation amount and must not create a customer
+        # receivable or refund impact.
+        if difference <= 0:
             return ClientFinanceDirection.NO_FINANCE_CHANGE, 0
         return ClientFinanceDirection.ADDITIONAL_CHARGE_DUE, difference
     if action is ClientObligationActionKind.CANCEL_OPEN:

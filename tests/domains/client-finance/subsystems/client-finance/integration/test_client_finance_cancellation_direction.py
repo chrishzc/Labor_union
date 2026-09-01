@@ -64,6 +64,13 @@ def _action(
             0,
         ),
         (
+            ClientObligationActionKind.REPLACE_OPEN,
+            8000,
+            8000,
+            ClientFinanceDirection.NO_FINANCE_CHANGE,
+            0,
+        ),
+        (
             ClientObligationActionKind.CANCEL_OPEN,
             8000,
             0,

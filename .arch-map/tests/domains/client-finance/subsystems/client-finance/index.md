@@ -5,6 +5,9 @@ test_root: tests/domains/client-finance/subsystems/client-finance/
 integration_root: tests/domains/client-finance/subsystems/client-finance/integration/
 fixtures_root: tests/fixtures/
 modules:
+  obligation-planning:
+    layout_status: custom_current
+    test_root: tests/domains/client-finance/subsystems/client-finance/integration/test_client_finance_cancellation_direction.py
   historical-payment-settlement-presentation:
     layout_status: custom_current
     test_root: ui_react/src/tests/historical_client_payment_workbench.test.tsx
