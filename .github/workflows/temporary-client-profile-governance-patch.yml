@@ -1,0 +1,72 @@
+name: Temporary Client Profile governance patch
+
+on:
+  push:
+    branches:
+      - fix/current-regression-baseline
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply exact Client Profile governance mapping
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/generate_entrypoint_review_queue.py')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = (
+              (
+                  '        "api:GET /api/v1/case-import/hcm/workbooks/results",\n'
+                  '        "api:GET /api/v1/client-payments/historical-payments/{case_no}",\n',
+                  '        "api:GET /api/v1/case-import/hcm/workbooks/results",\n'
+                  '        "api:GET /api/v1/client-profile/requests",\n'
+                  '        "api:GET /api/v1/client-profile/requests/{request_id}",\n'
+                  '        "api:POST /api/v1/client-profile/requests/{request_id}/approve/apply",\n'
+                  '        "api:POST /api/v1/client-profile/requests/{request_id}/approve/preview",\n'
+                  '        "api:POST /api/v1/client-profile/requests/{request_id}/reject",\n'
+                  '        "api:POST /api/v1/client-profile/requests/{request_id}/reject/preview",\n'
+                  '        "api:POST /api/v1/line/client-profile/apply",\n'
+                  '        "api:POST /api/v1/line/client-profile/preview",\n'
+                  '        "api:POST /api/v1/line/client-profile/query",\n'
+                  '        "api:GET /api/v1/client-payments/historical-payments/{case_no}",\n',
+              ),
+              (
+                  '    "api/routes/client_payments.py": ("Client Finance", "authenticated client-finance operator"),\n',
+                  '    "api/routes/client_payments.py": ("Client Finance", "authenticated client-finance operator"),\n'
+                  '    "api/routes/client_profile.py": ("Client Profile", "verified LINE client applicant or authenticated client-profile reviewer"),\n',
+              ),
+              (
+                  '    "api/routes/client_payments.py": ("ui_react/src/api/client_finance/historical_client_payment_client.ts", "tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement/contract/test_historical_client_payment_api.py; ui_react/src/tests/historical_client_payment_workbench.test.tsx"),\n',
+                  '    "api/routes/client_payments.py": ("ui_react/src/api/client_finance/historical_client_payment_client.ts", "tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement/contract/test_historical_client_payment_api.py; ui_react/src/tests/historical_client_payment_workbench.test.tsx"),\n'
+                  '    "api/routes/client_profile.py": ("line/static/profile_update.html for the applicant flow; authenticated reviewer API has no React caller", "tests/domains/clients/subsystems/client-profile/modules/profile-change/contract/test_application.py; tests/domains/clients/subsystems/client-profile/modules/profile-change/contract/test_client_binding_port.py; tests/domains/external-integration/subsystems/line/infrastructure/test_line_legacy_static_surfaces.py"),\n',
+              ),
+          )
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one exact anchor, found {count}: {old!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+          python -m py_compile scripts/generate_entrypoint_review_queue.py
+          git diff --check
+      - name: Commit bounded patch and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/temporary-client-profile-governance-patch.yml
+          git add scripts/generate_entrypoint_review_queue.py
+          git commit -m "fix: govern client profile entrypoints"
+          git push origin HEAD:fix/current-regression-baseline
