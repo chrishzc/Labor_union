@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -21,25 +20,27 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          path = Path('scripts/generate_entrypoint_review_queue.py')
-          text = path.read_text(encoding='utf-8')
-          old = '''        elif "/identity-reviews/" in identity:
-            owner = "LINE Identity"
-            operator = "authenticated LINE mobile identity-review operator"
-        else:
-'''
-          new = '''        elif "/identity-reviews/" in identity:
-            owner = "LINE Identity"
-            operator = "authenticated LINE mobile identity-review operator"
-        elif "/scheduling-review/" in identity:
-            owner = "Scheduling"
-            operator = "authenticated LINE mobile scheduling reviewer"
-        else:
-'''
+          path = Path("scripts/generate_entrypoint_review_queue.py")
+          text = path.read_text(encoding="utf-8")
+          old = (
+              '        elif "/identity-reviews/" in identity:\n'
+              '            owner = "LINE Identity"\n'
+              '            operator = "authenticated LINE mobile identity-review operator"\n'
+              '        else:\n'
+          )
+          new = (
+              '        elif "/identity-reviews/" in identity:\n'
+              '            owner = "LINE Identity"\n'
+              '            operator = "authenticated LINE mobile identity-review operator"\n'
+              '        elif "/scheduling-review/" in identity:\n'
+              '            owner = "Scheduling"\n'
+              '            operator = "authenticated LINE mobile scheduling reviewer"\n'
+              '        else:\n'
+          )
           count = text.count(old)
           if count != 1:
-              raise SystemExit(f'expected one exact anchor, found {count}')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+              raise SystemExit(f"expected one exact anchor, found {count}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
           PY
           python -m py_compile scripts/generate_entrypoint_review_queue.py
           git diff --check
