@@ -160,8 +160,8 @@ class SafeReviewLinkApplication:
         return _mutate(self._unit_of_work_factory, mutate)
 
 
-def _mutate(factory, operation):
-    uow = factory()
+def _mutate(unit_of_work_factory, operation):
+    uow = unit_of_work_factory()
     uow.__enter__()
     try:
         result = operation(uow)
