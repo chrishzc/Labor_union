@@ -247,6 +247,8 @@ def _lock_staff(
     case_no=None,
     historical_origin=False,
 ) -> None:
+    if not staff_ids:
+        return
     locked_ids = tuple(lock_staff_occupancy_mutex(cursor, list(staff_ids)))
     if locked_ids != staff_ids:
         raise ValueError("scheduling_staff_not_found")
