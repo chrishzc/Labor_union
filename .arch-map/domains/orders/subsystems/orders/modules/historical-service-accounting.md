@@ -36,4 +36,4 @@
 - test_root: `tests/domains/orders/subsystems/orders/modules/historical-service-accounting/`
 
 ## Change triggers
-Reconcile when historical day-count facts, lifecycle eligibility, cross-owner versions, API/UI resource, schema or correction semantics change.
+Reconcile when historical day-count facts, write-once lifecycle eligibility, cross-owner versions, API/UI resource or schema changes.

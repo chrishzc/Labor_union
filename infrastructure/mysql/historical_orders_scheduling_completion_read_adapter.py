@@ -44,57 +44,97 @@ SELECT 'order' AS row_kind,
        NULL AS schedule_id, NULL AS schedule_case_no,
        NULL AS schedule_generation_id, NULL AS schedule_assignment_id,
        NULL AS schedule_staff_id, NULL AS work_date,
-       NULL AS schedule_effective_marker, NULL AS schedule_is_work_day
+       NULL AS schedule_effective_marker, NULL AS schedule_is_work_day,
+       NULL AS historical_event_id, NULL AS historical_event_identity,
+       NULL AS historical_event_case_no,
+       NULL AS historical_event_resulting_day_revision,
+       NULL AS historical_event_total_actual_service_days,
+       NULL AS historical_projection_event_id,
+       NULL AS historical_projection_case_no,
+       NULL AS historical_projection_day_revision,
+       NULL AS historical_projection_total_actual_service_days,
+       NULL AS historical_item_assignment_id,
+       NULL AS historical_item_staff_id,
+       NULL AS historical_item_actual_service_days
 FROM orders o
 WHERE o.case_no=%s
 UNION ALL
 SELECT 'completion',
        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
        e.id, e.case_no, e.after_status, e.expected_version,
-       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL, NULL
+       NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 FROM order_lifecycle_state_events e
-WHERE e.case_no=%s AND e.after_status='訂單完成'
+WHERE e.case_no=%s AND e.after_status IN (
+    '訂單完成','歷史訂單－服務完成','歷史訂單－帳務完成'
+)
 UNION ALL
 SELECT 'aggregate',
        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
        NULL, NULL, NULL, NULL,
        a.case_no, a.aggregate_version, a.effective_generation_id,
-       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+       NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 FROM scheduling_aggregates a
 WHERE a.case_no=%s
 UNION ALL
 SELECT 'generation',
        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL,
        g.id, g.case_no, g.resulting_aggregate_version,
        g.status, g.effective_marker,
        NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 FROM scheduling_generations g
 WHERE g.case_no=%s
 UNION ALL
 SELECT 'assignment',
        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL,
        NULL, NULL, NULL, NULL, NULL,
        a.id, a.case_no, a.generation_id, a.staff_id, a.status,
        a.assigned_start_date, a.assigned_end_date,
-       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 FROM case_staff_assignments a
 WHERE a.case_no=%s
 UNION ALL
 SELECT 'schedule',
        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL,
        NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL, NULL, NULL, s.id, s.case_no, s.generation_id,
-       s.assignment_id, s.staff_id, s.work_date,
-       s.effective_marker, s.is_work_day
+       s.id, s.case_no, s.generation_id, s.assignment_id,
+       s.staff_id, s.work_date, s.effective_marker, s.is_work_day,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 FROM staff_schedule s
 WHERE s.case_no=%s
+UNION ALL
+SELECT 'historical_day',
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       e.id, e.event_identity, e.case_no, e.resulting_day_revision,
+       e.total_actual_service_days,
+       p.current_event_id, p.case_no, p.day_revision,
+       p.total_actual_service_days,
+       i.assignment_id, i.staff_id, i.actual_service_days
+FROM historical_service_day_projections p
+JOIN historical_service_day_events e ON e.id=p.current_event_id
+LEFT JOIN historical_service_day_items i ON i.event_id=e.id
+WHERE p.case_no=%s
 """
 
 
@@ -113,14 +153,22 @@ class MySqlHistoricalOrdersSchedulingCompletionReadAdapter:
         if for_update is not False:
             raise ValueError("historical completion read adapter is read-only")
         with self._connection.cursor() as cursor:
-            cursor.execute(_CURRENT_CASE_READ_SQL, (case_no,) * 6)
+            cursor.execute(_CURRENT_CASE_READ_SQL, (case_no,) * 7)
             rows = _mapping_rows(cursor.fetchall(), "Orders/Scheduling current roots")
         if not any(row.get("row_kind") == "order" for row in rows):
             return None
         if any(
             not isinstance(row.get("row_kind"), str)
             or row.get("row_kind")
-            not in {"order", "completion", "aggregate", "generation", "assignment", "schedule"}
+            not in {
+                "order",
+                "completion",
+                "aggregate",
+                "generation",
+                "assignment",
+                "schedule",
+                "historical_day",
+            }
             for row in rows
         ):
             raise ValueError("Orders/Scheduling current roots contain an unknown row kind")
@@ -132,6 +180,9 @@ class MySqlHistoricalOrdersSchedulingCompletionReadAdapter:
         generations = tuple(row for row in rows if row.get("row_kind") == "generation")
         assignments = tuple(row for row in rows if row.get("row_kind") == "assignment")
         schedules = tuple(row for row in rows if row.get("row_kind") == "schedule")
+        historical_days = tuple(
+            row for row in rows if row.get("row_kind") == "historical_day"
+        )
         return _build_readback(
             case_no,
             orders[0],
@@ -140,6 +191,7 @@ class MySqlHistoricalOrdersSchedulingCompletionReadAdapter:
             generations,
             assignments,
             schedules,
+            historical_days,
         )
 
 
@@ -151,6 +203,7 @@ def _build_readback(
     generation_rows: tuple[Mapping[str, Any], ...],
     assignment_rows: tuple[Mapping[str, Any], ...],
     schedule_rows: tuple[Mapping[str, Any], ...],
+    historical_day_rows: tuple[Mapping[str, Any], ...],
 ) -> HistoricalOrdersCompletionReadback:
     blockers: list[str] = []
     _check_case_identity(order, case_no, "Orders")
@@ -167,33 +220,43 @@ def _build_readback(
         blockers,
         "orders.actual_start_date",
     )
-    service_time_complete = _service_time_complete(order, blockers)
+    historical_count_path = status in {
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+    }
+    service_time_complete = (
+        False if historical_count_path else _service_time_complete(order, blockers)
+    )
 
     completion_identity = _completion_identity(
-        case_no, lifecycle_version, completion_rows, blockers
+        case_no, lifecycle_version, status, completion_rows, blockers
     )
-    aggregate, generation, assignments, schedules = _current_scheduling_rows(
-        case_no,
-        aggregate_rows,
-        generation_rows,
-        assignment_rows,
-        schedule_rows,
-        blockers,
-    )
-    service_dates, service_identity = _official_service_facts(
-        case_no,
-        lifecycle_version,
-        required_days,
-        aggregate,
-        generation,
-        assignments,
-        schedules,
-        blockers,
-    )
-    aggregate_version = None
-    if aggregate is not None:
-        aggregate_version = _required_nonnegative_int(
-            aggregate.get("aggregate_version"), "Scheduling aggregate version"
+    historical_identity = None
+    historical_counts: tuple[tuple[str, int, int], ...] = ()
+    if historical_count_path:
+        service_dates: list[date] = []
+        service_identity = None
+        historical_identity, historical_counts = _historical_service_day_facts(
+            case_no, historical_day_rows, blockers
+        )
+    else:
+        aggregate, generation, assignments, schedules = _current_scheduling_rows(
+            case_no,
+            aggregate_rows,
+            generation_rows,
+            assignment_rows,
+            schedule_rows,
+            blockers,
+        )
+        service_dates, service_identity = _official_service_facts(
+            case_no,
+            lifecycle_version,
+            required_days,
+            aggregate,
+            generation,
+            assignments,
+            schedules,
+            blockers,
         )
     return HistoricalOrdersCompletionReadback(
         case_no=case_no,
@@ -210,12 +273,15 @@ def _build_readback(
         # transport/query failure makes the readback unavailable.
         readback_available=True,
         integrity_blockers=tuple(sorted(set(blockers))),
+        historical_service_day_count_identity=historical_identity,
+        historical_assignment_day_counts=historical_counts,
     )
 
 
 def _completion_identity(
     case_no: str,
     lifecycle_version: int,
+    status: OrderLifecycleStatus,
     rows: tuple[Mapping[str, Any], ...],
     blockers: list[str],
 ) -> str | None:
@@ -251,7 +317,15 @@ def _completion_identity(
     if event_id > _SIGNED_BIGINT_MAXIMUM:
         blockers.append("orders.completion_event_identity_invalid")
         return None
-    if row.get("completion_after_status") != OrderLifecycleStatus.COMPLETED.value:
+    expected_status = (
+        status.value
+        if status in {
+            OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+            OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+        }
+        else OrderLifecycleStatus.COMPLETED.value
+    )
+    if row.get("completion_after_status") != expected_status:
         blockers.append("orders.completion_event_status_invalid")
         return None
     if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 0:
@@ -261,6 +335,85 @@ def _completion_identity(
         blockers.append("orders.completion_lineage_version_mismatch")
         return None
     return f"orders-completion-event:{case_no}:{event_id}"
+
+
+def _historical_service_day_facts(
+    case_no: str,
+    rows: tuple[Mapping[str, Any], ...],
+    blockers: list[str],
+) -> tuple[str | None, tuple[tuple[str, int, int], ...]]:
+    """Validate one adopted count root and its complete per-assignment items."""
+
+    if not rows:
+        blockers.append("orders.historical_service_day_projection_missing")
+        return None, ()
+    event_ids = {row.get("historical_event_id") for row in rows}
+    projection_event_ids = {
+        row.get("historical_projection_event_id") for row in rows
+    }
+    if len(event_ids) != 1 or len(projection_event_ids) != 1:
+        blockers.append("orders.historical_service_day_projection_duplicate")
+        return None, ()
+    row = rows[0]
+    for item in rows:
+        _check_case_identity(
+            item,
+            case_no,
+            "Historical service day event",
+            blockers,
+            field="historical_event_case_no",
+        )
+        _check_case_identity(
+            item,
+            case_no,
+            "Historical service day projection",
+            blockers,
+            field="historical_projection_case_no",
+        )
+    event_id = row.get("historical_event_id")
+    projection_event_id = row.get("historical_projection_event_id")
+    identity = row.get("historical_event_identity")
+    event_revision = row.get("historical_event_resulting_day_revision")
+    projection_revision = row.get("historical_projection_day_revision")
+    event_total = row.get("historical_event_total_actual_service_days")
+    projection_total = row.get("historical_projection_total_actual_service_days")
+    if (
+        not _is_positive_database_identity(event_id)
+        or projection_event_id != event_id
+        or not isinstance(identity, str)
+        or not identity.strip()
+        or identity != identity.strip()
+        or len(identity) > 191
+        or not _is_positive_database_identity(event_revision)
+        or projection_revision != event_revision
+        or not _is_positive_database_identity(event_total)
+        or projection_total != event_total
+    ):
+        blockers.append("orders.historical_service_day_projection_invalid")
+        return None, ()
+    counts: list[tuple[str, int, int]] = []
+    assignments: set[int] = set()
+    staff_ids: set[int] = set()
+    for item in rows:
+        assignment_id = item.get("historical_item_assignment_id")
+        staff_id = item.get("historical_item_staff_id")
+        actual_days = item.get("historical_item_actual_service_days")
+        if not all(
+            _is_positive_database_identity(value)
+            for value in (assignment_id, staff_id, actual_days)
+        ):
+            blockers.append("orders.historical_service_day_item_invalid")
+            continue
+        if assignment_id in assignments or staff_id in staff_ids:
+            blockers.append("orders.historical_service_day_item_duplicate")
+            continue
+        assignments.add(assignment_id)
+        staff_ids.add(staff_id)
+        counts.append((f"assignment:{assignment_id}", staff_id, actual_days))
+    result = tuple(sorted(counts))
+    if not result or sum(item[2] for item in result) != event_total:
+        blockers.append("orders.historical_service_day_total_mismatch")
+    return identity, result
 
 
 def _current_scheduling_rows(

@@ -3122,6 +3122,13 @@ def _local_classify_statement(statement: str) -> str:
                 .read_text(encoding="utf-8")
             )[0].strip(),
         ).casefold()
+        canonical_1028_alters = {
+            re.sub(r"\s+", " ", item.strip()).casefold()
+            for item in split_sql(
+                (ROOT / "db" / "schema_parts" / "1028_historical_service_accounting.sql")
+                .read_text(encoding="utf-8")
+            )[:2]
+        }
         controlled_parent_replacement = (
             normalized.startswith("alter table controlled_file_staging_objects ")
             and "modify column purpose enum(" in normalized
@@ -3147,6 +3154,8 @@ def _local_classify_statement(statement: str) -> str:
             return "controlled_check_replacement"
         if normalized == canonical_1023:
             return "matching_outbox_successor"
+        if normalized in canonical_1028_alters:
+            return "historical_lifecycle_shape_widen"
         if re.search(r"\b(drop|modify|change|rename|truncate)\b", normalized):
             raise LocalAdditiveBlocked("destructive ALTER is outside additive allowlist", code="forbidden_sql_effect")
         if not re.search(r"\badd\s+(column|index|unique|constraint|fulltext|spatial)\b", normalized):
@@ -5598,10 +5607,14 @@ def _historical_service_accounting_state(
         actual = _normalize_check_contract(
             show_create_checks.get(key, row.get("check_clause") or "")
         )
-        predecessor = _normalize_check_contract(_normalize_sql_contract(
-            f"{column_name} IN ('待補件','洽談中','訂單成立','服務中',"
-            "'訂單完成','訂單取消')"
-        ))
+        predecessor_values = (
+            "'待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消'"
+            if column_name == "before_status"
+            else "'洽談中','訂單成立','服務中','訂單完成','訂單取消'"
+        )
+        predecessor = _normalize_check_contract(
+            _normalize_sql_contract(f"{column_name} IN ({predecessor_values})")
+        )
         if actual != predecessor:
             return "drift"
     return "absent"

@@ -169,6 +169,44 @@ def test_open_recovery_source_is_lineage_not_a_step_11_blocker() -> None:
     )
 
 
+def test_exact_historical_staff_payout_bundle_satisfies_payment_lineage() -> None:
+    normal = _settlement(CompletionOwner.STAFF_PAYABLES)
+    core_kinds = {
+        SettlementSourceKind.PAYROLL_CASE_ACCOUNT,
+        SettlementSourceKind.STAFF_OBLIGATION,
+        SettlementSourceKind.STAFF_OBLIGATION_EVENT,
+        SettlementSourceKind.STAFF_PAYABLE_ACCOUNT,
+    }
+    historical_sources = tuple(
+        sorted(
+            tuple(item for item in normal.source_versions if item.kind in core_kinds)
+            + (
+                HistoricalSettlementSourceVersion(
+                    SettlementSourceKind.HISTORICAL_STAFF_PAYOUT_PROJECTION,
+                    "obligation:1",
+                    4,
+                ),
+                HistoricalSettlementSourceVersion(
+                    SettlementSourceKind.HISTORICAL_STAFF_PAYOUT_EVENT,
+                    "historical-payout:1",
+                    4,
+                ),
+                HistoricalSettlementSourceVersion(
+                    SettlementSourceKind.HISTORICAL_STAFF_PAYOUT_LINK,
+                    "1:1",
+                    2,
+                ),
+            )
+        )
+    )
+    staff = replace(normal, source_versions=historical_sources)
+
+    result = evaluate_historical_completion(_facts(staff_payables=staff))
+
+    assert result.state is HistoricalCompletionState.COMPLETED
+    assert result.missing_roots == ()
+
+
 def test_case_identity_mismatch_is_rejected_before_evaluation() -> None:
     with pytest.raises(ValueError, match="case identity"):
         HistoricalCompletionFacts(

@@ -9,12 +9,12 @@
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
     "expected_count": 155,
-    "ordered_digest_sha256": "8b21ff4a3244b1a292cf15af54f16891c0dec658fbd021e42c9290344829b6ff",
+    "ordered_digest_sha256": "2e465ec38251b0c47ebd10d0c3c9873fb4a94629c8976a4d9031c3c375921950",
     "terminal_artifact": "1029_client_payment_destination_configuration.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "ddc56ee7b5bd38eb8de5c394b670b237c6c97b2a73b87e8c6c2f0f3f63425b74"
+    "sha256": "e1b6471e16c27b698377b8ea37b1613d8825c738a04b781a0298b830d80b0795"
   },
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_v1.sql",

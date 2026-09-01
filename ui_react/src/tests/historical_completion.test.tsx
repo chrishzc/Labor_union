@@ -3,13 +3,16 @@
  * Description: 驗證 HOB-E strict decode、closed owner referral、收合技術證據與 Step 11 不假完成顯示。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { sessionClient } from '../api/auth/session_client';
 import {
   queryHistoricalCompletion,
   type HistoricalCompletionClient,
 } from '../api/orders/historical_completion_client';
-import type { HistoricalCompletion } from '../api/orders/historical_completion_schemas';
+import {
+  HistoricalCompletionSchema,
+  type HistoricalCompletion,
+} from '../api/orders/historical_completion_schemas';
 import { HistoricalCompletionPanel } from '../components/HistoricalCompletionPanel';
 
 const blocked: HistoricalCompletion = {
@@ -32,7 +35,27 @@ const blocked: HistoricalCompletion = {
 };
 
 function client(projection: HistoricalCompletion): HistoricalCompletionClient {
-  return { query: vi.fn().mockResolvedValue(projection) };
+  return {
+    query: vi.fn().mockResolvedValue(projection),
+    preview: vi.fn().mockResolvedValue({
+      case_no: projection.case_no,
+      before_status: '歷史訂單－服務完成',
+      after_status: '歷史訂單－帳務完成',
+      expected_order_version: '3',
+      resulting_order_version: '4',
+      expected_client_finance_version: '4',
+      expected_source_versions: projection.owner_source_versions,
+      business_date: '2026-09-01',
+      preview_fingerprint: 'c'.repeat(64),
+    }),
+    apply: vi.fn().mockResolvedValue({
+      case_no: projection.case_no,
+      lifecycle_event_id: 10,
+      resulting_order_version: '4',
+      after_status: '歷史訂單－帳務完成',
+      replayed: false,
+    }),
+  };
 }
 
 describe('HistoricalCompletionPanel', () => {
@@ -62,8 +85,34 @@ describe('HistoricalCompletionPanel', () => {
     expect(screen.queryByRole('list', { name: '待處理項目' })).not.toBeInTheDocument();
   });
 
+  it('requires explicit confirmation before applying accounting completion', async () => {
+    const completed: HistoricalCompletion = {
+      ...blocked,
+      state: 'completed',
+      step_11_status: 'completed',
+      step_11_completed: true,
+      historical_alerts_completed: true,
+      active_alerts: [],
+    };
+    const completionClient = client(completed);
+    render(<HistoricalCompletionPanel caseNo="CASE-1" client={completionClient} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '預覽並確認帳務完成' }));
+    const applyButton = await screen.findByRole('button', { name: '確認推進至帳務完成' });
+    expect(applyButton).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: /客戶款項及所有月嫂款項/ }));
+    fireEvent.click(applyButton);
+
+    await waitFor(() => expect(screen.getByText(/已推進至歷史訂單－帳務完成/)).toBeInTheDocument());
+    expect(completionClient.apply).toHaveBeenCalledTimes(1);
+  });
+
   it('does not expose an unclassified runtime error', async () => {
-    const failingClient: HistoricalCompletionClient = { query: vi.fn().mockRejectedValue(new Error('raw transport detail')) };
+    const failingClient: HistoricalCompletionClient = {
+      query: vi.fn().mockRejectedValue(new Error('raw transport detail')),
+      preview: vi.fn(),
+      apply: vi.fn(),
+    };
     render(<HistoricalCompletionPanel caseNo="CASE-1" client={failingClient} />);
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('歷史案件完成狀態目前無法載入。'));
@@ -100,5 +149,18 @@ describe('HistoricalCompletionPanel', () => {
 
     expect(lossless.owner_versions[0].version).toBe('9223372036854775807');
     expect(lossless.owner_source_versions[0].version).toBe('9007199254740993');
+  });
+
+  it('accepts exact historical staff payout source lineage', () => {
+    const decoded = HistoricalCompletionSchema.parse({
+      ...blocked,
+      owner_source_versions: [
+        { kind: 'historical_staff_payout_projection', identity: 'obligation:1', version: '4' },
+        { kind: 'historical_staff_payout_event', identity: 'historical-payout:1', version: '4' },
+        { kind: 'historical_staff_payout_link', identity: '1:1', version: '2' },
+      ],
+    });
+
+    expect(decoded.owner_source_versions).toHaveLength(3);
   });
 });

@@ -1,10 +1,13 @@
-"""Immutable difference-obligation persistence for historical accounting corrections."""
+"""Write-once persistence for historical service-day accounting."""
+
+from dataclasses import replace
 
 from domains.orders.historical_service_accounting import HistoricalActualServiceDaysInput
 from domains.orders.lifecycle import OrderLifecycleStatus
 from domains.payroll.calculation import PayrollPolicyKind, rate_snapshot
 from infrastructure.mysql.historical_service_accounting_repository import (
     MySqlHistoricalServiceAccountingRepository,
+    _ensure_assignment_rate_snapshots,
     _write_client_obligation,
     _write_payroll_outbox,
     _write_staff_obligations,
@@ -21,10 +24,9 @@ from subsystems.orders.historical_service_accounting_workflow import (
 
 
 class _Cursor:
-    def __init__(self, *, client_amount=None, staff_amount=None, staff_states=()):
+    def __init__(self, *, client_amount=None, staff_amount=None):
         self.client_amount = client_amount
         self.staff_amount = staff_amount
-        self.staff_states = staff_states
         self.statements = []
         self.lastrowid = 41
         self.rowcount = 1
@@ -51,10 +53,11 @@ class _Cursor:
                         },
                     )
                 )
-        elif "FROM staff_obligations obligation WHERE obligation.case_no" in statement:
-            self._all = self.staff_states
         elif statement.startswith("SELECT obligation_identity"):
             self._one = None
+
+    def executemany(self, statement, parameters):
+        self.statements.append((" ".join(statement.split()), parameters))
 
     def fetchone(self):
         value, self._one = self._one, None
@@ -130,7 +133,7 @@ def _candidate_and_request():
         lifecycle_version=3,
         adoption_receipt_id=19,
         adoption_source_identity="historical-source:19",
-        historical_day_revision=1,
+        historical_day_revision=0,
         client_finance_version=2,
         payroll_version=4,
         contracted_service_days=40,
@@ -159,14 +162,14 @@ def _candidate_and_request():
     request = ApplyHistoricalServiceAccounting(
         intent,
         3,
-        1,
+        0,
         2,
         4,
         candidate.fingerprint,
-        IdempotencyKey("historical-days:19:revision:2"),
+        IdempotencyKey("historical-days:19:revision:1"),
         ActorContext("operator"),
-        "修正舊系統實際服務天數",
-        CorrelationId("historical-days:19:revision:2"),
+        "確認舊系統實際服務天數",
+        CorrelationId("historical-days:19:revision:1"),
     )
     return candidate, request
 
@@ -184,9 +187,27 @@ def test_load_uses_case_client_terms_and_assignment_owned_payroll_facts():
     assert facts.assignments[0].effective_adjustment == MoneyNTD(150)
     statements = tuple(statement for statement, _ in connection.cursor_instance.statements)
     assert any("JOIN client_payment_terms client_terms" in statement for statement in statements)
-    assert any("JOIN assignment_payroll_rate_snapshots rate" in statement for statement in statements)
+    assert any("LEFT JOIN assignment_payroll_rate_snapshots rate" in statement for statement in statements)
+    assert any("JOIN case_payroll_rate_policy_snapshots case_rate" in statement for statement in statements)
     assert any("FROM payroll_adjustment_allocations" in statement for statement in statements)
     assert all(statement.endswith("FOR UPDATE") for statement in statements)
+
+
+def test_apply_freezes_projected_case_rate_for_legacy_assignment() -> None:
+    candidate, _ = _candidate_and_request()
+    cursor = _Cursor()
+
+    _ensure_assignment_rate_snapshots(cursor, candidate)
+
+    statement, parameters = next(
+        item
+        for item in cursor.statements
+        if item[0].startswith("INSERT INTO assignment_payroll_rate_snapshots ")
+    )
+    assert "source_identity_status" in statement
+    assert parameters == (
+        (19, "policy:1", PayrollPolicyKind.CITIZEN.value, 300, "一般市民"),
+    )
 
 
 def _insert_parameters(cursor, table):
@@ -197,94 +218,75 @@ def _insert_parameters(cursor, table):
     )
 
 
-def _paid_staff_state():
-    return ({
-        "obligation_identity": "historical-service:CASE-19:revision:1:assignment:19:payable_to_staff",
-        "assignment_id": 19,
-        "obligation_kind": "service_pay",
-        "direction": "payable_to_staff",
-        "source_obligation_identity": None,
-        "status": "open",
-        "payout_history_exists": 1,
-    },)
-
-
-def _unpaid_staff_state():
-    row = dict(_paid_staff_state()[0])
-    row["payout_history_exists"] = 0
-    return (row,)
-
-
-def test_client_correction_appends_receivable_difference_without_overwriting_prior_obligation():
+def test_initial_client_obligation_is_established_once():
     candidate, request = _candidate_and_request()
-    cursor = _Cursor(client_amount=5_600)
+    cursor = _Cursor()
 
     _write_client_obligation(cursor, request, candidate, "source:event", 3)
 
     parameters = _insert_parameters(cursor, "client_obligation_events")
     assert parameters[2] == "receivable_from_client"
-    assert parameters[3] == 2_800
+    assert parameters[3] == 8_400
     assert all(not statement.startswith("UPDATE client_obligations") for statement, _ in cursor.statements)
 
 
-def test_client_downward_correction_appends_refund_difference():
+def test_zero_client_obligation_is_immediately_settled_without_payment() -> None:
     candidate, request = _candidate_and_request()
-    cursor = _Cursor(client_amount=11_200)
+    candidate = replace(
+        candidate,
+        client_finance=replace(
+            candidate.client_finance,
+            service_receivable=MoneyNTD(0),
+            total_receivable=MoneyNTD(0),
+        ),
+    )
+    cursor = _Cursor()
 
     _write_client_obligation(cursor, request, candidate, "source:event", 3)
 
-    parameters = _insert_parameters(cursor, "client_obligation_events")
-    assert parameters[2] == "payable_to_client"
-    assert parameters[3] == 2_800
-
-
-def test_staff_downward_correction_appends_recovery_difference_without_overwriting_prior_obligation():
-    candidate, request = _candidate_and_request()
-    cursor = _Cursor(staff_amount=11_200, staff_states=_paid_staff_state())
-
-    _write_staff_obligations(cursor, request, candidate, "source:event", 5)
-
-    parameters = _insert_parameters(cursor, "staff_obligation_events")
-    assert parameters[4] == "reversal"
-    assert parameters[5] == "receivable_from_staff"
-    assert parameters[6] == _paid_staff_state()[0]["obligation_identity"]
-    assert parameters[7] == "reversal"
-    assert parameters[8] == 2_800
-    assert all(not statement.startswith("UPDATE staff_obligations") for statement, _ in cursor.statements)
-
-
-def test_unpaid_staff_correction_rebuilds_existing_obligation_in_place():
-    candidate, request = _candidate_and_request()
-    cursor = _Cursor(staff_amount=5_600, staff_states=_unpaid_staff_state())
-
-    _write_staff_obligations(cursor, request, candidate, "source:event", 5)
-
-    parameters = _insert_parameters(cursor, "staff_obligation_events")
-    assert parameters[0] == _unpaid_staff_state()[0]["obligation_identity"]
-    assert parameters[6] == 5_600
-    assert parameters[7] == 8_400
-    assert any(
-        statement.startswith("UPDATE staff_obligations SET amount_due_ntd=")
-        for statement, _ in cursor.statements
+    statement, parameters = next(
+        item
+        for item in cursor.statements
+        if item[0].startswith("INSERT INTO client_obligations ")
     )
-    assert all(
-        not statement.startswith("INSERT INTO staff_obligations")
-        for statement, _ in cursor.statements
-    )
+    assert parameters[3] == 0
+    assert parameters[4] == "settled"
 
 
-def test_paid_staff_increase_appends_source_bound_adjustment():
+def test_existing_client_day_projection_is_rejected_without_difference_obligation():
     candidate, request = _candidate_and_request()
-    cursor = _Cursor(staff_amount=5_600, staff_states=_paid_staff_state())
+    cursor = _Cursor(client_amount=8_400)
+
+    import pytest
+
+    with pytest.raises(ValueError, match="historical_actual_service_days_already_confirmed"):
+        _write_client_obligation(cursor, request, candidate, "source:event", 3)
+    assert all(not statement.startswith("INSERT INTO") for statement, _ in cursor.statements)
+
+
+def test_initial_staff_obligation_is_payable_and_established_once():
+    candidate, request = _candidate_and_request()
+    cursor = _Cursor()
 
     _write_staff_obligations(cursor, request, candidate, "source:event", 5)
 
     parameters = _insert_parameters(cursor, "staff_obligation_events")
-    assert parameters[4] == "adjustment"
+    assert parameters[4] == "service_pay"
     assert parameters[5] == "payable_to_staff"
-    assert parameters[6] == _paid_staff_state()[0]["obligation_identity"]
-    assert parameters[7] == "adjustment"
-    assert parameters[8] == 2_800
+    assert parameters[6] is None
+    assert parameters[7] == "established"
+    assert parameters[8] == 8_400
+
+
+def test_existing_staff_day_projection_is_rejected_without_recovery_obligation():
+    candidate, request = _candidate_and_request()
+    cursor = _Cursor(staff_amount=8_400)
+
+    import pytest
+
+    with pytest.raises(ValueError, match="historical_actual_service_days_already_confirmed"):
+        _write_staff_obligations(cursor, request, candidate, "source:event", 5)
+    assert all(not statement.startswith("INSERT INTO") for statement, _ in cursor.statements)
 
 
 def test_payroll_change_uses_existing_payroll_outbox_contract():
@@ -301,13 +303,3 @@ def test_payroll_change_uses_existing_payroll_outbox_contract():
     assert parameters[1].endswith(":payroll-outbox")
     assert '"payroll_version":5' in parameters[2]
     assert '"total_payable_ntd":8400' in parameters[2]
-
-
-def test_unchanged_totals_do_not_create_difference_obligations():
-    candidate, request = _candidate_and_request()
-    cursor = _Cursor(client_amount=8_400, staff_amount=8_400)
-
-    _write_client_obligation(cursor, request, candidate, "source:event", 3)
-    _write_staff_obligations(cursor, request, candidate, "source:event", 5)
-
-    assert all(not statement.startswith("INSERT INTO") for statement, _ in cursor.statements)

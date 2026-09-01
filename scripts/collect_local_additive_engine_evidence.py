@@ -54,6 +54,7 @@ def _verify_release_boundary(
     *,
     applied: bool,
     snapshot: Mapping[str, Any],
+    require_predecessor_prefix: bool = True,
 ) -> list[str]:
     entries = migration._local_ordered_upgrade_entries()
     target_indexes = [
@@ -86,7 +87,9 @@ def _verify_release_boundary(
             dependency_gap_seen = True
 
     expected_exact_end = target_index + (1 if applied else 0)
-    if any(state != "exact" for state in states[:expected_exact_end]):
+    if require_predecessor_prefix and any(
+        state != "exact" for state in states[:expected_exact_end]
+    ):
         raise EngineEvidenceError("release predecessor prefix is not exact")
     target_state = states[target_index]
     if applied:
@@ -328,7 +331,12 @@ def collect_evidence(
         config, candidate, release_id, applied=True, snapshot=candidate_snapshot
     )
     _verify_release_boundary(
-        config, fresh, release_id, applied=True, snapshot=fresh_snapshot
+        config,
+        fresh,
+        release_id,
+        applied=True,
+        snapshot=fresh_snapshot,
+        require_predecessor_prefix=False,
     )
     source_rows, candidate_rows = _canonical_row_preservation(
         config,

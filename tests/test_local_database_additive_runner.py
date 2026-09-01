@@ -72,6 +72,23 @@ def test_statement_classifier_allows_only_canonical_1008_atomic_check_replacemen
         )
 
 
+def test_statement_classifier_allows_only_canonical_1028_lifecycle_widens() -> None:
+    sql = (
+        migration.ROOT / "db" / "schema_parts" /
+        "1028_historical_service_accounting.sql"
+    ).read_text(encoding="utf-8")
+    statements = migration.split_sql(sql)
+
+    assert [migration._local_classify_statement(item) for item in statements[:2]] == [
+        "historical_lifecycle_shape_widen",
+        "historical_lifecycle_shape_widen",
+    ]
+    with pytest.raises(migration.LocalAdditiveBlocked):
+        migration._local_classify_statement(
+            statements[0].replace("'歷史訂單－帳務完成'", "'未授權狀態'")
+        )
+
+
 def test_column_contract_detects_stored_generated_column() -> None:
     name, contract = migration._parse_column_definition(
         "active_hold_scope_key VARCHAR(191)\n"

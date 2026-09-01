@@ -15,6 +15,7 @@ from api.dependencies.admin_auth import (
 from api.dependencies.historical_completion import get_historical_completion_application
 from api.routes.historical_completion import _projection_payload, router
 from api.schemas.historical_completion import (
+    HistoricalCompletionApplyBody,
     HistoricalCompletionPreviewView,
     HistoricalCompletionReceiptView,
     HistoricalCompletionView,
@@ -60,6 +61,40 @@ def test_projection_payload_matches_strict_api_view() -> None:
     assert view.owner_source_versions[0].identity == "obligation:1"
     assert view.owner_versions[0].version == "3"
     assert view.owner_source_versions[0].version == "2"
+
+
+def test_historical_staff_payout_source_kinds_round_trip_through_typed_views() -> None:
+    projection = _projection()
+    projection.owner_source_versions = tuple(
+        SimpleNamespace(
+            kind=SimpleNamespace(value=kind), identity=f"source:{index}", version=index
+        )
+        for index, kind in enumerate(
+            (
+                "historical_staff_payout_projection",
+                "historical_staff_payout_event",
+                "historical_staff_payout_link",
+            ),
+            start=1,
+        )
+    )
+
+    view = HistoricalCompletionView.model_validate(_projection_payload(projection))
+    body = HistoricalCompletionApplyBody.model_validate(
+        {
+            "expected_order_version": "7",
+            "expected_client_finance_version": "4",
+            "expected_source_versions": [item.model_dump() for item in view.owner_source_versions],
+            "preview_fingerprint": "c" * 64,
+            "reason": "核實歷史付款來源",
+        }
+    )
+
+    assert [item.kind for item in body.expected_source_versions] == [
+        "historical_staff_payout_projection",
+        "historical_staff_payout_event",
+        "historical_staff_payout_link",
+    ]
 
 
 def test_projection_payload_preserves_signed_bigint_versions_losslessly() -> None:

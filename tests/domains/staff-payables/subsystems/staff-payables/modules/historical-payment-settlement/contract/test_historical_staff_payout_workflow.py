@@ -167,7 +167,6 @@ def test_bank_candidate_blocks_manual_staff_payout_without_write() -> None:
     [
         (_obligation(staff_id=10), "historical_staff_cross_staff_forbidden"),
         (_obligation(case_no="OTHER"), "historical_staff_cross_case_forbidden"),
-        (_obligation(direction="receivable_from_staff"), "historical_staff_direction_mismatch"),
     ],
 )
 def test_staff_payout_rejects_cross_owner_obligation(obligation, blocker) -> None:

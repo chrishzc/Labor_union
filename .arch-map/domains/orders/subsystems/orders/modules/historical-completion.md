@@ -14,6 +14,8 @@
   - `subsystems/orders/historical_completion_projector.py`
   - `subsystems/orders/historical_completion_apply.py`
   - `infrastructure/mysql/historical_completion_writer.py`
+  - `infrastructure/mysql/historical_client_finance_completion_read_adapter.py`
+  - `infrastructure/mysql/historical_orders_scheduling_completion_read_adapter.py`
 - entrypoints:
   - `api/routes/historical_completion.py`
   - `api/dependencies/historical_completion.py`
@@ -24,6 +26,7 @@
 
 ## Dependencies
 - outbound: `scheduling`、`client-finance`、`staff-payables` — Query 只讀各 owner typed current readback；Apply 鎖定並驗證 exact owner versions/source vector，不改寫這些 owner root。
+- Staff Payables completion evidence accepts either canonical bank payout/allocation lineage or exact current historical payout projection/event/link lineage；Apply locks both lineage families before fresh re-read，且歷史流程只接受 `payable_to_staff` obligations。
 - outbound: Orders canonical lifecycle writer — 追加 lifecycle event/outbox 並以 lifecycle version CAS 更新 Orders projection。
 - inbound: Orders tracker — 顯示terminal projection與owner-specific referral，不提供generic resolve。
 
@@ -35,6 +38,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/domains/orders/subsystems/orders/modules/historical-completion/`
+- integration_root: `ui_react/src/tests/historical_completion.test.tsx`
 - routing: `.arch-map/tests/domains/orders/subsystems/orders/modules/historical-completion.md`
 
 ## Provenance

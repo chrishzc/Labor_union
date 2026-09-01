@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS historical_service_day_events (
     CONSTRAINT chk_historical_service_day_revision CHECK (resulting_day_revision=expected_day_revision+1),
     CONSTRAINT chk_historical_service_day_values CHECK (
         total_actual_service_days>0 AND total_actual_service_hours>0
-        AND historical_floor_fee_ntd>=0 AND client_obligation_amount_ntd>0
+        AND historical_floor_fee_ntd>=0 AND client_obligation_amount_ntd>=0
         AND staff_obligation_amount_ntd>0
     ),
     CONSTRAINT chk_historical_service_day_fingerprints CHECK (

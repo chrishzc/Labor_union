@@ -352,7 +352,7 @@ class HistoricalStaffObligationView(_StrictModel):
     staff_id: int = Field(gt=0)
     amount_due_ntd: int = Field(gt=0)
     payroll_version: int = Field(ge=0)
-    direction: Literal["payable_to_staff", "receivable_from_staff"]
+    direction: Literal["payable_to_staff"]
     status: Literal["open", "settled", "cancelled"]
 
 

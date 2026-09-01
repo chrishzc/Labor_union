@@ -40,7 +40,18 @@ SELECT 'payroll_account' row_kind, p.case_no, NULL identity, NULL related_identi
        NULL reconciliation_reference, NULL target_event_type, NULL target_event_amount_ntd,
        NULL linked_staff_id, NULL source_bank_fact_identities,
        NULL recovery_event_id, NULL recovery_before_ntd, NULL recovery_after_ntd,
-       NULL recovery_event_status
+       NULL recovery_event_status,
+       NULL historical_projection_event_id, NULL historical_projection_case_no,
+       NULL historical_projection_staff_id, NULL historical_confirmation_kind,
+       NULL historical_amount_snapshot_ntd, NULL historical_obligation_payroll_version,
+       NULL historical_staff_payables_version, NULL historical_event_identity,
+       NULL historical_event_case_no, NULL historical_event_staff_id,
+       NULL historical_event_confirmation_kind, NULL historical_event_payer_role,
+       NULL historical_event_payee_role,
+       NULL historical_event_expected_version, NULL historical_event_resulting_version,
+       NULL historical_event_adoption_receipt_id,
+       NULL historical_link_amount_snapshot_ntd, NULL historical_link_payroll_version,
+       NULL historical_link_ordinal
 FROM payroll_case_accounts p WHERE p.case_no=%s
 UNION ALL
 SELECT 'obligation', o.case_no, o.obligation_identity, NULL, o.staff_id,
@@ -50,12 +61,25 @@ SELECT 'obligation', o.case_no, o.obligation_identity, NULL, o.staff_id,
        sp.net_paid_ntd, sp.balance_ntd, sp.status, sa.aggregate_version, sp.current_event_id,
        sp.staff_id, NULL, NULL
        , sp.aggregate_version, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL, NULL, NULL
+       NULL, NULL, NULL, NULL,
+       hp.current_event_id, hp.case_no, hp.staff_id, hp.confirmation_kind,
+       hp.amount_snapshot_ntd, hp.obligation_payroll_version,
+       hp.staff_payables_version, he.event_identity, he.case_no, he.staff_id,
+       he.confirmation_kind, he.payer_role, he.payee_role,
+       he.expected_staff_payables_version, he.resulting_staff_payables_version,
+       he.historical_adoption_receipt_id, hl.amount_snapshot_ntd,
+       hl.obligation_payroll_version, hl.link_ordinal
 FROM staff_obligations o
 LEFT JOIN staff_obligation_events oe ON oe.id=o.current_event_id
 LEFT JOIN staff_payable_projections sp ON sp.obligation_identity=o.obligation_identity
 LEFT JOIN staff_payable_accounts sa ON sa.staff_id=o.staff_id
-WHERE o.case_no=%s AND o.direction='payable_to_staff' AND o.status<>'cancelled'
+LEFT JOIN historical_staff_payout_projections hp
+       ON hp.obligation_identity=o.obligation_identity
+LEFT JOIN historical_staff_payout_events he ON he.id=hp.current_event_id
+LEFT JOIN historical_staff_payout_obligation_links hl
+       ON hl.event_id=hp.current_event_id
+      AND hl.obligation_identity=o.obligation_identity
+WHERE o.case_no=%s AND o.status<>'cancelled'
 UNION ALL
 SELECT 'payout', linked.case_no,
        CAST(e.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci,
@@ -66,7 +90,10 @@ SELECT 'payout', linked.case_no,
        NULL, NULL,
        NULL, e.finance_import_row_id, e.bank_account_identity_hash,
        e.reconciliation_reference, target.event_type, target.amount_ntd,
-       linked.staff_id, NULL, NULL, NULL, NULL, NULL
+       linked.staff_id, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL
 FROM staff_payout_events e
 JOIN staff_payout_obligation_links l ON l.payout_event_id=e.id
 JOIN staff_obligations linked ON linked.obligation_identity=l.obligation_identity
@@ -86,7 +113,10 @@ SELECT 'recovery', %s, r.recovery_identity, NULL, r.staff_id, NULL,
        NULL, r.original_amount_ntd, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
        NULL, NULL, r.source_payout_event_ids, r.source_obligation_identities,
        NULL, NULL, NULL, NULL, NULL, NULL, NULL, r.source_bank_fact_identities,
-       re.id, re.before_remaining_ntd, re.after_remaining_ntd, re.resulting_status
+       re.id, re.before_remaining_ntd, re.after_remaining_ntd, re.resulting_status,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL
 FROM staff_overpayment_recoveries r
 LEFT JOIN staff_overpayment_recovery_events re
        ON re.recovery_identity=r.recovery_identity
@@ -147,6 +177,7 @@ def _build_readback(
 
     obligation_index: dict[str, Mapping[str, Any]] = {}
     projection_payload: list[dict[str, Any]] = []
+    historical_projection_payload: list[dict[str, Any]] = []
     open_identities: set[str] = set()
     for row in obligations:
         identity = _identity(row.get("identity"), "staff_payables_obligation_identity_invalid", blockers)
@@ -186,13 +217,31 @@ def _build_readback(
         account_version = _integer(row.get("account_version"), "staff_payables_account_missing", blockers)
         if staff_id is not None and account_version is not None:
             _add_source(versions, SettlementSourceKind.STAFF_PAYABLE_ACCOUNT, str(staff_id), account_version, blockers)
-        projection_version = _integer(row.get("projection_version"), "staff_payables_projection_version_invalid", blockers)
+        if direction != "payable_to_staff":
+            open_identities.add(identity)
+            continue
+
+        historical_terminal = _historical_projection_terminal(
+            row,
+            identity=identity,
+            case_no=case_no,
+            staff_id=staff_id,
+            amount_due=amount_due,
+            payroll_version=payroll_version,
+            account_version=account_version,
+            versions=versions,
+            blockers=blockers,
+            payload=historical_projection_payload,
+        )
         projection_status = row.get("projection_status")
+        normal_terminal = False
         # Obligation and projection share a SQL row; target_event_id is the
         # projection's current event and target_staff_id is its staff owner.
         if row.get("projection_amount_ntd") is None:
-            blockers.add("staff_payables_projection_missing")
+            if not historical_terminal:
+                open_identities.add(identity)
         else:
+            projection_version = _integer(row.get("projection_version"), "staff_payables_projection_version_invalid", blockers)
             _add_source(versions, SettlementSourceKind.STAFF_PAYABLE_PROJECTION, identity, projection_version, blockers)
             if projection_version is not None and account_version is not None and projection_version != account_version:
                 blockers.add("staff_payables_projection_account_version_mismatch")
@@ -222,6 +271,8 @@ def _build_readback(
                 if balance != 0 or net != amount:
                     blockers.add("staff_payables_terminal_projection_money_invalid")
                     open_identities.add(identity)
+                else:
+                    normal_terminal = True
             elif projection_status == "payable":
                 if net != 0 or balance != amount:
                     blockers.add("staff_payables_payable_projection_money_invalid")
@@ -238,6 +289,8 @@ def _build_readback(
                 blockers.add("staff_payables_projection_status_invalid")
                 open_identities.add(identity)
             projection_payload.append({"identity": identity, "staff_id": staff_id, "assignment_id": assignment_id, "direction": direction, "obligation_status": obligation_status, "obligation_amount_ntd": amount_due, "obligation_version": payroll_version, "obligation_event_id": event_id, "obligation_event_type": row.get("event_type"), "obligation_event_amount_ntd": event_amount, "obligation_event_version": resulting_version, "amount": amount, "net": net, "balance": balance, "status": projection_status, "current_event_id": projection_event_id, "account_version": account_version, "projection_version": projection_version})
+        if not normal_terminal and not historical_terminal:
+            open_identities.add(identity)
 
     event_groups: dict[int, list[Mapping[str, Any]]] = {}
     allocations_by_obligation: dict[str, int] = {}
@@ -571,6 +624,9 @@ def _build_readback(
         "case_no": case_no,
         "source_versions": tuple((item.kind.value, item.identity, item.version) for item in source_versions),
         "projections": tuple(sorted(projection_payload, key=lambda item: item["identity"])),
+        "historical_projections": tuple(
+            sorted(historical_projection_payload, key=lambda item: item["identity"])
+        ),
         "payouts": tuple(payout_payload),
         "recoveries": tuple(sorted(recovery_payload, key=lambda item: str(item["identity"]))),
     }
@@ -578,6 +634,9 @@ def _build_readback(
         "case_no": case_no,
         "obligations": tuple(
             sorted(projection_payload, key=lambda item: item["identity"])
+        ),
+        "historical_obligations": tuple(
+            sorted(historical_projection_payload, key=lambda item: item["identity"])
         ),
         "payouts": tuple(payout_payload),
     }
@@ -589,10 +648,189 @@ def _build_readback(
         settlement_lineage_identity=fingerprint_payload(lineage_payload).value if source_versions and available else None,
         obligation_count=len(obligation_index),
         open_obligation_count=len(open_identities),
-        allocation_lineage_identity=fingerprint_payload(allocation_payload).value if payout_payload and available else None,
+        allocation_lineage_identity=fingerprint_payload(allocation_payload).value if (payout_payload or historical_projection_payload) and available else None,
         source_versions=source_versions,
         readback_available=available,
         integrity_blockers=tuple(sorted(blockers)),
+    )
+
+
+def _historical_projection_terminal(
+    row: Mapping[str, Any],
+    *,
+    identity: str,
+    case_no: str,
+    staff_id: int | None,
+    amount_due: int | None,
+    payroll_version: int | None,
+    account_version: int | None,
+    versions: list[HistoricalSettlementSourceVersion],
+    blockers: set[str],
+    payload: list[dict[str, Any]],
+) -> bool:
+    event_id_value = row.get("historical_projection_event_id")
+    if event_id_value is None:
+        return False
+
+    event_id = _integer(
+        event_id_value,
+        "staff_payables_historical_projection_event_invalid",
+        blockers,
+        positive=True,
+        maximum=_SIGNED_BIGINT_MAXIMUM,
+    )
+    projection_staff_id = _integer(
+        row.get("historical_projection_staff_id"),
+        "staff_payables_historical_projection_staff_mismatch",
+        blockers,
+        positive=True,
+        maximum=_SIGNED_BIGINT_MAXIMUM,
+    )
+    amount_snapshot = _integer(
+        row.get("historical_amount_snapshot_ntd"),
+        "staff_payables_historical_projection_amount_invalid",
+        blockers,
+        positive=True,
+    )
+    projection_payroll_version = _integer(
+        row.get("historical_obligation_payroll_version"),
+        "staff_payables_historical_projection_payroll_version_invalid",
+        blockers,
+    )
+    projection_owner_version = _integer(
+        row.get("historical_staff_payables_version"),
+        "staff_payables_historical_projection_owner_version_invalid",
+        blockers,
+    )
+    expected_version = _integer(
+        row.get("historical_event_expected_version"),
+        "staff_payables_historical_event_version_invalid",
+        blockers,
+    )
+    resulting_version = _integer(
+        row.get("historical_event_resulting_version"),
+        "staff_payables_historical_event_version_invalid",
+        blockers,
+        positive=True,
+    )
+    adoption_receipt_id = _integer(
+        row.get("historical_event_adoption_receipt_id"),
+        "staff_payables_historical_adoption_receipt_missing",
+        blockers,
+        positive=True,
+        maximum=_SIGNED_BIGINT_MAXIMUM,
+    )
+    link_amount = _integer(
+        row.get("historical_link_amount_snapshot_ntd"),
+        "staff_payables_historical_link_amount_invalid",
+        blockers,
+        positive=True,
+    )
+    link_payroll_version = _integer(
+        row.get("historical_link_payroll_version"),
+        "staff_payables_historical_link_payroll_version_invalid",
+        blockers,
+    )
+    link_ordinal = _integer(
+        row.get("historical_link_ordinal"),
+        "staff_payables_historical_link_ordinal_invalid",
+        blockers,
+        positive=True,
+        maximum=_SIGNED_BIGINT_MAXIMUM,
+    )
+    event_identity = _identity(
+        row.get("historical_event_identity"),
+        "staff_payables_historical_event_identity_invalid",
+        blockers,
+    )
+    if row.get("historical_projection_case_no") != case_no:
+        blockers.add("staff_payables_historical_projection_case_mismatch")
+    if projection_staff_id != staff_id:
+        blockers.add("staff_payables_historical_projection_staff_mismatch")
+    if row.get("historical_confirmation_kind") not in {"paid", "settled"}:
+        blockers.add("staff_payables_historical_confirmation_kind_invalid")
+    if row.get("historical_event_case_no") != case_no:
+        blockers.add("staff_payables_historical_event_case_mismatch")
+    if row.get("historical_event_staff_id") != staff_id:
+        blockers.add("staff_payables_historical_event_staff_mismatch")
+    if row.get("historical_event_confirmation_kind") != row.get(
+        "historical_confirmation_kind"
+    ):
+        blockers.add("staff_payables_historical_event_confirmation_mismatch")
+    if (
+        row.get("historical_event_payer_role") != "union"
+        or row.get("historical_event_payee_role") != "staff"
+    ):
+        blockers.add("staff_payables_historical_event_direction_invalid")
+    if expected_version is not None and resulting_version != expected_version + 1:
+        blockers.add("staff_payables_historical_event_version_mismatch")
+    if projection_owner_version != resulting_version:
+        blockers.add("staff_payables_historical_projection_event_version_mismatch")
+    if account_version != projection_owner_version:
+        blockers.add("staff_payables_historical_projection_account_version_mismatch")
+    if link_amount != amount_snapshot:
+        blockers.add("staff_payables_historical_link_amount_mismatch")
+    if link_payroll_version != projection_payroll_version:
+        blockers.add("staff_payables_historical_link_payroll_version_mismatch")
+
+    structurally_complete = all(
+        value is not None
+        for value in (
+            event_id,
+            event_identity,
+            projection_staff_id,
+            amount_snapshot,
+            projection_payroll_version,
+            projection_owner_version,
+            expected_version,
+            resulting_version,
+            adoption_receipt_id,
+            link_amount,
+            link_payroll_version,
+            link_ordinal,
+        )
+    )
+    if structurally_complete:
+        _add_source(
+            versions,
+            SettlementSourceKind.HISTORICAL_STAFF_PAYOUT_PROJECTION,
+            identity,
+            projection_owner_version,
+            blockers,
+        )
+        _add_source(
+            versions,
+            SettlementSourceKind.HISTORICAL_STAFF_PAYOUT_EVENT,
+            event_identity,
+            resulting_version,
+            blockers,
+        )
+        _add_source(
+            versions,
+            SettlementSourceKind.HISTORICAL_STAFF_PAYOUT_LINK,
+            f"{event_id}:{link_ordinal}",
+            projection_payroll_version,
+            blockers,
+        )
+        payload.append(
+            {
+                "identity": identity,
+                "staff_id": staff_id,
+                "amount_snapshot_ntd": amount_snapshot,
+                "obligation_payroll_version": projection_payroll_version,
+                "staff_payables_version": projection_owner_version,
+                "event_id": event_id,
+                "event_identity": event_identity,
+                "event_expected_version": expected_version,
+                "event_resulting_version": resulting_version,
+                "adoption_receipt_id": adoption_receipt_id,
+                "link_ordinal": link_ordinal,
+            }
+        )
+    return bool(
+        structurally_complete
+        and amount_snapshot == amount_due
+        and projection_payroll_version == payroll_version
     )
 
 

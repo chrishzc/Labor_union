@@ -232,6 +232,8 @@ def _candidate(
         raise ValueError("historical_actual_service_days_assignment_mismatch")
     if facts.lifecycle_status is not OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED:
         raise ValueError("historical_order_lifecycle_transition_invalid")
+    if facts.historical_day_revision != 0:
+        raise ValueError("historical_actual_service_days_already_confirmed")
     service_days = build_historical_actual_service_days_candidate(
         case_no=facts.case_no,
         assignments=tuple(

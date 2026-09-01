@@ -42,6 +42,9 @@ const SourceVersionSchema = z.strictObject({
     'staff_bank_fact',
     'staff_overpayment_recovery',
     'staff_overpayment_recovery_event',
+    'historical_staff_payout_projection',
+    'historical_staff_payout_event',
+    'historical_staff_payout_link',
   ]),
   identity: z.string().trim().min(1).max(191),
   version: LosslessVersionSchema,
@@ -82,4 +85,40 @@ export const HistoricalCompletionEnvelopeSchema = z.strictObject({
   error: z.null(),
 });
 
+export const HistoricalCompletionPreviewSchema = z.strictObject({
+  case_no: z.string().trim().min(1).max(50),
+  before_status: z.literal('歷史訂單－服務完成'),
+  after_status: z.literal('歷史訂單－帳務完成'),
+  expected_order_version: LosslessVersionSchema,
+  resulting_order_version: z.string().regex(/^[1-9][0-9]*$/),
+  expected_client_finance_version: LosslessVersionSchema,
+  expected_source_versions: z.array(SourceVersionSchema).min(1),
+  business_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  preview_fingerprint: FingerprintSchema,
+});
+
+export const HistoricalCompletionReceiptSchema = z.strictObject({
+  case_no: z.string().trim().min(1).max(50),
+  lifecycle_event_id: z.number().int().positive(),
+  resulting_order_version: z.string().regex(/^[1-9][0-9]*$/),
+  after_status: z.literal('歷史訂單－帳務完成'),
+  replayed: z.boolean(),
+});
+
+export const HistoricalCompletionPreviewEnvelopeSchema = z.strictObject({
+  success: z.literal(true),
+  message: z.string(),
+  data: HistoricalCompletionPreviewSchema,
+  error: z.null(),
+});
+
+export const HistoricalCompletionReceiptEnvelopeSchema = z.strictObject({
+  success: z.literal(true),
+  message: z.string(),
+  data: HistoricalCompletionReceiptSchema,
+  error: z.null(),
+});
+
 export type HistoricalCompletion = z.infer<typeof HistoricalCompletionSchema>;
+export type HistoricalCompletionPreview = z.infer<typeof HistoricalCompletionPreviewSchema>;
+export type HistoricalCompletionReceipt = z.infer<typeof HistoricalCompletionReceiptSchema>;

@@ -21,7 +21,8 @@ NORMAL_STATUS_ENUM = "enum('待補件','洽談中','訂單成立','服務中','�
 
 
 def _predecessor_snapshot(status_enum: str = NORMAL_STATUS_ENUM):
-    statuses = "'待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消'"
+    before_statuses = "'待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消'"
+    after_statuses = "'洽談中','訂單成立','服務中','訂單完成','訂單取消'"
     return {
         "columns": [{
             "table_name": "orders",
@@ -37,7 +38,9 @@ def _predecessor_snapshot(status_enum: str = NORMAL_STATUS_ENUM):
                 "table_name": "order_lifecycle_state_events",
                 "constraint_name": f"chk_order_lifecycle_state_event_{name}",
                 "constraint_type": "CHECK",
-                "check_clause": f"{name} IN ({statuses})",
+                "check_clause": (
+                    f"{name} IN ({before_statuses if name == 'before_status' else after_statuses})"
+                ),
             }
             for name in ("before_status", "after_status")
         ],
@@ -64,6 +67,13 @@ def test_release_is_selected_hash_bound_and_matches_canonical_descriptor():
     assert released["tables"] == {
         table: set(columns) for table, columns in canonical["tables"].items()
     }
+    assert released["checks"][
+        ("historical_service_day_events", "chk_historical_service_day_values")
+    ] == (
+        "and(atom(total_actual_service_days>0),atom(total_actual_service_hours>0),"
+        "atom(historical_floor_fee_ntd>=0),atom(client_obligation_amount_ntd>=0),"
+        "atom(staff_obligation_amount_ntd>0))"
+    )
 
 
 def test_post_schema_verification_is_bound_to_the_released_artifact():

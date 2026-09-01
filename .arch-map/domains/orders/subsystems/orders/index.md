@@ -10,6 +10,7 @@
 - `order-tracker-presentation` — Orders tracker主清單與retry的business-facing presentation；path: `modules/order-tracker-presentation.md`
 - `historical-adoption` — 既有 Order 的 historical workbook adoption／replay; path: `modules/historical-adoption.md`
 - `historical-service-accounting` — 歷史逐月嫂服務天數、單薪帳務與跨 owner Q/P/A; path: `modules/historical-service-accounting.md`
+- `historical-precision-restart` — 歷史未服務／服務中案件撤銷 current 服務根並回到正常訂單成立的單交易 Q/P/A; path: `modules/historical-precision-restart.md`
 - `historical-adoption-presentation` — historical workbook typed API client／adapter 與狀態統計呈現; path: `modules/historical-adoption-presentation.md`
 - `historical-stage-baseline` — 已採納歷史訂單的唯讀作業階段 baseline overlay; path: `modules/historical-stage-baseline.md`
 - `actual-start` — Actual Start 正式服務日重建與跨 owner projection；path: `modules/actual-start.md`
@@ -36,6 +37,8 @@
 
 ## Verification routing
 - default_boundary: Subsystem
+- layout_status: `custom_current`
 - test_root: `tests/domains/orders/subsystems/orders/`
 - integration_root: `tests/domains/orders/subsystems/orders/integration/`
+- integration_root: `ui_react/src/tests/orders_service_dates_flow.test.tsx`
 - fixtures_root: `tests/fixtures/`

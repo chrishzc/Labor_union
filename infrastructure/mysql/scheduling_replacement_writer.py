@@ -79,6 +79,7 @@ def _assignment_resolution(command, assignment_ids):
     if command.command_family not in {
         "orders_cancellation_rebuild",
         "orders_terms_rebuild",
+        "orders_historical_precision_restart",
     }:
         raise ValueError("empty scheduling replacement is cancellation-only")
     return EmptyAssignmentIdentityResolution()

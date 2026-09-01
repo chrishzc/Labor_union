@@ -28,6 +28,7 @@ import {
   type ActualStartPreview,
   type ActualStartReceipt,
 } from '../api/orders/order_actual_start_client';
+import { historicalServiceAccountingClient } from '../api/orders/historical_service_accounting_client';
 import type { ActualStart, FormManagementContext, OrderDetail } from '../api/orders/order_query_schemas';
 import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
 import {
@@ -264,6 +265,9 @@ export const OrdersPage: React.FC = () => {
   const [precisionCalculating, setPrecisionCalculating] = useState(false);
   const [precisionResult, setPrecisionResult] = useState<SchedulePrecisionResult | null>(null);
   const [precisionError, setPrecisionError] = useState<string | null>(null);
+  const [historicalRestartStatus, setHistoricalRestartStatus] = useState<'idle' | 'applying' | 'completed'>('idle');
+  const [historicalRestartMessage, setHistoricalRestartMessage] = useState<string | null>(null);
+  const [normalFlowRestartedCaseNo, setNormalFlowRestartedCaseNo] = useState<string | null>(null);
   const [holidayRestDates, setHolidayRestDates] = useState<string[]>([]);
   const [leaveDates, setLeaveDates] = useState<string[]>([]);
   const [customWorkDates, setCustomWorkDates] = useState<string[]>([]);
@@ -600,6 +604,15 @@ export const OrdersPage: React.FC = () => {
   const serviceDatesDraft = dateConfirmOrder
     ? orderMutationFlowStore.getServiceDatesDraft(dateConfirmOrder.id)
     : undefined;
+  const activeContractOrder = contractOrder || dateConfirmOrder;
+  const historicalRestartRequired = Boolean(
+    activeContractOrder
+    && (
+      activeContractOrder.orderStatus === '歷史訂單－未服務'
+      || activeContractOrder.orderStatus === '歷史訂單－服務中'
+    )
+    && normalFlowRestartedCaseNo !== activeContractOrder.id,
+  );
   const reopenDraft = reopenOrder
     ? orderMutationFlowStore.getReopenDraft(reopenOrder.id)
     : undefined;
@@ -1419,7 +1432,19 @@ export const OrdersPage: React.FC = () => {
   const rerunSchedulePrecision = runSchedulePrecision;
 
   // Lazy loader for Service Dates & Actual Start queries
-  const loadCalendarTabQueries = async (order: OrderSummaryCardViewModel) => {
+  const loadCalendarTabQueries = async (
+    order: OrderSummaryCardViewModel,
+    allowRestartedNormalFlow = false,
+  ) => {
+    const historicalRestartRequired = (
+      order.orderStatus === '歷史訂單－未服務'
+      || order.orderStatus === '歷史訂單－服務中'
+    ) && normalFlowRestartedCaseNo !== order.id && !allowRestartedNormalFlow;
+    if (historicalRestartRequired) {
+      setPrecisionResult(null);
+      setPrecisionError(null);
+      return;
+    }
     const { controller, requestId } = beginDrawerRequest();
     setDrawerLoading(true);
     setPrecisionResult(null);
@@ -1443,22 +1468,27 @@ export const OrdersPage: React.FC = () => {
       }
       const serviceDates = serviceDatesRes.status === 'fulfilled' ? serviceDatesRes.value : null;
       const calendarDetail = calendarDetailRes.status === 'fulfilled' ? calendarDetailRes.value : null;
+      const restartedHistoricalServiceMode = allowRestartedNormalFlow && calendarDetail === null
+        ? '週休1日' as const
+        : null;
+      const serviceMode = calendarDetail?.service_mode ?? restartedHistoricalServiceMode;
       const startDate = actualStart?.current_actual_start_date ?? actualStart?.planned_start_date ?? null;
       const inputsReady = actualStart?.case_no === order.id
         && serviceDates?.case_no === order.id
-        && calendarDetail?.case_no === order.id
+        && serviceMode !== null
+        && (calendarDetail === null || calendarDetail.case_no === order.id)
         && startDate !== null;
       if (!inputsReady) {
         selectServiceDates(order.id, []);
         setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
         return;
       }
-      setPrecisionMode(calendarDetail.service_mode);
+      setPrecisionMode(serviceMode);
       await calculateAndSelectServiceDates({
         caseNo: order.id,
         startDate,
         targetDays: serviceDates.contracted_service_days,
-        serviceMode: calendarDetail.service_mode,
+        serviceMode,
         selectableDates: serviceDates.selectable_dates,
         leaveDates: [],
         customWorkDates: [],
@@ -1542,6 +1572,9 @@ export const OrdersPage: React.FC = () => {
     setActualStartReason('');
     setActualStartStatus('idle');
     setActualStartError(null);
+    setHistoricalRestartStatus('idle');
+    setHistoricalRestartMessage(null);
+    setNormalFlowRestartedCaseNo(null);
     setCancellationDays([]);
     setCancellationPreview(null);
     setCancellationReceipt(null);
@@ -1590,6 +1623,48 @@ export const OrdersPage: React.FC = () => {
       if (!reopenDraft?.previewView) {
         void loadReopenTabQueries(activeOrder);
       }
+    }
+  };
+
+  const restartHistoricalOrderIntoNormalFlow = async () => {
+    const order = contractOrder || dateConfirmOrder;
+    if (!order || historicalRestartStatus === 'applying') return;
+    setHistoricalRestartStatus('applying');
+    setHistoricalRestartMessage(null);
+    setPrecisionError(null);
+    try {
+      const query = await historicalServiceAccountingClient.queryPrecisionRestart(order.id);
+      if (query.blockers.length > 0) {
+        throw new Error(`目前不可重啟正常流程：${query.blockers.join('、')}`);
+      }
+      const preview = await historicalServiceAccountingClient.previewPrecisionRestart(order.id);
+      const receipt = await historicalServiceAccountingClient.applyPrecisionRestart(
+        preview,
+        '工會人員從原訂單工作台選擇重啟正常流程',
+      );
+      if (receipt.lifecycle_status !== '訂單成立') {
+        throw new Error('重啟後狀態不是正常「訂單成立」，已停止載入後續流程。');
+      }
+      const normalOrder = { ...order, orderStatus: '訂單成立' as const };
+      setContractOrder((current) => current?.id === order.id ? normalOrder : current);
+      setDateConfirmOrder((current) => current?.id === order.id ? normalOrder : current);
+      setCancelOrder((current) => current?.id === order.id ? normalOrder : current);
+      setReopenOrder((current) => current?.id === order.id ? normalOrder : current);
+      setNormalFlowRestartedCaseNo(order.id);
+      setHistoricalRestartStatus('completed');
+      setHistoricalRestartMessage(
+        receipt.replayed
+          ? '此案件已回到正常流程，已讀取原收據。'
+          : '已回到正常「訂單成立」；請依下方原流程重新精算並確認正式服務日期。',
+      );
+      await fetchOrderSummaries();
+      loadCardProjection(order.id);
+      await loadCalendarTabQueries(normalOrder, true);
+    } catch (restartError) {
+      setHistoricalRestartStatus('idle');
+      setHistoricalRestartMessage(
+        restartError instanceof Error ? restartError.message : '無法重啟正常流程。',
+      );
     }
   };
 
@@ -3187,6 +3262,36 @@ export const OrdersPage: React.FC = () => {
             {/* Tab 2: 實質服務日曆與天數精算 (Service Calendar & Precision) */}
             {activeContractTab === 'calendar' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                {historicalRestartRequired && (
+                  <section
+                    data-surface-id="orders.drawer.historical-normal-flow-restart"
+                    style={{ padding: '18px', borderRadius: '14px', border: '1px solid #fdba74', background: '#fff7ed' }}
+                  >
+                    <h3 style={{ margin: 0, color: '#9a3412', fontSize: '1.05rem' }}>歷史訂單：重啟正常流程</h3>
+                    <p style={{ margin: '8px 0 14px', color: '#7c2d12', fontSize: '0.88rem', lineHeight: 1.6 }}>
+                      重啟後，案件會回到正常「訂單成立」。歷史來源紀錄仍會保留，但目前的實際起訖、正式服務日與排班會撤銷；接著請使用本頁原有流程重新精算、確認服務日期、媒合排班及登錄實際開工。
+                    </p>
+                    <button
+                      type="button"
+                      data-control-id="orders.historical.restart-normal-flow"
+                      className="btn-primary-action"
+                      disabled={historicalRestartStatus === 'applying'}
+                      onClick={() => void restartHistoricalOrderIntoNormalFlow()}
+                    >
+                      {historicalRestartStatus === 'applying' ? '正在重啟正常流程…' : '重啟正常流程'}
+                    </button>
+                  </section>
+                )}
+                {historicalRestartMessage && (
+                  <div
+                    role={historicalRestartStatus === 'completed' ? 'status' : 'alert'}
+                    style={{ padding: '12px', borderRadius: '10px', background: historicalRestartStatus === 'completed' ? '#f0fdf4' : '#fef2f2', color: historicalRestartStatus === 'completed' ? '#166534' : '#991b1b' }}
+                  >
+                    {historicalRestartMessage}
+                  </div>
+                )}
+                {!historicalRestartRequired && (
+                  <>
                 <section data-surface-id="orders.drawer.service-dates">
                   {precisionError && (
                     <div role="alert" className="mutation-error-banner">
@@ -3607,6 +3712,8 @@ export const OrdersPage: React.FC = () => {
                     orderStatus={(contractOrder || dateConfirmOrder)!.orderStatus}
                     onCompleted={fetchOrderSummaries}
                   />
+                )}
+                  </>
                 )}
               </div>
             )}

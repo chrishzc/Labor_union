@@ -24,6 +24,7 @@ import {
 import { realisticOrderDetail } from './fixtures/orders_real_data_fixtures';
 import { buildOrdersStageProjectionFixture } from './fixtures/orders_stage_projection_fixtures';
 import { schedulePrecisionClient } from '../api/scheduling/schedule_precision_client';
+import { historicalServiceAccountingClient } from '../api/orders/historical_service_accounting_client';
 
 describe('Confirmed Service Dates Component Flow Suite', () => {
   const originalFetch = globalThis.fetch;
@@ -713,5 +714,109 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     const weeklyOneGrid = document.querySelector('[data-surface-id="orders.date.service-date-selection"]')!;
     expect(columnOf(weeklyOneGrid, '2026-09-12 服務日，點擊改為人工排休')).toBe(6);
     expect(columnOf(weeklyOneGrid, '2026-09-13 固定排休，點擊改為正式服務日')).toBe(0);
+  });
+
+  it('歷史訂單必須先在原工作台重啟，完成後才顯示既有正常精算流程', async () => {
+    const historicalPage = {
+      items: [{
+        case_no: 'ORD-HISTORY-1',
+        client_name: '歷史測試客戶',
+        order_status: '歷史訂單－未服務',
+        staff_name: '月嫂甲',
+        identity_status: null,
+        start_date: '2026-09-01',
+        end_date: null,
+        actual_start_date: null,
+        actual_end_date: null,
+        service_days: 3,
+        total_employer_self_pay_payable: 0,
+      }],
+      next_cursor: null,
+      etag: 'b'.repeat(64),
+    };
+    vi.spyOn(ordersQueryClient, 'getOrderSummaries')
+      .mockResolvedValueOnce(historicalPage)
+      .mockResolvedValue({
+        ...historicalPage,
+        items: [{ ...historicalPage.items[0], order_status: '訂單成立' }],
+        etag: 'd'.repeat(64),
+      });
+    vi.spyOn(ordersQueryClient, 'getActualStart').mockResolvedValue({
+      case_no: 'ORD-HISTORY-1', planned_start_date: '2026-09-01',
+      current_actual_start_date: null, service_data_locked: false,
+      order_version: 2, scheduling_version: 2, scheduling_generation: 2,
+      client_finance_version: 1, payroll_version: 1,
+    });
+    vi.spyOn(ordersMutationClient, 'getServiceDates').mockResolvedValue({
+      ...realisticServiceDateQueryView,
+      case_no: 'ORD-HISTORY-1',
+      contracted_service_days: 3,
+      current_version: null,
+      current_dates: [],
+      selectable_dates: [
+        '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04',
+        '2026-09-05', '2026-09-06', '2026-09-07',
+      ],
+    });
+    vi.spyOn(ordersQueryClient, 'getOrderCalendarDetail').mockRejectedValue(
+      new Error('historical source has no fixed-rest root'),
+    );
+    const calculate = vi.spyOn(schedulePrecisionClient, 'calculate').mockResolvedValue(
+      precisionResult(['2026-09-01', '2026-09-02', '2026-09-03']),
+    );
+    vi.spyOn(historicalServiceAccountingClient, 'queryPrecisionRestart').mockResolvedValue({
+      case_no: 'ORD-HISTORY-1', lifecycle_status: '歷史訂單－未服務',
+      order_version: 1, scheduling_version: 1, client_finance_version: 1,
+      payroll_version: 1, historical_day_revision: 0,
+      confirmed_service_date_version: null,
+      planned_start_date: '2026-09-01', actual_start_date: null,
+      contracted_service_days: 3,
+      assignments: [{ assignment_identity: 'assignment:1', staff_id: 3, staff_name: '月嫂甲' }],
+      blockers: [],
+    });
+    vi.spyOn(historicalServiceAccountingClient, 'previewPrecisionRestart').mockResolvedValue({
+      case_no: 'ORD-HISTORY-1', lifecycle_status: '歷史訂單－未服務',
+      order_version: 1, scheduling_version: 1, client_finance_version: 1,
+      payroll_version: 1, historical_day_revision: 0,
+      confirmed_service_date_version: null,
+      planned_start_date: '2026-09-01', actual_start_date: null,
+      contracted_service_days: 3,
+      assignments: [{ assignment_identity: 'assignment:1', staff_id: 3, staff_name: '月嫂甲' }],
+      blockers: [], target_status: '訂單成立', actual_end_date: null,
+      official_service_dates: [], client_finance_resulting_version: 1,
+      payroll_resulting_version: 1, preview_fingerprint: 'c'.repeat(64),
+    });
+    const applyRestart = vi.spyOn(historicalServiceAccountingClient, 'applyPrecisionRestart').mockResolvedValue({
+      case_no: 'ORD-HISTORY-1', lifecycle_status: '訂單成立', order_version: 2,
+      scheduling_version: 2, scheduling_generation: 2, client_finance_version: 1,
+      payroll_version: 1, historical_day_revision: 0,
+      preview_fingerprint: 'c'.repeat(64), replayed: false,
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-HISTORY-1');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /實質服務日曆/ }));
+
+    expect(await screen.findByText('歷史訂單：重啟正常流程')).toBeInTheDocument();
+    expect(screen.queryByText(/正式服務日期確認/)).not.toBeInTheDocument();
+    expect(ordersQueryClient.getActualStart).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '重啟正常流程' }));
+
+    await waitFor(() => {
+      expect(applyRestart).toHaveBeenCalledTimes(1);
+      expect(screen.getByText(/已回到正常「訂單成立」/)).toBeInTheDocument();
+      expect(screen.getByText(/正式服務日期確認/)).toBeInTheDocument();
+      expect(screen.getByText('實際開工日更正與動態排盤')).toBeInTheDocument();
+      expect(screen.getByLabelText('工會排休類型')).toHaveTextContent('週休1日');
+      expect(screen.queryByText(/精算所需的開始日、合約天數或排休類型尚未載入/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/目前狀態為「歷史訂單－未服務」/)).not.toBeInTheDocument();
+    });
+    expect(calculate).toHaveBeenCalledWith(expect.objectContaining({
+      actual_start_date: '2026-09-01',
+      target_service_days: 3,
+      service_mode: '週休1日',
+    }));
   });
 });

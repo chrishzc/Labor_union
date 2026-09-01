@@ -81,7 +81,27 @@ SELECT 'account' AS row_kind,
        NULL AS target_reversal_of_entry_id,
        NULL AS allocation_obligation_identity,
        NULL AS allocation_amount_ntd,
-       NULL AS allocation_ordinal
+       NULL AS allocation_ordinal,
+       NULL AS historical_projection_event_id,
+       NULL AS historical_projection_case_no,
+       NULL AS historical_projection_confirmation_kind,
+       NULL AS historical_projection_amount_ntd,
+       NULL AS historical_projection_obligation_version,
+       NULL AS historical_projection_account_version,
+       NULL AS historical_event_identity,
+       NULL AS historical_event_case_no,
+       NULL AS historical_event_direction,
+       NULL AS historical_event_confirmation_kind,
+       NULL AS historical_event_payer_role,
+       NULL AS historical_event_payee_role,
+       NULL AS historical_event_adoption_receipt_id,
+       NULL AS historical_event_expected_version,
+       NULL AS historical_event_resulting_version,
+       NULL AS historical_link_amount_ntd,
+       NULL AS historical_link_obligation_type,
+       NULL AS historical_link_direction,
+       NULL AS historical_link_obligation_version,
+       NULL AS historical_link_ordinal
 FROM client_finance_accounts a
 WHERE a.case_no=%s
 UNION ALL
@@ -90,10 +110,24 @@ SELECT 'obligation', a.case_no, a.aggregate_version,
        o.status, o.amount_due_ntd, o.current_event_id, o.projection_version,
        e.after_amount_ntd,
        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL
+       NULL, NULL,
+       hp.current_event_id, hp.case_no, hp.confirmation_kind,
+       hp.amount_snapshot_ntd, hp.obligation_projection_version,
+       hp.account_version, he.event_identity, he.case_no, he.direction,
+       he.confirmation_kind, he.payer_role, he.payee_role,
+       he.historical_adoption_receipt_id, he.expected_account_version,
+       he.resulting_account_version, hl.amount_snapshot_ntd,
+       hl.obligation_type, hl.obligation_direction,
+       hl.obligation_projection_version, hl.link_ordinal
 FROM client_finance_accounts a
 JOIN client_obligations o ON o.case_no=a.case_no
 LEFT JOIN client_obligation_events e ON e.id=o.current_event_id
+LEFT JOIN historical_client_payment_projections hp
+       ON hp.obligation_identity=o.obligation_identity
+LEFT JOIN historical_client_payment_events he ON he.id=hp.current_event_id
+LEFT JOIN historical_client_payment_obligation_links hl
+       ON hl.event_id=hp.current_event_id
+      AND hl.obligation_identity=o.obligation_identity
 WHERE a.case_no=%s
 UNION ALL
 SELECT 'ledger', a.case_no, a.aggregate_version,
@@ -103,7 +137,9 @@ SELECT 'ledger', a.case_no, a.aggregate_version,
        target.id, target.case_no, target.entry_type, target.amount_ntd,
        target.reversal_of_entry_id,
        allocation.obligation_identity, allocation.amount_ntd,
-       allocation.allocation_ordinal
+       allocation.allocation_ordinal,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 FROM client_finance_accounts a
 JOIN client_ledger_entries ledger ON ledger.case_no=a.case_no
 LEFT JOIN client_ledger_entries target
@@ -152,7 +188,15 @@ class MySqlClientFinanceCompletionReadAdapter:
         ledger_rows = tuple(
             _ledger_row(row) for row in rows if row.get("row_kind") == "ledger"
         )
-        return _readback(case_no, account, obligation_rows, ledger_rows)
+        historical_rows = tuple(
+            _historical_row(row)
+            for row in rows
+            if row.get("row_kind") == "obligation"
+            and row.get("historical_projection_event_id") is not None
+        )
+        return _readback(
+            case_no, account, obligation_rows, ledger_rows, historical_rows
+        )
 
 
 def _obligation_row(row: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -191,11 +235,46 @@ def _ledger_row(row: Mapping[str, Any]) -> Mapping[str, Any]:
     }
 
 
+def _historical_row(row: Mapping[str, Any]) -> Mapping[str, Any]:
+    return {
+        "obligation_identity": row.get("obligation_identity"),
+        "projection_event_id": row.get("historical_projection_event_id"),
+        "projection_case_no": row.get("historical_projection_case_no"),
+        "projection_confirmation_kind": row.get(
+            "historical_projection_confirmation_kind"
+        ),
+        "projection_amount_ntd": row.get("historical_projection_amount_ntd"),
+        "projection_obligation_version": row.get(
+            "historical_projection_obligation_version"
+        ),
+        "projection_account_version": row.get(
+            "historical_projection_account_version"
+        ),
+        "event_identity": row.get("historical_event_identity"),
+        "event_case_no": row.get("historical_event_case_no"),
+        "event_direction": row.get("historical_event_direction"),
+        "event_confirmation_kind": row.get("historical_event_confirmation_kind"),
+        "event_payer_role": row.get("historical_event_payer_role"),
+        "event_payee_role": row.get("historical_event_payee_role"),
+        "event_adoption_receipt_id": row.get(
+            "historical_event_adoption_receipt_id"
+        ),
+        "event_expected_version": row.get("historical_event_expected_version"),
+        "event_resulting_version": row.get("historical_event_resulting_version"),
+        "link_amount_ntd": row.get("historical_link_amount_ntd"),
+        "link_obligation_type": row.get("historical_link_obligation_type"),
+        "link_direction": row.get("historical_link_direction"),
+        "link_obligation_version": row.get("historical_link_obligation_version"),
+        "link_ordinal": row.get("historical_link_ordinal"),
+    }
+
+
 def _readback(
     case_no: str,
     account: Mapping[str, Any],
     obligation_rows: tuple[Mapping[str, Any], ...],
     ledger_rows: tuple[Mapping[str, Any], ...],
+    historical_rows: tuple[Mapping[str, Any], ...] = (),
 ) -> HistoricalSettlementReadback:
     blockers: list[str] = []
     account_version = int(account["account_aggregate_version"])
@@ -205,12 +284,44 @@ def _readback(
     if not obligation_rows:
         blockers.append("client_finance_obligations_missing")
 
+    zero_payment_terminal = bool(obligation_payload) and all(
+        item["status"] == "settled"
+        and item["amount_due_ntd"] == 0
+        and item["contracted_amount_ntd"] == 0
+        for item in obligation_payload
+    )
     ledger_payload, allocation_payload, ledger_valid, allocations_by_obligation = (
         _validate_ledger_lineage(ledger_rows, case_no, set(obligation_index), blockers)
     )
+    historical_payload, historical_link_payload, historical_terminal = (
+        _validate_historical_lineage(
+            historical_rows,
+            case_no,
+            account_version,
+            obligation_index,
+            blockers,
+        )
+    )
     _validate_reversal_lineage(ledger_rows, case_no, blockers)
-    _validate_obligation_net_state(obligation_index, allocations_by_obligation, blockers)
-    if not ledger_rows:
+    normal_obligations = {
+        identity: obligation
+        for identity, obligation in obligation_index.items()
+        if identity not in historical_terminal
+    }
+    _validate_obligation_net_state(
+        normal_obligations, allocations_by_obligation, blockers
+    )
+    all_terminal_without_ledger = bool(obligation_payload) and all(
+        item["status"] == "cancelled"
+        or (
+            item["status"] == "settled"
+            and item["amount_due_ntd"] == 0
+            and item["contracted_amount_ntd"] == 0
+        )
+        or item["obligation_identity"] in historical_terminal
+        for item in obligation_payload
+    )
+    if not ledger_rows and not all_terminal_without_ledger:
         blockers.extend(
             (
                 "client_finance_settlement_lineage_missing",
@@ -225,9 +336,13 @@ def _readback(
                 "account_aggregate_version": account_version,
                 "obligations": obligation_payload,
                 "ledger_entries": ledger_payload,
+                "historical_payments": historical_payload,
+                "zero_payment_terminal": zero_payment_terminal,
             }
         ).value
-        if obligation_payload and ledger_payload and lineage_valid
+        if obligation_payload
+        and (ledger_payload or zero_payment_terminal or historical_payload)
+        and lineage_valid
         else None
     )
     allocation_identity = (
@@ -238,9 +353,16 @@ def _readback(
                     item["obligation_identity"] for item in obligation_payload
                 ),
                 "allocations": allocation_payload,
+                "historical_links": historical_link_payload,
+                "zero_payment_terminal": zero_payment_terminal,
             }
         ).value
-        if allocation_payload and lineage_valid
+        if (
+            allocation_payload
+            or zero_payment_terminal
+            or historical_link_payload
+        )
+        and lineage_valid
         else None
     )
     return HistoricalSettlementReadback(
@@ -250,11 +372,155 @@ def _readback(
         settlement_lineage_identity=settlement_identity,
         obligation_count=len(obligation_rows),
         open_obligation_count=sum(
-            1 for row in obligation_rows if row.get("status") == "open"
+            1
+            for row in obligation_rows
+            if row.get("status") == "open"
+            and row.get("obligation_identity") not in historical_terminal
         ),
         allocation_lineage_identity=allocation_identity,
         readback_available=not blockers,
         integrity_blockers=tuple(sorted(set(blockers))),
+    )
+
+
+def _validate_historical_lineage(
+    rows: tuple[Mapping[str, Any], ...],
+    case_no: str,
+    account_version: int,
+    obligations: Mapping[str, Mapping[str, Any]],
+    blockers: list[str],
+) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...], set[str]]:
+    payload: list[dict[str, Any]] = []
+    links: list[dict[str, Any]] = []
+    terminal: set[str] = set()
+    seen_events: set[int] = set()
+    seen_ordinals: dict[int, set[int]] = {}
+    for row in rows:
+        identity = row.get("obligation_identity")
+        obligation = obligations.get(identity) if isinstance(identity, str) else None
+        valid = obligation is not None
+        if obligation is None:
+            blockers.append("client_finance_historical_obligation_missing")
+            continue
+        event_id = row.get("projection_event_id")
+        if not _is_positive_bigint(event_id):
+            blockers.append("client_finance_historical_event_missing")
+            valid = False
+        confirmation = row.get("projection_confirmation_kind")
+        if confirmation not in {"paid", "settled"}:
+            blockers.append("client_finance_historical_confirmation_kind_invalid")
+            valid = False
+        if row.get("projection_case_no") != case_no or row.get("event_case_no") != case_no:
+            blockers.append("client_finance_historical_case_mismatch")
+            valid = False
+        amount = row.get("projection_amount_ntd")
+        if amount != obligation.get("amount_due_ntd") or amount != row.get(
+            "link_amount_ntd"
+        ):
+            blockers.append("client_finance_historical_amount_mismatch")
+            valid = False
+        obligation_version = obligation.get("projection_version")
+        if (
+            row.get("projection_obligation_version") != obligation_version
+            or row.get("link_obligation_version") != obligation_version
+        ):
+            blockers.append("client_finance_historical_obligation_version_mismatch")
+            valid = False
+        if row.get("projection_account_version") != account_version:
+            blockers.append("client_finance_historical_account_version_mismatch")
+            valid = False
+        expected_version = row.get("event_expected_version")
+        resulting_version = row.get("event_resulting_version")
+        if (
+            not _is_nonnegative_bigint(expected_version)
+            or not _is_positive_bigint(resulting_version)
+            or resulting_version != expected_version + 1
+            or resulting_version != account_version
+        ):
+            blockers.append("client_finance_historical_event_version_mismatch")
+            valid = False
+        event_identity = row.get("event_identity")
+        if not isinstance(event_identity, str):
+            blockers.append("client_finance_historical_event_identity_invalid")
+            valid = False
+        else:
+            try:
+                require_canonical_text(
+                    event_identity,
+                    "historical client payment event identity",
+                    _IDENTITY_MAXIMUM_LENGTH,
+                )
+            except ValueError:
+                blockers.append("client_finance_historical_event_identity_invalid")
+                valid = False
+        direction = obligation.get("direction")
+        roles = (
+            ("client", "union")
+            if direction == "receivable_from_client"
+            else ("union", "client")
+        )
+        if (
+            row.get("event_direction") != direction
+            or row.get("link_direction") != direction
+            or row.get("event_payer_role") != roles[0]
+            or row.get("event_payee_role") != roles[1]
+        ):
+            blockers.append("client_finance_historical_direction_mismatch")
+            valid = False
+        if row.get("event_confirmation_kind") != confirmation:
+            blockers.append("client_finance_historical_confirmation_mismatch")
+            valid = False
+        if row.get("link_obligation_type") != obligation.get("obligation_type"):
+            blockers.append("client_finance_historical_obligation_type_mismatch")
+            valid = False
+        adoption_receipt_id = row.get("event_adoption_receipt_id")
+        ordinal = row.get("link_ordinal")
+        if not _is_positive_bigint(adoption_receipt_id):
+            blockers.append("client_finance_historical_adoption_receipt_missing")
+            valid = False
+        if not _is_positive_bigint(ordinal):
+            blockers.append("client_finance_historical_link_ordinal_invalid")
+            valid = False
+        elif _is_positive_bigint(event_id):
+            ordinals = seen_ordinals.setdefault(event_id, set())
+            if ordinal in ordinals:
+                blockers.append("client_finance_historical_link_ordinal_duplicate")
+                valid = False
+            ordinals.add(ordinal)
+        if _is_positive_bigint(event_id):
+            seen_events.add(event_id)
+        event_payload = {
+            "event_id": event_id,
+            "event_identity": event_identity,
+            "case_no": case_no,
+            "direction": direction,
+            "confirmation_kind": confirmation,
+            "expected_account_version": expected_version,
+            "resulting_account_version": resulting_version,
+            "adoption_receipt_id": adoption_receipt_id,
+        }
+        if not any(item["event_id"] == event_id for item in payload):
+            payload.append(event_payload)
+        links.append(
+            {
+                "event_id": event_id,
+                "obligation_identity": identity,
+                "amount_ntd": amount,
+                "obligation_version": obligation_version,
+                "link_ordinal": ordinal,
+            }
+        )
+        if valid:
+            terminal.add(identity)
+    return (
+        tuple(sorted(payload, key=lambda item: item["event_id"])),
+        tuple(
+            sorted(
+                links,
+                key=lambda item: (item["event_id"], item["link_ordinal"]),
+            )
+        ),
+        terminal,
     )
 
 
@@ -338,7 +604,7 @@ def _validate_obligations(
             blockers.append("client_finance_obligation_contract_amount_invalid")
             valid = False
             contracted = 0
-        elif isinstance(status, str) and status in {"open", "settled"} and contracted <= 0:
+        elif status == "open" and contracted <= 0:
             blockers.append("client_finance_obligation_contract_amount_invalid")
             valid = False
         normalized = {

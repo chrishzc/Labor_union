@@ -99,6 +99,8 @@ class MySqlHistoricalServiceAccountingRepository:
         )
 
     def persist(self, request, candidate):
+        if candidate.facts.historical_day_revision != 0:
+            raise ValueError("historical_actual_service_days_already_confirmed")
         resulting_day_revision = candidate.facts.historical_day_revision + 1
         resulting_client_version = candidate.facts.client_finance_version + 1
         resulting_payroll_version = candidate.facts.payroll_version + 1
@@ -116,6 +118,7 @@ class MySqlHistoricalServiceAccountingRepository:
         command_fingerprint = _command_fingerprint(request).value
         event_identity = f"historical-service-days:{command_fingerprint}"
         with _cursor(self._connection) as cursor:
+            _ensure_assignment_rate_snapshots(cursor, candidate)
             cursor.execute(
                 "INSERT INTO historical_service_day_events "
                 "(event_identity,case_no,historical_adoption_receipt_id,expected_day_revision,"
@@ -202,18 +205,68 @@ def _insert_items(cursor, event_id, candidate):
     )
 
 
+def _ensure_assignment_rate_snapshots(cursor, candidate):
+    """Freeze legacy imported assignments before their first obligation write.
+
+    Historical adoption predates assignment-owned Payroll snapshots.  Query may
+    therefore project the immutable case bootstrap rate, but Apply must persist
+    that exact rate on each assignment in the same outer transaction before any
+    historical day or obligation fact is written.
+    """
+    expected = {
+        _assignment_id(item.assignment_identity): item
+        for item in candidate.facts.assignments
+    }
+    placeholders = ",".join("%s" for _ in expected)
+    cursor.execute(
+        "SELECT assignment_id,policy_version,policy_kind,hourly_rate_ntd,"
+        "source_identity_status FROM assignment_payroll_rate_snapshots "
+        f"WHERE assignment_id IN ({placeholders}) FOR UPDATE",
+        tuple(expected),
+    )
+    existing = {int(row["assignment_id"]): row for row in cursor.fetchall()}
+    rows = []
+    for assignment_id, item in expected.items():
+        snapshot = item.rate_snapshot
+        row = existing.get(assignment_id)
+        if row is not None:
+            if (
+                str(row["policy_version"]) != snapshot.policy_version
+                or str(row["policy_kind"]) != snapshot.policy_kind.value
+                or int(row["hourly_rate_ntd"]) != snapshot.hourly_rate.amount
+            ):
+                raise ValueError("historical_accounting_obligation_binding_invalid")
+            continue
+        rows.append(
+            (
+                assignment_id,
+                snapshot.policy_version,
+                snapshot.policy_kind.value,
+                snapshot.hourly_rate.amount,
+                candidate.facts.client_identity_status,
+            )
+        )
+    if rows:
+        cursor.executemany(
+            "INSERT INTO assignment_payroll_rate_snapshots "
+            "(assignment_id,policy_version,policy_kind,hourly_rate_ntd,"
+            "source_identity_status) VALUES (%s,%s,%s,%s,%s)",
+            tuple(rows),
+        )
+
+
 def _write_client_obligation(cursor, request, candidate, source_identity, resulting_version):
     before = _previous_client_amount(cursor, candidate.facts.case_no)
     after = candidate.client_finance.total_receivable.amount
-    delta = after - before
-    if delta == 0:
-        return
-    direction = "receivable_from_client" if delta > 0 else "payable_to_client"
+    if before != 0:
+        raise ValueError("historical_actual_service_days_already_confirmed")
+    direction = "receivable_from_client"
+    projection_status = "settled" if after == 0 else "open"
     identity = (
         f"historical-service:{candidate.facts.case_no}:"
         f"revision:{candidate.facts.historical_day_revision + 1}:client:{direction}"
     )
-    amount = abs(delta)
+    amount = after
     cursor.execute(
         "SELECT obligation_identity FROM client_obligations WHERE obligation_identity=%s FOR UPDATE",
         (identity,),
@@ -241,51 +294,36 @@ def _write_client_obligation(cursor, request, candidate, source_identity, result
     cursor.execute(
         "INSERT INTO client_obligations "
         "(obligation_identity,case_no,obligation_type,direction,source_obligation_identity,amount_due_ntd,due_date,status,current_event_id,projection_version) "
-        "VALUES (%s,%s,'adjustment',%s,NULL,%s,NULL,'open',%s,%s)",
-        (identity, candidate.facts.case_no, direction, amount, event_id, resulting_version),
+        "VALUES (%s,%s,'adjustment',%s,NULL,%s,NULL,%s,%s,%s)",
+        (
+            identity,
+            candidate.facts.case_no,
+            direction,
+            amount,
+            projection_status,
+            event_id,
+            resulting_version,
+        ),
     )
 
 
 def _write_staff_obligations(cursor, request, candidate, source_identity, resulting_version):
     previous = _previous_staff_amounts(cursor, candidate.facts.case_no)
-    obligation_states = _previous_staff_obligation_states(
-        cursor, candidate.facts.case_no
-    )
     for ordinal, item in enumerate(candidate.payroll.assignments, start=1):
         assignment_id = _assignment_id(item.assignment_identity)
         before = previous.get(assignment_id, 0)
-        after = item.total_payable.amount
-        delta = after - before
-        if delta == 0:
-            continue
-        state = obligation_states.get(assignment_id)
-        if before > 0 and state is None:
-            raise ValueError("historical_accounting_obligation_binding_invalid")
-        if before > 0 and not state["payout_history_exists"]:
-            _rebuild_unpaid_staff_obligation(
-                cursor,
-                request,
-                candidate,
-                item,
-                state,
-                before,
-                after,
-                ordinal,
-                resulting_version,
-            )
-            continue
-        direction = "payable_to_staff" if delta > 0 else "receivable_from_staff"
-        obligation_kind = "service_pay" if before == 0 else (
-            "adjustment" if delta > 0 else "reversal"
-        )
-        event_type = "established" if before == 0 else obligation_kind
-        source_obligation_identity = None if state is None else state["obligation_identity"]
+        if before != 0:
+            raise ValueError("historical_actual_service_days_already_confirmed")
+        amount = item.total_payable.amount
+        direction = "payable_to_staff"
+        obligation_kind = "service_pay"
+        event_type = "established"
+        source_obligation_identity = None
         identity = (
             f"historical-service:{candidate.facts.case_no}:"
             f"revision:{candidate.facts.historical_day_revision + 1}:"
             f"assignment:{assignment_id}:{direction}"
         )
-        amount = abs(delta)
         cursor.execute(
             "SELECT obligation_identity FROM staff_obligations WHERE obligation_identity=%s FOR UPDATE",
             (identity,),
@@ -335,67 +373,6 @@ def _write_staff_obligations(cursor, request, candidate, source_identity, result
                 resulting_version,
             ),
         )
-
-
-def _rebuild_unpaid_staff_obligation(
-    cursor,
-    request,
-    candidate,
-    item,
-    state,
-    before,
-    after,
-    ordinal,
-    resulting_version,
-):
-    if after <= 0 or state["direction"] != "payable_to_staff" or state["status"] != "open":
-        raise ValueError("historical_accounting_obligation_binding_invalid")
-    identity = state["obligation_identity"]
-    cursor.execute(
-        "INSERT INTO staff_obligation_events "
-        "(obligation_identity,assignment_id,case_no,staff_id,obligation_kind,direction,source_obligation_identity,"
-        "event_type,before_amount_ntd,after_amount_ntd,due_date,payroll_fingerprint,expected_payroll_version,"
-        "resulting_payroll_version,idempotency_key,actor,reason) "
-        "VALUES (%s,%s,%s,%s,%s,'payable_to_staff',%s,'rebuilt',%s,%s,NULL,%s,%s,%s,%s,%s,%s)",
-        (
-            identity,
-            _assignment_id(item.assignment_identity),
-            candidate.facts.case_no,
-            item.staff_id,
-            state["obligation_kind"],
-            state["source_obligation_identity"],
-            before,
-            after,
-            candidate.payroll.fingerprint.value,
-            candidate.facts.payroll_version,
-            resulting_version,
-            f"{request.idempotency_key.value}:staff:{ordinal}:rebuild",
-            request.actor.actor_id,
-            request.reason,
-        ),
-    )
-    event_id = int(cursor.lastrowid)
-    cursor.execute(
-        "UPDATE staff_obligations SET amount_due_ntd=%s,current_event_id=%s,payroll_version=%s "
-        "WHERE obligation_identity=%s AND case_no=%s AND amount_due_ntd=%s "
-        "AND status='open' AND direction='payable_to_staff' "
-        "AND NOT EXISTS (SELECT 1 FROM staff_payout_obligation_links link "
-        "WHERE link.obligation_identity=staff_obligations.obligation_identity) "
-        "AND NOT EXISTS (SELECT 1 FROM historical_staff_payout_obligation_links historical_link "
-        "WHERE historical_link.obligation_identity=staff_obligations.obligation_identity)",
-        (
-            after,
-            event_id,
-            resulting_version,
-            identity,
-            candidate.facts.case_no,
-            before,
-        ),
-    )
-    if int(cursor.rowcount) != 1:
-        raise ValueError("historical_accounting_obligation_binding_invalid")
-
-
 def _previous_client_amount(cursor, case_no):
     cursor.execute(
         "SELECT event.client_obligation_amount_ntd "
@@ -420,48 +397,6 @@ def _previous_staff_amounts(cursor, case_no):
         int(row["assignment_id"]): int(row["staff_obligation_amount_ntd"])
         for row in cursor.fetchall()
     }
-
-
-def _previous_staff_obligation_states(cursor, case_no):
-    cursor.execute(
-        "SELECT obligation.obligation_identity,obligation.assignment_id,"
-        "obligation.obligation_kind,obligation.direction,"
-        "obligation.source_obligation_identity,obligation.status,"
-        "CASE WHEN EXISTS (SELECT 1 FROM staff_payout_obligation_links payout_link "
-        "WHERE payout_link.obligation_identity=obligation.obligation_identity) "
-        "OR EXISTS (SELECT 1 FROM historical_staff_payout_obligation_links historical_link "
-        "WHERE historical_link.obligation_identity=obligation.obligation_identity) "
-        "THEN 1 ELSE 0 END AS payout_history_exists "
-        "FROM staff_obligations obligation WHERE obligation.case_no=%s "
-        "AND obligation.obligation_identity LIKE 'historical-service:%' "
-        "AND obligation.status<>'cancelled' ORDER BY obligation.assignment_id,"
-        "obligation.payroll_version,obligation.obligation_identity FOR UPDATE",
-        (case_no,),
-    )
-    grouped = {}
-    for row in cursor.fetchall():
-        assignment_id = int(row["assignment_id"])
-        current = grouped.get(assignment_id)
-        has_history = bool(row["payout_history_exists"])
-        if current is None:
-            grouped[assignment_id] = {
-                "obligation_identity": str(row["obligation_identity"]),
-                "obligation_kind": str(row["obligation_kind"]),
-                "direction": str(row["direction"]),
-                "source_obligation_identity": row["source_obligation_identity"],
-                "status": str(row["status"]),
-                "payout_history_exists": has_history,
-            }
-            continue
-        current["payout_history_exists"] = (
-            current["payout_history_exists"] or has_history
-        )
-        current["obligation_identity"] = str(row["obligation_identity"])
-        current["obligation_kind"] = str(row["obligation_kind"])
-        current["direction"] = str(row["direction"])
-        current["source_obligation_identity"] = row["source_obligation_identity"]
-        current["status"] = str(row["status"])
-    return grouped
 
 
 def _write_payroll_outbox(cursor, request, candidate, resulting_version):
@@ -556,12 +491,14 @@ _ROOT_SQL = (
 )
 _ASSIGNMENTS_SQL = (
     "SELECT evidence.assignment_id,evidence.staff_id,staff.name AS staff_name,"
-    "rate.policy_version AS payroll_policy_version,rate.policy_kind AS payroll_policy_kind,"
-    "rate.hourly_rate_ntd AS payroll_hourly_rate_ntd "
+    "COALESCE(rate.policy_version,case_rate.policy_version) AS payroll_policy_version,"
+    "COALESCE(rate.policy_kind,case_rate.policy_kind) AS payroll_policy_kind,"
+    "COALESCE(rate.hourly_rate_ntd,case_rate.hourly_rate_ntd) AS payroll_hourly_rate_ntd "
     "FROM historical_order_pairing_evidence evidence "
     "JOIN case_staff_assignments assignment ON assignment.id=evidence.assignment_id "
     "JOIN staff ON staff.id=evidence.staff_id "
-    "JOIN assignment_payroll_rate_snapshots rate ON rate.assignment_id=evidence.assignment_id "
+    "JOIN case_payroll_rate_policy_snapshots case_rate ON case_rate.case_no=assignment.case_no "
+    "LEFT JOIN assignment_payroll_rate_snapshots rate ON rate.assignment_id=evidence.assignment_id "
     "WHERE evidence.receipt_id=%s AND evidence.assignment_id IS NOT NULL "
     "ORDER BY evidence.assignment_id"
 )

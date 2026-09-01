@@ -47,6 +47,9 @@ class HistoricalCompletionSourceVersionView(_StrictModel):
         "staff_bank_fact",
         "staff_overpayment_recovery",
         "staff_overpayment_recovery_event",
+        "historical_staff_payout_projection",
+        "historical_staff_payout_event",
+        "historical_staff_payout_link",
     ]
     identity: str = Field(min_length=1, max_length=191)
     version: str = Field(pattern=r"^(0|[1-9][0-9]*)$")
@@ -79,6 +82,9 @@ class HistoricalCompletionApplySourceVersionBody(_StrictModel):
         "staff_bank_fact",
         "staff_overpayment_recovery",
         "staff_overpayment_recovery_event",
+        "historical_staff_payout_projection",
+        "historical_staff_payout_event",
+        "historical_staff_payout_link",
     ]
     identity: str = Field(min_length=1, max_length=191)
     version: str = Field(pattern=r"^(0|[1-9][0-9]*)$")

@@ -184,3 +184,14 @@ def test_only_historical_service_completed_is_eligible() -> None:
 
     with pytest.raises(ValueError, match="historical_order_lifecycle_transition_invalid"):
         workflow.preview(_intent())
+
+
+def test_confirmed_historical_service_days_are_immutable() -> None:
+    repository = _Repository()
+    repository.facts = replace(repository.facts, historical_day_revision=1)
+    workflow = HistoricalServiceAccountingWorkflow(repository, lambda: _Unit([]))
+
+    with pytest.raises(
+        ValueError, match="historical_actual_service_days_already_confirmed"
+    ):
+        workflow.preview(_intent())

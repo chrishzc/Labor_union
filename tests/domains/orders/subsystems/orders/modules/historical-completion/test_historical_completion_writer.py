@@ -16,16 +16,28 @@ from subsystems.orders.historical_completion_apply import (
 
 
 class _Cursor:
+    def __init__(self):
+        self.calls = []
+
     def __enter__(self):
         return self
 
     def __exit__(self, *_):
         return False
 
+    def execute(self, statement, parameters):
+        self.calls.append((statement, parameters))
+
+    def fetchall(self):
+        return ()
+
 
 class _Connection:
+    def __init__(self):
+        self.cursor_value = _Cursor()
+
     def cursor(self):
-        return _Cursor()
+        return self.cursor_value
 
 
 def _candidate():
@@ -97,3 +109,15 @@ def test_event_replay_identity_matches_canonical_orders_writer_contract() -> Non
     assert _child_identity(key, "lifecycle-event") == _child_identity(
         key, "lifecycle-event"
     )
+
+
+def test_apply_locks_historical_staff_payout_roots() -> None:
+    connection = _Connection()
+
+    MySqlHistoricalCompletionWriter(connection)._lock_owner_roots("CASE-1")
+
+    statements = tuple(statement for statement, _ in connection.cursor_value.calls)
+    assert any("FROM historical_staff_payout_projections" in item for item in statements)
+    assert any("FROM historical_staff_payout_obligation_links" in item for item in statements)
+    assert any("FROM historical_staff_payout_events" in item for item in statements)
+    assert all(parameters == ("CASE-1",) for _, parameters in connection.cursor_value.calls)

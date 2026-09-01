@@ -55,6 +55,9 @@ class SettlementSourceKind(StrEnum):
     STAFF_BANK_FACT = "staff_bank_fact"
     STAFF_OVERPAYMENT_RECOVERY = "staff_overpayment_recovery"
     STAFF_OVERPAYMENT_RECOVERY_EVENT = "staff_overpayment_recovery_event"
+    HISTORICAL_STAFF_PAYOUT_PROJECTION = "historical_staff_payout_projection"
+    HISTORICAL_STAFF_PAYOUT_EVENT = "historical_staff_payout_event"
+    HISTORICAL_STAFF_PAYOUT_LINK = "historical_staff_payout_link"
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -403,18 +406,28 @@ def _check_settlement(missing: list[CompletionMissingRoot], facts: HistoricalSet
     if facts.owner is CompletionOwner.STAFF_PAYABLES and not facts.source_versions:
         _add(missing, f"{prefix}_source_versions_missing", facts.owner, f"{prefix}.source_versions", referral, f"{owner_label} source version vector is missing")
     if facts.owner is CompletionOwner.STAFF_PAYABLES and facts.readback_available:
-        required_kinds = {
+        core_kinds = {
             SettlementSourceKind.PAYROLL_CASE_ACCOUNT,
             SettlementSourceKind.STAFF_OBLIGATION,
             SettlementSourceKind.STAFF_OBLIGATION_EVENT,
             SettlementSourceKind.STAFF_PAYABLE_ACCOUNT,
+        }
+        normal_payout_kinds = {
             SettlementSourceKind.STAFF_PAYABLE_PROJECTION,
             SettlementSourceKind.STAFF_PAYOUT_EVENT,
             SettlementSourceKind.STAFF_PAYOUT_ALLOCATION,
             SettlementSourceKind.STAFF_BANK_FACT,
         }
+        historical_payout_kinds = {
+            SettlementSourceKind.HISTORICAL_STAFF_PAYOUT_PROJECTION,
+            SettlementSourceKind.HISTORICAL_STAFF_PAYOUT_EVENT,
+            SettlementSourceKind.HISTORICAL_STAFF_PAYOUT_LINK,
+        }
         present_kinds = {item.kind for item in facts.source_versions}
-        if not required_kinds.issubset(present_kinds):
+        has_payment_lineage = normal_payout_kinds.issubset(
+            present_kinds
+        ) or historical_payout_kinds.issubset(present_kinds)
+        if not core_kinds.issubset(present_kinds) or not has_payment_lineage:
             _add(missing, f"{prefix}_source_vector_readback_unavailable", facts.owner, f"{prefix}.source_versions", referral, f"{owner_label} source version vector is incomplete")
         recovery_events = {
             item.identity for item in facts.source_versions

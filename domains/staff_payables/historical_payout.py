@@ -60,7 +60,7 @@ class HistoricalStaffObligation:
         require_positive_integer(self.staff_id, "staff id")
         require_positive_integer(self.amount_due_ntd, "obligation amount")
         require_nonnegative_integer(self.payroll_version, "obligation payroll version")
-        if self.direction not in {"payable_to_staff", "receivable_from_staff"}:
+        if self.direction != "payable_to_staff":
             raise ValueError("historical_staff_obligation_direction_invalid")
         if self.status not in {"open", "settled", "cancelled"}:
             raise ValueError("historical_staff_obligation_status_invalid")

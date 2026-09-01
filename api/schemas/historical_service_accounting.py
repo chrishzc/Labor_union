@@ -1,5 +1,7 @@
 """Strict HTTP contract for historical per-caregiver service-day accounting."""
 
+from datetime import date
+
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 
@@ -109,6 +111,61 @@ class HistoricalServiceAccountingReceiptView(BaseModel):
     total_actual_service_days: int
     client_obligation_amount_ntd: int
     staff_obligation_amount_ntd: int
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    replayed: bool
+
+
+class HistoricalPrecisionRestartPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class HistoricalPrecisionRestartApplyBody(HistoricalPrecisionRestartPreviewBody):
+    expected_order_version: StrictInt = Field(ge=0)
+    expected_scheduling_version: StrictInt = Field(ge=0)
+    expected_historical_day_revision: StrictInt = Field(ge=0)
+    expected_confirmed_service_date_version: StrictInt | None = Field(default=None, ge=1)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class HistoricalPrecisionRestartQueryView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    case_no: str
+    lifecycle_status: str
+    order_version: int
+    scheduling_version: int
+    client_finance_version: int
+    payroll_version: int
+    historical_day_revision: int
+    confirmed_service_date_version: int | None
+    planned_start_date: date
+    actual_start_date: date | None
+    contracted_service_days: int
+    assignments: list[dict]
+    blockers: list[str]
+
+
+class HistoricalPrecisionRestartPreviewView(HistoricalPrecisionRestartQueryView):
+    target_status: str
+    actual_end_date: date | None
+    official_service_dates: list[date] = Field(max_length=0)
+    client_finance_resulting_version: int
+    payroll_resulting_version: int
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HistoricalPrecisionRestartReceiptView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    case_no: str
+    lifecycle_status: str
+    order_version: int
+    scheduling_version: int
+    scheduling_generation: int
+    client_finance_version: int
+    payroll_version: int
+    historical_day_revision: int
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     replayed: bool
 

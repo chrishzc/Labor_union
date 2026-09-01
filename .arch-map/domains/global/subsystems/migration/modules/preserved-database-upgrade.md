@@ -14,6 +14,7 @@
   - `scripts/migrate_preserved_database_additive_schema.py`
   - `scripts/local_database_additive_update.py`
   - `scripts/update_local_database.py`
+  - `scripts/collect_local_additive_engine_evidence.py`
   - `shared_kernel/migration_release.py`
 - entrypoints:
   - `scripts/launchers/update_local_database.bat`
@@ -46,7 +47,10 @@
   replacement boundary — `document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md`
 
 ## Verification
+- layout_status: `custom_current`
 - test_root: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/`
+- integration_root: `tests/test_collect_local_additive_engine_evidence.py`
+- integration_root: `tests/test_order_lifecycle_pending_status_constraint_schema.py`
 
 ## Provenance
 - Preserve-data upgrade is a Global Migration capability distinct from fresh reset —

@@ -12,6 +12,7 @@
   - `domains/staff_payables/historical_payout.py` — owner rules, exact staff/case obligations and later-reopen predicate.
   - `subsystems/staff_payables/historical_payment_settlement.py` — Query／Preview／Apply／fresh readback orchestration.
   - `infrastructure/mysql/historical_staff_payout_repository.py` — typed repository implementation without hidden commit.
+  - `infrastructure/mysql/historical_staff_payables_completion_read_adapter.py` — completion readback accepts exact current historical payout projection/event/link lineage as an alternative to normal bank payout evidence; this historical flow only accepts `payable_to_staff` obligations.
 - entrypoints:
   - `api/routes/staff_payout.py` — authenticated internal owner transport.
   - `api/dependencies/staff_payout.py` — request-scoped repository／outer UoW composition.

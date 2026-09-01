@@ -6,8 +6,11 @@ test_root: tests/domains/orders/subsystems/orders/
 # Custom current presentation routing
 - Order Tracker summary/retry presentation: `modules/order-tracker-presentation.md`.
 integration_root: tests/domains/orders/subsystems/orders/integration/
+integration_root: ui_react/src/tests/orders_service_dates_flow.test.tsx
 fixtures_root: tests/fixtures/
 modules:
+  historical-precision-restart:
+    test_root: tests/domains/orders/subsystems/orders/modules/historical-precision-restart/
   historical-service-accounting:
     test_root: tests/domains/orders/subsystems/orders/modules/historical-service-accounting/
   order-information:

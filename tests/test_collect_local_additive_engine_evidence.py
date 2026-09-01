@@ -85,6 +85,56 @@ def test_release_boundary_rejects_real_future_drift(monkeypatch) -> None:
         )
 
 
+def test_fresh_release_boundary_requires_target_but_not_preserve_prefix(
+    monkeypatch,
+) -> None:
+    entries = (
+        {"release_id": "preserve-only", "artifact": {"name": "1003.sql"}, "descriptor": {}},
+        {"release_id": "target", "artifact": {"name": "1004.sql"}, "descriptor": {}},
+        {"release_id": "future", "artifact": {"name": "1005.sql"}, "descriptor": {}},
+    )
+    states = iter(("absent", "exact", "absent"))
+    monkeypatch.setattr(migration, "_local_ordered_upgrade_entries", lambda: entries)
+    monkeypatch.setattr(
+        migration,
+        "local_additive_target_state",
+        lambda *_args, **_kwargs: {"state": next(states)},
+    )
+
+    assert collector._verify_release_boundary(
+        SimpleNamespace(),
+        "lu_test_fresh",
+        "target",
+        applied=True,
+        snapshot={"columns": []},
+        require_predecessor_prefix=False,
+    ) == ["absent", "exact", "absent"]
+
+
+def test_fresh_release_boundary_still_rejects_nonexact_target(monkeypatch) -> None:
+    entries = (
+        {"release_id": "preserve-only", "artifact": {"name": "1003.sql"}, "descriptor": {}},
+        {"release_id": "target", "artifact": {"name": "1004.sql"}, "descriptor": {}},
+    )
+    states = iter(("absent", "drift"))
+    monkeypatch.setattr(migration, "_local_ordered_upgrade_entries", lambda: entries)
+    monkeypatch.setattr(
+        migration,
+        "local_additive_target_state",
+        lambda *_args, **_kwargs: {"state": next(states)},
+    )
+
+    with pytest.raises(collector.EngineEvidenceError, match="target release"):
+        collector._verify_release_boundary(
+            SimpleNamespace(),
+            "lu_test_fresh",
+            "target",
+            applied=True,
+            snapshot={"columns": []},
+            require_predecessor_prefix=False,
+        )
+
+
 def test_all_canonical_table_projection_preserves_source_rows_and_zero_new_tables(
     monkeypatch
 ) -> None:

@@ -17,7 +17,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC = () => {
     <p>只填每位月嫂的實際服務天數；系統會以單薪計算應收應付，不建立逐日排班。</p>
     <div className="import-result-title-row">
       <label>案件編號 <input value={caseNo} onChange={(event) => { setCaseNo(event.target.value); setFacts(null); setPreview(null); }} /></label>
-      <button type="button" disabled={busy || !caseNo.trim()} onClick={() => void run(async () => { const result = await historicalServiceAccountingClient.query(caseNo.trim()); setFacts(result); setDays(Object.fromEntries(result.assignments.map((item) => [item.assignment_identity, '']))); setPreview(null); })}>查詢</button>
+      <button type="button" disabled={busy || !caseNo.trim()} onClick={() => void run(async () => { const result = await historicalServiceAccountingClient.query(caseNo.trim()); setFacts(result); setDays(Object.fromEntries(result.assignments.map((item) => [item.assignment_identity, '']))); setPreview(null); })}>查詢服務帳務</button>
     </div>
     {facts && <div>
       <p>目前狀態：{facts.lifecycle_status}；原訂 {facts.contracted_service_days} 天；每日 {facts.service_hours_per_day} 小時。</p>

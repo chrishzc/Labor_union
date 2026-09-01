@@ -7,7 +7,7 @@ import { ApiHttpError } from '../shared/typed_errors';
 
 const ObligationSchema = z.strictObject({
   obligation_identity: z.string().min(1), case_no: z.string().min(1), staff_id: z.number().int().positive(), amount_due_ntd: z.number().int().positive(),
-  payroll_version: z.number().int().nonnegative(), direction: z.enum(['payable_to_staff', 'receivable_from_staff']), status: z.enum(['open', 'settled', 'cancelled']),
+  payroll_version: z.number().int().nonnegative(), direction: z.literal('payable_to_staff'), status: z.enum(['open', 'settled', 'cancelled']),
 });
 const QuerySchema = z.strictObject({
   case_no: z.string().min(1), staff_id: z.number().int().positive(), staff_payables_version: z.number().int().nonnegative(),

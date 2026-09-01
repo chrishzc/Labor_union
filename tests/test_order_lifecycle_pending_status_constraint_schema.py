@@ -80,6 +80,11 @@ def test_predecessor_successor_and_drift_are_distinct() -> None:
     successor = _snapshot(
         "before_status IN ('待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消')"
     )
+    historical_successor = _snapshot(
+        "before_status IN ('待補件','洽談中','訂單成立','服務中','訂單完成',"
+        "'訂單取消','歷史訂單－未服務','歷史訂單－服務中','歷史訂單－服務完成',"
+        "'歷史訂單－帳務完成')"
+    )
     drift = _snapshot("before_status IN ('待補件','洽談中')")
 
     assert migration._order_lifecycle_pending_status_constraint_state(
@@ -87,6 +92,9 @@ def test_predecessor_successor_and_drift_are_distinct() -> None:
     ) == "absent"
     assert migration._order_lifecycle_pending_status_constraint_state(
         successor, canonical
+    ) == "exact"
+    assert migration._order_lifecycle_pending_status_constraint_state(
+        historical_successor, canonical
     ) == "exact"
     assert migration._order_lifecycle_pending_status_constraint_state(
         drift, canonical
