@@ -198,6 +198,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_30_line_identity_role_scope_v1.json",
     "labor_union_2026_08_31_historical_owner_payment_settlement_v1.json",
     "labor_union_2026_08_31_task96_owner_contract_successors_v1.json",
+    "labor_union_2026_09_01_historical_order_pairing_resolution_reused_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -1997,6 +1998,20 @@ def _modified_parent_predecessor_absent_state(
                     ),
                     "is_nullable": "NO",
                     "column_default": "pending",
+                    "extra": "",
+                },
+            },
+        },
+        "1027_historical_order_pairing_resolution_reused.sql": {
+            "historical_order_pairing_evidence": {
+                "resolution": {
+                    "column_type": (
+                        "enum('blank','staff_missing','staff_ambiguous',"
+                        "'evidence_only','assignment_candidate',"
+                        "'assignment_conflict')"
+                    ),
+                    "is_nullable": "NO",
+                    "column_default": None,
                     "extra": "",
                 },
             },
@@ -4695,6 +4710,15 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["tables"]["customer_service_tickets"][
             "active_marker"
         ]["extra"] = "stored generated"
+    if part_name == "1027_historical_order_pairing_resolution_reused.sql":
+        descriptor["parent_columns"]["historical_order_pairing_evidence"] = {
+            "resolution": _column_contract(
+                "enum('blank','staff_missing','staff_ambiguous',"
+                "'evidence_only','assignment_candidate','assignment_reused',"
+                "'assignment_conflict')",
+                "NO",
+            )
+        }
     if part_name == "1005_contract_external_signing_successor.sql":
         purpose_column = _column_contract(
             "enum('unsigned_contract','final_signed_contract',"
@@ -5196,6 +5220,11 @@ def _release_descriptor_metadata_state(
         if released.get(kind) != expected:
             raise UpgradeBlocked(
                 f"release descriptor differs from canonical SQL: {part_name}:{kind}"
+            )
+    if part_name == "1027_historical_order_pairing_resolution_reused.sql":
+        if released.get("parent_columns") != canonical.get("parent_columns"):
+            raise UpgradeBlocked(
+                f"release descriptor differs from canonical SQL: {part_name}:parent_columns"
             )
     if part_name == "1005_contract_external_signing_successor.sql":
         return _contract_external_signing_successor_state(

@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "d07f197dbb07da3740f03189f53de387d11686a3492b966f3bbf51967a9d3d00",
+  "active_artifacts_sha256": "20cdeeadc269190ab3d0b66d13e0ca2bffab30059257e86370beb8b08a8e76c0",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -154,13 +154,15 @@
     "db/schema_parts/1018_hcm_resubmission_canonical_review_version.sql",
     "db/schema_parts/1019_line_identity_role_scope.sql",
     "db/schema_parts/1020_historical_owner_payment_settlement.sql",
-    "db/schema_parts/1021_task96_owner_contract_successors.sql"
+    "db/schema_parts/1021_task96_owner_contract_successors.sql",
+    "db/schema_parts/214_historical_order_pairing_resolution_reused.sql"
   ],
   "classifications": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": "retired",
     "db/schema_parts/153_retire_empty_legacy_field_inventory.sql": "migration-only",
     "db/schema_parts/189_client_refund_recipient_snapshot_local_upgrade.sql": "migration-only",
-    "db/schema_parts/190_government_subsidy_overpayment_disposition_local_upgrade.sql": "migration-only"
+    "db/schema_parts/190_government_subsidy_overpayment_disposition_local_upgrade.sql": "migration-only",
+    "db/schema_parts/1027_historical_order_pairing_resolution_reused.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": {
@@ -197,6 +199,15 @@
       "data_effect": "preserve upgrade keeps the additive bridge for older local schemas only",
       "replay": "release manifest replays part 190 only during preserve-data candidate upgrade",
       "rollback": "retain source dump and discard the candidate before same-name replacement",
+      "unresolved_policy": "partial or drift owned metadata blocks candidate apply"
+    },
+    "db/schema_parts/1027_historical_order_pairing_resolution_reused.sql": {
+      "source_object": "preserve-data additive successor for historical_order_pairing_evidence.resolution",
+      "successor": "db/schema_parts/214_historical_order_pairing_resolution_reused.sql",
+      "terminal_schema_evidence": "fresh assembly uses canonical part 214; preserve chain uses 1027 for existing databases",
+      "data_effect": "schema_only; existing historical-order pairing evidence is preserved",
+      "replay": "preserve release chain applies 1027 only when resolution has the released enum predecessor",
+      "rollback": "retain source backup and discard candidate before same-name replacement",
       "unresolved_policy": "partial or drift owned metadata blocks candidate apply"
     }
   }

@@ -1,0 +1,23 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-historical-order-pairing-resolution-reused-2026-09-01-v1",
+  "descriptors": {
+    "1027_historical_order_pairing_resolution_reused.sql": {
+      "tables": {},
+      "parent_columns": {
+        "historical_order_pairing_evidence": {
+          "resolution": {
+            "column_type": "enum('blank','staff_missing','staff_ambiguous','evidence_only','assignment_candidate','assignment_reused','assignment_conflict')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": []
+    }
+  }
+}

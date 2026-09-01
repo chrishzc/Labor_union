@@ -8,7 +8,7 @@ import tempfile
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
-from pymysql.err import OperationalError
+from pymysql.err import DataError, OperationalError
 from starlette.concurrency import run_in_threadpool
 
 from api.dependencies.admin_auth import require_admin
@@ -110,6 +110,21 @@ async def _with_workbook(
             _actual_start_error_status(error.error.category),
             _with_correlation(error.error, correlation),
         ) from error
+    except DataError as error:
+        code = int(error.args[0]) if error.args else 0
+        message = str(error.args[1]) if len(error.args) > 1 else ""
+        if code == 1265 and "resolution" in message:
+            raise _http_error(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                TypedError(
+                    ErrorCategory.UNAVAILABLE,
+                    "historical_order_database_upgrade_required",
+                    "歷史訂單資料庫結構尚未升級，請先完成資料庫更新。",
+                    correlation,
+                    retryable=False,
+                ),
+            ) from error
+        raise
     except OperationalError as error:
         code = int(error.args[0]) if error.args else 0
         message = str(error.args[1]) if len(error.args) > 1 else ""

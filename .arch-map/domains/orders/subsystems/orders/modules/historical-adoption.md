@@ -26,7 +26,10 @@
   - `scripts/imports/adopt_historical_orders.py` — operational use remains subject to entry-point governance.
 - migrations:
   - `db/schema_parts/1008_historical_order_adoption_noop_constraint.sql`
+  - `db/schema_parts/214_historical_order_pairing_resolution_reused.sql`
+  - `db/schema_parts/1027_historical_order_pairing_resolution_reused.sql` — preserve-data successor.
   - `db/migration_releases/labor_union_2026_08_27_historical_order_adoption_noop_v1.json`
+  - `db/migration_releases/labor_union_2026_09_01_historical_order_pairing_resolution_reused_v1.json`
 
 ## Dependencies
 - outbound: `anomalies/anomalies` — committed review evidence can be projected by `subsystems/anomalies/historical_order_adoption_outbox_consumer.py`.
@@ -40,6 +43,7 @@
 ## Verification
 - static:
   - `db/schema_parts/1008_historical_order_adoption_noop_constraint.sql`
+  - `db/schema_parts/214_historical_order_pairing_resolution_reused.sql`
 - test_root: `tests/domains/orders/subsystems/orders/modules/historical-adoption/`
 
 ## Provenance

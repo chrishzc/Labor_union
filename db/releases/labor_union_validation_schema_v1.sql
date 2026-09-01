@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-08-31-v23
+-- Release: labor-union-validation-schema-2026-09-01-v24
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -20428,3 +20428,20 @@ CREATE TRIGGER trg_client_profile_change_events_before_update BEFORE UPDATE ON c
 DROP TRIGGER IF EXISTS trg_client_profile_change_events_before_delete;
 CREATE TRIGGER trg_client_profile_change_events_before_delete BEFORE DELETE ON client_profile_change_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='client profile change events cannot be deleted';
 -- END SOURCE: db/schema_parts/1021_task96_owner_contract_successors.sql
+
+-- BEGIN SOURCE: db/schema_parts/214_historical_order_pairing_resolution_reused.sql
+-- File: 214_historical_order_pairing_resolution_reused.sql
+-- Purpose: allow historical-order evidence to persist a reused assignment pairing.
+-- Data effect: schema only; existing pairing evidence remains readable.
+
+ALTER TABLE historical_order_pairing_evidence
+    MODIFY COLUMN resolution ENUM(
+        'blank',
+        'staff_missing',
+        'staff_ambiguous',
+        'evidence_only',
+        'assignment_candidate',
+        'assignment_reused',
+        'assignment_conflict'
+    ) NOT NULL;
+-- END SOURCE: db/schema_parts/214_historical_order_pairing_resolution_reused.sql

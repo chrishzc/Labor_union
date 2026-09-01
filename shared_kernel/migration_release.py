@@ -591,7 +591,7 @@ def _validate_descriptor_shapes(descriptors: dict[str, Any]) -> None:
             raise TypeError("owned-object descriptor must be an object")
         metadata_keys = {"indexes", "foreign_keys", "checks"}
         if not {"tables", "triggers"} <= set(descriptor) <= {
-            "tables", "triggers", "views", *metadata_keys
+            "tables", "parent_columns", "triggers", "views", *metadata_keys
         }:
             raise ValueError("owned-object descriptor keys are invalid")
         declared_metadata = set(descriptor).intersection(metadata_keys)
@@ -599,6 +599,18 @@ def _validate_descriptor_shapes(descriptors: dict[str, Any]) -> None:
             raise ValueError("owned metadata descriptors must be declared together")
         if not isinstance(descriptor["tables"], dict):
             raise TypeError("owned tables must be an object")
+        parent_columns = descriptor.get("parent_columns", {})
+        if not isinstance(parent_columns, dict):
+            raise TypeError("owned parent columns must be an object")
+        for table, columns in parent_columns.items():
+            if not isinstance(columns, dict):
+                raise TypeError("owned parent column table must be an object")
+            for column, contract in columns.items():
+                _validate_owned_metadata_identity(f"{table}.{column}")
+                if not isinstance(contract, dict) or set(contract) != {
+                    "column_type", "is_nullable", "column_default", "extra"
+                }:
+                    raise ValueError("owned parent column contract is invalid")
         if not isinstance(descriptor["triggers"], list):
             raise TypeError("owned triggers must be a list")
         _validate_owned_view_contracts(descriptor.get("views", {}))
@@ -671,6 +683,14 @@ def _normalize_owned_descriptor(
             for view_name, contract in descriptor.get("views", {}).items()
         },
     }
+    if "parent_columns" in descriptor:
+        normalized["parent_columns"] = {
+            table_name: {
+                column_name: dict(contract)
+                for column_name, contract in columns.items()
+            }
+            for table_name, columns in descriptor["parent_columns"].items()
+        }
     for key in ("indexes", "foreign_keys", "checks"):
         if key not in descriptor:
             continue

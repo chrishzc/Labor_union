@@ -1,0 +1,57 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-historical-order-pairing-resolution-reused-2026-09-01-v1",
+  "release_metadata": {
+    "release_name": "Labor Union historical-order reused pairing resolution",
+    "application_version": "historical-order-pairing-resolution-reused-v1",
+    "published_at": "2026-09-01",
+    "description": "Allow preserved databases to store reused assignment evidence during historical-order workbook adoption"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-schema-assembly-2026-08-15-v1"
+  },
+  "artifacts": [{
+    "name": "1027_historical_order_pairing_resolution_reused.sql",
+    "relative_path": "db/schema_parts/1027_historical_order_pairing_resolution_reused.sql",
+    "sha256": "5c262e52f0ace645d8e1773883d3b140483c0a5effef768202b17e835fb7890b",
+    "dependencies": [],
+    "data_effect": "schema_only",
+    "rollback_policy": "forward-only-preserve-historical-order-pairing-evidence",
+    "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+  }],
+  "backfills": [],
+  "verification_contracts": [{
+    "verification_id": "historical-order-pairing-resolution-reused",
+    "phase": "post-schema",
+    "policy": "historical-order-pairing-resolution-enum-exact-and-existing-evidence-readable",
+    "read_only": true,
+    "blocking": true
+  }],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["orders-historical-adoption-v1"],
+    "required_restart_targets": ["api", "worker"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["historical-order-adoption-preview"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_01_historical_order_pairing_resolution_reused_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_01_historical_order_pairing_resolution_reused_v1.descriptors.json",
+    "sha256": "aa718aa30a901b4709b9f42da15308c217ed167421e0bb7bcf767fa3c06017f2",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

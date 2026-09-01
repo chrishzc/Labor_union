@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
-from pymysql.err import OperationalError
+from pymysql.err import DataError, OperationalError
 
 from api.dependencies.admin_auth import require_admin
 from api.dependencies.historical_order_adoption import get_historical_order_workbook_import_service
@@ -140,6 +140,27 @@ def test_apply_reports_pending_status_constraint_as_database_upgrade_required():
     assert response.json()["detail"]["error"]["code"] == (
         "historical_order_database_upgrade_required"
     )
+
+
+def test_apply_reports_pairing_resolution_enum_drift_as_database_upgrade_required():
+    service = _Service()
+
+    def fail_apply(*_args):
+        raise DataError(1265, "Data truncated for column 'resolution' at row 1")
+
+    service.apply = fail_apply
+    response = _client(service).post(
+        "/api/v1/orders/historical-adoption/workbooks/apply",
+        headers=_headers(),
+        data={"preview_fingerprint": "2" * 64},
+        files=_file(),
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"]["code"] == (
+        "historical_order_database_upgrade_required"
+    )
+    assert response.json()["detail"]["error"]["retryable"] is False
 
 
 def test_apply_actual_start_idempotency_mismatch_is_a_conflict_not_a_server_error():
