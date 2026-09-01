@@ -10,7 +10,10 @@ from domains.finance_import.planning import (
     FinanceImportDisposition,
     build_finance_import_plan,
 )
-from infrastructure.mysql.finance_import_repository import _preview_disposition
+from infrastructure.mysql.finance_import_repository import (
+    _preview_disposition,
+    _sort_canonical_rows,
+)
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.money import MoneyNTD
 from subsystems.finance_import.query import (
@@ -155,6 +158,32 @@ def test_replayed_manual_review_row_preserves_ready_rows_for_apply() -> None:
     assert plan.apply_allowed is True
     assert tuple(row.row_identity for row in plan.dispatchable_rows) == (
         "finance-import-row:5",
+    )
+
+
+def test_canonical_rows_follow_the_textual_identity_order_required_by_preview() -> None:
+    row_ten = CanonicalFinanceImportRow(
+        "finance-import-row:10",
+        0,
+        MoneyNTD(100),
+        FinanceClassificationType.CLIENT_RECEIPT,
+        FinanceImportDisposition.BUSINESS_PENDING,
+        PreviewFingerprint("d" * 64),
+    )
+    row_two = CanonicalFinanceImportRow(
+        "finance-import-row:2",
+        0,
+        MoneyNTD(200),
+        FinanceClassificationType.CLIENT_RECEIPT,
+        FinanceImportDisposition.BUSINESS_PENDING,
+        PreviewFingerprint("e" * 64),
+    )
+
+    ordered = _sort_canonical_rows((row_two, row_ten))
+
+    assert tuple(row.row_identity for row in ordered) == (
+        "finance-import-row:10",
+        "finance-import-row:2",
     )
 
 

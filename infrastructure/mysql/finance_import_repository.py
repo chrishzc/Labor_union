@@ -369,9 +369,11 @@ def _load_batch_facts(cursor, batch_identity, for_update):
     if len(raw_rows) != int(counts["canonical_member_count"]):
         raise ValueError("classification_event_missing")
     issues = _load_integrity_issues(cursor, int(header["batch_id"]))
-    rows = tuple(
-        _canonical_row(row, issues, int(header["batch_id"]))
-        for row in raw_rows
+    rows = _sort_canonical_rows(
+        tuple(
+            _canonical_row(row, issues, int(header["batch_id"]))
+            for row in raw_rows
+        )
     )
     return FinanceImportBatchFacts(
         str(header["batch_identity"]),
@@ -423,6 +425,11 @@ def _preview_disposition(row, classification_type, batch_id):
     if classification_type is FinanceClassificationType.NON_BUSINESS_REVIEW:
         return stored
     return FinanceImportDisposition.EXISTING
+
+
+def _sort_canonical_rows(rows):
+    """Match the lexical identity ordering required by FinanceImportBatchFacts."""
+    return tuple(sorted(rows, key=lambda row: row.row_identity))
 
 
 def _load_integrity_issues(cursor, batch_id):
