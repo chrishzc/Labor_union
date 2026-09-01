@@ -318,7 +318,9 @@ def _canonical_relative_path(value: object) -> str:
 
 
 def _is_link_like_directory(path: Path) -> bool:
-    return path.is_symlink() or path.is_junction()
+    junction_checker = getattr(path, "is_junction", None)
+    is_junction = bool(junction_checker()) if junction_checker is not None else False
+    return path.is_symlink() or is_junction
 
 
 def _canonical_json(value: object) -> bytes:

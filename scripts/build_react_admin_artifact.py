@@ -61,7 +61,9 @@ def build_artifact(
                 production=production,
                 compatibility_registry=compatibility_registry,
             )
-    if source.is_symlink() or source.is_junction():
+    junction_checker = getattr(source, "is_junction", None)
+    is_junction = bool(junction_checker()) if junction_checker is not None else False
+    if source.is_symlink() or is_junction:
         raise ReactAdminArtifactError("react admin build source must be a real directory")
     source_root = source.resolve(strict=True)
     if source_root == PROJECT_ROOT.resolve() or source_root == output_path:
