@@ -80,6 +80,10 @@ Client Finance。後續return、reversal、薪資／服務更正或新obligation
 完整跨Domain契約見
 `../02_決策與退役執行記錄/PROV-20260828-historical-payment-and-owner-settlement-spec.md`。
 
+第 `27` 份正式規格新增的「歷史訂單－帳務完成」只可消費本 Domain 的正式逐 obligation settlement
+facts：每位月嫂 balance 都必須為 0，且無 payout／return／reversal binding blocker。Payroll 已依歷史
+`actual_service_days` 建立義務或只完成應付清冊下載，都不能推定月嫂款項已實際結清。
+
 ### Payable Anomaly Facts
 
 輸出 `PAYOUT-001` 到期未匯、`PAYOUT-002` 原應付日後才形成或改變、`PAYOUT-003` 銀行主檔不完整，以及 ownership／共享帳戶／金額不符。人工 resolve 不修改義務或付款投影。

@@ -12,7 +12,7 @@
 1. 根目錄 `AGENTS.md` 與本目錄 `00_Agent任務分級與交付規範.md`：工作區規則、T0–T3、dirty worktree 與驗證方式。
 2. 根目錄 `README.md`：執行入口、目錄與安全界線。
 3. `01_規格基線/00_Global_共同契約.md`：跨領域共同不變量。
-4. `15_正式規格索引與裁決總表.md`、對應 Domain 規格及 `16`～`24` 中與任務相關的最新補充裁決。
+4. `15_正式規格索引與裁決總表.md`、對應 Domain 規格及 `16`～`27` 中與任務相關的最新補充裁決。
 5. 需要定位source／dependency／test boundary時，從根目錄`.arch-map/index.md`進入最小affected subtree；它只提供current architecture navigation，不取代正式規格或驗收。
 6. 只讀對應且 active 的 `02_決策與退役執行記錄/` Work Package 與 `03_追蹤清單與證據/` evidence，不整目錄載入。
 7. 歷史追溯、incident／rollback、migration/cutover、舊 release 重現或稽核時，才依 `04_已完成與上線封存/README.md` 從 Git 歷史精準取回單一文件。
@@ -70,7 +70,7 @@ flowchart LR
 | Access／LINE／Jobs | `subsystems/access/`、`subsystems/line/`、`subsystems/jobs/` | 管理員身分與 capability、LINE inbox／delivery、durable worker supervision |
 
 完整 Domain ownership、SSOT 與跨域關係請讀
-`01_規格基線/15_正式規格索引與裁決總表.md`；其中的圖、`16`～`24` 補充裁決與權威順序
+`01_規格基線/15_正式規格索引與裁決總表.md`；其中的圖、`16`～`27` 補充裁決與權威順序
 優先於本摘要。Anomalies lifecycle 固定先讀 `06_Anomalies_Domain.md` 與索引最新
 current-state slimming 裁決；`22_銀行流水匯入與帳務異常處理正式規格.md` 只繼續擁有銀行流水與帳務 owner 根事實，不得復活舊 anomaly tracking／resolve 機制。
 
@@ -90,7 +90,7 @@ current-state slimming 裁決；`22_銀行流水匯入與帳務異常處理正�
 
 - `.arch-map/`：living current architecture與test routing navigation；`meta.yaml`標示最近scoped observation，地圖不保存Task history也不創造Authority。
 - `00_Agent任務分級與交付規範.md`：任務大小、最小 durable artifacts、驗證範圍與失敗回送的 canonical 路由。
-- `01_規格基線/`：現行正式 Global／Domain／Application 契約；`15` 是規格收斂入口，目前正式範圍為 `15`～`24`。`16`～`24` 補足帳務衝突、外部整合／權限與部署治理，`19` 管理 entry point，`20`：LINE 客服，`21`：Contract Signing 與簽約前服務承諾，`22`：銀行流水與帳務異常處置，`23`：LINE 身分管理與解除，`24`：Staff Matching Preferences 與不可服務期間。
+- `01_規格基線/`：現行正式 Global／Domain／Application 契約；`15` 是規格收斂入口，目前正式範圍為 `15`～`27`。`16`～`25` 補足帳務衝突、外部整合／權限與部署治理，`19` 管理 entry point，`20`：LINE 客服，`21`：Contract Signing 與簽約前服務承諾，`22`：銀行流水與帳務異常處置，`23`：LINE 身分管理與解除，`24`：Staff Matching Preferences 與不可服務期間，`25`：Access Control production cutover；`26` 保存 LINE 四模組驗收基線，`27` 擁有歷史訂單生命週期分支、服務天數帳務與重啟精算契約。
 - `02_決策與退役執行記錄/`：已核准的 Work Package、退役、驗收與部署決策；先確認 `declared_status`，不要把草案當授權。
 - `03_追蹤清單與證據/`：legacy inventory、evidence、收據；是現況證據，不自動構成業務規格或刪檔權限。
 - `03_追蹤清單與證據/evidence/global_e2e_manifest.json`：目前 Global E2E 驗收宣告與證據索引。

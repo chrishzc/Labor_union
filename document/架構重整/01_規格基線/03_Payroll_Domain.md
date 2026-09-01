@@ -6,6 +6,10 @@ Payroll 依有效 assignment、正式服務日、Orders Terms、身分費率政�
 
 Payroll 不建立 assignment、不處理客戶收款、不核銷銀行出款、不產生 Excel，也不接受人工輸入 actual hours、薪資或樓層費結果。
 
+唯一例外是第 `27` 份正式規格的歷史 lifecycle branch：Payroll 可消費 Orders application 已確認、逐
+assignment 且具 provenance 的 `actual_service_days` 根事實，依單薪建立義務；仍不得接受人工輸入
+actual hours、費率、薪資或樓層費結果，也不得把該天數偽造成正式 `service_dates`。
+
 ## 2. SSOT
 
 | 概念 | 唯一權威 |
@@ -47,6 +51,10 @@ total_payable = service_salary + floor_fee_allocated + effective_adjustments
 ```
 
 雙倍日原始工時已包含於 actual hours，再加一次 double-pay hours，結果恰為兩倍。
+
+歷史分支固定 `double_pay_hours = 0`，並允許實際服務天數少於或大於原合約天數；歷史樓層費隨天數
+比例增減後再按逐 assignment 天數守恆分配。完整公式、來源、重算與正常流程回歸契約見
+`27_歷史訂單生命週期與服務天數帳務正式規格.md` §6、§8。
 
 中途取消的樓層費先以 `ROUND_HALF_UP` 算出全案整數，再以最大餘數法按 assignment 服務日分配。完整履約後取消被拒絕，不套用縮減。
 

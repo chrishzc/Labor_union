@@ -16,6 +16,7 @@
 
 ## Modules
 - `late-obligation-disposition` — retired PAYOUT-002 owner validation／historical settlement evidence；path: `modules/late-obligation-disposition.md`
+- `historical-service-accounting` — 歷史逐 assignment 單薪應付與差額義務；path: `modules/historical-service-accounting.md`
 
 ## Verification routing
 - default_boundary: Subsystem

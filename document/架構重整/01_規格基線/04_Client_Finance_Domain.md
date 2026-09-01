@@ -27,6 +27,11 @@
 
 依 Orders Terms、服務日根事實及費率政策建立訂金、第一期、第二期及調整義務。樓層費只計入一次。條款變更只重算未核銷義務；已核銷差額建立 adjustment 或 refund obligation。
 
+第 `27` 份正式規格的歷史 lifecycle branch 可用每位月嫂已確認 `actual_service_days` 的總和取代逐日
+服務日期作為歷史服務量來源；Client Finance 仍自行擁有費率、補助、自費、樓層費、obligation direction
+與核銷。歷史服務量可少於或大於原合約天數，既有已核銷金額差異只能追加 adjustment／refund，不得
+覆寫 immutable ledger。
+
 依第 `21` 份正式規格，最後一位月嫂簽回並形成有效簽約前 commitment 時，只建立一次且
 唯一的 deposit obligation，使用 commitment 的精確服務日、時數、費率與樓層費計算。客戶
 簽回後的 Contract Completion 保留該 deposit identity、金額、ledger 與 allocation，只補足
@@ -312,3 +317,12 @@ Stable errors：
   `client_payment_transactions` 或 reconciliation projection。
 - final writer scan 必須證明 obligation event、client ledger、allocation、refund、
   adjustment、reversal 與 settled projection 都只有 Client Finance adapters 可寫。
+
+## 8. 工會／代收付帳戶設定（2026-09-01 人工裁決）
+
+- 客戶契約的「服務款項匯款帳號」是 Client Finance 擁有的付款目的地，不得讀取
+  `staff_bank_accounts` 或任何服務人員個人收款帳戶。
+- 管理端在財務工作台提供版本化 Query／Preview／Apply 設定入口；設定保存 account display、
+  revision、actor、reason、idempotency 與 receipt。未設定時契約 Preview fail closed。
+- Contract Signing 只消費 `client_payment_destination_account` typed current projection，不能保存
+  第二份設定或以環境變數、Excel placeholder、UI state 作 fallback。

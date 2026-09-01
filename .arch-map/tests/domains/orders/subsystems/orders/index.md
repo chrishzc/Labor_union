@@ -8,6 +8,8 @@ test_root: tests/domains/orders/subsystems/orders/
 integration_root: tests/domains/orders/subsystems/orders/integration/
 fixtures_root: tests/fixtures/
 modules:
+  historical-service-accounting:
+    test_root: tests/domains/orders/subsystems/orders/modules/historical-adoption/
   order-information:
     test_root: tests/domains/orders/subsystems/orders/modules/order-information/
   historical-adoption:
@@ -18,8 +20,7 @@ modules:
     layout_status: custom_current
     test_root: ui_react/src/tests/historical_order_workbook_client.test.ts
   historical-completion:
-    layout_status: custom_current
-    test_root: ui_react/src/tests/historical_completion.test.tsx
+    test_root: tests/domains/orders/subsystems/orders/modules/historical-completion/
   historical-baseline-presentation:
     layout_status: custom_current
     test_root: ui_react/src/tests/historical_operational_baseline_readback.test.tsx

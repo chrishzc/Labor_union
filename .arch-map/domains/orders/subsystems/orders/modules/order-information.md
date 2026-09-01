@@ -10,6 +10,8 @@
 ## Implementation
 - `subsystems/orders/order_information.py`
 - `infrastructure/mysql/order_information_repository.py`
+- `db/templates/tpl_info_01.json`
+- `db/templates/tpl_info_02.json`
 - `api/routes/orders.py`
 - `api/dependencies/order_information.py`
 - `api/schemas/order_information.py`

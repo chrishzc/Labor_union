@@ -71,6 +71,7 @@ LINE、管理權限、部署與治理語彙集中到當時的 `15`～`18`；`19`
 - `01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md`
 - `01_規格基線/25_Access_Control_Production_Cutover與External_Security_Alert正式規格.md`
 - `01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`
+- `01_規格基線/27_歷史訂單生命週期與服務天數帳務正式規格.md`
 
 `15` 是正式收斂入口；`16`～`26` 分別補齊帳務衝突、外部整合／權限及
 Deployment／治理，`19` 定義 API／Streamlit／CLI entry point 的逐項治理，`22` 定義銀行流水、

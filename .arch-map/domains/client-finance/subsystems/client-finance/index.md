@@ -17,9 +17,11 @@
 ## Modules
 - `obligation-planning` — plans canonical Client Finance stage obligations, including date-only replacement without customer cash impact; path: `modules/obligation-planning.md`
 - `historical-payment-settlement` — adopted pre-system historical Client payment evidence and exact obligation settlement overlay; path: `modules/historical-payment-settlement.md`
+- `historical-service-accounting` — 歷史服務天數驅動的客戶應收、退款／補收差額; path: `modules/historical-service-accounting.md`
 - `historical-payment-settlement-presentation` — owner-page historical Client payment Q/P/A and fresh readback; path: `modules/historical-payment-settlement-presentation.md`
 - `over-refund-recovery-presentation` — 客戶退款超額追償的既有安全 workflow 與 business-first React projection; path: `modules/over-refund-recovery-presentation.md`
 - `settlement-remediation-presentation` — 客戶應收、退款與補助退還三碼Q/P/A的business-first React projection; path: `modules/settlement-remediation-presentation.md`
+- `payment-destination-configuration` — 工會／代收付帳戶的版本化 Q/P/A 與客戶契約 typed projection; path: `modules/payment-destination-configuration.md`
 
 ## Verification routing
 - default_boundary: Subsystem

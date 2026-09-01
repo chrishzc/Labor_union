@@ -5,6 +5,8 @@ test_root: tests/domains/client-finance/subsystems/client-finance/
 integration_root: tests/domains/client-finance/subsystems/client-finance/integration/
 fixtures_root: tests/fixtures/
 modules:
+  historical-service-accounting:
+    test_root: tests/domains/client-finance/subsystems/client-finance/modules/historical-service-accounting/
   obligation-planning:
     layout_status: custom_current
     test_root: tests/domains/client-finance/subsystems/client-finance/integration/test_client_finance_cancellation_direction.py

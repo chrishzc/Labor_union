@@ -9,8 +9,11 @@
 
 ## Implementation
 - primary:
+  - `domains/orders/lifecycle.py`
   - `subsystems/orders/lifecycle_authoritative_facts_loader.py`
   - `subsystems/orders/lifecycle_authoritative_facts.py`
+  - `subsystems/orders/lifecycle_control_read_facts.py`
+  - `subsystems/orders/order_lifecycle_command_envelope.py`
   - `subsystems/orders/auto_completion_workflow.py`
 
 ## Dependencies

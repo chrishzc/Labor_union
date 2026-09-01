@@ -17,6 +17,7 @@ package；T3 才要求 current spec＋package。相同 owner／scenario／scope 
 
 | 文件 | 類型 | 狀態 | 正確用途／下一個 gate |
 |---|---|---|---|
+| [歷史訂單生命週期與服務天數帳務](PROV-20260901-historical-order-lifecycle-accounting-work-package.md) | work-package | `in-progress` | 依正式規格 27 執行 repository-local implementation；DB 套用與 external effect 不在 Authority 內。 |
 | [匯入入口與 Legacy Writer 退役](Import_Entry_and_Legacy_Writer_Retirement_工作包.md) | work-package | `blocked` | Client LIFF 與 writer replacement 未全數閉合；不得直接移除入口。current LIFF 功能由 96 列管。 |
 | [React Phase 6 retirement release gate](PROV-20260817-react-admin-phase6-retirement-release-gate-work-package.md) | work-package | `blocked` | 使用者目前禁止 entry switch／retirement；維持 fail closed。 |
 | [React Phase 6C per-entry readiness gap](PROV-20260817-react-admin-phase6c-per-entry-retirement-readiness-gap.md) | gap-package | `blocked` | 未達逐入口 replacement／regression gate，不得啟動 retirement。 |

@@ -11,11 +11,13 @@
 - primary:
   - `domains/scheduling/matching_coordination.py`
   - `subsystems/scheduling/matching_coordination_contracts.py`
+  - `subsystems/scheduling/historical_pending_deposit_matching.py` — Historical Adoption 可用的 typed proposed-plan writer port。
 - `subsystems/scheduling/matching_coordination_workflow.py`
 - `subsystems/scheduling/matching_notification_application.py` (zero-pool client decision response owner)
   - `subsystems/scheduling/matching_coordination_application.py` — P3 typed leave/date handoffs
   - `infrastructure/mysql/matching_coordination_repository.py`
   - `infrastructure/mysql/matching_coordination_facts_adapter.py`
+  - `infrastructure/mysql/historical_pending_deposit_matching_repository.py` — 借用 caller transaction 寫入可由 active Matching Query 讀取的正式 plan／segment roots。
   - `infrastructure/mysql/segmented_availability_repository.py`
 - entrypoints:
   - `api/routes/matching_coordination.py`
@@ -27,6 +29,7 @@
 ## Dependencies
 - outbound: `orders/orders` — case/lifecycle boundary.
 - inbound: Scheduling UI/LINE adapters — transport invokes typed coordination commands, not direct DB writes.
+- inbound: `orders/historical-adoption` — 只有 discussion、開始日空白且月嫂唯一可辨識的來源列，才在同一 outer UoW 建立 proposed plan。
 - P3 handoff: committed M3 intents carry immutable `LU96-M3-*` source identity and recipient selector; P5 owns delivery task/provider consumption.
 
 ## Contracts
@@ -47,6 +50,7 @@
 - Domain ownership — `architecture_declared` — Scheduling specs.
 - Source/API/UI paths — `source_observed` — current repository search.
 - Module-owned contract/domain/workflow/facts/API-route tests — `source_observed` — architecture-aligned test root.
+- Historical pending-deposit typed port、borrowed-connection adapter 與 owner-local tests — `source_observed` — current source and canonical module test root.
 - Scheduling React entry contract — `source_observed` — same architecture-aligned module test root.
 - Repository test exception — `source_observed` — current flat path with relocation-sensitive schema lookup.
 

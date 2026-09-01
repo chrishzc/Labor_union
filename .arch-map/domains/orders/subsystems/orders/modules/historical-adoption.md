@@ -32,6 +32,7 @@
   - `db/migration_releases/labor_union_2026_09_01_historical_order_pairing_resolution_reused_v1.json`
 
 ## Dependencies
+- outbound: `scheduling/matching-coordination` — discussion＋開始日空白＋唯一月嫂來源透過 typed borrowed-transaction port 建立正式 proposed Matching plan；其他來源不得製造 Matching root。
 - outbound: `anomalies/anomalies` — committed review evidence由 `subsystems/orders/historical_order_adoption_outbox_consumer.py`確認投遞；歷史服務日曆未確認維持 owner review，不建立推測帳務。
 - outbound: `orders/service-date-confirmation` — 只有工會人員日後主動確認逐日服務事實時，才由正式流程建立服務日與後續帳務投影；Historical Adoption 不呼叫此流程。
 - inbound: Case Import / operator import entry — only through typed source/workflow boundary.

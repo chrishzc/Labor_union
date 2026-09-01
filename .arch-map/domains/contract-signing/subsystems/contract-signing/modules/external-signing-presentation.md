@@ -16,6 +16,8 @@
 - `subsystems/contract_signing/client_contract_application.py`
 - `subsystems/contract_signing/contract_renderer.py`
 - `subsystems/contract_signing/template_catalog.py`
+- `db/templates/contracts/contract_client_copy.json`
+- `db/templates/contracts/contract_staff_service.json`
 - `subsystems/contract_integration/contract_context.py`
 - `ui/api_clients/full_contract_preview_api_client.py`
 - `ui/pages/form_management/tab3_contract_management.py`

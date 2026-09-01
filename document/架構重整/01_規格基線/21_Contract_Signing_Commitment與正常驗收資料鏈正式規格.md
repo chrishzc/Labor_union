@@ -386,3 +386,10 @@ fingerprint、blockers、preview fingerprint與PDF result。正式document persi
 只讀opaque document version／controlled-file object並重新authorization，不暴露filesystem/NAS locator、raw URL，
 也不重新計算business facts。preview與正式download bytes/digest依既有version contract保持一致可追溯。
 本裁決解除public-entry及owner-projection blocker，但依Task 96 priority尚未開始此後順位implementation。
+
+### 2026-09-01 客戶契約付款欄位人工裁決
+
+- 客戶契約 D36「服務款項匯款帳號」固定使用 Client Finance 的工會／代收付帳戶 current
+  configuration；禁止綁定月嫂或其他 Staff Payables 帳戶。沒有 current configuration 時不得列印。
+- 樓層費與訂金一起支付，因此 C37「樓層費入帳日」使用同一筆 Client Finance
+  `deposit_due_date`，不得另取實際收款日或建立第二套日期算法。
