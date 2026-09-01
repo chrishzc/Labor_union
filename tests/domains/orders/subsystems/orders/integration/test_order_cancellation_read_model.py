@@ -38,3 +38,11 @@ def test_cancellation_rejects_inactive_staff_after_mutex_lock():
 
     with pytest.raises(ValueError, match="scheduling_staff_not_found"):
         read_model._lock_staff(cursor, (1, 2))
+
+
+def test_cancellation_without_impacted_staff_skips_staff_mutex():
+    cursor = StaffLockCursor([])
+
+    read_model._lock_staff(cursor, ())
+
+    assert cursor.calls == []
