@@ -1,6 +1,6 @@
 ---
 doc_type: current-register
-declared_status: repository-local-acceptance-complete
+declared_status: repository-local-and-remote-ci-acceptance-complete
 date: 2026-09-01
 owner: architecture-governance / product-and-domain-owners
 ---
@@ -9,7 +9,10 @@ owner: architecture-governance / product-and-domain-owners
 
 ## 1. Current decision
 
-Task 96 在使用者明確排除的 external boundaries 之外，已達 repository-local acceptance：source、canonical tests、React full test/build、fresh `lu_test_1` bootstrap、LINE configuration baseline，以及 Scheduling／Contract／Payroll／Staff Payables 的 real-MySQL positive lane 均有 current evidence。
+Task 96 在使用者明確排除的 external boundaries 之外，已達repository-local acceptance，且對應
+`origin/main@06b1c72de2a49bebfeb6d75fe6ef077f98fafd4d`的GitHub Actions已通過：source、canonical tests、
+React full test/build、fresh `lu_test_1` bootstrap、LINE configuration baseline，以及
+Scheduling／Contract／Payroll／Staff Payables的real-MySQL positive lane均有current evidence。
 
 尚未執行且不包含在本次完成判定：
 
@@ -36,7 +39,7 @@ Task 96 在使用者明確排除的 external boundaries 之外，已達 reposito
 | Historical settlement／import | `passed` | canonical owner tests與既有 real-MySQL acceptance涵蓋 Query→Preview→Apply→replay→readback；Historical Import same-workbook self-stale 已修正為 fresh lock／typed conflict。 |
 | React | `passed` | 185 test files／1202 tests；production build passed。 |
 | Python repository | `passed with declared exclusions` | canonical/focused owners passed；全量一次收集到 5059 passed／145 skipped，剩餘是需要另一組 auth profile、獨立 MySQL credentials 或 clean-commit-bound Task97 checks，已各自以正確 profile／focused runner驗證。 |
-| Governance／architecture | `pending final commit check` | entry queue 724、review-required 74；Task97 inventory 88；formal baseline valid。最終 commit 後仍須跑 commit-bound dispositions與 GitHub Actions。 |
+| Governance／architecture | `passed` | entry queue 724、review-required 74；Task97 inventory 88；formal baseline valid。commit-bound dispositions與GitHub Actions run `33501045338`均通過。 |
 
 ## 3. Task 96 closure matrix
 
@@ -65,13 +68,9 @@ Task 96 在使用者明確排除的 external boundaries 之外，已達 reposito
 
 其餘大檔目前都有明確 consumer：M1–M4 coordination、safe-link、feedback、controlled-file、order-information、real-MySQL runner與 owner projection。它們可在後續獨立重構，但目前沒有證據支持為了行數拆散 UoW 或 typed owner boundary。
 
-## 5. Final close conditions
+## 5. Terminal boundary
 
-Repository-local Task 96 只剩機械式 final gates：
-
-1. final architecture closure validator；
-2. `git diff --check`、strict UTF-8／secret scan；
-3. commit並推送 `origin/main`；
-4. GitHub Actions current HEAD 全綠。
-
-若 GitHub Actions 對 current HEAD 失敗，Task 96 回到 `failed` 並修正；在 Actions成功前，本文件的 overall status不得外推為 remote-CI complete。
+Task 96的repository-local source、runtime lanes、architecture closure、Git hygiene、`origin/main` push與
+GitHub Actions均已完成。verified LIFF／provider、NAS、production／deployment及1019 preserve-upgrade仍按
+本檔第1節維持excluded／deferred／`not_run`；若要恢復，必須建立新的current successor與acceptance，
+不得重新開啟本register當作施工清單。

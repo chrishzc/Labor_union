@@ -877,6 +877,7 @@ describe('OrdersPage query real-data slice', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
     fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
     await screen.findByText(/實際開始日：尚未開始/);
+    expect(screen.queryByRole('button', { name: '新增實際服務日' })).not.toBeInTheDocument();
     expect(orderCancellationClient.query).toHaveBeenCalledWith('ORD-2026-0801', expect.any(AbortSignal));
     fireEvent.click(screen.getByRole('button', { name: /預覽取消與退款試算/ }));
     await screen.findByText(/取消影響預覽/);
@@ -904,8 +905,56 @@ describe('OrdersPage query real-data slice', () => {
 
     expect(await screen.findByText('此案件已取消，不可再次取消；如需處理請改走受控重開。')).toBeInTheDocument();
     expect(screen.getByText('🚫 不可再次取消')).toBeInTheDocument();
+    expect(screen.queryByText('🟠 歷史服務事實可補登')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /預覽取消與退款試算/ })).toBeDisabled();
     expect(orderCancellationClient.preview).not.toHaveBeenCalled();
+  });
+
+  it('allows historical mid-service remediation only when the server flag is true', async () => {
+    useOperableSummary();
+    vi.mocked(orderCancellationClient.query).mockResolvedValueOnce({
+      ...cancellationQuery,
+      lifecycle_status: '訂單取消',
+      service_started: false,
+      historical_mid_service_confirmation_available: true,
+      confirmed_service_days: [],
+      caregiver_options: [{ staff_id: 101, display_name: '歷史月嫂（已離職）' }],
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
+
+    expect(await screen.findByText('🟠 歷史服務事實可補登')).toBeInTheDocument();
+    expect(screen.queryByText('此案件已取消，不可再次取消；如需處理請改走受控重開。')).not.toBeInTheDocument();
+    const addServiceDayButton = screen.getByRole('button', { name: '新增實際服務日' });
+    fireEvent.click(addServiceDayButton);
+    fireEvent.click(addServiceDayButton);
+    const dateInputs = document.querySelectorAll<HTMLInputElement>('input[type="date"]');
+    fireEvent.change(dateInputs[0], { target: { value: '2026-08-01' } });
+    fireEvent.change(dateInputs[1], { target: { value: '2026-08-02' } });
+    const caregiverSelects = screen.getAllByRole('combobox');
+    expect(caregiverSelects).toHaveLength(2);
+    fireEvent.change(caregiverSelects[0], { target: { value: '101' } });
+    fireEvent.change(caregiverSelects[1], { target: { value: '101' } });
+    fireEvent.change(screen.getByLabelText('第 1 日人工原因'), { target: { value: '歷史服務日一' } });
+    fireEvent.change(screen.getByLabelText('第 2 日人工原因'), { target: { value: '歷史服務日二' } });
+    const previewButton = screen.getByRole('button', { name: /預覽取消與退款試算/ });
+    expect(previewButton).not.toBeDisabled();
+    fireEvent.click(previewButton);
+    await screen.findByText(/取消影響預覽/);
+    expect(orderCancellationClient.preview).toHaveBeenCalledWith(
+      'ORD-2026-0801',
+      [
+        { service_date: '2026-08-01', staff_id: 101, reason: '歷史服務日一' },
+        { service_date: '2026-08-02', staff_id: 101, reason: '歷史服務日二' },
+      ],
+      expect.any(AbortSignal),
+    );
+    fireEvent.change(screen.getByLabelText('人工取消原因'), { target: { value: '補登歷史服務事實' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /我已核對本次取消日期/ }));
+    expect(screen.getByRole('button', { name: /確認執行取消/ })).not.toBeDisabled();
   });
 
   it('shows the backend cancellation preview blocker instead of a generic failure', async () => {

@@ -1673,12 +1673,14 @@ export const OrdersPage: React.FC = () => {
       setCancellationError('請輸入有效且不重複的實際服務日期、月嫂。');
       return;
     }
-    if (!cancellationQuery.service_started && typedDays.length > 0) {
+    if (!cancellationIsHistoricalRemediation && !cancellationQuery.service_started && typedDays.length > 0) {
       setCancellationError('服務尚未開始，實際服務日必須維持為 0 天。');
       return;
     }
-    if (cancellationQuery.service_started && typedDays.length === 0) {
-      setCancellationError('服務已開始時，至少要保留一日實際服務事實。');
+    if (cancellationServiceFactsAvailable && typedDays.length === 0) {
+      setCancellationError(cancellationIsHistoricalRemediation
+        ? '歷史取消案件至少要補登一日實際服務事實。'
+        : '服務已開始時，至少要保留一日實際服務事實。');
       return;
     }
     const baseline = new Set(cancellationQuery.confirmed_service_days.map((day) => `${day.service_date}:${day.staff_id}`));
@@ -1807,6 +1809,12 @@ export const OrdersPage: React.FC = () => {
       if (isCurrentDrawer()) setCancellationStatus('idle');
     }
   };
+
+  const cancellationIsAlreadyCancelled = cancellationQuery?.lifecycle_status === '訂單取消';
+  const cancellationIsHistoricalRemediation = cancellationIsAlreadyCancelled
+    && cancellationQuery?.historical_mid_service_confirmation_available === true;
+  const cancellationServiceFactsAvailable = cancellationQuery?.service_started === true || cancellationIsHistoricalRemediation;
+  const cancellationLifecycleBlocked = cancellationIsAlreadyCancelled && !cancellationIsHistoricalRemediation;
 
   const allItems = pageData?.items || [];
   const filteredOrders = selectedStage === '全部'
@@ -3612,8 +3620,8 @@ export const OrdersPage: React.FC = () => {
                     <span style={{ fontSize: '0.92rem', fontWeight: 700, color: '#57423b' }}>當前案件狀態：</span>
                     <strong style={{ fontSize: '1rem', color: '#ff7f50' }}>{(contractOrder || dateConfirmOrder || cancelOrder || reopenOrder)?.orderStatus ?? '洽談中'}</strong>
                   </div>
-                  <span style={{ padding: '3px 10px', borderRadius: '9999px', fontSize: '0.78rem', fontWeight: 750, backgroundColor: cancellationQuery?.lifecycle_status === '訂單取消' ? '#fef2f2' : '#f0fdf4', color: cancellationQuery?.lifecycle_status === '訂單取消' ? '#991b1b' : '#166534', border: `1px solid ${cancellationQuery?.lifecycle_status === '訂單取消' ? '#fecaca' : '#bbf7d0'}` }}>
-                    {cancellationQuery?.lifecycle_status === '訂單取消' ? '🚫 不可再次取消' : '🟢 允許取消試算'}
+                  <span style={{ padding: '3px 10px', borderRadius: '9999px', fontSize: '0.78rem', fontWeight: 750, backgroundColor: cancellationIsHistoricalRemediation ? '#fff7ed' : cancellationIsAlreadyCancelled ? '#fef2f2' : '#f0fdf4', color: cancellationIsHistoricalRemediation ? '#9a3412' : cancellationIsAlreadyCancelled ? '#991b1b' : '#166534', border: `1px solid ${cancellationIsHistoricalRemediation ? '#fed7aa' : cancellationIsAlreadyCancelled ? '#fecaca' : '#bbf7d0'}` }}>
+                    {cancellationIsHistoricalRemediation ? '🟠 歷史服務事實可補登' : cancellationIsAlreadyCancelled ? '🚫 不可再次取消' : '🟢 允許取消試算'}
                   </span>
                 </div>
 
@@ -3640,21 +3648,25 @@ export const OrdersPage: React.FC = () => {
 
                     {cancellationQuery ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem', color: '#57423b', marginBottom: '12px' }}>
-                        {cancellationQuery.lifecycle_status === '訂單取消' && (
+                        {cancellationIsHistoricalRemediation ? (
+                          <div role="status" style={{ color: '#9a3412' }}>此案件可補登歷史實際服務事實；請逐日核對日期與月嫂後再預覽取消。</div>
+                        ) : cancellationIsAlreadyCancelled && (
                           <div role="alert" style={{ color: '#991b1b' }}>此案件已取消，不可再次取消；如需處理請改走受控重開。</div>
                         )}
                         <div>實際開始日：{cancellationQuery.actual_start_date ?? '尚未開始'}</div>
                         <div>契約服務天數：{cancellationQuery.contracted_service_days} 天</div>
                         <div>目前實際服務日：{cancellationDays.length} 天</div>
                         <div style={{ color: '#74593f' }}>
-                          {cancellationQuery.service_started
+                          {cancellationIsHistoricalRemediation
+                            ? '歷史取消案件：請逐日補登已發生的實際服務日期與月嫂；未確認的未來日期請勿加入。'
+                            : cancellationQuery.service_started
                             ? '服務進行中：請逐日核對實際服務日期與月嫂；未服務的未來日期請移除。'
                             : '服務尚未開始：實際服務日固定為 0 天，不得把未來排班當作已服務事實。'}
                         </div>
-                        {cancellationQuery.service_started && cancellationDays.length >= cancellationQuery.contracted_service_days && (
+                        {cancellationServiceFactsAvailable && cancellationDays.length >= cancellationQuery.contracted_service_days && (
                           <div role="alert" style={{ color: '#991b1b' }}>已達完整服務天數；依正式規則不可執行取消，系統不會寫入變更。</div>
                         )}
-                        {cancellationQuery.service_started && (
+                        {cancellationServiceFactsAvailable && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #f3d8c8', paddingTop: '10px' }}>
                             <strong>逐日實際服務事實</strong>
                             {cancellationDays.length === 0 && <span style={{ color: '#8b7169' }}>尚未填入實際服務日；服務已開始時必須至少保留一日。</span>}
@@ -3815,7 +3827,7 @@ export const OrdersPage: React.FC = () => {
                       data-control-id="orders.cancellation.preview"
                       className="btn-secondary-action"
                       style={{ width: '100%', padding: '10px' }}
-                      disabled={!cancellationQuery || cancellationQuery.lifecycle_status === '訂單取消' || cancellationStatus !== 'idle' || (cancellationQuery.service_started && cancellationDays.length >= cancellationQuery.contracted_service_days)}
+                      disabled={!cancellationQuery || cancellationLifecycleBlocked || cancellationStatus !== 'idle' || (cancellationServiceFactsAvailable && cancellationDays.length >= cancellationQuery.contracted_service_days)}
                       onClick={() => void previewCancellation()}
                     >
                       {cancellationStatus === 'previewing' ? '正在試算取消影響…' : '🔍 預覽取消與退款試算（檢查取消影響）'}
@@ -3825,7 +3837,7 @@ export const OrdersPage: React.FC = () => {
                       data-control-id="orders.cancellation.apply"
                       className="btn-primary-action"
                       style={{ backgroundColor: '#9f1239', borderColor: '#9f1239', width: '100%', padding: '10px' }}
-                      disabled={!cancellationPreview || cancellationQuery?.lifecycle_status === '訂單取消' || !cancellationReason.trim() || !cancellationConfirmed || cancellationStatus !== 'idle' || (cancellationQuery?.service_started === true && cancellationDays.length >= cancellationQuery.contracted_service_days)}
+                      disabled={!cancellationPreview || cancellationLifecycleBlocked || !cancellationReason.trim() || !cancellationConfirmed || cancellationStatus !== 'idle' || (cancellationServiceFactsAvailable && cancellationDays.length >= cancellationQuery.contracted_service_days)}
                       onClick={() => void applyCancellation()}
                     >
                       {cancellationStatus === 'applying'

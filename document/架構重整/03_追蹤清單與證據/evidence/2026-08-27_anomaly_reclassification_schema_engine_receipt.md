@@ -2,7 +2,8 @@
 
 - Evidence status：`current`（R11 final R9.1 artifact）
 - Date：2026-08-27
-- Work Package：`PROV-20260827-anomaly-necessity-migration-work-package.md`／`ANM-NM-A`
+- Historical Work Package identity：`PROV-20260827-anomaly-necessity-migration-work-package.md`／`ANM-NM-A`；
+  該package已由single-code Anomalies契約取代並自current tree封存，可從`06b1c72d`精準取回。
 - Scope：schema part `1009_anomaly_reclassification_disposition.sql`、release
   `labor-union-anomaly-reclassification-disposition-2026-08-27-v1`
 - Safety boundary：只使用 `lu_test_*`；未執行 `--switch`、未操作 `union_db`、未執行production migration。

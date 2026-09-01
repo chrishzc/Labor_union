@@ -6,6 +6,7 @@
 
 - 2026-08-29第一批歷史收斂前基準：`5c43e847e016fb8d64ada4ac63fe2bee4b4a7a65`
 - 2026-09-01文件清理前基準：`1f7c9cd7d90895f7846333c48cdb37c95da4caad`
+- 2026-09-01 Task 96／Anomalies第二批收斂前基準：`06b1c72de2a49bebfeb6d75fe6ef077f98fafd4d`
 
 需要incident、rollback、migration lineage、舊release重現或稽核時，應從適用的基準commit精準取回單一檔案；不要還原整個archive，也不要把歷史文件重新升格為current SSOT或施工gate。
 
@@ -20,6 +21,14 @@
 第二批：
 
 - 五份綁定舊baseline／舊counts／過期resume狀態的LINE backend slimming計畫、amendment、audit與resolved write set。
+
+第三批：
+
+- 已完成或明確superseded的Current-state Anomalies execution plan／amendments；
+- 已由正式規格、source、canonical tests或aggregate evidence承接的Task 96 bounded Work Package；
+- 已關閉且沒有current release／migration／rollback／audit consumer的Task 96 per-slice progress receipt；
+- 沒有current inbound reference、且已由正式owner規格承接或被single-code Anomalies裁決取代的孤立
+  spec-gap／closure record，包括舊PAYOUT-002／003 anomaly proposal與Task 96 UI收尾提案。
 
 LINE legacy retirement、provider cutover及其他未完成能力不因舊計畫移除而自動完成；若恢復，必須由新current successor依live source重新盤點。
 

@@ -8,7 +8,7 @@
 
 | 文件 | 用途 |
 |---|---|
-| [Task 96 current register](../02_決策與退役執行記錄/96_Current_剩餘代辦任務總表.md) | Task 96 仍為 `in-progress`；各 lane 依 current evidence 保持 `partial`／`blocked`／`not_run`，不得宣告整體 closeout。 |
+| [Task 96 terminal register](../02_決策與退役執行記錄/96_Current_剩餘代辦任務總表.md) | Task 96已達repository-local acceptance；verified LIFF／provider、NAS、production／deployment與1019 preserve-upgrade仍維持明示`not_run`／deferred。 |
 | [正式規格索引](../01_規格基線/15_正式規格索引與裁決總表.md) | current正式規格、owner與裁決入口。 |
 | [LINE／Anomalies整合 aggregate receipt](evidence/PROV-20260830-line-anomalies-slimming-integration-receipt.md) | PR #63 repository-local整合結果及未完成外部邊界。 |
 | [Task 97 repository-local closeout receipt](evidence/task97_repository_local_closeout_receipt_a48caa8.md) | Task 97 aggregate architecture結果；production、DB engine與external acceptance仍不得外推。 |
@@ -25,3 +25,8 @@
 ## 2026-09-01 清理批次
 
 第一批已移除只有歷史／中間用途、且沒有 current consumer的文件：Task 97 pre-slimming report、被整合receipt取代的Anomalies來源lane receipt，以及數份Task 96 spec-ready／handoff／已修復defect中間receipt。需要稽核時，從清理前基準 commit `1f7c9cd7d90895f7846333c48cdb37c95da4caad` 精準取回單一檔案。
+
+第二批再移除已被正式規格、canonical tests或aggregate evidence承接的Task 96 per-slice progress receipts；
+release／migration gate、current generated inventory、Task 97 aggregate closeout與仍有external／NAS consumer的
+receipts保留。需要追溯第二批文件時，從基準commit
+`06b1c72de2a49bebfeb6d75fe6ef077f98fafd4d`精準取回。
