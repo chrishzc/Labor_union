@@ -34,6 +34,7 @@ def test_formal_spec_index_uses_current_refund_and_deployment_decisions():
     assert "決策 53" in index_contents
     assert "target-host acceptance 已依決策 53 退役" in index_contents
     archive_contents = ARCHIVE_README.read_text(encoding="utf-8")
-    assert "## Git 復原基準" in archive_contents
-    assert 'git show 94787a3^:"<repo-relative-path>"' in archive_contents
-    assert 'git restore --source=94787a3^ -- "<repo-relative-path>"' in archive_contents
+    assert "## 復原基準" in archive_contents
+    assert "1f7c9cd7d90895f7846333c48cdb37c95da4caad" in archive_contents
+    assert "精準取回單一檔案" in archive_contents
+    assert "不要還原整個archive" in archive_contents
