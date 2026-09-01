@@ -1,122 +1,102 @@
 ---
 doc_type: gap-register
-declared_status: in-progress
-date: 2026-08-31
+declared_status: completed-closeout
+date: 2026-09-01
 owner: architecture-governance / product-and-domain-owners
 priority_authority_date: 2026-08-31
 ---
 
-# Current 剩餘代辦任務總表
+# Task 96 剩餘代辦總表：bounded closeout
 
-> 本表是 Task 96 未完成業務工作的唯一 current register。2026-08-31 最新人工裁決已把 Anomalies 產品原則收斂為：只保留實際可發生且發生後需要人處理的業務異常；純系統公式、deterministic projection／aggregate、transaction invariant、migration integrity、正常來源先後、automatic retry／replay或temporary readback failure不建立 runtime recovery product。
->
-> 本次文件修正不自動授權 production／`union_db`、provider、deployment、entry switch、configured DB Apply或destructive cleanup。既有完成 evidence、舊 Work Package與歷史 addenda只作證據，不再複製到current register。
+> Task 96 已停止作為 active gap register。本文件只記錄本次明確收尾範圍、已被 current evidence 支持的
+> repository-local 結果，以及移出 Task 96 的 deferred／not-run successor。`completed` 只表示表內列明的
+> repository-local scope；不表示 preserve-data upgrade、完整產品功能、真實 provider、Browser、production、
+> deployment 或 schema boundary 已完成。正式語意仍以 `01_規格基線` 與最新人工裁決為準，本文件不修改正式規格。
 
-## 1. Current Authority／scope
+## 1. Closeout status and stopping language
 
-Task 96維持 active。正式業務語意由`01_規格基線`擁有；本表只路由未完成工作。
+- **Declared status：** `TASK96_REPOSITORY_LOCAL_CLOSEOUT_WITH_DEFERRED_EXTERNAL_WORK`。
+- **Active Task 96 IDs：** 0。下表所有 ID 均為 `completed`、`superseded` 或 `deferred/not_run`，不再形成 Task 96 的施工隊列。
+- **CI closure：** `completed`。commit `37c9d063` 已推送至 `origin/main`，GitHub Actions run
+  [`33460244467`](https://github.com/chrishzc/Labor_union/actions/runs/33460244467) 已完成且所有 jobs 綠燈；此結果只關閉
+  current CI gate，不外推 DB、provider、Browser、production 或其他 deferred boundary。
+- **DB upgrade boundary：** 使用者已明確要求停止修正 1019 preserve-upgrade script。下列 reset path 是
+  development `lu_test_*` 的 disposable reset／current-schema bootstrap 與啟動證據，不是 1003→current
+  preserve-data upgrade，也不宣稱 1019、1020 或 1021 qualification 通過。
+- **Effect ceiling：** 本次只更新本表。沒有 production、`union_db`、provider send／publication、NAS、deployment、
+  entry switch、performance benchmark、destructive cutover 或其他資料庫操作授權。
 
-狀態只使用`proposed | approved | in-progress | blocked | completed | superseded`。局部 source／test PASS不得冒充runtime、DB、Browser或external acceptance。
+## 2. Accepted bounded repository-local closeout evidence
 
-2026-08-31 anomaly reachability裁決 supersede較早「15 current issues／13 owner prerequisite contracts」要求：
+下列結果已由 current task evidence 支持，且只在所列 scope 內成立：
 
-- runtime Anomalies exact target只剩`LINE-006`；`GOVSUB-007`退出runtime Anomalies，回到Government Subsidy正常owner flow；
-- `BECLASS-001`改為Case Import／Client owner follow-up，不進`#anomalies`；
-- `GOVSUB-007`、`PAYOUT-002`、`GOVSUB-001`～`GOVSUB-005`、`IMPORT-003`、`IMPORT-006`、`SCHEDULE-002`、`SCHEDULE-003`、`SCHEDULE-006`、`LINE-004`退出runtime anomaly；
-- 退役碼的正常owner validation、focused tests、transaction guard、migration readback仍保留，但不得建立第二套manual recovery framework。
-
-Canonical anomaly規格：`../01_規格基線/06_Anomalies_Domain.md`。
-Current anomaly計畫：`../../功能開發計畫/PROV-20260829-current-state-anomaly-slimming-execution-plan.md`。
-
-## 2. Current 執行順序
-
-2026-08-30既有主鏈仍保留序列dependency，但Anomalies相關Stage依2026-08-31產品裁決縮小：
-
-1. **Local DB 1003→current**：完成開發DB ordered upgrade／resume／preserve-data／normal startup；不得以fresh reset、SQLite、mock、`union_db`或production替代。
-2. **LINE backend prerequisites**：完成M1～M4目前仍屬Task 96的owner backend gate。`LINE-006`既有owner readback／delivery evidence保留，但需按最新裁決把predicate縮到「automatic path已無法繼續且需要人工」。
-3. **Anomalies closure**：registry／typed union／API／React／recheck exact set只保留`LINE-006`；`GOVSUB-007`退出runtime，`BECLASS-001`移owner follow-up，13個退役碼零runtime producer／public definition／React current mapping。
-4. **其他既有Task 96 lanes**：依本表current priority繼續；所有功能terminal後才做`CUR-UI-STITCH-UNIFICATION-01`。
-
-前一stage因external／DB Authority blocked時，不得把後一stage runtime標為terminal；但已明確授權且不依賴該external effect的repository-local規格／source工作，仍依各自current Authority判斷，不由本表額外擴權。
-
-| 順序 | Lane | Current IDs | Current terminal gate |
-|---:|---|---|---|
-| 1 | Local DB 1003→current | `CUR-LOCAL-DB-1003-CURRENT-01`、`CUR-LOCAL-DB-PORTABILITY` | ordered release chain、resume、preserve-data、normal startup有fresh合法`lu_test_*` evidence |
-| 2 | LINE backend | `CUR-LINE-MODULES-1-4-CLOSURE-01` | M1～M4 current requirements terminal；`LINE-006` transient／retry-only狀態不再產生business issue |
-| 3 | Anomalies product closure | `CUR-P0-ANOMALY-RECOVERY-01` | runtime exact one-code set=`{LINE-006}`＋`BECLASS-001` owner follow-up＋`GOVSUB-007`及其餘退役碼runtime absence＋fresh removal oracle |
-| 4 | 其他Task 96 lanes | 本表其餘active IDs | 各自canonical acceptance |
-
-## 3. Current 未完成執行清單
-
-| ID | 優先級 | 狀態 | Owner／正式規格 | Current scope | 下一個material gate |
-|---|---:|---|---|---|---|
-| `CUR-LOCAL-DB-1003-CURRENT-01` | S1 | `completed` / `LU_TEST_ORDERED_RESUME_PRESERVE_STARTUP_PASSED` | Global Migration／`10`、`18` | `lu_test_cf_source_1003`已唯讀備份並還原至新`lu_test_task96_ldu_candidate_1021_r9`；canonical apply在149 journal steps後中斷，再由同plan／receipt續跑至429 steps，verify為`verified`；preserve-data readback與isolated normal API startup通過 | 無；保留r9 receipt與既有source，不重跑或清除 |
-| `CUR-LOCAL-DB-PORTABILITY` | S1 | `completed` / `LU_TEST_PRESERVE_RESUME_LAUNCHER_PASSED` | Global Migration／`10` §4.5 | target未綁特定host／reference DB；r9保留resume row evidence與current candidate readback；configured `lu_test_1` read-only `--require-current`通過；Unix launcher `--dry-run`已限定為零DB寫入的wiring／dependency preflight並通過 | 無；保留r9 receipt與launcher regression |
-| `CUR-LINE-MODULES-1-4-CLOSURE-01` | S2 | `in-progress` / repository-local evidence preserved / `DB_CHANGE_NOT_READY` | LINE／Access／`17`、`20`、`23`、`26` | M1 role-scoped identity、M2 deterministic backend、M3 workbench／recipient、M4 ops與既有`LINE-006` readback成果保留；最新裁決只改`LINE-006` business predicate，不重做已完成owner work | 移除`LINE-006` pending／processing／retryable／readback-only false-positive；DB／provider/runtime acceptance仍依原gate |
-| `CUR-ANOMALY-OWNER-BACKEND-PREREQUISITES-01` | S3 | `superseded` / `GOVSUB007_EXITED_RUNTIME` | Government Subsidy／`06`、`14` | 原13-code prerequisite只剩已退出runtime的`GOVSUB-007`，不再形成Task 96 anomaly owner stage；正常Government owner flow不受影響 | 不再建立Anomalies owner gate；若未來需新增異常產品，另取得明確owner／contract Authority |
-| `CUR-P0-ANOMALY-RECOVERY-01` | S4 | `in-progress` / `PRODUCT_SCOPE_REVISED_LINE_ONLY` | Anomalies／`06` | exact current set=`LINE-006`。`GOVSUB-007`退出runtime；`BECLASS-001`移Case Import owner follow-up；13碼退出runtime anomaly；不再要求15-code terminal matrix | future source execution只做LINE-006 registry／typed union／API／React與recheck alignment；退役碼零runtime producer／mapping；predicate false＋complete後row delete |
-| `CUR-P0-HISTORICAL-PAYMENT-SETTLEMENT-01` | P0 | `in-progress` / `OWNER_UI_LOCAL_PASS` / `DB_CHANGE_NOT_READY` | Finance Import／Client Finance／Staff Payables；`04`、`05`、`16` | pre-system historical case的owner-specific`paid | settled`保持owner work item，不屬current anomaly pruning | 合法`lu_test_*`完成read-only plan／fresh／preserve-data／developer acceptance |
-| `CUR-CONTRACT-01` | P0 | `in-progress` | Contract Signing／LINE；`21` | external signing successor DB gate已ready；仍缺enabled persisted-human Chrome正向chain | 完成unsigned PDF download→completion reports→final PDF Preview／Apply→receipt／metadata／storage readback |
-| `CUR-FILE-NAS-01` | P0 | `in-progress` | Global controlled files／`00`、`17`、`18`、`20`、`21` | typed storage contract與local DB qualification已有證據；真NAS／production不在本包 | enabled-human Session fresh Chrome正向list／download |
-| `CUR-LIFF-PROFILE-01` | P0 | `approved` / `CLIENT_CONTRACT_READY` / `BOUNDARY_REQUIRED_PUBLIC_API` / `DB_CHANGE_NOT_READY` | Client／LINE；`20` §6.1、`23` | 第一階段只做Client；不擴張Staff | 另行public endpoint Authority仍是material boundary；不得旁路到LINE legacy route |
-| `CUR-LINE-RICHMENU-01` | P-after-S4 | `blocked` | LINE Rich Menu／Media；`17`、`20` | provider qualification不插隊主鏈 | Stage 4後依合法publication lineage做Browser／provider qualification |
-| `CUR-CONTRACT-FULL-PREVIEW-01` | P1 | `in-progress` / `OWNER_SOURCE_GAPS_REMAIN` / `BOUNDARY_REQUIRED` | Contract／Orders／Scheduling／Finance／Payables；`21` | template mapping已編譯；部分owner typed facts與public preview entry仍缺 | 只補仍無current owner source的material cells與public-entry boundary，不重算公式 |
-| `CUR-LINE-RICHMENU-AUTH-01` | P-after-S4 | `blocked` | Access／LINE Rich Menu；`17`、`25` | authenticated user與source tests已有；provider execution後置 | Stage 4後以enabled Session完成queue→worker→sandbox receipt／readback |
-| `CUR-UX-01` | P1 | `in-progress` | Global UX／各owner；`00`、`12`、`15` | presentation slices local evidence保留；Anomalies UI依唯一`LINE-006` current projection，不再維護退役碼 current presentation | runtime恢復後完成remaining responsive／keyboard／WCAG與owner語意對照 |
-| `CUR-UI-01` | P2 | `approved` | React presentation；`12` | 功能收斂後逐頁視覺／responsive／WCAG對齊 | 依保留設計做fresh Chrome comparison |
-| `CUR-PERF-01` | P2 | `blocked` / `BLOCKED_RUNTIME_BENCH_ENV` | Global／React；`12` | 無可重跑API／React／DB runtime，不建立假baseline | runtime可用後量測同環境before／after |
-| `CUR-INTERNAL-UI-UNMASKED-01` | P3 | `approved` | Global UX／Access／各owner；`12`、`15`、`25` | authenticated enabled內部UI顯示owner Query完整一般業務值；不擴張secret/raw evidence | 依current priority分批盤點／驗收 |
-| `CUR-UI-STITCH-UNIFICATION-01` | P-last | `proposed` / `SPEC_GAP` | Global UX／React | 只在全部前順位功能terminal後啟動 | terminal後重新收斂surface inventory與design adoption |
-
-## 4. 已授權但仍受外部／執行 gate 約束
-
-下列既有Task 96 Authority保持原意；本次anomaly裁決不擴張也不撤銷它們：
-
-| ID | 狀態 | Current gate |
+| Scope | Result | Boundary |
 |---|---|---|
-| `CUR-LIFF-E2E` | `approved` | DB release chain與verified-token環境就緒後驗收 |
-| `CUR-LINE-PROVIDER` | `approved` | 每次執行前回讀exact environment／target／recipient／quota／worker isolation；production recipient不在blanket approval |
-| `CUR-LINE-BABYLOG-MEDIA-01` | `approved` | 依賴受控NAS staging／digest／cleanup／readback |
-| `CUR-LINE-AI-FEEDBACK-01` | `approved` | 先有正式feedback owner contract；不得用browser-local counter假造 |
-| `CUR-LINE-QA` | `approved` | workbook只作review input；逐題answer仍需owner review才publish |
-| `CUR-CLOUD-01` | `approved` | external deployment前仍需exact project／operator／budget／rollback scope |
-| `CUR-RETIRE-01` | `approved` | production entry switch／不可逆retirement仍需exact target與rollback gate |
+| Development reset／bootstrap | `completed` | `scratch/task96/lu_test_1-bootstrap.json` 記錄 `lu_test_1` reset/rebuild receipt 為 `committed`，再讀回 current canonical schema；這是 disposable reset，沒有 preserve-data upgrade claim。 |
+| Current-schema guard | `completed` | updater 的 `--require-current` 對已建立的 `lu_test_1` readback 通過；此 readback 不證明 1019 preserve-upgrade。 |
+| No-auth local startup | `completed` | FastAPI、React、monitor、durable worker、incident worker 以 development no-auth path 啟動；`GET /health` 回 200，React `/admin/` root 可讀。 |
+| Current-head CI | `completed` | `origin/main` commit `37c9d063` 對應 GitHub Actions run [`33460244467`](https://github.com/chrishzc/Labor_union/actions/runs/33460244467)；exact flake8、governance、React cancellation、disposable MySQL、canonical owner matrices 與 cross-domain boundary jobs 全部成功。 |
+| LINE provider worker | `deferred/not_run` | 本次啟動刻意跳過 LINE provider worker；沒有 provider／recipient／quota／外部 delivery evidence。 |
+| LINE repository-local integration | `completed` | `03_追蹤清單與證據/evidence/PROV-20260830-line-anomalies-slimming-integration-receipt.md` 支持 M1～M4 的 repository-local focused contract／regression、typed owner boundary 與既有 LINE-006 readback alignment；browser sandbox、provider、DB engine 與 production boundary 不在此結果。 |
+| Anomalies repository-local integration | `completed` | 同一整合 receipt 支持 current-state registry／typed current-only mapping／LINE-004 owner consumer 與退役碼 routing 的 repository-local integration；LINE-006 完整人工處理功能及其他 owner contract 不因本列完成而存在。 |
 
-## 5. Anomaly pruning acceptance
+## 3. All former Task 96 lanes
 
-Task 96的Anomalies lane不再以「完整15-code matrix」為terminal。最低充分 acceptance固定為：
+| ID | Status | Closeout disposition / successor requirement |
+|---|---|---|
+| `CUR-LOCAL-DB-1003-CURRENT-01` | `superseded` | 原 1003→current ordered preserve／resume／normal-startup gate 已依使用者指示停止；不得保留或引用舊 preserve PASS。未來若要做保留資料升級，須另取得明確 DB Authority、合法 `lu_test_*` target 與新 receipt。 |
+| `CUR-LOCAL-DB-PORTABILITY` | `superseded` | 舊 portability／preserve-upgrade lane 不再是 Task 96 acceptance。第 2 節的 `lu_test_1` reset／current readback／no-auth startup 只作開發測試路徑，不能升格為 portability 或 production evidence。 |
+| `CUR-CI-CURRENT-HEAD-ACTIONS-01` | `completed` | `origin/main` commit `37c9d063` 的 GitHub Actions run [`33460244467`](https://github.com/chrishzc/Labor_union/actions/runs/33460244467) 已 `completed / success` 且所有 jobs 綠燈；只完成 current CI gate，不外推其他 Task 96 deferred boundary。 |
+| `CUR-LINE-MODULES-1-4-CLOSURE-01` | `completed` | 只收斂 repository-local LINE M1～M4 integration／focused regression／typed boundary。verified-token LIFF、provider、deployment、production DB、未核准 schema 與 external side effect 均移出 Task 96。 |
+| `CUR-ANOMALY-OWNER-BACKEND-PREREQUISITES-01` | `superseded` | 最新 reachability 裁決已退出原 13-code owner prerequisite stage；`GOVSUB-007` 回 Government Subsidy 正常 owner flow，不建立 Anomalies 第二套 manual-recovery framework。 |
+| `CUR-P0-ANOMALY-RECOVERY-01` | `completed` | 只完成 repository-local current-state integration：runtime routing 維持唯一 `LINE-006` 產品入口、`BECLASS-001` 回 Case Import／Client owner follow-up、退役碼不再作 current presentation。LINE-006 人工 remediation 與其他 owner predicate 仍 `deferred/not_run`。 |
+| `CUR-P0-HISTORICAL-PAYMENT-SETTLEMENT-01` | `deferred/not_run` | 不把 1020 owner payment settlement qualification、真 MySQL lifecycle 或 enabled-human Browser Apply 寫成 PASS；後續須有新 owner package、合法 target 與 acceptance Authority。 |
+| `CUR-CONTRACT-01` | `deferred/not_run` | enabled persisted-human Chrome chain、final PDF／metadata／storage readback 未執行；需新 Browser／storage target 與 owner acceptance。 |
+| `CUR-FILE-NAS-01` | `deferred/not_run` | 真 NAS list／download／readback 未執行；需受控 NAS target、credential 與新外部 evidence。 |
+| `CUR-LIFF-PROFILE-01` | `deferred/not_run` | public endpoint／LIFF verified-token boundary 未取得新 Authority；不得以 no-auth local startup 代替。 |
+| `CUR-LINE-RICHMENU-01` | `deferred/not_run` | Rich Menu provider qualification、publication lineage 與 sandbox receipt 未執行；需 exact provider target。 |
+| `CUR-CONTRACT-FULL-PREVIEW-01` | `deferred/not_run` | remaining owner source cells、public preview entry 與 schema boundary 未收斂；需新 contract／owner decision。 |
+| `CUR-LINE-RICHMENU-AUTH-01` | `deferred/not_run` | authenticated queue→worker→provider receipt／readback 未執行；不由 repository-local tests 代替。 |
+| `CUR-UX-01` | `deferred/not_run` | responsive／keyboard／WCAG 與 owner語意的 fresh UX／Chrome acceptance 未執行；需新 UX acceptance scope。 |
+| `CUR-UI-01` | `deferred/not_run` | 逐頁 visual／responsive／WCAG comparison 未執行；需新的 UI acceptance owner。 |
+| `CUR-PERF-01` | `deferred/not_run` | API／React／DB benchmark environment 不存在，沒有 baseline 或 performance PASS；需同環境新 benchmark Authority。 |
+| `CUR-INTERNAL-UI-UNMASKED-01` | `deferred/not_run` | internal UI unmasked display 的分批盤點與驗收未執行；需依 current access／UX owner 建立 successor。 |
+| `CUR-UI-STITCH-UNIFICATION-01` | `deferred/not_run` | UI stitch 尚未取得 fresh surface inventory／design adoption evidence；不再阻擋本 Task 96 closeout，後續另包。 |
+| `CUR-LIFF-E2E` | `deferred/not_run` | verified-token LIFF E2E 未執行；需 exact sandbox、token 與新 external acceptance。 |
+| `CUR-LINE-PROVIDER` | `deferred/not_run` | 真實 LINE provider delivery 未執行；不宣稱 provider、recipient 或 quota 通過。 |
+| `CUR-LINE-BABYLOG-MEDIA-01` | `deferred/not_run` | controlled NAS staging／digest／cleanup／readback 未執行；需新 NAS authority。 |
+| `CUR-LINE-AI-FEEDBACK-01` | `deferred/not_run` | feedback owner contract 與 provider effect 未取得；不得以 browser-local counter 代替。 |
+| `CUR-LINE-QA` | `deferred/not_run` | workbook review input 的逐題 owner review／publish 未完成；需新 owner sign-off。 |
+| `CUR-CLOUD-01` | `deferred/not_run` | external deployment 未執行；需 exact project、operator、budget、rollback scope 與 deployment Authority。 |
+| `CUR-RETIRE-01` | `deferred/not_run` | production entry switch／不可逆 retirement 未執行；需 exact target、rollback gate 與新 Authority。 |
 
-1. current runtime registry exact set=`{LINE-006}`；
-2. `LINE-006`只有automatic path耗盡／無法合法繼續且需要人處理才active；pending／processing／retryable／readback incomplete本身不產生新issue；
-3. `GOVSUB-007`無runtime producer／public current definition，正常Government owner accounting／review／correction flow保留；
-4. `BECLASS-001`只在Case Import／Client owner follow-up顯示；
-5. `GOVSUB-007`與其餘12個退役碼零runtime current producer／public definition／React mapping；
-6. customer＋staff雙角色、同一Client多案件、normal same-type replacement不產生`LINE-004`；
-7.退役碼仍有必要的owner validation／focused tests／transaction guard／migration readback，不因退出Anomalies而刪除正式business evidence；
-8. predicate false且authoritative complete時current row實際delete；
-9. strict UTF-8、focused regression、governance／reference scan、`git diff --check`通過；需要DB／Browser／provider evidence的gate仍如實標`blocked`或`not_run`。
+## 4. Superseded anomaly requirements
 
-## 6. Superseded current work
+下列舊要求已由最新 anomaly reachability／current-state 裁決取代，不再是 Task 96 待辦或 completion gate：
 
-下列舊Task 96要求不得再形成待辦：
+- 13-code anomaly owner backend prerequisite 與 15-code manual action／terminal matrix。
+- `GOVSUB-007` anomaly owner stage、`PAYOUT-002`、`GOVSUB-001`～`GOVSUB-005` recovery surfaces。
+- `IMPORT-003` original-review→new HCM anomaly lineage、`IMPORT-006` deterministic rebuild／corrected-source branch。
+- Scheduling invariant repair UI、`LINE-004` duplicate-root manual recovery，以及把 automatic retry／replay in progress／readback incomplete 當成 business anomaly。
 
-- 13-code anomaly owner backend prerequisite；
-- 15-code manual action／terminal matrix；
-- `GOVSUB-007` anomaly owner stage／recovery surface；
-- PAYOUT-002 late-event recovery；
-- GOVSUB-001～005 anomaly repair surfaces；
-- IMPORT-003 original-review→new HCM anomaly lineage；
-- IMPORT-006 deterministic rebuild／corrected-source recovery branches；
-- Scheduling invariant repair UI；
-- LINE-004 duplicate-root anomaly recovery；
-- 把 automatic LINE retry、replay in progress或readback incomplete顯示成business anomaly。
+退役碼的正常 owner validation、focused tests、transaction guard 與必要 migration readback 可留在各自 owner evidence；
+它們不會因退出 Anomalies 而產生新的 manual-recovery product。
 
-舊source／tests／receipts若能證明owner correctness仍可保留為evidence；不得因歷史投入成本反向保留已無current causal need的產品概念。
+## 5. Successor and residual contradiction rules
 
-## 7. 維護與停止條件
+- 任何 preserve-data upgrade（尤其 1019）、1020／1021 qualification、schema boundary、public entry、Browser、
+  provider、NAS、deployment、production、performance 或 destructive cutover，均須另有新人工 Authority、exact target、
+  bounded acceptance 與 fresh evidence。reset path 不得被重述成 upgrade PASS。
+- 本表與 formal specs 不互相取代；後續若要重新開啟任一 deferred lane，應建立或更新其 current owner package，並由新 register
+  吸收結果，不把 Task 96 重新標回 active。
+- repository 外仍可能保留歷史 package／receipt 中的 `DB_CHANGE_READY`、preserve-data PASS 或 provider／Browser PASS
+  結論；它們是 provenance，不是本 closeout 的 current acceptance。這些歷史文件本次不改寫；若需採用，必須由 successor
+  以 current target 重新驗證。
+- Current CI 已由 `origin/main` commit `37c9d063`／Actions run `33460244467` 完成；此完成只適用 CI gate，不能解除
+  1019 preserve-upgrade deferment 或任何外部／人工／schema-boundary 的 `deferred/not_run` 狀態。
 
-- 本表只記current未完成工作；completed／superseded細節不重抄。需要稽核時讀正式spec、Git history或既有evidence。
-- 新需求先找current正式owner；possibility不自動升格成requirement。
-- 缺少會改變owner、public contract、schema、external effect或irreversible action的Authority才停止；局部可安全推導的施工細節直接依current contract處理。
-- 前端驗收使用真Chrome；provider lane需真provider receipt；DB lane需合法明確target。mock、單一exit code、file existence或舊session evidence不得冒充current PASS。
-- Task 96 current acceptance全部滿足後停止，不新增future hardening／roadmap作為completion gate。
+## 6. Closeout verification
+
+- 本文件已維持 strict UTF-8，並完成 readability／status scan。
+- `git diff --check` 應在本次文件變更後通過。
+- 本次未修改 formal specs、source、tests、DB、migration script、generated release、provider configuration 或其他文件。
