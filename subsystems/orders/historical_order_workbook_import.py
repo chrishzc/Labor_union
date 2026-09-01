@@ -133,6 +133,52 @@ class HistoricalOrderWorkbookUnavailable(RuntimeError):
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class HistoricalOrderSourceScheduleInterval:
+    """One source-backed formal assignment interval.
+
+    The source row is retained here because the workbook preview model does not
+    otherwise carry the physical row number.  This is deliberately a small
+    diagnostic projection; it is not an additional scheduling authority.
+    """
+
+    source_row: int
+    pairing_ordinal: int
+    case_no: str
+    staff_id: int
+    start_date: object
+    end_date: object
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "source_row": self.source_row,
+            "pairing_ordinal": self.pairing_ordinal,
+            "case_identity": _mask_case(self.case_no),
+            "staff_id": self.staff_id,
+            "start_date": _date_value(self.start_date),
+            "end_date": _date_value(self.end_date),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalOrderSourceScheduleConflict:
+    """Deterministic pair of source intervals that cannot coexist."""
+
+    left: HistoricalOrderSourceScheduleInterval
+    right: HistoricalOrderSourceScheduleInterval
+
+    def as_dict(self) -> dict[str, object]:
+        return {"staff_id": self.left.staff_id, "left": self.left.as_dict(), "right": self.right.as_dict()}
+
+
+class HistoricalOrderSourceScheduleConflictError(ValueError):
+    """Stable source-conflict error with a safe, exact diagnostic projection."""
+
+    def __init__(self, conflicts: tuple[HistoricalOrderSourceScheduleConflict, ...]) -> None:
+        self.conflicts = conflicts
+        super().__init__("historical_order_source_schedule_conflict")
+
+
 class HistoricalOrderWorkbookImportService:
     def __init__(self, repository: HistoricalOrderWorkbookRepository, workflow: HistoricalOrderAdoptionWorkflow, unit_of_work_factory: Callable[[], object]) -> None:
         self._repository = repository
@@ -262,7 +308,7 @@ class HistoricalOrderWorkbookImportService:
 
 
 def _preview(workbook: HistoricalOrderWorkbook, row_previews) -> HistoricalOrderWorkbookPreview:
-    _assert_source_schedule_consistency(row_previews)
+    _assert_source_schedule_consistency(row_previews, workbook.rows)
     outcomes = Counter(item.outcome.value for item in row_previews)
     candidates = sum(sum(item.resolution.value == "assignment_candidate" for item in preview.pairings) for preview in row_previews)
     evidence = sum(sum(item.resolution.value == "evidence_only" for item in preview.pairings) for preview in row_previews)
@@ -310,45 +356,105 @@ def _assert_conservation(source_rows: int, outcomes: Counter[str]) -> None:
         raise RuntimeError("historical_order_workbook_outcomes_not_conserved")
 
 
-def _assert_source_schedule_consistency(row_previews) -> None:
+def project_source_schedule_conflicts(
+    row_previews,
+    source_rows: tuple[object, ...] | None = None,
+) -> tuple[HistoricalOrderSourceScheduleConflict, ...]:
+    """Project all cross-case overlaps using one deterministic interval rule.
+
+    Intervals are inclusive.  A same-case repeat is allowed because a workbook
+    can contain multiple source assertions for one Order; distinct cases for a
+    caregiver may not share even one source service date.
+    """
+
+    previews = tuple(row_previews)
+    rows = tuple(source_rows) if source_rows is not None else ()
+    intervals_by_staff: dict[int, list[HistoricalOrderSourceScheduleInterval]] = {}
+    for index, preview in enumerate(previews):
+        source_row = getattr(rows[index], "source_row", index) if index < len(rows) else index
+        case_no = getattr(preview, "case_no", None)
+        if case_no is None:
+            continue
+        for pairing_index, pairing in enumerate(preview.pairings, start=1):
+            if (
+                getattr(pairing.resolution, "value", pairing.resolution) == "assignment_candidate"
+                and pairing.staff_id is not None
+                and pairing.start_date is not None
+                and pairing.end_date is not None
+            ):
+                interval = HistoricalOrderSourceScheduleInterval(
+                    source_row,
+                    getattr(pairing, "ordinal", pairing_index),
+                    case_no,
+                    pairing.staff_id,
+                    pairing.start_date,
+                    pairing.end_date,
+                )
+                intervals_by_staff.setdefault(pairing.staff_id, []).append(interval)
+
+    conflicts: list[HistoricalOrderSourceScheduleConflict] = []
+    for intervals in intervals_by_staff.values():
+        ordered = sorted(
+            intervals,
+            key=lambda item: (
+                item.start_date,
+                item.end_date,
+                item.case_no,
+                item.source_row,
+                item.pairing_ordinal,
+            ),
+        )
+        for index, left in enumerate(ordered):
+            for right in ordered[index + 1 :]:
+                if right.start_date > left.end_date:
+                    break
+                if left.case_no != right.case_no and right.start_date <= left.end_date:
+                    conflicts.append(HistoricalOrderSourceScheduleConflict(left, right))
+
+    return tuple(
+        sorted(
+            conflicts,
+            key=lambda item: (
+                item.left.staff_id,
+                item.left.start_date,
+                item.left.end_date,
+                item.left.case_no,
+                item.left.source_row,
+                item.right.start_date,
+                item.right.end_date,
+                item.right.case_no,
+                item.right.source_row,
+            ),
+        )
+    )
+
+
+def _assert_source_schedule_consistency(row_previews, source_rows=None) -> None:
     """Reject overlapping formal candidates inside one immutable workbook.
 
     The empty-DB historical migration has no pre-existing scheduling baseline.
     Therefore any overlap between different cases in the submitted source is a
     source-data/parse failure, never an Apply-time replacement decision.
     """
-    intervals_by_staff: dict[int, list[tuple[object, object, str | None]]] = {}
-    for preview in row_previews:
-        if getattr(preview, "case_no", None) is None:
-            continue
-        for pairing in preview.pairings:
-            if (
-                pairing.resolution.value == "assignment_candidate"
-                and pairing.staff_id is not None
-                and pairing.start_date is not None
-                and pairing.end_date is not None
-            ):
-                intervals_by_staff.setdefault(pairing.staff_id, []).append(
-                    (pairing.start_date, pairing.end_date, preview.case_no)
-                )
-    for intervals in intervals_by_staff.values():
-        intervals.sort(key=lambda item: (item[0], item[1], item[2] or ""))
-        active_end = None
-        active_case_no = None
-        for start_date, end_date, case_no in intervals:
-            if (
-                active_end is not None
-                and start_date <= active_end
-                and case_no != active_case_no
-            ):
-                raise ValueError("historical_order_source_schedule_conflict")
-            if active_end is None or end_date > active_end:
-                active_end = end_date
-                active_case_no = case_no
+    conflicts = project_source_schedule_conflicts(row_previews, source_rows)
+    if conflicts:
+        raise HistoricalOrderSourceScheduleConflictError(conflicts)
+
+
+def _date_value(value: object) -> object:
+    return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _mask_case(case_no: str | None) -> str | None:
+    if not case_no:
+        return None
+    return f"***{case_no[-4:]}"
 
 
 __all__ = [
     "HistoricalOrderWorkbookConflict", "HistoricalOrderWorkbookImportService", "HistoricalOrderWorkbookPreview",
     "HistoricalOrderWorkbookReceipt", "HistoricalOrderWorkbookUnavailable",
-    "HistoricalOrderStatusCounts",
+    "HistoricalOrderStatusCounts", "HistoricalOrderSourceScheduleConflict",
+    "HistoricalOrderSourceScheduleConflictError", "HistoricalOrderSourceScheduleInterval",
+    "project_source_schedule_conflicts",
 ]
