@@ -58,6 +58,7 @@ export const HistoricalOrderWorkbookReceiptSchema = z
     replayed_rows: z.number().int().min(0),
     replayed_workbook: z.boolean(),
     status_counts: HistoricalOrderStatusCountsSchema,
+    review_references: z.array(z.string().trim().min(1).max(191)).max(100),
   })
   .strict()
   .superRefine(validateStatusCountConservation);

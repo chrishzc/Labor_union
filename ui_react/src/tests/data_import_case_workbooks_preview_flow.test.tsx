@@ -9,6 +9,8 @@ import { ClientBeClassWorkbookApplyError } from '../api/case_import/client_becla
 import { hcmImportResultClient } from '../api/case_import/hcm_import_result_client';
 import { staffHistoricalWorkbookPreviewClient } from '../api/case_import/staff_historical_workbook/client';
 import { historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
+import { historicalReviewRemediationClient } from '../api/orders/historical_review_remediation/client';
+import type { HistoricalReviewContext } from '../api/orders/historical_review_remediation/schemas';
 import { DataImportPage } from '../pages/DataImportPage';
 
 const digest = 'a'.repeat(64);
@@ -19,6 +21,25 @@ function workbook(contents: string, name = 'import.xlsx'): File {
   return new File([contents], name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
 
+const historicalReviewContext: HistoricalReviewContext = {
+  review_identity: 'historical-order-review:one',
+  masked_case_identity: 'CA****01',
+  issues: [],
+  review_version: 0,
+  remediation_version: 0,
+  workbook_contract: {
+    contract_key: 'orders.historical-review-correction',
+    contract_version: 1,
+    required_columns: ['case_no', 'client_name', 'status'],
+    single_row_only: true as const,
+    file_extension: 'xlsx',
+  },
+  reason_required: true,
+  evidence_required: true,
+  completion_condition: '更正來源合法採納。',
+  prior_alert_active: true,
+};
+
 describe('Data Import case workbook Preview flows', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -28,7 +49,7 @@ describe('Data Import case workbook Preview flows', () => {
     vi.spyOn(staffHistoricalWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, created_count: 1, adopted_existing_count: 1, blocked_identity_count: 1, identity_conflict_count: 1, review_required_count: 1, preview_fingerprint: fingerprint });
     vi.spyOn(staffHistoricalWorkbookPreviewClient, 'apply').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, created_count: 1, adopted_existing_count: 1, blocked_identity_count: 1, identity_conflict_count: 1, review_required_count: 1, preview_fingerprint: fingerprint, exact_replay_count: 0, replayed_workbook: false });
     vi.spyOn(historicalOrderWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, sheet_identity: identity, source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 1, current_conflict_count: 1, assignment_candidate_count: 1, evidence_only_pairing_count: 1, status_counts: { cancelled_0: 1, deposit_paid_1: 1, discussion_2: 1, invalid_or_blank: 1 }, preview_fingerprint: fingerprint });
-    vi.spyOn(historicalOrderWorkbookPreviewClient, 'apply').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 1, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: false, status_counts: { cancelled_0: 1, deposit_paid_1: 1, discussion_2: 1, invalid_or_blank: 1 } });
+    vi.spyOn(historicalOrderWorkbookPreviewClient, 'apply').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 1, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: false, status_counts: { cancelled_0: 1, deposit_paid_1: 1, discussion_2: 1, invalid_or_blank: 1 }, review_references: [] });
   });
 
   it('三張卡可獨立完成Preview、確認與Apply', async () => {
@@ -128,7 +149,7 @@ describe('Data Import case workbook Preview flows', () => {
   it('三類整份工作簿replay先標示未新增，原receipt統計僅供追溯', async () => {
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, created_count: 1, exact_replay_count: 0, review_required_count: 0, existing_conflict_count: 0, existing_source_count: 0, replayed_workbook: true });
     vi.mocked(staffHistoricalWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, created_count: 1, adopted_existing_count: 0, blocked_identity_count: 0, identity_conflict_count: 0, review_required_count: 0, preview_fingerprint: fingerprint, exact_replay_count: 0, replayed_workbook: true });
-    vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, adopted_count: 1, unmatched_case_count: 0, review_required_count: 0, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: true, status_counts: { cancelled_0: 0, deposit_paid_1: 1, discussion_2: 0, invalid_or_blank: 0 } });
+    vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, adopted_count: 1, unmatched_case_count: 0, review_required_count: 0, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: true, status_counts: { cancelled_0: 0, deposit_paid_1: 1, discussion_2: 0, invalid_or_blank: 0 }, review_references: [] });
     render(<DataImportPage />);
 
     const cases = [
@@ -158,6 +179,36 @@ describe('Data Import case workbook Preview flows', () => {
       expect(within(workbench).getByText('請先選擇 .xlsx 工作簿。')).toBeInTheDocument();
       expect(within(workbench).getByText('預覽成功後才能確認匯入。')).toBeInTheDocument();
     }
+  });
+
+  it('歷史訂單 receipt 直接開啟既有單列 review 更正，不導向異常中心', async () => {
+    vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockResolvedValueOnce({
+      source_content_digest: digest,
+      source_row_count: 1,
+      adopted_count: 1,
+      unmatched_case_count: 0,
+      review_required_count: 1,
+      current_conflict_count: 0,
+      assignments_created: 0,
+      replayed_rows: 0,
+      replayed_workbook: false,
+      status_counts: { cancelled_0: 0, deposit_paid_1: 1, discussion_2: 0, invalid_or_blank: 0 },
+      review_references: ['historical-order-review:one'],
+    });
+    vi.spyOn(historicalReviewRemediationClient, 'query').mockResolvedValue(historicalReviewContext);
+    render(<DataImportPage />);
+    const card = document.querySelector('[data-surface-id="imports.historic-orders.workbench"]') as HTMLElement;
+    fireEvent.change(screen.getByLabelText('選擇歷史訂單 Workbook'), { target: { files: [workbook('historical')] } });
+    fireEvent.click(document.querySelector('[data-control-id="imports.historic-orders.preview"]') as HTMLButtonElement);
+    await waitFor(() => expect(within(card).getByText('預覽結果')).toBeInTheDocument());
+    fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
+    fireEvent.click(document.querySelector('[data-control-id="imports.historic-orders.apply"]') as HTMLButtonElement);
+    const remediation = await screen.findByRole('button', { name: '🛠️ 處理歷史訂單待確認 1' });
+    fireEvent.click(remediation);
+
+    await waitFor(() => expect(historicalReviewRemediationClient.query).toHaveBeenCalledWith('historical-order-review:one'));
+    expect(await screen.findByText('歷史訂單欄位衝突更正')).toBeInTheDocument();
+    expect(window.location.hash).not.toBe('#anomalies');
   });
 
   it('同檔名不同bytes會清除舊Preview並產生不同snapshot digest', async () => {

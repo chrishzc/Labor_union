@@ -120,9 +120,7 @@ class HistoricalOrderAdoptionWorkflow:
         self._actual_start_rebuilder = actual_start_rebuilder
 
     def preview(self, row: HistoricalOrderWorkbookRow) -> HistoricalOrderAdoptionPreview:
-        preview = self._build_preview(row, for_update=False)
-        self._preview_actual_service_period(row, preview)
-        return preview
+        return self._build_preview(row, for_update=False)
 
     def apply(self, request: HistoricalOrderAdoptionRequest) -> HistoricalOrderAdoptionReceipt:
         with self._unit_of_work_factory() as unit_of_work:
@@ -192,23 +190,13 @@ class HistoricalOrderAdoptionWorkflow:
             correlation_id=request.correlation_id,
         )
 
-    def _preview_actual_service_period(self, row, preview) -> None:
-        rebuild = self._actual_service_period_rebuild(row, preview, for_update=False)
-        if rebuild is None or self._actual_start_rebuilder is None:
-            return
-        _current, case_no, actual_start_date = rebuild
-        self._actual_start_rebuilder.preview(
-            case_no=case_no,
-            actual_start_date=actual_start_date,
-            correlation_id="historical-order-workbook-preview",
-        )
-
     def _actual_service_period_rebuild(self, row, preview, *, for_update):
         if (
             preview.outcome is not HistoricalOrderOutcome.ADOPTED
             or preview.case_no is None
             or row.asserted_status is not HistoricalOrderSourceStatus.DEPOSIT_PAID
             or not isinstance(row.actual_start_date, date)
+            or "historical_actual_start_evidence_insufficient" in preview.issue_codes
         ):
             return None
         current = self._repository.load_order(
@@ -220,6 +208,10 @@ class HistoricalOrderAdoptionWorkflow:
             current is None
             or not isinstance(current.planned_start_date, date)
             or current.planned_start_date == row.actual_start_date
+            or (
+                not _has_actual_start_patch(preview)
+                and current.actual_start_date != row.actual_start_date
+            )
             or (
                 current.actual_start_date == row.actual_start_date
                 and current.actual_end_date is not None
@@ -266,6 +258,28 @@ class HistoricalOrderAdoptionWorkflow:
         )
         candidate = build_historical_order_candidate(current, source)
         pairings = self._pairings(row, current, candidate, for_update)
+        if _actual_start_evidence_is_insufficient(
+            row,
+            current,
+            candidate,
+            pairings,
+            self._repository.active_assignments(current.case_no, for_update=for_update),
+        ):
+            source = HistoricalOrderSourceFacts(
+                row.asserted_status,
+                None,
+                row.actual_end_date,
+                tuple(
+                    sorted(
+                        set(
+                            source_issues
+                            + ("historical_actual_start_evidence_insufficient",)
+                        )
+                    )
+                ),
+            )
+            candidate = build_historical_order_candidate(current, source)
+            pairings = self._pairings(row, current, candidate, for_update)
         issues = tuple(sorted(set(candidate.issue_codes + tuple(code for item in pairings for code in item.issue_codes))))
         return _preview(row, current, candidate, pairings, issues)
 
@@ -337,6 +351,47 @@ def _service_assignment_allowed(row, current, candidate) -> bool:
         and isinstance(row.actual_start_date, date)
         and row.actual_start_date != current.planned_start_date
     )
+
+
+def _actual_start_evidence_is_insufficient(
+    row,
+    current,
+    candidate,
+    pairings,
+    existing_assignments,
+) -> bool:
+    """Status adoption survives incomplete historical service evidence.
+
+    Only an established-order assertion with a distinct source start can become
+    an Actual Start root.  A same-row assignment candidate is sufficient for
+    Apply, which appends the immutable historical evidence before rebuilding
+    the formal Scheduling generation.
+    """
+    if (
+        candidate.outcome is not HistoricalOrderOutcome.ADOPTED
+        or row.asserted_status is not HistoricalOrderSourceStatus.DEPOSIT_PAID
+        or not isinstance(row.actual_start_date, date)
+    ):
+        return False
+    if not isinstance(current.planned_start_date, date):
+        return True
+    if current.planned_start_date == row.actual_start_date:
+        return False
+    if (
+        current.actual_start_date == row.actual_start_date
+        and current.actual_end_date is not None
+    ):
+        return False
+    if existing_assignments:
+        return False
+    return not any(
+        pairing.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+        for pairing in pairings
+    )
+
+
+def _has_actual_start_patch(preview) -> bool:
+    return any(field == "actual_start_date" for field, _value in preview.date_patch)
 
 
 def _preview(row, current, candidate, pairings, issues):

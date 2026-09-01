@@ -102,4 +102,5 @@ def _receipt_payload():
         "unmatched_case_count": 0, "review_required_count": 0, "current_conflict_count": 0,
         "assignments_created": 0, "replayed_rows": 0, "replayed_workbook": False,
         "status_counts": {"cancelled_0": 0, "deposit_paid_1": 1, "discussion_2": 0, "invalid_or_blank": 0},
+        "review_references": [],
     }

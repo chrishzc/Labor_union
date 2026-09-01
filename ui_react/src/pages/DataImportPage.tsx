@@ -13,6 +13,7 @@ import { HcmWorkbookSnapshot, hcmWorkbookPreviewClient } from '../api/case_impor
 import { hcmImportResultClient } from '../api/case_import/hcm_import_result_client';
 import { StaffHistoricalWorkbookSnapshot, staffHistoricalWorkbookPreviewClient } from '../api/case_import/staff_historical_workbook/client';
 import { HistoricalOrderWorkbookSnapshot, historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
+import { HistoricalOrderReviewRemediationWorkbench } from '../components/HistoricalOrderReviewRemediationWorkbench';
 import { DataBrowserPage } from './DataBrowserPage';
 import './DataImportPage.css';
 
@@ -106,7 +107,7 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
   summarize: (receipt: TReceipt) => ApplyPresentation,
   fallbackError: string,
   scope: string,
-  onApplied?: () => void | Promise<void>
+  onApplied?: (receipt: TReceipt) => void | Promise<void>
 ) {
   const [selectedWorkbook, setSelectedWorkbook] = useState<File | null>(null);
   const [previewState, setPreviewState] = useState<CasePreviewState<TModel>>({ kind: 'idle' });
@@ -176,7 +177,7 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
       const receipt = await apply(snapshot, previewState.preview.previewFingerprint, command);
       const presentation = summarize(receipt);
       setApplyState({ kind: 'ready', ...presentation });
-      await onApplied?.();
+      await onApplied?.(receipt);
     } catch (error) {
       setApplyState({
         kind: 'error',
@@ -206,10 +207,11 @@ interface CaseWorkbookPreviewCardProps {
   onPreview: () => Promise<void>;
   onConfirm: (confirmed: boolean) => void;
   onApply: () => Promise<void>;
+  reviewAction?: React.ReactNode;
 }
 
 const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
-  id, icon, title, inputLabel, openPreviewControlId, rowDetailUnavailableMessage, selectedWorkbook, previewState, applyState, confirmed, mutationLocked, metrics, onSelect, onPreview, onConfirm, onApply,
+  id, icon, title, inputLabel, openPreviewControlId, rowDetailUnavailableMessage, selectedWorkbook, previewState, applyState, confirmed, mutationLocked, metrics, onSelect, onPreview, onConfirm, onApply, reviewAction,
 }) => {
   const previewGuidanceId = `imports-${id}-preview-guidance`;
   const applyGuidanceId = `imports-${id}-apply-guidance`;
@@ -260,7 +262,7 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
       {applyState.kind === 'ready' && (
         <div className={`import-receipt-box ${applyState.outcome === 'needs-review' ? 'warning' : ''}`} role="status">
           <strong>{applyReceiptHeading(applyState.outcome)}</strong><p>{applyState.summary}</p>
-          {applyState.outcome === 'needs-review' && <button type="button" className="import-referral-btn" onClick={() => { window.location.hash = '#anomalies'; }}>🔍 前往異常審核處置問題列</button>}
+          {applyState.outcome === 'needs-review' && (reviewAction ?? <button type="button" className="import-referral-btn" onClick={() => { window.location.hash = '#anomalies'; }}>🔍 前往異常審核處置問題列</button>)}
         </div>
       )}
     </section>
@@ -278,6 +280,8 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
   const [state, setState] = useState<ResultState>({ kind: 'loading' });
   const generationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  const [historicalReviewIdentities, setHistoricalReviewIdentities] = useState<string[]>([]);
+  const [selectedHistoricalReviewIdentity, setSelectedHistoricalReviewIdentity] = useState<string | null>(null);
 
   const loadResults = useCallback(async () => {
     abortRef.current?.abort();
@@ -315,7 +319,7 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
     (snapshot, fingerprint, options) => hcmWorkbookPreviewClient.apply(snapshot, fingerprint, options),
     adaptHcmWorkbookPreview,
     (receipt) => applyPresentation(receipt.replayed_workbook, `新增 ${receipt.inserted_count} 筆、含警示 ${receipt.inserted_with_warning_count} 筆、已存在相同資料 ${receipt.exact_replay_count} 筆、需檢查 ${receipt.review_required_count} 筆、失敗 ${receipt.failed_count} 筆。`, receipt.review_required_count > 0 || receipt.failed_count > 0 ? 'needs-review' : receipt.inserted_count === 0 ? 'no-change' : 'applied'),
-    'HCM 工作簿處理失敗。', 'hcm-current', loadResults
+    'HCM 工作簿處理失敗。', 'hcm-current', () => loadResults()
   );
   const clientBeClass = useCaseWorkbookFlow(
     ClientBeClassWorkbookSnapshot.fromFile,
@@ -339,7 +343,26 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
     (snapshot, fingerprint, options) => historicalOrderWorkbookPreviewClient.apply(snapshot, fingerprint, options),
     adaptHistoricalOrderWorkbookPreview,
     (receipt) => applyPresentation(receipt.replayed_workbook, `認領 ${receipt.adopted_count} 筆、建立指派 ${receipt.assignments_created} 筆、已存在相同資料 ${receipt.replayed_rows} 筆、未配對案件 ${receipt.unmatched_case_count} 筆、需檢查 ${receipt.review_required_count} 筆、目前資料衝突 ${receipt.current_conflict_count} 筆。狀態判定：0→取消 ${receipt.status_counts.cancelled_0} 筆、1→已付訂金 ${receipt.status_counts.deposit_paid_1} 筆、2→洽談中 ${receipt.status_counts.discussion_2} 筆、無法辨識 ${receipt.status_counts.invalid_or_blank} 筆。`, receipt.unmatched_case_count > 0 || receipt.review_required_count > 0 || receipt.current_conflict_count > 0 ? 'needs-review' : receipt.adopted_count === 0 ? 'no-change' : 'applied'),
-    '歷史訂單工作簿處理失敗。', 'historical-orders'
+    '歷史訂單工作簿處理失敗。', 'historical-orders', (receipt) => {
+      setHistoricalReviewIdentities(receipt.review_references);
+      setSelectedHistoricalReviewIdentity(null);
+    }
+  );
+
+  const historicalReviewAction = historicalReviewIdentities.length === 0 ? undefined : (
+    <div className="import-referral-group" aria-label="歷史訂單待確認處理入口">
+      <p>這次匯入有 {historicalReviewIdentities.length} 筆資料需要確認，請直接處理：</p>
+      {historicalReviewIdentities.map((reviewIdentity, index) => (
+        <button
+          key={reviewIdentity}
+          type="button"
+          className="import-referral-btn"
+          onClick={() => setSelectedHistoricalReviewIdentity(reviewIdentity)}
+        >
+          🛠️ 處理歷史訂單待確認 {index + 1}
+        </button>
+      ))}
+    </div>
   );
 
   const mutationLocked = hcmCurrent.mutationLocked || clientBeClass.mutationLocked || staffHistorical.mutationLocked || historicalOrders.mutationLocked;
@@ -386,8 +409,17 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
             <CaseWorkbookPreviewCard id="hcm-current" icon="📄" title="1. HCM 案件匯入 (HCM Current)" inputLabel="選擇 HCM Current Workbook" openPreviewControlId="imports.hcm-current.open-preview" rowDetailUnavailableMessage={hcmCurrent.previewState.kind === 'ready' ? hcmCurrent.previewState.preview.rowDetailUnavailableMessage : undefined} selectedWorkbook={hcmCurrent.selectedWorkbook} previewState={hcmCurrent.previewState} applyState={hcmCurrent.applyState} confirmed={hcmCurrent.confirmed} mutationLocked={mutationLocked} metrics={hcmCurrent.previewState.kind === 'ready' ? [['來源列數', hcmCurrent.previewState.preview.sourceRowCount], ['可寫入', hcmCurrent.previewState.preview.readyCount], ['含警示', hcmCurrent.previewState.preview.readyWithWarningCount], ['需人工檢查', hcmCurrent.previewState.preview.reviewRequiredCount]] : []} onSelect={hcmCurrent.selectWorkbook} onPreview={hcmCurrent.previewWorkbook} onConfirm={hcmCurrent.setConfirmed} onApply={hcmCurrent.applyWorkbook} />
             <CaseWorkbookPreviewCard id="client-beclass" icon="👥" title="2. 客戶 BeClass 問卷匯入" inputLabel="選擇客戶 BeClass Workbook" selectedWorkbook={clientBeClass.selectedWorkbook} previewState={clientBeClass.previewState} applyState={clientBeClass.applyState} confirmed={clientBeClass.confirmed} mutationLocked={mutationLocked} metrics={clientBeClass.previewState.kind === 'ready' ? [['來源列數', clientBeClass.previewState.preview.sourceRowCount], ['可建立', clientBeClass.previewState.preview.createCount], ['需人工檢查', clientBeClass.previewState.preview.reviewRequiredCount], ['既有衝突', clientBeClass.previewState.preview.existingConflictCount], ['既有來源', clientBeClass.previewState.preview.existingSourceCount]] : []} onSelect={clientBeClass.selectWorkbook} onPreview={clientBeClass.previewWorkbook} onConfirm={clientBeClass.setConfirmed} onApply={clientBeClass.applyWorkbook} />
             <CaseWorkbookPreviewCard id="staff-historical" icon="👩‍🍼" title="3. 月嫂歷史資料匯入" inputLabel="選擇月嫂歷史 Workbook" selectedWorkbook={staffHistorical.selectedWorkbook} previewState={staffHistorical.previewState} applyState={staffHistorical.applyState} confirmed={staffHistorical.confirmed} mutationLocked={mutationLocked} metrics={staffHistorical.previewState.kind === 'ready' ? [['來源列數', staffHistorical.previewState.preview.sourceRowCount], ['新建', staffHistorical.previewState.preview.createdCount], ['採用既有', staffHistorical.previewState.preview.adoptedExistingCount], ['身分阻擋', staffHistorical.previewState.preview.blockedIdentityCount], ['身分衝突', staffHistorical.previewState.preview.identityConflictCount], ['需人工檢查', staffHistorical.previewState.preview.reviewRequiredCount]] : []} onSelect={staffHistorical.selectWorkbook} onPreview={staffHistorical.previewWorkbook} onConfirm={staffHistorical.setConfirmed} onApply={staffHistorical.applyWorkbook} />
-            <CaseWorkbookPreviewCard id="historic-orders" icon="📦" title="4. 歷史訂單認領匯入" inputLabel="選擇歷史訂單 Workbook" selectedWorkbook={historicalOrders.selectedWorkbook} previewState={historicalOrders.previewState} applyState={historicalOrders.applyState} confirmed={historicalOrders.confirmed} mutationLocked={mutationLocked} metrics={historicalOrders.previewState.kind === 'ready' ? [['來源列數', historicalOrders.previewState.preview.sourceRowCount], ['可認領', historicalOrders.previewState.preview.adoptedCount], ['無對應案件', historicalOrders.previewState.preview.unmatchedCaseCount], ['需人工檢查', historicalOrders.previewState.preview.reviewRequiredCount], ['目前資料衝突', historicalOrders.previewState.preview.currentConflictCount], ['派工候選', historicalOrders.previewState.preview.assignmentCandidateCount], ['僅證據配對', historicalOrders.previewState.preview.evidenceOnlyPairingCount], ['來源狀態 0 → 訂單取消', historicalOrders.previewState.preview.statusCounts.cancelled0], ['來源狀態 1 → 已付訂金', historicalOrders.previewState.preview.statusCounts.depositPaid1], ['來源狀態 2 → 洽談中', historicalOrders.previewState.preview.statusCounts.discussion2], ['狀態無法辨識', historicalOrders.previewState.preview.statusCounts.invalidOrBlank]] : []} onSelect={historicalOrders.selectWorkbook} onPreview={historicalOrders.previewWorkbook} onConfirm={historicalOrders.setConfirmed} onApply={historicalOrders.applyWorkbook} />
+            <CaseWorkbookPreviewCard id="historic-orders" icon="📦" title="4. 歷史訂單認領匯入" inputLabel="選擇歷史訂單 Workbook" selectedWorkbook={historicalOrders.selectedWorkbook} previewState={historicalOrders.previewState} applyState={historicalOrders.applyState} confirmed={historicalOrders.confirmed} mutationLocked={mutationLocked} metrics={historicalOrders.previewState.kind === 'ready' ? [['來源列數', historicalOrders.previewState.preview.sourceRowCount], ['可認領', historicalOrders.previewState.preview.adoptedCount], ['無對應案件', historicalOrders.previewState.preview.unmatchedCaseCount], ['需人工檢查', historicalOrders.previewState.preview.reviewRequiredCount], ['目前資料衝突', historicalOrders.previewState.preview.currentConflictCount], ['派工候選', historicalOrders.previewState.preview.assignmentCandidateCount], ['僅證據配對', historicalOrders.previewState.preview.evidenceOnlyPairingCount], ['來源狀態 0 → 訂單取消', historicalOrders.previewState.preview.statusCounts.cancelled0], ['來源狀態 1 → 已付訂金', historicalOrders.previewState.preview.statusCounts.depositPaid1], ['來源狀態 2 → 洽談中', historicalOrders.previewState.preview.statusCounts.discussion2], ['狀態無法辨識', historicalOrders.previewState.preview.statusCounts.invalidOrBlank]] : []} onSelect={historicalOrders.selectWorkbook} onPreview={historicalOrders.previewWorkbook} onConfirm={historicalOrders.setConfirmed} onApply={historicalOrders.applyWorkbook} reviewAction={historicalReviewAction} />
           </div>
+          {selectedHistoricalReviewIdentity && <section className="import-workbench-card" aria-label="歷史訂單欄位衝突更正">
+            <HistoricalOrderReviewRemediationWorkbench
+              reviewIdentity={selectedHistoricalReviewIdentity}
+              onResolved={() => {
+                setHistoricalReviewIdentities((current) => current.filter((item) => item !== selectedHistoricalReviewIdentity));
+                setSelectedHistoricalReviewIdentity(null);
+              }}
+            />
+          </section>}
         </div>
       )}
 

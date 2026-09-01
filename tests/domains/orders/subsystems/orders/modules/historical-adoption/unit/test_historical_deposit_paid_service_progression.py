@@ -94,8 +94,30 @@ def test_deposit_paid_with_distinct_actual_start_builds_service_assignment_candi
     assert preview.issue_codes == ()
 
 
-def test_deposit_paid_actual_service_dates_are_previewed_before_lifecycle_advances():
-    """A status-1 row must prove official service dates before its state mutation."""
+def test_deposit_paid_without_service_evidence_adopts_status_but_defers_actual_start():
+    row = SimpleNamespace(
+        case_no="CASE-1",
+        client_name="客戶甲",
+        asserted_status=HistoricalOrderSourceStatus.DEPOSIT_PAID,
+        actual_start_date=date(2026, 8, 7),
+        actual_end_date=date(2026, 9, 7),
+        issue_codes=(),
+        caregivers=(),
+        source_identity="historical-orders:test:missing-service-evidence",
+        source_fingerprint="e" * 64,
+    )
+
+    preview = HistoricalOrderAdoptionWorkflow(
+        _Repository(), _UnitOfWork, _Writer()
+    ).preview(row)
+
+    assert preview.after_status == OrderLifecycleStatus.ESTABLISHED.value
+    assert preview.date_patch == ()
+    assert preview.issue_codes == ("historical_actual_start_evidence_insufficient",)
+
+
+def test_deposit_paid_actual_service_dates_rebuild_after_status_adoption():
+    """A status-1 row uses its own verified caregiver evidence during Apply."""
     actual_start_date = date(2026, 8, 7)
     official_service_dates = (date(2026, 8, 7), date(2026, 8, 10))
     timeline: list[tuple[str, object]] = []
@@ -197,7 +219,16 @@ def test_deposit_paid_actual_service_dates_are_previewed_before_lifecycle_advanc
         actual_start_date=actual_start_date,
         actual_end_date=date(2026, 9, 7),
         issue_codes=(),
-        caregivers=(),
+        caregivers=(
+            SimpleNamespace(
+                ordinal=1,
+                name="月嫂甲",
+                start_date=actual_start_date,
+                end_date=date(2026, 9, 7),
+                has_individual_interval=True,
+                issue_codes=(),
+            ),
+        ),
         source_identity="historical-orders:test:actual-service-dates",
         source_fingerprint="f" * 64,
     )
@@ -212,11 +243,8 @@ def test_deposit_paid_actual_service_dates_are_previewed_before_lifecycle_advanc
     preview = workflow.preview(row)
 
     assert preview.after_status == OrderLifecycleStatus.ESTABLISHED.value
-    assert timeline == [
-        ("service-date-calculate", False),
-        ("service-date-source-validated", official_service_dates),
-        ("actual-service-dates-previewed", official_service_dates),
-    ]
+    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+    assert timeline == []
 
     receipt = workflow.apply(
         HistoricalOrderAdoptionRequest(
@@ -234,9 +262,6 @@ def test_deposit_paid_actual_service_dates_are_previewed_before_lifecycle_advanc
         (OrderLifecycleStatus.DISCUSSION.value, OrderLifecycleStatus.ESTABLISHED.value, 4)
     ]
     assert timeline == [
-        ("service-date-calculate", False),
-        ("service-date-source-validated", official_service_dates),
-        ("actual-service-dates-previewed", official_service_dates),
         ("status-transition", OrderLifecycleStatus.ESTABLISHED.value),
         ("service-date-calculate", True),
         ("service-date-source-prepared", official_service_dates),

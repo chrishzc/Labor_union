@@ -30,7 +30,7 @@ describe('Historical Orders workbook Preview client', () => {
 
   it('Apply送出fingerprint form與冪等headers並回傳typed receipt', async () => {
     const snapshot = await HistoricalOrderWorkbookSnapshot.fromFile(new File(['orders'], 'orders.xlsx'));
-    const receipt = { source_content_digest: snapshot.sha256, source_row_count: 1, adopted_count: 1, unmatched_case_count: 0, review_required_count: 0, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: false, status_counts: { cancelled_0: 0, deposit_paid_1: 1, discussion_2: 0, invalid_or_blank: 0 } };
+    const receipt = { source_content_digest: snapshot.sha256, source_row_count: 1, adopted_count: 1, unmatched_case_count: 0, review_required_count: 1, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: false, status_counts: { cancelled_0: 0, deposit_paid_1: 1, discussion_2: 0, invalid_or_blank: 0 }, review_references: ['historical-order-review:one'] };
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, message: 'ok', data: receipt, error: null }), { status: 200, headers: { 'content-type': 'application/json' } }));
     globalThis.fetch = fetchMock;
     await expect(applyHistoricalOrderWorkbook(snapshot, 'c'.repeat(64), { idempotencyKey: 'orders-apply-1', correlationId: 'orders-correlation-1' })).resolves.toEqual(receipt);
@@ -85,7 +85,7 @@ describe('Historical Orders workbook Preview client', () => {
     expect(HistoricalOrderWorkbookPreviewSchema.safeParse({ ...base, adopted_count: null }).success).toBe(false);
     expect(HistoricalOrderWorkbookPreviewSchema.safeParse({ ...base, sheet_identity: 'BAD' }).success).toBe(false);
     expect(HistoricalOrderWorkbookPreviewSchema.safeParse({ ...base, source_row_count: 1 }).success).toBe(false);
-    const receipt = { source_content_digest: 'a'.repeat(64), source_row_count: 1, adopted_count: 1, unmatched_case_count: 0, review_required_count: 0, current_conflict_count: 0, assignments_created: 0, replayed_rows: 0, replayed_workbook: false, status_counts: base.status_counts };
+    const receipt = { source_content_digest: 'a'.repeat(64), source_row_count: 1, adopted_count: 1, unmatched_case_count: 0, review_required_count: 0, current_conflict_count: 0, assignments_created: 0, replayed_rows: 0, replayed_workbook: false, status_counts: base.status_counts, review_references: [] };
     expect(HistoricalOrderWorkbookReceiptSchema.safeParse(receipt).success).toBe(false);
   });
 });

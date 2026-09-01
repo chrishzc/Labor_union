@@ -64,6 +64,24 @@ class HistoricalOrderWorkbookImportRepository:
                 (self._FAMILY, key, digest, preview_fingerprint, actor, "訂單歷史資料匯入", _json(result)),
             )
 
+    def find_open_review_identities(
+        self, source_event_identities: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        if not source_event_identities:
+            return ()
+        placeholders = ",".join("%s" for _ in source_event_identities)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT review.review_identity FROM historical_order_adoption_reviews review "
+                "WHERE review.source_event_identity IN (" + placeholders + ") "
+                "AND NOT EXISTS (SELECT 1 FROM historical_order_review_remediation_events remediation "
+                "WHERE remediation.prior_review_identity=review.review_identity) "
+                "ORDER BY review.id",
+                source_event_identities,
+            )
+            rows = cursor.fetchall()
+        return tuple(str(row["review_identity"]) for row in rows)
+
     @staticmethod
     def _lock_name(key: str) -> str:
         return f"order-history:{sha256(key.encode('utf-8')).hexdigest()[:50]}"

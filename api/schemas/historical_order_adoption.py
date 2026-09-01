@@ -54,6 +54,7 @@ class HistoricalOrderWorkbookReceiptView(BaseModel):
     replayed_rows: int = Field(ge=0)
     replayed_workbook: bool
     status_counts: HistoricalOrderStatusCountsView
+    review_references: list[str] = Field(default_factory=list, max_length=100)
 
     @model_validator(mode="after")
     def validate_status_count_conservation(self):

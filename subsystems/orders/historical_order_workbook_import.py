@@ -23,6 +23,8 @@ class HistoricalOrderWorkbookRepository(Protocol):
 
     def save_workbook_receipt(self, key: str, receipt) -> None: ...
 
+    def find_open_review_identities(self, source_event_identities: tuple[str, ...]) -> tuple[str, ...]: ...
+
 
 @dataclass(frozen=True, slots=True)
 class HistoricalOrderStatusCounts:
@@ -90,6 +92,7 @@ class HistoricalOrderWorkbookReceipt:
     replayed_rows: int
     replayed_workbook: bool
     status_counts: HistoricalOrderStatusCounts
+    review_references: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -103,6 +106,7 @@ class HistoricalOrderWorkbookReceipt:
             "replayed_rows": self.replayed_rows,
             "replayed_workbook": self.replayed_workbook,
             "status_counts": self.status_counts.as_dict(),
+            "review_references": list(self.review_references),
         }
 
 
@@ -175,6 +179,7 @@ class HistoricalOrderWorkbookImportService:
         assignments_created = 0
         replayed_rows = 0
         review_rows = 0
+        review_references: list[str] = []
         processed_case_numbers: set[str] = set()
         for row, row_preview in zip(workbook.rows, row_previews, strict=True):
             refresh_current_facts = (
@@ -209,13 +214,16 @@ class HistoricalOrderWorkbookImportService:
             assignments_created += 0 if receipt.replayed else receipt.assignment_count
             replayed_rows += int(receipt.replayed)
             review_rows += int(getattr(receipt, "review_identity", None) is not None)
+            review_identity = getattr(receipt, "review_identity", None)
+            if review_identity is not None and review_identity not in review_references:
+                review_references.append(review_identity)
             if row.case_no is not None:
                 processed_case_numbers.add(row.case_no)
         _assert_conservation(len(workbook.rows), outcomes)
         return HistoricalOrderWorkbookReceipt(
             workbook.content_digest, len(workbook.rows), outcomes["adopted"], outcomes["unmatched_case"],
             review_rows, outcomes["current_conflict"], assignments_created, replayed_rows, False,
-            _status_counts(workbook),
+            _status_counts(workbook), tuple(review_references),
         )
 
     def _apply_row(
@@ -286,6 +294,15 @@ class HistoricalOrderWorkbookImportService:
             if stored_counts is not None
             else _status_counts(workbook)
         )
+        if "review_references" not in snapshot:
+            find_open_reviews = getattr(
+                self._repository, "find_open_review_identities", None
+            )
+            snapshot["review_references"] = tuple(
+                find_open_reviews(tuple(row.source_identity for row in workbook.rows))
+                if callable(find_open_reviews)
+                else ()
+            )
         return HistoricalOrderWorkbookReceipt(**snapshot)
 
 

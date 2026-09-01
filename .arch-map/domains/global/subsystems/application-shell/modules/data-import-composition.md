@@ -12,6 +12,7 @@
 
 ## Dependencies
 - outbound: `orders/orders/module:historical-adoption-presentation` — Historical Orders typed preview／receipt。
+- outbound: `orders/orders/module:historical-review-remediation-presentation` — needs-review receipt 的 review reference 直接開啟既有單列更正工作台。
 - outbound: `case-import` owners — HCM／Client BeClass typed workbook clients。
 - inbound: authenticated React application navigation。
 

@@ -253,6 +253,7 @@ def test_actual_xlsx_upload_covers_every_historical_workbook_preview_category():
     assert receipt["replayed_rows"] == 0
     assert receipt["replayed_workbook"] is False
     assert receipt["status_counts"] == preview["status_counts"]
+    assert receipt["review_references"] == ["historical-review"]
     assert len(repository.receipts) == 1
 
 

@@ -42,6 +42,10 @@ class _Repository:
     def save_receipt(self, key, digest, preview_fingerprint, actor, result):
         self.receipts[key] = {"request_fingerprint": digest, "result_snapshot": json.dumps(result)}
 
+    def find_open_review_identities(self, source_event_identities):
+        del source_event_identities
+        return ()
+
 
 class _UnitOfWork:
     def __enter__(self):
@@ -238,6 +242,37 @@ def test_legacy_stored_receipt_replay_derives_status_counts_from_same_workbook(m
     assert replay.replayed_workbook is True
     assert replay.status_counts.total == 4
     assert replay.status_counts.deposit_paid_1 == 1
+
+
+def test_legacy_replay_discovers_open_review_identities_from_orders_evidence(monkeypatch):
+    workbook = _workbook("f" * 64)
+    repository = _Repository()
+    repository.receipts["legacy-key"] = {
+        "request_fingerprint": workbook.content_digest,
+        "result_snapshot": json.dumps({
+            "source_content_digest": workbook.content_digest,
+            "source_row_count": 1,
+            "adopted_count": 1,
+            "unmatched_case_count": 0,
+            "review_required_count": 1,
+            "current_conflict_count": 0,
+            "assignments_created": 0,
+            "replayed_rows": 0,
+            "replayed_workbook": False,
+            "status_counts": {"cancelled_0": 0, "deposit_paid_1": 1, "discussion_2": 0, "invalid_or_blank": 0},
+        }),
+    }
+    repository.find_open_review_identities = lambda identities: (
+        "historical-order-review:one",
+    ) if identities == (workbook.rows[0].source_identity,) else ()
+    monkeypatch.setattr(module, "load_historical_order_workbook", lambda _path: workbook)
+
+    replay = module.HistoricalOrderWorkbookImportService(repository, _Workflow(), _UnitOfWork).apply(
+        "legacy.xlsx", "legacy-key", "0" * 64, "operator", "correlation",
+    )
+
+    assert replay.replayed_workbook is True
+    assert replay.review_references == ("historical-order-review:one",)
 
 
 def _workbook(digest: str) -> HistoricalOrderWorkbook:

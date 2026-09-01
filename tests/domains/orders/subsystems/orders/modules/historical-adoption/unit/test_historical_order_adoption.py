@@ -103,6 +103,31 @@ def test_valid_status_is_adopted_when_dates_are_null():
     assert candidate.resulting_version == 4
 
 
+@pytest.mark.parametrize(
+    ("source_status", "expected_status"),
+    (
+        (HistoricalOrderSourceStatus.CANCELLED, OrderLifecycleStatus.CANCELLED),
+        (HistoricalOrderSourceStatus.DISCUSSION, OrderLifecycleStatus.DISCUSSION),
+    ),
+)
+def test_dirty_cancelled_or_discussion_dates_never_become_actual_start(
+    source_status,
+    expected_status,
+):
+    current = _current(OrderLifecycleStatus.ESTABLISHED, planned_start=date(2025, 1, 2))
+    source = HistoricalOrderSourceFacts(
+        source_status,
+        date(2025, 1, 3),
+        date(2025, 1, 31),
+    )
+
+    candidate = build_historical_order_candidate(current, source)
+
+    assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
+    assert candidate.after_status is expected_status
+    assert candidate.date_patch == ()
+
+
 def test_historical_start_matching_hcm_plan_does_not_create_actual_start():
     current = _current(OrderLifecycleStatus.DISCUSSION, planned_start=date(2025, 1, 3))
     source = HistoricalOrderSourceFacts(
@@ -284,7 +309,10 @@ def test_columns_after_canonical_six_are_ignored(tmp_path):
     assert tuple(item.resolution for item in preview.pairings) == (
         HistoricalPairingResolution.ASSIGNMENT_CONFLICT,
     )
-    assert preview.issue_codes == ("historical_assignment_conflict",)
+    assert preview.issue_codes == (
+        "historical_actual_start_evidence_insufficient",
+        "historical_assignment_conflict",
+    )
 
 
 def test_deposit_paid_row_does_not_build_completed_assignment_candidate(tmp_path):
@@ -427,8 +455,8 @@ def test_unmatched_case_apply_is_a_zero_write_skip(tmp_path):
 def test_completed_historical_actual_start_delegates_formal_rebuild(tmp_path):
     path = _workbook(
         tmp_path,
-        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態"],
-        ["客戶甲", "CASE-1", date(2026, 8, 7), date(1999, 1, 1), 1],
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"],
+        ["客戶甲", "CASE-1", date(2026, 8, 7), date(2026, 9, 7), 1, "月嫂甲"],
     )
     row = load_historical_order_workbook(path).rows[0]
 
@@ -473,6 +501,8 @@ def test_completed_historical_actual_start_delegates_formal_rebuild(tmp_path):
         rebuilder,
     )
     preview = workflow.preview(row)
+    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+    assert preview.date_patch == (("actual_start_date", date(2026, 8, 7)),)
 
     workflow.apply(
         HistoricalOrderAdoptionRequest(
@@ -486,11 +516,7 @@ def test_completed_historical_actual_start_delegates_formal_rebuild(tmp_path):
     )
 
     assert repository.persist_count == 1
-    assert rebuilder.preview_calls == [{
-        "case_no": "CASE-1",
-        "actual_start_date": date(2026, 8, 7),
-        "correlation_id": "historical-order-workbook-preview",
-    }]
+    assert rebuilder.preview_calls == []
     assert rebuilder.calls == [{
         "case_no": "CASE-1",
         "actual_start_date": date(2026, 8, 7),
@@ -587,8 +613,8 @@ def test_same_source_and_fingerprint_replays_across_operator_metadata(tmp_path):
 def test_replayed_historical_actual_start_repairs_a_predelegation_receipt(tmp_path):
     path = _workbook(
         tmp_path,
-        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態"],
-        ["客戶甲", "CASE-1", date(2026, 8, 8), None, 1],
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"],
+        ["客戶甲", "CASE-1", date(2026, 8, 8), date(2026, 9, 7), 1, "月嫂甲"],
     )
     row = load_historical_order_workbook(path).rows[0]
 
@@ -620,6 +646,8 @@ def test_replayed_historical_actual_start_repairs_a_predelegation_receipt(tmp_pa
         rebuilder,
     )
     preview = workflow.preview(row)
+    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+    assert preview.date_patch == ()
     repository.receipt = {
         "command_fingerprint": fingerprint_payload({
             "source_identity": row.source_identity,

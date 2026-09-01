@@ -118,9 +118,12 @@ def _lifecycle_status(source_status: HistoricalOrderSourceStatus) -> OrderLifecy
 
 def _date_patch(current, source, issues, outcome):
     del issues
-    if outcome is not HistoricalOrderOutcome.ADOPTED:
-        return ()
-    if source.actual_start_date is None:
+    if (
+        outcome is not HistoricalOrderOutcome.ADOPTED
+        or source.asserted_status is not HistoricalOrderSourceStatus.DEPOSIT_PAID
+        or not isinstance(source.actual_start_date, date)
+        or not isinstance(current.planned_start_date, date)
+    ):
         return ()
     actual_start = (
         None
