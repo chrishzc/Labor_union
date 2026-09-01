@@ -48,6 +48,9 @@ def test_historical_rebuilder_prepares_source_generation_before_preview():
             )
 
     class ActualStart:
+        def replay_from_immutable_source(self, _idempotency_key):
+            return None
+
         def preview(self, case_no, actual_start_date, *, recalculated_service_dates):
             assert calls and calls[0][0] == "prepare"
             calls.append(("preview", case_no, actual_start_date, recalculated_service_dates))
@@ -71,6 +74,38 @@ def test_historical_rebuilder_prepares_source_generation_before_preview():
     )
 
     assert [item[0] for item in calls] == ["prepare", "preview", "apply"]
+
+
+def test_historical_rebuilder_replays_completed_actual_start_before_recomputing_versions():
+    calls = []
+
+    class Planner:
+        def calculate(self, case_no, actual_start_date, *, for_update):
+            calls.append(("calculate", case_no, actual_start_date, for_update))
+            return (date(2026, 8, 8), date(2026, 8, 11))
+
+        def prepare_source_generation(self, *_args, **_kwargs):
+            raise AssertionError("completed replay must not bootstrap scheduling again")
+
+    class ActualStart:
+        def replay_from_immutable_source(self, idempotency_key):
+            calls.append(("replay", idempotency_key.value))
+            return SimpleNamespace(order_version=9)
+
+        def preview(self, *_args, **_kwargs):
+            raise AssertionError("completed replay must not build a new Actual Start command")
+
+    HistoricalActualStartRebuilder(ActualStart(), Planner()).apply_in_current_unit_of_work(
+        case_no="CASE-1",
+        actual_start_date=date(2026, 8, 8),
+        source_identity="historical-orders:digest:row:5",
+        actor="test-operator",
+        correlation_id="historical-rebuild-replay",
+    )
+
+    assert calls[0] == ("calculate", "CASE-1", date(2026, 8, 8), True)
+    assert calls[1][0] == "replay"
+    assert calls[1][1].startswith("historical-actual-start:")
 
 
 def test_historical_rebuilder_preview_reports_missing_historical_assignment_as_blocker():

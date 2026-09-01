@@ -110,6 +110,14 @@ class HistoricalActualStartRebuilder:
             actual_start_date,
             for_update=True,
         )
+        idempotency_key = IdempotencyKey(_idempotency_key(source_identity))
+        if (
+            self.actual_start_workflow.replay_from_immutable_source(
+                idempotency_key
+            )
+            is not None
+        ):
+            return
         prepare_source_generation = getattr(
             self.service_date_planner,
             "prepare_source_generation",
@@ -138,7 +146,7 @@ class HistoricalActualStartRebuilder:
             ),
             expected_payroll_version=ExpectedVersion(preview.payroll_version),
             preview_fingerprint=preview.fingerprint,
-            idempotency_key=IdempotencyKey(_idempotency_key(source_identity)),
+            idempotency_key=idempotency_key,
             actor=ActorContext(actor),
             reason="historical actual-start service-date rebuild",
             correlation_id=CorrelationId(correlation_id),

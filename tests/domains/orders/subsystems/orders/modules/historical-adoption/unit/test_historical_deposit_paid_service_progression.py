@@ -192,6 +192,9 @@ def test_deposit_paid_actual_service_dates_rebuild_after_status_adoption():
             timeline.append(("service-date-source-prepared", service_dates))
 
     class CanonicalActualStart:
+        def replay_from_immutable_source(self, _idempotency_key):
+            return None
+
         def preview(self, case_no, candidate_start, *, recalculated_service_dates):
             assert (case_no, candidate_start, recalculated_service_dates) == (
                 "CASE-1",

@@ -226,6 +226,20 @@ class ActualStartWorkflow:
             unit_of_work.commit()
             return receipt
 
+    def replay_from_immutable_source(
+        self, idempotency_key: IdempotencyKey
+    ) -> OrderTermsReceipt | None:
+        """Return a completed receipt for a caller-owned immutable source.
+
+        Historical adoption derives this key from the immutable workbook row.
+        Its current versions necessarily differ after a successful Actual Start,
+        so it must read a completed receipt before constructing a fresh command.
+        """
+        stored = self._repository.find_actual_start_receipt(
+            idempotency_key, for_update=True
+        )
+        return None if stored is None else stored.receipt
+
     def apply_in_current_unit_of_work(
         self,
         request: ActualStartApplyRequest,

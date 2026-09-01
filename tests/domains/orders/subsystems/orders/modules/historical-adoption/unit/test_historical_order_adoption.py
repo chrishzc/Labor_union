@@ -540,6 +540,9 @@ def test_historical_rebuilder_passes_recalculated_dates_to_canonical_actual_star
         def __init__(self):
             self.applied = []
 
+        def replay_from_immutable_source(self, _idempotency_key):
+            return None
+
         def preview(self, case_no, actual_start_date, *, recalculated_service_dates):
             assert (case_no, actual_start_date, recalculated_service_dates) == (
                 "CASE-1",
