@@ -158,11 +158,16 @@ class HistoricalActualStartRebuilder:
 
 
 def _preparation_blocked(code: str, correlation_id: str) -> ActualStartWorkflowError:
+    message = (
+        "歷史服務日期與月嫂既有正式排班衝突，請先完成受控調度後再匯入。"
+        if code == "historical_actual_start_staff_schedule_conflict"
+        else "歷史訂單缺少重建實際開工所需的目前資料。"
+    )
     return ActualStartWorkflowError(
         TypedError(
             ErrorCategory.DOMAIN_BLOCKED,
             code,
-            "歷史訂單缺少重建實際開工所需的目前資料。",
+            message,
             CorrelationId(correlation_id),
             domain_blockers=(code,),
         )

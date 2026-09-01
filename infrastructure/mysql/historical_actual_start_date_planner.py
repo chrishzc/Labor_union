@@ -78,6 +78,7 @@ class MySqlHistoricalActualStartDatePlanner:
         with self._connection.cursor() as cursor:
             aggregate = _locked_or_bootstrapped_aggregate(cursor, case_no)
             if _effective_generation_has_assignments(cursor, aggregate, for_update=True):
+                _delete_unmanaged_case_schedules(cursor, case_no)
                 return
             source_assignments, order, policy = _source_generation_facts(
                 cursor,
@@ -91,6 +92,8 @@ class MySqlHistoricalActualStartDatePlanner:
                 service_dates,
                 _service_hours_per_day(order),
             )
+            _delete_unmanaged_case_schedules(cursor, case_no)
+            _replace_conflicting_current_schedule_state(cursor, case_no, candidate)
             command_fingerprint = _bootstrap_fingerprint(
                 source_identity,
                 int(order["lifecycle_version"]),
@@ -129,13 +132,15 @@ class MySqlHistoricalActualStartDatePlanner:
                 case_no,
                 for_update=False,
             )
-            _bootstrap_candidate(
+            candidate = _bootstrap_candidate(
                 case_no,
                 aggregate,
                 source_assignments,
                 service_dates,
                 _service_hours_per_day(order),
             )
+            # Apply replaces conflicting current projections; Preview remains
+            # read-only and reports the incoming historical source as valid.
 
 
 def _locked_or_bootstrapped_aggregate(cursor, case_no):
@@ -275,6 +280,64 @@ def _bootstrap_candidate(
         assignments=assignments,
         buffers=tuple(_inactive_buffer(item) for item in assignments),
     )
+
+
+def _delete_unmanaged_case_schedules(cursor, case_no: str) -> None:
+    """Discard old generation-less schedule rows before historical replacement."""
+
+    cursor.execute(
+        "DELETE FROM staff_schedule WHERE case_no=%s AND generation_id IS NULL",
+        (case_no,),
+    )
+
+
+def _replace_conflicting_current_schedule_state(cursor, case_no: str, candidate) -> None:
+    """Directly remove current conflicts before writing the historical source."""
+
+    predicates, parameters = _occupancy_overlap_predicates(candidate)
+    if predicates:
+        cursor.execute(
+            "DELETE FROM scheduling_effective_occupancy WHERE "
+            + " OR ".join(predicates),
+            parameters,
+        )
+    predicates, parameters = _schedule_overlap_predicates(candidate)
+    if predicates:
+        cursor.execute(
+            "DELETE FROM staff_schedule WHERE case_no<>%s AND ("
+            + " OR ".join(predicates)
+            + ")",
+            (case_no, *parameters),
+        )
+
+
+def _schedule_overlap_predicates(candidate):
+    predicates = []
+    parameters = []
+    for assignment in candidate.assignments:
+        dates = assignment.service_dates
+        if not dates:
+            continue
+        predicates.append(
+            "(staff_id=%s AND work_date IN (" + ",".join("%s" for _ in dates) + "))"
+        )
+        parameters.extend((assignment.staff_id, *dates))
+    return tuple(predicates), tuple(parameters)
+
+
+def _occupancy_overlap_predicates(candidate):
+    predicates = []
+    parameters = []
+    for assignment in candidate.assignments:
+        predicates.append("(staff_id=%s AND occupancy_date BETWEEN %s AND %s)")
+        parameters.extend(
+            (
+                assignment.staff_id,
+                assignment.assigned_start_date,
+                assignment.assigned_end_date,
+            )
+        )
+    return tuple(predicates), tuple(parameters)
 
 
 def _allocate_service_dates(source_assignments, service_dates):

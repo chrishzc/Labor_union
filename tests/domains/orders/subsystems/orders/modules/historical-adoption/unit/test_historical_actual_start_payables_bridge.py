@@ -142,6 +142,26 @@ def test_historical_rebuilder_preview_reports_missing_historical_assignment_as_b
     )
 
 
+def test_historical_rebuilder_preview_allows_existing_staff_schedule_for_source_override():
+    class Planner:
+        def calculate(self, _case_no, _actual_start_date, *, for_update):
+            assert for_update is False
+            return (date(2026, 8, 8),)
+
+        def preview_source_generation(self, _case_no, _service_dates):
+            return None
+
+    class ActualStart:
+        def preview(self, *_args, **_kwargs):
+            return None
+
+    HistoricalActualStartRebuilder(ActualStart(), Planner()).preview(
+        case_no="CASE-1",
+        actual_start_date=date(2026, 8, 8),
+        correlation_id="historical-preview-staff-conflict",
+    )
+
+
 def test_mysql_historical_planner_preview_checks_assignment_before_any_write():
     from infrastructure.mysql.historical_actual_start_date_planner import (
         MySqlHistoricalActualStartDatePlanner,
@@ -177,6 +197,180 @@ def test_mysql_historical_planner_preview_checks_assignment_before_any_write():
 
     assert caught.value.code == "historical_assignment_required_for_actual_start"
     assert all(statement.lstrip().upper().startswith("SELECT") for statement in cursor.statements)
+
+
+def test_mysql_historical_planner_preview_does_not_block_existing_staff_schedule():
+    from infrastructure.mysql.historical_actual_start_date_planner import (
+        MySqlHistoricalActualStartDatePlanner,
+    )
+
+    class Cursor:
+        def __init__(self):
+            self.statements = []
+            self.one_rows = iter(
+                (
+                    {
+                        "aggregate_version": 0,
+                        "generation_counter": 0,
+                        "effective_generation_id": None,
+                    },
+                    {"lifecycle_version": 3, "service_hours_per_day": 8},
+                    {
+                        "policy_version": 1,
+                        "policy_kind": "fixed",
+                        "hourly_rate_ntd": 300,
+                        "source_identity_status": "verified",
+                    },
+                )
+            )
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, _parameters):
+            self.statements.append(statement)
+
+        def fetchone(self):
+            return next(self.one_rows)
+
+        def fetchall(self):
+            return (
+                {
+                    "id": 91,
+                    "staff_id": 11,
+                    "assignment_sequence": 1,
+                    "assigned_start_date": date(2026, 8, 8),
+                    "assigned_end_date": date(2026, 8, 8),
+                },
+            )
+
+    cursor = Cursor()
+    connection = SimpleNamespace(cursor=lambda: cursor)
+
+    MySqlHistoricalActualStartDatePlanner(connection).preview_source_generation(
+        "CASE-1",
+        (date(2026, 8, 8),),
+    )
+    assert all(
+        statement.lstrip().upper().startswith("SELECT")
+        for statement in cursor.statements
+    )
+
+
+def test_historical_planner_limits_source_override_to_conflicting_schedule_dates():
+    from infrastructure.mysql.historical_actual_start_date_planner import (
+        _schedule_overlap_predicates,
+    )
+    from domains.scheduling.generation import AssignmentCandidate, SchedulingGenerationCandidate
+
+    candidate = SchedulingGenerationCandidate(
+        case_no="CASE-1",
+        generation_number=1,
+        expected_aggregate_version=0,
+        resulting_aggregate_version=1,
+        cancelled_assignment_ids=(),
+        assignments=(
+            AssignmentCandidate(
+                candidate_key="CASE-1:historical:g1:a1",
+                source_assignment_id=9,
+                staff_id=11,
+                sequence=1,
+                assigned_start_date=date(2026, 8, 8),
+                assigned_end_date=date(2026, 8, 12),
+                service_dates=(date(2026, 8, 8), date(2026, 8, 12)),
+                actual_hours=16,
+            ),
+        ),
+        buffers=(),
+    )
+
+    predicates, parameters = _schedule_overlap_predicates(candidate)
+
+    assert predicates == ("(staff_id=%s AND work_date IN (%s,%s))",)
+    assert parameters == (11, date(2026, 8, 8), date(2026, 8, 12))
+
+
+def test_historical_planner_deletes_only_conflicting_current_schedule_projections():
+    from domains.scheduling.generation import AssignmentCandidate, SchedulingGenerationCandidate
+    from infrastructure.mysql.historical_actual_start_date_planner import (
+        _replace_conflicting_current_schedule_state,
+    )
+
+    class Cursor:
+        def __init__(self):
+            self.statements = []
+
+        def execute(self, statement, parameters):
+            self.statements.append((statement, parameters))
+
+    candidate = SchedulingGenerationCandidate(
+        case_no="CASE-1",
+        generation_number=1,
+        expected_aggregate_version=0,
+        resulting_aggregate_version=1,
+        cancelled_assignment_ids=(),
+        assignments=(
+            AssignmentCandidate(
+                candidate_key="CASE-1:historical:g1:a1",
+                source_assignment_id=9,
+                staff_id=11,
+                sequence=1,
+                assigned_start_date=date(2026, 8, 8),
+                assigned_end_date=date(2026, 8, 12),
+                service_dates=(date(2026, 8, 8), date(2026, 8, 12)),
+                actual_hours=16,
+            ),
+        ),
+        buffers=(),
+    )
+    cursor = Cursor()
+
+    _replace_conflicting_current_schedule_state(cursor, "CASE-1", candidate)
+
+    assert len(cursor.statements) == 2
+    occupancy_statement, occupancy_parameters = cursor.statements[0]
+    schedule_statement, schedule_parameters = cursor.statements[1]
+    assert occupancy_statement.startswith("DELETE FROM scheduling_effective_occupancy")
+    assert occupancy_parameters == (
+        11,
+        date(2026, 8, 8),
+        date(2026, 8, 12),
+    )
+    assert schedule_statement.startswith("DELETE FROM staff_schedule")
+    assert "case_no<>%s" in schedule_statement
+    assert schedule_parameters == (
+        "CASE-1",
+        11,
+        date(2026, 8, 8),
+        date(2026, 8, 12),
+    )
+
+
+def test_historical_planner_deletes_unmanaged_schedules_for_the_same_case():
+    from infrastructure.mysql.historical_actual_start_date_planner import (
+        _delete_unmanaged_case_schedules,
+    )
+
+    class Cursor:
+        def __init__(self):
+            self.statement = None
+            self.parameters = None
+
+        def execute(self, statement, parameters):
+            self.statement = statement
+            self.parameters = parameters
+
+    cursor = Cursor()
+
+    _delete_unmanaged_case_schedules(cursor, "CASE-1")
+
+    assert cursor.parameters == ("CASE-1",)
+    assert cursor.statement.startswith("DELETE FROM staff_schedule")
+    assert "case_no=%s" in cursor.statement
+    assert "generation_id IS NULL" in cursor.statement
 
 
 def test_historical_bootstrap_single_assignment_uses_recalculated_service_dates():
