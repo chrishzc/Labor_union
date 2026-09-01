@@ -201,6 +201,101 @@ def test_deposit_paid_with_distinct_actual_start_builds_service_assignment_candi
     assert preview.issue_codes == ()
 
 
+def test_matching_effective_assignment_is_reused_for_historical_actual_start():
+    """Row 70 must not classify corroborating formal occupancy as a conflict."""
+    asserted_start = date(2025, 10, 14)
+    formal_end = date(2025, 11, 3)
+    calls = []
+
+    class Repository(_Repository):
+        def __init__(self):
+            self.current = HistoricalOrderCurrentFacts(
+                "CASE-1", "客戶甲", OrderLifecycleStatus.DISCUSSION, 3,
+                date(2025, 9, 10), date(2025, 9, 8), None,
+            )
+
+        def resolve_staff(self, name, *, for_update):
+            del for_update
+            return (16,) if name == "月嫂甲" else ()
+
+        def active_assignments(self, case_no, *, for_update):
+            del case_no, for_update
+            return ({
+                "id": 51,
+                "staff_id": 16,
+                "generation_id": 114,
+                "assigned_start_date": asserted_start,
+                "assigned_end_date": formal_end,
+                "status": "completed",
+            }, {
+                "id": 40,
+                "staff_id": 16,
+                "generation_id": None,
+                "assigned_start_date": date(2025, 9, 8),
+                "assigned_end_date": date(2025, 10, 3),
+                "status": "completed",
+            })
+
+        def load_order(self, case_no, client_name, *, for_update):
+            del case_no, client_name, for_update
+            return self.current
+
+        def persist(self, request, preview, assignment_ids):
+            del request
+            calls.append(("persist", assignment_ids))
+            assert assignment_ids == ()
+            return HistoricalOrderAdoptionReceipt(
+                preview.outcome, preview.case_no, preview.resulting_version,
+                0, None, False, preview.fingerprint,
+            )
+
+    class Rebuilder:
+        def preview(self, **values):
+            calls.append(("preview", values))
+
+        def apply_in_current_unit_of_work(self, **values):
+            calls.append(("apply", values))
+
+    row = SimpleNamespace(
+        case_no="CASE-1", client_name="客戶甲",
+        asserted_status=HistoricalOrderSourceStatus.DEPOSIT_PAID,
+        actual_start_date=asserted_start, actual_end_date=date(2025, 10, 31),
+        issue_codes=(),
+        caregivers=(SimpleNamespace(
+            ordinal=1, name="月嫂甲", start_date=asserted_start,
+            end_date=date(2025, 10, 31), has_individual_interval=True,
+            issue_codes=(),
+        ),),
+        source_identity="historical-orders:test:row:70",
+        source_fingerprint="7" * 64,
+    )
+    repository = Repository()
+    workflow = HistoricalOrderAdoptionWorkflow(
+        repository, _UnitOfWork, _Writer(), Rebuilder()
+    )
+
+    preview = workflow.preview(row)
+    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_REUSED
+    assert preview.issue_codes == ()
+
+    workflow.apply(HistoricalOrderAdoptionRequest(
+        row, preview.fingerprint, "historical-order:row:70", "operator",
+        "adopt row 70", "historical-order:row:70:correlation",
+    ))
+    assert calls[0] == ("preview", {
+        "case_no": "CASE-1", "actual_start_date": asserted_start,
+        "correlation_id": "historical-preview:historical-orders:test:row:70",
+        "source_staff_ids": (),
+    })
+    assert calls[1][0] == "preview"
+    assert calls[2] == ("persist", ())
+    assert calls[3] == ("apply", {
+        "case_no": "CASE-1", "actual_start_date": asserted_start,
+        "source_identity": "historical-orders:test:row:70",
+        "actor": "operator", "correlation_id": "historical-order:row:70:correlation",
+    })
+
+
 def test_historical_actual_start_preview_projects_the_asserted_schedule_root():
     """A source assignment starts at the asserted, not HCM-planned, date."""
     asserted_start = date(2026, 8, 7)

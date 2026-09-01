@@ -28,8 +28,13 @@ def persist_scheduling_replacement(
     previous_generation_id = _previous_generation_id(aggregate_row)
     generation_id = _insert_generation(cursor, command)
     assignment_ids = _insert_assignments(cursor, command, generation_id)
-    _insert_schedules(cursor, command, generation_id, assignment_ids)
+    # ``uq_staff_schedule_effective_date`` covers the staff/date pair while
+    # the old generation is effective.  Retire that generation inside this
+    # same transaction before inserting a shifted replacement (for example an
+    # Actual Start correction); rollback still restores the old generation if
+    # any later write fails.
     _cancel_previous_state(cursor, command, previous_generation_id)
+    _insert_schedules(cursor, command, generation_id, assignment_ids)
     _insert_buffers(cursor, command, generation_id, assignment_ids)
     _activate_new_generation(cursor, generation_id)
     _insert_occupancy(cursor, command, generation_id, assignment_ids)
