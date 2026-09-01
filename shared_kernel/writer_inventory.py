@@ -229,8 +229,29 @@ def _build_finding(
 
 
 def _call_fingerprint(call: ast.Call) -> str:
-    normalized_call = ast.dump(call, include_attributes=False).encode("utf-8")
+    return writer_call_fingerprint(call)
+
+
+def writer_call_fingerprint(call: ast.Call) -> str:
+    normalized_call = json.dumps(
+        _stable_ast_value(call),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
     return hashlib.sha256(normalized_call).hexdigest()[:16]
+
+
+def _stable_ast_value(value: Any) -> Any:
+    if isinstance(value, ast.AST):
+        fields = [
+            [name, _stable_ast_value(field_value)]
+            for name, field_value in ast.iter_fields(value)
+            if field_value is not None and field_value != []
+        ]
+        return [type(value).__name__, fields]
+    if isinstance(value, list):
+        return [_stable_ast_value(item) for item in value]
+    return value
 
 
 def _constant_sql(

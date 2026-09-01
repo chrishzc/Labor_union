@@ -1182,7 +1182,7 @@
         "identity": "PROV-20260829-task97-production-script-scripts-generate_task97_commit_dispositions-py"
       },
       "evidence": {
-        "source_sha256": "e36768f152cc59d645eeef45718c0beb618c62a631d7e238dd7213be99021ba5",
+        "source_sha256": "e5ffbd252b2df985c1552bf0be839b195c8d43033238874a8ceec4203a94f1f2",
         "line_count": 572,
         "queue_status": "operator_only",
         "owner": "Architecture Governance",

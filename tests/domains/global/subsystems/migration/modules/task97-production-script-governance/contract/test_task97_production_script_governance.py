@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 from pathlib import Path
+
+from shared_kernel.writer_inventory import writer_call_fingerprint
 
 from scripts.generate_task97_production_script_inventory import discover_scripts
 
@@ -353,6 +356,21 @@ def test_task97_guard_requirements_follow_source_capability() -> None:
     assert "scripts/rebuild_beclass_import_anomalies.py" not in {
         entry["path"] for entry in inventory["entries"]
     }
+
+
+def test_writer_call_fingerprint_ignores_empty_optional_ast_fields() -> None:
+    call = ast.parse("unit_of_work.commit()").body[0].value
+    with_empty_optional_field = ast.Call(
+        func=call.func,
+        args=call.args,
+        keywords=call.keywords,
+    )
+    with_empty_optional_field._fields = (*with_empty_optional_field._fields, "future")
+    with_empty_optional_field.future = []
+
+    assert writer_call_fingerprint(call) == writer_call_fingerprint(
+        with_empty_optional_field
+    )
 
 
 def test_task97_inventory_has_no_null_or_empty_evidence_fields() -> None:

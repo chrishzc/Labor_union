@@ -26,10 +26,12 @@ class _Repository:
 
 def _facts(*, status=OrderLifecycleStatus.CANCELLED, cancellation_effective=True):
     return SimpleNamespace(
+        order=SimpleNamespace(service_started=False),
         lifecycle=SimpleNamespace(
             current_status=status,
             cancellation_effective=cancellation_effective,
-        )
+        ),
+        historical_cancellation_origin=False,
     )
 
 

@@ -71,8 +71,14 @@ class _HolidayConnection:
 @pytest.fixture(autouse=True)
 def _isolated_holiday_repository(monkeypatch):
     from infrastructure.mysql import mysql_adapter
+    from subsystems.scheduling import attendance_schedule_query
 
     monkeypatch.setattr(mysql_adapter, "get_connection", _HolidayConnection)
+    monkeypatch.setattr(
+        attendance_schedule_query,
+        "calculate_attendance_schedule",
+        mysql_adapter.calculate_attendance_schedule,
+    )
 
 
 # (name, start, service_days, service_type, holiday_dates, expected_end)

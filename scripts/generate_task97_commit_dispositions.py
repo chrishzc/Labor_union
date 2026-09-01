@@ -10,7 +10,6 @@ from __future__ import annotations
 import ast
 from collections import Counter
 from dataclasses import dataclass
-from hashlib import sha256
 import json
 from pathlib import Path
 import subprocess
@@ -25,6 +24,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 from shared_kernel.writer_inventory import (  # noqa: E402
     WriterFinding,
     scan_production_writers,
+    writer_call_fingerprint,
     writer_scan_fingerprint,
 )
 
@@ -155,7 +155,7 @@ def _git_revision() -> str:
 
 
 def _call_fingerprint(call: ast.Call) -> str:
-    return sha256(ast.dump(call, include_attributes=False).encode("utf-8")).hexdigest()[:16]
+    return writer_call_fingerprint(call)
 
 
 def _receiver(call: ast.Call) -> str:

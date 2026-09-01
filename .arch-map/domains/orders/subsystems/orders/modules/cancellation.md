@@ -28,15 +28,17 @@
 - `/api/v1/orders/{case_no}/cancellation/{preview,apply}` — `api/routes/order_cancellation.py`。
 
 ## Verification
+- test_root: `tests/domains/orders/subsystems/orders/modules/cancellation/`
 - static:
-  - `.venv/bin/python -m pytest tests/domains/orders/subsystems/orders/integration/test_cancelled_order_reentry_guard.py tests/domains/orders/subsystems/orders/integration/test_order_cancellation_cross_domain_chain.py`
+  - `.venv/bin/python -m pytest tests/domains/orders/subsystems/orders/modules/cancellation/ tests/domains/orders/subsystems/orders/integration/test_cancelled_order_reentry_guard.py tests/domains/orders/subsystems/orders/integration/test_order_cancellation_cross_domain_chain.py`
+- disposable_mysql: `tests/test_historical_mid_service_cancellation_disposable_mysql_e2e.py`
 - higher_boundary: tests/domains/orders/subsystems/orders/integration/
 - higher_boundary:
   - `ui_react/src/tests/orders_page_real_data.test.tsx`
 
 ## Provenance
 - Cancellation workflow ownership — `architecture_declared` — Orders §3.5 and existing Orders subsystem map.
-- Already-effective cancellation must be rejected before candidate rebuild — `source_observed` — `subsystems/orders/cancellation_workflow.py` and Orders UI contract.
+- Already-effective cancellation must be rejected before candidate rebuild, except a historical cancellation-origin row with confirmed service-day facts entering its one-time canonical remediation path — `source_observed` — `subsystems/orders/cancellation_workflow.py` and Orders historical-remediation tests.
 
 ## Change triggers
 - 取消 eligibility／typed error、cross-domain impact、transaction owner、API entrypoint 或 UI cancellation gating 改變時重新 reconcile。

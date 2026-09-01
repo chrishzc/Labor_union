@@ -252,12 +252,12 @@ jobs:
     - name: Collect preserved cross-domain workflows
       run: |
         python -m pytest --collect-only -q \
-          tests/test_order_cancellation_workflow.py \
+          tests/domains/orders/subsystems/orders/integration/test_order_cancellation_cross_domain_chain.py \
           tests/test_order_terms_preassignment_correction.py \
           tests/test_contract_completion_workflow.py
     - name: Run preserved cross-domain workflows
       run: |
         python -m pytest -q \
-          tests/test_order_cancellation_workflow.py \
+          tests/domains/orders/subsystems/orders/integration/test_order_cancellation_cross_domain_chain.py \
           tests/test_order_terms_preassignment_correction.py \
           tests/test_contract_completion_workflow.py

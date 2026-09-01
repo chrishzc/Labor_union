@@ -1,9 +1,16 @@
 from datetime import date
 from types import SimpleNamespace
 
+import pytest
+
 from domains.orders.cancellation import CancellationOrderFacts, ConfirmedServiceDay
 from domains.orders.lifecycle import OrderLifecycleStatus
-from subsystems.orders.cancellation_workflow import _effective_order_facts
+from shared_kernel.identities import CorrelationId
+from subsystems.orders.cancellation_workflow import (
+    CancellationWorkflowError,
+    _effective_order_facts,
+    _ensure_cancellation_allowed,
+)
 
 
 def _facts(*, historical_origin: bool, status=OrderLifecycleStatus.CANCELLED):
@@ -17,7 +24,10 @@ def _facts(*, historical_origin: bool, status=OrderLifecycleStatus.CANCELLED):
             False,
             False,
         ),
-        lifecycle=SimpleNamespace(current_status=status),
+        lifecycle=SimpleNamespace(
+            current_status=status,
+            cancellation_effective=status is OrderLifecycleStatus.CANCELLED,
+        ),
         historical_cancellation_origin=historical_origin,
     )
 
@@ -50,3 +60,20 @@ def test_normal_or_non_cancelled_case_does_not_receive_historical_exception():
     assert normal.service_started is False
     assert wrong_status.actual_start_date is None
     assert wrong_status.service_started is False
+
+
+def test_historical_cancelled_case_with_confirmed_days_can_enter_recovery():
+    _ensure_cancellation_allowed(
+        _facts(historical_origin=True),
+        _confirmed_days(),
+        CorrelationId("historical-recovery"),
+    )
+
+
+def test_historical_cancelled_case_without_confirmed_days_remains_closed():
+    with pytest.raises(CancellationWorkflowError):
+        _ensure_cancellation_allowed(
+            _facts(historical_origin=True),
+            (),
+            CorrelationId("historical-recovery-without-days"),
+        )

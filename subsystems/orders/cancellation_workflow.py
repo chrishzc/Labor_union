@@ -185,7 +185,9 @@ class OrderCancellationWorkflow:
             case_no, _confirmed_staff_ids(confirmed_service_days)
         )
         _ensure_cancellation_allowed(
-            facts, CorrelationId(f"order-cancellation-preview:{case_no}")
+            facts,
+            confirmed_service_days,
+            CorrelationId(f"order-cancellation-preview:{case_no}"),
         )
         return self._build_preview(facts, confirmed_service_days)
 
@@ -220,7 +222,9 @@ class OrderCancellationWorkflow:
     def _fresh_preview(self, request: OrderCancellationApplyRequest, facts: CancellationWorkflowFacts, preflight_staff_ids: tuple[int, ...]) -> OrderCancellationPreview:
         _validate_locked_staff_set(request, facts, preflight_staff_ids)
         _validate_expected_versions(request, facts)
-        _ensure_cancellation_allowed(facts, request.correlation_id)
+        _ensure_cancellation_allowed(
+            facts, request.confirmed_service_days, request.correlation_id
+        )
         try:
             preview = self._build_preview(facts, request.confirmed_service_days)
         except CancellationCandidateError as error:
@@ -269,12 +273,20 @@ def _effective_order_facts(facts, confirmed_service_days):
 
 
 def _ensure_cancellation_allowed(
-    facts: CancellationWorkflowFacts, correlation_id: CorrelationId
+    facts: CancellationWorkflowFacts,
+    confirmed_service_days: tuple[ConfirmedServiceDay, ...],
+    correlation_id: CorrelationId,
 ) -> None:
+    historical_recovery = (
+        facts.historical_cancellation_origin
+        and not facts.order.service_started
+        and bool(confirmed_service_days)
+        and facts.lifecycle.current_status is OrderLifecycleStatus.CANCELLED
+    )
     if (
         facts.lifecycle.current_status is OrderLifecycleStatus.CANCELLED
         or facts.lifecycle.cancellation_effective
-    ):
+    ) and not historical_recovery:
         raise CancellationWorkflowError(
             TypedError(
                 ErrorCategory.CONFLICT,
