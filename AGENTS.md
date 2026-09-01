@@ -9,14 +9,15 @@
 每個任務預設只按以下順序工作：
 
 1. 記錄 branch、HEAD、`git status --short`，保留所有 dirty paths。
-2. 讀本檔後，先讀 `.arch-map/index.md`。依使用者點名的 path、功能名稱或業務詞彙，選擇唯一最接近的 Domain／Global module；只沿一條已連結的 `Domain → Subsystem → Module` 最短路徑往下，不開 sibling branches。
-3. `.arch-map/` leaf 一旦指出 owner、source、adapter、直接依賴或測試路徑，導航即結束；只讀完成 current task 所需的那些目標檔案與一個最直接測試。使用者已點名精確檔案時，地圖只用來確認 owner／測試邊界，不再廣搜。
-4. **停止條件：** 已能確定 current target、owner、write set 與 focused verification。達成後不得繼續做 repository-wide search、caller graph 擴張、相鄰 Module／Domain 探索或文件瀏覽；「可能相關」不是擴搜理由。
-5. 只有 `.arch-map/` 沒有路由、指向的 path 不存在，或目標檔案出現一個會實質改變行為／修改位置／驗證邊界的 unresolved dependency 時，才以 symbol／path 向外擴一層。每次只開一個目錄或一個明確連結，解決該 unknown 後立即停止。
-6. 預設不掃描整個 repository，不整目錄載入 `document/`、`.arch-map/`、`tests/`，不先讀完整 `README.md`，也不跑 full suite。
-7. 一般 T0／T1 局部修改不建立新 spec、Work Package、receipt、架構圖或追蹤文件。
+2. 使用者已點名精確 path、symbol 或 test 時，直接開該檔案；只在需要確認 owner／相鄰測試時讀最接近的 `.arch-map/` leaf，不得先遍歷根索引或搜尋整個 repository。
+3. 使用者只描述功能、畫面或業務詞彙時，以 `.arch-map/` 作為第一個定位索引：先用 filename-only bounded search（例如 `rg -l`）只搜尋 `.arch-map/`，最多保留 10 個候選且不輸出全文。若命中唯一最接近的 Module／Subsystem leaf，直接讀該 leaf；候選仍不明時才讀 `.arch-map/index.md`，並只沿一條 `Domain → Subsystem → Module` 最短路徑往下，不開 sibling branches。
+4. `.arch-map/` leaf 一旦指出 owner、source、adapter、直接依賴或測試路徑，導航即結束；只讀完成 current task 所需的目標檔案與一個最直接測試。
+5. **停止條件：** 已能確定 current target、owner、write set 與 focused verification。達成後不得繼續做 repository-wide search、caller graph 擴張、相鄰 Module／Domain 探索或文件瀏覽；「可能相關」不是擴搜理由。
+6. 只有 `.arch-map/` 明確標示未建模／incomplete、沒有路由、指向的 path 不存在，或目標檔案出現一個會實質改變行為／修改位置／驗證邊界的 unresolved dependency 時，才在最可能的 owner 目錄做一次 bounded symbol／path search。解決該 unknown 後立即停止，不得因地圖缺口轉成全 repository 掃描。
+7. 預設不整目錄載入 `document/`、`.arch-map/`、`tests/`，不先讀完整 `README.md`，也不跑 full suite。
+8. 一般 T0／T1 局部修改不建立新 spec、Work Package、receipt、架構圖或追蹤文件。
 
-完成上述地圖導航後，只有任務實際涉及下列邊界時，才讀對應的最小 current 文件：
+完成上述定位後，只有任務實際涉及下列邊界時，才讀對應的最小 current 文件：
 
 - owner、SSOT、root fact、state machine、cross-domain invariant、public contract／entry point、transaction／Unit of Work：讀 `.arch-map/` 指向的單一 owning Domain／Subsystem current spec；只有 currentness 或裁決仍不明時才讀 `01_規格基線/15_正式規格索引與裁決總表.md`。
 - concurrency／fingerprint：只讀 `01_規格基線/00_Global_共同契約.md` 的相關段落。
