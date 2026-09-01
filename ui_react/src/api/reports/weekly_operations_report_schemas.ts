@@ -33,7 +33,7 @@ export const WeeklyOperationsReportSummarySchema = z.strictObject({
 export const WeeklyOperationsCaseRowSchema = z.strictObject({
   case_no: z.string().min(1),
   applicant_name_masked: z.string().min(1),
-  application_date: DateSchema,
+  application_date: DateSchema.nullable(),
   identity_status: z.string().nullable(),
   review_result: z.enum(['general_eligible', 'subsidized_eligible', 'rejected_unpartitioned', 'pending']),
   order_status: z.string().nullable(),

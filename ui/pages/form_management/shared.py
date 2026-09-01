@@ -6,6 +6,7 @@
 """
 
 import os
+from html import escape
 import json
 import time
 import math
@@ -13,10 +14,6 @@ import uuid
 import openpyxl
 from openpyxl.utils import get_column_letter
 from datetime import datetime, date
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
-from ui.pages.shared import build_admin_headers, resolve_api_base_url
 
 _FORM_MGMT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ui/pages
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(_FORM_MGMT_DIR))  # 專案根目錄
@@ -26,50 +23,6 @@ _PRIMARY_TEMPLATES_DIR = os.path.join(_PROJECT_ROOT, "db", "templates")
 JSON_TPL_PATH = os.path.join(_PROJECT_ROOT, "db", "form_templates.json")
 TEMPLATES_DIR = _PRIMARY_TEMPLATES_DIR if os.path.isdir(_PRIMARY_TEMPLATES_DIR) else _LEGACY_TEMPLATES_DIR
 CONTRACTS_DIR = os.path.join(_PRIMARY_TEMPLATES_DIR, "contracts") if os.path.isdir(_PRIMARY_TEMPLATES_DIR) else os.path.join(_LEGACY_TEMPLATES_DIR, "contracts")
-
-
-def fetch_staff_contract_context(case_no: str, assignment_id: int | None = None) -> dict:
-    """Read staff-contract facts from FastAPI without writing the workbook."""
-    query = urlencode({"assignment_id": assignment_id}) if assignment_id else ""
-    base_url = resolve_api_base_url()
-    url = f"{base_url}/api/v1/contracts/staff/{case_no}"
-    if query:
-        url = f"{url}?{query}"
-    request = Request(url=url, headers=build_admin_headers())
-    try:
-        with urlopen(request, timeout=5) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")
-        raise ValueError(f"契約資料 API 回應 {error.code}: {detail}") from error
-    except URLError as error:
-        raise ValueError(f"無法連線契約資料 API ({base_url}): {error.reason}") from error
-
-    if not payload.get("success", False) or not isinstance(payload.get("data"), dict):
-        raise ValueError(payload.get("error") or payload.get("message") or "契約資料 API 未回傳資料")
-    return payload["data"]
-
-
-def flatten_staff_contract_context(context: dict) -> dict:
-    """Flatten the read-only API payload into existing Excel mapping keys."""
-    order = context.get("order") or {}
-    client = context.get("client") or {}
-    assignment = context.get("assignment") or {}
-    staff = context.get("staff") or {}
-
-    flat = {
-        **{key: value for key, value in order.items() if value is not None},
-        **{key: value for key, value in assignment.items() if value is not None},
-        "client_name": client.get("name"),
-        "client_phone": client.get("phone"),
-        "city": client.get("city"),
-        "address": client.get("address"),
-        "service_type": client.get("service_type"),
-        "service_time": client.get("service_time"),
-        "staff_name": staff.get("name"),
-        "staff_phone": staff.get("phone"),
-    }
-    return {key: value for key, value in flat.items() if value is not None}
 
 
 def generate_field_id() -> str:
@@ -108,7 +61,12 @@ def get_border_style(cell_border):
     return f"border-left: {b_left} border-right: {b_right} border-top: {b_top} border-bottom: {b_bottom}"
 
 
-def render_excel_contract_mirror(contract_config: dict, target_order: dict, global_stats: dict) -> str:
+def render_excel_contract_mirror(
+    contract_config: dict,
+    target_order: dict,
+    global_stats: dict,
+    mapped_values: dict | None = None,
+) -> str:
     """實時 1:1 解析與高精度鏡像渲染 Excel 實體範本檔 (含背景色、欄寬、粗體與原廠邊框)"""
     tpl_filename = contract_config.get('template_filename', 'contract_client_copy.xlsx')
     excel_file_path = os.path.join(CONTRACTS_DIR, tpl_filename)
@@ -190,7 +148,10 @@ def render_excel_contract_mirror(contract_config: dict, target_order: dict, glob
                 text_color = "#0D47A1" if not target_order else "#111111"
                 font_weight_css = "bold"
 
-                if p_info.get('status') == 'pending':
+                if mapped_values is not None:
+                    raw_value = mapped_values.get(coord)
+                    cell_val = "" if raw_value is None else format_db_value(db_k, raw_value)
+                elif p_info.get('status') == 'pending':
                     cell_val = "暫不連動"
                     bg_color = "#FFF3CD"
                     text_color = "#9C6500"
@@ -204,7 +165,7 @@ def render_excel_contract_mirror(contract_config: dict, target_order: dict, glob
                     cell_val = f"[{p_info.get('label', coord)}]"
 
             style_str = f"background:{bg_color}; color:{text_color}; font-weight:{font_weight_css}; text-align:{h_align}; vertical-align:middle; padding:3px 6px; {border_css} font-size:12px; {wrap_css}"
-            row_html += f"<td {span_attr} style='{style_str}'>{cell_val}</td>"
+            row_html += f"<td {span_attr} style='{style_str}'>{escape(str(cell_val))}</td>"
 
         table_rows_html += f"<tr>{row_html}</tr>"
 
@@ -261,15 +222,6 @@ def load_contract_templates():
         except Exception:
             pass
     return c_list
-
-
-def save_contract_template(contract_data: dict):
-    """持久化保存契約變數對照設定至 db/templates/contracts/*.json"""
-    os.makedirs(CONTRACTS_DIR, exist_ok=True)
-    cid = contract_data.get('id', 'contract_hsinchu_v1')
-    fpath = os.path.join(CONTRACTS_DIR, f"{cid}.json")
-    with open(fpath, "w", encoding="utf-8") as f:
-        json.dump(contract_data, f, ensure_ascii=False, indent=2)
 
 
 def load_json_templates():
@@ -479,9 +431,24 @@ def get_table_for_key(db_key: str) -> str:
     return list(DB_TABLE_FIELDS.keys())[0]
 
 
-def render_html_document(tpl_data: dict, target_order: dict, global_stats: dict) -> str:
+def render_html_document(tpl_data: dict, target_order: dict, global_stats: dict, order_information: dict | None = None) -> str:
     """渲染雙欄 CSS Grid 高質感 HTML 實體單據"""
     html_items = ""
+    typed_values = {}
+    typed_blockers = []
+    if tpl_data.get('id') in {'tpl_info_01', 'tpl_info_02'}:
+        # The staff information sheets must be rendered from the typed API
+        # projection.  Raw target_order/global_stats are intentionally not a
+        # fallback for these two templates.
+        if isinstance(order_information, dict):
+            typed_values = {
+                item.get('field_id'): item.get('value')
+                for item in order_information.get('fields', [])
+                if isinstance(item, dict)
+            }
+            typed_blockers = [
+                str(item) for item in order_information.get('blockers', [])
+            ]
     for f in tpl_data.get('fields', []):
         lbl = f.get('label', '未命名欄位')
         f_type = f.get('type', 'text')
@@ -490,7 +457,10 @@ def render_html_document(tpl_data: dict, target_order: dict, global_stats: dict)
 
         if f_type == "db_link":
             db_k = f.get('db_key', 'client_name')
-            if db_k in global_stats:
+            if tpl_data.get('id') in {'tpl_info_01', 'tpl_info_02'}:
+                val_raw = typed_values.get(f.get('id'))
+                val_str = format_db_value(db_k, val_raw)
+            elif db_k in global_stats:
                 val_raw = global_stats[db_k]
                 val_str = format_db_value(db_k, val_raw)
             elif target_order:
@@ -507,6 +477,15 @@ def render_html_document(tpl_data: dict, target_order: dict, global_stats: dict)
         </div>
         """
 
+    blocker_html = ""
+    if tpl_data.get('id') in {'tpl_info_01', 'tpl_info_02'} and typed_blockers:
+        blocker_html = (
+            '<div style="color:#B71C1C;font-size:12px;margin-bottom:12px;">'
+            '部分欄位目前沒有可用的正式資料來源，已安全留白：'
+            + ', '.join(typed_blockers)
+            + '</div>'
+        )
+
     print_doc_html = f"""
     <div id="printable-area" style="font-family:'Segoe UI', Microsoft JhengHei, sans-serif; padding:25px; border:2px solid #1565C0; background:#FAFAFA; border-radius:8px; max-width:850px; margin:auto;">
         <div style="text-align:center; border-bottom:2px double #1565C0; padding-bottom:12px; margin-bottom:20px;">
@@ -515,6 +494,7 @@ def render_html_document(tpl_data: dict, target_order: dict, global_stats: dict)
             <p style="margin:4px 0 0 0; color:#757575; font-size:11px;">單據編號：TPL-{tpl_data.get('id', '00')} | 列印日期：{date.today().strftime('%Y-%m-%d')}</p>
         </div>
 
+        {blocker_html}
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px 14px;">
             {html_items}
         </div>

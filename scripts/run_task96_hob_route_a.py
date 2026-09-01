@@ -5,8 +5,10 @@ Description: 以合成來源和正式 no-auth API 重建 Task 96 HOB-F Route A �
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
+import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -23,8 +25,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-SCENARIO_ID = "HOB-F04-ROUTE-A-001"
-CASE_NO = "115960401"
+SCENARIO_ID = ""
+CASE_NO = ""
 STAFF_IDENTITY = "A123456789"
 STAFF_BANK_ACCOUNT = "0096000000000001"
 CLIENT_NAME = "Task96 合成客戶"
@@ -37,8 +39,10 @@ STAFF_SOURCE_IDENTITY = "TASK96-STAFF-001"
 CLIENT_SOURCE_IDENTITY = "TASK96-CLIENT-001"
 DEPOSIT_SOURCE_IDENTITY = "TASK96-DEP-001"
 PAYOUT_SOURCE_IDENTITY = "TASK96-PAYOUT-001"
-SOURCE_REVISION = "HOB-F04-ROUTE-A-001-r2"
-COMMAND_IDENTITY_PREFIX = "hob-f04-route-a-001"
+SOURCE_REVISION = ""
+COMMAND_IDENTITY_PREFIX = ""
+COMPLETION_EVALUATION_AT = "2026-07-07T17:01:00+08:00"
+PAYOUT_DATE = "2026/07/15"
 ACTOR = "development-bypass"
 SERVICE_DATES = (
     "2026-07-01",
@@ -91,6 +95,59 @@ def _require_safe_environment() -> str:
     if not os.getenv("DB_PASSWORD"):
         raise RuntimeError("task96_route_a_database_credential_missing")
     return database
+
+
+def _synthetic_staff_identity(case_no: str) -> str:
+    digest = hashlib.sha256(case_no.encode("utf-8")).hexdigest()
+    body = "1" + str(int(digest[8:24], 16) % 10_000_000).zfill(7)
+    letter_value = 10
+    digits = [int(str(letter_value)[0]), int(str(letter_value)[1]), *map(int, body)]
+    weights = (1, 9, 8, 7, 6, 5, 4, 3, 2, 1)
+    check_digit = (10 - sum(value * weight for value, weight in zip(digits, weights)) % 10) % 10
+    return f"A{body}{check_digit}"
+
+
+def _configure_case(case_no: str) -> None:
+    """Bind the runner to one caller-supplied disposable case identity."""
+    global CASE_NO, SCENARIO_ID, SOURCE_REVISION, COMMAND_IDENTITY_PREFIX
+    global CLIENT_SOURCE_IDENTITY, DEPOSIT_SOURCE_IDENTITY, PAYOUT_SOURCE_IDENTITY
+    global CLIENT_NAME, CLIENT_PHONE, CLIENT_EMAIL
+    global STAFF_IDENTITY, STAFF_NAME, STAFF_PHONE, STAFF_EMAIL, STAFF_SOURCE_IDENTITY
+    global STAFF_BANK_ACCOUNT
+    global SERVICE_DATES, COMPLETION_EVALUATION_AT, PAYOUT_DATE
+    normalized = case_no.strip()
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,62}", normalized) is None:
+        raise ValueError(
+            "task96_route_a_case_no_invalid: use a non-empty alphanumeric lu_test case identifier"
+        )
+    CASE_NO = normalized
+    identity = re.sub(r"[^A-Za-z0-9]+", "-", normalized).strip("-").lower()
+    SCENARIO_ID = f"TASK96-ROUTE-A-{normalized}"
+    SOURCE_REVISION = f"TASK96-ROUTE-A-{identity}-r1"
+    COMMAND_IDENTITY_PREFIX = f"task96-route-a-{identity}"
+    CLIENT_SOURCE_IDENTITY = f"TASK96-{identity.upper()}-CLIENT"
+    DEPOSIT_SOURCE_IDENTITY = f"TASK96-{identity.upper()}-DEP"
+    PAYOUT_SOURCE_IDENTITY = f"TASK96-{identity.upper()}-PAYOUT"
+    phone_suffix = str(int(hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:10], 16) % 100_000_000).zfill(8)
+    CLIENT_NAME = f"Task96 合成客戶 {identity.upper()}"
+    CLIENT_PHONE = f"09{phone_suffix}"
+    CLIENT_EMAIL = f"task96-client-{identity}@example.test"
+    staff_digest = hashlib.sha256(f"staff:{normalized}".encode("utf-8")).hexdigest()
+    STAFF_IDENTITY = _synthetic_staff_identity(normalized)
+    STAFF_NAME = f"Task96 合成月嫂 {identity.upper()}"
+    STAFF_PHONE = f"09{int(staff_digest[:10], 16) % 100_000_000:08d}"
+    STAFF_EMAIL = f"task96-staff-{identity}@example.test"
+    STAFF_SOURCE_IDENTITY = f"TASK96-{identity.upper()}-STAFF"
+    STAFF_BANK_ACCOUNT = f"0096{int(staff_digest[10:26], 16) % 1_000_000_000_000:012d}"
+    week_offset = int(hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:8], 16) % 52
+    start = date(2026, 8, 3) + timedelta(days=(week_offset % 4) * 7)
+    SERVICE_DATES = tuple(
+        (start + timedelta(days=day_offset)).isoformat()
+        for day_offset in (0, 1, 2, 3, 4)
+    )
+    COMPLETION_EVALUATION_AT = f"{SERVICE_DATES[-1]}T17:01:00+08:00"
+    payout_date = date.fromisoformat(SERVICE_DATES[-1]) + timedelta(days=18)
+    PAYOUT_DATE = payout_date.strftime("%Y/%m/%d")
 
 
 def _canonical_xlsx(frame: pd.DataFrame, sheet_name: str) -> bytes:
@@ -209,9 +266,9 @@ def _finance_deposit_workbook() -> bytes:
 def _finance_staff_payout_workbook() -> bytes:
     row = {
         "序號": PAYOUT_SOURCE_IDENTITY,
-        "交易日期": "2026/07/15",
+        "交易日期": PAYOUT_DATE,
         "交易時間": "09:07:15",
-        "帳務日期": "2026/07/15",
+        "帳務日期": PAYOUT_DATE,
         "摘要": "Task96 合成月嫂薪資",
         "支出金額": 12000,
         "存入金額": "",
@@ -354,7 +411,7 @@ def _ensure_staff_preferences(
         client.post(f"{path}/preview", json={"values": STAFF_PREFERENCE_VALUES}),
         "staff_preferences_preview",
     )
-    identity = f"{SCENARIO_ID}:staff-preferences:v1"
+    identity = f"{SCENARIO_ID}:staff-preferences:{staff_id}:v1"
     return _require_success(
         client.post(
             f"{path}/apply",
@@ -385,10 +442,114 @@ def _matching_contact_state(
     )
 
 
+def _ensure_candidate_contact_pool(
+    client: TestClient,
+    staff_id: int,
+) -> dict[str, object]:
+    """Drive the candidate-pool owner workflow before formal matching."""
+    path = f"/api/v1/orders/{CASE_NO}/candidate-contact-pool"
+    pool = _require_success(client.get(path), "candidate_contact_pool_query")
+    candidates = pool.get("candidates")
+    if not isinstance(candidates, list):
+        raise RuntimeError("candidate_contact_pool_candidates_invalid")
+    candidate = next(
+        (item for item in candidates if item.get("staff_id") == staff_id),
+        None,
+    )
+    if candidate is None:
+        added = _require_success(
+            client.post(
+                f"{path}/candidates",
+                json={
+                    "actor": ACTOR,
+                    "event_key": f"{SCENARIO_ID}:candidate-pool-add:v1",
+                    "candidates": [
+                        {
+                            "staff_id": staff_id,
+                            "start_date": SERVICE_DATES[0],
+                            "end_date": SERVICE_DATES[-1],
+                        }
+                    ],
+                },
+            ),
+            "candidate_contact_pool_add",
+        )
+        candidate_id = int(added["candidate_ids"][0])
+    else:
+        candidate_id = int(candidate["id"])
+
+    pool = _require_success(client.get(path), "candidate_contact_pool_readback")
+    candidates = pool.get("candidates")
+    if not isinstance(candidates, list):
+        raise RuntimeError("candidate_contact_pool_readback_invalid")
+    candidate = next(
+        (item for item in candidates if int(item.get("id", 0)) == candidate_id),
+        None,
+    )
+    if candidate is None:
+        raise RuntimeError("candidate_contact_pool_candidate_missing")
+    information = candidate.get("information")
+    if not isinstance(information, dict):
+        raise RuntimeError("candidate_contact_pool_information_invalid")
+    if information.get("1") is None and information.get("information_1") is None:
+        preview = _require_success(
+            client.post(
+                f"{path}/candidates/{candidate_id}/information/manual-confirmation/preview",
+                json={
+                    "info_type": 1,
+                    "confirmation_method": "phone",
+                    "reason": "Task 96 Route A 合成人工確認候選訂單資訊",
+                    "actor": ACTOR,
+                },
+            ),
+            "candidate_information_preview",
+        )
+        _require_success(
+            client.post(
+                f"{path}/candidates/{candidate_id}/information/manual-confirmation",
+                json={
+                    "info_type": 1,
+                    "confirmation_method": "phone",
+                    "reason": "Task 96 Route A 合成人工確認候選訂單資訊",
+                    "actor": ACTOR,
+                    "event_key": f"{SCENARIO_ID}:candidate-information-1:v1",
+                    "expected_version": preview["expected_version"],
+                    "preview_fingerprint": preview["preview_fingerprint"],
+                },
+            ),
+            "candidate_information_apply",
+        )
+        pool = _require_success(client.get(path), "candidate_contact_pool_after_information")
+        candidates = pool.get("candidates")
+        if not isinstance(candidates, list):
+            raise RuntimeError("candidate_contact_pool_after_information_invalid")
+        candidate = next(
+            (item for item in candidates if int(item.get("id", 0)) == candidate_id),
+            None,
+        )
+        if candidate is None:
+            raise RuntimeError("candidate_contact_pool_candidate_missing_after_information")
+    if candidate.get("willingness") != "willing":
+        _require_success(
+            client.put(
+                f"{path}/candidates/{candidate_id}/willingness",
+                json={
+                    "actor": ACTOR,
+                    "event_key": f"{SCENARIO_ID}:candidate-willingness:v1",
+                    "willingness": "willing",
+                    "reason": "Task 96 Route A 合成人工確認接案意願",
+                },
+            ),
+            "candidate_willingness_apply",
+        )
+    return _require_success(client.get(path), "candidate_contact_pool_final_readback")
+
+
 def _run_stage_02(
     client: TestClient,
     staff_id: int,
 ) -> dict[str, object]:
+    candidate_pool = _ensure_candidate_contact_pool(client, staff_id)
     segments = [
         {
             "staff_id": staff_id,
@@ -504,6 +665,10 @@ def _run_stage_02(
             state.get("customer_profiles_manual_confirmation") is not None
         ),
         "customer_decision": state.get("customer_decision"),
+        "candidate_contact_pool": {
+            "pool_id": candidate_pool.get("pool_id"),
+            "candidate_count": len(candidate_pool.get("candidates", [])),
+        },
     }
 
 
@@ -1075,7 +1240,7 @@ def _run_stage_06(client: TestClient) -> dict[str, object]:
             "order_status": order["order_status"],
             "owner_projection": completion,
         }
-    evaluation_at = "2026-07-07T17:01:00+08:00"
+    evaluation_at = COMPLETION_EVALUATION_AT
     path = f"/api/v1/orders/{CASE_NO}/service-completion"
     preview = _require_success(
         client.post(
@@ -1419,6 +1584,10 @@ def run_route_a() -> dict[str, object]:
         payroll = _ensure_payroll_obligation(client, int(selected_staff[0]["id"]))
         staff_payout = _ensure_staff_payout(client, int(selected_staff[0]["id"]))
         completion = _historical_completion(client)
+        final_order = _require_success(
+            client.get(f"/api/v1/orders/{CASE_NO}"),
+            "final_order_readback",
+        )
     return {
         "scenario_id": SCENARIO_ID,
         "database": database,
@@ -1460,9 +1629,17 @@ def run_route_a() -> dict[str, object]:
         "payroll": payroll,
         "staff_payout": staff_payout,
         "historical_completion": completion,
-        "order_status": order.get("order_status"),
+        "order_status": final_order.get("order_status"),
     }
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--case-no",
+        required=True,
+        help="caller-supplied case identifier for one disposable lu_test_* run",
+    )
+    args = parser.parse_args()
+    _configure_case(args.case_no)
     print(json.dumps(run_route_a(), ensure_ascii=False, sort_keys=True))

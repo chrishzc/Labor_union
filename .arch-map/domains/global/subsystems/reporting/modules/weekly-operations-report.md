@@ -12,6 +12,7 @@
   - `subsystems/reporting/weekly_operations_report_query.py`
   - `subsystems/reporting/weekly_operations_report_export.py`
   - `infrastructure/mysql/weekly_operations_report_query_adapter.py`
+  - `scripts/generate_entrypoint_review_queue.py`
   - `ui_react/src/pages/ReportsPage.tsx`
 - entrypoints:
   - `api/routes/operations_reports.py`

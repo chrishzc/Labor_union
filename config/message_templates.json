@@ -339,6 +339,136 @@
       "content": " 󁄴Ð򪣧Ù󶥔\u0007S񌺠\tWD",
       "variables": [],
       "usage": []
+    },
+    {
+      "id": "LU96-M1-GATEWAY-RETRY-FAIL-CARD-V1",
+      "name": "Task96 M1 gateway retry baseline",
+      "category": "task96_baseline",
+      "message_type": "text",
+      "enabled": true,
+      "content": "Task96 baseline notification: gateway retry review.",
+      "variables": [],
+      "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LU96-M1-LEAVE-EXTENSION-CARD-V1",
+      "name": "Task96 M1 leave extension baseline",
+      "category": "task96_baseline",
+      "message_type": "text",
+      "enabled": true,
+      "content": "Task96 baseline notification: leave extension.",
+      "variables": [],
+      "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LU96-M1-STAFF-RETIRE-CARD-V1",
+      "name": "Task96 M1 staff retirement baseline",
+      "category": "task96_baseline",
+      "message_type": "text",
+      "enabled": true,
+      "content": "Task96 baseline notification: staff retirement.",
+      "variables": [],
+      "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LU96-M2-ROUTER-REPLY-CARD-V1",
+      "name": "Task96 M2 router reply baseline",
+      "category": "task96_baseline",
+      "message_type": "text",
+      "enabled": true,
+      "content": "Task96 baseline notification: deterministic router reply.",
+      "variables": [],
+      "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LU96-M2-FEEDBACK-UNRESOLVED-CARD-V1",
+      "name": "Task96 M2 feedback baseline",
+      "category": "task96_baseline",
+      "message_type": "text",
+      "enabled": true,
+      "content": "Task96 baseline notification: unresolved feedback.",
+      "variables": [],
+      "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LU96-M3-ZERO-POOL-CARD-V1",
+      "name": "Task96 M3 zero pool baseline",
+      "category": "task96_baseline",
+      "message_type": "text",
+      "enabled": true,
+      "content": "Task96 baseline notification: zero-pool proposal.",
+      "variables": [],
+      "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LU96-M3-MATCH-SUCCESS-CLIENT-CARD-V1",
+      "name": "Task96 M3 client match baseline",
+      "category": "task96_baseline",
+      "message_type": "text",
+      "enabled": true,
+      "content": "Task96 baseline notification: client match success.",
+      "variables": [],
+      "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LU96-M3-MATCH-SUCCESS-STAFF-CARD-V1",
+      "name": "Task96 M3 staff match baseline",
+      "category": "task96_baseline",
+      "message_type": "text",
+      "enabled": true,
+      "content": "Task96 baseline notification: staff match success.",
+      "variables": [],
+      "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LU96-M3-LEAVE-AGREE-CARD-V1",
+      "name": "Task96 M3 leave agree baseline",
+      "category": "task96_baseline",
+      "message_type": "text",
+      "enabled": true,
+      "content": "Task96 baseline notification: leave extension agreed.",
+      "variables": [],
+      "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LU96-M3-LEAVE-DISAGREE-CARD-V1",
+      "name": "Task96 M3 leave disagree baseline",
+      "category": "task96_baseline",
+      "message_type": "text",
+      "enabled": true,
+      "content": "Task96 baseline notification: leave extension rejected.",
+      "variables": [],
+      "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LU96-M4-SAFE-ALERT-CARD-V1",
+      "name": "Task96 M4 safe alert baseline",
+      "category": "task96_baseline",
+      "message_type": "text",
+      "enabled": true,
+      "content": "Task96 baseline notification: safety alert review.",
+      "variables": [],
+      "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LU96-M4-COMPLAINT-HIGH-CARD-V1",
+      "name": "Task96 M4 complaint baseline",
+      "category": "task96_baseline",
+      "message_type": "text",
+      "enabled": true,
+      "content": "Task96 baseline notification: high complaint review.",
+      "variables": [],
+      "usage": ["task96_baseline"]
+    },
+    {
+      "id": "LU96-M4-SALARY-PAYABLE-CARD-V1",
+      "name": "Task96 M4 payroll baseline",
+      "category": "task96_baseline",
+      "message_type": "text",
+      "enabled": true,
+      "content": "Task96 baseline notification: payable anomaly review.",
+      "variables": [],
+      "usage": ["task96_baseline"]
     }
   ]
 }

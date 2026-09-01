@@ -234,6 +234,13 @@ class HumanEscalationPreviewResponse(BaseModel):
     apply_ready: Literal[True]
 
 
+class HumanEscalationAttemptWindowResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    attempt_count: int = Field(ge=1)
+    maximum_attempts: int = Field(ge=1)
+    generation: int = Field(ge=0)
+
+
 class HumanEscalationViewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
@@ -252,3 +259,8 @@ class HumanEscalationViewResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     available_actions: list[str]
+    delivery_task_ref: str | None = None
+    delivery_outcome_ref: str | None = None
+    trigger_identity: str | None = None
+    attempt_window: HumanEscalationAttemptWindowResponse | None = None
+    owner_selector: str | None = None

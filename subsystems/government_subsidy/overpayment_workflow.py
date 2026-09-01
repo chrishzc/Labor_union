@@ -9,6 +9,7 @@ from domains.government_subsidy.overpayment import (
     GovernmentSubsidyOverpayment, GovernmentSubsidyOverpaymentCandidate,
     build_overpayment_offset_candidate, build_overpayment_return_candidate,
     build_overpayment_return_reconciliation_candidate,
+    build_overpayment_return_reconciliation_with_excess_candidate,
 )
 from domains.government_subsidy.overpayment import build_receipt_with_overage_candidate
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -31,6 +32,13 @@ class ReturnReconciliationApplyRequest:
     identity: str; finance_import_row_id: int; expected_version: ExpectedVersion; preview_fingerprint: PreviewFingerprint; idempotency_key: IdempotencyKey; actor: ActorContext; reason: str; evidence_reference: str; correlation_id: CorrelationId
 
 
+@dataclass(frozen=True, slots=True)
+class ReturnReconciliationWithExcessApplyRequest:
+    """Apply request for the explicit actual-over-lawful-return branch."""
+
+    identity: str; finance_import_row_id: int; expected_version: ExpectedVersion; preview_fingerprint: PreviewFingerprint; idempotency_key: IdempotencyKey; actor: ActorContext; reason: str; evidence_reference: str; correlation_id: CorrelationId
+
+
 class Repository(Protocol):
     def load_overage_receipt_context(self, row_id: int, batch_id: int, *, lock: bool): ...
     def persist_receipt_with_overage(self, request, candidate, bank, batch) -> dict: ...
@@ -41,6 +49,7 @@ class Repository(Protocol):
     def persist_return(self, request: ReturnApplyRequest, candidate: GovernmentSubsidyOverpaymentCandidate, recipient: GovernmentRecipientSnapshot) -> dict: ...
     def load_return_reconciliation_context(self, identity: str, finance_import_row_id: int, *, lock: bool): ...
     def persist_return_reconciliation(self, request: ReturnReconciliationApplyRequest, candidate) -> dict: ...
+    def persist_return_reconciliation_with_excess(self, request: ReturnReconciliationWithExcessApplyRequest, candidate) -> dict: ...
 
 
 class GovernmentSubsidyOverpaymentWorkflow:
@@ -112,6 +121,42 @@ class GovernmentSubsidyOverpaymentWorkflow:
             _verify(request, root, candidate)
             receipt = self._repository.persist_return_reconciliation(request, candidate)
             _save_receipt(self._repository, request, candidate, receipt, "return_reconciliation")
+            unit_of_work.commit()
+            return receipt
+
+    def preview_return_reconciliation_with_excess(self, identity, finance_import_row_id):
+        root, payable, bank = self._repository.load_return_reconciliation_context(
+            identity, finance_import_row_id, lock=False
+        )
+        return build_overpayment_return_reconciliation_with_excess_candidate(
+            root, *payable, bank
+        )
+
+    def apply_return_reconciliation_with_excess(self, request):
+        with self._uow() as unit_of_work:
+            self._repository.load_overpayment(request.identity, lock=True)
+            replay = _replay(
+                self._repository, request, "return_reconciliation_with_excess"
+            )
+            if replay is not None:
+                return replay
+            root, payable, bank = self._repository.load_return_reconciliation_context(
+                request.identity, request.finance_import_row_id, lock=True
+            )
+            candidate = build_overpayment_return_reconciliation_with_excess_candidate(
+                root, *payable, bank
+            )
+            _verify(request, root, candidate)
+            receipt = self._repository.persist_return_reconciliation_with_excess(
+                request, candidate
+            )
+            _save_receipt(
+                self._repository,
+                request,
+                candidate,
+                receipt,
+                "return_reconciliation_with_excess",
+            )
             unit_of_work.commit()
             return receipt
 

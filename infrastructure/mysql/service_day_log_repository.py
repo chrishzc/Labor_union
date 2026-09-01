@@ -17,7 +17,11 @@ from domains.controlled_files.reference_finalize import (
 from infrastructure.db.controlled_file_reference_finalize_repository import (
     MySqlControlledFileReferenceFinalizeRepository,
 )
-from subsystems.scheduling.service_day_log_workflow import ApplyServiceDayLog, ServiceDayLogResult
+from subsystems.scheduling.service_day_log_workflow import (
+    ApplyServiceDayLog,
+    ControlledServiceDayLogAttachment,
+    ServiceDayLogResult,
+)
 
 
 class MySqlServiceDayLogRepository:
@@ -94,6 +98,7 @@ class MySqlServiceDayLogRepository:
             command.intent.baby_log_text.strip(),
             bool(assignment["requires_cooking"]),
             "created",
+            tuple(command.controlled_file_attachments),
         )
 
     def _attach_controlled_files(
@@ -206,7 +211,11 @@ class MySqlServiceDayLogRepository:
             or str(row["content_fingerprint"]) != fingerprint
         ):
             raise ValueError("service_day_log_idempotency_conflict")
-        return _result_from_row(row, outcome="existing")
+        return _result_from_row(
+            row,
+            outcome="existing",
+            attachments=self._load_controlled_attachments(int(row["id"])),
+        )
 
     def load_for_staff(
         self, log_id: int, staff_id: int, line_user_id: str
@@ -216,10 +225,32 @@ class MySqlServiceDayLogRepository:
             row = cursor.fetchone()
         if not isinstance(row, dict):
             return None
-        return _result_from_row(row, outcome="existing")
+        return _result_from_row(
+            row,
+            outcome="existing",
+            attachments=self._load_controlled_attachments(int(row["id"])),
+        )
 
 
-def _result_from_row(row, *, outcome: str) -> ServiceDayLogResult:
+    def _load_controlled_attachments(self, log_id: int) -> tuple[ControlledServiceDayLogAttachment, ...]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_ATTACHMENTS_READBACK_SQL, (log_id,))
+            fetchall = getattr(cursor, "fetchall", None)
+            rows = fetchall() if callable(fetchall) else ()
+        return tuple(
+            ControlledServiceDayLogAttachment(
+                str(row["controlled_file_object_id"]),
+                str(row["staging_id"]),
+                str(row["content_sha256"]),
+                str(row["attachment_kind"]),
+                index,
+            )
+            for index, row in enumerate(rows, start=1)
+            if isinstance(row, dict)
+        )
+
+
+def _result_from_row(row, *, outcome: str, attachments=()) -> ServiceDayLogResult:
     if row.get("requires_cooking") is None:
         raise ValueError("service_day_log_cooking_requirement_unresolved")
     return ServiceDayLogResult(
@@ -230,6 +261,7 @@ def _result_from_row(row, *, outcome: str) -> ServiceDayLogResult:
         str(row["baby_log_text"]),
         bool(row["requires_cooking"]),
         outcome,
+        tuple(attachments),
     )
 
 
@@ -245,6 +277,17 @@ _EXISTING_COLUMNS = "id,case_no,assignment_id,staff_id,staff_line_user_id,servic
 _EXISTING_SQL = f"SELECT {_EXISTING_COLUMNS} FROM scheduling_service_day_logs WHERE idempotency_key=%s FOR UPDATE"
 _EXISTING_FOR_ASSIGNMENT_DAY_SQL = f"SELECT {_EXISTING_COLUMNS} FROM scheduling_service_day_logs WHERE assignment_id=%s AND service_date=%s FOR UPDATE"
 _READBACK_SQL = f"SELECT {_EXISTING_COLUMNS} FROM scheduling_service_day_logs WHERE id=%s AND staff_id=%s AND staff_line_user_id=%s"
+_ATTACHMENTS_READBACK_SQL = (
+    "SELECT object.opaque_object_id AS controlled_file_object_id, "
+    "staging.staging_id, object.content_sha256, attachment.attachment_kind, "
+    "attachment.created_at_utc "
+    "FROM scheduling_service_day_log_attachments attachment "
+    "JOIN controlled_file_objects object "
+    "ON object.id=attachment.controlled_file_object_id "
+    "JOIN controlled_file_staging_objects staging "
+    "ON staging.id=object.source_staging_id "
+    "WHERE attachment.service_day_log_id=%s ORDER BY attachment.id"
+)
 _LOG_INSERT_SQL = (
     "INSERT INTO scheduling_service_day_logs (case_no,assignment_id,staff_id,staff_line_user_id,service_date,baby_log_text,requires_cooking,content_fingerprint,idempotency_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )

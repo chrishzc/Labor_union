@@ -472,7 +472,12 @@ def _append_line_response(unit_of_work, interaction, state, decision, line_user_
             state.customer_decision, value,
             plan_is_active=state.plan_is_active,
             recipient_matches=state.customer_line_user_id == line_user_id,
-            profiles_are_available=state.customer_profiles_are_available,
+            # A zero-pool compromise is itself the client-facing proposal;
+            # it deliberately has no caregiver profile payload to deliver.
+            profiles_are_available=(
+                state.customer_profiles_are_available
+                or (scope == "customer_decision" and segment_id is None)
+            ),
         )
         response_type = scope
     return unit_of_work.matching_notifications.append_response(

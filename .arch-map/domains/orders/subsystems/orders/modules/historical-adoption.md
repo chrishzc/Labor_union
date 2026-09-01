@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-將受控 historical order workbook 的可採納來源值套用到既有 Orders root，維持精確 case matching、Preview zero-write、Apply fresh recheck、replay/idempotency 與 immutable receipt/outbox；歷史來源不取得獨立 Orders authority。
+將受控 historical order workbook 的可採納來源值套用到既有 Orders root，維持精確 case matching、Preview zero-write、Apply fresh recheck、replay/idempotency 與 immutable receipt/outbox；歷史實際期間不猜測逐日排假或自動建立帳務投影。
 
 ## Implementation
 - primary:
@@ -13,6 +13,7 @@
   - `subsystems/orders/historical_adoption_workflow.py`
   - `subsystems/orders/historical_order_workbook.py`
   - `subsystems/orders/historical_order_workbook_import.py`
+  - `subsystems/orders/historical_order_adoption_outbox_consumer.py`
   - `subsystems/orders/historical_actual_start_rebuild.py`
   - `infrastructure/mysql/historical_order_adoption_repository.py`
   - `infrastructure/mysql/historical_order_workbook_import_repository.py`
@@ -32,8 +33,8 @@
   - `db/migration_releases/labor_union_2026_09_01_historical_order_pairing_resolution_reused_v1.json`
 
 ## Dependencies
-- outbound: `anomalies/anomalies` — committed review evidence can be projected by `subsystems/anomalies/historical_order_adoption_outbox_consumer.py`.
-- outbound: `orders/actual-start` — deposit-paid historical rows whose source date differs from the HCM planned start rebuild current official service facts through the canonical writer in the same outer UoW; source status `1` alone never triggers this path.
+- outbound: `anomalies/anomalies` — committed review evidence由 `subsystems/orders/historical_order_adoption_outbox_consumer.py`確認投遞；歷史服務日曆未確認維持 owner review，不建立推測帳務。
+- outbound: `orders/service-date-confirmation` — 只有工會人員日後主動確認逐日服務事實時，才由正式流程建立服務日與後續帳務投影；Historical Adoption 不呼叫此流程。
 - inbound: Case Import / operator import entry — only through typed source/workflow boundary.
 
 ## Contracts

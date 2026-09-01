@@ -549,6 +549,8 @@ export const MatchingNotificationIntentSchema = z
     package_fingerprint: sha256,
     candidate_id: identity,
     idempotency_key: identity,
+    source_identity: identity.nullable(),
+    recipient_selector: identity.nullable(),
   })
   .strict();
 

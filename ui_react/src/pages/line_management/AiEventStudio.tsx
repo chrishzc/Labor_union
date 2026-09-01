@@ -2,7 +2,7 @@
  * File: AiEventStudio.tsx
  * Description: 保留 LINE 事件規則編輯與本機模擬設計，並將正式發布鎖在 typed Preview／Apply 契約之後。
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import '../LineManagementPage.css';
 
 export interface AiEventRule {
@@ -16,6 +16,51 @@ export interface AiEventRule {
   satisfactionRate: number | null;
   feedbackCount: number | null;
   isActive: boolean;
+}
+
+interface FeedbackAggregate {
+  resolved_count: number;
+  unresolved_count: number;
+  total_count: number;
+  resolved_rate: number | null;
+}
+
+interface NavigationCatalogEntry {
+  alias: string;
+  route_key: string;
+  tier: string;
+  source_identity: string;
+  revision: number;
+}
+
+interface NavigationCatalog {
+  revision: number;
+  entries: NavigationCatalogEntry[];
+}
+
+interface NavigationReply {
+  source_response_id: string;
+  source_event_id: string;
+  reply_kind: string;
+  reason_code: string;
+  source_identity: string;
+  source_revision: number;
+}
+
+interface RouterPreview {
+  kind: string;
+  source_event_id: string;
+  source_identity: string;
+  source_revision: number;
+  semantic_bucket: string;
+  confidence: number;
+  score_band: string | null;
+  reason_code: string | null;
+  route_key: string | null;
+  options: string[];
+  answer_text: string | null;
+  ticket_id: number | null;
+  apply_ready: boolean;
 }
 
 const DEFAULT_CATEGORIES = ['補助與費用', '服務異動', '爭議客訴', '服務流程', '一般諮詢'];
@@ -106,10 +151,18 @@ export const AiEventStudio: React.FC = () => {
   const [newTagInput, setNewTagInput] = useState<string>('');
   const [draftNotice, setDraftNotice] = useState<string | null>(null);
   const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
+  const [feedbackAggregate, setFeedbackAggregate] = useState<FeedbackAggregate | null>(null);
+  const [navigationCatalog, setNavigationCatalog] = useState<NavigationCatalog | null>(null);
+  const [navigationReply, setNavigationReply] = useState<NavigationReply | null>(null);
   const [automationHoldPreview, setAutomationHoldPreview] = useState<boolean>(false);
+  const [routerInput, setRouterInput] = useState<string>('我不確定要問哪一項');
+  const [routerScore, setRouterScore] = useState<string>('65');
+  const [routerPreview, setRouterPreview] = useState<RouterPreview | null>(null);
+  const [routerNotice, setRouterNotice] = useState<string | null>(null);
+  const [routerSourceEventId, setRouterSourceEventId] = useState<string | null>(null);
   const [simInput, setSimInput] = useState<string>('請問新竹市補助可以折抵幾小時？');
   const [simMessages, setSimMessages] = useState<
-    Array<{ sender: 'user' | 'bot'; text: string; liff?: string | null; high?: boolean }>
+    Array<{ sender: 'user' | 'bot'; text: string; liff?: string | null; high?: boolean; sourceResponseId?: string }>
   >([
     {
       sender: 'user',
@@ -122,6 +175,41 @@ export const AiEventStudio: React.FC = () => {
       high: false,
     },
   ]);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/v1/line/ai-events/catalog')
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('catalog_readback_failed')))
+      .then((payload: { data?: NavigationCatalog }) => {
+        if (active && payload.data) setNavigationCatalog(payload.data);
+      })
+      .catch(() => {
+        if (active) setDraftNotice('正式 navigation catalog 讀取失敗；本頁不以本機規則冒充伺服器目錄。');
+      });
+    fetch('/api/v1/line/ai-events/feedback/aggregate')
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('feedback_readback_failed')))
+      .then((payload: { data?: FeedbackAggregate }) => {
+        if (active && payload.data) setFeedbackAggregate(payload.data);
+      })
+      .catch(() => {
+        if (active) setFeedbackNotice('正式 Feedback aggregate 讀取失敗；未以本機數字替代。');
+      });
+    const developmentLineUserId = import.meta.env.DEV
+      ? import.meta.env.VITE_LINE_DEVELOPMENT_USER_ID
+      : undefined;
+    const replyPath = developmentLineUserId
+      ? `/api/v1/line/ai-events/replies/recent?development_line_user_id=${encodeURIComponent(developmentLineUserId)}`
+      : '/api/v1/line/ai-events/replies/recent';
+    fetch(replyPath)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('reply_readback_failed')))
+      .then((payload: { data?: { items?: NavigationReply[] } }) => {
+        if (active && payload.data?.items?.[0]) setNavigationReply(payload.data.items[0]);
+      })
+      .catch(() => {
+        // A missing server-owned reply is a normal state for the local draft-only view.
+      });
+    return () => { active = false; };
+  }, []);
   const currentRule = rules.find((r) => r.id === selectedRuleId) || rules[0];
   const categoryOptions = Array.from(new Set([
     ...DEFAULT_CATEGORIES,
@@ -134,6 +222,10 @@ export const AiEventStudio: React.FC = () => {
       .some((value) => value.toLocaleLowerCase('zh-TW').includes(normalizedSearch));
     return matchesCategory && matchesSearch;
   });
+  const protectedAliases = navigationCatalog?.entries
+    .filter((entry) => entry.tier === 'identity')
+    .map((entry) => entry.alias)
+    .join('、');
 
   const handleAddTag = () => {
     const trimmed = newTagInput.trim();
@@ -185,12 +277,84 @@ export const AiEventStudio: React.FC = () => {
     setDraftNotice(`已從本機草稿移除「${currentRule.name}」；重新載入頁面即恢復，後端與 LINE 均未變更。`);
   };
 
-  const handleFeedbackPreview = (choice: 'helpful' | 'unresolved') => {
-    setFeedbackNotice(
-      choice === 'helpful'
-        ? '已在本機預覽「有幫助」回饋；正式回饋統計尚未接通，不會寫入數據。'
-        : '已在本機預覽「未解決」回饋；正式流程應轉人工處理，但客服待辦尚未接通，本頁不會假造工單。',
-    );
+  const handleFeedbackForSource = async (
+    choice: 'helpful' | 'unresolved',
+    sourceResponseId: string,
+    responseRevision: number,
+    idempotencySeed: string,
+  ) => {
+    const token = (globalThis as typeof globalThis & { __LINE_ID_TOKEN__?: string }).__LINE_ID_TOKEN__;
+    const developmentLineUserId = import.meta.env.DEV
+      ? import.meta.env.VITE_LINE_DEVELOPMENT_USER_ID
+      : undefined;
+    if (!token && !developmentLineUserId) {
+      setFeedbackNotice('Feedback 必須由已驗證 LINE 身分提交；本工作台未取得 token，未寫入或增加本機統計。');
+      return;
+    }
+    try {
+      const requestBody = {
+        line_id_token: token ?? '',
+        development_line_user_id: developmentLineUserId ?? '',
+        source_response_id: sourceResponseId,
+        outcome: choice === 'helpful' ? 'resolved' : 'unresolved',
+        response_revision: responseRevision,
+        catalog_revision: 1,
+        idempotency_key: `studio-feedback:${idempotencySeed}:${choice}`,
+        correlation_id: `studio-feedback:${idempotencySeed}`,
+      };
+      const previewResponse = await fetch('/api/v1/line/feedback/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+      if (!previewResponse.ok) throw new Error('feedback_preview_failed');
+      const response = await fetch('/api/v1/line/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+      const payload = await response.json() as { data?: { ticket_id?: number | null; replayed?: boolean } };
+      if (!response.ok || !payload.data) throw new Error('feedback_record_failed');
+      setFeedbackNotice(
+        choice === 'unresolved'
+          ? `正式 Feedback 已讀回，客服工單 ${payload.data.ticket_id ?? '待關聯'}（${payload.data.replayed ? 'exact replay' : 'new receipt'}）。`
+          : `正式 Feedback 已讀回（${payload.data.replayed ? 'exact replay' : 'new receipt'}）。`,
+      );
+      const aggregateResponse = await fetch('/api/v1/line/ai-events/feedback/aggregate');
+      const aggregatePayload = await aggregateResponse.json() as { data?: FeedbackAggregate };
+      if (aggregateResponse.ok && aggregatePayload.data) setFeedbackAggregate(aggregatePayload.data);
+      const queryResponse = await fetch('/api/v1/line/feedback/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          line_id_token: token ?? '',
+          development_line_user_id: developmentLineUserId ?? '',
+          source_response_id: sourceResponseId,
+        }),
+      });
+      if (queryResponse.ok) {
+        setFeedbackNotice((current) => `${current} Query 已讀回 root／receipt。`);
+      }
+    } catch {
+      setFeedbackNotice('正式 Feedback 提交失敗；未以本機成功訊息或計數替代。');
+    }
+  };
+
+  const handleFeedbackPreview = async (choice: 'helpful' | 'unresolved', messageIndex: number) => {
+    const token = (globalThis as typeof globalThis & { __LINE_ID_TOKEN__?: string }).__LINE_ID_TOKEN__;
+    const developmentLineUserId = import.meta.env.DEV
+      ? import.meta.env.VITE_LINE_DEVELOPMENT_USER_ID
+      : undefined;
+    if (!token && !developmentLineUserId) {
+      setFeedbackNotice('Feedback 必須由已驗證 LINE 身分提交；本工作台未取得 token，未寫入或增加本機統計。');
+      return;
+    }
+    const sourceResponseId = simMessages[messageIndex]?.sourceResponseId;
+    if (!sourceResponseId) {
+      setFeedbackNotice('本機預覽沒有正式回覆 identity，未寫入 Feedback；請由實際 LINE 回覆提供來源識別。');
+      return;
+    }
+    await handleFeedbackForSource(choice, sourceResponseId, 1, `${messageIndex}`);
   };
 
   const handleRunSim = () => {
@@ -223,6 +387,36 @@ export const AiEventStudio: React.FC = () => {
       },
     ]);
     setSimInput('');
+  };
+
+  const previewServerRouter = async (applyManualFallback = false) => {
+    const sourceEventId = applyManualFallback && routerSourceEventId
+      ? routerSourceEventId
+      : `studio-router-${Date.now()}`;
+    if (!applyManualFallback) setRouterSourceEventId(sourceEventId);
+    const score = routerScore.trim() === '' ? null : Number(routerScore);
+    try {
+      const response = await fetch('/api/v1/line/ai-events/router/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: routerInput,
+          source_event_id: sourceEventId,
+          score: Number.isNaN(score) ? null : score,
+          development_line_user_id: import.meta.env.DEV
+            ? import.meta.env.VITE_LINE_DEVELOPMENT_USER_ID ?? '' : '',
+          apply_manual_fallback: applyManualFallback,
+        }),
+      });
+      const payload = await response.json() as { data?: RouterPreview; detail?: string };
+      if (!response.ok || !payload.data) throw new Error(payload.detail ?? 'router_preview_failed');
+      setRouterPreview(payload.data);
+      setRouterNotice(applyManualFallback
+        ? `已由既有 typed workflow 建立客服工單 ${payload.data.ticket_id ?? '待讀回'}。`
+        : 'Server-owned router preview 已讀回；本次 answer/clarification/route 未寫入資料。');
+    } catch {
+      setRouterNotice('Server-owned router preview 失敗；未以本機結果替代。');
+    }
   };
 
   return (
@@ -487,8 +681,81 @@ export const AiEventStudio: React.FC = () => {
 
         {/* 本機草稿比對器 */}
         <div className="ai-simulator-card">
+          <h4>🧭 Server-owned deterministic router flow preview</h4>
+          <div className="line-warning" role="status">
+            僅 development/no-auth 可用；輸入會交給伺服器固定 router。Answer、clarification、protected route 與 unknown 僅讀取；manual fallback 才會透過既有客服 workflow 建立工單。
+          </div>
+          {routerNotice && <div className="line-success" role="status">{routerNotice}</div>}
+          {routerPreview && (
+            <div className="line-success" role="status">
+              <div>結果：{routerPreview.kind} · semantic bucket：{routerPreview.semantic_bucket} · confidence：{routerPreview.confidence}</div>
+              <div>reason：{routerPreview.reason_code ?? '—'} · score band：{routerPreview.score_band ?? '—'} · source revision：{routerPreview.source_revision}</div>
+              {routerPreview.route_key && <div>protected route：{routerPreview.route_key}</div>}
+              {routerPreview.options.length > 0 && <div>options：{routerPreview.options.join('、')}</div>}
+              {routerPreview.answer_text && <div>{routerPreview.answer_text}</div>}
+              {routerPreview.apply_ready && (
+                <button type="button" onClick={() => previewServerRouter(true)}>
+                  建立 typed 客服 fallback 工單
+                </button>
+              )}
+              {routerPreview.ticket_id !== null && <div>ticket readback：{routerPreview.ticket_id}</div>}
+            </div>
+          )}
+          <div className="sim-input-bar">
+            <input
+              aria-label="Server router 測試文字"
+              value={routerInput}
+              onChange={(event) => setRouterInput(event.target.value)}
+            />
+            <input
+              aria-label="Server router confidence"
+              type="number"
+              min="0"
+              max="100"
+              value={routerScore}
+              onChange={(event) => setRouterScore(event.target.value)}
+            />
+            <button type="button" className="mock-primary-btn" onClick={() => previewServerRouter()}>
+              讀取 server router preview
+            </button>
+          </div>
+
           <h4>💬 本機畫面比對（不發送）</h4>
+          {navigationCatalog && (
+            <div className="line-success" role="status">
+              正式 navigation catalog：revision {navigationCatalog.revision}，{navigationCatalog.entries.length} 個伺服器別名（來源 {navigationCatalog.entries[0]?.source_identity ?? '未提供'}）；受保護別名：{protectedAliases || '未提供'}。
+            </div>
+          )}
+          {feedbackAggregate && (
+            <div className="line-success" role="status">
+              正式 Feedback aggregate：{feedbackAggregate.total_count} 則，已解決 {feedbackAggregate.resolved_count}、未解決 {feedbackAggregate.unresolved_count}
+              {feedbackAggregate.resolved_rate === null ? '' : `（${Math.round(feedbackAggregate.resolved_rate * 100)}%）`}
+            </div>
+          )}
           {feedbackNotice && <div className="line-warning" role="status">{feedbackNotice}</div>}
+          {navigationReply && (
+            <div className="line-success" role="status">
+              <div>正式伺服器回覆：{navigationReply.reply_kind}（source revision {navigationReply.source_revision}）。</div>
+              <small>來源識別 {navigationReply.source_response_id}；此回覆由 server-owned router event 讀回，本機草稿不會冒充來源。</small>
+              <div className="sim-feedback-row">
+                <small>正式回覆滿意度調查：</small>
+                <button
+                  type="button"
+                  onClick={() => handleFeedbackForSource(
+                    'helpful', navigationReply.source_response_id, navigationReply.source_revision,
+                    navigationReply.source_response_id,
+                  )}
+                >👍 有幫助</button>
+                <button
+                  type="button"
+                  onClick={() => handleFeedbackForSource(
+                    'unresolved', navigationReply.source_response_id, navigationReply.source_revision,
+                    navigationReply.source_response_id,
+                  )}
+                >👎 未解決</button>
+              </div>
+            </div>
+          )}
           <div className="sim-chat-window">
             {simMessages.map((msg, idx) => (
               <div key={idx} className={`sim-msg-row ${msg.sender}`}>
@@ -509,8 +776,8 @@ export const AiEventStudio: React.FC = () => {
                   {msg.sender === 'bot' && (
                     <div className="sim-feedback-row">
                       <small>回覆滿意度調查：本則回覆是否有解答問題？</small>
-                      <button type="button" onClick={() => handleFeedbackPreview('helpful')}>👍 有幫助</button>
-                      <button type="button" onClick={() => handleFeedbackPreview('unresolved')}>👎 未解決</button>
+                      <button type="button" onClick={() => handleFeedbackPreview('helpful', idx)}>👍 有幫助</button>
+                      <button type="button" onClick={() => handleFeedbackPreview('unresolved', idx)}>👎 未解決</button>
                     </div>
                   )}
                 </div>

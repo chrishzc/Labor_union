@@ -36,6 +36,19 @@ class MySqlStaffRetirementRepository:
             effective_at = effective_at.replace(tzinfo=TAIPEI_TIME_ZONE)
         return StaffLifecycleFact(staff_id, StaffLifecycleState(str(row["lifecycle_state"])), int(row["aggregate_version"]), effective_at, row["reason_code"])
 
+    def ensure_no_open_assignments(self, staff_id: int, *, lock: bool) -> None:
+        """Fail closed while planned/active assignments still belong to staff."""
+        suffix = " FOR UPDATE" if lock else ""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id FROM case_staff_assignments "
+                "WHERE staff_id=%s AND status NOT IN ('completed','replaced','cancelled') "
+                "ORDER BY id LIMIT 1" + suffix,
+                (staff_id,),
+            )
+            if cursor.fetchone() is not None:
+                raise ValueError("staff_retirement_open_assignments")
+
     def load_lifecycle(
         self, staff_ids: tuple[int, ...], *, for_update: bool = False
     ) -> tuple[StaffLifecycleFact, ...]:

@@ -165,6 +165,37 @@ duplicate idempotency key 必須回既有 task／receipt，不得只回 `None`�
 retry 使用 bounded exponential backoff；非 retryable 4xx、invalid recipient、
 content validation failure 直接 failed＋alert。
 
+#### M4 Safe Review Link（2026-09-01 current Task96 contract）
+
+M4 的 `Mobile_Group_Alert` 由 LINE Integration 擁有 review-link transport persistence；
+`runtime_alert_application` 只擁有目前 active singleton target、target version 與 alert
+source reference，Access Control 只提供既有 Admin Session／capability 驗證，不成為第二個
+link writer。review link root 必須保存 opaque `review_link_id`、只保存 token digest、
+canonical internal target identity、runtime target version、source alert identity、
+allowed actor／capability、issued／expires／redeemed／revoked timestamps、root version、
+correlation 與 idempotency identity；不得保存原 token、raw PII 或 arbitrary URL。
+
+狀態固定為 `issued → redeemed | expired | revoked`，terminal 狀態不可復活。Typed contract
+提供 `IssueSafeReviewLink`、`RedeemSafeReviewLink`、`RevokeSafeReviewLink` 與去敏
+`QuerySafeReviewLink`；`Preview` 若由既有 owner surface 提供必須零寫入。Issue 在既有 LINE
+outer Unit of Work 內 fresh-read alert target、保存 link root／receipt，並由 committed
+notification intent／outbox 指向同一 canonical internal target；opaque one-time handle 只可
+作既有同源 internal target 的受控 path projection，LINE payload 不得帶 raw token／PII、query／
+fragment token、Bearer header 或 arbitrary URL。Redeem 必須鎖 link root，fresh-read target／version、已驗證 Admin Session、
+actor 與 capability，成功只允許一次並追加 receipt；Revoke 由 runtime target owner 的
+typed reference 觸發，同一 UoW 保存 revocation event／receipt。Delivery worker 只能使用
+已提交 intent，不能在 HTTP 或 provider call 內建立 link。
+
+失敗固定回 `safe_review_link_expired`、`safe_review_link_replayed`、
+`safe_review_link_revoked`、`safe_review_link_wrong_actor`、
+`safe_review_link_target_stale` 或 `safe_review_link_version_conflict`；錯誤不改 alert
+root、不得盲目 retry。storage timeout／deadlock 可 bounded retry；actor、capability、
+target 或 version 不一致必須 fail closed 並由 owner Query／人工 review reconcile。Readback
+只回 masked target、link status、expiry／redeem／revoke outcome、root version、receipt 與
+typed failure，不回 token／PII。若現有 persistence 無法承擔此 root，僅允許依 DB change gate
+提出 additive schema；本節不授權新 public route、production／`union_db`、provider 或
+deployment。
+
 #### LINE Configuration typed／redacted query（2026-08-20）
 
 LINE Configuration 提供 authenticated、query-only 的

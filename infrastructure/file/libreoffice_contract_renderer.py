@@ -70,6 +70,8 @@ class LibreOfficeContractRenderer:
                 mapping_path=mapping_path,
                 facts=facts,
             )
+        except ContractRendererError:
+            raise
         except Exception:
             raise ContractRendererError(
                 "contract_pdf_renderer_source_invalid",

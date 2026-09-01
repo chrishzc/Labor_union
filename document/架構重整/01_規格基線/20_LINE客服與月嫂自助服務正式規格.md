@@ -313,14 +313,17 @@ leave decision、Customer Service escalation 與 M3 zero-candidate public contra
 
 因此，四張卡的「closed typed design preview contract」已由本節回答；尚未完成的是真實 owner
 projection composition、exact recipient intent、delivery／postback、provider 與 Chrome E2E。依
-2026-08-25 人工裁決，原圖缺失需求在 96 完成前只登記於 26 的 deferred-after-96 清單，
-不得以本節擴張 current 施工。
+2026-08-25 人工裁決，原圖缺失需求在 96 完成前只登記於 26 的 deferred-after-96 清單；此句僅保留
+當時 provenance。2026-09-01 26 §1.1／§1.2 已取代其排除效果：Task 96 必須驗證所有非 FAQ 原圖
+節點／箭頭，但仍不得由本節擴張 owner-safe boundary、schema、public route、provider 或 production
+施工。
 
 四卡 presentation 驗收狀態（2026-08-25）：completed。Focused Vitest 2 passed、TypeScript
 passed；Chrome fresh reload 後實點派案通知、服務日順延確認、重大異常通報與媒合條件溝通，
 均顯示對應去敏文案、明確 owner-fact blocker 與「不建立發送工作」邊界。頁面沒有 application
 error／warn；僅觀察到第三方 Chrome 擴充套件自身 listener warning。此完成事實不包含真實
-projection composition、postback、delivery、provider 或 26 的 deferred-after-96 缺口。
+projection composition、postback、delivery、provider 或 26 的 deferred-after-96（僅歷史 provenance，
+現由 2026-09-01 Task96 direct-flow acceptance 取代排除效果）缺口。
 
 ## 7. 第一版驗收
 

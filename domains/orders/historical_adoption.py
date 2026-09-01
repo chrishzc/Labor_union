@@ -65,6 +65,8 @@ def build_historical_order_candidate(
     source: HistoricalOrderSourceFacts,
 ) -> HistoricalOrderAdoptionCandidate:
     issues = set(source.issue_codes)
+    if _historical_accounting_review_required(current, source):
+        issues.add("historical_accounting_service_calendar_unconfirmed")
     outcome = _outcome(current.status, source.asserted_status, issues)
     date_patch = _date_patch(current, source, issues, outcome)
     after_status = (
@@ -122,6 +124,8 @@ def _date_patch(current, source, issues, outcome):
         outcome is not HistoricalOrderOutcome.ADOPTED
         or source.asserted_status is not HistoricalOrderSourceStatus.DEPOSIT_PAID
         or not isinstance(source.actual_start_date, date)
+        or not isinstance(source.actual_end_date, date)
+        or source.actual_end_date < source.actual_start_date
         or not isinstance(current.planned_start_date, date)
     ):
         return ()
@@ -130,9 +134,26 @@ def _date_patch(current, source, issues, outcome):
         if source.actual_start_date == current.planned_start_date
         else source.actual_start_date
     )
-    if current.actual_start_date == actual_start:
-        return ()
-    return (("actual_start_date", actual_start),)
+    actual_end = source.actual_end_date if actual_start is not None else None
+    patch = []
+    if current.actual_start_date != actual_start:
+        patch.append(("actual_start_date", actual_start))
+    if current.actual_end_date != actual_end:
+        patch.append(("actual_end_date", actual_end))
+    return tuple(patch)
+
+
+def _historical_accounting_review_required(current, source) -> bool:
+    """Historical ranges prove roots, but never prove their daily work calendar."""
+
+    return (
+        source.asserted_status is HistoricalOrderSourceStatus.DEPOSIT_PAID
+        and isinstance(current.planned_start_date, date)
+        and isinstance(source.actual_start_date, date)
+        and isinstance(source.actual_end_date, date)
+        and source.actual_end_date >= source.actual_start_date
+        and source.actual_start_date != current.planned_start_date
+    )
 
 
 __all__ = [

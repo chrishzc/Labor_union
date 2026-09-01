@@ -18,7 +18,7 @@ from pydantic import (
 
 from domains.line.notification_rules import registered_notification_event_codes
 
-Identifier = Annotated[StrictStr, Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")]
+Identifier = Annotated[StrictStr, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")]
 Sha256Hex = Annotated[StrictStr, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
@@ -64,7 +64,20 @@ NotificationFrequency = Annotated[
 class LineNotificationRuleInput(_ClosedModel):
     id: Identifier
     event_code: Identifier
-    recipient_selector: Literal["client", "assigned_caregiver", "case_group"]
+    recipient_selector: Literal[
+        "client", "assigned_caregiver", "case_group",
+        "customer_service.ticket_owner",
+        "client.bound_case",
+        "staff.binding_owner",
+        "conversation.bound_actor",
+        "matching.request.participants",
+        "assignment.client_snapshot",
+        "assignment.staff_snapshot",
+        "scheduling.owner",
+        "admin.review_actor",
+        "customer_service.claim_owner",
+        "staff_payables.anomaly_owner",
+    ]
     template_id: Identifier
     enabled: StrictBool = False
     schedule: NotificationSchedule

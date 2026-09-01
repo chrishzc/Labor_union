@@ -88,8 +88,6 @@ def test_external_signing_release_is_canonical_schema_only_artifact() -> None:
     ) < active_bootstrap.index(
         "db/schema_parts/1006_historical_order_review_remediation.sql"
     )
-    assert active_bootstrap[-1] == "db/schema_parts/1021_task96_owner_contract_successors.sql"
-
     normalized = load_migration_release_manifest(MANIFEST_PATH, ROOT).owned_object_descriptors(
         ROOT
     )[SQL_PATH.name]

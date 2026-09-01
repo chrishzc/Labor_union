@@ -6,11 +6,13 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+from collections.abc import Mapping
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_DIRECTORY = PROJECT_ROOT / "db" / "templates" / "contracts"
 _APPROVED_TEMPLATE_KEYS = frozenset({"contract_staff_service", "contract_client_copy"})
+_MAPPING_REQUIREDNESS = frozenset({"required", "conditional", "optional"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +45,35 @@ def approved_template_mapping_path(template_key: str) -> Path:
     return TEMPLATE_DIRECTORY / f"{normalized_key}.json"
 
 
+def mapping_is_applicable(
+    descriptor: Mapping[str, object], facts: Mapping[str, object]
+) -> bool:
+    """Evaluate declared presence gates without deriving a business value."""
+    kind = descriptor.get("applicability")
+    if kind == "floor_fee_positive":
+        value = facts.get("floor_fee")
+        try:
+            return value is not None and value > 0
+        except TypeError:
+            return False
+    if kind == "subsidy_eligible":
+        return facts.get("identity_status") in {"一般市民", "補助市民"}
+    keys = {
+        "staff_payable_obligation_present": ("staff_payable_total",),
+        "official_assignment_rate_present": ("service_unit_price",),
+        "typed_due_date_present": ("due_date",),
+        "single_staff_assignment_present": ("staff_name",),
+        "typed_total_hours_present": ("total_hours",),
+        "staff_payable_split_present": (
+            "staff_payable_subsidy_amount",
+            "staff_payable_subsidy_date",
+            "staff_payable_self_pay_amount",
+            "staff_payable_self_pay_date",
+        ),
+    }.get(kind)
+    return keys is not None and any(facts.get(key) is not None for key in keys)
+
+
 def _require_approved_template_key(template_key: str) -> str:
     normalized_key = template_key.strip() if isinstance(template_key, str) else ""
     if normalized_key not in _APPROVED_TEMPLATE_KEYS:
@@ -61,6 +92,12 @@ def _validate_mapping(template_key: str, mapping: object) -> None:
     path = TEMPLATE_DIRECTORY / filename
     if not path.is_file():
         raise ValueError("contract template artifact is missing")
+    fields = mapping.get("param_mappings")
+    if not isinstance(fields, dict):
+        raise ValueError("contract template parameter mappings are invalid")
+    for descriptor in fields.values():
+        if not isinstance(descriptor, dict) or descriptor.get("requiredness") not in _MAPPING_REQUIREDNESS:
+            raise ValueError("contract template mapping requiredness is invalid")
     if template_key == "contract_client_copy":
         _validate_client_precontract_mappings(mapping)
 

@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-09-01-v24
+-- Release: labor-union-validation-schema-2026-09-01-v25
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -20428,6 +20428,305 @@ CREATE TRIGGER trg_client_profile_change_events_before_update BEFORE UPDATE ON c
 DROP TRIGGER IF EXISTS trg_client_profile_change_events_before_delete;
 CREATE TRIGGER trg_client_profile_change_events_before_delete BEFORE DELETE ON client_profile_change_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='client profile change events cannot be deleted';
 -- END SOURCE: db/schema_parts/1021_task96_owner_contract_successors.sql
+
+-- BEGIN SOURCE: db/schema_parts/1023_task96_line_safe_review_link_matching_outbox_v1.sql
+-- File: 1023_task96_line_safe_review_link_matching_outbox_v1.sql
+-- Purpose: additive LINE safe-review-link roots and M3 owner-intent successor.
+-- Data effect: schema only; existing matching outbox rows remain readable.
+
+ALTER TABLE matching_coordination_outbox
+    MODIFY COLUMN intent_type ENUM(
+        'line_matching_interaction','line_criteria_diff_resend',
+        'assignment_conversion_requested','rematch_requested',
+        'orders_terms_update_requested','line_bilateral_notification',
+        'line_client_decision','customer_service_ticket'
+    ) NOT NULL,
+    MODIFY COLUMN target_owner ENUM(
+        'line_integration','assignment_workflow','orders_workflow',
+        'customer_service'
+    ) NOT NULL,
+    DROP CHECK chk_matching_outbox_target,
+    ADD CONSTRAINT chk_matching_outbox_target CHECK (
+        (intent_type IN (
+            'line_matching_interaction','line_criteria_diff_resend',
+            'line_bilateral_notification','line_client_decision'
+        ) AND target_owner = 'line_integration')
+        OR (intent_type IN ('assignment_conversion_requested','rematch_requested')
+            AND target_owner = 'assignment_workflow')
+        OR (intent_type = 'orders_terms_update_requested'
+            AND target_owner = 'orders_workflow')
+        OR (intent_type = 'customer_service_ticket'
+            AND target_owner = 'customer_service')
+    );
+
+CREATE TABLE IF NOT EXISTS line_safe_review_links (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    link_id VARCHAR(191) NOT NULL,
+    token_digest CHAR(64) NOT NULL,
+    canonical_internal_target VARCHAR(191) NOT NULL,
+    target_version BIGINT UNSIGNED NOT NULL,
+    source_alert_identity VARCHAR(191) NOT NULL,
+    allowed_actor_ref VARCHAR(191) NOT NULL,
+    required_capability VARCHAR(100) NOT NULL,
+    status ENUM('issued','redeemed','expired','revoked') NOT NULL DEFAULT 'issued',
+    issued_at_utc DATETIME(6) NOT NULL,
+    expires_at_utc DATETIME(6) NOT NULL,
+    redeemed_at_utc DATETIME(6) NULL,
+    revoked_at_utc DATETIME(6) NULL,
+    root_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    idempotency_key VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_line_safe_review_link_id (link_id),
+    UNIQUE KEY uq_line_safe_review_token_digest (token_digest),
+    UNIQUE KEY uq_line_safe_review_idempotency (idempotency_key),
+    INDEX idx_line_safe_review_status_expiry (status, expires_at_utc),
+    INDEX idx_line_safe_review_alert (source_alert_identity, created_at_utc),
+    CONSTRAINT chk_line_safe_review_link_digest CHECK (
+        token_digest REGEXP '^[0-9a-f]{64}$'
+    ),
+    CONSTRAINT chk_line_safe_review_link_identity CHECK (
+        CHAR_LENGTH(TRIM(link_id)) > 0
+        AND CHAR_LENGTH(TRIM(canonical_internal_target)) > 0
+        AND CHAR_LENGTH(TRIM(source_alert_identity)) > 0
+        AND CHAR_LENGTH(TRIM(allowed_actor_ref)) > 0
+        AND CHAR_LENGTH(TRIM(required_capability)) > 0
+    ),
+    CONSTRAINT chk_line_safe_review_link_expiry CHECK (expires_at_utc > issued_at_utc),
+    CONSTRAINT chk_line_safe_review_link_terminal_times CHECK (
+        (status = 'issued' AND redeemed_at_utc IS NULL AND revoked_at_utc IS NULL)
+        OR (status = 'redeemed' AND redeemed_at_utc IS NOT NULL AND revoked_at_utc IS NULL)
+        OR (status = 'expired' AND redeemed_at_utc IS NULL AND revoked_at_utc IS NULL)
+        OR (status = 'revoked' AND revoked_at_utc IS NOT NULL AND redeemed_at_utc IS NULL)
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS line_safe_review_link_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    link_id BIGINT UNSIGNED NOT NULL,
+    event_type ENUM('issued','redeemed','expired','revoked') NOT NULL,
+    actor_ref VARCHAR(191) NOT NULL,
+    resulting_status ENUM('issued','redeemed','expired','revoked') NOT NULL,
+    target_version BIGINT UNSIGNED NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    event_payload JSON NOT NULL,
+    occurred_at_utc DATETIME(6) NOT NULL,
+    UNIQUE KEY uq_line_safe_review_event_idempotency (idempotency_key),
+    INDEX idx_line_safe_review_event_link (link_id, id),
+    CONSTRAINT fk_line_safe_review_event_link FOREIGN KEY (link_id)
+        REFERENCES line_safe_review_links(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_line_safe_review_event_payload CHECK (
+        JSON_TYPE(event_payload) = 'OBJECT'
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS line_safe_review_link_receipts (
+    idempotency_key VARCHAR(191) PRIMARY KEY,
+    link_id BIGINT UNSIGNED NOT NULL,
+    command_fingerprint CHAR(64) NOT NULL,
+    outcome ENUM('issued','redeemed','expired','revoked','rejected') NOT NULL,
+    result_snapshot JSON NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT fk_line_safe_review_receipt_link FOREIGN KEY (link_id)
+        REFERENCES line_safe_review_links(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_line_safe_review_receipt_digest CHECK (
+        command_fingerprint REGEXP '^[0-9a-f]{64}$'
+    ),
+    CONSTRAINT chk_line_safe_review_receipt_result CHECK (
+        JSON_TYPE(result_snapshot) = 'OBJECT'
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS line_safe_review_link_outbox (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    link_id BIGINT UNSIGNED NOT NULL,
+    intent_type ENUM('safe_review_link_issued') NOT NULL,
+    target_owner ENUM('line_integration') NOT NULL DEFAULT 'line_integration',
+    intent_payload JSON NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_line_safe_review_outbox_idempotency (idempotency_key),
+    INDEX idx_line_safe_review_outbox_link (link_id, id),
+    CONSTRAINT fk_line_safe_review_outbox_link FOREIGN KEY (link_id)
+        REFERENCES line_safe_review_links(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_line_safe_review_outbox_payload CHECK (
+        JSON_TYPE(intent_payload) = 'OBJECT'
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_line_safe_review_links_before_delete;
+CREATE TRIGGER trg_line_safe_review_links_before_delete
+BEFORE DELETE ON line_safe_review_links FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_safe_review_links records cannot be deleted';
+DROP TRIGGER IF EXISTS trg_line_safe_review_link_events_before_update;
+CREATE TRIGGER trg_line_safe_review_link_events_before_update
+BEFORE UPDATE ON line_safe_review_link_events FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_safe_review_link_events records cannot be updated';
+DROP TRIGGER IF EXISTS trg_line_safe_review_link_events_before_delete;
+CREATE TRIGGER trg_line_safe_review_link_events_before_delete
+BEFORE DELETE ON line_safe_review_link_events FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_safe_review_link_events records cannot be deleted';
+DROP TRIGGER IF EXISTS trg_line_safe_review_link_receipts_before_update;
+CREATE TRIGGER trg_line_safe_review_link_receipts_before_update
+BEFORE UPDATE ON line_safe_review_link_receipts FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_safe_review_link_receipts records cannot be updated';
+DROP TRIGGER IF EXISTS trg_line_safe_review_link_receipts_before_delete;
+CREATE TRIGGER trg_line_safe_review_link_receipts_before_delete
+BEFORE DELETE ON line_safe_review_link_receipts FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_safe_review_link_receipts records cannot be deleted';
+DROP TRIGGER IF EXISTS trg_line_safe_review_link_outbox_before_update;
+CREATE TRIGGER trg_line_safe_review_link_outbox_before_update
+BEFORE UPDATE ON line_safe_review_link_outbox FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_safe_review_link_outbox records cannot be updated';
+DROP TRIGGER IF EXISTS trg_line_safe_review_link_outbox_before_delete;
+CREATE TRIGGER trg_line_safe_review_link_outbox_before_delete
+BEFORE DELETE ON line_safe_review_link_outbox FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_safe_review_link_outbox records cannot be deleted';
+-- END SOURCE: db/schema_parts/1023_task96_line_safe_review_link_matching_outbox_v1.sql
+
+-- BEGIN SOURCE: db/schema_parts/1024_task96_line_identity_revocation_role_binding_fk.sql
+-- File: 1024_task96_line_identity_revocation_role_binding_fk.sql
+-- Purpose: retarget Staff/LINE revocation requests to the canonical role binding root.
+-- Data effect: schema only; existing revocation rows and their lineage are preserved.
+
+ALTER TABLE line_identity_revocation_requests
+    DROP FOREIGN KEY fk_line_identity_revocation_binding,
+    ADD CONSTRAINT fk_line_identity_revocation_role_binding
+        FOREIGN KEY (line_user_id, subject_type)
+        REFERENCES line_identity_role_bindings(line_user_id, subject_type)
+        ON UPDATE RESTRICT ON DELETE RESTRICT;
+-- END SOURCE: db/schema_parts/1024_task96_line_identity_revocation_role_binding_fk.sql
+
+-- BEGIN SOURCE: db/schema_parts/212_government_subsidy_return_excess_recovery.sql
+-- Government Subsidy owner root for the excess of an outgoing return payout.
+
+ALTER TABLE government_subsidy_outbox
+    MODIFY COLUMN intent_type ENUM(
+        'government_subsidy_receipt_applied',
+        'government_subsidy_receipt_allocated',
+        'government_subsidy_reversal_applied',
+        'government_subsidy_anomaly_root_changed',
+        'government_subsidy_overpayment_established',
+        'government_subsidy_overpayment_offset',
+        'government_overpayment_return_payable',
+        'government_overpayment_return_payout',
+        'government_overpayment_return_excess_recovery'
+    ) NOT NULL;
+
+ALTER TABLE government_subsidy_overpayment_apply_receipts
+    MODIFY COLUMN command_kind ENUM(
+        'offset',
+        'return',
+        'return_reconciliation',
+        'return_reconciliation_with_excess'
+    ) NOT NULL;
+
+CREATE TABLE IF NOT EXISTS government_overpayment_return_excess_recoveries (
+    recovery_identity VARCHAR(191) PRIMARY KEY,
+    overpayment_identity VARCHAR(191) NOT NULL,
+    payable_identity VARCHAR(191) NOT NULL,
+    source_finance_import_row_id BIGINT NOT NULL,
+    source_payout_id BIGINT NOT NULL,
+    payer_identity VARCHAR(191) NOT NULL,
+    original_amount_ntd BIGINT NOT NULL,
+    remaining_amount_ntd BIGINT NOT NULL,
+    status ENUM('open', 'partially_recovered', 'recovered') NOT NULL DEFAULT 'open',
+    projection_version BIGINT UNSIGNED NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    evidence_reference VARCHAR(500) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_government_return_excess_source_payout (source_payout_id),
+    UNIQUE KEY uq_government_return_excess_source_bank (source_finance_import_row_id),
+    INDEX idx_government_return_excess_status (status, created_at),
+    CONSTRAINT fk_government_return_excess_overpayment
+        FOREIGN KEY (overpayment_identity) REFERENCES government_subsidy_overpayments(overpayment_identity)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_government_return_excess_payable
+        FOREIGN KEY (payable_identity) REFERENCES government_overpayment_return_payables(payable_identity)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_government_return_excess_bank
+        FOREIGN KEY (source_finance_import_row_id) REFERENCES finance_import_rows(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_government_return_excess_payout
+        FOREIGN KEY (source_payout_id) REFERENCES government_overpayment_return_payouts(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_government_return_excess_amount
+        CHECK (original_amount_ntd > 0 AND remaining_amount_ntd >= 0
+            AND remaining_amount_ntd <= original_amount_ntd
+            AND (remaining_amount_ntd > 0 OR status = 'recovered'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS government_overpayment_return_excess_recovery_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    recovery_identity VARCHAR(191) NOT NULL,
+    event_type ENUM('established', 'incoming_reconciled') NOT NULL,
+    finance_import_row_id BIGINT NULL,
+    before_remaining_ntd BIGINT NOT NULL,
+    after_remaining_ntd BIGINT NOT NULL,
+    resulting_status ENUM('open', 'partially_recovered', 'recovered') NOT NULL,
+    expected_version BIGINT UNSIGNED NOT NULL,
+    resulting_version BIGINT UNSIGNED NOT NULL,
+    preview_fingerprint CHAR(64) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    evidence_reference VARCHAR(500) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_government_return_excess_event_key (idempotency_key),
+    INDEX idx_government_return_excess_event_root (recovery_identity, id),
+    CONSTRAINT fk_government_return_excess_event_root
+        FOREIGN KEY (recovery_identity) REFERENCES government_overpayment_return_excess_recoveries(recovery_identity)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_government_return_excess_event_bank
+        FOREIGN KEY (finance_import_row_id) REFERENCES finance_import_rows(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_government_return_excess_event_amount
+        CHECK (before_remaining_ntd > 0 AND after_remaining_ntd >= 0
+            AND after_remaining_ntd <= before_remaining_ntd
+            AND resulting_version = expected_version + 1),
+    CONSTRAINT chk_government_return_excess_event_fingerprint
+        CHECK (preview_fingerprint REGEXP '^[0-9a-f]{64}$')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_government_return_excess_recoveries_before_update;
+CREATE TRIGGER trg_government_return_excess_recoveries_before_update
+BEFORE UPDATE ON government_overpayment_return_excess_recoveries
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'government_overpayment_return_excess_recoveries records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_government_return_excess_recoveries_before_delete;
+CREATE TRIGGER trg_government_return_excess_recoveries_before_delete
+BEFORE DELETE ON government_overpayment_return_excess_recoveries
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'government_overpayment_return_excess_recoveries records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_government_return_excess_events_before_update;
+CREATE TRIGGER trg_government_return_excess_events_before_update
+BEFORE UPDATE ON government_overpayment_return_excess_recovery_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'government_overpayment_return_excess_recovery_events records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_government_return_excess_events_before_delete;
+CREATE TRIGGER trg_government_return_excess_events_before_delete
+BEFORE DELETE ON government_overpayment_return_excess_recovery_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'government_overpayment_return_excess_recovery_events records cannot be deleted';
+-- END SOURCE: db/schema_parts/212_government_subsidy_return_excess_recovery.sql
+
+-- BEGIN SOURCE: db/schema_parts/213_scheduling_service_day_attachment_kind.sql
+-- File: 213_scheduling_service_day_attachment_kind.sql
+-- Description: Add the Scheduling-owned Baby Log controlled-media attachment kind.
+-- This successor preserves the hash-bound 204 release and changes no existing rows.
+
+ALTER TABLE scheduling_service_day_log_attachments
+    MODIFY COLUMN attachment_kind ENUM('meal_photo','baby_log_photo') NOT NULL;
+-- END SOURCE: db/schema_parts/213_scheduling_service_day_attachment_kind.sql
 
 -- BEGIN SOURCE: db/schema_parts/214_historical_order_pairing_resolution_reused.sql
 -- File: 214_historical_order_pairing_resolution_reused.sql

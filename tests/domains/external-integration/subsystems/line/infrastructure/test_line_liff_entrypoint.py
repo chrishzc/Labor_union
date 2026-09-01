@@ -253,8 +253,8 @@ def test_staff_schedule_page_uses_strict_leave_and_text_log_flows() -> None:
     assert "/query`" in source
     assert "/api/v1/line/staff-self-service/service-day-logs/preview" in source
     assert "/api/v1/line/staff-self-service/service-day-logs/apply" in source
-    assert "/api/v1/line/staff-self-service/service-day-media" not in source
-    assert "等待受控檔案儲存區完成" in source
+    assert "/api/v1/line/staff-self-service/service-day-media" in source
+    assert "受控檔案 staging" in source
     assert 'development_line_user_id: ""' in source
     assert 'params.get("userId")' not in source
     assert '"line_user_id"' not in source

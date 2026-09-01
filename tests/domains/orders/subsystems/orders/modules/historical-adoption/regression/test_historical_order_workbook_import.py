@@ -374,6 +374,63 @@ def test_source_schedule_handoff_on_shared_boundary_is_not_a_conflict():
     assert module.project_source_schedule_conflicts(previews, rows) == ()
 
 
+def test_preview_rejects_canonical_service_day_collision_hidden_by_source_ranges():
+    from datetime import date
+
+    rows = (SimpleNamespace(source_row=110), SimpleNamespace(source_row=115))
+
+    def preview(case_no, source_start, source_end, canonical_dates):
+        return SimpleNamespace(
+            case_no=case_no,
+            canonical_service_dates=canonical_dates,
+            pairings=(SimpleNamespace(
+                ordinal=1,
+                resolution=SimpleNamespace(value="assignment_candidate"),
+                staff_id=1,
+                start_date=source_start,
+                end_date=source_end,
+            ),),
+        )
+
+    previews = (
+        preview(
+            "CASE-0006",
+            date(2026, 3, 23),
+            date(2026, 4, 21),
+            (date(2026, 3, 23), date(2026, 5, 21)),
+        ),
+        preview(
+            "CASE-0010",
+            date(2026, 5, 21),
+            date(2026, 6, 22),
+            (date(2026, 5, 21), date(2026, 6, 22)),
+        ),
+    )
+
+    conflicts = module.project_source_schedule_conflicts(previews, rows)
+
+    assert len(conflicts) == 1
+    assert conflicts[0].as_dict() == {
+        "staff_id": 1,
+        "left": {
+            "source_row": 110,
+            "pairing_ordinal": 1,
+            "case_identity": "***0006",
+            "staff_id": 1,
+            "start_date": "2026-05-21",
+            "end_date": "2026-05-21",
+        },
+        "right": {
+            "source_row": 115,
+            "pairing_ordinal": 1,
+            "case_identity": "***0010",
+            "staff_id": 1,
+            "start_date": "2026-05-21",
+            "end_date": "2026-05-21",
+        },
+    }
+
+
 def test_apply_uses_one_transaction_and_rolls_back_the_whole_workbook(monkeypatch):
     workbook = _workbook_with_statuses()
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda _path: workbook)

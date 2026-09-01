@@ -17,6 +17,6 @@
 ## Verification routing
 - default_boundary: Domain
 - test_root: `tests/domains/staff-payables/`
-- subsystem_root: `tests/domains/staff-payables/subsystems/staff-payables/`
+- subsystem_root: tests/domains/staff-payables/subsystems/staff-payables/
 - higher_boundary: shared acceptance/disposable-MySQL suites remain under their current higher roots.
 - routing: `.arch-map/tests/domains/staff-payables/index.md`.

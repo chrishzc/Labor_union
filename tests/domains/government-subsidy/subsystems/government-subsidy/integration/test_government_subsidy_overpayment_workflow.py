@@ -2,7 +2,7 @@ from domains.government_subsidy.overpayment import GovernmentRecipientSnapshot, 
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.money import MoneyNTD
-from subsystems.government_subsidy.overpayment_workflow import GovernmentSubsidyOverpaymentWorkflow, OffsetApplyRequest, ReturnApplyRequest, ReturnReconciliationApplyRequest
+from subsystems.government_subsidy.overpayment_workflow import GovernmentSubsidyOverpaymentWorkflow, OffsetApplyRequest, ReturnApplyRequest, ReturnReconciliationApplyRequest, ReturnReconciliationWithExcessApplyRequest
 
 class Uow:
  def __enter__(self): return self
@@ -34,6 +34,18 @@ class ReconciliationRepo:
  def persist_return_reconciliation(self, *_): self.persisted=True; return {'reconciled':True}
 
 
+class ExcessReconciliationRepo:
+ def __init__(self): self.persisted=False; self.lock_values=[]
+ def load_overpayment(self, *_args, **_kwargs):
+  self.lock_values.append(_kwargs.get('lock'))
+  return GovernmentSubsidyOverpayment('o','hccg',MoneyNTD(200),GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE,2)
+ def load_return_reconciliation_context(self, *_args, **_kwargs):
+  self.lock_values.append(_kwargs.get('lock'))
+  from domains.government_subsidy.ledger import GovernmentBankFact, GovernmentSubsidyBankDirection
+  return (GovernmentSubsidyOverpayment('o','hccg',MoneyNTD(200),GovernmentSubsidyOverpaymentStatus.RETURN_PAYABLE,2), ('return:o', MoneyNTD(200), 1), GovernmentBankFact(8,'bank-8',GovernmentSubsidyBankDirection.OUTGOING,'government_subsidy',MoneyNTD(250),__import__('datetime').date(2026,7,1)))
+ def persist_return_reconciliation_with_excess(self, request, candidate): self.persisted=(request,candidate); return {'recovery_identity':candidate.recovery_identity,'excess_amount_ntd':candidate.excess_amount_ntd.amount}
+
+
 def test_apply_reloads_root_and_refuses_stale_preview_before_write():
  repo=Repo(); workflow=GovernmentSubsidyOverpaymentWorkflow(repo,Uow)
  request=OffsetApplyRequest('o',(GovernmentSubsidyOffsetIntent(7,MoneyNTD(100)),),ExpectedVersion(1),PreviewFingerprint('0'*64),IdempotencyKey('key'),ActorContext('admin'), 'reason','evidence',CorrelationId('c'))
@@ -58,3 +70,12 @@ def test_return_reconciliation_accepts_an_earlier_bank_statement_date():
  request=ReturnReconciliationApplyRequest('o',7,ExpectedVersion(2),preview.fingerprint,IdempotencyKey('reconcile-key'),ActorContext('admin'),'reason','evidence',CorrelationId('c'))
  assert workflow.apply_return_reconciliation(request)=={'reconciled':True}
  assert repo.persisted is True
+
+
+def test_excess_return_reconciliation_uses_dedicated_owner_operation():
+ repo=ExcessReconciliationRepo(); workflow=GovernmentSubsidyOverpaymentWorkflow(repo,Uow)
+ preview=workflow.preview_return_reconciliation_with_excess('o',8)
+ request=ReturnReconciliationWithExcessApplyRequest('o',8,ExpectedVersion(2),preview.fingerprint,IdempotencyKey('excess-reconcile-key'),ActorContext('admin'),'over-return','statement',CorrelationId('c'))
+ assert workflow.apply_return_reconciliation_with_excess(request)=={'recovery_identity':'government-overpayment-return-excess:bank-8','excess_amount_ntd':50}
+ assert repo.persisted[1].lawful_amount_ntd == MoneyNTD(200)
+ assert repo.lock_values == [False, True, True]

@@ -11,6 +11,11 @@ set "APP_ENV=development"
 set "ENABLE_ADMIN_AUTH=false"
 set "ACCESS_CONTROL_PROFILE=local_bypass"
 set "VITE_ACCESS_CONTROL_PROFILE=local_bypass"
+set "REACT_ADMIN_RUNTIME_PROFILE=source"
+set "REACT_ADMIN_CURRENT_ARTIFACT_DIR="
+set "REACT_ADMIN_PREVIOUS_ARTIFACT_DIR="
+set "REACT_ADMIN_ACTIVE_SELECTOR="
+if not defined ADMIN_ENTRY_TARGET_STATE_PATH set "ADMIN_ENTRY_TARGET_STATE_PATH=%ProgramData%\Labor_union\runtime\admin-entry-targets.json"
 
 if /I "%~1"=="--dry-run" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0configure_local_admin_no_auth.ps1" -DryRun
@@ -22,6 +27,21 @@ if /I "%~1"=="--dry-run" (
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0configure_local_admin_no_auth.ps1"
 if errorlevel 1 goto _bootstrap_failed
+
+if not exist "%PROJECT_ROOT%\.venv\Scripts\python.exe" goto _bootstrap_failed
+set "LOCAL_PYTHON=%PROJECT_ROOT%\.venv\Scripts\python.exe"
+for %%I in ("%ADMIN_ENTRY_TARGET_STATE_PATH%") do set "ENTRY_TARGET_STATE_PARENT=%%~dpI"
+if not exist "%ENTRY_TARGET_STATE_PARENT%" mkdir "%ENTRY_TARGET_STATE_PARENT%"
+if errorlevel 1 goto _bootstrap_failed
+if exist "%ADMIN_ENTRY_TARGET_STATE_PATH%" (
+  "%LOCAL_PYTHON%" -m scripts.provision_admin_entry_target_state attest --state "%ADMIN_ENTRY_TARGET_STATE_PATH%"
+) else (
+  "%LOCAL_PYTHON%" -m scripts.provision_admin_entry_target_state provision --template "%PROJECT_ROOT%\config\admin_entry_targets.initial.json" --output "%ADMIN_ENTRY_TARGET_STATE_PATH%"
+)
+if errorlevel 1 goto _bootstrap_failed
+if not defined ANOMALY_ISSUE_IDENTITY_KEY_V1 (
+  for /f "usebackq delims=" %%K in (`"%LOCAL_PYTHON%" -c "import secrets; print(secrets.token_urlsafe(32))"`) do set "ANOMALY_ISSUE_IDENTITY_KEY_V1=%%K"
+)
 
 call "%~dp0start_local_development.bat"
 goto :eof

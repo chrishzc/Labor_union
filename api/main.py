@@ -64,6 +64,8 @@ from api.routes import (
     line_admin,
     line_configurations,
     line_notification_rules,
+    line_ai_events,
+    line_feedback,
     staff_service_day_media,
     staff_service_day_logs,
     line_identity,
@@ -227,6 +229,8 @@ app.include_router(capability_grants.router)
 app.include_router(line_admin.router)
 app.include_router(line_configurations.router)
 app.include_router(line_notification_rules.router)
+app.include_router(line_ai_events.router)
+app.include_router(line_feedback.router)
 app.include_router(staff_service_day_media.router)
 app.include_router(staff_service_day_logs.router)
 app.include_router(line_tasks.router)

@@ -16,7 +16,7 @@ def test_task96_owner_successor_release_is_hash_bound_and_terminal() -> None:
     manifest = load_migration_release_manifest(MANIFEST_PATH, ROOT)
     assert manifest.schema_paths(ROOT) == ((ROOT / "db/schema_parts" / PART_NAME).resolve(),)
     assert manifest.backfills == ()
-    assert load_schema_assembly().active_artifact_paths[-1].name == PART_NAME
+    assert PART_NAME in tuple(path.name for path in load_schema_assembly().active_artifact_paths)
 
     released = manifest.owned_object_descriptors(ROOT)[PART_NAME]
     canonical = migration._canonical_artifact_descriptor(PART_NAME)

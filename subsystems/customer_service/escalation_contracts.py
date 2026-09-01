@@ -37,6 +37,21 @@ class HumanEscalationError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class HumanEscalationAttemptWindow:
+    """Safe readback of a bounded retry window; it contains no proof or identity."""
+
+    attempt_count: int
+    maximum_attempts: int
+    generation: int
+
+    def __post_init__(self) -> None:
+        if self.attempt_count < 1 or self.attempt_count > self.maximum_attempts:
+            raise ValueError("human escalation attempt count is invalid")
+        if self.maximum_attempts < 1 or self.generation < 0:
+            raise ValueError("human escalation attempt window is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class CreateHumanEscalation:
     source_event_identity: str
     source_kind: str
@@ -125,6 +140,11 @@ class HumanEscalationView:
     created_at: datetime
     updated_at: datetime
     available_actions: tuple[str, ...]
+    delivery_task_ref: str | None = None
+    delivery_outcome_ref: str | None = None
+    trigger_identity: str | None = None
+    attempt_window: HumanEscalationAttemptWindow | None = None
+    owner_selector: str | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.escalation_id, "escalation ID")
@@ -139,6 +159,15 @@ class HumanEscalationView:
             raise TypeError("masked_context must be a mapping")
         if set(self.masked_context) - {"summary_code", "policy_version", "category", "redaction_version"}:
             raise ValueError("masked_context contains a non-allowlisted field")
+        for value, name in ((self.delivery_task_ref, "delivery task reference"), (self.delivery_outcome_ref, "delivery outcome reference")):
+            if value is not None:
+                require_canonical_text(value, name, 191)
+        if self.trigger_identity is not None:
+            require_canonical_text(self.trigger_identity, "trigger identity", 191)
+        if self.attempt_window is not None and not isinstance(self.attempt_window, HumanEscalationAttemptWindow):
+            raise TypeError("attempt_window must be HumanEscalationAttemptWindow")
+        if self.owner_selector is not None:
+            require_canonical_text(self.owner_selector, "owner selector", 191)
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +218,8 @@ class HumanEscalationPersistencePort(Protocol):
     def enqueue_masked_alert(self, intent: MaskedAlertIntent) -> None: ...
     def save_receipt(self, key: str, fingerprint: str, receipt: HumanEscalationReceipt) -> None: ...
     def active_hold(self, hold_scope: str) -> AutomationHoldDecision | None: ...
+    def record_alert_delivery_task(self, escalation_ref: str, task_id: int) -> None: ...
+    def record_alert_delivery_outcome(self, escalation_ref: str, outcome_ref: str, alert_status: str) -> None: ...
 
 
 class HumanEscalationTicketPort(Protocol):

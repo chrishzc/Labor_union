@@ -24,6 +24,7 @@ from subsystems.reporting.weekly_operations_report_query import (
     WeeklyOperationsReportQuery,
     WeeklyServiceFact,
 )
+from infrastructure.mysql.weekly_operations_report_query_adapter import _CASE_FACTS_SQL
 
 
 class _Facts:
@@ -113,6 +114,38 @@ def test_weekly_query_rejects_non_monday():
     )
     assert response.status_code == 400
     assert response.json()["detail"]["error"]["code"] == "weekly_operations_report_invalid"
+
+
+def test_weekly_query_retains_missing_application_date_as_typed_quality_issue():
+    class MissingDateFacts(_Facts):
+        def list_case_facts(self, week_start, week_end):
+            return [
+                WeeklyCaseFact(
+                    9, "OPS96-WEEKLY-D-MISSING-DATE", None, "林大華", "一般市民", None,
+                    "北區", "洽談中", None, None, None, None,
+                ),
+            ]
+
+    def query():
+        return WeeklyOperationsReportQuery(
+            MissingDateFacts(),
+            lambda: datetime(2026, 8, 23, 12, tzinfo=TAIPEI_TIME_ZONE),
+        )
+
+    app = _app()
+    app.dependency_overrides[get_weekly_operations_report_query] = query
+    response = TestClient(app).get(
+        "/api/v1/operations-reports/weekly",
+        params={"week_start": "2026-08-17"},
+    )
+    assert response.status_code == 200
+    row = response.json()["data"]["case_rows"][0]
+    assert row["application_date"] is None
+    assert "application_date_missing" in row["data_quality_codes"]
+
+
+def test_case_source_retains_rows_without_application_date_for_typed_quality_review():
+    assert "OR c.created_at IS NULL" in _CASE_FACTS_SQL
 
 
 def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():

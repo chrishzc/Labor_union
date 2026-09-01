@@ -2,10 +2,10 @@
   "schema_version": 1,
   "registry_revision": "phase5a-mapped-entries-v2-system-status",
   "registry_digest": "1d829dc89fda82843907fe134b90d5147b9de44f6263c4d80fc69d3e86ef42de",
-  "revision": 1,
+  "revision": 2,
   "entries": [
     {"entry_id":"ui-react:#account-management","replacement_group":"access","current_target":"streamlit","streamlit_target":"/?entry=access-management","react_target":"/admin/#account-management","required_react_artifact":null,"entry_revision":1},
-    {"entry_id":"ui-react:#anomalies","replacement_group":"anomalies","current_target":"streamlit","streamlit_target":"/?entry=anomalies","react_target":"/admin/#anomalies","required_react_artifact":null,"entry_revision":1},
+    {"entry_id":"ui-react:#anomalies","replacement_group":"anomalies","current_target":"react","streamlit_target":"/?entry=anomalies","react_target":"/admin/#anomalies","required_react_artifact":{"version":"react-admin-c0282230bc007688","digest":"05c0e6874ec16b1acba2c5934e9afccae1ba98f452bf70a7728de6815ec5a425","api_compatibility_revision":"react-admin-api-v1"},"entry_revision":2},
     {"entry_id":"ui-react:#data-browser","replacement_group":"data-browser","current_target":"streamlit","streamlit_target":"/?entry=data-browser","react_target":"/admin/#data-browser","required_react_artifact":null,"entry_revision":1},
     {"entry_id":"ui-react:#data-import","replacement_group":"data-import","current_target":"streamlit","streamlit_target":"/?entry=data-import","react_target":"/admin/#data-import","required_react_artifact":null,"entry_revision":1},
     {"entry_id":"ui-react:#finance","replacement_group":"finance","current_target":"streamlit","streamlit_target":"/?entry=finance","react_target":"/admin/#finance","required_react_artifact":null,"entry_revision":1},
@@ -17,6 +17,8 @@
     {"entry_id":"ui-react:#staff","replacement_group":"staff-scheduling","current_target":"streamlit","streamlit_target":"/?entry=scheduling&view=staff-directory","react_target":"/admin/#staff","required_react_artifact":null,"entry_revision":1},
     {"entry_id":"ui-react:#system-status","replacement_group":"reports-system","current_target":"streamlit","streamlit_target":"/?entry=system-status","react_target":"/admin/#system-status","required_react_artifact":null,"entry_revision":1}
   ],
-  "receipts": [],
-  "state_digest": "ecd41979e9aabe0d9d68af8cb09a0e619f66dda538d046cd969c01bbaca2a2f8"
+  "receipts": [
+    {"receipt_id":"admin-entry-target:2:ui-react:#anomalies","command_fingerprint":"3f2da90390af16875cf1ba82575d47284212e9612880ac2feef9321fecccb7a8","idempotency_key":"initial-anomalies-react","entry_id":"ui-react:#anomalies","before_target":"streamlit","resulting_target":"react","before_state_revision":1,"resulting_state_revision":2,"before_entry_revision":1,"resulting_entry_revision":2,"artifact_version":"react-admin-c0282230bc007688","artifact_digest":"05c0e6874ec16b1acba2c5934e9afccae1ba98f452bf70a7728de6815ec5a425","api_compatibility_revision":"react-admin-api-v1","actor_id":"admin:initial-bootstrap","reason_code":"activate_react","correlation_id":"initial-anomalies-react","occurred_at":"2026-09-01T03:00:00Z","previous_receipt_digest":null,"receipt_digest":"474bd2591c56b18d52a165e56d65ca7c3082d205231af3ef7a57d9530d1c6ea9"}
+  ],
+  "state_digest": "d087559cd5fc70a802924ed6f41314a5f65d86127e6307dba2285db7cd1e6047"
 }

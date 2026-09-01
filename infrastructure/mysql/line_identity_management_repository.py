@@ -85,6 +85,25 @@ class MySqlLineIdentityManagementRepository:
             cursor.execute(_DEFAULT_MENU_SQL)
             return cursor.fetchone()
 
+    def staff_menu_publication(self) -> dict[str, Any] | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_STAFF_MENU_SQL)
+            return cursor.fetchone()
+
+    def terminal_closure_case(self, case_no: str) -> dict[str, Any] | None:
+        """Fresh owner readback used by the LINE consumer; this method never writes Orders."""
+
+        with self._connection.cursor() as cursor:
+            cursor.execute(_TERMINAL_CLOSURE_CASE_SQL, (case_no,))
+            return cursor.fetchone()
+
+    def active_client_cases(self, line_user_id: LineUserId) -> tuple[dict[str, Any], ...]:
+        """Read every customer-role case for this LINE user at the current owner state."""
+
+        with self._connection.cursor() as cursor:
+            cursor.execute(_ACTIVE_CLIENT_CASES_SQL, (line_user_id.value,))
+            return tuple(cursor.fetchall() or ())
+
     def subject_candidate(
         self,
         subject_type: LineBindingSubjectType,
@@ -368,18 +387,21 @@ _CURRENT_FACT_SQL = (
     "NULL AS owner_line_user_id FROM line_identity_role_bindings b WHERE b.line_user_id=%s "
     "UNION ALL "
     "SELECT 'customer' AS source_kind,c.line_user_id,NULL AS binding_status,"
-    "NULL AS aggregate_version,'customer' AS subject_type,CAST(c.id AS CHAR) "
+    "NULL AS aggregate_version,'customer' AS subject_type,"
+    "CAST(c.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
     "AS subject_reference,c.name AS subject_name,c.line_user_id AS owner_line_user_id "
     "FROM clients c WHERE c.line_user_id=%s AND c.line_user_id<>'' "
     "UNION ALL "
     "SELECT 'staff' AS source_kind,s.line_user_id,NULL AS binding_status,"
-    "NULL AS aggregate_version,'staff' AS subject_type,CAST(s.id AS CHAR) "
+    "NULL AS aggregate_version,'staff' AS subject_type,"
+    "CAST(s.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
     "AS subject_reference,s.name AS subject_name,s.line_user_id AS owner_line_user_id "
     "FROM staff s WHERE s.line_user_id=%s AND s.line_user_id<>'' "
     "UNION ALL "
     "SELECT 'admin' AS source_kind,a.linked_line_user_id AS line_user_id,"
     "NULL AS binding_status,NULL AS aggregate_version,'admin' AS subject_type,"
-    "CAST(a.id AS CHAR) AS subject_reference,a.display_name AS subject_name,"
+    "CAST(a.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+    "AS subject_reference,a.display_name AS subject_name,"
     "a.linked_line_user_id AS owner_line_user_id FROM admin_users a "
     "WHERE a.linked_line_user_id=%s AND a.linked_line_user_id<>''"
 )
@@ -409,6 +431,22 @@ _DEFAULT_MENU_SQL = (
     "FROM line_rich_menu_publication_tasks "
     "WHERE menu_definition_id='default_menu' AND publication_status='published' "
     "AND provider_menu_id IS NOT NULL ORDER BY id DESC LIMIT 1"
+)
+_STAFF_MENU_SQL = (
+    "SELECT id,provider_menu_id AS line_rich_menu_id "
+    "FROM line_rich_menu_publication_tasks "
+    "WHERE menu_definition_id='staff_menu' AND publication_status='published' "
+    "AND provider_menu_id IS NOT NULL ORDER BY id DESC LIMIT 1"
+)
+_TERMINAL_CLOSURE_CASE_SQL = (
+    "SELECT o.case_no,o.status,o.lifecycle_version,c.line_user_id "
+    "FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s"
+)
+_ACTIVE_CLIENT_CASES_SQL = (
+    "SELECT o.case_no,o.status,o.lifecycle_version,1 AS owner_readback_verified "
+    "FROM orders o JOIN clients c ON c.id=o.client_id "
+    "WHERE c.line_user_id=%s AND o.status NOT IN ('訂單完成','訂單取消') "
+    "ORDER BY o.case_no"
 )
 _REQUEST_SELECT_SQL = (
     "SELECT id,line_user_id,subject_type,subject_reference,request_status,"

@@ -22,7 +22,7 @@ SUBSIDIZED_CITIZEN = "補助市民"
 class WeeklyCaseFact:
     client_id: int
     case_no: str | None
-    created_at: datetime
+    created_at: datetime | None
     applicant_name: str | None
     identity_status: str | None
     reject_reason: str | None
@@ -92,7 +92,7 @@ class DataQualityIssue:
 class WeeklyCaseRow:
     case_no: str
     applicant_name_masked: str
-    application_date: date
+    application_date: date | None
     identity_status: str | None
     review_result: str
     order_status: str | None
@@ -218,6 +218,8 @@ class WeeklyOperationsReportQuery:
     @staticmethod
     def _case_row(fact: WeeklyCaseFact) -> WeeklyCaseRow:
         quality_codes: list[str] = []
+        if fact.created_at is None:
+            quality_codes.append("application_date_missing")
         if not fact.case_no:
             quality_codes.append("case_no_missing")
         if fact.order_status is None:
@@ -240,7 +242,7 @@ class WeeklyOperationsReportQuery:
         return WeeklyCaseRow(
             case_no=fact.case_no or "—",
             applicant_name_masked=_mask_name(fact.applicant_name),
-            application_date=fact.created_at.date(),
+            application_date=fact.created_at.date() if fact.created_at is not None else None,
             identity_status=fact.identity_status,
             review_result=review_result,
             order_status=fact.order_status,

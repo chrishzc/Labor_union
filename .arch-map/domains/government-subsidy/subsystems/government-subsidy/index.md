@@ -24,5 +24,5 @@
 - default_boundary: Subsystem
 - test_root: `tests/domains/government-subsidy/subsystems/government-subsidy/`
 - integration_root: `tests/domains/government-subsidy/subsystems/government-subsidy/integration/`
-- anomaly-focused subsidy projections remain under `tests/domains/anomalies/`.
+- anomaly-focused subsidy projections remain under tests/domains/anomalies/.
 - routing: `.arch-map/tests/domains/government-subsidy/subsystems/government-subsidy/index.md`.

@@ -398,6 +398,27 @@ class GovernmentOverpaymentReturnReconciliationPreviewView(BaseModel):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class GovernmentOverpaymentReturnReconciliationWithExcessPreviewView(BaseModel):
+    """Strict preview for actual outgoing amount above lawful payable."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    overpayment_identity: str
+    overpayment_version: int = Field(ge=0)
+    payable_identity: str
+    payable_version: int = Field(ge=0)
+    bank_fact_identity: str
+    actual_amount_ntd: int = Field(gt=0)
+    lawful_amount_ntd: int = Field(gt=0)
+    excess_amount_ntd: int = Field(gt=0)
+    payable_remaining_after_ntd: int = Field(ge=0)
+    overpayment_remaining_after_ntd: int = Field(ge=0)
+    resulting_status: str
+    recovery_identity: str
+    recovery_status: Literal["open", "partially_recovered", "recovered"]
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class GovernmentSubsidyOverpaymentPreviewView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -444,6 +465,18 @@ class GovernmentSubsidyReturnRecipientQueryView(BaseModel):
     effective_date: str | None = None
 
 
+class GovernmentSubsidyReturnExcessRecoveryQueryView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recovery_identity: str
+    source_bank_fact_reference: str
+    source_payout_reference: str
+    original_amount_ntd: int = Field(gt=0)
+    remaining_amount_ntd: int = Field(ge=0)
+    status: Literal["open", "partially_recovered", "recovered"]
+    recovery_version: int = Field(ge=0)
+
+
 class GovernmentSubsidyOverpaymentQueryView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -458,6 +491,7 @@ class GovernmentSubsidyOverpaymentQueryView(BaseModel):
     return_recipient: GovernmentSubsidyReturnRecipientQueryView
     blockers: list[str] = Field(default_factory=list)
     available_actions: list[str] = Field(default_factory=list)
+    return_excess_recovery: GovernmentSubsidyReturnExcessRecoveryQueryView | None = None
 
 
 __all__ = [
@@ -496,9 +530,11 @@ __all__ = [
     "GovernmentOverpaymentReturnReconciliationApplyBody",
     "GovernmentOverpaymentReturnReconciliationPreviewBody",
     "GovernmentOverpaymentReturnReconciliationPreviewView",
+    "GovernmentOverpaymentReturnReconciliationWithExcessPreviewView",
     "GovernmentSubsidyOverpaymentPreviewView",
     "GovernmentSubsidyOverpaymentReceiptView",
     "GovernmentSubsidyOffsetTargetQueryView",
     "GovernmentSubsidyReturnRecipientQueryView",
+    "GovernmentSubsidyReturnExcessRecoveryQueryView",
     "GovernmentSubsidyOverpaymentQueryView",
 ]

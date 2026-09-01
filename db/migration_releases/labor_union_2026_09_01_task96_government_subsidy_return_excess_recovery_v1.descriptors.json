@@ -1,0 +1,35 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-task96-government-subsidy-return-excess-recovery-2026-09-01-v1",
+  "descriptors": {
+    "1025_task96_government_subsidy_return_excess_recovery.sql": {
+      "tables": {
+        "government_overpayment_return_excess_recoveries": ["actor", "created_at", "evidence_reference", "original_amount_ntd", "overpayment_identity", "payable_identity", "payer_identity", "projection_version", "reason", "recovery_identity", "remaining_amount_ntd", "source_finance_import_row_id", "source_payout_id", "status", "updated_at"],
+        "government_overpayment_return_excess_recovery_events": ["actor", "after_remaining_ntd", "before_remaining_ntd", "created_at", "event_type", "evidence_reference", "expected_version", "finance_import_row_id", "id", "idempotency_key", "preview_fingerprint", "reason", "recovery_identity", "resulting_status", "resulting_version"]
+      },
+      "indexes": {
+        "government_overpayment_return_excess_recoveries.PRIMARY": {"columns": ["recovery_identity"], "non_unique": 0},
+        "government_overpayment_return_excess_recoveries.idx_government_return_excess_status": {"columns": ["status", "created_at"], "non_unique": 1},
+        "government_overpayment_return_excess_recoveries.uq_government_return_excess_source_bank": {"columns": ["source_finance_import_row_id"], "non_unique": 0},
+        "government_overpayment_return_excess_recoveries.uq_government_return_excess_source_payout": {"columns": ["source_payout_id"], "non_unique": 0},
+        "government_overpayment_return_excess_recovery_events.PRIMARY": {"columns": ["id"], "non_unique": 0},
+        "government_overpayment_return_excess_recovery_events.idx_government_return_excess_event_root": {"columns": ["recovery_identity", "id"], "non_unique": 1},
+        "government_overpayment_return_excess_recovery_events.uq_government_return_excess_event_key": {"columns": ["idempotency_key"], "non_unique": 0}
+      },
+      "foreign_keys": {
+        "government_overpayment_return_excess_recoveries.fk_government_return_excess_bank": {"columns": ["source_finance_import_row_id"], "delete_rule": "RESTRICT", "referenced_columns": ["id"], "referenced_table": "finance_import_rows", "update_rule": "RESTRICT"},
+        "government_overpayment_return_excess_recoveries.fk_government_return_excess_overpayment": {"columns": ["overpayment_identity"], "delete_rule": "RESTRICT", "referenced_columns": ["overpayment_identity"], "referenced_table": "government_subsidy_overpayments", "update_rule": "RESTRICT"},
+        "government_overpayment_return_excess_recoveries.fk_government_return_excess_payable": {"columns": ["payable_identity"], "delete_rule": "RESTRICT", "referenced_columns": ["payable_identity"], "referenced_table": "government_overpayment_return_payables", "update_rule": "RESTRICT"},
+        "government_overpayment_return_excess_recoveries.fk_government_return_excess_payout": {"columns": ["source_payout_id"], "delete_rule": "RESTRICT", "referenced_columns": ["id"], "referenced_table": "government_overpayment_return_payouts", "update_rule": "RESTRICT"},
+        "government_overpayment_return_excess_recovery_events.fk_government_return_excess_event_bank": {"columns": ["finance_import_row_id"], "delete_rule": "RESTRICT", "referenced_columns": ["id"], "referenced_table": "finance_import_rows", "update_rule": "RESTRICT"},
+        "government_overpayment_return_excess_recovery_events.fk_government_return_excess_event_root": {"columns": ["recovery_identity"], "delete_rule": "RESTRICT", "referenced_columns": ["recovery_identity"], "referenced_table": "government_overpayment_return_excess_recoveries", "update_rule": "RESTRICT"}
+      },
+      "checks": {
+        "government_overpayment_return_excess_recoveries.chk_government_return_excess_amount": "and(atom(original_amount_ntd>0),atom(remaining_amount_ntd>=0),atom(remaining_amount_ntd<=original_amount_ntd),or(atom(remaining_amount_ntd>0),atom(status='recovered')))",
+        "government_overpayment_return_excess_recovery_events.chk_government_return_excess_event_amount": "and(atom(before_remaining_ntd>0),atom(after_remaining_ntd>=0),atom(after_remaining_ntd<=before_remaining_ntd),atom(resulting_version=expected_version+1))",
+        "government_overpayment_return_excess_recovery_events.chk_government_return_excess_event_fingerprint": "atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$'))"
+      },
+      "triggers": ["trg_government_return_excess_events_before_delete", "trg_government_return_excess_events_before_update", "trg_government_return_excess_recoveries_before_delete", "trg_government_return_excess_recoveries_before_update"]
+    }
+  }
+}

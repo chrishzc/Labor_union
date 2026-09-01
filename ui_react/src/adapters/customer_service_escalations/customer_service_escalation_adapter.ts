@@ -28,6 +28,11 @@ export interface CustomerServiceEscalationModel {
   updatedAt: string;
   availableActions: string[];
   availableActionLabels: string[];
+  deliveryTaskRef: string | null;
+  deliveryOutcomeRef: string | null;
+  triggerIdentity: string | null;
+  attemptWindow: { attemptCount: number; maximumAttempts: number; generation: number } | null;
+  ownerSelector: string | null;
 }
 
 export interface CustomerServiceEscalationReceiptModel {
@@ -73,6 +78,13 @@ export function adaptCustomerServiceEscalation(source: unknown): CustomerService
     updatedAt: value.updated_at,
     availableActions: [...value.available_actions],
     availableActionLabels: value.available_actions.map((action) => actionLabels[action]),
+    deliveryTaskRef: value.delivery_task_ref ?? null,
+    deliveryOutcomeRef: value.delivery_outcome_ref ?? null,
+    triggerIdentity: value.trigger_identity ?? null,
+    attemptWindow: value.attempt_window
+      ? { attemptCount: value.attempt_window.attempt_count, maximumAttempts: value.attempt_window.maximum_attempts, generation: value.attempt_window.generation }
+      : null,
+    ownerSelector: value.owner_selector ?? null,
   };
 }
 

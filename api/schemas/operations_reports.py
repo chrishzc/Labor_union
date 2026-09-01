@@ -40,7 +40,7 @@ class WeeklyReportSummaryView(_StrictModel):
 class WeeklyReportCaseRowView(_StrictModel):
     case_no: str
     applicant_name_masked: str
-    application_date: date
+    application_date: date | None
     identity_status: str | None
     review_result: Literal[
         "general_eligible",

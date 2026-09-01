@@ -253,6 +253,16 @@ def _current_evidence_payload(key: str, value: object) -> dict[str, object]:
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError("anomaly_projection_data_integrity_violation")
         return {"kind": "integer", "key": key, "value": value}
+    if key in {"applicable_source_count", "unresolved_source_count"}:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError("anomaly_projection_data_integrity_violation")
+        return {"kind": "integer", "key": key, "value": value}
+    if key == "unresolved_reason_codes":
+        if not isinstance(value, (tuple, list)) or any(
+            not isinstance(item, str) or not item for item in value
+        ):
+            raise ValueError("anomaly_projection_data_integrity_violation")
+        return {"kind": "code_list", "key": key, "value": list(value)}
     if key == "subject_type":
         if not _safe_code(value):
             raise ValueError("anomaly_projection_data_integrity_violation")

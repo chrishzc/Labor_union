@@ -92,6 +92,12 @@ class GovernmentSubsidyApplication:
     def apply_overpayment_return_reconciliation(self, request):
         return self.overpayment_workflow.apply_return_reconciliation(request)
 
+    def preview_overpayment_return_reconciliation_with_excess(self, identity, finance_import_row_id):
+        return self.overpayment_workflow.preview_return_reconciliation_with_excess(identity, finance_import_row_id)
+
+    def apply_overpayment_return_reconciliation_with_excess(self, request):
+        return self.overpayment_workflow.apply_return_reconciliation_with_excess(request)
+
     def query_overpayment(self, overpayment_identity, correlation_id):
         return self.overpayment_query_workflow.query(overpayment_identity, correlation_id)
 

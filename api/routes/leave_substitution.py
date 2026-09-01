@@ -25,6 +25,7 @@ from api.schemas.leave_substitution import (
     LeaveSubstitutionPreviewBody,
     LeaveSubstitutionPreviewView,
     LeaveSubstitutionReceiptView,
+    SubstitutionPayablesLineageView,
 )
 from subsystems.access.authentication_session import AdminPrincipal
 from shared_kernel.errors import ErrorCategory, TypedError
@@ -78,6 +79,29 @@ def list_leave_assignments(
             for row in assignments
         ],
         message="成功取得請假與代班正式服務指派",
+    )
+
+
+@router.get(
+    "/{case_no}/leave-substitution/{batch_key}/payables-lineage",
+    response_model=BaseResponse[SubstitutionPayablesLineageView],
+)
+def query_substitution_payables_lineage(
+    case_no: str = Path(..., min_length=1, max_length=50),
+    batch_key: str = Path(..., min_length=1, max_length=191),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: LeaveSubstitutionApplication = Depends(
+        get_leave_substitution_application
+    ),
+):
+    del principal
+    # Keep the transport correlation within the shared 191-character identity bound;
+    # case/batch are already carried as validated route parameters and SQL bindings.
+    correlation = CorrelationId("leave-substitution-payables-lineage")
+    return _call_endpoint(
+        lambda: _materialize(application.query_payables_lineage(case_no, batch_key)),
+        "成功取得代班至薪資與應付款的版本化血緣",
+        correlation,
     )
 
 

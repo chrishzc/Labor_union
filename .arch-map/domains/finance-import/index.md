@@ -21,4 +21,3 @@
 - layout_status: `custom_current`
 - default_boundary: Domain
 - test_root: `tests/domains/finance-import/`
-- integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/`; see Test Map.

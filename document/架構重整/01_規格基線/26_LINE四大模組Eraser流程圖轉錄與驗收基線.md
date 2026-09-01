@@ -4,6 +4,7 @@ declared_status: approved
 date: 2026-08-25
 owner: LINE Integration / Customer Service / Scheduling / Access Control
 source_authority: 2026-08-25 user-provided Eraser DSL transcription
+spec_convergence: SPEC_READY（2026-09-01 direct-flow acceptance amendment）
 ---
 
 # LINE 四大模組 Eraser 流程圖轉錄與驗收基線
@@ -21,8 +22,75 @@ public API、schema、provider 或 production mutation 授權。原圖與 curren
 current 正式規格執行。
 
 2026-08-25 人工裁決：原圖中尚未實作、契約缺失或需重新裁決的需求先記錄為
-deferred-after-96，不加入 96 Current 剩餘代辦的施工範圍。96 全部收斂後，才依本文件的
-缺口清單另立有界 Work Package；不得因此重開 96 已完成項目。
+deferred-after-96，不加入 96 Current 剩餘代辦的施工範圍。此段僅保存當時的裁決 provenance；
+2026-09-01 最新人工裁決已取代其排除效果：Task 96 必須逐項直接驗證 M1～M4 原圖節點與箭頭，
+FAQ／常見問題庫內容除外。原圖與 current owner-safe supersession 仍以 current 規格為準；本修訂
+不授權跨 owner 直寫、schema／migration、public route、provider、production 或 deployment。
+
+### 1.2 Task 96 direct-flow acceptance amendment（2026-09-01）
+
+M1～M4 原圖所有非 FAQ 節點與箭頭均是 Task 96 的 required acceptance gap。每一項必須有可直接操作的 UI／ingress、current owner typed
+contract、必要 commit／outbox／worker／provider boundary、readback 與 failure evidence；尚未具備者
+標為 `blocked` 或 `not_run`，不標 `passed`。Current source、focused test、local no-auth 或空資料庫
+只證明 source／boundary，不能取代直接流程驗收；允許的 `lu_test_*` no-auth Browser 仍必須逐步操作流程並取得 committed intent／outbox／deterministic delivery task、retry/manual fallback、mock/local adapter result／typed readback。
+
+2026-09-01 direct `lu_test_1` readback 顯示 LINE Notification catalog revision `0`、rules `0`、
+source_events `0`。因此通知規則、source event、decision、intent、recipient delivery 與 LINE-006
+正向 predicate 目前沒有可驗證的 baseline data；不得以空 catalog 或 queue existence 宣稱流程完成。
+M1 尚缺實際 BeClass source producer；M3 尚缺可由 owner outbox 消費並形成雙方 recipient／client
+decision readback 的完整閉環；M4 尚缺從 canonical complaint ingress 到 hold／HIGH ticket／alert 的
+直接操作證據。recipient intent／delivery task／retry/manual fallback／mock-local adapter result 必須可讀回；真 provider、quota、deployment、production DB 與外部 effect
+仍各自需要新 Authority 與 bounded gate，但真 provider receipt 不是 Task 96 terminal gate。
+
+跨流程的 notification test baseline 不是新的 owner root：驗收前必須在 development `lu_test_*` 配置至少一組
+非空 rule、template、trigger 與 exact recipient，並能由 Query／Preview／Apply 讀回 revision、intent、outbox、
+deterministic delivery task、mock/local result 與 typed failure。任一 catalog 欄位為零、只有 queue row、無
+recipient snapshot、無 terminal/fallback result 或 readback 不一致，均為該通知邊的 failure／`not_run`，不構成
+Task 96 通過。
+
+```yaml
+convergence:
+  status: READY
+  blockers: []
+```
+
+### 1.3 Versioned notification baseline identities（P0 canonical catalog）
+
+P0 的 baseline identity 只描述原圖觸發語意與 owner recipient projection，不代表 business decision、assignment、
+profile 或 production effect。命名規則固定為
+`LU96-{M1|M2|M3|M4}-{原圖 node／edge semantic slug}-{SOURCE|RULE|TEMPLATE|CARD}-V{contract_revision}`；同一
+semantic slug 的 interactive decision 必須各自有 source／rule／card ID，不能合併成 generic decision rule。V1
+沿用本文件 2026-09-01 amendment；改變 trigger、recipient kind 或 observable failure 時升版，舊版只作 readback
+provenance，不覆寫。
+
+| Flow semantic | Required source-event ID | Rule ID | Template／card ID | Trigger kind | Recipient selector kind |
+|---|---|---|---|---|---|
+| M1 Gateway Retry_Fail | `LU96-M1-GATEWAY-RETRY-FAIL-SOURCE-V1` | `LU96-M1-GATEWAY-RETRY-FAIL-RULE-V1` | `LU96-M1-GATEWAY-RETRY-FAIL-CARD-V1` | `gateway.identity_mismatch.second_attempt` | `customer_service.ticket_owner` |
+| M1 Client_Extension_Push | `LU96-M1-LEAVE-EXTENSION-SOURCE-V1` | `LU96-M1-LEAVE-EXTENSION-RULE-V1` | `LU96-M1-LEAVE-EXTENSION-CARD-V1` | `scheduling.leave.extension_requested` | `client.bound_case` |
+| M1 Staff retirement | `LU96-M1-STAFF-RETIRE-SOURCE-V1` | `LU96-M1-STAFF-RETIRE-RULE-V1` | `LU96-M1-STAFF-RETIRE-CARD-V1` | `staff.retirement.committed` | `staff.binding_owner` |
+| M2 deterministic router reply | `LU96-M2-ROUTER-REPLY-SOURCE-V1` | `LU96-M2-ROUTER-REPLY-RULE-V1` | `LU96-M2-ROUTER-REPLY-CARD-V1` | `router.deterministic.reply_committed` | `conversation.bound_actor` |
+| M2 feedback unresolved | `LU96-M2-FEEDBACK-UNRESOLVED-SOURCE-V1` | `LU96-M2-FEEDBACK-UNRESOLVED-RULE-V1` | `LU96-M2-FEEDBACK-UNRESOLVED-CARD-V1` | `feedback.unresolved.recorded` | `customer_service.ticket_owner` |
+| M3 zero-pool proposal | `LU96-M3-ZERO-POOL-SOURCE-V1` | `LU96-M3-ZERO-POOL-RULE-V1` | `LU96-M3-ZERO-POOL-CARD-V1` | `matching.zero_pool.preview_applied` | `matching.request.participants` |
+| M3 Match_Success client | `LU96-M3-MATCH-SUCCESS-CLIENT-SOURCE-V1` | `LU96-M3-MATCH-SUCCESS-CLIENT-RULE-V1` | `LU96-M3-MATCH-SUCCESS-CLIENT-CARD-V1` | `matching.decision.committed.client` | `assignment.client_snapshot` |
+| M3 Match_Success staff | `LU96-M3-MATCH-SUCCESS-STAFF-SOURCE-V1` | `LU96-M3-MATCH-SUCCESS-STAFF-RULE-V1` | `LU96-M3-MATCH-SUCCESS-STAFF-CARD-V1` | `matching.decision.committed.staff` | `assignment.staff_snapshot` |
+| M3 Client_Agree | `LU96-M3-LEAVE-AGREE-SOURCE-V1` | `LU96-M3-LEAVE-AGREE-RULE-V1` | `LU96-M3-LEAVE-AGREE-CARD-V1` | `client.leave.extension_agreed` | `scheduling.owner` |
+| M3 Client_Disagree | `LU96-M3-LEAVE-DISAGREE-SOURCE-V1` | `LU96-M3-LEAVE-DISAGREE-RULE-V1` | `LU96-M3-LEAVE-DISAGREE-CARD-V1` | `client.leave.extension_rejected` | `customer_service.ticket_owner` |
+| M4 Mobile_Group_Alert | `LU96-M4-SAFE-ALERT-SOURCE-V1` | `LU96-M4-SAFE-ALERT-RULE-V1` | `LU96-M4-SAFE-ALERT-CARD-V1` | `runtime.alert.review_required` | `admin.review_actor` |
+| M4 complaint escalation | `LU96-M4-COMPLAINT-HIGH-SOURCE-V1` | `LU96-M4-COMPLAINT-HIGH-RULE-V1` | `LU96-M4-COMPLAINT-HIGH-CARD-V1` | `complaint.ingress.hold_high_ticket` | `customer_service.claim_owner` |
+| M4 salary/payable anomaly | `LU96-M4-SALARY-PAYABLE-SOURCE-V1` | `LU96-M4-SALARY-PAYABLE-RULE-V1` | `LU96-M4-SALARY-PAYABLE-CARD-V1` | `payroll.substitute.obligation_projected` | `staff_payables.anomaly_owner` |
+
+development-only reset/bootstrap 可由既有 Notification owner 的 typed fixture writer 建立上述最小 synthetic
+owner-root recipient fixture／projection 與 source trigger event；fixture 只含 `lu_test_*` synthetic principal／binding、canonical
+identity、source subject 與 revision，不建立假的 matching／leave decision、assignment、payroll obligation 或
+production side effect。source trigger event 只保存 canonical event identity、trigger kind、source subject 與
+producer reference，不捏造 business decision；若 trigger 語意依賴 owner decision，整合驗收時必須由該 owner
+producer 提供 decision reference，P0 writer 不得直接補寫。fresh reset 必須能用相同 canonical IDs 重建，重跑必須 idempotent；既有 Notification Query
+讀回 catalog／revision／selector，Preview 只預覽 source event→intent／task（零寫入），Apply 由 owner commit
+intent／outbox 並回 receipt，public typed readback 再讀回 deterministic task、mock/local result 與 typed failure。
+若 current owner 沒有 development-only typed source ingress，
+只能由 owner fixture producer 在 reset/bootstrap 內產生 source event；不得新增 public route。任一 identity 漂移、
+缺 source event、generic interactive decision、錯 recipient、重複 fixture、business root 被改動或 readback 不一致，
+均為 P0 failure／`not_run`。
 
 ### 1.1 Eraser current identities
 
@@ -48,8 +116,8 @@ deferred-after-96，不加入 96 Current 剩餘代辦的施工範圍。96 全部
 | disposition | aligned／conflict／superseded-by-current-spec／unimplemented／blocked／not_run／passed |
 | acceptance evidence | Chrome 實點、focused test、receipt 或明確 blocker |
 
-Chrome 驗收須實際點擊 UI；mutation 不得以 API 直接呼叫替代。LINE provider 未獲授權時固定
-not_run，不得以 queue、mock 或本機預覽冒充 delivery success。
+Chrome 驗收須實際點擊 UI；mutation 不得以 API 直接呼叫替代。LINE 真 provider 未獲授權時固定
+`not_run` 且不阻塞 Task 96；仍須取得 committed delivery task 與 mock/local adapter result／typed readback，不得以未持久化 queue 或本機預覽冒充已完成的 delivery decision。
 
 ## 3. 模組一原圖轉錄：LINE LIFF 表單架構與身分升級切換
 
@@ -352,30 +420,71 @@ Auto_Payroll_Engine（依正式出勤與補助規則產生結算）。
 | AI 安撫後自動暫停所有回答 | explicit human／wrong 優先並建立 durable manual escalation；pause state 的 owner／公開契約仍須逐流程證明 | partial | 17、20 |
 | 代班完成後由 LINE 自動拆薪 | LINE 不擁有薪資；Scheduling 建立正式代班 assignment，Payroll 依有效 assignment 與服務日計算義務 | superseded-by-current-spec | 02、03 |
 
-## 9. Deferred-after-96 缺口登記
+## 9. Task 96 required flow gaps（current SPEC_READY disposition）
 
-下列原圖需求尚未由 current 規格與可驗收 public contract 完整承接。它們是 96 完成後的
-規劃輸入，不是 96 Current 執行清單，也不授權本輪 code、schema、provider 或 production 變更。
+下列原圖需求已由 current owner／UoW 邊界唯一收斂為 SPEC_READY 的 observable contract；列入 SPEC_READY
+不等於 runtime 已完成。每項都必須以 `lu_test_*` no-auth Browser 或 verified-token LIFF 直接操作，並取得
+committed root／intent／outbox、deterministic delivery task、retry/manual fallback、mock/local result 與
+typed readback；缺任一 required evidence 即為 implementation `not_run`，不是新的 Authority blocker。
 
-| Gap | 原圖來源 | 96 後需要先補的契約 |
-|---|---|---|
-| Gateway 兩次失敗的 durable escalation 門檻與去重 | M1 Retry_Fail、M4 Trigger_Anomaly | trigger identity、attempt window、Customer Service ticket owner、replay、masked evidence |
-| dual-role 選單切換與案件結束後恢復 | M1 Dual_Role_Trigger／Dual_Menu／Auto_Restore | dual subject projection、active context、menu binding intent、closure trigger、manual recovery |
-| staff retirement 的根事實與 LINE 權限回收 | M1 Admin_Retire_Staff | Staff owner command、binding projection、Rich Menu recovery、open assignment blocker |
-| deterministic navigation catalog | M2 Nav_Command | source/version、typed query、publication、fallback、manual editor |
-| Tier 2 AI／confidence／clarification | M2 Agent_Router／Confidence_Gate | 另行 architecture approval、source citation、threshold governance、privacy、eval、provider budget |
-| AI feedback 與滿意度分析 | M2 AI_Badge_Rating／Feedback_Analytics | feedback root、event linkage、receipt、privacy、aggregation、retention、manual ticket handoff |
-| zero-pool 具體協商建議生成 | M3 Zero_Pool_Engine／Client_Compromise_Push | 人工選擇 criteria 的 typed preview、文案 owner、delivery intent、replay；禁止自動改單 |
-| 派案成功雙方通知 | M3 Match_Success | committed matching decision → exact recipient intents → delivery task／retry／manual fallback |
-| leave substitute mobile review | M1 Review_4、M3 Client_Leave_Disagree | Scheduling-owned case list、Preview／Apply、actor、fresh assignment／availability、receipt |
-| M4 alert 群組安全直達審核連結 | M4 Mobile_Group_Alert | canonical target、short-lived authorization、masked payload、expiry、replay、revocation |
-| 客訴自動應答暫停與接手解除 | M4 Step1_AI_Empathy | conversation hold owner、state machine、claim／release、timeout、manual recovery |
-| 代班後財務清冊跨域完成證據 | M4 Auto_Salary_Split | Scheduling assignment readback、Payroll obligation、Staff Payables export 與異常投影 |
+| Gap | 原圖來源 | Observable acceptance | Failure／not accepted |
+|---|---|---|---|
+| Gateway 兩次失敗的 durable escalation 門檻與去重 | M1 Retry_Fail、M4 Trigger_Anomaly | 連續兩次 identity 比對失敗後，建立一筆可去重的 Customer Service ticket；UI／typed readback 顯示 trigger identity、attempt window、owner、masked evidence 與 manual replay。 | 只有提示、pending／processing／retry 中間態、重複 ticket、無 owner／readback 或直接寫 LINE 表，均 failure／`not_run`。 |
+| dual-role 選單切換與案件結束後恢復 | M1 Dual_Role_Trigger／Dual_Menu／Auto_Restore | 雙角色使用者可選 active context，選單投影與 binding intent 對應該 context；案件 closure 後恢復預設 role，並由 typed readback 證明。 | context 過期、選單與 active role 不一致、closure 不恢復、跨 owner 直寫或無 intent/readback，均 failure。 |
+| staff retirement 的根事實與 LINE 權限回收 | M1 Admin_Retire_Staff | Staff owner retirement Apply 產生 receipt；binding projection／LINE 權限與 Rich Menu 失效，open assignment blocker 明確回報，無法退休時 typed failure 可讀回。 | LINE adapter 自行改 Staff root、仍可操作受限 menu、open assignment 被靜默覆蓋或無 blocker/readback，均 failure。 |
+| deterministic navigation／event catalog | M2 Nav_Command、Agent_Router | server-owned revision 的 command／event 以 protected alias 命中正確 tier、source citation、durable reply/event receipt；unknown 與 fallback 亦有 typed result。 | alias 漂移、unknown 誤命中受保護 action、revision 不可讀、無 citation／receipt 或只回 HTTP 200，均 failure。 |
+| deterministic semantic confidence／clarification | M2 Agent_Router／Confidence_Gate | deterministic harness 對固定 semantic bucket／confidence 輸出可重現的 answer、clarification 或 manual fallback，含 reason、source revision、reply／ticket readback；不要求 full AI/provider。 | 結果依外部 provider 隨機變化、低信心瞎猜、無 clarification reason、無 fallback／readback 或以 provider send 代替，均 failure。 |
+| feedback root／receipt／aggregate／ticket | M2 AI_Badge_Rating／Feedback_Analytics | feedback 以 owner root／event linkage 持久化並回 receipt；依固定 revision／window 可重算 aggregate；`unresolved` 產生 Customer Service ticket，Query 可讀回。 | local counter、無 root／receipt、aggregate 不可重算、unresolved 無 ticket、raw provider payload 穿透，均 failure。 |
+| zero-pool 具體協商建議與 client decision | M3 Zero_Pool_Engine／Client_Compromise_Push | 人工選 criteria 後 Preview 顯示候選／文案；Apply 只產生 recipient intent／outbox／delivery task／retry／manual fallback 與 mock/local result，且不自動改 assignment。客戶 accept／reject postback token 必須綁定 exact recipient、expiry 與 current criteria／plan version；decision receipt 可讀回。accepted 才形成 owner customer decision 並進入後續 Match_Success；rejected 建立 typed Customer Service ticket，不得由 LINE 直接改單。 | 自動改單、無人工 Apply、無 intent/outbox/result、recipient 不明、decision 不落 receipt、token stale／wrong-recipient 未拒絕、rejected 無 ticket，或以 provider receipt 代替，均 failure。 |
+| 派案成功雙方通知 | M3 Match_Success | 已 committed 的 `accepted` customer decision 產生雙方 exact recipient snapshot、owner outbox consumer、兩筆 delivery task／retry／manual fallback；mock/local adapter result 與既有 accepted decision receipt 可讀回。Match_Success 通知是 decision 後的資訊通知，不得再建立第二組 accept／reject token。 | 只有 queue、單方通知、無 consumer、既有 accepted decision receipt 不可讀、重複要求客戶決策或無 fallback/readback，均 failure。 |
+| 請假同意／拒絕與 due-shift rematch | M1 Review_4、M3 Client_Leave_Disagree | Scheduling owner 讀回 leave／availability；通知 intent/outbox/task 可本地完成。Agree 經 owner Apply 更新 end_date／班表；Disagree 建立 substitute ticket，due-shift rematch Preview／Apply 產生新 assignment／recipient readback。 | LINE 直接改 assignment、stale availability 被採用、同意無 owner receipt、拒絕無 ticket、rematch 無 fresh readback，均 failure。 |
+| M4 alert 群組安全直達審核連結 | M4 Mobile_Group_Alert | masked alert intent/outbox/task 指向 canonical review target；short-lived authorization 的 expiry、replay、revocation 與 wrong-actor typed failure 可在 mobile UI readback。 | raw PII、永久／可重放／未撤銷 link、wrong target、無失敗 reason 或僅頁面存在，均 failure。 |
+| 客訴 ingress／hold／HIGH ticket／alert | M4 Step1_AI_Empathy | canonical complaint ingress 產生 Customer Service hold state、HIGH ticket、masked alert intent/outbox/delivery task／mock-local result；claim／release／timeout 與 manual recovery 可讀回。 | 只有 normalizer、無 canonical ingress、未 hold、無 HIGH ticket／alert、無 owner claim/release 或無 outbox/readback，均 failure。 |
+| 代班後薪資／應付跨域完成證據 | M4 Auto_Salary_Split | Scheduling assignment readback 連到 Payroll obligation，再連到 Staff Payables evidence／anomaly projection；每段以 owner receipt、exact subject 與 version 可追溯。 | 缺任一 owner receipt、跨域直接寫 root、assignment／obligation 不一致、只有 typed GET 或無 anomaly readback，均 failure。 |
+
+### 9.1 B／C current owner-safe contract amendments（2026-09-01）
+
+#### `R4-SAFE-LINK`：M4 安全審核連結
+
+LINE Integration 是 review-link transport persistence 的唯一 owner；`runtime_alert_application`
+只提供 active singleton target、target version 與 alert reference，Access Control 只提供既有
+Admin Session／capability 驗證。Link root 最小欄位為 opaque link identity、token digest、
+canonical internal target、target version、source alert identity、allowed actor／capability、
+issued／expires／redeemed／revoked timestamps、root version、correlation 與 idempotency；不得
+保存 raw token、PII 或 arbitrary URL。狀態固定 `issued → redeemed | expired | revoked`，terminal
+狀態不可復活。
+
+Typed contract 為 `IssueSafeReviewLink`、`RedeemSafeReviewLink`、`RevokeSafeReviewLink` 與
+masked `QuerySafeReviewLink`（若有 Preview 必須零寫入）。Issue 在 LINE outer UoW 內 fresh-read
+target 並提交 link root／receipt／notification intent／outbox；Redeem 鎖 root 並重驗 current
+target、Admin Session、actor、capability、expiry 與 version，成功只可一次；Revoke 由 runtime
+target owner 以 typed reference 觸發。錯誤固定為 expired、replayed、revoked、wrong-actor、
+target-stale 或 version-conflict typed result，且失敗零寫入。Readback 僅回 masked target、
+status、expiry／redeem／revoke outcome、versions 與 receipts。可承擔此 root 的 additive schema
+須另過既有 DB change gate；本規格不授權新 route、production、`union_db`、provider 或 deployment，
+也禁止 query／fragment Bearer token、raw PII 與 arbitrary URL。
+
+#### `R1-LIFECYCLE`：案件 terminal closure 自動恢復
+
+Orders 是 terminal closure event 的唯一 source owner；event identity 由 `case_no`、
+`terminal_kind` 與 resulting Orders lifecycle version 組成，並由 Orders outer UoW 同交易保存
+immutable event／receipt／post-commit outbox。若 closure 依賴其他 owner 的退款／歸檔結果，只能
+攜帶 typed receipt reference，不可跨 owner 直寫。LINE Identity 是唯一 consumer，透過既有
+role-scoped Query／Apply 檢查同一 LINE User ID 的全部 active client-role cases 與 staff binding。
+
+只有 staff binding 仍為 `active` 且全部 active client-role cases 已由 owner readback 證明 terminal，
+才可提交一次 staff default/menu intent；仍有 active client case 時回 typed no-op，不得 restore。
+staff retirement／revocation pending／revoked 優先且不得恢復 revoked role。Replay 回原 receipt，
+payload mismatch、source／binding／menu version stale、subject 或 capability mismatch 固定
+fail closed；transient storage error 才可 bounded retry，其餘由 owner Query／manual reconciliation
+與必要 manual fallback 處理。Consumer 不得寫 Orders、Staff、Client 或 Scheduling root。
 
 ## 10. 驗收停止條件
 
 1. 只因頁面、API 或測試存在，不得將原圖節點標示 passed。
 2. 原圖的自動化若缺人工介入入口、fresh validation、receipt 或 readback，固定未完成。
-3. provider、production、schema、migration、DDL、deployment 與 entry switch 仍需各自新授權。
-4. 96 完成前，本文件第 9 節只維護缺口，不啟動施工。
-5. 96 完成後，每個 gap 必須先核對最新人工裁決與 current 正式規格，再建立獨立工作包。
+3. 真 provider send／真人效果、production、schema、migration、DDL、deployment 與 entry switch 仍需各自新授權；provider receipt 不是 Task 96 terminal gate，但 intent／outbox／deterministic task／mock-local result／readback 仍是。
+4. 本文件第 9 節是 Task 96 的 required acceptance gaps；不因列入驗收而授權 code、schema、provider
+   或 production mutation，完成仍須以直接 UI／ingress 操作與 current owner readback 為準。
+5. 每個 gap 施工前，均須先核對最新人工裁決與 current 正式規格，再建立有界工作包；本文件不自行
+   授權 implementation 或外部 effect。

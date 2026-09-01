@@ -13,7 +13,7 @@ import hashlib
 import json
 from typing import Any
 
-from pymysql.err import IntegrityError
+from pymysql.err import IntegrityError, OperationalError
 
 from domains.government_subsidy.claims import (
     ClaimApprovalCandidate,
@@ -69,6 +69,7 @@ from subsystems.government_subsidy.overpayment_workflow import OffsetApplyReques
 from subsystems.government_subsidy.overpayment_query import (
     GovernmentSubsidyOffsetTargetQueryView,
     GovernmentSubsidyOverpaymentQueryView,
+    GovernmentSubsidyReturnExcessRecoveryQueryView,
     GovernmentSubsidyReturnRecipientQueryView,
 )
 
@@ -234,6 +235,35 @@ class MySqlGovernmentSubsidyRepository:
                 (PAYER_IDENTITY,),
             )
             recipient_rows = cursor.fetchall()
+            excess_recovery = None
+            try:
+                cursor.execute(
+                    "SELECT recovery_identity,source_finance_import_row_id,"
+                    "source_payout_id,original_amount_ntd,remaining_amount_ntd,"
+                    "status,projection_version "
+                    "FROM government_overpayment_return_excess_recoveries "
+                    "WHERE overpayment_identity=%s",
+                    (overpayment_identity,),
+                )
+                recovery = cursor.fetchone()
+            except OperationalError as error:
+                if getattr(error, "args", (None,))[0] != 1146:
+                    raise
+                recovery = None
+            if recovery is not None:
+                excess_recovery = GovernmentSubsidyReturnExcessRecoveryQueryView(
+                    recovery_identity=str(recovery["recovery_identity"]),
+                    source_bank_fact_reference=_redact_query_reference(
+                        "finance-import-row", recovery["source_finance_import_row_id"]
+                    ),
+                    source_payout_reference=_redact_query_reference(
+                        "government-overpayment-return-payout", recovery["source_payout_id"]
+                    ),
+                    original_amount_ntd=int(recovery["original_amount_ntd"]),
+                    remaining_amount_ntd=int(recovery["remaining_amount_ntd"]),
+                    status=str(recovery["status"]),
+                    recovery_version=int(recovery["projection_version"]),
+                )
         targets = tuple(
             _query_offset_target(row) for row in target_rows
             if _query_target_outstanding(row) > 0
@@ -267,6 +297,7 @@ class MySqlGovernmentSubsidyRepository:
             return_recipient=recipient,
             blockers=tuple(sorted(blockers)),
             available_actions=tuple(sorted(available_actions)),
+            return_excess_recovery=excess_recovery,
         )
 
     def find_overpayment_apply_receipt(self, idempotency_key, command_fingerprint):
@@ -467,6 +498,161 @@ class MySqlGovernmentSubsidyRepository:
                  })),
             )
         return _overpayment_receipt(candidate)
+
+    def persist_return_reconciliation_with_excess(self, request, candidate):
+        """Persist the lawful payout and its separate excess recovery root atomically."""
+        try:
+            with self._connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT 1 FROM government_overpayment_return_payouts "
+                    "WHERE finance_import_row_id=%s FOR UPDATE",
+                    (request.finance_import_row_id,),
+                )
+                if cursor.fetchone() is not None:
+                    raise ValueError(
+                        "government_subsidy_return_bank_fact_already_reconciled"
+                    )
+                cursor.execute(
+                    "UPDATE government_overpayment_return_payables SET "
+                    "remaining_amount_ntd=0,status='paid',projection_version=projection_version+1 "
+                    "WHERE payable_identity=%s AND remaining_amount_ntd=%s "
+                    "AND projection_version=%s AND status IN ('payable','partially_paid')",
+                    (
+                        candidate.payable_identity,
+                        candidate.lawful_amount_ntd.amount,
+                        candidate.payable_version,
+                    ),
+                )
+                _require_single_updated_row(cursor)
+                cursor.execute(
+                    "UPDATE government_subsidy_overpayments SET remaining_amount_ntd=0,"
+                    "status='returned',projection_version=%s "
+                    "WHERE overpayment_identity=%s AND projection_version=%s",
+                    (
+                        request.expected_version.value + 1,
+                        request.identity,
+                        request.expected_version.value,
+                    ),
+                )
+                _require_single_updated_row(cursor)
+                cursor.execute(
+                    "INSERT INTO government_subsidy_overpayment_events "
+                    "(overpayment_identity,event_type,before_remaining_ntd,"
+                    "after_remaining_ntd,resulting_status,expected_version,"
+                    "resulting_version,preview_fingerprint,idempotency_key,actor,"
+                    "reason,evidence_reference) VALUES "
+                    "(%s,'return_reconciled',%s,0,'returned',%s,%s,%s,%s,%s,%s,%s)",
+                    (
+                        request.identity,
+                        candidate.lawful_amount_ntd.amount,
+                        request.expected_version.value,
+                        request.expected_version.value + 1,
+                        candidate.fingerprint.value,
+                        request.idempotency_key.value,
+                        request.actor.actor_id,
+                        request.reason,
+                        request.evidence_reference,
+                    ),
+                )
+                event_id = int(cursor.lastrowid)
+                cursor.execute(
+                    "INSERT INTO government_overpayment_return_payouts "
+                    "(overpayment_event_id,payable_identity,finance_import_row_id,"
+                    "amount_ntd,preview_fingerprint,idempotency_key,actor,reason,"
+                    "evidence_reference) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (
+                        event_id,
+                        candidate.payable_identity,
+                        request.finance_import_row_id,
+                        candidate.actual_amount_ntd.amount,
+                        candidate.fingerprint.value,
+                        request.idempotency_key.value,
+                        request.actor.actor_id,
+                        request.reason,
+                        request.evidence_reference,
+                    ),
+                )
+                payout_id = int(cursor.lastrowid)
+                cursor.execute(
+                    "INSERT INTO government_overpayment_return_excess_recoveries "
+                    "(recovery_identity,overpayment_identity,payable_identity,"
+                    "source_finance_import_row_id,source_payout_id,payer_identity,"
+                    "original_amount_ntd,remaining_amount_ntd,status,projection_version,"
+                    "actor,reason,evidence_reference) VALUES "
+                    "(%s,%s,%s,%s,%s,%s,%s,%s,'open',1,%s,%s,%s)",
+                    (
+                        candidate.recovery_identity,
+                        request.identity,
+                        candidate.payable_identity,
+                        request.finance_import_row_id,
+                        payout_id,
+                        PAYER_IDENTITY,
+                        candidate.excess_amount_ntd.amount,
+                        candidate.excess_amount_ntd.amount,
+                        request.actor.actor_id,
+                        request.reason,
+                        request.evidence_reference,
+                    ),
+                )
+                cursor.execute(
+                    "INSERT INTO government_overpayment_return_excess_recovery_events "
+                    "(recovery_identity,event_type,finance_import_row_id,"
+                    "before_remaining_ntd,after_remaining_ntd,resulting_status,"
+                    "expected_version,resulting_version,preview_fingerprint,"
+                    "idempotency_key,actor,reason,evidence_reference) VALUES "
+                    "(%s,'established',%s,%s,%s,'open',0,1,%s,%s,%s,%s,%s)",
+                    (
+                        candidate.recovery_identity,
+                        request.finance_import_row_id,
+                        candidate.excess_amount_ntd.amount,
+                        candidate.excess_amount_ntd.amount,
+                        candidate.fingerprint.value,
+                        request.idempotency_key.value,
+                        request.actor.actor_id,
+                        request.reason,
+                        request.evidence_reference,
+                    ),
+                )
+                lineage = _overpayment_outbox_lineage(cursor, request.identity)
+                cursor.execute(
+                    _OUTBOX_INSERT_SQL,
+                    (
+                        *lineage,
+                        f"government_overpayment_return_excess:{request.idempotency_key.value}",
+                        "government_overpayment_return_excess_recovery",
+                        _canonical_json(
+                            {
+                                "overpayment_identity": request.identity,
+                                "payable_identity": candidate.payable_identity,
+                                "bank_fact_identity": candidate.bank_fact_identity,
+                                "recovery_identity": candidate.recovery_identity,
+                                "lawful_amount_ntd": candidate.lawful_amount_ntd.amount,
+                                "excess_amount_ntd": candidate.excess_amount_ntd.amount,
+                            }
+                        ),
+                    ),
+                )
+        except OperationalError as error:
+            # A schema older than this owner contract must fail closed.  The
+            # outer UoW rolls back any preceding statements.
+            if getattr(error, "args", [None])[0] == 1146:
+                raise ValueError(
+                    "government_subsidy_return_excess_recovery_schema_required"
+                ) from error
+            raise
+        return {
+            "overpayment_identity": candidate.overpayment_identity,
+            "payable_identity": candidate.payable_identity,
+            "bank_fact_identity": candidate.bank_fact_identity,
+            "amount_ntd": candidate.actual_amount_ntd.amount,
+            "lawful_amount_ntd": candidate.lawful_amount_ntd.amount,
+            "excess_amount_ntd": candidate.excess_amount_ntd.amount,
+            "remaining_after_ntd": candidate.overpayment_remaining_after_ntd.amount,
+            "status": candidate.resulting_status.value,
+            "recovery_identity": candidate.recovery_identity,
+            "recovery_status": candidate.recovery_status.value,
+            "preview_fingerprint": candidate.fingerprint.value,
+        }
 
     def load_batch(
         self,

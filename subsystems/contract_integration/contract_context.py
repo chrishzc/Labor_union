@@ -52,6 +52,8 @@ class ContractClientContext:
     service_type: str | None
     service_time: str | None
     baby_info: str | None
+    delivery_type: str | None
+    residence_type: str | None
     notes: str | None
 
 
@@ -177,6 +179,8 @@ def _client(row: Mapping[str, object]) -> ContractClientContext:
         service_type=_optional_text(row, "service_type"),
         service_time=_optional_text(row, "service_time"),
         baby_info=_optional_text(row, "baby_info"),
+        delivery_type=_optional_text(row, "delivery_type"),
+        residence_type=_optional_text(row, "residence_type"),
         notes=_optional_text(row, "client_notes"),
     )
 

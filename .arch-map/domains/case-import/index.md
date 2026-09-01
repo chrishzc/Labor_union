@@ -17,5 +17,4 @@
 ## Verification routing
 - default_boundary: Domain
 - test_root: `tests/domains/case_import/`
-- integration_root: `tests/subsystems/case_import/`.
 - remaining_layout_gap: protected legacy import-contract paths only; see Test Map.

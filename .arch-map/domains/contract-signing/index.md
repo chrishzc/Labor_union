@@ -20,4 +20,3 @@
 ## Verification routing
 - default_boundary: Domain
 - test_root: `tests/domains/contract-signing/`
-- integration_root: `tests/domains/contract-signing/subsystems/contract-signing/integration/`; see Test Map.

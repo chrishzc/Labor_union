@@ -398,25 +398,28 @@ Preview與Apply receipt必須由Orders回傳`0／1／2／invalid`守恆數量，
 
 `actual_start_date`、`actual_end_date` 永遠允許 `NULL`。2026-08-31 人工裁決：歷史來源開始日若與
 HCM／Orders `start_date` 預期開始日相同，代表尚無實際服務開始日，`actual_start_date` 維持
-`NULL`；兩者不同時，才以歷史來源開始日寫入 `actual_start_date`。歷史來源結束日不得寫入
-Orders `actual_end_date`；正式結束日以後續服務天數精算結果為準。此限制不移除 canonical 六欄
-工作簿的結束日期，也不妨礙該日期作為單一月嫂歷史 assignment 服務區間的來源 evidence。
-來源狀態斷言可在缺日期、取消原因或排班時成立。2026-08-31 人工裁決補充：若可採納的
-`1→已付訂金`來源列將歷史開始日寫為非空 `actual_start_date`，Apply 必須以該案件既有的
-`週休1日／週休2日／連續服務`與 canonical holiday calendar 重算正式服務日；歷史結束日仍不得直接寫入。
-同一 outer UoW 必須再由 Actual Start canonical writer 重建有效 Scheduling generation、由最後正式服務日
-得出 `actual_end_date`，並重算尚未結清的 Client Finance／Payroll projection 與日期。完整 service-time tuple
-沿用其精確 completion instant；缺失時以 Asia/Taipei 最後正式服務日的日終作為 completion instant。此重建
-不得建立付款、收款、訂金或現行通知事實，且 immutable lifecycle event／receipt 必須標示 historical origin。
-無法精確配對、欄位不可解析或違反 Orders invariant 時建立 typed warning 並 fail closed。
+`NULL`；兩者不同時，才以歷史來源開始日寫入 `actual_start_date`。2026-09-01 最新人工裁決：
+一旦歷史來源開始日可採納為 `actual_start_date`，同列可解析且不早於開始日的歷史結束日必須直接成為
+Orders `actual_end_date`，不得再以訂單預設 `service_days` 延展或取代。正式服務日只可在歷史
+`actual_start_date..actual_end_date` 閉區間之外產生；歷史月嫂 assignment 也不得超出其來源區間。
+來源期間與既有條款不一致時，以這次歷史期間建立實際根事實，不得把預設契約天數偽造成已服務天數。
+
+2026-09-01 最新人工覆決：歷史起訖只證明實際期間，不能證明逐日服務／排假日曆。Historical Orders
+Apply 必須直接保存來源 `actual_start_date`、`actual_end_date` 與 lifecycle 狀態，但不得呼叫 Actual Start
+精算、不得依 `service_days`、服務模式或假日曆建立正式服務日，也不得自動重建 Scheduling generation、
+Client Finance 或 Payroll 金額。凡採納非空實際起訖的歷史案件，一律標記
+`historical_accounting_service_calendar_unconfirmed`，帳務／薪資維持待人工確認且不得進自動應付清冊。
+只有工會人員日後主動使用正式服務日確認／精算流程，提供可驗證的逐日服務事實後，才可重建正式排班與
+帳務投影。來源狀態斷言仍可在缺日期、取消原因或排班時成立；欄位不可解析或違反 Orders invariant 時
+建立 typed warning 並 fail closed。
 此受限斷言只授權 Orders-owned historical adoption command，不授權一般 adapter 或 UI 寫入。Preview 零寫入，Apply 每列鎖定 fresh
-Order、驗證 version／fingerprint，並以單一 UoW 保存 projection、event、receipt、outbox及跨域 evidence。
+Order、驗證 version／fingerprint，並以單一 UoW 保存 Orders root、event、receipt、outbox及來源配對 evidence。
 
 2026-09-01 人工校正：Historical Orders 的本次用途是以空白 DB 一次性建立完整且真實的歷史
 排班基準，取代前述 `ROW_ATOMIC_RESUMABLE` 契約。Preview 必須先對整份工作簿完成所有可採納列、
-狀態機、實際開工重建前提及來源內月嫂區間的零寫入驗證；不同案件的同月嫂來源區間重疊固定為
+狀態機、實際期間與來源內月嫂區間的零寫入驗證；不同案件的同月嫂來源區間重疊固定為
 `historical_order_source_schedule_conflict`，不得以列順序覆寫。Apply 必須以單一 outer UoW 同時保存
-workbook claim、全部列的 Orders／Scheduling／跨域寫入與 terminal receipt；任一列失敗即整份 rollback，
+workbook claim、全部列的 Orders／歷史 assignment evidence 與 terminal receipt；任一列失敗即整份 rollback，
 不得留下 claim、row receipt、assignment、schedule、occupancy、event、outbox 或部分 Order 狀態。same
 key＋same canonical workbook 僅 replay terminal receipt；same key＋different workbook 固定 conflict。
 來源資料不得因既有測試排班而刪除或覆寫其他案件；同案若已有 current generation，仍只可由

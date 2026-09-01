@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from dataclasses import fields, replace
 import hashlib
+import re
 from typing import Callable, Iterable, Mapping
 
 from domains.customer_service.escalation import (
@@ -29,6 +30,7 @@ from subsystems.customer_service.escalation_contracts import (
     HumanEscalationPreview,
     HumanEscalationReceipt,
     HumanEscalationView,
+    HumanEscalationAttemptWindow,
     ResolveHumanEscalation,
     StartHumanEscalationHandling,
 )
@@ -192,7 +194,7 @@ class HumanEscalationApplication:
                 updated = repo.transition(int(_field(escalation, "id")), workflow_status=EscalationWorkflowStatus.RESOLVED.value, workflow_version=command.expected_escalation_version + 1, hold_state=AutomationHoldState.RELEASED.value, hold_version=int(_field(escalation, "hold_version", 0)) + 1, ticket_version=int(_field(resolved_ticket, "version")), resolution_code=command.resolution_code, resolution_evidence_digest=command.resolution_evidence_digest)
                 receipt = self._receipt(updated, "resolve", command.correlation_id.value, replayed=False)
                 for event_type in (EscalationEventType.RESOLVED, EscalationEventType.HOLD_RELEASED):
-                    repo.append_event(int(_field(escalation, "id")), event_type, expected_escalation_version=command.expected_escalation_version, resulting_escalation_version=command.expected_escalation_version + 1, expected_ticket_version=command.expected_ticket_version, resulting_ticket_version=int(_field(resolved_ticket, "version")), expected_hold_version=int(_field(escalation, "hold_version", 0)), resulting_hold_version=int(_field(escalation, "hold_version", 0)) + 1, actor_ref=command.actor.actor_id, reason_code=command.resolution_code, reason_evidence_digest=command.resolution_evidence_digest, receipt_id=_receipt_id(event_type.value, command.idempotency_key.value), idempotency_key=command.idempotency_key.value, correlation_id=command.correlation_id.value)
+                    repo.append_event(int(_field(escalation, "id")), event_type, expected_escalation_version=command.expected_escalation_version, resulting_escalation_version=command.expected_escalation_version + 1, expected_ticket_version=command.expected_ticket_version, resulting_ticket_version=int(_field(resolved_ticket, "version")), expected_hold_version=int(_field(escalation, "hold_version", 0)), resulting_hold_version=int(_field(escalation, "hold_version", 0)) + 1, actor_ref=command.actor.actor_id, reason_code=command.resolution_code, reason_evidence_digest=command.resolution_evidence_digest, receipt_id=_receipt_id(event_type.value, command.idempotency_key.value), idempotency_key=f"{command.idempotency_key.value}:{event_type.value}", correlation_id=command.correlation_id.value)
                 repo.save_receipt(command.idempotency_key.value, fingerprint, receipt)
                 uow.commit()
                 return receipt
@@ -501,7 +503,29 @@ def _view(row) -> HumanEscalationView:
         raise _error("unavailable", "human_escalation_redaction_failed")
     safe = MaskedContext.from_mapping(context)
     from domains.customer_service.ticket import CustomerServiceCategory
-    return HumanEscalationView(int(_field(row, "id")), f"ticket:{int(_field(row, 'ticket_id'))}", CustomerServiceCategory(str(_field(row, "ticket_category"))), "high", TriggerCode(str(_field(row, "trigger_code"))), EscalationWorkflowStatus(str(_field(row, "workflow_status"))), int(_field(row, "workflow_version", 0)), AutomationHoldState(str(_field(row, "hold_state", _field(row, "automation_hold_state", "active")))), "opaque", safe.as_dict(), AlertStatus(str(_field(row, "alert_status", AlertStatus.PENDING))), _version(row), _utc(_field(row, "created_at")), _utc(_field(row, "updated_at")), _actions(_field(row, "workflow_status"), _field(row, "hold_state", _field(row, "automation_hold_state", "active"))))
+    trigger_identity, attempt_window, owner_selector = _retry_readback(row)
+    return HumanEscalationView(int(_field(row, "id")), f"ticket:{int(_field(row, 'ticket_id'))}", CustomerServiceCategory(str(_field(row, "ticket_category"))), "high", TriggerCode(str(_field(row, "trigger_code"))), EscalationWorkflowStatus(str(_field(row, "workflow_status"))), int(_field(row, "workflow_version", 0)), AutomationHoldState(str(_field(row, "hold_state", _field(row, "automation_hold_state", "active")))), "opaque", safe.as_dict(), AlertStatus(str(_field(row, "alert_status", AlertStatus.PENDING))), _version(row), _utc(_field(row, "created_at")), _utc(_field(row, "updated_at")), _actions(_field(row, "workflow_status"), _field(row, "hold_state", _field(row, "automation_hold_state", "active"))), _field(row, "delivery_task_ref"), _field(row, "delivery_outcome_ref"), trigger_identity, attempt_window, owner_selector)
+
+
+_BINDING_FAILURE_SOURCE = re.compile(r"^binding-failure:([0-9a-f]{64}):(0|[1-9][0-9]*)$")
+
+
+def _retry_readback(row):
+    """Project only the opaque retry identity and bounded owner metadata."""
+    if str(_field(row, "trigger_code", "")) not in {
+        TriggerCode.BINDING_FAILURE_THRESHOLD_2.value,
+        str(TriggerCode.BINDING_FAILURE_THRESHOLD_2),
+    }:
+        return None, None, None
+    source = str(_field(row, "source_event_identity", ""))
+    match = _BINDING_FAILURE_SOURCE.fullmatch(source)
+    if match is None:
+        return None, None, None
+    return (
+        source,
+        HumanEscalationAttemptWindow(2, 2, int(match.group(2))),
+        "customer_service.ticket_owner",
+    )
 
 
 def _actions(status, hold):

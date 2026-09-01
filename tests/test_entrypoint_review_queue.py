@@ -77,8 +77,8 @@ def test_task97_local_canonical_http_promotions_are_exact_identity_locked() -> N
         - set(queue.SOURCE_RETIRED_HTTP_ENTRIES)
     )
 
-    assert len(queue.SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES) == 93
-    assert len(canonical_entries) == 92
+    assert len(queue.SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES) == 100
+    assert len(canonical_entries) == 99
     for identity in canonical_entries:
         entry = entries[identity]
         assert entry["status"] == "active"
@@ -90,18 +90,19 @@ def test_task97_local_canonical_http_promotions_are_exact_identity_locked() -> N
         assert "production deployment or external usage is not claimed" in entry["external_operator_evidence"]
 
 
-def test_task97_controlled_file_entries_are_exact_retired_410() -> None:
+def test_task97_controlled_file_entries_are_exact_active_canonical() -> None:
     entries = {entry["entry_id"]: entry for entry in queue.build_review_queue()}
 
-    assert len(queue.SOURCE_MEDIA_REWRITE_HTTP_ENTRIES) == 7
-    for identity in queue.SOURCE_MEDIA_REWRITE_HTTP_ENTRIES:
+    assert len(queue.SOURCE_CONTROLLED_FILE_HTTP_ENTRIES) == 7
+    for identity in queue.SOURCE_CONTROLLED_FILE_HTTP_ENTRIES:
         entry = entries[identity]
-        assert entry["status"] == "retired_410"
-        assert entry["terminal_disposition"] == "retired_410"
-        assert entry["deletion_410_gate"] == "blocked_media_successor_schema_and_runtime_gate"
-        assert entry["replacement_path_or_symbol"] == (
-            "subsystems.controlled_files.reference_finalize.ControlledFileReferenceService"
-        )
+        assert entry["status"] == "active"
+        assert entry["terminal_disposition"] == "active_canonical"
+        assert entry["deletion_410_gate"] == "not_applicable_active_canonical"
+        assert entry["replacement_path_or_symbol"] == identity
+        assert entry["final_zero_reference_oracle"] == "not_applicable_active_canonical"
+        assert "repository-local typed caller" in entry["current_inbound_callers"]
+        assert "production deployment or external usage is not claimed" in entry["external_operator_evidence"]
 
 
 def test_task97_anomaly_dead_letter_entries_are_exact_retired_410() -> None:
@@ -135,7 +136,7 @@ def test_task97_remaining_api_blockers_are_exact_identity_locked() -> None:
         if entry["status"] == "review_required" and entry["kind"] == "api"
     }
 
-    assert len(queue.SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES) == 25
+    assert len(queue.SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES) == 63
     assert set(review_api) == (
         queue.SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES
         | queue.SOURCE_OWNER_COMMAND_REWRITE_HTTP_ENTRIES
@@ -151,9 +152,9 @@ def test_task97_remaining_api_blockers_are_exact_identity_locked() -> None:
 def test_task97_review_queue_current_terminal_counts() -> None:
     entries = _load_queue()
 
-    assert sum(entry["status"] == "active" for entry in entries) == 489
-    assert sum(entry["status"] == "retired_410" for entry in entries) == 86
-    assert sum(entry["status"] == "review_required" for entry in entries) == 34
+    assert sum(entry["status"] == "active" for entry in entries) == 496
+    assert sum(entry["status"] == "retired_410" for entry in entries) == 79
+    assert sum(entry["status"] == "review_required" for entry in entries) == 74
     assert sum(entry["status"] == "operator_only" for entry in entries) == 75
 
 

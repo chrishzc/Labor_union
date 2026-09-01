@@ -14,6 +14,7 @@
   - `scripts/migrate_preserved_database_additive_schema.py`
   - `scripts/local_database_additive_update.py`
   - `scripts/update_local_database.py`
+  - `shared_kernel/migration_release.py`
 - entrypoints:
   - `scripts/launchers/update_local_database.bat`
   - `scripts/launchers/update_local_database.sh`
@@ -21,8 +22,18 @@
   - `db/schema_assembly/labor_union_fresh_schema_v1.json`
   - `db/cutover_releases/labor_union_validation_schema_v1.json`
   - `db/releases/labor_union_validation_schema_v1.sql`
-  - `db/schema_parts/214_historical_order_pairing_resolution_reused.sql`
-- current historical-order release successor:
+  - `db/schema_parts/212_government_subsidy_return_excess_recovery.sql` (fresh bootstrap owner)
+  - `db/schema_parts/214_historical_order_pairing_resolution_reused.sql` (fresh bootstrap successor)
+- current Task 96 release successor:
+  - `db/schema_parts/1024_task96_line_identity_revocation_role_binding_fk.sql`
+  - `db/migration_releases/labor_union_2026_09_01_task96_line_identity_revocation_role_binding_fk_v1.json`
+  - `db/migration_releases/labor_union_2026_09_01_task96_line_identity_revocation_role_binding_fk_v1.descriptors.json`
+  - `db/schema_parts/1025_task96_government_subsidy_return_excess_recovery.sql`
+  - `db/migration_releases/labor_union_2026_09_01_task96_government_subsidy_return_excess_recovery_v1.json`
+  - `db/migration_releases/labor_union_2026_09_01_task96_government_subsidy_return_excess_recovery_v1.descriptors.json`
+  - `db/schema_parts/1026_task96_scheduling_service_day_attachment_kind.sql`
+  - `db/migration_releases/labor_union_2026_09_01_task96_scheduling_service_day_attachment_kind_v1.json`
+  - `db/migration_releases/labor_union_2026_09_01_task96_scheduling_service_day_attachment_kind_v1.descriptors.json`
   - `db/schema_parts/1027_historical_order_pairing_resolution_reused.sql`
   - `db/migration_releases/labor_union_2026_09_01_historical_order_pairing_resolution_reused_v1.json`
   - `db/migration_releases/labor_union_2026_09_01_historical_order_pairing_resolution_reused_v1.descriptors.json`

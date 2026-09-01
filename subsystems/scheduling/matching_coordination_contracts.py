@@ -58,6 +58,30 @@ class MatchingCommandName(StrEnum):
     APPLY_SERVICE_DATE_REMATCH = "ApplyServiceDateChangeRematch"
 
 
+class MatchingOutboxIntentType(StrEnum):
+    """Versioned successor values for the committed P3 handoff."""
+
+    LINE_BILATERAL_NOTIFICATION = "line_bilateral_notification"
+    LINE_CLIENT_DECISION = "line_client_decision"
+    CUSTOMER_SERVICE_TICKET = "customer_service_ticket"
+
+
+class MatchingOutboxTargetOwner(StrEnum):
+    LINE_INTEGRATION = "line_integration"
+    CUSTOMER_SERVICE = "customer_service"
+
+
+# These identities are the P0 notification source contracts consumed by the
+# later LINE delivery package.  They belong in the M3 projection payload, not
+# in the provider adapter, so a committed intent remains attributable even
+# when delivery is deferred to P5.
+M3_ZERO_POOL_SOURCE_ID = "LU96-M3-ZERO-POOL-SOURCE-V1"
+M3_MATCH_SUCCESS_CLIENT_SOURCE_ID = "LU96-M3-MATCH-SUCCESS-CLIENT-SOURCE-V1"
+M3_MATCH_SUCCESS_STAFF_SOURCE_ID = "LU96-M3-MATCH-SUCCESS-STAFF-SOURCE-V1"
+M3_LEAVE_AGREE_SOURCE_ID = "LU96-M3-LEAVE-AGREE-SOURCE-V1"
+M3_LEAVE_DISAGREE_SOURCE_ID = "LU96-M3-LEAVE-DISAGREE-SOURCE-V1"
+
+
 MATCHING_ERROR_CODES: tuple[str, ...] = (
     "matching_case_not_found",
     "matching_criteria_invalid",
@@ -500,6 +524,8 @@ class MatchingNotificationIntentProjection:
     package_fingerprint: PreviewFingerprint
     candidate_id: str
     idempotency_key: IdempotencyKey
+    source_identity: str | None = None
+    recipient_selector: str | None = None
 
     def __post_init__(self) -> None:
         for value, name in (
@@ -518,6 +544,10 @@ class MatchingNotificationIntentProjection:
             object.__setattr__(self, "package_fingerprint", PreviewFingerprint(self.package_fingerprint))
         if not isinstance(self.idempotency_key, IdempotencyKey):
             raise TypeError("notification idempotency key must be IdempotencyKey")
+        if self.source_identity is not None:
+            require_canonical_text(self.source_identity, "notification source identity", 191)
+        if self.recipient_selector is not None:
+            require_canonical_text(self.recipient_selector, "notification recipient selector", 191)
 
 
 @dataclass(frozen=True, slots=True)
@@ -735,6 +765,13 @@ __all__ = [
     "MatchingErrorCode",
     "MatchingNotificationIntentProjection",
     "MatchingNotificationRecipientRole",
+    "MatchingOutboxIntentType",
+    "MatchingOutboxTargetOwner",
+    "M3_ZERO_POOL_SOURCE_ID",
+    "M3_MATCH_SUCCESS_CLIENT_SOURCE_ID",
+    "M3_MATCH_SUCCESS_STAFF_SOURCE_ID",
+    "M3_LEAVE_AGREE_SOURCE_ID",
+    "M3_LEAVE_DISAGREE_SOURCE_ID",
     "MatchingPackageView",
     "MATCHING_ERROR_CODES",
     "PreviewCriteriaDiffResend",

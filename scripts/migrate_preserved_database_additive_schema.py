@@ -198,6 +198,10 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_30_line_identity_role_scope_v1.json",
     "labor_union_2026_08_31_historical_owner_payment_settlement_v1.json",
     "labor_union_2026_08_31_task96_owner_contract_successors_v1.json",
+    "labor_union_2026_09_01_task96_line_safe_review_link_v1.json",
+    "labor_union_2026_09_01_task96_line_identity_revocation_role_binding_fk_v1.json",
+    "labor_union_2026_09_01_task96_government_subsidy_return_excess_recovery_v1.json",
+    "labor_union_2026_09_01_task96_scheduling_service_day_attachment_kind_v1.json",
     "labor_union_2026_09_01_historical_order_pairing_resolution_reused_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
@@ -2002,6 +2006,16 @@ def _modified_parent_predecessor_absent_state(
                 },
             },
         },
+        "1026_task96_scheduling_service_day_attachment_kind.sql": {
+            "scheduling_service_day_log_attachments": {
+                "attachment_kind": {
+                    "column_type": "enum('meal_photo')",
+                    "is_nullable": "NO",
+                    "column_default": None,
+                    "extra": "",
+                },
+            },
+        },
         "1027_historical_order_pairing_resolution_reused.sql": {
             "historical_order_pairing_evidence": {
                 "resolution": {
@@ -3056,6 +3070,15 @@ def _local_classify_statement(statement: str) -> str:
                 .read_text(encoding="utf-8")
             )[0].strip(),
         ).casefold()
+        canonical_1023 = re.sub(
+            r"\s+",
+            " ",
+            split_sql(
+                (ROOT / "db" / "schema_parts" /
+                 "1023_task96_line_safe_review_link_matching_outbox_v1.sql")
+                .read_text(encoding="utf-8")
+            )[0].strip(),
+        ).casefold()
         controlled_parent_replacement = (
             normalized.startswith("alter table controlled_file_staging_objects ")
             and "modify column purpose enum(" in normalized
@@ -3079,6 +3102,8 @@ def _local_classify_statement(statement: str) -> str:
             return "controlled_file_fk_rebuild"
         if normalized in {canonical_1008, canonical_1013}:
             return "controlled_check_replacement"
+        if normalized == canonical_1023:
+            return "matching_outbox_successor"
         if re.search(r"\b(drop|modify|change|rename|truncate)\b", normalized):
             raise LocalAdditiveBlocked("destructive ALTER is outside additive allowlist", code="forbidden_sql_effect")
         if not re.search(r"\badd\s+(column|index|unique|constraint|fulltext|spatial)\b", normalized):
@@ -4710,6 +4735,23 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["tables"]["customer_service_tickets"][
             "active_marker"
         ]["extra"] = "stored generated"
+    if part_name == "1024_task96_line_identity_revocation_role_binding_fk.sql":
+        descriptor["foreign_keys"][(
+            "line_identity_revocation_requests",
+            "fk_line_identity_revocation_role_binding",
+        )] = {
+            "columns": ("line_user_id", "subject_type"),
+            "referenced_table": "line_identity_role_bindings",
+            "referenced_columns": ("line_user_id", "subject_type"),
+            "update_rule": "RESTRICT",
+            "delete_rule": "RESTRICT",
+        }
+    if part_name == "1026_task96_scheduling_service_day_attachment_kind.sql":
+        descriptor["parent_columns"]["scheduling_service_day_log_attachments"] = {
+            "attachment_kind": _column_contract(
+                "enum('meal_photo','baby_log_photo')", "NO"
+            )
+        }
     if part_name == "1027_historical_order_pairing_resolution_reused.sql":
         descriptor["parent_columns"]["historical_order_pairing_evidence"] = {
             "resolution": _column_contract(
@@ -5221,7 +5263,10 @@ def _release_descriptor_metadata_state(
             raise UpgradeBlocked(
                 f"release descriptor differs from canonical SQL: {part_name}:{kind}"
             )
-    if part_name == "1027_historical_order_pairing_resolution_reused.sql":
+    if part_name in {
+        "1026_task96_scheduling_service_day_attachment_kind.sql",
+        "1027_historical_order_pairing_resolution_reused.sql",
+    }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
                 f"release descriptor differs from canonical SQL: {part_name}:parent_columns"
@@ -5618,9 +5663,20 @@ def _artifact_metadata_state(
             actual_extra = re.sub(
                 r"\s+", " ", str(row["extra"] or "")
             ).casefold()
-            if (
+            type_matches = (
                 _normalize_column_type_contract(row["column_type"])
-                != expected["column_type"]
+                == expected["column_type"]
+            )
+            successor_type = _matching_coordination_successor_column_type(
+                part_name, table, name
+            )
+            successor_type_matches = (
+                successor_type is not None
+                and _normalize_column_type_contract(row["column_type"])
+                == successor_type
+            )
+            if (
+                not (type_matches or successor_type_matches)
                 or row["is_nullable"] != expected["is_nullable"]
                 or actual_default != expected["column_default"]
                 or actual_extra != expected["extra"]
@@ -5937,6 +5993,32 @@ def _allowed_later_artifact_columns(
     return set()
 
 
+def _matching_coordination_successor_column_type(
+    part_name: str, table: str, column: str,
+) -> str | None:
+    """Return the only published successor type allowed on the 1003 parent table."""
+    if part_name != "1003_matching_coordination_successor.sql" or table != "matching_coordination_outbox":
+        return None
+    successor_types = {
+        "intent_type": (
+            "enum('line_matching_interaction','line_criteria_diff_resend',"
+            "'assignment_conversion_requested','rematch_requested',"
+            "'orders_terms_update_requested','line_bilateral_notification',"
+            "'line_client_decision','customer_service_ticket')"
+        ),
+        "target_owner": (
+            "enum('line_integration','assignment_workflow','orders_workflow',"
+            "'customer_service')"
+        ),
+    }
+    value = successor_types.get(column)
+    return (
+        _normalize_column_type_contract(value)
+        if value is not None
+        else None
+    )
+
+
 def _allowed_later_artifact_indexes(
     part_name: str,
 ) -> dict[tuple[str, str], dict[str, Any]]:
@@ -5970,6 +6052,23 @@ def _allowed_later_artifact_checks(
             "1013_order_lifecycle_pending_status_constraint.sql"
         )
         return dict(successor["checks"])
+    if part_name == "1003_matching_coordination_successor.sql":
+        # 1023 intentionally evolves this existing CHECK while adding its own
+        # safe-link roots. Derive the clause from the hash-bound SQL artifact so
+        # the compatibility exception cannot drift from the published successor.
+        successor_path = ROOT / "db" / "schema_parts" / (
+            "1023_task96_line_safe_review_link_matching_outbox_v1.sql"
+        )
+        for statement in split_sql(successor_path.read_text(encoding="utf-8")):
+            marker = "ADD CONSTRAINT CHK_MATCHING_OUTBOX_TARGET CHECK"
+            position = statement.upper().find(marker)
+            if position < 0:
+                continue
+            opening = statement.upper().find("CHECK", position) + len("CHECK")
+            clause, _ = _extract_parenthesized(statement, statement.find("(", opening))
+            return {
+                ("matching_coordination_outbox", "chk_matching_outbox_target"): clause
+            }
     return {}
 
 

@@ -14,6 +14,7 @@
 - `current-anomaly-facts` — retired anomaly validation／migration readback only；path: `modules/current-anomaly-facts.md`
 - `current-service-projection` — effective assignment service-period status projection；path: `modules/current-service-projection.md`
 - `waiting-deposit-lock` — waiting-deposit 檔期鎖的取得、釋放與訂單取消收斂；path: `modules/waiting-deposit-lock.md`
+- `service-day-log` — 月嫂服務日日誌與受控餐食照片的 Query／Preview／Apply；path: `modules/service-day-log.md`
 
 ## Dependencies
 - outbound: `orders` — order/case lifecycle boundary。
@@ -27,5 +28,5 @@
 ## Verification routing
 - default_boundary: Subsystem
 - test_root: `tests/domains/scheduling/subsystems/scheduling/`
-- integration_root: `tests/integration/`
 - routing: `.arch-map/tests/domains/scheduling/subsystems/scheduling/index.md`.
+- bounded runtime verification: `scripts/run_task96_scheduling_lane_c.py` (typed TestClient disposable lane-C data and Scheduling readback)

@@ -21,6 +21,9 @@ from infrastructure.mysql.matching_coordination_facts_adapter import (
 from infrastructure.mysql.matching_coordination_repository import (
     MySqlMatchingCoordinationRepository,
 )
+from infrastructure.mysql.line_matching_coordination_delivery_projection import (
+    MySqlLineMatchingCoordinationDeliveryProjection,
+)
 from infrastructure.mysql.leave_substitution_repository import (
     MySqlLeaveSubstitutionRepository,
 )
@@ -77,7 +80,13 @@ def get_matching_coordination_composition():
         staff_availability,
     )
     effective_generation = MatchingEffectiveGenerationQueryAdapter(order_terms)
-    repository = MySqlMatchingCoordinationRepository(connection, clock)
+    repository = MySqlMatchingCoordinationRepository(
+        connection,
+        clock,
+        line_delivery_projection=MySqlLineMatchingCoordinationDeliveryProjection(
+            connection
+        ),
+    )
     facts = MySqlMatchingCoordinationFactsAdapter(
         orders_terms=order_terms,
         orders_service_dates=service_dates,

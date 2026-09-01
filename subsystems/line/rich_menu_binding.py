@@ -70,6 +70,42 @@ def schedule_revocation_successor_menu(unit_of_work, line_user_id, request_id) -
     return True
 
 
+def schedule_staff_default_restore_menu(
+    unit_of_work,
+    binding: LineIdentityBindingSnapshot,
+    source_event_identity: str,
+    menu_revision: int | None = None,
+) -> str:
+    """Queue the existing staff menu provider intent for a terminal-closure restore."""
+
+    if (
+        binding.status is not LineIdentityBindingStatus.BOUND
+        or binding.subject_type is not LineBindingSubjectType.STAFF
+    ):
+        raise ValueError("staff default restore requires an active staff binding")
+    if not source_event_identity:
+        raise ValueError("terminal closure source event identity is required")
+    payload = {
+        "line_user_id": binding.line_user_id.value,
+        "menu_definition_id": _MENU_BY_SUBJECT[LineBindingSubjectType.STAFF],
+        "restore_reason": "case_terminal_closure",
+        "source_event_identity": source_event_identity,
+    }
+    if menu_revision is not None:
+        payload["menu_revision"] = menu_revision
+    intent_identity = f"staff-default-restore:{source_event_identity}"
+    unit_of_work.outbox.append(
+        OutboxIntent(
+            "line_identity",
+            binding.line_user_id.value,
+            RICH_MENU_BINDING_INTENT,
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            intent_identity,
+        )
+    )
+    return intent_identity
+
+
 def _resolved_identity_binding(unit_of_work, line_user_id):
     scoped = tuple(
         binding
@@ -265,4 +301,5 @@ __all__ = [
     "schedule_rich_menu_binding",
     "schedule_resolved_identity_menu",
     "schedule_revocation_successor_menu",
+    "schedule_staff_default_restore_menu",
 ]

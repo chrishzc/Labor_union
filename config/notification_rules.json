@@ -1,0 +1,134 @@
+{
+  "rules": [
+    {
+      "id": "LU96-M1-GATEWAY-RETRY-FAIL-RULE-V1",
+      "event_code": "gateway.identity_mismatch.second_attempt",
+      "recipient_selector": "customer_service.ticket_owner",
+      "template_id": "LU96-M1-GATEWAY-RETRY-FAIL-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    },
+    {
+      "id": "LU96-M1-LEAVE-EXTENSION-RULE-V1",
+      "event_code": "scheduling.leave.extension_requested",
+      "recipient_selector": "client.bound_case",
+      "template_id": "LU96-M1-LEAVE-EXTENSION-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    },
+    {
+      "id": "LU96-M1-STAFF-RETIRE-RULE-V1",
+      "event_code": "staff.retirement.committed",
+      "recipient_selector": "staff.binding_owner",
+      "template_id": "LU96-M1-STAFF-RETIRE-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    },
+    {
+      "id": "LU96-M2-ROUTER-REPLY-RULE-V1",
+      "event_code": "router.deterministic.reply_committed",
+      "recipient_selector": "conversation.bound_actor",
+      "template_id": "LU96-M2-ROUTER-REPLY-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    },
+    {
+      "id": "LU96-M2-FEEDBACK-UNRESOLVED-RULE-V1",
+      "event_code": "feedback.unresolved.recorded",
+      "recipient_selector": "customer_service.ticket_owner",
+      "template_id": "LU96-M2-FEEDBACK-UNRESOLVED-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    },
+    {
+      "id": "LU96-M3-ZERO-POOL-RULE-V1",
+      "event_code": "matching.zero_pool.preview_applied",
+      "recipient_selector": "matching.request.participants",
+      "template_id": "LU96-M3-ZERO-POOL-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    },
+    {
+      "id": "LU96-M3-MATCH-SUCCESS-CLIENT-RULE-V1",
+      "event_code": "matching.decision.committed.client",
+      "recipient_selector": "assignment.client_snapshot",
+      "template_id": "LU96-M3-MATCH-SUCCESS-CLIENT-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    },
+    {
+      "id": "LU96-M3-MATCH-SUCCESS-STAFF-RULE-V1",
+      "event_code": "matching.decision.committed.staff",
+      "recipient_selector": "assignment.staff_snapshot",
+      "template_id": "LU96-M3-MATCH-SUCCESS-STAFF-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    },
+    {
+      "id": "LU96-M3-LEAVE-AGREE-RULE-V1",
+      "event_code": "client.leave.extension_agreed",
+      "recipient_selector": "scheduling.owner",
+      "template_id": "LU96-M3-LEAVE-AGREE-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    },
+    {
+      "id": "LU96-M3-LEAVE-DISAGREE-RULE-V1",
+      "event_code": "client.leave.extension_rejected",
+      "recipient_selector": "customer_service.ticket_owner",
+      "template_id": "LU96-M3-LEAVE-DISAGREE-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    },
+    {
+      "id": "LU96-M4-SAFE-ALERT-RULE-V1",
+      "event_code": "runtime.alert.review_required",
+      "recipient_selector": "admin.review_actor",
+      "template_id": "LU96-M4-SAFE-ALERT-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    },
+    {
+      "id": "LU96-M4-COMPLAINT-HIGH-RULE-V1",
+      "event_code": "complaint.ingress.hold_high_ticket",
+      "recipient_selector": "customer_service.claim_owner",
+      "template_id": "LU96-M4-COMPLAINT-HIGH-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    },
+    {
+      "id": "LU96-M4-SALARY-PAYABLE-RULE-V1",
+      "event_code": "payroll.substitute.obligation_projected",
+      "recipient_selector": "staff_payables.anomaly_owner",
+      "template_id": "LU96-M4-SALARY-PAYABLE-CARD-V1",
+      "enabled": true,
+      "schedule": {"kind": "immediate"},
+      "frequency": {"kind": "once"},
+      "predicates": []
+    }
+  ]
+}

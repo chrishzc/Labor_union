@@ -61,8 +61,7 @@ import {
   type LeaveInboxStatus,
 } from '../api/scheduling/staff_leave_inbox_client';
 import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
-import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
-import { adaptStaffPayablesQuery } from '../adapters/finance/staff_payables_query_adapter';
+import { substitutionPayablesLineageClient, type SubstitutionPayablesLineage } from '../api/scheduling/substitution_payables_lineage_client';
 import { Drawer } from '../components/Drawer';
 import { MatchingCoordinationWorkbench } from '../components/MatchingCoordinationWorkbench';
 
@@ -689,10 +688,7 @@ function LeaveSubstitutionWorkspace({
   const [inboxReasonById, setInboxReasonById] = useState<Record<number, string>>({});
   const inboxQueryGenerationRef = useRef(0);
   const observedInboxReceiptRef = useRef<string | null>(null);
-  const [payablesReadback, setPayablesReadback] = useState<ReadonlyArray<{
-    staffId: number;
-    obligations: ReturnType<typeof adaptStaffPayablesQuery>['obligations'];
-  }> | null>(null);
+  const [payablesReadback, setPayablesReadback] = useState<SubstitutionPayablesLineage | null>(null);
   const [payablesBusy, setPayablesBusy] = useState(false);
   const [payablesError, setPayablesError] = useState<string | null>(null);
   const payablesQueryGenerationRef = useRef(0);
@@ -816,30 +812,15 @@ function LeaveSubstitutionWorkspace({
   const selectedSchedule = schedules.find((item) => item.schedule_id === scheduleId) ?? null;
   const busy = ['query_loading', 'preview_loading', 'apply_pending', 'receipt_received', 'requery_loading', 'outcome_unknown', 'observation_failed']
     .includes(machine.type);
-  const payablesStaffIds = useMemo(() => {
-    if (!observedReceipt || !draft?.preview) return [];
-    const ids = draft.preview.outcomes.flatMap((outcome) => [
-      outcome.original_staff_id,
-      outcome.resulting_staff_id,
-    ]);
-    return [...new Set(ids)].sort((left, right) => left - right);
-  }, [draft?.preview, observedReceipt]);
-
   const loadPayablesReadback = useCallback(async () => {
-    if (!observedReceipt || payablesStaffIds.length === 0) return;
+    if (!observedReceipt) return;
     const generation = ++payablesQueryGenerationRef.current;
     setPayablesBusy(true);
     setPayablesError(null);
     try {
-      const rows = await Promise.all(payablesStaffIds.map(async (staffId) => {
-        const view = adaptStaffPayablesQuery(await staffPayablesQueryClient.query(staffId));
-        return {
-          staffId,
-          obligations: view.obligations.filter((obligation) => obligation.caseNo === normalizedCaseNo),
-        };
-      }));
+      const readback = await substitutionPayablesLineageClient.query(normalizedCaseNo, observedReceipt.batch_key);
       if (generation === payablesQueryGenerationRef.current) {
-        setPayablesReadback(rows);
+        setPayablesReadback(readback);
       }
     } catch {
       if (generation === payablesQueryGenerationRef.current) {
@@ -851,7 +832,7 @@ function LeaveSubstitutionWorkspace({
         setPayablesBusy(false);
       }
     }
-  }, [normalizedCaseNo, observedReceipt, payablesStaffIds]);
+  }, [normalizedCaseNo, observedReceipt]);
 
   useEffect(() => {
     if (!observedReceipt) {
@@ -1414,7 +1395,7 @@ function LeaveSubstitutionWorkspace({
       {observedReceipt && (
         <section className="leave-substitution-receipt" aria-label="代班薪資與應付款回讀" aria-live="polite">
           <h3>代班薪資與應付款回讀</h3>
-          <p>以下為已提交薪資義務的 Staff Payables 最新唯讀資料；本區不會發動付款、匯出或再次套用代班。</p>
+          <p>以下為代班→Payroll→Staff Payables 的版本化血緣與最新唯讀資料；本區不會發動付款、匯出或再次套用代班。</p>
           {payablesBusy && <p>正在查詢受影響服務人員的最新應付款…</p>}
           {payablesError && (
             <>
@@ -1424,22 +1405,38 @@ function LeaveSubstitutionWorkspace({
               </button>
             </>
           )}
-          {payablesReadback && payablesReadback.map((row) => (
-            <div key={row.staffId}>
-              <strong>{staffList.find((staff) => staff.id === row.staffId)?.displayName ?? `服務人員 ${row.staffId}`}</strong>
-              {row.obligations.length === 0 ? (
-                <p>本案目前無未結應付款。</p>
-              ) : (
-                <ul>
-                  {row.obligations.map((obligation) => (
-                    <li key={obligation.id}>
-                      應付 {obligation.amountDue}｜未結 {obligation.balance}｜到期日 {obligation.dueDate}｜{obligation.payoutStatus}
+          {payablesReadback && !payablesReadback.authoritative_complete && (
+            <p className="leave-substitution-notice error" role="alert">
+              跨域薪資血緣尚未完整：{[...payablesReadback.blockers, ...payablesReadback.items.flatMap((item) => item.blockers)].join('、') || '資料待補正'}；不宣稱代班薪資已完成。
+            </p>
+          )}
+          {payablesReadback && payablesReadback.items.map((item) => {
+            const evidence = item.payables_evidence;
+            const staffId = evidence?.staff_id ?? item.resulting_staff_id;
+            const staffName = staffList.find((staff) => staff.id === staffId)?.displayName ?? `服務人員 ${staffId}`;
+            const payoutStatus = evidence?.projection_status === 'payable'
+              ? '待付款'
+              : evidence?.projection_status === 'completed'
+                ? '已完成付款'
+                : evidence?.projection_status === 'anomaly'
+                  ? '待異常處理'
+                  : '待投影';
+            return (
+              <div key={item.lineage_subject}>
+                <strong>{staffName}</strong>
+                {evidence ? (
+                  <ul>
+                    <li>
+                      應付 NT$ {evidence.amount_due_ntd.toLocaleString()}｜未結 NT$ {(evidence.projection_balance_ntd ?? evidence.amount_due_ntd).toLocaleString()}｜到期日 {evidence.due_date ?? '—'}｜{payoutStatus}
                     </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ))}
+                  </ul>
+                ) : (
+                  <p>本筆代班 Payroll obligation 尚無可驗證的 Staff Payables projection。</p>
+                )}
+                <small>來源血緣：{item.lineage_subject}；Scheduling v{payablesReadback.scheduling_version} → Payroll v{payablesReadback.resulting_payroll_version}</small>
+              </div>
+            );
+          })}
         </section>
       )}
 

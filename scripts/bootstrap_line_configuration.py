@@ -30,6 +30,7 @@ from subsystems.line.message_configuration import (
     validate_message_schedules,
     validate_message_templates,
 )
+from subsystems.line.notification_baseline import bootstrap_notification_baseline
 
 CONFIG_FILES = {
     LineConfigurationKind.MESSAGE_TEMPLATES: ROOT / "config" / "message_templates.json",
@@ -37,6 +38,7 @@ CONFIG_FILES = {
     LineConfigurationKind.RICH_MENUS: ROOT / "config" / "line_menu.json",
     LineConfigurationKind.LIFF: ROOT / "config" / "liff_settings.json",
     LineConfigurationKind.CUSTOMER_SERVICE: ROOT / "config" / "customer_service.json",
+    LineConfigurationKind.NOTIFICATION_RULES: ROOT / "config" / "notification_rules.json",
 }
 
 
@@ -147,6 +149,8 @@ def main() -> int:
         definitions[LineConfigurationKind.MESSAGE_TEMPLATES],
     )
     LineMenusConfig.model_validate(definitions[LineConfigurationKind.RICH_MENUS])
+    from domains.line.notification_rules import validate_notification_rules
+    validate_notification_rules(definitions[LineConfigurationKind.NOTIFICATION_RULES])
     fingerprint = _canonical_definitions_fingerprint(definitions)
     if arguments.repair_empty_rich_menus and not arguments.apply:
         parser.error("--repair-empty-rich-menus requires --apply")
@@ -187,12 +191,22 @@ def main() -> int:
         reason="initial canonical LINE configuration bootstrap",
         correlation_id=CorrelationId("line-config-bootstrap:v1"),
     )
+    baseline_actor = ActorContext(
+        "system:line-task96-baseline",
+        tuple(sorted({LineCapability.CONFIG_MANAGE.value})),
+    )
+    baseline_source_ids = bootstrap_notification_baseline(
+        open_line_unit_of_work,
+        target_database=arguments.target_database,
+        actor=baseline_actor,
+    )
     payload = {
         "mode": "apply",
         "receipt_status": "committed",
         "target_database": arguments.target_database,
         "definitions_fingerprint": fingerprint,
         "applied_count": len(results),
+        "notification_baseline_source_event_ids": list(baseline_source_ids),
         "backup_receipt": backup,
     }
     if arguments.repair_empty_rich_menus:

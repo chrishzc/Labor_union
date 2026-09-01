@@ -42,6 +42,8 @@ def query_lifecycle(
         return BaseResponse(data=_view(application.workflow.query(staff_id)))
     except (TypeError, ValueError) as error:
         _raise(error, correlation)
+    except (LookupError, RuntimeError) as error:
+        _raise_line_effect_error(error, correlation)
 
 
 @router.post("/{staff_id}/{action}/preview", response_model=BaseResponse[StaffLifecyclePreviewView])
@@ -60,6 +62,8 @@ def preview_lifecycle(
         return BaseResponse(data={**_view(preview.candidate.before), "after_state": preview.candidate.after.state.value, "preview_fingerprint": preview.fingerprint.value})
     except (TypeError, ValueError) as error:
         _raise(error, correlation)
+    except (LookupError, RuntimeError) as error:
+        _raise_line_effect_error(error, correlation)
 
 
 @router.post("/{staff_id}/{action}/apply", response_model=BaseResponse[StaffLifecycleApplyReceiptView])
@@ -90,6 +94,8 @@ def apply_lifecycle(
         )
     except (TypeError, ValueError) as error:
         _raise(error, correlation)
+    except (LookupError, RuntimeError) as error:
+        _raise_line_effect_error(error, correlation)
 
 
 def _transition(action: str) -> StaffLifecycleTransition:
@@ -112,15 +118,52 @@ def _masked_reason_code(reason_code: str | None) -> str | None:
     return reason_code[:1] + "***"
 
 
-def _raise(error: ValueError, correlation: CorrelationId) -> None:
+_LINE_NOT_FOUND_CODES = frozenset({
+    "line_identity_binding_not_found",
+})
+_LINE_IDEMPOTENCY_CODES = frozenset({
+    "line_identity_revocation_idempotency_conflict",
+})
+_LINE_DOMAIN_BLOCKED_CODES = frozenset({
+    "line_identity_binding_not_bound",
+    "line_identity_default_menu_not_published",
+    "line_identity_revocation_in_progress",
+    "line_identity_staff_retirement_revocation_blocked",
+    "line_identity_revocation_not_retryable",
+    "line_identity_manual_completion_forbidden",
+})
+_LINE_CONFLICT_CODES = frozenset({
+    "line_identity_binding_version_conflict",
+    "line_identity_owner_projection_conflict",
+})
+
+
+def _raise_line_effect_error(error: Exception, correlation: CorrelationId) -> None:
+    if str(error) not in (
+        _LINE_NOT_FOUND_CODES
+        | _LINE_IDEMPOTENCY_CODES
+        | _LINE_DOMAIN_BLOCKED_CODES
+        | _LINE_CONFLICT_CODES
+    ):
+        raise error
+    _raise(error, correlation)
+
+
+def _raise(error: Exception, correlation: CorrelationId) -> None:
     code = str(error)
-    if code == "staff_not_found":
+    if code in _LINE_NOT_FOUND_CODES or code == "staff_not_found":
         status = 404
         category = ErrorCategory.NOT_FOUND
-    elif code == "idempotency_mismatch":
+    elif code in _LINE_IDEMPOTENCY_CODES or code == "idempotency_mismatch":
         status = 409
         category = ErrorCategory.IDEMPOTENCY_MISMATCH
-    elif code in {"stale_version", "stale_preview", "staff_lifecycle_transition_invalid"}:
+    elif code in _LINE_DOMAIN_BLOCKED_CODES:
+        status = 409
+        category = ErrorCategory.DOMAIN_BLOCKED
+    elif code in {"stale_version", "stale_preview", "staff_lifecycle_transition_invalid", "staff_retirement_open_assignments"}:
+        status = 409
+        category = ErrorCategory.CONFLICT
+    elif code in _LINE_CONFLICT_CODES:
         status = 409
         category = ErrorCategory.CONFLICT
     else:

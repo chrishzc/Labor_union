@@ -9,6 +9,9 @@ from pathlib import Path
 from infrastructure.mysql.contract_signing_document_query_repository import (
     MySqlContractSigningDocumentQueryRepository,
 )
+from infrastructure.mysql.contract_full_preview_repository import (
+    MySqlFullContractProjectionRepository,
+)
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.archive.contract_documents import archive_contract_document, discard_uncommitted_contract_document
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
@@ -56,7 +59,22 @@ def get_client_contract_signing_application() -> ClientContractSigningApplicatio
         discard_document=discard_uncommitted_contract_document,
         line_delivery_repository_factory=MySqlLineDeliveryTaskRepository,
         completion=_complete_contract_in_transaction,
+        template_facts_loader=_load_client_contract_template_facts,
     )
+
+
+def _load_client_contract_template_facts(
+    connection, case_no: str, _workflow_facts: dict[str, object], now: datetime
+) -> dict[str, object]:
+    projection = MySqlFullContractProjectionRepository(
+        connection
+    ).load_client_projection(case_no)
+    if projection is None:
+        raise ValueError("contract_signing_case_facts_not_found")
+    facts = dict(projection.facts)
+    facts["contract_signed_date"] = now.date()
+    facts["__today__"] = now.date()
+    return facts
 
 
 def get_contract_signing_document_query_application():

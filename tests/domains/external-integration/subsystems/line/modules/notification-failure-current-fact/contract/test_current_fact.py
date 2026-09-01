@@ -185,6 +185,63 @@ def test_mysql_readback_composes_exact_replay_and_delivery_without_raw_payload()
     assert all("payload_snapshot" not in sql for sql, _ in cursor.executed)
 
 
+def test_mysql_readback_includes_terminal_failed_delivery_with_line006_reason() -> None:
+    facts = json.dumps({"case_no": "CASE-006"})
+    original = {
+        "source_event_id": 11,
+        "source_domain": "line_task96_fixture",
+        "event_code": "deposit_confirmed",
+        "source_event_identity": "line-task96:11",
+        "source_aggregate_type": "line_task96_runtime",
+        "source_aggregate_identity": "CASE-006",
+        "source_version": 1,
+        "facts_snapshot": facts,
+        "rule_id": "rule-a",
+        "reason_code": "rule_matched",
+        "is_latest_source_version": 1,
+    }
+    class _TerminalFailureCursor(_Cursor):
+        def execute(self, sql, parameters=()):
+            # Negative control: before the regression fix this SQL did not
+            # admit a delivery-owned terminal failure, so the source is absent.
+            if (
+                "source.id AS source_event_id" in sql
+                and "task.processing_status='failed'" not in sql
+            ):
+                self.all_rows[0] = ()
+            super().execute(sql, parameters)
+
+    cursor = _TerminalFailureCursor(
+        all_rows=((original,), ()),
+        one_rows=(
+            {
+                "revision_id": 7,
+                "definition_snapshot": json.dumps(
+                    {
+                        "rules": [
+                            {
+                                "id": "rule-a",
+                                "event_code": "deposit_confirmed",
+                                "enabled": True,
+                                "predicates": [],
+                            }
+                        ]
+                    }
+                ),
+            },
+        ),
+    )
+
+    readback = MySqlLineNotificationRepository(_Connection(cursor)).current_failure_fact(
+        QUERY
+    )
+
+    assert readback.authoritative_complete is True
+    assert readback.applicable_source_count == 1
+    assert readback.unresolved_source_count == 1
+    assert readback.predicate_active is True
+
+
 def test_existing_exact_manual_replay_is_idempotent_without_revalidation_or_write() -> None:
     facts = json.dumps({"case_no": "CASE-006"})
     cursor = _Cursor(one_rows=(

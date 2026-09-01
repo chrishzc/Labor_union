@@ -18,6 +18,11 @@ from subsystems.line.ai_router_contracts import (
     TicketReferral,
     Unavailable,
 )
+from subsystems.line.navigation_catalog import (
+    CATALOG_REVISION,
+    CATALOG_SOURCE_IDENTITY,
+    entry_for_alias,
+)
 
 
 _HUMAN_MARKERS = (
@@ -31,16 +36,8 @@ _HUMAN_MARKERS = (
     "不對",
     "無法解決",
 )
-_IDENTITY_ALIASES = {
-    "綁定訂單": ("customer_binding", "customer_binding"),
-    "訂單查詢": ("customer_binding", "customer_binding"),
-    "綁定後台帳號": ("admin_binding", "admin_binding"),
-}
-_GROUP_INTENTS = {
-    "工會選單": "union_menu",
-    "開啟客服系統": "union_menu",
-    "月嫂驗證管理": "union_menu",
-}
+_IDENTITY_ALIASES = {"綁定訂單", "訂單查詢", "綁定後台帳號"}
+_GROUP_INTENTS = {"工會選單", "開啟客服系統", "月嫂驗證管理"}
 _SERVICE_ALIASES = {
     "服務登記": (None, "registration"),
     "服務說明": (None, "service_help_menu"),
@@ -108,19 +105,29 @@ class DeterministicLineRouter:
                 IdempotencyKey(f"line-service-help:other:{source_event_id}"),
             )
 
-        identity = _IDENTITY_ALIASES.get(normalized)
-        if identity is not None:
-            route_key, flow_id = identity
-            return DeterministicRoute(route_key, None, flow_id, "protected_identity_alias")
+        entry = entry_for_alias(normalized)
+        if normalized in _IDENTITY_ALIASES and entry is not None:
+            return DeterministicRoute(
+                entry.route_key, None, entry.route_key, "protected_identity_alias",
+                entry.source_identity, entry.revision, entry.source_identity,
+                "protected_route", 100,
+            )
 
-        group_route = _GROUP_INTENTS.get(normalized)
-        if group_route is not None:
-            return DeterministicRoute(group_route, None, None, "approved_group_intent")
+        if normalized in _GROUP_INTENTS and entry is not None:
+            return DeterministicRoute(
+                entry.route_key, None, None, "approved_group_intent",
+                entry.source_identity, entry.revision, entry.source_identity,
+                "protected_route", 100,
+            )
 
         service = _SERVICE_ALIASES.get(normalized)
         if service is not None:
             category, route_key = service
-            return DeterministicRoute(route_key, category, None, "approved_service_help_alias")
+            return DeterministicRoute(
+                route_key, category, None, "approved_service_help_alias",
+                CATALOG_SOURCE_IDENTITY, CATALOG_REVISION, CATALOG_SOURCE_IDENTITY,
+                "navigation", 100,
+            )
 
         if knowledge_answer is not None:
             if knowledge_index_ready is False:
@@ -131,15 +138,25 @@ class DeterministicLineRouter:
                 knowledge_answer.citations,
                 knowledge_answer.index_version,
                 authoritative=knowledge_answer.authoritative,
+                source_identity=CATALOG_SOURCE_IDENTITY,
+                source_revision=knowledge_answer.index_version,
+                semantic_bucket="answer",
+                confidence=100,
             )
         if knowledge_index_ready is False:
             return _safe_menu("knowledge_index_unavailable")
 
         band = score_band(score)
         if band == "50_79":
-            return Clarification("service_help_clarification", _CLARIFICATION_OPTIONS, "ambiguous_intent")
+            return Clarification(
+                "service_help_clarification", _CLARIFICATION_OPTIONS, "ambiguous_intent",
+                "50_79", CATALOG_SOURCE_IDENTITY, CATALOG_REVISION, score or 50,
+            )
         if band == "gte_80":
-            return Unavailable("deterministic_answer_unavailable", False, "請轉交客服人員確認。")
+            return Unavailable(
+                "deterministic_answer_unavailable", False, "請轉交客服人員確認。",
+                CATALOG_SOURCE_IDENTITY, CATALOG_REVISION, "manual_fallback",
+            )
         return _safe_menu("unknown_intent")
 
 

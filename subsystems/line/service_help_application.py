@@ -15,6 +15,7 @@ from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identity_flow import LineIdentityFlowPurpose
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.customer_service.escalation_contracts import CreateHumanEscalation, HumanEscalationError
 from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
@@ -28,6 +29,9 @@ from subsystems.line.ai_router_contracts import (
     Unavailable,
 )
 from subsystems.line.deterministic_ai_router import DeterministicLineRouter
+from subsystems.line.notification_policy import NotificationSourceEvent
+from shared_kernel.identities import IdempotencyReceipt
+from subsystems.line.runtime_human_escalation_source import normalize_complaint_text
 
 
 _CATEGORY_ALIASES = {
@@ -52,9 +56,18 @@ class LineServiceHelpApplication:
         self._router = DeterministicLineRouter()
 
     def handle(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
+        normalized = text.strip()
+        complaint_context = normalize_complaint_text(normalized)
+        if complaint_context is not None:
+            self._create_complaint_escalation(
+                inbox,
+                unit_of_work,
+                line_user_id,
+                complaint_context,
+            )
+            return True
         if self._escalation_gateway is not None:
             self._escalation_gateway.hold_guard(_conversation_scope(line_user_id), unit_of_work)
-        normalized = text.strip()
         event_id = inbox.event.event_id.value
         outcome = self._router.route(normalized, source_event_id=event_id)
         if isinstance(outcome, TicketReferral):
@@ -68,10 +81,11 @@ class LineServiceHelpApplication:
                     line_user_id,
                     _text_payload(_registration_reply(_registration_liff_url())),
                     "registration",
+                    reason_code=outcome.reason_code,
                 )
                 return True
             if outcome.route_key == "service_help_menu":
-                self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _service_menu_payload(), "menu")
+                self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _service_menu_payload(), "menu", reason_code=outcome.reason_code)
                 return True
             if outcome.category is None:
                 return False
@@ -89,6 +103,7 @@ class LineServiceHelpApplication:
                 line_user_id,
                 _clarification_payload(outcome),
                 "clarification",
+                reason_code=outcome.reason_code,
             )
             return True
         if isinstance(outcome, DeterministicAnswer):
@@ -98,6 +113,7 @@ class LineServiceHelpApplication:
                 line_user_id,
                 _answer_payload(outcome),
                 "knowledge",
+                reason_code="published_knowledge",
             )
             return True
         if isinstance(outcome, Unavailable):
@@ -107,9 +123,98 @@ class LineServiceHelpApplication:
                 line_user_id,
                 _text_payload(outcome.human_action),
                 "unavailable",
+                reason_code=outcome.code,
             )
             return True
         return False
+
+    def apply_manual_fallback(self, inbox, unit_of_work, line_user_id, text: str) -> int:
+        """Create the typed manual fallback selected by the development preview."""
+        event_id = inbox.event.event_id.value
+        event_key = f"line-service-help:other:{event_id}"
+        existing_lookup = getattr(unit_of_work.customer_service, "get_by_event_key", None)
+        if callable(existing_lookup):
+            existing = existing_lookup(event_key)
+            if existing is not None:
+                return int(existing.ticket_id)
+        referral = TicketReferral(
+            CustomerServiceCategory.OTHER,
+            "explicit_human_request",
+            event_id,
+            IdempotencyKey(f"line-service-help:other:{event_id}"),
+        )
+        return self._create_manual_ticket(inbox, unit_of_work, line_user_id, text, referral)
+
+    def _create_complaint_escalation(
+        self,
+        inbox,
+        unit_of_work,
+        line_user_id,
+        masked_context,
+    ) -> None:
+        """Route complaint language through the M4 ingress in the caller UoW.
+
+        The source normalizer intentionally returns no complaint text.  The
+        Customer Service owner still receives its required routing identity,
+        while the ticket note, escalation command, and alert carry only the
+        closed masked context; the source fingerprint proves that the original
+        ingress was observed without retaining the raw complaint message.
+        """
+        if self._escalation_gateway is None:
+            raise HumanEscalationError(
+                "unavailable",
+                "human_escalation_ingress_unavailable",
+                "客訴轉真人流程尚未配置，已安全停止。",
+                retryable=True,
+            )
+        event_id = inbox.event.event_id.value
+        event_key = f"line-complaint:{event_id}"
+        ticket = unit_of_work.customer_service.create_or_append(
+            CreateCustomerServiceMessage(
+                line_user_id.value,
+                CustomerServiceCategory.OTHER,
+                "客訴訊息已遮罩；請查看客服 escalation 的去敏摘要。",
+                event_key,
+            )
+        )
+        command = CreateHumanEscalation(
+            source_event_identity=event_key,
+            source_kind="line_inbox",
+            source_fingerprint=evidence_digest(
+                {
+                    "event_identity": event_id,
+                    "line_user_id": line_user_id.value,
+                    "masked_context": masked_context,
+                }
+            ),
+            trigger_code=TriggerCode.COMPLAINT,
+            trigger_policy_version=masked_context["policy_version"],
+            ticket_category=CustomerServiceCategory.OTHER,
+            masked_context=MaskedContext.from_mapping(masked_context),
+            hold_scope=_conversation_scope(line_user_id),
+            idempotency_key=IdempotencyKey(
+                f"line-complaint-escalation:{event_id}"
+            ),
+            correlation_id=CorrelationId(f"line-event:{event_id}"),
+            actor=ActorContext("system:line-complaint-ingress"),
+        )
+        receipt = self._escalation_gateway.create_for_ticket(command, ticket, unit_of_work)
+        # A redelivered complaint is already represented by the canonical
+        # escalation receipt.  Do not append another audit event or enqueue a
+        # second empathy task; the delivery repository remains the final
+        # idempotency boundary for callers that cannot return a receipt.
+        if getattr(receipt, "replayed", False):
+            return
+        unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
+        self._reply_or_enqueue(
+            inbox,
+            unit_of_work,
+            line_user_id,
+            _text_payload(
+                "很抱歉讓您有不好的感受，我們已暫停自動回覆，客服專員會盡快協助您。"
+            ),
+            "complaint-empathy",
+        )
 
     def _create_manual_ticket(self, inbox, unit_of_work, line_user_id, text, referral):
         ticket = unit_of_work.customer_service.create_or_append(
@@ -131,6 +236,7 @@ class LineServiceHelpApplication:
             _text_payload(_TICKET_ACKNOWLEDGEMENTS[referral.category]),
             "ticket",
         )
+        return int(ticket.ticket_id)
 
     def _handle_category(self, inbox, unit_of_work, line_user_id, category, text):
         if category is CustomerServiceCategory.SERVICE_FLOW:
@@ -164,20 +270,56 @@ class LineServiceHelpApplication:
         url = self._identity_url(opened.purpose.value, opened.flow_id.value)
         return _text_payload(_unbound_progress_reply(url))
 
-    def _enqueue(self, inbox, unit_of_work, line_user_id, payload, suffix):
+    def _enqueue(self, inbox, unit_of_work, line_user_id, payload, suffix, *, reason_code=None):
         event_id = inbox.event.event_id.value
-        unit_of_work.delivery_tasks.enqueue(
-            LineDeliveryRequest(
+        request = LineDeliveryRequest(
                 LineRecipient(LineRecipientType.USER, line_user_id),
                 LineMessageKind.FLEX if payload.get("type") == "flex" else LineMessageKind.TEXT,
                 canonical_line_payload_json(payload), self._now(),
                 IdempotencyKey(f"service-help:{suffix}:{event_id}"),
                 CorrelationId(f"line-event:{event_id}"), "line_webhook_event", event_id,
             )
-        )
+        delivery = unit_of_work.delivery_tasks.enqueue(request)
+        notification_rules = getattr(unit_of_work, "notification_rules", None)
+        receipts = getattr(unit_of_work, "receipts", None)
+        register_source_event = getattr(notification_rules, "register_source_event", None)
+        if callable(register_source_event):
+            source_identity = f"router-reply:{event_id}:{suffix}"
+            register_source_event(
+                NotificationSourceEvent(
+                    identity=source_identity,
+                    event_code="router.deterministic.reply_committed",
+                    historical_silent=False,
+                    facts={
+                        "source_event_id": event_id,
+                        "reply_kind": suffix,
+                        "reason_code": reason_code or suffix,
+                        "source_contract_id": "LU96-M2-ROUTER-REPLY-SOURCE-V1",
+                        "source_revision": 1,
+                        "delivery_task_id": getattr(getattr(delivery, "task_id", None), "value", None),
+                    },
+                    source_domain="line_router",
+                    source_aggregate_type="line_router_reply",
+                    source_aggregate_identity=event_id,
+                    source_version=1,
+                    occurred_at=request.scheduled_at,
+                )
+            )
+            if callable(getattr(receipts, "append", None)):
+                receipts.append(
+                    IdempotencyReceipt(
+                        IdempotencyKey(f"line-router-reply:{source_identity}"),
+                        fingerprint_payload({
+                            "source_identity": source_identity,
+                            "reply_kind": suffix,
+                            "reason_code": reason_code or suffix,
+                        }),
+                        f"line-router-reply:{source_identity}",
+                    )
+                )
 
-    def _reply_or_enqueue(self, inbox, unit_of_work, line_user_id, payload, suffix):
-        self._enqueue(inbox, unit_of_work, line_user_id, payload, suffix)
+    def _reply_or_enqueue(self, inbox, unit_of_work, line_user_id, payload, suffix, *, reason_code=None):
+        self._enqueue(inbox, unit_of_work, line_user_id, payload, suffix, reason_code=reason_code)
 
 def _event_key(inbox, suffix):
     return f"line-service-help:{suffix}:{inbox.event.event_id.value}"

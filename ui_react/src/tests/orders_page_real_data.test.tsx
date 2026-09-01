@@ -890,6 +890,24 @@ describe('OrdersPage query real-data slice', () => {
     expect(ordersQueryClient.getAssignmentPlan).not.toHaveBeenCalled();
   });
 
+  it('blocks a second cancellation when the fresh lifecycle query is already cancelled', async () => {
+    useOperableSummary();
+    vi.mocked(orderCancellationClient.query).mockResolvedValueOnce({
+      ...cancellationQuery,
+      lifecycle_status: '訂單取消',
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
+
+    expect(await screen.findByText('此案件已取消，不可再次取消；如需處理請改走受控重開。')).toBeInTheDocument();
+    expect(screen.getByText('🚫 不可再次取消')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /預覽取消與退款試算/ })).toBeDisabled();
+    expect(orderCancellationClient.preview).not.toHaveBeenCalled();
+  });
+
   it('shows the backend cancellation preview blocker instead of a generic failure', async () => {
     useOperableSummary();
     vi.mocked(orderCancellationClient.preview).mockRejectedValueOnce(

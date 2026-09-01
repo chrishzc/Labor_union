@@ -27,6 +27,8 @@ from subsystems.scheduling.matching_coordination_contracts import (
     PreviewMatchingPackage,
     PreviewZeroCandidateAlternative,
     PreviewZeroCandidateConfirmation,
+    M3_MATCH_SUCCESS_CLIENT_SOURCE_ID,
+    M3_MATCH_SUCCESS_STAFF_SOURCE_ID,
 )
 from subsystems.scheduling.matching_coordination_workflow import (
     MatchingCoordinationFacts,
@@ -202,6 +204,14 @@ def test_accepted_decision_returns_typed_conversion_request_and_stale_returns_re
         "customer",
         "caregiver",
     }
+    assert {item.source_identity for item in receipt.notification_intents} == {
+        M3_MATCH_SUCCESS_CLIENT_SOURCE_ID,
+        M3_MATCH_SUCCESS_STAFF_SOURCE_ID,
+    }
+    assert {item.recipient_selector for item in receipt.notification_intents} == {
+        "assignment.client_snapshot",
+        "assignment.staff_snapshot",
+    }
     rematch = workflow.apply(command, facts, preview_fingerprint=facts.package.fingerprint, fresh_effects_match=False)
     assert rematch.cross_domain_request is not None
     assert rematch.cross_domain_request.request_kind.value == "rematch_requested"
@@ -293,7 +303,7 @@ def test_customer_acceptance_requires_an_eligible_willing_candidate() -> None:
     assert rematch.rematch_reference == "matching:case-001:workflow:rematch"
 
 
-def test_zero_candidate_disagreement_remains_awaiting_matching_without_outbox() -> None:
+def test_zero_candidate_disagreement_queues_client_prompt_and_service_ticket() -> None:
     candidate_facts = _facts()
     facts = MatchingCoordinationFacts(
         snapshot=candidate_facts.snapshot,
@@ -330,10 +340,13 @@ def test_zero_candidate_disagreement_remains_awaiting_matching_without_outbox() 
     assert receipt.result_state == "awaiting_matching"
     assert receipt.zero_candidate_decision is not None
     assert receipt.zero_candidate_decision.alternative_id == preview.alternative_id
-    assert receipt.outbox_intent_ids == ()
+    assert receipt.outbox_intent_ids == (
+        "matching:case-001:workflow:zero-candidate:client-decision",
+        "matching:case-001:workflow:zero-candidate:customer-service",
+    )
 
 
-def test_zero_candidate_agreement_queues_only_orders_before_owner_receipt() -> None:
+def test_zero_candidate_agreement_queues_client_prompt_before_orders_handoff() -> None:
     original = _facts()
     facts = MatchingCoordinationFacts(
         snapshot=original.snapshot,
@@ -371,6 +384,7 @@ def test_zero_candidate_agreement_queues_only_orders_before_owner_receipt() -> N
 
     assert receipt.result_state == "alternative_agreed_pending_owning_workflows"
     assert receipt.outbox_intent_ids == (
+        "matching:case-001:workflow:zero-candidate:client-decision",
         "matching:case-001:workflow:zero-candidate:orders",
     )
 

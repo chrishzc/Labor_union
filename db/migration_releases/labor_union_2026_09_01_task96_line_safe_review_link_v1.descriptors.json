@@ -1,0 +1,45 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "1023_task96_line_safe_review_link_matching_outbox_v1.sql": {
+      "tables": {
+        "line_safe_review_links": ["id","link_id","token_digest","canonical_internal_target","target_version","source_alert_identity","allowed_actor_ref","required_capability","status","issued_at_utc","expires_at_utc","redeemed_at_utc","revoked_at_utc","root_version","idempotency_key","correlation_id","created_at_utc","updated_at_utc"],
+        "line_safe_review_link_events": ["id","link_id","event_type","actor_ref","resulting_status","target_version","idempotency_key","correlation_id","event_payload","occurred_at_utc"],
+        "line_safe_review_link_receipts": ["idempotency_key","link_id","command_fingerprint","outcome","result_snapshot","created_at_utc"],
+        "line_safe_review_link_outbox": ["id","link_id","intent_type","target_owner","intent_payload","idempotency_key","correlation_id","created_at_utc"]
+      },
+      "indexes": {
+        "line_safe_review_links.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "line_safe_review_links.uq_line_safe_review_link_id": {"non_unique": 0, "columns": ["link_id"]},
+        "line_safe_review_links.uq_line_safe_review_token_digest": {"non_unique": 0, "columns": ["token_digest"]},
+        "line_safe_review_links.uq_line_safe_review_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "line_safe_review_links.idx_line_safe_review_status_expiry": {"non_unique": 1, "columns": ["status","expires_at_utc"]},
+        "line_safe_review_links.idx_line_safe_review_alert": {"non_unique": 1, "columns": ["source_alert_identity","created_at_utc"]},
+        "line_safe_review_link_events.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "line_safe_review_link_events.uq_line_safe_review_event_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "line_safe_review_link_events.idx_line_safe_review_event_link": {"non_unique": 1, "columns": ["link_id","id"]},
+        "line_safe_review_link_receipts.PRIMARY": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "line_safe_review_link_outbox.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "line_safe_review_link_outbox.uq_line_safe_review_outbox_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "line_safe_review_link_outbox.idx_line_safe_review_outbox_link": {"non_unique": 1, "columns": ["link_id","id"]}
+      },
+      "foreign_keys": {
+        "line_safe_review_link_events.fk_line_safe_review_event_link": {"columns": ["link_id"], "referenced_table": "line_safe_review_links", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "line_safe_review_link_receipts.fk_line_safe_review_receipt_link": {"columns": ["link_id"], "referenced_table": "line_safe_review_links", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "line_safe_review_link_outbox.fk_line_safe_review_outbox_link": {"columns": ["link_id"], "referenced_table": "line_safe_review_links", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"}
+      },
+      "checks": {
+        "line_safe_review_links.chk_line_safe_review_link_digest": "atom(regexp_like(token_digest,'^[0-9a-f]{64}$'))",
+        "line_safe_review_links.chk_line_safe_review_link_identity": "and(atom(char_length(trim(link_id))>0),atom(char_length(trim(canonical_internal_target))>0),atom(char_length(trim(source_alert_identity))>0),atom(char_length(trim(allowed_actor_ref))>0),atom(char_length(trim(required_capability))>0))",
+        "line_safe_review_links.chk_line_safe_review_link_expiry": "atom(expires_at_utc>issued_at_utc)",
+        "line_safe_review_links.chk_line_safe_review_link_terminal_times": "or(and(atom(status='issued'),atom(redeemed_at_utcisnull),atom(revoked_at_utcisnull)),and(atom(status='redeemed'),atom(redeemed_at_utcisnotnull),atom(revoked_at_utcisnull)),and(atom(status='expired'),atom(redeemed_at_utcisnull),atom(revoked_at_utcisnull)),and(atom(status='revoked'),atom(revoked_at_utcisnotnull),atom(redeemed_at_utcisnull)))",
+        "line_safe_review_link_events.chk_line_safe_review_event_payload": "atom(json_type(event_payload)='OBJECT')",
+        "line_safe_review_link_receipts.chk_line_safe_review_receipt_digest": "atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$'))",
+        "line_safe_review_link_receipts.chk_line_safe_review_receipt_result": "atom(json_type(result_snapshot)='OBJECT')",
+        "line_safe_review_link_outbox.chk_line_safe_review_outbox_payload": "atom(json_type(intent_payload)='OBJECT')"
+      },
+      "triggers": ["trg_line_safe_review_link_events_before_delete","trg_line_safe_review_link_events_before_update","trg_line_safe_review_link_outbox_before_delete","trg_line_safe_review_link_outbox_before_update","trg_line_safe_review_link_receipts_before_delete","trg_line_safe_review_link_receipts_before_update","trg_line_safe_review_links_before_delete"]
+    }
+  },
+  "release_id": "labor-union-task96-line-safe-review-link-2026-09-01-v1"
+}

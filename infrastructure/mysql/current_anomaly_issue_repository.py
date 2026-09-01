@@ -62,7 +62,7 @@ class MySqlCurrentIssueRepository:
         try:
             with _cursor(self._connection) as cursor:
                 for key in lock_keys:
-                    cursor.execute("SELECT GET_LOCK(%s, 0)", ("anomaly-owner:" + key,))
+                    cursor.execute("SELECT GET_LOCK(%s, 0)", (_lock_name(key),))
                     row = cursor.fetchone()
                     result = row[0] if not isinstance(row, dict) else next(iter(row.values()))
                     if result != 1:
@@ -267,13 +267,18 @@ class MySqlCurrentIssueRepository:
             return
         with _cursor(self._connection) as cursor:
             for key in reversed(lock_keys):
-                cursor.execute("SELECT RELEASE_LOCK(%s)", ("anomaly-owner:" + key,))
+                cursor.execute("SELECT RELEASE_LOCK(%s)", (_lock_name(key),))
 
 
 # The longer alias mirrors the persisted table name and keeps the adapter
 # discoverable without introducing a second implementation.
 MySqlCurrentAnomalyIssueRepository = MySqlCurrentIssueRepository
 CurrentAnomalyIssueMySqlUnitOfWork = CurrentIssueMySqlUnitOfWork
+
+
+def _lock_name(key: str) -> str:
+    """Keep MySQL's user-lock name within its 64-byte limit."""
+    return "anomaly-owner:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:48]
 
 
 def _projection(row: Any) -> CurrentIssueProjection:

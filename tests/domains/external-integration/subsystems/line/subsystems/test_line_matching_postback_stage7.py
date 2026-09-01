@@ -78,6 +78,18 @@ def test_non_matching_or_non_user_postback_is_ignored() -> None:
     assert spy.calls == []
 
 
+def test_m3_rejected_alias_is_normalized_to_legacy_declined_root_value() -> None:
+    spy = _MatchingApplicationSpy()
+    handler = LineMatchingPostbackApplication(spy)
+
+    handler.handle(
+        _inbox("matching:safe-token-12345678901234567890:rejected"),
+        object(),
+    )
+
+    assert spy.calls[0][1]["decision"] == "declined"
+
+
 def test_schedule_rejection_reason_message_uses_the_durable_event_identity() -> None:
     handler = LineMatchingPostbackApplication(_MatchingApplicationSpy())
     schedule_spy = _ScheduleConfirmationSpy()

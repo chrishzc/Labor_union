@@ -181,7 +181,13 @@ class OrderCancellationWorkflow:
         self._clock = clock
 
     def preview(self, case_no: str, confirmed_service_days: tuple[ConfirmedServiceDay, ...]) -> OrderCancellationPreview:
-        return self._build_preview(self._repository.load_for_preview(case_no, _confirmed_staff_ids(confirmed_service_days)), confirmed_service_days)
+        facts = self._repository.load_for_preview(
+            case_no, _confirmed_staff_ids(confirmed_service_days)
+        )
+        _ensure_cancellation_allowed(
+            facts, CorrelationId(f"order-cancellation-preview:{case_no}")
+        )
+        return self._build_preview(facts, confirmed_service_days)
 
     def apply(self, request: OrderCancellationApplyRequest) -> OrderCancellationReceipt:
         command_fingerprint = _command_fingerprint(request)
@@ -214,6 +220,7 @@ class OrderCancellationWorkflow:
     def _fresh_preview(self, request: OrderCancellationApplyRequest, facts: CancellationWorkflowFacts, preflight_staff_ids: tuple[int, ...]) -> OrderCancellationPreview:
         _validate_locked_staff_set(request, facts, preflight_staff_ids)
         _validate_expected_versions(request, facts)
+        _ensure_cancellation_allowed(facts, request.correlation_id)
         try:
             preview = self._build_preview(facts, request.confirmed_service_days)
         except CancellationCandidateError as error:
@@ -259,6 +266,23 @@ def _effective_order_facts(facts, confirmed_service_days):
         actual_start_date=actual_start_date,
         service_started=True,
     )
+
+
+def _ensure_cancellation_allowed(
+    facts: CancellationWorkflowFacts, correlation_id: CorrelationId
+) -> None:
+    if (
+        facts.lifecycle.current_status is OrderLifecycleStatus.CANCELLED
+        or facts.lifecycle.cancellation_effective
+    ):
+        raise CancellationWorkflowError(
+            TypedError(
+                ErrorCategory.CONFLICT,
+                "order_version_conflict",
+                "The order is already cancelled and cannot be cancelled again.",
+                correlation_id,
+            )
+        )
 
 
 def _build_impacts(facts, candidate):

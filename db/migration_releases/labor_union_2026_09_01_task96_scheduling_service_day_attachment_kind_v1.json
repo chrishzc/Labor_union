@@ -1,0 +1,57 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-task96-scheduling-service-day-attachment-kind-2026-09-01-v1",
+  "release_metadata": {
+    "release_name": "Labor Union Task 96 Scheduling service-day attachment kind",
+    "application_version": "task96-scheduling-service-day-attachment-kind-v1",
+    "published_at": "2026-09-01",
+    "description": "Add Baby Log controlled-media attachment kind to the preserved-data Scheduling service-day log attachment bridge"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-schema-assembly-2026-08-15-v1"
+  },
+  "artifacts": [{
+    "name": "1026_task96_scheduling_service_day_attachment_kind.sql",
+    "relative_path": "db/schema_parts/1026_task96_scheduling_service_day_attachment_kind.sql",
+    "sha256": "86af73bd74ed0e1f0ad8905ba84eaa0234ed4afc60416c6571b644dc1418ff86",
+    "dependencies": [],
+    "data_effect": "schema_only",
+    "rollback_policy": "forward-only-preserve-service-day-log-attachment-lineage",
+    "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+  }],
+  "backfills": [],
+  "verification_contracts": [{
+    "verification_id": "task96-scheduling-service-day-attachment-kind",
+    "phase": "post-schema",
+    "policy": "scheduling-service-day-attachment-kind-exact-and-existing-lineage-readable",
+    "read_only": true,
+    "blocking": true
+  }],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["task96-government-subsidy-return-excess-recovery-v1"],
+    "required_restart_targets": ["api", "worker"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["task96-scheduling-service-day-attachment-kind"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_01_task96_scheduling_service_day_attachment_kind_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_01_task96_scheduling_service_day_attachment_kind_v1.descriptors.json",
+    "sha256": "4964069e9293d65d3b8882bb39ed955d2684716e68f30ccafa0fb80ad3efcb6d",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

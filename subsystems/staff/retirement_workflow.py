@@ -46,6 +46,7 @@ class StaffLifecycleReceipt:
 
 class StaffLifecycleRepository(Protocol):
     def load(self, staff_id: int, *, lock: bool) -> StaffLifecycleFact: ...
+    def ensure_no_open_assignments(self, staff_id: int, *, lock: bool) -> None: ...
     def claim_command(self, request: StaffLifecycleApplyRequest, command_fingerprint: PreviewFingerprint) -> None: ...
     def load_receipt(self, key: IdempotencyKey) -> tuple[PreviewFingerprint, StaffLifecycleReceipt] | None: ...
     def persist(self, request: StaffLifecycleApplyRequest, preview: StaffLifecyclePreview, receipt: StaffLifecycleReceipt, command_fingerprint: PreviewFingerprint) -> None: ...
@@ -72,7 +73,9 @@ class StaffLifecycleWorkflow:
         return self._repository.load(staff_id, lock=False)
 
     def preview(self, staff_id: int, transition: StaffLifecycleTransition, effective_at: datetime, reason_code: str) -> StaffLifecyclePreview:
-        return self._build_preview(self._repository.load(staff_id, lock=False), transition, effective_at, reason_code)
+        fact = self._repository.load(staff_id, lock=False)
+        self._guard_open_assignments(staff_id, fact, transition, lock=False)
+        return self._build_preview(fact, transition, effective_at, reason_code)
 
     def apply(self, request: StaffLifecycleApplyRequest) -> StaffLifecycleReceipt:
         command_fingerprint = fingerprint_payload(
@@ -96,6 +99,12 @@ class StaffLifecycleWorkflow:
                 unit_of_work.commit()
                 return _receipt_with_idempotency_key(receipt, request.idempotency_key)
             fact = self._repository.load(request.staff_id, lock=True)
+            self._guard_open_assignments(
+                request.staff_id,
+                fact,
+                request.transition,
+                lock=True,
+            )
             replay = self._repository.load_receipt(request.idempotency_key)
             if replay is not None:
                 stored_fingerprint, receipt = replay
@@ -120,6 +129,29 @@ class StaffLifecycleWorkflow:
                 self._effect.on_transition(unit_of_work, request, preview, receipt)
             unit_of_work.commit()
             return receipt
+
+    def _guard_open_assignments(
+        self,
+        staff_id: int,
+        fact: StaffLifecycleFact,
+        transition: StaffLifecycleTransition,
+        *,
+        lock: bool,
+    ) -> None:
+        """Retirement cannot orphan an existing Scheduling assignment.
+
+        The optional lookup keeps existing in-memory owner adapters compatible;
+        the MySQL owner implements it against the existing assignment status
+        column. Apply repeats the check after the lifecycle row lock so a
+        concurrent assignment cannot slip through the retirement boundary.
+        """
+        if transition is not StaffLifecycleTransition.RETIRE:
+            return
+        if fact.state is not StaffLifecycleState.ACTIVE:
+            return
+        guard = getattr(self._repository, "ensure_no_open_assignments", None)
+        if guard is not None:
+            guard(staff_id, lock=lock)
 
     def _build_preview(self, fact: StaffLifecycleFact, transition: StaffLifecycleTransition, effective_at: datetime, reason_code: str) -> StaffLifecyclePreview:
         if effective_at.tzinfo is None or effective_at.utcoffset() is None:

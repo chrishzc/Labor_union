@@ -93,7 +93,7 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
     <table className="reports-table">
       <thead><tr><th>案件</th><th>申請人</th><th>申請日</th><th>身分</th><th>審核</th><th>訂單狀態</th><th>天數／每日時數</th><th>預計服務期間</th><th>區域</th><th>資料品質</th></tr></thead>
       <tbody>{report.caseRows.map((row) => <tr key={row.case_no}>
-        <td>{row.case_no}</td><td>{row.applicant_name_masked}</td><td>{row.application_date}</td>
+        <td>{row.case_no}</td><td>{row.applicant_name_masked}</td><td>{displayWeeklyValue(row.application_date)}</td>
         <td>{displayWeeklyValue(row.identity_status)}</td><td>{row.reviewLabel}</td><td>{displayWeeklyValue(row.order_status)}</td>
         <td>{displayWeeklyValue(row.service_days)}／{displayWeeklyValue(row.service_hours_per_day)}</td>
         <td>{displayWeeklyValue(row.planned_start_date)}～{displayWeeklyValue(row.planned_end_date)}</td>
@@ -137,6 +137,7 @@ export const ReportsPage: React.FC = () => {
   const [state, setState] = useState<ReportState>({ kind: 'idle' });
   const [reload, setReload] = useState(0);
   const [exportState, setExportState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const weekInputRef = useRef<HTMLInputElement | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const exportControllerRef = useRef<AbortController | null>(null);
   const sequenceRef = useRef(0);
@@ -169,6 +170,15 @@ export const ReportsPage: React.FC = () => {
   };
 
   const reloadReport = () => {
+    // Native `type=week` fill may update the element before React receives its event.
+    // Capture that value before the controlled render restores the previous state.
+    if (reportKind === 'weekly' && weekInputRef.current?.value) {
+      try {
+        setWeekStart(weeklyReportWeekStart(weekInputRef.current.value));
+      } catch {
+        // The native control only emits a valid ISO week; preserve state for invalid input.
+      }
+    }
     clearExportState();
     setReload((value) => value + 1);
   };
@@ -269,7 +279,7 @@ export const ReportsPage: React.FC = () => {
           </select>
         </label>
         {reportKind === 'weekly' ? <label>週別
-          <input type="week" value={weeklyReportIsoWeek(weekStart)} onChange={(event) => changeWeekStart(weeklyReportWeekStart(event.target.value))} />
+          <input ref={weekInputRef} type="week" value={weeklyReportIsoWeek(weekStart)} onChange={(event) => changeWeekStart(weeklyReportWeekStart(event.target.value))} />
         </label> : <label>年度
           <input type="number" min="1912" value={year} onChange={(event) => changeYear(Number(event.target.value))} />
         </label>}

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
 File: staff_schedule.html
-Description: 提供月嫂查班、請假待辦，以及尚未接通的服務日誌與餐食照片說明。
+Description: 提供月嫂查班、請假待辦，以及服務日日誌與受控餐食照片 staging。
 -->
 <html lang="zh-Hant-TW">
 <head>
@@ -108,8 +108,8 @@ Description: 提供月嫂查班、請假待辦，以及尚未接通的服務日�
     </div>
     <div class="field">
       <label for="mealPhoto">餐食照片</label>
-      <input id="mealPhoto" type="file" accept="image/jpeg,image/png,image/webp" disabled>
-      <p>照片功能等待受控檔案儲存區完成；需要餐食照片的案件目前不能送出日誌。</p>
+      <input id="mealPhoto" type="file" accept="image/jpeg,image/png" disabled>
+      <p>需要下廚的服務日必須上傳一張 JPG 或 PNG；照片會先進入受控檔案 staging，送出日誌時才會一併登錄。</p>
     </div>
     <button id="previewLog" class="primary" type="button" disabled>預覽寶寶日誌</button>
     <div id="logPreview" class="message" hidden></div>
@@ -129,6 +129,7 @@ let flowId = "";
 let identityReady = false;
 let leaveCandidate = null;
 let selectedServiceDay = null;
+let mediaCandidate = null;
 let logCandidate = null;
 
 async function captureLineIdentity() {
@@ -236,6 +237,9 @@ function renderCalendar(schedule) {
   selectedServiceDay = null;
   document.getElementById("selectedServiceDay").textContent = "請先在上方班表點選一個正式服務日。";
   document.getElementById("babyLog").disabled = true;
+  document.getElementById("mealPhoto").disabled = true;
+  document.getElementById("mealPhoto").value = "";
+  mediaCandidate = null;
   document.getElementById("previewLog").disabled = true;
   invalidateLogPreview();
   const year = schedule.year;
@@ -275,6 +279,9 @@ function selectServiceDay(day) {
   selectedServiceDay = {assignmentId: day.assignment_id, serviceDate: day.work_date, caseNo: day.case_no || ""};
   document.getElementById("selectedServiceDay").textContent = `已選擇 ${day.work_date}${day.case_no ? `｜案件 ${day.case_no}` : ""}`;
   document.getElementById("babyLog").disabled = false;
+  document.getElementById("mealPhoto").disabled = false;
+  document.getElementById("mealPhoto").value = "";
+  mediaCandidate = null;
   document.getElementById("previewLog").disabled = false;
   invalidateLogPreview();
 }
@@ -454,12 +461,25 @@ function requireLogPreview(value) {
   return value;
 }
 
+function requireMealPhotoStage(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !/^cfs_[0-9a-f]{32}$/.test(value.staging_id) ||
+      !/^[0-9a-f]{64}$/.test(value.sha256_digest) ||
+      !["image/jpeg", "image/png"].includes(value.content_type) ||
+      !Number.isInteger(value.size_bytes) || value.size_bytes <= 0 ||
+      typeof value.expires_at !== "string") {
+    throw new Error("餐食照片 staging 格式錯誤");
+  }
+  return value;
+}
+
 function requireLogReadback(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) ||
       !Number.isInteger(value.log_id) || typeof value.case_no !== "string" ||
       !Number.isInteger(value.assignment_id) || typeof value.service_date !== "string" ||
       typeof value.baby_log_text !== "string" || typeof value.requires_cooking !== "boolean" ||
-      !new Set(["created", "existing"]).has(value.outcome)) throw new Error("寶寶日誌回讀格式錯誤");
+      !new Set(["created", "existing"]).has(value.outcome) ||
+      !Array.isArray(value.controlled_file_attachments)) throw new Error("寶寶日誌回讀格式錯誤");
   return value;
 }
 
@@ -475,9 +495,46 @@ function invalidateLogPreview() {
 }
 
 function logBlockerMessage(blockers) {
-  if (blockers.includes("service_day_log_meal_photo_required")) return "此案件需要餐食照片；照片功能等待受控檔案儲存區完成，目前請聯絡工會人員處理。";
+  if (blockers.includes("service_day_log_meal_photo_required")) return "此案件需要餐食照片；請選擇 JPG 或 PNG 後重新預覽。";
+  if (blockers.includes("service_day_log_meal_photo_forbidden")) return "此案件不需要餐食照片；請移除照片後重新預覽。";
   if (blockers.includes("service_day_log_cooking_requirement_unresolved")) return "此案件的下廚需求尚未確定，請先由工會人員補齊訂單資料。";
   return "目前無法送出，請聯絡工會人員確認。";
+}
+
+async function stageMealPhoto() {
+  const input = document.getElementById("mealPhoto");
+  const file = input.files && input.files[0];
+  if (!file) {
+    mediaCandidate = null;
+    return null;
+  }
+  if (!selectedServiceDay) throw new Error("請先選擇正式服務日。");
+  const form = new FormData();
+  const identity = identityPayload();
+  form.append("flow_id", identity.flow_id);
+  form.append("line_id_token", identity.line_id_token);
+  form.append("development_line_user_id", identity.development_line_user_id);
+  form.append("assignment_id", String(selectedServiceDay.assignmentId));
+  form.append("service_date", selectedServiceDay.serviceDate);
+  form.append("photo", file, file.name);
+  const response = await fetch("/api/v1/line/staff-self-service/service-day-media", {
+    method: "POST",
+    headers: {"Idempotency-Key": `service-day-media-${crypto.randomUUID()}`},
+    body: form,
+  });
+  const result = await responseData(response);
+  if (!response.ok || result.success === false || !result.data) {
+    throw new Error(responseMessage(result, "餐食照片 staging 失敗，請重新選擇照片。"));
+  }
+  const staged = requireMealPhotoStage(result.data);
+  mediaCandidate = {
+    controlled_file_object_id: null,
+    staging_id: staged.staging_id,
+    sha256_digest: staged.sha256_digest,
+    attachment_kind: "meal_photo",
+    sequence: 1,
+  };
+  return mediaCandidate;
 }
 
 async function previewServiceDayLog() {
@@ -491,10 +548,33 @@ async function previewServiceDayLog() {
   invalidateLogPreview();
   show("logStatus", "正在準備寶寶日誌預覽...");
   try {
-    const response = await fetch("/api/v1/line/staff-self-service/service-day-logs/preview", {
+    const previewRequest = async (attachments) => fetch("/api/v1/line/staff-self-service/service-day-logs/preview", {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({...identityPayload(), assignment_id: selectedServiceDay.assignmentId, service_date: selectedServiceDay.serviceDate, baby_log_text: text}),
+      body: JSON.stringify({...identityPayload(), assignment_id: selectedServiceDay.assignmentId, service_date: selectedServiceDay.serviceDate, baby_log_text: text, controlled_file_attachments: attachments}),
     });
+    const initialResponse = await previewRequest([]);
+    const initialResult = await responseData(initialResponse);
+    if (!initialResponse.ok || initialResult.success === false || !initialResult.data) {
+      show("logStatus", responseMessage(initialResult, "寶寶日誌預覽失敗，請稍後重試。"), true);
+      showReauthenticationFor(initialResult);
+      return;
+    }
+    const initialPreview = requireLogPreview(initialResult.data);
+    const photoSelected = Boolean(document.getElementById("mealPhoto").files?.[0]);
+    if (initialPreview.requires_cooking === false && photoSelected) {
+      show("logStatus", logBlockerMessage(["service_day_log_meal_photo_forbidden"]), true);
+      return;
+    }
+    if (initialPreview.requires_cooking !== true || !photoSelected) {
+      logCandidate = {assignmentId: initialPreview.assignment_id, serviceDate: initialPreview.service_date, text: initialPreview.baby_log_text, controlledFileAttachments: [], previewFingerprint: initialPreview.preview_fingerprint, idempotencyKey: `service-day-log-${crypto.randomUUID()}`};
+      show("logPreview", `${initialPreview.service_date}｜案件 ${initialPreview.case_no}｜${initialPreview.baby_log_text}`);
+      document.getElementById("confirmLogLabel").hidden = false;
+      document.getElementById("confirmLog").disabled = !initialPreview.can_apply;
+      show("logStatus", initialPreview.can_apply ? "請核對預覽內容並勾選確認。" : logBlockerMessage(initialPreview.blockers), !initialPreview.can_apply);
+      return;
+    }
+    const stagedAttachment = await stageMealPhoto();
+    const response = await previewRequest(stagedAttachment ? [stagedAttachment] : []);
     const result = await responseData(response);
     if (!response.ok || result.success === false || !result.data) {
       show("logStatus", responseMessage(result, "寶寶日誌預覽失敗，請稍後重試。"), true);
@@ -502,7 +582,7 @@ async function previewServiceDayLog() {
       return;
     }
     const preview = requireLogPreview(result.data);
-    logCandidate = {assignmentId: preview.assignment_id, serviceDate: preview.service_date, text: preview.baby_log_text, previewFingerprint: preview.preview_fingerprint, idempotencyKey: `service-day-log-${crypto.randomUUID()}`};
+    logCandidate = {assignmentId: preview.assignment_id, serviceDate: preview.service_date, text: preview.baby_log_text, controlledFileAttachments: stagedAttachment ? [stagedAttachment] : [], previewFingerprint: preview.preview_fingerprint, idempotencyKey: `service-day-log-${crypto.randomUUID()}`};
     show("logPreview", `${preview.service_date}｜案件 ${preview.case_no}｜${preview.baby_log_text}`);
     document.getElementById("confirmLogLabel").hidden = false;
     document.getElementById("confirmLog").disabled = !preview.can_apply;
@@ -527,7 +607,7 @@ async function applyServiceDayLog() {
   try {
     const response = await fetch("/api/v1/line/staff-self-service/service-day-logs/apply", {
       method: "POST", headers: {"Content-Type": "application/json", "Idempotency-Key": candidate.idempotencyKey},
-      body: JSON.stringify({...identityPayload(), assignment_id: candidate.assignmentId, service_date: candidate.serviceDate, baby_log_text: candidate.text, preview_fingerprint: candidate.previewFingerprint}),
+      body: JSON.stringify({...identityPayload(), assignment_id: candidate.assignmentId, service_date: candidate.serviceDate, baby_log_text: candidate.text, controlled_file_attachments: candidate.controlledFileAttachments, preview_fingerprint: candidate.previewFingerprint}),
     });
     const result = await responseData(response);
     if (!response.ok || result.success === false || !result.data?.receipt || !result.data?.readback) {
@@ -598,6 +678,10 @@ document.getElementById("applyLeave").addEventListener("click", applyLeave);
 document.getElementById("previewLog").addEventListener("click", previewServiceDayLog);
 document.getElementById("applyLog").addEventListener("click", applyServiceDayLog);
 document.getElementById("babyLog").addEventListener("input", invalidateLogPreview);
+document.getElementById("mealPhoto").addEventListener("change", () => {
+  mediaCandidate = null;
+  invalidateLogPreview();
+});
 document.getElementById("confirmLog").addEventListener("change", event => {
   document.getElementById("applyLog").disabled = !logCandidate || !event.currentTarget.checked;
 });

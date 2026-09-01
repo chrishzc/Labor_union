@@ -119,6 +119,8 @@ import { LineNotificationRulesMutationPanel } from '../components/LineNotificati
 import { LineRichMenuPublicationActions } from '../components/LineRichMenuPublicationActions';
 import { LineRichMenuDraftActionEditor } from '../components/LineRichMenuDraftActionEditor';
 import { LineRichMenuDraftAppearanceEditor } from '../components/LineRichMenuDraftAppearanceEditor';
+import { SafeReviewLinkWorkbench } from '../components/SafeReviewLinkWorkbench';
+import { safeReviewLinkClient, type SafeReviewLinkClient } from '../api/line_safe_review_link/line_safe_review_link_client';
 import type {
   RichMenuDraft,
   RichMenuDraftDefinition,
@@ -149,6 +151,7 @@ interface LineManagementPageProps {
   runtimeTarget?: typeof lineRuntimeTargetClient;
   escalation?: typeof customerServiceEscalationClient;
   delivery?: typeof lineDeliveryQueryClient;
+  safeReviewLink?: SafeReviewLinkClient;
 }
 
 type QueryStatus = 'idle' | 'loading' | 'loaded' | 'error';
@@ -317,6 +320,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   runtimeTarget = lineRuntimeTargetClient,
   escalation = customerServiceEscalationClient,
   delivery = lineDeliveryQueryClient,
+  safeReviewLink = safeReviewLinkClient,
 }) => {
   const [activeTab, setActiveTab] = useState<LineTab>('tickets');
   const [ticketSummary, setTicketSummary] = useState<QueryState<CustomerServiceSummaryModel>>(idleState);
@@ -2574,6 +2578,8 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
             {runtimeError && <div className="line-error" role="alert" style={{ marginTop: '12px' }}>{runtimeError}</div>}
           </section>
 
+          <SafeReviewLinkWorkbench client={safeReviewLink} />
+
           {/* 3. 人工客服升級 */}
           <section className="line-workspace-card">
             <div className="line-section-heading">
@@ -2697,6 +2703,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   <div><span>分類</span><strong>{escalationDetail.value.categoryLabel}</strong></div>
                   <div><span>自動化</span><strong>{escalationDetail.value.automationHoldLabel}</strong></div>
                   <div><span>警示</span><strong>{escalationDetail.value.alertStatus}</strong></div>
+                  <div><span>告警投遞任務</span><strong>{escalationDetail.value.deliveryTaskRef ?? '尚未建立'}</strong></div>
+                  <div><span>本機結果</span><strong>{escalationDetail.value.deliveryOutcomeRef ?? '尚未回讀'}</strong></div>
+                  {escalationDetail.value.triggerIdentity && <div><span>觸發身分（遮罩）</span><strong>{escalationDetail.value.triggerIdentity}</strong></div>}
+                  {escalationDetail.value.attemptWindow && <div><span>嘗試窗口</span><strong>{escalationDetail.value.attemptWindow.attemptCount} / {escalationDetail.value.attemptWindow.maximumAttempts}（第 {escalationDetail.value.attemptWindow.generation} 輪）</strong></div>}
+                  {escalationDetail.value.ownerSelector && <div><span>負責人選擇器</span><strong>{escalationDetail.value.ownerSelector}</strong></div>}
                 </div>
 
                 <details style={{ marginTop: '12px' }}>

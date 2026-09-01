@@ -26,6 +26,7 @@ from api.dependencies.form_management import (
     FormManagementQueryApplication,
     get_form_management_query_application,
 )
+from api.dependencies.order_information import get_order_information_application
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.order_calendar_detail import OrderCalendarDetailView
@@ -39,6 +40,7 @@ from api.schemas.form_management import (
     FormManagementCaseContextView,
     FormManagementStatisticsView,
 )
+from api.schemas.order_information import OrderInformationView
 from api.schemas.orders import (
     OrderFullUpdateRequest,
     ClientNameApplyRequest,
@@ -65,6 +67,10 @@ from subsystems.orders.summary_query import (
 from subsystems.orders.form_management_query import (
     FormManagementCaseNotFoundError,
     FormManagementQueryContractError,
+)
+from subsystems.orders.order_information import (
+    OrderInformationError,
+    OrderInformationQueryService,
 )
 from subsystems.orders import client_name_maintenance
 from subsystems.orders.lifecycle_control_read_projection import (
@@ -216,6 +222,46 @@ def get_form_management_case_context(
         raise _form_management_database_error(error) from error
 
 
+@router.get(
+    "/{case_no}/order-information/{template_id}",
+    response_model=BaseResponse[OrderInformationView],
+)
+def get_order_information(
+    case_no: str = Path(..., min_length=1, max_length=50),
+    template_id: str = Path(..., min_length=1, max_length=50),
+    assignment_id: int | None = Query(None, ge=1),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: OrderInformationQueryService = Depends(
+        get_order_information_application
+    ),
+):
+    del principal
+    return _order_information_endpoint(
+        lambda: application.query(template_id, case_no, assignment_id),
+        "order-information-query",
+    )
+
+
+@router.post(
+    "/{case_no}/order-information/{template_id}/preview",
+    response_model=BaseResponse[OrderInformationView],
+)
+def preview_order_information(
+    case_no: str = Path(..., min_length=1, max_length=50),
+    template_id: str = Path(..., min_length=1, max_length=50),
+    assignment_id: int | None = Query(None, ge=1),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: OrderInformationQueryService = Depends(
+        get_order_information_application
+    ),
+):
+    del principal
+    return _order_information_endpoint(
+        lambda: application.preview(template_id, case_no, assignment_id),
+        "order-information-preview",
+    )
+
+
 def _order_summary_page_view(page) -> OrderSummaryPageView:
     return OrderSummaryPageView(
         items=[
@@ -225,6 +271,36 @@ def _order_summary_page_view(page) -> OrderSummaryPageView:
         next_cursor=page.next_cursor,
         etag=page.etag,
     )
+
+
+def _order_information_endpoint(operation, operation_name):
+    try:
+        result = operation()
+        return BaseResponse(
+            data=OrderInformationView.model_validate(
+                result, from_attributes=True
+            ),
+            message="成功取得訂單資訊投影" if operation_name.endswith("query") else "成功產生訂單資訊預覽",
+        )
+    except OrderInformationError as error:
+        status = 404 if error.not_found else 409
+        raise typed_http_error(
+            status,
+            "not_found" if error.not_found else "conflict",
+            error.code,
+            str(error),
+            operation_name,
+        ) from error
+    except (OperationalError, ProgrammingError) as error:
+        raise _form_management_database_error(error) from error
+    except ValueError as error:
+        raise typed_http_error(
+            422,
+            "validation",
+            "order_information_query_invalid",
+            "訂單資訊查詢條件不正確。",
+            operation_name,
+        ) from error
 
 
 def _etag_matches(candidate: str | None, current: str) -> bool:

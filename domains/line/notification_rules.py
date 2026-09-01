@@ -13,17 +13,44 @@ class LineNotificationRuleError(ValueError):
     """Raised when a notification-rule definition is unsafe or invalid."""
 
 
-_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _EVENT_CODES = frozenset(
     {
         "order_lifecycle_transition",
         "service_time_checkpoint",
         "beclass_completion_changed",
         "deposit_confirmed",
+        "gateway.identity_mismatch.second_attempt",
+        "scheduling.leave.extension_requested",
+        "staff.retirement.committed",
+        "router.deterministic.reply_committed",
+        "feedback.resolved.recorded",
+        "feedback.unresolved.recorded",
+        "matching.zero_pool.preview_applied",
+        "matching.decision.committed.client",
+        "matching.decision.committed.staff",
+        "client.leave.extension_agreed",
+        "client.leave.extension_rejected",
+        "runtime.alert.review_required",
+        "complaint.ingress.hold_high_ticket",
+        "payroll.substitute.obligation_projected",
     }
 )
 _RECIPIENT_SELECTORS = frozenset(
-    {"client", "assigned_caregiver", "case_group"}
+    {
+        "client", "assigned_caregiver", "case_group",
+        "customer_service.ticket_owner",
+        "client.bound_case",
+        "staff.binding_owner",
+        "conversation.bound_actor",
+        "matching.request.participants",
+        "assignment.client_snapshot",
+        "assignment.staff_snapshot",
+        "scheduling.owner",
+        "admin.review_actor",
+        "customer_service.claim_owner",
+        "staff_payables.anomaly_owner",
+    }
 )
 _SCHEDULE_KINDS = frozenset(
     {"immediate", "relative_service_time", "service_end"}

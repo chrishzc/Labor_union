@@ -1,4 +1,4 @@
-"""Regression coverage for actionable Historical Orders replay refresh."""
+"""Regression coverage for Historical Orders terminal replay."""
 
 from datetime import date
 import json
@@ -20,7 +20,7 @@ from subsystems.orders.historical_order_workbook import (
 )
 
 
-def test_terminal_replay_refreshes_status_actual_start_and_resolvable_staff(
+def test_terminal_replay_returns_stored_receipt_for_disjoint_source_schedules(
     monkeypatch,
 ) -> None:
     digest = "a" * 64
@@ -96,18 +96,15 @@ def test_terminal_replay_refreshes_status_actual_start_and_resolvable_staff(
         "correlation",
     )
 
-    assert receipt.assignments_created == 1
-    assert receipt.replayed_workbook is False
-    assert workflow.applied_source_identities[0] == source_identity
-    assert workflow.applied_source_identities[1].startswith(source_identity + ":refresh:")
-    assert workflow.applied_source_identities[2] == completed_identity
-    assert workflow.applied_source_identities[3].startswith(
-        completed_identity + ":refresh:"
-    )
-    assert workflow.applied_source_identities[4] == actual_start_identity
-    assert workflow.applied_source_identities[5].startswith(
-        actual_start_identity + ":refresh:"
-    )
+    assert receipt.assignments_created == 0
+    assert receipt.replayed_workbook is True
+    assert workflow.applied_source_identities == []
+    assert receipt.status_counts.as_dict() == {
+        "cancelled_0": 1,
+        "deposit_paid_1": 2,
+        "discussion_2": 0,
+        "invalid_or_blank": 0,
+    }
 
 
 class _Workflow:
@@ -121,8 +118,8 @@ class _Workflow:
             1,
             "月**",
             9,
-            date(2025, 1, 2),
-            date(2025, 1, 31),
+            row.actual_start_date,
+            row.actual_end_date,
             HistoricalPairingResolution.ASSIGNMENT_CANDIDATE,
             (),
         )

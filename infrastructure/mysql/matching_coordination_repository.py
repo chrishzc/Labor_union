@@ -44,6 +44,13 @@ from subsystems.scheduling.matching_coordination_contracts import (
     MatchingCriteriaRecontactIntentProjection,
     MatchingNotificationIntentProjection,
     MatchingNotificationRecipientRole,
+    MatchingOutboxIntentType,
+    MatchingOutboxTargetOwner,
+    M3_LEAVE_AGREE_SOURCE_ID,
+    M3_LEAVE_DISAGREE_SOURCE_ID,
+    M3_MATCH_SUCCESS_CLIENT_SOURCE_ID,
+    M3_MATCH_SUCCESS_STAFF_SOURCE_ID,
+    M3_ZERO_POOL_SOURCE_ID,
 )
 from subsystems.scheduling.matching_coordination_workflow import (
     MatchingCoordinationFacts,
@@ -57,9 +64,16 @@ class MatchingCoordinationPersistenceError(RuntimeError):
 class MySqlMatchingCoordinationRepository:
     """Borrow one connection; this adapter never begins, commits, or rolls back."""
 
-    def __init__(self, connection: Any, clock: BusinessClock) -> None:
+    def __init__(
+        self,
+        connection: Any,
+        clock: BusinessClock,
+        *,
+        line_delivery_projection: Any | None = None,
+    ) -> None:
         self._connection = connection
         self._clock = clock
+        self._line_delivery_projection = line_delivery_projection
 
     def claim_or_replay(
         self,
@@ -266,7 +280,11 @@ class MySqlMatchingCoordinationRepository:
             raise MatchingCoordinationPersistenceError(
                 "matching event and receipt must precede owner intents"
             )
-        intents = _intent_payloads(command, receipt)
+        intents = _intent_payloads(
+            command,
+            receipt,
+            line_delivery_projection=self._line_delivery_projection,
+        )
         if tuple(item[0] for item in intents) != receipt.outbox_intent_ids:
             raise MatchingCoordinationPersistenceError(
                 "typed owner intents do not match receipt identities"
@@ -447,6 +465,15 @@ class MySqlMatchingCoordinationRepository:
             raise MatchingCoordinationPersistenceError("dict cursor is required")
         return row
 
+    def next_criteria_version(self, case_no: str) -> int:
+        """Return the next immutable criteria version for a case owner."""
+        row = self._one(
+            "SELECT COALESCE(MAX(criteria_version),0)+1 AS next_version "
+            "FROM matching_coordination_criteria_snapshots WHERE case_no=%s",
+            (case_no,),
+        )
+        return int((row or {}).get("next_version") or 1)
+
     def _all(self, sql: str, params: tuple[Any, ...]) -> tuple[Mapping[str, Any], ...]:
         with self._connection.cursor() as cursor:
             cursor.execute(sql, params)
@@ -493,7 +520,10 @@ def _outcome_state(result_state: str) -> str:
 
 
 def _intent_payloads(
-    command: MatchingCommand, receipt: MatchingApplyReceipt
+    command: MatchingCommand,
+    receipt: MatchingApplyReceipt,
+    *,
+    line_delivery_projection: Any | None = None,
 ) -> tuple[tuple[str, str, str, dict[str, Any]], ...]:
     by_identity: dict[str, tuple[str, str, dict[str, Any]]] = {}
     if receipt.cross_domain_request is not None:
@@ -505,10 +535,17 @@ def _intent_payloads(
             _jsonable(request),
         )
     for intent in receipt.notification_intents:
+        payload = _jsonable(intent)
+        if line_delivery_projection is not None:
+            payload.update(
+                line_delivery_projection.project(
+                    command, receipt, intent.intent_id, payload
+                )
+            )
         by_identity[intent.intent_id] = (
-            "line_matching_interaction",
+            MatchingOutboxIntentType.LINE_BILATERAL_NOTIFICATION.value,
             "line_integration",
-            _jsonable(intent),
+            payload,
         )
     for intent in receipt.criteria_recontact_intents:
         by_identity[intent.intent_id] = (
@@ -525,25 +562,85 @@ def _intent_payloads(
             intent_type, owner = "orders_terms_update_requested", "orders_workflow"
         elif reference_id.endswith(":assignment"):
             intent_type, owner = "rematch_requested", "assignment_workflow"
+        elif reference_id.endswith(":line-bilateral"):
+            intent_type, owner = MatchingOutboxIntentType.LINE_BILATERAL_NOTIFICATION.value, MatchingOutboxTargetOwner.LINE_INTEGRATION.value
+        elif reference_id.endswith(":client-decision"):
+            intent_type, owner = MatchingOutboxIntentType.LINE_CLIENT_DECISION.value, MatchingOutboxTargetOwner.LINE_INTEGRATION.value
+        elif reference_id.endswith(":customer-service"):
+            intent_type, owner = MatchingOutboxIntentType.CUSTOMER_SERVICE_TICKET.value, MatchingOutboxTargetOwner.CUSTOMER_SERVICE.value
+        elif reference_id.endswith(":rematch"):
+            intent_type, owner = "rematch_requested", "assignment_workflow"
         else:
             raise MatchingCoordinationPersistenceError(
                 f"unsupported matching intent identity: {reference_id}"
             )
+        payload = {
+            "reference_id": reference_id,
+            "case_no": command.case_no,
+            "receipt_id": receipt.receipt_id,
+            "result_state": receipt.result_state,
+            "zero_candidate_decision": _jsonable(receipt.zero_candidate_decision),
+            "resulting_package": _jsonable(receipt.resulting_package),
+            "source_identity": _source_identity_for_intent(command, reference_id),
+            "recipient_selector": _recipient_selector_for_intent(command, reference_id),
+            "recipient_subject_references": _recipient_subjects_for_intent(command, reference_id),
+            "source_event_identity": _event_identity(command, receipt),
+        }
+        if reference_id.endswith(":customer-service"):
+            # Customer Service owns ticket creation. This bounded projection
+            # supplies a stable typed message while M3 only writes its
+            # immutable owner handoff.
+            payload["customer_service"] = {
+                "category": "service_flow",
+                "message": "客戶未接受目前媒合替代方案，請客服協助安排後續服務。",
+            }
+        if line_delivery_projection is not None and owner == MatchingOutboxTargetOwner.LINE_INTEGRATION.value:
+            payload.update(
+                line_delivery_projection.project(
+                    command, receipt, reference_id, payload
+                )
+            )
         by_identity[reference_id] = (
             intent_type,
             owner,
-            {
-                "reference_id": reference_id,
-                "case_no": command.case_no,
-                "receipt_id": receipt.receipt_id,
-                "result_state": receipt.result_state,
-                "zero_candidate_decision": _jsonable(receipt.zero_candidate_decision),
-                "resulting_package": _jsonable(receipt.resulting_package),
-            },
+            payload,
         )
     return tuple(
         (identity, *by_identity[identity]) for identity in receipt.outbox_intent_ids
     )
+
+
+def _source_identity_for_intent(command: MatchingCommand, reference_id: str) -> str:
+    """Bind every deferred M3 handoff to a P0 source identity."""
+
+    command_name = type(command).__name__
+    if command_name == "ApplyZeroCandidateAlternative":
+        return M3_ZERO_POOL_SOURCE_ID
+    if reference_id.endswith(":customer-service"):
+        return M3_LEAVE_DISAGREE_SOURCE_ID
+    if command_name == "ApplyLeaveImpactOnMatching":
+        return M3_LEAVE_AGREE_SOURCE_ID
+    return M3_MATCH_SUCCESS_CLIENT_SOURCE_ID
+
+
+def _recipient_selector_for_intent(command: MatchingCommand, reference_id: str) -> str:
+    if reference_id.endswith(":customer-service"):
+        return "customer_service.ticket_owner"
+    if command.__class__.__name__ == "ApplyZeroCandidateAlternative":
+        return "matching.request.participants"
+    if reference_id.endswith(":notify:caregiver"):
+        return "assignment.staff_snapshot"
+    return "assignment.client_snapshot"
+
+
+def _recipient_subjects_for_intent(command: MatchingCommand, reference_id: str) -> tuple[str, ...]:
+    if reference_id.endswith(":customer-service"):
+        return (f"case:{command.case_no}",)
+    if command.__class__.__name__ == "ApplyZeroCandidateAlternative":
+        return (f"case:{command.case_no}",)
+    if reference_id.endswith(":notify:caregiver"):
+        return (reference_id.rsplit(":", 2)[0],)
+    return (f"case:{command.case_no}",)
 
 
 def _receipt_payload(receipt: MatchingApplyReceipt) -> dict[str, Any]:

@@ -151,6 +151,16 @@ class SwitchCommand:
     correlation_id: str
 
 
+# The repository initial state starts with the Anomalies React entry already
+# selected.  This binding is the current checked-in source artifact identity;
+# production artifact cutover still requires the external artifact health gate.
+ANOMALIES_INITIAL_REACT_ARTIFACT = ArtifactBinding(
+    "react-admin-c0282230bc007688",
+    "05c0e6874ec16b1acba2c5934e9afccae1ba98f452bf70a7728de6815ec5a425",
+    "react-admin-api-v1",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class SwitchPreview:
     entry_id: str
@@ -507,7 +517,59 @@ def make_initial_state() -> EntryTargetState:
         for entry_id, values in sorted(FROZEN_ENTRY_TARGETS.items())
     )
     unsigned = EntryTargetState(1, REGISTRY_REVISION, REGISTRY_DIGEST, 1, entries, (), "")
-    return replace(unsigned, state_digest=calculate_state_digest(unsigned))
+    command = SwitchCommand(
+        "ui-react:#anomalies",
+        1,
+        1,
+        "streamlit",
+        "react",
+        ANOMALIES_INITIAL_REACT_ARTIFACT,
+        "activate_react",
+        "initial-anomalies-react",
+        "admin:initial-bootstrap",
+        "initial-anomalies-react",
+    )
+    fingerprint = command_fingerprint(command)
+    receipt_base = {
+        "receipt_id": "admin-entry-target:2:ui-react:#anomalies",
+        "command_fingerprint": fingerprint,
+        "idempotency_key": command.idempotency_key,
+        "entry_id": command.entry_id,
+        "before_target": "streamlit",
+        "resulting_target": "react",
+        "before_state_revision": 1,
+        "resulting_state_revision": 2,
+        "before_entry_revision": 1,
+        "resulting_entry_revision": 2,
+        "artifact_version": ANOMALIES_INITIAL_REACT_ARTIFACT.version,
+        "artifact_digest": ANOMALIES_INITIAL_REACT_ARTIFACT.digest,
+        "api_compatibility_revision": ANOMALIES_INITIAL_REACT_ARTIFACT.api_compatibility_revision,
+        "actor_id": command.actor_id,
+        "reason_code": command.reason_code,
+        "correlation_id": command.correlation_id,
+        "occurred_at": "2026-09-01T03:00:00Z",
+        "previous_receipt_digest": None,
+    }
+    receipt = SwitchReceipt(**receipt_base, receipt_digest=digest_value(receipt_base))
+    next_entries = tuple(
+        replace(
+            item,
+            current_target="react",
+            required_react_artifact=ANOMALIES_INITIAL_REACT_ARTIFACT,
+            entry_revision=2,
+        )
+        if item.entry_id == command.entry_id
+        else item
+        for item in entries
+    )
+    next_state = replace(
+        unsigned,
+        revision=2,
+        entries=next_entries,
+        receipts=(receipt,),
+        state_digest="",
+    )
+    return replace(next_state, state_digest=calculate_state_digest(next_state))
 
 
 def _validate_fresh_command(state: EntryTargetState, command: SwitchCommand) -> EntryTargetRecord:

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+from fastapi import HTTPException
+
+from api.routes.staff_retirement import _raise_line_effect_error
 from domains.line.identities import LineUserId
 from domains.line.identity_binding import (
     LineBindingSubjectType,
@@ -141,6 +145,12 @@ class _LifecycleRepository:
         self.receipt = (fingerprint, receipt)
 
 
+class _OpenAssignmentRepository(_LifecycleRepository):
+    def ensure_no_open_assignments(self, _staff_id, *, lock):
+        assert lock is False
+        raise ValueError("staff_retirement_open_assignments")
+
+
 class _Effect:
     def __init__(self):
         self.unit_of_work = None
@@ -191,3 +201,44 @@ def test_staff_transition_and_line_effect_share_one_outer_uow() -> None:
 
     assert effect.unit_of_work is unit_of_work
     assert unit_of_work.committed is True
+
+
+def test_retirement_preview_fails_closed_when_staff_has_open_assignment() -> None:
+    repository = _OpenAssignmentRepository()
+    workflow = StaffLifecycleWorkflow(
+        repository,
+        lambda: _LifecycleUnitOfWork(),
+        FixedBusinessClock(NOW),
+    )
+
+    try:
+        workflow.preview(
+            7,
+            StaffLifecycleTransition.RETIRE,
+            datetime(2026, 8, 30, tzinfo=timezone.utc),
+            "left_union",
+        )
+    except ValueError as error:
+        assert str(error) == "staff_retirement_open_assignments"
+    else:
+        raise AssertionError("retirement preview must reject open assignments")
+
+
+@pytest.mark.parametrize(
+    ("error_code", "status_code", "category"),
+    [
+        ("line_identity_binding_not_found", 404, "not_found"),
+        ("line_identity_default_menu_not_published", 409, "domain_blocked"),
+        ("line_identity_staff_retirement_revocation_blocked", 409, "domain_blocked"),
+        ("line_identity_revocation_idempotency_conflict", 409, "idempotency_mismatch"),
+    ],
+)
+def test_known_line_effect_failures_are_typed_and_not_internal(
+    error_code: str, status_code: int, category: str,
+) -> None:
+    with pytest.raises(HTTPException) as captured:
+        _raise_line_effect_error(RuntimeError(error_code), CorrelationId("staff-line-error"))
+
+    assert captured.value.status_code == status_code
+    assert captured.value.detail["error"]["code"] == error_code
+    assert captured.value.detail["error"]["category"] == category

@@ -64,6 +64,7 @@ from api.schemas.government_subsidy import (
     GovernmentSubsidyOverpaymentDispositionPreviewBody,
     GovernmentOverpaymentReturnReconciliationApplyBody,
     GovernmentOverpaymentReturnReconciliationPreviewBody,
+    GovernmentOverpaymentReturnReconciliationWithExcessPreviewView,
     GovernmentSubsidyOverpaymentQueryView,
 )
 from domains.government_subsidy.payer_master import GovernmentRefundAccount
@@ -113,6 +114,7 @@ from subsystems.government_subsidy.overpayment_workflow import (
     ReceiptWithOverageApplyRequest,
     ReturnApplyRequest,
     ReturnReconciliationApplyRequest,
+    ReturnReconciliationWithExcessApplyRequest,
 )
 from domains.government_subsidy.overpayment import GovernmentSubsidyOffsetIntent
 from subsystems.government_subsidy.overpayment_query import (
@@ -1218,6 +1220,19 @@ def _overpayment_query_payload(value):
         },
         "blockers": list(value.blockers),
         "available_actions": list(value.available_actions),
+        "return_excess_recovery": (
+            {
+                "recovery_identity": value.return_excess_recovery.recovery_identity,
+                "source_bank_fact_reference": value.return_excess_recovery.source_bank_fact_reference,
+                "source_payout_reference": value.return_excess_recovery.source_payout_reference,
+                "original_amount_ntd": value.return_excess_recovery.original_amount_ntd,
+                "remaining_amount_ntd": value.return_excess_recovery.remaining_amount_ntd,
+                "status": value.return_excess_recovery.status,
+                "recovery_version": value.return_excess_recovery.recovery_version,
+            }
+            if value.return_excess_recovery is not None
+            else None
+        ),
     }
 
 
@@ -1278,6 +1293,76 @@ def _return_reconciliation_candidate_payload(candidate):
         "amount_ntd": candidate.amount_ntd.amount,
         "remaining_after_ntd": candidate.remaining_after_ntd.amount,
         "resulting_status": candidate.resulting_status.value,
+        "preview_fingerprint": candidate.fingerprint.value,
+    }
+
+
+@router.post(
+    "/overpayments/return-reconciliation-with-excess/preview",
+    response_model=BaseResponse[GovernmentOverpaymentReturnReconciliationWithExcessPreviewView],
+)
+def preview_government_overpayment_return_reconciliation_with_excess(
+    body: GovernmentOverpaymentReturnReconciliationPreviewBody,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = "government-overpayment-return-reconciliation-with-excess-preview",
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application),
+):
+    del principal
+    correlation = CorrelationId(correlation_id)
+    return _call_endpoint(
+        lambda: _return_reconciliation_with_excess_candidate_payload(
+            application.preview_overpayment_return_reconciliation_with_excess(
+                body.overpayment_identity, body.finance_import_row_id
+            )
+        ),
+        "成功產生政府退款超額對帳預覽",
+        correlation,
+    )
+
+
+@router.post(
+    "/overpayments/return-reconciliation-with-excess/apply",
+)
+def apply_government_overpayment_return_reconciliation_with_excess(
+    body: GovernmentOverpaymentReturnReconciliationApplyBody,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_capability("government_subsidy.overpayment.disposition")),
+    application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application),
+):
+    request = ReturnReconciliationWithExcessApplyRequest(
+        body.overpayment_identity,
+        body.finance_import_row_id,
+        ExpectedVersion(body.expected_overpayment_version),
+        PreviewFingerprint(body.preview_fingerprint),
+        IdempotencyKey(idempotency_key),
+        _actor(principal),
+        body.reason,
+        body.evidence_reference,
+        CorrelationId(correlation_id),
+    )
+    return _call_endpoint(
+        lambda: application.apply_overpayment_return_reconciliation_with_excess(request),
+        "成功記錄政府退款超額對帳",
+        request.correlation_id,
+    )
+
+
+def _return_reconciliation_with_excess_candidate_payload(candidate):
+    return {
+        "overpayment_identity": candidate.overpayment_identity,
+        "overpayment_version": candidate.overpayment_version,
+        "payable_identity": candidate.payable_identity,
+        "payable_version": candidate.payable_version,
+        "bank_fact_identity": candidate.bank_fact_identity,
+        "actual_amount_ntd": candidate.actual_amount_ntd.amount,
+        "lawful_amount_ntd": candidate.lawful_amount_ntd.amount,
+        "excess_amount_ntd": candidate.excess_amount_ntd.amount,
+        "payable_remaining_after_ntd": candidate.payable_remaining_after_ntd.amount,
+        "overpayment_remaining_after_ntd": candidate.overpayment_remaining_after_ntd.amount,
+        "resulting_status": candidate.resulting_status.value,
+        "recovery_identity": candidate.recovery_identity,
+        "recovery_status": candidate.recovery_status.value,
         "preview_fingerprint": candidate.fingerprint.value,
     }
 

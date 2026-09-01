@@ -35,6 +35,7 @@ from subsystems.scheduling.matching_coordination_contracts import (
     MatchingCriteriaRecontactIntentProjection,
     MatchingNotificationIntentProjection,
     MatchingNotificationRecipientRole,
+    M3_ZERO_POOL_SOURCE_ID,
     PreviewZeroCandidateAlternative,
     PreviewZeroCandidateConfirmation,
 )
@@ -255,7 +256,7 @@ def test_claim_none_locks_receipt_key_without_commit() -> None:
     assert connection.commit_count == 0
 
 
-def test_zero_candidate_agree_projects_only_orders_owner_intent() -> None:
+def test_zero_candidate_agree_projects_client_decision_and_orders_intents() -> None:
     facts = _facts(no_candidate=True)
     alternative = MatchingCoordinationWorkflow().preview(
         PreviewZeroCandidateAlternative(
@@ -298,9 +299,19 @@ def test_zero_candidate_agree_projects_only_orders_owner_intent() -> None:
     )
     payloads = _repository_module._intent_payloads(command, replay)
 
-    assert replay.outbox_intent_ids == ("matching:zero:agree:zero-candidate:orders",)
-    assert len(payloads) == 1
+    assert replay.outbox_intent_ids == (
+        "matching:zero:agree:zero-candidate:client-decision",
+        "matching:zero:agree:zero-candidate:orders",
+    )
+    assert len(payloads) == 2
     assert payloads[0][0:3] == (
+        "matching:zero:agree:zero-candidate:client-decision",
+        "line_client_decision",
+        "line_integration",
+    )
+    assert payloads[0][3]["source_identity"] == M3_ZERO_POOL_SOURCE_ID
+    assert payloads[0][3]["recipient_selector"] == "matching.request.participants"
+    assert payloads[1][0:3] == (
         "matching:zero:agree:zero-candidate:orders",
         "orders_terms_update_requested",
         "orders_workflow",
@@ -592,7 +603,7 @@ def test_accepted_lineage_receipt_then_three_immutable_intents_without_commit() 
     assert not any("LINE" in sql and "HTTP" in sql for sql in sqls)
 
 
-def test_zero_candidate_disagree_writes_no_intents() -> None:
+def test_zero_candidate_disagree_writes_customer_service_intent() -> None:
     facts = _facts(no_candidate=True)
     alternative = MatchingCoordinationWorkflow().preview(
         PreviewZeroCandidateAlternative(
@@ -629,7 +640,11 @@ def test_zero_candidate_disagree_writes_no_intents() -> None:
     )
     connection = _Connection(
         _lineage_rows()
-        + [{"id": 701, "criteria_snapshot_id": 601, "package_lineage_id": 801}]
+        + [
+            {"id": 701, "criteria_snapshot_id": 601, "package_lineage_id": 801},
+            {"id": 701},
+            {"id": 901},
+        ]
     )
     repository = _repo(connection)
 
@@ -637,7 +652,23 @@ def test_zero_candidate_disagree_writes_no_intents() -> None:
     repository.save_receipt(command, receipt.command_fingerprint, receipt)
     repository.append_typed_intents(command, receipt)
 
-    assert not any("OUTBOX" in statement.upper() for statement, _ in connection.statements)
+    outbox_inserts = [
+        params
+        for statement, params in connection.statements
+        if statement.lstrip().upper().startswith(
+            "INSERT INTO MATCHING_COORDINATION_OUTBOX"
+        )
+    ]
+    assert len(outbox_inserts) == 2
+    assert outbox_inserts[0][4:6] == (
+        "line_client_decision",
+        "line_integration",
+    )
+    assert outbox_inserts[1][4:6] == (
+        "customer_service_ticket",
+        "customer_service",
+    )
+    assert json.loads(outbox_inserts[1][6])["customer_service"]["category"] == "service_flow"
     assert connection.commit_count == 0
 
 

@@ -15,10 +15,16 @@ from typing import Mapping, Protocol, runtime_checkable
 
 from openpyxl import load_workbook
 
+from subsystems.contract_signing.template_catalog import mapping_is_applicable
+
 
 PDF_MEDIA_TYPE = "application/pdf"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _FORMULA_PREFIXES = ("=", "+", "-", "@")
+_APPROVED_TEMPLATE_IDS = frozenset(
+    {"contract_client_copy", "contract_staff_service"}
+)
+_MAPPING_REQUIREDNESS = frozenset({"required", "conditional", "optional"})
 
 
 class ContractRendererError(RuntimeError):
@@ -99,12 +105,67 @@ def render_contract_template(
 ) -> bytes:
     """Return the historical XLSX artifact while treating external facts as literals."""
 
-    mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+    try:
+        mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ContractRendererError(
+            "contract_pdf_mapping_invalid",
+            "契約 PDF 欄位映射無法讀取。",
+        ) from error
+    if not isinstance(mapping, dict) or not isinstance(
+        mapping.get("param_mappings"), dict
+    ):
+        raise ContractRendererError(
+            "contract_pdf_mapping_invalid",
+            "契約 PDF 欄位映射格式無效。",
+        )
+    approved_template = mapping.get("id") in _APPROVED_TEMPLATE_IDS
     workbook = load_workbook(template_path)
     worksheet = workbook.active
     for cell, descriptor in mapping["param_mappings"].items():
+        if not isinstance(descriptor, dict):
+            raise ContractRendererError(
+                "contract_pdf_mapping_invalid",
+                "契約 PDF 欄位映射格式無效。",
+            )
         key = descriptor.get("db_key")
-        if not isinstance(key, str) or not key or key not in facts:
+        status = descriptor.get("status")
+        requiredness = descriptor.get("requiredness")
+        if status == "not_applicable":
+            # Preserve the template's intentional blank for a legacy field
+            # with no current typed owner source; never ask staff to fill it.
+            if descriptor.get("requiredness") in {"optional", "conditional"}:
+                continue
+            raise ContractRendererError(
+                "contract_pdf_required_mapping_unresolved",
+                "契約 PDF 的不適用欄位不能是 required。",
+            )
+        if status in {"pending", "unresolved"}:
+            if requiredness == "optional" or (
+                requiredness == "conditional"
+                and not mapping_is_applicable(descriptor, facts)
+            ):
+                continue
+            raise ContractRendererError(
+                "contract_pdf_required_mapping_unresolved",
+                "契約 PDF 仍有欄位缺少核准的 typed owner source。",
+            )
+        if not isinstance(key, str) or not key:
+            raise ContractRendererError(
+                "contract_pdf_required_mapping_unresolved",
+                "契約 PDF 仍有欄位缺少核准的 typed owner source。",
+            )
+        if approved_template and requiredness not in _MAPPING_REQUIREDNESS:
+            raise ContractRendererError(
+                "contract_pdf_required_mapping_unresolved",
+                "契約 PDF 欄位缺少核准的 requiredness 與 typed owner source。",
+            )
+        if key not in facts or facts.get(key) is None:
+            if requiredness == "required":
+                raise ContractRendererError(
+                    "contract_pdf_required_mapping_missing",
+                    "契約 PDF 欄位缺少核准的 typed owner source。",
+                )
             continue
         value = facts[key]
         target = worksheet[cell]

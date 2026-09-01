@@ -219,3 +219,26 @@ def test_adapter_maps_invalid_source_without_leaking_its_path(tmp_path):
 
     assert captured.value.code == "contract_pdf_renderer_source_invalid"
     assert str(tmp_path) not in str(captured.value)
+
+
+def test_adapter_preserves_unresolved_mapping_failure(tmp_path):
+    template = tmp_path / "approved-template.xlsx"
+    Workbook().save(template)
+    mapping = tmp_path / "approved-template.json"
+    mapping.write_text(
+        json.dumps(
+            {
+                "param_mappings": {
+                    "A1": {"db_key": "", "status": "pending"}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    executable = _executable(tmp_path)
+    renderer = LibreOfficeContractRenderer(executable=str(executable))
+
+    with pytest.raises(ContractRendererError) as captured:
+        renderer.render(template_path=template, mapping_path=mapping, facts={})
+
+    assert captured.value.code == "contract_pdf_required_mapping_unresolved"

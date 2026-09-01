@@ -36,6 +36,9 @@ from subsystems.orders.historical_adoption_workflow import (
 from subsystems.orders.historical_actual_start_rebuild import (
     HistoricalActualStartRebuilder,
 )
+from subsystems.orders.historical_order_adoption_outbox_consumer import (
+    _validate_canonical_event,
+)
 from subsystems.orders.historical_order_workbook import (
     load_historical_order_workbook,
     parse_historical_status,
@@ -153,8 +156,13 @@ def test_historical_start_different_from_hcm_plan_becomes_actual_start():
 
     candidate = build_historical_order_candidate(current, source)
 
-    assert candidate.date_patch == (("actual_start_date", date(2025, 1, 3)),)
-    assert all(field != "actual_end_date" for field, _value in candidate.date_patch)
+    assert candidate.date_patch == (
+        ("actual_start_date", date(2025, 1, 3)),
+        ("actual_end_date", date(2025, 1, 31)),
+    )
+    assert candidate.issue_codes == (
+        "historical_accounting_service_calendar_unconfirmed",
+    )
 
 
 def test_historical_actual_start_rebuild_uses_order_rest_days_and_holidays():
@@ -236,7 +244,7 @@ def test_repository_skips_lifecycle_write_for_unchanged_adoption_preview():
     )
 
 
-def test_repository_leaves_actual_start_to_canonical_writer():
+def test_repository_writes_historical_actual_dates_without_precision():
     class Cursor:
         rowcount = 1
         lastrowid = 81
@@ -265,7 +273,10 @@ def test_repository_leaves_actual_start_to_canonical_writer():
         after_status=OrderLifecycleStatus.COMPLETED,
         before_status=OrderLifecycleStatus.COMPLETED.value,
         case_no="CASE-1",
-        date_patch=(("actual_start_date", None),),
+        date_patch=(
+            ("actual_start_date", date(2026, 5, 6)),
+            ("actual_end_date", date(2026, 5, 8)),
+        ),
         issue_codes=(),
     )
     request = SimpleNamespace(
@@ -283,15 +294,47 @@ def test_repository_leaves_actual_start_to_canonical_writer():
 
     update_sql, update_parameters = cursor.calls[0]
     assert event_id == 81
-    assert "actual_end_date" not in update_sql
-    assert "actual_start_date" not in update_sql
-    # Historical adoption records the patch but leaves the root transition to
-    # the canonical Actual Start writer.
+    assert "actual_end_date" in update_sql
+    assert "actual_start_date" in update_sql
     assert update_parameters == (
         OrderLifecycleStatus.COMPLETED,
         4,
+        True,
+        date(2026, 5, 6),
+        True,
+        date(2026, 5, 8),
         "CASE-1",
         3,
+    )
+
+
+def test_adopted_accounting_review_outbox_is_acknowledgeable():
+    review_identity = "historical-order-review:accounting"
+
+    _validate_canonical_event(
+        {
+            "receipt_id": 81,
+            "intent_type": "historical_order_review_required",
+            "bounded_snapshot": {"review_identity": review_identity},
+        },
+        {
+            "id": 81,
+            "outcome": "adopted",
+            "review_identity": review_identity,
+            "result_snapshot": {
+                "service_calendar_status": "accounting_review_required"
+            },
+        },
+        {
+            "review_identity": review_identity,
+            "source_event_identity": "historical-orders:row:019",
+            "masked_case_identity": "***0019",
+            "issue_codes": [
+                "historical_accounting_service_calendar_unconfirmed"
+            ],
+            "evidence_snapshot": {},
+        },
+        review_identity,
     )
 
 
@@ -459,7 +502,7 @@ def test_unmatched_case_apply_is_a_zero_write_skip(tmp_path):
     assert repository.persist_count == 0
 
 
-def test_completed_historical_actual_start_delegates_formal_rebuild(tmp_path):
+def test_completed_historical_actual_start_skips_formal_rebuild(tmp_path):
     path = _workbook(
         tmp_path,
         ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"],
@@ -509,7 +552,13 @@ def test_completed_historical_actual_start_delegates_formal_rebuild(tmp_path):
     )
     preview = workflow.preview(row)
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
-    assert preview.date_patch == (("actual_start_date", date(2026, 8, 7)),)
+    assert preview.date_patch == (
+        ("actual_start_date", date(2026, 8, 7)),
+        ("actual_end_date", date(2026, 9, 7)),
+    )
+    assert preview.issue_codes == (
+        "historical_accounting_service_calendar_unconfirmed",
+    )
 
     workflow.apply(
         HistoricalOrderAdoptionRequest(
@@ -523,16 +572,8 @@ def test_completed_historical_actual_start_delegates_formal_rebuild(tmp_path):
     )
 
     assert repository.persist_count == 1
-    assert len(rebuilder.preview_calls) == 2
-    assert all(call["source_staff_ids"] == (11,) for call in rebuilder.preview_calls)
-    assert rebuilder.calls == [{
-        "case_no": "CASE-1",
-        "actual_start_date": date(2026, 8, 7),
-        "source_identity": row.source_identity,
-        "actor": "test-operator",
-        "correlation_id": "historical-order:actual-start-rebuild:correlation",
-        "source_staff_ids": (11,),
-    }]
+    assert rebuilder.preview_calls == []
+    assert rebuilder.calls == []
 
 
 def test_historical_rebuilder_passes_recalculated_dates_to_canonical_actual_start():
@@ -622,7 +663,7 @@ def test_same_source_and_fingerprint_replays_across_operator_metadata(tmp_path):
     assert repository.persist_count == 0
 
 
-def test_replayed_historical_actual_start_repairs_a_predelegation_receipt(tmp_path):
+def test_replayed_historical_actual_start_does_not_run_precision(tmp_path):
     path = _workbook(
         tmp_path,
         ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"],
@@ -659,7 +700,7 @@ def test_replayed_historical_actual_start_repairs_a_predelegation_receipt(tmp_pa
     )
     preview = workflow.preview(row)
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
-    assert preview.date_patch == ()
+    assert preview.date_patch == (("actual_end_date", date(2026, 9, 7)),)
     repository.receipt = {
         "command_fingerprint": fingerprint_payload({
             "source_identity": row.source_identity,
@@ -685,7 +726,7 @@ def test_replayed_historical_actual_start_repairs_a_predelegation_receipt(tmp_pa
 
     assert receipt.replayed is True
     assert repository.persist_count == 0
-    assert rebuilder.calls[0]["actual_start_date"] == date(2026, 8, 8)
+    assert rebuilder.calls == []
 
 
 def test_replayed_historical_actual_start_does_not_repeat_completed_rebuild(tmp_path):

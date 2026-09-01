@@ -86,6 +86,8 @@ class _Cursor:
                 if self.recipient
                 else []
             )
+        elif "FROM government_overpayment_return_excess_recoveries" in statement:
+            self._result = None
 
     def fetchone(self):
         if isinstance(self._result, list):

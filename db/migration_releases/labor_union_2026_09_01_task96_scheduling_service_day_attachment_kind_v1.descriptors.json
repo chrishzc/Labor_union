@@ -1,0 +1,23 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-task96-scheduling-service-day-attachment-kind-2026-09-01-v1",
+  "descriptors": {
+    "1026_task96_scheduling_service_day_attachment_kind.sql": {
+      "tables": {},
+      "parent_columns": {
+        "scheduling_service_day_log_attachments": {
+          "attachment_kind": {
+            "column_type": "enum('meal_photo','baby_log_photo')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": []
+    }
+  }
+}

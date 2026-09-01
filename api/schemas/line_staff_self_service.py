@@ -140,11 +140,26 @@ class StaffLeaveRequestCancel(StaffLiffRequest):
     reason: str = Field(min_length=1, max_length=1000)
 
 
+class StaffServiceDayLogMediaAttachment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    controlled_file_object_id: str | None = Field(
+        default=None, pattern=r"^cf_[0-9a-f]{32}$"
+    )
+    staging_id: str = Field(pattern=r"^cfs_[0-9a-f]{32}$")
+    sha256_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    attachment_kind: Literal["meal_photo", "baby_log_photo"] = "meal_photo"
+    sequence: int = Field(default=1, ge=1, le=10)
+
+
 class StaffServiceDayLogPreviewRequest(StaffLiffRequest):
     model_config = ConfigDict(extra="forbid")
     assignment_id: int = Field(gt=0)
     service_date: date
     baby_log_text: str = Field(min_length=1, max_length=5000)
+    controlled_file_attachments: list["StaffServiceDayLogMediaAttachment"] = Field(
+        default_factory=list, max_length=10
+    )
 
 
 class StaffServiceDayLogApplyRequest(StaffServiceDayLogPreviewRequest):
@@ -172,6 +187,9 @@ class StaffServiceDayLogReadbackResponse(BaseModel):
     baby_log_text: str
     requires_cooking: bool
     outcome: Literal["created", "existing"]
+    controlled_file_attachments: list["StaffServiceDayLogMediaAttachment"] = Field(
+        default_factory=list
+    )
 
 
 class StaffServiceDayLogReceiptResponse(BaseModel):
@@ -190,7 +208,9 @@ class StaffServiceDayLogApplyResponse(BaseModel):
 class StaffServiceDayMediaResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    media_id: str
+    staging_id: str = Field(pattern=r"^cfs_[0-9a-f]{32}$")
     content_type: str
     size_bytes: int
-    outcome: str
+    sha256_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expires_at: str
+    outcome: Literal["created", "existing"]

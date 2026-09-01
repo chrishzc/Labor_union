@@ -45,10 +45,14 @@ class MySqlSegmentedAvailabilityFactsRepository:
         return cursor.fetchone()
 
     def _load_negotiation_facts(self, cursor: Any, order: dict[str, Any]) -> dict[str, Any]:
-        window_start, window_end = _availability_window(order)
+        confirmed_service_dates = self._load_confirmed_service_dates(cursor, order["case_no"])
+        window_start, window_end = _availability_window(order, confirmed_service_dates)
+        planning_order = dict(order)
+        planning_order["start_date"] = window_start
+        planning_order["end_date"] = window_end
         return {
-            "order": order,
-            "confirmed_service_dates": self._load_confirmed_service_dates(cursor, order["case_no"]),
+            "order": planning_order,
+            "confirmed_service_dates": confirmed_service_dates,
             "staff_rows": self._load_active_staff(cursor),
             "assignments": self._load_assignments(cursor, window_start, window_end),
             "schedule_rows": self._load_assignment_schedule_rows(cursor, window_start, window_end),
@@ -163,8 +167,24 @@ class MySqlSegmentedAvailabilityFactsRepository:
         return cursor.fetchall() or []
 
 
-def _availability_window(order: dict[str, Any]) -> tuple[str, str]:
-    return _as_date(order["start_date"]).isoformat(), _as_date(order["end_date"]).isoformat()
+def _availability_window(
+    order: dict[str, Any], confirmed_service_dates: list[dict[str, Any]] | None = None
+) -> tuple[str, str]:
+    """Cover both planned bounds and every currently confirmed service date.
+
+    A service-date owner may shift confirmed dates outside the order's original
+    planning interval. Availability and assignment conflicts must still be
+    read for those dates; otherwise a valid due-shift candidate is silently
+    dropped before the typed matching owner can evaluate it.
+    """
+    starts = [_as_date(order["start_date"]), _as_date(order["end_date"])]
+    dates = [
+        _as_date(row["service_date"])
+        for row in confirmed_service_dates or ()
+        if row.get("service_date") is not None
+    ]
+    bounds = starts + dates
+    return min(bounds).isoformat(), max(bounds).isoformat()
 
 
 def _as_date(value: Any) -> date:

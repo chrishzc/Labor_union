@@ -413,6 +413,81 @@ def project_source_schedule_conflicts(
                 if left.case_no != right.case_no and right.start_date < left.end_date:
                     conflicts.append(HistoricalOrderSourceScheduleConflict(left, right))
 
+    existing_pairs = {
+        _conflict_pair_key(item.left, item.right) for item in conflicts
+    }
+    canonical_by_staff: dict[
+        int, list[tuple[HistoricalOrderSourceScheduleInterval, frozenset[object]]]
+    ] = {}
+    for index, preview in enumerate(previews):
+        case_no = getattr(preview, "case_no", None)
+        service_dates = frozenset(
+            getattr(preview, "canonical_service_dates", ()) or ()
+        )
+        if case_no is None or not service_dates:
+            continue
+        source_row = getattr(rows[index], "source_row", index) if index < len(rows) else index
+        for pairing_index, pairing in enumerate(preview.pairings, start=1):
+            if (
+                getattr(pairing.resolution, "value", pairing.resolution)
+                != "assignment_candidate"
+                or pairing.staff_id is None
+            ):
+                continue
+            diagnostic = HistoricalOrderSourceScheduleInterval(
+                source_row,
+                getattr(pairing, "ordinal", pairing_index),
+                case_no,
+                pairing.staff_id,
+                min(service_dates),
+                max(service_dates),
+            )
+            canonical_by_staff.setdefault(pairing.staff_id, []).append(
+                (diagnostic, service_dates)
+            )
+
+    for entries in canonical_by_staff.values():
+        ordered = sorted(
+            entries,
+            key=lambda item: (
+                item[0].case_no,
+                item[0].source_row,
+                item[0].pairing_ordinal,
+            ),
+        )
+        for index, (left, left_dates) in enumerate(ordered):
+            for right, right_dates in ordered[index + 1 :]:
+                pair_key = _conflict_pair_key(left, right)
+                shared_dates = left_dates.intersection(right_dates)
+                if (
+                    left.case_no == right.case_no
+                    or not shared_dates
+                    or pair_key in existing_pairs
+                ):
+                    continue
+                collision_date = min(shared_dates)
+                conflicts.append(
+                    HistoricalOrderSourceScheduleConflict(
+                        HistoricalOrderSourceScheduleInterval(
+                            left.source_row,
+                            left.pairing_ordinal,
+                            left.case_no,
+                            left.staff_id,
+                            collision_date,
+                            collision_date,
+                        ),
+                        HistoricalOrderSourceScheduleInterval(
+                            right.source_row,
+                            right.pairing_ordinal,
+                            right.case_no,
+                            right.staff_id,
+                            collision_date,
+                            collision_date,
+                        ),
+                    )
+                )
+                existing_pairs.add(pair_key)
+
     return tuple(
         sorted(
             conflicts,
@@ -429,6 +504,16 @@ def project_source_schedule_conflicts(
             ),
         )
     )
+
+
+def _conflict_pair_key(left, right) -> tuple[tuple[object, ...], tuple[object, ...]]:
+    identities = sorted(
+        (
+            (left.case_no, left.source_row, left.pairing_ordinal),
+            (right.case_no, right.source_row, right.pairing_ordinal),
+        )
+    )
+    return identities[0], identities[1]
 
 
 def _assert_source_schedule_consistency(row_previews, source_rows=None) -> None:

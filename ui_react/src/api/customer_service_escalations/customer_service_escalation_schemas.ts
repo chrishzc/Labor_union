@@ -18,6 +18,11 @@ export const EscalationMaskedContextSchema = z.strictObject({
   category: z.string(),
   redaction_version: z.string(),
 });
+export const EscalationAttemptWindowSchema = z.strictObject({
+  attempt_count: z.number().int().min(1),
+  maximum_attempts: z.number().int().min(1),
+  generation: z.number().int().nonnegative(),
+});
 
 const CommandIdentityShape = {
   idempotency_key: z.string().trim().min(1).max(191),
@@ -110,6 +115,11 @@ export const CustomerServiceEscalationViewSchema = z.strictObject({
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
   available_actions: z.array(EscalationActionSchema),
+  delivery_task_ref: z.string().trim().min(1).nullable().optional(),
+  delivery_outcome_ref: z.string().trim().min(1).nullable().optional(),
+  trigger_identity: z.string().trim().min(1).max(191).nullable().optional(),
+  attempt_window: EscalationAttemptWindowSchema.nullable().optional(),
+  owner_selector: z.string().trim().min(1).max(191).nullable().optional(),
 }).superRefine((value, context) => {
   if (new Set(value.available_actions).size !== value.available_actions.length) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['available_actions'], message: 'available_actions 不可重複。' });

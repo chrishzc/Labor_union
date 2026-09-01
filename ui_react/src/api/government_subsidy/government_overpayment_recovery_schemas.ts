@@ -55,6 +55,23 @@ export const GovernmentOverpaymentReturnRecipientSchema = z.strictObject({
   }
 });
 
+export const GovernmentOverpaymentReturnExcessRecoveryQuerySchema = z.strictObject({
+  recovery_identity: IdentitySchema,
+  source_bank_fact_reference: IdentitySchema,
+  source_payout_reference: IdentitySchema,
+  original_amount_ntd: z.number().int().positive(),
+  remaining_amount_ntd: z.number().int().nonnegative(),
+  status: z.enum(['open', 'partially_recovered', 'recovered']),
+  recovery_version: z.number().int().nonnegative(),
+}).superRefine((recovery, context) => {
+  if (recovery.remaining_amount_ntd > recovery.original_amount_ntd) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: '超額回收剩餘金額不合法。' });
+  }
+  if (recovery.remaining_amount_ntd === 0 && recovery.status !== 'recovered') {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: '超額回收狀態與剩餘金額不一致。' });
+  }
+});
+
 export const GovernmentOverpaymentQuerySchema = z.strictObject({
   overpayment_identity: IdentitySchema,
   payer_identity: z.literal('hccg'),
@@ -67,6 +84,7 @@ export const GovernmentOverpaymentQuerySchema = z.strictObject({
   return_recipient: GovernmentOverpaymentReturnRecipientSchema,
   blockers: z.array(z.string()),
   available_actions: z.array(GovernmentOverpaymentDispositionSchema),
+  return_excess_recovery: GovernmentOverpaymentReturnExcessRecoveryQuerySchema.nullable().optional(),
 }).superRefine((query, context) => {
   if (query.remaining_amount_ntd === 0 && !['offset_applied', 'returned'].includes(query.status)) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: '溢撥剩餘金額與狀態不一致。' });

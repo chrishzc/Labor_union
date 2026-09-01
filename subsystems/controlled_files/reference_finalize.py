@@ -11,7 +11,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
-from typing import Protocol
+from typing import Callable, Protocol
 
 from domains.controlled_files.reference_finalize import (
     ControlledFileFinalizeIntent,
@@ -101,9 +101,12 @@ class ControlledFileFinalizeWorker:
         self,
         repository: ControlledFileFinalizeRepository,
         storage: ControlledFileStoragePort,
+        *,
+        checkpoint: Callable[[], None] | None = None,
     ) -> None:
         self._repository = repository
         self._storage = storage
+        self._checkpoint = checkpoint or (lambda: None)
 
     def run(
         self,
@@ -131,6 +134,7 @@ class ControlledFileFinalizeWorker:
                 intent.observed_size_bytes,
                 observed_at,
             )
+        self._checkpoint()
         claim_token = intent.claim_token
         if not claim_token:
             raise ControlledFileFinalizeError(
@@ -140,6 +144,7 @@ class ControlledFileFinalizeWorker:
         lease = self._repository.acquire_finalize_lease(
             intent, worker_id=worker_id, acquired_at=observed_at
         )
+        self._checkpoint()
         try:
             # This call is intentionally outside the repository/CAS operation.
             verified = self._storage.finalize_staged(
@@ -160,6 +165,7 @@ class ControlledFileFinalizeWorker:
             self._repository.release_finalize_lease(
                 lease, released_at=observed_at, worker_id=worker_id
             )
+            self._checkpoint()
             self._repository.mark_finalize_reconciliation_required(
                 intent.finalize_id,
                 worker_id=worker_id,
@@ -167,6 +173,7 @@ class ControlledFileFinalizeWorker:
                 observed_at=observed_at,
                 error_code=error.code,
             )
+            self._checkpoint()
             return ControlledFileFinalizeReceipt(
                 intent.finalize_id,
                 intent.staging_id,
@@ -187,10 +194,12 @@ class ControlledFileFinalizeWorker:
                 observed_sha256=verified.sha256_digest,
                 observed_size_bytes=len(verified.content),
             )
+            self._checkpoint()
         finally:
             self._repository.release_finalize_lease(
                 lease, released_at=observed_at, worker_id=worker_id
             )
+            self._checkpoint()
         return ControlledFileFinalizeReceipt(
             intent.finalize_id,
             intent.staging_id,

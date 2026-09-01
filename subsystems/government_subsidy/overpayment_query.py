@@ -86,6 +86,39 @@ class GovernmentSubsidyReturnRecipientQueryView:
 
 
 @dataclass(frozen=True, slots=True)
+class GovernmentSubsidyReturnExcessRecoveryQueryView:
+    recovery_identity: str
+    source_bank_fact_reference: str
+    source_payout_reference: str
+    original_amount_ntd: int
+    remaining_amount_ntd: int
+    status: str
+    recovery_version: int
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.recovery_identity, "recovery identity", 191)
+        require_canonical_text(
+            self.source_bank_fact_reference, "recovery source bank fact reference", 191
+        )
+        require_canonical_text(
+            self.source_payout_reference, "recovery source payout reference", 191
+        )
+        if isinstance(self.original_amount_ntd, bool) or not isinstance(
+            self.original_amount_ntd, int
+        ) or self.original_amount_ntd <= 0:
+            raise ValueError("government_subsidy_overpayment_query_invalid")
+        if isinstance(self.remaining_amount_ntd, bool) or not isinstance(
+            self.remaining_amount_ntd, int
+        ) or not 0 <= self.remaining_amount_ntd <= self.original_amount_ntd:
+            raise ValueError("government_subsidy_overpayment_query_invalid")
+        if self.status not in {"open", "partially_recovered", "recovered"}:
+            raise ValueError("government_subsidy_overpayment_query_invalid")
+        if self.remaining_amount_ntd == 0 and self.status != "recovered":
+            raise ValueError("government_subsidy_overpayment_query_invalid")
+        require_nonnegative_integer(self.recovery_version, "recovery version")
+
+
+@dataclass(frozen=True, slots=True)
 class GovernmentSubsidyOverpaymentQueryView:
     overpayment_identity: str
     payer_identity: str
@@ -98,6 +131,7 @@ class GovernmentSubsidyOverpaymentQueryView:
     return_recipient: GovernmentSubsidyReturnRecipientQueryView
     blockers: tuple[str, ...]
     available_actions: tuple[str, ...]
+    return_excess_recovery: GovernmentSubsidyReturnExcessRecoveryQueryView | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.overpayment_identity, "overpayment identity", 191)
@@ -203,4 +237,5 @@ __all__ = [
     "GovernmentSubsidyOverpaymentQueryView",
     "GovernmentSubsidyOverpaymentQueryWorkflow",
     "GovernmentSubsidyReturnRecipientQueryView",
+    "GovernmentSubsidyReturnExcessRecoveryQueryView",
 ]

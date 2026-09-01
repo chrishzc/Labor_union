@@ -46,9 +46,7 @@ def test_release_and_fresh_catalog_preserve_1008_before_its_successor() -> None:
     assert cutover["schema_parts"]["expected_count"] == len(
         assembly["active_bootstrap"]
     )
-    assert cutover["schema_parts"]["terminal_artifact"] == (
-        "1021_task96_owner_contract_successors.sql"
-    )
+    assert cutover["schema_parts"]["terminal_artifact"] == artifact_names[-1]
 
 
 def test_released_descriptor_matches_canonical_check_contract() -> None:

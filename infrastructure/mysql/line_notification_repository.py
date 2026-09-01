@@ -15,7 +15,7 @@ from domains.line.delivery import (
     LineRecipient,
     LineRecipientType,
 )
-from domains.line.identities import LineGroupId
+from domains.line.identities import LineGroupId, LineRoomId, LineUserId
 from domains.line.identities import LineDeliveryTaskId
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from shared_kernel.validation import require_canonical_text
@@ -33,6 +33,7 @@ from subsystems.line.notification_failure_current_fact import (
     LineNotificationReplaySuccessorFact,
     evaluate_line_notification_failure_current_fact,
 )
+from subsystems.line.navigation_catalog import LineNavigationReplyReadback
 
 
 class LineNotificationManualReplayValidationError(ValueError):
@@ -140,6 +141,39 @@ class MySqlLineNotificationRepository:
             rows = tuple(cursor.fetchall() or ())
         return tuple(_timeline_row(row) for row in rows if isinstance(row, dict))
 
+    def list_router_replies(
+        self, recipient_identity: str, *, limit: int = 5
+    ) -> tuple[LineNavigationReplyReadback, ...]:
+        """Read recent deterministic replies addressed to one verified LINE actor.
+
+        The source response identity comes only from the immutable router source
+        event.  Delivery payloads are deliberately not returned to presentation.
+        """
+        require_canonical_text(recipient_identity, "LINE reply recipient identity", 191)
+        if limit < 1 or limit > 25:
+            raise ValueError("LINE reply readback limit is invalid")
+        with self._connection.cursor() as cursor:
+            cursor.execute(_RECENT_ROUTER_REPLIES_SQL, (recipient_identity, limit))
+            rows = tuple(cursor.fetchall() or ())
+        replies: list[LineNavigationReplyReadback] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                raise RuntimeError("line_router_reply_readback_invalid")
+            try:
+                replies.append(
+                    LineNavigationReplyReadback(
+                        source_response_id=str(row["source_response_id"]),
+                        source_event_id=str(row["source_event_id"]),
+                        reply_kind=str(row["reply_kind"]),
+                        reason_code=str(row["reason_code"]),
+                        source_identity=str(row["source_identity"]),
+                        source_revision=int(row["source_revision"]),
+                    )
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                raise RuntimeError("line_router_reply_readback_invalid") from error
+        return tuple(replies)
+
     def list_anomaly_sources(self, *, limit: int = 100) -> tuple[NotificationDecisionSource, ...]:
         with self._connection.cursor() as cursor:
             cursor.execute(_NOTIFICATION_ANOMALY_SOURCES_SQL, (limit,))
@@ -159,7 +193,11 @@ class MySqlLineNotificationRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 _LINE006_FAILED_SOURCES_SQL,
-                (query.case_no, query.notification_reason.value),
+                (
+                    query.case_no,
+                    query.notification_reason.value,
+                    query.notification_reason.value,
+                ),
             )
             rows = _strict_dict_rows(
                 tuple(cursor.fetchall() or ()),
@@ -311,7 +349,9 @@ class MySqlLineNotificationRepository:
         ) if isinstance(rules, list) else None
         if rule is None:
             return "notification_source_not_currently_applicable"
-        recipient = self._resolve_recipient(str(rule.get("recipient_selector")), original.facts)
+        recipient = self._resolve_recipient(
+            str(rule.get("recipient_selector")), original.facts, source_domain=original.source_domain
+        )
         if recipient is None:
             return "recipient_unavailable"
         expected_recipient = (
@@ -512,7 +552,9 @@ class MySqlLineNotificationRepository:
             )
         for rule in matching:
             selector = rule.get("recipient_selector")
-            recipient = self._resolve_recipient(str(selector), source.facts)
+            recipient = self._resolve_recipient(
+                str(selector), source.facts, source_domain=source.source_domain
+            )
             if recipient is None:
                 raise LineNotificationManualReplayValidationError(
                     "recipient_unavailable"
@@ -618,6 +660,12 @@ class MySqlLineNotificationRepository:
         rules = definition.get("rules")
         if not isinstance(rules, list):
             return source_event_id
+        # Replaying the same immutable source identity must not create a second
+        # decision/task merely because the catalog revision advanced. Fresh
+        # source events and reconciliation rows without a decision still flow
+        # through the normal projection path below.
+        if self._source_has_decision(source_event_id):
+            return source_event_id
         for rule in rules:
             if not isinstance(rule, dict) or rule.get("event_code") != event.event_code:
                 continue
@@ -625,6 +673,14 @@ class MySqlLineNotificationRepository:
                 source_event_id, event, rule_revision_id, rule, templates, template_snapshot[0]
             )
         return source_event_id
+
+    def _source_has_decision(self, source_event_id: int) -> bool:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT 1 FROM line_notification_decisions WHERE source_event_id=%s LIMIT 1",
+                (source_event_id,),
+            )
+            return cursor.fetchone() is not None
 
     def _project_rule(
         self,
@@ -648,7 +704,9 @@ class MySqlLineNotificationRepository:
         if not _predicates_match(rule.get("predicates"), event.facts):
             self._record_decision(source_event_id, rule_revision_id, rule_id, selector, None, "suppressed", "prerequisite_not_satisfied", event)
             return
-        recipient = self._resolve_recipient(selector, event.facts)
+        recipient = self._resolve_recipient(
+            selector, event.facts, source_domain=event.source_domain
+        )
         if recipient is None:
             self._record_decision(source_event_id, rule_revision_id, rule_id, selector, None, "suppressed", "recipient_unavailable", event)
             return
@@ -682,7 +740,15 @@ class MySqlLineNotificationRepository:
         definition = _json_object(row["definition_snapshot"])
         return int(row["revision_id"]), definition
 
-    def _resolve_recipient(self, selector: str, facts: Any):
+    def _resolve_recipient(
+        self, selector: str, facts: Any, *, source_domain: str = "unknown"
+    ):
+        # Manual replay preserves the original facts verbatim, so its immutable
+        # source domain is intentionally ``manual_replay``.  The only replay
+        # projection accepted here is still the development fixture's typed,
+        # allowlisted ``lu_test_*`` identity.
+        if source_domain in {"line_task96_fixture", "manual_replay"}:
+            return _fixture_recipient(selector, facts)
         if selector != "case_group" or not isinstance(facts, dict):
             return None
         case_no = facts.get("case_no")
@@ -792,11 +858,10 @@ def _cancel_service_day_assignment_tasks_sql(placeholders: str) -> str:
     )
 
 _SOURCE_EVENT_INSERT_SQL = (
-    "INSERT INTO line_notification_source_events (source_domain,event_code,"
+    "INSERT IGNORE INTO line_notification_source_events (source_domain,event_code,"
     "source_event_identity,source_aggregate_type,source_aggregate_identity,"
     "source_version,historical_silent,facts_snapshot,occurred_at_utc) "
-    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
-    "ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)"
+    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 _SOURCE_EVENT_EXISTING_SQL = (
     "SELECT id,source_aggregate_type,source_aggregate_identity,source_version,"
@@ -844,6 +909,22 @@ _CASE_TIMELINE_SQL = (
     "WHERE JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.case_no'))=%s "
     "ORDER BY source.occurred_at_utc DESC,source.id DESC,decision.id DESC,intent.occurrence_number ASC"
 )
+_RECENT_ROUTER_REPLIES_SQL = (
+    "SELECT source.source_event_identity AS source_response_id,"
+    "JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.source_event_id')) AS source_event_id,"
+    "JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.reply_kind')) AS reply_kind,"
+    "JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.reason_code')) AS reason_code,"
+    "JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.source_contract_id')) AS source_identity,"
+    "CAST(JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.source_revision')) AS UNSIGNED) AS source_revision "
+    "FROM line_notification_source_events source "
+    "JOIN line_delivery_tasks task ON task.source_aggregate_type='line_webhook_event' "
+    "AND task.source_aggregate_identity=JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.source_event_id')) "
+    "AND task.recipient_type='user' AND task.recipient_identity=%s "
+    "WHERE source.source_domain='line_router' "
+    "AND source.event_code='router.deterministic.reply_committed' "
+    "GROUP BY source.id,source.source_event_identity,source.facts_snapshot "
+    "ORDER BY source.occurred_at_utc DESC,source.id DESC LIMIT %s"
+)
 _NOTIFICATION_ANOMALY_SOURCES_SQL = (
     "SELECT decision.id AS decision_id,source.source_event_identity,"
     "JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.case_no')) AS case_no,"
@@ -867,27 +948,40 @@ _LINE006_FAILED_SOURCES_SQL = (
     "AS is_latest_source_version "
     "FROM line_notification_source_events source "
     "JOIN line_notification_decisions decision ON decision.source_event_id=source.id "
+    "LEFT JOIN line_notification_intents intent ON intent.decision_id=decision.id "
+    "LEFT JOIN line_delivery_tasks task ON task.id=intent.delivery_task_id "
     "WHERE source.source_domain<>'manual_replay' "
     "AND JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.case_no'))=%s "
-    "AND decision.reason_code=%s ORDER BY source.id,decision.id"
+    "AND (decision.reason_code=%s OR (task.processing_status='failed' AND task.error_code=%s)) "
+    "ORDER BY source.id,decision.id"
 )
 
 _LINE006_RECHECK_TARGETS_FOR_SOURCE_SQL = (
     "SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.case_no')) AS case_no,"
-    "decision.reason_code FROM line_notification_source_events source "
+    "CASE WHEN decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
+    "THEN decision.reason_code ELSE task.error_code END AS reason_code "
+    "FROM line_notification_source_events source "
     "JOIN line_notification_decisions decision ON decision.source_event_id=source.id "
+    "LEFT JOIN line_notification_intents intent ON intent.decision_id=decision.id "
+    "LEFT JOIN line_delivery_tasks task ON task.id=intent.delivery_task_id "
     "WHERE source.id=%s AND source.source_domain<>'manual_replay' "
-    "AND decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
-    "ORDER BY case_no,decision.reason_code"
+    "AND (decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
+    "OR (task.processing_status='failed' AND task.error_code IN ('recipient_unavailable','template_or_schedule_invalid'))) "
+    "ORDER BY case_no,reason_code"
 )
 
 _LINE006_RECHECK_TARGETS_SQL = (
     "SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.case_no')) AS case_no,"
-    "decision.reason_code FROM line_notification_source_events source "
+    "CASE WHEN decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
+    "THEN decision.reason_code ELSE task.error_code END AS reason_code "
+    "FROM line_notification_source_events source "
     "JOIN line_notification_decisions decision ON decision.source_event_id=source.id "
+    "LEFT JOIN line_notification_intents intent ON intent.decision_id=decision.id "
+    "LEFT JOIN line_delivery_tasks task ON task.id=intent.delivery_task_id "
     "WHERE source.source_domain<>'manual_replay' "
-    "AND decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
-    "ORDER BY case_no,decision.reason_code LIMIT %s"
+    "AND (decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
+    "OR (task.processing_status='failed' AND task.error_code IN ('recipient_unavailable','template_or_schedule_invalid'))) "
+    "ORDER BY case_no,reason_code LIMIT %s"
 )
 
 _LINE006_REPLAY_IDENTITY_FOR_TASK_SQL = (
@@ -949,12 +1043,17 @@ def _line006_replay_rows_sql(conditions: str) -> str:
 def _line006_recheck_targets_for_event_codes_sql(placeholders: str) -> str:
     return (
         "SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.case_no')) AS case_no,"
-        "decision.reason_code FROM line_notification_source_events source "
+        "CASE WHEN decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
+        "THEN decision.reason_code ELSE task.error_code END AS reason_code "
+        "FROM line_notification_source_events source "
         "JOIN line_notification_decisions decision ON decision.source_event_id=source.id "
+        "LEFT JOIN line_notification_intents intent ON intent.decision_id=decision.id "
+        "LEFT JOIN line_delivery_tasks task ON task.id=intent.delivery_task_id "
         "WHERE source.source_domain<>'manual_replay' "
         f"AND source.event_code IN ({placeholders}) "
-        "AND decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
-        "ORDER BY case_no,decision.reason_code"
+        "AND (decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
+        "OR (task.processing_status='failed' AND task.error_code IN ('recipient_unavailable','template_or_schedule_invalid'))) "
+        "ORDER BY case_no,reason_code"
     )
 
 
@@ -1104,6 +1203,33 @@ def _template_variables(facts: object) -> dict[str, object]:
         return {}
     service_date = facts.get("service_date")
     return {"service_date": service_date} if isinstance(service_date, str) else {}
+
+
+def _fixture_recipient(selector: str, facts: object) -> LineRecipient | None:
+    """Resolve only the development fixture's typed projection.
+
+    Production source events cannot smuggle a recipient through arbitrary
+    facts.  The fixture domain is the sole development-only ingress and still
+    requires an exact selector match plus an allowlisted ``lu_test_*`` identity.
+    """
+    if not isinstance(facts, dict):
+        return None
+    projection = facts.get("recipient_projection")
+    if not isinstance(projection, dict):
+        return None
+    if projection.get("selector") != selector:
+        return None
+    identity = projection.get("identity")
+    if not isinstance(identity, str) or not identity.startswith("lu_test_"):
+        return None
+    recipient_type = projection.get("type")
+    if recipient_type == "user":
+        return LineRecipient(LineRecipientType.USER, LineUserId(identity))
+    if recipient_type == "group":
+        return LineRecipient(LineRecipientType.GROUP, LineGroupId(identity))
+    if recipient_type == "room":
+        return LineRecipient(LineRecipientType.ROOM, LineRoomId(identity))
+    return None
 
 
 def _timeline_row(row: dict[str, object]) -> dict[str, object]:

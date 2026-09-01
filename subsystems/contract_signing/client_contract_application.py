@@ -95,6 +95,10 @@ class ClientContractSigningApplication:
         discard_document: Callable[..., None] | None = None,
         line_delivery_repository_factory: Callable[[object], object] | None = None,
         completion: Callable[[object, object, str], None] | None = None,
+        template_facts_loader: Callable[
+            [object, str, dict[str, object], datetime], dict[str, object]
+        ]
+        | None = None,
     ) -> None:
         self._connection_factory = connection_factory
         self._archive_root = archive_root
@@ -103,6 +107,7 @@ class ClientContractSigningApplication:
         self._discard_document = discard_document
         self._line_delivery_repository_factory = line_delivery_repository_factory
         self._completion = completion
+        self._template_facts_loader = template_facts_loader
 
     def _archive(self, content: bytes, storage_key: str):
         fn = self._archive_document or archive_contract_document
@@ -119,6 +124,15 @@ class ClientContractSigningApplication:
     def _complete(self, connection, command, identity: str) -> None:
         callback = self._completion or _complete_contract_in_transaction
         callback(connection, command, identity)
+
+    def _template_facts(
+        self, connection, case_no: str, facts: dict[str, object]
+    ) -> dict[str, object]:
+        if self._template_facts_loader is not None:
+            return self._template_facts_loader(
+                connection, case_no, facts, self._now()
+            )
+        return _client_template_facts(connection, case_no, facts)
 
     def _run_in_application_unit_of_work(self, operation: Callable[[object], object]):
         connection = self._connection_factory()
@@ -203,7 +217,7 @@ class ClientContractSigningApplication:
                 content = render_contract_template(
                     template_path=TEMPLATE_DIRECTORY / template.template_filename,
                     mapping_path=approved_template_mapping_path(template.template_key),
-                    facts=_client_template_facts(connection, command.case_no, facts),
+                    facts=self._template_facts(connection, command.case_no, facts),
                 )
                 template_archive = self._archive(content, _manual_client_template_storage_key(command))
                 source_document_id = _insert_generated_document(
@@ -300,7 +314,7 @@ class ClientContractSigningApplication:
                 content = render_contract_template(
                     template_path=TEMPLATE_DIRECTORY / template.template_filename,
                     mapping_path=approved_template_mapping_path(template.template_key),
-                    facts=_client_template_facts(connection, command.case_no, facts),
+                    facts=self._template_facts(connection, command.case_no, facts),
                 )
                 archive = self._archive(content, _client_template_storage_key(command))
                 binding = _line_binding(connection, "customer", str(facts["client_id"]))

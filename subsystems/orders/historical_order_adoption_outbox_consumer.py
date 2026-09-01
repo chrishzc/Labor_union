@@ -125,7 +125,11 @@ def _validate_canonical_event(event, receipt, review, review_identity: str) -> N
         raise ValueError("historical_order_adoption_receipt_binding_mismatch")
     if event.get("intent_type") != "historical_order_review_required":
         raise ValueError("historical_order_adoption_intent_type_invalid")
-    if receipt.get("outcome") not in {"review_required", "current_conflict"}:
+    if receipt.get("outcome") not in {
+        "adopted",
+        "review_required",
+        "current_conflict",
+    }:
         raise ValueError("historical_order_adoption_review_outcome_invalid")
     if receipt.get("review_identity") != review_identity:
         raise ValueError("historical_order_adoption_review_binding_mismatch")

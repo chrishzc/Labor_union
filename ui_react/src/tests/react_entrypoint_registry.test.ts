@@ -81,9 +81,9 @@ describe('React entrypoint registry', () => {
     expect(screen.getByText(/重新載入頁面即恢復，後端與 LINE 均未變更/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '👍 有幫助' }));
-    expect(screen.getByText(/正式回饋統計尚未接通，不會寫入數據/)).toBeInTheDocument();
+    expect(screen.getByText(/Feedback 必須由已驗證 LINE 身分提交；本工作台未取得 token，未寫入或增加本機統計/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '👎 未解決' }));
-    expect(screen.getByText(/客服待辦尚未接通，本頁不會假造工單/)).toBeInTheDocument();
+    expect(screen.getByText(/Feedback 必須由已驗證 LINE 身分提交；本工作台未取得 token，未寫入或增加本機統計/)).toBeInTheDocument();
     expect(screen.queryByText(/已成功儲存並同步/)).not.toBeInTheDocument();
   });
 

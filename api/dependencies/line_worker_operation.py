@@ -39,7 +39,17 @@ from infrastructure.mysql.segmented_availability_repository import (
     MySqlSegmentedAvailabilityFactsRepository,
 )
 from subsystems.customer_service.escalation_application import HumanEscalationApplication
+from subsystems.customer_service.matching_coordination_worker import (
+    MatchingCoordinationCustomerServiceWorker,
+)
 from subsystems.line.delivery_worker import LineDeliveryWorker
+from subsystems.line.matching_coordination_delivery_worker import (
+    MatchingCoordinationDeliveryWorker,
+)
+from subsystems.line.human_escalation_delivery import (
+    HUMAN_ESCALATION_INTENT,
+    HumanEscalationDeliveryWorker,
+)
 from subsystems.line.event_dispatcher import LineEventDispatcher
 from subsystems.line.follow_schedule_application import enqueue_follow_schedule
 from subsystems.line.identity_management_application import IDENTITY_MENU_RESET_INTENT
@@ -61,6 +71,7 @@ from subsystems.line.service_help_application import LineServiceHelpApplication
 from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 from subsystems.line.worker_runtime import CanonicalLineWorkerRuntime
+from subsystems.line.terminal_closure_worker import LineTerminalClosureWorker
 from subsystems.line.notification_reconciliation import (
     LineNotificationReconciliationApplication,
 )
@@ -158,6 +169,25 @@ def _additional_workers(worker_identity: str, now, images, provider) -> dict[str
         "notification_reconciliation": LineNotificationReconciliationApplication(
             open_line_unit_of_work
         ),
+        "matching_coordination_deliveries": MatchingCoordinationDeliveryWorker(
+            open_line_unit_of_work,
+            worker_identity,
+            now,
+        ),
+        "matching_coordination_customer_service": MatchingCoordinationCustomerServiceWorker(
+            open_line_unit_of_work,
+            worker_identity,
+        ),
+        "human_escalation_deliveries": HumanEscalationDeliveryWorker(
+            open_line_unit_of_work,
+            worker_identity,
+            now,
+        ),
+        "terminal_closures": LineTerminalClosureWorker(
+            open_line_unit_of_work,
+            worker_identity,
+            now,
+        ),
         "media_archives": LineMediaArchiveWorker(
             open_line_unit_of_work,
             LineMediaApiAdapter(_required_access_token()),
@@ -209,8 +239,10 @@ def _next_due_at():
         due_times = (
             unit_of_work.webhook_inbox.next_due_at(),
             unit_of_work.delivery_tasks.next_due_at(),
+            unit_of_work.orders_terminal_closure_source.next_due_at(),
             unit_of_work.rich_menu_publications.next_due_at(),
             unit_of_work.outbox.next_due_at(),
+            unit_of_work.outbox.next_due_at(HUMAN_ESCALATION_INTENT),
             unit_of_work.outbox.next_due_at(RICH_MENU_BINDING_INTENT),
             unit_of_work.outbox.next_due_at(IDENTITY_MENU_RESET_INTENT),
         )

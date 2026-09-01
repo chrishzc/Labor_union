@@ -163,3 +163,35 @@ LINE 管理中心新增「身分管理」，並將「LINE 下方選單」改名�
   可在再次兩次失敗時建立新單；Staff retirement 與 staff-role解除同一 commit，customer role保留且
   successor menu intent不與舊bind intent碰撞；既有 revocation／provider／`LINE-006` focused
   regression 不退步。
+
+### 9.5 Orders terminal closure auto-restore（2026-09-01 Task96 contract）
+
+Orders 是案件 terminal closure source owner。只有 Orders 在其 lifecycle aggregate 的單一
+outer Unit of Work 內提交 terminal closure event／receipt 時，才可建立對 LINE Identity 的
+committed outbox handoff；事件 identity 固定由 `case_no`、`terminal_kind` 與 resulting
+Orders lifecycle version 組成，並保存 source subject、producer reference、occurred time、
+correlation 與 idempotency identity。事件不得由 LINE、UI、worker 或付款／通知 adapter 猜測或
+直接建立；若退款／歸檔由其他 owner 完成，Orders 只攜帶該 owner 的 typed receipt reference，
+不得跨域直寫其 root。
+
+LINE Identity consumer 收到事件後必須 fresh-read 同一 LINE User ID 的所有 role-scoped
+bindings 與 client-role active-case Query。只有同時滿足以下條件，才可在既有 LINE Identity
+outer Unit of Work 內建立一次 `staff_default_restore` menu intent／receipt：
+
+1. staff binding 仍為 `active`；
+2. 該 LINE User ID 的每一個 active client-role case 都已由其 owner readback 證明 terminal；
+3. source event identity／Orders lifecycle version 尚未處理，且 current binding version、
+   target menu revision 與 capability 均一致。
+
+任一 active client case 未 terminal 時，必須保存 typed no-op readback，不得 restore。staff
+retirement 或 revocation 已進行／完成時優先於 restore；已 `revoked` 的 staff role 永不得
+被此 consumer 恢復。restore 不改 Orders、Client、Staff 或 Scheduling root，也不繞過既有
+Rich Menu provider boundary。
+
+同一 source event／idempotency key replay 必須回原 restore 或 no-op receipt；不同 payload、
+stale Orders／binding／menu version、subject mismatch 或 capability mismatch 固定 typed
+failure 並零寫入。storage transient failure 可 bounded retry；其餘 failure 只能由 LINE
+Identity Query／既有人工 review reconcile，必要時建立 manual recovery reference，不得盲目
+重播。Readback 必須回 source event identity、Orders version、binding version、case-scope
+decision（`restored | blocked_active_client_case | blocked_revoked_staff | noop_replay`）、
+menu intent／receipt 與 typed failure。

@@ -117,6 +117,35 @@ class MySqlLineDeliveryTaskRepository:
             claimed = tuple(self._load_rows(cursor, task_ids))
         return tuple(_snapshot(row) for row in claimed)
 
+    def claim_specific(
+        self,
+        task_id: LineDeliveryTaskId,
+        query: ClaimLineDeliveryTasksQuery,
+    ) -> LineDeliveryTaskSnapshot | None:
+        """Lease one task without allowing a local/mock worker to touch other tasks."""
+        lease_expires_at = query.now + self._lease_duration
+        with self._connection.cursor() as cursor:
+            cursor.execute(_SELECT_SQL + " FOR UPDATE", (task_id.value,))
+            row = optional_row(cursor.fetchone())
+            if row is None:
+                return None
+            status = str(row["processing_status"])
+            due = row.get("scheduled_at_utc") if status == "pending" else row.get("next_attempt_at_utc")
+            if status not in {"pending", "retryable_failed"} or due is None or aware_utc(due) > query.now:
+                return None
+            cursor.execute(
+                _CLAIM_UPDATE_SQL,
+                (
+                    query.lease_owner,
+                    database_utc(query.now),
+                    database_utc(lease_expires_at),
+                    task_id.value,
+                ),
+            )
+            cursor.execute(_SELECT_SQL, (task_id.value,))
+            updated = optional_row(cursor.fetchone())
+        return None if updated is None else _snapshot(updated)
+
     def record_attempt(
         self,
         command: RecordLineDeliveryAttemptCommand,

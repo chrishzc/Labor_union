@@ -42,7 +42,7 @@
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/service_before_replacement_actions.test.tsx`
 - higher_boundary:
-  - `tests/integration/`
+  - tests/integration/ (shared legacy higher-boundary root)
 - cross_owner:
   - `tests/domains/anomalies/subsystems/anomalies/integration/test_service_before_replacement_projection.py` — Anomalies-owned projection contract.
 - higher_boundary_schema_release: current path-sensitive oracle is classified by the Global Arch Map routing.

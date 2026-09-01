@@ -203,7 +203,8 @@ class MatchingCoordinationApplication:
         """Run the existing pure workflow against a non-locking typed snapshot."""
 
         if isinstance(command, PreviewInitialCriteriaSnapshot):
-            return snapshot_view(self._initial_facts(command.case_no, for_update=False).snapshot)
+            facts = self._initial_facts(command.case_no, for_update=False)
+            return snapshot_view(self._version_initial_snapshot(facts).snapshot)
         facts = self._facts_reader.load(command.case_no)
         return self._workflow.preview(command, facts)
 
@@ -223,11 +224,14 @@ class MatchingCoordinationApplication:
             # The M3 root lock precedes the fresh owner-fact read.  Owner roots
             # are locked by their typed reader, never by this coordinator.
             self._repository.lock_matching_root(command.case_no)
+            leave_result = None
             facts = (
                 self._initial_facts(command.case_no, for_update=True)
                 if isinstance(command, ApplyInitialCriteriaSnapshot)
                 else self._load_fresh(command.case_no)
             )
+            if isinstance(command, ApplyInitialCriteriaSnapshot):
+                facts = self._version_initial_snapshot(facts)
             if isinstance(command, ApplyServiceDateChangeRematch):
                 service_date_inputs = self._service_date_inputs(
                     command,
@@ -248,11 +252,20 @@ class MatchingCoordinationApplication:
                     expected_leave_version=command.expected_leave_version,
                     original_staff_id=command.original_staff_id,
                 )
-                if command.expected_source_versions != leave_result.source_versions:
-                    raise self._blocked(
-                        command.correlation_id, "matching_leave_reference_stale"
-                    )
+                # The fresh M3 read intentionally leaves the optional leave
+                # source unconsulted.  The typed leave evaluator then replaces
+                # that slot with the canonical Scheduling receipt version.
+                # Comparing the pre-evaluation tuple with the enriched tuple
+                # would make every valid Preview -> Apply false-stale.
                 facts = replace(facts, source_versions=leave_result.source_versions)
+                # The workflow re-validates its command against the facts it
+                # is about to persist.  Continue with the evaluator-enriched
+                # typed command so that validation observes the same canonical
+                # leave source that is written to the receipt.
+                command = replace(
+                    command,
+                    expected_source_versions=leave_result.source_versions,
+                )
                 preview_fingerprint = leave_result.preview_fingerprint
             else:
                 preview_fingerprint = _preview_fingerprint(command, facts)
@@ -261,6 +274,24 @@ class MatchingCoordinationApplication:
                 facts,
                 preview_fingerprint=preview_fingerprint,
             )
+            # M3 only hands off typed, committed owner intents.  The owning
+            # Scheduling/Assignment/Customer Service workflows remain the
+            # writers of their roots; P5 is responsible for delivery tasks.
+            if isinstance(command, ApplyLeaveImpactOnMatching) and leave_result is not None:
+                handoff_suffix = (
+                    ":line-bilateral"
+                    if leave_result.result_state == "leave_deferred"
+                    else ":customer-service"
+                )
+                receipt = replace(
+                    receipt,
+                    outbox_intent_ids=(f"{command.idempotency_key.value}{handoff_suffix}",),
+                )
+            elif isinstance(command, ApplyServiceDateChangeRematch):
+                receipt = replace(
+                    receipt,
+                    outbox_intent_ids=(f"{command.idempotency_key.value}:rematch",),
+                )
             self._repository.append_lineage(command, facts, receipt)
             self._repository.save_receipt(
                 command,
@@ -270,6 +301,29 @@ class MatchingCoordinationApplication:
             self._repository.append_typed_intents(command, receipt)
             unit.commit()
             return receipt
+
+    def _version_initial_snapshot(
+        self, facts: MatchingCoordinationFacts
+    ) -> MatchingCoordinationFacts:
+        """Assign the next criteria version when owner dates are refreshed."""
+        reader = getattr(self._repository, "next_criteria_version", None)
+        if not callable(reader):
+            return facts
+        version = int(reader(facts.snapshot.case_no))
+        if version <= facts.snapshot.criteria_version:
+            return facts
+        snapshot = build_criteria_snapshot(
+            snapshot_id=(
+                f"matching:{facts.snapshot.case_no}:criteria:{version}:"
+                f"{facts.snapshot.fingerprint.value[:16]}"
+            ),
+            case_no=facts.snapshot.case_no,
+            criteria_version=version,
+            criteria=facts.snapshot.criteria,
+            source_versions=facts.snapshot.source_versions,
+            created_at=facts.snapshot.created_at,
+        )
+        return replace(facts, snapshot=snapshot)
 
     def _initial_facts(
         self, case_no: str, *, for_update: bool

@@ -16,6 +16,6 @@
 ## Verification routing
 - default_boundary: Domain
 - test_root: `tests/domains/government-subsidy/`
-- subsystem_root: `tests/domains/government-subsidy/subsystems/government-subsidy/`
+- subsystem_root: tests/domains/government-subsidy/subsystems/government-subsidy/
 - anomaly projections sourced from subsidy facts remain under the Anomalies test owner.
 - routing: `.arch-map/tests/domains/government-subsidy/index.md`.

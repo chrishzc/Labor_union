@@ -191,3 +191,60 @@ class LeaveSubstitutionReceiptView(BaseModel):
     outcome_event_ids: list[int]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     linked_request: LinkedLeaveRequestView | None
+
+
+class StaffPayablesEvidenceView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    obligation_identity: str
+    assignment_id: int = Field(gt=0)
+    staff_id: int = Field(gt=0)
+    amount_due_ntd: int = Field(gt=0)
+    due_date: date | None
+    obligation_status: Literal["open", "settled", "cancelled"]
+    obligation_payroll_version: int = Field(ge=0)
+    obligation_event_id: int = Field(gt=0)
+    projection_status: Literal["payable", "completed", "anomaly"] | None
+    projection_amount_ntd: int | None = Field(default=None, gt=0)
+    projection_net_paid_ntd: int | None = Field(default=None, ge=0)
+    projection_balance_ntd: int | None
+    projection_version: int | None = Field(default=None, ge=0)
+    projection_event_id: int | None = Field(default=None, gt=0)
+    blockers: list[str]
+
+
+class SubstitutionPayablesLineageItemView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_index: int = Field(ge=0)
+    outcome_event_id: int = Field(gt=0)
+    original_assignment_id: int = Field(gt=0)
+    original_schedule_id: int = Field(gt=0)
+    original_staff_id: int = Field(gt=0)
+    original_work_date: date
+    resolution_type: Literal["defer_following_assignments", "substitute"]
+    resulting_assignment_id: int = Field(gt=0)
+    resulting_staff_id: int = Field(gt=0)
+    resulting_service_date: date
+    payroll_event_id: int | None = Field(default=None, gt=0)
+    payroll_event_expected_version: int | None = Field(default=None, ge=0)
+    payroll_event_resulting_version: int | None = Field(default=None, ge=0)
+    payroll_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    payables_evidence: StaffPayablesEvidenceView | None
+    lineage_subject: str
+    blockers: list[str]
+
+
+class SubstitutionPayablesLineageView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_no: str
+    batch_key: str
+    scheduling_receipt_id: int = Field(gt=0)
+    scheduling_version: int = Field(ge=0)
+    scheduling_generation: int = Field(ge=0)
+    expected_payroll_version: int = Field(ge=0)
+    resulting_payroll_version: int = Field(ge=0)
+    items: list[SubstitutionPayablesLineageItemView]
+    authoritative_complete: bool
+    blockers: list[str]

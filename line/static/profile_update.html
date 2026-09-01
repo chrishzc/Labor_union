@@ -139,7 +139,7 @@ Description: 以 server 驗證的 LIFF token 提出 Client 資料異動申請，
     async function init() {
         renderOptions();
         try {
-            const config = await fetch('/api/config/liff/runtime?page=profile_update');
+            const config = await fetch('/api/v1/line/identity/runtime-config');
             const configBody = await config.json();
             const liffId = configBody.data?.liff_id;
             if (!config.ok || !liffId) throw new Error('LIFF 尚未完成設定。');
@@ -147,12 +147,24 @@ Description: 以 server 驗證的 LIFF token 提出 Client 資料異動申請，
             if (!liff.isLoggedIn()) { liff.login({redirectUri: location.href}); return; }
             lineIdToken = liff.getIDToken() || "";
             if (!lineIdToken) throw new Error('無法取得 LINE 登入憑證，請重新開啟此頁。');
+            await openCustomerIdentityFlow();
             const result = await request('/api/v1/line/client-profile/query', {line_id_token: lineIdToken});
             profile = result.data;
             renderCurrent(profile);
             document.getElementById("submitButton").disabled = false;
             showStatus("已載入目前資料。選擇欄位後可先預覽，預覽不會寫入資料。", "notice");
         } catch (error) { showStatus(error.message || "目前無法載入資料，請稍後再試。", "error"); }
+    }
+
+    async function openCustomerIdentityFlow() {
+        const storageKey = "line-flow-idempotency:customer_binding";
+        const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
+        sessionStorage.setItem(storageKey, idempotencyKey);
+        await request('/api/v1/line/identity/flow/open', {
+            purpose: 'customer_binding',
+            idempotency_key: idempotencyKey,
+            line_id_token: lineIdToken
+        });
     }
 
     function renderOptions() {

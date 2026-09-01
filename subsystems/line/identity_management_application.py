@@ -78,7 +78,21 @@ class LineIdentityManagementApplication:
         target_role: LineBindingSubjectType,
     ) -> LineIdentityRoleSelectionPreview:
         with self._unit_of_work_factory() as unit_of_work:
-            readback = _role_context(unit_of_work, line_user_id)
+            return self.preview_role_selection_in_unit_of_work(
+                unit_of_work,
+                line_user_id,
+                target_role,
+            )
+
+    def preview_role_selection_in_unit_of_work(
+        self,
+        unit_of_work: LineUnitOfWorkPort,
+        line_user_id: LineUserId,
+        target_role: LineBindingSubjectType,
+    ) -> LineIdentityRoleSelectionPreview:
+        """Build role preview from a caller-owned LINE transaction."""
+
+        readback = _role_context(unit_of_work, line_user_id)
         blockers = _role_selection_blockers(readback, target_role)
         return LineIdentityRoleSelectionPreview(
             readback,
@@ -92,54 +106,69 @@ class LineIdentityManagementApplication:
         command: SelectLineIdentityRoleCommand,
     ) -> LineIdentityRoleSelectionReceipt:
         with self._unit_of_work_factory() as unit_of_work:
-            existing = unit_of_work.receipts.get(command.idempotency_key)
-            if existing is not None:
-                if existing.payload_fingerprint != command.preview_fingerprint:
-                    raise RuntimeError("line_identity_role_selection_idempotency_conflict")
-                result = _role_context(unit_of_work, command.line_user_id)
-                unit_of_work.commit()
-                return LineIdentityRoleSelectionReceipt(
-                    result,
-                    True,
-                    existing.result_reference,
-                )
-            readback = _role_context(unit_of_work, command.line_user_id)
-            fingerprint = _role_selection_fingerprint(readback, command.target_role)
-            if (
-                readback.context_version != command.expected_context_version
-                or fingerprint != command.preview_fingerprint
-            ):
-                raise RuntimeError("line_identity_role_selection_stale")
-            blockers = _role_selection_blockers(readback, command.target_role)
-            if blockers:
-                raise RuntimeError(blockers[0])
-            resulting_version = unit_of_work.identities.select_role(
-                command.line_user_id,
-                command.target_role,
-                command.expected_context_version,
-            )
-            receipt_identity = (
-                f"line-identity-role:{command.line_user_id.value}:"
-                f"{command.target_role.value}:{resulting_version.value}"
-            )
-            unit_of_work.receipts.append(
-                IdempotencyReceipt(
-                    command.idempotency_key,
-                    fingerprint,
-                    receipt_identity,
-                )
-            )
-            unit_of_work.audit.append(
-                LineAuditIntent(
-                    "line.identity.role.selected",
-                    command.actor.actor_id,
-                    "line_identity_role_context",
-                    command.line_user_id.value,
-                )
-            )
-            schedule_resolved_identity_menu(unit_of_work, command.line_user_id)
-            result = _role_context(unit_of_work, command.line_user_id)
+            result = self.select_role_in_unit_of_work(unit_of_work, command)
             unit_of_work.commit()
+        return result
+
+    def select_role_in_unit_of_work(
+        self,
+        unit_of_work: LineUnitOfWorkPort,
+        command: SelectLineIdentityRoleCommand,
+    ) -> LineIdentityRoleSelectionReceipt:
+        """Apply role context on a caller-owned LINE transaction.
+
+        Existing canonical LIFF flows already own the outer transaction.  This
+        adapter keeps the role-selection invariants in this application while
+        allowing those flows to select their explicit customer/staff context
+        without opening a second transaction or adding a public route.
+        """
+
+        existing = unit_of_work.receipts.get(command.idempotency_key)
+        if existing is not None:
+            if existing.payload_fingerprint != command.preview_fingerprint:
+                raise RuntimeError("line_identity_role_selection_idempotency_conflict")
+            result = _role_context(unit_of_work, command.line_user_id)
+            return LineIdentityRoleSelectionReceipt(
+                result,
+                True,
+                existing.result_reference,
+            )
+        readback = _role_context(unit_of_work, command.line_user_id)
+        fingerprint = _role_selection_fingerprint(readback, command.target_role)
+        if (
+            readback.context_version != command.expected_context_version
+            or fingerprint != command.preview_fingerprint
+        ):
+            raise RuntimeError("line_identity_role_selection_stale")
+        blockers = _role_selection_blockers(readback, command.target_role)
+        if blockers:
+            raise RuntimeError(blockers[0])
+        resulting_version = unit_of_work.identities.select_role(
+            command.line_user_id,
+            command.target_role,
+            command.expected_context_version,
+        )
+        receipt_identity = (
+            f"line-identity-role:{command.line_user_id.value}:"
+            f"{command.target_role.value}:{resulting_version.value}"
+        )
+        unit_of_work.receipts.append(
+            IdempotencyReceipt(
+                command.idempotency_key,
+                fingerprint,
+                receipt_identity,
+            )
+        )
+        unit_of_work.audit.append(
+            LineAuditIntent(
+                "line.identity.role.selected",
+                command.actor.actor_id,
+                "line_identity_role_context",
+                command.line_user_id.value,
+            )
+        )
+        schedule_resolved_identity_menu(unit_of_work, command.line_user_id)
+        result = _role_context(unit_of_work, command.line_user_id)
         return LineIdentityRoleSelectionReceipt(result, False, receipt_identity)
 
     def preview_revocation(

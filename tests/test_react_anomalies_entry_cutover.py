@@ -75,8 +75,14 @@ def test_anomalies_control_plane_keeps_react_identity_metadata() -> None:
     anomalies_entries = [entry for entry in entries if entry["entry_id"] == ANOMALIES_ENTRY]
     assert len(anomalies_entries) == 1
     assert anomalies_entries[0]["entry_id"] == ANOMALIES_ENTRY
+    assert anomalies_entries[0]["current_target"] == "react"
     assert anomalies_entries[0]["react_target"] == "/admin/#anomalies"
     assert anomalies_entries[0]["replacement_group"] == "anomalies"
+    assert anomalies_entries[0]["required_react_artifact"]["api_compatibility_revision"] == "react-admin-api-v1"
+    assert anomalies_entries[0]["entry_revision"] == 2
+    assert initial_targets["revision"] == 2
+    assert len(initial_targets["receipts"]) == 1
+    assert initial_targets["receipts"][0]["entry_id"] == ANOMALIES_ENTRY
 
 
 def test_anomalies_sources_use_current_read_only_owner_boundaries() -> None:

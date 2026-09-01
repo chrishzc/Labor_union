@@ -6,9 +6,9 @@
   "authority": "D97-PRODUCTION-SCRIPT-GOVERNANCE; Global migration spec section 9",
   "source": {
     "entrypoint_queue": "document/架構重整/03_追蹤清單與證據/evidence/entrypoint_review_queue_v1.jsonl",
-    "entrypoint_queue_sha256": "18405295e98ad93ec01ab4faf1de319a3f13d820a9830f4cae7be81af42afc31",
-    "cli_count": 86,
-    "queue_cli_count": 86,
+    "entrypoint_queue_sha256": "0e21790c4c8b4a0336dacec02a651f66193ba88857663548438df0cb3d8ceba5",
+    "cli_count": 88,
+    "queue_cli_count": 88,
     "discovery": "AST __main__ registration over current scripts/**/*.py; queue is caller-evidence input and is regenerated independently."
   },
   "required_guard_contract": [
@@ -25,18 +25,18 @@
     "production_authority_credential_gate"
   ],
   "summary": {
-    "total": 86,
+    "total": 88,
     "classification_counts": {
       "blocked-caller-evidence": 3,
       "delete-executable": 6,
       "keep-operator-only": 38,
       "rewrite-to-canonical-runner": 1,
-      "test-only": 38
+      "test-only": 40
     },
     "queue_status_counts": {
       "active": 4,
       "operator_only": 75,
-      "review_required": 7
+      "review_required": 9
     },
     "repo_local_blocker_count": 0,
     "deferred_gate_count": 14,
@@ -310,8 +310,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "e406aaccb4d55d6a850094f8d48bbe79dadf7f713018755b864e2370e1b017d6",
-        "line_count": 221,
+        "source_sha256": "4bf84934144f7e71355d24cba55b23bf97df236c752a651f93e1abd4ef074fe2",
+        "line_count": 235,
         "queue_status": "operator_only",
         "owner": "LINE Integration / Access Control",
         "scenario": "Controlled LINE Integration / Access Control maintenance or release operation.",
@@ -432,8 +432,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "590727fcf8ea83e47862f5ae3e6aaaf97e987bd47a09da7a8f141aae6deaa817",
-        "line_count": 266,
+        "source_sha256": "27999a8f12a3d1d5d5314df0c909e10ee18c91d791c354efbc72c41e864fab2e",
+        "line_count": 268,
         "queue_status": "review_required",
         "owner": "Frontend Release",
         "scenario": "Execute or read the bounded Frontend Release scenario identified by cli:scripts/build_react_admin_artifact.py.",
@@ -730,6 +730,67 @@
       "required_guards": []
     },
     {
+      "exact_id": "cli:scripts/diagnose_historical_order_preview.py",
+      "path": "scripts/diagnose_historical_order_preview.py",
+      "runtime": "python-cli",
+      "callers": {
+        "runtime_registration": [
+          "scripts/diagnose_historical_order_preview.py::cli:scripts/diagnose_historical_order_preview.py (entrypoint_review_queue_v1)"
+        ],
+        "repository_search": [
+          "Task 97 production-script inventory confirms CLI registration for cli:scripts/diagnose_historical_order_preview.py; external/operator execution authority remains incomplete"
+        ]
+      },
+      "replacement": "cli:scripts/diagnose_historical_order_preview.py",
+      "test": {
+        "status": "not_run",
+        "focused": "tests/test_task97_production_script_governance.py",
+        "oracle": "source digest and exact identity remain stable"
+      },
+      "oracle": "exit 0 with no unauthorized database or external writes",
+      "receipt": {
+        "status": "not_run",
+        "identity": "task97:cli:scripts/diagnose_historical_order_preview.py"
+      },
+      "evidence": {
+        "source_sha256": "11a70aac15a4994310026f8fe2af3e36e41b6f3961a3c7c4f617f7a114d4eeb5",
+        "line_count": 388,
+        "queue_status": "review_required",
+        "owner": "Orders Historical Adoption Diagnosis",
+        "scenario": "Execute or read the bounded Orders Historical Adoption Diagnosis scenario identified by cli:scripts/diagnose_historical_order_preview.py.",
+        "operator": "authorized disposable-test diagnostic operator; caller not evidenced",
+        "observed": {
+          "dry_run": false,
+          "explicit_db": false,
+          "host_check": false,
+          "schema_fingerprint": false,
+          "prior_dry_run_receipt": false,
+          "backup_receipt": false,
+          "explicit_apply": false,
+          "verify": false,
+          "resume_replay": false,
+          "terminal_receipt": false,
+          "production_authority": false
+        }
+      },
+      "classification": "test-only",
+      "capabilities": {
+        "kind": "test-only",
+        "database": "read",
+        "production_mutation": false,
+        "data_import": false,
+        "process_launch": false
+      },
+      "required_guards": [],
+      "guard_gap": [
+        "caller_evidence_and_terminal_disposition"
+      ],
+      "gate": {
+        "status": "PASS",
+        "reason": "test-only entry is bounded to its allowlisted disposable target"
+      }
+    },
+    {
       "exact_id": "cli:scripts/export_db_snapshot_fixture_v2.py",
       "path": "scripts/export_db_snapshot_fixture_v2.py",
       "runtime": "python-cli",
@@ -865,8 +926,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "755b1164d75eb2fe59587047144fad0ca2f6f2379a93c4a8d5864c3634f3ffb8",
-        "line_count": 958,
+        "source_sha256": "a2d7d96d971389f141688fd2ef98ff5ecc61c727169afac10d5f2cf3fa81a751",
+        "line_count": 1000,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",
@@ -1243,8 +1304,8 @@
         "identity": "PROV-20260829-task97-production-script-scripts-generate_task97_production_script_inventory-py"
       },
       "evidence": {
-        "source_sha256": "d1ff70210a89bbe98c1fcab75a761557de4f9dceeeb45882d1a4548f3d61b990",
-        "line_count": 865,
+        "source_sha256": "999136d9f317c1d89f3df4e915f8b0b00eb2c1945ec0dd3888bbf0c5a5b1e04b",
+        "line_count": 867,
         "queue_status": "operator_only",
         "owner": "Architecture Governance",
         "scenario": "Regenerate the tracked Task 97 production-script inventory from current executable sources.",
@@ -2465,8 +2526,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "435439d1a1bd4930d3e5af7d089d49f9d268b0636424eaa8f570eb1343550e01",
-        "line_count": 7867,
+        "source_sha256": "05a9ec1fc41f4709ec7c0da4755d9b02ccf1e3ef25f816a9e6220c8e2b83ada7",
+        "line_count": 7995,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",
@@ -3604,8 +3665,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "9ffc408ad0b6e12ef1e2cdf9249526ab2d4ea876164333e62139dea3af8206b1",
-        "line_count": 1452,
+        "source_sha256": "403dd8a7f6754f267c55e85eccd3fdbf4555d0635966c23082b4ccbf87986514",
+        "line_count": 1645,
         "queue_status": "review_required",
         "owner": "Task 96 HOB Scenario Evidence",
         "scenario": "Execute or read the bounded Task 96 HOB Scenario Evidence scenario identified by cli:scripts/run_task96_hob_route_a.py.",
@@ -3665,7 +3726,7 @@
         ]
       },
       "evidence": {
-        "source_sha256": "4b5c72f7f63056039a87b430ec1f7e5ddd3b483620bf1e6279643eae7d84f17c",
+        "source_sha256": "a07bbd95b331341374435dd735002ab372f6c50ab912ec40970cfe76e8eb9280",
         "line_count": 349,
         "queue_status": "review_required",
         "owner": "Task 96 Staff Payables Scenario Evidence",
@@ -3726,8 +3787,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "0477849a552088b044611c8d20bddfe14b5fc647f51a62d6e7556065ea8ffa20",
-        "line_count": 999,
+        "source_sha256": "2f1e59dc5fe74e0d616877e74133ee16a590ee563ee38573c2d04306a9fce937",
+        "line_count": 1006,
         "queue_status": "review_required",
         "owner": "Task 96 Replacement Scenario Evidence",
         "scenario": "Execute or read the bounded Task 96 Replacement Scenario Evidence scenario identified by cli:scripts/run_task96_rpre_browser_scenario.py.",
@@ -3773,6 +3834,67 @@
         "process_launch": false
       },
       "required_guards": []
+    },
+    {
+      "exact_id": "cli:scripts/run_task96_scheduling_lane_c.py",
+      "path": "scripts/run_task96_scheduling_lane_c.py",
+      "runtime": "python-cli",
+      "callers": {
+        "runtime_registration": [
+          "scripts/run_task96_scheduling_lane_c.py::cli:scripts/run_task96_scheduling_lane_c.py (entrypoint_review_queue_v1)"
+        ],
+        "repository_search": [
+          "Task 97 production-script inventory confirms CLI registration for cli:scripts/run_task96_scheduling_lane_c.py; external/operator execution authority remains incomplete"
+        ]
+      },
+      "replacement": "cli:scripts/run_task96_scheduling_lane_c.py",
+      "test": {
+        "status": "not_run",
+        "focused": "tests/test_task97_production_script_governance.py",
+        "oracle": "source digest and exact identity remain stable"
+      },
+      "oracle": "exit 0 with no unauthorized database or external writes",
+      "receipt": {
+        "status": "not_run",
+        "identity": "task97:cli:scripts/run_task96_scheduling_lane_c.py"
+      },
+      "evidence": {
+        "source_sha256": "4caa89e2d21b868721c78b13958478963895fa14e63ad6ee7c27de55eaa69ae3",
+        "line_count": 505,
+        "queue_status": "review_required",
+        "owner": "Task 96 Scheduling Scenario Evidence",
+        "scenario": "Execute or read the bounded Task 96 Scheduling Scenario Evidence scenario identified by cli:scripts/run_task96_scheduling_lane_c.py.",
+        "operator": "authorized Task 96 evidence operator; caller not evidenced",
+        "observed": {
+          "dry_run": false,
+          "explicit_db": false,
+          "host_check": false,
+          "schema_fingerprint": false,
+          "prior_dry_run_receipt": false,
+          "backup_receipt": false,
+          "explicit_apply": false,
+          "verify": false,
+          "resume_replay": true,
+          "terminal_receipt": false,
+          "production_authority": false
+        }
+      },
+      "classification": "test-only",
+      "capabilities": {
+        "kind": "test-only",
+        "database": "none",
+        "production_mutation": false,
+        "data_import": false,
+        "process_launch": false
+      },
+      "required_guards": [],
+      "guard_gap": [
+        "caller_evidence_and_terminal_disposition"
+      ],
+      "gate": {
+        "status": "PASS",
+        "reason": "test-only entry is bounded to its allowlisted disposable target"
+      }
     },
     {
       "exact_id": "cli:scripts/seed_payment_schedule_normal_case.py",

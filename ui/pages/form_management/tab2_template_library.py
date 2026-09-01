@@ -16,7 +16,7 @@ from ui.pages.form_management.shared import (
 )
 
 
-def _render_tab2_template_library(form_db_table_fields, field_types, field_widths, global_stats, target_order):
+def _render_tab2_template_library(form_db_table_fields, field_types, field_widths, global_stats, target_order, order_information=None):
     """TAB 2: 自訂表單模板庫 (5:5 雙視窗 Side-by-Side + 拖拉排序 + 二次確認刪除)"""
     st.markdown("### 🗄️ 所有已建立之表單模板庫 (支援 5:5 雙視窗實時預覽、順序平移與二次刪除確認)")
 
@@ -179,10 +179,10 @@ def _render_tab2_template_library(form_db_table_fields, field_types, field_width
 
         with col_right:
             st.markdown("#### 👁️ 右側：實時單據與 PDF 即時預覽")
-            live_html = render_html_document(draft_tpl, target_order, global_stats)
+            live_html = render_html_document(draft_tpl, target_order, global_stats, order_information)
             st.iframe(live_html, height=620)
 
     else:
         st.markdown("---")
-        doc_html = render_html_document(curr_tpl, target_order, global_stats)
+        doc_html = render_html_document(curr_tpl, target_order, global_stats, order_information)
         st.iframe(doc_html, height=580)

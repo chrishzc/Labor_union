@@ -14,6 +14,9 @@ from typing import Any, Iterator
 from infrastructure.db.contract_external_signing_repository import (
     MySqlContractExternalSigningRepository,
 )
+from infrastructure.mysql.contract_full_preview_repository import (
+    MySqlFullContractProjectionRepository,
+)
 from infrastructure.db.contract_unsigned_pdf_repository import (
     MySqlContractUnsignedPdfRepository,
 )
@@ -34,6 +37,7 @@ from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.identities import ActorContext, CorrelationId
 from subsystems.contract_signing.external_signing_workflow import ExternalSigningWorkflow
+from subsystems.contract_signing.full_contract_preview import FullContractPreviewApplication
 from subsystems.contract_signing.final_document_preview_token import (
     HmacFinalDocumentPreviewTokenCodec,
 )
@@ -58,6 +62,7 @@ class ContractExternalSigningApplication:
     controlled_files: ControlledFileWorkflow
     final_documents: FinalSignedContractWorkflow
     unsigned_documents: UnsignedContractPdfApplication
+    full_preview: FullContractPreviewApplication
 
     def load_facts(self, case_no: str):
         facts = self.repository.load_active_session_by_case(case_no, for_update=False)
@@ -193,6 +198,10 @@ def get_contract_external_signing_application() -> Iterator[ContractExternalSign
                 unsigned_repository,
                 ContractUnsignedPdfStorage(controlled),
                 LibreOfficeContractRenderer(),
+            ),
+            full_preview=FullContractPreviewApplication(
+                MySqlFullContractProjectionRepository(connection),
+                clock,
             ),
         )
     finally:

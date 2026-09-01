@@ -11,6 +11,9 @@
 - outbound: caller-composed `SecurityAlertSink` — projects a committed Access alert intent without selecting or importing the Anomalies implementation。
 - inbound: `anomalies/anomalies` — central outbox worker supplies the concrete projection sink and invokes the Access-owned bounded delivery transaction。
 
+## Modules
+- `admin-entry-target-control` — 管理端入口 target 的 file-backed state、CAS／replay 與 artifact health gate；path: `modules/admin-entry-target-control.md`
+
 ## Contracts
 - `subsystems/access/` — Access workflows
 - `subsystems/access/security_alert_outbox.py` — Access-owned durable alert delivery state、retry與sink protocol

@@ -291,6 +291,7 @@ class LineConfigurationApplication:
             LineConfigurationKind.RICH_MENUS,
             LineConfigurationKind.LIFF,
             LineConfigurationKind.CUSTOMER_SERVICE,
+            LineConfigurationKind.NOTIFICATION_RULES,
         )
         results = []
         with self._unit_of_work_factory() as unit_of_work:

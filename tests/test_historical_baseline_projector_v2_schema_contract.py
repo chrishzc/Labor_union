@@ -91,10 +91,8 @@ def test_v2_is_the_fresh_assembly_and_validation_release_terminal() -> None:
     assert names.index("1014_historical_baseline_projector_v2.sql") < names.index(
         "1015_controlled_file_reference_finalize_leases.sql"
     )
-    assert names[-1] == "1021_task96_owner_contract_successors.sql"
-    assert validation_manifest["schema_parts"]["terminal_artifact"] == (
-        "1021_task96_owner_contract_successors.sql"
-    )
+    assert "1023_task96_line_safe_review_link_matching_outbox_v1.sql" in names
+    assert validation_manifest["schema_parts"]["terminal_artifact"] == names[-1]
     assert verify_manifest(validation_manifest) == []
     assert verify_release(validation_manifest) == []
 

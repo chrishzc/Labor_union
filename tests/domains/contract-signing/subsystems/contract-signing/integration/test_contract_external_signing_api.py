@@ -22,6 +22,7 @@ from domains.contract_signing.external_signing import (
     StaffSigningReportTarget,
 )
 from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.contract_signing.full_contract_preview import ContractPreviewScope
 
 
 CASE_NO = "CASE-EXT-1"
@@ -133,11 +134,35 @@ class FakeFinalDocuments:
         )
 
 
+class FakeFullPreview:
+    def _result(self, scope, assignment_id=None):
+        return SimpleNamespace(
+            case_no=CASE_NO,
+            scope=scope,
+            assignment_id=assignment_id,
+            template_key="contract_staff_service" if assignment_id else "contract_client_copy",
+            template_version="a" * 64,
+            owner_fingerprints={"orders": "b" * 64},
+            field_values={"F1": CASE_NO},
+            blockers=(),
+            preview_fingerprint=route.PreviewFingerprint("c" * 64),
+            ready_to_print=True,
+        )
+
+    def preview_client(self, case_no):
+        assert case_no == CASE_NO
+        return self._result(ContractPreviewScope.CLIENT)
+
+    def preview_staff(self, case_no, assignment_id):
+        assert case_no == CASE_NO
+        return self._result(ContractPreviewScope.STAFF, assignment_id)
+
 class FakeApplication:
     def __init__(self) -> None:
         self.reports = FakeReports()
         self.controlled_files = FakeControlledFiles()
         self.final_documents = FakeFinalDocuments()
+        self.full_preview = FakeFullPreview()
         self.facts = ExternalSigningSessionFacts(
             SESSION_ID,
             CASE_NO,
@@ -241,6 +266,40 @@ def test_query_returns_only_react_contract_fields() -> None:
     }
     serialized = response.text.lower()
     assert all(term not in serialized for term in ("locator", "digest", "fingerprint", "url", "path"))
+
+
+def test_full_contract_preview_has_exact_targets_and_typed_values_without_locators() -> None:
+    client = _client(FakeApplication())
+
+    client_preview = client.post(
+        f"/api/v1/orders/{CASE_NO}/contract-signing/client/preview"
+    )
+    staff_preview = client.post(
+        f"/api/v1/orders/{CASE_NO}/contract-signing/staff-segments/71/preview"
+    )
+    assert client_preview.status_code == 200
+    assert client_preview.json()["data"]["scope"] == "client"
+    assert client_preview.json()["data"]["assignment_id"] is None
+    assert client_preview.json()["data"]["field_values"] == {"F1": CASE_NO}
+    assert client_preview.json()["data"]["ready_to_print"] is True
+    assert staff_preview.status_code == 200
+    assert staff_preview.json()["data"]["scope"] == "staff"
+    assert staff_preview.json()["data"]["assignment_id"] == 71
+    assert all(term not in client_preview.text.lower() for term in ("locator", "url", "path", "storage"))
+
+
+def test_full_contract_preview_preserves_not_found_target_and_blocker_mapping() -> None:
+    application = FakeApplication()
+    application.full_preview.preview_staff = lambda case_no, assignment_id: (_ for _ in ()).throw(
+        route.FullContractPreviewError(
+            "contract_preview_target_not_found", "找不到指定契約預覽對象。", not_found=True
+        )
+    )
+    response = _client(application).post(
+        f"/api/v1/orders/{CASE_NO}/contract-signing/staff-segments/999/preview"
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"]["code"] == "contract_preview_target_not_found"
 
 
 def test_manual_staff_report_uses_persisted_admin_and_closed_receipt_identity() -> None:

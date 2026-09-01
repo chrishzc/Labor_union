@@ -679,6 +679,8 @@ class MatchingNotificationIntentTransportView(MatchingCoordinationSchema):
     package_fingerprint: Sha256
     candidate_id: str = Field(min_length=1, max_length=191)
     idempotency_key: str = Field(min_length=1, max_length=191)
+    source_identity: str | None = Field(default=None, min_length=1, max_length=191)
+    recipient_selector: str | None = Field(default=None, min_length=1, max_length=191)
 
     @field_validator("package_fingerprint", "idempotency_key", mode="before")
     @classmethod

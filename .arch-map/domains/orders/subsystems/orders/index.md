@@ -19,6 +19,10 @@
 - `historical-review-remediation-presentation` — 歷史訂單review更正的business-first呈現與技術詳情分層; path: `modules/historical-review-remediation-presentation.md`
 - `order-card-projection` — Orders 管理端案件投影的 typed adaptation 與營運／技術資訊層級; path: `modules/order-card-projection.md`
 - `service-completion-presentation` — Orders服務完成Preview／Confirm／Apply與closed business presentation; path: `modules/service-completion-presentation.md`
+- `cancellation` — 訂單取消的跨 owner Preview／Apply 與 fresh readback；path: `modules/cancellation.md`
+- `terminal-closure-handoff` — terminal lifecycle event／receipt／outbox 的 LINE Identity typed handoff；path: `modules/terminal-closure-handoff.md`
+- `order-information` — typed order-information Query／Preview 與既有管理端 readback；path: `modules/order-information.md`
+- `order-information` — 服務人員訂單資訊-1／2 typed exact-target Query／Preview；path: `modules/order-information.md`
 
 ## Dependencies
 - outbound: `scheduling` — 服務日期／assignment 相關跨域協調只透過明確 contract。

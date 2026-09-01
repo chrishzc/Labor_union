@@ -44,9 +44,6 @@ from subsystems.orders.historical_adoption_workflow import (
     HistoricalOrderAdoptionWorkflow,
     HistoricalPairingResolution,
 )
-from subsystems.orders.historical_actual_start_rebuild import (
-    HistoricalActualStartRebuilder,
-)
 from subsystems.orders.terms_workflow import TermsWorkflowFacts
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.payroll.terms_impact import (
@@ -209,7 +206,9 @@ def test_deposit_paid_with_distinct_actual_start_builds_service_assignment_candi
 
     assert preview.after_status == OrderLifecycleStatus.ESTABLISHED.value
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
-    assert preview.issue_codes == ()
+    assert preview.issue_codes == (
+        "historical_accounting_service_calendar_unconfirmed",
+    )
 
 
 def test_matching_effective_assignment_is_reused_for_historical_actual_start():
@@ -287,25 +286,15 @@ def test_matching_effective_assignment_is_reused_for_historical_actual_start():
 
     preview = workflow.preview(row)
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_REUSED
-    assert preview.issue_codes == ()
+    assert preview.issue_codes == (
+        "historical_accounting_service_calendar_unconfirmed",
+    )
 
     workflow.apply(HistoricalOrderAdoptionRequest(
         row, preview.fingerprint, "historical-order:row:70", "operator",
         "adopt row 70", "historical-order:row:70:correlation",
     ))
-    assert calls[0] == ("preview", {
-        "case_no": "CASE-1", "actual_start_date": asserted_start,
-        "correlation_id": "historical-preview:historical-orders:test:row:70",
-        "source_staff_ids": (),
-    })
-    assert calls[1][0] == "preview"
-    assert calls[2] == ("persist", ())
-    assert calls[3] == ("apply", {
-        "case_no": "CASE-1", "actual_start_date": asserted_start,
-        "source_identity": "historical-orders:test:row:70",
-        "actor": "operator", "correlation_id": "historical-order:row:70:correlation",
-        "source_staff_ids": (),
-    })
+    assert calls == [("persist", ())]
 
 
 def test_historical_actual_start_preview_projects_the_asserted_schedule_root():
@@ -570,10 +559,9 @@ def test_deposit_paid_without_service_evidence_adopts_status_but_defers_actual_s
     assert preview.issue_codes == ("historical_actual_start_evidence_insufficient",)
 
 
-def test_deposit_paid_actual_service_dates_rebuild_after_status_adoption():
-    """A status-1 row uses its own verified caregiver evidence during Apply."""
+def test_deposit_paid_historical_period_skips_precision_and_requires_accounting_review():
+    """Historical roots advance without inventing a daily calendar or accounting."""
     actual_start_date = date(2026, 8, 7)
-    official_service_dates = (date(2026, 8, 7), date(2026, 8, 10))
     timeline: list[tuple[str, object]] = []
 
     class Repository(_Repository):
@@ -608,7 +596,7 @@ def test_deposit_paid_actual_service_dates_rebuild_after_status_adoption():
                 preview.resulting_version,
                 date(2026, 8, 6),
                 actual_start_date,
-                None,
+                row.actual_end_date,
             )
             return HistoricalOrderAdoptionReceipt(
                 preview.outcome,
@@ -620,73 +608,12 @@ def test_deposit_paid_actual_service_dates_rebuild_after_status_adoption():
                 preview.fingerprint,
             )
 
-    class Planner:
-        def calculate(self, case_no, candidate_start, *, for_update):
-            assert (case_no, candidate_start) == ("CASE-1", actual_start_date)
-            timeline.append(("service-date-calculate", for_update))
-            return official_service_dates
+    class ForbiddenPrecision:
+        def preview(self, **_values):
+            raise AssertionError("historical import must not calculate service days")
 
-        def preview_source_generation(
-            self, case_no, service_dates, *, source_staff_ids=()
-        ):
-            assert (case_no, service_dates) == ("CASE-1", official_service_dates)
-            assert source_staff_ids == (11,)
-            timeline.append(("service-date-source-validated", service_dates))
-
-        def prepare_source_generation(
-            self,
-            case_no,
-            service_dates,
-            *,
-            source_identity,
-            actor,
-            correlation_id,
-        ):
-            assert (case_no, service_dates) == ("CASE-1", official_service_dates)
-            assert source_identity == row.source_identity
-            assert actor == "test-operator"
-            assert correlation_id == "historical-order:actual-service-dates:correlation"
-            timeline.append(("service-date-source-prepared", service_dates))
-
-    class CanonicalActualStart:
-        def replay_from_immutable_source(self, _idempotency_key):
-            return None
-
-        def preview(self, case_no, candidate_start, *, recalculated_service_dates):
-            assert (case_no, candidate_start, recalculated_service_dates) == (
-                "CASE-1",
-                actual_start_date,
-                official_service_dates,
-            )
-            timeline.append(("actual-service-dates-previewed", recalculated_service_dates))
-            return SimpleNamespace(
-                order_version=4,
-                scheduling_version=5,
-                client_finance_version=6,
-                payroll_version=7,
-                fingerprint=fingerprint_payload({"actual-start": "preview"}),
-            )
-
-        def preview_historical_source(
-            self,
-            case_no,
-            candidate_start,
-            *,
-            recalculated_service_dates,
-            source_staff_ids,
-        ):
-            assert (case_no, candidate_start, recalculated_service_dates) == (
-                "CASE-1",
-                actual_start_date,
-                official_service_dates,
-            )
-            assert source_staff_ids == (11,)
-            timeline.append(("actual-service-dates-previewed", recalculated_service_dates))
-
-        def apply_in_current_unit_of_work(self, request, *, recalculated_service_dates):
-            assert request.new_actual_start_date == actual_start_date
-            assert recalculated_service_dates == official_service_dates
-            timeline.append(("actual-service-dates-applied", recalculated_service_dates))
+        def apply_in_current_unit_of_work(self, **_values):
+            raise AssertionError("historical import must not project accounting")
 
     row = SimpleNamespace(
         case_no="CASE-1",
@@ -713,18 +640,21 @@ def test_deposit_paid_actual_service_dates_rebuild_after_status_adoption():
         repository,
         _UnitOfWork,
         _Writer(),
-        HistoricalActualStartRebuilder(CanonicalActualStart(), Planner()),
+        ForbiddenPrecision(),
     )
 
     preview = workflow.preview(row)
 
     assert preview.after_status == OrderLifecycleStatus.ESTABLISHED.value
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
-    assert timeline == [
-        ("service-date-calculate", False),
-        ("service-date-source-validated", official_service_dates),
-        ("actual-service-dates-previewed", official_service_dates),
-    ]
+    assert preview.date_patch == (
+        ("actual_start_date", actual_start_date),
+        ("actual_end_date", row.actual_end_date),
+    )
+    assert preview.issue_codes == (
+        "historical_accounting_service_calendar_unconfirmed",
+    )
+    assert timeline == []
 
     receipt = workflow.apply(
         HistoricalOrderAdoptionRequest(
@@ -732,7 +662,7 @@ def test_deposit_paid_actual_service_dates_rebuild_after_status_adoption():
             preview.fingerprint,
             "historical-order:actual-service-dates",
             "test-operator",
-            "validate service dates before lifecycle transition",
+            "adopt historical roots without precision",
             "historical-order:actual-service-dates:correlation",
         )
     )
@@ -741,16 +671,4 @@ def test_deposit_paid_actual_service_dates_rebuild_after_status_adoption():
     assert repository.lifecycle_events == [
         (OrderLifecycleStatus.DISCUSSION.value, OrderLifecycleStatus.ESTABLISHED.value, 4)
     ]
-    assert timeline == [
-        ("service-date-calculate", False),
-        ("service-date-source-validated", official_service_dates),
-        ("actual-service-dates-previewed", official_service_dates),
-        ("service-date-calculate", False),
-        ("service-date-source-validated", official_service_dates),
-        ("actual-service-dates-previewed", official_service_dates),
-        ("status-transition", OrderLifecycleStatus.ESTABLISHED.value),
-        ("service-date-calculate", True),
-        ("service-date-source-prepared", official_service_dates),
-        ("actual-service-dates-previewed", official_service_dates),
-        ("actual-service-dates-applied", official_service_dates),
-    ]
+    assert timeline == [("status-transition", OrderLifecycleStatus.ESTABLISHED.value)]

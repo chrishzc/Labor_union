@@ -7,6 +7,10 @@
 
 import streamlit as st
 from ui.api_clients.form_management_api_client import FormManagementApiClient
+from ui.api_clients.order_information_api_client import (
+    OrderInformationApiClient,
+    OrderInformationApiError,
+)
 from ui.api_clients.order_summary_api_client import OrderSummaryApiClient
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
 
@@ -68,7 +72,7 @@ def _render_order_summary_pagination(next_cursor):
         st.session_state["form_management_summary_after_case_no"] = next_cursor
         st.rerun()
 
-def _render_form_management_page_shell(form_db_table_fields, field_types, field_widths, global_stats, target_order, form_table_for_key):
+def _render_form_management_page_shell(form_db_table_fields, field_types, field_widths, global_stats, target_order, form_table_for_key, order_information=None):
     """Render FormManagementUI's 2 fixed tabs."""
     tab2, tab3 = st.tabs([
         "🗄️ 2. 自訂表單模板庫與 5:5 雙視窗線上編輯預覽",
@@ -76,7 +80,7 @@ def _render_form_management_page_shell(form_db_table_fields, field_types, field_
     ])
 
     with tab2:
-        _render_tab2_template_library(form_db_table_fields, field_types, field_widths, global_stats, target_order)
+        _render_tab2_template_library(form_db_table_fields, field_types, field_widths, global_stats, target_order, order_information)
 
     with tab3:
         _render_tab3_contract_management(form_db_table_fields, form_table_for_key, global_stats, target_order)
@@ -122,6 +126,7 @@ def show():
         scope_mode = st.radio("⚙️ 選擇表單連動作用域", ["🎯 特定單筆案件 (契約/個人單據)", "📊 全域/多案件統計模式 (週報/統計表)"], horizontal=True, key="sbs_scope_mode")
     
     target_order = None
+    order_information = {}
     with col_order:
         if "特定單筆案件" in scope_mode and orders_data:
             order_opts = {
@@ -137,6 +142,23 @@ def show():
                     headers=admin_headers,
                 ).case_context(target_case_no)
                 target_order = _merge_client_context(target_order, context)
+                info_client = OrderInformationApiClient(
+                    base_url=base_url,
+                    headers=admin_headers,
+                )
+                for template_id in ("tpl_info_01", "tpl_info_02"):
+                    try:
+                        order_information[template_id] = info_client.query(
+                            target_case_no, template_id
+                        ).model_dump(mode="json")
+                    except OrderInformationApiError as error:
+                        # The typed API returns a closed blocker for missing
+                        # assignment or unavailable owner facts.  Keep the
+                        # template visible with safe blanks and no raw fallback.
+                        order_information[template_id] = {
+                            "fields": [],
+                            "blockers": [str(error)],
+                        }
 
         else:
             st.info("💡 目前切換為「全域/多案件統計模式」，無須鎖定單一訂單。")
@@ -158,5 +180,5 @@ def show():
     }
 
     _render_form_management_page_shell(
-        form_db_table_fields, field_types, field_widths, global_stats, target_order, form_table_for_key
+        form_db_table_fields, field_types, field_widths, global_stats, target_order, form_table_for_key, order_information
     )

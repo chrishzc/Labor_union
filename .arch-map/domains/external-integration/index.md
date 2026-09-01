@@ -22,7 +22,10 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — Global actor/outbox contract
 
 ## Verification routing
+- layout_status: `custom_current`
 - default_boundary: Domain
 - test_root: `tests/domains/external-integration/`
 - integration_root: subsystem-owned integration roots; see `.arch-map/tests/domains/external-integration/index.md`.
+- integration_root: `tests/test_line_knowledge_authorization_route_matrix.py`
+- integration_root: `tests/test_line_management_stage9.py`
 - remaining_layout_gap: selected flat Access/legacy Streamlit rollback tests only.

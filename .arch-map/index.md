@@ -50,21 +50,25 @@ Current higher-boundary living schema／release baselines remain at their path-s
 - integration_root: `tests/test_phase3_scenario_lineage.py`
 - integration_root: `tests/test_preserved_database_additive_upgrade_cutover.py`
 - integration_root: `tests/test_wp77_disposable_mysql_e2e.py`
+- integration_root: `tests/test_production_module_caller_graph.py`
+- integration_root: `tests/test_react_anomalies_entry_cutover.py`
+- integration_root: `tests/test_react_data_browser_entry_cutover.py`
+- integration_root: `tests/test_task97_entry_governance_artifact.py`
 
-Current canonical owner roots are:
+Current canonical owner roots are (routing notes; detailed ownership is declared by the corresponding Domain/Subsystem/Module leaf):
 
-- Orders — `tests/domains/orders/subsystems/orders/`
-- Scheduling — `tests/domains/scheduling/subsystems/scheduling/`
-- Client Finance — `tests/domains/client-finance/subsystems/client-finance/`
-- Staff Payables — `tests/domains/staff-payables/subsystems/staff-payables/`
-- Anomalies — `tests/domains/anomalies/subsystems/anomalies/`
-- Payroll — `tests/domains/payroll/subsystems/payroll/`
-- Finance Import — `tests/domains/finance-import/subsystems/finance-import/`
-- Government Subsidy — `tests/domains/government-subsidy/subsystems/government-subsidy/`
-- Case Import — `tests/subsystems/case_import/`（既有特殊 layout；Domain-level higher boundary仍可使用 `tests/domains/case_import/`）
-- Access — `tests/domains/external-integration/subsystems/access/`
-- LINE — `tests/domains/external-integration/subsystems/line/`
-- Contract Signing — `tests/domains/contract-signing/subsystems/contract-signing/`
+- Orders — tests/domains/orders/subsystems/orders/
+- Scheduling — tests/domains/scheduling/subsystems/scheduling/
+- Client Finance — tests/domains/client-finance/subsystems/client-finance/
+- Staff Payables — tests/domains/staff-payables/subsystems/staff-payables/
+- Anomalies — tests/domains/anomalies/subsystems/anomalies/
+- Payroll — tests/domains/payroll/subsystems/payroll/
+- Finance Import — tests/domains/finance-import/subsystems/finance-import/
+- Government Subsidy — tests/domains/government-subsidy/subsystems/government-subsidy/
+- Case Import — tests/subsystems/case_import/（既有特殊 layout；Domain-level higher boundary仍可使用 tests/domains/case_import/）
+- Access — tests/domains/external-integration/subsystems/access/
+- LINE — tests/domains/external-integration/subsystems/line/
+- Contract Signing — tests/domains/contract-signing/subsystems/contract-signing/
 
 `tests/` flat root不是 owner-local 測試的預設目的地。只有 application composition/OpenAPI、真正 cross-domain、release/schema/migration、disposable-MySQL/engine、Task97/governance、或有明確 compatibility/path consumer 的 higher-boundary coverage 才應留在 flat/higher roots。詳細路由見 `tests/index.md`。
 

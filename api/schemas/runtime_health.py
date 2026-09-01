@@ -94,6 +94,62 @@ class AlertAdminCandidateResponse(BaseModel):
     line_linked: bool
 
 
+class SafeReviewLinkIssueRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    link_id: str = Field(min_length=1, max_length=191)
+    raw_token: str = Field(min_length=16, max_length=512)
+    canonical_internal_target: str = Field(min_length=1, max_length=191)
+    target_version: int = Field(ge=0)
+    source_alert_identity: str = Field(min_length=1, max_length=191)
+    allowed_actor_ref: str = Field(min_length=1, max_length=191)
+    required_capability: str = Field(min_length=1, max_length=100)
+    ttl_seconds: int = Field(ge=1, le=900)
+    idempotency_key: str = Field(min_length=1, max_length=191)
+    correlation_id: str = Field(min_length=1, max_length=191)
+
+
+class SafeReviewLinkRedeemRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    raw_token: str = Field(min_length=1, max_length=512)
+    capability: str = Field(min_length=1, max_length=100)
+    current_target: str = Field(min_length=1, max_length=191)
+    current_target_version: int = Field(ge=0)
+    idempotency_key: str = Field(min_length=1, max_length=191)
+    correlation_id: str = Field(min_length=1, max_length=191)
+
+
+class SafeReviewLinkRevokeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    reason: str = Field(min_length=1, max_length=500)
+    idempotency_key: str = Field(min_length=1, max_length=191)
+    correlation_id: str = Field(min_length=1, max_length=191)
+
+
+class SafeReviewLinkResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    link_id: str
+    status: Literal["issued", "redeemed", "expired", "revoked"]
+    canonical_internal_target: str
+    target_version: int = Field(ge=0)
+    source_alert_identity: str
+    expires_at_utc: datetime
+    redeemed_at_utc: datetime | None
+    revoked_at_utc: datetime | None
+    root_version: int = Field(ge=0)
+
+
+class SafeReviewLinkReceiptResponse(BaseModel):
+    receipt_id: str
+    outcome: Literal["issued", "redeemed", "expired", "revoked"]
+    replayed: bool
+    root_version: int = Field(ge=0)
+    readback: SafeReviewLinkResponse
+
+
 class AlertTargetMutationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 

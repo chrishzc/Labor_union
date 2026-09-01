@@ -19,4 +19,3 @@
 - layout_status: `custom_current`
 - default_boundary: Domain
 - test_root: `tests/domains/anomalies/`
-- integration_root: `tests/domains/anomalies/subsystems/anomalies/integration/`

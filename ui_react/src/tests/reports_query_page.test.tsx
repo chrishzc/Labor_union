@@ -80,6 +80,23 @@ describe('ReportsPage query-only presentation', () => {
     await waitFor(() => expect(weeklyOperationsReportQueryClient.query).toHaveBeenCalledTimes(3));
   });
 
+  it('type=week fill 後 reload 仍保留選定週並查詢 canonical Monday', async () => {
+    render(<ReportsPage />);
+    await screen.findByText('CASE-WEEK-001');
+
+    const weekInput = screen.getByLabelText('週別') as HTMLInputElement;
+    // Browser fill can update the native value before React receives an input/change event.
+    weekInput.value = '2026-W34';
+    expect(weekInput.value).toBe('2026-W34');
+    fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+
+    await waitFor(() => expect(weeklyOperationsReportQueryClient.query).toHaveBeenLastCalledWith(
+      '2026-08-17',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    expect(weekInput.value).toBe('2026-W34');
+  });
+
   it('scope 變更後忽略舊週報 export completion', async () => {
     let resolveExport!: (artifact: { blob: Blob; filename: string }) => void;
     vi.mocked(weeklyOperationsReportExportClient.download).mockImplementation(

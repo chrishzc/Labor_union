@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "20cdeeadc269190ab3d0b66d13e0ca2bffab30059257e86370beb8b08a8e76c0",
+  "active_artifacts_sha256": "9e57d2a936f09a80a799845bc6c5128e681519280e9e777d3ed2a05915434073",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -155,6 +155,10 @@
     "db/schema_parts/1019_line_identity_role_scope.sql",
     "db/schema_parts/1020_historical_owner_payment_settlement.sql",
     "db/schema_parts/1021_task96_owner_contract_successors.sql",
+    "db/schema_parts/1023_task96_line_safe_review_link_matching_outbox_v1.sql",
+    "db/schema_parts/1024_task96_line_identity_revocation_role_binding_fk.sql",
+    "db/schema_parts/212_government_subsidy_return_excess_recovery.sql",
+    "db/schema_parts/213_scheduling_service_day_attachment_kind.sql",
     "db/schema_parts/214_historical_order_pairing_resolution_reused.sql"
   ],
   "classifications": {
@@ -162,6 +166,8 @@
     "db/schema_parts/153_retire_empty_legacy_field_inventory.sql": "migration-only",
     "db/schema_parts/189_client_refund_recipient_snapshot_local_upgrade.sql": "migration-only",
     "db/schema_parts/190_government_subsidy_overpayment_disposition_local_upgrade.sql": "migration-only",
+    "db/schema_parts/1025_task96_government_subsidy_return_excess_recovery.sql": "migration-only",
+    "db/schema_parts/1026_task96_scheduling_service_day_attachment_kind.sql": "migration-only",
     "db/schema_parts/1027_historical_order_pairing_resolution_reused.sql": "migration-only"
   },
   "retirement_contracts": {
@@ -199,6 +205,24 @@
       "data_effect": "preserve upgrade keeps the additive bridge for older local schemas only",
       "replay": "release manifest replays part 190 only during preserve-data candidate upgrade",
       "rollback": "retain source dump and discard the candidate before same-name replacement",
+      "unresolved_policy": "partial or drift owned metadata blocks candidate apply"
+    },
+    "db/schema_parts/1025_task96_government_subsidy_return_excess_recovery.sql": {
+      "source_object": "preserve-data additive owner root for Government Subsidy outgoing-return excess",
+      "successor": "db/schema_parts/212_government_subsidy_return_excess_recovery.sql",
+      "terminal_schema_evidence": "fresh assembly uses canonical part 212; preserve chain uses 1025 for existing databases",
+      "data_effect": "schema_only; existing government subsidy return and finance lineage is preserved",
+      "replay": "preserve release chain applies 1025 only when its owned objects are absent",
+      "rollback": "retain source backup and discard candidate before same-name replacement",
+      "unresolved_policy": "partial or drift owned metadata blocks candidate apply"
+    },
+    "db/schema_parts/1026_task96_scheduling_service_day_attachment_kind.sql": {
+      "source_object": "preserve-data additive successor for the Scheduling service-day log Baby Log controlled-media attachment kind",
+      "successor": "db/schema_parts/213_scheduling_service_day_attachment_kind.sql",
+      "terminal_schema_evidence": "fresh assembly uses canonical part 213; preserve chain uses 1026 for existing databases",
+      "data_effect": "schema_only; existing service-day log attachment lineage is preserved",
+      "replay": "preserve release chain applies 1026 only when the parent attachment_kind column is the released meal_photo predecessor",
+      "rollback": "retain source backup and discard candidate before same-name replacement",
       "unresolved_policy": "partial or drift owned metadata blocks candidate apply"
     },
     "db/schema_parts/1027_historical_order_pairing_resolution_reused.sql": {

@@ -112,6 +112,7 @@ from subsystems.line.outbox_contracts import (
     CompleteLineOutboxCommand,
     LineOutboxWorkItem,
 )
+from subsystems.line.feedback_contracts import LineFeedbackRepository
 from subsystems.line.order_group_contracts import (
     BindLineOrderGroupCommand,
     BindLineOrderGroupResult,
@@ -568,6 +569,12 @@ class LineDeliveryTaskRepositoryPort(Protocol):
         query: ClaimLineDeliveryTasksQuery,
     ) -> tuple[LineDeliveryTaskSnapshot, ...]: ...
 
+    def claim_specific(
+        self,
+        task_id: LineDeliveryTaskId,
+        query: ClaimLineDeliveryTasksQuery,
+    ) -> LineDeliveryTaskSnapshot | None: ...
+
     def record_attempt(
         self,
         command: RecordLineDeliveryAttemptCommand,
@@ -971,6 +978,7 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     matching_notifications: object
     knowledge_questions: object
     customer_service: object
+    feedback: LineFeedbackRepository
     identity_management: object
 
 
@@ -987,6 +995,7 @@ __all__ = [
     "LineIdentityFlowRepositoryPort",
     "LineIdentityReviewRepositoryPort",
     "LineIdempotencyReceiptPort",
+    "LineFeedbackRepository",
     "LineMediaMetadataRepositoryPort",
     "LineRichMenuMediaAssetQueryRepositoryPort",
     "LineMediaObjectStorePort",

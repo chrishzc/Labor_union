@@ -710,6 +710,19 @@ def _escalation_view_response(view) -> HumanEscalationViewResponse:
         created_at=view.created_at,
         updated_at=view.updated_at,
         available_actions=list(view.available_actions),
+        delivery_task_ref=view.delivery_task_ref,
+        delivery_outcome_ref=view.delivery_outcome_ref,
+        trigger_identity=view.trigger_identity,
+        attempt_window=(
+            None
+            if view.attempt_window is None
+            else {
+                "attempt_count": view.attempt_window.attempt_count,
+                "maximum_attempts": view.attempt_window.maximum_attempts,
+                "generation": view.attempt_window.generation,
+            }
+        ),
+        owner_selector=view.owner_selector,
     )
 
 

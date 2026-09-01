@@ -268,15 +268,19 @@ def _require_control_event(cursor, request, event_id) -> None:
 
 
 def _insert_lifecycle_event(cursor, request, preview):
+    source_subject = _line_user_id(cursor, request.case_no)
     cursor.execute(
         _LIFECYCLE_EVENT_INSERT_SQL,
-        _lifecycle_values(request, preview),
+        _lifecycle_values(request, preview, source_subject),
     )
     return int(cursor.lastrowid)
 
 
-def _lifecycle_values(request, preview):
+def _lifecycle_values(request, preview, source_subject):
     impact = preview.lifecycle_impact
+    facts = _lifecycle_facts(request, preview)
+    if impact.after_status is OrderLifecycleStatus.CANCELLED:
+        facts.update(_terminal_closure_fields(request, preview, None, source_subject))
     return (
         request.case_no,
         "order_cancellation_applied",
@@ -286,7 +290,7 @@ def _lifecycle_values(request, preview):
         preview.candidate.cancellation_date,
         preview.order_version,
         request.idempotency_key.value,
-        _canonical_json(_lifecycle_facts(request, preview)),
+        _canonical_json(facts),
     )
 
 
@@ -315,6 +319,12 @@ def _append_lifecycle_outbox(cursor, request, preview, event_id):
         "correlation_id": request.correlation_id.value,
         "resulting_order_version": preview.order_version + 1,
     }
+    if preview.lifecycle_impact.after_status is OrderLifecycleStatus.CANCELLED:
+        payload.update(
+            _terminal_closure_fields(
+                request, preview, event_id, _line_user_id(cursor, request.case_no)
+            )
+        )
     cursor.execute(
         "INSERT INTO orders_domain_outbox "
         "(case_no,lifecycle_event_id,intent_key,intent_type,payload_snapshot) "
@@ -326,6 +336,30 @@ def _append_lifecycle_outbox(cursor, request, preview, event_id):
             _canonical_json(payload),
         ),
     )
+
+
+def _line_user_id(cursor, case_no):
+    cursor.execute(
+        "SELECT c.line_user_id FROM orders o JOIN clients c ON c.id=o.client_id "
+        "WHERE o.case_no=%s",
+        (case_no,),
+    )
+    row = cursor.fetchone() or {}
+    return row.get("line_user_id") or None
+
+
+def _terminal_closure_fields(request, preview, event_id, source_subject):
+    version = preview.order_version + 1
+    identity = f"case-terminal:{request.case_no}:cancellation:{version}"
+    return {
+        "event_type": "case_terminal_closure",
+        "source_event_identity": identity,
+        "terminal_kind": "cancellation",
+        "source_subject": source_subject,
+        "producer_reference": f"orders.lifecycle_event:{request.case_no}:{version}",
+        "occurred_at": preview.candidate.cancellation_date.isoformat() + "T00:00:00+00:00",
+        "idempotency_identity": identity,
+    }
 
 
 def _child_identity(request, purpose):

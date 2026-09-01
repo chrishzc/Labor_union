@@ -17,4 +17,3 @@
 ## Verification routing
 - default_boundary: Domain
 - test_root: `tests/domains/orders/`
-- integration_root: `tests/integration/` — shared legacy higher-boundary root; see `.arch-map/tests/domains/orders/index.md`.

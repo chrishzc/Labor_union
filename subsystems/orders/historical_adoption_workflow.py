@@ -20,9 +20,7 @@ from domains.orders.historical_adoption import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.ports import UnitOfWork
-from subsystems.orders.historical_actual_start_rebuild import (
-    HistoricalActualStartRebuilder,
-)
+from subsystems.orders.historical_actual_start_rebuild import HistoricalActualStartRebuilder
 from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbookRow
 
 
@@ -118,7 +116,9 @@ class HistoricalOrderAdoptionWorkflow:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
         self._scheduling_historical_assignment = scheduling_historical_assignment
-        self._actual_start_rebuilder = actual_start_rebuilder
+        # Compatibility-only dependency: historical adoption deliberately does
+        # not invoke Actual Start calculation or finance/payroll projection.
+        del actual_start_rebuilder
 
     def preview(self, row: HistoricalOrderWorkbookRow) -> HistoricalOrderAdoptionPreview:
         return self._build_preview(row, for_update=False)
@@ -148,7 +148,6 @@ class HistoricalOrderAdoptionWorkflow:
             # repair Scheduling/Actual Start under its own idempotency key.
             preview = self._build_preview(request.row, for_update=True)
             self._append_assignment_candidates(preview)
-            self._rebuild_actual_service_period(request, preview)
             return replay
         preview = self._build_preview(request.row, for_update=True)
         if preview.fingerprint != request.preview_fingerprint:
@@ -157,7 +156,6 @@ class HistoricalOrderAdoptionWorkflow:
             return _unmatched_receipt(preview)
         assignment_ids = self._append_assignment_candidates(preview)
         receipt = self._repository.persist(request, preview, assignment_ids)
-        self._rebuild_actual_service_period(request, preview)
         return receipt
 
     def _append_assignment_candidates(
@@ -173,63 +171,6 @@ class HistoricalOrderAdoptionWorkflow:
                 if item.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
             ),
         )
-
-    def _rebuild_actual_service_period(self, request, preview) -> None:
-        rebuild = self._actual_service_period_rebuild(
-            request.row,
-            preview,
-            for_update=True,
-        )
-        if rebuild is None or self._actual_start_rebuilder is None:
-            return
-        _current, case_no, actual_start_date = rebuild
-        rebuild_kwargs = dict(
-            case_no=case_no,
-            actual_start_date=actual_start_date,
-            source_identity=request.row.source_identity,
-            actor=request.actor,
-            correlation_id=request.correlation_id,
-        )
-        source_staff_ids = tuple(
-            item.staff_id
-            for item in preview.pairings
-            if item.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
-            and item.staff_id is not None
-        )
-        rebuild_kwargs["source_staff_ids"] = source_staff_ids
-        self._actual_start_rebuilder.apply_in_current_unit_of_work(
-            **rebuild_kwargs,
-        )
-
-    def _actual_service_period_rebuild(self, row, preview, *, for_update):
-        if (
-            preview.outcome is not HistoricalOrderOutcome.ADOPTED
-            or preview.case_no is None
-            or row.asserted_status is not HistoricalOrderSourceStatus.DEPOSIT_PAID
-            or not isinstance(row.actual_start_date, date)
-            or "historical_actual_start_evidence_insufficient" in preview.issue_codes
-        ):
-            return None
-        current = self._repository.load_order(
-            preview.case_no,
-            row.client_name,
-            for_update=for_update,
-        )
-        if (
-            current is None
-            or not isinstance(current.planned_start_date, date)
-            or current.planned_start_date == row.actual_start_date
-            or (
-                not _has_actual_start_patch(preview)
-                and current.actual_start_date != row.actual_start_date
-            )
-            or (
-                current.actual_start_date == row.actual_start_date
-                and current.actual_end_date is not None
-            )
-        ):
-            return None
-        return current, current.case_no, row.actual_start_date
 
     def _replay(self, request, command_fingerprint):
         stored = self._repository.find_receipt(
@@ -291,32 +232,7 @@ class HistoricalOrderAdoptionWorkflow:
             candidate = build_historical_order_candidate(current, source)
             pairings = self._pairings(row, current, candidate, for_update)
         issues = tuple(sorted(set(candidate.issue_codes + tuple(code for item in pairings for code in item.issue_codes))))
-        preview = _preview(row, current, candidate, pairings, issues)
-        self._preview_actual_service_period(row, preview)
-        return preview
-
-    def _preview_actual_service_period(self, row, preview) -> None:
-        if self._actual_start_rebuilder is None:
-            return
-        rebuild = self._actual_service_period_rebuild(
-            row,
-            preview,
-            for_update=False,
-        )
-        if rebuild is None:
-            return
-        _current, case_no, actual_start_date = rebuild
-        self._actual_start_rebuilder.preview(
-            case_no=case_no,
-            actual_start_date=actual_start_date,
-            correlation_id=f"historical-preview:{row.source_identity}",
-            source_staff_ids=tuple(
-                item.staff_id
-                for item in preview.pairings
-                if item.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
-                and item.staff_id is not None
-            ),
-        )
+        return _preview(row, current, candidate, pairings, issues)
 
     def _pairings(self, row, current, candidate, for_update):
         existing = self._repository.active_assignments(
@@ -455,10 +371,6 @@ def _matching_effective_assignment(existing, staff_id, source):
         ):
             return assignment
     return None
-
-
-def _has_actual_start_patch(preview) -> bool:
-    return any(field == "actual_start_date" for field, _value in preview.date_patch)
 
 
 def _preview(row, current, candidate, pairings, issues):

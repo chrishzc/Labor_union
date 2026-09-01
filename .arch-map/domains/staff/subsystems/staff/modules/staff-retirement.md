@@ -5,7 +5,7 @@
 - subsystem: `staff`
 
 ## Responsibility
-擁有 Staff lifecycle Query／Preview／Apply transaction。真正 `active → retired` transition 透過 typed effect port，在同一 outer Unit of Work 呼叫 LINE-owned staff-role revocation；不直接實作 LINE repository、menu 或 provider 規則。
+擁有 Staff lifecycle Query／Preview／Apply transaction，且在退役的 owner boundary fail-closed 檢查既有 Scheduling assignment。真正 `active → retired` transition 透過 typed effect port，在同一 outer Unit of Work 呼叫 LINE-owned staff-role revocation；不直接實作 LINE repository、menu 或 provider 規則。
 
 ## Implementation
 - `domains/staff/retirement.py`

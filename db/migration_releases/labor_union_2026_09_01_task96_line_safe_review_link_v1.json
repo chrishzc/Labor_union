@@ -1,0 +1,57 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-task96-line-safe-review-link-2026-09-01-v1",
+  "release_metadata": {
+    "release_name": "Task 96 LINE safe review link and matching outbox successor",
+    "application_version": "task96-line-safe-review-link-v1",
+    "published_at": "2026-09-01",
+    "description": "Additive safe-review-link roots and preserve-data-safe matching intent enum successor"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-schema-assembly-2026-08-15-v1"
+  },
+  "artifacts": [{
+    "name": "1023_task96_line_safe_review_link_matching_outbox_v1.sql",
+    "relative_path": "db/schema_parts/1023_task96_line_safe_review_link_matching_outbox_v1.sql",
+    "sha256": "b5917e385978d6c0eb75cfe59dc3be7fed3ad9eb575cca1bb8c25de623a86659",
+    "dependencies": [],
+    "data_effect": "schema_only",
+    "rollback_policy": "forward-only-preserve-existing-matching-outbox-and-safe-link-lineage",
+    "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+  }],
+  "backfills": [],
+  "verification_contracts": [{
+    "verification_id": "task96-line-safe-review-link-owned-objects",
+    "phase": "post-schema",
+    "policy": "candidate-owned-objects-exact-and-existing-outbox-readable",
+    "read_only": true,
+    "blocking": true
+  }],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["task96-line-safe-review-link-v1"],
+    "required_restart_targets": ["api", "worker"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["task96-line-safe-review-link-owned-objects"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_01_task96_line_safe_review_link_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_01_task96_line_safe_review_link_v1.descriptors.json",
+    "sha256": "f041290c84c5f53ab6587b5809a4331a171eafa5b2e4fe865e125940474cd711",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

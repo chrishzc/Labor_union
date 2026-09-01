@@ -23,6 +23,7 @@ from api.dependencies.contract_external_signing import (
 )
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
+from api.schemas.full_contract_preview import FullContractPreviewView
 from domains.contract_signing.external_signing import ExternalSigningRuleError
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
@@ -42,6 +43,7 @@ from subsystems.contract_signing.final_document_workflow import (
     FinalDocumentWorkflowError,
     PreviewFinalSignedContractUpload,
 )
+from subsystems.contract_signing.full_contract_preview import FullContractPreviewError
 from subsystems.contract_signing.unsigned_contract_pdf import UnsignedContractPdfError
 from subsystems.controlled_files.contracts import ControlledFileStorageError
 from subsystems.controlled_files.workflow import (
@@ -340,6 +342,43 @@ def query_external_signing(
     return _call(
         lambda: BaseResponse(data=_public_query(application.query_case(case_no))),
         "query",
+    )
+
+
+@router.post(
+    "/{case_no}/contract-signing/client/preview",
+    response_model=BaseResponse[FullContractPreviewView],
+)
+def preview_full_client_contract(
+    case_no: str = ApiPath(pattern=_CASE),
+    _: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    return _call(
+        lambda: BaseResponse(
+            data=_public_full_preview(application.full_preview.preview_client(case_no))
+        ),
+        "full-contract-preview",
+    )
+
+
+@router.post(
+    "/{case_no}/contract-signing/staff-segments/{segment_id}/preview",
+    response_model=BaseResponse[FullContractPreviewView],
+)
+def preview_full_staff_contract(
+    case_no: str = ApiPath(pattern=_CASE),
+    segment_id: int = ApiPath(ge=1),
+    _: AdminPrincipal = Depends(require_persisted_admin),
+    application: ContractExternalSigningApplication = Depends(_application),
+):
+    return _call(
+        lambda: BaseResponse(
+            data=_public_full_preview(
+                application.full_preview.preview_staff(case_no, segment_id)
+            )
+        ),
+        "full-contract-preview",
     )
 
 
@@ -695,6 +734,21 @@ def _public_query(value: Mapping[str, Any]) -> dict[str, Any]:
     return ExternalSigningQueryView.model_validate(value).model_dump(mode="json")
 
 
+def _public_full_preview(value) -> dict[str, Any]:
+    payload = {
+        "case_no": value.case_no,
+        "scope": value.scope.value,
+        "assignment_id": value.assignment_id,
+        "template_key": value.template_key,
+        "template_version": value.template_version,
+        "owner_fingerprints": dict(value.owner_fingerprints),
+        "field_values": dict(value.field_values),
+        "blockers": list(value.blockers),
+        "preview_fingerprint": value.preview_fingerprint.value,
+        "ready_to_print": value.ready_to_print,
+    }
+    return FullContractPreviewView.model_validate(payload).model_dump(mode="json")
+
 def _public_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
     return ExternalSigningReceiptView.model_validate(value).model_dump(mode="json")
 
@@ -800,9 +854,9 @@ def _call(action, correlation_id: str):
     except ContractCompletionWorkflowError as error:
         typed = error.error
         raise typed_http_error(409, str(typed.category), typed.code, typed.message, correlation_id, retryable=typed.retryable) from error
-    except (ExternalSigningTypedError, ExternalSigningRuleError, FinalDocumentWorkflowError) as error:
+    except (ExternalSigningTypedError, ExternalSigningRuleError, FinalDocumentWorkflowError, FullContractPreviewError) as error:
         category = getattr(error, "category", "conflict")
-        status = 404 if category == "not_found" else 409
+        status = 404 if getattr(error, "not_found", False) or category == "not_found" else 409
         raise typed_http_error(status, category, str(getattr(error, "code", "external_signing_conflict")), str(error), correlation_id, retryable=getattr(error, "retryable", False)) from error
     except UnsignedContractPdfError as error:
         status = 404 if error.category == "not_found" else 503 if error.retryable else 409

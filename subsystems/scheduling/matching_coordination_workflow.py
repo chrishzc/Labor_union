@@ -55,6 +55,8 @@ from subsystems.scheduling.matching_coordination_contracts import (
     MatchingCriteriaRecontactIntentProjection,
     MatchingNotificationIntentProjection,
     MatchingNotificationRecipientRole,
+    M3_MATCH_SUCCESS_CLIENT_SOURCE_ID,
+    M3_MATCH_SUCCESS_STAFF_SOURCE_ID,
     MatchingPackageView,
     PreviewCriteriaDiffResend,
     PreviewLeaveImpactOnMatching,
@@ -724,13 +726,28 @@ class MatchingCoordinationWorkflow:
         command = command_fingerprint(request)
         if isinstance(request, ApplyZeroCandidateConfirmation):
             event_id = f"{request.idempotency_key.value}:zero-candidate-confirmed"
+        elif zero_candidate_decision is not None:
+            event_id = zero_candidate_decision.event_id
         else:
             event_id = f"{request.idempotency_key.value}:decision" if candidate_id is not None or isinstance(request, ApplyCustomerMatchingDecision) else None
         outbox = outbox_intent_ids
         if cross_domain_request is not None:
             outbox = (cross_domain_request.request_id,)
         if zero_candidate_decision is not None and zero_candidate_decision.decision is ZeroCandidateDecision.AGREE:
-            outbox = (f"{zero_candidate_decision.event_id}:orders",)
+            # A zero-pool compromise is first a client-facing proposal.  The
+            # owning Orders handoff remains explicit for the agreed branch,
+            # but it must follow a durable, recipient-bound decision prompt.
+            outbox = (
+                f"{zero_candidate_decision.event_id}:client-decision",
+                f"{zero_candidate_decision.event_id}:orders",
+            )
+        elif zero_candidate_decision is not None and zero_candidate_decision.decision is ZeroCandidateDecision.DISAGREE:
+            # Rejection is a typed Customer Service handoff; LINE never edits
+            # an Orders or Assignment root directly.
+            outbox = (
+                f"{zero_candidate_decision.event_id}:client-decision",
+                f"{zero_candidate_decision.event_id}:customer-service",
+            )
         notifications: tuple[MatchingNotificationIntentProjection, ...] = ()
         if (
             isinstance(request, ApplyCustomerMatchingDecision)
@@ -754,6 +771,8 @@ class MatchingCoordinationWorkflow:
                     package_fingerprint=facts.package.fingerprint,
                     candidate_id=candidate_id,
                     idempotency_key=request.idempotency_key,
+                    source_identity=M3_MATCH_SUCCESS_CLIENT_SOURCE_ID,
+                    recipient_selector="assignment.client_snapshot",
                 ),
                 MatchingNotificationIntentProjection(
                     intent_id=f"{event_reference}:notify:caregiver",
@@ -766,6 +785,8 @@ class MatchingCoordinationWorkflow:
                     package_fingerprint=facts.package.fingerprint,
                     candidate_id=candidate_id,
                     idempotency_key=request.idempotency_key,
+                    source_identity=M3_MATCH_SUCCESS_STAFF_SOURCE_ID,
+                    recipient_selector="assignment.staff_snapshot",
                 ),
             )
             outbox = tuple((*outbox, *(item.intent_id for item in notifications)))

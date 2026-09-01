@@ -46,6 +46,7 @@ from subsystems.line.order_group_application import LineOrderGroupQueryApplicati
 from subsystems.line.webhook_intake import LineWebhookIntake
 from subsystems.line.runtime_alert_application import LineRuntimeApplication
 from subsystems.line.runtime_health import classify_line_worker_health
+from subsystems.line.feedback_application import LineFeedbackApplication
 
 
 def line_webhook_runtime_mode() -> LineRuntimeMode:
@@ -98,6 +99,11 @@ def get_line_rich_menu_application() -> LineRichMenuApplication:
 @lru_cache(maxsize=1)
 def get_line_order_group_query_application() -> LineOrderGroupQueryApplication:
     return LineOrderGroupQueryApplication(open_line_unit_of_work)
+
+
+@lru_cache(maxsize=1)
+def get_line_feedback_application() -> LineFeedbackApplication:
+    return LineFeedbackApplication(open_line_unit_of_work, lambda: datetime.now(timezone.utc))
 
 
 @lru_cache(maxsize=1)

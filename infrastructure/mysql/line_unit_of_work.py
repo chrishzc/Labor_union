@@ -75,6 +75,17 @@ from infrastructure.mysql.matching_schedule_confirmation_repository import (
 from infrastructure.mysql.current_anomaly_issue_repository import (
     MySqlCurrentIssueRepository,
 )
+from infrastructure.mysql.line_feedback_repository import MySqlLineFeedbackRepository
+from infrastructure.mysql.line_safe_review_link_repository import MySqlLineSafeReviewLinkRepository
+from infrastructure.mysql.line_matching_coordination_delivery_source import (
+    MySqlLineMatchingCoordinationDeliverySource,
+)
+from infrastructure.mysql.orders_terminal_closure_source import (
+    MySqlOrdersTerminalClosureSource,
+)
+from infrastructure.mysql.matching_coordination_customer_service_source import (
+    MySqlMatchingCoordinationCustomerServiceSource,
+)
 
 
 class LineMySqlUnitOfWork(MySqlUnitOfWork):
@@ -106,6 +117,11 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.matching_schedule_confirmations = MySqlMatchingScheduleConfirmationRepository(connection)
         self.knowledge_questions = MySqlKnowledgeQuestionIntakeAdapter(connection)
         self.customer_service = MySqlCustomerServiceRepository(connection)
+        self.feedback = MySqlLineFeedbackRepository(connection)
+        self.safe_review_links = MySqlLineSafeReviewLinkRepository(connection)
+        self.matching_coordination_delivery = MySqlLineMatchingCoordinationDeliverySource(connection)
+        self.matching_coordination_customer_service = MySqlMatchingCoordinationCustomerServiceSource(connection)
+        self.orders_terminal_closure_source = MySqlOrdersTerminalClosureSource(connection)
         self.escalations = MySqlCustomerServiceEscalationRepository(connection)
         self.identity_management = MySqlLineIdentityManagementRepository(connection)
         # Registration remains Case Import-owned, but shares this outer transaction.

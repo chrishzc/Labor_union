@@ -40,7 +40,7 @@ _SELECT = (
     "workflow_version,hold_scope_ref,automation_hold_state AS hold_state,hold_version,"
     "actor_ref,claim_at_utc,handling_started_at_utc,resolved_at_utc,resolution_code,"
     "resolution_evidence_digest,masked_context,idempotency_key,correlation_id,"
-    "alert_status,created_at_utc AS created_at,updated_at_utc AS updated_at "
+    "alert_status,delivery_task_ref,delivery_outcome_ref,created_at_utc AS created_at,updated_at_utc AS updated_at "
     "FROM customer_service_escalations"
 )
 
@@ -63,7 +63,22 @@ class MySqlCustomerServiceEscalationRepository:
     def get_by_idempotency(self, key: str, *, lock: bool = False) -> Mapping[str, Any] | None:
         row = self._one(" WHERE idempotency_key=%s" + (" FOR UPDATE" if lock else ""), (key,))
         if row is None:
-            return None
+            # Transition commands have their own idempotency key, while the
+            # escalation root keeps the create key.  Resolve the transition
+            # replay through the immutable command receipt's escalation
+            # reference instead of treating it as a new command.
+            receipt = self._receipt_row(key, lock=lock)
+            snapshot = None if receipt is None else _receipt_snapshot(receipt.get("result_snapshot"))
+            if snapshot is None:
+                return None
+            row = self._one(
+                " WHERE id=%s" + (" FOR UPDATE" if lock else ""),
+                (snapshot.escalation_id,),
+            )
+            if row is None:
+                raise CustomerServiceEscalationNotFoundError(
+                    f"escalation {snapshot.escalation_id} was not returned"
+                )
         receipt = self._receipt_row(key, lock=lock)
         if receipt is not None:
             row = dict(row)
@@ -175,7 +190,7 @@ class MySqlCustomerServiceEscalationRepository:
         return row
 
     def append_event(self, escalation_id: int, event_type: EscalationEventType, **values: object) -> None:
-        names = (
+        base_names = (
             "expected_escalation_version",
             "resulting_escalation_version",
             "expected_ticket_version",
@@ -187,7 +202,17 @@ class MySqlCustomerServiceEscalationRepository:
             "idempotency_key",
             "correlation_id",
         )
-        missing = set(names) - set(values)
+        hold_names = ("expected_hold_version", "resulting_hold_version")
+        supplied_hold_names = tuple(name for name in hold_names if name in values)
+        if supplied_hold_names and len(supplied_hold_names) != len(hold_names):
+            raise ValueError("hold version fields must be supplied together")
+        names = (
+            base_names[:4] + hold_names + base_names[4:]
+            if len(supplied_hold_names) == len(hold_names)
+            else base_names
+        )
+        optional_names = {"expected_ticket_version", "resulting_ticket_version"}
+        missing = (set(names) - optional_names) - set(values)
         if missing:
             raise ValueError(f"missing event fields: {sorted(missing)}")
         unknown = set(values) - set(names)
@@ -195,17 +220,28 @@ class MySqlCustomerServiceEscalationRepository:
             raise CustomerServiceEscalationNotImplementedError(
                 f"unsupported event fields: {sorted(unknown)}"
             )
+        if len(supplied_hold_names) == len(hold_names):
+            columns = (
+                "escalation_id,event_type,expected_escalation_version,resulting_escalation_version,"
+                "expected_ticket_version,resulting_ticket_version,expected_hold_version,"
+                "resulting_hold_version,actor_ref,reason_code,reason_evidence_digest,receipt_id,"
+                "idempotency_key,correlation_id"
+            )
+        else:
+            columns = (
+                "escalation_id,event_type,expected_escalation_version,resulting_escalation_version,"
+                "expected_ticket_version,resulting_ticket_version,actor_ref,reason_code,"
+                "reason_evidence_digest,receipt_id,idempotency_key,correlation_id"
+            )
         sql = (
-            "INSERT INTO customer_service_escalation_events "
-            "(escalation_id,event_type,expected_escalation_version,resulting_escalation_version,"
-            "expected_ticket_version,resulting_ticket_version,actor_ref,reason_code,"
-            "reason_evidence_digest,receipt_id,idempotency_key,correlation_id) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+            "INSERT INTO customer_service_escalation_events (" + columns + ") VALUES ("
+            + ",".join("%s" for _ in range(len(names) + 2))
+            + ")"
         )
         params = (
             escalation_id,
             getattr(event_type, "value", event_type),
-            *(values[name] for name in names),
+            *(values.get(name) for name in names),
         )
         with self._connection.cursor() as cursor:
             cursor.execute(sql, params)
@@ -233,6 +269,7 @@ class MySqlCustomerServiceEscalationRepository:
     def enqueue_masked_alert(self, intent: object) -> None:
         if not isinstance(intent, MaskedAlertIntent):
             raise CustomerServiceEscalationNotImplementedError("invalid masked alert intent")
+        target_snapshot = self._active_alert_target_snapshot()
         payload = {
             "escalation_ref": intent.escalation_ref,
             "ticket_ref": intent.ticket_ref,
@@ -243,6 +280,7 @@ class MySqlCustomerServiceEscalationRepository:
             "urgency": intent.urgency,
             "correlation_id": intent.correlation_id,
             "source_digest": intent.source_digest,
+            "target_snapshot": target_snapshot,
         }
         payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         identity = "human-escalation-alert:" + hashlib.sha256(
@@ -269,6 +307,68 @@ class MySqlCustomerServiceEscalationRepository:
                 "UPDATE customer_service_escalations SET alert_status='queued',masked_alert_intent_ref=%s WHERE id=%s",
                 (identity, escalation_id),
             )
+
+    def record_alert_delivery_task(self, escalation_ref: str, task_id: int) -> None:
+        escalation_id = _escalation_id(escalation_ref)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE customer_service_escalations SET delivery_task_ref=%s,alert_status='queued' WHERE id=%s",
+                (f"delivery-task:{task_id}", escalation_id),
+            )
+            if cursor.rowcount != 1:
+                raise CustomerServiceEscalationNotFoundError(f"escalation {escalation_id} not found")
+
+    def record_alert_delivery_outcome(
+        self, escalation_ref: str, outcome_ref: str, alert_status: str
+    ) -> None:
+        if alert_status not in {"sent", "failed"}:
+            raise ValueError("invalid human escalation alert status")
+        escalation_id = _escalation_id(escalation_ref)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE customer_service_escalations SET delivery_outcome_ref=%s,alert_status=%s WHERE id=%s",
+                (outcome_ref, alert_status, escalation_id),
+            )
+            if cursor.rowcount != 1:
+                raise CustomerServiceEscalationNotFoundError(f"escalation {escalation_id} not found")
+
+    def _active_alert_target_snapshot(self) -> dict[str, object] | None:
+        """Capture the configured recipient and threshold in the immutable intent."""
+        # Legacy unit fakes model only the outbox writer cursor; preserve that
+        # adapter seam while real MySQL cursors provide the typed snapshot.
+        cursor_queue = getattr(self._connection, "cursors", None)
+        if isinstance(cursor_queue, list) and cursor_queue and not hasattr(cursor_queue[0], "fetchall"):
+            return None
+        sql = (
+            "SELECT t.id,t.target_type,t.group_id,t.minimum_status,t.updated_at_utc,"
+            "a.linked_line_user_id FROM line_alert_notification_targets t "
+            "LEFT JOIN admin_users a ON a.id=t.admin_user_id "
+            "WHERE t.enabled=TRUE ORDER BY (t.target_type='group') DESC,t.id LIMIT 2"
+        )
+        with self._connection.cursor() as cursor:
+            if not hasattr(cursor, "fetchall"):
+                return None
+            cursor.execute(sql)
+            fetchall = getattr(cursor, "fetchall", None)
+            rows = tuple(fetchall() or ()) if callable(fetchall) else ()
+        if len(rows) != 1:
+            return None
+        row = rows[0]
+        target_type = str(row["target_type"])
+        identity = row.get("group_id") if target_type == "group" else row.get("linked_line_user_id")
+        if not identity:
+            return None
+        updated = row.get("updated_at_utc")
+        return {
+            "target_id": int(row["id"]),
+            "recipient_type": "group" if target_type == "group" else "user",
+            "recipient_identity": str(identity),
+            "active": True,
+            "configuration": {
+                "minimum_status": str(row["minimum_status"]),
+                "revision": updated.isoformat() if hasattr(updated, "isoformat") else str(updated),
+            },
+        }
 
     def append_source_event(self, escalation_id: int, command: CreateHumanEscalation) -> None:
         row = self.get_by_id(escalation_id, lock=True)

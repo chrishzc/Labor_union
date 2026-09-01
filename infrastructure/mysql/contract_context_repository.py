@@ -23,7 +23,8 @@ _CASE_FACTS_SQL = """SELECT o.case_no,o.status,o.contract_identity,o.service_day
 o.service_hours_per_day,o.floor_fee,o.start_date,o.end_date,o.actual_start_date,
 o.actual_end_date,c.id AS client_id,c.name AS client_name,c.phone AS client_phone,
 c.city AS client_city,c.address AS client_address,c.identity_status AS client_identity_status,
-c.service_type,c.service_time,c.baby_info,c.notes AS client_notes,
+c.service_type,c.service_time,c.baby_info,c.delivery_type,c.residence_type,
+c.notes AS client_notes,o.custom_rest_dates,
 b.query_no AS beclass_query_no,b.survey_details,b.admin_notes AS beclass_admin_notes
 FROM orders o JOIN clients c ON c.case_no=o.case_no
 LEFT JOIN beclass_records b ON b.bound_case_no=o.case_no WHERE o.case_no=%s"""

@@ -16,6 +16,11 @@
   - `subsystems/line/staff_retirement_effect.py`
   - `infrastructure/mysql/line_identity_review_repository.py`
   - `infrastructure/mysql/line_identity_management_repository.py`
+  - `subsystems/line/terminal_closure_contracts.py`
+  - `subsystems/line/terminal_closure_application.py`
+  - `subsystems/line/terminal_closure_worker.py` — canonical LINE worker bridge for the read-only Orders handoff.
+  - `subsystems/line/rich_menu_binding.py`
+  - `infrastructure/mysql/orders_terminal_closure_source.py` — read-only Orders outbox handoff adapter; LINE never acknowledges or mutates Orders.
   - `db/schema_parts/1019_line_identity_role_scope.sql`
   - `db/releases/labor_union_validation_schema_v1.sql` — generated Global validation composition; listed as an exact touched artifact, not LINE-owned business semantics.
   - `scripts/migrate_preserved_database_additive_schema.py` — existing Global migration runner with this release's exact registration/descriptor only.
@@ -32,6 +37,7 @@
 
 ## Contracts
 - `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §9 — one role-scoped contract, selected-role state and bounded failure streak.
+- `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §9.5 — Orders terminal closure is the source; LINE fresh-reads role bindings and active client cases before a single staff default-menu intent.
 - `domains/line/identity_binding.py` — role-scoped claim/snapshot plus bounded streak transition.
 - `db/schema_parts/1019_line_identity_role_scope.sql` — additive shared root/event successor, selected-role column and streak root.
 
@@ -43,6 +49,7 @@
 ## Provenance
 - `line_identity_role_bindings` and `line_identity_role_binding_events` are the single shared role-scoped successor; legacy roots/events are migration/compatibility input only — `architecture_declared` — `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §9.
 - Role selection, bounded streak and same-type replacement tests are owned by this Module test root — `source_observed` — `tests/domains/external-integration/subsystems/line/modules/line-identity-management/`.
+- Terminal closure restore/no-op/replay/stale/revocation tests are owned by this Module test root — `source_observed` — `tests/domains/external-integration/subsystems/line/modules/line-identity-management/contract/test_terminal_closure_restore.py`.
 
 ## Change triggers
 - Reconcile this module when role-scoped binding ownership, selected-role state, bounded streak, replacement constraints, Staff retirement adaptation, persistence implementation root, Customer Service typed dependency, or canonical module test root changes.

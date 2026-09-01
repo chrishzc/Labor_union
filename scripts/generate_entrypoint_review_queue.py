@@ -50,13 +50,6 @@ SOURCE_RETIRED_HTTP_ENTRIES = {
     "api:GET /api/v1/admin/capability-grants/{admin_user_id}": "Authenticated principal effective-capability projection; no per-user capability list.",
     "api:GET /api/v1/finance-reports/accounts-payable-summary": "api:GET /api/v1/finance-reports/accounts-payable",
     "api:GET /api/v1/finance-import/jobs/{job_id}": "api:GET /api/v1/jobs/{job_id}/observation",
-    "api:GET /api/v1/storage/files": "subsystems.controlled_files.reference_finalize.ControlledFileReferenceService",
-    "api:GET /api/v1/storage/files/{file_id}": "subsystems.controlled_files.reference_finalize.ControlledFileReferenceService",
-    "api:GET /api/v1/storage/files/{file_id}/download": "subsystems.controlled_files.reference_finalize.ControlledFileReferenceService",
-    "api:GET /api/v1/storage/receipts/{receipt_id}": "subsystems.controlled_files.reference_finalize.ControlledFileReferenceService",
-    "api:POST /api/v1/storage/files/apply": "subsystems.controlled_files.reference_finalize.ControlledFileReferenceService",
-    "api:POST /api/v1/storage/files/preview": "subsystems.controlled_files.reference_finalize.ControlledFileReferenceService",
-    "api:POST /api/v1/storage/staging": "subsystems.controlled_files.reference_finalize.ControlledFileReferenceService",
     "api:GET /api/v1/anomaly-recovery/projector/dead-letters": "Global durable-job retry/supersede mechanism",
     "api:POST /api/v1/anomaly-recovery/projector/dead-letters/{projector_identity}/{event_id}/retry/apply": "Global durable-job retry/supersede mechanism",
     "api:POST /api/v1/anomaly-recovery/projector/dead-letters/{projector_identity}/{event_id}/retry/preview": "Global durable-job retry/supersede mechanism",
@@ -135,6 +128,8 @@ SOURCE_REPOSITORY_LOCAL_TYPED_410_ENTRIES = frozenset(
     }
 )
 SOURCE_MEDIA_RETIRED_HTTP_ENTRIES = frozenset(
+)
+SOURCE_CONTROLLED_FILE_HTTP_ENTRIES = frozenset(
     {
         "api:GET /api/v1/storage/files",
         "api:GET /api/v1/storage/files/{file_id}",
@@ -147,6 +142,7 @@ SOURCE_MEDIA_RETIRED_HTTP_ENTRIES = frozenset(
 )
 SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES = frozenset(
     {
+        *SOURCE_CONTROLLED_FILE_HTTP_ENTRIES,
         "api:GET /api/v1/anomalies/{issue_key}",
         "api:GET /api/v1/anomaly-recovery/{issue_key}",
         "api:GET /api/v1/anomaly-recovery/{issue_key}/actions/{action_key}",
@@ -242,18 +238,9 @@ SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES = frozenset(
         "api:PUT /api/v1/line/rich-menus/draft",
     }
 )
-# These identities remain grouped for review metadata even though the source
-# retirement override above now makes each terminal disposition `retired_410`.
+# These identities remain grouped for any future local rewrite review; active
+# controlled-file entries are intentionally owned by SOURCE_CONTROLLED_FILE_HTTP_ENTRIES.
 SOURCE_MEDIA_REWRITE_HTTP_ENTRIES = frozenset(
-    {
-        "api:GET /api/v1/storage/files",
-        "api:GET /api/v1/storage/files/{file_id}",
-        "api:GET /api/v1/storage/files/{file_id}/download",
-        "api:GET /api/v1/storage/receipts/{receipt_id}",
-        "api:POST /api/v1/storage/files/apply",
-        "api:POST /api/v1/storage/files/preview",
-        "api:POST /api/v1/storage/staging",
-    }
 )
 SOURCE_ANOMALY_REWRITE_HTTP_ENTRIES = frozenset(
     {
@@ -274,6 +261,18 @@ SOURCE_LOCAL_REWRITE_HTTP_ENTRIES = (
 )
 SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES = frozenset(
     {
+        "api:GET /api/v1/client-payments/historical-payments/{case_no}",
+        "api:GET /api/v1/client-payments/historical-payments/{case_no}/readback",
+        "api:GET /api/v1/client-profile/requests",
+        "api:GET /api/v1/client-profile/requests/{request_id}",
+        "api:GET /api/v1/line/ai-events/catalog",
+        "api:GET /api/v1/line/ai-events/feedback/aggregate",
+        "api:GET /api/v1/line/ai-events/replies/recent",
+        "api:GET /api/v1/orders/{case_no}/leave-substitution/{batch_key}/payables-lineage",
+        "api:GET /api/v1/orders/{case_no}/order-information/{template_id}",
+        "api:GET /api/v1/runtime/line-safe-review-links/{link_id}",
+        "api:GET /api/v1/staff-payables/historical-payouts/{case_no}/{staff_id}",
+        "api:GET /api/v1/staff-payables/historical-payouts/{case_no}/{staff_id}/readback",
         "api:GET /api/v1/admin/entry-targets",
         "api:GET /api/v1/admin/entry-targets/{entry_id}",
         "api:GET /api/v1/line/media-assets/rich-menu/{asset_id}",
@@ -283,12 +282,30 @@ SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES = frozenset(
         "api:GET /static/bind.html",
         "api:POST /api/v1/admin/entry-targets/apply",
         "api:POST /api/v1/admin/entry-targets/preview",
+        "api:POST /api/v1/client-payments/historical-payments/apply",
+        "api:POST /api/v1/client-payments/historical-payments/preview",
+        "api:POST /api/v1/client-profile/requests/{request_id}/approve/apply",
+        "api:POST /api/v1/client-profile/requests/{request_id}/approve/preview",
+        "api:POST /api/v1/client-profile/requests/{request_id}/reject",
+        "api:POST /api/v1/client-profile/requests/{request_id}/reject/preview",
+        "api:POST /api/v1/government-subsidy/overpayments/return-reconciliation-with-excess/apply",
+        "api:POST /api/v1/government-subsidy/overpayments/return-reconciliation-with-excess/preview",
+        "api:POST /api/v1/line/ai-events/router/preview",
+        "api:POST /api/v1/line/client-profile/apply",
+        "api:POST /api/v1/line/client-profile/preview",
+        "api:POST /api/v1/line/client-profile/query",
+        "api:POST /api/v1/line/feedback",
+        "api:POST /api/v1/line/feedback/preview",
+        "api:POST /api/v1/line/feedback/query",
         "api:POST /api/v1/line/identity/admin/preview",
         "api:POST /api/v1/line/identity/registration/preview",
         "api:POST /api/v1/line/mobile-admin/customer-service/tickets/{ticket_id}/reply/apply",
         "api:POST /api/v1/line/mobile-admin/customer-service/tickets/{ticket_id}/reply/preview",
         "api:POST /api/v1/line/mobile-admin/identity-reviews/{request_id}/decision/apply",
         "api:POST /api/v1/line/mobile-admin/identity-reviews/{request_id}/decision/preview",
+        "api:POST /api/v1/line/mobile-admin/scheduling-review/apply",
+        "api:POST /api/v1/line/mobile-admin/scheduling-review/preview",
+        "api:POST /api/v1/line/mobile-admin/scheduling-review/query",
         "api:POST /api/v1/line/staff-self-service/leave-requests/apply",
         "api:POST /api/v1/line/staff-self-service/leave-requests/preview",
         "api:POST /api/v1/line/staff-self-service/leave-requests/{request_id}/query",
@@ -297,8 +314,16 @@ SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES = frozenset(
         "api:POST /api/v1/line/staff-self-service/service-day-logs/{log_id}/query",
         "api:POST /api/v1/orders/{case_no}/historical-operational-baseline/apply",
         "api:POST /api/v1/orders/{case_no}/historical-operational-baseline/preview",
+        "api:POST /api/v1/orders/{case_no}/contract-signing/client/preview",
+        "api:POST /api/v1/orders/{case_no}/contract-signing/staff-segments/{segment_id}/preview",
+        "api:POST /api/v1/orders/{case_no}/order-information/{template_id}/preview",
         "api:POST /api/v1/orders/{case_no}/matching-plans/{plan_id}/schedule-confirmation/manual-apply",
         "api:POST /api/v1/orders/{case_no}/matching-plans/{plan_id}/schedule-confirmation/manual-preview",
+        "api:POST /api/v1/runtime/line-safe-review-links",
+        "api:POST /api/v1/runtime/line-safe-review-links/{link_id}/redeem",
+        "api:POST /api/v1/runtime/line-safe-review-links/{link_id}/revoke",
+        "api:POST /api/v1/staff-payables/historical-payouts/apply",
+        "api:POST /api/v1/staff-payables/historical-payouts/preview",
     }
 )
 SOURCE_CANONICAL_OPERATOR_ENTRIES = {
@@ -355,6 +380,8 @@ REVIEW_REQUIRED_PATH_GOVERNANCE = {
     "api/routes/anomaly_recovery.py": ("Anomalies / Global Durable Jobs", "authenticated anomaly recovery operator"),
     "api/routes/anomaly_registry.py": ("Anomalies", "authenticated anomaly operator"),
     "api/routes/candidate_contact_pool.py": ("Scheduling Candidate Contact", "authenticated scheduling operator"),
+    "api/routes/client_payments.py": ("Client Finance", "authenticated client-finance operator"),
+    "api/routes/client_profile.py": ("Client Profile", "authenticated client-profile reviewer or verified applicant"),
     "api/routes/client_refund_reversal.py": ("Client Finance", "authenticated client-finance operator"),
     "api/routes/contract_external_signing.py": ("Contract Signing", "authenticated contract-signing operator or verified external signing integration"),
     "api/routes/contract_signing.py": ("Contract Signing", "authenticated contract-signing operator"),
@@ -371,6 +398,9 @@ REVIEW_REQUIRED_PATH_GOVERNANCE = {
     "api/routes/import_warning_tracking.py": ("Import Warning Tracking", "authenticated import operator"),
     "api/routes/jobs.py": ("Global Durable Jobs", "authenticated job observer"),
     "api/routes/line_configurations.py": ("LINE Configuration", "authenticated LINE configuration operator"),
+    "api/routes/leave_substitution.py": ("Scheduling Leave Substitution", "authenticated scheduling operator"),
+    "api/routes/line_ai_events.py": ("LINE AI Event Observation", "authenticated LINE operations operator"),
+    "api/routes/line_feedback.py": ("LINE Feedback", "verified LINE user or authenticated customer-service operator"),
     "api/routes/line_identity.py": ("LINE Identity", "authenticated LINE identity operator or verified LINE principal"),
     "api/routes/line_identity_management.py": ("LINE Identity", "authenticated LINE identity operator"),
     "api/routes/line_media_assets.py": ("LINE Integration Media", "authenticated LINE media operator"),
@@ -382,6 +412,7 @@ REVIEW_REQUIRED_PATH_GOVERNANCE = {
     "api/routes/operations_reports.py": ("Operations Reporting Projection", "authenticated operations-report operator"),
     "api/routes/order_auto_completion.py": ("Orders", "authenticated order-completion operator or scheduler"),
     "api/routes/order_cancellation.py": ("Orders", "authenticated orders operator"),
+    "api/routes/orders.py": ("Orders", "authenticated orders or contract-document operator"),
     "api/routes/private_operations.py": ("Global Runtime Supervision", "authenticated internal runtime service"),
     "api/routes/runtime_health.py": ("Global Runtime Supervision", "authenticated runtime operator"),
     "api/routes/service_before_replacement.py": ("Scheduling Service Before Replacement", "authenticated scheduling recovery operator"),
@@ -393,9 +424,11 @@ REVIEW_REQUIRED_PATH_GOVERNANCE = {
     "scripts/collect_local_additive_engine_evidence.py": ("Global Migration Qualification", "authorized local evidence operator; caller not evidenced"),
     "scripts/launchers/local_mysql_tcp_forward.py": ("Local Infrastructure", "authorized local infrastructure operator; caller not evidenced"),
     "scripts/migrate_admin_capability_grants_schema.py": ("Access Control Migration", "authorized migration operator; caller not evidenced"),
+    "scripts/diagnose_historical_order_preview.py": ("Orders Historical Adoption Diagnosis", "authorized disposable-test diagnostic operator; caller not evidenced"),
     "scripts/run_task96_hob_route_a.py": ("Task 96 HOB Scenario Evidence", "authorized Task 96 evidence operator; caller not evidenced"),
     "scripts/run_task96_payout001_scenario.py": ("Task 96 Staff Payables Scenario Evidence", "authorized Task 96 evidence operator; caller not evidenced"),
     "scripts/run_task96_rpre_browser_scenario.py": ("Task 96 Replacement Scenario Evidence", "authorized Task 96 evidence operator; caller not evidenced"),
+    "scripts/run_task96_scheduling_lane_c.py": ("Task 96 Scheduling Scenario Evidence", "authorized Task 96 evidence operator; caller not evidenced"),
     "scripts/validate_agent_governance.py": ("Global Agent Governance", "authorized governance validator operator; caller not evidenced"),
     "scripts/validate_streamlit_retirement_readiness.py": ("Frontend Retirement Governance", "authorized frontend retirement operator; caller not evidenced"),
     "ui/pages/09_data_import.py": ("Import UI Composition", "authenticated import operator"),
@@ -417,6 +450,12 @@ REVIEW_REQUIRED_REACT_OWNERS = {
     "ui-react:#system-status": "Global Runtime Supervision",
 }
 LOCAL_CANONICAL_EVIDENCE_BY_SOURCE = {
+    "api/routes/controlled_files.py": (
+        "authenticated admin API caller through /api/v1/storage",
+        "tests/domains/global/subsystems/controlled-files/test_controlled_file_api.py; "
+        "tests/test_controlled_file_workflow.py; tests/test_controlled_file_storage.py; "
+        "tests/test_controlled_file_schema_contract.py",
+    ),
     "api/routes/anomaly_recovery.py": (
         "ui_react/src/api/anomalies/anomaly_detail_client.ts",
         "tests/domains/anomalies/subsystems/anomalies/integration/test_anomaly_public_detail_recovery_contract.py; ui_react/src/tests/anomaly_detail_client.test.ts",
@@ -805,6 +844,9 @@ def _expand_review_required_entry(entry: dict[str, object]) -> dict[str, object]
         elif "/identity-reviews/" in identity:
             owner = "LINE Identity"
             operator = "authenticated LINE mobile identity-review operator"
+        elif "/scheduling-review/" in identity:
+            owner = "Scheduling Mobile Review"
+            operator = "authenticated LINE mobile scheduling-review operator"
         else:
             raise ValueError(f"unmapped LINE mobile review entry: {identity}")
     elif source_path == "ui_react/src/components/MasterLayout.tsx":

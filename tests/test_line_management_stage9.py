@@ -376,7 +376,11 @@ def test_runtime_detail_summary_is_bounded() -> None:
     assert summary.count("=") == 4
 
 
-def test_stage9_management_routes_are_registered() -> None:
+def test_stage9_management_routes_are_registered(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("REACT_ADMIN_CURRENT_ARTIFACT_DIR", "")
+    monkeypatch.setenv("REACT_ADMIN_PREVIOUS_ARTIFACT_DIR", "")
+    monkeypatch.setenv("REACT_ADMIN_ACTIVE_SELECTOR", "")
     from api.main import app
 
     paths = app.openapi()["paths"]

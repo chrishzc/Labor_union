@@ -6,7 +6,7 @@ Description: 建立月嫂契約簽署與簽約前承諾；承諾服務日必須�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import hashlib
 import json
 from pathlib import Path
@@ -423,7 +423,19 @@ def _staff_template_facts(connection, case_no: str, segment: dict[str, object]) 
         facts = cursor.fetchone()
     if facts is None:
         raise ValueError("contract_signing_case_facts_not_found")
-    return dict(facts)
+    result = dict(facts)
+    result.update(
+        {
+            "assignment_start_date": segment["assigned_start_date"],
+            "assignment_end_date": segment["assigned_end_date"],
+            "assignment_service_days": (
+                segment["assigned_end_date"] - segment["assigned_start_date"]
+            ).days
+            + 1,
+            "__today__": date.today(),
+        }
+    )
+    return result
 
 
 def _line_binding(connection, subject_type: str, subject_reference: str) -> ContractLineBinding:

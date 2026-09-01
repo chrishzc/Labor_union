@@ -477,6 +477,83 @@ def test_historical_planner_bootstraps_when_effective_generation_is_empty(monkey
     assert command.candidate.generation_number == 8
 
 
+def test_historical_planner_maps_effective_staff_date_duplicate_to_preparation_blocker(
+    monkeypatch,
+):
+    from pymysql.err import IntegrityError
+
+    import infrastructure.mysql.historical_actual_start_date_planner as planner
+    from domains.scheduling.generation import SchedulingGenerationCandidate
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    cursor = Cursor()
+    connection = SimpleNamespace(cursor=lambda: cursor)
+    candidate = SchedulingGenerationCandidate(
+        case_no="CASE-1",
+        generation_number=1,
+        expected_aggregate_version=0,
+        resulting_aggregate_version=1,
+        cancelled_assignment_ids=(),
+        assignments=(),
+        buffers=(),
+    )
+    monkeypatch.setattr(
+        planner,
+        "_locked_or_bootstrapped_aggregate",
+        lambda *_args: {
+            "aggregate_version": 0,
+            "generation_counter": 0,
+            "effective_generation_id": None,
+        },
+    )
+    monkeypatch.setattr(
+        planner,
+        "_effective_generation_has_assignments",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        planner,
+        "_source_assignment_and_order_facts",
+        lambda *_args, **_kwargs: (
+            ({"id": 9, "staff_id": 11},),
+            {"lifecycle_version": 1, "service_hours_per_day": 8},
+        ),
+    )
+    monkeypatch.setattr(planner, "_bootstrap_candidate", lambda *_args: candidate)
+    monkeypatch.setattr(planner, "_effective_generation_assignment_ids", lambda *_args: ())
+    monkeypatch.setattr(
+        planner,
+        "_case_payroll_policy",
+        lambda *_args, **_kwargs: {"policy_version": 1},
+    )
+
+    def raise_duplicate(*_args):
+        raise IntegrityError(
+            1062,
+            "Duplicate entry '11-2026-08-08-1' for key "
+            "'staff_schedule.uq_staff_schedule_effective_date'",
+        )
+
+    monkeypatch.setattr(planner, "persist_scheduling_replacement", raise_duplicate)
+
+    with pytest.raises(HistoricalActualStartPreparationError) as caught:
+        planner.MySqlHistoricalActualStartDatePlanner(connection).prepare_source_generation(
+            "CASE-1",
+            (date(2026, 8, 8),),
+            source_identity="historical-orders:digest:row:staff-conflict",
+            actor="historical-import",
+            correlation_id="historical-staff-conflict",
+        )
+
+    assert caught.value.code == "historical_actual_start_staff_schedule_conflict"
+
+
 def test_historical_bootstrap_single_assignment_uses_recalculated_service_dates():
     from infrastructure.mysql.historical_actual_start_date_planner import (
         _bootstrap_candidate,

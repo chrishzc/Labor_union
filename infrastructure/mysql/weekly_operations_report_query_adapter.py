@@ -121,7 +121,9 @@ def _optional_date(value: object) -> date | None:
     return date.fromisoformat(str(value)[:10])
 
 
-def _datetime(value: object) -> datetime:
+def _datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
     if isinstance(value, datetime):
         return value
     if isinstance(value, date):
@@ -136,7 +138,7 @@ SELECT c.id AS client_id,c.case_no,c.created_at AS application_created_at,
        o.start_date AS planned_start_date,o.end_date AS planned_end_date
 FROM clients c
 LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no
-WHERE c.created_at >= %s AND c.created_at < %s
+WHERE (c.created_at >= %s AND c.created_at < %s) OR c.created_at IS NULL
 ORDER BY c.created_at,c.id
 """
 

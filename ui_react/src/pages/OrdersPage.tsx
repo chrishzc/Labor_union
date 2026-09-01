@@ -3612,8 +3612,8 @@ export const OrdersPage: React.FC = () => {
                     <span style={{ fontSize: '0.92rem', fontWeight: 700, color: '#57423b' }}>當前案件狀態：</span>
                     <strong style={{ fontSize: '1rem', color: '#ff7f50' }}>{(contractOrder || dateConfirmOrder || cancelOrder || reopenOrder)?.orderStatus ?? '洽談中'}</strong>
                   </div>
-                  <span style={{ padding: '3px 10px', borderRadius: '9999px', fontSize: '0.78rem', fontWeight: 750, backgroundColor: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>
-                    🟢 允許取消試算
+                  <span style={{ padding: '3px 10px', borderRadius: '9999px', fontSize: '0.78rem', fontWeight: 750, backgroundColor: cancellationQuery?.lifecycle_status === '訂單取消' ? '#fef2f2' : '#f0fdf4', color: cancellationQuery?.lifecycle_status === '訂單取消' ? '#991b1b' : '#166534', border: `1px solid ${cancellationQuery?.lifecycle_status === '訂單取消' ? '#fecaca' : '#bbf7d0'}` }}>
+                    {cancellationQuery?.lifecycle_status === '訂單取消' ? '🚫 不可再次取消' : '🟢 允許取消試算'}
                   </span>
                 </div>
 
@@ -3640,6 +3640,9 @@ export const OrdersPage: React.FC = () => {
 
                     {cancellationQuery ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem', color: '#57423b', marginBottom: '12px' }}>
+                        {cancellationQuery.lifecycle_status === '訂單取消' && (
+                          <div role="alert" style={{ color: '#991b1b' }}>此案件已取消，不可再次取消；如需處理請改走受控重開。</div>
+                        )}
                         <div>實際開始日：{cancellationQuery.actual_start_date ?? '尚未開始'}</div>
                         <div>契約服務天數：{cancellationQuery.contracted_service_days} 天</div>
                         <div>目前實際服務日：{cancellationDays.length} 天</div>
@@ -3812,7 +3815,7 @@ export const OrdersPage: React.FC = () => {
                       data-control-id="orders.cancellation.preview"
                       className="btn-secondary-action"
                       style={{ width: '100%', padding: '10px' }}
-                      disabled={!cancellationQuery || cancellationStatus !== 'idle' || (cancellationQuery.service_started && cancellationDays.length >= cancellationQuery.contracted_service_days)}
+                      disabled={!cancellationQuery || cancellationQuery.lifecycle_status === '訂單取消' || cancellationStatus !== 'idle' || (cancellationQuery.service_started && cancellationDays.length >= cancellationQuery.contracted_service_days)}
                       onClick={() => void previewCancellation()}
                     >
                       {cancellationStatus === 'previewing' ? '正在試算取消影響…' : '🔍 預覽取消與退款試算（檢查取消影響）'}
@@ -3822,7 +3825,7 @@ export const OrdersPage: React.FC = () => {
                       data-control-id="orders.cancellation.apply"
                       className="btn-primary-action"
                       style={{ backgroundColor: '#9f1239', borderColor: '#9f1239', width: '100%', padding: '10px' }}
-                      disabled={!cancellationPreview || !cancellationReason.trim() || !cancellationConfirmed || cancellationStatus !== 'idle' || (cancellationQuery?.service_started === true && cancellationDays.length >= cancellationQuery.contracted_service_days)}
+                      disabled={!cancellationPreview || cancellationQuery?.lifecycle_status === '訂單取消' || !cancellationReason.trim() || !cancellationConfirmed || cancellationStatus !== 'idle' || (cancellationQuery?.service_started === true && cancellationDays.length >= cancellationQuery.contracted_service_days)}
                       onClick={() => void applyCancellation()}
                     >
                       {cancellationStatus === 'applying'

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from domains.line.identities import LineUserId
@@ -11,8 +13,11 @@ from infrastructure.mysql.line_identity_review_repository import (
 )
 from infrastructure.mysql.line_identity_management_repository import (
     MySqlLineIdentityManagementRepository,
+    _CURRENT_FACT_SQL,
 )
+from infrastructure.mysql.mysql_adapter import DB_CONFIG, get_connection
 from shared_kernel.identities import ExpectedVersion
+from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
 
 
 def _binding(subject_type, reference, *, status="bound", version=1):
@@ -144,3 +149,41 @@ def test_revoked_role_cannot_be_selected() -> None:
         statement.startswith("UPDATE line_platform_users")
         for statement, _parameters in cursor.executed
     )
+
+
+def test_current_fact_union_casts_all_owner_ids_with_canonical_collation() -> None:
+    """The four-arm readback must not inherit connection collation for IDs."""
+    arms = _CURRENT_FACT_SQL.split("UNION ALL")
+
+    assert len(arms) == 4
+    for alias, arm in zip(("c", "s", "a"), arms[1:]):
+        assert (
+            f"CAST({alias}.id AS CHAR CHARACTER SET utf8mb4) "
+            "COLLATE utf8mb4_unicode_ci"
+        ) in arm
+
+
+@pytest.mark.skipif(
+    not os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE", "").startswith("lu_test_")
+    or DB_CONFIG.get("database")
+    != os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE", "").strip(),
+    reason="requires an explicitly selected disposable lu_test_* MySQL database",
+)
+def test_current_fact_uses_default_connection_without_collation_session_workaround() -> None:
+    database = os.environ["LABOR_UNION_TEST_MYSQL_DATABASE"]
+    line_user_id = "U-collation-regression-20260901"
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT DATABASE(), @@collation_connection")
+            selected_database, connection_collation = cursor.fetchone().values()
+        assert selected_database == database
+        assert connection_collation
+
+        readback = MySqlLineIdentityManagementRepository(connection).current_fact(
+            LineIdentityCurrentFactQuery(LineUserId(line_user_id))
+        )
+
+        assert readback.line_user_id == line_user_id
+    finally:
+        connection.close()

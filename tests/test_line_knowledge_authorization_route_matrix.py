@@ -94,6 +94,10 @@ MATCHING_ROUTE_CONTRACT = {
         "recommend_staff": ({"require_system_admin"}, "none"),
     },
     "runtime_health.py": {
+        "query_safe_review_link": ({"require_line_monitor_reader"}, "none"),
+        "issue_safe_review_link": ({"require_line_alert_manager"}, "none"),
+        "redeem_safe_review_link": ({"require_line_alert_manager"}, "none"),
+        "revoke_safe_review_link": ({"require_line_alert_manager"}, "none"),
         "health_status": ({"require_line_monitor_reader"}, "none"),
         "health_events": ({"require_line_monitor_reader"}, "none"),
         "alert_targets": ({"require_line_monitor_reader"}, "none"),
@@ -371,7 +375,7 @@ def test_matching_and_runtime_routes_have_complete_guard_capability_matrix() -> 
             )
             route_count += 1
 
-    assert route_count == 27
+    assert route_count == 31
 
 
 def test_identity_public_liff_and_page_static_routes_are_explicit_exclusions() -> None:

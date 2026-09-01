@@ -11,7 +11,9 @@
 - primary:
   - `domains/scheduling/matching_coordination.py`
   - `subsystems/scheduling/matching_coordination_contracts.py`
-  - `subsystems/scheduling/matching_coordination_workflow.py`
+- `subsystems/scheduling/matching_coordination_workflow.py`
+- `subsystems/scheduling/matching_notification_application.py` (zero-pool client decision response owner)
+  - `subsystems/scheduling/matching_coordination_application.py` — P3 typed leave/date handoffs
   - `infrastructure/mysql/matching_coordination_repository.py`
   - `infrastructure/mysql/matching_coordination_facts_adapter.py`
   - `infrastructure/mysql/segmented_availability_repository.py`
@@ -25,6 +27,7 @@
 ## Dependencies
 - outbound: `orders/orders` — case/lifecycle boundary.
 - inbound: Scheduling UI/LINE adapters — transport invokes typed coordination commands, not direct DB writes.
+- P3 handoff: committed M3 intents carry immutable `LU96-M3-*` source identity and recipient selector; P5 owns delivery task/provider consumption.
 
 ## Contracts
 - `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — Scheduling ownership.
@@ -35,7 +38,7 @@
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/matching_coordination_workbench.test.tsx`
 - higher_boundary:
-  - `tests/integration/`
+  - tests/integration/ (shared legacy higher-boundary root)
 - layout_gap:
   - `tests/test_matching_coordination_repository.py` — still uses a repo-relative schema path and remains at its observed path until that path dependency is reconciled.
 - routing: `.arch-map/tests/domains/scheduling/subsystems/scheduling/index.md`.

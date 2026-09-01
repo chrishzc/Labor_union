@@ -6,6 +6,8 @@ from dataclasses import replace
 from datetime import date, timedelta
 from hashlib import sha256
 
+from pymysql.err import IntegrityError
+
 from domains.orders.actual_start import calculate_service_dates
 from domains.scheduling.generation import (
     AssignmentCandidate,
@@ -106,22 +108,29 @@ class MySqlHistoricalActualStartDatePlanner:
                 int(order["lifecycle_version"]),
                 candidate,
             )
-            result = persist_scheduling_replacement(
-                cursor,
-                SchedulingReplacementCommand(
-                    candidate=candidate,
-                    command_family="historical_actual_start_bootstrap",
-                    expected_order_version=int(order["lifecycle_version"]),
-                    command_fingerprint=command_fingerprint,
-                    preview_fingerprint=command_fingerprint,
-                    idempotency_key=IdempotencyKey(
-                        _bootstrap_idempotency_key(source_identity)
+            try:
+                result = persist_scheduling_replacement(
+                    cursor,
+                    SchedulingReplacementCommand(
+                        candidate=candidate,
+                        command_family="historical_actual_start_bootstrap",
+                        expected_order_version=int(order["lifecycle_version"]),
+                        command_fingerprint=command_fingerprint,
+                        preview_fingerprint=command_fingerprint,
+                        idempotency_key=IdempotencyKey(
+                            _bootstrap_idempotency_key(source_identity)
+                        ),
+                        actor=ActorContext(actor),
+                        reason="historical actual-start scheduling bootstrap",
+                        correlation_id=CorrelationId(correlation_id),
                     ),
-                    actor=ActorContext(actor),
-                    reason="historical actual-start scheduling bootstrap",
-                    correlation_id=CorrelationId(correlation_id),
-                ),
-            )
+                )
+            except IntegrityError as error:
+                if _is_effective_staff_date_conflict(error):
+                    raise HistoricalActualStartPreparationError(
+                        "historical_actual_start_staff_schedule_conflict"
+                    ) from error
+                raise
             _persist_rate_snapshots(cursor, candidate, result, policy)
 
     def preview_source_generation(
@@ -437,6 +446,14 @@ def _canonical_service_mode(value: str) -> str:
         "周休二日": "週休2日",
     }
     return aliases.get(value.strip(), value.strip())
+
+
+def _is_effective_staff_date_conflict(error: IntegrityError) -> bool:
+    return (
+        error.args
+        and error.args[0] == 1062
+        and "uq_staff_schedule_effective_date" in str(error)
+    )
 
 
 __all__ = ["MySqlHistoricalActualStartDatePlanner"]

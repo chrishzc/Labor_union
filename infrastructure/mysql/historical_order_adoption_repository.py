@@ -133,16 +133,25 @@ class MySqlHistoricalOrderAdoptionRepository:
             or preview.resulting_version == preview.expected_version
         ):
             return None
-        # Actual Start owns the actual_start_date root transition.  Historical
-        # adoption records the source patch in its immutable receipt, but must
-        # leave the root untouched until the canonical bridge runs below.
+        actual_start_present, actual_start_date = _date_patch_value(
+            preview.date_patch, "actual_start_date"
+        )
+        actual_end_present, actual_end_date = _date_patch_value(
+            preview.date_patch, "actual_end_date"
+        )
         with _cursor(self._connection) as cursor:
             cursor.execute(
-                "UPDATE orders SET status=%s,lifecycle_version=%s "
+                "UPDATE orders SET status=%s,lifecycle_version=%s,"
+                "actual_start_date=CASE WHEN %s THEN %s ELSE actual_start_date END,"
+                "actual_end_date=CASE WHEN %s THEN %s ELSE actual_end_date END "
                 "WHERE case_no=%s AND lifecycle_version=%s",
                 (
                     preview.after_status,
                     preview.resulting_version,
+                    actual_start_present,
+                    actual_start_date,
+                    actual_end_present,
+                    actual_end_date,
                     preview.case_no,
                     preview.expected_version,
                 ),
@@ -171,7 +180,8 @@ class MySqlHistoricalOrderAdoptionRepository:
         snapshot = {
             "outcome": preview.outcome.value,
             "issue_codes": preview.issue_codes,
-            "payroll_rebuild_status": "delegated_to_actual_start_when_required",
+            "service_calendar_status": "accounting_review_required",
+            "payroll_rebuild_status": "skipped_pending_service_calendar_confirmation",
             **_operational_baseline_snapshot(request, preview),
         }
         with _cursor(self._connection) as cursor:
@@ -257,6 +267,13 @@ def _command_fingerprint(request):
         "source_identity": request.row.source_identity,
         "source_fingerprint": request.row.source_fingerprint,
     }).value
+
+
+def _date_patch_value(date_patch, field_name):
+    for field, value in date_patch:
+        if field == field_name:
+            return True, value
+    return False, None
 
 
 def _insert_outbox(cursor, receipt_id, key, intent_type, payload):

@@ -83,8 +83,12 @@ def test_data_browser_frozen_control_plane_remains_streamlit_without_receipt() -
             "entry_revision": 1,
         }
     ]
-    assert all(entry["current_target"] == "streamlit" for entry in entries)
-    assert state["receipts"] == []
+    assert all(
+        entry["current_target"] == ("react" if entry["entry_id"] == "ui-react:#anomalies" else "streamlit")
+        for entry in entries
+    )
+    assert len(state["receipts"]) == 1
+    assert state["receipts"][0]["entry_id"] == "ui-react:#anomalies"
 
 
 def test_data_browser_app_nav_and_bounded_client_remain_query_only() -> None:

@@ -86,6 +86,7 @@ class MySqlOrderAutoCompletionRepository:
     def append_lifecycle_event(self, request, candidate, facts):
         snapshot = _lifecycle_snapshot(request, candidate, facts)
         with self._connection.cursor() as cursor:
+            snapshot.update(_terminal_closure_fields(request, candidate, cursor, None))
             cursor.execute(_LIFECYCLE_EVENT_INSERT_SQL, (request.case_no, "evaluation_time_reached", "服務中", "訂單完成", request.actor.actor_id, candidate.evaluation_at.date(), candidate.expected_order_version, request.idempotency_key.value, _json(snapshot)))
             return int(cursor.lastrowid)
 
@@ -100,12 +101,35 @@ class MySqlOrderAutoCompletionRepository:
     def append_outbox(self, request, candidate, lifecycle_event_id):
         payload = {"after_status": "訂單完成", "completion_instant": candidate.completion_instant.isoformat(), "correlation_id": request.correlation_id.value, "resulting_order_version": candidate.resulting_order_version}
         with self._connection.cursor() as cursor:
+            payload.update(_terminal_closure_fields(request, candidate, cursor, lifecycle_event_id))
             cursor.execute(_OUTBOX_INSERT_SQL, (request.case_no, lifecycle_event_id, _child_identity(request, "orders-outbox"), "lifecycle_projection_changed", _json(payload)))
 
     def save_receipt(self, receipt: AutoCompletionReceipt) -> None:
         payload = _receipt_payload(receipt)
         with self._connection.cursor() as cursor:
             cursor.execute(_RECEIPT_INSERT_SQL, (receipt.idempotency_key.value, receipt.command_fingerprint.value, receipt.case_no, receipt.lifecycle_event_id, receipt.order_version, receipt.completion_instant, receipt.evaluation_at, _json(payload)))
+
+
+def _terminal_closure_fields(request, candidate, cursor, event_id):
+    cursor.execute(
+        "SELECT c.line_user_id FROM orders o JOIN clients c ON c.id=o.client_id "
+        "WHERE o.case_no=%s",
+        (request.case_no,),
+    )
+    row = cursor.fetchone() or {}
+    source_subject = row.get("line_user_id") or None
+    identity = f"case-terminal:{request.case_no}:completion:{candidate.resulting_order_version}"
+    return {
+        "event_type": "case_terminal_closure",
+        "source_event_identity": identity,
+        "terminal_kind": "completion",
+        "source_subject": source_subject,
+        "producer_reference": (
+            f"orders.lifecycle_event:{request.case_no}:{candidate.resulting_order_version}"
+        ),
+        "occurred_at": candidate.evaluation_at.isoformat(),
+        "idempotency_identity": identity,
+    }
 
 
 def _insert_claim(cursor, request, fingerprint):

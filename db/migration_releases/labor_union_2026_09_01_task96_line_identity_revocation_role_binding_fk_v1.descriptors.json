@@ -1,0 +1,21 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-task96-line-identity-revocation-role-binding-fk-2026-09-01-v1",
+  "descriptors": {
+    "1024_task96_line_identity_revocation_role_binding_fk.sql": {
+      "tables": {},
+      "indexes": {},
+      "foreign_keys": {
+        "line_identity_revocation_requests.fk_line_identity_revocation_role_binding": {
+          "columns": ["line_user_id", "subject_type"],
+          "referenced_table": "line_identity_role_bindings",
+          "referenced_columns": ["line_user_id", "subject_type"],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {},
+      "triggers": []
+    }
+  }
+}

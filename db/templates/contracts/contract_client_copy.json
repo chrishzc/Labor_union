@@ -7,227 +7,283 @@
     "F1": {
       "label": "訂單單號 (F1)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "case_no"
+      "db_key": "case_no",
+      "requiredness": "required"
     },
     "B7": {
       "label": "簽約日期 (B7)",
       "db_table": "contract_signing (客戶簽約命令)",
-      "db_key": "contract_signed_date"
+      "db_key": "contract_signed_date",
+      "requiredness": "required"
     },
     "B8": {
       "label": "客戶名稱 (B8)",
       "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "client_name"
+      "db_key": "client_name",
+      "requiredness": "required"
     },
     "A9": {
       "label": "預產期 (A9)",
-      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "due_date"
+      "db_table": "clients.due_month (strict YYYY/MM/DD only; typed Client projection)",
+      "db_key": "due_date",
+    "requiredness": "conditional",
+    "applicability": "typed_due_date_present",
+      "status": "approved"
     },
-    "C10": {
+  "C10": {
       "label": "服務人員 (C10)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "staff_name"
+      "db_key": "staff_name",
+    "requiredness": "conditional",
+    "applicability": "single_staff_assignment_present"
     },
     "B24": {
       "label": "預定服務開始日期 (B24)",
       "db_table": "precontract_service_commitments (簽約前服務承諾)",
-      "db_key": "committed_service_start_date"
+      "db_key": "committed_service_start_date",
+      "requiredness": "required"
     },
     "D24": {
       "label": "預定服務結束日期 (D24)",
       "db_table": "precontract_service_commitments (簽約前服務承諾)",
-      "db_key": "committed_service_end_date"
+      "db_key": "committed_service_end_date",
+      "requiredness": "required"
     },
     "F24": {
       "label": "希望服務天數 (F24)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "service_days"
+      "db_key": "service_days",
+      "requiredness": "required"
     },
     "B25": {
       "label": "雇主單價 (B25)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "caregiver_rate"
+      "db_table": "client_payment_terms (Client Finance typed projection)",
+      "db_key": "client_hourly_rate",
+      "requiredness": "required"
     },
-    "F25": {
+  "F25": {
       "label": "服務總時數 (F25)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "total_hours"
+      "db_table": "Scheduling assignment typed projection",
+      "db_key": "total_hours",
+    "requiredness": "conditional",
+    "applicability": "typed_total_hours_present"
     },
     "B28": {
       "label": "補助時數 (B28)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "subsidy_hours"
+      "db_table": "client_finance.subsidy_coverage (typed Government Subsidy coverage result)",
+      "db_key": "subsidy_hours",
+      "requiredness": "conditional",
+      "status": "approved"
     },
     "E28": {
       "label": "服務時段 (E28)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "service_time"
+      "db_key": "service_time",
+      "requiredness": "required"
     },
     "D29": {
       "label": "服務單價 (D29)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "caregiver_rate"
+      "db_table": "assignment_payroll_rate_snapshots (Payroll typed assignment projection)",
+      "db_key": "assignment_hourly_rate",
+      "requiredness": "conditional"
     },
     "B30": {
       "label": "自費天數 (B30)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "service_days"
+      "db_key": "client_finance_self_pay_days",
+      "requiredness": "conditional"
     },
     "D30": {
       "label": "每日服務時數 (D30)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "service_hours_per_day"
+      "db_key": "service_hours_per_day",
+      "requiredness": "required"
     },
-    "F30": {
-      "label": "費用合計 (F30)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "total_employer_self_pay_payable"
-    },
+  "F30": {
+    "label": "費用合計 (F30)",
+    "db_table": "Client Finance typed stage plan projection",
+    "db_key": "total_employer_self_pay_payable",
+    "requiredness": "required"
+  },
     "F31": {
       "label": "特殊休假 (F31)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "special_holidays"
+      "db_table": "orders.custom_rest_dates (typed Scheduling/Orders projection)",
+      "db_key": "special_holidays",
+      "requiredness": "conditional",
+      "status": "approved"
     },
     "E33": {
       "label": "政府案件編號 (E33)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "case_no"
+      "db_key": "case_no",
+      "requiredness": "required"
     },
     "B34": {
       "label": "訂金金額 (B34)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "deposit_amount"
+      "db_key": "deposit_amount",
+      "requiredness": "conditional"
     },
     "C34": {
       "label": "訂金日期 (C34)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "deposit_date"
+      "db_table": "client_payment_terms (Client Finance typed projection)",
+      "db_key": "deposit_due_date",
+      "requiredness": "conditional"
     },
     "E34": {
       "label": "Email (E34)",
-      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "email"
+      "db_table": "beclass_records.email (normalized Case Import client projection)",
+      "db_key": "email",
+      "requiredness": "conditional",
+      "status": "approved"
     },
     "B35": {
       "label": "第一期款 (B35)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "first_payment_amount"
+      "db_table": "client_payment_terms (Client Finance typed projection)",
+      "db_key": "first_payment_amount",
+      "requiredness": "conditional"
     },
     "C35": {
       "label": "第一期應收日期 (C35)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "first_payment_date"
+      "db_table": "client_payment_terms (Client Finance typed projection)",
+      "db_key": "first_payment_due_date",
+      "requiredness": "conditional"
     },
     "B36": {
       "label": "第二期款 (B36)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "second_payment_amount"
+      "db_table": "client_payment_terms (Client Finance typed projection)",
+      "db_key": "second_payment_amount",
+      "requiredness": "conditional"
     },
     "C36": {
       "label": "第二期應收日期 (C36)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "second_payment_date"
+      "db_table": "client_payment_terms (Client Finance typed projection)",
+      "db_key": "second_payment_due_date",
+      "requiredness": "conditional"
     },
     "D36": {
       "label": "月嫂匯款帳號 (D36)",
       "db_table": "staff (服務人員 - 月嫂主表與撥款帳號)",
-      "db_key": "staff_bank_account"
+      "db_key": "staff_bank_account",
+      "requiredness": "conditional"
     },
     "B37": {
       "label": "樓層費用 (B37)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "floor_fee"
+      "db_key": "floor_fee",
+      "requiredness": "conditional"
     },
     "C37": {
       "label": "樓層費入帳日 (C37)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "deposit_date"
+      "db_key": "deposit_date",
+      "requiredness": "conditional",
+      "status": "unresolved",
+      "applicability": "floor_fee_positive"
     },
-    "B38": {
-      "label": "雇主自費合計金額 (B38)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "total_employer_self_pay_payable"
-    },
+  "B38": {
+    "label": "雇主自費合計金額 (B38)",
+    "db_table": "Client Finance typed stage plan projection",
+    "db_key": "total_employer_self_pay_payable",
+    "requiredness": "required"
+  },
     "B40": {
       "label": "補助薪資 (B40)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "subsidy_salary"
+      "db_table": "subsidy_claim_batch_items.approved_amount (Government Subsidy exact approved claim)",
+      "db_key": "subsidy_salary",
+      "requiredness": "conditional",
+      "status": "approved"
     },
     "D40": {
       "label": "雇主退款銀行代號 (D40)",
-      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "bank_code"
+      "db_table": "client_refund_recipient_snapshots (Client Finance typed destination)",
+      "db_key": "bank_code",
+      "requiredness": "conditional"
     },
     "E40": {
       "label": "雇主退款銀行帳號 (E40)",
-      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "bank_account"
+      "db_table": "client_refund_recipient_snapshots (Client Finance typed destination)",
+      "db_key": "bank_account",
+      "requiredness": "conditional"
     },
-    "B41": {
+  "B41": {
       "label": "服務方式 (B41)",
-      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "service_mode"
+      "db_table": "clients.service_type (canonical HCM service mode)",
+      "db_key": "service_type",
+    "requiredness": "required"
     },
     "C41": {
       "label": "寶寶資訊 (C41)",
       "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "baby_info"
+      "db_key": "baby_info",
+      "requiredness": "conditional"
     },
     "D41": {
       "label": "生產方式 (D41)",
       "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "delivery_mode"
+      "db_key": "delivery_type",
+      "requiredness": "conditional"
     },
     "E41": {
       "label": "居住型態 (E41)",
       "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "residence_type"
+      "db_key": "residence_type",
+      "requiredness": "conditional"
     },
     "F41": {
       "label": "其他備註 (F41)",
       "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "notes"
+      "db_key": "notes",
+      "requiredness": "conditional"
     },
     "B43": {
       "label": "服務地址 (B43)",
       "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "address"
+      "db_key": "address",
+      "requiredness": "required"
     },
     "A48": {
       "label": "服務時段 (A48)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "service_time"
+      "db_key": "service_time",
+      "requiredness": "required"
     },
     "B178": {
       "label": "甲方姓名 (B178)",
       "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "client_name"
+      "db_key": "client_name",
+      "requiredness": "required"
     },
     "E178": {
       "label": "甲方電話 (E178)",
       "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "phone"
+      "db_key": "phone",
+      "requiredness": "required"
     },
     "B180": {
       "label": "甲方通訊地址 (B180)",
       "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
-      "db_key": "address"
+      "db_key": "address",
+      "requiredness": "required"
     },
-    "B181": {
+  "B181": {
       "label": "乙方月嫂姓名 (B181)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "staff_name"
+      "db_key": "staff_name",
+    "requiredness": "conditional",
+    "applicability": "single_staff_assignment_present"
     },
     "B185": {
       "label": "立約簽署日期 (B185)",
       "db_table": "contract_signing (客戶簽約命令)",
-      "db_key": "contract_signed_date"
+      "db_key": "contract_signed_date",
+      "requiredness": "required"
     },
     "E39": {
       "label": "每日服務時數 (E39)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "service_hours_per_day"
+      "db_key": "service_hours_per_day",
+      "requiredness": "required"
     }
   }
 }

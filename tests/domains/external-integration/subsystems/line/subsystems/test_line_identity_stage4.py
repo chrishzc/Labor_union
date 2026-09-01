@@ -123,6 +123,91 @@ def test_verified_liff_user_is_observed_before_identity_flow_open() -> None:
     assert uow.committed is True
 
 
+def test_new_customer_flow_selects_dual_role_in_the_same_uow_and_replay_is_read_only() -> None:
+    line_user_id = LineUserId("U-dual-role-flow")
+    selected = [None]
+    context_version = [ExpectedVersion(0)]
+    bindings = (
+        LineIdentityBindingSnapshot(
+            line_user_id,
+            LineIdentityBindingStatus.BOUND,
+            ExpectedVersion(1),
+            LineBindingSubjectType.CUSTOMER,
+            "customer:23",
+        ),
+        LineIdentityBindingSnapshot(
+            line_user_id,
+            LineIdentityBindingStatus.BOUND,
+            ExpectedVersion(1),
+            LineBindingSubjectType.STAFF,
+            "staff:18",
+        ),
+    )
+
+    class Identities:
+        def list_by_user(self, queried_line_user_id):
+            assert queried_line_user_id == line_user_id
+            return bindings
+
+        def selected_role(self, queried_line_user_id):
+            assert queried_line_user_id == line_user_id
+            return selected[0], context_version[0]
+
+        def select_role(self, queried_line_user_id, target_role, expected_version):
+            assert queried_line_user_id == line_user_id
+            assert expected_version == context_version[0]
+            selected[0] = target_role
+            context_version[0] = ExpectedVersion(expected_version.value + 1)
+            return context_version[0]
+
+    class FlowRepository:
+        def __init__(self):
+            self.calls = 0
+
+        def open(self, command):
+            self.calls += 1
+            result = _opened_flow(command)
+            if self.calls == 2:
+                return OpenLineIdentityFlowResult(
+                    result.flow_id,
+                    result.purpose,
+                    result.line_user_id,
+                    result.expires_at,
+                    LineIdentityCommandOutcome.EXISTING,
+                )
+            return result
+
+    uow = FakeUow(
+        platform_users=SimpleNamespace(ensure_verified_user=lambda _: None),
+        identity_flows=FlowRepository(),
+        identities=Identities(),
+        receipts=ReceiptRepository(),
+        audit=RecordingRepository(),
+        outbox=RecordingRepository(),
+    )
+    application = LineIdentityApplication(lambda: uow, lambda: NOW)
+
+    application.open_flow(
+        LineIdentityFlowPurpose.CUSTOMER_BINDING,
+        line_user_id,
+        IdempotencyKey("dual-role-flow:1"),
+        CorrelationId("dual-role-flow:1"),
+    )
+    application.open_flow(
+        LineIdentityFlowPurpose.CUSTOMER_BINDING,
+        line_user_id,
+        IdempotencyKey("dual-role-flow:1"),
+        CorrelationId("dual-role-flow:1"),
+    )
+
+    assert selected[0] is LineBindingSubjectType.CUSTOMER
+    assert context_version[0] == ExpectedVersion(1)
+    assert len(uow.receipts.items) == 1
+    assert len(uow.audit.items) == 1
+    assert len(uow.outbox.items) == 1
+    assert uow.committed is True
+
+
 def test_staff_command_only_opens_flow_and_queues_liff_link() -> None:
     flows = SimpleNamespace(open=lambda command: _opened_flow(command))
     deliveries = RecordingRepository()
