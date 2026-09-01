@@ -1,0 +1,66 @@
+name: Temporary entrypoint contamination diagnostic
+
+on:
+  push:
+    branches:
+      - fix/current-regression-baseline
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install -r requirements.txt
+      - name: Find the first shard-1 test that changes LINE mobile source discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="api/routes/line_mobile_admin.py"
+          initial_hash="$(sha256sum "$target" | awk '{print $1}')"
+          mapfile -t all_test_files < <(
+            find tests -type f \( -name 'test_*.py' -o -name '*_test.py' \) | sort
+          )
+          selected=()
+          for index in "${!all_test_files[@]}"; do
+            if (( index % 8 == 0 )); then
+              selected+=("${all_test_files[$index]}")
+            fi
+          done
+          echo "initial_hash=$initial_hash"
+          grep -n "open-safe-link" "$target" && exit 1 || true
+          for file in "${selected[@]}"; do
+            if [[ "$file" == "tests/test_entrypoint_review_queue.py" ]]; then
+              echo "reached entrypoint test without prior source mutation"
+              break
+            fi
+            echo "RUN $file"
+            python -m pytest -q --strict-markers -m "not integration" "$file"
+            current_hash="$(sha256sum "$target" | awk '{print $1}')"
+            if [[ "$current_hash" != "$initial_hash" ]]; then
+              echo "SOURCE_MUTATED_BY=$file"
+              git diff -- "$target"
+              grep -n "open-safe-link" "$target" || true
+              exit 1
+            fi
+          done
+          python - <<'PY'
+          from scripts import generate_entrypoint_review_queue as queue
+          entries = queue.discover_entrypoints()
+          matches = [entry for entry in entries if "open-safe-link" in str(entry["entry_id"])]
+          print(f"clean_process_open_safe_link_entries={matches}")
+          if matches:
+              raise SystemExit(1)
+          PY
