@@ -45,7 +45,10 @@ def _snapshot(column_type: str) -> dict[str, object]:
 
 def test_pairing_resolution_release_is_ordered_and_hash_bound() -> None:
     configured = migration.DEFAULT_RELEASE_MANIFESTS
-    assert configured[-1] == MANIFEST_NAME
+    assert MANIFEST_NAME in configured
+    assert configured.index(MANIFEST_NAME) < configured.index(
+        "labor_union_2026_09_01_historical_service_accounting_v1.json"
+    )
 
     manifest = load_migration_release_manifest(
         ROOT / "db/migration_releases" / MANIFEST_NAME,

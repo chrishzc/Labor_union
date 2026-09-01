@@ -262,6 +262,66 @@ def test_staff_legacy_funding_split_cells_stay_blank_and_whole_obligation_popula
     assert worksheet["B19"].value == 42000
 
 
+def test_real_staff_template_clears_legacy_funding_placeholders():
+    root = Path(__file__).resolve().parents[6]
+    template = root / "db/templates/contracts/服務人員契約.xlsx"
+    mapping = root / "db/templates/contracts/contract_staff_service.json"
+    descriptors = json.loads(mapping.read_text(encoding="utf-8"))["param_mappings"]
+    facts = {
+        descriptor["db_key"]: "測試值"
+        for descriptor in descriptors.values()
+        if descriptor.get("db_key") and descriptor.get("requiredness") == "required"
+    }
+    facts.update(
+        {
+            "case_no": "CASE-1", "staff_name": "服務人員", "client_name": "客戶",
+            "assigned_start_date": "2026-09-01", "assigned_end_date": "2026-09-10",
+            "service_days": 10, "assignment_service_days": 10, "service_time": "09:00-17:00",
+            "service_type": "週休1日", "service_unit_price": 300,
+            "staff_payable_total": 24000, "payroll_payment_date": "2026-09-15",
+            "client_city": "新竹市", "client_address": "測試地址", "staff_phone": "0900000000",
+            "contract_signed_date": "2026-09-01", "__today__": "2026-09-01",
+        }
+    )
+
+    rendered = render_contract_template(
+        template_path=template,
+        mapping_path=mapping,
+        facts=facts,
+    )
+    worksheet = load_workbook(BytesIO(rendered), data_only=False).active
+    assert [worksheet[cell].value for cell in ("B13", "C13", "B15", "C15")] == [None, None, None, None]
+
+
+def test_client_contract_payment_destination_and_floor_fee_due_date_use_client_finance_owner():
+    root = Path(__file__).resolve().parents[6]
+    mapping = json.loads((root / "db/templates/contracts/contract_client_copy.json").read_text(encoding="utf-8"))
+    assert mapping["param_mappings"]["D36"] == {
+        "label": "工會／代收付帳戶 (D36)",
+        "db_table": "client_payment_destination_configuration_current (Client Finance typed current configuration)",
+        "db_key": "client_payment_destination_account",
+        "requiredness": "required",
+        "status": "approved",
+    }
+    floor_fee_date = mapping["param_mappings"]["C37"]
+    assert floor_fee_date["db_key"] == "deposit_due_date"
+    assert floor_fee_date["status"] == "approved"
+
+
+@pytest.mark.parametrize(
+    ("filename", "print_area"),
+    [("服務人員契約.xlsx", "'工作表1'!$A$1:$H$97"), ("contract_client_copy.xlsx", "'客戶契約'!$A$1:$G$185")],
+)
+def test_contract_templates_print_one_page_wide_without_horizontal_fragment_pages(filename, print_area):
+    root = Path(__file__).resolve().parents[6]
+    worksheet = load_workbook(root / "db/templates/contracts" / filename).active
+    assert str(worksheet.print_area) == print_area
+    assert worksheet.page_setup.fitToWidth == 1
+    assert worksheet.page_setup.fitToHeight == 0
+    assert worksheet.page_setup.scale is None
+    assert worksheet.sheet_properties.pageSetUpPr.fitToPage is True
+
+
 def test_client_finance_coverage_projection_uses_exact_planned_hours():
     facts = {
         "identity_status": "補助市民",

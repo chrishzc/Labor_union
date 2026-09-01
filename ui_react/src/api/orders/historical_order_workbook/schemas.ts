@@ -13,8 +13,20 @@ export const HistoricalOrderStatusCountsSchema = z.object({
   invalid_or_blank: z.number().int().min(0),
 }).strict();
 
+export const HistoricalOrderResultCountsSchema = z.object({
+  not_adopted: z.number().int().min(0),
+  matching_pending_deposit: z.number().int().min(0),
+  historical_unserved: z.number().int().min(0),
+  historical_in_service: z.number().int().min(0),
+  historical_service_completed: z.number().int().min(0),
+}).strict();
+
 const validateStatusCountConservation = (
-  value: { source_row_count: number; status_counts: z.infer<typeof HistoricalOrderStatusCountsSchema> },
+  value: {
+    source_row_count: number;
+    status_counts: z.infer<typeof HistoricalOrderStatusCountsSchema>;
+    result_counts: z.infer<typeof HistoricalOrderResultCountsSchema>;
+  },
   context: z.RefinementCtx
 ) => {
   const total = Object.values(value.status_counts).reduce((sum, count) => sum + count, 0);
@@ -23,6 +35,14 @@ const validateStatusCountConservation = (
       code: 'custom',
       path: ['status_counts'],
       message: 'historical_order_status_counts_not_conserved',
+    });
+  }
+  const resultTotal = Object.values(value.result_counts).reduce((sum, count) => sum + count, 0);
+  if (resultTotal !== value.source_row_count) {
+    context.addIssue({
+      code: 'custom',
+      path: ['result_counts'],
+      message: 'historical_order_result_counts_not_conserved',
     });
   }
 };
@@ -39,6 +59,7 @@ export const HistoricalOrderWorkbookPreviewSchema = z
     assignment_candidate_count: z.number().int().min(0),
     evidence_only_pairing_count: z.number().int().min(0),
     status_counts: HistoricalOrderStatusCountsSchema,
+    result_counts: HistoricalOrderResultCountsSchema,
     preview_fingerprint: HistoricalOrderSha256Schema,
   })
   .strict()
@@ -58,6 +79,7 @@ export const HistoricalOrderWorkbookReceiptSchema = z
     replayed_rows: z.number().int().min(0),
     replayed_workbook: z.boolean(),
     status_counts: HistoricalOrderStatusCountsSchema,
+    result_counts: HistoricalOrderResultCountsSchema,
     review_references: z.array(z.string().trim().min(1).max(191)).max(100),
   })
   .strict()

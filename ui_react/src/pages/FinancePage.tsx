@@ -18,8 +18,9 @@ import { financeImportBlockerMessage } from '../adapters/finance/finance_import_
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
 import { HistoricalStaffPayoutWorkbench } from '../components/HistoricalStaffPayoutWorkbench';
+import { PaymentDestinationConfigurationPanel } from '../components/PaymentDestinationConfigurationPanel';
 
-type FinanceTab = 'client-receipts' | 'staff-payables' | 'accounts-payable' | 'finance-import';
+type FinanceTab = 'client-receipts' | 'staff-payables' | 'accounts-payable' | 'finance-import' | 'payment-destination';
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
 const FINANCE_OUTCOME_POLL_LIMIT = 10;
 const FINANCE_OUTCOME_POLL_DELAY_MS = 500;
@@ -261,6 +262,7 @@ export const FinancePage: React.FC = () => {
           ['staff-payables', '月嫂應付款'],
           ['accounts-payable', '應付帳款'],
           ['finance-import', '銀行流水匯入'],
+          ['payment-destination', '契約收款帳戶'],
         ] as const).map(([id, label]) => (
           <button
             key={id}
@@ -390,6 +392,7 @@ export const FinancePage: React.FC = () => {
           )}
         </section>
       )}
+      {activeTab === 'payment-destination' && <PaymentDestinationConfigurationPanel reload={reload} />}
 
       {activeTab === 'staff-payables' && (
         <section className="finance-workspace">

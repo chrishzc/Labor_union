@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
 
 class _StrictModel(BaseModel):
@@ -65,4 +65,51 @@ class HistoricalCompletionView(_StrictModel):
     projection_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-__all__ = ["HistoricalCompletionView"]
+class HistoricalCompletionApplySourceVersionBody(_StrictModel):
+    kind: Literal[
+        "payroll_case_account",
+        "staff_obligation",
+        "staff_obligation_event",
+        "staff_payable_account",
+        "staff_payable_projection",
+        "staff_payout_event",
+        "staff_payout_return_event",
+        "staff_payout_reversal_event",
+        "staff_payout_allocation",
+        "staff_bank_fact",
+        "staff_overpayment_recovery",
+        "staff_overpayment_recovery_event",
+    ]
+    identity: str = Field(min_length=1, max_length=191)
+    version: str = Field(pattern=r"^(0|[1-9][0-9]*)$")
+
+
+class HistoricalCompletionApplyBody(_StrictModel):
+    expected_order_version: str = Field(pattern=r"^(0|[1-9][0-9]*)$")
+    expected_client_finance_version: str = Field(pattern=r"^(0|[1-9][0-9]*)$")
+    expected_source_versions: list[HistoricalCompletionApplySourceVersionBody]
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class HistoricalCompletionPreviewView(_StrictModel):
+    case_no: str = Field(min_length=1, max_length=50)
+    before_status: Literal["歷史訂單－服務完成"]
+    after_status: Literal["歷史訂單－帳務完成"]
+    expected_order_version: str = Field(pattern=r"^(0|[1-9][0-9]*)$")
+    resulting_order_version: str = Field(pattern=r"^[1-9][0-9]*$")
+    expected_client_finance_version: str = Field(pattern=r"^(0|[1-9][0-9]*)$")
+    expected_source_versions: list[HistoricalCompletionApplySourceVersionBody]
+    business_date: str
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HistoricalCompletionReceiptView(_StrictModel):
+    case_no: str = Field(min_length=1, max_length=50)
+    lifecycle_event_id: StrictInt = Field(gt=0)
+    resulting_order_version: str = Field(pattern=r"^[1-9][0-9]*$")
+    after_status: Literal["歷史訂單－帳務完成"]
+    replayed: StrictBool
+
+
+__all__ = [name for name in globals() if name.startswith("HistoricalCompletion")]

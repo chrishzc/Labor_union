@@ -1,0 +1,57 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-client-payment-destination-configuration-2026-09-01-v1",
+  "release_metadata": {
+    "release_name": "Labor Union Client Finance payment destination configuration",
+    "application_version": "client-payment-destination-configuration-v1",
+    "published_at": "2026-09-01",
+    "description": "Add versioned union collection account configuration used by client contracts"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-schema-assembly-2026-08-15-v1"
+  },
+  "artifacts": [{
+    "name": "1029_client_payment_destination_configuration.sql",
+    "relative_path": "db/schema_parts/1029_client_payment_destination_configuration.sql",
+    "sha256": "c5c04e7e8d98ab2f3a85e56ec1bc047f66c3bd846ac8f6f266cd808db0b4bd95",
+    "dependencies": [],
+    "data_effect": "schema_only",
+    "rollback_policy": "forward-only-preserve-payment-destination-lineage",
+    "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+  }],
+  "backfills": [],
+  "verification_contracts": [{
+    "verification_id": "client-payment-destination-configuration-owned-objects",
+    "phase": "post-schema",
+    "policy": "candidate-owned-objects-exact-and-current-readable",
+    "read_only": true,
+    "blocking": true
+  }],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["historical-service-accounting-v1", "client-payment-destination-configuration-v1"],
+    "required_restart_targets": ["api"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["client-payment-destination-configuration-owned-objects"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_01_client_payment_destination_configuration_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_01_client_payment_destination_configuration_v1.descriptors.json",
+    "sha256": "9266a5c892b018d208b4e59c56d4a793a0a4630e4a6dbb35e80cd0d315c6fd08",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

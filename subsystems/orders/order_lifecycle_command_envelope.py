@@ -9,7 +9,10 @@ from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 import re
 
-_CANONICAL_STATUSES = frozenset({"待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"})
+_CANONICAL_STATUSES = frozenset({
+    "待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消",
+    "歷史訂單－未服務", "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成",
+})
 _CONTROL_TYPES = frozenset({"cancellation", "actual_start_reconfirmation", "human_hold"})
 _CONTROL_SCOPES = frozenset({"order", "enter_service", "auto_complete"})
 _CONTROL_STATES = frozenset({"active", "cleared"})

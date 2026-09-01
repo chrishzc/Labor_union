@@ -224,7 +224,8 @@ def _row_issues(values, positions, bad_start, bad_end, start, end):
         issues.append("historical_case_no_missing")
     if _blank(_value(values, positions.get("client_name"))):
         issues.append("historical_client_name_missing")
-    if parse_historical_status(_value(values, positions.get("status"))) is None:
+    status_value = _value(values, positions.get("status"))
+    if not _blank(status_value) and parse_historical_status(status_value) is None:
         issues.append("historical_status_invalid")
     return tuple(issues)
 

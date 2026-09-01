@@ -204,11 +204,9 @@ def test_deposit_paid_with_distinct_actual_start_builds_service_assignment_candi
         _Repository(), _UnitOfWork, _Writer()
     ).preview(row)
 
-    assert preview.after_status == OrderLifecycleStatus.ESTABLISHED.value
+    assert preview.after_status == OrderLifecycleStatus.HISTORICAL_IN_SERVICE.value
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
-    assert preview.issue_codes == (
-        "historical_accounting_service_calendar_unconfirmed",
-    )
+    assert preview.issue_codes == ()
 
 
 def test_matching_effective_assignment_is_reused_for_historical_actual_start():
@@ -286,9 +284,7 @@ def test_matching_effective_assignment_is_reused_for_historical_actual_start():
 
     preview = workflow.preview(row)
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_REUSED
-    assert preview.issue_codes == (
-        "historical_accounting_service_calendar_unconfirmed",
-    )
+    assert preview.issue_codes == ()
 
     workflow.apply(HistoricalOrderAdoptionRequest(
         row, preview.fingerprint, "historical-order:row:70", "operator",
@@ -537,7 +533,7 @@ def test_historical_source_context_reuses_bridged_formal_assignment_identity():
     assert preview.actual_start.assignments[0].source_assignment_id == 51
 
 
-def test_deposit_paid_without_service_evidence_adopts_status_but_defers_actual_start():
+def test_deposit_paid_source_dates_are_adopted_without_daily_schedule_evidence():
     row = SimpleNamespace(
         case_no="CASE-1",
         client_name="客戶甲",
@@ -554,12 +550,15 @@ def test_deposit_paid_without_service_evidence_adopts_status_but_defers_actual_s
         _Repository(), _UnitOfWork, _Writer()
     ).preview(row)
 
-    assert preview.after_status == OrderLifecycleStatus.ESTABLISHED.value
-    assert preview.date_patch == ()
-    assert preview.issue_codes == ("historical_actual_start_evidence_insufficient",)
+    assert preview.after_status == OrderLifecycleStatus.HISTORICAL_IN_SERVICE.value
+    assert preview.date_patch == (
+        ("actual_start_date", date(2026, 8, 7)),
+        ("actual_end_date", date(2026, 9, 7)),
+    )
+    assert preview.issue_codes == ()
 
 
-def test_deposit_paid_historical_period_skips_precision_and_requires_accounting_review():
+def test_deposit_paid_historical_period_skips_precision_and_enters_historical_branch():
     """Historical roots advance without inventing a daily calendar or accounting."""
     actual_start_date = date(2026, 8, 7)
     timeline: list[tuple[str, object]] = []
@@ -645,15 +644,13 @@ def test_deposit_paid_historical_period_skips_precision_and_requires_accounting_
 
     preview = workflow.preview(row)
 
-    assert preview.after_status == OrderLifecycleStatus.ESTABLISHED.value
+    assert preview.after_status == OrderLifecycleStatus.HISTORICAL_IN_SERVICE.value
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
     assert preview.date_patch == (
         ("actual_start_date", actual_start_date),
         ("actual_end_date", row.actual_end_date),
     )
-    assert preview.issue_codes == (
-        "historical_accounting_service_calendar_unconfirmed",
-    )
+    assert preview.issue_codes == ()
     assert timeline == []
 
     receipt = workflow.apply(
@@ -669,6 +666,12 @@ def test_deposit_paid_historical_period_skips_precision_and_requires_accounting_
 
     assert receipt.resulting_version == 4
     assert repository.lifecycle_events == [
-        (OrderLifecycleStatus.DISCUSSION.value, OrderLifecycleStatus.ESTABLISHED.value, 4)
+        (
+            OrderLifecycleStatus.DISCUSSION.value,
+            OrderLifecycleStatus.HISTORICAL_IN_SERVICE.value,
+            4,
+        )
     ]
-    assert timeline == [("status-transition", OrderLifecycleStatus.ESTABLISHED.value)]
+    assert timeline == [
+        ("status-transition", OrderLifecycleStatus.HISTORICAL_IN_SERVICE.value)
+    ]

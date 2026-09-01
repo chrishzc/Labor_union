@@ -7,6 +7,9 @@ from infrastructure.mysql.historical_order_adoption_cancellation_decorator impor
     MySqlHistoricalOrderAdoptionCancellationDecorator,
 )
 from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
+from infrastructure.mysql.historical_pending_deposit_matching_repository import (
+    MySqlHistoricalPendingDepositMatchingRepository,
+)
 from infrastructure.mysql.historical_actual_start_date_planner import (
     MySqlHistoricalActualStartDatePlanner,
 )
@@ -45,6 +48,9 @@ def get_historical_order_workbook_import_service():
                     SystemBusinessClock(),
                 ),
                 MySqlHistoricalActualStartDatePlanner(connection),
+            ),
+            matching_pending_deposit=MySqlHistoricalPendingDepositMatchingRepository(
+                connection
             ),
         )
         yield HistoricalOrderWorkbookImportService(

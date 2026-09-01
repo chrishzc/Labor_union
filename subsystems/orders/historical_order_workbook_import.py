@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Callable, Protocol
 
-from domains.orders.historical_adoption import HistoricalOrderSourceStatus
+from domains.orders.historical_adoption import HistoricalOrderResult, HistoricalOrderSourceStatus
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from subsystems.orders.historical_adoption_workflow import HistoricalOrderAdoptionRequest, HistoricalOrderAdoptionWorkflow
 from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbook, load_historical_order_workbook
@@ -66,6 +66,32 @@ class HistoricalOrderStatusCounts:
 
 
 @dataclass(frozen=True, slots=True)
+class HistoricalOrderResultCounts:
+    not_adopted: int
+    matching_pending_deposit: int
+    historical_unserved: int
+    historical_in_service: int
+    historical_service_completed: int
+
+    def __post_init__(self) -> None:
+        if any(value < 0 for value in self.as_dict().values()):
+            raise ValueError("historical_order_result_count_negative")
+
+    @property
+    def total(self) -> int:
+        return sum(self.as_dict().values())
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "not_adopted": self.not_adopted,
+            "matching_pending_deposit": self.matching_pending_deposit,
+            "historical_unserved": self.historical_unserved,
+            "historical_in_service": self.historical_in_service,
+            "historical_service_completed": self.historical_service_completed,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class HistoricalOrderWorkbookPreview:
     source_content_digest: str
     sheet_identity: str
@@ -77,6 +103,7 @@ class HistoricalOrderWorkbookPreview:
     assignment_candidate_count: int
     evidence_only_pairing_count: int
     status_counts: HistoricalOrderStatusCounts
+    result_counts: HistoricalOrderResultCounts
     preview_fingerprint: str
 
     def as_dict(self) -> dict[str, object]:
@@ -91,6 +118,7 @@ class HistoricalOrderWorkbookPreview:
             "assignment_candidate_count": self.assignment_candidate_count,
             "evidence_only_pairing_count": self.evidence_only_pairing_count,
             "status_counts": self.status_counts.as_dict(),
+            "result_counts": self.result_counts.as_dict(),
             "preview_fingerprint": self.preview_fingerprint,
         }
 
@@ -107,6 +135,7 @@ class HistoricalOrderWorkbookReceipt:
     replayed_rows: int
     replayed_workbook: bool
     status_counts: HistoricalOrderStatusCounts
+    result_counts: HistoricalOrderResultCounts
     review_references: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
@@ -121,6 +150,7 @@ class HistoricalOrderWorkbookReceipt:
             "replayed_rows": self.replayed_rows,
             "replayed_workbook": self.replayed_workbook,
             "status_counts": self.status_counts.as_dict(),
+            "result_counts": self.result_counts.as_dict(),
             "review_references": list(self.review_references),
         }
 
@@ -245,6 +275,7 @@ class HistoricalOrderWorkbookImportService:
         self, workbook, key, actor, correlation_id
     ) -> HistoricalOrderWorkbookReceipt:
         outcomes: Counter[str] = Counter()
+        locked_previews: list[object] = []
         assignments_created = 0
         replayed_rows = 0
         review_rows = 0
@@ -253,6 +284,7 @@ class HistoricalOrderWorkbookImportService:
             locked_preview = self._workflow.preview_in_current_unit_of_work(
                 row, for_update=True
             )
+            locked_previews.append(locked_preview)
             receipt = self._workflow.apply_in_current_unit_of_work(
                 _row_request(
                     row,
@@ -273,7 +305,8 @@ class HistoricalOrderWorkbookImportService:
         return HistoricalOrderWorkbookReceipt(
             workbook.content_digest, len(workbook.rows), outcomes["adopted"], outcomes["unmatched_case"],
             review_rows, outcomes["current_conflict"], assignments_created, replayed_rows, False,
-            _status_counts(workbook), tuple(review_references),
+            _status_counts(workbook), _result_counts(tuple(locked_previews)),
+            tuple(review_references),
         )
 
     def _stored_replay(self, key: str, workbook: HistoricalOrderWorkbook) -> HistoricalOrderWorkbookReceipt | None:
@@ -295,6 +328,12 @@ class HistoricalOrderWorkbookImportService:
             if stored_counts is not None
             else _status_counts(workbook)
         )
+        if "result_counts" not in snapshot:
+            snapshot["result_counts"] = _legacy_result_counts(snapshot["status_counts"])
+        elif isinstance(snapshot["result_counts"], dict):
+            snapshot["result_counts"] = HistoricalOrderResultCounts(
+                **snapshot["result_counts"]
+            )
         if "review_references" not in snapshot:
             find_open_reviews = getattr(
                 self._repository, "find_open_review_identities", None
@@ -308,25 +347,98 @@ class HistoricalOrderWorkbookImportService:
 
 
 def _preview(workbook: HistoricalOrderWorkbook, row_previews) -> HistoricalOrderWorkbookPreview:
+    _assert_workbook_validation(workbook, row_previews)
     _assert_source_schedule_consistency(row_previews, workbook.rows)
     outcomes = Counter(item.outcome.value for item in row_previews)
     candidates = sum(sum(item.resolution.value == "assignment_candidate" for item in preview.pairings) for preview in row_previews)
     evidence = sum(sum(item.resolution.value == "evidence_only" for item in preview.pairings) for preview in row_previews)
     status_counts = _status_counts(workbook)
+    result_counts = _result_counts(row_previews)
     fingerprint = fingerprint_payload({
         "digest": workbook.content_digest,
         "sheet": workbook.sheet_identity,
         "rows": tuple((item.source_identity, item.source_fingerprint, item.fingerprint.value) for item in row_previews),
         "status_counts": status_counts.as_dict(),
+        "result_counts": result_counts.as_dict(),
     }).value
-    review_rows = sum(
-        item.outcome.value != "unmatched_case" and bool(getattr(item, "issue_codes", ()))
-        for item in row_previews
-    )
+    review_rows = 0
     return HistoricalOrderWorkbookPreview(
         workbook.content_digest, workbook.sheet_identity, len(workbook.rows), outcomes["adopted"],
         outcomes["unmatched_case"], review_rows, outcomes["current_conflict"],
-        candidates, evidence, status_counts, fingerprint,
+        candidates, evidence, status_counts, result_counts, fingerprint,
+    )
+
+
+def _assert_workbook_validation(
+    workbook: HistoricalOrderWorkbook,
+    row_previews: tuple[object, ...],
+) -> None:
+    """Fail closed for nonblank contradictory source data.
+
+    Truly blank identity/status/caregiver rows and cancelled rows are business
+    ``not_adopted`` results.  A nonblank value that cannot be interpreted is a
+    source defect and rejects the entire workbook before any write.
+    """
+
+    for row, preview in zip(workbook.rows, row_previews, strict=True):
+        issues = set(row.issue_codes)
+        if "historical_status_invalid" in issues:
+            raise ValueError("historical_order_source_status_invalid")
+        if not row.case_no or not row.client_name or row.asserted_status is None:
+            continue
+        if row.asserted_status is HistoricalOrderSourceStatus.CANCELLED:
+            continue
+        if any(
+            code.endswith("_date_invalid") or code.endswith("_date_range_invalid")
+            for code in issues
+        ):
+            raise ValueError("historical_order_date_range_invalid")
+        for pairing in getattr(preview, "pairings", ()):
+            resolution = getattr(pairing.resolution, "value", pairing.resolution)
+            if resolution in {"staff_missing", "staff_ambiguous"}:
+                raise ValueError("historical_order_staff_not_unique")
+
+
+def _result_counts(row_previews) -> HistoricalOrderResultCounts:
+    counts = Counter(_preview_result(item) for item in row_previews)
+    result = HistoricalOrderResultCounts(
+        not_adopted=counts[HistoricalOrderResult.NOT_ADOPTED],
+        matching_pending_deposit=counts[HistoricalOrderResult.MATCHING_PENDING_DEPOSIT],
+        historical_unserved=counts[HistoricalOrderResult.HISTORICAL_UNSERVED],
+        historical_in_service=counts[HistoricalOrderResult.HISTORICAL_IN_SERVICE],
+        historical_service_completed=counts[HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED],
+    )
+    if result.total != len(row_previews):
+        raise RuntimeError("historical_order_result_counts_not_conserved")
+    return result
+
+
+def _preview_result(item: object) -> HistoricalOrderResult:
+    """Read the new workflow result with a bounded compatibility fallback.
+
+    The fallback only serves in-process legacy workflow doubles which predate
+    the result field.  Production previews always carry the explicit result.
+    """
+
+    result = getattr(item, "result", None)
+    if isinstance(result, HistoricalOrderResult):
+        return result
+    if getattr(getattr(item, "outcome", None), "value", None) == "unmatched_case":
+        return HistoricalOrderResult.NOT_ADOPTED
+    return HistoricalOrderResult.HISTORICAL_UNSERVED
+
+
+def _legacy_result_counts(
+    status_counts: HistoricalOrderStatusCounts,
+) -> HistoricalOrderResultCounts:
+    """Conserve old immutable receipts without rereading mutable Order facts."""
+
+    return HistoricalOrderResultCounts(
+        not_adopted=status_counts.cancelled_0 + status_counts.invalid_or_blank,
+        matching_pending_deposit=status_counts.discussion_2,
+        historical_unserved=status_counts.deposit_paid_1,
+        historical_in_service=0,
+        historical_service_completed=0,
     )
 
 
@@ -378,8 +490,20 @@ def project_source_schedule_conflicts(
         if case_no is None:
             continue
         for pairing_index, pairing in enumerate(preview.pairings, start=1):
+            resolution = getattr(pairing.resolution, "value", pairing.resolution)
+            preview_result = getattr(preview, "result", None)
+            eligible_service_evidence = (
+                resolution == "assignment_candidate" and preview_result is None
+            ) or (
+                resolution in {"assignment_candidate", "evidence_only"}
+                and preview_result
+                in {
+                    HistoricalOrderResult.HISTORICAL_IN_SERVICE,
+                    HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED,
+                }
+            )
             if (
-                getattr(pairing.resolution, "value", pairing.resolution) == "assignment_candidate"
+                eligible_service_evidence
                 and pairing.staff_id is not None
                 and pairing.start_date is not None
                 and pairing.end_date is not None

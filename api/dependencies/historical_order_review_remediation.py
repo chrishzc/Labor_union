@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from infrastructure.mysql.historical_order_adoption_repository import MySqlHistoricalOrderAdoptionRepository
 from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
+from infrastructure.mysql.historical_pending_deposit_matching_repository import (
+    MySqlHistoricalPendingDepositMatchingRepository,
+)
 from infrastructure.mysql.historical_order_review_remediation_repository import (
     HistoricalOrderReviewRemediationMySqlUnitOfWork,
     MySqlHistoricalOrderReviewRemediationRepository,
@@ -56,6 +59,9 @@ def get_historical_order_review_remediation_application():
         adoption_repository,
         lambda: HistoricalOrderReviewRemediationMySqlUnitOfWork(connection),
         MySqlHistoricalAssignmentWriter(connection),
+        matching_pending_deposit=MySqlHistoricalPendingDepositMatchingRepository(
+            connection
+        ),
     )
     repository = MySqlHistoricalOrderReviewRemediationRepository(connection, adoption_workflow)
     workflow = HistoricalReviewRemediationWorkflow(

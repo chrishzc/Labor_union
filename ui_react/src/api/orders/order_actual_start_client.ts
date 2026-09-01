@@ -41,6 +41,10 @@ const LifecycleStatusSchema = z.enum([
   '服務中',
   '訂單完成',
   '訂單取消',
+  '歷史訂單－未服務',
+  '歷史訂單－服務中',
+  '歷史訂單－服務完成',
+  '歷史訂單－帳務完成',
 ]);
 
 const ActualStartAssignmentSchema = z.strictObject({

@@ -30,6 +30,24 @@ def prorate_floor_fee(
     return MoneyNTD(rounded)
 
 
+def prorate_historical_floor_fee(
+    contractual_fee: MoneyNTD,
+    contracted_service_days: int,
+    actual_service_days: int,
+) -> MoneyNTD:
+    """Prorate legacy service volume without the normal contracted-day ceiling."""
+
+    if not isinstance(contractual_fee, MoneyNTD):
+        raise TypeError("contractual floor fee must be MoneyNTD")
+    require_positive_integer(contracted_service_days, "contracted service days")
+    require_positive_integer(actual_service_days, "actual service days")
+    numerator = contractual_fee.amount * actual_service_days
+    quotient, remainder = divmod(numerator, contracted_service_days)
+    return MoneyNTD(
+        quotient + (1 if remainder * 2 >= contracted_service_days else 0)
+    )
+
+
 def allocate_largest_remainder(
     total: MoneyNTD,
     weights: Mapping[str, int],
@@ -72,4 +90,8 @@ def _distribute_remainder(total, weights, bases, weight_total) -> None:
         bases[identity] += 1
 
 
-__all__ = ["allocate_largest_remainder", "prorate_floor_fee"]
+__all__ = [
+    "allocate_largest_remainder",
+    "prorate_floor_fee",
+    "prorate_historical_floor_fee",
+]

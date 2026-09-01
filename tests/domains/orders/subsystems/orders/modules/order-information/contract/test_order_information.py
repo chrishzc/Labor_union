@@ -50,6 +50,7 @@ def _snapshot():
             "service_salary": 48000,
             "salary_payment_date_1": date(2026, 10, 5),
             "floor_fee": 0,
+            "special_holidays": "2026-09-07、2026-09-14",
             "notes": "請注意寶寶作息",
             "dietary_habits": "葷食",
             "vegetarian_preference": "可以",
@@ -83,6 +84,8 @@ def test_info_01_uses_exact_typed_owner_values_and_no_legacy_execution_dates():
     assert values["f_104_c4"] == date(2026, 9, 1)
     assert values["f_105_c5"] == date(2026, 9, 20)
     assert values["f_110_ca"] == 48000
+    assert values["f_109_c9"] == 2400
+    assert values["f_114_ce"] == "2026-09-07、2026-09-14"
     assert repository.calls == [("CASE-1", 7)]
 
 
@@ -143,6 +146,11 @@ def test_templates_declare_typed_owner_and_requiredness_metadata(template_id):
     assert all(
         "survey_details" not in str(field).lower() for field in template["fields"]
     )
+    if template_id == "tpl_info_01":
+        by_id = {field["id"]: field for field in template["fields"]}
+        assert by_id["f_109_c9"]["label"] == "服務單價（時薪）"
+        assert by_id["f_114_ce"]["source"] == "order.custom_rest_dates"
+        assert by_id["f_115_cf"]["label"] == "注意事項備註"
 
 
 class _Cursor:
@@ -165,6 +173,7 @@ class _Cursor:
                     "service_days": 20,
                     "service_hours_per_day": 10,
                     "floor_fee": 0,
+                    "custom_rest_dates": '["2026-09-07"]',
                     "client_name": "客戶甲",
                     "client_phone": "0900000000",
                     "client_address": "新竹市",

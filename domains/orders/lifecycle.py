@@ -27,11 +27,38 @@ class OrderLifecycleStatus(StrEnum):
     IN_SERVICE = "服務中"
     COMPLETED = "訂單完成"
     CANCELLED = "訂單取消"
+    HISTORICAL_UNSERVED = "歷史訂單－未服務"
+    HISTORICAL_IN_SERVICE = "歷史訂單－服務中"
+    HISTORICAL_SERVICE_COMPLETED = "歷史訂單－服務完成"
+    HISTORICAL_ACCOUNTING_COMPLETED = "歷史訂單－帳務完成"
 
 
 class OrderLifecycleScope(StrEnum):
     ALL = "all"
     UNFINISHED = "unfinished"
+
+
+def project_historical_accounting_completion_status(
+    current_status: OrderLifecycleStatus,
+    *,
+    client_settled: bool,
+    all_staff_settled: bool,
+    service_day_counts_complete: bool,
+) -> OrderLifecycleStatus:
+    """Project the historical terminal branch from owner settlement facts."""
+
+    if any(
+        type(value) is not bool
+        for value in (client_settled, all_staff_settled, service_day_counts_complete)
+    ):
+        raise TypeError("historical accounting completion facts must be boolean")
+    if current_status is OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED:
+        return current_status
+    if current_status is not OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED:
+        raise ValueError("historical_order_lifecycle_transition_invalid")
+    if client_settled and all_staff_settled and service_day_counts_complete:
+        return OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED
+    return current_status
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +176,13 @@ def _lifecycle_status(
     completion_reached,
     evaluation_at,
 ):
+    if root_facts.current_status in {
+        OrderLifecycleStatus.HISTORICAL_UNSERVED,
+        OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+    }:
+        return root_facts.current_status
     if root_facts.current_status is OrderLifecycleStatus.PENDING_COMPLETION:
         return OrderLifecycleStatus.PENDING_COMPLETION
     if root_facts.current_status is OrderLifecycleStatus.COMPLETED:

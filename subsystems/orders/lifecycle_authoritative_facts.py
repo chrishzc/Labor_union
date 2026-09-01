@@ -11,7 +11,10 @@ from typing import Mapping
 import re
 from zoneinfo import ZoneInfo
 
-CANONICAL_ORDER_STATUSES = frozenset({"待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"})
+CANONICAL_ORDER_STATUSES = frozenset({
+    "待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消",
+    "歷史訂單－未服務", "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成",
+})
 CANONICAL_LIFECYCLE_TRIGGERS = frozenset({"case_created", "schedule_applied", "deposit_reconciled", "deposit_reversed", "actual_start_updated", "actual_start_reconfirmed", "evaluation_time_reached", "cancelled", "hold_activated", "hold_released", "manual_correction"})
 _REQUIRED_FACT_KEYS = frozenset({"cancellation", "cancellation_reason", "deposit_reconciled", "deposit_settlement_identity", "actual_start_date", "actual_end_date", "evaluation_at", "completion_instant", "completion_facts_consistent", "actual_start_reconfirmed", "effective_scheduling_generation_id", "official_service_dates", "transition_blockers", "manual_correction_target"})
 _BOOLEAN_FACT_KEYS = ("cancellation", "deposit_reconciled", "completion_facts_consistent", "actual_start_reconfirmed")

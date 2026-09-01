@@ -87,6 +87,8 @@ class HistoricalOrdersCompletionReadback:
     service_time_tuple_complete: bool
     readback_available: bool = True
     integrity_blockers: tuple[str, ...] = ()
+    historical_service_day_count_identity: str | None = None
+    historical_assignment_day_counts: tuple[tuple[str, int, int], ...] = ()
 
     def __post_init__(self) -> None:
         _case(self.case_no)
@@ -95,6 +97,10 @@ class HistoricalOrdersCompletionReadback:
             raise TypeError("Orders canonical status is invalid")
         _optional_identity(self.completion_lineage_identity, "completion lineage identity")
         _optional_identity(self.official_service_fact_identity, "official service fact identity")
+        _optional_identity(
+            self.historical_service_day_count_identity,
+            "historical service day count identity",
+        )
         if self.actual_start_date is not None and type(self.actual_start_date) is not date:
             raise TypeError("actual start date must be date or None")
         if not isinstance(self.official_service_dates, tuple):
@@ -109,6 +115,26 @@ class HistoricalOrdersCompletionReadback:
         if type(self.readback_available) is not bool:
             raise TypeError("Orders readback availability must be boolean")
         _blockers(self.integrity_blockers)
+        if not isinstance(self.historical_assignment_day_counts, tuple):
+            raise TypeError("historical assignment day counts must be a tuple")
+        if any(
+            not isinstance(item, tuple)
+            or len(item) != 3
+            or not isinstance(item[0], str)
+            or not item[0].strip()
+            or not isinstance(item[1], int)
+            or isinstance(item[1], bool)
+            or item[1] <= 0
+            or not isinstance(item[2], int)
+            or isinstance(item[2], bool)
+            or item[2] <= 0
+            for item in self.historical_assignment_day_counts
+        ):
+            raise ValueError("historical assignment day counts are invalid")
+        if self.historical_assignment_day_counts != tuple(
+            sorted(set(self.historical_assignment_day_counts))
+        ):
+            raise ValueError("historical assignment day counts must be sorted and unique")
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,18 +359,32 @@ def _check_orders(missing: list[CompletionMissingRoot], facts: HistoricalOrdersC
     if not facts.readback_available:
         _add(missing, "orders_readback_unavailable", CompletionOwner.ORDERS, "orders.readback", CompletionReferral.ORDERS_COMPLETION, "Orders completion root currently unavailable")
         return
-    if facts.canonical_status is not OrderLifecycleStatus.COMPLETED:
+    historical_count_path = facts.canonical_status in {
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+    }
+    if facts.canonical_status not in {
+        OrderLifecycleStatus.COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+    }:
         _add(missing, "orders_completion_not_terminal", CompletionOwner.ORDERS, "orders.canonical_status", CompletionReferral.ORDERS_COMPLETION, "Orders completion lineage is not terminal")
     if facts.completion_lineage_identity is None:
         _add(missing, "orders_completion_lineage_missing", CompletionOwner.ORDERS, "orders.completion_lineage_identity", CompletionReferral.ORDERS_COMPLETION, "Canonical Orders completion lineage is missing")
     if facts.actual_start_date is None:
         _add(missing, "orders_actual_start_missing", CompletionOwner.ORDERS, "orders.actual_start_date", CompletionReferral.ORDERS_ACTUAL_START, "Actual service start date is missing")
-    if facts.official_service_fact_identity is None:
-        _add(missing, "scheduling_service_facts_missing", CompletionOwner.SCHEDULING, "scheduling.official_service_fact_identity", CompletionReferral.SCHEDULING_SERVICE_FACTS, "Assignment-owned official service facts are missing")
-    if len(facts.official_service_dates) != facts.required_service_day_count:
-        _add(missing, "scheduling_service_dates_incomplete", CompletionOwner.SCHEDULING, "scheduling.official_service_dates", CompletionReferral.SCHEDULING_SERVICE_FACTS, "Official service dates do not cover the required service days")
-    if not facts.service_time_tuple_complete:
-        _add(missing, "scheduling_service_time_missing", CompletionOwner.SCHEDULING, "scheduling.service_time_tuple", CompletionReferral.SCHEDULING_SERVICE_FACTS, "Required service-time tuple is incomplete")
+    if historical_count_path:
+        if facts.historical_service_day_count_identity is None:
+            _add(missing, "historical_actual_service_days_required", CompletionOwner.ORDERS, "orders.historical_service_day_count_identity", CompletionReferral.ORDERS_COMPLETION, "Historical actual service day counts are missing")
+        if not facts.historical_assignment_day_counts:
+            _add(missing, "historical_actual_service_days_assignment_mismatch", CompletionOwner.ORDERS, "orders.historical_assignment_day_counts", CompletionReferral.ORDERS_COMPLETION, "Historical assignment day counts are incomplete")
+    else:
+        if facts.official_service_fact_identity is None:
+            _add(missing, "scheduling_service_facts_missing", CompletionOwner.SCHEDULING, "scheduling.official_service_fact_identity", CompletionReferral.SCHEDULING_SERVICE_FACTS, "Assignment-owned official service facts are missing")
+        if len(facts.official_service_dates) != facts.required_service_day_count:
+            _add(missing, "scheduling_service_dates_incomplete", CompletionOwner.SCHEDULING, "scheduling.official_service_dates", CompletionReferral.SCHEDULING_SERVICE_FACTS, "Official service dates do not cover the required service days")
+        if not facts.service_time_tuple_complete:
+            _add(missing, "scheduling_service_time_missing", CompletionOwner.SCHEDULING, "scheduling.service_time_tuple", CompletionReferral.SCHEDULING_SERVICE_FACTS, "Required service-time tuple is incomplete")
     for blocker in facts.integrity_blockers:
         if blocker.startswith("scheduling.") or blocker.startswith("scheduling_"):
             _add(missing, _integrity_code("scheduling", blocker), CompletionOwner.SCHEDULING, "scheduling.integrity", CompletionReferral.SCHEDULING_SERVICE_FACTS, _integrity_message("Scheduling service facts", blocker))
@@ -460,6 +500,8 @@ def _orders_payload(item: HistoricalOrdersCompletionReadback) -> dict[str, objec
         "official_service_dates": tuple(value.isoformat() for value in item.official_service_dates),
         "required_service_day_count": item.required_service_day_count,
         "service_time_tuple_complete": item.service_time_tuple_complete,
+        "historical_service_day_count_identity": item.historical_service_day_count_identity,
+        "historical_assignment_day_counts": item.historical_assignment_day_counts,
         "readback_available": item.readback_available,
         "integrity_blockers": item.integrity_blockers,
     }

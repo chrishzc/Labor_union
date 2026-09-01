@@ -54,7 +54,7 @@ class ClientNameReceiptView(BaseModel):
 class OrderStatusUpdateRequest(BaseModel):
     """Retired request kept only for the legacy HTTP 410 response."""
 
-    status: str = Field(..., description="訂單狀態: 洽談中/訂單成立/服務中/訂單完成/訂單取消")
+    status: str = Field(..., description="訂單狀態，包含正常與歷史訂單生命週期分支")
     cancel_reason: Optional[str] = Field(None, description="當狀態為訂單取消時的取消原因")
 
 

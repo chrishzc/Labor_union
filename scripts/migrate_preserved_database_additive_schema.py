@@ -94,6 +94,41 @@ def run_manifest_verifications(
     return tuple(receipts)
 
 
+def _post_schema_verification_validators(
+    owned_objects: Mapping[str, Any],
+) -> dict[str, Callable[[], Mapping[str, Any]]]:
+    """Bind each released post-schema contract to its owned artifacts."""
+
+    artifacts_by_verification: dict[str, set[str]] = {}
+    for manifest in getattr(RELEASE_MANIFEST, "manifests", ()):
+        artifact_names = {
+            schema.artifact.name for schema in manifest.schema_artifacts
+        }
+        for contract in manifest.verification_contracts:
+            if contract.phase != "post-schema":
+                continue
+            artifacts_by_verification.setdefault(
+                contract.verification_id, set()
+            ).update(artifact_names)
+
+    validators: dict[str, Callable[[], Mapping[str, Any]]] = {}
+    for verification_id, artifact_names in artifacts_by_verification.items():
+        selected_names = tuple(sorted(artifact_names))
+
+        def validate(
+            names: tuple[str, ...] = selected_names,
+        ) -> Mapping[str, Any]:
+            states = {name: owned_objects.get(name) for name in names}
+            if not states or any(state != "exact" for state in states.values()):
+                raise UpgradeBlocked(
+                    "post-schema owned objects are not exact: " + str(states)
+                )
+            return {"status": "passed", "owned_objects": states}
+
+        validators[verification_id] = validate
+    return validators
+
+
 def restart_and_run_read_smoke(
     restart_targets: Iterable[str],
     smoke_ids: Iterable[str],
@@ -203,6 +238,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_01_task96_government_subsidy_return_excess_recovery_v1.json",
     "labor_union_2026_09_01_task96_scheduling_service_day_attachment_kind_v1.json",
     "labor_union_2026_09_01_historical_order_pairing_resolution_reused_v1.json",
+    "labor_union_2026_09_01_historical_service_accounting_v1.json",
+    "labor_union_2026_09_01_client_payment_destination_configuration_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2098,6 +2135,12 @@ def _metadata_state_for_artifact(
         return _order_lifecycle_pending_status_constraint_state(
             snapshot,
             descriptor,
+        )
+    if artifact == "1028_historical_service_accounting.sql":
+        return _historical_service_accounting_state(
+            snapshot,
+            descriptor,
+            defer_missing_triggers=defer_missing_triggers,
         )
     if artifact == "204_scheduling_service_day_logs.sql":
         return _scheduling_service_day_logs_successor_state(
@@ -4761,6 +4804,24 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "NO",
             )
         }
+    if part_name == "1028_historical_service_accounting.sql":
+        historical_statuses = (
+            "enum('待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消',"
+            "'歷史訂單－未服務','歷史訂單－服務中','歷史訂單－服務完成',"
+            "'歷史訂單－帳務完成')"
+        )
+        descriptor["parent_columns"]["orders"] = {
+            "status": _column_contract(historical_statuses, "NO", "洽談中")
+        }
+        for column_name in ("before_status", "after_status"):
+            descriptor["checks"][(
+                "order_lifecycle_state_events",
+                f"chk_order_lifecycle_state_event_{column_name}",
+            )] = _normalize_sql_contract(
+                f"{column_name} IN ('待補件','洽談中','訂單成立','服務中',"
+                "'訂單完成','訂單取消','歷史訂單－未服務','歷史訂單－服務中',"
+                "'歷史訂單－服務完成','歷史訂單－帳務完成')"
+            )
     if part_name == "1005_contract_external_signing_successor.sql":
         purpose_column = _column_contract(
             "enum('unsigned_contract','final_signed_contract',"
@@ -5266,6 +5327,7 @@ def _release_descriptor_metadata_state(
     if part_name in {
         "1026_task96_scheduling_service_day_attachment_kind.sql",
         "1027_historical_order_pairing_resolution_reused.sql",
+        "1028_historical_service_accounting.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -5286,6 +5348,12 @@ def _release_descriptor_metadata_state(
         return _order_lifecycle_pending_status_constraint_state(
             snapshot,
             canonical,
+        )
+    if part_name == "1028_historical_service_accounting.sql":
+        return _historical_service_accounting_state(
+            snapshot,
+            canonical,
+            defer_missing_triggers=defer_missing_triggers,
         )
     if part_name == "204_scheduling_service_day_logs.sql":
         return _scheduling_service_day_logs_successor_state(
@@ -5465,6 +5533,73 @@ def _order_lifecycle_pending_status_constraint_state(
     if actual == predecessor:
         return "absent"
     return "drift"
+
+
+def _historical_service_accounting_state(
+    snapshot: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+    *,
+    defer_missing_triggers: bool,
+) -> str:
+    """Accept only the released normal-status predecessor or the full successor."""
+    present_columns = {
+        (str(row["table_name"]), str(row["column_name"]))
+        for row in snapshot.get("columns", ())
+    }
+    owned_columns = {
+        (table, column)
+        for table, columns in descriptor["tables"].items()
+        for column in columns
+    }
+    if owned_columns.intersection(present_columns):
+        return _artifact_metadata_state(
+            snapshot,
+            descriptor,
+            "1028_historical_service_accounting.sql",
+            defer_missing_triggers=defer_missing_triggers,
+        )
+
+    order_status = next(
+        (
+            row
+            for row in snapshot.get("columns", ())
+            if row["table_name"] == "orders" and row["column_name"] == "status"
+        ),
+        None,
+    )
+    predecessor_status = _normalize_column_type_contract(
+        "enum('待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消')"
+    )
+    if order_status is None or _normalize_column_type_contract(
+        order_status.get("column_type")
+    ) != predecessor_status:
+        return "drift"
+
+    constraints = {
+        (str(row["table_name"]), str(row["constraint_name"])): row
+        for row in snapshot.get("constraints", ())
+    }
+    show_create_checks: dict[tuple[str, str], str] = {}
+    for create_sql in snapshot.get("show_create_tables", {}).values():
+        show_create_checks.update(_show_create_check_clauses(create_sql))
+    for column_name in ("before_status", "after_status"):
+        key = (
+            "order_lifecycle_state_events",
+            f"chk_order_lifecycle_state_event_{column_name}",
+        )
+        row = constraints.get(key)
+        if row is None or row.get("constraint_type") != "CHECK":
+            return "drift"
+        actual = _normalize_check_contract(
+            show_create_checks.get(key, row.get("check_clause") or "")
+        )
+        predecessor = _normalize_check_contract(_normalize_sql_contract(
+            f"{column_name} IN ('待補件','洽談中','訂單成立','服務中',"
+            "'訂單完成','訂單取消')"
+        ))
+        if actual != predecessor:
+            return "drift"
+    return "absent"
 
 
 def _contract_external_signing_successor_state(
@@ -6883,11 +7018,28 @@ def run_candidate_post_schema(
             raise UpgradeBlocked(
                 "manifest backfill execution is not supported by this runner"
             )
+        owned_objects = receipt.get("owned_objects")
+        verification_receipts = ()
+        if isinstance(owned_objects, Mapping):
+            verification_receipts = run_manifest_verifications(
+                RELEASE_MANIFEST.verification_contracts,
+                phase="post-schema",
+                validators=_post_schema_verification_validators(owned_objects),
+            )
         receipt.update(
             status="backfilled",
             phase="post_schema_complete",
             backfilled_at=_now(),
             backfills=(),
+            post_schema_verification_receipts=tuple(
+                {
+                    "verification_id": item.verification_id,
+                    "phase": item.phase,
+                    "status": item.status,
+                    "evidence": dict(item.evidence),
+                }
+                for item in verification_receipts
+            ),
         )
         write_receipt(operation_receipt_path, receipt)
         return receipt

@@ -15,6 +15,7 @@ import pytest
 from domains.orders.historical_adoption import (
     HistoricalOrderCurrentFacts,
     HistoricalOrderOutcome,
+    HistoricalOrderResult,
     HistoricalOrderSourceFacts,
     HistoricalOrderSourceStatus,
     build_historical_order_candidate,
@@ -43,6 +44,9 @@ from subsystems.orders.historical_order_workbook import (
     load_historical_order_workbook,
     parse_historical_status,
 )
+
+
+_BUSINESS_DATE = date(2026, 9, 1)
 
 
 def test_status_profile_accepts_only_zero_one_two():
@@ -98,10 +102,11 @@ def test_valid_status_is_adopted_when_dates_are_null():
     current = _current(OrderLifecycleStatus.DISCUSSION)
     source = HistoricalOrderSourceFacts(HistoricalOrderSourceStatus.DEPOSIT_PAID, None, None)
 
-    candidate = build_historical_order_candidate(current, source)
+    candidate = build_historical_order_candidate(current, source, _BUSINESS_DATE)
 
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
-    assert candidate.after_status is OrderLifecycleStatus.ESTABLISHED
+    assert candidate.after_status is OrderLifecycleStatus.HISTORICAL_UNSERVED
+    assert candidate.result is HistoricalOrderResult.HISTORICAL_UNSERVED
     assert candidate.date_patch == ()
     assert candidate.resulting_version == 4
 
@@ -109,8 +114,8 @@ def test_valid_status_is_adopted_when_dates_are_null():
 @pytest.mark.parametrize(
     ("source_status", "expected_status"),
     (
-        (HistoricalOrderSourceStatus.CANCELLED, OrderLifecycleStatus.CANCELLED),
-        (HistoricalOrderSourceStatus.DISCUSSION, OrderLifecycleStatus.DISCUSSION),
+        (HistoricalOrderSourceStatus.CANCELLED, OrderLifecycleStatus.ESTABLISHED),
+        (HistoricalOrderSourceStatus.DISCUSSION, OrderLifecycleStatus.ESTABLISHED),
     ),
 )
 def test_dirty_cancelled_or_discussion_dates_never_become_actual_start(
@@ -124,11 +129,116 @@ def test_dirty_cancelled_or_discussion_dates_never_become_actual_start(
         date(2025, 1, 31),
     )
 
-    candidate = build_historical_order_candidate(current, source)
+    candidate = build_historical_order_candidate(current, source, _BUSINESS_DATE)
 
-    assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
+    assert candidate.outcome is (
+        HistoricalOrderOutcome.UNMATCHED_CASE
+        if source_status is HistoricalOrderSourceStatus.CANCELLED
+        else HistoricalOrderOutcome.ADOPTED
+    )
     assert candidate.after_status is expected_status
     assert candidate.date_patch == ()
+    if source_status is HistoricalOrderSourceStatus.DISCUSSION:
+        assert candidate.result is HistoricalOrderResult.NOT_ADOPTED
+
+
+def test_discussion_requires_blank_start_and_one_uniquely_resolved_caregiver(tmp_path):
+    blank_start = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"],
+        ["客戶甲", "CASE-1", None, None, 2, "月嫂甲"],
+    )
+    row = load_historical_order_workbook(blank_start).rows[0]
+    repository = _Repository(row)
+
+    preview = HistoricalOrderAdoptionWorkflow(
+        repository,
+        _UnitOfWork,
+        _SchedulingHistoricalAssignment(),
+    ).preview(row)
+
+    assert preview.outcome is HistoricalOrderOutcome.ADOPTED
+    assert preview.result is HistoricalOrderResult.MATCHING_PENDING_DEPOSIT
+    assert preview.after_status == OrderLifecycleStatus.DISCUSSION.value
+    assert preview.pairings[0].staff_id == 11
+
+    nonblank_start = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"],
+        ["客戶甲", "CASE-1", date(2026, 8, 1), date(2026, 8, 10), 2, "月嫂甲"],
+    )
+    nonblank_row = load_historical_order_workbook(nonblank_start).rows[0]
+    nonblank_repository = _Repository(nonblank_row)
+
+    skipped = HistoricalOrderAdoptionWorkflow(
+        nonblank_repository,
+        _UnitOfWork,
+        _SchedulingHistoricalAssignment(),
+    ).preview(nonblank_row)
+
+    assert skipped.outcome is HistoricalOrderOutcome.UNMATCHED_CASE
+    assert skipped.result is HistoricalOrderResult.NOT_ADOPTED
+    assert nonblank_repository.staff_resolution_count == 0
+
+
+def test_matching_pending_deposit_apply_writes_formal_matching_root_before_receipt(tmp_path):
+    path = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"],
+        ["客戶甲", "CASE-1", None, None, 2, "月嫂甲"],
+    )
+    row = load_historical_order_workbook(path).rows[0]
+    ordering: list[str] = []
+
+    class PersistingRepository(_Repository):
+        def persist(self, request, preview, assignment_ids):
+            del request, assignment_ids
+            ordering.append("receipt")
+            self.persist_count += 1
+            return SimpleNamespace(
+                outcome=preview.outcome,
+                case_no=preview.case_no,
+                resulting_version=preview.resulting_version,
+                assignment_count=0,
+                review_identity=None,
+                replayed=False,
+                preview_fingerprint=preview.fingerprint,
+            )
+
+    class MatchingPort:
+        def __init__(self):
+            self.command = None
+
+        def ensure_pending_deposit_match(self, command):
+            ordering.append("matching")
+            self.command = command
+            return SimpleNamespace(plan_id=81, plan_version=1, created=True)
+
+    repository = PersistingRepository(row)
+    matching = MatchingPort()
+    workflow = HistoricalOrderAdoptionWorkflow(
+        repository,
+        _UnitOfWork,
+        _SchedulingHistoricalAssignment(),
+        matching_pending_deposit=matching,
+    )
+    preview = workflow.preview(row)
+
+    workflow.apply(
+        HistoricalOrderAdoptionRequest(
+            row,
+            preview.fingerprint,
+            "historical-order:matching-pending",
+            "test-operator",
+            "adopt historical pending-deposit match",
+            "historical-order:matching-pending:correlation",
+        )
+    )
+
+    assert ordering == ["matching", "receipt"]
+    assert matching.command.case_no == "CASE-1"
+    assert matching.command.staff_id == 11
+    assert matching.command.source_identity == row.source_identity
 
 
 def test_historical_start_matching_hcm_plan_does_not_create_actual_start():
@@ -139,11 +249,12 @@ def test_historical_start_matching_hcm_plan_does_not_create_actual_start():
         date(2025, 1, 31),
     )
 
-    candidate = build_historical_order_candidate(current, source)
+    candidate = build_historical_order_candidate(current, source, _BUSINESS_DATE)
 
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
     assert candidate.date_patch == ()
     assert candidate.issue_codes == ()
+    assert candidate.after_status is OrderLifecycleStatus.HISTORICAL_UNSERVED
 
 
 def test_historical_start_different_from_hcm_plan_becomes_actual_start():
@@ -154,15 +265,14 @@ def test_historical_start_different_from_hcm_plan_becomes_actual_start():
         date(2025, 1, 31),
     )
 
-    candidate = build_historical_order_candidate(current, source)
+    candidate = build_historical_order_candidate(current, source, _BUSINESS_DATE)
 
     assert candidate.date_patch == (
         ("actual_start_date", date(2025, 1, 3)),
         ("actual_end_date", date(2025, 1, 31)),
     )
-    assert candidate.issue_codes == (
-        "historical_accounting_service_calendar_unconfirmed",
-    )
+    assert candidate.issue_codes == ()
+    assert candidate.after_status is OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED
 
 
 def test_historical_actual_start_rebuild_uses_order_rest_days_and_holidays():
@@ -192,6 +302,7 @@ def test_matching_hcm_plan_clears_previously_inferred_actual_start():
             date(2025, 1, 2),
             date(2025, 1, 31),
         ),
+        _BUSINESS_DATE,
     )
 
     assert candidate.date_patch == (("actual_start_date", None),)
@@ -201,19 +312,21 @@ def test_valid_historical_status_overwrites_current_value_without_false_warning(
     candidate = build_historical_order_candidate(
         _current(OrderLifecycleStatus.CANCELLED),
         HistoricalOrderSourceFacts(HistoricalOrderSourceStatus.DEPOSIT_PAID, None, None),
+        _BUSINESS_DATE,
     )
 
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
-    assert candidate.after_status is OrderLifecycleStatus.ESTABLISHED
+    assert candidate.after_status is OrderLifecycleStatus.HISTORICAL_UNSERVED
     assert candidate.resulting_version == 4
     assert candidate.issue_codes == ()
 
 
 def test_same_status_and_dates_do_not_repeat_order_lifecycle_version():
-    current = _current(OrderLifecycleStatus.ESTABLISHED)
+    current = _current(OrderLifecycleStatus.HISTORICAL_UNSERVED)
     candidate = build_historical_order_candidate(
         current,
         HistoricalOrderSourceFacts(HistoricalOrderSourceStatus.DEPOSIT_PAID, None, None),
+        _BUSINESS_DATE,
     )
 
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
@@ -357,12 +470,9 @@ def test_columns_after_canonical_six_are_ignored(tmp_path):
     assert row.actual_end_date == date(1904, 1, 3)
     assert tuple(item.name for item in row.caregivers) == ("月嫂甲",)
     assert tuple(item.resolution for item in preview.pairings) == (
-        HistoricalPairingResolution.ASSIGNMENT_CONFLICT,
+        HistoricalPairingResolution.ASSIGNMENT_CANDIDATE,
     )
-    assert preview.issue_codes == (
-        "historical_actual_start_evidence_insufficient",
-        "historical_assignment_conflict",
-    )
+    assert preview.issue_codes == ()
 
 
 def test_deposit_paid_row_does_not_build_completed_assignment_candidate(tmp_path):
@@ -372,7 +482,7 @@ def test_deposit_paid_row_does_not_build_completed_assignment_candidate(tmp_path
     preview = HistoricalOrderAdoptionWorkflow(_Repository(row), _UnitOfWork, _SchedulingHistoricalAssignment()).preview(row)
 
     assert preview.outcome is HistoricalOrderOutcome.ADOPTED
-    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CONFLICT
+    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
 
 
 def test_unique_case_number_adopts_client_name_suffix_with_review_evidence(tmp_path):
@@ -392,8 +502,8 @@ def test_unique_case_number_adopts_client_name_suffix_with_review_evidence(tmp_p
         CaseNumberRepository(row), _UnitOfWork, _SchedulingHistoricalAssignment()
     ).preview(row)
 
-    assert preview.outcome is HistoricalOrderOutcome.ADOPTED
-    assert preview.issue_codes == ("historical_client_name_mismatch",)
+    assert preview.outcome is HistoricalOrderOutcome.UNMATCHED_CASE
+    assert preview.issue_codes == ()
 
 
 def test_repository_loads_a_unique_case_without_using_source_client_name():
@@ -457,11 +567,8 @@ def test_existing_assignment_never_builds_duplicate_assignment_candidate(tmp_pat
         RepositoryWithExistingAssignment(row), _UnitOfWork, _SchedulingHistoricalAssignment()
     ).preview(row)
 
-    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CONFLICT
-    assert all(
-        pairing.resolution is not HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
-        for pairing in preview.pairings
-    )
+    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+    assert preview.issue_codes == ()
 
 
 def test_unmatched_case_does_not_resolve_staff_or_create_review(tmp_path):
@@ -556,9 +663,7 @@ def test_completed_historical_actual_start_skips_formal_rebuild(tmp_path):
         ("actual_start_date", date(2026, 8, 7)),
         ("actual_end_date", date(2026, 9, 7)),
     )
-    assert preview.issue_codes == (
-        "historical_accounting_service_calendar_unconfirmed",
-    )
+    assert preview.issue_codes == ()
 
     workflow.apply(
         HistoricalOrderAdoptionRequest(

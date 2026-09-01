@@ -21,6 +21,13 @@ export interface HistoricalOrderWorkbookPreviewModel {
     discussion2: number;
     invalidOrBlank: number;
   };
+  resultCounts: {
+    notAdopted: number;
+    matchingPendingDeposit: number;
+    historicalUnserved: number;
+    historicalInService: number;
+    historicalServiceCompleted: number;
+  };
   previewFingerprint: string;
 }
 
@@ -39,6 +46,10 @@ export function adaptHistoricalOrderWorkbookPreview(
   if (statusTotal !== preview.source_row_count) {
     throw new HistoricalOrderWorkbookContractError('historical_order_status_counts_not_conserved', 'Historical Orders狀態判定計數不守恆。');
   }
+  const resultTotal = Object.values(preview.result_counts).reduce((total, count) => total + count, 0);
+  if (resultTotal !== preview.source_row_count) {
+    throw new HistoricalOrderWorkbookContractError('historical_order_result_counts_not_conserved', '歷史訂單處理結果計數不守恆。');
+  }
   return {
     sourceContentDigest: preview.source_content_digest,
     sheetIdentity: preview.sheet_identity,
@@ -54,6 +65,13 @@ export function adaptHistoricalOrderWorkbookPreview(
       depositPaid1: preview.status_counts.deposit_paid_1,
       discussion2: preview.status_counts.discussion_2,
       invalidOrBlank: preview.status_counts.invalid_or_blank,
+    },
+    resultCounts: {
+      notAdopted: preview.result_counts.not_adopted,
+      matchingPendingDeposit: preview.result_counts.matching_pending_deposit,
+      historicalUnserved: preview.result_counts.historical_unserved,
+      historicalInService: preview.result_counts.historical_in_service,
+      historicalServiceCompleted: preview.result_counts.historical_service_completed,
     },
     previewFingerprint: preview.preview_fingerprint,
   };

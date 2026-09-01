@@ -8,10 +8,19 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.dependencies.admin_auth import require_historical_order_review_remediator
+from api.dependencies.admin_auth import (
+    require_historical_order_review_remediator,
+    require_system_admin,
+)
 from api.dependencies.historical_completion import get_historical_completion_application
 from api.routes.historical_completion import _projection_payload, router
-from api.schemas.historical_completion import HistoricalCompletionView
+from api.schemas.historical_completion import (
+    HistoricalCompletionPreviewView,
+    HistoricalCompletionReceiptView,
+    HistoricalCompletionView,
+)
+from domains.orders.lifecycle import OrderLifecycleStatus
+from datetime import date
 
 
 def _projection(case_no="CASE-1"):
@@ -86,3 +95,75 @@ def test_authenticated_route_queries_exact_case_and_returns_typed_view() -> None
     assert response.json()["data"]["case_no"] == "CASE-1"
     assert response.json()["data"]["active_alerts"][0]["owner"] == "client_finance"
     assert calls == [("CASE-1", "api-test:historical-completion")]
+
+
+def test_authenticated_preview_and_apply_expose_server_owned_transition() -> None:
+    source = SimpleNamespace(
+        kind=SimpleNamespace(value="staff_obligation"),
+        identity="obligation:1",
+        version=2,
+    )
+    candidate = SimpleNamespace(
+        case_no="CASE-1",
+        before_status=OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        after_status=OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+        expected_order_version=7,
+        resulting_order_version=8,
+        expected_client_finance_version=4,
+        expected_source_versions=(source,),
+        business_date=date(2026, 9, 1),
+        fingerprint=SimpleNamespace(value="c" * 64),
+    )
+    receipt = SimpleNamespace(
+        case_no="CASE-1",
+        lifecycle_event_id=91,
+        resulting_order_version=8,
+        after_status=OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+        replayed=False,
+    )
+
+    class Application:
+        def preview(self, case_no):
+            assert case_no == "CASE-1"
+            return candidate
+
+        def apply(self, request):
+            assert request.expected_source_versions[0].identity == "obligation:1"
+            assert request.actor.actor_id == "admin"
+            return receipt
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_system_admin] = lambda: SimpleNamespace(username="admin")
+    app.dependency_overrides[get_historical_completion_application] = Application
+    client = TestClient(app)
+
+    preview_response = client.post(
+        "/api/v1/orders/CASE-1/historical-completion/preview",
+        headers={"X-Correlation-ID": "api-test:preview"},
+    )
+    apply_response = client.post(
+        "/api/v1/orders/CASE-1/historical-completion/apply",
+        headers={
+            "X-Correlation-ID": "api-test:apply",
+            "Idempotency-Key": "api-test:key-1",
+        },
+        json={
+            "expected_order_version": "7",
+            "expected_client_finance_version": "4",
+            "expected_source_versions": [
+                {"kind": "staff_obligation", "identity": "obligation:1", "version": "2"}
+            ],
+            "preview_fingerprint": "c" * 64,
+            "reason": "雙邊款項已核實結清",
+        },
+    )
+
+    assert preview_response.status_code == 200
+    assert HistoricalCompletionPreviewView.model_validate(
+        preview_response.json()["data"]
+    ).after_status == "歷史訂單－帳務完成"
+    assert apply_response.status_code == 200
+    assert HistoricalCompletionReceiptView.model_validate(
+        apply_response.json()["data"]
+    ).lifecycle_event_id == 91

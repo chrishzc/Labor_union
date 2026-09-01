@@ -132,9 +132,10 @@ def render_contract_template(
         status = descriptor.get("status")
         requiredness = descriptor.get("requiredness")
         if status == "not_applicable":
-            # Preserve the template's intentional blank for a legacy field
-            # with no current typed owner source; never ask staff to fill it.
+            # Real legal templates may still contain legacy placeholder text.
+            # Clear the declared cell so staff never need to edit the value.
             if descriptor.get("requiredness") in {"optional", "conditional"}:
+                worksheet[cell] = None
                 continue
             raise ContractRendererError(
                 "contract_pdf_required_mapping_unresolved",

@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "9e57d2a936f09a80a799845bc6c5128e681519280e9e777d3ed2a05915434073",
+  "active_artifacts_sha256": "13ff337f4108727018afda515106b3a71a0a9c711aaf42e16dfd69e032a2ff1f",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -159,7 +159,9 @@
     "db/schema_parts/1024_task96_line_identity_revocation_role_binding_fk.sql",
     "db/schema_parts/212_government_subsidy_return_excess_recovery.sql",
     "db/schema_parts/213_scheduling_service_day_attachment_kind.sql",
-    "db/schema_parts/214_historical_order_pairing_resolution_reused.sql"
+    "db/schema_parts/214_historical_order_pairing_resolution_reused.sql",
+    "db/schema_parts/215_historical_service_accounting.sql",
+    "db/schema_parts/1029_client_payment_destination_configuration.sql"
   ],
   "classifications": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": "retired",
@@ -168,7 +170,8 @@
     "db/schema_parts/190_government_subsidy_overpayment_disposition_local_upgrade.sql": "migration-only",
     "db/schema_parts/1025_task96_government_subsidy_return_excess_recovery.sql": "migration-only",
     "db/schema_parts/1026_task96_scheduling_service_day_attachment_kind.sql": "migration-only",
-    "db/schema_parts/1027_historical_order_pairing_resolution_reused.sql": "migration-only"
+    "db/schema_parts/1027_historical_order_pairing_resolution_reused.sql": "migration-only",
+    "db/schema_parts/1028_historical_service_accounting.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": {
@@ -233,6 +236,15 @@
       "replay": "preserve release chain applies 1027 only when resolution has the released enum predecessor",
       "rollback": "retain source backup and discard candidate before same-name replacement",
       "unresolved_policy": "partial or drift owned metadata blocks candidate apply"
+    },
+    "db/schema_parts/1028_historical_service_accounting.sql": {
+      "source_object": "preserve-data additive successor for Historical Orders lifecycle statuses and count-based service accounting roots",
+      "successor": "db/schema_parts/215_historical_service_accounting.sql",
+      "terminal_schema_evidence": "fresh assembly uses canonical part 215; preserve chain uses 1028 for existing databases",
+      "data_effect": "schema_only; existing orders, lifecycle events, adoption evidence and financial ledgers are preserved",
+      "replay": "preserve release chain applies 1028 only when the historical accounting roots are absent and the normal lifecycle status predecessor is exact",
+      "rollback": "retain source backup and discard candidate before same-name replacement",
+      "unresolved_policy": "partial roots, lifecycle status drift or constraint drift block candidate apply"
     }
   }
 }

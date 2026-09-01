@@ -43,6 +43,7 @@ from api.routes import (
     contract_signing,
     contract_external_signing,
     client_payments,
+    client_payment_destination,
     clients,
     contracts,
     controlled_files,
@@ -50,6 +51,7 @@ from api.routes import (
     finance_import,
     hcm_import,
     historical_order_adoption,
+    historical_service_accounting,
     historical_baseline_projector,
     historical_completion,
     historical_operational_baseline,
@@ -300,6 +302,7 @@ app.include_router(holidays.router)
 app.include_router(line_system_config.router)
 app.include_router(line_system_config.public_router)
 app.include_router(client_payments.router)
+app.include_router(client_payment_destination.router)
 app.include_router(client_deposit_reversal.router)
 app.include_router(client_receipt_reconciliation.router)
 app.include_router(client_refund_reversal.router)
@@ -316,6 +319,7 @@ app.include_router(client_beclass_import.router)
 app.include_router(client_profile.router)
 app.include_router(client_profile.review_router)
 app.include_router(historical_order_adoption.router)
+app.include_router(historical_service_accounting.router)
 app.include_router(historical_baseline_projector.router)
 app.include_router(historical_completion.router)
 app.include_router(historical_operational_baseline.router)

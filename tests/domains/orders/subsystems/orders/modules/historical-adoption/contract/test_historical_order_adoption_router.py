@@ -32,6 +32,7 @@ from subsystems.orders.historical_adoption_workflow import (
     HistoricalPairingResolution,
 )
 from subsystems.orders.historical_order_workbook_import import (
+    HistoricalOrderResultCounts,
     HistoricalOrderStatusCounts,
     HistoricalOrderWorkbookConflict,
     HistoricalOrderWorkbookImportService,
@@ -54,7 +55,8 @@ class _Service:
         self.paths.append(Path(path))
         return HistoricalOrderWorkbookPreview(
             "0" * 64, "1" * 64, 1, 1, 0, 0, 0, 0, 0,
-            HistoricalOrderStatusCounts(0, 1, 0, 0), "2" * 64,
+            HistoricalOrderStatusCounts(0, 1, 0, 0),
+            HistoricalOrderResultCounts(0, 0, 1, 0, 0), "2" * 64,
         )
 
     def apply(self, path, key, preview, actor, correlation):
@@ -64,6 +66,7 @@ class _Service:
         return HistoricalOrderWorkbookReceipt(
             "0" * 64, 1, 1, 0, 0, 0, 0, 0, False,
             HistoricalOrderStatusCounts(0, 1, 0, 0),
+            HistoricalOrderResultCounts(0, 0, 1, 0, 0),
         )
 
 
@@ -236,8 +239,8 @@ def test_preview_rejects_source_schedule_overlap_as_a_validation_error():
     )
 
 
-def test_actual_xlsx_upload_covers_every_historical_workbook_preview_category():
-    """Exercise the real XLSX parser and both HTTP endpoints without a shared DB."""
+def test_actual_xlsx_upload_rejects_nonblank_invalid_status_before_apply():
+    """A contradictory nonblank source value rejects the whole workbook."""
     repository = _WorkbookRepository()
     service = HistoricalOrderWorkbookImportService(
         repository,
@@ -253,48 +256,11 @@ def test_actual_xlsx_upload_covers_every_historical_workbook_preview_category():
         files={"workbook": ("historical-preview-matrix.xlsx", upload, _XLSX_MEDIA_TYPE)},
     )
 
-    assert preview_response.status_code == 200
-    preview = preview_response.json()["data"]
-    assert preview == {
-        **preview,
-        "source_row_count": 6,
-        "adopted_count": 3,
-        "unmatched_case_count": 1,
-        "review_required_count": 1,
-        "current_conflict_count": 1,
-        "assignment_candidate_count": 1,
-        "evidence_only_pairing_count": 1,
-        "status_counts": {
-            "cancelled_0": 1,
-            "deposit_paid_1": 3,
-            "discussion_2": 1,
-            "invalid_or_blank": 1,
-        },
-    }
-
-    apply_response = client.post(
-        "/api/v1/orders/historical-adoption/workbooks/apply",
-        headers={
-            "Idempotency-Key": "historical-preview-matrix-apply",
-            "X-Correlation-ID": "historical-matrix-apply",
-        },
-        data={"preview_fingerprint": preview["preview_fingerprint"]},
-        files={"workbook": ("historical-preview-matrix.xlsx", upload, _XLSX_MEDIA_TYPE)},
+    assert preview_response.status_code == 422
+    assert preview_response.json()["detail"]["error"]["code"] == (
+        "historical_order_source_status_invalid"
     )
-
-    assert apply_response.status_code == 200
-    receipt = apply_response.json()["data"]
-    assert receipt["source_row_count"] == 6
-    assert receipt["adopted_count"] == 3
-    assert receipt["unmatched_case_count"] == 1
-    assert receipt["review_required_count"] == 1
-    assert receipt["current_conflict_count"] == 1
-    assert receipt["assignments_created"] == 1
-    assert receipt["replayed_rows"] == 0
-    assert receipt["replayed_workbook"] is False
-    assert receipt["status_counts"] == preview["status_counts"]
-    assert receipt["review_references"] == ["historical-review"]
-    assert len(repository.receipts) == 1
+    assert repository.receipts == {}
 
 
 def _client(service):

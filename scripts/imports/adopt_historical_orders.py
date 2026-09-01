@@ -21,6 +21,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from infrastructure.mysql.historical_order_adoption_repository import MySqlHistoricalOrderAdoptionRepository
 from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
+from infrastructure.mysql.historical_pending_deposit_matching_repository import (
+    MySqlHistoricalPendingDepositMatchingRepository,
+)
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.orders.historical_adoption_workflow import (
@@ -57,6 +60,9 @@ def _process_workbook(connection, workbook, apply, actor, reason):
         repository,
         lambda: MySqlUnitOfWork(connection),
         MySqlHistoricalAssignmentWriter(connection),
+        matching_pending_deposit=MySqlHistoricalPendingDepositMatchingRepository(
+            connection
+        ),
     )
     outcomes: Counter[str] = Counter()
     review_rows = 0

@@ -15,6 +15,11 @@ from infrastructure.mysql.historical_staff_payables_completion_read_adapter impo
     MySqlStaffPayablesCompletionReadAdapter,
 )
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.historical_completion_writer import (
+    MySqlHistoricalCompletionWriter,
+)
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.identities import CorrelationId
 from subsystems.orders.historical_completion_projector import (
     HistoricalCompletionTerminalProjection,
@@ -24,13 +29,22 @@ from subsystems.orders.historical_completion_query import (
     HistoricalCompletionQueryRequest,
     HistoricalCompletionQueryWorkflow,
 )
+from subsystems.orders.historical_completion_apply import (
+    ApplyHistoricalCompletion,
+    HistoricalCompletionApplyWorkflow,
+)
 
 
 class HistoricalCompletionApplication:
     """Expose one cohesive fresh Query plus pure terminal projection."""
 
-    def __init__(self, workflow: HistoricalCompletionQueryWorkflow) -> None:
+    def __init__(
+        self,
+        workflow: HistoricalCompletionQueryWorkflow,
+        apply_workflow: HistoricalCompletionApplyWorkflow,
+    ) -> None:
         self._workflow = workflow
+        self._apply_workflow = apply_workflow
 
     def query(
         self, case_no: str, correlation_id: CorrelationId
@@ -39,6 +53,12 @@ class HistoricalCompletionApplication:
             HistoricalCompletionQueryRequest(case_no), correlation_id
         )
         return project_historical_completion(result)
+
+    def preview(self, case_no: str):
+        return self._apply_workflow.preview(case_no)
+
+    def apply(self, request: ApplyHistoricalCompletion):
+        return self._apply_workflow.apply(request)
 
 
 def get_historical_completion_application():
@@ -49,7 +69,14 @@ def get_historical_completion_application():
         MySqlStaffPayablesCompletionReadAdapter(connection),
     )
     try:
-        yield HistoricalCompletionApplication(workflow)
+        yield HistoricalCompletionApplication(
+            workflow,
+            HistoricalCompletionApplyWorkflow(
+                MySqlHistoricalCompletionWriter(connection),
+                lambda: MySqlUnitOfWork(connection),
+                SystemBusinessClock(),
+            ),
+        )
     finally:
         connection.close()
 

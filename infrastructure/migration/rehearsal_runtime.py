@@ -15,6 +15,7 @@ import sys
 import time
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 
@@ -145,12 +146,41 @@ class CandidateReadSmokePort:
             return f"/api/v1/payroll/staff/{self._staff_id()}/obligations"
         if smoke_id == "anomalies-read":
             return "/api/v1/anomalies?limit=1&offset=0"
+        if smoke_id == "historical-service-accounting-query":
+            case_no = quote(
+                self._historical_service_accounting_case_no(), safe=""
+            )
+            return f"/api/v1/orders/{case_no}/historical-service-accounting"
         raise RehearsalRuntimeError(f"unsupported smoke id: {smoke_id}")
 
     def _accepted_statuses(self, smoke_id):
-        if smoke_id in {"scheduling-read", "payroll-payables-read"}:
+        if smoke_id in {
+            "scheduling-read",
+            "payroll-payables-read",
+            "historical-service-accounting-query",
+        }:
             return frozenset({200, 404})
         return frozenset({200})
+
+    def _historical_service_accounting_case_no(self):
+        connection = self._config.database_config.connect(
+            self._config.candidate_database
+        )
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT case_no FROM orders "
+                    "WHERE status='歷史訂單－服務完成' "
+                    "ORDER BY case_no LIMIT 1"
+                )
+                row = cursor.fetchone()
+        finally:
+            connection.close()
+        return (
+            str(row["case_no"])
+            if row and str(row.get("case_no") or "").strip()
+            else "__migration_empty_historical_case__"
+        )
 
     def _staff_id(self):
         connection = self._config.database_config.connect(self._config.candidate_database)

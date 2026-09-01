@@ -162,10 +162,11 @@
       "requiredness": "conditional"
     },
     "D36": {
-      "label": "月嫂匯款帳號 (D36)",
-      "db_table": "staff (服務人員 - 月嫂主表與撥款帳號)",
-      "db_key": "staff_bank_account",
-      "requiredness": "conditional"
+      "label": "工會／代收付帳戶 (D36)",
+      "db_table": "client_payment_destination_configuration_current (Client Finance typed current configuration)",
+      "db_key": "client_payment_destination_account",
+      "requiredness": "required",
+      "status": "approved"
     },
     "B37": {
       "label": "樓層費用 (B37)",
@@ -175,10 +176,10 @@
     },
     "C37": {
       "label": "樓層費入帳日 (C37)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "deposit_date",
+      "db_table": "client_payment_terms.deposit_due_date (Client Finance typed projection; floor fee is due with deposit)",
+      "db_key": "deposit_due_date",
       "requiredness": "conditional",
-      "status": "unresolved",
+      "status": "approved",
       "applicability": "floor_fee_positive"
     },
   "B38": {

@@ -92,6 +92,7 @@ def _preview_payload():
         "adopted_count": 1, "unmatched_case_count": 0, "review_required_count": 0, "current_conflict_count": 0,
         "assignment_candidate_count": 0, "evidence_only_pairing_count": 0,
         "status_counts": {"cancelled_0": 0, "deposit_paid_1": 1, "discussion_2": 0, "invalid_or_blank": 0},
+        "result_counts": {"not_adopted": 0, "matching_pending_deposit": 0, "historical_unserved": 1, "historical_in_service": 0, "historical_service_completed": 0},
         "preview_fingerprint": "2" * 64,
     }
 
@@ -102,5 +103,6 @@ def _receipt_payload():
         "unmatched_case_count": 0, "review_required_count": 0, "current_conflict_count": 0,
         "assignments_created": 0, "replayed_rows": 0, "replayed_workbook": False,
         "status_counts": {"cancelled_0": 0, "deposit_paid_1": 1, "discussion_2": 0, "invalid_or_blank": 0},
+        "result_counts": {"not_adopted": 0, "matching_pending_deposit": 0, "historical_unserved": 1, "historical_in_service": 0, "historical_service_completed": 0},
         "review_references": [],
     }

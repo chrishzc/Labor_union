@@ -14,14 +14,21 @@ from domains.orders.historical_adoption import (
     HistoricalOrderAdoptionCandidate,
     HistoricalOrderCurrentFacts,
     HistoricalOrderOutcome,
+    HistoricalOrderResult,
     HistoricalOrderSourceFacts,
     HistoricalOrderSourceStatus,
     build_historical_order_candidate,
 )
+from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+from shared_kernel.clock import BusinessClock, SystemBusinessClock
 from shared_kernel.ports import UnitOfWork
 from subsystems.orders.historical_actual_start_rebuild import HistoricalActualStartRebuilder
 from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbookRow
+from subsystems.scheduling.historical_pending_deposit_matching import (
+    HistoricalPendingDepositMatchCommand,
+    HistoricalPendingDepositMatchingPort,
+)
 
 
 class HistoricalPairingResolution(StrEnum):
@@ -43,6 +50,7 @@ class HistoricalPairingCandidate:
     end_date: object | None
     resolution: HistoricalPairingResolution
     issue_codes: tuple[str, ...]
+    assignment_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +67,17 @@ class HistoricalOrderAdoptionPreview:
     pairings: tuple[HistoricalPairingCandidate, ...]
     issue_codes: tuple[str, ...]
     fingerprint: PreviewFingerprint
+
+    @property
+    def result(self) -> HistoricalOrderResult:
+        if self.outcome is HistoricalOrderOutcome.UNMATCHED_CASE:
+            return HistoricalOrderResult.NOT_ADOPTED
+        return {
+            OrderLifecycleStatus.DISCUSSION.value: HistoricalOrderResult.MATCHING_PENDING_DEPOSIT,
+            OrderLifecycleStatus.HISTORICAL_UNSERVED.value: HistoricalOrderResult.HISTORICAL_UNSERVED,
+            OrderLifecycleStatus.HISTORICAL_IN_SERVICE.value: HistoricalOrderResult.HISTORICAL_IN_SERVICE,
+            OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value: HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED,
+        }.get(self.after_status, HistoricalOrderResult.NOT_ADOPTED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,13 +131,20 @@ class HistoricalOrderAdoptionWorkflow:
         unit_of_work_factory: Callable[[], UnitOfWork],
         scheduling_historical_assignment: SchedulingHistoricalAssignmentPort,
         actual_start_rebuilder: HistoricalActualStartRebuilder | None = None,
+        clock: BusinessClock | None = None,
+        matching_pending_deposit: HistoricalPendingDepositMatchingPort | None = None,
     ) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
         self._scheduling_historical_assignment = scheduling_historical_assignment
-        # Compatibility-only dependency: historical adoption deliberately does
-        # not invoke Actual Start calculation or finance/payroll projection.
+        # Compatibility-only dependencies: historical adoption deliberately
+        # does not invoke Actual Start calculation, scheduling generation, or
+        # finance/payroll projection.  The workbook carries interval evidence,
+        # not a reconstructed daily roster.
         del actual_start_rebuilder
+        self._scheduling_historical_assignment = scheduling_historical_assignment
+        self._clock = clock or SystemBusinessClock()
+        self._matching_pending_deposit = matching_pending_deposit
 
     def preview(self, row: HistoricalOrderWorkbookRow) -> HistoricalOrderAdoptionPreview:
         return self._build_preview(row, for_update=False)
@@ -142,12 +168,6 @@ class HistoricalOrderAdoptionWorkflow:
         command_fingerprint = _command_fingerprint(request)
         replay = self._replay(request, command_fingerprint)
         if replay is not None:
-            # Older status-1 receipts can predate the service-evidence bridge.
-            # Re-evaluate the immutable source, append only missing historical
-            # assignment evidence, then let the delegated canonical command
-            # repair Scheduling/Actual Start under its own idempotency key.
-            preview = self._build_preview(request.row, for_update=True)
-            self._append_assignment_candidates(preview)
             return replay
         preview = self._build_preview(request.row, for_update=True)
         if preview.fingerprint != request.preview_fingerprint:
@@ -155,8 +175,28 @@ class HistoricalOrderAdoptionWorkflow:
         if preview.outcome is HistoricalOrderOutcome.UNMATCHED_CASE:
             return _unmatched_receipt(preview)
         assignment_ids = self._append_assignment_candidates(preview)
+        self._ensure_matching_pending_deposit(request, preview)
         receipt = self._repository.persist(request, preview, assignment_ids)
         return receipt
+
+    def _ensure_matching_pending_deposit(
+        self,
+        request: HistoricalOrderAdoptionRequest,
+        preview: HistoricalOrderAdoptionPreview,
+    ) -> None:
+        if preview.result is not HistoricalOrderResult.MATCHING_PENDING_DEPOSIT:
+            return
+        if self._matching_pending_deposit is None:
+            raise RuntimeError("historical_matching_port_required")
+        pairing = preview.pairings[0]
+        self._matching_pending_deposit.ensure_pending_deposit_match(
+            HistoricalPendingDepositMatchCommand(
+                case_no=str(preview.case_no),
+                staff_id=int(pairing.staff_id),
+                actor=request.actor,
+                source_identity=request.row.source_identity,
+            )
+        )
 
     def _append_assignment_candidates(
         self, preview: HistoricalOrderAdoptionPreview
@@ -192,54 +232,48 @@ class HistoricalOrderAdoptionWorkflow:
         )
 
     def _build_preview(self, row, *, for_update):
-        if not row.case_no or not row.client_name:
+        if (
+            not row.case_no
+            or not row.client_name
+            or not row.asserted_status
+            or row.asserted_status is HistoricalOrderSourceStatus.CANCELLED
+            or (
+                row.asserted_status is HistoricalOrderSourceStatus.DISCUSSION
+                and not any(item.name for item in row.caregivers)
+            )
+        ):
             return _unmatched_preview(row)
         current = self._repository.load_order(row.case_no, row.client_name, for_update=for_update)
         if current is None:
             return _unmatched_preview(row)
         source_issues = row.issue_codes
         if current.client_name != row.client_name:
-            source_issues = tuple(
-                sorted(set(source_issues + ("historical_client_name_mismatch",)))
-            )
+            return _unmatched_preview(row)
         source = HistoricalOrderSourceFacts(
             row.asserted_status,
             row.actual_start_date,
             row.actual_end_date,
             source_issues,
         )
-        candidate = build_historical_order_candidate(current, source)
-        pairings = self._pairings(row, current, candidate, for_update)
-        if _actual_start_evidence_is_insufficient(
-            row,
+        candidate = build_historical_order_candidate(
             current,
-            candidate,
-            pairings,
-        ):
-            source = HistoricalOrderSourceFacts(
-                row.asserted_status,
-                None,
-                row.actual_end_date,
-                tuple(
-                    sorted(
-                        set(
-                            source_issues
-                            + ("historical_actual_start_evidence_insufficient",)
-                        )
-                    )
-                ),
-            )
-            candidate = build_historical_order_candidate(current, source)
-            pairings = self._pairings(row, current, candidate, for_update)
+            source,
+            self._clock.today(),
+        )
+        if candidate.result is HistoricalOrderResult.NOT_ADOPTED:
+            return _not_adopted_preview(row, current)
+        pairings = self._pairings(row, current, candidate, for_update)
         issues = tuple(sorted(set(candidate.issue_codes + tuple(code for item in pairings for code in item.issue_codes))))
+        if (
+            candidate.result is HistoricalOrderResult.MATCHING_PENDING_DEPOSIT
+            and not _matching_pending_deposit_eligible(row, pairings)
+        ):
+            return _not_adopted_preview(row, current, pairings, issues)
         return _preview(row, current, candidate, pairings, issues)
 
     def _pairings(self, row, current, candidate, for_update):
         existing = self._repository.active_assignments(
             current.case_no, for_update=for_update
-        )
-        service_assignment_allowed = _service_assignment_allowed(
-            row, current, candidate
         )
         result = []
         for source in row.caregivers:
@@ -248,7 +282,6 @@ class HistoricalOrderAdoptionWorkflow:
                     source,
                     existing,
                     candidate,
-                    service_assignment_allowed,
                     for_update,
                 )
             )
@@ -259,7 +292,6 @@ class HistoricalOrderAdoptionWorkflow:
         source,
         existing,
         candidate,
-        service_assignment_allowed,
         for_update,
     ):
         masked = _mask_name(source.name)
@@ -273,33 +305,44 @@ class HistoricalOrderAdoptionWorkflow:
         if source.issue_codes:
             return HistoricalPairingCandidate(source.ordinal, masked, staff_ids[0], source.start_date, source.end_date, HistoricalPairingResolution.EVIDENCE_ONLY, source.issue_codes)
         if (
-            not source.has_individual_interval
-            or source.start_date is None
-            or source.end_date is None
+            candidate.result
+            in {
+                HistoricalOrderResult.HISTORICAL_IN_SERVICE,
+                HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED,
+            }
+            and source.start_date is not None
+            and source.end_date is not None
         ):
-            return _pairing_issue(
-                source,
-                masked,
-                HistoricalPairingResolution.ASSIGNMENT_CONFLICT,
-                "historical_assignment_evidence_insufficient",
-                staff_ids[0],
-            )
-        if candidate.outcome is not HistoricalOrderOutcome.ADOPTED or not service_assignment_allowed:
-            return _pairing_issue(source, masked, HistoricalPairingResolution.ASSIGNMENT_CONFLICT, "historical_assignment_conflict", staff_ids[0])
-        matching = _matching_effective_assignment(existing, staff_ids[0], source)
-        if matching is not None:
+            matching = _matching_effective_assignment(existing, staff_ids[0], source)
+            if matching is not None:
+                return HistoricalPairingCandidate(
+                    source.ordinal,
+                    masked,
+                    staff_ids[0],
+                    source.start_date,
+                    source.end_date,
+                    HistoricalPairingResolution.ASSIGNMENT_REUSED,
+                    (),
+                    int(matching["id"]),
+                )
             return HistoricalPairingCandidate(
                 source.ordinal,
                 masked,
                 staff_ids[0],
                 source.start_date,
                 source.end_date,
-                HistoricalPairingResolution.ASSIGNMENT_REUSED,
-                source.issue_codes,
+                HistoricalPairingResolution.ASSIGNMENT_CANDIDATE,
+                (),
             )
-        if existing:
-            return _pairing_issue(source, masked, HistoricalPairingResolution.ASSIGNMENT_CONFLICT, "historical_assignment_conflict", staff_ids[0])
-        return HistoricalPairingCandidate(source.ordinal, masked, staff_ids[0], source.start_date, source.end_date, HistoricalPairingResolution.ASSIGNMENT_CANDIDATE, source.issue_codes)
+        return HistoricalPairingCandidate(
+            source.ordinal,
+            masked,
+            staff_ids[0],
+            source.start_date,
+            source.end_date,
+            HistoricalPairingResolution.EVIDENCE_ONLY,
+            (),
+        )
 
 
 def _service_assignment_allowed(row, current, candidate) -> bool:
@@ -310,44 +353,6 @@ def _service_assignment_allowed(row, current, candidate) -> bool:
         and isinstance(current.planned_start_date, date)
         and isinstance(row.actual_start_date, date)
         and row.actual_start_date != current.planned_start_date
-    )
-
-
-def _actual_start_evidence_is_insufficient(
-    row,
-    current,
-    candidate,
-    pairings,
-) -> bool:
-    """Status adoption survives incomplete historical service evidence.
-
-    Only an established-order assertion with a distinct source start can become
-    an Actual Start root.  A same-row assignment candidate is sufficient for
-    Apply, which appends the immutable historical evidence before rebuilding
-    the formal Scheduling generation.
-    """
-    if (
-        candidate.outcome is not HistoricalOrderOutcome.ADOPTED
-        or row.asserted_status is not HistoricalOrderSourceStatus.DEPOSIT_PAID
-        or not isinstance(row.actual_start_date, date)
-    ):
-        return False
-    if not isinstance(current.planned_start_date, date):
-        return True
-    if current.planned_start_date == row.actual_start_date:
-        return False
-    if (
-        current.actual_start_date == row.actual_start_date
-        and current.actual_end_date is not None
-    ):
-        return False
-    return not any(
-        pairing.resolution
-        in {
-            HistoricalPairingResolution.ASSIGNMENT_CANDIDATE,
-            HistoricalPairingResolution.ASSIGNMENT_REUSED,
-        }
-        for pairing in pairings
     )
 
 
@@ -371,6 +376,16 @@ def _matching_effective_assignment(existing, staff_id, source):
         ):
             return assignment
     return None
+
+
+def _matching_pending_deposit_eligible(row, pairings) -> bool:
+    return (
+        row.actual_start_date is None
+        and len(pairings) == 1
+        and pairings[0].staff_id is not None
+        and pairings[0].resolution is HistoricalPairingResolution.EVIDENCE_ONLY
+        and not pairings[0].issue_codes
+    )
 
 
 def _preview(row, current, candidate, pairings, issues):
@@ -420,6 +435,31 @@ def _unmatched_preview(row):
     )
 
 
+def _not_adopted_preview(row, current, pairings=(), issues=()):
+    payload = {
+        "source_identity": row.source_identity,
+        "source_fingerprint": row.source_fingerprint,
+        "case_no": current.case_no,
+        "outcome": HistoricalOrderOutcome.UNMATCHED_CASE.value,
+        "pairings": tuple(_pairing_payload(item) for item in pairings),
+        "issue_codes": tuple(issues),
+    }
+    return HistoricalOrderAdoptionPreview(
+        row.source_identity,
+        row.source_fingerprint,
+        HistoricalOrderOutcome.UNMATCHED_CASE,
+        current.case_no,
+        current.lifecycle_version,
+        current.lifecycle_version,
+        current.status.value,
+        current.status.value,
+        (),
+        tuple(pairings),
+        tuple(issues),
+        fingerprint_payload(payload),
+    )
+
+
 def _unmatched_receipt(preview):
     return HistoricalOrderAdoptionReceipt(
         HistoricalOrderOutcome.UNMATCHED_CASE,
@@ -452,6 +492,7 @@ def _pairing_payload(item):
         "end_date": item.end_date.isoformat() if item.end_date else None,
         "resolution": item.resolution.value,
         "issue_codes": item.issue_codes,
+        "assignment_id": item.assignment_id,
     }
 
 

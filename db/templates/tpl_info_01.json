@@ -11,10 +11,11 @@
     {"id": "f_106_c6", "label": "每日服務時段(小時/天)", "type": "db_link", "db_key": "service_hours_per_day", "owner": "orders", "source": "order.service_hours_per_day", "requiredness": "required", "status": "resolved", "width": "half"},
     {"id": "f_107_c7", "label": "希望服務天數", "type": "db_link", "db_key": "service_days", "owner": "orders", "source": "order.service_days", "requiredness": "required", "status": "resolved", "width": "half"},
     {"id": "f_108_c8", "label": "服務地址", "type": "db_link", "db_key": "address", "owner": "clients", "source": "client.address", "requiredness": "required", "status": "resolved", "width": "full"},
-    {"id": "f_109_c9", "label": "服務單價 (日薪)", "type": "db_link", "db_key": "caregiver_rate", "owner": "payroll", "source": "assignment.hourly_rate", "requiredness": "required", "status": "resolved", "width": "half"},
+    {"id": "f_109_c9", "label": "服務單價（時薪）", "type": "db_link", "db_key": "caregiver_rate", "owner": "payroll", "source": "assignment.hourly_rate", "requiredness": "required", "status": "resolved", "width": "half"},
     {"id": "f_110_ca", "label": "服務薪資", "type": "db_link", "db_key": "service_salary", "owner": "staff_payables", "source": "service_payable.contracted_amount", "requiredness": "required", "status": "resolved", "width": "half"},
     {"id": "f_111_cb", "label": "預計發薪日", "type": "db_link", "db_key": "salary_payment_date_1", "owner": "staff_payables", "source": "service_payable.due_date", "requiredness": "required", "status": "resolved", "width": "half"},
     {"id": "f_112_cc", "label": "樓層費", "type": "db_link", "db_key": "floor_fee", "owner": "orders", "source": "order.floor_fee", "requiredness": "required", "status": "resolved", "width": "half"},
-    {"id": "f_115_cf", "label": "特殊假日與注意事項備註", "type": "db_link", "db_key": "notes", "owner": "clients", "source": "client.notes", "requiredness": "optional", "status": "resolved", "width": "full"}
+    {"id": "f_114_ce", "label": "特殊休假日", "type": "db_link", "db_key": "special_holidays", "owner": "orders", "source": "order.custom_rest_dates", "requiredness": "optional", "status": "resolved", "width": "full"},
+    {"id": "f_115_cf", "label": "注意事項備註", "type": "db_link", "db_key": "notes", "owner": "clients", "source": "client.notes", "requiredness": "optional", "status": "resolved", "width": "full"}
   ]
 }

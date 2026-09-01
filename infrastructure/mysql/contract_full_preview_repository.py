@@ -247,7 +247,7 @@ def _extend_owner_facts(
             )
             commitment = _load_commitment(cursor, case_no)
             rate = _load_assignment_payroll_rate(cursor, assignment_id)
-            bank = _load_primary_staff_bank_account(cursor, staff_id)
+            payment_destination = _load_client_payment_destination(cursor)
             refund_destination = _load_client_refund_destination(cursor, case_no)
         payment = finance.payment_terms
         facts.update(
@@ -363,14 +363,13 @@ def _extend_owner_facts(
                         "policy_kind": rate["policy_kind"],
                     }
                 )
-        if bank is not None:
-            facts["staff_bank_account"] = bank["account_no"]
-            owners["staff_payables"] = projection_fingerprint(
+        if payment_destination is not None:
+            facts["client_payment_destination_account"] = payment_destination["account_display"]
+            owners["client_finance"] = projection_fingerprint(
                 {
-                    "staff_id": staff_id,
-                    "account_id": bank["id"],
-                    "account_no": bank["account_no"],
-                    "is_primary": bank["is_primary"],
+                    "client_finance": owners["client_finance"],
+                    "payment_destination_revision": payment_destination["revision"],
+                    "account_display": payment_destination["account_display"],
                 }
             )
         if refund_destination is not None:
@@ -435,16 +434,13 @@ def _load_assignment_payroll_rate(cursor: Any, assignment_id: int | None) -> dic
     return cursor.fetchone()
 
 
-def _load_primary_staff_bank_account(cursor: Any, staff_id: int | None) -> dict[str, object] | None:
-    if staff_id is None:
-        return None
+def _load_client_payment_destination(cursor: Any) -> dict[str, object] | None:
+    """Read the single Client Finance-owned union collection destination."""
     cursor.execute(
-        "SELECT id,account_no,is_primary FROM staff_bank_accounts "
-        "WHERE staff_id=%s AND is_primary=1 ORDER BY id",
-        (staff_id,),
+        "SELECT account_display,revision "
+        "FROM client_payment_destination_configuration_current WHERE singleton_id=1"
     )
-    rows = tuple(cursor.fetchall() or ())
-    return rows[0] if len(rows) == 1 else None
+    return cursor.fetchone()
 
 
 def _load_client_refund_destination(cursor: Any, case_no: str) -> dict[str, object] | None:

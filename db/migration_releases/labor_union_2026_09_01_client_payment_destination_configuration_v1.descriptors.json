@@ -1,0 +1,37 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-client-payment-destination-configuration-2026-09-01-v1",
+  "descriptors": {
+    "1029_client_payment_destination_configuration.sql": {
+      "tables": {
+        "client_payment_destination_configuration_events": ["id", "expected_revision", "resulting_revision", "account_display", "actor", "reason", "idempotency_key", "correlation_id", "preview_fingerprint", "created_at"],
+        "client_payment_destination_configuration_current": ["singleton_id", "current_event_id", "account_display", "revision"],
+        "client_payment_destination_configuration_receipts": ["idempotency_key", "event_id", "command_fingerprint", "result_snapshot", "created_at"]
+      },
+      "indexes": {
+        "client_payment_destination_configuration_events.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "client_payment_destination_configuration_events.uq_client_payment_destination_event_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "client_payment_destination_configuration_events.uq_client_payment_destination_event_revision": {"non_unique": 0, "columns": ["resulting_revision"]},
+        "client_payment_destination_configuration_current.PRIMARY": {"non_unique": 0, "columns": ["singleton_id"]},
+        "client_payment_destination_configuration_current.uq_client_payment_destination_current_event": {"non_unique": 0, "columns": ["current_event_id"]},
+        "client_payment_destination_configuration_receipts.PRIMARY": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "client_payment_destination_configuration_receipts.uq_client_payment_destination_receipt_event": {"non_unique": 0, "columns": ["event_id"]}
+      },
+      "foreign_keys": {
+        "client_payment_destination_configuration_current.fk_client_payment_destination_current_event": {"columns": ["current_event_id"], "referenced_table": "client_payment_destination_configuration_events", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "client_payment_destination_configuration_receipts.fk_client_payment_destination_receipt_event": {"columns": ["event_id"], "referenced_table": "client_payment_destination_configuration_events", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"}
+      },
+      "checks": {
+        "client_payment_destination_configuration_events.chk_client_payment_destination_event_revision": "atom(resulting_revision=expected_revision+1)",
+        "client_payment_destination_configuration_events.chk_client_payment_destination_event_text": "and(atom(char_length(trim(account_display))>0),atom(char_length(trim(actor))>0),atom(char_length(trim(reason))>0),atom(char_length(trim(correlation_id))>0))",
+        "client_payment_destination_configuration_events.chk_client_payment_destination_event_fingerprint": "atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$'))",
+        "client_payment_destination_configuration_current.chk_client_payment_destination_singleton": "atom(singleton_id=1)",
+        "client_payment_destination_configuration_current.chk_client_payment_destination_current_text": "atom(char_length(trim(account_display))>0)",
+        "client_payment_destination_configuration_current.chk_client_payment_destination_current_revision": "atom(revision>0)",
+        "client_payment_destination_configuration_receipts.chk_client_payment_destination_receipt_fingerprint": "atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$'))",
+        "client_payment_destination_configuration_receipts.chk_client_payment_destination_receipt_snapshot": "atom(json_type(result_snapshot)='OBJECT')"
+      },
+      "triggers": ["trg_client_payment_destination_events_before_update", "trg_client_payment_destination_events_before_delete", "trg_client_payment_destination_receipts_before_update", "trg_client_payment_destination_receipts_before_delete"]
+    }
+  }
+}

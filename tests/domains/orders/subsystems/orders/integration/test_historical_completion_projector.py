@@ -104,3 +104,63 @@ def test_unavailable_owner_never_projects_false_completion() -> None:
     assert projection.state.value == "unavailable"
     assert projection.step_11_status == "unavailable"
     assert not projection.step_11_completed
+
+
+def test_historical_count_path_does_not_require_fabricated_service_dates() -> None:
+    facts = HistoricalCompletionFacts(
+        "CASE-1",
+        HistoricalOrdersCompletionReadback(
+            "CASE-1",
+            3,
+            OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+            "historical-adoption:1",
+            date(2026, 1, 1),
+            None,
+            (),
+            40,
+            False,
+            historical_service_day_count_identity="historical-days:1",
+            historical_assignment_day_counts=(("assignment:1", 7, 3),),
+        ),
+        HistoricalSettlementReadback(
+            "CASE-1", CompletionOwner.CLIENT_FINANCE, 4,
+            "client-settlement:1", 1, 0, "client-allocation:1",
+        ),
+        HistoricalSettlementReadback(
+            "CASE-1", CompletionOwner.STAFF_PAYABLES, None,
+            "staff-settlement:1", 1, 0, "staff-allocation:1", _staff_sources(),
+        ),
+    )
+
+    projection = project_historical_completion(evaluate_historical_completion(facts))
+
+    assert projection.step_11_completed
+    assert not any(
+        item.code.startswith("scheduling_service") for item in projection.active_alerts
+    )
+
+
+def test_historical_count_path_stays_blocked_until_days_are_confirmed() -> None:
+    facts = HistoricalCompletionFacts(
+        "CASE-1",
+        HistoricalOrdersCompletionReadback(
+            "CASE-1", 3, OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+            "historical-adoption:1", date(2026, 1, 1), None, (), 40, False,
+        ),
+        HistoricalSettlementReadback(
+            "CASE-1", CompletionOwner.CLIENT_FINANCE, 4,
+            "client-settlement:1", 1, 0, "client-allocation:1",
+        ),
+        HistoricalSettlementReadback(
+            "CASE-1", CompletionOwner.STAFF_PAYABLES, None,
+            "staff-settlement:1", 1, 0, "staff-allocation:1", _staff_sources(),
+        ),
+    )
+
+    projection = project_historical_completion(evaluate_historical_completion(facts))
+
+    assert not projection.step_11_completed
+    assert {item.code for item in projection.active_alerts} >= {
+        "historical_actual_service_days_required",
+        "historical_actual_service_days_assignment_mismatch",
+    }

@@ -179,9 +179,15 @@ class MySqlHistoricalOrderAdoptionRepository:
     def _append_receipt(self, request, preview, command_fingerprint, event_id, assignment_count, review_identity):
         snapshot = {
             "outcome": preview.outcome.value,
+            "result": preview.result.value,
             "issue_codes": preview.issue_codes,
-            "service_calendar_status": "accounting_review_required",
-            "payroll_rebuild_status": "skipped_pending_service_calendar_confirmation",
+            "service_calendar_status": "not_reconstructed_for_historical_order",
+            "historical_service_days_status": (
+                "pending_operator_confirmation"
+                if preview.result.value == "historical_service_completed"
+                else "not_yet_eligible"
+            ),
+            "payroll_rebuild_status": "not_started",
             **_operational_baseline_snapshot(request, preview),
         }
         with _cursor(self._connection) as cursor:
@@ -216,7 +222,11 @@ class MySqlHistoricalOrderAdoptionRepository:
         assignment_iterator = iter(assignment_ids)
         rows = []
         for item in preview.pairings:
-            assignment_id = next(assignment_iterator) if item.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE else None
+            assignment_id = (
+                next(assignment_iterator)
+                if item.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+                else item.assignment_id
+            )
             rows.append((
                 receipt_id,
                 item.ordinal,
@@ -243,6 +253,7 @@ class MySqlHistoricalOrderAdoptionRepository:
         payload = {
             "case_no": preview.case_no,
             "outcome": preview.outcome.value,
+            "result": preview.result.value,
             "review_identity": review_identity,
             "issue_codes": preview.issue_codes,
         }

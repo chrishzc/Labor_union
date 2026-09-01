@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
 from typing import Any
 
 from domains.case_import.order_information import project_order_information
@@ -115,6 +116,7 @@ def _facts(
         "service_salary": None,
         "salary_payment_date_1": None,
         "floor_fee": case.get("floor_fee"),
+        "special_holidays": _special_holidays_text(case.get("custom_rest_dates")),
         "notes": case.get("client_notes"),
         **projection.values,
     }
@@ -172,6 +174,7 @@ _ORDER_FACT_KEYS = (
     "service_hours_per_day",
     "service_days",
     "floor_fee",
+    "special_holidays",
 )
 _CLIENT_FACT_KEYS = ("client_name", "phone", "address", "notes")
 _ASSIGNMENT_FACT_KEYS = (
@@ -202,7 +205,7 @@ _CASE_IMPORT_FACT_KEYS = (
 )
 
 _CASE_SQL = """
-SELECT o.case_no, o.service_days, o.service_hours_per_day, o.floor_fee,
+SELECT o.case_no, o.service_days, o.service_hours_per_day, o.floor_fee, o.custom_rest_dates,
        c.name AS client_name, c.phone AS client_phone, c.address AS client_address,
        c.notes AS client_notes, b.survey_details AS _case_import_payload
   FROM orders o
@@ -210,6 +213,17 @@ SELECT o.case_no, o.service_days, o.service_hours_per_day, o.floor_fee,
   LEFT JOIN beclass_records b ON b.bound_case_no=o.case_no
  WHERE o.case_no=%s
 """
+
+
+def _special_holidays_text(value: object) -> str | None:
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, list):
+        return None
+    dates = tuple(str(item).strip() for item in parsed if str(item).strip())
+    return "、".join(dates) or None
 
 _ASSIGNMENTS_SQL = """
 SELECT a.id AS assignment_id, a.case_no, a.staff_id,
