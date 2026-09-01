@@ -6,7 +6,7 @@
   "authority": "D97-PRODUCTION-SCRIPT-GOVERNANCE; Global migration spec section 9",
   "source": {
     "entrypoint_queue": "document/架構重整/03_追蹤清單與證據/evidence/entrypoint_review_queue_v1.jsonl",
-    "entrypoint_queue_sha256": "5255d83ebe412a134d0fe898f34942992bf60a88a0f3c114caef080627381c7a",
+    "entrypoint_queue_sha256": "93dc4792dac2b68adb091a9d40193bf35eeba60d92eafee3a53642f00942d7d5",
     "cli_count": 87,
     "queue_cli_count": 87,
     "discovery": "AST __main__ registration over current scripts/**/*.py; queue is caller-evidence input and is regenerated independently."
@@ -865,8 +865,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "a99344a37d20123830dcf2ed2dcdd41a728cb96d5915bf38514e0269f107106c",
-        "line_count": 1004,
+        "source_sha256": "aaf167b03295e8af83be61b8c0ee3eb27e286dd198db924aa9c8bfd1ae4e83bd",
+        "line_count": 1024,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",
@@ -1419,8 +1419,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "916bbcb002affc4001ddd96424d655ff639691aff3e4e3b8dc7f31fe4fefa02c",
-        "line_count": 168,
+        "source_sha256": "e4db3037bddb5954dca44b6a6bc5b2f29b61dda769550f1034bda6899715ff01",
+        "line_count": 174,
         "queue_status": "operator_only",
         "owner": "Orders",
         "scenario": "An authorized historical-import operator runs the controlled Orders adoption command.",
@@ -2465,8 +2465,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "05a9ec1fc41f4709ec7c0da4755d9b02ccf1e3ef25f816a9e6220c8e2b83ada7",
-        "line_count": 7995,
+        "source_sha256": "06ba935c1e62f9fc5ec92e1437613af9eeb0eb157b227fec45c8489d95f9b9b0",
+        "line_count": 8147,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",
