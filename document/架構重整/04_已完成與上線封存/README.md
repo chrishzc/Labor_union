@@ -12,7 +12,6 @@
 2026-09-01第一批移除範圍限於：
 
 - 已完成且自帶刪除條件的Task 97 pre-slimming report；
-- LINE merge未移植的歷史備忘；
 - 已由aggregate integration receipt承接的Anomalies來源lane receipt；
 - Task 96 spec-ready、handoff與已關閉defect的中間receipt。
 
