@@ -1,6 +1,6 @@
 """
 File: test_react_anomalies_entry_cutover.py
-Description: 驗證 Anomalies query candidate 的 registry、rollback、Streamlit target 與 GET-only 變更鎖定。
+Description: 驗證 Anomalies current entry 的 registry、navigation、唯讀 Query 與 owner action descriptor 邊界。
 """
 
 from __future__ import annotations
@@ -31,16 +31,6 @@ def _read_queue() -> list[dict[str, object]]:
         for line in REVIEW_QUEUE.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-
-
-def _opening_tag(source: str, control_id: str) -> tuple[str, str]:
-    match = re.search(
-        rf'<(?P<tag>button|textarea)\b(?P<attrs>[^>]*data-control-id="{re.escape(control_id)}"[^>]*)>',
-        source,
-        re.DOTALL,
-    )
-    assert match is not None, control_id
-    return match.group("tag"), match.group("attrs")
 
 
 def test_anomalies_is_unique_in_current_registries_and_review_queue() -> None:
@@ -84,19 +74,23 @@ def test_anomalies_control_plane_keeps_react_identity_metadata() -> None:
     assert len(entries) == 12
     anomalies_entries = [entry for entry in entries if entry["entry_id"] == ANOMALIES_ENTRY]
     assert len(anomalies_entries) == 1
-    assert len(anomalies_entries) == 1
     assert anomalies_entries[0]["entry_id"] == ANOMALIES_ENTRY
     assert anomalies_entries[0]["react_target"] == "/admin/#anomalies"
     assert anomalies_entries[0]["replacement_group"] == "anomalies"
 
 
-def test_anomalies_sources_use_typed_query_and_recovery_boundaries() -> None:
+def test_anomalies_sources_use_current_read_only_owner_boundaries() -> None:
     app_source = (ROOT / "ui_react/src/App.tsx").read_text(encoding="utf-8")
     nav_source = (ROOT / "ui_react/src/components/MasterLayout.tsx").read_text(encoding="utf-8")
-    page_path = ROOT / "ui_react/src/pages/CurrentAnomaliesPage.tsx"
-    client_path = ROOT / "ui_react/src/api/anomalies/anomaly_query_client.ts"
-    page_source = page_path.read_text(encoding="utf-8")
-    client_source = client_path.read_text(encoding="utf-8")
+    page_source = (ROOT / "ui_react/src/pages/CurrentAnomaliesPage.tsx").read_text(
+        encoding="utf-8"
+    )
+    current_query_client_source = (
+        ROOT / "ui_react/src/api/anomalies/current_anomaly_query_client.ts"
+    ).read_text(encoding="utf-8")
+    detail_client_source = (
+        ROOT / "ui_react/src/api/anomalies/anomaly_detail_client.ts"
+    ).read_text(encoding="utf-8")
 
     assert re.search(
         r"\{currentPage\s*===\s*'anomalies'\s*&&\s*<CurrentAnomaliesPage\s*/>\}",
@@ -104,24 +98,28 @@ def test_anomalies_sources_use_typed_query_and_recovery_boundaries() -> None:
     )
     assert re.search(r"\{\s*id:\s*'anomalies'\s*,[^}]*section:\s*'audit'\s*\}", nav_source)
 
-    for control_id in (
-        "anomalies.card.drawer_open",
-        "anomalies.warning.drawer_open",
-        "anomalies.import-warning.transition.preview",
+    assert "currentAnomalyQueryClient.queryCurrentAnomalies" in page_source
+    assert "anomalyDetailClient.queryCurrentAnomalyRecovery" in page_source
+    assert "detail.available_actions" in page_source
+    assert "action.preview_operation" in page_source
+    assert "action.apply_operation" in page_source
+    assert "action.completion_predicate" in page_source
+    assert "系統不會用通用結案取代業務修正" in page_source
+
+    for retired_path in (
+        "importWarningTransitionClient",
+        "financeImportCorrectionClient",
+        "queryAnomalyDetail",
         "anomalies.import-warning.transition.apply",
-        "anomalies.finance-correction.preview",
         "anomalies.finance-correction.apply",
     ):
-        assert f'data-control-id="{control_id}"' in page_source
+        assert retired_path not in page_source
 
-    assert "anomalyDetailClient.queryAnomalyDetail" in page_source
-    assert "importWarningTransitionClient.preview" in page_source
-    assert "importWarningTransitionClient.apply" in page_source
-    assert "financeImportCorrectionClient.preview" in page_source
-    assert "financeImportCorrectionClient.apply" in page_source
-
-    transport_methods = re.findall(
+    assert re.findall(
         r"\btransport\.(get|post|put|patch|delete)\b",
-        client_source,
-    )
-    assert transport_methods == ["get", "get", "get", "get"]
+        current_query_client_source,
+    ) == ["get"]
+    assert re.findall(
+        r"\btransport\.(get|post|put|patch|delete)\b",
+        detail_client_source,
+    ) == ["get"]
