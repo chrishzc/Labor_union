@@ -93,13 +93,13 @@ def test_anomalies_control_plane_keeps_react_identity_metadata() -> None:
 def test_anomalies_sources_use_typed_query_and_recovery_boundaries() -> None:
     app_source = (ROOT / "ui_react/src/App.tsx").read_text(encoding="utf-8")
     nav_source = (ROOT / "ui_react/src/components/MasterLayout.tsx").read_text(encoding="utf-8")
-    page_path = ROOT / "ui_react/src/pages/AnomaliesPage.tsx"
+    page_path = ROOT / "ui_react/src/pages/CurrentAnomaliesPage.tsx"
     client_path = ROOT / "ui_react/src/api/anomalies/anomaly_query_client.ts"
     page_source = page_path.read_text(encoding="utf-8")
     client_source = client_path.read_text(encoding="utf-8")
 
     assert re.search(
-        r"\{currentPage\s*===\s*'anomalies'\s*&&\s*<AnomaliesPage\s*/>\}",
+        r"\{currentPage\s*===\s*'anomalies'\s*&&\s*<CurrentAnomaliesPage\s*/>\}",
         app_source,
     )
     assert re.search(r"\{\s*id:\s*'anomalies'\s*,[^}]*section:\s*'audit'\s*\}", nav_source)
