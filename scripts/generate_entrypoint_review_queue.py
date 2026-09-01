@@ -822,6 +822,9 @@ def _expand_review_required_entry(entry: dict[str, object]) -> dict[str, object]
         elif "/identity-reviews/" in identity:
             owner = "LINE Identity"
             operator = "authenticated LINE mobile identity-review operator"
+        elif "/scheduling-review/" in identity:
+            owner = "Scheduling"
+            operator = "authenticated LINE mobile scheduling reviewer"
         else:
             raise ValueError(f"unmapped LINE mobile review entry: {identity}")
     elif source_path == "ui_react/src/components/MasterLayout.tsx":
