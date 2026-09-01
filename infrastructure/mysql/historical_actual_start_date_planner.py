@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, timedelta
 from hashlib import sha256
 
@@ -89,8 +90,12 @@ class MySqlHistoricalActualStartDatePlanner:
             )
             _delete_unmanaged_case_schedules(cursor, case_no)
             _replace_conflicting_current_schedule_state(cursor, case_no, candidate)
-            if _effective_generation_has_assignments(cursor, aggregate, for_update=True):
-                return
+            candidate = replace(
+                candidate,
+                cancelled_assignment_ids=_effective_generation_assignment_ids(
+                    cursor, aggregate
+                ),
+            )
             policy = _case_payroll_policy(cursor, case_no, for_update=True)
             command_fingerprint = _bootstrap_fingerprint(
                 source_identity,
@@ -187,6 +192,18 @@ def _effective_generation_has_assignments(cursor, aggregate, *, for_update: bool
         (generation_id,),
     )
     return cursor.fetchone() is not None
+
+
+def _effective_generation_assignment_ids(cursor, aggregate) -> tuple[int, ...]:
+    generation_id = aggregate["effective_generation_id"]
+    if generation_id is None:
+        return ()
+    cursor.execute(
+        "SELECT id FROM case_staff_assignments WHERE generation_id=%s "
+        "AND status NOT IN ('cancelled','replaced') ORDER BY id FOR UPDATE",
+        (generation_id,),
+    )
+    return tuple(int(row["id"]) for row in cursor.fetchall())
 
 
 def _historical_assignments(cursor, case_no, *, for_update: bool):

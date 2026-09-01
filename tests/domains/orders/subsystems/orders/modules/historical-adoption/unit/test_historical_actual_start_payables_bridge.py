@@ -373,8 +373,9 @@ def test_historical_planner_deletes_unmanaged_schedules_for_the_same_case():
     assert "generation_id IS NULL" in cursor.statement
 
 
-def test_historical_planner_replaces_conflicts_before_existing_generation_return(monkeypatch):
+def test_historical_planner_replaces_existing_generation_with_historical_source(monkeypatch):
     import infrastructure.mysql.historical_actual_start_date_planner as planner
+    from domains.scheduling.generation import SchedulingGenerationCandidate
 
     calls = []
 
@@ -392,13 +393,25 @@ def test_historical_planner_replaces_conflicts_before_existing_generation_return
         "generation_counter": 7,
         "effective_generation_id": 71,
     }
+    candidate = SchedulingGenerationCandidate(
+        case_no="CASE-1",
+        generation_number=8,
+        expected_aggregate_version=4,
+        resulting_aggregate_version=5,
+        cancelled_assignment_ids=(),
+        assignments=(),
+        buffers=(),
+    )
     monkeypatch.setattr(planner, "_locked_or_bootstrapped_aggregate", lambda *_args: aggregate)
     monkeypatch.setattr(
         planner,
         "_source_assignment_and_order_facts",
-        lambda *_args, **_kwargs: (({"id": 9, "staff_id": 11},), {"service_hours_per_day": 8}),
+        lambda *_args, **_kwargs: (
+            ({"id": 9, "staff_id": 11},),
+            {"service_hours_per_day": 8, "lifecycle_version": 9},
+        ),
     )
-    monkeypatch.setattr(planner, "_bootstrap_candidate", lambda *_args: "candidate")
+    monkeypatch.setattr(planner, "_bootstrap_candidate", lambda *_args: candidate)
     monkeypatch.setattr(
         planner,
         "_delete_unmanaged_case_schedules",
@@ -411,16 +424,20 @@ def test_historical_planner_replaces_conflicts_before_existing_generation_return
     )
     monkeypatch.setattr(
         planner,
-        "_effective_generation_has_assignments",
-        lambda *_args, **_kwargs: True,
+        "_case_payroll_policy",
+        lambda *_args, **_kwargs: {"policy_version": 1},
     )
     monkeypatch.setattr(
         planner,
-        "_case_payroll_policy",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("existing generation must not require a bootstrap policy")
-        ),
+        "_effective_generation_assignment_ids",
+        lambda *_args: (91, 92),
     )
+    monkeypatch.setattr(
+        planner,
+        "persist_scheduling_replacement",
+        lambda _cursor, command: calls.append(command),
+    )
+    monkeypatch.setattr(planner, "_persist_rate_snapshots", lambda *_args: None)
 
     planner.MySqlHistoricalActualStartDatePlanner(connection).prepare_source_generation(
         "CASE-1",
@@ -430,7 +447,11 @@ def test_historical_planner_replaces_conflicts_before_existing_generation_return
         correlation_id="historical-override-test",
     )
 
-    assert calls == ["delete-unmanaged", "delete-conflicts"]
+    assert calls[:2] == ["delete-unmanaged", "delete-conflicts"]
+    command = calls[2]
+    assert command.candidate.cancelled_assignment_ids == (91, 92)
+    assert command.candidate.case_no == "CASE-1"
+    assert command.candidate.generation_number == 8
 
 
 def test_historical_bootstrap_single_assignment_uses_recalculated_service_dates():
