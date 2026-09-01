@@ -35,7 +35,7 @@ REQUIRED_ENTRY_FIELDS = {
 }
 EXPECTED_COUNTS = {
     "keep-operator-only": 38,
-    "test-only": 40,
+    "test-only": 39,
     "rewrite-to-canonical-runner": 1,
     "delete-executable": 6,
     "blocked-caller-evidence": 3,
@@ -51,15 +51,15 @@ def test_task97_script_inventory_is_complete_and_current() -> None:
     entries = inventory["entries"]
 
     assert inventory["contract"] == "task97-production-script-inventory/v1"
-    assert inventory["source"]["cli_count"] == len(discover_scripts()) == 88
-    assert len(entries) == 88
-    assert inventory["summary"]["total"] == 88
-    assert inventory["source"]["queue_cli_count"] == 88
+    assert inventory["source"]["cli_count"] == len(discover_scripts()) == 87
+    assert len(entries) == 87
+    assert inventory["summary"]["total"] == 87
+    assert inventory["source"]["queue_cli_count"] == 87
 
     identities = [entry["exact_id"] for entry in entries]
     paths = [entry["path"] for entry in entries]
-    assert len(set(identities)) == 88
-    assert len(set(paths)) == 88
+    assert len(set(identities)) == 87
+    assert len(set(paths)) == 87
     assert all(entry.keys() >= REQUIRED_ENTRY_FIELDS for entry in entries)
 
     observed_counts = {

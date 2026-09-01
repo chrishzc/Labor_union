@@ -143,6 +143,8 @@ SOURCE_CONTROLLED_FILE_HTTP_ENTRIES = frozenset(
 SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES = frozenset(
     {
         *SOURCE_CONTROLLED_FILE_HTTP_ENTRIES,
+        "api:GET /api/v1/client-payments/historical-payments/{case_no}",
+        "api:GET /api/v1/client-payments/historical-payments/{case_no}/readback",
         "api:GET /api/v1/anomalies/{issue_key}",
         "api:GET /api/v1/anomaly-recovery/{issue_key}",
         "api:GET /api/v1/anomaly-recovery/{issue_key}/actions/{action_key}",
@@ -190,6 +192,8 @@ SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES = frozenset(
         "api:POST /api/v1/customer-service/tickets/{ticket_id}/reply/preview",
         "api:POST /api/v1/customer-service/tickets/{ticket_id}/update/apply",
         "api:POST /api/v1/customer-service/tickets/{ticket_id}/update/preview",
+        "api:POST /api/v1/client-payments/historical-payments/apply",
+        "api:POST /api/v1/client-payments/historical-payments/preview",
         "api:POST /api/v1/line/identity/reviews/{request_id}/{decision}/apply",
         "api:POST /api/v1/line/identity/reviews/{request_id}/{decision}/preview",
         "api:POST /api/v1/line/rich-menus/draft/preview",
@@ -261,8 +265,6 @@ SOURCE_LOCAL_REWRITE_HTTP_ENTRIES = (
 )
 SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES = frozenset(
     {
-        "api:GET /api/v1/client-payments/historical-payments/{case_no}",
-        "api:GET /api/v1/client-payments/historical-payments/{case_no}/readback",
         "api:GET /api/v1/client-profile/requests",
         "api:GET /api/v1/client-profile/requests/{request_id}",
         "api:GET /api/v1/line/ai-events/catalog",
@@ -282,8 +284,6 @@ SOURCE_EXTERNAL_EVIDENCE_HTTP_ENTRIES = frozenset(
         "api:GET /static/bind.html",
         "api:POST /api/v1/admin/entry-targets/apply",
         "api:POST /api/v1/admin/entry-targets/preview",
-        "api:POST /api/v1/client-payments/historical-payments/apply",
-        "api:POST /api/v1/client-payments/historical-payments/preview",
         "api:POST /api/v1/client-profile/requests/{request_id}/approve/apply",
         "api:POST /api/v1/client-profile/requests/{request_id}/approve/preview",
         "api:POST /api/v1/client-profile/requests/{request_id}/reject",
@@ -424,7 +424,6 @@ REVIEW_REQUIRED_PATH_GOVERNANCE = {
     "scripts/collect_local_additive_engine_evidence.py": ("Global Migration Qualification", "authorized local evidence operator; caller not evidenced"),
     "scripts/launchers/local_mysql_tcp_forward.py": ("Local Infrastructure", "authorized local infrastructure operator; caller not evidenced"),
     "scripts/migrate_admin_capability_grants_schema.py": ("Access Control Migration", "authorized migration operator; caller not evidenced"),
-    "scripts/diagnose_historical_order_preview.py": ("Orders Historical Adoption Diagnosis", "authorized disposable-test diagnostic operator; caller not evidenced"),
     "scripts/run_task96_hob_route_a.py": ("Task 96 HOB Scenario Evidence", "authorized Task 96 evidence operator; caller not evidenced"),
     "scripts/run_task96_payout001_scenario.py": ("Task 96 Staff Payables Scenario Evidence", "authorized Task 96 evidence operator; caller not evidenced"),
     "scripts/run_task96_rpre_browser_scenario.py": ("Task 96 Replacement Scenario Evidence", "authorized Task 96 evidence operator; caller not evidenced"),
@@ -466,6 +465,11 @@ LOCAL_CANONICAL_EVIDENCE_BY_SOURCE = {
     ),
     "api/routes/admin_auth.py": ("ui_react/src/api/auth/session_client.ts", "tests/test_admin_auth_runtime.py; tests/test_admin_auth_security.py"),
     "api/routes/candidate_contact_pool.py": ("ui_react/src/api/scheduling/candidate_contact_pool_client.ts", "tests/test_candidate_contact_pool_workflow.py; ui_react/src/tests/candidate_contact_pool_client.test.ts"),
+    "api/routes/client_payments.py": (
+        "ui_react/src/api/client_finance/historical_client_payment_client.ts",
+        "tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement/contract/test_historical_client_payment_api.py; "
+        "ui_react/src/tests/historical_client_payment_workbench.test.tsx",
+    ),
     "api/routes/client_refund_reversal.py": ("ui_react/src/api/client_finance/client_over_refund_recovery_client.ts", "tests/test_client_refund_reversal_route.py; tests/domains/client-finance/subsystems/client-finance/integration/test_client_refund_overage.py"),
     "api/routes/contract_external_signing.py": ("ui_react/src/api/orders/contract_external_signing_client.ts", "tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_external_signing_api.py; ui_react/src/tests/contract_external_signing_client.test.ts"),
     "api/routes/contract_signing.py": ("ui_react/src/api/orders/contract_signing_mutation_client.ts", "tests/test_client_contract_signing_application.py; tests/test_staff_contract_signing_application.py; ui_react/src/tests/contract_signing_mutation_client.test.ts"),

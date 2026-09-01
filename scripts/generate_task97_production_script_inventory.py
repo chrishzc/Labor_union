@@ -98,7 +98,6 @@ CLASSIFICATION_OVERRIDES = {
             "scripts/bootstrap_disposable_mysql_schema.py",
             "scripts/bootstrap_line_configuration.py",
             "scripts/create_admin.py",
-            "scripts/diagnose_historical_order_preview.py",
             "scripts/export_db_snapshot_fixture_v2.py",
             "scripts/fix_schedule_conflicts.py",
             "scripts/import_db_snapshot_fixture_v2.py",

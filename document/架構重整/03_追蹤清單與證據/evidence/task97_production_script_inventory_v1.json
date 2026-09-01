@@ -6,9 +6,9 @@
   "authority": "D97-PRODUCTION-SCRIPT-GOVERNANCE; Global migration spec section 9",
   "source": {
     "entrypoint_queue": "document/架構重整/03_追蹤清單與證據/evidence/entrypoint_review_queue_v1.jsonl",
-    "entrypoint_queue_sha256": "0e21790c4c8b4a0336dacec02a651f66193ba88857663548438df0cb3d8ceba5",
-    "cli_count": 88,
-    "queue_cli_count": 88,
+    "entrypoint_queue_sha256": "5255d83ebe412a134d0fe898f34942992bf60a88a0f3c114caef080627381c7a",
+    "cli_count": 87,
+    "queue_cli_count": 87,
     "discovery": "AST __main__ registration over current scripts/**/*.py; queue is caller-evidence input and is regenerated independently."
   },
   "required_guard_contract": [
@@ -25,18 +25,18 @@
     "production_authority_credential_gate"
   ],
   "summary": {
-    "total": 88,
+    "total": 87,
     "classification_counts": {
       "blocked-caller-evidence": 3,
       "delete-executable": 6,
       "keep-operator-only": 38,
       "rewrite-to-canonical-runner": 1,
-      "test-only": 40
+      "test-only": 39
     },
     "queue_status_counts": {
       "active": 4,
       "operator_only": 75,
-      "review_required": 9
+      "review_required": 8
     },
     "repo_local_blocker_count": 0,
     "deferred_gate_count": 14,
@@ -730,67 +730,6 @@
       "required_guards": []
     },
     {
-      "exact_id": "cli:scripts/diagnose_historical_order_preview.py",
-      "path": "scripts/diagnose_historical_order_preview.py",
-      "runtime": "python-cli",
-      "callers": {
-        "runtime_registration": [
-          "scripts/diagnose_historical_order_preview.py::cli:scripts/diagnose_historical_order_preview.py (entrypoint_review_queue_v1)"
-        ],
-        "repository_search": [
-          "Task 97 production-script inventory confirms CLI registration for cli:scripts/diagnose_historical_order_preview.py; external/operator execution authority remains incomplete"
-        ]
-      },
-      "replacement": "cli:scripts/diagnose_historical_order_preview.py",
-      "test": {
-        "status": "not_run",
-        "focused": "tests/test_task97_production_script_governance.py",
-        "oracle": "source digest and exact identity remain stable"
-      },
-      "oracle": "exit 0 with no unauthorized database or external writes",
-      "receipt": {
-        "status": "not_run",
-        "identity": "task97:cli:scripts/diagnose_historical_order_preview.py"
-      },
-      "evidence": {
-        "source_sha256": "11a70aac15a4994310026f8fe2af3e36e41b6f3961a3c7c4f617f7a114d4eeb5",
-        "line_count": 388,
-        "queue_status": "review_required",
-        "owner": "Orders Historical Adoption Diagnosis",
-        "scenario": "Execute or read the bounded Orders Historical Adoption Diagnosis scenario identified by cli:scripts/diagnose_historical_order_preview.py.",
-        "operator": "authorized disposable-test diagnostic operator; caller not evidenced",
-        "observed": {
-          "dry_run": false,
-          "explicit_db": false,
-          "host_check": false,
-          "schema_fingerprint": false,
-          "prior_dry_run_receipt": false,
-          "backup_receipt": false,
-          "explicit_apply": false,
-          "verify": false,
-          "resume_replay": false,
-          "terminal_receipt": false,
-          "production_authority": false
-        }
-      },
-      "classification": "test-only",
-      "capabilities": {
-        "kind": "test-only",
-        "database": "read",
-        "production_mutation": false,
-        "data_import": false,
-        "process_launch": false
-      },
-      "required_guards": [],
-      "guard_gap": [
-        "caller_evidence_and_terminal_disposition"
-      ],
-      "gate": {
-        "status": "PASS",
-        "reason": "test-only entry is bounded to its allowlisted disposable target"
-      }
-    },
-    {
       "exact_id": "cli:scripts/export_db_snapshot_fixture_v2.py",
       "path": "scripts/export_db_snapshot_fixture_v2.py",
       "runtime": "python-cli",
@@ -926,8 +865,8 @@
         ]
       },
       "evidence": {
-        "source_sha256": "a2d7d96d971389f141688fd2ef98ff5ecc61c727169afac10d5f2cf3fa81a751",
-        "line_count": 1000,
+        "source_sha256": "a99344a37d20123830dcf2ed2dcdd41a728cb96d5915bf38514e0269f107106c",
+        "line_count": 1004,
         "queue_status": "operator_only",
         "owner": "Global application boundary",
         "scenario": "Controlled Global application boundary maintenance or release operation.",
@@ -1304,8 +1243,8 @@
         "identity": "PROV-20260829-task97-production-script-scripts-generate_task97_production_script_inventory-py"
       },
       "evidence": {
-        "source_sha256": "999136d9f317c1d89f3df4e915f8b0b00eb2c1945ec0dd3888bbf0c5a5b1e04b",
-        "line_count": 867,
+        "source_sha256": "77439a15d0ea4acdbddbb976d1e293a9c88dcb139e3f562119cf94b5ccfe422b",
+        "line_count": 866,
         "queue_status": "operator_only",
         "owner": "Architecture Governance",
         "scenario": "Regenerate the tracked Task 97 production-script inventory from current executable sources.",

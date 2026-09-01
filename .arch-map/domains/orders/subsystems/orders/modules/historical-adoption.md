@@ -19,7 +19,6 @@
   - `infrastructure/mysql/historical_order_workbook_import_repository.py`
   - `infrastructure/mysql/historical_order_adoption_cancellation_decorator.py`
   - `infrastructure/mysql/historical_actual_start_date_planner.py`
-  - `scripts/diagnose_historical_order_preview.py` — read-only source-schedule conflict and scheduling-root diagnosis.
 - entrypoints:
   - `api/routes/historical_order_adoption.py`
   - `api/dependencies/historical_order_adoption.py`

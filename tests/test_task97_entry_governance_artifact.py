@@ -16,26 +16,26 @@ def test_task97_entry_governance_is_fresh_clone_reproducible():
     artifact = build_artifact()
     persisted = json.loads(ARTIFACT.read_text(encoding="utf-8"))
 
-    assert len(queue) == 724
+    assert len(queue) == 723
     assert artifact == persisted
-    assert artifact["source"]["entry_count"] == 724
+    assert artifact["source"]["entry_count"] == 723
     assert artifact["summary"]["generic_placeholder_count"] == 0
     assert artifact["summary"]["queue_status_counts"] == {
-        "active": 496,
+        "active": 500,
         "operator_only": 75,
         "retired_410": 79,
-        "review_required": 74,
+        "review_required": 69,
     }
     assert artifact["summary"]["terminal_disposition_counts"] == {
-        "active_canonical": 496,
-            "blocked_external_evidence": 72,
+        "active_canonical": 500,
+        "blocked_external_evidence": 67,
         "operator_only_guarded": 75,
         "retired_410": 79,
         "rewrite_to_canonical": 2,
     }
-    assert artifact["summary"]["blocked_receipt_count"] == 74
+    assert artifact["summary"]["blocked_receipt_count"] == 69
     assert artifact["summary"]["repo_local_blocker_count"] == 0
-    assert artifact["summary"]["deferred_external_evidence_count"] == 74
+    assert artifact["summary"]["deferred_external_evidence_count"] == 69
     assert artifact["summary"]["overall"] == "TASK97_REPOSITORY_LOCAL_COMPLETE"
     assert artifact["summary"]["production_acceptance"] == "NOT_RUN"
     assert len(artifact["records"]) == len(
