@@ -5506,7 +5506,7 @@ def _order_lifecycle_pending_status_constraint_state(
     snapshot: Mapping[str, Any],
     descriptor: Mapping[str, Any],
 ) -> str:
-    """Accept only the exact five-status predecessor or six-status before check."""
+    """Accept the released predecessor, 1013 shape, or exact later successor."""
     key = (
         "order_lifecycle_state_events",
         "chk_order_lifecycle_state_event_before_status",
@@ -5525,10 +5525,15 @@ def _order_lifecycle_pending_status_constraint_state(
         show_create_checks.get(key, row.get("check_clause") or "")
     )
     successor = _normalize_check_contract(descriptor["checks"][key])
+    historical_successor = _normalize_check_contract(
+        _canonical_artifact_descriptor(
+            "1028_historical_service_accounting.sql"
+        )["checks"][key]
+    )
     predecessor = _normalize_check_contract(_normalize_sql_contract(
         "before_status IN ('洽談中','訂單成立','服務中','訂單完成','訂單取消')"
     ))
-    if actual == successor:
+    if actual in {successor, historical_successor}:
         return "exact"
     if actual == predecessor:
         return "absent"
