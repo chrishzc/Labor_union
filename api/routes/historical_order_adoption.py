@@ -15,7 +15,9 @@ from api.dependencies.admin_auth import require_admin
 from api.dependencies.historical_order_adoption import get_historical_order_workbook_import_service
 from api.schemas.base import BaseResponse
 from api.schemas.historical_order_adoption import HistoricalOrderWorkbookPreviewView, HistoricalOrderWorkbookReceiptView
+from shared_kernel.errors import ErrorCategory
 from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.orders.actual_start_workflow import ActualStartWorkflowError
 from subsystems.orders.historical_order_workbook_import import HistoricalOrderWorkbookConflict, HistoricalOrderWorkbookUnavailable
 
 
@@ -64,6 +66,11 @@ async def _with_workbook(workbook: UploadFile, operation, message: str):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": str(error)}) from error
     except HistoricalOrderWorkbookUnavailable as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={"code": str(error)}) from error
+    except ActualStartWorkflowError as error:
+        raise HTTPException(
+            status_code=_actual_start_error_status(error.error.category),
+            detail={"code": error.error.code},
+        ) from error
     except OperationalError as error:
         code = int(error.args[0]) if error.args else 0
         message = str(error.args[1]) if len(error.args) > 1 else ""
@@ -81,6 +88,19 @@ async def _with_workbook(workbook: UploadFile, operation, message: str):
     finally:
         if upload_path is not None:
             upload_path.unlink(missing_ok=True)
+
+
+def _actual_start_error_status(category: ErrorCategory) -> int:
+    return {
+        ErrorCategory.VALIDATION: status.HTTP_422_UNPROCESSABLE_CONTENT,
+        ErrorCategory.FORBIDDEN: status.HTTP_403_FORBIDDEN,
+        ErrorCategory.NOT_FOUND: status.HTTP_404_NOT_FOUND,
+        ErrorCategory.DOMAIN_BLOCKED: status.HTTP_409_CONFLICT,
+        ErrorCategory.CONFLICT: status.HTTP_409_CONFLICT,
+        ErrorCategory.IDEMPOTENCY_MISMATCH: status.HTTP_409_CONFLICT,
+        ErrorCategory.UNAVAILABLE: status.HTTP_503_SERVICE_UNAVAILABLE,
+        ErrorCategory.INTERNAL: status.HTTP_500_INTERNAL_SERVER_ERROR,
+    }[category]
 
 
 async def _persist_uploaded_workbook(workbook: UploadFile) -> Path:

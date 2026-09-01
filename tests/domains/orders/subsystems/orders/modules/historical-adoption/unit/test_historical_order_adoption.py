@@ -635,6 +635,69 @@ def test_replayed_historical_actual_start_repairs_a_predelegation_receipt(tmp_pa
     assert rebuilder.calls[0]["actual_start_date"] == date(2026, 8, 8)
 
 
+def test_replayed_historical_actual_start_does_not_repeat_completed_rebuild(tmp_path):
+    path = _workbook(
+        tmp_path,
+        ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態"],
+        ["客戶甲", "CASE-1", date(2026, 8, 8), None, 1],
+    )
+    row = load_historical_order_workbook(path).rows[0]
+
+    class ExistingReceiptRepository(_Repository):
+        def load_order(self, case_no, client_name, *, for_update):
+            del case_no, client_name, for_update
+            return _current(
+                OrderLifecycleStatus.COMPLETED,
+                planned_start=date(2026, 8, 7),
+                actual_start=date(2026, 8, 8),
+                actual_end=date(2026, 9, 7),
+            )
+
+    class Rebuilder:
+        def __init__(self):
+            self.calls = []
+
+        def apply_in_current_unit_of_work(self, **values):
+            self.calls.append(values)
+
+    repository = ExistingReceiptRepository(row)
+    rebuilder = Rebuilder()
+    workflow = HistoricalOrderAdoptionWorkflow(
+        repository,
+        _UnitOfWork,
+        _SchedulingHistoricalAssignment(),
+        rebuilder,
+    )
+    preview = workflow.preview(row)
+    repository.receipt = {
+        "command_fingerprint": fingerprint_payload({
+            "source_identity": row.source_identity,
+            "source_fingerprint": row.source_fingerprint,
+        }).value,
+        "outcome": "adopted",
+        "case_no": "CASE-1",
+        "resulting_version": 4,
+        "assignment_count": 0,
+        "review_identity": None,
+        "preview_fingerprint": preview.fingerprint.value,
+    }
+
+    receipt = workflow.apply(
+        HistoricalOrderAdoptionRequest(
+            row,
+            preview.fingerprint,
+            "historical-order:replay-complete",
+            "test-operator",
+            "do not repeat completed historical rebuild",
+            "historical-order:replay-complete:correlation",
+        )
+    )
+
+    assert receipt.replayed is True
+    assert repository.persist_count == 0
+    assert rebuilder.calls == []
+
+
 def test_multiple_matching_sheets_fail_closed(tmp_path):
     path = tmp_path / "ambiguous.xlsx"
     workbook = Workbook()

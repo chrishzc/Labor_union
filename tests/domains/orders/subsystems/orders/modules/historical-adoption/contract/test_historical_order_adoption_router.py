@@ -15,6 +15,9 @@ from pymysql.err import OperationalError
 from api.dependencies.admin_auth import require_admin
 from api.dependencies.historical_order_adoption import get_historical_order_workbook_import_service
 from api.routes.historical_order_adoption import router
+from shared_kernel.errors import ErrorCategory, TypedError
+from shared_kernel.identities import CorrelationId
+from subsystems.orders.actual_start_workflow import ActualStartWorkflowError
 from subsystems.orders.historical_order_workbook_import import (
     HistoricalOrderStatusCounts, HistoricalOrderWorkbookConflict, HistoricalOrderWorkbookPreview,
     HistoricalOrderWorkbookReceipt,
@@ -121,6 +124,31 @@ def test_apply_reports_pending_status_constraint_as_database_upgrade_required():
     assert response.json()["detail"]["code"] == (
         "historical_order_database_upgrade_required"
     )
+
+
+def test_apply_actual_start_idempotency_mismatch_is_a_conflict_not_a_server_error():
+    service = _Service()
+
+    def fail_apply(*_args):
+        raise ActualStartWorkflowError(
+            TypedError(
+                ErrorCategory.IDEMPOTENCY_MISMATCH,
+                "idempotency_mismatch",
+                "Idempotency key was already used with a different command.",
+                CorrelationId("historical-order-router-test"),
+            )
+        )
+
+    service.apply = fail_apply
+    response = _client(service).post(
+        "/api/v1/orders/historical-adoption/workbooks/apply",
+        headers=_headers(),
+        data={"preview_fingerprint": "2" * 64},
+        files=_file(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "idempotency_mismatch"
 
 
 def _client(service):

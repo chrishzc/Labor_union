@@ -196,6 +196,15 @@ class HistoricalOrderAdoptionWorkflow:
             or current.planned_start_date == actual_start_date
         ):
             return
+        # The canonical Actual Start writer has already materialized the
+        # service period for this immutable historical assertion.  Repeating
+        # it would reuse its source-derived idempotency key against newer
+        # owner versions and be rejected as a different command.
+        if (
+            current.actual_start_date == actual_start_date
+            and current.actual_end_date is not None
+        ):
+            return
         self._actual_start_rebuilder.apply_in_current_unit_of_work(
             case_no=preview.case_no,
             actual_start_date=actual_start_date,
