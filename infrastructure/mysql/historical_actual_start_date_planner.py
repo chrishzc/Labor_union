@@ -88,8 +88,6 @@ class MySqlHistoricalActualStartDatePlanner:
                 service_dates,
                 _service_hours_per_day(order),
             )
-            _delete_unmanaged_case_schedules(cursor, case_no)
-            _replace_conflicting_current_schedule_state(cursor, case_no, candidate)
             candidate = replace(
                 candidate,
                 cancelled_assignment_ids=_effective_generation_assignment_ids(
@@ -124,11 +122,25 @@ class MySqlHistoricalActualStartDatePlanner:
         self,
         case_no: str,
         service_dates: tuple[date, ...],
+        *,
+        source_staff_ids: tuple[int, ...] = (),
     ) -> None:
         """Check bootstrap prerequisites without creating a generation or writing facts."""
         with self._connection.cursor() as cursor:
             aggregate = _read_or_empty_aggregate(cursor, case_no)
             if _effective_generation_has_assignments(cursor, aggregate, for_update=False):
+                return
+            if source_staff_ids:
+                if len(source_staff_ids) != 1 or source_staff_ids[0] <= 0:
+                    raise HistoricalActualStartPreparationError(
+                        "historical_assignment_required_for_actual_start"
+                    )
+                if service_dates != tuple(sorted(set(service_dates))) or not service_dates:
+                    raise HistoricalActualStartPreparationError(
+                        "historical_service_dates_invalid"
+                    )
+                _order_context(cursor, case_no, for_update=False)
+                _case_payroll_policy(cursor, case_no, for_update=False)
                 return
             source_assignments, order, _policy = _source_generation_facts(
                 cursor,
@@ -304,64 +316,6 @@ def _bootstrap_candidate(
         assignments=assignments,
         buffers=tuple(_inactive_buffer(item) for item in assignments),
     )
-
-
-def _delete_unmanaged_case_schedules(cursor, case_no: str) -> None:
-    """Discard old generation-less schedule rows before historical replacement."""
-
-    cursor.execute(
-        "DELETE FROM staff_schedule WHERE case_no=%s AND generation_id IS NULL",
-        (case_no,),
-    )
-
-
-def _replace_conflicting_current_schedule_state(cursor, case_no: str, candidate) -> None:
-    """Directly remove current conflicts before writing the historical source."""
-
-    predicates, parameters = _occupancy_overlap_predicates(candidate)
-    if predicates:
-        cursor.execute(
-            "DELETE FROM scheduling_effective_occupancy WHERE "
-            + " OR ".join(predicates),
-            parameters,
-        )
-    predicates, parameters = _schedule_overlap_predicates(candidate)
-    if predicates:
-        cursor.execute(
-            "DELETE FROM staff_schedule WHERE case_no<>%s AND ("
-            + " OR ".join(predicates)
-            + ")",
-            (case_no, *parameters),
-        )
-
-
-def _schedule_overlap_predicates(candidate):
-    predicates = []
-    parameters = []
-    for assignment in candidate.assignments:
-        dates = assignment.service_dates
-        if not dates:
-            continue
-        predicates.append(
-            "(staff_id=%s AND work_date IN (" + ",".join("%s" for _ in dates) + "))"
-        )
-        parameters.extend((assignment.staff_id, *dates))
-    return tuple(predicates), tuple(parameters)
-
-
-def _occupancy_overlap_predicates(candidate):
-    predicates = []
-    parameters = []
-    for assignment in candidate.assignments:
-        predicates.append("(staff_id=%s AND occupancy_date BETWEEN %s AND %s)")
-        parameters.extend(
-            (
-                assignment.staff_id,
-                assignment.assigned_start_date,
-                assignment.assigned_end_date,
-            )
-        )
-    return tuple(predicates), tuple(parameters)
 
 
 def _allocate_service_dates(source_assignments, service_dates):

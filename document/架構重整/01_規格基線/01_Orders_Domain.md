@@ -306,6 +306,27 @@ AutoComplete 與 Scheduling leave-substitution Apply 必須序列化於同一 Or
   settlement identity 不同而失效，必須重新確認 actual start；reversal 本身不猜測新的
   actual start。
 
+### 3.3.2 LINE Identity terminal-closure handoff（2026-09-01 Task96 contract）
+
+Orders lifecycle 是案件 terminal closure event 的唯一 source owner。當案件依本節 lifecycle
+predicate 進入 terminal closure，Orders 必須在同一 outer Unit of Work 追加 immutable
+`case_terminal_closure` event、receipt 與 post-commit outbox；event identity 由
+`case_no`、`terminal_kind` 與 resulting lifecycle version 組成，並帶 source subject、
+producer reference、occurred time、correlation 與 idempotency identity。此 event 是對 LINE
+Identity 的 typed handoff，不是 LINE、UI、worker 或付款／通知 adapter 可自行產生的命令。
+
+若 terminal closure 依賴 Client Finance refund／archive 等其他 owner 結果，Orders 只能在
+既有 typed coordination 中引用該 owner receipt；不得跨域寫入 Finance、Staff、Scheduling
+或 LINE root。event producer 必須保留 current lifecycle version，讓 consumer 可辨識 stale
+event；相同 key／payload replay 回原 receipt，payload mismatch 固定 conflict。
+
+LINE Identity 依該 committed outbox 呼叫既有 role-scoped Query／Apply：只有該 LINE User ID
+的 staff binding 仍為 `active`，且其全部 active client-role cases 都由 owner readback 證明
+terminal，才可建立一次 staff default menu intent。仍有 active client case 時必須回 typed
+no-op；staff retirement／revocation pending 或 revoked 優先，絕不可由此 event 恢復 staff role。
+consumer 不得修改 Orders 或任何其他 Domain root；binding／menu version、subject mismatch
+與 stale event 必須 fail closed，透過 owner Query／manual reconciliation 處理，不得盲目 retry。
+
 ### 3.4 Actual Start Preview／Apply
 
 - 首次確認與更正都必須 Preview／Apply。
@@ -391,10 +412,15 @@ Orders `actual_end_date`；正式結束日以後續服務天數精算結果為�
 此受限斷言只授權 Orders-owned historical adoption command，不授權一般 adapter 或 UI 寫入。Preview 零寫入，Apply 每列鎖定 fresh
 Order、驗證 version／fingerprint，並以單一 UoW 保存 projection、event、receipt、outbox及跨域 evidence。
 
-2026-08-23人工進一步裁決Historical Orders workbook採`ROW_ATOMIC_RESUMABLE + archive_required`。
-workbook command必須有durable `running → row_committed* → terminal_receipt`、resume cursor、每列fresh
-Order version與`retryable_interrupted | terminal_failed`；same key＋same canonical workbook只續跑未terminal
-rows或replay terminal receipt，same key＋different workbook固定conflict。`assignment_candidate`與
+2026-09-01 人工校正：Historical Orders 的本次用途是以空白 DB 一次性建立完整且真實的歷史
+排班基準，取代前述 `ROW_ATOMIC_RESUMABLE` 契約。Preview 必須先對整份工作簿完成所有可採納列、
+狀態機、實際開工重建前提及來源內月嫂區間的零寫入驗證；不同案件的同月嫂來源區間重疊固定為
+`historical_order_source_schedule_conflict`，不得以列順序覆寫。Apply 必須以單一 outer UoW 同時保存
+workbook claim、全部列的 Orders／Scheduling／跨域寫入與 terminal receipt；任一列失敗即整份 rollback，
+不得留下 claim、row receipt、assignment、schedule、occupancy、event、outbox 或部分 Order 狀態。same
+key＋same canonical workbook 僅 replay terminal receipt；same key＋different workbook 固定 conflict。
+來源資料不得因既有測試排班而刪除或覆寫其他案件；同案若已有 current generation，仍只可由
+Scheduling canonical cancel-old／create-new replacement 處理。`assignment_candidate` 與
 `evidence_only_pairing`是`adopted`子分類，不得重複計入source-row aggregate。
 
 HCM Current仍由Case Import編排whole-workbook outer UoW。若HCM來源`exact IP + exact normalized name`

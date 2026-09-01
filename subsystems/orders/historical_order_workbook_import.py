@@ -6,11 +6,11 @@ Description: 協調訂單歷史 workbook Preview、Apply、replay 與逐列 Orde
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Callable, NoReturn, Protocol
+from typing import Callable, Protocol
 
 from domains.orders.historical_adoption import HistoricalOrderSourceStatus
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -19,9 +19,24 @@ from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbook,
 
 
 class HistoricalOrderWorkbookRepository(Protocol):
+    def acquire_lock(self, key: str) -> bool: ...
+
+    def release_lock(self, key: str) -> None: ...
+
+    def load_receipt(self, key: str): ...
+
+    def claim(self, key: str, digest: str, correlation_id: str) -> str: ...
+
     def find_workbook_receipt(self, key: str): ...
 
-    def save_workbook_receipt(self, key: str, receipt) -> None: ...
+    def save_receipt(
+        self,
+        key: str,
+        digest: str,
+        preview_fingerprint: str,
+        actor: str,
+        result: dict[str, object],
+    ) -> None: ...
 
     def find_open_review_identities(self, source_event_identities: tuple[str, ...]) -> tuple[str, ...]: ...
 
@@ -141,27 +156,35 @@ class HistoricalOrderWorkbookImportService:
             raise HistoricalOrderWorkbookUnavailable("historical_order_workbook_coordinator_lock_timeout")
         try:
             workbook = load_historical_order_workbook(source_path)
-            row_previews = tuple(self._workflow.preview(row) for row in workbook.rows)
             replay = self._stored_replay(key, workbook)
-            if replay is not None and not _requires_replay_refresh(row_previews):
+            if replay is not None:
                 return replay
+            row_previews = tuple(self._workflow.preview(row) for row in workbook.rows)
             preview = self._require_preview(
                 workbook, row_previews, supplied_preview_fingerprint
             )
-            if replay is not None:
-                return self._apply_rows(
-                    workbook, key, actor, correlation_id, row_previews
-                )
-            with self._unit_of_work_factory() as unit_of_work:
-                if self._repository.claim(key, workbook.content_digest, correlation_id) == "conflict":
-                    raise HistoricalOrderWorkbookConflict("historical_order_workbook_idempotency_conflict")
-                unit_of_work.commit()
-            receipt = self._apply_rows(
-                workbook, key, actor, correlation_id, row_previews
-            )
-            with self._unit_of_work_factory() as unit_of_work:
-                self._repository.save_receipt(key, workbook.content_digest, preview.preview_fingerprint, actor, receipt.as_dict())
-                unit_of_work.commit()
+            try:
+                with self._unit_of_work_factory() as unit_of_work:
+                    if self._repository.claim(key, workbook.content_digest, correlation_id) == "conflict":
+                        raise HistoricalOrderWorkbookConflict("historical_order_workbook_idempotency_conflict")
+                    receipt = self._apply_rows(
+                        workbook, key, actor, correlation_id
+                    )
+                    self._repository.save_receipt(
+                        key,
+                        workbook.content_digest,
+                        preview.preview_fingerprint,
+                        actor,
+                        receipt.as_dict(),
+                    )
+                    unit_of_work.commit()
+            except RuntimeError as error:
+                if str(error) in {
+                    "historical_order_candidate_stale",
+                    "historical_order_idempotency_conflict",
+                }:
+                    raise HistoricalOrderWorkbookConflict(str(error)) from error
+                raise
             return receipt
         finally:
             self._repository.release_lock(key)
@@ -173,43 +196,26 @@ class HistoricalOrderWorkbookImportService:
         return preview
 
     def _apply_rows(
-        self, workbook, key, actor, correlation_id, row_previews
+        self, workbook, key, actor, correlation_id
     ) -> HistoricalOrderWorkbookReceipt:
         outcomes: Counter[str] = Counter()
         assignments_created = 0
         replayed_rows = 0
         review_rows = 0
         review_references: list[str] = []
-        processed_case_numbers: set[str] = set()
-        for row, row_preview in zip(workbook.rows, row_previews, strict=True):
-            refresh_current_facts = (
-                row.case_no is not None and row.case_no in processed_case_numbers
+        for row in workbook.rows:
+            locked_preview = self._workflow.preview_in_current_unit_of_work(
+                row, for_update=True
             )
-            receipt = self._apply_row(
-                row,
-                row_preview.fingerprint,
-                key,
-                actor,
-                correlation_id,
-                refresh_current_facts=refresh_current_facts,
-            )
-            if receipt.replayed and _requires_replay_refresh((row_preview,)):
-                refresh_row = replace(
+            receipt = self._workflow.apply_in_current_unit_of_work(
+                _row_request(
                     row,
-                    source_identity=(
-                        f"{row.source_identity}:refresh:{row_preview.fingerprint.value}"
-                    ),
+                    locked_preview.fingerprint,
+                    key,
+                    actor,
+                    correlation_id,
                 )
-                refresh_preview = self._workflow.preview(refresh_row)
-                if _requires_replay_refresh((refresh_preview,)):
-                    receipt = self._apply_row(
-                        refresh_row,
-                        refresh_preview.fingerprint,
-                        key,
-                        actor,
-                        correlation_id,
-                        refresh_current_facts=True,
-                    )
+            )
             outcomes[receipt.outcome.value] += 1
             assignments_created += 0 if receipt.replayed else receipt.assignment_count
             replayed_rows += int(receipt.replayed)
@@ -217,63 +223,12 @@ class HistoricalOrderWorkbookImportService:
             review_identity = getattr(receipt, "review_identity", None)
             if review_identity is not None and review_identity not in review_references:
                 review_references.append(review_identity)
-            if row.case_no is not None:
-                processed_case_numbers.add(row.case_no)
         _assert_conservation(len(workbook.rows), outcomes)
         return HistoricalOrderWorkbookReceipt(
             workbook.content_digest, len(workbook.rows), outcomes["adopted"], outcomes["unmatched_case"],
             review_rows, outcomes["current_conflict"], assignments_created, replayed_rows, False,
             _status_counts(workbook), tuple(review_references),
         )
-
-    def _apply_row(
-        self,
-        row,
-        preview_fingerprint,
-        key,
-        actor,
-        correlation_id,
-        *,
-        refresh_current_facts: bool,
-    ):
-        request = _row_request(
-            row, preview_fingerprint, key, actor, correlation_id
-        )
-        try:
-            return self._workflow.apply(request)
-        except RuntimeError as error:
-            if not (
-                refresh_current_facts
-                and str(error) == "historical_order_candidate_stale"
-            ):
-                self._raise_workbook_conflict(error)
-        try:
-            with self._unit_of_work_factory() as unit_of_work:
-                locked_preview = self._workflow.preview_in_current_unit_of_work(
-                    row, for_update=True
-                )
-                receipt = self._workflow.apply_in_current_unit_of_work(
-                    _row_request(
-                        row,
-                        locked_preview.fingerprint,
-                        key,
-                        actor,
-                        correlation_id,
-                    )
-                )
-                unit_of_work.commit()
-                return receipt
-        except RuntimeError as error:
-            self._raise_workbook_conflict(error)
-
-    @staticmethod
-    def _raise_workbook_conflict(error: RuntimeError) -> NoReturn:
-        if str(error) in {
-            "historical_order_candidate_stale",
-            "historical_order_idempotency_conflict",
-        }:
-            raise HistoricalOrderWorkbookConflict(str(error)) from error
-        raise error
 
     def _stored_replay(self, key: str, workbook: HistoricalOrderWorkbook) -> HistoricalOrderWorkbookReceipt | None:
         stored = self._repository.load_receipt(key)
@@ -307,6 +262,7 @@ class HistoricalOrderWorkbookImportService:
 
 
 def _preview(workbook: HistoricalOrderWorkbook, row_previews) -> HistoricalOrderWorkbookPreview:
+    _assert_source_schedule_consistency(row_previews)
     outcomes = Counter(item.outcome.value for item in row_previews)
     candidates = sum(sum(item.resolution.value == "assignment_candidate" for item in preview.pairings) for preview in row_previews)
     evidence = sum(sum(item.resolution.value == "evidence_only" for item in preview.pairings) for preview in row_previews)
@@ -341,22 +297,6 @@ def _status_counts(workbook: HistoricalOrderWorkbook) -> HistoricalOrderStatusCo
     return result
 
 
-def _requires_replay_refresh(row_previews) -> bool:
-    return any(
-        (
-            getattr(preview, "expected_version", None) is not None
-            and getattr(preview, "resulting_version", None)
-            != getattr(preview, "expected_version", None)
-        )
-        or bool(getattr(preview, "date_patch", ()))
-        or any(
-            pairing.resolution.value == "assignment_candidate"
-            for pairing in preview.pairings
-        )
-        for preview in row_previews
-    )
-
-
 def _row_request(row, fingerprint: PreviewFingerprint, workbook_key: str, actor: str, correlation_id: str) -> HistoricalOrderAdoptionRequest:
     row_hash = sha256(f"{workbook_key}:{row.source_identity}".encode("utf-8")).hexdigest()
     return HistoricalOrderAdoptionRequest(
@@ -368,6 +308,43 @@ def _row_request(row, fingerprint: PreviewFingerprint, workbook_key: str, actor:
 def _assert_conservation(source_rows: int, outcomes: Counter[str]) -> None:
     if sum(outcomes.values()) != source_rows:
         raise RuntimeError("historical_order_workbook_outcomes_not_conserved")
+
+
+def _assert_source_schedule_consistency(row_previews) -> None:
+    """Reject overlapping formal candidates inside one immutable workbook.
+
+    The empty-DB historical migration has no pre-existing scheduling baseline.
+    Therefore any overlap between different cases in the submitted source is a
+    source-data/parse failure, never an Apply-time replacement decision.
+    """
+    intervals_by_staff: dict[int, list[tuple[object, object, str | None]]] = {}
+    for preview in row_previews:
+        if getattr(preview, "case_no", None) is None:
+            continue
+        for pairing in preview.pairings:
+            if (
+                pairing.resolution.value == "assignment_candidate"
+                and pairing.staff_id is not None
+                and pairing.start_date is not None
+                and pairing.end_date is not None
+            ):
+                intervals_by_staff.setdefault(pairing.staff_id, []).append(
+                    (pairing.start_date, pairing.end_date, preview.case_no)
+                )
+    for intervals in intervals_by_staff.values():
+        intervals.sort(key=lambda item: (item[0], item[1], item[2] or ""))
+        active_end = None
+        active_case_no = None
+        for start_date, end_date, case_no in intervals:
+            if (
+                active_end is not None
+                and start_date <= active_end
+                and case_no != active_case_no
+            ):
+                raise ValueError("historical_order_source_schedule_conflict")
+            if active_end is None or end_date > active_end:
+                active_end = end_date
+                active_case_no = case_no
 
 
 __all__ = [

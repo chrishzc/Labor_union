@@ -172,8 +172,11 @@ def test_deposit_paid_actual_service_dates_rebuild_after_status_adoption():
             timeline.append(("service-date-calculate", for_update))
             return official_service_dates
 
-        def preview_source_generation(self, case_no, service_dates):
+        def preview_source_generation(
+            self, case_no, service_dates, *, source_staff_ids=()
+        ):
             assert (case_no, service_dates) == ("CASE-1", official_service_dates)
+            assert source_staff_ids == (11,)
             timeline.append(("service-date-source-validated", service_dates))
 
         def prepare_source_generation(
@@ -209,6 +212,22 @@ def test_deposit_paid_actual_service_dates_rebuild_after_status_adoption():
                 payroll_version=7,
                 fingerprint=fingerprint_payload({"actual-start": "preview"}),
             )
+
+        def preview_historical_source(
+            self,
+            case_no,
+            candidate_start,
+            *,
+            recalculated_service_dates,
+            source_staff_ids,
+        ):
+            assert (case_no, candidate_start, recalculated_service_dates) == (
+                "CASE-1",
+                actual_start_date,
+                official_service_dates,
+            )
+            assert source_staff_ids == (11,)
+            timeline.append(("actual-service-dates-previewed", recalculated_service_dates))
 
         def apply_in_current_unit_of_work(self, request, *, recalculated_service_dates):
             assert request.new_actual_start_date == actual_start_date
@@ -247,7 +266,11 @@ def test_deposit_paid_actual_service_dates_rebuild_after_status_adoption():
 
     assert preview.after_status == OrderLifecycleStatus.ESTABLISHED.value
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
-    assert timeline == []
+    assert timeline == [
+        ("service-date-calculate", False),
+        ("service-date-source-validated", official_service_dates),
+        ("actual-service-dates-previewed", official_service_dates),
+    ]
 
     receipt = workflow.apply(
         HistoricalOrderAdoptionRequest(
@@ -265,6 +288,12 @@ def test_deposit_paid_actual_service_dates_rebuild_after_status_adoption():
         (OrderLifecycleStatus.DISCUSSION.value, OrderLifecycleStatus.ESTABLISHED.value, 4)
     ]
     assert timeline == [
+        ("service-date-calculate", False),
+        ("service-date-source-validated", official_service_dates),
+        ("actual-service-dates-previewed", official_service_dates),
+        ("service-date-calculate", False),
+        ("service-date-source-validated", official_service_dates),
+        ("actual-service-dates-previewed", official_service_dates),
         ("status-transition", OrderLifecycleStatus.ESTABLISHED.value),
         ("service-date-calculate", True),
         ("service-date-source-prepared", official_service_dates),

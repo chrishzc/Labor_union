@@ -25,6 +25,7 @@ from domains.orders.actual_start import (
     build_actual_start_reconfirmation_candidate,
     to_scheduling_generation_candidate,
 )
+from domains.scheduling.generation import EffectiveAssignmentSegment
 from domains.orders.lifecycle import (
     LifecycleImpactCandidate,
     OrderLifecycleStatus,
@@ -56,6 +57,7 @@ from subsystems.orders.terms_workflow import (
 )
 from subsystems.payroll.terms_impact import (
     PayrollTermsImpactCandidate,
+    SourceAssignmentPayrollTerms,
     build_payroll_terms_impact,
 )
 
@@ -212,6 +214,32 @@ class ActualStartWorkflow:
             recalculated_service_dates,
         )
 
+    def preview_historical_source(
+        self,
+        case_no: str,
+        new_date: date,
+        *,
+        recalculated_service_dates: tuple[date, ...],
+        source_staff_ids: tuple[int, ...],
+    ) -> ActualStartPreview:
+        """Validate an unpersisted historical caregiver source without writes.
+
+        Historical workbook Preview runs before its source assignment exists in
+        Scheduling.  It therefore projects the same canonical service dates
+        and rate-policy bindings into an in-memory Scheduling snapshot solely
+        for the Actual Start/Finance/Payroll candidate calculation.
+        """
+        context = self._repository.load_for_preview(case_no)
+        return self._build_preview(
+            _historical_source_context(
+                context,
+                recalculated_service_dates,
+                source_staff_ids,
+            ),
+            new_date,
+            recalculated_service_dates,
+        )
+
     def apply(
         self,
         request: ActualStartApplyRequest,
@@ -324,6 +352,49 @@ def _actual_start_candidates(facts, new_date, recalculated_service_dates=None):
         recalculated_service_dates,
     )
     return actual_start, to_scheduling_generation_candidate(actual_start)
+
+
+def _historical_source_context(context, service_dates, source_staff_ids):
+    if not service_dates or service_dates != tuple(sorted(set(service_dates))):
+        raise ValueError("historical_service_dates_invalid")
+    if len(source_staff_ids) != 1 or source_staff_ids[0] <= 0:
+        raise ValueError("historical_assignment_required_for_actual_start")
+    facts = context.shared_facts
+    policy = facts.payroll.case_policy
+    if policy is None:
+        raise ValueError("payroll_case_policy_bootstrap_required")
+    source_assignment_id = 1
+    segment = EffectiveAssignmentSegment(
+        assignment_id=source_assignment_id,
+        staff_id=source_staff_ids[0],
+        sequence=1,
+        service_day_count=len(service_dates),
+        assigned_start_date=service_dates[0],
+        assigned_end_date=service_dates[-1],
+        official_service_dates=service_dates,
+    )
+    payroll = replace(
+        facts.payroll,
+        source_terms=(
+            SourceAssignmentPayrollTerms(
+                source_assignment_id,
+                source_staff_ids[0],
+                policy.policy_version,
+                policy.policy_kind,
+            ),
+        ),
+    )
+    synthetic_facts = replace(
+        facts,
+        scheduling=replace(
+            facts.scheduling,
+            segments=(segment,),
+            service_started=False,
+        ),
+        planned_service_dates=service_dates,
+        payroll=payroll,
+    )
+    return ActualStartWorkflowContext(synthetic_facts, context.reconfirmation)
 
 
 def _raise_missing_receipt(request):

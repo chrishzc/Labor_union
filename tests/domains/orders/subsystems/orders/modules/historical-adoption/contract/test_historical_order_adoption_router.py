@@ -196,6 +196,25 @@ def test_preview_actual_start_blocker_uses_domain_blocked_error_envelope():
     assert error["correlation_id"] == "historical-order-router-test"
 
 
+def test_preview_rejects_source_schedule_overlap_as_a_validation_error():
+    service = _Service()
+
+    def fail_preview(*_args):
+        raise ValueError("historical_order_source_schedule_conflict")
+
+    service.preview = fail_preview
+    response = _client(service).post(
+        "/api/v1/orders/historical-adoption/workbooks/preview",
+        headers={"X-Correlation-ID": "historical-source-overlap"},
+        files=_file(),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error"]["code"] == (
+        "historical_order_source_schedule_conflict"
+    )
+
+
 def test_actual_xlsx_upload_covers_every_historical_workbook_preview_category():
     """Exercise the real XLSX parser and both HTTP endpoints without a shared DB."""
     repository = _WorkbookRepository()
@@ -394,6 +413,13 @@ class _PreviewMatrixWorkflow:
             False,
             request.preview_fingerprint,
         )
+
+    def preview_in_current_unit_of_work(self, row, *, for_update):
+        assert for_update is True
+        return self.preview(row)
+
+    def apply_in_current_unit_of_work(self, request):
+        return self.apply(request)
 
 
 def _preview_matrix_workbook() -> bytes:

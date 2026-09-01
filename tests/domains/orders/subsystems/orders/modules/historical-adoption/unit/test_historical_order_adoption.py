@@ -516,7 +516,8 @@ def test_completed_historical_actual_start_delegates_formal_rebuild(tmp_path):
     )
 
     assert repository.persist_count == 1
-    assert rebuilder.preview_calls == []
+    assert len(rebuilder.preview_calls) == 2
+    assert all(call["source_staff_ids"] == (11,) for call in rebuilder.preview_calls)
     assert rebuilder.calls == [{
         "case_no": "CASE-1",
         "actual_start_date": date(2026, 8, 7),

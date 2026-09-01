@@ -49,6 +49,7 @@ class HistoricalActualStartRebuilder:
         case_no: str,
         actual_start_date: date,
         correlation_id: str,
+        source_staff_ids: tuple[int, ...] = (),
     ) -> None:
         """Validate the same no-write prerequisites required by Apply."""
         try:
@@ -63,7 +64,28 @@ class HistoricalActualStartRebuilder:
                 None,
             )
             if preview_source_generation is not None:
-                preview_source_generation(case_no, service_dates)
+                if source_staff_ids:
+                    preview_source_generation(
+                        case_no,
+                        service_dates,
+                        source_staff_ids=source_staff_ids,
+                    )
+                else:
+                    preview_source_generation(case_no, service_dates)
+            if source_staff_ids:
+                historical_preview = getattr(
+                    self.actual_start_workflow,
+                    "preview_historical_source",
+                    None,
+                )
+                if callable(historical_preview):
+                    historical_preview(
+                        case_no,
+                        actual_start_date,
+                        recalculated_service_dates=service_dates,
+                        source_staff_ids=source_staff_ids,
+                    )
+                    return
             self.actual_start_workflow.preview(
                 case_no,
                 actual_start_date,

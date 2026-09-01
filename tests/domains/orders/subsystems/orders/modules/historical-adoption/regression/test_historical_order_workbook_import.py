@@ -67,6 +67,7 @@ class _Workflow:
             source_identity=row.source_identity,
             source_fingerprint=row.source_fingerprint,
             outcome=HistoricalOrderOutcome.ADOPTED,
+            case_no=row.case_no,
             pairings=(),
             fingerprint=PreviewFingerprint("1" * 64),
         )
@@ -74,6 +75,13 @@ class _Workflow:
     def apply(self, request):
         self.apply_calls += 1
         return SimpleNamespace(outcome=HistoricalOrderOutcome.ADOPTED, replayed=False, assignment_count=0)
+
+    def preview_in_current_unit_of_work(self, row, *, for_update):
+        assert for_update is True
+        return self.preview(row)
+
+    def apply_in_current_unit_of_work(self, request):
+        return self.apply(request)
 
 
 class _StatefulWorkflow(_Workflow):
@@ -137,6 +145,35 @@ def test_workbook_apply_replays_terminal_receipt_and_conflicts_before_row_apply(
     assert workflow.apply_calls == 1
 
 
+def test_terminal_replay_does_not_revalidate_current_rows(monkeypatch):
+    workbook = _workbook("a" * 64)
+    monkeypatch.setattr(module, "load_historical_order_workbook", lambda _path: workbook)
+
+    class Workflow(_Workflow):
+        reject_preview = False
+
+        def preview(self, row):
+            if self.reject_preview:
+                raise AssertionError("terminal replay must not revalidate rows")
+            return super().preview(row)
+
+    repository = _Repository()
+    workflow = Workflow()
+    service = module.HistoricalOrderWorkbookImportService(repository, workflow, _UnitOfWork)
+    preview = service.preview("first.xlsx")
+
+    service.apply(
+        "first.xlsx", "workbook-key", preview.preview_fingerprint, "operator", "correlation"
+    )
+    workflow.reject_preview = True
+    replay = service.apply(
+        "first.xlsx", "workbook-key", preview.preview_fingerprint, "operator", "correlation"
+    )
+
+    assert replay.replayed_workbook is True
+    assert workflow.apply_calls == 1
+
+
 def test_apply_reports_a_stale_preview_as_a_conflict_before_row_apply(monkeypatch):
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda path: _workbook("c" * 64))
     workflow = _Workflow()
@@ -189,6 +226,88 @@ def test_row_stale_is_exposed_as_a_workbook_conflict_instead_of_an_internal_erro
             "operator",
             "correlation",
         )
+
+
+def test_preview_rejects_an_overlapping_source_schedule_before_apply(monkeypatch):
+    from datetime import date
+
+    rows = (
+        HistoricalOrderWorkbookRow(2, "source:2", "2" * 64, "CASE-1", "客戶甲", HistoricalOrderSourceStatus.DEPOSIT_PAID, date(2026, 8, 1), date(2026, 8, 10), (), ()),
+        HistoricalOrderWorkbookRow(3, "source:3", "3" * 64, "CASE-2", "客戶乙", HistoricalOrderSourceStatus.DEPOSIT_PAID, date(2026, 8, 8), date(2026, 8, 15), (), ()),
+    )
+    workbook = HistoricalOrderWorkbook("4" * 64, "5" * 64, "歷史訂單", rows)
+
+    class Workflow(_Workflow):
+        def preview(self, row):
+            return SimpleNamespace(
+                source_identity=row.source_identity,
+                source_fingerprint=row.source_fingerprint,
+                outcome=HistoricalOrderOutcome.ADOPTED,
+                case_no=row.case_no,
+                pairings=(SimpleNamespace(
+                    resolution=SimpleNamespace(value="assignment_candidate"),
+                    staff_id=11,
+                    start_date=row.actual_start_date,
+                    end_date=row.actual_end_date,
+                ),),
+                fingerprint=PreviewFingerprint("1" * 64),
+            )
+
+    monkeypatch.setattr(module, "load_historical_order_workbook", lambda _path: workbook)
+
+    with pytest.raises(ValueError, match="historical_order_source_schedule_conflict"):
+        module.HistoricalOrderWorkbookImportService(
+            _Repository(), Workflow(), _UnitOfWork
+        ).preview("overlap.xlsx")
+
+
+def test_apply_uses_one_transaction_and_rolls_back_the_whole_workbook(monkeypatch):
+    workbook = _workbook_with_statuses()
+    monkeypatch.setattr(module, "load_historical_order_workbook", lambda _path: workbook)
+    events: list[str] = []
+
+    class UnitOfWork:
+        def __enter__(self):
+            events.append("enter")
+            return self
+
+        def __exit__(self, exception_type, *_args):
+            if exception_type is not None:
+                events.append("rollback")
+            return False
+
+        def commit(self):
+            events.append("commit")
+
+    class FailingWorkflow(_Workflow):
+        def apply_in_current_unit_of_work(self, request):
+            self.apply_calls += 1
+            if self.apply_calls == 2:
+                raise RuntimeError("historical_workbook_forced_failure")
+            return SimpleNamespace(
+                outcome=HistoricalOrderOutcome.ADOPTED,
+                replayed=False,
+                assignment_count=0,
+                review_identity=None,
+            )
+
+    repository = _Repository()
+    workflow = FailingWorkflow()
+    service = module.HistoricalOrderWorkbookImportService(repository, workflow, UnitOfWork)
+    preview = service.preview("atomic.xlsx")
+
+    with pytest.raises(RuntimeError, match="historical_workbook_forced_failure"):
+        service.apply(
+            "atomic.xlsx",
+            "atomic-key",
+            preview.preview_fingerprint,
+            "operator",
+            "correlation",
+        )
+
+    assert workflow.apply_calls == 2
+    assert events == ["enter", "rollback"]
+    assert repository.receipts == {}
 
 
 def test_preview_and_receipt_expose_conserved_zero_one_two_status_counts(monkeypatch):

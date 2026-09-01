@@ -281,7 +281,32 @@ class HistoricalOrderAdoptionWorkflow:
             candidate = build_historical_order_candidate(current, source)
             pairings = self._pairings(row, current, candidate, for_update)
         issues = tuple(sorted(set(candidate.issue_codes + tuple(code for item in pairings for code in item.issue_codes))))
-        return _preview(row, current, candidate, pairings, issues)
+        preview = _preview(row, current, candidate, pairings, issues)
+        self._preview_actual_service_period(row, preview)
+        return preview
+
+    def _preview_actual_service_period(self, row, preview) -> None:
+        if self._actual_start_rebuilder is None:
+            return
+        rebuild = self._actual_service_period_rebuild(
+            row,
+            preview,
+            for_update=False,
+        )
+        if rebuild is None:
+            return
+        _current, case_no, actual_start_date = rebuild
+        self._actual_start_rebuilder.preview(
+            case_no=case_no,
+            actual_start_date=actual_start_date,
+            correlation_id=f"historical-preview:{row.source_identity}",
+            source_staff_ids=tuple(
+                item.staff_id
+                for item in preview.pairings
+                if item.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+                and item.staff_id is not None
+            ),
+        )
 
     def _pairings(self, row, current, candidate, for_update):
         existing = self._repository.active_assignments(

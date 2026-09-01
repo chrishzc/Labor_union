@@ -299,6 +299,63 @@ def test_row_apply_rolls_back_when_persist_fails(tmp_path, monkeypatch):
         connection.close()
 
 
+def test_workbook_apply_rolls_back_every_prior_row_when_a_later_row_fails(
+    tmp_path, monkeypatch
+):
+    token = uuid4().hex
+    connection = get_connection()
+    try:
+        first_case, _ = _seed_case(connection, token, "atomic-first")
+        second_case, _ = _seed_case(connection, token, "atomic-second")
+        repository = MySqlHistoricalOrderAdoptionRepository(connection)
+        workflow = HistoricalOrderAdoptionWorkflow(
+            repository,
+            lambda: MySqlUnitOfWork(connection),
+            MySqlHistoricalAssignmentWriter(connection),
+        )
+        service = HistoricalOrderWorkbookImportService(
+            HistoricalOrderWorkbookImportRepository(connection),
+            workflow,
+            lambda: MySqlUnitOfWork(connection),
+        )
+        workbook_path = _write_status_workbook(
+            tmp_path / "whole-workbook-rollback.xlsx",
+            ((first_case, 1), (second_case, 2)),
+        )
+        original_append_outbox = repository._append_outbox
+        outbox_calls = 0
+
+        def fail_after_first_row(*args):
+            nonlocal outbox_calls
+            outbox_calls += 1
+            if outbox_calls == 2:
+                raise RuntimeError("historical_workbook_forced_second_row_failure")
+            return original_append_outbox(*args)
+
+        monkeypatch.setattr(repository, "_append_outbox", fail_after_first_row)
+        preview = service.preview(str(workbook_path))
+
+        with pytest.raises(
+            RuntimeError, match="historical_workbook_forced_second_row_failure"
+        ):
+            service.apply(
+                str(workbook_path),
+                f"historical-workbook:whole-rollback:{token}",
+                preview.preview_fingerprint,
+                "historical-workbook-test",
+                token,
+            )
+
+        assert _order_status(connection, first_case) == "洽談中"
+        assert _order_status(connection, second_case) == "洽談中"
+        assert _count(connection, "order_lifecycle_state_events", first_case) == 0
+        assert _count(connection, "order_lifecycle_state_events", second_case) == 0
+        assert _count(connection, "historical_order_adoption_receipts", first_case) == 0
+        assert _count(connection, "historical_order_adoption_receipts", second_case) == 0
+    finally:
+        connection.close()
+
+
 def test_matched_dirty_row_acknowledges_orders_historical_review_outbox():
     token = uuid4().hex
     connection = get_connection()
