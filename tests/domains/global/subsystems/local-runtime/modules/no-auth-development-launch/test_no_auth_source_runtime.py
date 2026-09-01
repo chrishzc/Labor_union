@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import subprocess
+import sys
 
 
 ROOT = Path(__file__).parents[7]
@@ -22,7 +23,18 @@ def test_no_auth_launcher_forces_source_runtime_before_delegation() -> None:
         assert SOURCE.index(statement) < SOURCE.index(delegate)
 
 
-def test_no_auth_launcher_injects_ephemeral_anomaly_key_without_persisting_or_overriding() -> None:
+def test_no_auth_launcher_injects_ephemeral_anomaly_key_without_persisting_or_overriding(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    project_python = project_root / ".venv" / "bin" / "python"
+    project_python.parent.mkdir(parents=True)
+    project_python.write_text(
+        f'#!/usr/bin/env bash\nexec "{sys.executable}" "$@"\n',
+        encoding="utf-8",
+    )
+    project_python.chmod(0o755)
+
     delegate = 'exec "$SCRIPT_DIR/start_local_development.sh" "$@"'
     stub = (
         'if [[ -n "$EXPECTED_ANOMALY_ISSUE_IDENTITY_KEY_V1" ]]; then '
@@ -30,10 +42,17 @@ def test_no_auth_launcher_injects_ephemeral_anomaly_key_without_persisting_or_ov
         '&& printf "preserved=yes\\n" || printf "preserved=no\\n"; '
         'else printf "generated_length=%s\\n" "${#ANOMALY_ISSUE_IDENTITY_KEY_V1}"; fi'
     )
-    source = SOURCE.replace(
-        'SCRIPT_DIR="${BASH_SOURCE[0]%/*}"',
-        f'SCRIPT_DIR="{ROOT / "scripts" / "launchers"}"',
-    ).replace(delegate, stub)
+    source = (
+        SOURCE.replace(
+            'SCRIPT_DIR="${BASH_SOURCE[0]%/*}"',
+            f'SCRIPT_DIR="{ROOT / "scripts" / "launchers"}"',
+        )
+        .replace(
+            'PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"',
+            f'PROJECT_ROOT="{project_root}"',
+        )
+        .replace(delegate, stub)
+    )
     env = os.environ.copy()
     env.pop("ANOMALY_ISSUE_IDENTITY_KEY_V1", None)
     env["EXPECTED_ANOMALY_ISSUE_IDENTITY_KEY_V1"] = ""
