@@ -46,6 +46,10 @@ from subsystems.orders.historical_adoption_workflow import (
     HistoricalOrderAdoptionWorkflow,
     HistoricalPairingResolution,
 )
+from subsystems.orders.historical_order_workbook_import import (
+    HistoricalOrderSourceScheduleConflictError,
+    project_source_schedule_conflicts,
+)
 from subsystems.orders.historical_order_workbook import (
     load_historical_order_workbook,
 )
@@ -78,18 +82,59 @@ def main() -> int:
             HistoricalActualStartRebuilder(actual_workflow, planner),
         )
 
-        for row in workbook.rows:
-            if arguments.case_no and row.case_no != arguments.case_no:
-                continue
-            record = _base_record(row)
+        selected_rows = tuple(
+            row
+            for row in workbook.rows
+            if not arguments.case_no or row.case_no == arguments.case_no
+        )
+        raw_previews: dict[int, object] = {}
+        raw_errors: dict[int, Exception] = {}
+        for row in selected_rows:
             try:
-                raw_preview = raw_workflow.preview(row)
+                raw_previews[row.source_row] = raw_workflow.preview(row)
+            except Exception as error:  # diagnostic boundary: retain exact class/code
+                raw_errors[row.source_row] = error
+        successful_rows = tuple(row for row in selected_rows if row.source_row in raw_previews)
+        source_conflicts = project_source_schedule_conflicts(
+            tuple(raw_previews[row.source_row] for row in successful_rows),
+            successful_rows,
+        )
+        if source_conflicts:
+            counts["historical_order_source_schedule_conflict"] = len(source_conflicts)
+        conflicts_by_row: dict[int, list[dict[str, object]]] = {}
+        for conflict in source_conflicts:
+            projection = conflict.as_dict()
+            for source_row in (
+                conflict.left.source_row,
+                conflict.right.source_row,
+            ):
+                conflicts_by_row.setdefault(source_row, []).append(projection)
+
+        for row in selected_rows:
+            record = _base_record(row)
+            raw_error = raw_errors.get(row.source_row)
+            try:
+                if raw_error is not None:
+                    raise raw_error
+                raw_preview = raw_previews[row.source_row]
                 record["historical_candidate"] = _historical_candidate(raw_preview)
                 record["database_scheduling"] = _scheduling_snapshot(
                     connection,
                     raw_preview.case_no,
                 )
                 record["incompatibilities"] = _incompatibilities(record)
+                row_conflicts = conflicts_by_row.get(row.source_row, [])
+                if row_conflicts:
+                    record["result"] = "error"
+                    record["error"] = {
+                        "type": HistoricalOrderSourceScheduleConflictError.__name__,
+                        "code": "historical_order_source_schedule_conflict",
+                        "source_schedule_conflicts": row_conflicts,
+                    }
+                    _print(record)
+                    if not arguments.all_rows:
+                        break
+                    continue
                 production_workflow.preview(row)
             except ActualStartWorkflowError as error:
                 counts[error.error.code] += 1

@@ -255,10 +255,77 @@ def test_preview_rejects_an_overlapping_source_schedule_before_apply(monkeypatch
 
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda _path: workbook)
 
-    with pytest.raises(ValueError, match="historical_order_source_schedule_conflict"):
+    with pytest.raises(
+        module.HistoricalOrderSourceScheduleConflictError,
+        match="historical_order_source_schedule_conflict",
+    ) as error:
         module.HistoricalOrderWorkbookImportService(
             _Repository(), Workflow(), _UnitOfWork
         ).preview("overlap.xlsx")
+
+    assert error.value.conflicts[0].as_dict() == {
+        "staff_id": 11,
+        "left": {
+            "source_row": 2,
+            "pairing_ordinal": 1,
+            "case_identity": "***SE-1",
+            "staff_id": 11,
+            "start_date": "2026-08-01",
+            "end_date": "2026-08-10",
+        },
+        "right": {
+            "source_row": 3,
+            "pairing_ordinal": 1,
+            "case_identity": "***SE-2",
+            "staff_id": 11,
+            "start_date": "2026-08-08",
+            "end_date": "2026-08-15",
+        },
+    }
+
+
+def test_source_schedule_conflict_projection_is_order_independent_and_allows_same_case_repeats():
+    from datetime import date
+
+    def preview(case_no, start, end):
+        return SimpleNamespace(
+            case_no=case_no,
+            pairings=(SimpleNamespace(
+                ordinal=1,
+                resolution=SimpleNamespace(value="assignment_candidate"),
+                staff_id=11,
+                start_date=start,
+                end_date=end,
+            ),),
+        )
+
+    rows = (
+        SimpleNamespace(source_row=9),
+        SimpleNamespace(source_row=7),
+        SimpleNamespace(source_row=8),
+    )
+    previews = (
+        preview("CASE-2", date(2026, 8, 8), date(2026, 8, 15)),
+        preview("CASE-1", date(2026, 8, 1), date(2026, 8, 10)),
+        preview("CASE-1", date(2026, 8, 1), date(2026, 8, 10)),
+    )
+
+    conflicts = module.project_source_schedule_conflicts(previews, rows)
+
+    assert len(conflicts) == 2
+    assert [
+        (item.left.source_row, item.right.source_row)
+        for item in conflicts
+    ] == [(7, 9), (8, 9)]
+    assert all(item.left.case_no == "CASE-1" for item in conflicts)
+    assert tuple(
+        item.as_dict() for item in conflicts
+    ) == tuple(
+        item.as_dict()
+        for item in module.project_source_schedule_conflicts(
+            tuple(reversed(previews)), tuple(reversed(rows))
+        )
+    )
 
 
 def test_apply_uses_one_transaction_and_rolls_back_the_whole_workbook(monkeypatch):
