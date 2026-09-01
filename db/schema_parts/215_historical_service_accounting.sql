@@ -128,14 +128,10 @@ CREATE TABLE IF NOT EXISTS historical_service_accounting_outbox (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 DROP TRIGGER IF EXISTS trg_historical_service_day_events_before_update;
-CREATE TRIGGER trg_historical_service_day_events_before_update BEFORE UPDATE ON historical_service_day_events
-FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_events records cannot be updated';
+CREATE TRIGGER trg_historical_service_day_events_before_update BEFORE UPDATE ON historical_service_day_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_events records cannot be updated';
 DROP TRIGGER IF EXISTS trg_historical_service_day_events_before_delete;
-CREATE TRIGGER trg_historical_service_day_events_before_delete BEFORE DELETE ON historical_service_day_events
-FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_events records cannot be deleted';
+CREATE TRIGGER trg_historical_service_day_events_before_delete BEFORE DELETE ON historical_service_day_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_events records cannot be deleted';
 DROP TRIGGER IF EXISTS trg_historical_service_day_items_before_update;
-CREATE TRIGGER trg_historical_service_day_items_before_update BEFORE UPDATE ON historical_service_day_items
-FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_items records cannot be updated';
+CREATE TRIGGER trg_historical_service_day_items_before_update BEFORE UPDATE ON historical_service_day_items FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_items records cannot be updated';
 DROP TRIGGER IF EXISTS trg_historical_service_day_items_before_delete;
-CREATE TRIGGER trg_historical_service_day_items_before_delete BEFORE DELETE ON historical_service_day_items
-FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_items records cannot be deleted';
+CREATE TRIGGER trg_historical_service_day_items_before_delete BEFORE DELETE ON historical_service_day_items FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_items records cannot be deleted';

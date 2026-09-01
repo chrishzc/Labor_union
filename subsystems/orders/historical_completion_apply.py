@@ -84,6 +84,11 @@ class ApplyHistoricalCompletion:
             raise TypeError("expected source version is invalid")
         if self.expected_source_versions != tuple(sorted(set(self.expected_source_versions))):
             raise ValueError("expected source versions must be sorted and unique")
+        identities = tuple(
+            (item.kind, item.identity) for item in self.expected_source_versions
+        )
+        if len(identities) != len(set(identities)):
+            raise ValueError("expected source identities must be unique")
 
 
 @dataclass(frozen=True, slots=True)

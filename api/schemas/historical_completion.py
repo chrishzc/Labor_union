@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, model_validator
 
 
 class _StrictModel(BaseModel):
@@ -87,9 +87,20 @@ class HistoricalCompletionApplySourceVersionBody(_StrictModel):
 class HistoricalCompletionApplyBody(_StrictModel):
     expected_order_version: str = Field(pattern=r"^(0|[1-9][0-9]*)$")
     expected_client_finance_version: str = Field(pattern=r"^(0|[1-9][0-9]*)$")
-    expected_source_versions: list[HistoricalCompletionApplySourceVersionBody]
+    expected_source_versions: list[HistoricalCompletionApplySourceVersionBody] = Field(
+        min_length=1
+    )
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def _source_identities_are_unique(self):
+        identities = tuple(
+            (item.kind, item.identity) for item in self.expected_source_versions
+        )
+        if len(identities) != len(set(identities)):
+            raise ValueError("expected source identities must be unique")
+        return self
 
 
 class HistoricalCompletionPreviewView(_StrictModel):

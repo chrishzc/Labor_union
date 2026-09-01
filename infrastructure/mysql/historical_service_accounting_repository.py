@@ -469,7 +469,7 @@ def _write_payroll_outbox(cursor, request, candidate, resulting_version):
         "case_no": candidate.facts.case_no,
         "historical_day_revision": candidate.facts.historical_day_revision + 1,
         "payroll_version": resulting_version,
-        "staff_obligation_amount_ntd": candidate.payroll.total_payable.amount,
+        "total_payable_ntd": candidate.payroll.total_payable.amount,
         "payroll_fingerprint": candidate.payroll.fingerprint.value,
     }
     cursor.execute(

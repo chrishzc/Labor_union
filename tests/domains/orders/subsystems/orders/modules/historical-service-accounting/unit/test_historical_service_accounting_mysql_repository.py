@@ -6,6 +6,7 @@ from domains.payroll.calculation import PayrollPolicyKind, rate_snapshot
 from infrastructure.mysql.historical_service_accounting_repository import (
     MySqlHistoricalServiceAccountingRepository,
     _write_client_obligation,
+    _write_payroll_outbox,
     _write_staff_obligations,
 )
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
@@ -20,11 +21,13 @@ from subsystems.orders.historical_service_accounting_workflow import (
 
 
 class _Cursor:
-    def __init__(self, *, client_amount=None, staff_amount=None):
+    def __init__(self, *, client_amount=None, staff_amount=None, staff_states=()):
         self.client_amount = client_amount
         self.staff_amount = staff_amount
+        self.staff_states = staff_states
         self.statements = []
         self.lastrowid = 41
+        self.rowcount = 1
         self._one = None
         self._all = ()
 
@@ -48,6 +51,8 @@ class _Cursor:
                         },
                     )
                 )
+        elif "FROM staff_obligations obligation WHERE obligation.case_no" in statement:
+            self._all = self.staff_states
         elif statement.startswith("SELECT obligation_identity"):
             self._one = None
 
@@ -192,6 +197,24 @@ def _insert_parameters(cursor, table):
     )
 
 
+def _paid_staff_state():
+    return ({
+        "obligation_identity": "historical-service:CASE-19:revision:1:assignment:19:payable_to_staff",
+        "assignment_id": 19,
+        "obligation_kind": "service_pay",
+        "direction": "payable_to_staff",
+        "source_obligation_identity": None,
+        "status": "open",
+        "payout_history_exists": 1,
+    },)
+
+
+def _unpaid_staff_state():
+    row = dict(_paid_staff_state()[0])
+    row["payout_history_exists"] = 0
+    return (row,)
+
+
 def test_client_correction_appends_receivable_difference_without_overwriting_prior_obligation():
     candidate, request = _candidate_and_request()
     cursor = _Cursor(client_amount=5_600)
@@ -217,15 +240,67 @@ def test_client_downward_correction_appends_refund_difference():
 
 def test_staff_downward_correction_appends_recovery_difference_without_overwriting_prior_obligation():
     candidate, request = _candidate_and_request()
-    cursor = _Cursor(staff_amount=11_200)
+    cursor = _Cursor(staff_amount=11_200, staff_states=_paid_staff_state())
+
+    _write_staff_obligations(cursor, request, candidate, "source:event", 5)
+
+    parameters = _insert_parameters(cursor, "staff_obligation_events")
+    assert parameters[4] == "reversal"
+    assert parameters[5] == "receivable_from_staff"
+    assert parameters[6] == _paid_staff_state()[0]["obligation_identity"]
+    assert parameters[7] == "reversal"
+    assert parameters[8] == 2_800
+    assert all(not statement.startswith("UPDATE staff_obligations") for statement, _ in cursor.statements)
+
+
+def test_unpaid_staff_correction_rebuilds_existing_obligation_in_place():
+    candidate, request = _candidate_and_request()
+    cursor = _Cursor(staff_amount=5_600, staff_states=_unpaid_staff_state())
+
+    _write_staff_obligations(cursor, request, candidate, "source:event", 5)
+
+    parameters = _insert_parameters(cursor, "staff_obligation_events")
+    assert parameters[0] == _unpaid_staff_state()[0]["obligation_identity"]
+    assert parameters[6] == 5_600
+    assert parameters[7] == 8_400
+    assert any(
+        statement.startswith("UPDATE staff_obligations SET amount_due_ntd=")
+        for statement, _ in cursor.statements
+    )
+    assert all(
+        not statement.startswith("INSERT INTO staff_obligations")
+        for statement, _ in cursor.statements
+    )
+
+
+def test_paid_staff_increase_appends_source_bound_adjustment():
+    candidate, request = _candidate_and_request()
+    cursor = _Cursor(staff_amount=5_600, staff_states=_paid_staff_state())
 
     _write_staff_obligations(cursor, request, candidate, "source:event", 5)
 
     parameters = _insert_parameters(cursor, "staff_obligation_events")
     assert parameters[4] == "adjustment"
-    assert parameters[5] == "receivable_from_staff"
-    assert parameters[7] == 2_800
-    assert all(not statement.startswith("UPDATE staff_obligations") for statement, _ in cursor.statements)
+    assert parameters[5] == "payable_to_staff"
+    assert parameters[6] == _paid_staff_state()[0]["obligation_identity"]
+    assert parameters[7] == "adjustment"
+    assert parameters[8] == 2_800
+
+
+def test_payroll_change_uses_existing_payroll_outbox_contract():
+    candidate, request = _candidate_and_request()
+    cursor = _Cursor()
+
+    _write_payroll_outbox(cursor, request, candidate, 5)
+
+    statement, parameters = next(
+        item for item in cursor.statements if item[0].startswith("INSERT INTO payroll_outbox")
+    )
+    assert "'staff_obligation_changed'" in statement
+    assert parameters[0] == "CASE-19"
+    assert parameters[1].endswith(":payroll-outbox")
+    assert '"payroll_version":5' in parameters[2]
+    assert '"total_payable_ntd":8400' in parameters[2]
 
 
 def test_unchanged_totals_do_not_create_difference_obligations():

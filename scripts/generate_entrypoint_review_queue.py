@@ -143,6 +143,7 @@ SOURCE_CONTROLLED_FILE_HTTP_ENTRIES = frozenset(
 SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES = frozenset(
     {
         *SOURCE_CONTROLLED_FILE_HTTP_ENTRIES,
+        "api:GET /api/v1/client-finance/payment-destination",
         "api:GET /api/v1/client-payments/historical-payments/{case_no}",
         "api:GET /api/v1/client-payments/historical-payments/{case_no}/readback",
         "api:GET /api/v1/anomalies/{issue_key}",
@@ -175,6 +176,7 @@ SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES = frozenset(
         "api:GET /api/v1/orders/{case_no}/contract-external-signing/unsigned-pdf",
         "api:GET /api/v1/orders/{case_no}/historical-baseline-projector",
         "api:GET /api/v1/orders/{case_no}/historical-completion",
+        "api:GET /api/v1/orders/{case_no}/historical-service-accounting",
         "api:GET /api/v1/orders/{case_no}/service-before-replacement",
         "api:GET /api/v1/staff-payables/overpayment-recoveries/{staff_id}/{recovery_identity}",
         "api:GET /internal/v1/runtime/react-admin/artifact-health",
@@ -194,6 +196,8 @@ SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES = frozenset(
         "api:POST /api/v1/customer-service/tickets/{ticket_id}/update/preview",
         "api:POST /api/v1/client-payments/historical-payments/apply",
         "api:POST /api/v1/client-payments/historical-payments/preview",
+        "api:POST /api/v1/client-finance/payment-destination/apply",
+        "api:POST /api/v1/client-finance/payment-destination/preview",
         "api:POST /api/v1/line/identity/reviews/{request_id}/{decision}/apply",
         "api:POST /api/v1/line/identity/reviews/{request_id}/{decision}/preview",
         "api:POST /api/v1/line/rich-menus/draft/preview",
@@ -217,6 +221,10 @@ SOURCE_LOCAL_CANONICAL_HTTP_ENTRIES = frozenset(
         "api:POST /api/v1/matching-coordination/{case_no}/query",
         "api:POST /api/v1/orders/historical-review-remediations/apply",
         "api:POST /api/v1/orders/historical-review-remediations/preview",
+        "api:POST /api/v1/orders/{case_no}/historical-completion/apply",
+        "api:POST /api/v1/orders/{case_no}/historical-completion/preview",
+        "api:POST /api/v1/orders/{case_no}/historical-service-accounting/apply",
+        "api:POST /api/v1/orders/{case_no}/historical-service-accounting/preview",
         "api:POST /api/v1/orders/{case_no}/candidate-contact-pool/candidates/{candidate_id}/information/manual-confirmation",
         "api:POST /api/v1/orders/{case_no}/candidate-contact-pool/candidates/{candidate_id}/information/manual-confirmation/preview",
         "api:POST /api/v1/orders/{case_no}/contract-external-signing/client/completion-reports",
@@ -380,6 +388,7 @@ REVIEW_REQUIRED_PATH_GOVERNANCE = {
     "api/routes/anomaly_recovery.py": ("Anomalies / Global Durable Jobs", "authenticated anomaly recovery operator"),
     "api/routes/anomaly_registry.py": ("Anomalies", "authenticated anomaly operator"),
     "api/routes/candidate_contact_pool.py": ("Scheduling Candidate Contact", "authenticated scheduling operator"),
+    "api/routes/client_payment_destination.py": ("Client Finance", "authenticated client-finance operator"),
     "api/routes/client_payments.py": ("Client Finance", "authenticated client-finance operator"),
     "api/routes/client_profile.py": ("Client Profile", "authenticated client-profile reviewer or verified applicant"),
     "api/routes/client_refund_reversal.py": ("Client Finance", "authenticated client-finance operator"),
@@ -393,6 +402,7 @@ REVIEW_REQUIRED_PATH_GOVERNANCE = {
     "api/routes/hcm_import.py": ("Case Import", "authenticated case-import operator"),
     "api/routes/historical_baseline_projector.py": ("Orders Historical Baseline", "authenticated historical-baseline operator or projector worker"),
     "api/routes/historical_completion.py": ("Orders", "authenticated historical-completion operator"),
+    "api/routes/historical_service_accounting.py": ("Orders Historical Accounting", "authenticated historical-accounting operator"),
     "api/routes/historical_operational_baseline.py": ("Orders Historical Operational Baseline", "authenticated historical-baseline operator"),
     "api/routes/historical_order_review_remediation.py": ("Orders Historical Review", "authenticated historical-review operator"),
     "api/routes/import_warning_tracking.py": ("Import Warning Tracking", "authenticated import operator"),
@@ -470,6 +480,11 @@ LOCAL_CANONICAL_EVIDENCE_BY_SOURCE = {
         "tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement/contract/test_historical_client_payment_api.py; "
         "ui_react/src/tests/historical_client_payment_workbench.test.tsx",
     ),
+    "api/routes/client_payment_destination.py": (
+        "ui_react/src/api/client_finance/payment_destination_client.ts",
+        "tests/domains/client-finance/subsystems/client-finance/modules/payment-destination-configuration/contract/test_payment_destination_api_contract.py; "
+        "ui_react/src/tests/payment_destination_configuration.test.tsx",
+    ),
     "api/routes/client_refund_reversal.py": ("ui_react/src/api/client_finance/client_over_refund_recovery_client.ts", "tests/test_client_refund_reversal_route.py; tests/domains/client-finance/subsystems/client-finance/integration/test_client_refund_overage.py"),
     "api/routes/contract_external_signing.py": ("ui_react/src/api/orders/contract_external_signing_client.ts", "tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_external_signing_api.py; ui_react/src/tests/contract_external_signing_client.test.ts"),
     "api/routes/contract_signing.py": ("ui_react/src/api/orders/contract_signing_mutation_client.ts", "tests/test_client_contract_signing_application.py; tests/test_staff_contract_signing_application.py; ui_react/src/tests/contract_signing_mutation_client.test.ts"),
@@ -480,6 +495,11 @@ LOCAL_CANONICAL_EVIDENCE_BY_SOURCE = {
     "api/routes/hcm_import.py": ("ui_react/src/api/case_import/hcm_import_result_client.ts", "tests/test_hcm_import_router.py; ui_react/src/tests/hcm_import_result_client.test.ts"),
     "api/routes/historical_baseline_projector.py": ("ui_react/src/api/anomalies/historical_baseline_projector_client.ts", "tests/domains/anomalies/subsystems/anomalies/integration/test_historical_baseline_projector_api.py; ui_react/src/tests/historical_baseline_projector_readback.test.tsx"),
     "api/routes/historical_completion.py": ("ui_react/src/api/orders/historical_completion_client.ts", "tests/domains/orders/subsystems/orders/integration/test_historical_completion_api.py; ui_react/src/tests/historical_completion.test.tsx"),
+    "api/routes/historical_service_accounting.py": (
+        "ui_react/src/api/orders/historical_service_accounting_client.ts",
+        "tests/domains/orders/subsystems/orders/modules/historical-adoption/contract/test_historical_service_accounting_router.py; "
+        "ui_react/src/components/HistoricalServiceAccountingWorkbench.tsx",
+    ),
     "api/routes/historical_order_review_remediation.py": ("ui_react/src/api/orders/historical_review_remediation/client.ts", "tests/domains/orders/subsystems/orders/integration/test_historical_order_review_remediation_api.py; ui_react/src/tests/historical_order_review_remediation.test.tsx"),
     "api/routes/import_warning_tracking.py": ("ui_react import-warning typed transition client", "tests/test_import_warning_tracking_api.py; tests/test_import_warning_transition_receipt_contract.py; ui_react/src/tests/import_warning_transition_client.test.ts"),
     "api/routes/jobs.py": ("ui_react typed job observation client", "tests/test_jobs_public_observation_route.py; ui_react/src/tests/account_query_client.test.ts"),

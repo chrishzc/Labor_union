@@ -16,18 +16,18 @@ def test_task97_entry_governance_is_fresh_clone_reproducible():
     artifact = build_artifact()
     persisted = json.loads(ARTIFACT.read_text(encoding="utf-8"))
 
-    assert len(queue) == 723
+    assert len(queue) == 731
     assert artifact == persisted
-    assert artifact["source"]["entry_count"] == 723
+    assert artifact["source"]["entry_count"] == 731
     assert artifact["summary"]["generic_placeholder_count"] == 0
     assert artifact["summary"]["queue_status_counts"] == {
-        "active": 500,
+        "active": 508,
         "operator_only": 75,
         "retired_410": 79,
         "review_required": 69,
     }
     assert artifact["summary"]["terminal_disposition_counts"] == {
-        "active_canonical": 500,
+        "active_canonical": 508,
         "blocked_external_evidence": 67,
         "operator_only_guarded": 75,
         "retired_410": 79,

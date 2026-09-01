@@ -9,7 +9,7 @@ integration_root: tests/domains/orders/subsystems/orders/integration/
 fixtures_root: tests/fixtures/
 modules:
   historical-service-accounting:
-    test_root: tests/domains/orders/subsystems/orders/modules/historical-adoption/
+    test_root: tests/domains/orders/subsystems/orders/modules/historical-service-accounting/
   order-information:
     test_root: tests/domains/orders/subsystems/orders/modules/order-information/
   historical-adoption:

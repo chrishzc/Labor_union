@@ -167,3 +167,30 @@ def test_authenticated_preview_and_apply_expose_server_owned_transition() -> Non
     assert HistoricalCompletionReceiptView.model_validate(
         apply_response.json()["data"]
     ).lifecycle_event_id == 91
+
+
+def test_apply_rejects_duplicate_source_identity_before_workflow() -> None:
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_system_admin] = lambda: SimpleNamespace(username="admin")
+    app.dependency_overrides[get_historical_completion_application] = lambda: object()
+
+    response = TestClient(app).post(
+        "/api/v1/orders/CASE-1/historical-completion/apply",
+        headers={
+            "X-Correlation-ID": "api-test:duplicate-source",
+            "Idempotency-Key": "api-test:key-duplicate",
+        },
+        json={
+            "expected_order_version": "7",
+            "expected_client_finance_version": "4",
+            "expected_source_versions": [
+                {"kind": "staff_obligation", "identity": "obligation:1", "version": "2"},
+                {"kind": "staff_obligation", "identity": "obligation:1", "version": "3"},
+            ],
+            "preview_fingerprint": "c" * 64,
+            "reason": "雙邊款項已核實結清",
+        },
+    )
+
+    assert response.status_code == 422
