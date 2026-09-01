@@ -357,9 +357,22 @@ def _actual_start_candidates(facts, new_date, recalculated_service_dates=None):
 def _historical_source_context(context, service_dates, source_staff_ids):
     if not service_dates or service_dates != tuple(sorted(set(service_dates))):
         raise ValueError("historical_service_dates_invalid")
+    facts = context.shared_facts
+    if not source_staff_ids:
+        if not facts.scheduling.segments:
+            raise ValueError("historical_assignment_required_for_actual_start")
+        return ActualStartWorkflowContext(
+            replace(
+                facts,
+                lifecycle=replace(
+                    facts.lifecycle,
+                    actual_start_date=service_dates[0],
+                ),
+            ),
+            context.reconfirmation,
+        )
     if len(source_staff_ids) != 1 or source_staff_ids[0] <= 0:
         raise ValueError("historical_assignment_required_for_actual_start")
-    facts = context.shared_facts
     policy = facts.payroll.case_policy
     if policy is None:
         raise ValueError("payroll_case_policy_bootstrap_required")

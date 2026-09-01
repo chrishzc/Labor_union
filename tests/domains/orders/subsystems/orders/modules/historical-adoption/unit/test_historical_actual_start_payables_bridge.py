@@ -152,13 +152,76 @@ def test_historical_rebuilder_preview_allows_existing_staff_schedule_for_source_
             return None
 
     class ActualStart:
-        def preview(self, *_args, **_kwargs):
-            return None
+        def __init__(self):
+            self.calls = []
 
-    HistoricalActualStartRebuilder(ActualStart(), Planner()).preview(
+        def preview_historical_source(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+
+    actual_start = ActualStart()
+    HistoricalActualStartRebuilder(actual_start, Planner()).preview(
         case_no="CASE-1",
         actual_start_date=date(2026, 8, 8),
         correlation_id="historical-preview-staff-conflict",
+    )
+
+    assert actual_start.calls == [
+        (
+            ("CASE-1", date(2026, 8, 8)),
+            {
+                "recalculated_service_dates": (date(2026, 8, 8),),
+                "source_staff_ids": (),
+            },
+        )
+    ]
+
+
+def test_mysql_historical_planner_apply_reuses_an_effective_generation():
+    from infrastructure.mysql.historical_actual_start_date_planner import (
+        MySqlHistoricalActualStartDatePlanner,
+    )
+
+    class Cursor:
+        def __init__(self):
+            self.statements = []
+            self.rows = iter(
+                (
+                    {
+                        "aggregate_version": 3,
+                        "generation_counter": 3,
+                        "effective_generation_id": 114,
+                    },
+                    {"id": 51},
+                )
+            )
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, _parameters):
+            self.statements.append(statement)
+
+        def fetchone(self):
+            return next(self.rows)
+
+    cursor = Cursor()
+    connection = SimpleNamespace(cursor=lambda: cursor)
+
+    MySqlHistoricalActualStartDatePlanner(connection).prepare_source_generation(
+        "CASE-1",
+        (date(2026, 8, 8),),
+        source_identity="source:row:70",
+        actor="test-operator",
+        correlation_id="historical-existing-generation",
+    )
+
+    assert len(cursor.statements) == 2
+    assert all(
+        statement.lstrip().upper().startswith("SELECT")
+        for statement in cursor.statements
     )
 
 
@@ -260,7 +323,7 @@ def test_mysql_historical_planner_preview_does_not_block_existing_staff_schedule
     )
 
 
-def test_historical_planner_replaces_only_the_same_case_generation(monkeypatch):
+def test_historical_planner_bootstraps_when_effective_generation_is_empty(monkeypatch):
     import infrastructure.mysql.historical_actual_start_date_planner as planner
     from domains.scheduling.generation import SchedulingGenerationCandidate
 
@@ -301,13 +364,18 @@ def test_historical_planner_replaces_only_the_same_case_generation(monkeypatch):
     monkeypatch.setattr(planner, "_bootstrap_candidate", lambda *_args: candidate)
     monkeypatch.setattr(
         planner,
+        "_effective_generation_has_assignments",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        planner,
         "_case_payroll_policy",
         lambda *_args, **_kwargs: {"policy_version": 1},
     )
     monkeypatch.setattr(
         planner,
         "_effective_generation_assignment_ids",
-        lambda *_args: (91, 92),
+        lambda *_args: (),
     )
     monkeypatch.setattr(
         planner,
@@ -325,7 +393,7 @@ def test_historical_planner_replaces_only_the_same_case_generation(monkeypatch):
     )
 
     command = calls[0]
-    assert command.candidate.cancelled_assignment_ids == (91, 92)
+    assert command.candidate.cancelled_assignment_ids == ()
     assert command.candidate.case_no == "CASE-1"
     assert command.candidate.generation_number == 8
 

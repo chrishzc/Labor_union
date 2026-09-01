@@ -78,6 +78,12 @@ class MySqlHistoricalActualStartDatePlanner:
         """Bridge generation-less historical assignment evidence into Scheduling once."""
         with self._connection.cursor() as cursor:
             aggregate = _locked_or_bootstrapped_aggregate(cursor, case_no)
+            if _effective_generation_has_assignments(
+                cursor,
+                aggregate,
+                for_update=True,
+            ):
+                return
             source_assignments, order = _source_assignment_and_order_facts(
                 cursor, case_no, for_update=True
             )

@@ -18,7 +18,10 @@ from domains.orders.historical_adoption import (
 from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus
 from domains.orders.terms import OrderAggregateFacts, OrderTerms, ServiceTimeTerms
 from domains.payroll.calculation import PayrollPolicyKind
-from domains.scheduling.generation import SchedulingGenerationFacts
+from domains.scheduling.generation import (
+    EffectiveAssignmentSegment,
+    SchedulingGenerationFacts,
+)
 from shared_kernel.money import MoneyNTD
 from subsystems.orders.actual_start_workflow import (
     ActualStartWorkflow,
@@ -38,6 +41,7 @@ from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.payroll.terms_impact import (
     CasePayrollPolicyTerms,
     PayrollTermsSourceFacts,
+    SourceAssignmentPayrollTerms,
 )
 
 
@@ -83,6 +87,88 @@ class _Writer:
     def append_completed_assignments(self, case_no, assignments):
         del case_no, assignments
         return ()
+
+
+def _actual_start_facts(
+    *,
+    planned_start: date,
+    current_actual_start: date,
+    formal_start: date,
+) -> ActualStartWorkflowContext:
+    terms = OrderTerms(
+        planned_start,
+        1,
+        8,
+        MoneyNTD(0),
+        ServiceTimeTerms(time(9), time(17), 0),
+    )
+    segment = EffectiveAssignmentSegment(
+        assignment_id=51,
+        staff_id=16,
+        sequence=1,
+        service_day_count=1,
+        assigned_start_date=formal_start,
+        assigned_end_date=formal_start,
+        official_service_dates=(formal_start,),
+    )
+    shared = TermsWorkflowFacts(
+        order=OrderAggregateFacts("CASE-1", 7, terms, False, "一般市民"),
+        scheduling=SchedulingGenerationFacts(
+            "CASE-1",
+            3,
+            3,
+            (segment,),
+            service_started=True,
+        ),
+        planned_service_dates=(formal_start,),
+        planned_end_date=formal_start,
+        client_finance=ClientFinanceTermsSourceFacts(
+            "CASE-1",
+            3,
+            ClientPaymentTerms(
+                0,
+                MoneyNTD(300),
+                date(2025, 9, 1),
+                planned_start,
+                None,
+            ),
+            (),
+            (),
+        ),
+        payroll=PayrollTermsSourceFacts(
+            "CASE-1",
+            3,
+            (
+                SourceAssignmentPayrollTerms(
+                    51,
+                    16,
+                    "policy-1",
+                    PayrollPolicyKind.CITIZEN,
+                ),
+            ),
+            (),
+            None,
+            CasePayrollPolicyTerms("policy-1", PayrollPolicyKind.CITIZEN),
+        ),
+        lifecycle=OrderLifecycleRootFacts(
+            "CASE-1",
+            OrderLifecycleStatus.ESTABLISHED,
+            False,
+            current_actual_start,
+            False,
+            False,
+            False,
+        ),
+    )
+    return ActualStartWorkflowContext(
+        shared,
+        ActualStartReconfirmationFacts(
+            ActualStartReconfirmationState.NOT_REQUIRED,
+            None,
+            None,
+            False,
+        ),
+    )
 
 
 def test_deposit_paid_with_distinct_actual_start_builds_service_assignment_candidate():
@@ -188,6 +274,34 @@ def test_historical_actual_start_preview_projects_the_asserted_schedule_root():
 
     assert preview.actual_start.new_actual_start_date == asserted_start
     assert preview.scheduling.assignments[0].assigned_start_date == asserted_start
+
+
+def test_historical_preview_corrects_a_stale_order_root_against_formal_schedule():
+    asserted_start = date(2025, 10, 14)
+    facts = _actual_start_facts(
+        planned_start=date(2025, 9, 10),
+        current_actual_start=date(2025, 9, 8),
+        formal_start=asserted_start,
+    )
+
+    class Repository:
+        def load_for_preview(self, _case_no):
+            return facts
+
+    class Clock:
+        def now(self):
+            return datetime(2025, 9, 1, tzinfo=timezone.utc)
+
+    preview = ActualStartWorkflow(Repository(), object, Clock()).preview_historical_source(
+        "CASE-1",
+        asserted_start,
+        recalculated_service_dates=(asserted_start,),
+        source_staff_ids=(),
+    )
+
+    assert preview.before_actual_start_date == asserted_start
+    assert preview.actual_start.original_scheduling_root_date == asserted_start
+    assert preview.actual_start.new_actual_start_date == asserted_start
 
 
 def test_deposit_paid_without_service_evidence_adopts_status_but_defers_actual_start():
