@@ -393,6 +393,11 @@ def _historical_source_context(context, service_dates, source_staff_ids):
         ),
         planned_service_dates=service_dates,
         payroll=payroll,
+        # The synthetic assignment is the asserted historical Actual Start.
+        # Actual Start validates the first assignment against the current
+        # Scheduling root, so this preview-only snapshot must project that
+        # same asserted root instead of retaining the HCM planned date.
+        lifecycle=replace(facts.lifecycle, actual_start_date=service_dates[0]),
     )
     return ActualStartWorkflowContext(synthetic_facts, context.reconfirmation)
 

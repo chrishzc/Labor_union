@@ -1,13 +1,29 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, time, timezone
 from types import SimpleNamespace
 
+from domains.client_finance.obligation_planning import (
+    ClientFinanceTermsSourceFacts,
+    ClientPaymentTerms,
+)
+from domains.orders.actual_start import (
+    ActualStartReconfirmationFacts,
+    ActualStartReconfirmationState,
+)
 from domains.orders.historical_adoption import (
     HistoricalOrderCurrentFacts,
     HistoricalOrderSourceStatus,
 )
-from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus
+from domains.orders.terms import OrderAggregateFacts, OrderTerms, ServiceTimeTerms
+from domains.payroll.calculation import PayrollPolicyKind
+from domains.scheduling.generation import SchedulingGenerationFacts
+from shared_kernel.money import MoneyNTD
+from subsystems.orders.actual_start_workflow import (
+    ActualStartWorkflow,
+    ActualStartWorkflowContext,
+)
 from subsystems.orders.historical_adoption_workflow import (
     HistoricalOrderAdoptionReceipt,
     HistoricalOrderAdoptionRequest,
@@ -17,7 +33,12 @@ from subsystems.orders.historical_adoption_workflow import (
 from subsystems.orders.historical_actual_start_rebuild import (
     HistoricalActualStartRebuilder,
 )
+from subsystems.orders.terms_workflow import TermsWorkflowFacts
 from shared_kernel.fingerprints import fingerprint_payload
+from subsystems.payroll.terms_impact import (
+    CasePayrollPolicyTerms,
+    PayrollTermsSourceFacts,
+)
 
 
 class _Repository:
@@ -92,6 +113,81 @@ def test_deposit_paid_with_distinct_actual_start_builds_service_assignment_candi
     assert preview.after_status == OrderLifecycleStatus.ESTABLISHED.value
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
     assert preview.issue_codes == ()
+
+
+def test_historical_actual_start_preview_projects_the_asserted_schedule_root():
+    """A source assignment starts at the asserted, not HCM-planned, date."""
+    asserted_start = date(2026, 8, 7)
+    terms = OrderTerms(
+        date(2026, 8, 6),
+        1,
+        8,
+        MoneyNTD(0),
+        ServiceTimeTerms(time(9), time(17), 0),
+    )
+    facts = TermsWorkflowFacts(
+        order=OrderAggregateFacts("CASE-1", 3, terms, False, "一般市民"),
+        scheduling=SchedulingGenerationFacts("CASE-1", 0, 0, ()),
+        planned_service_dates=(),
+        planned_end_date=date(2026, 8, 6),
+        client_finance=ClientFinanceTermsSourceFacts(
+            "CASE-1",
+            0,
+            ClientPaymentTerms(
+                0,
+                MoneyNTD(300),
+                date(2026, 8, 1),
+                date(2026, 8, 6),
+                None,
+            ),
+            (),
+            (),
+        ),
+        payroll=PayrollTermsSourceFacts(
+            "CASE-1",
+            0,
+            (),
+            (),
+            None,
+            CasePayrollPolicyTerms("policy-1", PayrollPolicyKind.CITIZEN),
+        ),
+        lifecycle=OrderLifecycleRootFacts(
+            "CASE-1",
+            OrderLifecycleStatus.DISCUSSION,
+            False,
+            None,
+            False,
+            False,
+            False,
+        ),
+    )
+
+    class Repository:
+        def load_for_preview(self, case_no):
+            assert case_no == "CASE-1"
+            return ActualStartWorkflowContext(
+                facts,
+                ActualStartReconfirmationFacts(
+                    ActualStartReconfirmationState.NOT_REQUIRED,
+                    None,
+                    None,
+                    False,
+                ),
+            )
+
+    class Clock:
+        def now(self):
+            return datetime(2026, 8, 1, tzinfo=timezone.utc)
+
+    preview = ActualStartWorkflow(Repository(), object, Clock()).preview_historical_source(
+        "CASE-1",
+        asserted_start,
+        recalculated_service_dates=(asserted_start,),
+        source_staff_ids=(11,),
+    )
+
+    assert preview.actual_start.new_actual_start_date == asserted_start
+    assert preview.scheduling.assignments[0].assigned_start_date == asserted_start
 
 
 def test_deposit_paid_without_service_evidence_adopts_status_but_defers_actual_start():
