@@ -17,9 +17,9 @@ priority_authority_date: 2026-08-31
 
 - **Declared status：** `TASK96_REPOSITORY_LOCAL_CLOSEOUT_WITH_DEFERRED_EXTERNAL_WORK`。
 - **Active Task 96 IDs：** 0。下表所有 ID 均為 `completed`、`superseded` 或 `deferred/not_run`，不再形成 Task 96 的施工隊列。
-- **CI closure：** `completed`。commit `37c9d063` 已推送至 `origin/main`，GitHub Actions run
-  [`33460244467`](https://github.com/chrishzc/Labor_union/actions/runs/33460244467) 已完成且所有 jobs 綠燈；此結果只關閉
-  current CI gate，不外推 DB、provider、Browser、production 或其他 deferred boundary。
+- **CI closure：** `completed`（code-bearing baseline）。最後一個 source-bearing baseline commit `37c9d063` 對應 GitHub
+  Actions run [`33460244467`](https://github.com/chrishzc/Labor_union/actions/runs/33460244467)，已完成且所有 jobs 綠燈；此結果只
+  關閉 code-bearing baseline CI gate，不外推 DB、provider、Browser、production 或其他 deferred boundary。
 - **DB upgrade boundary：** 使用者已明確要求停止修正 1019 preserve-upgrade script。下列 reset path 是
   development `lu_test_*` 的 disposable reset／current-schema bootstrap 與啟動證據，不是 1003→current
   preserve-data upgrade，也不宣稱 1019、1020 或 1021 qualification 通過。
@@ -35,7 +35,7 @@ priority_authority_date: 2026-08-31
 | Development reset／bootstrap | `completed` | `scratch/task96/lu_test_1-bootstrap.json` 記錄 `lu_test_1` reset/rebuild receipt 為 `committed`，再讀回 current canonical schema；這是 disposable reset，沒有 preserve-data upgrade claim。 |
 | Current-schema guard | `completed` | updater 的 `--require-current` 對已建立的 `lu_test_1` readback 通過；此 readback 不證明 1019 preserve-upgrade。 |
 | No-auth local startup | `completed` | FastAPI、React、monitor、durable worker、incident worker 以 development no-auth path 啟動；`GET /health` 回 200，React `/admin/` root 可讀。 |
-| Current-head CI | `completed` | `origin/main` commit `37c9d063` 對應 GitHub Actions run [`33460244467`](https://github.com/chrishzc/Labor_union/actions/runs/33460244467)；exact flake8、governance、React cancellation、disposable MySQL、canonical owner matrices 與 cross-domain boundary jobs 全部成功。 |
+| Code-bearing baseline CI | `completed` | 最後一個 source-bearing baseline commit `37c9d063` 對應 GitHub Actions run [`33460244467`](https://github.com/chrishzc/Labor_union/actions/runs/33460244467)；該 run 證明 F821 修復及 exact flake8、governance、React cancellation、disposable MySQL、canonical owner matrices 與 cross-domain boundary jobs 全部成功。 |
 | LINE provider worker | `deferred/not_run` | 本次啟動刻意跳過 LINE provider worker；沒有 provider／recipient／quota／外部 delivery evidence。 |
 | LINE repository-local integration | `completed` | `03_追蹤清單與證據/evidence/PROV-20260830-line-anomalies-slimming-integration-receipt.md` 支持 M1～M4 的 repository-local focused contract／regression、typed owner boundary 與既有 LINE-006 readback alignment；browser sandbox、provider、DB engine 與 production boundary 不在此結果。 |
 | Anomalies repository-local integration | `completed` | 同一整合 receipt 支持 current-state registry／typed current-only mapping／LINE-004 owner consumer 與退役碼 routing 的 repository-local integration；LINE-006 完整人工處理功能及其他 owner contract 不因本列完成而存在。 |
@@ -46,7 +46,7 @@ priority_authority_date: 2026-08-31
 |---|---|---|
 | `CUR-LOCAL-DB-1003-CURRENT-01` | `superseded` | 原 1003→current ordered preserve／resume／normal-startup gate 已依使用者指示停止；不得保留或引用舊 preserve PASS。未來若要做保留資料升級，須另取得明確 DB Authority、合法 `lu_test_*` target 與新 receipt。 |
 | `CUR-LOCAL-DB-PORTABILITY` | `superseded` | 舊 portability／preserve-upgrade lane 不再是 Task 96 acceptance。第 2 節的 `lu_test_1` reset／current readback／no-auth startup 只作開發測試路徑，不能升格為 portability 或 production evidence。 |
-| `CUR-CI-CURRENT-HEAD-ACTIONS-01` | `completed` | `origin/main` commit `37c9d063` 的 GitHub Actions run [`33460244467`](https://github.com/chrishzc/Labor_union/actions/runs/33460244467) 已 `completed / success` 且所有 jobs 綠燈；只完成 current CI gate，不外推其他 Task 96 deferred boundary。 |
+| `CUR-CI-CODE-BASELINE-ACTIONS-01` | `completed` | 最後一個 source-bearing baseline commit `37c9d063` 的 GitHub Actions run [`33460244467`](https://github.com/chrishzc/Labor_union/actions/runs/33460244467) 已 `completed / success` 且所有 jobs 綠燈；證明 F821 修復與完整 workflow，僅完成 code-bearing baseline CI gate，不外推其他 Task 96 deferred boundary。 |
 | `CUR-LINE-MODULES-1-4-CLOSURE-01` | `completed` | 只收斂 repository-local LINE M1～M4 integration／focused regression／typed boundary。verified-token LIFF、provider、deployment、production DB、未核准 schema 與 external side effect 均移出 Task 96。 |
 | `CUR-ANOMALY-OWNER-BACKEND-PREREQUISITES-01` | `superseded` | 最新 reachability 裁決已退出原 13-code owner prerequisite stage；`GOVSUB-007` 回 Government Subsidy 正常 owner flow，不建立 Anomalies 第二套 manual-recovery framework。 |
 | `CUR-P0-ANOMALY-RECOVERY-01` | `completed` | 只完成 repository-local current-state integration：runtime routing 維持唯一 `LINE-006` 產品入口、`BECLASS-001` 回 Case Import／Client owner follow-up、退役碼不再作 current presentation。LINE-006 人工 remediation 與其他 owner predicate 仍 `deferred/not_run`。 |
@@ -92,8 +92,9 @@ priority_authority_date: 2026-08-31
 - repository 外仍可能保留歷史 package／receipt 中的 `DB_CHANGE_READY`、preserve-data PASS 或 provider／Browser PASS
   結論；它們是 provenance，不是本 closeout 的 current acceptance。這些歷史文件本次不改寫；若需採用，必須由 successor
   以 current target 重新驗證。
-- Current CI 已由 `origin/main` commit `37c9d063`／Actions run `33460244467` 完成；此完成只適用 CI gate，不能解除
-  1019 preserve-upgrade deferment 或任何外部／人工／schema-boundary 的 `deferred/not_run` 狀態。
+- Code-bearing baseline CI 已由 commit `37c9d063`／Actions run `33460244467` 完成；此完成只適用 CI gate，不能解除
+  1019 preserve-upgrade deferment 或任何外部／人工／schema-boundary 的 `deferred/not_run` 狀態。文件-only closeout commit
+  由交付時的最終 GitHub Actions 驗證，不需把會變動的文件 commit hash 寫入本表。
 
 ## 6. Closeout verification
 
