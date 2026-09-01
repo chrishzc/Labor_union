@@ -9,6 +9,7 @@
 
 ## Implementation
 - primary: `ui_react/src/pages/CurrentAnomaliesPage.tsx`
+- `ui_react/src/adapters/anomalies/anomaly_query_adapter.ts`
 
 ## Contracts
 - `document/架構重整/01_規格基線/06_Anomalies_Domain.md` — LINE-006 current-only Query、detail、owner action與recheck契約。
@@ -18,6 +19,8 @@
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/current_anomalies_page.test.tsx`
 - test_root: `ui_react/src/tests/current_anomaly_query_client.test.ts`
+- test_root: `ui_react/src/tests/anomaly_query_adapter.test.ts`
+- test_root: `ui_react/src/tests/fixtures/anomalies/anomaly_query_contract_fixtures.ts`
 - integration_root: `ui_react/src/tests/anomalies_entry_cutover.test.tsx`
 - routing: `.arch-map/tests/domains/anomalies/subsystems/anomalies/modules/current-issue-presentation.md`
 

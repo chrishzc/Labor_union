@@ -82,8 +82,6 @@ CREATE TABLE IF NOT EXISTS client_profile_change_outbox (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 DROP TRIGGER IF EXISTS trg_client_profile_change_events_before_update;
-CREATE TRIGGER trg_client_profile_change_events_before_update BEFORE UPDATE ON client_profile_change_events
-FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='client profile change events cannot be updated';
+CREATE TRIGGER trg_client_profile_change_events_before_update BEFORE UPDATE ON client_profile_change_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='client profile change events cannot be updated';
 DROP TRIGGER IF EXISTS trg_client_profile_change_events_before_delete;
-CREATE TRIGGER trg_client_profile_change_events_before_delete BEFORE DELETE ON client_profile_change_events
-FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='client profile change events cannot be deleted';
+CREATE TRIGGER trg_client_profile_change_events_before_delete BEFORE DELETE ON client_profile_change_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='client profile change events cannot be deleted';

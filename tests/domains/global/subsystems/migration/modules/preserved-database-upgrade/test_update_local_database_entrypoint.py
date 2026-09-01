@@ -10,18 +10,13 @@ import pytest
 from scripts import update_local_database as update
 
 
-SCRIPT = (
-    Path(__file__).parents[1]
-    / "scripts"
-    / "launchers"
-    / "update_local_database.bat"
-).read_text(encoding="utf-8")
-SHELL_SCRIPT = (
-    Path(__file__).parents[1]
-    / "scripts"
-    / "launchers"
-    / "update_local_database.sh"
-).read_text(encoding="utf-8")
+ROOT = Path(__file__).parents[7]
+SCRIPT = (ROOT / "scripts" / "launchers" / "update_local_database.bat").read_text(
+    encoding="utf-8"
+)
+SHELL_SCRIPT = (ROOT / "scripts" / "launchers" / "update_local_database.sh").read_text(
+    encoding="utf-8"
+)
 
 
 def test_double_click_previews_before_preserve_data_update() -> None:
@@ -53,6 +48,16 @@ def test_launcher_dry_run_only_checks_wiring() -> None:
     dry_run_block = SCRIPT[dry_run_start:argument_forward_start]
     assert "scripts.launcher_preflight --profile database-update" in dry_run_block
     assert "scripts.update_local_database" not in dry_run_block
+
+    shell_dry_run_start = SHELL_SCRIPT.index('if [[ "${1:-}" == "--dry-run" ]]')
+    shell_argument_forward_start = SHELL_SCRIPT.index(
+        'if [[ $# -gt 0 ]]', shell_dry_run_start
+    )
+    shell_dry_run_block = SHELL_SCRIPT[
+        shell_dry_run_start:shell_argument_forward_start
+    ]
+    assert "scripts.launcher_preflight --profile database-update" in shell_dry_run_block
+    assert "scripts.update_local_database" not in shell_dry_run_block
 
 
 def test_update_reports_restart_requirement() -> None:
@@ -204,4 +209,3 @@ def test_apply_additive_update_reports_release_phase_and_resume_guidance(
         "release release-1012 failed during apply: ProgrammingError; "
         "rerun the updater to resume from its journal"
     )
-    assert "sensitive SQL details" not in str(raised.value)

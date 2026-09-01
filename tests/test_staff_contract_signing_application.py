@@ -6,6 +6,7 @@ Description: 驗證月嫂契約簽回、交易回滾與簽約前精確服務日�
 from datetime import date, datetime
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -126,6 +127,80 @@ def test_manual_staff_attestation_requires_customer_acceptance_for_active_propos
             "status": "proposed", "is_active": 1, "customer_decision": "", "already_signed": 0,
         })
 
+
+def test_manual_staff_attestation_uses_injected_finance_adapters(tmp_path, monkeypatch):
+    class _ConnectionWithCursor(_Connection):
+        @contextmanager
+        def cursor(self):
+            yield object()
+
+    connection = _ConnectionWithCursor()
+    finance_calls = []
+
+    def order_selector(_cursor, case_no, *, lock):
+        finance_calls.append(("order_selector", case_no, lock))
+        return {"case_no": case_no}
+
+    def facts_loader(_cursor, order, *, lock):
+        finance_calls.append(("facts_loader", order, lock))
+        return {"case_no": order["case_no"]}
+
+    def terms_writer(_cursor, _command):
+        finance_calls.append(("terms_writer",))
+
+    application = staff_signing.StaffContractSigningApplication(
+        lambda: connection,
+        archive_root=tmp_path,
+        now=lambda: datetime(2030, 1, 1),
+        archive_document=lambda *_args, **_kwargs: SimpleNamespace(storage_key="archive-key"),
+        discard_document=lambda **_kwargs: None,
+        order_selector=order_selector,
+        finance_facts_loader=facts_loader,
+        finance_terms_writer=terms_writer,
+    )
+    command = staff_signing.ManualStaffContractAttestationCommand(
+        "CASE-1", 9, b"signed-content", "signed.xlsx", "application/octet-stream",
+        "phone", "customer-confirmed", "manual-preview", "staff-1",
+        IdempotencyKey("manual-key"), CorrelationId("manual-key"),
+    )
+
+    monkeypatch.setattr(application, "_existing_signed_return_receipt", lambda _command: None)
+    monkeypatch.setattr(
+        staff_signing,
+        "_manual_staff_snapshot",
+        lambda *_args, **_kwargs: {"status": "accepted", "is_active": None, "already_signed": 0},
+    )
+    monkeypatch.setattr(staff_signing, "_manual_preview_fingerprint", lambda *_args: "manual-preview")
+    monkeypatch.setattr(staff_signing, "_staff_segment", lambda *_args: {"id": 9, "plan_id": 3})
+    monkeypatch.setattr(
+        staff_signing,
+        "load_approved_template",
+        lambda *_args: SimpleNamespace(template_filename="template.xlsx", template_key="contract_staff_service"),
+    )
+    monkeypatch.setattr(staff_signing, "approved_template_mapping_path", lambda *_args: Path("mapping.json"))
+    monkeypatch.setattr(staff_signing, "_staff_template_facts", lambda *_args: {})
+    monkeypatch.setattr(staff_signing, "render_contract_template", lambda **_kwargs: b"template-content")
+    monkeypatch.setattr(staff_signing, "_insert_generated_document", lambda *_args: 41)
+    monkeypatch.setattr(staff_signing, "_insert_signed_document", lambda *_args: 42)
+    monkeypatch.setattr(staff_signing, "_insert_signed_event", lambda *_args: 43)
+    monkeypatch.setattr(staff_signing, "_create_commitment_if_ready", lambda *_args: 44)
+    monkeypatch.setattr(staff_signing, "_append_command_outcome", lambda *_args: None)
+    monkeypatch.setattr(
+        staff_signing,
+        "build_precontract_deposit_candidate",
+        lambda *_args: SimpleNamespace(mutates=True),
+    )
+    monkeypatch.setattr(staff_signing, "precontract_deposit_terms_impact", lambda *_args: "impact")
+
+    receipt = application.record_manual_attestation(command)
+
+    assert receipt.commitment_id == 44
+    assert finance_calls == [
+        ("order_selector", "CASE-1", True),
+        ("facts_loader", {"case_no": "CASE-1"}, True),
+        ("terms_writer",),
+    ]
+    assert connection.committed is True
 
 class _ReplayConnection:
     @contextmanager

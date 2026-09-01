@@ -74,7 +74,7 @@ class MySqlSegmentedAvailabilityFactsRepository:
         cursor.execute("SELECT s.id,s.name FROM staff s LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=s.id WHERE s.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active' ORDER BY s.id")
         staff_rows = cursor.fetchall() or []
         by_id = {int(row["id"]): row for row in staff_rows}
-        _attach_grouped_rows(cursor, by_id, "staff_regions", "region_name", "regions")
+        _attach_region_rows(cursor, by_id)
         _attach_grouped_rows(
             cursor, by_id, "staff_cooking_skills", "skill_name", "cooking_skills"
         )
@@ -181,6 +181,19 @@ def _attach_grouped_rows(cursor, staff_by_id, table, value_column, target_key):
         staff = staff_by_id.get(int(row["staff_id"]))
         if staff is not None:
             staff.setdefault(target_key, []).append(str(row[value_column]))
+
+
+def _attach_region_rows(cursor, staff_by_id):
+    cursor.execute("SELECT staff_id,region_name,custom_region_detail FROM staff_regions")
+    for row in cursor.fetchall() or []:
+        staff = staff_by_id.get(int(row["staff_id"]))
+        if staff is None:
+            continue
+        region_name = str(row["region_name"])
+        custom_detail = row.get("custom_region_detail")
+        if region_name == "其他" and custom_detail:
+            region_name = str(custom_detail)
+        staff.setdefault("regions", []).append(region_name)
 
 
 def _json_object(value):

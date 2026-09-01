@@ -115,6 +115,7 @@ describe('G5 OrdersPage adversarial suite', () => {
       contracted_service_days: 30,
       service_hours_per_day: 8,
       service_started: false,
+      historical_mid_service_confirmation_available: false,
       service_data_locked: false,
       order_version: 0,
       scheduling_version: 0,

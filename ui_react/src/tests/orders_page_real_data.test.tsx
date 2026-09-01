@@ -79,6 +79,7 @@ const operableSummaryPage = {
 const cancellationQuery = {
   case_no: 'ORD-2026-0801', lifecycle_status: '訂單成立', actual_start_date: null,
   contracted_service_days: 30, service_hours_per_day: 8, service_started: false,
+  historical_mid_service_confirmation_available: false,
   service_data_locked: false, order_version: 0, scheduling_version: 0,
   scheduling_generation: 0, client_finance_version: 0, payroll_version: 0,
   confirmed_service_days: [], caregiver_options: [],
@@ -134,7 +135,7 @@ describe('OrdersPage query real-data slice', () => {
     vi.spyOn(orderCardProjectionClient, 'getCardProjection').mockImplementation(async (caseNo) => unavailableCardProjection(caseNo));
     vi.spyOn(orderCancellationClient, 'query').mockResolvedValue(cancellationQuery);
     vi.spyOn(orderCancellationClient, 'preview').mockResolvedValue({
-      cancellation_date: '2026-08-23', actual_end_date: null, confirmed_service_days: [],
+      cancellation_date: '2026-08-23', actual_start_date: null, actual_end_date: null, confirmed_service_days: [],
       official_service_day_count: 0, official_service_hours: 0, order_version: 0,
       scheduling_version: 0, scheduling_generation: 0, client_finance_version: 0,
       payroll_version: 0,

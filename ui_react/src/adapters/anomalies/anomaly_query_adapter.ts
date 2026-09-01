@@ -43,30 +43,7 @@ export const CATEGORY_TAB_KEYS: readonly CategoryTabKey[] = [
 ] as const;
 
 const ANOMALY_TITLES: Readonly<Record<string, string>> = {
-  'SCHEDULE-001': '假日排班尚未確認',
-  'SCHEDULE-002': '已替換排班待確認',
-  'SCHEDULE-003': '月嫂排班時間重疊',
-  'SCHEDULE-005': '假日服務意願與排班衝突',
-  'SCHEDULE-006': '正式服務日期與排班不一致',
-  'ORDER-001': '尚未聯繫候選月嫂',
-  'ORDER-002': '願意接案的月嫂尚待後續聯繫',
-  'ORDER-003': '候選月嫂尚未回覆意願',
-  'ORDER-004': '媒合方案尚待定案',
-  'BECLASS-001': '客戶尚未完成 BeClass 資料',
-  'IMPORT-001': '匯入資料格式待修正',
-  'IMPORT-003': 'BeClass 身分對應待確認',
-  'IMPORT-004': 'HCM 匯入待人工確認',
-  'HISTORICAL-ORDER-001': '歷史訂單匯入待人工確認',
-  'finance_import_manual_review': '銀行流水待人工確認',
-  'LINE-001': '客戶尚未完成 LINE 綁定',
-  'LINE-005': '月嫂尚未完成 LINE 綁定',
   'LINE-006': 'LINE 通知發送待確認',
-  'PAYOUT-003': '月嫂收款資料待補正',
-  'GOVSUB-006': '政府補助溢撥待處理',
-  'CLIENTREFUND-001': '客戶退款退匯待處理',
-  'RECEIVABLE-001': '客戶應付款已逾期',
-  'CLIENTPAYABLE-001': '客戶退款／調整應付已逾期',
-  'RETURN-001': '政府補助退還款已逾期',
 };
 
 const ANOMALY_DESCRIPTIONS: Readonly<Record<string, string>> = {

@@ -1629,7 +1629,9 @@ def test_real_mysql_preserved_source_candidate_cutover(tmp_path: Path) -> None:
                     unit_of_work_factory=lambda: _BorrowedAnomalyUnitOfWork(),
                 )
                 assert summary.succeeded
-                assert summary.projected_count > 0
+                # Process Reminder anomaly projection is retired; current
+                # Anomalies is refreshed by the dedicated LINE-006 path.
+                assert summary.projected_count == 0
                 connection.rollback()
         finally:
             connection.close()

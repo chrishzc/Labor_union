@@ -309,7 +309,7 @@ def test_hcm_unknown_issue_retries_then_dead_letters_without_partial_warning():
         connection.close()
 
 
-def test_beclass_review_root_rescan_rebuilds_missing_current_projection():
+def test_beclass_review_root_rescan_stays_in_case_import_owner_follow_up():
     digest = hashlib.sha256(uuid4().bytes).hexdigest()
     connection = get_connection()
     try:
@@ -340,20 +340,16 @@ def test_beclass_review_root_rescan_rebuilds_missing_current_projection():
             )
         connection.commit()
 
-        cursor_after = 0
-        while True:
-            page = project_beclass_import_review_page(
-                connection, after_review_row_id=cursor_after, limit=25
-            )
-            if page.next_review_row_id is None:
-                break
-            cursor_after = page.next_review_row_id
+        page = project_beclass_import_review_page(
+            connection, after_review_row_id=0, limit=25
+        )
+        assert page.projected_count == 0
+        assert page.next_review_row_id is None
 
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT COUNT(*) AS count FROM anomaly_current_alerts "
-                "WHERE definition_code='IMPORT-001' AND source_identity=%s "
-                "AND predicate_active=TRUE",
+                "SELECT COUNT(*) AS count FROM beclass_import_review_rows "
+                "WHERE review_identity=%s",
                 (review_identity,),
             )
             assert cursor.fetchone() == {"count": 1}

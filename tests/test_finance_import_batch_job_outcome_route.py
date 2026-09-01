@@ -12,6 +12,7 @@ from api.routes.finance_import import query_finance_import_correction_job_outcom
 from subsystems.finance_import.query import (
     FinanceImportBatchApplyReceipt,
     FinanceImportCorrectionApplyReceipt,
+    _correction_apply_receipt,
 )
 
 
@@ -63,7 +64,7 @@ def test_succeeded_correction_job_reads_typed_receipt_not_durable_raw_payload() 
         )
     )
     receipt = FinanceImportCorrectionApplyReceipt(
-        "finance-import-row:9", "finance-import-batch:9", 2, 1, 1, 1, 1, 1, "a" * 64
+        "finance-import-row:9", "finance-import-batch:9", 2, 1, 1, 1, 1, 0, "a" * 64
     )
     query = SimpleNamespace(
         get_correction_apply_receipt=lambda key: receipt if key == "finance-correction-key" else None
@@ -74,6 +75,31 @@ def test_succeeded_correction_job_reads_typed_receipt_not_durable_raw_payload() 
     assert response.data.status == "succeeded"
     assert response.data.receipt is not None
     assert response.data.receipt.row_identity == "finance-import-row:9"
+    assert response.data.receipt.alert_resolved_event_count == 0
+
+
+def test_correction_receipt_parser_rejects_negative_alert_count_and_extra_fields() -> None:
+    payload = {
+        "row_identity": "finance-import-row:9",
+        "batch_identity": "finance-import-batch:9",
+        "resulting_batch_version": 2,
+        "classification_event_count": 1,
+        "ledger_entry_count": 1,
+        "allocation_count": 1,
+        "reconciliation_receipt_count": 1,
+        "alert_resolved_event_count": 0,
+        "preview_fingerprint": "a" * 64,
+    }
+
+    assert _correction_apply_receipt({"result_snapshot": payload}).alert_resolved_event_count == 0
+    with pytest.raises(ValueError, match="contract_invalid"):
+        _correction_apply_receipt(
+            {"result_snapshot": {**payload, "alert_resolved_event_count": -1}}
+        )
+    with pytest.raises(ValueError, match="contract_invalid"):
+        _correction_apply_receipt(
+            {"result_snapshot": {**payload, "undeclared": True}}
+        )
 
 
 def test_succeeded_correction_job_fails_closed_when_receipt_is_missing() -> None:

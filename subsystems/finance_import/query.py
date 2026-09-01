@@ -458,7 +458,8 @@ def _correction_apply_receipt(
         or not isinstance(fingerprint, str)
         or len(fingerprint) != 64
         or any(not isinstance(value, int) or isinstance(value, bool) for value in numbers)
-        or any(value < 1 for value in numbers)
+        or any(value < 1 for value in numbers[:-1])
+        or numbers[-1] < 0
     ):
         raise ValueError("finance_import_correction_receipt_contract_invalid")
     return FinanceImportCorrectionApplyReceipt(*identities, *numbers, fingerprint)

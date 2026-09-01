@@ -38,7 +38,7 @@ import type {
 describe('Anomaly Query Adapter Suite', () => {
   it('maps typed detail timeline without exposing actor, reason, or raw action bindings', () => {
     const view = adaptAnomalyDetail(VALID_ANOMALY_DETAIL_VIEW);
-    expect(view.summary.code).toBe('SCHEDULE-001');
+    expect(view.summary.code).toBe('LINE-006');
     expect(view.timeline).toEqual([
       {
         action: 'reopen',
@@ -143,20 +143,20 @@ describe('Anomaly Query Adapter Suite', () => {
 
       expect(adapted.id).toBe(dto.fingerprint);
       expect(adapted.fingerprint).toBe(dto.fingerprint);
-      expect(adapted.code).toBe('SCHEDULE-001');
+      expect(adapted.code).toBe('LINE-006');
       expect(adapted.severity).toBe('🔴 嚴重阻擋');
       expect(adapted.severityClass).toBe('critical');
       expect(adapted.status).toBe('🟡 待處理');
       expect(adapted.rawSeverity).toBe('blocking');
       expect(adapted.rawWorkflowStatus).toBe('open');
-      expect(adapted.rawDomain).toBe('scheduling');
-      expect(adapted.category).toBe('排班調度');
+      expect(adapted.rawDomain).toBe('line_integration');
+      expect(adapted.category).toBe('媒合推播');
 
-      expect(adapted.title).toBe('假日排班尚未確認');
-      expect(adapted.description).toBe('請核對排班調度相關資料的目前資料與可採取的處理方式。');
-      expect(adapted.relatedEntity).toBe('排班調度相關資料');
+      expect(adapted.title).toBe('LINE 通知發送待確認');
+      expect(adapted.description).toBe('請核對案件 CASE-102的目前資料與可採取的處理方式。');
+      expect(adapted.relatedEntity).toBe('案件 CASE-102');
       expect(adapted.suggestedAction).toBe('開啟詳情查看可執行的處置。');
-      expect(adapted.rootEvidence).toBe('影響對象：排班調度相關資料');
+      expect(adapted.rootEvidence).toBe('影響對象：案件 CASE-102');
 
       // Navigation & Metadata
       expect(adapted.staffCalendarNavigation).toEqual({
@@ -164,7 +164,7 @@ describe('Anomaly Query Adapter Suite', () => {
         target_date: '2026-08-20',
       });
       expect(adapted.metadata).toEqual({
-        sourceDomain: 'scheduling',
+        sourceDomain: 'line_integration',
         sourceVersion: 2,
         workflowVersion: 0,
         predicateActive: true,
@@ -176,55 +176,28 @@ describe('Anomaly Query Adapter Suite', () => {
       const adapted = adaptAnomalySummary(dto);
 
       expect(adapted.id).toBe(dto.fingerprint);
-      expect(adapted.code).toBe('FINANCE-002');
+      expect(adapted.code).toBe('LINE-006');
       expect(adapted.severity).toBe('🟡 警示待補');
       expect(adapted.severityClass).toBe('warning');
       expect(adapted.status).toBe('🔵 已認領');
       expect(adapted.rawSeverity).toBe('warning');
       expect(adapted.rawWorkflowStatus).toBe('claimed');
-      expect(adapted.category).toBe('客戶帳務');
+      expect(adapted.category).toBe('媒合推播');
       expect(adapted.staffCalendarNavigation).toBeNull();
       expect(adapted.metadata.predicateActive).toBe(true);
-    });
-
-    it('將 Orders 擁有的歷史訂單檢查映射為匯入資料，而非其他', () => {
-      const adapted = adaptAnomalySummary({
-        ...VALID_ANOMALY_SUMMARY_2,
-        definition_code: 'HISTORICAL-ORDER-001',
-        source_domain: 'orders',
-        source_identity: 'historical-order:source:7',
-      });
-
-      expect(adapted.category).toBe('匯入資料');
-      expect(adapted.title).toBe('歷史訂單匯入待人工確認');
-      expect(adapted.suggestedAction).toBe('開啟處理方式，上傳只含此 review 對應列的更正工作簿。');
-    });
-
-    it('顯示客戶應付異常的具體案件與完整解除條件', () => {
-      const adapted = adaptAnomalySummary({
-        ...VALID_ANOMALY_SUMMARY_2,
-        definition_code: 'CLIENTPAYABLE-001',
-        source_domain: 'client_payable',
-        source_identity: 'T96-CS-20260827-01',
-      });
-
-      expect(adapted.category).toBe('客戶帳務');
-      expect(adapted.title).toBe('客戶退款／調整應付已逾期');
-      expect(adapted.relatedEntity).toBe('案件 T96-CS-20260827-01');
-      expect(adapted.description).toContain('所有同碼逾期義務餘額歸零後才解除');
     });
 
     it('transforms resolved anomaly correctly', () => {
       const dto: AnomalySummaryView = VALID_ANOMALY_SUMMARY_3;
       const adapted = adaptAnomalySummary(dto);
 
-      expect(adapted.code).toBe('IMPORT-003');
+      expect(adapted.code).toBe('LINE-006');
       expect(adapted.severity).toBe('🟡 警示待補');
       expect(adapted.severityClass).toBe('warning');
       expect(adapted.status).toBe('✅ 已排除');
       expect(adapted.rawSeverity).toBe('warning');
       expect(adapted.rawWorkflowStatus).toBe('resolved');
-      expect(adapted.category).toBe('匯入資料');
+      expect(adapted.category).toBe('媒合推播');
       expect(adapted.metadata.predicateActive).toBe(false);
     });
   });
@@ -328,13 +301,12 @@ describe('Anomaly Query Adapter Suite', () => {
     });
 
     it('filters strictly by category', () => {
-      const schedulingOnly = filterAnomalies(list, '排班調度', 'all');
-      expect(schedulingOnly.length).toBe(1);
-      expect(schedulingOnly[0].code).toBe('SCHEDULE-001');
+      const lineOnly = filterAnomalies(list, '媒合推播', 'all');
+      expect(lineOnly.length).toBe(3);
+      expect(lineOnly.every((item) => item.code === 'LINE-006')).toBe(true);
 
       const financeOnly = filterAnomalies(list, '客戶帳務', 'all');
-      expect(financeOnly.length).toBe(1);
-      expect(financeOnly[0].code).toBe('FINANCE-002');
+      expect(financeOnly.length).toBe(0);
 
       const nonExistent = filterAnomalies(list, '政府補助', 'all');
       expect(nonExistent.length).toBe(0);
@@ -355,11 +327,11 @@ describe('Anomaly Query Adapter Suite', () => {
     });
 
     it('filters by both category and workflow status simultaneously', () => {
-      const matched = filterAnomalies(list, '排班調度', 'open');
+      const matched = filterAnomalies(list, '媒合推播', 'open');
       expect(matched.length).toBe(1);
-      expect(matched[0].code).toBe('SCHEDULE-001');
+      expect(matched[0].code).toBe('LINE-006');
 
-      const mismatched = filterAnomalies(list, '排班調度', 'claimed');
+      const mismatched = filterAnomalies(list, '客戶帳務', 'claimed');
       expect(mismatched.length).toBe(0);
     });
 

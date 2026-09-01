@@ -213,14 +213,14 @@ class MySqlAnomalyRepository:
             timeline = tuple(_timeline_event(item) for item in cursor.fetchall())
         return AnomalyDetail(_summary(row), timeline, ())
 
-def append_finance_import_manual_review_resolution(connection, candidate, actor) -> None:
-    """Append a resolve event in Finance Import's existing transaction."""
+def append_finance_import_manual_review_resolution(connection, candidate, actor) -> int:
+    """Append a legacy resolve event, returning zero when none is projected."""
     row_id = _finance_import_row_id(candidate.row_identity)
     with _cursor(connection) as cursor:
         cursor.execute(_FINANCE_IMPORT_ACTIVE_ALERT_SQL, (row_id,))
         alert = cursor.fetchone()
         if alert is None:
-            raise RuntimeError("recovery_action_not_available")
+            return 0
         expected_version = int(alert["workflow_version"])
         event_identity = _sha256_identity(
             "finance-import-alert-resolve",
@@ -239,6 +239,7 @@ def append_finance_import_manual_review_resolution(connection, candidate, actor)
                 event_identity,
             ),
         )
+    return 1
 
 
 @contextmanager

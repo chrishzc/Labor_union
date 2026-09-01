@@ -5,6 +5,7 @@ Description: 以正式 no-auth API 建立停在 stage 04 的 fresh RPRE Browser 
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import replace
@@ -48,6 +49,7 @@ DEFAULT_SERVICE_DATES = (
     "2026-09-18",
 )
 SCENARIO = "R-02"
+DATABASE = ""
 
 
 def _configured_database() -> str:
@@ -65,6 +67,11 @@ def _configured_service_dates() -> tuple[str, ...]:
     if len(values) != len(set(values)) or tuple(sorted(values)) != values:
         raise RuntimeError("task96_rpre_service_dates_must_be_unique_and_sorted")
     return values
+
+
+def _command_identity_prefix(scenario: str, case_no: str) -> str:
+    case_digest = hashlib.sha256(case_no.encode("utf-8")).hexdigest()
+    return f"task96-rpre-{scenario.casefold()}-{case_digest}"
 
 
 def _ensure_order_matching_preferences(client: TestClient) -> dict[str, object]:
@@ -108,7 +115,7 @@ def _ensure_order_matching_preferences(client: TestClient) -> dict[str, object]:
 
 
 def _configure_route() -> None:
-    global SCENARIO
+    global DATABASE, SCENARIO
     database = _configured_database()
     scenario = os.getenv("TASK96_RPRE_SCENARIO", "R-02").strip()
     if scenario not in {"R-01", "R-02", "R-03", "R-04", "R-07"}:
@@ -117,11 +124,12 @@ def _configure_route() -> None:
     case_no = os.getenv("TASK96_RPRE_CASE_NO", DEFAULT_CASE_NO).strip()
     if not case_no or len(case_no) > 50:
         raise RuntimeError("task96_rpre_case_no_invalid")
-    route_a.DATABASE = database
+    DATABASE = database
     route_a.CASE_NO = case_no
     route_a.SERVICE_DATES = _configured_service_dates()
     route_a.SCENARIO_ID = f"TASK96-RPRE-{scenario}-{case_no}"
     route_a.SOURCE_REVISION = f"TASK96-RPRE-{scenario}-{case_no}-r1"
+    route_a.COMMAND_IDENTITY_PREFIX = _command_identity_prefix(scenario, case_no)
 
 
 class _PackageFixtureFactsReader:
@@ -427,7 +435,7 @@ def _read_r03_line_identity_binding(
         port=int(os.getenv("DB_PORT", "3306")),
         user=os.getenv("DB_USER", "root"),
         password=os.environ["DB_PASSWORD"],
-        database=route_a.DATABASE,
+        database=DATABASE,
         charset="utf8mb4",
         autocommit=True,
         cursorclass=pymysql.cursors.DictCursor,
@@ -508,7 +516,7 @@ def _read_r03_waiting_lock(*, plan_id: int) -> dict[str, object] | None:
         port=int(os.getenv("DB_PORT", "3306")),
         user=os.getenv("DB_USER", "root"),
         password=os.environ["DB_PASSWORD"],
-        database=route_a.DATABASE,
+        database=DATABASE,
         charset="utf8mb4",
         autocommit=True,
         cursorclass=pymysql.cursors.DictCursor,
@@ -775,7 +783,7 @@ def _replacement_row_counts() -> dict[str, int]:
         port=int(os.getenv("DB_PORT", "3306")),
         user=os.getenv("DB_USER", "root"),
         password=os.environ["DB_PASSWORD"],
-        database=route_a.DATABASE,
+        database=DATABASE,
         charset="utf8mb4",
         autocommit=True,
     )
@@ -868,7 +876,7 @@ def run_scenario() -> dict[str, object]:
             )
             return {
                 "scenario_id": route_a.SCENARIO_ID,
-                "database": route_a.DATABASE,
+                "database": DATABASE,
                 "case_no": route_a.CASE_NO,
                 "rpre_query": query,
                 "actual_service_referral": _run_actual_service_referral(
@@ -909,7 +917,6 @@ def run_scenario() -> dict[str, object]:
         if len(selected_staff) != 1:
             raise RuntimeError("task96_rpre_staff_identity_not_unique")
         staff_id = int(selected_staff[0]["id"])
-        route_a._ensure_client_region(client, int(order["client_id"]))
         route_a._ensure_staff_preferences(client, staff_id)
         _ensure_order_matching_preferences(client)
         line_identities = None
@@ -975,7 +982,7 @@ def run_scenario() -> dict[str, object]:
     }.get(SCENARIO, "stage-04-zero-service-rpre-ready")
     return {
         "scenario_id": route_a.SCENARIO_ID,
-        "database": route_a.DATABASE,
+        "database": DATABASE,
         "stage": fixture_stage,
         "case_no": route_a.CASE_NO,
         "staff_id": staff_id,

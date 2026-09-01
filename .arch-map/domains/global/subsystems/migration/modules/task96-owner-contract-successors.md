@@ -18,6 +18,10 @@
   - `db/schema_assembly/labor_union_fresh_schema_v1.json`
   - `db/cutover_releases/labor_union_validation_schema_v1.json`
 - validator: `scripts/migrate_preserved_database_additive_schema.py`
+- validation runners:
+  - `scripts/run_task96_hob_route_a.py`
+  - `scripts/run_task96_payout001_scenario.py`
+  - `scripts/run_task96_rpre_browser_scenario.py`
 
 ## Verification
 - test_root: `tests/domains/global/subsystems/migration/modules/task96-owner-contract-successors/`

@@ -41,6 +41,7 @@ def get_staff_contract_signing_application() -> StaffContractSigningApplication:
         archive_document=archive_contract_document,
         discard_document=discard_uncommitted_contract_document,
         line_delivery_repository_factory=MySqlLineDeliveryTaskRepository,
+        order_selector=select_order,
         finance_facts_loader=load_contract_client_finance_facts,
         finance_terms_writer=persist_client_finance_terms_impact,
     )

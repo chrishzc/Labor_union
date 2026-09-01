@@ -16,10 +16,11 @@ if [[ ! -x "$PYTHON" ]]; then
 fi
 
 if [[ "${1:-}" == "--dry-run" ]]; then
+  # Launcher dry-run is deliberately limited to entrypoint wiring and static
+  # dependencies.  The canonical database plan is an explicit operator gate;
+  # invoking it here would turn a no-side-effect launcher check into a live DB
+  # probe and would duplicate the separate --require-current gate.
   "$PYTHON" -m scripts.launcher_preflight --profile database-update
-  PREFLIGHT_EXIT=$?
-  if [[ $PREFLIGHT_EXIT -ne 0 ]]; then exit $PREFLIGHT_EXIT; fi
-  "$PYTHON" -m scripts.update_local_database --dry-run
   exit $?
 fi
 

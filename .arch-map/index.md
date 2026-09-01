@@ -48,6 +48,8 @@ Current higher-boundary living schema／release baselines remain at their path-s
 - integration_root: `tests/test_line_identity_management_first_release.py`
 - integration_root: `tests/test_verify_verification_baseline.py`
 - integration_root: `tests/test_phase3_scenario_lineage.py`
+- integration_root: `tests/test_preserved_database_additive_upgrade_cutover.py`
+- integration_root: `tests/test_wp77_disposable_mysql_e2e.py`
 
 Current canonical owner roots are:
 

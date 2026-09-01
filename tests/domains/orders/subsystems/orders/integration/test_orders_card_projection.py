@@ -100,6 +100,21 @@ def test_card_projection_keeps_full_contact_for_internal_admin_and_nested_typed_
     assert view.assignment_segments.value[0].status.value == "planned"
 
 
+def test_card_projection_normalizes_blank_optional_address_to_unavailable():
+    projection = OrdersCardProjectionQueryService(
+        _Repository((_row(address="  \t"),))
+    ).query("C-100")
+
+    assert projection.contact_address.value is None
+    assert projection.contact_address.availability == "unavailable"
+    assert projection.contact_address.availability_reason == "client_address_not_provided"
+    view = OrdersCardProjectionView.model_validate(
+        _materialize(projection), from_attributes=True
+    )
+    assert view.contact_address.value is None
+    assert view.contact_address.availability == "unavailable"
+
+
 def test_card_projection_keeps_unknown_cooking_and_missing_assignment_as_unavailable():
     projection = OrdersCardProjectionQueryService(
         _Repository(
@@ -147,6 +162,8 @@ def test_repository_uses_one_bounded_read_without_commit_or_n_plus_one():
     sql, params = connection.cursor_instance.executions[0]
     assert sql.lstrip().startswith("SELECT")
     assert "LIMIT %s" in sql
+    assert "deposit_projection.contracted_amount_ntd AS deposit_amount_ntd" in sql
+    assert "deposit.amount_due_ntd AS deposit_amount_ntd" not in sql
     assert re.search(r"\b(?:INSERT|UPDATE|DELETE)\b", sql, re.IGNORECASE) is None
     assert params == ("C-100", 33)
 

@@ -40,7 +40,7 @@ const jobAcceptedSchema = z.strictObject({ job_id: z.string().min(1).max(191), s
 const receiptSchema = z.strictObject({
   row_identity: z.string().min(1), batch_identity: z.string().min(1), resulting_batch_version: z.number().int().positive(),
   classification_event_count: z.number().int().positive(), ledger_entry_count: z.number().int().positive(), allocation_count: z.number().int().positive(),
-  reconciliation_receipt_count: z.number().int().positive(), alert_resolved_event_count: z.number().int().positive(), preview_fingerprint: sha256,
+  reconciliation_receipt_count: z.number().int().positive(), alert_resolved_event_count: z.number().int().nonnegative(), preview_fingerprint: sha256,
 });
 const outcomeSchema = z.strictObject({
   job_id: z.string().min(1).max(191), status: z.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),

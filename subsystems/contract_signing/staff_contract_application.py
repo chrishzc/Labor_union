@@ -107,6 +107,7 @@ class StaffContractSigningApplication:
         archive_document: Callable[..., object] | None = None,
         discard_document: Callable[..., None] | None = None,
         line_delivery_repository_factory: Callable[[object], object] | None = None,
+        order_selector: Callable[..., object] | None = None,
         finance_facts_loader: Callable[..., object] | None = None,
         finance_terms_writer: Callable[..., None] | None = None,
     ) -> None:
@@ -116,6 +117,7 @@ class StaffContractSigningApplication:
         self._archive_document = archive_document
         self._discard_document = discard_document
         self._line_delivery_repository_factory = line_delivery_repository_factory
+        self._order_selector = order_selector
         self._finance_facts_loader = finance_facts_loader
         self._finance_terms_writer = finance_terms_writer
 
@@ -136,6 +138,7 @@ class StaffContractSigningApplication:
             connection,
             command,
             commitment_id,
+            order_selector=self._order_selector,
             facts_loader=self._finance_facts_loader,
             terms_writer=self._finance_terms_writer,
         )
@@ -240,7 +243,7 @@ class StaffContractSigningApplication:
                     connection, command.case_no, segment["plan_id"], command.actor_id,
                 )
                 if commitment_id is not None:
-                    _establish_precontract_deposit(connection, command, commitment_id)
+                    self._establish_deposit(connection, command, commitment_id)
                 _append_command_outcome(
                     connection,
                     command,
@@ -623,11 +626,13 @@ def _establish_precontract_deposit(
     command,
     commitment_id: int,
     *,
+    order_selector: Callable[..., object] | None = None,
     facts_loader: Callable[..., object] | None = None,
     terms_writer: Callable[..., None] | None = None,
 ) -> None:
     with connection.cursor() as cursor:
-        order = select_order(cursor, command.case_no, lock=True)
+        selector = order_selector or select_order
+        order = selector(cursor, command.case_no, lock=True)
         loader = facts_loader or load_contract_client_finance_facts
         facts = loader(cursor, order, lock=True)
         candidate = build_precontract_deposit_candidate(

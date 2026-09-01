@@ -25,7 +25,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 SCENARIO_ID = "HOB-F04-ROUTE-A-001"
 CASE_NO = "115960401"
-DATABASE = "lu_test_task96_scenarios_20260827"
 STAFF_IDENTITY = "A123456789"
 STAFF_BANK_ACCOUNT = "0096000000000001"
 CLIENT_NAME = "Task96 合成客戶"
@@ -69,12 +68,11 @@ _ZIP_TIMESTAMP = (2026, 8, 27, 0, 0, 0)
 _SOURCE_MODIFIED_AT = b"2026-08-27T12:46:36Z"
 
 
-def _require_safe_environment() -> None:
+def _require_safe_environment() -> str:
     expected = {
         "APP_ENV": "development",
         "ACCESS_CONTROL_PROFILE": "local_bypass",
         "ENABLE_ADMIN_AUTH": "false",
-        "DB_DATABASE": DATABASE,
     }
     observed = {key: os.getenv(key, "").strip() for key in expected}
     mismatches = {
@@ -82,10 +80,17 @@ def _require_safe_environment() -> None:
         for key, value in expected.items()
         if observed[key].lower() != value.lower()
     }
+    database = os.getenv("DB_DATABASE", "").strip()
+    if re.fullmatch(r"lu_test_[a-z0-9_]+", database) is None:
+        mismatches["DB_DATABASE"] = {
+            "expected": "lu_test_*",
+            "observed": database,
+        }
     if mismatches:
         raise RuntimeError(f"task96_route_a_environment_mismatch:{json.dumps(mismatches, ensure_ascii=False)}")
     if not os.getenv("DB_PASSWORD"):
         raise RuntimeError("task96_route_a_database_credential_missing")
+    return database
 
 
 def _canonical_xlsx(frame: pd.DataFrame, sheet_name: str) -> bytes:
@@ -157,7 +162,7 @@ def _staff_workbook() -> bytes:
         "地址": "測試路 96 號",
         "銀行帳號": STAFF_BANK_ACCOUNT,
         "銀行代3碼+分行代號4碼": "8120001",
-        "北區": "Y",
+        "[其它].1": "新竹市",
         "8小時": "Y",
         "葷食": "Y",
         "機車": "Y",
@@ -178,7 +183,7 @@ def _client_beclass_workbook() -> bytes:
         "日": 2,
         "行動電話": CLIENT_PHONE,
         "縣市": "新竹市",
-        "地址": "測試路 96 號",
+        "地址": "北區測試路 96 號",
         "補助款退款:銀行代號+分行代號": "",
         "銀行帳號": "",
         "月子餐點調理喜好/飲食習慣：": "葷食",
@@ -335,35 +340,6 @@ def _confirm_service_dates(
         "service_dates_apply",
     )
     return preview, apply
-
-
-def _ensure_client_region(
-    client: TestClient,
-    client_id: int,
-) -> dict[str, object]:
-    path = f"/api/v1/admin/data-browser/clients/{client_id}/source-correction"
-    preview = _require_success(
-        client.post(f"{path}/preview", json={"updates": {"address": "北區"}}),
-        "client_region_preview",
-    )
-    changes = preview.get("changes")
-    if not isinstance(changes, dict):
-        raise RuntimeError("client_region_preview_invalid")
-    if not changes:
-        return {"result": "existing", "changed_fields": []}
-    identity = f"{SCENARIO_ID}:client-region:v1"
-    return _require_success(
-        client.post(
-            f"{path}/apply",
-            json={
-                "updates": {"address": "北區"},
-                "preview_fingerprint": preview["preview_fingerprint"],
-                "reason": "Task 96 HOB-F Route A 合成媒合區域",
-            },
-            headers={"Idempotency-Key": identity},
-        ),
-        "client_region_apply",
-    )
 
 
 def _ensure_staff_preferences(
@@ -755,6 +731,38 @@ def _ensure_deposit_root(client: TestClient) -> dict[str, object]:
     rows = preview.get("rows")
     if not isinstance(rows, list) or len(rows) != 1 or rows[0].get("amount_ntd") != 12000:
         raise RuntimeError("finance_deposit_row_invalid")
+    batch_job_id = None
+    if preview["batch_version"] == 0:
+        apply_identity = f"{COMMAND_IDENTITY_PREFIX}:finance-deposit-batch-apply:v1"
+        accepted = _require_success(
+            client.post(
+                "/api/v1/finance-import/batches/apply",
+                json={
+                    "batch_identity": batch_identity,
+                    "expected_batch_version": preview["batch_version"],
+                    "preview_fingerprint": preview["preview_fingerprint"],
+                    "reason": "Task 96 HOB-F Route A 合成訂金匯入",
+                },
+                headers={
+                    "Idempotency-Key": apply_identity,
+                    "X-Correlation-ID": apply_identity,
+                },
+            ),
+            "finance_deposit_batch_apply",
+        )
+        batch_job_id = str(accepted["job_id"])
+        if not batch_job_id or batch_job_id == "None":
+            raise RuntimeError(f"finance_deposit_batch_job_invalid:{accepted}")
+        _run_one_durable_job()
+        outcome = _require_success(
+            client.get(f"/api/v1/finance-import/jobs/{batch_job_id}/batch-outcome"),
+            "finance_deposit_batch_outcome",
+        )
+        if outcome.get("status") != "succeeded" or not outcome.get("receipt") or not isinstance(outcome["receipt"], dict):
+            raise RuntimeError(f"finance_deposit_batch_not_succeeded:{outcome}")
+    elif preview["batch_version"] < 1:
+        raise RuntimeError(f"finance_deposit_batch_version_invalid:{preview}")
+
     from infrastructure.mysql.anomaly_runtime import build_anomaly_runtime
     from infrastructure.mysql.mysql_adapter import get_connection
     from subsystems.finance_import.finance_import_anomaly_consumer import (
@@ -770,6 +778,15 @@ def _ensure_deposit_root(client: TestClient) -> dict[str, object]:
         anomaly_connection.close()
     if projected.failed_count:
         raise RuntimeError("finance_deposit_anomaly_projection_failed")
+
+    receipt_facts = _require_success(client.get(receipt_path), "client_receipt_readback")
+    deposit_obligations = [
+        item
+        for item in receipt_facts.get("obligations", [])
+        if item.get("payment_stage") == "deposit"
+    ]
+    if len(deposit_obligations) != 1 or deposit_obligations[0].get("amount_due_ntd") != 12000:
+        raise RuntimeError("deposit_obligation_invalid_after_batch")
     selection = {
         "row_identity": rows[0]["row_identity"],
         "classification_type": "client_receipt",
@@ -788,7 +805,7 @@ def _ensure_deposit_root(client: TestClient) -> dict[str, object]:
         ),
         "finance_deposit_correction_preview",
     )
-    apply_identity = f"{COMMAND_IDENTITY_PREFIX}:finance-correction:v1"
+    correction_identity = f"{COMMAND_IDENTITY_PREFIX}:finance-correction:v1"
     accepted = _require_success(
         client.post(
             "/api/v1/finance-import/corrections/apply",
@@ -800,31 +817,30 @@ def _ensure_deposit_root(client: TestClient) -> dict[str, object]:
                 "preview_fingerprint": correction["preview_fingerprint"],
             },
             headers={
-                "Idempotency-Key": apply_identity,
-                "X-Correlation-ID": apply_identity,
+                "Idempotency-Key": correction_identity,
+                "X-Correlation-ID": correction_identity,
             },
         ),
         "finance_deposit_correction_apply",
     )
-    _run_one_durable_job()
     job_id = str(accepted["job_id"])
+    if not job_id or job_id == "None":
+        raise RuntimeError(f"finance_deposit_correction_job_invalid:{accepted}")
+    _run_one_durable_job()
     outcome = _require_success(
         client.get(f"/api/v1/finance-import/jobs/{job_id}/correction-outcome"),
         "finance_deposit_correction_outcome",
     )
-    if outcome.get("status") != "succeeded":
-        raise RuntimeError(f"finance_deposit_job_not_succeeded:{outcome}")
-    receipt_facts = _require_success(client.get(receipt_path), "client_receipt_readback")
-    if any(
-        item.get("payment_stage") == "deposit"
-        for item in receipt_facts.get("obligations", [])
-    ):
+    if outcome.get("status") != "succeeded" or not outcome.get("receipt") or not isinstance(outcome["receipt"], dict):
+        raise RuntimeError(f"finance_deposit_correction_not_succeeded:{outcome}")
+    receipt_facts = _require_success(client.get(receipt_path), "client_receipt_reconciliation_readback")
+    if any(item.get("payment_stage") == "deposit" for item in receipt_facts.get("obligations", [])):
         raise RuntimeError("deposit_obligation_not_reconciled")
     return {
         "result": "created",
         "batch_identity": batch_identity,
-        "row_identity": rows[0]["row_identity"],
         "job_id": job_id,
+        "row_identity": rows[0]["row_identity"],
         "account_version": receipt_facts["account_version"],
     }
 
@@ -1346,7 +1362,7 @@ def _ensure_staff_payout(
 
 
 def run_route_a() -> dict[str, object]:
-    _require_safe_environment()
+    database = _require_safe_environment()
     from api.main import app
 
     with TestClient(app) as client:
@@ -1386,7 +1402,7 @@ def run_route_a() -> dict[str, object]:
             raise RuntimeError("task96_route_a_staff_identity_not_unique")
         if order.get("case_no") != CASE_NO:
             raise RuntimeError("task96_route_a_order_identity_mismatch")
-        client_region = _ensure_client_region(client, int(order["client_id"]))
+        client_region = {"result": "existing", "changed_fields": []}
         staff_preferences = _ensure_staff_preferences(
             client,
             int(selected_staff[0]["id"]),
@@ -1405,7 +1421,7 @@ def run_route_a() -> dict[str, object]:
         completion = _historical_completion(client)
     return {
         "scenario_id": SCENARIO_ID,
-        "database": DATABASE,
+        "database": database,
         "stage": "stage-07-settled",
         "case_no": CASE_NO,
         "staff_id": selected_staff[0]["id"],

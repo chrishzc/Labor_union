@@ -25,7 +25,7 @@ class FinanceImportCorrectionRepository(Protocol):
     def find_correction_receipt(self, key: IdempotencyKey) -> StoredFinanceImportCorrectionReceipt | None: ...
     def append_manual_classification(self, candidate, actor): ...
     def append_reconciliation_receipt(self, candidate): ...
-    def append_alert_resolved_event(self, candidate, actor): ...
+    def append_alert_resolved_event(self, candidate, actor) -> int: ...
     def append_outbox(self, candidate): ...
     def advance_batch_version(self, candidate, expected_version, resulting_version): ...
     def save_correction_receipt(self, key, stored): ...
@@ -53,7 +53,7 @@ class FinanceImportCorrectionWorkflow:
         with self._unit_of_work_factory() as uow:
             replay=self._find_replay(request,fingerprint)
             if replay is not None: return replay
-            preview=self._fresh_preview(request); count=self._persist_formal_result(request,preview); receipt=_build_receipt(preview,count)
+            preview=self._fresh_preview(request); count, alert_resolved_event_count=self._persist_formal_result(request,preview); receipt=_build_receipt(preview,count,alert_resolved_event_count)
             self._save_receipt(request,fingerprint,receipt); uow.commit(); return receipt
     def _find_replay(self,request,fingerprint):
         stored=self._repository.find_correction_receipt(request.idempotency_key)
@@ -69,15 +69,15 @@ class FinanceImportCorrectionWorkflow:
     def _persist_formal_result(self,request,preview):
         candidate=preview.candidate; self._repository.append_manual_classification(candidate,request.actor); count=self._posting_port.post(candidate)
         if count < 1: raise RuntimeError("correction posting created no formal ledger entry")
-        self._repository.append_reconciliation_receipt(candidate); self._repository.append_alert_resolved_event(candidate,request.actor); self._repository.append_outbox(candidate); self._repository.advance_batch_version(candidate,preview.batch_version,preview.batch_version+1); return count
+        self._repository.append_reconciliation_receipt(candidate); alert_resolved_event_count=self._repository.append_alert_resolved_event(candidate,request.actor) or 0; self._repository.append_outbox(candidate); self._repository.advance_batch_version(candidate,preview.batch_version,preview.batch_version+1); return count, alert_resolved_event_count
     def _save_receipt(self,request,fingerprint,receipt): self._repository.save_correction_receipt(request.idempotency_key,StoredFinanceImportCorrectionReceipt(fingerprint,receipt))
 
 def _build_preview(selection,facts):
     candidate=build_finance_import_correction_candidate(selection,facts); fingerprint=fingerprint_payload({"candidate_fingerprint":candidate.fingerprint.value,"batch_version":facts.batch_version,"canonical_fact_version":facts.canonical_fact_version,"alert_version":facts.alert_version}); return FinanceImportCorrectionPreview(candidate,facts.batch_version,facts.canonical_fact_version,facts.alert_version,fingerprint)
 def _validate_expected_versions(request,facts):
     if (request.expected_batch_version.value,request.expected_canonical_fact_version.value,request.expected_alert_version.value)!=(facts.batch_version,facts.canonical_fact_version,facts.alert_version): raise _workflow_error(request.correlation_id,ErrorCategory.CONFLICT,"stale_preview","Correction facts changed before Apply.")
-def _build_receipt(preview,ledger_entry_count):
-    candidate=preview.candidate; return FinanceImportCorrectionReceipt(candidate.row_identity,candidate.batch_identity,preview.batch_version+1,1,ledger_entry_count,len(candidate.allocations),1,1,preview.fingerprint)
+def _build_receipt(preview,ledger_entry_count,alert_resolved_event_count):
+    candidate=preview.candidate; return FinanceImportCorrectionReceipt(candidate.row_identity,candidate.batch_identity,preview.batch_version+1,1,ledger_entry_count,len(candidate.allocations),1,alert_resolved_event_count,preview.fingerprint)
 def _command_fingerprint(request):
     selection=request.selection; return fingerprint_payload({"row_identity":selection.row_identity,"classification_type":selection.classification_type.value,"target_obligation_identities":selection.target_obligation_identities,"refund_ledger_entry_identity":selection.refund_ledger_entry_identity,"reason":selection.reason,"evidence":selection.evidence,"expected_batch_version":request.expected_batch_version.value,"expected_canonical_fact_version":request.expected_canonical_fact_version.value,"expected_alert_version":request.expected_alert_version.value,"preview_fingerprint":request.preview_fingerprint.value,"actor_id":request.actor.actor_id})
 def _domain_error(correlation_id,raw_code):

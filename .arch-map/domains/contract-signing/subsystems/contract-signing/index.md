@@ -18,6 +18,9 @@
 - `subsystems/contract_signing/` — Contract Signing application contracts/workflows
 - `document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md` — canonical Contract Signing contract
 
+## Modules
+- `staff-contract-application` — staff-side contract send／signed-return／manual attestation application；path: `modules/staff-contract-application.md`
+
 ## Verification routing
 - default_boundary: Subsystem
 - test_root: `tests/domains/contract-signing/subsystems/contract-signing/`

@@ -36,4 +36,13 @@ describe('Finance Import correction client', () => {
     globalThis.fetch = vi.fn().mockResolvedValue(response({ job_id: 'job-correction-1', status: 'succeeded', attempt_count: 1, max_attempts: 3, result_reference: 'safe:1', receipt: { row_identity: selection.row_identity, batch_identity: 'finance-import-batch:9', resulting_batch_version: 2, classification_event_count: 1, ledger_entry_count: 1, allocation_count: 1, reconciliation_receipt_count: 1, alert_resolved_event_count: 1, preview_fingerprint: fingerprint, raw_bank_account: 'unsafe' } }));
     await expect(financeImportCorrectionClient.queryOutcome('job-correction-1')).rejects.toThrow();
   });
+
+  it('accepts zero legacy alert events but rejects negative counts', async () => {
+    const receipt = { row_identity: selection.row_identity, batch_identity: 'finance-import-batch:9', resulting_batch_version: 2, classification_event_count: 1, ledger_entry_count: 1, allocation_count: 1, reconciliation_receipt_count: 1, alert_resolved_event_count: 0, preview_fingerprint: fingerprint };
+    globalThis.fetch = vi.fn().mockResolvedValue(response({ job_id: 'job-correction-1', status: 'succeeded', attempt_count: 1, max_attempts: 3, result_reference: 'safe:1', receipt }));
+    await expect(financeImportCorrectionClient.queryOutcome('job-correction-1')).resolves.toMatchObject({ receipt });
+
+    globalThis.fetch = vi.fn().mockResolvedValue(response({ job_id: 'job-correction-1', status: 'succeeded', attempt_count: 1, max_attempts: 3, result_reference: 'safe:1', receipt: { ...receipt, alert_resolved_event_count: -1 } }));
+    await expect(financeImportCorrectionClient.queryOutcome('job-correction-1')).rejects.toThrow();
+  });
 });

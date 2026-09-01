@@ -14,6 +14,7 @@
   - `subsystems/scheduling/matching_coordination_workflow.py`
   - `infrastructure/mysql/matching_coordination_repository.py`
   - `infrastructure/mysql/matching_coordination_facts_adapter.py`
+  - `infrastructure/mysql/segmented_availability_repository.py`
 - entrypoints:
   - `api/routes/matching_coordination.py`
   - `api/schemas/matching_coordination.py`

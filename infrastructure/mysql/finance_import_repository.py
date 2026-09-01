@@ -297,8 +297,8 @@ class MySqlFinanceImportRepository:
                 ),
             )
 
-    def append_alert_resolved_event(self, candidate, actor) -> None:
-        append_finance_import_manual_review_resolution(
+    def append_alert_resolved_event(self, candidate, actor) -> int:
+        return append_finance_import_manual_review_resolution(
             self._connection,
             candidate,
             actor,
@@ -420,7 +420,7 @@ def _load_integrity_issues(cursor, batch_id):
     return {key: tuple(sorted(set(values))) for key, values in issues.items()}
 
 
-# Kept whole so row, alert, obligations, and blockers share one lock snapshot.
+# Kept whole so row, classification, obligations, and blockers share one lock snapshot.
 def _load_correction_facts(cursor, selection, for_update):
     row_id = _row_database_id(selection.row_identity)
     cursor.execute(
@@ -430,7 +430,6 @@ def _load_correction_facts(cursor, selection, for_update):
     header = cursor.fetchone()
     if header is None:
         raise ValueError("finance_import_row_not_found")
-    alert = _load_active_alert(cursor, row_id, for_update)
     obligations = _load_obligations(cursor, selection, for_update)
     issues = _load_integrity_issues(cursor, int(header["batch_id"]))
     row_issues = issues.get(row_id, ())
@@ -438,9 +437,9 @@ def _load_correction_facts(cursor, selection, for_update):
         str(header["batch_identity"]),
         int(header["batch_version"]),
         int(header["canonical_fact_version"]),
-        0 if alert is None else int(alert["workflow_version"]),
+        int(header["classification_version"]),
         MoneyNTD(_integer_bank_amount(header["credit"], header["debit"])),
-        alert is not None,
+        str(header["disposition"]) == "manual_review",
         obligations,
         tuple(
             code
@@ -450,14 +449,6 @@ def _load_correction_facts(cursor, selection, for_update):
         "fingerprint_collision" in row_issues,
         "formal_reference_conflict" in row_issues,
     )
-
-
-def _load_active_alert(cursor, row_id, for_update):
-    cursor.execute(
-        _ACTIVE_ALERT_SELECT_SQL + (" FOR UPDATE" if for_update else ""),
-        (row_id,),
-    )
-    return cursor.fetchone()
 
 
 def _load_obligations(cursor, selection, for_update):
@@ -832,7 +823,8 @@ _ACTIVE_INTEGRITY_SQL = (
 )
 _CORRECTION_HEADER_SQL = (
     "SELECT contract.batch_id,contract.batch_identity,contract.batch_version,"
-    "classification.canonical_fact_version,bank_fact.credit,bank_fact.debit "
+    "classification.canonical_fact_version,classification.classification_version,"
+    "classification.disposition,bank_fact.credit,bank_fact.debit "
     "FROM finance_import_rows AS bank_fact "
     "JOIN finance_import_occurrences AS occurrence "
     "ON occurrence.finance_import_row_id=bank_fact.id "
@@ -843,12 +835,6 @@ _CORRECTION_HEADER_SQL = (
     "SELECT MAX(latest.id) FROM finance_import_classification_events AS latest "
     "WHERE latest.finance_import_row_id=bank_fact.id"
     ") WHERE bank_fact.id=%s ORDER BY occurrence.id DESC LIMIT 1"
-)
-_ACTIVE_ALERT_SELECT_SQL = (
-    "SELECT fingerprint,workflow_version FROM anomaly_current_alerts "
-    "WHERE definition_code='finance_import_manual_review' "
-    "AND source_identity=CONCAT('finance-import-row:',%s) "
-    "AND predicate_active=1 AND workflow_status<>'resolved'"
 )
 _CLIENT_OBLIGATIONS_SQL = (
     "SELECT obligation_identity,amount_due_ntd AS remaining_amount_ntd "

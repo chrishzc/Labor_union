@@ -17,8 +17,11 @@
 
 ## Modules
 - `import006-owner-current-facts` — retired IMPORT-006 owner-validation／migration evidence only；path: `modules/import006-owner-current-facts.md`
+- `finance-import-correction` — Finance Import correction Query／Preview／Apply and durable outcome client contract；path: `modules/finance-import-correction.md`
 
 ## Verification routing
+- layout_status: `custom_current`
 - default_boundary: Subsystem
 - test_root: `tests/domains/finance-import/subsystems/finance-import/`
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/`.
+- integration_root: `tests/test_finance_import_batch_job_outcome_route.py`

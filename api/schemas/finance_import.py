@@ -284,7 +284,7 @@ class FinanceImportCorrectionReceiptView(_StrictModel):
     ledger_entry_count: int = Field(gt=0)
     allocation_count: int = Field(gt=0)
     reconciliation_receipt_count: int = Field(gt=0)
-    alert_resolved_event_count: int = Field(gt=0)
+    alert_resolved_event_count: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 

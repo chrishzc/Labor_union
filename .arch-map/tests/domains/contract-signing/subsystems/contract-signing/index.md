@@ -5,6 +5,11 @@ test_root: tests/domains/contract-signing/subsystems/contract-signing/
 integration_root: tests/domains/contract-signing/subsystems/contract-signing/integration/
 fixtures_root: tests/fixtures/
 
+modules:
+  staff-contract-application:
+    layout_status: custom_current
+    test_root: tests/test_staff_contract_signing_application.py
+
 # Routing notes
 Owner-local coverage includes external-signing domain/contracts/workflow, legacy manual recovery, final-document Q/P/A and preview token, Contract Signing API/download routes, contract renderer/LibreOffice adapter, unsigned-PDF application/storage/persistence/repository, external-signing repository, borrowed staff-completion adapter, and the Contract Signing-specific historical-baseline owner adapter.
 

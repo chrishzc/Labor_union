@@ -14,6 +14,7 @@ import {
 } from '../adapters/orders/order_stage_projection_adapter';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import type { FormManagementContext } from '../api/orders/order_query_schemas';
+import { extractErrorMessage } from '../api/shared/typed_errors';
 import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
 import type { OrdersCardProjection } from '../api/orders/order_card_projection_schemas';
 import { loadAllOrderOperationalTimelines, orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
@@ -200,12 +201,12 @@ export const OrderTrackerPage: React.FC = () => {
           message: ORDER_STAGE_PROJECTION_UNAVAILABLE,
         });
       }
-    } catch {
+    } catch (error) {
       if (controller.signal.aborted || generation !== generationRef.current) return;
       setStageProjectionState({ kind: 'unavailable', message: ORDER_STAGE_PROJECTION_UNAVAILABLE });
       setQueryState({
         kind: 'error',
-        message: '訂單清單載入未完成，請稍後重新載入摘要。',
+        message: extractErrorMessage(error),
       });
     } finally {
       if (abortRef.current === controller) abortRef.current = null;

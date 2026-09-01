@@ -72,8 +72,8 @@ describe('OrderTrackerPage request budget', () => {
       .mockResolvedValueOnce(realisticOrderSummaryPage);
     render(<OrderTrackerPage />);
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('訂單清單載入未完成，請稍後重新載入摘要。'));
-    expect(document.body.textContent).not.toContain('typed orders failure');
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('typed orders failure'));
+    expect(document.body.textContent).not.toContain('訂單清單載入未完成，請稍後重新載入摘要。');
     expect(query).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: '重新載入摘要' }));
     await waitFor(() => expect(screen.getByText('ORD-2026-0801')).toBeInTheDocument());

@@ -92,7 +92,7 @@ def _setup_owner_roots(client: TestClient) -> dict[str, object]:
     if len(selected_staff) != 1:
         raise RuntimeError("payout001_staff_identity_not_unique")
     staff_id = int(selected_staff[0]["id"])
-    client_region = route_a._ensure_client_region(client, int(order["client_id"]))
+    client_region = {"result": "existing", "changed_fields": []}
     staff_preferences = route_a._ensure_staff_preferences(client, staff_id)
     matching = route_a._run_stage_02(client, staff_id)
     commitment = route_a._run_stage_03(client, int(matching["plan_id"]))
@@ -274,7 +274,7 @@ def _staff_id(client: TestClient) -> int:
 
 
 def prepare_scenario() -> dict[str, object]:
-    route_a._require_safe_environment()
+    database = route_a._require_safe_environment()
     from api.main import app
 
     with _scenario_configuration(), TestClient(app) as client:
@@ -292,7 +292,7 @@ def prepare_scenario() -> dict[str, object]:
         "scenario_id": SCENARIO_ID,
         "phase": "prepared",
         "business_date": date.today().isoformat(),
-        "database": route_a.DATABASE,
+        "database": database,
         "case_no": CASE_NO,
         "roots": roots,
         "bank_fact": bank_fact,
@@ -303,7 +303,7 @@ def prepare_scenario() -> dict[str, object]:
 
 
 def verify_terminal() -> dict[str, object]:
-    route_a._require_safe_environment()
+    database = route_a._require_safe_environment()
     from api.main import app
 
     with _scenario_configuration(), TestClient(app) as client:
@@ -328,7 +328,7 @@ def verify_terminal() -> dict[str, object]:
     return {
         "scenario_id": SCENARIO_ID,
         "phase": "verified",
-        "database": route_a.DATABASE,
+        "database": database,
         "case_no": CASE_NO,
         "staff_id": staff_id,
         "scan": scan,

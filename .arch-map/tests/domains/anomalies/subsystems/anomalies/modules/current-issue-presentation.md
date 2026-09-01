@@ -3,6 +3,8 @@ parent_subsystem: anomalies
 architecture: ../../../../../../domains/anomalies/subsystems/anomalies/modules/current-issue-presentation.md
 layout_status: custom_current
 test_root: ui_react/src/tests/current_anomalies_page.test.tsx
+test_root: ui_react/src/tests/anomaly_query_adapter.test.ts
+test_root: ui_react/src/tests/fixtures/anomalies/anomaly_query_contract_fixtures.ts
 integration_root: ui_react/src/tests/anomalies_entry_cutover.test.tsx
 
 # Owned verification

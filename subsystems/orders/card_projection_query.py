@@ -483,6 +483,8 @@ def _optional_text(row: Mapping[str, object], field_name: str, maximum: int) -> 
     value = row[field_name]
     if value is None:
         return None
+    if isinstance(value, str) and not value.strip():
+        return None
     try:
         return require_canonical_text(value, field_name, maximum)
     except ValueError as error:
