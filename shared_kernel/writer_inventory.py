@@ -233,25 +233,21 @@ def _call_fingerprint(call: ast.Call) -> str:
 
 
 def writer_call_fingerprint(call: ast.Call) -> str:
-    normalized_call = json.dumps(
-        _stable_ast_value(call),
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
+    normalized_call = _stable_ast_dump(call).encode("utf-8")
     return hashlib.sha256(normalized_call).hexdigest()[:16]
 
 
-def _stable_ast_value(value: Any) -> Any:
+def _stable_ast_dump(value: Any) -> str:
     if isinstance(value, ast.AST):
         fields = [
-            [name, _stable_ast_value(field_value)]
+            f"{name}={_stable_ast_dump(field_value)}"
             for name, field_value in ast.iter_fields(value)
             if field_value is not None and field_value != []
         ]
-        return [type(value).__name__, fields]
+        return f"{type(value).__name__}({', '.join(fields)})"
     if isinstance(value, list):
-        return [_stable_ast_value(item) for item in value]
-    return value
+        return f"[{', '.join(_stable_ast_dump(item) for item in value)}]"
+    return repr(value)
 
 
 def _constant_sql(
