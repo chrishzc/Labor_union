@@ -328,6 +328,52 @@ def test_source_schedule_conflict_projection_is_order_independent_and_allows_sam
     )
 
 
+def test_source_schedule_handoff_on_shared_boundary_is_not_a_conflict():
+    from datetime import date
+
+    rows = (
+        HistoricalOrderWorkbookRow(
+            2,
+            "source:synthetic:2",
+            "1" * 64,
+            "CASE-1",
+            "客戶甲",
+            HistoricalOrderSourceStatus.DEPOSIT_PAID,
+            date(2030, 1, 1),
+            date(2030, 1, 10),
+            (),
+            (),
+        ),
+        HistoricalOrderWorkbookRow(
+            3,
+            "source:synthetic:3",
+            "2" * 64,
+            "CASE-2",
+            "客戶乙",
+            HistoricalOrderSourceStatus.DEPOSIT_PAID,
+            date(2030, 1, 10),
+            date(2030, 1, 20),
+            (),
+            (),
+        ),
+    )
+    previews = tuple(
+        SimpleNamespace(
+            case_no=row.case_no,
+            pairings=(SimpleNamespace(
+                ordinal=1,
+                resolution=SimpleNamespace(value="assignment_candidate"),
+                staff_id=11,
+                start_date=row.actual_start_date,
+                end_date=row.actual_end_date,
+            ),),
+        )
+        for row in rows
+    )
+
+    assert module.project_source_schedule_conflicts(previews, rows) == ()
+
+
 def test_apply_uses_one_transaction_and_rolls_back_the_whole_workbook(monkeypatch):
     workbook = _workbook_with_statuses()
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda _path: workbook)

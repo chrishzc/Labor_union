@@ -362,9 +362,11 @@ def project_source_schedule_conflicts(
 ) -> tuple[HistoricalOrderSourceScheduleConflict, ...]:
     """Project all cross-case overlaps using one deterministic interval rule.
 
-    Intervals are inclusive.  A same-case repeat is allowed because a workbook
-    can contain multiple source assertions for one Order; distinct cases for a
-    caregiver may not share even one source service date.
+    Source intervals use a strict-overlap boundary: a later source start equal
+    to an earlier source end is a legal handoff.  A same-case repeat is allowed
+    because a workbook can contain multiple source assertions for one Order;
+    distinct cases conflict only when their source service ranges overlap
+    strictly (``next_start < previous_end``).
     """
 
     previews = tuple(row_previews)
@@ -406,9 +408,9 @@ def project_source_schedule_conflicts(
         )
         for index, left in enumerate(ordered):
             for right in ordered[index + 1 :]:
-                if right.start_date > left.end_date:
+                if right.start_date >= left.end_date:
                     break
-                if left.case_no != right.case_no and right.start_date <= left.end_date:
+                if left.case_no != right.case_no and right.start_date < left.end_date:
                     conflicts.append(HistoricalOrderSourceScheduleConflict(left, right))
 
     return tuple(
