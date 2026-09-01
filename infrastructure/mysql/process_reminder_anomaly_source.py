@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Callable
+from typing import Any, Callable
 
 from shared_kernel.errors import TypedError
 
