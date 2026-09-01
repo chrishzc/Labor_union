@@ -4,24 +4,25 @@
 
 `.agents/AGENTS.md` 只能補充個人互動與 Git 偏好，不得覆蓋本檔或正式規格。不得 reset、clean、stash、覆蓋、搬移或刪除既有 ignored／untracked／dirty 使用者成果。
 
-## 1. 預設快速路徑
+## 1. 預設導航與停止條件
 
-每個任務預設只做以下工作：
+每個任務預設只按以下順序工作：
 
 1. 記錄 branch、HEAD、`git status --short`，保留所有 dirty paths。
-2. 讀本檔、使用者點名或直接受影響的檔案、直接 caller／callee，以及一個最相關測試。
-3. 先以 symbol／path 在最小受影響目錄搜尋；只有缺少會改變修改位置、行為或驗證邊界的事實時，才向外擴一層。
-4. 預設不掃描整個 repository，不整目錄載入 `document/`、`.arch-map/`、`tests/`，不先讀完整 `README.md`，也不跑 full suite。
-5. 一般 T0／T1 局部修改不建立新 spec、Work Package、receipt、架構圖或追蹤文件。
+2. 讀本檔後，先讀 `.arch-map/index.md`。依使用者點名的 path、功能名稱或業務詞彙，選擇唯一最接近的 Domain／Global module；只沿一條已連結的 `Domain → Subsystem → Module` 最短路徑往下，不開 sibling branches。
+3. `.arch-map/` leaf 一旦指出 owner、source、adapter、直接依賴或測試路徑，導航即結束；只讀完成 current task 所需的那些目標檔案與一個最直接測試。使用者已點名精確檔案時，地圖只用來確認 owner／測試邊界，不再廣搜。
+4. **停止條件：** 已能確定 current target、owner、write set 與 focused verification。達成後不得繼續做 repository-wide search、caller graph 擴張、相鄰 Module／Domain 探索或文件瀏覽；「可能相關」不是擴搜理由。
+5. 只有 `.arch-map/` 沒有路由、指向的 path 不存在，或目標檔案出現一個會實質改變行為／修改位置／驗證邊界的 unresolved dependency 時，才以 symbol／path 向外擴一層。每次只開一個目錄或一個明確連結，解決該 unknown 後立即停止。
+6. 預設不掃描整個 repository，不整目錄載入 `document/`、`.arch-map/`、`tests/`，不先讀完整 `README.md`，也不跑 full suite。
+7. 一般 T0／T1 局部修改不建立新 spec、Work Package、receipt、架構圖或追蹤文件。
 
-只有任務涉及下列邊界時，才讀對應的最小 current 文件：
+完成上述地圖導航後，只有任務實際涉及下列邊界時，才讀對應的最小 current 文件：
 
-- owner、SSOT、root fact、state machine、cross-domain invariant、public contract／entry point、transaction／Unit of Work：讀 `document/架構重整/00_開發者與Agent導覽.md`、`01_規格基線/15_正式規格索引與裁決總表.md`，再讀單一 owning Domain／Subsystem current spec。
+- owner、SSOT、root fact、state machine、cross-domain invariant、public contract／entry point、transaction／Unit of Work：讀 `.arch-map/` 指向的單一 owning Domain／Subsystem current spec；只有 currentness 或裁決仍不明時才讀 `01_規格基線/15_正式規格索引與裁決總表.md`。
 - concurrency／fingerprint：只讀 `01_規格基線/00_Global_共同契約.md` 的相關段落。
 - schema／migration／preserve-data／cutover：只讀 canonical DB gate 與直接相關 release／migration 文件。
 - entry point retirement／replacement：只讀 `19_Global_Entry_Point_Governance.md` 的相關段落。
 - rollback、incident、舊 release 重現或稽核：依 `04_已完成與上線封存/README.md` 精準取回單一歷史文件。
-- 找不到 owner 或測試邊界時才使用 `.arch-map/`，且只讀最小 affected subtree。
 
 不得因文件存在、checklist 未完成、測試很多或可能有風險，就自動擴大 scope。
 
