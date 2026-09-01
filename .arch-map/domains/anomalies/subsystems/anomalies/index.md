@@ -9,7 +9,6 @@
 ## Modules
 - `anomaly-registry` — closed definition、source-bound recovery descriptor與public detail contract；path: `modules/anomaly-registry.md`
 - `current-issue-presentation` — LINE-006 current-only清單／detail的business-first React projection; path: `modules/current-issue-presentation.md`
-- `anomaly-detail-presentation` — 異常詳情、處理方式與排班導向的業務資訊層級; path: `modules/anomaly-detail-presentation.md`
 - `line-notification-current-issue` — LINE-006 typed owner predicate consumer與fail-closed reconcile；path: `modules/line-notification-current-issue.md`
 - `current-issue-runtime-composition` — durable recheck runtime的owner reader／consumer組合；path: `modules/current-issue-runtime-composition.md`
 

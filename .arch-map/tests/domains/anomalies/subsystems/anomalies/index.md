@@ -11,12 +11,6 @@ modules:
   current-issue-presentation:
     layout_status: custom_current
     test_root: ui_react/src/tests/current_anomalies_page.test.tsx
-  finance-correction-presentation:
-    layout_status: custom_current
-    test_root: ui_react/src/tests/anomalies_finance_correction_flow.test.tsx
-  anomaly-detail-presentation:
-    layout_status: custom_current
-    test_root: ui_react/src/tests/anomalies_page_real_data.test.tsx
   line-notification-current-issue:
     layout_status: canonical
     test_root: tests/domains/anomalies/subsystems/anomalies/modules/line-notification-current-issue/

@@ -10,8 +10,8 @@ import { SYSTEM_STATUS_ENDPOINT } from '../api/system/system_status_client';
 import { sessionClient } from '../api/auth/session_client';
 import { detailedHcmResult } from './fixtures/hcm_import_result_fixtures';
 
-vi.mock('../pages/AnomaliesPage', () => ({
-  AnomaliesPage: () => null,
+vi.mock('../pages/CurrentAnomaliesPage', () => ({
+  CurrentAnomaliesPage: () => null,
 }));
 
 const HCM_RESULTS_ENDPOINT = '/api/v1/case-import/hcm/workbooks/results';

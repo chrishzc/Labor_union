@@ -12,7 +12,7 @@
 - delegated entrypoint: `scripts/launchers/start_local_development.sh`
 
 ## Contracts
-- no-auth launcher 必須在委派前設定 development／local_bypass，並以 source runtime 啟動；`start_local_development.sh` 仍唯一擁有 DB current gate 與 child-process supervision。
+- no-auth launcher 必須在委派前設定 development／local_bypass，並以 source runtime 啟動；缺少 `ANOMALY_ISSUE_IDENTITY_KEY_V1` 時以一次性 process-only 隨機值供 current-anomaly read-only query 使用，明確既有值必須保留且不得寫入 `.env`；`start_local_development.sh` 仍唯一擁有 DB current gate 與 child-process supervision。
 
 ## Verification
 - test_root: `tests/domains/global/subsystems/local-runtime/modules/no-auth-development-launch/`

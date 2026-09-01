@@ -8,3 +8,4 @@ test_root: tests/domains/staff-payables/subsystems/staff-payables/modules/histor
 - `contract/test_historical_staff_payout_workflow.py` — Staff owner Query／Preview／Apply, bank-first blocker, exact staff/case, replay and later reopen.
 - `contract/test_historical_staff_payout_mysql_repository.py` — Staff fresh-lock order and owner-only event/link/overlay/outbox/existing-receipt persistence without hidden commit.
 - `contract/test_historical_staff_payout_api.py` — authenticated bounded Query／Preview／Apply／fresh readback owner transport and strict views.
+- `integration/test_task96_historical_staff_payout_mysql_acceptance.py` — disposable real-MySQL Query／Preview／Apply／exact replay／owner readback lifecycle with committed event, projection, receipt and outbox.

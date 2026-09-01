@@ -22,6 +22,7 @@ Owner-local tests應進 owning Domain／Subsystem canonical root；`tests/` flat
 - `access` — `tests/domains/external-integration/subsystems/access/`；map: `domains/external-integration/index.md`
 - `line` — `tests/domains/external-integration/subsystems/line/`；map: `domains/external-integration/index.md`
 - `contract-signing` — `tests/domains/contract-signing/subsystems/contract-signing/`；map: `domains/contract-signing/index.md`
+- `clients` — `tests/domains/clients/subsystems/client-profile/`；map: `domains/clients/index.md`
 - `global-reporting` — `tests/test_weekly_operations_report_contract.py`（path-sensitive cross-domain contract）；map: `domains/global/subsystems/reporting/index.md`
 
 ## Higher-boundary routing
