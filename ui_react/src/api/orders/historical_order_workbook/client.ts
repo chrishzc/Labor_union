@@ -16,6 +16,7 @@ import { HistoricalOrderWorkbookPreviewEnvelopeSchema, HistoricalOrderWorkbookRe
 
 export const HISTORICAL_ORDER_WORKBOOK_PREVIEW_PATH = '/api/v1/orders/historical-adoption/workbooks/preview';
 export const HISTORICAL_ORDER_WORKBOOK_APPLY_PATH = '/api/v1/orders/historical-adoption/workbooks/apply';
+export const HISTORICAL_ORDER_WORKBOOK_TIMEOUT_MS = 120_000;
 const MAXIMUM_BYTES = 20 * 1024 * 1024;
 
 export class HistoricalOrderWorkbookSnapshot {
@@ -68,7 +69,7 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 function requestOptions(signal?: AbortSignal, operation: 'preview' | 'apply' = 'preview'): RequestOptions {
   const token = sessionClient.getToken();
   if (!token) throw new HistoricalOrderWorkbookUnauthenticatedError(operation);
-  return { token, signal, timeoutMs: 30_000 };
+  return { token, signal, timeoutMs: HISTORICAL_ORDER_WORKBOOK_TIMEOUT_MS };
 }
 
 function applyRequestOptions(idempotencyKey: string, correlationId: string, signal?: AbortSignal): RequestOptions {

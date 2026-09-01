@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
-import { HISTORICAL_ORDER_WORKBOOK_APPLY_PATH, HISTORICAL_ORDER_WORKBOOK_PREVIEW_PATH, HistoricalOrderWorkbookSnapshot, applyHistoricalOrderWorkbook, previewHistoricalOrderWorkbook } from '../api/orders/historical_order_workbook/client';
+import { HISTORICAL_ORDER_WORKBOOK_APPLY_PATH, HISTORICAL_ORDER_WORKBOOK_PREVIEW_PATH, HISTORICAL_ORDER_WORKBOOK_TIMEOUT_MS, HistoricalOrderWorkbookSnapshot, applyHistoricalOrderWorkbook, previewHistoricalOrderWorkbook } from '../api/orders/historical_order_workbook/client';
 import { HistoricalOrderWorkbookApplyError, HistoricalOrderWorkbookPreviewError, HistoricalOrderWorkbookUnauthenticatedError } from '../api/orders/historical_order_workbook/errors';
 import { HistoricalOrderWorkbookPreviewSchema, HistoricalOrderWorkbookReceiptSchema } from '../api/orders/historical_order_workbook/schemas';
 
@@ -26,6 +26,7 @@ describe('Historical Orders workbook Preview client', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe(HISTORICAL_ORDER_WORKBOOK_PREVIEW_PATH);
     const form = fetchMock.mock.calls[0]?.[1]?.body as FormData;
     expect(Array.from(form.keys())).toEqual(['workbook']);
+    expect(HISTORICAL_ORDER_WORKBOOK_TIMEOUT_MS).toBe(120_000);
   });
 
   it('Apply送出fingerprint form與冪等headers並回傳typed receipt', async () => {
