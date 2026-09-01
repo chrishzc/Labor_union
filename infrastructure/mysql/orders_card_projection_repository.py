@@ -64,6 +64,7 @@ SELECT o.case_no,
     ON scheduling.case_no = o.case_no
   LEFT JOIN case_staff_assignments assignment
     ON assignment.case_no = o.case_no
+   AND assignment.generation_id = scheduling.effective_generation_id
    AND assignment.status IN ('planned', 'active', 'completed')
   LEFT JOIN staff assigned_staff ON assigned_staff.id = assignment.staff_id
  WHERE o.case_no = %s

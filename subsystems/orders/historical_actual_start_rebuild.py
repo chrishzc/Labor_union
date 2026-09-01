@@ -7,6 +7,8 @@ from datetime import date
 from hashlib import sha256
 from typing import Protocol
 
+from domains.orders.actual_start import ActualStartCandidateError
+from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.identities import (
     ActorContext,
     CorrelationId,
@@ -16,6 +18,7 @@ from shared_kernel.identities import (
 from subsystems.orders.actual_start_workflow import (
     ActualStartApplyRequest,
     ActualStartWorkflow,
+    ActualStartWorkflowError,
 )
 
 
@@ -25,6 +28,14 @@ class HistoricalServiceDatePlanner(Protocol):
     ) -> tuple[date, ...]: ...
 
 
+class HistoricalActualStartPreparationError(ValueError):
+    """A historical source cannot yet support canonical Actual Start rebuilding."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
 @dataclass(frozen=True, slots=True)
 class HistoricalActualStartRebuilder:
     """Delegate one adopted historical start assertion to the canonical writer."""
@@ -32,7 +43,60 @@ class HistoricalActualStartRebuilder:
     actual_start_workflow: ActualStartWorkflow
     service_date_planner: HistoricalServiceDatePlanner
 
+    def preview(
+        self,
+        *,
+        case_no: str,
+        actual_start_date: date,
+        correlation_id: str,
+    ) -> None:
+        """Validate the same no-write prerequisites required by Apply."""
+        try:
+            service_dates = self.service_date_planner.calculate(
+                case_no,
+                actual_start_date,
+                for_update=False,
+            )
+            preview_source_generation = getattr(
+                self.service_date_planner,
+                "preview_source_generation",
+                None,
+            )
+            if preview_source_generation is not None:
+                preview_source_generation(case_no, service_dates)
+            self.actual_start_workflow.preview(
+                case_no,
+                actual_start_date,
+                recalculated_service_dates=service_dates,
+            )
+        except HistoricalActualStartPreparationError as error:
+            raise _preparation_blocked(error.code, correlation_id) from error
+        except ActualStartCandidateError as error:
+            raise _preparation_blocked(error.blocker.value, correlation_id) from error
+
     def apply_in_current_unit_of_work(
+        self,
+        *,
+        case_no: str,
+        actual_start_date: date,
+        source_identity: str,
+        actor: str,
+        correlation_id: str,
+    ) -> None:
+        try:
+            self._apply_in_current_unit_of_work(
+                case_no=case_no,
+                actual_start_date=actual_start_date,
+                source_identity=source_identity,
+                actor=actor,
+                correlation_id=correlation_id,
+            )
+        except HistoricalActualStartPreparationError as error:
+            raise _preparation_blocked(error.code, correlation_id) from error
+        except ActualStartCandidateError as error:
+            raise _preparation_blocked(error.blocker.value, correlation_id) from error
+
+    def _apply_in_current_unit_of_work(
         self,
         *,
         case_no: str,
@@ -85,12 +149,25 @@ class HistoricalActualStartRebuilder:
         )
 
 
+def _preparation_blocked(code: str, correlation_id: str) -> ActualStartWorkflowError:
+    return ActualStartWorkflowError(
+        TypedError(
+            ErrorCategory.DOMAIN_BLOCKED,
+            code,
+            "歷史訂單缺少重建實際開工所需的目前資料。",
+            CorrelationId(correlation_id),
+            domain_blockers=(code,),
+        )
+    )
+
+
 def _idempotency_key(source_identity: str) -> str:
     digest = sha256(source_identity.encode("utf-8")).hexdigest()
     return f"historical-actual-start:{digest}"
 
 
 __all__ = [
+    "HistoricalActualStartPreparationError",
     "HistoricalActualStartRebuilder",
     "HistoricalServiceDatePlanner",
 ]

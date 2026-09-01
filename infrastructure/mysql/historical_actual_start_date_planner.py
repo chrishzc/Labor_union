@@ -17,6 +17,9 @@ from infrastructure.mysql.scheduling_replacement_writer import (
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.orders.terms_workflow import SchedulingReplacementCommand
+from subsystems.orders.historical_actual_start_rebuild import (
+    HistoricalActualStartPreparationError,
+)
 
 _POST_SERVICE_BUFFER_DAYS = 7
 
@@ -41,19 +44,26 @@ class MySqlHistoricalActualStartDatePlanner:
             )
             order = cursor.fetchone()
             if order is None:
-                raise ValueError("historical_actual_start_order_not_found")
+                raise HistoricalActualStartPreparationError(
+                    "historical_actual_start_order_not_found"
+                )
             cursor.execute(
                 "SELECT holiday_date FROM holidays WHERE holiday_date >= %s "
                 "ORDER BY holiday_date" + suffix,
                 (actual_start_date,),
             )
             holiday_dates = tuple(row["holiday_date"] for row in cursor.fetchall())
-        return calculate_service_dates(
-            actual_start_date,
-            int(order["service_days"]),
-            _canonical_service_mode(str(order["service_type"])),
-            holiday_dates,
-        )
+        try:
+            return calculate_service_dates(
+                actual_start_date,
+                int(order["service_days"]),
+                _canonical_service_mode(str(order["service_type"])),
+                holiday_dates,
+            )
+        except (TypeError, ValueError) as error:
+            raise HistoricalActualStartPreparationError(
+                "historical_actual_start_source_invalid"
+            ) from error
 
     def prepare_source_generation(
         self,
@@ -67,19 +77,19 @@ class MySqlHistoricalActualStartDatePlanner:
         """Bridge generation-less historical assignment evidence into Scheduling once."""
         with self._connection.cursor() as cursor:
             aggregate = _locked_or_bootstrapped_aggregate(cursor, case_no)
-            if _effective_generation_has_assignments(cursor, aggregate):
+            if _effective_generation_has_assignments(cursor, aggregate, for_update=True):
                 return
-            source_assignments = _locked_historical_assignments(cursor, case_no)
-            if not source_assignments:
-                raise ValueError("historical_assignment_required_for_actual_start")
-            order = _locked_order_context(cursor, case_no)
-            policy = _locked_case_payroll_policy(cursor, case_no)
+            source_assignments, order, policy = _source_generation_facts(
+                cursor,
+                case_no,
+                for_update=True,
+            )
             candidate = _bootstrap_candidate(
                 case_no,
                 aggregate,
                 source_assignments,
                 service_dates,
-                int(order["service_hours_per_day"]),
+                _service_hours_per_day(order),
             )
             command_fingerprint = _bootstrap_fingerprint(
                 source_identity,
@@ -104,6 +114,29 @@ class MySqlHistoricalActualStartDatePlanner:
             )
             _persist_rate_snapshots(cursor, candidate, result, policy)
 
+    def preview_source_generation(
+        self,
+        case_no: str,
+        service_dates: tuple[date, ...],
+    ) -> None:
+        """Check bootstrap prerequisites without creating a generation or writing facts."""
+        with self._connection.cursor() as cursor:
+            aggregate = _read_or_empty_aggregate(cursor, case_no)
+            if _effective_generation_has_assignments(cursor, aggregate, for_update=False):
+                return
+            source_assignments, order, _policy = _source_generation_facts(
+                cursor,
+                case_no,
+                for_update=False,
+            )
+            _bootstrap_candidate(
+                case_no,
+                aggregate,
+                source_assignments,
+                service_dates,
+                _service_hours_per_day(order),
+            )
+
 
 def _locked_or_bootstrapped_aggregate(cursor, case_no):
     cursor.execute(
@@ -126,52 +159,91 @@ def _locked_or_bootstrapped_aggregate(cursor, case_no):
     }
 
 
-def _effective_generation_has_assignments(cursor, aggregate) -> bool:
+def _read_or_empty_aggregate(cursor, case_no):
+    cursor.execute(
+        "SELECT aggregate_version,generation_counter,effective_generation_id "
+        "FROM scheduling_aggregates WHERE case_no=%s",
+        (case_no,),
+    )
+    return cursor.fetchone() or {
+        "aggregate_version": 0,
+        "generation_counter": 0,
+        "effective_generation_id": None,
+    }
+
+
+def _effective_generation_has_assignments(cursor, aggregate, *, for_update: bool) -> bool:
     generation_id = aggregate["effective_generation_id"]
     if generation_id is None:
         return False
+    suffix = " FOR UPDATE" if for_update else ""
     cursor.execute(
         "SELECT id FROM case_staff_assignments "
         "WHERE generation_id=%s AND status NOT IN ('cancelled','replaced') "
-        "ORDER BY id LIMIT 1 FOR UPDATE",
+        "ORDER BY id LIMIT 1" + suffix,
         (generation_id,),
     )
     return cursor.fetchone() is not None
 
 
-def _locked_historical_assignments(cursor, case_no):
+def _historical_assignments(cursor, case_no, *, for_update: bool):
+    suffix = " FOR UPDATE" if for_update else ""
     cursor.execute(
         "SELECT id,staff_id,assignment_sequence,assigned_start_date,assigned_end_date "
         "FROM case_staff_assignments "
         "WHERE case_no=%s AND generation_id IS NULL AND status='completed' "
-        "ORDER BY assignment_sequence,id FOR UPDATE",
+        "ORDER BY assignment_sequence,id" + suffix,
         (case_no,),
     )
     return tuple(cursor.fetchall())
 
 
-def _locked_order_context(cursor, case_no):
+def _order_context(cursor, case_no, *, for_update: bool):
+    suffix = " FOR UPDATE" if for_update else ""
     cursor.execute(
         "SELECT lifecycle_version,service_hours_per_day FROM orders "
-        "WHERE case_no=%s FOR UPDATE",
+        "WHERE case_no=%s" + suffix,
         (case_no,),
     )
     row = cursor.fetchone()
     if row is None:
-        raise ValueError("historical_actual_start_order_not_found")
+        raise HistoricalActualStartPreparationError("historical_actual_start_order_not_found")
     return row
 
 
-def _locked_case_payroll_policy(cursor, case_no):
+def _case_payroll_policy(cursor, case_no, *, for_update: bool):
+    suffix = " FOR UPDATE" if for_update else ""
     cursor.execute(
         "SELECT policy_version,policy_kind,hourly_rate_ntd,source_identity_status "
-        "FROM case_payroll_rate_policy_snapshots WHERE case_no=%s FOR UPDATE",
+        "FROM case_payroll_rate_policy_snapshots WHERE case_no=%s" + suffix,
         (case_no,),
     )
     row = cursor.fetchone()
     if row is None:
-        raise ValueError("payroll_case_policy_bootstrap_required")
+        raise HistoricalActualStartPreparationError("payroll_case_policy_bootstrap_required")
     return row
+
+
+def _source_generation_facts(cursor, case_no, *, for_update: bool):
+    source_assignments = _historical_assignments(cursor, case_no, for_update=for_update)
+    if not source_assignments:
+        raise HistoricalActualStartPreparationError(
+            "historical_assignment_required_for_actual_start"
+        )
+    return (
+        source_assignments,
+        _order_context(cursor, case_no, for_update=for_update),
+        _case_payroll_policy(cursor, case_no, for_update=for_update),
+    )
+
+
+def _service_hours_per_day(order) -> int:
+    try:
+        return int(order["service_hours_per_day"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise HistoricalActualStartPreparationError(
+            "historical_actual_start_source_invalid"
+        ) from error
 
 
 def _bootstrap_candidate(
@@ -207,7 +279,7 @@ def _bootstrap_candidate(
 
 def _allocate_service_dates(source_assignments, service_dates):
     if service_dates != tuple(sorted(set(service_dates))) or not service_dates:
-        raise ValueError("historical_service_dates_invalid")
+        raise HistoricalActualStartPreparationError("historical_service_dates_invalid")
     if len(source_assignments) == 1:
         return ((source_assignments[0], service_dates),)
     claimed: set[date] = set()
@@ -219,13 +291,13 @@ def _allocate_service_dates(source_assignments, service_dates):
             if source["assigned_start_date"] <= value <= source["assigned_end_date"]
         )
         if not assigned_dates:
-            raise ValueError("historical_assignment_service_dates_missing")
+            raise HistoricalActualStartPreparationError("historical_assignment_service_dates_missing")
         if any(value in claimed for value in assigned_dates):
-            raise ValueError("historical_assignment_service_dates_overlap")
+            raise HistoricalActualStartPreparationError("historical_assignment_service_dates_overlap")
         claimed.update(assigned_dates)
         allocations.append((source, assigned_dates))
     if claimed != set(service_dates):
-        raise ValueError("historical_assignment_service_dates_incomplete")
+        raise HistoricalActualStartPreparationError("historical_assignment_service_dates_incomplete")
     return tuple(allocations)
 
 

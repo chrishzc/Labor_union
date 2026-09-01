@@ -47,7 +47,9 @@ export function mapHistoricalOrderWorkbookPreviewError(error: unknown): Error {
   if (error instanceof HistoricalOrderWorkbookPreviewError || error instanceof ApiDecodeError) return error;
   if (error instanceof ApiHttpError) {
     if (error.status === 401) return new HistoricalOrderWorkbookUnauthenticatedError();
-    const message = error.status === 403
+    const message = error.code === 'historical_assignment_required_for_actual_start'
+      ? '歷史訂單缺少已完成的歷史服務指派，無法重建實際開工資料。'
+      : error.status === 403
       ? '目前 Session 沒有預覽歷史訂單檔案的權限。'
       : error.status === 422
         ? '歷史訂單檔案未通過伺服器預覽驗證。'

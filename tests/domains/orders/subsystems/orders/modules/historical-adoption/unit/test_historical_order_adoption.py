@@ -455,6 +455,11 @@ def test_completed_historical_actual_start_delegates_formal_rebuild(tmp_path):
     class Rebuilder:
         def __init__(self):
             self.calls = []
+            self.preview_calls = []
+
+        def preview(self, **values):
+            self.preview_calls.append(values)
+            return None
 
         def apply_in_current_unit_of_work(self, **values):
             self.calls.append(values)
@@ -481,6 +486,11 @@ def test_completed_historical_actual_start_delegates_formal_rebuild(tmp_path):
     )
 
     assert repository.persist_count == 1
+    assert rebuilder.preview_calls == [{
+        "case_no": "CASE-1",
+        "actual_start_date": date(2026, 8, 7),
+        "correlation_id": "historical-order-workbook-preview",
+    }]
     assert rebuilder.calls == [{
         "case_no": "CASE-1",
         "actual_start_date": date(2026, 8, 7),
@@ -595,6 +605,9 @@ def test_replayed_historical_actual_start_repairs_a_predelegation_receipt(tmp_pa
         def __init__(self):
             self.calls = []
 
+        def preview(self, **_values):
+            return None
+
         def apply_in_current_unit_of_work(self, **values):
             self.calls.append(values)
 
@@ -656,6 +669,9 @@ def test_replayed_historical_actual_start_does_not_repeat_completed_rebuild(tmp_
     class Rebuilder:
         def __init__(self):
             self.calls = []
+
+        def preview(self, **_values):
+            return None
 
         def apply_in_current_unit_of_work(self, **values):
             self.calls.append(values)

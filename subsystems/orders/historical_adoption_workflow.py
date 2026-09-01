@@ -120,7 +120,9 @@ class HistoricalOrderAdoptionWorkflow:
         self._actual_start_rebuilder = actual_start_rebuilder
 
     def preview(self, row: HistoricalOrderWorkbookRow) -> HistoricalOrderAdoptionPreview:
-        return self._build_preview(row, for_update=False)
+        preview = self._build_preview(row, for_update=False)
+        self._preview_actual_service_period(row, preview)
+        return preview
 
     def apply(self, request: HistoricalOrderAdoptionRequest) -> HistoricalOrderAdoptionReceipt:
         with self._unit_of_work_factory() as unit_of_work:
@@ -174,44 +176,57 @@ class HistoricalOrderAdoptionWorkflow:
         )
 
     def _rebuild_actual_service_period(self, request, preview) -> None:
-        if self._actual_start_rebuilder is None:
-            return
-        if (
-            preview.outcome is not HistoricalOrderOutcome.ADOPTED
-            or preview.case_no is None
-            or request.row.asserted_status is not HistoricalOrderSourceStatus.DEPOSIT_PAID
-        ):
-            return
-        actual_start_date = request.row.actual_start_date
-        if not isinstance(actual_start_date, date):
-            return
-        current = self._repository.load_order(
-            preview.case_no,
-            request.row.client_name,
+        rebuild = self._actual_service_period_rebuild(
+            request.row,
+            preview,
             for_update=True,
         )
-        if (
-            current is None
-            or not isinstance(current.planned_start_date, date)
-            or current.planned_start_date == actual_start_date
-        ):
+        if rebuild is None or self._actual_start_rebuilder is None:
             return
-        # The canonical Actual Start writer has already materialized the
-        # service period for this immutable historical assertion.  Repeating
-        # it would reuse its source-derived idempotency key against newer
-        # owner versions and be rejected as a different command.
-        if (
-            current.actual_start_date == actual_start_date
-            and current.actual_end_date is not None
-        ):
-            return
+        _current, case_no, actual_start_date = rebuild
         self._actual_start_rebuilder.apply_in_current_unit_of_work(
-            case_no=preview.case_no,
+            case_no=case_no,
             actual_start_date=actual_start_date,
             source_identity=request.row.source_identity,
             actor=request.actor,
             correlation_id=request.correlation_id,
         )
+
+    def _preview_actual_service_period(self, row, preview) -> None:
+        rebuild = self._actual_service_period_rebuild(row, preview, for_update=False)
+        if rebuild is None or self._actual_start_rebuilder is None:
+            return
+        _current, case_no, actual_start_date = rebuild
+        self._actual_start_rebuilder.preview(
+            case_no=case_no,
+            actual_start_date=actual_start_date,
+            correlation_id="historical-order-workbook-preview",
+        )
+
+    def _actual_service_period_rebuild(self, row, preview, *, for_update):
+        if (
+            preview.outcome is not HistoricalOrderOutcome.ADOPTED
+            or preview.case_no is None
+            or row.asserted_status is not HistoricalOrderSourceStatus.DEPOSIT_PAID
+            or not isinstance(row.actual_start_date, date)
+        ):
+            return None
+        current = self._repository.load_order(
+            preview.case_no,
+            row.client_name,
+            for_update=for_update,
+        )
+        if (
+            current is None
+            or not isinstance(current.planned_start_date, date)
+            or current.planned_start_date == row.actual_start_date
+            or (
+                current.actual_start_date == row.actual_start_date
+                and current.actual_end_date is not None
+            )
+        ):
+            return None
+        return current, current.case_no, row.actual_start_date
 
     def _replay(self, request, command_fingerprint):
         stored = self._repository.find_receipt(

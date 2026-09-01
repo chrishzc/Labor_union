@@ -164,6 +164,9 @@ def test_repository_uses_one_bounded_read_without_commit_or_n_plus_one():
     assert "LIMIT %s" in sql
     assert "deposit_projection.contracted_amount_ntd AS deposit_amount_ntd" in sql
     assert "deposit.amount_due_ntd AS deposit_amount_ntd" not in sql
+    assert (
+        "assignment.generation_id = scheduling.effective_generation_id" in sql
+    )
     assert re.search(r"\b(?:INSERT|UPDATE|DELETE)\b", sql, re.IGNORECASE) is None
     assert params == ("C-100", 33)
 

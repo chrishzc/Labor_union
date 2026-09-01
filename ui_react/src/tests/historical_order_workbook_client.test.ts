@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import { HISTORICAL_ORDER_WORKBOOK_APPLY_PATH, HISTORICAL_ORDER_WORKBOOK_PREVIEW_PATH, HistoricalOrderWorkbookSnapshot, applyHistoricalOrderWorkbook, previewHistoricalOrderWorkbook } from '../api/orders/historical_order_workbook/client';
-import { HistoricalOrderWorkbookApplyError, HistoricalOrderWorkbookUnauthenticatedError } from '../api/orders/historical_order_workbook/errors';
+import { HistoricalOrderWorkbookApplyError, HistoricalOrderWorkbookPreviewError, HistoricalOrderWorkbookUnauthenticatedError } from '../api/orders/historical_order_workbook/errors';
 import { HistoricalOrderWorkbookPreviewSchema, HistoricalOrderWorkbookReceiptSchema } from '../api/orders/historical_order_workbook/schemas';
 
 function setSession(): void {
@@ -47,6 +47,28 @@ describe('Historical Orders workbook Preview client', () => {
     globalThis.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }));
     const request = applyHistoricalOrderWorkbook(snapshot, 'c'.repeat(64), { idempotencyKey: 'orders-apply-1', correlationId: 'orders-correlation-1' });
     await expect(request).rejects.toBeInstanceOf(HistoricalOrderWorkbookApplyError);
+  });
+
+  it('Preview會顯示歷史指派不足的實際開工 blocker', async () => {
+    const snapshot = await HistoricalOrderWorkbookSnapshot.fromFile(new File(['orders'], 'orders.xlsx'));
+    const error = {
+      category: 'domain_blocked',
+      code: 'historical_assignment_required_for_actual_start',
+      message: '歷史訂單缺少重建實際開工所需的目前資料。',
+      field_errors: [],
+      domain_blockers: ['historical_assignment_required_for_actual_start'],
+      retryable: false,
+      correlation_id: 'historical-preview-blocker',
+      current_version: null,
+    };
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: { error } }), { status: 409, headers: { 'content-type': 'application/json' } }));
+
+    await expect(previewHistoricalOrderWorkbook(snapshot)).rejects.toMatchObject({
+      name: HistoricalOrderWorkbookPreviewError.name,
+      code: 'historical_assignment_required_for_actual_start',
+      message: '歷史訂單缺少已完成的歷史服務指派，無法重建實際開工資料。',
+      status: 409,
+    });
   });
 
   it('無Session時零fetch', async () => {

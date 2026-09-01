@@ -3,8 +3,15 @@ from __future__ import annotations
 from datetime import date
 from types import SimpleNamespace
 
+import pytest
+
+from shared_kernel.errors import ErrorCategory
 from shared_kernel.fingerprints import fingerprint_payload
-from subsystems.orders.historical_actual_start_rebuild import HistoricalActualStartRebuilder
+from subsystems.orders.historical_actual_start_rebuild import (
+    HistoricalActualStartPreparationError,
+    HistoricalActualStartRebuilder,
+)
+from subsystems.orders.actual_start_workflow import ActualStartWorkflowError
 from subsystems.payroll.terms_impact import PayrollTermsSourceFacts
 
 
@@ -64,6 +71,77 @@ def test_historical_rebuilder_prepares_source_generation_before_preview():
     )
 
     assert [item[0] for item in calls] == ["prepare", "preview", "apply"]
+
+
+def test_historical_rebuilder_preview_reports_missing_historical_assignment_as_blocker():
+    class Planner:
+        def calculate(self, case_no, actual_start_date, *, for_update):
+            assert (case_no, actual_start_date, for_update) == (
+                "CASE-1",
+                date(2026, 8, 8),
+                False,
+            )
+            return (date(2026, 8, 8),)
+
+        def preview_source_generation(self, case_no, service_dates):
+            assert (case_no, service_dates) == ("CASE-1", (date(2026, 8, 8),))
+            raise HistoricalActualStartPreparationError(
+                "historical_assignment_required_for_actual_start"
+            )
+
+    class ActualStart:
+        def preview(self, *_args, **_kwargs):
+            raise AssertionError("blocked preparation must stop before Actual Start preview")
+
+    with pytest.raises(ActualStartWorkflowError) as caught:
+        HistoricalActualStartRebuilder(ActualStart(), Planner()).preview(
+            case_no="CASE-1",
+            actual_start_date=date(2026, 8, 8),
+            correlation_id="historical-preview-blocker",
+        )
+
+    assert caught.value.error.category is ErrorCategory.DOMAIN_BLOCKED
+    assert caught.value.error.code == "historical_assignment_required_for_actual_start"
+    assert caught.value.error.domain_blockers == (
+        "historical_assignment_required_for_actual_start",
+    )
+
+
+def test_mysql_historical_planner_preview_checks_assignment_before_any_write():
+    from infrastructure.mysql.historical_actual_start_date_planner import (
+        MySqlHistoricalActualStartDatePlanner,
+    )
+
+    class Cursor:
+        def __init__(self):
+            self.statements = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement, _parameters):
+            self.statements.append(statement)
+
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            return ()
+
+    cursor = Cursor()
+    connection = SimpleNamespace(cursor=lambda: cursor)
+
+    with pytest.raises(HistoricalActualStartPreparationError) as caught:
+        MySqlHistoricalActualStartDatePlanner(connection).preview_source_generation(
+            "CASE-1",
+            (date(2026, 8, 8),),
+        )
+
+    assert caught.value.code == "historical_assignment_required_for_actual_start"
+    assert all(statement.lstrip().upper().startswith("SELECT") for statement in cursor.statements)
 
 
 def test_historical_bootstrap_single_assignment_uses_recalculated_service_dates():

@@ -5,22 +5,37 @@ Description: 驗證訂單歷史 workbook HTTP Preview／Apply typed result、con
 
 from __future__ import annotations
 
+import json
+from datetime import date
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_admin
 from api.dependencies.historical_order_adoption import get_historical_order_workbook_import_service
 from api.exception_handlers.typed_errors import CorrelationBoundaryMiddleware, install_typed_error_handlers
 from api.routes.historical_order_adoption import router
+from domains.orders.historical_adoption import HistoricalOrderOutcome
 from shared_kernel.errors import ErrorCategory, TypedError
+from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId
 from subsystems.orders.actual_start_workflow import ActualStartWorkflowError
+from subsystems.orders.historical_adoption_workflow import (
+    HistoricalOrderAdoptionPreview,
+    HistoricalOrderAdoptionReceipt,
+    HistoricalPairingCandidate,
+    HistoricalPairingResolution,
+)
 from subsystems.orders.historical_order_workbook_import import (
-    HistoricalOrderStatusCounts, HistoricalOrderWorkbookConflict, HistoricalOrderWorkbookPreview,
+    HistoricalOrderStatusCounts,
+    HistoricalOrderWorkbookConflict,
+    HistoricalOrderWorkbookImportService,
+    HistoricalOrderWorkbookPreview,
     HistoricalOrderWorkbookReceipt,
 )
 
@@ -152,25 +167,93 @@ def test_apply_actual_start_idempotency_mismatch_is_a_conflict_not_a_server_erro
     assert response.json()["detail"]["error"]["code"] == "idempotency_mismatch"
 
 
-def test_apply_value_error_keeps_its_code_in_the_production_typed_error_envelope():
+def test_preview_actual_start_blocker_uses_domain_blocked_error_envelope():
     service = _Service()
 
-    def fail_apply(*_args):
-        raise ValueError("historical_assignment_required_for_actual_start")
+    def fail_preview(*_args):
+        raise ActualStartWorkflowError(
+            TypedError(
+                ErrorCategory.DOMAIN_BLOCKED,
+                "historical_assignment_required_for_actual_start",
+                "歷史訂單缺少重建實際開工所需的目前資料。",
+                CorrelationId("historical-order-router-test"),
+                domain_blockers=("historical_assignment_required_for_actual_start",),
+            )
+        )
 
-    service.apply = fail_apply
+    service.preview = fail_preview
     response = _production_client(service).post(
-        "/api/v1/orders/historical-adoption/workbooks/apply",
+        "/api/v1/orders/historical-adoption/workbooks/preview",
         headers=_headers(),
-        data={"preview_fingerprint": "2" * 64},
         files=_file(),
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 409
     error = response.json()["detail"]["error"]
-    assert error["category"] == "validation"
+    assert error["category"] == "domain_blocked"
     assert error["code"] == "historical_assignment_required_for_actual_start"
+    assert error["domain_blockers"] == ["historical_assignment_required_for_actual_start"]
     assert error["correlation_id"] == "historical-order-router-test"
+
+
+def test_actual_xlsx_upload_covers_every_historical_workbook_preview_category():
+    """Exercise the real XLSX parser and both HTTP endpoints without a shared DB."""
+    repository = _WorkbookRepository()
+    service = HistoricalOrderWorkbookImportService(
+        repository,
+        _PreviewMatrixWorkflow(),
+        _UnitOfWork,
+    )
+    client = _client(service)
+    upload = _preview_matrix_workbook()
+
+    preview_response = client.post(
+        "/api/v1/orders/historical-adoption/workbooks/preview",
+        headers={"X-Correlation-ID": "historical-matrix-preview"},
+        files={"workbook": ("historical-preview-matrix.xlsx", upload, _XLSX_MEDIA_TYPE)},
+    )
+
+    assert preview_response.status_code == 200
+    preview = preview_response.json()["data"]
+    assert preview == {
+        **preview,
+        "source_row_count": 6,
+        "adopted_count": 3,
+        "unmatched_case_count": 1,
+        "review_required_count": 1,
+        "current_conflict_count": 1,
+        "assignment_candidate_count": 1,
+        "evidence_only_pairing_count": 1,
+        "status_counts": {
+            "cancelled_0": 1,
+            "deposit_paid_1": 3,
+            "discussion_2": 1,
+            "invalid_or_blank": 1,
+        },
+    }
+
+    apply_response = client.post(
+        "/api/v1/orders/historical-adoption/workbooks/apply",
+        headers={
+            "Idempotency-Key": "historical-preview-matrix-apply",
+            "X-Correlation-ID": "historical-matrix-apply",
+        },
+        data={"preview_fingerprint": preview["preview_fingerprint"]},
+        files={"workbook": ("historical-preview-matrix.xlsx", upload, _XLSX_MEDIA_TYPE)},
+    )
+
+    assert apply_response.status_code == 200
+    receipt = apply_response.json()["data"]
+    assert receipt["source_row_count"] == 6
+    assert receipt["adopted_count"] == 3
+    assert receipt["unmatched_case_count"] == 1
+    assert receipt["review_required_count"] == 1
+    assert receipt["current_conflict_count"] == 1
+    assert receipt["assignments_created"] == 1
+    assert receipt["replayed_rows"] == 0
+    assert receipt["replayed_workbook"] is False
+    assert receipt["status_counts"] == preview["status_counts"]
+    assert len(repository.receipts) == 1
 
 
 def _client(service):
@@ -197,3 +280,132 @@ def _headers():
 
 def _file():
     return {"workbook": ("orders.xlsx", b"test", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+
+
+_XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+class _UnitOfWork:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def commit(self):
+        return None
+
+
+class _WorkbookRepository:
+    def __init__(self):
+        self.claims: dict[str, str] = {}
+        self.receipts: dict[str, dict[str, str]] = {}
+        self.locked: set[str] = set()
+
+    def acquire_lock(self, key):
+        if key in self.locked:
+            return False
+        self.locked.add(key)
+        return True
+
+    def release_lock(self, key):
+        self.locked.remove(key)
+
+    def load_receipt(self, key):
+        return self.receipts.get(key)
+
+    def claim(self, key, digest, _correlation_id):
+        prior = self.claims.get(key)
+        if prior is not None and prior != digest:
+            return "conflict"
+        self.claims[key] = digest
+        return "created"
+
+    def save_receipt(self, key, digest, _preview_fingerprint, _actor, result):
+        self.receipts[key] = {
+            "request_fingerprint": digest,
+            "result_snapshot": json.dumps(result),
+        }
+
+
+class _PreviewMatrixWorkflow:
+    _OUTCOMES = {
+        "MATRIX-CANCELLED": (HistoricalOrderOutcome.ADOPTED, (), ()),
+        "MATRIX-DEPOSIT": (
+            HistoricalOrderOutcome.ADOPTED,
+            (HistoricalPairingResolution.ASSIGNMENT_CANDIDATE,),
+            (),
+        ),
+        "MATRIX-DISCUSSION": (
+            HistoricalOrderOutcome.ADOPTED,
+            (HistoricalPairingResolution.EVIDENCE_ONLY,),
+            (),
+        ),
+        "MATRIX-UNMATCHED": (HistoricalOrderOutcome.UNMATCHED_CASE, (), ()),
+        "MATRIX-REVIEW": (
+            HistoricalOrderOutcome.REVIEW_REQUIRED,
+            (),
+            ("historical_status_invalid",),
+        ),
+        "MATRIX-CONFLICT": (HistoricalOrderOutcome.CURRENT_CONFLICT, (), ()),
+    }
+
+    def preview(self, row):
+        outcome, resolutions, issues = self._OUTCOMES[row.case_no]
+        pairings = tuple(
+            HistoricalPairingCandidate(
+                index,
+                "月**",
+                100 + index,
+                row.actual_start_date,
+                row.actual_end_date,
+                resolution,
+                (),
+            )
+            for index, resolution in enumerate(resolutions, start=1)
+        )
+        return HistoricalOrderAdoptionPreview(
+            row.source_identity,
+            row.source_fingerprint,
+            outcome,
+            None if outcome is HistoricalOrderOutcome.UNMATCHED_CASE else row.case_no,
+            0,
+            0,
+            "洽談中",
+            "洽談中",
+            (),
+            pairings,
+            issues,
+            fingerprint_payload({"source_identity": row.source_identity, "outcome": outcome.value}),
+        )
+
+    def apply(self, request):
+        preview = self.preview(request.row)
+        return HistoricalOrderAdoptionReceipt(
+            preview.outcome,
+            preview.case_no,
+            preview.resulting_version,
+            sum(
+                pairing.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+                for pairing in preview.pairings
+            ),
+            "historical-review" if preview.outcome is HistoricalOrderOutcome.REVIEW_REQUIRED else None,
+            False,
+            request.preview_fingerprint,
+        )
+
+
+def _preview_matrix_workbook() -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "歷史訂單預覽矩陣"
+    sheet.append(["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"])
+    sheet.append(["客戶甲", "MATRIX-CANCELLED", date(2025, 1, 2), date(2025, 1, 31), 0, None])
+    sheet.append(["客戶乙", "MATRIX-DEPOSIT", date(2025, 2, 2), date(2025, 2, 28), 1, "月嫂甲"])
+    sheet.append(["客戶丙", "MATRIX-DISCUSSION", date(2025, 3, 3), date(2025, 3, 31), 2, "月嫂乙"])
+    sheet.append(["客戶丁", "MATRIX-UNMATCHED", None, None, 1, None])
+    sheet.append(["客戶戊", "MATRIX-REVIEW", None, None, "無效狀態", None])
+    sheet.append(["客戶己", "MATRIX-CONFLICT", None, None, 1, None])
+    stream = BytesIO()
+    workbook.save(stream)
+    return stream.getvalue()
