@@ -363,13 +363,16 @@ def _load_batch_facts(cursor, batch_identity, for_update):
     counts = cursor.fetchone()
     cursor.execute(
         _BATCH_ROWS_SQL,
-        (header["batch_id"], header["batch_id"]),
+        (header["batch_id"],),
     )
     raw_rows = tuple(cursor.fetchall())
     if len(raw_rows) != int(counts["canonical_member_count"]):
         raise ValueError("classification_event_missing")
     issues = _load_integrity_issues(cursor, int(header["batch_id"]))
-    rows = tuple(_canonical_row(row, issues) for row in raw_rows)
+    rows = tuple(
+        _canonical_row(row, issues, int(header["batch_id"]))
+        for row in raw_rows
+    )
     return FinanceImportBatchFacts(
         str(header["batch_identity"]),
         int(header["batch_version"]),
@@ -386,16 +389,19 @@ def _load_batch_facts(cursor, batch_identity, for_update):
 
 
 # Kept whole so no mutable raw bank field leaks into the canonical row contract.
-def _canonical_row(row, issues):
+def _canonical_row(row, issues, batch_id):
     row_id = int(row["finance_import_row_id"])
     amount = _integer_bank_amount(row["credit"], row["debit"])
     violations = issues.get(row_id, ())
+    classification_type = FinanceClassificationType(
+        str(row["classification_type"])
+    )
     return CanonicalFinanceImportRow(
         _row_identity(row_id),
         int(row["canonical_fact_version"]),
         MoneyNTD(amount),
-        FinanceClassificationType(str(row["classification_type"])),
-        FinanceImportDisposition(str(row["disposition"])),
+        classification_type,
+        _preview_disposition(row, classification_type, batch_id),
         PreviewFingerprint(str(row["decision_facts_fingerprint"])),
         _json_text_tuple(row["target_identities"]),
         _json_text_tuple(row["evidence"]),
@@ -408,6 +414,15 @@ def _canonical_row(row, issues):
         "fingerprint_collision" in violations,
         "formal_reference_conflict" in violations,
     )
+
+
+def _preview_disposition(row, classification_type, batch_id):
+    stored = FinanceImportDisposition(str(row["disposition"]))
+    if int(row["canonical_batch_id"]) == batch_id:
+        return stored
+    if classification_type is FinanceClassificationType.NON_BUSINESS_REVIEW:
+        return stored
+    return FinanceImportDisposition.EXISTING
 
 
 def _load_integrity_issues(cursor, batch_id):
@@ -792,11 +807,11 @@ _BATCH_COUNTS_SQL = (
 )
 _BATCH_ROWS_SQL = (
     "SELECT bank_fact.id AS finance_import_row_id,"
+    "bank_fact.batch_id AS canonical_batch_id,"
     "bank_fact.credit,bank_fact.debit,"
     "classification.canonical_fact_version,"
     "classification.classification_type,"
-    "CASE WHEN bank_fact.batch_id<>%s THEN 'existing' "
-    "ELSE classification.disposition END AS disposition,"
+    "classification.disposition,"
     "classification.decision_facts_fingerprint,"
     "classification.target_identities,classification.evidence,"
     "classification.available_actions "

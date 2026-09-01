@@ -3,6 +3,16 @@ from decimal import Decimal
 
 import pytest
 
+from domains.finance_import.planning import (
+    CanonicalFinanceImportRow,
+    FinanceClassificationType,
+    FinanceImportBatchFacts,
+    FinanceImportDisposition,
+    build_finance_import_plan,
+)
+from infrastructure.mysql.finance_import_repository import _preview_disposition
+from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.money import MoneyNTD
 from subsystems.finance_import.query import (
     FinanceImportQueryNotFound,
     FinanceImportQueryService,
@@ -94,6 +104,58 @@ def test_review_row_parses_json_actions_and_credit_precedence() -> None:
 
     assert summary.amount_ntd == 200
     assert summary.available_actions == ("apply", "ignore")
+
+
+def test_replayed_manual_review_row_preserves_ready_rows_for_apply() -> None:
+    manual_review = _preview_disposition(
+        {
+            "canonical_batch_id": 4,
+            "disposition": "manual_review",
+        },
+        FinanceClassificationType.NON_BUSINESS_REVIEW,
+        9,
+    )
+    review_row = CanonicalFinanceImportRow(
+        "finance-import-row:4",
+        0,
+        MoneyNTD(100),
+        FinanceClassificationType.NON_BUSINESS_REVIEW,
+        manual_review,
+        PreviewFingerprint("a" * 64),
+        evidence=("counterparty_account_no_match",),
+        available_actions=("preview_manual_correction",),
+    )
+    ready_row = CanonicalFinanceImportRow(
+        "finance-import-row:5",
+        0,
+        MoneyNTD(200),
+        FinanceClassificationType.CLIENT_RECEIPT,
+        FinanceImportDisposition.CREATE,
+        PreviewFingerprint("b" * 64),
+        target_identities=("client:5",),
+        evidence=("exact_virtual_account",),
+        available_actions=("preview_apply",),
+    )
+
+    plan = build_finance_import_plan(
+        FinanceImportBatchFacts(
+            "finance-import-batch:9",
+            0,
+            2,
+            1,
+            1,
+            "c" * 64,
+            "classifier-v1",
+            "fingerprint-v1",
+            (review_row, ready_row),
+        )
+    )
+
+    assert manual_review is FinanceImportDisposition.MANUAL_REVIEW
+    assert plan.apply_allowed is True
+    assert tuple(row.row_identity for row in plan.dispatchable_rows) == (
+        "finance-import-row:5",
+    )
 
 
 def _summary_row() -> dict[str, object]:
