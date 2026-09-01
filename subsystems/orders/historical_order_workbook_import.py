@@ -165,7 +165,7 @@ class HistoricalOrderWorkbookImportService:
     def _require_preview(self, workbook, row_previews, supplied):
         preview = _preview(workbook, row_previews)
         if preview.preview_fingerprint != supplied:
-            raise ValueError("historical_order_preview_stale")
+            raise HistoricalOrderWorkbookConflict("historical_order_preview_stale")
         return preview
 
     def _apply_rows(

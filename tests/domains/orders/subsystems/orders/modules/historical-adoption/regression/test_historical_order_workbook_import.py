@@ -133,12 +133,12 @@ def test_workbook_apply_replays_terminal_receipt_and_conflicts_before_row_apply(
     assert workflow.apply_calls == 1
 
 
-def test_apply_rejects_a_stale_preview_before_row_apply(monkeypatch):
+def test_apply_reports_a_stale_preview_as_a_conflict_before_row_apply(monkeypatch):
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda path: _workbook("c" * 64))
     workflow = _Workflow()
     service = module.HistoricalOrderWorkbookImportService(_Repository(), workflow, _UnitOfWork)
 
-    with pytest.raises(ValueError, match="historical_order_preview_stale"):
+    with pytest.raises(module.HistoricalOrderWorkbookConflict, match="historical_order_preview_stale"):
         service.apply("first.xlsx", "workbook-key", "0" * 64, "operator", "correlation")
 
     assert workflow.apply_calls == 0

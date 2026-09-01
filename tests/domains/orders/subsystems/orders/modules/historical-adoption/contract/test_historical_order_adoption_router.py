@@ -22,8 +22,13 @@ from subsystems.orders.historical_order_workbook_import import (
 
 
 class _Service:
-    def __init__(self, conflict: bool = False) -> None:
+    def __init__(
+        self,
+        conflict: bool = False,
+        conflict_code: str = "historical_order_workbook_idempotency_conflict",
+    ) -> None:
         self.conflict = conflict
+        self.conflict_code = conflict_code
         self.paths: list[Path] = []
 
     def preview(self, path):
@@ -36,7 +41,7 @@ class _Service:
     def apply(self, path, key, preview, actor, correlation):
         self.paths.append(Path(path))
         if self.conflict:
-            raise HistoricalOrderWorkbookConflict("historical_order_workbook_idempotency_conflict")
+            raise HistoricalOrderWorkbookConflict(self.conflict_code)
         return HistoricalOrderWorkbookReceipt(
             "0" * 64, 1, 1, 0, 0, 0, 0, 0, False,
             HistoricalOrderStatusCounts(0, 1, 0, 0),
@@ -67,6 +72,17 @@ def test_apply_conflict_is_typed_and_removes_temporary_workbook():
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "historical_order_workbook_idempotency_conflict"
     assert service.paths[0].exists() is False
+
+
+def test_apply_stale_preview_is_a_conflict_not_a_validation_error():
+    service = _Service(conflict=True, conflict_code="historical_order_preview_stale")
+    response = _client(service).post(
+        "/api/v1/orders/historical-adoption/workbooks/apply", headers=_headers(),
+        data={"preview_fingerprint": "2" * 64}, files=_file(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "historical_order_preview_stale"
 
 
 def test_database_dependency_unavailable_is_typed(monkeypatch):
