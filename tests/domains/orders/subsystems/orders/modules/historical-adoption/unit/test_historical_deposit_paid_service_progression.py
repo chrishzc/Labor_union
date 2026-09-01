@@ -3,11 +3,14 @@ from __future__ import annotations
 from datetime import date, datetime, time, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from domains.client_finance.obligation_planning import (
     ClientFinanceTermsSourceFacts,
     ClientPaymentTerms,
 )
 from domains.orders.actual_start import (
+    ActualStartCandidateError,
     ActualStartReconfirmationFacts,
     ActualStartReconfirmationState,
 )
@@ -24,9 +27,17 @@ from domains.scheduling.generation import (
 )
 from shared_kernel.money import MoneyNTD
 from subsystems.orders.actual_start_workflow import (
+    ActualStartApplyRequest,
     ActualStartWorkflow,
     ActualStartWorkflowContext,
 )
+from shared_kernel.identities import (
+    ActorContext,
+    CorrelationId,
+    ExpectedVersion,
+    IdempotencyKey,
+)
+from subsystems.orders.terms_workflow import CommandClaimState
 from subsystems.orders.historical_adoption_workflow import (
     HistoricalOrderAdoptionReceipt,
     HistoricalOrderAdoptionRequest,
@@ -293,6 +304,7 @@ def test_matching_effective_assignment_is_reused_for_historical_actual_start():
         "case_no": "CASE-1", "actual_start_date": asserted_start,
         "source_identity": "historical-orders:test:row:70",
         "actor": "operator", "correlation_id": "historical-order:row:70:correlation",
+        "source_staff_ids": (),
     })
 
 
@@ -397,6 +409,143 @@ def test_historical_preview_corrects_a_stale_order_root_against_formal_schedule(
     assert preview.before_actual_start_date == asserted_start
     assert preview.actual_start.original_scheduling_root_date == asserted_start
     assert preview.actual_start.new_actual_start_date == asserted_start
+
+
+def test_legacy_actual_start_apply_rejects_stale_root_even_with_historical_dates():
+    """Negative control: the generic Apply path cannot consume this source context."""
+    asserted_start = date(2025, 10, 14)
+    facts = _actual_start_facts(
+        planned_start=date(2025, 9, 10),
+        current_actual_start=date(2025, 9, 8),
+        formal_start=asserted_start,
+    )
+
+    class Repository:
+        def preflight_impacted_staff_ids(self, _case_no):
+            return (16,)
+
+        def claim_actual_start_command(self, _request, _fingerprint):
+            return CommandClaimState.CREATED
+
+        def find_actual_start_receipt(self, _key, *, for_update):
+            assert for_update is True
+            return None
+
+        def load_for_apply(self, _case_no, _staff_ids):
+            return facts
+
+    request = ActualStartApplyRequest(
+        "CASE-1",
+        asserted_start,
+        ExpectedVersion(7),
+        ExpectedVersion(3),
+        ExpectedVersion(3),
+        ExpectedVersion(3),
+        fingerprint_payload({"preview": "historical"}),
+        IdempotencyKey("historical-negative-control"),
+        ActorContext("operator"),
+        "historical actual start",
+        CorrelationId("historical-negative-control"),
+    )
+
+    with pytest.raises(ActualStartCandidateError) as caught:
+        ActualStartWorkflow(Repository(), object, object()).apply_in_current_unit_of_work(
+            request,
+            recalculated_service_dates=(asserted_start,),
+        )
+
+    assert caught.value.blocker.value == "scheduling_root_mismatch"
+
+
+def test_historical_apply_rebuilds_fresh_candidate_from_formal_schedule_context():
+    asserted_start = date(2025, 10, 14)
+    facts = _actual_start_facts(
+        planned_start=date(2025, 9, 10),
+        current_actual_start=date(2025, 9, 8),
+        formal_start=asserted_start,
+    )
+
+    class Repository:
+        def load_for_preview(self, _case_no):
+            return facts
+
+        def preflight_impacted_staff_ids(self, _case_no):
+            return (16,)
+
+        def claim_actual_start_command(self, _request, _fingerprint):
+            return CommandClaimState.CREATED
+
+        def find_actual_start_receipt(self, _key, *, for_update):
+            assert for_update is True
+            return None
+
+        def load_for_apply(self, _case_no, staff_ids):
+            assert staff_ids == (16,)
+            return facts
+
+    class Clock:
+        def now(self):
+            return datetime(2025, 9, 1, tzinfo=timezone.utc)
+
+    workflow = ActualStartWorkflow(Repository(), object, Clock())
+    historical_preview = workflow.preview_historical_source(
+        "CASE-1",
+        asserted_start,
+        recalculated_service_dates=(asserted_start,),
+        source_staff_ids=(),
+    )
+    request = ActualStartApplyRequest(
+        "CASE-1",
+        asserted_start,
+        ExpectedVersion(historical_preview.order_version),
+        ExpectedVersion(historical_preview.scheduling_version),
+        ExpectedVersion(historical_preview.client_finance_version),
+        ExpectedVersion(historical_preview.payroll_version),
+        historical_preview.fingerprint,
+        IdempotencyKey("historical-source-context-apply"),
+        ActorContext("operator"),
+        "historical actual start",
+        CorrelationId("historical-source-context-apply"),
+    )
+    persisted = {}
+    workflow._persist = lambda _request, preview, *_args: persisted.setdefault(
+        "preview", preview
+    )
+
+    workflow.apply_historical_source_in_current_unit_of_work(
+        request,
+        recalculated_service_dates=(asserted_start,),
+        source_staff_ids=(),
+    )
+
+    assert persisted["preview"].actual_start.original_scheduling_root_date == asserted_start
+    assert persisted["preview"].actual_start.new_actual_start_date == asserted_start
+
+
+def test_historical_source_context_reuses_bridged_formal_assignment_identity():
+    asserted_start = date(2025, 10, 14)
+    facts = _actual_start_facts(
+        planned_start=date(2025, 9, 10),
+        current_actual_start=date(2025, 9, 8),
+        formal_start=asserted_start,
+    )
+
+    class Repository:
+        def load_for_preview(self, _case_no):
+            return facts
+
+    class Clock:
+        def now(self):
+            return datetime(2025, 9, 1, tzinfo=timezone.utc)
+
+    preview = ActualStartWorkflow(Repository(), object, Clock()).preview_historical_source(
+        "CASE-1",
+        asserted_start,
+        recalculated_service_dates=(asserted_start,),
+        source_staff_ids=(16,),
+    )
+
+    assert preview.actual_start.assignments[0].source_assignment_id == 51
 
 
 def test_deposit_paid_without_service_evidence_adopts_status_but_defers_actual_start():

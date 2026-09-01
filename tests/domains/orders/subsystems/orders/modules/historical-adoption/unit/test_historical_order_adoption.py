@@ -531,6 +531,7 @@ def test_completed_historical_actual_start_delegates_formal_rebuild(tmp_path):
         "source_identity": row.source_identity,
         "actor": "test-operator",
         "correlation_id": "historical-order:actual-start-rebuild:correlation",
+        "source_staff_ids": (11,),
     }]
 
 

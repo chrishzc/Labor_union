@@ -103,6 +103,7 @@ class HistoricalActualStartRebuilder:
         source_identity: str,
         actor: str,
         correlation_id: str,
+        source_staff_ids: tuple[int, ...] = (),
     ) -> None:
         try:
             self._apply_in_current_unit_of_work(
@@ -111,6 +112,7 @@ class HistoricalActualStartRebuilder:
                 source_identity=source_identity,
                 actor=actor,
                 correlation_id=correlation_id,
+                source_staff_ids=source_staff_ids,
             )
         except HistoricalActualStartPreparationError as error:
             raise _preparation_blocked(error.code, correlation_id) from error
@@ -125,6 +127,7 @@ class HistoricalActualStartRebuilder:
         source_identity: str,
         actor: str,
         correlation_id: str,
+        source_staff_ids: tuple[int, ...],
     ) -> None:
         service_dates = self.service_date_planner.calculate(
             case_no,
@@ -152,6 +155,46 @@ class HistoricalActualStartRebuilder:
                 actor=actor,
                 correlation_id=correlation_id,
             )
+        historical_preview = getattr(
+            self.actual_start_workflow,
+            "preview_historical_source",
+            None,
+        )
+        historical_apply = getattr(
+            self.actual_start_workflow,
+            "apply_historical_source_in_current_unit_of_work",
+            None,
+        )
+        if callable(historical_preview) and callable(historical_apply):
+            preview = historical_preview(
+                case_no,
+                actual_start_date,
+                recalculated_service_dates=service_dates,
+                source_staff_ids=source_staff_ids,
+            )
+            request = ActualStartApplyRequest(
+                case_no=case_no,
+                new_actual_start_date=actual_start_date,
+                expected_order_version=ExpectedVersion(preview.order_version),
+                expected_scheduling_version=ExpectedVersion(
+                    preview.scheduling_version
+                ),
+                expected_client_finance_version=ExpectedVersion(
+                    preview.client_finance_version
+                ),
+                expected_payroll_version=ExpectedVersion(preview.payroll_version),
+                preview_fingerprint=preview.fingerprint,
+                idempotency_key=idempotency_key,
+                actor=ActorContext(actor),
+                reason="historical actual-start service-date rebuild",
+                correlation_id=CorrelationId(correlation_id),
+            )
+            historical_apply(
+                request,
+                recalculated_service_dates=service_dates,
+                source_staff_ids=source_staff_ids,
+            )
+            return
         preview = self.actual_start_workflow.preview(
             case_no,
             actual_start_date,

@@ -291,6 +291,54 @@ class ActualStartWorkflow:
         self._persist(request, preview, command_fingerprint, receipt)
         return receipt
 
+    def apply_historical_source_in_current_unit_of_work(
+        self,
+        request: ActualStartApplyRequest,
+        *,
+        recalculated_service_dates: tuple[date, ...],
+        source_staff_ids: tuple[int, ...] = (),
+    ) -> OrderTermsReceipt:
+        """Apply a historical source through the canonical writer in one UoW.
+
+        Historical adoption may have a source assignment that is not present in
+        the current Scheduling generation yet.  The source context used by
+        ``preview_historical_source`` is therefore rebuilt after the command
+        claim and fresh locks, instead of asking the generic Apply path to
+        interpret the stale formal root.  Persistence remains the same
+        canonical ``_persist`` sequence as ordinary Actual Start.
+        """
+        command_fingerprint = _command_fingerprint(request)
+        preflight_staff_ids = self._repository.preflight_impacted_staff_ids(
+            request.case_no
+        )
+        replay = self._claim_or_replay(request, command_fingerprint)
+        if replay is not None:
+            return replay
+        # A historical source caregiver may not be visible to the ordinary
+        # effective-generation preflight query.  Include it in the same locked
+        # set so the fresh source context cannot race a staff mutation.
+        locked_staff_ids = tuple(
+            sorted(set(preflight_staff_ids) | set(source_staff_ids))
+        )
+        context = self._repository.load_for_apply(
+            request.case_no,
+            locked_staff_ids,
+        )
+        historical_context = _historical_source_context(
+            context,
+            recalculated_service_dates,
+            source_staff_ids,
+        )
+        preview = self._fresh_preview(
+            request,
+            historical_context,
+            locked_staff_ids,
+            recalculated_service_dates,
+        )
+        receipt = _build_receipt(preview)
+        self._persist(request, preview, command_fingerprint, receipt)
+        return receipt
+
     def _claim_or_replay(self, request, command_fingerprint):
         state = self._repository.claim_actual_start_command(request, command_fingerprint)
         if state is CommandClaimState.MISMATCH:
@@ -376,7 +424,15 @@ def _historical_source_context(context, service_dates, source_staff_ids):
     policy = facts.payroll.case_policy
     if policy is None:
         raise ValueError("payroll_case_policy_bootstrap_required")
-    source_assignment_id = 1
+    # When the planner has already bridged the generation-less historical
+    # assignment into an effective generation, retain that formal assignment
+    # identity for canonical Scheduling replacement.  Preview-only contexts
+    # have no assignment identity yet and use a stable synthetic identity.
+    source_assignment_id = (
+        facts.scheduling.segments[0].assignment_id
+        if len(facts.scheduling.segments) == 1
+        else 1
+    )
     segment = EffectiveAssignmentSegment(
         assignment_id=source_assignment_id,
         staff_id=source_staff_ids[0],

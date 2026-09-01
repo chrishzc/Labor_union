@@ -76,6 +76,85 @@ def test_historical_rebuilder_prepares_source_generation_before_preview():
     assert [item[0] for item in calls] == ["prepare", "preview", "apply"]
 
 
+def test_historical_rebuilder_uses_source_context_apply_entrypoint():
+    calls = []
+    service_dates = (date(2026, 8, 8), date(2026, 8, 11))
+
+    class Planner:
+        def calculate(self, _case_no, _actual_start_date, *, for_update):
+            assert for_update is True
+            return service_dates
+
+        def prepare_source_generation(self, *_args, **_kwargs):
+            calls.append("prepare")
+
+    class ActualStart:
+        def replay_from_immutable_source(self, _idempotency_key):
+            return None
+
+        def preview_historical_source(
+            self,
+            case_no,
+            actual_start_date,
+            *,
+            recalculated_service_dates,
+            source_staff_ids,
+        ):
+            calls.append(
+                (
+                    "preview_historical_source",
+                    case_no,
+                    actual_start_date,
+                    recalculated_service_dates,
+                    source_staff_ids,
+                )
+            )
+            return SimpleNamespace(
+                order_version=4,
+                scheduling_version=5,
+                client_finance_version=6,
+                payroll_version=7,
+                fingerprint=fingerprint_payload({"preview": "historical"}),
+            )
+
+        def apply_historical_source_in_current_unit_of_work(
+            self,
+            request,
+            *,
+            recalculated_service_dates,
+            source_staff_ids,
+        ):
+            calls.append(
+                (
+                    "apply_historical_source",
+                    request,
+                    recalculated_service_dates,
+                    source_staff_ids,
+                )
+            )
+
+    HistoricalActualStartRebuilder(ActualStart(), Planner()).apply_in_current_unit_of_work(
+        case_no="CASE-1",
+        actual_start_date=date(2026, 8, 8),
+        source_identity="historical-orders:digest:row:source-context",
+        actor="test-operator",
+        correlation_id="historical-rebuild-source-context",
+        source_staff_ids=(11,),
+    )
+
+    assert calls[0] == "prepare"
+    assert calls[1] == (
+        "preview_historical_source",
+        "CASE-1",
+        date(2026, 8, 8),
+        service_dates,
+        (11,),
+    )
+    assert calls[2][0] == "apply_historical_source"
+    assert calls[2][1].expected_order_version.value == 4
+    assert calls[2][2:] == (service_dates, (11,))
+
+
 def test_historical_rebuilder_replays_completed_actual_start_before_recomputing_versions():
     calls = []
 

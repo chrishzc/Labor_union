@@ -183,12 +183,22 @@ class HistoricalOrderAdoptionWorkflow:
         if rebuild is None or self._actual_start_rebuilder is None:
             return
         _current, case_no, actual_start_date = rebuild
-        self._actual_start_rebuilder.apply_in_current_unit_of_work(
+        rebuild_kwargs = dict(
             case_no=case_no,
             actual_start_date=actual_start_date,
             source_identity=request.row.source_identity,
             actor=request.actor,
             correlation_id=request.correlation_id,
+        )
+        source_staff_ids = tuple(
+            item.staff_id
+            for item in preview.pairings
+            if item.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+            and item.staff_id is not None
+        )
+        rebuild_kwargs["source_staff_ids"] = source_staff_ids
+        self._actual_start_rebuilder.apply_in_current_unit_of_work(
+            **rebuild_kwargs,
         )
 
     def _actual_service_period_rebuild(self, row, preview, *, for_update):
