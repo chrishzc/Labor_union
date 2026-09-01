@@ -236,7 +236,7 @@ def test_repository_skips_lifecycle_write_for_unchanged_adoption_preview():
     )
 
 
-def test_repository_can_clear_actual_start_without_writing_actual_end():
+def test_repository_leaves_actual_start_to_canonical_writer():
     class Cursor:
         rowcount = 1
         lastrowid = 81
@@ -284,8 +284,15 @@ def test_repository_can_clear_actual_start_without_writing_actual_end():
     update_sql, update_parameters = cursor.calls[0]
     assert event_id == 81
     assert "actual_end_date" not in update_sql
-    assert "actual_start_date=CASE" in update_sql
-    assert update_parameters[1:3] == (1, None)
+    assert "actual_start_date" not in update_sql
+    # Historical adoption records the patch but leaves the root transition to
+    # the canonical Actual Start writer.
+    assert update_parameters == (
+        OrderLifecycleStatus.COMPLETED,
+        4,
+        "CASE-1",
+        3,
+    )
 
 
 def test_columns_after_canonical_six_are_ignored(tmp_path):

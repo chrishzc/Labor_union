@@ -13,6 +13,7 @@
   - `subsystems/scheduling/service_before_replacement_workflow.py`
   - `infrastructure/mysql/service_before_replacement_loader.py`
   - `infrastructure/mysql/service_before_replacement_repository.py`
+  - `infrastructure/mysql/scheduling_replacement_writer.py`
 - entrypoints:
   - `api/routes/service_before_replacement.py`
   - `api/dependencies/service_before_replacement.py`

@@ -32,6 +32,7 @@ class HistoricalPairingResolution(StrEnum):
     STAFF_AMBIGUOUS = "staff_ambiguous"
     EVIDENCE_ONLY = "evidence_only"
     ASSIGNMENT_CANDIDATE = "assignment_candidate"
+    ASSIGNMENT_REUSED = "assignment_reused"
     ASSIGNMENT_CONFLICT = "assignment_conflict"
 
 
@@ -263,7 +264,6 @@ class HistoricalOrderAdoptionWorkflow:
             current,
             candidate,
             pairings,
-            self._repository.active_assignments(current.case_no, for_update=for_update),
         ):
             source = HistoricalOrderSourceFacts(
                 row.asserted_status,
@@ -358,11 +358,20 @@ class HistoricalOrderAdoptionWorkflow:
                 "historical_assignment_evidence_insufficient",
                 staff_ids[0],
             )
-        if (
-            candidate.outcome is not HistoricalOrderOutcome.ADOPTED
-            or not service_assignment_allowed
-            or existing
-        ):
+        if candidate.outcome is not HistoricalOrderOutcome.ADOPTED or not service_assignment_allowed:
+            return _pairing_issue(source, masked, HistoricalPairingResolution.ASSIGNMENT_CONFLICT, "historical_assignment_conflict", staff_ids[0])
+        matching = _matching_effective_assignment(existing, staff_ids[0], source)
+        if matching is not None:
+            return HistoricalPairingCandidate(
+                source.ordinal,
+                masked,
+                staff_ids[0],
+                source.start_date,
+                source.end_date,
+                HistoricalPairingResolution.ASSIGNMENT_REUSED,
+                source.issue_codes,
+            )
+        if existing:
             return _pairing_issue(source, masked, HistoricalPairingResolution.ASSIGNMENT_CONFLICT, "historical_assignment_conflict", staff_ids[0])
         return HistoricalPairingCandidate(source.ordinal, masked, staff_ids[0], source.start_date, source.end_date, HistoricalPairingResolution.ASSIGNMENT_CANDIDATE, source.issue_codes)
 
@@ -383,7 +392,6 @@ def _actual_start_evidence_is_insufficient(
     current,
     candidate,
     pairings,
-    existing_assignments,
 ) -> bool:
     """Status adoption survives incomplete historical service evidence.
 
@@ -407,12 +415,36 @@ def _actual_start_evidence_is_insufficient(
         and current.actual_end_date is not None
     ):
         return False
-    if existing_assignments:
-        return False
     return not any(
-        pairing.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+        pairing.resolution
+        in {
+            HistoricalPairingResolution.ASSIGNMENT_CANDIDATE,
+            HistoricalPairingResolution.ASSIGNMENT_REUSED,
+        }
         for pairing in pairings
     )
+
+
+def _matching_effective_assignment(existing, staff_id, source):
+    """Find formal Scheduling evidence that corroborates a source interval."""
+    if source.start_date is None or source.end_date is None:
+        return None
+    for assignment in existing:
+        if assignment.get("generation_id") is None:
+            continue
+        if assignment.get("status") in {"cancelled", "replaced"}:
+            continue
+        if assignment.get("staff_id") != staff_id:
+            continue
+        assigned_start = assignment.get("assigned_start_date")
+        assigned_end = assignment.get("assigned_end_date")
+        if (
+            assigned_start == source.start_date
+            and assigned_end is not None
+            and source.end_date <= assigned_end
+        ):
+            return assignment
+    return None
 
 
 def _has_actual_start_patch(preview) -> bool:

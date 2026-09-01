@@ -60,7 +60,7 @@ class MySqlHistoricalOrderAdoptionRepository:
         suffix = " FOR UPDATE" if for_update else ""
         with _cursor(self._connection) as cursor:
             cursor.execute(
-                "SELECT id,staff_id,assignment_sequence,assigned_start_date,assigned_end_date,status "
+                "SELECT id,staff_id,assignment_sequence,assigned_start_date,assigned_end_date,status,generation_id "
                 "FROM case_staff_assignments WHERE case_no=%s AND status<>'cancelled' "
                 "ORDER BY assignment_sequence,id" + suffix,
                 (case_no,),
@@ -133,18 +133,15 @@ class MySqlHistoricalOrderAdoptionRepository:
             or preview.resulting_version == preview.expected_version
         ):
             return None
-        date_patch = dict(preview.date_patch)
-        has_actual_start_patch = "actual_start_date" in date_patch
+        # Actual Start owns the actual_start_date root transition.  Historical
+        # adoption records the source patch in its immutable receipt, but must
+        # leave the root untouched until the canonical bridge runs below.
         with _cursor(self._connection) as cursor:
             cursor.execute(
-                "UPDATE orders SET status=%s,"
-                "actual_start_date=CASE WHEN %s=1 THEN %s ELSE actual_start_date END,"
-                "lifecycle_version=%s "
+                "UPDATE orders SET status=%s,lifecycle_version=%s "
                 "WHERE case_no=%s AND lifecycle_version=%s",
                 (
                     preview.after_status,
-                    int(has_actual_start_patch),
-                    date_patch.get("actual_start_date"),
                     preview.resulting_version,
                     preview.case_no,
                     preview.expected_version,
