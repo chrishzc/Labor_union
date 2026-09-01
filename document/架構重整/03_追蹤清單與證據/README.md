@@ -2,13 +2,13 @@
 
 本目錄只保存仍有 current consumer 的 review queue、release／migration gate、aggregate final receipt 與目前回歸需要的 evidence。這些資料提供可驗證事實，不建立業務 Authority；正式 owner、contract 與 current status 仍由 `01_規格基線/`、最新人工裁決及 current successor register 擁有。
 
-一般 T1／T2 工作不按 slice 建立 tracked receipt。Intermediate plan、handoff、progress note、raw log、HTTP dump、重複 candidate receipt 與已關閉 defect摘要應放在 ignored `scratch/`，或在完成後由 Git 歷史保存。大型 raw evidence、個資、secret、DB dump 與不必要 payload 不加入 Git。
+一般 T1／T2 工作不按 slice 建立 tracked receipt；依 [00_Agent任務分級與交付規範.md](../00_Agent任務分級與交付規範.md) 的 artifact 邊界，不按 slice 建 tracked receipt。Intermediate plan、handoff、progress note、raw log、HTTP dump、重複 candidate receipt 與已關閉 defect摘要應放在 ignored `scratch/`，或在完成後由 Git 歷史保存。大型 raw evidence、個資、secret、DB dump 與不必要 payload 不加入 Git。
 
 ## 目前常用入口
 
 | 文件 | 用途 |
 |---|---|
-| [Task 96 bounded closeout](../02_決策與退役執行記錄/96_Current_剩餘代辦任務總表.md) | Task 96 repository-local closeout與 deferred／not-run邊界；不再是 active施工隊列。 |
+| [Task 96 current register](../02_決策與退役執行記錄/96_Current_剩餘代辦任務總表.md) | Task 96 仍為 `in-progress`；各 lane 依 current evidence 保持 `partial`／`blocked`／`not_run`，不得宣告整體 closeout。 |
 | [正式規格索引](../01_規格基線/15_正式規格索引與裁決總表.md) | current正式規格、owner與裁決入口。 |
 | [LINE／Anomalies整合 aggregate receipt](evidence/PROV-20260830-line-anomalies-slimming-integration-receipt.md) | PR #63 repository-local整合結果及未完成外部邊界。 |
 | [Task 97 repository-local closeout receipt](evidence/task97_repository_local_closeout_receipt_a48caa8.md) | Task 97 aggregate architecture結果；production、DB engine與external acceptance仍不得外推。 |
