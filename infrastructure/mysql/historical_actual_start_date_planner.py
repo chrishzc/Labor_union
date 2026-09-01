@@ -77,13 +77,8 @@ class MySqlHistoricalActualStartDatePlanner:
         """Bridge generation-less historical assignment evidence into Scheduling once."""
         with self._connection.cursor() as cursor:
             aggregate = _locked_or_bootstrapped_aggregate(cursor, case_no)
-            if _effective_generation_has_assignments(cursor, aggregate, for_update=True):
-                _delete_unmanaged_case_schedules(cursor, case_no)
-                return
-            source_assignments, order, policy = _source_generation_facts(
-                cursor,
-                case_no,
-                for_update=True,
+            source_assignments, order = _source_assignment_and_order_facts(
+                cursor, case_no, for_update=True
             )
             candidate = _bootstrap_candidate(
                 case_no,
@@ -94,6 +89,9 @@ class MySqlHistoricalActualStartDatePlanner:
             )
             _delete_unmanaged_case_schedules(cursor, case_no)
             _replace_conflicting_current_schedule_state(cursor, case_no, candidate)
+            if _effective_generation_has_assignments(cursor, aggregate, for_update=True):
+                return
+            policy = _case_payroll_policy(cursor, case_no, for_update=True)
             command_fingerprint = _bootstrap_fingerprint(
                 source_identity,
                 int(order["lifecycle_version"]),
@@ -230,16 +228,25 @@ def _case_payroll_policy(cursor, case_no, *, for_update: bool):
 
 
 def _source_generation_facts(cursor, case_no, *, for_update: bool):
-    source_assignments = _historical_assignments(cursor, case_no, for_update=for_update)
+    source_assignments, order = _source_assignment_and_order_facts(
+        cursor, case_no, for_update=for_update
+    )
+    return (
+        source_assignments,
+        order,
+        _case_payroll_policy(cursor, case_no, for_update=for_update),
+    )
+
+
+def _source_assignment_and_order_facts(cursor, case_no, *, for_update: bool):
+    source_assignments = _historical_assignments(
+        cursor, case_no, for_update=for_update
+    )
     if not source_assignments:
         raise HistoricalActualStartPreparationError(
             "historical_assignment_required_for_actual_start"
         )
-    return (
-        source_assignments,
-        _order_context(cursor, case_no, for_update=for_update),
-        _case_payroll_policy(cursor, case_no, for_update=for_update),
-    )
+    return source_assignments, _order_context(cursor, case_no, for_update=for_update)
 
 
 def _service_hours_per_day(order) -> int:

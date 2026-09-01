@@ -373,6 +373,66 @@ def test_historical_planner_deletes_unmanaged_schedules_for_the_same_case():
     assert "generation_id IS NULL" in cursor.statement
 
 
+def test_historical_planner_replaces_conflicts_before_existing_generation_return(monkeypatch):
+    import infrastructure.mysql.historical_actual_start_date_planner as planner
+
+    calls = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    cursor = Cursor()
+    connection = SimpleNamespace(cursor=lambda: cursor)
+    aggregate = {
+        "aggregate_version": 4,
+        "generation_counter": 7,
+        "effective_generation_id": 71,
+    }
+    monkeypatch.setattr(planner, "_locked_or_bootstrapped_aggregate", lambda *_args: aggregate)
+    monkeypatch.setattr(
+        planner,
+        "_source_assignment_and_order_facts",
+        lambda *_args, **_kwargs: (({"id": 9, "staff_id": 11},), {"service_hours_per_day": 8}),
+    )
+    monkeypatch.setattr(planner, "_bootstrap_candidate", lambda *_args: "candidate")
+    monkeypatch.setattr(
+        planner,
+        "_delete_unmanaged_case_schedules",
+        lambda *_args: calls.append("delete-unmanaged"),
+    )
+    monkeypatch.setattr(
+        planner,
+        "_replace_conflicting_current_schedule_state",
+        lambda *_args: calls.append("delete-conflicts"),
+    )
+    monkeypatch.setattr(
+        planner,
+        "_effective_generation_has_assignments",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        planner,
+        "_case_payroll_policy",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("existing generation must not require a bootstrap policy")
+        ),
+    )
+
+    planner.MySqlHistoricalActualStartDatePlanner(connection).prepare_source_generation(
+        "CASE-1",
+        (date(2026, 8, 8),),
+        source_identity="historical-orders:digest:row:8",
+        actor="historical-import",
+        correlation_id="historical-override-test",
+    )
+
+    assert calls == ["delete-unmanaged", "delete-conflicts"]
+
+
 def test_historical_bootstrap_single_assignment_uses_recalculated_service_dates():
     from infrastructure.mysql.historical_actual_start_date_planner import (
         _bootstrap_candidate,
