@@ -147,6 +147,8 @@ def test_completed_historical_order_enters_step_11_without_completing_settlement
 
     assert historical_baseline_step(facts) == 11
     assert result.current_stage_code == "settlement_payout"
+    assert result.current_sop_step == 11
+    assert result.terminal_state is None
     assert all(stage.status == "completed" for stage in result.stages[:6])
     assert result.stages[6].status == "blocked"
     assert all(step.status == "completed" for step in result.sop_steps[:10])
@@ -163,6 +165,7 @@ def test_deposit_paid_historical_order_enters_date_confirmation() -> None:
 
     assert historical_baseline_step(facts) == 9
     assert result.current_stage_code == "date_confirmation"
+    assert result.current_sop_step == 9
     assert all(stage.status == "completed" for stage in result.stages[:4])
     assert result.stages[4].status == "unavailable"
     assert all(step.status == "completed" for step in result.sop_steps[:8])
@@ -178,6 +181,7 @@ def test_deposit_paid_with_actual_start_enters_formal_service() -> None:
 
     assert historical_baseline_step(facts) == 10
     assert result.current_stage_code == "active_service"
+    assert result.current_sop_step == 10
     assert all(stage.status == "completed" for stage in result.stages[:5])
     assert result.stages[5].status == "unavailable"
     assert all(step.status == "completed" for step in result.sop_steps[:9])
@@ -193,7 +197,31 @@ def test_in_service_status_keeps_historical_predecessors_completed() -> None:
 
     assert historical_baseline_step(facts) == 10
     assert result.current_stage_code == "active_service"
+    assert result.current_sop_step == 10
     assert all(stage.status == "completed" for stage in result.stages[:5])
+
+
+def test_historical_service_statuses_map_to_their_operational_baselines() -> None:
+    assert historical_baseline_step(
+        HistoricalStageBaselineFacts(
+            "CASE-1", 201, OrderLifecycleStatus.HISTORICAL_UNSERVED, None
+        )
+    ) == 9
+    assert historical_baseline_step(
+        HistoricalStageBaselineFacts(
+            "CASE-1", 202, OrderLifecycleStatus.HISTORICAL_IN_SERVICE, date(2025, 2, 3)
+        )
+    ) == 10
+    assert historical_baseline_step(
+        HistoricalStageBaselineFacts(
+            "CASE-1", 203, OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED, date(2025, 2, 3)
+        )
+    ) == 11
+    assert historical_baseline_step(
+        HistoricalStageBaselineFacts(
+            "CASE-1", 204, OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED, date(2025, 2, 3)
+        )
+    ) == 11
 
 
 def test_discussion_with_actual_start_enters_formal_service() -> None:
@@ -205,6 +233,7 @@ def test_discussion_with_actual_start_enters_formal_service() -> None:
 
     assert historical_baseline_step(facts) == 10
     assert result.current_stage_code == "active_service"
+    assert result.current_sop_step == 10
     assert all(stage.status == "completed" for stage in result.stages[:5])
     assert result.stages[5].status == "unavailable"
     assert all(step.status == "completed" for step in result.sop_steps[:9])
@@ -230,6 +259,7 @@ def test_formal_baseline_step_is_immutable_while_owner_roots_progress_forward() 
 
     assert historical_baseline_step(facts) == 9
     assert result.current_stage_code == "active_service"
+    assert result.current_sop_step == 10
     assert all(step.status == "completed" for step in result.sop_steps[:9])
     assert result.sop_steps[9].status == "in_progress"
     assert result.sop_steps[0].owner == "Historical Orders"
@@ -256,6 +286,7 @@ def test_concrete_predecessor_owner_state_can_regress_current_step_without_rewri
 
     assert historical_baseline_step(facts) == 10
     assert result.current_stage_code == "date_confirmation"
+    assert result.current_sop_step == 9
     assert all(step.status == "completed" for step in result.sop_steps[:8])
     assert result.sop_steps[8].status == "blocked"
     assert result.sop_steps[9].status == "unavailable"
@@ -280,6 +311,7 @@ def test_unavailable_predecessor_does_not_fake_h06_invalidation() -> None:
 
     assert historical_baseline_step(facts) == 10
     assert result.current_stage_code == "active_service"
+    assert result.current_sop_step == 10
     assert result.sop_steps[8].status == "completed"
     assert result.sop_steps[9].status == "in_progress"
 
@@ -304,6 +336,28 @@ def test_historical_cancel_has_no_active_operational_stage() -> None:
     result = _query(facts)
 
     assert result.current_stage_code is None
+    assert result.current_sop_step is None
+    assert result.terminal_state == "cancelled"
     assert all(stage.status == "unavailable" for stage in result.stages)
     assert all(step.status == "unavailable" for step in result.sop_steps)
     assert result.stages[0].availability_reason == "historical_order_cancelled"
+
+
+def test_current_cancellation_wins_over_an_older_historical_baseline() -> None:
+    timeline = replace(
+        _timeline(),
+        current_stage_code=None,
+        current_sop_step=None,
+        terminal_state="cancelled",
+    )
+    facts = HistoricalStageBaselineFacts(
+        "CASE-1",
+        205,
+        OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+        date(2025, 2, 3),
+        selected_step=10,
+    )
+
+    result = _query(facts, timeline)
+
+    assert result == timeline

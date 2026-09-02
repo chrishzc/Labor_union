@@ -271,6 +271,24 @@ describe('OrdersPage query real-data slice', () => {
     expect(screen.getByRole('button', { name: '重試' })).toBeInTheDocument();
   });
 
+  it('filters cancelled orders from the terminal projection instead of a business stage', async () => {
+    const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);
+    stagePage.items[0].current_stage_code = null;
+    stagePage.items[0].current_sop_step = null;
+    stagePage.items[0].terminal_state = 'cancelled';
+    stagePage.stage_counts.intake_terms = 0;
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(stagePage);
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+
+    const cancelledFilter = screen.getByRole('button', { name: '已取消 (1)' });
+    fireEvent.click(cancelledFilter);
+    expect(screen.getByText('ORD-2026-0801')).toBeInTheDocument();
+    expect(screen.queryByText('ORD-2026-0802')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '2. 媒合與徵詢意願 (0)' })).toBeEnabled();
+  });
+
   it('searches all lifecycle states and clears the old stage filter', async () => {
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
@@ -292,6 +310,31 @@ describe('OrdersPage query real-data slice', () => {
     expect(await screen.findByText('ORD-2026-0802')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /全部 \(7\)/ })).toHaveClass('active');
     expect(screen.getByRole('button', { name: /1\. 進件與補件/ })).toBeDisabled();
+  });
+
+  it('reloads cancellation facts when the shared workbench switches to another order', async () => {
+    const firstQuery = { ...cancellationQuery, lifecycle_status: '訂單取消' as const };
+    const secondQuery = { ...cancellationQuery, case_no: 'ORD-2026-0802', lifecycle_status: '洽談中' as const };
+    vi.mocked(orderCancellationClient.query).mockImplementation(async (caseNo) => (
+      caseNo === 'ORD-2026-0801' ? firstQuery : secondQuery
+    ));
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
+    expect(await screen.findByText('🚫 不可再次取消')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));
+
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[1]);
+    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
+
+    await waitFor(() => expect(orderCancellationClient.query).toHaveBeenLastCalledWith(
+      'ORD-2026-0802',
+      expect.any(AbortSignal),
+    ));
+    expect(screen.getByText('🟢 允許取消試算')).toBeInTheDocument();
+    expect(screen.queryByText('🚫 不可再次取消')).not.toBeInTheDocument();
   });
 
   it('deduplicates the StrictMode initial summary load to one transport request', async () => {

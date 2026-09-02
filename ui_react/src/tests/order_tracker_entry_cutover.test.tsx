@@ -28,6 +28,16 @@ const STAGE_CODES = [
   'settlement_payout',
 ] as const;
 
+const CURRENT_STEP_BY_STAGE = {
+  intake_terms: 1,
+  matching_willingness: 2,
+  client_review: 5,
+  contract_deposit: 6,
+  date_confirmation: 9,
+  active_service: 10,
+  settlement_payout: 11,
+} as const;
+
 type FetchRecord = {
   path: string;
   method: string;
@@ -114,6 +124,8 @@ function stageProjectionEnvelope(summaryPage: OrderSummaryPage): unknown {
       case_no: summary.case_no,
       base_revision: 1,
       current_stage_code: currentStageCode,
+      current_sop_step: CURRENT_STEP_BY_STAGE[currentStageCode],
+      terminal_state: null,
       stages,
       sop_steps: sopSteps,
       projection_digest: 'd'.repeat(64),

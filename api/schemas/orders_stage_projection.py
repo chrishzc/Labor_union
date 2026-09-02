@@ -78,6 +78,8 @@ class OrderOperationalTimelineView(BaseModel):
     case_no: str
     base_revision: int = Field(ge=0)
     current_stage_code: Literal["intake_terms", "matching_willingness", "client_review", "contract_deposit", "date_confirmation", "active_service", "settlement_payout"] | None
+    current_sop_step: int | None = Field(default=None, ge=1, le=11)
+    terminal_state: Literal["cancelled"] | None = None
     stages: list[StageProjectionView] = Field(min_length=7, max_length=7)
     sop_steps: list[SopStepProjectionView] = Field(min_length=11, max_length=11)
     projection_digest: str = Field(pattern=r"^[0-9a-f]{64}$")

@@ -15,6 +15,7 @@ from subsystems.orders.stage_projection_query import MAXIMUM_PAGE_SIZE
 _PAGE_SQL = """
 SELECT o.case_no,
        o.lifecycle_version AS order_version,
+       o.status AS order_lifecycle_status,
        o.updated_at AS order_updated_at,
        import_fact.import_receipt_id,
        import_fact.import_created_at,
