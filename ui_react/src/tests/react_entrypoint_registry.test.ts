@@ -15,7 +15,7 @@ import {
 import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 
 const EXPECTED_HASHES = [
-  'order-tracker', 'orders', 'scheduling', 'staff', 'data-import', 'reports',
+  'order-tracker', 'order-workbench-v2', 'orders', 'scheduling', 'staff', 'data-import', 'reports',
   'line-management', 'line-ai-events', 'line-llm-settings', 'line-liff-studio', 'line-security',
   'finance', 'anomalies', 'account-management', 'system-status',
 ] as const;
