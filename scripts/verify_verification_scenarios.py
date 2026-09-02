@@ -72,8 +72,11 @@ def verify_scenarios(
     for scenario in scenarios:
         errors.extend(
             _scenario_errors(
-                scenario, suite_tracks, scenario_ids, business_requirement_ids
-                , suite_test_kinds
+                scenario,
+                suite_tracks,
+                scenario_ids,
+                business_requirement_ids,
+                suite_test_kinds,
             )
         )
     errors.extend(_completeness_errors(scenarios, suite_tracks, business_requirement_ids))
@@ -122,10 +125,16 @@ def _suite_test_kinds(baseline: dict[str, object]) -> dict[str, set[str]]:
 
 
 def matrix_requirement_ids(path: Path = DEFAULT_BUSINESS_MATRIX_PATH) -> set[str]:
-    """Read named business coverage requirements from the formal matrix."""
+    """Read Track A coverage requirements from the formal verification spec."""
     if not path.is_file():
         raise ValueError(f"business matrix is missing: {path}")
-    return set(re.findall(r"\|\s*([A-Z]+-[A-Z0-9]+)\s*\|", path.read_text(encoding="utf-8")))
+    text = path.read_text(encoding="utf-8")
+    marker = "### 5.1"
+    boundary = "### 5.3"
+    if marker not in text or boundary not in text:
+        raise ValueError(f"business matrix section is missing: {path}")
+    business_section = text.split(marker, 1)[1].split(boundary, 1)[0]
+    return set(re.findall(r"\|\s*([A-Z]+-[A-Z0-9]+)\s*\|", business_section))
 
 
 def _scenario_errors(
