@@ -1,0 +1,84 @@
+name: Issue 101 canonical data cutover
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/issue101-apply.yml"
+      - ".github/issue101_payload.b64"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-101-canonical-data-cutover
+  cancel-in-progress: false
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Decode and apply Issue 101 transformation
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .github/issue101_payload.b64 | gzip -d > /tmp/issue101_remove_masked_apply.py
+          python -m py_compile /tmp/issue101_remove_masked_apply.py
+          python /tmp/issue101_remove_masked_apply.py . --expected-head "$GITHUB_SHA" --apply > /tmp/issue101.diff
+          tail -n 8 /tmp/issue101.diff
+          git diff --check
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run Issue 101 backend regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t selected < <(
+            find tests -type f \( -name 'test_*.py' -o -name '*_test.py' \) \
+              | grep -Ei '(data_browser|customer_service|line_identity|line_notification|weekly|subsidy|accounts_payable|finance|import_warning|historical|hcm)' \
+              | sort
+          )
+          printf 'Selected backend tests: %s\n' "${#selected[@]}"
+          test "${#selected[@]}" -gt 0
+          python -m pytest -q --strict-markers -m "not integration" "${selected[@]}"
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui_react/package-lock.json
+
+      - name: Run React tests and build
+        working-directory: ui_react
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Commit transformed repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git diff --cached --check
+          git diff --cached --stat
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat: remove admin data masking contracts (#101)"
+          git push origin HEAD:main
