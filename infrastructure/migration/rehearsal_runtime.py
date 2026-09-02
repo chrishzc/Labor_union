@@ -1,6 +1,6 @@
 """
 File: rehearsal_runtime.py
-Description: 提供 preserve-data rehearsal 的 ephemeral candidate runtime ports。
+Description: 提供 preserve-data rehearsal 的 ephemeral FastAPI、React 與 worker runtime ports。
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -27,7 +28,7 @@ class RehearsalRuntimeError(RuntimeError):
 class CandidateRuntimeConfig:
     project_root: Path
     api_port: int
-    streamlit_port: int
+    react_port: int
     startup_timeout_seconds: int
     database_environment: Mapping[str, str]
     database_config: Any
@@ -42,11 +43,19 @@ class EphemeralCandidateRestartPort:
         self._logs: dict[str, Path] = {}
 
     def restart(self, target: str) -> Mapping[str, Any]:
-        if target == "api":
-            return self._start_http_target(target, self._api_command(), "/health")
-        if target == "streamlit":
-            return self._start_http_target(target, self._streamlit_command(), "/")
-        if target == "background-worker":
+        # Historical migration manifests may still carry the removed UI target
+        # name. It is normalized to the current React runtime; no Streamlit
+        # process, source, dependency, or rollback surface is restored.
+        current_target = "react" if target in {"react", "streamlit"} else target
+        if current_target == "api":
+            return self._start_http_target(
+                current_target, self._api_command(), "/health"
+            )
+        if current_target == "react":
+            return self._start_http_target(
+                current_target, self._react_command(), "/admin/"
+            )
+        if current_target == "background-worker":
             return self._run_idle_worker_once()
         raise RehearsalRuntimeError(f"unsupported restart target: {target}")
 
@@ -54,36 +63,52 @@ class EphemeralCandidateRestartPort:
         receipts = []
         for target in reversed(tuple(self._processes)):
             process = self._processes.pop(target)
-            receipts.append(_terminate_process(target, process, self._logs[target]))
+            receipts.append(
+                _terminate_process(target, process, self._logs[target])
+            )
         return tuple(receipts)
 
-    def _start_http_target(self, target, command, path):
+    def _start_http_target(
+        self, target: str, command: list[str], path: str
+    ) -> Mapping[str, Any]:
         process = self._start_process(target, command)
-        _wait_for_http(_base_url(self._port_for(target)) + path, process, self._config.startup_timeout_seconds)
-        return _started_receipt(target, process, self._logs[target], endpoint=path)
+        _wait_for_http(
+            _base_url(self._port_for(target)) + path,
+            process,
+            self._config.startup_timeout_seconds,
+        )
+        return _started_receipt(
+            target, process, self._logs[target], endpoint=path
+        )
 
-    def _start_background_target(self, target, command):
-        process = self._start_process(target, command)
-        time.sleep(0.5)
-        if process.poll() is not None:
-            raise RehearsalRuntimeError(f"{target} exited before readiness")
-        return _started_receipt(target, process, self._logs[target])
-
-    def _run_idle_worker_once(self):
-        _require_no_active_jobs(self._config.database_config, self._config.candidate_database)
+    def _run_idle_worker_once(self) -> Mapping[str, Any]:
+        _require_no_active_jobs(
+            self._config.database_config, self._config.candidate_database
+        )
         target = "background-worker"
         process = self._start_process(target, self._worker_command())
         try:
             process.wait(timeout=self._config.startup_timeout_seconds)
         except subprocess.TimeoutExpired as error:
-            raise RehearsalRuntimeError("background worker did not finish its idle check") from error
+            raise RehearsalRuntimeError(
+                "background worker did not finish its idle check"
+            ) from error
         if process.returncode != 0:
             raise RehearsalRuntimeError("background worker idle check failed")
-        return _started_receipt(target, process, self._logs[target], completed_once=True)
+        return _started_receipt(
+            target,
+            process,
+            self._logs[target],
+            completed_once=True,
+        )
 
-    def _start_process(self, target, command):
+    def _start_process(
+        self, target: str, command: list[str]
+    ) -> subprocess.Popen[bytes]:
         if target in self._processes:
-            raise RehearsalRuntimeError(f"restart target already started: {target}")
+            raise RehearsalRuntimeError(
+                f"restart target already started: {target}"
+            )
         self._config.evidence_directory.mkdir(parents=True, exist_ok=True)
         log_path = self._config.evidence_directory / f"{target}.log"
         log_handle = log_path.open("wb")
@@ -91,7 +116,9 @@ class EphemeralCandidateRestartPort:
             process = subprocess.Popen(
                 command,
                 cwd=self._config.project_root,
-                env=_runtime_environment(self._config.database_environment),
+                env=_runtime_environment(
+                    self._config.database_environment
+                ),
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
             )
@@ -101,17 +128,54 @@ class EphemeralCandidateRestartPort:
         self._logs[target] = log_path
         return process
 
-    def _api_command(self):
-        return [sys.executable, "-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", str(self._config.api_port)]
+    def _api_command(self) -> list[str]:
+        return [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "api.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(self._config.api_port),
+        ]
 
-    def _streamlit_command(self):
-        return [sys.executable, "-m", "streamlit", "run", "ui/app.py", "--server.address", "127.0.0.1", "--server.port", str(self._config.streamlit_port), "--server.headless", "true"]
+    def _react_command(self) -> list[str]:
+        npm = shutil.which("npm")
+        if npm is None:
+            raise RehearsalRuntimeError(
+                "npm is required for React candidate rehearsal"
+            )
+        return [
+            npm,
+            "--prefix",
+            str(self._config.project_root / "ui_react"),
+            "run",
+            "dev",
+            "--",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(self._config.react_port),
+            "--strictPort",
+        ]
 
-    def _worker_command(self):
-        return [sys.executable, "-m", "scripts.run_durable_job_worker", "--once", "--worker-id", "preserve-rehearsal"]
+    def _worker_command(self) -> list[str]:
+        return [
+            sys.executable,
+            "-m",
+            "scripts.run_durable_job_worker",
+            "--once",
+            "--worker-id",
+            "preserve-rehearsal",
+        ]
 
-    def _port_for(self, target):
-        return self._config.api_port if target == "api" else self._config.streamlit_port
+    def _port_for(self, target: str) -> int:
+        return (
+            self._config.api_port
+            if target == "api"
+            else self._config.react_port
+        )
 
 
 class CandidateReadSmokePort:
@@ -135,25 +199,34 @@ class CandidateReadSmokePort:
             "response_bytes": len(body),
         }
 
-    def _path_for(self, smoke_id):
+    def _path_for(self, smoke_id: str) -> str:
         if smoke_id == "orders-read":
             return "/api/v1/orders/summaries?page_size=1"
         if smoke_id == "finance-import-read":
             return "/api/v1/finance-import/batches?limit=1"
         if smoke_id == "scheduling-read":
-            return f"/api/v1/scheduling/staff/{self._staff_id()}/current-calendar?range_start=2026-01-01&range_end=2026-01-01"
+            return (
+                f"/api/v1/scheduling/staff/{self._staff_id()}"
+                "/current-calendar?range_start=2026-01-01&range_end=2026-01-01"
+            )
         if smoke_id == "payroll-payables-read":
-            return f"/api/v1/payroll/staff/{self._staff_id()}/obligations"
+            return (
+                f"/api/v1/payroll/staff/{self._staff_id()}/obligations"
+            )
         if smoke_id == "anomalies-read":
             return "/api/v1/anomalies?limit=1&offset=0"
         if smoke_id == "historical-service-accounting-query":
             case_no = quote(
                 self._historical_service_accounting_case_no(), safe=""
             )
-            return f"/api/v1/orders/{case_no}/historical-service-accounting"
-        raise RehearsalRuntimeError(f"unsupported smoke id: {smoke_id}")
+            return (
+                f"/api/v1/orders/{case_no}/historical-service-accounting"
+            )
+        raise RehearsalRuntimeError(
+            f"unsupported smoke id: {smoke_id}"
+        )
 
-    def _accepted_statuses(self, smoke_id):
+    def _accepted_statuses(self, smoke_id: str) -> frozenset[int]:
         if smoke_id in {
             "scheduling-read",
             "payroll-payables-read",
@@ -162,7 +235,7 @@ class CandidateReadSmokePort:
             return frozenset({200, 404})
         return frozenset({200})
 
-    def _historical_service_accounting_case_no(self):
+    def _historical_service_accounting_case_no(self) -> str:
         connection = self._config.database_config.connect(
             self._config.candidate_database
         )
@@ -182,8 +255,10 @@ class CandidateReadSmokePort:
             else "__migration_empty_historical_case__"
         )
 
-    def _staff_id(self):
-        connection = self._config.database_config.connect(self._config.candidate_database)
+    def _staff_id(self) -> int:
+        connection = self._config.database_config.connect(
+            self._config.candidate_database
+        )
         try:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT id FROM staff ORDER BY id LIMIT 1")
@@ -193,11 +268,15 @@ class CandidateReadSmokePort:
         if not row:
             return 1
         if int(row["id"]) < 1:
-            raise RehearsalRuntimeError("candidate staff identifier is invalid")
+            raise RehearsalRuntimeError(
+                "candidate staff identifier is invalid"
+            )
         return int(row["id"])
 
 
-def _runtime_environment(database_environment):
+def _runtime_environment(
+    database_environment: Mapping[str, str]
+) -> dict[str, str]:
     environment = os.environ.copy()
     environment.update(database_environment)
     environment.update(
@@ -211,37 +290,56 @@ def _runtime_environment(database_environment):
     return environment
 
 
-def _read_smoke_headers():
+def _read_smoke_headers() -> dict[str, str]:
     return {}
 
 
-def _require_no_active_jobs(database_config, candidate_database):
+def _require_no_active_jobs(
+    database_config: Any, candidate_database: str
+) -> None:
     connection = database_config.connect(candidate_database)
     try:
         with connection.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) AS count FROM background_jobs WHERE status IN ('queued','running')")
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM background_jobs "
+                "WHERE status IN ('queued','running')"
+            )
             row = cursor.fetchone()
     finally:
         connection.close()
     if not row or int(row["count"]) != 0:
-        raise RehearsalRuntimeError("candidate has active durable jobs")
+        raise RehearsalRuntimeError(
+            "candidate has active durable jobs"
+        )
 
 
-def _wait_for_http(url, process, timeout_seconds):
+def _wait_for_http(
+    url: str,
+    process: subprocess.Popen[bytes],
+    timeout_seconds: int,
+) -> None:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise RehearsalRuntimeError(f"runtime exited before HTTP readiness: {url}")
+            raise RehearsalRuntimeError(
+                f"runtime exited before HTTP readiness: {url}"
+            )
         try:
             _read_http(url)
             return
         except (URLError, HTTPError):
             time.sleep(0.2)
-    raise RehearsalRuntimeError(f"runtime did not become readable: {url}")
+    raise RehearsalRuntimeError(
+        f"runtime did not become readable: {url}"
+    )
 
 
-def _read_http(url, headers=None, accepted_statuses=frozenset({200})):
-    request = Request(url, headers=headers or {})
+def _read_http(
+    url: str,
+    headers: Mapping[str, str] | None = None,
+    accepted_statuses: frozenset[int] = frozenset({200}),
+) -> tuple[int, bytes]:
+    request = Request(url, headers=dict(headers or {}))
     try:
         with urlopen(request, timeout=5) as response:
             status = response.status
@@ -251,19 +349,36 @@ def _read_http(url, headers=None, accepted_statuses=frozenset({200})):
             raise
         return error.code, error.read()
     if status not in accepted_statuses:
-        raise RehearsalRuntimeError(f"read smoke returned HTTP {status}: {url}")
+        raise RehearsalRuntimeError(
+            f"read smoke returned HTTP {status}: {url}"
+        )
     return status, body
 
 
-def _base_url(port):
+def _base_url(port: int) -> str:
     return f"http://127.0.0.1:{port}"
 
 
-def _started_receipt(target, process, log_path, **extra):
-    return {"status": "passed", "target": target, "pid": process.pid, "log_path": str(log_path), **extra}
+def _started_receipt(
+    target: str,
+    process: subprocess.Popen[bytes],
+    log_path: Path,
+    **extra: Any,
+) -> dict[str, Any]:
+    return {
+        "status": "passed",
+        "target": target,
+        "pid": process.pid,
+        "log_path": str(log_path),
+        **extra,
+    }
 
 
-def _terminate_process(target, process, log_path):
+def _terminate_process(
+    target: str,
+    process: subprocess.Popen[bytes],
+    log_path: Path,
+) -> dict[str, Any]:
     if process.poll() is None:
         process.terminate()
         try:
@@ -271,4 +386,9 @@ def _terminate_process(target, process, log_path):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=10)
-    return {"status": "passed", "target": target, "exit_code": process.returncode, "log_path": str(log_path)}
+    return {
+        "status": "passed",
+        "target": target,
+        "exit_code": process.returncode,
+        "log_path": str(log_path),
+    }
