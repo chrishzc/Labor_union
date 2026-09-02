@@ -1,6 +1,6 @@
 /**
  * File: line_rich_menu_draft_action_editor.test.tsx
- * Description: 驗證 Rich Menu typed action 編輯、kind 清理及 Preview、確認、Apply 流程。
+ * Description: 驗證 Rich Menu typed action 編輯、禁止 switch，以及 Preview、確認、Apply 流程。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -70,21 +70,23 @@ describe('LineRichMenuDraftActionEditor', () => {
     expect(onLocalDefinitionChange).toHaveBeenLastCalledWith(null);
   });
 
-  it('只有 Preview 與明確確認後才 Apply normalized typed action', async () => {
+  it('編輯器不提供 Rich Menu switch，仍可 Preview 與確認後 Apply 支援的 URI action', async () => {
     vi.stubGlobal('crypto', { randomUUID: () => 'action-editor-1' });
     const draftClient = client();
     const onApplied = vi.fn();
     render(<LineRichMenuDraftActionEditor draft={DRAFT} menuId="customer_menu" client={draftClient} onApplied={onApplied} />);
-    fireEvent.change(screen.getByLabelText('動作類型'), { target: { value: 'richmenuswitch' } });
-    fireEvent.change(screen.getByLabelText('切換資料'), { target: { value: 'switch=staff' } });
-    fireEvent.change(screen.getByLabelText('Rich Menu alias'), { target: { value: 'staff-menu' } });
+
+    const actionType = screen.getByLabelText('動作類型');
+    expect(screen.queryByRole('option', { name: /切換 Rich Menu/ })).not.toBeInTheDocument();
+    fireEvent.change(actionType, { target: { value: 'uri' } });
+    fireEvent.change(screen.getByLabelText('LIFF target／網址'), { target: { value: '?target=profile_update' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽草稿變更' }));
+
     await waitFor(() => expect(draftClient.preview).toHaveBeenCalledTimes(1));
     const request = vi.mocked(draftClient.preview).mock.calls[0][0];
     expect(request.definition.menus[0].buttons[0].action).toEqual({
-      type: 'richmenuswitch', data: 'switch=staff', rich_menu_alias_id: 'staff-menu',
+      type: 'uri', uri: '?target=profile_update', uri_source: 'liff',
     });
-    expect(screen.queryByText(FINGERPRINT)).not.toBeInTheDocument();
     const applyButton = screen.getByRole('button', { name: '套用並回讀' });
     expect(applyButton).toBeDisabled();
     fireEvent.click(screen.getByRole('checkbox', { name: /我確認保存此草稿/ }));
