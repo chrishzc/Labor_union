@@ -56,6 +56,8 @@ export function buildOrdersStageProjectionFixture(summary: OrderSummaryPage): Or
       case_no: item.case_no,
       base_revision: index + 1,
       current_stage_code: currentStage,
+      current_sop_step: currentStage === 'active_service' ? 10 : 1,
+      terminal_state: null,
       stages: STAGE_CODES.map((code, stageIndex) => stageProjection(code, stageIndex + 1, currentStage)),
       sop_steps: Array.from({ length: 11 }, (_, stepIndex) => ({
         ordinal: stepIndex + 1,
