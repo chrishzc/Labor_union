@@ -9,16 +9,23 @@ import {
   loadAllOrderOperationalTimelines,
   orderStageProjectionClient,
 } from '../api/orders/order_stage_projection_client';
+import {
+  loadAllOrderSummaries,
+  ordersQueryClient,
+} from '../api/orders/order_query_client';
 import type {
   OrderOperationalTimeline,
   OrderOperationalTimelinePage,
   SopStepProjection,
   StageProjection,
 } from '../api/orders/order_stage_projection_schemas';
+import {
+  adaptOrderSummaryPage,
+  type OrderSummaryCardViewModel,
+} from '../adapters/orders/order_summary_adapter';
 
 type CoreStageOrdinal = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
 type FilterStatus = 'all' | 'not_started' | 'in_progress' | 'blocked' | 'unavailable';
-
 type StageStatus = SopStepProjection['status'];
 
 interface StageDefinition {
@@ -52,14 +59,6 @@ const CORE_STAGES: readonly StageDefinition[] = [
   { ordinal: 12, shortLabel: '客戶結算', label: '客戶端結算', owner: 'Client Finance' },
   { ordinal: 13, shortLabel: '月嫂結算', label: '月嫂端結算', owner: 'Staff Payables' },
 ] as const;
-
-const FILTER_STATUS_LABELS: Readonly<Record<FilterStatus, string>> = {
-  all: '全部',
-  not_started: '待處理',
-  in_progress: '處理中',
-  blocked: '阻塞',
-  unavailable: '資料不足',
-};
 
 function isHistorical(timeline: OrderOperationalTimeline): boolean {
   return timeline.lifecycle_status.startsWith('歷史訂單－');
@@ -139,7 +138,7 @@ function stageSubstatusLabel(ordinal: CoreStageOrdinal, status: StageStatus): st
   return '已完成';
 }
 
-function availableFilters(ordinal: CoreStageOrdinal, cases: readonly StageCase[]): FilterStatus[] {
+function availableFilters(cases: readonly StageCase[]): FilterStatus[] {
   const statuses = new Set(cases.map((item) => item.status));
   const result: FilterStatus[] = ['all'];
   (['not_started', 'in_progress', 'blocked', 'unavailable'] as const).forEach((status) => {
@@ -148,10 +147,19 @@ function availableFilters(ordinal: CoreStageOrdinal, cases: readonly StageCase[]
   return result;
 }
 
+function summaryUnavailableMessage(summaryLoading: boolean, summaryQueryFailed: boolean): string {
+  if (summaryLoading) return '正式案件摘要載入中。';
+  if (summaryQueryFailed) return '正式案件摘要查詢失敗；目前只顯示階段投影。';
+  return '未取得與此案件編號相符的正式摘要。';
+}
+
 export const OrderWorkbenchV2Page: React.FC = () => {
   const [page, setPage] = useState<OrderOperationalTimelinePage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [summaryIndex, setSummaryIndex] = useState<ReadonlyMap<string, OrderSummaryCardViewModel>>(() => new Map());
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryQueryFailed, setSummaryQueryFailed] = useState(false);
   const [selectedStage, setSelectedStage] = useState<CoreStageOrdinal>(1);
   const [selectedStatus, setSelectedStatus] = useState<FilterStatus>('all');
   const [search, setSearch] = useState('');
@@ -161,7 +169,11 @@ export const OrderWorkbenchV2Page: React.FC = () => {
     let alive = true;
     setLoading(true);
     setError(null);
-    loadAllOrderOperationalTimelines(
+    setSummaryIndex(new Map());
+    setSummaryLoading(true);
+    setSummaryQueryFailed(false);
+
+    void loadAllOrderOperationalTimelines(
       orderStageProjectionClient.getOperationalTimelines.bind(orderStageProjectionClient),
       { lifecycle_scope: 'all', page_size: 200 },
     )
@@ -174,6 +186,25 @@ export const OrderWorkbenchV2Page: React.FC = () => {
       .finally(() => {
         if (alive) setLoading(false);
       });
+
+    void loadAllOrderSummaries(
+      ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
+      { lifecycle_scope: 'all', page_size: 200 },
+    )
+      .then((data) => {
+        if (!alive) return;
+        const summaries = adaptOrderSummaryPage(data).items;
+        setSummaryIndex(new Map(summaries.map((item) => [item.id, item])));
+      })
+      .catch(() => {
+        if (!alive) return;
+        setSummaryIndex(new Map());
+        setSummaryQueryFailed(true);
+      })
+      .finally(() => {
+        if (alive) setSummaryLoading(false);
+      });
+
     return () => { alive = false; };
   }, []);
 
@@ -203,7 +234,7 @@ export const OrderWorkbenchV2Page: React.FC = () => {
   }, [normalTimelines]);
 
   const selectedCases = stageCases.get(selectedStage) ?? [];
-  const filters = availableFilters(selectedStage, selectedCases);
+  const filters = availableFilters(selectedCases);
 
   useEffect(() => {
     if (!filters.includes(selectedStatus)) setSelectedStatus('all');
@@ -287,32 +318,55 @@ export const OrderWorkbenchV2Page: React.FC = () => {
         })}
       </div>
 
+      {summaryQueryFailed && !loading && !error && (
+        <div className="order-v2-summary-warning" role="status">
+          案件摘要查詢失敗；以下案件仍依正式 operational timeline 顯示，但客戶、日期與月嫂摘要暫時不可用。
+        </div>
+      )}
+
       {loading && <div className="order-v2-empty">正在載入 server-owned 案件投影…</div>}
       {error && <div className="order-v2-error" role="alert">{error}</div>}
       {!loading && !error && visibleCases.length === 0 && <div className="order-v2-empty">目前沒有符合條件的案件。</div>}
 
       {!loading && !error && visibleCases.length > 0 && (
         <div className="order-v2-case-grid">
-          {visibleCases.map(({ timeline, status, occurredAt, blockers, warnings, availabilityReason }) => (
-            <article className="order-v2-case-card" key={timeline.case_no}>
-              <div className="order-v2-case-topline">
-                <strong>{timeline.case_no}</strong>
-                <span className={`order-v2-status status-${status}`}>{stageSubstatusLabel(selectedStage, status)}</span>
-              </div>
-              <div className="order-v2-case-meta">
-                <span>Lifecycle：{timeline.lifecycle_status}</span>
-                <span>Revision：{timeline.base_revision}</span>
-                {occurredAt && <span>更新：{new Date(occurredAt).toLocaleString('zh-TW')}</span>}
-              </div>
-              {blockers.length > 0 && (
-                <div className="order-v2-notice blocked"><strong>阻塞</strong>{blockers.map((item) => <span key={item.code}>{item.message}</span>)}</div>
-              )}
-              {warnings.length > 0 && (
-                <div className="order-v2-notice warning"><strong>提醒</strong>{warnings.map((item) => <span key={item.code}>{item.message}</span>)}</div>
-              )}
-              {availabilityReason && <div className="order-v2-technical">projection：{availabilityReason}</div>}
-            </article>
-          ))}
+          {visibleCases.map(({ timeline, status, occurredAt, blockers, warnings, availabilityReason }) => {
+            const summary = summaryIndex.get(timeline.case_no) ?? null;
+            return (
+              <article className="order-v2-case-card" key={timeline.case_no}>
+                <div className="order-v2-case-topline">
+                  <strong>{timeline.case_no}</strong>
+                  <span className={`order-v2-status status-${status}`}>{stageSubstatusLabel(selectedStage, status)}</span>
+                </div>
+
+                {summary ? (
+                  <dl className="order-v2-business-summary">
+                    <div><dt>客戶</dt><dd>{summary.clientName.trim() || '客戶姓名未登錄'}</dd></div>
+                    <div><dt>服務日期</dt><dd>{summary.serviceRange}</dd></div>
+                    <div><dt>指派月嫂</dt><dd>{summary.assignedDoulaDisplay}</dd></div>
+                  </dl>
+                ) : (
+                  <div className="order-v2-business-summary unavailable" role="note">
+                    <strong>案件摘要不可用</strong>
+                    <span>{summaryUnavailableMessage(summaryLoading, summaryQueryFailed)}</span>
+                  </div>
+                )}
+
+                <div className="order-v2-case-meta">
+                  <span>Lifecycle：{timeline.lifecycle_status}</span>
+                  <span>Revision：{timeline.base_revision}</span>
+                  {occurredAt && <span>更新：{new Date(occurredAt).toLocaleString('zh-TW')}</span>}
+                </div>
+                {blockers.length > 0 && (
+                  <div className="order-v2-notice blocked"><strong>阻塞</strong>{blockers.map((item) => <span key={item.code}>{item.message}</span>)}</div>
+                )}
+                {warnings.length > 0 && (
+                  <div className="order-v2-notice warning"><strong>提醒</strong>{warnings.map((item) => <span key={item.code}>{item.message}</span>)}</div>
+                )}
+                {availabilityReason && <div className="order-v2-technical">projection：{availabilityReason}</div>}
+              </article>
+            );
+          })}
         </div>
       )}
 
