@@ -325,8 +325,28 @@ class HistoricalOrderAdoptionWorkflow:
             return HistoricalPairingCandidate(source.ordinal, masked, None, source.start_date, source.end_date, HistoricalPairingResolution.BLANK, ())
         staff_ids = self._repository.resolve_staff(source.name, for_update=for_update)
         if not staff_ids:
+            if _historical_calendar_service_result(candidate.result):
+                return HistoricalPairingCandidate(
+                    source.ordinal,
+                    masked,
+                    None,
+                    source.start_date,
+                    source.end_date,
+                    HistoricalPairingResolution.EVIDENCE_ONLY,
+                    tuple(sorted(set(source.issue_codes + ("historical_staff_not_found",)))),
+                )
             return _pairing_issue(source, masked, HistoricalPairingResolution.STAFF_MISSING, "historical_staff_not_found")
         if len(staff_ids) != 1:
+            if _historical_calendar_service_result(candidate.result):
+                return HistoricalPairingCandidate(
+                    source.ordinal,
+                    masked,
+                    None,
+                    source.start_date,
+                    source.end_date,
+                    HistoricalPairingResolution.EVIDENCE_ONLY,
+                    tuple(sorted(set(source.issue_codes + ("historical_staff_ambiguous",)))),
+                )
             return _pairing_issue(source, masked, HistoricalPairingResolution.STAFF_AMBIGUOUS, "historical_staff_ambiguous")
         if source.issue_codes:
             return HistoricalPairingCandidate(source.ordinal, masked, staff_ids[0], source.start_date, source.end_date, HistoricalPairingResolution.EVIDENCE_ONLY, source.issue_codes)
@@ -382,6 +402,13 @@ def _service_assignment_allowed(row, current, candidate) -> bool:
     )
 
 
+def _historical_calendar_service_result(result):
+    return result in {
+        HistoricalOrderResult.HISTORICAL_IN_SERVICE,
+        HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED,
+    }
+
+
 def _matching_effective_assignment(existing, staff_id, source):
     """Find a completed Scheduling assignment that corroborates a source interval."""
     if source.start_date is None or source.end_date is None:
@@ -403,10 +430,7 @@ def _matching_effective_assignment(existing, staff_id, source):
 
 
 def _historical_calendar_integrity_issues(candidate, pairings):
-    if candidate.result not in {
-        HistoricalOrderResult.HISTORICAL_IN_SERVICE,
-        HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED,
-    }:
+    if not _historical_calendar_service_result(candidate.result):
         return ()
     has_staff = any(item.staff_id is not None for item in pairings)
     has_valid_dates = any(
