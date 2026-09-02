@@ -9,6 +9,7 @@ export const StaffDirectorySummarySchema = z
     id: z.number().int().positive(),
     name: z.string().nullable(),
     phone: z.string().nullable(),
+    education: z.string().nullable(),
   })
   .strict();
 
