@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.llm_configuration import LlmConfigurationApplication
 from api.routes import llm_configuration
 from domains.knowledge_retrieval.knowledge import (
     KnowledgeAnswer,
@@ -29,57 +30,48 @@ class _Selector:
         return self._result
 
 
-class _KnowledgeRepository:
-    def __init__(self, version: int | None) -> None:
-        self._version = version
-
-    def ready_index_version(self) -> int | None:
-        return self._version
-
-
-class _KnowledgeUnitOfWork:
-    def __init__(self, version: int | None) -> None:
-        self.knowledge = _KnowledgeRepository(version)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, traceback) -> None:
-        del exc_type, exc, traceback
-
-
 class _Gateway:
-    answer_value: KnowledgeAnswer | Exception | None = None
-    calls: list[tuple[str, int]] = []
-
-    def __init__(self, persistence_path: str, *, llm) -> None:
-        self.persistence_path = persistence_path
-        self.llm = llm
+    def __init__(self) -> None:
+        self.answer_value: KnowledgeAnswer | Exception | None = None
+        self.calls: list[tuple[str, int]] = []
 
     def answer(self, question: str, version: int) -> KnowledgeAnswer:
-        type(self).calls.append((question, version))
-        value = type(self).answer_value
+        self.calls.append((question, version))
+        value = self.answer_value
         if isinstance(value, Exception):
             raise value
         assert isinstance(value, KnowledgeAnswer)
         return value
 
 
-def _client(tmp_path, selector: _Selector | None = None):
+def _client(
+    tmp_path,
+    selector: _Selector | None = None,
+    *,
+    index_version: int | None = 1,
+):
     store = LlmApiKeyStore(tmp_path / "llm_api_key")
     active_selector = selector or _Selector()
+    gateway = _Gateway()
+    application = LlmConfigurationApplication(
+        store=store,
+        selector=active_selector,
+        ready_index_version=lambda: index_version,
+        gateway_factory=lambda _selector: gateway,
+    )
     app = FastAPI()
     app.include_router(llm_configuration.router)
     app.dependency_overrides[require_system_admin] = lambda: SimpleNamespace(
         username="system-admin"
     )
-    app.dependency_overrides[llm_configuration.get_llm_api_key_store] = lambda: store
-    app.dependency_overrides[llm_configuration.get_gemini_selector] = lambda: active_selector
-    return TestClient(app), store, active_selector
+    app.dependency_overrides[
+        llm_configuration.get_llm_configuration_application
+    ] = lambda: application
+    return TestClient(app), store, active_selector, gateway
 
 
 def test_llm_api_key_is_write_only_over_http(tmp_path) -> None:
-    client, store, _ = _client(tmp_path)
+    client, store, _, _ = _client(tmp_path)
     secret = "sk-test-write-only-123456789"
 
     response = client.post("/api/v1/system/llm/api-key", json={"api_key": secret})
@@ -97,7 +89,7 @@ def test_llm_api_key_is_write_only_over_http(tmp_path) -> None:
 
 
 def test_invalid_llm_api_key_is_not_echoed_in_validation_response(tmp_path) -> None:
-    client, _, _ = _client(tmp_path)
+    client, _, _, _ = _client(tmp_path)
     invalid_secret = "short"
 
     response = client.post(
@@ -110,7 +102,7 @@ def test_invalid_llm_api_key_is_not_echoed_in_validation_response(tmp_path) -> N
 
 
 def test_replacing_llm_api_key_does_not_expose_previous_value(tmp_path) -> None:
-    client, store, _ = _client(tmp_path)
+    client, store, _, _ = _client(tmp_path)
     first_secret = "sk-test-first-123456789"
     second_secret = "sk-test-second-987654321"
 
@@ -129,7 +121,7 @@ def test_replacing_llm_api_key_does_not_expose_previous_value(tmp_path) -> None:
 
 def test_connection_test_returns_only_safe_status(tmp_path) -> None:
     selector = _Selector(result="OK")
-    client, store, _ = _client(tmp_path, selector)
+    client, store, _, _ = _client(tmp_path, selector)
     secret = "google-ai-studio-secret-value"
     store.replace(secret)
 
@@ -148,7 +140,7 @@ def test_connection_test_returns_only_safe_status(tmp_path) -> None:
 
 def test_connection_test_maps_provider_failure_without_secret(tmp_path) -> None:
     selector = _Selector(error=RuntimeError("gemini_api_http_403"))
-    client, store, _ = _client(tmp_path, selector)
+    client, store, _, _ = _client(tmp_path, selector)
     secret = "google-ai-studio-secret-value"
     store.replace(secret)
 
@@ -164,13 +156,12 @@ def test_connection_test_maps_provider_failure_without_secret(tmp_path) -> None:
     }
 
 
-def test_semantic_test_reads_ready_index_and_returns_approved_answer(tmp_path, monkeypatch) -> None:
+def test_semantic_test_reads_ready_index_and_returns_approved_answer(tmp_path) -> None:
     selector = _Selector()
-    client, store, _ = _client(tmp_path, selector)
+    client, store, _, gateway = _client(tmp_path, selector, index_version=7)
     secret = "google-ai-studio-secret-value"
     store.replace(secret)
-    _Gateway.calls = []
-    _Gateway.answer_value = KnowledgeAnswer(
+    gateway.answer_value = KnowledgeAnswer(
         "補助核准答案。",
         (
             KnowledgeCitation(
@@ -181,12 +172,6 @@ def test_semantic_test_reads_ready_index_and_returns_approved_answer(tmp_path, m
         ),
         7,
     )
-    monkeypatch.setattr(
-        llm_configuration,
-        "open_knowledge_retrieval_unit_of_work",
-        lambda: _KnowledgeUnitOfWork(7),
-    )
-    monkeypatch.setattr(llm_configuration, "ChromaKnowledgeGateway", _Gateway)
 
     response = client.post(
         "/api/v1/system/llm/semantic-test",
@@ -205,19 +190,12 @@ def test_semantic_test_reads_ready_index_and_returns_approved_answer(tmp_path, m
         "answer_text": "補助核准答案。",
         "code": None,
     }
-    assert _Gateway.calls == [("補助可以折抵幾小時？", 7)]
+    assert gateway.calls == [("補助可以折抵幾小時？", 7)]
 
 
-def test_semantic_test_fails_closed_when_answer_is_unsupported(tmp_path, monkeypatch) -> None:
-    client, _, _ = _client(tmp_path)
-    _Gateway.calls = []
-    _Gateway.answer_value = KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
-    monkeypatch.setattr(
-        llm_configuration,
-        "open_knowledge_retrieval_unit_of_work",
-        lambda: _KnowledgeUnitOfWork(9),
-    )
-    monkeypatch.setattr(llm_configuration, "ChromaKnowledgeGateway", _Gateway)
+def test_semantic_test_fails_closed_when_answer_is_unsupported(tmp_path) -> None:
+    client, _, _, gateway = _client(tmp_path, index_version=9)
+    gateway.answer_value = KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
 
     response = client.post(
         "/api/v1/system/llm/semantic-test",
@@ -237,16 +215,9 @@ def test_semantic_test_fails_closed_when_answer_is_unsupported(tmp_path, monkeyp
     }
 
 
-def test_semantic_test_reports_missing_ready_index_without_calling_gateway(tmp_path, monkeypatch) -> None:
-    client, _, _ = _client(tmp_path)
-    _Gateway.calls = []
-    _Gateway.answer_value = AssertionError("gateway must not run without a READY index")
-    monkeypatch.setattr(
-        llm_configuration,
-        "open_knowledge_retrieval_unit_of_work",
-        lambda: _KnowledgeUnitOfWork(None),
-    )
-    monkeypatch.setattr(llm_configuration, "ChromaKnowledgeGateway", _Gateway)
+def test_semantic_test_reports_missing_ready_index_without_calling_gateway(tmp_path) -> None:
+    client, _, _, gateway = _client(tmp_path, index_version=None)
+    gateway.answer_value = AssertionError("gateway must not run without a READY index")
 
     response = client.post(
         "/api/v1/system/llm/semantic-test",
@@ -256,4 +227,4 @@ def test_semantic_test_reports_missing_ready_index_without_calling_gateway(tmp_p
     assert response.status_code == 200
     assert response.json()["data"]["outcome"] == "index_unavailable"
     assert response.json()["data"]["code"] == "knowledge_index_unavailable"
-    assert _Gateway.calls == []
+    assert gateway.calls == []
