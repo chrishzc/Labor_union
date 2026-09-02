@@ -116,4 +116,26 @@ class OrderCoreStageTimelinePageView(BaseModel):
     etag: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-__all__ = ["OrderCoreStageTimelinePageView"]
+class TerminalCompletionComponentView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str
+    owner: str
+    completed: bool
+    reason: str | None
+
+
+class OrderTerminalAggregateView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    case_no: str
+    applicable: bool
+    fully_closed: bool
+    components: list[TerminalCompletionComponentView]
+
+
+class OrderTerminalAggregatePageView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[OrderTerminalAggregateView]
+    next_cursor: str | None
+
+
+__all__ = ["OrderCoreStageTimelinePageView", "OrderTerminalAggregatePageView"]
