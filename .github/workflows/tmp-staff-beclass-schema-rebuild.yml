@@ -1,0 +1,307 @@
+name: Temporary staff BeClass schema rebuild
+
+on:
+  push:
+    branches: [ "fix/staff-beclass-profile-import" ]
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Rebuild controlled schema artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          from pathlib import Path
+
+          ROOT = Path.cwd()
+          PART = "db/schema_parts/216_staff_beclass_profile.sql"
+          TERMINAL = "db/schema_parts/1029_client_payment_destination_configuration.sql"
+          RELEASE_ID = "labor-union-staff-beclass-profile-2026-09-02-v1"
+          RELEASE_NAME = "labor_union_2026_09_02_staff_beclass_profile_v1"
+
+          def sha256(path: Path) -> str:
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def write_json(path: Path, payload: dict) -> None:
+              path.write_text(
+                  json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                  encoding="utf-8",
+              )
+
+          assembly_path = ROOT / "db/schema_assembly/labor_union_fresh_schema_v1.json"
+          assembly = json.loads(assembly_path.read_text(encoding="utf-8"))
+          active = list(assembly["active_bootstrap"])
+          if PART not in active:
+              active.insert(active.index(TERMINAL), PART)
+          assembly["active_bootstrap"] = active
+          ordered_source = "".join(
+              f"{Path(relative).name}:{sha256(ROOT / relative)}\n"
+              for relative in active
+          )
+          ordered_digest = hashlib.sha256(ordered_source.encode()).hexdigest()
+          assembly["active_artifacts_sha256"] = ordered_digest
+          write_json(assembly_path, assembly)
+          assembly_digest = sha256(assembly_path)
+
+          validation_path = ROOT / "db/cutover_releases/labor_union_validation_schema_v1.json"
+          validation = json.loads(validation_path.read_text(encoding="utf-8"))
+          validation["release_id"] = "labor-union-validation-schema-2026-09-02-v26"
+          validation["schema_parts"]["expected_count"] = len(active)
+          validation["schema_parts"]["ordered_digest_sha256"] = ordered_digest
+          validation["schema_parts"]["terminal_artifact"] = Path(TERMINAL).name
+          validation["schema_assembly"]["sha256"] = assembly_digest
+          write_json(validation_path, validation)
+
+          descriptor_path = ROOT / f"db/migration_releases/{RELEASE_NAME}.descriptors.json"
+          descriptor = {
+              "contract": "migration-owned-object-descriptors/v1",
+              "release_id": RELEASE_ID,
+              "descriptors": {
+                  "216_staff_beclass_profile.sql": {
+                      "tables": {
+                          "staff_certifications": [
+                              "staff_id",
+                              "certification_type",
+                              "created_at",
+                          ]
+                      },
+                      "parent_columns": {
+                          "staff": {
+                              "education": {
+                                  "column_type": "varchar(255)",
+                                  "is_nullable": "YES",
+                                  "column_default": None,
+                                  "extra": "",
+                              },
+                              "emergency_contact_name": {
+                                  "column_type": "varchar(100)",
+                                  "is_nullable": "YES",
+                                  "column_default": None,
+                                  "extra": "",
+                              },
+                              "emergency_contact_phone": {
+                                  "column_type": "varchar(30)",
+                                  "is_nullable": "YES",
+                                  "column_default": None,
+                                  "extra": "",
+                              },
+                              "admin_notes": {
+                                  "column_type": "text",
+                                  "is_nullable": "YES",
+                                  "column_default": None,
+                                  "extra": "",
+                              },
+                          }
+                      },
+                      "indexes": {
+                          "staff_certifications.PRIMARY": {
+                              "non_unique": 0,
+                              "columns": ["staff_id", "certification_type"],
+                          }
+                      },
+                      "foreign_keys": {
+                          "staff_certifications.fk_staff_certification_staff": {
+                              "columns": ["staff_id"],
+                              "referenced_table": "staff",
+                              "referenced_columns": ["id"],
+                              "update_rule": "RESTRICT",
+                              "delete_rule": "CASCADE",
+                          }
+                      },
+                      "checks": {
+                          "staff_certifications.chk_staff_certification_type": "atom(char_length(trim(certification_type))>0)"
+                      },
+                      "triggers": [],
+                  }
+              },
+          }
+          write_json(descriptor_path, descriptor)
+
+          manifest_path = ROOT / f"db/migration_releases/{RELEASE_NAME}.json"
+          manifest = {
+              "contract": "migration-release-manifest/v1",
+              "release_id": RELEASE_ID,
+              "release_metadata": {
+                  "release_name": "Labor Union Staff BeClass profile storage",
+                  "application_version": "staff-beclass-profile-v1",
+                  "published_at": "2026-09-02",
+                  "description": "Preserve Staff historical BeClass education, emergency contact, admin note and certification data",
+              },
+              "source_baseline": {
+                  "minimum_mysql_version": "8.0",
+                  "required_character_set": "utf8mb4",
+                  "allowed_owned_object_states": ["absent", "exact"],
+                  "forbidden_owned_object_states": ["partial", "drift"],
+                  "source_must_be_read_only": True,
+                  "maintenance_token_required": True,
+                  "baseline_id": assembly["assembly_id"],
+              },
+              "artifacts": [
+                  {
+                      "name": "216_staff_beclass_profile.sql",
+                      "relative_path": PART,
+                      "sha256": sha256(ROOT / PART),
+                      "dependencies": [],
+                      "data_effect": "schema_only",
+                      "rollback_policy": "forward-only-preserve-staff-profile-lineage",
+                      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+                  }
+              ],
+              "backfills": [],
+              "verification_contracts": [
+                  {
+                      "verification_id": "staff-beclass-profile-owned-objects",
+                      "phase": "post-schema",
+                      "policy": "candidate-owned-objects-exact-and-import-mapping-readable",
+                      "read_only": True,
+                      "blocking": True,
+                  }
+              ],
+              "application_compatibility": {
+                  "minimum_api_contract": "typed-api-v1",
+                  "compatible_contracts": [
+                      "client-payment-destination-configuration-v1",
+                      "staff-beclass-profile-v1",
+                  ],
+                  "required_restart_targets": ["api"],
+                  "watcher_worker_compatibility": "same-release-required",
+                  "post_cutover_smoke_ids": ["staff-beclass-profile-owned-objects"],
+              },
+              "descriptor_artifact": {
+                  "name": descriptor_path.name,
+                  "relative_path": descriptor_path.relative_to(ROOT).as_posix(),
+                  "sha256": sha256(descriptor_path),
+                  "dependencies": [],
+              },
+              "tool_archive_policy": {
+                  "artifact_hash_algorithm": "sha256",
+                  "backup_archive_policy": "permanent-release-archive",
+                  "journal_archive_policy": "append-only-per-operation",
+                  "mysqldump_required_options": [
+                      "--single-transaction",
+                      "--routines",
+                      "--events",
+                      "--triggers",
+                      "--hex-blob",
+                  ],
+                  "receipt_archive_policy": "permanent-release-archive",
+                  "restore_required_mode": "new-absent-candidate-only",
+              },
+          }
+          write_json(manifest_path, manifest)
+
+          runner_path = ROOT / "scripts/migrate_preserved_database_additive_schema.py"
+          runner = runner_path.read_text(encoding="utf-8")
+          manifest_name = f"{RELEASE_NAME}.json"
+          if manifest_name not in runner:
+              needle = '    "labor_union_2026_09_01_client_payment_destination_configuration_v1.json",\n)'
+              replacement = (
+                  '    "labor_union_2026_09_01_client_payment_destination_configuration_v1.json",\n'
+                  f'    "{manifest_name}",\n'
+                  ')'
+              )
+              if needle not in runner:
+                  raise RuntimeError("preserve-data release chain insertion point not found")
+              runner_path.write_text(runner.replace(needle, replacement, 1), encoding="utf-8")
+
+          report = {
+              "assembly_active_count": len(active),
+              "assembly_active_artifacts_sha256": ordered_digest,
+              "assembly_sha256": assembly_digest,
+              "part_216_sha256": sha256(ROOT / PART),
+              "descriptor_sha256": sha256(descriptor_path),
+              "migration_manifest_sha256": sha256(manifest_path),
+              "validation_release_id": validation["release_id"],
+              "migration_release_id": RELEASE_ID,
+          }
+          report_path = ROOT / "staff_beclass_schema_rebuild_report.json"
+          write_json(report_path, report)
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Build validation schema release
+        run: python scripts/build_validation_schema_release.py
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Verify controlled schema manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/verify_validation_schema_manifest.py
+          python - <<'PY'
+          from pathlib import Path
+          from scripts.schema_assembly import validate_schema_assembly
+          from shared_kernel.migration_release import load_migration_release_manifest
+
+          errors = validate_schema_assembly()
+          if errors:
+              raise SystemExit("schema assembly invalid: " + "; ".join(errors))
+          manifest = Path("db/migration_releases/labor_union_2026_09_02_staff_beclass_profile_v1.json")
+          loaded = load_migration_release_manifest(manifest, Path.cwd())
+          assert loaded.release_id == "labor-union-staff-beclass-profile-2026-09-02-v1"
+          import scripts.migrate_preserved_database_additive_schema as runner
+          assert manifest.name in runner.DEFAULT_RELEASE_MANIFESTS
+          print("controlled schema manifests: PASS")
+          PY
+
+      - name: Run Staff BeClass mapping regression
+        run: >-
+          python -m pytest -q
+          tests/domains/case-import/subsystems/case-import/modules/staff-historical-workbook-adoption/regression/test_staff_beclass_profile_mapping.py
+
+      - name: Run case-import owner-local regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d tests/subsystems/case_import ]; then
+            python -m pytest -q tests/subsystems/case_import
+          fi
+
+      - name: Run schema and migration contract regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests_found < <(find tests -type f \( -name 'test_*.py' -o -name '*_test.py' \) | grep -E '(schema_assembly|validation_schema|migration_release)' | sort || true)
+          if (( ${#tests_found[@]} > 0 )); then
+            printf 'Running %s schema/migration contract test files\n' "${#tests_found[@]}"
+            python -m pytest -q "${tests_found[@]}"
+          else
+            echo "No schema/migration contract tests discovered"
+          fi
+
+      - name: Upload rebuilt controlled artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: staff-beclass-schema-rebuild
+          if-no-files-found: error
+          path: |
+            db/schema_assembly/labor_union_fresh_schema_v1.json
+            db/cutover_releases/labor_union_validation_schema_v1.json
+            db/releases/labor_union_validation_schema_v1.sql
+            db/migration_releases/labor_union_2026_09_02_staff_beclass_profile_v1.descriptors.json
+            db/migration_releases/labor_union_2026_09_02_staff_beclass_profile_v1.json
+            scripts/migrate_preserved_database_additive_schema.py
+            staff_beclass_schema_rebuild_report.json
