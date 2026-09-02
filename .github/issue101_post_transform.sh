@@ -205,10 +205,11 @@ replace_any(
         ('row["identity_card"] == "A*********"', 'row["identity_card"] == "A123456789"'),
         ('row["address_masked"] == "地址已遮罩"', 'row["address"] == "完整地址"'),
         ('row["address"] == "地址已遮罩"', 'row["address"] == "完整地址"'),
+        ('row["address"] == "—"', 'row["address"] == "完整地址"'),
         ('assert "A123456789" not in quarterly.text', 'assert "A123456789" in quarterly.text'),
         ('assert "完整地址" not in quarterly.text', 'assert "完整地址" in quarterly.text'),
     ],
-    minimum=4,
+    minimum=5,
 )
 replace_any(
     "tests/test_weekly_operations_report_contract.py",
