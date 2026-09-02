@@ -39,10 +39,16 @@ jobs:
           path = Path("/tmp/issue101_remove_masked_apply.py")
           text = path.read_text()
 
-          start_marker = "def transform_line_feedback(text: str) -> str:\n"
-          start = text.index(start_marker)
-          end = text.index("\n\ndef ", start + len(start_marker))
-          replacement = '''def transform_line_feedback(text: str) -> str:
+          def patch_transformer(source: str, name: str, replacement: str) -> str:
+              start_marker = f"def {name}(text: str) -> str:\n"
+              start = source.index(start_marker)
+              end = source.index("\n\ndef ", start + len(start_marker))
+              return source[:start] + replacement + source[end:]
+
+          text = patch_transformer(
+              text,
+              "transform_line_feedback",
+              '''def transform_line_feedback(text: str) -> str:
               text = replace_top_level_function(
                   text,
                   "_canonical_actor",
@@ -57,8 +63,35 @@ jobs:
               return str(value or "").strip()""",
                   required=False,
               )
-          '''
-          text = text[:start] + replacement + text[end:]
+          ''',
+          )
+          text = patch_transformer(
+              text,
+              "transform_beclass_review_intake",
+              '''def transform_beclass_review_intake(text: str) -> str:
+              text = text.replace("privacy evidence", "canonical evidence")
+              text = replace_top_level_function(
+                  text,
+                  "canonical_review_identifier",
+                  """def canonical_review_identifier(source_kind, stable_identity, fallback) -> str:
+              raw = str(stable_identity or "").strip()
+              if raw:
+                  return raw
+              return f"{source_kind.value}-row-{fallback}"""",
+                  required=False,
+              )
+              return replace_top_level_function(
+                  text,
+                  "review_identifier",
+                  """def review_identifier(source_kind, stable_identity, fallback) -> str:
+              raw = str(stable_identity or "").strip()
+              if raw:
+                  return raw
+              return f"{source_kind.value}-row-{fallback}"""",
+                  required=False,
+              )
+          ''',
+          )
 
           # #101 changes authorized readback only. Preserve audit write-time redaction.
           text = text.replace(
