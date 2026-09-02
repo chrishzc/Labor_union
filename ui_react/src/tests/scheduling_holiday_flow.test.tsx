@@ -21,7 +21,7 @@ describe('SchedulingPage holiday policy flow', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({
-      items: [{ id: 11, name: '去敏人員甲', phone: null }],
+      items: [{ id: 11, name: '去敏人員甲', phone: null, education: null }],
       next_cursor: null,
     });
     vi.spyOn(schedulingCurrentClient, 'queryCurrentCalendar').mockResolvedValue(

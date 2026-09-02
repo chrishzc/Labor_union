@@ -22,8 +22,8 @@ describe('SchedulingPage query-only presentation', () => {
     window.location.hash = '#scheduling';
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({
       items: [
-        { id: 11, name: '去敏人員甲', phone: null },
-        { id: 12, name: '去敏人員乙', phone: null },
+        { id: 11, name: '去敏人員甲', phone: null, education: null },
+        { id: 12, name: '去敏人員乙', phone: null, education: null },
       ],
       next_cursor: null,
     });
@@ -139,11 +139,11 @@ describe('SchedulingPage query-only presentation', () => {
   it('uses page_size 20, continues the staff cursor and keeps a complete month axis', async () => {
     vi.mocked(staffDirectoryClient.queryPage)
       .mockResolvedValueOnce({
-        items: [{ id: 11, name: '去敏人員甲', phone: null }],
+        items: [{ id: 11, name: '去敏人員甲', phone: null, education: null }],
         next_cursor: 11,
       })
       .mockResolvedValueOnce({
-        items: [{ id: 12, name: '去敏人員乙', phone: null }],
+        items: [{ id: 12, name: '去敏人員乙', phone: null, education: null }],
         next_cursor: null,
       });
 

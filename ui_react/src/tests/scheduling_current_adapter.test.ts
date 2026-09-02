@@ -13,7 +13,7 @@ import { SCHEDULING_PROJECTION_READY } from './fixtures/scheduling/scheduling_cu
 
 describe('scheduling current adapter', () => {
   it('maps server days and occupancy kinds without computing business dates', () => {
-    const staff = adaptStaffDirectorySummary({ id: 11, name: '去敏人員甲', phone: null });
+    const staff = adaptStaffDirectorySummary({ id: 11, name: '去敏人員甲', phone: null, education: null });
     const row = adaptSchedulingProjection(staff, SCHEDULING_PROJECTION_READY);
 
     expect(row.displayName).toBe('去敏人員甲');
@@ -26,7 +26,7 @@ describe('scheduling current adapter', () => {
   });
 
   it('preserves server lifecycle status instead of labeling completed service as active', () => {
-    const staff = adaptStaffDirectorySummary({ id: 11, name: '去敏人員甲', phone: null });
+    const staff = adaptStaffDirectorySummary({ id: 11, name: '去敏人員甲', phone: null, education: null });
     const completedProjection = {
       ...SCHEDULING_PROJECTION_READY,
       assignments: SCHEDULING_PROJECTION_READY.assignments.map((assignment) => ({
@@ -52,7 +52,7 @@ describe('scheduling current adapter', () => {
   });
 
   it('includes assignment buffer occupancy in the waiting filter', () => {
-    const staff = adaptStaffDirectorySummary({ id: 11, name: '去敏人員甲', phone: null });
+    const staff = adaptStaffDirectorySummary({ id: 11, name: '去敏人員甲', phone: null, education: null });
     const bufferProjection = {
       ...SCHEDULING_PROJECTION_READY,
       days: SCHEDULING_PROJECTION_READY.days.map((day, index) => index === 0 ? {
@@ -72,7 +72,7 @@ describe('scheduling current adapter', () => {
   });
 
   it('shows the typed unavailability kind and reason on calendar days', () => {
-    const staff = adaptStaffDirectorySummary({ id: 11, name: '去敏人員甲', phone: null });
+    const staff = adaptStaffDirectorySummary({ id: 11, name: '去敏人員甲', phone: null, education: null });
     const unavailableProjection: SchedulingCurrentProjection = {
       ...SCHEDULING_PROJECTION_READY,
       assignments: [],

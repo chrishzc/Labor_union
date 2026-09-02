@@ -138,7 +138,7 @@ function staffDirectoryResponse(): unknown {
     message: 'ok',
     error: null,
     data: {
-      items: [{ id: 11, name: '去敏人員', phone: null }],
+      items: [{ id: 11, name: '去敏人員', phone: null, education: null }],
       next_cursor: null,
     },
   };

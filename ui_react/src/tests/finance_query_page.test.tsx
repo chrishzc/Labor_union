@@ -17,7 +17,7 @@ describe('FinancePage query and guarded import presentation', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [{ case_no: 'CASE-FIN-001', client_name: '去敏客戶', order_status: '服務中', staff_name: null, identity_status: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, service_days: null, total_employer_self_pay_payable: null }], next_cursor: null, etag: 'c'.repeat(64) });
-    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [{ id: 11, name: '去敏人員', phone: null }], next_cursor: null });
+    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [{ id: 11, name: '去敏人員', phone: null, education: null }], next_cursor: null });
     vi.spyOn(clientReceiptQueryClient, 'query').mockResolvedValue(RECEIPT_RESPONSE.data);
     vi.spyOn(staffPayablesQueryClient, 'query').mockResolvedValue(STAFF_PAYABLES_RESPONSE.data);
     vi.spyOn(accountsPayableQueryClient, 'query').mockResolvedValue(ACCOUNTS_PAYABLE_RESPONSE.data);
@@ -81,8 +81,8 @@ describe('FinancePage query and guarded import presentation', () => {
       .mockResolvedValueOnce({ items: [orderItem], next_cursor: orderItem.case_no, etag: 'a'.repeat(64) })
       .mockResolvedValueOnce({ items: [{ ...orderItem, case_no: 'CASE-FIN-002', client_name: '第二頁客戶' }], next_cursor: null, etag: 'b'.repeat(64) });
     vi.mocked(staffDirectoryClient.queryPage)
-      .mockResolvedValueOnce({ items: [{ id: 11, name: '第一頁人員', phone: null }], next_cursor: 11 })
-      .mockResolvedValueOnce({ items: [{ id: 12, name: '第二頁人員', phone: null }], next_cursor: null });
+      .mockResolvedValueOnce({ items: [{ id: 11, name: '第一頁人員', phone: null, education: null }], next_cursor: 11 })
+      .mockResolvedValueOnce({ items: [{ id: 12, name: '第二頁人員', phone: null, education: null }], next_cursor: null });
 
     render(<FinancePage />);
     expect(await screen.findByRole('option', { name: /CASE-FIN-002｜第二頁客戶/ })).toBeInTheDocument();
