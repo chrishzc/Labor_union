@@ -16,7 +16,6 @@ import { HistoricalOrderWorkbookSnapshot, historicalOrderWorkbookPreviewClient }
 import { HistoricalOrderReviewRemediationWorkbench } from '../components/HistoricalOrderReviewRemediationWorkbench';
 import { DataBrowserPage } from './DataBrowserPage';
 import './DataImportPage.css';
-import { HistoricalServiceAccountingWorkbench } from '../components/HistoricalServiceAccountingWorkbench';
 
 type ResultState =
   | { kind: 'loading' }
@@ -412,7 +411,6 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
             <CaseWorkbookPreviewCard id="staff-historical" icon="👩‍🍼" title="3. 月嫂歷史資料匯入" inputLabel="選擇月嫂歷史 Workbook" selectedWorkbook={staffHistorical.selectedWorkbook} previewState={staffHistorical.previewState} applyState={staffHistorical.applyState} confirmed={staffHistorical.confirmed} mutationLocked={mutationLocked} metrics={staffHistorical.previewState.kind === 'ready' ? [['來源列數', staffHistorical.previewState.preview.sourceRowCount], ['新建', staffHistorical.previewState.preview.createdCount], ['採用既有', staffHistorical.previewState.preview.adoptedExistingCount], ['身分阻擋', staffHistorical.previewState.preview.blockedIdentityCount], ['身分衝突', staffHistorical.previewState.preview.identityConflictCount], ['需人工檢查', staffHistorical.previewState.preview.reviewRequiredCount]] : []} onSelect={staffHistorical.selectWorkbook} onPreview={staffHistorical.previewWorkbook} onConfirm={staffHistorical.setConfirmed} onApply={staffHistorical.applyWorkbook} />
             <CaseWorkbookPreviewCard id="historic-orders" icon="📦" title="4. 歷史訂單認領匯入" inputLabel="選擇歷史訂單 Workbook" selectedWorkbook={historicalOrders.selectedWorkbook} previewState={historicalOrders.previewState} applyState={historicalOrders.applyState} confirmed={historicalOrders.confirmed} mutationLocked={mutationLocked} metrics={historicalOrders.previewState.kind === 'ready' ? [['來源列數', historicalOrders.previewState.preview.sourceRowCount], ['工作簿未列入將取消', historicalOrders.previewState.preview.absentOrderCancellationCount], ['不採用', historicalOrders.previewState.preview.resultCounts.notAdopted], ['配對中未付訂金', historicalOrders.previewState.preview.resultCounts.matchingPendingDeposit], ['已付訂金未服務', historicalOrders.previewState.preview.resultCounts.historicalUnserved], ['歷史服務中', historicalOrders.previewState.preview.resultCounts.historicalInService], ['歷史服務完成', historicalOrders.previewState.preview.resultCounts.historicalServiceCompleted], ['目前資料衝突', historicalOrders.previewState.preview.currentConflictCount]] : []} onSelect={historicalOrders.selectWorkbook} onPreview={historicalOrders.previewWorkbook} onConfirm={historicalOrders.setConfirmed} onApply={historicalOrders.applyWorkbook} reviewAction={historicalReviewAction} />
           </div>
-          <HistoricalServiceAccountingWorkbench />
           {selectedHistoricalReviewIdentity && <section className="import-workbench-card" aria-label="歷史訂單欄位衝突更正">
             <HistoricalOrderReviewRemediationWorkbench
               reviewIdentity={selectedHistoricalReviewIdentity}
@@ -431,7 +429,7 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
         <section className="import-result-workbench" data-surface-id="imports.hcm-results.open">
           <div className="import-result-title-row"><div><span className="import-icon">🏢</span><h2>HCM 最近匯入紀錄與問題檢查</h2></div><span className="import-status-badge ready">唯讀查詢</span></div>
           {state.kind === 'loading' && <div className="import-result-state" role="status">正在載入最近匯入結果…</div>}
-          {state.kind === 'error' && <div className="import-result-state import-result-error" data-surface-id="imports.hcm-results.error" role="status"><strong>最近匯入結果暫時無法載入；不影響上方工作簿預覽與匯入。</strong><p>{state.message}</p><button type="button" data-control-id="imports.hcm-results.retry" onClick={() => void loadResults()}>重試結果查詢</button></div>}
+          {state.kind === 'error' && <div className="import-result-state import-result-error" data-surface-id="imports.hcm-results.error" role="status"><strong>最近匯入結果暫時無法載入；不影響上方工作簿預覽與匯入。</strong><p>{state.message}</p><button type="button" data-surface-id="imports.hcm-results.retry" onClick={() => void loadResults()}>重試結果查詢</button></div>}
           {state.kind === 'empty' && <div className="import-result-state" data-surface-id="imports.hcm-results.empty">目前沒有可查詢的 HCM 匯入結果。</div>}
           {state.kind === 'ready' && state.items.map((result) => (
             <article key={result.receiptId} className="import-result-batch" data-surface-id={`imports.hcm-results.receipt.${result.receiptId}`}>
