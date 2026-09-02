@@ -32,7 +32,8 @@ jobs:
           from pathlib import Path
 
           ROOT = Path.cwd()
-          PART = "db/schema_parts/216_staff_beclass_profile.sql"
+          FRESH_PART = "db/schema_parts/216_staff_beclass_profile.sql"
+          MIGRATION_PART = "db/schema_parts/1030_staff_beclass_profile.sql"
           TERMINAL = "db/schema_parts/1029_client_payment_destination_configuration.sql"
           RELEASE_ID = "labor-union-staff-beclass-profile-2026-09-02-v1"
           RELEASE_NAME = "labor_union_2026_09_02_staff_beclass_profile_v1"
@@ -46,12 +47,31 @@ jobs:
                   encoding="utf-8",
               )
 
+          fresh_path = ROOT / FRESH_PART
+          migration_path = ROOT / MIGRATION_PART
+          migration_sql = fresh_path.read_text(encoding="utf-8").replace(
+              "-- File: 216_staff_beclass_profile.sql",
+              "-- File: 1030_staff_beclass_profile.sql",
+              1,
+          )
+          migration_path.write_text(migration_sql, encoding="utf-8")
+
           assembly_path = ROOT / "db/schema_assembly/labor_union_fresh_schema_v1.json"
           assembly = json.loads(assembly_path.read_text(encoding="utf-8"))
           active = list(assembly["active_bootstrap"])
-          if PART not in active:
-              active.insert(active.index(TERMINAL), PART)
+          if FRESH_PART not in active:
+              active.insert(active.index(TERMINAL), FRESH_PART)
           assembly["active_bootstrap"] = active
+          assembly["classifications"][MIGRATION_PART] = "migration-only"
+          assembly["retirement_contracts"][MIGRATION_PART] = {
+              "source_object": "preserve-data additive bridge for Staff BeClass profile storage",
+              "successor": FRESH_PART,
+              "terminal_schema_evidence": "fresh assembly uses canonical part 216; preserve chain uses 1030 for existing databases",
+              "data_effect": "schema_only; existing staff rows are preserved and no business-value backfill is inferred",
+              "replay": "preserve release chain applies 1030 only when owned objects are absent or exact; partial or drift metadata blocks candidate apply",
+              "rollback": "retain source backup and discard candidate before same-name replacement",
+              "unresolved_policy": "partial or drift owned metadata blocks candidate apply pending explicit remediation",
+          }
           ordered_source = "".join(
               f"{Path(relative).name}:{sha256(ROOT / relative)}\n"
               for relative in active
@@ -71,11 +91,12 @@ jobs:
           write_json(validation_path, validation)
 
           descriptor_path = ROOT / f"db/migration_releases/{RELEASE_NAME}.descriptors.json"
+          migration_name = Path(MIGRATION_PART).name
           descriptor = {
               "contract": "migration-owned-object-descriptors/v1",
               "release_id": RELEASE_ID,
               "descriptors": {
-                  "216_staff_beclass_profile.sql": {
+                  migration_name: {
                       "tables": {
                           "staff_certifications": [
                               "staff_id",
@@ -156,9 +177,9 @@ jobs:
               },
               "artifacts": [
                   {
-                      "name": "216_staff_beclass_profile.sql",
-                      "relative_path": PART,
-                      "sha256": sha256(ROOT / PART),
+                      "name": migration_name,
+                      "relative_path": MIGRATION_PART,
+                      "sha256": sha256(migration_path),
                       "dependencies": [],
                       "data_effect": "schema_only",
                       "rollback_policy": "forward-only-preserve-staff-profile-lineage",
@@ -212,8 +233,12 @@ jobs:
           runner = runner_path.read_text(encoding="utf-8")
           manifest_name = f"{RELEASE_NAME}.json"
           if manifest_name not in runner:
-              needle = '    "labor_union_2026_09_01_client_payment_destination_configuration_v1.json",\n'
-              replacement = f'    "{manifest_name}",\n' + needle
+              needle = '    "labor_union_2026_09_01_client_payment_destination_configuration_v1.json",\n)'
+              replacement = (
+                  '    "labor_union_2026_09_01_client_payment_destination_configuration_v1.json",\n'
+                  f'    "{manifest_name}",\n'
+                  ')'
+              )
               if needle not in runner:
                   raise RuntimeError("preserve-data release chain insertion point not found")
               runner_path.write_text(runner.replace(needle, replacement, 1), encoding="utf-8")
@@ -222,7 +247,8 @@ jobs:
               "assembly_active_count": len(active),
               "assembly_active_artifacts_sha256": ordered_digest,
               "assembly_sha256": assembly_digest,
-              "part_216_sha256": sha256(ROOT / PART),
+              "fresh_part_sha256": sha256(fresh_path),
+              "migration_part_sha256": sha256(migration_path),
               "descriptor_sha256": sha256(descriptor_path),
               "migration_manifest_sha256": sha256(manifest_path),
               "validation_release_id": validation["release_id"],
@@ -260,6 +286,7 @@ jobs:
           assert loaded.release_id == "labor-union-staff-beclass-profile-2026-09-02-v1"
           import scripts.migrate_preserved_database_additive_schema as runner
           assert manifest.name in runner.DEFAULT_RELEASE_MANIFESTS
+          assert runner.RELEASE_MANIFEST.release_id == loaded.release_id
           print("controlled schema manifests: PASS")
           PY
 
@@ -294,6 +321,7 @@ jobs:
           name: staff-beclass-schema-rebuild
           if-no-files-found: error
           path: |
+            db/schema_parts/1030_staff_beclass_profile.sql
             db/schema_assembly/labor_union_fresh_schema_v1.json
             db/cutover_releases/labor_union_validation_schema_v1.json
             db/releases/labor_union_validation_schema_v1.sql
