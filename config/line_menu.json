@@ -3,103 +3,53 @@
   "menus": [
     {
       "id": "default_menu",
-      "name": "服務選單",
+      "name": "一般用戶選單",
       "audience_role": "customer",
       "enabled": true,
       "selected": true,
       "set_as_default": true,
-      "chat_bar_text": "服務選單",
-      "size": {
-        "width": 2500,
-        "height": 1686
-      },
-      "appearance": {
-        "background_color": "#F5F5F5",
-        "image_mode": "generated",
-        "image_path": "line/default_menu.jpg",
-        "image_asset_id": null
-      },
+      "chat_bar_text": "用戶選單",
+      "size": {"width": 2500, "height": 1686},
+      "appearance": {"background_color": "#F5F5F5", "image_mode": "generated", "image_path": "line/default_menu.jpg", "image_asset_id": null},
       "buttons": [
-        {
-          "id": "service_registration",
-          "label": "服務登記",
-          "text_color": "#FFFFFF",
-          "background_color": "#1E3A8A",
-          "bounds": {
-            "x": 0,
-            "y": 0,
-            "width": 1250,
-            "height": 843
-          },
-          "action": {
-            "type": "uri",
-            "text": null,
-            "uri": "?entry=registration",
-            "uri_source": "liff",
-            "data": null
-          },
-          "border_radius": 54
-        },
-        {
-          "id": "profile_update",
-          "label": "修改登記資料",
-          "text_color": "#FFFFFF",
-          "background_color": "#EA580C",
-          "bounds": {
-            "x": 1250,
-            "y": 0,
-            "width": 1250,
-            "height": 843
-          },
-          "action": {
-            "type": "uri",
-            "text": null,
-            "uri": "?target=profile_update",
-            "uri_source": "liff",
-            "data": null
-          },
-          "border_radius": 54
-        },
-        {
-          "id": "contact_staff",
-          "label": "服務說明",
-          "text_color": "#FFFFFF",
-          "background_color": "#3B82F6",
-          "bounds": {
-            "x": 0,
-            "y": 843,
-            "width": 1250,
-            "height": 843
-          },
-          "action": {
-            "type": "message",
-            "text": "服務說明",
-            "uri": null,
-            "uri_source": "literal",
-            "data": null
-          },
-          "border_radius": 54
-        },
-        {
-          "id": "help_desk",
-          "label": "專人客服諮詢",
-          "text_color": "#FFFFFF",
-          "background_color": "#10B981",
-          "bounds": {
-            "x": 1250,
-            "y": 843,
-            "width": 1250,
-            "height": 843
-          },
-          "action": {
-            "type": "message",
-            "text": "專人客服",
-            "uri": null,
-            "uri_source": "literal",
-            "data": null
-          },
-          "border_radius": 54
-        }
+        {"id":"service_registration","label":"服務登記","text_color":"#FFFFFF","background_color":"#1E3A8A","bounds":{"x":0,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?entry=registration","uri_source":"liff","data":null},"border_radius":54},
+        {"id":"profile_update","label":"修改登記資料","text_color":"#FFFFFF","background_color":"#EA580C","bounds":{"x":1250,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=profile_update","uri_source":"liff","data":null},"border_radius":54},
+        {"id":"contact_staff","label":"服務說明","text_color":"#FFFFFF","background_color":"#3B82F6","bounds":{"x":0,"y":843,"width":1250,"height":843},"action":{"type":"message","text":"服務說明","uri":null,"uri_source":"literal","data":null},"border_radius":54},
+        {"id":"help_desk","label":"專人客服諮詢","text_color":"#FFFFFF","background_color":"#10B981","bounds":{"x":1250,"y":843,"width":1250,"height":843},"action":{"type":"message","text":"專人客服","uri":null,"uri_source":"literal","data":null},"border_radius":54}
+      ]
+    },
+    {
+      "id": "staff_menu",
+      "name": "月嫂專屬選單",
+      "audience_role": "staff",
+      "enabled": true,
+      "selected": true,
+      "set_as_default": false,
+      "chat_bar_text": "月嫂專區",
+      "size": {"width": 2500, "height": 1686},
+      "appearance": {"background_color": "#FFF1F2", "image_mode": "generated", "image_path": "line/staff_menu.jpg", "image_asset_id": null},
+      "buttons": [
+        {"id":"order_query","label":"訂單查詢","text_color":"#FFFFFF","background_color":"#BE123C","bounds":{"x":0,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=staff_order_search","uri_source":"liff","data":null},"border_radius":54},
+        {"id":"schedule_query","label":"排班資訊","text_color":"#FFFFFF","background_color":"#F43F5E","bounds":{"x":1250,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=staff_schedule","uri_source":"liff","data":null},"border_radius":54},
+        {"id":"leave_apply","label":"請假代班申請","text_color":"#FFFFFF","background_color":"#D97706","bounds":{"x":0,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=staff_leave_apply","uri_source":"liff","data":null},"border_radius":54},
+        {"id":"payout_query","label":"薪資請款明細","text_color":"#FFFFFF","background_color":"#059669","bounds":{"x":1250,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=staff_payout","uri_source":"liff","data":null},"border_radius":54}
+      ]
+    },
+    {
+      "id": "union_staff_menu",
+      "name": "工會人員專屬選單",
+      "audience_role": "union_staff",
+      "enabled": true,
+      "selected": true,
+      "set_as_default": false,
+      "chat_bar_text": "工會管理",
+      "size": {"width": 2500, "height": 1686},
+      "appearance": {"background_color": "#ECFDF5", "image_mode": "generated", "image_path": "line/union_staff_menu.jpg", "image_asset_id": null},
+      "buttons": [
+        {"id":"staff_review","label":"待確認審核","text_color":"#FFFFFF","background_color":"#047857","bounds":{"x":0,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=staff_review","uri_source":"liff","data":null},"border_radius":54},
+        {"id":"customer_service","label":"客服中心","text_color":"#FFFFFF","background_color":"#059669","bounds":{"x":1250,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=customer_service","uri_source":"liff","data":null},"border_radius":54},
+        {"id":"anomalies_center","label":"重大異常通報","text_color":"#FFFFFF","background_color":"#DC2626","bounds":{"x":0,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=anomalies_center","uri_source":"liff","data":null},"border_radius":54},
+        {"id":"ops_dashboard","label":"即時營運看板","text_color":"#FFFFFF","background_color":"#2563EB","bounds":{"x":1250,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=dashboard","uri_source":"liff","data":null},"border_radius":54}
       ]
     }
   ]
