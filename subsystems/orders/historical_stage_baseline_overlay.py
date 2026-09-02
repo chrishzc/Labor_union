@@ -138,7 +138,11 @@ def _overlay(
     if selected_step is None:
         return timeline
 
-    current_step = _current_step(timeline.sop_steps, selected_step)
+    current_step = _current_step(
+        timeline.sop_steps,
+        selected_step,
+        timeline.current_sop_step,
+    )
     historical_cutoff = min(selected_step, current_step)
     current_stage_ordinal = _stage_ordinal_for_step(current_step)
 
@@ -173,23 +177,34 @@ def _overlay(
 def _current_step(
     steps: tuple[SopStepProjection, ...],
     selected_step: int,
+    projected_current_step: int | None,
 ) -> int:
-    """Project current work without treating old missing history as a new regression.
+    """Combine immutable baseline, explicit invalidation, and base progression.
 
     Before the immutable baseline, only a concrete current owner state
-    (not_started/in_progress/blocked) may reopen a step.  ``unavailable`` alone
+    (not_started/in_progress/blocked) may reopen a step. ``unavailable`` alone
     remains an allowed historical predecessor gap because H-06 requires a typed
-    owner invalidation rather than inference from missing lineage.  From the
-    selected step onward, the first non-completed owner projection is current.
+    owner invalidation rather than inference from missing lineage. Once no such
+    predecessor exists, the base projection may move forward beyond the selected
+    baseline; raw unavailable owner rows must not pull completed service backward.
     """
 
     if tuple(step.ordinal for step in steps) != tuple(range(1, 12)):
         raise ValueError("historical_stage_baseline_steps_invalid")
+    if projected_current_step is not None and (
+        isinstance(projected_current_step, bool)
+        or not isinstance(projected_current_step, int)
+        or not 1 <= projected_current_step <= 11
+    ):
+        raise ValueError("historical_stage_baseline_current_step_invalid")
     for step in steps:
-        if step.ordinal < selected_step:
-            if step.status in {"not_started", "in_progress", "blocked"}:
-                return step.ordinal
-            continue
+        if step.ordinal >= selected_step:
+            break
+        if step.status in {"not_started", "in_progress", "blocked"}:
+            return step.ordinal
+    if projected_current_step is not None and projected_current_step >= selected_step:
+        return projected_current_step
+    for step in steps[selected_step - 1:]:
         if step.status != "completed":
             return step.ordinal
     return 11
