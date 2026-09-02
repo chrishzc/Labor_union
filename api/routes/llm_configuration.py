@@ -1,4 +1,4 @@
-"""System-admin write-only configuration endpoint for the LLM API key."""
+"""System-admin write-only configuration endpoint for the Gemini API key."""
 
 from __future__ import annotations
 
@@ -10,6 +10,10 @@ from pydantic import BaseModel
 
 from api.dependencies.admin_auth import AdminPrincipal, require_system_admin
 from api.schemas.base import BaseResponse
+from infrastructure.knowledge.gemini_selector import (
+    DEFAULT_GEMINI_MODEL,
+    GeminiCandidateSelector,
+)
 from infrastructure.runtime.llm_api_key_store import LlmApiKeyStatus, LlmApiKeyStore
 
 
@@ -22,8 +26,21 @@ class LlmApiKeyStatusView(BaseModel):
     updated_at: datetime | None
 
 
+class LlmConnectionTestView(BaseModel):
+    connected: bool
+    provider: str
+    model: str
+    code: str | None
+
+
 def get_llm_api_key_store() -> LlmApiKeyStore:
     return _STORE
+
+
+def get_gemini_selector(
+    store: LlmApiKeyStore = Depends(get_llm_api_key_store),
+) -> GeminiCandidateSelector:
+    return GeminiCandidateSelector(store=store)
 
 
 def _status_view(value: LlmApiKeyStatus) -> LlmApiKeyStatusView:
@@ -61,6 +78,40 @@ async def _read_api_key_without_echo(request: Request) -> str:
     return normalized
 
 
+def _connection_result(selector: GeminiCandidateSelector) -> LlmConnectionTestView:
+    try:
+        output = selector("連線測試。只回覆 OK。")
+        connected = bool(output.strip())
+        return LlmConnectionTestView(
+            connected=connected,
+            provider="google_ai_studio",
+            model=selector.model,
+            code=None if connected else "empty_response",
+        )
+    except TimeoutError:
+        code = "timeout"
+    except ConnectionError as error:
+        error_code = str(error)
+        code = "rate_limited" if error_code == "gemini_api_http_429" else "unavailable"
+    except RuntimeError as error:
+        error_code = str(error)
+        if error_code == "gemini_api_key_not_configured":
+            code = "not_configured"
+        elif error_code in {"gemini_api_http_401", "gemini_api_http_403"}:
+            code = "authentication_failed"
+        elif error_code == "gemini_api_http_404":
+            code = "model_unavailable"
+        else:
+            code = "provider_error"
+
+    return LlmConnectionTestView(
+        connected=False,
+        provider="google_ai_studio",
+        model=selector.model or DEFAULT_GEMINI_MODEL,
+        code=code,
+    )
+
+
 @router.get("/api-key/status", response_model=BaseResponse[LlmApiKeyStatusView])
 def query_llm_api_key_status(
     _: AdminPrincipal = Depends(require_system_admin),
@@ -93,3 +144,22 @@ async def replace_llm_api_key(
         data=_status_view(current_status),
         message="API Key 已更新；系統不提供讀回功能",
     )
+
+
+@router.post("/connection-test", response_model=BaseResponse[LlmConnectionTestView])
+def test_llm_connection(
+    request: Request,
+    _: AdminPrincipal = Depends(require_system_admin),
+    selector: GeminiCandidateSelector = Depends(get_gemini_selector),
+) -> BaseResponse[LlmConnectionTestView]:
+    result = _connection_result(selector)
+    request.state.audit_action = "system.llm.connection_test"
+    request.state.audit_resource_type = "llm_provider"
+    request.state.audit_resource_id = "google_ai_studio"
+    request.state.audit_details = {
+        "connected": result.connected,
+        "model": result.model,
+        "code": result.code,
+    }
+    message = "Gemini 連線成功" if result.connected else "Gemini 連線測試未通過"
+    return BaseResponse(data=result, message=message)
