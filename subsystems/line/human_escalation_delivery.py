@@ -1,18 +1,18 @@
-"""Project masked Customer Service alert intents into local LINE delivery.
+"""Project masked Customer Service alert intents into canonical LINE delivery.
 
-This bounded worker deliberately uses the existing local adapter.  It never
-loads a provider credential and never sends an external LINE request.
+This bounded worker validates the masked alert, creates the durable canonical
+LINE delivery task, and records the Customer Service task readback. Provider
+I/O and delivery retries remain owned by LineDeliveryWorker.
 
 Timeout/5xx retry and retry exhaustion remain the existing delivery-task
 semantics from LINE Access §3.3: only the task retries, then becomes failed
 with a manual fallback; the Customer Service ticket and automation hold are
-not rolled back.  Customer Service §20 defines no separate escalation timeout
+not rolled back. Customer Service §20 defines no separate escalation timeout
 state, so this worker does not invent one.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -28,13 +28,6 @@ from domains.line.delivery import (
 )
 from domains.line.identities import LineGroupId, LineRoomId, LineUserId
 from shared_kernel.identities import CorrelationId, IdempotencyKey
-from shared_kernel.ports import OutboxIntent
-from subsystems.line.delivery_contracts import (
-    ClaimLineDeliveryTasksQuery,
-    LineProviderOutcomeType,
-    RecordLineDeliveryAttemptCommand,
-)
-from subsystems.line.matching_coordination_delivery import LocalLineDeliveryAdapter
 from subsystems.line.outbox_contracts import ClaimLineOutboxQuery, CompleteLineOutboxCommand, LineOutboxWorkItem
 
 
@@ -79,8 +72,7 @@ class HumanEscalationDeliveryApplication:
     ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._now = now
-        self._worker_identity = worker_identity
-        self._local = LocalLineDeliveryAdapter()
+        del worker_identity
 
     def consume(self, item: HumanEscalationOutboxItem) -> HumanEscalationDeliveryReceipt:
         request, target = _request(item, self._now())
@@ -93,58 +85,25 @@ class HumanEscalationDeliveryApplication:
             if escalations is None:
                 raise HumanEscalationDeliveryError("human_escalation_escalation_repository_missing")
             escalations.record_alert_delivery_task(item.aggregate_identity, task.task_id.value)
-            uow.commit()
-
-        if task.status is LineDeliveryStatus.SENT:
-            with self._unit_of_work_factory() as uow:
-                uow.outbox.complete(CompleteLineOutboxCommand(item_to_work(item), self._now()))
-                uow.commit()
-            return HumanEscalationDeliveryReceipt(
-                item.aggregate_identity, task.task_id.value, task.status, target,
-                "local-success", f"delivery-attempt:{task.task_id.value}:{task.completed_attempts}", True,
-            )
-
-        leased = self._claim_task(task.task_id)
-        if leased is None:
-            raise HumanEscalationDeliveryError("human_escalation_delivery_task_not_due")
-        outcome = self._local.send(leased.request)
-        attempt_key = IdempotencyKey(
-            f"human-escalation-delivery-attempt:{leased.task_id.value}:{leased.completed_attempts + 1}"
-        )
-        if leased.lease is None:
-            raise HumanEscalationDeliveryError("human_escalation_delivery_lease_missing")
-        command = RecordLineDeliveryAttemptCommand(
-            leased, leased.lease, outcome, self._now(), attempt_key, leased.request.correlation_id
-        )
-        with self._unit_of_work_factory() as uow:
-            uow.delivery_tasks.record_attempt(command)
-            status = "sent" if outcome.outcome_type is LineProviderOutcomeType.SUCCESS else "failed"
-            uow.escalations.record_alert_delivery_outcome(
-                item.aggregate_identity, attempt_key.value, status
-            )
+            outcome_ref = None
+            if task.status in {LineDeliveryStatus.SENT, LineDeliveryStatus.FAILED}:
+                outcome_ref = f"delivery-task:{task.task_id.value}:{task.status.value}"
+                escalations.record_alert_delivery_outcome(
+                    item.aggregate_identity,
+                    outcome_ref,
+                    task.status.value,
+                )
             uow.outbox.complete(CompleteLineOutboxCommand(item_to_work(item), self._now()))
             uow.commit()
-            updated = uow.delivery_tasks.get(leased.task_id)
-        if updated is None:
-            raise HumanEscalationDeliveryError("human_escalation_delivery_task_readback_missing")
         return HumanEscalationDeliveryReceipt(
             item.aggregate_identity,
-            updated.task_id.value,
-            updated.status,
+            task.task_id.value,
+            task.status,
             target,
-            "local-success" if outcome.outcome_type is LineProviderOutcomeType.SUCCESS else "local-failure",
-            attempt_key.value,
+            task.status.value,
+            outcome_ref,
             result.outcome.value == "existing",
         )
-
-    def _claim_task(self, task_id):
-        with self._unit_of_work_factory() as uow:
-            task = uow.delivery_tasks.claim_specific(
-                task_id,
-                ClaimLineDeliveryTasksQuery(self._worker_identity + ":local", self._now(), 1),
-            )
-            uow.commit()
-        return task
 
 
 class HumanEscalationDeliveryWorker:
