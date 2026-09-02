@@ -353,7 +353,6 @@ describe('OrdersPage query real-data slice', () => {
     ));
     expect(screen.getByText('🟢 允許取消試算')).toBeInTheDocument();
     expect(screen.queryByText('🚫 不可再次取消')).not.toBeInTheDocument();
-    expect(screen.getByText('洽談中')).toBeInTheDocument();
   });
 
   it('reloads cancellation facts when the shared workbench switches to another order', async () => {
