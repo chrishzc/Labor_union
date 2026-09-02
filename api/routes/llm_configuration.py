@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 from typing import Any
 
@@ -136,7 +137,7 @@ def test_llm_connection(
         "code": result.code,
     }
     message = "Gemini 連線成功" if result.connected else "Gemini 連線測試未通過"
-    return BaseResponse(data=LlmConnectionTestView(**result.__dict__), message=message)
+    return BaseResponse(data=LlmConnectionTestView(**asdict(result)), message=message)
 
 
 @router.post("/semantic-test", response_model=BaseResponse[LlmSemanticTestView])
@@ -158,4 +159,4 @@ def test_llm_semantics(
         "code": result.code,
     }
     message = "Gemini M2 語意測試完成" if result.outcome == "answered" else "Gemini M2 語意測試未產生核准答案"
-    return BaseResponse(data=LlmSemanticTestView(**result.__dict__), message=message)
+    return BaseResponse(data=LlmSemanticTestView(**asdict(result)), message=message)
