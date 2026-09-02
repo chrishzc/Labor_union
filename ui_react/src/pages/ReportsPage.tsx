@@ -114,7 +114,7 @@ const WeeklySubsidyView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
 </>;
 
 const WeeklyServiceView: React.FC<{ report: WeeklyView }> = ({ report }) => (
-  report.serviceRows.length === 0 ? <div className="reports-state">本週沒有正式服務工作日。</div> : <div className="reports-table-container">
+  report.serviceRows.length === 0 ? <div className="reports-state">本週服務工時無資料。</div> : <div className="reports-table-container">
     <table className="reports-table">
       <thead><tr><th>案件</th><th>案家</th><th>服務人員</th><th>服務期間</th><th>每日時數</th><th>本週工作日</th><th>本週工時</th><th>訂單狀態</th><th>完成</th><th>資料品質</th></tr></thead>
       <tbody>{report.serviceRows.map((row) => <tr key={row.assignment_id}>
@@ -312,7 +312,7 @@ export const ReportsPage: React.FC = () => {
       {exportState === 'success' && <div className="reports-state" role="status">XLSX 已產生並開始下載。</div>}
       {exportState === 'error' && <div className="reports-state error" role="alert">報表匯出失敗，請重試。</div>}
       {state.kind === 'loading' && <div className="reports-state" role="status">正在載入報表…</div>}
-      {state.kind === 'empty' && <div className="reports-state">此期間沒有可列入報表的資料。</div>}
+      {state.kind === 'empty' && <div className="reports-state">此期間無資料。</div>}
       {state.kind === 'error' && <div className="reports-state error" role="alert">
         <span>{state.message}</span><button type="button" onClick={reloadReport}>重試</button>
       </div>}
