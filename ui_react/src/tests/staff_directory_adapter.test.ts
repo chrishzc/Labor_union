@@ -7,11 +7,14 @@ import {
   adaptStaffDirectoryPage,
   adaptStaffDirectorySummary,
 } from '../adapters/staff/staff_directory_adapter';
-import { STAFF_PAGE_ONE } from './fixtures/staff/staff_directory_contract_fixtures';
+import {
+  STAFF_PAGE_ONE,
+  STAFF_PAGE_WITH_EDUCATION,
+} from './fixtures/staff/staff_directory_contract_fixtures';
 
 describe('staff directory adapter', () => {
   it('maps only the approved summary fields including education', () => {
-    expect(adaptStaffDirectorySummary(STAFF_PAGE_ONE.items[0])).toEqual({
+    expect(adaptStaffDirectorySummary(STAFF_PAGE_WITH_EDUCATION.items[0])).toEqual({
       id: 11,
       name: '去敏人員甲',
       phone: '09********',
