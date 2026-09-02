@@ -8,7 +8,29 @@ import {
   replaceLlmApiKey,
   type LlmApiKeyStatus,
 } from '../../api/system/llm_configuration_client';
+import {
+  ApiHttpError,
+  ApiNetworkError,
+  ApiTimeoutError,
+} from '../../api/shared/typed_errors';
 import './LlmConfigurationPage.css';
+
+
+function safeSaveErrorMessage(error: unknown): string {
+  if (error instanceof ApiHttpError) {
+    if (error.status === 401) return '管理員 Session 已失效，請重新登入後再試。';
+    if (error.status === 403) return '目前帳號沒有 AI 模型設定權限（HTTP 403）。';
+    if (error.status === 404) {
+      return '後端尚未載入 AI 模型設定 API（HTTP 404）。請重新啟動 FastAPI 後再試。';
+    }
+    if (error.status === 422) return 'API Key 格式不符合目前的輸入規則（HTTP 422）。';
+    if (error.status === 503) return '後端目前無法寫入 API Key 儲存位置（HTTP 503）。';
+    return `API Key 儲存失敗（HTTP ${error.status} / ${error.code}）。`;
+  }
+  if (error instanceof ApiTimeoutError) return 'API Key 儲存逾時，請確認後端服務狀態後再試。';
+  if (error instanceof ApiNetworkError) return '無法連線到後端 API，請確認 FastAPI 是否正在執行。';
+  return 'API Key 儲存失敗，請稍後再試。';
+}
 
 
 export const LlmConfigurationPage: React.FC = () => {
@@ -25,8 +47,16 @@ export const LlmConfigurationPage: React.FC = () => {
       .then((nextStatus) => {
         if (active) setStatus(nextStatus);
       })
-      .catch(() => {
-        if (active) setError('無法讀取 API Key 設定狀態。');
+      .catch((statusError: unknown) => {
+        if (active) {
+          if (statusError instanceof ApiHttpError && statusError.status === 404) {
+            setError('後端尚未載入 AI 模型設定 API（HTTP 404）。請重新啟動 FastAPI。');
+          } else if (statusError instanceof ApiNetworkError) {
+            setError('無法連線到後端 API，請確認 FastAPI 是否正在執行。');
+          } else {
+            setError('無法讀取 API Key 設定狀態。');
+          }
+        }
       })
       .finally(() => {
         if (active) setLoadingStatus(false);
@@ -53,8 +83,8 @@ export const LlmConfigurationPage: React.FC = () => {
       setStatus(nextStatus);
       setApiKey('');
       setNotice('API Key 已儲存。基於安全設計，系統不提供讀回或顯示功能。');
-    } catch {
-      setError('API Key 儲存失敗，請確認權限或稍後再試。');
+    } catch (saveError: unknown) {
+      setError(safeSaveErrorMessage(saveError));
     } finally {
       setSaving(false);
     }
