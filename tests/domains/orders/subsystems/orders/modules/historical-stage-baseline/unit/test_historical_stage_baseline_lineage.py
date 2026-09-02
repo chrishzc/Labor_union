@@ -63,6 +63,36 @@ def test_legacy_adoption_event_keeps_original_step_after_current_status_moves() 
     assert facts.selected_step == 10
 
 
+def test_legacy_null_baseline_recovers_historical_completion_from_adoption_event() -> None:
+    facts = _facts(
+        {
+            "case_no": "CASE-HISTORICAL-COMPLETED",
+            "status": OrderLifecycleStatus.COMPLETED.value,
+            "actual_start_date": date(2026, 8, 8),
+            "adoption_receipt_id": 33,
+            "adoption_result_snapshot": {
+                "historical_source_status": "deposit_paid",
+                "operational_baseline_step": None,
+                "operational_baseline_actual_start_date": None,
+            },
+            "adoption_after_status": OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value,
+            "adoption_facts_snapshot": {
+                "date_patch": (
+                    ("actual_start_date", "2026-08-08"),
+                    ("actual_end_date", "2026-08-28"),
+                )
+            },
+            "baseline_event_version": None,
+            "baseline_event_identity": None,
+            "selected_step": None,
+        }
+    )
+
+    assert facts.lifecycle_status is OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED
+    assert facts.actual_start_date == date(2026, 8, 8)
+    assert facts.selected_step == 11
+
+
 def test_new_adoption_receipt_freezes_deposit_paid_actual_start_baseline() -> None:
     request = SimpleNamespace(
         row=SimpleNamespace(asserted_status=HistoricalOrderSourceStatus.DEPOSIT_PAID)
@@ -96,3 +126,22 @@ def test_new_adoption_receipt_freezes_plain_deposit_paid_at_step_nine() -> None:
 
     assert snapshot["operational_baseline_step"] == 9
     assert snapshot["operational_baseline_actual_start_date"] is None
+
+
+def test_new_adoption_receipt_freezes_historical_service_completion_at_step_eleven() -> None:
+    request = SimpleNamespace(
+        row=SimpleNamespace(asserted_status=HistoricalOrderSourceStatus.DEPOSIT_PAID)
+    )
+    preview = SimpleNamespace(
+        outcome=HistoricalOrderOutcome.ADOPTED,
+        after_status=OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value,
+        date_patch=(
+            ("actual_start_date", date(2026, 8, 9)),
+            ("actual_end_date", date(2026, 8, 29)),
+        ),
+    )
+
+    snapshot = _operational_baseline_snapshot(request, preview)
+
+    assert snapshot["operational_baseline_step"] == 11
+    assert snapshot["operational_baseline_actual_start_date"] == "2026-08-09"
