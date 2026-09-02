@@ -19,7 +19,7 @@ class LineAiQaCatalogItem:
     question: str
     aliases: tuple[str, ...]
     answer: str
-    status: str
+    enabled: bool
     source_ref: str
     notes: str | None = None
 
@@ -36,6 +36,9 @@ def load_line_ai_qa_catalog(path: Path | None = None) -> tuple[LineAiQaCatalogIt
             aliases = payload.get("aliases", [])
             if not isinstance(aliases, list) or not all(isinstance(value, str) for value in aliases):
                 raise ValueError(f"invalid_qa_aliases:{line_number}")
+            enabled = payload.get("enabled")
+            if not isinstance(enabled, bool):
+                raise ValueError(f"invalid_qa_enabled:{line_number}")
             items.append(
                 LineAiQaCatalogItem(
                     id=str(payload["id"]),
@@ -44,7 +47,7 @@ def load_line_ai_qa_catalog(path: Path | None = None) -> tuple[LineAiQaCatalogIt
                     question=str(payload["question"]),
                     aliases=tuple(aliases),
                     answer=str(payload.get("answer", "")),
-                    status=str(payload["status"]),
+                    enabled=enabled,
                     source_ref=str(payload["source_ref"]),
                     notes=(str(payload["notes"]) if payload.get("notes") else None),
                 )
@@ -52,8 +55,14 @@ def load_line_ai_qa_catalog(path: Path | None = None) -> tuple[LineAiQaCatalogIt
     return tuple(items)
 
 
+def enabled_line_ai_qa_catalog(path: Path | None = None) -> tuple[LineAiQaCatalogItem, ...]:
+    """Return only QA rows explicitly enabled for automated matching."""
+    return tuple(item for item in load_line_ai_qa_catalog(path) if item.enabled)
+
+
 __all__ = [
     "CATALOG_SOURCE_IDENTITY",
     "LineAiQaCatalogItem",
+    "enabled_line_ai_qa_catalog",
     "load_line_ai_qa_catalog",
 ]
