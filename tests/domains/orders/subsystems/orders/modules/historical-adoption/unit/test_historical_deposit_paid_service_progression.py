@@ -209,6 +209,43 @@ def test_deposit_paid_with_distinct_actual_start_builds_service_assignment_candi
     assert preview.issue_codes == ()
 
 
+def test_deposit_paid_start_equal_to_planned_builds_completed_assignment_candidate():
+    caregiver = SimpleNamespace(
+        ordinal=1,
+        name="月嫂甲",
+        start_date=date(2026, 8, 6),
+        end_date=date(2026, 8, 31),
+        has_individual_interval=True,
+        issue_codes=(),
+    )
+    row = SimpleNamespace(
+        case_no="CASE-1",
+        client_name="客戶甲",
+        asserted_status=HistoricalOrderSourceStatus.DEPOSIT_PAID,
+        actual_start_date=date(2026, 8, 6),
+        actual_end_date=date(2026, 8, 31),
+        issue_codes=(),
+        caregivers=(caregiver,),
+        source_identity="historical-orders:test:on-time-completed",
+        source_fingerprint="c" * 64,
+    )
+
+    preview = HistoricalOrderAdoptionWorkflow(
+        _Repository(),
+        _UnitOfWork,
+        _Writer(),
+        clock=SimpleNamespace(today=lambda: date(2026, 9, 1)),
+    ).preview(row)
+
+    assert preview.after_status == OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value
+    assert preview.date_patch == (
+        ("actual_start_date", date(2026, 8, 6)),
+        ("actual_end_date", date(2026, 8, 31)),
+    )
+    assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE
+    assert preview.issue_codes == ()
+
+
 def test_matching_effective_assignment_is_reused_for_historical_actual_start():
     """Row 70 must not classify corroborating formal occupancy as a conflict."""
     asserted_start = date(2025, 10, 14)
