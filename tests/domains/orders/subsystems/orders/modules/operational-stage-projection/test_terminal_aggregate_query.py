@@ -52,7 +52,12 @@ def _core_stage(index: int, code: str, *, blocked: bool = False) -> CoreStagePro
     )
 
 
-def _timeline(*, blocked_code: str | None = None) -> OrderCoreStageTimeline:
+def _timeline(
+    *,
+    blocked_code: str | None = None,
+    lifecycle_status: OrderLifecycleStatus = OrderLifecycleStatus.COMPLETED,
+    branch_type: str = "normal",
+) -> OrderCoreStageTimeline:
     stages = tuple(
         _core_stage(index, code, blocked=code == blocked_code)
         for index, code in enumerate(_CORE_CODES, start=1)
@@ -60,8 +65,8 @@ def _timeline(*, blocked_code: str | None = None) -> OrderCoreStageTimeline:
     return OrderCoreStageTimeline(
         case_no="CASE-TERMINAL-001",
         base_revision=3,
-        lifecycle_status=OrderLifecycleStatus.COMPLETED,
-        branch_type="normal",
+        lifecycle_status=lifecycle_status,
+        branch_type=branch_type,  # type: ignore[arg-type]
         current_core_stage_code=None,
         current_core_stage_ordinal=None,
         historical_current_owner_stage_code=None,
@@ -130,3 +135,31 @@ def test_nonterminal_government_subsidy_status_keeps_terminal_aggregate_open():
     assert subsidy.owner == "Government Subsidy"
     assert subsidy.completed is False
     assert subsidy.reason == "submitted"
+
+
+def test_historical_order_is_classified_outside_terminal_aggregate():
+    aggregate = project_terminal_aggregate(
+        _timeline(
+            lifecycle_status=OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+            branch_type="historical",
+        ),
+        _subsidy("paid"),
+    )
+
+    assert aggregate.applicable is False
+    assert aggregate.fully_closed is False
+    assert aggregate.components == ()
+
+
+def test_cancelled_order_is_classified_outside_terminal_aggregate():
+    aggregate = project_terminal_aggregate(
+        _timeline(
+            lifecycle_status=OrderLifecycleStatus.CANCELLED,
+            branch_type="cancelled",
+        ),
+        _subsidy("paid"),
+    )
+
+    assert aggregate.applicable is False
+    assert aggregate.fully_closed is False
+    assert aggregate.components == ()
