@@ -429,7 +429,7 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
         <section className="import-result-workbench" data-surface-id="imports.hcm-results.open">
           <div className="import-result-title-row"><div><span className="import-icon">🏢</span><h2>HCM 最近匯入紀錄與問題檢查</h2></div><span className="import-status-badge ready">唯讀查詢</span></div>
           {state.kind === 'loading' && <div className="import-result-state" role="status">正在載入最近匯入結果…</div>}
-          {state.kind === 'error' && <div className="import-result-state import-result-error" data-surface-id="imports.hcm-results.error" role="status"><strong>最近匯入結果暫時無法載入；不影響上方工作簿預覽與匯入。</strong><p>{state.message}</p><button type="button" data-surface-id="imports.hcm-results.retry" onClick={() => void loadResults()}>重試結果查詢</button></div>}
+          {state.kind === 'error' && <div className="import-result-state import-result-error" data-surface-id="imports.hcm-results.error" role="status"><strong>最近匯入結果暫時無法載入；不影響上方工作簿預覽與匯入。</strong><p>{state.message}</p><button type="button" data-control-id="imports.hcm-results.retry" onClick={() => void loadResults()}>重試結果查詢</button></div>}
           {state.kind === 'empty' && <div className="import-result-state" data-surface-id="imports.hcm-results.empty">目前沒有可查詢的 HCM 匯入結果。</div>}
           {state.kind === 'ready' && state.items.map((result) => (
             <article key={result.receiptId} className="import-result-batch" data-surface-id={`imports.hcm-results.receipt.${result.receiptId}`}>
