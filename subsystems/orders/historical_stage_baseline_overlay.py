@@ -80,6 +80,8 @@ class HistoricalStageBaselineOverlayService:
                         item.case_no,
                         item.base_revision,
                         item.current_stage_code,
+                        item.current_sop_step,
+                        item.terminal_state,
                         item.projection_digest,
                     )
                     for item in items
@@ -97,8 +99,16 @@ def historical_baseline_step(facts: HistoricalStageBaselineFacts) -> int | None:
         if isinstance(facts.selected_step, bool) or not 1 <= facts.selected_step <= 11:
             raise ValueError("historical_stage_baseline_step_invalid")
         return facts.selected_step
-    if facts.lifecycle_status is OrderLifecycleStatus.COMPLETED:
+    if facts.lifecycle_status in {
+        OrderLifecycleStatus.COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+    }:
         return 11
+    if facts.lifecycle_status is OrderLifecycleStatus.HISTORICAL_IN_SERVICE:
+        return 10
+    if facts.lifecycle_status is OrderLifecycleStatus.HISTORICAL_UNSERVED:
+        return 9
     if (
         facts.actual_start_date is not None
         and facts.lifecycle_status
@@ -118,6 +128,8 @@ def _overlay(
     timeline: OrderOperationalTimeline,
     facts: HistoricalStageBaselineFacts | None,
 ) -> OrderOperationalTimeline:
+    if timeline.terminal_state == "cancelled":
+        return timeline
     if facts is None:
         return timeline
     if facts.selected_step is None and facts.lifecycle_status is OrderLifecycleStatus.CANCELLED:
@@ -143,9 +155,16 @@ def _overlay(
         for stage in timeline.stages
     )
     current_stage_code = timeline.stages[current_stage_ordinal - 1].code
+    current_sop_step = (
+        current_step
+        if steps[current_step - 1].status != "completed"
+        else None
+    )
     return _with_projection_digest(
         timeline,
         current_stage_code=current_stage_code,
+        current_sop_step=current_sop_step,
+        terminal_state=None,
         stages=stages,
         steps=steps,
     )
@@ -277,6 +296,8 @@ def _cancelled_timeline(
     return _with_projection_digest(
         timeline,
         current_stage_code=None,
+        current_sop_step=None,
+        terminal_state="cancelled",
         stages=stages,
         steps=steps,
     )
@@ -286,6 +307,8 @@ def _with_projection_digest(
     timeline: OrderOperationalTimeline,
     *,
     current_stage_code: str | None,
+    current_sop_step: int | None,
+    terminal_state: str | None,
     stages: tuple[StageProjection, ...],
     steps: tuple[SopStepProjection, ...],
 ) -> OrderOperationalTimeline:
@@ -293,6 +316,8 @@ def _with_projection_digest(
         "case_no": timeline.case_no,
         "base_revision": timeline.base_revision,
         "current_stage_code": current_stage_code,
+        "current_sop_step": current_sop_step,
+        "terminal_state": terminal_state,
         "stages": tuple(asdict(stage) for stage in stages),
         "sop_steps": tuple(asdict(step) for step in steps),
     }
@@ -303,6 +328,8 @@ def _with_projection_digest(
         stages,
         steps,
         _digest(payload),
+        current_sop_step,
+        terminal_state,  # type: ignore[arg-type]
     )
 
 
