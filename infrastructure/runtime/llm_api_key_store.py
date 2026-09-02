@@ -1,8 +1,8 @@
-"""Write-only-at-HTTP runtime storage for the configured LLM API key.
+"""Write-only-at-HTTP runtime storage for the configured Gemini API key.
 
-The secret is kept outside Git under ``runtime_data`` by default.  HTTP routes
-may replace it or query presence metadata, while model adapters use the
-internal ``read_for_runtime`` method when provider wiring is added.
+The secret is kept outside Git under ``runtime_data`` by default. HTTP routes
+may replace it or query presence metadata, while the Gemini provider adapter is
+the only application path that reads the value through ``read_for_runtime``.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_LLM_API_KEY_PATH = PROJECT_ROOT / "runtime_data" / "secrets" / "llm_api_key"
+DEFAULT_LLM_API_KEY_PATH = PROJECT_ROOT / "runtime_data" / "secrets" / "gemini_api_key"
 
 
 @dataclass(frozen=True)
@@ -25,10 +25,15 @@ class LlmApiKeyStatus:
 
 
 class LlmApiKeyStore:
-    """Persist one replace-only LLM API key with owner-only file permissions."""
+    """Persist one replace-only Gemini API key with owner-only file permissions."""
 
     def __init__(self, path: str | Path | None = None) -> None:
-        configured_path = path or os.getenv("LLM_API_KEY_FILE") or DEFAULT_LLM_API_KEY_PATH
+        configured_path = (
+            path
+            or os.getenv("GEMINI_API_KEY_FILE")
+            or os.getenv("LLM_API_KEY_FILE")
+            or DEFAULT_LLM_API_KEY_PATH
+        )
         self._path = Path(configured_path)
 
     @property
@@ -51,8 +56,10 @@ class LlmApiKeyStore:
             raise ValueError("invalid_llm_api_key")
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        if os.name != "nt":
+            os.chmod(self._path.parent, 0o700)
         fd, temporary_name = tempfile.mkstemp(
-            prefix=".llm_api_key.",
+            prefix=".gemini_api_key.",
             dir=str(self._path.parent),
             text=True,
         )
@@ -62,9 +69,11 @@ class LlmApiKeyStore:
                 handle.write(normalized)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.chmod(temporary_path, 0o600)
+            if os.name != "nt":
+                os.chmod(temporary_path, 0o600)
             os.replace(temporary_path, self._path)
-            os.chmod(self._path, 0o600)
+            if os.name != "nt":
+                os.chmod(self._path, 0o600)
         finally:
             if temporary_path.exists():
                 temporary_path.unlink()
