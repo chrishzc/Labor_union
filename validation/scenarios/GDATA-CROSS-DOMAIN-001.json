@@ -2,7 +2,7 @@
   "contract": "labor-union-verification-scenario/v1", "scenario_id": "GDATA-CROSS-DOMAIN-001", "track": "A", "suite_id": "GDATA", "status": "specified", "requires_database": true,
   "test_kinds": ["domain_root_data", "expected_manifest"],
   "coverage_ids": ["GLOBAL-01", "GLOBAL-02"],
-  "source_refs": ["document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#GLOBAL-01"],
+  "source_refs": ["document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#GLOBAL-01"],
   "root_facts": ["A cross-domain command, idempotency key, fixed terms and injected persistence/outbox failures."],
   "forbidden_direct_seed": ["cross-domain receipt, partial formal transaction, derived state or completed outbox row"],
   "commands": ["Apply identical and mismatched idempotency retries and inject failure at each transaction seam."],
