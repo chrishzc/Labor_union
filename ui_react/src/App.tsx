@@ -21,7 +21,7 @@ import { SchedulingPage } from './pages/SchedulingPage';
 import { StaffPage } from './pages/StaffPage';
 import { DataImportPage } from './pages/DataImportPage';
 import { LineManagementPage } from './pages/LineManagementPage';
-import { AiEventStudio } from './pages/line_management/AiEventStudio';
+import { AiCustomerServiceStudioPage } from './pages/line_management/AiCustomerServiceStudioPage';
 import { LlmConfigurationPage } from './pages/line_management/LlmConfigurationPage';
 import { LiffCardStudio } from './pages/line_management/LiffCardStudio';
 import { AlertGroupSecurity } from './pages/line_management/AlertGroupSecurity';
@@ -155,7 +155,7 @@ export const App: React.FC = () => {
 
         {/* LINE Hub Section */}
         {currentPage === 'line-management' && <LineManagementPage />}
-        {currentPage === 'line-ai-events' && <AiEventStudio />}
+        {currentPage === 'line-ai-events' && <AiCustomerServiceStudioPage />}
         {currentPage === 'line-llm-settings' && <LlmConfigurationPage />}
         {currentPage === 'line-liff-studio' && <LiffCardStudio />}
         {currentPage === 'line-security' && <AlertGroupSecurity />}
