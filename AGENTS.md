@@ -1,6 +1,6 @@
 # Workspace Agent Rules — Lightweight
 
-本檔是 repository-wide 基線。最新人工明確指示優先，其次為 current 正式規格、可追溯業務／欄位權威、其他架構文件、live evidence。歷史文件、舊 task／checkpoint、system map、程式碼與測試都只提供 evidence，不得反向創造需求或覆蓋正式語意。
+本檔是 repository-wide 基線。最新人工明確指示優先，其次為 `document/架構重整/01_規格基線/` 的 current 正式規格與可追溯業務／欄位權威；程式碼、測試、附件與 Git history 只提供 evidence，不得反向創造需求或覆蓋正式語意。
 
 `.agents/AGENTS.md` 只能補充個人互動與 Git 偏好，不得覆蓋本檔或正式規格。不得 reset、clean、stash、覆蓋、搬移或刪除既有 ignored／untracked／dirty 使用者成果。
 
@@ -19,11 +19,13 @@
 
 完成上述定位後，只有任務實際涉及下列邊界時，才讀對應的最小 current 文件：
 
-- owner、SSOT、root fact、state machine、cross-domain invariant、public contract／entry point、transaction／Unit of Work：讀 `.arch-map/` 指向的單一 owning Domain／Subsystem current spec；只有 currentness 或裁決仍不明時才讀 `01_規格基線/15_正式規格索引與裁決總表.md`。
-- concurrency／fingerprint：只讀 `01_規格基線/00_Global_共同契約.md` 的相關段落。
-- schema／migration／preserve-data／cutover：只讀 canonical DB gate 與直接相關 release／migration 文件。
+- owner、SSOT、root fact、state machine、cross-domain invariant、public contract／entry point、transaction／Unit of Work：讀 `.arch-map/` 指向的單一 owning Domain／Subsystem 正式規格；只有 currentness 或裁決仍不明時才讀 `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md`。
+- concurrency／fingerprint：只讀 `document/架構重整/01_規格基線/00_Global_共同契約.md` 的相關段落。
+- schema／migration／preserve-data／cutover：只讀 `10_Global_保留資料Migration與Cutover_Subsystem.md` 與直接相關 owner spec。
 - entry point retirement／replacement：只讀 `19_Global_Entry_Point_Governance.md` 的相關段落。
-- rollback、incident、舊 release 重現或稽核：依 `04_已完成與上線封存/README.md` 精準取回單一歷史文件。
+- 驗證情境、測試資料與 coverage ID：只讀 `28_驗證情境與測試資料正式規格.md` 與對應 owner spec。
+- LINE 服務說明、客服分類與 Rich Menu audience：只讀 `29_LINE服務說明、客服互動與選單角色正式規格.md` 及其上位規格 17、20。
+- rollback、incident、舊 release 重現或稽核：從 Git history 精準取回必要 revision，不掃描或復活已退役文件樹。
 
 不得因文件存在、checklist 未完成、測試很多或可能有風險，就自動擴大 scope。
 
@@ -31,7 +33,7 @@
 
 - `domains/<domain>/` 唯一擁有 root facts、state machine、invariants 與 typed business rules；不得依賴 UI、FastAPI 或 concrete DB adapter。
 - `subsystems/<domain>/` 擁有 Query／Preview／Apply、fresh-fact 驗證、outer Unit of Work 與跨 Domain coordination；不得重定義 Domain 規則。
-- `api/`、`ui/`、`line/`、`infrastructure/`、`scripts/` 只負責 transport、schema、presentation、typed-port implementation 與 ops；不得旁路 writer、重算 root facts 或 hidden commit。
+- `api/`、`ui_react/`、`line/`、`infrastructure/`、`scripts/` 只負責 transport、schema、presentation、typed-port implementation 與 ops；不得旁路 writer、重算 root facts 或 hidden commit。
 - 依賴由外往內。Query 唯讀；Preview 零寫入；Apply fresh-read／lock current owner facts。每個 mutation 只有一個 outer commit owner；外部副作用只經 committed inbox／outbox／durable job。
 - UI／LINE 使用 bounded typed API／port；raw persistence dict、SQL row、provider payload 不得穿透 presentation。
 
@@ -59,6 +61,7 @@ DB 變更須 additive、可追溯，並區分 fresh bootstrap、preserve-data up
 
 - 從最低受影響邊界驗證：Static → Module → Subsystem → Domain → Global。只有實際 failure signal 或整合風險才擴大到 full suite、DB、Browser、stress、security 或 performance。
 - snapshot／golden／validation dataset 不得為了過測試任意重寫；canonical change 造成 deterministic drift 時，只同步直接受影響的 current asset。
-- 文件只在 current acceptance、release／migration／rollback／incident／external effect／audit 或明確 consumer 需要時新增或更新；歷史 immutable evidence 不改寫。
+- `document/` 的 current Markdown 只放在 `document/架構重整/01_規格基線/`。新語意優先修改既有 owner spec；只有既有 owner 無法承接且 current acceptance 明確需要時才新增正式規格。
+- 非 Markdown 附件只作 input、範例或 evidence；不得因存在而升格為 SSOT。
 - 所有文字 strict UTF-8。secret、token、完整銀行帳號、raw webhook secret、credential 與不必要 PII 不得進 Git、log、command argument、UI 或 receipt。
 - 交付前確認 scope、dirty paths、必要 tests、`git diff --check`、typed conflict、外部效果上限與敏感資訊；清楚標示 `PASS | FAILED | BLOCKED | NOT_RUN`，完成 current acceptance 後停止。
