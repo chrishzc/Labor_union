@@ -1,4 +1,4 @@
-# LINE Rich Menu 單一服務選單與互動入口正式規範
+# LINE Rich Menu 多角色圖文選單與互動中心正式規範
 
 > 文件性質：正式業務規範  
 > 適用範圍：目前正式 LINE Bot  
@@ -6,48 +6,85 @@
 
 ## 一、目的與範圍
 
-本系統使用一套共用預設 Rich Menu，提供服務登記、修改登記資料、服務說明與專人客服入口。
+LINE 保留四個邏輯使用角色：一般用戶／訪客、客戶、月嫂、工會人員／管理員。角色與其功能入口必須存在，但使用者不得在 LINE 內自行切換角色或 Rich Menu。
 
-本規範不建立多角色選單、四種使用狀態、身分選擇器或使用者端選單切換。既有 Rich Menu 編輯與發布、LIFF 身分綁定、工會身分維護及客服流程維持原有介面與後端責任。
+目前 Rich Menu provider 設定維持三套主要選單：
 
-## 二、身分判定與衝突處理
+1. `default_menu`：一般用戶／訪客與客戶共用。
+2. `staff_menu`：月嫂功能入口。
+3. `union_staff_menu`：工會人員／管理員功能入口。
 
-1. 後端目前有效的 LINE 身分綁定是身分判定來源。
-2. 使用者不在 Rich Menu 內自行選擇或切換身分。
-3. 發現重複、錯綁或身分變更時，由使用者向工會提出。
-4. 工會依當下有效身分，使用既有身分維護介面解除、替換或重新綁定。
-5. 審核中或衝突狀態不得由前端猜測、覆蓋或自動切換身分。
+一般用戶／訪客與客戶雖為不同業務身分情境，但共用 `default_menu`，因此不另建立第四套 provider menu。
 
-## 三、共用選單內容
+## 二、身分判定與禁止切換規則
+
+1. 後端目前有效的 LINE 身分綁定是身分與權限判定來源。
+2. 四角色與其固定指令、功能入口繼續存在。
+3. 不提供角色選擇器、`richmenuswitch`、alias switch、`esc` 或其他使用者端自行切換機制。
+4. Rich Menu 顯示本身不授權任何 Domain 操作；實際功能仍由後端身分、Session、LIFF Token 與 capability 驗證。
+5. 發現重複、錯綁或需要變更身分時，由使用者向工會提出。
+6. 工會依當下有效身分，以既有身分維護介面解除、替換或重新綁定；完成前不得由前端猜測或覆蓋身分。
+
+## 三、角色選單與功能入口
+
+### 一般用戶／訪客與客戶：`default_menu`
 
 | 按鈕 | 動作 |
 | --- | --- |
-| 服務登記 | 開啟 LIFF `?entry=registration` |
-| 修改登記資料 | 開啟 LIFF `?target=profile_update` |
+| 服務登記 | LIFF `?entry=registration` |
+| 修改登記資料 | LIFF `?target=profile_update` |
 | 服務說明 | 傳送訊息「服務說明」 |
 | 專人客服諮詢 | 傳送訊息「專人客服」 |
 
-LIFF URI 由既有發布流程依正式設定解析。只有已有對應 UI 與後端處理的入口可列入正式選單。
+### 月嫂：`staff_menu`
 
-## 四、編輯與發布
+| 按鈕 | 動作 |
+| --- | --- |
+| 訂單查詢 | LIFF `?target=staff_order_search` |
+| 排班資訊 | LIFF `?target=staff_schedule` |
+| 請假代班申請 | LIFF `?target=staff_leave_apply` |
+| 薪資請款明細 | LIFF `?target=staff_payout` |
 
-正式發布沿用既有認證後台的 Preview／Apply 流程：
+### 工會人員／管理員：`union_staff_menu`
+
+| 按鈕 | 動作 |
+| --- | --- |
+| 待確認審核 | LIFF `?target=staff_review` |
+| 客服中心 | LIFF `?target=customer_service` |
+| 重大異常通報 | LIFF `?target=anomalies_center` |
+| 即時營運看板 | LIFF `?target=dashboard` |
+
+只允許已有安全入口或 fail-closed UI 的 target 留在選單。當 owner contract 尚未就緒時，既有 LIFF 必須顯示不可用說明，不得改走其他流程或執行 mutation。
+
+## 四、AI 與固定指令
+
+四角色相關固定指令與 deterministic navigation 保留。AI／QA 只處理未命中固定指令的自然語言，不得把「角色判定」改成由模型猜測，也不得透過回答觸發 Rich Menu switch。
+
+## 五、編輯與發布
+
+正式發布沿用既有認證後台 Preview／Apply 流程：
 
 `Draft → Preview → Queued → Processing → Published / Failed`
 
-Preview 不寫入 LINE；Apply 才可排入發布。發布流程不再要求依身分批次連結角色專屬選單。失敗時保留可讀狀態，不以本地設定或排入佇列冒充已發布。
+- Preview 不寫入 LINE。
+- Apply 才可建立發布工作。
+- 各角色選單可個別維護與發布。
+- 不建立使用者端 switch action。
+- 身分變更與 Rich Menu 發布是兩件不同事情，不得互相冒充成功。
+- 檔案修改或排入 queue 不等於 LINE 已生效；正式狀態仍以 publication readback 與 provider readback 為準。
 
-## 五、設定與既有介面
+## 六、設定與既有介面
 
-- `config/line_menu.json` 是 bootstrap 草稿，只保留一個啟用中的預設選單。
-- 正式草稿、發布紀錄與目前 LINE 狀態仍由既有管理端及後端資料判定。
-- LIFF 身分頁、工會身分維護、AI 客服工作室與 Rich Menu 發布 UI 均沿用現有實作。
-- 本規範不要求新增 UI、API、狀態機、角色選單、alias 或 fallback。
+- `config/line_menu.json` 是 bootstrap 草稿，保留 `default_menu`、`staff_menu`、`union_staff_menu`。
+- 正式 current configuration 仍由既有版本化 runtime 設定與管理端讀回判定。
+- LIFF 身分頁、工會身分維護、AI 客服工作室與 Rich Menu 編輯／發布 UI 沿用既有實作。
+- Rich Menu 動作只允許 message、URI、postback；不允許 `richmenuswitch`。
 
-## 六、驗收條件
+## 七、驗收條件
 
-1. bootstrap 設定只有一個啟用且設為預設的 Rich Menu。
-2. 設定中沒有月嫂或工會人員專屬選單，也沒有選單切換 action。
-3. 四個按鈕均映射到既有 LIFF 或訊息入口。
+1. 三套主要 provider menu 均存在且 enabled，且恰有 `default_menu` 設為 default。
+2. 四個邏輯角色的功能入口仍可由其既有流程到達。
+3. 設定、UI 與 provider payload 契約均不能建立 `richmenuswitch` action。
 4. 身分衝突可由工會透過既有流程解除、替換或重新綁定。
-5. 文件或設定變更本身不視為已發布；正式 LINE 狀態須另以發布紀錄及 provider readback 驗證。
+5. 使用者無 `esc`、alias switch、角色選擇器或其他自行切換入口。
+6. 正式 LINE 狀態須另以發布紀錄及 provider readback 驗證。
