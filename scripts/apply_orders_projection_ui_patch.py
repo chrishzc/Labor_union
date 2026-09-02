@@ -17,9 +17,9 @@ TARGET_PATHS = (
 
 def replace_once(path: Path, old: str, new: str) -> None:
     text = path.read_text(encoding="utf-8")
-    count = text.count(old)
-    if count == 0 and new in text:
+    if new in text:
         return
+    count = text.count(old)
     if count != 1:
         raise RuntimeError(f"{path}: expected one match, found {count}")
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
@@ -276,6 +276,16 @@ def patch_orders_page_tests() -> None:
     )
     replace_once(
         path,
+        "    const cancelledFilter = screen.getByRole('button', { name: /已取消 \\(1\\)/ });",
+        "    const cancelledFilter = screen.getByRole('button', { name: '已取消 (1)' });",
+    )
+    replace_once(
+        path,
+        "    expect(screen.getByRole('button', { name: /2\\. 媒合與徵詢意願 \\(0\\)/ })).toBeEnabled();",
+        "    expect(screen.getByRole('button', { name: '2. 媒合與徵詢意願 (0)' })).toBeEnabled();",
+    )
+    replace_once(
+        path,
         "  it('deduplicates the StrictMode initial summary load to one transport request', async () => {",
         "  it('reloads cancellation facts when the shared workbench switches to another order', async () => {\n"
         "    const firstQuery = { ...cancellationQuery, lifecycle_status: '訂單取消' as const };\n"
@@ -299,6 +309,11 @@ def patch_orders_page_tests() -> None:
         "    expect(screen.queryByText('🚫 不可再次取消')).not.toBeInTheDocument();\n"
         "  });\n\n"
         "  it('deduplicates the StrictMode initial summary load to one transport request', async () => {",
+    )
+    replace_once(
+        path,
+        "    expect(screen.getByText('洽談中')).toBeInTheDocument();\n",
+        "",
     )
 
 
