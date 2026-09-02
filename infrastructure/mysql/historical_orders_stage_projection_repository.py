@@ -17,32 +17,21 @@ _HISTORICAL_SCOPE = """   AND (%s = 'all' OR o.status <> %s)"""
 _HISTORICAL_SCOPE_REPLACEMENT = """   AND (
        %s = 'all'
        OR (
-           NOT (
+           o.status <> %s
+           OR (
                o.status = %s
                AND EXISTS (
                    SELECT 1
-                     FROM historical_order_adoption_receipts historical_cancel
-                    WHERE historical_cancel.case_no = o.case_no
-                      AND historical_cancel.outcome = 'adopted'
+                     FROM historical_order_adoption_receipts historical_done
+                    WHERE historical_done.case_no = o.case_no
+                      AND historical_done.outcome = 'adopted'
                )
-           )
-           AND (
-               o.status <> %s
-               OR (
-                   o.status = %s
-                   AND EXISTS (
-                       SELECT 1
-                         FROM historical_order_adoption_receipts historical_done
-                        WHERE historical_done.case_no = o.case_no
-                          AND historical_done.outcome = 'adopted'
-                   )
-                   AND (
-                       completion_fact.receipt_id IS NULL
-                       OR COALESCE(client_fact.client_obligation_count, 0) = 0
-                       OR COALESCE(client_fact.client_open_count, 0) > 0
-                       OR COALESCE(staff_fact.staff_obligation_count, 0) = 0
-                       OR COALESCE(staff_fact.staff_open_count, 0) > 0
-                   )
+               AND (
+                   completion_fact.receipt_id IS NULL
+                   OR COALESCE(client_fact.client_obligation_count, 0) = 0
+                   OR COALESCE(client_fact.client_open_count, 0) > 0
+                   OR COALESCE(staff_fact.staff_obligation_count, 0) = 0
+                   OR COALESCE(staff_fact.staff_open_count, 0) > 0
                )
            )
        )
@@ -55,7 +44,7 @@ _HISTORICAL_PAGE_SQL = _PAGE_SQL.replace(
 
 
 class MySqlHistoricalAwareOrdersStageProjectionRepository:
-    """Keep historical Step-11 work visible without redefining normal unfinished."""
+    """Keep cancellations visible and historical Step-11 work actionable."""
 
     def __init__(self, connection: Any) -> None:
         self._connection = connection
@@ -75,7 +64,6 @@ class MySqlHistoricalAwareOrdersStageProjectionRepository:
                 (
                     cursor_identity,
                     lifecycle_scope.value,
-                    OrderLifecycleStatus.CANCELLED.value,
                     OrderLifecycleStatus.COMPLETED.value,
                     OrderLifecycleStatus.COMPLETED.value,
                     result_limit,
