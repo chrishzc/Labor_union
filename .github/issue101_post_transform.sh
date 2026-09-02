@@ -203,6 +203,7 @@ replace_any(
     [
         ('row["employer_name"] == "王**"', 'row["employer_name"] == "王小美"'),
         ('row["identity_card"] == "A*********"', 'row["identity_card"] == "A123456789"'),
+        ('row["address_masked"] == "地址已遮罩"', 'row["address"] == "完整地址"'),
         ('row["address"] == "地址已遮罩"', 'row["address"] == "完整地址"'),
         ('assert "A123456789" not in quarterly.text', 'assert "A123456789" in quarterly.text'),
         ('assert "完整地址" not in quarterly.text', 'assert "完整地址" in quarterly.text'),
