@@ -9,15 +9,23 @@ import type {
 
 export const STAFF_PAGE_ONE: StaffDirectoryPage = {
   items: [
-    { id: 11, name: '去敏人員甲', phone: '09********', education: '大學' },
+    { id: 11, name: '去敏人員甲', phone: '09********', education: null },
     { id: 12, name: null, phone: null, education: null },
   ],
   next_cursor: 12,
 };
 
 export const STAFF_PAGE_TWO: StaffDirectoryPage = {
-  items: [{ id: 13, name: '去敏人員乙', phone: null, education: '高中' }],
+  items: [{ id: 13, name: '去敏人員乙', phone: null, education: null }],
   next_cursor: null,
+};
+
+export const STAFF_PAGE_WITH_EDUCATION: StaffDirectoryPage = {
+  items: [
+    { id: 11, name: '去敏人員甲', phone: '09********', education: '大學' },
+    { id: 12, name: null, phone: null, education: null },
+  ],
+  next_cursor: 12,
 };
 
 export const STAFF_RESPONSE_ONE: StaffDirectoryResponse = {
@@ -53,4 +61,3 @@ export const STAFF_RESPONSE_DUPLICATE_IDS = {
     next_cursor: null,
   },
 };
-
