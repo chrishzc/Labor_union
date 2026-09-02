@@ -1,0 +1,95 @@
+name: Temporary apply verified staff schema artifact
+
+on:
+  push:
+    branches: [ "fix/staff-beclass-profile-import" ]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  apply-verified-artifact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Download verified rebuild artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/staff-schema-artifact
+          gh run download 33611731328 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name staff-beclass-schema-rebuild \
+            --dir /tmp/staff-schema-artifact
+
+      - name: Apply controlled artifacts exactly
+        run: |
+          set -euo pipefail
+          for path in \
+            db/schema_parts/1030_staff_beclass_profile.sql \
+            db/schema_assembly/labor_union_fresh_schema_v1.json \
+            db/cutover_releases/labor_union_validation_schema_v1.json \
+            db/releases/labor_union_validation_schema_v1.sql \
+            db/migration_releases/labor_union_2026_09_02_staff_beclass_profile_v1.descriptors.json \
+            db/migration_releases/labor_union_2026_09_02_staff_beclass_profile_v1.json \
+            scripts/migrate_preserved_database_additive_schema.py
+          do
+            test -f "/tmp/staff-schema-artifact/${path}"
+            mkdir -p "$(dirname "${path}")"
+            cp "/tmp/staff-schema-artifact/${path}" "${path}"
+          done
+
+      - name: Verify copied controlled artifacts
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          python -m scripts.verify_validation_schema_manifest
+          python - <<'PY'
+          from pathlib import Path
+          from scripts.schema_assembly import validate_schema_assembly
+          from shared_kernel.migration_release import load_migration_release_manifest
+
+          errors = validate_schema_assembly()
+          if errors:
+              raise SystemExit("schema assembly invalid: " + "; ".join(errors))
+          manifest = Path("db/migration_releases/labor_union_2026_09_02_staff_beclass_profile_v1.json")
+          loaded = load_migration_release_manifest(manifest, Path.cwd())
+          import scripts.migrate_preserved_database_additive_schema as runner
+          assert runner.RELEASE_MANIFEST.release_id == loaded.release_id
+          print("copied controlled artifacts: PASS")
+          PY
+          python -m pytest -q \
+            tests/domains/case-import/subsystems/case-import/modules/staff-historical-workbook-adoption/regression/test_staff_beclass_profile_mapping.py
+
+      - name: Commit verified artifacts and remove temporary workflow
+        run: |
+          set -euo pipefail
+          rm .github/workflows/tmp-apply-staff-schema-artifact.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            db/schema_parts/1030_staff_beclass_profile.sql \
+            db/schema_assembly/labor_union_fresh_schema_v1.json \
+            db/cutover_releases/labor_union_validation_schema_v1.json \
+            db/releases/labor_union_validation_schema_v1.sql \
+            db/migration_releases/labor_union_2026_09_02_staff_beclass_profile_v1.descriptors.json \
+            db/migration_releases/labor_union_2026_09_02_staff_beclass_profile_v1.json \
+            scripts/migrate_preserved_database_additive_schema.py \
+            .github/workflows/tmp-apply-staff-schema-artifact.yml
+          git diff --cached --check
+          git commit -m "chore: rebuild staff schema controlled artifacts"
+          git push origin HEAD:fix/staff-beclass-profile-import
