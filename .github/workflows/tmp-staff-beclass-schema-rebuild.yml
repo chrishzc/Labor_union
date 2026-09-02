@@ -212,12 +212,8 @@ jobs:
           runner = runner_path.read_text(encoding="utf-8")
           manifest_name = f"{RELEASE_NAME}.json"
           if manifest_name not in runner:
-              needle = '    "labor_union_2026_09_01_client_payment_destination_configuration_v1.json",\n)'
-              replacement = (
-                  '    "labor_union_2026_09_01_client_payment_destination_configuration_v1.json",\n'
-                  f'    "{manifest_name}",\n'
-                  ')'
-              )
+              needle = '    "labor_union_2026_09_01_client_payment_destination_configuration_v1.json",\n'
+              replacement = f'    "{manifest_name}",\n' + needle
               if needle not in runner:
                   raise RuntimeError("preserve-data release chain insertion point not found")
               runner_path.write_text(runner.replace(needle, replacement, 1), encoding="utf-8")
