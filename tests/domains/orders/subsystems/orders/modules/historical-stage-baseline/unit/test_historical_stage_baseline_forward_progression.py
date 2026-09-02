@@ -102,5 +102,5 @@ def test_completed_lifecycle_projection_advances_beyond_older_step_ten_baseline(
     assert result.current_sop_step == 11
     assert result.stages[5].status == "completed"
     assert result.sop_steps[8].status == "completed"
-    assert result.sop_steps[9].status == "unavailable"
+    assert result.sop_steps[9].status == "completed"
     assert result.sop_steps[10].status == "unavailable"

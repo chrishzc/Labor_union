@@ -143,7 +143,7 @@ def _overlay(
         selected_step,
         timeline.current_sop_step,
     )
-    historical_cutoff = min(selected_step, current_step)
+    historical_cutoff = current_step
     current_stage_ordinal = _stage_ordinal_for_step(current_step)
 
     steps = tuple(
