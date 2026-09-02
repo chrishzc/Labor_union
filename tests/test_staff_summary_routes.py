@@ -1,6 +1,6 @@
 """
 File: test_staff_summary_routes.py
-Description: 驗證 Staff 摘要 route 的管理員會話、typed 參數衝突與 bounded cursor 回應。
+Description: 驗證 Staff／月嫂名冊摘要 route 的 bounded read contract、管理員會話與敏感欄位邊界。
 """
 
 from fastapi import FastAPI, HTTPException
@@ -165,7 +165,45 @@ def test_authorized_query_returns_bounded_cursor_page():
         ],
         "next_cursor": 12,
     }
-    assert connection.cursor_instance.executed[1] == (10, 3)
+    query, params = connection.cursor_instance.executed
+    assert " ".join(query.split()) == (
+        "SELECT id, name, phone FROM staff "
+        "WHERE id > %s ORDER BY id LIMIT %s"
+    )
+    assert params == (10, 3)
+    assert connection.closed is True
+
+
+def test_roster_projection_fails_closed_when_repository_returns_sensitive_fields():
+    connection = _Connection(
+        [
+            {
+                "id": 11,
+                "name": "名冊人員",
+                "phone": "09********",
+                "national_id": "A*********",
+                "emergency_contact_name": "內部聯絡人",
+                "emergency_contact_phone": "09********",
+                "admin_notes": "內部備註",
+            }
+        ]
+    )
+    response = TestClient(
+        _app(
+            authenticated=True,
+            query_application=_query_application(connection),
+            query_connection=connection,
+        )
+    ).get(
+        "/api/v1/staff/summaries",
+        headers={"X-Correlation-ID": "staff-roster-sensitive-fields-01"},
+    )
+
+    assert response.status_code == 500
+    error = response.json()["detail"]["error"]
+    assert error["category"] == "internal"
+    assert error["code"] == "staff_summary_projection_invalid"
+    assert error["correlation_id"] == "staff-roster-sensitive-fields-01"
     assert connection.closed is True
 
 
