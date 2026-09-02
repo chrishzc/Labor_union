@@ -853,8 +853,6 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
 
         const nameValue = name.value.trim();
         if (!nameValue) addError(errors, name, '請填寫產婦姓名。');
-        else if (nameValue.length < 2) addError(errors, name, '產婦姓名至少需 2 個字。');
-        else if (/\d/.test(nameValue)) addError(errors, name, '產婦姓名不可包含數字。');
 
         const idValue = idNumber.value.trim().toUpperCase();
         idNumber.value = idValue;
@@ -888,11 +886,6 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             addError(errors, email, 'Email 格式不正確，請確認包含 @ 與網域。');
         }
 
-        const cityValue = city.value.trim();
-        if (cityValue && !/^[\u4e00-\u9fa5A-Za-z]{2,20}$/.test(cityValue)) {
-            addError(errors, city, '縣市請填中文或英文地名，例如新竹市。');
-        }
-
         const zipValue = zipCode.value.trim();
         if (zipValue && !/^\d{3,5}$/.test(zipValue)) {
             addError(errors, zipCode, '郵遞區號請填 3 至 5 碼數字，例如 300。');
@@ -900,7 +893,6 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
 
         const addressValue = address.value.trim();
         if (!addressValue) addError(errors, address, '請填寫服務地址。');
-        else if (addressValue.length < 6) addError(errors, address, '服務地址請填寫完整地址，至少 6 個字。');
 
         if (!expectedDate.value) {
             addError(errors, expectedDate, '請選擇預產期或已生產日期。');
