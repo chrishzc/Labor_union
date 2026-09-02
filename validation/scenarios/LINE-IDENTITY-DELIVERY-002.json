@@ -9,8 +9,8 @@
   "test_kinds": ["external_input_fixture", "expected_manifest"],
   "coverage_ids": ["LINE-IDENTITY-DELIVERY-002"],
   "source_refs": [
-    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#LINE-01",
-    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#5.2"
+    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#LINE-01",
+    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#5.2"
   ],
   "root_facts": [
     "Signed webhook bytes, provider event identity, role-local identity-flow input, review command version and provider outcome faults."
