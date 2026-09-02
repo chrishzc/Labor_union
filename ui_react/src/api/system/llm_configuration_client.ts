@@ -1,6 +1,6 @@
 /**
  * File: llm_configuration_client.ts
- * Description: Gemini API Key write-only 管理端 client；只讀設定狀態與安全連線結果，不讀回 secret。
+ * Description: Gemini API Key write-only 管理端 client；只讀設定狀態與安全測試結果，不讀回 secret。
  */
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -20,8 +20,20 @@ export const LlmConnectionTestSchema = z.strictObject({
   code: z.string().nullable(),
 });
 
+export const LlmSemanticTestSchema = z.strictObject({
+  outcome: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  index_version: z.number().int().positive().nullable(),
+  qa_id: z.string().nullable(),
+  source_identity: z.string().nullable(),
+  answer_text: z.string().nullable(),
+  code: z.string().nullable(),
+});
+
 export type LlmApiKeyStatus = z.infer<typeof LlmApiKeyStatusSchema>;
 export type LlmConnectionTest = z.infer<typeof LlmConnectionTestSchema>;
+export type LlmSemanticTest = z.infer<typeof LlmSemanticTestSchema>;
 
 function requireToken(): string {
   const token = sessionClient.getToken();
@@ -52,4 +64,13 @@ export async function testLlmConnection(): Promise<LlmConnectionTest> {
     { token: requireToken() },
   );
   return decodeEnvelope(LlmConnectionTestSchema, raw);
+}
+
+export async function testLlmSemantics(question: string): Promise<LlmSemanticTest> {
+  const raw = await transport.post(
+    '/api/v1/system/llm/semantic-test',
+    { question },
+    { token: requireToken() },
+  );
+  return decodeEnvelope(LlmSemanticTestSchema, raw);
 }
