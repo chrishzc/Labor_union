@@ -93,9 +93,8 @@ def _selected_step(
         return _validated_step(formal)
     if "operational_baseline_step" in receipt_snapshot:
         value = receipt_snapshot.get("operational_baseline_step")
-        if value is None:
-            return None
-        return _validated_step(_required_int(value, "operational_baseline_step"))
+        if value is not None:
+            return _validated_step(_required_int(value, "operational_baseline_step"))
     return _legacy_step(lifecycle_status, actual_start)
 
 
@@ -103,6 +102,17 @@ def _historical_lifecycle_status(
     row: Mapping[str, object],
     receipt_snapshot: Mapping[str, object],
 ) -> OrderLifecycleStatus:
+    event_status = row.get("adoption_after_status")
+    if event_status is not None:
+        projected = OrderLifecycleStatus(str(event_status))
+        if projected in {
+            OrderLifecycleStatus.CANCELLED,
+            OrderLifecycleStatus.HISTORICAL_UNSERVED,
+            OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+            OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+            OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+        }:
+            return projected
     source_status = receipt_snapshot.get("historical_source_status")
     if source_status is not None:
         mapped = {
@@ -113,7 +123,6 @@ def _historical_lifecycle_status(
         if mapped is None:
             raise ValueError("historical_stage_baseline_source_status_invalid")
         return mapped
-    event_status = row.get("adoption_after_status")
     if event_status is not None:
         return OrderLifecycleStatus(str(event_status))
     return OrderLifecycleStatus(str(row["status"]))
@@ -125,7 +134,9 @@ def _historical_actual_start(
     lifecycle_snapshot: Mapping[str, object],
 ) -> date | None:
     if "operational_baseline_actual_start_date" in receipt_snapshot:
-        return _optional_date(receipt_snapshot.get("operational_baseline_actual_start_date"))
+        snapshot_value = receipt_snapshot.get("operational_baseline_actual_start_date")
+        if snapshot_value is not None:
+            return _optional_date(snapshot_value)
     event_value = _event_actual_start(lifecycle_snapshot)
     if event_value is not _MISSING:
         return _optional_date(event_value)
@@ -153,8 +164,16 @@ def _legacy_step(
     lifecycle_status: OrderLifecycleStatus,
     actual_start: date | None,
 ) -> int | None:
-    if lifecycle_status is OrderLifecycleStatus.COMPLETED:
+    if lifecycle_status in {
+        OrderLifecycleStatus.COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+    }:
         return 11
+    if lifecycle_status is OrderLifecycleStatus.HISTORICAL_IN_SERVICE:
+        return 10
+    if lifecycle_status is OrderLifecycleStatus.HISTORICAL_UNSERVED:
+        return 9
     if (
         actual_start is not None
         and lifecycle_status
