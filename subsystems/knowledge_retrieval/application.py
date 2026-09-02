@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from domains.knowledge_retrieval.knowledge import content_set_digest
+from domains.knowledge_retrieval.knowledge import (
+    KnowledgeAnswerUnsupported,
+    content_set_digest,
+)
+
 
 class KnowledgeApplication:
     def __init__(self, unit_of_work) -> None:
@@ -107,12 +111,12 @@ class KnowledgeWorker:
             items = unit_of_work.knowledge.published_items()
             version = int(job["target_index_version"])
             unit_of_work.commit()
-        if not items:
+        indexed_items = self._index_gateway.rebuild(version, items)
+        if not indexed_items:
             raise ValueError("knowledge_source_invalid")
-        self._index_gateway.rebuild(version, items)
         with self._unit_of_work() as unit_of_work:
             unit_of_work.knowledge.complete_index(
-                job["id"], version, content_set_digest(items)
+                job["id"], version, content_set_digest(indexed_items)
             )
             unit_of_work.commit()
 
@@ -122,7 +126,15 @@ class KnowledgeWorker:
             unit_of_work.commit()
         if version is None:
             raise RuntimeError("knowledge_index_unavailable")
-        answer = self._index_gateway.answer(job["question"], version)
+        try:
+            answer = self._index_gateway.answer(job["question"], version)
+        except KnowledgeAnswerUnsupported:
+            with self._unit_of_work() as unit_of_work:
+                unit_of_work.knowledge.complete_unsupported(
+                    job["id"], job["answer_request_id"]
+                )
+                unit_of_work.commit()
+            return
         with self._unit_of_work() as unit_of_work:
             unit_of_work.knowledge.complete_answer(
                 job["id"], job["answer_request_id"], answer
