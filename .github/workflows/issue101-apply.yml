@@ -23,10 +23,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python 3.11
+      - name: Set up Python 3.12
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Decode and apply Issue 101 transformation
         shell: bash
@@ -35,7 +35,7 @@ jobs:
           base64 -d .github/issue101_payload.b64 | gzip -d > /tmp/issue101_remove_masked_apply.py
           python -m py_compile /tmp/issue101_remove_masked_apply.py
           python /tmp/issue101_remove_masked_apply.py . --expected-head "$GITHUB_SHA" --apply > /tmp/issue101.diff
-          tail -n 8 /tmp/issue101.diff
+          tail -n 20 /tmp/issue101.diff
           git diff --check
 
       - name: Install Python dependencies
@@ -50,7 +50,7 @@ jobs:
           set -euo pipefail
           mapfile -t selected < <(
             find tests -type f \( -name 'test_*.py' -o -name '*_test.py' \) \
-              | grep -Ei '(data_browser|customer_service|line_identity|line_notification|weekly|subsidy|accounts_payable|finance|import_warning|historical|hcm)' \
+              | grep -Ei '(data_browser|customer_service|line_identity|line_notification|weekly|subsidy|accounts_payable|finance|import_warning|historical|hcm|admin_audit|anomaly|beclass|line_feedback|line_tasks|staff_retirement)' \
               | sort
           )
           printf 'Selected backend tests: %s\n' "${#selected[@]}"
@@ -75,6 +75,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git rm .github/workflows/issue101-apply.yml .github/issue101_payload.b64
           git add -A
           git diff --cached --check
           git diff --cached --stat
