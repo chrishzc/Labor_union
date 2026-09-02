@@ -123,42 +123,18 @@ def test_verified_liff_user_is_observed_before_identity_flow_open() -> None:
     assert uow.committed is True
 
 
-def test_new_customer_flow_selects_dual_role_in_the_same_uow_and_replay_is_read_only() -> None:
-    line_user_id = LineUserId("U-dual-role-flow")
-    selected = [None]
-    context_version = [ExpectedVersion(0)]
-    bindings = (
-        LineIdentityBindingSnapshot(
-            line_user_id,
-            LineIdentityBindingStatus.BOUND,
-            ExpectedVersion(1),
-            LineBindingSubjectType.CUSTOMER,
-            "customer:23",
-        ),
-        LineIdentityBindingSnapshot(
-            line_user_id,
-            LineIdentityBindingStatus.BOUND,
-            ExpectedVersion(1),
-            LineBindingSubjectType.STAFF,
-            "staff:18",
-        ),
-    )
+def test_open_flow_never_mutates_selected_role_state() -> None:
+    line_user_id = LineUserId("U-single-role-flow")
 
     class Identities:
-        def list_by_user(self, queried_line_user_id):
-            assert queried_line_user_id == line_user_id
-            return bindings
+        def list_by_user(self, *_):
+            raise AssertionError("opening a flow must not inspect dual-role state")
 
-        def selected_role(self, queried_line_user_id):
-            assert queried_line_user_id == line_user_id
-            return selected[0], context_version[0]
+        def selected_role(self, *_):
+            raise AssertionError("opening a flow must not read selected role")
 
-        def select_role(self, queried_line_user_id, target_role, expected_version):
-            assert queried_line_user_id == line_user_id
-            assert expected_version == context_version[0]
-            selected[0] = target_role
-            context_version[0] = ExpectedVersion(expected_version.value + 1)
-            return context_version[0]
+        def select_role(self, *_):
+            raise AssertionError("opening a flow must not switch identity")
 
     class FlowRepository:
         def __init__(self):
@@ -177,34 +153,23 @@ def test_new_customer_flow_selects_dual_role_in_the_same_uow_and_replay_is_read_
                 )
             return result
 
+    flows = FlowRepository()
     uow = FakeUow(
         platform_users=SimpleNamespace(ensure_verified_user=lambda _: None),
-        identity_flows=FlowRepository(),
+        identity_flows=flows,
         identities=Identities(),
-        receipts=ReceiptRepository(),
-        audit=RecordingRepository(),
-        outbox=RecordingRepository(),
     )
     application = LineIdentityApplication(lambda: uow, lambda: NOW)
 
-    application.open_flow(
-        LineIdentityFlowPurpose.CUSTOMER_BINDING,
-        line_user_id,
-        IdempotencyKey("dual-role-flow:1"),
-        CorrelationId("dual-role-flow:1"),
-    )
-    application.open_flow(
-        LineIdentityFlowPurpose.CUSTOMER_BINDING,
-        line_user_id,
-        IdempotencyKey("dual-role-flow:1"),
-        CorrelationId("dual-role-flow:1"),
-    )
+    for _ in range(2):
+        application.open_flow(
+            LineIdentityFlowPurpose.CUSTOMER_BINDING,
+            line_user_id,
+            IdempotencyKey("single-role-flow:1"),
+            CorrelationId("single-role-flow:1"),
+        )
 
-    assert selected[0] is LineBindingSubjectType.CUSTOMER
-    assert context_version[0] == ExpectedVersion(1)
-    assert len(uow.receipts.items) == 1
-    assert len(uow.audit.items) == 1
-    assert len(uow.outbox.items) == 1
+    assert flows.calls == 2
     assert uow.committed is True
 
 
