@@ -1,6 +1,6 @@
 /**
  * File: LlmConfigurationPage.tsx
- * Description: 系統管理員 write-only LLM API Key 設定頁；永不讀回或顯示既有 secret。
+ * Description: 系統管理員 write-only Google AI Studio API Key 設定頁；永不讀回或顯示既有 secret。
  */
 import React, { FormEvent, useEffect, useState } from 'react';
 import {
@@ -14,6 +14,9 @@ import {
   ApiTimeoutError,
 } from '../../api/shared/typed_errors';
 import './LlmConfigurationPage.css';
+
+
+const GEMINI_MODEL = 'gemini-3.7-flash';
 
 
 function safeSaveErrorMessage(error: unknown): string {
@@ -70,7 +73,7 @@ export const LlmConfigurationPage: React.FC = () => {
     event.preventDefault();
     const normalized = apiKey.trim();
     if (normalized.length < 8) {
-      setError('請輸入有效的 API Key。');
+      setError('請輸入有效的 Google AI Studio API Key。');
       setNotice(null);
       return;
     }
@@ -82,7 +85,7 @@ export const LlmConfigurationPage: React.FC = () => {
       const nextStatus = await replaceLlmApiKey(normalized);
       setStatus(nextStatus);
       setApiKey('');
-      setNotice('API Key 已儲存。基於安全設計，系統不提供讀回或顯示功能。');
+      setNotice('Google AI Studio API Key 已儲存。系統不提供讀回或顯示功能。');
     } catch (saveError: unknown) {
       setError(safeSaveErrorMessage(saveError));
     } finally {
@@ -101,7 +104,7 @@ export const LlmConfigurationPage: React.FC = () => {
           <p className="llm-config-eyebrow">LINE Hub / AI</p>
           <h1 id="llm-config-title">AI 模型設定</h1>
           <p className="llm-config-description">
-            此頁只允許寫入或覆寫 LLM API Key。既有 Key 不會回傳至瀏覽器，也不提供顯示功能。
+            目前固定使用 Google AI Studio 的 Gemini API。Key 只會送往後端寫入私有 runtime secret；既有 Key 不會回傳至瀏覽器。
           </p>
         </div>
         <div className={`llm-config-status ${status?.configured ? 'configured' : 'empty'}`}>
@@ -110,20 +113,20 @@ export const LlmConfigurationPage: React.FC = () => {
             {loadingStatus
               ? '查詢中'
               : status?.configured
-                ? 'API Key 已設定'
-                : '尚未設定 API Key'}
+                ? 'Gemini API Key 已設定'
+                : '尚未設定 Gemini API Key'}
           </span>
         </div>
       </header>
 
       <div className="llm-config-card">
         <div className="llm-config-card-heading">
-          <h2>LLM API Key</h2>
-          <p>儲存後輸入框會立即清空。再次提交會直接覆寫目前設定。</p>
+          <h2>Google AI Studio / Gemini API</h2>
+          <p>模型：{GEMINI_MODEL}。儲存後輸入框立即清空；再次提交會覆寫目前設定。</p>
         </div>
 
         <form onSubmit={handleSubmit} className="llm-config-form">
-          <label htmlFor="llm-api-key">API Key</label>
+          <label htmlFor="llm-api-key">Google AI Studio API Key</label>
           <input
             id="llm-api-key"
             name="llm-api-key"
@@ -133,17 +136,17 @@ export const LlmConfigurationPage: React.FC = () => {
             spellCheck={false}
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
-            placeholder="貼上 API Key"
+            placeholder="貼上 Gemini API Key"
             disabled={saving}
             aria-describedby="llm-api-key-help"
           />
           <p id="llm-api-key-help" className="llm-config-help">
-            系統只會回報是否已設定，不會回傳完整或遮罩後的 Key。
+            系統只回報是否已設定與更新時間；不會透過任何管理 API 回傳完整或遮罩後的 Key。
           </p>
 
           <div className="llm-config-actions">
             <button type="submit" disabled={saving || apiKey.trim().length < 8}>
-              {saving ? '儲存中…' : status?.configured ? '覆寫 API Key' : '儲存 API Key'}
+              {saving ? '儲存中…' : status?.configured ? '覆寫 Gemini API Key' : '儲存 Gemini API Key'}
             </button>
           </div>
         </form>
