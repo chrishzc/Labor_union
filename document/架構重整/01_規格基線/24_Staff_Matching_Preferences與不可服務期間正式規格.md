@@ -196,3 +196,81 @@ fresh refresh、Calendar 同源顯示、取消 Preview／Apply 與恢復；此�
 Staff Matching Preferences／不可服務期間仍由本規格與 Scheduling owner 擁有；M3 Matching Coordination 只能透過 typed query／port 讀取 current preference、lifecycle、availability 與 unavailability facts，不能寫入偏好、不可服務期間、assignment、leave 或正式服務日。
 
 `accepted` 只代表 matching decision；M3 需 fresh-read 本規格提供的 source versions，若 facts 變動則回 `rematch_required`，並透過 typed Assignment conversion/rematch request 交回 owning workflow。M3 Phase D 不接管本 Domain root writer；本 amendment 不授權 production code、schema／DB、provider 或真人 LINE 驗收。
+
+## 2026-09-02 Staff／BeClass 接案偏好 canonical ownership 裁決（Issue #104）
+
+### 範圍與分類原則
+
+本裁決只定義資訊架構、canonical ownership、資料形態與 read/write boundary；不授權 UI、schema、migration、backfill、re-import、production DB、deploy 或 cutover。資料目前存在於 Staff 或 BeClass adoption storage，不代表它自動成為可編輯的 Staff Matching Preference；只有本節明列為 Staff Matching Profile definition/value 的資料，才可由該 owner 的 mutation boundary 寫入。
+
+「接案偏好相關資訊」分成兩類：
+
+1. **Staff Matching Profile 可寫偏好**：由 Scheduling／Staff Matching Profile 擁有 definition、typed value 與 aggregate version。
+2. **Staff 服務能力／接案事實**：由 canonical Staff scalar／relation facts 擁有；Matching、名冊與其他 UI 只能透過 typed read model 消費，不得因顯示或媒合用途而改變 owner，也不得透過 Staff Matching Profile API 寫回。
+
+### Staff Matching Profile canonical owner 與 API boundary
+
+第一版正式 value shape 維持本規格 §3.1：`integer_range`（`minimum`、`maximum`）與 `integer_set`（排序且不重複的正整數 `values`）。Definition 至少包含 stable `preference_key`、`display_name`、`value_kind`、`is_filterable`、`order_fact_key`、`comparison_operator`、`active` 與 version；每位 Staff 的 profile 以 preference key 對應 typed value，並有獨立 aggregate version。
+
+目前正式的兩個 initial definitions 維持：
+
+| 業務主題 | value shape | matching source | ownership |
+|---|---|---|---|
+| 可承接服務天數 | `integer_range` | `orders.service_days` | Scheduling／Staff Matching Profile |
+| 可承接每日服務時數 | `integer_set` | `orders.service_hours_per_day` | Scheduling／Staff Matching Profile |
+
+正式 HTTP boundary 是 `/api/v1/scheduling/staff-matching-preferences`：
+
+- Read：`GET /definitions`、`GET /staff/{staff_id}`。
+- Definition write：`POST /definitions/{preference_key}/preview` → `POST /definitions/{preference_key}/apply`。
+- Staff value write：`POST /staff/{staff_id}/preview` → `POST /staff/{staff_id}/apply`。
+- 所有 mutation 都必須經 owner workflow 的 version／fingerprint／idempotency／actor／reason 契約；UI、Case Import、Matching 或 Staff relation adapter 不得直接寫 preference storage。
+- 新增自訂 preference definition 必須是明確的管理端定義行為並通過 typed definition validator。任何 Staff／BeClass 欄位或 relation 的存在，本身不是新增 definition 的授權。
+
+### Staff／BeClass 接案相關事實 inventory
+
+以下資料屬於接案／媒合時可能需要讀取的 canonical service facts，但**不是** Staff Matching Profile 可寫偏好：
+
+| 業務主題 | canonical data shape | current ownership／用途 | #104 write boundary |
+|---|---|---|---|
+| 最多照顧寶寶數 | Staff scalar `care_babies` | Staff canonical profile fact；可供名冊／Matching read projection | 不得由 preference profile 寫入 |
+| 可承接區域 | relation `staff_regions`：標準值 + topic-local other detail | Staff service capability fact | 只讀；若未來要人工修改，須另由該 fact owner 明確定義 command |
+| 可承接時段 | relation `staff_time_slots`：標準值 + topic-local other detail | Staff service capability fact；可作每日服務時數 migration source evidence | 不得直接等同 `daily_service_hours`；無法唯一解析時不得猜測 |
+| 下廚能力 | relation `staff_cooking_skills`：標準值 + topic-local other detail | Staff capability；Matching 對 Orders `requires_cooking` 消費 | 不得由 preference profile 寫入 |
+| 交通方式 | relation `staff_transportation` | Staff service capability fact | 不得由 preference profile 寫入 |
+| 特殊節日意願 | relation `staff_holiday_availability`：標準值 + topic-local other detail | Staff service capability／availability fact | 不得由 preference profile 寫入 |
+| 週間服務／排休 | relation `staff_weekly_rest`：標準值 + topic-local other detail | Staff service capability／availability fact | 不得由 preference profile 寫入 |
+| 可承接胎數／型態 | relation `staff_baby_types`：標準值 + topic-local other detail | Staff service capability fact；`[其它].4` 含「三胞胎」時可依既有 adoption 規則得到 `care_babies = 3` | 不得由 preference profile 寫入 |
+
+Case Import 的 Staff Historical BeClass adoption 只負責把已知 workbook source 正規化到上述 canonical Staff scalar／relations。採納完成後，raw workbook 欄名或欄序不成為 runtime owner；Matching／名冊不得重新解析問卷來創造另一份偏好事實。
+
+### 六組 `[其它]` 的母題 ownership
+
+六組 other detail 必須永久跟隨原母題，不得合併為 generic `other`，也不得跨母題轉用：
+
+| BeClass 欄位 | canonical parent relation | 母題 |
+|---|---|---|
+| `[其它]` | `staff_cooking_skills` | 下廚能力 |
+| `[其它].1` | `staff_regions` | 可承接區域 |
+| `[其它].2` | `staff_time_slots` | 可承接時段 |
+| `[其它].3` | `staff_weekly_rest` | 週間服務／排休 |
+| `[其它].4` | `staff_baby_types` | 可承接胎數／型態 |
+| `[其它].5` | `staff_holiday_availability` | 特殊節日意願 |
+
+`staff_transportation` 沒有對應 `[其它]` 欄位，不得為求欄位對稱而新增或借用其他母題的 detail。
+
+### 明確排除：不是接案偏好
+
+- 一般個人資料：姓名、電話、email、地址、生日、身分識別資料。
+- `education`、`emergency_contact_name`、`emergency_contact_phone`、`admin_notes`；已有 canonical storage 不改變其語意分類。
+- 銀行／匯款資料、IP、credential、token、secret。
+- `has_massage_cert` 是嬰幼兒按摩證書的 dedicated Staff fact；不得再複製成一般 certification 或 matching preference。
+- 一般資格證明由 `staff_certifications` 擁有；資格證明不是因媒合可能參考就自動成為 preference。
+- BeClass `項次`／`查詢序號` 不保存，也不得建立 canonical preference identity。
+
+### Evolution rule 與 Issue #104 驗收
+
+- 既有 Staff／BeClass fact 若未來需要變成可編輯 preference，必須另有明確需求，先定義 stable preference identity、typed value、matching semantics、migration/read source 與專屬驗收，再經 Staff Matching Profile owner 的 Preview／Apply boundary；本 Issue 不預先建立 storage 或 UI requirement。
+- 名冊／Matching 可以讀既有 canonical facts，但 read projection 不取得 writer ownership。
+- 六組 `[其它]` 已逐一綁定原母題；不存在共用 `other`。
+- 本節完成「包含／排除清單、每個包含主題 owner/data shape、read/write API boundary、六組 other ownership、未知不升格」五項 Issue #104 驗收；runtime、DB 與 production 均無變更。
