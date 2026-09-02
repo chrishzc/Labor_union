@@ -1,6 +1,6 @@
 """
 File: orders_core_stage_projection.py
-Description: 提供待辦看板 Beta 十三核心階段、Government Subsidy side lane 與歷史 evidence 的唯讀 HTTP endpoint。
+Description: 提供待辦看板 Beta 十三核心階段、Government Subsidy side lane、完全結案與歷史 evidence 的唯讀 HTTP endpoint。
 """
 
 from __future__ import annotations
@@ -28,7 +28,11 @@ from api.schemas.historical_order_adoption_evidence import HistoricalOrderAdopti
 from api.schemas.order_government_subsidy_projection import (
     OrderGovernmentSubsidyProjectionPageView,
 )
-from api.schemas.orders_core_stage_projection import OrderCoreStageTimelinePageView
+from api.schemas.orders_core_stage_projection import (
+    OrderCoreStageTimelinePageView,
+    OrderTerminalAggregatePageView,
+    OrderTerminalAggregateView,
+)
 from domains.orders.lifecycle import OrderLifecycleScope
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.orders.core_stage_filter_query import (
@@ -53,6 +57,10 @@ from subsystems.orders.historical_adoption_evidence_query import (
     query_historical_order_adoption_evidence,
 )
 from subsystems.orders.stage_projection_query import OrderStageProjectionContractError
+from subsystems.orders.terminal_aggregate_query import (
+    TerminalAggregateContractError,
+    project_terminal_aggregate,
+)
 
 
 router = APIRouter(prefix="/api/orders", tags=["Orders Core Stage Timeline Beta"])
@@ -225,6 +233,101 @@ def get_order_government_subsidy_projections(
         return Response(status_code=304, headers=headers)
     response.headers.update(headers)
     return BaseResponse(data=view, message="成功取得訂單 Government Subsidy 唯讀投影")
+
+
+@router.get(
+    "/terminal-aggregates",
+    response_model=BaseResponse[OrderTerminalAggregatePageView],
+    responses={
+        401: {"model": GlobalTypedErrorResponseView, "description": "需要有效的管理員驗證"},
+        403: {"model": GlobalTypedErrorResponseView, "description": "目前身分無權查詢完全結案投影"},
+        409: {"model": GlobalTypedErrorResponseView, "description": "完全結案 owner facts 無法形成一致投影"},
+        422: {"model": GlobalTypedErrorResponseView, "description": "完全結案查詢條件不符合公開契約"},
+        500: {"model": GlobalTypedErrorResponseView, "description": "完全結案投影查詢失敗"},
+        503: {"model": GlobalTypedErrorResponseView, "description": "完全結案 owner facts 暫時無法使用"},
+    },
+)
+def get_order_terminal_aggregates(
+    page_size: int = Query(50, ge=1, le=200),
+    after_case_no: str | None = Query(None, min_length=1, max_length=50),
+    case_no_search: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: OrdersStageProjectionApplication = Depends(get_orders_stage_projection_application),
+    repository=Depends(get_order_government_subsidy_projection_repository),
+):
+    del principal
+    try:
+        core_page = query_core_stage_page(
+            application,
+            CoreStageProjectionFilterQuery(
+                page_size=page_size,
+                after_case_no=after_case_no,
+                case_no_search=case_no_search,
+                branch_type="normal",
+            ),
+        )
+        subsidy_page = query_government_subsidy_projection_page(
+            application,
+            repository,
+            GovernmentSubsidyProjectionQuery(
+                page_size=page_size,
+                after_case_no=after_case_no,
+                case_no_search=case_no_search,
+            ),
+        )
+        core_case_nos = tuple(item.case_no.casefold() for item in core_page.items)
+        subsidy_case_nos = tuple(item.case_no.casefold() for item in subsidy_page.items)
+        if core_case_nos != subsidy_case_nos or core_page.next_cursor != subsidy_page.next_cursor:
+            raise TerminalAggregateContractError(
+                "terminal aggregate source pages do not identify the same orders"
+            )
+        items = [
+            OrderTerminalAggregateView.model_validate(
+                project_terminal_aggregate(timeline, subsidy),
+                from_attributes=True,
+            )
+            for timeline, subsidy in zip(core_page.items, subsidy_page.items, strict=True)
+        ]
+        view = OrderTerminalAggregatePageView(
+            items=items,
+            next_cursor=core_page.next_cursor,
+        )
+    except (
+        OrderStageProjectionContractError,
+        CoreStageProjectionContractError,
+        GovernmentSubsidyProjectionContractError,
+        TerminalAggregateContractError,
+    ) as error:
+        raise typed_http_error(
+            409,
+            "conflict",
+            "order_terminal_aggregate_invalid",
+            "完全結案所需 owner facts 無法產生一致投影。",
+            "order-terminal-aggregate-query",
+        ) from error
+    except ValueError as error:
+        raise typed_http_error(
+            422,
+            "validation",
+            "order_terminal_aggregate_query_invalid",
+            "完全結案查詢條件不正確。",
+            "order-terminal-aggregate-query",
+        ) from error
+    except (OperationalError, ProgrammingError) as error:
+        raise typed_http_error(
+            503,
+            "unavailable",
+            "order_terminal_aggregate_source_unavailable",
+            "完全結案所需 owner facts 目前無法讀取。",
+            "order-terminal-aggregate-query",
+        ) from error
+    except Exception as error:
+        raise internal_query_error(
+            "order_terminal_aggregate_internal_error",
+            "完全結案投影查詢失敗。",
+            "order-terminal-aggregate-query",
+        ) from error
+    return BaseResponse(data=view, message="成功取得訂單完全結案唯讀投影")
 
 
 @router.get(
