@@ -11,6 +11,7 @@ import { StaffPage } from '../pages/StaffPage';
 import {
   STAFF_PAGE_ONE,
   STAFF_PAGE_TWO,
+  STAFF_PAGE_WITH_EDUCATION,
 } from './fixtures/staff/staff_directory_contract_fixtures';
 import { STAFF_LIFECYCLE_VIEW } from './fixtures/staff/staff_lifecycle_contract_fixtures';
 import { STAFF_QUALIFICATION_MASTER } from './fixtures/staff/staff_qualification_contract_fixtures';
@@ -26,6 +27,7 @@ describe('StaffPage directory presentation', () => {
   });
 
   it('renders approved server summary values including education without unsupported placeholders', async () => {
+    vi.mocked(staffDirectoryClient.queryPage).mockResolvedValueOnce(STAFF_PAGE_WITH_EDUCATION);
     render(<StaffPage />);
 
     expect(screen.getByText(/正在載入服務人員摘要名冊/)).toBeInTheDocument();
@@ -43,6 +45,7 @@ describe('StaffPage directory presentation', () => {
   });
 
   it('opens summary drawer without another query', async () => {
+    vi.mocked(staffDirectoryClient.queryPage).mockResolvedValueOnce(STAFF_PAGE_WITH_EDUCATION);
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
