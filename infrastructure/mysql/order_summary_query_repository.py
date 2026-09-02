@@ -22,17 +22,49 @@ SELECT o.case_no,
        c.identity_status,
        o.service_days,
        order_details.total_employer_self_pay_payable,
-       (
-           SELECT GROUP_CONCAT(
-                      assigned_staff.name
-                      ORDER BY assignment.assignment_sequence
-                      SEPARATOR '、'
-                  )
-             FROM case_staff_assignments assignment
-             JOIN staff assigned_staff
-               ON assigned_staff.id = assignment.staff_id
-            WHERE assignment.case_no = o.case_no
-              AND assignment.status <> 'cancelled'
+       COALESCE(
+           (
+               SELECT GROUP_CONCAT(
+                          assigned_staff.name
+                          ORDER BY assignment.assignment_sequence
+                          SEPARATOR '、'
+                      )
+                 FROM case_staff_assignments assignment
+                 JOIN staff assigned_staff
+                   ON assigned_staff.id = assignment.staff_id
+                WHERE assignment.case_no = o.case_no
+                  AND assignment.status <> 'cancelled'
+           ),
+           CASE
+                      WHEN o.status IN (
+                          '歷史訂單－未服務',
+                          '歷史訂單－服務中',
+                          '歷史訂單－服務完成',
+                          '歷史訂單－帳務完成'
+                      ) THEN (
+                          SELECT GROUP_CONCAT(
+                                     historical_staff.name
+                                     ORDER BY historical_pairing.caregiver_ordinal
+                                     SEPARATOR '、'
+                                 )
+                            FROM historical_order_adoption_receipts historical_receipt
+                            JOIN historical_order_pairing_evidence historical_pairing
+                              ON historical_pairing.receipt_id = historical_receipt.id
+                            JOIN staff historical_staff
+                              ON historical_staff.id = historical_pairing.staff_id
+                           WHERE historical_receipt.id = (
+                                 SELECT MAX(latest_historical_receipt.id)
+                                   FROM historical_order_adoption_receipts latest_historical_receipt
+                                  WHERE latest_historical_receipt.case_no = o.case_no
+                                    AND latest_historical_receipt.outcome = 'adopted'
+                           )
+                             AND historical_pairing.staff_id IS NOT NULL
+                             AND historical_pairing.resolution IN (
+                                 'evidence_only', 'assignment_candidate', 'assignment_reused'
+                             )
+                      )
+                      ELSE NULL
+                      END
        ) AS staff_name
   FROM orders o FORCE INDEX (PRIMARY)
   JOIN clients c ON c.id = o.client_id

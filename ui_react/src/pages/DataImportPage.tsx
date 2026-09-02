@@ -344,7 +344,7 @@ export const DataImportPage: React.FC<DataImportPageProps> = ({ initialTab = 'wo
     (snapshot, fingerprint, options) => historicalOrderWorkbookPreviewClient.apply(snapshot, fingerprint, options),
     adaptHistoricalOrderWorkbookPreview,
     (receipt) => applyPresentation(receipt.replayed_workbook, `不採用 ${receipt.result_counts.not_adopted} 筆、配對中未付訂金 ${receipt.result_counts.matching_pending_deposit} 筆、已付訂金未服務 ${receipt.result_counts.historical_unserved} 筆、歷史服務中 ${receipt.result_counts.historical_in_service} 筆、歷史服務完成 ${receipt.result_counts.historical_service_completed} 筆、工作簿未列入而取消 ${receipt.absent_order_cancellation_count} 筆。`, receipt.review_required_count > 0 || receipt.current_conflict_count > 0 ? 'needs-review' : receipt.adopted_count + receipt.absent_order_cancellation_count === 0 ? 'no-change' : 'applied'),
-    '歷史訂單工作簿處理失敗。', 'historical-orders-authoritative-v2', (receipt) => {
+    '歷史訂單工作簿處理失敗。', 'historical-orders-authoritative-v3', (receipt) => {
       setHistoricalReviewIdentities(receipt.review_references);
       setSelectedHistoricalReviewIdentity(null);
     }
