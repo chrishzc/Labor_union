@@ -223,7 +223,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     await waitFor(() => {
       expect(within(cardFor('CASE-ACTIVE-1')).getByText('王小明')).toBeInTheDocument();
       expect(within(cardFor('CASE-ACTIVE-1')).getByText('陳月嫂')).toBeInTheDocument();
-      expect(witin(cardFor('CASE-PLAN-1')).getByText('尚未正式指派')).toBeInTheDocument();
+      expect(within(cardFor('CASE-PLAN-1')).getByText('尚未正式指派')).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: /待開工 3/ }));
