@@ -9,8 +9,8 @@
   "coverage_scope": "supplemental",
   "coverage_ids": ["ASM-01", "ASM-02"],
   "source_refs": [
-    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ASM-01",
-    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ASM-02"
+    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#ASM-01",
+    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#ASM-02"
   ],
   "root_facts": [
     "A detector's bounded desired alert state: code, source domain, case key, reason and safe display details.",
