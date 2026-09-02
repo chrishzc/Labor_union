@@ -10,8 +10,7 @@
   "coverage_scope": "supplemental",
   "coverage_ids": ["OSM-03"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#OSM-03",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#5.7"
+    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#OSM-03"
   ],
   "root_facts": [
     "A disposable in-service Order, effective assignment-owned official work day and authoritative payment/payroll terms, scoped to the auto-completion transition boundary.",
