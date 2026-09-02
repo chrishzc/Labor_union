@@ -16,7 +16,7 @@ import {
 import './LlmConfigurationPage.css';
 
 
-const GEMINI_MODEL = 'gemini-3.7-flash';
+const GEMINI_MODEL = 'gemini-3.5-flash-lite';
 
 
 function safeSaveErrorMessage(error: unknown): string {
@@ -104,7 +104,8 @@ export const LlmConfigurationPage: React.FC = () => {
           <p className="llm-config-eyebrow">LINE Hub / AI</p>
           <h1 id="llm-config-title">AI 模型設定</h1>
           <p className="llm-config-description">
-            目前固定使用 Google AI Studio 的 Gemini API。Key 只會送往後端寫入私有 runtime secret；既有 Key 不會回傳至瀏覽器。
+            目前固定使用 Google AI Studio 的 Gemini API，並優先採用 Free Tier 的 Flash-Lite 模型。
+            Key 只會送往後端寫入私有 runtime secret；既有 Key 不會回傳至瀏覽器。
           </p>
         </div>
         <div className={`llm-config-status ${status?.configured ? 'configured' : 'empty'}`}>
@@ -122,7 +123,7 @@ export const LlmConfigurationPage: React.FC = () => {
       <div className="llm-config-card">
         <div className="llm-config-card-heading">
           <h2>Google AI Studio / Gemini API</h2>
-          <p>模型：{GEMINI_MODEL}。儲存後輸入框立即清空；再次提交會覆寫目前設定。</p>
+          <p>模型：{GEMINI_MODEL}（Free Tier 優先）。儲存後輸入框立即清空；再次提交會覆寫目前設定。</p>
         </div>
 
         <form onSubmit={handleSubmit} className="llm-config-form">
