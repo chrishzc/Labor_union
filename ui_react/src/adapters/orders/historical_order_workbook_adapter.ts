@@ -15,6 +15,7 @@ export interface HistoricalOrderWorkbookPreviewModel {
   currentConflictCount: number;
   assignmentCandidateCount: number;
   evidenceOnlyPairingCount: number;
+  absentOrderCancellationCount: number;
   statusCounts: {
     cancelled0: number;
     depositPaid1: number;
@@ -60,6 +61,7 @@ export function adaptHistoricalOrderWorkbookPreview(
     currentConflictCount: preview.current_conflict_count,
     assignmentCandidateCount: preview.assignment_candidate_count,
     evidenceOnlyPairingCount: preview.evidence_only_pairing_count,
+    absentOrderCancellationCount: preview.absent_order_cancellation_count,
     statusCounts: {
       cancelled0: preview.status_counts.cancelled_0,
       depositPaid1: preview.status_counts.deposit_paid_1,

@@ -51,6 +51,7 @@ class HistoricalOrderWorkbookPreviewView(BaseModel):
     current_conflict_count: int = Field(ge=0)
     assignment_candidate_count: int = Field(ge=0)
     evidence_only_pairing_count: int = Field(ge=0)
+    absent_order_cancellation_count: int = Field(ge=0)
     status_counts: HistoricalOrderStatusCountsView
     result_counts: HistoricalOrderResultCountsView
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -76,6 +77,7 @@ class HistoricalOrderWorkbookReceiptView(BaseModel):
     assignments_created: int = Field(ge=0)
     replayed_rows: int = Field(ge=0)
     replayed_workbook: bool
+    absent_order_cancellation_count: int = Field(ge=0)
     status_counts: HistoricalOrderStatusCountsView
     result_counts: HistoricalOrderResultCountsView
     review_references: list[str] = Field(default_factory=list, max_length=100)
