@@ -122,10 +122,10 @@ class _Source:
 
 def test_four_historical_lifecycles_have_stable_server_counts_and_independent_filters():
     source = _Source((
-        _timeline("H-UNSERVED", OrderLifecycleStatus.HISTORICAL_UNSERVED),
-        _timeline("H-SERVICE", OrderLifecycleStatus.HISTORICAL_IN_SERVICE),
-        _timeline("H-COMPLETE", OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED),
         _timeline("H-ACCOUNTING", OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED),
+        _timeline("H-COMPLETE", OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED),
+        _timeline("H-SERVICE", OrderLifecycleStatus.HISTORICAL_IN_SERVICE),
+        _timeline("H-UNSERVED", OrderLifecycleStatus.HISTORICAL_UNSERVED),
     ))
 
     all_historical = query_core_stage_page(
