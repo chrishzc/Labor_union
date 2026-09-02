@@ -1,4 +1,4 @@
-import { useEffect, useState, type FC } from 'react';
+import { useEffect, useRef, useState, type FC } from 'react';
 import {
   orderTermsMutationClient,
   type OrderTermsPreview,
@@ -50,22 +50,26 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   const [reason, setReason] = useState('');
   const [status, setStatus] = useState<'idle' | 'previewing' | 'applying'>('idle');
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setDraft(draftFromQuery(query));
-    setPreview(null);
-    setReceipt(null);
-    setReason('');
-    setError(null);
-    setStatus('idle');
-  }, [
+  const queryRevision = [
     caseNo,
     query.order_version,
     query.scheduling_version,
     query.scheduling_generation,
     query.client_finance_version,
     query.payroll_version,
-  ]);
+  ].join(':');
+  const previousQueryRevision = useRef(queryRevision);
+
+  useEffect(() => {
+    if (previousQueryRevision.current === queryRevision) return;
+    previousQueryRevision.current = queryRevision;
+    setDraft(draftFromQuery(query));
+    setPreview(null);
+    setReceipt(null);
+    setReason('');
+    setError(null);
+    setStatus('idle');
+  }, [query, queryRevision]);
 
   const updateDraft = <K extends keyof OrderTermsDraft>(key: K, value: OrderTermsDraft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
