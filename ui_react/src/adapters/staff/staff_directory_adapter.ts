@@ -1,6 +1,6 @@
 /**
  * File: staff_directory_adapter.ts
- * Description: 將 Staff 摘要三欄轉成名冊卡片 view model，合法 null 採中性顯示。
+ * Description: 將 Staff bounded 摘要轉成名冊卡片 view model，合法 null 採中性顯示。
  */
 import type {
   StaffDirectoryPage,
@@ -11,6 +11,7 @@ export interface StaffDirectoryCardViewModel {
   id: number;
   name: string | null;
   phone: string | null;
+  education: string | null;
   displayName: string;
   displayPhone: string;
 }
@@ -21,12 +22,17 @@ export interface StaffDirectoryPageViewModel {
 }
 
 export function adaptStaffDirectorySummary(summary: StaffDirectorySummary): StaffDirectoryCardViewModel {
+  const displayPhone = summary.education
+    ? `${summary.phone ?? '—'} · 🎓 ${summary.education}`
+    : summary.phone ?? '—';
+
   return {
     id: summary.id,
     name: summary.name,
     phone: summary.phone,
+    education: summary.education,
     displayName: summary.name ?? `服務人員摘要 #${summary.id}`,
-    displayPhone: summary.phone ?? '—',
+    displayPhone,
   };
 }
 
