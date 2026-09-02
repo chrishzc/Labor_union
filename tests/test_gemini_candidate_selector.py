@@ -3,7 +3,10 @@ from __future__ import annotations
 import pytest
 import requests
 
-from infrastructure.knowledge.gemini_selector import GeminiCandidateSelector
+from infrastructure.knowledge.gemini_selector import (
+    DEFAULT_GEMINI_MODEL,
+    GeminiCandidateSelector,
+)
 
 
 class _Store:
@@ -23,6 +26,10 @@ class _Response:
         return self._payload
 
 
+def test_default_model_is_cost_efficient_flash_lite() -> None:
+    assert DEFAULT_GEMINI_MODEL == "gemini-3.5-flash-lite"
+
+
 def test_selector_uses_server_secret_and_bounded_google_request() -> None:
     calls: list[dict] = []
     secret = "google-ai-studio-secret-value"
@@ -40,18 +47,21 @@ def test_selector_uses_server_secret_and_bounded_google_request() -> None:
 
     selector = GeminiCandidateSelector(
         store=_Store(secret),
-        model="gemini-3.7-flash",
+        model="gemini-3.5-flash-lite",
         post=post,
     )
 
     assert selector("只能選候選 ID") == "QA-013"
     assert len(calls) == 1
     call = calls[0]
-    assert call["url"].endswith("/models/gemini-3.7-flash:generateContent")
+    assert call["url"].endswith("/models/gemini-3.5-flash-lite:generateContent")
     assert call["headers"]["x-goog-api-key"] == secret
     assert call["json"]["contents"][0]["parts"][0]["text"] == "只能選候選 ID"
     assert call["json"]["generationConfig"]["temperature"] == 0
     assert call["json"]["generationConfig"]["maxOutputTokens"] == 64
+    assert call["json"]["generationConfig"]["thinkingConfig"] == {
+        "thinkingLevel": "minimal"
+    }
     assert secret not in str(call["json"])
 
 
