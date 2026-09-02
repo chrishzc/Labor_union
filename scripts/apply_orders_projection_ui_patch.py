@@ -160,9 +160,144 @@ def patch_order_tracker_page() -> None:
     )
 
 
+def patch_order_tracker_tests() -> None:
+    path = Path("ui_react/src/tests/order_tracker_real_data.test.tsx")
+
+    replace_once(
+        path,
+        "    stagePage.items[0].sop_steps[1].status = 'in_progress';\n"
+        "    stagePage.items[0].sop_steps[2].status = 'blocked';",
+        "    stagePage.items[0].sop_steps[1].status = 'in_progress';\n"
+        "    stagePage.items[0].current_sop_step = 2;\n"
+        "    stagePage.items[0].sop_steps[2].status = 'blocked';",
+    )
+    replace_once(
+        path,
+        "  it('isolates incomplete historical imports as data correction instead of a business stage', async () => {",
+        "  it('uses the server current SOP step when the current work is blocked', async () => {\n"
+        "    const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);\n"
+        "    const timeline = stagePage.items[0];\n"
+        "    timeline.current_sop_step = 3;\n"
+        "    timeline.sop_steps = timeline.sop_steps.map((step) => ({\n"
+        "      ...step,\n"
+        "      status: step.ordinal < 3 ? 'completed' as const : step.ordinal === 3 ? 'blocked' as const : 'not_started' as const,\n"
+        "      blockers: step.ordinal === 3 ? [{ code: 'current_blocker', message: '目前作業受阻。' }] : [],\n"
+        "    }));\n"
+        "    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(stagePage);\n\n"
+        "    render(<OrderTrackerPage />);\n"
+        "    await screen.findByText('ORD-2026-0801');\n"
+        "    fireEvent.click(screen.getByRole('button', { name: /查看訂單 ORD-2026-0801/ }));\n\n"
+        "    const current = document.querySelector('[data-surface-id=\"order-tracker.sop.step.3\"]');\n"
+        "    expect(current).toHaveAttribute('data-status', 'blocked');\n"
+        "    expect(current).toHaveAttribute('aria-current', 'step');\n"
+        "    expect(screen.getByText('目前作業受阻。')).toBeInTheDocument();\n"
+        "  });\n\n"
+        "  it('renders cancelled orders outside both the seven stages and data-correction region', async () => {\n"
+        "    const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);\n"
+        "    const cancelled = stagePage.items[0];\n"
+        "    cancelled.current_stage_code = null;\n"
+        "    cancelled.current_sop_step = null;\n"
+        "    cancelled.terminal_state = 'cancelled';\n"
+        "    cancelled.stages = cancelled.stages.map((stage) => ({\n"
+        "      ...stage,\n"
+        "      status: 'unavailable' as const,\n"
+        "      warnings: [{ code: 'order_cancelled', message: '訂單已取消。' }],\n"
+        "      availability_reason: 'order_cancelled',\n"
+        "    }));\n"
+        "    cancelled.sop_steps = cancelled.sop_steps.map((step) => ({\n"
+        "      ...step,\n"
+        "      status: 'unavailable' as const,\n"
+        "      warnings: [{ code: 'order_cancelled', message: '訂單已取消。' }],\n"
+        "      availability_reason: 'order_cancelled',\n"
+        "    }));\n"
+        "    stagePage.stage_counts.intake_terms = 0;\n"
+        "    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(stagePage);\n\n"
+        "    render(<OrderTrackerPage />);\n\n"
+        "    await screen.findByText('已取消訂單');\n"
+        "    const cancelledRegion = document.querySelector('[data-surface-id=\"order-tracker.cancelled-orders\"]');\n"
+        "    const correctionRegion = document.querySelector('[data-surface-id=\"order-tracker.unclassified-orders\"]');\n"
+        "    expect(cancelledRegion).toHaveTextContent('ORD-2026-0801');\n"
+        "    expect(cancelledRegion).toHaveTextContent('訂單已取消');\n"
+        "    expect(correctionRegion).not.toHaveTextContent('ORD-2026-0801');\n"
+        "    expect(screen.getByText(/已取消是終止狀態/)).toBeInTheDocument();\n"
+        "  });\n\n"
+        "  it('isolates incomplete historical imports as data correction instead of a business stage', async () => {",
+    )
+    replace_once(
+        path,
+        "    incomplete.current_stage_code = null;\n"
+        "    incomplete.stages = incomplete.stages.map((stage, index) => ({",
+        "    incomplete.current_stage_code = null;\n"
+        "    incomplete.current_sop_step = null;\n"
+        "    incomplete.stages = incomplete.stages.map((stage, index) => ({",
+    )
+    replace_once(
+        path,
+        "    secondStagePage.items[0].current_stage_code = 'matching_willingness';\n"
+        "    secondStagePage.stage_counts.intake_terms = 0;",
+        "    secondStagePage.items[0].current_stage_code = 'matching_willingness';\n"
+        "    secondStagePage.items[0].current_sop_step = 2;\n"
+        "    secondStagePage.stage_counts.intake_terms = 0;",
+    )
+
+
+def patch_orders_page_tests() -> None:
+    path = Path("ui_react/src/tests/orders_page_real_data.test.tsx")
+
+    replace_once(
+        path,
+        "  it('searches all lifecycle states and clears the old stage filter', async () => {",
+        "  it('filters cancelled orders from the terminal projection instead of a business stage', async () => {\n"
+        "    const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);\n"
+        "    stagePage.items[0].current_stage_code = null;\n"
+        "    stagePage.items[0].current_sop_step = null;\n"
+        "    stagePage.items[0].terminal_state = 'cancelled';\n"
+        "    stagePage.stage_counts.intake_terms = 0;\n"
+        "    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(stagePage);\n\n"
+        "    render(<OrdersPage />);\n"
+        "    await screen.findByText('ORD-2026-0801');\n\n"
+        "    const cancelledFilter = screen.getByRole('button', { name: /已取消 \\(1\\)/ });\n"
+        "    fireEvent.click(cancelledFilter);\n"
+        "    expect(screen.getByText('ORD-2026-0801')).toBeInTheDocument();\n"
+        "    expect(screen.queryByText('ORD-2026-0802')).not.toBeInTheDocument();\n"
+        "    expect(screen.getByRole('button', { name: /2\\. 媒合與徵詢意願 \\(0\\)/ })).toBeEnabled();\n"
+        "  });\n\n"
+        "  it('searches all lifecycle states and clears the old stage filter', async () => {",
+    )
+    replace_once(
+        path,
+        "  it('deduplicates the StrictMode initial summary load to one transport request', async () => {",
+        "  it('reloads cancellation facts when the shared workbench switches to another order', async () => {\n"
+        "    const firstQuery = { ...cancellationQuery, lifecycle_status: '訂單取消' as const };\n"
+        "    const secondQuery = { ...cancellationQuery, case_no: 'ORD-2026-0802', lifecycle_status: '洽談中' as const };\n"
+        "    vi.mocked(orderCancellationClient.query).mockImplementation(async (caseNo) => (\n"
+        "      caseNo === 'ORD-2026-0801' ? firstQuery : secondQuery\n"
+        "    ));\n\n"
+        "    render(<OrdersPage />);\n"
+        "    await screen.findByText('ORD-2026-0801');\n"
+        "    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);\n"
+        "    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));\n"
+        "    expect(await screen.findByText('🚫 不可再次取消')).toBeInTheDocument();\n"
+        "    fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));\n\n"
+        "    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[1]);\n"
+        "    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));\n\n"
+        "    await waitFor(() => expect(orderCancellationClient.query).toHaveBeenLastCalledWith(\n"
+        "      'ORD-2026-0802',\n"
+        "      expect.any(AbortSignal),\n"
+        "    ));\n"
+        "    expect(screen.getByText('🟢 允許取消試算')).toBeInTheDocument();\n"
+        "    expect(screen.queryByText('🚫 不可再次取消')).not.toBeInTheDocument();\n"
+        "    expect(screen.getByText('洽談中')).toBeInTheDocument();\n"
+        "  });\n\n"
+        "  it('deduplicates the StrictMode initial summary load to one transport request', async () => {",
+    )
+
+
 def main() -> None:
     patch_orders_page()
     patch_order_tracker_page()
+    patch_order_tracker_tests()
+    patch_orders_page_tests()
 
 
 if __name__ == "__main__":
