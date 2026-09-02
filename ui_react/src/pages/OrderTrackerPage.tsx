@@ -78,6 +78,7 @@ function businessOwnerLabel(owner: string): string {
 }
 
 function currentStageLabel(timeline: OrderOperationalTimelinePage['items'][number]): string {
+  if (timeline.terminal_state === 'cancelled') return '訂單已取消';
   if (!timeline.current_stage_code) return '待判定';
   return stageByCode(timeline, timeline.current_stage_code)?.label ?? '待判定';
 }
@@ -87,6 +88,9 @@ function currentStageSummary(
   fallback: string,
 ): string {
   if (!timeline) return fallback;
+  if (timeline.terminal_state === 'cancelled') {
+    return '訂單已取消；不再屬於七階段進行中工作。';
+  }
   if (!timeline.current_stage_code) {
     const missingFacts = [...new Set(
       timeline.stages
@@ -232,9 +236,7 @@ export const OrderTrackerPage: React.FC = () => {
   const selectedTimeline = selectedOrder && stageProjectionState.kind === 'ready'
     ? stageProjectionState.byCaseNo.get(selectedOrder.id) ?? null
     : null;
-  const selectedCurrentStepOrdinal = selectedTimeline?.sop_steps.find(
-    (step) => step.status === 'in_progress',
-  )?.ordinal;
+  const selectedCurrentStepOrdinal = selectedTimeline?.current_sop_step ?? undefined;
 
   const scrollToStage = (stageId: string) => {
     document.getElementById(`order-tracker-stage-${stageId}`)?.scrollIntoView({
@@ -256,6 +258,17 @@ export const OrderTrackerPage: React.FC = () => {
     [trimmedQuery]
   );
   const visibleTrackerOrders = resolvedData?.unclassifiedOrders.filter(matchesSearch) ?? [];
+  const visibleCancelledOrders = stageProjectionState.kind === 'ready'
+    ? visibleTrackerOrders.filter((order) => (
+      stageProjectionState.byCaseNo.get(order.id)?.terminal_state === 'cancelled'
+    ))
+    : [];
+  const visibleUnclassifiedOrders = stageProjectionState.kind === 'ready'
+    ? visibleTrackerOrders.filter((order) => {
+      const timeline = stageProjectionState.byCaseNo.get(order.id);
+      return timeline?.terminal_state === null && !timeline.current_stage_code;
+    })
+    : visibleTrackerOrders;
   const visibleStageCount = (stageId: string): number => visibleTrackerOrders.filter(
     (order) => stageProjectionState.kind === 'ready'
       && stageProjectionState.byCaseNo.get(order.id)?.current_stage_code === stageId,
@@ -311,9 +324,11 @@ export const OrderTrackerPage: React.FC = () => {
         ? { title: '階段資料載入失敗', summary: stageProjectionState.message }
         : !timeline
           ? { title: '階段資料缺失', summary: '此案件未包含於目前的七階段投影，請重新載入摘要。' }
-          : timeline.current_stage_code
-            ? { title: '目前卡點／待辦', summary: currentStageSummary(timeline, order.waitingText) }
-            : { title: '資料完整性異常', summary: currentStageSummary(timeline, order.waitingText) };
+          : timeline.terminal_state === 'cancelled'
+            ? { title: '訂單已取消', summary: currentStageSummary(timeline, order.waitingText) }
+            : timeline.current_stage_code
+              ? { title: '目前卡點／待辦', summary: currentStageSummary(timeline, order.waitingText) }
+              : { title: '資料完整性異常', summary: currentStageSummary(timeline, order.waitingText) };
     const isAmountPending = order.contractAmountFormatted.includes('尚未登錄');
     return (
       <button
@@ -489,6 +504,21 @@ export const OrderTrackerPage: React.FC = () => {
             })}
           </section>
 
+          {stageProjectionState.kind === 'ready' && visibleCancelledOrders.length > 0 && (
+            <section className="tracker-unclassified" data-surface-id="order-tracker.cancelled-orders">
+              <div className="tracker-section-heading">
+                <div>
+                  <h2>已取消訂單</h2>
+                  <p>已取消是終止狀態，不屬於七階段進行中工作。</p>
+                </div>
+                <span className="tracker-loaded-count">{visibleCancelledOrders.length} 筆</span>
+              </div>
+              <div className="pipeline-cards-grid">
+                {visibleCancelledOrders.map(renderTrackerCard)}
+              </div>
+            </section>
+          )}
+
           <section className="tracker-unclassified" data-surface-id="order-tracker.unclassified-orders">
             <div className="tracker-section-heading">
               <div>
@@ -508,13 +538,7 @@ export const OrderTrackerPage: React.FC = () => {
               </div>
             ) : (
               <div className="pipeline-cards-grid">
-                {visibleTrackerOrders
-                  .filter(
-                    (order) =>
-                      (stageProjectionState.kind !== 'ready' ||
-                        !stageProjectionState.byCaseNo.get(order.id)?.current_stage_code)
-                  )
-                  .map(renderTrackerCard)}
+                {visibleUnclassifiedOrders.map(renderTrackerCard)}
               </div>
             )}
           </section>

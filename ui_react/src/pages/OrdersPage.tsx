@@ -1575,6 +1575,7 @@ export const OrdersPage: React.FC = () => {
     setHistoricalRestartStatus('idle');
     setHistoricalRestartMessage(null);
     setNormalFlowRestartedCaseNo(null);
+    setCancellationQuery(null);
     setCancellationDays([]);
     setCancellationPreview(null);
     setCancellationReceipt(null);
@@ -1616,7 +1617,7 @@ export const OrdersPage: React.FC = () => {
     } else if (tab === 'calendar' && actualStartQuery === null) {
       void loadCalendarTabQueries(activeOrder);
     } else if (tab === 'cancellation') {
-      if (cancellationQuery === null) {
+      if (cancellationQuery === null || cancellationQuery.case_no !== activeOrder.id) {
         void loadCancellationTabQueries(activeOrder);
       }
     } else if (tab === 'reopen') {
@@ -1742,7 +1743,7 @@ export const OrdersPage: React.FC = () => {
   };
 
   const previewCancellation = async () => {
-    if (!cancelOrder || !cancellationQuery) return;
+    if (!cancelOrder || !cancellationQuery || cancellationQuery.case_no !== cancelOrder.id) return;
     const typedDays = validCancellationDays(cancellationDays);
     if (typedDays === null) {
       setCancellationError('請輸入有效且不重複的實際服務日期、月嫂。');
@@ -1891,10 +1892,15 @@ export const OrdersPage: React.FC = () => {
   const cancellationServiceFactsAvailable = cancellationQuery?.service_started === true || cancellationIsHistoricalRemediation;
   const cancellationLifecycleBlocked = cancellationIsAlreadyCancelled && !cancellationIsHistoricalRemediation;
 
+  const orderClassification = (timeline: OrderOperationalTimeline | undefined): WorkflowStage | null => (
+    timeline?.terminal_state === 'cancelled'
+      ? 'cancelled'
+      : timeline?.current_stage_code ?? null
+  );
   const allItems = pageData?.items || [];
   const filteredOrders = selectedStage === '全部'
     ? allItems
-    : allItems.filter((order) => stageIndex.get(order.id)?.current_stage_code === selectedStage);
+    : allItems.filter((order) => orderClassification(stageIndex.get(order.id)) === selectedStage);
   const depositAmountText = cardProjection?.rows.find((row) => row.key === 'deposit_amount_ntd')?.valueText
     ?? (cardProjectionError ? '資料載入失敗（定金金額）' : '正在確認定金金額…');
   const depositSettlementText = cardProjection?.rows.find((row) => row.key === 'deposit_settlement_state')?.valueText
@@ -1959,7 +1965,7 @@ export const OrdersPage: React.FC = () => {
           const count = filter.stage === '全部'
             ? pageData?.loadedCount
             : stagePage
-              ? [...stageIndex.values()].filter((timeline) => timeline.current_stage_code === filter.stage).length
+              ? [...stageIndex.values()].filter((timeline) => orderClassification(timeline) === filter.stage).length
               : null;
           return (
             <button
