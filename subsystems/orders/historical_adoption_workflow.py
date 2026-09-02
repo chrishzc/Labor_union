@@ -70,7 +70,10 @@ class HistoricalOrderAdoptionPreview:
 
     @property
     def result(self) -> HistoricalOrderResult:
-        if self.outcome is HistoricalOrderOutcome.UNMATCHED_CASE:
+        if self.outcome in {
+            HistoricalOrderOutcome.UNMATCHED_CASE,
+            HistoricalOrderOutcome.REVIEW_REQUIRED,
+        }:
             return HistoricalOrderResult.NOT_ADOPTED
         return {
             OrderLifecycleStatus.DISCUSSION.value: HistoricalOrderResult.MATCHING_PENDING_DEPOSIT,
@@ -201,7 +204,10 @@ class HistoricalOrderAdoptionWorkflow:
     def _append_assignment_candidates(
         self, preview: HistoricalOrderAdoptionPreview
     ) -> tuple[int, ...]:
-        if preview.case_no is None:
+        if (
+            preview.outcome is not HistoricalOrderOutcome.ADOPTED
+            or preview.case_no is None
+        ):
             return ()
         return self._scheduling_historical_assignment.append_completed_assignments(
             preview.case_no,
@@ -263,7 +269,27 @@ class HistoricalOrderAdoptionWorkflow:
         if candidate.result is HistoricalOrderResult.NOT_ADOPTED:
             return _not_adopted_preview(row, current)
         pairings = self._pairings(row, current, candidate, for_update)
-        issues = tuple(sorted(set(candidate.issue_codes + tuple(code for item in pairings for code in item.issue_codes))))
+        issues = tuple(
+            sorted(
+                set(
+                    candidate.issue_codes
+                    + tuple(
+                        code
+                        for item in pairings
+                        for code in item.issue_codes
+                    )
+                )
+            )
+        )
+        calendar_issues = _historical_calendar_integrity_issues(candidate, pairings)
+        if calendar_issues:
+            return _review_required_preview(
+                row,
+                current,
+                candidate,
+                pairings,
+                tuple(sorted(set(issues + calendar_issues))),
+            )
         if (
             candidate.result is HistoricalOrderResult.MATCHING_PENDING_DEPOSIT
             and not _matching_pending_deposit_eligible(row, pairings)
@@ -357,13 +383,11 @@ def _service_assignment_allowed(row, current, candidate) -> bool:
 
 
 def _matching_effective_assignment(existing, staff_id, source):
-    """Find formal Scheduling evidence that corroborates a source interval."""
+    """Find a completed Scheduling assignment that corroborates a source interval."""
     if source.start_date is None or source.end_date is None:
         return None
     for assignment in existing:
-        if assignment.get("generation_id") is None:
-            continue
-        if assignment.get("status") in {"cancelled", "replaced"}:
+        if assignment.get("status") != "completed":
             continue
         if assignment.get("staff_id") != staff_id:
             continue
@@ -376,6 +400,39 @@ def _matching_effective_assignment(existing, staff_id, source):
         ):
             return assignment
     return None
+
+
+def _historical_calendar_integrity_issues(candidate, pairings):
+    if candidate.result not in {
+        HistoricalOrderResult.HISTORICAL_IN_SERVICE,
+        HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED,
+    }:
+        return ()
+    has_staff = any(item.staff_id is not None for item in pairings)
+    has_valid_dates = any(
+        item.start_date is not None
+        and item.end_date is not None
+        and isinstance(item.start_date, date)
+        and isinstance(item.end_date, date)
+        and item.start_date <= item.end_date
+        for item in pairings
+    )
+    has_completed_assignment = any(
+        item.resolution
+        in {
+            HistoricalPairingResolution.ASSIGNMENT_CANDIDATE,
+            HistoricalPairingResolution.ASSIGNMENT_REUSED,
+        }
+        for item in pairings
+    )
+    issues = []
+    if not has_staff:
+        issues.append("historical_calendar_staff_missing")
+    if not has_valid_dates:
+        issues.append("historical_calendar_valid_dates_missing")
+    if not has_completed_assignment:
+        issues.append("historical_calendar_completed_assignment_missing")
+    return tuple(issues)
 
 
 def _matching_pending_deposit_eligible(row, pairings) -> bool:
@@ -409,6 +466,32 @@ def _preview(row, current, candidate, pairings, issues):
         candidate.date_patch,
         pairings,
         issues,
+        fingerprint_payload(payload),
+    )
+
+
+def _review_required_preview(row, current, candidate, pairings, issues):
+    payload = {
+        "source_identity": row.source_identity,
+        "source_fingerprint": row.source_fingerprint,
+        "case_no": current.case_no,
+        "candidate_fingerprint": candidate.fingerprint.value,
+        "outcome": HistoricalOrderOutcome.REVIEW_REQUIRED.value,
+        "pairings": tuple(_pairing_payload(item) for item in pairings),
+        "issue_codes": tuple(issues),
+    }
+    return HistoricalOrderAdoptionPreview(
+        row.source_identity,
+        row.source_fingerprint,
+        HistoricalOrderOutcome.REVIEW_REQUIRED,
+        current.case_no,
+        current.lifecycle_version,
+        current.lifecycle_version,
+        current.status.value,
+        current.status.value,
+        (),
+        tuple(pairings),
+        tuple(issues),
         fingerprint_payload(payload),
     )
 
