@@ -7,6 +7,11 @@ from fastapi.testclient import TestClient
 
 from api.dependencies.admin_auth import require_system_admin
 from api.routes import llm_configuration
+from domains.knowledge_retrieval.knowledge import (
+    KnowledgeAnswer,
+    KnowledgeAnswerUnsupported,
+    KnowledgeCitation,
+)
 from infrastructure.runtime.llm_api_key_store import LlmApiKeyStore
 
 
@@ -22,6 +27,42 @@ class _Selector:
         if self._error is not None:
             raise self._error
         return self._result
+
+
+class _KnowledgeRepository:
+    def __init__(self, version: int | None) -> None:
+        self._version = version
+
+    def ready_index_version(self) -> int | None:
+        return self._version
+
+
+class _KnowledgeUnitOfWork:
+    def __init__(self, version: int | None) -> None:
+        self.knowledge = _KnowledgeRepository(version)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        del exc_type, exc, traceback
+
+
+class _Gateway:
+    answer_value: KnowledgeAnswer | Exception | None = None
+    calls: list[tuple[str, int]] = []
+
+    def __init__(self, persistence_path: str, *, llm) -> None:
+        self.persistence_path = persistence_path
+        self.llm = llm
+
+    def answer(self, question: str, version: int) -> KnowledgeAnswer:
+        type(self).calls.append((question, version))
+        value = type(self).answer_value
+        if isinstance(value, Exception):
+            raise value
+        assert isinstance(value, KnowledgeAnswer)
+        return value
 
 
 def _client(tmp_path, selector: _Selector | None = None):
@@ -121,3 +162,98 @@ def test_connection_test_maps_provider_failure_without_secret(tmp_path) -> None:
         "model": "gemini-3.5-flash-lite",
         "code": "authentication_failed",
     }
+
+
+def test_semantic_test_reads_ready_index_and_returns_approved_answer(tmp_path, monkeypatch) -> None:
+    selector = _Selector()
+    client, store, _ = _client(tmp_path, selector)
+    secret = "google-ai-studio-secret-value"
+    store.replace(secret)
+    _Gateway.calls = []
+    _Gateway.answer_value = KnowledgeAnswer(
+        "補助核准答案。",
+        (
+            KnowledgeCitation(
+                "document/line/AI客服QA題庫.jsonl#QA-013",
+                1,
+                "補助核准答案。",
+            ),
+        ),
+        7,
+    )
+    monkeypatch.setattr(
+        llm_configuration,
+        "open_knowledge_retrieval_unit_of_work",
+        lambda: _KnowledgeUnitOfWork(7),
+    )
+    monkeypatch.setattr(llm_configuration, "ChromaKnowledgeGateway", _Gateway)
+
+    response = client.post(
+        "/api/v1/system/llm/semantic-test",
+        json={"question": "補助可以折抵幾小時？"},
+    )
+
+    assert response.status_code == 200
+    assert secret not in response.text
+    assert response.json()["data"] == {
+        "outcome": "answered",
+        "provider": "google_ai_studio",
+        "model": "gemini-3.5-flash-lite",
+        "index_version": 7,
+        "qa_id": "QA-013",
+        "source_identity": "document/line/AI客服QA題庫.jsonl#QA-013",
+        "answer_text": "補助核准答案。",
+        "code": None,
+    }
+    assert _Gateway.calls == [("補助可以折抵幾小時？", 7)]
+
+
+def test_semantic_test_fails_closed_when_answer_is_unsupported(tmp_path, monkeypatch) -> None:
+    client, _, _ = _client(tmp_path)
+    _Gateway.calls = []
+    _Gateway.answer_value = KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
+    monkeypatch.setattr(
+        llm_configuration,
+        "open_knowledge_retrieval_unit_of_work",
+        lambda: _KnowledgeUnitOfWork(9),
+    )
+    monkeypatch.setattr(llm_configuration, "ChromaKnowledgeGateway", _Gateway)
+
+    response = client.post(
+        "/api/v1/system/llm/semantic-test",
+        json={"question": "這句沒有核准答案"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "outcome": "unsupported",
+        "provider": "google_ai_studio",
+        "model": "gemini-3.5-flash-lite",
+        "index_version": 9,
+        "qa_id": None,
+        "source_identity": None,
+        "answer_text": None,
+        "code": "knowledge_answer_unsupported",
+    }
+
+
+def test_semantic_test_reports_missing_ready_index_without_calling_gateway(tmp_path, monkeypatch) -> None:
+    client, _, _ = _client(tmp_path)
+    _Gateway.calls = []
+    _Gateway.answer_value = AssertionError("gateway must not run without a READY index")
+    monkeypatch.setattr(
+        llm_configuration,
+        "open_knowledge_retrieval_unit_of_work",
+        lambda: _KnowledgeUnitOfWork(None),
+    )
+    monkeypatch.setattr(llm_configuration, "ChromaKnowledgeGateway", _Gateway)
+
+    response = client.post(
+        "/api/v1/system/llm/semantic-test",
+        json={"question": "補助可以折抵幾小時？"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["outcome"] == "index_unavailable"
+    assert response.json()["data"]["code"] == "knowledge_index_unavailable"
+    assert _Gateway.calls == []
