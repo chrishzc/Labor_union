@@ -10,7 +10,7 @@ interface QaCatalogItem {
   question: string;
   aliases: string[];
   answer: string;
-  status: string;
+  enabled: boolean;
   source_ref: string;
   notes: string | null;
 }
@@ -18,22 +18,14 @@ interface QaCatalogItem {
 interface QaCatalog {
   source_identity: string;
   total_count: number;
-  ready_count: number;
+  enabled_count: number;
   items: QaCatalogItem[];
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  ready: '可自動回答',
-  partial: '部分答案',
-  missing: '缺答案',
-  review_required: '待人工複核',
-  manual_only: '只允許人工',
-};
 
 export const CommonQaCatalogPanel: React.FC = () => {
   const [catalog, setCatalog] = useState<QaCatalog | null>(null);
   const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [enabledFilter, setEnabledFilter] = useState('ALL');
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,7 +47,9 @@ export const CommonQaCatalogPanel: React.FC = () => {
     if (!catalog) return [];
     const normalized = query.trim().toLocaleLowerCase('zh-TW');
     return catalog.items.filter((item) => {
-      const statusMatches = statusFilter === 'ALL' || item.status === statusFilter;
+      const enabledMatches = enabledFilter === 'ALL'
+        || (enabledFilter === 'ENABLED' && item.enabled)
+        || (enabledFilter === 'DISABLED' && !item.enabled);
       const textMatches = !normalized || [
         item.id,
         item.category,
@@ -64,9 +58,9 @@ export const CommonQaCatalogPanel: React.FC = () => {
         item.answer,
         ...item.aliases,
       ].some((value) => value.toLocaleLowerCase('zh-TW').includes(normalized));
-      return statusMatches && textMatches;
+      return enabledMatches && textMatches;
     });
-  }, [catalog, query, statusFilter]);
+  }, [catalog, query, enabledFilter]);
 
   return (
     <div className="ai-editor-card" style={{ marginBottom: '16px' }}>
@@ -74,12 +68,12 @@ export const CommonQaCatalogPanel: React.FC = () => {
         <h4>📚 常見 QA 題庫</h4>
         {catalog && (
           <span className="category-badge">
-            共 {catalog.total_count} 筆 · {catalog.ready_count} 筆可自動回答
+            共 {catalog.total_count} 筆 · {catalog.enabled_count} 筆已啟用
           </span>
         )}
       </div>
       <div className="line-warning" role="status">
-        這裡是核准回答題庫，不是事件規則。LLM 可用它做語意比對；只有 status=ready 的項目可進自動回答鏈。
+        這裡是固定回答題庫，不是事件規則。LLM 可用它做語意比對；只有 enabled=true 的項目可進自動回答鏈。
       </div>
       {notice && <div className="line-warning" role="status">{notice}</div>}
       {catalog && (
@@ -96,18 +90,15 @@ export const CommonQaCatalogPanel: React.FC = () => {
               />
             </div>
             <div className="form-field-half">
-              <label htmlFor="qa-catalog-status">回答狀態</label>
+              <label htmlFor="qa-catalog-status">啟用狀態</label>
               <select
                 id="qa-catalog-status"
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
+                value={enabledFilter}
+                onChange={(event) => setEnabledFilter(event.target.value)}
               >
-                <option value="ALL">全部狀態</option>
-                <option value="ready">可自動回答</option>
-                <option value="review_required">待人工複核</option>
-                <option value="partial">部分答案</option>
-                <option value="missing">缺答案</option>
-                <option value="manual_only">只允許人工</option>
+                <option value="ALL">全部</option>
+                <option value="ENABLED">啟用</option>
+                <option value="DISABLED">未啟用</option>
               </select>
             </div>
           </div>
@@ -120,13 +111,13 @@ export const CommonQaCatalogPanel: React.FC = () => {
                 <summary style={{ cursor: 'pointer' }}>
                   <strong>{item.id} · {item.question}</strong>
                   <span className="category-badge" style={{ marginLeft: '8px' }}>
-                    {item.category} / {item.tag} · {STATUS_LABELS[item.status] ?? item.status}
+                    {item.category} / {item.tag} · {item.enabled ? '啟用' : '未啟用'}
                   </span>
                 </summary>
                 <div style={{ marginTop: '10px' }}>
                   <div><strong>常見問法：</strong>{item.aliases.length > 0 ? item.aliases.join('、') : '—'}</div>
                   <div style={{ marginTop: '6px' }}>
-                    <strong>核准答案：</strong>{item.answer || '尚無可發布答案'}
+                    <strong>固定答案：</strong>{item.answer || '尚無答案'}
                   </div>
                   {item.notes && <div style={{ marginTop: '6px' }}><strong>備註：</strong>{item.notes}</div>}
                   <small>原始來源：{item.source_ref}</small>
