@@ -58,7 +58,14 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     setReason('');
     setError(null);
     setStatus('idle');
-  }, [caseNo, query]);
+  }, [
+    caseNo,
+    query.order_version,
+    query.scheduling_version,
+    query.scheduling_generation,
+    query.client_finance_version,
+    query.payroll_version,
+  ]);
 
   const updateDraft = <K extends keyof OrderTermsDraft>(key: K, value: OrderTermsDraft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
