@@ -10,7 +10,7 @@ from decimal import Decimal
 
 import pytest
 
-from domains.orders.lifecycle import OrderLifecycleScope
+from domains.orders.lifecycle import OrderLifecycleScope, OrderLifecycleStatus
 from infrastructure.mysql.orders_stage_projection_repository import MySqlOrdersStageProjectionRepository, _PAGE_SQL
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
 from subsystems.orders.stage_projection_query import OrderStageProjectionContractError, OrderStageProjectionQueryService, StageProjectionQuery
@@ -26,6 +26,10 @@ def test_service_completion_projection_reads_the_canonical_orders_receipt() -> N
     assert "service_lock.client_settlement_fingerprint AS service_completion_identity" not in _PAGE_SQL
 
 
+def test_stage_projection_reads_the_canonical_orders_lifecycle_status() -> None:
+    assert "o.status AS order_lifecycle_status" in _PAGE_SQL
+
+
 def test_staff_settlement_reads_staff_payables_projection_not_obligation_status() -> None:
     assert "LEFT JOIN staff_payable_projections projection" in _PAGE_SQL
     assert "COALESCE(projection.status, 'payable') <> 'completed'" in _PAGE_SQL
@@ -35,6 +39,7 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
     return {
         "case_no": case_no,
         "order_version": 7,
+        "order_lifecycle_status": OrderLifecycleStatus.DISCUSSION.value,
         "order_updated_at": NOW,
         "import_receipt_id": 1,
         "import_created_at": NOW,
@@ -121,8 +126,93 @@ def test_projection_keeps_seven_stages_eleven_steps_and_three_settlement_owners(
     assert [part.code for part in item.stages[-1].settlement] == ["service_completion", "client_settlement", "staff_payout"]
     assert item.stages[-1].status == "completed"
     assert item.current_stage_code == "settlement_payout"
+    assert item.current_sop_step is None
+    assert item.terminal_state is None
     assert [step.status for step in item.sop_steps] == ["completed"] * 11
     assert page.stage_counts["settlement_payout"] == 1
+
+
+def test_cancelled_order_is_terminal_and_not_counted_as_a_business_stage() -> None:
+    row = _row("CANCELLED-001")
+    row.update({
+        "order_lifecycle_status": OrderLifecycleStatus.CANCELLED.value,
+        "matching_plan_status": "proposed",
+        "matching_customer_decision": "pending",
+    })
+
+    page = OrderStageProjectionQueryService(
+        _Repository((row,)), BUSINESS_CLOCK
+    ).query(StageProjectionQuery(50))
+    item = page.items[0]
+
+    assert item.terminal_state == "cancelled"
+    assert item.current_stage_code is None
+    assert item.current_sop_step is None
+    assert {stage.status for stage in item.stages} == {"unavailable"}
+    assert {step.status for step in item.sop_steps} == {"unavailable"}
+    assert item.stages[1].warnings[0].code == "order_cancelled"
+    assert len(item.stages[-1].settlement) == 3
+    assert sum(page.stage_counts.values()) == 0
+
+
+def test_in_service_lifecycle_cannot_regress_to_an_incomplete_intake_stage() -> None:
+    row = _row("IN-SERVICE-001")
+    row.update({
+        "order_lifecycle_status": OrderLifecycleStatus.IN_SERVICE.value,
+        "imported_terms_complete": 0,
+        "terms_event_id": None,
+        "terms_version": None,
+        "terms_created_at": None,
+        "assignment_first_service_date": date(2026, 8, 20),
+        "assignment_last_service_date": date(2026, 8, 22),
+        "service_completion_identity": None,
+        "service_completed_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(
+        _Repository((row,)), BUSINESS_CLOCK
+    ).query(StageProjectionQuery(50)).items[0]
+
+    assert item.stages[0].status == "in_progress"
+    assert item.stages[5].status == "in_progress"
+    assert item.current_stage_code == "active_service"
+    assert item.current_sop_step == 10
+
+
+def test_historical_service_completion_routes_to_settlement_despite_predecessor_gaps() -> None:
+    row = _row("HISTORICAL-COMPLETED-001")
+    row.update({
+        "order_lifecycle_status": OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value,
+        "imported_terms_complete": 0,
+        "terms_event_id": None,
+        "terms_version": None,
+        "terms_created_at": None,
+        "confirmed_version_id": None,
+        "confirmed_version": None,
+        "confirmed_at": None,
+        "assignment_count": 0,
+        "assignment_active_count": 0,
+        "assignment_completed_count": 0,
+        "assignment_updated_at": None,
+        "assignment_first_service_date": None,
+        "assignment_last_service_date": None,
+        "service_completion_identity": None,
+        "service_completed_at": None,
+        "client_obligation_count": 0,
+        "client_updated_at": None,
+        "staff_obligation_count": 0,
+        "staff_updated_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(
+        _Repository((row,)), BUSINESS_CLOCK
+    ).query(StageProjectionQuery(50)).items[0]
+
+    assert item.stages[0].status == "in_progress"
+    assert item.stages[4].status == "unavailable"
+    assert item.current_stage_code == "settlement_payout"
+    assert item.current_sop_step == 11
+    assert item.terminal_state is None
 
 
 def test_date_only_service_period_remains_available_until_last_service_day_ends() -> None:
@@ -315,6 +405,7 @@ def test_rootless_historical_order_is_isolated_without_guessing_a_business_stage
 
     assert {stage.status for stage in item.stages} == {"unavailable"}
     assert item.current_stage_code is None
+    assert item.current_sop_step is None
     assert sum(page.stage_counts.values()) == 0
 
 
@@ -383,6 +474,7 @@ def test_completed_service_advances_to_settlement_even_when_settlement_roots_are
     assert item.stages[5].status == "completed"
     assert item.stages[6].status == "unavailable"
     assert item.current_stage_code == "settlement_payout"
+    assert item.current_sop_step == 11
 
 
 def test_out_of_order_service_dates_do_not_skip_the_missing_matching_stage() -> None:
@@ -590,6 +682,7 @@ def test_mysql_repository_uses_one_bounded_select_and_never_commits() -> None:
     assert rows == ()
     assert connection.last_cursor.params == ("CASE-009", "all", "訂單完成", 51)
     assert connection.last_cursor.sql.count("SELECT") >= 1
+    assert "o.status AS order_lifecycle_status" in connection.last_cursor.sql
     assert "staff_schedule" in connection.last_cursor.sql
     assert "caregiver_candidate_contact_pools" in connection.last_cursor.sql
     assert "caregiver_candidate_contact_events" in connection.last_cursor.sql
