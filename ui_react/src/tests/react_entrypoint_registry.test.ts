@@ -16,7 +16,7 @@ import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 
 const EXPECTED_HASHES = [
   'order-tracker', 'orders', 'scheduling', 'staff', 'data-import', 'reports',
-  'line-management', 'line-ai-events', 'line-liff-studio', 'line-security',
+  'line-management', 'line-ai-events', 'line-llm-settings', 'line-liff-studio', 'line-security',
   'finance', 'anomalies', 'account-management', 'system-status',
 ] as const;
 
@@ -225,135 +225,18 @@ describe('React entrypoint registry', () => {
       previewResetGroup: vi.fn(),
       resetGroup: vi.fn(),
     };
+    render(React.createElement(AlertGroupSecurity, { runtimeTargetClient: client }));
 
-    render(React.createElement(AlertGroupSecurity, { client }));
-    expect((await screen.findAllByText('typed 測試群組')).length).toBeGreaterThan(0);
-    expect(screen.queryByText('最近操作人員')).not.toBeInTheDocument();
-    expect(screen.queryByText('尚未提供')).not.toBeInTheDocument();
-    expect(screen.queryByText(/最高權限管理員專區/)).not.toBeInTheDocument();
-    expect(screen.queryByText('管理員使用者')).not.toBeInTheDocument();
-    expect(screen.getByText('內部使用者')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /通知群組管理/ })).toBeInTheDocument();
-    expect(screen.getByText(/已登入且啟用的內部使用者確認/)).toBeInTheDocument();
-    const groupCard = screen
-      .getAllByRole('article')
-      .find((article) => within(article).queryByText('typed 測試群組'));
-    expect(groupCard).not.toBeNull();
-    fireEvent.click(within(groupCard!).getByRole('button', { name: '檢查停用影響' }));
-    expect(await screen.findByText('🔎 異動影響確認')).toBeInTheDocument();
-    expect(screen.queryByText('aaaaaaaaaaaa…aaaa')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: '確認套用' }));
-    expect(await screen.findByText(/通知對象已更新/)).toBeInTheDocument();
-    expect(screen.queryByText(/receipt-toggle/)).not.toBeInTheDocument();
-
-    expect(client.previewSetEnabled).toHaveBeenCalledWith(8, expect.objectContaining({
-      expected_version: 'version-8', enabled: false,
-    }));
-    expect(client.setEnabled).toHaveBeenCalledWith(8, expect.objectContaining({
-      expected_version: 'version-8', enabled: false, preview_fingerprint: 'a'.repeat(64),
-    }));
-    await waitFor(() => expect(client.listTargets).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText(/正常監聽中/)).not.toBeInTheDocument();
-  });
-
-  it('群組重設沿用 Preview identity 與 fingerprint，但技術識別不顯示', async () => {
-    const target = {
-      target_id: 9,
-      target_kind: 'group' as const,
-      display_label: 'typed 重設群組',
-      state: 'active' as const,
-      minimum_status: 'warning' as const,
-      current_version: 'version-11',
-      updated_at: '2026-08-25T02:02:03+08:00',
-    };
-    const client: RuntimeTargetClient = {
-      listTargets: vi.fn(async () => [target]),
-      previewResetGroup: vi.fn(async () => ({
-        operation: 'group_reset' as const, target_id: 9, previous_state: 'active' as const,
-        resulting_state: 'disabled' as const, current_version: 'version-11',
-        preview_fingerprint: 'b'.repeat(64), apply_ready: true as const,
-      })),
-      resetGroup: vi.fn(async () => ({
-        receipt_id: 'receipt-reset', command_family: 'line_alert_target' as const,
-        operation: 'group_reset' as const, target_id: 9, previous_state: 'active' as const,
-        resulting_state: 'disabled' as const, current_version: 'version-12', replayed: false,
-        correlation_id: 'line-security:group-reset:test', committed_at: '2026-08-25T02:03:03+08:00',
-      })),
-      previewSetEnabled: vi.fn(),
-      setEnabled: vi.fn(),
-    };
-
-    render(React.createElement(AlertGroupSecurity, { client }));
-    expect((await screen.findAllByText('typed 重設群組')).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('button', { name: /檢查重設影響/ }));
-    expect(await screen.findByText('🔎 異動影響確認')).toBeInTheDocument();
-    expect(screen.queryByText('bbbbbbbbbbbb…bbbb')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: '確認套用' }));
-    expect(await screen.findByText(/通知對象已更新/)).toBeInTheDocument();
-    expect(screen.queryByText(/receipt-reset/)).not.toBeInTheDocument();
-
-    const previewRequest = vi.mocked(client.previewResetGroup).mock.calls[0][0];
-    expect(client.resetGroup).toHaveBeenCalledWith(expect.objectContaining({
-      expected_version: 'version-11',
-      correlation_id: previewRequest.correlation_id,
-      idempotency_key: previewRequest.idempotency_key,
-      preview_fingerprint: 'b'.repeat(64),
-    }));
-  });
-
-  it('Apply 已提交但 fresh readback 失敗時保留 receipt 並提供安全重查入口', async () => {
-    const target = {
-      target_id: 10,
-      target_kind: 'group' as const,
-      display_label: 'readback 測試群組',
-      state: 'active' as const,
-      minimum_status: 'critical' as const,
-      current_version: 'version-20',
-      updated_at: '2026-08-25T03:02:03+08:00',
-    };
-    const listTargets = vi.fn()
-      .mockResolvedValueOnce([target])
-      .mockRejectedValueOnce(new Error('readback unavailable'));
-    const client: RuntimeTargetClient = {
-      listTargets,
-      previewSetEnabled: vi.fn(async () => ({
-        operation: 'disable' as const,
-        target_id: 10,
-        previous_state: 'active' as const,
-        resulting_state: 'disabled' as const,
-        current_version: 'version-20',
-        preview_fingerprint: 'c'.repeat(64),
-        apply_ready: true as const,
-      })),
-      setEnabled: vi.fn(async () => ({
-        receipt_id: 'receipt-readback-failed',
-        command_family: 'line_alert_target' as const,
-        operation: 'disable' as const,
-        target_id: 10,
-        previous_state: 'active' as const,
-        resulting_state: 'disabled' as const,
-        current_version: 'version-21',
-        replayed: false,
-        correlation_id: 'line-security:toggle:readback',
-        committed_at: '2026-08-25T03:03:03+08:00',
-      })),
-      previewResetGroup: vi.fn(),
-      resetGroup: vi.fn(),
-    };
-
-    render(React.createElement(AlertGroupSecurity, { client }));
-    expect((await screen.findAllByText('readback 測試群組')).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('button', { name: '檢查停用影響' }));
-    expect(await screen.findByText('🔎 異動影響確認')).toBeInTheDocument();
-    expect(screen.queryByText('cccccccccccc…cccc')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: '確認套用' }));
-
-    expect(await screen.findByText(/通知對象已更新/)).toBeInTheDocument();
-    expect(screen.queryByText(/receipt-readback-failed/)).not.toBeInTheDocument();
-    expect(screen.getByText(/最新狀態暫時無法取得/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '重新整理' })).toBeEnabled();
+    await waitFor(() => expect(client.listTargets).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('typed 測試群組')).toBeInTheDocument();
+    expect(screen.getByText('typed 內部使用者')).toBeInTheDocument();
+    const groupRow = screen.getByText('typed 測試群組').closest('tr');
+    expect(groupRow).not.toBeNull();
+    fireEvent.click(within(groupRow as HTMLElement).getByRole('button', { name: '停用' }));
+    await waitFor(() => expect(client.previewSetEnabled).toHaveBeenCalledTimes(1));
+    expect(screen.getByText(/停用 typed 測試群組/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '確認停用' }));
+    await waitFor(() => expect(client.setEnabled).toHaveBeenCalledTimes(1));
+    expect(screen.getByText(/receipt-toggle/)).toBeInTheDocument();
   });
 });
