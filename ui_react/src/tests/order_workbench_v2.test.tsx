@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OrderWorkbenchV2Page } from '../pages/OrderWorkbenchV2Page';
 
 const source = { owner: 'test-owner', identity: 'test:1', version: 1 };
-const emptyNotice: never[] = [];
 const makeStage = (ordinal: number, code: string, status: string, settlement: unknown[] = []) => ({
   ordinal,
   code,
@@ -13,8 +12,8 @@ const makeStage = (ordinal: number, code: string, status: string, settlement: un
   status,
   source,
   occurred_at: null,
-  blockers: emptyNotice,
-  warnings: emptyNotice,
+  blockers: [],
+  warnings: [],
   available_actions: [],
   availability_reason: null,
   settlement,
@@ -94,12 +93,13 @@ describe('待辦看板 Beta dry-run', () => {
 
     render(<OrderWorkbenchV2Page />);
 
-    await waitFor(() => expect(screen.getByText('CASE-ACTIVE')).toBeInTheDocument());
-    expect(screen.getByText('13')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('heading', { name: '📌 待辦看板 Beta' })).toBeInTheDocument());
     expect(screen.getByText('歷史訂單支線')).toBeInTheDocument();
     expect(screen.getByText('政府補助結算支線')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /13 月嫂結算/ })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /10 排班\/服務 2/ }));
+    await waitFor(() => expect(screen.getByText('CASE-ACTIVE')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /服務進行中 1/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /待開工 1/ })).toBeInTheDocument();
 
