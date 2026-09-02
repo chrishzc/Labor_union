@@ -13,9 +13,10 @@ export type WorkflowStage =
   | 'contract_deposit'
   | 'date_confirmation'
   | 'active_service'
-  | 'settlement_payout';
+  | 'settlement_payout'
+  | 'cancelled';
 
-export type OrderClassification = WorkflowStage | 'cancelled';
+export type OrderClassification = WorkflowStage;
 
 export interface FilterOption {
   label: string;
