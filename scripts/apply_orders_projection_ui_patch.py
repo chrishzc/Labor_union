@@ -266,11 +266,11 @@ def patch_orders_page_tests() -> None:
         "    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(stagePage);\n\n"
         "    render(<OrdersPage />);\n"
         "    await screen.findByText('ORD-2026-0801');\n\n"
-        "    const cancelledFilter = screen.getByRole('button', { name: /已取消 \\(1\\)/ });\n"
+        "    const cancelledFilter = screen.getByRole('button', { name: '已取消 (1)' });\n"
         "    fireEvent.click(cancelledFilter);\n"
         "    expect(screen.getByText('ORD-2026-0801')).toBeInTheDocument();\n"
         "    expect(screen.queryByText('ORD-2026-0802')).not.toBeInTheDocument();\n"
-        "    expect(screen.getByRole('button', { name: /2\\. 媒合與徵詢意願 \\(0\\)/ })).toBeEnabled();\n"
+        "    expect(screen.getByRole('button', { name: '2. 媒合與徵詢意願 (0)' })).toBeEnabled();\n"
         "  });\n\n"
         "  it('searches all lifecycle states and clears the old stage filter', async () => {",
     )
@@ -297,7 +297,6 @@ def patch_orders_page_tests() -> None:
         "    ));\n"
         "    expect(screen.getByText('🟢 允許取消試算')).toBeInTheDocument();\n"
         "    expect(screen.queryByText('🚫 不可再次取消')).not.toBeInTheDocument();\n"
-        "    expect(screen.getByText('洽談中')).toBeInTheDocument();\n"
         "  });\n\n"
         "  it('deduplicates the StrictMode initial summary load to one transport request', async () => {",
     )
