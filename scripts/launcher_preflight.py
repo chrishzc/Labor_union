@@ -1,6 +1,6 @@
 """
 File: launcher_preflight.py
-Description: 唯讀檢查 FastAPI＋React launcher 依賴、React artifact 與 12-entry runtime state 邊界。
+Description: 唯讀檢查 FastAPI＋React launcher 依賴、React artifact 與 runtime state 邊界。
 """
 
 from __future__ import annotations
@@ -44,13 +44,36 @@ PROFILE_REQUIREMENTS = {
     },
     "local-windows": {
         "commands": ("docker-compose", "npm"),
-        "files": ("docker-compose.yml", "scripts/wait_for_db.py", "ui_react/package.json", "ui_react/src/main.tsx", "ui_react/index.html"),
-        "modules": ("uvicorn", "scripts.run_line_worker", "scripts.run_service_monitor", "scripts.run_durable_job_worker", "scripts.smoke_local_development_launcher"),
+        "files": (
+            "docker-compose.yml",
+            "scripts/wait_for_db.py",
+            "ui_react/package.json",
+            "ui_react/src/main.tsx",
+            "ui_react/index.html",
+        ),
+        "modules": (
+            "uvicorn",
+            "scripts.run_line_worker",
+            "scripts.run_service_monitor",
+            "scripts.run_durable_job_worker",
+            "scripts.smoke_local_development_launcher",
+        ),
     },
     "local-unix": {
         "commands": ("docker", "npm"),
-        "files": ("docker-compose.yml", "scripts/wait_for_db.py", "ui_react/package.json", "ui_react/src/main.tsx", "ui_react/index.html"),
-        "modules": ("uvicorn", "scripts.run_line_worker", "scripts.run_service_monitor", "scripts.run_durable_job_worker"),
+        "files": (
+            "docker-compose.yml",
+            "scripts/wait_for_db.py",
+            "ui_react/package.json",
+            "ui_react/src/main.tsx",
+            "ui_react/index.html",
+        ),
+        "modules": (
+            "uvicorn",
+            "scripts.run_line_worker",
+            "scripts.run_service_monitor",
+            "scripts.run_durable_job_worker",
+        ),
     },
     "admin-no-auth": {"files": (), "modules": ()},
     "database-update": {
@@ -67,18 +90,11 @@ PROFILE_REQUIREMENTS = {
         ),
         "modules": ("scripts.reset_fake_database",),
     },
-    "ngrok-development": {
-        "commands": ("ngrok",),
-        "files": (".env", "ui/app.py"),
-        "modules": ("uvicorn", "streamlit", "scripts.run_line_worker", "scripts.run_service_monitor"),
-    },
     "line-worker": {"files": (".env",), "modules": ("scripts.run_line_worker",)},
 }
 
 
 def _command_exists(command: str) -> bool:
-    if command == "ngrok" and (PROJECT_ROOT / ".venv/Scripts/ngrok.exe").exists():
-        return True
     return shutil.which(command) is not None
 
 
@@ -97,16 +113,24 @@ def _configuration_issues(profile: str) -> list[str]:
 
 def inspect_profile(profile: str) -> dict[str, object]:
     requirements = PROFILE_REQUIREMENTS[profile]
-    missing_commands = [name for name in requirements.get("commands", ()) if not _command_exists(name)]
-    missing_files = [name for name in requirements.get("files", ()) if not (PROJECT_ROOT / name).exists()]
-    missing_modules = [name for name in requirements.get("modules", ()) if importlib.util.find_spec(name) is None]
+    missing_commands = [
+        name for name in requirements.get("commands", ()) if not _command_exists(name)
+    ]
+    missing_files = [
+        name for name in requirements.get("files", ()) if not (PROJECT_ROOT / name).exists()
+    ]
+    missing_modules = [
+        name
+        for name in requirements.get("modules", ())
+        if importlib.util.find_spec(name) is None
+    ]
     issues = {
         "commands": missing_commands,
         "files": missing_files,
         "modules": missing_modules,
         "configuration": _configuration_issues(profile),
     }
-    report = {
+    report: dict[str, object] = {
         "status": "ready" if not any(issues.values()) else "blocked",
         "profile": profile,
         "project_root": str(PROJECT_ROOT),
@@ -123,27 +147,30 @@ def inspect_profile(profile: str) -> dict[str, object]:
                     "Entry target runtime state path 未設定",
                 )
             report["entry_target_attestation"] = attest_state(Path(state_path))
-            runtime = load_react_admin_runtime_from_environment(workspace_root=PROJECT_ROOT)
+            runtime = load_react_admin_runtime_from_environment(
+                workspace_root=PROJECT_ROOT
+            )
             if runtime is None:
-                raise ReactAdminArtifactError("react admin artifact runtime is not configured")
+                raise ReactAdminArtifactError(
+                    "react admin artifact runtime is not configured"
+                )
             report["artifact_attestation"] = runtime.health_attestation()
-            report["streamlit_rollback"] = {
-                "status": "retained",
-                "health_url": "http://127.0.0.1:8501/_stcore/health",
-            }
-            report["ports"] = [8000, 8501]
+            report["ports"] = [8000]
             report["startup_order"] = [
                 "entry-target-preflight",
                 "artifact-preflight",
                 "api",
                 "artifact-private-health",
-                "streamlit",
             ]
         except EntryTargetError:
-            issues["configuration"].append("Admin entry target runtime state attestation")
+            issues["configuration"].append(
+                "Admin entry target runtime state attestation"
+            )
             report["status"] = "blocked"
         except (OSError, ReactAdminArtifactError, ValueError):
-            issues["configuration"].append("React admin current/previous selector attestation")
+            issues["configuration"].append(
+                "React admin current/previous selector attestation"
+            )
             report["status"] = "blocked"
     if profile == "dual-run":
         report["planned_commands"] = [
@@ -158,7 +185,6 @@ def inspect_profile(profile: str) -> dict[str, object]:
         }
         report["startup_order"] = ["api", "react"]
         report["disabled"] = [
-            "streamlit",
             "monitor",
             "LINE delivery",
             "durable worker",
