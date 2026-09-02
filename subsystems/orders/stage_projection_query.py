@@ -5,14 +5,14 @@ Description: 依生命週期範圍讀取跨 owner 根事實，產生 Orders 七�
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time
 from decimal import Decimal
 import hashlib
 import json
 from typing import Literal, Mapping, Protocol
 
-from domains.orders.lifecycle import OrderLifecycleScope
+from domains.orders.lifecycle import OrderLifecycleScope, OrderLifecycleStatus
 from domains.orders.terms import ServiceTimeTerms
 from domains.scheduling.current_projection import AssignmentLifecycleStatus, project_service_period_status
 from shared_kernel.clock import BusinessClock, SystemBusinessClock
@@ -21,10 +21,11 @@ from shared_kernel.validation import require_canonical_text, require_positive_in
 
 MAXIMUM_PAGE_SIZE = 200
 StageStatus = Literal["not_started", "in_progress", "blocked", "completed", "unavailable"]
+TerminalState = Literal["cancelled"]
 
 _ROW_FIELDS = frozenset({
-    "case_no", "order_version", "order_updated_at", "import_receipt_id", "import_created_at",
-    "imported_terms_complete",
+    "case_no", "order_version", "order_lifecycle_status", "order_updated_at",
+    "import_receipt_id", "import_created_at", "imported_terms_complete",
     "terms_event_id", "terms_version", "terms_created_at", "candidate_pool_id", "candidate_pool_created_at",
     "candidate_pool_candidate_count", "candidate_pool_contacted_count", "candidate_pool_contacted_at",
     "candidate_pool_replied_count", "candidate_pool_replied_at", "matching_plan_id", "matching_plan_version",
@@ -139,6 +140,8 @@ class OrderOperationalTimeline:
     stages: tuple[StageProjection, ...]
     sop_steps: tuple[SopStepProjection, ...]
     projection_digest: str
+    current_sop_step: int | None = None
+    terminal_state: TerminalState | None = None
 
 
 @dataclass(frozen=True)
@@ -188,17 +191,35 @@ def _timeline(row: object, evaluated_at: datetime) -> OrderOperationalTimeline:
         raise OrderStageProjectionContractError("repository row fields are not canonical")
     case_no = _text(row, "case_no", 50)
     order_version = _nonnegative_int(row, "order_version")
+    lifecycle_status = _order_lifecycle_status(row)
     stages = _stages(row, case_no, evaluated_at)
     steps = _steps(row, case_no, stages)
-    current_stage_code = _current_stage(stages)
+    terminal_state: TerminalState | None = None
+    if lifecycle_status is OrderLifecycleStatus.CANCELLED:
+        terminal_state = "cancelled"
+        stages = tuple(_cancelled_stage(stage, order_version) for stage in stages)
+        steps = tuple(_cancelled_step(step) for step in steps)
+    current_stage_code = _current_stage(stages, lifecycle_status)
+    current_sop_step = _current_sop_step(steps, lifecycle_status)
     payload = {
         "case_no": case_no,
         "base_revision": order_version,
         "current_stage_code": current_stage_code,
+        "current_sop_step": current_sop_step,
+        "terminal_state": terminal_state,
         "stages": [_stage_payload(stage) for stage in stages],
         "sop_steps": [_step_payload(step) for step in steps],
     }
-    return OrderOperationalTimeline(case_no, order_version, current_stage_code, stages, steps, _digest(payload))
+    return OrderOperationalTimeline(
+        case_no,
+        order_version,
+        current_stage_code,
+        stages,
+        steps,
+        _digest(payload),
+        current_sop_step,
+        terminal_state,
+    )
 
 
 def _stages(row: Mapping[str, object], case_no: str, evaluated_at: datetime) -> tuple[StageProjection, ...]:
@@ -443,6 +464,8 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
         _step_from_stage(10, "formal_service", "轉換正式排班與服務履約", stage["active_service"]),
         _step_from_stage(11, "settlement_close", "完工驗收、時數核對與尾款／薪資結清", stage["settlement_payout"]),
     )
+
+
 def _step_from_stage(ordinal: int, code: str, label: str, stage: StageProjection) -> SopStepProjection:
     return SopStepProjection(ordinal, code, label, stage.owner, stage.status, stage.occurred_at, stage.blockers, stage.warnings, stage.available_actions, stage.availability_reason)
 
@@ -457,6 +480,35 @@ def _stage(ordinal: int, code: str, label: str, owner: str, status: StageStatus,
 
 def _unavailable_stage(ordinal: int, code: str, label: str, owner: str, reason: str) -> StageProjection:
     return _stage(ordinal, code, label, owner, "unavailable", _source(owner, None, None), None, availability_reason=reason)
+
+
+def _cancelled_stage(stage: StageProjection, order_version: int) -> StageProjection:
+    notice = _notice("order_cancelled", "訂單已取消；不再屬於進行中的七階段工作。")
+    return replace(
+        stage,
+        owner="Orders",
+        status="unavailable",
+        source=_source("Orders", None, order_version),
+        occurred_at=None,
+        blockers=(),
+        warnings=(notice,),
+        available_actions=(),
+        availability_reason="order_cancelled",
+    )
+
+
+def _cancelled_step(step: SopStepProjection) -> SopStepProjection:
+    notice = _notice("order_cancelled", "訂單已取消；原流程步驟不再是目前作業。")
+    return replace(
+        step,
+        owner="Orders",
+        status="unavailable",
+        occurred_at=None,
+        blockers=(),
+        warnings=(notice,),
+        available_actions=(),
+        availability_reason="order_cancelled",
+    )
 
 
 def _source(owner: str, identity: str | None, version: int | None) -> SourceLineage:
@@ -476,6 +528,16 @@ def _text(row: Mapping[str, object], field: str, maximum: int) -> str:
         return require_canonical_text(row[field], field, maximum)
     except ValueError as exc:
         raise OrderStageProjectionContractError(str(exc)) from exc
+
+
+def _order_lifecycle_status(row: Mapping[str, object]) -> OrderLifecycleStatus:
+    value = row["order_lifecycle_status"]
+    if not isinstance(value, str):
+        raise OrderStageProjectionContractError("order_lifecycle_status must be a string")
+    try:
+        return OrderLifecycleStatus(value)
+    except ValueError as exc:
+        raise OrderStageProjectionContractError("order_lifecycle_status is outside the closed contract") from exc
 
 
 def _nonnegative_int(row: Mapping[str, object], field: str) -> int:
@@ -564,17 +626,79 @@ def _step_payload(step: SopStepProjection) -> dict[str, object]:
 
 
 def _timeline_payload(item: OrderOperationalTimeline) -> dict[str, object]:
-    return {"case_no": item.case_no, "base_revision": item.base_revision, "current_stage_code": item.current_stage_code, "projection_digest": item.projection_digest}
+    return {
+        "case_no": item.case_no,
+        "base_revision": item.base_revision,
+        "current_stage_code": item.current_stage_code,
+        "current_sop_step": item.current_sop_step,
+        "terminal_state": item.terminal_state,
+        "projection_digest": item.projection_digest,
+    }
 
 
-def _current_stage(stages: tuple[StageProjection, ...]) -> str | None:
-    if all(stage.status == "unavailable" for stage in stages):
+def _current_stage(
+    stages: tuple[StageProjection, ...],
+    lifecycle_status: OrderLifecycleStatus,
+) -> str | None:
+    if lifecycle_status is OrderLifecycleStatus.CANCELLED:
+        return None
+    floor = _stage_floor(lifecycle_status)
+    if floor == 1 and all(stage.status == "unavailable" for stage in stages):
         return None
     service_stage = stages[_STAGE_CODES.index("active_service")]
     if service_stage.status == "completed":
         return "settlement_payout"
-    current = next((stage for stage in stages if stage.status != "completed"), None)
+    current = next((stage for stage in stages[floor - 1:] if stage.status != "completed"), None)
     return stages[-1].code if current is None else current.code
+
+
+def _current_sop_step(
+    steps: tuple[SopStepProjection, ...],
+    lifecycle_status: OrderLifecycleStatus,
+) -> int | None:
+    if lifecycle_status is OrderLifecycleStatus.CANCELLED:
+        return None
+    floor = _sop_floor(lifecycle_status)
+    if steps[9].status == "completed":
+        floor = max(floor, 11)
+    if floor == 1 and all(step.status == "unavailable" for step in steps):
+        return None
+    current = next((step for step in steps[floor - 1:] if step.status != "completed"), None)
+    return None if current is None else current.ordinal
+
+
+def _stage_floor(lifecycle_status: OrderLifecycleStatus) -> int:
+    if lifecycle_status is OrderLifecycleStatus.HISTORICAL_UNSERVED:
+        return 5
+    if lifecycle_status in {
+        OrderLifecycleStatus.IN_SERVICE,
+        OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+    }:
+        return 6
+    if lifecycle_status in {
+        OrderLifecycleStatus.COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+    }:
+        return 7
+    return 1
+
+
+def _sop_floor(lifecycle_status: OrderLifecycleStatus) -> int:
+    if lifecycle_status is OrderLifecycleStatus.HISTORICAL_UNSERVED:
+        return 9
+    if lifecycle_status in {
+        OrderLifecycleStatus.IN_SERVICE,
+        OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+    }:
+        return 10
+    if lifecycle_status in {
+        OrderLifecycleStatus.COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+    }:
+        return 11
+    return 1
 
 
 __all__ = ["MAXIMUM_PAGE_SIZE", "OrderOperationalTimelinePage", "OrderStageProjectionContractError", "OrderStageProjectionQueryService", "OrderStageProjectionRepository", "StageProjectionQuery"]
