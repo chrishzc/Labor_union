@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-2026-09-01-v25",
+  "release_id": "labor-union-validation-schema-2026-09-02-v26",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,13 +8,13 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 155,
-    "ordered_digest_sha256": "2e465ec38251b0c47ebd10d0c3c9873fb4a94629c8976a4d9031c3c375921950",
+    "expected_count": 156,
+    "ordered_digest_sha256": "fad446528b962c8bc5f5099465e43a5ffa774857d3c909e2cfaeb1038310680e",
     "terminal_artifact": "1029_client_payment_destination_configuration.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "e1b6471e16c27b698377b8ea37b1613d8825c738a04b781a0298b830d80b0795"
+    "sha256": "2af8bbdee4f2571d662aa59c657560bb26553b7e810662080502de836a740bcc"
   },
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_v1.sql",

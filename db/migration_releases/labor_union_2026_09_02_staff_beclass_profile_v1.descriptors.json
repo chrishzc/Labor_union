@@ -1,0 +1,69 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-staff-beclass-profile-2026-09-02-v1",
+  "descriptors": {
+    "1030_staff_beclass_profile.sql": {
+      "tables": {
+        "staff_certifications": [
+          "staff_id",
+          "certification_type",
+          "created_at"
+        ]
+      },
+      "parent_columns": {
+        "staff": {
+          "education": {
+            "column_type": "varchar(255)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "emergency_contact_name": {
+            "column_type": "varchar(100)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "emergency_contact_phone": {
+            "column_type": "varchar(30)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "admin_notes": {
+            "column_type": "text",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {
+        "staff_certifications.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "staff_id",
+            "certification_type"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "staff_certifications.fk_staff_certification_staff": {
+          "columns": [
+            "staff_id"
+          ],
+          "referenced_table": "staff",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "CASCADE"
+        }
+      },
+      "checks": {
+        "staff_certifications.chk_staff_certification_type": "atom(char_length(trim(certification_type))>0)"
+      },
+      "triggers": []
+    }
+  }
+}

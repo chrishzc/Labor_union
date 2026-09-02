@@ -1,0 +1,80 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-staff-beclass-profile-2026-09-02-v1",
+  "release_metadata": {
+    "release_name": "Labor Union Staff BeClass profile storage",
+    "application_version": "staff-beclass-profile-v1",
+    "published_at": "2026-09-02",
+    "description": "Preserve Staff historical BeClass education, emergency contact, admin note and certification data"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-fresh-schema-assembly-2026-08-15-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1030_staff_beclass_profile.sql",
+      "relative_path": "db/schema_parts/1030_staff_beclass_profile.sql",
+      "sha256": "fc53146d5273dbfae51a2f32318a42ddd967f93afedcd460639f5eb458e781db",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-preserve-staff-profile-lineage",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "staff-beclass-profile-owned-objects",
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact-and-import-mapping-readable",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "client-payment-destination-configuration-v1",
+      "staff-beclass-profile-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "staff-beclass-profile-owned-objects"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_09_02_staff_beclass_profile_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_09_02_staff_beclass_profile_v1.descriptors.json",
+    "sha256": "9d599c0145ff85b2ad74f07be3adede568ac8630c7872a77eb0881f4a1a5036e",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}
