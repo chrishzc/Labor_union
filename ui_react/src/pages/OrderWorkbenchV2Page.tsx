@@ -10,6 +10,7 @@ import {
   type FC,
 } from 'react';
 import './OrderWorkbenchV2Page.css';
+import { OrderGovernmentSubsidyLane } from '../components/OrderGovernmentSubsidyLane';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
 import {
   orderCoreStageProjectionClient,
@@ -419,10 +420,7 @@ export const OrderWorkbenchV2Page: FC = () => {
           <span><strong>歷史訂單支線</strong><small>使用正式 historical lifecycle facet 與 immutable evidence。</small></span>
           <b>{branchType === 'historical' ? '檢視中' : '開啟'}</b>
         </button>
-        <div className="order-v2-lane pending">
-          <span><strong>政府補助結算支線</strong><small>等待正式 Government Subsidy → Order projection。</small></span>
-          <b>待接正式 projection</b>
-        </div>
+        <OrderGovernmentSubsidyLane />
         <button
           type="button"
           className={`order-v2-lane ${branchType === 'cancelled' ? 'active' : ''}`}
