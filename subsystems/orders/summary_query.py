@@ -32,6 +32,10 @@ _SUMMARY_FIELDS = frozenset({
     "start_date",
     "total_employer_self_pay_payable",
 })
+_OPTIONAL_SUMMARY_FIELDS = frozenset({
+    "historical_source_start_date",
+    "historical_source_end_date",
+})
 
 
 class OrderSummaryContractError(ValueError):
@@ -81,6 +85,8 @@ class OrderSummaryItem:
     actual_end_date: date | None
     service_days: int | None
     total_employer_self_pay_payable: int | None
+    historical_source_start_date: date | None = None
+    historical_source_end_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -118,7 +124,13 @@ def _validate_repository_page(
 
 
 def _summary_item(row: object) -> OrderSummaryItem:
-    if not isinstance(row, Mapping) or set(row) != _SUMMARY_FIELDS:
+    if not isinstance(row, Mapping):
+        raise OrderSummaryContractError("repository row fields are not canonical")
+    row_fields = set(row)
+    if (
+        not _SUMMARY_FIELDS.issubset(row_fields)
+        or not row_fields.issubset(_SUMMARY_FIELDS | _OPTIONAL_SUMMARY_FIELDS)
+    ):
         raise OrderSummaryContractError("repository row fields are not canonical")
     case_no = _required_text(row, "case_no", _MAXIMUM_CASE_NO_LENGTH)
     return OrderSummaryItem(
@@ -134,6 +146,12 @@ def _summary_item(row: object) -> OrderSummaryItem:
         service_days=_optional_planned_service_days(row),
         total_employer_self_pay_payable=_optional_nonnegative_ntd(
             row, "total_employer_self_pay_payable"
+        ),
+        historical_source_start_date=_optional_declared_date(
+            row, "historical_source_start_date"
+        ),
+        historical_source_end_date=_optional_declared_date(
+            row, "historical_source_end_date"
         ),
     )
 
@@ -173,6 +191,14 @@ def _optional_date(row: Mapping[str, object], field: str) -> date | None:
     if value is None:
         return None
     return _required_date(row, field)
+
+
+def _optional_declared_date(
+    row: Mapping[str, object], field: str
+) -> date | None:
+    if field not in row:
+        return None
+    return _optional_date(row, field)
 
 
 def _positive_integer(row: Mapping[str, object], field: str) -> int:
@@ -232,7 +258,7 @@ def _page_etag(items: tuple[OrderSummaryItem, ...], next_cursor: str | None) -> 
 
 
 def _item_representation(item: OrderSummaryItem) -> dict[str, object]:
-    return {
+    representation = {
         "case_no": item.case_no,
         "client_name": item.client_name,
         "order_status": item.order_status,
@@ -245,6 +271,15 @@ def _item_representation(item: OrderSummaryItem) -> dict[str, object]:
         "service_days": item.service_days,
         "total_employer_self_pay_payable": item.total_employer_self_pay_payable,
     }
+    if item.historical_source_start_date is not None:
+        representation["historical_source_start_date"] = _date_representation(
+            item.historical_source_start_date
+        )
+    if item.historical_source_end_date is not None:
+        representation["historical_source_end_date"] = _date_representation(
+            item.historical_source_end_date
+        )
+    return representation
 
 
 def _date_representation(value: date | None) -> str | None:

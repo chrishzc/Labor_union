@@ -44,6 +44,9 @@ export const OrdersCardProjectionSchema = z.strictObject({
   deposit_settled_on: OrdersCardProjectionFieldSchema(DateOnlySchema),
   actual_start_date: OrdersCardProjectionFieldSchema(DateOnlySchema),
   actual_end_date: OrdersCardProjectionFieldSchema(DateOnlySchema),
+  historical_source_start_date: OrdersCardProjectionFieldSchema(DateOnlySchema).optional(),
+  historical_source_end_date: OrdersCardProjectionFieldSchema(DateOnlySchema).optional(),
+  historical_paired_staff_name: OrdersCardProjectionFieldSchema(z.string()).optional(),
   assignment_segments: OrdersCardProjectionFieldSchema(z.array(OrdersCardAssignmentSegmentSchema)),
 });
 

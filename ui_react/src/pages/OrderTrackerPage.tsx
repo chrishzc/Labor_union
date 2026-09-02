@@ -133,6 +133,22 @@ function cardProjectionContactValue(
   return cardProjectionValue(state.data[field], String, '尚未登錄');
 }
 
+function historicalCardEvidenceAvailable(data: OrdersCardProjection): boolean {
+  return [
+    data.historical_source_start_date,
+    data.historical_source_end_date,
+    data.historical_paired_staff_name,
+  ].some((field) => field?.source_version != null);
+}
+
+function optionalCardProjectionValue<T>(
+  field: { value: T | null; owner: string; availability: 'available' | 'unavailable' | 'blocked'; availability_reason: string | null } | undefined,
+  renderValue: (value: T) => string,
+  emptyText: string,
+): string {
+  return field ? cardProjectionValue(field, renderValue, emptyText) : emptyText;
+}
+
 function formatFriendlyTimestamp(value: string | null): string {
   if (!value) return '尚無事件時間';
   const date = new Date(value);
@@ -345,8 +361,11 @@ export const OrderTrackerPage: React.FC = () => {
         <dl className="tracker-card-facts">
           <div><dt>目前訂單狀態</dt><dd>{order.rawOrderStatus}</dd></div>
           <div><dt>約定服務日期</dt><dd>{formatCardRange(order.plannedServiceRange)}</dd></div>
-          <div><dt>實際服務日期</dt><dd>{formatCardRange(order.actualServiceRange)}</dd></div>
-          <div><dt>正式指派月嫂</dt><dd>{order.assignedStaffDisplay}</dd></div>
+          {order.historicalServiceRange && (
+            <div><dt>歷史匯入服務日期</dt><dd>{formatCardRange(order.historicalServiceRange)}</dd></div>
+          )}
+          <div><dt>已發生實際服務日期</dt><dd>{formatCardRange(order.actualServiceRange)}</dd></div>
+          <div><dt>月嫂</dt><dd>{order.assignedStaffDisplay}</dd></div>
         </dl>
         <div className="card-waiting-alert">
           <strong>{stageCardState.title}</strong>
@@ -680,12 +699,18 @@ export const OrderTrackerPage: React.FC = () => {
                   <dt className="card-projection-item-label">約定服務日期</dt>
                   <dd className="card-projection-item-value">{selectedOrder.plannedServiceRange}</dd>
                 </div>
+                {selectedOrder.historicalServiceRange && (
+                  <div className="card-projection-item">
+                    <dt className="card-projection-item-label">歷史匯入服務日期</dt>
+                    <dd className="card-projection-item-value">{selectedOrder.historicalServiceRange}</dd>
+                  </div>
+                )}
                 <div className="card-projection-item">
-                  <dt className="card-projection-item-label">實際服務日期</dt>
+                  <dt className="card-projection-item-label">已發生實際服務日期</dt>
                   <dd className="card-projection-item-value">{selectedOrder.actualServiceRange}</dd>
                 </div>
                 <div className="card-projection-item">
-                  <dt className="card-projection-item-label">正式指派月嫂</dt>
+                  <dt className="card-projection-item-label">月嫂</dt>
                   <dd className="card-projection-item-value highlight-staff">{selectedOrder.assignedStaffDisplay}</dd>
                 </div>
                 <div className="card-projection-item">
@@ -722,8 +747,26 @@ export const OrderTrackerPage: React.FC = () => {
                       <dt className="card-projection-item-label">定金狀態</dt>
                       <dd className="card-projection-item-value">{cardProjectionValue(cardProjectionState.data.deposit_settlement_state, (value) => value === 'settled' ? '已核銷' : '尚未核銷', '尚未登錄')}</dd>
                     </div>
+                    {historicalCardEvidenceAvailable(cardProjectionState.data) && (
+                      <>
+                        <div className="card-projection-item">
+                          <dt className="card-projection-item-label">歷史匯入服務日期</dt>
+                          <dd className="card-projection-item-value">
+                            {optionalCardProjectionValue(cardProjectionState.data.historical_source_start_date, String, '待確認')}
+                            {' ～ '}
+                            {optionalCardProjectionValue(cardProjectionState.data.historical_source_end_date, String, '待確認')}
+                          </dd>
+                        </div>
+                        <div className="card-projection-item">
+                          <dt className="card-projection-item-label">歷史匯入配對月嫂</dt>
+                          <dd className="card-projection-item-value highlight-staff">
+                            {optionalCardProjectionValue(cardProjectionState.data.historical_paired_staff_name, String, '待確認')}
+                          </dd>
+                        </div>
+                      </>
+                    )}
                     <div className="card-projection-item">
-                      <dt className="card-projection-item-label">實際服務日期</dt>
+                      <dt className="card-projection-item-label">已發生實際服務日期</dt>
                       <dd className="card-projection-item-value">{cardProjectionValue(cardProjectionState.data.actual_start_date, String, '待確認')} ～ {cardProjectionValue(cardProjectionState.data.actual_end_date, String, '待確認')}</dd>
                     </div>
                     <div className="card-projection-item">

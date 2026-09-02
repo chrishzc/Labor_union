@@ -20,6 +20,8 @@ class OrderSummaryItemView(BaseModel):
     end_date: date | None
     actual_start_date: date | None
     actual_end_date: date | None
+    historical_source_start_date: date | None = None
+    historical_source_end_date: date | None = None
     service_days: int | None = Field(default=None, gt=0)
     total_employer_self_pay_payable: int | None = Field(default=None, ge=0)
 

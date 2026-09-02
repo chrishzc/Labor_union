@@ -111,6 +111,7 @@ export interface TrackerOrderCardViewModel {
   assignedStaffName: string | null;
   assignedStaffDisplay: string;
   plannedServiceRange: string;
+  historicalServiceRange: string | null;
   actualServiceRange: string;
   serviceDaysLabel: string;
   contractAmountFormatted: string;
@@ -141,6 +142,11 @@ function formatDateRange(start: string | null, end: string | null, label: string
   return `${TRACKER_TYPED_PROJECTION_UNAVAILABLE}（${label}）`;
 }
 
+function historicalDateRange(start: string | null | undefined, end: string | null | undefined): string | null {
+  if (!start && !end) return null;
+  return formatDateRange(start ?? null, end ?? null, '歷史匯入服務日期');
+}
+
 export function createUnavailableSopSteps(): TrackerSopStepViewModel[] {
   return SOP_STEP_NAMES.map((name, index) => ({
     stepNo: index + 1,
@@ -162,6 +168,10 @@ export function adaptTrackerOrderCard(item: OrderSummaryItem): TrackerOrderCardV
     assignedStaffName: staffName,
     assignedStaffDisplay: staffName ?? '尚未正式指派',
     plannedServiceRange: formatDateRange(item.start_date, item.end_date, '約定服務日期'),
+    historicalServiceRange: historicalDateRange(
+      item.historical_source_start_date,
+      item.historical_source_end_date,
+    ),
     actualServiceRange: formatDateRange(item.actual_start_date, item.actual_end_date, '實際服務日期'),
     serviceDaysLabel: item.service_days === null
       ? '待補服務天數'

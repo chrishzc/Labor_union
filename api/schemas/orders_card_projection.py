@@ -53,6 +53,9 @@ class OrdersCardProjectionView(BaseModel):
     deposit_settled_on: OrdersCardProjectionFieldView[date]
     actual_start_date: OrdersCardProjectionFieldView[date]
     actual_end_date: OrdersCardProjectionFieldView[date]
+    historical_source_start_date: OrdersCardProjectionFieldView[date]
+    historical_source_end_date: OrdersCardProjectionFieldView[date]
+    historical_paired_staff_name: OrdersCardProjectionFieldView[str]
     assignment_segments: OrdersCardProjectionFieldView[
         list[OrdersCardAssignmentSegmentView]
     ]

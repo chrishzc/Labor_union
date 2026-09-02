@@ -18,6 +18,8 @@ export const OrderSummaryItemSchema = z.strictObject({
   end_date: DateOnlySchema.nullable(),
   actual_start_date: DateOnlySchema.nullable(),
   actual_end_date: DateOnlySchema.nullable(),
+  historical_source_start_date: DateOnlySchema.nullable().optional(),
+  historical_source_end_date: DateOnlySchema.nullable().optional(),
   service_days: z.number().int().positive().nullable(),
   total_employer_self_pay_payable: z.number().int().nonnegative().nullable(),
 });

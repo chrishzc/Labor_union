@@ -19,6 +19,48 @@ SELECT o.case_no,
        o.end_date,
        o.actual_start_date,
        o.actual_end_date,
+       CASE
+           WHEN o.status IN (
+               '歷史訂單－未服務',
+               '歷史訂單－服務中',
+               '歷史訂單－服務完成',
+               '歷史訂單－帳務完成'
+           ) THEN (
+               SELECT MAX(historical_pairing.source_start_date)
+                 FROM historical_order_adoption_receipts historical_receipt
+                 JOIN historical_order_pairing_evidence historical_pairing
+                   ON historical_pairing.receipt_id = historical_receipt.id
+                WHERE historical_receipt.id = (
+                      SELECT MAX(latest_historical_receipt.id)
+                        FROM historical_order_adoption_receipts latest_historical_receipt
+                       WHERE latest_historical_receipt.case_no = o.case_no
+                         AND latest_historical_receipt.outcome = 'adopted'
+                )
+                  AND historical_pairing.caregiver_ordinal = 1
+           )
+           ELSE NULL
+       END AS historical_source_start_date,
+       CASE
+           WHEN o.status IN (
+               '歷史訂單－未服務',
+               '歷史訂單－服務中',
+               '歷史訂單－服務完成',
+               '歷史訂單－帳務完成'
+           ) THEN (
+               SELECT MAX(historical_pairing.source_end_date)
+                 FROM historical_order_adoption_receipts historical_receipt
+                 JOIN historical_order_pairing_evidence historical_pairing
+                   ON historical_pairing.receipt_id = historical_receipt.id
+                WHERE historical_receipt.id = (
+                      SELECT MAX(latest_historical_receipt.id)
+                        FROM historical_order_adoption_receipts latest_historical_receipt
+                       WHERE latest_historical_receipt.case_no = o.case_no
+                         AND latest_historical_receipt.outcome = 'adopted'
+                )
+                  AND historical_pairing.caregiver_ordinal = 1
+           )
+           ELSE NULL
+       END AS historical_source_end_date,
        c.identity_status,
        o.service_days,
        order_details.total_employer_self_pay_payable,
