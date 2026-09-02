@@ -18,7 +18,6 @@ from domains.knowledge_retrieval.knowledge import (
 _DEFAULT_CATALOG_PATH = (
     Path(__file__).resolve().parents[2] / "document" / "line" / "AI客服QA題庫.jsonl"
 )
-_READY_STATUS = "ready"
 
 
 class ChromaKnowledgeGateway:
@@ -118,7 +117,7 @@ class ChromaKnowledgeGateway:
                     raise ValueError(
                         f"knowledge_catalog_invalid:{line_number}"
                     ) from error
-                if str(record.get("status", "")).strip().lower() != _READY_STATUS:
+                if record.get("enabled") is not True:
                     continue
                 catalog_id = str(record.get("id", "")).strip()
                 category = str(record.get("category", "")).strip()
@@ -145,7 +144,7 @@ class ChromaKnowledgeGateway:
                     "question": question,
                     "aliases": [alias.strip() for alias in aliases if alias.strip()],
                     "answer": answer,
-                    "status": _READY_STATUS,
+                    "enabled": True,
                     "source_ref": str(record.get("source_ref", "")).strip(),
                 }
                 encoded = json.dumps(
