@@ -5,6 +5,7 @@ layout_status: custom_current
 test_root: ui_react/src/tests/contract_external_signing_actions.test.tsx
 
 # Owned verification
-- `contract_external_signing_actions.test.tsx` — 保護外部簽約 closed states、歷史簽回 strict lineage、Preview invalidation、未知結果不得重送、final PDF fresh readback 與 business-first closed presentation。
-- `test_full_contract_preview.py` — 保護 exact target、typed owner mappings、conditional applicability與零寫入 Preview。
-- `test_full_contract_preview_ui_client.py` — 保護 authenticated typed client及 browser print mirror只採 cell-keyed typed values、不回退 raw presentation資料。
+- `ui_react/src/tests/contract_external_signing_actions.test.tsx` — closed states、歷史簽回 lineage、Preview invalidation、未知結果不得重送與 final PDF readback。
+- `ui_react/src/tests/contract_external_signing_client.test.ts` — typed React transport 與 schema decode。
+- `tests/domains/contract-signing/subsystems/contract-signing/integration/test_full_contract_preview.py` — exact target、typed owner mappings、conditional applicability 與零寫入 Preview。
+- `tests/domains/contract-signing/subsystems/contract-signing/integration/test_contract_external_signing_api.py` — authenticated API contract。
