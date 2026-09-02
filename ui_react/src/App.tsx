@@ -22,6 +22,7 @@ import { StaffPage } from './pages/StaffPage';
 import { DataImportPage } from './pages/DataImportPage';
 import { LineManagementPage } from './pages/LineManagementPage';
 import { AiEventStudio } from './pages/line_management/AiEventStudio';
+import { LlmConfigurationPage } from './pages/line_management/LlmConfigurationPage';
 import { LiffCardStudio } from './pages/line_management/LiffCardStudio';
 import { AlertGroupSecurity } from './pages/line_management/AlertGroupSecurity';
 import { ReportsPage } from './pages/ReportsPage';
@@ -37,6 +38,8 @@ export const HASH_ALIASES: Record<string, PageType> = {
   'line-management': 'line-management',
   'line-ai': 'line-ai-events',
   'line-ai-events': 'line-ai-events',
+  'line-llm': 'line-llm-settings',
+  'line-llm-settings': 'line-llm-settings',
   'line-studio': 'line-liff-studio',
   'line-liff-studio': 'line-liff-studio',
   'line-security': 'line-security',
@@ -153,6 +156,7 @@ export const App: React.FC = () => {
         {/* LINE Hub Section */}
         {currentPage === 'line-management' && <LineManagementPage />}
         {currentPage === 'line-ai-events' && <AiEventStudio />}
+        {currentPage === 'line-llm-settings' && <LlmConfigurationPage />}
         {currentPage === 'line-liff-studio' && <LiffCardStudio />}
         {currentPage === 'line-security' && <AlertGroupSecurity />}
 
