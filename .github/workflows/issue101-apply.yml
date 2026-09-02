@@ -93,6 +93,45 @@ jobs:
           ''',
           )
 
+          base_signature = "def transform_one(relative: str, original: str) -> str:"
+          if base_signature not in text:
+              raise RuntimeError("Issue 101 transformer signature changed")
+          text = text.replace(
+              base_signature,
+              "def _issue101_base_transform_one(relative: str, original: str) -> str:",
+              1,
+          )
+          wrapper_marker = "\n\ndef is_secret_context(relative: str, line: str) -> bool:"
+          if wrapper_marker not in text:
+              raise RuntimeError("Issue 101 transformer audit marker changed")
+          wrapper = '''
+
+          def transform_one(relative: str, original: str) -> str:
+              text = _issue101_base_transform_one(relative, original)
+              if relative == "api/routes/anomaly_registry.py":
+                  text = text.replace('actor=f"{actor[:1]}***",', "actor=actor,")
+                  text = text.replace(
+                      'reason=_safe_timeline_reason(raw["action"]),',
+                      'reason=str(raw["reason"]).strip(),',
+                  )
+              if relative == "domains/finance_import/warning_review.py":
+                  text = text.replace(
+                      'subject=f"finance-row-***-{finance_import_row_id}",',
+                      'subject=f"finance-row-{finance_import_row_id}",',
+                  )
+              if relative == "infrastructure/mysql/historical_order_adoption_repository.py":
+                  text = text.replace("_mask_case", "_canonical_case")
+                  text = replace_top_level_function(
+                      text,
+                      "_canonical_case",
+                      """def _canonical_case(case_no):
+              return str(case_no or "").strip()""",
+                      required=False,
+                  )
+              return text
+          '''
+          text = text.replace(wrapper_marker, wrapper + wrapper_marker, 1)
+
           # #101 changes authorized readback only. Preserve audit write-time redaction.
           text = text.replace(
               'SENSITIVE_DETAIL_KEYS = frozenset({"password", "token", "authorization", "secret", "credential"})',
