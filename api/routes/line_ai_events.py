@@ -102,7 +102,7 @@ def get_qa_catalog(
             question=item.question,
             aliases=item.aliases,
             answer=item.answer,
-            status=item.status,
+            enabled=item.enabled,
             source_ref=item.source_ref,
             notes=item.notes,
         )
@@ -112,7 +112,7 @@ def get_qa_catalog(
         data=LineQaCatalogView(
             source_identity=QA_CATALOG_SOURCE_IDENTITY,
             total_count=len(views),
-            ready_count=sum(1 for item in views if item.status == "ready"),
+            enabled_count=sum(1 for item in views if item.enabled),
             items=views,
         )
     )
