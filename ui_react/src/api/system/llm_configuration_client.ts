@@ -1,6 +1,6 @@
 /**
  * File: llm_configuration_client.ts
- * Description: LLM API Key write-only 管理端 client；只讀設定狀態，不讀回 secret。
+ * Description: Gemini API Key write-only 管理端 client；只讀設定狀態與安全連線結果，不讀回 secret。
  */
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -13,7 +13,15 @@ export const LlmApiKeyStatusSchema = z.strictObject({
   updated_at: z.string().nullable(),
 });
 
+export const LlmConnectionTestSchema = z.strictObject({
+  connected: z.boolean(),
+  provider: z.string(),
+  model: z.string(),
+  code: z.string().nullable(),
+});
+
 export type LlmApiKeyStatus = z.infer<typeof LlmApiKeyStatusSchema>;
+export type LlmConnectionTest = z.infer<typeof LlmConnectionTestSchema>;
 
 function requireToken(): string {
   const token = sessionClient.getToken();
@@ -35,4 +43,13 @@ export async function replaceLlmApiKey(apiKey: string): Promise<LlmApiKeyStatus>
     { token: requireToken() },
   );
   return decodeEnvelope(LlmApiKeyStatusSchema, raw);
+}
+
+export async function testLlmConnection(): Promise<LlmConnectionTest> {
+  const raw = await transport.post(
+    '/api/v1/system/llm/connection-test',
+    {},
+    { token: requireToken() },
+  );
+  return decodeEnvelope(LlmConnectionTestSchema, raw);
 }
