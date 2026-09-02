@@ -83,6 +83,7 @@ from api.routes import (
     line_system_config,
     line_tasks,
     knowledge_retrieval,
+    llm_configuration,
     match_records,
     matches,
     candidate_contact_pool,
@@ -335,6 +336,7 @@ app.include_router(anomaly_recovery.router)
 app.include_router(import_warning_tracking.router)
 app.include_router(data_browser_admin.router)
 app.include_router(system_status.router)
+app.include_router(llm_configuration.router)
 app.include_router(runtime_health.router)
 app.include_router(private_operations.router)
 app.include_router(admin_entry_targets.router)
