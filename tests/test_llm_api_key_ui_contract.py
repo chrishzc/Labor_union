@@ -16,16 +16,21 @@ def test_llm_api_key_ui_is_write_only() -> None:
     assert "setApiKey('')" in page
     assert "fetchLlmApiKeyStatus" in page
     assert "replaceLlmApiKey" in page
+    assert "testLlmConnection" in page
+    assert "測試 Gemini 連線" in page
     assert 'type="text"' not in page
     assert "showApiKey" not in page
     assert "revealApiKey" not in page
 
     assert "'/api/v1/system/llm/api-key/status'" in client
     assert "'/api/v1/system/llm/api-key'" in client
+    assert "'/api/v1/system/llm/connection-test'" in client
     assert "api_key: apiKey" in client
     assert "api_key:" not in client.split("fetchLlmApiKeyStatus", 1)[1].split(
         "replaceLlmApiKey", 1
     )[0]
+    connection_test = client.split("testLlmConnection", 1)[1]
+    assert "api_key" not in connection_test
 
 
 def test_llm_settings_page_is_registered_in_line_navigation_and_app() -> None:
