@@ -1,4 +1,4 @@
-"""Typed development-only deterministic router preview contract."""
+"""Typed LINE AI event and curated QA readback contracts."""
 
 from __future__ import annotations
 
@@ -31,3 +31,26 @@ class LineRouterPreviewView(BaseModel):
     answer_text: str | None = None
     ticket_id: int | None = None
     apply_ready: bool
+
+
+class LineQaCatalogItemView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    category: str
+    tag: str
+    question: str
+    aliases: tuple[str, ...] = ()
+    answer: str
+    status: str
+    source_ref: str
+    notes: str | None = None
+
+
+class LineQaCatalogView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_identity: str
+    total_count: int = Field(ge=0)
+    ready_count: int = Field(ge=0)
+    items: tuple[LineQaCatalogItemView, ...] = ()
