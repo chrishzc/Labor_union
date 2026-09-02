@@ -6,6 +6,7 @@ import React, { FormEvent, useEffect, useState } from 'react';
 import {
   fetchLlmApiKeyStatus,
   replaceLlmApiKey,
+  testLlmConnection,
   type LlmApiKeyStatus,
 } from '../../api/system/llm_configuration_client';
 import {
@@ -36,11 +37,24 @@ function safeSaveErrorMessage(error: unknown): string {
 }
 
 
+function connectionResultMessage(code: string | null): string {
+  if (code === 'not_configured') return '尚未設定 Gemini API Key。';
+  if (code === 'authentication_failed') return 'Google 拒絕驗證此 API Key，請重新產生或覆寫 Key。';
+  if (code === 'model_unavailable') return `目前無法使用 ${GEMINI_MODEL}。`;
+  if (code === 'rate_limited') return '已連到 Google，但目前受到配額或頻率限制。';
+  if (code === 'timeout') return 'Gemini 連線測試逾時。';
+  if (code === 'unavailable') return '目前無法連線到 Google Gemini API。';
+  if (code === 'empty_response') return 'Google 已回應，但沒有取得有效測試內容。';
+  return 'Gemini 連線測試未通過。';
+}
+
+
 export const LlmConfigurationPage: React.FC = () => {
   const [apiKey, setApiKey] = useState('');
   const [status, setStatus] = useState<LlmApiKeyStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,6 +104,34 @@ export const LlmConfigurationPage: React.FC = () => {
       setError(safeSaveErrorMessage(saveError));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleConnectionTest = async () => {
+    setTestingConnection(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await testLlmConnection();
+      if (result.connected) {
+        setNotice(`Gemini 連線成功：${result.model}`);
+      } else {
+        setError(connectionResultMessage(result.code));
+      }
+    } catch (testError: unknown) {
+      if (testError instanceof ApiHttpError && testError.status === 401) {
+        setError('管理員 Session 已失效，請重新登入後再試。');
+      } else if (testError instanceof ApiHttpError && testError.status === 403) {
+        setError('目前帳號沒有 AI 模型設定權限（HTTP 403）。');
+      } else if (testError instanceof ApiNetworkError) {
+        setError('無法連線到後端 API，請確認 FastAPI 是否正在執行。');
+      } else if (testError instanceof ApiTimeoutError) {
+        setError('後端連線測試逾時。');
+      } else {
+        setError('無法執行 Gemini 連線測試。');
+      }
+    } finally {
+      setTestingConnection(false);
     }
   };
 
@@ -148,6 +190,13 @@ export const LlmConfigurationPage: React.FC = () => {
           <div className="llm-config-actions">
             <button type="submit" disabled={saving || apiKey.trim().length < 8}>
               {saving ? '儲存中…' : status?.configured ? '覆寫 Gemini API Key' : '儲存 Gemini API Key'}
+            </button>
+            <button
+              type="button"
+              onClick={handleConnectionTest}
+              disabled={!status?.configured || saving || testingConnection}
+            >
+              {testingConnection ? '測試中…' : '測試 Gemini 連線'}
             </button>
           </div>
         </form>
