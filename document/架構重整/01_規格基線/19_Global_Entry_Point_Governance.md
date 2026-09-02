@@ -25,6 +25,11 @@ retirement plan 與 cutover rehearsal。這項核准允許逐 entry 準備與驗
 切換前仍須逐項取得 exact target、replacement readback、rollback、maintenance window 與涵蓋該
 entry 的 execution approval。任一資訊缺失固定 fail closed。
 
+2026-09-02 人工另對九個 exact Streamlit page 作出較新裁決：只要 React canonical navigation entry
+與 `App.tsx` render branch 已存在，即足以刪除該 Streamlit page；舊的 rollback retention、production
+observation、removal receipt 或逐 entry release gate 不再阻擋這九個 exact source removal。適用清單與
+replacement 見 §7；未列入清單的 entry 仍遵守原本逐項治理。
+
 ## 3. One-entry review procedure
 
 每次只處理一個 `entry_id`：
@@ -37,7 +42,8 @@ entry 的 execution approval。任一資訊缺失固定 fail closed。
 6. 執行 focused regression 與 entry queue validator。
 
 實際執行 `retired_410`／`removed` 前，還必須保存切換前 caller inventory、replacement 可達證據、
-回復路徑與切換後 readback；rehearsal passed 不等於 production switch completed。
+回復路徑與切換後 readback；rehearsal passed 不等於 production switch completed。§7 的九個 exact
+Streamlit page 依 2026-09-02 較新人工裁決例外，不再要求上述額外退役證據。
 
 ## 4. Automated boundary
 
@@ -50,16 +56,17 @@ entry 的 execution approval。任一資訊缺失固定 fail closed。
 - `retired_410` 非 HTTP entry，或 `operator_only` 非 CLI entry。
 
 這個 queue 是入口治理，不是 runtime telemetry；它不記錄呼叫次數、人員、案件、payload 或 log。
+九個已依 §7 刪除的 Streamlit source 不得再由歷史 queue row 復活成 current entry。
 
 ## 5. 資料中心 React 正式入口（2026-08-26）
 
 - canonical 側邊欄入口為 `資料中心`，沿用 `data-import` hash 作穩定 identity。
 - `資料中心` 內固定包含 `NAS 檔案`、`資料匯入`、`數據瀏覽` 三個分頁；分頁不是新的 Domain owner，
   只組合各自 typed Query／Command UI。
-- 現行 `data-browser` 不得直接刪除。它作為 compatibility deep link 時，必須開啟資料中心的
-  `數據瀏覽` 分頁；不得再顯示為側邊欄獨立項目，也不得建立第二份 Data Browser 實作或 API client。
-- 舊入口轉向須保留 hash query、認證後目標與瀏覽器 back／forward 語意，並以 focused route／navigation
-  regression 證明匯入流程、數據瀏覽 Query 與未送出草稿沒有退步。
+- `ui:01_data_browser.py` 已依 §7 退役；舊 data-browser identity 由 React `#data-browser` compatibility
+  deep link 開啟資料中心的 `數據瀏覽` 分頁，不再保留第二份 Streamlit Data Browser 實作。
+- React deep link 須保留 hash query、認證後目標與瀏覽器 back／forward 語意，並以 focused
+  route／navigation regression 證明匯入流程、數據瀏覽 Query 與未送出草稿沒有退步。
 - NAS 分頁採已核准的高保真前端狀態機與使用者設計，明示清單、容量、下載、上傳與刪除目前皆為
   本機介面預覽；不得宣稱已操作 NAS 或資料庫。實體 mount path、arbitrary path query、browser-side
   file mutation、NAS mount／搬移與 provider delivery 均不屬本次入口切換。後續 typed storage adapter
@@ -73,5 +80,27 @@ entry 的 execution approval。任一資訊缺失固定 fail closed。
   `/admin/`，並透過 relative `/api` proxy 呼叫同一 FastAPI owner。
 - `--dry-run` 必須唯讀驗證 Python、npm、React entry files 與 launcher 依賴；`--smoke-test` 只建立
   FastAPI＋React 兩個 owned process，執行 GET-only readiness／proxy 檢查後清理本次 process。
-- Legacy Streamlit source 是否保留作 rollback 由獨立 entry retirement／cutover 裁決管理；其存在不得
-  使標準本機 launcher 回復啟動 Streamlit。啟動服務仍不得隱式套用 schema、migration 或 entry switch。
+- §7 九個 Streamlit page 已退役；`ui/app.py` 只保留尚未納入本輪裁決的
+  `ui:09_data_import.py` 相容入口。其餘 Streamlit source 是否仍有該入口的直接依賴，另依實際 reference
+  決定，不得因資料夾存在復活已刪 page。
+
+## 7. 2026-09-02 React-sufficient Streamlit retirement
+
+下列 mapping 已由 React `MasterLayout.tsx` navigation 與 `App.tsx` render branch 證明存在。最新人工
+裁決將此 existence proof 視為各列 Streamlit page 的充分刪除條件：
+
+| 已刪 Streamlit entry | React replacement |
+|---|---|
+| `ui:01_data_browser.py` | `ui-react:#data-browser` |
+| `ui:02_orders.py` | `ui-react:#orders` |
+| `ui:03_calendar.py` | `ui-react:#scheduling`、`ui-react:#staff` |
+| `ui:04_finance.py` | `ui-react:#finance` |
+| `ui:05_form_management.py` | `ui-react:#order-tracker` |
+| `ui:06_finance_alerts.py` | `ui-react:#anomalies` |
+| `ui:07_line_management.py` | `ui-react:#line-management` |
+| `ui:08_system_status.py` | `ui-react:#reports`、`ui-react:#system-status` |
+| `ui:09_access_management.py` | `ui-react:#account-management` |
+
+這項裁決只授權上述九個 source page 與其失效導航引用退役，不自動授權刪除
+`ui:09_data_import.py`、共用 API client、仍有 current caller 的 helper、資料庫、API、provider、deployment
+或其他外部效果。
