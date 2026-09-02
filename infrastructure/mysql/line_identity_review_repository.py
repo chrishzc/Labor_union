@@ -48,17 +48,9 @@ class MySqlLineIdentityRepository:
             )
             if not bindings:
                 return None
-            if len(bindings) == 1:
-                return bindings[0]
-            selected_role, _ = self.selected_role(line_user_id)
-            if selected_role is None:
-                raise RuntimeError("line_identity_role_selection_required")
-            selected = tuple(
-                binding for binding in bindings if binding.subject_type is selected_role
-            )
-            if len(selected) != 1:
-                raise RuntimeError("line_identity_selected_role_stale")
-            return selected[0]
+            if len(bindings) != 1:
+                raise RuntimeError("line_identity_multiple_active_binding")
+            return bindings[0]
         with self._connection.cursor() as cursor:
             cursor.execute(
                 _IDENTITY_SELECT_BY_ROLE_SQL,
@@ -515,12 +507,18 @@ class MySqlLineIdentityRepository:
             (claim.line_user_id.value,),
         )
         counts = optional_row(cursor.fetchone()) or {}
-        admin_count = int(counts.get("admin_count") or 0)
-        nonadmin_count = int(counts.get("nonadmin_count") or 0)
-        if claim.subject_type is LineBindingSubjectType.ADMIN and nonadmin_count:
-            raise RuntimeError("line_identity_admin_role_exclusive")
-        if claim.subject_type is not LineBindingSubjectType.ADMIN and admin_count:
-            raise RuntimeError("line_identity_admin_role_exclusive")
+        active_counts = {
+            LineBindingSubjectType.ADMIN: int(counts.get("admin_count") or 0),
+            LineBindingSubjectType.CUSTOMER: int(counts.get("customer_count") or 0),
+            LineBindingSubjectType.STAFF: int(counts.get("staff_count") or 0),
+        }
+        conflicting_count = sum(
+            count
+            for subject_type, count in active_counts.items()
+            if subject_type is not claim.subject_type
+        )
+        if conflicting_count:
+            raise RuntimeError("line_identity_role_change_requires_revocation")
 
     def _persist_binding_transition(self, cursor, snapshot, claim, target, version, is_new):
         if is_new:
@@ -974,8 +972,10 @@ _IDENTITY_ROLE_SCOPE_LOCK_SQL = (
 _IDENTITY_ROLE_SCOPE_COUNTS_SQL = (
     "SELECT SUM(subject_type='admin' AND binding_status IN "
     "('pending_review','bound','revocation_pending')) AS admin_count,"
-    "SUM(subject_type IN ('customer','staff') AND binding_status IN "
-    "('pending_review','bound','revocation_pending')) AS nonadmin_count "
+    "SUM(subject_type='customer' AND binding_status IN "
+    "('pending_review','bound','revocation_pending')) AS customer_count,"
+    "SUM(subject_type='staff' AND binding_status IN "
+    "('pending_review','bound','revocation_pending')) AS staff_count "
     "FROM line_identity_role_bindings WHERE line_user_id=%s"
 )
 _IDENTITY_FAILURE_STREAK_SELECT_SQL = (
