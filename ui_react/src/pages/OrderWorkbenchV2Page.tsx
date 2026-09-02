@@ -10,6 +10,7 @@ import {
   type FC,
 } from 'react';
 import './OrderWorkbenchV2Page.css';
+import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
 import {
   orderCoreStageProjectionClient,
   type OrderCoreStageProjectionQueryParams,
@@ -66,6 +67,10 @@ export const OrderWorkbenchV2Page: FC = () => {
   const [search, setSearch] = useState('');
   const [onlyBlocked, setOnlyBlocked] = useState(false);
   const [onlyWarning, setOnlyWarning] = useState(false);
+  const [selectedDrawer, setSelectedDrawer] = useState<{
+    caseNo: string;
+    branchType: CoreStageBranchType;
+  } | null>(null);
   const requestSequence = useRef(0);
 
   const normalizedSearch = search.trim();
@@ -334,6 +339,13 @@ export const OrderWorkbenchV2Page: FC = () => {
                 {stage?.availability_reason && (
                   <div className="order-v2-technical">projection：{stage.availability_reason}</div>
                 )}
+                <button
+                  type="button"
+                  className="order-v2-open-drawer"
+                  onClick={() => setSelectedDrawer({ caseNo: item.id, branchType: item.branchType })}
+                >
+                  開啟唯讀工作 Drawer
+                </button>
               </article>
             );
           })}
@@ -362,6 +374,14 @@ export const OrderWorkbenchV2Page: FC = () => {
           <b>{branchType === 'cancelled' ? '檢視中' : '開啟'}</b>
         </button>
       </section>
+
+      {selectedDrawer !== null && (
+        <OrderWorkbenchV2Drawer
+          caseNo={selectedDrawer.caseNo}
+          branchType={selectedDrawer.branchType}
+          onClose={() => setSelectedDrawer(null)}
+        />
+      )}
     </div>
   );
 };
