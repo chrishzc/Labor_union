@@ -45,7 +45,7 @@ router = APIRouter(prefix="/api/orders", tags=["Orders Core Stage Timeline Beta"
         401: {"model": GlobalTypedErrorResponseView, "description": "需要有效的管理員驗證"},
         403: {"model": GlobalTypedErrorResponseView, "description": "目前身分無權查詢訂單核心階段"},
         409: {"model": GlobalTypedErrorResponseView, "description": "核心階段投影根事實不一致"},
-        422: {"model": GlobalTypedErrorResponseView, "description": "查詢條件不符合公�z�契約"},
+        422: {"model": GlobalTypedErrorResponseView, "description": "查詢條件不符合公開契約"},
         500: {"model": GlobalTypedErrorResponseView, "description": "核心階段投影查詢失敗"},
         503: {"model": GlobalTypedErrorResponseView, "description": "核心階段根事實暫時無法使用"},
     },
