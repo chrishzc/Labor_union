@@ -1,14 +1,25 @@
-"""M2 deterministic catalog and feedback aggregate readback routes."""
+"""M2 deterministic catalog, curated QA, and feedback readback routes."""
 
 import os
 from dataclasses import asdict
 from datetime import datetime, time, timezone
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.dependencies.admin_auth import require_line_configuration_reader
+from api.dependencies.line_ai_qa_catalog import (
+    CATALOG_SOURCE_IDENTITY as QA_CATALOG_SOURCE_IDENTITY,
+    load_line_ai_qa_catalog,
+)
 from api.dependencies.line_runtime import get_line_feedback_application
 from api.schemas.base import BaseResponse
+from api.schemas.line_ai_events import (
+    LineQaCatalogItemView,
+    LineQaCatalogView,
+    LineRouterPreviewRequest,
+    LineRouterPreviewView,
+)
 from api.schemas.line_feedback import (
     LineFeedbackAggregateView,
     LineNavigationCatalogView,
@@ -16,17 +27,15 @@ from api.schemas.line_feedback import (
     LineNavigationRecentRepliesView,
     LineNavigationReplyView,
 )
-from api.schemas.line_ai_events import LineRouterPreviewRequest, LineRouterPreviewView
 from domains.line.identities import LineUserId
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.customer_service.escalation_application import HumanEscalationApplication
+from subsystems.line.ai_router_contracts import Unavailable
+from subsystems.line.deterministic_ai_router import DeterministicLineRouter, score_band
 from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
 from subsystems.line.navigation_catalog import CATALOG_REVISION, CATALOG_SOURCE_IDENTITY, catalog_entries
-from subsystems.line.deterministic_ai_router import DeterministicLineRouter, score_band
-from subsystems.line.ai_router_contracts import Unavailable
 from subsystems.line.service_help_application import LineServiceHelpApplication
-from subsystems.customer_service.escalation_application import HumanEscalationApplication
-from types import SimpleNamespace
 
 
 router = APIRouter(prefix="/api/v1/line/ai-events", tags=["LINE AI Events"])
@@ -73,6 +82,38 @@ def get_navigation_catalog(
         data=LineNavigationCatalogView(
             revision=CATALOG_REVISION,
             entries=tuple(LineNavigationEntryView.model_validate(asdict(entry)) for entry in catalog_entries()),
+        )
+    )
+
+
+@router.get("/qa-catalog", response_model=BaseResponse[LineQaCatalogView])
+def get_qa_catalog(
+    _: AdminPrincipal = Depends(require_line_configuration_reader),
+):
+    try:
+        items = load_line_ai_qa_catalog()
+    except (OSError, ValueError, KeyError):
+        raise HTTPException(status_code=503, detail="line_ai_qa_catalog_unavailable")
+    views = tuple(
+        LineQaCatalogItemView(
+            id=item.id,
+            category=item.category,
+            tag=item.tag,
+            question=item.question,
+            aliases=item.aliases,
+            answer=item.answer,
+            status=item.status,
+            source_ref=item.source_ref,
+            notes=item.notes,
+        )
+        for item in items
+    )
+    return BaseResponse(
+        data=LineQaCatalogView(
+            source_identity=QA_CATALOG_SOURCE_IDENTITY,
+            total_count=len(views),
+            ready_count=sum(1 for item in views if item.status == "ready"),
+            items=views,
         )
     )
 
