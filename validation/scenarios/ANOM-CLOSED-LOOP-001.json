@@ -8,8 +8,8 @@
   "test_kinds": ["domain_root_data", "external_input_fixture", "expected_manifest"],
   "coverage_ids": ["ANOM-01", "ANOM-02", "ASM-01", "ASM-02", "ORDER-001", "ORDER-002", "ORDER-003", "ORDER-004", "SCHEDULE-001", "SCHEDULE-002", "SCHEDULE-003", "SCHEDULE-005", "SCHEDULE-006"],
   "source_refs": [
-    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ANOM-01",
-    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ASM-01"
+    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#ANOM-01",
+    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#ASM-01"
   ],
   "root_facts": [
     "Versioned order and scheduling roots that make a detector predicate true.",
