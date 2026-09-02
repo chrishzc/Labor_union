@@ -21,17 +21,17 @@ interface Props {
 }
 
 type Status = 'idle' | 'previewing' | 'previewed' | 'applying' | 'applied' | 'error';
+type EditableActionType = 'message' | 'uri' | 'postback';
 
 function copyDefinition(value: RichMenuDraftDefinition): RichMenuDraftDefinition {
   return structuredClone(value);
 }
 
-function initialAction(kind: RichMenuAction['type']): RichMenuAction {
+function initialAction(kind: EditableActionType): RichMenuAction {
   switch (kind) {
     case 'message': return { type: 'message', text: '' };
     case 'uri': return { type: 'uri', uri: '?entry=registration', uri_source: 'liff' };
     case 'postback': return { type: 'postback', data: '' };
-    case 'richmenuswitch': return { type: 'richmenuswitch', data: '', rich_menu_alias_id: '' };
   }
 }
 
@@ -90,8 +90,7 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
   );
 
   const updateAction = (action: RichMenuAction) => {
-    if (!menu || !button) return;
-    if (!('menus' in definition)) return;
+    if (!menu || !button || !('menus' in definition)) return;
     const nextDefinition: RichMenuDraftDefinition = {
       ...definition,
       menus: definition.menus.map((item) => item.id !== menu.id ? item : {
@@ -109,7 +108,7 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
     setMessage(null);
   };
 
-  const requestPreview = async () => {
+  const requestPreview = async (): Promise<RichMenuDraftPreview | null> => {
     setStatus('previewing');
     setMessage(null);
     setConfirmed(false);
@@ -120,22 +119,23 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
       });
       setPreview(result);
       setStatus('previewed');
+      return result;
     } catch (error) {
       setStatus('error');
       setMessage(error instanceof Error ? error.message : 'Rich Menu 草稿預覽失敗');
+      return null;
     }
   };
 
-  const apply = async () => {
-    if (!preview || !confirmed) return;
+  const applyPreview = async (candidate: RichMenuDraftPreview) => {
     setStatus('applying');
     setMessage(null);
     try {
       const identity = crypto.randomUUID();
       const result = await client.apply({
         expected_revision: draft.revision,
-        definition: preview.normalized_definition,
-        preview_fingerprint: preview.preview_fingerprint,
+        definition: candidate.normalized_definition,
+        preview_fingerprint: candidate.preview_fingerprint,
         reason,
         idempotency_key: `rich-menu-draft-${identity}`,
         correlation_id: `rich-menu-draft-${identity}`,
@@ -149,6 +149,16 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
       setStatus('error');
       setMessage(error instanceof Error ? error.message : 'Rich Menu 草稿套用失敗');
     }
+  };
+
+  const apply = async () => {
+    if (!preview || !confirmed) return;
+    await applyPreview(preview);
+  };
+
+  const saveDirectly = async () => {
+    const candidate = await requestPreview();
+    if (candidate) await applyPreview(candidate);
   };
 
   if (!menu || !button) {
@@ -168,12 +178,8 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
       <section className="richmenu-card" data-control-id="line.richmenu.draft.action-editor">
         <div className="richmenu-card-header">
           <div>
-            <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1e1b19', fontWeight: 700 }}>
-              ⚡ 修改按鈕動作
-            </h4>
-            <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>
-              此版本保留原始發布內容，目前不提供修改。
-            </p>
+            <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1e1b19', fontWeight: 700 }}>⚡ 修改按鈕動作</h4>
+            <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>此版本保留原始發布內容，目前不提供修改。</p>
           </div>
           <span className="line-category-badge category-service_flow">唯讀</span>
         </div>
@@ -183,19 +189,23 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
   }
 
   const action = button.action;
+  const legacySwitchBlocked = action.type === 'richmenuswitch';
+
   return (
     <section className="richmenu-card" data-control-id="line.richmenu.draft.action-editor">
       <div className="richmenu-card-header">
         <div>
-          <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1e1b19', fontWeight: 700 }}>
-            ⚡ 修改按鈕動作
-          </h4>
-          <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>
-            只修改草稿版本；本機模擬不發送 LINE，可直接一鍵套用。
-          </p>
+          <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1e1b19', fontWeight: 700 }}>⚡ 修改按鈕動作</h4>
+          <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>只修改草稿版本；本機模擬不發送 LINE，可直接一鍵套用。</p>
         </div>
         <span className="line-category-badge category-navigation">編輯草稿</span>
       </div>
+
+      {legacySwitchBlocked && (
+        <div className="line-warning" role="alert">
+          此按鈕仍是舊版 Rich Menu switch 動作。使用者端選單切換已停用，請改成訊息、LIFF／網址或 Postback 後再保存。
+        </div>
+      )}
 
       <div className="richmenu-form-grid">
         <label className="richmenu-form-field">
@@ -211,24 +221,21 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
               setMessage(null);
             }}
           >
-            {menu.buttons.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.label}
-              </option>
-            ))}
+            {menu.buttons.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.label}</option>)}
           </select>
         </label>
+
         <label className="richmenu-form-field">
           <span>動作類型</span>
           <select
             className="richmenu-form-select"
-            value={action.type}
-            onChange={(event) => updateAction(initialAction(event.target.value as RichMenuAction['type']))}
+            value={legacySwitchBlocked ? '' : action.type}
+            onChange={(event) => updateAction(initialAction(event.target.value as EditableActionType))}
           >
+            {legacySwitchBlocked && <option value="">請改用支援的動作</option>}
             <option value="message">發送訊息</option>
             <option value="uri">開啟 LIFF／網址</option>
             <option value="postback">Postback 資料</option>
-            <option value="richmenuswitch">切換 Rich Menu</option>
           </select>
         </label>
 
@@ -272,9 +279,7 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
                   onChange={(event) => updateAction({ ...action, uri: event.target.value })}
                 >
                   {CANONICAL_LIFF_TARGETS.map((target) => (
-                    <option key={target.value} value={target.value}>
-                      {target.label}
-                    </option>
+                    <option key={target.value} value={target.value}>{target.label}</option>
                   ))}
                 </select>
               ) : (
@@ -305,31 +310,6 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
           </label>
         )}
 
-        {action.type === 'richmenuswitch' && (
-          <>
-            <label className="richmenu-form-field">
-              <span>切換資料</span>
-              <input
-                className="richmenu-form-input"
-                maxLength={300}
-                placeholder="例如：switch=staff"
-                value={action.data ?? ''}
-                onChange={(event) => updateAction({ ...action, data: event.target.value })}
-              />
-            </label>
-            <label className="richmenu-form-field">
-              <span>Rich Menu alias</span>
-              <input
-                className="richmenu-form-input"
-                maxLength={32}
-                placeholder="例如：staff-menu"
-                value={action.rich_menu_alias_id ?? ''}
-                onChange={(event) => updateAction({ ...action, rich_menu_alias_id: event.target.value })}
-              />
-            </label>
-          </>
-        )}
-
         <label className="richmenu-form-field richmenu-form-field-full">
           <span>變更原因</span>
           <input
@@ -347,7 +327,7 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
           className="richmenu-btn-primary"
           style={{ background: '#059669', color: '#fff', fontWeight: 700, padding: '10px 22px', borderRadius: '8px', border: 0, cursor: 'pointer' }}
           onClick={() => void saveDirectly()}
-          disabled={status === 'previewing' || status === 'applying'}
+          disabled={legacySwitchBlocked || status === 'previewing' || status === 'applying'}
         >
           {status === 'applying' ? '正在套用…' : '💾 儲存並套用變更'}
         </button>
@@ -355,7 +335,7 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
           type="button"
           className="richmenu-btn-secondary"
           onClick={() => void requestPreview()}
-          disabled={status === 'previewing' || status === 'applying'}
+          disabled={legacySwitchBlocked || status === 'previewing' || status === 'applying'}
         >
           預覽草稿變更
         </button>
@@ -381,25 +361,17 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
             預覽完成：已核對目前內容與保存後結果。
           </p>
           <label className="richmenu-confirm-checkbox-label">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              onChange={(event) => setConfirmed(event.target.checked)}
-            />
+            <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
             我確認保存此草稿；這不會發布或發送 LINE。
           </label>
           <div>
-            <button
-              type="button"
-              className="richmenu-btn-apply"
-              onClick={() => void apply()}
-              disabled={!confirmed || status === 'applying'}
-            >
+            <button type="button" className="richmenu-btn-apply" onClick={() => void apply()} disabled={!confirmed || status === 'applying'}>
               套用並回讀
             </button>
           </div>
         </div>
       )}
+
       {message && (
         <div
           className={status === 'error' ? 'line-error' : 'line-scope-note'}

@@ -19,12 +19,11 @@ class MenuBounds(BaseModel):
 
 
 class MenuAction(BaseModel):
-    type: Literal["message", "uri", "postback", "richmenuswitch"]
+    type: Literal["message", "uri", "postback"]
     text: str | None = None
     uri: str | None = None
     uri_source: Literal["literal", "liff"] = "literal"
     data: str | None = None
-    rich_menu_alias_id: str | None = Field(default=None, min_length=1, max_length=32, pattern=r"^[a-zA-Z0-9_-]+$")
 
     @model_validator(mode="after")
     def validate_action_value(self):
@@ -37,8 +36,6 @@ class MenuAction(BaseModel):
                 raise ValueError("literal uri action only supports http or https")
         if self.type == "postback" and not self.data:
             raise ValueError("postback action requires data")
-        if self.type == "richmenuswitch" and not self.rich_menu_alias_id:
-            raise ValueError("rich menu switch action requires rich menu alias")
         return self
 
 

@@ -17,6 +17,7 @@ RELATION_COLUMNS = {
     "staff_holiday_availability": ("holiday_name", "custom_holiday_detail"),
     "staff_weekly_rest": ("rest_type", "custom_rest_detail"),
     "staff_baby_types": ("baby_type", "custom_baby_detail"),
+    "staff_certifications": ("certification_type", None),
 }
 
 

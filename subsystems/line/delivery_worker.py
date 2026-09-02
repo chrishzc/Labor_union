@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Callable
 
-from domains.line.delivery import LineDeliveryTaskSnapshot
+from domains.line.delivery import LineDeliveryStatus, LineDeliveryTaskSnapshot
 from shared_kernel.identities import IdempotencyKey
 from subsystems.line.delivery_contracts import (
     ClaimLineDeliveryTasksQuery,
@@ -114,7 +114,18 @@ class LineDeliveryWorker:
             task.request.correlation_id,
         )
         with self._unit_of_work_factory() as unit_of_work:
-            unit_of_work.delivery_tasks.record_attempt(command)
+            result = unit_of_work.delivery_tasks.record_attempt(command)
+            if task.request.source_aggregate_type == "customer_service_escalation":
+                status = result.plan.resulting_status
+                if status in {LineDeliveryStatus.SENT, LineDeliveryStatus.FAILED}:
+                    escalations = getattr(unit_of_work, "escalations", None)
+                    if escalations is None:
+                        raise RuntimeError("customer service escalation repository is required")
+                    escalations.record_alert_delivery_outcome(
+                        task.request.source_aggregate_identity,
+                        command.idempotency_key.value,
+                        status.value,
+                    )
             notification_rules = getattr(unit_of_work, "notification_rules", None)
             if outcome.outcome_type is LineProviderOutcomeType.SUCCESS:
                 mark_accepted = getattr(
