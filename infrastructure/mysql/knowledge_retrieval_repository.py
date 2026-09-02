@@ -364,6 +364,24 @@ class MySqlKnowledgeRetrievalRepository:
             self._complete_job(cursor, job_id)
         return task_id
 
+    # Unsupported is a completed, non-answer outcome with an explicit human fallback.
+    def complete_unsupported(self, job_id: int, request_id: int):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT requester_line_user_id,correlation_id FROM knowledge_answer_requests "
+                "WHERE id=%s FOR UPDATE",
+                (request_id,),
+            )
+            request = cursor.fetchone()
+            task_id = self._enqueue_unsupported_delivery(request_id, request)
+            cursor.execute(
+                "UPDATE knowledge_answer_requests SET request_status='unsupported',"
+                "completed_at_utc=CURRENT_TIMESTAMP(6) WHERE id=%s",
+                (request_id,),
+            )
+            self._complete_job(cursor, job_id)
+        return task_id
+
     def fail_job(self, job_id: int, error_code: str, retryable: bool):
         with self._connection.cursor() as cursor:
             cursor.execute("SELECT attempt_count,max_attempts,answer_request_id FROM knowledge_jobs WHERE id=%s FOR UPDATE", (job_id,))
@@ -493,6 +511,28 @@ class MySqlKnowledgeRetrievalRepository:
             IdempotencyKey(f"knowledge-answer-delivery:{request_id}"),
             CorrelationId(str(request["correlation_id"])),
             "knowledge_answer_request", str(request_id),
+        )
+        return self._delivery_tasks.enqueue(delivery).task_id.value
+
+    def _enqueue_unsupported_delivery(self, request_id, request):
+        line_user_id = request["requester_line_user_id"]
+        if not line_user_id:
+            return None
+        payload = canonical_line_payload_json(
+            {
+                "type": "text",
+                "text": "目前沒有可引用的已核准答案，請聯絡工會人員協助確認。",
+            }
+        )
+        delivery = LineDeliveryRequest(
+            LineRecipient(LineRecipientType.USER, LineUserId(str(line_user_id))),
+            LineMessageKind.TEXT,
+            payload,
+            datetime.now(timezone.utc),
+            IdempotencyKey(f"knowledge-unsupported-delivery:{request_id}"),
+            CorrelationId(str(request["correlation_id"])),
+            "knowledge_answer_request",
+            str(request_id),
         )
         return self._delivery_tasks.enqueue(delivery).task_id.value
 
