@@ -7,7 +7,7 @@
   "requires_database": false,
   "test_kinds": ["metadata_fixture", "process_network_harness"],
   "coverage_ids": ["LEGACY-01", "LEGACY-02", "LEGACY-03", "LEGACY-04"],
-  "source_refs": ["document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"],
+  "source_refs": ["document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#LEGACY-01"],
   "root_facts": [
     "A checked-in legacy entry and writer inventory represented by retired routes, CLI diagnostics and module paths.",
     "Canonical replacement metadata for each retained HTTP endpoint."
