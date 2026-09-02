@@ -11,6 +11,7 @@ import {
 } from 'react';
 import './OrderWorkbenchV2Page.css';
 import { OrderGovernmentSubsidyLane } from '../components/OrderGovernmentSubsidyLane';
+import { OrderTerminalAggregateLane } from '../components/OrderTerminalAggregateLane';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
 import {
   orderCoreStageProjectionClient,
@@ -421,6 +422,7 @@ export const OrderWorkbenchV2Page: FC = () => {
           <b>{branchType === 'historical' ? '檢視中' : '開啟'}</b>
         </button>
         <OrderGovernmentSubsidyLane />
+        <OrderTerminalAggregateLane />
         <button
           type="button"
           className={`order-v2-lane ${branchType === 'cancelled' ? 'active' : ''}`}
