@@ -6,7 +6,7 @@
 - 收斂日期：2026-09-02
 - 上位契約：`17_External_Integration_LINE_Access正式規格.md`
 - 關聯契約：`20_LINE客服與月嫂自助服務正式規格.md`、`23_LINE身分管理與解除正式規格.md`、`26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`
-- 來源：既有 Service Help 正式條款，以及功能開發計畫中的 QA、Rich Menu 與手機驗收文件；來源文件只提供 evidence，不另建 Authority。
+- 來源：既有 Service Help 正式條款、功能開發計畫中的 QA／Rich Menu 規格，以及仍保留的 LINE 四大模組操作測試手冊；來源文件只提供 evidence 或執行指引，不另建 Authority。
 
 本文件只補足「使用者如何進入服務說明、回答如何核准發布、何時轉人工、不同身分看到哪一類選單，以及本機 preview 的零外送邊界」。LINE identity、ticket root、delivery task、provider publication 與 M1～M4 transaction 仍由上位正式規格擁有。
 
@@ -129,11 +129,12 @@ Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 
 
 ## 11. 本批來源文件處置
 
-下列功能開發計畫中的 LINE Markdown 已由本文件及 `17`、`20`、`23`、`26` 承接，從 current tree 移除：
+下列功能開發計畫中的 LINE 規格文件已由本文件及 `17`、`20`、`23`、`26` 承接，從 current tree 移除：
 
 - `LINE_QA客服知識契約收斂計畫.md`
 - `LINE_Rich_Menu_多角色圖文選單與互動中心正式規範.md`
 - `LINE_Rich_Menu_本機視覺比對與互動模擬工作室正式規範.md`
-- `LINE_四大模組_詳細測試手冊與前置條件.md`
 
-`document/line/服務說明規則書.md` 在本批不刪除，但只作已被 `20` 與本文件承接的歷史輸入，不得與 current 正式規格競爭。需要舊 wording 或操作步驟時從 Git history 精確取回，不建立第二套 current owner。
+`LINE_四大模組_詳細測試手冊與前置條件.md` 保留在 `document/功能開發計畫/`，作為 current 可執行操作／手機 E2E 驗收手冊。它可保存 Agent 前置、測試資料準備、裝置操作、readback、驗收層級與 cleanup，但不得覆蓋本文件及 `17`、`20`、`23`、`26` 的 owner／語意／transaction 契約；route、schema、owner 或正式驗收條件改變時必須同步更新。
+
+`document/line/服務說明規則書.md` 在本批不刪除，但只作已被 `20` 與本文件承接的歷史輸入，不得與 current 正式規格競爭。需要舊 wording 時從 Git history 精確取回，不建立第二套 current owner。
