@@ -135,6 +135,7 @@ from api.routes import (
 from api.schemas.base import BaseResponse
 from api.schemas.runtime_health import ApiHealthView
 from api.dependencies.admin_auth import (
+    ensure_development_line_configuration,
     ensure_development_root_admin,
     get_access_control_connection_factory,
 )
@@ -179,6 +180,7 @@ def _allowed_origins() -> list[str]:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     ensure_development_root_admin()
+    ensure_development_line_configuration()
     line_webhook_runtime_mode()
     yield
 

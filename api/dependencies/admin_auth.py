@@ -105,6 +105,49 @@ def ensure_development_root_admin() -> None:
         pass
 
 
+def ensure_development_line_configuration() -> None:
+    """開發環境啟動時自動確認並初始化 6 大基準 LINE 設定（Rich Menu、通知規則、LIFF等），防止空設定。"""
+    if os.getenv("APP_ENV", "").strip().lower() not in DEVELOPMENT_ENVIRONMENTS:
+        return
+    try:
+        from pathlib import Path
+        import json
+        from domains.line.configuration import LineConfigurationKind
+        from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
+        from shared_kernel.identities import ActorContext, CorrelationId
+        from subsystems.line.capabilities import LineCapability
+        from subsystems.line.configuration_application import LineConfigurationApplication
+
+        root = Path(__file__).resolve().parents[2]
+        config_files = {
+            LineConfigurationKind.MESSAGE_TEMPLATES: root / "config" / "message_templates.json",
+            LineConfigurationKind.MESSAGE_SCHEDULES: root / "config" / "message_schedules.json",
+            LineConfigurationKind.RICH_MENUS: root / "config" / "line_menu.json",
+            LineConfigurationKind.LIFF: root / "config" / "liff_settings.json",
+            LineConfigurationKind.CUSTOMER_SERVICE: root / "config" / "customer_service.json",
+            LineConfigurationKind.NOTIFICATION_RULES: root / "config" / "notification_rules.json",
+        }
+        definitions = {
+            kind: json.loads(path.read_text(encoding="utf-8"))
+            for kind, path in config_files.items()
+            if path.is_file()
+        }
+        if len(definitions) == len(config_files):
+            actor = ActorContext(
+                "system:line-configuration-bootstrap",
+                tuple(sorted({LineCapability.CONFIG_MANAGE.value})),
+            )
+            app = LineConfigurationApplication(open_line_unit_of_work)
+            app.bootstrap_missing(
+                definitions,
+                actor,
+                reason="開發環境自動初始化基準設定",
+                correlation_id=CorrelationId("line-configuration-bootstrap"),
+            )
+    except Exception:
+        pass
+
+
 def get_bearer_token(authorization: str | None) -> str:
     scheme, _, token = (authorization or "").partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
