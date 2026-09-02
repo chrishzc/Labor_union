@@ -1,4 +1,4 @@
-"""Regression contracts for role-scoped LINE revocation/rebind gating."""
+"""Regression contracts for single-identity LINE revocation/rebind gating."""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ def test_same_role_new_claim_waits_for_revocation_completion() -> None:
     cursor = _Cursor(
         one_rows=(
             {"line_user_id": _LINE_USER_ID.value},
-            {"admin_count": 0, "nonadmin_count": 1},
+            {"admin_count": 0, "customer_count": 1, "staff_count": 0},
             _binding(
                 "customer",
                 "customer:7",
@@ -98,7 +98,7 @@ def test_same_role_new_claim_is_allowed_after_revocation_completed() -> None:
     cursor = _Cursor(
         one_rows=(
             {"line_user_id": _LINE_USER_ID.value},
-            {"admin_count": 0, "nonadmin_count": 0},
+            {"admin_count": 0, "customer_count": 0, "staff_count": 0},
             _binding("customer", "customer:7", status="revoked", version=3),
         )
     )
@@ -115,18 +115,20 @@ def test_same_role_new_claim_is_allowed_after_revocation_completed() -> None:
     assert result.version == ExpectedVersion(4)
 
 
-def test_admin_revocation_pending_remains_exclusive_until_completion() -> None:
+def test_cross_role_claim_waits_for_revocation_completion() -> None:
     assert "'revocation_pending'" in _IDENTITY_ROLE_SCOPE_COUNTS_SQL
+    assert "AS customer_count" in _IDENTITY_ROLE_SCOPE_COUNTS_SQL
+    assert "AS staff_count" in _IDENTITY_ROLE_SCOPE_COUNTS_SQL
 
     pending_cursor = _Cursor(
         one_rows=(
             {"line_user_id": _LINE_USER_ID.value},
-            {"admin_count": 1, "nonadmin_count": 0},
+            {"admin_count": 1, "customer_count": 0, "staff_count": 0},
         )
     )
     pending_repository = MySqlLineIdentityRepository(_Connection(pending_cursor))
 
-    with pytest.raises(RuntimeError, match="line_identity_admin_role_exclusive"):
+    with pytest.raises(RuntimeError, match="line_identity_role_change_requires_revocation"):
         pending_repository.save_claim(
             _claim(LineBindingSubjectType.CUSTOMER, "customer:9"),
             ExpectedVersion(0),
@@ -135,7 +137,7 @@ def test_admin_revocation_pending_remains_exclusive_until_completion() -> None:
     completed_cursor = _Cursor(
         one_rows=(
             {"line_user_id": _LINE_USER_ID.value},
-            {"admin_count": 0, "nonadmin_count": 0},
+            {"admin_count": 0, "customer_count": 0, "staff_count": 0},
             None,
         )
     )
