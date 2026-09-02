@@ -134,7 +134,10 @@ from api.routes import (
 
 from api.schemas.base import BaseResponse
 from api.schemas.runtime_health import ApiHealthView
-from api.dependencies.admin_auth import get_access_control_connection_factory
+from api.dependencies.admin_auth import (
+    ensure_development_root_admin,
+    get_access_control_connection_factory,
+)
 from api.dependencies.line_runtime import line_webhook_runtime_mode
 from infrastructure.runtime.react_admin_artifact import (
     ReactAdminArtifactRuntime,
@@ -175,6 +178,7 @@ def _allowed_origins() -> list[str]:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    ensure_development_root_admin()
     line_webhook_runtime_mode()
     yield
 

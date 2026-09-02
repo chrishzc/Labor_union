@@ -57,6 +57,54 @@ def admin_auth_is_enabled() -> bool:
     )
 
 
+def ensure_development_root_admin() -> None:
+    """開發環境啟動時自動確認並建立 root 管理員帳號與預設 TOTP factor，防止重啟後無法登入。"""
+    if os.getenv("APP_ENV", "").strip().lower() not in DEVELOPMENT_ENVIRONMENTS:
+        return
+    username = os.getenv("DEV_ROOT_USERNAME", "").strip()
+    password = os.getenv("DEV_ROOT_PASSWORD", "").strip()
+    if not username or not password:
+        return
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id FROM admin_users WHERE username=%s", (username.lower(),))
+            user = cursor.fetchone()
+            if user is None:
+                from subsystems.access.authentication_session import (
+                    bootstrap_root_admin,
+                    totp_cipher_from_environment,
+                )
+                import hashlib
+                admin_id = bootstrap_root_admin(
+                    connection_factory=get_connection,
+                    username=username,
+                    password=password,
+                    display_name="系統最高管理員",
+                )
+                totp_secret = "WWTMUTCHGVOQ3MK6JPOV4KLRYGR3IN5R"
+                try:
+                    cipher = totp_cipher_from_environment()
+                    encrypted = cipher.encrypt(totp_secret)
+                    dummy_hash = hashlib.sha256(b"initial_enrollment").hexdigest()
+                    cursor.execute(
+                        """
+                        INSERT INTO admin_totp_factors (
+                            admin_user_id, factor_state, seed_ciphertext, encryption_key_version,
+                            enrollment_challenge_hash, enrollment_expires_at,
+                            activated_at, created_at, updated_at
+                        ) VALUES (%s, 'active', %s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                        """,
+                        (admin_id, encrypted.ciphertext, encrypted.key_version, dummy_hash),
+                    )
+                    conn.commit()
+                except Exception:
+                    pass
+        conn.close()
+    except Exception:
+        pass
+
+
 def get_bearer_token(authorization: str | None) -> str:
     scheme, _, token = (authorization or "").partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
