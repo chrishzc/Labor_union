@@ -57,6 +57,12 @@ def test_staff_beclass_profile_fields_are_preserved_by_business_topic():
     assert ("其他", "清明節不接案") in relations["staff_holiday_availability"]
 
 
+def test_staff_education_header_aliases_are_preserved():
+    for header in ("教育程度", "最高學歷", "學歷"):
+        record = _record({"姓名": "測試月嫂", header: "高職"}, {})
+        assert record["education"] == "高職"
+
+
 def test_staff_certification_detection_is_bounded_to_qualification_headers():
     raw = {
         "北區": "Y",
