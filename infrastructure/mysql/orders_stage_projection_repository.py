@@ -14,6 +14,8 @@ from subsystems.orders.stage_projection_query import MAXIMUM_PAGE_SIZE
 
 _PAGE_SQL = """
 SELECT o.case_no,
+       o.status AS lifecycle_status,
+       replacement.resume_step AS replacement_resume_step,
        o.lifecycle_version AS order_version,
        o.updated_at AS order_updated_at,
        import_fact.import_receipt_id,
@@ -237,6 +239,24 @@ SELECT o.case_no,
     ON confirmed.case_no = o.case_no AND confirmed.is_current = 1
   LEFT JOIN scheduling_aggregates scheduling ON scheduling.case_no = o.case_no
   LEFT JOIN (
+       SELECT successor.case_no,
+              successor.replacement_generation_id,
+              successor.resume_step
+         FROM scheduling_service_before_replacement_successors successor
+         JOIN (
+              SELECT case_no,
+                     replacement_generation_id,
+                     MAX(id) AS successor_id
+                FROM scheduling_service_before_replacement_successors
+               GROUP BY case_no, replacement_generation_id
+         ) latest_replacement
+           ON latest_replacement.case_no = successor.case_no
+          AND latest_replacement.replacement_generation_id = successor.replacement_generation_id
+          AND latest_replacement.successor_id = successor.id
+  ) replacement
+    ON replacement.case_no = o.case_no
+   AND replacement.replacement_generation_id = scheduling.effective_generation_id
+  LEFT JOIN (
        SELECT assignment.case_no,
               COUNT(DISTINCT CASE WHEN assignment.status NOT IN ('cancelled','replaced') THEN assignment.id END) AS assignment_count,
               COUNT(DISTINCT CASE WHEN assignment.status = 'active' THEN assignment.id END) AS assignment_active_count,
@@ -279,7 +299,7 @@ SELECT o.case_no,
         GROUP BY obligation.case_no
   ) staff_fact ON staff_fact.case_no = o.case_no
  WHERE o.case_no > %s
-   AND (%s = 'all' OR o.status <> %s)
+   AND (%s = 'all' OR o.status NOT IN (%s, %s))
  ORDER BY o.case_no
  LIMIT %s
 """
@@ -298,8 +318,13 @@ class MySqlOrdersStageProjectionRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 _PAGE_SQL,
-                (cursor_identity, lifecycle_scope.value,
-                 OrderLifecycleStatus.COMPLETED.value, result_limit),
+                (
+                    cursor_identity,
+                    lifecycle_scope.value,
+                    OrderLifecycleStatus.COMPLETED.value,
+                    OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED.value,
+                    result_limit,
+                ),
             )
             return tuple(cursor.fetchall() or ())
 

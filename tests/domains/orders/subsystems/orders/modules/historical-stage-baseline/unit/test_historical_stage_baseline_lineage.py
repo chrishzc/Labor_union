@@ -82,6 +82,54 @@ def test_new_adoption_receipt_freezes_deposit_paid_actual_start_baseline() -> No
     }
 
 
+def test_old_null_step_receipts_recover_from_adoption_event_status() -> None:
+    expected = {
+        OrderLifecycleStatus.HISTORICAL_UNSERVED: 9,
+        OrderLifecycleStatus.HISTORICAL_IN_SERVICE: 10,
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED: 11,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED: 11,
+    }
+    for status, step in expected.items():
+        facts = _facts(
+            {
+                "case_no": f"CASE-{step}",
+                "status": status.value,
+                "actual_start_date": date(2026, 8, 8),
+                "adoption_receipt_id": step,
+                "adoption_result_snapshot": {
+                    "historical_source_status": "deposit_paid",
+                    "operational_baseline_step": None,
+                    "operational_baseline_actual_start_date": None,
+                },
+                "adoption_after_status": status.value,
+                "adoption_facts_snapshot": {},
+                "baseline_event_version": None,
+                "baseline_event_identity": None,
+                "selected_step": None,
+            }
+        )
+        assert facts.selected_step == step
+
+
+def test_new_adoption_snapshot_maps_historical_lifecycle_statuses() -> None:
+    request = SimpleNamespace(
+        row=SimpleNamespace(asserted_status=HistoricalOrderSourceStatus.DEPOSIT_PAID)
+    )
+    expected = {
+        OrderLifecycleStatus.HISTORICAL_UNSERVED: 9,
+        OrderLifecycleStatus.HISTORICAL_IN_SERVICE: 10,
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED: 11,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED: 11,
+    }
+    for status, step in expected.items():
+        preview = SimpleNamespace(
+            outcome=HistoricalOrderOutcome.ADOPTED,
+            after_status=status.value,
+            date_patch=(("actual_start_date", date(2026, 8, 9)),),
+        )
+        assert _operational_baseline_snapshot(request, preview)["operational_baseline_step"] == step
+
+
 def test_new_adoption_receipt_freezes_plain_deposit_paid_at_step_nine() -> None:
     request = SimpleNamespace(
         row=SimpleNamespace(asserted_status=HistoricalOrderSourceStatus.DEPOSIT_PAID)

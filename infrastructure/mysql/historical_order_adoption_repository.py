@@ -330,15 +330,26 @@ def _operational_baseline_step(preview):
     actual_start = date_patch.get("actual_start_date")
     if status is OrderLifecycleStatus.CANCELLED:
         return None, None
-    if status is OrderLifecycleStatus.COMPLETED:
+    if status in {
+        OrderLifecycleStatus.COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+    }:
         return 11, _optional_date(actual_start)
+    if status in {
+        OrderLifecycleStatus.IN_SERVICE,
+        OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+    }:
+        return 10, _optional_date(actual_start)
     if actual_start is not None and status in {
         OrderLifecycleStatus.DISCUSSION,
         OrderLifecycleStatus.ESTABLISHED,
-        OrderLifecycleStatus.IN_SERVICE,
     }:
         return 10, _optional_date(actual_start)
-    if status is OrderLifecycleStatus.ESTABLISHED:
+    if status in {
+        OrderLifecycleStatus.ESTABLISHED,
+        OrderLifecycleStatus.HISTORICAL_UNSERVED,
+    }:
         return 9, None
     return None, None
 

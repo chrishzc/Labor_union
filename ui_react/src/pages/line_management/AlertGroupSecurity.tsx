@@ -24,6 +24,7 @@ export interface RuntimeTargetClient {
 
 export interface AlertGroupSecurityProps {
   client?: RuntimeTargetClient;
+  runtimeTargetClient?: RuntimeTargetClient;
 }
 
 type PendingAction =
@@ -75,8 +76,10 @@ function commandIdentity(operation: string): { correlation_id: string; idempoten
 }
 
 export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
-  client = lineRuntimeTargetClient,
+  client,
+  runtimeTargetClient,
 }) => {
+  const targetClient = client ?? runtimeTargetClient ?? lineRuntimeTargetClient;
   const [targets, setTargets] = useState<LineRuntimeTarget[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [busy, setBusy] = useState<boolean>(false);
@@ -93,7 +96,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
     setLoading(true);
     setErrorMessage(null);
     try {
-      const result = await client.listTargets({ correlationId: `line-security-query:${identityPart()}`, signal });
+      const result = await targetClient.listTargets({ correlationId: `line-security-query:${identityPart()}`, signal });
       setTargets(result);
     } catch (error) {
       if (signal?.aborted) return;
@@ -102,7 +105,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [client]);
+  }, [targetClient]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -133,7 +136,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
         reason: normalizedReason,
         ...commandIdentity('toggle'),
       };
-      const preview = await client.previewSetEnabled(target.target_id, request);
+      const preview = await targetClient.previewSetEnabled(target.target_id, request);
       setPending({ kind: 'toggle', target, request, preview });
     } catch (error) {
       setErrorMessage(publicFailureMessage(error));
@@ -159,7 +162,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
         reason: normalizedReason,
         ...commandIdentity('group-reset'),
       };
-      const preview = await client.previewResetGroup(request);
+      const preview = await targetClient.previewResetGroup(request);
       setPending({ kind: 'group_reset', target, request, preview });
     } catch (error) {
       setErrorMessage(publicFailureMessage(error));
@@ -174,11 +177,11 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
     setErrorMessage(null);
     try {
       const applied = pending.kind === 'group_reset'
-        ? await client.resetGroup({
+        ? await targetClient.resetGroup({
             ...pending.request,
             preview_fingerprint: pending.preview.preview_fingerprint,
           })
-        : await client.setEnabled(pending.target.target_id, {
+        : await targetClient.setEnabled(pending.target.target_id, {
             ...pending.request,
             preview_fingerprint: pending.preview.preview_fingerprint,
           });
@@ -186,7 +189,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
       setPending(null);
       setConfirmed(false);
       try {
-        const readback = await client.listTargets({ correlationId: `line-security-readback:${identityPart()}` });
+        const readback = await targetClient.listTargets({ correlationId: `line-security-readback:${identityPart()}` });
         setTargets(readback);
         setReadbackMessage('已重新查詢並確認最新狀態。');
       } catch {

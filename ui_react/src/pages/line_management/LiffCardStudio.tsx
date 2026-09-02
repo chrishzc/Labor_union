@@ -40,19 +40,19 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     endpointUrl: '/line-identity',
     launchPath: '/line-identity',
     authLevel: '後端驗證 LINE 登入憑證；網址列 userId 僅供導航，不具授權效果',
-    description: '正式入口先顯示已登記／尚未登記選擇，再依已驗證的 LINE 身分進入對應流程。',
+    description: '正式入口先詢問是否已登記市府平台：已申請者繼續填寫工會「需求調查表單」，未申請者引導至新竹市到宅坐月子媒合服務平台。',
     apiMapping: '身分開啟、候選綁定檢查與確認流程已接通',
   },
   {
     id: 'register',
     type: 'liff',
     title: '2. register.html',
-    subtitle: '產婦完整服務登記',
+    subtitle: '產婦需求調查表單',
     badge: '檢查後送出',
     endpointUrl: '/line-registration',
     launchPath: '/line-registration',
     authLevel: '後端驗證 LINE 登入憑證；不接受網址列身分',
-    description: '登記資料先顯示去敏摘要，明確確認後才送出；成功只呈現業務結果。',
+    description: '登記資料先顯示去敏摘要，明確確認後才送出；完整建立服務需求調查。',
     apiMapping: '登記資料檢查、確認送出與結果回讀已接通',
   },
   {
@@ -184,12 +184,12 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
   if (item.id === 'gateway' || item.id === 'bind' || item.id === 'identity') {
     return (
       <div className="mock-form-inputs">
-        <div className="mock-step-indicator">服務登記</div>
-        <p>請選擇您是否已填寫過工會基本資料表單。</p>
-        <button type="button" className="mock-primary-btn" disabled>📝 已登記服務／補助</button>
-        <small>我已填寫 BeClass 或政府補助資料，要直接綁定並查詢進度。</small>
-        <button type="button" className="mock-primary-btn" disabled>✨ 尚未填寫登記表單</button>
-        <small>我是新客戶，要填寫完整資料並建立服務檔案。</small>
+        <div className="mock-step-indicator">服務確認與導流</div>
+        <p>請確認您是否已於新竹市政府平台完成申請登記：</p>
+        <button type="button" className="mock-primary-btn" disabled>📝 已申請市府平台</button>
+        <small>我已在市府媒合服務平台完成登記，要繼續填寫工會【需求調查表單】。</small>
+        <button type="button" className="mock-primary-btn" disabled>🏛️ 未申請市府平台</button>
+        <small>我尚未於市府平台登記，請先前往新竹市政府到宅月子媒合服務平台提出申請。</small>
       </div>
     );
   }
@@ -197,7 +197,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
   if (item.id === 'register') {
     return (
       <div className="mock-form-inputs">
-        <div className="mock-step-indicator">產婦服務登記表單</div>
+        <div className="mock-step-indicator">需求調查表單</div>
         <strong>👩 1. 基本資料</strong>
         <label>產婦姓名 *</label><input type="text" placeholder="請填寫真實姓名" readOnly />
         <label>行動電話 *</label><input type="text" placeholder="例如：0912345678" readOnly />

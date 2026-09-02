@@ -35,6 +35,22 @@ function initialAction(kind: RichMenuAction['type']): RichMenuAction {
   }
 }
 
+const CANONICAL_LIFF_TARGETS = [
+  { value: '?entry=gateway', label: '?entry=gateway（服務確認與身分導流 Gateway）' },
+  { value: '?entry=registration', label: '?entry=registration（服務登記／身分導流）' },
+  { value: '?target=gateway', label: '?target=gateway（服務確認與身分導流 Gateway）' },
+  { value: '?target=profile_update', label: '?target=profile_update（修改登記資料）' },
+  { value: '?target=staff_order_search', label: '?target=staff_order_search（月嫂案件查詢）' },
+  { value: '?target=staff_schedule', label: '?target=staff_schedule（月嫂服務行程）' },
+  { value: '?target=staff_leave_apply', label: '?target=staff_leave_apply（月嫂請假登記）' },
+  { value: '?target=customer_service', label: '?target=customer_service（客服管理）' },
+  { value: '?target=scheduling_review', label: '?target=scheduling_review（排班審核）' },
+  { value: '?target=staff_review', label: '?target=staff_review（月嫂審核）' },
+  { value: '?target=staff_payout', label: '?target=staff_payout（薪資請款）' },
+  { value: '?target=anomalies_center', label: '?target=anomalies_center（重大異常通報）' },
+  { value: '?target=dashboard', label: '?target=dashboard（儀表板）' },
+];
+
 export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
   draft,
   menuId,
@@ -175,10 +191,10 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
             ⚡ 修改按鈕動作
           </h4>
           <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#74593f' }}>
-            只修改草稿版本；本機模擬不發送 LINE，正式保存固定先預覽再確認。
+            只修改草稿版本；本機模擬不發送 LINE，可直接一鍵套用。
           </p>
         </div>
-        <span className="line-category-badge category-service_flow">編輯草稿</span>
+        <span className="line-category-badge category-navigation">編輯草稿</span>
       </div>
 
       <div className="richmenu-form-grid">
@@ -187,9 +203,19 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
           <select
             className="richmenu-form-select"
             value={button.id}
-            onChange={(event) => setButtonId(event.target.value)}
+            onChange={(event) => {
+              setButtonId(event.target.value);
+              setPreview(null);
+              setConfirmed(false);
+              setStatus('idle');
+              setMessage(null);
+            }}
           >
-            {menu.buttons.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            {menu.buttons.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.label}
+              </option>
+            ))}
           </select>
         </label>
         <label className="richmenu-form-field">
@@ -199,9 +225,9 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
             value={action.type}
             onChange={(event) => updateAction(initialAction(event.target.value as RichMenuAction['type']))}
           >
+            <option value="message">發送訊息</option>
             <option value="uri">開啟 LIFF／網址</option>
-            <option value="message">送出訊息</option>
-            <option value="postback">Postback</option>
+            <option value="postback">Postback 資料</option>
             <option value="richmenuswitch">切換 Rich Menu</option>
           </select>
         </label>
@@ -209,10 +235,9 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
         {action.type === 'message' && (
           <label className="richmenu-form-field richmenu-form-field-full">
             <span>送出訊息</span>
-            <textarea
-              className="richmenu-form-textarea"
+            <input
+              className="richmenu-form-input"
               maxLength={300}
-              rows={3}
               placeholder="輸入點擊按鈕時，使用者將自動發送的訊息文字..."
               value={action.text ?? ''}
               onChange={(event) => updateAction({ type: 'message', text: event.target.value })}
@@ -230,7 +255,7 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
                 onChange={(event) => updateAction({
                   type: 'uri',
                   uri_source: event.target.value as 'literal' | 'liff',
-                  uri: event.target.value === 'liff' ? '?entry=registration' : 'https://',
+                  uri: event.target.value === 'liff' ? '?entry=gateway' : 'https://',
                 })}
               >
                 <option value="liff">系統 LIFF 入口</option>
@@ -238,14 +263,30 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
               </select>
             </label>
             <label className="richmenu-form-field">
-              <span>LIFF target／網址</span>
-              <input
-                className="richmenu-form-input"
-                maxLength={1000}
-                placeholder={action.uri_source === 'liff' ? '?entry=registration' : 'https://...'}
-                value={action.uri ?? ''}
-                onChange={(event) => updateAction({ ...action, uri: event.target.value })}
-              />
+              <span>{action.uri_source === 'liff' ? 'LIFF 入口' : 'HTTPS 網址'}</span>
+              {action.uri_source === 'liff' ? (
+                <select
+                  className="richmenu-form-select"
+                  aria-label="LIFF target／網址"
+                  value={action.uri ?? '?entry=gateway'}
+                  onChange={(event) => updateAction({ ...action, uri: event.target.value })}
+                >
+                  {CANONICAL_LIFF_TARGETS.map((target) => (
+                    <option key={target.value} value={target.value}>
+                      {target.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  className="richmenu-form-input"
+                  aria-label="LIFF target／網址"
+                  maxLength={1000}
+                  placeholder="https://..."
+                  value={action.uri ?? ''}
+                  onChange={(event) => updateAction({ ...action, uri: event.target.value })}
+                />
+              )}
             </label>
           </>
         )}
@@ -300,10 +341,19 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
         </label>
       </div>
 
-      <div className="richmenu-editor-actions">
+      <div className="richmenu-editor-actions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '16px' }}>
         <button
           type="button"
           className="richmenu-btn-primary"
+          style={{ background: '#059669', color: '#fff', fontWeight: 700, padding: '10px 22px', borderRadius: '8px', border: 0, cursor: 'pointer' }}
+          onClick={() => void saveDirectly()}
+          disabled={status === 'previewing' || status === 'applying'}
+        >
+          {status === 'applying' ? '正在套用…' : '💾 儲存並套用變更'}
+        </button>
+        <button
+          type="button"
+          className="richmenu-btn-secondary"
           onClick={() => void requestPreview()}
           disabled={status === 'previewing' || status === 'applying'}
         >

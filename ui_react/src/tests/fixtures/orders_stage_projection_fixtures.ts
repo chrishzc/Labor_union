@@ -18,6 +18,23 @@ const STAGE_CODES = [
   'settlement_payout',
 ] as const;
 
+const CURRENT_STEP_BY_STAGE: Readonly<Record<typeof STAGE_CODES[number], number>> = {
+  intake_terms: 1,
+  matching_willingness: 2,
+  client_review: 5,
+  contract_deposit: 6,
+  date_confirmation: 9,
+  active_service: 10,
+  settlement_payout: 11,
+};
+
+function lifecycleStatusForStage(stage: typeof STAGE_CODES[number]) {
+  if (stage === 'active_service') return '服務中' as const;
+  if (stage === 'settlement_payout') return '訂單完成' as const;
+  if (stage === 'contract_deposit' || stage === 'date_confirmation') return '訂單成立' as const;
+  return '洽談中' as const;
+}
+
 function stageProjection(code: typeof STAGE_CODES[number], ordinal: number, currentCode: typeof STAGE_CODES[number]): StageProjection {
   return {
     ordinal,
@@ -55,7 +72,9 @@ export function buildOrdersStageProjectionFixture(summary: OrderSummaryPage): Or
     return {
       case_no: item.case_no,
       base_revision: index + 1,
+      lifecycle_status: lifecycleStatusForStage(currentStage),
       current_stage_code: currentStage,
+      current_step_ordinal: CURRENT_STEP_BY_STAGE[currentStage],
       stages: STAGE_CODES.map((code, stageIndex) => stageProjection(code, stageIndex + 1, currentStage)),
       sop_steps: Array.from({ length: 11 }, (_, stepIndex) => ({
         ordinal: stepIndex + 1,

@@ -170,6 +170,7 @@ describe('OrderTrackerPage query-only presentation', () => {
 
   it('renders completed, current, blocked and unavailable SOP states with distinct semantics', async () => {
     const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);
+    stagePage.items[0].current_step_ordinal = 2;
     stagePage.items[0].sop_steps[0].status = 'completed';
     stagePage.items[0].sop_steps[1].status = 'in_progress';
     stagePage.items[0].sop_steps[2].status = 'blocked';
@@ -202,6 +203,7 @@ describe('OrderTrackerPage query-only presentation', () => {
     const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);
     const incomplete = stagePage.items[0];
     incomplete.current_stage_code = null;
+    incomplete.current_step_ordinal = null;
     incomplete.stages = incomplete.stages.map((stage, index) => ({
       ...stage,
       status: 'unavailable' as const,
@@ -221,6 +223,45 @@ describe('OrderTrackerPage query-only presentation', () => {
     expect(screen.getByText(/這不是業務階段/)).toBeInTheDocument();
     expect(screen.getByText('資料完整性異常')).toBeInTheDocument();
     expect(screen.getByText(/資料待補正：請先完成進件匯入與訂單條款/)).toBeInTheDocument();
+  });
+
+  it('uses the server current step instead of searching for the first in-progress row', async () => {
+    const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);
+    const timeline = stagePage.items[0];
+    timeline.lifecycle_status = '服務中';
+    timeline.current_stage_code = 'active_service';
+    timeline.current_step_ordinal = 10;
+    timeline.sop_steps[0].status = 'in_progress';
+    timeline.sop_steps[9].status = 'blocked';
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(stagePage);
+
+    render(<OrderTrackerPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getByRole('button', { name: /查看訂單 ORD-2026-0801/ }));
+
+    expect(document.querySelector('[data-surface-id="order-tracker.sop.step.10"]')).toHaveAttribute('aria-current', 'step');
+    expect(document.querySelector('[data-surface-id="order-tracker.sop.step.1"]')).not.toHaveAttribute('aria-current');
+    expect(screen.getByText('目前位置')).toBeInTheDocument();
+  });
+
+  it('renders cancelled orders outside both seven stages and data-correction isolation', async () => {
+    const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);
+    const cancelled = stagePage.items[0];
+    cancelled.lifecycle_status = '訂單取消';
+    cancelled.current_stage_code = null;
+    cancelled.current_step_ordinal = null;
+    stagePage.stage_counts.intake_terms -= 1;
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(stagePage);
+
+    render(<OrderTrackerPage />);
+    await screen.findByText('已取消訂單');
+
+    const cancelledSection = document.querySelector('[data-surface-id="order-tracker.cancelled-orders"]');
+    const correctionSection = document.querySelector('[data-surface-id="order-tracker.unclassified-orders"]');
+    if (!cancelledSection || !correctionSection) throw new Error('取消或待補正分類未呈現。');
+    expect(cancelledSection).toHaveTextContent('ORD-2026-0801');
+    expect(cancelledSection).toHaveTextContent('訂單已取消');
+    expect(correctionSection).not.toHaveTextContent('ORD-2026-0801');
   });
 
   it('shows an honest loaded-scope empty state without turning stage slots into zero counts', async () => {

@@ -28,6 +28,23 @@ const STAGE_CODES = [
   'settlement_payout',
 ] as const;
 
+const CURRENT_STEP_BY_STAGE: Readonly<Record<typeof STAGE_CODES[number], number>> = {
+  intake_terms: 1,
+  matching_willingness: 2,
+  client_review: 5,
+  contract_deposit: 6,
+  date_confirmation: 9,
+  active_service: 10,
+  settlement_payout: 11,
+};
+
+function lifecycleStatusForStage(stage: typeof STAGE_CODES[number]) {
+  if (stage === 'active_service') return '服務中' as const;
+  if (stage === 'settlement_payout') return '訂單完成' as const;
+  if (stage === 'contract_deposit' || stage === 'date_confirmation') return '訂單成立' as const;
+  return '洽談中' as const;
+}
+
 type FetchRecord = {
   path: string;
   method: string;
@@ -113,7 +130,9 @@ function stageProjectionEnvelope(summaryPage: OrderSummaryPage): unknown {
     return {
       case_no: summary.case_no,
       base_revision: 1,
+      lifecycle_status: lifecycleStatusForStage(currentStageCode),
       current_stage_code: currentStageCode,
+      current_step_ordinal: CURRENT_STEP_BY_STAGE[currentStageCode],
       stages,
       sop_steps: sopSteps,
       projection_digest: 'd'.repeat(64),

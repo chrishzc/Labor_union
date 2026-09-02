@@ -12,6 +12,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 StageStatus = Literal["not_started", "in_progress", "blocked", "completed", "unavailable"]
+OrderLifecycleStatusView = Literal[
+    "待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消",
+    "歷史訂單－未服務", "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成",
+]
 
 
 class SourceLineageView(BaseModel):
@@ -77,7 +81,9 @@ class OrderOperationalTimelineView(BaseModel):
     model_config = ConfigDict(extra="forbid")
     case_no: str
     base_revision: int = Field(ge=0)
+    lifecycle_status: OrderLifecycleStatusView
     current_stage_code: Literal["intake_terms", "matching_willingness", "client_review", "contract_deposit", "date_confirmation", "active_service", "settlement_payout"] | None
+    current_step_ordinal: int | None = Field(ge=1, le=11)
     stages: list[StageProjectionView] = Field(min_length=7, max_length=7)
     sop_steps: list[SopStepProjectionView] = Field(min_length=11, max_length=11)
     projection_digest: str = Field(pattern=r"^[0-9a-f]{64}$")

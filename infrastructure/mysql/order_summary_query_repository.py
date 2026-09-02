@@ -38,7 +38,7 @@ SELECT o.case_no,
   JOIN clients c ON c.id = o.client_id
   JOIN v_order_details order_details ON order_details.case_no = o.case_no
  WHERE o.case_no > %s
-   AND (%s = 'all' OR o.status <> %s)
+   AND (%s = 'all' OR o.status NOT IN (%s, %s))
    AND (
        %s IS NULL
        OR o.case_no LIKE CONCAT('%%', %s, '%%')
@@ -66,8 +66,16 @@ class MySqlOrderSummaryQueryRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 _ORDER_SUMMARY_PAGE_SQL,
-                (cursor_case_no, lifecycle_scope.value, OrderLifecycleStatus.COMPLETED.value,
-                 query_text, query_text, query_text, result_limit),
+                (
+                    cursor_case_no,
+                    lifecycle_scope.value,
+                    OrderLifecycleStatus.COMPLETED.value,
+                    OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED.value,
+                    query_text,
+                    query_text,
+                    query_text,
+                    result_limit,
+                ),
             )
             return tuple(cursor.fetchall() or ())
 

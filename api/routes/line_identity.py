@@ -101,30 +101,39 @@ review_router = APIRouter(
 )
 page_router = APIRouter(tags=["LINE Identity"])
 _IDENTITY_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "identity.html"
+_GATEWAY_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "gateway.html"
 _REGISTRATION_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "register.html"
 _STAFF_ORDERS_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_order_search.html"
 _STAFF_SCHEDULE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_schedule.html"
 
 
+_NO_CACHE_HEADERS = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
+
 @page_router.get("/line-identity/", include_in_schema=False)
 @page_router.get("/line-identity")
 def identity_page():
-    return FileResponse(_IDENTITY_PAGE)
+    return FileResponse(_IDENTITY_PAGE, headers=_NO_CACHE_HEADERS)
+
+
+@page_router.get("/line-gateway")
+def gateway_page():
+    return FileResponse(_GATEWAY_PAGE, headers=_NO_CACHE_HEADERS)
 
 
 @page_router.get("/line-registration")
 def registration_page():
-    return FileResponse(_REGISTRATION_PAGE)
+    return FileResponse(_REGISTRATION_PAGE, headers=_NO_CACHE_HEADERS)
 
 
 @page_router.get("/line-staff-orders")
 def staff_orders_page():
-    return FileResponse(_STAFF_ORDERS_PAGE)
+    return FileResponse(_STAFF_ORDERS_PAGE, headers=_NO_CACHE_HEADERS)
 
 
 @page_router.get("/line-staff-schedule")
 def staff_schedule_page():
-    return FileResponse(_STAFF_SCHEDULE_PAGE)
+    return FileResponse(_STAFF_SCHEDULE_PAGE, headers=_NO_CACHE_HEADERS)
 
 
 @public_router.get(

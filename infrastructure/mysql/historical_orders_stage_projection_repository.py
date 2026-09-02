@@ -13,37 +13,24 @@ from infrastructure.mysql.orders_stage_projection_repository import (
 )
 
 
-_HISTORICAL_SCOPE = """   AND (%s = 'all' OR o.status <> %s)"""
+_HISTORICAL_SCOPE = """   AND (%s = 'all' OR o.status NOT IN (%s, %s))"""
 _HISTORICAL_SCOPE_REPLACEMENT = """   AND (
        %s = 'all'
+       OR o.status NOT IN (%s, %s)
        OR (
-           NOT (
-               o.status = %s
-               AND EXISTS (
-                   SELECT 1
-                     FROM historical_order_adoption_receipts historical_cancel
-                    WHERE historical_cancel.case_no = o.case_no
-                      AND historical_cancel.outcome = 'adopted'
-               )
+           o.status = %s
+           AND EXISTS (
+               SELECT 1
+                 FROM historical_order_adoption_receipts historical_done
+                WHERE historical_done.case_no = o.case_no
+                  AND historical_done.outcome = 'adopted'
            )
            AND (
-               o.status <> %s
-               OR (
-                   o.status = %s
-                   AND EXISTS (
-                       SELECT 1
-                         FROM historical_order_adoption_receipts historical_done
-                        WHERE historical_done.case_no = o.case_no
-                          AND historical_done.outcome = 'adopted'
-                   )
-                   AND (
-                       completion_fact.receipt_id IS NULL
-                       OR COALESCE(client_fact.client_obligation_count, 0) = 0
-                       OR COALESCE(client_fact.client_open_count, 0) > 0
-                       OR COALESCE(staff_fact.staff_obligation_count, 0) = 0
-                       OR COALESCE(staff_fact.staff_open_count, 0) > 0
-                   )
-               )
+               completion_fact.receipt_id IS NULL
+               OR COALESCE(client_fact.client_obligation_count, 0) = 0
+               OR COALESCE(client_fact.client_open_count, 0) > 0
+               OR COALESCE(staff_fact.staff_obligation_count, 0) = 0
+               OR COALESCE(staff_fact.staff_open_count, 0) > 0
            )
        )
    )"""
@@ -75,8 +62,8 @@ class MySqlHistoricalAwareOrdersStageProjectionRepository:
                 (
                     cursor_identity,
                     lifecycle_scope.value,
-                    OrderLifecycleStatus.CANCELLED.value,
                     OrderLifecycleStatus.COMPLETED.value,
+                    OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED.value,
                     OrderLifecycleStatus.COMPLETED.value,
                     result_limit,
                 ),

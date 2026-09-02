@@ -7,6 +7,18 @@ import { z } from 'zod';
 const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const DateTimeSchema = z.string().min(1);
 const StageStatusSchema = z.enum(['not_started', 'in_progress', 'blocked', 'completed', 'unavailable']);
+const OrderLifecycleStatusSchema = z.enum([
+  '待補件',
+  '洽談中',
+  '訂單成立',
+  '服務中',
+  '訂單完成',
+  '訂單取消',
+  '歷史訂單－未服務',
+  '歷史訂單－服務中',
+  '歷史訂單－服務完成',
+  '歷史訂單－帳務完成',
+]);
 const StageCodeSchema = z.enum([
   'intake_terms',
   'matching_willingness',
@@ -16,6 +28,20 @@ const StageCodeSchema = z.enum([
   'active_service',
   'settlement_payout',
 ]);
+
+const CURRENT_STAGE_BY_STEP: Readonly<Record<number, z.infer<typeof StageCodeSchema>>> = {
+  1: 'intake_terms',
+  2: 'matching_willingness',
+  3: 'matching_willingness',
+  4: 'matching_willingness',
+  5: 'client_review',
+  6: 'contract_deposit',
+  7: 'contract_deposit',
+  8: 'contract_deposit',
+  9: 'date_confirmation',
+  10: 'active_service',
+  11: 'settlement_payout',
+};
 
 export const SourceLineageSchema = z.strictObject({
   owner: z.string().min(1),
@@ -73,7 +99,9 @@ export const SopStepProjectionSchema = z.strictObject({
 export const OrderOperationalTimelineSchema = z.strictObject({
   case_no: z.string().min(1),
   base_revision: z.number().int().nonnegative(),
+  lifecycle_status: OrderLifecycleStatusSchema,
   current_stage_code: StageCodeSchema.nullable(),
+  current_step_ordinal: z.number().int().min(1).max(11).nullable(),
   stages: z.array(StageProjectionSchema).length(7),
   sop_steps: z.array(SopStepProjectionSchema).length(11),
   projection_digest: Sha256Schema,
@@ -89,6 +117,30 @@ export const OrderOperationalTimelineSchema = z.strictObject({
   const stepOrdinals = timeline.sop_steps.map((step) => step.ordinal);
   if (new Set(stepOrdinals).size !== 11 || stepOrdinals.some((value, index) => value !== index + 1)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['sop_steps'], message: 'SOP ordinal 必須完整且不重複' });
+  }
+  if ((timeline.current_stage_code === null) !== (timeline.current_step_ordinal === null)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['current_step_ordinal'],
+      message: '目前階段與目前 SOP 步驟必須同時存在或同時為空',
+    });
+  }
+  if (
+    timeline.current_step_ordinal !== null
+    && timeline.current_stage_code !== CURRENT_STAGE_BY_STEP[timeline.current_step_ordinal]
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['current_stage_code'],
+      message: '目前階段必須對應 server-owned SOP 步驟',
+    });
+  }
+  if (timeline.lifecycle_status === '訂單取消' && timeline.current_stage_code !== null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['current_stage_code'],
+      message: '已取消訂單不得保留進行中的業務階段',
+    });
   }
 });
 
@@ -109,6 +161,7 @@ export const OrderOperationalTimelinePageSchema = z.strictObject({
   etag: Sha256Schema,
 });
 
+export type OrderLifecycleStatus = z.infer<typeof OrderLifecycleStatusSchema>;
 export type SourceLineage = z.infer<typeof SourceLineageSchema>;
 export type StageProjection = z.infer<typeof StageProjectionSchema>;
 export type SopStepProjection = z.infer<typeof SopStepProjectionSchema>;

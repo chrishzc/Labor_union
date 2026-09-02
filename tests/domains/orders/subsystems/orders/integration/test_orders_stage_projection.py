@@ -10,7 +10,7 @@ from decimal import Decimal
 
 import pytest
 
-from domains.orders.lifecycle import OrderLifecycleScope
+from domains.orders.lifecycle import OrderLifecycleScope, OrderLifecycleStatus
 from infrastructure.mysql.orders_stage_projection_repository import MySqlOrdersStageProjectionRepository, _PAGE_SQL
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
 from subsystems.orders.stage_projection_query import OrderStageProjectionContractError, OrderStageProjectionQueryService, StageProjectionQuery
@@ -21,6 +21,10 @@ BUSINESS_CLOCK = FixedBusinessClock(datetime(2026, 8, 21, 18, 0, tzinfo=TAIPEI_T
 
 
 def test_service_completion_projection_reads_the_canonical_orders_receipt() -> None:
+    assert "o.status AS lifecycle_status" in _PAGE_SQL
+    assert "scheduling_service_before_replacement_successors" in _PAGE_SQL
+    assert "replacement.replacement_generation_id = scheduling.effective_generation_id" in _PAGE_SQL
+    assert "GROUP BY case_no, replacement_generation_id" in _PAGE_SQL
     assert "FROM order_auto_completion_apply_receipts" in _PAGE_SQL
     assert "orders-auto-completion-receipt:" in _PAGE_SQL
     assert "service_lock.client_settlement_fingerprint AS service_completion_identity" not in _PAGE_SQL
@@ -34,6 +38,8 @@ def test_staff_settlement_reads_staff_payables_projection_not_obligation_status(
 def _row(case_no: str = "CASE-001") -> dict[str, object]:
     return {
         "case_no": case_no,
+        "lifecycle_status": OrderLifecycleStatus.DISCUSSION.value,
+        "replacement_resume_step": None,
         "order_version": 7,
         "order_updated_at": NOW,
         "import_receipt_id": 1,
@@ -276,6 +282,138 @@ def test_preassignment_confirmed_dates_are_not_mislabeled_as_actual_start() -> N
     assert item.sop_steps[8].status == "completed"
     assert item.sop_steps[8].label == "確認事前服務日期（精算）"
     assert item.sop_steps[9].status == "unavailable"
+
+
+def test_cancelled_order_has_no_active_stage_or_current_step() -> None:
+    row = _row("CANCELLED-001")
+    row["lifecycle_status"] = OrderLifecycleStatus.CANCELLED.value
+
+    page = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    )
+    item = page.items[0]
+
+    assert item.lifecycle_status is OrderLifecycleStatus.CANCELLED
+    assert item.current_stage_code is None
+    assert item.current_step_ordinal is None
+    assert sum(page.stage_counts.values()) == 0
+
+
+def test_in_service_lifecycle_cannot_be_dragged_back_by_intake_gap() -> None:
+    row = _row("IN-SERVICE-WITH-OLD-GAP")
+    row.update({
+        "lifecycle_status": OrderLifecycleStatus.IN_SERVICE.value,
+        "imported_terms_complete": 0,
+        "terms_event_id": None,
+        "terms_version": None,
+        "terms_created_at": None,
+        "assignment_last_service_date": date(2026, 8, 30),
+        "service_completion_identity": None,
+        "service_completed_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[0].status == "in_progress"
+    assert item.stages[5].status == "in_progress"
+    assert item.current_stage_code == "active_service"
+    assert item.current_step_ordinal == 10
+
+
+def test_active_service_owner_fact_advances_a_stale_established_lifecycle() -> None:
+    row = _row("ACTIVE-SERVICE-STALE-LIFECYCLE")
+    row.update({
+        "lifecycle_status": OrderLifecycleStatus.ESTABLISHED.value,
+        "assignment_last_service_date": date(2026, 8, 30),
+        "service_completion_identity": None,
+        "service_completed_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[5].status == "in_progress"
+    assert item.current_stage_code == "active_service"
+    assert item.current_step_ordinal == 10
+
+
+def test_established_order_ignores_old_matching_gap_without_replacement_lineage() -> None:
+    row = _row("ESTABLISHED-WITH-OLD-MATCHING-GAP")
+    row.update({
+        "lifecycle_status": OrderLifecycleStatus.ESTABLISHED.value,
+        "matching_plan_id": None,
+        "matching_plan_version": None,
+        "matching_plan_status": None,
+        "matching_created_at": None,
+        "candidate_pool_id": None,
+        "candidate_pool_created_at": None,
+        "candidate_pool_candidate_count": 0,
+        "candidate_pool_contacted_count": 0,
+        "candidate_pool_contacted_at": None,
+        "candidate_pool_replied_count": 0,
+        "candidate_pool_replied_at": None,
+        "assignment_count": 0,
+        "assignment_updated_at": None,
+        "assignment_first_service_date": None,
+        "assignment_last_service_date": None,
+        "service_completion_identity": None,
+        "service_completed_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[1].status == "unavailable"
+    assert item.current_step_ordinal >= 6
+    assert item.current_stage_code != "matching_willingness"
+
+
+def test_service_before_replacement_resume_step_is_the_only_established_reentry() -> None:
+    row = _row("ESTABLISHED-REPLACEMENT")
+    row.update({
+        "lifecycle_status": OrderLifecycleStatus.ESTABLISHED.value,
+        "replacement_resume_step": "step_3",
+        "candidate_pool_contacted_count": 0,
+        "candidate_pool_contacted_at": None,
+        "assignment_count": 0,
+        "assignment_updated_at": None,
+        "assignment_first_service_date": None,
+        "assignment_last_service_date": None,
+        "service_completion_identity": None,
+        "service_completed_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.current_stage_code == "matching_willingness"
+    assert item.current_step_ordinal == 3
+
+
+def test_historical_service_completion_stays_in_settlement_despite_old_gaps() -> None:
+    row = _row("HISTORICAL-COMPLETED-WITH-OLD-GAP")
+    row.update({
+        "lifecycle_status": OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED.value,
+        "imported_terms_complete": 0,
+        "terms_event_id": None,
+        "terms_version": None,
+        "terms_created_at": None,
+        "service_completion_identity": None,
+        "service_completed_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[0].status == "in_progress"
+    assert item.current_stage_code == "settlement_payout"
+    assert item.current_step_ordinal == 11
 
 
 def test_rootless_historical_order_is_isolated_without_guessing_a_business_stage() -> None:

@@ -79,7 +79,9 @@ class HistoricalStageBaselineOverlayService:
                     (
                         item.case_no,
                         item.base_revision,
+                        item.lifecycle_status.value,
                         item.current_stage_code,
+                        item.current_step_ordinal,
                         item.projection_digest,
                     )
                     for item in items
@@ -97,19 +99,30 @@ def historical_baseline_step(facts: HistoricalStageBaselineFacts) -> int | None:
         if isinstance(facts.selected_step, bool) or not 1 <= facts.selected_step <= 11:
             raise ValueError("historical_stage_baseline_step_invalid")
         return facts.selected_step
-    if facts.lifecycle_status is OrderLifecycleStatus.COMPLETED:
+    if facts.lifecycle_status in {
+        OrderLifecycleStatus.COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+    }:
         return 11
+    if facts.lifecycle_status in {
+        OrderLifecycleStatus.IN_SERVICE,
+        OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+    }:
+        return 10
     if (
         facts.actual_start_date is not None
         and facts.lifecycle_status
         in {
             OrderLifecycleStatus.DISCUSSION,
             OrderLifecycleStatus.ESTABLISHED,
-            OrderLifecycleStatus.IN_SERVICE,
         }
     ):
         return 10
-    if facts.lifecycle_status is OrderLifecycleStatus.ESTABLISHED:
+    if facts.lifecycle_status in {
+        OrderLifecycleStatus.ESTABLISHED,
+        OrderLifecycleStatus.HISTORICAL_UNSERVED,
+    }:
         return 9
     return None
 
@@ -120,13 +133,17 @@ def _overlay(
 ) -> OrderOperationalTimeline:
     if facts is None:
         return timeline
+    if timeline.lifecycle_status is OrderLifecycleStatus.CANCELLED:
+        if facts.selected_step is None and facts.lifecycle_status is OrderLifecycleStatus.CANCELLED:
+            return _cancelled_timeline(timeline, facts)
+        return timeline
     if facts.selected_step is None and facts.lifecycle_status is OrderLifecycleStatus.CANCELLED:
         return _cancelled_timeline(timeline, facts)
     selected_step = historical_baseline_step(facts)
     if selected_step is None:
         return timeline
 
-    current_step = _current_step(timeline.sop_steps, selected_step)
+    current_step = _current_step(timeline, selected_step)
     historical_cutoff = min(selected_step, current_step)
     current_stage_ordinal = _stage_ordinal_for_step(current_step)
 
@@ -146,34 +163,37 @@ def _overlay(
     return _with_projection_digest(
         timeline,
         current_stage_code=current_stage_code,
+        current_step_ordinal=current_step,
         stages=stages,
         steps=steps,
     )
 
 
 def _current_step(
-    steps: tuple[SopStepProjection, ...],
+    timeline: OrderOperationalTimeline,
     selected_step: int,
 ) -> int:
-    """Project current work without treating old missing history as a new regression.
+    """Use the canonical base projection and require typed re-entry evidence.
 
-    Before the immutable baseline, only a concrete current owner state
-    (not_started/in_progress/blocked) may reopen a step.  ``unavailable`` alone
-    remains an allowed historical predecessor gap because H-06 requires a typed
-    owner invalidation rather than inference from missing lineage.  From the
-    selected step onward, the first non-completed owner projection is current.
+    Generic predecessor status is not an H-06 invalidation event.  A baseline
+    may move backward only when the lifecycle itself returns to pending intake,
+    or when an applied service-before-replacement successor supplies the
+    persisted resume step carried by the base timeline.
     """
 
-    if tuple(step.ordinal for step in steps) != tuple(range(1, 12)):
-        raise ValueError("historical_stage_baseline_steps_invalid")
-    for step in steps:
-        if step.ordinal < selected_step:
-            if step.status in {"not_started", "in_progress", "blocked"}:
-                return step.ordinal
-            continue
-        if step.status != "completed":
-            return step.ordinal
-    return 11
+    current_step = timeline.current_step_ordinal
+    if current_step is None:
+        return selected_step
+    if current_step >= selected_step:
+        return current_step
+    if timeline.lifecycle_status is OrderLifecycleStatus.PENDING_COMPLETION:
+        return current_step
+    if (
+        timeline.lifecycle_status is OrderLifecycleStatus.ESTABLISHED
+        and timeline.replacement_resume_step_ordinal is not None
+    ):
+        return current_step
+    return selected_step
 
 
 def _stage_ordinal_for_step(step: int) -> int:
@@ -277,6 +297,7 @@ def _cancelled_timeline(
     return _with_projection_digest(
         timeline,
         current_stage_code=None,
+        current_step_ordinal=None,
         stages=stages,
         steps=steps,
     )
@@ -286,20 +307,26 @@ def _with_projection_digest(
     timeline: OrderOperationalTimeline,
     *,
     current_stage_code: str | None,
+    current_step_ordinal: int | None,
     stages: tuple[StageProjection, ...],
     steps: tuple[SopStepProjection, ...],
 ) -> OrderOperationalTimeline:
     payload = {
         "case_no": timeline.case_no,
         "base_revision": timeline.base_revision,
+        "lifecycle_status": timeline.lifecycle_status.value,
         "current_stage_code": current_stage_code,
+        "current_step_ordinal": current_step_ordinal,
         "stages": tuple(asdict(stage) for stage in stages),
         "sop_steps": tuple(asdict(step) for step in steps),
     }
     return OrderOperationalTimeline(
         timeline.case_no,
         timeline.base_revision,
+        timeline.lifecycle_status,
+        timeline.replacement_resume_step_ordinal,
         current_stage_code,
+        current_step_ordinal,
         stages,
         steps,
         _digest(payload),

@@ -33,8 +33,8 @@ Description: 提供 LIFF 身分與登記前導流程，安全顯示 typed flow �
   <h1 id="title">LINE 身分確認</h1>
   <p id="description">正在確認登入狀態…</p>
   <div id="customer-choice" hidden>
-    <button id="bind-existing" type="button"><strong>📝 已登記服務／補助</strong><span>我已填寫 BeClass 或政府補助資料，要直接綁定並查詢進度。</span></button>
-    <button id="register-new" type="button"><strong>✨ 尚未填寫登記表單</strong><span>我是新客戶，要填寫完整資料並建立服務檔案。</span></button>
+    <button id="register-new" type="button"><strong>📝 已申請市府平台</strong><span>我已在市府媒合服務平台完成登記，要繼續填寫工會【需求調查表單】。</span></button>
+    <button id="goto-gov" type="button"><strong>🏛️ 未申請市府平台</strong><span>我尚未於市府平台登記，請先前往新竹市政府到宅月子媒合服務平台提出申請。</span></button>
   </div>
   <form id="form" hidden></form>
   <div id="message" role="status"></div>
@@ -145,7 +145,7 @@ function showIdentityEntry(definition, purpose) {
     document.getElementById("form").hidden = false;
     return;
   }
-  document.getElementById("description").textContent = "請選擇您是否已填寫過工會基本資料表單。";
+  document.getElementById("description").textContent = "請確認您是否已於新竹市政府平台完成申請登記？";
   document.getElementById("customer-choice").hidden = false;
 }
 
@@ -189,29 +189,26 @@ async function openIdentityFlow(purpose) {
 }
 
 function configureCustomerChoice(definition) {
-  document.getElementById("bind-existing").addEventListener("click", async () => {
-    try {
-      showMessage("正在建立安全綁定流程…");
-      await openIdentityFlow("customer_binding");
-      await validateIdentityFlow("customer_binding");
-      showMessage("");
-    } catch (error) {
-      showIdentityError(error, "目前無法建立安全綁定流程。");
-      return;
-    }
-    document.getElementById("customer-choice").hidden = true;
-    document.getElementById("description").textContent = definition.description;
-    document.getElementById("form").hidden = false;
-  });
-  document.getElementById("register-new").addEventListener("click", async () => {
-    try {
-      showMessage("正在建立安全登記流程…");
-      await openIdentityFlow("customer_binding");
-      location.assign(`/line-registration?flow_id=${encodeURIComponent(flowId)}`);
-    } catch (error) {
-      showIdentityError(error, "目前無法開啟服務登記表單。");
-    }
-  });
+  const registerBtn = document.getElementById("register-new");
+  const gotoGovBtn = document.getElementById("goto-gov");
+
+  if (registerBtn) {
+    registerBtn.addEventListener("click", async () => {
+      try {
+        showMessage("正在為您開啟需求調查表單…");
+        await openIdentityFlow("customer_binding");
+        location.assign(`/line-registration?flow_id=${encodeURIComponent(flowId)}`);
+      } catch (error) {
+        showIdentityError(error, "目前無法開啟需求調查表單。");
+      }
+    });
+  }
+
+  if (gotoGovBtn) {
+    gotoGovBtn.addEventListener("click", () => {
+      location.assign("https://hsinchu-nanny.hccg.gov.tw/home");
+    });
+  }
 }
 
 function requireIdentityPreview(result) {
@@ -402,6 +399,10 @@ function requestedMobileAdminPage() {
 function requestedStandalonePage() {
   const {parameters, stateParameters} = combinedEntryParameters();
   const target = parameters.get("target") || stateParameters.get("target");
+  const entry = parameters.get("entry") || stateParameters.get("entry");
+  if (entry === "gateway" || target === "gateway") {
+    return "/line-gateway";
+  }
   return {profile_update: "/static/profile_update.html"}[target] || "";
 }
 
@@ -439,8 +440,8 @@ function hasSensitiveFlowContext() {
 
 function showRegistrationEntry() {
   const definition = definitions.customer_binding;
-  document.getElementById("title").textContent = "服務登記";
-  document.getElementById("description").textContent = "請選擇您是否已填寫過工會基本資料表單。";
+  document.getElementById("title").textContent = "服務確認與導流";
+  document.getElementById("description").textContent = "請確認您是否已於新竹市政府平台完成申請登記？";
   configureCustomerChoice(definition);
   buildForm(definition);
   document.getElementById("customer-choice").hidden = false;
@@ -456,7 +457,7 @@ async function validateIdentityFlow(purpose) {
   if (response.ok) return;
   const result = await response.json();
   if (response.status === 410) {
-    throw new Error("此連結已失效，請回到 LINE 重新取得連結。");
+    throw new Error("此連結已超過 15 分鐘安全時效已失效，請返回 LINE 聊天室點選下方圖文選單【服務登記】即可重新進入。");
   }
   throw new Error(
     safeIdentityErrorMessage(result, "目前無法驗證連結，請稍後再試。")

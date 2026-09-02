@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from domains.orders.lifecycle import OrderLifecycleScope
+from infrastructure.mysql.order_summary_query_repository import _ORDER_SUMMARY_PAGE_SQL
 from subsystems.orders.summary_query import (
     OrderSummaryContractError,
     OrderSummaryQueryRequest,
@@ -37,6 +38,10 @@ def _service(rows: object) -> OrderSummaryQueryService:
     return OrderSummaryQueryService(
         SimpleNamespace(fetch_page=lambda **_arguments: rows)
     )
+
+
+def test_unfinished_scope_excludes_normal_and_historical_accounting_completion() -> None:
+    assert "o.status NOT IN (%s, %s)" in _ORDER_SUMMARY_PAGE_SQL
 
 
 def test_query_returns_canonical_page_and_stable_etag() -> None:

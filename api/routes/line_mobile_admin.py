@@ -195,7 +195,7 @@ class _MobileAdminProfileView(BaseModel):
 
 @page_router.get("/line-mobile-admin", include_in_schema=False)
 def mobile_admin_page():
-    return FileResponse(_PAGE)
+    return FileResponse(_PAGE, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 @router.post("/profile", response_model=BaseResponse[_MobileAdminProfileView])

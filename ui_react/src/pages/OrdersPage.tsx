@@ -74,9 +74,9 @@ import {
   ORDER_FILTER_OPTIONS,
   adaptOrderSummaryPage,
   ORDERS_TYPED_PROJECTION_UNAVAILABLE,
+  type OrderListFilter,
   type OrderSummaryCardViewModel,
   type OrderSummaryPageViewModel,
-  type WorkflowStage,
 } from '../adapters/orders/order_summary_adapter';
 import {
   adaptMatchingWorkbenchDrawer,
@@ -214,7 +214,7 @@ export const OrdersPage: React.FC = () => {
   const [stagePage, setStagePage] = useState<OrderOperationalTimelinePage | null>(null);
   const [stageIndex, setStageIndex] = useState<ReadonlyMap<string, OrderOperationalTimeline>>(new Map());
   const [stageProjectionError, setStageProjectionError] = useState<string | null>(null);
-  const [selectedStage, setSelectedStage] = useState<WorkflowStage | '全部'>('全部');
+  const [selectedStage, setSelectedStage] = useState<OrderListFilter>('全部');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -1516,6 +1516,11 @@ export const OrdersPage: React.FC = () => {
     try {
       const query = await orderCancellationClient.query(order.id, controller.signal);
       if (requestId !== currentDrawerRequestRef.current) return;
+      if (query.case_no !== order.id) {
+        setCancellationError('取消資料案件識別不一致，請關閉後重試。');
+        setCancellationStatus('idle');
+        return;
+      }
       setCancellationQuery(query);
       setCancellationDays(cancellationDayDrafts(query.service_started ? query.confirmed_service_days : []));
       setCancellationStatus('idle');
@@ -1575,6 +1580,7 @@ export const OrdersPage: React.FC = () => {
     setHistoricalRestartStatus('idle');
     setHistoricalRestartMessage(null);
     setNormalFlowRestartedCaseNo(null);
+    setCancellationQuery(null);
     setCancellationDays([]);
     setCancellationPreview(null);
     setCancellationReceipt(null);
@@ -1616,7 +1622,7 @@ export const OrdersPage: React.FC = () => {
     } else if (tab === 'calendar' && actualStartQuery === null) {
       void loadCalendarTabQueries(activeOrder);
     } else if (tab === 'cancellation') {
-      if (cancellationQuery === null) {
+      if (cancellationQuery?.case_no !== activeOrder.id) {
         void loadCancellationTabQueries(activeOrder);
       }
     } else if (tab === 'reopen') {
@@ -1742,7 +1748,7 @@ export const OrdersPage: React.FC = () => {
   };
 
   const previewCancellation = async () => {
-    if (!cancelOrder || !cancellationQuery) return;
+    if (!cancelOrder || cancellationQuery?.case_no !== cancelOrder.id) return;
     const typedDays = validCancellationDays(cancellationDays);
     if (typedDays === null) {
       setCancellationError('請輸入有效且不重複的實際服務日期、月嫂。');
@@ -1885,16 +1891,22 @@ export const OrdersPage: React.FC = () => {
     }
   };
 
-  const cancellationIsAlreadyCancelled = cancellationQuery?.lifecycle_status === '訂單取消';
+  const activeCancellationQuery = cancellationQuery?.case_no === cancelOrder?.id
+    ? cancellationQuery
+    : null;
+  const cancellationIsAlreadyCancelled = activeCancellationQuery?.lifecycle_status === '訂單取消';
   const cancellationIsHistoricalRemediation = cancellationIsAlreadyCancelled
-    && cancellationQuery?.historical_mid_service_confirmation_available === true;
-  const cancellationServiceFactsAvailable = cancellationQuery?.service_started === true || cancellationIsHistoricalRemediation;
+    && activeCancellationQuery?.historical_mid_service_confirmation_available === true;
+  const cancellationServiceFactsAvailable = activeCancellationQuery?.service_started === true
+    || cancellationIsHistoricalRemediation;
   const cancellationLifecycleBlocked = cancellationIsAlreadyCancelled && !cancellationIsHistoricalRemediation;
 
   const allItems = pageData?.items || [];
   const filteredOrders = selectedStage === '全部'
     ? allItems
-    : allItems.filter((order) => stageIndex.get(order.id)?.current_stage_code === selectedStage);
+    : selectedStage === 'cancelled'
+      ? allItems.filter((order) => stageIndex.get(order.id)?.lifecycle_status === '訂單取消')
+      : allItems.filter((order) => stageIndex.get(order.id)?.current_stage_code === selectedStage);
   const depositAmountText = cardProjection?.rows.find((row) => row.key === 'deposit_amount_ntd')?.valueText
     ?? (cardProjectionError ? '資料載入失敗（定金金額）' : '正在確認定金金額…');
   const depositSettlementText = cardProjection?.rows.find((row) => row.key === 'deposit_settlement_state')?.valueText
@@ -1959,7 +1971,11 @@ export const OrdersPage: React.FC = () => {
           const count = filter.stage === '全部'
             ? pageData?.loadedCount
             : stagePage
-              ? [...stageIndex.values()].filter((timeline) => timeline.current_stage_code === filter.stage).length
+              ? [...stageIndex.values()].filter((timeline) => (
+                filter.stage === 'cancelled'
+                  ? timeline.lifecycle_status === '訂單取消'
+                  : timeline.current_stage_code === filter.stage
+              )).length
               : null;
           return (
             <button
@@ -2053,7 +2069,17 @@ export const OrdersPage: React.FC = () => {
                 </div>}
               </div>
 
-              {isOrderIntakeIncomplete(order) ? (
+              {order.orderStatus === '訂單取消' || order.status === '訂單取消' || stageIndex.get(order.id)?.lifecycle_status === '訂單取消' ? (
+                <div className="order-card-actions">
+                  <button
+                    className="btn-secondary-action"
+                    data-control-id="orders.card.cancelled-workbench"
+                    onClick={() => handleOpenContractDrawer(order, 'cancellation')}
+                  >
+                    查看取消與受控重開
+                  </button>
+                </div>
+              ) : isOrderIntakeIncomplete(order) ? (
                 <div className="order-card-actions" role="status">
                   案件仍待補齊姓名、服務日期等進件資料；完成補件後即可操作契約、媒合、排班與取消流程。
                 </div>

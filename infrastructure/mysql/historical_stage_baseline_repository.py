@@ -93,9 +93,11 @@ def _selected_step(
         return _validated_step(formal)
     if "operational_baseline_step" in receipt_snapshot:
         value = receipt_snapshot.get("operational_baseline_step")
-        if value is None:
-            return None
-        return _validated_step(_required_int(value, "operational_baseline_step"))
+        if value is not None:
+            return _validated_step(_required_int(value, "operational_baseline_step"))
+        event_step = _adoption_event_step(row, actual_start)
+        if event_step is not None:
+            return event_step
     return _legacy_step(lifecycle_status, actual_start)
 
 
@@ -149,23 +151,47 @@ def _event_actual_start(snapshot: Mapping[str, object]):
     return _MISSING
 
 
+def _adoption_event_step(
+    row: Mapping[str, object], actual_start: date | None
+) -> int | None:
+    raw_status = row.get("adoption_after_status")
+    if raw_status is None:
+        return None
+    try:
+        status = OrderLifecycleStatus(str(raw_status))
+    except ValueError as error:
+        raise ValueError("historical_stage_baseline_event_status_invalid") from error
+    return _legacy_step(status, actual_start)
+
+
 def _legacy_step(
     lifecycle_status: OrderLifecycleStatus,
     actual_start: date | None,
 ) -> int | None:
-    if lifecycle_status is OrderLifecycleStatus.COMPLETED:
+    if lifecycle_status in {
+        OrderLifecycleStatus.COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+    }:
         return 11
+    if lifecycle_status in {
+        OrderLifecycleStatus.IN_SERVICE,
+        OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+    }:
+        return 10
     if (
         actual_start is not None
         and lifecycle_status
         in {
             OrderLifecycleStatus.DISCUSSION,
             OrderLifecycleStatus.ESTABLISHED,
-            OrderLifecycleStatus.IN_SERVICE,
         }
     ):
         return 10
-    if lifecycle_status is OrderLifecycleStatus.ESTABLISHED:
+    if lifecycle_status in {
+        OrderLifecycleStatus.ESTABLISHED,
+        OrderLifecycleStatus.HISTORICAL_UNSERVED,
+    }:
         return 9
     return None
 

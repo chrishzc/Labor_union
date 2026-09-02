@@ -43,76 +43,17 @@ describe('React entrypoint registry', () => {
     });
   });
 
-  it('AI 工作頁保留編輯與新增功能，但不假造發布或 provider 發送', () => {
+  it('AI 工作頁只顯示正式 catalog 與 server-owned router preview', () => {
     render(React.createElement(AiEventStudio));
-    expect(screen.getByRole('button', { name: '＋ 新增事件' })).toBeEnabled();
-    expect(screen.getByRole('searchbox', { name: '搜尋事件名稱或標籤' })).toBeEnabled();
-    expect(screen.getByRole('combobox', { name: '事件分類篩選' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '預覽規則變更' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '🗑️ 刪除本機草稿' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '💾 儲存並發布' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /預覽本機規則比對/ })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '👍 有幫助' })).toBeEnabled();
-    expect(screen.getAllByText('回饋統計尚未接通')).toHaveLength(4);
-    expect(screen.getByText('回覆滿意度調查：本則回覆是否有解答問題？')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '＋ 新增事件' }));
-    expect(screen.getByDisplayValue('一般諮詢')).toBeInTheDocument();
-    expect(screen.getByText('目前顯示 5／5 筆本機草稿；正式規則數量尚未接通。')).toBeInTheDocument();
-
-    fireEvent.change(screen.getByRole('searchbox', { name: '搜尋事件名稱或標籤' }), {
-      target: { value: '客訴' },
-    });
-    expect(screen.getByText('目前顯示 1／5 筆本機草稿；正式規則數量尚未接通。')).toBeInTheDocument();
-    fireEvent.change(screen.getByRole('searchbox', { name: '搜尋事件名稱或標籤' }), {
-      target: { value: '' },
-    });
-
-    fireEvent.click(screen.getByRole('checkbox', { name: /通報真人專員介入/ }));
-    expect(screen.getByRole('combobox', { name: '人工工單優先級' })).toHaveValue('NORMAL');
-    fireEvent.change(screen.getByRole('combobox', { name: '人工工單優先級' }), {
-      target: { value: 'HIGH' },
-    });
-    expect(screen.getByRole('combobox', { name: '人工工單優先級' })).toHaveValue('HIGH');
-
-    fireEvent.click(screen.getByRole('button', { name: '🗑️ 刪除本機草稿' }));
-    expect(screen.getByRole('button', { name: '確認移除本機草稿' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: '確認移除本機草稿' }));
-    expect(screen.getByText(/重新載入頁面即恢復，後端與 LINE 均未變更/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '👍 有幫助' }));
-    expect(screen.getByText(/Feedback 必須由已驗證 LINE 身分提交；本工作台未取得 token，未寫入或增加本機統計/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '👎 未解決' }));
-    expect(screen.getByText(/Feedback 必須由已驗證 LINE 身分提交；本工作台未取得 token，未寫入或增加本機統計/)).toBeInTheDocument();
-    expect(screen.queryByText(/已成功儲存並同步/)).not.toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: '搜尋正式事件規則' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '讀取 server router preview' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '🧠 執行真實 Gemini 測試' })).toBeEnabled();
+    expect(screen.getByText('舊版 4 筆 INITIAL_RULES 本機示範資料已移除。本頁只接受正式 QA 題庫與 server-owned navigation/event catalog 作為可見來源。')).toBeInTheDocument();
+    expect(screen.getByLabelText('Server router 測試文字')).toHaveValue('我想修改登記資料');
+    expect(screen.getByLabelText('Server router confidence')).toHaveValue(90);
   });
 
-  it('AI 本機預覽優先轉人工、遵守自動回覆暫停，且不顯示內部入口路徑', () => {
-    render(React.createElement(AiEventStudio));
-    const input = screen.getByPlaceholderText(/輸入民眾的測試問法/);
-    const previewButton = screen.getByRole('button', { name: /預覽本機規則比對/ });
 
-    fireEvent.change(input, { target: { value: '我要人工協助，補助怎麼算' } });
-    fireEvent.click(previewButton);
-    expect(screen.getByText(/正式流程必須優先轉人工，不會套用自動規則/)).toBeInTheDocument();
-
-    const holdCheckbox = screen.getByRole('checkbox', { name: '模擬自動回覆暫停' });
-    fireEvent.click(holdCheckbox);
-    fireEvent.change(input, { target: { value: '補助怎麼算' } });
-    fireEvent.click(previewButton);
-    expect(screen.getByText(/目前模擬為自動回覆暫停/)).toBeInTheDocument();
-
-    fireEvent.click(holdCheckbox);
-    fireEvent.click(screen.getByText(/客戶資料與服務異動申請/));
-    expect(screen.getByRole('option', { name: '服務登記入口' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '身分確認入口' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '客戶資料異動入口（正式流程待補）' })).toBeInTheDocument();
-    expect(screen.queryByText(/profile_update\.html|\/line-registration|\/line-identity/)).not.toBeInTheDocument();
-
-    fireEvent.change(input, { target: { value: '我想改地址' } });
-    fireEvent.click(previewButton);
-    expect(screen.getByText('草稿動作：客戶資料異動入口（正式流程待補）（本頁不開啟）')).toBeInTheDocument();
-  });
 
   it('LIFF 視覺頁保留 8 個 LIFF 與 4 個 Flex，且只產生 canonical 測試連結', async () => {
     const runtimeConfigClient = {
@@ -141,9 +82,9 @@ describe('React entrypoint registry', () => {
     expect(screen.queryByText(/demo-token/)).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: /複製正式測試連結/ })).toBeEnabled());
     expect(screen.getByText(/本機預覽已更新/)).toBeInTheDocument();
-    expect(screen.getByText('服務登記')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '📝 已登記服務／補助' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '✨ 尚未填寫登記表單' })).toBeDisabled();
+    expect(screen.getByText('服務確認與導流')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '📝 已申請市府平台' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '🏛️ 未申請市府平台' })).toBeDisabled();
     expect(screen.queryByText('開始身分驗證與服務分流')).not.toBeInTheDocument();
     expect(screen.queryByText(/重新渲染 \d+ 次/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '🔄 重新整理預覽' }));
@@ -155,13 +96,13 @@ describe('React entrypoint registry', () => {
     );
 
     fireEvent.click(screen.getByText('2. register.html'));
-    expect(screen.getByText('產婦服務登記表單')).toBeInTheDocument();
+    expect(screen.getByText('需求調查表單')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '預覽登記資料' })).toBeDisabled();
 
     fireEvent.click(screen.getByText('3. bind.html'));
-    expect(screen.getByText('服務登記')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '📝 已登記服務／補助' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '✨ 尚未填寫登記表單' })).toBeDisabled();
+    expect(screen.getByText('服務確認與導流')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '📝 已申請市府平台' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '🏛️ 未申請市府平台' })).toBeDisabled();
     expect(screen.queryByText('候選紀錄摘要')).not.toBeInTheDocument();
   });
 
@@ -228,15 +169,17 @@ describe('React entrypoint registry', () => {
     render(React.createElement(AlertGroupSecurity, { runtimeTargetClient: client }));
 
     await waitFor(() => expect(client.listTargets).toHaveBeenCalledTimes(1));
-    expect(screen.getByText('typed 測試群組')).toBeInTheDocument();
+    expect(screen.getAllByText('typed 測試群組').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('typed 內部使用者')).toBeInTheDocument();
-    const groupRow = screen.getByText('typed 測試群組').closest('tr');
-    expect(groupRow).not.toBeNull();
-    fireEvent.click(within(groupRow as HTMLElement).getByRole('button', { name: '停用' }));
+    const groupCard = screen.getAllByText('typed 測試群組')[1]?.closest('article') ?? screen.getAllByText('typed 測試群組')[0].closest('div');
+    expect(groupCard).not.toBeNull();
+    fireEvent.click(within(groupCard as HTMLElement).getByRole('button', { name: /停用/ }));
     await waitFor(() => expect(client.previewSetEnabled).toHaveBeenCalledTimes(1));
-    expect(screen.getByText(/停用 typed 測試群組/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '確認停用' }));
+    expect(screen.getByText('🔎 異動影響確認')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '確認套用' }));
     await waitFor(() => expect(client.setEnabled).toHaveBeenCalledTimes(1));
-    expect(screen.getByText(/receipt-toggle/)).toBeInTheDocument();
+    expect(screen.getByText(/通知對象已更新/)).toBeInTheDocument();
+    expect(screen.getByText('已重新查詢並確認最新狀態。')).toBeInTheDocument();
   });
 });

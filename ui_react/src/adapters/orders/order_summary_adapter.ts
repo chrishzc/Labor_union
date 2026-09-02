@@ -15,9 +15,11 @@ export type WorkflowStage =
   | 'active_service'
   | 'settlement_payout';
 
+export type OrderListFilter = WorkflowStage | 'cancelled' | '全部';
+
 export interface FilterOption {
   label: string;
-  stage: WorkflowStage | '全部';
+  stage: OrderListFilter;
 }
 
 export const ORDER_FILTER_OPTIONS: readonly FilterOption[] = [
@@ -29,6 +31,7 @@ export const ORDER_FILTER_OPTIONS: readonly FilterOption[] = [
   { label: '5. 確認事前服務日期', stage: 'date_confirmation' },
   { label: '6. 正式服務中', stage: 'active_service' },
   { label: '7. 完工結案請款', stage: 'settlement_payout' },
+  { label: '已取消', stage: 'cancelled' },
 ];
 
 export interface ServiceTimeTupleViewModel {

@@ -22,10 +22,12 @@ _ACTION_KINDS = frozenset({"uri", "message", "postback", "richmenuswitch"})
 _AUDIENCE_ROLES = frozenset({"customer", "staff", "union_staff", "union_staff_page"})
 _LIFF_TARGETS = frozenset(
     {
+        "?entry=gateway",
         "?entry=registration",
         "?target=anomalies_center",
         "?target=customer_service",
         "?target=dashboard",
+        "?target=gateway",
         "?target=profile_update",
         "?target=staff_leave_apply",
         "?target=staff_order_search",

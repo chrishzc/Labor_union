@@ -144,8 +144,8 @@
 <div class="container">
     <div class="header">
         <div class="logo" id="pageLogo">新竹市月子工會</div>
-        <div class="title" id="pageTitle">歡迎！請選擇您的狀態</div>
-        <div class="subtitle" id="pageSubtitle">為協助您快速完成服務建檔，請告訴我們您是否已經填寫過申請表單？</div>
+        <div class="title" id="pageTitle">服務確認與身分導流</div>
+        <div class="subtitle" id="pageSubtitle">請確認您是否已於新竹市政府平台完成申請登記？</div>
     </div>
 
     <div id="actionsContainer"></div>
@@ -170,6 +170,7 @@
     const liffStateParams = parseLiffStateParams();
     const targetPage = urlParams.get('target') || liffStateParams.get('target');
     const targetPaths = {
+        gateway: '/line-gateway',
         registration: '/line-registration',
         staff_order_search: '/line-staff-orders',
         staff_schedule: '/line-staff-schedule',
@@ -183,9 +184,20 @@
         dashboard: '/line-identity?target=dashboard'
     };
     const actions = [
-        { path: targetPaths.registration, icon: '📝', label: '客戶服務登記', description: '填寫或補正服務申請資料' },
-        { path: targetPaths.staff_order_search, icon: '📋', label: '月嫂案件查詢', description: '查看本人可處理的案件' },
-        { path: targetPaths.staff_schedule, icon: '📅', label: '月嫂服務行程', description: '查看排班、請假與服務紀錄' },
+        {
+            path: '/line-registration',
+            icon: '📝',
+            label: '已申請市府平台',
+            description: '我已在市府媒合服務平台完成登記，要繼續填寫工會【需求調查表單】。',
+            isExternal: false
+        },
+        {
+            path: 'https://hsinchu-nanny.hccg.gov.tw/home',
+            icon: '🏛️',
+            label: '未申請市府平台',
+            description: '我尚未於市府平台登記，請先前往新竹市政府到宅月子媒合服務平台提出申請。',
+            isExternal: true
+        }
     ];
 
     async function initLiff() {
@@ -203,7 +215,7 @@
 
             if (!liff.getIDToken()) throw new Error('無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。');
             if (targetPaths[targetPage]) {
-                navigateTo(targetPaths[targetPage]);
+                navigateTo(targetPaths[targetPage], false);
                 return;
             }
             renderActions();
@@ -219,11 +231,11 @@
         container.replaceChildren();
         actions.forEach(action => {
             const card = document.createElement('a');
-            card.href = '#';
+            card.href = action.path;
             card.className = 'option-card';
             card.addEventListener('click', event => {
                 event.preventDefault();
-                navigateTo(action.path);
+                navigateTo(action.path, action.isExternal);
             });
             const icon = document.createElement('div');
             icon.className = 'option-icon';
@@ -239,7 +251,11 @@
         });
     }
 
-    function navigateTo(path) {
+    function navigateTo(path, isExternal = false) {
+        if (isExternal) {
+            window.location.href = path;
+            return;
+        }
         document.getElementById('loaderOverlay').style.display = 'flex';
         document.getElementById('loaderText').textContent = '正在為您跳轉...';
         window.location.href = path;

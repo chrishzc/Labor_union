@@ -57,6 +57,9 @@ function displayError(error: unknown): string {
     if (error.category === 'forbidden') {
       return '目前登入狀態不能排入發布工作；本機免驗證模式不可發布，其他情況請重新登入已啟用的內部使用者帳號。';
     }
+    if (error.code === 'rich_menu_preview_stale') {
+      return '選單草稿或版本已變更，先前的發布預覽已過期；請點擊右上角「🔍 檢查發布影響」重新預覽後，再勾選確認發布。';
+    }
     return `${error.code}：${error.message}`;
   }
   return error instanceof Error ? error.message : 'Rich Menu 發布操作失敗，請重新查詢後再試。';
@@ -109,12 +112,15 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
     setPreviewState('loading');
     setPreview(null);
     setReceipt(null);
-    setPublishConfirmed(false);
     setErrorMessage(null);
     try {
       const result = await client.preview(selectedMenu.id, { signal: controller.signal });
       if (controller.signal.aborted) return;
       setPreview(adaptLineRichMenuPublishPreview(result));
+      setPublishConfirmed(false);
+      if (!publishReason.trim()) {
+        setPublishReason('工會人員更新圖文選單設定');
+      }
       setPreviewState('success');
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -124,23 +130,54 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
   };
 
   const queuePublication = async (): Promise<void> => {
-    if (!selectedMenu || !preview || !publishConfirmed || !publishReason.trim()) return;
+    if (!selectedMenu || !publishConfirmed) return;
+    const effectiveReason = publishReason.trim() || '工會人員更新圖文選單設定';
     const controller = new AbortController();
     controllerRef.current = controller;
     setPublishState('loading');
     setReceipt(null);
     setErrorMessage(null);
     try {
-      const result = await client.publish(
-        selectedMenu.id,
-        {
-          preview_id: preview.previewId,
-          reason: publishReason.trim(),
-          idempotency_key: uniqueOperationIdentity('line-rich-menu-publish-idem'),
-          correlation_id: uniqueOperationIdentity('line-rich-menu-publish-corr'),
-        },
-        { signal: controller.signal }
-      );
+      let activePreview = preview;
+      if (!activePreview) {
+        const previewResult = await client.preview(selectedMenu.id, { signal: controller.signal });
+        activePreview = adaptLineRichMenuPublishPreview(previewResult);
+        setPreview(activePreview);
+      }
+
+      let result;
+      try {
+        result = await client.publish(
+          selectedMenu.id,
+          {
+            preview_id: activePreview.previewId,
+            reason: effectiveReason,
+            idempotency_key: uniqueOperationIdentity('line-rich-menu-publish-idem'),
+            correlation_id: uniqueOperationIdentity('line-rich-menu-publish-corr'),
+          },
+          { signal: controller.signal }
+        );
+      } catch (publishErr) {
+        if (publishErr instanceof LineRichMenuPublicationError && publishErr.code === 'rich_menu_preview_stale') {
+          // 自動重新獲取最新預覽並重試發布
+          const freshPreviewResult = await client.preview(selectedMenu.id, { signal: controller.signal });
+          activePreview = adaptLineRichMenuPublishPreview(freshPreviewResult);
+          setPreview(activePreview);
+          result = await client.publish(
+            selectedMenu.id,
+            {
+              preview_id: activePreview.previewId,
+              reason: effectiveReason,
+              idempotency_key: uniqueOperationIdentity('line-rich-menu-publish-idem'),
+              correlation_id: uniqueOperationIdentity('line-rich-menu-publish-corr'),
+            },
+            { signal: controller.signal }
+          );
+        } else {
+          throw publishErr;
+        }
+      }
+
       if (controller.signal.aborted) return;
       const nextReceipt = adaptLineRichMenuPublicationReceipt(result);
       setReceipt(nextReceipt);
@@ -202,15 +239,38 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
           </p>
         </div>
         {selectedMenu && (
-          <button
-            type="button"
-            className="line-secondary-btn"
-            disabled={busy}
-            onClick={() => void runPreview()}
-            style={{ padding: '6px 14px', fontSize: '0.85rem' }}
-          >
-            🔍 檢查發布影響
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              type="button"
+              className="line-primary-btn"
+              disabled={busy || Boolean(publicationAccess)}
+              onClick={() => {
+                setPublishConfirmed(true);
+                void queuePublication();
+              }}
+              style={{
+                padding: '8px 20px',
+                fontSize: '0.9rem',
+                fontWeight: 700,
+                background: '#ea580c',
+                color: '#fff',
+                border: 0,
+                borderRadius: '8px',
+                cursor: busy ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {publishState === 'loading' ? '正在發布至 LINE…' : '🚀 發布至 LINE'}
+            </button>
+            <button
+              type="button"
+              className="line-secondary-btn"
+              disabled={busy}
+              onClick={() => void runPreview()}
+              style={{ padding: '8px 12px', fontSize: '0.82rem' }}
+            >
+              🔍 檢查發布影響
+            </button>
+          </div>
         )}
       </div>
 
@@ -225,23 +285,21 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
           </p>
 
           <label htmlFor="line-rich-menu-publish-reason" style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#57423b', marginBottom: '4px' }}>
-            發布原因說明
+            發布原因
           </label>
-          <textarea
+          <input
             id="line-rich-menu-publish-reason"
+            aria-label="發布原因"
             value={publishReason}
-            rows={2}
             maxLength={500}
             disabled={busy}
-            placeholder="例如：更新秋季月嫂媒合方案與線上補助試算連結..."
-            style={{ width: '100%', padding: '8px', border: '1px solid #dec0b6', borderRadius: '8px', fontSize: '0.85rem', boxSizing: 'border-box' }}
+            placeholder="例如：工會人員更新圖文選單設定"
+            style={{ width: '100%', padding: '8px', border: '1px solid #dec0b6', borderRadius: '8px', fontSize: '0.85rem', boxSizing: 'border-box', marginBottom: '8px' }}
             onChange={(event) => {
               setPublishReason(event.target.value);
-              setPublishConfirmed(false);
-              setPublishState('idle');
             }}
           />
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', color: '#57423b', margin: '10px 0' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', color: '#57423b', margin: '8px 0' }}>
             <input
               type="checkbox"
               checked={publishConfirmed}
@@ -252,7 +310,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
           </label>
           <button
             type="button"
-            style={{ width: '100%', padding: '10px', background: '#ff7f50', color: '#fff', border: 0, borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
+            style={{ width: '100%', padding: '10px', background: '#ea580c', color: '#fff', border: 0, borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
             disabled={busy || Boolean(publicationAccess) || !publishConfirmed || publishReason.trim().length === 0}
             onClick={() => void queuePublication()}
           >

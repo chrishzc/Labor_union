@@ -198,6 +198,27 @@ describe('OrdersPage query real-data slice', () => {
     expect(screen.queryByText(/合約總額：/)).not.toBeInTheDocument();
   });
 
+  it('filters cancelled orders outside the seven operational stages', async () => {
+    const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);
+    const cancelled = stagePage.items[0];
+    cancelled.lifecycle_status = '訂單取消';
+    cancelled.current_stage_code = null;
+    cancelled.current_step_ordinal = null;
+    stagePage.stage_counts.intake_terms -= 1;
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(stagePage);
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+
+    const cancelledFilter = screen.getByRole('button', { name: /已取消 \(1\)/ });
+    expect(cancelledFilter).toBeEnabled();
+    fireEvent.click(cancelledFilter);
+    expect(screen.getByText('ORD-2026-0801')).toBeInTheDocument();
+    expect(screen.queryByText('ORD-2026-0802')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看取消與受控重開' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /媒合與正式排班/ })).not.toBeInTheDocument();
+  });
+
   it('keeps summary orders usable when stage projection includes a stage-only historical case', async () => {
     const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);
     vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue({
@@ -908,6 +929,32 @@ describe('OrdersPage query real-data slice', () => {
     expect(screen.queryByText('🟠 歷史服務事實可補登')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /預覽取消與退款試算/ })).toBeDisabled();
     expect(orderCancellationClient.preview).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse a cancelled query when the shared workbench opens another order', async () => {
+    useOperableSummary();
+    vi.mocked(orderCancellationClient.query).mockImplementation(async (caseNo) => ({
+      ...cancellationQuery,
+      case_no: caseNo,
+      lifecycle_status: caseNo === 'ORD-2026-0801' ? '訂單取消' : '訂單成立',
+    }));
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
+    expect(await screen.findByText('🚫 不可再次取消')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));
+
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[1]);
+    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
+
+    expect(await screen.findByText('🟢 允許取消試算')).toBeInTheDocument();
+    expect(screen.queryByText('此案件已取消，不可再次取消；如需處理請改走受控重開。')).not.toBeInTheDocument();
+    expect(orderCancellationClient.query).toHaveBeenCalledWith(
+      'ORD-2026-0802',
+      expect.any(AbortSignal),
+    );
   });
 
   it('allows historical mid-service remediation only when the server flag is true', async () => {
