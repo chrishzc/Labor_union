@@ -28,6 +28,7 @@ from infrastructure.http.private_operations_client import (
 )
 from subsystems.line.runtime_monitoring import RuntimeHealthObservation, RuntimeHealthStatus
 
+
 def main() -> int:
     discard_database_credentials()
     arguments = _arguments()
@@ -66,13 +67,15 @@ def _run_cycle(client: PrivateOperationsClient, identity: dict[str, object]) -> 
 def _external_observations() -> list[RuntimeHealthObservation]:
     observations = [
         _http_probe("api", "FastAPI", _api_health_url()),
-        _http_probe("streamlit", "Streamlit", _ui_health_url()),
+        _http_probe("react", "React Admin", _ui_health_url()),
     ]
     public_url = os.getenv("LINE_PUBLIC_BASE_URL", "").strip().rstrip("/")
     observations.append(
         _http_probe("public_endpoint", "Public endpoint", f"{public_url}/health")
         if public_url
-        else _unknown("public_endpoint", "Public endpoint", "尚未設定 LINE_PUBLIC_BASE_URL")
+        else _unknown(
+            "public_endpoint", "Public endpoint", "尚未設定 LINE_PUBLIC_BASE_URL"
+        )
     )
     liff_url = os.getenv("LINE_LIFF_HEALTH_URL", "").strip()
     observations.append(
@@ -110,7 +113,9 @@ def _http_probe(name: str, component: str, url: str) -> RuntimeHealthObservation
         )
 
 
-def _serialize_observation(observation: RuntimeHealthObservation) -> dict[str, object]:
+def _serialize_observation(
+    observation: RuntimeHealthObservation,
+) -> dict[str, object]:
     return {
         "service_name": observation.check_name,
         "component": observation.component,
@@ -138,7 +143,7 @@ def _api_health_url() -> str:
 
 
 def _ui_health_url() -> str:
-    return os.getenv("UI_HEALTH_URL", "http://127.0.0.1:8501/_stcore/health").strip()
+    return os.getenv("UI_HEALTH_URL", "http://127.0.0.1:5173/admin/").strip()
 
 
 def _redacted_url(url: str) -> str:
