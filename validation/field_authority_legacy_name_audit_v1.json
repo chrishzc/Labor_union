@@ -19,8 +19,7 @@
         "db/schema.sql",
         "db/schema_parts/999_v_order_details_view.sql",
         "infrastructure/mysql/order_detail_query_repository.py",
-        "document/文件整併工作區/06_欄位權威性與計算邏輯盤點/01_客戶與訂單生命週期/orders.md",
-        "document/管理端UI/系統異常警示中心規格書.md"
+        "document/文件整併工作區/06_欄位權威性與計算邏輯盤點/01_客戶與訂單生命週期/orders.md"
       ],
       "allowed_legacy_paths": [
         "scripts/migrate_order_contract_identity.py",
