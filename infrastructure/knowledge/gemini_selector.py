@@ -15,7 +15,10 @@ import requests
 from infrastructure.runtime.llm_api_key_store import LlmApiKeyStore
 
 
-DEFAULT_GEMINI_MODEL = "gemini-3.7-flash"
+# This workload only classifies/selects reviewed QA candidates. Prefer Google's
+# cost-efficient GA Flash-Lite model so normal AI Studio free-tier usage does
+# not spend a larger model on simple semantic routing.
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 _GEMINI_GENERATE_CONTENT_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
@@ -58,7 +61,7 @@ class GeminiCandidateSelector:
                     "generationConfig": {
                         "temperature": 0,
                         "maxOutputTokens": 64,
-                        "thinkingConfig": {"thinkingLevel": "low"},
+                        "thinkingConfig": {"thinkingLevel": "minimal"},
                     },
                 },
                 timeout=self._timeout_seconds,
