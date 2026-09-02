@@ -19,6 +19,7 @@ import type {
   CoreStageBranchType,
   CoreStageCode,
   CoreStageSubstatusCode,
+  HistoricalLifecycleFacet,
 } from '../api/orders/order_core_stage_projection_schemas';
 import {
   loadAllOrderSummaries,
@@ -29,6 +30,7 @@ import {
   CORE_STAGE_DEFINITIONS,
   coreStageBranchLabel,
   coreStageDefinition,
+  HISTORICAL_LIFECYCLE_LABELS,
   ORDER_CORE_STAGE_PROJECTION_UNAVAILABLE,
   type OrderCoreStageWorkbenchViewModel,
 } from '../adapters/orders/order_core_stage_projection_adapter';
@@ -38,6 +40,12 @@ import {
 } from '../adapters/orders/order_summary_adapter';
 
 const BRANCH_TYPES: readonly CoreStageBranchType[] = ['normal', 'historical', 'cancelled'];
+const HISTORICAL_LIFECYCLES: readonly HistoricalLifecycleFacet[] = [
+  'unserved',
+  'in_service',
+  'service_completed',
+  'accounting_completed',
+];
 
 function summaryUnavailableMessage(summaryLoading: boolean, summaryQueryFailed: boolean): string {
   if (summaryLoading) return '正式案件摘要載入中。';
@@ -64,6 +72,7 @@ export const OrderWorkbenchV2Page: FC = () => {
   const [selectedStage, setSelectedStage] = useState<CoreStageCode>('intake_validation');
   const [selectedSubstatus, setSelectedSubstatus] = useState<CoreStageSubstatusCode | null>(null);
   const [branchType, setBranchType] = useState<CoreStageBranchType>('normal');
+  const [selectedHistoricalLifecycle, setSelectedHistoricalLifecycle] = useState<HistoricalLifecycleFacet | null>(null);
   const [search, setSearch] = useState('');
   const [onlyBlocked, setOnlyBlocked] = useState(false);
   const [onlyWarning, setOnlyWarning] = useState(false);
@@ -83,6 +92,10 @@ export const OrderWorkbenchV2Page: FC = () => {
       page_size: 200,
       lifecycle_scope: 'all',
       branch_type: branchType,
+      historical_lifecycle:
+        branchType === 'historical' && selectedHistoricalLifecycle !== null
+          ? selectedHistoricalLifecycle
+          : undefined,
       case_no_search: normalizedSearch || undefined,
       blocker_only: onlyBlocked || undefined,
       warning_only: onlyWarning || undefined,
@@ -115,7 +128,15 @@ export const OrderWorkbenchV2Page: FC = () => {
       });
 
     return () => controller.abort();
-  }, [branchType, normalizedSearch, onlyBlocked, onlyWarning, selectedStage, selectedSubstatus]);
+  }, [
+    branchType,
+    normalizedSearch,
+    onlyBlocked,
+    onlyWarning,
+    selectedHistoricalLifecycle,
+    selectedStage,
+    selectedSubstatus,
+  ]);
 
   useEffect(() => {
     let alive = true;
@@ -147,16 +168,21 @@ export const OrderWorkbenchV2Page: FC = () => {
   const selectedDefinition = coreStageDefinition(selectedStage);
   const selectedStageCount = view?.stageCounts[selectedStage] ?? 0;
   const displayedCount = view?.items.length ?? 0;
+  const historicalTotalCount = view
+    ? HISTORICAL_LIFECYCLES.reduce((sum, facet) => sum + (view.historicalLifecycleCounts?.[facet] ?? 0), 0)
+    : 0;
 
   const selectBranch = (branch: CoreStageBranchType) => {
     setBranchType(branch);
     setSelectedSubstatus(null);
+    setSelectedHistoricalLifecycle(null);
   };
 
   const selectStage = (stage: CoreStageCode) => {
     setBranchType('normal');
     setSelectedStage(stage);
     setSelectedSubstatus(null);
+    setSelectedHistoricalLifecycle(null);
   };
 
   return (
@@ -165,13 +191,16 @@ export const OrderWorkbenchV2Page: FC = () => {
         <div>
           <div className="order-v2-eyebrow">BETA · 正式唯讀查詢</div>
           <h1>📌 待辦看板 Beta</h1>
-          <p>案件、十三階段計數與子狀態計數均由正式 server query 回傳；此頁不再載入舊七階資料後自行推導。</p>
+          <p>案件、十三階段與歷史 lifecycle 計數均由正式 server query 回傳；瀏覽器不以日期或舊投影猜測狀態。</p>
         </div>
         <div className="order-v2-summary">
           <strong>{coreStageBranchLabel(branchType)}</strong><span>目前支線</span>
           <strong>{displayedCount}</strong><span>目前顯示</span>
           {branchType === 'normal' && (
             <><strong>{selectedStageCount}</strong><span>階段總數</span></>
+          )}
+          {branchType === 'historical' && (
+            <><strong>{historicalTotalCount}</strong><span>歷史總數</span></>
           )}
         </div>
       </header>
@@ -211,12 +240,16 @@ export const OrderWorkbenchV2Page: FC = () => {
           <h2>
             {branchType === 'normal'
               ? `${selectedDefinition.ordinal}. ${selectedDefinition.label}`
-              : coreStageBranchLabel(branchType)}
+              : branchType === 'historical' && selectedHistoricalLifecycle !== null
+                ? `歷史訂單 · ${HISTORICAL_LIFECYCLE_LABELS[selectedHistoricalLifecycle]}`
+                : coreStageBranchLabel(branchType)}
           </h2>
           <p>
             {branchType === 'normal'
               ? selectedDefinition.ownerLabel
-              : '由正式 branch_type query 讀取，不套用正常十三階段推導。'}
+              : branchType === 'historical'
+                ? '由 canonical lifecycle server facet 分類；historical source period 不參與 lifecycle 推導。'
+                : '取消訂單維持獨立終止支線，不套用正常十三階段 current stage。'}
           </p>
         </div>
         <div className="order-v2-toolbar-actions">
@@ -260,6 +293,28 @@ export const OrderWorkbenchV2Page: FC = () => {
               onClick={() => setSelectedSubstatus(option.code)}
             >
               {option.label} <strong>{option.count}</strong>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {branchType === 'historical' && (
+        <div className="order-v2-subfilters" aria-label="歷史 lifecycle 篩選">
+          <button
+            type="button"
+            className={selectedHistoricalLifecycle === null ? 'active' : ''}
+            onClick={() => setSelectedHistoricalLifecycle(null)}
+          >
+            全部 <strong>{historicalTotalCount}</strong>
+          </button>
+          {HISTORICAL_LIFECYCLES.map((facet) => (
+            <button
+              type="button"
+              key={facet}
+              className={selectedHistoricalLifecycle === facet ? 'active' : ''}
+              onClick={() => setSelectedHistoricalLifecycle(facet)}
+            >
+              {HISTORICAL_LIFECYCLE_LABELS[facet]} <strong>{view?.historicalLifecycleCounts?.[facet] ?? 0}</strong>
             </button>
           ))}
         </div>
@@ -315,6 +370,9 @@ export const OrderWorkbenchV2Page: FC = () => {
                   <span>Revision：{item.baseRevision}</span>
                   {stage && <span>目前階段：{stage.label}</span>}
                   {stage && <span>Owner：{stage.owner}</span>}
+                  {item.historicalCurrentOwnerStage && (
+                    <span>目前正式 owner progression：{item.historicalCurrentOwnerStage.label}</span>
+                  )}
                   {stage?.occurred_at && (
                     <span>更新：{new Date(stage.occurred_at).toLocaleString('zh-TW')}</span>
                   )}
@@ -358,7 +416,7 @@ export const OrderWorkbenchV2Page: FC = () => {
           className={`order-v2-lane ${branchType === 'historical' ? 'active' : ''}`}
           onClick={() => selectBranch('historical')}
         >
-          <span><strong>歷史訂單支線</strong><small>使用正式 historical branch filter。</small></span>
+          <span><strong>歷史訂單支線</strong><small>使用正式 historical lifecycle facet 與 immutable evidence。</small></span>
           <b>{branchType === 'historical' ? '檢視中' : '開啟'}</b>
         </button>
         <div className="order-v2-lane pending">

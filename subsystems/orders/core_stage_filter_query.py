@@ -1,6 +1,6 @@
 """
 File: core_stage_filter_query.py
-Description: 在待辦看板 Beta query boundary 執行十三核心階段篩選、facet counts 與確定性 pagination。
+Description: 在待辦看板 Beta query boundary 執行十三核心階段、歷史 lifecycle 篩選、facet counts 與確定性 pagination。
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import hashlib
 import json
 from typing import Literal, Mapping, Protocol, cast
 
-from domains.orders.lifecycle import OrderLifecycleScope
+from domains.orders.lifecycle import OrderLifecycleScope, OrderLifecycleStatus
 from shared_kernel.validation import require_canonical_text
 from subsystems.orders.core_stage_projection_query import (
     CoreStageBranchType,
@@ -43,6 +43,12 @@ CoreStageSubstatusCode = Literal[
     "client_settlement_pending", "client_settlement_in_progress", "client_balance_open", "client_settled", "client_settlement_unavailable",
     "staff_settlement_pending", "staff_settlement_in_progress", "staff_payable_open", "staff_settled", "staff_settlement_unavailable",
 ]
+HistoricalLifecycleFacet = Literal[
+    "unserved",
+    "in_service",
+    "service_completed",
+    "accounting_completed",
+]
 
 _CORE_STAGE_CODES: tuple[CoreStageCode, ...] = (
     "intake_validation",
@@ -59,6 +65,15 @@ _CORE_STAGE_CODES: tuple[CoreStageCode, ...] = (
     "client_settlement",
     "staff_payout",
 )
+_HISTORICAL_LIFECYCLE_STATUS_BY_FACET: Mapping[HistoricalLifecycleFacet, OrderLifecycleStatus] = {
+    "unserved": OrderLifecycleStatus.HISTORICAL_UNSERVED,
+    "in_service": OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+    "service_completed": OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+    "accounting_completed": OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+}
+_HISTORICAL_LIFECYCLE_FACET_BY_STATUS = {
+    status: facet for facet, status in _HISTORICAL_LIFECYCLE_STATUS_BY_FACET.items()
+}
 _VALID_SUBSTATUSES = frozenset(
     value for mapping in _SUBSTATUS_BY_CODE.values() for value in mapping.values()
 )
@@ -79,6 +94,7 @@ class CoreStageProjectionFilterQuery:
     blocker_only: bool = False
     warning_only: bool = False
     branch_type: CoreStageBranchType | None = None
+    historical_lifecycle: HistoricalLifecycleFacet | None = None
 
     def __post_init__(self) -> None:
         StageProjectionQuery(self.page_size, self.after_case_no, self.lifecycle_scope)
@@ -99,6 +115,13 @@ class CoreStageProjectionFilterQuery:
             raise TypeError("warning_only must be a bool")
         if self.branch_type not in {None, "normal", "historical", "cancelled"}:
             raise ValueError("branch_type is outside the core-stage contract")
+        if (
+            self.historical_lifecycle is not None
+            and self.historical_lifecycle not in _HISTORICAL_LIFECYCLE_STATUS_BY_FACET
+        ):
+            raise ValueError("historical_lifecycle is outside the historical branch contract")
+        if self.historical_lifecycle is not None and self.branch_type != "historical":
+            raise ValueError("historical_lifecycle requires branch_type=historical")
 
 
 @dataclass(frozen=True)
@@ -106,6 +129,7 @@ class OrderCoreStageTimelineFilteredPage:
     items: tuple[OrderCoreStageTimeline, ...]
     stage_counts: Mapping[CoreStageCode, int]
     substatus_counts: Mapping[CoreStageSubstatusCode, int]
+    historical_lifecycle_counts: Mapping[HistoricalLifecycleFacet, int]
     next_cursor: str | None
     etag: str
 
@@ -119,6 +143,9 @@ def query_core_stage_page(
 
     stage_counts: dict[CoreStageCode, int] = {code: 0 for code in _CORE_STAGE_CODES}
     substatus_counts: dict[CoreStageSubstatusCode, int] = {}
+    historical_lifecycle_counts: dict[HistoricalLifecycleFacet, int] = {
+        facet: 0 for facet in _HISTORICAL_LIFECYCLE_STATUS_BY_FACET
+    }
     if request.stage is not None:
         substatus_counts = {
             cast(CoreStageSubstatusCode, code): 0
@@ -159,6 +186,10 @@ def query_core_stage_page(
 
             if not _matches_common_filters(item, request):
                 continue
+            historical_facet = _historical_lifecycle_facet(item.lifecycle_status)
+            if historical_facet is not None:
+                historical_lifecycle_counts[historical_facet] += 1
+
             current_stage = _current_stage(item)
             if current_stage is not None:
                 stage_counts[current_stage.code] += 1
@@ -167,6 +198,8 @@ def query_core_stage_page(
                     substatus_counts[substatus] += 1
 
             if requested_cursor_key is not None and identity_key <= requested_cursor_key:
+                continue
+            if not _matches_historical_lifecycle(item, request):
                 continue
             if not _matches_stage_filters(current_stage, request):
                 continue
@@ -181,13 +214,20 @@ def query_core_stage_page(
 
     items = tuple(selected)
     next_cursor = items[-1].case_no if has_more and items else None
-    etag = _response_etag(items, stage_counts, substatus_counts, next_cursor)
+    etag = _response_etag(
+        items,
+        stage_counts,
+        substatus_counts,
+        historical_lifecycle_counts,
+        next_cursor,
+    )
     if _can_reuse_single_source_etag(request, items, next_cursor, single_source_etag):
         etag = cast(str, single_source_etag)
     return OrderCoreStageTimelineFilteredPage(
         items=items,
         stage_counts=stage_counts,
         substatus_counts=substatus_counts,
+        historical_lifecycle_counts=historical_lifecycle_counts,
         next_cursor=next_cursor,
         etag=etag,
     )
@@ -228,6 +268,23 @@ def _matches_common_filters(
     return True
 
 
+def _historical_lifecycle_facet(
+    lifecycle_status: OrderLifecycleStatus,
+) -> HistoricalLifecycleFacet | None:
+    return _HISTORICAL_LIFECYCLE_FACET_BY_STATUS.get(lifecycle_status)
+
+
+def _matches_historical_lifecycle(
+    item: OrderCoreStageTimeline,
+    request: CoreStageProjectionFilterQuery,
+) -> bool:
+    if request.historical_lifecycle is None:
+        return True
+    return item.lifecycle_status is _HISTORICAL_LIFECYCLE_STATUS_BY_FACET[
+        request.historical_lifecycle
+    ]
+
+
 def _current_stage(item: OrderCoreStageTimeline) -> CoreStageProjection | None:
     if item.current_core_stage_code is None:
         return None
@@ -255,12 +312,14 @@ def _response_etag(
     items: tuple[OrderCoreStageTimeline, ...],
     stage_counts: Mapping[CoreStageCode, int],
     substatus_counts: Mapping[CoreStageSubstatusCode, int],
+    historical_lifecycle_counts: Mapping[HistoricalLifecycleFacet, int],
     next_cursor: str | None,
 ) -> str:
     payload = {
         "items": tuple((item.case_no, item.source_projection_digest) for item in items),
         "stage_counts": stage_counts,
         "substatus_counts": substatus_counts,
+        "historical_lifecycle_counts": historical_lifecycle_counts,
         "next_cursor": next_cursor,
     }
     return hashlib.sha256(
@@ -289,6 +348,7 @@ def _can_reuse_single_source_etag(
         and not request.blocker_only
         and not request.warning_only
         and request.branch_type is None
+        and request.historical_lifecycle is None
         and len(items) <= request.page_size
     )
 
@@ -296,6 +356,7 @@ def _can_reuse_single_source_etag(
 __all__ = [
     "CoreStageProjectionFilterQuery",
     "CoreStageSubstatusCode",
+    "HistoricalLifecycleFacet",
     "OrderCoreStageTimelineFilteredPage",
     "query_core_stage_page",
 ]

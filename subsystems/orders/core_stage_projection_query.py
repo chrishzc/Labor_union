@@ -67,6 +67,8 @@ class OrderCoreStageTimeline:
     branch_type: CoreStageBranchType
     current_core_stage_code: CoreStageCode | None
     current_core_stage_ordinal: int | None
+    historical_current_owner_stage_code: CoreStageCode | None
+    historical_current_owner_stage_ordinal: int | None
     core_stages: tuple[CoreStageProjection, ...]
     source_projection_digest: str
 
@@ -245,6 +247,9 @@ def project_core_stage_timeline(timeline: OrderOperationalTimeline) -> OrderCore
     core_stages = first_ten + final_three
     branch_type = _branch_type(timeline.lifecycle_status)
     current = _current_core_stage(branch_type, timeline.current_step_ordinal, core_stages)
+    historical_current_owner = _historical_current_owner_stage(
+        branch_type, timeline.current_step_ordinal, core_stages
+    )
     return OrderCoreStageTimeline(
         case_no=timeline.case_no,
         base_revision=timeline.base_revision,
@@ -252,6 +257,12 @@ def project_core_stage_timeline(timeline: OrderOperationalTimeline) -> OrderCore
         branch_type=branch_type,
         current_core_stage_code=current.code if current is not None else None,
         current_core_stage_ordinal=current.ordinal if current is not None else None,
+        historical_current_owner_stage_code=(
+            historical_current_owner.code if historical_current_owner is not None else None
+        ),
+        historical_current_owner_stage_ordinal=(
+            historical_current_owner.ordinal if historical_current_owner is not None else None
+        ),
         core_stages=core_stages,
         source_projection_digest=timeline.projection_digest,
     )
@@ -334,12 +345,31 @@ def _current_core_stage(
 ) -> CoreStageProjection | None:
     if branch_type != "normal" or source_current_step is None:
         return None
+    return _stage_for_source_current_step(source_current_step, stages)
+
+
+def _historical_current_owner_stage(
+    branch_type: CoreStageBranchType,
+    source_current_step: int | None,
+    stages: tuple[CoreStageProjection, ...],
+) -> CoreStageProjection | None:
+    if branch_type != "historical" or source_current_step is None:
+        return None
+    # Historical baseline overlay only completes predecessor steps. The current
+    # source step therefore remains the formal owner boundary and is safe to
+    # expose separately without redefining it as a normal-mainline current stage.
+    return _stage_for_source_current_step(source_current_step, stages)
+
+
+def _stage_for_source_current_step(
+    source_current_step: int,
+    stages: tuple[CoreStageProjection, ...],
+) -> CoreStageProjection | None:
     if 1 <= source_current_step <= 10:
         return stages[source_current_step - 1]
     if source_current_step != 11:
         raise CoreStageProjectionContractError("source current step is outside the closed contract")
     return next((stage for stage in stages[10:] if stage.status != "completed"), None)
-
 
 def _substatus(code: CoreStageCode, status: StageStatus) -> str:
     try:

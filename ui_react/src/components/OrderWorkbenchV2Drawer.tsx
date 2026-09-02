@@ -1,22 +1,21 @@
 import { useEffect, useRef, useState, type FC } from 'react';
 import './OrderWorkbenchV2Drawer.css';
+import { historicalAdoptionEvidenceClient } from '../api/orders/historical_adoption_evidence_client';
+import type { HistoricalOrderAdoptionEvidence } from '../api/orders/historical_adoption_evidence_schemas';
 import {
   historicalServiceAccountingClient,
   type HistoricalServiceAccountingQuery,
 } from '../api/orders/historical_service_accounting_client';
+import { historicalOperationalBaselineClient } from '../api/orders/historical_operational_baseline_client';
+import type { HistoricalOperationalBaseline } from '../api/orders/historical_operational_baseline_schemas';
 import { orderCoreStageProjectionClient } from '../api/orders/order_core_stage_projection_client';
 import type {
   CoreStageBranchType,
+  CoreStageProjection,
   OrderCoreStageTimeline,
 } from '../api/orders/order_core_stage_projection_schemas';
-import {
-  ordersQueryClient,
-} from '../api/orders/order_query_client';
-import type {
-  AssignmentPlan,
-  OrderDetail,
-  OrderTerms,
-} from '../api/orders/order_query_schemas';
+import { ordersQueryClient } from '../api/orders/order_query_client';
+import type { AssignmentPlan, OrderDetail, OrderTerms } from '../api/orders/order_query_schemas';
 import { coreStageSubstatusLabel } from '../adapters/orders/order_core_stage_projection_adapter';
 
 interface OrderWorkbenchV2DrawerProps {
@@ -34,12 +33,9 @@ type ReadState<T> =
 const loading = <T,>(): ReadState<T> => ({ status: 'loading' });
 
 function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message.trim();
-  return '正式唯讀資料查詢失敗';
-}
-
-function lineageIdentity(identity: string | null): string {
-  return identity ?? '無 identity';
+  return error instanceof Error && error.message.trim()
+    ? error.message.trim()
+    : '正式唯讀資料查詢失敗';
 }
 
 function timelineForCase(
@@ -47,10 +43,35 @@ function timelineForCase(
   caseNo: string,
 ): OrderCoreStageTimeline {
   const exact = page.items.filter((item) => item.case_no === caseNo);
-  if (exact.length !== 1) {
-    throw new Error(`正式十三階段查詢未唯一命中案件 ${caseNo}`);
-  }
+  if (exact.length !== 1) throw new Error(`正式十三階段查詢未唯一命中案件 ${caseNo}`);
   return exact[0]!;
+}
+
+function historicalCurrentOwnerStage(timeline: OrderCoreStageTimeline): CoreStageProjection | null {
+  const code = timeline.historical_current_owner_stage_code ?? null;
+  if (code === null) return null;
+  const stage = timeline.core_stages.find((item) => item.code === code);
+  if (!stage) throw new Error('historical current owner stage 不存在於正式十三階段投影。');
+  if (stage.source.owner === 'Historical Orders') {
+    throw new Error('immutable historical baseline 不得冒充目前正式 owner stage。');
+  }
+  return stage;
+}
+
+function evidencePeriod(evidence: HistoricalOrderAdoptionEvidence): string {
+  if (evidence.source_period_availability === 'unavailable') return '來源服務期間未保留';
+  return `${evidence.source_start_date ?? '開始日未保留'} → ${evidence.source_end_date ?? '結束日未保留'}`;
+}
+
+function baselineSkippedSteps(baseline: HistoricalOperationalBaseline): readonly number[] {
+  const selected = baseline.current_baseline?.selected_step ?? null;
+  return selected === null
+    ? []
+    : Array.from({ length: Math.max(0, selected - 1) }, (_, index) => index + 1);
+}
+
+function lineageIdentity(identity: string | null): string {
+  return identity ?? '無 identity';
 }
 
 export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
@@ -63,8 +84,14 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [detail, setDetail] = useState<ReadState<OrderDetail>>(loading);
   const [terms, setTerms] = useState<ReadState<OrderTerms>>(loading);
   const [assignmentPlan, setAssignmentPlan] = useState<ReadState<AssignmentPlan>>(loading);
-  const [historicalEvidence, setHistoricalEvidence] = useState<ReadState<HistoricalServiceAccountingQuery>>(
+  const [historicalEvidence, setHistoricalEvidence] = useState<ReadState<HistoricalOrderAdoptionEvidence>>(
+    () => branchType === 'historical' ? loading<HistoricalOrderAdoptionEvidence>() : { status: 'skipped' },
+  );
+  const [historicalAccounting, setHistoricalAccounting] = useState<ReadState<HistoricalServiceAccountingQuery>>(
     () => branchType === 'historical' ? loading<HistoricalServiceAccountingQuery>() : { status: 'skipped' },
+  );
+  const [historicalBaseline, setHistoricalBaseline] = useState<ReadState<HistoricalOperationalBaseline>>(
+    () => branchType === 'historical' ? loading<HistoricalOperationalBaseline>() : { status: 'skipped' },
   );
 
   useEffect(() => {
@@ -78,6 +105,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     setTerms(loading());
     setAssignmentPlan(loading());
     setHistoricalEvidence(branchType === 'historical' ? loading() : { status: 'skipped' });
+    setHistoricalAccounting(branchType === 'historical' ? loading() : { status: 'skipped' });
+    setHistoricalBaseline(branchType === 'historical' ? loading() : { status: 'skipped' });
 
     void orderCoreStageProjectionClient.getCoreStageTimelines({
       page_size: 20,
@@ -85,45 +114,31 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       branch_type: branchType,
       case_no_search: caseNo,
     }, { signal: controller.signal })
-      .then((page) => {
-        if (current()) setTimeline({ status: 'ready', data: timelineForCase(page, caseNo) });
-      })
-      .catch((error) => {
-        if (current()) setTimeline({ status: 'error', message: errorMessage(error) });
-      });
+      .then((page) => { if (current()) setTimeline({ status: 'ready', data: timelineForCase(page, caseNo) }); })
+      .catch((error) => { if (current()) setTimeline({ status: 'error', message: errorMessage(error) }); });
 
     void ordersQueryClient.getOrderDetail(caseNo, { signal: controller.signal })
-      .then((data) => {
-        if (current()) setDetail({ status: 'ready', data });
-      })
-      .catch((error) => {
-        if (current()) setDetail({ status: 'error', message: errorMessage(error) });
-      });
+      .then((data) => { if (current()) setDetail({ status: 'ready', data }); })
+      .catch((error) => { if (current()) setDetail({ status: 'error', message: errorMessage(error) }); });
 
     void ordersQueryClient.getOrderTerms(caseNo, { signal: controller.signal })
-      .then((data) => {
-        if (current()) setTerms({ status: 'ready', data });
-      })
-      .catch((error) => {
-        if (current()) setTerms({ status: 'error', message: errorMessage(error) });
-      });
+      .then((data) => { if (current()) setTerms({ status: 'ready', data }); })
+      .catch((error) => { if (current()) setTerms({ status: 'error', message: errorMessage(error) }); });
 
     void ordersQueryClient.getAssignmentPlan(caseNo, { signal: controller.signal })
-      .then((data) => {
-        if (current()) setAssignmentPlan({ status: 'ready', data });
-      })
-      .catch((error) => {
-        if (current()) setAssignmentPlan({ status: 'error', message: errorMessage(error) });
-      });
+      .then((data) => { if (current()) setAssignmentPlan({ status: 'ready', data }); })
+      .catch((error) => { if (current()) setAssignmentPlan({ status: 'error', message: errorMessage(error) }); });
 
     if (branchType === 'historical') {
       void historicalServiceAccountingClient.query(caseNo)
-        .then((data) => {
-          if (current()) setHistoricalEvidence({ status: 'ready', data });
-        })
-        .catch((error) => {
-          if (current()) setHistoricalEvidence({ status: 'error', message: errorMessage(error) });
-        });
+        .then((data) => { if (current()) setHistoricalAccounting({ status: 'ready', data }); })
+        .catch((error) => { if (current()) setHistoricalAccounting({ status: 'error', message: errorMessage(error) }); });
+      void historicalAdoptionEvidenceClient.queryByCase(caseNo, { signal: controller.signal })
+        .then((data) => { if (current()) setHistoricalEvidence({ status: 'ready', data }); })
+        .catch((error) => { if (current()) setHistoricalEvidence({ status: 'error', message: errorMessage(error) }); });
+      void historicalOperationalBaselineClient.queryByCase(caseNo, { signal: controller.signal })
+        .then((data) => { if (current()) setHistoricalBaseline({ status: 'ready', data }); })
+        .catch((error) => { if (current()) setHistoricalBaseline({ status: 'error', message: errorMessage(error) }); });
     }
 
     return () => {
@@ -133,9 +148,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   }, [branchType, caseNo]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
@@ -154,26 +167,22 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       message: notice.message,
     })))
     : [];
+  const currentHistoricalOwner = timeline.status === 'ready' && branchType === 'historical'
+    ? historicalCurrentOwnerStage(timeline.data)
+    : null;
 
   return (
     <div
       className="order-v2-drawer-backdrop"
       role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
-      <aside
-        className="order-v2-drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="order-v2-drawer-title"
-      >
+      <aside className="order-v2-drawer" role="dialog" aria-modal="true" aria-labelledby="order-v2-drawer-title">
         <header className="order-v2-drawer-header">
           <div>
             <div className="order-v2-eyebrow">唯讀工作 Drawer</div>
             <h2 id="order-v2-drawer-title">案件 {caseNo}</h2>
-            <p>正式目前 owner facts 與歷史來源證據分開呈現；此 Drawer 不提供任何寫入操作。</p>
+            <p>目前正式 owner facts、immutable historical baseline 與歷史來源 evidence 分開呈現；此 Drawer 不提供寫入。</p>
           </div>
           <button type="button" onClick={onClose} aria-label="關閉工作 Drawer">關閉</button>
         </header>
@@ -181,7 +190,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
         <div className="order-v2-drawer-body">
           <section className="order-v2-drawer-section" aria-labelledby="order-v2-current-facts">
             <h3 id="order-v2-current-facts">正式目前 owner facts</h3>
-
             <div className="order-v2-drawer-fact-grid">
               <article>
                 <h4>案件／客戶</h4>
@@ -197,7 +205,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                   </dl>
                 )}
               </article>
-
               <article aria-label="正式服務期間">
                 <h4>正式服務條款</h4>
                 {terms.status === 'loading' && <p>載入 Orders canonical planned period…</p>}
@@ -212,6 +219,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                   </dl>
                 )}
                 <p className="order-v2-drawer-note">`actual_start_date` 僅代表實際開始，不作為完整服務區間。</p>
+                <p className="order-v2-drawer-note">historical source period 是來源 evidence，不用來推導目前 lifecycle。</p>
               </article>
             </div>
           </section>
@@ -219,11 +227,9 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           <section className="order-v2-drawer-section" aria-labelledby="order-v2-assignment-heading">
             <h3 id="order-v2-assignment-heading">目前正式派案／Assignment projection</h3>
             {assignmentPlan.status === 'loading' && <p>載入正式派案…</p>}
-            {assignmentPlan.status === 'error' && (
-              <p className="order-v2-drawer-error">正式派案不可用：{assignmentPlan.message}</p>
-            )}
+            {assignmentPlan.status === 'error' && <p className="order-v2-drawer-error">正式派案不可用：{assignmentPlan.message}</p>}
             {assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length === 0 && (
-              <p>目前沒有正式 assignment segment。</p>
+              <p>尚無正式指派。歷史匯入配對證據（若有）顯示於下方歷史來源證據，不等同 Scheduling assignment。</p>
             )}
             {assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length > 0 && (
               <div className="order-v2-drawer-assignments">
@@ -240,6 +246,35 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             )}
           </section>
 
+          {branchType === 'historical' && (
+            <section className="order-v2-drawer-section" aria-labelledby="order-v2-historical-owner-heading">
+              <h3 id="order-v2-historical-owner-heading">目前正式 owner progression</h3>
+              {timeline.status === 'loading' && <p>載入正式 owner progression…</p>}
+              {timeline.status === 'error' && <p className="order-v2-drawer-error">owner progression 不可用：{timeline.message}</p>}
+              {timeline.status === 'ready' && currentHistoricalOwner === null && <p>目前沒有尚待處理的正式 owner stage。</p>}
+              {currentHistoricalOwner !== null && (
+                <div>
+                  <strong>{currentHistoricalOwner.ordinal}. {currentHistoricalOwner.label}</strong>
+                  <p>{coreStageSubstatusLabel(currentHistoricalOwner.substatus_code)}</p>
+                  <p className="order-v2-technical">
+                    owner：{currentHistoricalOwner.source.owner} · identity：{lineageIdentity(currentHistoricalOwner.source.identity)}
+                  </p>
+                  {currentHistoricalOwner.availability_reason && (
+                    <p className="order-v2-drawer-note">availability：{currentHistoricalOwner.availability_reason}</p>
+                  )}
+                  {currentHistoricalOwner.available_read_actions.length > 0 && (
+                    <div className="order-v2-drawer-actions" aria-label="正式唯讀入口">
+                      {currentHistoricalOwner.available_read_actions.map((action) => (
+                        <a key={action.action_id} href={action.path} target="_blank" rel="noreferrer">{action.action_id}</a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              <p className="order-v2-drawer-note">只顯示 server 已提供的 GET action descriptor；不補造歷史流程事件或操作入口。</p>
+            </section>
+          )}
+
           <section className="order-v2-drawer-section" aria-labelledby="order-v2-progress-heading">
             <h3 id="order-v2-progress-heading">13 階段正式進度</h3>
             {timeline.status === 'loading' && <p>載入正式十三階段 projection…</p>}
@@ -249,10 +284,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 {timeline.data.core_stages.map((stage) => (
                   <li key={stage.code} data-testid="drawer-core-stage">
                     <span className={`order-v2-drawer-stage-status status-${stage.status}`}>{stage.ordinal}</span>
-                    <div>
-                      <strong>{stage.label}</strong>
-                      <span>{coreStageSubstatusLabel(stage.substatus_code)}</span>
-                    </div>
+                    <div><strong>{stage.label}</strong><span>{coreStageSubstatusLabel(stage.substatus_code)}</span></div>
                   </li>
                 ))}
               </ol>
@@ -263,14 +295,10 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             <h3 id="order-v2-notices-heading">阻塞與提醒</h3>
             {timeline.status === 'ready' && blockers.length === 0 && warnings.length === 0 && <p>目前沒有正式 blocker / warning。</p>}
             {blockers.map((notice) => (
-              <div className="order-v2-notice blocked" key={notice.key}>
-                <strong>阻塞 · {notice.stage}</strong><span>{notice.message}</span>
-              </div>
+              <div className="order-v2-notice blocked" key={notice.key}><strong>阻塞 · {notice.stage}</strong><span>{notice.message}</span></div>
             ))}
             {warnings.map((notice) => (
-              <div className="order-v2-notice warning" key={notice.key}>
-                <strong>提醒 · {notice.stage}</strong><span>{notice.message}</span>
-              </div>
+              <div className="order-v2-notice warning" key={notice.key}><strong>提醒 · {notice.stage}</strong><span>{notice.message}</span></div>
             ))}
           </section>
 
@@ -294,23 +322,58 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           </section>
 
           {branchType === 'historical' && (
-            <section
-              className="order-v2-drawer-section historical-evidence"
-              aria-labelledby="order-v2-history-heading"
-              aria-label="歷史來源證據"
-            >
-              <h3 id="order-v2-history-heading">歷史來源證據</h3>
-              <p className="order-v2-drawer-note">以下為歷史匯入／帳務 read model 證據，不代表目前正式服務期間或目前正式派案。</p>
-              {historicalEvidence.status === 'loading' && <p>載入歷史來源證據…</p>}
-              {historicalEvidence.status === 'error' && (
-                <p className="order-v2-drawer-error">歷史來源證據不可用：{historicalEvidence.message}</p>
+            <section className="order-v2-drawer-section historical-evidence" aria-labelledby="order-v2-history-baseline-heading" aria-label="歷史來源證據">
+              <h3 id="order-v2-history-baseline-heading">Immutable historical baseline</h3>
+              <p className="order-v2-drawer-note">baseline 只表示已接受略過的前置步驟，不是真實 owner event，也不覆寫後續正式 owner facts。</p>
+              {historicalBaseline.status === 'loading' && <p>載入 immutable baseline…</p>}
+              {historicalBaseline.status === 'error' && <p className="order-v2-drawer-error">baseline read model 不可用：{historicalBaseline.message}</p>}
+              {historicalBaseline.status === 'ready' && historicalBaseline.data.current_baseline === null && (
+                <p>目前沒有獨立 historical operational baseline event；採納 receipt lineage 仍顯示於下方。</p>
               )}
-              {historicalEvidence.status === 'ready' && (
+              {historicalBaseline.status === 'ready' && historicalBaseline.data.current_baseline !== null && (
                 <dl>
-                  <div><dt>來源 identity</dt><dd>{historicalEvidence.data.adoption_source_identity}</dd></div>
-                  <div><dt>歷史合約服務天數</dt><dd>{historicalEvidence.data.contracted_service_days} 日</dd></div>
-                  <div><dt>歷史配對月嫂</dt><dd>{historicalEvidence.data.assignments.map((item) => `${item.staff_name} (#${item.staff_id}, ${item.assignment_identity})`).join('；')}</dd></div>
+                  <div><dt>Baseline identity</dt><dd>{historicalBaseline.data.current_baseline.baseline_event_identity}</dd></div>
+                  <div><dt>Selected step</dt><dd>{historicalBaseline.data.current_baseline.selected_step}</dd></div>
+                  <div><dt>略過前置步驟</dt><dd>{baselineSkippedSteps(historicalBaseline.data).join(', ') || '無'}</dd></div>
                 </dl>
+              )}
+
+              <h3>歷史來源證據</h3>
+              <p className="order-v2-drawer-note">以下為歷史匯入／帳務 read model 證據，不代表目前正式服務期間或目前正式派案。source period 不等於已發生 actual period，pairing evidence 不等於 formal Scheduling assignment。</p>
+              {historicalAccounting.status === 'ready' && (
+                <dl aria-label="既有 historical accounting read model">
+                  <div><dt>來源 identity</dt><dd>{historicalAccounting.data.adoption_source_identity}</dd></div>
+                  <div><dt>歷史合約服務天數</dt><dd>{historicalAccounting.data.contracted_service_days} 日</dd></div>
+                  <div><dt>歷史配對月嫂</dt><dd>{historicalAccounting.data.assignments.map((item) => `${item.staff_name} (#${item.staff_id}, ${item.assignment_identity})`).join('；')}</dd></div>
+                </dl>
+              )}
+              {historicalEvidence.status === 'loading' && <p>載入 historical adoption evidence…</p>}
+              {historicalEvidence.status === 'error' && <p className="order-v2-drawer-error">historical adoption evidence 不可用：{historicalEvidence.message}</p>}
+              {historicalEvidence.status === 'ready' && (
+                <>
+                  <dl>
+                    <div><dt>Receipt</dt><dd>{historicalEvidence.data.receipt_identity}</dd></div>
+                    <div><dt>來源 identity</dt><dd>{historicalEvidence.data.source_identity}</dd></div>
+                    <div><dt>Evidence owner</dt><dd>{historicalEvidence.data.evidence_owner}</dd></div>
+                    <div><dt>歷史匯入服務日期</dt><dd>{evidencePeriod(historicalEvidence.data)}</dd></div>
+                    <div><dt>期間 availability</dt><dd>{historicalEvidence.data.source_period_availability}</dd></div>
+                  </dl>
+                  {historicalEvidence.data.paired_staff.length === 0 ? (
+                    <p>歷史匯入未保留可唯一解析的配對月嫂 evidence。</p>
+                  ) : (
+                    <div className="order-v2-drawer-assignments" aria-label="歷史匯入配對月嫂">
+                      {historicalEvidence.data.paired_staff.map((item) => (
+                        <article key={`${item.caregiver_ordinal}:${item.staff_id}`}>
+                          <strong>歷史匯入配對月嫂 · #{item.staff_id}</strong>
+                          <span>來源名稱：{item.masked_staff_name}</span>
+                          <span>resolution：{item.resolution}</span>
+                          <span>來源服務：{item.source_start_date ?? '未保留'} → {item.source_end_date ?? '未保留'}</span>
+                          <span>historical assignment_id：{item.assignment_id ?? '無（evidence-only）'}</span>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </section>
           )}

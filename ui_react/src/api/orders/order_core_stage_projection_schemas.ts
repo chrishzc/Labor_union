@@ -29,6 +29,12 @@ export const CORE_STAGE_STATUSES = [
 ] as const;
 
 export const CORE_STAGE_BRANCH_TYPES = ['normal', 'historical', 'cancelled'] as const;
+export const HISTORICAL_LIFECYCLE_FACETS = [
+  'unserved',
+  'in_service',
+  'service_completed',
+  'accounting_completed',
+] as const;
 
 export const CORE_STAGE_SUBSTATUS_CODES = [
   'intake_pending', 'intake_in_progress', 'intake_blocked', 'data_complete', 'intake_unavailable',
@@ -49,6 +55,7 @@ export const CORE_STAGE_SUBSTATUS_CODES = [
 export type CoreStageCode = typeof CORE_STAGE_CODES[number];
 export type CoreStageStatus = typeof CORE_STAGE_STATUSES[number];
 export type CoreStageBranchType = typeof CORE_STAGE_BRANCH_TYPES[number];
+export type HistoricalLifecycleFacet = typeof HISTORICAL_LIFECYCLE_FACETS[number];
 export type CoreStageSubstatusCode = typeof CORE_STAGE_SUBSTATUS_CODES[number];
 
 export const SUBSTATUS_BY_STAGE_STATUS = {
@@ -111,6 +118,7 @@ const DateTimeSchema = z.string().min(1);
 const CoreStageCodeSchema = z.enum(CORE_STAGE_CODES);
 const CoreStageStatusSchema = z.enum(CORE_STAGE_STATUSES);
 const CoreStageBranchTypeSchema = z.enum(CORE_STAGE_BRANCH_TYPES);
+const HistoricalLifecycleFacetSchema = z.enum(HISTORICAL_LIFECYCLE_FACETS);
 const CoreStageSubstatusCodeSchema = z.enum(CORE_STAGE_SUBSTATUS_CODES);
 const OrderLifecycleStatusSchema = z.enum([
   '待補件',
@@ -173,6 +181,8 @@ export const OrderCoreStageTimelineSchema = z.strictObject({
   branch_type: CoreStageBranchTypeSchema,
   current_core_stage_code: CoreStageCodeSchema.nullable(),
   current_core_stage_ordinal: z.number().int().min(1).max(13).nullable(),
+  historical_current_owner_stage_code: CoreStageCodeSchema.nullable(),
+  historical_current_owner_stage_ordinal: z.number().int().min(1).max(13).nullable(),
   core_stages: z.array(CoreStageProjectionSchema).length(13),
   source_projection_digest: Sha256Schema,
 }).superRefine((timeline, context) => {
@@ -205,6 +215,35 @@ export const OrderCoreStageTimelineSchema = z.strictObject({
     }
   }
 
+  const hasHistoricalOwnerCode = timeline.historical_current_owner_stage_code !== null;
+  const hasHistoricalOwnerOrdinal = timeline.historical_current_owner_stage_ordinal !== null;
+  if (hasHistoricalOwnerCode !== hasHistoricalOwnerOrdinal) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['historical_current_owner_stage_code'],
+      message: '歷史 current owner stage code 與 ordinal 必須同時存在或同時為空',
+    });
+  } else if (
+    timeline.historical_current_owner_stage_code !== null
+    && timeline.historical_current_owner_stage_ordinal !== null
+  ) {
+    const currentOwner = timeline.core_stages[timeline.historical_current_owner_stage_ordinal - 1];
+    if (currentOwner?.code !== timeline.historical_current_owner_stage_code) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['historical_current_owner_stage_code'],
+        message: '歷史 current owner stage 必須指向同一份十三階段投影',
+      });
+    }
+    if (currentOwner?.source.owner === 'Historical Orders') {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['historical_current_owner_stage_code'],
+        message: 'immutable historical baseline 不得冒充目前正式 owner stage',
+      });
+    }
+  }
+
   const expectedBranch: CoreStageBranchType = timeline.lifecycle_status === '訂單取消'
     ? 'cancelled'
     : timeline.lifecycle_status.startsWith('歷史訂單－')
@@ -221,7 +260,21 @@ export const OrderCoreStageTimelineSchema = z.strictObject({
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['current_core_stage_code'],
-      message: '歷史或取消支線不得保留目前正常核心階段',
+      message: '歷史或取消支線不得保留 normal mainline current stage',
+    });
+  }
+  if (timeline.branch_type !== 'historical' && hasHistoricalOwnerCode) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['historical_current_owner_stage_code'],
+      message: '只有 historical 支線可回傳 historical current owner progression',
+    });
+  }
+  if (timeline.branch_type === 'cancelled' && (hasCurrentCode || hasHistoricalOwnerCode)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['branch_type'],
+      message: '取消訂單必須維持終止狀態',
     });
   }
 });
@@ -260,10 +313,18 @@ const CoreStageSubstatusCountsSchema = z.record(
   }
 });
 
+export const HistoricalLifecycleCountsSchema = z.strictObject({
+  unserved: NonnegativeIntSchema,
+  in_service: NonnegativeIntSchema,
+  service_completed: NonnegativeIntSchema,
+  accounting_completed: NonnegativeIntSchema,
+});
+
 export const OrderCoreStageTimelinePageSchema = z.strictObject({
   items: z.array(OrderCoreStageTimelineSchema),
   stage_counts: CoreStageCountsSchema,
   substatus_counts: CoreStageSubstatusCountsSchema,
+  historical_lifecycle_counts: HistoricalLifecycleCountsSchema,
   next_cursor: z.string().min(1).nullable(),
   etag: Sha256Schema,
 });
@@ -271,4 +332,6 @@ export const OrderCoreStageTimelinePageSchema = z.strictObject({
 export type CoreStageProjection = z.infer<typeof CoreStageProjectionSchema>;
 export type OrderCoreStageTimeline = z.infer<typeof OrderCoreStageTimelineSchema>;
 export type CoreStageCounts = z.infer<typeof CoreStageCountsSchema>;
+export type HistoricalLifecycleCounts = z.infer<typeof HistoricalLifecycleCountsSchema>;
 export type OrderCoreStageTimelinePage = z.infer<typeof OrderCoreStageTimelinePageSchema>;
+export { HistoricalLifecycleFacetSchema };

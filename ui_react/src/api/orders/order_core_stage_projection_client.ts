@@ -11,11 +11,13 @@ import {
   CORE_STAGE_BRANCH_TYPES,
   CORE_STAGE_CODES,
   CORE_STAGE_SUBSTATUS_CODES,
+  HISTORICAL_LIFECYCLE_FACETS,
   OrderCoreStageTimelinePageSchema,
   substatusBelongsToStage,
   type CoreStageBranchType,
   type CoreStageCode,
   type CoreStageSubstatusCode,
+  type HistoricalLifecycleFacet,
   type OrderCoreStageTimelinePage,
 } from './order_core_stage_projection_schemas';
 
@@ -38,6 +40,7 @@ export interface OrderCoreStageProjectionQueryParams {
   blocker_only?: boolean;
   warning_only?: boolean;
   branch_type?: CoreStageBranchType;
+  historical_lifecycle?: HistoricalLifecycleFacet;
 }
 
 export interface OrderCoreStageProjectionClient {
@@ -57,6 +60,7 @@ const ParamsSchema = z.strictObject({
   blocker_only: z.boolean().optional(),
   warning_only: z.boolean().optional(),
   branch_type: z.enum(CORE_STAGE_BRANCH_TYPES).optional(),
+  historical_lifecycle: z.enum(HISTORICAL_LIFECYCLE_FACETS).optional(),
 }).superRefine((params, context) => {
   if (params.substatus_code !== undefined && params.stage === undefined) {
     context.addIssue({
@@ -73,6 +77,13 @@ const ParamsSchema = z.strictObject({
       code: z.ZodIssueCode.custom,
       path: ['substatus_code'],
       message: 'substatus_code 不屬於指定 stage',
+    });
+  }
+  if (params.historical_lifecycle !== undefined && params.branch_type !== 'historical') {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['historical_lifecycle'],
+      message: 'historical_lifecycle 只允許 historical branch',
     });
   }
 });
@@ -126,6 +137,7 @@ export async function getOrderCoreStageTimelines(
   if (parsed.blocker_only !== undefined) query.blocker_only = parsed.blocker_only;
   if (parsed.warning_only !== undefined) query.warning_only = parsed.warning_only;
   if (parsed.branch_type !== undefined) query.branch_type = parsed.branch_type;
+  if (parsed.historical_lifecycle !== undefined) query.historical_lifecycle = parsed.historical_lifecycle;
 
   const raw = await transport.get('/api/orders/core-stage-timelines', {
     ...requestOptions(options),

@@ -10,7 +10,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from subsystems.orders.core_stage_filter_query import CoreStageSubstatusCode
+from subsystems.orders.core_stage_filter_query import (
+    CoreStageSubstatusCode,
+    HistoricalLifecycleFacet,
+)
 
 
 StageStatusView = Literal["not_started", "in_progress", "blocked", "completed", "unavailable"]
@@ -31,6 +34,7 @@ CoreStageCodeView = Literal[
     "staff_payout",
 ]
 CoreStageSubstatusCodeView = CoreStageSubstatusCode
+HistoricalLifecycleFacetView = HistoricalLifecycleFacet
 OrderLifecycleStatusView = Literal[
     "待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消",
     "歷史訂單－未服務", "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成",
@@ -81,8 +85,18 @@ class OrderCoreStageTimelineView(BaseModel):
     branch_type: CoreStageBranchTypeView
     current_core_stage_code: CoreStageCodeView | None
     current_core_stage_ordinal: int | None = Field(default=None, ge=1, le=13)
+    historical_current_owner_stage_code: CoreStageCodeView | None
+    historical_current_owner_stage_ordinal: int | None = Field(default=None, ge=1, le=13)
     core_stages: list[CoreStageProjectionView] = Field(min_length=13, max_length=13)
     source_projection_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HistoricalLifecycleCountsView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    unserved: int = Field(ge=0)
+    in_service: int = Field(ge=0)
+    service_completed: int = Field(ge=0)
+    accounting_completed: int = Field(ge=0)
 
 
 class OrderCoreStageTimelinePageView(BaseModel):
@@ -90,6 +104,14 @@ class OrderCoreStageTimelinePageView(BaseModel):
     items: list[OrderCoreStageTimelineView]
     stage_counts: dict[CoreStageCodeView, int] = Field(default_factory=dict)
     substatus_counts: dict[CoreStageSubstatusCodeView, int] = Field(default_factory=dict)
+    historical_lifecycle_counts: HistoricalLifecycleCountsView = Field(
+        default_factory=lambda: HistoricalLifecycleCountsView(
+            unserved=0,
+            in_service=0,
+            service_completed=0,
+            accounting_completed=0,
+        )
+    )
     next_cursor: str | None
     etag: str = Field(pattern=r"^[0-9a-f]{64}$")
 

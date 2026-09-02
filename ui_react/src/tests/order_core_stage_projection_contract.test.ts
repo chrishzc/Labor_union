@@ -52,6 +52,8 @@ function timeline(caseNo = 'CASE-001', currentCode: CoreStageCode = 'formal_serv
     branch_type: 'normal',
     current_core_stage_code: currentCode,
     current_core_stage_ordinal: CORE_STAGE_CODES.indexOf(currentCode) + 1,
+    historical_current_owner_stage_code: null,
+    historical_current_owner_stage_ordinal: null,
     core_stages: CORE_STAGE_CODES.map((code) => stage(
       code,
       code === currentCode ? currentStatus : 'completed',
@@ -73,6 +75,12 @@ function page(currentCode: CoreStageCode = 'formal_service') {
         code === SUBSTATUS_BY_STAGE_STATUS[currentCode].in_progress ? 1 : 0,
       ]),
     ),
+    historical_lifecycle_counts: {
+      unserved: 0,
+      in_service: 0,
+      service_completed: 0,
+      accounting_completed: 0,
+    },
     next_cursor: null,
     etag: 'b'.repeat(64),
   };
@@ -139,6 +147,40 @@ describe('十三核心階段 React contract', () => {
           blocker_only: true,
           warning_only: true,
           branch_type: 'normal',
+        }),
+      }),
+    );
+  });
+
+  it('historical lifecycle 只能搭配 historical branch 並送到 server query', async () => {
+    await expect(getOrderCoreStageTimelines({
+      branch_type: 'normal',
+      historical_lifecycle: 'unserved',
+    })).rejects.toThrow();
+    expect(transportMocks.get).not.toHaveBeenCalled();
+
+    const historical = page();
+    historical.items = [];
+    historical.stage_counts = Object.fromEntries(CORE_STAGE_CODES.map((code) => [code, 0]));
+    historical.substatus_counts = {};
+    historical.historical_lifecycle_counts = {
+      unserved: 2,
+      in_service: 1,
+      service_completed: 3,
+      accounting_completed: 4,
+    };
+    transportMocks.get.mockResolvedValue({ success: true, message: 'ok', data: historical, error: null });
+
+    await getOrderCoreStageTimelines({
+      branch_type: 'historical',
+      historical_lifecycle: 'unserved',
+    });
+    expect(transportMocks.get).toHaveBeenCalledWith(
+      '/api/orders/core-stage-timelines',
+      expect.objectContaining({
+        params: expect.objectContaining({
+          branch_type: 'historical',
+          historical_lifecycle: 'unserved',
         }),
       }),
     );

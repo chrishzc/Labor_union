@@ -10,6 +10,8 @@ import {
   type CoreStageCounts,
   type CoreStageProjection,
   type CoreStageSubstatusCode,
+  type HistoricalLifecycleCounts,
+  type HistoricalLifecycleFacet,
   type OrderCoreStageTimeline,
   type OrderCoreStageTimelinePage,
 } from '../../api/orders/order_core_stage_projection_schemas';
@@ -63,6 +65,20 @@ const BRANCH_LABELS: Readonly<Record<CoreStageBranchType, string>> = {
   cancelled: '取消訂單',
 };
 
+export const HISTORICAL_LIFECYCLE_LABELS: Readonly<Record<HistoricalLifecycleFacet, string>> = {
+  unserved: '未服務',
+  in_service: '服務中',
+  service_completed: '服務完成',
+  accounting_completed: '帳務完成',
+};
+
+const HISTORICAL_LIFECYCLE_STATUS: Readonly<Record<HistoricalLifecycleFacet, string>> = {
+  unserved: '歷史訂單－未服務',
+  in_service: '歷史訂單－服務中',
+  service_completed: '歷史訂單－服務完成',
+  accounting_completed: '歷史訂單－帳務完成',
+};
+
 export class OrderCoreStageProjectionAdapterError extends Error {
   constructor(message: string) {
     super(message);
@@ -83,6 +99,7 @@ export interface CoreStageCaseViewModel {
   branchLabel: string;
   baseRevision: number;
   currentStage: CoreStageProjection | null;
+  historicalCurrentOwnerStage: CoreStageProjection | null;
   statusLabel: string;
   blockers: readonly CoreStageNoticeViewModel[];
   warnings: readonly CoreStageNoticeViewModel[];
@@ -99,6 +116,7 @@ export interface OrderCoreStageWorkbenchViewModel {
   items: readonly CoreStageCaseViewModel[];
   stageCounts: CoreStageCounts;
   substatusOptions: readonly CoreStageSubstatusOptionViewModel[];
+  historicalLifecycleCounts: HistoricalLifecycleCounts;
   nextCursor: string | null;
   etag: string;
 }
@@ -117,17 +135,25 @@ export function coreStageBranchLabel(branch: CoreStageBranchType): string {
   return BRANCH_LABELS[branch];
 }
 
-function currentStageForTimeline(timeline: OrderCoreStageTimeline): CoreStageProjection | null {
-  if (timeline.current_core_stage_code === null) return null;
-  const current = timeline.core_stages.find(
-    (stage) => stage.code === timeline.current_core_stage_code,
-  );
-  if (!current) {
-    throw new OrderCoreStageProjectionAdapterError(
-      `案件 ${timeline.case_no} 的目前核心階段不存在於正式投影。`,
-    );
+function stageByCode(timeline: OrderCoreStageTimeline, code: CoreStageCode | null): CoreStageProjection | null {
+  if (code === null) return null;
+  const stage = timeline.core_stages.find((item) => item.code === code);
+  if (!stage) {
+    throw new OrderCoreStageProjectionAdapterError(`案件 ${timeline.case_no} 的核心階段不存在於正式投影。`);
   }
-  return current;
+  return stage;
+}
+
+function currentStageForTimeline(timeline: OrderCoreStageTimeline): CoreStageProjection | null {
+  return stageByCode(timeline, timeline.current_core_stage_code);
+}
+
+function historicalCurrentOwnerStageForTimeline(timeline: OrderCoreStageTimeline): CoreStageProjection | null {
+  const stage = stageByCode(timeline, timeline.historical_current_owner_stage_code ?? null);
+  if (stage?.source.owner === 'Historical Orders') {
+    throw new OrderCoreStageProjectionAdapterError(`案件 ${timeline.case_no} 的 immutable baseline 不得冒充正式 owner stage。`);
+  }
+  return stage;
 }
 
 function noticesForTimeline(
@@ -143,6 +169,7 @@ function noticesForTimeline(
 
 function adaptTimeline(timeline: OrderCoreStageTimeline): CoreStageCaseViewModel {
   const currentStage = currentStageForTimeline(timeline);
+  const historicalCurrentOwnerStage = historicalCurrentOwnerStageForTimeline(timeline);
   return {
     id: timeline.case_no,
     lifecycleStatus: timeline.lifecycle_status,
@@ -150,6 +177,7 @@ function adaptTimeline(timeline: OrderCoreStageTimeline): CoreStageCaseViewModel
     branchLabel: coreStageBranchLabel(timeline.branch_type),
     baseRevision: timeline.base_revision,
     currentStage,
+    historicalCurrentOwnerStage,
     statusLabel: currentStage
       ? coreStageSubstatusLabel(currentStage.substatus_code)
       : coreStageBranchLabel(timeline.branch_type),
@@ -175,6 +203,15 @@ function validateQueryResult(
     if (mismatch) {
       throw new OrderCoreStageProjectionAdapterError(
         `案件 ${mismatch.case_no} 不符合要求的 ${query.branch_type} 支線。`,
+      );
+    }
+  }
+  if (query.historical_lifecycle !== undefined) {
+    const expectedStatus = HISTORICAL_LIFECYCLE_STATUS[query.historical_lifecycle];
+    const mismatch = page.items.find((item) => item.lifecycle_status !== expectedStatus);
+    if (mismatch) {
+      throw new OrderCoreStageProjectionAdapterError(
+        `案件 ${mismatch.case_no} 不符合要求的 historical lifecycle。`,
       );
     }
   }
@@ -223,6 +260,7 @@ export function adaptOrderCoreStageTimelinePage(
     items: page.items.map(adaptTimeline),
     stageCounts: page.stage_counts,
     substatusOptions,
+    historicalLifecycleCounts: page.historical_lifecycle_counts,
     nextCursor: page.next_cursor,
     etag: page.etag,
   };
