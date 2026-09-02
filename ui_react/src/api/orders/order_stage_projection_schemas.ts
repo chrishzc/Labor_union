@@ -74,6 +74,8 @@ export const OrderOperationalTimelineSchema = z.strictObject({
   case_no: z.string().min(1),
   base_revision: z.number().int().nonnegative(),
   current_stage_code: StageCodeSchema.nullable(),
+  current_sop_step: z.number().int().min(1).max(11).nullable(),
+  terminal_state: z.literal('cancelled').nullable(),
   stages: z.array(StageProjectionSchema).length(7),
   sop_steps: z.array(SopStepProjectionSchema).length(11),
   projection_digest: Sha256Schema,
@@ -89,6 +91,13 @@ export const OrderOperationalTimelineSchema = z.strictObject({
   const stepOrdinals = timeline.sop_steps.map((step) => step.ordinal);
   if (new Set(stepOrdinals).size !== 11 || stepOrdinals.some((value, index) => value !== index + 1)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['sop_steps'], message: 'SOP ordinal 必須完整且不重複' });
+  }
+  if (timeline.terminal_state === 'cancelled' && (timeline.current_stage_code !== null || timeline.current_sop_step !== null)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['terminal_state'],
+      message: '已取消訂單不得同時具有進行中的七階段或 SOP 步驟',
+    });
   }
 });
 
