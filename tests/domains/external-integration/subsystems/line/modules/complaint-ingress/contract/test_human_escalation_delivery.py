@@ -1,12 +1,23 @@
-"""M4 masked alert outbox -> existing delivery task -> local result contract."""
+"""M4 masked alert outbox -> canonical delivery task -> provider outcome contract."""
 
 from datetime import datetime, timedelta, timezone
 import json
 
-from domains.line.delivery import LineDeliveryLease, LineDeliveryStatus, LineDeliveryTaskSnapshot
-from domains.line.identities import LineDeliveryTaskId
-from shared_kernel.identities import CorrelationId, IdempotencyKey
-from subsystems.line.delivery_contracts import EnqueueLineDeliveryResult, LineDeliveryCommandOutcome
+from domains.line.delivery import (
+    LineAttemptPlan,
+    LineDeliveryLease,
+    LineDeliveryStatus,
+    LineDeliveryTaskSnapshot,
+)
+from domains.line.identities import LineDeliveryTaskId, LineProviderMessageId
+from subsystems.line.delivery_contracts import (
+    EnqueueLineDeliveryResult,
+    LineDeliveryCommandOutcome,
+    LineProviderOutcome,
+    LineProviderOutcomeType,
+    RecordLineDeliveryAttemptResult,
+)
+from subsystems.line.delivery_worker import LineDeliveryWorker
 from subsystems.line.human_escalation_delivery import (
     HUMAN_ESCALATION_INTENT,
     HumanEscalationDeliveryWorker,
@@ -24,21 +35,70 @@ class _Delivery:
 
     def enqueue(self, request):
         if self.task is None:
-            self.task = LineDeliveryTaskSnapshot(LineDeliveryTaskId(91), request, LineDeliveryStatus.PENDING, 0)
-            return EnqueueLineDeliveryResult(LineDeliveryCommandOutcome.CREATED, LineDeliveryTaskId(91), LineDeliveryStatus.PENDING)
-        return EnqueueLineDeliveryResult(LineDeliveryCommandOutcome.EXISTING, self.task.task_id, self.task.status)
+            self.task = LineDeliveryTaskSnapshot(
+                LineDeliveryTaskId(91),
+                request,
+                LineDeliveryStatus.PENDING,
+                0,
+            )
+            return EnqueueLineDeliveryResult(
+                LineDeliveryCommandOutcome.CREATED,
+                LineDeliveryTaskId(91),
+                LineDeliveryStatus.PENDING,
+            )
+        return EnqueueLineDeliveryResult(
+            LineDeliveryCommandOutcome.EXISTING,
+            self.task.task_id,
+            self.task.status,
+        )
 
     def get(self, task_id):
-        return self.task
+        return self.task if self.task is not None and self.task.task_id == task_id else None
 
-    def claim_specific(self, task_id, query):
-        lease = LineDeliveryLease(task_id, query.lease_owner, query.now, query.now + timedelta(seconds=60))
-        self.task = LineDeliveryTaskSnapshot(task_id, self.task.request, LineDeliveryStatus.PROCESSING, self.task.completed_attempts, lease)
-        return self.task
+    def claim(self, query):
+        if self.task is None or self.task.status is not LineDeliveryStatus.PENDING:
+            return ()
+        lease = LineDeliveryLease(
+            self.task.task_id,
+            query.lease_owner,
+            query.now,
+            query.now + timedelta(seconds=60),
+        )
+        self.task = LineDeliveryTaskSnapshot(
+            self.task.task_id,
+            self.task.request,
+            LineDeliveryStatus.PROCESSING,
+            self.task.completed_attempts,
+            lease,
+        )
+        return (self.task,)
 
     def record_attempt(self, command):
+        if command.provider_outcome.outcome_type is not LineProviderOutcomeType.SUCCESS:
+            raise AssertionError("focused delivery fake only models provider success")
         self.attempts.append(command)
-        self.task = LineDeliveryTaskSnapshot(self.task.task_id, self.task.request, LineDeliveryStatus.SENT, 1)
+        self.task = LineDeliveryTaskSnapshot(
+            self.task.task_id,
+            self.task.request,
+            LineDeliveryStatus.SENT,
+            self.task.completed_attempts + 1,
+        )
+        return RecordLineDeliveryAttemptResult(
+            self.task.task_id,
+            LineAttemptPlan(LineDeliveryStatus.SENT, None),
+        )
+
+
+class _Provider:
+    def __init__(self):
+        self.requests = []
+
+    def send(self, request):
+        self.requests.append(request)
+        return LineProviderOutcome(
+            LineProviderOutcomeType.SUCCESS,
+            provider_message_id=LineProviderMessageId("provider-message-91"),
+        )
 
 
 class _Outbox:
@@ -81,9 +141,9 @@ class _Uow:
         pass
 
 
-def test_masked_alert_is_projected_and_completed_with_local_result():
-    payload = {
-        "escalation_ref": "escalation:7",
+def _work_item(outbox_id=17, escalation_ref="escalation:7", payload=None):
+    payload = payload or {
+        "escalation_ref": escalation_ref,
         "ticket_ref": "ticket:21",
         "trigger_code": "complaint",
         "category": "other",
@@ -100,40 +160,76 @@ def test_masked_alert_is_projected_and_completed_with_local_result():
             "configuration": {"minimum_status": "warning", "revision": "v1"},
         },
     }
-    item = LineOutboxWorkItem(
-        17, "customer_service_escalation", "escalation:7", HUMAN_ESCALATION_INTENT,
-        json.dumps(payload, ensure_ascii=False, sort_keys=True), 0, 3,
-        "worker", NOW + timedelta(seconds=90),
+    return LineOutboxWorkItem(
+        outbox_id,
+        "customer_service_escalation",
+        escalation_ref,
+        HUMAN_ESCALATION_INTENT,
+        json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        0,
+        3,
+        "worker",
+        NOW + timedelta(seconds=90),
     )
+
+
+def test_masked_alert_is_projected_then_canonical_delivery_records_provider_outcome():
+    item = _work_item()
     outbox, delivery, escalations = _Outbox(item), _Delivery(), _Escalations()
     uow = _Uow(outbox, delivery, escalations)
-    worker = HumanEscalationDeliveryWorker(lambda: uow, "task96", lambda: NOW)
+    projection_worker = HumanEscalationDeliveryWorker(
+        lambda: uow,
+        "task96",
+        lambda: NOW,
+    )
 
-    assert worker.run_once() == 1
-    assert delivery.task.status is LineDeliveryStatus.SENT
-    assert len(delivery.attempts) == 1
+    assert projection_worker.run_once() == 1
+    assert delivery.task.status is LineDeliveryStatus.PENDING
+    assert delivery.attempts == []
     assert escalations.task_ref == ("escalation:7", 91)
-    assert escalations.status == "sent"
+    assert escalations.outcome_ref is None
+    assert escalations.status is None
     assert len(outbox.completed) == 1
+
     request_payload = json.loads(delivery.task.request.payload_json)
     assert request_payload["type"] == "text"
     assert "complaint_explicit" in request_payload["text"]
     assert "Ctask96M4Alert0901" in delivery.task.request.recipient.identity.value
     assert "source_digest" not in request_payload["text"]
 
+    provider = _Provider()
+    delivery_worker = LineDeliveryWorker(
+        lambda: uow,
+        provider,
+        "task96-delivery",
+        lambda: NOW,
+    )
+
+    assert delivery_worker.run_once() == 1
+    assert delivery.task.status is LineDeliveryStatus.SENT
+    assert len(delivery.attempts) == 1
+    assert provider.requests == [delivery.task.request]
+    assert escalations.outcome_ref == (
+        "escalation:7",
+        "line-delivery-attempt:91:1",
+    )
+    assert escalations.status == "sent"
+
 
 def test_missing_target_is_a_durable_manual_fallback():
-    item = LineOutboxWorkItem(
-        18, "customer_service_escalation", "escalation:8", HUMAN_ESCALATION_INTENT,
-        json.dumps({"urgency": "high", "hold_state": "active"}), 0, 3,
-        "worker", NOW + timedelta(seconds=90),
+    item = _work_item(
+        outbox_id=18,
+        escalation_ref="escalation:8",
+        payload={"urgency": "high", "hold_state": "active"},
     )
     outbox, delivery, escalations = _Outbox(item), _Delivery(), _Escalations()
     uow = _Uow(outbox, delivery, escalations)
     worker = HumanEscalationDeliveryWorker(lambda: uow, "task96", lambda: NOW)
 
     assert worker.run_once() == 1
-    assert worker.failures == (("escalation:8", "human_escalation_alert_target_missing"),)
+    assert worker.failures == (
+        ("escalation:8", "human_escalation_alert_target_missing"),
+    )
     assert escalations.status == "failed"
     assert outbox.completed[0].retryable is True
     assert delivery.task is None
