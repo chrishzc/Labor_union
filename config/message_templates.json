@@ -193,11 +193,11 @@
     },
     {
       "id": "new_user_d1",
-      "name": "新好友 D+1",
+      "name": "新好友 D+1 服務須知",
       "category": "scheduled_push",
       "message_type": "text",
       "enabled": true,
-      "content": "歡迎加入工會 LINE 官方帳號，今天帶您了解第一項服務。",
+      "content": "【新手爸媽照護指南 🌸】\n您好！坐月子是媽媽產後休養的重要時期。\n\n如果您已在市府月子平台登記，別忘了點選下方選單【服務登記】完成 60 題需求問卷，工會將為您精準媒合最合適的優質月嫂！\n\n如有任何問題，直接在對話框輸入「服務說明」即可隨時查詢。",
       "variables": [],
       "usage": [
         "schedule"
@@ -205,11 +205,11 @@
     },
     {
       "id": "new_user_d2",
-      "name": "新好友 D+2",
+      "name": "新好友 D+2 履約保證",
       "category": "scheduled_push",
       "message_type": "text",
       "enabled": true,
-      "content": "加入第二天，您可以透過下方選單查詢案件與聯絡工會專員。",
+      "content": "【工會月嫂三大安心保證 🛡️】\n1. 專業合格證照與定期健康檢查。\n2. 定型化契約保障與市府定額補助核銷。\n3. 請假安心調休與專人代班制度支援。\n\n讓您在家坐月子更放心！您可隨時透過下方選單查詢最新進度與常見問答。",
       "variables": [],
       "usage": [
         "schedule"
@@ -217,11 +217,11 @@
     },
     {
       "id": "new_user_d3",
-      "name": "新好友 D+3",
+      "name": "新好友 D+3 專人諮詢",
       "category": "scheduled_push",
       "message_type": "text",
       "enabled": true,
-      "content": "加入第三天，如有服務需求或疑問，歡迎隨時透過 LINE 聯絡工會。",
+      "content": "【產前準備與專人諮詢 ✨】\n距離預產期還有一段時間嗎？建議提早準備產婦母嬰必備用品清單。\n\n如需諮詢客製化天數、時段調配或特殊照護需求，歡迎直接輸入「轉真人客服」，工會專員將竭誠為您服務！",
       "variables": [],
       "usage": [
         "schedule"

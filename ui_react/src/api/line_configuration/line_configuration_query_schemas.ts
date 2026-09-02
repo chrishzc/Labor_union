@@ -4,33 +4,20 @@
  */
 import { z } from 'zod';
 
-const IdentifierSchema = z.string().regex(/^[a-z][a-z0-9_]{0,63}$/);
+const IdentifierSchema = z.string().min(1).max(128);
 const NullableTextSchema = z.string().nullable();
 
-export const LineNotificationEventCodeSchema = z.enum([
-  'order_lifecycle_transition',
-  'service_time_checkpoint',
-  'beclass_completion_changed',
-  'deposit_confirmed',
-]);
+export const LineNotificationEventCodeSchema = z.string().min(1).max(128);
 export type LineNotificationEventCode = z.infer<
   typeof LineNotificationEventCodeSchema
 >;
 
-export const LineNotificationRecipientSelectorSchema = z.enum([
-  'client',
-  'assigned_caregiver',
-  'case_group',
-]);
+export const LineNotificationRecipientSelectorSchema = z.string().min(1).max(128);
 export type LineNotificationRecipientSelector = z.infer<
   typeof LineNotificationRecipientSelectorSchema
 >;
 
-export const LineNotificationPredicateSchema = z.enum([
-  'requires_cooking_true',
-  'baby_log_missing',
-  'beclass_missing',
-]);
+export const LineNotificationPredicateSchema = z.string().min(1).max(128);
 export type LineNotificationPredicate = z.infer<
   typeof LineNotificationPredicateSchema
 >;

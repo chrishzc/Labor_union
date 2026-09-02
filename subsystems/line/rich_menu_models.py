@@ -1,8 +1,6 @@
-"""Canonical LINE Rich Menu configuration models.
-
-These models are shared by the API adapter and LINE application workflow;
-keeping them below the API layer prevents the subsystem from depending on
-transport schemas while preserving the public model names through re-export.
+"""
+File: rich_menu_models.py
+Description: LINE Rich Menu 規格模型、外觀、動作與清單驗證契約。
 """
 
 from __future__ import annotations
@@ -122,6 +120,8 @@ class LineMenusConfig(BaseModel):
         ids = [item.id for item in self.menus]
         if len(ids) != len(set(ids)):
             raise ValueError("rich menu ids must be unique")
+        if not self.menus:
+            return self
         enabled = [item for item in self.menus if item.enabled]
         primary_roles = {"customer", "staff", "union_staff"}
         roles = [item.audience_role for item in enabled if item.audience_role in primary_roles]

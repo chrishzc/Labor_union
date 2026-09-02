@@ -27,6 +27,7 @@ import {
   adaptLineNotificationRulesCatalog,
   adaptLineRichMenuPublication,
   adaptLineRichMenuPublicationPage,
+  ruleName,
   type LineNotificationRuleModel,
   type LineNotificationRulesCatalogModel,
   type LineRichMenuConfigurationModel,
@@ -2183,6 +2184,66 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               </button>
             </div>
 
+            {/* 0. 新好友加入即時歡迎詞與迎新引導 (Follow Webhook) */}
+            <div className="richmenu-card" style={{ marginBottom: '24px', border: '2px solid #ff7f50', background: 'linear-gradient(180deg, #fffaf6 0%, #ffffff 100%)' }}>
+              <div className="richmenu-card-header">
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <h4 style={{ margin: 0, fontSize: '1.1rem', color: '#1e1b19', fontWeight: 700 }}>
+                      🌟 新好友加入即時歡迎詞與功能導覽 (Onboarding)
+                    </h4>
+                    <span className="line-status line-status-bound" style={{ fontSize: '0.78rem' }}>
+                      ● Webhook 自動推播中
+                    </span>
+                  </div>
+                  <p style={{ margin: '4px 0 0', fontSize: '0.84rem', color: '#74593f' }}>
+                    當訪客掃描 QR Code 或搜尋 LINE ID 加入好友時，系統 Webhook 將自動秒速推播下方歡迎導覽與 15 分鐘專屬安全登記連結。
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ marginTop: '16px', padding: '16px', background: '#ffffff', borderRadius: '8px', border: '1px solid #f0e6e0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <strong style={{ fontSize: '0.92rem', color: '#533f2d' }}>
+                    📱 即時歡迎訊息內容預覽：
+                  </strong>
+                  <span style={{ fontSize: '0.75rem', color: '#8c7662', background: '#f5ece9', padding: '2px 8px', borderRadius: '4px' }}>
+                    觸發條件：LINE Follow Webhook (加好友 / 解除封鎖)
+                  </span>
+                </div>
+                <div style={{ padding: '12px', background: '#faf6f4', borderRadius: '6px', fontSize: '0.88rem', color: '#332920', lineHeight: 1.6, whiteSpace: 'pre-wrap', borderLeft: '4px solid #ff7f50' }}>
+{`您好！歡迎加入【新竹市月子工會】官方服務平台 🤱✨
+我們提供專業、安心、有保障的到府坐月子媒合與母嬰照護服務。
+
+📱【新手快速導覽・三步驟開始使用】
+
+1️⃣ 準爸媽／產婦專區：
+👉 請開啟以下專屬登記頁面，進行服務需求填寫或核對市府登記案件：
+https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效）
+
+2️⃣ 專業月嫂服務人員：
+👉 請點擊下方選單【月嫂專區】或直接在對話框輸入「我要綁定月嫂」進行身分認證。
+
+3️⃣ 即時智慧客服諮詢：
+👉 直接在對話框輸入您的問題（例如：「補助時數」、「收費原則」、「服務內容」），AI 小幫手 24 小時為您即時解答！
+
+---
+💡 如需真人專員協助，隨時在對話框輸入「轉真人客服」，我們將由專人為您服務。
+
+👇 請點擊下方圖文選單，開啟您的專屬服務！`}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid #f5ece9' }}>
+                  <span style={{ fontSize: '0.82rem', color: '#74593f' }}>
+                    📅 <strong>多日排程關懷：</strong>已啟用 D+1（登記須知）、D+2（履約保證）、D+3（準備清單）定時引導
+                  </span>
+                  <span style={{ fontSize: '0.78rem', color: '#16a34a', fontWeight: 700 }}>
+                    ✓ 運作正常 (Active)
+                  </span>
+                </div>
+              </div>
+            </div>
+
             {/* 1. 通知規則目錄卡片清單 */}
             <div className="richmenu-card" style={{ marginBottom: '24px' }}>
               <div className="richmenu-card-header">
@@ -2217,17 +2278,22 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     >
                       <div className="line-rule-card-header">
                         <span className="line-category-badge category-service_flow">
-                          {rule.eventLabel}
+                          📌 {rule.eventLabel}
                         </span>
                         <span className="line-category-badge category-payment_subsidy">
-                          {rule.recipientLabel}
+                          👤 {rule.recipientLabel}
                         </span>
                       </div>
-                      <strong>{rule.id}</strong>
-                      <small>
+                      <strong style={{ fontSize: '0.98rem', color: '#1e1b19', margin: '6px 0 2px', display: 'block', textAlign: 'left' }}>
+                        {ruleName(rule.id)}
+                      </strong>
+                      <span style={{ fontSize: '0.74rem', color: '#8c7662', fontFamily: 'monospace', display: 'block', textAlign: 'left' }}>
+                        代碼：{rule.id}
+                      </span>
+                      <small style={{ marginTop: '6px', display: 'block', textAlign: 'left' }}>
                         ⏱️ {rule.scheduleLabel} ｜ 頻率：{rule.frequencyLabel}
                       </small>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #f5ece9' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #f5ece9' }}>
                         <span className={`line-status ${rule.enabled ? 'line-status-bound' : 'line-status-revoked'}`}>
                           {rule.enabled ? '● 已啟用' : '○ 停用中'}
                         </span>
@@ -2986,7 +3052,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         </div>
       </Drawer>
 
-      <Drawer isOpen={selectedRule !== null} onClose={() => setSelectedRule(null)} title="通知規則" footer={<div className="line-drawer-footer"><button type="button" onClick={() => setSelectedRule(null)}>關閉</button></div>}>{selectedRule && <div className="line-drawer-content" data-control-id="line.notification-rule.detail"><div className="line-detail-grid"><div><span>事件</span><strong>{selectedRule.eventLabel}</strong></div><div><span>收件人</span><strong>{selectedRule.recipientLabel}</strong></div><div><span>通知內容</span><strong>{selectedRule.templateId ? '已設定' : '尚未設定'}</strong></div><div><span>狀態</span><strong>{selectedRule.enabled ? '已啟用' : '未啟用'}</strong></div></div><p>{selectedRule.scheduleLabel}｜{selectedRule.frequencyLabel}</p>{selectedRule.predicateLabels.length > 0 && <p>條件：{selectedRule.predicateLabels.join('、')}</p>}</div>}</Drawer>
+      <Drawer isOpen={selectedRule !== null} onClose={() => setSelectedRule(null)} title={selectedRule ? `🔔 ${ruleName(selectedRule.id)}` : '通知規則明細'} footer={<div className="line-drawer-footer"><button type="button" onClick={() => setSelectedRule(null)}>關閉</button></div>}>{selectedRule && <div className="line-drawer-content" data-control-id="line.notification-rule.detail"><div className="line-detail-grid"><div><span>觸發事件</span><strong>{selectedRule.eventLabel}</strong></div><div><span>接收對象</span><strong>{selectedRule.recipientLabel}</strong></div><div><span>範本代碼</span><strong>{selectedRule.templateId}</strong></div><div><span>啟用狀態</span><strong>{selectedRule.enabled ? '已啟用' : '未啟用'}</strong></div></div><div style={{ margin: '16px 0', padding: '12px', background: '#faf6f4', borderRadius: '8px', border: '1px solid #f0e6e0' }}><p style={{ margin: 0, fontSize: '0.9rem', color: '#533f2d' }}><strong>⏱️ 發送排程：</strong>{selectedRule.scheduleLabel}</p><p style={{ margin: '6px 0 0', fontSize: '0.9rem', color: '#533f2d' }}><strong>🔄 發送頻率：</strong>{selectedRule.frequencyLabel}</p>{selectedRule.predicateLabels.length > 0 && <p style={{ margin: '6px 0 0', fontSize: '0.9rem', color: '#533f2d' }}><strong>🎯 觸發條件：</strong>{selectedRule.predicateLabels.join('、')}</p>}<p style={{ margin: '6px 0 0', fontSize: '0.78rem', color: '#8c7662', fontFamily: 'monospace' }}>系統唯一規則識別碼：{selectedRule.id}</p></div></div>}</Drawer>
 
       <Drawer isOpen={selectedPublication.status !== 'idle'} onClose={closePublication} title="Rich Menu 發布紀錄" footer={<div className="line-drawer-footer"><button type="button" onClick={closePublication}>關閉</button>{selectedPublication.status === 'error' && publicationDetailId.current !== null && <button type="button" onClick={() => openPublication(publicationDetailId.current!)}>重試查詢</button>}</div>}><div className="line-drawer-content"><LoadingOrError state={selectedPublication} loadingText="正在載入發布紀錄明細…" />{selectedPublication.status === 'loaded' && selectedPublication.value && <div className="line-detail-grid"><div><span>選單</span><strong>{richMenuConfiguration.value?.menus.find((menu) => menu.id === selectedPublication.value?.menuDefinitionId)?.name ?? '已發布圖文選單'}</strong></div><div><span>目前狀態</span><strong>{selectedPublication.value.statusLabel}</strong></div></div>}</div></Drawer>
     </div>

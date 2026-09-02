@@ -1,4 +1,7 @@
-"""Content-addressed filesystem/NAS storage and renderer for Rich Menu images."""
+"""
+File: rich_menu_image_store.py
+Description: LINE Rich Menu 圖片檔案儲存管理與現代化卡片圖文選單繪製渲染引擎。
+"""
 
 from __future__ import annotations
 
@@ -68,53 +71,203 @@ class FileSystemRichMenuImageStore:
         return target
 
 
+def _get_icon_for_label(label: str) -> str:
+    if "通報" in label or "異常" in label or "警報" in label:
+        return "🚨"
+    if "看板" in label or "報表" in label or "數據" in label or "營運" in label:
+        return "📊"
+    if "修改" in label or "異動" in label:
+        return "✏️"
+    if "登記" in label or "申請" in label:
+        return "📝"
+    if "說明" in label or "FAQ" in label:
+        return "🔍"
+    if "客服" in label or "諮詢" in label:
+        return "💬"
+    if "訂單" in label or "案件" in label:
+        return "📦"
+    if "排班" in label or "日曆" in label:
+        return "📅"
+    if "請假" in label or "休假" in label:
+        return "🏖️"
+    if "薪資" in label or "請款" in label or "明細" in label:
+        return "💵"
+    if "契約" in label or "合約" in label:
+        return "📑"
+    if "評價" in label or "滿意度" in label:
+        return "⭐"
+    if "審核" in label or "調度" in label or "確認" in label:
+        return "📋"
+    if "一般用戶" in label or "會員" in label or "用戶" in label:
+        return "👥"
+    if "月嫂" in label:
+        return "👩‍🍼"
+    if "工會" in label:
+        return "🛡️"
+    return "📌"
+
+
+def _find_emoji_font(size: int = 140) -> ImageFont.FreeTypeFont | None:
+    for path in (
+        "C:/Windows/Fonts/seguiemj.ttf",
+        "seguiemj.ttf",
+        "/System/Library/Fonts/Apple Color Emoji.ttc",
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+        "/usr/share/fonts/truetype/google-noto-color-emoji/NotoColorEmoji.ttf",
+    ):
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            continue
+    return None
+
+
+def _find_text_font(size: int = 76) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    for name in (
+        "C:/Windows/Fonts/msjhbd.ttc",
+        "C:/Windows/Fonts/msjh.ttc",
+        "/Library/Fonts/Microsoft JhengHei Bold.ttf",
+        "/Library/Fonts/Microsoft JhengHei.ttf",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "msjhbd.ttc",
+        "msjh.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "arial.ttf",
+    ):
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
 def render_rich_menu_image(menu: dict[str, object]) -> bytes:
     width = int(menu["size"]["width"])
     height = int(menu["size"]["height"])
     if (width, height) not in ALLOWED_RICH_MENU_SIZES:
         raise ValueError("Rich Menu image size is unsupported")
+
     appearance = menu.get("appearance")
-    background = appearance.get("background_color", "#F5F5F5") if isinstance(appearance, dict) else "#F5F5F5"
-    image = Image.new("RGB", (width, height), color=background)
+    bg_color = (
+        appearance.get("background_color", "#F4EFEB")
+        if isinstance(appearance, dict) and appearance.get("background_color")
+        else "#F4EFEB"
+    )
+    image = Image.new("RGB", (width, height), color=bg_color)
     draw = ImageDraw.Draw(image)
-    for button in menu.get("buttons", []):
+
+    buttons = menu.get("buttons", [])
+    margin = 16
+
+    for button in buttons:
         bounds = button["bounds"]
-        left, top = int(bounds["x"]), int(bounds["y"])
-        button_width = int(bounds["width"])
-        button_height = int(bounds["height"])
-        right = left + int(bounds["width"])
-        bottom = top + int(bounds["height"])
-        button_box = [left, top, right, bottom]
+        bx, by = int(bounds["x"]), int(bounds["y"])
+        bw, bh = int(bounds["width"]), int(bounds["height"])
+        card_box = [bx + margin, by + margin, bx + bw - margin, by + bh - margin]
+        is_compact = bh < 700
+
         radius = int(button.get("border_radius", 0) or 0)
-        fill = button.get("background_color", "#4A90E2")
-        if radius > 0:
-            draw.rounded_rectangle(
-                button_box,
-                radius=min(radius, button_width // 2, button_height // 2),
-                fill=fill,
-                outline="#FFFFFF",
-                width=4,
-            )
-        else:
-            draw.rectangle(
-                button_box,
-                fill=fill,
-                outline="#FFFFFF",
-                width=4,
-            )
-        label = str(button["label"])
-        font, text_box = _button_font_for_label(draw, label, button_width, button_height)
-        text_width = text_box[2] - text_box[0]
-        text_height = text_box[3] - text_box[1]
-        draw.text(
-            (
-                left + (button_width - text_width) / 2 - text_box[0],
-                top + (button_height - text_height) / 2 - text_box[1],
-            ),
-            label,
-            fill=button.get("text_color", "#FFFFFF"),
-            font=font,
+        card_radius = min(radius, 44) if radius > 0 else (34 if is_compact else 44)
+
+        # 1. 繪製純白卡片底圖與柔和邊框
+        draw.rounded_rectangle(
+            card_box,
+            radius=card_radius,
+            fill="#FFFFFF",
+            outline="#E5DCD4",
+            width=3,
         )
+
+        # 2. 繪製頂部品牌強調色條
+        accent_color = button.get("background_color") or "#FF7F50"
+        accent_h = 10 if is_compact else 14
+        draw.rounded_rectangle(
+            [card_box[0] + 24, card_box[1] + 4, card_box[2] - 24, card_box[1] + accent_h + 4],
+            radius=6,
+            fill=accent_color,
+        )
+
+        label = str(button.get("label", ""))
+        icon = _get_icon_for_label(label)
+        card_center_x = bx + bw / 2
+        card_center_y = by + bh / 2
+
+        # 3. 繪製圓形底圖與圖示 (Emoji / Icon)
+        emoji_size = 110 if is_compact else 145
+        emoji_font = _find_emoji_font(emoji_size)
+        circle_r = 72 if is_compact else 100
+        circle_y = card_center_y - (50 if is_compact else 80)
+
+        draw.ellipse(
+            [
+                card_center_x - circle_r,
+                circle_y - circle_r,
+                card_center_x + circle_r,
+                circle_y + circle_r,
+            ],
+            fill="#FFF7F2",
+        )
+
+        if emoji_font:
+            try:
+                e_box = draw.textbbox((0, 0), icon, font=emoji_font)
+                ew = e_box[2] - e_box[0]
+                eh = e_box[3] - e_box[1]
+                draw.text(
+                    (card_center_x - ew / 2 - e_box[0], circle_y - eh / 2 - e_box[1]),
+                    icon,
+                    font=emoji_font,
+                    embedded_color=True,
+                )
+            except Exception:
+                pass
+
+        # 4. 繪製主標題文字
+        title_font_size = 58 if is_compact else 76
+        title_font = _find_text_font(title_font_size)
+        t_box = draw.textbbox((0, 0), label, font=title_font)
+        tw = t_box[2] - t_box[0]
+        th = t_box[3] - t_box[1]
+
+        # 若文字過長則動態微調字型
+        if tw > (bw - margin * 2 - 40) and title_font_size > 40:
+            title_font_size = int(title_font_size * 0.8)
+            title_font = _find_text_font(title_font_size)
+            t_box = draw.textbbox((0, 0), label, font=title_font)
+            tw = t_box[2] - t_box[0]
+            th = t_box[3] - t_box[1]
+
+        ty = card_center_y + (54 if is_compact else 82)
+        text_color = button.get("text_color")
+        if not text_color or text_color == "#FFFFFF":
+            text_color = "#2B211D"
+
+        draw.text(
+            (card_center_x - tw / 2 - t_box[0], ty),
+            label,
+            font=title_font,
+            fill=text_color,
+        )
+
+        # 5. 繪製動作提示次標題
+        action = button.get("action", {})
+        action_type = action.get("type", "") if isinstance(action, dict) else ""
+        sub_text = "線上服務 ›" if action_type == "uri" else "即時查詢 ›"
+        sub_font_size = 32 if is_compact else 38
+        sub_font = _find_text_font(sub_font_size)
+        s_box = draw.textbbox((0, 0), sub_text, font=sub_font)
+        sw = s_box[2] - s_box[0]
+        draw.text(
+            (card_center_x - sw / 2 - s_box[0], ty + th + (16 if is_compact else 22)),
+            sub_text,
+            font=sub_font,
+            fill="#A89587",
+        )
+
     return encode_line_jpeg(image)
 
 
@@ -127,46 +280,6 @@ def encode_line_jpeg(image: Image.Image) -> bytes:
         if len(data) <= MAX_LINE_IMAGE_BYTES:
             return data
     raise ValueError("Rich Menu image remains too large after encoding")
-
-
-def _button_font_for_label(
-    draw: ImageDraw.ImageDraw,
-    label: str,
-    width: int,
-    height: int,
-):
-    for size in range(min(300, int(height * 0.38)), 119, -8):
-        font = _font(size)
-        text_box = draw.textbbox((0, 0), label, font=font)
-        text_width = text_box[2] - text_box[0]
-        text_height = text_box[3] - text_box[1]
-        if text_width <= width * 0.82 and text_height <= height * 0.58:
-            return font, text_box
-    font = _font(120)
-    return font, draw.textbbox((0, 0), label, font=font)
-
-
-def _font(size: int = 86):
-    for name in (
-        "/Library/Fonts/Microsoft JhengHei.ttf",
-        "/Library/Fonts/Microsoft JhengHei Bold.ttf",
-        "/Library/Fonts/msjh.ttc",
-        "/Library/Fonts/msjhbd.ttc",
-        "/System/Library/Fonts/STHeiti Medium.ttc",
-        "/System/Library/Fonts/STHeiti Light.ttc",
-        "/System/Library/Fonts/PingFang.ttc",
-        "msjh.ttc",
-        "Microsoft JhengHei.ttf",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "arial.ttf",
-    ):
-        try:
-            return ImageFont.truetype(name, size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
 
 
 __all__ = [

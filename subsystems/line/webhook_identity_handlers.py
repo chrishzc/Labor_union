@@ -335,12 +335,29 @@ def _liff_url(query):
 
 
 def _identity_link_message(purpose, url):
+    if purpose == LineIdentityFlowPurpose.CUSTOMER_BINDING:
+        return (
+            "您好！歡迎加入【新竹市月子工會】官方服務平台 🤱✨\n\n"
+            "我們提供專業、安心、有保障的到府坐月子媒合與母嬰照護服務。\n\n"
+            "📱【新手快速導覽・三步驟開始使用】\n\n"
+            "1️⃣ 準爸媽／產婦專區：\n"
+            "👉 請開啟以下專屬登記頁面，進行服務需求填寫或核對市府登記案件：\n"
+            f"{url}\n"
+            "（此安全登記連結將於 15 分鐘後失效）\n\n"
+            "2️⃣ 專業月嫂服務人員：\n"
+            "👉 請點擊下方選單【月嫂專區】或直接在對話框輸入「我要綁定月嫂」進行身分認證。\n\n"
+            "3️⃣ 即時智慧客服諮詢：\n"
+            "👉 直接在對話框輸入您的問題（例如：「補助時數」、「收費原則」、「服務內容」），AI 小幫手 24 小時為您即時解答！\n\n"
+            "---\n"
+            "💡 如需真人專員協助，隨時在對話框輸入「轉真人客服」，我們將由專人為您服務。\n\n"
+            "👇 請點擊下方圖文選單，開啟您的專屬服務！"
+        )
     introductions = {
-        LineIdentityFlowPurpose.CUSTOMER_BINDING: "請開啟以下頁面完成客戶資料綁定：",
         LineIdentityFlowPurpose.STAFF_VERIFICATION: "請開啟以下頁面填寫月嫂身分資料：",
         LineIdentityFlowPurpose.ADMIN_BINDING: "請開啟以下頁面登入並綁定工會後台帳號：",
     }
-    return f"{introductions[purpose]}\n\n{url}\n\n此連結將於 15 分鐘後失效。"
+    intro = introductions.get(purpose, "請開啟以下頁面完成身分綁定：")
+    return f"{intro}\n\n{url}\n\n此連結將於 15 分鐘後失效。"
 
 
 def _identity_purpose_for_text(text):

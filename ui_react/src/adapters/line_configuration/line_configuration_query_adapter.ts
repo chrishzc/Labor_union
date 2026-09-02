@@ -86,21 +86,69 @@ export interface LineRichMenuPublicationPageModel {
   loadedScope: true;
 }
 
-function eventLabel(value: LineNotificationRule['event_code']): string {
-  switch (value) {
-    case 'order_lifecycle_transition': return '訂單生命週期變更';
-    case 'service_time_checkpoint': return '服務時間節點';
-    case 'beclass_completion_changed': return 'BeClass 完成狀態變更';
-    case 'deposit_confirmed': return '訂金確認';
-  }
+const RULE_NAMES: Record<string, string> = {
+  'LU96-M1-GATEWAY-RETRY-FAIL-RULE-V1': 'M1：Gateway 核對失敗協處工單通知',
+  'LU96-M1-LEAVE-EXTENSION-RULE-V1': 'M1：月嫂請假順延客戶確認通知',
+  'LU96-M1-STAFF-RETIRE-RULE-V1': 'M1：月嫂退役權限回收通知',
+  'LU96-M2-ROUTER-REPLY-RULE-V1': 'M2：AI 路由器確定性答覆推播',
+  'LU96-M2-FEEDBACK-UNRESOLVED-RULE-V1': 'M2：AI 評分未解決工單通報',
+  'LU96-M3-ZERO-POOL-RULE-V1': 'M3：零意願降維協商建議通知',
+  'LU96-M3-MATCH-SUCCESS-CLIENT-RULE-V1': 'M3：派案成功通知（產婦端）',
+  'LU96-M3-MATCH-SUCCESS-STAFF-RULE-V1': 'M3：派案成功通知（月嫂端）',
+  'LU96-M3-LEAVE-AGREE-RULE-V1': 'M3：客戶同意請假順延確認',
+  'LU96-M3-LEAVE-DISAGREE-RULE-V1': 'M3：客戶拒絕順延代班工單',
+  'LU96-M4-SAFE-ALERT-RULE-V1': 'M4：幹部異常通報與安全審核',
+  'LU96-M4-COMPLAINT-HIGH-RULE-V1': 'M4：重大客訴 HIGH 急件告警',
+  'LU96-M4-SALARY-PAYABLE-RULE-V1': 'M4：代班薪資自動拆帳通報',
+};
+
+const EVENT_LABELS: Record<string, string> = {
+  'gateway.identity_mismatch.second_attempt': '身分核對連續兩次失敗',
+  'scheduling.leave.extension_requested': '月嫂申請請假調休',
+  'staff.retirement.committed': '月嫂辦理退休生效',
+  'router.deterministic.reply_committed': 'AI 確定性指令回覆',
+  'feedback.unresolved.recorded': '客服回答評為未解決',
+  'matching.zero_pool.preview_applied': '媒合意願池人數為零',
+  'matching.decision.committed.client': '媒合派案成交（產婦）',
+  'matching.decision.committed.staff': '媒合派案成交（月嫂）',
+  'client.leave.extension_agreed': '產婦同意服務順延',
+  'client.leave.extension_rejected': '產婦不同意順延需代班',
+  'runtime.alert.review_required': '系統重大告警待審核',
+  'complaint.ingress.hold_high_ticket': '重大客訴觸發急件工單',
+  'payroll.substitute.obligation_projected': '代班出勤薪資拆帳結算',
+  'order_lifecycle_transition': '訂單生命週期變更',
+  'service_time_checkpoint': '服務時間節點',
+  'beclass_completion_changed': 'BeClass 完成狀態變更',
+  'deposit_confirmed': '訂金確認',
+};
+
+const RECIPIENT_LABELS: Record<string, string> = {
+  'customer_service.ticket_owner': '客服工單專員',
+  'client.bound_case': '案件產婦',
+  'staff.binding_owner': '綁定月嫂',
+  'conversation.bound_actor': '對話使用者',
+  'matching.request.participants': '媒合相關對象',
+  'assignment.client_snapshot': '指派產婦',
+  'assignment.staff_snapshot': '指派月嫂',
+  'scheduling.owner': '排班調度負責人',
+  'admin.review_actor': '工會幹部審核群',
+  'customer_service.claim_owner': '客訴專責處理人',
+  'staff_payables.anomaly_owner': '財務核銷專員',
+  'client': '客戶',
+  'assigned_caregiver': '已指派月嫂',
+  'case_group': '案件群組',
+};
+
+export function ruleName(id: string): string {
+  return RULE_NAMES[id] ?? id;
 }
 
-function recipientLabel(value: LineNotificationRule['recipient_selector']): string {
-  switch (value) {
-    case 'client': return '客戶';
-    case 'assigned_caregiver': return '已指派月嫂';
-    case 'case_group': return '案件群組';
-  }
+function eventLabel(value: string): string {
+  return EVENT_LABELS[value] ?? value;
+}
+
+function recipientLabel(value: string): string {
+  return RECIPIENT_LABELS[value] ?? value;
 }
 
 function scheduleLabel(value: LineNotificationSchedule): string {
@@ -124,6 +172,7 @@ function predicateLabel(value: LineNotificationPredicate): string {
     case 'requires_cooking_true': return '需要下廚';
     case 'baby_log_missing': return '嬰兒日誌缺失';
     case 'beclass_missing': return 'BeClass 資料缺失';
+    default: return String(value);
   }
 }
 

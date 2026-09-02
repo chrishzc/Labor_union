@@ -38,6 +38,19 @@ type PreviewIntent =
   | { kind: 'delete'; ruleId: string; preview: LineNotificationRulesPreviewModel };
 
 const EVENT_OPTIONS: ReadonlyArray<{ value: LineNotificationEventCode; label: string }> = [
+  { value: 'gateway.identity_mismatch.second_attempt', label: '身分核對連續兩次失敗' },
+  { value: 'scheduling.leave.extension_requested', label: '月嫂申請請假調休' },
+  { value: 'staff.retirement.committed', label: '月嫂辦理退休生效' },
+  { value: 'router.deterministic.reply_committed', label: 'AI 確定性指令回覆' },
+  { value: 'feedback.unresolved.recorded', label: '客服回答評為未解決' },
+  { value: 'matching.zero_pool.preview_applied', label: '媒合意願池人數為零' },
+  { value: 'matching.decision.committed.client', label: '媒合派案成交（產婦）' },
+  { value: 'matching.decision.committed.staff', label: '媒合派案成交（月嫂）' },
+  { value: 'client.leave.extension_agreed', label: '產婦同意服務順延' },
+  { value: 'client.leave.extension_rejected', label: '產婦不同意順延需代班' },
+  { value: 'runtime.alert.review_required', label: '系統重大告警待審核' },
+  { value: 'complaint.ingress.hold_high_ticket', label: '重大客訴觸發急件工單' },
+  { value: 'payroll.substitute.obligation_projected', label: '代班出勤薪資拆帳結算' },
   { value: 'order_lifecycle_transition', label: '訂單生命週期變更' },
   { value: 'service_time_checkpoint', label: '服務時間節點' },
   { value: 'beclass_completion_changed', label: 'BeClass 完成狀態變更' },
@@ -47,6 +60,17 @@ const RECIPIENT_OPTIONS: ReadonlyArray<{
   value: LineNotificationRecipientSelector;
   label: string;
 }> = [
+  { value: 'customer_service.ticket_owner', label: '客服工單專員' },
+  { value: 'client.bound_case', label: '案件產婦' },
+  { value: 'staff.binding_owner', label: '綁定月嫂' },
+  { value: 'conversation.bound_actor', label: '對話使用者' },
+  { value: 'matching.request.participants', label: '媒合相關對象' },
+  { value: 'assignment.client_snapshot', label: '指派產婦' },
+  { value: 'assignment.staff_snapshot', label: '指派月嫂' },
+  { value: 'scheduling.owner', label: '排班調度負責人' },
+  { value: 'admin.review_actor', label: '工會幹部審核群' },
+  { value: 'customer_service.claim_owner', label: '客訴專責處理人' },
+  { value: 'staff_payables.anomaly_owner', label: '財務核銷專員' },
   { value: 'client', label: '客戶' },
   { value: 'assigned_caregiver', label: '已指派月嫂' },
   { value: 'case_group', label: '案件群組' },
