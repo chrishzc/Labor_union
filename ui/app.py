@@ -1,6 +1,6 @@
 """
 File: app.py
-Description: 管理端 Streamlit 導覽、全域登入與短效 TOTP QR 配對入口。
+Description: 尚未退役的 Streamlit 資料匯入相容入口與全域登入。
 """
 
 import importlib
@@ -28,43 +28,21 @@ from ui.pages.shared import (
 
 st.set_page_config(page_title="Lobar Union 管理系統", layout="wide")
 
-DEFAULT_PAGE_TITLE = "📦 訂單管理"
+DEFAULT_PAGE_TITLE = "📥 資料匯入中心"
 NAV_SECTION_KEY = "nav_section"
 PAGE_REGISTRY: Mapping[str, tuple[tuple[str, str], ...]] = {
     "營運作業": (
-        ("📦 訂單管理", "ui.pages.02_orders"),
         ("📥 資料匯入中心", "ui.pages.09_data_import"),
-        ("多月嫂排班", "ui.pages.03_calendar"),
-        ("📋 表單與履歷問卷管理", "ui.pages.05_form_management"),
-        ("💬 LINE 管理中心", "ui.pages.07_line_management"),
-    ),
-    "帳務": (
-        ("💰 帳務作業中心", "ui.pages.04_finance"),
-    ),
-    "異常與稽核": (
-        ("異常警示中心", "ui.pages.06_finance_alerts"),
-        ("🔍 資料庫原始資料瀏覽", "ui.pages.01_data_browser"),
-        ("工會人員權限", "ui.pages.09_access_management"),
-        ("🩺 系統狀態", "ui.pages.08_system_status"),
     ),
 }
 
 ROLLBACK_TARGETS: Mapping[str, tuple[str, str | tuple[str, ...] | None, str]] = {
-    "form-management": ("ui.pages.05_form_management", "order-tracker", "📋 表單與履歷問卷管理"),
-    "orders": ("ui.pages.02_orders", None, "📦 訂單管理"),
-    "scheduling": ("ui.pages.03_calendar", ("calendar", "staff-directory"), "多月嫂排班"),
     "data-import": ("ui.pages.09_data_import", None, "📥 資料匯入中心"),
-    "line-management": ("ui.pages.07_line_management", None, "💬 LINE 管理中心"),
-    "system-status": ("ui.pages.08_system_status", "reports", "🩺 系統狀態"),
-    "finance": ("ui.pages.04_finance", None, "💰 帳務作業中心"),
-    "anomalies": ("ui.pages.06_finance_alerts", None, "異常警示中心"),
-    "data-browser": ("ui.pages.01_data_browser", None, "🔍 資料庫原始資料瀏覽"),
-    "access-management": ("ui.pages.09_access_management", None, "工會人員權限"),
 }
 
 
 def resolve_rollback_query(raw_query: str | Mapping[str, object]) -> tuple[str, str | None] | None:
-    """Resolve only the frozen entry/view pair; malformed input fails closed."""
+    """Resolve only the remaining data-import compatibility entry."""
     if isinstance(raw_query, str):
         values = parse_qs(raw_query.lstrip("?"), keep_blank_values=True)
     else:
@@ -246,7 +224,6 @@ def _render_login_or_enrollment(client: AccessControlApiClient) -> None:
             st.session_state.pop("access_control_factor_submitting", None)
             st.session_state.pop("access_control_password_challenge", None)
             st.session_state[ADMIN_ACCESS_TOKEN_KEY] = session.access_token
-            st.session_state["line_admin_profile"] = session.admin.model_dump()
             st.rerun()
         return
     with st.form("global_admin_login"):
