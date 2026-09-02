@@ -549,6 +549,21 @@ export const OrderTrackerPage: React.FC = () => {
             </section>
           )}
 
+          {stageProjectionState.kind === 'ready' && visibleCancelledOrders.length > 0 && (
+            <section className="tracker-unclassified" data-surface-id="order-tracker.cancelled-orders">
+              <div className="tracker-section-heading">
+                <div>
+                  <h2>已取消訂單</h2>
+                  <p>已取消是終止狀態，不屬於七階段進行中工作。</p>
+                </div>
+                <span className="tracker-loaded-count">{visibleCancelledOrders.length} 筆</span>
+              </div>
+              <div className="pipeline-cards-grid">
+                {visibleCancelledOrders.map(renderTrackerCard)}
+              </div>
+            </section>
+          )}
+
           <section className="tracker-unclassified" data-surface-id="order-tracker.unclassified-orders">
             <div className="tracker-section-heading">
               <div>

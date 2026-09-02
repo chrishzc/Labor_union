@@ -252,6 +252,59 @@ describe('OrderTrackerPage query-only presentation', () => {
     expect(screen.getByText(/已取消是終止狀態/)).toBeInTheDocument();
   });
 
+  it('uses the server current SOP step when the current work is blocked', async () => {
+    const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);
+    const timeline = stagePage.items[0];
+    timeline.current_sop_step = 3;
+    timeline.sop_steps = timeline.sop_steps.map((step) => ({
+      ...step,
+      status: step.ordinal < 3 ? 'completed' as const : step.ordinal === 3 ? 'blocked' as const : 'not_started' as const,
+      blockers: step.ordinal === 3 ? [{ code: 'current_blocker', message: '目前作業受阻。' }] : [],
+    }));
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(stagePage);
+
+    render(<OrderTrackerPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getByRole('button', { name: /查看訂單 ORD-2026-0801/ }));
+
+    const current = document.querySelector('[data-surface-id="order-tracker.sop.step.3"]');
+    expect(current).toHaveAttribute('data-status', 'blocked');
+    expect(current).toHaveAttribute('aria-current', 'step');
+    expect(screen.getByText('目前作業受阻。')).toBeInTheDocument();
+  });
+
+  it('renders cancelled orders outside both the seven stages and data-correction region', async () => {
+    const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);
+    const cancelled = stagePage.items[0];
+    cancelled.current_stage_code = null;
+    cancelled.current_sop_step = null;
+    cancelled.terminal_state = 'cancelled';
+    cancelled.stages = cancelled.stages.map((stage) => ({
+      ...stage,
+      status: 'unavailable' as const,
+      warnings: [{ code: 'order_cancelled', message: '訂單已取消。' }],
+      availability_reason: 'order_cancelled',
+    }));
+    cancelled.sop_steps = cancelled.sop_steps.map((step) => ({
+      ...step,
+      status: 'unavailable' as const,
+      warnings: [{ code: 'order_cancelled', message: '訂單已取消。' }],
+      availability_reason: 'order_cancelled',
+    }));
+    stagePage.stage_counts.intake_terms = 0;
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(stagePage);
+
+    render(<OrderTrackerPage />);
+
+    await screen.findByText('已取消訂單');
+    const cancelledRegion = document.querySelector('[data-surface-id="order-tracker.cancelled-orders"]');
+    const correctionRegion = document.querySelector('[data-surface-id="order-tracker.unclassified-orders"]');
+    expect(cancelledRegion).toHaveTextContent('ORD-2026-0801');
+    expect(cancelledRegion).toHaveTextContent('訂單已取消');
+    expect(correctionRegion).not.toHaveTextContent('ORD-2026-0801');
+    expect(screen.getByText(/已取消是終止狀態/)).toBeInTheDocument();
+  });
+
   it('isolates incomplete historical imports as data correction instead of a business stage', async () => {
     const stagePage = buildOrdersStageProjectionFixture(realisticOrderSummaryPage);
     const incomplete = stagePage.items[0];
