@@ -250,7 +250,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python scripts/verify_validation_schema_manifest.py
+          python -m scripts.verify_validation_schema_manifest
           python - <<'PY'
           from pathlib import Path
           from scripts.schema_assembly import validate_schema_assembly
