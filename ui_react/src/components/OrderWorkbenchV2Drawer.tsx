@@ -17,6 +17,7 @@ import type {
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { AssignmentPlan, OrderDetail, OrderTerms } from '../api/orders/order_query_schemas';
 import { coreStageSubstatusLabel } from '../adapters/orders/order_core_stage_projection_adapter';
+import { OrderTermsMutationPanel } from './OrderTermsMutationPanel';
 
 interface OrderWorkbenchV2DrawerProps {
   caseNo: string;
@@ -180,9 +181,9 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       <aside className="order-v2-drawer" role="dialog" aria-modal="true" aria-labelledby="order-v2-drawer-title">
         <header className="order-v2-drawer-header">
           <div>
-            <div className="order-v2-eyebrow">唯讀工作 Drawer</div>
+            <div className="order-v2-eyebrow">工作 Drawer</div>
             <h2 id="order-v2-drawer-title">案件 {caseNo}</h2>
-            <p>目前正式 owner facts、immutable historical baseline 與歷史來源 evidence 分開呈現；此 Drawer 不提供寫入。</p>
+            <p>正式 owner facts、immutable historical baseline 與歷史來源 evidence 分開呈現；第 1 階進件條款可沿用既有 Preview／Apply。</p>
           </div>
           <button type="button" onClick={onClose} aria-label="關閉工作 Drawer">關閉</button>
         </header>
@@ -223,6 +224,13 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               </article>
             </div>
           </section>
+
+          {branchType === 'normal'
+            && timeline.status === 'ready'
+            && timeline.data.current_core_stage_code === 'intake_validation'
+            && terms.status === 'ready' && (
+            <OrderTermsMutationPanel caseNo={caseNo} query={terms.data} />
+          )}
 
           <section className="order-v2-drawer-section" aria-labelledby="order-v2-assignment-heading">
             <h3 id="order-v2-assignment-heading">目前正式派案／Assignment projection</h3>
