@@ -6,7 +6,7 @@ Description: 解析 Staff 歷史 workbook 並建立不含原始個資的列級�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from hashlib import sha256
 from pathlib import Path
 import re
@@ -20,6 +20,17 @@ from domains.case_import.staff_import_validation import (
     validate_staff_row,
 )
 from shared_kernel.fingerprints import fingerprint_payload
+
+
+EDUCATION_HEADERS = ("學歷", "教育程度", "最高學歷")
+EMERGENCY_CONTACT_NAME_HEADERS = ("緊急聯絡人", "緊急聯絡人姓名", "緊急聯絡姓名")
+EMERGENCY_CONTACT_PHONE_HEADERS = ("緊急聯絡電話", "緊急聯絡人電話", "緊急聯絡人手機")
+ADMIN_NOTE_HEADERS = ("行政備註", "行政註記", "管理者註記", "管理者註記事項")
+CERTIFICATION_HEADER_PATTERN = re.compile(
+    r"(證書|證照|證明|良民|警察刑事紀錄|體檢|健檢|CPR|急救|保母|托育|烹飪|廚師)",
+    re.IGNORECASE,
+)
+EXCLUDED_CERTIFICATION_HEADERS = frozenset({"有嬰幼兒按摩證書嗎?"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +75,13 @@ def _row(source_row: int, series) -> StaffHistoricalWorkbookRow:
     raw = series.to_dict()
     errors = validate_staff_row(raw)
     record = _record(raw, errors)
-    return StaffHistoricalWorkbookRow(source_row, record, tuple(sorted(errors)), _bank_accounts(raw, errors), _relations(raw))
+    return StaffHistoricalWorkbookRow(
+        source_row,
+        record,
+        tuple(sorted(errors)),
+        _bank_accounts(raw, errors),
+        _relations(raw),
+    )
 
 
 def _record(raw: dict[str, object], errors: dict[str, str]) -> dict[str, object]:
@@ -75,11 +92,20 @@ def _record(raw: dict[str, object], errors: dict[str, str]) -> dict[str, object]
         "name": _text(raw.get("姓名")),
         "identity_card": _identity_card(raw.get("身分證字號")),
         "phone": _phone(raw.get("行動電話")),
-        "tel": _text(raw.get("市話")), "tel_ext": _text(raw.get("分機")),
-        "email": _text(raw.get("EMAIL")), "birthday": _birthday(raw),
-        "city": city, "zip_code": _text(raw.get("郵遞區號")), "address": address,
+        "tel": _text(raw.get("市話")),
+        "tel_ext": _text(raw.get("分機")),
+        "email": _text(raw.get("EMAIL")),
+        "birthday": _birthday(raw),
+        "city": city,
+        "zip_code": _text(raw.get("郵遞區號")),
+        "address": address,
+        "education": _first_text(raw, EDUCATION_HEADERS),
+        "emergency_contact_name": _first_text(raw, EMERGENCY_CONTACT_NAME_HEADERS),
+        "emergency_contact_phone": _phone(_first_value(raw, EMERGENCY_CONTACT_PHONE_HEADERS)),
+        "admin_notes": _first_text(raw, ADMIN_NOTE_HEADERS),
         "has_massage_cert": _yes(raw.get("有嬰幼兒按摩證書嗎?")),
-        "care_babies": _care_babies(raw), "status": "active",
+        "care_babies": _care_babies(raw),
+        "status": "active",
     }
     for excel_column, database_column in EXCEL_TO_DB_COLUMN.items():
         if excel_column in errors:
@@ -102,6 +128,17 @@ def _text(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _first_value(raw: dict[str, object], headers: tuple[str, ...]) -> object | None:
+    for header in headers:
+        if _text(raw.get(header)) is not None:
+            return raw.get(header)
+    return None
+
+
+def _first_text(raw: dict[str, object], headers: tuple[str, ...]) -> str | None:
+    return _text(_first_value(raw, headers))
 
 
 def _identity_card(value: object) -> str | None:
@@ -133,7 +170,9 @@ def _birthday(raw: dict[str, object]) -> str | None:
         if not pd.isna(parsed):
             return parsed.strftime("%Y-%m-%d")
     try:
-        year = int(raw.get("出生年")); month = int(raw.get("月")); day = int(raw.get("日"))
+        year = int(raw.get("出生年"))
+        month = int(raw.get("月"))
+        day = int(raw.get("日"))
         return date(year + 1911 if year < 1900 else year, month, day).isoformat()
     except (TypeError, ValueError):
         return None
@@ -150,7 +189,10 @@ def _yes(value: object) -> bool:
 
 
 def _care_babies(raw: dict[str, object]) -> int:
-    values = " ".join(_text(raw.get(field)) or "" for field in ("可承接的胎數", "雙胞胎", "三胞胎"))
+    values = " ".join(
+        _text(raw.get(field)) or ""
+        for field in ("可承接的胎數", "雙胞胎", "三胞胎", "[其它].4")
+    )
     return 3 if "三胞胎" in values else 2 if "雙胞胎" in values else 1
 
 
@@ -166,6 +208,20 @@ def _bank_accounts(raw: dict[str, object], errors: dict[str, str]) -> tuple[tupl
     return tuple(accounts)
 
 
+def _certifications(raw: dict[str, object]) -> tuple[tuple[object, ...], ...]:
+    values: list[tuple[object, ...]] = []
+    for raw_header, raw_value in raw.items():
+        header = str(raw_header).strip()
+        if header in EXCLUDED_CERTIFICATION_HEADERS:
+            continue
+        if _text(raw_value) != "Y":
+            continue
+        if CERTIFICATION_HEADER_PATTERN.search(header) is None:
+            continue
+        values.append((header,))
+    return tuple(values)
+
+
 def _relations(raw: dict[str, object]) -> dict[str, tuple[tuple[object, ...], ...]]:
     specs = (
         ("staff_regions", ("北區", "東區", "香山區", "新竹縣", "苗栗縣"), "[其它].1"),
@@ -178,11 +234,16 @@ def _relations(raw: dict[str, object]) -> dict[str, tuple[tuple[object, ...], ..
     )
     result = {}
     for table_name, options, other_column in specs:
-        values = [(option,) if table_name == "staff_transportation" else (option, None) for option in options if _text(raw.get(option)) == "Y"]
+        values = [
+            (option,) if table_name == "staff_transportation" else (option, None)
+            for option in options
+            if _text(raw.get(option)) == "Y"
+        ]
         other = _text(raw.get(other_column)) if other_column else None
         if other is not None:
             values.append(("其他", other))
         result[table_name] = tuple(values)
+    result["staff_certifications"] = _certifications(raw)
     return result
 
 
