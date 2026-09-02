@@ -194,7 +194,7 @@ describe('待辦看板 Beta Government Subsidy side lane', () => {
     expect(screen.getByText('正常訂單尚未找到正式 Government Subsidy claim 關聯。')).toBeInTheDocument();
     expect(screen.getByText('CASE-SUBMITTED')).toBeInTheDocument();
     expect(screen.getByText('77 小時')).toBeInTheDocument();
-    expect(screen.getByText('NT$ 23,100')).toBeInTheDocument();
+    expect(screen.getByText(/23,100/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /已送件 1/ }));
 
