@@ -9,14 +9,14 @@ import type {
 
 export const STAFF_PAGE_ONE: StaffDirectoryPage = {
   items: [
-    { id: 11, name: '去敏人員甲', phone: '09********' },
-    { id: 12, name: null, phone: null },
+    { id: 11, name: '去敏人員甲', phone: '09********', education: '大學' },
+    { id: 12, name: null, phone: null, education: null },
   ],
   next_cursor: 12,
 };
 
 export const STAFF_PAGE_TWO: StaffDirectoryPage = {
-  items: [{ id: 13, name: '去敏人員乙', phone: null }],
+  items: [{ id: 13, name: '去敏人員乙', phone: null, education: '高中' }],
   next_cursor: null,
 };
 
