@@ -20,6 +20,7 @@ export type PageType =
   | 'reports'
   | 'line-management'
   | 'line-ai-events'
+  | 'line-llm-settings'
   | 'line-liff-studio'
   | 'line-security'
   | 'finance'
@@ -38,6 +39,7 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
 
   'line-management': 'line',
   'line-ai-events': 'line',
+  'line-llm-settings': 'line',
   'line-liff-studio': 'line',
   'line-security': 'line',
 
@@ -68,6 +70,7 @@ export const NAV_ITEMS: NavItem[] = [
   // LINE Section
   { id: 'line-management', icon: '📋', label: '客服與選單', section: 'line' },
   { id: 'line-ai-events', icon: '🤖', label: 'AI 事件工作室', section: 'line' },
+  { id: 'line-llm-settings', icon: '🔑', label: 'AI 模型設定', section: 'line' },
   { id: 'line-liff-studio', icon: '🪟', label: 'LIFF 卡片工作室', section: 'line' },
   { id: 'line-security', icon: '🔒', label: '群組與安全', section: 'line' },
 
