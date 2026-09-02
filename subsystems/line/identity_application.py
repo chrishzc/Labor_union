@@ -47,7 +47,6 @@ from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from subsystems.line.identity_contracts import (
     AdminCredentialProof,
     CustomerIdentityProof,
-    LineIdentityCommandOutcome,
     LineIdentityApplyResult,
     LineIdentityApplyStatus,
     LineIdentityCandidate,
@@ -55,12 +54,6 @@ from subsystems.line.identity_contracts import (
     LineIdentityPreviewStatus,
     OpenLineIdentityFlowCommand,
     StaffIdentityProof,
-)
-from subsystems.line.identity_management_application import (
-    LineIdentityManagementApplication,
-)
-from subsystems.line.identity_management_contracts import (
-    SelectLineIdentityRoleCommand,
 )
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 from subsystems.line.review_contracts import CreateLineReviewCommand
@@ -83,60 +76,6 @@ class LineIdentityConflictError(RuntimeError):
 
 class LineIdentityAuthenticationError(PermissionError):
     pass
-
-
-def _select_role_for_explicit_flow(
-    unit_of_work,
-    purpose,
-    line_user_id: LineUserId,
-    flow_id: LineIdentityFlowId,
-    correlation_id: CorrelationId,
-    unit_of_work_factory,
-    now,
-) -> None:
-    """Use an existing canonical flow as the explicit dual-role choice.
-
-    The identity page already distinguishes customer and staff flows.  When
-    both roles are active, opening one of those flows is the user's explicit
-    context choice; the selection is applied in the same outer transaction as
-    the flow open, preserving the existing route and token boundary.
-    """
-
-    target_role = {
-        LineIdentityFlowPurpose.CUSTOMER_BINDING: LineBindingSubjectType.CUSTOMER,
-        LineIdentityFlowPurpose.STAFF_SELF_SERVICE: LineBindingSubjectType.STAFF,
-    }.get(purpose)
-    identities = getattr(unit_of_work, "identities", None)
-    if target_role is None or identities is None:
-        return
-    if not all(
-        hasattr(identities, name) for name in ("list_by_user", "selected_role", "select_role")
-    ):
-        return
-    management = LineIdentityManagementApplication(unit_of_work_factory, now)
-    preview = management.preview_role_selection_in_unit_of_work(
-        unit_of_work,
-        line_user_id,
-        target_role,
-    )
-    if len(preview.readback.available_roles) < 2:
-        return
-    if preview.readback.selected_role is target_role:
-        return
-    if preview.blockers:
-        raise LineIdentityConflictError(preview.blockers[0])
-    management.select_role_in_unit_of_work(
-        unit_of_work,
-        SelectLineIdentityRoleCommand(
-            line_user_id,
-            target_role,
-            preview.readback.context_version,
-            preview.preview_fingerprint,
-            ActorContext(f"line:identity-flow:{purpose}"),
-            IdempotencyKey(f"line-identity-role-flow:{flow_id.value}:{target_role.value}"),
-            correlation_id,
-        ),
-    )
 
 
 class LineIdentityApplication:
@@ -164,16 +103,6 @@ class LineIdentityApplication:
         with self._unit_of_work_factory() as unit_of_work:
             unit_of_work.platform_users.ensure_verified_user(line_user_id)
             result = unit_of_work.identity_flows.open(command)
-            if result.outcome is LineIdentityCommandOutcome.CREATED:
-                _select_role_for_explicit_flow(
-                    unit_of_work,
-                    purpose,
-                    line_user_id,
-                    result.flow_id,
-                    correlation_id,
-                    self._unit_of_work_factory,
-                    self._now,
-                )
             unit_of_work.commit()
         return result
 
