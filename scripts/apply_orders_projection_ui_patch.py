@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import subprocess
+
+
+TARGET_PATHS = (
+    "ui_react/src/pages/OrdersPage.tsx",
+    "ui_react/src/pages/OrderTrackerPage.tsx",
+    "ui_react/src/tests/orders_page_real_data.test.tsx",
+    "ui_react/src/tests/order_tracker_real_data.test.tsx",
+)
 
 
 def replace_once(path: Path, old: str, new: str) -> None:
@@ -293,11 +303,45 @@ def patch_orders_page_tests() -> None:
     )
 
 
+def commit_and_push() -> None:
+    head_ref = os.environ.get("GITHUB_HEAD_REF")
+    if os.environ.get("GITHUB_ACTIONS") != "true" or not head_ref:
+        return
+    subprocess.run(["git", "add", *TARGET_PATHS], check=True)
+    changed = subprocess.run(
+        ["git", "diff", "--cached", "--quiet"],
+        check=False,
+    ).returncode
+    if changed == 0:
+        return
+    subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "config",
+            "user.email",
+            "41898282+github-actions[bot]@users.noreply.github.com",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "commit",
+            "-m",
+            "fix(orders-ui): isolate cancellation and render terminal projection",
+        ],
+        check=True,
+    )
+    subprocess.run(["git", "push", "origin", f"HEAD:{head_ref}"], check=True)
+
+
 def main() -> None:
     patch_orders_page()
     patch_order_tracker_page()
     patch_order_tracker_tests()
     patch_orders_page_tests()
+    commit_and_push()
 
 
 if __name__ == "__main__":
