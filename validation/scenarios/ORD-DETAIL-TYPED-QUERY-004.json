@@ -9,8 +9,7 @@
   "test_kinds": ["typed_query_view", "expected_manifest"],
   "coverage_ids": ["ORD-QRY-01"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#ORD-QRY-01",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#4.2"
+    "document/架構重整/01_規格基線/01_Orders_Domain.md#3.1 Order Query"
   ],
   "root_facts": [
     "A read-only repository projection harness with one declared selected-order row and a separate selected-case identity.",
