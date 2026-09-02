@@ -18,6 +18,7 @@ from api.dependencies.runtime_heartbeat import (
 from api.dependencies.durable_job_handlers import default_job_handlers
 from api.schemas.private_operations import MonitorCycleRequest, WorkerRuntimeIdentity
 from infrastructure.knowledge.chroma_gateway import ChromaKnowledgeGateway
+from infrastructure.knowledge.gemini_selector import GeminiCandidateSelector
 from infrastructure.mysql.background_job_repository import BackgroundJobRepository
 from infrastructure.mysql.knowledge_retrieval_unit_of_work import (
     open_knowledge_retrieval_unit_of_work,
@@ -83,7 +84,10 @@ def _write_durable_job_heartbeat(
 
 
 def run_knowledge_cycle(worker_id: str, runtime_identity: WorkerRuntimeIdentity) -> int:
-    gateway = ChromaKnowledgeGateway(os.getenv("KNOWLEDGE_CHROMA_PATH", "db/chroma_knowledge"))
+    gateway = ChromaKnowledgeGateway(
+        os.getenv("KNOWLEDGE_CHROMA_PATH", "db/chroma_knowledge"),
+        llm=GeminiCandidateSelector(),
+    )
     worker = KnowledgeWorker(open_knowledge_retrieval_unit_of_work, gateway, worker_id)
     processed = int(worker.run_once())
     record_runtime_heartbeat(runtime_identity, processed)
