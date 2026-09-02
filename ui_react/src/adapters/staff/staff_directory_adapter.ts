@@ -23,14 +23,15 @@ export interface StaffDirectoryPageViewModel {
 }
 
 export function adaptStaffDirectorySummary(summary: StaffDirectorySummary): StaffDirectoryCardViewModel {
+  const displayEducation = summary.education ?? '—';
   return {
     id: summary.id,
     name: summary.name,
     phone: summary.phone,
     education: summary.education,
     displayName: summary.name ?? `服務人員摘要 #${summary.id}`,
-    displayPhone: summary.phone ?? '—',
-    displayEducation: summary.education ?? '—',
+    displayPhone: `${summary.phone ?? '—'} ｜ 學歷：${displayEducation}`,
+    displayEducation,
   };
 }
 
