@@ -17,7 +17,7 @@ describe('staff directory adapter', () => {
       phone: '09********',
       education: '大學',
       displayName: '去敏人員甲',
-      displayPhone: '09********',
+      displayPhone: '09******** ｜ 學歷：大學',
       displayEducation: '大學',
     });
   });
@@ -26,7 +26,7 @@ describe('staff directory adapter', () => {
     const page = adaptStaffDirectoryPage(STAFF_PAGE_ONE);
 
     expect(page.items[1].displayName).toBe('服務人員摘要 #12');
-    expect(page.items[1].displayPhone).toBe('—');
+    expect(page.items[1].displayPhone).toBe('— ｜ 學歷：—');
     expect(page.items[1].displayEducation).toBe('—');
     expect(page.nextCursor).toBe(12);
     expect(Object.keys(page.items[1]).sort()).toEqual([
