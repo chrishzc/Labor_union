@@ -33,35 +33,6 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d .github/issue101_payload.b64 | gzip -d > /tmp/issue101_remove_masked_apply.py
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path("/tmp/issue101_remove_masked_apply.py")
-          text = path.read_text()
-
-          # The third inventory renamed _mask_actor to _canonical_actor, while an
-          # earlier transform still looked for _canonical_actor_id.
-          text = text.replace('"_canonical_actor_id"', '"_canonical_actor"')
-
-          # Issue #101 changes authorized readback only.  Never weaken the
-          # existing write-time audit snapshot redaction boundary.
-          text = text.replace(
-              'SENSITIVE_DETAIL_KEYS = frozenset({"password", "token", "authorization", "secret", "credential"})',
-              'SENSITIVE_DETAIL_KEYS = frozenset({"password", "token", "authorization", "line_user_id", "phone", "identity_number"})',
-          )
-
-          # These are security-boundary classifiers/sentinels rather than admin
-          # display masks; leave their runtime semantics unchanged.
-          text = text.replace(
-              '''    if relative == "subsystems/anomalies/system_alert_projection.py":\n        text = text.replace('return "masked"', 'return "canonical"')\n''',
-              "",
-          )
-          text = text.replace(
-              '''    if relative == "subsystems/line/safe_review_link_application.py":\n        text = text.replace('"masked"', '"unavailable"')\n''',
-              "",
-          )
-          path.write_text(text)
-          PY
           python -m py_compile /tmp/issue101_remove_masked_apply.py
           python /tmp/issue101_remove_masked_apply.py . --expected-head "$GITHUB_SHA" --apply > /tmp/issue101.diff
           tail -n 20 /tmp/issue101.diff
