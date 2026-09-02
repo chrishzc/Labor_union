@@ -33,6 +33,10 @@ class KnowledgeIndexUnavailable(ValueError):
     pass
 
 
+class KnowledgeAnswerUnsupported(ValueError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class KnowledgeCitation:
     source_identity: str
@@ -101,6 +105,7 @@ def content_set_digest(items: tuple[dict, ...]) -> str:
 
 __all__ = [
     "KnowledgeAnswer",
+    "KnowledgeAnswerUnsupported",
     "KnowledgeCitation",
     "KnowledgeIndexStatus",
     "KnowledgeIndexUnavailable",
