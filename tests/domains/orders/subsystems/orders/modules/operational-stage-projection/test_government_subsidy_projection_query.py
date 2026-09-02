@@ -144,7 +144,7 @@ def _timeline(
 
 class _Source:
     def __init__(self, *items: OrderOperationalTimeline) -> None:
-        self.items = items
+        self.items = tuple(sorted(items, key=lambda item: item.case_no.casefold()))
 
     def query(self, request):
         assert request.after_case_no is None
