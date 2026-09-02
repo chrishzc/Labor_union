@@ -2,7 +2,7 @@
   "contract": "labor-union-verification-scenario/v1", "scenario_id": "PAY-AND-SP-OBLIGATION-001", "track": "A", "suite_id": "PAY", "status": "specified", "requires_database": true,
   "test_kinds": ["domain_root_data", "external_input_fixture", "expected_manifest"],
   "coverage_ids": ["PAY-01", "PAY-02", "PAY-03", "SP-01", "SP-02", "SP-03", "PSM-01", "PSM-02", "PSM-03", "PAYOUT-001", "PAYOUT-002", "PAYOUT-003"],
-  "source_refs": ["document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#PAY-01", "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#PSM-01"],
+  "source_refs": ["document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#PAY-01", "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#PSM-01"],
   "root_facts": ["Official assignment-owned work days, terms, fee policy, double-pay and adjustment events, staff account roots and outgoing bank facts."],
   "forbidden_direct_seed": ["payroll amount, staff payable status/summary, payout allocation, monthly settlement or anomaly rows"],
   "commands": ["Generate obligations, Preview/Apply exact payouts, then apply underpay, ownership mismatch and reversal facts."],
