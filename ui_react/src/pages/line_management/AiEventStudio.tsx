@@ -3,6 +3,7 @@
  * Description: 保留 LINE 事件規則編輯與本機模擬設計，並將正式發布鎖在 typed Preview／Apply 契約之後。
  */
 import React, { useEffect, useState } from 'react';
+import { RealLlmSemanticTestPanel } from './RealLlmSemanticTestPanel';
 import '../LineManagementPage.css';
 
 export interface AiEventRule {
@@ -681,6 +682,8 @@ export const AiEventStudio: React.FC = () => {
 
         {/* 本機草稿比對器 */}
         <div className="ai-simulator-card">
+          <RealLlmSemanticTestPanel />
+
           <h4>🧭 Server-owned deterministic router flow preview</h4>
           <div className="line-warning" role="status">
             僅 development/no-auth 可用；輸入會交給伺服器固定 router。Answer、clarification、protected route 與 unknown 僅讀取；manual fallback 才會透過既有客服 workflow 建立工單。
