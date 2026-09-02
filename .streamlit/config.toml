@@ -1,3 +1,0 @@
-[client]
-# ui/app.py owns the single business navigation. Hide Streamlit's file-derived page list.
-showSidebarNavigation = false
