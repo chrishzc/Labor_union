@@ -19,7 +19,11 @@ from scripts.verify_verification_baseline import DEFAULT_BASELINE_PATH, load_bas
 
 DEFAULT_SCENARIO_DIRECTORY = PROJECT_ROOT / "validation" / "scenarios"
 DEFAULT_BUSINESS_MATRIX_PATH = (
-    PROJECT_ROOT / "document" / "資料庫、資料處理" / "新版測試資料規則矩陣_草案.md"
+    PROJECT_ROOT
+    / "document"
+    / "架構重整"
+    / "01_規格基線"
+    / "28_驗證情境與測試資料正式規格.md"
 )
 SCENARIO_CONTRACT = "labor-union-verification-scenario/v1"
 SCENARIO_STATUS = {"specified", "bound", "blocked"}
@@ -118,7 +122,7 @@ def _suite_test_kinds(baseline: dict[str, object]) -> dict[str, set[str]]:
 
 
 def matrix_requirement_ids(path: Path = DEFAULT_BUSINESS_MATRIX_PATH) -> set[str]:
-    """Read named business coverage requirements from the human-review matrix."""
+    """Read named business coverage requirements from the formal matrix."""
     if not path.is_file():
         raise ValueError(f"business matrix is missing: {path}")
     return set(re.findall(r"\|\s*([A-Z]+-[A-Z0-9]+)\s*\|", path.read_text(encoding="utf-8")))
