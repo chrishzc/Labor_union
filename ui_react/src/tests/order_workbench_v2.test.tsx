@@ -1,7 +1,22 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderWorkbenchV2Page } from '../pages/OrderWorkbenchV2Page';
+
+const clientMocks = vi.hoisted(() => ({
+  loadTimelines: vi.fn(),
+  loadSummaries: vi.fn(),
+}));
+
+vi.mock('../api/orders/order_stage_projection_client', () => ({
+  loadAllOrderOperationalTimelines: clientMocks.loadTimelines,
+  orderStageProjectionClient: { getOperationalTimelines: vi.fn() },
+}));
+
+vi.mock('../api/orders/order_query_client', () => ({
+  loadAllOrderSummaries: clientMocks.loadSummaries,
+  ordersQueryClient: { getOrderSummaries: vi.fn() },
+}));
 
 const source = { owner: 'test-owner', identity: 'test:1', version: 1 };
 const makeStage = (ordinal: number, code: string, status: string, settlement: unknown[] = []) => ({
@@ -63,48 +78,116 @@ function timeline(caseNo: string, lifecycle: string, currentStep: number | null,
   };
 }
 
-describe('待辦看板 Beta dry-run', () => {
-  afterEach(() => vi.restoreAllMocks());
+function timelinePage(items: unknown[]) {
+  return {
+    items,
+    stage_counts: {
+      intake_terms: 0,
+      matching_willingness: 0,
+      client_review: 0,
+      contract_deposit: 0,
+      date_confirmation: 0,
+      active_service: items.length,
+      settlement_payout: 0,
+    },
+    next_cursor: null,
+    etag: 'b'.repeat(64),
+  };
+}
 
-  it('保留 13 階段並可在第 10 階只看服務進行中', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      success: true,
-      message: 'ok',
-      error: null,
-      data: {
-        items: [
-          timeline('CASE-ACTIVE', '服務中', 10, 'in_progress'),
-          timeline('CASE-PLANNED', '訂單成立', 10, 'not_started'),
-          timeline('CASE-HISTORY', '歷史訂單－服務完成', 11, 'completed'),
-        ],
-        stage_counts: {
-          intake_terms: 0,
-          matching_willingness: 0,
-          client_review: 0,
-          contract_deposit: 0,
-          date_confirmation: 0,
-          active_service: 2,
-          settlement_payout: 1,
-        },
-        next_cursor: null,
-        etag: 'b'.repeat(64),
-      },
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+function orderSummary(caseNo: string, clientName: string, staffName: string | null, startDate: string, endDate: string) {
+  return {
+    case_no: caseNo,
+    client_name: clientName,
+    order_status: '服務中',
+    staff_name: staffName,
+    identity_status: '一般市民',
+    start_date: startDate,
+    end_date: endDate,
+    actual_start_date: null,
+    actual_end_date: null,
+    service_days: 20,
+    total_employer_self_pay_payable: 12000,
+  };
+}
+
+function summaryPage(items: unknown[]) {
+  return {
+    items,
+    next_cursor: null,
+    etag: 'c'.repeat(64),
+  };
+}
+
+function cardFor(caseNo: string): HTMLElement {
+  const card = screen.getByText(caseNo).closest('article');
+  if (!(card instanceof HTMLElement)) throw new Error(`找不到 ${caseNo} 案件卡`);
+  return card;
+}
+
+describe('待辦看板 Beta dry-run', () => {
+  beforeEach(() => {
+    clientMocks.loadTimelines.mockReset();
+    clientMocks.loadSummaries.mockReset();
+  });
+
+  it('以 case_no 配對正式摘要，保留缺摘要案件與第 10 階子狀態篩選', async () => {
+    clientMocks.loadTimelines.mockResolvedValue(timelinePage([
+      timeline('CASE-ACTIVE', '服務中', 10, 'in_progress'),
+      timeline('CASE-PLANNED', '訂單成立', 10, 'not_started'),
+      timeline('CASE-MISSING', '服務中', 10, 'in_progress'),
+      timeline('CASE-HISTORY', '歷史訂單－服務完成', 11, 'completed'),
+    ]));
+    clientMocks.loadSummaries.mockResolvedValue(summaryPage([
+      orderSummary('CASE-PLANNED', '林小芳', null, '2026-10-01', '2026-10-20'),
+      orderSummary('CASE-ACTIVE', '王小明', '陳月嫂', '2026-09-01', '2026-09-20'),
+    ]));
 
     render(<OrderWorkbenchV2Page />);
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '📌 待辦看板 Beta' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: /10 排班\/服務 3/ })).toBeInTheDocument());
     expect(screen.getByText('歷史訂單支線')).toBeInTheDocument();
     expect(screen.getByText('政府補助結算支線')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /13 月嫂結算/ })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /10 排班\/服務 2/ }));
-    await waitFor(() => expect(screen.getByText('CASE-ACTIVE')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: /服務進行中 1/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /10 排班\/服務 3/ }));
+
+    await waitFor(() => {
+      expect(within(cardFor('CASE-ACTIVE')).getByText('王小明')).toBeInTheDocument();
+      expect(within(cardFor('CASE-ACTIVE')).getByText('2026-09-01 ~ 2026-09-20')).toBeInTheDocument();
+      expect(within(cardFor('CASE-ACTIVE')).getByText('陳月嫂')).toBeInTheDocument();
+      expect(within(cardFor('CASE-PLANNED')).getByText('林小芳')).toBeInTheDocument();
+      expect(within(cardFor('CASE-PLANNED')).getByText('尚未正式指派')).toBeInTheDocument();
+    });
+
+    const missingCard = cardFor('CASE-MISSING');
+    expect(within(missingCard).getByText('案件摘要不可用')).toBeInTheDocument();
+    expect(within(missingCard).getByText('未取得與此案件編號相符的正式摘要。')).toBeInTheDocument();
+
+    expect(screen.getByRole('button', { name: /服務進行中 2/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /待開工 1/ })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /服務進行中 1/ }));
+    fireEvent.click(screen.getByRole('button', { name: /服務進行中 2/ }));
     expect(screen.getByText('CASE-ACTIVE')).toBeInTheDocument();
+    expect(screen.getByText('CASE-MISSING')).toBeInTheDocument();
     expect(screen.queryByText('CASE-PLANNED')).not.toBeInTheDocument();
+  });
+
+  it('摘要 Query 失敗時仍顯示 operational timeline 並標示摘要不可用', async () => {
+    clientMocks.loadTimelines.mockResolvedValue(timelinePage([
+      timeline('CASE-ACTIVE', '服務中', 10, 'in_progress'),
+    ]));
+    clientMocks.loadSummaries.mockRejectedValue(new Error('summary unavailable'));
+
+    render(<OrderWorkbenchV2Page />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /10 排班\/服務 1/ })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /10 排班\/服務 1/ }));
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('案件摘要查詢失敗'));
+    expect(screen.getByText('CASE-ACTIVE')).toBeInTheDocument();
+    expect(within(cardFor('CASE-ACTIVE')).getByText('案件摘要不可用')).toBeInTheDocument();
+    expect(within(cardFor('CASE-ACTIVE')).getByText('正式案件摘要查詢失敗；目前只顯示階段投影。')).toBeInTheDocument();
+    expect(within(cardFor('CASE-ACTIVE')).getByText('Lifecycle：服務中')).toBeInTheDocument();
   });
 });
