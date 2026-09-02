@@ -243,7 +243,7 @@ describe('OrderTrackerPage query-only presentation', () => {
 
     render(<OrderTrackerPage />);
 
-    await screen.findByText('已取消訂單');
+    expect(screen.getByRole('heading', { name: '已取消訂單' })).toBeInTheDocument();
     const cancelledRegion = document.querySelector('[data-surface-id="order-tracker.cancelled-orders"]');
     const correctionRegion = document.querySelector('[data-surface-id="order-tracker.unclassified-orders"]');
     expect(cancelledRegion).toHaveTextContent('ORD-2026-0801');
