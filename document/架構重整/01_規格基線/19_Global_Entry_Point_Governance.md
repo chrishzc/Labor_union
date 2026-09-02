@@ -1,106 +1,81 @@
 # Global Entry Point Governance
 
-## 1. Purpose
+## 1. Current boundary
 
-API endpoint、Streamlit page 與 direct CLI 是外部可達契約；被 router mount、動態 page loader 或
-`__main__` 串起，不等於仍有合法業務用途。它們不得以「有 wiring」逃避 legacy retirement audit。
+管理端唯一 current UI source 是 `ui_react/`。舊 `ui/` Streamlit tree 已於 2026-09-02 依人工裁決從工作樹移除；不得再把 Git 歷史、舊文件、舊測試、rollback metadata 或 generated queue 當成 current entry evidence。
 
-## 2. Entry SSOT
+正式管理端入口由兩個直接事實共同成立：
 
-`03_追蹤清單與證據/evidence/entrypoint_review_queue_v1.jsonl` 是現況 entry discovery 與人工裁決
-清單。每筆都必須有唯一 `entry_id`、kind、source path 與下列其中一個 status：
+1. `ui_react/src/components/MasterLayout.tsx` 宣告可達 navigation entry；
+2. `ui_react/src/App.tsx` 對相同 page identity 有實際 render branch。
 
-- `review_required`：尚未逐項裁決；不得因這個狀態被誤認為 active，也不得擴大功能。
-- `active`：必填業務情境、操作者、canonical owner 與 public／operator contract。
-- `retired_410`：僅限 HTTP；必填 replacement 與 retirement decision，route 必須回 typed `410 Gone`。
-- `operator_only`：僅限 CLI；必填操作情境、操作角色、owner 與安全邊界。
-- `removed`：source path 已不存在，並有 replacement 或明確不再需要的決策證據。
+只有其中之一存在時視為 registry drift，不得宣稱功能可達。
 
-不得以「內部沒有 static caller」自動刪除 API、UI 或 CLI entry。API 的外部 consumer、UI 的
-dynamic navigation、CLI 的人工維運都屬可能 caller；只有逐項業務裁決後才可退役。
+## 2. Current React entries
 
-2026-08-26 人工已核准 current entry queue 的 caller／replacement 盤點、focused regression、
-retirement plan 與 cutover rehearsal。這項核准允許逐 entry 準備與驗證，不會把 `review_required`
-自動改成 retired，也不直接授權 production entry switch、source removal 或不可逆 retirement；實際
-切換前仍須逐項取得 exact target、replacement readback、rollback、maintenance window 與涵蓋該
-entry 的 execution approval。任一資訊缺失固定 fail closed。
+Current navigation identity 包含：
 
-2026-09-02 人工另對九個 exact Streamlit page 作出較新裁決：只要 React canonical navigation entry
-與 `App.tsx` render branch 已存在，即足以刪除該 Streamlit page；舊的 rollback retention、production
-observation、removal receipt 或逐 entry release gate 不再阻擋這九個 exact source removal。適用清單與
-replacement 見 §7；未列入清單的 entry 仍遵守原本逐項治理。
+- `order-tracker`
+- `orders`
+- `scheduling`
+- `staff`
+- `data-import`
+- `reports`
+- `line-management`
+- `line-ai-events`
+- `line-liff-studio`
+- `line-security`
+- `finance`
+- `anomalies`
+- `account-management`
+- `system-status`
 
-## 3. One-entry review procedure
+`data-browser` 保留為 React compatibility hash identity，實際 render 同一個 `DataImportPage` 的 data-browser 分頁；不建立第二份 UI owner。
 
-每次只處理一個 `entry_id`：
+## 3. Removed Streamlit surface
 
-1. 確認實際 route/page/CLI entry 與所有可見 caller；
-2. 寫明「誰在何種人事／訂單／帳務／維運情境操作」；
-3. 指定 Global、Domain、Subsystem 或 Module canonical owner；
-4. 裁決 `active`、`retired_410`、`operator_only` 或 `removed`；
-5. 若 retired，先完成 replacement／external contract boundary，再移除 source；
-6. 執行 focused regression 與 entry queue validator。
+下列資產已退役，不得復活為 current dependency：
 
-實際執行 `retired_410`／`removed` 前，還必須保存切換前 caller inventory、replacement 可達證據、
-回復路徑與切換後 readback；rehearsal passed 不等於 production switch completed。§7 的九個 exact
-Streamlit page 依 2026-09-02 較新人工裁決例外，不再要求上述額外退役證據。
+- `ui/` 與 `.streamlit/`
+- Streamlit API clients、pages、components 與 navigation helper
+- Streamlit rollback deep links
+- `react_admin_entrypoints.json` 與 `react_admin_retirement_requirements.json`
+- `entrypoint_review_queue_v1.jsonl` 與只為該 queue 存在的 generator／validator
+- Streamlit compatibility Docker image、build、setup 與 publish scripts
+- 直接 import 或讀取 `ui/` source 的測試
 
-## 4. Automated boundary
+歷史內容需要追溯時從 Git history 讀取，不回存 current worktree。
 
-`scripts/generate_entrypoint_review_queue.py` 從 FastAPI decorators、Streamlit title pages 與
-`__main__` CLI 產生 discovery queue。`tests/test_entrypoint_review_queue.py` 會拒絕：
+## 4. API 與 CLI entry
 
-- source entry 與 queue 不一致；
-- duplicate entry id；
-- 已裁決 entry 缺業務情境、操作者、owner 或 replacement；
-- `retired_410` 非 HTTP entry，或 `operator_only` 非 CLI entry。
+本裁決只簡化已退役的 Streamlit surface。API endpoint 與 operator CLI 仍需依 current objective 個別判定：
 
-這個 queue 是入口治理，不是 runtime telemetry；它不記錄呼叫次數、人員、案件、payload 或 log。
-九個已依 §7 刪除的 Streamlit source 不得再由歷史 queue row 復活成 current entry。
+- current owner 與實際用途；
+- public／operator contract；
+- replacement 是否存在；
+- source removal 後是否仍有 current caller；
+- focused regression 或直接 readback。
 
-## 5. 資料中心 React 正式入口（2026-08-26）
+不得因 UI 已改為 React，自動刪除仍被 React、worker、provider 或操作人員使用的 API／CLI。
 
-- canonical 側邊欄入口為 `資料中心`，沿用 `data-import` hash 作穩定 identity。
-- `資料中心` 內固定包含 `NAS 檔案`、`資料匯入`、`數據瀏覽` 三個分頁；分頁不是新的 Domain owner，
-  只組合各自 typed Query／Command UI。
-- `ui:01_data_browser.py` 已依 §7 退役；舊 data-browser identity 由 React `#data-browser` compatibility
-  deep link 開啟資料中心的 `數據瀏覽` 分頁，不再保留第二份 Streamlit Data Browser 實作。
-- React deep link 須保留 hash query、認證後目標與瀏覽器 back／forward 語意，並以 focused
-  route／navigation regression 證明匯入流程、數據瀏覽 Query 與未送出草稿沒有退步。
-- NAS 分頁採已核准的高保真前端狀態機與使用者設計，明示清單、容量、下載、上傳與刪除目前皆為
-  本機介面預覽；不得宣稱已操作 NAS 或資料庫。實體 mount path、arbitrary path query、browser-side
-  file mutation、NAS mount／搬移與 provider delivery 均不屬本次入口切換。後續 typed storage adapter
-  只能填入真實資料，不得覆蓋或簡化既有 UI。
+## 5. Standard local runtime
 
-## 6. 標準本機管理端啟動入口（2026-08-26）
+標準本機管理端固定為：
 
-- `scripts/launchers/start_local_development.bat` 與 `.sh` 的 current 管理端固定為 React/Vite；標準
-  啟動不得自動建立 Streamlit process，也不得把 8501 readiness 當成服務就緒條件。
-- 本機開發服務順序固定為 FastAPI `8000` ready 後啟動 React/Vite `5173`，React canonical URL 為
-  `/admin/`，並透過 relative `/api` proxy 呼叫同一 FastAPI owner。
-- `--dry-run` 必須唯讀驗證 Python、npm、React entry files 與 launcher 依賴；`--smoke-test` 只建立
-  FastAPI＋React 兩個 owned process，執行 GET-only readiness／proxy 檢查後清理本次 process。
-- §7 九個 Streamlit page 已退役；`ui/app.py` 只保留尚未納入本輪裁決的
-  `ui:09_data_import.py` 相容入口。其餘 Streamlit source 是否仍有該入口的直接依賴，另依實際 reference
-  決定，不得因資料夾存在復活已刪 page。
+1. FastAPI `127.0.0.1:8000`
+2. React/Vite `127.0.0.1:5173/admin/`
 
-## 7. 2026-09-02 React-sufficient Streamlit retirement
+`scripts/launchers/start_local_development.bat` 與 `.sh` 不得啟動 Streamlit、檢查 8501，或要求 `ui/app.py`。React 透過 relative `/api` proxy 呼叫同一 FastAPI owner。
 
-下列 mapping 已由 React `MasterLayout.tsx` navigation 與 `App.tsx` render branch 證明存在。最新人工
-裁決將此 existence proof 視為各列 Streamlit page 的充分刪除條件：
+`--dry-run` 只檢查 current dependencies；`--smoke-test` 只建立本次擁有的 FastAPI＋React process，執行 GET-only readiness 後清理。
 
-| 已刪 Streamlit entry | React replacement |
-|---|---|
-| `ui:01_data_browser.py` | `ui-react:#data-browser` |
-| `ui:02_orders.py` | `ui-react:#orders` |
-| `ui:03_calendar.py` | `ui-react:#scheduling`、`ui-react:#staff` |
-| `ui:04_finance.py` | `ui-react:#finance` |
-| `ui:05_form_management.py` | `ui-react:#order-tracker` |
-| `ui:06_finance_alerts.py` | `ui-react:#anomalies` |
-| `ui:07_line_management.py` | `ui-react:#line-management` |
-| `ui:08_system_status.py` | `ui-react:#reports`、`ui-react:#system-status` |
-| `ui:09_access_management.py` | `ui-react:#account-management` |
+## 6. Verification
 
-這項裁決只授權上述九個 source page 與其失效導航引用退役，不自動授權刪除
-`ui:09_data_import.py`、共用 API client、仍有 current caller 的 helper、資料庫、API、provider、deployment
-或其他外部效果。
+管理端 entry 的最低充分驗證是：
+
+- navigation identity 存在；
+- render branch 存在；
+- page module 可被 TypeScript build／test 載入；
+- 直接相關 typed API client 與 focused UI test 通過。
+
+不得再要求 Streamlit rollback、retention window、removal receipt 或舊 queue 一致性來驗證 current React entry。
