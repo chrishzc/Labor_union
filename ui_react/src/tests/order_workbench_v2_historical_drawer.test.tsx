@@ -143,17 +143,23 @@ describe('historical Drawer immutable evidence boundary', () => {
   it('future source period 與 evidence-only staff 保留在來源區，formal owner/assignment 不被覆寫', async () => {
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
     const dialog = screen.getByRole('dialog', { name: '案件 CASE-FUTURE' });
+    const ownerHeading = within(dialog).getByRole('heading', { name: '目前正式 owner progression' });
+    const ownerSection = ownerHeading.closest('section');
+    if (!(ownerSection instanceof HTMLElement)) throw new Error('找不到目前正式 owner progression 區');
+    const evidenceRegion = within(dialog).getByRole('region', { name: '歷史來源證據' });
 
-    await waitFor(() => expect(within(dialog).getByText('baseline:event:9')).toBeInTheDocument());
-    expect(within(dialog).getByText('1, 2, 3, 4, 5, 6, 7, 8')).toBeInTheDocument();
-    expect(within(dialog).getByText('正式服務日期確認')).toBeInTheDocument();
-    expect(within(dialog).getByText(/owner：Orders \/ Scheduling/)).toBeInTheDocument();
-    expect(within(dialog).getByRole('link', { name: 'orders.terms.query' })).toHaveAttribute('href', '/api/v1/orders/CASE-FUTURE/terms');
+    await waitFor(() => expect(within(evidenceRegion).getByText('baseline:event:9')).toBeInTheDocument());
+    expect(within(evidenceRegion).getByText('1, 2, 3, 4, 5, 6, 7, 8')).toBeInTheDocument();
+    await waitFor(() => expect(within(ownerSection).getByText('9. 正式服務日期確認')).toBeInTheDocument());
+    expect(within(ownerSection).getByText(/owner：Orders \/ Scheduling/)).toBeInTheDocument();
+    expect(within(ownerSection).getByRole('link', { name: 'orders.terms.query' })).toHaveAttribute(
+      'href',
+      '/api/v1/orders/CASE-FUTURE/terms',
+    );
 
     expect(within(dialog).getByText(/尚無正式指派/)).toBeInTheDocument();
     expect(within(dialog).getByText('尚無 actual start')).toBeInTheDocument();
 
-    const evidenceRegion = within(dialog).getByRole('region', { name: '歷史來源證據' });
     expect(within(evidenceRegion).getByText('2026-09-03 → 2026-09-22')).toBeInTheDocument();
     expect(within(evidenceRegion).getByText('Historical Orders Adoption')).toBeInTheDocument();
     expect(within(evidenceRegion).getByText(/歷史匯入配對月嫂 · #42/)).toBeInTheDocument();

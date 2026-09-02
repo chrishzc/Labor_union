@@ -322,7 +322,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           </section>
 
           {branchType === 'historical' && (
-            <section className="order-v2-drawer-section historical-evidence" aria-labelledby="order-v2-history-baseline-heading" aria-label="歷史來源證據">
+            <section className="order-v2-drawer-section historical-evidence" aria-label="歷史來源證據">
               <h3 id="order-v2-history-baseline-heading">Immutable historical baseline</h3>
               <p className="order-v2-drawer-note">baseline 只表示已接受略過的前置步驟，不是真實 owner event，也不覆寫後續正式 owner facts。</p>
               {historicalBaseline.status === 'loading' && <p>載入 immutable baseline…</p>}
