@@ -182,7 +182,7 @@ def query_core_stage_page(
     items = tuple(selected)
     next_cursor = items[-1].case_no if has_more and items else None
     etag = _response_etag(items, stage_counts, substatus_counts, next_cursor)
-    if _can_reuse_single_source_etag(request, items, single_source_etag):
+    if _can_reuse_single_source_etag(request, items, next_cursor, single_source_etag):
         etag = cast(str, single_source_etag)
     return OrderCoreStageTimelineFilteredPage(
         items=items,
@@ -276,10 +276,12 @@ def _response_etag(
 def _can_reuse_single_source_etag(
     request: CoreStageProjectionFilterQuery,
     items: tuple[OrderCoreStageTimeline, ...],
+    next_cursor: str | None,
     source_etag: str | None,
 ) -> bool:
     return (
         source_etag is not None
+        and next_cursor is None
         and request.after_case_no is None
         and request.stage is None
         and request.substatus_code is None

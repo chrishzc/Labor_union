@@ -308,3 +308,23 @@ def test_filtered_pagination_has_no_duplicates_or_gaps_and_counts_ignore_cursor(
     assert first.substatus_counts == second.substatus_counts
     assert first.etag != second.etag
     assert all(request.page_size == MAXIMUM_PAGE_SIZE for request in source.requests)
+
+
+def test_partial_unfiltered_page_does_not_reuse_whole_source_etag():
+    source_etag = "c" * 64
+    source = _Source(
+        {
+            None: _page(
+                _timeline("CASE-001"),
+                _timeline("CASE-002"),
+                _timeline("CASE-003"),
+                etag=source_etag,
+            )
+        }
+    )
+
+    page = query_core_stage_page(source, CoreStageProjectionFilterQuery(2))
+
+    assert [item.case_no for item in page.items] == ["CASE-001", "CASE-002"]
+    assert page.next_cursor == "CASE-002"
+    assert page.etag != source_etag
