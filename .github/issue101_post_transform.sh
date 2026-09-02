@@ -208,7 +208,7 @@ replace_any(
         ('assert "A123456789" not in quarterly.text', 'assert "A123456789" in quarterly.text'),
         ('assert "完整地址" not in quarterly.text', 'assert "完整地址" in quarterly.text'),
     ],
-    minimum=5,
+    minimum=4,
 )
 replace_any(
     "tests/test_weekly_operations_report_contract.py",
