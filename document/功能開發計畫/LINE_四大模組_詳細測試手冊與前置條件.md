@@ -1,616 +1,994 @@
-# LINE 四大模組詳細測試手冊與前置條件規範
+# LINE 四大模組詳細測試手冊與 Agent 前置條件規範
 
-> **文件版本**：v1.0 (2026-09-02)  
-> **適用範圍**：LINE 官方帳號、LIFF 跨平台表單、FastAPI 後端核心服務、MySQL 資料庫、管理後台 Web/手機審核中心。  
-> **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`
-
----
-
-## 🛠️ 測試環境準備與共用前置條件
-
-在開始執行各模組測試前，請確認以下本機服務已啟動並處於正常狀態：
-
-1. **資料庫與快取**：
-   - MySQL 8.0 運行於 `127.0.0.1:3306`（資料庫：`union_db`）。
-   - Redis 7 運行於 `127.0.0.1:6379`。
-2. **後端 API 服務**：
-   - FastAPI 服務運行於 `http://127.0.0.1:8000`。
-   - 確認健康檢查端點正常：`GET http://127.0.0.1:8000/health` ➜ 回傳 `200 OK`。
-3. **前端 Web 管理後台**：
-   - Vite 前端運行於 `http://localhost:5173/admin/`。
-4. **LINE Webhook 外網通道**：
-   - 透過 ngrok 或 Cloudflare Tunnel 建立 HTTPS 轉發至 `http://127.0.0.1:8000/api/v1/line/webhook`。
-   - LINE Developers Console 的 Webhook URL 已填入並通過驗證（`Verify` 成功）。
-5. **測試帳號準備**：
-   - **手機 LINE 帳號 A**：作為訪客／產婦測試帳號。
-   - **手機 LINE 帳號 B**：作為月嫂測試帳號。
-   - **手機 LINE 帳號 C**：作為工會幹部／管理員測試帳號。
-   - **LINE 測試群組**：邀請 LINE 官方帳號加入，作為幹部異常通報群。
+> **文件版本**：v2.0（2026-09-02）  
+> **對齊程式版本**：`main @ 0988f6c430472343662aa1f8989ab2af9732bde3`  
+> **適用範圍**：LINE 官方帳號、LIFF、FastAPI、MySQL、React 管理後台、M1～M4 repository-local 與手機 E2E 驗收。  
+> **權威依據**：`document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md`  
+> **目的**：讓 Agent 先完成可自動化的測試前置資料與 readback，測試者拿手機後只執行真正需要 LINE／LIFF／Rich Menu 的最後操作。
 
 ---
 
+## 0. 驗收原則：前置資料與被測流程必須分開
 
-## 🌟 模組零：新好友歡迎訊息與功能引導 (Onboarding)
+本手冊把每個案例拆成兩段：
 
----
+1. **Agent 前置任務**：建立或整理 development/test 測試資料、檢查服務、建立測試案件狀態、準備候選人、產生 readback。
+2. **手機驗收**：由真人在 LINE／LIFF 實際操作，驗證畫面、身分、postback、推播與 Rich Menu。
 
-### 測試編號：M0-01 新好友加入即時歡迎訊息與功能導覽
+### 0.1 不得把 fixture 當成流程通過
 
-#### 1. 前置條件
-- LINE 官方帳號已設定歡迎訊息或啟用 Follow Webhook 事件。
-- 準備一組從未加入該官方帳號的手機 LINE 帳號（或將現有帳號封鎖後解除封鎖/重新加入）。
+- 若 current owner 已有正式 `Query / Preview / Apply / receipt / readback`，Agent 必須優先走正式 owner contract。
+- 若目前**沒有正式建立訂單 API**，Agent 可以在 `development/test` DB 建立最小測試訂單 fixture，但必須標記為 `PRECONDITION_FIXTURE`。
+- `PRECONDITION_FIXTURE` 只證明「測試起點已準備」，**不證明訂單建立流程本身通過**。
+- 不得直接 INSERT/UPDATE `matching_coordination_events`、outbox、delivery task、customer-service escalation 等被測結果表來製造成功結果。
+- 不得在 production DB 建 fixture。
+- 真 LINE provider、真 Rich Menu 發布、真群組推播等外部副作用，除非測試者明確要求執行，Agent 前置階段只準備到 provider boundary 前。
 
-#### 2. 操作步驟
-1. 使用手機掃描官方帳號 QR Code 或搜尋 LINE ID 加入好友。
-2. 觀察加入好友當下，系統是否**即時主動推播**歡迎訊息與功能導覽圖卡。
-3. 觀察下方圖文選單（Rich Menu）是否已正確展開。
+### 0.2 驗收層級
 
-#### 3. 細節測試內容與驗證重點
-- **歡迎訊息完整度與視覺導引**：
-  - **品牌問候**：清晰標註工會名稱（如「新竹市月子工會」）與服務宗旨。
-  - **三大角色指引**：
-    - 🤱 **準爸媽/產婦**：指引點擊下方選單【服務登記】開始媒合與填寫問卷。
-    - 👩‍🍼 **專業月嫂**：指引點擊【月嫂專區】或輸入身分證字號進行月嫂認證。
-    - 💬 **一般諮詢**：說明可直接於聊天室輸入「補助時數」、「收費原則」等問題。
-  - **Rich Menu 互動連動**：訊息結尾明確提示「👇 請點選下方圖文選單開始使用」，且下方預設選單保持開啟狀態。
-- **後端與資料庫查核**：
-  - Webhook 收到 ollow 事件。
-  - 資料庫 line_friend_events 記錄一筆 event_type='follow'。
-  - 若啟用 message_schedules.json 中的三日引導排程，確認自動建立 D+1 ~ D+3 的排程工作。
+每個案例結束時需標記：
 
----
+| 層級 | 定義 |
+|---|---|
+| `PREPARED` | Agent 已完成前置資料與 readback，尚未拿手機操作 |
+| `REPO_LOCAL_PASS` | owner contract、commit/outbox/readback/fallback 已由測試證明 |
+| `MOBILE_PASS` | 真人已在 LINE／LIFF 手機端完成直接操作 |
+| `PROVIDER_PASS` | 真 LINE/Gemini provider 已取得成功結果 |
+| `NOT_RUN` | 尚未執行該層級 |
+| `BLOCKED` | 有明確 blocker，必須記錄 blocker code／原因 |
 
-## 📱 模組一：LINE LIFF 表單架構與身分升級切換
+只看到 API、table、UI 或 unit test 存在，不得直接標 `MOBILE_PASS`。
 
 ---
 
-### 測試編號：M1-01 Gateway 訪客身分先行導流
+# 1. 最低設備與帳號需求
 
-#### 1. 前置條件
-- 手機 LINE 帳號 A 未與任何客戶、月嫂或工會人員綁定（`line_identity_bindings` 中無此 `line_user_id` 紀錄）。
-- LINE 官方帳號已套用並顯示「一般用戶選單」。
+## 1.1 不需要三支手機
 
-#### 2. 操作步驟
-1. 在手機 LINE 開啟工會官方帳號聊天室。
-2. 點擊下方 Rich Menu 的 **【服務登記】** 按鈕。
-3. 系統開啟 LIFF 頁面（`gateway.html`）。
-4. 分別點擊：
-   - 分支 1：點選 **「未申請市府平台」**。
-   - 分支 2：點選 **「已申請市府平台」**。
+目前建議：
 
-#### 3. 細節測試內容與導流驗證
-- **UI 導流與外連檢查**：
-  - **分支 1（點選「未申請市府平台」）**：系統自動跳轉開啟新竹市政府官方平台：[`https://hsinchu-nanny.hccg.gov.tw/home`](https://hsinchu-nanny.hccg.gov.tw/home)，引導產婦先行於市府平台提出媒合申請。
-  - **分支 2（點選「已申請市府平台」）**：系統自動開啟並進入工會**【需求調查表單】**（`register.html` / `/line-registration`），供已向市府申請的準爸媽填寫到宅坐月子需求調查細節。
-- **資料庫查核**：
-  - 此階段僅進行安全導流與身分初始化檢查，**不可**對任何業務主表產生未授權之垃圾寫入。
+- **最低：1 個個人 LINE 帳號**
+  - 可依序測 M0、M1 客戶身分、解除綁定、再綁月嫂／管理角色、M2 AI、部分 M4。
+- **建議：2 個個人 LINE 帳號**
+  - 帳號 A：產婦／客戶。
+  - 帳號 B：月嫂。
+  - 可完整驗證 M3「雙方同時收到不同 recipient 訊息」。
+- **不強制第 3 個個人 LINE 帳號**。
+  - 工會管理角色可在測試完其他角色後，用同一帳號解除綁定再測。
+- **LINE 測試群組**：M4 群組告警需要一個可加入官方帳號的測試群組，但不等於需要第三支手機。
 
----
+## 1.2 重複使用同一帳號的方法
 
-### 測試編號：M1-02 舊客完全命中（狀態 A）
+管理後台已有正式解除綁定流程：
 
-#### 1. 前置條件
-- 在 MySQL `clients` 表中預先建立一筆已知資料：
-  ```sql
-  INSERT INTO clients (name, phone, national_id, created_at, updated_at)
-  VALUES ('王小美', '0912345678', 'A223456789', NOW(), NOW());
-  ```
-- 確保該客戶有關聯一筆有效之訂單紀錄（`case_no='CASE202609001'`）。
+```text
+LINE 管理 → LINE 身分綁定與授權管理
+→ 選擇目前帳號
+→ 檢查解除影響
+→ 填寫解除原因
+→ 勾選確認
+→ 提交解除
+```
 
-#### 2. 操作步驟
-1. 手機進入 Gateway 頁面，點選「已申請市府平台」。
-2. 輸入姓名 `王小美`、手機 `0912345678`，點擊 **「送出身分核對」**。
+後端 contract：
 
-#### 3. 細節測試內容與驗證重點
-- **後端 API 與核對**：
-  - 送出請求 `POST /api/v1/line/gateway/verify`，後端成功比對到 `clients` 記錄。
-- **資料庫寫入查核**：
-  - `line_identity_bindings` 表必須寫入一筆綁定紀錄：
-    - `line_user_id`：手機端 LINE User ID
-    - `identity_type` / `binding_type`：`client`
-    - `client_id`：指向該客戶 ID
-    - `status`：`active`
-- **LINE 互動與選單驗證**：
-  - 聊天室收到推播訊息：「🎉 身分綁定成功！您的案件編號為 CASE202609001，您可隨時透過選單查詢服務進度。」
-  - 系統無需要求用戶重複填寫 60 題問卷，Rich Menu 保持或切換至已綁定之客戶功能。
+```text
+POST /api/v1/line/identity-bindings/{line_user_id}/revocation/preview
+POST /api/v1/line/identity-bindings/{line_user_id}/revocation/apply
+```
+
+解除不是直接 DELETE binding，而是 durable revocation + Rich Menu 回復流程。若 reset 失敗，另有 retry；system admin 只有在允許條件下可 manual-complete。
+
+因此可以：
+
+```text
+帳號 A 綁客戶 → 測試 → 解除
+→ 帳號 A 綁月嫂 → 測試 → 解除
+→ 帳號 A 綁管理角色 → 測試
+```
 
 ---
 
-### 測試編號：M1-03 有案號缺問卷（狀態 B）
+# 2. Agent 共用前置任務
 
-#### 1. 前置條件
-- 資料庫 `clients` 表存在案號客戶資料，但該客戶在問卷表（`client_intake_surveys`）中尚無紀錄。
+測試者可以先交給 Agent 執行以下任務，完成後再拿手機。
 
-#### 2. 操作步驟
-1. 於 Gateway 輸入該名冊客戶之姓名與手機，點擊核對。
+## 2.1 Agent 安全檢查
 
-#### 3. 細節測試內容與驗證重點
-- **頁面導流與預填驗證**：
-  - 系統自動導向 `register.html`（產婦 60 題需求問卷）。
-  - 檢查問卷頂部的「姓名」、「手機號碼」、「案件編號」輸入框是否已**自動預填**且呈現為唯讀（`readonly`）狀態，防止用戶竄改身分。
-- **資料庫歸戶查核**：
-  - 用戶完成並送出問卷後，資料必須直接寫入正式問卷表，並正確關聯該 `client_id`，**不得**進入未知的暫存孤島。
+Agent 必須先確認：
 
----
+```text
+APP_ENV != production
+```
 
-### 測試編號：M1-04 查無案號 / 名冊未同步（狀態 C）
+以及：
 
-#### 1. 前置條件
-- 輸入一組完全不存在於 `clients` 表中的全新身分（例：`陳新客` / `0988776655`）。
+```text
+GET http://127.0.0.1:8000/health
+```
 
-#### 2. 操作步驟
-1. 於 Gateway 輸入上述姓名與手機號碼並送出核對。
+應回 `200`。
 
-#### 3. 細節測試內容與驗證重點
-- **臨時檔案與導流**：
-  - 系統提示：「查無您的市府登記案號，系統將為您建立臨時登記檔案，請先填寫服務需求問卷。」
-  - 自動跳轉至 `register.html`，並預填姓名 `陳新客` 與電話 `0988776655`。
-- **資料庫暫存池查核**：
-  - 完成問卷並送出後，資料必須寫入 `provisional_registrations` 表：
-    - `name`：`陳新客`
-    - `phone`：`0988776655`
-    - `line_user_id`：手機端 LINE ID
-    - `payload_json`：完整 60 題問卷答案 JSON
-    - `status`：`pending_review`
-  - **嚴格驗證**：確認 `clients` 正式表**尚未**新增該客戶，避免未經審核的資料污染正式營運名冊。
+目前常用環境設定：
 
----
+```text
+DB_HOST
+DB_PORT
+DB_USER
+DB_PASSWORD
+DB_DATABASE
+LINE_LIFF_ID
+LINE_PUBLIC_BASE_URL 或 BASE_URL
+```
 
-### 測試編號：M1-05 身分核對連續失敗告警（Retry_Fail）
+MySQL development 預設通常為 `127.0.0.1:3306 / union_db`，但 Agent 應讀目前環境，不得假設固定密碼。
 
-#### 1. 前置條件
-- 訪客 LINE 帳號。
+React：
 
-#### 2. 操作步驟
-1. 第 1 次輸入錯誤/不存在的身分資料並點擊送出。
-2. 停留在頁面，第 2 次再次輸入錯誤身分資料並點擊送出。
+- development Vite：`http://localhost:5173/admin/`
+- build artifact：FastAPI `/admin`
 
-#### 3. 細節測試內容與驗證重點
-- **次數累計與友善提示**：
-  - 第 1 次失敗：顯示警告提示「查無此身分資料，請確認是否與市府登記相符（第 1 次失敗）」。
-- **第 2 次失敗 Escalation 查核**：
-  - 第 2 次失敗：觸發工單自動建立機制。
-  - **資料庫查核**：
-    - `customer_service_tickets` 表新增一筆紀錄：
-      - `ticket_type`：`identity_mismatch`
-      - `priority`：`normal`
-      - `status`：`open`
-      - `description`：記錄該 `line_user_id` 連續兩次比對失敗之事件
-  - **前台提示**：頁面顯示「已為您通知工會專員協助核對，專員將盡速主動與您聯繫」。
+## 2.2 Agent 建立測試資料的優先順序
 
----
+Agent 必須依序選擇：
 
-### 測試編號：M1-06 產婦 60 題問卷與 3 大條款強制確認
+1. current owner 的正式 `Preview → Apply → Readback`。
+2. repo 既有 development/test fixture writer 或 bootstrap。
+3. 只有前兩者不存在時，才可建立 **development-only SQL fixture**。
 
-#### 1. 前置條件
-- 進入 `register.html` 問卷表單頁面。
+如果使用第 3 種，必須：
 
-#### 2. 操作步驟
-1. 逐題填寫問卷，並針對必填、格式錯誤進行邊界測試。
-2. 進行底部 3 大條款的點擊與同意。
-3. 點擊「確認送出問卷」。
+- 先讀 current schema，不可沿用手冊舊 SQL。
+- 只建立測試所需的最小 root facts。
+- 使用 transaction。
+- 不直接製造被測流程的 event/outbox/receipt 成功結果。
+- 使用明確測試識別，例如 actor/reason/source 中含 `lu_test_` 或 `LINE-E2E-<run-id>`。
+- 建完立即 readback。
+- 回報 cleanup 方式。
 
-#### 3. 細節測試內容與正則驗證
-- **欄位格式與正則校驗 (Regex)**：
-  - **產婦身分證字號**：正則式 `^[A-Z][1289]\d{8}$`（符合台灣身分證字號規則與首字母大寫）。輸入 `a123456789`、`A12345678`（長度不足）或非數字字元時應顯示錯誤。
-  - **預產期 (EDD)**：日期選擇器，必須為未來日期（`> 今日`），選擇過去日期時顯示錯誤。
-  - **緊急聯絡人手機**：正則式 `^09\d{8}$`。
-  - **飲食與照護偏好**：多選題（如：素食、過敏食材），至少選擇一項或勾選「無特殊禁忌」。
-  - **15 項設備勾選**：檢查設備勾選清單（吸乳器、溫奶器、微波爐、烘碗機、洗脫烘洗衣機等）是否可正常複選。
-- **3 大強制條款 Modal 驗證**：
-  - 包含：① 個人資料保護法告知條款、② 服務契約履約同意書、③ 消費者保護申訴權益。
-  - **防作弊機制**：表單送出按鈕預設為 `disabled`。使用者必須個別點開 3 個條款 Modal，滾動瀏覽後勾選「我已詳細閱讀並同意」，3 項皆勾選後送出按鈕才可點擊。
-- **資料庫查核**：
-  - 檢查資料庫中儲存的 JSON Payload，確認 60 題答案鍵值無缺失、中文無亂碼、特殊符號無 Escape 破壞。
+## 2.3 「建立訂單」的 current 限制
 
----
+目前 `api/routes/orders.py` 沒有 canonical `POST /orders` 建單 API。
 
-### 測試編號：M1-07 客戶資料異動申請（`profile_update.html`）
+`/api/v1/cases/{case_no}/architecture-bootstrap/*` 是針對**既有案件**補齊 Finance / Payroll / Scheduling 架構，不是建立訂單。
 
-#### 1. 前置條件
-- 已綁定之客戶帳號，在系統中有進行中之訂單。
+因此 Agent 若為 M3/M4 準備一筆測試訂單：
 
-#### 2. 操作步驟
-1. 客戶透過選單點擊進入 `profile_update.html`。
-2. 修改「服務地址」由 *新竹市東區中央路 1 號* 改為 *新竹市北區光華街 10 號*。
-3. 修改「預產期」由 *2026-10-20* 提前至 *2026-10-15*。
-4. 點擊「送出異動申請」。
+1. 優先找 current import/bootstrap/test fixture writer。
+2. 若沒有符合本案例的 writer，可在 development DB 建 `PRECONDITION_FIXTURE` 訂單及必要 client/staff root facts。
+3. 訂單存在後，再使用：
 
-#### 3. 細節測試內容與驗證重點
-- **欄位狀態保護**：
-  - 敏感欄位（如服務天數、合約總金額）在已簽約狀態下應反灰鎖定不可自行修改。
-- **Diff 差異工單生成**：
-  - 送出後不可直接 `UPDATE clients`！
-  - **資料庫查核**：
-    - `client_profile_change_requests` 表寫入一筆異動請求：
-      - `original_data`：包含原地址與原預產期
-      - `proposed_data`：包含新地址與新預產期
-      - `status`：`pending_review`
-  - 確認 `clients` 主表中的原資料維持不變，等待專員審核。
+```text
+GET  /api/v1/cases/{case_no}/architecture-bootstrap/status
+POST /api/v1/cases/{case_no}/architecture-bootstrap/preview
+POST /api/v1/cases/{case_no}/architecture-bootstrap/apply
+```
 
----
+補齊案件架構。
 
-### 測試編號：M1-08 月嫂身分認證與綁定
+**禁止**為了讓 M3 看起來成功而直接寫 `matching_coordination_*` 結果表；M3 必須由正式 Matching Preview/Apply 產生。
 
-#### 1. 前置條件
-- MySQL `staff` 表中存在一筆月嫂資料：
-  ```sql
-  INSERT INTO staff (name, national_id, birth_date, phone, status, created_at, updated_at)
-  VALUES ('李美華', 'H220000000', '1980-05-15', '0922333444', 'active', NOW(), NOW());
-  ```
-- 測試手機 LINE 帳號 B。
+## 2.4 Agent 完成前置後必須回傳「手機測試包」
 
-#### 2. 操作步驟
-1. 手機 B 進入 `identity.html?purpose=staff_verification`。
-2. 輸入姓名 `李美華`、身分證字號 `H220000000`、出生年月日 `1980-05-15`。
-3. 點擊「送出身分認證」。
+格式固定：
 
-#### 3. 細節測試內容與正則驗證
-- **輸入正則校驗**：
-  - 身分證字號：`^[A-Z][12]\d{8}$`。
-  - 生日格式：`^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$`。
-- **資料庫查核**：
-  - `line_identity_bindings` 寫入：
-    - `line_user_id`：手機 B 之 LINE User ID
-    - `binding_type`：`staff`
-    - `staff_id`：指向該月嫂 ID
-    - `status`：`active`
-- **選單自動升級**：
-  - 手機 B 重新開啟聊天室，Rich Menu 應自動升級為 **「月嫂專屬選單」**（包含：訂單查詢、排班資訊、請假代班申請、薪資請款明細）。
+```text
+TEST RUN ID:
+目前環境: development / test
+FastAPI health: PASS/FAIL
+Admin UI: URL
+Public LINE URL:
+LIFF runtime: READY/BLOCKED
+Gemini: READY/BLOCKED/NOT_REQUIRED
+
+測試案例:
+case_no:
+client_id / client_name:
+staff_id / staff_name:
+第二 staff（若需要）:
+目前 matching/scheduling 狀態:
+目前 LINE binding 狀態:
+需要使用的手機帳號: A / B
+
+Agent 已完成:
+- ...
+
+你現在只要用手機做:
+1. ...
+2. ...
+3. ...
+
+預期結果:
+- ...
+
+測完 cleanup:
+- ...
+```
+
+如果 Agent 無法建立某個 root fact，必須回 `BLOCKED`，不得假造資料。
 
 ---
 
-### 測試編號：M1-09 月嫂訂單查詢與排班資訊
+# 3. 模組零：新好友 Onboarding（前導，不列入四大模組核心分數）
 
-#### 1. 前置條件
-- 月嫂帳號 B 已完成綁定，且資料庫中有指派給該月嫂之訂單與排班日程。
+## M0-01 新好友加入
 
-#### 2. 操作步驟
-1. 點擊選單 **【訂單查詢】**。
-2. 點擊選單 **【排班資訊】**。
+### Agent 前置
 
-#### 3. 細節測試內容與驗證重點
-- **訂單查詢 Flex 卡片**：
-  - 檢查 LINE 輸出的 Flex 卡片：字體大、對比高（適合長輩閱讀）。
-  - 顯示內容：客戶稱謂（如「陳小姐」）、區域（如「新竹市東區」）、服務日期、餐點需求與特殊照護備註。客戶完整地址與電話需做去識別化（Masking）保護。
-- **排班月曆 (`staff_schedule.html`)**：
-  - 呈現標準 7 格日曆，清楚標示：服務中（藍色）、休假（灰色）、待確認（橘色）。
+- 確認 webhook runtime 啟用。
+- 確認 public HTTPS URL 可由 LINE 連線。
+- 確認 default Rich Menu publication/readback 存在；若未發布，回 `BLOCKED: default_menu_not_published`。
+- 不需要建立訂單。
 
----
+### 手機操作
 
-### 測試編號：M1-10 月嫂請假調休 ➔ 客戶順延確認閉環
+1. 封鎖後解除封鎖，或用尚未加入的測試帳號加入官方帳號。
+2. 檢查歡迎訊息。
+3. 檢查 default Rich Menu。
 
-#### 1. 前置條件
-- 存在進行中之服務案件（月嫂李美華服務產婦王小美，原服務起訖日 10/01~10/10，共 10 天）。
+### 驗收
 
-#### 2. 操作步驟
-1. 月嫂於 `staff_schedule.html` 點擊 10/05 服務日 ➔ 點選「申請請假/調休」➔ 選擇原因「個人事假」並送出。
-2. 觀察產婦王小美之 LINE 聊天室收到的推播。
-3. 產婦點擊卡片中的 **【同意服務順延】**（或 **【不同意，需指派代班】**）。
-
-#### 3. 細節測試內容與驗證重點
-- **請假申請送出時**：
-  - 後端建立請假紀錄，狀態為 `pending_client_confirmation`。
-  - 產婦 LINE 收到互動詢問卡片：「月嫂李美華申請於 10/05 請假一日，服務結束日將由 10/10 順延至 10/11，總服務天數不變，請問您是否同意順延？」
-- **分支 A：產婦點擊【同意服務順延】**：
-  - 呼叫 `POST /api/v1/line/schedule/leave-confirm`。
-  - **資料庫查核**：訂單結束日 `end_date` 更新為 `2026-10-11`，`staff_schedule` 自動更新 10/05 為休假、10/11 為服務日。
-  - 雙方 LINE 收到「順延已生效確認通知」。
-- **分支 B：產婦點擊【不同意，需代班】**：
-  - 資料庫寫入 `customer_service_tickets`（`ticket_type='leave_substitute_required'`, `priority='high'`），通知工會專員安排代班月嫂。
+- Follow webhook 有 ingress evidence。
+- 歡迎訊息 delivery 有 durable task/readback。
+- Rich Menu 顯示 default menu。
 
 ---
 
-### 測試編號：M1-11 工會管理員帳密綁定
+# 4. 模組一：LIFF、登記、身分與角色切換
 
-#### 1. 前置條件
-- 具備後台管理員帳號（如 `ch23144638` / `111111111111`）。
-- 手機 LINE 帳號 C。
+## M1-01 Gateway LIFF 導流
 
-#### 2. 操作步驟
-1. 手機 C 在 1 對 1 聊天室輸入密語：`綁定後台帳號`。
-2. 系統回傳一組專屬綁定安全連結（帶有 15 分鐘一次性 Token）。
-3. 點擊開啟 `identity.html?purpose=admin_binding`。
-4. 輸入帳號 `ch23144638` 與密碼 `111111111111`。
+### Agent 前置
 
-#### 3. 細節測試內容與安全性驗證
-- **群組防洩漏測試**：在 LINE 群組內發送「綁定後台帳號」，系統必須**拒絕**發放 Token 並提示「管理密語僅限於 1 對 1 私訊使用」。
-- **防爆破鎖定測試**：故意連續輸入 5 次錯誤密碼，系統需回傳 429 / 鎖定錯誤，並在 `admin_login_attempts` 中記錄，15 分鐘內禁止嘗試。
-- **綁定成功與選單切換**：
-  - 驗證成功後，`line_identity_bindings` 寫入 `binding_type='union_staff'`。
-  - 手機 C 之 Rich Menu 自動切換為 **「工會人員專屬選單」**（包含：待確認審核、客服中心、重大異常通報、即時營運看板）。
+- 確認 `LINE_LIFF_ID` 已配置。
+- 確認 `GET /api/v1/line/identity/runtime-config` 可正常回應。
+- 確認 public base URL 是 HTTPS（localhost 開發例外僅限本機）。
+- 確認手機測試帳號目前沒有不需要的舊 binding；有的話先走正式 revocation。
 
----
+### 手機操作
 
-### 測試編號：M1-12 雙身分切換與月嫂退役權限回收
+1. 點 Rich Menu【服務登記】。
+2. 開啟 `gateway.html`。
+3. 測「未申請市府平台」：應導向新竹市政府平台。
+4. 回來後測「已申請市府平台」：應進 `/line-registration?flow_id=...`。
 
-#### 1. 前置條件
-- 一位月嫂兼為產婦（具備 `staff_id` 與 `client_id`）/ 月嫂申請辦理退役。
+### Current 技術路徑
 
-#### 2. 操作步驟
-1. **雙身分測試**：在聊天室點擊雙頁籤選單，切換「月嫂身分」與「產婦身分」，分別查詢月嫂排班與產婦訂單。
-2. **退役權限回收測試**：管理員於 Web 後台將該月嫂狀態變更為 `retired`。
+```text
+POST /api/v1/line/identity/flow/open
+POST /api/v1/line/identity/flow/validate
+```
 
-#### 3. 細節測試內容與驗證重點
-- **雙身分資料隔離**：切換為月嫂時，API 僅回傳該月嫂工作資訊；切換為產婦時，僅回傳自身坐月子合約資訊，不可互相穿透。
-- **產婦案件結案**：產婦案件結案退款後，選單自動恢復為單一月嫂選單。
-- **退役權限回收查核**：
-  - `line_identity_bindings` 中該月嫂之綁定狀態變更為 `revoked`。
-  - 手機端選單立即降級為「一般用戶選單」。
-  - 嘗試呼叫月嫂 API（如 `GET /api/v1/line/staff/orders`）必須回傳 `403 Forbidden`。
+LIFF 使用 `liff.getIDToken()`；不得由前端任意指定真實 LINE User ID。
 
 ---
 
-## 🤖 模組二：AI Agent 語意路由器與確定性控制
+## M1-02 需求調查表 Preview → Apply
+
+### Agent 前置
+
+- 不先替手機帳號寫 binding。
+- 確認 registration page 可讀 current LIFF config。
+- 準備一組不會與正式資料衝突的測試姓名、電話、地址。
+
+### 手機操作
+
+1. 從 M1-01 進入 `/line-registration`。
+2. 填必填欄位與需求調查。
+3. 故意輸入錯誤手機格式，確認 UI 阻擋。
+4. 填正確資料。
+5. 第一次送出只產生 preview。
+6. 確認去識別摘要後再 Apply。
+
+### Current API
+
+```text
+POST /api/v1/line/identity/registration/preview
+POST /api/v1/line/identity/registration/apply
+```
+
+### 驗收
+
+- Preview 不寫正式登記。
+- Apply 後可 readback `provisional_client_registrations` 對應紀錄。
+- Current implementation 可在 apply 流程建立 `clients` 與 `beclass_records` 並關聯回 registration；因此**不可再用「clients 必須完全不新增」作為舊版驗收條件**。
+- LINE confirmation 必須經 durable delivery task。
 
 ---
 
-### 測試編號：M2-01 Tier 1 確定性指令直出
+## M1-03 客戶身分綁定
 
-#### 1. 前置條件
-- LINE 官方帳號運行中。
+### Agent 前置
 
-#### 2. 操作步驟
-1. 在聊天室分別輸入以下固定指令文字：
-   - `服務說明`
-   - `收費原則`
-   - `補助時數`
+Agent 準備一個 current `clients` 中可供測試的客戶 root fact；若本案例需要既有案件，再準備 `case_no`。
 
-#### 3. 細節測試內容與驗證重點
-- **繞過 LLM 快速回應**：
-  - 系統命中 Tier 1 確定性字典，**不呼叫**外部大語言模型 API。
-  - 回應時間需 < 1 秒。
-- **輸出格式驗證**：
-  - 精確回傳官方核定標準 Markdown 範本與圖卡，包含補助資格對照表、時數試算與定型化契約條款說明。
+不得直接建立最終 LINE binding。
 
----
+### 手機操作
 
-### 測試編號：M2-02 Tier 2 AI 語意意圖路由（高置信度 ≥80%）
+透過 current 客戶身分驗證入口完成：
 
-#### 1. 前置條件
-- AI 語意路由器（Agent Router）配置啟用。
+```text
+POST /api/v1/line/identity/customer/preview
+POST /api/v1/line/identity/customer/apply
+```
 
-#### 2. 操作步驟
-1. 輸入自然語言句子：`「我想要修改預產期和地址」`。
-2. 輸入自然語言句子：`「請假如果遇到颱風天怎麼算錢？」`。
+### 驗收
 
-#### 3. 細節測試內容與驗證重點
-- **Path 1 安全表單引導 (≥80%)**：
-  - 輸入「修改預產期」➔ 系統判斷意圖為資料異動，回覆同理文案並附帶 `profile_update.html` 之安全按鈕。
-- **Path 2 標準官方回覆 (≥80%)**：
-  - 輸入「颱風天請假算錢」➔ 系統命中颱風天出勤補償規範，輸出標準法規範本。
+- preview 命中正確客戶。
+- apply 後 binding readback 為 current bound 狀態。
+- Rich Menu 切至對應角色選單時必須有 publication/delivery evidence。
 
 ---
 
-### 測試編號：M2-03 意圖模糊澄清反問（50%~79%）
+## M1-04 月嫂身分綁定
 
-#### 1. 前置條件
-- 聊天室對話環境。
+### Agent 前置
 
-#### 2. 操作步驟
-1. 輸入模糊簡短文字：`「時間問題」` 或 `「改時間」`。
+- 準備一筆 `staff` 測試月嫂，狀態需符合 current staff owner 規則。
+- 回報姓名、測試身分資料與 staff_id；不要把真個資寫進手冊。
+- 若帳號 A 前一案例已綁客戶且要重用，先完成 revocation。
 
-#### 3. 細節測試內容與驗證重點
-- **防線 1：澄清反問卡片**：
-  - AI 計算 Confidence 落在 50%~79% 區間，不直接猜測執行動作。
-  - 回傳澄清卡片，提供 2~3 個可點擊按鈕：
-    - ① 我要變更預產期（改期）
-    - ② 我要調整每日服務時段（如 9點改8點）
-    - ③ 我想了解月嫂請假調休規則
+### 手機操作
 
----
+Current API：
 
-### 測試編號：M2-04 安全兜底 Safe Fallback（<50%）與轉真人
+```text
+POST /api/v1/line/identity/staff/preview
+POST /api/v1/line/identity/staff/apply
+```
 
-#### 1. 前置條件
-- 聊天室對話環境。
+### 驗收
 
-#### 2. 操作步驟
-1. 輸入無法辨識的亂碼：`「asdfghjk」` 或無關語意 `「今天天氣真好」`。
-2. 輸入反悔/轉真人語句：`「不對，這不是我要問的，幫我轉真人」`。
-
-#### 3. 細節測試內容與驗證重點
-- **Safe Fallback (<50%)**：
-  - 系統不胡言亂語，輸出兜底文案「小幫手暫時無法完全理解您的問題」，並提供【常用功能總覽】與【轉接專人客服】按鈕。
-- **轉真人專員 Escalation**：
-  - 用戶說「轉真人」時，AI 立即暫停自動答覆，回覆「已為您轉接工會專員，專員將於上班時間盡速回覆您」。
-  - 後端 `customer_service_tickets` 表建立一筆待辦工單。
+- 正確月嫂可綁定。
+- 錯誤資料不得建立有效 binding。
+- 成功後 role context 與 Rich Menu 對應 staff。
 
 ---
 
-### 測試編號：M2-05 後台 AI 事件管理與評分回饋閉環
+## M1-05 管理角色綁定
 
-#### 1. 前置條件
-- 管理員登入 Web 後台（`http://localhost:5173/admin/`）。
+### Agent 前置
 
-#### 2. 操作步驟
-1. 進入後台「AI 客服事件管理」，針對關鍵字「雙胞胎加價」新增 Tag 錨點與官方標準回覆文案並儲存。
-2. 前台 LINE 提問「雙胞胎有加收費用嗎？」。
-3. 針對 AI 回覆訊息底部的「這則回答是否有幫助？」點擊 **【未解決】**。
+- 建立／確認一個 development 管理員帳號，具本案例所需 capability。
+- **不得在手冊、Git、聊天回覆中寫真密碼。**
+- 使用者自行在安全環境取得測試密碼。
 
-#### 3. 細節測試內容與驗證重點
-- **即時發布生效**：前台提問立即獲得後台新設定之標準回覆文案。
-- **評分回饋紀錄查核**：
-  - 點擊「未解決」後，寫入 `ai_feedback_logs` 表（包含 `user_id`, `message_id`, `rating='unresolved'`, `created_at`）。
-  - 後台滿意度報表即時呈現負評統計，提供專員優化知識庫依據。
+### 手機操作
 
----
+使用 current admin identity flow：
 
-## 🔄 模組三：雙向智慧協調與派案博弈
+```text
+POST /api/v1/line/identity/admin/preview
+POST /api/v1/line/identity/admin/apply
+```
 
----
+### 驗收
 
-### 測試編號：M3-01 條件變更精準重探（Term Diff）
-
-#### 1. 前置條件
-- 建立一筆媒合中之訂單（原需求：每日 9 小時、**需烹煮三餐**、雙胞胎）。
-- 資料庫中有 3 位月嫂：
-  - 月嫂甲：原本表達願意接案。
-  - 月嫂乙：曾因「不願下廚烹飪」而回絕接案。
-  - 月嫂丙：曾因「距離太遠」而回絕接案。
-
-#### 2. 操作步驟
-1. 客戶修改需求為：每日 9 小時、**改為月子餐外送（不下廚）**。
-2. 觸發系統條件差異分析與重探引擎。
-
-#### 3. 細節測試內容與分流驗證
-- **差異分析器 (Diff Analyzer) 分流查核**：
-  - **第 1 群（原本願意者：月嫂甲）**：收到「條件變更再確認卡片」，詢問是否接受新條件。
-  - **第 2 群（痛點已解決者：月嫂乙）**：收到「條件已改善重探卡片」（註明產婦已取消下廚需求，詢問是否重新考慮接案）。
-  - **第 3 群（無關者：月嫂丙）**：因拒接原因為距離，與下廚無關，系統**靜默排除、零打擾**，不發送通知。
+- 管理角色只能綁定符合權限的帳號。
+- 群組環境不得暴露管理密碼或 credential。
 
 ---
 
-### 測試編號：M3-02 意願池達成派案（Willing Pool ≥ 1）
+## M1-06 解除綁定並重複使用同一支手機
 
-#### 1. 前置條件
-- 案件意願池人數 `willing_pool >= 1`（月嫂乙點擊同意接案）。
+### Agent 前置
 
-#### 2. 操作步驟
-1. 工會專員於管理後台點擊 **「一鍵指派月嫂乙」**。
+- 確認 default Rich Menu publication 存在。
+- 找出手機帳號 current binding readback。
 
-#### 3. 細節測試內容與驗證重點
-- **資料庫更新**：
-  - 訂單狀態更新為 `assigned`，寫入 `staff_assignments` 表。
-- **雙方通知推播**：
-  - 產婦 LINE 收到：**「🎉 媒合成功通知」**（附月嫂姓名、資歷、到府服務注意事項）。
-  - 月嫂 LINE 收到：**「📋 派案成交通知」**（附服務起訖日、產婦照護需求與行事曆連動）。
+### 管理後台操作
 
----
+1. LINE 身分綁定與授權管理。
+2. 選擇該 LINE User。
+3. 「檢查解除影響」。
+4. 填原因、確認。
+5. 「提交解除」。
 
-### 測試編號：M3-03 零意願降維協商（Zero Pool = 0）與產婦確認
+### API
 
-#### 1. 前置條件
-- 案件發布後 24 小時內無月嫂接單，或所有回絕原因皆集中於「每日 07:30 上工太早」。
+```text
+POST /api/v1/line/identity-bindings/{line_user_id}/revocation/preview
+POST /api/v1/line/identity-bindings/{line_user_id}/revocation/apply
+```
 
-#### 2. 操作步驟
-1. 系統自動彙整回絕原因，向產婦推播降維協商建議。
-2. 產婦在 LINE 上分別測試點選 **【同意調整為 09:00】** 與 **【堅持保留原時間】**。
+### 驗收
 
-#### 3. 細節測試內容與驗證重點
-- **協商建議卡片**：
-  - 推播內容：「目前有 3 位優秀月嫂反映 07:30 上工時間過早；若將每日服務時間調整為 09:00~18:00，將可立即為您安排月嫂接案，請問是否願意調整？」
-- **分支 A：產婦點選【同意調整】**：
-  - 系統自動將訂單服務時段更新為 `09:00~18:00`，立即向候選月嫂發送成交確認。
-- **分支 B：產婦點選【堅持保留】**：
-  - 訂單維持原需求，保留於工會待媒合隊列中，後台標註「產婦堅持原時段，需專員協調」。
+- 不直接 DELETE binding。
+- revocation saga 有 request/readback。
+- Rich Menu reset 成功後 binding 完成撤銷。
+- 若 reset 失敗，應可 retry；manual-complete 只能依 system-admin 規則使用。
+
+此案例是「只有一支手機」時的核心 reset 步驟。
 
 ---
 
-### 測試編號：M3-04 產婦預產期變更檔期協調
+## M1-07 雙角色隔離
 
-#### 1. 前置條件
-- 已成立並指派月嫂之訂單，產婦申請將預產期從 10/20 提前至 10/13。
+### Agent 前置
 
-#### 2. 操作步驟
-1. 產婦於 `profile_update.html` 送出預產期變更申請。
-2. 系統試算原月嫂 10/13~10/19 檔期是否衝突，並向月嫂推播詢問。
-3. 月嫂於 LINE 點選「同意提前上工」或「檔期衝突無法提前」。
+- 同一 LINE User 準備 customer + staff 兩種 current binding（使用正式 owner flow；不可偽造 selected role）。
+- 為兩個角色各準備至少一筆可 readback 資料。
 
-#### 3. 細節測試內容與驗證重點
-- **月嫂同意提前**：專員後台一鍵核准，合約與排班表自動平移至新起訖日。
-- **月嫂檔期衝突**：系統自動觸發改派流程，將案件轉入重探媒合池，並通知專員安排其他合適月嫂。
+### 手機操作
 
----
+1. 切 customer role，讀客戶功能。
+2. 切 staff role，讀月嫂功能。
 
-## 🛡️ 模組四：工會管理端、異常通報與客訴轉真人
+### 驗收
 
----
-
-### 測試編號：M4-01 設定唯一異常通報幹部群與防劫持
-
-#### 1. 前置條件
-- 邀請 LINE 官方帳號加入 LINE 測試群組。
-
-#### 2. 操作步驟
-1. 幹部在群組內發送密語：`設定異常通知群組`。
-2. 在已綁定成功的群組內，再次發送相同指令。
-3. 嘗試由另一個未授權的外部群組發送該指令。
-
-#### 3. 細節測試內容與安全性驗證
-- **單一鎖定 (Singleton Lock)**：
-  - 首次發送：系統檢查 `system_settings` 表中的 `alert_group_id`。若為空，將該群組之 `group_id` 寫入，回覆「✅ 此群組已成功設定為唯一重大異常與審核通知群組」。
-- **防劫持與防重複綁定**：
-  - 再次發送或外部群組嘗試綁定：系統檢查發現已存在 `alert_group_id`，直接**拒絕**綁定，回覆「⚠️ 系統已綁定專屬通報群組，若需變更請由最高權限管理員至 Web 後台重設」。
+- customer 不得讀 staff 私有資料。
+- staff 不得讀其他客戶資料。
+- role change 要有 current role-context/readback。
 
 ---
 
-### 測試編號：M4-02 Web 後台安全重設通報群組 (CAS)
+# 5. 模組二：AI 客服、QA、Gemini 與安全 fallback
 
-#### 1. 前置條件
-- 系統已綁定某一群組 ID。
+> Current M2 已不是舊版「手動新增 INITIAL_RULES 後直接發布」的模型。正式 QA 來源為 `document/line/AI客服QA題庫.jsonl`；只有 `status=ready` 可自動回答。
 
-#### 2. 操作步驟
-1. 最高權限管理員（`role='system_admin'`）登入 Web 後台。
-2. 進入「系統安全與通知設定」➔ 找到「LINE 異常通報群組」。
-3. 點擊 **「解除綁定 / 重設通報群組」**，填寫重設原因並確認。
+## M2-00 Agent 前置總檢查
 
-#### 3. 細節測試內容與驗證重點
-- **安全審核與 CAS 更新**：
-  - 檢查資料庫 `system_settings`，`alert_group_id` 被安全清空為 `NULL`，並記錄稽核日誌（Audit Log）至 `admin_audit_logs` 表。
-  - 此時幹部即可在新的 LINE 群組中重新執行 `M4-01` 綁定新群組。
+Agent 應先執行：
 
----
+1. `GET /api/v1/system/llm/api-key/status`
+2. 若未設定，請測試者自行在 UI 輸入 Google AI Studio key；Agent 不得要求讀回 Key。
+3. `POST /api/v1/system/llm/connection-test`
+4. `GET /api/v1/line/ai-events/qa-catalog`
+5. 確認 Knowledge READY index 可用。
+6. 在 AI 客服工作室執行一次 `/semantic-test` smoke test。
 
-### 測試編號：M4-03 客訴與重大異常 SOP 觸發
-
-#### 1. 前置條件
-- 官方帳號與幹部群組已綁定完成。
-
-#### 2. 操作步驟
-1. 用戶在個人聊天室輸入強烈情緒客訴詞彙：`「我要退費！月嫂態度極差，照顧寶寶很不專業，請立刻叫主管出來處理！」`。
-
-#### 3. 細節測試內容與 SOP 三步驟驗證
-- **Step 1：AI 同理安撫**：
-  - 偵測到客訴關鍵字（退費、態度極差、不專業），AI 即刻輸出安撫文案：「非常抱歉造成您的不愉快與困擾，工會非常重視您的反饋，已為您暫停自動應答並立即通報主管介入協處。」
-- **Step 2：建立 HIGH 急件工單**：
-  - 資料庫 `customer_service_tickets` 表寫入一筆 `priority='HIGH'`, `category='complaint'`, `status='pending_takeover'` 工單。
-- **Step 3：幹部群紅色告警卡推播**：
-  - LINE 幹部群立即收到**紅色 Flex 告警卡**：
-    - 標題：🚨 **重大客訴異常通報 (HIGH)**
-    - 內容：用戶稱謂（去識別化）、發生時間、客訴摘要、工單編號。
-    - 按鈕：附帶 **【開啟安全審核/處理】** 之安全連結。
+Agent 回報只包含 `configured/connected/model/status`，不得輸出 secret。
 
 ---
 
-### 測試編號：M4-04 手機審核中心（`mobile_admin.html`）
+## M2-01 確定性 Tier 1
 
-#### 1. 前置條件
-- 工會專員已綁定工會身分。
+### 手機操作
 
-#### 2. 操作步驟
-1. 專員從幹部群告警卡點擊【開啟安全審核】，或從 LINE 選單進入 `mobile_admin.html`。
-2. 進行三大業務審核：
-   - 業務 1：**客戶資料異動審核**（檢視紅綠 Diff 對照表）。
-   - 業務 2：**舊客重綁防冒領審核**。
-   - 業務 3：**月嫂換機身分重綁審核**。
-3. 點擊 **【一鍵核准】** 或 **【駁回並填寫原因】**。
+輸入 current deterministic alias，例如功能總覽／客服等已配置固定指令。
 
-#### 4. 細節測試內容與驗證重點
-- **紅綠 Diff 視覺對照**：
-  - 綠色高亮顯示新值，紅色刪除線顯示舊值，資訊清晰無誤。
-- **一鍵核准資料庫查核**：
-  - 點擊「一鍵核准」後，後端透過事務（Transaction）將異動資料正式寫入 `clients` 或 `line_identity_bindings`，並將工單標記為 `resolved`。
-  - 推播通知給該客戶/月嫂：「您的資料異動申請已審核通過」。
+### 驗收
+
+- 命中 deterministic route 時不需要 Gemini 自由回答。
+- 輸出必須由 server-owned router 決定。
+- 不因未知文字執行外部 action。
 
 ---
 
-### 測試編號：M4-05 電腦後台代班指派與薪資自動拆帳
+## M2-02 正式 QA + Gemini 語意選擇
 
-#### 1. 前置條件
-- 月嫂 A 請假 2 天且客戶不同意順延，工會專員安排月嫂 B 代班 2 天（總天數 10 天，月嫂 A 出勤 8 天，月嫂 B 出勤 2 天；合約總薪資 $30,000，政府補助款 $10,000）。
+### Agent 前置
 
-#### 2. 操作步驟
-1. 專員於 Web 後台開啟代班指派介面，選取代班月嫂 B 並確認。
-2. 服務結束結案後，進入後台「財務清冊與請款核銷」。
+Agent 從 `/qa-catalog` 選 3 筆 `ready` QA，回傳：
 
-#### 3. 細節測試內容與金額拆分算式查核
-- **薪資與補助拆分精準度驗證**：
-  - **月嫂 A 請款金額**：
-    $$\text{薪資} = 30,000 \times \frac{8}{10} = 24,000$$
-    $$\text{補助} = 10,000 \times \frac{8}{10} = 8,000$$
-  - **代班月嫂 B 請款金額**：
-    $$\text{薪資} = 30,000 \times \frac{2}{10} = 6,000$$
-    $$\text{補助} = 10,000 \times \frac{2}{10} = 2,000$$
-- **財務清冊查核**：
-  - 資料庫 `payroll_items` 與 `subsidy_claims` 表必須分列為兩筆獨立紀錄（一筆指向月嫂 A，一筆指向月嫂 B），兩筆金額加總必須 100% 等於合約總額，不可產生 1 元之四捨五入誤差或漏算。
+```text
+QA ID
+canonical question
+1 個 alias
+```
+
+不要事先修改答案。
+
+### 手機操作
+
+用自然口語改寫提問，例如不要逐字照 canonical question。
+
+### Current M2 路徑
+
+```text
+LINE question
+→ Knowledge READY index
+→ Chroma 以 category/tag/question/aliases 找候選
+→ Gemini 僅選 candidate QA ID 或 UNSUPPORTED
+→ server 取 curated QA 的正式 answer
+→ LINE answer
+```
+
+### 驗收
+
+- Gemini 不得自由撰寫政策答案。
+- 最終 answer 必須來自 selected QA 的 approved `answer`。
+- citation/readback 可追溯來源。
+
+---
+
+## M2-03 非 ready QA 不得自動回答
+
+### Agent 前置
+
+從 QA catalog 各選一筆可用的：
+
+```text
+missing
+partial
+review_required
+manual_only
+```
+
+若某狀態目前沒有資料，標 `NOT_APPLICABLE`。
+
+### 手機／真實 M2 測試
+
+提出對應問題。
+
+### 驗收
+
+- 不可把非 ready 項目當核准答案。
+- 無可信候選應走 unsupported／安全 fallback。
+- 不得由 Gemini 補寫政策內容。
+
+---
+
+## M2-04 模糊問題與 unsupported
+
+### 測試文字
+
+```text
+時間問題
+asdfghjk
+今天天氣真好
+```
+
+### 驗收
+
+分清兩種機制：
+
+1. **deterministic router preview** 可有 confidence bands 與 clarify/safe menu。
+2. **Gemini + Knowledge semantic QA** 不把 Gemini 當成百分比信心來源；候選不足、非法 ID、UNSUPPORTED、index unavailable、Gemini unavailable 都必須 fail closed。
+
+---
+
+## M2-05 明確轉真人
+
+### 手機操作
+
+```text
+幫我轉真人
+這不是我要問的，找客服
+```
+
+### 驗收
+
+- 自動回答停止或進入人工接管語意。
+- 由 Customer Service owner 建立／取得 current ticket/escalation。
+- 不得由 LLM 自行直接 INSERT ticket。
+
+---
+
+## M2-06 Feedback
+
+### 手機操作
+
+對回答點「未解決」。
+
+### 驗收
+
+- feedback durable readback 可見。
+- unresolved 可形成正式 customer-service follow-up，而不是只有前端計數。
+
+---
+
+# 6. 模組三：Matching 雙向協調
+
+## M3-00 Agent 一鍵建立手機測試案件
+
+此階段是本手冊最重要的 Agent 前置。
+
+### Agent 任務
+
+請 Agent 建立一個全新的 development test run：
+
+1. 建立／選擇測試 client。
+2. 建立／選擇至少 2 位可測 staff。
+3. 建立一筆 `PRECONDITION_FIXTURE` order（因 current 沒有 canonical create-order route）。
+4. 確認 case_no 可由 current Orders readback 查到。
+5. 呼叫 architecture bootstrap status；若需要，走 preview→apply 補齊架構。
+6. 透過 current owner 準備 matching 所需 criteria/candidate availability/preferences。
+7. **停在手機要參與的前一個狀態**，不可替手機點掉 customer/staff decision。
+8. 回傳「手機測試包」。
+
+### Agent 禁止事項
+
+不得直接寫：
+
+```text
+matching_coordination_events
+matching_coordination_apply_receipts
+matching_coordination_outbox
+line_delivery_tasks
+```
+
+來偽造 M3 pass。
+
+---
+
+## M3-01 Criteria snapshot / term diff
+
+### Agent 前置
+
+建立一個 initial criteria，例如：
+
+```text
+每日服務時段 07:30
+需料理
+指定區域
+```
+
+使用 current API：
+
+```text
+POST /api/v1/matching/coordination/criteria/preview
+POST /api/v1/matching/coordination/criteria/apply
+```
+
+再準備一個 changed criteria；但先停在 diff preview 前或完成 initial state，依測試包說明。
+
+### 驗收
+
+使用：
+
+```text
+POST /api/v1/matching/coordination/criteria-diff/preview
+POST /api/v1/matching/coordination/criteria-diff/apply
+GET  /api/v1/matching/coordination/cases/{case_no}/readback
+```
+
+確認只重探受變更條件影響的候選，不把無關拒絕原因全部重送。
+
+---
+
+## M3-02 Caregiver willingness
+
+### Agent 前置
+
+讓案件處於「等待月嫂意願」；準備 staff B 對應 recipient/binding。
+
+### 手機操作（帳號 B）
+
+月嫂在 LINE 卡片選擇接受／拒絕。
+
+### Current owner 驗收
+
+```text
+POST /api/v1/matching/coordination/caregiver-willingness/preview
+POST /api/v1/matching/coordination/caregiver-willingness/apply
+```
+
+- decision 要有 event/receipt/readback。
+- 不直接 UPDATE assignment 當作 willingness。
+
+---
+
+## M3-03 Zero Pool 協商
+
+### Agent 前置
+
+準備一筆 current matching package，確保合法計算結果為 zero pool；不得直接 INSERT zero-pool event。
+
+### 手機操作（帳號 A）
+
+收到替代條件 proposal，選擇：
+
+- 接受調整。
+- 保留原需求。
+
+### Current API
+
+```text
+POST /api/v1/matching/coordination/zero-pool/preview
+POST /api/v1/matching/coordination/zero-pool/apply
+POST /api/v1/matching/coordination/customer-decision/preview
+POST /api/v1/matching/coordination/customer-decision/apply
+```
+
+### 驗收
+
+- proposal → customer decision 有完整 lineage。
+- 不接受時不應偷偷改原訂單條件。
+- 接受時後續變更必須交由正確 owner，不由 Matching 跨 owner 直寫。
+
+---
+
+## M3-04 Match Success 雙方 recipient
+
+### 設備
+
+本案例建議使用 **2 個不同 LINE User ID**。
+
+### Agent 前置
+
+- 帳號 A 對應 client。
+- 帳號 B 對應 staff。
+- Agent 準備到 conversion/assignment 前一狀態。
+
+### 手機驗收
+
+完成 final decision 後確認：
+
+- A 收到 client 版本通知。
+- B 收到 staff 版本通知。
+- recipient 不可交換。
+
+### Owner/API
+
+```text
+POST /api/v1/matching/coordination/conversion/preview
+POST /api/v1/matching/coordination/conversion/apply
+```
+
+並 readback Matching outbox → LINE delivery task/result。
+
+只有 repository local task 但未真的送到手機時，標 `REPO_LOCAL_PASS / MOBILE_NOT_RUN`，不可標完整通過。
+
+---
+
+# 7. 模組四：管理端、群組告警、客訴與代班財務
+
+## M4-01 異常通知群組設定
+
+### Agent 前置
+
+- 確認測試管理員 capability。
+- `GET /api/v1/admin/line/runtime-alert-targets/alert-group-context`
+- 若已有舊測試群組，先用正式 reset preview/apply，而非直接清 DB。
+
+### 手機操作
+
+在測試 LINE 群組使用 current 群組設定指令／流程。
+
+### Current owner
+
+管理 API：
+
+```text
+GET  /api/v1/admin/line/runtime-alert-targets/alert-group-context
+POST /api/v1/admin/line/runtime-alert-targets/group/preview
+POST /api/v1/admin/line/runtime-alert-targets/group/apply
+POST /api/v1/admin/line/runtime-alert-targets/group-reset/preview
+POST /api/v1/admin/line/runtime-alert-targets/group-reset/apply
+```
+
+LINE ingress：
+
+```text
+POST /api/v1/line/system/alert-group
+```
+
+Current persistence owner 為 `line_alert_notification_targets` 等 runtime alert tables，不再以舊版 `system_settings.alert_group_id` 作為唯一驗收依據。
+
+---
+
+## M4-02 客訴 → Hold → HIGH escalation → Alert
+
+### Agent 前置
+
+- 確認 alert target 已 ready。
+- 確認 Customer Service readback 可用。
+- 不先建立假 HIGH escalation。
+
+### 手機操作
+
+帳號 A 輸入明確客訴，例如：
+
+```text
+我要退費，服務態度很差，請主管處理。
+```
+
+### 驗收
+
+應由 canonical complaint ingress 形成：
+
+```text
+complaint
+→ automation hold
+→ customer_service_tickets / customer_service_escalations
+→ masked alert intent
+→ LINE delivery task
+→ 管理端安全處理入口
+```
+
+- HIGH escalation 必須由 owner 產生，不可由 fixture 預先 INSERT。
+- 群組內容需去識別化。
+
+---
+
+## M4-03 Mobile Admin / Safe Review Link
+
+### Agent 前置
+
+Agent 準備一筆**合法待審 root fact**，例如由正式 profile/rebind flow 建立 pending review；不得直接偽造「已核准」結果。
+
+### 手機操作
+
+1. 從 LINE 告警／選單打開 mobile admin 或 safe review link。
+2. 查看去敏摘要/diff。
+3. Preview approve/reject。
+4. 人工確認後 Apply。
+
+### 驗收
+
+- token/actor/版本錯誤時 fail closed。
+- Preview 不應直接寫正式資料。
+- Apply 有 receipt/readback。
+
+---
+
+## M4-04 月嫂請假與代班
+
+### Agent 一鍵前置
+
+Agent：
+
+1. 建一筆 development test order fixture。
+2. 準備 client A、staff A、staff B。
+3. 建 current assignment/scheduling root facts。
+4. bootstrap 案件架構。
+5. 確認 staff A 有可請假的 service day。
+6. 停在「staff A 可從手機提出請假」的狀態。
+
+### 手機操作
+
+- staff A 提出請假。
+- client A 接收順延／代班決策。
+- 若拒絕順延，再由管理端安排 staff B。
+
+### 驗收
+
+Current leave root 包含 `staff_leave_requests`；後續 substitution 必須走 Scheduling/Leave owner，不以直接 UPDATE schedule 作為 pass。
+
+---
+
+## M4-05 代班後 Payroll / Staff Payables
+
+### Agent 前置
+
+可直接沿用 M4-04 已完成的測試案件；Agent 不得另造假的 payroll result。
+
+Agent 執行 repository-local readback：
+
+1. 檢查 assignment/service-day facts。
+2. 觸發 current Payroll owner 所需的正式 rebuild/project path（若本環境已有對應 Apply）。
+3. 讀取 `staff_obligation_events` / `staff_obligations` 等 current SSOT。
+4. 回傳每位 staff 的 obligation lineage。
+
+### 驗收
+
+- 原月嫂與代班月嫂各自有正確 payable obligation。
+- 金額來源可追到 assignment/service facts。
+- 不再以舊版泛稱 `payroll_items` 是否有兩列作為唯一驗收。
+
+---
+
+# 8. Agent 快速前置 Prompt 範本
+
+## 8.1 任一案例
+
+```text
+請替我準備 LINE 手機測試案例 <TEST-ID>。
+限制：只能使用 development/test 環境，不觸發 production，不替我執行手機上的最終決策。
+先讀 current main 的 owner/API/schema；能用 Preview/Apply 就不能直接 SQL。
+若沒有正式建立訂單 API，可以建立 PRECONDITION_FIXTURE，但不得直接寫被測流程的 event/outbox/receipt/result。
+完成後請只回傳「手機測試包」：case_no、client/staff 測試識別、目前狀態、你已做的前置、我手機接下來要點的 3~5 步、預期結果、cleanup。
+```
+
+## 8.2 M3 Zero Pool
+
+```text
+請替我準備 M3-03 Zero Pool 手機測試。
+建立一筆 development-only 測試案件與必要 client/staff root facts，必要時做 architecture bootstrap。
+使用 current Matching owner 建 initial criteria 與合法候選狀態，讓系統自然進入 zero-pool proposal；不要直接 INSERT matching_coordination_events/outbox。
+停在產婦手機即將收到／處理 proposal 的前一步，回傳測試包。
+```
+
+## 8.3 M4 請假代班
+
+```text
+請替我準備 M4-04 請假代班手機測試。
+建立 development test order、client A、staff A、staff B、assignment 與可請假的 service day，必要時完成 architecture bootstrap。
+不得直接製造 leave/substitution/payroll 成功結果。
+停在 staff A 可以從 LINE 送出請假申請的狀態，回傳 A/B 手機各自要操作什麼與後台 readback 點。
+```
+
+## 8.4 重用單一 LINE 帳號
+
+```text
+請替我把目前測試 LINE 帳號安全重置給下一個角色使用。
+先讀 current binding，走 revocation preview/apply 與 Rich Menu reset；禁止直接 DELETE line identity binding。
+完成後回傳 binding/current-fact readback 與是否已恢復 default menu。
+```
+
+---
+
+# 9. 測試完成後 Cleanup
+
+Agent 可協助 cleanup，但必須遵守 owner boundary。
+
+1. LINE 身分：使用正式 revocation，不直接 DELETE。
+2. Rich Menu / alert group：使用 current reset Preview/Apply。
+3. Customer-service/matching/payroll 正式測試結果：保留 audit/receipt/event lineage，不刪 immutable evidence。
+4. `PRECONDITION_FIXTURE`：只清理由 Agent 建立且能證明 ownership 的 development synthetic roots；不得誤刪正式資料。
+5. 測完輸出：
+
+```text
+cleanup_status: COMPLETE / PARTIAL / BLOCKED
+保留的 immutable evidence:
+已撤銷的 LINE bindings:
+已重設的 Rich Menu / alert target:
+尚需人工處理:
+```
+
+---
+
+# 10. 快速執行順序（手機時間最省）
+
+若只有 1 支手機，建議：
+
+```text
+Agent 一次準備全部可共用資料
+↓
+M0
+↓
+M1 customer
+↓
+M2 AI QA / fallback / 真人客服
+↓
+M4 complaint / mobile admin
+↓
+解除 customer binding
+↓
+綁 staff
+↓
+M1 staff / M4 leave
+↓
+解除 staff binding
+↓
+需要時綁 admin role
+```
+
+若有第 2 支手機，再做：
+
+```text
+A = client
+B = staff
+→ M3 willingness
+→ M3 zero pool/customer decision
+→ M3 match success 雙 recipient
+→ M4 leave/substitution 雙方閉環
+```
+
+這樣不需要為每個案例重新人工建立訂單或手動改資料庫；Agent 應先把案件準備到「手機下一步就能操作」的狀態。
+
+---
+
+# 11. Current main 關鍵對照表
+
+| 能力 | Current route / owner |
+|---|---|
+| API health | `GET /health` |
+| LIFF runtime | `GET /api/v1/line/identity/runtime-config` |
+| Identity flow | `/api/v1/line/identity/flow/open`, `/flow/validate` |
+| Customer binding | `/customer/preview`, `/customer/apply` |
+| Staff binding | `/staff/preview`, `/staff/apply` |
+| Admin binding | `/admin/preview`, `/admin/apply` |
+| Registration | `/registration/preview`, `/registration/apply` |
+| Binding revoke | `/api/v1/line/identity-bindings/{line_user_id}/revocation/*` |
+| QA catalog | `GET /api/v1/line/ai-events/qa-catalog` |
+| Real M2 test | `POST /api/v1/line/ai-events/semantic-test` |
+| Gemini status/test | `/api/v1/system/llm/api-key/status`, `/connection-test` |
+| Matching readback | `GET /api/v1/matching/coordination/cases/{case_no}/readback` |
+| Matching operations | `/criteria/*`, `/criteria-diff/*`, `/caregiver-willingness/*`, `/zero-pool/*`, `/customer-decision/*`, `/conversion/*` |
+| Case architecture bootstrap | `/api/v1/cases/{case_no}/architecture-bootstrap/*` |
+| Alert target | `/api/v1/admin/line/runtime-alert-targets/*` |
+| Customer Service | current `customer_service_tickets` + escalation owner |
+| Leave root | `staff_leave_requests` |
+| Payroll SSOT | `staff_obligations` / `staff_obligation_events` 等 current Payroll owner |
+
+---
+
+## 文件維護規則
+
+- 此文件描述的是 **current main 可操作測試方法**，不是保存舊版 API 的歷史文件。
+- main 若修改 route/schema/owner，應同步更新此手冊。
+- Eraser 原始業務流程仍以正式基線保存；如果原圖與 current owner-safe implementation 不同，本手冊應寫 current 驗收方法，並標示 supersession，而不是要求測試者呼叫已不存在的 API。
+- 禁止在此手冊寫任何 API Key、LINE Channel Secret、access token、管理員真密碼或 production credential。
