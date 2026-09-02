@@ -127,14 +127,11 @@ Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 
 7. LLM 或 Knowledge 不得直接寫業務 root、繞過 closed tool catalog 或宣稱 provider 成功。
 8. API／React／LINE visible result 對 timeout、conflict、unavailable 與 unknown outcome fail closed。
 
-## 11. 本批來源文件處置
+## 11. 本批來源文件處置（2026-09-02 修正）
 
-下列功能開發計畫中的 LINE 規格文件已由本文件及 `17`、`20`、`23`、`26` 承接，從 current tree 移除：
+- `LINE_QA客服知識契約收斂計畫.md` 已恢復為 current blocked／read-only inspection plan。它不是 SSOT，但仍保存 workbook loader、逐題人工 review、automation boundary、conflict queue 與完成 gate；這些未完成工作未被本文件自動完成或取消，因此不得退役。
+- `LINE_Rich_Menu_多角色圖文選單與互動中心正式規範.md` 與 `LINE_Rich_Menu_本機視覺比對與互動模擬工作室正式規範.md` 已恢復為非 Authority 的 `source-review`。其逐節處置由 `document/功能開發計畫/SOURCE_REVIEW_DISPOSITION.md` 記錄；標記為「仍有效待搬移」的內容尚未進入唯一 owning formal spec 前，不得再次刪除。
+- `LINE_四大模組_詳細測試手冊與前置條件.md` 保留在 `document/功能開發計畫/`，作為 current 可執行操作／手機 E2E 驗收手冊。它可保存 Agent 前置、測試資料準備、裝置操作、readback、驗收層級與 cleanup，但不得覆蓋本文件及 `17`、`20`、`23`、`26` 的 owner／語意／transaction 契約；route、schema、owner 或正式驗收條件改變時必須同步更新。
+- `document/line/服務說明規則書.md` 在本批不刪除，但只作已被 `20` 與本文件承接的歷史輸入，不得與 current 正式規格競爭。需要舊 wording 時從 Git history 精確取回，不建立第二套 current owner。
 
-- `LINE_QA客服知識契約收斂計畫.md`
-- `LINE_Rich_Menu_多角色圖文選單與互動中心正式規範.md`
-- `LINE_Rich_Menu_本機視覺比對與互動模擬工作室正式規範.md`
-
-`LINE_四大模組_詳細測試手冊與前置條件.md` 保留在 `document/功能開發計畫/`，作為 current 可執行操作／手機 E2E 驗收手冊。它可保存 Agent 前置、測試資料準備、裝置操作、readback、驗收層級與 cleanup，但不得覆蓋本文件及 `17`、`20`、`23`、`26` 的 owner／語意／transaction 契約；route、schema、owner 或正式驗收條件改變時必須同步更新。
-
-`document/line/服務說明規則書.md` 在本批不刪除，但只作已被 `20` 與本文件承接的歷史輸入，不得與 current 正式規格競爭。需要舊 wording 時從 Git history 精確取回，不建立第二套 current owner。
+任何上述來源文件再次退役前，必須完成逐條 disposition、搬移所有仍有效內容、移除被否定的 current consumer，並同步 executable consumers、`15` current index與相關正式規格後，以focused tests／readback驗證刪除不造成stale path或規格缺口。
