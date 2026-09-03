@@ -1,22 +1,53 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { historicalServiceAccountingClient, type HistoricalCaregiverDays, type HistoricalServiceAccountingPreview, type HistoricalServiceAccountingQuery } from '../api/orders/historical_service_accounting_client';
+import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
+import type { OrderSummaryItem } from '../api/orders/order_query_schemas';
 
 export const HistoricalServiceAccountingWorkbench: React.FC = () => {
   const [caseNo, setCaseNo] = useState('');
+  const [orderSummaries, setOrderSummaries] = useState<OrderSummaryItem[]>([]);
+  const [orderListState, setOrderListState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [facts, setFacts] = useState<HistoricalServiceAccountingQuery | null>(null);
   const [days, setDays] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<HistoricalServiceAccountingPreview | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    let active = true;
+    void loadAllOrderSummaries((params, options) => ordersQueryClient.getOrderSummaries(params, options))
+      .then((page) => {
+        if (!active) return;
+        setOrderSummaries(page.items);
+        setOrderListState('ready');
+      })
+      .catch(() => {
+        if (!active) return;
+        setOrderSummaries([]);
+        setOrderListState('error');
+      });
+    return () => { active = false; };
+  }, []);
+
   const inputs = (): HistoricalCaregiverDays[] => (facts?.assignments ?? []).map((item) => ({ assignment_identity: item.assignment_identity, staff_id: item.staff_id, actual_service_days: Number(days[item.assignment_identity]) }));
   const run = async (operation: () => Promise<void>) => { setBusy(true); setMessage(''); try { await operation(); } catch (error) { setMessage(error instanceof Error ? error.message : '處理失敗。'); } finally { setBusy(false); } };
+  const caseOptionsUnavailable = orderListState !== 'ready' || orderSummaries.length === 0;
+  const casePlaceholder = orderListState === 'loading'
+    ? '載入案件中…'
+    : orderListState === 'error'
+      ? '案件清單載入失敗'
+      : orderSummaries.length === 0
+        ? '目前沒有可選案件'
+        : '請選擇案件';
 
   return <section className="import-workbench-card" aria-label="歷史訂單實際服務天數與帳務">
     <h2>🧮 歷史訂單實際服務天數與帳務</h2>
     <p>只填每位月嫂的實際服務天數；系統會以單薪計算應收應付，不建立逐日排班。</p>
     <div className="import-result-title-row">
-      <label>案件編號 <input value={caseNo} onChange={(event) => { setCaseNo(event.target.value); setFacts(null); setPreview(null); }} /></label>
+      <label>案件編號 <select aria-label="案件編號" value={caseNo} disabled={caseOptionsUnavailable} onChange={(event) => { setCaseNo(event.target.value); setFacts(null); setPreview(null); }}>
+        <option value="">{casePlaceholder}</option>
+        {orderSummaries.map((item) => <option key={item.case_no} value={item.case_no}>{item.case_no}｜{item.client_name}｜{item.order_status}</option>)}
+      </select></label>
       <button type="button" disabled={busy || !caseNo.trim()} onClick={() => void run(async () => { const result = await historicalServiceAccountingClient.query(caseNo.trim()); setFacts(result); setDays(Object.fromEntries(result.assignments.map((item) => [item.assignment_identity, '']))); setPreview(null); })}>查詢服務帳務</button>
     </div>
     {facts && <div>
