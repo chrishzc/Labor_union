@@ -26,18 +26,15 @@ describe('AccountManagementPage query slice', () => {
     expect(screen.queryByText(/Access Control Version|帳號識別|Email \/ IP/)).not.toBeInTheDocument();
   });
 
-  it('loads audit lazily and does not query jobs until a job id is submitted', async () => {
+  it('loads audit lazily without exposing or querying account-level job observation', async () => {
     render(<AccountManagementPage />);
     await waitFor(() => expect(screen.getByText(/根帳號/, { exact: false })).toBeInTheDocument());
+    expect(screen.queryByRole('tab', { name: /背景工作狀態/ })).not.toBeInTheDocument();
+    expect(jobObservationClient.query).not.toHaveBeenCalled();
+
     fireEvent.click(screen.getByRole('tab', { name: /安全操作與登入稽核/ }));
     await waitFor(() => expect(screen.getByText('登入驗證')).toBeInTheDocument());
     expect(auditQueryClient.query).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('tab', { name: /背景工作狀態/ }));
     expect(jobObservationClient.query).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('背景工作查詢碼'), { target: { value: 'job-observation-1' } });
-    fireEvent.click(screen.getByRole('button', { name: '查詢狀態' }));
-    await waitFor(() => expect(screen.getByText('正式排班建立')).toBeInTheDocument());
-    expect(screen.getByText('處理中')).toBeInTheDocument();
-    expect(jobObservationClient.query).toHaveBeenCalledTimes(1);
   });
 });
