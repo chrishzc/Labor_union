@@ -51,6 +51,7 @@ from api.routes import (
     finance_import,
     hcm_import,
     historical_order_adoption,
+    historical_calendar_assignment_remediation,
     historical_service_accounting,
     historical_baseline_projector,
     historical_completion,
@@ -328,6 +329,7 @@ app.include_router(client_beclass_import.router)
 app.include_router(client_profile.router)
 app.include_router(client_profile.review_router)
 app.include_router(historical_order_adoption.router)
+app.include_router(historical_calendar_assignment_remediation.router)
 app.include_router(historical_service_accounting.router)
 app.include_router(historical_baseline_projector.router)
 app.include_router(historical_completion.router)
