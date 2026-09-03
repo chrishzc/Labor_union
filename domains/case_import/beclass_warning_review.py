@@ -20,7 +20,7 @@ def build_beclass_warning_occurrences(
     *,
     source_kind: BeClassImportSourceKind,
     source_event_identity: str,
-    masked_identifier: str,
+    identifier: str,
     issue_codes: tuple[str, ...],
 ) -> tuple[ImportWarningOccurrence, ...]:
     warnings: list[ImportWarningOccurrence] = []
@@ -38,7 +38,7 @@ def build_beclass_warning_occurrences(
             source_event_identity=source_event_identity,
             logical_code=logical_code,
             field_path=field_path,
-            masked_subject=masked_identifier,
+            subject=identifier,
             issue_codes=(issue_code,),
         )
         if (

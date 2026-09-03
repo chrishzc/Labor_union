@@ -11,7 +11,7 @@ from typing import Callable, Protocol
 from domains.case_import.staff_historical_adoption import plan_staff_scalar_merge
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 from shared_kernel.fingerprints import fingerprint_payload
-from subsystems.case_import.beclass_review_intake import masked_review_identifier, record_invalid_beclass_row
+from subsystems.case_import.beclass_review_intake import canonical_review_identifier, record_invalid_beclass_row
 
 
 class StaffHistoricalAdoptionRepository(Protocol):
@@ -210,7 +210,7 @@ def adopt_existing_staff(
                 source_content_digest=source_content_digest,
                 source_sheet=source_sheet,
                 source_row=source_row,
-                masked_identifier=masked_review_identifier(
+                identifier=canonical_review_identifier(
                     BeClassImportSourceKind.STAFF, identity_card, source_row
                 ),
                 source_payload=review_payload,

@@ -120,8 +120,8 @@ EXACT_SOURCE_REVIEWS: dict[
     ),
     "infrastructure/mysql/data_browser_query_repository.py": (
         "0a779627343558692412359372fe8682d376fa5d817046aa14e5f48ff0bb9404",
-        frozenset({"DataBrowserQueryRepository.query_masked_page"}),
-        ("access_control", "bounded masked Data Browser query over fixed source allowlist", "authenticated data-browser source query API", "retain_restricted:source-locked source, columns, search, ordering, and limits are fixed; no arbitrary table or mutation authority"),
+        frozenset({"DataBrowserQueryRepository.query_page"}),
+        ("access_control", "bounded canonical Data Browser query over fixed source allowlist", "authenticated data-browser source query API", "retain_restricted:source-locked source, columns, search, ordering, and limits are fixed; no arbitrary table or mutation authority"),
     ),
     "subsystems/scheduling/matching_coordination_application.py": (
         "3d06adbe26b3e1a9948caaf555db9c7fff212bade2803dec7021c00b12a03820",
@@ -245,8 +245,8 @@ EXACT_SOURCE_REVIEWS: dict[
     ),
     "infrastructure/mysql/customer_service_escalation_repository.py": (
         "13e2536420ae383c9bde29fc9fa7fcee096616e1c406e1fadfc4099db9cb00ba",
-        frozenset({"MySqlCustomerServiceEscalationRepository.append_event", "MySqlCustomerServiceEscalationRepository.append_source_event", "MySqlCustomerServiceEscalationRepository.create", "MySqlCustomerServiceEscalationRepository.enqueue_masked_alert", "MySqlCustomerServiceEscalationRepository.save_receipt", "MySqlCustomerServiceEscalationRepository.transition"}),
-        ("customer_service", "Customer Service escalation repository inside workflow outer Unit of Work", "typed Customer Service escalation Query/Preview/Apply", "retain_canonical:source-locked exact escalation, source-event, masked-alert enqueue, transition, and receipt symbols; repository never commits"),
+        frozenset({"MySqlCustomerServiceEscalationRepository.append_event", "MySqlCustomerServiceEscalationRepository.append_source_event", "MySqlCustomerServiceEscalationRepository.create", "MySqlCustomerServiceEscalationRepository.enqueue_alert", "MySqlCustomerServiceEscalationRepository.save_receipt", "MySqlCustomerServiceEscalationRepository.transition"}),
+        ("customer_service", "Customer Service escalation repository inside workflow outer Unit of Work", "typed Customer Service escalation Query/Preview/Apply", "retain_canonical:source-locked exact escalation, source-event, bounded-alert enqueue, transition, and receipt symbols; repository never commits"),
     ),
     "infrastructure/db/contract_external_signing_repository.py": (
         "715def0bda249e10b685782ecf2ca846b926582520ffd08ccb83c15c03c4ddc1",
@@ -988,7 +988,7 @@ def _current_runtime_review(path: str) -> tuple[str, str, str, str] | None:
         ),
         "subsystems/access/authentication_session.py": (
             "access_control", "authenticated session and audit transaction",
-            "api/dependencies/admin_auth.py", "retain_canonical:session lifecycle and privacy-masked audit append are Access Control facts",
+            "api/dependencies/admin_auth.py", "retain_canonical:session lifecycle and privacy-redacted audit append are Access Control facts",
         ),
         "subsystems/access/security_audit_query.py": (
             "access_control", "security-audit retention transaction",

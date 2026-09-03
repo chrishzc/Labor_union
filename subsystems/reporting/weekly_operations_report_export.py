@@ -1,6 +1,6 @@
 """
 File: weekly_operations_report_export.py
-Description: 將同一營運週報 candidate 輸出為固定三分頁且去敏的 XLSX。
+Description: 將同一營運週報 candidate 輸出為固定三分頁且canonical的 XLSX。
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def export_weekly_operations_report(report: WeeklyOperationsReport) -> bytes:
         ),
         (
             (
-                row.case_no, row.applicant_name_masked, row.application_date, row.identity_status,
+                row.case_no, row.applicant_name, row.application_date, row.identity_status,
                 row.review_result, row.order_status, row.service_days, row.service_hours_per_day,
                 row.planned_start_date, row.planned_end_date, row.district, ",".join(row.data_quality_codes),
             )
@@ -61,8 +61,8 @@ def export_weekly_operations_report(report: WeeklyOperationsReport) -> bytes:
                 partition.citizen_kind, row.serial_number, row.case_no, row.eligibility,
                 row.service_start, row.service_end, row.subsidy_hours, row.subsidy_days,
                 row.service_days, row.subsidy_amount_ntd, row.unit_price_ntd,
-                row.employer_name_masked, row.staff_name_masked, row.identity_card_masked,
-                row.address_masked,
+                row.employer_name, row.staff_name, row.identity_card,
+                row.address,
             )
             for partition in report.subsidy_partitions
             for row in partition.rows
@@ -76,7 +76,7 @@ def export_weekly_operations_report(report: WeeklyOperationsReport) -> bytes:
         ),
         (
             (
-                row.assignment_id, row.case_no, row.client_name_masked, row.staff_name_masked,
+                row.assignment_id, row.case_no, row.client_name, row.staff_name,
                 row.service_start_date, row.service_end_date, row.period_start_date, row.period_end_date,
                 row.service_hours_per_day, row.weekly_work_days, row.weekly_hours,
                 row.order_status, "是" if row.completed else "否", ",".join(row.data_quality_codes),

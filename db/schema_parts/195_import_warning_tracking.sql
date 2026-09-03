@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS import_warning_occurrences (
     source_receipt_identity VARCHAR(191) NULL,
     logical_code VARCHAR(96) NOT NULL,
     field_path VARCHAR(191) NOT NULL,
-    masked_subject VARCHAR(191) NOT NULL,
+    subject VARCHAR(191) NOT NULL,
     issue_codes JSON NOT NULL,
     evidence_snapshot JSON NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS import_warning_occurrences (
     UNIQUE KEY uq_import_warning_occurrence_source (
         owning_lane, source_event_identity, logical_code, field_path
     ),
-    INDEX idx_import_warning_occurrence_lane_subject (owning_lane, masked_subject),
+    INDEX idx_import_warning_occurrence_lane_subject (owning_lane, subject),
     CONSTRAINT chk_import_warning_occurrence_payload
         CHECK (JSON_TYPE(issue_codes) = 'ARRAY' AND JSON_TYPE(evidence_snapshot) = 'OBJECT')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

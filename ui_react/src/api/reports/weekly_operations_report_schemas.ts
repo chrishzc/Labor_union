@@ -1,6 +1,6 @@
 /**
  * File: weekly_operations_report_schemas.ts
- * Description: 定義營運週報三分頁、期間、彙總與資料品質問題的 strict server-redacted view。
+ * Description: 定義營運週報三分頁、期間、彙總與資料品質問題的 strict canonical view。
  */
 import { z } from 'zod';
 import { SubsidyReportPartitionSchema } from './subsidy_report_query_schemas';
@@ -32,7 +32,7 @@ export const WeeklyOperationsReportSummarySchema = z.strictObject({
 
 export const WeeklyOperationsCaseRowSchema = z.strictObject({
   case_no: z.string().min(1),
-  applicant_name_masked: z.string().min(1),
+  applicant_name: z.string().min(1),
   application_date: DateSchema.nullable(),
   identity_status: z.string().nullable(),
   review_result: z.enum(['general_eligible', 'subsidized_eligible', 'rejected_unpartitioned', 'pending']),
@@ -48,8 +48,8 @@ export const WeeklyOperationsCaseRowSchema = z.strictObject({
 export const WeeklyOperationsServiceRowSchema = z.strictObject({
   assignment_id: z.number().int().positive(),
   case_no: z.string().min(1),
-  client_name_masked: z.string().min(1),
-  staff_name_masked: z.string().min(1),
+  client_name: z.string().min(1),
+  staff_name: z.string().min(1),
   service_start_date: DateSchema,
   service_end_date: DateSchema,
   period_start_date: DateSchema,

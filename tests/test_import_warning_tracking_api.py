@@ -82,7 +82,7 @@ class _Application:
             owning_lane="hcm",
             logical_code="HCM-FIELD-001",
             field_path="身分證字號",
-            masked_subject="masked",
+            subject="masked",
             display_message="缺少身分證",
             navigation_action="hcm_import_center",
             action_kind="owner_preview_apply",
@@ -167,7 +167,7 @@ def test_hcm_referral_is_read_only_typed_owner_context_without_corrected_payload
         "owning_lane": "hcm",
         "logical_code": "HCM-FIELD-001",
         "field_path": "身分證字號",
-        "masked_subject": "masked",
+        "subject": "masked",
         "display_message": "缺少身分證",
         "navigation_action": "hcm_import_center",
         "action_kind": "owner_preview_apply",
@@ -188,7 +188,7 @@ def test_task_query_structure_and_pydantic_contract_conformance() -> None:
         owning_lane="hcm",
         logical_code="HCM-FIELD-001",
         field_path="身分證字號",
-        masked_subject="A12****789",
+        subject="A12****789",
         issue_codes=("hcm_field_missing:身分證字號",),
         tracking_status=ImportWarningTrackingStatus.OPEN,
         tracking_version=1,
@@ -201,7 +201,7 @@ def test_task_query_structure_and_pydantic_contract_conformance() -> None:
         owning_lane="finance",
         logical_code="FIN-IMPORT-002",
         field_path="amount",
-        masked_subject="TX-9988",
+        subject="TX-9988",
         issue_codes=("finance_amount_negative", "finance_format_invalid"),
         tracking_status=ImportWarningTrackingStatus.AWAITING_EXTERNAL_CONFIRMATION,
         tracking_version=2,
@@ -235,7 +235,7 @@ def test_task_query_structure_and_pydantic_contract_conformance() -> None:
     assert t0["owning_lane"] == "hcm"
     assert t0["logical_code"] == "HCM-FIELD-001"
     assert t0["field_path"] == "身分證字號"
-    assert t0["masked_subject"] == "A12****789"
+    assert t0["subject"] == "A12****789"
     assert t0["issue_codes"] == ["hcm_field_missing:身分證字號"]
     assert t0["tracking_status"] == "open"
     assert t0["tracking_version"] == 1
@@ -431,7 +431,7 @@ def test_task_public_contract_rejects_unknown_tracking_status() -> None:
         "owning_lane": "hcm",
         "logical_code": "HCM-FIELD-001",
         "field_path": "身分證字號",
-        "masked_subject": "masked",
+        "subject": "masked",
         "issue_codes": ["missing"],
         "tracking_status": "unknown",
         "tracking_version": 1,

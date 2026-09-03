@@ -35,7 +35,7 @@ describe('LINE Identity Adapter（Phase 3A Lane D）', () => {
     subject_reference: 'STAFF-REVIEW-071',
     assigned_admin_id: null,
     due_at: null,
-    line_user_id_masked: 'Ureview-should-be-masked-7890',
+    line_user_id: 'Ureview-should-be-masked-7890',
     display_name: '待審月嫂甲',
     decision_reason: null,
     reviewed_by_actor_id: null,
@@ -61,7 +61,7 @@ describe('LINE Identity Adapter（Phase 3A Lane D）', () => {
 
     expect(result.statusLabel).toBe('已綁定');
     expect(result.subjectTypeLabel).toBe('客戶');
-    expect(result.maskedLineUserId).toBe('U123••••cdef');
+    expect(result.lineUserId).toBe('U123••••cdef');
     expect(serialized).not.toContain(FIXTURE_LINE_USER_ID);
     expect(serialized).not.toContain(BOUND_IDENTITY_FIXTURE.subject_reference);
   });
@@ -191,8 +191,8 @@ describe('LINE Identity Adapter（Phase 3A Lane D）', () => {
     expect(result.reviewTypeLabel).toBe('月嫂身分驗證');
     expect(result.statusLabel).toBe('待人工審核');
     expect(result.subjectTypeLabel).toBe('月嫂');
-    expect(result.maskedLineUserId).toBe('Urev••••7890');
-    expect(JSON.stringify(result)).not.toContain(review.line_user_id_masked);
+    expect(result.lineUserId).toBe('Urev••••7890');
+    expect(JSON.stringify(result)).not.toContain(review.line_user_id);
   });
 
   it('review Preview 保留 fingerprint 供 Apply，receipt 不假造 provider 送達', () => {
@@ -205,7 +205,7 @@ describe('LINE Identity Adapter（Phase 3A Lane D）', () => {
       resulting_version: 4,
       subject_type: 'staff',
       subject_reference: 'STAFF-REVIEW-071',
-      line_user_id_masked: review.line_user_id_masked,
+      line_user_id: review.line_user_id,
       preview_fingerprint: 'review-preview-fixture-071',
     });
     const receipt = adaptLineIdentityReviewReceipt({

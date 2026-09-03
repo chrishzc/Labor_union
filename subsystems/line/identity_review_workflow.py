@@ -77,12 +77,11 @@ def _as_int(value: Any) -> int:
     return int(value or 0)
 
 
-def _mask_line_id(value: str | None) -> str:
-    text = (value or "").strip()
-    if len(text) <= 8:
-        return text or "-"
-    return f"{text[:4]}…{text[-4:]}"
-
+def _canonical_line_id(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 def _utc_naive(value: datetime | None) -> datetime | None:
     if value is None or value.tzinfo is None:
@@ -243,10 +242,10 @@ def list_line_reviews(
         items = []
         for row in rows:
             item = dict(row)
-            item["line_user_id_masked"] = _mask_line_id(item.pop("line_user_id", None))
-            item["old_line_user_id_masked"] = _mask_line_id(item.pop("old_line_user_id", None))
-            item["new_line_user_id_masked"] = _mask_line_id(item.pop("new_line_user_id", None))
-            item["display_name"] = item.get("client_name") or item["line_user_id_masked"]
+            item["line_user_id"] = _canonical_line_id(item.pop("line_user_id", None))
+            item["old_line_user_id"] = _canonical_line_id(item.pop("old_line_user_id", None))
+            item["new_line_user_id"] = _canonical_line_id(item.pop("new_line_user_id", None))
+            item["display_name"] = item.get("client_name") or item["line_user_id"]
             items.append(item)
         return {
             "items": items,

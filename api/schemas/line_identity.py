@@ -162,7 +162,7 @@ class CanonicalLineReviewDecisionPreviewResponse(BaseModel):
     resulting_version: int
     subject_type: str | None
     subject_reference: str | None
-    line_user_id_masked: str
+    line_user_id: str
     preview_fingerprint: str
 
 
@@ -177,7 +177,7 @@ class CanonicalLineReviewResponse(BaseModel):
     subject_reference: str | None
     assigned_admin_id: int | None
     due_at: datetime | None
-    line_user_id_masked: str
+    line_user_id: str
     display_name: str
     decision_reason: str | None
     reviewed_by_actor_id: str | None

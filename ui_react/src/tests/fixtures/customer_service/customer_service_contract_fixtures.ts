@@ -19,7 +19,7 @@ import type {
 
 export const CUSTOMER_SERVICE_TICKET_FIXTURE: CustomerServiceTicket = {
   ticket_id: 31,
-  line_user_id_masked: 'U12***789',
+  line_user_id: 'U12***789',
   category: 'profile_update',
   status: 'handling',
   version: 4,

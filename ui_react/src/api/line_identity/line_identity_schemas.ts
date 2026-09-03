@@ -154,7 +154,7 @@ export const LineIdentityReviewViewSchema = z
     subject_reference: z.string().nullable(),
     assigned_admin_id: z.number().int().nullable(),
     due_at: NullableDateTimeSchema,
-    line_user_id_masked: z.string(),
+    line_user_id: z.string(),
     display_name: z.string(),
     decision_reason: z.string().nullable(),
     reviewed_by_actor_id: z.string().nullable(),
@@ -218,7 +218,7 @@ export const LineIdentityReviewPreviewViewSchema = z
     resulting_version: z.number().int().nonnegative(),
     subject_type: LineBindingSubjectTypeSchema.nullable(),
     subject_reference: z.string().nullable(),
-    line_user_id_masked: z.string(),
+    line_user_id: z.string(),
     preview_fingerprint: z.string().min(1),
   })
   .strict();

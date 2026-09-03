@@ -93,7 +93,7 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
     <table className="reports-table">
       <thead><tr><th>案件</th><th>申請人</th><th>申請日</th><th>身分</th><th>審核</th><th>訂單狀態</th><th>天數／每日時數</th><th>預計服務期間</th><th>區域</th><th>資料品質</th></tr></thead>
       <tbody>{report.caseRows.map((row) => <tr key={row.case_no}>
-        <td>{row.case_no}</td><td>{row.applicant_name_masked}</td><td>{displayWeeklyValue(row.application_date)}</td>
+        <td>{row.case_no}</td><td>{row.applicant_name}</td><td>{displayWeeklyValue(row.application_date)}</td>
         <td>{displayWeeklyValue(row.identity_status)}</td><td>{row.reviewLabel}</td><td>{displayWeeklyValue(row.order_status)}</td>
         <td>{displayWeeklyValue(row.service_days)}／{displayWeeklyValue(row.service_hours_per_day)}</td>
         <td>{displayWeeklyValue(row.planned_start_date)}～{displayWeeklyValue(row.planned_end_date)}</td>
@@ -118,7 +118,7 @@ const WeeklyServiceView: React.FC<{ report: WeeklyView }> = ({ report }) => (
     <table className="reports-table">
       <thead><tr><th>案件</th><th>案家</th><th>服務人員</th><th>服務期間</th><th>每日時數</th><th>期間工作日</th><th>期間工時</th><th>訂單狀態</th><th>完成</th><th>資料品質</th></tr></thead>
       <tbody>{report.serviceRows.map((row) => <tr key={row.assignment_id}>
-        <td>{row.case_no}</td><td>{row.client_name_masked}</td><td>{row.staff_name_masked}</td>
+        <td>{row.case_no}</td><td>{row.client_name}</td><td>{row.staff_name}</td>
         <td>{row.service_start_date}～{row.service_end_date}</td><td>{row.service_hours_per_day}</td>
         <td>{row.weekly_work_days}</td><td>{row.weekly_hours}</td><td>{row.order_status}</td>
         <td>{row.completed ? '是' : '否'}</td><td>{row.data_quality_codes.length ? row.data_quality_codes.join('、') : '—'}</td>

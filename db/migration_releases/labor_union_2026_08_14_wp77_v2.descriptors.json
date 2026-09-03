@@ -23,7 +23,7 @@
           "source_content_digest",
           "source_sheet_identity",
           "source_row",
-          "masked_case_identity",
+          "case_identity",
           "source_fingerprint",
           "issue_codes",
           "evidence_snapshot",

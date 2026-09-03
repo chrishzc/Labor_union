@@ -135,7 +135,7 @@ class MySqlLineNotificationRepository:
         return cancelled
 
     def list_case_timeline(self, case_no: str) -> tuple[dict[str, object], ...]:
-        """Return deidentified evidence only; notification payload text never crosses this API."""
+        """Return canonical recipient evidence; notification payload text never crosses this API."""
         with self._connection.cursor() as cursor:
             cursor.execute(_CASE_TIMELINE_SQL, (case_no,))
             rows = tuple(cursor.fetchall() or ())
@@ -1243,7 +1243,7 @@ def _timeline_row(row: dict[str, object]) -> dict[str, object]:
         "decision_status": row.get("decision_status"),
         "reason_code": row.get("reason_code"),
         "recipient_type": row.get("recipient_type"),
-        "recipient_masked": _mask_recipient(recipient),
+        "recipient_identity": _canonical_recipient(recipient),
         "occurrence_number": row.get("occurrence_number"),
         "intent_status": row.get("intent_status"),
         "scheduled_at_utc": None if row.get("scheduled_at_utc") is None else str(row["scheduled_at_utc"]),
@@ -1252,11 +1252,10 @@ def _timeline_row(row: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _mask_recipient(value: object) -> str | None:
+def _canonical_recipient(value: object) -> str | None:
     if not isinstance(value, str) or not value:
         return None
-    return "***" + value[-4:]
-
+    return value
 
 def _cancellation_row(row: object) -> tuple[int, int | None]:
     if not isinstance(row, dict) or frozenset(row) != {"intent_id", "delivery_task_id"}:

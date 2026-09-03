@@ -193,41 +193,27 @@ def _accounts_payable_row(row) -> dict[str, object]:
         "payment_type": row.payment_type,
         "recipient_name": row.recipient_name,
         "bank_code": row.bank_code,
-        "bank_account_masked": _mask_bank_account(row.bank_account),
+        "bank_account": _canonical_bank_account(row.bank_account),
         "amount_ntd": row.amount.amount,
         "obligation_identities": list(row.obligation_identities),
         "case_numbers": list(row.case_numbers),
-        "recipient_identity_card_masked": _mask_identity_card(
+        "recipient_identity_card": _canonical_identity_card(
             row.recipient_identity_card
         ),
     }
 
 
-def _mask_bank_account(value: object) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return "—"
-    suffix = text[-4:]
-    return f"{'*' * max(len(text) - len(suffix), 4)}{suffix}"
+def _canonical_bank_account(value: object) -> str:
+    return str(value or "").strip() or "—"
 
+def _canonical_identity_card(value: object) -> str:
+    return str(value or "").strip() or "—"
 
-def _mask_identity_card(value: object) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return "—"
-    if len(text) == 1:
-        return "*"
-    return f"{text[0]}{'*' * (len(text) - 1)}"
+def _canonical_name(value: object) -> str:
+    return str(value or "").strip() or "—"
 
-
-def _mask_name(value: object) -> str:
-    text = str(value or "").strip()
-    return "—" if not text else f"{text[0]}{'*' * max(len(text) - 1, 1)}"
-
-
-def _mask_address(value: object) -> str:
-    return "—" if not str(value or "").strip() else "地址已遮罩"
-
+def _canonical_address(value: object) -> str:
+    return str(value or "").strip() or "—"
 
 def _subsidy_report_row(row: dict[str, object]) -> GovernmentSubsidyReportRowView:
     return GovernmentSubsidyReportRowView(
@@ -241,10 +227,10 @@ def _subsidy_report_row(row: dict[str, object]) -> GovernmentSubsidyReportRowVie
         service_days=int(row["服務天數"]),
         subsidy_amount_ntd=int(Decimal(row["補助款金額"])),
         unit_price_ntd=int(Decimal(row["單價"])),
-        employer_name_masked=_mask_name(row.get("雇主")),
-        staff_name_masked=_mask_name(row.get("服務人員")),
-        identity_card_masked=_mask_identity_card(row.get("身分證字號")),
-        address_masked=_mask_address(row.get("地址")),
+        employer_name=_canonical_name(row.get("雇主")),
+        staff_name=_canonical_name(row.get("服務人員")),
+        identity_card=_canonical_identity_card(row.get("身分證字號")),
+        address=_canonical_address(row.get("地址")),
     )
 
 

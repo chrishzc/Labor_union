@@ -91,7 +91,7 @@ class DataQualityIssue:
 @dataclass(frozen=True, slots=True)
 class WeeklyCaseRow:
     case_no: str
-    applicant_name_masked: str
+    applicant_name: str
     application_date: date | None
     identity_status: str | None
     review_result: str
@@ -116,10 +116,10 @@ class WeeklySubsidyRow:
     service_days: int
     subsidy_amount_ntd: int
     unit_price_ntd: int
-    employer_name_masked: str
-    staff_name_masked: str
-    identity_card_masked: str
-    address_masked: str
+    employer_name: str
+    staff_name: str
+    identity_card: str
+    address: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,8 +132,8 @@ class WeeklySubsidyPartition:
 class WeeklyServiceRow:
     assignment_id: int
     case_no: str
-    client_name_masked: str
-    staff_name_masked: str
+    client_name: str
+    staff_name: str
     service_start_date: date
     service_end_date: date
     period_start_date: date
@@ -240,7 +240,7 @@ class WeeklyOperationsReportQuery:
             quality_codes.append("review_result_pending")
         return WeeklyCaseRow(
             case_no=fact.case_no or "—",
-            applicant_name_masked=_mask_name(fact.applicant_name),
+            applicant_name=_canonical_name(fact.applicant_name),
             application_date=fact.created_at.date() if fact.created_at is not None else None,
             identity_status=fact.identity_status,
             review_result=review_result,
@@ -265,8 +265,8 @@ class WeeklyOperationsReportQuery:
         return WeeklyServiceRow(
             assignment_id=fact.assignment_id,
             case_no=fact.case_no,
-            client_name_masked=_mask_name(fact.client_name),
-            staff_name_masked=_mask_name(fact.staff_name),
+            client_name=_canonical_name(fact.client_name),
+            staff_name=_canonical_name(fact.staff_name),
             service_start_date=fact.service_start_date,
             service_end_date=fact.service_end_date,
             period_start_date=start_date,
@@ -295,10 +295,10 @@ class WeeklyOperationsReportQuery:
                     service_days=fact.service_days,
                     subsidy_amount_ntd=fact.subsidy_amount_ntd,
                     unit_price_ntd=fact.unit_price_ntd,
-                    employer_name_masked=_mask_name(fact.employer_name),
-                    staff_name_masked=_mask_name(fact.staff_name),
-                    identity_card_masked=_mask_identity_card(fact.identity_card),
-                    address_masked="地址已遮罩" if str(fact.address or "").strip() else "—",
+                    employer_name=_canonical_name(fact.employer_name),
+                    staff_name=_canonical_name(fact.staff_name),
+                    identity_card=_canonical_identity_card(fact.identity_card),
+                    address=str(fact.address or "").strip() or "—",
                 )
                 for fact in facts
             ),
@@ -351,17 +351,11 @@ def _positive_or_none(value: int | None) -> int | None:
     return value if value is not None and value > 0 else None
 
 
-def _mask_name(value: str | None) -> str:
-    text = str(value or "").strip()
-    return "—" if not text else f"{text[0]}{'*' * max(len(text) - 1, 1)}"
+def _canonical_name(value: str | None) -> str:
+    return str(value or "").strip() or "—"
 
-
-def _mask_identity_card(value: str | None) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return "—"
-    return f"{text[0]}{'*' * max(len(text) - 1, 1)}"
-
+def _canonical_identity_card(value: str | None) -> str:
+    return str(value or "").strip() or "—"
 
 __all__ = [
     "DataQualityIssue",

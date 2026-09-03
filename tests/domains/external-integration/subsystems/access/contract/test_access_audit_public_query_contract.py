@@ -25,10 +25,10 @@ def test_masked_audit_query_does_not_expose_raw_details(monkeypatch) -> None:
                 AuditListItem(
                     audit_id=10,
                     occurred_at=datetime.fromisoformat("2026-08-20T10:00:00+08:00"),
-                    actor_label_masked="根***",
+                    actor_label="根***",
                     action_family="authentication",
-                    target_label_masked="session:se***",
-                    ip_address_masked="127.0.0.***",
+                    target_label="session:se***",
+                    ip_address="127.0.0.***",
                     outcome="success",
                     reason_code="admin.login.success",
                 )
@@ -42,8 +42,8 @@ def test_masked_audit_query_does_not_expose_raw_details(monkeypatch) -> None:
     response = admin_audit.list_audits(_=AdminPrincipal(1, "admin", "管理員", "system_admin"))
     item = response.data.items[0]
     assert item.audit_id == 10
-    assert item.actor_label_masked == "根***"
-    assert item.target_label_masked == "session:se***"
+    assert item.actor_label == "根***"
+    assert item.target_label == "session:se***"
     assert item.occurred_at.isoformat() == "2026-08-20T10:00:00+08:00"
     assert not hasattr(item, "details")
 
@@ -55,10 +55,10 @@ def test_masked_detail_is_a_closed_allowlist_and_never_returns_raw_payload(monke
         lambda _, **__: AuditDetailItem(
             audit_id=11,
             occurred_at=datetime.fromisoformat("2026-08-20T10:00:00+08:00"),
-            actor_label_masked="管***",
+            actor_label="管***",
             action_family="account_security",
-            target_label_masked="account:12***",
-            ip_address_masked="127.0.0.***",
+            target_label="account:12***",
+            ip_address="127.0.0.***",
             outcome="success",
             reason_code="admin.account.enabled_changed",
             details=(
@@ -72,8 +72,8 @@ def test_masked_detail_is_a_closed_allowlist_and_never_returns_raw_payload(monke
     dumped = response.data.model_dump()
 
     assert dumped["details"] == [
-        {"key": "reason", "value_masked": "provided"},
-        {"key": "enabled", "value_masked": "disabled"},
+        {"key": "reason", "value": "provided"},
+        {"key": "enabled", "value": "disabled"},
     ]
     assert "password" not in str(dumped).lower()
     assert "request_path" not in dumped

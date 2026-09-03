@@ -202,14 +202,14 @@ def _append_source_reviews(
         cursor.execute(
             "INSERT IGNORE INTO finance_import_source_reviews "
             "(review_identity,source_content_digest,format_id,sheet_name,source_row,"
-            "masked_source_identity,issue_codes) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            "source_identity,issue_codes) VALUES (%s,%s,%s,%s,%s,%s,%s)",
             (
                 review.review_identity,
                 review.source_content_digest,
                 review.format_id,
                 review.sheet_name,
                 review.source_row,
-                review.masked_source_identity,
+                review.source_identity,
                 _canonical_json(review.issue_codes),
             ),
         )

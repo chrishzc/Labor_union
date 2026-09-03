@@ -108,7 +108,7 @@ export interface ImportWarningTaskViewModel {
   laneLabel: string;
   logicalCode: string;
   fieldPath: string;
-  maskedSubject: string;
+  subject: string;
   issueCodes: string[];
   status: ImportWarningTrackingStatus;
   statusLabel: string;
@@ -145,7 +145,7 @@ export interface ImportWarningReferralViewModel {
   owningLane: string;
   logicalCode: string;
   fieldPath: string;
-  maskedSubject: string;
+  subject: string;
   displayMessage: string;
   navigationAction: 'hcm_import_center';
   actionKind: 'owner_preview_apply' | 'wait_for_counterpart';
@@ -303,22 +303,14 @@ export function adaptAnomalySummary(dto: AnomalySummaryView): AnomalySummaryView
  * 將後端 ImportWarningTaskView 轉換為前端 ImportWarningTaskViewModel
  */
 export function adaptImportWarningTask(dto: ImportWarningTaskView): ImportWarningTaskViewModel {
-  const maskedSubject = (() => {
-    const value = dto.masked_subject.trim();
-    if (!value || value.toLowerCase() === 'masked') return '資料內容已遮罩';
-    if (/^finance-row-/i.test(value)) return '銀行流水資料';
-    if (/^client-/i.test(value)) return '客戶資料';
-    if (/^staff-/i.test(value)) return '月嫂資料';
-    if (/^hcm-/i.test(value)) return '匯入資料';
-    return value;
-  })();
+  const subject = dto.subject.trim() || '—';
   return {
     occurrenceIdentity: dto.occurrence_identity,
     owningLane: dto.owning_lane,
     laneLabel: mapImportWarningLaneLabel(dto.owning_lane),
     logicalCode: dto.logical_code,
     fieldPath: dto.field_path,
-    maskedSubject,
+    subject,
     issueCodes: Array.isArray(dto.issue_codes) ? [...dto.issue_codes] : [],
     status: dto.tracking_status,
     statusLabel: mapImportWarningStatusLabel(dto.tracking_status),
@@ -354,7 +346,7 @@ export function adaptImportWarningReferral(
     owningLane: dto.owning_lane,
     logicalCode: dto.logical_code,
     fieldPath: dto.field_path,
-    maskedSubject: dto.masked_subject,
+    subject: dto.subject,
     displayMessage: dto.display_message,
     navigationAction: dto.navigation_action,
     actionKind: dto.action_kind,

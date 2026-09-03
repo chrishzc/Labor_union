@@ -125,7 +125,7 @@ describe('M4 customer-service escalation successor', () => {
     const createRequest = {
       source_event_identity: 'line-event:m4', source_kind: 'line_inbox', source_fingerprint: 'a'.repeat(64),
       trigger_code: 'complaint', trigger_policy_version: 'complaint.v1', ticket_category: 'other',
-      masked_context: { summary_code: 'complaint_explicit', policy_version: 'complaint.v1', category: 'other', redaction_version: 'm4-mask.v1' },
+      context: { summary_code: 'complaint_explicit', policy_version: 'complaint.v1', category: 'other', redaction_version: 'm4-mask.v1' },
       hold_scope: 'line:conversation:m4', ...identity,
     } as const;
     await customerServiceEscalationClient.previewCreate(createRequest);
@@ -166,7 +166,7 @@ describe('M4 customer-service escalation successor', () => {
     await expect(customerServiceEscalationClient.previewCreate({
       source_event_identity: 'line-event:m4', source_kind: 'line_inbox', source_fingerprint: 'a'.repeat(64),
       trigger_code: 'complaint', trigger_policy_version: 'complaint.v1', ticket_category: 'other',
-      masked_context: { summary_code: 'complaint_explicit', policy_version: 'complaint.v1', category: 'other', redaction_version: 'm4-mask.v1', raw_message: 'secret' } as never,
+      context: { summary_code: 'complaint_explicit', policy_version: 'complaint.v1', category: 'other', redaction_version: 'm4-mask.v1', raw_message: 'secret' } as never,
       hold_scope: 'line:conversation:m4', idempotency_key: 'm4-create', correlation_id: 'm4-create',
     })).rejects.toBeInstanceOf(CustomerServiceEscalationError);
     expect(globalThis.fetch).not.toHaveBeenCalled();

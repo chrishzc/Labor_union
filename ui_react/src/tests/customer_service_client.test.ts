@@ -187,7 +187,7 @@ describe('customer service client', () => {
   it('接受 Pydantic 可缺省且可為 null 的客服查詢欄位', () => {
     const minimalTicket = {
       ticket_id: 31,
-      line_user_id_masked: 'Uabc…xyz',
+      line_user_id: 'Uabc…xyz',
       category: 'contact_union',
       status: 'handling',
       version: 4,

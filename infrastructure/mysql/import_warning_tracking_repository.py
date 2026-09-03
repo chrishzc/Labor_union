@@ -125,7 +125,7 @@ def _cursor(connection) -> Iterator[object]:
 
 def _task(row) -> ImportWarningTask:
     issue_codes = json.loads(row["issue_codes"]) if isinstance(row["issue_codes"], str) else row["issue_codes"]
-    return ImportWarningTask(str(row["occurrence_identity"]), str(row["owning_lane"]), str(row["logical_code"]), str(row["field_path"]), str(row["masked_subject"]), tuple(str(item) for item in issue_codes), ImportWarningTrackingStatus(str(row["tracking_status"])), int(row["tracking_version"]), None)
+    return ImportWarningTask(str(row["occurrence_identity"]), str(row["owning_lane"]), str(row["logical_code"]), str(row["field_path"]), str(row["subject"]), tuple(str(item) for item in issue_codes), ImportWarningTrackingStatus(str(row["tracking_status"])), int(row["tracking_version"]), None)
 
 
 def _fingerprint(request: WarningTransitionRequest) -> str:
@@ -155,7 +155,7 @@ def _receipt(value: object) -> WarningTransitionReceipt:
     return receipt
 
 
-_TASK_FIELDS = "o.occurrence_identity,o.owning_lane,o.logical_code,o.field_path,o.masked_subject,o.issue_codes,t.tracking_status,t.tracking_version"
+_TASK_FIELDS = "o.occurrence_identity,o.owning_lane,o.logical_code,o.field_path,o.subject,o.issue_codes,t.tracking_status,t.tracking_version"
 _TASK_SELECT = f"SELECT {_TASK_FIELDS} FROM import_warning_current_tasks t JOIN import_warning_occurrences o ON o.id=t.occurrence_id {{predicate}} ORDER BY t.last_event_at DESC LIMIT %s OFFSET %s"
 _TASK_BY_IDENTITY = f"SELECT {_TASK_FIELDS} FROM import_warning_current_tasks t JOIN import_warning_occurrences o ON o.id=t.occurrence_id WHERE o.occurrence_identity=%s"
 

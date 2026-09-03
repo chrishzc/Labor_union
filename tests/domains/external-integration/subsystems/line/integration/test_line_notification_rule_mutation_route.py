@@ -126,7 +126,7 @@ def test_query_and_manual_replay_routes_preserve_typed_payloads(monkeypatch) -> 
                 "decision_status": "suppressed",
                 "reason_code": "rule_shadow_mode",
                 "recipient_type": None,
-                "recipient_masked": None,
+                "recipient_identity": None,
                 "occurrence_number": None,
                 "intent_status": None,
                 "scheduled_at_utc": None,

@@ -94,7 +94,7 @@ def _review_identity(event) -> str:
 def _load_review(connection, review_identity: str):
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT review_identity,source_event_identity,masked_case_identity,issue_codes,evidence_snapshot FROM "
+            "SELECT review_identity,source_event_identity,case_identity,issue_codes,evidence_snapshot FROM "
             "historical_order_adoption_reviews WHERE review_identity=%s FOR UPDATE",
             (review_identity,),
         )
@@ -137,8 +137,8 @@ def _validate_canonical_event(event, receipt, review, review_identity: str) -> N
         raise ValueError("historical_order_review_binding_mismatch")
     if not isinstance(review.get("source_event_identity"), str) or not review["source_event_identity"].strip():
         raise ValueError("historical_order_review_source_missing")
-    if not isinstance(review.get("masked_case_identity"), str) or not review["masked_case_identity"].strip():
-        raise ValueError("historical_order_review_masked_identity_missing")
+    if not isinstance(review.get("case_identity"), str) or not review["case_identity"].strip():
+        raise ValueError("historical_order_review_identity_missing")
     _text_tuple(review.get("issue_codes"))
     _json_object(review.get("evidence_snapshot"))
     _json_object(receipt.get("result_snapshot"))

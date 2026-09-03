@@ -34,7 +34,7 @@ export type CustomerServiceStatus = z.infer<
 export const CustomerServiceTicketSchema = z
   .object({
     ticket_id: z.number().int(),
-    line_user_id_masked: z.string(),
+    line_user_id: z.string(),
     category: CustomerServiceCategorySchema,
     status: CustomerServiceStatusSchema,
     version: z.number().int(),

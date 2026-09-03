@@ -133,7 +133,7 @@ def _load_review(connection, review_identity):
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT review_identity,source_event_identity,source_fingerprint,"
-            "masked_case_identity,issue_codes,evidence_snapshot FROM "
+            "case_identity,issue_codes,evidence_snapshot FROM "
             "historical_order_adoption_reviews WHERE review_identity=%s FOR UPDATE",
             (review_identity,),
         )

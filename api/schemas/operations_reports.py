@@ -39,7 +39,7 @@ class WeeklyReportSummaryView(_StrictModel):
 
 class WeeklyReportCaseRowView(_StrictModel):
     case_no: str
-    applicant_name_masked: str
+    applicant_name: str
     application_date: date | None
     identity_status: str | None
     review_result: Literal[
@@ -60,8 +60,8 @@ class WeeklyReportCaseRowView(_StrictModel):
 class WeeklyReportServiceRowView(_StrictModel):
     assignment_id: int = Field(gt=0)
     case_no: str
-    client_name_masked: str
-    staff_name_masked: str
+    client_name: str
+    staff_name: str
     service_start_date: date
     service_end_date: date
     period_start_date: date

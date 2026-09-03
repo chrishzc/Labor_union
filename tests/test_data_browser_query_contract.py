@@ -1,6 +1,6 @@
 """
 File: test_data_browser_query_contract.py
-Description: 驗證六來源 masked Data Browser query、cursor 與 strict view。
+Description: 驗證六來源 canonical Data Browser query、cursor 與 strict view。
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from api.dependencies.admin_auth import require_system_admin
 from api.routes import data_browser_admin
-from api.schemas.data_browser import DataBrowserMaskedPageView
+from api.schemas.data_browser import DataBrowserPageView
 from api.schemas.errors import GlobalTypedErrorResponseView
 from infrastructure.mysql.data_browser_query_repository import (
     DataBrowserQueryRepository,
@@ -72,13 +72,13 @@ def test_orders_query_is_bounded_and_strictly_typed():
             },
         ]
     )
-    page = DataBrowserQueryRepository(connection).query_masked_page(
+    page = DataBrowserQueryRepository(connection).query_page(
         "orders",
         limit=1,
         after=None,
         query="服務中",
     )
-    view = DataBrowserMaskedPageView.model_validate(page)
+    view = DataBrowserPageView.model_validate(page)
 
     assert view.source_id == "orders"
     assert len(view.items) == 1
@@ -94,14 +94,14 @@ def test_unknown_source_and_invalid_cursor_fail_before_query():
     repository = DataBrowserQueryRepository(connection)
 
     try:
-        repository.query_masked_page("unknown", limit=25, after=None, query=None)
+        repository.query_page("unknown", limit=25, after=None, query=None)
     except DataBrowserSourceNotFound as error:
         assert str(error) == "source_not_found"
     else:
         raise AssertionError("unknown source must fail")
 
     try:
-        repository.query_masked_page("clients", limit=25, after="0", query=None)
+        repository.query_page("clients", limit=25, after="0", query=None)
     except ValueError as error:
         assert str(error) == "cursor_invalid"
     else:
@@ -118,7 +118,7 @@ def test_masked_page_schema_rejects_extra_public_fields():
         "raw_rows": [{"phone": "SENSITIVE_PHONE_SENTINEL"}],
     }
     try:
-        DataBrowserMaskedPageView.model_validate(payload)
+        DataBrowserPageView.model_validate(payload)
     except ValueError:
         pass
     else:

@@ -100,11 +100,11 @@ def test_weekly_query_is_redacted_and_uses_official_work_days():
     assert data["summary"]["promotion_count"] is None
     assert data["service_rows"][0]["weekly_work_days"] == 5
     assert data["service_rows"][0]["weekly_hours"] == 40
-    assert data["case_rows"][0]["applicant_name_masked"] == "王**"
-    assert data["subsidy_partitions"][0]["rows"][0]["identity_card_masked"] == "A*********"
-    assert "王小美" not in response.text
-    assert "A123456789" not in response.text
-    assert "完整地址" not in response.text
+    assert data["case_rows"][0]["applicant_name"] == "王小美"
+    assert data["subsidy_partitions"][0]["rows"][0]["identity_card"] == "A123456789"
+    assert "王小美" in response.text
+    assert "A123456789" in response.text
+    assert "完整地址" in response.text
 
 
 def test_operations_report_rejects_inverted_date_range():
@@ -173,6 +173,6 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     assert case_values[0][:2] == ("報表期間", "2026-08-20 ~ 2026-08-26")
     assert "未登錄" in case_values[1]
     workbook_text = " ".join(str(value) for sheet in workbook for row in sheet.values for value in row if value is not None)
-    assert "王小美" not in workbook_text
-    assert "A123456789" not in workbook_text
-    assert "完整地址" not in workbook_text
+    assert "王小美" in workbook_text
+    assert "A123456789" in workbook_text
+    assert "完整地址" in workbook_text

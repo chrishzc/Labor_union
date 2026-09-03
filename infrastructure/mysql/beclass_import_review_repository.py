@@ -59,7 +59,7 @@ class MySqlBeClassImportReviewRepository:
                     root.source_event_identity,
                     root.source_sheet,
                     root.source_row,
-                    root.masked_identifier,
+                    root.identifier,
                     root.source_fingerprint.value,
                     _canonical_json(root.source_payload),
                     _canonical_json(root.issue_codes),
@@ -213,7 +213,7 @@ def _facts(row):
         str(row["source_event_identity"]),
         str(row["source_sheet"]),
         int(row["source_row"]),
-        str(row["masked_identifier"]),
+        str(row["identifier"]),
         source_payload,
         issue_codes,
         PreviewFingerprint(str(row["source_fingerprint"])),
@@ -332,12 +332,12 @@ def _json_text_tuple(value):
 _ROOT_INSERT_SQL = (
     "INSERT INTO beclass_import_review_rows "
     "(review_identity,source_kind,source_event_identity,source_sheet,source_row,"
-    "masked_identifier,source_fingerprint,source_payload,issue_codes) "
+    "identifier,source_fingerprint,source_payload,issue_codes) "
     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 _REVIEW_SELECT_SQL = (
     "SELECT root.review_identity,root.source_kind,root.source_event_identity,"
-    "root.source_sheet,root.source_row,root.masked_identifier,"
+    "root.source_sheet,root.source_row,root.identifier,"
     "root.source_fingerprint,root.source_payload,root.issue_codes,"
     "event.resulting_version,event.corrected_payload "
     "FROM beclass_import_review_rows AS root "

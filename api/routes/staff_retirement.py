@@ -108,35 +108,15 @@ def _view(fact):
         "state": fact.state.value,
         "version": fact.version,
         "effective_at": fact.effective_at,
-        "masked_reason_code": _masked_reason_code(fact.reason_code),
+        "reason_code": _canonical_reason_code(fact.reason_code),
     }
 
 
-def _masked_reason_code(reason_code: str | None) -> str | None:
+def _canonical_reason_code(reason_code: str | None) -> str | None:
     if reason_code is None:
         return None
-    return reason_code[:1] + "***"
-
-
-_LINE_NOT_FOUND_CODES = frozenset({
-    "line_identity_binding_not_found",
-})
-_LINE_IDEMPOTENCY_CODES = frozenset({
-    "line_identity_revocation_idempotency_conflict",
-})
-_LINE_DOMAIN_BLOCKED_CODES = frozenset({
-    "line_identity_binding_not_bound",
-    "line_identity_default_menu_not_published",
-    "line_identity_revocation_in_progress",
-    "line_identity_staff_retirement_revocation_blocked",
-    "line_identity_revocation_not_retryable",
-    "line_identity_manual_completion_forbidden",
-})
-_LINE_CONFLICT_CODES = frozenset({
-    "line_identity_binding_version_conflict",
-    "line_identity_owner_projection_conflict",
-})
-
+    value = str(reason_code).strip()
+    return value or None
 
 def _raise_line_effect_error(error: Exception, correlation: CorrelationId) -> None:
     if str(error) not in (

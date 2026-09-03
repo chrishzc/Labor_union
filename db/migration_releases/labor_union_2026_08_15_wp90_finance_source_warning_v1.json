@@ -10,8 +10,14 @@
   "source_baseline": {
     "minimum_mysql_version": "8.0",
     "required_character_set": "utf8mb4",
-    "allowed_owned_object_states": ["absent", "exact"],
-    "forbidden_owned_object_states": ["partial", "drift"],
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
     "source_must_be_read_only": true,
     "maintenance_token_required": true,
     "baseline_id": "schema-assembly-v1-or-later"
@@ -20,7 +26,7 @@
     {
       "name": "200_finance_import_source_reviews.sql",
       "relative_path": "db/schema_parts/200_finance_import_source_reviews.sql",
-      "sha256": "02147dcea57d91d2a97b894a784db79647b46610a3772a1a5e8eff54f1292e47",
+      "sha256": "968ba99b66c65875efe45014bb066d47a325a811a1d438d628d7652f0146c171",
       "dependencies": [],
       "data_effect": "schema_only",
       "rollback_policy": "code-rollback-preserve-source-review-evidence",
@@ -39,22 +45,35 @@
   ],
   "application_compatibility": {
     "minimum_api_contract": "typed-api-v1",
-    "compatible_contracts": ["finance-source-warning-v1"],
-    "required_restart_targets": ["api", "architecture-outbox-worker"],
+    "compatible_contracts": [
+      "finance-source-warning-v1"
+    ],
+    "required_restart_targets": [
+      "api",
+      "architecture-outbox-worker"
+    ],
     "watcher_worker_compatibility": "same-release-required",
-    "post_cutover_smoke_ids": ["finance-source-warning-projection"]
+    "post_cutover_smoke_ids": [
+      "finance-source-warning-projection"
+    ]
   },
   "descriptor_artifact": {
     "name": "labor_union_2026_08_15_wp90_finance_source_warning_v1.descriptors.json",
     "relative_path": "db/migration_releases/labor_union_2026_08_15_wp90_finance_source_warning_v1.descriptors.json",
-    "sha256": "8405d75083ef49f3966bc0f0305be9c491f916d4c243176eb8508e1f3132be4b",
+    "sha256": "68ffdaae2e34dd1d382b1e65a704d6dec0ea640f1db138621e98d6df1dd56bc8",
     "dependencies": []
   },
   "tool_archive_policy": {
     "artifact_hash_algorithm": "sha256",
     "backup_archive_policy": "permanent-release-archive",
     "journal_archive_policy": "append-only-per-operation",
-    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
     "receipt_archive_policy": "permanent-release-archive",
     "restore_required_mode": "new-absent-candidate-only"
   }

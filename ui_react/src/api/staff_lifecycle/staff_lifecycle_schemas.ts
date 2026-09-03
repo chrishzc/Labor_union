@@ -43,7 +43,7 @@ export const StaffLifecycleViewSchema = z
     state: StaffLifecycleStateSchema,
     version: z.number().int().nonnegative(),
     effective_at: StaffLifecycleAwareDateTimeSchema.nullable().optional(),
-    masked_reason_code: z.string().nullable().optional(),
+    reason_code: z.string().nullable().optional(),
   });
 
 export const StaffLifecyclePreviewSchema = z
@@ -52,7 +52,7 @@ export const StaffLifecyclePreviewSchema = z
     state: StaffLifecycleStateSchema,
     version: z.number().int().nonnegative(),
     effective_at: StaffLifecycleAwareDateTimeSchema.nullable().optional(),
-    masked_reason_code: z.string().nullable().optional(),
+    reason_code: z.string().nullable().optional(),
     after_state: StaffLifecycleStateSchema,
     preview_fingerprint: StaffLifecycleFingerprintSchema,
   });

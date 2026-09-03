@@ -85,7 +85,7 @@ class _Repository:
         return {
             "ticket": {
                 "ticket_id": ticket_id,
-                "line_user_id_masked": "U-te…y-51",
+                "line_user_id": "U-te…y-51",
                 "category": self.ticket.category.value,
                 "status": self.ticket.status.value,
                 "version": self.ticket.version,

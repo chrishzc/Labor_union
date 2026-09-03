@@ -1,6 +1,6 @@
 /**
  * File: weekly_operations_report_query_client.ts
- * Description: 以 fresh Session 查詢自選期間的營運報表，驗證期間、遮罩、分區與 server aggregate。
+ * Description: 以 fresh Session 查詢自選期間的營運報表，驗證期間、分區與 server aggregate。
  */
 import { sessionClient } from '../auth/session_client';
 import { transport } from '../shared/transport';
@@ -31,9 +31,6 @@ export function validateOperationsReportDateRange(startDate: string, endDate: st
   }
 }
 
-function isMasked(value: string): boolean {
-  return value === '—' || value.includes('*');
-}
 
 function assertWeeklyView(view: WeeklyOperationsReport, startDate: string, endDate: string): WeeklyOperationsReport {
   if (view.period.start_date !== startDate || view.period.end_date !== endDate) {
@@ -63,13 +60,7 @@ function assertWeeklyView(view: WeeklyOperationsReport, startDate: string, endDa
       throw new WeeklyOperationsReportError('WEEKLY_REPORT_AGGREGATE_MISMATCH', '補助 partition aggregate 不一致。');
     }
   }
-  if (view.case_rows.some((row) => !isMasked(row.applicant_name_masked))) {
-    throw new WeeklyOperationsReportError('WEEKLY_REPORT_PII_NOT_MASKED', '案件受理資料包含未遮罩姓名。');
-  }
   for (const row of view.service_rows) {
-    if (!isMasked(row.client_name_masked) || !isMasked(row.staff_name_masked)) {
-      throw new WeeklyOperationsReportError('WEEKLY_REPORT_PII_NOT_MASKED', '服務工時資料包含未遮罩姓名。');
-    }
     if (row.period_start_date !== view.period.start_date || row.period_end_date !== view.period.end_date) {
       throw new WeeklyOperationsReportError('WEEKLY_REPORT_PERIOD_MISMATCH', '服務工時列的 period 不一致。');
     }

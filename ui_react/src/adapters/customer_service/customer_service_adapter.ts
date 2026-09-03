@@ -25,7 +25,7 @@ export interface CustomerServiceSummaryModel {
 export interface CustomerServiceTicketModel {
   ticketId: number;
   ticketIdText: string;
-  maskedLineUserId: string;
+  lineUserId: string;
   category: CustomerServiceCategory;
   categoryLabel: string;
   status: CustomerServiceStatus;
@@ -159,7 +159,7 @@ export function adaptCustomerServiceTicket(
   return {
     ticketId: ticket.ticket_id,
     ticketIdText: String(ticket.ticket_id),
-    maskedLineUserId: ticket.line_user_id_masked,
+    lineUserId: ticket.line_user_id,
     category: ticket.category,
     categoryLabel: customerServiceCategoryLabel(ticket.category),
     status: ticket.status,

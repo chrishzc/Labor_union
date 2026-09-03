@@ -1,6 +1,6 @@
 /**
  * File: weekly_operations_report_client.test.ts
- * Description: 驗證營運週報 GET、週一起日、strict 解碼、aggregate、PII 與完整 XLSX 匯出邊界。
+ * Description: 驗證營運週報 GET、週一起日、strict 解碼、aggregate、canonical PII 與完整 XLSX 匯出邊界。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
@@ -54,7 +54,7 @@ describe('weekly operations report clients', () => {
     expect(() => validateOperationsReportDateRange('2026-12-31', '2027-01-02')).not.toThrow();
   });
 
-  it('拒絕 aggregate 漂移、未遮罩姓名與 unknown 欄位', async () => {
+  it('接受 canonical 原始姓名，仍拒絕 aggregate 漂移與 unknown 欄位', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(jsonResponse({
         ...WEEKLY_OPERATIONS_RESPONSE,
@@ -64,7 +64,7 @@ describe('weekly operations report clients', () => {
         ...WEEKLY_OPERATIONS_RESPONSE,
         data: {
           ...WEEKLY_OPERATIONS_REPORT,
-          case_rows: [{ ...WEEKLY_OPERATIONS_REPORT.case_rows[0], applicant_name_masked: '王小明' }, WEEKLY_OPERATIONS_REPORT.case_rows[1]],
+          case_rows: [{ ...WEEKLY_OPERATIONS_REPORT.case_rows[0], applicant_name: '王小明' }, WEEKLY_OPERATIONS_REPORT.case_rows[1]],
         },
       }))
       .mockResolvedValueOnce(jsonResponse({
@@ -73,7 +73,7 @@ describe('weekly operations report clients', () => {
       }));
 
     await expect(weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26')).rejects.toThrow('aggregate');
-    await expect(weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26')).rejects.toThrow('未遮罩');
+    await expect(weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26')).resolves.toBeDefined();
     await expect(weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26')).rejects.toThrow('結構異常');
   });
 

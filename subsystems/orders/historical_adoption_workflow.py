@@ -44,7 +44,7 @@ class HistoricalPairingResolution(StrEnum):
 @dataclass(frozen=True, slots=True)
 class HistoricalPairingCandidate:
     ordinal: int
-    masked_name: str
+    name: str
     staff_id: int | None
     start_date: object | None
     end_date: object | None
@@ -294,16 +294,16 @@ class HistoricalOrderAdoptionWorkflow:
         candidate,
         for_update,
     ):
-        masked = _mask_name(source.name)
+        canonical_name = _canonical_name(source.name)
         if not source.name:
-            return HistoricalPairingCandidate(source.ordinal, masked, None, source.start_date, source.end_date, HistoricalPairingResolution.BLANK, ())
+            return HistoricalPairingCandidate(source.ordinal, canonical_name, None, source.start_date, source.end_date, HistoricalPairingResolution.BLANK, ())
         staff_ids = self._repository.resolve_staff(source.name, for_update=for_update)
         if not staff_ids:
-            return _pairing_issue(source, masked, HistoricalPairingResolution.STAFF_MISSING, "historical_staff_not_found")
+            return _pairing_issue(source, canonical_name, HistoricalPairingResolution.STAFF_MISSING, "historical_staff_not_found")
         if len(staff_ids) != 1:
-            return _pairing_issue(source, masked, HistoricalPairingResolution.STAFF_AMBIGUOUS, "historical_staff_ambiguous")
+            return _pairing_issue(source, canonical_name, HistoricalPairingResolution.STAFF_AMBIGUOUS, "historical_staff_ambiguous")
         if source.issue_codes:
-            return HistoricalPairingCandidate(source.ordinal, masked, staff_ids[0], source.start_date, source.end_date, HistoricalPairingResolution.EVIDENCE_ONLY, source.issue_codes)
+            return HistoricalPairingCandidate(source.ordinal, canonical_name, staff_ids[0], source.start_date, source.end_date, HistoricalPairingResolution.EVIDENCE_ONLY, source.issue_codes)
         if (
             candidate.result
             in {
@@ -317,7 +317,7 @@ class HistoricalOrderAdoptionWorkflow:
             if matching is not None:
                 return HistoricalPairingCandidate(
                     source.ordinal,
-                    masked,
+                    canonical_name,
                     staff_ids[0],
                     source.start_date,
                     source.end_date,
@@ -327,7 +327,7 @@ class HistoricalOrderAdoptionWorkflow:
                 )
             return HistoricalPairingCandidate(
                 source.ordinal,
-                masked,
+                canonical_name,
                 staff_ids[0],
                 source.start_date,
                 source.end_date,
@@ -336,7 +336,7 @@ class HistoricalOrderAdoptionWorkflow:
             )
         return HistoricalPairingCandidate(
             source.ordinal,
-            masked,
+            canonical_name,
             staff_ids[0],
             source.start_date,
             source.end_date,
@@ -472,10 +472,10 @@ def _unmatched_receipt(preview):
     )
 
 
-def _pairing_issue(source, masked, resolution, issue, staff_id=None):
+def _pairing_issue(source, canonical_name, resolution, issue, staff_id=None):
     return HistoricalPairingCandidate(
         source.ordinal,
-        masked,
+        canonical_name,
         staff_id,
         source.start_date,
         source.end_date,
@@ -503,14 +503,8 @@ def _command_fingerprint(request):
     })
 
 
-def _mask_name(name):
-    text = str(name or "").strip()
-    if not text:
-        return ""
-    if len(text) == 1:
-        return "*"
-    return text[0] + "*" * (len(text) - 1)
-
+def _canonical_name(name):
+    return str(name or "").strip()
 
 def _optional_int(value):
     return None if value is None else int(value)
