@@ -72,9 +72,21 @@ describe('staff case preference summary client', () => {
             other_detail_status: 'source_not_ready',
           },
         },
+      }))
+      .mockResolvedValueOnce(response({
+        ...STAFF_CASE_PREFERENCE_SUMMARY_RESPONSE,
+        data: {
+          ...STAFF_CASE_PREFERENCE_SUMMARY_RESPONSE.data,
+          service_regions: {
+            values: ['北區'],
+            other_detail: null,
+            other_detail_status: 'ready',
+          },
+        },
       }));
     const client = createStaffCasePreferenceSummaryClient();
 
+    await expect(client.query(11)).rejects.toBeInstanceOf(ApiDecodeError);
     await expect(client.query(11)).rejects.toBeInstanceOf(ApiDecodeError);
     await expect(client.query(11)).rejects.toBeInstanceOf(ApiDecodeError);
   });
