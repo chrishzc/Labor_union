@@ -64,6 +64,7 @@ import type {
 import { Drawer } from '../components/Drawer';
 import { ContractExternalSigningActions } from '../components/ContractExternalSigningActions';
 import { ServiceBeforeReplacementActions } from '../components/ServiceBeforeReplacementActions';
+import { OrderIntakeRepairPanel } from '../components/OrderIntakeRepairPanel';
 import { MatchingScheduleAndAssignmentActions } from '../components/MatchingScheduleAndAssignmentActions';
 import { OrderServiceCompletionActions } from '../components/OrderServiceCompletionActions';
 import {
@@ -2852,6 +2853,13 @@ export const OrdersPage: React.FC = () => {
       >
         {(contractOrder || dateConfirmOrder) && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            <OrderIntakeRepairPanel
+              caseNo={(contractOrder || dateConfirmOrder)!.id}
+              orderStatus={(contractOrder || dateConfirmOrder)!.orderStatus}
+              onChanged={fetchOrderSummaries}
+              onHistoricalRestartRequested={() => switchContractTab('calendar')}
+            />
+
             {renderCardProjection()}
 
             <div className="matching-facts-bar">
