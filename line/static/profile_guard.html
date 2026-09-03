@@ -248,11 +248,12 @@ Description: 修改登記資料身分門禁：先以 server 驗證 LINE 客戶�
             const queryBody = await queryRes.json().catch(() => ({}));
 
             if (queryRes.ok && queryBody.data?.client_id) {
-                // 驗證合格，已綁定客戶！
+                // 驗證合格，已綁定客戶！標記通過門禁並放行
+                sessionStorage.setItem("line_profile_guard_passed", "1");
                 showSuccess();
                 setTimeout(() => {
-                    location.href = '/line-profile-update';
-                }, 1000);
+                    location.href = '/line-profile-update?verified=1';
+                }, 800);
             } else if (queryRes.status === 401) {
                 // Token 過期或失效
                 const msg = queryBody.detail?.error?.message || queryBody.detail?.message || 'LINE 登入狀態已過期，請重新登入。';

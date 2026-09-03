@@ -126,6 +126,16 @@ Description: 以 server 驗證的 LIFF token 提出 Client 資料異動申請，
 
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
+    // 檢查是否已通過門禁檢驗；若未經門禁放行，立即重導向至門禁進行身分查驗
+    (function enforceProfileGuard() {
+        const params = new URLSearchParams(window.location.search);
+        const passed = sessionStorage.getItem("line_profile_guard_passed") === "1" || params.get("verified") === "1";
+        if (!passed) {
+            window.location.replace("/line-profile-guard");
+            return;
+        }
+    })();
+
     const fields = [
         ["name", "姓名"], ["gender", "性別"], ["phone", "聯絡電話"], ["city", "縣市"],
         ["address", "地址"], ["residence_type", "居住型態"], ["delivery_type", "生產方式"],

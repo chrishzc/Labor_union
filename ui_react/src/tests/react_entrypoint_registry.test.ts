@@ -63,7 +63,7 @@ describe('React entrypoint registry', () => {
       })),
     };
     render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
-    expect(screen.getByRole('button', { name: 'LIFF 表單 (8)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'LIFF 表單 (9)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Flex 卡片 (4)' })).toBeInTheDocument();
     expect(screen.queryByText(/原始 8 個 LIFF 與 4 個 Flex 功能均保留/)).not.toBeInTheDocument();
     expect(screen.getAllByRole('button')
@@ -72,11 +72,12 @@ describe('React entrypoint registry', () => {
         '1. gateway.html',
         '2. register.html',
         '3. bind.html',
-        '4. profile_update.html',
-        '5. staff_order_search.html',
-        '6. staff_schedule.html',
-        '7. identity.html',
-        '8. mobile_admin.html',
+        '4. profile_guard.html',
+        '5. profile_update.html',
+        '6. staff_order_search.html',
+        '7. staff_schedule.html',
+        '8. identity.html',
+        '9. mobile_admin.html',
       ]);
     expect(screen.queryByText(/15 分鐘.*Token/)).not.toBeInTheDocument();
     expect(screen.queryByText(/demo-token/)).not.toBeInTheDocument();
@@ -111,12 +112,19 @@ describe('React entrypoint registry', () => {
       'https://line-test.example.dev/line-bind',
     );
 
-    fireEvent.click(screen.getByText('4. profile_update.html'));
+    fireEvent.click(screen.getByText('4. profile_guard.html'));
+    expect(screen.getByText('尚未完成工會服務綁定')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
+      'href',
+      'https://line-test.example.dev/line-profile-guard',
+    );
+
+    fireEvent.click(screen.getByText('5. profile_update.html'));
     expect(screen.getByText('修改登記資料申請')).toBeInTheDocument();
     expect(screen.getByText(/正式異動流程已接通後端 API/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
       'href',
-      'https://line-test.example.dev/line-profile-update',
+      'https://line-test.example.dev/line-profile-guard',
     );
   });
 

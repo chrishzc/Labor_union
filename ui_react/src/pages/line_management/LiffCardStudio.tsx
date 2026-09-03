@@ -68,21 +68,33 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     apiMapping: '候選綁定、資料檢查與確認送出已接通',
   },
   {
+    id: 'profile_guard',
+    type: 'liff',
+    title: '4. profile_guard.html',
+    subtitle: '修改登記資料身分門禁（阻擋未綁定用戶）',
+    badge: '身分門禁查驗',
+    endpointUrl: '/line-profile-guard',
+    launchPath: '/line-profile-guard',
+    authLevel: '伺服器端 Token 檢驗 ｜ 阻擋未綁定身分 ｜ 導流服務綁定',
+    description: '修改登記資料前置門禁。先向伺服器驗證 LINE 登入憑證與客戶綁定資格：已綁定者放行進入 profile_update，未綁定者堅決阻擋並導流至服務綁定或需求填寫。',
+    apiMapping: '門禁查驗：/api/v1/line/client-profile/query ＋ 資格放行 / 阻擋導流',
+  },
+  {
     id: 'profile_update',
     type: 'liff',
-    title: '4. profile_update.html',
-    subtitle: '客戶資料與服務異動申請',
+    title: '5. profile_update.html',
+    subtitle: '客戶資料與服務異動申請（經門禁放行）',
     badge: '正式異動申請',
     endpointUrl: '/line-profile-update',
-    launchPath: '/line-profile-update',
+    launchPath: '/line-profile-guard',
     authLevel: '必須驗證 LINE 登入憑證、正式綁定、案件權限與狀態鎖',
-    description: '產婦可查詢目前已登記資料，勾選異動欄位（地址、電話、預產期、寶寶資訊等）並送審。',
+    description: '產婦可查詢目前已登記資料，勾選異動欄位（地址、電話、預產期、寶寶資訊等）並送審。未經門禁放行者自動重導回門禁查驗。',
     apiMapping: '客戶資料異動之查詢、預覽與申請流程已接通',
   },
   {
     id: 'staff_order_search',
     type: 'liff',
-    title: '5. staff_order_search.html',
+    title: '6. staff_order_search.html',
     subtitle: '月嫂安全查單',
     badge: '正式指派資料',
     endpointUrl: '/line-staff-orders',
@@ -94,7 +106,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'staff_schedule',
     type: 'liff',
-    title: '6. staff_schedule.html',
+    title: '7. staff_schedule.html',
     subtitle: '月嫂月曆與不可服務期間',
     badge: '正式排班月曆',
     endpointUrl: '/line-staff-schedule',
@@ -106,7 +118,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'identity',
     type: 'liff',
-    title: '7. identity.html',
+    title: '8. identity.html',
     subtitle: '通用身分認證與服務入口',
     badge: '伺服器已驗證',
     endpointUrl: '/line-identity',
@@ -118,7 +130,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'mobile_admin',
     type: 'liff',
-    title: '8. mobile_admin.html',
+    title: '9. mobile_admin.html',
     subtitle: '手機身分審核中心',
     badge: '檢查後送出',
     endpointUrl: '/line-mobile-admin',
@@ -230,6 +242,27 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <strong>💰 5. 費用與同意條款</strong>
         <label><input type="checkbox" disabled /> 已詳閱退費原則</label>
         <button type="button" className="mock-primary-btn" disabled>預覽登記資料</button>
+      </div>
+    );
+  }
+
+  if (item.id === 'profile_guard') {
+    return (
+      <div className="mock-form-inputs">
+        <div className="mock-step-indicator" style={{ background: '#d9534f', color: '#fff' }}>🛑 身分資格門禁</div>
+        <p style={{ fontWeight: 700, color: '#d9534f', margin: '6px 0 4px' }}>尚未完成工會服務綁定</p>
+        <small style={{ display: 'block', margin: '4px 0 12px', color: '#74593f', lineHeight: 1.5 }}>
+          修改登記資料僅限已在工會完成媒合登記或服務綁定之產婦使用。系統查無此 LINE 帳號之客戶綁定，直接在此阻擋。
+        </small>
+        <button type="button" className="mock-primary-btn" disabled style={{ marginBottom: '8px' }}>
+          📝 前往服務綁定 (/line-bind)
+        </button>
+        <button type="button" className="mock-primary-btn" disabled style={{ background: '#718096' }}>
+          📋 填寫需求調查表單 (/line-registration)
+        </button>
+        <small style={{ display: 'block', marginTop: '10px', color: '#8d6e63' }}>
+          🔒 伺服器端 Token 檢驗 ｜ 阻擋未綁定身分 ｜ 防竄改架構
+        </small>
       </div>
     );
   }
