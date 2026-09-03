@@ -1,5 +1,6 @@
 name: Issue 101 canonical data cutover
 
+# Trigger the verified #101 cutover against the latest main checkout.
 on:
   push:
     branches: ["main"]
