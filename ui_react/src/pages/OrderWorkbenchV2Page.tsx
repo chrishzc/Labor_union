@@ -12,6 +12,7 @@ import {
 import './OrderWorkbenchV2Page.css';
 import { OrderCandidateContactStatusPanel } from '../components/OrderCandidateContactStatusPanel';
 import { OrderCandidateQueryPanel } from '../components/OrderCandidateQueryPanel';
+import { OrderFormalRecommendationPanel } from '../components/OrderFormalRecommendationPanel';
 import { OrderGovernmentSubsidyLane } from '../components/OrderGovernmentSubsidyLane';
 import { OrderTerminalAggregateLane } from '../components/OrderTerminalAggregateLane';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
@@ -247,7 +248,7 @@ export const OrderWorkbenchV2Page: FC = () => {
             {branchType === 'normal'
               ? `${selectedDefinition.ordinal}. ${selectedDefinition.label}`
               : branchType === 'historical' && selectedHistoricalLifecycle !== null
-                ? `歷史訂單 · ${HISTORICAL_LIFECYCLE_LABELS[selectedHistoricalLifecycle]}`
+                ? `歷史訂單 · ${HISTORICAL_LIFECYCLES[selectedHistoricalLifecycle]}`
                 : coreStageBranchLabel(branchType)}
           </h2>
           <p>
@@ -414,6 +415,9 @@ export const OrderWorkbenchV2Page: FC = () => {
                   || selectedStage === 'caregiver_willingness_reply'
                 ) && (
                   <OrderCandidateContactStatusPanel caseNo={item.id} />
+                )}
+                {branchType === 'normal' && selectedStage === 'formal_recommendation' && (
+                  <OrderFormalRecommendationPanel caseNo={item.id} />
                 )}
                 <button
                   type="button"
