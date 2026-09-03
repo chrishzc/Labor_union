@@ -16,7 +16,7 @@ import { LoginPage } from './pages/LoginPage';
 import { sessionClient } from './api/auth/session_client';
 import { ADMIN_SESSION_UNAUTHORIZED_EVENT } from './api/shared/transport';
 import { OrderTrackerPage } from './pages/OrderTrackerPage';
-import { OrdersPage } from './pages/OrdersPage';
+import { OrdersManagementPage } from './pages/OrdersManagementPage';
 import { SchedulingPage } from './pages/SchedulingPage';
 import { StaffPage } from './pages/StaffPage';
 import { DataImportPage } from './pages/DataImportPage';
@@ -148,7 +148,7 @@ export const App: React.FC = () => {
       >
         {/* Operations Section */}
         {currentPage === 'order-tracker' && <OrderTrackerPage />}
-        {currentPage === 'orders' && <OrdersPage />}
+        {currentPage === 'orders' && <OrdersManagementPage />}
         {currentPage === 'scheduling' && <SchedulingPage />}
         {currentPage === 'staff' && <StaffPage />}
         {currentPage === 'data-import' && <DataImportPage initialTab="workbook-import" />}
