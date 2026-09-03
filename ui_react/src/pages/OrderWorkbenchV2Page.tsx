@@ -248,7 +248,7 @@ export const OrderWorkbenchV2Page: FC = () => {
             {branchType === 'normal'
               ? `${selectedDefinition.ordinal}. ${selectedDefinition.label}`
               : branchType === 'historical' && selectedHistoricalLifecycle !== null
-                ? `歷史訂單 · ${HISTORICAL_LIFECYCLES[selectedHistoricalLifecycle]}`
+                ? `歷史訂單 · ${HISTORICAL_LIFECYCLE_LABELS[selectedHistoricalLifecycle]}`
                 : coreStageBranchLabel(branchType)}
           </h2>
           <p>
