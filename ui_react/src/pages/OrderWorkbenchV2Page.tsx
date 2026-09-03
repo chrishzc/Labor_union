@@ -10,6 +10,7 @@ import {
   type FC,
 } from 'react';
 import './OrderWorkbenchV2Page.css';
+import { OrderAssignmentPlanPanel } from '../components/OrderAssignmentPlanPanel';
 import { OrderCandidateContactStatusPanel } from '../components/OrderCandidateContactStatusPanel';
 import { OrderCandidateQueryPanel } from '../components/OrderCandidateQueryPanel';
 import { OrderCaregiverContractPanel } from '../components/OrderCaregiverContractPanel';
@@ -433,6 +434,9 @@ export const OrderWorkbenchV2Page: FC = () => {
                     caseNo={item.id}
                     onObserved={() => setProjectionRefreshKey((current) => current + 1)}
                   />
+                )}
+                {branchType === 'normal' && selectedStage === 'formal_service' && (
+                  <OrderAssignmentPlanPanel caseNo={item.id} />
                 )}
                 <button
                   type="button"
