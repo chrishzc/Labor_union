@@ -4,11 +4,20 @@ import { OrderCandidateQueryPanel } from '../components/OrderCandidateQueryPanel
 
 const mocks = vi.hoisted(() => ({
   searchSegmentedCaregivers: vi.fn(),
+  addCandidates: vi.fn(),
+  sendInformation: vi.fn(),
 }));
 
 vi.mock('../api/scheduling/matching_candidate_workflow_client', () => ({
   matchingCandidateWorkflowClient: {
     searchSegmentedCaregivers: mocks.searchSegmentedCaregivers,
+  },
+}));
+
+vi.mock('../api/scheduling/candidate_contact_pool_client', () => ({
+  candidateContactPoolClient: {
+    addCandidates: mocks.addCandidates,
+    sendInformation: mocks.sendInformation,
   },
 }));
 
@@ -77,9 +86,9 @@ function availability(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe('待辦看板 Beta 第 2 階正式候選查詢', () => {
+describe('待辦看板 Beta 第 2 階正式候選查詢與候選池寫入', () => {
   beforeEach(() => {
-    mocks.searchSegmentedCaregivers.mockReset();
+    Object.values(mocks).forEach((mock) => mock.mockReset());
   });
 
   it('只顯示 server complete combination 內的正式候選，不把 partial option 冒充合格人選', async () => {
@@ -108,5 +117,23 @@ describe('待辦看板 Beta 第 2 階正式候選查詢', () => {
     expect(await screen.findByText('目前沒有 server 確認的完整候選；不以瀏覽器條件推導人選。')).toBeInTheDocument();
     expect(screen.getByText(/2026-09-01 · 月嫂 #8893 · active_lock/)).toBeInTheDocument();
     expect(screen.queryByText('部分可用月嫂')).not.toBeInTheDocument();
+  });
+
+  it('只把使用者選定的正式候選寫入候選池，且不發送聯絡', async () => {
+    mocks.searchSegmentedCaregivers.mockResolvedValue(availability());
+    mocks.addCandidates.mockResolvedValue({ pool_id: 9, candidate_ids: [17], status: 'recorded' });
+    render(<OrderCandidateQueryPanel caseNo="CASE-CANDIDATE" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '查詢正式候選' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: '選擇正式候選 正式合格月嫂' }));
+    fireEvent.click(screen.getByRole('button', { name: '加入候選池（1）' }));
+
+    await waitFor(() => expect(mocks.addCandidates).toHaveBeenCalledWith('CASE-CANDIDATE', [{
+      staff_id: 8892,
+      start_date: '2026-09-01',
+      end_date: '2026-09-05',
+    }]));
+    expect(mocks.sendInformation).not.toHaveBeenCalled();
+    expect(await screen.findByText('Pool #9 · 新增 1 位候選；本步驟未發送聯絡。')).toBeInTheDocument();
   });
 });
