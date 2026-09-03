@@ -80,6 +80,32 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     expect(mocks.addCandidates).not.toHaveBeenCalled();
   });
 
+  it('只使用既有 recordWillingness 記錄人工意願與原因，不觸發 LINE 或提前做寫入後回讀', async () => {
+    mocks.query.mockResolvedValue(pool());
+    mocks.recordWillingness.mockResolvedValue({ status: 'recorded', event_id: 45 });
+    render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '讀取候選聯絡狀態' }));
+    expect(await screen.findByText('月嫂甲 · 月嫂 #8892')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('人工意願原因（月嫂甲）'), {
+      target: { value: '已電話確認但日期不合' },
+    });
+    expect(screen.getByRole('button', { name: '記錄 月嫂甲 願意' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '記錄 月嫂甲 無意願' }));
+
+    await waitFor(() => expect(mocks.recordWillingness).toHaveBeenCalledWith(
+      'CASE-CONTACT',
+      17,
+      'unwilling',
+      '已電話確認但日期不合',
+    ));
+    expect(await screen.findByText('意願已記錄：recorded · event #45')).toBeInTheDocument();
+    expect(mocks.query).toHaveBeenCalledTimes(1);
+    expect(mocks.sendInformation).not.toHaveBeenCalled();
+    expect(mocks.addCandidates).not.toHaveBeenCalled();
+  });
+
   it('owner query 不可用時顯示阻塞，不用其他來源猜測狀態', async () => {
     mocks.query.mockRejectedValue(new Error('candidate pool unavailable'));
     render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
