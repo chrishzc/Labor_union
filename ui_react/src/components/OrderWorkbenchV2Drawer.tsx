@@ -17,6 +17,7 @@ import type {
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { AssignmentPlan, OrderDetail, OrderTerms } from '../api/orders/order_query_schemas';
 import { coreStageSubstatusLabel } from '../adapters/orders/order_core_stage_projection_adapter';
+import { OrderServiceCompletionActions } from './OrderServiceCompletionActions';
 import { OrderTermsMutationPanel } from './OrderTermsMutationPanel';
 
 interface OrderWorkbenchV2DrawerProps {
@@ -81,6 +82,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   onClose,
 }) => {
   const requestSequence = useRef(0);
+  const [refreshRevision, setRefreshRevision] = useState(0);
   const [timeline, setTimeline] = useState<ReadState<OrderCoreStageTimeline>>(loading);
   const [detail, setDetail] = useState<ReadState<OrderDetail>>(loading);
   const [terms, setTerms] = useState<ReadState<OrderTerms>>(loading);
@@ -146,7 +148,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       controller.abort();
       if (requestSequence.current === requestId) requestSequence.current += 1;
     };
-  }, [branchType, caseNo]);
+  }, [branchType, caseNo, refreshRevision]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
@@ -253,6 +255,14 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               </div>
             )}
           </section>
+
+          {branchType === 'normal' && detail.status === 'ready' && (
+            <OrderServiceCompletionActions
+              caseNo={caseNo}
+              orderStatus={detail.data.order_status}
+              onCompleted={() => setRefreshRevision((revision) => revision + 1)}
+            />
+          )}
 
           {branchType === 'historical' && (
             <section className="order-v2-drawer-section" aria-labelledby="order-v2-historical-owner-heading">
