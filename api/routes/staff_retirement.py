@@ -118,6 +118,27 @@ def _canonical_reason_code(reason_code: str | None) -> str | None:
     value = str(reason_code).strip()
     return value or None
 
+
+_LINE_NOT_FOUND_CODES = frozenset({
+    "line_identity_binding_not_found",
+})
+_LINE_IDEMPOTENCY_CODES = frozenset({
+    "line_identity_revocation_idempotency_conflict",
+})
+_LINE_DOMAIN_BLOCKED_CODES = frozenset({
+    "line_identity_binding_not_bound",
+    "line_identity_default_menu_not_published",
+    "line_identity_revocation_in_progress",
+    "line_identity_staff_retirement_revocation_blocked",
+    "line_identity_revocation_not_retryable",
+    "line_identity_manual_completion_forbidden",
+})
+_LINE_CONFLICT_CODES = frozenset({
+    "line_identity_binding_version_conflict",
+    "line_identity_owner_projection_conflict",
+})
+
+
 def _raise_line_effect_error(error: Exception, correlation: CorrelationId) -> None:
     if str(error) not in (
         _LINE_NOT_FOUND_CODES
