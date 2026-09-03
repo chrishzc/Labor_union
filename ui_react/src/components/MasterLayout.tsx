@@ -24,6 +24,7 @@ export type PageType =
   | 'line-liff-studio'
   | 'line-security'
   | 'finance'
+  | 'historical-service-accounting'
   | 'anomalies'
   | 'data-browser'
   | 'account-management'
@@ -44,6 +45,7 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'line-security': 'line',
 
   'finance': 'finance',
+  'historical-service-accounting': 'finance',
 
   'anomalies': 'audit',
   'data-browser': 'operations',
@@ -76,6 +78,7 @@ export const NAV_ITEMS: NavItem[] = [
 
   // Finance Section
   { id: 'finance', icon: '💰', label: '帳務中心', section: 'finance' },
+  { id: 'historical-service-accounting', icon: '🧮', label: '歷史服務天數', section: 'finance' },
 
   // Audit & System Section
   { id: 'anomalies', icon: '⚠️', label: '異常審核', section: 'audit' },
