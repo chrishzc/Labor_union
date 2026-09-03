@@ -424,7 +424,7 @@ def _safe_display_snapshot(
     if unknown - _private_navigation_fields(definition_code):
         raise ValueError("anomaly_projection_data_integrity_violation")
     return AnomalyDisplaySnapshotView(
-        redaction_version="canonical.v1",
+        redaction_version="anomaly-safe.v1",
         definition_code=definition_code,
         fields=[
             _evidence_payload(key, public_snapshot[key]) for key in display_fields
@@ -518,7 +518,11 @@ def _identity(value: object) -> str:
 
 
 def _canonical_text_evidence(value: object) -> str:
-    return str(value or "").strip() or "—"
+    text = _text(value)
+    if "*" in text:
+        return text
+    return f"{text[:1]}***"
+
 
 def _date_value(value: object) -> str:
     if not isinstance(value, str):
