@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "e42be1fcb6e835e868bf45c135320045f55442c00d741610bb6e40a0451d58f8",
+  "active_artifacts_sha256": "d56eab3f7cb6b81174ef039c7dad829d7d891f4a4ecde696cafcefa90b964747",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -211,7 +211,7 @@
       "terminal_schema_evidence": "fresh assembly uses canonical part 169 and omits the bridge",
       "data_effect": "preserve upgrade keeps the additive bridge for older local schemas only",
       "replay": "release manifest replays part 190 only during preserve-data candidate upgrade",
-      "rollback": "retain source dump and discard the candidate before same-name replacement",
+      "rollback": "retain source dump and discard candidate before same-name replacement",
       "unresolved_policy": "partial or drift owned metadata blocks candidate apply"
     },
     "db/schema_parts/1025_task96_government_subsidy_return_excess_recovery.sql": {
