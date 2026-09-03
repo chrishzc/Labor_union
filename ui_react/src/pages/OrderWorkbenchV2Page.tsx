@@ -10,6 +10,7 @@ import {
   type FC,
 } from 'react';
 import './OrderWorkbenchV2Page.css';
+import { OrderCandidateQueryPanel } from '../components/OrderCandidateQueryPanel';
 import { OrderGovernmentSubsidyLane } from '../components/OrderGovernmentSubsidyLane';
 import { OrderTerminalAggregateLane } from '../components/OrderTerminalAggregateLane';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
@@ -398,6 +399,9 @@ export const OrderWorkbenchV2Page: FC = () => {
                 )}
                 {stage?.availability_reason && (
                   <div className="order-v2-technical">projection：{stage.availability_reason}</div>
+                )}
+                {branchType === 'normal' && selectedStage === 'matching_pool' && (
+                  <OrderCandidateQueryPanel caseNo={item.id} />
                 )}
                 <button
                   type="button"
