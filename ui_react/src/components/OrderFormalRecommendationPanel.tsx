@@ -7,6 +7,10 @@ import {
   matchingCandidateWorkflowClient,
   type FormalMatchingPlan,
 } from '../api/scheduling/matching_candidate_workflow_client';
+import {
+  matchingPlanCommunicationClient,
+  type FormalPlanContactState,
+} from '../api/scheduling/matching_plan_communication_client';
 
 interface OrderFormalRecommendationPanelProps {
   caseNo: string;
@@ -24,6 +28,12 @@ type CreateState =
   | { status: 'success'; plan: FormalMatchingPlan }
   | { status: 'error'; message: string };
 
+type ResumeStatusState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'ready'; data: FormalPlanContactState }
+  | { status: 'error'; message: string };
+
 type CandidateContact = CandidateContactPool['candidates'][number];
 
 function errorMessage(error: unknown): string {
@@ -39,12 +49,33 @@ function canCreatePlan(candidate: CandidateContact): boolean {
 export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelProps> = ({ caseNo }) => {
   const [readState, setReadState] = useState<ReadState>({ status: 'idle' });
   const [createStates, setCreateStates] = useState<Record<number, CreateState>>({});
+  const [resumeStatusStates, setResumeStatusStates] = useState<Record<number, ResumeStatusState>>({});
 
   const loadCandidates = () => {
     setReadState({ status: 'loading' });
     void candidateContactPoolClient.query(caseNo)
       .then((data) => setReadState({ status: 'ready', data }))
       .catch((error) => setReadState({ status: 'error', message: errorMessage(error) }));
+  };
+
+  const loadResumeStatus = (plan: FormalMatchingPlan) => {
+    setResumeStatusStates((current) => ({
+      ...current,
+      [plan.plan_id]: { status: 'loading' },
+    }));
+    void matchingPlanCommunicationClient.queryContactState(caseNo, plan.plan_id)
+      .then((data) => {
+        setResumeStatusStates((current) => ({
+          ...current,
+          [plan.plan_id]: { status: 'ready', data },
+        }));
+      })
+      .catch((error) => {
+        setResumeStatusStates((current) => ({
+          ...current,
+          [plan.plan_id]: { status: 'error', message: errorMessage(error) },
+        }));
+      });
   };
 
   const createPlan = (candidate: CandidateContact) => {
@@ -63,6 +94,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
           ...current,
           [candidate.id]: { status: 'success', plan },
         }));
+        loadResumeStatus(plan);
       })
       .catch((error) => {
         setCreateStates((current) => ({
@@ -102,6 +134,9 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
           {readState.data.candidates.map((candidate) => {
             const createState = createStates[candidate.id] ?? { status: 'idle' as const };
             const eligible = canCreatePlan(candidate);
+            const resumeStatusState = createState.status === 'success'
+              ? resumeStatusStates[createState.plan.plan_id] ?? { status: 'idle' as const }
+              : { status: 'idle' as const };
             return (
               <div key={candidate.id}>
                 <dt>{candidate.staff_name} · 月嫂 #{candidate.staff_id}</dt>
@@ -122,7 +157,29 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
                   <p role="note">不可建立方案：僅 active 且 willing 的 owner candidate 可送入既有正式 route。</p>
                 )}
                 {createState.status === 'success' && (
-                  <p role="status">正式媒合方案已建立：#{createState.plan.plan_id} · {createState.plan.result}</p>
+                  <>
+                    <p role="status">正式媒合方案已建立：#{createState.plan.plan_id} · {createState.plan.result}</p>
+                    <div className="order-v2-case-meta" aria-label={`方案 ${createState.plan.plan_id} 履歷推薦送達狀態`}>
+                      <strong>履歷推薦送達狀態</strong>
+                      {resumeStatusState.status === 'idle' && <span>尚未讀取</span>}
+                      {resumeStatusState.status === 'loading' && <span>讀取中…</span>}
+                      {resumeStatusState.status === 'ready' && (
+                        <span>{resumeStatusState.data.customer_profiles_status ?? '尚未有履歷送達根事實'}</span>
+                      )}
+                      {resumeStatusState.status === 'error' && (
+                        <span role="alert">{resumeStatusState.message}</span>
+                      )}
+                      <button
+                        type="button"
+                        className="order-v2-open-drawer"
+                        aria-label={`重新讀取方案 ${createState.plan.plan_id} 履歷推薦送達狀態`}
+                        disabled={resumeStatusState.status === 'loading'}
+                        onClick={() => loadResumeStatus(createState.plan)}
+                      >
+                        重新讀取履歷推薦狀態
+                      </button>
+                    </div>
+                  </>
                 )}
                 {createState.status === 'error' && (
                   <p className="order-v2-drawer-error" role="alert">{createState.message}</p>
