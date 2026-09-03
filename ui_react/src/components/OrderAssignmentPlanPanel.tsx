@@ -1,6 +1,7 @@
 import { useState, type FC } from 'react';
 import type { AssignmentPlan } from '../api/orders/order_query_schemas';
 import { ordersQueryClient } from '../api/orders/order_query_client';
+import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActions';
 
 interface OrderAssignmentPlanPanelProps {
   caseNo: string;
@@ -20,6 +21,7 @@ function errorMessage(error: unknown): string {
 
 export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ caseNo }) => {
   const [state, setState] = useState<ReadState>({ status: 'idle' });
+  const [replacementOpen, setReplacementOpen] = useState(false);
 
   const load = async () => {
     setState({ status: 'loading' });
@@ -46,6 +48,25 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
       >
         {state.status === 'loading' ? '讀取正式指派與排班中…' : '讀取正式指派與排班'}
       </button>
+
+      <button
+        type="button"
+        className="order-v2-open-drawer"
+        aria-expanded={replacementOpen}
+        onClick={() => setReplacementOpen((current) => !current)}
+      >
+        {replacementOpen ? '收合服務前更換月嫂' : '服務前更換月嫂'}
+      </button>
+
+      {replacementOpen && (
+        <ServiceBeforeReplacementActions
+          caseNo={caseNo}
+          onCommitted={() => load()}
+          onSubstitutionReferral={() => {
+            window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`;
+          }}
+        />
+      )}
 
       {state.status === 'error' && <p role="alert">{state.message}</p>}
 
