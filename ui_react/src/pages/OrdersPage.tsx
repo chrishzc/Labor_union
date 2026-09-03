@@ -330,7 +330,6 @@ export const OrdersPage: React.FC = () => {
     precisionRequestRef.current += 1;
   }, []);
 
-  // Load summaries from live API
   const fetchOrderSummaries = useCallback(async () => {
     summaryControllerRef.current?.abort();
     const controller = new AbortController();
@@ -625,6 +624,9 @@ export const OrdersPage: React.FC = () => {
     && serviceDatesDraft?.queryView !== null
     && serviceDatesDraft?.queryView !== undefined
     && serviceDatesDraft.selectedDates.length === serviceDatesDraft.queryView.contracted_service_days;
+  const hasFormalAssignment = (cardProjection?.assignmentSegments.length ?? 0) > 0;
+  const serviceHasStarted = actualStartQuery?.current_actual_start_date !== null
+    && actualStartQuery?.current_actual_start_date !== undefined;
   const reopenLocked =
     reopenDraft?.status === 'apply_pending' ||
     reopenDraft?.status === 'outcome_unknown' ||
@@ -1395,7 +1397,7 @@ export const OrdersPage: React.FC = () => {
     } finally {
       if (requestId === precisionRequestRef.current) setPrecisionCalculating(false);
     }
-  };
+  }
 
   const runSchedulePrecision = (
     nextHolidayRestDates = holidayRestDates,
@@ -1654,7 +1656,7 @@ export const OrdersPage: React.FC = () => {
       setHistoricalRestartMessage(
         receipt.replayed
           ? '此案件已回到正常流程，已讀取原收據。'
-          : '已回到正常「訂單成立」；請依下方原流程重新精算並確認正式服務日期。',
+          : '已回到正常「訂單成立」；請依下方正常日期流程設定並確認正式服務日期。',
       );
       await fetchOrderSummaries();
       loadCardProjection(order.id);
@@ -3286,7 +3288,7 @@ export const OrdersPage: React.FC = () => {
                   >
                     <h3 style={{ margin: 0, color: '#9a3412', fontSize: '1.05rem' }}>歷史訂單：重啟正常流程</h3>
                     <p style={{ margin: '8px 0 14px', color: '#7c2d12', fontSize: '0.88rem', lineHeight: 1.6 }}>
-                      重啟後，案件會回到正常「訂單成立」。歷史來源紀錄仍會保留，但目前的實際起訖、正式服務日與排班會撤銷；接著請使用本頁原有流程重新精算、確認服務日期、媒合排班及登錄實際開工。
+                      重啟後，案件會回到正常「訂單成立」。歷史來源紀錄仍會保留，但目前的實際起訖、正式服務日與排班會撤銷；接著請使用本頁原有流程設定並確認服務日期、媒合排班及登錄實際開工。
                     </p>
                     <button
                       type="button"
@@ -3324,7 +3326,7 @@ export const OrdersPage: React.FC = () => {
                           <span>已確認日期：{serviceDatesDraft.queryView.current_dates.length > 0 ? serviceDatesDraft.queryView.current_dates.join(', ') : '無'}</span>
                         </div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '14px', alignItems: 'flex-end', marginBottom: '14px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', alignItems: 'flex-end', marginBottom: '14px' }}>
                           <div>
                             <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#57423b', marginBottom: '4px' }}>
                               實際開工基準：
@@ -3341,15 +3343,6 @@ export const OrdersPage: React.FC = () => {
                               {precisionMode}
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            className="btn-primary-action"
-                            disabled={serviceDatesLocked || precisionCalculating}
-                            onClick={() => rerunSchedulePrecision()}
-                            style={{ padding: '9px 20px', fontSize: '0.88rem' }}
-                          >
-                            {precisionCalculating ? '精算中…' : '🧮 重新依工會規則精算'}
-                          </button>
                         </div>
 
                         {precisionResult && (
@@ -3378,17 +3371,11 @@ export const OrdersPage: React.FC = () => {
                         )}
                       </div>
 
-                      {precisionResult && (
+                      {precisionResult && precisionResult.national_holidays_found.length > 0 && (
                         <div style={{ backgroundColor: '#fff8f6', border: '1px solid #fed9b8', borderRadius: '12px', padding: '14px 18px', marginBottom: '18px' }}>
                           <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#9a3412', marginBottom: '6px' }}>
-                            工會排休與出勤精算依據：
+                            國定假日休假設定
                           </div>
-                          <ul style={{ margin: 0, paddingLeft: '20px', color: '#57423b', fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <li><strong>排休服務模式</strong>：依「{precisionMode}」規則自動計算出勤與休假（排休共計 {precisionResult.rest_days_count} 天）。</li>
-                            <li><strong>國定假日／補假</strong>：系統自動比對行政院人事行政總處行事曆（偵測到 {precisionResult.national_holidays_found.length} 天國定假日）。</li>
-                            <li><strong>事前請假日</strong>：依月嫂與產婦雙方約定排除（已設定 {leaveDates.length} 天）。</li>
-                            <li><strong>目標達成保證</strong>：系統自動順延至滿足合約 {precisionResult.target_service_days} 天實質出勤為止。</li>
-                          </ul>
                           {precisionResult.national_holidays_found.map((holiday) => {
                             const restsOnHoliday = holidayRestDates.includes(holiday.date);
                             return (
@@ -3520,7 +3507,7 @@ export const OrdersPage: React.FC = () => {
                             disabled={serviceDatesLocked || precisionCalculating || !serviceDatesSelectionReady}
                             onClick={() => (contractOrder || dateConfirmOrder) && previewServiceDates((contractOrder || dateConfirmOrder)!.id)}
                           >
-                            {serviceDatesDraft?.status === 'preview_loading' ? '正在精算服務週次…' : '🔍 檢查服務週次影響'}
+                            {serviceDatesDraft?.status === 'preview_loading' ? '正在確認服務日期…' : '確認服務日期'}
                           </button>
 
                           {serviceDatesDraft?.previewView && (
@@ -3607,26 +3594,28 @@ export const OrdersPage: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="leave-substitution-entry">
-                        <div>
-                          <strong>已有正式排班：處理請假／代班</strong>
-                          <p>
-                            未正式指派時只做上方事前排休；正式指派後請在代班工作台選同日指定代班，或讓原月嫂後續順延。
-                          </p>
+                      {hasFormalAssignment && (
+                        <div className="leave-substitution-entry">
+                          <div>
+                            <strong>已有正式排班：處理請假／代班</strong>
+                            <p>
+                              未正式指派時只做上方事前排休；正式指派後請在代班工作台選同日指定代班，或讓原月嫂後續順延。
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-secondary-action"
+                            onClick={() => {
+                              const caseNo = (contractOrder || dateConfirmOrder)?.id;
+                              if (caseNo) {
+                                window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`;
+                              }
+                            }}
+                          >
+                            前往請假／代班工作台
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          className="btn-secondary-action"
-                          onClick={() => {
-                            const caseNo = (contractOrder || dateConfirmOrder)?.id;
-                            if (caseNo) {
-                              window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`;
-                            }
-                          }}
-                        >
-                          前往請假／代班工作台
-                        </button>
-                      </div>
+                      )}
                     </>
                   )}
                   {!serviceDatesDraft?.queryView && (
@@ -3644,81 +3633,83 @@ export const OrdersPage: React.FC = () => {
                   )}
                 </section>
 
-                <div className="calendar-workbench-card" style={{ marginTop: '16px' }}>
-                  <div className="calendar-card-header">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span className="calendar-badge actual">實際開工</span>
-                      <h4 className="calendar-card-title">實際開工日更正與動態排盤</h4>
+                {serviceHasStarted && (
+                  <div className="calendar-workbench-card" style={{ marginTop: '16px' }}>
+                    <div className="calendar-card-header">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span className="calendar-badge actual">實際開工</span>
+                        <h4 className="calendar-card-title">實際開工日更正與動態排盤</h4>
+                      </div>
                     </div>
-                  </div>
 
-                  <div>
                     <div>
-                      <label style={{ display: 'block', fontWeight: 700, fontSize: '0.85rem' }}>
-                        更正實際服務開始日
-                        <input
-                          type="date"
-                          value={actualStartDraft}
-                          disabled={actualStartLocked}
-                          onChange={(e) => setActualStartDraft(e.target.value)}
-                          style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6' }}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        className="btn-secondary-action"
-                        style={{ marginTop: '10px', width: '100%', padding: '9px' }}
-                        disabled={actualStartLocked || actualStartDraft.trim().length === 0}
-                        onClick={() => void previewActualStart()}
-                      >
-                        {actualStartStatus === 'previewing' ? '正在產生預覽…' : '預覽實際開工日變更'}
-                      </button>
+                      <div>
+                        <label style={{ display: 'block', fontWeight: 700, fontSize: '0.85rem' }}>
+                          更正實際服務開始日
+                          <input
+                            type="date"
+                            value={actualStartDraft}
+                            disabled={actualStartLocked}
+                            onChange={(e) => setActualStartDraft(e.target.value)}
+                            style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6' }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn-secondary-action"
+                          style={{ marginTop: '10px', width: '100%', padding: '9px' }}
+                          disabled={actualStartLocked || actualStartDraft.trim().length === 0}
+                          onClick={() => void previewActualStart()}
+                        >
+                          {actualStartStatus === 'previewing' ? '正在產生預覽…' : '預覽實際開工日變更'}
+                        </button>
+                      </div>
                     </div>
+
+                    {actualStartQuery?.service_data_locked && (
+                      <div role="status" style={{ color: '#92400e', margin: '10px 0', fontSize: '0.84rem' }}>
+                        本案服務資料已鎖定；目前只能查詢，需先依既有解鎖流程處理後才能更正。
+                      </div>
+                    )}
+                    {actualStartPreview && (
+                      <div style={{ backgroundColor: '#fffdfb', border: '1px solid #fed9b8', borderRadius: '12px', padding: '16px', marginTop: '14px' }}>
+                        <strong style={{ color: '#ff7f50', fontSize: '0.92rem' }}>實際開工日影響已確認</strong>
+                        <div style={{ fontSize: '0.86rem', color: '#57423b', marginTop: '6px' }}>日期：{actualStartPreview.before_actual_start_date ?? '尚未登錄'} → {actualStartPreview.after_actual_start_date}</div>
+                        <div style={{ fontSize: '0.86rem', color: '#57423b' }}>預計結束日：{actualStartPreview.actual_end_date}</div>
+                        <div style={{ fontSize: '0.86rem', color: '#57423b' }}>正式服務日：{actualStartPreview.actual_start.official_service_dates.length} 天</div>
+                        <div style={{ fontSize: '0.86rem', color: '#57423b' }}>重建指派：{actualStartPreview.scheduling.assignments.length} 段</div>
+                        <label style={{ display: 'block', marginTop: '10px', fontWeight: 700, fontSize: '0.84rem' }}>
+                          套用原因（稽核必填）
+                          <textarea
+                            rows={2}
+                            maxLength={500}
+                            value={actualStartReason}
+                            disabled={actualStartLocked}
+                            onChange={(e) => setActualStartReason(e.target.value)}
+                            style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6' }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn-primary-action"
+                          style={{ marginTop: '10px', width: '100%', padding: '11px', background: '#c2410c' }}
+                          disabled={actualStartLocked || actualStartReason.trim().length === 0}
+                          onClick={() => void applyActualStart()}
+                        >
+                          {actualStartStatus === 'applying' ? '實際開工日套用中…' : '確認套用實際開工日'}
+                        </button>
+                      </div>
+                    )}
+                    {actualStartReceipt && (
+                      <div role="status" style={{ color: '#166534', fontWeight: 700, marginTop: '10px', fontSize: '0.86rem' }}>
+                        實際開工日已套用（{actualStartReceipt.official_service_day_count} 個正式服務日）
+                      </div>
+                    )}
+                    {actualStartError && <div role="alert" style={{ color: '#b91c1c', marginTop: '10px', fontSize: '0.85rem' }}>{actualStartError}</div>}
                   </div>
+                )}
 
-                  {actualStartQuery?.service_data_locked && (
-                    <div role="status" style={{ color: '#92400e', margin: '10px 0', fontSize: '0.84rem' }}>
-                      本案服務資料已鎖定；目前只能查詢，需先依既有解鎖流程處理後才能更正。
-                    </div>
-                  )}
-                  {actualStartPreview && (
-                    <div style={{ backgroundColor: '#fffdfb', border: '1px solid #fed9b8', borderRadius: '12px', padding: '16px', marginTop: '14px' }}>
-                      <strong style={{ color: '#ff7f50', fontSize: '0.92rem' }}>實際開工日影響已確認</strong>
-                      <div style={{ fontSize: '0.86rem', color: '#57423b', marginTop: '6px' }}>日期：{actualStartPreview.before_actual_start_date ?? '尚未登錄'} → {actualStartPreview.after_actual_start_date}</div>
-                      <div style={{ fontSize: '0.86rem', color: '#57423b' }}>預計結束日：{actualStartPreview.actual_end_date}</div>
-                      <div style={{ fontSize: '0.86rem', color: '#57423b' }}>正式服務日：{actualStartPreview.actual_start.official_service_dates.length} 天</div>
-                      <div style={{ fontSize: '0.86rem', color: '#57423b' }}>重建指派：{actualStartPreview.scheduling.assignments.length} 段</div>
-                      <label style={{ display: 'block', marginTop: '10px', fontWeight: 700, fontSize: '0.84rem' }}>
-                        套用原因（稽核必填）
-                        <textarea
-                          rows={2}
-                          maxLength={500}
-                          value={actualStartReason}
-                          disabled={actualStartLocked}
-                          onChange={(e) => setActualStartReason(e.target.value)}
-                          style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6' }}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        className="btn-primary-action"
-                        style={{ marginTop: '10px', width: '100%', padding: '11px', background: '#c2410c' }}
-                        disabled={actualStartLocked || actualStartReason.trim().length === 0}
-                        onClick={() => void applyActualStart()}
-                      >
-                        {actualStartStatus === 'applying' ? '實際開工日套用中…' : '確認套用實際開工日'}
-                      </button>
-                    </div>
-                  )}
-                  {actualStartReceipt && (
-                    <div role="status" style={{ color: '#166534', fontWeight: 700, marginTop: '10px', fontSize: '0.86rem' }}>
-                      實際開工日已套用（{actualStartReceipt.official_service_day_count} 個正式服務日）
-                    </div>
-                  )}
-                  {actualStartError && <div role="alert" style={{ color: '#b91c1c', marginTop: '10px', fontSize: '0.85rem' }}>{actualStartError}</div>}
-                </div>
-
-                {(contractOrder || dateConfirmOrder) && (
+                {serviceHasStarted && (contractOrder || dateConfirmOrder) && (
                   <OrderServiceCompletionActions
                     caseNo={(contractOrder || dateConfirmOrder)!.id}
                     orderStatus={(contractOrder || dateConfirmOrder)!.orderStatus}
