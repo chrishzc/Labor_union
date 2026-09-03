@@ -20,7 +20,7 @@ EvidenceAvailability = Literal["available", "unavailable"]
 @dataclass(frozen=True, slots=True)
 class HistoricalAdoptionPairedStaffEvidence:
     caregiver_ordinal: int
-    masked_staff_name: str
+    staff_name: str
     staff_id: int
     resolution: HistoricalPairingResolution
     source_start_date: date | None
