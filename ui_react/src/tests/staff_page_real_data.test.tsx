@@ -9,10 +9,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { staffLifecycleClient } from '../api/staff_lifecycle/staff_lifecycle_client';
 import { staffQualificationMasterClient } from '../api/staff/qualification_master_client';
+import { staffCasePreferenceSummaryClient } from '../api/staff/case_preference_summary_client';
 import { StaffPage } from '../pages/StaffPage';
 import { STAFF_PAGE_ONE } from './fixtures/staff/staff_directory_contract_fixtures';
 import { STAFF_LIFECYCLE_VIEW } from './fixtures/staff/staff_lifecycle_contract_fixtures';
 import { STAFF_QUALIFICATION_MASTER } from './fixtures/staff/staff_qualification_contract_fixtures';
+import { STAFF_CASE_PREFERENCE_READ } from './fixtures/staff/staff_case_preference_contract_fixtures';
 
 describe('StaffPage real data boundary', () => {
   beforeEach(() => {
@@ -20,6 +22,7 @@ describe('StaffPage real data boundary', () => {
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffLifecycleClient, 'query').mockResolvedValue(STAFF_LIFECYCLE_VIEW);
     vi.spyOn(staffQualificationMasterClient, 'query').mockResolvedValue(STAFF_QUALIFICATION_MASTER);
+    vi.spyOn(staffCasePreferenceSummaryClient, 'query').mockResolvedValue(STAFF_CASE_PREFERENCE_READ);
   });
 
   afterEach(() => {
@@ -72,20 +75,43 @@ describe('StaffPage real data boundary', () => {
     expect(screen.getAllByText('尚未登錄。')).toHaveLength(6);
   });
 
-  it('shows BeClass-adopted service capability facts in the selected staff drawer', async () => {
+  it('shows Staff-owned case-preference facts and fallbacks in the selected staff drawer', async () => {
+    vi.mocked(staffQualificationMasterClient.query).mockResolvedValue({
+      ...STAFF_QUALIFICATION_MASTER,
+      service_profile: {
+        ...STAFF_QUALIFICATION_MASTER.service_profile,
+        service_regions: [{ value: '不得使用舊 service_profile', detail: null }],
+      },
+    });
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
 
     expect(await screen.findByRole('group', { name: '最多照顧寶寶數' })).toHaveTextContent('2 位');
-    expect(screen.getByRole('group', { name: '可承接區域' })).toHaveTextContent('北區、其他（新竹市）');
-    expect(screen.getByRole('group', { name: '可承接時段' })).toHaveTextContent('8小時');
+    expect(screen.getByRole('group', { name: '服務區域' })).toHaveTextContent('北區');
+    expect(screen.getByRole('group', { name: '服務區域' })).toHaveTextContent('其它：新竹市');
+    expect(screen.getByRole('group', { name: '服務時段' })).toHaveTextContent('8小時');
     expect(screen.getByRole('group', { name: '交通方式' })).toHaveTextContent('機車');
-    expect(screen.getByRole('group', { name: '週間服務／排休' })).toHaveTextContent('週休1日');
-    expect(screen.getByRole('group', { name: '特殊節日意願' })).toHaveTextContent('中秋節');
-    expect(screen.getByRole('group', { name: '可承接胎數' })).toHaveTextContent('單胞胎、雙胞胎');
+    expect(screen.getByRole('group', { name: '交通方式' })).toHaveTextContent('其它來源尚未就緒');
+    expect(screen.getByRole('group', { name: '排休' })).toHaveTextContent('週休1日');
+    expect(screen.getByRole('group', { name: '節日意願' })).toHaveTextContent('中秋節');
+    expect(screen.getByRole('group', { name: '胎數' })).toHaveTextContent('單胞胎、雙胞胎');
+    expect(screen.queryByText('不得使用舊 service_profile')).not.toBeInTheDocument();
     expect(screen.queryByText(/source_identity|fingerprint|preview_fingerprint/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/cooking_skill_|massage_certificate|special_skill_/)).not.toBeInTheDocument();
+  });
+
+  it('shows all six case-preference topics on the selected roster card without source-not-ready detail noise', async () => {
+    render(<StaffPage />);
+    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+
+    await waitFor(() => expect(screen.getByText('服務區域：北區')).toBeInTheDocument());
+    expect(screen.getByText('服務時段：8小時')).toBeInTheDocument();
+    expect(screen.getByText('排休：週休1日')).toBeInTheDocument();
+    expect(screen.getByText('胎數：單胞胎、雙胞胎')).toBeInTheDocument();
+    expect(screen.getByText('節日意願：中秋節')).toBeInTheDocument();
+    expect(screen.getByText('交通方式：機車')).toBeInTheDocument();
+    expect(screen.queryByText('其它來源尚未就緒')).not.toBeInTheDocument();
   });
 
   it('renders qualification facts with business labels instead of internal field codes', async () => {

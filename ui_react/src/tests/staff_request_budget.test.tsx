@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffAvailabilityClient } from '../api/staff_availability/staff_availability_client';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { staffQualificationMasterClient } from '../api/staff/qualification_master_client';
+import { staffCasePreferenceSummaryClient } from '../api/staff/case_preference_summary_client';
 import { staffLifecycleClient } from '../api/staff_lifecycle/staff_lifecycle_client';
 import { staffPreferencesClient } from '../api/staff_preferences/staff_preferences_client';
 import { StaffPage } from '../pages/StaffPage';
@@ -28,15 +29,27 @@ import {
   STAFF_LIFECYCLE_VIEW,
 } from './fixtures/staff/staff_lifecycle_contract_fixtures';
 import { STAFF_QUALIFICATION_MASTER } from './fixtures/staff/staff_qualification_contract_fixtures';
+import { STAFF_CASE_PREFERENCE_READ } from './fixtures/staff/staff_case_preference_contract_fixtures';
 
 describe('Staff request budget', () => {
   beforeEach(() => {
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue(STAFF_PAGE_ONE);
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffQualificationMasterClient, 'query').mockResolvedValue(STAFF_QUALIFICATION_MASTER);
+    vi.spyOn(staffCasePreferenceSummaryClient, 'query').mockResolvedValue(STAFF_CASE_PREFERENCE_READ);
   });
 
   afterEach(() => vi.restoreAllMocks());
+
+  it('roster selection uses one lifecycle, qualification, and case-preference GET each', async () => {
+    vi.spyOn(staffLifecycleClient, 'query').mockResolvedValue(STAFF_LIFECYCLE_VIEW);
+    render(<StaffPage />);
+    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
+    await waitFor(() => expect(staffCasePreferenceSummaryClient.query).toHaveBeenCalledTimes(1));
+    expect(staffQualificationMasterClient.query).toHaveBeenCalledTimes(1);
+    expect(staffLifecycleClient.query).toHaveBeenCalledTimes(1);
+  });
 
   it('preferences uses definitions/profile/preview/apply/requery once each', async () => {
     vi.spyOn(staffPreferencesClient, 'queryDefinitions').mockResolvedValue(STAFF_PREFERENCE_DEFINITIONS);

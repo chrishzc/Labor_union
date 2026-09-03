@@ -51,6 +51,8 @@ import type {
 } from '../api/staff_lifecycle/staff_lifecycle_schemas';
 import { staffQualificationMasterClient } from '../api/staff/qualification_master_client';
 import { StaffQualificationMasterError } from '../api/staff/qualification_master_errors';
+import { staffCasePreferenceSummaryClient } from '../api/staff/case_preference_summary_client';
+import { StaffCasePreferenceSummaryError } from '../api/staff/case_preference_summary_errors';
 import {
   adaptStaffDirectoryPage,
   type StaffDirectoryCardViewModel,
@@ -71,6 +73,11 @@ import {
   adaptStaffQualificationMaster,
   type StaffQualificationMasterViewModel,
 } from '../adapters/staff/qualification_master_adapter';
+import {
+  adaptStaffCasePreferenceSummary,
+  type StaffCasePreferenceSummaryViewModel,
+} from '../adapters/staff/case_preference_summary_adapter';
+import { StaffCasePreferenceSummary as StaffCasePreferenceSummaryPanel } from '../components/staff/StaffCasePreferenceSummary';
 
 type StaffTab = 'roster' | 'preferences' | 'unavailability';
 type DirectoryState =
@@ -172,13 +179,6 @@ function qualificationEmptyMessage(
   return '尚未登錄。';
 }
 
-function profileItemsText(items: ReadonlyArray<{ value: string; detail: string | null }>): string {
-  if (items.length === 0) return '尚未登錄';
-  return items
-    .map((item) => item.detail ? `${item.value}（${item.detail}）` : item.value)
-    .join('、');
-}
-
 function isPreferencesOutcomeUnknown(error: unknown): boolean {
   return error instanceof StaffPreferencesTimeoutError
     || error instanceof StaffPreferencesNetworkError
@@ -253,6 +253,7 @@ export const StaffPage: React.FC = () => {
   const [availabilityAction, setAvailabilityAction] = useState<ActionState<StaffAvailabilityPreview, StaffAvailabilityReceipt, StaffAvailabilityApplyPayload>>(initialActionState);
   const [lifecycle, setLifecycle] = useState<QueryState<StaffLifecycleViewModel>>({ status: 'idle' });
   const [qualification, setQualification] = useState<QueryState<StaffQualificationMasterViewModel>>({ status: 'idle' });
+  const [casePreferenceSummary, setCasePreferenceSummary] = useState<QueryState<StaffCasePreferenceSummaryViewModel>>({ status: 'idle' });
   const [lifecycleEffectiveAt, setLifecycleEffectiveAt] = useState('');
   const [lifecycleReasonCode, setLifecycleReasonCode] = useState('');
   const [lifecycleAction, setLifecycleAction] = useState<ActionState<StaffLifecyclePreview, StaffLifecycleApplyReceipt, StaffLifecycleApplyPayload> & { action: StaffLifecycleAction | null }>({
@@ -410,6 +411,7 @@ export const StaffPage: React.FC = () => {
     setEndPauseReason('');
     setLifecycle({ status: 'idle' });
     setQualification({ status: 'idle' });
+    setCasePreferenceSummary({ status: 'idle' });
     setLifecycleAction({ ...initialActionState(), action: null });
     if (selectedStaffId === null) return;
 
@@ -449,6 +451,16 @@ export const StaffPage: React.FC = () => {
         if (error instanceof StaffQualificationMasterError && error.code === 'STAFF_QUALIFICATION_ABORTED') return;
         if (!isCurrentSlice(generation, controller.signal)) return;
         setQualification({ status: 'error', message: error instanceof Error ? error.message : '資格主檔載入失敗。' });
+      });
+      setCasePreferenceSummary({ status: 'loading' });
+      void staffCasePreferenceSummaryClient.query(currentStaffId, { signal: controller.signal }).then((summary) => {
+        if (isCurrentSlice(generation, controller.signal)) {
+          setCasePreferenceSummary({ status: 'ready', data: adaptStaffCasePreferenceSummary(summary) });
+        }
+      }).catch((error: unknown) => {
+        if (error instanceof StaffCasePreferenceSummaryError && error.code === 'STAFF_CASE_PREFERENCE_ABORTED') return;
+        if (!isCurrentSlice(generation, controller.signal)) return;
+        setCasePreferenceSummary({ status: 'error', message: error instanceof Error ? error.message : '接案偏好摘要載入失敗。' });
       });
     }
 
@@ -1068,7 +1080,12 @@ export const StaffPage: React.FC = () => {
                   </div>
 
                   <div className="staff-card-pref-summary">
-                    <span>🎯 接案偏好與不可服務期間於個人摘要中查詢</span>
+                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'loading' && <span>🎯 正在載入接案偏好…</span>}
+                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'ready' && (
+                      <StaffCasePreferenceSummaryPanel summary={casePreferenceSummary.data} compact />
+                    )}
+                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'error' && <span>🎯 接案偏好暫時無法取得</span>}
+                    {selectedStaffId !== staff.id && <span>🎯 選取後載入正式接案偏好摘要</span>}
                   </div>
 
                   <div className="staff-card-footer">
@@ -1349,25 +1366,31 @@ export const StaffPage: React.FC = () => {
                 {qualification.status === 'ready' && (
                   <>
                     <h3 style={{ margin: '0 0 10px', fontSize: '1.05rem', color: '#7c2d12', fontWeight: 700 }}>
-                      🧭 服務能力與接案資料
+                      🧭 服務能力
                     </h3>
                     <div className="staff-qual-grid" style={{ marginBottom: '18px' }}>
-                      {[
-                        ['最多照顧寶寶數', qualification.data.service_profile.care_babies === null ? '尚未登錄' : `${qualification.data.service_profile.care_babies} 位`],
-                        ['可承接區域', profileItemsText(qualification.data.service_profile.service_regions)],
-                        ['可承接時段', profileItemsText(qualification.data.service_profile.service_time_slots)],
-                        ['交通方式', profileItemsText(qualification.data.service_profile.transportation)],
-                        ['週間服務／排休', profileItemsText(qualification.data.service_profile.weekly_rest)],
-                        ['特殊節日意願', profileItemsText(qualification.data.service_profile.holiday_availability)],
-                        ['可承接胎數', profileItemsText(qualification.data.service_profile.baby_types)],
-                      ].map(([label, value]) => (
-                        <div key={label} className="staff-qual-card" role="group" aria-label={label}>
-                          <h4>{label}</h4>
-                          <p style={{ margin: 0 }}>{value}</p>
-                        </div>
-                      ))}
+                      <div className="staff-qual-card" role="group" aria-label="最多照顧寶寶數">
+                        <h4>最多照顧寶寶數</h4>
+                        <p style={{ margin: 0 }}>
+                          {qualification.data.service_profile.care_babies === null ? '尚未登錄' : `${qualification.data.service_profile.care_babies} 位`}
+                        </p>
+                      </div>
                     </div>
                   </>
+                )}
+
+                <h3 style={{ margin: '0 0 10px', fontSize: '1.05rem', color: '#7c2d12', fontWeight: 700 }}>
+                  🎯 接案偏好（唯讀）
+                </h3>
+                {casePreferenceSummary.status === 'loading' && <p role="status">正在載入接案偏好摘要…</p>}
+                {casePreferenceSummary.status === 'error' && (
+                  <div role="alert">
+                    <p>{casePreferenceSummary.message}</p>
+                    <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((v) => v + 1)}>重試接案偏好</button>
+                  </div>
+                )}
+                {casePreferenceSummary.status === 'ready' && (
+                  <StaffCasePreferenceSummaryPanel summary={casePreferenceSummary.data} />
                 )}
 
                 {/* 6 大專業資格審核主檔 */}
