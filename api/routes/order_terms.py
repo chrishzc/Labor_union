@@ -330,3 +330,8 @@ def _materialize_collection(value):
     if isinstance(value, (tuple, list)):
         return [_materialize(item) for item in value]
     return value
+
+
+from api.routes.order_intake_terms_bootstrap import router as intake_terms_bootstrap_router
+
+router.include_router(intake_terms_bootstrap_router)
