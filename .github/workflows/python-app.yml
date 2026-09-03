@@ -125,7 +125,6 @@ jobs:
       run: npm run build
 
   historical-order-workbook-regression:
-    if: ${{ false }}
     name: historical order workbook router regression
     runs-on: ubuntu-latest
 
