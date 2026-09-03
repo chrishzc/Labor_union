@@ -3,8 +3,6 @@ File: historical_order_adoption.py
 Description: 定義訂單狀態與月嫂歷史配對 workbook 的嚴格 Preview／Apply HTTP view。
 """
 
-from datetime import date
-
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -91,53 +89,3 @@ class HistoricalOrderWorkbookReceiptView(BaseModel):
         if self.result_counts.total != self.source_row_count:
             raise ValueError("historical_order_result_counts_not_conserved")
         return self
-
-
-class HistoricalCompletedAssignmentRepairIntentView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    case_no: str = Field(min_length=1, max_length=50)
-    staff_name: str | None = Field(default=None, max_length=100)
-    start_date: date | None = None
-    end_date: date | None = None
-
-
-class HistoricalCompletedAssignmentRepairPreviewView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    case_no: str
-    order_status: str | None
-    expected_order_version: int | None = Field(default=None, ge=0)
-    masked_staff_name: str
-    staff_id: int | None = Field(default=None, ge=1)
-    start_date: date | None
-    end_date: date | None
-    reusable_assignment_id: int | None = Field(default=None, ge=1)
-    applicable: bool
-    reusable: bool
-    blockers: list[str]
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class HistoricalCompletedAssignmentRepairApplyView(
-    HistoricalCompletedAssignmentRepairIntentView
-):
-    expected_order_version: int = Field(ge=0)
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
-
-
-class HistoricalCompletedAssignmentRepairReceiptView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    receipt_key: str
-    case_no: str
-    order_version: int = Field(ge=0)
-    staff_id: int = Field(ge=1)
-    start_date: date
-    end_date: date
-    assignment_id: int = Field(ge=1)
-    assignment_created: bool
-    reused_existing: bool
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    replayed: bool
