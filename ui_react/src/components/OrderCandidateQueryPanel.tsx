@@ -1,10 +1,13 @@
 import { useState, type FC } from 'react';
 import { candidateContactPoolClient, type AddCandidatesResult } from '../api/scheduling/candidate_contact_pool_client';
 import {
+  defaultMatchingFilterPolicy,
   matchingCandidateWorkflowClient,
   type MatchingAvailability,
   type MatchingCandidateOption,
+  type MatchingFilterPolicy,
 } from '../api/scheduling/matching_candidate_workflow_client';
+import { ApiHttpError } from '../api/shared/typed_errors';
 
 interface OrderCandidateQueryPanelProps {
   caseNo: string;
@@ -15,6 +18,7 @@ type CandidateQueryState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'ready'; data: MatchingAvailability }
+  | { status: 'blocked'; message: string }
   | { status: 'error'; message: string };
 
 type CandidateAddState =
@@ -27,18 +31,40 @@ type CandidateAddState =
     }
   | { status: 'error'; message: string };
 
+const MATCHING_BLOCKER_CODES = new Set([
+  'matching_preference_source_not_ready',
+  'official_service_dates_incomplete',
+  'caregiver_availability_stage_conflict',
+]);
+
+const FILTER_OPTIONS: readonly {
+  key: keyof MatchingFilterPolicy;
+  label: string;
+}[] = [
+  { key: 'region', label: '服務地區' },
+  { key: 'cooking', label: '下廚料理' },
+  { key: 'preferred_service_days', label: '偏好服務日' },
+  { key: 'daily_service_hours', label: '每日服務時數' },
+];
+
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim()
     ? error.message.trim()
     : fallback;
 }
 
+function queryFailure(error: unknown): CandidateQueryState {
+  const message = errorMessage(error, '正式候選查詢失敗');
+  if (error instanceof ApiHttpError && MATCHING_BLOCKER_CODES.has(error.code)) {
+    return { status: 'blocked', message };
+  }
+  return { status: 'error', message };
+}
+
 function formalCandidates(data: MatchingAvailability): MatchingCandidateOption[] {
-  const staffIds = new Set<number>();
-  data.complete_combinations.forEach((combination) => {
-    if (combination.length === 1) staffIds.add(combination[0]!.staff_id);
-  });
-  return data.candidate_options.filter((candidate) => staffIds.has(candidate.staff_id));
+  return data.candidate_options.filter(
+    (candidate) => candidate.segment_index === 0 && candidate.full_case_coverage,
+  );
 }
 
 function sameStaffIds(expected: readonly number[], actual: readonly number[]): boolean {
@@ -49,20 +75,25 @@ function sameStaffIds(expected: readonly number[], actual: readonly number[]): b
 }
 
 export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPoolReadback }) => {
+  const [filters, setFilters] = useState<MatchingFilterPolicy>(() => ({ ...defaultMatchingFilterPolicy }));
   const [queryState, setQueryState] = useState<CandidateQueryState>({ status: 'idle' });
   const [selectedStaffIds, setSelectedStaffIds] = useState<ReadonlySet<number>>(() => new Set());
   const [addState, setAddState] = useState<CandidateAddState>({ status: 'idle' });
+
+  const updateFilter = (key: keyof MatchingFilterPolicy) => {
+    setFilters((current) => ({ ...current, [key]: !current[key] }));
+    setSelectedStaffIds(new Set());
+    setAddState({ status: 'idle' });
+    setQueryState({ status: 'idle' });
+  };
 
   const queryCandidates = () => {
     setSelectedStaffIds(new Set());
     setAddState({ status: 'idle' });
     setQueryState({ status: 'loading' });
-    void matchingCandidateWorkflowClient.searchSegmentedCaregivers(caseNo, 1)
+    void matchingCandidateWorkflowClient.searchSegmentedCaregivers(caseNo, 1, [], filters)
       .then((data) => setQueryState({ status: 'ready', data }))
-      .catch((error) => setQueryState({
-        status: 'error',
-        message: errorMessage(error, '正式候選查詢失敗'),
-      }));
+      .catch((error) => setQueryState(queryFailure(error)));
   };
 
   const candidates = queryState.status === 'ready' ? formalCandidates(queryState.data) : [];
@@ -117,21 +148,58 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
       }));
   };
 
+  const busy = queryState.status === 'loading' || addState.status === 'saving';
+
   return (
     <section aria-label={`案件 ${caseNo} 正式候選查詢`}>
+      <fieldset disabled={busy} aria-label="媒合篩選條件">
+        <legend>媒合篩選條件</legend>
+        {FILTER_OPTIONS.map((option) => (
+          <label key={option.key}>
+            <input
+              type="checkbox"
+              checked={filters[option.key]}
+              onChange={() => updateFilter(option.key)}
+            />
+            {option.label}
+          </label>
+        ))}
+      </fieldset>
+
       <button
         type="button"
         className="order-v2-open-drawer"
         onClick={queryCandidates}
-        disabled={queryState.status === 'loading' || addState.status === 'saving'}
+        disabled={busy}
       >
-        {queryState.status === 'loading' ? '查詢正式候選中…' : '查詢正式候選'}
+        {queryState.status === 'loading' ? '查詢中…' : '查詢符合條件月嫂'}
       </button>
+
+      {queryState.status === 'idle' && (
+        <div className="order-v2-notice warning" role="status">
+          <strong>尚未查詢</strong>
+          <span>設定媒合條件後，按「查詢符合條件月嫂」。</span>
+        </div>
+      )}
+
+      {queryState.status === 'loading' && (
+        <div className="order-v2-notice warning" role="status">
+          <strong>查詢中</strong>
+          <span>正在向正式媒合服務查詢候選月嫂。</span>
+        </div>
+      )}
+
+      {queryState.status === 'blocked' && (
+        <div className="order-v2-notice blocked" role="alert">
+          <strong>被既有條件阻擋</strong>
+          <span>{queryState.message}</span>
+        </div>
+      )}
 
       {queryState.status === 'error' && (
         <div className="order-v2-notice blocked" role="alert">
-          <strong>阻塞</strong>
-          <span>正式候選查詢不可用：{queryState.message}</span>
+          <strong>查詢失敗</strong>
+          <span>{queryState.message}</span>
         </div>
       )}
 
@@ -144,6 +212,10 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
 
           {candidates.length > 0 ? (
             <>
+              <div className="order-v2-notice warning" role="status">
+                <strong>符合 {candidates.length} 位</strong>
+                <span>僅列出 server 標記為完整覆蓋的正式候選。</span>
+              </div>
               <div className="order-v2-business-summary" aria-label="正式符合條件候選">
                 {candidates.map((candidate) => (
                   <label key={candidate.staff_id}>
@@ -172,7 +244,7 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
             </>
           ) : (
             <div className="order-v2-notice blocked" role="status">
-              <strong>阻塞</strong>
+              <strong>沒有符合條件</strong>
               <span>目前沒有 server 確認的完整候選；不以瀏覽器條件推導人選。</span>
               {queryState.data.conflicts.map((conflict, index) => (
                 <span key={`${conflict.segment_index}:${conflict.staff_id ?? 'none'}:${conflict.work_date}:${index}`}>
