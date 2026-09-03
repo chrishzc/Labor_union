@@ -261,7 +261,7 @@ export const OrdersPage: React.FC = () => {
   const [activeContractTab, setActiveContractTab] = useState<ContractWorkbenchTab>('contract_terms');
   const [contractDocView, setContractDocView] = useState<'contract' | 'spec'>('contract');
   const [contractDocFullscreen, setContractDocFullscreen] = useState(false);
-  const [precisionMode, setPrecisionMode] = useState<'週休1日' | '週休2日' | '連續服務'>('週休1日');
+  const [precisionMode, setPrecisionMode] = useState<'週休1日' | '週休2日' | '連續服務' | null>(null);
   const [precisionCalculating, setPrecisionCalculating] = useState(false);
   const [precisionResult, setPrecisionResult] = useState<SchedulePrecisionResult | null>(null);
   const [precisionError, setPrecisionError] = useState<string | null>(null);
@@ -613,6 +613,12 @@ export const OrdersPage: React.FC = () => {
     )
     && normalFlowRestartedCaseNo !== activeContractOrder.id,
   );
+  const manualServiceDateSelection = Boolean(
+    activeContractOrder
+    && normalFlowRestartedCaseNo === activeContractOrder.id
+    && precisionMode === null
+    && serviceDatesDraft?.queryView,
+  );
   const reopenDraft = reopenOrder
     ? orderMutationFlowStore.getReopenDraft(reopenOrder.id)
     : undefined;
@@ -621,7 +627,7 @@ export const OrdersPage: React.FC = () => {
     serviceDatesDraft?.status === 'outcome_unknown' ||
     serviceDatesDraft?.status === 'receipt_received' ||
     serviceDatesDraft?.status === 'requery_loading';
-  const serviceDatesSelectionReady = precisionResult !== null
+  const serviceDatesSelectionReady = (precisionResult !== null || manualServiceDateSelection)
     && serviceDatesDraft?.queryView !== null
     && serviceDatesDraft?.queryView !== undefined
     && serviceDatesDraft.selectedDates.length === serviceDatesDraft.queryView.contracted_service_days;
@@ -1408,6 +1414,11 @@ export const OrdersPage: React.FC = () => {
     nextCustomWorkDates = customWorkDates,
   ) => {
     if (!caseNo) return;
+    if (precisionMode === null) {
+      setPrecisionResult(null);
+      setPrecisionError('目前未取得可信排休類型，請直接在日曆手動確認真實服務日期。');
+      return;
+    }
     const serviceDateQuery = orderMutationFlowStore.getServiceDatesDraft(caseNo)?.queryView;
     const startDate = actualStartQuery?.case_no === caseNo
       ? actualStartQuery.current_actual_start_date ?? actualStartQuery.planned_start_date
@@ -1441,12 +1452,14 @@ export const OrdersPage: React.FC = () => {
       || order.orderStatus === '歷史訂單－服務中'
     ) && normalFlowRestartedCaseNo !== order.id && !allowRestartedNormalFlow;
     if (historicalRestartRequired) {
+      setPrecisionMode(null);
       setPrecisionResult(null);
       setPrecisionError(null);
       return;
     }
     const { controller, requestId } = beginDrawerRequest();
     setDrawerLoading(true);
+    setPrecisionMode(null);
     setPrecisionResult(null);
     setPrecisionError(null);
     setHolidayRestDates([]);
@@ -1468,21 +1481,31 @@ export const OrdersPage: React.FC = () => {
       }
       const serviceDates = serviceDatesRes.status === 'fulfilled' ? serviceDatesRes.value : null;
       const calendarDetail = calendarDetailRes.status === 'fulfilled' ? calendarDetailRes.value : null;
-      const restartedHistoricalServiceMode = allowRestartedNormalFlow && calendarDetail === null
-        ? '週休1日' as const
-        : null;
-      const serviceMode = calendarDetail?.service_mode ?? restartedHistoricalServiceMode;
       const startDate = actualStart?.current_actual_start_date ?? actualStart?.planned_start_date ?? null;
-      const inputsReady = actualStart?.case_no === order.id
+      const baseInputsReady = actualStart?.case_no === order.id
         && serviceDates?.case_no === order.id
-        && serviceMode !== null
-        && (calendarDetail === null || calendarDetail.case_no === order.id)
         && startDate !== null;
-      if (!inputsReady) {
+      if (!baseInputsReady) {
         selectServiceDates(order.id, []);
         setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
         return;
       }
+      if (calendarDetail === null) {
+        if (allowRestartedNormalFlow) {
+          changeServiceDateSelection(order.id, serviceDates.current_dates);
+          setPrecisionError(null);
+          return;
+        }
+        selectServiceDates(order.id, []);
+        setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
+        return;
+      }
+      if (calendarDetail.case_no !== order.id) {
+        selectServiceDates(order.id, []);
+        setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
+        return;
+      }
+      const serviceMode = calendarDetail.service_mode;
       setPrecisionMode(serviceMode);
       await calculateAndSelectServiceDates({
         caseNo: order.id,
@@ -1590,6 +1613,7 @@ export const OrdersPage: React.FC = () => {
     setCancellationStatus('idle');
     setCancellationRetryMode(cancellationApplyAttemptRef.current?.caseNo === order.id);
     precisionRequestRef.current += 1;
+    setPrecisionMode(null);
     setPrecisionResult(null);
     setPrecisionError(null);
     setHolidayRestDates([]);
@@ -2387,7 +2411,7 @@ export const OrdersPage: React.FC = () => {
               )}
             </div>
 
-            {/* 📱 步驟三：已選入候選池的月嫂 ➜ 寄送訂單資訊與意願管理 */}
+            {/* 👥 步驟三：已選入候選池的月嫂 ➜ 寄送訂單資訊與意願管理 */}
             <div className="matching-step-card">
               <div className="matching-step-header">
                 <div>
@@ -3361,19 +3385,25 @@ export const OrdersPage: React.FC = () => {
                               工會排休類型：
                             </div>
                             <div aria-label="工會排休類型" style={{ padding: '8px 12px', borderRadius: '8px', backgroundColor: '#f1f5f9', border: '1px solid #dec0b6', fontSize: '0.9rem', fontWeight: 600, color: '#334155' }}>
-                              {precisionMode}
+                              {precisionMode ?? (manualServiceDateSelection ? '人工確認真實服務日期' : '尚未載入')}
                             </div>
                           </div>
                           <button
                             type="button"
                             className="btn-primary-action"
-                            disabled={serviceDatesLocked || precisionCalculating}
+                            disabled={manualServiceDateSelection || serviceDatesLocked || precisionCalculating}
                             onClick={() => rerunSchedulePrecision()}
                             style={{ padding: '9px 20px', fontSize: '0.88rem' }}
                           >
-                            {precisionCalculating ? '精算中…' : '🧮 重新依工會規則精算'}
+                            {manualServiceDateSelection ? '請手動確認服務日期' : precisionCalculating ? '精算中…' : '🧮 重新依工會規則精算'}
                           </button>
                         </div>
+
+                        {manualServiceDateSelection && (
+                          <div role="status" style={{ color: '#74593f', fontSize: '0.84rem', lineHeight: 1.6 }}>
+                            無法取得可信排休類型；系統不會假設週休模式。請直接在下方日曆點選真實服務日期，選滿合約天數後再檢查服務週次影響。
+                          </div>
+                        )}
 
                         {precisionResult && (
                           <div className="precision-stat-grid" style={{ marginBottom: 0 }}>
@@ -3450,17 +3480,23 @@ export const OrdersPage: React.FC = () => {
                             }).map((_, index) => <div key={`calendar-leading-${index}`} aria-hidden="true" />)}
                             {serviceDatesDraft.queryView.selectable_dates.map((date) => {
                               const precisionDay = precisionResult?.day_by_day.find((day) => day.date === date);
-                              const selected = precisionDay?.is_work_day === true;
+                              const selected = manualServiceDateSelection
+                                ? serviceDatesDraft.selectedDates.includes(date)
+                                : precisionDay?.is_work_day === true;
                               const holiday = precisionResult?.national_holidays_found.find((h) => h.date === date);
                               const isLeave = leaveDates.includes(date);
                               const isCustomWork = customWorkDates.includes(date);
-                              const calendarActionLabel = isLeave
-                                ? `${date} 人工調整休假，點擊取消`
-                                : isCustomWork
-                                  ? `${date} 人工覆寫服務日，點擊恢復固定排休`
-                                  : selected
-                                    ? `${date} 服務日，點擊改為人工排休`
-                                    : `${date} 固定排休，點擊改為正式服務日`;
+                              const calendarActionLabel = manualServiceDateSelection
+                                ? selected
+                                  ? `${date} 已選真實服務日，點擊取消`
+                                  : `${date} 未選，點擊設為真實服務日`
+                                : isLeave
+                                  ? `${date} 人工調整休假，點擊取消`
+                                  : isCustomWork
+                                    ? `${date} 人工覆寫服務日，點擊恢復固定排休`
+                                    : selected
+                                      ? `${date} 服務日，點擊改為人工排休`
+                                      : `${date} 固定排休，點擊改為正式服務日`;
                               return (
                                 <button
                                   key={date}
@@ -3471,6 +3507,15 @@ export const OrdersPage: React.FC = () => {
                                   className={`calendar-date-cell ${selected ? 'selected' : isLeave ? 'manual-rest' : holiday ? 'holiday' : ''}`}
                                   disabled={serviceDatesLocked}
                                   onClick={() => {
+                                    if (manualServiceDateSelection) {
+                                      const caseNo = (contractOrder || dateConfirmOrder)?.id;
+                                      if (!caseNo) return;
+                                      const nextSelectedDates = selected
+                                        ? serviceDatesDraft.selectedDates.filter((value) => value !== date)
+                                        : [...serviceDatesDraft.selectedDates, date].sort();
+                                      changeServiceDateSelection(caseNo, nextSelectedDates);
+                                      return;
+                                    }
                                     if (isLeave) {
                                       const nextLeaveDates = leaveDates.filter((value) => value !== date);
                                       setLeaveDates(nextLeaveDates);
@@ -3506,34 +3551,36 @@ export const OrdersPage: React.FC = () => {
 
                       </div>
 
-                      <div className="leave-planning-box" style={{ marginTop: '12px' }}>
-                        <strong style={{ fontSize: '0.82rem', color: '#9a3412' }}>➕ 設定事前約定請假日：</strong>
-                        <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                          <input
-                            type="date"
-                            aria-label="事前請假日期"
-                            value={leaveDateDraft}
-                            disabled={serviceDatesLocked || precisionCalculating}
-                            onChange={(e) => setLeaveDateDraft(e.target.value)}
-                            style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #dec0b6', fontSize: '0.82rem', flex: 1 }}
-                          />
-                          <button
-                            type="button"
-                            className="btn-secondary-action"
-                            disabled={serviceDatesLocked || precisionCalculating || !leaveDateDraft}
-                            onClick={() => {
-                              if (!leaveDateDraft || leaveDates.includes(leaveDateDraft)) return;
-                              const nextLeaveDates = [...leaveDates, leaveDateDraft].sort();
-                              setLeaveDates(nextLeaveDates);
-                              setLeaveDateDraft('');
-                              rerunSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
-                            }}
-                            style={{ padding: '4px 10px', fontSize: '0.78rem' }}
-                          >
-                            新增事前請假
-                          </button>
+                      {!manualServiceDateSelection && (
+                        <div className="leave-planning-box" style={{ marginTop: '12px' }}>
+                          <strong style={{ fontSize: '0.82rem', color: '#9a3412' }}>➕ 設定事前約定請假日：</strong>
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                            <input
+                              type="date"
+                              aria-label="事前請假日期"
+                              value={leaveDateDraft}
+                              disabled={serviceDatesLocked || precisionCalculating}
+                              onChange={(e) => setLeaveDateDraft(e.target.value)}
+                              style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #dec0b6', fontSize: '0.82rem', flex: 1 }}
+                            />
+                            <button
+                              type="button"
+                              className="btn-secondary-action"
+                              disabled={serviceDatesLocked || precisionCalculating || !leaveDateDraft}
+                              onClick={() => {
+                                if (!leaveDateDraft || leaveDates.includes(leaveDateDraft)) return;
+                                const nextLeaveDates = [...leaveDates, leaveDateDraft].sort();
+                                setLeaveDates(nextLeaveDates);
+                                setLeaveDateDraft('');
+                                rerunSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
+                              }}
+                              style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                            >
+                              新增事前請假
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* Full-width Preview / Apply workflow below the calendar */}
                       <div className="service-date-confirmation-panel">

@@ -716,7 +716,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     expect(columnOf(weeklyOneGrid, '2026-09-13 固定排休，點擊改為正式服務日')).toBe(0);
   });
 
-  it('歷史訂單必須先在原工作台重啟，完成後才顯示既有正常精算流程', async () => {
+  it('歷史訂單重啟後無可信排休類型時改由人工確認真實服務日期', async () => {
     const historicalPage = {
       items: [{
         case_no: 'ORD-HISTORY-1',
@@ -809,15 +809,23 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       expect(screen.getByText(/已回到正常「訂單成立」/)).toBeInTheDocument();
       expect(screen.getByText(/正式服務日期確認/)).toBeInTheDocument();
       expect(screen.getByText('實際開工日更正與動態排盤')).toBeInTheDocument();
-      expect(screen.getByLabelText('工會排休類型')).toHaveTextContent('週休1日');
+      expect(screen.getByLabelText('工會排休類型')).toHaveTextContent('人工確認真實服務日期');
+      expect(screen.getByText(/系統不會假設週休模式/)).toBeInTheDocument();
       expect(screen.queryByText(/精算所需的開始日、合約天數或排休類型尚未載入/)).not.toBeInTheDocument();
       expect(screen.queryByText(/目前狀態為「歷史訂單－未服務」/)).not.toBeInTheDocument();
     });
-    expect(calculate).toHaveBeenCalledWith(expect.objectContaining({
-      actual_start_date: '2026-09-01',
-      target_service_days: 3,
-      service_mode: '週休1日',
-    }));
+    expect(calculate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '2026-09-01 未選，點擊設為真實服務日' }));
+    fireEvent.click(screen.getByRole('button', { name: '2026-09-02 未選，點擊設為真實服務日' }));
+    fireEvent.click(screen.getByRole('button', { name: '2026-09-03 未選，點擊設為真實服務日' }));
+
+    await waitFor(() => {
+      expect(orderMutationFlowStore.getServiceDatesDraft('ORD-HISTORY-1')?.selectedDates)
+        .toEqual(['2026-09-01', '2026-09-02', '2026-09-03']);
+      expect(screen.getByRole('button', { name: /檢查服務週次影響/ })).not.toBeDisabled();
+    });
+    expect(calculate).not.toHaveBeenCalled();
   });
 
   it('歷史訂單重啟已成功但伺服器狀態重讀失敗時不得重複 Apply', async () => {
