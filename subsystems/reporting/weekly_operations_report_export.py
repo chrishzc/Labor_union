@@ -38,7 +38,7 @@ def export_weekly_operations_report(report: WeeklyOperationsReport) -> bytes:
             for row in report.case_rows
         ),
         preamble=(
-            ("報表週界", report.week_label),
+            ("報表期間", report.period_label),
             ("推廣次數", _metric(report.summary.promotion_count), "詢問人次", _metric(report.summary.inquiry_count)),
             ("申請案件", report.summary.application_count, "一般符合", report.summary.general_eligible_count,
              "一般不符合", _metric(report.summary.general_ineligible_count)),
@@ -71,13 +71,13 @@ def export_weekly_operations_report(report: WeeklyOperationsReport) -> bytes:
     _append_rows(
         service_sheet,
         (
-            "指派識別", "案件識別", "雇主", "服務人員", "服務開始", "服務結束", "每週起始日",
-            "每週結束日", "每日服務時數", "每週工作日數", "每週工時", "訂單狀態", "結案", "資料品質",
+            "指派識別", "案件識別", "雇主", "服務人員", "服務開始", "服務結束", "報表起始日",
+            "報表結束日", "每日服務時數", "期間工作日數", "期間工時", "訂單狀態", "結案", "資料品質",
         ),
         (
             (
                 row.assignment_id, row.case_no, row.client_name_masked, row.staff_name_masked,
-                row.service_start_date, row.service_end_date, row.week_start, row.week_end,
+                row.service_start_date, row.service_end_date, row.period_start_date, row.period_end_date,
                 row.service_hours_per_day, row.weekly_work_days, row.weekly_hours,
                 row.order_status, "是" if row.completed else "否", ",".join(row.data_quality_codes),
             )

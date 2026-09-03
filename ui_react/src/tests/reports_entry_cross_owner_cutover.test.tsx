@@ -7,7 +7,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { sessionClient } from '../api/auth/session_client';
-import { weeklyReportWeekEnd } from '../api/reports/weekly_operations_report_query_client';
 import type { SubsidyReportPreview } from '../api/reports/subsidy_report_query_schemas';
 import { SUBSIDY_REPORT_RESPONSE } from './fixtures/reports/subsidy_report_query_contract_fixtures';
 import { WEEKLY_OPERATIONS_REPORT } from './fixtures/reports/weekly_operations_report_contract_fixtures';
@@ -25,7 +24,7 @@ type FetchRecord = {
 
 type FetchStubOptions = {
   reportResponse?: (kind: 'quarterly' | 'annual', year: number, quarter: number | null, call: number) => Response;
-  weeklyResponse?: (weekStart: string, call: number) => Response;
+  weeklyResponse?: (startDate: string, endDate: string, call: number) => Response;
 };
 
 function requestUrl(input: string | URL | Request): URL {
@@ -59,15 +58,14 @@ function reportEnvelope(
   };
 }
 
-function weeklyEnvelope(weekStart: string, data = WEEKLY_OPERATIONS_REPORT): unknown {
-  const weekEnd = weeklyReportWeekEnd(weekStart);
+function weeklyEnvelope(startDate: string, endDate: string, data = WEEKLY_OPERATIONS_REPORT): unknown {
   return {
     success: true,
     message: '成功取得營運週報',
     data: {
       ...data,
-      period: { ...data.period, week_start: weekStart, week_end: weekEnd, week_label: `${weekStart}～${weekEnd}` },
-      service_rows: data.service_rows.map((row) => ({ ...row, week_start: weekStart, week_end: weekEnd })),
+      period: { ...data.period, start_date: startDate, end_date: endDate, period_label: `${startDate}～${endDate}` },
+      service_rows: data.service_rows.map((row) => ({ ...row, period_start_date: startDate, period_end_date: endDate })),
     },
     error: null,
   };
@@ -144,8 +142,9 @@ function installFetchStub(options: FetchStubOptions = {}): FetchRecord[] {
     if (path === SYSTEM_STATUS_ENDPOINT) return jsonResponse(systemStatusEnvelope());
     if (path === WEEKLY_ENDPOINT) {
       reportCalls += 1;
-      const weekStart = url.searchParams.get('week_start') ?? '';
-      return options.weeklyResponse?.(weekStart, reportCalls) ?? jsonResponse(weeklyEnvelope(weekStart));
+      const startDate = url.searchParams.get('start_date') ?? '';
+      const endDate = url.searchParams.get('end_date') ?? '';
+      return options.weeklyResponse?.(startDate, endDate, reportCalls) ?? jsonResponse(weeklyEnvelope(startDate, endDate));
     }
     if (path !== QUARTERLY_ENDPOINT && path !== ANNUAL_ENDPOINT) {
       throw new Error(`Unexpected API path: ${path}`);
@@ -246,7 +245,7 @@ describe('Reports #reports cross-owner entry static subgate', () => {
   it('empty report 維持明確空狀態，不以fixture補成假資料', async () => {
     authenticate();
     const emptyRequests = installFetchStub({
-      weeklyResponse: (weekStart) => jsonResponse(weeklyEnvelope(weekStart, emptyWeeklyData())),
+      weeklyResponse: (startDate, endDate) => jsonResponse(weeklyEnvelope(startDate, endDate, emptyWeeklyData())),
     });
 
     render(
@@ -265,8 +264,8 @@ describe('Reports #reports cross-owner entry static subgate', () => {
     authenticate();
     let retryRequested = false;
     const unavailableRequests = installFetchStub({
-      weeklyResponse: (weekStart) => retryRequested
-        ? jsonResponse(weeklyEnvelope(weekStart))
+      weeklyResponse: (startDate, endDate) => retryRequested
+        ? jsonResponse(weeklyEnvelope(startDate, endDate))
         : jsonResponse(typedUnavailableResponse(), 503),
     });
 

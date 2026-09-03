@@ -1,6 +1,6 @@
 /**
  * File: weekly_operations_report_query_client.ts
- * Description: 以 fresh Session 查詢週一週界的營運週報，驗證期間、遮罩、分區與 server aggregate。
+ * Description: 以 fresh Session 查詢自選期間的營運報表，驗證期間、遮罩、分區與 server aggregate。
  */
 import { sessionClient } from '../auth/session_client';
 import { transport } from '../shared/transport';
@@ -23,63 +23,20 @@ function parseDate(value: string): Date | null {
   return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value ? null : parsed;
 }
 
-export function validateWeeklyReportWeekStart(weekStart: string): Date {
-  const parsed = parseDate(weekStart);
-  if (!parsed || parsed.getUTCDay() !== 1) {
-    throw new WeeklyOperationsReportError('WEEKLY_REPORT_VALIDATION', '週起日必須是有效的星期一。');
+export function validateOperationsReportDateRange(startDate: string, endDate: string): void {
+  const start = parseDate(startDate);
+  const end = parseDate(endDate);
+  if (!start || !end || start.getTime() > end.getTime()) {
+    throw new WeeklyOperationsReportError('WEEKLY_REPORT_VALIDATION', '起日與迄日必須有效，且起日不得晚於迄日。');
   }
-  return parsed;
-}
-
-export function weeklyReportWeekEnd(weekStart: string): string {
-  const start = validateWeeklyReportWeekStart(weekStart);
-  start.setUTCDate(start.getUTCDate() + 6);
-  return start.toISOString().slice(0, 10);
-}
-
-const ISO_WEEK_PATTERN = /^(\d{4})-W(\d{2})$/;
-const WEEK_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
-
-function firstIsoMonday(year: number): Date {
-  const januaryFourth = new Date(Date.UTC(year, 0, 4));
-  januaryFourth.setUTCDate(januaryFourth.getUTCDate() - ((januaryFourth.getUTCDay() + 6) % 7));
-  return januaryFourth;
-}
-
-export function weeklyReportIsoWeek(weekStart: string): string {
-  const monday = validateWeeklyReportWeekStart(weekStart);
-  const thursday = new Date(monday);
-  thursday.setUTCDate(thursday.getUTCDate() + 3);
-  const isoYear = thursday.getUTCFullYear();
-  const week = Math.floor((monday.getTime() - firstIsoMonday(isoYear).getTime()) / WEEK_MILLISECONDS) + 1;
-  return `${isoYear}-W${String(week).padStart(2, '0')}`;
-}
-
-export function weeklyReportWeekStart(isoWeek: string): string {
-  const match = ISO_WEEK_PATTERN.exec(isoWeek);
-  if (!match) {
-    throw new WeeklyOperationsReportError('WEEKLY_REPORT_VALIDATION', '週別必須是有效的 ISO 週。');
-  }
-  const isoYear = Number(match[1]);
-  const week = Number(match[2]);
-  if (week < 1 || week > 53) {
-    throw new WeeklyOperationsReportError('WEEKLY_REPORT_VALIDATION', '週別必須是有效的 ISO 週。');
-  }
-  const monday = firstIsoMonday(isoYear);
-  monday.setUTCDate(monday.getUTCDate() + ((week - 1) * 7));
-  const weekStart = monday.toISOString().slice(0, 10);
-  if (weeklyReportIsoWeek(weekStart) !== isoWeek) {
-    throw new WeeklyOperationsReportError('WEEKLY_REPORT_VALIDATION', '週別必須是有效的 ISO 週。');
-  }
-  return weekStart;
 }
 
 function isMasked(value: string): boolean {
   return value === '—' || value.includes('*');
 }
 
-function assertWeeklyView(view: WeeklyOperationsReport, weekStart: string): WeeklyOperationsReport {
-  if (view.period.week_start !== weekStart || view.period.week_end !== weeklyReportWeekEnd(weekStart)) {
+function assertWeeklyView(view: WeeklyOperationsReport, startDate: string, endDate: string): WeeklyOperationsReport {
+  if (view.period.start_date !== startDate || view.period.end_date !== endDate) {
     throw new WeeklyOperationsReportError('WEEKLY_REPORT_PERIOD_MISMATCH', '週報 period 與 request 不一致。');
   }
   if (view.summary.application_count !== view.case_rows.length) {
@@ -113,7 +70,7 @@ function assertWeeklyView(view: WeeklyOperationsReport, weekStart: string): Week
     if (!isMasked(row.client_name_masked) || !isMasked(row.staff_name_masked)) {
       throw new WeeklyOperationsReportError('WEEKLY_REPORT_PII_NOT_MASKED', '服務工時資料包含未遮罩姓名。');
     }
-    if (row.week_start !== view.period.week_start || row.week_end !== view.period.week_end) {
+    if (row.period_start_date !== view.period.start_date || row.period_end_date !== view.period.end_date) {
       throw new WeeklyOperationsReportError('WEEKLY_REPORT_PERIOD_MISMATCH', '服務工時列的 period 不一致。');
     }
     if (Math.abs(row.weekly_hours - (row.weekly_work_days * row.service_hours_per_day)) > 0.000001) {
@@ -124,8 +81,8 @@ function assertWeeklyView(view: WeeklyOperationsReport, weekStart: string): Week
 }
 
 export const weeklyOperationsReportQueryClient = {
-  async query(weekStart: string, options?: WeeklyOperationsReportQueryOptions): Promise<WeeklyOperationsReport> {
-    validateWeeklyReportWeekStart(weekStart);
+  async query(startDate: string, endDate: string, options?: WeeklyOperationsReportQueryOptions): Promise<WeeklyOperationsReport> {
+    validateOperationsReportDateRange(startDate, endDate);
     const token = sessionClient.getToken();
     if (!token) throw new WeeklyOperationsReportError('WEEKLY_REPORT_UNAUTHENTICATED', '請先登入。', false, 401);
     try {
@@ -134,7 +91,7 @@ export const weeklyOperationsReportQueryClient = {
         timeoutMs: options?.timeoutMs,
         baseUrl: options?.baseUrl,
         token,
-        params: { week_start: weekStart },
+        params: { start_date: startDate, end_date: endDate },
       });
       const decoded = WeeklyOperationsReportResponseSchema.safeParse(raw);
       if (!decoded.success) {
@@ -147,7 +104,7 @@ export const weeklyOperationsReportQueryClient = {
       if (!decoded.data.success) {
         throw new WeeklyOperationsReportError('WEEKLY_REPORT_FAILURE', decoded.data.error ?? decoded.data.message);
       }
-      return assertWeeklyView(decoded.data.data, weekStart);
+      return assertWeeklyView(decoded.data.data, startDate, endDate);
     } catch (error) {
       throw mapWeeklyOperationsReportError(error);
     }

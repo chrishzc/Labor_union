@@ -6,12 +6,12 @@ import type { WeeklyOperationsReport } from '../../../api/reports/weekly_operati
 import { SUBSIDY_REPORT_RESPONSE } from './subsidy_report_query_contract_fixtures';
 
 export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
-  schema_version: 'weekly-operations-report.v1',
+  schema_version: 'operations-report.v2',
   period: {
-    week_start: '2026-08-17',
-    week_end: '2026-08-23',
+    start_date: '2026-08-20',
+    end_date: '2026-08-26',
     timezone: 'Asia/Taipei',
-    week_label: '2026-08-17～2026-08-23',
+    period_label: '2026-08-20～2026-08-26',
   },
   generated_at: '2026-08-23T12:00:00+08:00',
   source_revision: 'weekly-operations-fixture-revision',
@@ -67,8 +67,8 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
     staff_name_masked: '陳**',
     service_start_date: '2026-08-17',
     service_end_date: '2026-08-28',
-    week_start: '2026-08-17',
-    week_end: '2026-08-23',
+    period_start_date: '2026-08-20',
+    period_end_date: '2026-08-26',
     service_hours_per_day: 8,
     weekly_work_days: 5,
     weekly_hours: 40,

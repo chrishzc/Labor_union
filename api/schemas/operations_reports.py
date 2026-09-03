@@ -1,6 +1,6 @@
 """
 File: operations_reports.py
-Description: 定義營運週報 weekly-operations-report.v1 的 strict 去敏 view。
+Description: 定義營運報表 operations-report.v2 的 strict 去敏 view。
 """
 
 from datetime import date, datetime
@@ -16,10 +16,10 @@ class _StrictModel(BaseModel):
 
 
 class WeeklyReportPeriodView(_StrictModel):
-    week_start: date
-    week_end: date
+    start_date: date
+    end_date: date
     timezone: Literal["Asia/Taipei"]
-    week_label: str
+    period_label: str
 
 
 class WeeklyReportSummaryView(_StrictModel):
@@ -64,10 +64,10 @@ class WeeklyReportServiceRowView(_StrictModel):
     staff_name_masked: str
     service_start_date: date
     service_end_date: date
-    week_start: date
-    week_end: date
+    period_start_date: date
+    period_end_date: date
     service_hours_per_day: int = Field(gt=0)
-    weekly_work_days: int = Field(gt=0, le=7)
+    weekly_work_days: int = Field(gt=0)
     weekly_hours: int = Field(gt=0)
     order_status: str
     completed: bool
@@ -82,7 +82,7 @@ class WeeklyReportDataQualityIssueView(_StrictModel):
 
 
 class WeeklyOperationsReportView(_StrictModel):
-    schema_version: Literal["weekly-operations-report.v1"]
+    schema_version: Literal["operations-report.v2"]
     period: WeeklyReportPeriodView
     generated_at: datetime
     source_revision: str

@@ -6,13 +6,13 @@ Description: 協調營運週報三分頁根事實、遮罩、彙總與資料品�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol
 
 
-SCHEMA_VERSION = "weekly-operations-report.v1"
-SOURCE_REVISION = "weekly_operations_report_query_v2"
+SCHEMA_VERSION = "operations-report.v2"
+SOURCE_REVISION = "operations_report_query_v3"
 TIMEZONE = "Asia/Taipei"
 GENERAL_CITIZEN = "一般市民"
 SUBSIDIZED_CITIZEN = "補助市民"
@@ -73,11 +73,11 @@ class SubsidyFacts:
 
 
 class WeeklyOperationsReportFacts(Protocol):
-    def list_case_facts(self, week_start: date, week_end: date) -> list[WeeklyCaseFact]: ...
+    def list_case_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]: ...
 
-    def list_service_facts(self, week_start: date, week_end: date) -> list[WeeklyServiceFact]: ...
+    def list_service_facts(self, start_date: date, end_date: date) -> list[WeeklyServiceFact]: ...
 
-    def list_subsidy_facts(self, week_start: date, week_end: date) -> SubsidyFacts: ...
+    def list_subsidy_facts(self, start_date: date, end_date: date) -> SubsidyFacts: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,8 +136,8 @@ class WeeklyServiceRow:
     staff_name_masked: str
     service_start_date: date
     service_end_date: date
-    week_start: date
-    week_end: date
+    period_start_date: date
+    period_end_date: date
     service_hours_per_day: int
     weekly_work_days: int
     weekly_hours: int
@@ -165,10 +165,10 @@ class WeeklySummary:
 @dataclass(frozen=True, slots=True)
 class WeeklyOperationsReport:
     schema_version: str
-    week_start: date
-    week_end: date
+    start_date: date
+    end_date: date
     timezone: str
-    week_label: str
+    period_label: str
     generated_at: datetime
     source_revision: str
     summary: WeeklySummary
@@ -183,18 +183,17 @@ class WeeklyOperationsReportQuery:
         self._facts = facts
         self._now = now
 
-    def query(self, week_start: date) -> WeeklyOperationsReport:
-        if week_start.weekday() != 0:
-            raise ValueError("week_start_must_be_monday")
-        week_end = week_start + timedelta(days=6)
-        case_rows = tuple(self._case_row(fact) for fact in self._facts.list_case_facts(week_start, week_end))
+    def query(self, start_date: date, end_date: date) -> WeeklyOperationsReport:
+        if start_date > end_date:
+            raise ValueError("operations_report_date_range_invalid")
+        case_rows = tuple(self._case_row(fact) for fact in self._facts.list_case_facts(start_date, end_date))
         service_candidates = tuple(
-            self._service_row(fact, week_start, week_end)
-            for fact in self._facts.list_service_facts(week_start, week_end)
+            self._service_row(fact, start_date, end_date)
+            for fact in self._facts.list_service_facts(start_date, end_date)
         )
         service_rows = tuple(row for row in service_candidates if row is not None)
         incomplete_service_count = len(service_candidates) - len(service_rows)
-        subsidies = self._facts.list_subsidy_facts(week_start, week_end)
+        subsidies = self._facts.list_subsidy_facts(start_date, end_date)
         subsidy_partitions = (
             self._subsidy_partition("general", subsidies.general),
             self._subsidy_partition("subsidized", subsidies.subsidized),
@@ -202,10 +201,10 @@ class WeeklyOperationsReportQuery:
         issues = self._issues(case_rows, subsidy_partitions, incomplete_service_count)
         return WeeklyOperationsReport(
             schema_version=SCHEMA_VERSION,
-            week_start=week_start,
-            week_end=week_end,
+            start_date=start_date,
+            end_date=end_date,
             timezone=TIMEZONE,
-            week_label=f"{week_start.isoformat()} ~ {week_end.isoformat()}",
+            period_label=f"{start_date.isoformat()} ~ {end_date.isoformat()}",
             generated_at=self._now(),
             source_revision=SOURCE_REVISION,
             summary=self._summary(case_rows),
@@ -257,8 +256,8 @@ class WeeklyOperationsReportQuery:
     @staticmethod
     def _service_row(
         fact: WeeklyServiceFact,
-        week_start: date,
-        week_end: date,
+        start_date: date,
+        end_date: date,
     ) -> WeeklyServiceRow | None:
         hours_per_day = _positive_or_none(fact.service_hours_per_day)
         if hours_per_day is None or fact.service_start_date is None or fact.service_end_date is None:
@@ -270,8 +269,8 @@ class WeeklyOperationsReportQuery:
             staff_name_masked=_mask_name(fact.staff_name),
             service_start_date=fact.service_start_date,
             service_end_date=fact.service_end_date,
-            week_start=week_start,
-            week_end=week_end,
+            period_start_date=start_date,
+            period_end_date=end_date,
             service_hours_per_day=hours_per_day,
             weekly_work_days=fact.weekly_work_days,
             weekly_hours=fact.weekly_work_days * hours_per_day,

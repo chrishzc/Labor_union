@@ -1,13 +1,13 @@
 """
 File: operations_reports.py
-Description: 提供營運週報 strict JSON Query 與同 candidate 的三分頁 XLSX 匯出。
+Description: 提供自選期間營運報表 strict JSON Query 與同 candidate 的三分頁 XLSX 匯出。
 """
 
 from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from api.dependencies.admin_auth import require_admin
@@ -29,26 +29,29 @@ XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
     response_model=BaseResponse[WeeklyOperationsReportView],
 )
 def query_weekly_operations_report(
-    week_start: date = Query(...),
+    request: Request,
+    start_date: date = Query(...),
+    end_date: date = Query(...),
     principal: AdminPrincipal = Depends(require_admin),
     query: WeeklyOperationsReportQuery = Depends(get_weekly_operations_report_query),
 ):
     del principal
     try:
-        report = query.query(week_start)
+        _reject_legacy_week_start(request)
+        report = query.query(start_date, end_date)
         view = _weekly_report_view(report)
     except ValueError as exc:
         raise typed_http_error(
             400,
             "validation",
             "weekly_operations_report_invalid",
-            "週起日必須是有效的星期一。",
+            "起日不得晚於迄日。",
             "weekly-operations-report",
         ) from exc
     except Exception as exc:
         raise internal_query_error(
             "weekly_operations_report_internal_error",
-            "營運週報查詢失敗。",
+            "營運報表查詢失敗。",
             "weekly-operations-report",
         ) from exc
     return BaseResponse(data=view, message="Weekly operations report")
@@ -56,29 +59,32 @@ def query_weekly_operations_report(
 
 @router.get("/weekly/export")
 def export_weekly_operations_report_xlsx(
-    week_start: date = Query(...),
+    request: Request,
+    start_date: date = Query(...),
+    end_date: date = Query(...),
     principal: AdminPrincipal = Depends(require_admin),
     query: WeeklyOperationsReportQuery = Depends(get_weekly_operations_report_query),
 ):
     del principal
     try:
-        report = query.query(week_start)
+        _reject_legacy_week_start(request)
+        report = query.query(start_date, end_date)
         workbook_bytes = export_weekly_operations_report(report)
     except ValueError as exc:
         raise typed_http_error(
             400,
             "validation",
             "weekly_operations_report_export_invalid",
-            "週起日必須是有效的星期一。",
+            "起日不得晚於迄日。",
             "weekly-operations-report-export",
         ) from exc
     except Exception as exc:
         raise internal_query_error(
             "weekly_operations_report_export_internal_error",
-            "營運週報匯出失敗。",
+            "營運報表匯出失敗。",
             "weekly-operations-report-export",
         ) from exc
-    filename = f"weekly-operations-report-{report.week_start}_{report.week_end}.xlsx"
+    filename = f"operations-report-{report.start_date}_{report.end_date}.xlsx"
     return StreamingResponse(
         iter([workbook_bytes]),
         media_type=XLSX_MEDIA_TYPE,
@@ -91,10 +97,10 @@ def _weekly_report_view(report) -> WeeklyOperationsReportView:
         {
             "schema_version": report.schema_version,
             "period": {
-                "week_start": report.week_start,
-                "week_end": report.week_end,
+                "start_date": report.start_date,
+                "end_date": report.end_date,
                 "timezone": report.timezone,
-                "week_label": report.week_label,
+                "period_label": report.period_label,
             },
             "generated_at": report.generated_at,
             "source_revision": report.source_revision,
@@ -113,6 +119,11 @@ def _weekly_report_view(report) -> WeeklyOperationsReportView:
             "data_quality_issues": [_slots_dict(issue) for issue in report.data_quality_issues],
         },
     )
+
+
+def _reject_legacy_week_start(request: Request) -> None:
+    if "week_start" in request.query_params:
+        raise ValueError("weekly_operations_report_legacy_week_start")
 
 
 def _slots_dict(value) -> dict[str, object]:

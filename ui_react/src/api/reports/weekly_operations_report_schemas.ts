@@ -9,10 +9,10 @@ const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const NonNegativeNullableIntegerSchema = z.number().int().nonnegative().nullable();
 
 export const WeeklyOperationsReportPeriodSchema = z.strictObject({
-  week_start: DateSchema,
-  week_end: DateSchema,
+  start_date: DateSchema,
+  end_date: DateSchema,
   timezone: z.literal('Asia/Taipei'),
-  week_label: z.string().min(1),
+  period_label: z.string().min(1),
 });
 
 export const WeeklyOperationsReportSummarySchema = z.strictObject({
@@ -52,8 +52,8 @@ export const WeeklyOperationsServiceRowSchema = z.strictObject({
   staff_name_masked: z.string().min(1),
   service_start_date: DateSchema,
   service_end_date: DateSchema,
-  week_start: DateSchema,
-  week_end: DateSchema,
+  period_start_date: DateSchema,
+  period_end_date: DateSchema,
   service_hours_per_day: z.number().nonnegative(),
   weekly_work_days: z.number().int().nonnegative(),
   weekly_hours: z.number().nonnegative(),
@@ -70,7 +70,7 @@ export const WeeklyOperationsDataQualityIssueSchema = z.strictObject({
 });
 
 export const WeeklyOperationsReportSchema = z.strictObject({
-  schema_version: z.literal('weekly-operations-report.v1'),
+  schema_version: z.literal('operations-report.v2'),
   period: WeeklyOperationsReportPeriodSchema,
   generated_at: z.string().datetime({ offset: true }),
   source_revision: z.string().min(1),

@@ -77,7 +77,8 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
 
         .form-group { margin-bottom: 20px; }
         .form-label { display: block; font-size: 15px; font-weight: 500; margin-bottom: 8px; color: var(--text-dark); }
-        .form-label.required::after { content: ' *'; color: var(--error); }
+        .form-label.required::after,
+        .checkbox-item > label.required::after { content: ' *'; color: var(--error); }
         
         .form-input, .form-select {
             width: 100%; padding: 12px 16px; border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 10px;
@@ -261,7 +262,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             </div>
             <div class="form-group">
                 <label class="form-label">身分證字號</label>
-                <input type="text" class="form-input" id="id_number" maxlength="12" placeholder="新竹市市民身分證，例如: O100000004">
+                <input type="text" class="form-input" id="id_number" maxlength="12" placeholder="身分證，例如: A123456789">
             </div>
         </div>
         <div class="grid-2">
@@ -322,8 +323,8 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             <input type="text" class="form-input" data-survey="特殊計費:胎數" placeholder="例如: 第一胎">
         </div>
         <div class="form-group">
-            <label class="form-label">服務時間內是否有其他大寶/寶寶</label>
-            <input type="text" class="form-input" data-survey="服務時間內是否有其他寶寶" placeholder="例如: 無 / 有一個3歲大寶">
+            <label class="form-label required">服務時間內是否有其他大寶/寶寶</label>
+            <input type="text" class="form-input" data-survey="服務時間內是否有其他寶寶" required placeholder="例如: 無 / 有一個3歲大寶">
         </div>
         
         <div class="form-group">
@@ -355,6 +356,13 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
 
         <!-- Section 3: 飲食偏好 -->
         <div class="section-title">🍲 3. 飲食偏好</div>
+        <div class="form-group">
+            <label class="form-label required">是否需要下廚</label>
+            <div class="radio-group">
+                <div class="radio-item"><input type="radio" name="needs_cooking" value="需要下廚" id="needs_cooking_yes" required><label for="needs_cooking_yes">需要下廚</label></div>
+                <div class="radio-item"><input type="radio" name="needs_cooking" value="不需要下廚" id="needs_cooking_no"><label for="needs_cooking_no">不需要下廚</label></div>
+            </div>
+        </div>
         <div class="form-group">
             <label class="form-label">月子餐點調理喜好/飲食習慣</label>
             <div class="radio-group">
@@ -446,19 +454,21 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             </div>
         </div>
         <div class="form-group">
-            <label class="form-label">補助款退款: 銀行代號與名稱</label>
-            <input type="text" class="form-input" data-survey="補助款退款:銀行代號+分行代號" placeholder="例如: 004 台灣銀行">
+            <label class="form-label required">補助款退款銀行代號加分行</label>
+            <input type="text" class="form-input" id="refund_bank_code" inputmode="numeric" maxlength="7" data-survey="補助款退款:銀行代號+分行代號" required placeholder="請輸入 7 位數字">
+            <div class="form-hint">請輸入 7 位數字；可至 <a href="https://www.fisc.com.tw/TC/Service?CAID=51254999-5d15-4ddf-8e54-4b2cdb2a8399" target="_blank" rel="noopener noreferrer">財金資訊股份有限公司</a> 查詢銀行與分行代號。</div>
         </div>
         <div class="form-group">
-            <label class="form-label">銀行帳號</label>
-            <input type="text" class="form-input" data-survey="銀行帳號" placeholder="請輸入完整帳號">
+            <label class="form-label required">銀行帳號</label>
+            <input type="text" class="form-input" id="refund_bank_account" data-survey="銀行帳號" required placeholder="請輸入完整帳號">
         </div>
         <div class="form-group">
-            <label class="form-label required">確認條款</label>
+            <label class="form-label">確認條款</label>
+            <div class="form-hint">請先點選「已確實詳閱退費原則」閱讀內容，並在彈窗按下「已閱讀並同意」後，才能完成勾選及送出。</div>
             <div class="checkbox-group">
-                <div class="checkbox-item"><input type="checkbox" id="agree1" required><label for="agree1">※已確實詳閱退費原則</label></div>
-                <div class="checkbox-item"><input type="checkbox" id="agree2" required><label for="agree2">我確實了解並願意遵照辦理以上相關規定，說明及退費原則 (勾選後等同簽名確認)</label></div>
-                <div class="checkbox-item"><input type="checkbox" id="agree3" required><label for="agree3">需自行負擔銀行轉帳手續費</label></div>
+                <div class="checkbox-item"><input type="checkbox" id="agree1" required><label for="agree1" class="required">※已確實詳閱退費原則</label></div>
+                <div class="checkbox-item"><input type="checkbox" id="agree2" required><label for="agree2" class="required">我確實了解並願意遵照辦理以上相關規定，說明及退費原則 (勾選後等同簽名確認)</label></div>
+                <div class="checkbox-item"><input type="checkbox" id="agree3" required><label for="agree3" class="required">需自行負擔銀行轉帳手續費</label></div>
             </div>
         </div>
 
@@ -847,6 +857,9 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         const address = document.getElementById('address');
         const expectedDate = document.getElementById('expected_date');
         const serviceDays = document.getElementById('service_days');
+        const needsCooking = document.querySelector('input[name="needs_cooking"]:checked');
+        const refundBankCode = document.getElementById('refund_bank_code');
+        const refundBankAccount = document.getElementById('refund_bank_account');
         const agree1 = document.getElementById('agree1');
         const agree2 = document.getElementById('agree2');
         const agree3 = document.getElementById('agree3');
@@ -860,8 +873,6 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         idNumber.value = idValue;
         if (idValue && !isValidTaiwanId(idValue)) {
             addError(errors, idNumber, '身分證字號格式不正確，請填 1 個英文字母加 9 個數字。');
-        } else if (idValue && !idValue.startsWith('O')) {
-            addError(errors, idNumber, '本補助限新竹市市民申請；身分證字號需為新竹市核發的 O 開頭格式，例如 O100000004。');
         }
 
         if (birthDate.value) {
@@ -918,6 +929,25 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         const days = Number.parseInt(serviceDays.value, 10);
         if (!Number.isInteger(days)) addError(errors, serviceDays, '請填寫預計服務天數。');
         else if (days < 1 || days > 60) addError(errors, serviceDays, '預計服務天數需介於 1 至 60 天。');
+
+        if (!needsCooking) {
+            addError(errors, document.getElementById('needs_cooking_yes'), '請選擇是否需要下廚。');
+        }
+
+        const otherChildren = document.querySelector('[data-survey="服務時間內是否有其他寶寶"]');
+        if (!otherChildren.value.trim()) {
+            addError(errors, otherChildren, '請填寫服務時間內是否有其他大寶或寶寶；若無請填「無」。');
+        }
+
+        const refundBankCodeValue = refundBankCode.value.trim();
+        if (!refundBankCodeValue) {
+            addError(errors, refundBankCode, '請輸入補助款退款銀行代號加分行。');
+        } else if (!/^\d{7}$/.test(refundBankCodeValue)) {
+            addError(errors, refundBankCode, '補助款退款銀行代號加分行請輸入 7 位數字。');
+        }
+        if (!refundBankAccount.value.trim()) {
+            addError(errors, refundBankAccount, '請輸入銀行帳號。');
+        }
 
         if (!agree1.checked || !refundPolicyAccepted) addError(errors, agree1, '請先點選退費原則並詳閱內容，按下「已閱讀並同意」後才可送出。');
         if (!agree2.checked) addError(errors, agree2, '請確認了解並願意遵照相關規定。');
@@ -997,9 +1027,10 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             });
 
             // 處理單選 Radio 的 survey 資料 (透過 name)
-            const radioGroups = ['breastfeed', 'diet', 'veg_staff', 'alcohol', 'floor_fee', 'parking'];
+            const radioGroups = ['breastfeed', 'needs_cooking', 'diet', 'veg_staff', 'alcohol', 'floor_fee', 'parking'];
             const radioKeys = {
                 'breastfeed': '哺乳方式：',
+                'needs_cooking': '是否需要下廚：',
                 'diet': '月子餐點調理喜好/飲食習慣：',
                 'veg_staff': '呈上題，若遇無法媒合到葷食服務人員時，是否可以接受蛋奶素服務人員？',
                 'alcohol': '2．餐飲含酒比例：',
