@@ -65,6 +65,10 @@ describe('weekly operations report clients', () => {
         data: {
           ...WEEKLY_OPERATIONS_REPORT,
           case_rows: [{ ...WEEKLY_OPERATIONS_REPORT.case_rows[0], applicant_name: '王小明' }, WEEKLY_OPERATIONS_REPORT.case_rows[1]],
+          subsidy_partitions: WEEKLY_OPERATIONS_REPORT.subsidy_partitions.map((partition, index) => index === 0 ? {
+            ...partition,
+            rows: partition.rows.map((row, rowIndex) => rowIndex === 0 ? { ...row, address: '新竹市東區中央路281巷20-1號2樓' } : row),
+          } : partition),
         },
       }))
       .mockResolvedValueOnce(jsonResponse({
