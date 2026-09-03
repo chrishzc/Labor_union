@@ -92,7 +92,7 @@ describe('React entrypoint registry', () => {
     expect(screen.getByText(/不呼叫外部 QR 服務或繪製不可掃描的假碼/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
       'href',
-      'https://line-test.example.dev/line-identity',
+      'https://line-test.example.dev/line-gateway',
     );
 
     fireEvent.click(screen.getByText('2. register.html'));
@@ -100,10 +100,13 @@ describe('React entrypoint registry', () => {
     expect(screen.getByRole('button', { name: '預覽登記資料' })).toBeDisabled();
 
     fireEvent.click(screen.getByText('3. bind.html'));
-    expect(screen.getByText('服務確認與導流')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '📝 已申請市府平台' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '🏛️ 未申請市府平台' })).toBeDisabled();
-    expect(screen.queryByText('候選紀錄摘要')).not.toBeInTheDocument();
+    expect(screen.getByText('服務綁定與訂單查詢')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '確認綁定' })).toBeDisabled();
+    expect(screen.queryByText('服務確認與導流')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
+      'href',
+      'https://line-test.example.dev/line-bind',
+    );
   });
 
   it('LIFF 視覺頁使用後端核定的公開測試網址', async () => {
@@ -116,7 +119,7 @@ describe('React entrypoint registry', () => {
     render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
     await waitFor(() => expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
       'href',
-      'https://line-test.example.dev/line-identity',
+      'https://line-test.example.dev/line-gateway',
     ));
   });
 

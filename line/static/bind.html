@@ -326,12 +326,8 @@
         <div class="status-message" id="statusMessage"></div>
 
         <form id="bindForm" onsubmit="handleFormSubmit(event)" novalidate>
-            <!-- LINE User ID 欄位 (一般情況下隱藏，僅在開發測試模式下顯示) -->
-            <div class="form-group" id="userIdGroup" style="display: none;">
-                <span class="test-badge" id="testModeBadge" style="display: none;">開發測試模式</span>
-                <label class="form-label" for="lineUserId">LINE 用戶識別碼 (User ID)</label>
-                <input class="form-input" type="text" id="lineUserId" placeholder="自動獲取中..." readonly required>
-            </div>
+            <!-- LINE User ID 在背景自動獲取，不需產婦手動填寫 -->
+            <input type="hidden" id="lineUserId">
 
             <div class="form-group">
                 <label class="form-label" for="userName" id="userNameLabel">您的真實姓名</label>
@@ -385,7 +381,6 @@
     const loaderText = document.getElementById('loaderText');
     const statusMessage = document.getElementById('statusMessage');
     const lineUserIdInput = document.getElementById('lineUserId');
-    const testModeBadge = document.getElementById('testModeBadge');
     const formContent = document.getElementById('formContent');
     const successContent = document.getElementById('successContent');
     const successDesc = document.getElementById('successDesc');
@@ -444,7 +439,8 @@
             setFieldError(phoneInput, '聯絡電話需為 09 開頭的 10 碼手機號碼，例如 0912345678。');
         }
         if (!lineUserId) {
-            errors.push('無法取得 LINE 用戶識別碼，請重新從 LINE 開啟此頁。');
+            const queryUserId = getQueryParam('userId');
+            lineUserIdInput.value = queryUserId || ('client-' + Math.random().toString(36).substring(2, 10));
         }
         return {
             ok: errors.length === 0,
@@ -476,60 +472,60 @@
     // 初始化頁面
     window.addEventListener('DOMContentLoaded', async () => {
         try {
-            // 1. 先向後端請求 LINE 與 LIFF Runtime 設定
-            const [configRes, runtimeRes] = await Promise.all([
-                fetch('/api/line/config'),
-                fetch('/api/config/liff/runtime?page=bind')
-            ]);
-            if (!configRes.ok || !runtimeRes.ok) {
-                throw new Error('無法取得後端 API 配置');
+            // 1. 取得現行標準 LIFF runtime 配置
+            let liffId = '';
+            try {
+                const configRes = await fetch('/api/v1/line/identity/runtime-config');
+                if (configRes.ok) {
+                    const configData = await configRes.json();
+                    liffId = configData.data?.liff_id || '';
+                }
+            } catch (e) {
+                console.warn('讀取 runtime-config 失敗:', e);
             }
-            const config = await configRes.json();
-            const runtime = await runtimeRes.json();
-            runtimePage = runtime.page;
-            applyRuntime(runtime);
-            const liffId = config.liff_id;
+
+            try {
+                const runtimeRes = await fetch('/api/config/liff/runtime?page=bind');
+                if (runtimeRes.ok) {
+                    const runtime = await runtimeRes.json();
+                    runtimePage = runtime.page;
+                    applyRuntime(runtime);
+                }
+            } catch (_) {}
 
             // 檢查是否配置了 LIFF ID
             if (!liffId || liffId === 'your_liff_id_here' || liffId.trim() === '') {
-                console.warn('LINE_LIFF_ID 未在環境變數中配置。進入開發測試模式。');
-                enableTestMode('系統未配置 LINE LIFF ID。請手動輸入測試用的 LINE User ID。');
+                hideLoader();
                 return;
             }
 
             // 2. 初始化 LIFF SDK
             await liff.init({ liffId: liffId });
-            console.log('LIFF 初始化成功');
 
-            // 3. 檢查登入狀態，若未登入則自動登入
+            // 3. 檢查登入狀態，若在 LINE client 未登入則自動登入
             if (!liff.isLoggedIn()) {
-                console.log('使用者未登入，準備導向 LINE 登入...');
-                showLoader('正在導向 LINE 登入授權...');
-                liff.login();
-                return;
+                if (liff.isInClient()) {
+                    showLoader('正在導向 LINE 登入授權...');
+                    liff.login();
+                    return;
+                } else {
+                    hideLoader();
+                    return;
+                }
             }
 
-            // 4. 已登入，取得 User Profile
+            // 4. 已登入，背景自動獲取 User Profile 與 ID Token（不需使用者手動填寫）
             const profile = await liff.getProfile();
             if (profile && profile.userId) {
                 currentIdToken = liff.getIDToken() || '';
                 lineUserIdInput.value = profile.userId;
-                lineUserIdInput.readOnly = true;
                 await fetchAndFillClientInfo(profile.userId, currentIdToken);
-                hideLoader();
-            } else {
-                throw new Error('無法取得 LINE 用戶識別碼 (userId)');
             }
+            hideLoader();
 
         } catch (error) {
-            console.error('初始化失敗:', error);
-            // 發生錯誤時降級至測試模式，並顯示錯誤提示，同時檢查有無 query string 中的 userId
-            const queryUserId = getQueryParam('userId');
-            enableTestMode(`初始化 LIFF 失敗：${error.message}`);
-            if (queryUserId) {
-                lineUserIdInput.value = queryUserId;
-                await fetchAndFillClientInfo(queryUserId, '');
-            }
+            console.warn('LIFF 載入提示:', error);
+            hideLoader();
         }
     });
 
@@ -592,14 +588,10 @@
         }
     }
 
-    // 啟動測試模式 (允許手動輸入 User ID)
+    // 啟動測試模式 (不展示任何內部 ID 輸入框)
     function enableTestMode(tipText) {
         isTestMode = true;
-        document.getElementById('userIdGroup').style.display = 'block';
-        testModeBadge.style.display = 'inline-block';
-        lineUserIdInput.readOnly = false;
-        lineUserIdInput.placeholder = '請輸入模擬的 LINE User ID';
-        showMessage(tipText, 'info');
+        if (tipText) showMessage(tipText, 'info');
         hideLoader();
     }
 
@@ -638,31 +630,62 @@
 
             const result = await response.json();
 
-            if (response.ok && result.status === 'success') {
-                // 成功綁定
-                formContent.style.display = 'none';
-                successContent.style.display = 'block';
-                
-                let desc = `您的 LINE 帳號已成功連結姓名為「${result.client_name}」的客戶資料！`;
-                if (result.case_no) {
-                    desc += `\n\n您的案件編號為：${result.case_no}。`;
-                } else {
-                    desc += `\n\n您的案件編號尚待行政核發；完成核對後將主動通知您。`;
+            if (response.ok) {
+                // 【狀態 A：舊客完全命中】
+                if (result.status === 'state_a' || (result.status === 'success' && !result.needs_survey)) {
+                    formContent.style.display = 'none';
+                    successContent.style.display = 'block';
+
+                    let desc = `【狀態 A：舊客完全命中】\n您的 LINE 帳號已成功連結客戶「${result.client_name || name}」的專屬資料！`;
+                    if (result.case_no) {
+                        desc += `\n\n您的案件編號為：【${result.case_no}】。`;
+                    }
+                    desc += `\n\n系統資料庫已有您的完整需求問卷，無需重複填寫問卷！\n我們已為您啟用【客戶專屬選單】，請關閉此頁面回到聊天室即可使用。`;
+                    successDesc.style.whiteSpace = 'pre-line';
+                    successDesc.textContent = desc;
+                    hideLoader();
+                    return;
                 }
-                desc += `\n\n我們已將最新確認訊息傳送至您的 LINE 聊天室，請關閉此頁面。`;
-                successDesc.style.whiteSpace = 'pre-line';
-                successDesc.textContent = desc;
-                
-                hideLoader();
-            } else if (response.ok && result.status === 'confirm_rebind') {
-                // 需要確認是否重新綁定
-                formContent.style.display = 'none';
-                rebindContent.style.display = 'block';
-                hideLoader();
-            } else {
-                // 綁定失敗
+
+                // 【狀態 B：有案號但缺問卷】➔ 自動預填姓名+電話+case_no 無縫跳轉 register.html
+                if (result.status === 'state_b') {
+                    showLoader('已為您找到案件編號，即將無縫載入需求調查表單...');
+                    const target = new URL('/line-registration', window.location.origin);
+                    target.searchParams.set('name', result.name || name);
+                    target.searchParams.set('phone', result.phone || phone);
+                    if (result.case_no) target.searchParams.set('case_no', result.case_no);
+                    window.location.replace(target.toString());
+                    return;
+                }
+
+                // 【狀態 C：查無案號/未同步】➔ 建立臨時檔案，預填姓名+電話 無縫跳轉 register.html
+                if (result.status === 'state_c' || result.status === 'not_found' || (result.status === 'error' && result.message && result.message.includes('查無'))) {
+                    showLoader('市府名冊同步中，即將無縫載入工會需求調查表單...');
+                    const target = new URL('/line-registration', window.location.origin);
+                    target.searchParams.set('name', result.name || name);
+                    target.searchParams.set('phone', result.phone || phone);
+                    window.location.replace(target.toString());
+                    return;
+                }
+
+                // 需要確認重新綁定
+                if (result.status === 'confirm_rebind') {
+                    formContent.style.display = 'none';
+                    rebindContent.style.display = 'block';
+                    hideLoader();
+                    return;
+                }
+
+                // 其他一般訊息
                 showMessage(result.message || result.detail || '綁定失敗，請確認資料是否正確。', 'error');
                 hideLoader();
+            } else {
+                // 安全降級：無縫進入問卷
+                showLoader('即將為您載入工會需求調查表單...');
+                const target = new URL('/line-registration', window.location.origin);
+                target.searchParams.set('name', name);
+                target.searchParams.set('phone', phone);
+                window.location.replace(target.toString());
             }
 
         } catch (err) {

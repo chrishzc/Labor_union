@@ -261,8 +261,8 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
                 <input type="text" class="form-input" id="name" required maxlength="30" placeholder="請填寫真實姓名">
             </div>
             <div class="form-group">
-                <label class="form-label">身分證字號</label>
-                <input type="text" class="form-input" id="id_number" maxlength="12" placeholder="身分證，例如: A123456789">
+                <label class="form-label required">身分證字號</label>
+                <input type="text" class="form-input" id="id_number" required maxlength="12" placeholder="身分證，例如: A123456789">
             </div>
         </div>
         <div class="grid-2">
@@ -589,9 +589,40 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         );
     }
 
+    function autofillFromQueryParams() {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const name = params.get('name');
+            const phone = params.get('phone');
+            const caseNo = params.get('case_no');
+            if (name) {
+                const nameInput = document.getElementById('name');
+                if (nameInput) nameInput.value = name;
+            }
+            if (phone) {
+                const phoneInput = document.getElementById('phone');
+                if (phoneInput) phoneInput.value = phone;
+            }
+            if (caseNo) {
+                let caseNoInput = document.getElementById('case_no');
+                if (!caseNoInput) {
+                    caseNoInput = document.createElement('input');
+                    caseNoInput.type = 'hidden';
+                    caseNoInput.id = 'case_no';
+                    caseNoInput.name = 'case_no';
+                    document.getElementById('registerForm')?.appendChild(caseNoInput);
+                }
+                caseNoInput.value = caseNo;
+            }
+        } catch (e) {
+            console.warn('自動預填參數失敗:', e);
+        }
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
         initializeLiff();
         setupRefundPolicyAgreement();
+        autofillFromQueryParams();
     });
 
     function applyRuntime(runtime) {
@@ -869,7 +900,9 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
 
         const idValue = idNumber.value.trim().toUpperCase();
         idNumber.value = idValue;
-        if (idValue && !isValidTaiwanId(idValue)) {
+        if (!idValue) {
+            addError(errors, idNumber, '請填寫身分證字號。');
+        } else if (!isValidTaiwanId(idValue)) {
             addError(errors, idNumber, '身分證字號格式不正確，請填 1 個英文字母加 9 個數字。');
         }
 

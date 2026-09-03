@@ -37,8 +37,8 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     title: '1. gateway.html',
     subtitle: '服務確認與身分先行導流',
     badge: '伺服器已驗證',
-    endpointUrl: '/line-identity',
-    launchPath: '/line-identity',
+    endpointUrl: '/line-gateway',
+    launchPath: '/line-gateway',
     authLevel: '後端驗證 LINE 登入憑證；網址列 userId 僅供導航，不具授權效果',
     description: '正式入口先詢問是否已登記市府平台：已申請者繼續填寫工會「需求調查表單」，未申請者引導至新竹市到宅坐月子媒合服務平台。',
     apiMapping: '身分開啟、候選綁定檢查與確認流程已接通',
@@ -61,8 +61,8 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     title: '3. bind.html',
     subtitle: '既有客戶綁定入口（正式身分分流）',
     badge: '檢查後送出',
-    endpointUrl: '/line-identity',
-    launchPath: '/line-identity',
+    endpointUrl: '/line-bind',
+    launchPath: '/line-bind',
     authLevel: '後端驗證 LINE 登入憑證；候選匹配後仍需明確確認',
     description: '正式入口先顯示登記選擇；選擇已登記後才進入候選資料檢查與明確確認，不以姓名、電話或網址列 userId 授權。',
     apiMapping: '候選綁定、資料檢查與確認送出已接通',
@@ -181,7 +181,7 @@ function canonicalLiffUrl(path: string, origin: string): string {
 }
 
 function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
-  if (item.id === 'gateway' || item.id === 'bind' || item.id === 'identity') {
+  if (item.id === 'gateway' || item.id === 'identity') {
     return (
       <div className="mock-form-inputs">
         <div className="mock-step-indicator">服務確認與導流</div>
@@ -190,6 +190,20 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <small>我已在市府媒合服務平台完成登記，要繼續填寫工會【需求調查表單】。</small>
         <button type="button" className="mock-primary-btn" disabled>🏛️ 未申請市府平台</button>
         <small>我尚未於市府平台登記，請先前往新竹市政府到宅月子媒合服務平台提出申請。</small>
+      </div>
+    );
+  }
+
+  if (item.id === 'bind') {
+    return (
+      <div className="mock-form-inputs">
+        <div className="mock-step-indicator">服務綁定與訂單查詢</div>
+        <p>請填寫基本資料，以完成 LINE 帳號與最新訂單的綁定：</p>
+        <label>您的真實姓名</label>
+        <input type="text" placeholder="請輸入姓名" readOnly />
+        <label>您的聯絡電話</label>
+        <input type="tel" placeholder="請輸入聯絡電話（例 0912345678）" readOnly />
+        <button type="button" className="mock-primary-btn" disabled>確認綁定</button>
       </div>
     );
   }

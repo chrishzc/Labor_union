@@ -125,20 +125,36 @@ Chrome 驗收須實際點擊 UI；mutation 不得以 API 直接呼叫替代。LI
 
 ### 3.1 訪客入口與 Gateway 身分先行導流
 
-| Node | 原圖顯示文字 |
-|---|---|
-| User_Entry | 訪客點擊 LINE 預設選單【服務登記／身分綁定】 |
-| Gateway_View | 開啟 gateway.html（服務確認首頁） |
-| Branch_Gov_No | 未申請市府平台：彈窗提醒 → 外連市府月子平台登記；提醒登記後回 LINE 填 60 題問卷 |
-| Branch_Gov_Yes | 已申請市府平台：身分先行，輸入姓名＋手機 09xx；系統即時向後端 clients 查詢 |
-| State_A | 狀態 A：舊客完全命中；綁定成功、推播案件編號 case_no、無需重複填問卷、啟用客戶選單 |
-| State_B | 狀態 B：有案號但缺問卷；自動預填姓名＋電話＋case_no，跳轉 register.html（60 題問卷） |
-| State_C | 狀態 C：查無案號／未同步；建立臨時檔案、預填姓名＋電話，跳轉 register.html（60 題問卷） |
-| Retry_Fail | 第 1 次提示確認；第 2 次仍失敗時，自動於 customer_service_tickets 建立協處工單 |
+```mermaid
+flowchart TD
+    User_Entry["訪客點擊 LINE 預設選單【服務登記／身分綁定】"] --> Gateway_View["開啟 gateway.html（服務確認首頁）"]
+
+    Gateway_View --> Branch_Gov_No["【未申請市府平台】<br/>彈窗提醒 ➔ 外連市府月子平台登記<br/>(提醒登記後回 LINE 填 60 題問卷)"]
+    Gateway_View --> Branch_Gov_Yes["【已申請市府平台】<br/>身分先行：輸入 姓名 + 手機 09xx<br/>(系統即時向後端 clients 查詢)"]
+
+    Branch_Gov_Yes -->|"完全吻合"| State_A["【狀態 A：舊客完全命中】<br/>綁定成功！推播案件編號【case_no】<br/>無需重複填問卷 ➔ 啟用【客戶選單】"]
+    Branch_Gov_Yes -->|"有案號待填問卷"| State_B["【狀態 B：有案號但缺問卷】<br/>自動預填 姓名+電話+case_no<br/>無縫跳轉 register.html (60 題問卷)"]
+    Branch_Gov_Yes -->|"名冊未同步"| State_C["【狀態 C：查無案號/未同步】<br/>建立臨時檔案，預填姓名+電話<br/>跳轉 register.html (60 題問卷)"]
+    Branch_Gov_Yes -->|"連續失敗 2 次"| Retry_Fail["【重試失敗協處】<br/>自動於 customer_service_tickets 建立協處工單"]
+
+    State_B --> Register_Form["register.html (60 題需求調查問卷)"]
+    State_C --> Register_Form
+```
+
+| Node | 原圖顯示文字 | 系統執行與狀態機契約 |
+|---|---|---|
+| User_Entry | 訪客點擊 LINE 預設選單【服務登記／身分綁定】 | 觸發 LINE URI 進入 Gateway |
+| Gateway_View | 開啟 gateway.html（服務確認首頁） | 提供二選一安全導流介面 |
+| Branch_Gov_No | 未申請市府平台：彈窗提醒 → 外連市府月子平台登記；提醒登記後回 LINE 填 60 題問卷 | 彈出提醒視窗後外連 `https://hsinchu-nanny.hccg.gov.tw/home` |
+| Branch_Gov_Yes | 已申請市府平台：身分先行，輸入姓名＋手機 09xx；系統即時向後端 clients 查詢 | 進入 `bind.html`，輸入姓名與 09xx 手機，向後端查詢 clients 與訂單狀態 |
+| State_A | 狀態 A：舊客完全命中；綁定成功！推播案件編號【case_no】無需重複填問卷 ➔ 啟用【客戶選單】 | 後端比對吻合且問卷已完成：成功綁定、推播 case_no，無需重填問卷，即刻啟用客戶選單 |
+| State_B | 狀態 B：有案號但缺問卷；自動預填 姓名+電話+case_no 無縫跳轉 register.html（60 題問卷） | 後端有客戶案件但問卷未齊：回傳 case_no，前端無縫跳轉 `/line-registration?name=...&phone=...&case_no=...` 並自動帶入欄位 |
+| State_C | 狀態 C：查無案號／未同步；建立臨時檔案、預填姓名＋電話 跳轉 register.html（60 題問卷） | 後端查無案號（市府名冊未同步或新客）：建立 provisional 臨時登記，前端無縫跳轉 `/line-registration?name=...&phone=...` 並自動帶入欄位 |
+| Retry_Fail | 第 1 次提示確認；第 2 次仍失敗時，自動於 customer_service_tickets 建立協處工單 | 連續 2 次輸入查核失敗，轉真人客服工單協處 |
 
 箭頭：User_Entry → Gateway_View（載入 LIFF）；Gateway_View → Branch_Gov_No／Branch_Gov_Yes；
 Branch_Gov_Yes → State_A（完全吻合）／State_B（有案號待填問卷）／State_C（名冊未同步）／
-Retry_Fail（連續失敗 2 次）。
+Retry_Fail（連續失敗 2 次）；State_B／State_C → Register_Form。
 
 ### 3.2 產婦問卷登記與資料異動
 

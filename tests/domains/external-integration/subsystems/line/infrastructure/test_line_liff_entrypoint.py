@@ -141,10 +141,10 @@ def test_default_service_registration_menu_uses_the_canonical_identity_entry() -
     source = (ROOT / "config" / "line_menu.json").read_text(encoding="utf-8")
     identity = (ROOT / "line" / "static" / "identity.html").read_text(encoding="utf-8")
 
-    assert '"id": "service_registration"' in source
-    assert '"uri": "?entry=registration"' in source
-    assert '"uri": "?target=registration"' not in source
-    assert '"uri_source": "liff"' in source
+    assert '"id": "service_registration"' in source or '"id":"service_registration"' in source
+    assert '"uri": "?entry=registration"' in source or '"uri":"?entry=registration"' in source
+    assert '"uri": "?target=registration"' not in source and '"uri":"?target=registration"' not in source
+    assert '"uri_source": "liff"' in source or '"uri_source":"liff"' in source
     assert 'return entry === "registration";' in identity
 
 
@@ -362,3 +362,9 @@ def test_active_liff_pages_offer_manual_reauthentication_without_url_identity() 
     assert "liff.login({redirectUri: redirect.toString()})" in mobile_admin
     assert "liff.login({redirectUri: location.href})" not in mobile_admin
     assert 'params.get("userId")' not in mobile_admin
+
+
+def test_line_bind_page_route_serves_bind_html() -> None:
+    response = line_identity.bind_page()
+    assert response.status_code == 200
+    assert response.path.name == "bind.html"

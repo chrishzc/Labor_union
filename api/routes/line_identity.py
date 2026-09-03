@@ -102,6 +102,7 @@ review_router = APIRouter(
 page_router = APIRouter(tags=["LINE Identity"])
 _IDENTITY_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "identity.html"
 _GATEWAY_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "gateway.html"
+_BIND_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "bind.html"
 _REGISTRATION_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "register.html"
 _STAFF_ORDERS_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_order_search.html"
 _STAFF_SCHEDULE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_schedule.html"
@@ -119,6 +120,11 @@ def identity_page():
 @page_router.get("/line-gateway")
 def gateway_page():
     return FileResponse(_GATEWAY_PAGE, headers=_NO_CACHE_HEADERS)
+
+
+@page_router.get("/line-bind")
+def bind_page():
+    return FileResponse(_BIND_PAGE, headers=_NO_CACHE_HEADERS)
 
 
 @page_router.get("/line-registration")
