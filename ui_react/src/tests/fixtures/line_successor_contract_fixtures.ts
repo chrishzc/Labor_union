@@ -42,7 +42,7 @@ export const ESCALATION_VIEW_RESPONSE = {
     workflow_version: 0,
     automation_hold: 'active',
     hold_scope_label: 'opaque',
-    masked_context: {
+    context: {
       summary_code: 'complaint_explicit',
       policy_version: 'complaint.v1',
       category: 'other',

@@ -32,7 +32,7 @@ describe('StaffPage real data boundary', () => {
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
     await waitFor(() => expect(screen.getAllByText('在職').length).toBeGreaterThan(0));
-    expect(screen.getByText('📞 09********')).toBeInTheDocument();
+    expect(screen.getByText('📞 09******** ｜ 學歷：大學')).toBeInTheDocument();
     expect(screen.queryByText(/未開放|後端.*提供|unavailable|資料待補/)).not.toBeInTheDocument();
   });
 

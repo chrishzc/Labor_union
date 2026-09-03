@@ -1,6 +1,6 @@
 /**
  * File: data_browser_query_schemas.ts
- * Description: 六來源 masked Data Browser GET 的 strict Zod 契約。
+ * Description: 六來源 canonical Data Browser GET 的 strict Zod 契約。
  */
 import { z } from 'zod';
 
@@ -21,10 +21,9 @@ export const DataBrowserPresentationSchema = z.enum([
   'integer',
   'decimal',
   'status',
-  'masked',
 ]);
 
-export const DataBrowserMaskedCellSchema = z
+export const DataBrowserCellSchema = z
   .object({
     field_id: z.string().min(1).max(100),
     label: z.string().min(1).max(100),
@@ -32,36 +31,36 @@ export const DataBrowserMaskedCellSchema = z
     presentation: DataBrowserPresentationSchema,
   })
   .strict();
-export type DataBrowserMaskedCell = z.infer<typeof DataBrowserMaskedCellSchema>;
+export type DataBrowserCell = z.infer<typeof DataBrowserCellSchema>;
 
-export const DataBrowserMaskedRowSchema = z
+export const DataBrowserRowSchema = z
   .object({
     source_id: DataBrowserSourceIdSchema,
     row_identity: z.string().min(1).max(191),
     display_title: z.string().min(1).max(300),
-    summary_cells: z.array(DataBrowserMaskedCellSchema),
-    detail_cells: z.array(DataBrowserMaskedCellSchema),
+    summary_cells: z.array(DataBrowserCellSchema),
+    detail_cells: z.array(DataBrowserCellSchema),
     recorded_at: z.string().nullable(),
     source_actor_label: z.string().nullable(),
     version_identity: z.string().regex(/^[0-9a-f]{64}$/),
   })
   .strict();
-export type DataBrowserMaskedRow = z.infer<typeof DataBrowserMaskedRowSchema>;
+export type DataBrowserRow = z.infer<typeof DataBrowserRowSchema>;
 
-export const DataBrowserMaskedPageSchema = z
+export const DataBrowserPageSchema = z
   .object({
     source_id: DataBrowserSourceIdSchema,
-    items: z.array(DataBrowserMaskedRowSchema),
+    items: z.array(DataBrowserRowSchema),
     next_cursor: z.string().min(1).nullable(),
   })
   .strict();
-export type DataBrowserMaskedPage = z.infer<typeof DataBrowserMaskedPageSchema>;
+export type DataBrowserPage = z.infer<typeof DataBrowserPageSchema>;
 
-export const DataBrowserMaskedPageEnvelopeSchema = z
+export const DataBrowserPageEnvelopeSchema = z
   .object({
     success: z.boolean(),
     message: z.string(),
-    data: DataBrowserMaskedPageSchema,
+    data: DataBrowserPageSchema,
     error: z.string().nullable().optional(),
   })
   .strict();

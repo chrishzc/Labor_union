@@ -1,6 +1,6 @@
 """
 File: admin_audit.py
-Description: 提供管理員遮罩稽核清單唯讀查詢與受限 detail 相容入口。
+Description: 提供管理員稽核清單唯讀查詢與受限 detail 相容入口。
 """
 
 from __future__ import annotations
@@ -13,9 +13,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api.dependencies.admin_auth import require_admin
 from api.error_contracts import typed_http_error
 from api.schemas.admin_audit import (
-    AdminAuditMaskedDetailView,
-    AdminAuditMaskedItemView,
-    AdminAuditMaskedPageView,
+    AdminAuditDetailView,
+    AdminAuditItemView,
+    AdminAuditPageView,
 )
 from api.schemas.base import BaseResponse
 from infrastructure.mysql.mysql_adapter import get_connection
@@ -31,7 +31,7 @@ from subsystems.access.security_audit_query import (
 router = APIRouter(prefix="/api/v1/admin/audits", tags=["Admin Audit"])
 
 
-@router.get("", response_model=BaseResponse[AdminAuditMaskedPageView])
+@router.get("", response_model=BaseResponse[AdminAuditPageView])
 def list_audits(
     action: str | None = Query(default=None, min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_.-]+$"),
     action_prefix: str | None = Query(default=None, min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_.-]+$"),
@@ -59,18 +59,18 @@ def list_audits(
         raise _audit_unavailable() from error
     total_pages = max(1, (result.total + result.page_size - 1) // result.page_size)
     return BaseResponse(
-        data=AdminAuditMaskedPageView(
+        data=AdminAuditPageView(
             items=[_item_view(item) for item in result.items],
             page=result.page,
             page_size=result.page_size,
             total=result.total,
             total_pages=total_pages,
         ),
-        message="成功取得遮罩稽核清單",
+        message="成功取得稽核清單",
     )
 
 
-@router.get("/{audit_id}", response_model=BaseResponse[AdminAuditMaskedDetailView])
+@router.get("/{audit_id}", response_model=BaseResponse[AdminAuditDetailView])
 def audit_detail(
     audit_id: int,
     _: AdminPrincipal = Depends(require_admin),
@@ -81,11 +81,11 @@ def audit_detail(
         raise _audit_unavailable() from error
     if detail is None:
         raise typed_http_error(404, "not_found", "audit_record_not_found", "找不到管理員稽核紀錄。", "access-audit-query")
-    return BaseResponse(data=AdminAuditMaskedDetailView.model_validate(asdict(detail)))
+    return BaseResponse(data=AdminAuditDetailView.model_validate(asdict(detail)))
 
 
-def _item_view(item: AuditListItem) -> AdminAuditMaskedItemView:
-    return AdminAuditMaskedItemView.model_validate(asdict(item))
+def _item_view(item: AuditListItem) -> AdminAuditItemView:
+    return AdminAuditItemView.model_validate(asdict(item))
 
 
 def _audit_unavailable() -> HTTPException:

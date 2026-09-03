@@ -17,8 +17,8 @@ const issue = {
   issue_code: 'historical_status_invalid',
   field_path: 'status',
   field_label: '訂單狀態',
-  masked_source_value: '9',
-  masked_current_value: '1',
+  source_value: '9',
+  current_value: '1',
   rule: 'status must be one of 0, 1, or 2',
   allowed_values: ['0', '1', '2'],
   process_blocker: '不得進入後續訂單流程',
@@ -26,7 +26,7 @@ const issue = {
 
 const context: HistoricalReviewContext = {
   review_identity: 'review:historical:1',
-  masked_case_identity: 'CASE-***1',
+  case_identity: 'CASE-***1',
   issues: [issue],
   review_version: 2,
   remediation_version: 0,

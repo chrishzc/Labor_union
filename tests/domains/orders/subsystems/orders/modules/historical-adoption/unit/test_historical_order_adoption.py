@@ -111,6 +111,46 @@ def test_valid_status_is_adopted_when_dates_are_null():
     assert candidate.resulting_version == 4
 
 
+def test_deposit_paid_future_start_remains_historical_unserved():
+    current = _current(
+        OrderLifecycleStatus.DISCUSSION,
+        planned_start=date(2026, 9, 2),
+    )
+    source = HistoricalOrderSourceFacts(
+        HistoricalOrderSourceStatus.DEPOSIT_PAID,
+        date(2026, 9, 2),
+        date(2026, 9, 30),
+    )
+
+    candidate = build_historical_order_candidate(current, source, _BUSINESS_DATE)
+
+    assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
+    assert candidate.result is HistoricalOrderResult.HISTORICAL_UNSERVED
+    assert candidate.after_status is OrderLifecycleStatus.HISTORICAL_UNSERVED
+    assert candidate.date_patch == ()
+
+
+def test_deposit_paid_service_ending_on_business_date_remains_in_service():
+    current = _current(
+        OrderLifecycleStatus.DISCUSSION,
+        planned_start=date(2026, 8, 1),
+    )
+    source = HistoricalOrderSourceFacts(
+        HistoricalOrderSourceStatus.DEPOSIT_PAID,
+        date(2026, 8, 1),
+        _BUSINESS_DATE,
+    )
+
+    candidate = build_historical_order_candidate(current, source, _BUSINESS_DATE)
+
+    assert candidate.result is HistoricalOrderResult.HISTORICAL_IN_SERVICE
+    assert candidate.after_status is OrderLifecycleStatus.HISTORICAL_IN_SERVICE
+    assert candidate.date_patch == (
+        ("actual_start_date", date(2026, 8, 1)),
+        ("actual_end_date", _BUSINESS_DATE),
+    )
+
+
 @pytest.mark.parametrize(
     ("source_status", "expected_status"),
     (
@@ -241,7 +281,7 @@ def test_matching_pending_deposit_apply_writes_formal_matching_root_before_recei
     assert matching.command.source_identity == row.source_identity
 
 
-def test_historical_start_matching_hcm_plan_does_not_create_actual_start():
+def test_historical_start_matching_plan_is_an_actual_start_and_completes_service():
     current = _current(OrderLifecycleStatus.DISCUSSION, planned_start=date(2025, 1, 3))
     source = HistoricalOrderSourceFacts(
         HistoricalOrderSourceStatus.DEPOSIT_PAID,
@@ -252,9 +292,13 @@ def test_historical_start_matching_hcm_plan_does_not_create_actual_start():
     candidate = build_historical_order_candidate(current, source, _BUSINESS_DATE)
 
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
-    assert candidate.date_patch == ()
+    assert candidate.date_patch == (
+        ("actual_start_date", date(2025, 1, 3)),
+        ("actual_end_date", date(2025, 1, 31)),
+    )
     assert candidate.issue_codes == ()
-    assert candidate.after_status is OrderLifecycleStatus.HISTORICAL_UNSERVED
+    assert candidate.result is HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED
+    assert candidate.after_status is OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED
 
 
 def test_historical_start_different_from_hcm_plan_becomes_actual_start():
@@ -288,7 +332,7 @@ def test_historical_actual_start_rebuild_uses_order_rest_days_and_holidays():
     )
 
 
-def test_matching_hcm_plan_clears_previously_inferred_actual_start():
+def test_matching_plan_start_keeps_actual_start_and_updates_end_date():
     current = _current(
         OrderLifecycleStatus.COMPLETED,
         planned_start=date(2025, 1, 2),
@@ -305,7 +349,9 @@ def test_matching_hcm_plan_clears_previously_inferred_actual_start():
         _BUSINESS_DATE,
     )
 
-    assert candidate.date_patch == (("actual_start_date", None),)
+    assert candidate.result is HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED
+    assert candidate.after_status is OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED
+    assert candidate.date_patch == (("actual_end_date", date(2025, 1, 31)),)
 
 
 def test_valid_historical_status_overwrites_current_value_without_false_warning():
@@ -441,7 +487,7 @@ def test_adopted_accounting_review_outbox_is_acknowledgeable():
         {
             "review_identity": review_identity,
             "source_event_identity": "historical-orders:row:019",
-            "masked_case_identity": "***0019",
+            "case_identity": "***0019",
             "issue_codes": [
                 "historical_accounting_service_calendar_unconfirmed"
             ],

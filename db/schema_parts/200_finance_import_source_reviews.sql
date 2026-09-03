@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS finance_import_source_reviews (
     format_id ENUM('legacy', 'taishin', 'sinopac') NOT NULL,
     sheet_name VARCHAR(191) NOT NULL,
     source_row INT UNSIGNED NOT NULL,
-    masked_source_identity VARCHAR(191) NOT NULL,
+    source_identity VARCHAR(191) NOT NULL,
     issue_codes JSON NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_finance_source_review_identity (review_identity),

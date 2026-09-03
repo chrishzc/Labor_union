@@ -321,6 +321,23 @@ class _WorkbookRepository:
     def load_receipt(self, key):
         return self.receipts.get(key)
 
+    def find_absent_orders(self, _source_case_nos, *, for_update):
+        assert type(for_update) is bool
+        return ()
+
+    def cancel_absent_orders(
+        self,
+        candidates,
+        *,
+        workbook_key,
+        source_content_digest,
+        actor,
+        correlation_id,
+    ):
+        del workbook_key, source_content_digest, actor, correlation_id
+        assert candidates == ()
+        return 0
+
     def claim(self, key, digest, _correlation_id):
         prior = self.claims.get(key)
         if prior is not None and prior != digest:

@@ -42,11 +42,11 @@ def mask_secrets(obj, secrets):
         return obj
 
     if isinstance(obj, str):
-        masked = obj
+        redacted = obj
         for sec in clean_secrets:
-            if sec in masked:
-                masked = masked.replace(sec, '***MASKED***')
-        return masked
+            if sec in redacted:
+                redacted = redacted.replace(sec, '***REDACTED***')
+        return redacted
     elif isinstance(obj, dict):
         return {k: mask_secrets(v, clean_secrets) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -422,13 +422,13 @@ def main():
     try:
         connection = pymysql.connect(**db_config)
     except Exception as e:
-        masked_err = mask_secrets(str(e), secrets)
+        redacted_err = mask_secrets(str(e), secrets)
         err_manifest = {
             'mode': 'apply' if args.apply else 'check',
             'success': False,
             'post_check_failed': False,
-            'errors': [f'Failed to connect to MySQL: {masked_err}'],
-            'apply_result': {'applied': False, 'reason': f'DB Connection Error: {masked_err}'}
+            'errors': [f'Failed to connect to MySQL: {redacted_err}'],
+            'apply_result': {'applied': False, 'reason': f'DB Connection Error: {redacted_err}'}
         }
         print(json.dumps(err_manifest, ensure_ascii=False, indent=2, sort_keys=True))
         sys.exit(1)

@@ -46,6 +46,23 @@ class _Repository:
         del source_event_identities
         return ()
 
+    def find_absent_orders(self, _source_case_nos, *, for_update):
+        assert type(for_update) is bool
+        return ()
+
+    def cancel_absent_orders(
+        self,
+        candidates,
+        *,
+        workbook_key,
+        source_content_digest,
+        actor,
+        correlation_id,
+    ):
+        del workbook_key, source_content_digest, actor, correlation_id
+        assert candidates == ()
+        return 0
+
 
 class _UnitOfWork:
     def __enter__(self):

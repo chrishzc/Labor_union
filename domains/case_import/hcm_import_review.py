@@ -24,7 +24,7 @@ class HcmImportReviewRoot:
     source_content_digest: str
     source_sheet_identity: str
     source_row: int
-    masked_case_identity: str
+    case_identity: str
     source_fingerprint: PreviewFingerprint
     issue_codes: tuple[str, ...]
     evidence_snapshot: Mapping[str, object]
@@ -48,12 +48,12 @@ def build_hcm_import_review_root(
     sheet_identity = _sha256_text(source_sheet.strip())
     source_identity = f"hcm-workbook:{source_content_digest}:{sheet_identity}:row:{source_row}"
     review_identity = f"hcm-review:{_sha256_text(source_identity)}"
-    masked_identity = _masked_case_identity(case_identity, source_row)
+    case_identity_value = _canonical_case_identity(case_identity, source_row)
     bounded_evidence = _bounded_evidence(evidence_snapshot)
     fingerprint = fingerprint_payload(
         {
             "source_event_identity": source_identity,
-            "masked_case_identity": masked_identity,
+            "case_identity": case_identity_value,
             "issue_codes": normalized_issues,
             "evidence_snapshot": bounded_evidence,
         }
@@ -64,7 +64,7 @@ def build_hcm_import_review_root(
         source_content_digest,
         sheet_identity,
         source_row,
-        masked_identity,
+        case_identity_value,
         fingerprint,
         normalized_issues,
         bounded_evidence,
@@ -76,7 +76,7 @@ def opened_anomaly_snapshot(root: HcmImportReviewRoot) -> dict[str, object]:
         "definition_code": "IMPORT-004",
         "review_identity": root.review_identity,
         "source_row": root.source_row,
-        "masked_case_identity": root.masked_case_identity,
+        "case_identity": root.case_identity,
         "issue_codes": root.issue_codes,
         "active": True,
         "source_version": 1,
@@ -88,7 +88,7 @@ def build_hcm_warning_occurrences(
 ) -> tuple[ImportWarningOccurrence, ...]:
     return build_hcm_warning_occurrences_from_review(
         source_event_identity=root.source_event_identity,
-        masked_case_identity=root.masked_case_identity,
+        case_identity=root.case_identity,
         issue_codes=root.issue_codes,
     )
 
@@ -96,7 +96,7 @@ def build_hcm_warning_occurrences(
 def build_hcm_warning_occurrences_from_review(
     *,
     source_event_identity: str,
-    masked_case_identity: str,
+    case_identity: str,
     issue_codes: tuple[str, ...],
 ) -> tuple[ImportWarningOccurrence, ...]:
     if "hcm_case_import:case_import_case_no_required" in issue_codes:
@@ -107,7 +107,7 @@ def build_hcm_warning_occurrences_from_review(
             source_event_identity=source_event_identity,
             logical_code=_hcm_logical_code(issue_code),
             field_path=_hcm_field_path(issue_code),
-            masked_subject=masked_case_identity,
+            subject=case_identity,
             issue_codes=(issue_code,),
         )
         for issue_code in issue_codes
@@ -154,10 +154,9 @@ def _bounded_evidence(snapshot: Mapping[str, object]) -> dict[str, object]:
     return bounded
 
 
-def _masked_case_identity(case_identity: object, source_row: int) -> str:
+def _canonical_case_identity(case_identity: object, source_row: int) -> str:
     raw = str(case_identity or "").strip()
-    return f"hcm-***-{raw[-4:]}" if raw else f"hcm-row-{source_row}"
-
+    return raw if raw else f"hcm-row-{source_row}"
 
 def _require_sha256(value: str, name: str) -> None:
     if not isinstance(value, str) or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):

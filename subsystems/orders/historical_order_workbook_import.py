@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from domains.orders.historical_adoption import HistoricalOrderResult, HistoricalOrderSourceStatus
+from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from subsystems.orders.historical_adoption_workflow import HistoricalOrderAdoptionRequest, HistoricalOrderAdoptionWorkflow
 from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbook, load_historical_order_workbook
@@ -39,6 +40,20 @@ class HistoricalOrderWorkbookRepository(Protocol):
     ) -> None: ...
 
     def find_open_review_identities(self, source_event_identities: tuple[str, ...]) -> tuple[str, ...]: ...
+
+    def find_absent_orders(
+        self, source_case_nos: tuple[str, ...], *, for_update: bool
+    ) -> tuple[HistoricalOrderAbsenceCancellation, ...]: ...
+
+    def cancel_absent_orders(
+        self,
+        candidates: tuple[HistoricalOrderAbsenceCancellation, ...],
+        *,
+        workbook_key: str,
+        source_content_digest: str,
+        actor: str,
+        correlation_id: str,
+    ) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +107,31 @@ class HistoricalOrderResultCounts:
 
 
 @dataclass(frozen=True, slots=True)
+class HistoricalOrderAbsenceCancellation:
+    case_no: str
+    before_status: OrderLifecycleStatus
+    expected_version: int
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.case_no, str)
+            or not self.case_no
+            or self.case_no.strip() != self.case_no
+        ):
+            raise ValueError("historical_order_absence_case_no_invalid")
+        if not isinstance(self.before_status, OrderLifecycleStatus):
+            raise TypeError("historical_order_absence_status_invalid")
+        if self.before_status is OrderLifecycleStatus.CANCELLED:
+            raise ValueError("historical_order_absence_already_cancelled")
+        if (
+            isinstance(self.expected_version, bool)
+            or not isinstance(self.expected_version, int)
+            or self.expected_version < 0
+        ):
+            raise ValueError("historical_order_absence_version_invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class HistoricalOrderWorkbookPreview:
     source_content_digest: str
     sheet_identity: str
@@ -105,6 +145,11 @@ class HistoricalOrderWorkbookPreview:
     status_counts: HistoricalOrderStatusCounts
     result_counts: HistoricalOrderResultCounts
     preview_fingerprint: str
+    absent_order_cancellations: tuple[HistoricalOrderAbsenceCancellation, ...] = ()
+
+    @property
+    def absent_order_cancellation_count(self) -> int:
+        return len(self.absent_order_cancellations)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -117,6 +162,7 @@ class HistoricalOrderWorkbookPreview:
             "current_conflict_count": self.current_conflict_count,
             "assignment_candidate_count": self.assignment_candidate_count,
             "evidence_only_pairing_count": self.evidence_only_pairing_count,
+            "absent_order_cancellation_count": self.absent_order_cancellation_count,
             "status_counts": self.status_counts.as_dict(),
             "result_counts": self.result_counts.as_dict(),
             "preview_fingerprint": self.preview_fingerprint,
@@ -137,6 +183,12 @@ class HistoricalOrderWorkbookReceipt:
     status_counts: HistoricalOrderStatusCounts
     result_counts: HistoricalOrderResultCounts
     review_references: tuple[str, ...] = ()
+    absent_order_cancellation_count: int = 0
+
+    def __post_init__(self) -> None:
+        value = self.absent_order_cancellation_count
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError("historical_order_absence_cancellation_count_invalid")
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -149,6 +201,7 @@ class HistoricalOrderWorkbookReceipt:
             "assignments_created": self.assignments_created,
             "replayed_rows": self.replayed_rows,
             "replayed_workbook": self.replayed_workbook,
+            "absent_order_cancellation_count": self.absent_order_cancellation_count,
             "status_counts": self.status_counts.as_dict(),
             "result_counts": self.result_counts.as_dict(),
             "review_references": list(self.review_references),
@@ -217,8 +270,11 @@ class HistoricalOrderWorkbookImportService:
 
     def preview(self, source_path: str) -> HistoricalOrderWorkbookPreview:
         workbook = load_historical_order_workbook(source_path)
-        previews = tuple(self._workflow.preview(row) for row in workbook.rows)
-        return _preview(workbook, previews)
+        row_previews = tuple(self._workflow.preview(row) for row in workbook.rows)
+        absent_orders = self._repository.find_absent_orders(
+            _source_case_nos(workbook), for_update=False
+        )
+        return _preview(workbook, row_previews, absent_orders)
 
     def apply(
         self,
@@ -235,16 +291,36 @@ class HistoricalOrderWorkbookImportService:
             replay = self._stored_replay(key, workbook)
             if replay is not None:
                 return replay
+            source_case_nos = _source_case_nos(workbook)
             row_previews = tuple(self._workflow.preview(row) for row in workbook.rows)
+            absent_orders = self._repository.find_absent_orders(
+                source_case_nos, for_update=False
+            )
             preview = self._require_preview(
-                workbook, row_previews, supplied_preview_fingerprint
+                workbook,
+                row_previews,
+                absent_orders,
+                supplied_preview_fingerprint,
             )
             try:
                 with self._unit_of_work_factory() as unit_of_work:
                     if self._repository.claim(key, workbook.content_digest, correlation_id) == "conflict":
                         raise HistoricalOrderWorkbookConflict("historical_order_workbook_idempotency_conflict")
+                    locked_absent_orders = self._repository.find_absent_orders(
+                        source_case_nos, for_update=True
+                    )
+                    if _absence_snapshot(locked_absent_orders) != _absence_snapshot(
+                        preview.absent_order_cancellations
+                    ):
+                        raise HistoricalOrderWorkbookConflict(
+                            "historical_order_absence_preview_stale"
+                        )
                     receipt = self._apply_rows(
-                        workbook, key, actor, correlation_id
+                        workbook,
+                        key,
+                        actor,
+                        correlation_id,
+                        locked_absent_orders,
                     )
                     self._repository.save_receipt(
                         key,
@@ -258,6 +334,7 @@ class HistoricalOrderWorkbookImportService:
                 if str(error) in {
                     "historical_order_candidate_stale",
                     "historical_order_idempotency_conflict",
+                    "historical_order_absence_candidate_stale",
                 }:
                     raise HistoricalOrderWorkbookConflict(str(error)) from error
                 raise
@@ -265,14 +342,25 @@ class HistoricalOrderWorkbookImportService:
         finally:
             self._repository.release_lock(key)
 
-    def _require_preview(self, workbook, row_previews, supplied):
-        preview = _preview(workbook, row_previews)
+    def _require_preview(
+        self,
+        workbook,
+        row_previews,
+        absent_orders,
+        supplied,
+    ):
+        preview = _preview(workbook, row_previews, absent_orders)
         if preview.preview_fingerprint != supplied:
             raise HistoricalOrderWorkbookConflict("historical_order_preview_stale")
         return preview
 
     def _apply_rows(
-        self, workbook, key, actor, correlation_id
+        self,
+        workbook,
+        key,
+        actor,
+        correlation_id,
+        absent_orders,
     ) -> HistoricalOrderWorkbookReceipt:
         outcomes: Counter[str] = Counter()
         locked_previews: list[object] = []
@@ -301,12 +389,32 @@ class HistoricalOrderWorkbookImportService:
             review_identity = getattr(receipt, "review_identity", None)
             if review_identity is not None and review_identity not in review_references:
                 review_references.append(review_identity)
+
+        absent_order_cancellation_count = self._repository.cancel_absent_orders(
+            _canonical_absent_orders(absent_orders),
+            workbook_key=key,
+            source_content_digest=workbook.content_digest,
+            actor=actor,
+            correlation_id=correlation_id,
+        )
+        if absent_order_cancellation_count != len(absent_orders):
+            raise RuntimeError("historical_order_absence_cancellation_count_mismatch")
+
         _assert_conservation(len(workbook.rows), outcomes)
         return HistoricalOrderWorkbookReceipt(
-            workbook.content_digest, len(workbook.rows), outcomes["adopted"], outcomes["unmatched_case"],
-            review_rows, outcomes["current_conflict"], assignments_created, replayed_rows, False,
-            _status_counts(workbook), _result_counts(tuple(locked_previews)),
-            tuple(review_references),
+            source_content_digest=workbook.content_digest,
+            source_row_count=len(workbook.rows),
+            adopted_count=outcomes["adopted"],
+            unmatched_case_count=outcomes["unmatched_case"],
+            review_required_count=review_rows,
+            current_conflict_count=outcomes["current_conflict"],
+            assignments_created=assignments_created,
+            replayed_rows=replayed_rows,
+            replayed_workbook=False,
+            status_counts=_status_counts(workbook),
+            result_counts=_result_counts(tuple(locked_previews)),
+            review_references=tuple(review_references),
+            absent_order_cancellation_count=absent_order_cancellation_count,
         )
 
     def _stored_replay(self, key: str, workbook: HistoricalOrderWorkbook) -> HistoricalOrderWorkbookReceipt | None:
@@ -316,6 +424,7 @@ class HistoricalOrderWorkbookImportService:
         if stored["request_fingerprint"] != workbook.content_digest:
             raise HistoricalOrderWorkbookConflict("historical_order_workbook_idempotency_conflict")
         snapshot = {**json.loads(stored["result_snapshot"]), "replayed_workbook": True}
+        snapshot.setdefault("absent_order_cancellation_count", 0)
         stored_counts = snapshot.get("status_counts")
         if stored_counts is not None and "completed_1" in stored_counts:
             stored_counts = {
@@ -346,26 +455,51 @@ class HistoricalOrderWorkbookImportService:
         return HistoricalOrderWorkbookReceipt(**snapshot)
 
 
-def _preview(workbook: HistoricalOrderWorkbook, row_previews) -> HistoricalOrderWorkbookPreview:
+def _preview(
+    workbook: HistoricalOrderWorkbook,
+    row_previews,
+    absent_orders=(),
+) -> HistoricalOrderWorkbookPreview:
     _assert_workbook_validation(workbook, row_previews)
     _assert_source_schedule_consistency(row_previews, workbook.rows)
+    absent_orders = _canonical_absent_orders(absent_orders)
     outcomes = Counter(item.outcome.value for item in row_previews)
-    candidates = sum(sum(item.resolution.value == "assignment_candidate" for item in preview.pairings) for preview in row_previews)
-    evidence = sum(sum(item.resolution.value == "evidence_only" for item in preview.pairings) for preview in row_previews)
+    candidates = sum(
+        sum(item.resolution.value == "assignment_candidate" for item in preview.pairings)
+        for preview in row_previews
+    )
+    evidence = sum(
+        sum(item.resolution.value == "evidence_only" for item in preview.pairings)
+        for preview in row_previews
+    )
     status_counts = _status_counts(workbook)
     result_counts = _result_counts(row_previews)
     fingerprint = fingerprint_payload({
         "digest": workbook.content_digest,
         "sheet": workbook.sheet_identity,
-        "rows": tuple((item.source_identity, item.source_fingerprint, item.fingerprint.value) for item in row_previews),
+        "rows": tuple(
+            (item.source_identity, item.source_fingerprint, item.fingerprint.value)
+            for item in row_previews
+        ),
         "status_counts": status_counts.as_dict(),
         "result_counts": result_counts.as_dict(),
+        "absent_order_cancellations": _absence_snapshot(absent_orders),
     }).value
     review_rows = 0
     return HistoricalOrderWorkbookPreview(
-        workbook.content_digest, workbook.sheet_identity, len(workbook.rows), outcomes["adopted"],
-        outcomes["unmatched_case"], review_rows, outcomes["current_conflict"],
-        candidates, evidence, status_counts, result_counts, fingerprint,
+        source_content_digest=workbook.content_digest,
+        sheet_identity=workbook.sheet_identity,
+        source_row_count=len(workbook.rows),
+        adopted_count=outcomes["adopted"],
+        unmatched_case_count=outcomes["unmatched_case"],
+        review_required_count=review_rows,
+        current_conflict_count=outcomes["current_conflict"],
+        assignment_candidate_count=candidates,
+        evidence_only_pairing_count=evidence,
+        status_counts=status_counts,
+        result_counts=result_counts,
+        preview_fingerprint=fingerprint,
+        absent_order_cancellations=absent_orders,
     )
 
 
@@ -397,6 +531,44 @@ def _assert_workbook_validation(
             resolution = getattr(pairing.resolution, "value", pairing.resolution)
             if resolution in {"staff_missing", "staff_ambiguous"}:
                 raise ValueError("historical_order_staff_not_unique")
+
+
+def _source_case_nos(workbook: HistoricalOrderWorkbook) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                row.case_no
+                for row in workbook.rows
+                if isinstance(row.case_no, str) and row.case_no
+            }
+        )
+    )
+
+
+def _canonical_absent_orders(values) -> tuple[HistoricalOrderAbsenceCancellation, ...]:
+    result = tuple(values)
+    if any(not isinstance(item, HistoricalOrderAbsenceCancellation) for item in result):
+        raise TypeError("historical_order_absence_candidate_invalid")
+    ordered = tuple(
+        sorted(
+            result,
+            key=lambda item: (
+                item.case_no,
+                item.before_status.value,
+                item.expected_version,
+            ),
+        )
+    )
+    if len({item.case_no for item in ordered}) != len(ordered):
+        raise ValueError("historical_order_absence_case_no_duplicated")
+    return ordered
+
+
+def _absence_snapshot(values) -> tuple[tuple[str, str, int], ...]:
+    return tuple(
+        (item.case_no, item.before_status.value, item.expected_version)
+        for item in _canonical_absent_orders(values)
+    )
 
 
 def _result_counts(row_previews) -> HistoricalOrderResultCounts:
@@ -665,7 +837,8 @@ def _mask_case(case_no: str | None) -> str | None:
 __all__ = [
     "HistoricalOrderWorkbookConflict", "HistoricalOrderWorkbookImportService", "HistoricalOrderWorkbookPreview",
     "HistoricalOrderWorkbookReceipt", "HistoricalOrderWorkbookUnavailable",
-    "HistoricalOrderStatusCounts", "HistoricalOrderSourceScheduleConflict",
+    "HistoricalOrderAbsenceCancellation", "HistoricalOrderStatusCounts",
+    "HistoricalOrderSourceScheduleConflict",
     "HistoricalOrderSourceScheduleConflictError", "HistoricalOrderSourceScheduleInterval",
     "project_source_schedule_conflicts",
 ]

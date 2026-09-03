@@ -140,6 +140,9 @@ def _materialize(result):
         "deposit_settled_on": result.deposit_settled_on,
         "actual_start_date": result.actual_start_date,
         "actual_end_date": result.actual_end_date,
+        "historical_source_start_date": result.historical_source_start_date,
+        "historical_source_end_date": result.historical_source_end_date,
+        "historical_paired_staff_name": result.historical_paired_staff_name,
         "assignment_segments": {
             **_field_payload(result.assignment_segments),
             "value": [
@@ -171,6 +174,9 @@ def _materialize(result):
         "deposit_settled_on",
         "actual_start_date",
         "actual_end_date",
+        "historical_source_start_date",
+        "historical_source_end_date",
+        "historical_paired_staff_name",
     ):
         payload[field_name] = _field_payload(getattr(result, field_name))
     return payload

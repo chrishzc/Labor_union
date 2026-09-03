@@ -103,16 +103,29 @@ def _validate_control_state(row: Mapping[str, object]) -> None:
     if not valid: raise ValueError("human-hold control projection is inconsistent")
 
 
-def _validate_order_row(row: Mapping[str, object], case_no: str) -> tuple[str, int, int]:
+def _validate_order_row(
+    row: Mapping[str, object],
+    case_no: str,
+    *,
+    allow_incomplete_order: bool = False,
+) -> tuple[str, int, int]:
+    if type(allow_incomplete_order) is not bool:
+        raise TypeError("allow_incomplete_order must be a bool")
     if row["case_no"] != case_no: raise ValueError("locked order identity differs from case_no")
     status = row["status"]
     if status not in _CANONICAL_STATUSES: raise ValueError("locked order status is not canonical")
-    if status == "待補件": raise ValueError("pending-completion order cannot enter lifecycle commands")
+    if status == "待補件" and not allow_incomplete_order: raise ValueError("pending-completion order cannot enter lifecycle commands")
     version = _nonnegative_int(row["lifecycle_version"], "lifecycle_version")
-    service_days = _positive_int(row["service_days"], "service_days")
+    raw_service_days = row["service_days"]
+    if allow_incomplete_order and raw_service_days is None:
+        service_days = 0
+    elif allow_incomplete_order:
+        service_days = _nonnegative_int(raw_service_days, "service_days")
+    else:
+        service_days = _positive_int(raw_service_days, "service_days")
     if row["cancel_reason"] is not None and not isinstance(row["cancel_reason"], str): raise TypeError("cancel_reason must be a string or None")
     terms = (row["service_start_time"], row["service_end_time"], row["service_end_day_offset"])
-    if not all(value is None for value in terms) and any(value is None for value in terms): raise ValueError("order service time terms are partially populated")
+    if not allow_incomplete_order and not all(value is None for value in terms) and any(value is None for value in terms): raise ValueError("order service time terms are partially populated")
     offset = row["service_end_day_offset"]
     if offset is not None and (isinstance(offset, bool) or not isinstance(offset, int) or offset not in {0, 1}): raise ValueError("service_end_day_offset must be 0, 1, or None")
     return str(status), version, service_days
@@ -138,18 +151,29 @@ def _validate_lifecycle_event(row: Mapping[str, object], *, case_no: str, idempo
     return _nonnegative_int(row["expected_version"], "existing lifecycle expected_version")
 
 
-def lock_order_lifecycle_command_envelope(cursor: Any, case_no: str, expected_version: int, idempotency_key: str) -> OrderLifecycleCommandEnvelope:
+def lock_order_lifecycle_command_envelope(
+    cursor: Any,
+    case_no: str,
+    expected_version: int,
+    idempotency_key: str,
+    *,
+    allow_incomplete_order: bool = False,
+) -> OrderLifecycleCommandEnvelope:
     """Lock canonical aggregate rows without owning the caller transaction."""
     if not callable(getattr(cursor, "execute", None)): raise TypeError("cursor must provide execute()")
     if not callable(getattr(cursor, "fetchone", None)) or not callable(getattr(cursor, "fetchall", None)): raise TypeError("cursor must provide fetchone() and fetchall()")
     case_no = _required_text(case_no, "case_no")
     request_expected_version = _nonnegative_int(expected_version, "expected_version")
     idempotency_key = _required_text(idempotency_key, "idempotency_key")
+    if type(allow_incomplete_order) is not bool:
+        raise TypeError("allow_incomplete_order must be a bool")
     cursor.execute("SELECT case_no, status, lifecycle_version, service_days, cancel_reason,\n                  actual_start_date, actual_end_date, service_start_time,\n                  service_end_time, service_end_day_offset\n           FROM orders\n           WHERE case_no = %s\n           FOR UPDATE", (case_no,))
     order_value = cursor.fetchone()
     if order_value is None: raise ValueError("order does not exist")
     order = _exact_mapping(order_value, _ORDER_KEYS, "locked order")
-    current_status, lifecycle_version, service_days = _validate_order_row(order, case_no)
+    current_status, lifecycle_version, service_days = _validate_order_row(
+        order, case_no, allow_incomplete_order=allow_incomplete_order
+    )
     cursor.execute("SELECT control_type, control_key, scope, state, current_event_id,\n                  release_policy, expires_at_utc, confirmed_start_date,\n                  deposit_settlement_identity_hash, reason, changed_by\n           FROM order_lifecycle_control_state\n           WHERE case_no = %s\n           ORDER BY control_type, control_key\n           FOR UPDATE", (case_no,))
     state_values = cursor.fetchall()
     if not isinstance(state_values, Sequence) or isinstance(state_values, (str, bytes)): raise TypeError("control state query must return a sequence")

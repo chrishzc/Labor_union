@@ -390,7 +390,7 @@ def identity_review_decision_preview(
             "resulting_version": candidate.resulting_version.value,
             "subject_type": snapshot.subject_type.value if snapshot.subject_type else None,
             "subject_reference": snapshot.subject_reference,
-            "line_user_id_masked": _mask(snapshot.line_user_id.value if snapshot.line_user_id else ""),
+            "line_user_id": _mask(snapshot.line_user_id.value if snapshot.line_user_id else ""),
             "preview_fingerprint": candidate.fingerprint.value,
         }
     )
@@ -683,7 +683,7 @@ def _review_view(snapshot, *, outcome=None, receipt_identity=None) -> dict:
         "subject_reference": snapshot.subject_reference,
         "assigned_admin_id": None,
         "due_at": None,
-        "line_user_id_masked": _mask(snapshot.line_user_id.value if snapshot.line_user_id else ""),
+        "line_user_id": _mask(snapshot.line_user_id.value if snapshot.line_user_id else ""),
         "display_name": f"{snapshot.subject_type.value} #{snapshot.subject_reference}" if snapshot.subject_type else "未指定",
         "decision_reason": snapshot.decision_reason,
         "reviewed_by_actor_id": snapshot.reviewed_by_actor_id,

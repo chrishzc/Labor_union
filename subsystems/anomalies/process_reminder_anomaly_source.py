@@ -113,7 +113,7 @@ def build_hcm_missing_requests(
         snapshot = {
             "entity_kind": "client_counterpart",
             "error_codes": ("beclass_hcm_mismatch",),
-            "masked_identifier": f"case-***-{query_no[-4:]}",
+            "identifier": query_no,
             "review_item_id": review_item_id,
             "source_row": 1,
             "source_sheet": "current-state",

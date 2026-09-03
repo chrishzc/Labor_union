@@ -166,7 +166,7 @@ def _query_payload(query):
     context = query.context
     return {
         "review_identity": context.review_identity,
-        "masked_case_identity": context.masked_case_identity,
+        "case_identity": context.case_identity,
         "issues": [_conflict_payload(conflict) for conflict in context.conflicts],
         "review_version": context.review_version,
         "remediation_version": context.remediation_version,
@@ -210,7 +210,7 @@ def _apply_payload(application, command):
         ).context
         successor = {
             "review_identity": successor_context.review_identity,
-            "masked_case_identity": successor_context.masked_case_identity,
+            "case_identity": successor_context.case_identity,
             "issues": [
                 _conflict_payload(conflict)
                 for conflict in successor_context.conflicts
@@ -251,8 +251,8 @@ def _conflict_payload(conflict):
         "issue_code": conflict.issue_code,
         "field_path": conflict.field_path,
         "field_label": conflict.field_label,
-        "masked_source_value": conflict.masked_source_value,
-        "masked_current_value": conflict.masked_current_value,
+        "source_value": conflict.source_value,
+        "current_value": conflict.current_value,
         "rule": conflict.rule,
         "allowed_values": list(conflict.allowed_values),
         "process_blocker": conflict.process_blocker,

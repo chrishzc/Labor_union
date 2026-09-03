@@ -213,6 +213,121 @@ def test_reconciliation_replay_does_not_repeat_typed_terms_apply():
     assert port.apply_count == 1
 
 
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    (("需要下廚", True), ("不需要下廚", False)),
+)
+def test_reconciliation_applies_unique_explicit_line_cooking_answer(answer, expected):
+    class Port:
+        def __init__(self):
+            self.applied = []
+
+        def load_pair_facts(self, _case_no):
+            return {
+                "hcm_count": 1,
+                "beclass_count": 1,
+                "beclass_id": 9,
+                "survey_details": {"是否需要下廚：": answer},
+                "requires_cooking": None,
+            }
+
+        def record_cooking_review(self, *_args):
+            raise AssertionError("controlled explicit answer must not create a review")
+
+        def apply_cooking_terms(self, case_no, beclass_id, requires_cooking):
+            self.applied.append((case_no, beclass_id, requires_cooking))
+
+    port = Port()
+
+    result = reconcile_hcm_beclass_cooking(port, "115990823")
+
+    assert result.status == "reconciled"
+    assert result.requires_cooking is expected
+    assert port.applied == [("115990823", 9, expected)]
+
+
+def test_reconciliation_reviews_explicit_line_answer_conflicting_with_legacy_answer_without_writing():
+    class Port:
+        applied = []
+        reviews = []
+
+        def load_pair_facts(self, _case_no):
+            return {
+                "hcm_count": 1,
+                "beclass_count": 1,
+                "beclass_id": 9,
+                "survey_details": {
+                    "是否需要下廚：": "不需要下廚",
+                    "月子餐點調理喜好/飲食習慣：": "葷食",
+                },
+                "requires_cooking": None,
+            }
+
+        def record_cooking_review(self, _case_no, _facts, issue_code):
+            self.reviews.append(issue_code)
+
+        def apply_cooking_terms(self, *_args):
+            self.applied.append(True)
+
+    port = Port()
+
+    result = reconcile_hcm_beclass_cooking(port, "115990823")
+
+    assert result.status == "cooking_review_required"
+    assert port.reviews == ["case_import_cooking_requirement_ambiguous"]
+    assert port.applied == []
+
+
+@pytest.mark.parametrize("hcm_count,beclass_count", ((0, 1), (1, 0), (2, 1), (1, 2)))
+def test_reconciliation_does_not_write_without_exactly_one_hcm_and_beclass_pair(hcm_count, beclass_count):
+    class Port:
+        applied = []
+
+        def load_pair_facts(self, _case_no):
+            return {"hcm_count": hcm_count, "beclass_count": beclass_count}
+
+        def record_cooking_review(self, *_args):
+            raise AssertionError("unpaired records must not enter cooking review")
+
+        def apply_cooking_terms(self, *_args):
+            self.applied.append(True)
+
+    port = Port()
+
+    result = reconcile_hcm_beclass_cooking(port, "115990823")
+
+    assert result.status in {"pending_counterpart", "identity_conflict"}
+    assert port.applied == []
+
+
+def test_reconciliation_propagates_service_data_lock_without_writing():
+    class Port:
+        attempts = 0
+
+        def load_pair_facts(self, _case_no):
+            return {
+                "hcm_count": 1,
+                "beclass_count": 1,
+                "beclass_id": 9,
+                "survey_details": {"是否需要下廚：": "需要下廚"},
+                "requires_cooking": None,
+            }
+
+        def record_cooking_review(self, *_args):
+            raise AssertionError("valid source must attempt the typed owner command")
+
+        def apply_cooking_terms(self, *_args):
+            self.attempts += 1
+            raise ValueError("service_data_locked")
+
+    port = Port()
+
+    with pytest.raises(ValueError, match="service_data_locked"):
+        reconcile_hcm_beclass_cooking(port, "115990823")
+
+    assert port.attempts == 1
+
+
 def test_reconciliation_does_not_create_retired_anomaly_rechecks(monkeypatch):
     requests = []
 

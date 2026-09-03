@@ -42,7 +42,7 @@ class MySqlHcmImportReviewRepository:
             cursor.execute(
                 "INSERT INTO case_import_hcm_review_rows "
                 "(review_identity,source_event_identity,source_content_digest,source_sheet_identity,"
-                "source_row,masked_case_identity,source_fingerprint,issue_codes,evidence_snapshot) "
+                "source_row,case_identity,source_fingerprint,issue_codes,evidence_snapshot) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (
                     root.review_identity,
@@ -50,7 +50,7 @@ class MySqlHcmImportReviewRepository:
                     root.source_content_digest,
                     root.source_sheet_identity,
                     root.source_row,
-                    root.masked_case_identity,
+                    root.case_identity,
                     root.source_fingerprint.value,
                     _canonical_json(root.issue_codes),
                     _canonical_json(root.evidence_snapshot),

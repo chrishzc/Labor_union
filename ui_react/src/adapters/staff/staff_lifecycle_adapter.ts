@@ -17,7 +17,7 @@ export interface StaffLifecycleViewModel {
   version: number;
   effectiveAt: string | null;
   displayEffectiveAt: string;
-  maskedReasonCode: string | null;
+  reasonCode: string | null;
   canRetire: boolean;
   canReactivate: boolean;
 }
@@ -55,7 +55,7 @@ function viewModel(view: StaffLifecycleView): StaffLifecycleViewModel {
     version: view.version,
     effectiveAt: view.effective_at ?? null,
     displayEffectiveAt: view.effective_at ?? '—',
-    maskedReasonCode: view.masked_reason_code ?? null,
+    reasonCode: view.reason_code ?? null,
     canRetire: view.state === 'active',
     canReactivate: view.state === 'retired',
   };

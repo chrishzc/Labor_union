@@ -8,7 +8,7 @@ from typing import Any
 from shared_kernel.performance import MAXIMUM_PAGE_SIZE
 
 
-_STAFF_SUMMARY_COLUMNS = "id, name, phone"
+_STAFF_SUMMARY_COLUMNS = "id, name, phone, education"
 
 
 class MySqlStaffSummaryQueryRepository:

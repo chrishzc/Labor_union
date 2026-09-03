@@ -14,7 +14,7 @@ from domains.customer_service.escalation import (
     AutomationHoldState,
     EscalationWorkflowStatus,
     HumanEscalationDomainError,
-    MaskedContext,
+    EscalationContext,
     TriggerCode,
 )
 from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus
@@ -107,7 +107,7 @@ class _EscalationRepo:
             "source_event_identity": command.source_event_identity,
             "source_fingerprint": command.source_fingerprint,
             "trigger_code": command.trigger_code,
-            "masked_context": command.masked_context.as_dict(),
+            "context": command.context.as_dict(),
             "hold_scope": command.hold_scope,
             "workflow_status": EscalationWorkflowStatus.OPEN.value,
             "workflow_version": 0,
@@ -133,7 +133,7 @@ class _EscalationRepo:
     def append_source_event(self, escalation_id: int, command):
         self.events.append((escalation_id, "source_appended", {"source_event_identity": command.source_event_identity}))
 
-    def enqueue_masked_alert(self, intent):
+    def enqueue_alert(self, intent):
         self.alerts.append(intent)
 
     def save_receipt(self, key: str, fingerprint: str, receipt):
@@ -180,7 +180,7 @@ class _Uow:
 
 
 def _command(key: str = "create-1") -> CreateHumanEscalation:
-    from domains.customer_service.escalation import MaskedContext
+    from domains.customer_service.escalation import EscalationContext
 
     return CreateHumanEscalation(
         source_event_identity="line-event-1",
@@ -189,7 +189,7 @@ def _command(key: str = "create-1") -> CreateHumanEscalation:
         trigger_code=TriggerCode.COMPLAINT,
         trigger_policy_version="complaint.v1",
         ticket_category=CustomerServiceCategory.OTHER,
-        masked_context=MaskedContext("complaint_explicit", "complaint.v1", "other", "m4-mask.v1"),
+        context=EscalationContext("complaint_explicit", "complaint.v1", "other", "m4-mask.v1"),
         hold_scope="conversation:opaque",
         idempotency_key=IdempotencyKey(key),
         correlation_id=CorrelationId(f"corr-{key}"),
@@ -262,7 +262,7 @@ def test_resolve_keeps_hold_active_when_source_predicate_is_not_satisfied():
             trigger_code=TriggerCode.RUNTIME_CRITICAL,
             trigger_policy_version="runtime-critical.v1",
             ticket_category=base.ticket_category,
-            masked_context=MaskedContext(
+            context=EscalationContext(
                 "runtime_critical",
                 "runtime-critical.v1",
                 "other",
@@ -327,7 +327,7 @@ def test_stale_transition_is_typed_conflict():
 def test_masked_context_rejects_phone_email_and_line_user_id_values():
     for unsafe in ("0912-345-678", "member@example.test", "U" + "a" * 32):
         with pytest.raises(HumanEscalationDomainError):
-            MaskedContext(unsafe, "complaint.v1", "other", "m4-mask.v1")
+            EscalationContext(unsafe, "complaint.v1", "other", "m4-mask.v1")
 
 
 def test_active_scope_appends_source_and_saves_replay_receipt_without_new_alert():
@@ -342,7 +342,7 @@ def test_active_scope_appends_source_and_saves_replay_receipt_without_new_alert(
         trigger_code=second_command.trigger_code,
         trigger_policy_version=second_command.trigger_policy_version,
         ticket_category=second_command.ticket_category,
-        masked_context=second_command.masked_context,
+        context=second_command.context,
         hold_scope=second_command.hold_scope,
         idempotency_key=second_command.idempotency_key,
         correlation_id=second_command.correlation_id,

@@ -21,7 +21,7 @@ _TERMINAL_PREDICATE_LOGICAL_CODES = {
 class ImportWarningReviewResolutionState:
     review_identity: str
     source_row: int
-    masked_case_identity: str
+    case_identity: str
     unresolved_occurrence_count: int
     unresolved_issue_codes: tuple[str, ...]
 
@@ -68,7 +68,7 @@ def load_import_warning_review_resolution_state(
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT o.source_receipt_identity AS review_identity,"
-            "r.source_row,r.masked_case_identity "
+            "r.source_row,r.case_identity "
             "FROM import_warning_occurrences o "
             "JOIN case_import_hcm_review_rows r "
             "ON r.review_identity=o.source_receipt_identity "
@@ -154,7 +154,7 @@ def _review_resolution_state(review, siblings) -> ImportWarningReviewResolutionS
     return ImportWarningReviewResolutionState(
         review_identity=str(review["review_identity"]),
         source_row=int(review["source_row"]),
-        masked_case_identity=str(review["masked_case_identity"]),
+        case_identity=str(review["case_identity"]),
         unresolved_occurrence_count=unresolved_occurrence_count,
         unresolved_issue_codes=tuple(sorted(set(unresolved))),
     )

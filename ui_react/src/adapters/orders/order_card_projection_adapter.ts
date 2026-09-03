@@ -56,6 +56,16 @@ function row<T>(key: string, label: string, field: OrdersCardProjectionField<T>,
   };
 }
 
+function optionalHistoricalRow<T>(
+  key: string,
+  label: string,
+  field: OrdersCardProjectionField<T> | undefined,
+  render: (value: T) => string,
+): readonly OrdersCardProjectionRowViewModel[] {
+  if (!field || field.source_version === null) return [];
+  return [row(key, label, field, render)];
+}
+
 function dateText(value: string): string { return value; }
 
 const ASSIGNMENT_STATUS_LABELS: Readonly<Record<string, string>> = {
@@ -102,8 +112,26 @@ export function adaptOrdersCardProjection(projection: OrdersCardProjection, expe
       row('deposit_amount_ntd', '定金金額', projection.deposit_amount_ntd, (value) => `NT$ ${value.toLocaleString('en-US')}`),
       row('deposit_settlement_state', '定金結清狀態', projection.deposit_settlement_state, String),
       row('deposit_settled_on', '定金結清日期', projection.deposit_settled_on, dateText),
-      row('actual_start_date', '實際開始日', projection.actual_start_date, dateText),
-      row('actual_end_date', '實際結束日', projection.actual_end_date, dateText),
+      ...optionalHistoricalRow(
+        'historical_source_start_date',
+        '歷史匯入開始日',
+        projection.historical_source_start_date,
+        dateText,
+      ),
+      ...optionalHistoricalRow(
+        'historical_source_end_date',
+        '歷史匯入結束日',
+        projection.historical_source_end_date,
+        dateText,
+      ),
+      ...optionalHistoricalRow(
+        'historical_paired_staff_name',
+        '歷史匯入配對月嫂',
+        projection.historical_paired_staff_name,
+        String,
+      ),
+      row('actual_start_date', '已發生實際開始日', projection.actual_start_date, dateText),
+      row('actual_end_date', '已發生實際結束日', projection.actual_end_date, dateText),
     ],
     assignmentSegments: projection.assignment_segments.value?.map((segment, index) => assignmentRows(segment, `assignment.${index}`)) ?? [],
     assignmentSegmentsAvailability: projection.assignment_segments.availability,

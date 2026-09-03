@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS case_import_hcm_review_rows (
     source_content_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     source_sheet_identity CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     source_row INT NOT NULL,
-    masked_case_identity VARCHAR(64) NOT NULL,
+    case_identity VARCHAR(64) NOT NULL,
     source_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     issue_codes JSON NOT NULL,
     evidence_snapshot JSON NOT NULL,

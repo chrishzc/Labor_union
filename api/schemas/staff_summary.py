@@ -12,6 +12,7 @@ class StaffSummaryView(BaseModel):
     id: int = Field(gt=0)
     name: str | None = None
     phone: str | None = None
+    education: str | None = None
 
 
 class StaffSummaryPageView(BaseModel):

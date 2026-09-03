@@ -24,6 +24,77 @@ SELECT o.case_no,
        o.floor_fee,
        o.actual_start_date,
        o.actual_end_date,
+       CASE WHEN o.status IN (
+           '歷史訂單－未服務',
+           '歷史訂單－服務中',
+           '歷史訂單－服務完成',
+           '歷史訂單－帳務完成'
+       ) THEN (
+           SELECT MAX(latest_historical_receipt.id)
+             FROM historical_order_adoption_receipts latest_historical_receipt
+            WHERE latest_historical_receipt.case_no = o.case_no
+              AND latest_historical_receipt.outcome = 'adopted'
+       ) ELSE NULL END AS historical_receipt_id,
+       CASE WHEN o.status IN (
+           '歷史訂單－未服務',
+           '歷史訂單－服務中',
+           '歷史訂單－服務完成',
+           '歷史訂單－帳務完成'
+       ) THEN (
+           SELECT MAX(historical_pairing.source_start_date)
+             FROM historical_order_adoption_receipts historical_receipt
+             JOIN historical_order_pairing_evidence historical_pairing
+               ON historical_pairing.receipt_id = historical_receipt.id
+            WHERE historical_receipt.id = (
+           SELECT MAX(latest_historical_receipt.id)
+             FROM historical_order_adoption_receipts latest_historical_receipt
+            WHERE latest_historical_receipt.case_no = o.case_no
+              AND latest_historical_receipt.outcome = 'adopted'
+       )
+              AND historical_pairing.caregiver_ordinal = 1
+       ) ELSE NULL END AS historical_source_start_date,
+       CASE WHEN o.status IN (
+           '歷史訂單－未服務',
+           '歷史訂單－服務中',
+           '歷史訂單－服務完成',
+           '歷史訂單－帳務完成'
+       ) THEN (
+           SELECT MAX(historical_pairing.source_end_date)
+             FROM historical_order_adoption_receipts historical_receipt
+             JOIN historical_order_pairing_evidence historical_pairing
+               ON historical_pairing.receipt_id = historical_receipt.id
+            WHERE historical_receipt.id = (
+           SELECT MAX(latest_historical_receipt.id)
+             FROM historical_order_adoption_receipts latest_historical_receipt
+            WHERE latest_historical_receipt.case_no = o.case_no
+              AND latest_historical_receipt.outcome = 'adopted'
+       )
+              AND historical_pairing.caregiver_ordinal = 1
+       ) ELSE NULL END AS historical_source_end_date,
+       CASE WHEN o.status IN (
+           '歷史訂單－未服務',
+           '歷史訂單－服務中',
+           '歷史訂單－服務完成',
+           '歷史訂單－帳務完成'
+       ) THEN (
+           SELECT MAX(historical_staff.name)
+             FROM historical_order_adoption_receipts historical_receipt
+             JOIN historical_order_pairing_evidence historical_pairing
+               ON historical_pairing.receipt_id = historical_receipt.id
+           JOIN staff historical_staff
+             ON historical_staff.id = historical_pairing.staff_id
+            WHERE historical_receipt.id = (
+           SELECT MAX(latest_historical_receipt.id)
+             FROM historical_order_adoption_receipts latest_historical_receipt
+            WHERE latest_historical_receipt.case_no = o.case_no
+              AND latest_historical_receipt.outcome = 'adopted'
+       )
+              AND historical_pairing.caregiver_ordinal = 1
+              AND historical_pairing.staff_id IS NOT NULL
+              AND historical_pairing.resolution IN (
+                  'evidence_only', 'assignment_candidate', 'assignment_reused'
+              )
+       ) ELSE NULL END AS historical_paired_staff_name,
        COALESCE(deposit.deposit_obligation_count, 0) AS deposit_obligation_count,
        deposit_projection.contracted_amount_ntd AS deposit_amount_ntd,
        deposit.obligation_identity AS deposit_obligation_identity,

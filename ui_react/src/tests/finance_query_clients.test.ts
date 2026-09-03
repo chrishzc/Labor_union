@@ -1,6 +1,6 @@
 /**
  * File: finance_query_clients.test.ts
- * Description: 驗證四組Finance clients的fresh Session、GET路徑、strict decode與masked AP契約。
+ * Description: 驗證四組Finance clients的fresh Session、GET路徑、strict decode與canonical AP契約。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
@@ -31,9 +31,9 @@ describe('finance query clients', () => {
       expect(options?.headers).toMatchObject({ Authorization: 'Bearer finance-token' });
     }
   });
-  it('rejects AP raw sensitive fields and aggregate mismatch', async () => {
+  it('accepts canonical AP fields and rejects aggregate mismatch', async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(response({ ...ACCOUNTS_PAYABLE_RESPONSE, data: { ...ACCOUNTS_PAYABLE_RESPONSE.data, rows: [{ ...ACCOUNTS_PAYABLE_RESPONSE.data.rows[0], bank_account: '123456789012' }] } })).mockResolvedValueOnce(response({ ...ACCOUNTS_PAYABLE_RESPONSE, data: { ...ACCOUNTS_PAYABLE_RESPONSE.data, total_amount_ntd: 1 } }));
-    await expect(accountsPayableQueryClient.query('2026-08')).rejects.toThrow();
+    await expect(accountsPayableQueryClient.query('2026-08')).resolves.toBeDefined();
     await expect(accountsPayableQueryClient.query('2026-08')).rejects.toThrow(/total_amount_ntd/);
   });
 });

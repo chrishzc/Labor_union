@@ -9,6 +9,7 @@ export const StaffDirectorySummarySchema = z
     id: z.number().int().positive(),
     name: z.string().nullable(),
     phone: z.string().nullable(),
+    education: z.string().nullable(),
   })
   .strict();
 
@@ -31,4 +32,3 @@ export const StaffDirectoryResponseSchema = z
 export type StaffDirectorySummary = z.infer<typeof StaffDirectorySummarySchema>;
 export type StaffDirectoryPage = z.infer<typeof StaffDirectoryPageSchema>;
 export type StaffDirectoryResponse = z.infer<typeof StaffDirectoryResponseSchema>;
-

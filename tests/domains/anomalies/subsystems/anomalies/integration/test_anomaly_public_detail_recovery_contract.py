@@ -138,7 +138,7 @@ def test_public_detail_and_recovery_models_have_no_raw_mapping_escape_hatch() ->
         ("notification_reason", "missing_document", "code", "missing_document"),
         ("issue_codes", ["missing_document"], "code_list", ["missing_document"]),
         ("overdue_obligations", ["obligation:19"], "detail_list", ["obligation:19"]),
-        ("staff_name", "Private Operator Name", "masked_text", "P***"),
+        ("staff_name", "Private Operator Name", "text", "P***"),
     ),
 )
 def test_registry_display_fields_emit_discriminated_safe_evidence(

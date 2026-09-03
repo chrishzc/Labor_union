@@ -35,7 +35,7 @@ def verify(arguments) -> dict[str, object]:
 def _inspect(connection, review_identity: str) -> dict[str, object]:
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT root.review_identity,root.masked_identifier,root.source_payload,root.issue_codes,"
+            "SELECT root.review_identity,root.identifier,root.source_payload,root.issue_codes,"
             "COUNT(outbox.id) AS outbox_count FROM beclass_import_review_rows root "
             "LEFT JOIN beclass_import_review_outbox outbox ON outbox.review_row_id=root.id "
             "WHERE root.review_identity=%s GROUP BY root.id",
@@ -56,7 +56,7 @@ def _checks(observed: dict[str, object]) -> list[dict[str, object]]:
     return [
         _check("invalid_root_is_open_for_review", review.get("outbox_count"), 1),
         _check("privacy_safe_payload", payload, {"query_no": None, "validation_marker": "missing_query_no"}),
-        _check("privacy_safe_identifier", "*" in str(review.get("masked_identifier", "")), True),
+        _check("privacy_safe_identifier", "*" in str(review.get("identifier", "")), True),
         _check("issue_is_recorded", issues, ["missing_query_no"]),
     ]
 

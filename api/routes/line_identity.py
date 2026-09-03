@@ -102,7 +102,10 @@ review_router = APIRouter(
 page_router = APIRouter(tags=["LINE Identity"])
 _IDENTITY_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "identity.html"
 _GATEWAY_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "gateway.html"
+_BIND_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "bind.html"
 _REGISTRATION_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "register.html"
+_PROFILE_UPDATE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "profile_update.html"
+_PROFILE_GUARD_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "profile_guard.html"
 _STAFF_ORDERS_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_order_search.html"
 _STAFF_SCHEDULE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_schedule.html"
 
@@ -121,9 +124,24 @@ def gateway_page():
     return FileResponse(_GATEWAY_PAGE, headers=_NO_CACHE_HEADERS)
 
 
+@page_router.get("/line-bind")
+def bind_page():
+    return FileResponse(_BIND_PAGE, headers=_NO_CACHE_HEADERS)
+
+
 @page_router.get("/line-registration")
 def registration_page():
     return FileResponse(_REGISTRATION_PAGE, headers=_NO_CACHE_HEADERS)
+
+
+@page_router.get("/line-profile-guard")
+def profile_guard_page():
+    return FileResponse(_PROFILE_GUARD_PAGE, headers=_NO_CACHE_HEADERS)
+
+
+@page_router.get("/line-profile-update")
+def profile_update_page():
+    return FileResponse(_PROFILE_UPDATE_PAGE, headers=_NO_CACHE_HEADERS)
 
 
 @page_router.get("/line-staff-orders")
@@ -524,7 +542,7 @@ def preview_review_decision(
             resulting_version=candidate.resulting_version.value,
             subject_type=snapshot.subject_type.value if snapshot.subject_type else None,
             subject_reference=snapshot.subject_reference,
-            line_user_id_masked=_mask_line_user_id(
+            line_user_id=_canonical_line_user_id(
                 snapshot.line_user_id.value if snapshot.line_user_id else ""
             ),
             preview_fingerprint=candidate.fingerprint.value,
@@ -738,7 +756,7 @@ def _review_response(snapshot, *, outcome=None, receipt_identity=None):
         subject_reference=snapshot.subject_reference,
         assigned_admin_id=snapshot.assigned_admin_id,
         due_at=snapshot.due_at,
-        line_user_id_masked=_mask_line_user_id(snapshot.line_user_id.value),
+        line_user_id=_canonical_line_user_id(snapshot.line_user_id.value),
         display_name=f"{snapshot.subject_type.value} #{snapshot.subject_reference}",
         decision_reason=snapshot.decision_reason,
         reviewed_by_actor_id=snapshot.reviewed_by_actor_id,
@@ -749,11 +767,8 @@ def _review_response(snapshot, *, outcome=None, receipt_identity=None):
     )
 
 
-def _mask_line_user_id(value: str) -> str:
-    if len(value) <= 8:
-        return value[:2] + "***"
-    return value[:4] + "…" + value[-4:]
-
+def _canonical_line_user_id(value: str) -> str:
+    return value
 
 def _correlation_id(prefix: str) -> CorrelationId:
     return CorrelationId(f"line-identity:{prefix}:{uuid4()}")

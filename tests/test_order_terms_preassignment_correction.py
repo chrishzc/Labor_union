@@ -278,3 +278,15 @@ def test_preassignment_service_started_allows_unique_cooking_correction():
     assert preview.after.requires_cooking is False
     assert preview.scheduling.assignments == ()
     assert preview.scheduling.cancelled_assignment_ids == ()
+
+
+def test_service_data_lock_rejects_unique_cooking_correction():
+    facts = _facts()
+    locked = replace(
+        facts,
+        order=replace(facts.order, service_data_locked=True),
+    )
+    workflow = terms_workflow.OrderTermsWorkflow(_Repository(locked), object(), _Clock())
+
+    with pytest.raises(ValueError, match="service_data_locked"):
+        workflow.preview("116990823", _terms(requires_cooking=True))

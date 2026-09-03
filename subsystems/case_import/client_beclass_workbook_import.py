@@ -18,7 +18,7 @@ from domains.case_import.client_beclass_validation import CLIENT_BECLASS_REQUIRE
 from domains.case_import.client_beclass_binding import ClientCaseBindingStatus
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.ports import UnitOfWork
-from subsystems.case_import.beclass_review_intake import masked_review_identifier, record_invalid_beclass_row
+from subsystems.case_import.beclass_review_intake import canonical_review_identifier, record_invalid_beclass_row
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 
 
@@ -239,7 +239,7 @@ class ClientBeClassWorkbookImportService:
                 review_identity = self._persist_review(
                     self._repository.connection, source_kind=BeClassImportSourceKind.CLIENT,
                     source_content_digest=workbook.digest, source_sheet=workbook.sheet_identity,
-                    source_row=row_number, masked_identifier=masked_review_identifier(BeClassImportSourceKind.CLIENT, payload.get("query_no"), row_number),
+                    source_row=row_number, identifier=canonical_review_identifier(BeClassImportSourceKind.CLIENT, payload.get("query_no"), row_number),
                     source_payload=_safe_review_payload(payload),
                     issue_codes=_client_validation_issue_codes(errors),
                 )
@@ -326,7 +326,7 @@ class ClientBeClassWorkbookImportService:
             self._repository.connection, source_kind=BeClassImportSourceKind.CLIENT,
             source_content_digest=workbook.digest, source_sheet=workbook.sheet_identity,
             source_row=row_number,
-            masked_identifier=masked_review_identifier(
+            identifier=canonical_review_identifier(
                 BeClassImportSourceKind.CLIENT, payload["query_no"], row_number,
             ),
             source_payload=review_payload or _safe_review_payload(payload),

@@ -42,7 +42,7 @@ class LineQaCatalogItemView(BaseModel):
     question: str
     aliases: tuple[str, ...] = ()
     answer: str
-    status: str
+    enabled: bool
     source_ref: str
     notes: str | None = None
 
@@ -52,5 +52,5 @@ class LineQaCatalogView(BaseModel):
 
     source_identity: str
     total_count: int = Field(ge=0)
-    ready_count: int = Field(ge=0)
+    enabled_count: int = Field(ge=0)
     items: tuple[LineQaCatalogItemView, ...] = ()

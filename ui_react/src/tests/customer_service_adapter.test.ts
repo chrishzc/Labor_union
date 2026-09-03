@@ -40,7 +40,7 @@ describe('customer service adapter', () => {
     );
     expect(page.items[0].categoryLabel).toBe('修改登記資料');
     expect(page.items[0].statusLabel).toBe('處理中');
-    expect(page.items[0].maskedLineUserId).toBe('U12***789');
+    expect(page.items[0].lineUserId).toBe('U12***789');
   });
 
   it('detail 逐筆映射 server events 且不改寫時間與 actor', () => {

@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<!--
+File: profile_guard.html
+Description: 修改登記資料身分門禁：先以 server 驗證 LINE 客戶綁定身分，合格者放行進入 profile_update，未綁定者堅決阻擋並導流。
+-->
+<html lang="zh-Hant-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>修改登記資料 ｜ 身分資格驗證</title>
+    <style>
+        :root {
+            --primary: #ff7f50;
+            --primary-hover: #e0693c;
+            --primary-light: #fff0eb;
+            --text-dark: #3e2723;
+            --text-muted: #74593f;
+            --border: #dec0b6;
+            --error: #d9534f;
+            --success: #2e7d32;
+            --bg-gradient: linear-gradient(135deg, #fff5f2 0%, #faece8 100%);
+            --card-bg: rgba(255, 255, 255, 0.95);
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            padding: 24px 16px;
+            background: var(--bg-gradient);
+            color: var(--text-dark);
+            font-family: "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 480px;
+            background: var(--card-bg);
+            border-radius: 24px;
+            padding: 28px 22px;
+            box-shadow: 0 12px 36px rgba(164, 60, 18, 0.08);
+            border: 1px solid rgba(222, 192, 182, 0.5);
+            text-align: center;
+        }
+        .logo {
+            font-size: 20px;
+            font-weight: 700;
+            color: #a43c12;
+            margin-bottom: 6px;
+        }
+        h1 {
+            font-size: 21px;
+            margin: 0 0 10px;
+            color: var(--text-dark);
+        }
+        .subtitle {
+            font-size: 14px;
+            color: var(--text-muted);
+            line-height: 1.6;
+            margin-bottom: 24px;
+        }
+        .guard-card {
+            border-radius: 16px;
+            padding: 20px 16px;
+            margin-bottom: 20px;
+            text-align: left;
+            line-height: 1.6;
+        }
+        .guard-card.checking {
+            background: var(--primary-light);
+            border: 1px solid var(--border);
+            text-align: center;
+        }
+        .guard-card.blocked {
+            background: #fff5f5;
+            border: 1px solid rgba(217, 83, 79, 0.3);
+        }
+        .guard-card.success {
+            background: #f1f8e9;
+            border: 1px solid rgba(46, 125, 50, 0.3);
+            text-align: center;
+        }
+        .guard-card.expired {
+            background: #fffdf5;
+            border: 1px solid rgba(255, 179, 0, 0.3);
+            text-align: center;
+        }
+        .status-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+            display: inline-block;
+        }
+        .card-title {
+            font-size: 17px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .card-title.blocked { color: var(--error); }
+        .card-title.success { color: var(--success); }
+        .card-desc {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin: 0 0 16px;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            font-size: 16px;
+            font-weight: 700;
+            border-radius: 12px;
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+            text-align: center;
+            margin-top: 10px;
+            transition: all 0.2s ease;
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(255, 127, 80, 0.25);
+        }
+        .btn-primary:hover {
+            background: var(--primary-hover);
+        }
+        .btn-secondary {
+            background: #fff;
+            color: #74593f;
+            border: 1px solid var(--border);
+        }
+        .btn-secondary:hover {
+            background: var(--primary-light);
+        }
+        .spinner {
+            width: 36px;
+            height: 36px;
+            border: 3px solid rgba(255, 127, 80, 0.2);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 14px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .security-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            color: #8d6e63;
+            background: #ede6e3;
+            padding: 4px 10px;
+            border-radius: 20px;
+            margin-top: 16px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="logo">🌸 新竹市到宅月子工會</div>
+    <h1>修改登記資料 ｜ 身分查驗</h1>
+    <div class="subtitle">為保護產婦個資與服務安全，進入資料異動前需由伺服器驗證您的 LINE 客戶綁定資格。</div>
+
+    <div id="stateChecking" class="guard-card checking">
+        <div class="spinner"></div>
+        <div style="font-weight: 700; color: #a43c12; margin-bottom: 4px;">正在驗證您的身分資格…</div>
+        <small style="color: var(--text-muted);">正在確認 LINE 登入憑證與工會名冊綁定狀態</small>
+    </div>
+
+    <div id="stateSuccess" class="guard-card success" style="display: none;">
+        <span class="status-icon">✅</span>
+        <div class="card-title success" style="justify-content: center;">身分查驗合格</div>
+        <p class="card-desc">已確認為工會建檔產婦，正在為您開啟資料異動申請表單…</p>
+        <a id="forwardLink" href="/line-profile-update" class="btn btn-primary">立即前往資料異動頁面</a>
+    </div>
+
+    <div id="stateBlocked" class="guard-card blocked" style="display: none;">
+        <div class="card-title blocked">🛑 尚未完成工會服務綁定</div>
+        <p class="card-desc">
+            很抱歉，【修改登記資料】功能僅開放給<strong>已在工會完成登記或服務綁定</strong>之產婦使用。<br><br>
+            系統目前查無您此 LINE 帳號的客戶綁定紀錄，因此無法直接開啟資料修改。
+        </p>
+        <div style="font-size: 13px; font-weight: 700; color: var(--text-dark); margin-bottom: 8px;">您可以透過以下方式進行：</div>
+        <a href="/line-bind" class="btn btn-primary">📝 前往服務綁定 (/line-bind)</a>
+        <small style="display: block; color: var(--text-muted); font-size: 12px; margin: 4px 0 12px;">已在市府平台登記或已有案件編號者，請先在此完成身分綁定。</small>
+        
+        <a href="/line-registration" class="btn btn-secondary">📋 填寫需求調查表單 (/line-registration)</a>
+        <small style="display: block; color: var(--text-muted); font-size: 12px; margin: 4px 0 0;">初次洽詢或尚未提出月子服務需求者，請先填寫需求調查。</small>
+    </div>
+
+    <div id="stateExpired" class="guard-card expired" style="display: none;">
+        <span class="status-icon">⚠️</span>
+        <div class="card-title" style="justify-content: center; color: #e65100;">LINE 登入狀態已過期</div>
+        <p class="card-desc" id="expiredMsg">LINE 授權憑證已過期或與伺服器不一致。請點擊下方按鈕重新登入以刷新憑證。</p>
+        <button type="button" class="btn btn-primary" onclick="relogin()">🔄 重新登入 LINE</button>
+    </div>
+
+    <div class="security-badge">
+        🔒 伺服器端 Token 檢驗 ｜ 禁止未授權存取 ｜ 防竄改架構
+    </div>
+</div>
+
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+    let liffId = '';
+
+    async function initGuard() {
+        try {
+            const configRes = await fetch('/api/v1/line/identity/runtime-config');
+            const configBody = await configRes.json().catch(() => ({}));
+            liffId = configBody.data?.liff_id;
+            if (!configRes.ok || !liffId || liffId === 'your_liff_id_here') {
+                showBlocked('系統設定維護中，暫無法驗證 LIFF 設定，請稍後再試。');
+                return;
+            }
+
+            await liff.init({ liffId });
+
+            if (!liff.isLoggedIn()) {
+                if (liff.isInClient()) {
+                    liff.login();
+                    return;
+                } else {
+                    showExpired('尚未登入 LINE，請點擊下方按鈕以 LINE 帳號登入。');
+                    return;
+                }
+            }
+
+            const token = liff.getIDToken();
+            if (!token) {
+                showExpired('無法取得 LINE 登入憑證，請重新登入。');
+                return;
+            }
+
+            // 呼叫後端驗證客戶綁定身分
+            const queryRes = await fetch('/api/v1/line/client-profile/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ line_id_token: token })
+            });
+
+            const queryBody = await queryRes.json().catch(() => ({}));
+
+            if (queryRes.ok && queryBody.data?.client_id) {
+                // 驗證合格，已綁定客戶！標記通過門禁並放行
+                sessionStorage.setItem("line_profile_guard_passed", "1");
+                showSuccess();
+                setTimeout(() => {
+                    location.href = '/line-profile-update?verified=1';
+                }, 800);
+            } else if (queryRes.status === 401) {
+                // Token 過期或失效
+                const msg = queryBody.detail?.error?.message || queryBody.detail?.message || 'LINE 登入狀態已過期，請重新登入。';
+                showExpired(msg);
+            } else if (queryRes.status === 403 || queryRes.status === 404 || String(queryBody.detail?.error?.code || '').includes('binding')) {
+                // 未完成身分綁定，堅決擋下！
+                showBlocked();
+            } else {
+                // 其他非 200 情況，亦直接擋下保護
+                showBlocked(queryBody.detail?.error?.message || queryBody.detail?.message);
+            }
+
+        } catch (error) {
+            console.warn('門禁檢查失敗:', error);
+            showBlocked('身分查驗連線異常，請稍後再試。');
+        }
+    }
+
+    function showSuccess() {
+        hideAll();
+        document.getElementById('stateSuccess').style.display = 'block';
+    }
+
+    function showBlocked(customMsg) {
+        hideAll();
+        const el = document.getElementById('stateBlocked');
+        el.style.display = 'block';
+        if (customMsg) {
+            console.log('Blocked reason:', customMsg);
+        }
+    }
+
+    function showExpired(msg) {
+        hideAll();
+        const el = document.getElementById('stateExpired');
+        el.style.display = 'block';
+        if (msg) {
+            document.getElementById('expiredMsg').textContent = msg;
+        }
+    }
+
+    function hideAll() {
+        document.getElementById('stateChecking').style.display = 'none';
+        document.getElementById('stateSuccess').style.display = 'none';
+        document.getElementById('stateBlocked').style.display = 'none';
+        document.getElementById('stateExpired').style.display = 'none';
+    }
+
+    function relogin() {
+        try {
+            if (liff.isLoggedIn()) {
+                liff.logout();
+            }
+        } catch (_) {}
+        liff.login({ redirectUri: location.href });
+    }
+
+    initGuard();
+</script>
+</body>
+</html>

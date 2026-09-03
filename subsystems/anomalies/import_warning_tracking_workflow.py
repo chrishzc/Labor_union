@@ -22,7 +22,7 @@ class ImportWarningTask:
     owning_lane: str
     logical_code: str
     field_path: str
-    masked_subject: str
+    subject: str
     issue_codes: tuple[str, ...]
     tracking_status: ImportWarningTrackingStatus
     tracking_version: int
@@ -72,7 +72,7 @@ class WarningReferralDescriptor:
     owning_lane: str
     logical_code: str
     field_path: str
-    masked_subject: str
+    subject: str
     display_message: str
     navigation_action: str
     action_kind: str
@@ -143,7 +143,7 @@ class ImportWarningTrackingApplication:
             owning_lane=task.owning_lane,
             logical_code=task.logical_code,
             field_path=task.field_path,
-            masked_subject=task.masked_subject,
+            subject=task.subject,
             display_message=_display_message(task),
             navigation_action=navigation_action,
             action_kind=action_kind,

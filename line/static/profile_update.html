@@ -10,14 +10,14 @@ Description: 以 server 驗證的 LIFF token 提出 Client 資料異動申請，
     <title>修改登記資料申請</title>
     <style>
         :root {
-            --primary: #4a90e2;
-            --primary-hover: #357abd;
-            --bg: linear-gradient(135deg, #eef2f7 0%, #d9e2ec 100%);
-            --card: rgba(255,255,255,.92);
-            --text: #334e68;
-            --muted: #627d98;
-            --error: #d64545;
-            --success: #2f855a;
+            --primary: #ff7f50;
+            --primary-hover: #e0693c;
+            --bg: linear-gradient(135deg, #fff5f2 0%, #faece8 100%);
+            --card: rgba(255,255,255,.95);
+            --text: #3e2723;
+            --muted: #74593f;
+            --error: #d9534f;
+            --success: #2e7d32;
         }
         * { box-sizing: border-box; }
         body {
@@ -126,6 +126,16 @@ Description: 以 server 驗證的 LIFF token 提出 Client 資料異動申請，
 
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
+    // 檢查是否已通過門禁檢驗；若未經門禁放行，立即重導向至門禁進行身分查驗
+    (function enforceProfileGuard() {
+        const params = new URLSearchParams(window.location.search);
+        const passed = sessionStorage.getItem("line_profile_guard_passed") === "1" || params.get("verified") === "1";
+        if (!passed) {
+            window.location.replace("/line-profile-guard");
+            return;
+        }
+    })();
+
     const fields = [
         ["name", "姓名"], ["gender", "性別"], ["phone", "聯絡電話"], ["city", "縣市"],
         ["address", "地址"], ["residence_type", "居住型態"], ["delivery_type", "生產方式"],
@@ -153,7 +163,25 @@ Description: 以 server 驗證的 LIFF token 提出 Client 資料異動申請，
             renderCurrent(profile);
             document.getElementById("submitButton").disabled = false;
             showStatus("已載入目前資料。選擇欄位後可先預覽，預覽不會寫入資料。", "notice");
-        } catch (error) { showStatus(error.message || "目前無法載入資料，請稍後再試。", "error"); }
+        } catch (error) {
+            if (error.status === 401) {
+                showStatusHtml(`
+                    <strong>⚠️ LINE 登入憑證已失效</strong><br>
+                    <span>${escapeHtml(error.message || "登入狀態已失效，請重新登入以刷新憑證。")}</span><br>
+                    <button type="button" onclick="relogin()" style="margin-top: 10px; padding: 10px; font-size: 15px;">🔄 重新登入 LINE</button>
+                `, "error");
+            } else if (error.status === 403 || String(error.code || "").includes("binding")) {
+                document.getElementById("changeForm").style.display = "none";
+                showStatusHtml(`
+                    <strong>🛑 尚未完成工會服務綁定</strong><br>
+                    <span>修改登記資料功能僅開放給<strong>已在工會完成登記或服務綁定</strong>之產婦使用。<br>系統目前查無您的客戶資料。</span><br>
+                    <a href="/line-bind" style="display: block; margin-top: 12px; padding: 12px; background: var(--primary); color: #fff; border-radius: 10px; text-decoration: none; font-weight: 700; text-align: center;">📝 前往服務綁定 (/line-bind)</a>
+                    <a href="/line-profile-guard" style="display: block; margin-top: 8px; padding: 10px; background: #fff; color: var(--muted); border: 1px solid var(--primary); border-radius: 10px; text-decoration: none; font-weight: 600; text-align: center; font-size: 14px;">🛡️ 返回身分查驗門禁</a>
+                `, "error");
+            } else {
+                showStatus(error.message || "目前無法載入資料，請稍後再試。", "error");
+            }
+        }
     }
 
     async function openCustomerIdentityFlow() {
@@ -217,10 +245,17 @@ Description: 以 server 驗證的 LIFF token 提出 Client 資料異動申請，
     async function request(url, payload) {
         const response = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
         const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(body.detail?.error?.message || body.detail?.message || '操作未完成。');
+        if (!response.ok) {
+            const err = new Error(body.detail?.error?.message || body.detail?.message || '操作未完成。');
+            err.status = response.status;
+            err.code = body.detail?.error?.code || body.detail?.code || '';
+            throw err;
+        }
         return body;
     }
     function showStatus(message, kind) { const status = document.getElementById("status"); status.textContent = message; status.className = `status ${kind}`; }
+    function showStatusHtml(html, kind) { const status = document.getElementById("status"); status.innerHTML = html; status.className = `status ${kind}`; }
+    function relogin() { try { if (liff.isLoggedIn()) liff.logout(); } catch (_) {} liff.login({ redirectUri: location.href }); }
 
     function renderSubmissionReceipt(receipt) {
         const card = document.getElementById("submissionReadback");

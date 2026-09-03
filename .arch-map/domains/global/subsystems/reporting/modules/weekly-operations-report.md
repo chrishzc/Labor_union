@@ -5,7 +5,7 @@
 - subsystem: `reporting`
 
 ## Responsibility
-以canonical Monday `week_start`協調selected week內案件、補助完成列與Scheduling正式工作日，提供strict JSON及同candidate XLSX；不得把year-to-date資料混入週報。
+以canonical `start_date`／`end_date` 協調自選期間內案件、補助完成列與Scheduling正式工作日，提供strict JSON及同candidate XLSX；不得把year-to-date資料混入營運報表。
 
 ## Implementation
 - primary:
@@ -25,17 +25,19 @@
 - inbound: authenticated React Reports page。
 
 ## Contracts
-- `weekly-operations-report.v1`與canonical `week_start` — `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` §15.1。
+- `operations-report.v2`與canonical `start_date`／`end_date` — `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` §15.1。
 
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/test_weekly_operations_report_contract.py`
 - integration_root: `ui_react/src/tests/reports_query_page.test.tsx`
 - integration_root: `ui_react/src/tests/weekly_operations_report_client.test.ts`
+- integration_root: `ui_react/src/tests/reports_entry_cross_owner_cutover.test.tsx`
+- integration_root: `ui_react/src/tests/fixtures/reports/weekly_operations_report_contract_fixtures.ts`
 
 ## Provenance
-- Global Reporting擁有跨Domain週報composition，business formula仍由各owner提供 — `architecture_declared` — 正式規格§15.1與current source。
+- Global Reporting擁有跨Domain營運報表composition，business formula仍由各owner提供 — `architecture_declared` — 正式規格§15.1與current source。
 - flat Python contract path由entrypoint review generator直接消費且本身證明cross-domain API／XLSX boundary — `source_observed` — `scripts/generate_entrypoint_review_queue.py`。
 
 ## Change triggers
-Reconcile when週界、補助期間、三分頁schema、owner fact dependency、public GET/export或Reports presentation test path改變。
+Reconcile when報表期間、補助期間、三分頁schema、owner fact dependency、public GET/export或Reports presentation test path改變。

@@ -207,7 +207,7 @@ def test_beclass_apply_persists_then_replays(monkeypatch):
         source_kind=BeClassImportSourceKind.CLIENT,
         source_sheet="sheet-1",
         source_row=2,
-        masked_identifier="client-***",
+        identifier="client-***",
         resolved_issue_codes=("client_field_invalid:Email",),
         resulting_version=1,
     )
@@ -236,7 +236,7 @@ def test_beclass_apply_rejects_stale_version(monkeypatch):
         source_kind=BeClassImportSourceKind.CLIENT,
         source_sheet="sheet-1",
         source_row=2,
-        masked_identifier="client-***",
+        identifier="client-***",
         resolved_issue_codes=("client_field_invalid:Email",),
         resulting_version=2,
     )

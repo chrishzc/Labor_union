@@ -14,7 +14,7 @@ from domains.orders.historical_order_warning_review import (
 def test_historical_review_expands_registered_field_and_staff_issues():
     warnings = build_historical_order_warning_occurrences(
         source_event_identity="historical-order:source:7",
-        masked_case_identity="order-***-0007",
+        case_identity="order-***-0007",
         issue_codes=("historical_status_invalid", "staff_missing"),
     )
 
@@ -28,7 +28,7 @@ def test_historical_unknown_issue_fails_closed_without_partial_warnings():
     with pytest.raises(UnknownImportWarningIssueError):
         build_historical_order_warning_occurrences(
             source_event_identity="historical-order:source:9",
-            masked_case_identity="order-***-0009",
+            case_identity="order-***-0009",
             issue_codes=("staff_missing", "unregistered_legacy_issue"),
         )
 
@@ -36,7 +36,7 @@ def test_historical_unknown_issue_fails_closed_without_partial_warnings():
 def test_historical_review_maps_assignment_and_nonempty_conflict_to_distinct_fields():
     warnings = build_historical_order_warning_occurrences(
         source_event_identity="historical-order:source:8",
-        masked_case_identity="order-***-0008",
+        case_identity="order-***-0008",
         issue_codes=(
             "historical_assignment_conflict",
             "historical_nonempty_conflict:actual_end_date",
@@ -52,7 +52,7 @@ def test_historical_review_maps_assignment_and_nonempty_conflict_to_distinct_fie
 def test_historical_review_maps_real_insufficient_assignment_evidence() -> None:
     warning = build_historical_order_warning_occurrences(
         source_event_identity="historical-order:source:assignment",
-        masked_case_identity="order-***-0011",
+        case_identity="order-***-0011",
         issue_codes=("historical_assignment_evidence_insufficient",),
     )[0]
 
@@ -65,7 +65,7 @@ def test_historical_review_maps_real_insufficient_assignment_evidence() -> None:
 def test_historical_review_maps_real_start_and_end_parse_failures() -> None:
     warnings = build_historical_order_warning_occurrences(
         source_event_identity="historical-order:source:10",
-        masked_case_identity="order-***-0010",
+        case_identity="order-***-0010",
         issue_codes=(
             "historical_order_start_date_invalid",
             "historical_order_end_date_invalid",

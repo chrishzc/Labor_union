@@ -25,7 +25,7 @@ type DataBrowserMode = 'pages' | 'empty' | 'unavailable';
 function envelope(data: object): Response {
   return new Response(JSON.stringify({
     success: true,
-    message: '成功取得去敏資料來源',
+    message: '成功取得資料來源',
     data,
     error: null,
   }), {
@@ -166,14 +166,14 @@ describe('Data Browser Phase5 entry candidate', () => {
     await waitFor(() => expect(count(requests, CLIENTS_ENDPOINT)).toBe(initialClients + 3));
     expect(requests.at(-1)?.query.get('after')).toBe('cursor-clients-1');
 
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視去敏詳情/ })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /檢視詳情/ })[0]);
     const beforeDrawerActions = requests.length;
-    expect(screen.getByText(/去敏資料詳情/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '複製去敏資料' }));
-    await waitFor(() => expect(screen.getByText('已複製去敏資料')).toBeInTheDocument());
+    expect(screen.getByText(/完整資料詳情/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '複製完整資料' }));
+    await waitFor(() => expect(screen.getByText('已複製完整資料')).toBeInTheDocument());
     expect(requests.length).toBe(beforeDrawerActions);
 
-    expect(screen.getByText(/此頁只提供去敏資料查詢/)).toBeInTheDocument();
+    expect(screen.getByText(/此頁只提供完整資料查詢/)).toBeInTheDocument();
     for (const controlId of [
       'data-browser.patch',
       'data-browser.source-correction.preview',
@@ -191,7 +191,7 @@ describe('Data Browser Phase5 entry candidate', () => {
     installFetchStub('empty');
     render(<StrictMode><App /></StrictMode>);
 
-    await waitFor(() => expect(screen.getByText('此來源目前沒有符合條件的去敏資料。')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('此來源目前沒有符合條件的完整資料。')).toBeInTheDocument());
     expect(screen.queryByText(/訂單 115000001|已成功載入/)).not.toBeInTheDocument();
     expect(document.querySelector('[data-surface-id^="data-browser.row."]')).toBeNull();
 
@@ -200,7 +200,7 @@ describe('Data Browser Phase5 entry candidate', () => {
     installFetchStub('unavailable');
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(screen.getByText(/載入失敗/)).toBeInTheDocument());
-    expect(screen.queryByText('此來源目前沒有符合條件的去敏資料。')).not.toBeInTheDocument();
+    expect(screen.queryByText('此來源目前沒有符合條件的完整資料。')).not.toBeInTheDocument();
     expect(screen.queryByText(/訂單 115000001|已成功載入/)).not.toBeInTheDocument();
   });
 });

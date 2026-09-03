@@ -1,6 +1,6 @@
 """
 File: historical_review_remediation.py
-Description: 定義歷史訂單 review 更正的去敏候選與完成規則。
+Description: 定義歷史訂單 review 更正的canonical 候選與完成規則。
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ class HistoricalReviewConflict:
     field_path: str
     field_label: str
     rule: str
-    masked_source_value: str
-    masked_current_value: str
+    source_value: str
+    current_value: str
     allowed_values: tuple[str, ...]
     process_blocker: str
 
@@ -32,7 +32,7 @@ class HistoricalReviewContext:
     review_identity: str
     source_event_identity: str
     source_content_digest: str
-    masked_case_identity: str
+    case_identity: str
     case_no: str
     original_adoption_receipt_id: int
     original_outcome: str

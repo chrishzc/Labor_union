@@ -15,7 +15,7 @@ export const STAFF_LIFECYCLE_VIEW = {
   state: 'active',
   version: 2,
   effective_at: null,
-  masked_reason_code: null,
+  reason_code: null,
 } satisfies StaffLifecycleView;
 
 export const STAFF_LIFECYCLE_PREVIEW = {
@@ -23,7 +23,7 @@ export const STAFF_LIFECYCLE_PREVIEW = {
   state: 'active',
   version: 2,
   effective_at: null,
-  masked_reason_code: null,
+  reason_code: null,
   after_state: 'retired',
   preview_fingerprint: 'b'.repeat(64),
 } satisfies StaffLifecyclePreview;

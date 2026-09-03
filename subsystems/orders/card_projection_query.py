@@ -60,6 +60,9 @@ class OrdersCardProjection:
     deposit_settled_on: CardProjectionField[date]
     actual_start_date: CardProjectionField[date]
     actual_end_date: CardProjectionField[date]
+    historical_source_start_date: CardProjectionField[date]
+    historical_source_end_date: CardProjectionField[date]
+    historical_paired_staff_name: CardProjectionField[str]
     assignment_segments: CardProjectionField[tuple[AssignmentSegmentProjection, ...]]
 
 
@@ -115,6 +118,14 @@ _ROW_FIELDS = frozenset(
         "staff_source_version",
     }
 )
+_OPTIONAL_ROW_FIELDS = frozenset(
+    {
+        "historical_receipt_id",
+        "historical_source_start_date",
+        "historical_source_end_date",
+        "historical_paired_staff_name",
+    }
+)
 
 
 def _validate_rows(rows: object) -> None:
@@ -125,7 +136,14 @@ def _validate_rows(rows: object) -> None:
             "repository returned more than the bounded assignment slice"
         )
     for row in rows:
-        if not isinstance(row, Mapping) or frozenset(row) != _ROW_FIELDS:
+        if not isinstance(row, Mapping):
+            raise OrdersCardProjectionContractError(
+                "repository row fields are not canonical"
+            )
+        fields = frozenset(row)
+        if not _ROW_FIELDS.issubset(fields) or not fields.issubset(
+            _ROW_FIELDS | _OPTIONAL_ROW_FIELDS
+        ):
             raise OrdersCardProjectionContractError(
                 "repository row fields are not canonical"
             )
@@ -178,6 +196,17 @@ def _project(
             order_version,
             "actual_end_not_recorded",
         ),
+        historical_source_start_date=_historical_date(
+            first,
+            "historical_source_start_date",
+            "historical_source_start_date_missing",
+        ),
+        historical_source_end_date=_historical_date(
+            first,
+            "historical_source_end_date",
+            "historical_source_end_date_missing",
+        ),
+        historical_paired_staff_name=_historical_staff_name(first),
         assignment_segments=_assignment_segments(
             case_no, segments, scheduling_version
         ),
@@ -326,6 +355,63 @@ def _actual_date(
     if value is None:
         return _unavailable("Orders", source_identity, source_version, missing_reason)
     return _field(value, "Orders", source_identity, source_version, "")
+
+
+def _historical_source(row: Mapping[str, object]) -> tuple[str, str | None]:
+    raw_receipt_id = row.get("historical_receipt_id")
+    if raw_receipt_id is None:
+        return "historical-order-adoption", None
+    synthetic = dict(row)
+    synthetic["historical_receipt_id"] = raw_receipt_id
+    receipt_id = _positive_int(synthetic, "historical_receipt_id")
+    return f"historical-order-adoption-receipt:{receipt_id}", str(receipt_id)
+
+
+def _historical_date(
+    row: Mapping[str, object], field_name: str, missing_reason: str
+) -> CardProjectionField[date]:
+    source_identity, source_version = _historical_source(row)
+    raw = row.get(field_name)
+    if raw is None:
+        return _unavailable(
+            "Historical Order Adoption",
+            source_identity,
+            source_version,
+            missing_reason,
+        )
+    if isinstance(raw, datetime) or not isinstance(raw, date):
+        raise OrdersCardProjectionContractError(f"{field_name} must be a date or null")
+    return _field(
+        raw,
+        "Historical Order Adoption",
+        source_identity,
+        source_version,
+        missing_reason,
+    )
+
+
+def _historical_staff_name(
+    row: Mapping[str, object],
+) -> CardProjectionField[str]:
+    source_identity, source_version = _historical_source(row)
+    raw = row.get("historical_paired_staff_name")
+    if raw is None:
+        return _unavailable(
+            "Historical Order Adoption / Staff",
+            source_identity,
+            source_version,
+            "historical_paired_staff_missing",
+        )
+    synthetic = dict(row)
+    synthetic["historical_paired_staff_name"] = raw
+    value = _required_text(synthetic, "historical_paired_staff_name", 100)
+    return _field(
+        value,
+        "Historical Order Adoption / Staff",
+        source_identity,
+        source_version,
+        "historical_paired_staff_missing",
+    )
 
 
 def _assignment_segment(row: Mapping[str, object]) -> AssignmentSegmentProjection:

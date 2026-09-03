@@ -19,7 +19,7 @@ from shared_kernel.identities import (
     IdempotencyKey,
 )
 from subsystems.case_import.beclass_review_intake import (
-    masked_review_identifier,
+    canonical_review_identifier,
     record_invalid_beclass_row,
 )
 from subsystems.case_import.hcm_beclass_reconciliation import (
@@ -74,7 +74,7 @@ class MySqlHcmBeClassReconciliationAdapter:
             source_content_digest=digest,
             source_sheet="case-import-reconciliation",
             source_row=beclass_id,
-            masked_identifier=masked_review_identifier(
+            identifier=canonical_review_identifier(
                 BeClassImportSourceKind.CLIENT, case_no, beclass_id
             ),
             source_payload={

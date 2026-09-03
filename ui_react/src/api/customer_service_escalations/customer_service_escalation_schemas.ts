@@ -12,7 +12,7 @@ export const EscalationHoldStateSchema = z.enum(['active', 'released']);
 export const EscalationAlertStatusSchema = z.enum(['pending', 'queued', 'sent', 'failed', 'unknown']);
 export const EscalationActionSchema = z.enum(['claim', 'handling', 'resolve']);
 
-export const EscalationMaskedContextSchema = z.strictObject({
+export const EscalationContextSchema = z.strictObject({
   summary_code: z.string(),
   policy_version: z.string(),
   category: z.string(),
@@ -36,7 +36,7 @@ export const CustomerServiceEscalationCreateRequestSchema = z.strictObject({
   trigger_code: EscalationTriggerSchema,
   trigger_policy_version: z.string().trim().min(1).max(191),
   ticket_category: EscalationCategorySchema,
-  masked_context: EscalationMaskedContextSchema,
+  context: EscalationContextSchema,
   hold_scope: z.string().trim().min(1).max(191),
   ...CommandIdentityShape,
 });
@@ -109,7 +109,7 @@ export const CustomerServiceEscalationViewSchema = z.strictObject({
   workflow_version: z.number().int().nonnegative(),
   automation_hold: EscalationHoldStateSchema,
   hold_scope_label: z.string().trim().min(1).max(80),
-  masked_context: EscalationMaskedContextSchema,
+  context: EscalationContextSchema,
   alert_status: EscalationAlertStatusSchema,
   current_version: z.string().trim().min(1),
   created_at: z.string().datetime({ offset: true }),

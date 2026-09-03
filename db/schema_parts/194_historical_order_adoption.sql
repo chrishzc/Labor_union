@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS historical_order_adoption_reviews (
     review_identity VARCHAR(191) NOT NULL,
     source_event_identity VARCHAR(191) NOT NULL,
     source_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    masked_case_identity VARCHAR(64) NOT NULL,
+    case_identity VARCHAR(64) NOT NULL,
     issue_codes JSON NOT NULL,
     evidence_snapshot JSON NOT NULL,
     created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS historical_order_pairing_evidence (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     receipt_id BIGINT UNSIGNED NOT NULL,
     caregiver_ordinal INT UNSIGNED NOT NULL,
-    masked_staff_name VARCHAR(100) NOT NULL,
+    staff_name VARCHAR(100) NOT NULL,
     staff_id INT NULL,
     resolution ENUM(
         'blank','staff_missing','staff_ambiguous','evidence_only',

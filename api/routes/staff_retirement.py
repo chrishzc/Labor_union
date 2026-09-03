@@ -108,14 +108,15 @@ def _view(fact):
         "state": fact.state.value,
         "version": fact.version,
         "effective_at": fact.effective_at,
-        "masked_reason_code": _masked_reason_code(fact.reason_code),
+        "reason_code": _canonical_reason_code(fact.reason_code),
     }
 
 
-def _masked_reason_code(reason_code: str | None) -> str | None:
+def _canonical_reason_code(reason_code: str | None) -> str | None:
     if reason_code is None:
         return None
-    return reason_code[:1] + "***"
+    value = str(reason_code).strip()
+    return value or None
 
 
 _LINE_NOT_FOUND_CODES = frozenset({

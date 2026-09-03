@@ -127,8 +127,8 @@ describe('Scheduling substitution Staff Payables readback', () => {
     leaveSubstitutionFlowStore.clearAll();
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({
       items: [
-        { id: 11, name: '月嫂甲', phone: null },
-        { id: 12, name: '月嫂乙', phone: null },
+        { id: 11, name: '月嫂甲', phone: null, education: null },
+        { id: 12, name: '月嫂乙', phone: null, education: null },
       ],
       next_cursor: null,
     });

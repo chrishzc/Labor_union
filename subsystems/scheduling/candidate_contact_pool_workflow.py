@@ -5,12 +5,21 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Callable, Mapping
 
+from domains.line.canonical_payload import canonical_line_payload_json
+from domains.line.delivery import (
+    LineDeliveryRequest,
+    LineMessageKind,
+    LineRecipient,
+    LineRecipientType,
+)
+from domains.line.identities import LineUserId
+from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
 from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.scheduling.ports import unconfigured_connection_factory
-from subsystems.line.delivery_task_workflow import enqueue_line_task
 from subsystems.scheduling.segmented_availability_query import (
     search_segmented_caregiver_availability,
 )
@@ -648,7 +657,25 @@ def _send_information_in_transaction(
         existing = cursor.fetchone()
         if isinstance(existing, Mapping):
             return {"status": "idempotent_replay", "event_id": existing["id"]}
-        task_id = enqueue_line_task(cursor, to_user_id=recipient.strip(), message_content=f"訂單資訊-{info_type}\n服務期間：{entry['service_start_date']}～{entry['service_end_date']}", task_type="candidate_matching_willingness_card", payload={"case_no": case_no, "candidate_id": candidate_id, "info_type": info_type}, source_event_id=event_key, idempotency_key=event_key)
+        message = canonical_line_payload_json(
+            {
+                "type": "text",
+                "text": f"訂單資訊-{info_type}\n服務期間：{entry['service_start_date']}～{entry['service_end_date']}",
+            }
+        )
+        delivery = MySqlLineDeliveryTaskRepository(connection).enqueue(
+            LineDeliveryRequest(
+                LineRecipient(LineRecipientType.USER, LineUserId(recipient.strip())),
+                LineMessageKind.TEXT,
+                message,
+                datetime.now(timezone.utc),
+                IdempotencyKey(event_key),
+                CorrelationId(f"candidate-contact:{event_key}"),
+                "candidate_matching_willingness_card",
+                event_key,
+            )
+        )
+        task_id = delivery.task_id.value
         cursor.execute("INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,%s,%s,%s,%s)", (entry["pool_id"], candidate_id, f"info_{info_type}_sent", event_key, actor, json.dumps({"line_task_id": task_id, "delivery_status": "queued"}, sort_keys=True)))
         event_id = _positive_int(cursor.lastrowid, "event_id")
         return {"status": "queued", "event_id": event_id, "line_task_id": task_id}

@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "2e465ec38251b0c47ebd10d0c3c9873fb4a94629c8976a4d9031c3c375921950",
+  "active_artifacts_sha256": "e42be1fcb6e835e868bf45c135320045f55442c00d741610bb6e40a0451d58f8",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -161,6 +161,7 @@
     "db/schema_parts/213_scheduling_service_day_attachment_kind.sql",
     "db/schema_parts/214_historical_order_pairing_resolution_reused.sql",
     "db/schema_parts/215_historical_service_accounting.sql",
+    "db/schema_parts/216_staff_beclass_profile.sql",
     "db/schema_parts/1029_client_payment_destination_configuration.sql"
   ],
   "classifications": {
@@ -171,7 +172,8 @@
     "db/schema_parts/1025_task96_government_subsidy_return_excess_recovery.sql": "migration-only",
     "db/schema_parts/1026_task96_scheduling_service_day_attachment_kind.sql": "migration-only",
     "db/schema_parts/1027_historical_order_pairing_resolution_reused.sql": "migration-only",
-    "db/schema_parts/1028_historical_service_accounting.sql": "migration-only"
+    "db/schema_parts/1028_historical_service_accounting.sql": "migration-only",
+    "db/schema_parts/1030_staff_beclass_profile.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": {
@@ -245,6 +247,15 @@
       "replay": "preserve release chain applies 1028 only when the historical accounting roots are absent and the normal lifecycle status predecessor is exact",
       "rollback": "retain source backup and discard candidate before same-name replacement",
       "unresolved_policy": "partial roots, lifecycle status drift or constraint drift block candidate apply"
+    },
+    "db/schema_parts/1030_staff_beclass_profile.sql": {
+      "source_object": "preserve-data additive bridge for Staff BeClass profile storage",
+      "successor": "db/schema_parts/216_staff_beclass_profile.sql",
+      "terminal_schema_evidence": "fresh assembly uses canonical part 216; preserve chain uses 1030 for existing databases",
+      "data_effect": "schema_only; existing staff rows are preserved and no business-value backfill is inferred",
+      "replay": "preserve release chain applies 1030 only when owned objects are absent or exact; partial or drift metadata blocks candidate apply",
+      "rollback": "retain source backup and discard candidate before same-name replacement",
+      "unresolved_policy": "partial or drift owned metadata blocks candidate apply pending explicit remediation"
     }
   }
 }

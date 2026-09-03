@@ -132,7 +132,7 @@ def _result(current, source, outcome, business_date) -> HistoricalOrderResult:
         )
     if (
         not isinstance(source.actual_start_date, date)
-        or source.actual_start_date == current.planned_start_date
+        or source.actual_start_date > business_date
     ):
         return HistoricalOrderResult.HISTORICAL_UNSERVED
     if (
