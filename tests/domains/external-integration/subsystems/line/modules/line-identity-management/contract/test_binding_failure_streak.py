@@ -75,7 +75,7 @@ class _Escalations:
             "ticket_version": 0,
         }
 
-    def enqueue_masked_alert(self, intent) -> None:
+    def enqueue_alert(self, intent) -> None:
         self.alerts.append(intent)
 
     def append_event(self, escalation_id, event_type, **values) -> None:
@@ -245,14 +245,14 @@ def test_apply_customer_identity_mismatch_escalates_once_and_readback_is_typed()
                 "workflow_version": 0,
                 "hold_state": "active",
                 "hold_version": 0,
-                "masked_context": command.masked_context.as_dict(),
+                "context": command.context.as_dict(),
                 "alert_status": "pending",
                 "created_at": now,
                 "updated_at": now,
             }
             return state["row"]
 
-        def enqueue_masked_alert(self, intent):
+        def enqueue_alert(self, intent):
             return None
 
         def append_event(self, *args, **kwargs):
@@ -304,7 +304,7 @@ def test_apply_customer_identity_mismatch_escalates_once_and_readback_is_typed()
     assert readback.attempt_window.attempt_count == 2
     assert readback.attempt_window.maximum_attempts == 2
     assert readback.owner_selector == "customer_service.ticket_owner"
-    assert set(readback.masked_context) == {
+    assert set(readback.context) == {
         "summary_code", "policy_version", "category", "redaction_version",
     }
     serialized = str(readback.model_dump())

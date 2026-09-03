@@ -10,8 +10,14 @@
   "source_baseline": {
     "minimum_mysql_version": "8.0",
     "required_character_set": "utf8mb4",
-    "allowed_owned_object_states": ["absent", "exact"],
-    "forbidden_owned_object_states": ["partial", "drift"],
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
     "source_must_be_read_only": true,
     "maintenance_token_required": true,
     "baseline_id": "government-outbox-intent-type-repair-v1-or-later"
@@ -20,7 +26,7 @@
     {
       "name": "193_staff_historical_adoption_hcm_review.sql",
       "relative_path": "db/schema_parts/193_staff_historical_adoption_hcm_review.sql",
-      "sha256": "4aa159e9fd89d324cef192a2d493dda3b14aff81bd65e9ca15a5d730fe090ccb",
+      "sha256": "e6c78faa0a238490d1b6860e6b5c6f099ab1e080c0453a6a47aa46e3c4c835d2",
       "dependencies": [],
       "data_effect": "schema_only",
       "rollback_policy": "code-rollback-preserve-adoption-and-review-evidence",
@@ -39,22 +45,37 @@
   ],
   "application_compatibility": {
     "minimum_api_contract": "typed-api-v1",
-    "compatible_contracts": ["staff-historical-adoption-v1", "case-import-hcm-review-v1"],
-    "required_restart_targets": ["api", "architecture-outbox-worker"],
+    "compatible_contracts": [
+      "staff-historical-adoption-v1",
+      "case-import-hcm-review-v1"
+    ],
+    "required_restart_targets": [
+      "api",
+      "architecture-outbox-worker"
+    ],
     "watcher_worker_compatibility": "same-release-required",
-    "post_cutover_smoke_ids": ["staff-historical-adoption", "hcm-invalid-review-outbox"]
+    "post_cutover_smoke_ids": [
+      "staff-historical-adoption",
+      "hcm-invalid-review-outbox"
+    ]
   },
   "descriptor_artifact": {
     "name": "labor_union_2026_08_14_wp77_v2.descriptors.json",
     "relative_path": "db/migration_releases/labor_union_2026_08_14_wp77_v2.descriptors.json",
-    "sha256": "2c7c16d6876f2494d660f85349f5834852914dfaf30c9279fd57db5e7d109975",
+    "sha256": "fed1a958be7e1506c13d56d58949c756b0c873cc71728ca86e05548e34f6ae46",
     "dependencies": []
   },
   "tool_archive_policy": {
     "artifact_hash_algorithm": "sha256",
     "backup_archive_policy": "permanent-release-archive",
     "journal_archive_policy": "append-only-per-operation",
-    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
     "receipt_archive_policy": "permanent-release-archive",
     "restore_required_mode": "new-absent-candidate-only"
   }

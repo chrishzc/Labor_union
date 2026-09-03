@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from domains.case_import.beclass_import_review import BeClassImportSourceKind, build_review_identity
 from subsystems.case_import.beclass_review_intake import (
-    masked_review_identifier,
+    canonical_review_identifier,
     record_invalid_beclass_row,
 )
 
@@ -63,7 +63,7 @@ def _record_invalid_root(connection) -> str:
         source_content_digest=_SOURCE_DIGEST,
         source_sheet="WP56-UI-CI",
         source_row=1,
-        masked_identifier=masked_review_identifier(BeClassImportSourceKind.CLIENT, None, SCENARIO_ID),
+        identifier=canonical_review_identifier(BeClassImportSourceKind.CLIENT, None, SCENARIO_ID),
         source_payload={"query_no": None, "validation_marker": "missing_query_no"},
         issue_codes=("missing_query_no",),
         repository=MySqlBeClassImportReviewRepository(connection),
@@ -78,7 +78,7 @@ def _require_payload_conflict(connection) -> str:
             source_content_digest=_SOURCE_DIGEST,
             source_sheet="WP56-UI-CI",
             source_row=1,
-            masked_identifier=masked_review_identifier(BeClassImportSourceKind.CLIENT, None, SCENARIO_ID),
+            identifier=canonical_review_identifier(BeClassImportSourceKind.CLIENT, None, SCENARIO_ID),
             source_payload={"query_no": None, "validation_marker": "changed_payload"},
             issue_codes=("missing_query_no",),
             repository=MySqlBeClassImportReviewRepository(connection),

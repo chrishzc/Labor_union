@@ -212,7 +212,7 @@ describe('Anomaly Query Adapter Suite', () => {
       expect(adapted.laneLabel).toBe('HCM 匯入');
       expect(adapted.logicalCode).toBe('HCM-FIELD-001');
       expect(adapted.fieldPath).toBe('身分證字號');
-      expect(adapted.maskedSubject).toBe('A12****789');
+      expect(adapted.subject).toBe('A12****789');
       expect(adapted.issueCodes).toEqual(['hcm_field_missing:身分證字號']);
       expect(adapted.status).toBe('open');
       expect(adapted.statusLabel).toBe('待處理');

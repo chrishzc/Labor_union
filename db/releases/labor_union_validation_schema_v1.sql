@@ -9387,7 +9387,7 @@ CREATE TABLE IF NOT EXISTS beclass_import_review_rows (
     source_event_identity VARCHAR(191) NOT NULL,
     source_sheet VARCHAR(191) NOT NULL,
     source_row INT UNSIGNED NOT NULL,
-    masked_identifier VARCHAR(191) NOT NULL,
+    identifier VARCHAR(191) NOT NULL,
     source_fingerprint CHAR(64) NOT NULL,
     source_payload JSON NOT NULL,
     issue_codes JSON NOT NULL,
@@ -9410,8 +9410,7 @@ CREATE TABLE IF NOT EXISTS beclass_import_review_rows (
         CHECK (
             CHAR_LENGTH(TRIM(source_sheet)) > 0
             AND source_row > 0
-            AND CHAR_LENGTH(TRIM(masked_identifier)) > 0
-            AND LOCATE('*', masked_identifier) > 0
+            AND CHAR_LENGTH(TRIM(identifier)) > 0
         )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -14653,7 +14652,7 @@ CREATE TABLE IF NOT EXISTS case_import_hcm_review_rows (
     source_content_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     source_sheet_identity CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     source_row INT NOT NULL,
-    masked_case_identity VARCHAR(64) NOT NULL,
+    case_identity VARCHAR(64) NOT NULL,
     source_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     issue_codes JSON NOT NULL,
     evidence_snapshot JSON NOT NULL,
@@ -14724,7 +14723,7 @@ CREATE TABLE IF NOT EXISTS historical_order_adoption_reviews (
     review_identity VARCHAR(191) NOT NULL,
     source_event_identity VARCHAR(191) NOT NULL,
     source_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    masked_case_identity VARCHAR(64) NOT NULL,
+    case_identity VARCHAR(64) NOT NULL,
     issue_codes JSON NOT NULL,
     evidence_snapshot JSON NOT NULL,
     created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -14795,7 +14794,7 @@ CREATE TABLE IF NOT EXISTS historical_order_pairing_evidence (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     receipt_id BIGINT UNSIGNED NOT NULL,
     caregiver_ordinal INT UNSIGNED NOT NULL,
-    masked_staff_name VARCHAR(100) NOT NULL,
+    staff_name VARCHAR(100) NOT NULL,
     staff_id INT NULL,
     resolution ENUM(
         'blank','staff_missing','staff_ambiguous','evidence_only',
@@ -14896,7 +14895,7 @@ CREATE TABLE IF NOT EXISTS import_warning_occurrences (
     source_receipt_identity VARCHAR(191) NULL,
     logical_code VARCHAR(96) NOT NULL,
     field_path VARCHAR(191) NOT NULL,
-    masked_subject VARCHAR(191) NOT NULL,
+    subject VARCHAR(191) NOT NULL,
     issue_codes JSON NOT NULL,
     evidence_snapshot JSON NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -14904,7 +14903,7 @@ CREATE TABLE IF NOT EXISTS import_warning_occurrences (
     UNIQUE KEY uq_import_warning_occurrence_source (
         owning_lane, source_event_identity, logical_code, field_path
     ),
-    INDEX idx_import_warning_occurrence_lane_subject (owning_lane, masked_subject),
+    INDEX idx_import_warning_occurrence_lane_subject (owning_lane, subject),
     CONSTRAINT chk_import_warning_occurrence_payload
         CHECK (JSON_TYPE(issue_codes) = 'ARRAY' AND JSON_TYPE(evidence_snapshot) = 'OBJECT')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -15145,7 +15144,7 @@ CREATE TABLE IF NOT EXISTS finance_import_source_reviews (
     format_id ENUM('legacy', 'taishin', 'sinopac') NOT NULL,
     sheet_name VARCHAR(191) NOT NULL,
     source_row INT UNSIGNED NOT NULL,
-    masked_source_identity VARCHAR(191) NOT NULL,
+    source_identity VARCHAR(191) NOT NULL,
     issue_codes JSON NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_finance_source_review_identity (review_identity),
@@ -15779,10 +15778,10 @@ CREATE TABLE IF NOT EXISTS customer_service_escalations (
     resolved_at_utc DATETIME(6) NULL,
     resolution_code VARCHAR(64) NULL,
     resolution_evidence_digest CHAR(64) NULL,
-    masked_context JSON NOT NULL,
+    context JSON NOT NULL,
     idempotency_key VARCHAR(191) NOT NULL,
     correlation_id VARCHAR(191) NOT NULL,
-    masked_alert_intent_ref VARCHAR(191) NULL,
+    alert_intent_ref VARCHAR(191) NULL,
     delivery_task_ref VARCHAR(191) NULL,
     delivery_outcome_ref VARCHAR(191) NULL,
     alert_status ENUM('pending','queued','sent','failed','unknown') NOT NULL DEFAULT 'pending',

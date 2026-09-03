@@ -26,6 +26,23 @@ def test_monthly_meal_service_does_not_require_cooking():
 
 
 @pytest.mark.parametrize(
+    ("answer", "expected"),
+    (("需要下廚", True), ("不需要下廚", False)),
+)
+def test_explicit_line_cooking_answer_is_a_controlled_source(answer, expected):
+    assert normalize_cooking_requirement({"是否需要下廚：": answer}) is expected
+
+
+def test_explicit_line_cooking_answer_conflicting_with_legacy_answer_is_rejected():
+    with pytest.raises(CookingRequirementDomainError) as captured:
+        normalize_cooking_requirement(
+            {"是否需要下廚：": "不需要下廚", "月子餐點調理喜好/飲食習慣：": "葷食"}
+        )
+
+    assert captured.value.issue is CookingRequirementIssue.AMBIGUOUS
+
+
+@pytest.mark.parametrize(
     "question",
     (
         "月子餐點調理喜好/飲食習慣：",

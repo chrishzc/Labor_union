@@ -27,7 +27,7 @@ def test_hcm_field_issues_expand_to_independent_field_occurrences() -> None:
         source_event_identity="hcm-workbook:source:sheet:row:7",
         logical_code="HCM-FIELD-002",
         field_path="服務時間",
-        masked_subject="hcm-***-0007",
+        subject="hcm-***-0007",
         issue_codes=("hcm_field_invalid:服務時間",),
     )
     second = build_import_warning_occurrence(
@@ -35,7 +35,7 @@ def test_hcm_field_issues_expand_to_independent_field_occurrences() -> None:
         source_event_identity="hcm-workbook:source:sheet:row:7",
         logical_code="HCM-FIELD-002",
         field_path="行動電話",
-        masked_subject="hcm-***-0007",
+        subject="hcm-***-0007",
         issue_codes=("hcm_field_invalid:行動電話",),
     )
 
@@ -172,7 +172,7 @@ def test_hcm_referral_requires_fresh_active_warning_and_never_locks() -> None:
 
     assert repository.lock_requests == [False]
     assert referral.target_command == "preview_hcm_resubmission"
-    assert referral.masked_subject == "hcm-***-0001"
+    assert referral.subject == "hcm-***-0001"
     with pytest.raises(ValueError, match="import_warning_version_conflict"):
         application.query_referral("warning-referral", expected_version=2)
 

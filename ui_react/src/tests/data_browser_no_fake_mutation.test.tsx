@@ -19,7 +19,7 @@ describe('Data Browser zero fake mutation', () => {
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
     render(<DataBrowserPage />);
     await waitFor(() => expect(screen.getByText('訂單 115000001')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /檢視去敏詳情/ }));
+    fireEvent.click(screen.getByRole('button', { name: /檢視詳情/ }));
 
     for (const id of [
       'data-browser.patch',
@@ -29,7 +29,7 @@ describe('Data Browser zero fake mutation', () => {
       const control = document.querySelector(`[data-control-id="${id}"]`);
       expect(control).not.toBeInTheDocument();
     }
-    expect(screen.getByText(/此頁只提供去敏資料查詢/)).toBeInTheDocument();
+    expect(screen.getByText(/此頁只提供完整資料查詢/)).toBeInTheDocument();
     expect(alertSpy).not.toHaveBeenCalled();
     expect(fetchSpy.mock.calls.filter((call) => call[1]?.method && call[1]?.method !== 'GET')).toHaveLength(0);
   });

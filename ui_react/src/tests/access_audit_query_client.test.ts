@@ -32,7 +32,7 @@ describe('Access Audit query client', () => {
   it('rejects raw or extra detail fields without fallback', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({
       ...AUDIT_DETAIL_FIXTURE,
-      details: [{ key: 'password', value_masked: 'secret' }],
+      details: [{ key: 'password', value: 'secret' }],
       raw_payload: { phone: '0900000000' },
     }));
     await expect(queryAdminAuditDetail(10)).rejects.toMatchObject({ code: 'AUDIT_QUERY_INVALID' });

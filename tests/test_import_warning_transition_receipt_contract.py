@@ -118,7 +118,7 @@ def _assert_receipt_payload(data: dict[str, object], *, replayed: bool) -> None:
     for forbidden in (
         "note",
         "evidence_reference",
-        "masked_subject",
+        "subject",
         "raw_evidence",
         "source_snapshot",
         "actor",

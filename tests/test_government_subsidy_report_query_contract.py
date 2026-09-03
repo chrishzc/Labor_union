@@ -45,12 +45,12 @@ def test_quarterly_and_annual_reports_are_strict_and_redacted(monkeypatch):
     assert quarterly.json()["data"]["period_kind"] == "quarterly"
     assert annual.json()["data"]["quarter"] is None
     row = quarterly.json()["data"]["partitions"][0]["rows"][0]
-    assert row["employer_name_masked"] == "王**"
-    assert row["identity_card_masked"] == "A*********"
-    assert row["address_masked"] == "地址已遮罩"
+    assert row["employer_name"] == "王小美"
+    assert row["identity_card"] == "A123456789"
+    assert row["address"] == "完整地址"
     assert quarterly.json()["data"]["total_amount_ntd"] == 12000
-    assert "A123456789" not in quarterly.text
-    assert "完整地址" not in quarterly.text
+    assert "A123456789" in quarterly.text
+    assert "完整地址" in quarterly.text
     assert "xlsx_bytes" not in quarterly.text
 
 

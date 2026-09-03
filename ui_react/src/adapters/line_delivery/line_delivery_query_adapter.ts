@@ -1,6 +1,6 @@
 /**
  * File: line_delivery_query_adapter.ts
- * Description: 將 LINE Delivery masked query 映射為管理頁唯讀摘要、列表與嘗試紀錄顯示模型。
+ * Description: 將 LINE Delivery canonical query 映射為管理頁唯讀摘要、列表與嘗試紀錄顯示模型。
  */
 import type { LineDeliveryDetail, LineDeliveryItem, LineDeliverySourceType, LineDeliverySummary } from '../../api/line_delivery/line_delivery_query_schemas';
 

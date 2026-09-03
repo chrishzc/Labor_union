@@ -103,7 +103,9 @@ focused tests 與 React build 通過，畫面不含 raw workbook／JSON、來源
 - HCM Client／Order 先建立但尚未唯一綁定 Client BeClass 時，Orders `requires_cooking` 保持
   `NULL`；缺少對方由 current-state anomaly 顯示，不得預設為否。
 - 唯一配對後，Case Import reconciliation 才可將 BeClass 問卷的明確 yes／no source value透過
-  typed Orders command補入 canonical `requires_cooking`。空白、矛盾或自由文字無法唯一判定時回
+  typed Orders command補入 canonical `requires_cooking`。`是否需要下廚：` 的 `需要下廚`／`不需要下廚`
+  為優先的受控來源；若與既有餐點偏好受控答案矛盾，必須回 review，不得以優先規則直接覆寫。空白、
+  矛盾或自由文字無法唯一判定時回
   `case_import_cooking_requirement_ambiguous` 進 Import Review，但不撤銷已建立的 HCM roots。
 - 此補正僅能改寫 `requires_cooking`；歷史 root 有 `actual_start_date` 而尚無正式 Scheduling segment
   時仍可執行，不得順帶變更日期、時段、工時、費用或其他服務條款。服務資料鎖形成後固定拒絕。

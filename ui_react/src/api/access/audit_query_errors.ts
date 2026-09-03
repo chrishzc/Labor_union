@@ -1,6 +1,6 @@
 /**
  * File: audit_query_errors.ts
- * Description: 收斂遮罩稽核查詢的傳輸、權限、解碼與取消錯誤。
+ * Description: 收斂稽核查詢的傳輸、權限、解碼與取消錯誤。
  */
 import {
   ApiAbortError,

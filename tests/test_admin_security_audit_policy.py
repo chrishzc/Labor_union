@@ -11,7 +11,7 @@ from subsystems.access.security_audit_query import (
     AuditDetailField,
     AuditDetailItem,
     mask_audit_details,
-    mask_ip_address,
+    canonical_ip_address,
 )
 
 
@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_audit_display_masks_ip_and_sensitive_detail_values() -> None:
-    assert mask_ip_address("203.0.113.9") == "203.0.113.***"
-    assert mask_ip_address("not-an-ip") == "***"
+    assert canonical_ip_address("203.0.113.9") == "203.0.113.***"
+    assert canonical_ip_address("not-an-ip") == "***"
     assert mask_audit_details({"token": "secret", "nested": {"phone": "0912"}}) == {
         "token": "***", "nested": {"phone": "***"}
     }
@@ -56,10 +56,10 @@ def _audit_detail(actor_id: int) -> AuditDetailItem:
     return AuditDetailItem(
         audit_id=7,
         occurred_at=datetime.fromisoformat("2026-08-09T08:00:00+08:00"),
-        actor_label_masked="A***",
+        actor_label="A***",
         action_family="other",
-        target_label_masked=None,
-        ip_address_masked="203.0.113.***",
+        target_label=None,
+        ip_address="203.0.113.***",
         outcome="success",
         reason_code="line.review.approve",
         details=(AuditDetailField("reason", "provided"),),

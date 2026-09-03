@@ -21,7 +21,7 @@ export interface CustomerServiceEscalationModel {
   automationHold: string;
   automationHoldLabel: string;
   holdScopeLabel: string;
-  maskedContext: Readonly<Record<string, string>>;
+  context: Readonly<Record<string, string>>;
   alertStatus: string;
   currentVersion: string;
   createdAt: string;
@@ -71,7 +71,7 @@ export function adaptCustomerServiceEscalation(source: unknown): CustomerService
     automationHold: value.automation_hold,
     automationHoldLabel: value.automation_hold === 'active' ? '自動化暫停中' : '已解除暫停',
     holdScopeLabel: value.hold_scope_label,
-    maskedContext: { ...value.masked_context },
+    context: { ...value.context },
     alertStatus: value.alert_status,
     currentVersion: value.current_version,
     createdAt: value.created_at,

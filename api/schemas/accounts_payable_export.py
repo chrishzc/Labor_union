@@ -1,6 +1,6 @@
 """
 File: accounts_payable_export.py
-Description: 定義應付帳款masked preview與封存清單的嚴格HTTP views。
+Description: 定義應付帳款canonical preview與封存清單的嚴格HTTP views。
 """
 
 from datetime import date
@@ -15,11 +15,11 @@ class AccountsPayableRowView(BaseModel):
     payment_type: str
     recipient_name: str
     bank_code: str
-    bank_account_masked: str
+    bank_account: str
     amount_ntd: int
     obligation_identities: list[str]
     case_numbers: list[str]
-    recipient_identity_card_masked: str
+    recipient_identity_card: str
 
 
 class AccountsPayablePreviewView(BaseModel):

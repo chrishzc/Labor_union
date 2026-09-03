@@ -1,6 +1,6 @@
 /**
  * File: DataBrowserPage.tsx
- * Description: 六來源去敏資料唯讀查詢，支援分頁、搜尋與業務欄位詳情。
+ * Description: 六來源完整資料唯讀查詢，支援分頁、搜尋與業務欄位詳情。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import './DataBrowserPage.css';
@@ -122,7 +122,7 @@ export const DataBrowserPage: React.FC = () => {
     void loadSource(selectedTab, appliedQuery, state.failedCursor, state.rows);
   };
 
-  const copyMaskedView = async () => {
+  const copyCanonicalView = async () => {
     if (!selectedRecord) return;
     const payload = {
       data_source: selectedTab.label,
@@ -132,7 +132,7 @@ export const DataBrowserPage: React.FC = () => {
     };
     try {
       await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-      setCopyStatus('已複製去敏資料');
+      setCopyStatus('已複製完整資料');
     } catch {
       setCopyStatus('無法使用剪貼簿，請手動選取欄位');
     }
@@ -162,7 +162,7 @@ export const DataBrowserPage: React.FC = () => {
           <span className="databrowser-kpi-value" style={{ color: '#ea580c' }}>
             {selectedTab.label}
           </span>
-          <span className="databrowser-kpi-desc">已套用去敏顯示規則</span>
+          <span className="databrowser-kpi-desc">顯示 canonical 完整值</span>
         </div>
         <div className="databrowser-kpi-card">
           <span className="databrowser-kpi-label">目前載入筆數</span>
@@ -209,7 +209,7 @@ export const DataBrowserPage: React.FC = () => {
               value={queryInput}
               onChange={(event) => setQueryInput(event.target.value)}
               maxLength={100}
-              placeholder="搜尋案件編號、狀態或去敏欄位內容"
+              placeholder="搜尋案件編號、狀態或欄位內容"
             />
             {queryInput && (
               <button
@@ -239,7 +239,7 @@ export const DataBrowserPage: React.FC = () => {
       </form>
 
       {/* 載入與錯誤提示 */}
-      {state.kind === 'loading' && <div className="anomalies-loading">正在載入去敏資料...</div>}
+      {state.kind === 'loading' && <div className="anomalies-loading">正在載入完整資料...</div>}
       {state.kind === 'error' && (
         <div className="anomalies-error">
           <span>載入失敗：{state.message}</span>
@@ -253,7 +253,7 @@ export const DataBrowserPage: React.FC = () => {
         </div>
       )}
       {state.kind === 'empty' && (
-        <div className="anomalies-empty">此來源目前沒有符合條件的去敏資料。</div>
+        <div className="anomalies-empty">此來源目前沒有符合條件的完整資料。</div>
       )}
 
       {/* 高密度等寬資料表格 */}
@@ -263,7 +263,7 @@ export const DataBrowserPage: React.FC = () => {
             <thead>
               <tr>
                 <th style={{ minWidth: '180px' }}>標題</th>
-                <th style={{ minWidth: '320px' }}>去敏摘要</th>
+                <th style={{ minWidth: '320px' }}>資料摘要</th>
                 <th style={{ width: '170px' }}>紀錄時間</th>
                 <th style={{ width: '120px' }}>來源操作者</th>
                 <th style={{ width: '140px', textAlign: 'right' }}>詳情</th>
@@ -297,7 +297,7 @@ export const DataBrowserPage: React.FC = () => {
                         setCopyStatus('');
                       }}
                     >
-                      檢視去敏詳情 ➔
+                      檢視詳情 ➔
                     </button>
                   </td>
                 </tr>
@@ -335,12 +335,12 @@ export const DataBrowserPage: React.FC = () => {
         </div>
       )}
 
-      {/* 去敏資料詳情抽屜 */}
+      {/* 完整資料詳情抽屜 */}
       <Drawer
         isOpen={selectedRecord !== null}
         onClose={() => setSelectedRecord(null)}
         size="wide"
-        title={`📑 去敏資料詳情 — ${selectedRecord?.title ?? ''}`}
+        title={`📑 完整資料詳情 — ${selectedRecord?.title ?? ''}`}
         footer={
           <div className="databrowser-drawer-footer">
             <span
@@ -368,11 +368,11 @@ export const DataBrowserPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                data-control-id="data-browser.drawer.copy-masked"
+                data-control-id="data-browser.drawer.copy-canonical"
                 className="databrowser-btn-primary"
-                onClick={() => void copyMaskedView()}
+                onClick={() => void copyCanonicalView()}
               >
-                複製去敏資料
+                複製完整資料
               </button>
             </div>
           </div>
@@ -405,13 +405,13 @@ export const DataBrowserPage: React.FC = () => {
               </div>
             </div>
 
-            {/* 去敏欄位清單 */}
+            {/* 欄位清單 */}
             {(
               <table className="databrowser-kv-table">
                 <thead>
                   <tr>
                     <th style={{ width: '200px' }}>欄位名稱</th>
-                    <th>去敏內容</th>
+                    <th>內容</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -434,7 +434,7 @@ export const DataBrowserPage: React.FC = () => {
               <div>
                 <p>
                   <strong>唯讀查詢：</strong>
-                  此頁只提供去敏資料查詢；如需修正，請前往對應業務頁面依正式流程辦理。
+                  此頁只提供完整資料查詢；如需修正，請前往對應業務頁面依正式流程辦理。
                 </p>
               </div>
             </div>

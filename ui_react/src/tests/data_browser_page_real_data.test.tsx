@@ -21,18 +21,18 @@ describe('Data Browser real-data page', () => {
     expect(dataBrowserQueryClient.querySource).toHaveBeenCalledTimes(1);
     expect(document.querySelectorAll('[data-control-id^="data-browser.source."]')).toHaveLength(6);
 
-    fireEvent.click(screen.getByRole('button', { name: /檢視去敏詳情/ }));
-    expect(screen.getByText(/去敏資料詳情/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /檢視詳情/ }));
+    expect(screen.getByText(/完整資料詳情/)).toBeInTheDocument();
     expect(dataBrowserQueryClient.querySource).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/RAW JSON/)).not.toBeInTheDocument();
   });
 
-  it('copies only masked loaded-row view with inline feedback', async () => {
+  it('copies only canonical loaded-row view with inline feedback', async () => {
     render(<DataBrowserPage />);
     await waitFor(() => expect(screen.getByText('訂單 115000001')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /檢視去敏詳情/ }));
-    fireEvent.click(screen.getByRole('button', { name: '複製去敏資料' }));
-    await waitFor(() => expect(screen.getByText('已複製去敏資料')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /檢視詳情/ }));
+    fireEvent.click(screen.getByRole('button', { name: '複製完整資料' }));
+    await waitFor(() => expect(screen.getByText('已複製完整資料')).toBeInTheDocument());
     expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
     const copied = vi.mocked(navigator.clipboard.writeText).mock.calls[0]?.[0] ?? '';
     expect(copied).not.toMatch(/source_id|row_identity|version_identity|field_id/);

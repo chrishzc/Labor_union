@@ -45,7 +45,7 @@ class MySqlHistoricalOrderReviewRemediationRepository:
         with _cursor(self._connection) as cursor:
             cursor.execute(
                 "SELECT review.review_identity,review.source_event_identity,review.source_fingerprint,"
-                "review.masked_case_identity,review.issue_codes,adoption.id AS adoption_id,"
+                "review.case_identity,review.issue_codes,adoption.id AS adoption_id,"
                 "adoption.outcome,adoption.case_no,adoption.lifecycle_event_id,"
                 "CASE WHEN remediation.id IS NULL THEN 0 ELSE 1 END AS remediation_version,"
                 "CASE WHEN alert.fingerprint IS NULL THEN 1 "
@@ -92,7 +92,7 @@ class MySqlHistoricalOrderReviewRemediationRepository:
             str(row["review_identity"]),
             str(row["source_event_identity"]),
             str(row["source_fingerprint"]),
-            str(row["masked_case_identity"]),
+            str(row["case_identity"]),
             str(row["case_no"]),
             int(row["adoption_id"]),
             str(row["outcome"]),

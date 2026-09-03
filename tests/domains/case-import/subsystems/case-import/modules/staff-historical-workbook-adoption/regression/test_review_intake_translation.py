@@ -66,7 +66,7 @@ def test_staff_historical_review_translates_workbook_context_for_intake_recorder
     root = repository.appended[0]
     assert root.source_sheet == "月嫂歷史"
     assert root.source_row == 7
-    assert root.masked_identifier == "staff-***-6789"
+    assert root.identifier == "A123456789"
     assert root.source_payload == {
         "source_field_count": 4,
         "has_identity_card": True,
@@ -91,7 +91,7 @@ def test_staff_historical_dependency_routes_review_to_beclass_repository(monkeyp
         source_content_digest="b" * 64,
         source_sheet="月嫂歷史",
         source_row=8,
-        masked_identifier="staff-***-6789",
+        identifier="A123456789",
         source_payload={"has_identity_card": True},
         issue_codes=("staff_field_invalid:EMAIL",),
         repository=object(),

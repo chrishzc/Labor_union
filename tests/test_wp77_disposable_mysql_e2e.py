@@ -182,7 +182,7 @@ def test_hcm_review_outbox_projects_field_warnings_and_replays_without_duplicate
         assert replay.delivered_count == 0
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT logical_code,field_path,masked_subject,issue_codes,evidence_snapshot "
+                "SELECT logical_code,field_path,subject,issue_codes,evidence_snapshot "
                 "FROM import_warning_occurrences "
                 "WHERE source_receipt_identity=%s ORDER BY field_path",
                 (review_identity,),
@@ -192,7 +192,7 @@ def test_hcm_review_outbox_projects_field_warnings_and_replays_without_duplicate
                 ("HCM-FIELD-001", "服務日期"),
                 ("HCM-FIELD-002", "服務時間"),
             ]
-            assert all(row["masked_subject"] == "hcm-***-0008" for row in warnings)
+            assert all(row["subject"] == "hcm-***-0008" for row in warnings)
             assert all("HCM-TEST-0008" not in str(row) for row in warnings)
             cursor.execute(
                 "SELECT tracking_status,tracking_version FROM import_warning_current_tasks task "
@@ -319,7 +319,7 @@ def test_beclass_review_root_rescan_stays_in_case_import_owner_follow_up():
             source_content_digest=digest,
             source_sheet="任意資料頁",
             source_row=7,
-            masked_identifier="staff-***-0007",
+            identifier="staff-***-0007",
             source_payload={"has_identity_card": True},
             issue_codes=("staff_field_invalid:銀行代號",),
         )
@@ -372,7 +372,7 @@ def test_staff_beclass_review_outbox_acknowledges_canonical_review_without_legac
             source_content_digest=digest,
             source_sheet="任意資料頁",
             source_row=9,
-            masked_identifier="staff-***-0009",
+            identifier="staff-***-0009",
             source_payload={"has_identity_card": True, "has_name": True},
             issue_codes=("staff_field_invalid:銀行代號",),
         )
@@ -416,7 +416,7 @@ def test_beclass_unknown_issue_is_delivered_as_canonical_review_evidence():
             source_content_digest=digest,
             source_sheet="任意資料頁",
             source_row=12,
-            masked_identifier="client-***-0012",
+            identifier="client-***-0012",
             source_payload={"has_name": True, "has_phone": True},
             issue_codes=(raw_issue,),
         )

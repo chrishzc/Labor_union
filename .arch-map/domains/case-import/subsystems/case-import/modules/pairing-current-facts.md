@@ -17,6 +17,9 @@
 - `subsystems/case_import/client_beclass_workbook_import.py`
 - `infrastructure/mysql/client_beclass_workbook_import_repository.py`
 - `api/routes/client_beclass_import.py`
+- `domains/case_import/cooking_requirement.py`
+- `subsystems/case_import/hcm_beclass_reconciliation.py`
+- `infrastructure/mysql/hcm_beclass_reconciliation_adapter.py`
 
 ## Consumers
 - Case Import／Client owner follow-up only；不再有 Anomalies runtime consumer。

@@ -1,6 +1,6 @@
 /**
  * File: accounts_payable_query_schemas.ts
- * Description: 定義Accounts Payable server-masked preview的嚴格Zod契約。
+ * Description: 定義Accounts Payable server-canonical preview的嚴格Zod契約。
  */
 import { z } from 'zod';
 const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -13,11 +13,11 @@ export const AccountsPayablePreviewSchema = z.strictObject({
     payment_type: z.string(),
     recipient_name: z.string(),
     bank_code: z.string(),
-    bank_account_masked: z.string(),
+    bank_account: z.string(),
     amount_ntd: z.number().int().positive(),
     obligation_identities: z.array(z.string()),
     case_numbers: z.array(z.string()),
-    recipient_identity_card_masked: z.string(),
+    recipient_identity_card: z.string(),
   })),
 });
 export const AccountsPayableResponseSchema = z.strictObject({ success: z.boolean(), message: z.string(), data: AccountsPayablePreviewSchema, error: z.string().nullable().optional() });

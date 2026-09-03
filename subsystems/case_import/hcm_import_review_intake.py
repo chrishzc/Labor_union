@@ -55,7 +55,7 @@ def record_hcm_import_review(
 
 
 def _canonical_case_no(value: object) -> str | None:
-    """A raw case number may create an explicit FK; masked values never do."""
+    """A raw case number may create an explicit FK; canonical values never do."""
     if not isinstance(value, str):
         return None
     normalized = value.strip()

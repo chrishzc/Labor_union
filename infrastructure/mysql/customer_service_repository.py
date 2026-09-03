@@ -238,7 +238,7 @@ def _ticket(row: dict[str, Any]) -> CustomerServiceTicket:
 
 def _ticket_view(ticket: CustomerServiceTicket) -> dict[str, Any]:
     return {
-        "ticket_id": ticket.ticket_id, "line_user_id_masked": _mask(ticket.line_user_id),
+        "ticket_id": ticket.ticket_id, "line_user_id": _canonical_line_user_id(ticket.line_user_id),
         "category": ticket.category.value, "status": ticket.status.value, "version": ticket.version,
         "client_id": ticket.client_id, "case_no": ticket.case_no,
         "client_name": ticket.client_name, "client_phone": ticket.client_phone,
@@ -247,9 +247,8 @@ def _ticket_view(ticket: CustomerServiceTicket) -> dict[str, Any]:
     }
 
 
-def _mask(value: str) -> str:
-    return value[:4] + "…" + value[-4:] if len(value) > 8 else value[:2] + "***"
-
+def _canonical_line_user_id(value: str) -> str:
+    return value
 
 def _admin_user_id(actor_id: str) -> int | None:
     if not isinstance(actor_id, str) or not actor_id.startswith("admin:"):

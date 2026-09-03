@@ -10,8 +10,14 @@
   "source_baseline": {
     "minimum_mysql_version": "8.0",
     "required_character_set": "utf8mb4",
-    "allowed_owned_object_states": ["absent", "exact"],
-    "forbidden_owned_object_states": ["partial", "drift"],
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
     "source_must_be_read_only": true,
     "maintenance_token_required": true,
     "baseline_id": "wp77-pre-189-exact"
@@ -39,22 +45,33 @@
   ],
   "application_compatibility": {
     "minimum_api_contract": "typed-api-v1",
-    "compatible_contracts": ["staff-historical-adoption-v1", "case-import-hcm-review-v1"],
+    "compatible_contracts": [
+      "staff-historical-adoption-v1",
+      "case-import-hcm-review-v1"
+    ],
     "required_restart_targets": [],
     "watcher_worker_compatibility": "not-applicable",
-    "post_cutover_smoke_ids": ["staff-historical-adoption-preview"]
+    "post_cutover_smoke_ids": [
+      "staff-historical-adoption-preview"
+    ]
   },
   "descriptor_artifact": {
     "name": "labor_union_2026_08_13_wp77_v1.descriptors.json",
     "relative_path": "db/migration_releases/labor_union_2026_08_13_wp77_v1.descriptors.json",
-    "sha256": "eae739f2230fce0e5ba3981861a483a8c850119009525c68e4f559556cc21491",
+    "sha256": "605a58e9604e4dc41248d47b3461064a81dbb0b6d6cac8d6a7369d162903cb45",
     "dependencies": []
   },
   "tool_archive_policy": {
     "artifact_hash_algorithm": "sha256",
     "backup_archive_policy": "permanent-release-archive",
     "journal_archive_policy": "append-only-per-operation",
-    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
     "receipt_archive_policy": "permanent-release-archive",
     "restore_required_mode": "new-absent-candidate-only"
   }

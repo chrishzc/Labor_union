@@ -106,7 +106,7 @@ def test_complaint_ingress_creates_masked_high_escalation_and_empathy_reply() ->
     assert command.trigger_code is TriggerCode.COMPLAINT
     assert command.source_kind == "line_inbox"
     assert command.trigger_policy_version == "complaint.v1"
-    assert command.masked_context.as_dict() == {
+    assert command.context.as_dict() == {
         "summary_code": "complaint_explicit",
         "policy_version": "complaint.v1",
         "category": "other",

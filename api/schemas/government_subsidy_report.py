@@ -1,6 +1,6 @@
 """
 File: government_subsidy_report.py
-Description: 定義季度與年度補助報表的strict server-redacted JSON views。
+Description: 定義季度與年度補助報表的strict canonical JSON views。
 """
 from datetime import date, datetime
 from decimal import Decimal
@@ -24,10 +24,10 @@ class GovernmentSubsidyReportRowView(_StrictModel):
     service_days: int = Field(gt=0)
     subsidy_amount_ntd: int = Field(ge=0)
     unit_price_ntd: int = Field(ge=0)
-    employer_name_masked: str
-    staff_name_masked: str
-    identity_card_masked: str
-    address_masked: str
+    employer_name: str
+    staff_name: str
+    identity_card: str
+    address: str
 
 
 class GovernmentSubsidyReportPartitionView(_StrictModel):

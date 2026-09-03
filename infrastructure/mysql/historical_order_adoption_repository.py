@@ -107,20 +107,20 @@ class MySqlHistoricalOrderAdoptionRepository:
         review_identity = f"historical-order-review:{uuid4()}"
         evidence = {
             "source_row": request.row.source_row,
-            "case_identity": _mask_case(preview.case_no),
+            "case_identity": _canonical_case(preview.case_no),
             "outcome": preview.outcome.value,
             "pairing_resolutions": tuple(item.resolution.value for item in preview.pairings),
         }
         with _cursor(self._connection) as cursor:
             cursor.execute(
                 "INSERT INTO historical_order_adoption_reviews "
-                "(review_identity,source_event_identity,source_fingerprint,masked_case_identity,"
+                "(review_identity,source_event_identity,source_fingerprint,case_identity,"
                 "issue_codes,evidence_snapshot) VALUES (%s,%s,%s,%s,%s,%s)",
                 (
                     review_identity,
                     request.row.source_identity,
                     request.row.source_fingerprint,
-                    _mask_case(preview.case_no),
+                    _canonical_case(preview.case_no),
                     _json(preview.issue_codes),
                     _json(evidence),
                 ),
@@ -230,7 +230,7 @@ class MySqlHistoricalOrderAdoptionRepository:
             rows.append((
                 receipt_id,
                 item.ordinal,
-                item.masked_name,
+                item.name,
                 item.staff_id,
                 item.resolution.value,
                 item.start_date,
@@ -242,7 +242,7 @@ class MySqlHistoricalOrderAdoptionRepository:
             with _cursor(self._connection) as cursor:
                 cursor.executemany(
                     "INSERT INTO historical_order_pairing_evidence "
-                    "(receipt_id,caregiver_ordinal,masked_staff_name,staff_id,resolution,source_start_date,"
+                    "(receipt_id,caregiver_ordinal,staff_name,staff_id,resolution,source_start_date,"
                     "source_end_date,assignment_id,issue_codes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     rows,
                 )
@@ -364,10 +364,8 @@ def _optional_int(value):
     return None if value is None else int(value)
 
 
-def _mask_case(case_no):
-    text = str(case_no or "").strip()
-    return text[:2] + "*" * max(0, len(text) - 4) + text[-2:] if len(text) > 4 else "*" * len(text)
-
+def _canonical_case(case_no):
+    return str(case_no or "").strip()
 
 def _json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

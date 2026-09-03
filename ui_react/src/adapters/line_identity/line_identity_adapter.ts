@@ -22,7 +22,7 @@ import type {
 } from '../../api/line_identity/line_identity_schemas';
 
 export interface LineIdentityBindingRowViewModel {
-  maskedLineUserId: string;
+  lineUserId: string;
   status: LineIdentityBindingStatus;
   statusLabel: string;
   version: number;
@@ -83,7 +83,7 @@ export interface LineIdentityReviewRowViewModel {
   version: number;
   subjectTypeLabel: string;
   subjectReference: string | null;
-  maskedLineUserId: string;
+  lineUserId: string;
   displayName: string;
   decisionReason: string | null;
   reviewedAt: string | null;
@@ -114,7 +114,7 @@ export interface LineIdentityReviewPreviewViewModel {
   resultingVersion: number;
   subjectTypeLabel: string;
   subjectReference: string | null;
-  maskedLineUserId: string;
+  lineUserId: string;
   previewFingerprint: string;
 }
 
@@ -242,7 +242,7 @@ export function adaptLineIdentityBinding(
   binding: LineIdentityBindingView
 ): LineIdentityBindingRowViewModel {
   return {
-    maskedLineUserId: maskLineUserId(binding.line_user_id),
+    lineUserId: maskLineUserId(binding.line_user_id),
     status: binding.status,
     statusLabel: bindingStatusLabel(binding.status),
     version: binding.version,
@@ -338,7 +338,7 @@ export function adaptLineIdentityReview(
     version: review.version,
     subjectTypeLabel: review.subject_type === null ? '尚未連結對象' : subjectTypeLabel(review.subject_type),
     subjectReference: review.subject_reference,
-    maskedLineUserId: maskLineUserId(review.line_user_id_masked),
+    lineUserId: maskLineUserId(review.line_user_id),
     displayName: review.display_name,
     decisionReason: review.decision_reason,
     reviewedAt: review.reviewed_at,
@@ -381,7 +381,7 @@ export function adaptLineIdentityReviewPreview(
     resultingVersion: preview.resulting_version,
     subjectTypeLabel: preview.subject_type === null ? '尚未連結對象' : subjectTypeLabel(preview.subject_type),
     subjectReference: preview.subject_reference,
-    maskedLineUserId: maskLineUserId(preview.line_user_id_masked),
+    lineUserId: maskLineUserId(preview.line_user_id),
     previewFingerprint: preview.preview_fingerprint,
   };
 }
