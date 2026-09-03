@@ -141,10 +141,10 @@ def test_default_service_registration_menu_uses_the_canonical_identity_entry() -
     source = (ROOT / "config" / "line_menu.json").read_text(encoding="utf-8")
     identity = (ROOT / "line" / "static" / "identity.html").read_text(encoding="utf-8")
 
-    assert '"id": "service_registration"' in source
-    assert '"uri": "?entry=registration"' in source
-    assert '"uri": "?target=registration"' not in source
-    assert '"uri_source": "liff"' in source
+    assert '"id": "service_registration"' in source or '"id":"service_registration"' in source
+    assert '"uri": "?entry=registration"' in source or '"uri":"?entry=registration"' in source
+    assert '"uri": "?target=registration"' not in source and '"uri":"?target=registration"' not in source
+    assert '"uri_source": "liff"' in source or '"uri_source":"liff"' in source
     assert 'return entry === "registration";' in identity
 
 
@@ -192,9 +192,9 @@ def test_liff_targets_route_to_existing_pages_or_fail_closed() -> None:
     initialize_source = identity.split("async function initialize()", 1)[1]
 
     assert "staff_leave_apply: '/line-staff-schedule'" in gateway
-    assert "profile_update: '/static/profile_update.html'" in gateway
+    assert "profile_update: '/line-profile-guard'" in gateway
     assert 'staff_leave_apply: "/line-staff-schedule"' in staff_route
-    assert 'profile_update: "/static/profile_update.html"' in standalone_route
+    assert 'profile_update: "/line-profile-guard"' in standalone_route
     for target in ("staff_payout", "anomalies_center", "dashboard"):
         assert f"{target}:" in unavailable_route
         assert f"/line-identity?target={target}" in gateway
@@ -362,3 +362,21 @@ def test_active_liff_pages_offer_manual_reauthentication_without_url_identity() 
     assert "liff.login({redirectUri: redirect.toString()})" in mobile_admin
     assert "liff.login({redirectUri: location.href})" not in mobile_admin
     assert 'params.get("userId")' not in mobile_admin
+
+
+def test_line_bind_page_route_serves_bind_html() -> None:
+    response = line_identity.bind_page()
+    assert response.status_code == 200
+    assert response.path.name == "bind.html"
+
+
+def test_line_profile_update_page_route_serves_profile_update_html() -> None:
+    response = line_identity.profile_update_page()
+    assert response.status_code == 200
+    assert response.path.name == "profile_update.html"
+
+
+def test_line_profile_guard_page_route_serves_profile_guard_html() -> None:
+    response = line_identity.profile_guard_page()
+    assert response.status_code == 200
+    assert response.path.name == "profile_guard.html"
