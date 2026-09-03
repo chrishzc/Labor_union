@@ -114,7 +114,7 @@ const WeeklySubsidyView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
 </>;
 
 const WeeklyServiceView: React.FC<{ report: WeeklyView }> = ({ report }) => (
-  report.serviceRows.length === 0 ? <div className="reports-state">此期間沒有正式服務工作日。</div> : <div className="reports-table-container">
+  report.serviceRows.length === 0 ? <div className="reports-state">此期間服務工時無資料。</div> : <div className="reports-table-container">
     <table className="reports-table">
       <thead><tr><th>案件</th><th>案家</th><th>服務人員</th><th>服務期間</th><th>每日時數</th><th>期間工作日</th><th>期間工時</th><th>訂單狀態</th><th>完成</th><th>資料品質</th></tr></thead>
       <tbody>{report.serviceRows.map((row) => <tr key={row.assignment_id}>
