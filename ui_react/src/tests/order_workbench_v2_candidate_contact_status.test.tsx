@@ -80,8 +80,14 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     expect(mocks.addCandidates).not.toHaveBeenCalled();
   });
 
-  it('只使用既有 recordWillingness 記錄人工意願與原因，不觸發 LINE 或提前做寫入後回讀', async () => {
-    mocks.query.mockResolvedValue(pool());
+  it('人工意願寫入後回讀 owner facts，更新畫面並阻止再次記錄相同意願', async () => {
+    const readback = pool();
+    readback.candidates[0] = {
+      ...readback.candidates[0],
+      willingness: 'unwilling',
+      reason: '已電話確認但日期不合',
+    };
+    mocks.query.mockResolvedValueOnce(pool()).mockResolvedValueOnce(readback);
     mocks.recordWillingness.mockResolvedValue({ status: 'recorded', event_id: 45 });
     render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
 
@@ -91,7 +97,6 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     fireEvent.change(screen.getByLabelText('人工意願原因（月嫂甲）'), {
       target: { value: '已電話確認但日期不合' },
     });
-    expect(screen.getByRole('button', { name: '記錄 月嫂甲 願意' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '記錄 月嫂甲 無意願' }));
 
     await waitFor(() => expect(mocks.recordWillingness).toHaveBeenCalledWith(
@@ -100,10 +105,35 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
       'unwilling',
       '已電話確認但日期不合',
     ));
-    expect(await screen.findByText('意願已記錄：recorded · event #45')).toBeInTheDocument();
-    expect(mocks.query).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.query).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('意願已記錄並回讀：recorded · event #45')).toBeInTheDocument();
+    expect(screen.getByText('回覆原因：已電話確認但日期不合')).toBeInTheDocument();
+
+    const sameWillingnessButton = screen.getByRole('button', { name: '記錄 月嫂甲 無意願' });
+    expect(sameWillingnessButton).toBeDisabled();
+    fireEvent.click(sameWillingnessButton);
+    expect(mocks.recordWillingness).toHaveBeenCalledTimes(1);
     expect(mocks.sendInformation).not.toHaveBeenCalled();
     expect(mocks.addCandidates).not.toHaveBeenCalled();
+  });
+
+  it('寫入後回讀的意願不一致時 fail closed，不宣告成功', async () => {
+    mocks.query.mockResolvedValueOnce(pool()).mockResolvedValueOnce(pool());
+    mocks.recordWillingness.mockResolvedValue({ status: 'recorded', event_id: 46 });
+    render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '讀取候選聯絡狀態' }));
+    expect(await screen.findByText('月嫂甲 · 月嫂 #8892')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('人工意願原因（月嫂甲）'), {
+      target: { value: '日期不合' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '記錄 月嫂甲 無意願' }));
+
+    expect(await screen.findByText('人工意願回讀與本次寫入不一致。')).toBeInTheDocument();
+    expect(screen.queryByText(/意願已記錄並回讀/)).not.toBeInTheDocument();
+    expect(mocks.query).toHaveBeenCalledTimes(2);
+    expect(mocks.recordWillingness).toHaveBeenCalledTimes(1);
+    expect(mocks.sendInformation).not.toHaveBeenCalled();
   });
 
   it('owner query 不可用時顯示阻塞，不用其他來源猜測狀態', async () => {
