@@ -39,17 +39,21 @@ const TermsReceiptSchema = z.strictObject({
 
 const ClientNamePreviewSchema = z.strictObject({
   case_no: z.string().min(1),
+  lifecycle_version: VersionSchema,
   before_client_name: z.string().nullable(),
   after_client_name: z.string().min(1),
-  terms_impact: z.literal('none'),
-  scheduling_impact: z.literal('none'),
+  blockers: z.array(z.string().min(1)),
+  apply_allowed: z.boolean(),
   preview_fingerprint: FingerprintSchema,
 });
 
 const ClientNameReceiptSchema = z.strictObject({
+  receipt_key: z.string().min(1),
   case_no: z.string().min(1),
+  lifecycle_version: VersionSchema,
   client_name: z.string().min(1),
-  changed: z.boolean(),
+  preview_fingerprint: FingerprintSchema,
+  replayed: z.boolean(),
 });
 
 const CompletionPreviewSchema = z.strictObject({
@@ -82,6 +86,7 @@ const envelope = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({
 export type IntakeTermsPreview = z.infer<typeof TermsPreviewSchema>;
 export type IntakeTermsReceipt = z.infer<typeof TermsReceiptSchema>;
 export type IntakeClientNamePreview = z.infer<typeof ClientNamePreviewSchema>;
+export type IntakeClientNameReceipt = z.infer<typeof ClientNameReceiptSchema>;
 export type IntakeCompletionPreview = z.infer<typeof CompletionPreviewSchema>;
 export type IntakeCompletionReceipt = z.infer<typeof CompletionReceiptSchema>;
 export type IntakeMissingField = z.infer<typeof MissingFieldSchema>;
@@ -205,7 +210,7 @@ export const orderIntakeCompletionClient = {
       await transport.post(
         endpoint,
         { client_name: z.string().trim().min(1).max(100).parse(clientName) },
-        requestOptions(source),
+        requestOptions(source, headers(canonical, 'client-name-preview', source)),
       ),
     );
   },
@@ -216,7 +221,7 @@ export const orderIntakeCompletionClient = {
     reason: string,
     idempotencyKey: string,
     source?: IntakeRequestOptions,
-  ): Promise<z.infer<typeof ClientNameReceiptSchema>> {
+  ): Promise<IntakeClientNameReceipt> {
     const canonical = canonicalCaseNo(caseNo);
     const key = commandKey(idempotencyKey);
     const endpoint = `/api/v1/orders/${encodeURIComponent(canonical)}/intake-completion/client-name/apply`;
@@ -226,10 +231,11 @@ export const orderIntakeCompletionClient = {
         endpoint,
         {
           client_name: preview.after_client_name,
+          expected_lifecycle_version: preview.lifecycle_version,
           preview_fingerprint: preview.preview_fingerprint,
           reason: z.string().trim().min(1).max(500).parse(reason),
         },
-        requestOptions(source, { 'Idempotency-Key': key }),
+        requestOptions(source, headers(canonical, 'client-name-apply', source, key)),
       ),
     );
   },
@@ -276,6 +282,8 @@ export const orderIntakeCompletionClient = {
 };
 
 const blockerMessages: Record<string, string> = {
+  order_intake_client_name_status_not_eligible: '案件已不在待補件狀態，不能使用姓名補件入口。',
+  order_intake_client_name_already_set: '客戶姓名已存在；此入口只允許補齊缺失姓名。',
   order_intake_terms_bootstrap_service_data_locked: '服務資料已鎖定，不能再補改服務日期或天數。',
   order_intake_completion_service_data_locked: '服務資料已鎖定，目前不能完成進件補齊。',
   order_intake_terms_bootstrap_actual_start_exists: '案件已有實際開工日，不能使用進件補件流程。',
@@ -309,7 +317,7 @@ export function intakeRepairErrorMessage(error: unknown): string {
       return '訂單資料版本已變更，請重新檢查缺件後再套用。';
     }
     if (error.status === 422) {
-      return '補件資料不合法，請確認日期、服務天數與必填原因。';
+      return '補件資料不合法，請確認日期、服務天數、姓名與必填原因。';
     }
     const blockers = domainBlockers(error);
     if (blockers.length > 0) {
