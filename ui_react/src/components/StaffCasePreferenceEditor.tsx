@@ -153,7 +153,7 @@ export const StaffCasePreferenceEditor: React.FC<Props> = ({ staffId, onObserved
   const editing = phase === 'editing' || phase === 'previewing' || phase === 'preview_ready' || phase === 'applying';
 
   return (
-    <div data-surface-id="staff.case-preference-editor">
+    <div data-surface-id="staff.drawer.case-preference-summary">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
         <div>
           <h3 style={{ margin: 0 }}>📌 接案偏好設定</h3>
