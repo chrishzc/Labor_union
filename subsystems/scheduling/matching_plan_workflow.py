@@ -293,7 +293,7 @@ def _create_matching_plan_version_in_transaction(
         if order_row is None:
             raise ValueError("case not found")
 
-        if order_row["status"] != "洽談中":
+        if order_row["status"] not in {"洽談中", "訂單成立"}:
             raise ValueError("case is not in negotiation stage")
 
         _normalize_db_date(order_row["start_date"], "start_date")

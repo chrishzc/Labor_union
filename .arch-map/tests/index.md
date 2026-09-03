@@ -2,7 +2,7 @@ kind: test-index
 schema_version: 2
 architecture_map: ../index.md
 test_root: tests/
-global_root: layout_gap
+global_root: tests/global/
 
 # Test routing
 
@@ -37,7 +37,7 @@ Keep tests outside an owner root only when the test itself proves one of these b
 
 `ui_react/src/tests/challenger_auth_navigation.test.tsx` remains a Global application-shell higher-boundary test because one file jointly protects hash navigation、session/auth boundaries、nested ErrorBoundary isolation及closed crash presentation；它不是任何單一Domain owner-local root，也不得因其中一個oracle更新而重包。
 
-Physical roots currently used for those cases include `tests/integration/`, `tests/e2e/`, `tests/hurl/` and selected documented flat `tests/test_*.py` files. `tests/fixtures/` remains shared legacy fixture storage; ownership must be resolved from consumers before moving/removing it. `tests/global/` is not currently present (`layout_gap`).
+Physical roots currently used for those cases include `tests/global/`, `tests/integration/`, `tests/e2e/`, `tests/hurl/` and selected documented flat `tests/test_*.py` files. `tests/global/` owns true cross-Domain/system workflow acceptance；`tests/fixtures/` remains shared legacy fixture storage and ownership must be resolved from consumers before moving/removing it.
 
 ## Placement refresh — 2026-08-30
 The HCM resubmission domain/workbook/workflow coverage is Case Import owner-local and now lives under `tests/subsystems/case_import/`. Its file-system assertion is relocation-safe and resolves the repository root from the canonical owner location. Existing explicit higher-boundary exceptions in owner Test Maps remain unchanged; do not mechanically move them merely to eliminate flat files.

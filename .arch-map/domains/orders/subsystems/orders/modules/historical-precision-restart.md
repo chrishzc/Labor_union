@@ -30,6 +30,7 @@
 
 ## Verification
 - test_root: `tests/domains/orders/subsystems/orders/modules/historical-precision-restart/`
+- higher_boundary: restart → confirmed service dates → matching confirmation → assignment plan → canonical Scheduling／reporting readback。
 
 ## Change triggers
 Reconcile when restart eligibility, historical accounting bridge, current-root revocation、API/UI entrypoint or provenance receipt semantics change.

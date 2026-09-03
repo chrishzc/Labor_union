@@ -155,6 +155,12 @@ def get_staff_monthly_calendar_schedule(
                 JOIN staff s ON s.id=csa.staff_id
                 WHERE csa.staff_id=%s AND csa.status='completed'
                   AND csa.assigned_start_date<=%s AND csa.assigned_end_date>=%s
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM order_lifecycle_state_events restart
+                    WHERE restart.case_no=csa.case_no
+                      AND restart.trigger_event='orders_historical_precision_restart'
+                  )
                 ORDER BY csa.assigned_start_date,csa.id
                 """,
                 (staff_id, month_end, month_start),

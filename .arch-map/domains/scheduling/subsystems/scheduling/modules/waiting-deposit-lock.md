@@ -18,6 +18,7 @@
 
 ## Dependencies
 - outbound: `orders/orders` — 訂單取消由 Orders outer Unit of Work 傳入已鎖定 lifecycle command envelope。
+- outbound: `orders/historical-precision-restart` — precision restart 後，沒有 generation ownership 的舊歷史 assignment 不再構成 waiting-lock occupancy。
 - inbound: `scheduling/matching-coordination` — matching plan 與 commitment 提供檔期鎖候選事實。
 
 ## Contracts
@@ -32,7 +33,8 @@
 ## Provenance
 - Scheduling ownership and Orders cancellation dependency — `architecture_declared` — current Orders/Scheduling specs.
 - Workflow and route paths — `source_observed` — current repository source.
+- Restarted generation-less historical assignment exclusion — `source_observed` — current availability-lock acquisition occupancy query.
 - Cross-owner disposable MySQL verification — `source_observed` — current Global Test Map higher-boundary exception.
 
 ## Change triggers
-Reconcile when lock lifecycle、matching-plan eligibility、Orders cancellation integration、occupancy mutex、entrypoint or verification routing changes.
+Reconcile when lock lifecycle、matching-plan eligibility、Orders restart／cancellation integration、assignment generation ownership、occupancy mutex、entrypoint or verification routing changes.

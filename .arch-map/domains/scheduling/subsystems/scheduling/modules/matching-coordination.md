@@ -11,6 +11,8 @@
 - primary:
   - `domains/scheduling/matching_coordination.py`
   - `subsystems/scheduling/matching_coordination_contracts.py`
+  - `subsystems/scheduling/matching_plan_workflow.py`
+  - `subsystems/scheduling/segmented_availability_query.py`
   - `subsystems/scheduling/historical_pending_deposit_matching.py` — Historical Adoption 可用的 typed proposed-plan writer port。
 - `subsystems/scheduling/matching_coordination_workflow.py`
 - `subsystems/scheduling/matching_notification_application.py` (zero-pool client decision response owner)
@@ -28,6 +30,7 @@
 
 ## Dependencies
 - outbound: `orders/orders` — case/lifecycle boundary.
+- outbound: `orders/historical-precision-restart` — restarted `訂單成立` 案件可進入正常媒合；已失效且沒有 generation ownership 的歷史 assignment 不再占用候選檔期。
 - inbound: Scheduling UI/LINE adapters — transport invokes typed coordination commands, not direct DB writes.
 - inbound: `orders/historical-adoption` — 只有 discussion、開始日空白且月嫂唯一可辨識的來源列，才在同一 outer UoW 建立 proposed plan。
 - P3 handoff: committed M3 intents carry immutable `LU96-M3-*` source identity and recipient selector; P5 owns delivery task/provider consumption.
@@ -51,8 +54,9 @@
 - Source/API/UI paths — `source_observed` — current repository search.
 - Module-owned contract/domain/workflow/facts/API-route tests — `source_observed` — architecture-aligned test root.
 - Historical pending-deposit typed port、borrowed-connection adapter 與 owner-local tests — `source_observed` — current source and canonical module test root.
+- Segmented availability query/repository 的 lifecycle gate 與 assignment occupancy filtering — `source_observed` — current Scheduling query and MySQL facts adapter.
 - Scheduling React entry contract — `source_observed` — same architecture-aligned module test root.
 - Repository test exception — `source_observed` — current flat path with relocation-sensitive schema lookup.
 
 ## Change triggers
-Reconcile when coordination owner, package/event contract, presentation hierarchy, API route/schema, persistence adapter or focused test root moves.
+Reconcile when coordination owner, case lifecycle eligibility, assignment occupancy semantics, package/event contract, presentation hierarchy, API route/schema, persistence adapter or focused test root moves.
