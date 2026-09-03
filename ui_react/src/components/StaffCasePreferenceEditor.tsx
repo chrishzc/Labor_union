@@ -5,6 +5,7 @@ import type {
   StaffCasePreferencePreview,
   StaffCasePreferenceSnapshot,
   StaffCasePreferenceSummary,
+  StaffCasePreferenceTopic,
 } from '../api/staff_case_preference_summary/staff_case_preference_summary_schemas';
 
 type TopicKey = keyof StaffCasePreferenceSnapshot;
@@ -40,10 +41,15 @@ function snapshotFromSummary(summary: StaffCasePreferenceSummary): StaffCasePref
   };
 }
 
-function topicText(values: readonly string[], otherDetail: string | null): string {
-  const items = [...values];
-  if (otherDetail) items.push(`其他（${otherDetail}）`);
-  return items.length > 0 ? items.join('、') : '尚未登錄';
+function topicText(topic: StaffCasePreferenceTopic): string {
+  const valuesText = topic.values.length > 0 ? topic.values.join('、') : '尚未登錄';
+  if (topic.other_detail_status === 'ready' && topic.other_detail) {
+    return `${valuesText} · 其它：${topic.other_detail}`;
+  }
+  if (topic.other_detail_status === 'source_not_ready') {
+    return `${valuesText} · 其它來源尚未就緒`;
+  }
+  return valuesText;
 }
 
 export const StaffCasePreferenceEditor: React.FC<Props> = ({ staffId, onObserved }) => {
@@ -171,7 +177,7 @@ export const StaffCasePreferenceEditor: React.FC<Props> = ({ staffId, onObserved
             <div key={spec.key} className="staff-qual-card" role="group" aria-label={spec.label}>
               <h4>{spec.label}</h4>
               {!editing ? (
-                <p style={{ margin: 0 }}>{topicText(topic.values, topic.other_detail)}</p>
+                <p style={{ margin: 0 }}>{topicText(summary[spec.key])}</p>
               ) : (
                 <div>
                   {optionsByTopic[spec.key].map((option) => (
