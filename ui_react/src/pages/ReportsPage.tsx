@@ -312,7 +312,7 @@ export const ReportsPage: React.FC = () => {
       {exportState === 'success' && <div className="reports-state" role="status">XLSX 已產生並開始下載。</div>}
       {exportState === 'error' && <div className="reports-state error" role="alert">報表匯出失敗，請重試。</div>}
       {state.kind === 'loading' && <div className="reports-state" role="status">正在載入報表…</div>}
-      {state.kind === 'empty' && <div className="reports-state">此期間無資料。</div>}
+      {state.kind === 'empty' && <div className="reports-state">此期間沒有可列入報表的資料。</div>}
       {state.kind === 'error' && <div className="reports-state error" role="alert">
         <span>{state.message}</span><button type="button" onClick={reloadReport}>重試</button>
       </div>}
