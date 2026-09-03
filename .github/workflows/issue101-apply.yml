@@ -48,18 +48,11 @@ jobs:
 
           path = Path('/tmp/issue101_post_transform.sh')
           text = path.read_text(encoding='utf-8')
-          marker = '''replace_any(
-              "ui_react/src/tests/weekly_operations_report_client.test.ts",
-              [
-          '''
-          start = text.index(marker)
-          end = text.index('\n)\nPY', start)
-          block = text[start:end]
-          if 'minimum=3,' not in block:
-              raise RuntimeError('weekly operations React replacement guard changed')
-          block = block.replace('minimum=3,', 'minimum=2,', 1)
-          text = text[:start] + block + text[end:]
-          path.write_text(text, encoding='utf-8')
+          old = """        (\"await expect(weeklyOperationsReportQueryClient.query('2026-08-17')).rejects.toThrow('未遮罩');\", \"await expect(weeklyOperationsReportQueryClient.query('2026-08-17')).resolves.toBeDefined();\"),"""
+          new = """        (\"await expect(weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26')).rejects.toThrow('未遮罩');\", \"await expect(weeklyOperationsReportQueryClient.query('2026-08-20', '2026-08-26')).resolves.toBeDefined();\"),"""
+          if text.count(old) != 1:
+              raise RuntimeError('weekly operations canonical assertion transform changed')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
           sed -i 's#bash .github/issue101_post_transform.sh#bash /tmp/issue101_post_transform.sh#' /tmp/issue101_cutover.sh
           sed -i 's#git push origin HEAD:main#git push origin HEAD:issue101-canonical-cutover-direct#' /tmp/issue101_cutover.sh
