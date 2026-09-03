@@ -10,6 +10,7 @@ import {
   type FC,
 } from 'react';
 import './OrderWorkbenchV2Page.css';
+import { OrderCandidateContactStatusPanel } from '../components/OrderCandidateContactStatusPanel';
 import { OrderCandidateQueryPanel } from '../components/OrderCandidateQueryPanel';
 import { OrderGovernmentSubsidyLane } from '../components/OrderGovernmentSubsidyLane';
 import { OrderTerminalAggregateLane } from '../components/OrderTerminalAggregateLane';
@@ -407,6 +408,12 @@ export const OrderWorkbenchV2Page: FC = () => {
                     caseNo={item.id}
                     onPoolReadback={() => setProjectionRefreshKey((current) => current + 1)}
                   />
+                )}
+                {branchType === 'normal' && (
+                  selectedStage === 'caregiver_line_delivery'
+                  || selectedStage === 'caregiver_willingness_reply'
+                ) && (
+                  <OrderCandidateContactStatusPanel caseNo={item.id} />
                 )}
                 <button
                   type="button"
