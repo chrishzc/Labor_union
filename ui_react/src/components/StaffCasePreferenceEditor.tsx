@@ -2,7 +2,7 @@
  * File: StaffCasePreferenceEditor.tsx
  * Description: 直接以六個 Staff-owned topic 完成接案偏好編輯、預覽、儲存與回讀。
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { staffCasePreferenceSummaryClient } from '../api/staff_case_preference_summary/staff_case_preference_summary_client';
 import { staffCasePreferenceCommandClient } from '../api/staff_case_preference_summary/staff_case_preference_summary_command_client';
 import type {
@@ -95,6 +95,10 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+function changedTopicLabels(keys: string[]): string[] {
+  return keys.map((key) => TOPICS.find((topic) => topic.key === key)?.label ?? key);
+}
+
 export const StaffCasePreferenceEditor: React.FC<StaffCasePreferenceEditorProps> = ({ staffId, onSaved }) => {
   const [summary, setSummary] = useState<StaffCasePreferenceSummary | null>(null);
   const [draft, setDraft] = useState<DraftState>(EMPTY_DRAFT);
@@ -133,13 +137,6 @@ export const StaffCasePreferenceEditor: React.FC<StaffCasePreferenceEditorProps>
       });
     return () => controller.abort();
   }, [staffId, reloadGeneration]);
-
-  const changedLabels = useMemo(() => {
-    if (preview === null) return [];
-    return preview.changed_topics.map((key) => (
-      TOPICS.find((topic) => topic.key === key)?.label ?? key
-    ));
-  }, [preview]);
 
   const updateDraft = (
     key: StaffCasePreferenceTopicKey,
@@ -183,10 +180,11 @@ export const StaffCasePreferenceEditor: React.FC<StaffCasePreferenceEditorProps>
         { snapshot: snapshotFromDraft(draft) },
       );
       setPreview(result);
+      const labels = changedTopicLabels(result.changed_topics);
       setMessage(
-        result.changed_topics.length === 0
+        labels.length === 0
           ? '目前六項偏好沒有變更。'
-          : `預覽完成：將變更 ${changedLabels.length > 0 ? changedLabels.join('、') : result.changed_topics.length + ' 項'}。`,
+          : `預覽完成：將變更 ${labels.join('、')}。`,
       );
     } catch (reason) {
       setPreview(null);
@@ -344,7 +342,7 @@ export const StaffCasePreferenceEditor: React.FC<StaffCasePreferenceEditorProps>
         <div className="staff-action-status" role="status">
           {preview.changed_topics.length === 0
             ? '預覽完成：六項內容與目前資料相同。'
-            : `預覽完成：${preview.changed_topics.map((key) => TOPICS.find((topic) => topic.key === key)?.label ?? key).join('、')}。`}
+            : `預覽完成：${changedTopicLabels(preview.changed_topics).join('、')}。`}
         </div>
       )}
       {message && <div className="staff-action-status" role="status">{message}</div>}
