@@ -1,11 +1,8 @@
 /**
  * Orders management wrapper: exposes incomplete intake repair without changing complete-order workbenches.
  */
-import React, { useCallback, useEffect, useState } from 'react';
-import {
-  loadAllOrderSummaries,
-  ordersQueryClient,
-} from '../api/orders/order_query_client';
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { subscribeOrderSummarySnapshots } from '../api/orders/order_query_client';
 import type { OrderSummaryItem } from '../api/orders/order_query_schemas';
 import {
   intakeBlockerMessage,
@@ -42,6 +39,7 @@ interface IntakeRepairCardProps {
 
 const IntakeRepairCard: React.FC<IntakeRepairCardProps> = ({ item, onChanged }) => {
   const [completion, setCompletion] = useState<IntakeCompletionPreview | null>(null);
+  const [completionLoading, setCompletionLoading] = useState(true);
   const [clientName, setClientName] = useState(
     item.client_name.startsWith('待補姓名') ? '' : item.client_name,
   );
@@ -55,6 +53,7 @@ const IntakeRepairCard: React.FC<IntakeRepairCardProps> = ({ item, onChanged }) 
   const [notice, setNotice] = useState<string | null>(null);
 
   const refreshCompletion = useCallback(async () => {
+    setCompletionLoading(true);
     try {
       const preview = await orderIntakeCompletionClient.previewCompletion(item.case_no);
       setCompletion(preview);
@@ -64,6 +63,8 @@ const IntakeRepairCard: React.FC<IntakeRepairCardProps> = ({ item, onChanged }) 
       setCompletion(null);
       setError(intakeRepairErrorMessage(caught));
       return null;
+    } finally {
+      setCompletionLoading(false);
     }
   }, [item.case_no]);
 
@@ -82,6 +83,7 @@ const IntakeRepairCard: React.FC<IntakeRepairCardProps> = ({ item, onChanged }) 
   const validTermsDraft = /^\d{4}-\d{2}-\d{2}$/.test(startDate)
     && Number.isInteger(Number(serviceDays))
     && Number(serviceDays) > 0;
+  const termsProtectionReady = completion !== null && completion.blockers.length === 0;
 
   const finalizeIfComplete = async (successMessage: string) => {
     const fresh = await orderIntakeCompletionClient.previewCompletion(item.case_no);
@@ -137,7 +139,7 @@ const IntakeRepairCard: React.FC<IntakeRepairCardProps> = ({ item, onChanged }) 
   };
 
   const previewTerms = async () => {
-    if (!validTermsDraft) return;
+    if (!validTermsDraft || !termsProtectionReady) return;
     setBusy('terms-preview');
     setError(null);
     setNotice(null);
@@ -202,43 +204,35 @@ const IntakeRepairCard: React.FC<IntakeRepairCardProps> = ({ item, onChanged }) 
   return (
     <article
       data-surface-id="orders.intake-repair.card"
-      style={{
-        border: '1px solid #d8c7bd',
-        borderRadius: '12px',
-        padding: '16px',
-        background: '#fff',
-        display: 'grid',
-        gap: '14px',
-      }}
+      style={{ border: '1px solid #d8c7bd', borderRadius: 12, padding: 16, background: '#fff', display: 'grid', gap: 14 }}
     >
       <header>
         <strong>{item.case_no}</strong>
-        <span style={{ marginLeft: '10px', color: '#8a4b32' }}>狀態：{item.order_status}</span>
+        <span style={{ marginLeft: 10, color: '#8a4b32' }}>狀態：{item.order_status}</span>
       </header>
 
       <section aria-label={`${item.case_no} 缺件項目`}>
         <strong>目前阻擋項目</strong>
         {missingFields.length > 0 ? (
-          <ul style={{ margin: '6px 0 0', paddingLeft: '22px' }}>
+          <ul style={{ margin: '6px 0 0', paddingLeft: 22 }}>
             {missingFields.map((field) => <li key={field}>{FIELD_LABELS[field]}</li>)}
           </ul>
         ) : (
-          <div style={{ marginTop: '6px', color: '#166534' }}>必填進件資料已齊全，待重新判定訂單狀態。</div>
+          <div style={{ marginTop: 6, color: '#166534' }}>必填進件資料已齊全，待重新判定訂單狀態。</div>
         )}
       </section>
 
+      {completionLoading && <div role="status">正在檢查服務資料鎖與版本限制…</div>}
       {completion && completion.blockers.length > 0 && (
-        <section role="status" style={{ border: '1px solid #f0b37e', background: '#fff7ed', borderRadius: '8px', padding: '10px' }}>
+        <section role="status" style={{ border: '1px solid #f0b37e', background: '#fff7ed', borderRadius: 8, padding: 10 }}>
           <strong>目前不可完成補件</strong>
-          <ul style={{ margin: '6px 0 0', paddingLeft: '22px' }}>
-            {completion.blockers.map((blocker) => (
-              <li key={blocker}>{intakeBlockerMessage(blocker)}</li>
-            ))}
+          <ul style={{ margin: '6px 0 0', paddingLeft: 22 }}>
+            {completion.blockers.map((blocker) => <li key={blocker}>{intakeBlockerMessage(blocker)}</li>)}
           </ul>
         </section>
       )}
 
-      <label style={{ display: 'grid', gap: '4px', fontWeight: 600 }}>
+      <label style={{ display: 'grid', gap: 4, fontWeight: 600 }}>
         補件原因（稽核必填）
         <textarea
           aria-label={`${item.case_no} 補件原因`}
@@ -252,7 +246,7 @@ const IntakeRepairCard: React.FC<IntakeRepairCardProps> = ({ item, onChanged }) 
       </label>
 
       {missingFields.includes('client_name') && (
-        <section aria-label="補齊客戶姓名" style={{ display: 'grid', gap: '8px' }}>
+        <section aria-label="補齊客戶姓名" style={{ display: 'grid', gap: 8 }}>
           <strong>客戶姓名</strong>
           <input
             aria-label={`${item.case_no} 客戶姓名`}
@@ -265,21 +259,13 @@ const IntakeRepairCard: React.FC<IntakeRepairCardProps> = ({ item, onChanged }) 
             }}
             placeholder="輸入正式客戶姓名"
           />
-          <button
-            type="button"
-            disabled={busy !== null || clientName.trim().length === 0}
-            onClick={() => void previewClientName()}
-          >
+          <button type="button" disabled={busy !== null || clientName.trim().length === 0} onClick={() => void previewClientName()}>
             {busy === 'client-preview' ? '檢查中…' : '檢查姓名補件'}
           </button>
           {clientPreview && (
-            <div style={{ display: 'grid', gap: '6px' }}>
+            <div style={{ display: 'grid', gap: 6 }}>
               <div>補件後姓名：<strong>{clientPreview.after_client_name}</strong></div>
-              <button
-                type="button"
-                disabled={busy !== null || !hasReason}
-                onClick={() => void applyClientName()}
-              >
+              <button type="button" disabled={busy !== null || !hasReason} onClick={() => void applyClientName()}>
                 {busy === 'client-apply' ? '套用中…' : '確認補齊客戶姓名'}
               </button>
             </div>
@@ -288,9 +274,9 @@ const IntakeRepairCard: React.FC<IntakeRepairCardProps> = ({ item, onChanged }) 
       )}
 
       {termsMissing && (
-        <section aria-label="補齊約定服務資料" style={{ display: 'grid', gap: '8px' }}>
+        <section aria-label="補齊約定服務資料" style={{ display: 'grid', gap: 8 }}>
           <strong>約定服務資料</strong>
-          <label style={{ display: 'grid', gap: '4px' }}>
+          <label style={{ display: 'grid', gap: 4 }}>
             約定服務開始日
             <input
               aria-label={`${item.case_no} 約定服務開始日`}
@@ -304,7 +290,7 @@ const IntakeRepairCard: React.FC<IntakeRepairCardProps> = ({ item, onChanged }) 
               }}
             />
           </label>
-          <label style={{ display: 'grid', gap: '4px' }}>
+          <label style={{ display: 'grid', gap: 4 }}>
             服務天數
             <input
               aria-label={`${item.case_no} 服務天數`}
@@ -321,21 +307,17 @@ const IntakeRepairCard: React.FC<IntakeRepairCardProps> = ({ item, onChanged }) 
           </label>
           <button
             type="button"
-            disabled={busy !== null || !validTermsDraft}
+            disabled={busy !== null || !validTermsDraft || !termsProtectionReady}
             onClick={() => void previewTerms()}
           >
             {busy === 'terms-preview' ? '檢查中…' : '檢查服務資料補件'}
           </button>
           {termsPreview && (
-            <div style={{ display: 'grid', gap: '6px' }}>
-              <div>
-                補件欄位：{termsPreview.changed_fields.map((field) => FIELD_LABELS[field]).join('、') || '無'}
-              </div>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div>補件欄位：{termsPreview.changed_fields.map((field) => FIELD_LABELS[field]).join('、') || '無'}</div>
               {termsPreview.blockers.length > 0 && (
-                <ul style={{ margin: 0, paddingLeft: '22px', color: '#9a3412' }}>
-                  {termsPreview.blockers.map((blocker) => (
-                    <li key={blocker}>{intakeBlockerMessage(blocker)}</li>
-                  ))}
+                <ul style={{ margin: 0, paddingLeft: 22, color: '#9a3412' }}>
+                  {termsPreview.blockers.map((blocker) => <li key={blocker}>{intakeBlockerMessage(blocker)}</li>)}
                 </ul>
               )}
               <button
@@ -351,13 +333,9 @@ const IntakeRepairCard: React.FC<IntakeRepairCardProps> = ({ item, onChanged }) 
       )}
 
       {completion?.apply_allowed && missingFields.length === 0 && (
-        <section aria-label="恢復訂單操作" style={{ display: 'grid', gap: '8px' }}>
+        <section aria-label="恢復訂單操作" style={{ display: 'grid', gap: 8 }}>
           <div>所有必填進件資料已齊全；確認後會以最新版本重新判定並恢復為「洽談中」。</div>
-          <button
-            type="button"
-            disabled={busy !== null || !hasReason}
-            onClick={() => void finalizeExistingCompleteIntake()}
-          >
+          <button type="button" disabled={busy !== null || !hasReason} onClick={() => void finalizeExistingCompleteIntake()}>
             {busy === 'completion-apply' ? '重新判定中…' : '恢復訂單操作'}
           </button>
         </section>
@@ -375,28 +353,16 @@ export const OrdersManagementPage: React.FC = () => {
   const [repairError, setRepairError] = useState<string | null>(null);
   const [ordersRevision, setOrdersRevision] = useState(0);
 
-  const loadRepairItems = useCallback(async () => {
-    setRepairLoading(true);
-    try {
-      const page = await loadAllOrderSummaries(
-        ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
-        { page_size: 200, lifecycle_scope: 'unfinished' },
-      );
-      setRepairItems(page.items.filter(needsIntakeRepair));
-      setRepairError(null);
-    } catch (caught) {
-      setRepairError(caught instanceof Error ? caught.message : '無法取得待補件訂單清單。');
-    } finally {
-      setRepairLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadRepairItems();
-  }, [loadRepairItems]);
+  useLayoutEffect(() => subscribeOrderSummarySnapshots(({ page, params }) => {
+    if (params.lifecycle_scope !== 'unfinished' || params.query_text || params.after_case_no) return;
+    setRepairItems(page.items.filter(needsIntakeRepair));
+    setRepairLoading(false);
+    setRepairError(null);
+  }), []);
 
   const handleChanged = async () => {
-    await loadRepairItems();
+    setRepairLoading(true);
+    setRepairError(null);
     setOrdersRevision((current) => current + 1);
   };
 
@@ -406,25 +372,17 @@ export const OrdersManagementPage: React.FC = () => {
         <section
           aria-label="訂單缺件補齊"
           data-surface-id="orders.intake-repair"
-          style={{
-            marginBottom: '20px',
-            padding: '18px',
-            border: '1px solid #e7c8b5',
-            borderRadius: '14px',
-            background: '#fffaf7',
-          }}
+          style={{ marginBottom: 20, padding: 18, border: '1px solid #e7c8b5', borderRadius: 14, background: '#fffaf7' }}
         >
-          <h2 style={{ marginTop: 0, marginBottom: '6px', fontSize: '1.1rem' }}>訂單缺件補齊</h2>
+          <h2 style={{ marginTop: 0, marginBottom: 6, fontSize: '1.1rem' }}>訂單缺件補齊</h2>
           <p style={{ marginTop: 0, color: '#6b5146' }}>
             僅列出目前缺少必要進件資料的訂單。補件先 Preview，再以最新版本與稽核原因 Apply；完整訂單仍使用下方既有工作台。
           </p>
           {repairLoading && <div role="status">正在重新判定缺件…</div>}
           {repairError && <div role="alert" style={{ color: '#991b1b' }}>{repairError}</div>}
           {!repairLoading && !repairError && repairItems.length > 0 && (
-            <div style={{ display: 'grid', gap: '12px' }}>
-              {repairItems.map((item) => (
-                <IntakeRepairCard key={item.case_no} item={item} onChanged={handleChanged} />
-              ))}
+            <div style={{ display: 'grid', gap: 12 }}>
+              {repairItems.map((item) => <IntakeRepairCard key={item.case_no} item={item} onChanged={handleChanged} />)}
             </div>
           )}
         </section>
