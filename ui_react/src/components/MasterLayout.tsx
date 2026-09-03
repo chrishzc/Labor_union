@@ -25,6 +25,7 @@ export type PageType =
   | 'line-liff-studio'
   | 'line-security'
   | 'finance'
+  | 'historical-service-accounting'
   | 'anomalies'
   | 'data-browser'
   | 'account-management'
@@ -46,6 +47,7 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'line-security': 'line',
 
   'finance': 'finance',
+  'historical-service-accounting': 'finance',
 
   'anomalies': 'audit',
   'data-browser': 'operations',
@@ -79,6 +81,7 @@ export const NAV_ITEMS: NavItem[] = [
 
   // Finance Section
   { id: 'finance', icon: '💰', label: '帳務中心', section: 'finance' },
+  { id: 'historical-service-accounting', icon: '🧮', label: '歷史服務天數', section: 'finance' },
 
   // Audit & System Section
   { id: 'anomalies', icon: '⚠️', label: '異常審核', section: 'audit' },
@@ -165,19 +168,42 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
 
   return (
     <div className="app-shell">
+      {/* Top Primary Navbar */}
       <header className="top-navbar">
         <div className="brand-section" onClick={() => handleSectionClick('operations')}>
           <span className="brand-logo">🤱</span>
           <span>月子工會管理系統</span>
         </div>
 
+        {/* Primary 4 Section Tabs */}
         <nav className="primary-section-tabs">
-          <button className={`section-tab-btn ${currentSection === 'operations' ? 'active' : ''}`} onClick={() => handleSectionClick('operations')}>營運作業 (Operations)</button>
-          <button className={`section-tab-btn ${currentSection === 'line' ? 'active' : ''}`} onClick={() => handleSectionClick('line')}>💬 LINE 專區 (LINE Hub)</button>
-          <button className={`section-tab-btn ${currentSection === 'finance' ? 'active' : ''}`} onClick={() => handleSectionClick('finance')}>帳務作業 (Finance)</button>
-          <button className={`section-tab-btn ${currentSection === 'audit' ? 'active' : ''}`} onClick={() => handleSectionClick('audit')}>稽核與系統 (Audit & System)</button>
+          <button
+            className={`section-tab-btn ${currentSection === 'operations' ? 'active' : ''}`}
+            onClick={() => handleSectionClick('operations')}
+          >
+            營運作業 (Operations)
+          </button>
+          <button
+            className={`section-tab-btn ${currentSection === 'line' ? 'active' : ''}`}
+            onClick={() => handleSectionClick('line')}
+          >
+            💬 LINE 專區 (LINE Hub)
+          </button>
+          <button
+            className={`section-tab-btn ${currentSection === 'finance' ? 'active' : ''}`}
+            onClick={() => handleSectionClick('finance')}
+          >
+            帳務作業 (Finance)
+          </button>
+          <button
+            className={`section-tab-btn ${currentSection === 'audit' ? 'active' : ''}`}
+            onClick={() => handleSectionClick('audit')}
+          >
+            稽核與系統 (Audit & System)
+          </button>
         </nav>
 
+        {/* Top Navbar Right Controls */}
         <div className="top-navbar-right">
           <div
             className="system-status-indicator"
@@ -186,20 +212,45 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
           >
             <span
               className={`status-dot ${systemOnline ? (isDegraded ? 'degraded' : 'online') : 'offline'}`}
-              style={{ backgroundColor: systemOnline === null || !systemOnline ? '#9ca3af' : isDegraded ? '#ea580c' : '#16a34a' }}
+              style={{
+                backgroundColor: systemOnline === null || !systemOnline
+                  ? '#9ca3af'
+                  : isDegraded
+                  ? '#ea580c'
+                  : '#16a34a',
+              }}
             />
             <span>{systemOnline === null ? '系統狀態查詢中' : systemOnline ? `系統在線 (${latencyText})` : '系統離線'}</span>
           </div>
 
-          <button className="notification-btn" title="查看待處理異常" onClick={() => { onSelectSection('audit'); onSelectPage('anomalies'); }}>🔔</button>
+          <button
+            className="notification-btn"
+            title="查看待處理異常"
+            onClick={() => {
+              onSelectSection('audit');
+              onSelectPage('anomalies');
+            }}
+          >
+            🔔
+          </button>
 
           <div className="user-profile-capsule">
-            <span className="user-profile-name">👤 {currentUser?.display_name || currentUser?.username || '已登入使用者'}</span>
-            <button type="button" className="logout-action-btn" onClick={() => setShowLogoutModal(true)} title="點擊登出系統">🚪 登出</button>
+            <span className="user-profile-name">
+              👤 {currentUser?.display_name || currentUser?.username || '已登入使用者'}
+            </span>
+            <button
+              type="button"
+              className="logout-action-btn"
+              onClick={() => setShowLogoutModal(true)}
+              title="點擊登出系統"
+            >
+              🚪 登出
+            </button>
           </div>
         </div>
       </header>
 
+      {/* App Body: Slim Sidebar + Main Content */}
       <div className="app-body">
         <aside className="slim-sidebar">
           {visibleNavItems.map((item) => (
@@ -214,18 +265,45 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
             </button>
           ))}
         </aside>
+
         <main className="main-workspace">{children}</main>
       </div>
 
+      {/* Stitch Nurture Core Logout Confirmation Modal */}
       {showLogoutModal && (
-        <div className="logout-modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setShowLogoutModal(false); }} role="dialog" aria-modal="true" aria-labelledby="logout-dialog-title">
+        <div
+          className="logout-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowLogoutModal(false);
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="logout-dialog-title"
+        >
           <div className="logout-modal-card">
             <div className="logout-modal-icon">🚪</div>
             <h2 id="logout-dialog-title" className="logout-modal-title">確定要登出系統嗎？</h2>
-            <p className="logout-modal-desc">登出後將清除當前工作會話，下次進入需重新進行雙重身分驗證。</p>
+            <p className="logout-modal-desc">
+              登出後將清除當前工作會話，下次進入需重新進行雙重身分驗證。
+            </p>
             <div className="logout-modal-actions">
-              <button type="button" className="logout-btn-cancel" onClick={() => setShowLogoutModal(false)}>取消</button>
-              <button type="button" className="logout-btn-confirm" onClick={() => { setShowLogoutModal(false); onLogout(); }}>確認登出</button>
+              <button
+                type="button"
+                className="logout-btn-cancel"
+                onClick={() => setShowLogoutModal(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="logout-btn-confirm"
+                onClick={() => {
+                  setShowLogoutModal(false);
+                  onLogout();
+                }}
+              >
+                確認登出
+              </button>
             </div>
           </div>
         </div>
