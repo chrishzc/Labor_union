@@ -22,9 +22,9 @@ class MySqlWeeklyOperationsReportQueryAdapter:
     def __init__(self, connection) -> None:
         self._connection = connection
 
-    def list_case_facts(self, week_start: date, week_end: date) -> list[WeeklyCaseFact]:
+    def list_case_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]:
         with self._connection.cursor() as cursor:
-            cursor.execute(_CASE_FACTS_SQL, (week_start, week_end + timedelta(days=1)))
+            cursor.execute(_CASE_FACTS_SQL, (start_date, end_date + timedelta(days=1)))
             rows = cursor.fetchall()
         return [
             WeeklyCaseFact(
@@ -44,9 +44,9 @@ class MySqlWeeklyOperationsReportQueryAdapter:
             for row in rows
         ]
 
-    def list_service_facts(self, week_start: date, week_end: date) -> list[WeeklyServiceFact]:
+    def list_service_facts(self, start_date: date, end_date: date) -> list[WeeklyServiceFact]:
         with self._connection.cursor() as cursor:
-            cursor.execute(_SERVICE_FACTS_SQL, (week_start, week_end))
+            cursor.execute(_SERVICE_FACTS_SQL, (start_date, end_date))
             rows = cursor.fetchall()
         return [
             WeeklyServiceFact(
@@ -64,10 +64,10 @@ class MySqlWeeklyOperationsReportQueryAdapter:
             for row in rows
         ]
 
-    def list_subsidy_facts(self, week_start: date, week_end: date) -> SubsidyFacts:
+    def list_subsidy_facts(self, start_date: date, end_date: date) -> SubsidyFacts:
         report = reconciliation_register_query.build_completion_period_subsidy_rows(
-            week_start,
-            week_end,
+            start_date,
+            end_date,
             get_connection,
         )
         return SubsidyFacts(

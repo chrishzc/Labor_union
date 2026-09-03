@@ -6,10 +6,10 @@ import { sessionClient } from '../auth/session_client';
 import { transport, type RequestOptions } from '../shared/transport';
 import { ApiDecodeError } from '../shared/typed_errors';
 import {
-  AdminAuditMaskedPageResponseSchema,
-  AdminAuditMaskedDetailResponseSchema,
-  type AdminAuditMaskedDetail,
-  type AdminAuditMaskedPage,
+  AdminAuditPageResponseSchema,
+  AdminAuditDetailResponseSchema,
+  type AdminAuditDetail,
+  type AdminAuditPage,
   type AuditQueryParams,
 } from './audit_query_schemas';
 import {
@@ -25,8 +25,8 @@ export type AuditQueryOptions = Omit<
 >;
 
 export interface AuditQueryClient {
-  query(params?: AuditQueryParams, options?: AuditQueryOptions): Promise<AdminAuditMaskedPage>;
-  detail(auditId: number, options?: AuditQueryOptions): Promise<AdminAuditMaskedDetail>;
+  query(params?: AuditQueryParams, options?: AuditQueryOptions): Promise<AdminAuditPage>;
+  detail(auditId: number, options?: AuditQueryOptions): Promise<AdminAuditDetail>;
 }
 
 function requestOptions(options?: AuditQueryOptions): RequestOptions {
@@ -57,7 +57,7 @@ function validateParams(params: AuditQueryParams): void {
 export async function queryAdminAudit(
   params: AuditQueryParams = {},
   options?: AuditQueryOptions,
-): Promise<AdminAuditMaskedPage> {
+): Promise<AdminAuditPage> {
   validateParams(params);
   try {
     const raw = await transport.get<unknown>('/api/v1/admin/audits', {
@@ -69,10 +69,10 @@ export async function queryAdminAudit(
         actor_query: params.actorQuery?.trim() || undefined,
       },
     });
-    const decoded = AdminAuditMaskedPageResponseSchema.safeParse(raw);
+    const decoded = AdminAuditPageResponseSchema.safeParse(raw);
     if (!decoded.success) {
       throw new ApiDecodeError(
-        '遮罩稽核回應結構不符 strict contract。',
+        '稽核回應結構不符 strict contract。',
         decoded.error.issues.map((issue) => ({
           path: issue.path.join('.') || '(root)',
           message: issue.message,
@@ -93,16 +93,16 @@ export async function queryAdminAudit(
 export async function queryAdminAuditDetail(
   auditId: number,
   options?: AuditQueryOptions,
-): Promise<AdminAuditMaskedDetail> {
+): Promise<AdminAuditDetail> {
   if (!Number.isInteger(auditId) || auditId < 1) {
     throw new AuditQueryError('AUDIT_QUERY_INVALID', 'audit_id 必須為正整數。');
   }
   try {
     const raw = await transport.get<unknown>(`/api/v1/admin/audits/${auditId}`, requestOptions(options));
-    const decoded = AdminAuditMaskedDetailResponseSchema.safeParse(raw);
+    const decoded = AdminAuditDetailResponseSchema.safeParse(raw);
     if (!decoded.success) {
       throw new ApiDecodeError(
-        '遮罩稽核明細回應結構不符 strict contract。',
+        '稽核明細回應結構不符 strict contract。',
         decoded.error.issues.map((issue) => ({
           path: issue.path.join('.') || '(root)',
           message: issue.message,

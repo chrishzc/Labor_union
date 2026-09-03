@@ -13,8 +13,8 @@ from domains.customer_service.escalation import (
     AutomationHoldState,
     EscalationEventType,
     EscalationWorkflowStatus,
-    MaskedAlertIntent,
-    MaskedContext,
+    EscalationAlertIntent,
+    EscalationContext,
     TriggerCode,
 )
 from domains.customer_service.ticket import CustomerServiceCategory
@@ -71,7 +71,7 @@ def _command() -> CreateHumanEscalation:
         trigger_code=TriggerCode.COMPLAINT,
         trigger_policy_version="complaint.v1",
         ticket_category=CustomerServiceCategory.OTHER,
-        masked_context=MaskedContext("complaint_explicit", "complaint.v1", "other", "m4-mask.v1"),
+        context=EscalationContext("complaint_explicit", "complaint.v1", "other", "m4-mask.v1"),
         hold_scope="conversation:opaque",
         idempotency_key=IdempotencyKey("m4-create-1"),
         correlation_id=CorrelationId("m4-correlation-1"),
@@ -143,11 +143,11 @@ def test_receipt_snapshot_is_written_to_existing_immutable_receipt_table():
 
 def test_masked_alert_uses_existing_global_outbox_and_updates_status():
     cursor = _Cursor()
-    intent = MaskedAlertIntent(
+    intent = EscalationAlertIntent(
         "escalation:7", "ticket:21", TriggerCode.COMPLAINT, "other",
         "complaint_explicit", AutomationHoldState.ACTIVE, "corr-m4", "a" * 64,
     )
-    MySqlCustomerServiceEscalationRepository(_Connection(cursor)).enqueue_masked_alert(intent)
+    MySqlCustomerServiceEscalationRepository(_Connection(cursor)).enqueue_alert(intent)
     assert len(cursor.calls) == 2
     assert "line_domain_outbox" in cursor.calls[0][0]
     assert "UPDATE customer_service_escalations" in cursor.calls[1][0]
@@ -164,11 +164,11 @@ def test_masked_alert_captures_active_target_and_configuration_snapshot():
         "linked_line_user_id": None,
     },))
     outbox, update = _Cursor(), _Cursor()
-    intent = MaskedAlertIntent(
+    intent = EscalationAlertIntent(
         "escalation:7", "ticket:21", TriggerCode.COMPLAINT, "other",
         "complaint_explicit", AutomationHoldState.ACTIVE, "corr-m4", "a" * 64,
     )
-    MySqlCustomerServiceEscalationRepository(_Connection(target, outbox, update)).enqueue_masked_alert(intent)
+    MySqlCustomerServiceEscalationRepository(_Connection(target, outbox, update)).enqueue_alert(intent)
     payload = json.loads(outbox.calls[0][1][3])
     assert payload["target_snapshot"] == {
         "target_id": 3,

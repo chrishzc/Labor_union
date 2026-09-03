@@ -17,7 +17,7 @@ from domains.customer_service.ticket import CustomerServiceCategory, CustomerSer
 class CustomerServiceTicketView(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ticket_id: int
-    line_user_id_masked: str
+    line_user_id: str
     category: CustomerServiceCategory
     status: CustomerServiceStatus
     version: int
@@ -167,7 +167,7 @@ class HumanEscalationCreateRequest(BaseModel):
         "contact_union",
         "other",
     ]
-    masked_context: dict[str, str]
+    context: dict[str, str]
     hold_scope: str = Field(min_length=1, max_length=191)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
@@ -177,13 +177,13 @@ class HumanEscalationCreateApplyRequest(HumanEscalationCreateRequest):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     def model_post_init(self, __context) -> None:
-        if set(self.masked_context) != {
+        if set(self.context) != {
             "summary_code",
             "policy_version",
             "category",
             "redaction_version",
         }:
-            raise ValueError("masked_context must use the closed M4 allowlist")
+            raise ValueError("context must use the closed M4 allowlist")
 
 
 class HumanEscalationHandlingRequest(HumanEscalationClaimRequest):
@@ -253,7 +253,7 @@ class HumanEscalationViewResponse(BaseModel):
     workflow_version: int = Field(ge=0)
     automation_hold: str
     hold_scope_label: str
-    masked_context: dict[str, str]
+    context: dict[str, str]
     alert_status: str
     current_version: str
     created_at: datetime

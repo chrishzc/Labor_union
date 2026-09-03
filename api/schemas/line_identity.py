@@ -5,10 +5,41 @@ Description: 定義 canonical LINE LIFF、登記與管理端身分流程的 publ
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+
+
+_TAIWAN_ID_LETTER_CODES = {
+    "A": 10,
+    "B": 11,
+    "C": 12,
+    "D": 13,
+    "E": 14,
+    "F": 15,
+    "G": 16,
+    "H": 17,
+    "I": 34,
+    "J": 18,
+    "K": 19,
+    "L": 20,
+    "M": 21,
+    "N": 22,
+    "O": 35,
+    "P": 23,
+    "Q": 24,
+    "R": 25,
+    "S": 26,
+    "T": 27,
+    "U": 28,
+    "V": 29,
+    "W": 32,
+    "X": 30,
+    "Y": 31,
+    "Z": 33,
+}
 
 
 class LiffIdentityContext(BaseModel):
@@ -110,6 +141,62 @@ class ProvisionalRegistrationPreviewRequest(BaseModel):
     liff_config_revision: str | None = Field(default=None, max_length=191)
     survey_details: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("id_number")
+    @classmethod
+    def validate_id_number(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return value
+        candidate = value.strip()
+        if not re.fullmatch(r"[A-Z][12]\d{8}", candidate):
+            raise ValueError("id_number must be a valid Taiwan national ID number")
+        letter_code = _TAIWAN_ID_LETTER_CODES[candidate[0]]
+        digits = [int(char) for char in candidate[1:]]
+        checksum = (
+            letter_code // 10
+            + (letter_code % 10) * 9
+            + sum(digit * weight for digit, weight in zip(digits, (8, 7, 6, 5, 4, 3, 2, 1, 1)))
+        )
+        if checksum % 10 != 0:
+            raise ValueError("id_number must be a valid Taiwan national ID number")
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return value
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value.strip()):
+            raise ValueError("email must be a valid email address")
+        return value
+
+    @field_validator("birth_date")
+    @classmethod
+    def validate_birth_date(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return value
+        candidate = value.strip()
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", candidate):
+            raise ValueError("birth_date must be a valid YYYY-MM-DD date")
+        try:
+            parsed = date.fromisoformat(candidate)
+        except ValueError as exc:
+            raise ValueError("birth_date must be a valid YYYY-MM-DD date") from exc
+        if parsed > date.today():
+            raise ValueError("birth_date cannot be later than today")
+        return value
+
+    @field_validator("expected_date")
+    @classmethod
+    def validate_expected_date(cls, value: str) -> str:
+        candidate = value.strip()
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", candidate):
+            raise ValueError("expected_date must be a valid YYYY-MM-DD date")
+        try:
+            date.fromisoformat(candidate)
+        except ValueError as exc:
+            raise ValueError("expected_date must be a valid YYYY-MM-DD date") from exc
+        return value
+
 
 class ProvisionalRegistrationRequest(ProvisionalRegistrationPreviewRequest):
     expected_binding_version: int = Field(ge=0)
@@ -162,7 +249,7 @@ class CanonicalLineReviewDecisionPreviewResponse(BaseModel):
     resulting_version: int
     subject_type: str | None
     subject_reference: str | None
-    line_user_id_masked: str
+    line_user_id: str
     preview_fingerprint: str
 
 
@@ -177,7 +264,7 @@ class CanonicalLineReviewResponse(BaseModel):
     subject_reference: str | None
     assigned_admin_id: int | None
     due_at: datetime | None
-    line_user_id_masked: str
+    line_user_id: str
     display_name: str
     decision_reason: str | None
     reviewed_by_actor_id: str | None

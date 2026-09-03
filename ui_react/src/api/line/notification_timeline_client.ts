@@ -1,6 +1,6 @@
 /**
  * File: notification_timeline_client.ts
- * Description: 嚴格解碼案件範圍的去識別 LINE 通知唯讀歷程。
+ * Description: 嚴格解碼案件範圍的canonical LINE 通知唯讀歷程。
  */
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -17,7 +17,7 @@ export const LineNotificationTimelineRecordSchema = z.strictObject({
   decision_status: z.string().nullable().optional(),
   reason_code: z.string().nullable().optional(),
   recipient_type: z.string().nullable().optional(),
-  recipient_masked: z.string().nullable().optional(),
+  recipient_identity: z.string().nullable().optional(),
   occurrence_number: z.number().int().positive().nullable().optional(),
   intent_status: z.string().nullable().optional(),
   scheduled_at_utc: z.string().nullable().optional(),

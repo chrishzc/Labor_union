@@ -70,7 +70,7 @@ def test_review_identity_is_deterministic_and_contains_no_raw_bank_data() -> Non
     )
 
     assert replay == first
-    assert first.masked_source_identity == "finance-sinopac-row-8"
+    assert first.source_identity == "finance-sinopac-row-8"
     assert "交易明細報表" not in first.review_identity
 
 

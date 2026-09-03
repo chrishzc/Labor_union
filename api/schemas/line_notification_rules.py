@@ -113,7 +113,7 @@ class LineNotificationTimelineRecordView(_ClosedModel):
     decision_status: StrictStr | None
     reason_code: StrictStr | None
     recipient_type: StrictStr | None
-    recipient_masked: StrictStr | None
+    recipient_identity: StrictStr | None
     occurrence_number: StrictInt | None
     intent_status: StrictStr | None
     scheduled_at_utc: StrictStr | None

@@ -12,8 +12,8 @@ export const HistoricalReviewIssueSchema = z.strictObject({
   issue_code: z.string().trim().min(1),
   field_path: z.string().trim().min(1),
   field_label: z.string().trim().min(1),
-  masked_source_value: z.string(),
-  masked_current_value: z.string(),
+  source_value: z.string(),
+  current_value: z.string(),
   rule: z.string().trim().min(1),
   allowed_values: z.array(z.string()),
   process_blocker: z.string().trim().min(1),
@@ -31,7 +31,7 @@ export type HistoricalReviewWorkbookContract = z.infer<typeof HistoricalReviewWo
 
 export const HistoricalReviewContextSchema = z.strictObject({
   review_identity: HistoricalReviewIdentitySchema,
-  masked_case_identity: z.string().trim().min(1),
+  case_identity: z.string().trim().min(1),
   issues: z.array(HistoricalReviewIssueSchema),
   review_version: z.number().int().nonnegative(),
   remediation_version: z.number().int().nonnegative(),
@@ -71,7 +71,7 @@ export type HistoricalReviewReceipt = z.infer<typeof HistoricalReviewReceiptSche
 
 export const HistoricalReviewSuccessorSchema = z.strictObject({
   review_identity: HistoricalReviewIdentitySchema,
-  masked_case_identity: z.string().trim().min(1),
+  case_identity: z.string().trim().min(1),
   issues: z.array(HistoricalReviewIssueSchema),
 });
 export type HistoricalReviewSuccessor = z.infer<typeof HistoricalReviewSuccessorSchema>;

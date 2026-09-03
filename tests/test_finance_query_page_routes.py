@@ -25,7 +25,7 @@ class _Application:
             SimpleNamespace(
                 payment_date=finance_reports.date(2026, 8, 15),
                 payment_type="staff_payable",
-                recipient_name="去敏受款人",
+                recipient_name="完整受款人",
                 bank_code="812",
                 bank_account="123456789012",
                 amount=MoneyNTD(5000),
@@ -73,10 +73,10 @@ def test_accounts_payable_query_requires_admin_and_masks_sensitive_values(monkey
     )
     assert response.status_code == 200
     row = response.json()["data"]["rows"][0]
-    assert row["bank_account_masked"].endswith("9012")
-    assert row["recipient_identity_card_masked"] == "A*********"
-    assert "123456789012" not in response.text
-    assert "A123456789" not in response.text
+    assert row["bank_account"] == "123456789012"
+    assert row["recipient_identity_card"] == "A123456789"
+    assert "123456789012" in response.text
+    assert "A123456789" in response.text
 
 
 def test_finance_import_query_error_uses_request_correlation_and_redacts_detail():

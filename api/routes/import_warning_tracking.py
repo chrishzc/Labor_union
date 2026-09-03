@@ -1,6 +1,6 @@
 """
 File: import_warning_tracking.py
-Description: 提供匯入警示查詢、去敏 owner referral 與狀態 Preview／Apply API。
+Description: 提供匯入警示查詢、owner referral 與狀態 Preview／Apply API。
 """
 
 from typing import Annotated
@@ -113,7 +113,7 @@ def _transition(operation, body, occurrence_identity, idempotency_key, correlati
 
 
 def _task(value):
-    return {"occurrence_identity": value.occurrence_identity, "owning_lane": value.owning_lane, "logical_code": value.logical_code, "field_path": value.field_path, "masked_subject": value.masked_subject, "issue_codes": list(value.issue_codes), "tracking_status": value.tracking_status.value, "tracking_version": value.tracking_version, "evidence_reference": value.evidence_reference, "display_message": value.display_message, "navigation_action": value.navigation_action}
+    return {"occurrence_identity": value.occurrence_identity, "owning_lane": value.owning_lane, "logical_code": value.logical_code, "field_path": value.field_path, "subject": value.subject, "issue_codes": list(value.issue_codes), "tracking_status": value.tracking_status.value, "tracking_version": value.tracking_version, "evidence_reference": value.evidence_reference, "display_message": value.display_message, "navigation_action": value.navigation_action}
 
 
 def _preview(value):
@@ -143,7 +143,7 @@ def _referral(value):
         "owning_lane": value.owning_lane,
         "logical_code": value.logical_code,
         "field_path": value.field_path,
-        "masked_subject": value.masked_subject,
+        "subject": value.subject,
         "display_message": value.display_message,
         "navigation_action": value.navigation_action,
         "action_kind": value.action_kind,

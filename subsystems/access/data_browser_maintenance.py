@@ -1,6 +1,6 @@
 """
 File: data_browser_maintenance.py
-Description: 編排 legacy table metadata 與 masked Data Browser query。
+Description: 編排 legacy table metadata 與 canonical Data Browser query。
 """
 
 from typing import Any, Callable, Dict, Mapping
@@ -83,7 +83,7 @@ def get_data_browser_table_schema(
     }
 
 
-def query_masked_data_browser_source(
+def query_data_browser_source(
     repository,
     source_id: str,
     *,
@@ -94,7 +94,7 @@ def query_masked_data_browser_source(
     """Run one bounded read-only source query without exposing table identifiers."""
     if limit < 1 or limit > 100:
         raise ValueError("limit_invalid")
-    return repository.query_masked_page(
+    return repository.query_page(
         source_id,
         limit=limit,
         after=after,

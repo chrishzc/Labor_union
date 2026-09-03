@@ -114,7 +114,7 @@ def _load_canonical_review_evidence(connection, event, snapshot) -> Mapping[str,
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT review_identity,source_kind,source_event_identity,source_sheet,"
-            "source_row,masked_identifier,source_fingerprint,source_payload,issue_codes "
+            "source_row,identifier,source_fingerprint,source_payload,issue_codes "
             "FROM beclass_import_review_rows WHERE id=%s FOR UPDATE",
             (review_row_id,),
         )
@@ -126,7 +126,7 @@ def _load_canonical_review_evidence(connection, event, snapshot) -> Mapping[str,
     source_event_identity = _canonical_text(review.get("source_event_identity"), "source event identity")
     source_sheet = _canonical_text(review.get("source_sheet"), "source sheet")
     source_row = _positive_integer(review.get("source_row"), "source row")
-    masked_identifier = _canonical_text(review.get("masked_identifier"), "masked identifier")
+    identifier = _canonical_text(review.get("identifier"), "identifier")
     source_payload = _json_object(review["source_payload"])
     issue_codes = _text_tuple(review["issue_codes"])
     source_fingerprint = _canonical_text(review.get("source_fingerprint"), "source fingerprint")
@@ -139,7 +139,7 @@ def _load_canonical_review_evidence(connection, event, snapshot) -> Mapping[str,
         source_event_identity,
         source_sheet,
         source_row,
-        masked_identifier,
+        identifier,
         source_payload,
         issue_codes,
     ).value:
@@ -150,7 +150,7 @@ def _load_canonical_review_evidence(connection, event, snapshot) -> Mapping[str,
         source_event_identity,
         source_sheet,
         source_row,
-        masked_identifier,
+        identifier,
         source_payload,
         issue_codes,
         PreviewFingerprint(source_fingerprint),
@@ -162,7 +162,7 @@ def _load_canonical_review_evidence(connection, event, snapshot) -> Mapping[str,
         source_kind,
         source_sheet,
         source_row,
-        masked_identifier,
+        identifier,
         issue_codes,
         str(event.get("intent_type")),
     )
@@ -176,7 +176,7 @@ def _validate_snapshot(
     source_kind: BeClassImportSourceKind,
     source_sheet: str,
     source_row: int,
-    masked_identifier: str,
+    identifier: str,
     issue_codes: tuple[str, ...],
     intent_type: str,
 ) -> None:
@@ -187,7 +187,7 @@ def _validate_snapshot(
         "source_row",
         "issue_codes",
         "version",
-        "masked_identifier",
+        "identifier",
         "active",
     }
     if set(snapshot) != required:
@@ -198,8 +198,8 @@ def _validate_snapshot(
         raise ValueError("beclass_import_review_outbox_source_kind_mismatch")
     if snapshot["source_sheet"] != source_sheet or snapshot["source_row"] != source_row:
         raise ValueError("beclass_import_review_outbox_source_location_mismatch")
-    if snapshot["masked_identifier"] != masked_identifier:
-        raise ValueError("beclass_import_review_outbox_masked_identifier_mismatch")
+    if snapshot["identifier"] != identifier:
+        raise ValueError("beclass_import_review_outbox_identifier_mismatch")
     if _text_tuple(snapshot["issue_codes"]) != issue_codes:
         raise ValueError("beclass_import_review_outbox_issue_codes_mismatch")
     expected_snapshot = (

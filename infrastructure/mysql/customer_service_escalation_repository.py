@@ -13,7 +13,7 @@ from domains.customer_service.escalation import (
     AutomationHoldState,
     EscalationEventType,
     EscalationWorkflowStatus,
-    MaskedAlertIntent,
+    EscalationAlertIntent,
 )
 from subsystems.customer_service.escalation_contracts import (
     AutomationHoldDecision,
@@ -39,7 +39,7 @@ _SELECT = (
     "trigger_policy_version,ticket_id,ticket_category,urgency,workflow_status,"
     "workflow_version,hold_scope_ref,automation_hold_state AS hold_state,hold_version,"
     "actor_ref,claim_at_utc,handling_started_at_utc,resolved_at_utc,resolution_code,"
-    "resolution_evidence_digest,masked_context,idempotency_key,correlation_id,"
+    "resolution_evidence_digest,context,idempotency_key,correlation_id,"
     "alert_status,delivery_task_ref,delivery_outcome_ref,created_at_utc AS created_at,updated_at_utc AS updated_at "
     "FROM customer_service_escalations"
 )
@@ -103,15 +103,15 @@ class MySqlCustomerServiceEscalationRepository:
         if ticket_id is None:
             raise CustomerServiceEscalationNotImplementedError("ticket contract lacks ticket_id")
         context = (
-            command.masked_context.as_dict()
-            if hasattr(command.masked_context, "as_dict")
-            else dict(command.masked_context)
+            command.context.as_dict()
+            if hasattr(command.context, "as_dict")
+            else dict(command.context)
         )
         sql = (
             "INSERT INTO customer_service_escalations "
             "(source_event_identity,source_kind,source_fingerprint,trigger_code,"
             "trigger_policy_version,ticket_id,ticket_category,urgency,hold_scope_ref,"
-            "actor_ref,masked_context,idempotency_key,correlation_id) "
+            "actor_ref,context,idempotency_key,correlation_id) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,'high',%s,%s,%s,%s,%s)"
         )
         params = (
@@ -266,9 +266,9 @@ class MySqlCustomerServiceEscalationRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(sql, params)
 
-    def enqueue_masked_alert(self, intent: object) -> None:
-        if not isinstance(intent, MaskedAlertIntent):
-            raise CustomerServiceEscalationNotImplementedError("invalid masked alert intent")
+    def enqueue_alert(self, intent: object) -> None:
+        if not isinstance(intent, EscalationAlertIntent):
+            raise CustomerServiceEscalationNotImplementedError("invalid bounded alert intent")
         target_snapshot = self._active_alert_target_snapshot()
         payload = {
             "escalation_ref": intent.escalation_ref,
@@ -304,7 +304,7 @@ class MySqlCustomerServiceEscalationRepository:
             )
             escalation_id = _escalation_id(intent.escalation_ref)
             cursor.execute(
-                "UPDATE customer_service_escalations SET alert_status='queued',masked_alert_intent_ref=%s WHERE id=%s",
+                "UPDATE customer_service_escalations SET alert_status='queued',alert_intent_ref=%s WHERE id=%s",
                 (identity, escalation_id),
             )
 
@@ -397,12 +397,12 @@ class MySqlCustomerServiceEscalationRepository:
             row = cursor.fetchone()
         if row is None:
             return None
-        if isinstance(row, Mapping) and isinstance(row.get("masked_context"), (str, bytes)):
-            payload = row["masked_context"]
+        if isinstance(row, Mapping) and isinstance(row.get("context"), (str, bytes)):
+            payload = row["context"]
             if isinstance(payload, bytes):
                 payload = payload.decode("utf-8")
             row = dict(row)
-            row["masked_context"] = json.loads(payload)
+            row["context"] = json.loads(payload)
         return row
 
     def _receipt_row(self, key: str, *, lock: bool) -> Mapping[str, Any] | None:

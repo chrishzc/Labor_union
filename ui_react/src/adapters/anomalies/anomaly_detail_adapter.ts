@@ -32,7 +32,7 @@ const DAILY_DETAIL_SAFE_FIELDS: Readonly<Record<string, readonly SafeEvidenceKin
   amount_delta_ntd: ['money_ntd'],
   case_no: ['identity'],
   holiday_date: ['date'],
-  staff_name: ['masked_text'],
+  staff_name: ['text'],
   root_condition_active: ['boolean'],
   integrity_blocker_active: ['boolean'],
   overdue_obligations: ['detail_list', 'identity_list'],

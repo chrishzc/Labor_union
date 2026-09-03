@@ -1501,7 +1501,7 @@ export const StaffPage: React.FC = () => {
                   {lifecycle.status === 'ready' && (
                     <div className="staff-holiday-meta-bar">
                       <span>最近生效時間：{lifecycle.data.displayEffectiveAt}</span>
-                      <span>最近異動原因：{lifecycle.data.maskedReasonCode ?? '—'}</span>
+                      <span>最近異動原因：{lifecycle.data.reasonCode ?? '—'}</span>
                     </div>
                   )}
                   {lifecycle.status === 'idle' && <p>請先選擇服務人員。</p>}

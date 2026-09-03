@@ -10,8 +10,14 @@
   "source_baseline": {
     "minimum_mysql_version": "8.0",
     "required_character_set": "utf8mb4",
-    "allowed_owned_object_states": ["absent", "exact"],
-    "forbidden_owned_object_states": ["partial", "drift"],
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
     "source_must_be_read_only": true,
     "maintenance_token_required": true,
     "baseline_id": "wp77-v2-or-later"
@@ -20,7 +26,7 @@
     {
       "name": "194_historical_order_adoption.sql",
       "relative_path": "db/schema_parts/194_historical_order_adoption.sql",
-      "sha256": "d34438db11c852d7a12b828066168b0965a40420c0e2bfb26e52272b1354c7cc",
+      "sha256": "bb237c0c9503899078955c175abe900722fe3dda5796bc60fd444b89a609e21c",
       "dependencies": [],
       "data_effect": "schema_only",
       "rollback_policy": "code-rollback-preserve-historical-adoption-evidence",
@@ -39,22 +45,32 @@
   ],
   "application_compatibility": {
     "minimum_api_contract": "typed-api-v1",
-    "compatible_contracts": ["orders-historical-adoption-v1"],
+    "compatible_contracts": [
+      "orders-historical-adoption-v1"
+    ],
     "required_restart_targets": [],
     "watcher_worker_compatibility": "not-applicable",
-    "post_cutover_smoke_ids": ["historical-order-adoption-preview"]
+    "post_cutover_smoke_ids": [
+      "historical-order-adoption-preview"
+    ]
   },
   "descriptor_artifact": {
     "name": "labor_union_2026_08_14_wp80_v2.descriptors.json",
     "relative_path": "db/migration_releases/labor_union_2026_08_14_wp80_v2.descriptors.json",
-    "sha256": "fc980c32f1a2a251163b973806f659607b9f151cbeb82b4a7706353e36b67ec1",
+    "sha256": "8e729a2a7d77f8cac2adea133777da3effa4d34efe2193ce3a238fbd1284e7b3",
     "dependencies": []
   },
   "tool_archive_policy": {
     "artifact_hash_algorithm": "sha256",
     "backup_archive_policy": "permanent-release-archive",
     "journal_archive_policy": "append-only-per-operation",
-    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
     "receipt_archive_policy": "permanent-release-archive",
     "restore_required_mode": "new-absent-candidate-only"
   }

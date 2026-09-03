@@ -31,8 +31,8 @@ class HistoricalReviewConflictView(_StrictModel):
     field_path: str
     field_label: str
     rule: str
-    masked_source_value: str
-    masked_current_value: str
+    source_value: str
+    current_value: str
     allowed_values: list[str]
     process_blocker: str
 
@@ -47,7 +47,7 @@ class HistoricalReviewWorkbookContractView(_StrictModel):
 
 class HistoricalReviewRemediationQueryView(_StrictModel):
     review_identity: str
-    masked_case_identity: str
+    case_identity: str
     issues: list[HistoricalReviewConflictView]
     review_version: StrictInt = Field(ge=0)
     remediation_version: StrictInt = Field(ge=0)
@@ -87,7 +87,7 @@ class HistoricalReviewRemediationReceiptSnapshotView(_StrictModel):
 
 class HistoricalReviewSuccessorView(_StrictModel):
     review_identity: str
-    masked_case_identity: str
+    case_identity: str
     issues: list[HistoricalReviewConflictView]
 
 

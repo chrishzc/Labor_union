@@ -1,17 +1,17 @@
 /**
  * File: weekly_operations_report_contract_fixtures.ts
- * Description: 提供營運週報三分頁 strict、去敏且含歷史缺欄位的測試契約 fixture。
+ * Description: 提供營運週報三分頁 strict、canonical且含歷史缺欄位的測試契約 fixture。
  */
 import type { WeeklyOperationsReport } from '../../../api/reports/weekly_operations_report_schemas';
 import { SUBSIDY_REPORT_RESPONSE } from './subsidy_report_query_contract_fixtures';
 
 export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
-  schema_version: 'weekly-operations-report.v1',
+  schema_version: 'operations-report.v2',
   period: {
-    week_start: '2026-08-17',
-    week_end: '2026-08-23',
+    start_date: '2026-08-20',
+    end_date: '2026-08-26',
     timezone: 'Asia/Taipei',
-    week_label: '2026-08-17～2026-08-23',
+    period_label: '2026-08-20～2026-08-26',
   },
   generated_at: '2026-08-23T12:00:00+08:00',
   source_revision: 'weekly-operations-fixture-revision',
@@ -32,7 +32,7 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
   case_rows: [
     {
       case_no: 'CASE-WEEK-001',
-      applicant_name_masked: '王**',
+      applicant_name: '王**',
       application_date: '2026-08-18',
       identity_status: '一般市民',
       review_result: 'general_eligible',
@@ -46,7 +46,7 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
     },
     {
       case_no: 'CASE-WEEK-LEGACY',
-      applicant_name_masked: '李**',
+      applicant_name: '李**',
       application_date: '2026-08-19',
       identity_status: null,
       review_result: 'rejected_unpartitioned',
@@ -63,12 +63,12 @@ export const WEEKLY_OPERATIONS_REPORT: WeeklyOperationsReport = {
   service_rows: [{
     assignment_id: 701,
     case_no: 'CASE-WEEK-001',
-    client_name_masked: '王**',
-    staff_name_masked: '陳**',
+    client_name: '王**',
+    staff_name: '陳**',
     service_start_date: '2026-08-17',
     service_end_date: '2026-08-28',
-    week_start: '2026-08-17',
-    week_end: '2026-08-23',
+    period_start_date: '2026-08-20',
+    period_end_date: '2026-08-26',
     service_hours_per_day: 8,
     weekly_work_days: 5,
     weekly_hours: 40,

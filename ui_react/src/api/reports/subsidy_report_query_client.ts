@@ -1,6 +1,6 @@
 /**
  * File: subsidy_report_query_client.ts
- * Description: 以 fresh Session 查詢季度或年度補助報表並驗證期間、完整分區、aggregate 與 redaction。
+ * Description: 以 fresh Session 查詢季度或年度補助報表並驗證期間、完整分區、aggregate 與 canonical data。
  */
 import { sessionClient } from '../auth/session_client';
 import { transport } from '../shared/transport';
@@ -18,7 +18,6 @@ function assertView(view: SubsidyReportPreview, query: SubsidyReportQuery) {
   const rows = view.partitions.flatMap((item) => item.rows);
   for (const partition of view.partitions) { if (partition.row_count !== partition.rows.length || partition.total_amount_ntd !== partition.rows.reduce((sum, row) => sum + row.subsidy_amount_ntd, 0)) throw new SubsidyReportQueryError('SUBSIDY_REPORT_AGGREGATE_MISMATCH', 'partition aggregate不一致。'); }
   if (view.total_row_count !== rows.length || view.total_amount_ntd !== rows.reduce((sum, row) => sum + row.subsidy_amount_ntd, 0)) throw new SubsidyReportQueryError('SUBSIDY_REPORT_AGGREGATE_MISMATCH', 'report aggregate不一致。');
-  for (const row of rows) { if (/^[A-Z][12]\d{8}$/.test(row.identity_card_masked) || (row.employer_name_masked !== '—' && !row.employer_name_masked.includes('*')) || (row.staff_name_masked !== '—' && !row.staff_name_masked.includes('*'))) throw new SubsidyReportQueryError('SUBSIDY_REPORT_PII_NOT_MASKED', '報表包含未遮罩PII。'); }
   return view;
 }
 export const subsidyReportQueryClient = {

@@ -72,7 +72,7 @@ def test_six_source_query_cursor_masking_and_zero_write_on_lu_test_mysql() -> No
     repository = DataBrowserQueryRepository(audited)
     try:
         pages = {
-            source_id: repository.query_masked_page(
+            source_id: repository.query_page(
                 source_id,
                 limit=2,
                 after=None,
@@ -95,7 +95,7 @@ def test_six_source_query_cursor_masking_and_zero_write_on_lu_test_mysql() -> No
             for source_id, page in pages.items()
             if page.next_cursor is not None
         )
-        second_page = repository.query_masked_page(
+        second_page = repository.query_page(
             cursor_source,
             limit=2,
             after=first_page.next_cursor,
@@ -110,7 +110,7 @@ def test_six_source_query_cursor_masking_and_zero_write_on_lu_test_mysql() -> No
                 name_cell = next(
                     cell for cell in row.detail_cells if cell.field_id == "name"
                 )
-                assert name_cell.presentation == "masked"
+                assert name_cell.presentation == "canonical"
                 assert name_cell.value == "未提供" or "○" in str(name_cell.value)
         for row in pages["bank_facts"].items:
             amount_cell = next(
@@ -120,14 +120,14 @@ def test_six_source_query_cursor_masking_and_zero_write_on_lu_test_mysql() -> No
 
         statement_count = len(audited.statements)
         with pytest.raises(DataBrowserSourceNotFound):
-            repository.query_masked_page(
+            repository.query_page(
                 "unknown",
                 limit=2,
                 after=None,
                 query=None,
             )
         with pytest.raises(ValueError, match="cursor_invalid"):
-            repository.query_masked_page(
+            repository.query_page(
                 "clients",
                 limit=2,
                 after="0",

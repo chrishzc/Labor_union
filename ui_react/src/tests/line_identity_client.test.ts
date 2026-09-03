@@ -49,7 +49,7 @@ const REVIEW_FIXTURE = {
   subject_reference: 'STAFF-REVIEW-071',
   assigned_admin_id: null,
   due_at: null,
-  line_user_id_masked: 'Urev•••7890',
+  line_user_id: 'Urev•••7890',
   display_name: '待審月嫂甲',
   decision_reason: null,
   reviewed_by_actor_id: null,
@@ -75,7 +75,7 @@ const REVIEW_PREVIEW_FIXTURE = {
   resulting_version: 4,
   subject_type: 'staff' as const,
   subject_reference: 'STAFF-REVIEW-071',
-  line_user_id_masked: 'Urev•••7890',
+  line_user_id: 'Urev•••7890',
   preview_fingerprint: 'review-preview-fixture-071',
 };
 

@@ -30,6 +30,8 @@ _ANSWER_VALUES = {
     "素食": True,
     "不用料理/訂月餐": False,
 }
+_EXPLICIT_QUESTION_ALIASES = ("是否需要下廚：", "是否需要下廚")
+_EXPLICIT_ANSWER_VALUES = {"需要下廚": True, "不需要下廚": False}
 _SELECTED_MARKERS = frozenset({"1", "TRUE", "V", "Y", "YES", "✓", "✔", "是"})
 
 
@@ -37,6 +39,34 @@ def normalize_cooking_requirement(survey_details: Mapping[str, object]) -> bool:
     """Return the canonical requirement from controlled BeClass fields only."""
     if not isinstance(survey_details, Mapping):
         raise _missing()
+    explicit = _explicit_answer(survey_details)
+    if explicit is not None:
+        try:
+            legacy = _legacy_cooking_requirement(survey_details)
+        except CookingRequirementDomainError as error:
+            if error.issue is CookingRequirementIssue.AMBIGUOUS:
+                raise
+            legacy = None
+        if legacy is not None and legacy != explicit:
+            raise _ambiguous()
+        return explicit
+    return _legacy_cooking_requirement(survey_details)
+
+
+def _explicit_answer(survey_details: Mapping[str, object]) -> bool | None:
+    answers = {
+        value.strip()
+        for question in _EXPLICIT_QUESTION_ALIASES
+        if isinstance((value := survey_details.get(question)), str) and value.strip()
+    }
+    if not answers:
+        return None
+    if len(answers) != 1 or not answers <= _EXPLICIT_ANSWER_VALUES.keys():
+        raise _ambiguous()
+    return _EXPLICIT_ANSWER_VALUES[answers.pop()]
+
+
+def _legacy_cooking_requirement(survey_details: Mapping[str, object]) -> bool:
     answers = _controlled_answers(survey_details)
     resolved_values = {_ANSWER_VALUES[answer] for answer in answers if answer in _ANSWER_VALUES}
     unrecognized_answers = answers - _ANSWER_VALUES.keys()

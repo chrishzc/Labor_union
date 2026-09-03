@@ -570,7 +570,7 @@ def test_historical_source_context_reuses_bridged_formal_assignment_identity():
     assert preview.actual_start.assignments[0].source_assignment_id == 51
 
 
-def test_deposit_paid_source_dates_are_adopted_without_daily_schedule_evidence():
+def test_deposit_paid_source_dates_without_calendar_occupancy_evidence_require_review():
     row = SimpleNamespace(
         case_no="CASE-1",
         client_name="客戶甲",
@@ -587,12 +587,11 @@ def test_deposit_paid_source_dates_are_adopted_without_daily_schedule_evidence()
         _Repository(), _UnitOfWork, _Writer()
     ).preview(row)
 
-    assert preview.after_status == OrderLifecycleStatus.HISTORICAL_IN_SERVICE.value
-    assert preview.date_patch == (
-        ("actual_start_date", date(2026, 8, 7)),
-        ("actual_end_date", date(2026, 9, 7)),
-    )
-    assert preview.issue_codes == ()
+    assert preview.outcome.value == "review_required"
+    assert preview.after_status == OrderLifecycleStatus.DISCUSSION.value
+    assert preview.date_patch == ()
+    assert "historical_calendar_staff_missing" in preview.issue_codes
+    assert "historical_calendar_completed_assignment_missing" in preview.issue_codes
 
 
 def test_deposit_paid_historical_period_skips_precision_and_enters_historical_branch():

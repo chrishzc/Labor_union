@@ -81,7 +81,7 @@ class LineFeedbackQueryRequest(_Closed):
 
 
 class LineFeedbackRootView(_Closed):
-    actor_id_masked: str
+    actor_id: str
     source_response_id: str
     outcome: str
     binding_version: int = Field(ge=0)

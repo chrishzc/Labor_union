@@ -1,6 +1,6 @@
 /**
  * File: audit_query_schemas.ts
- * Description: 管理員遮罩稽核清單 GET 的嚴格 Zod 契約。
+ * Description: 管理員稽核清單 GET 的嚴格 Zod 契約。
  */
 import { z } from 'zod';
 
@@ -9,11 +9,11 @@ const IsoDateTimeSchema = z.string().refine(
   'occurred_at 必須為 ISO 日期時間',
 );
 
-export const AdminAuditMaskedItemSchema = z
+export const AdminAuditItemSchema = z
   .object({
     audit_id: z.number().int().positive(),
     occurred_at: IsoDateTimeSchema,
-    actor_label_masked: z.string().max(100).nullable(),
+    actor_label: z.string().max(100).nullable(),
     action_family: z.enum([
       'authentication',
       'account_security',
@@ -22,31 +22,31 @@ export const AdminAuditMaskedItemSchema = z
       'system',
       'other',
     ]),
-    target_label_masked: z.string().max(191).nullable(),
-    ip_address_masked: z.string().max(64).nullable(),
+    target_label: z.string().max(191).nullable(),
+    ip_address: z.string().max(64).nullable(),
     outcome: z.enum(['success', 'denied', 'failed', 'unknown']),
     reason_code: z.string().regex(/^[A-Za-z0-9_.-]+$/).max(100).nullable(),
   })
   .strict();
 
-export type AdminAuditMaskedItem = z.infer<typeof AdminAuditMaskedItemSchema>;
+export type AdminAuditItem = z.infer<typeof AdminAuditItemSchema>;
 
 export const AdminAuditDetailFieldSchema = z
   .object({
     key: z.enum(['reason', 'mfa_method', 'account', 'enabled', 'source', 'subject']),
-    value_masked: z.string().min(1).max(191),
+    value: z.string().min(1).max(191),
   })
   .strict();
 
-export const AdminAuditMaskedDetailSchema = AdminAuditMaskedItemSchema.extend({
+export const AdminAuditDetailSchema = AdminAuditItemSchema.extend({
   details: z.array(AdminAuditDetailFieldSchema),
 }).strict();
 
-export type AdminAuditMaskedDetail = z.infer<typeof AdminAuditMaskedDetailSchema>;
+export type AdminAuditDetail = z.infer<typeof AdminAuditDetailSchema>;
 
-export const AdminAuditMaskedPageSchema = z
+export const AdminAuditPageSchema = z
   .object({
-    items: z.array(AdminAuditMaskedItemSchema),
+    items: z.array(AdminAuditItemSchema),
     page: z.number().int().min(1),
     page_size: z.number().int().min(1).max(100),
     total: z.number().int().nonnegative(),
@@ -83,22 +83,22 @@ export const AdminAuditMaskedPageSchema = z
     }
   });
 
-export type AdminAuditMaskedPage = z.infer<typeof AdminAuditMaskedPageSchema>;
+export type AdminAuditPage = z.infer<typeof AdminAuditPageSchema>;
 
-export const AdminAuditMaskedPageResponseSchema = z
+export const AdminAuditPageResponseSchema = z
   .object({
     success: z.boolean(),
     message: z.string(),
-    data: AdminAuditMaskedPageSchema,
+    data: AdminAuditPageSchema,
     error: z.string().nullable().optional(),
   })
   .strict();
 
-export const AdminAuditMaskedDetailResponseSchema = z
+export const AdminAuditDetailResponseSchema = z
   .object({
     success: z.boolean(),
     message: z.string(),
-    data: AdminAuditMaskedDetailSchema,
+    data: AdminAuditDetailSchema,
     error: z.string().nullable().optional(),
   })
   .strict();

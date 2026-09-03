@@ -10,7 +10,7 @@ import os
 from typing import Callable
 
 from domains.customer_service.ticket import CustomerServiceCategory
-from domains.customer_service.escalation import MaskedContext, TriggerCode, evidence_digest
+from domains.customer_service.escalation import EscalationContext, TriggerCode, evidence_digest
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identity_flow import LineIdentityFlowPurpose
@@ -150,14 +150,14 @@ class LineServiceHelpApplication:
         inbox,
         unit_of_work,
         line_user_id,
-        masked_context,
+        context,
     ) -> None:
         """Route complaint language through the M4 ingress in the caller UoW.
 
         The source normalizer intentionally returns no complaint text.  The
         Customer Service owner still receives its required routing identity,
         while the ticket note, escalation command, and alert carry only the
-        closed masked context; the source fingerprint proves that the original
+        closed canonical context; the source fingerprint proves that the original
         ingress was observed without retaining the raw complaint message.
         """
         if self._escalation_gateway is None:
@@ -184,13 +184,13 @@ class LineServiceHelpApplication:
                 {
                     "event_identity": event_id,
                     "line_user_id": line_user_id.value,
-                    "masked_context": masked_context,
+                    "context": context,
                 }
             ),
             trigger_code=TriggerCode.COMPLAINT,
-            trigger_policy_version=masked_context["policy_version"],
+            trigger_policy_version=context["policy_version"],
             ticket_category=CustomerServiceCategory.OTHER,
-            masked_context=MaskedContext.from_mapping(masked_context),
+            context=EscalationContext.from_mapping(context),
             hold_scope=_conversation_scope(line_user_id),
             idempotency_key=IdempotencyKey(
                 f"line-complaint-escalation:{event_id}"
@@ -365,7 +365,7 @@ def _escalation_command(inbox, line_user_id, referral):
         trigger_code=trigger,
         trigger_policy_version=policy_version,
         ticket_category=referral.category,
-        masked_context=MaskedContext(
+        context=EscalationContext(
             summary_code=trigger.value,
             policy_version=policy_version,
             category=referral.category.value,

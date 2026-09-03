@@ -125,7 +125,7 @@ def _readback_view(result) -> LineFeedbackReadbackView:
     root = result.root
     return LineFeedbackReadbackView(
         root=LineFeedbackRootView(
-            actor_id_masked=_mask_actor(root.actor_id),
+            actor_id=_canonical_actor(root.actor_id),
             source_response_id=root.source_response_id,
             outcome=root.outcome.value,
             binding_version=root.binding_version,
@@ -148,8 +148,7 @@ def _readback_view(result) -> LineFeedbackReadbackView:
     )
 
 
-def _mask_actor(value: str) -> str:
-    return value[:4] + "…" + value[-4:] if len(value) > 8 else value[:2] + "***"
-
+def _canonical_actor(value: str) -> str:
+    return str(value or "").strip()
 
 __all__ = ["router"]

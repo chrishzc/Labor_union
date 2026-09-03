@@ -1,6 +1,6 @@
 /**
  * File: ReportsPage.tsx
- * Description: 顯示營運週報三分頁及季度／年度補助報表，支援重載、完整 XLSX 與 stale request 防護。
+ * Description: 顯示自選期間營運報表三分頁及季度／年度補助報表，支援重載、完整 XLSX 與 stale request 防護。
  */
 import React, { useEffect, useRef, useState } from 'react';
 import './ReportsPage.css';
@@ -8,8 +8,6 @@ import { subsidyReportQueryClient } from '../api/reports/subsidy_report_query_cl
 import { subsidyReportExportClient } from '../api/reports/subsidy_report_export_client';
 import {
   weeklyOperationsReportQueryClient,
-  weeklyReportIsoWeek,
-  weeklyReportWeekStart,
 } from '../api/reports/weekly_operations_report_query_client';
 import { weeklyOperationsReportExportClient } from '../api/reports/weekly_operations_report_export_client';
 import { adaptSubsidyReport } from '../adapters/reports/subsidy_report_query_adapter';
@@ -33,7 +31,7 @@ function currentPeriod() {
   return { year: now.getFullYear(), quarter: Math.floor(now.getMonth() / 3) + 1 };
 }
 
-function currentTaipeiWeekStart(): string {
+function currentTaipeiReportPeriod(): { startDate: string; endDate: string } {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Taipei',
     year: 'numeric',
@@ -42,8 +40,10 @@ function currentTaipeiWeekStart(): string {
   }).formatToParts(new Date());
   const value = (part: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === part)?.value ?? '';
   const date = new Date(`${value('year')}-${value('month')}-${value('day')}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
-  return date.toISOString().slice(0, 10);
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 3) % 7));
+  const startDate = date.toISOString().slice(0, 10);
+  date.setUTCDate(date.getUTCDate() + 6);
+  return { startDate, endDate: date.toISOString().slice(0, 10) };
 }
 
 type SubsidyPartitions = ReturnType<typeof adaptSubsidyReport>['partitions'];
@@ -89,11 +89,11 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
     <article><span>已成立訂單</span><strong>{displayWeeklyMetric(report.summary.order_established_count)}</strong></article>
     <article><span>資料不完整</span><strong>{displayWeeklyMetric(report.summary.incomplete_count)}</strong></article>
   </section>
-  {report.caseRows.length === 0 ? <div className="reports-state">本週沒有案件受理資料。</div> : <div className="reports-table-container">
+  {report.caseRows.length === 0 ? <div className="reports-state">此期間沒有案件受理資料。</div> : <div className="reports-table-container">
     <table className="reports-table">
       <thead><tr><th>案件</th><th>申請人</th><th>申請日</th><th>身分</th><th>審核</th><th>訂單狀態</th><th>天數／每日時數</th><th>預計服務期間</th><th>區域</th><th>資料品質</th></tr></thead>
       <tbody>{report.caseRows.map((row) => <tr key={row.case_no}>
-        <td>{row.case_no}</td><td>{row.applicant_name_masked}</td><td>{displayWeeklyValue(row.application_date)}</td>
+        <td>{row.case_no}</td><td>{row.applicant_name}</td><td>{displayWeeklyValue(row.application_date)}</td>
         <td>{displayWeeklyValue(row.identity_status)}</td><td>{row.reviewLabel}</td><td>{displayWeeklyValue(row.order_status)}</td>
         <td>{displayWeeklyValue(row.service_days)}／{displayWeeklyValue(row.service_hours_per_day)}</td>
         <td>{displayWeeklyValue(row.planned_start_date)}～{displayWeeklyValue(row.planned_end_date)}</td>
@@ -105,20 +105,20 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
 
 const WeeklySubsidyView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
   <section className="reports-kpi-grid" data-surface-id="reports.weekly.subsidy-kpis">
-    <article><span>統計範圍</span><strong>{report.period.week_start}～{report.period.week_end}</strong></article>
+    <article><span>統計範圍</span><strong>{report.period.start_date}～{report.period.end_date}</strong></article>
     <article><span>核銷筆數</span><strong>{report.subsidy.totalRows}</strong></article>
     <article><span>補助總額</span><strong>{report.subsidy.totalAmount}</strong></article>
-    <article><span>週別</span><strong>{weeklyReportIsoWeek(report.period.week_start)}</strong></article>
+    <article><span>報表期間</span><strong>{report.period.period_label}</strong></article>
   </section>
   <SubsidyPartitionsView partitions={report.subsidy.partitions} />
 </>;
 
 const WeeklyServiceView: React.FC<{ report: WeeklyView }> = ({ report }) => (
-  report.serviceRows.length === 0 ? <div className="reports-state">本週服務工時無資料。</div> : <div className="reports-table-container">
+  report.serviceRows.length === 0 ? <div className="reports-state">此期間服務工時無資料。</div> : <div className="reports-table-container">
     <table className="reports-table">
-      <thead><tr><th>案件</th><th>案家</th><th>服務人員</th><th>服務期間</th><th>每日時數</th><th>本週工作日</th><th>本週工時</th><th>訂單狀態</th><th>完成</th><th>資料品質</th></tr></thead>
+      <thead><tr><th>案件</th><th>案家</th><th>服務人員</th><th>服務期間</th><th>每日時數</th><th>期間工作日</th><th>期間工時</th><th>訂單狀態</th><th>完成</th><th>資料品質</th></tr></thead>
       <tbody>{report.serviceRows.map((row) => <tr key={row.assignment_id}>
-        <td>{row.case_no}</td><td>{row.client_name_masked}</td><td>{row.staff_name_masked}</td>
+        <td>{row.case_no}</td><td>{row.client_name}</td><td>{row.staff_name}</td>
         <td>{row.service_start_date}～{row.service_end_date}</td><td>{row.service_hours_per_day}</td>
         <td>{row.weekly_work_days}</td><td>{row.weekly_hours}</td><td>{row.order_status}</td>
         <td>{row.completed ? '是' : '否'}</td><td>{row.data_quality_codes.length ? row.data_quality_codes.join('、') : '—'}</td>
@@ -131,13 +131,14 @@ export const ReportsPage: React.FC = () => {
   const period = currentPeriod();
   const [reportKind, setReportKind] = useState<ReportKind>('weekly');
   const [weeklyTab, setWeeklyTab] = useState<WeeklyTab>('cases');
-  const [weekStart, setWeekStart] = useState(currentTaipeiWeekStart);
+  const initialReportPeriod = currentTaipeiReportPeriod();
+  const [startDate, setStartDate] = useState(initialReportPeriod.startDate);
+  const [endDate, setEndDate] = useState(initialReportPeriod.endDate);
   const [year, setYear] = useState(period.year);
   const [quarter, setQuarter] = useState(period.quarter);
   const [state, setState] = useState<ReportState>({ kind: 'idle' });
   const [reload, setReload] = useState(0);
   const [exportState, setExportState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const weekInputRef = useRef<HTMLInputElement | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const exportControllerRef = useRef<AbortController | null>(null);
   const sequenceRef = useRef(0);
@@ -154,9 +155,10 @@ export const ReportsPage: React.FC = () => {
     setReportKind(next);
   };
 
-  const changeWeekStart = (next: string) => {
+  const changeDateRange = (nextStartDate: string, nextEndDate: string) => {
     clearExportState();
-    setWeekStart(next);
+    setStartDate(nextStartDate);
+    setEndDate(nextEndDate);
   };
 
   const changeYear = (next: number) => {
@@ -170,15 +172,6 @@ export const ReportsPage: React.FC = () => {
   };
 
   const reloadReport = () => {
-    // Native `type=week` fill may update the element before React receives its event.
-    // Capture that value before the controlled render restores the previous state.
-    if (reportKind === 'weekly' && weekInputRef.current?.value) {
-      try {
-        setWeekStart(weeklyReportWeekStart(weekInputRef.current.value));
-      } catch {
-        // The native control only emits a valid ISO week; preserve state for invalid input.
-      }
-    }
     clearExportState();
     setReload((value) => value + 1);
   };
@@ -193,7 +186,7 @@ export const ReportsPage: React.FC = () => {
       if (cancelled) return;
       setState({ kind: 'loading' });
       const request = reportKind === 'weekly'
-        ? weeklyOperationsReportQueryClient.query(weekStart, { signal: controller.signal })
+        ? weeklyOperationsReportQueryClient.query(startDate, endDate, { signal: controller.signal })
         : subsidyReportQueryClient.query(
           reportKind === 'quarterly'
             ? { kind: 'quarterly', applicationYear: year, quarter }
@@ -222,7 +215,7 @@ export const ReportsPage: React.FC = () => {
       cancelled = true;
       controller.abort();
     };
-  }, [reportKind, weekStart, year, quarter, reload]);
+  }, [reportKind, startDate, endDate, year, quarter, reload]);
 
   useEffect(() => () => exportControllerRef.current?.abort(), []);
 
@@ -234,7 +227,7 @@ export const ReportsPage: React.FC = () => {
     setExportState('loading');
     try {
       const artifact = reportKind === 'weekly'
-        ? await weeklyOperationsReportExportClient.download(weekStart, controller.signal)
+        ? await weeklyOperationsReportExportClient.download(startDate, endDate, controller.signal)
         : await subsidyReportExportClient.download(
           reportKind === 'quarterly'
             ? { kind: 'quarterly', applicationYear: year, quarter }
@@ -264,23 +257,25 @@ export const ReportsPage: React.FC = () => {
     <header className="page-header-banner reports-page-header">
       <div>
         <h1 className="page-title">📊 工會營運與補助報表</h1>
-        <p className="page-subtitle">集中查詢營運週報與政府補助核銷資料，並可下載完整工作表。</p>
+        <p className="page-subtitle">集中查詢營運報表與政府補助核銷資料，並可下載完整工作表。</p>
       </div>
     </header>
     <section className="reports-workspace" aria-label="營運與補助報表查詢工作區">
       <div className="reports-toolbar">
         <div>
-          <h2>{reportKind === 'weekly' ? '工會營運週報' : '政府補助核銷報表'}</h2>
-          <p>{reportKind === 'weekly' ? '週一至週日，下載內容固定包含三個工作表。' : '保留既有季度／年度核銷查詢與 XLSX。'}</p>
+          <h2>{reportKind === 'weekly' ? '工會營運報表' : '政府補助核銷報表'}</h2>
+          <p>{reportKind === 'weekly' ? '可自選含首尾的日期範圍，下載內容固定包含三個工作表。' : '保留既有季度／年度核銷查詢與 XLSX。'}</p>
         </div>
         <label>報表範圍
           <select value={reportKind} onChange={(event) => changeReportKind(event.target.value as ReportKind)}>
-            <option value="weekly">營運週報</option><option value="quarterly">季度補助</option><option value="annual">年度補助</option>
+            <option value="weekly">營運報表</option><option value="quarterly">季度補助</option><option value="annual">年度補助</option>
           </select>
         </label>
-        {reportKind === 'weekly' ? <label>週別
-          <input ref={weekInputRef} type="week" value={weeklyReportIsoWeek(weekStart)} onChange={(event) => changeWeekStart(weeklyReportWeekStart(event.target.value))} />
-        </label> : <label>年度
+        {reportKind === 'weekly' ? <><label>起日
+          <input type="date" value={startDate} onChange={(event) => changeDateRange(event.target.value, endDate)} />
+        </label><label>迄日
+          <input type="date" value={endDate} onChange={(event) => changeDateRange(startDate, event.target.value)} />
+        </label></> : <label>年度
           <input type="number" min="1912" value={year} onChange={(event) => changeYear(Number(event.target.value))} />
         </label>}
         {reportKind === 'quarterly' && <label>季度
@@ -290,11 +285,11 @@ export const ReportsPage: React.FC = () => {
         </label>}
         <button type="button" onClick={reloadReport}>重新載入</button>
         <button type="button" data-control-id={exportControlId} disabled={exportState === 'loading'} onClick={() => void downloadXlsx()}>
-          {exportState === 'loading' ? '正在產生 XLSX…' : reportKind === 'weekly' ? '下載週報完整 XLSX' : '匯出 XLSX'}
+          {exportState === 'loading' ? '正在產生 XLSX…' : reportKind === 'weekly' ? '下載營運報表 XLSX' : '匯出 XLSX'}
         </button>
       </div>
 
-      {reportKind === 'weekly' && <nav className="reports-sheet-tabs" role="tablist" aria-label="營運週報分頁">
+      {reportKind === 'weekly' && <nav className="reports-sheet-tabs" role="tablist" aria-label="營運報表分頁">
         {([
           ['cases', '週報案件受理總表'],
           ['subsidy', '補助案件統計表'],
@@ -318,7 +313,7 @@ export const ReportsPage: React.FC = () => {
       </div>}
 
       {state.kind === 'weekly-ready' && <>
-        <div className="reports-meta">{state.data.period.week_label}｜{state.data.period.week_start}～{state.data.period.week_end}</div>
+        <div className="reports-meta">{state.data.period.period_label}｜{state.data.period.start_date}～{state.data.period.end_date}</div>
         {weeklyTab === 'cases' && <WeeklyCasesView report={state.data} />}
         {weeklyTab === 'subsidy' && <WeeklySubsidyView report={state.data} />}
         {weeklyTab === 'service' && <WeeklyServiceView report={state.data} />}

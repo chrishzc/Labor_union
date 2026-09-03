@@ -45,7 +45,7 @@ def _seed(identity: str) -> None:
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
-            cursor.execute("INSERT INTO import_warning_occurrences (occurrence_identity,owning_lane,source_kind,source_event_identity,logical_code,field_path,masked_subject,issue_codes,evidence_snapshot) VALUES (%s,'hcm','workbook',%s,'IMPORT-004','phone','masked',JSON_ARRAY('invalid_phone'),JSON_OBJECT())", (identity, f"source-{identity}"))
+            cursor.execute("INSERT INTO import_warning_occurrences (occurrence_identity,owning_lane,source_kind,source_event_identity,logical_code,field_path,subject,issue_codes,evidence_snapshot) VALUES (%s,'hcm','workbook',%s,'IMPORT-004','phone','masked',JSON_ARRAY('invalid_phone'),JSON_OBJECT())", (identity, f"source-{identity}"))
             occurrence_id = cursor.lastrowid
             cursor.execute("INSERT INTO import_warning_tracking_events (event_identity,occurrence_id,action,before_status,after_status,expected_version,resulting_version,actor_kind,actor_identity,reason_code,command_fingerprint,idempotency_key,correlation_id) VALUES (%s,%s,'opened',NULL,'open',0,1,'system','system','opened',%s,%s,%s)", (f"seed-{identity}", occurrence_id, "0" * 64, f"seed-key-{identity}", f"seed-correlation-{identity}"))
             cursor.execute("INSERT INTO import_warning_current_tasks (occurrence_id,tracking_status,tracking_version,last_event_id) VALUES (%s,'open',1,%s)", (occurrence_id, cursor.lastrowid))

@@ -135,7 +135,7 @@ describe('Anomaly detail adapter', () => {
       { key: 'domain_blockers', kind: 'code_list', value: ['refund_return_requires_confirmed_reversal'] },
       { key: 'reason_codes', kind: 'code_list', value: ['refund_return_review_recorded'] },
       { key: 'source_identity', kind: 'identity', value: 'event:private' },
-      { key: 'raw_payload', kind: 'masked_text', value: 'private' },
+      { key: 'raw_payload', kind: 'text', value: 'private' },
       { key: 'fingerprint', kind: 'identity', value: 'private' },
     ] as const;
 
