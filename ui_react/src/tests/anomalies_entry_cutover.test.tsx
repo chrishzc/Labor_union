@@ -5,6 +5,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
+import { MasterLayout } from '../components/MasterLayout';
 import { sessionClient } from '../api/auth/session_client';
 import { SYSTEM_STATUS_ENDPOINT } from '../api/system/system_status_client';
 
@@ -189,6 +190,27 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
     sessionClient.clearSession();
     window.history.replaceState(null, '', '#');
     vi.restoreAllMocks();
+  });
+
+  it('current audit navigation selects the anomalies route', () => {
+    const onSelectPage = vi.fn();
+
+    render(
+      <MasterLayout
+        currentSection="audit"
+        currentPage="system-status"
+        onSelectSection={vi.fn()}
+        onSelectPage={onSelectPage}
+        onLogout={vi.fn()}
+      >
+        <div>系統頁面</div>
+      </MasterLayout>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /異常審核/ }));
+
+    expect(onSelectPage).toHaveBeenCalledTimes(1);
+    expect(onSelectPage).toHaveBeenCalledWith('anomalies');
   });
 
   it('authenticated #anomalies renders only the current page contract', async () => {
