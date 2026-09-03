@@ -44,13 +44,16 @@ class MySqlOrderIntakeTermsBootstrapRepository:
         if row is None:
             return None
         scheduling_present = row["scheduling_case_no"] is not None
+        assignment_exists = bool(row["assignment_exists"])
         scheduling_pristine = (
-            not scheduling_present
-            or (
-                int(row["aggregate_version"] or 0) == 0
-                and int(row["generation_counter"] or 0) == 0
-                and row["effective_generation_id"] is None
-                and not bool(row["assignment_exists"])
+            not assignment_exists
+            and (
+                not scheduling_present
+                or (
+                    int(row["aggregate_version"] or 0) == 0
+                    and int(row["generation_counter"] or 0) == 0
+                    and row["effective_generation_id"] is None
+                )
             )
         )
         service_days = row["service_days"]
@@ -64,7 +67,7 @@ class MySqlOrderIntakeTermsBootstrapRepository:
             service_data_locked=bool(row["service_data_locked"]),
             client_finance_present=bool(row["client_finance_present"]),
             payroll_present=bool(row["payroll_present"]),
-            scheduling_present=scheduling_present,
+            scheduling_present=scheduling_present or assignment_exists,
             scheduling_pristine=scheduling_pristine,
         )
 
