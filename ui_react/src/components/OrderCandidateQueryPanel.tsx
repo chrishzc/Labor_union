@@ -8,6 +8,7 @@ import {
 
 interface OrderCandidateQueryPanelProps {
   caseNo: string;
+  onPoolReadback?: () => void;
 }
 
 type CandidateQueryState =
@@ -19,7 +20,11 @@ type CandidateQueryState =
 type CandidateAddState =
   | { status: 'idle' }
   | { status: 'saving' }
-  | { status: 'success'; data: AddCandidatesResult }
+  | {
+      status: 'success';
+      data: AddCandidatesResult;
+      readbackStaff: readonly { staffId: number; staffName: string }[];
+    }
   | { status: 'error'; message: string };
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -36,7 +41,14 @@ function formalCandidates(data: MatchingAvailability): MatchingCandidateOption[]
   return data.candidate_options.filter((candidate) => staffIds.has(candidate.staff_id));
 }
 
-export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ caseNo }) => {
+function sameStaffIds(expected: readonly number[], actual: readonly number[]): boolean {
+  if (expected.length !== actual.length) return false;
+  const expectedSorted = [...expected].sort((left, right) => left - right);
+  const actualSorted = [...actual].sort((left, right) => left - right);
+  return expectedSorted.every((staffId, index) => staffId === actualSorted[index]);
+}
+
+export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPoolReadback }) => {
   const [queryState, setQueryState] = useState<CandidateQueryState>({ status: 'idle' });
   const [selectedStaffIds, setSelectedStaffIds] = useState<ReadonlySet<number>>(() => new Set());
   const [addState, setAddState] = useState<CandidateAddState>({ status: 'idle' });
@@ -72,22 +84,36 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
       setAddState({ status: 'error', message: '請先選擇至少一位正式候選。' });
       return;
     }
+    const selectedInputs = selected.map((candidate) => ({
+      staff_id: candidate.staff_id,
+      start_date: candidate.selected_segment_start,
+      end_date: candidate.selected_segment_end,
+    }));
+    const expectedStaffIds = selectedInputs.map((candidate) => candidate.staff_id);
+
     setAddState({ status: 'saving' });
-    void candidateContactPoolClient.addCandidates(
-      caseNo,
-      selected.map((candidate) => ({
-        staff_id: candidate.staff_id,
-        start_date: candidate.selected_segment_start,
-        end_date: candidate.selected_segment_end,
-      })),
-    )
-      .then((data) => {
+    void candidateContactPoolClient.addCandidates(caseNo, selectedInputs)
+      .then(async (data) => {
+        const pool = await candidateContactPoolClient.query(caseNo);
+        const insertedIds = new Set(data.candidate_ids);
+        const readbackCandidates = pool.candidates.filter((candidate) => insertedIds.has(candidate.id));
+        if (!sameStaffIds(expectedStaffIds, readbackCandidates.map((candidate) => candidate.staff_id))) {
+          throw new Error('候選池回讀與本次寫入選擇不一致。');
+        }
         setSelectedStaffIds(new Set());
-        setAddState({ status: 'success', data });
+        setAddState({
+          status: 'success',
+          data,
+          readbackStaff: readbackCandidates.map((candidate) => ({
+            staffId: candidate.staff_id,
+            staffName: candidate.staff_name,
+          })),
+        });
+        onPoolReadback?.();
       })
       .catch((error) => setAddState({
         status: 'error',
-        message: errorMessage(error, '加入候選池失敗'),
+        message: errorMessage(error, '候選池寫入後回讀失敗'),
       }));
   };
 
@@ -160,13 +186,16 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
 
       {addState.status === 'success' && (
         <div className="order-v2-notice warning" role="status">
-          <strong>已寫入候選池</strong>
-          <span>Pool #{addState.data.pool_id} · 新增 {addState.data.candidate_ids.length} 位候選；本步驟未發送聯絡。</span>
+          <strong>候選池回讀完成</strong>
+          <span>
+            Pool #{addState.data.pool_id} · 已回讀 {addState.readbackStaff.length} 位本次寫入候選：
+            {addState.readbackStaff.map((candidate) => `${candidate.staffName} (#${candidate.staffId})`).join('、')}。
+          </span>
         </div>
       )}
       {addState.status === 'error' && (
         <div className="order-v2-notice blocked" role="alert">
-          <strong>加入候選池失敗</strong>
+          <strong>候選池寫入／回讀失敗</strong>
           <span>{addState.message}</span>
         </div>
       )}
