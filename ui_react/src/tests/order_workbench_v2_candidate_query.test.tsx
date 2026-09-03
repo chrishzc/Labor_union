@@ -9,11 +9,16 @@ const mocks = vi.hoisted(() => ({
   sendInformation: vi.fn(),
 }));
 
-vi.mock('../api/scheduling/matching_candidate_workflow_client', () => ({
-  matchingCandidateWorkflowClient: {
-    searchSegmentedCaregivers: mocks.searchSegmentedCaregivers,
-  },
-}));
+vi.mock('../api/scheduling/matching_candidate_workflow_client', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../api/scheduling/matching_candidate_workflow_client')>();
+  return {
+    ...original,
+    matchingCandidateWorkflowClient: {
+      ...original.matchingCandidateWorkflowClient,
+      searchSegmentedCaregivers: mocks.searchSegmentedCaregivers,
+    },
+  };
+});
 
 vi.mock('../api/scheduling/candidate_contact_pool_client', () => ({
   candidateContactPoolClient: {
@@ -107,37 +112,95 @@ function candidatePool(staffId = 8892, staffName = '正式合格月嫂') {
   };
 }
 
+const allFilters = {
+  region: true,
+  cooking: true,
+  preferred_service_days: true,
+  daily_service_hours: true,
+};
+
 describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回讀', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
   });
 
-  it('只顯示 server complete combination 內的正式候選，不把 partial option 冒充合格人選', async () => {
+  it('初次進入明確顯示尚未查詢，四項既有媒合條件預設全開', () => {
+    render(<OrderCandidateQueryPanel caseNo="CASE-CANDIDATE" />);
+
+    expect(screen.getByText('尚未查詢')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查詢符合條件月嫂' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: '服務地區' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '下廚料理' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '偏好服務日' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '每日服務時數' })).toBeChecked();
+    expect(mocks.searchSegmentedCaregivers).not.toHaveBeenCalled();
+  });
+
+  it('修改條件後查詢會把目前四項 filter state 送到既有 matching query', async () => {
     mocks.searchSegmentedCaregivers.mockResolvedValue(availability());
     render(<OrderCandidateQueryPanel caseNo="CASE-CANDIDATE" />);
 
-    fireEvent.click(screen.getByRole('button', { name: '查詢正式候選' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '下廚料理' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '每日服務時數' }));
+    fireEvent.click(screen.getByRole('button', { name: '查詢符合條件月嫂' }));
 
-    await waitFor(() => expect(mocks.searchSegmentedCaregivers).toHaveBeenCalledWith('CASE-CANDIDATE', 1));
+    await waitFor(() => expect(mocks.searchSegmentedCaregivers).toHaveBeenCalledWith(
+      'CASE-CANDIDATE',
+      1,
+      [],
+      {
+        region: true,
+        cooking: false,
+        preferred_service_days: true,
+        daily_service_hours: false,
+      },
+    ));
+    expect(await screen.findByText('符合 1 位')).toBeInTheDocument();
+  });
+
+  it('只顯示 full_case_coverage 的正式候選，不把 partial option 冒充合格人選', async () => {
+    mocks.searchSegmentedCaregivers.mockResolvedValue(availability({ complete_combinations: [] }));
+    render(<OrderCandidateQueryPanel caseNo="CASE-CANDIDATE" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '查詢符合條件月嫂' }));
+
+    await waitFor(() => expect(mocks.searchSegmentedCaregivers).toHaveBeenCalledWith(
+      'CASE-CANDIDATE',
+      1,
+      [],
+      allFilters,
+    ));
     expect(await screen.findByText('正式合格月嫂')).toBeInTheDocument();
     expect(screen.getByText(/月嫂 #8892/)).toBeInTheDocument();
     expect(screen.queryByText('部分可用月嫂')).not.toBeInTheDocument();
     expect(screen.getByText('Server 計畫期間：2026-09-01 → 2026-09-05')).toBeInTheDocument();
   });
 
-  it('沒有 server 完整候選時顯示正式 conflict 作為阻礙', async () => {
+  it('沒有 server 完整候選時顯示明確空結果與正式 conflict', async () => {
     mocks.searchSegmentedCaregivers.mockResolvedValue(availability({
       feasibility: 'partial',
       complete_combinations: [],
       segment_candidates: [],
+      candidate_options: [partial],
     }));
     render(<OrderCandidateQueryPanel caseNo="CASE-CANDIDATE" />);
 
-    fireEvent.click(screen.getByRole('button', { name: '查詢正式候選' }));
+    fireEvent.click(screen.getByRole('button', { name: '查詢符合條件月嫂' }));
 
-    expect(await screen.findByText('目前沒有 server 確認的完整候選；不以瀏覽器條件推導人選。')).toBeInTheDocument();
+    expect(await screen.findByText('沒有符合條件')).toBeInTheDocument();
+    expect(screen.getByText('目前沒有 server 確認的完整候選；不以瀏覽器條件推導人選。')).toBeInTheDocument();
     expect(screen.getByText(/2026-09-01 · 月嫂 #8893 · active_lock/)).toBeInTheDocument();
     expect(screen.queryByText('部分可用月嫂')).not.toBeInTheDocument();
+  });
+
+  it('查詢 transport 失敗時與既有 domain blocker 使用不同狀態文案', async () => {
+    mocks.searchSegmentedCaregivers.mockRejectedValue(new Error('network down'));
+    render(<OrderCandidateQueryPanel caseNo="CASE-CANDIDATE" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '查詢符合條件月嫂' }));
+
+    expect(await screen.findByText('查詢失敗')).toBeInTheDocument();
+    expect(screen.getByText('network down')).toBeInTheDocument();
   });
 
   it('寫入後以 receipt candidate id 回讀相同人選，再通知待辦投影刷新；不發送聯絡', async () => {
@@ -147,7 +210,7 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     const onPoolReadback = vi.fn();
     render(<OrderCandidateQueryPanel caseNo="CASE-CANDIDATE" onPoolReadback={onPoolReadback} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '查詢正式候選' }));
+    fireEvent.click(screen.getByRole('button', { name: '查詢符合條件月嫂' }));
     fireEvent.click(await screen.findByRole('checkbox', { name: '選擇正式候選 正式合格月嫂' }));
     fireEvent.click(screen.getByRole('button', { name: '加入候選池（1）' }));
 
@@ -169,7 +232,7 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     const onPoolReadback = vi.fn();
     render(<OrderCandidateQueryPanel caseNo="CASE-CANDIDATE" onPoolReadback={onPoolReadback} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '查詢正式候選' }));
+    fireEvent.click(screen.getByRole('button', { name: '查詢符合條件月嫂' }));
     fireEvent.click(await screen.findByRole('checkbox', { name: '選擇正式候選 正式合格月嫂' }));
     fireEvent.click(screen.getByRole('button', { name: '加入候選池（1）' }));
 
