@@ -52,6 +52,11 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     candidateId: number,
     willingness: 'willing' | 'unwilling',
   ) => {
+    const currentCandidate = state.status === 'ready'
+      ? state.data.candidates.find((candidate) => candidate.id === candidateId)
+      : undefined;
+    if (currentCandidate?.willingness === willingness) return;
+
     setMutationStates((current) => ({
       ...current,
       [candidateId]: { status: 'submitting' },
@@ -62,7 +67,13 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       willingness,
       reasonDrafts[candidateId] ?? '',
     )
-      .then((result) => {
+      .then(async (result) => {
+        const readback = await candidateContactPoolClient.query(caseNo);
+        const readbackCandidates = readback.candidates.filter((candidate) => candidate.id === candidateId);
+        if (readbackCandidates.length !== 1 || readbackCandidates[0]!.willingness !== willingness) {
+          throw new Error('人工意願回讀與本次寫入不一致。');
+        }
+        setState({ status: 'ready', data: readback });
         setMutationStates((current) => ({
           ...current,
           [candidateId]: { status: 'success', result },
@@ -138,7 +149,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                         type="button"
                         className="order-v2-open-drawer"
                         aria-label={`記錄 ${candidate.staff_name} 願意`}
-                        disabled={submitting}
+                        disabled={submitting || candidate.willingness === 'willing'}
                         onClick={() => recordWillingness(candidate.id, 'willing')}
                       >
                         記錄願意
@@ -147,7 +158,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                         type="button"
                         className="order-v2-open-drawer"
                         aria-label={`記錄 ${candidate.staff_name} 無意願`}
-                        disabled={submitting}
+                        disabled={submitting || candidate.willingness === 'unwilling'}
                         onClick={() => recordWillingness(candidate.id, 'unwilling')}
                       >
                         記錄無意願
@@ -156,7 +167,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                     {mutationState.status === 'submitting' && <p role="status">記錄人工意願中…</p>}
                     {mutationState.status === 'success' && (
                       <p role="status">
-                        意願已記錄：{mutationState.result.status} · event #{mutationState.result.event_id}
+                        意願已記錄並回讀：{mutationState.result.status} · event #{mutationState.result.event_id}
                       </p>
                     )}
                     {mutationState.status === 'error' && (
