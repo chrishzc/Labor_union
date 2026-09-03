@@ -5,6 +5,7 @@ import { OrderFormalRecommendationPanel } from '../components/OrderFormalRecomme
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   createSingleCaregiverPlan: vi.fn(),
+  queryContactState: vi.fn(),
 }));
 
 vi.mock('../api/scheduling/candidate_contact_pool_client', () => ({
@@ -16,6 +17,12 @@ vi.mock('../api/scheduling/candidate_contact_pool_client', () => ({
 vi.mock('../api/scheduling/matching_candidate_workflow_client', () => ({
   matchingCandidateWorkflowClient: {
     createSingleCaregiverPlan: mocks.createSingleCaregiverPlan,
+  },
+}));
+
+vi.mock('../api/scheduling/matching_plan_communication_client', () => ({
+  matchingPlanCommunicationClient: {
+    queryContactState: mocks.queryContactState,
   },
 }));
 
@@ -64,12 +71,29 @@ function pool() {
   };
 }
 
+function contactState(customerProfilesStatus: string | null = 'manually_confirmed') {
+  return {
+    plan: {
+      id: 51,
+      case_no: 'CASE-RECOMMEND',
+      communication_version: 4,
+      status: 'proposed',
+      is_active: 1,
+    },
+    segments: [{ segment_id: 71, willingness: 'willing' }],
+    all_willing: true,
+    customer_decision: 'pending',
+    customer_profiles_status: customerProfilesStatus,
+    customer_profiles_manual_confirmation: null,
+  };
+}
+
 describe('待辦看板 Beta 第 5 階正式推薦媒合方案', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
   });
 
-  it('只讓 active 且 willing 的 owner candidate 建立既有正式媒合方案', async () => {
+  it('只讓 active 且 willing 的 owner candidate 建立既有正式媒合方案，並獨立回讀履歷推薦送達狀態', async () => {
     mocks.query.mockResolvedValue(pool());
     mocks.createSingleCaregiverPlan.mockResolvedValue({
       plan_id: 51,
@@ -84,6 +108,7 @@ describe('待辦看板 Beta 第 5 階正式推薦媒合方案', () => {
         assigned_end_date: '2026-09-05',
       }],
     });
+    mocks.queryContactState.mockResolvedValue(contactState());
 
     render(<OrderFormalRecommendationPanel caseNo="CASE-RECOMMEND" />);
     fireEvent.click(screen.getByRole('button', { name: '讀取正式推薦候選' }));
@@ -101,10 +126,13 @@ describe('待辦看板 Beta 第 5 階正式推薦媒合方案', () => {
       { staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-05' },
     ));
     expect(await screen.findByText('正式媒合方案已建立：#51 · created')).toBeInTheDocument();
+    await waitFor(() => expect(mocks.queryContactState).toHaveBeenCalledWith('CASE-RECOMMEND', 51));
+    expect(await screen.findByText('manually_confirmed')).toBeInTheDocument();
+    expect(screen.getByText('履歷推薦送達狀態')).toBeInTheDocument();
     expect(mocks.createSingleCaregiverPlan).toHaveBeenCalledTimes(1);
   });
 
-  it('owner candidate query 不可用時 fail closed，不建立方案', async () => {
+  it('owner candidate query 不可用時 fail closed，不建立方案或讀取履歷推薦狀態', async () => {
     mocks.query.mockRejectedValue(new Error('candidate pool unavailable'));
     render(<OrderFormalRecommendationPanel caseNo="CASE-RECOMMEND" />);
 
@@ -113,5 +141,6 @@ describe('待辦看板 Beta 第 5 階正式推薦媒合方案', () => {
     expect(await screen.findByText('candidate pool unavailable')).toBeInTheDocument();
     expect(screen.getByText('正式推薦候選不可用')).toBeInTheDocument();
     expect(mocks.createSingleCaregiverPlan).not.toHaveBeenCalled();
+    expect(mocks.queryContactState).not.toHaveBeenCalled();
   });
 });
