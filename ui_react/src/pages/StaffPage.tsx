@@ -10,6 +10,7 @@ import {
   staffDirectoryClient,
 } from '../api/staff_directory/staff_directory_client';
 import { StaffDirectoryAbortedError } from '../api/staff_directory/staff_directory_errors';
+import { staffCasePreferenceSummaryClient } from '../api/staff_case_preference_summary/staff_case_preference_summary_client';
 import { staffPreferencesClient } from '../api/staff_preferences/staff_preferences_client';
 import {
   StaffPreferencesAbortedError,
@@ -55,6 +56,10 @@ import {
   adaptStaffDirectoryPage,
   type StaffDirectoryCardViewModel,
 } from '../adapters/staff/staff_directory_adapter';
+import {
+  adaptStaffCasePreferenceSummary,
+  type StaffCasePreferenceSummaryViewModel,
+} from '../adapters/staff/staff_case_preference_summary_adapter';
 import {
   adaptStaffPreferencesProfile,
   type StaffPreferencesProfileViewModel,
@@ -253,6 +258,7 @@ export const StaffPage: React.FC = () => {
   const [availabilityAction, setAvailabilityAction] = useState<ActionState<StaffAvailabilityPreview, StaffAvailabilityReceipt, StaffAvailabilityApplyPayload>>(initialActionState);
   const [lifecycle, setLifecycle] = useState<QueryState<StaffLifecycleViewModel>>({ status: 'idle' });
   const [qualification, setQualification] = useState<QueryState<StaffQualificationMasterViewModel>>({ status: 'idle' });
+  const [casePreferenceSummary, setCasePreferenceSummary] = useState<QueryState<StaffCasePreferenceSummaryViewModel>>({ status: 'idle' });
   const [lifecycleEffectiveAt, setLifecycleEffectiveAt] = useState('');
   const [lifecycleReasonCode, setLifecycleReasonCode] = useState('');
   const [lifecycleAction, setLifecycleAction] = useState<ActionState<StaffLifecyclePreview, StaffLifecycleApplyReceipt, StaffLifecycleApplyPayload> & { action: StaffLifecycleAction | null }>({
@@ -410,6 +416,7 @@ export const StaffPage: React.FC = () => {
     setEndPauseReason('');
     setLifecycle({ status: 'idle' });
     setQualification({ status: 'idle' });
+    setCasePreferenceSummary({ status: 'idle' });
     setLifecycleAction({ ...initialActionState(), action: null });
     if (selectedStaffId === null) return;
 
@@ -431,6 +438,15 @@ export const StaffPage: React.FC = () => {
         setPreferences({ status: 'error', message: error instanceof Error ? error.message : '偏好資料載入失敗。' });
       });
     } else if (activeTab === 'roster') {
+      setCasePreferenceSummary({ status: 'loading' });
+      void staffCasePreferenceSummaryClient.query(currentStaffId, { signal: controller.signal }).then((summary) => {
+        if (isCurrentSlice(generation, controller.signal)) {
+          setCasePreferenceSummary({ status: 'ready', data: adaptStaffCasePreferenceSummary(summary) });
+        }
+      }).catch((error: unknown) => {
+        if (!isCurrentSlice(generation, controller.signal)) return;
+        setCasePreferenceSummary({ status: 'error', message: errorMessage(error, '接案偏好摘要載入失敗。') });
+      });
       setLifecycle({ status: 'loading' });
       void staffLifecycleClient.query(currentStaffId, { signal: controller.signal }).then((view) => {
         if (isCurrentSlice(generation, controller.signal)) {
@@ -1067,8 +1083,21 @@ export const StaffPage: React.FC = () => {
                     <span className="staff-skill-chip">📋 選取後載入正式資格與料理能力</span>
                   </div>
 
-                  <div className="staff-card-pref-summary">
-                    <span>🎯 接案偏好與不可服務期間於個人摘要中查詢</span>
+                  <div className="staff-card-pref-summary" data-surface-id={`staff.card.case-preference.${staff.id}`}>
+                    {selectedStaffId !== staff.id && <span>🎯 選取後載入接案偏好摘要</span>}
+                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'idle' && <span>🎯 接案偏好摘要待查詢</span>}
+                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'loading' && <span role="status">🎯 正在載入接案偏好摘要…</span>}
+                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'error' && <span>🎯 接案偏好目前無法讀取</span>}
+                    {selectedStaffId === staff.id && casePreferenceSummary.status === 'ready' && (
+                      <div>
+                        {casePreferenceSummary.data.topics.map((topic) => (
+                          <div key={topic.key} role="group" aria-label={topic.label}>
+                            <strong>{topic.label}</strong>：{topic.valuesText}
+                            {topic.otherDetailStatus === 'ready' && topic.detailText && <small> · {topic.detailText}</small>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="staff-card-footer">
@@ -1422,6 +1451,24 @@ export const StaffPage: React.FC = () => {
             {/* Drawer Tab 2: 接案偏好設定 */}
             {drawerTab === 'preferences' && (
               <section className="staff-drawer-section" data-surface-id="staff.drawer.preferences">
+                <div data-surface-id="staff.drawer.case-preference-summary" style={{ marginBottom: '18px' }}>
+                  <h3 style={{ margin: '0 0 10px' }}>📌 接案偏好摘要</h3>
+                  {casePreferenceSummary.status === 'loading' && <p role="status">正在載入接案偏好摘要…</p>}
+                  {casePreferenceSummary.status === 'error' && <p role="alert">接案偏好摘要目前無法讀取。</p>}
+                  {casePreferenceSummary.status === 'idle' && <p>接案偏好摘要尚未查詢。</p>}
+                  {casePreferenceSummary.status === 'ready' && (
+                    <div className="staff-qual-grid">
+                      {casePreferenceSummary.data.topics.map((topic) => (
+                        <div key={topic.key} className="staff-qual-card" role="group" aria-label={topic.label}>
+                          <h4>{topic.label}</h4>
+                          <p style={{ margin: 0 }}>{topic.valuesText}</p>
+                          {topic.detailText && <small>{topic.detailText}</small>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                   <h3 style={{ margin: 0 }}>🎯 接案偏好與前置條件設定</h3>
                   <div className="staff-action-pair">
