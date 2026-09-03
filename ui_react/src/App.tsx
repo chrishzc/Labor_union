@@ -17,7 +17,7 @@ import { sessionClient } from './api/auth/session_client';
 import { ADMIN_SESSION_UNAUTHORIZED_EVENT } from './api/shared/transport';
 import { OrderTrackerPage } from './pages/OrderTrackerPage';
 import { OrderWorkbenchV2Page } from './pages/OrderWorkbenchV2Page';
-import { OrdersPage } from './pages/OrdersPage';
+import { OrdersManagementPage } from './pages/OrdersManagementPage';
 import { SchedulingPage } from './pages/SchedulingPage';
 import { StaffPage } from './pages/StaffPage';
 import { DataImportPage } from './pages/DataImportPage';
@@ -28,6 +28,7 @@ import { LiffCardStudio } from './pages/line_management/LiffCardStudio';
 import { AlertGroupSecurity } from './pages/line_management/AlertGroupSecurity';
 import { ReportsPage } from './pages/ReportsPage';
 import { FinancePage } from './pages/FinancePage';
+import { HistoricalServiceAccountingPage } from './pages/HistoricalServiceAccountingPage';
 import { CurrentAnomaliesPage } from './pages/CurrentAnomaliesPage';
 import { AccountManagementPage } from './pages/AccountManagementPage';
 import { SystemStatusPage } from './pages/SystemStatusPage';
@@ -49,26 +50,40 @@ export const HASH_ALIASES: Record<string, PageType> = {
 
 function getPageFromHash(): PageType {
   const hashPath = window.location.hash.replace(/^#\/?/, '').split('?', 1)[0];
-  if (hashPath in HASH_ALIASES) return HASH_ALIASES[hashPath];
-  if (hashPath in PAGE_SECTION_MAP) return hashPath as PageType;
+  if (hashPath in HASH_ALIASES) {
+    return HASH_ALIASES[hashPath];
+  }
+  if (hashPath in PAGE_SECTION_MAP) {
+    return hashPath as PageType;
+  }
   return 'order-tracker';
 }
 
 export function getMobileAdminReturnPathFromHash(hash: string): string | null {
   const query = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '';
   const returnTarget = new URLSearchParams(query).get('return_target');
-  return returnTarget === 'scheduling_review' ? '/line-mobile-admin?target=scheduling_review' : null;
+  return returnTarget === 'scheduling_review'
+    ? '/line-mobile-admin?target=scheduling_review'
+    : null;
 }
 
 export const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => sessionClient.isAuthenticated());
   const [currentPage, setCurrentPage] = useState<PageType>(() => getPageFromHash());
+
+  // 永遠自當前頁面確定性派生所屬分區，杜絕 HMR 快取或非同步狀態脫鉤
   const currentSection: SectionType = PAGE_SECTION_MAP[currentPage] || 'operations';
 
   useEffect(() => {
-    const handleHashChange = () => setCurrentPage(getPageFromHash());
+    const handleHashChange = () => {
+      const page = getPageFromHash();
+      setCurrentPage(page);
+    };
+
     window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -81,6 +96,7 @@ export const App: React.FC = () => {
       setIsLoggedIn(false);
       window.location.hash = '#login';
     };
+
     window.addEventListener(ADMIN_SESSION_UNAUTHORIZED_EVENT, handleSessionUnauthorized);
     return () => window.removeEventListener(ADMIN_SESSION_UNAUTHORIZED_EVENT, handleSessionUnauthorized);
   }, []);
@@ -91,8 +107,11 @@ export const App: React.FC = () => {
   };
 
   const handleSelectSection = (section: SectionType) => {
+    // 切換頂部大分區時，自動跳轉至該分區的第一個子頁面
     const firstPage = NAV_ITEMS.find((item) => item.section === section);
-    if (firstPage) handleSelectPage(firstPage.id);
+    if (firstPage) {
+      handleSelectPage(firstPage.id);
+    }
   };
 
   const handleLoginSuccess = (_username: string) => {
@@ -113,7 +132,11 @@ export const App: React.FC = () => {
   };
 
   if (!isLoggedIn) {
-    return <ErrorBoundary><LoginPage onLoginSuccess={handleLoginSuccess} /></ErrorBoundary>;
+    return (
+      <ErrorBoundary>
+        <LoginPage onLoginSuccess={handleLoginSuccess} />
+      </ErrorBoundary>
+    );
   }
 
   return (
@@ -125,22 +148,27 @@ export const App: React.FC = () => {
         onSelectPage={handleSelectPage}
         onLogout={handleLogout}
       >
+        {/* Operations Section */}
         {currentPage === 'order-tracker' && <OrderTrackerPage />}
         {currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page />}
-        {currentPage === 'orders' && <OrdersPage />}
+        {currentPage === 'orders' && <OrdersManagementPage />}
         {currentPage === 'scheduling' && <SchedulingPage />}
         {currentPage === 'staff' && <StaffPage />}
         {currentPage === 'data-import' && <DataImportPage initialTab="workbook-import" />}
         {currentPage === 'reports' && <ReportsPage />}
 
+        {/* LINE Hub Section */}
         {currentPage === 'line-management' && <LineManagementPage />}
         {currentPage === 'line-ai-events' && <AiCustomerServiceStudioPage />}
         {currentPage === 'line-llm-settings' && <LlmConfigurationPage />}
         {currentPage === 'line-liff-studio' && <LiffCardStudio />}
         {currentPage === 'line-security' && <AlertGroupSecurity />}
 
+        {/* Finance Section */}
         {currentPage === 'finance' && <FinancePage />}
+        {currentPage === 'historical-service-accounting' && <HistoricalServiceAccountingPage />}
 
+        {/* Audit & System Section */}
         {currentPage === 'anomalies' && <CurrentAnomaliesPage />}
         {currentPage === 'data-browser' && <DataImportPage initialTab="data-browser" />}
         {currentPage === 'account-management' && <AccountManagementPage />}
