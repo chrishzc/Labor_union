@@ -13,12 +13,29 @@ from api.dependencies.admin_auth import require_admin
 from api.dependencies.staff_case_preference_summary import (
     get_staff_case_preference_summary_application,
 )
+from api.dependencies.staff_case_preference_summary_command import (
+    get_staff_case_preference_command_application,
+)
 from api.dependencies.staff_summary import get_staff_summary_application
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.staff_case_preference_summary import StaffCasePreferenceSummaryView
+from api.schemas.staff_case_preference_summary_command import (
+    StaffCasePreferenceApplyRequestView,
+    StaffCasePreferencePreviewRequest,
+    StaffCasePreferencePreviewView,
+    StaffCasePreferenceReceiptView,
+)
 from api.schemas.staff_summary import StaffSummaryPageView, StaffSummaryView
 from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.staff.case_preference_summary_command import (
+    StaffCasePreferenceApplyRequest,
+    StaffCasePreferenceCommandApplication,
+    StaffCasePreferenceNotFoundError,
+    StaffCasePreferencePersistenceError,
+    StaffCasePreferenceStaleError,
+    StaffCasePreferenceValidationError,
+)
 from subsystems.staff.case_preference_summary_query import (
     StaffCasePreferenceSummaryContractError,
     StaffCasePreferenceSummaryQueryApplication,
@@ -90,6 +107,139 @@ def get_staff_summaries(
             next_cursor=page.next_cursor,
         ),
         message="成功取得服務人員摘要",
+    )
+
+
+@router.post(
+    "/{staff_id}/case-preference-summary/preview",
+    response_model=BaseResponse[StaffCasePreferencePreviewView],
+)
+def preview_staff_case_preference_summary(
+    payload: StaffCasePreferencePreviewRequest,
+    staff_id: int = Path(..., ge=1),
+    correlation_id: Annotated[
+        str | None,
+        Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ] = None,
+    principal: AdminPrincipal = Depends(require_admin),
+    application: StaffCasePreferenceCommandApplication = Depends(
+        get_staff_case_preference_command_application
+    ),
+) -> BaseResponse[StaffCasePreferencePreviewView]:
+    """Preview replacement of the six Staff-owned roster preference topics."""
+    del principal
+    correlation = correlation_id or uuid4().hex
+    try:
+        preview = application.preview(staff_id, payload.snapshot.to_domain())
+    except StaffCasePreferenceNotFoundError as error:
+        raise typed_http_error(
+            404,
+            "not_found",
+            "staff_not_found",
+            "查無服務人員。",
+            correlation,
+        ) from error
+    except StaffCasePreferenceValidationError as error:
+        raise typed_http_error(
+            422,
+            "validation",
+            "staff_case_preference_invalid",
+            str(error),
+            correlation,
+        ) from error
+    except (OperationalError, ProgrammingError) as error:
+        raise internal_query_error(
+            "staff_case_preference_preview_internal_error",
+            "服務人員接案偏好預覽失敗。",
+            correlation,
+        ) from error
+    except Exception as error:
+        raise internal_query_error(
+            "staff_case_preference_preview_internal_error",
+            "服務人員接案偏好預覽失敗。",
+            correlation,
+        ) from error
+
+    return BaseResponse(
+        data=StaffCasePreferencePreviewView.from_domain(preview),
+        message="成功預覽服務人員接案偏好變更",
+    )
+
+
+@router.post(
+    "/{staff_id}/case-preference-summary/apply",
+    response_model=BaseResponse[StaffCasePreferenceReceiptView],
+)
+def apply_staff_case_preference_summary(
+    payload: StaffCasePreferenceApplyRequestView,
+    staff_id: int = Path(..., ge=1),
+    correlation_id: Annotated[
+        str | None,
+        Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ] = None,
+    principal: AdminPrincipal = Depends(require_admin),
+    application: StaffCasePreferenceCommandApplication = Depends(
+        get_staff_case_preference_command_application
+    ),
+) -> BaseResponse[StaffCasePreferenceReceiptView]:
+    """Apply one previously previewed six-topic Staff preference snapshot."""
+    del principal
+    correlation = correlation_id or uuid4().hex
+    try:
+        receipt = application.apply(
+            StaffCasePreferenceApplyRequest(
+                staff_id=staff_id,
+                snapshot=payload.snapshot.to_domain(),
+                expected_fingerprint=payload.expected_fingerprint,
+                preview_fingerprint=payload.preview_fingerprint,
+            )
+        )
+    except StaffCasePreferenceNotFoundError as error:
+        raise typed_http_error(
+            404,
+            "not_found",
+            "staff_not_found",
+            "查無服務人員。",
+            correlation,
+        ) from error
+    except StaffCasePreferenceValidationError as error:
+        raise typed_http_error(
+            422,
+            "validation",
+            "staff_case_preference_invalid",
+            str(error),
+            correlation,
+        ) from error
+    except StaffCasePreferenceStaleError as error:
+        raise typed_http_error(
+            409,
+            "conflict",
+            "staff_case_preference_stale",
+            "接案偏好已變更，請重新查詢並預覽。",
+            correlation,
+        ) from error
+    except StaffCasePreferencePersistenceError as error:
+        raise internal_query_error(
+            "staff_case_preference_apply_readback_mismatch",
+            "接案偏好儲存後回讀不一致。",
+            correlation,
+        ) from error
+    except (OperationalError, ProgrammingError) as error:
+        raise internal_query_error(
+            "staff_case_preference_apply_internal_error",
+            "服務人員接案偏好儲存失敗。",
+            correlation,
+        ) from error
+    except Exception as error:
+        raise internal_query_error(
+            "staff_case_preference_apply_internal_error",
+            "服務人員接案偏好儲存失敗。",
+            correlation,
+        ) from error
+
+    return BaseResponse(
+        data=StaffCasePreferenceReceiptView.from_domain(receipt),
+        message="成功儲存服務人員接案偏好",
     )
 
 
