@@ -5,6 +5,7 @@ import { OrderCandidateQueryPanel } from '../components/OrderCandidateQueryPanel
 const mocks = vi.hoisted(() => ({
   searchSegmentedCaregivers: vi.fn(),
   addCandidates: vi.fn(),
+  queryPool: vi.fn(),
   sendInformation: vi.fn(),
 }));
 
@@ -17,6 +18,7 @@ vi.mock('../api/scheduling/matching_candidate_workflow_client', () => ({
 vi.mock('../api/scheduling/candidate_contact_pool_client', () => ({
   candidateContactPoolClient: {
     addCandidates: mocks.addCandidates,
+    query: mocks.queryPool,
     sendInformation: mocks.sendInformation,
   },
 }));
@@ -86,7 +88,26 @@ function availability(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe('待辦看板 Beta 第 2 階正式候選查詢與候選池寫入', () => {
+function candidatePool(staffId = 8892, staffName = '正式合格月嫂') {
+  return {
+    pool_id: 9,
+    case_no: 'CASE-CANDIDATE',
+    candidates: [{
+      id: 17,
+      staff_id: staffId,
+      service_start_date: '2026-09-01',
+      service_end_date: '2026-09-05',
+      status: 'active',
+      created_at: '2026-09-03T00:00:00Z',
+      staff_name: staffName,
+      willingness: 'pending',
+      reason: null,
+      information: { '1': null, '2': null },
+    }],
+  };
+}
+
+describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回讀', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
   });
@@ -119,10 +140,12 @@ describe('待辦看板 Beta 第 2 階正式候選查詢與候選池寫入', () =
     expect(screen.queryByText('部分可用月嫂')).not.toBeInTheDocument();
   });
 
-  it('只把使用者選定的正式候選寫入候選池，且不發送聯絡', async () => {
+  it('寫入後以 receipt candidate id 回讀相同人選，再通知待辦投影刷新；不發送聯絡', async () => {
     mocks.searchSegmentedCaregivers.mockResolvedValue(availability());
     mocks.addCandidates.mockResolvedValue({ pool_id: 9, candidate_ids: [17], status: 'recorded' });
-    render(<OrderCandidateQueryPanel caseNo="CASE-CANDIDATE" />);
+    mocks.queryPool.mockResolvedValue(candidatePool());
+    const onPoolReadback = vi.fn();
+    render(<OrderCandidateQueryPanel caseNo="CASE-CANDIDATE" onPoolReadback={onPoolReadback} />);
 
     fireEvent.click(screen.getByRole('button', { name: '查詢正式候選' }));
     fireEvent.click(await screen.findByRole('checkbox', { name: '選擇正式候選 正式合格月嫂' }));
@@ -133,7 +156,25 @@ describe('待辦看板 Beta 第 2 階正式候選查詢與候選池寫入', () =
       start_date: '2026-09-01',
       end_date: '2026-09-05',
     }]));
+    await waitFor(() => expect(mocks.queryPool).toHaveBeenCalledWith('CASE-CANDIDATE'));
+    await waitFor(() => expect(onPoolReadback).toHaveBeenCalledTimes(1));
     expect(mocks.sendInformation).not.toHaveBeenCalled();
-    expect(await screen.findByText('Pool #9 · 新增 1 位候選；本步驟未發送聯絡。')).toBeInTheDocument();
+    expect(await screen.findByText(/Pool #9 · 已回讀 1 位本次寫入候選：正式合格月嫂 \(#8892\)。/)).toBeInTheDocument();
+  });
+
+  it('回讀 receipt candidate id 對應到不同人員時 fail closed，不刷新待辦投影', async () => {
+    mocks.searchSegmentedCaregivers.mockResolvedValue(availability());
+    mocks.addCandidates.mockResolvedValue({ pool_id: 9, candidate_ids: [17], status: 'recorded' });
+    mocks.queryPool.mockResolvedValue(candidatePool(9999, '錯誤月嫂'));
+    const onPoolReadback = vi.fn();
+    render(<OrderCandidateQueryPanel caseNo="CASE-CANDIDATE" onPoolReadback={onPoolReadback} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '查詢正式候選' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: '選擇正式候選 正式合格月嫂' }));
+    fireEvent.click(screen.getByRole('button', { name: '加入候選池（1）' }));
+
+    expect(await screen.findByText('候選池回讀與本次寫入選擇不一致。')).toBeInTheDocument();
+    expect(onPoolReadback).not.toHaveBeenCalled();
+    expect(mocks.sendInformation).not.toHaveBeenCalled();
   });
 });
