@@ -34,6 +34,11 @@ type ResumeStatusState =
   | { status: 'ready'; data: FormalPlanContactState }
   | { status: 'error'; message: string };
 
+type DecisionState =
+  | { status: 'idle' }
+  | { status: 'submitting' }
+  | { status: 'error'; message: string };
+
 type CandidateContact = CandidateContactPool['candidates'][number];
 
 function errorMessage(error: unknown): string {
@@ -50,6 +55,8 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
   const [readState, setReadState] = useState<ReadState>({ status: 'idle' });
   const [createStates, setCreateStates] = useState<Record<number, CreateState>>({});
   const [resumeStatusStates, setResumeStatusStates] = useState<Record<number, ResumeStatusState>>({});
+  const [decisionReasons, setDecisionReasons] = useState<Record<number, string>>({});
+  const [decisionStates, setDecisionStates] = useState<Record<number, DecisionState>>({});
 
   const loadCandidates = () => {
     setReadState({ status: 'loading' });
@@ -104,6 +111,40 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       });
   };
 
+  const recordCustomerDecision = (
+    plan: FormalMatchingPlan,
+    decision: 'accepted' | 'declined',
+  ) => {
+    const contactState = resumeStatusStates[plan.plan_id];
+    const reason = (decisionReasons[plan.plan_id] ?? '').trim();
+    if (contactState?.status !== 'ready' || !reason) return;
+
+    setDecisionStates((current) => ({
+      ...current,
+      [plan.plan_id]: { status: 'submitting' },
+    }));
+    void matchingPlanCommunicationClient.recordCustomerDecision(
+      caseNo,
+      plan.plan_id,
+      contactState.data.plan.communication_version,
+      decision,
+      reason,
+    )
+      .then(() => {
+        setDecisionStates((current) => ({
+          ...current,
+          [plan.plan_id]: { status: 'idle' },
+        }));
+        loadResumeStatus(plan);
+      })
+      .catch((error) => {
+        setDecisionStates((current) => ({
+          ...current,
+          [plan.plan_id]: { status: 'error', message: errorMessage(error) },
+        }));
+      });
+  };
+
   return (
     <section aria-label={`案件 ${caseNo} 正式推薦媒合方案`}>
       <button
@@ -137,6 +178,12 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
             const resumeStatusState = createState.status === 'success'
               ? resumeStatusStates[createState.plan.plan_id] ?? { status: 'idle' as const }
               : { status: 'idle' as const };
+            const decisionState = createState.status === 'success'
+              ? decisionStates[createState.plan.plan_id] ?? { status: 'idle' as const }
+              : { status: 'idle' as const };
+            const decisionReason = createState.status === 'success'
+              ? decisionReasons[createState.plan.plan_id] ?? ''
+              : '';
             return (
               <div key={candidate.id}>
                 <dt>{candidate.staff_name} · 月嫂 #{candidate.staff_id}</dt>
@@ -179,6 +226,51 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
                         重新讀取履歷推薦狀態
                       </button>
                     </div>
+
+                    {resumeStatusState.status === 'ready' && (
+                      <div className="order-v2-case-meta" aria-label={`方案 ${createState.plan.plan_id} 客戶決定`}>
+                        <strong>客戶決定</strong>
+                        <span>目前決定：{resumeStatusState.data.customer_decision}</span>
+                        {resumeStatusState.data.customer_decision === 'declined' && (
+                          <div className="order-v2-notice blocked" role="alert">
+                            <strong>客戶拒絕正式推薦</strong>
+                            <span>目前正式方案受阻；請依後續 owner 流程處理。</span>
+                          </div>
+                        )}
+                        <textarea
+                          aria-label={`方案 ${createState.plan.plan_id} 客戶決策依據`}
+                          value={decisionReason}
+                          maxLength={500}
+                          onChange={(event) => setDecisionReasons((current) => ({
+                            ...current,
+                            [createState.plan.plan_id]: event.target.value,
+                          }))}
+                          placeholder="填寫客戶決策依據"
+                        />
+                        <button
+                          type="button"
+                          className="order-v2-open-drawer"
+                          aria-label={`記錄方案 ${createState.plan.plan_id} 客戶接受`}
+                          disabled={decisionState.status === 'submitting' || !decisionReason.trim()}
+                          onClick={() => recordCustomerDecision(createState.plan, 'accepted')}
+                        >
+                          記錄客戶接受
+                        </button>
+                        <button
+                          type="button"
+                          className="order-v2-open-drawer"
+                          aria-label={`記錄方案 ${createState.plan.plan_id} 客戶拒絕`}
+                          disabled={decisionState.status === 'submitting' || !decisionReason.trim()}
+                          onClick={() => recordCustomerDecision(createState.plan, 'declined')}
+                        >
+                          記錄客戶拒絕
+                        </button>
+                        {decisionState.status === 'submitting' && <span>記錄客戶決定中…</span>}
+                        {decisionState.status === 'error' && (
+                          <span role="alert">{decisionState.message}</span>
+                        )}
+                      </div>
+                    )}
                   </>
                 )}
                 {createState.status === 'error' && (
