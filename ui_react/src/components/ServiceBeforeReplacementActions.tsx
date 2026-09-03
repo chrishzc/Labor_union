@@ -79,8 +79,6 @@ export function ServiceBeforeReplacementActions({
   onCommitted,
   onSubstitutionReferral,
 }: ServiceBeforeReplacementActionsProps) {
-  const ordersBusinessEntry = onCommitted !== undefined && onSubstitutionReferral !== undefined;
-  const [expanded, setExpanded] = useState(!ordersBusinessEntry);
   const [scenario, setScenario] = useState<ServiceBeforeReplacementScenario | ''>(initialScenario ?? '');
   const [query, setQuery] = useState<ServiceBeforeReplacementQuery | null>(null);
   const [reason, setReason] = useState('');
@@ -114,10 +112,6 @@ export function ServiceBeforeReplacementActions({
       setUiState({ type: 'error', message: errorMessage(error, '無法取得服務前換人根事實。') });
     }
   }, [caseNo]);
-
-  useEffect(() => {
-    setExpanded(!ordersBusinessEntry);
-  }, [caseNo, ordersBusinessEntry]);
 
   useEffect(() => {
     setScenario(initialScenario ?? '');
@@ -218,10 +212,6 @@ export function ServiceBeforeReplacementActions({
     }
     await apply(request, createServiceBeforeReplacementCommandIdentity());
   };
-
-  if (!expanded) {
-    return <button type="button" onClick={() => setExpanded(true)}>服務前更換月嫂</button>;
-  }
 
   return (
     <section aria-label="服務前換人人工修復" style={{ display: 'grid', gap: '12px' }}>
