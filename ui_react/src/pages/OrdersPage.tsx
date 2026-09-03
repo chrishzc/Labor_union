@@ -261,6 +261,7 @@ export const OrdersPage: React.FC = () => {
   const [activeContractTab, setActiveContractTab] = useState<ContractWorkbenchTab>('contract_terms');
   const [contractDocView, setContractDocView] = useState<'contract' | 'spec'>('contract');
   const [contractDocFullscreen, setContractDocFullscreen] = useState(false);
+  const [replacementActionsExpanded, setReplacementActionsExpanded] = useState(false);
   const [precisionMode, setPrecisionMode] = useState<'週休1日' | '週休2日' | '連續服務'>('週休1日');
   const [precisionCalculating, setPrecisionCalculating] = useState(false);
   const [precisionResult, setPrecisionResult] = useState<SchedulePrecisionResult | null>(null);
@@ -365,8 +366,6 @@ export const OrdersPage: React.FC = () => {
         const adapted = adaptOrderSummaryPage(rawPage);
         setPageData(adapted);
         if (queryText) {
-          // The stage endpoint has no query_text contract. A searched card stays operable,
-          // while stage filters remain disabled instead of treating unrelated rows as an error.
           setSelectedStage('全部');
           setStagePage(null);
           setStageIndex(new Map());
@@ -646,6 +645,7 @@ export const OrdersPage: React.FC = () => {
     }
     precisionRequestRef.current += 1;
     invalidateDrawerRequest();
+    setReplacementActionsExpanded(false);
     setContractOrder(null);
     setDateConfirmOrder(null);
     setReopenOrder(null);
@@ -708,7 +708,6 @@ export const OrdersPage: React.FC = () => {
     }
   };
 
-  // Handle opening Drawer 2: Matching Workbench
   const handleOpenMatchingDrawer = async (
     order: OrderSummaryCardViewModel,
     options?: { preserveCandidateAction?: boolean },
@@ -805,9 +804,6 @@ export const OrdersPage: React.FC = () => {
           assignmentPlan,
           terms,
           candidateContactPool,
-          // A failed customer-decision read must not erase the independently
-          // authoritative active plan or its waiting-deposit lock.  Keeping it
-          // visible prevents a stale UI from offering a second formal plan.
           activePlan: activePlanRes.status === 'fulfilled' ? activePlan : null,
           customerDecision: contactState?.customer_decision,
           customerProfilesStatus: contactState?.customer_profiles_manual_confirmation
@@ -1260,7 +1256,6 @@ export const OrdersPage: React.FC = () => {
     }
   };
 
-  // Lazy loader for Contract SSOT & Terms queries
   const loadContractTabQueries = async (order: OrderSummaryCardViewModel) => {
     const { controller, requestId } = beginDrawerRequest();
     setDrawerLoading(true);
@@ -1431,7 +1426,6 @@ export const OrdersPage: React.FC = () => {
 
   const rerunSchedulePrecision = runSchedulePrecision;
 
-  // Lazy loader for Service Dates & Actual Start queries
   const loadCalendarTabQueries = async (
     order: OrderSummaryCardViewModel,
     allowRestartedNormalFlow = false,
@@ -1500,7 +1494,6 @@ export const OrdersPage: React.FC = () => {
     }
   };
 
-  // Lazy loader for Cancellation queries
   const loadCancellationTabQueries = async (order: OrderSummaryCardViewModel) => {
     const { controller, requestId } = beginDrawerRequest();
     setDrawerLoading(true);
@@ -1535,7 +1528,6 @@ export const OrdersPage: React.FC = () => {
     }
   };
 
-  // Lazy loader for Reopen preview queries
   const loadReopenTabQueries = async (order: OrderSummaryCardViewModel) => {
     reopenPreviewControllerRef.current?.abort();
     const controller = new AbortController();
@@ -1544,7 +1536,6 @@ export const OrdersPage: React.FC = () => {
     void previewReopenFlow(order.id, { signal: controller.signal }).catch(() => undefined);
   };
 
-  // Handle opening Unified Drawer: Terms, Service Dates, Contract Progress, Cancellation & Reopen
   const handleOpenContractDrawer = async (
     order: OrderSummaryCardViewModel,
     initialTab: ContractWorkbenchTab = 'contract_terms',
@@ -1555,6 +1546,7 @@ export const OrdersPage: React.FC = () => {
     }
     serviceDatesPreviewControllerRef.current?.abort();
     reopenPreviewControllerRef.current?.abort();
+    setReplacementActionsExpanded(false);
     setContractOrder(order);
     setDateConfirmOrder(order);
     setCancelOrder(order);
@@ -1673,8 +1665,6 @@ export const OrdersPage: React.FC = () => {
       );
     }
   };
-
-
 
   const updateTermsDraft = <K extends keyof OrderTermsDraft>(key: K, value: OrderTermsDraft[K]) => {
     setTermsDraft((current) => ({ ...current, [key]: value }));
@@ -1964,7 +1954,6 @@ export const OrdersPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Status Filter Chips */}
       <div className="orders-filter-bar">
         {ORDER_FILTER_OPTIONS.map((filter) => {
           const projectionReady = stagePage !== null;
@@ -2006,7 +1995,6 @@ export const OrdersPage: React.FC = () => {
         </div>
       )}
 
-      {/* Loading & Error States */}
       {loading && (
         <div style={{ textAlign: 'center', padding: '40px', color: '#64748b', fontSize: '1rem', fontWeight: 600 }}>
           ⏳ 正在載入即時訂單數據...
@@ -2025,7 +2013,6 @@ export const OrdersPage: React.FC = () => {
         </div>
       )}
 
-      {/* Empty State */}
       {!loading && !error && filteredOrders.length === 0 && (
         <div style={{ textAlign: 'center', padding: '48px', backgroundColor: '#fff', borderRadius: '16px', border: '1px solid #e2e8f0', color: '#64748b' }}>
           <div style={{ fontSize: '2.5rem', marginBottom: '10px' }}>☕</div>
@@ -2034,7 +2021,6 @@ export const OrdersPage: React.FC = () => {
         </div>
       )}
 
-      {/* Orders Grid Cards */}
       {!loading && !error && (
         <div className="orders-grid">
           {filteredOrders.map((order) => (
@@ -2049,7 +2035,6 @@ export const OrdersPage: React.FC = () => {
                 <div>🪪 身分資格：{order.identityStatus}</div>
                 <div>📅 約定服務：{order.serviceRange}（{order.serviceDaysLabel}）</div>
 
-                {/* Actual Start Date Badge if exists */}
                 {order.actualStartDate && (
                   <div style={{ color: '#0f766e', fontWeight: 700, fontSize: '0.85rem' }}>
                     🗓️ 實際服務開始日：{order.actualStartDate}
@@ -2060,7 +2045,6 @@ export const OrdersPage: React.FC = () => {
                   💰 雇主自付應付額：<strong style={{ color: '#ff7f50', fontSize: '1.05rem' }}>{order.contractAmountFormatted}</strong>
                 </div>}
 
-                {/* Doula Assigned Box */}
                 {order.assignedDoulaName && <div className="order-doula-box">
                     <div>
                       <div>👩‍🍼 摘要所列月嫂：<strong>{order.assignedDoulaName}</strong></div>
@@ -2109,7 +2093,6 @@ export const OrdersPage: React.FC = () => {
         </div>
       )}
 
-      {/* 2. 1280px Extra-Wide Matching Workbench (size="xl") */}
       <Drawer
         isOpen={matchingOrder !== null}
         onClose={() => { invalidateDrawerRequest(); setMatchingOrder(null); }}
@@ -2151,7 +2134,6 @@ export const OrdersPage: React.FC = () => {
               </div>
             )}
 
-            {/* Top Demand Summary Bar (4-Column Layout + Deposit Status) */}
             <div className="matching-facts-bar">
               <div className="matching-facts-col">
                 <div className="matching-facts-label">產婦與服務地點</div>
@@ -2215,7 +2197,6 @@ export const OrdersPage: React.FC = () => {
               </div>
             </section>
 
-            {/* 👥 步驟一：以既定規則查詢候選月嫂 */}
             <div className="matching-step-card">
               <div className="matching-step-header">
                 <div>
@@ -2250,7 +2231,6 @@ export const OrdersPage: React.FC = () => {
               </div>
             </div>
 
-            {/* 👥 步驟二：選擇合格月嫂並加入候選池 */}
             <div className="matching-step-card">
               <div className="matching-step-header">
                 <div>
@@ -2376,7 +2356,6 @@ export const OrdersPage: React.FC = () => {
               )}
             </div>
 
-            {/* 📱 步驟三：已選入候選池的月嫂 ➜ 寄送訂單資訊與意願管理 */}
             <div className="matching-step-card">
               <div className="matching-step-header">
                 <div>
@@ -2594,7 +2573,6 @@ export const OrdersPage: React.FC = () => {
               ) : null}
             </div>
 
-            {/* 📝 步驟四：推薦產婦、定金狀態與雙邊契約簽署 */}
             {activePlanQueryError ? (
               <div
                 role="alert"
@@ -2783,7 +2761,6 @@ export const OrdersPage: React.FC = () => {
               </div>
             )}
 
-            {/* 📋 步驟五：正式執行排班（生效成果） */}
             <div className="matching-step-card">
               <div className="matching-step-header">
                 <div>
@@ -2850,7 +2827,6 @@ export const OrdersPage: React.FC = () => {
         )}
       </Drawer>
 
-      {/* 3. Unified 1280px Workbench: Terms, Service Dates & Contract Progress (size="xl") */}
       <Drawer
         isOpen={Boolean(contractOrder || dateConfirmOrder || reopenOrder || cancelOrder)}
         onClose={closeContractDrawer}
@@ -2878,7 +2854,6 @@ export const OrdersPage: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
             {renderCardProjection()}
 
-            {/* Top 4-Column Fact Strip */}
             <div className="matching-facts-bar">
               <div className="matching-fact-item">
                 <div className="matching-fact-label">產婦與地點</div>
@@ -2920,7 +2895,6 @@ export const OrdersPage: React.FC = () => {
               </div>
             </div>
 
-            {/* 4-Tab Clean Navigation */}
             <div className="contract-tabs-nav">
               <button
                 type="button"
@@ -2969,10 +2943,8 @@ export const OrdersPage: React.FC = () => {
               </div>
             )}
 
-            {/* Tab 1: 契約簽署與約定條款 (Contract & Terms Consolidated) */}
             {activeContractTab === 'contract_terms' && contractDetail && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-                {/* SSOT 3-Card Status Strip */}
                 <div className="contract-ssot-grid">
                   <div className="contract-ssot-card">
                     <div className="contract-ssot-header">
@@ -3033,13 +3005,26 @@ export const OrdersPage: React.FC = () => {
                 )}
 
                 {(contractOrder || dateConfirmOrder) && (
-                  <ServiceBeforeReplacementActions
-                    caseNo={(contractOrder || dateConfirmOrder)!.id}
-                    onCommitted={() => loadContractTabQueries((contractOrder || dateConfirmOrder)!)}
-                    onSubstitutionReferral={() => {
-                      window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent((contractOrder || dateConfirmOrder)!.id)}`;
-                    }}
-                  />
+                  <section data-surface-id="orders.service-before-replacement.entry">
+                    {!replacementActionsExpanded ? (
+                      <button
+                        type="button"
+                        className="btn-secondary-action"
+                        data-control-id="orders.service-before-replacement.open"
+                        onClick={() => setReplacementActionsExpanded(true)}
+                      >
+                        服務前更換月嫂
+                      </button>
+                    ) : (
+                      <ServiceBeforeReplacementActions
+                        caseNo={(contractOrder || dateConfirmOrder)!.id}
+                        onCommitted={() => loadContractTabQueries((contractOrder || dateConfirmOrder)!)}
+                        onSubstitutionReferral={() => {
+                          window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent((contractOrder || dateConfirmOrder)!.id)}`;
+                        }}
+                      />
+                    )}
+                  </section>
                 )}
 
                 {contractDetail.domainBlockers && contractDetail.domainBlockers.length > 0 ? (
@@ -3057,9 +3042,7 @@ export const OrdersPage: React.FC = () => {
                   </div>
                 )}
 
-                {/* 5:5 Split Workbench: Left Terms Form + Diff | Right Document Live Preview */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: '20px', alignItems: 'start' }}>
-                  {/* Left Column: 編輯約定服務條款 */}
                   <div className="terms-edit-card">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#ff7f50', margin: 0 }}>📝 編輯約定服務條款</h3>
@@ -3156,7 +3139,6 @@ export const OrdersPage: React.FC = () => {
                     </section>
                   </div>
 
-                  {/* Right Column: 📜 正式雙邊契約與訂單資訊即時文件預覽 */}
                   <div className={`contract-doc-preview-card ${contractDocFullscreen ? 'fullscreen' : ''}`}>
                     <div className="contract-doc-toolbar">
                       <div className="contract-doc-view-toggle">
@@ -3287,7 +3269,6 @@ export const OrdersPage: React.FC = () => {
               </div>
             )}
 
-            {/* Tab 2: 實質服務日曆與天數精算 (Service Calendar & Precision) */}
             {activeContractTab === 'calendar' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
                 {historicalRestartRequired && (
@@ -3328,7 +3309,6 @@ export const OrdersPage: React.FC = () => {
                   )}
                   {serviceDatesDraft?.queryView && (
                     <>
-                      {/* Precision Controls & Metric Bar */}
                       <div style={{ backgroundColor: '#ffffff', border: '1px solid #fed9b8', borderRadius: '14px', padding: '18px 22px', marginBottom: '18px', boxShadow: '0 4px 16px rgba(255, 127, 80, 0.05)' }}>
                         <div className="service-dates-meta-row" style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', marginBottom: '14px', fontSize: '0.85rem', color: '#57423b' }}>
                           <span>合約服務天數：{serviceDatesDraft.queryView.contracted_service_days} 天</span>
@@ -3390,7 +3370,6 @@ export const OrdersPage: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Precision Rule Explanations Banner */}
                       {precisionResult && (
                         <div style={{ backgroundColor: '#fff8f6', border: '1px solid #fed9b8', borderRadius: '12px', padding: '14px 18px', marginBottom: '18px' }}>
                           <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#9a3412', marginBottom: '6px' }}>
@@ -3492,7 +3471,6 @@ export const OrdersPage: React.FC = () => {
                             })}
                           </div>
                         </div>
-
                       </div>
 
                       <div className="leave-planning-box" style={{ marginTop: '12px' }}>
@@ -3524,7 +3502,6 @@ export const OrdersPage: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Full-width Preview / Apply workflow below the calendar */}
                       <div className="service-date-confirmation-panel">
                         <div className="service-date-confirmation-actions">
                           <button
@@ -3659,7 +3636,6 @@ export const OrdersPage: React.FC = () => {
                   )}
                 </section>
 
-                {/* Actual Start Date Precision Card */}
                 <div className="calendar-workbench-card" style={{ marginTop: '16px' }}>
                   <div className="calendar-card-header">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -3746,8 +3722,6 @@ export const OrdersPage: React.FC = () => {
               </div>
             )}
 
-            {/* Tab 3: 訂單取消、退款與受控重開 (Cancellation, Refund & Reopen) */}
-            {/* Tab 3: 訂單取消與退款試算 (Cancellation & Refund) */}
             {activeContractTab === 'cancellation' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
                 <div style={{ backgroundColor: '#fffdfc', border: '1px solid #fed9b8', borderRadius: '12px', padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -3984,7 +3958,6 @@ export const OrdersPage: React.FC = () => {
               </div>
             )}
 
-            {/* Tab 4: 🔄 訂單受控重開 (Controlled Reopen) */}
             {activeContractTab === 'reopen' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
                 <div style={{ backgroundColor: '#fffdfc', border: '1px solid #fed9b8', borderRadius: '12px', padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
