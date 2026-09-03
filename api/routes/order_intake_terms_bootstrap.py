@@ -11,21 +11,16 @@ from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_persisted_admin
 from api.dependencies.order_intake_terms_bootstrap import (
+    get_order_intake_client_name_repair_application,
     get_order_intake_terms_bootstrap_application,
 )
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
-from api.schemas.orders import (
-    ClientNameApplyRequest,
-    ClientNamePreviewRequest,
-    ClientNamePreviewView,
-    ClientNameReceiptView,
-)
-from infrastructure.mysql.admin_command_repository import AdminCommandRepository
-from infrastructure.mysql.mysql_adapter import get_connection
-from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.access.authentication_session import AdminPrincipal
-from subsystems.orders import client_name_maintenance
+from subsystems.orders.order_intake_client_name_repair import (
+    OrderIntakeClientNameRepairApplication,
+    OrderIntakeClientNameRepairError,
+)
 from subsystems.orders.order_intake_terms_bootstrap import (
     OrderIntakeTermsBootstrapApplication,
     OrderIntakeTermsBootstrapError,
@@ -82,6 +77,39 @@ class OrderIntakeTermsBootstrapReceiptView(BaseModel):
     replayed: bool
 
 
+class OrderIntakeClientNameIntent(BaseModel):
+    client_name: str = Field(min_length=1, max_length=100)
+
+
+class OrderIntakeClientNameApplyBody(OrderIntakeClientNameIntent):
+    expected_lifecycle_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class OrderIntakeClientNamePreviewView(BaseModel):
+    case_no: str
+    lifecycle_version: int
+    before_client_name: str | None
+    after_client_name: str
+    blockers: list[str]
+    apply_allowed: bool
+    preview_fingerprint: str
+
+
+class OrderIntakeClientNameReceiptView(BaseModel):
+    receipt_key: str
+    case_no: str
+    lifecycle_version: int
+    client_name: str
+    preview_fingerprint: str
+    replayed: bool
+
+
 class OrderIntakeCompletionPreviewView(BaseModel):
     case_no: str
     lifecycle_version: int
@@ -133,7 +161,7 @@ def preview_order_intake_terms_bootstrap(
             body.proposed_service_days,
         )
         return BaseResponse(
-            data=_preview_payload(result),
+            data=_terms_preview_payload(result),
             message="已產生待補件訂單條款補齊預覽",
         )
     except OrderIntakeTermsBootstrapError as error:
@@ -174,7 +202,7 @@ def apply_order_intake_terms_bootstrap(
             body.reason.strip(),
         )
         return BaseResponse(
-            data=_receipt_payload(result),
+            data=_terms_receipt_payload(result),
             message="已補齊待補件訂單條款",
         )
     except OrderIntakeTermsBootstrapError as error:
@@ -191,77 +219,74 @@ def apply_order_intake_terms_bootstrap(
 
 @router.post(
     "/{case_no}/intake-completion/client-name/preview",
-    response_model=BaseResponse[ClientNamePreviewView],
+    response_model=BaseResponse[OrderIntakeClientNamePreviewView],
 )
 def preview_order_intake_client_name(
-    body: ClientNamePreviewRequest,
+    body: OrderIntakeClientNameIntent,
     case_no: str = Path(..., min_length=1, max_length=50),
+    correlation_id: _CorrelationHeader = "order-intake-client-name-preview",
     principal: AdminPrincipal = Depends(require_persisted_admin),
+    application: OrderIntakeClientNameRepairApplication = Depends(
+        get_order_intake_client_name_repair_application
+    ),
 ):
     del principal
-    connection = get_connection()
     try:
-        result = client_name_maintenance.preview(
-            AdminCommandRepository(connection),
-            case_no.strip(),
-            body.client_name.strip(),
-        )
+        result = application.preview(case_no.strip(), body.client_name.strip())
         return BaseResponse(
-            data=ClientNamePreviewView.model_validate(result),
+            data=_client_name_preview_payload(result),
             message="已產生待補件客戶姓名預覽",
         )
-    except ValueError as error:
-        raise _client_name_http_error(error, "intake-client-name-preview") from error
+    except OrderIntakeClientNameRepairError as error:
+        raise _client_name_http_error(error, correlation_id) from error
     except OperationalError as error:
-        raise _database_http_error(error, "intake-client-name-preview") from error
+        raise _database_http_error(error, correlation_id) from error
     except Exception as error:
         raise internal_query_error(
             "order_intake_client_name_preview_failed",
             "待補件客戶姓名預覽失敗。",
-            "intake-client-name-preview",
+            correlation_id,
         ) from error
-    finally:
-        connection.close()
 
 
 @router.post(
     "/{case_no}/intake-completion/client-name/apply",
-    response_model=BaseResponse[ClientNameReceiptView],
+    response_model=BaseResponse[OrderIntakeClientNameReceiptView],
 )
 def apply_order_intake_client_name(
-    body: ClientNameApplyRequest,
+    body: OrderIntakeClientNameApplyBody,
     case_no: str = Path(..., min_length=1, max_length=50),
     idempotency_key: _IdempotencyHeader = ...,
+    correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_persisted_admin),
+    application: OrderIntakeClientNameRepairApplication = Depends(
+        get_order_intake_client_name_repair_application
+    ),
 ):
-    connection = get_connection()
     try:
-        result = client_name_maintenance.apply(
-            AdminCommandRepository(connection),
-            lambda: MySqlUnitOfWork(connection),
+        result = application.apply(
             case_no.strip(),
             body.client_name.strip(),
+            body.expected_lifecycle_version,
             body.preview_fingerprint,
             idempotency_key,
             str(principal.username or "").strip(),
             body.reason.strip(),
         )
         return BaseResponse(
-            data=ClientNameReceiptView.model_validate(result),
+            data=_client_name_receipt_payload(result),
             message="已補齊待補件客戶姓名",
         )
-    except ValueError as error:
-        raise _client_name_http_error(error, "intake-client-name-apply") from error
+    except OrderIntakeClientNameRepairError as error:
+        raise _client_name_http_error(error, correlation_id) from error
     except OperationalError as error:
-        raise _database_http_error(error, "intake-client-name-apply") from error
+        raise _database_http_error(error, correlation_id) from error
     except Exception as error:
         raise internal_query_error(
             "order_intake_client_name_apply_failed",
             "待補件客戶姓名補齊失敗。",
-            "intake-client-name-apply",
+            correlation_id,
         ) from error
-    finally:
-        connection.close()
 
 
 @router.post(
@@ -334,7 +359,7 @@ def apply_order_intake_completion(
         ) from error
 
 
-def _preview_payload(result):
+def _terms_preview_payload(result):
     return {
         "case_no": result.case_no,
         "lifecycle_version": result.lifecycle_version,
@@ -349,7 +374,7 @@ def _preview_payload(result):
     }
 
 
-def _receipt_payload(result):
+def _terms_receipt_payload(result):
     return {
         "receipt_key": result.receipt_key,
         "case_no": result.case_no,
@@ -357,6 +382,29 @@ def _receipt_payload(result):
         "start_date": result.start_date,
         "service_days": result.service_days,
         "changed_fields": list(result.changed_fields),
+        "preview_fingerprint": result.preview_fingerprint,
+        "replayed": result.replayed,
+    }
+
+
+def _client_name_preview_payload(result):
+    return {
+        "case_no": result.case_no,
+        "lifecycle_version": result.lifecycle_version,
+        "before_client_name": result.before_client_name,
+        "after_client_name": result.after_client_name,
+        "blockers": list(result.blockers),
+        "apply_allowed": result.apply_allowed,
+        "preview_fingerprint": result.preview_fingerprint,
+    }
+
+
+def _client_name_receipt_payload(result):
+    return {
+        "receipt_key": result.receipt_key,
+        "case_no": result.case_no,
+        "lifecycle_version": result.lifecycle_version,
+        "client_name": result.client_name,
         "preview_fingerprint": result.preview_fingerprint,
         "replayed": result.replayed,
     }
@@ -425,29 +473,35 @@ def _workflow_http_error(error, correlation_id):
     )
 
 
-def _client_name_http_error(error: ValueError, correlation_id: str):
-    code = str(error)
-    if code == "client_not_found":
+def _client_name_http_error(error, correlation_id):
+    if error.code == "order_intake_client_name_case_not_found":
         return typed_http_error(
             404,
             "not_found",
-            code,
-            "找不到指定訂單的客戶資料。",
+            error.code,
+            "找不到指定訂單。",
             correlation_id,
         )
-    if code in {"stale_preview", "idempotency_key_conflict"}:
-        return typed_http_error(
+    if error.code in {
+        "order_intake_client_name_stale_preview",
+        "order_intake_client_name_idempotency_key_conflict",
+        "order_intake_client_name_blocked",
+    }:
+        exc = typed_http_error(
             409,
             "conflict",
-            code,
-            "客戶姓名資料已變更，請重新預覽後再補件。",
+            error.code,
+            "客戶姓名補件條件已變更，請重新載入後再試。",
             correlation_id,
         )
+        if error.blockers:
+            exc.detail["error"]["domain_blockers"] = list(error.blockers)
+        return exc
     return typed_http_error(
         422,
         "validation",
-        code or "order_intake_client_name_invalid",
-        "客戶姓名未通過驗證。",
+        error.code,
+        "客戶姓名未通過補件驗證。",
         correlation_id,
     )
 
