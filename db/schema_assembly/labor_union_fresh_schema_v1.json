@@ -162,6 +162,7 @@
     "db/schema_parts/214_historical_order_pairing_resolution_reused.sql",
     "db/schema_parts/215_historical_service_accounting.sql",
     "db/schema_parts/216_staff_beclass_profile.sql",
+    "db/schema_parts/217_weekly_report_batches.sql",
     "db/schema_parts/1029_client_payment_destination_configuration.sql"
   ],
   "classifications": {
@@ -173,7 +174,8 @@
     "db/schema_parts/1026_task96_scheduling_service_day_attachment_kind.sql": "migration-only",
     "db/schema_parts/1027_historical_order_pairing_resolution_reused.sql": "migration-only",
     "db/schema_parts/1028_historical_service_accounting.sql": "migration-only",
-    "db/schema_parts/1030_staff_beclass_profile.sql": "migration-only"
+    "db/schema_parts/1030_staff_beclass_profile.sql": "migration-only",
+    "db/schema_parts/1031_weekly_report_batches.sql": "retired"
   },
   "retirement_contracts": {
     "db/schema_parts/1022_task96_retired_anomaly_owner_contracts.sql": {
@@ -256,6 +258,15 @@
       "replay": "preserve release chain applies 1030 only when owned objects are absent or exact; partial or drift metadata blocks candidate apply",
       "rollback": "retain source backup and discard candidate before same-name replacement",
       "unresolved_policy": "partial or drift owned metadata blocks candidate apply pending explicit remediation"
+    },
+    "db/schema_parts/1031_weekly_report_batches.sql": {
+      "source_object": "duplicate weekly-report batch DDL introduced alongside the canonical fresh schema artifact",
+      "successor": "db/schema_parts/217_weekly_report_batches.sql",
+      "terminal_schema_evidence": "fresh assembly uses canonical part 217; existing-database upgrade remains owned by scripts/migrate_weekly_report_batches.py, and no preserve release manifest references part 1031",
+      "data_effect": "none; the duplicate part is retired from executable schema assembly",
+      "replay": "never replay part 1031; fresh bootstrap executes part 217 and existing-database upgrade uses the explicit weekly-report migration script",
+      "rollback": "retain the versioned duplicate bytes as provenance; rollback of executable schema follows the owning bootstrap or migration path",
+      "unresolved_policy": "any future preserve-data release for weekly-report tables must declare an explicit release manifest instead of reactivating this duplicate"
     }
   }
 }
