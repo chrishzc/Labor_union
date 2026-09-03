@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { HistoricalOrderAdoptionEvidenceSchema } from '../api/orders/historical_adoption_evidence_schemas';
 import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS, type CoreStageCode } from '../api/orders/order_core_stage_projection_schemas';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
 
@@ -72,6 +73,33 @@ function timeline() {
   };
 }
 
+function canonicalEvidence() {
+  return {
+    case_no: 'CASE-FUTURE',
+    receipt_id: 77,
+    receipt_identity: 'historical-order-adoption-receipt:77',
+    evidence_owner: 'Historical Orders Adoption',
+    source_identity: 'historical-orders:sheet:row:17',
+    source_fingerprint: 'c'.repeat(64),
+    preview_fingerprint: 'd'.repeat(64),
+    historical_source_status: 'deposit_paid',
+    operational_baseline_step: 9,
+    source_start_date: '2026-09-03',
+    source_end_date: '2026-09-22',
+    source_period_availability: 'available',
+    paired_staff: [{
+      caregiver_ordinal: 1,
+      staff_name: '陳月嫂',
+      staff_id: 42,
+      resolution: 'evidence_only',
+      source_start_date: '2026-09-03',
+      source_end_date: '2026-09-22',
+      assignment_id: null,
+    }],
+    paired_staff_availability: 'available',
+  };
+}
+
 describe('historical Drawer immutable evidence boundary', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
@@ -104,18 +132,7 @@ describe('historical Drawer immutable evidence boundary', () => {
       client_finance_version: 2, payroll_version: 2, contracted_service_days: 20, service_hours_per_day: 9,
       service_started: false, assignments: [],
     });
-    mocks.evidence.mockResolvedValue({
-      case_no: 'CASE-FUTURE', receipt_id: 77, receipt_identity: 'historical-order-adoption-receipt:77',
-      evidence_owner: 'Historical Orders Adoption', source_identity: 'historical-orders:sheet:row:17',
-      source_fingerprint: 'c'.repeat(64), preview_fingerprint: 'd'.repeat(64),
-      historical_source_status: 'deposit_paid', operational_baseline_step: 9,
-      source_start_date: '2026-09-03', source_end_date: '2026-09-22', source_period_availability: 'available',
-      paired_staff: [{
-        caregiver_ordinal: 1, masked_staff_name: '陳*嫂', staff_id: 42, resolution: 'evidence_only',
-        source_start_date: '2026-09-03', source_end_date: '2026-09-22', assignment_id: null,
-      }],
-      paired_staff_availability: 'available',
-    });
+    mocks.evidence.mockResolvedValue(canonicalEvidence());
     mocks.baseline.mockResolvedValue({
       order_identity: 'order:CASE-FUTURE', case_no: 'CASE-FUTURE',
       historical_provenance: { source_event_identity: 'historical-source:17', source_version: 1 },
@@ -163,7 +180,25 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(within(evidenceRegion).getByText('2026-09-03 → 2026-09-22')).toBeInTheDocument();
     expect(within(evidenceRegion).getByText('Historical Orders Adoption')).toBeInTheDocument();
     expect(within(evidenceRegion).getByText(/歷史匯入配對月嫂 · #42/)).toBeInTheDocument();
+    expect(within(evidenceRegion).getByText('月嫂名稱：陳月嫂')).toBeInTheDocument();
+    expect(within(evidenceRegion).queryByText(/陳\*嫂/)).not.toBeInTheDocument();
     expect(within(evidenceRegion).getByText('resolution：evidence_only')).toBeInTheDocument();
     expect(within(evidenceRegion).getByText('historical assignment_id：無（evidence-only）')).toBeInTheDocument();
+  });
+
+  it('strict adoption evidence contract 接受 canonical staff_name 並拒絕舊 masked 欄位', () => {
+    const canonical = canonicalEvidence();
+    const parsed = HistoricalOrderAdoptionEvidenceSchema.parse(canonical);
+    expect(parsed.paired_staff[0]?.staff_name).toBe('陳月嫂');
+
+    const legacy = {
+      ...canonical,
+      paired_staff: [{
+        ...canonical.paired_staff[0],
+        staff_name: undefined,
+        masked_staff_name: '陳*嫂',
+      }],
+    };
+    expect(() => HistoricalOrderAdoptionEvidenceSchema.parse(legacy)).toThrow();
   });
 });

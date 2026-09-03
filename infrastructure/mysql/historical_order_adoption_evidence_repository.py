@@ -43,10 +43,13 @@ class MySqlHistoricalOrderAdoptionEvidenceRepository:
         receipt_id = _positive_int(receipt.get("id"), "receipt_id")
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT caregiver_ordinal,masked_staff_name,staff_id,resolution,"
-                "source_start_date,source_end_date,assignment_id "
-                "FROM historical_order_pairing_evidence "
-                "WHERE receipt_id=%s ORDER BY caregiver_ordinal,id",
+                "SELECT pairing.caregiver_ordinal,paired_staff.name AS staff_name,"
+                "pairing.staff_id,pairing.resolution,pairing.source_start_date,"
+                "pairing.source_end_date,pairing.assignment_id "
+                "FROM historical_order_pairing_evidence pairing "
+                "LEFT JOIN staff paired_staff ON paired_staff.id=pairing.staff_id "
+                "WHERE pairing.receipt_id=%s "
+                "ORDER BY pairing.caregiver_ordinal,pairing.id",
                 (receipt_id,),
             )
             pairing_rows = tuple(cursor.fetchall() or ())
@@ -88,7 +91,7 @@ def _paired_staff(row: Mapping[str, object]) -> HistoricalAdoptionPairedStaffEvi
         raise ValueError("historical_order_pairing_resolution_invalid")
     return HistoricalAdoptionPairedStaffEvidence(
         caregiver_ordinal=_positive_int(row.get("caregiver_ordinal"), "caregiver_ordinal"),
-        masked_staff_name=_required_text(row.get("masked_staff_name"), "masked_staff_name"),
+        staff_name=_required_text(row.get("staff_name"), "staff_name"),
         staff_id=_positive_int(row.get("staff_id"), "staff_id"),
         resolution=resolution,  # type: ignore[arg-type]
         source_start_date=_optional_date(row.get("source_start_date")),

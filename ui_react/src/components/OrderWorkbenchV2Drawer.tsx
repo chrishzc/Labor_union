@@ -373,7 +373,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                       {historicalEvidence.data.paired_staff.map((item) => (
                         <article key={`${item.caregiver_ordinal}:${item.staff_id}`}>
                           <strong>歷史匯入配對月嫂 · #{item.staff_id}</strong>
-                          <span>來源名稱：{item.masked_staff_name}</span>
+                          <span>月嫂名稱：{item.staff_name}</span>
                           <span>resolution：{item.resolution}</span>
                           <span>來源服務：{item.source_start_date ?? '未保留'} → {item.source_end_date ?? '未保留'}</span>
                           <span>historical assignment_id：{item.assignment_id ?? '無（evidence-only）'}</span>

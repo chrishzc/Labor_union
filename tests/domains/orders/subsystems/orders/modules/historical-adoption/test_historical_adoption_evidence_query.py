@@ -1,8 +1,11 @@
-"""Focused #88 regression for immutable source period and pairing evidence."""
+"""Focused #88/#101 regression for immutable source period and canonical pairing evidence."""
 
 from datetime import date
 import json
 
+from api.schemas.historical_order_adoption_evidence import (
+    HistoricalOrderAdoptionEvidenceView,
+)
 from infrastructure.mysql.historical_order_adoption_evidence_repository import (
     MySqlHistoricalOrderAdoptionEvidenceRepository,
 )
@@ -55,7 +58,7 @@ class _Connection:
         self.pairings = (
             {
                 "caregiver_ordinal": 1,
-                "masked_staff_name": "陳*嫂",
+                "staff_name": "陳月嫂",
                 "staff_id": 42,
                 "resolution": "evidence_only",
                 "source_start_date": date(2026, 9, 3),
@@ -64,7 +67,7 @@ class _Connection:
             },
             {
                 "caregiver_ordinal": 2,
-                "masked_staff_name": "待確認",
+                "staff_name": None,
                 "staff_id": None,
                 "resolution": "staff_missing",
                 "source_start_date": date(2026, 9, 3),
@@ -78,10 +81,18 @@ class _Connection:
 
 
 def test_future_source_period_and_evidence_only_staff_are_visible_without_becoming_formal_facts():
-    repository = MySqlHistoricalOrderAdoptionEvidenceRepository(_Connection())
+    connection = _Connection()
+    repository = MySqlHistoricalOrderAdoptionEvidenceRepository(connection)
 
     evidence = query_historical_order_adoption_evidence(repository, "CASE-FUTURE")
 
+    pairing_sql = next(
+        sql
+        for sql, _ in connection.calls
+        if "historical_order_pairing_evidence" in sql
+    )
+    assert "LEFT JOIN staff paired_staff" in pairing_sql
+    assert "masked_staff_name" not in pairing_sql
     assert evidence.source_start_date == date(2026, 9, 3)
     assert evidence.source_end_date == date(2026, 9, 22)
     assert evidence.source_period_availability == "available"
@@ -90,5 +101,14 @@ def test_future_source_period_and_evidence_only_staff_are_visible_without_becomi
     assert [(item.staff_id, item.resolution) for item in evidence.paired_staff] == [
         (42, "evidence_only")
     ]
+    assert evidence.paired_staff[0].staff_name == "陳月嫂"
+    assert "*" not in evidence.paired_staff[0].staff_name
     assert evidence.paired_staff[0].assignment_id is None
     assert evidence.paired_staff_availability == "available"
+
+    view = HistoricalOrderAdoptionEvidenceView.model_validate(
+        evidence,
+        from_attributes=True,
+    )
+    assert view.paired_staff[0].staff_name == "陳月嫂"
+    assert "masked_staff_name" not in view.paired_staff[0].model_dump()

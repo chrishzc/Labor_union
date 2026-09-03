@@ -10,7 +10,7 @@ class HistoricalAdoptionPairedStaffEvidenceView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     caregiver_ordinal: int = Field(ge=1)
-    masked_staff_name: str = Field(min_length=1)
+    staff_name: str = Field(min_length=1)
     staff_id: int = Field(ge=1)
     resolution: Literal["evidence_only", "assignment_candidate", "assignment_reused"]
     source_start_date: date | None

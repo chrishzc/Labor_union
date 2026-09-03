@@ -6,7 +6,7 @@ const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 export const HistoricalAdoptionPairedStaffEvidenceSchema = z.strictObject({
   caregiver_ordinal: z.number().int().positive(),
-  masked_staff_name: z.string().min(1),
+  staff_name: z.string().min(1),
   staff_id: z.number().int().positive(),
   resolution: z.enum(['evidence_only', 'assignment_candidate', 'assignment_reused']),
   source_start_date: DateSchema.nullable(),
