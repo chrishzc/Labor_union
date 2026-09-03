@@ -1399,7 +1399,7 @@ export const OrdersPage: React.FC = () => {
     } finally {
       if (requestId === precisionRequestRef.current) setPrecisionCalculating(false);
     }
-  }
+  };
 
   const runSchedulePrecision = (
     nextHolidayRestDates = holidayRestDates,
@@ -2067,6 +2067,12 @@ export const OrdersPage: React.FC = () => {
                       <div style={{ fontSize: '0.8rem', color: '#74593f' }}>正式推薦與分段方案請開啟媒合工作台查看</div>
                     </div>
                 </div>}
+
+                {isOrderIntakeIncomplete(order) && (
+                  <div role="status" style={{ color: '#9a3412', fontSize: '0.82rem', marginTop: '8px' }}>
+                    案件仍待補齊姓名、服務日期等進件資料；可先開啟工作台查看現有資料與目前 blocker。
+                  </div>
+                )}
               </div>
 
               {order.orderStatus === '訂單取消' || order.status === '訂單取消' || stageIndex.get(order.id)?.lifecycle_status === '訂單取消' ? (
@@ -2078,10 +2084,6 @@ export const OrdersPage: React.FC = () => {
                   >
                     查看取消與受控重開
                   </button>
-                </div>
-              ) : false && isOrderIntakeIncomplete(order) ? (
-                <div className="order-card-actions" role="status">
-                  案件仍待補齊姓名、服務日期等進件資料；完成補件後即可操作契約、媒合、排班與取消流程。
                 </div>
               ) : (
               <div className="order-card-actions">
