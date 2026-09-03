@@ -1,0 +1,94 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { OrderCandidateContactStatusPanel } from '../components/OrderCandidateContactStatusPanel';
+
+const mocks = vi.hoisted(() => ({
+  query: vi.fn(),
+  sendInformation: vi.fn(),
+  recordWillingness: vi.fn(),
+  addCandidates: vi.fn(),
+}));
+
+vi.mock('../api/scheduling/candidate_contact_pool_client', () => ({
+  candidateContactPoolClient: {
+    query: mocks.query,
+    sendInformation: mocks.sendInformation,
+    recordWillingness: mocks.recordWillingness,
+    addCandidates: mocks.addCandidates,
+  },
+}));
+
+function pool() {
+  return {
+    pool_id: 9,
+    case_no: 'CASE-CONTACT',
+    candidates: [
+      {
+        id: 17,
+        staff_id: 8892,
+        service_start_date: '2026-09-01',
+        service_end_date: '2026-09-05',
+        status: 'active',
+        created_at: '2026-09-03T00:00:00Z',
+        staff_name: '月嫂甲',
+        willingness: 'willing',
+        reason: null,
+        information: {
+          '1': { status: 'sent', sent_at: '2026-09-03T00:05:00Z' },
+          '2': { status: 'retryable_failed', sent_at: '2026-09-03T00:06:00Z' },
+        },
+      },
+      {
+        id: 18,
+        staff_id: 8893,
+        service_start_date: '2026-09-01',
+        service_end_date: '2026-09-05',
+        status: 'selected',
+        created_at: '2026-09-03T00:01:00Z',
+        staff_name: '月嫂乙',
+        willingness: 'unwilling',
+        reason: '日期不合',
+        information: { '1': null, '2': null },
+      },
+    ],
+  };
+}
+
+describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
+  beforeEach(() => {
+    Object.values(mocks).forEach((mock) => mock.mockReset());
+  });
+
+  it('只讀既有候選池 owner facts，原樣顯示聯絡、回覆與意願狀態，不觸發 mutation', async () => {
+    mocks.query.mockResolvedValue(pool());
+    render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '讀取候選聯絡狀態' }));
+
+    await waitFor(() => expect(mocks.query).toHaveBeenCalledWith('CASE-CONTACT'));
+    expect(await screen.findByText('月嫂甲 · 月嫂 #8892')).toBeInTheDocument();
+    expect(screen.getByText('候選狀態：active')).toBeInTheDocument();
+    expect(screen.getByText('回覆／意願：willing')).toBeInTheDocument();
+    expect(screen.getByText('聯絡資訊 1：sent · 2026-09-03T00:05:00Z')).toBeInTheDocument();
+    expect(screen.getByText('聯絡資訊 2：retryable_failed · 2026-09-03T00:06:00Z')).toBeInTheDocument();
+    expect(screen.getByText('月嫂乙 · 月嫂 #8893')).toBeInTheDocument();
+    expect(screen.getByText('回覆／意願：unwilling')).toBeInTheDocument();
+    expect(screen.getByText('回覆原因：日期不合')).toBeInTheDocument();
+    expect(screen.getAllByText(/聯絡資訊 [12]：尚無紀錄/)).toHaveLength(2);
+    expect(mocks.sendInformation).not.toHaveBeenCalled();
+    expect(mocks.recordWillingness).not.toHaveBeenCalled();
+    expect(mocks.addCandidates).not.toHaveBeenCalled();
+  });
+
+  it('owner query 不可用時顯示阻塞，不用其他來源猜測狀態', async () => {
+    mocks.query.mockRejectedValue(new Error('candidate pool unavailable'));
+    render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '讀取候選聯絡狀態' }));
+
+    expect(await screen.findByText('candidate pool unavailable')).toBeInTheDocument();
+    expect(screen.getByText('候選聯絡狀態不可用')).toBeInTheDocument();
+    expect(mocks.sendInformation).not.toHaveBeenCalled();
+    expect(mocks.recordWillingness).not.toHaveBeenCalled();
+  });
+});
