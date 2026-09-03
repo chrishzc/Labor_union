@@ -269,8 +269,110 @@ def test_idempotent_replay_is_safe_and_different_payload_with_same_key_is_reject
         )
 
 
+def test_completion_preview_lists_every_missing_field_and_protection_blocker():
+    repository = _Repository(
+        start_date=None,
+        service_days=None,
+        client_name=None,
+    )
+    repository.case = replace(repository.case, service_data_locked=True)
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+
+    preview = application.preview_completion(_CASE)
+
+    assert preview.missing_fields == ("client_name", "start_date", "service_days")
+    assert preview.apply_allowed is False
+    assert preview.current_status is OrderLifecycleStatus.PENDING_COMPLETION
+    assert preview.target_status is OrderLifecycleStatus.DISCUSSION
+    assert "order_intake_completion_service_data_locked" in preview.blockers
+
+
+def test_completion_apply_restores_fully_repaired_order_to_discussion_with_version_and_audit():
+    repository = _Repository(
+        start_date=_START,
+        service_days=_DAYS,
+        client_name="王小明",
+    )
+    unit_of_work = _UnitOfWorkFactory()
+    application = OrderIntakeTermsBootstrapApplication(repository, unit_of_work)
+
+    preview = application.preview_completion(_CASE)
+    assert preview.missing_fields == ()
+    assert preview.blockers == ()
+    assert preview.apply_allowed is True
+
+    receipt = application.apply_completion(
+        _CASE,
+        preview.lifecycle_version,
+        preview.preview_fingerprint,
+        "issue-153:complete",
+        "orders-operator",
+        "all intake blockers repaired",
+    )
+
+    assert receipt.lifecycle_version == 8
+    assert receipt.status is OrderLifecycleStatus.DISCUSSION
+    assert receipt.replayed is False
+    assert repository.completion_calls == [(_CASE, 7)]
+    assert repository.case.status is OrderLifecycleStatus.DISCUSSION
+    assert unit_of_work.commits == 1
+    stored = repository.receipts[("orders_intake_completion/v1", "issue-153:complete")]
+    assert stored["actor"] == "orders-operator"
+    assert stored["reason"] == "all intake blockers repaired"
+    assert stored["preview_fingerprint"] == preview.preview_fingerprint
+
+
+def test_completion_rechecks_version_and_fingerprint_before_status_change():
+    repository = _Repository(
+        start_date=_START,
+        service_days=_DAYS,
+        client_name="王小明",
+    )
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    preview = application.preview_completion(_CASE)
+    repository.case = replace(repository.case, lifecycle_version=8)
+
+    with pytest.raises(OrderIntakeTermsBootstrapError, match="order_intake_completion_stale_preview"):
+        application.apply_completion(
+            _CASE,
+            preview.lifecycle_version,
+            preview.preview_fingerprint,
+            "issue-153:stale",
+            "orders-operator",
+            "stale completion",
+        )
+
+    assert repository.completion_calls == []
+
+
+def test_completion_idempotent_replay_is_safe():
+    repository = _Repository(
+        start_date=_START,
+        service_days=_DAYS,
+        client_name="王小明",
+    )
+    application = OrderIntakeTermsBootstrapApplication(repository, _UnitOfWorkFactory())
+    preview = application.preview_completion(_CASE)
+    arguments = (
+        _CASE,
+        preview.lifecycle_version,
+        preview.preview_fingerprint,
+        "issue-153:replay",
+        "orders-operator",
+        "finish intake repair",
+    )
+
+    first = application.apply_completion(*arguments)
+    second = application.apply_completion(*arguments)
+
+    assert first.replayed is False
+    assert second.replayed is True
+    assert first.lifecycle_version == second.lifecycle_version == 8
+    assert repository.completion_calls == [(_CASE, 7)]
+
+
 class _Repository:
-    def __init__(self, *, start_date, service_days):
+    def __init__(self, *, start_date, service_days, client_name="王小明"):
         self.case = OrderIntakeTermsBootstrapFacts(
             case_no=_CASE,
             status=OrderLifecycleStatus.PENDING_COMPLETION,
@@ -283,11 +385,13 @@ class _Repository:
             payroll_present=False,
             scheduling_present=False,
             scheduling_pristine=True,
+            client_name=client_name,
         )
         self.receipts = {}
         self.load_calls = []
         self.for_update_calls = []
         self.update_calls = []
+        self.completion_calls = []
 
     def load_case(self, case_no, *, for_update):
         self.load_calls.append((case_no, for_update))
@@ -321,6 +425,17 @@ class _Repository:
             lifecycle_version=expected_lifecycle_version + 1,
             start_date=start_date if fill_start_date else self.case.start_date,
             service_days=service_days if fill_service_days else self.case.service_days,
+        )
+        return self.case.lifecycle_version
+
+    def complete_intake(self, case_no, expected_lifecycle_version):
+        self.completion_calls.append((case_no, expected_lifecycle_version))
+        assert self.case.lifecycle_version == expected_lifecycle_version
+        assert self.case.status is OrderLifecycleStatus.PENDING_COMPLETION
+        self.case = replace(
+            self.case,
+            lifecycle_version=expected_lifecycle_version + 1,
+            status=OrderLifecycleStatus.DISCUSSION,
         )
         return self.case.lifecycle_version
 
