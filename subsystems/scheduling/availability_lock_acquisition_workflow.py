@@ -239,9 +239,14 @@ def _occupancy_conflicts(cursor: Any, snapshot: dict[str, Any]) -> list[dict[str
     fixed_staff_params = _fixed_staff_params(staff_ids)
     conflicts: list[dict[str, Any]] = []
     cursor.execute(
-        "SELECT id AS source_id, staff_id, assigned_start_date, assigned_end_date "
-        "FROM case_staff_assignments WHERE staff_id IN (" + staff_placeholders + ") "
-        "AND status <> 'cancelled' FOR UPDATE",
+        "SELECT assignment.id AS source_id, assignment.staff_id, "
+        "assignment.assigned_start_date, assignment.assigned_end_date "
+        "FROM case_staff_assignments assignment WHERE assignment.staff_id IN (" + staff_placeholders + ") "
+        "AND assignment.status <> 'cancelled' "
+        "AND NOT (assignment.generation_id IS NULL AND EXISTS ("
+        "SELECT 1 FROM order_lifecycle_state_events restart "
+        "WHERE restart.case_no=assignment.case_no "
+        "AND restart.trigger_event='orders_historical_precision_restart')) FOR UPDATE",
         staff_ids,
     )
     for row in _rows(cursor, "invalid assignment occupancy row"):

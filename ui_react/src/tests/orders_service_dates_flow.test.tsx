@@ -819,4 +819,70 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       service_mode: '週休1日',
     }));
   });
+
+  it('歷史訂單重啟已成功但伺服器狀態重讀失敗時不得重複 Apply', async () => {
+    const historicalPage = {
+      items: [{
+        case_no: 'ORD-HISTORY-REFRESH-FAIL',
+        client_name: '歷史測試客戶',
+        order_status: '歷史訂單－未服務',
+        staff_name: '月嫂甲',
+        identity_status: null,
+        start_date: '2026-09-01',
+        end_date: null,
+        actual_start_date: null,
+        actual_end_date: null,
+        service_days: 3,
+        total_employer_self_pay_payable: 0,
+      }],
+      next_cursor: null,
+      etag: 'e'.repeat(64),
+    };
+    vi.spyOn(ordersQueryClient, 'getOrderSummaries')
+      .mockResolvedValueOnce(historicalPage)
+      .mockRejectedValue(new Error('重啟後摘要讀取失敗'));
+    vi.spyOn(historicalServiceAccountingClient, 'queryPrecisionRestart').mockResolvedValue({
+      case_no: 'ORD-HISTORY-REFRESH-FAIL', lifecycle_status: '歷史訂單－未服務',
+      order_version: 1, scheduling_version: 1, client_finance_version: 1,
+      payroll_version: 1, historical_day_revision: 0,
+      confirmed_service_date_version: null,
+      planned_start_date: '2026-09-01', actual_start_date: null,
+      contracted_service_days: 3,
+      assignments: [{ assignment_identity: 'assignment:1', staff_id: 3, staff_name: '月嫂甲' }],
+      blockers: [],
+    });
+    vi.spyOn(historicalServiceAccountingClient, 'previewPrecisionRestart').mockResolvedValue({
+      case_no: 'ORD-HISTORY-REFRESH-FAIL', lifecycle_status: '歷史訂單－未服務',
+      order_version: 1, scheduling_version: 1, client_finance_version: 1,
+      payroll_version: 1, historical_day_revision: 0,
+      confirmed_service_date_version: null,
+      planned_start_date: '2026-09-01', actual_start_date: null,
+      contracted_service_days: 3,
+      assignments: [{ assignment_identity: 'assignment:1', staff_id: 3, staff_name: '月嫂甲' }],
+      blockers: [], target_status: '訂單成立', actual_end_date: null,
+      official_service_dates: [], client_finance_resulting_version: 1,
+      payroll_resulting_version: 1, preview_fingerprint: 'f'.repeat(64),
+    });
+    const applyRestart = vi.spyOn(historicalServiceAccountingClient, 'applyPrecisionRestart').mockResolvedValue({
+      case_no: 'ORD-HISTORY-REFRESH-FAIL', lifecycle_status: '訂單成立', order_version: 2,
+      scheduling_version: 2, scheduling_generation: 2, client_finance_version: 1,
+      payroll_version: 1, historical_day_revision: 0,
+      preview_fingerprint: 'f'.repeat(64), replayed: false,
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-HISTORY-REFRESH-FAIL');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /實質服務日曆/ }));
+
+    const restartButton = await screen.findByRole('button', { name: '重啟正常流程' });
+    fireEvent.click(restartButton);
+
+    expect(await screen.findByText(/重啟已完成，但最新狀態讀取失敗/)).toHaveTextContent(
+      '重啟後摘要讀取失敗',
+    );
+    expect(restartButton).toBeDisabled();
+    fireEvent.click(restartButton);
+    expect(applyRestart).toHaveBeenCalledTimes(1);
+  });
 });

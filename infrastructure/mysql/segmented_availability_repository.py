@@ -24,7 +24,7 @@ class MySqlSegmentedAvailabilityFactsRepository:
         try:
             cursor = connection.cursor()
             order = self._load_order(cursor, case_no)
-            if not order or order["status"] != "洽談中":
+            if not order or order["status"] not in {"洽談中", "訂單成立"}:
                 return {"order": order}
             return self._load_negotiation_facts(cursor, order)
         finally:
@@ -102,8 +102,13 @@ class MySqlSegmentedAvailabilityFactsRepository:
 
     def _load_assignments(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
         cursor.execute(
-            "SELECT id, staff_id, assigned_start_date, assigned_end_date FROM case_staff_assignments "
-            "WHERE (status IS NULL OR status <> 'cancelled') AND assigned_start_date <= %s AND assigned_end_date >= %s",
+            "SELECT a.id, a.staff_id, a.assigned_start_date, a.assigned_end_date FROM case_staff_assignments a "
+            "WHERE (a.status IS NULL OR a.status <> 'cancelled') "
+            "AND a.assigned_start_date <= %s AND a.assigned_end_date >= %s "
+            "AND NOT (a.generation_id IS NULL AND EXISTS ("
+            "SELECT 1 FROM order_lifecycle_state_events restart "
+            "WHERE restart.case_no=a.case_no "
+            "AND restart.trigger_event='orders_historical_precision_restart'))",
             (window_end, window_start),
         )
         return cursor.fetchall() or []

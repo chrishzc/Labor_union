@@ -39,6 +39,7 @@ layout_status: `custom_current`
 
 Current higher-boundary living schema／release baselines remain at their path-sensitive flat roots:
 
+- integration_root: `tests/global/`
 - integration_root: `tests/test_contract_external_signing_schema_contract.py`
 - integration_root: `tests/test_historical_baseline_projector_schema_contract.py`
 - integration_root: `tests/test_historical_baseline_projector_v2_schema_contract.py`

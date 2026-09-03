@@ -103,7 +103,7 @@ def search_segmented_caregiver_availability(
     order_row = loaded_facts["order"]
     if not order_row:
         raise ValueError("case not found")
-    if order_row["status"] != "洽談中":
+    if order_row["status"] not in {"洽談中", "訂單成立"}:
         raise ValueError("case is not in negotiation stage")
     if order_row.get("requires_cooking") is None:
         raise ValueError("matching_preference_source_not_ready")

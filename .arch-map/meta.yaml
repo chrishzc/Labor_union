@@ -17,4 +17,10 @@ last_reconciled_scope:
   - government-subsidy/government-subsidy
   - finance-import/finance-import
   - scheduling/scheduling
+  - scheduling/scheduling/staff-monthly-calendar
+  - scheduling/scheduling/matching-coordination
+  - scheduling/scheduling/waiting-deposit-lock
+  - orders/orders/historical-precision-restart
+  - tests/global
+  - tests/scheduling/staff-monthly-calendar
   - payroll/payroll

@@ -7,6 +7,12 @@ fixtures_root: tests/fixtures/
 modules:
   matching-coordination:
     test_root: tests/domains/scheduling/subsystems/scheduling/modules/matching-coordination/
+  staff-monthly-calendar:
+    test_root: tests/domains/scheduling/subsystems/scheduling/modules/staff-monthly-calendar/
+    layout_status: custom_current
+    presentation_test_roots:
+      - ui_react/src/tests/staff_monthly_schedule_client.test.ts
+      - ui_react/src/tests/scheduling_current_page.test.tsx
   matching-schedule-confirmation:
     layout_status: custom_current
     test_root: ui_react/src/tests/matching_schedule_confirmation_actions.test.tsx

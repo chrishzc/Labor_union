@@ -1076,8 +1076,8 @@ export const OrdersPage: React.FC = () => {
     if (!matchingOrder || !matchingDetail) return '媒合資料尚未載入，無法建立正式方案。';
     if (matchingDetail.waitingLockAcquired) return '目前方案已取得等待訂金鎖，不能重新建立媒合方案。';
     if (matchingDetail.status === '已接受') return '目前方案已由客戶接受，不能重新建立媒合方案。';
-    if (matchingOrder.orderStatus !== '洽談中') {
-      return `目前訂單狀態為「${matchingOrder.orderStatus}」，僅洽談中案件可建立正式媒合方案。`;
+    if (!['洽談中', '訂單成立'].includes(matchingOrder.orderStatus)) {
+      return `目前訂單狀態為「${matchingOrder.orderStatus}」，此狀態不可建立正式媒合方案。`;
     }
     return null;
   };
@@ -1090,7 +1090,7 @@ export const OrdersPage: React.FC = () => {
     if (matchingDetail.status === '已接受') {
       return '客戶已接受正式媒合方案；候選聯繫紀錄改為唯讀，請依定金與簽約流程繼續。';
     }
-    if (matchingOrder.orderStatus !== '洽談中') {
+    if (!['洽談中', '訂單成立'].includes(matchingOrder.orderStatus)) {
       return `目前訂單狀態為「${matchingOrder.orderStatus}」；候選聯繫紀錄已改為唯讀。`;
     }
     return null;
@@ -1651,11 +1651,6 @@ export const OrdersPage: React.FC = () => {
       if (receipt.lifecycle_status !== '訂單成立') {
         throw new Error('重啟後狀態不是正常「訂單成立」，已停止載入後續流程。');
       }
-      const normalOrder = { ...order, orderStatus: '訂單成立' as const };
-      setContractOrder((current) => current?.id === order.id ? normalOrder : current);
-      setDateConfirmOrder((current) => current?.id === order.id ? normalOrder : current);
-      setCancelOrder((current) => current?.id === order.id ? normalOrder : current);
-      setReopenOrder((current) => current?.id === order.id ? normalOrder : current);
       setNormalFlowRestartedCaseNo(order.id);
       setHistoricalRestartStatus('completed');
       setHistoricalRestartMessage(
@@ -1663,9 +1658,27 @@ export const OrdersPage: React.FC = () => {
           ? '此案件已回到正常流程，已讀取原收據。'
           : '已回到正常「訂單成立」；請依下方原流程重新精算並確認正式服務日期。',
       );
-      await fetchOrderSummaries();
-      loadCardProjection(order.id);
-      await loadCalendarTabQueries(normalOrder, true);
+      try {
+        const refreshedRaw = await loadAllOrderSummaries(
+          ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
+          { page_size: 200, lifecycle_scope: 'all', query_text: order.id },
+        );
+        const refreshedOrder = adaptOrderSummaryPage(refreshedRaw).items.find((item) => item.id === order.id);
+        if (!refreshedOrder || refreshedOrder.orderStatus !== '訂單成立') {
+          throw new Error('伺服器尚未回傳重啟後的「訂單成立」狀態。');
+        }
+        setContractOrder((current) => current?.id === order.id ? refreshedOrder : current);
+        setDateConfirmOrder((current) => current?.id === order.id ? refreshedOrder : current);
+        setCancelOrder((current) => current?.id === order.id ? refreshedOrder : current);
+        setReopenOrder((current) => current?.id === order.id ? refreshedOrder : current);
+        await fetchOrderSummaries();
+        loadCardProjection(order.id);
+        await loadCalendarTabQueries(refreshedOrder, true);
+      } catch (refreshError) {
+        setHistoricalRestartMessage(
+          `重啟已完成，但最新狀態讀取失敗：${refreshError instanceof Error ? refreshError.message : '請重新整理後繼續。'}`,
+        );
+      }
     } catch (restartError) {
       setHistoricalRestartStatus('idle');
       setHistoricalRestartMessage(
@@ -2069,7 +2082,7 @@ export const OrdersPage: React.FC = () => {
                 </div>}
               </div>
 
-              {order.orderStatus === '訂單取消' || order.status === '訂單取消' || stageIndex.get(order.id)?.lifecycle_status === '訂單取消' ? (
+              {order.orderStatus === '訂單取消' || stageIndex.get(order.id)?.lifecycle_status === '訂單取消' ? (
                 <div className="order-card-actions">
                   <button
                     className="btn-secondary-action"
@@ -3301,7 +3314,7 @@ export const OrdersPage: React.FC = () => {
                       type="button"
                       data-control-id="orders.historical.restart-normal-flow"
                       className="btn-primary-action"
-                      disabled={historicalRestartStatus === 'applying'}
+                      disabled={historicalRestartStatus !== 'idle'}
                       onClick={() => void restartHistoricalOrderIntoNormalFlow()}
                     >
                       {historicalRestartStatus === 'applying' ? '正在重啟正常流程…' : '重啟正常流程'}
@@ -3970,7 +3983,7 @@ export const OrdersPage: React.FC = () => {
                       data-control-id="orders.cancellation.apply"
                       className="btn-primary-action"
                       style={{ backgroundColor: '#9f1239', borderColor: '#9f1239', width: '100%', padding: '10px' }}
-                      disabled={!cancellationPreview || cancellationLifecycleBlocked || !cancellationReason.trim() || !cancellationConfirmed || cancellationStatus !== 'idle' || (cancellationServiceFactsAvailable && cancellationDays.length >= cancellationQuery.contracted_service_days)}
+                      disabled={!cancellationPreview || cancellationLifecycleBlocked || !cancellationReason.trim() || !cancellationConfirmed || cancellationStatus !== 'idle' || (cancellationServiceFactsAvailable && cancellationDays.length >= (cancellationQuery?.contracted_service_days ?? Number.POSITIVE_INFINITY))}
                       onClick={() => void applyCancellation()}
                     >
                       {cancellationStatus === 'applying'
