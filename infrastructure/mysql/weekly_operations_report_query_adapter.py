@@ -138,7 +138,7 @@ SELECT c.id AS client_id,c.case_no,c.created_at AS application_created_at,
        o.start_date AS planned_start_date,o.end_date AS planned_end_date
 FROM clients c
 LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no
-WHERE (c.created_at >= %s AND c.created_at < %s) OR c.created_at IS NULL
+WHERE c.created_at >= %s AND c.created_at < %s
 ORDER BY c.created_at,c.id
 """
 
