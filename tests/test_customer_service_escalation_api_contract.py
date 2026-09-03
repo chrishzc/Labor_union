@@ -166,7 +166,7 @@ def test_escalation_commands_are_closed_and_require_identity() -> None:
         trigger_code="complaint",
         trigger_policy_version="complaint.v1",
         ticket_category="other",
-        masked_context={
+        context={
             "summary_code": "complaint_explicit",
             "policy_version": "complaint.v1",
             "category": "other",
@@ -176,7 +176,7 @@ def test_escalation_commands_are_closed_and_require_identity() -> None:
         idempotency_key="m4-create-1",
         correlation_id="m4-correlation-1",
     )
-    assert create.masked_context["summary_code"] == "complaint_explicit"
+    assert create.context["summary_code"] == "complaint_explicit"
     with pytest.raises(ValueError):
         HumanEscalationCreateApplyRequest(
             source_event_identity="line-event:m4",
@@ -185,7 +185,7 @@ def test_escalation_commands_are_closed_and_require_identity() -> None:
             trigger_code="complaint",
             trigger_policy_version="complaint.v1",
             ticket_category="other",
-            masked_context={"raw_message": "不要穿透"},
+            context={"raw_message": "不要穿透"},
             hold_scope="line:conversation:m4",
             idempotency_key="m4-create-2",
             correlation_id="m4-correlation-2",
@@ -255,7 +255,7 @@ def test_escalation_view_projection_is_masked() -> None:
         ("claim",),
     )
     projected = customer_service._escalation_view_response(view)
-    assert set(projected.masked_context) == {
+    assert set(projected.context) == {
         "summary_code",
         "policy_version",
         "category",

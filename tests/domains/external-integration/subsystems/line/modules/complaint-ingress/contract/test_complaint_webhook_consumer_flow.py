@@ -104,7 +104,7 @@ class _Escalations:
             "hold_version": 0,
         }
 
-    def enqueue_masked_alert(self, intent):
+    def enqueue_alert(self, intent):
         self.alerts.append(intent)
 
     def append_event(self, escalation_id, event_type, **values):
@@ -229,7 +229,7 @@ def test_complaint_claimed_inbox_reaches_high_masked_escalation_in_one_business_
     command = state.escalations.commands[0]
     assert command.trigger_code is TriggerCode.COMPLAINT
     assert command.trigger_policy_version == "complaint.v1"
-    assert command.masked_context.as_dict() == {
+    assert command.context.as_dict() == {
         "summary_code": "complaint_explicit",
         "policy_version": "complaint.v1",
         "category": "other",

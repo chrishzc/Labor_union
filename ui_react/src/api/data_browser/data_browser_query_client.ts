@@ -1,14 +1,14 @@
 /**
  * File: data_browser_query_client.ts
- * Description: 查詢單一 allowlisted masked Data Browser source，並合併完全相同的無signal in-flight GET。
+ * Description: 查詢單一 allowlisted canonical Data Browser source，並合併完全相同的無signal in-flight GET。
  */
 import { sessionClient } from '../auth/session_client';
 import { transport, type RequestOptions } from '../shared/transport';
 import { ApiDecodeError } from '../shared/typed_errors';
 import {
-  DataBrowserMaskedPageEnvelopeSchema,
+  DataBrowserPageEnvelopeSchema,
   DataBrowserSourceIdSchema,
-  type DataBrowserMaskedPage,
+  type DataBrowserPage,
   type DataBrowserSourceId,
 } from './data_browser_query_schemas';
 import {
@@ -29,10 +29,10 @@ export interface DataBrowserQueryClient {
   querySource(
     params: DataBrowserQueryParams,
     options?: DataBrowserQueryOptions
-  ): Promise<DataBrowserMaskedPage>;
+  ): Promise<DataBrowserPage>;
 }
 
-const inFlightQueries = new Map<string, Promise<DataBrowserMaskedPage>>();
+const inFlightQueries = new Map<string, Promise<DataBrowserPage>>();
 
 function optionsWithSession(options?: DataBrowserQueryOptions): RequestOptions {
   const headers = { ...(options?.headers ?? {}) };
@@ -87,8 +87,8 @@ function coalescingKey(endpoint: string, options: RequestOptions): string | null
 function executeCoalesced(
   endpoint: string,
   options: RequestOptions,
-  execute: () => Promise<DataBrowserMaskedPage>
-): Promise<DataBrowserMaskedPage> {
+  execute: () => Promise<DataBrowserPage>
+): Promise<DataBrowserPage> {
   const key = coalescingKey(endpoint, options);
   if (key === null) return execute();
   const existing = inFlightQueries.get(key);
@@ -105,7 +105,7 @@ function executeCoalesced(
 export async function queryDataBrowserSource(
   params: DataBrowserQueryParams,
   options?: DataBrowserQueryOptions
-): Promise<DataBrowserMaskedPage> {
+): Promise<DataBrowserPage> {
   try {
     validateParams(params);
     const endpoint = `/api/v1/admin/data-browser/sources/${encodeURIComponent(params.sourceId)}`;
@@ -119,7 +119,7 @@ export async function queryDataBrowserSource(
     };
     return await executeCoalesced(endpoint, requestOptions, async () => {
       const raw = await transport.get<unknown>(endpoint, requestOptions);
-      const decoded = DataBrowserMaskedPageEnvelopeSchema.safeParse(raw);
+      const decoded = DataBrowserPageEnvelopeSchema.safeParse(raw);
       if (!decoded.success) {
         throw new ApiDecodeError(
           'Data Browser 回應結構不符 strict contract',

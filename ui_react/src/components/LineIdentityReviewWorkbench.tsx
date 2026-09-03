@@ -200,7 +200,7 @@ function ReviewQueuePanel(props: ReviewQueuePanelProps) {
               <tr key={item.requestId}>
                 <td>#{item.requestId}</td><td>{item.reviewTypeLabel}</td>
                 <td>{item.displayName}<br /><small>{item.subjectTypeLabel}｜{item.subjectReference ?? '尚未連結'}</small></td>
-                <td><code>{item.maskedLineUserId}</code></td><td>{item.statusLabel}</td>
+                <td><code>{item.lineUserId}</code></td><td>{item.statusLabel}</td>
                 <td><button type="button" aria-label={`查看審核 #${item.requestId}`} onClick={() => props.onOpenDetail(item.requestId)}>查看審核明細</button></td>
               </tr>
             ))}</tbody>
@@ -243,7 +243,7 @@ function ReviewDetailPanel(props: ReviewDetailPanelProps) {
   return (
     <div className="line-action-panel" aria-label="LINE 身分審核明細">
       <h4>審核 #{detail.value.requestId}｜{detail.value.reviewTypeLabel}</h4>
-      <p>{detail.value.displayName}｜{detail.value.subjectTypeLabel}｜<code>{detail.value.maskedLineUserId}</code></p>
+      <p>{detail.value.displayName}｜{detail.value.subjectTypeLabel}｜<code>{detail.value.lineUserId}</code></p>
       <p>目前狀態：<strong>{detail.value.statusLabel}</strong></p>
       {detail.value.status !== 'pending' ? (
         <div className="line-scope-note" role="status">此審核已是 {detail.value.statusLabel}，不可再提交決定；可保留明細作為最新審核結果。</div>
@@ -262,7 +262,7 @@ function ReviewDetailPanel(props: ReviewDetailPanelProps) {
         <div className="line-preview-result">
           <h4>預覽：{preview.decisionLabel}</h4>
           <p>{preview.beforeStatusLabel} → {preview.afterStatusLabel}</p>
-          <p>{preview.subjectTypeLabel}｜{preview.subjectReference ?? '尚未連結'}｜<code>{preview.maskedLineUserId}</code></p>
+          <p>{preview.subjectTypeLabel}｜{preview.subjectReference ?? '尚未連結'}｜<code>{preview.lineUserId}</code></p>
           <label><input type="checkbox" checked={props.confirmed} onChange={(event) => props.onConfirm(event.target.checked)} />我已確認審核對象與決定</label>
           {!receipt && <button type="button" disabled={!props.confirmed || props.mutationStatus === 'loading'} onClick={props.onApply}>提交審核決定</button>}
         </div>

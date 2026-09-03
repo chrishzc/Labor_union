@@ -19,7 +19,7 @@ class ImportWarningTaskView(_StrictModel):
     owning_lane: str
     logical_code: str
     field_path: str
-    masked_subject: str
+    subject: str
     issue_codes: list[str]
     tracking_status: ImportWarningTrackingStatus
     tracking_version: int = Field(ge=1)
@@ -70,7 +70,7 @@ class WarningReferralView(_StrictModel):
     owning_lane: Literal["hcm"]
     logical_code: str
     field_path: str
-    masked_subject: str
+    subject: str
     display_message: str = Field(min_length=1, max_length=200)
     navigation_action: Literal["hcm_import_center"]
     action_kind: Literal["owner_preview_apply", "wait_for_counterpart"]

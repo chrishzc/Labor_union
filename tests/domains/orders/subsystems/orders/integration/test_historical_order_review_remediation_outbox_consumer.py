@@ -15,7 +15,7 @@ def _review(identity: str = "prior-review", *, issues=None) -> dict[str, object]
         "review_identity": identity,
         "source_event_identity": f"source:{identity}",
         "source_fingerprint": "a" * 64,
-        "masked_case_identity": "CA****01",
+        "case_identity": "CA****01",
         "issue_codes": issues if issues is not None else ["staff_missing"],
         "evidence_snapshot": {"evidence": ["phone-log:1"]},
     }
@@ -84,7 +84,7 @@ def test_successor_validation_uses_immutable_review_identity_and_masks_source() 
     successor = _review("successor-review")
 
     consumer._validate_successor(disposition, replacement, successor, _review())
-    assert successor["masked_case_identity"] == "CA****01"
+    assert successor["case_identity"] == "CA****01"
     assert "RAW" not in str(successor)
 
 

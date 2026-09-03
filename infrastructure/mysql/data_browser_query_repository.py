@@ -1,6 +1,6 @@
 """
 File: data_browser_query_repository.py
-Description: 查詢六個 allowlisted source 並在 repository 邊界產生 masked rows。
+Description: 查詢六個 allowlisted source 並在 repository 邊界產生 canonical rows。
 """
 
 from __future__ import annotations
@@ -28,12 +28,11 @@ Presentation = Literal[
     "integer",
     "decimal",
     "status",
-    "masked",
 ]
 
 
 @dataclass(frozen=True, slots=True)
-class MaskedCell:
+class DataBrowserCell:
     field_id: str
     label: str
     value: str | int | bool | float | None
@@ -41,21 +40,21 @@ class MaskedCell:
 
 
 @dataclass(frozen=True, slots=True)
-class MaskedRow:
+class DataBrowserRow:
     source_id: SourceId
     row_identity: str
     display_title: str
-    summary_cells: tuple[MaskedCell, ...]
-    detail_cells: tuple[MaskedCell, ...]
+    summary_cells: tuple[DataBrowserCell, ...]
+    detail_cells: tuple[DataBrowserCell, ...]
     recorded_at: str | None
     source_actor_label: str | None
     version_identity: str
 
 
 @dataclass(frozen=True, slots=True)
-class MaskedPage:
+class DataBrowserPage:
     source_id: SourceId
-    items: tuple[MaskedRow, ...]
+    items: tuple[DataBrowserRow, ...]
     next_cursor: str | None
 
 
@@ -100,8 +99,8 @@ _SOURCE_SPECS: dict[str, _SourceSpec] = {
     "hcm_review": _SourceSpec(
         "case_import_hcm_review_rows",
         "id",
-        ("id", "review_identity", "masked_case_identity", "issue_codes", "created_at"),
-        ("id", "masked_case_identity"),
+        ("id", "review_identity", "case_identity", "issue_codes", "created_at"),
+        ("id", "case_identity"),
         True,
     ),
     "bank_facts": _SourceSpec(
@@ -132,14 +131,14 @@ class DataBrowserQueryRepository:
     def __init__(self, connection) -> None:
         self._connection = connection
 
-    def query_masked_page(
+    def query_page(
         self,
         source_id: str,
         *,
         limit: int,
         after: str | None,
         query: str | None,
-    ) -> MaskedPage:
+    ) -> DataBrowserPage:
         spec = _SOURCE_SPECS.get(source_id)
         if spec is None:
             raise DataBrowserSourceNotFound("source_not_found")
@@ -168,9 +167,9 @@ class DataBrowserQueryRepository:
             cursor.execute(sql, tuple(params))
             rows = tuple(cursor.fetchall())
         visible = rows[:limit]
-        items = tuple(_masked_row(source_id, row) for row in visible)
+        items = tuple(_data_browser_row(source_id, row) for row in visible)
         next_cursor = items[-1].row_identity if len(rows) > limit and items else None
-        return MaskedPage(source_id, items, next_cursor)
+        return DataBrowserPage(source_id, items, next_cursor)
 
 
 def canonical_source_ids() -> tuple[str, ...]:
@@ -201,7 +200,7 @@ def _query_value(query: str | None) -> str | None:
     return value
 
 
-def _masked_row(source_id: str, row: dict[str, object]) -> MaskedRow:
+def _data_browser_row(source_id: str, row: dict[str, object]) -> DataBrowserRow:
     builders = {
         "orders": _orders_row,
         "clients": _clients_row,
@@ -226,9 +225,9 @@ def _orders_row(row):
 
 def _clients_row(row):
     identity = _positive_identity(row.get("id"))
-    name = _mask_name(row.get("name"))
+    name = _canonical_name(row.get("name"))
     cells = (
-        _cell("name", "客戶姓名", name, "masked"),
+        _cell("name", "客戶姓名", name, "text"),
         _cell("city", "縣市", row.get("city"), "text"),
         _cell("identity_status", "身分資格", row.get("identity_status"), "status"),
         _cell("updated_at", "更新時間", row.get("db_updated_at"), "datetime"),
@@ -238,9 +237,9 @@ def _clients_row(row):
 
 def _staff_row(row):
     identity = _positive_identity(row.get("id"))
-    name = _mask_name(row.get("name"))
+    name = _canonical_name(row.get("name"))
     cells = (
-        _cell("name", "服務人員姓名", name, "masked"),
+        _cell("name", "服務人員姓名", name, "text"),
         _cell("city", "縣市", row.get("city"), "text"),
         _cell("status", "主檔狀態", row.get("status"), "status"),
         _cell("updated_at", "更新時間", row.get("updated_at"), "datetime"),
@@ -251,10 +250,10 @@ def _staff_row(row):
 def _beclass_row(row):
     identity = _positive_identity(row.get("id"))
     query_no = _safe_text(row.get("query_no"))
-    name = _mask_name(row.get("name"))
+    name = _canonical_name(row.get("name"))
     cells = (
         _cell("query_no", "查詢序號", query_no, "text"),
-        _cell("name", "報名者", name, "masked"),
+        _cell("name", "報名者", name, "text"),
         _cell("received_at", "報名時間", row.get("created_at"), "datetime"),
         _cell("updated_at", "更新時間", row.get("db_updated_at"), "datetime"),
     )
@@ -264,31 +263,30 @@ def _beclass_row(row):
 
 def _hcm_row(row):
     identity = _positive_identity(row.get("id"))
-    masked_case = _required_text(row.get("masked_case_identity"), "masked_case_identity_invalid")
+    case_identity = _required_text(row.get("case_identity"), "case_identity_identity_invalid")
     cells = (
-        _cell("masked_case_identity", "遮罩案件", masked_case, "masked"),
+        _cell("case_identity", "案件識別", case_identity, "text"),
         _cell("issue_codes", "問題代碼", _issue_code_text(row.get("issue_codes")), "text"),
         _cell("created_at", "建立時間", row.get("created_at"), "datetime"),
     )
-    return _row("hcm_review", identity, f"HCM review {masked_case}", cells, cells, row.get("created_at"))
+    return _row("hcm_review", identity, f"HCM review {case_identity}", cells, cells, row.get("created_at"))
 
 
 def _bank_row(row):
     identity = _positive_identity(row.get("id"))
-    amount_present = row.get("credit") is not None or row.get("debit") is not None
     cells = (
         _cell("transaction_date", "交易日期", row.get("transaction_date"), "date"),
         _cell("direction", "流向", row.get("direction"), "status"),
         _cell("classification_type", "分類", row.get("classification_type"), "status"),
         _cell("reconciliation_status", "核銷狀態", row.get("reconciliation_status"), "status"),
-        _cell("amount", "金額", "NT$ ****" if amount_present else None, "masked"),
+        _cell("credit", "Credit", row.get("credit"), "decimal"),
+        _cell("debit", "Debit", row.get("debit"), "decimal"),
         _cell("created_at", "建立時間", row.get("created_at"), "datetime"),
     )
     return _row("bank_facts", identity, f"銀行根事實 #{identity}", cells[:4], cells, row.get("created_at"))
 
-
 def _cell(field_id, label, value, presentation):
-    return MaskedCell(field_id, label, _scalar(value), presentation)
+    return DataBrowserCell(field_id, label, _scalar(value), presentation)
 
 
 def _row(source_id, identity, title, summary, detail, recorded_at):
@@ -301,7 +299,7 @@ def _row(source_id, identity, title, summary, detail, recorded_at):
     digest = hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    return MaskedRow(
+    return DataBrowserRow(
         source_id,
         identity,
         title,
@@ -333,12 +331,9 @@ def _safe_text(value) -> str | None:
     return text[:191] if text else None
 
 
-def _mask_name(value) -> str:
+def _canonical_name(value) -> str:
     text = _safe_text(value)
-    if not text:
-        return "未提供"
-    return text[0] + "○" * max(1, len(text) - 1)
-
+    return text or "未提供"
 
 def _issue_code_text(value) -> str | None:
     parsed = json.loads(value) if isinstance(value, str) else value
@@ -360,7 +355,7 @@ def _scalar(value):
         return float(value)
     if isinstance(value, (date, datetime, time)):
         return value.isoformat()
-    raise ValueError("masked_cell_value_invalid")
+    raise ValueError("data_browser_cell_value_invalid")
 
 
 def _datetime_text(value) -> str | None:

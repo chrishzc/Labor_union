@@ -1,5 +1,5 @@
 """File: escalation.py
-Description: M4 客服 HIGH escalation、去敏 hold 與閉合狀態規則。
+Description: M4 客服 HIGH escalation、bounded hold 與閉合狀態規則。
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ class HumanEscalationDomainError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
-class MaskedContext:
+class EscalationContext:
     """Closed complaint.v1 payload; raw source text and identity never enter the domain."""
 
     summary_code: str
@@ -102,7 +102,7 @@ class MaskedContext:
         }
 
     @classmethod
-    def from_mapping(cls, value: Mapping[str, object]) -> "MaskedContext":
+    def from_mapping(cls, value: Mapping[str, object]) -> "EscalationContext":
         if not isinstance(value, Mapping):
             raise HumanEscalationDomainError("human_escalation_redaction_failed")
         allowed = {"summary_code", "policy_version", "category", "redaction_version"}
@@ -115,7 +115,7 @@ class MaskedContext:
 
 
 @dataclass(frozen=True, slots=True)
-class MaskedAlertIntent:
+class EscalationAlertIntent:
     escalation_ref: str
     ticket_ref: str
     trigger_code: TriggerCode
@@ -151,7 +151,7 @@ def validate_source_fingerprint(value: str) -> str:
     return value
 
 
-def validate_trigger(trigger: TriggerCode, source_kind: str, policy_version: str, context: MaskedContext) -> None:
+def validate_trigger(trigger: TriggerCode, source_kind: str, policy_version: str, context: EscalationContext) -> None:
     allowed = {
         TriggerCode.EXPLICIT_HUMAN_REQUEST: {"ticket_referral", "line_inbox"},
         TriggerCode.EXPLICIT_WRONG_ANSWER: {"ticket_referral", "line_inbox"},
@@ -175,7 +175,7 @@ def validate_trigger(trigger: TriggerCode, source_kind: str, policy_version: str
 
 def _safe(value: object, name: str, maximum: int) -> None:
     if not isinstance(value, str) or len(value) == 0 or len(value) > maximum or not _SAFE.fullmatch(value):
-        raise HumanEscalationDomainError("human_escalation_redaction_failed", f"{name} 不符合去敏格式")
+        raise HumanEscalationDomainError("human_escalation_redaction_failed", f"{name} 不符合bounded 格式")
 
 
 def _reject_sensitive(*pairs: tuple[str, str]) -> None:
@@ -191,6 +191,6 @@ def _reject_sensitive(*pairs: tuple[str, str]) -> None:
 
 __all__ = [
     "AlertStatus", "AutomationHoldState", "EscalationEventType", "EscalationWorkflowStatus",
-    "HumanEscalationDomainError", "MaskedAlertIntent", "MaskedContext", "TriggerCode",
+    "HumanEscalationDomainError", "EscalationAlertIntent", "EscalationContext", "TriggerCode",
     "evidence_digest", "validate_source_fingerprint", "validate_trigger",
 ]

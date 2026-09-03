@@ -1,6 +1,6 @@
 /**
  * File: line_delivery_query_client.ts
- * Description: 以 fresh Session 查詢 LINE Delivery masked summary、bounded page 與 detail，拒絕 aggregate 漂移。
+ * Description: 以 fresh Session 查詢 LINE Delivery canonical summary、bounded page 與 detail，拒絕 aggregate 漂移。
  */
 import { sessionClient } from '../auth/session_client';
 import { ApiDecodeError } from '../shared/typed_errors';

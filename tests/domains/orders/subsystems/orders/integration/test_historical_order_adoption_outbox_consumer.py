@@ -23,7 +23,7 @@ def test_historical_order_review_event_requires_canonical_receipt_and_review():
         {
             "review_identity": "historical-order-review:one",
             "source_event_identity": "source:one",
-            "masked_case_identity": "AB****89",
+            "case_identity": "AB****89",
             "issue_codes": ["staff_missing", "unknown_status"],
             "evidence_snapshot": {},
         },
@@ -52,7 +52,7 @@ def test_historical_order_review_event_rejects_receipt_binding_mismatch():
             {
                 "review_identity": "review",
                 "source_event_identity": "source",
-                "masked_case_identity": "CA****01",
+                "case_identity": "CA****01",
                 "issue_codes": [],
                 "evidence_snapshot": {},
             },
@@ -83,7 +83,7 @@ def test_historical_order_review_is_visible_in_import_alert_tab():
             "redaction_version": "anomaly-safe.v1",
             "definition_code": "HISTORICAL-ORDER-001",
             "fields": [
-                {"key": "masked_case_identity", "kind": "masked_text", "value": "AB****89"},
+                {"key": "case_identity", "kind": "text", "value": "AB****89"},
                 {"key": "issue_codes", "kind": "code_list", "value": ["staff_missing"]},
             ],
         },

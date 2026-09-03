@@ -34,7 +34,7 @@ class StaffLifecycleView(BaseModel):
     state: Literal["active", "retired"]
     version: int = Field(ge=0)
     effective_at: datetime | None = None
-    masked_reason_code: str | None = None
+    reason_code: str | None = None
 
 
 class StaffLifecyclePreviewView(StaffLifecycleView):

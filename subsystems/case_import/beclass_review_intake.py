@@ -1,6 +1,6 @@
 """
 File: beclass_review_intake.py
-Description: 保存 BeClass invalid-row review，並相容同來源的 privacy evidence升級 replay。
+Description: 保存 BeClass invalid-row review，並相容同來源的 canonical evidence升級 replay。
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def record_invalid_beclass_row(
     source_content_digest: str,
     source_sheet: str,
     source_row: int,
-    masked_identifier: str,
+    identifier: str,
     source_payload: Mapping[str, object],
     issue_codes,
     repository: BeClassImportReviewRepository,
@@ -48,7 +48,7 @@ def record_invalid_beclass_row(
         source_event_identity,
         source_sheet.strip(),
         source_row,
-        masked_identifier.strip(),
+        identifier.strip(),
         canonical_payload,
         canonical_issues,
         fingerprint_source_row(
@@ -56,7 +56,7 @@ def record_invalid_beclass_row(
             source_event_identity,
             source_sheet.strip(),
             source_row,
-            masked_identifier.strip(),
+            identifier.strip(),
             canonical_payload,
             canonical_issues,
         ),
@@ -79,16 +79,14 @@ def _same_source_issue(existing, candidate) -> bool:
         and existing.source_event_identity == candidate.source_event_identity
         and existing.source_sheet == candidate.source_sheet
         and existing.source_row == candidate.source_row
-        and existing.masked_identifier == candidate.masked_identifier
+        and existing.identifier == candidate.identifier
         and existing.issue_codes == candidate.issue_codes
     )
 
 
-def masked_review_identifier(source_kind, stable_identity, fallback) -> str:
+def canonical_review_identifier(source_kind, stable_identity, fallback) -> str:
     raw = str(stable_identity or fallback or "").strip()
-    suffix = raw[-4:] if raw else "none"
-    return f"{source_kind.value}-***-{suffix}"
-
+    return raw if raw else f"{source_kind.value}-unknown"
 
 def fingerprint_workbook(workbook_path: str) -> str:
     return hashlib.sha256(Path(workbook_path).read_bytes()).hexdigest()
@@ -117,4 +115,4 @@ def _canonical_value(value: object) -> object:
     return str(value).strip()
 
 
-__all__ = ["fingerprint_workbook", "masked_review_identifier", "record_invalid_beclass_row"]
+__all__ = ["fingerprint_workbook", "canonical_review_identifier", "record_invalid_beclass_row"]

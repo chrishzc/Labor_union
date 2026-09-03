@@ -168,11 +168,11 @@ def test_mixed_finance_workbook_keeps_valid_row_and_acknowledges_owner_review(tm
             )
             assert cursor.fetchone() == {"count": 1}
             cursor.execute(
-                "SELECT masked_source_identity,issue_codes "
+                "SELECT source_identity,issue_codes "
                 "FROM finance_import_source_reviews"
             )
             stored_review = cursor.fetchone()
-            assert stored_review["masked_source_identity"].startswith("finance-taishin-row-")
+            assert stored_review["source_identity"].startswith("finance-taishin-row-")
             assert "invalid:transaction_amount" in stored_review["issue_codes"]
             assert "0912345678" not in str(stored_review)
             assert "敏感備註" not in str(stored_review)

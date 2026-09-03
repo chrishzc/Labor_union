@@ -1,6 +1,6 @@
 /**
  * File: accounts_payable_query_client.ts
- * Description: 以fresh Session查詢單月Accounts Payable masked preview並驗證aggregate。
+ * Description: 以fresh Session查詢單月Accounts Payable canonical preview並驗證aggregate。
  */
 import { sessionClient } from '../auth/session_client';
 import { transport } from '../shared/transport';

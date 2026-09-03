@@ -97,7 +97,7 @@ class _CustomerServiceRepository:
         return {
             "ticket": {
                 "ticket_id": self.ticket.ticket_id,
-                "line_user_id_masked": "U-te…y-41",
+                "line_user_id": "U-te…y-41",
                 "category": self.ticket.category.value,
                 "status": self.ticket.status.value,
                 "version": self.ticket.version,

@@ -1034,7 +1034,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         trigger_code: escalationTrigger,
         trigger_policy_version: 'ui-react-v1',
         ticket_category: escalationCategory,
-        masked_context: { summary_code: escalationTrigger, policy_version: 'ui-react-v1', category: escalationCategory, redaction_version: 'v1' },
+        context: { summary_code: escalationTrigger, policy_version: 'ui-react-v1', category: escalationCategory, redaction_version: 'v1' },
         hold_scope: escalationHoldScope.trim(),
         correlation_id: correlationId,
         idempotency_key: operationIdentity('line-escalation-create-apply'),
@@ -1187,7 +1187,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           const q = ticketSearchQuery.trim().toLowerCase();
           const matchesQuery = !q ||
             ticket.ticketIdText.toLowerCase().includes(q) ||
-            ticket.maskedLineUserId.toLowerCase().includes(q) ||
+            ticket.lineUserId.toLowerCase().includes(q) ||
             (ticket.caseNo && ticket.caseNo.toLowerCase().includes(q));
 
           const matchesStatus = ticketStatusFilter === 'all' || ticket.status === ticketStatusFilter;
@@ -1315,7 +1315,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       {filteredList.map((ticket) => (
                         <tr key={ticket.ticketId}>
                           <td><strong style={{ fontFamily: 'monospace', color: '#a43c12' }}>#{ticket.ticketIdText}</strong></td>
-                          <td>👤 {ticket.maskedLineUserId}</td>
+                          <td>👤 {ticket.lineUserId}</td>
                           <td>
                             {ticket.caseNo ? (
                               <span style={{ color: '#ff7f50', fontWeight: 600, textDecoration: 'underline' }}>
@@ -1993,7 +1993,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           if (bindingSearchQuery.trim()) {
             const q = bindingSearchQuery.toLowerCase();
             const matchName = item.subjectName.toLowerCase().includes(q);
-            const matchUser = item.maskedLineUserId.toLowerCase().includes(q);
+            const matchUser = item.lineUserId.toLowerCase().includes(q);
             if (!matchName && !matchUser) return false;
           }
           return true;
@@ -2051,7 +2051,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     <input
                       type="text"
                       className="line-search-input"
-                      placeholder="搜尋實名姓名或 Masked LINE ID…"
+                      placeholder="搜尋實名姓名或 LINE ID…"
                       value={bindingSearchQuery}
                       onChange={(e) => { setBindingPageNumber(1); setBindingSearchQuery(e.target.value); }}
                     />
@@ -2103,8 +2103,8 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                         </thead>
                         <tbody>
                           {filteredBindings.map(({ record, lineUserId }, index) => (
-                            <tr key={`${record.maskedLineUserId}-${record.version}-${index}`}>
-                              <td><code>{record.maskedLineUserId}</code></td>
+                            <tr key={`${record.lineUserId}-${record.version}-${index}`}>
+                              <td><code>{record.lineUserId}</code></td>
                               <td><strong>👤 {record.subjectName}</strong></td>
                               <td>
                                 <span className={`line-category-badge category-${record.subjectType === 'staff' ? 'service_progress' : record.subjectType === 'admin' ? 'contact_union' : 'service_flow'}`}>
@@ -2879,7 +2879,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
 
 
 
-      <Drawer isOpen={ticketDetail.status !== 'idle'} onClose={closeTicket} title="客服工單明細" size="wide" footer={<div className="line-drawer-footer"><button type="button" onClick={closeTicket}>關閉</button>{ticketDetail.status === 'error' && ticketDetailId.current !== null && <button type="button" onClick={() => openTicket(ticketDetailId.current!)}>重試查詢</button>}{ticketDetail.status === 'loaded' && ticketDetail.value?.ticket.status !== 'resolved' && customerService.previewResolve && <button type="button" data-control-id="line.ticket.resolve.preview" disabled={ticketResolvePreview.status === 'loading' || ticketResolveStatus === 'loading'} onClick={() => void previewTicketResolve()}>檢查結案影響</button>}{ticketResolvePreview.value?.applyReady && ticketResolvePreview.value.blockers.length === 0 && customerService.applyResolve && <button type="button" data-control-id="line.ticket.resolve.apply" disabled={!ticketResolveConfirmed || ticketResolveStatus === 'loading'} onClick={() => void applyTicketResolve()}>確認結案</button>}</div>}><div data-control-id="line.ticket.detail" className="line-drawer-content"><LoadingOrError state={ticketDetail} loadingText="正在載入工單明細…" />{ticketDetail.status === 'loaded' && ticketDetail.value && <><div className="line-detail-grid"><div><span>客戶</span><strong>{ticketDetail.value.ticket.maskedLineUserId}</strong></div><div><span>案件</span><strong>{ticketDetail.value.ticket.caseNo ?? '無關聯'}</strong></div><div><span>狀態</span><strong>{ticketDetail.value.ticket.statusLabel}</strong></div></div>{ticketDetail.value.ticket.status !== 'resolved' && customerService.previewResolve && <div className="line-action-panel"><label htmlFor="ticket-resolve-note">結案說明</label><textarea id="ticket-resolve-note" value={ticketResolveNote} onChange={(event) => { setTicketResolveNote(event.target.value); setTicketResolvePreview(idleState()); setTicketResolveConfirmed(false); setTicketResolveStatus('idle'); }} rows={3} maxLength={4000} />{ticketResolvePreview.status === 'loading' && <p>正在驗證結案內容…</p>}{ticketResolvePreview.status === 'error' && <div className="line-error" role="alert">{ticketResolvePreview.error}</div>}{ticketResolvePreview.value && <div className="line-preview-result"><strong>{ticketResolvePreview.value.beforeStatusLabel} → {ticketResolvePreview.value.afterStatusLabel}</strong>{ticketResolvePreview.value.blockers.length > 0 ? <ul>{ticketResolvePreview.value.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul> : <label><input type="checkbox" checked={ticketResolveConfirmed} onChange={(event) => setTicketResolveConfirmed(event.target.checked)} />我已確認結案內容與目前工單狀態</label>}</div>}{ticketResolveStatus === 'success' && <div className="line-success" role="status">結案已完成</div>}{ticketResolveStatus === 'error' && <div className="line-error" role="alert">{ticketResolveError}</div>}</div>}<LineCustomerServiceActions detail={ticketDetail.value} onCommitted={(nextDetail) => { setTicketDetail(loadedState(nextDetail)); setTicketReload((value) => value + 1); }} /><div className="line-events"><h4>事件紀錄</h4>{ticketDetail.value.events.length === 0 ? <p>尚無事件紀錄</p> : ticketDetail.value.events.map((event) => <article key={event.id}><strong>{event.eventType}</strong><span>{event.createdAt}</span><p>{event.messageText ?? '無訊息內容'}</p></article>)}</div></>}</div></Drawer>
+      <Drawer isOpen={ticketDetail.status !== 'idle'} onClose={closeTicket} title="客服工單明細" size="wide" footer={<div className="line-drawer-footer"><button type="button" onClick={closeTicket}>關閉</button>{ticketDetail.status === 'error' && ticketDetailId.current !== null && <button type="button" onClick={() => openTicket(ticketDetailId.current!)}>重試查詢</button>}{ticketDetail.status === 'loaded' && ticketDetail.value?.ticket.status !== 'resolved' && customerService.previewResolve && <button type="button" data-control-id="line.ticket.resolve.preview" disabled={ticketResolvePreview.status === 'loading' || ticketResolveStatus === 'loading'} onClick={() => void previewTicketResolve()}>檢查結案影響</button>}{ticketResolvePreview.value?.applyReady && ticketResolvePreview.value.blockers.length === 0 && customerService.applyResolve && <button type="button" data-control-id="line.ticket.resolve.apply" disabled={!ticketResolveConfirmed || ticketResolveStatus === 'loading'} onClick={() => void applyTicketResolve()}>確認結案</button>}</div>}><div data-control-id="line.ticket.detail" className="line-drawer-content"><LoadingOrError state={ticketDetail} loadingText="正在載入工單明細…" />{ticketDetail.status === 'loaded' && ticketDetail.value && <><div className="line-detail-grid"><div><span>客戶</span><strong>{ticketDetail.value.ticket.lineUserId}</strong></div><div><span>案件</span><strong>{ticketDetail.value.ticket.caseNo ?? '無關聯'}</strong></div><div><span>狀態</span><strong>{ticketDetail.value.ticket.statusLabel}</strong></div></div>{ticketDetail.value.ticket.status !== 'resolved' && customerService.previewResolve && <div className="line-action-panel"><label htmlFor="ticket-resolve-note">結案說明</label><textarea id="ticket-resolve-note" value={ticketResolveNote} onChange={(event) => { setTicketResolveNote(event.target.value); setTicketResolvePreview(idleState()); setTicketResolveConfirmed(false); setTicketResolveStatus('idle'); }} rows={3} maxLength={4000} />{ticketResolvePreview.status === 'loading' && <p>正在驗證結案內容…</p>}{ticketResolvePreview.status === 'error' && <div className="line-error" role="alert">{ticketResolvePreview.error}</div>}{ticketResolvePreview.value && <div className="line-preview-result"><strong>{ticketResolvePreview.value.beforeStatusLabel} → {ticketResolvePreview.value.afterStatusLabel}</strong>{ticketResolvePreview.value.blockers.length > 0 ? <ul>{ticketResolvePreview.value.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul> : <label><input type="checkbox" checked={ticketResolveConfirmed} onChange={(event) => setTicketResolveConfirmed(event.target.checked)} />我已確認結案內容與目前工單狀態</label>}</div>}{ticketResolveStatus === 'success' && <div className="line-success" role="status">結案已完成</div>}{ticketResolveStatus === 'error' && <div className="line-error" role="alert">{ticketResolveError}</div>}</div>}<LineCustomerServiceActions detail={ticketDetail.value} onCommitted={(nextDetail) => { setTicketDetail(loadedState(nextDetail)); setTicketReload((value) => value + 1); }} /><div className="line-events"><h4>事件紀錄</h4>{ticketDetail.value.events.length === 0 ? <p>尚無事件紀錄</p> : ticketDetail.value.events.map((event) => <article key={event.id}><strong>{event.eventType}</strong><span>{event.createdAt}</span><p>{event.messageText ?? '無訊息內容'}</p></article>)}</div></>}</div></Drawer>
 
       <Drawer
         isOpen={bindingDetail.status !== 'idle'}
@@ -2931,7 +2931,7 @@ https://liff.line.me/{LIFF_ID}/gateway （安全專屬連結，15分鐘內有效
           {bindingDetail.status === 'loaded' && bindingDetail.value && (
             <>
               <div className="line-detail-grid">
-                <div><span>LINE User ID</span><strong>{bindingDetail.value.maskedLineUserId}</strong></div>
+                <div><span>LINE User ID</span><strong>{bindingDetail.value.lineUserId}</strong></div>
                 <div><span>實名姓名</span><strong>{bindingDetail.value.subjectName}</strong></div>
                 <div><span>角色</span><strong>{bindingDetail.value.subjectTypeLabel}</strong></div>
                 <div><span>狀態</span><strong>{bindingDetail.value.statusLabel}</strong></div>

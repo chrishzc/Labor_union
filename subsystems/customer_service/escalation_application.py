@@ -16,8 +16,8 @@ from domains.customer_service.escalation import (
     EscalationEventType,
     EscalationWorkflowStatus,
     HumanEscalationDomainError,
-    MaskedAlertIntent,
-    MaskedContext,
+    EscalationAlertIntent,
+    EscalationContext,
     TriggerCode,
 )
 from domains.customer_service.ticket import CustomerServiceStatus, transition_ticket
@@ -103,7 +103,7 @@ class HumanEscalationApplication:
                 ticket = ticket_port.create_or_append_escalation_ticket(command)
             escalation = repo.create(command, ticket)
             intent = _intent(escalation, ticket, command)
-            repo.enqueue_masked_alert(intent)
+            repo.enqueue_alert(intent)
             repo.append_event(
                 int(_field(escalation, "id")), EscalationEventType.CREATED,
                 expected_escalation_version=0, resulting_escalation_version=int(_field(escalation, "workflow_version", 0)),
@@ -448,20 +448,20 @@ def _check_state(row, expected: EscalationWorkflowStatus) -> None:
         raise _error("domain_blocked", "human_escalation_transition_invalid")
 
 
-def _intent(escalation, ticket, command: CreateHumanEscalation) -> MaskedAlertIntent:
-    context = command.masked_context if isinstance(command.masked_context, MaskedContext) else MaskedContext.from_mapping(command.masked_context)
-    return MaskedAlertIntent(f"escalation:{int(_field(escalation, 'id'))}", f"ticket:{int(_field(escalation, 'ticket_id'))}", command.trigger_code, context.category, context.summary_code, AutomationHoldState.ACTIVE, command.correlation_id.value, command.source_fingerprint)
+def _intent(escalation, ticket, command: CreateHumanEscalation) -> EscalationAlertIntent:
+    context = command.context if isinstance(command.context, EscalationContext) else EscalationContext.from_mapping(command.context)
+    return EscalationAlertIntent(f"escalation:{int(_field(escalation, 'id'))}", f"ticket:{int(_field(escalation, 'ticket_id'))}", command.trigger_code, context.category, context.summary_code, AutomationHoldState.ACTIVE, command.correlation_id.value, command.source_fingerprint)
 
 
 def _command_fingerprint(command) -> str:
-    context = command.masked_context.as_dict() if isinstance(command, CreateHumanEscalation) and isinstance(command.masked_context, MaskedContext) else (dict(command.masked_context) if isinstance(command, CreateHumanEscalation) else None)
+    context = command.context.as_dict() if isinstance(command, CreateHumanEscalation) and isinstance(command.context, EscalationContext) else (dict(command.context) if isinstance(command, CreateHumanEscalation) else None)
     data = {
         field.name: getattr(command, field.name)
         for field in fields(command)
         if field.name not in {"actor", "preview_fingerprint"}
     }
     if context is not None:
-        data["masked_context"] = context
+        data["context"] = context
     for key in ("idempotency_key", "correlation_id"):
         if key in data:
             data[key] = data[key].value
@@ -498,10 +498,10 @@ def _version(row) -> str:
 
 
 def _view(row) -> HumanEscalationView:
-    context = _field(row, "masked_context", {})
+    context = _field(row, "context", {})
     if isinstance(context, str):
         raise _error("unavailable", "human_escalation_redaction_failed")
-    safe = MaskedContext.from_mapping(context)
+    safe = EscalationContext.from_mapping(context)
     from domains.customer_service.ticket import CustomerServiceCategory
     trigger_identity, attempt_window, owner_selector = _retry_readback(row)
     return HumanEscalationView(int(_field(row, "id")), f"ticket:{int(_field(row, 'ticket_id'))}", CustomerServiceCategory(str(_field(row, "ticket_category"))), "high", TriggerCode(str(_field(row, "trigger_code"))), EscalationWorkflowStatus(str(_field(row, "workflow_status"))), int(_field(row, "workflow_version", 0)), AutomationHoldState(str(_field(row, "hold_state", _field(row, "automation_hold_state", "active")))), "opaque", safe.as_dict(), AlertStatus(str(_field(row, "alert_status", AlertStatus.PENDING))), _version(row), _utc(_field(row, "created_at")), _utc(_field(row, "updated_at")), _actions(_field(row, "workflow_status"), _field(row, "hold_state", _field(row, "automation_hold_state", "active"))), _field(row, "delivery_task_ref"), _field(row, "delivery_outcome_ref"), trigger_identity, attempt_window, owner_selector)

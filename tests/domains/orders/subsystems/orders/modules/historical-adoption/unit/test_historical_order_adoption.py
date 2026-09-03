@@ -487,7 +487,7 @@ def test_adopted_accounting_review_outbox_is_acknowledgeable():
         {
             "review_identity": review_identity,
             "source_event_identity": "historical-orders:row:019",
-            "masked_case_identity": "***0019",
+            "case_identity": "***0019",
             "issue_codes": [
                 "historical_accounting_service_calendar_unconfirmed"
             ],

@@ -5,7 +5,7 @@
       "tables": {
         "historical_order_adoption_reviews": [
           "id", "review_identity", "source_event_identity", "source_fingerprint",
-          "masked_case_identity", "issue_codes", "evidence_snapshot", "created_at"
+          "case_identity", "issue_codes", "evidence_snapshot", "created_at"
         ],
         "historical_order_adoption_receipts": [
           "id", "idempotency_key", "command_fingerprint", "source_event_identity",
@@ -14,7 +14,7 @@
           "review_identity", "result_snapshot", "actor", "reason", "correlation_id", "created_at"
         ],
         "historical_order_pairing_evidence": [
-          "id", "receipt_id", "caregiver_ordinal", "masked_staff_name", "staff_id",
+          "id", "receipt_id", "caregiver_ordinal", "staff_name", "staff_id",
           "resolution", "source_start_date", "source_end_date", "assignment_id",
           "issue_codes", "created_at"
         ],

@@ -1,6 +1,6 @@
 """
 File: data_browser_admin.py
-Description: 提供 legacy table 管理與六來源 masked Data Browser query。
+Description: 提供 legacy table 管理與六來源 canonical Data Browser query。
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -10,7 +10,7 @@ from api.schemas.base import BaseResponse
 from api.schemas.errors import GlobalTypedErrorResponseView
 from api.schemas.data_browser import (
     DataBrowserTableResponse,
-    DataBrowserMaskedPageView,
+    DataBrowserPageView,
 )
 from infrastructure.mysql import mysql_adapter as db_service
 from infrastructure.mysql.mysql_adapter import get_connection
@@ -33,21 +33,21 @@ _ERROR_RESPONSES = {
 
 @router.get(
     "/sources/{source_id}",
-    response_model=BaseResponse[DataBrowserMaskedPageView],
+    response_model=BaseResponse[DataBrowserPageView],
     responses=_ERROR_RESPONSES,
 )
-def get_masked_data_browser_source(
+def get_data_browser_source(
     source_id: str = Path(..., min_length=1, max_length=50, pattern=r"^[a-z][a-z0-9_]*$"),
     limit: int = Query(25, ge=1, le=100),
     after: str | None = Query(None, min_length=1, max_length=191),
     query: str | None = Query(None, max_length=100),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """Return a bounded server-masked page for one canonical source."""
+    """Return a bounded server-canonical page for one canonical source."""
     del principal
     connection = get_connection()
     try:
-        page = data_browser_maintenance.query_masked_data_browser_source(
+        page = data_browser_maintenance.query_data_browser_source(
             DataBrowserQueryRepository(connection),
             source_id,
             limit=limit,
@@ -55,8 +55,8 @@ def get_masked_data_browser_source(
             query=query,
         )
         return BaseResponse(
-            data=DataBrowserMaskedPageView.model_validate(page),
-            message="成功取得去敏資料來源",
+            data=DataBrowserPageView.model_validate(page),
+            message="成功取得資料來源",
         )
     except DataBrowserSourceNotFound as error:
         raise typed_http_error(

@@ -548,9 +548,9 @@ export const AccountManagementPage: React.FC = () => {
                       <td><code>{entry.auditId}</code></td>
                       <td>{entry.occurredAt}</td>
                       <td><span className="account-action-pill">{entry.actionFamily}</span></td>
-                      <td>{entry.actorLabelMasked ?? '—'}</td>
-                      <td>{entry.targetLabelMasked ?? '—'}</td>
-                      <td><code>{entry.ipAddressMasked ?? '—'}</code></td>
+                      <td>{entry.actorLabel ?? '—'}</td>
+                      <td>{entry.targetLabel ?? '—'}</td>
+                      <td><code>{entry.ipAddress ?? '—'}</code></td>
                       <td><span className="account-outcome-pill">{entry.outcome}</span></td>
                       <td>
                         <button
@@ -606,7 +606,7 @@ export const AccountManagementPage: React.FC = () => {
                   {auditDetailState.data.details.map((field) => (
                     <React.Fragment key={field.key}>
                       <dt>{field.key}</dt>
-                      <dd>{field.valueMasked}</dd>
+                      <dd>{field.value}</dd>
                     </React.Fragment>
                   ))}
                 </dl>

@@ -1,6 +1,6 @@
 """
 File: line_tasks.py
-Description: 定義 LINE Delivery 控制輸入與 server-masked 查詢輸出模型。
+Description: 定義 LINE Delivery 控制輸入與 canonical 查詢輸出模型。
 """
 
 from datetime import datetime
@@ -104,7 +104,7 @@ class LineDeliveryPublicDetailView(_StrictModel):
 
 
 class LineDeliveryTaskActionResultView(_StrictModel):
-    """Masked typed readback returned after a task control operation."""
+    """Typed readback returned after a task control operation."""
 
     id: int = Field(gt=0)
     task_id: int = Field(gt=0)

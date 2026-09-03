@@ -16,5 +16,5 @@ def test_finance_row_warning_uses_stable_row_identity_and_no_bank_values():
         "FINANCE-ROW-001",
         "$classification",
     )
-    assert warning.masked_subject == "finance-row-***-17"
+    assert warning.subject == "finance-row-17"
     assert "bank" not in warning.occurrence_identity

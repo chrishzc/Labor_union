@@ -15,7 +15,7 @@ const stringListSchema = z.array(z.string().trim().min(1).max(191)).max(100);
 const evidenceBase = { key: keySchema };
 export const AnomalyEvidenceFieldSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...evidenceBase, kind: z.literal('identity'), value: identitySchema }),
-  z.strictObject({ ...evidenceBase, kind: z.literal('masked_text'), value: identitySchema }),
+  z.strictObject({ ...evidenceBase, kind: z.literal('text'), value: identitySchema }),
   z.strictObject({ ...evidenceBase, kind: z.literal('date'), value: dateSchema }),
   z.strictObject({ ...evidenceBase, kind: z.literal('datetime'), value: dateTimeSchema }),
   z.strictObject({ ...evidenceBase, kind: z.literal('boolean'), value: z.boolean() }),

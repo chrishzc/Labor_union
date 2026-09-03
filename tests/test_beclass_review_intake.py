@@ -6,16 +6,16 @@ from domains.case_import.beclass_import_review import BeClassImportSourceKind
 from subsystems.case_import.beclass_review_intake import (
     _canonical_value,
     _source_event_identity,
-    masked_review_identifier,
+    canonical_review_identifier,
 )
 
 
 def test_masks_the_stable_identifier_without_exposing_it() -> None:
-    assert masked_review_identifier(BeClassImportSourceKind.CLIENT, "ABC1234", None) == "client-***-1234"
+    assert canonical_review_identifier(BeClassImportSourceKind.CLIENT, "ABC1234", None) == "ABC1234"
 
 
 def test_masks_a_missing_identifier_with_a_fixed_safe_value() -> None:
-    assert masked_review_identifier(BeClassImportSourceKind.CLIENT, None, None) == "client-***-none"
+    assert canonical_review_identifier(BeClassImportSourceKind.CLIENT, None, None) == "client-unknown"
 
 
 def test_builds_a_durable_lowercase_digest_identity() -> None:

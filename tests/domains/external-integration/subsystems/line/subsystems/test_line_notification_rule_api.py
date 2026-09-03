@@ -189,7 +189,7 @@ def test_notification_timeline_api_returns_deidentified_evidence(monkeypatch) ->
         "decision_status": "matched",
         "reason_code": None,
         "recipient_type": "assigned_caregiver",
-        "recipient_masked": "***1234",
+        "recipient_identity": "***1234",
         "occurrence_number": 1,
         "intent_status": "cancelled",
         "scheduled_at_utc": "2026-08-08T03:00:00Z",

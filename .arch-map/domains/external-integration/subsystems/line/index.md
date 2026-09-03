@@ -11,6 +11,7 @@
 - `line-identity-management` — canonical LINE identity binding and review persistence; path: `modules/line-identity-management.md`
 - `line-identity-maintenance-presentation` — LINE identity更正與解除維護的business-facing presentation；path: `modules/line-identity-maintenance-presentation.md`
 - `line-identity-review-presentation` — LINE identity人工審核工作台的business-facing presentation；path: `modules/line-identity-review-presentation.md`
+- `registration-presentation` — LIFF 客戶需求調查表單的呈現與本地輸入驗證；path: `modules/registration-presentation.md`
 - `notification-rules-presentation` — LINE通知規則維護的business-facing presentation；path: `modules/notification-rules-presentation.md`
 - `notification-failure-current-fact` — LINE-006 typed zero-write group readback、manual replay lineage與bounded recheck；path: `modules/notification-failure-current-fact.md`
 - `notification-baseline-bootstrap` — Task96 M1–M4 versioned notification catalog與development-only source fixture producer；path: `modules/notification-baseline-bootstrap.md`

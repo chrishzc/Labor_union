@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS beclass_import_review_rows (
     source_event_identity VARCHAR(191) NOT NULL,
     source_sheet VARCHAR(191) NOT NULL,
     source_row INT UNSIGNED NOT NULL,
-    masked_identifier VARCHAR(191) NOT NULL,
+    identifier VARCHAR(191) NOT NULL,
     source_fingerprint CHAR(64) NOT NULL,
     source_payload JSON NOT NULL,
     issue_codes JSON NOT NULL,
@@ -30,8 +30,7 @@ CREATE TABLE IF NOT EXISTS beclass_import_review_rows (
         CHECK (
             CHAR_LENGTH(TRIM(source_sheet)) > 0
             AND source_row > 0
-            AND CHAR_LENGTH(TRIM(masked_identifier)) > 0
-            AND LOCATE('*', masked_identifier) > 0
+            AND CHAR_LENGTH(TRIM(identifier)) > 0
         )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

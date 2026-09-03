@@ -33,7 +33,7 @@ class FinanceSourceReview:
     format_id: str
     sheet_name: str
     source_row: int
-    masked_source_identity: str
+    source_identity: str
     issue_codes: tuple[str, ...]
 
 

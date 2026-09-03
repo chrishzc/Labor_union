@@ -1,10 +1,10 @@
 /**
  * File: data_browser_query_adapter.ts
- * Description: 將 masked Data Browser DTO 映射為安全 table/Drawer model。
+ * Description: 將 canonical Data Browser DTO 映射為安全 table/Drawer model。
  */
 import type {
-  DataBrowserMaskedCell,
-  DataBrowserMaskedPage,
+  DataBrowserCell,
+  DataBrowserPage,
   DataBrowserSourceId,
 } from '../../api/data_browser/data_browser_query_schemas';
 
@@ -54,7 +54,7 @@ export interface DataBrowserPageViewModel {
   nextCursor: string | null;
 }
 
-export function adaptDataBrowserPage(page: DataBrowserMaskedPage): DataBrowserPageViewModel {
+export function adaptDataBrowserPage(page: DataBrowserPage): DataBrowserPageViewModel {
   const rowIds = new Set<string>();
   const rows = page.items.map((row) => {
     if (row.source_id !== page.source_id || rowIds.has(row.row_identity)) {
@@ -78,7 +78,7 @@ export function adaptDataBrowserPage(page: DataBrowserMaskedPage): DataBrowserPa
   return { sourceId: page.source_id, rows, nextCursor: page.next_cursor };
 }
 
-function adaptCells(cells: DataBrowserMaskedCell[]): DataBrowserCellViewModel[] {
+function adaptCells(cells: DataBrowserCell[]): DataBrowserCellViewModel[] {
   const ids = new Set<string>();
   return cells.map((cell) => {
     if (ids.has(cell.field_id)) throw new Error('data_browser_duplicate_cell');

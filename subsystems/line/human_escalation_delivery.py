@@ -1,6 +1,6 @@
-"""Project masked Customer Service alert intents into canonical LINE delivery.
+"""Project bounded Customer Service alert intents into canonical LINE delivery.
 
-This bounded worker validates the masked alert, creates the durable canonical
+This bounded worker validates the bounded alert, creates the durable canonical
 LINE delivery task, and records the Customer Service task readback. Provider
 I/O and delivery retries remain owned by LineDeliveryWorker.
 
@@ -146,7 +146,7 @@ class HumanEscalationDeliveryWorker:
             except Exception:
                 pass
             uow.outbox.complete(CompleteLineOutboxCommand(
-                item_to_work(item), self._now(), code, "masked alert delivery requires manual recovery",
+                item_to_work(item), self._now(), code, "bounded alert delivery requires manual recovery",
                 retryable=not terminal,
             ))
             uow.commit()
@@ -155,7 +155,7 @@ class HumanEscalationDeliveryWorker:
 def _request(item: HumanEscalationOutboxItem, now: datetime) -> tuple[LineDeliveryRequest, dict[str, Any]]:
     payload = item.payload
     if payload.get("urgency") != "high" or payload.get("hold_state") != "active":
-        raise HumanEscalationDeliveryError("human_escalation_masked_intent_invalid")
+        raise HumanEscalationDeliveryError("human_escalation_bounded_intent_invalid")
     target = payload.get("target_snapshot")
     if not isinstance(target, Mapping):
         raise HumanEscalationDeliveryError("human_escalation_alert_target_missing")
@@ -175,7 +175,7 @@ def _request(item: HumanEscalationOutboxItem, now: datetime) -> tuple[LineDelive
     safe_summary = str(payload.get("safe_summary", ""))
     category = str(payload.get("category", ""))
     if not safe_summary or not category or "line_user_id" in safe_summary.lower():
-        raise HumanEscalationDeliveryError("human_escalation_masked_payload_invalid")
+        raise HumanEscalationDeliveryError("human_escalation_bounded_payload_invalid")
     message = canonical_line_payload_json({
         "type": "text",
         "text": f"客服人工升級（{category}）：{safe_summary}",
@@ -193,9 +193,9 @@ def _item(raw: LineOutboxWorkItem) -> HumanEscalationOutboxItem:
     try:
         payload = json.loads(raw.payload_json)
     except (TypeError, ValueError, json.JSONDecodeError) as error:
-        raise HumanEscalationDeliveryError("human_escalation_masked_payload_invalid") from error
+        raise HumanEscalationDeliveryError("human_escalation_bounded_payload_invalid") from error
     if not isinstance(payload, Mapping):
-        raise HumanEscalationDeliveryError("human_escalation_masked_payload_invalid")
+        raise HumanEscalationDeliveryError("human_escalation_bounded_payload_invalid")
     return HumanEscalationOutboxItem(
         raw.outbox_id, raw.aggregate_identity, payload, raw.attempt_count,
         raw.maximum_attempts, raw.lease_owner, raw.lease_expires_at,

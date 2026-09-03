@@ -161,9 +161,9 @@ def test_explicit_human_referral_maps_masked_escalation_in_same_unit_of_work() -
     assert gateway_uow is unit_of_work
     assert command.source_kind == "ticket_referral"
     assert command.trigger_code is TriggerCode.EXPLICIT_HUMAN_REQUEST
-    assert set(command.masked_context.as_dict()) == {"summary_code", "policy_version", "category", "redaction_version"}
-    assert "我要找客服" not in repr(command.masked_context)
-    assert "U123456789" not in repr(command.masked_context)
+    assert set(command.context.as_dict()) == {"summary_code", "policy_version", "category", "redaction_version"}
+    assert "我要找客服" not in repr(command.context)
+    assert "U123456789" not in repr(command.context)
     assert re.fullmatch(r"[0-9a-f]{64}", command.hold_scope)
     assert re.fullmatch(r"[0-9a-f]{64}", command.source_fingerprint)
 

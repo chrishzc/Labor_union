@@ -120,7 +120,7 @@ class GovernmentRecipientSnapshot:
             (self.agency_identity, "agency identity"),
             (self.agency_name, "agency name"),
             (self.bank_code, "bank code"),
-            (self.account_display, "masked account"),
+            (self.account_display, "account"),
             (self.account_fingerprint, "account fingerprint"),
             (self.effective_date, "effective date"),
             (self.due_date, "due date"),

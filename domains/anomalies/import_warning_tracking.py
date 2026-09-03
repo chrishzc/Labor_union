@@ -46,7 +46,7 @@ class ImportWarningOccurrence:
     source_event_identity: str
     logical_code: str
     field_path: str
-    masked_subject: str
+    subject: str
     issue_codes: tuple[str, ...]
     tracking_status: ImportWarningTrackingStatus
 
@@ -65,14 +65,14 @@ def build_import_warning_occurrence(
     source_event_identity: str,
     logical_code: str,
     field_path: str,
-    masked_subject: str,
+    subject: str,
     issue_codes: tuple[str, ...],
 ) -> ImportWarningOccurrence:
     lane = _require_lane(owning_lane)
     source = _require_text(source_event_identity, "source event identity")
     code = _require_logical_code(logical_code)
     path = _require_text(field_path, "field path")
-    subject = _require_text(masked_subject, "masked subject")
+    subject = _require_text(subject, "subject")
     canonical_issues = _canonical_issue_codes(issue_codes)
     identity = _occurrence_identity(lane, source, code, path)
     return ImportWarningOccurrence(
