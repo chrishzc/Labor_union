@@ -12,6 +12,12 @@ const mocks = vi.hoisted(() => ({
   contractQuery: vi.fn(),
 }));
 
+vi.mock('../components/OrderIntakeRepairPanel', () => ({
+  OrderIntakeRepairPanel: ({ caseNo }: { caseNo: string }) => (
+    <div data-testid="order-intake-repair-panel">缺件處理：{caseNo}</div>
+  ),
+}));
+
 vi.mock('../api/orders/order_query_client', () => ({
   loadAllOrderSummaries: mocks.loadSummaries,
   ordersQueryClient: {
@@ -84,7 +90,7 @@ describe('OrdersPage incomplete intake card actions', () => {
     mocks.contractQuery.mockRejectedValue(new Error('contract query not needed for drawer reachability'));
   });
 
-  it('keeps the incomplete hint while leaving existing workbench actions reachable', async () => {
+  it('keeps the incomplete hint and presents intake repair inside the existing drawer', async () => {
     render(<OrdersPage />);
 
     await waitFor(() => expect(screen.getByText('CASE-INCOMPLETE')).toBeInTheDocument());
@@ -97,5 +103,6 @@ describe('OrdersPage incomplete intake card actions', () => {
     fireEvent.click(contractButton);
 
     await waitFor(() => expect(screen.getByText(/訂單條款、服務日曆與契約簽署工作台 — CASE-INCOMPLETE/)).toBeInTheDocument());
+    expect(screen.getByTestId('order-intake-repair-panel')).toHaveTextContent('缺件處理：CASE-INCOMPLETE');
   });
 });
