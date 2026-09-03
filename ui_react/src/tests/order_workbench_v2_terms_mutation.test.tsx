@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   getOrderDetail: vi.fn(),
   getOrderTerms: vi.fn(),
   getAssignmentPlan: vi.fn(),
+  queryTerms: vi.fn(),
   previewTerms: vi.fn(),
   applyTerms: vi.fn(),
 }));
@@ -35,6 +36,7 @@ vi.mock('../api/orders/order_query_client', () => ({
 
 vi.mock('../api/orders/order_terms_mutation_client', () => ({
   orderTermsMutationClient: {
+    query: mocks.queryTerms,
     preview: mocks.previewTerms,
     apply: mocks.applyTerms,
   },
@@ -129,10 +131,44 @@ function orderTerms() {
   };
 }
 
+function refreshedOrderTerms() {
+  return {
+    ...orderTerms(),
+    order_version: 13,
+    scheduling_version: 14,
+    scheduling_generation: 3,
+    client_finance_version: 6,
+    payroll_version: 7,
+    terms: {
+      ...orderTerms().terms,
+      service_days: 21,
+    },
+  };
+}
+
 function card(): HTMLElement {
   const node = screen.getByText('CASE-TERMS').closest('article');
   if (!(node instanceof HTMLElement)) throw new Error('找不到 CASE-TERMS 案件卡');
   return node;
+}
+
+async function openTermsPanel(): Promise<HTMLElement> {
+  render(<OrderWorkbenchV2Page />);
+  await waitFor(() => expect(screen.getByText('CASE-TERMS')).toBeInTheDocument());
+  fireEvent.click(within(card()).getByRole('button', { name: '開啟唯讀工作 Drawer' }));
+
+  const dialog = await screen.findByRole('dialog', { name: '案件 CASE-TERMS' });
+  const panel = within(dialog).getByRole('heading', { name: '進件條款預覽與套用' }).closest('section');
+  if (!(panel instanceof HTMLElement)) throw new Error('找不到進件條款操作區');
+  return panel;
+}
+
+async function previewAndApply(panel: HTMLElement) {
+  fireEvent.change(within(panel).getByLabelText('Beta 服務天數'), { target: { value: '21' } });
+  fireEvent.click(within(panel).getByRole('button', { name: '檢查訂單條款變更' }));
+  await waitFor(() => expect(mocks.previewTerms).toHaveBeenCalled());
+  fireEvent.change(within(panel).getByLabelText('Beta 條款變更原因'), { target: { value: '客戶確認延長一天' } });
+  fireEvent.click(within(panel).getByRole('button', { name: '確認套用訂單條款' }));
 }
 
 describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
@@ -175,6 +211,7 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
       service_started: false,
       assignments: [],
     });
+    mocks.queryTerms.mockResolvedValue(refreshedOrderTerms());
     mocks.previewTerms.mockResolvedValue({
       before: orderTerms().terms,
       after: { ...orderTerms().terms, service_days: 21 },
@@ -206,14 +243,8 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
     });
   });
 
-  it('沿用既有 Preview -> 原因確認 -> Apply，套用時帶入 preview versions 與 fingerprint', async () => {
-    render(<OrderWorkbenchV2Page />);
-    await waitFor(() => expect(screen.getByText('CASE-TERMS')).toBeInTheDocument());
-    fireEvent.click(within(card()).getByRole('button', { name: '開啟唯讀工作 Drawer' }));
-
-    const dialog = await screen.findByRole('dialog', { name: '案件 CASE-TERMS' });
-    const panel = within(dialog).getByRole('heading', { name: '進件條款預覽與套用' }).closest('section');
-    if (!(panel instanceof HTMLElement)) throw new Error('找不到進件條款操作區');
+  it('沿用既有 Preview -> 原因確認 -> Apply，並在成功後回讀正式條款投影', async () => {
+    const panel = await openTermsPanel();
 
     fireEvent.change(within(panel).getByLabelText('Beta 服務天數'), { target: { value: '21' } });
     fireEvent.click(within(panel).getByRole('button', { name: '檢查訂單條款變更' }));
@@ -246,6 +277,40 @@ describe('待辦看板 Beta 第 1 階訂單條款操作', () => {
       }),
       expect.objectContaining({ idempotencyKey: expect.stringMatching(/^orders-terms-ui-CASE-TERMS-/) }),
     ));
-    expect(await within(panel).findByText(/條款已套用；Order version 13，正式服務日 21 天。/)).toBeInTheDocument();
+    await waitFor(() => expect(mocks.queryTerms).toHaveBeenCalledWith('CASE-TERMS'));
+    expect(await within(panel).findByText(/條款已套用並完成正式回讀；Order version 13，合約服務 21 日。/)).toBeInTheDocument();
+    expect(within(panel).getByLabelText('Beta 服務天數')).toHaveValue(21);
+  });
+
+  it('預覽 fingerprint 不匹配時顯示可辨識錯誤並要求重新預覽', async () => {
+    mocks.applyTerms.mockRejectedValueOnce(Object.assign(
+      new Error('The business facts changed after Preview.'),
+      { code: 'stale_preview' },
+    ));
+    const panel = await openTermsPanel();
+
+    await previewAndApply(panel);
+
+    expect(await within(panel).findByRole('alert')).toHaveTextContent(
+      '預覽已過期：正式資料已變更，請重新檢查條款變更後再套用。',
+    );
+    expect(within(panel).queryByRole('button', { name: '確認套用訂單條款' })).not.toBeInTheDocument();
+    expect(mocks.queryTerms).not.toHaveBeenCalled();
+  });
+
+  it('版本不匹配時顯示可辨識錯誤並要求重新預覽', async () => {
+    mocks.applyTerms.mockRejectedValueOnce(Object.assign(
+      new Error('The order version changed before Apply.'),
+      { code: 'order_version_conflict' },
+    ));
+    const panel = await openTermsPanel();
+
+    await previewAndApply(panel);
+
+    expect(await within(panel).findByRole('alert')).toHaveTextContent(
+      '版本已變更：正式資料已更新，請重新檢查條款變更後再套用。',
+    );
+    expect(within(panel).queryByRole('button', { name: '確認套用訂單條款' })).not.toBeInTheDocument();
+    expect(mocks.queryTerms).not.toHaveBeenCalled();
   });
 });
