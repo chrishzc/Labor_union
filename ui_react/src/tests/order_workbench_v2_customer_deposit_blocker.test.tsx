@@ -161,7 +161,9 @@ describe('待辦看板 Beta 客戶訂金 blocker', () => {
     ));
 
     expect(await screen.findByText('CASE-DEPOSIT-OPEN')).toBeInTheDocument();
-    expect(screen.getByText('客戶定金核銷：仍有未結清訂金')).toBeInTheDocument();
+    const blocker = screen.getByText('客戶定金核銷：仍有未結清訂金');
+    expect(blocker).toBeInTheDocument();
+    expect(blocker.closest('article')).toHaveTextContent('CASE-DEPOSIT-OPEN');
     expect(screen.getByText('阻塞')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /定金阻塞 1/ })).toBeInTheDocument();
   });
