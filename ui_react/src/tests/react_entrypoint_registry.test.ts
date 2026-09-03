@@ -47,7 +47,7 @@ describe('React entrypoint registry', () => {
     render(React.createElement(AiEventStudio));
     expect(screen.getByRole('searchbox', { name: '搜尋正式事件規則' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '讀取 server router preview' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '🧠 執行真實 Gemini 測試' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '🚀 執行真實 AI 智能解答' })).toBeEnabled();
     expect(screen.getByText('舊版 4 筆 INITIAL_RULES 本機示範資料已移除。本頁只接受正式 QA 題庫與 server-owned navigation/event catalog 作為可見來源。')).toBeInTheDocument();
     expect(screen.getByLabelText('Server router 測試文字')).toHaveValue('我想修改登記資料');
     expect(screen.getByLabelText('Server router confidence')).toHaveValue(90);
