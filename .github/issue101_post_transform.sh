@@ -225,6 +225,36 @@ replace_any(
     ],
     minimum=8,
 )
+
+# React strict decoders must accept #101 canonical business PII while retaining
+# fail-closed aggregate and unknown-field validation.
+replace_any(
+    "ui_react/src/tests/finance_query_clients.test.ts",
+    [
+        ("masked AP契約", "canonical AP契約"),
+        ("rejects AP raw sensitive fields and aggregate mismatch", "accepts canonical AP fields and rejects aggregate mismatch"),
+        ("await expect(accountsPayableQueryClient.query('2026-08')).rejects.toThrow();", "await expect(accountsPayableQueryClient.query('2026-08')).resolves.toBeDefined();"),
+    ],
+    minimum=3,
+)
+replace_any(
+    "ui_react/src/tests/subsidy_report_query_client.test.ts",
+    [
+        ("aggregate與PII拒絕", "aggregate與canonical PII契約"),
+        ("rejects raw PII and aggregate mismatch", "accepts canonical PII and rejects aggregate mismatch"),
+        ("await expect(subsidyReportQueryClient.query({ kind: 'quarterly', applicationYear: 2026, quarter: 1 })).rejects.toThrow(/PII/);", "await expect(subsidyReportQueryClient.query({ kind: 'quarterly', applicationYear: 2026, quarter: 1 })).resolves.toBeDefined();"),
+    ],
+    minimum=3,
+)
+replace_any(
+    "ui_react/src/tests/weekly_operations_report_client.test.ts",
+    [
+        ("aggregate、PII 與完整 XLSX 匯出邊界", "aggregate、canonical PII 與完整 XLSX 匯出邊界"),
+        ("拒絕 aggregate 漂移、未遮罩姓名與 unknown 欄位", "接受 canonical 原始姓名，仍拒絕 aggregate 漂移與 unknown 欄位"),
+        ("await expect(weeklyOperationsReportQueryClient.query('2026-08-17')).rejects.toThrow('未遮罩');", "await expect(weeklyOperationsReportQueryClient.query('2026-08-17')).resolves.toBeDefined();"),
+    ],
+    minimum=3,
+)
 PY
 
 python - <<'PY'
