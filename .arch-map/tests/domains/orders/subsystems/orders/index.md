@@ -19,6 +19,10 @@ modules:
     test_root: tests/domains/orders/subsystems/orders/modules/historical-adoption/
   historical-stage-baseline:
     test_root: tests/domains/orders/subsystems/orders/modules/historical-stage-baseline/
+  service-date-confirmation:
+    test_root: tests/domains/orders/subsystems/orders/modules/service-date-confirmation/
+  actual-start:
+    test_root: ui_react/src/tests/domains/orders/subsystems/orders/modules/actual-start/
   historical-adoption-presentation:
     layout_status: custom_current
     test_root: ui_react/src/tests/historical_order_workbook_client.test.ts

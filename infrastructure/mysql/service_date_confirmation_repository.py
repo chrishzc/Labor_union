@@ -9,8 +9,13 @@ from datetime import timedelta
 
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.orders.service_date_confirmation_workflow import (
+    RestartSchedulingAssignmentFacts,
     ServiceDateConfirmationFacts,
     ServiceDateConfirmationReceipt,
+)
+from infrastructure.mysql.scheduling_replacement_writer import persist_scheduling_replacement
+from infrastructure.mysql.payroll_terms_writer import (
+    persist_scheduling_assignment_rate_snapshots,
 )
 
 
@@ -39,6 +44,9 @@ class MySqlServiceDateConfirmationRepository:
             current = cursor.fetchone()
             current_dates = self._dates(cursor, current["id"], lock=lock) if current else ()
             suggested = self._suggested_dates(cursor, case_no, order, lock=lock)
+            restart_generation, restart_assignments = self._restart_scheduling_source(
+                cursor, case_no, int(order["service_days"]), lock=lock
+            )
         return ServiceDateConfirmationFacts(
             str(order["case_no"]),
             int(order["lifecycle_version"] or 0),
@@ -48,7 +56,22 @@ class MySqlServiceDateConfirmationRepository:
             self._selectable_dates(order),
             int(current["version"]) if current else None,
             current_dates,
+            restart_generation,
+            restart_assignments,
         )
+
+    def persist_restarted_scheduling(self, command):
+        with self._connection.cursor() as cursor:
+            result = persist_scheduling_replacement(cursor, command)
+            persist_scheduling_assignment_rate_snapshots(cursor, command, result)
+            cursor.execute(
+                "UPDATE confirmed_service_date_versions SET scheduling_version=%s "
+                "WHERE case_no=%s AND is_current=1",
+                (result.scheduling_version, command.candidate.case_no),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("confirmed_service_date_version_conflict")
+        return result.scheduling_version
 
     def load_service_dates(
         self, case_no: str, *, for_update: bool = False
@@ -141,6 +164,51 @@ class MySqlServiceDateConfirmationRepository:
             order["start_date"] + timedelta(days=offset)
             for offset in range(int(order["service_days"]) + 45)
         )
+
+    @staticmethod
+    def _restart_scheduling_source(cursor, case_no, contracted_days, *, lock=False):
+        lock_clause = " FOR UPDATE" if lock else ""
+        cursor.execute(
+            "SELECT generation.generation_number FROM scheduling_aggregates aggregate "
+            "JOIN scheduling_generations generation ON generation.id=aggregate.effective_generation_id "
+            "JOIN scheduling_command_receipts restart_receipt "
+            "ON restart_receipt.resulting_generation_id=generation.id "
+            "AND restart_receipt.case_no=aggregate.case_no "
+            "AND restart_receipt.command_family='orders_historical_precision_restart' "
+            "WHERE aggregate.case_no=%s AND generation.status='effective' "
+            "AND generation.effective_marker=1 "
+            "AND NOT EXISTS (SELECT 1 FROM case_staff_assignments current_assignment "
+            "WHERE current_assignment.generation_id=generation.id)" + lock_clause,
+            (case_no,),
+        )
+        generation = cursor.fetchone()
+        if generation is None:
+            return None, ()
+        cursor.execute(
+            "SELECT evidence.assignment_id,evidence.staff_id,evidence.caregiver_ordinal,"
+            "COUNT(schedule.id) AS service_day_count "
+            "FROM historical_order_adoption_receipts receipt "
+            "JOIN historical_order_pairing_evidence evidence ON evidence.receipt_id=receipt.id "
+            "LEFT JOIN staff_schedule schedule ON schedule.assignment_id=evidence.assignment_id "
+            "AND schedule.is_work_day=1 "
+            "WHERE receipt.id=(SELECT MAX(candidate.id) FROM historical_order_adoption_receipts candidate "
+            "WHERE candidate.case_no=%s AND candidate.outcome='adopted') "
+            "AND evidence.assignment_id IS NOT NULL AND evidence.staff_id IS NOT NULL "
+            "GROUP BY evidence.assignment_id,evidence.staff_id,evidence.caregiver_ordinal "
+            "ORDER BY evidence.caregiver_ordinal" + lock_clause,
+            (case_no,),
+        )
+        rows = tuple(cursor.fetchall())
+        assignments = tuple(
+            RestartSchedulingAssignmentFacts(
+                int(row["assignment_id"]),
+                int(row["staff_id"]),
+                index,
+                contracted_days if len(rows) == 1 else int(row["service_day_count"]),
+            )
+            for index, row in enumerate(rows, start=1)
+        )
+        return int(generation["generation_number"]), assignments
 
 
 def _receipt(row, dates):

@@ -94,6 +94,15 @@ def run_line_cycle(
         from line.worker import process_due_tasks
 
         asyncio.run(process_due_tasks())
+    if os.getenv("KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}:
+        try:
+            from api.dependencies.private_operations import run_knowledge_cycle
+            knowledge_processed = run_knowledge_cycle(worker_identity, runtime_identity)
+            processed += knowledge_processed
+            if knowledge_processed and mode is not LineRuntimeMode.LEGACY:
+                processed += sum(_canonical_runtime(worker_identity, runtime_identity).run_once().values())
+        except Exception:
+            pass
     record_runtime_heartbeat(runtime_identity, processed)
     return processed
 

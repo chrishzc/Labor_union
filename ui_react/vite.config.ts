@@ -18,6 +18,10 @@ export default defineConfig({
         target: apiTarget,
         changeOrigin: true,
       },
+      '/line-': {
+        target: apiTarget,
+        changeOrigin: true,
+      },
     },
   },
   // @ts-expect-error vitest configuration is read directly by vitest runner

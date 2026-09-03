@@ -385,3 +385,34 @@ def export_annual_reconciliation(
             "annual-subsidy-export",
         ) from exc
     return _xlsx_response(report["xlsx_bytes"], f"subsidy-reconciliation-{application_year}.xlsx")
+
+
+@router.get("/subsidy-reconciliation/combined/export", response_class=XlsxStreamingResponse)
+def export_combined_reconciliation(
+    application_year: int = Query(..., ge=1912),
+    quarter: int = Query(..., ge=1, le=4),
+    principal: AdminPrincipal = Depends(require_admin),
+):
+    """Download the combined subsidy reconciliation workbook with quarterly and annual sheets."""
+    try:
+        del principal
+        report = reconciliation_register_query.build_combined_subsidy_register(
+            application_year, quarter, get_connection
+        )
+    except ValueError as exc:
+        raise typed_http_error(
+            400,
+            "validation",
+            "combined_subsidy_export_invalid",
+            "核銷清冊匯出條件無效。",
+            "combined-subsidy-export",
+        ) from exc
+    except Exception as exc:
+        raise internal_query_error(
+            "combined_subsidy_export_internal_error",
+            "核銷清冊匯出失敗。",
+            "combined-subsidy-export",
+        ) from exc
+    filename = f"reconciliation-and-register-{application_year}-Q{quarter}.xlsx"
+    return _xlsx_response(report["xlsx_bytes"], filename)
+
