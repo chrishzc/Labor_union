@@ -79,6 +79,7 @@ export const OrderWorkbenchV2Page: FC = () => {
   const [search, setSearch] = useState('');
   const [onlyBlocked, setOnlyBlocked] = useState(false);
   const [onlyWarning, setOnlyWarning] = useState(false);
+  const [projectionRefreshKey, setProjectionRefreshKey] = useState(0);
   const [selectedDrawer, setSelectedDrawer] = useState<{
     caseNo: string;
     branchType: CoreStageBranchType;
@@ -136,6 +137,7 @@ export const OrderWorkbenchV2Page: FC = () => {
     normalizedSearch,
     onlyBlocked,
     onlyWarning,
+    projectionRefreshKey,
     selectedHistoricalLifecycle,
     selectedStage,
     selectedSubstatus,
@@ -401,7 +403,10 @@ export const OrderWorkbenchV2Page: FC = () => {
                   <div className="order-v2-technical">projection：{stage.availability_reason}</div>
                 )}
                 {branchType === 'normal' && selectedStage === 'matching_pool' && (
-                  <OrderCandidateQueryPanel caseNo={item.id} />
+                  <OrderCandidateQueryPanel
+                    caseNo={item.id}
+                    onPoolReadback={() => setProjectionRefreshKey((current) => current + 1)}
+                  />
                 )}
                 <button
                   type="button"
