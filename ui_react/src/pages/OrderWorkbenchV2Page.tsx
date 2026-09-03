@@ -16,6 +16,7 @@ import { OrderCaregiverContractPanel } from '../components/OrderCaregiverContrac
 import { OrderClientContractPanel } from '../components/OrderClientContractPanel';
 import { OrderFormalRecommendationPanel } from '../components/OrderFormalRecommendationPanel';
 import { OrderGovernmentSubsidyLane } from '../components/OrderGovernmentSubsidyLane';
+import { OrderServiceDatesPanel } from '../components/OrderServiceDatesPanel';
 import { OrderTerminalAggregateLane } from '../components/OrderTerminalAggregateLane';
 import { OrderWorkbenchV2Drawer } from '../components/OrderWorkbenchV2Drawer';
 import {
@@ -426,6 +427,12 @@ export const OrderWorkbenchV2Page: FC = () => {
                 )}
                 {branchType === 'normal' && selectedStage === 'client_contract' && (
                   <OrderClientContractPanel caseNo={item.id} />
+                )}
+                {branchType === 'normal' && selectedStage === 'confirmed_service_dates' && (
+                  <OrderServiceDatesPanel
+                    caseNo={item.id}
+                    onObserved={() => setProjectionRefreshKey((current) => current + 1)}
+                  />
                 )}
                 <button
                   type="button"
