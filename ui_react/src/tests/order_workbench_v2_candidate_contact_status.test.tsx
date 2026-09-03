@@ -18,7 +18,7 @@ vi.mock('../api/scheduling/candidate_contact_pool_client', () => ({
   },
 }));
 
-function pool() {
+function pool(firstWillingness = 'willing', firstReason: string | null = null) {
   return {
     pool_id: 9,
     case_no: 'CASE-CONTACT',
@@ -31,8 +31,8 @@ function pool() {
         status: 'active',
         created_at: '2026-09-03T00:00:00Z',
         staff_name: '月嫂甲',
-        willingness: 'willing',
-        reason: null,
+        willingness: firstWillingness,
+        reason: firstReason,
         information: {
           '1': { status: 'sent', sent_at: '2026-09-03T00:05:00Z' },
           '2': { status: 'retryable_failed', sent_at: '2026-09-03T00:06:00Z' },
@@ -81,12 +81,7 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
   });
 
   it('人工意願寫入後回讀 owner facts，更新畫面並阻止再次記錄相同意願', async () => {
-    const readback = pool();
-    readback.candidates[0] = {
-      ...readback.candidates[0],
-      willingness: 'unwilling',
-      reason: '已電話確認但日期不合',
-    };
+    const readback = pool('unwilling', '已電話確認但日期不合');
     mocks.query.mockResolvedValueOnce(pool()).mockResolvedValueOnce(readback);
     mocks.recordWillingness.mockResolvedValue({ status: 'recorded', event_id: 45 });
     render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
