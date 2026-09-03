@@ -49,7 +49,7 @@ describe('ReportsPage weekly service display', () => {
 
     render(<ReportsPage />);
 
-    expect(await screen.findByText('此期間無資料。')).toBeInTheDocument();
+    expect(await screen.findByText('此期間沒有可列入報表的資料。')).toBeInTheDocument();
   });
 
   it('週報查詢失敗時顯示錯誤而不是空白', async () => {
