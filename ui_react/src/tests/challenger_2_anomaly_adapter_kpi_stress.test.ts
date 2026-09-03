@@ -484,7 +484,7 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
           owning_lane: 'hcm',
           logical_code: 'TEST-CODE',
           field_path: '身分證字號',
-          masked_subject: 'A12****789',
+          subject: 'A12****789',
           issue_codes: ['code_1'],
           tracking_status: status,
           tracking_version: 1,
@@ -518,7 +518,7 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
           owning_lane: 'beclass',
           logical_code: 'NAV-TEST',
           field_path: '欄位',
-          masked_subject: 'SUBJ',
+          subject: 'SUBJ',
           issue_codes: ['code_nav'],
           tracking_status: 'open',
           tracking_version: 1,
@@ -560,7 +560,7 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
       expect((adaptedAnomaly as any).laneLabel).toBeUndefined();
       expect((adaptedAnomaly as any).logicalCode).toBeUndefined();
       expect((adaptedAnomaly as any).fieldPath).toBeUndefined();
-      expect((adaptedAnomaly as any).maskedSubject).toBeUndefined();
+      expect((adaptedAnomaly as any).subject).toBeUndefined();
       expect((adaptedAnomaly as any).issueCodes).toBeUndefined();
       expect((adaptedAnomaly as any).navigationAction).toBeUndefined();
     });

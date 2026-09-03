@@ -15,7 +15,7 @@ from domains.anomalies.import_warning_tracking import (
 def build_historical_order_warning_occurrences(
     *,
     source_event_identity: str,
-    masked_case_identity: str,
+    case_identity: str,
     issue_codes: tuple[str, ...],
 ) -> tuple[ImportWarningOccurrence, ...]:
     """Expand only registry-approved historical-order review issues."""
@@ -33,7 +33,7 @@ def build_historical_order_warning_occurrences(
                 source_event_identity=source_event_identity,
                 logical_code=logical_code,
                 field_path=field_path,
-                masked_subject=masked_case_identity,
+                subject=case_identity,
                 issue_codes=(issue_code,),
             )
         )

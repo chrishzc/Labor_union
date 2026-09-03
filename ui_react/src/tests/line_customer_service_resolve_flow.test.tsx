@@ -53,7 +53,7 @@ describe('客服工單結案 successor', () => {
     await waitFor(() => expect(screen.getByText('#31')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '查看明細' }));
     await screen.findByText('請協助確認資料更新方式');
-    expect(screen.getByText(CUSTOMER_SERVICE_TICKET_FIXTURE.line_user_id_masked)).toBeInTheDocument();
+    expect(screen.getByText(CUSTOMER_SERVICE_TICKET_FIXTURE.line_user_id)).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: '結案說明' }), { target: { value: '已由工會人員確認處理完成' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查結案影響' }));
     await screen.findByText('處理中 → 已結案');

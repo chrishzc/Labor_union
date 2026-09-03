@@ -25,7 +25,7 @@ def build_finance_row_warning_occurrence(
         source_event_identity=f"finance-import-row:{finance_import_row_id}",
         logical_code="FINANCE-ROW-001",
         field_path="$classification",
-        masked_subject=f"finance-row-***-{finance_import_row_id}",
+        subject=f"finance-row-{finance_import_row_id}",
         issue_codes=("finance_manual_review",),
     )
 
@@ -39,7 +39,7 @@ def build_finance_source_warning_occurrences(
             source_event_identity=review.review_identity,
             logical_code="FINANCE-SOURCE-001",
             field_path=finance_source_issue_field(issue_code),
-            masked_subject=review.masked_source_identity,
+            subject=review.source_identity,
             issue_codes=(issue_code,),
         )
         for issue_code in review.issue_codes

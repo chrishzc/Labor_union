@@ -12,7 +12,7 @@ const fixture = {
   records: [{
     source_event_id: 9,
     event_code: 'service_time_checkpoint',
-    recipient_masked: '***1234',
+    recipient_identity: '***1234',
     intent_status: 'cancelled',
   }],
 };

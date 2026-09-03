@@ -27,7 +27,7 @@ from domains.line.identity_binding import (
     LineIdentityClaim,
     advance_binding_failure_streak,
 )
-from domains.customer_service.escalation import MaskedContext, TriggerCode
+from domains.customer_service.escalation import EscalationContext, TriggerCode
 from domains.customer_service.ticket import CustomerServiceCategory
 from domains.line.identity_flow import (
     LineIdentityFlowPurpose,
@@ -432,7 +432,7 @@ class LineIdentityApplication:
                     trigger_code=TriggerCode.BINDING_FAILURE_THRESHOLD_2,
                     trigger_policy_version="identity.v1",
                     ticket_category=CustomerServiceCategory.CONTACT_UNION,
-                    masked_context=MaskedContext(
+                    context=EscalationContext(
                         (
                             "customer_binding_failure_threshold_2"
                             if subject_type is LineBindingSubjectType.CUSTOMER

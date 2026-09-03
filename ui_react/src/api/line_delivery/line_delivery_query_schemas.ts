@@ -1,6 +1,6 @@
 /**
  * File: line_delivery_query_schemas.ts
- * Description: 定義 LINE Delivery server-masked summary、list、detail 與 attempt strict views。
+ * Description: 定義 LINE Delivery canonical summary、list、detail 與 attempt strict views。
  */
 import { z } from 'zod';
 

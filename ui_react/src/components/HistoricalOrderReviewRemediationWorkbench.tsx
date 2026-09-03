@@ -51,7 +51,7 @@ function renderIssues(issues: HistoricalReviewIssue[], title: string): React.Rea
     {issues.length === 0 ? <p>沒有剩餘欄位衝突。</p> : <ul>
       {issues.map((issue) => <li key={`${issue.issue_code}:${issue.field_path}`}>
         <strong>{issue.field_label}</strong>
-        <div>來源值：{issue.masked_source_value || '（空白）'}｜目前值：{issue.masked_current_value || '（空白）'}</div>
+        <div>來源值：{issue.source_value || '（空白）'}｜目前值：{issue.current_value || '（空白）'}</div>
         <div>規則：{issue.rule}</div>
         <div>可採用值：{issue.allowed_values.length ? issue.allowed_values.join('、') : '依規則判定'}</div>
         <div>流程阻擋：{issue.process_blocker}</div>
@@ -244,7 +244,7 @@ export const HistoricalOrderReviewRemediationWorkbench: React.FC<HistoricalOrder
 
   return <section aria-label="歷史訂單 review 更正" data-review-identity={context.review_identity}>
     <h3>歷史訂單欄位衝突更正</h3>
-    <p>案件：{context.masked_case_identity}</p>
+    <p>案件：{context.case_identity}</p>
     <p>完成條件：{context.completion_condition}</p>
     {renderIssues(context.issues, '目前欄位衝突')}
     <div aria-label="更正檔案要求">
@@ -270,7 +270,7 @@ export const HistoricalOrderReviewRemediationWorkbench: React.FC<HistoricalOrder
         '原 review 尚未解除的欄位衝突',
       )}
       {applyResult.prior_alert_active && <button type="button" onClick={() => void reconcileProjection()} disabled={busy}>重新檢核異常狀態</button>}
-      {applyResult.successor ? <div>{renderIssues(applyResult.successor.issues, `後續 review：${applyResult.successor.masked_case_identity}`)}<p>請使用後續 review 的新修正入口。</p></div> : <p>後續流程可繼續推進；原 review 僅保留於歷史紀錄。</p>}
+      {applyResult.successor ? <div>{renderIssues(applyResult.successor.issues, `後續 review：${applyResult.successor.case_identity}`)}<p>請使用後續 review 的新修正入口。</p></div> : <p>後續流程可繼續推進；原 review 僅保留於歷史紀錄。</p>}
     </div> : <>
       <label>單列更正 .xlsx（必須符合上述契約）<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void selectWorkbook(event)} disabled={busy} /></label>
       {fileName && <><p>已選檔案：{fileName}</p>{snapshot && <details><summary>檔案技術詳情</summary><p>內容摘要：{snapshot.sha256}</p></details>}</>}

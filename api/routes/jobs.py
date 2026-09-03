@@ -1,6 +1,6 @@
 """
 File: jobs.py
-Description: 提供 Durable Job masked closed outcome 查詢與 outer-UoW 安全取消入口。
+Description: 提供 Durable Job canonical closed outcome 查詢與 outer-UoW 安全取消入口。
 """
 
 from fastapi import APIRouter, Depends

@@ -408,7 +408,7 @@ def _historical_order_review_definition() -> AnomalyDefinition:
             ),
         ),
         no_automated_recovery=True,
-        display_fields=("issue_codes", "masked_case_identity", "review_identity"),
+        display_fields=("issue_codes", "case_identity", "review_identity"),
     )
 
 
@@ -1221,7 +1221,7 @@ def _beclass_identity_conflict_definition() -> AnomalyDefinition:
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(),
-        display_fields=("entity_kind", "error_codes", "masked_identifier", "review_item_id", "source_row", "source_sheet", "version"),
+        display_fields=("entity_kind", "error_codes", "identifier", "review_item_id", "source_row", "source_sheet", "version"),
     )
 
 
@@ -1248,7 +1248,7 @@ def _beclass_import_definition(
         display_fields=(
             "entity_kind",
             "error_codes",
-            "masked_identifier",
+            "identifier",
             "review_item_id",
             "source_row",
             "source_sheet",

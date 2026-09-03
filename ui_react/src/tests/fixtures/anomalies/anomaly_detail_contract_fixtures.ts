@@ -47,7 +47,7 @@ const VALID_DISPLAY_SNAPSHOT = {
       value: ['obligation:SYNTH-19'],
     },
     {
-      kind: 'masked_text' as const,
+      kind: 'text' as const,
       key: 'staff_name',
       value: 'P***',
     },

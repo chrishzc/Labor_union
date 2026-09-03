@@ -1,6 +1,6 @@
 /**
  * File: line_delivery_query_errors.ts
- * Description: 收斂 LINE Delivery masked query 的驗證、認證、HTTP、解碼、逾時與取消錯誤。
+ * Description: 收斂 LINE Delivery canonical query 的驗證、認證、HTTP、解碼、逾時與取消錯誤。
  */
 import {
   ApiAbortError, ApiDecodeError, ApiError, ApiHttpError, ApiNetworkError,

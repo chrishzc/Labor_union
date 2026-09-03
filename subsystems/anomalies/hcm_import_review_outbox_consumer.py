@@ -83,14 +83,14 @@ def _consume_next(connection, runtime: AnomalyRuntime):
 
 def _project_request(event, snapshot):
     review_identity = str(snapshot["review_identity"])
-    masked_case_identity = str(snapshot["masked_case_identity"])
+    case_identity = str(snapshot["case_identity"])
     return ProjectAlertRequest(
         desired=DesiredAlertState(
             definition_code="IMPORT-004",
             source_identity=review_identity,
             source_version=int(snapshot["source_version"]),
             active=bool(snapshot["active"]),
-            fingerprint_values={"case_no": masked_case_identity},
+            fingerprint_values={"case_no": case_identity},
         ),
         source_event_identity=f"hcm-review-outbox:{event['id']}",
         consumer_identity="hcm-import-review-anomaly-projector-v1",
@@ -98,7 +98,7 @@ def _project_request(event, snapshot):
         display_snapshot={
             "review_identity": review_identity,
             "source_row": int(snapshot["source_row"]),
-            "masked_case_identity": masked_case_identity,
+            "case_identity": case_identity,
             "issue_codes": tuple(sorted(set(snapshot["issue_codes"]))),
         },
     )
@@ -134,7 +134,7 @@ def _project_warning_occurrences(connection, snapshot):
     evidence = _json_object(review["evidence_snapshot"])
     warnings = build_hcm_warning_occurrences_from_review(
         source_event_identity=str(review["source_event_identity"]),
-        masked_case_identity=str(review["masked_case_identity"]),
+        case_identity=str(review["case_identity"]),
         issue_codes=tuple(str(item) for item in issue_codes),
     )
     for warning in warnings:
@@ -145,7 +145,7 @@ def _project_warning_occurrences(connection, snapshot):
 def _load_review(connection, review_identity):
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT source_event_identity,masked_case_identity,issue_codes,evidence_snapshot "
+            "SELECT source_event_identity,case_identity,issue_codes,evidence_snapshot "
             "FROM case_import_hcm_review_rows WHERE review_identity=%s FOR UPDATE",
             (review_identity,),
         )
@@ -156,10 +156,10 @@ def _append_warning_occurrence(connection, warning, review_identity, evidence):
     with connection.cursor() as cursor:
         cursor.execute(
             "INSERT IGNORE INTO import_warning_occurrences "
-            "(occurrence_identity,owning_lane,source_kind,source_event_identity,source_receipt_identity,logical_code,field_path,masked_subject,issue_codes,evidence_snapshot) "
+            "(occurrence_identity,owning_lane,source_kind,source_event_identity,source_receipt_identity,logical_code,field_path,subject,issue_codes,evidence_snapshot) "
             "VALUES (%s,%s,'hcm_review',%s,%s,%s,%s,%s,%s,%s)",
             (warning.occurrence_identity, warning.owning_lane, warning.source_event_identity,
-             review_identity, warning.logical_code, warning.field_path, warning.masked_subject,
+             review_identity, warning.logical_code, warning.field_path, warning.subject,
              _json(list(warning.issue_codes)), _json(evidence)),
         )
         cursor.execute(

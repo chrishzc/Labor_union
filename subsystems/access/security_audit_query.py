@@ -1,6 +1,6 @@
 """
 File: security_audit_query.py
-Description: 執行安全稽核查詢、遮罩投影與既有保留期搬移。
+Description: 執行安全稽核查詢、canonical 投影與既有保留期搬移。
 """
 
 from __future__ import annotations
@@ -17,17 +17,17 @@ from shared_kernel.clock import TAIPEI_TIME_ZONE
 
 
 ONLINE_RETENTION_YEARS = 2
-SENSITIVE_DETAIL_KEYS = frozenset({"password", "token", "authorization", "line_user_id", "phone", "identity_number"})
+SENSITIVE_DETAIL_KEYS = frozenset({"password", "token", "authorization", "secret", "credential", "line_user_id", "phone", "identity_number"})
 
 
 @dataclass(frozen=True)
 class AuditListItem:
     audit_id: int
     occurred_at: datetime
-    actor_label_masked: str | None
+    actor_label: str | None
     action_family: Literal["authentication", "account_security", "session", "mfa", "system", "other"]
-    target_label_masked: str | None
-    ip_address_masked: str | None
+    target_label: str | None
+    ip_address: str | None
     outcome: Literal["success", "denied", "failed", "unknown"]
     reason_code: str | None
 
@@ -35,7 +35,7 @@ class AuditListItem:
 @dataclass(frozen=True)
 class AuditDetailField:
     key: Literal["reason", "mfa_method", "account", "enabled", "source", "subject"]
-    value_masked: str
+    value: str
 
 
 @dataclass(frozen=True)
@@ -51,29 +51,23 @@ class AuditPage:
     total: int
 
 
-def project_masked_audit_page(page: AuditPage) -> list[AuditListItem]:
-    """將儲存層稽核列收斂為不含 raw details 的 UI 公開投影。"""
+def project_audit_page(page: AuditPage) -> list[AuditListItem]:
+    """將儲存層稽核列收斂為不新增 raw details 的 UI canonical 投影。"""
     return list(page.items)
 
 
-def _mask_label(value: object) -> str | None:
+def _canonical_label(value: object) -> str | None:
     if value is None:
         return None
     label = str(value).strip()
-    if not label:
-        return None
-    return f"{label[:1]}***"
+    return label or None
 
-
-def _mask_target(resource_type: object, resource_id: object) -> str | None:
+def _canonical_target(resource_type: object, resource_id: object) -> str | None:
     kind = str(resource_type).strip() if resource_type is not None else ""
     identity = str(resource_id).strip() if resource_id is not None else ""
     if not kind and not identity:
         return None
-    if identity:
-        return f"{kind or 'resource'}:{identity[:2]}***"
-    return kind[:100]
-
+    return f"{kind or 'resource'}:{identity}" if identity else kind
 
 def _action_family(action: str) -> str:
     normalized = action.lower()
@@ -114,12 +108,10 @@ def mask_audit_details(value: Any) -> Any:
     return value
 
 
-def mask_ip_address(ip_address: str | None) -> str | None:
+def canonical_ip_address(ip_address: str | None) -> str | None:
     if not ip_address:
         return None
-    parts = ip_address.split(".")
-    return ".".join([*parts[:3], "***"]) if len(parts) == 4 else "***"
-
+    return str(ip_address).strip() or None
 
 def list_admin_audits(
     *,
@@ -215,10 +207,10 @@ def _audit_list_item(row: dict[str, Any]) -> AuditListItem:
     return AuditListItem(
         audit_id=int(row["id"]),
         occurred_at=_as_business_datetime(row["created_at"]),
-        actor_label_masked=_mask_label(row.get("actor_display_name")),
+        actor_label=_canonical_label(row.get("actor_display_name")),
         action_family=_action_family(action),
-        target_label_masked=_mask_target(row.get("resource_type"), row.get("resource_id")),
-        ip_address_masked=mask_ip_address(row.get("ip_address")),
+        target_label=_canonical_target(row.get("resource_type"), row.get("resource_id")),
+        ip_address=canonical_ip_address(row.get("ip_address")),
         outcome=_audit_outcome(row.get("result_status")),
         reason_code=action if re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", action) else None,
     )
@@ -256,7 +248,7 @@ def _safe_detail_fields(value: object) -> list[AuditDetailField]:
         method = value.get("mfa_method")
         fields.append(AuditDetailField("mfa_method", method if method in {"totp", "recovery_code"} else "other"))
     if "account_id" in value:
-        fields.append(AuditDetailField("account", _mask_target("account", value.get("account_id")) or "account"))
+        fields.append(AuditDetailField("account", _canonical_target("account", value.get("account_id")) or "account"))
     if isinstance(value.get("enabled"), bool):
         fields.append(AuditDetailField("enabled", "enabled" if value["enabled"] else "disabled"))
     if "source" in value:

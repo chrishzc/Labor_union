@@ -1,6 +1,6 @@
 """
 File: anomaly_registry.py
-Description: 提供異常清單、owner remediation 詳情、工作流與封閉去敏投影。
+Description: 提供異常清單、owner remediation 詳情、工作流與canonical 投影。
 """
 
 from __future__ import annotations
@@ -327,11 +327,11 @@ _IDENTITY_EVIDENCE_FIELDS = frozenset(
         "original_refund_ledger_entry_id",
     }
 )
-_MASKED_TEXT_EVIDENCE_FIELDS = frozenset(
+_TEXT_EVIDENCE_FIELDS = frozenset(
     {
         "line_user_id",
-        "masked_case_identity",
-        "masked_identifier",
+        "case_identity",
+        "identifier",
         "staff_name",
         "to_user_id",
     }
@@ -479,8 +479,8 @@ def _private_navigation_fields(definition_code: str) -> frozenset[str]:
 def _evidence_payload(key: str, value: object) -> dict[str, object]:
     if key in _IDENTITY_EVIDENCE_FIELDS:
         return {"kind": "identity", "key": key, "value": _identity(value)}
-    if key in _MASKED_TEXT_EVIDENCE_FIELDS:
-        return {"kind": "masked_text", "key": key, "value": _masked_text(value)}
+    if key in _TEXT_EVIDENCE_FIELDS:
+        return {"kind": "text", "key": key, "value": _canonical_text_evidence(value)}
     if key in _DATE_EVIDENCE_FIELDS:
         return {"kind": "date", "key": key, "value": _date_value(value)}
     if key in _MONEY_EVIDENCE_FIELDS:
@@ -517,7 +517,7 @@ def _identity(value: object) -> str:
     return rendered
 
 
-def _masked_text(value: object) -> str:
+def _canonical_text_evidence(value: object) -> str:
     text = _text(value)
     if "*" in text:
         return text
@@ -597,8 +597,8 @@ def _timeline_payload(event) -> AnomalyTimelineEventView:
         action=raw["action"],
         expected_workflow_version=raw["expected_workflow_version"],
         resulting_workflow_version=raw["resulting_workflow_version"],
-        actor=f"{actor[:1]}***",
-        reason=_safe_timeline_reason(raw["action"]),
+        actor=actor,
+        reason=str(raw["reason"]).strip(),
         correlation_id=correlation_id,
         created_at=raw["created_at"],
     )

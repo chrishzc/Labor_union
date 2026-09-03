@@ -19,7 +19,7 @@ const PENDING_REVIEW = {
   subject_reference: 'STAFF-REVIEW-071',
   assigned_admin_id: null,
   due_at: null,
-  line_user_id_masked: 'Ureview-should-be-masked-7890',
+  line_user_id: 'Ureview-should-be-masked-7890',
   display_name: '待審月嫂甲',
   decision_reason: null,
   reviewed_by_actor_id: null,
@@ -47,7 +47,7 @@ const REVIEW_PREVIEW = {
   resulting_version: 4,
   subject_type: 'staff' as const,
   subject_reference: 'STAFF-REVIEW-071',
-  line_user_id_masked: 'Ureview-should-be-masked-7890',
+  line_user_id: 'Ureview-should-be-masked-7890',
   preview_fingerprint: 'review-preview-fixture-071',
 };
 
@@ -77,7 +77,7 @@ describe('LINE 身分人工審核工作台', () => {
 
     await screen.findByText('待審月嫂甲');
     expect(screen.getByText('只有具審核權限的真人管理員可核准或拒絕；等待時間不會自動做出決定。')).toBeInTheDocument();
-    expect(document.body.textContent).not.toContain(PENDING_REVIEW.line_user_id_masked);
+    expect(document.body.textContent).not.toContain(PENDING_REVIEW.line_user_id);
     fireEvent.click(screen.getByRole('button', { name: '查看審核 #71' }));
     await screen.findByRole('heading', { name: '審核 #71｜月嫂身分驗證' });
 

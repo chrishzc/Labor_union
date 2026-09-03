@@ -12,7 +12,7 @@ from typing import Callable
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 from domains.case_import.staff_historical_adoption import plan_staff_scalar_merge
 from shared_kernel.fingerprints import fingerprint_payload
-from subsystems.case_import.beclass_review_intake import masked_review_identifier, record_invalid_beclass_row
+from subsystems.case_import.beclass_review_intake import canonical_review_identifier, record_invalid_beclass_row
 from subsystems.case_import.staff_historical_adoption import adopt_existing_staff, record_created_staff_adoption, record_staff_adoption_outcome
 from subsystems.case_import.staff_historical_workbook import StaffHistoricalWorkbook, StaffHistoricalWorkbookRow, load_staff_historical_workbook
 
@@ -198,7 +198,7 @@ class StaffHistoricalWorkbookService:
 
 
 def _record_review(connection, workbook, row, issues: tuple[str, ...], *, recorder, repository) -> str:
-    return recorder(connection, source_kind=BeClassImportSourceKind.STAFF, source_content_digest=workbook.source_content_digest, source_sheet=workbook.sheet_identity, source_row=row.source_row, masked_identifier=masked_review_identifier(BeClassImportSourceKind.STAFF, row.record.get("identity_card"), row.source_row), source_payload=_review_payload(row.record), issue_codes=issues, repository=repository)
+    return recorder(connection, source_kind=BeClassImportSourceKind.STAFF, source_content_digest=workbook.source_content_digest, source_sheet=workbook.sheet_identity, source_row=row.source_row, identifier=canonical_review_identifier(BeClassImportSourceKind.STAFF, row.record.get("identity_card"), row.source_row), source_payload=_review_payload(row.record), issue_codes=issues, repository=repository)
 
 
 def _issues(row, outcome: str) -> tuple[str, ...]:

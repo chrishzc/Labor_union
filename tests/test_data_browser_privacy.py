@@ -1,13 +1,10 @@
-"""
-File: test_data_browser_privacy.py
-Description: 驗證 Data Browser masked rows 不輸出 PII 或 raw payload。
-"""
+"""Regression coverage for canonical Data Browser projections after issue #101."""
 
 from __future__ import annotations
 
 import json
 
-from api.schemas.data_browser import DataBrowserMaskedPageView
+from api.schemas.data_browser import DataBrowserPageView
 from infrastructure.mysql.data_browser_query_repository import DataBrowserQueryRepository
 
 
@@ -37,19 +34,19 @@ class _Connection:
 
 
 def _render(source_id, row):
-    page = DataBrowserQueryRepository(_Connection([row])).query_masked_page(
+    page = DataBrowserQueryRepository(_Connection([row])).query_page(
         source_id,
         limit=25,
         after=None,
         query=None,
     )
     return json.dumps(
-        DataBrowserMaskedPageView.model_validate(page).model_dump(mode="json"),
+        DataBrowserPageView.model_validate(page).model_dump(mode="json"),
         ensure_ascii=False,
     )
 
 
-def test_client_and_staff_rows_mask_names_and_omit_contact_fields():
+def test_client_and_staff_rows_preserve_canonical_names_without_expanding_projection():
     client = _render(
         "clients",
         {
@@ -59,8 +56,8 @@ def test_client_and_staff_rows_mask_names_and_omit_contact_fields():
             "identity_status": "一般市民",
             "db_created_at": "2026-08-01T00:00:00",
             "db_updated_at": "2026-08-02T00:00:00",
-            "phone": "SENSITIVE_PHONE_SENTINEL",
-            "address": "完整地址不得出現",
+            "phone": "OUTSIDE_PROJECTION_PHONE",
+            "address": "OUTSIDE_PROJECTION_ADDRESS",
         },
     )
     staff = _render(
@@ -72,18 +69,20 @@ def test_client_and_staff_rows_mask_names_and_omit_contact_fields():
             "status": "active",
             "created_at": "2026-08-01T00:00:00",
             "updated_at": "2026-08-02T00:00:00",
-            "identity_card": "A123456789",
-            "bank_account": "1234567890",
+            "identity_card": "OUTSIDE_PROJECTION_ID",
+            "bank_account": "OUTSIDE_PROJECTION_ACCOUNT",
         },
     )
 
-    assert "林佩萱" not in client and "林○○" in client
-    assert "SENSITIVE_PHONE_SENTINEL" not in client and "完整地址不得出現" not in client
-    assert "王美惠" not in staff and "王○○" in staff
-    assert "A123456789" not in staff and "1234567890" not in staff
+    assert "林佩萱" in client
+    assert "王美惠" in staff
+    assert "OUTSIDE_PROJECTION_PHONE" not in client
+    assert "OUTSIDE_PROJECTION_ADDRESS" not in client
+    assert "OUTSIDE_PROJECTION_ID" not in staff
+    assert "OUTSIDE_PROJECTION_ACCOUNT" not in staff
 
 
-def test_bank_row_never_exposes_amount_or_account_details():
+def test_bank_row_exposes_canonical_amount_without_expanding_projection():
     rendered = _render(
         "bank_facts",
         {
@@ -96,14 +95,13 @@ def test_bank_row_never_exposes_amount_or_account_details():
             "credit": 78000,
             "debit": None,
             "created_at": "2026-08-17T00:00:00",
-            "source_bank_account": "完整銀行帳號",
-            "counterparty_name": "完整交易人",
+            "source_bank_account": "OUTSIDE_PROJECTION_ACCOUNT",
+            "counterparty_name": "OUTSIDE_PROJECTION_COUNTERPARTY",
             "raw_payload": {"secret": "raw"},
         },
     )
 
-    assert "78000" not in rendered
-    assert "完整銀行帳號" not in rendered
-    assert "完整交易人" not in rendered
+    assert "78000" in rendered
+    assert "OUTSIDE_PROJECTION_ACCOUNT" not in rendered
+    assert "OUTSIDE_PROJECTION_COUNTERPARTY" not in rendered
     assert "raw_payload" not in rendered
-    assert "NT$ ****" in rendered

@@ -1,6 +1,6 @@
 """
 File: data_browser.py
-Description: 定義 legacy Data Browser 與六來源 masked query 契約。
+Description: 定義 legacy Data Browser 與六來源 canonical query 契約。
 """
 
 from datetime import date, datetime
@@ -25,7 +25,6 @@ DataBrowserPresentation = Literal[
     "integer",
     "decimal",
     "status",
-    "masked",
 ]
 
 
@@ -33,27 +32,27 @@ class _StrictQueryModel(BaseModel):
     model_config = ConfigDict(extra="forbid", from_attributes=True)
 
 
-class DataBrowserMaskedCellView(_StrictQueryModel):
+class DataBrowserCellView(_StrictQueryModel):
     field_id: str = Field(min_length=1, max_length=100)
     label: str = Field(min_length=1, max_length=100)
     value: str | int | bool | float | None
     presentation: DataBrowserPresentation
 
 
-class DataBrowserMaskedRowView(_StrictQueryModel):
+class DataBrowserRowView(_StrictQueryModel):
     source_id: DataBrowserSourceId
     row_identity: str = Field(min_length=1, max_length=191)
     display_title: str = Field(min_length=1, max_length=300)
-    summary_cells: list[DataBrowserMaskedCellView]
-    detail_cells: list[DataBrowserMaskedCellView]
+    summary_cells: list[DataBrowserCellView]
+    detail_cells: list[DataBrowserCellView]
     recorded_at: str | None
     source_actor_label: str | None
     version_identity: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-class DataBrowserMaskedPageView(_StrictQueryModel):
+class DataBrowserPageView(_StrictQueryModel):
     source_id: DataBrowserSourceId
-    items: list[DataBrowserMaskedRowView]
+    items: list[DataBrowserRowView]
     next_cursor: str | None
 
 

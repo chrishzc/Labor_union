@@ -89,7 +89,7 @@ def _record_invalid_root(fixture: dict[str, object], source_digest: str) -> str:
             source_content_digest=source_digest,
             source_sheet=str(fixture["source_sheet"]),
             source_row=int(fixture["source_row"]),
-            masked_identifier=str(fixture["masked_identifier"]),
+            identifier=str(fixture["identifier"]),
             source_payload=_object(fixture, "source_payload"),
             issue_codes=_text_items(fixture, "issue_codes"),
             repository=MySqlBeClassImportReviewRepository(connection),

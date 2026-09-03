@@ -19,10 +19,10 @@ export function adaptSubsidyPartitions(partitions: readonly SubsidyReportPartiti
       serviceDays: row.service_days,
       amount: `NT$ ${row.subsidy_amount_ntd.toLocaleString()}`,
       unitPrice: `NT$ ${row.unit_price_ntd.toLocaleString()}`,
-      employer: row.employer_name_masked,
-      staff: row.staff_name_masked,
-      identity: row.identity_card_masked,
-      address: row.address_masked,
+      employer: row.employer_name,
+      staff: row.staff_name,
+      identity: row.identity_card,
+      address: row.address,
     })),
   }));
 }

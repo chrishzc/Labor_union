@@ -35,8 +35,8 @@ class AnomalyIdentityEvidenceView(_AnomalyEvidenceBase):
     value: str = Field(min_length=1, max_length=191)
 
 
-class AnomalyMaskedTextEvidenceView(_AnomalyEvidenceBase):
-    kind: Literal["masked_text"]
+class AnomalyTextEvidenceView(_AnomalyEvidenceBase):
+    kind: Literal["text"]
     value: str = Field(min_length=1, max_length=191)
 
 
@@ -87,7 +87,7 @@ class AnomalyDetailListEvidenceView(_AnomalyEvidenceBase):
 
 AnomalyEvidenceFieldView = Annotated[
     AnomalyIdentityEvidenceView
-    | AnomalyMaskedTextEvidenceView
+    | AnomalyTextEvidenceView
     | AnomalyDateEvidenceView
     | AnomalyDatetimeEvidenceView
     | AnomalyBooleanEvidenceView
@@ -247,7 +247,7 @@ __all__ = [
     "AnomalyIdentityEvidenceView",
     "AnomalyIdentityListEvidenceView",
     "AnomalyIntegerEvidenceView",
-    "AnomalyMaskedTextEvidenceView",
+    "AnomalyTextEvidenceView",
     "AnomalyMoneyEvidenceView",
     "AnomalySourceBindingView",
     "AnomalySummaryView",

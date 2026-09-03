@@ -1,10 +1,10 @@
 /**
  * File: data_browser_query_contract_fixtures.ts
- * Description: 提供 masked Data Browser strict contract 測試資料。
+ * Description: 提供 canonical Data Browser strict contract 測試資料。
  */
-import type { DataBrowserMaskedPage } from '../../../api/data_browser/data_browser_query_schemas';
+import type { DataBrowserPage } from '../../../api/data_browser/data_browser_query_schemas';
 
-export const VALID_DATA_BROWSER_PAGE: DataBrowserMaskedPage = {
+export const VALID_DATA_BROWSER_PAGE: DataBrowserPage = {
   source_id: 'orders',
   items: [
     {
@@ -30,7 +30,7 @@ export const VALID_DATA_BROWSER_PAGE: DataBrowserMaskedPage = {
 
 export const VALID_DATA_BROWSER_ENVELOPE = {
   success: true,
-  message: '成功取得去敏資料來源',
+  message: '成功取得資料來源',
   data: VALID_DATA_BROWSER_PAGE,
   error: null,
 };

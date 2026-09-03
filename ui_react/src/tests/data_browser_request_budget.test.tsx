@@ -32,7 +32,7 @@ describe('Data Browser request budget', () => {
     fireEvent.click(screen.getByRole('button', { name: '查詢' }));
     await waitFor(() => expect(dataBrowserQueryClient.querySource).toHaveBeenCalledTimes(3));
 
-    fireEvent.click(screen.getByRole('button', { name: /檢視去敏詳情/ }));
+    fireEvent.click(screen.getByRole('button', { name: /檢視詳情/ }));
     expect(dataBrowserQueryClient.querySource).toHaveBeenCalledTimes(3);
   });
 });

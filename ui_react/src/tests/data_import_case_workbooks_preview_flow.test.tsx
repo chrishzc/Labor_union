@@ -25,7 +25,7 @@ function workbook(contents: string, name = 'import.xlsx'): File {
 
 const historicalReviewContext: HistoricalReviewContext = {
   review_identity: 'historical-order-review:one',
-  masked_case_identity: 'CA****01',
+  case_identity: 'CA****01',
   issues: [],
   review_version: 0,
   remediation_version: 0,

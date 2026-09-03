@@ -50,7 +50,7 @@ class InvalidBeClassImportRow:
     source_event_identity: str
     source_sheet: str
     source_row: int
-    masked_identifier: str
+    identifier: str
     source_payload: CanonicalBeClassPayload
     issue_codes: tuple[str, ...]
     source_fingerprint: PreviewFingerprint
@@ -60,7 +60,7 @@ class InvalidBeClassImportRow:
         _validate_identity(self.source_event_identity, "source event identity")
         _validate_identity(self.source_sheet, "source sheet")
         _validate_source_row(self.source_row)
-        _validate_masked_identifier(self.masked_identifier)
+        _validate_identifier(self.identifier)
         _validate_payload(self.source_payload, "source payload")
         _validate_issue_codes(self.issue_codes)
         if self.source_fingerprint != fingerprint_source_row(
@@ -68,7 +68,7 @@ class InvalidBeClassImportRow:
             self.source_event_identity,
             self.source_sheet,
             self.source_row,
-            self.masked_identifier,
+            self.identifier,
             self.source_payload,
             self.issue_codes,
         ):
@@ -111,7 +111,7 @@ class BeClassImportReviewCandidate:
     source_kind: BeClassImportSourceKind
     source_sheet: str
     source_row: int
-    masked_identifier: str
+    identifier: str
     resulting_version: int
     corrected_payload: CanonicalBeClassPayload
     resolved_issue_codes: tuple[str, ...]
@@ -137,7 +137,7 @@ def fingerprint_source_row(
     source_event_identity: str,
     source_sheet: str,
     source_row: int,
-    masked_identifier: str,
+    identifier: str,
     source_payload: CanonicalBeClassPayload,
     issue_codes: tuple[str, ...],
 ) -> PreviewFingerprint:
@@ -146,14 +146,14 @@ def fingerprint_source_row(
     _validate_issue_codes(issue_codes)
     _validate_identity(source_sheet, "source sheet")
     _validate_source_row(source_row)
-    _validate_masked_identifier(masked_identifier)
+    _validate_identifier(identifier)
     return fingerprint_payload(
         {
             "source_kind": source_kind.value,
             "source_event_identity": source_event_identity,
             "source_sheet": source_sheet,
             "source_row": source_row,
-            "masked_identifier": masked_identifier,
+            "identifier": identifier,
             "source_payload": source_payload,
             "issue_codes": issue_codes,
         }
@@ -183,7 +183,7 @@ def build_beclass_import_review_candidate(
         facts.root.source_kind,
         facts.root.source_sheet,
         facts.root.source_row,
-        facts.root.masked_identifier,
+        facts.root.identifier,
         resulting_version,
         corrected_payload,
         intent.resolved_issue_codes,
@@ -208,7 +208,7 @@ def review_outbox_snapshot(
         source_kind = root.source_kind
         source_sheet = root.source_sheet
         source_row = root.source_row
-        masked_identifier = root.masked_identifier
+        identifier = root.identifier
         issue_codes = root.issue_codes
         snapshot_version = 0 if version is None else version
         snapshot_active = True if active is None else active
@@ -217,7 +217,7 @@ def review_outbox_snapshot(
         source_kind = root.source_kind
         source_sheet = root.source_sheet
         source_row = root.source_row
-        masked_identifier = root.masked_identifier
+        identifier = root.identifier
         issue_codes = root.resolved_issue_codes
         snapshot_version = root.resulting_version if version is None else version
         snapshot_active = False if active is None else active
@@ -228,7 +228,7 @@ def review_outbox_snapshot(
         "source_row": source_row,
         "issue_codes": issue_codes,
         "version": snapshot_version,
-        "masked_identifier": masked_identifier,
+        "identifier": identifier,
         "active": snapshot_active,
     }
 
@@ -303,11 +303,8 @@ def _validate_source_row(value) -> None:
         _raise_invalid("source row must be a positive integer")
 
 
-def _validate_masked_identifier(value) -> None:
-    _validate_identity(value, "masked identifier")
-    if "*" not in value:
-        _raise_invalid("masked identifier must not expose the raw identifier")
-
+def _validate_identifier(value) -> None:
+    _validate_identity(value, "identifier")
 
 def _validate_review_identity(value) -> None:
     _validate_identity(value, "review identity")

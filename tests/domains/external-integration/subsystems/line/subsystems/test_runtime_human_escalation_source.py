@@ -15,7 +15,7 @@ from subsystems.line.runtime_human_escalation_source import (
     normalize_complaint_text,
     normalize_runtime_critical,
 )
-from domains.customer_service.escalation import MaskedContext, TriggerCode, validate_trigger
+from domains.customer_service.escalation import EscalationContext, TriggerCode, validate_trigger
 
 
 def _event(sequence: int, *, scope: str = "binding:opaque") -> BindingFailureEvent:
@@ -58,7 +58,7 @@ def test_complaint_is_masked_and_category_is_not_guessed() -> None:
 def test_complaint_mask_maps_directly_to_customer_service_domain_context() -> None:
     payload = normalize_complaint_text("我要客訴：姓名 王小美")
     assert payload is not None
-    context = MaskedContext.from_mapping(payload)
+    context = EscalationContext.from_mapping(payload)
     validate_trigger(TriggerCode.COMPLAINT, "line_inbox", "complaint.v1", context)
     assert set(context.as_dict()) == {
         "summary_code", "policy_version", "category", "redaction_version"

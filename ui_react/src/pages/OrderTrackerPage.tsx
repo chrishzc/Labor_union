@@ -989,7 +989,7 @@ export const OrderTrackerPage: React.FC = () => {
 
                           <div className="notification-meta-row">
                             <span className="notification-recipient">
-                              對象：{record.recipient_type === 'staff' ? '👩‍🍼 月嫂' : '👤 客戶'}（{record.recipient_masked ?? '未指定'}）
+                              對象：{record.recipient_type === 'staff' ? '👩‍🍼 月嫂' : '👤 客戶'}（{record.recipient_identity ?? '未指定'}）
                             </span>
                             <span className="notification-time">
                               🕒 {record.occurred_at_utc ? formatFriendlyTimestamp(record.occurred_at_utc) : '未記錄'}

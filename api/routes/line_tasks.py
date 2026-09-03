@@ -1,6 +1,6 @@
 """
 File: line_tasks.py
-Description: 提供 LINE Delivery 的 server-masked 查詢與既有控制端點。
+Description: 提供 LINE Delivery 的 canonical 查詢與既有控制端點。
 """
 
 from __future__ import annotations
@@ -420,7 +420,7 @@ def _task_snapshot(task: LineDeliveryTaskSnapshot) -> LineDeliveryTaskActionResu
 
 
 def _admin_record(item) -> dict[str, object]:
-    preview = _message_preview(item.payload_json)
+    preview = _message_text(item.payload_json)
     return {
         "id": item.task_id.value,
         "task_id": item.task_id.value,
@@ -429,7 +429,7 @@ def _admin_record(item) -> dict[str, object]:
         "recipient_type": item.recipient_type,
         "recipient_identity": item.recipient_identity,
         "message_kind": item.message_kind,
-        "message_preview": preview,
+        "message_text": preview,
         "payload_json": item.payload_json,
         "status": item.status.value,
         "scheduled_at": item.scheduled_at,
@@ -448,14 +448,17 @@ def _admin_record(item) -> dict[str, object]:
     }
 
 
-def _message_preview(payload_json: str) -> str:
+def _message_text(payload_json: str) -> str:
     try:
         payload = json.loads(payload_json)
-    except (TypeError, ValueError):
-        return ""
-    value = payload.get("text") or payload.get("altText") or payload.get("alt_text")
-    return str(value)[:160] if value else ""
-
+    except (TypeError, json.JSONDecodeError):
+        return str(payload_json or "")
+    if isinstance(payload, dict):
+        for key in ("text", "message", "content"):
+            value = payload.get(key)
+            if isinstance(value, str):
+                return value
+    return str(payload_json or "")
 
 def _legacy_task_type(source_type: str) -> str:
     return {

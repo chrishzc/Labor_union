@@ -1,5 +1,5 @@
 """File: escalation_contracts.py
-Description: M4 escalation commands、views、ports 與去敏通知契約。
+Description: M4 escalation commands、views、ports 與bounded 通知契約。
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from domains.customer_service.escalation import (
     AutomationHoldState,
     EscalationEventType,
     EscalationWorkflowStatus,
-    MaskedAlertIntent,
-    MaskedContext,
+    EscalationAlertIntent,
+    EscalationContext,
     TriggerCode,
     validate_source_fingerprint,
     validate_trigger,
@@ -59,7 +59,7 @@ class CreateHumanEscalation:
     trigger_code: TriggerCode
     trigger_policy_version: str
     ticket_category: CustomerServiceCategory
-    masked_context: MaskedContext | Mapping[str, object]
+    context: EscalationContext | Mapping[str, object]
     hold_scope: str
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
@@ -74,7 +74,7 @@ class CreateHumanEscalation:
         require_canonical_text(self.hold_scope, "hold scope", 191)
         if not isinstance(self.ticket_category, CustomerServiceCategory):
             raise TypeError("ticket_category must be CustomerServiceCategory")
-        context = _context(self.masked_context)
+        context = _context(self.context)
         validate_trigger(self.trigger_code, self.source_kind, self.trigger_policy_version, context)
 
 
@@ -134,7 +134,7 @@ class HumanEscalationView:
     workflow_version: int
     automation_hold: AutomationHoldState
     hold_scope_label: str
-    masked_context: Mapping[str, str]
+    context: Mapping[str, str]
     alert_status: AlertStatus
     current_version: str
     created_at: datetime
@@ -155,10 +155,10 @@ class HumanEscalationView:
             raise ValueError("workflow version must be nonnegative")
         require_canonical_text(self.hold_scope_label, "hold scope label", 80)
         require_canonical_text(self.current_version, "current version", 191)
-        if not isinstance(self.masked_context, Mapping):
-            raise TypeError("masked_context must be a mapping")
-        if set(self.masked_context) - {"summary_code", "policy_version", "category", "redaction_version"}:
-            raise ValueError("masked_context contains a non-allowlisted field")
+        if not isinstance(self.context, Mapping):
+            raise TypeError("context must be a mapping")
+        if set(self.context) - {"summary_code", "policy_version", "category", "redaction_version"}:
+            raise ValueError("context contains a non-allowlisted field")
         for value, name in ((self.delivery_task_ref, "delivery task reference"), (self.delivery_outcome_ref, "delivery outcome reference")):
             if value is not None:
                 require_canonical_text(value, name, 191)
@@ -215,7 +215,7 @@ class HumanEscalationPersistencePort(Protocol):
     def create(self, command: CreateHumanEscalation, ticket: object) -> object: ...
     def transition(self, escalation_id: int, **changes: object) -> object: ...
     def append_event(self, escalation_id: int, event_type: EscalationEventType, **values: object) -> None: ...
-    def enqueue_masked_alert(self, intent: MaskedAlertIntent) -> None: ...
+    def enqueue_alert(self, intent: EscalationAlertIntent) -> None: ...
     def save_receipt(self, key: str, fingerprint: str, receipt: HumanEscalationReceipt) -> None: ...
     def active_hold(self, hold_scope: str) -> AutomationHoldDecision | None: ...
     def record_alert_delivery_task(self, escalation_ref: str, task_id: int) -> None: ...
@@ -232,10 +232,10 @@ class HumanEscalationSourcePort(Protocol):
     def can_release(self, escalation: object) -> bool: ...
 
 
-def _context(value: MaskedContext | Mapping[str, object]) -> MaskedContext:
-    if isinstance(value, MaskedContext):
+def _context(value: EscalationContext | Mapping[str, object]) -> EscalationContext:
+    if isinstance(value, EscalationContext):
         return value
-    return MaskedContext.from_mapping(value)
+    return EscalationContext.from_mapping(value)
 
 
 def _ids(*values: int) -> None:
