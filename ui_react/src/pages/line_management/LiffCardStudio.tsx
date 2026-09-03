@@ -72,11 +72,12 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     type: 'liff',
     title: '4. profile_update.html',
     subtitle: '客戶資料與服務異動申請',
-    badge: '正式介面待補',
-    endpointUrl: '/line-profile-update（規劃入口）',
+    badge: '正式異動申請',
+    endpointUrl: '/line-profile-update',
+    launchPath: '/line-profile-update',
     authLevel: '必須驗證 LINE 登入憑證、正式綁定、案件權限與狀態鎖',
-    description: '保留原本預產期、地址、天數與服務需求異動設計；正式異動流程尚未接上，不得假存。',
-    apiMapping: '待補：客戶資料異動的查詢、預覽、確認與結果回讀',
+    description: '產婦可查詢目前已登記資料，勾選異動欄位（地址、電話、預產期、寶寶資訊等）並送審。',
+    apiMapping: '客戶資料異動之查詢、預覽與申請流程已接通',
   },
   {
     id: 'staff_order_search',
@@ -129,49 +130,49 @@ const ASSET_ITEMS: LiffAssetItem[] = [
   {
     id: 'flex_dispatch',
     type: 'flex_card',
-    title: '派案通知卡設計稿',
-    subtitle: '去敏案件入口版面',
-    badge: '設計稿',
-    endpointUrl: '未發布',
-    authLevel: '僅為設計稿，尚未接通正式發送檢查',
-    description: '僅保留去敏視覺結構；不代表已建立發送工作或已送達。',
-    apiMapping: '正式卡片素材清單與發送流程尚未接通',
+    title: '派案通知卡設計稿（模組三：月嫂派案意願）',
+    subtitle: '【模組三】候選月嫂派案意願調查 ｜ 去敏案件入口',
+    badge: '模組三範本',
+    endpointUrl: '排定於模組三：月嫂派案與媒合 Subsystem',
+    authLevel: '候選月嫂專屬 ｜ LINE Flex 去敏安全版面（受派案資格保護）',
+    description: '【業務定位】當系統媒合成功時向候選月嫂推播。去敏呈現服務期間、時段與區域，詳細地址不留在對話中；供月嫂查閱案件或回覆接案意願。',
+    apiMapping: '模組三排定：LineBotPushService.send_dispatch_notice() ＋ Postback 意願回覆',
     flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_dispatch,
   },
   {
     id: 'flex_leave_confirm',
     type: 'flex_card',
-    title: '服務日順延確認卡設計稿',
-    subtitle: '雙選項版面',
-    badge: '設計稿',
-    endpointUrl: '未發布',
-    authLevel: '僅為設計稿，尚未接通正式發送檢查',
-    description: '僅呈現選項的視覺位置；不建立順延命令、不送出 postback。',
-    apiMapping: '正式卡片素材清單與發送流程尚未接通',
+    title: '服務日順延確認卡設計稿（模組三：產婦順延確認）',
+    subtitle: '【模組三】產婦調休/順延雙選項確認 ｜ 雙向決策卡',
+    badge: '模組三範本',
+    endpointUrl: '排定於模組三：月嫂排班與請假 Subsystem',
+    authLevel: '簽約產婦專屬 ｜ 雙選項互動確認（受簽約案件版本保護）',
+    description: '【業務定位】月嫂因故請假時自動推播給產婦。提供「同意順延一日」或「由工會派代班」決策按鈕，回覆後經後端排班狀態機核對生效。',
+    apiMapping: '模組三排定：LeaveWorkflow.push_extension_confirm() ＋ Postback 順延決策確認',
     flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_leave_confirm,
   },
   {
     id: 'flex_alert_critical',
     type: 'flex_card',
-    title: '重大異常通報卡設計稿',
-    subtitle: '幹部通知版面',
-    badge: '設計稿',
-    endpointUrl: '未發布',
-    authLevel: '僅為設計稿，尚未接通正式發送檢查',
-    description: '僅呈現去敏告警層級與處理入口位置；不代表群組已設定或訊息已送達。',
-    apiMapping: '正式卡片素材清單與發送流程尚未接通',
+    title: '重大異常通報卡設計稿（模組四：幹部重大告警）',
+    subtitle: '【模組四】工會幹部群重大告警 ｜ 幹部通知版面',
+    badge: '模組四範本',
+    endpointUrl: '排定於模組四：客服與異常處置 Subsystem',
+    authLevel: '工會幹部群組專屬 ｜ 去敏高層級告警（僅推播已授權幹部群）',
+    description: '【業務定位】重大客訴、連續身分核對異常或重大排班衝突時，自動推播至幹部群組，並附帶一鍵進入手機管理中心審核處理之入口。',
+    apiMapping: '模組四排定：AlertDispatchService.broadcast_critical_alert() ＋ 管理中心一鍵處置',
     flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_alert_critical,
   },
   {
     id: 'flex_negotiation',
     type: 'flex_card',
-    title: '媒合條件溝通卡設計稿',
-    subtitle: '服務條件確認版面',
-    badge: '設計稿',
-    endpointUrl: '未發布',
-    authLevel: '僅為設計稿，尚未接通正式發送檢查',
-    description: '僅呈現條件摘要與確認區；不修改媒合狀態、不建立 LINE 發送任務。',
-    apiMapping: '正式卡片素材清單與發送流程尚未接通',
+    title: '媒合條件溝通卡設計稿（模組三：服務條件調解）',
+    subtitle: '【模組三】零媒合服務條件調解建議 ｜ 條件確認卡',
+    badge: '模組三範本',
+    endpointUrl: '排定於模組三：月嫂派案與媒合 Subsystem',
+    authLevel: '簽約產婦專屬 ｜ 條件調解確認（受需求登記保護）',
+    description: '【業務定位】當案件無候選月嫂可接單時，系統自動分析並向產婦提出可微調方案（如時數、天數建議），產婦可一鍵確認調整以加速媒合。',
+    apiMapping: '模組三排定：ZeroPoolEngine.push_compromise_options() ＋ 方案確認 postback',
     flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_negotiation,
   },
 ];
@@ -214,6 +215,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <div className="mock-step-indicator">需求調查表單</div>
         <strong>👩 1. 基本資料</strong>
         <label>產婦姓名 *</label><input type="text" placeholder="請填寫真實姓名" readOnly />
+        <label>身分證字號 *</label><input type="text" placeholder="例如：A123456789" readOnly />
         <label>行動電話 *</label><input type="text" placeholder="例如：0912345678" readOnly />
         <label>服務地址 *</label><input type="text" placeholder="請填寫完整地址（含巷弄樓層）" readOnly />
         <strong>🍼 2. 照護與環境</strong>
@@ -235,18 +237,19 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
   if (item.id === 'profile_update') {
     return (
       <div className="mock-form-inputs">
-        <div className="mock-step-indicator">客戶資料與服務異動</div>
-        <label>異動類型</label>
-        <select disabled defaultValue="service_address">
-          <option value="service_address">服務地址</option>
-          <option value="expected_date">預產期／生產日</option>
-          <option value="service_days">服務天數</option>
-          <option value="service_preferences">服務需求</option>
-        </select>
-        <label>異動內容</label>
-        <textarea rows={3} placeholder="正式資料會載入目前登錄內容" readOnly />
+        <div className="mock-step-indicator">修改登記資料申請</div>
+        <p>產婦可查詢目前已登記資料，勾選欲異動之項目並送審：</p>
+        <label>欲異動項目</label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', margin: '6px 0 10px' }}>
+          <span>☑ 聯絡電話</span>
+          <span>☑ 服務地址</span>
+          <span>☑ 寶寶資訊</span>
+          <span>☑ 生產方式</span>
+        </div>
+        <label>填寫異動內容</label>
+        <textarea rows={2} placeholder="請輸入欲變更的新內容" readOnly />
         <button type="button" className="mock-primary-btn" disabled>預覽異動差異</button>
-        <small>功能與版面已保留；待正式查詢與異動流程接妥後啟用。</small>
+        <small>正式異動流程已接通後端 API；送出後等待工會人員審核。</small>
       </div>
     );
   }
@@ -287,14 +290,25 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
           <button type="button" className="mock-primary-btn" disabled>客服中心</button>
           <button type="button" className="mock-primary-btn" disabled>月嫂驗證</button>
         </div>
-        <div className="mock-placeholder-box">尚未載入資料，不以樣本工單補空。</div>
+        <div className="mock-placeholder-box">審核中心待辦：客服工單、排班審核與月嫂驗證。</div>
+      </div>
+    );
+  }
+
+  if (item.id === 'identity') {
+    return (
+      <div className="mock-form-inputs">
+        <div className="mock-step-indicator">通用身分認證入口</div>
+        <p>依 LINE 登入憑證開啟客戶、月嫂或幹部服務流程：</p>
+        <button type="button" className="mock-primary-btn" disabled>LINE 快速登入驗證</button>
+        <small>網址列 userId 僅供導航，不具授權效果；由伺服器驗證 ID Token。</small>
       </div>
     );
   }
 
   return (
     <div className="mock-admin-view">
-      <div className="mock-placeholder-box">此資產的高擬真預覽待完成。</div>
+      <div className="mock-placeholder-box">此頁面可點擊下方連結直接開啟實體網頁進行測試。</div>
     </div>
   );
 }
@@ -403,7 +417,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
                         href={canonicalLiffUrl(selectedItem.launchPath, runtimeConfig.origin)}
                         target="_blank"
                         rel="noreferrer"
-                        style={{ display: 'block', marginTop: '16px', textAlign: 'center' }}
+                        style={{ display: 'block', marginTop: '16px', textAlign: 'center', textDecoration: 'none' }}
                       >
                         開啟正式 LIFF 入口
                       </a>

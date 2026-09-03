@@ -104,6 +104,8 @@ _IDENTITY_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "iden
 _GATEWAY_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "gateway.html"
 _BIND_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "bind.html"
 _REGISTRATION_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "register.html"
+_PROFILE_UPDATE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "profile_update.html"
+_PROFILE_GUARD_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "profile_guard.html"
 _STAFF_ORDERS_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_order_search.html"
 _STAFF_SCHEDULE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_schedule.html"
 
@@ -130,6 +132,16 @@ def bind_page():
 @page_router.get("/line-registration")
 def registration_page():
     return FileResponse(_REGISTRATION_PAGE, headers=_NO_CACHE_HEADERS)
+
+
+@page_router.get("/line-profile-guard")
+def profile_guard_page():
+    return FileResponse(_PROFILE_GUARD_PAGE, headers=_NO_CACHE_HEADERS)
+
+
+@page_router.get("/line-profile-update")
+def profile_update_page():
+    return FileResponse(_PROFILE_UPDATE_PAGE, headers=_NO_CACHE_HEADERS)
 
 
 @page_router.get("/line-staff-orders")

@@ -192,9 +192,9 @@ def test_liff_targets_route_to_existing_pages_or_fail_closed() -> None:
     initialize_source = identity.split("async function initialize()", 1)[1]
 
     assert "staff_leave_apply: '/line-staff-schedule'" in gateway
-    assert "profile_update: '/static/profile_update.html'" in gateway
+    assert "profile_update: '/line-profile-guard'" in gateway
     assert 'staff_leave_apply: "/line-staff-schedule"' in staff_route
-    assert 'profile_update: "/static/profile_update.html"' in standalone_route
+    assert 'profile_update: "/line-profile-guard"' in standalone_route
     for target in ("staff_payout", "anomalies_center", "dashboard"):
         assert f"{target}:" in unavailable_route
         assert f"/line-identity?target={target}" in gateway
@@ -368,3 +368,15 @@ def test_line_bind_page_route_serves_bind_html() -> None:
     response = line_identity.bind_page()
     assert response.status_code == 200
     assert response.path.name == "bind.html"
+
+
+def test_line_profile_update_page_route_serves_profile_update_html() -> None:
+    response = line_identity.profile_update_page()
+    assert response.status_code == 200
+    assert response.path.name == "profile_update.html"
+
+
+def test_line_profile_guard_page_route_serves_profile_guard_html() -> None:
+    response = line_identity.profile_guard_page()
+    assert response.status_code == 200
+    assert response.path.name == "profile_guard.html"

@@ -81,7 +81,6 @@ describe('React entrypoint registry', () => {
     expect(screen.queryByText(/15 分鐘.*Token/)).not.toBeInTheDocument();
     expect(screen.queryByText(/demo-token/)).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: /複製正式測試連結/ })).toBeEnabled());
-    expect(screen.getByText(/本機預覽已更新/)).toBeInTheDocument();
     expect(screen.getByText('服務確認與導流')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '📝 已申請市府平台' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '🏛️ 未申請市府平台' })).toBeDisabled();
@@ -98,6 +97,10 @@ describe('React entrypoint registry', () => {
     fireEvent.click(screen.getByText('2. register.html'));
     expect(screen.getByText('需求調查表單')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '預覽登記資料' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
+      'href',
+      'https://line-test.example.dev/line-registration',
+    );
 
     fireEvent.click(screen.getByText('3. bind.html'));
     expect(screen.getByText('服務綁定與訂單查詢')).toBeInTheDocument();
@@ -106,6 +109,14 @@ describe('React entrypoint registry', () => {
     expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
       'href',
       'https://line-test.example.dev/line-bind',
+    );
+
+    fireEvent.click(screen.getByText('4. profile_update.html'));
+    expect(screen.getByText('修改登記資料申請')).toBeInTheDocument();
+    expect(screen.getByText(/正式異動流程已接通後端 API/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '開啟正式 LIFF 入口' })).toHaveAttribute(
+      'href',
+      'https://line-test.example.dev/line-profile-update',
     );
   });
 

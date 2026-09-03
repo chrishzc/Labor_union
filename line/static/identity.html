@@ -403,7 +403,7 @@ function requestedStandalonePage() {
   if (entry === "gateway" || target === "gateway") {
     return "/line-gateway";
   }
-  return {profile_update: "/static/profile_update.html"}[target] || "";
+  return {profile_update: "/line-profile-guard"}[target] || "";
 }
 
 function requestedUnavailableTarget() {
