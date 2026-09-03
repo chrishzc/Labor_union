@@ -44,6 +44,24 @@ export interface OrderSummaryQueryParams {
   lifecycle_scope?: 'all' | 'unfinished';
 }
 
+export interface OrderSummarySnapshot {
+  page: OrderSummaryPage;
+  params: Readonly<OrderSummaryQueryParams>;
+}
+
+type OrderSummarySnapshotListener = (snapshot: OrderSummarySnapshot) => void;
+const orderSummarySnapshotListeners = new Set<OrderSummarySnapshotListener>();
+
+export function subscribeOrderSummarySnapshots(listener: OrderSummarySnapshotListener): () => void {
+  orderSummarySnapshotListeners.add(listener);
+  return () => orderSummarySnapshotListeners.delete(listener);
+}
+
+function publishOrderSummarySnapshot(page: OrderSummaryPage, params: OrderSummaryQueryParams): void {
+  const snapshot: OrderSummarySnapshot = { page, params: { ...params } };
+  for (const listener of orderSummarySnapshotListeners) listener(snapshot);
+}
+
 export interface OrdersQueryClient {
   getOrderSummaries(params?: OrderSummaryQueryParams, options?: OrderQueryOptions): Promise<OrderSummaryPage>;
   getOrderDetail(caseNo: string, options?: OrderQueryOptions): Promise<OrderDetail>;
@@ -103,11 +121,13 @@ export async function loadAllOrderSummaries(
   }
 
   if (!lastPage) throw new OrderSummaryContinuationError('Orders 摘要未取得任何頁面。');
-  return {
+  const completedPage: OrderSummaryPage = {
     items: [...itemsByCaseNo.values()].sort((left, right) => left.case_no.localeCompare(right.case_no)),
     next_cursor: null,
     etag: lastPage.etag,
   };
+  publishOrderSummarySnapshot(completedPage, parsed);
+  return completedPage;
 }
 
 const summaryFlights = new Map<string, Promise<OrderSummaryPage>>();
