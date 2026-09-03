@@ -12,6 +12,7 @@ import {
 import './OrderWorkbenchV2Page.css';
 import { OrderCandidateContactStatusPanel } from '../components/OrderCandidateContactStatusPanel';
 import { OrderCandidateQueryPanel } from '../components/OrderCandidateQueryPanel';
+import { OrderCaregiverContractPanel } from '../components/OrderCaregiverContractPanel';
 import { OrderFormalRecommendationPanel } from '../components/OrderFormalRecommendationPanel';
 import { OrderGovernmentSubsidyLane } from '../components/OrderGovernmentSubsidyLane';
 import { OrderTerminalAggregateLane } from '../components/OrderTerminalAggregateLane';
@@ -418,6 +419,9 @@ export const OrderWorkbenchV2Page: FC = () => {
                 )}
                 {branchType === 'normal' && selectedStage === 'formal_recommendation' && (
                   <OrderFormalRecommendationPanel caseNo={item.id} />
+                )}
+                {branchType === 'normal' && selectedStage === 'caregiver_contract' && (
+                  <OrderCaregiverContractPanel caseNo={item.id} />
                 )}
                 <button
                   type="button"
