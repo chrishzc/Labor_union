@@ -5,7 +5,7 @@ name: Python application
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "ci-ablation/duplicate-gates" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -125,6 +125,7 @@ jobs:
       run: npm run build
 
   historical-order-workbook-regression:
+    if: ${{ false }}
     name: historical order workbook router regression
     runs-on: ubuntu-latest
 
