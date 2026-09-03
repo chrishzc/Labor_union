@@ -43,13 +43,32 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim() ? error.message.trim() : fallback;
 }
 
+function conflictMessage(error: unknown): string | null {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return null;
+  const code = (error as { code?: unknown }).code;
+  if (typeof code !== 'string') return null;
+  if (code === 'stale_preview') {
+    return '預覽已過期：正式資料已變更，請重新檢查條款變更後再套用。';
+  }
+  if (
+    code.endsWith('_version_conflict')
+    || code === 'client_finance_candidate_stale'
+    || code === 'scheduling_lock_set_stale'
+  ) {
+    return '版本已變更：正式資料已更新，請重新檢查條款變更後再套用。';
+  }
+  return null;
+}
+
 export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ caseNo, query }) => {
   const [draft, setDraft] = useState<OrderTermsDraft>(() => draftFromQuery(query));
   const [preview, setPreview] = useState<OrderTermsPreview | null>(null);
   const [receipt, setReceipt] = useState<OrderTermsReceipt | null>(null);
+  const [readback, setReadback] = useState<OrderTerms | null>(null);
   const [reason, setReason] = useState('');
   const [status, setStatus] = useState<'idle' | 'previewing' | 'applying'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const currentQuery = readback ?? query;
   const queryRevision = [
     caseNo,
     query.order_version,
@@ -66,6 +85,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     setDraft(draftFromQuery(query));
     setPreview(null);
     setReceipt(null);
+    setReadback(null);
     setReason('');
     setError(null);
     setStatus('idle');
@@ -103,10 +123,10 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     && Number(draft.floorFeeNtd) >= 0
     && /^\d{2}:\d{2}$/.test(draft.startTime)
     && /^\d{2}:\d{2}$/.test(draft.endTime);
-  const locked = query.service_data_locked || status !== 'idle';
+  const locked = currentQuery.service_data_locked || status !== 'idle';
 
   const previewTerms = async () => {
-    if (!draftReady || query.service_data_locked) return;
+    if (!draftReady || currentQuery.service_data_locked) return;
     setStatus('previewing');
     setError(null);
     setReceipt(null);
@@ -121,7 +141,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   };
 
   const applyTerms = async () => {
-    if (!preview || !reason.trim() || query.service_data_locked) return;
+    if (!preview || !reason.trim() || currentQuery.service_data_locked) return;
     setStatus('applying');
     setError(null);
     try {
@@ -139,8 +159,24 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
         { idempotencyKey: `orders-terms-ui-${caseNo}-${crypto.randomUUID()}` },
       );
       setReceipt(nextReceipt);
+      setPreview(null);
+      setReason('');
+      try {
+        const refreshed = await orderTermsMutationClient.query(caseNo);
+        setReadback(refreshed);
+        setDraft(draftFromQuery(refreshed));
+      } catch (caught) {
+        setError(`條款已套用，但正式回讀失敗：${errorMessage(caught, '無法重新取得訂單條款。')}`);
+      }
     } catch (caught) {
-      setError(errorMessage(caught, '無法確認套用訂單條款。'));
+      const conflict = conflictMessage(caught);
+      if (conflict) {
+        setPreview(null);
+        setReason('');
+        setError(conflict);
+      } else {
+        setError(errorMessage(caught, '無法確認套用訂單條款。'));
+      }
     } finally {
       setStatus('idle');
     }
@@ -150,7 +186,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     <section className="order-v2-drawer-section" aria-labelledby="order-v2-terms-mutation-heading">
       <h3 id="order-v2-terms-mutation-heading">進件條款預覽與套用</h3>
       <p className="order-v2-drawer-note">沿用既有 Orders Terms Preview／Apply；預覽不寫入，套用使用預覽版本與 fingerprint，並要求人工變更原因。</p>
-      {query.service_data_locked && (
+      {currentQuery.service_data_locked && (
         <p className="order-v2-drawer-error" role="status">此案件的服務條件已鎖定，依既有規則不可再變更條款。</p>
       )}
 
@@ -211,7 +247,10 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
         </div>
       )}
 
-      {receipt && (
+      {receipt && readback && (
+        <p role="status">條款已套用並完成正式回讀；Order version {readback.order_version}，合約服務 {readback.terms.service_days} 日。</p>
+      )}
+      {receipt && !readback && (
         <p role="status">條款已套用；Order version {receipt.order_version}，正式服務日 {receipt.official_service_day_count} 天。</p>
       )}
       {error && <p className="order-v2-drawer-error" role="alert">{error}</p>}
