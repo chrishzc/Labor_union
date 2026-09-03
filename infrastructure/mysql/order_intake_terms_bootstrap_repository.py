@@ -112,6 +112,16 @@ class MySqlOrderIntakeTermsBootstrapRepository:
                 raise RuntimeError("order_intake_terms_bootstrap_write_conflict")
         return expected_lifecycle_version + 1
 
+    def update_missing_client_name(self, case_no: str, client_name: str) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE clients SET name=%s WHERE case_no=%s "
+                "AND (name IS NULL OR TRIM(name)='')",
+                (client_name, case_no),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("order_intake_client_name_write_conflict")
+
     def complete_intake(
         self,
         case_no: str,
