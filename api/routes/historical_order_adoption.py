@@ -8,45 +8,21 @@ import tempfile
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
-from pymysql.err import DataError, IntegrityError, OperationalError
+from pymysql.err import DataError, OperationalError
 from starlette.concurrency import run_in_threadpool
 
-from api.dependencies.admin_auth import (
-    admin_actor_context,
-    require_admin,
-    require_historical_order_review_remediator,
-)
-from api.dependencies.historical_order_adoption import (
-    get_historical_completed_assignment_repair_workflow,
-    get_historical_order_workbook_import_service,
-)
+from api.dependencies.admin_auth import require_admin
+from api.dependencies.historical_order_adoption import get_historical_order_workbook_import_service
 from api.schemas.base import BaseResponse
-from api.schemas.historical_order_adoption import (
-    HistoricalCompletedAssignmentRepairApplyView,
-    HistoricalCompletedAssignmentRepairIntentView,
-    HistoricalCompletedAssignmentRepairPreviewView,
-    HistoricalCompletedAssignmentRepairReceiptView,
-    HistoricalOrderWorkbookPreviewView,
-    HistoricalOrderWorkbookReceiptView,
-)
+from api.schemas.historical_order_adoption import HistoricalOrderWorkbookPreviewView, HistoricalOrderWorkbookReceiptView
 from shared_kernel.errors import ErrorCategory, TypedError
-from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.orders.actual_start_workflow import ActualStartWorkflowError
-from subsystems.orders.historical_completed_assignment_repair import (
-    ApplyHistoricalCompletedAssignmentRepair,
-    HistoricalCompletedAssignmentRepairError,
-    HistoricalCompletedAssignmentRepairIntent,
-)
 from subsystems.orders.historical_order_workbook_import import HistoricalOrderWorkbookConflict, HistoricalOrderWorkbookUnavailable
 
 
 router = APIRouter(prefix="/api/v1/orders/historical-adoption/workbooks", tags=["Orders Historical Adoption"])
-repair_router = APIRouter(
-    prefix="/api/v1/orders/historical-adoption/completed-assignment-repairs",
-    tags=["Orders Historical Adoption"],
-)
 _MAXIMUM_WORKBOOK_BYTES = 20 * 1024 * 1024
 _IdempotencyHeader = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)]
 _CorrelationHeader = Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)]
@@ -84,140 +60,6 @@ async def apply_historical_order_workbook(
         "訂單歷史資料 Apply 已完成",
         correlation_id,
     )
-
-
-@repair_router.post(
-    "/preview",
-    response_model=BaseResponse[HistoricalCompletedAssignmentRepairPreviewView],
-)
-def preview_historical_completed_assignment_repair(
-    req: HistoricalCompletedAssignmentRepairIntentView,
-    correlation_id: _CorrelationHeader = "historical-assignment-repair-preview",
-    principal: AdminPrincipal = Depends(require_historical_order_review_remediator),
-    workflow=Depends(get_historical_completed_assignment_repair_workflow),
-):
-    del principal
-    correlation = CorrelationId(correlation_id)
-    try:
-        preview = workflow.preview(_repair_intent(req))
-    except HistoricalCompletedAssignmentRepairError as error:
-        raise _http_error(
-            _actual_start_error_status(error.error.category),
-            _with_correlation(error.error, correlation),
-        ) from error
-    except OperationalError as error:
-        raise _http_error(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            TypedError(
-                ErrorCategory.UNAVAILABLE,
-                "historical_assignment_repair_database_unavailable",
-                "歷史訂單 completed assignment 修復資料暫時無法讀取。",
-                correlation,
-                retryable=True,
-            ),
-        ) from error
-    return BaseResponse(
-        data=_repair_preview_payload(preview),
-        message="歷史訂單 completed assignment 修復 Preview 已完成",
-    )
-
-
-@repair_router.post(
-    "/apply",
-    response_model=BaseResponse[HistoricalCompletedAssignmentRepairReceiptView],
-)
-def apply_historical_completed_assignment_repair(
-    req: HistoricalCompletedAssignmentRepairApplyView,
-    idempotency_key: _IdempotencyHeader = ...,
-    correlation_id: _CorrelationHeader = ...,
-    principal: AdminPrincipal = Depends(require_historical_order_review_remediator),
-    workflow=Depends(get_historical_completed_assignment_repair_workflow),
-):
-    correlation = CorrelationId(correlation_id)
-    try:
-        receipt = workflow.apply(
-            ApplyHistoricalCompletedAssignmentRepair(
-                _repair_intent(req),
-                req.expected_order_version,
-                PreviewFingerprint(req.preview_fingerprint),
-                idempotency_key,
-                admin_actor_context(principal).actor_id,
-                req.reason.strip(),
-                correlation,
-            )
-        )
-    except HistoricalCompletedAssignmentRepairError as error:
-        raise _http_error(
-            _actual_start_error_status(error.error.category),
-            _with_correlation(error.error, correlation),
-        ) from error
-    except IntegrityError as error:
-        raise _http_error(
-            status.HTTP_409_CONFLICT,
-            TypedError(
-                ErrorCategory.CONFLICT,
-                "historical_assignment_repair_integrity_conflict",
-                "歷史訂單 completed assignment 修復與目前資料衝突，請重新 Preview。",
-                correlation,
-            ),
-        ) from error
-    except OperationalError as error:
-        raise _http_error(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            TypedError(
-                ErrorCategory.UNAVAILABLE,
-                "historical_assignment_repair_database_unavailable",
-                "歷史訂單 completed assignment 修復暫時無法套用。",
-                correlation,
-                retryable=True,
-            ),
-        ) from error
-    return BaseResponse(
-        data=_repair_receipt_payload(receipt),
-        message="歷史訂單 completed assignment 修復已套用",
-    )
-
-
-def _repair_intent(req) -> HistoricalCompletedAssignmentRepairIntent:
-    return HistoricalCompletedAssignmentRepairIntent(
-        req.case_no.strip(),
-        None if req.staff_name is None else req.staff_name.strip(),
-        req.start_date,
-        req.end_date,
-    )
-
-
-def _repair_preview_payload(preview) -> dict[str, object]:
-    return {
-        "case_no": preview.case_no,
-        "order_status": preview.order_status,
-        "expected_order_version": preview.expected_order_version,
-        "masked_staff_name": preview.masked_staff_name,
-        "staff_id": preview.staff_id,
-        "start_date": preview.start_date,
-        "end_date": preview.end_date,
-        "reusable_assignment_id": preview.reusable_assignment_id,
-        "applicable": preview.applicable,
-        "reusable": preview.reusable,
-        "blockers": list(preview.blockers),
-        "preview_fingerprint": preview.fingerprint.value,
-    }
-
-
-def _repair_receipt_payload(receipt) -> dict[str, object]:
-    return {
-        "receipt_key": receipt.receipt_key,
-        "case_no": receipt.case_no,
-        "order_version": receipt.order_version,
-        "staff_id": receipt.staff_id,
-        "start_date": receipt.start_date,
-        "end_date": receipt.end_date,
-        "assignment_id": receipt.assignment_id,
-        "assignment_created": receipt.assignment_created,
-        "reused_existing": receipt.reused_existing,
-        "preview_fingerprint": receipt.preview_fingerprint.value,
-        "replayed": receipt.replayed,
-    }
 
 
 async def _with_workbook(
