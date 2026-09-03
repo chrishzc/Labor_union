@@ -1,4 +1,4 @@
-"""MySQL adapter for Orders intake terms bootstrap."""
+"""MySQL adapter for Orders intake terms bootstrap and completion."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class MySqlOrderIntakeTermsBootstrapRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT o.case_no,o.status,o.lifecycle_version,o.start_date,"
-                "o.service_days,o.actual_start_date,"
+                "o.service_days,o.actual_start_date,c.name AS client_name,"
                 "EXISTS(SELECT 1 FROM order_service_data_locks l "
                 "WHERE l.case_no=o.case_no) AS service_data_locked,"
                 "(EXISTS(SELECT 1 FROM client_finance_accounts f "
@@ -36,7 +36,8 @@ class MySqlOrderIntakeTermsBootstrapRepository:
                 "s.generation_counter,s.effective_generation_id,"
                 "EXISTS(SELECT 1 FROM case_staff_assignments a "
                 "WHERE a.case_no=o.case_no) AS assignment_exists "
-                "FROM orders o LEFT JOIN scheduling_aggregates s "
+                "FROM orders o LEFT JOIN clients c ON c.case_no=o.case_no "
+                "LEFT JOIN scheduling_aggregates s "
                 "ON s.case_no=o.case_no WHERE o.case_no=%s" + suffix,
                 (case_no,),
             )
@@ -57,6 +58,12 @@ class MySqlOrderIntakeTermsBootstrapRepository:
             )
         )
         service_days = row["service_days"]
+        client_name = row["client_name"]
+        normalized_client_name = (
+            str(client_name).strip()
+            if client_name is not None and str(client_name).strip()
+            else None
+        )
         return OrderIntakeTermsBootstrapFacts(
             case_no=str(row["case_no"]),
             status=OrderLifecycleStatus(str(row["status"])),
@@ -69,6 +76,7 @@ class MySqlOrderIntakeTermsBootstrapRepository:
             payroll_present=bool(row["payroll_present"]),
             scheduling_present=scheduling_present or assignment_exists,
             scheduling_pristine=scheduling_pristine,
+            client_name=normalized_client_name,
         )
 
     def update_missing_terms(
@@ -102,6 +110,26 @@ class MySqlOrderIntakeTermsBootstrapRepository:
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("order_intake_terms_bootstrap_write_conflict")
+        return expected_lifecycle_version + 1
+
+    def complete_intake(
+        self,
+        case_no: str,
+        expected_lifecycle_version: int,
+    ) -> int:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE orders SET status=%s,lifecycle_version=lifecycle_version+1 "
+                "WHERE case_no=%s AND lifecycle_version=%s AND status=%s",
+                (
+                    OrderLifecycleStatus.DISCUSSION.value,
+                    case_no,
+                    expected_lifecycle_version,
+                    OrderLifecycleStatus.PENDING_COMPLETION.value,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("order_intake_completion_write_conflict")
         return expected_lifecycle_version + 1
 
     def load_receipt(self, family: str, key: str):
