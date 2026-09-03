@@ -39,4 +39,6 @@ jobs:
 
       - name: Apply, verify, and commit Issue 101
         shell: bash
-        run: bash .github/issue101_cutover.sh
+        run: |
+          sed -i 's#git push origin HEAD:main#git push origin HEAD:issue101-canonical-cutover-direct#' .github/issue101_cutover.sh
+          bash .github/issue101_cutover.sh
