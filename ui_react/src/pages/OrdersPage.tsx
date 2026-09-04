@@ -259,8 +259,6 @@ export const OrdersPage: React.FC = () => {
   const [contractCorrectionNotice, setContractCorrectionNotice] = useState<string | null>(null);
   type ContractWorkbenchTab = 'contract_terms' | 'calendar' | 'cancellation' | 'reopen';
   const [activeContractTab, setActiveContractTab] = useState<ContractWorkbenchTab>('contract_terms');
-  const [contractDocView, setContractDocView] = useState<'contract' | 'spec'>('contract');
-  const [contractDocFullscreen, setContractDocFullscreen] = useState(false);
   const [precisionMode, setPrecisionMode] = useState<'週休1日' | '週休2日' | '連續服務' | null>(null);
   const [precisionCalculating, setPrecisionCalculating] = useState(false);
   const [precisionResult, setPrecisionResult] = useState<SchedulePrecisionResult | null>(null);
@@ -1421,7 +1419,7 @@ export const OrdersPage: React.FC = () => {
     }
     const serviceDateQuery = orderMutationFlowStore.getServiceDatesDraft(caseNo)?.queryView;
     const startDate = actualStartQuery?.case_no === caseNo
-      ? actualStartQuery.current_actual_start_date ?? actualStartQuery.planned_start_date
+      ? actualStartDraft || actualStartQuery.current_actual_start_date || actualStartQuery.planned_start_date
       : null;
     if (!serviceDateQuery || serviceDateQuery.case_no !== caseNo || startDate === null) {
       setPrecisionResult(null);
@@ -3092,9 +3090,7 @@ export const OrdersPage: React.FC = () => {
                   </div>
                 )}
 
-                {/* 5:5 Split Workbench: Left Terms Form + Diff | Right Document Live Preview */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: '20px', alignItems: 'start' }}>
-                  {/* Left Column: 編輯約定服務條款 */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px', alignItems: 'start' }}>
                   <div className="terms-edit-card">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#ff7f50', margin: 0 }}>📝 編輯約定服務條款</h3>
@@ -3189,134 +3185,6 @@ export const OrdersPage: React.FC = () => {
                       )}
                       {termsMutationError && <div role="alert" style={{ color: '#b91c1c', marginTop: '10px', fontSize: '0.84rem' }}>{termsMutationError}</div>}
                     </section>
-                  </div>
-
-                  {/* Right Column: 📜 正式雙邊契約與訂單資訊即時文件預覽 */}
-                  <div className={`contract-doc-preview-card ${contractDocFullscreen ? 'fullscreen' : ''}`}>
-                    <div className="contract-doc-toolbar">
-                      <div className="contract-doc-view-toggle">
-                        <button
-                          type="button"
-                          className={`contract-doc-toggle-btn ${contractDocView === 'contract' ? 'active' : ''}`}
-                          onClick={() => setContractDocView('contract')}
-                        >
-                          📜 契約草稿預覽（非正式）
-                        </button>
-                        <button
-                          type="button"
-                          className={`contract-doc-toggle-btn ${contractDocView === 'spec' ? 'active' : ''}`}
-                          onClick={() => setContractDocView('spec')}
-                        >
-                          📋 訂單規格摘要
-                        </button>
-                      </div>
-                      <div className="contract-doc-actions">
-                        <button
-                          type="button"
-                          className="contract-doc-tool-btn"
-                          title="列印草稿預覽（非正式 PDF）"
-                          onClick={() => window.print()}
-                        >
-                          🖨️ 列印草稿
-                        </button>
-                        <button
-                          type="button"
-                          className="contract-doc-tool-btn"
-                          title={contractDocFullscreen ? '離開全螢幕' : '全螢幕檢視'}
-                          onClick={() => setContractDocFullscreen(!contractDocFullscreen)}
-                        >
-                          {contractDocFullscreen ? '🗗 縮小' : '⛶ 全螢幕'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {contractDocView === 'contract' ? (
-                      <div className="contract-doc-sheet">
-                        <div className="contract-doc-watermark">
-                          {contractDetail.staffContractSigned && contractDetail.clientContractSigned ? 'OFFICIAL CONTRACT' : 'DRAFT PREVIEW'}
-                        </div>
-                        <div className="contract-doc-header">
-                          <h4 className="contract-doc-title">中華民國月子照護勞動工會</h4>
-                          <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#ff7f50' }}>產婦月子照護服務定型化契約書</div>
-                          <div className="contract-doc-meta-row">
-                            <span>契約字號：CT-{(contractOrder || dateConfirmOrder)?.id.slice(4)}</span>
-                            <span>訂單編號：{(contractOrder || dateConfirmOrder)?.id}</span>
-                            <span>條款來源：正式訂單資料</span>
-                          </div>
-                        </div>
-
-                        <div className="contract-doc-parties">
-                          <div><strong>甲方（委託人／產婦）：</strong>{contractDetail.clientName}</div>
-                          <div><strong>乙方（媒合服務單位）：</strong>中華民國月子照護勞動工會</div>
-                          <div><strong>丙方（服務承接月嫂）：</strong>{(contractOrder || dateConfirmOrder)?.assignedDoulaDisplay || '（正式媒合指派中）'}</div>
-                        </div>
-
-                        <div className="contract-doc-clauses">
-                          <div className="contract-doc-clause-item">
-                            <div className="contract-doc-clause-title">第一條【服務期間與地點】</div>
-                            <div className="contract-doc-clause-body">
-                              自民國 <span className="contract-doc-clause-highlight">{termsDraft.plannedStartDate || contractDetail.serviceRange.split(' ~ ')[0] || '約定日'}</span> 起，
-                              共計實質服務 <span className="contract-doc-clause-highlight">{termsDraft.serviceDays || contractDetail.serviceDays} 日整</span>。
-                              服務地點為甲方指定之居所。
-                            </div>
-                          </div>
-
-                          <div className="contract-doc-clause-item">
-                            <div className="contract-doc-clause-title">第二條【服務時段與膳食料理】</div>
-                            <div className="contract-doc-clause-body">
-                              每日服務時段為 <span className="contract-doc-clause-highlight">{termsDraft.startTime && termsDraft.endTime ? `${termsDraft.startTime} 至 ${termsDraft.endTime}` : '待確認'}</span>（每日 {termsDraft.serviceHoursPerDay || '待確認'} 小時）。
-                              膳食料理需求：<span className="contract-doc-clause-highlight">{termsDraft.requiresCooking === 'yes' ? '需要下廚料理月子餐' : termsDraft.requiresCooking === 'no' ? '不需下廚' : contractDetail.requiresCookingText}</span>。
-                            </div>
-                          </div>
-
-                          <div className="contract-doc-clause-item">
-                            <div className="contract-doc-clause-title">第三條【服務報酬與定金核銷】</div>
-                            <div className="contract-doc-clause-body">
-                              合約總報酬為新臺幣 <span className="contract-doc-clause-highlight">{contractDetail.contractAmountText}</span>。
-                              定金約定收取 20%（{contractDetail.depositSettled ? '🟢 定金已全額入帳核銷，服務檔期已正式鎖定' : '🟡 定金待收取核銷'}）。
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="contract-doc-stamps-grid">
-                          <div className="contract-doc-stamp-card">
-                            <div className="contract-doc-stamp-title">
-                              <span>甲方（產婦）簽章存證</span>
-                              <span className={`contract-doc-seal ${contractDetail.clientContractSigned ? '' : 'pending'}`}>
-                                {contractDetail.clientContractSigned ? '已簽署' : '待簽署'}
-                              </span>
-                            </div>
-                            <div style={{ color: '#74593f', marginTop: '4px' }}>簽署人：{contractDetail.clientName}</div>
-                            <div style={{ fontSize: '0.72rem', color: '#8b7169' }}>{contractDetail.clientContractSigned ? '簽署文件已由正式回讀確認' : '尚未完成簽署存證'}</div>
-                          </div>
-
-                          <div className="contract-doc-stamp-card">
-                            <div className="contract-doc-stamp-title">
-                              <span>丙方（月嫂）簽章存證</span>
-                              <span className={`contract-doc-seal ${contractDetail.staffContractSigned ? '' : 'pending'}`}>
-                                {contractDetail.staffContractSigned ? '已簽署' : '待簽署'}
-                              </span>
-                            </div>
-                            <div style={{ color: '#74593f', marginTop: '4px' }}>簽署人：{(contractOrder || dateConfirmOrder)?.assignedDoulaDisplay || '—'}</div>
-                            <div style={{ fontSize: '0.72rem', color: '#8b7169' }}>{contractDetail.staffContractSigned ? '簽署文件已由正式回讀確認' : '尚未完成簽署存證'}</div>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="contract-doc-sheet">
-                        <div style={{ fontWeight: 800, fontSize: '1rem', color: '#ff7f50', marginBottom: '12px' }}>📋 訂單完整條件規格摘要 (Order Spec)</div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '0.84rem' }}>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>訂單編號：</strong>{(contractOrder || dateConfirmOrder)?.id}</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>產婦姓名：</strong>{contractDetail.clientName}</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>預定服務起訖：</strong>{termsDraft.plannedStartDate || contractDetail.serviceRange}</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>約定服務天數：</strong>{termsDraft.serviceDays || contractDetail.serviceDays} 天</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>每日時數時段：</strong>{termsDraft.startTime && termsDraft.endTime ? `${termsDraft.startTime} ~ ${termsDraft.endTime}` : '待確認'} ({termsDraft.serviceHoursPerDay ? `${termsDraft.serviceHoursPerDay} hr` : '時數待確認'})</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>下廚需求：</strong>{termsDraft.requiresCooking === 'yes' ? '需要' : termsDraft.requiresCooking === 'no' ? '不需' : '待確認'}</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>樓層費加給：</strong>NT$ {termsDraft.floorFeeNtd || '0'}</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>合約總應付額：</strong>{contractDetail.contractAmountText}</div>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -3642,7 +3510,7 @@ export const OrdersPage: React.FC = () => {
                                   .catch(() => undefined);
                               }}
                             >
-                              {serviceDatesDraft?.status === 'apply_pending' ? '服務日期套用中…' : '確認套用服務日期'}
+                              {serviceDatesDraft?.status === 'apply_pending' ? '正在儲存排班結果…' : '儲存排班結果'}
                             </button>
                           )}
 

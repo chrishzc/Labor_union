@@ -1,4 +1,4 @@
-"""Current-only Anomalies list contract and signed cursor regression."""
+"""Current-only Anomalies list contract and deterministic cursor regression."""
 
 # Canonical anomaly-registry root retains this durable current-contract oracle.
 
@@ -20,7 +20,6 @@ from subsystems.anomalies.current_issue_query import (
 
 
 NOW = datetime(2026, 8, 30, 8, 0, tzinfo=timezone.utc)
-SECRET = b"task97-current-issue-query-secret"
 
 
 def _projection(key: str, *, blocking: bool, severity: str, minutes: int) -> CurrentIssueProjection:
@@ -55,21 +54,23 @@ class _Repository:
         return rows[:fetch_limit]
 
 
-def test_signed_cursor_is_filter_bound_and_replays_next_page() -> None:
+def test_cursor_is_filter_bound_deterministic_and_replays_next_page() -> None:
     rows = (
         _projection("ci_" + "1" * 64, blocking=True, severity="blocking", minutes=0),
         _projection("ci_" + "2" * 64, blocking=False, severity="warning", minutes=1),
     )
     repository = _Repository(rows)
-    application = CurrentIssueQueryApplication(repository, CurrentIssueCursorCodec(SECRET))
+    application = CurrentIssueQueryApplication(repository, CurrentIssueCursorCodec())
     request = CurrentIssueListRequest(owner_domain="line", limit=1)
 
     first = application.query(request)
+    repeat = application.query(request)
     second = application.query(
         CurrentIssueListRequest(owner_domain="line", limit=1, cursor=first.next_cursor)
     )
 
     assert [item.issue_key for item in first.items] == [rows[0].issue_key]
+    assert first.next_cursor == repeat.next_cursor
     assert [item.issue_key for item in second.items] == [rows[1].issue_key]
     assert first.next_cursor is not None
     assert second.next_cursor is None
@@ -85,24 +86,22 @@ def test_signed_cursor_is_filter_bound_and_replays_next_page() -> None:
         raise AssertionError("cursor reuse with different filters must fail closed")
 
 
-def test_cursor_tampering_fails_closed() -> None:
-    row = _projection("ci_" + "3" * 64, blocking=True, severity="blocking", minutes=0)
-    codec = CurrentIssueCursorCodec(SECRET)
-    request = CurrentIssueListRequest(limit=1)
-    cursor = codec.encode(request, row)
+def test_malformed_cursor_fails_as_validation_error_without_runtime_secret() -> None:
+    codec = CurrentIssueCursorCodec()
+    request = CurrentIssueListRequest(limit=1, cursor="not-a-valid-cursor!")
 
     try:
-        codec.decode(CurrentIssueListRequest(limit=1, cursor=cursor[:-1] + "A"))
+        codec.decode(request)
     except ValueError as error:
         assert str(error) == "anomaly_cursor_invalid"
     else:  # pragma: no cover
-        raise AssertionError("tampered cursor must fail closed")
+        raise AssertionError("malformed cursor must fail as validation")
 
 
 def test_current_list_route_has_only_current_filters_and_typed_page() -> None:
     row = _projection("ci_" + "4" * 64, blocking=True, severity="blocking", minutes=0)
     repository = _Repository((row,))
-    application = CurrentIssueQueryApplication(repository, CurrentIssueCursorCodec(SECRET))
+    application = CurrentIssueQueryApplication(repository, CurrentIssueCursorCodec())
     app.dependency_overrides[require_system_admin] = lambda: object()
     app.dependency_overrides[get_current_issue_query_application] = lambda: application
     client = TestClient(app)
@@ -133,7 +132,7 @@ def test_current_list_route_has_only_current_filters_and_typed_page() -> None:
 
 
 def test_current_list_route_maps_invalid_cursor_to_stable_code() -> None:
-    application = CurrentIssueQueryApplication(_Repository(()), CurrentIssueCursorCodec(SECRET))
+    application = CurrentIssueQueryApplication(_Repository(()), CurrentIssueCursorCodec())
     app.dependency_overrides[require_system_admin] = lambda: object()
     app.dependency_overrides[get_current_issue_query_application] = lambda: application
     client = TestClient(app)

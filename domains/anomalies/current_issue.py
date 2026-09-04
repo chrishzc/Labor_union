@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
-import hmac
 import json
 import math
 from typing import Any, Mapping
@@ -23,7 +22,7 @@ from shared_kernel.validation import (
 
 _IDENTITY_MAXIMUM_LENGTH = 191
 _ISSUE_KEY_PREFIX = "ci_"
-_ISSUE_KEY_VERSION = 1
+_ISSUE_KEY_VERSION = 2
 
 # The subject object is closed per definition.  A detector with no entry here
 # must not fall back to a generic anomaly row.
@@ -86,35 +85,30 @@ def canonical_subject_identity(subject_identity: Mapping[str, Any]) -> str:
 
 
 def build_issue_key(
-    secret: str | bytes,
     definition_code: str,
     subject_identity: Mapping[str, Any],
+    lifecycle_token: str,
 ) -> str:
-    """Derive the opaque current issue identity using the injected secret."""
+    """Derive a deterministic opaque identity from canonical lifecycle facts."""
 
     require_canonical_text(definition_code, "definition code", _IDENTITY_MAXIMUM_LENGTH)
-    if isinstance(secret, str):
-        secret_bytes = secret.encode("utf-8")
-    elif isinstance(secret, bytes):
-        secret_bytes = secret
-    else:
-        raise TypeError("issue identity secret must be text or bytes")
-    if not secret_bytes:
-        raise ValueError("issue identity secret is required")
+    lifecycle_token = require_canonical_text(
+        lifecycle_token, "anomaly lifecycle token", _IDENTITY_MAXIMUM_LENGTH
+    )
     canonical = canonical_subject_identity_for_code(definition_code, subject_identity)
     payload = json.dumps(
         {
             "v": _ISSUE_KEY_VERSION,
             "definition_code": definition_code,
             "subject_identity": json.loads(canonical),
+            "lifecycle_token": lifecycle_token,
         },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
         allow_nan=False,
     ).encode("utf-8")
-    digest = hmac.new(secret_bytes, payload, hashlib.sha256).hexdigest()
-    return _ISSUE_KEY_PREFIX + digest
+    return _ISSUE_KEY_PREFIX + hashlib.sha256(payload).hexdigest()
 
 
 def _validate_json_object(value: Mapping[str, Any]) -> None:

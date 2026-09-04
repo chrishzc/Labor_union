@@ -13,6 +13,7 @@
   - `domains/orders/terms.py`
   - `subsystems/orders/actual_start_workflow.py`
   - `infrastructure/mysql/order_actual_start_repository.py`
+  - `ui_react/src/api/orders/order_actual_start_client.ts`
 
 ## Dependencies
 - outbound: `scheduling/scheduling` — replacement generation 擁有正式服務日期與 assignment lineage。
@@ -23,6 +24,11 @@
 ## Contracts
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — Actual Start、歷史來源與 completion instant 語意。
 - `subsystems/orders/actual_start_workflow.py` — Preview／Apply 與單一 outer UoW contract。
+
+## Verification
+- layout_status: custom_current
+- test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/actual-start/`
+- higher_boundary: `tests/domains/orders/subsystems/orders/integration/test_order_actual_start_workflow.py`
 
 ## Provenance
 - Actual Start writer and cross-owner persistence — `source_observed` — `subsystems/orders/actual_start_workflow.py`.

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Callable, Protocol
 
 from domains.orders.service_date_confirmation import (
@@ -11,6 +11,21 @@ from domains.orders.service_date_confirmation import (
     group_service_dates_by_calendar_week,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from domains.scheduling.generation import (
+    AssignmentCandidate,
+    BufferCandidate,
+    SchedulingGenerationCandidate,
+)
+from subsystems.orders.terms_workflow import SchedulingReplacementCommand
+
+
+@dataclass(frozen=True, slots=True)
+class RestartSchedulingAssignmentFacts:
+    source_assignment_id: int
+    staff_id: int
+    sequence: int
+    service_day_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +38,8 @@ class ServiceDateConfirmationFacts:
     selectable_dates: tuple[date, ...]
     current_version: int | None
     current_dates: tuple[date, ...]
+    restart_generation_number: int | None = None
+    restart_assignments: tuple[RestartSchedulingAssignmentFacts, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +64,7 @@ class ServiceDateConfirmationRepository(Protocol):
     def replay(self, idempotency_key: str, command_fingerprint: str) -> ServiceDateConfirmationReceipt | None: ...
     def save(self, candidate: ConfirmedServiceDateCandidate, *, actor: str, reason: str,
              idempotency_key: str, command_fingerprint: str) -> ServiceDateConfirmationReceipt: ...
+    def persist_restarted_scheduling(self, command: SchedulingReplacementCommand) -> int: ...
 
 
 class SchedulingSnapshotInvalidationPort(Protocol):
@@ -109,11 +127,107 @@ class ServiceDateConfirmationWorkflow:
                 idempotency_key=idempotency_key,
                 command_fingerprint=command_fingerprint,
             )
+            if facts.restart_generation_number is not None:
+                scheduling_version = self._repository.persist_restarted_scheduling(
+                    _restart_scheduling_command(
+                        facts,
+                        candidate.service_dates,
+                        actor=actor,
+                        reason=reason,
+                        idempotency_key=idempotency_key,
+                        command_fingerprint=command_fingerprint,
+                        preview_fingerprint=preview_fingerprint,
+                    )
+                )
+                receipt = ServiceDateConfirmationReceipt(
+                    receipt.case_no,
+                    receipt.confirmed_version,
+                    receipt.order_version,
+                    scheduling_version,
+                    receipt.service_dates,
+                    receipt.fingerprint,
+                )
             self._scheduling_snapshot_invalidation.invalidate_current_snapshot(
                 candidate.case_no
             )
             unit_of_work.commit()
             return receipt
+
+
+def _restart_scheduling_command(
+    facts: ServiceDateConfirmationFacts,
+    service_dates: tuple[date, ...],
+    *,
+    actor: str,
+    reason: str,
+    idempotency_key: str,
+    command_fingerprint: str,
+    preview_fingerprint: str,
+) -> SchedulingReplacementCommand:
+    assignments = _restart_assignment_candidates(facts, service_dates)
+    generation_number = facts.restart_generation_number
+    if generation_number is None:
+        raise ValueError("historical_restart_scheduling_not_pending")
+    candidate = SchedulingGenerationCandidate(
+        case_no=facts.case_no,
+        generation_number=generation_number + 1,
+        expected_aggregate_version=facts.scheduling_version,
+        resulting_aggregate_version=facts.scheduling_version + 1,
+        cancelled_assignment_ids=(),
+        assignments=assignments,
+        buffers=tuple(_restart_buffer(item) for item in assignments),
+    )
+    return SchedulingReplacementCommand(
+        candidate=candidate,
+        command_family="historical_restart_service_dates",
+        expected_order_version=facts.order_version,
+        command_fingerprint=PreviewFingerprint(command_fingerprint),
+        preview_fingerprint=PreviewFingerprint(preview_fingerprint),
+        idempotency_key=IdempotencyKey(idempotency_key),
+        actor=ActorContext(actor),
+        reason=reason,
+        correlation_id=CorrelationId(f"historical-restart-service-dates:{idempotency_key}"),
+    )
+
+
+def _restart_assignment_candidates(
+    facts: ServiceDateConfirmationFacts,
+    service_dates: tuple[date, ...],
+) -> tuple[AssignmentCandidate, ...]:
+    sources = tuple(sorted(facts.restart_assignments, key=lambda item: item.sequence))
+    if not sources:
+        raise ValueError("historical_restart_assignment_required")
+    if len(sources) == 1:
+        counts = (len(service_dates),)
+    else:
+        counts = tuple(item.service_day_count for item in sources)
+        if any(value <= 0 for value in counts) or sum(counts) != len(service_dates):
+            raise ValueError("historical_restart_assignment_allocation_required")
+    offset = 0
+    result = []
+    for source, count in zip(sources, counts, strict=True):
+        assigned_dates = service_dates[offset:offset + count]
+        offset += count
+        result.append(AssignmentCandidate(
+            candidate_key=f"{facts.case_no}:g{facts.restart_generation_number + 1}:a{source.sequence}",
+            source_assignment_id=source.source_assignment_id,
+            staff_id=source.staff_id,
+            sequence=source.sequence,
+            assigned_start_date=assigned_dates[0],
+            assigned_end_date=assigned_dates[-1],
+            service_dates=assigned_dates,
+            actual_hours=0,
+        ))
+    return tuple(result)
+
+
+def _restart_buffer(assignment: AssignmentCandidate) -> BufferCandidate:
+    return BufferCandidate(
+        candidate_key=f"{assignment.candidate_key}:buffer",
+        staff_id=assignment.staff_id,
+        dates=tuple(assignment.assigned_end_date + timedelta(days=value) for value in range(1, 8)),
+        active=True,
+    )
 
 
 def _candidate(facts, service_dates):

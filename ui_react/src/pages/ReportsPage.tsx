@@ -16,6 +16,7 @@ import {
   displayWeeklyMetric,
   displayWeeklyValue,
 } from '../adapters/reports/weekly_operations_report_adapter';
+import { WeeklyBatchModal } from '../components/reports/WeeklyBatchModal';
 
 type ReportKind = 'weekly' | 'quarterly' | 'annual';
 type WeeklyTab = 'cases' | 'subsidy' | 'service';
@@ -116,12 +117,15 @@ const WeeklySubsidyView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
 const WeeklyServiceView: React.FC<{ report: WeeklyView }> = ({ report }) => (
   report.serviceRows.length === 0 ? <div className="reports-state">此期間服務工時無資料。</div> : <div className="reports-table-container">
     <table className="reports-table">
-      <thead><tr><th>案件</th><th>案家</th><th>服務人員</th><th>服務期間</th><th>每日時數</th><th>期間工作日</th><th>期間工時</th><th>訂單狀態</th><th>完成</th><th>資料品質</th></tr></thead>
-      <tbody>{report.serviceRows.map((row) => <tr key={row.assignment_id}>
-        <td>{row.case_no}</td><td>{row.client_name}</td><td>{row.staff_name}</td>
-        <td>{row.service_start_date}～{row.service_end_date}</td><td>{row.service_hours_per_day}</td>
-        <td>{row.weekly_work_days}</td><td>{row.weekly_hours}</td><td>{row.order_status}</td>
-        <td>{row.completed ? '是' : '否'}</td><td>{row.data_quality_codes.length ? row.data_quality_codes.join('、') : '—'}</td>
+      <thead><tr><th>週數</th><th>序號</th><th>市府案號</th><th>雇主</th><th>休假模式</th><th>休數</th><th>服務開始</th><th>服務結束</th><th>特殊休假</th><th>每週起始日</th><th>每週結束日</th><th>服務時數</th><th>每周工作日數</th><th>每周工時</th><th>結案</th></tr></thead>
+      <tbody>{report.serviceRows.map((row, idx) => <tr key={row.assignment_id || idx}>
+        <td>{row.week_code || '—'}</td><td>{idx + 1}</td><td>{row.case_no}</td><td>{row.client_name}</td>
+        <td>{row.rest_mode || '周休二日'}</td><td>{row.rest_days_count ?? 0}</td>
+        <td>{displayWeeklyValue(row.service_start_date)}</td><td>{displayWeeklyValue(row.service_end_date)}</td>
+        <td>{row.special_rest || '—'}</td>
+        <td>{displayWeeklyValue(row.period_start_date)}</td><td>{displayWeeklyValue(row.period_end_date)}</td>
+        <td>{row.service_hours_per_day}</td><td>{row.weekly_work_days}</td><td>{row.weekly_hours}</td>
+        <td>{row.is_closed || (row.completed ? '結案' : '—')}</td>
       </tr>)}</tbody>
     </table>
   </div>
@@ -136,8 +140,11 @@ export const ReportsPage: React.FC = () => {
   const [endDate, setEndDate] = useState(initialReportPeriod.endDate);
   const [year, setYear] = useState(period.year);
   const [quarter, setQuarter] = useState(period.quarter);
+  const [promotionCount, setPromotionCount] = useState<string>('');
+  const [inquiryCount, setInquiryCount] = useState<string>('');
   const [state, setState] = useState<ReportState>({ kind: 'idle' });
   const [reload, setReload] = useState(0);
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
   const [exportState, setExportState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const controllerRef = useRef<AbortController | null>(null);
   const exportControllerRef = useRef<AbortController | null>(null);
@@ -226,8 +233,19 @@ export const ReportsPage: React.FC = () => {
     const sequence = ++exportSequenceRef.current;
     setExportState('loading');
     try {
+      const pCount = promotionCount.trim() !== '' ? Number(promotionCount) : null;
+      const iCount = inquiryCount.trim() !== '' ? Number(inquiryCount) : null;
       const artifact = reportKind === 'weekly'
-        ? await weeklyOperationsReportExportClient.download(startDate, endDate, controller.signal)
+        ? await weeklyOperationsReportExportClient.download(
+          startDate,
+          endDate,
+          {
+            promotionCount: pCount,
+            inquiryCount: iCount,
+            annualYtd: true,
+          },
+          controller.signal,
+        )
         : await subsidyReportExportClient.download(
           reportKind === 'quarterly'
             ? { kind: 'quarterly', applicationYear: year, quarter }
@@ -275,6 +293,22 @@ export const ReportsPage: React.FC = () => {
           <input type="date" value={startDate} onChange={(event) => changeDateRange(event.target.value, endDate)} />
         </label><label>迄日
           <input type="date" value={endDate} onChange={(event) => changeDateRange(startDate, event.target.value)} />
+        </label><label>推廣次數
+          <input
+            type="number"
+            min="0"
+            placeholder="0"
+            value={promotionCount}
+            onChange={(event) => setPromotionCount(event.target.value)}
+          />
+        </label><label>詢問人次
+          <input
+            type="number"
+            min="0"
+            placeholder="0"
+            value={inquiryCount}
+            onChange={(event) => setInquiryCount(event.target.value)}
+          />
         </label></> : <label>年度
           <input type="number" min="1912" value={year} onChange={(event) => changeYear(Number(event.target.value))} />
         </label>}
@@ -284,6 +318,15 @@ export const ReportsPage: React.FC = () => {
           </select>
         </label>}
         <button type="button" onClick={reloadReport}>重新載入</button>
+        {reportKind === 'weekly' && (
+          <button
+            type="button"
+            style={{ background: '#f8fafc', borderColor: '#3b82f6', color: '#1d4ed8' }}
+            onClick={() => setIsBatchModalOpen(true)}
+          >
+            📑 週報結算管理
+          </button>
+        )}
         <button type="button" data-control-id={exportControlId} disabled={exportState === 'loading'} onClick={() => void downloadXlsx()}>
           {exportState === 'loading' ? '正在產生 XLSX…' : reportKind === 'weekly' ? '下載營運報表 XLSX' : '匯出 XLSX'}
         </button>
@@ -293,7 +336,7 @@ export const ReportsPage: React.FC = () => {
         {([
           ['cases', '週報案件受理總表'],
           ['subsidy', '補助案件統計表'],
-          ['service', '每週服務中與工時'],
+          ['service', '每周服務中說明'],
         ] as const).map(([tab, label]) => <button
           key={tab}
           type="button"
@@ -313,11 +356,9 @@ export const ReportsPage: React.FC = () => {
       </div>}
 
       {state.kind === 'weekly-ready' && <>
-        <div className="reports-meta">{state.data.period.period_label}｜{state.data.period.start_date}～{state.data.period.end_date}</div>
         {weeklyTab === 'cases' && <WeeklyCasesView report={state.data} />}
         {weeklyTab === 'subsidy' && <WeeklySubsidyView report={state.data} />}
         {weeklyTab === 'service' && <WeeklyServiceView report={state.data} />}
-        <DataQualityIssues issues={state.data.dataQualityIssues} />
       </>}
 
       {state.kind === 'subsidy-ready' && <>
@@ -329,6 +370,13 @@ export const ReportsPage: React.FC = () => {
         <div className="reports-meta">報表產生時間：{state.data.generatedAt}</div>
         <SubsidyPartitionsView partitions={state.data.partitions} />
       </>}
+
+      <WeeklyBatchModal
+        isOpen={isBatchModalOpen}
+        onClose={() => setIsBatchModalOpen(false)}
+        year={Number(startDate.slice(0, 4)) || 2026}
+        onBatchClosed={reloadReport}
+      />
     </section>
   </div>;
 };

@@ -17,7 +17,7 @@ import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 const EXPECTED_HASHES = [
   'order-tracker', 'orders', 'scheduling', 'staff', 'data-import', 'reports',
   'line-management', 'line-ai-events', 'line-llm-settings', 'line-liff-studio', 'line-security',
-  'finance', 'historical-service-accounting', 'anomalies', 'account-management', 'system-status',
+  'finance', 'historical-service-accounting', 'anomalies', 'account-management',
 ] as const;
 
 describe('React entrypoint registry', () => {

@@ -11,7 +11,7 @@ import { ACCOUNT_DIRECTORY_FIXTURE } from './fixtures/access/account_query_contr
 describe('Account Management mutation boundary', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('keeps account, MFA and job mutation controls natively disabled', async () => {
+  it('keeps account and MFA mutation controls natively disabled and omits jobs controls', async () => {
     vi.spyOn(accountDirectoryClient, 'query').mockResolvedValue(ACCOUNT_DIRECTORY_FIXTURE);
     render(<AccountManagementPage />);
     await waitFor(() => expect(screen.getByText('root-user')).toBeInTheDocument());
@@ -24,7 +24,7 @@ describe('Account Management mutation boundary', () => {
     expect(screen.getByText(/若操作按鈕無法使用，請先填寫操作原因/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: /驗證器動態碼/ }));
     expect(document.querySelector('[data-control-id="account.mfa.enroll"]')).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: /背景工作狀態/ }));
+    expect(screen.queryByRole('tab', { name: /背景工作狀態/ })).not.toBeInTheDocument();
     for (const id of ['account.jobs.cancel', 'account.jobs.retry', 'account.jobs.run']) {
       expect(document.querySelector(`[data-control-id="${id}"]`)).toBeNull();
     }

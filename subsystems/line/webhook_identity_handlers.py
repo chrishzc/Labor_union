@@ -143,6 +143,13 @@ class LineWebhookIdentityHandlers:
             return
         purpose = _identity_purpose_for_text(text)
         if purpose is None:
+            normalized = text.strip()
+            if normalized in {"有幫助", "👍 有幫助", "很有幫助", "有解決"}:
+                self._handle_feedback_resolved(inbox, unit_of_work, line_user_id)
+                return
+            if normalized in {"未解決", "👎 未解決", "沒解決", "沒有幫助", "未解決（通報專人客服）"}:
+                self._handle_feedback_unresolved(inbox, unit_of_work, line_user_id)
+                return
             if self._menu_command_application is not None and self._menu_command_application.handle(
                 inbox, unit_of_work, line_user_id, text
             ):
@@ -185,6 +192,49 @@ class LineWebhookIdentityHandlers:
     def handle_postback(self, inbox, unit_of_work):
         if self._matching_postback_application is not None:
             self._matching_postback_application.handle(inbox, unit_of_work)
+
+    def _handle_feedback_resolved(self, inbox, unit_of_work, line_user_id) -> None:
+        event_identity = inbox.event.event_id.value
+        correlation_id = CorrelationId(inbox.event.correlation_id.value)
+        delivery = _text_delivery(
+            line_user_id,
+            _text_message_payload("感謝您的肯定與回饋！很高興能為您解答 😊 若還有其他疑問，歡迎隨時告訴小幫手。"),
+            event_identity,
+            correlation_id,
+            self._now(),
+            f"feedback-resolved:{event_identity}",
+        )
+        unit_of_work.delivery_tasks.enqueue(delivery)
+
+    def _handle_feedback_unresolved(self, inbox, unit_of_work, line_user_id) -> None:
+        event_identity = inbox.event.event_id.value
+        correlation_id = CorrelationId(inbox.event.correlation_id.value)
+        ticket_id_str = ""
+        if hasattr(unit_of_work, "customer_service") and unit_of_work.customer_service is not None:
+            try:
+                from domains.customer_service.ticket import CustomerServiceCategory
+                from subsystems.customer_service.contracts import CreateCustomerServiceMessage
+                ticket = unit_of_work.customer_service.create_or_append(
+                    CreateCustomerServiceMessage(
+                        line_user_id=line_user_id.value,
+                        category=CustomerServiceCategory.OTHER,
+                        message="LINE 知識庫問答用戶回饋未解決，請真人客服接手協助。",
+                        event_key=f"line-feedback-ticket:{event_identity}",
+                    )
+                )
+                ticket_id_str = f"（工單編號 #{ticket.ticket_id}）"
+            except Exception:
+                pass
+
+        delivery = _text_delivery(
+            line_user_id,
+            _text_message_payload(f"已收到您的回饋！我們已為您通報工會專人客服{ticket_id_str}，專員將盡快接手與您聯繫協助，請稍候！"),
+            event_identity,
+            correlation_id,
+            self._now(),
+            f"feedback-unresolved:{event_identity}",
+        )
+        unit_of_work.delivery_tasks.enqueue(delivery)
 
     # Kept cohesive so the flow and its delivery task use the same event identity.
     def _open_and_notify(self, inbox, unit_of_work, line_user_id, purpose):

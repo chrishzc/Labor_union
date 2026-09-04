@@ -1,12 +1,12 @@
 /**
  * File: system_status_entry_cutover.test.tsx
- * Description: 驗證系統狀態入口的認證、唯讀查詢、業務化摘要、失敗去敏與重試。
+ * Description: 驗證系統狀態獨立入口已切除，同時保留既有 snapshot 查詢與右上角狀態指示。
  */
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
-import { MasterLayout } from '../components/MasterLayout';
+import { MasterLayout, NAV_ITEMS, PAGE_SECTION_MAP } from '../components/MasterLayout';
 import {
   fetchPerformanceSnapshot,
   SYSTEM_STATUS_ENDPOINT,
@@ -81,26 +81,29 @@ describe('System Status entry cutover candidate contract', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('認證後 Hash 才呈現專用 entry', async () => {
-    act(() => {
-      window.history.replaceState(null, '', '#system-status');
-    });
+  it('system-status 不再是 canonical page 或 audit navigation，shell 仍使用原 snapshot contract', async () => {
     authenticate();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse(snapshotEnvelope())
     );
-    render(
-      <StrictMode>
-        <App />
-      </StrictMode>
+
+    expect(PAGE_SECTION_MAP).not.toHaveProperty('system-status');
+    expect(NAV_ITEMS).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'system-status' })])
     );
 
-    await waitFor(() => expect(screen.getByTestId('system-status.page')).toBeInTheDocument());
-    expect(screen.getByTestId('system-status.page')).toHaveAttribute(
-      'data-entry-identity',
-      'ui-react:#system-status'
+    render(
+      <MasterLayout
+        currentSection="audit"
+        currentPage="anomalies"
+        onSelectSection={() => undefined}
+        onSelectPage={() => undefined}
+        onLogout={() => undefined}
+      />
     );
-    expect(window.location.hash).toBe('#system-status');
+
+    expect(screen.queryByRole('button', { name: /系統狀態/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('system-status-indicator')).toHaveTextContent('系統在線'));
     expect(fetchSpy).toHaveBeenCalledOnce();
     expect(fetchSpy).toHaveBeenCalledWith(
       SYSTEM_STATUS_ENDPOINT,
