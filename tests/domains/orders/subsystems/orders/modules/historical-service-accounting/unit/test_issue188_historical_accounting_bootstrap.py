@@ -51,7 +51,7 @@ class _LoadCursor:
                     "staff_name": "月嫂乙",
                     "payroll_policy_version": "payroll-policy:188" if self.rate else None,
                     "payroll_policy_kind": PayrollPolicyKind.CITIZEN.value if self.rate else None,
-                    "payroll_hourly_rate_ntd": 320 if self.rate else None,
+                    "payroll_hourly_rate_ntd": 300 if self.rate else None,
                 },
             )
         elif "FROM payroll_adjustment_allocations" in statement:
