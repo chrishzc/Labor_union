@@ -285,6 +285,19 @@ def _call(command, message, correlation):
         _raise(error.error)
     except ValueError as error:
         code = str(error) or "historical_actual_service_days_invalid"
+        if code in {
+            "historical_client_payment_terms_missing",
+            "historical_payroll_rate_policy_missing",
+        }:
+            _raise(
+                TypedError(
+                    ErrorCategory.DOMAIN_BLOCKED,
+                    code,
+                    "歷史服務帳務缺少正式計價前置資料。",
+                    correlation,
+                    domain_blockers=(code,),
+                )
+            )
         status = 404 if code == "historical_order_not_found" else 422
         category = ErrorCategory.NOT_FOUND if status == 404 else ErrorCategory.VALIDATION
         _raise(TypedError(category, code, "歷史服務帳務資料未通過驗證。", correlation))
