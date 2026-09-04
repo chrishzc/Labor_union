@@ -65,6 +65,7 @@ import {
 import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
 import { substitutionPayablesLineageClient, type SubstitutionPayablesLineage } from '../api/scheduling/substitution_payables_lineage_client';
 import { Drawer } from '../components/Drawer';
+import { OfficialHolidayCsvImport } from '../components/scheduling/OfficialHolidayCsvImport';
 
 type SchedulingTab = 'calendar' | 'leave_sub' | 'holidays';
 type StatusFilter = 'all' | 'active' | 'waiting' | 'leave';
@@ -400,6 +401,8 @@ function HolidayPolicyWorkspace() {
         </div>
       </header>
 
+      <OfficialHolidayCsvImport disabled={busy} />
+
       <div className="holiday-policy-horizon">
         <label>
           查詢起日
@@ -734,7 +737,6 @@ function LeaveSubstitutionWorkspace({
       }
       setSelectedInboxItem(selectedItem);
       setReason(`依 LINE 請假待辦（${item.staff_name} ${item.leave_start_date}～${item.leave_end_date}）安排代班`);
-      // 若當前案件指派中有該月嫂，自動選中該 assignment
       const matchedAssignment = assignments.find((a) => a.staff_id === item.staff_id);
       if (matchedAssignment) {
         setAssignmentId(matchedAssignment.assignment_id);
@@ -1131,7 +1133,6 @@ function LeaveSubstitutionWorkspace({
         )}
       </div>
 
-      {/* 當前載入的 LINE 請假待辦提示橫幅 */}
       {selectedInboxItem && (
         <div style={{ padding: '12px 18px', background: '#ffedd5', border: '1.5px solid #fdba74', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
           <span style={{ fontSize: '0.9rem', color: '#9a3412', fontWeight: 700 }}>
@@ -1150,7 +1151,6 @@ function LeaveSubstitutionWorkspace({
         </div>
       )}
 
-      {/* 訂單選擇控制列（支援下拉選單與快速切換標籤） */}
       <div className="leave-substitution-query-row" style={{ background: '#fff8f6', padding: '16px 20px', borderRadius: '12px', border: '1.5px solid #fed7aa' }}>
         <div style={{ flex: '1 1 320px' }}>
           <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: '#9a3412', marginBottom: '6px' }}>
@@ -1476,7 +1476,6 @@ type CalendarCaseOptionsState =
   | { kind: 'error'; message: string };
 
 
-
 type SchedulingDiagnosticTone = 'unavailable' | 'active' | 'waiting' | 'leave';
 
 type EligibilityCollisionState =
@@ -1602,7 +1601,6 @@ const NO_OCCUPANCY_DIAGNOSTIC: SchedulingDiagnosticBadge = {
 };
 const NO_OCCUPANCY_SLOT_TEXT = '本月無排班占用';
 
-// 只將 server occupancy／typed error 映射為標籤，或在 Ghost 模式下計算預留區間撞期診斷
 function getStaffDiagnosticBadge(
   state: CalendarRowState | undefined,
   ghostConfig?: GhostProjectionConfig | null
@@ -1624,7 +1622,6 @@ function getStaffDiagnosticBadge(
   }
   const row = state.row;
 
-  // 案件完整檔期由逐人 typed eligibility 結果決定，不由月曆回傳的稀疏日期陣列反推。
   if (ghostConfig?.active && ghostConfig.startDay && ghostConfig.endDay) {
     if (ghostConfig.outcome === 'hard_conflict') return { tone: 'leave', text: '🔴 整段檔期有衝突' };
     if (ghostConfig.outcome === 'reservation_conflict') return { tone: 'waiting', text: '🟡 整段受預約／防撞期影響' };
@@ -1717,7 +1714,6 @@ function visibleCaseInterval(
   };
 }
 
-// 動態將 Server 天數投影合併為連續甘特區間條塊（支援 Ghost Projection 幽靈透視）
 interface GanttSpan {
   id: string;
   startDay: number;
@@ -1894,7 +1890,6 @@ export const SchedulingPage: React.FC = () => {
   const [eligibilityState, setEligibilityState] = useState<EligibilityCollisionState>({ kind: 'idle' });
   const [collisionDrawerOpen, setCollisionDrawerOpen] = useState(false);
 
-  // 🔮 洽談案件幽靈投影 (Ghost Projection) 狀態：預設沒有選擇案件
   const [selectedCaseNo, setSelectedCaseNo] = useState<string>(
     () => parseSchedulingDeepLink(window.location.hash).caseNo || '',
   );
@@ -1939,7 +1934,6 @@ export const SchedulingPage: React.FC = () => {
     return () => window.removeEventListener('hashchange', syncDeepLink);
   }, []);
 
-  // 載入服務人員名冊
   const loadDirectory = useCallback(async () => {
     directoryControllerRef.current?.abort();
     const controller = new AbortController();
@@ -2126,10 +2120,8 @@ export const SchedulingPage: React.FC = () => {
   }, [selectedCaseNo, staffList]);
 
   const range = useMemo(() => monthRange(month), [month]);
-
   const prevMonthRef = useRef<MonthSelection | null>(null);
 
-  // 切換月份時重置排班快取
   useEffect(() => {
     if (prevMonthRef.current === null) {
       prevMonthRef.current = month;
@@ -2142,7 +2134,6 @@ export const SchedulingPage: React.FC = () => {
     }
   }, [month]);
 
-  // 甘特矩陣中的每一列都必須有自己的 server projection，不能只查目前選取的人員。
   useEffect(() => {
     if (staffList.length === 0) return undefined;
     const rangeKey = `${range.rangeStart}:${range.rangeEnd}`;
@@ -2272,7 +2263,6 @@ export const SchedulingPage: React.FC = () => {
     }
   }, [collisionDrawerOpen, selectedStaffId, eligibilityCaseNo, selectedCaseNo, queryEligibility]);
 
-  // 篩選與搜尋過濾
   const filteredStaff = useMemo(() => {
     return staffList.filter((staff) => {
       const matchKeyword =
@@ -2370,7 +2360,6 @@ export const SchedulingPage: React.FC = () => {
 
   return (
     <div data-surface-id="scheduling.page" className="scheduling-gantt-page">
-      {/* Page Header */}
       <header className="page-header-banner scheduling-page-header">
         <div>
           <h1 className="page-title">📅 多月嫂排班日曆與調度中心</h1>
@@ -2380,7 +2369,6 @@ export const SchedulingPage: React.FC = () => {
         </div>
       </header>
 
-      {/* Sticky Tabs Bar */}
       <nav className="scheduling-tab-bar" aria-label="排班工作區">
         <button
           data-surface-id="scheduling.tab.calendar"
@@ -2412,7 +2400,6 @@ export const SchedulingPage: React.FC = () => {
           data-surface-id="scheduling.calendar"
           aria-label="排班甘特月曆與服務人員檔期"
         >
-          {/* Top Case Selection & Ghost Projection Bar */}
           <div className="gantt-case-projection-bar">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '0.92rem', fontWeight: 750, color: '#9a3412' }}>
@@ -2507,9 +2494,7 @@ export const SchedulingPage: React.FC = () => {
             )}
           </div>
 
-          {/* Top Control Bar: Month Switcher + Search + Filters */}
           <section className="gantt-matrix-header-bar" aria-label="月曆查詢控制">
-            {/* Left: Month Navigator & Today */}
             <div className="gantt-month-navigator">
               <div className="month-pill-group">
                 <button
@@ -2545,7 +2530,6 @@ export const SchedulingPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Right: Search + Filter Chips */}
             <div className="gantt-filter-controls">
               <div className="gantt-search-box">
                 <span>🔍</span>
@@ -2593,7 +2577,6 @@ export const SchedulingPage: React.FC = () => {
             </div>
           </section>
 
-          {/* Full Legend Bar */}
           <section className="gantt-legend-bar-rich" aria-label="排班檔期圖例">
             <div className="legend-item">
               <span className="legend-badge active" />
@@ -2625,7 +2608,6 @@ export const SchedulingPage: React.FC = () => {
             </div>
           </section>
 
-          {/* Status Notifications */}
           {directoryLoading && (
             <div className="scheduling-status" role="status">正在載入服務人員摘要…</div>
           )}
@@ -2679,11 +2661,9 @@ export const SchedulingPage: React.FC = () => {
             </div>
           )}
 
-          {/* Multi-Caregiver Gantt Chart Matrix Table */}
           {filteredStaff.length > 0 && (
             <div className="gantt-matrix-scroll-wrapper" data-surface-id="scheduling.calendar.grid">
               <div className="gantt-matrix-table">
-                {/* Header Row: Days 1 ~ 31 */}
                 <div className="gantt-matrix-header-row">
                   <div className="gantt-staff-header-cell">
                     <strong>月嫂名冊 ｜ 檔期診斷</strong>
@@ -2702,7 +2682,6 @@ export const SchedulingPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Staff Rows */}
                 {filteredStaff.map((staff) => {
                   const row = calendarRows[staff.id];
                   const ghostConfig: GhostProjectionConfig | null = visibleInterval
@@ -2735,7 +2714,6 @@ export const SchedulingPage: React.FC = () => {
                         }
                       }}
                     >
-                      {/* Left: Staff Identity Card */}
                       <div className="gantt-staff-info-cell">
                         <div className="staff-name-line">
                           <span className="staff-avatar">👤</span>
@@ -2764,9 +2742,7 @@ export const SchedulingPage: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Right: Gantt Days Timeline Bar */}
                       <div className="gantt-days-timeline-cell">
-                        {/* Render Days Grid */}
                         <div className="gantt-timeline-grid-bg">
                           {daysList.map((d) => (
                             <div
@@ -2776,7 +2752,6 @@ export const SchedulingPage: React.FC = () => {
                           ))}
                         </div>
 
-                        {/* Continuous Visual Gantt Blocks */}
                         <div className="gantt-spans-layer">
                           {spans.map((sp) => {
                             const leftPercent = ((sp.startDay - 1) / daysList.length) * 100;
@@ -2819,14 +2794,12 @@ export const SchedulingPage: React.FC = () => {
         </section>
       )}
 
-      {/* Other Tabs */}
       {activeTab === 'leave_sub' && (
         <LeaveSubstitutionWorkspace suggestedCaseNo={eligibilityCaseNo.trim() || null} staffList={staffList} />
       )}
       {activeTab === 'holidays' && (
         <HolidayPolicyWorkspace />
       )}
-      {/* 🔮 洽談檔期衝突檢測 暨 媒合排查 Slide-over Drawer (Unified wide size) */}
       <Drawer
         isOpen={collisionDrawerOpen}
         onClose={() => setCollisionDrawerOpen(false)}
@@ -2834,7 +2807,6 @@ export const SchedulingPage: React.FC = () => {
         size="wide"
       >
         <div className="collision-drawer-content">
-          {/* Candidate Pool Action Card */}
           <div style={{ padding: '16px 20px', background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)', border: '1.5px solid #fed7aa', borderRadius: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', boxShadow: '0 2px 8px rgba(234, 88, 12, 0.05)' }}>
             <div>
               <strong style={{ fontSize: '1rem', color: '#9a3412', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -2879,7 +2851,6 @@ export const SchedulingPage: React.FC = () => {
             )}
           </div>
 
-          {/* Top Query & Staff Selector Bar */}
           <div className="collision-drawer-query-bar">
             <div style={{ flex: '1 1 200px' }}>
               <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#57423b', marginBottom: '4px' }}>
@@ -2940,9 +2911,7 @@ export const SchedulingPage: React.FC = () => {
             </div>
           </div>
 
-          {/* 5:5 Split Grid */}
           <div className="collision-drawer-grid">
-            {/* Left Column: 📋 客戶需求 ✕ 月嫂條件與偏好比對 */}
             <div className="collision-panel-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#9a3412', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -2993,7 +2962,6 @@ export const SchedulingPage: React.FC = () => {
               )}
             </div>
 
-            {/* Right Column: 🛡️ 接單資格與檔期衝突判定 */}
             <div className="collision-panel-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#9a3412' }}>
@@ -3030,7 +2998,6 @@ export const SchedulingPage: React.FC = () => {
 
               {eligibilityState.kind === 'ready' && eligibilityResult && (
                 <div id="scheduling-eligibility-guidance" data-surface-id="scheduling.eligibility-collision" aria-live="polite">
-                  {/* 3-Status Summary Badges */}
                   <div className="collision-status-group">
                     <div className="collision-badge-item">
                       <span className="badge-label">接單資格</span>
@@ -3054,7 +3021,6 @@ export const SchedulingPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* 衝突與異常明細 */}
                   {eligibilityState.data.collisions.length > 0 ? (
                     <div className="collision-alert-box">
                       <div style={{ fontWeight: 750, color: '#991b1b', fontSize: '0.88rem', marginBottom: '8px' }}>
@@ -3074,7 +3040,6 @@ export const SchedulingPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 資格檢查不通過項目 */}
                   {eligibilityState.data.qualificationChecks.some((c) => c.status !== 'pass') && (
                     <div className="collision-warn-box">
                       <div style={{ fontWeight: 750, color: '#92400e', fontSize: '0.88rem', marginBottom: '6px' }}>
