@@ -18,9 +18,9 @@ describe('ReportsPage service-hours display', () => {
 
     render(<ReportsPage />);
     await screen.findByText('CASE-WEEK-001');
-    fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
+    fireEvent.click(screen.getByRole('tab', { name: '每周服務中說明' }));
 
-    expect(screen.getByText('陳**')).toBeInTheDocument();
+    expect(screen.getByText('王**')).toBeInTheDocument();
     expect(screen.getByText('40')).toBeInTheDocument();
   });
 
@@ -33,7 +33,7 @@ describe('ReportsPage service-hours display', () => {
 
     render(<ReportsPage />);
     await screen.findByText('CASE-WEEK-001');
-    fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
+    fireEvent.click(screen.getByRole('tab', { name: '每周服務中說明' }));
 
     expect(screen.getByText('此期間服務工時無資料。')).toBeInTheDocument();
   });

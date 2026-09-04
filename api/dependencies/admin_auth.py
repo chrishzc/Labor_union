@@ -191,6 +191,22 @@ def require_admin(
     return principal
 
 
+def optional_admin(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
+) -> AdminPrincipal | None:
+    """Optional admin session extractor; returns None if absent or invalid without throwing 401."""
+    if not authorization:
+        if not admin_auth_is_enabled():
+            return require_admin(request, authorization, connection_factory)
+        return None
+    try:
+        return require_admin(request, authorization, connection_factory)
+    except Exception:
+        return None
+
+
 def _development_bypass_principal() -> AdminPrincipal:
     base = AdminPrincipal(None, "development-bypass", "開發模式管理員", "system_admin")
     capabilities = frozenset(

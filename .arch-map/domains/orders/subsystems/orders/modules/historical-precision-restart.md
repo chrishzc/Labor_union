@@ -35,4 +35,4 @@
 ## Change triggers
 Reconcile when restart eligibility, historical accounting bridge, current-root revocation、API/UI entrypoint or provenance receipt semantics change.
 兩種 eligible 狀態都只回到正常 `訂單成立`；重啟不得接受服務日期、建立帳務或視為 actual-start reconfirmation。後續全部使用既有正常訂單 UI／API。
-六欄歷史來源缺少固定排休 root 時，OrdersPage 的既有日期精算 UI 使用正常 `週休1日` 預設；restart writer 本身仍不寫服務日期或帳務。
+六欄歷史來源缺少可信排休 root 時，OrdersPage 只允許人工確認真實服務日期，不得預設任何 service mode。restart writer 本身仍只建立空 tombstone；其後由既有服務日期 Apply 在同一交易保存 confirmed dates，且僅對待重建的 restart tombstone 呼叫 Scheduling generation replacement writer，讓可追溯的歷史 assignment 與人工日期成為 current canonical `staff_schedule`。

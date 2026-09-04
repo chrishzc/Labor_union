@@ -9,6 +9,7 @@ from infrastructure.mysql.weekly_operations_report_query_adapter import (
 )
 from shared_kernel.clock import SystemBusinessClock
 from subsystems.reporting.weekly_operations_report_query import WeeklyOperationsReportQuery
+from subsystems.reporting.weekly_report_batch_service import WeeklyReportBatchService
 
 
 def get_weekly_operations_report_query():
@@ -22,4 +23,13 @@ def get_weekly_operations_report_query():
         connection.close()
 
 
-__all__ = ["get_weekly_operations_report_query"]
+def get_weekly_report_batch_service():
+    connection = get_connection()
+    try:
+        yield WeeklyReportBatchService(connection)
+    finally:
+        connection.close()
+
+
+__all__ = ["get_weekly_operations_report_query", "get_weekly_report_batch_service"]
+

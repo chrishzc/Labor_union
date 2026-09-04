@@ -100,4 +100,20 @@ describe('AI 事件工作室正式規則 readback', () => {
       expect.objectContaining({ method: 'POST' }),
     );
   });
+
+  it('點擊別名標籤能直接觸發 router 模擬與選中規則控制中心', async () => {
+    mockReadback();
+    render(React.createElement(AiEventStudio));
+
+    await waitFor(() => {
+      expect(screen.getByText('問法：修改登記資料')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('問法：修改登記資料'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/🎯 成功命中事件規則【profile_update】/)).toBeInTheDocument();
+      expect(screen.getByText('✨ 命中')).toBeInTheDocument();
+    });
+  });
 });

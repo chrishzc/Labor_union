@@ -102,6 +102,11 @@ const SchedulingGenerationSchema = z.strictObject({
 });
 
 const PaymentStageSchema = z.enum(['deposit', 'first', 'second']);
+const ClientFinanceDirectionSchema = z.enum([
+  'refund_due',
+  'additional_charge_due',
+  'no_finance_change',
+]);
 const ClientFinanceImpactSchema = z.strictObject({
   case_no: z.string().min(1),
   expected_account_version: NonnegativeIntegerSchema,
@@ -129,6 +134,8 @@ const ClientFinanceImpactSchema = z.strictObject({
     before_due_date: IsoDateSchema.nullable(),
     after_due_date: IsoDateSchema.nullable(),
     source_obligation_identity: z.string().min(1).nullable(),
+    direction: ClientFinanceDirectionSchema,
+    direction_amount_ntd: NonnegativeIntegerSchema,
   })),
   settlement: z.strictObject({
     deposit_settled: z.boolean(),
@@ -184,6 +191,11 @@ const PayrollImpactSchema = z.strictObject({
     direction: z.enum(['payable_to_staff', 'receivable_from_staff']),
     amount: MoneySchema,
     due_date: IsoDateSchema.nullable(),
+  })),
+  special_pay_events: z.array(z.strictObject({
+    assignment_identity: z.string().min(1),
+    assignment_sequence: PositiveIntegerSchema,
+    service_dates: z.array(IsoDateSchema),
   })),
   blockers: z.array(z.string()),
   fingerprint: FingerprintSchema,

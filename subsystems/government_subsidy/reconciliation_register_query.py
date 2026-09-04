@@ -92,11 +92,12 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                 SELECT o.case_no, c.identity_status, o.actual_start_date,
                        o.actual_end_date, o.service_days, o.service_hours_per_day,
                        c.name AS employer_name, c.address AS employer_address,
-                       s.name AS staff_name, br.survey_details
+                       s.name AS staff_name, br.survey_details,
+                       COALESCE(br.query_no, o.case_no) AS hc_query_no
                 FROM orders o
                 JOIN clients c ON c.id = o.client_id
                 LEFT JOIN staff s ON s.id = o.staff_id
-                LEFT JOIN beclass_records br ON br.query_no = o.case_no
+                LEFT JOIN beclass_records br ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
                 WHERE o.actual_end_date IS NOT NULL
                   AND c.identity_status IN (%s, %s)
                 ORDER BY o.case_no
@@ -128,22 +129,23 @@ def _to_register_row(source: dict) -> dict | None:
         return None
 
     return {
-        "\u5e02\u5e9c\u8a02\u55ae\u865f\u78bc": str(source["case_no"]),
-        "\u88dc\u52a9\u8cc7\u683c": source["identity_status"],
-        "\u670d\u52d9\u958b\u59cb": actual_start,
-        "\u670d\u52d9\u7d50\u675f": actual_end,
-        "\u88dc\u52a9\u6642\u6578": subsidy_hours,
-        "\u88dc\u52a9\u5929\u6578": (subsidy_hours / daily_hours).quantize(
+        "hc_case_no": str(source.get("hc_query_no") or source["case_no"]),
+        "市府訂單號碼": str(source["case_no"]),
+        "補助資格": source["identity_status"],
+        "服務開始": actual_start,
+        "服務結束": actual_end,
+        "補助時數": subsidy_hours,
+        "補助天數": (subsidy_hours / daily_hours).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         ),
-        "\u670d\u52d9\u5929\u6578": source.get("service_days") or 0,
-        "\u88dc\u52a9\u6b3e\u91d1\u984d": subsidy_hours * unit_price,
-        "\u55ae\u50f9": unit_price,
-        "\u96c7\u4e3b": source.get("employer_name") or "",
-        "\u670d\u52d9\u4eba\u54e1": source.get("staff_name") or "",
-        "\u8eab\u5206\u8b49\u5b57\u865f": extract_employer_identity_card(source.get("survey_details")),
-        "\u5730\u5740": source.get("employer_address") or "",
-        "\u7c3d\u9818": "",
+        "服務天數": source.get("service_days") or 0,
+        "補助款金額": subsidy_hours * unit_price,
+        "單價": unit_price,
+        "雇主": source.get("employer_name") or "",
+        "服務人員": source.get("staff_name") or "",
+        "身分證字號": extract_employer_identity_card(source.get("survey_details")),
+        "地址": source.get("employer_address") or "",
+        "簽領": "",
     }
 
 
@@ -151,18 +153,20 @@ def _partition_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     general = []
     subsidized = []
     for row in rows:
-        (subsidized if row["\u88dc\u52a9\u8cc7\u683c"] == SUBSIDIZED_CITIZEN else general).append(row)
+        (subsidized if row["補助資格"] == SUBSIDIZED_CITIZEN else general).append(row)
     return general, subsidized
 
 
 def _with_serials(rows: list[dict]) -> list[dict]:
-    return [{"\u5e8f\u865f": index, **row} for index, row in enumerate(rows, start=1)]
+    return [{"序號": index, **row} for index, row in enumerate(rows, start=1)]
 
 
-def _build_workbook(headers: tuple[str, ...], general_rows: list[dict], subsidized_rows: list[dict], title: str) -> bytes:
-    workbook = Workbook()
-    worksheet = workbook.active
-    worksheet.title = title
+def _populate_subsidy_sheet(
+    worksheet,
+    headers: tuple[str, ...],
+    general_rows: list[dict],
+    subsidized_rows: list[dict],
+) -> None:
     yellow_fill = PatternFill(fill_type="solid", fgColor="FFFF00")
 
     def append_section(rows: list[dict], label: str) -> None:
@@ -174,8 +178,8 @@ def _build_workbook(headers: tuple[str, ...], general_rows: list[dict], subsidiz
             cell.font = Font(bold=True)
         for row in rows:
             worksheet.append(tuple(row.get(header, "") for header in headers))
-            if "\u88dc\u52a9\u5929\u6578" in headers:
-                worksheet.cell(worksheet.max_row, headers.index("\u88dc\u52a9\u5929\u6578") + 1).number_format = "0.00"
+            if "補助天數" in headers:
+                worksheet.cell(worksheet.max_row, headers.index("補助天數") + 1).number_format = "0.00"
 
     append_section(general_rows, GENERAL_CITIZEN)
     if subsidized_rows:
@@ -187,6 +191,13 @@ def _build_workbook(headers: tuple[str, ...], general_rows: list[dict], subsidiz
         worksheet.column_dimensions[column].width = 14
     for column in ("B", "K", "L", "M", "N", "O"):
         worksheet.column_dimensions[column].width = 18
+
+
+def _build_workbook(headers: tuple[str, ...], general_rows: list[dict], subsidized_rows: list[dict], title: str) -> bytes:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = title
+    _populate_subsidy_sheet(worksheet, headers, general_rows, subsidized_rows)
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
@@ -301,3 +312,36 @@ def build_annual_subsidy_summary(
         "subsidized_citizen_rows": subsidized_rows,
         "xlsx_bytes": _build_workbook(ANNUAL_HEADERS, general_rows, subsidized_rows, "\u5e74\u5ea6\u7e3d\u8868"),
     }
+
+
+def build_combined_subsidy_register(
+    application_year: int,
+    quarter: int,
+    connection_factory: Callable[[], Any],
+) -> dict:
+    """Build a combined workbook with both quarterly and annual reconciliation sheets."""
+    _validate_year_and_quarter(application_year, quarter)
+    q_general, q_subsidized = _filtered_rows(
+        application_year, quarter, connection_factory
+    )
+    a_general, a_subsidized = _filtered_rows(
+        application_year, None, connection_factory
+    )
+    workbook = Workbook()
+    ws_quarterly = workbook.active
+    ws_quarterly.title = "季核銷"
+    _populate_subsidy_sheet(ws_quarterly, QUARTERLY_HEADERS, q_general, q_subsidized)
+    ws_annual = workbook.create_sheet(title="年度總表")
+    _populate_subsidy_sheet(ws_annual, ANNUAL_HEADERS, a_general, a_subsidized)
+    output = BytesIO()
+    workbook.save(output)
+    return {
+        "application_year": application_year,
+        "quarter": quarter,
+        "quarterly_general_rows": q_general,
+        "quarterly_subsidized_rows": q_subsidized,
+        "annual_general_rows": a_general,
+        "annual_subsidized_rows": a_subsidized,
+        "xlsx_bytes": output.getvalue(),
+    }
+
