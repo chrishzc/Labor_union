@@ -20,7 +20,6 @@ import {
 
 interface OfficialHolidayCsvImportProps {
   readonly disabled?: boolean;
-  readonly onYearPrepared?: (year: number) => void;
 }
 
 interface PreparedImport {
@@ -38,10 +37,7 @@ const importOperations = {
   },
 };
 
-export function OfficialHolidayCsvImport({
-  disabled = false,
-  onYearPrepared,
-}: OfficialHolidayCsvImportProps) {
+export function OfficialHolidayCsvImport({ disabled = false }: OfficialHolidayCsvImportProps) {
   const [prepared, setPrepared] = useState<PreparedImport | null>(null);
   const [summary, setSummary] = useState<OfficialHolidayImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +66,6 @@ export function OfficialHolidayCsvImport({
         to_date: `${parsed.year}-12-31`,
       };
       const calendar = await queryHolidayFlow(horizon);
-      onYearPrepared?.(parsed.year);
       setPrepared({
         fileName: file.name,
         parsed,
@@ -185,8 +180,17 @@ export function OfficialHolidayCsvImport({
           <p>
             成功 {summary.successCount} 筆／略過 {summary.skipCount} 筆／失敗 {summary.failureCount} 筆
           </p>
-          {summary.failedDates.length > 0 && (
-            <p>失敗日期：{summary.failedDates.join('、')}</p>
+          {summary.failures.length > 0 && (
+            <>
+              <strong>失敗日期／原因</strong>
+              <ul>
+                {summary.failures.map((failure, index) => (
+                  <li key={`${failure.holiday_date}-${index}`}>
+                    {failure.holiday_date}：{failure.reason}
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </section>
       )}
