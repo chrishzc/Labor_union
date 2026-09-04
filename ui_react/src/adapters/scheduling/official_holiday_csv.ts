@@ -37,11 +37,16 @@ export interface OfficialHolidayImportPlan {
   readonly existingSkipCount: number;
 }
 
+export interface OfficialHolidayImportFailure {
+  readonly holiday_date: string;
+  readonly reason: string;
+}
+
 export interface OfficialHolidayImportSummary {
   readonly successCount: number;
   readonly skipCount: number;
   readonly failureCount: number;
-  readonly failedDates: readonly string[];
+  readonly failures: readonly OfficialHolidayImportFailure[];
 }
 
 export interface OfficialHolidayImportOperations {
@@ -139,6 +144,11 @@ function fail(error: string): OfficialHolidayCsvFailure {
   return { ok: false, error };
 }
 
+function failureReason(cause: unknown): string {
+  if (cause instanceof Error && cause.message.trim()) return cause.message.trim();
+  return 'Holiday Preview／Apply 失敗。';
+}
+
 export function parseOfficialHolidayCsv(text: string): OfficialHolidayCsvResult {
   const rows = parseCsvRows(text.replace(/^\uFEFF/, ''));
   if (!rows || rows.length < 2) return fail('CSV 格式不正確或沒有資料列。');
@@ -219,7 +229,7 @@ export async function importOfficialHolidayCandidates(
   const horizon = yearHorizon(year);
   let successCount = 0;
   let skipCount = existingSkipCount;
-  const failedDates: string[] = [];
+  const failures: OfficialHolidayImportFailure[] = [];
 
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index];
@@ -242,12 +252,15 @@ export async function importOfficialHolidayCandidates(
       });
       if (receipt.changed) successCount += 1;
       else skipCount += 1;
-    } catch {
-      failedDates.push(candidate.holiday_date);
+    } catch (cause) {
+      failures.push({ holiday_date: candidate.holiday_date, reason: failureReason(cause) });
       try {
         await operations.query(horizon);
-      } catch {
-        for (const remaining of candidates.slice(index + 1)) failedDates.push(remaining.holiday_date);
+      } catch (queryCause) {
+        const reason = `無法取得最新 Holiday readback：${failureReason(queryCause)}`;
+        for (const remaining of candidates.slice(index + 1)) {
+          failures.push({ holiday_date: remaining.holiday_date, reason });
+        }
         break;
       }
     }
@@ -257,7 +270,7 @@ export async function importOfficialHolidayCandidates(
   return {
     successCount,
     skipCount,
-    failureCount: failedDates.length,
-    failedDates,
+    failureCount: failures.length,
+    failures,
   };
 }
