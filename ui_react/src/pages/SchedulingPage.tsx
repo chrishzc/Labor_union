@@ -65,9 +65,8 @@ import {
 import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
 import { substitutionPayablesLineageClient, type SubstitutionPayablesLineage } from '../api/scheduling/substitution_payables_lineage_client';
 import { Drawer } from '../components/Drawer';
-import { MatchingCoordinationWorkbench } from '../components/MatchingCoordinationWorkbench';
 
-type SchedulingTab = 'calendar' | 'leave_sub' | 'holidays' | 'matching';
+type SchedulingTab = 'calendar' | 'leave_sub' | 'holidays';
 type StatusFilter = 'all' | 'active' | 'waiting' | 'leave';
 
 interface SchedulingDeepLink {
@@ -2405,17 +2404,7 @@ export const SchedulingPage: React.FC = () => {
         >
           🗓️ 3. 國定假日政策
         </button>
-        <button
-          data-surface-id="scheduling.tab.matching"
-          className={`scheduling-tab-btn ${activeTab === 'matching' ? 'active' : ''}`}
-          aria-current={activeTab === 'matching' ? 'page' : undefined}
-          onClick={() => setActiveTab('matching')}
-        >
-          🤝 4. 媒合協調
-        </button>
       </nav>
-
-      {activeTab === 'matching' && <MatchingCoordinationWorkbench />}
 
       {activeTab === 'calendar' && (
         <section
