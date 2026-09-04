@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.schemas.orders_core_stage_projection import (
-    CoreStageNoticeView,
-    CoreStageReadActionView,
-    CoreStageSourceLineageView,
+from api.schemas.orders_stage_projection import (
+    AvailableActionView,
+    ProjectionNoticeView,
+    SourceLineageView,
 )
 from subsystems.orders.government_subsidy_projection_query import (
     GovernmentSubsidySubstatusCode,
@@ -21,11 +21,11 @@ class OrderGovernmentSubsidyProjectionView(BaseModel):
     case_no: str
     substatus_code: GovernmentSubsidySubstatusCode
     identity_status: str | None
-    source: CoreStageSourceLineageView
+    source: SourceLineageView
     occurred_at: datetime | None
-    blockers: list[CoreStageNoticeView]
-    warnings: list[CoreStageNoticeView]
-    available_read_actions: list[CoreStageReadActionView]
+    blockers: list[ProjectionNoticeView]
+    warnings: list[ProjectionNoticeView]
+    available_read_actions: list[AvailableActionView]
     claim_batch_id: int | None = Field(default=None, gt=0)
     claim_item_count: int = Field(ge=0)
     claimed_hours: int = Field(ge=0)
