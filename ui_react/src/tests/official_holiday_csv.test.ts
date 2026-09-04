@@ -177,11 +177,11 @@ describe('official holiday import orchestration', () => {
       successCount: 2,
       skipCount: 1,
       failureCount: 0,
-      failedDates: [],
+      failures: [],
     });
   });
 
-  it('records one failed date, refreshes Query state, and continues without rollback', async () => {
+  it('records a failed date and reason, refreshes Query state, and continues without rollback', async () => {
     const calls: string[] = [];
     const query = vi.fn(async () => {
       calls.push('query');
@@ -220,7 +220,7 @@ describe('official holiday import orchestration', () => {
       successCount: 1,
       skipCount: 0,
       failureCount: 1,
-      failedDates: ['2026-01-01'],
+      failures: [{ holiday_date: '2026-01-01', reason: 'preview rejected' }],
     });
   });
 });
