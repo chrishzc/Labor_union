@@ -391,7 +391,7 @@
       "relative_path": "db/schema_parts/136_beclass_import_review.sql",
       "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
       "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
-      "sha256": "a324332b963e780961b7cc60f4ce2de5f11e51e78e914c906dcef42f908c7055"
+      "sha256": "bf4ad266425617a0de9ca1033f8604600cf706d6d2c829cc4e89ce3d257202a2"
     }
   ],
   "backfills": [
@@ -484,7 +484,7 @@
         ],
         "name": "migrate_order_details_lifecycle_version_view.py",
         "relative_path": "scripts/migrate_order_details_lifecycle_version_view.py",
-        "sha256": "3d17f71bf1e8d3f50f214fcd7aea6d2346ccd96eaf4b5af204b2db62efdce61e"
+        "sha256": "416f785dfd8221c08d46db58162b0745f14238d7e526dbf221b84d03f0960085"
       },
       "backfill_id": "order-details-lifecycle-version-view-v1",
       "dry_run_arguments": [],
@@ -498,7 +498,7 @@
     "dependencies": [],
     "name": "labor_union_2026_08_02_v1.descriptors.json",
     "relative_path": "db/migration_releases/labor_union_2026_08_02_v1.descriptors.json",
-    "sha256": "1bb67bf261e834317e97bce49f2b7aede666c73b915c4eca398cf449ff57759f"
+    "sha256": "0fddffc05b7389aeeb517de45e6754b00eb5abb8a18b6b7aaf9ded38195f7626"
   },
   "release_id": "labor-union-2026-08-02-v1",
   "release_metadata": {
