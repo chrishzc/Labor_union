@@ -7,6 +7,8 @@ fixtures_root: tests/fixtures/
 modules:
   historical-service-accounting:
     test_root: tests/domains/payroll/subsystems/payroll/modules/historical-service-accounting/
+  assignment-terms-impact:
+    test_root: tests/domains/payroll/subsystems/payroll/modules/assignment-terms-impact/
 
 # Routing notes
 Owner-local Payroll rebuild, adjustment, terms-impact, staff-payment due-date/state and Payroll-specific persistence-invariant verification lives here. Tests may consume canonical Orders/Scheduling source facts while still being Payroll-owned when the subject under test is `domains.payroll`, `subsystems.payroll`, or a Payroll-specific infrastructure adapter invariant. Keep cross-boundary API/Access/Jobs durable-command acceptance, disposable-MySQL and Task 97 oracles at their higher boundary.

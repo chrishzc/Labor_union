@@ -19,6 +19,8 @@ from shared_kernel.identities import (
 from shared_kernel.fingerprints import PreviewFingerprint
 from domains.orders.lifecycle import OrderLifecycleRootFacts, OrderLifecycleStatus, _lifecycle_status
 from domains.orders.actual_start import (
+    ActualStartBlocker,
+    ActualStartCandidateError,
     ActualStartAssignmentFacts,
     ActualStartOrderFacts,
     ActualStartSchedulingFacts,
@@ -138,3 +140,40 @@ def test_actual_start_can_replace_legacy_dates_with_recalculated_official_dates(
         date(2026, 8, 12),
     )
     assert candidate.actual_end_date == date(2026, 8, 12)
+
+
+def test_actual_start_keeps_current_service_data_lock_blocker() -> None:
+    order = ActualStartOrderFacts(
+        "CASE-LOCKED", 3, None, True, ServiceTimeTerms(None, None, None)
+    )
+    scheduling = ActualStartSchedulingFacts(
+        "CASE-LOCKED",
+        5,
+        1,
+        date(2026, 8, 1),
+        (
+            ActualStartAssignmentFacts(
+                11, 22, 1, date(2026, 8, 1), date(2026, 8, 1),
+                (date(2026, 8, 1),),
+            ),
+        ),
+    )
+
+    with pytest.raises(ActualStartCandidateError) as error:
+        build_actual_start_candidate(order, scheduling, date(2026, 8, 2), 8)
+
+    assert error.value.blocker is ActualStartBlocker.SERVICE_DATA_LOCKED
+
+
+def test_normal_actual_start_still_requires_canonical_scheduling_assignment() -> None:
+    order = ActualStartOrderFacts(
+        "CASE-NORMAL", 3, None, False, ServiceTimeTerms(None, None, None)
+    )
+    scheduling = ActualStartSchedulingFacts(
+        "CASE-NORMAL", 5, 1, date(2026, 8, 1), ()
+    )
+
+    with pytest.raises(ActualStartCandidateError) as error:
+        build_actual_start_candidate(order, scheduling, date(2026, 8, 2), 8)
+
+    assert error.value.blocker is ActualStartBlocker.SCHEDULING_ASSIGNMENTS_REQUIRED

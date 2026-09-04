@@ -1421,7 +1421,7 @@ export const OrdersPage: React.FC = () => {
     }
     const serviceDateQuery = orderMutationFlowStore.getServiceDatesDraft(caseNo)?.queryView;
     const startDate = actualStartQuery?.case_no === caseNo
-      ? actualStartQuery.current_actual_start_date ?? actualStartQuery.planned_start_date
+      ? actualStartDraft || actualStartQuery.current_actual_start_date || actualStartQuery.planned_start_date
       : null;
     if (!serviceDateQuery || serviceDateQuery.case_no !== caseNo || startDate === null) {
       setPrecisionResult(null);
@@ -3642,7 +3642,7 @@ export const OrdersPage: React.FC = () => {
                                   .catch(() => undefined);
                               }}
                             >
-                              {serviceDatesDraft?.status === 'apply_pending' ? '服務日期套用中…' : '確認套用服務日期'}
+                              {serviceDatesDraft?.status === 'apply_pending' ? '正在儲存排班結果…' : '儲存排班結果'}
                             </button>
                           )}
 

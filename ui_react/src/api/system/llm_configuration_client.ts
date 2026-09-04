@@ -61,7 +61,7 @@ export async function testLlmConnection(): Promise<LlmConnectionTest> {
   const raw = await transport.post(
     '/api/v1/system/llm/connection-test',
     {},
-    { token: requireToken() },
+    { token: requireToken(), timeoutMs: 30000 },
   );
   return decodeEnvelope(LlmConnectionTestSchema, raw);
 }
@@ -70,7 +70,7 @@ export async function testLlmSemantics(question: string): Promise<LlmSemanticTes
   const raw = await transport.post(
     '/api/v1/system/llm/semantic-test',
     { question },
-    { token: requireToken() },
+    { token: requireToken(), timeoutMs: 30000 },
   );
   return decodeEnvelope(LlmSemanticTestSchema, raw);
 }

@@ -49,27 +49,32 @@ class GeminiCandidateSelector:
         if not api_key:
             raise RuntimeError("gemini_api_key_not_configured")
 
-        try:
-            response = self._post(
-                _GEMINI_GENERATE_CONTENT_URL.format(model=self._model),
-                headers={
-                    "Content-Type": "application/json",
-                    "x-goog-api-key": api_key,
-                },
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "temperature": 0,
-                        "maxOutputTokens": 64,
-                        "thinkingConfig": {"thinkingLevel": "minimal"},
+        response = None
+        for attempt in range(2):
+            try:
+                response = self._post(
+                    _GEMINI_GENERATE_CONTENT_URL.format(model=self._model),
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": api_key,
                     },
-                },
-                timeout=self._timeout_seconds,
-            )
-        except requests.Timeout as error:
-            raise TimeoutError("gemini_api_timeout") from error
-        except requests.RequestException as error:
-            raise ConnectionError("gemini_api_unavailable") from error
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {
+                            "temperature": 0,
+                            "maxOutputTokens": 64,
+                            "thinkingConfig": {"thinkingLevel": "minimal"},
+                        },
+                    },
+                    timeout=self._timeout_seconds,
+                )
+                break
+            except requests.Timeout as error:
+                if attempt == 1:
+                    raise TimeoutError("gemini_api_timeout") from error
+            except requests.RequestException as error:
+                if attempt == 1:
+                    raise ConnectionError("gemini_api_unavailable") from error
 
         status_code = int(getattr(response, "status_code", 0))
         if status_code in {408, 429, 500, 502, 503, 504}:
