@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import issue209_shard_probe  # type: ignore[import-not-found]  # temporary CI locator
 import pytest
 
 from shared_kernel.fingerprints import PreviewFingerprint
