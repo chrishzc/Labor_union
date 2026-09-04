@@ -1526,7 +1526,7 @@
           "created_at",
           "id",
           "issue_codes",
-          "masked_identifier",
+          "identifier",
           "review_identity",
           "source_event_identity",
           "source_fingerprint",
