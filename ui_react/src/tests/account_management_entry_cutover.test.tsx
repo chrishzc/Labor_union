@@ -12,14 +12,12 @@ import { SYSTEM_STATUS_ENDPOINT } from '../api/system/system_status_client';
 import {
   ACCOUNT_DIRECTORY_FIXTURE,
   AUDIT_PAGE_FIXTURE,
-  JOB_OBSERVATION_FIXTURE,
 } from './fixtures/access/account_query_contract_fixtures';
 import { AUDIT_DETAIL_FIXTURE } from './fixtures/access/audit_query_contract_fixtures';
 
 const ACCOUNTS_ENDPOINT = '/api/v1/admin/accounts';
 const AUDIT_ENDPOINT = '/api/v1/admin/audits';
 const AUDIT_DETAIL_ENDPOINT = '/api/v1/admin/audits/10';
-const JOB_ENDPOINT = '/api/v1/jobs/job-observation-1/observation';
 
 interface RecordedRequest {
   path: string;
@@ -54,7 +52,6 @@ function installFetchStub(): RecordedRequest[] {
     if (url.pathname === ACCOUNTS_ENDPOINT) return response(ACCOUNT_DIRECTORY_FIXTURE);
     if (url.pathname === AUDIT_ENDPOINT) return response(AUDIT_PAGE_FIXTURE);
     if (url.pathname === AUDIT_DETAIL_ENDPOINT) return response(AUDIT_DETAIL_FIXTURE);
-    if (url.pathname === JOB_ENDPOINT) return response(JOB_OBSERVATION_FIXTURE);
     if (url.pathname === SYSTEM_STATUS_ENDPOINT) {
       return response({
         started_at: '2026-08-20T01:02:03Z',
@@ -87,7 +84,7 @@ describe('Account Management Phase5 entry candidate', () => {
     vi.restoreAllMocks();
   });
 
-  it('actual StrictMode keeps initial and lazy GET budgets while mutations stay disabled', async () => {
+  it('actual StrictMode keeps account/audit GET budgets and exposes only account-owned tabs', async () => {
     authenticate();
     const requests = installFetchStub();
     render(<StrictMode><App /></StrictMode>);
@@ -96,7 +93,7 @@ describe('Account Management Phase5 entry candidate', () => {
     expect(window.location.hash).toBe('#account-management');
     expect(count(requests, ACCOUNTS_ENDPOINT)).toBe(1);
     expect(count(requests, AUDIT_ENDPOINT)).toBe(0);
-    expect(count(requests, JOB_ENDPOINT)).toBe(0);
+    expect(requests.some((request) => request.path.startsWith('/api/v1/jobs/'))).toBe(false);
 
     for (const name of [
       /建立工作人員帳號/,
@@ -114,16 +111,13 @@ describe('Account Management Phase5 entry candidate', () => {
     await waitFor(() => expect(screen.getByText('provided')).toBeInTheDocument());
     expect(count(requests, AUDIT_DETAIL_ENDPOINT)).toBe(1);
 
-    fireEvent.click(screen.getByRole('tab', { name: /背景工作狀態/ }));
-    expect(count(requests, JOB_ENDPOINT)).toBe(0);
-    fireEvent.change(screen.getByLabelText('背景工作查詢碼'), { target: { value: 'job-observation-1' } });
-    fireEvent.click(screen.getByRole('button', { name: '查詢狀態' }));
-    await waitFor(() => expect(screen.getByText('正式排班建立')).toBeInTheDocument());
-    expect(count(requests, JOB_ENDPOINT)).toBe(1);
-    expect(screen.getByText(/回原作業頁面依可用流程處理/)).toBeInTheDocument();
-    expect(document.querySelector('[data-control-id="account.jobs.cancel"]')).toBeNull();
-    expect(document.querySelector('[data-control-id="account.jobs.retry"]')).toBeNull();
-    expect(document.querySelector('[data-control-id="account.jobs.run"]')).toBeNull();
+    expect(screen.getAllByRole('tab')).toHaveLength(3);
+    expect(screen.queryByRole('tab', { name: /背景工作狀態/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('背景工作查詢碼')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="account.jobs.lookup"]')).toBeNull();
+    expect(document.querySelector('[data-control-id="account.jobs.refresh"]')).toBeNull();
+    expect(screen.getByText('管理工作人員帳號、登入驗證與安全稽核。')).toBeInTheDocument();
+    expect(requests.some((request) => request.path.startsWith('/api/v1/jobs/'))).toBe(false);
 
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
     expect(screen.queryByText(/建立成功|停權成功|重試成功|取消成功/)).not.toBeInTheDocument();
