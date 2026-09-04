@@ -1427,8 +1427,6 @@ export const OrdersPage: React.FC = () => {
     });
   };
 
-  const rerunSchedulePrecision = runSchedulePrecision;
-
   const loadCalendarTabQueries = async (
     order: OrderSummaryCardViewModel,
     allowRestartedNormalFlow = false,
@@ -3348,23 +3346,15 @@ export const OrdersPage: React.FC = () => {
                         {precisionResult && (
                           <div className="precision-stat-grid" style={{ marginBottom: 0 }}>
                             <div className="precision-stat-box">
-                              <span className="precision-stat-label">合約目標天數</span>
+                              <span className="precision-stat-label">合約天數</span>
                               <span className="precision-stat-val">{precisionResult.target_service_days} 天</span>
                             </div>
                             <div className="precision-stat-box">
-                              <span className="precision-stat-label">實質出勤天數</span>
-                              <span className="precision-stat-val" style={{ color: '#0f766e' }}>{precisionResult.actual_work_days_count} 天</span>
-                            </div>
-                            <div className="precision-stat-box">
-                              <span className="precision-stat-label">排休/假日記數</span>
+                              <span className="precision-stat-label">休假日</span>
                               <span className="precision-stat-val" style={{ color: '#9a3412' }}>{precisionResult.rest_days_count} 天</span>
                             </div>
                             <div className="precision-stat-box">
-                              <span className="precision-stat-label">總日曆跨越天</span>
-                              <span className="precision-stat-val">{precisionResult.total_calendar_days} 天</span>
-                            </div>
-                            <div className="precision-stat-box">
-                              <span className="precision-stat-label">🎯 自動順延完工日</span>
+                              <span className="precision-stat-label">建議完工日</span>
                               <span className="precision-stat-val" style={{ color: '#ff7f50' }}>{precisionResult.actual_end_date}</span>
                             </div>
                           </div>
@@ -3389,7 +3379,7 @@ export const OrdersPage: React.FC = () => {
                                       ? holidayRestDates.filter((date) => date !== holiday.date)
                                       : [...holidayRestDates, holiday.date].sort();
                                     setHolidayRestDates(nextHolidayRestDates);
-                                    rerunSchedulePrecision(nextHolidayRestDates, leaveDates, undefined, customWorkDates);
+                                    runSchedulePrecision(nextHolidayRestDates, leaveDates, undefined, customWorkDates);
                                   }}
                                 />
                                 {holiday.name}（{holiday.date}）列為休假日
@@ -3437,24 +3427,24 @@ export const OrdersPage: React.FC = () => {
                                     if (isLeave) {
                                       const nextLeaveDates = leaveDates.filter((value) => value !== date);
                                       setLeaveDates(nextLeaveDates);
-                                      rerunSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
+                                      runSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
                                       return;
                                     }
                                     if (isCustomWork) {
                                       const nextCustomWorkDates = customWorkDates.filter((value) => value !== date);
                                       setCustomWorkDates(nextCustomWorkDates);
-                                      rerunSchedulePrecision(holidayRestDates, leaveDates, undefined, nextCustomWorkDates);
+                                      runSchedulePrecision(holidayRestDates, leaveDates, undefined, nextCustomWorkDates);
                                       return;
                                     }
                                     if (selected) {
                                       const nextLeaveDates = [...leaveDates, date].sort();
                                       setLeaveDates(nextLeaveDates);
-                                      rerunSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
+                                      runSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
                                       return;
                                     }
                                     const nextCustomWorkDates = [...customWorkDates, date].sort();
                                     setCustomWorkDates(nextCustomWorkDates);
-                                    rerunSchedulePrecision(holidayRestDates, leaveDates, undefined, nextCustomWorkDates);
+                                    runSchedulePrecision(holidayRestDates, leaveDates, undefined, nextCustomWorkDates);
                                   }}
                                 >
                                   <span>{date}</span>
@@ -3488,7 +3478,7 @@ export const OrdersPage: React.FC = () => {
                               const nextLeaveDates = [...leaveDates, leaveDateDraft].sort();
                               setLeaveDates(nextLeaveDates);
                               setLeaveDateDraft('');
-                              rerunSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
+                              runSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
                             }}
                             style={{ padding: '4px 10px', fontSize: '0.78rem' }}
                           >
