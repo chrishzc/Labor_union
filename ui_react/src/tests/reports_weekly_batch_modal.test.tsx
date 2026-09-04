@@ -3,7 +3,6 @@
  * Description: 測試營運週報方案 C 結算彈窗之渲染、待結算案件顯示與結算操作。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { WeeklyBatchModal } from '../components/reports/WeeklyBatchModal';
 import * as batchClient from '../api/reports/weekly_report_batch_client';
