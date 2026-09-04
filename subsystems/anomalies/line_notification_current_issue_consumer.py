@@ -20,7 +20,7 @@ LINE_NOTIFICATION_FAILURE_DEFINITION_CODE = "LINE-006"
 
 class LineNotificationCurrentIssueConsumer:
     def __init__(
-        self, issue_key_builder: Callable[[str, dict[str, str]], str]
+        self, issue_key_builder: Callable[[str, dict[str, str], str], str]
     ) -> None:
         self._issue_key_builder = issue_key_builder
 
@@ -71,7 +71,9 @@ class LineNotificationCurrentIssueConsumer:
         }
         return CurrentIssueCandidate(
             issue_key=self._issue_key_builder(
-                LINE_NOTIFICATION_FAILURE_DEFINITION_CODE, subject_identity
+                LINE_NOTIFICATION_FAILURE_DEFINITION_CODE,
+                subject_identity,
+                readback.owner_snapshot_token,
             ),
             definition_code=LINE_NOTIFICATION_FAILURE_DEFINITION_CODE,
             owner_domain=LINE_NOTIFICATION_FAILURE_OWNER_DOMAIN,

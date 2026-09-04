@@ -8,13 +8,9 @@ import { accountDirectoryClient } from '../api/access/account_directory_client';
 import { accountCenterClient } from '../api/access/account_center_client';
 import type { AccountMutationReceipt } from '../api/access/account_center_schemas';
 import { auditQueryClient, type AuditQueryParams } from '../api/access/audit_query_client';
-import { jobObservationClient } from '../api/jobs/job_observation_client';
 import {
   adaptAccountDirectory,
-  adaptJobObservation,
-  ACCOUNT_UNAVAILABLE,
   type AccountDirectoryRow,
-  type JobObservationView,
 } from '../adapters/access/account_query_adapter';
 import {
   adaptAuditDetail,
@@ -23,7 +19,7 @@ import {
   type AuditPageView,
 } from '../adapters/access/audit_query_adapter';
 
-type Tab = 'users' | 'totp' | 'audit' | 'jobs';
+type Tab = 'users' | 'totp' | 'audit';
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
 
 interface QueryState<T> {
@@ -35,7 +31,6 @@ interface QueryState<T> {
 const initialUsersState: QueryState<AccountDirectoryRow[]> = { status: 'idle', data: null, error: null };
 const initialAuditState: QueryState<AuditPageView> = { status: 'idle', data: null, error: null };
 const initialAuditDetailState: QueryState<AuditDetailView> = { status: 'idle', data: null, error: null };
-const initialJobState: QueryState<JobObservationView> = { status: 'idle', data: null, error: null };
 const initialCommandState: QueryState<AccountMutationReceipt> = { status: 'idle', data: null, error: null };
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -61,16 +56,11 @@ function QueryError({ message, onRetry }: { message: string; onRetry: () => void
   );
 }
 
-function Unavailable({ children = ACCOUNT_UNAVAILABLE }: { children?: React.ReactNode }) {
-  return <span className="account-unavailable">{children}</span>;
-}
-
 export const AccountManagementPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('users');
   const [usersState, setUsersState] = useState(initialUsersState);
   const [auditState, setAuditState] = useState(initialAuditState);
   const [auditDetailState, setAuditDetailState] = useState(initialAuditDetailState);
-  const [jobState, setJobState] = useState(initialJobState);
   const [commandState, setCommandState] = useState(initialCommandState);
   const [commandReason, setCommandReason] = useState('');
   const [commandPassword, setCommandPassword] = useState('');
@@ -80,16 +70,13 @@ export const AccountManagementPage: React.FC = () => {
   const [auditLoaded, setAuditLoaded] = useState(false);
   const [auditPage, setAuditPage] = useState(1);
   const [auditFilterInput, setAuditFilterInput] = useState('');
-  const [jobIdInput, setJobIdInput] = useState('');
 
   const usersGeneration = useRef(0);
   const auditGeneration = useRef(0);
   const auditDetailGeneration = useRef(0);
-  const jobGeneration = useRef(0);
   const usersController = useRef<AbortController | null>(null);
   const auditController = useRef<AbortController | null>(null);
   const auditDetailController = useRef<AbortController | null>(null);
-  const jobController = useRef<AbortController | null>(null);
   const auditActionPrefixRef = useRef('');
   const commandKeys = useRef(new Map<string, string>());
 
@@ -199,24 +186,6 @@ export const AccountManagementPage: React.FC = () => {
     }
   }, []);
 
-  const loadJob = useCallback(async () => {
-    const jobId = jobIdInput.trim();
-    if (!jobId) return;
-    const generation = ++jobGeneration.current;
-    jobController.current?.abort();
-    const controller = new AbortController();
-    jobController.current = controller;
-    setJobState({ status: 'loading', data: null, error: null });
-    try {
-      const result = await jobObservationClient.query(jobId, { signal: controller.signal });
-      if (generation !== jobGeneration.current) return;
-      setJobState({ status: 'ready', data: adaptJobObservation(result), error: null });
-    } catch (error) {
-      if (generation !== jobGeneration.current || isAbortError(error)) return;
-      setJobState({ status: 'error', data: null, error: errorMessage(error, '背景工作狀態暫時無法取得，請稍後重試。') });
-    }
-  }, [jobIdInput]);
-
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadUsers();
@@ -232,7 +201,6 @@ export const AccountManagementPage: React.FC = () => {
     return () => {
       auditController.current?.abort();
       auditDetailController.current?.abort();
-      jobController.current?.abort();
     };
   }, [activeTab, auditLoaded, loadAudit]);
 
@@ -244,7 +212,7 @@ export const AccountManagementPage: React.FC = () => {
       <div className="page-header-banner account-page-header">
         <div className="account-page-header-text">
           <h1 className="page-title">👤 系統帳號與安全管理</h1>
-          <p className="page-subtitle">管理工作人員帳號、登入驗證、安全稽核與背景工作狀態。</p>
+          <p className="page-subtitle">管理工作人員帳號、登入驗證與安全稽核。</p>
         </div>
         <button
           type="button"
@@ -288,16 +256,6 @@ export const AccountManagementPage: React.FC = () => {
           onClick={() => setActiveTab('audit')}
         >
           🛡️ 3. 安全操作與登入稽核 {auditPageView ? `(${auditPageView.total})` : ''}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          data-surface-id="account.tab.jobs"
-          aria-selected={activeTab === 'jobs'}
-          className={`account-tab-btn ${activeTab === 'jobs' ? 'active' : ''}`}
-          onClick={() => setActiveTab('jobs')}
-        >
-          ⚙️ 4. 背景工作狀態
         </button>
       </div>
 
@@ -613,62 +571,6 @@ export const AccountManagementPage: React.FC = () => {
               )}
             </aside>
           )}
-        </section>
-      )}
-
-      {activeTab === 'jobs' && (
-        <section className="account-table-container" aria-label="背景工作觀察">
-          <div className="account-table-toolbar">
-            <div>
-              <h3>⚙️ 背景工作狀態</h3>
-              <p>輸入作業頁面提供的查詢碼，可確認背景工作是否仍在處理或已完成。</p>
-            </div>
-          </div>
-          <div className="account-filter-row">
-            <label htmlFor="account-job-id">背景工作查詢碼</label>
-            <input
-              id="account-job-id"
-              data-control-id="account.jobs.lookup"
-              value={jobIdInput}
-              onChange={(event) => setJobIdInput(event.target.value)}
-              maxLength={191}
-              placeholder="輸入作業頁面提供的查詢碼"
-            />
-            <button
-              type="button"
-              className="account-secondary-btn"
-              onClick={() => void loadJob()}
-              disabled={!jobIdInput.trim() || jobState.status === 'loading'}
-            >
-              查詢狀態
-            </button>
-            <button
-              type="button"
-              className="account-secondary-btn"
-              data-control-id="account.jobs.refresh"
-              onClick={() => void loadJob()}
-              disabled={!jobIdInput.trim() || jobState.status === 'loading'}
-            >
-              重新整理
-            </button>
-          </div>
-          {jobState.status === 'idle' && (
-            <div className="account-query-state">
-              <Unavailable>請輸入作業頁面提供的查詢碼。</Unavailable>
-            </div>
-          )}
-          {jobState.status === 'loading' && <div className="account-query-state">載入背景工作狀態中…</div>}
-          {jobState.status === 'error' && (
-            <QueryError message={jobState.error ?? '背景工作觀察查詢失敗。'} onRetry={() => void loadJob()} />
-          )}
-          {jobState.status === 'ready' && jobState.data && (
-            <div className="account-job-observation">
-              <div><strong>工作類型</strong><span>{jobState.data.commandType}</span></div>
-              <div><strong>處理狀態</strong><span>{jobState.data.status}</span></div>
-              <div><strong>已嘗試次數</strong><span>{jobState.data.attemptCount} / {jobState.data.maxAttempts}</span></div>
-            </div>
-          )}
-          <div className="account-query-panel">需要重新執行或修正時，請回原作業頁面依可用流程處理。</div>
         </section>
       )}
     </div>

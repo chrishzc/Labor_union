@@ -15,10 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.migrate_preserved_database_additive_schema import (
-    DatabaseConfig,
-    config_from_env,
-)
+from dataclasses import dataclass
 
 # 確保中文輸出編碼正確
 try:
@@ -28,6 +25,44 @@ except Exception:
     pass
 
 ENVIRONMENT_FILE = PROJECT_ROOT / ".env"
+
+
+@dataclass(frozen=True)
+class DatabaseConfig:
+    host: str
+    port: int
+    user: str
+    password: str
+
+
+def _read_env_bytes(path: Path) -> tuple[bytes, dict[str, str]]:
+    raw = path.expanduser().resolve().read_bytes()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("environment file must be strict UTF-8") from exc
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key.strip()] = value.strip().strip("\"'")
+    return raw, values
+
+
+def config_from_env(path: Path) -> tuple[DatabaseConfig, str]:
+    _, values = _read_env_bytes(path)
+    source = values.get("DB_DATABASE", os.getenv("DB_DATABASE", "")).strip()
+    return (
+        DatabaseConfig(
+            host=values.get("DB_HOST", os.getenv("DB_HOST", "127.0.0.1")),
+            port=int(values.get("DB_PORT", os.getenv("DB_PORT", "3306"))),
+            user=values.get("DB_USER", os.getenv("DB_USER", "root")),
+            password=values.get("DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+        ),
+        source,
+    )
 
 
 def configured_target(
@@ -48,6 +83,7 @@ def configured_target(
         raise ValueError("DB_DATABASE is required for local database readiness")
     return config, database
 
+
 def main():
     try:
         config, database = configured_target()
@@ -55,6 +91,7 @@ def main():
         print(f"❌ 錯誤：無法讀取本機資料庫目標：{exc}")
         sys.exit(1)
     print(f"⏳ 正在等待 MySQL 資料庫 {database} 啟動完成 (最長等待 30 秒)...")
+    last_error = None
     t = 0
     while t < 30:
         try:
@@ -69,10 +106,11 @@ def main():
             conn.close()
             print("🟢 MySQL 資料庫已就緒，可以開始執行初始化與匯入！")
             sys.exit(0)
-        except Exception:
+        except Exception as err:
+            last_error = err
             time.sleep(1)
             t += 1
-    print("❌ 錯誤：無法連線至 MySQL，請確認 MySQL 容器是否正常運作！")
+    print(f"❌ 錯誤：無法連線至 MySQL（{last_error}），請確認 MySQL 容器是否正常運作！")
     sys.exit(1)
 
 if __name__ == '__main__':
