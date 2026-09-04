@@ -107,7 +107,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     try {
       const nextPreview = await previewServiceDatesFlow(caseNo);
       setPreview(nextPreview);
-      setSuccess('服務日期預覽已取得。');
+      setSuccess('服務日期確認內容已準備。');
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -128,7 +128,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
       setQueryView(observed.queryView);
       setSelectedDates(observed.queryView.current_dates);
       setPreview(null);
-      setSuccess(`服務日期已套用並回讀版本 #${receipt.confirmed_version}。`);
+      setSuccess(`服務日期已確認並回讀版本 #${receipt.confirmed_version}。`);
       onObserved?.();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -148,14 +148,14 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
     && working === null;
 
   return (
-    <section aria-label={`案件 ${caseNo} 服務日期精算`}>
+    <section aria-label={`案件 ${caseNo} 服務日期設定`}>
       <button
         type="button"
         className="order-v2-open-drawer"
         disabled={working !== null}
         onClick={() => void loadAndCalculate()}
       >
-        {working === 'load' ? '讀取並精算服務日期中…' : '讀取並精算服務日期'}
+        {working === 'load' ? '讀取服務日期中…' : '設定並查看服務日期'}
       </button>
 
       {error !== null && <p role="alert">{error}</p>}
@@ -163,10 +163,10 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
 
       {queryView !== null && precision !== null && serviceMode !== null && (
         <>
-          <dl className="order-v2-business-summary" aria-label="服務日期精算結果">
+          <dl className="order-v2-business-summary" aria-label="建議服務日期摘要">
             <div><dt>排休類型</dt><dd>{serviceMode}</dd></div>
-            <div><dt>精算開始</dt><dd>{precision.actual_start_date}</dd></div>
-            <div><dt>精算結束</dt><dd>{precision.actual_end_date}</dd></div>
+            <div><dt>建議開始</dt><dd>{precision.actual_start_date}</dd></div>
+            <div><dt>建議完工</dt><dd>{precision.actual_end_date}</dd></div>
             <div><dt>合約服務日</dt><dd>{requiredDateCount} 天</dd></div>
           </dl>
 
@@ -192,16 +192,16 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
             disabled={!canPreview}
             onClick={() => void runPreview()}
           >
-            {working === 'preview' ? '預覽中…' : '預覽服務日期'}
+            {working === 'preview' ? '檢查確認內容中…' : '確認服務日期'}
           </button>
         </>
       )}
 
       {preview !== null && (
         <>
-          <dl className="order-v2-business-summary" aria-label="服務日期預覽">
-            <div><dt>預覽版本</dt><dd>{preview.current_version === null ? '首次確認' : `#${preview.current_version}`}</dd></div>
-            <div><dt>預覽日期</dt><dd>{preview.service_dates.join('、')}</dd></div>
+          <dl className="order-v2-business-summary" aria-label="服務日期確認內容">
+            <div><dt>目前版本</dt><dd>{preview.current_version === null ? '首次確認' : `#${preview.current_version}`}</dd></div>
+            <div><dt>確認日期</dt><dd>{preview.service_dates.join('、')}</dd></div>
           </dl>
           <label>
             服務日期確認原因
@@ -223,7 +223,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo
             disabled={!canApply}
             onClick={() => void runApply()}
           >
-            {working === 'apply' ? '套用並回讀中…' : '套用並回讀服務日期'}
+            {working === 'apply' ? '確認並回讀中…' : '完成服務日期確認'}
           </button>
         </>
       )}
