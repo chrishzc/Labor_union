@@ -1,6 +1,6 @@
 """
 File: orders_stage_projection.py
-Description: 定義 Orders 七階段與十一作業步驟的嚴格 HTTP read model。
+Description: 定義 Orders 七階段、十一作業步驟與完全結案的嚴格 HTTP read model。
 """
 
 from __future__ import annotations
@@ -108,4 +108,29 @@ class OrderOperationalTimelinePageView(BaseModel):
     etag: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-__all__ = ["OrderOperationalTimelinePageView"]
+class TerminalCompletionComponentView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str
+    owner: str
+    completed: bool
+    reason: str | None
+
+
+class OrderTerminalAggregateView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    case_no: str
+    applicable: bool
+    fully_closed: bool
+    components: list[TerminalCompletionComponentView]
+
+
+class OrderTerminalAggregatePageView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[OrderTerminalAggregateView]
+    next_cursor: str | None
+
+
+__all__ = [
+    "OrderOperationalTimelinePageView",
+    "OrderTerminalAggregatePageView",
+]
