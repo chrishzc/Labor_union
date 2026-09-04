@@ -117,15 +117,13 @@ const WeeklySubsidyView: React.FC<{ report: WeeklyView }> = ({ report }) => <>
 const WeeklyServiceView: React.FC<{ report: WeeklyView }> = ({ report }) => (
   report.serviceRows.length === 0 ? <div className="reports-state">此期間服務工時無資料。</div> : <div className="reports-table-container">
     <table className="reports-table">
-      <thead><tr><th>週數</th><th>序號</th><th>市府案號</th><th>雇主</th><th>休假模式</th><th>休數</th><th>服務開始</th><th>服務結束</th><th>特殊休假</th><th>每週起始日</th><th>每週結束日</th><th>服務時數</th><th>每周工作日數</th><th>每周工時</th><th>結案</th></tr></thead>
+      <thead><tr><th>序號</th><th>市府案號</th><th>雇主</th><th>服務開始</th><th>服務結束</th><th>每週起始日</th><th>每週結束日</th><th>服務時數</th><th>每周工作日數</th><th>每周工時</th><th>結案</th></tr></thead>
       <tbody>{report.serviceRows.map((row, idx) => <tr key={row.assignment_id || idx}>
-        <td>{row.week_code || '—'}</td><td>{idx + 1}</td><td>{row.case_no}</td><td>{row.client_name}</td>
-        <td>{row.rest_mode || '周休二日'}</td><td>{row.rest_days_count ?? 0}</td>
+        <td>{idx + 1}</td><td>{row.case_no}</td><td>{row.client_name}</td>
         <td>{displayWeeklyValue(row.service_start_date)}</td><td>{displayWeeklyValue(row.service_end_date)}</td>
-        <td>{row.special_rest || '—'}</td>
         <td>{displayWeeklyValue(row.period_start_date)}</td><td>{displayWeeklyValue(row.period_end_date)}</td>
         <td>{row.service_hours_per_day}</td><td>{row.weekly_work_days}</td><td>{row.weekly_hours}</td>
-        <td>{row.is_closed || (row.completed ? '結案' : '—')}</td>
+        <td>{row.completed ? '結案' : '—'}</td>
       </tr>)}</tbody>
     </table>
   </div>
