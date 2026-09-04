@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# CI refresh marker for #209; no production or test semantics change.
+
 import pytest
 
 from shared_kernel.fingerprints import PreviewFingerprint
