@@ -10,9 +10,8 @@ from typing import Literal, Mapping, Protocol, cast
 
 from domains.government_subsidy.ledger import GovernmentSubsidyBatchStatus
 from domains.government_subsidy.overpayment import GovernmentSubsidyOverpaymentStatus
-from domains.orders.lifecycle import OrderLifecycleScope
+from domains.orders.lifecycle import OrderLifecycleScope, OrderLifecycleStatus
 from shared_kernel.validation import require_canonical_text, require_positive_integer
-from subsystems.orders.core_stage_projection_query import project_core_stage_timeline
 from subsystems.orders.stage_projection_query import (
     AvailableAction,
     MAXIMUM_PAGE_SIZE,
@@ -72,6 +71,15 @@ _CLAIM_PRIORITY = {
     GovernmentSubsidyBatchStatus.PARTIALLY_PAID: 3,
     GovernmentSubsidyBatchStatus.PAID: 4,
 }
+_NON_NORMAL_LIFECYCLE_STATUSES = frozenset(
+    {
+        OrderLifecycleStatus.CANCELLED,
+        OrderLifecycleStatus.HISTORICAL_UNSERVED,
+        OrderLifecycleStatus.HISTORICAL_IN_SERVICE,
+        OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED,
+        OrderLifecycleStatus.HISTORICAL_ACCOUNTING_COMPLETED,
+    }
+)
 
 
 class GovernmentSubsidyProjectionContractError(ValueError):
@@ -204,9 +212,8 @@ def query_government_subsidy_projection_page(
                     "source pages are duplicate or unordered"
                 )
             last_source_key = identity_key
-            timeline = project_core_stage_timeline(source_item)
-            if timeline.branch_type == "normal":
-                normal_case_nos.append(timeline.case_no)
+            if source_item.lifecycle_status not in _NON_NORMAL_LIFECYCLE_STATUSES:
+                normal_case_nos.append(source_item.case_no)
 
         facts_by_case = _facts_by_case(
             repository.query_order_projection_facts(tuple(normal_case_nos))
