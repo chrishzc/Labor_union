@@ -16,7 +16,10 @@ def _assert_historical_staff_fallback(sql: str) -> None:
 
 def test_order_summary_prefers_formal_assignment_with_historical_pairing_fallback() -> None:
     assert "assignment.status <> 'cancelled'" in _ORDER_SUMMARY_PAGE_SQL
-    assert _ORDER_SUMMARY_PAGE_SQL.index("case_staff_assignments assignment") < _ORDER_SUMMARY_PAGE_SQL.index(
+    staff_projection = _ORDER_SUMMARY_PAGE_SQL[
+        _ORDER_SUMMARY_PAGE_SQL.index("COALESCE("):_ORDER_SUMMARY_PAGE_SQL.index(") AS staff_name")
+    ]
+    assert staff_projection.index("case_staff_assignments assignment") < staff_projection.index(
         "historical_order_pairing_evidence historical_pairing"
     )
     _assert_historical_staff_fallback(_ORDER_SUMMARY_PAGE_SQL)

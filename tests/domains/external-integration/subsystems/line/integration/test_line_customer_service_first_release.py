@@ -261,14 +261,28 @@ def test_customer_context_uses_canonical_identity_binding_ssot():
 
 
 def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
-    menu = (PROJECT_ROOT / "config/line_menu.json").read_text(encoding="utf-8")
+    menu = json.loads(
+        (PROJECT_ROOT / "config/line_menu.json").read_text(encoding="utf-8")
+    )
     identity = (PROJECT_ROOT / "line/static/identity.html").read_text(encoding="utf-8")
     staff_orders = (PROJECT_ROOT / "line/static/staff_order_search.html").read_text(encoding="utf-8")
-    assert '"uri": "?entry=registration"' in menu
-    assert '"uri": "?target=registration"' not in menu
-    assert '"text": "服務說明"' in menu
-    assert "?target=staff_order_search" in menu
-    assert "?target=staff_schedule" in menu
+    action_uris = {
+        button["action"]["uri"]
+        for menu_definition in menu["menus"]
+        for button in menu_definition["buttons"]
+        if button.get("action", {}).get("type") == "uri"
+    }
+    message_texts = {
+        button["action"]["text"]
+        for menu_definition in menu["menus"]
+        for button in menu_definition["buttons"]
+        if button.get("action", {}).get("type") == "message"
+    }
+    assert "?entry=registration" in action_uris
+    assert "?target=registration" not in action_uris
+    assert "服務說明" in message_texts
+    assert "?target=staff_order_search" in action_uris
+    assert "?target=staff_schedule" in action_uris
     assert "flow_id=${encodeURIComponent(flowId)}" in identity
     assert "development_line_user_id" not in staff_orders
     assert "userId" not in staff_orders

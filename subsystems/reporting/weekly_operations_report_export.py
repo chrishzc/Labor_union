@@ -11,7 +11,10 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from subsystems.reporting.weekly_operations_report_query import WeeklyOperationsReport
+from subsystems.reporting.weekly_operations_report_query import (
+    WeeklyCaseRow,
+    WeeklyOperationsReport,
+)
 
 
 SHEET_NAMES = ("週報案件受理總表", "補助案件統計表", "每周服務中說明")
@@ -415,4 +418,3 @@ def _auto_fit_columns(worksheet, min_col: int, max_col: int) -> None:
 
 
 __all__ = ["SHEET_NAMES", "SERVICE_HEADERS", "export_weekly_operations_report"]
-
