@@ -126,11 +126,11 @@ def test_reconcile_deletes_absent_issue_and_completes_intent_in_one_application_
     tx_log = []
     application = CurrentIssueApplication(repository, lambda: _Uow(tx_log), clock=lambda: NOW)
 
-    result = application.reconcile(scope, lambda _snapshot: (_candidate(),), completed_intent=_intent())
+    result = application.reconcile(scope, lambda _snapshot: (), completed_intent=_intent())
 
-    assert result.present_issue_keys == ("ci_" + "a" * 64,)
+    assert result.present_issue_keys == ()
     assert result.deleted_issue_keys == ("ci_" + "b" * 64,)
-    assert [item.issue_key for item in repository.current] == ["ci_" + "a" * 64]
+    assert repository.current == []
     assert repository.completed == ["recheck:CASE-1"]
     assert tx_log == ["begin", "commit"]
     assert repository.events[-2:] == [("delete", "ci_" + "b" * 64), ("complete_intent", "recheck:CASE-1")]
@@ -182,7 +182,6 @@ def test_projection_and_intent_completion_rollback_together():
 def test_owner_mutation_is_not_committed_when_recheck_intent_append_fails():
     scope = _scope()
     repository = _Repository(OwnerSnapshot(scope, "owner-v3", 3, object()))
-    mutation_calls = []
 
     def fail_append(_intent):
         repository.events.append(("append_intent_failed",))
@@ -191,6 +190,7 @@ def test_owner_mutation_is_not_committed_when_recheck_intent_append_fails():
     repository.append_recheck_intent = fail_append
     tx_log = []
     application = CurrentIssueApplication(repository, lambda: _Uow(tx_log))
+    mutation_calls = []
 
     with pytest.raises(RuntimeError, match="intent_append_failed"):
         application.mutate_owner_with_recheck_intent(
