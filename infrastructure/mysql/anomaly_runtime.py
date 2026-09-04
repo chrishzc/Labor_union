@@ -42,9 +42,9 @@ class MySqlAnomalyRuntime:
 
     def __init__(self, *, issue_identity_secret: str | bytes | None = None,
                  owner_snapshot_reader=None, current_issue_detectors=None) -> None:
-        # The secret is process configuration only.  It is never passed to a
-        # repository, serialized into a job, or included in a receipt.
-        self._issue_identity_secret = issue_identity_secret
+        # The legacy composition argument is intentionally not an identity input.
+        # Current issue identity comes from deterministic owner lifecycle facts.
+        del issue_identity_secret
         self._owner_snapshot_reader = owner_snapshot_reader
         self._current_issue_detectors = dict(current_issue_detectors or {})
 
@@ -72,12 +72,8 @@ class MySqlAnomalyRuntime:
             owner_snapshot_reader=owner_snapshot_reader or self._owner_snapshot_reader,
         )
 
-    def current_issue_key(self, definition_code, subject_identity) -> str:
-        if self._issue_identity_secret is None:
-            raise RuntimeError("anomaly issue identity secret not composed")
-        return build_issue_key(
-            self._issue_identity_secret, definition_code, subject_identity
-        )
+    def current_issue_key(self, definition_code, subject_identity, lifecycle_token) -> str:
+        return build_issue_key(definition_code, subject_identity, lifecycle_token)
 
     def current_issue_application(self, connection, *, owner_snapshot_reader=None):
         repository = self.current_issue_repository(
