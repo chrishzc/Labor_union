@@ -182,6 +182,7 @@ def test_projection_and_intent_completion_rollback_together():
 def test_owner_mutation_is_not_committed_when_recheck_intent_append_fails():
     scope = _scope()
     repository = _Repository(OwnerSnapshot(scope, "owner-v3", 3, object()))
+    mutation_calls = []
 
     def fail_append(_intent):
         repository.events.append(("append_intent_failed",))
@@ -190,7 +191,6 @@ def test_owner_mutation_is_not_committed_when_recheck_intent_append_fails():
     repository.append_recheck_intent = fail_append
     tx_log = []
     application = CurrentIssueApplication(repository, lambda: _Uow(tx_log))
-    mutation_calls = []
 
     with pytest.raises(RuntimeError, match="intent_append_failed"):
         application.mutate_owner_with_recheck_intent(
