@@ -63,33 +63,17 @@ class _Connection:
         return self.cursor_instance
 
 
-def test_dual_role_without_selection_fails_closed_and_selected_role_resolves() -> None:
+def test_multiple_active_roles_fail_closed_until_conflicting_role_is_revoked() -> None:
     rows = (
         _binding("customer", "customer:7"),
         _binding("staff", "staff:8"),
     )
-    unselected = MySqlLineIdentityRepository(
-        _Connection(
-            _Cursor(
-                all_rows=(rows,),
-                one_rows=({"selected_identity_role": None, "aggregate_version": 4},),
-            )
-        )
-    )
-    with pytest.raises(RuntimeError, match="line_identity_multiple_active_binding"):
-        unselected.get(LineUserId("U-role-negative"))
+    cursor = _Cursor(all_rows=(rows,))
+    repository = MySqlLineIdentityRepository(_Connection(cursor))
 
-    selected = MySqlLineIdentityRepository(
-        _Connection(
-            _Cursor(
-                all_rows=(rows,),
-                one_rows=({"selected_identity_role": "staff", "aggregate_version": 4},),
-            )
-        )
-    ).get(LineUserId("U-role-negative"))
-    assert selected is not None
-    assert selected.subject_type is LineBindingSubjectType.STAFF
-    assert selected.subject_reference == "staff:8"
+    with pytest.raises(RuntimeError, match="line_identity_multiple_active_binding"):
+        repository.get(LineUserId("U-role-negative"))
+    assert len(cursor.executed) == 1
 
 
 def test_management_detail_ignores_revoked_history_when_one_role_is_active() -> None:
