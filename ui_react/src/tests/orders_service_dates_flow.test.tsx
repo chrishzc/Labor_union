@@ -55,7 +55,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       fireEvent.click(tabBtn);
     });
     await waitFor(() => {
-      expect(screen.getByText('合約目標天數').parentElement).toHaveTextContent(`${expectedDays} 天`);
+      expect(screen.getByText('合約天數').parentElement).toHaveTextContent(`${expectedDays} 天`);
     });
   };
 
@@ -472,8 +472,11 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       service_mode: '週休2日',
       custom_leave_dates: [],
     });
-    expect((await screen.findByText('合約目標天數')).parentElement).toHaveTextContent('5 天');
-    expect(screen.getByText('實質出勤天數').parentElement).toHaveTextContent('5 天');
+    expect((await screen.findByText('合約天數')).parentElement).toHaveTextContent('5 天');
+    expect(screen.getByText('休假日').parentElement).toHaveTextContent('0 天');
+    expect(screen.getByText('建議完工日').parentElement).toHaveTextContent('2026-09-05');
+    expect(screen.queryByText('實質出勤天數')).not.toBeInTheDocument();
+    expect(screen.queryByText('總日曆跨越天')).not.toBeInTheDocument();
   });
 
   it('8. actual-start query 缺失時 fail closed 且不呼叫精算 API', async () => {
