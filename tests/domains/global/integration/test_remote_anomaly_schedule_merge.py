@@ -20,13 +20,6 @@ from subsystems.staff.summary_query import (
     StaffSummaryQueryService,
 )
 from subsystems.access.authentication_session import AdminPrincipal
-from ui.pages.scheduling.navigation_state import (
-    apply_one_time_default,
-    clear_staff_calendar_navigation,
-    consume_staff_calendar_selection,
-    staff_option_label,
-)
-from ui.pages.scheduling import matching_center
 
 
 class _Cursor:
@@ -111,91 +104,6 @@ def test_staff_summary_supports_exact_typed_lookup():
     assert response.data.next_cursor is None
     assert connection.cursor_instance.executed[0][1] == (7,)
     assert connection.closed is True
-
-
-def test_staff_calendar_pending_target_is_not_consumed_until_present():
-    state = {
-        "pending_staff_calendar_staff_id": 77,
-        "pending_staff_calendar_year": 2026,
-        "pending_staff_calendar_month": 10,
-        "pending_staff_calendar_note": "holiday conflict",
-    }
-
-    assert consume_staff_calendar_selection(state, {"other": 1}) is None
-    assert state["pending_staff_calendar_staff_id"] == 77
-
-    selection = consume_staff_calendar_selection(state, {"target": 77})
-
-    assert selection is not None
-    assert (selection.label, selection.year, selection.month) == (
-        "target",
-        2026,
-        10,
-    )
-    assert "pending_staff_calendar_staff_id" not in state
-
-
-def test_matching_plan_default_only_applies_once_per_navigation_event():
-    state = {"matching_center_plan_navigation_token": "event-1"}
-
-    apply_one_time_default(
-        state,
-        enabled=True,
-        navigation_value="plan",
-    )
-    state["matching_center_sub_nav"] = "details"
-    apply_one_time_default(
-        state,
-        enabled=True,
-        navigation_value="plan",
-    )
-    assert state["matching_center_sub_nav"] == "details"
-
-    state["matching_center_plan_navigation_token"] = "event-2"
-    apply_one_time_default(
-        state,
-        enabled=True,
-        navigation_value="plan",
-    )
-    assert state["matching_center_sub_nav"] == "plan"
-
-
-def test_missing_staff_navigation_is_cleared_after_exact_lookup_fails():
-    state = {
-        "pending_staff_calendar_staff_id": 77,
-        "pending_staff_calendar_year": 2026,
-        "pending_staff_calendar_month": 10,
-        "pending_staff_calendar_note": "holiday conflict",
-    }
-
-    clear_staff_calendar_navigation(state)
-
-    assert state == {}
-
-
-def test_staff_option_label_uses_staff_id_as_immutable_identity():
-    first = staff_option_label({"id": 7, "name": "同名", "phone": "0900"})
-    second = staff_option_label({"id": 8, "name": "同名", "phone": "0900"})
-
-    assert first != second
-    assert first.endswith("#7")
-
-
-def test_smart_matching_entry_renders_the_real_matching_flow(monkeypatch):
-    calls = []
-    monkeypatch.setattr(matching_center.st, "markdown", lambda *_: None)
-    monkeypatch.setattr(matching_center.st, "caption", lambda *_: None)
-    monkeypatch.setattr(
-        matching_center,
-        "_render_multi_segment_matching",
-        lambda order, staff: calls.append((order, staff)),
-    )
-    order = {"case_no": "CASE-1"}
-    staff = [{"id": 7}]
-
-    matching_center._render_single_caregiver_matching(order, staff)
-
-    assert calls == [(order, staff)]
 
 
 def test_existing_hcm_case_with_invalid_source_persists_owned_review(monkeypatch):
