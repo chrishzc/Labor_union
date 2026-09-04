@@ -7,7 +7,7 @@ deletes absent issues, and completes a previously committed recheck intent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Callable, Protocol
 
@@ -132,9 +132,10 @@ class CurrentIssueApplication:
                 self._repository.assert_snapshot_current(scope, snapshot.snapshot_token)
                 if completed_intent is not None:
                     _validate_completed_intent(completed_intent, scope, snapshot)
-                candidates = validate_candidate_set(scope, detector(snapshot))
+                proposed = validate_candidate_set(scope, detector(snapshot))
                 now = self._clock()
                 current = self._repository.list_current(scope)
+                candidates = _preserve_active_lifecycle_keys(scope, proposed, current)
                 current_by_key = {item.issue_key: item for item in current}
                 candidate_keys = {item.issue_key for item in candidates}
                 deleted = tuple(sorted(set(current_by_key) - candidate_keys))
@@ -156,6 +157,30 @@ class CurrentIssueApplication:
             deleted,
             snapshot.snapshot_token,
         )
+
+
+def _preserve_active_lifecycle_keys(
+    scope: RecheckScope,
+    candidates: tuple[CurrentIssueCandidate, ...],
+    current: tuple[CurrentIssueProjection, ...],
+) -> tuple[CurrentIssueCandidate, ...]:
+    """Reuse the persisted key while the same canonical subject remains active."""
+
+    current_by_subject = {
+        (item.candidate.definition_code, item.candidate.canonical_subject_identity): item.issue_key
+        for item in current
+    }
+    stable = tuple(
+        replace(
+            candidate,
+            issue_key=current_by_subject.get(
+                (candidate.definition_code, candidate.canonical_subject_identity),
+                candidate.issue_key,
+            ),
+        )
+        for candidate in candidates
+    )
+    return validate_candidate_set(scope, stable)
 
 
 def _validate_completed_intent(
