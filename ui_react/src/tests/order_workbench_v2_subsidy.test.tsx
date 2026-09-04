@@ -192,6 +192,8 @@ describe('待辦看板 Beta Government Subsidy side lane', () => {
 
     expect(await screen.findByText('CASE-GAP')).toBeInTheDocument();
     expect(screen.getByText('正常訂單尚未找到正式 Government Subsidy claim 關聯。')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'government_subsidy.claim_batches.query' }))
+      .toHaveAttribute('href', '/api/v1/government-subsidy/claim-batches');
     expect(screen.getByText('CASE-SUBMITTED')).toBeInTheDocument();
     expect(screen.getByText('77 小時')).toBeInTheDocument();
     expect(screen.getByText(/23,100/)).toBeInTheDocument();
