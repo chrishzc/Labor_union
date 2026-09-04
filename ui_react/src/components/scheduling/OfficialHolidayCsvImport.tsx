@@ -20,6 +20,7 @@ import {
 
 interface OfficialHolidayCsvImportProps {
   readonly disabled?: boolean;
+  readonly onYearPrepared?: (year: number) => void;
 }
 
 interface PreparedImport {
@@ -37,7 +38,10 @@ const importOperations = {
   },
 };
 
-export function OfficialHolidayCsvImport({ disabled = false }: OfficialHolidayCsvImportProps) {
+export function OfficialHolidayCsvImport({
+  disabled = false,
+  onYearPrepared,
+}: OfficialHolidayCsvImportProps) {
   const [prepared, setPrepared] = useState<PreparedImport | null>(null);
   const [summary, setSummary] = useState<OfficialHolidayImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +70,7 @@ export function OfficialHolidayCsvImport({ disabled = false }: OfficialHolidayCs
         to_date: `${parsed.year}-12-31`,
       };
       const calendar = await queryHolidayFlow(horizon);
+      onYearPrepared?.(parsed.year);
       setPrepared({
         fileName: file.name,
         parsed,
