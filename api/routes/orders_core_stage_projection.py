@@ -1,6 +1,6 @@
 """
 File: orders_core_stage_projection.py
-Description: 提供待辦看板 Beta 十三核心階段、Government Subsidy side lane、完全結案與歷史 evidence 的唯讀 HTTP endpoint。
+Description: 提供待辦看板 Beta 十三核心階段、完全結案與歷史 evidence 的唯讀 HTTP endpoint。
 """
 
 from __future__ import annotations
@@ -25,9 +25,6 @@ from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.errors import GlobalTypedErrorResponseView
 from api.schemas.historical_order_adoption_evidence import HistoricalOrderAdoptionEvidenceView
-from api.schemas.order_government_subsidy_projection import (
-    OrderGovernmentSubsidyProjectionPageView,
-)
 from api.schemas.orders_core_stage_projection import (
     OrderCoreStageTimelinePageView,
     OrderTerminalAggregatePageView,
@@ -49,7 +46,6 @@ from subsystems.orders.core_stage_projection_query import (
 from subsystems.orders.government_subsidy_projection_query import (
     GovernmentSubsidyProjectionContractError,
     GovernmentSubsidyProjectionQuery,
-    GovernmentSubsidySubstatusCode,
     query_government_subsidy_projection_page,
 )
 from subsystems.orders.historical_adoption_evidence_query import (
@@ -150,89 +146,6 @@ def get_order_core_stage_timelines(
         return Response(status_code=304, headers=headers)
     response.headers.update(headers)
     return BaseResponse(data=view, message="成功取得訂單十三核心階段投影")
-
-
-@router.get(
-    "/government-subsidy-projections",
-    response_model=BaseResponse[OrderGovernmentSubsidyProjectionPageView],
-    responses={
-        304: {"description": "Government Subsidy side-lane projection 自上次查詢後未變更"},
-        401: {"model": GlobalTypedErrorResponseView, "description": "需要有效的管理員驗證"},
-        403: {"model": GlobalTypedErrorResponseView, "description": "目前身分無權查詢補助投影"},
-        409: {"model": GlobalTypedErrorResponseView, "description": "補助 owner facts 無法形成一致投影"},
-        422: {"model": GlobalTypedErrorResponseView, "description": "補助查詢條件不符合公開契約"},
-        500: {"model": GlobalTypedErrorResponseView, "description": "補助投影查詢失敗"},
-        503: {"model": GlobalTypedErrorResponseView, "description": "補助 owner facts 暫時無法使用"},
-    },
-)
-def get_order_government_subsidy_projections(
-    response: Response,
-    page_size: int = Query(50, ge=1, le=200),
-    after_case_no: str | None = Query(None, min_length=1, max_length=50),
-    case_no_search: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
-    substatus_code: Annotated[GovernmentSubsidySubstatusCode | None, Query()] = None,
-    if_none_match: str | None = Header(None, alias="If-None-Match"),
-    principal: AdminPrincipal = Depends(require_system_admin),
-    application: OrdersStageProjectionApplication = Depends(get_orders_stage_projection_application),
-    repository=Depends(get_order_government_subsidy_projection_repository),
-):
-    del principal
-    try:
-        page = query_government_subsidy_projection_page(
-            application,
-            repository,
-            GovernmentSubsidyProjectionQuery(
-                page_size=page_size,
-                after_case_no=after_case_no,
-                case_no_search=case_no_search,
-                substatus_code=substatus_code,
-            ),
-        )
-        view = OrderGovernmentSubsidyProjectionPageView.model_validate(
-            page,
-            from_attributes=True,
-        )
-    except (
-        OrderStageProjectionContractError,
-        CoreStageProjectionContractError,
-        GovernmentSubsidyProjectionContractError,
-    ) as error:
-        raise typed_http_error(
-            409,
-            "conflict",
-            "order_government_subsidy_projection_invalid",
-            "Government Subsidy owner facts 無法產生一致的訂單唯讀投影。",
-            "order-government-subsidy-projection-query",
-        ) from error
-    except ValueError as error:
-        raise typed_http_error(
-            422,
-            "validation",
-            "order_government_subsidy_projection_query_invalid",
-            "Government Subsidy 訂單投影查詢條件不正確。",
-            "order-government-subsidy-projection-query",
-        ) from error
-    except (OperationalError, ProgrammingError) as error:
-        raise typed_http_error(
-            503,
-            "unavailable",
-            "order_government_subsidy_projection_source_unavailable",
-            "Government Subsidy owner facts 目前無法讀取。",
-            "order-government-subsidy-projection-query",
-        ) from error
-    except Exception as error:
-        raise internal_query_error(
-            "order_government_subsidy_projection_internal_error",
-            "Government Subsidy 訂單投影查詢失敗。",
-            "order-government-subsidy-projection-query",
-        ) from error
-
-    etag = f'"{page.etag}"'
-    headers = {"ETag": etag, "Cache-Control": "private, no-cache"}
-    if if_none_match is not None and if_none_match.strip() == etag:
-        return Response(status_code=304, headers=headers)
-    response.headers.update(headers)
-    return BaseResponse(data=view, message="成功取得訂單 Government Subsidy 唯讀投影")
 
 
 @router.get(
