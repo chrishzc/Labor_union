@@ -218,11 +218,14 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       expect(screen.getByText(/正式服務日期確認/)).toBeInTheDocument();
     });
 
-    // 預覽按鈕應為可點擊
-    const previewBtn = await screen.findByRole('button', { name: /檢查服務週次影響/ });
+    expect(screen.queryByRole('button', { name: /重新依工會規則精算/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('已有正式排班：處理請假／代班')).not.toBeInTheDocument();
+    expect(screen.queryByText('實際開工日更正與動態排盤')).not.toBeInTheDocument();
+    expect(screen.queryByText('服務完成與結案階段')).not.toBeInTheDocument();
+
+    const previewBtn = await screen.findByRole('button', { name: '確認服務日期' });
     expect(previewBtn).not.toBeDisabled();
 
-    // 點擊預覽
     await act(async () => {
       fireEvent.click(previewBtn);
     });
@@ -233,11 +236,9 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     });
     expect(previewSpy).toHaveBeenCalledTimes(1);
 
-    // 填寫原因
     const reasonInput = document.querySelector('.mutation-reason-input') as HTMLInputElement;
     fireEvent.change(reasonInput, { target: { value: '客戶確認服務日期無誤' } });
 
-    // 點擊確認套用
     const applyBtn = await screen.findByRole('button', { name: /確認套用服務日期/ });
     expect(applyBtn).not.toBeDisabled();
 
@@ -292,7 +293,6 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     fireEvent.click(screen.getByRole('button', { name: '新增事前請假' }));
     await waitFor(() => expect(rerunSpy).toHaveBeenCalledTimes(1));
 
-    // 預覽結果卡片與 Apply 按鈕應消失或不可見
     expect(screen.queryByText(/服務週次精算預覽/)).toBeNull();
     expect(document.querySelector('[data-control-id="orders.date.service-date-apply"]')).toBeNull();
   });
@@ -408,7 +408,6 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       document.querySelector('[data-control-id="orders.date.service-date-apply"]')!
     );
 
-    // 出現 outcome_unknown 提示
     await waitFor(() => {
       expect(screen.getByText(/服務日期確認回應逾時或未明/)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /重試提交/ })).toBeInTheDocument();
@@ -422,7 +421,6 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
 
     const firstKey = applySpy.mock.calls[0][2].idempotencyKey;
 
-    // 點擊重試
     fireEvent.click(screen.getByRole('button', { name: /重試提交/ }));
 
     await waitFor(() => {
@@ -438,17 +436,14 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     render(React.createElement(OrdersPage));
     await waitFor(() => expect(screen.getByText('ORD-2026-0801')).toBeInTheDocument());
 
-    // 開啟抽屜並選取日期
     await openServiceCalendarTab();
     await waitFor(() => expect(screen.getByText(/正式服務日期確認/)).toBeInTheDocument());
 
     const draftBefore = orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801');
     const keyBefore = draftBefore?.idempotencyKey;
 
-    // 關閉抽屜
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
 
-    // 再次開啟抽屜
     await openServiceCalendarTab();
     await waitFor(() => expect(screen.getByText(/正式服務日期確認/)).toBeInTheDocument());
 
@@ -631,10 +626,6 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     });
     expect(orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')?.selectedDates)
       .toEqual(['2026-09-01', '2026-09-02', '2026-09-03']);
-
-    fireEvent.click(screen.getByRole('button', { name: '前往請假／代班工作台' }));
-    expect(window.location.hash).toBe('#scheduling?tab=leave_sub&case_no=ORD-2026-0801');
-    window.location.hash = '';
   });
 
   it('11. Sunday-first 日曆欄位正確呈現週休 1／2 日，不把開始日誤塞星期日欄', async () => {
@@ -797,7 +788,6 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     await screen.findByText('ORD-HISTORY-1');
     fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
     fireEvent.click(await screen.findByRole('button', { name: /實質服務日曆/ }));
-
     expect(await screen.findByText('歷史訂單：重啟正常流程')).toBeInTheDocument();
     expect(screen.queryByText(/正式服務日期確認/)).not.toBeInTheDocument();
     expect(ordersQueryClient.getActualStart).not.toHaveBeenCalled();
@@ -808,7 +798,8 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       expect(applyRestart).toHaveBeenCalledTimes(1);
       expect(screen.getByText(/已回到正常「訂單成立」/)).toBeInTheDocument();
       expect(screen.getByText(/正式服務日期確認/)).toBeInTheDocument();
-      expect(screen.getByText('實際開工日更正與動態排盤')).toBeInTheDocument();
+      expect(screen.queryByText('實際開工日更正與動態排盤')).not.toBeInTheDocument();
+      expect(screen.queryByText('服務完成與結案階段')).not.toBeInTheDocument();
       expect(screen.getByLabelText('工會排休類型')).toHaveTextContent('週休1日');
       expect(screen.queryByText(/精算所需的開始日、合約天數或排休類型尚未載入/)).not.toBeInTheDocument();
       expect(screen.queryByText(/目前狀態為「歷史訂單－未服務」/)).not.toBeInTheDocument();
