@@ -8,8 +8,8 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 156,
-    "ordered_digest_sha256": "e42be1fcb6e835e868bf45c135320045f55442c00d741610bb6e40a0451d58f8",
+    "expected_count": 157,
+    "ordered_digest_sha256": "d56eab3f7cb6b81174ef039c7dad829d7d891f4a4ecde696cafcefa90b964747",
     "terminal_artifact": "1029_client_payment_destination_configuration.sql"
   },
   "schema_assembly": {
