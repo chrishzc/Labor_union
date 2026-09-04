@@ -76,7 +76,7 @@ def test_dual_role_without_selection_fails_closed_and_selected_role_resolves() -
             )
         )
     )
-    with pytest.raises(RuntimeError, match="line_identity_role_selection_required"):
+    with pytest.raises(RuntimeError, match="line_identity_multiple_active_binding"):
         unselected.get(LineUserId("U-role-negative"))
 
     selected = MySqlLineIdentityRepository(
@@ -111,11 +111,17 @@ def test_management_detail_ignores_revoked_history_when_one_role_is_active() -> 
 @pytest.mark.parametrize(
     ("subject_type", "counts"),
     (
-        (LineBindingSubjectType.ADMIN, {"admin_count": 0, "nonadmin_count": 1}),
-        (LineBindingSubjectType.STAFF, {"admin_count": 1, "nonadmin_count": 0}),
+        (
+            LineBindingSubjectType.ADMIN,
+            {"admin_count": 0, "customer_count": 1, "staff_count": 0},
+        ),
+        (
+            LineBindingSubjectType.STAFF,
+            {"admin_count": 1, "customer_count": 0, "staff_count": 0},
+        ),
     ),
 )
-def test_admin_and_customer_staff_roles_are_mutually_exclusive(subject_type, counts) -> None:
+def test_role_change_requires_revoking_the_current_active_role(subject_type, counts) -> None:
     cursor = _Cursor(
         one_rows=(
             {"line_user_id": "U-role-negative"},
@@ -124,7 +130,7 @@ def test_admin_and_customer_staff_roles_are_mutually_exclusive(subject_type, cou
     )
     repository = MySqlLineIdentityRepository(_Connection(cursor))
 
-    with pytest.raises(RuntimeError, match="line_identity_admin_role_exclusive"):
+    with pytest.raises(RuntimeError, match="line_identity_role_change_requires_revocation"):
         repository.save_claim(
             LineIdentityClaim(
                 LineUserId("U-role-negative"),
