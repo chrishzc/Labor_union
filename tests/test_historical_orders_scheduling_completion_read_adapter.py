@@ -544,4 +544,4 @@ def test_each_union_branch_has_the_same_engine_column_count() -> None:
                 count += 1
         counts.append(count)
 
-    assert counts == [36] * 6
+    assert counts == [48] * 7

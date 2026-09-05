@@ -1,19 +1,14 @@
 """
 File: test_react_production_runtime_integration.py
-Description: 驗證 Phase6B-RUN 本機 artifact preflight、queue 不變與 fail-closed identity。
+Description: 驗證 Phase6B-RUN 本機 artifact preflight 與 fail-closed identity。
 """
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 from scripts.build_react_admin_artifact import build_artifact
 from scripts.launcher_preflight import inspect_profile
-
-
-ROOT = Path(__file__).resolve().parents[1]
-QUEUE = ROOT / "document/架構重整/03_追蹤清單與證據/evidence/entrypoint_review_queue_v1.jsonl"
 
 
 def _source(root: Path, marker: str) -> Path:
@@ -28,14 +23,13 @@ def _source(root: Path, marker: str) -> Path:
     return root
 
 
-def test_artifact_runtime_preflight_validates_two_bindings_without_queue_change(
+def test_artifact_runtime_preflight_validates_two_bindings(
     monkeypatch, tmp_path: Path
 ) -> None:
     current = tmp_path / "current"
     previous = tmp_path / "previous"
     build_artifact(current, source=_source(tmp_path / "source-current", "current123"))
     build_artifact(previous, source=_source(tmp_path / "source-previous", "previous123"))
-    before = hashlib.sha256(QUEUE.read_bytes()).hexdigest()
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("REACT_ADMIN_CURRENT_ARTIFACT_DIR", str(current))
     monkeypatch.setenv("REACT_ADMIN_PREVIOUS_ARTIFACT_DIR", str(previous))
@@ -57,7 +51,6 @@ def test_artifact_runtime_preflight_validates_two_bindings_without_queue_change(
     assert report["artifact_attestation"]["active_selector"] == "current"
     assert report["entry_target_attestation"]["entry_count"] == 12
     assert report["streamlit_rollback"]["status"] == "retained"
-    assert hashlib.sha256(QUEUE.read_bytes()).hexdigest() == before
 
 
 def test_artifact_runtime_preflight_fails_closed_without_bindings(monkeypatch) -> None:

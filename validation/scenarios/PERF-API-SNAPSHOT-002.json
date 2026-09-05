@@ -35,15 +35,17 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_api_performance_middleware.py tests\\test_performance_snapshot.py tests\\test_system_status_ui.py tests\\test_system_status_router.py tests\\test_system_status_api_client.py tests\\test_performance_policies.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_api_performance_middleware.py tests\\test_performance_snapshot.py tests\\test_system_status_router.py tests\\test_performance_policies.py",
+      "npm --prefix ui_react test -- src/tests/runtime_decoder.test.ts src/tests/system_status_entry_cutover.test.tsx src/tests/system_status_entry_identity.test.tsx"
     ],
     "test_paths": [
       "tests/test_api_performance_middleware.py",
       "tests/test_performance_snapshot.py",
-      "tests/test_system_status_ui.py",
       "tests/test_system_status_router.py",
-      "tests/test_system_status_api_client.py",
-      "tests/test_performance_policies.py"
+      "tests/test_performance_policies.py",
+      "ui_react/src/tests/runtime_decoder.test.ts",
+      "ui_react/src/tests/system_status_entry_cutover.test.tsx",
+      "ui_react/src/tests/system_status_entry_identity.test.tsx"
     ]
   }
 }

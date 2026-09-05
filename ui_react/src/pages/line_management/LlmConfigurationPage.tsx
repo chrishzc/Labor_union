@@ -2,7 +2,8 @@
  * File: LlmConfigurationPage.tsx
  * Description: 系統管理員 write-only Google AI Studio API Key 設定頁；永不讀回或顯示既有 secret。
  */
-import React, { FormEvent, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import type { FormEvent } from 'react';
 import {
   fetchLlmApiKeyStatus,
   replaceLlmApiKey,
