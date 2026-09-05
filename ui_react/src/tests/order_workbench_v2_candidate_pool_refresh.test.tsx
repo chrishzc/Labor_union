@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CORE_STAGE_CODES,
@@ -7,6 +7,7 @@ import {
   type CoreStageCode,
 } from '../api/orders/order_core_stage_projection_schemas';
 import type { OrderCoreStageProjectionQueryParams } from '../api/orders/order_core_stage_projection_client';
+import type { OrderSummaryPage } from '../api/orders/order_query_schemas';
 import { OrderWorkbenchV2Page } from '../pages/OrderWorkbenchV2Page';
 
 const mocks = vi.hoisted(() => ({
@@ -25,6 +26,18 @@ vi.mock('../components/OrderCandidateQueryPanel', () => ({
     <button type="button" onClick={onPoolReadback}>
       模擬 {caseNo} 候選池回讀完成
     </button>
+  ),
+}));
+
+vi.mock('../components/OrderServiceDatesPanel', () => ({
+  OrderServiceDatesPanel: ({ onObserved }: { onObserved?: () => void }) => (
+    <button type="button" onClick={onObserved}>模擬服務日期回讀完成</button>
+  ),
+}));
+
+vi.mock('../components/OrderWorkbenchV2Drawer', () => ({
+  OrderWorkbenchV2Drawer: ({ onClose }: { onClose: () => void }) => (
+    <button type="button" onClick={onClose}>關閉測試工作 Drawer</button>
   ),
 }));
 
@@ -100,6 +113,26 @@ function page(selectedStage: CoreStageCode, items: unknown[]) {
   };
 }
 
+function summaries(updated = false): OrderSummaryPage {
+  return {
+    items: [{
+      case_no: 'CASE-READBACK',
+      client_name: updated ? '回讀後測試客戶' : '回讀前測試客戶',
+      order_status: '訂單成立',
+      staff_name: updated ? '回讀後測試月嫂' : null,
+      identity_status: null,
+      start_date: updated ? '2026-09-10' : '2026-09-01',
+      end_date: updated ? '2026-09-30' : '2026-09-21',
+      actual_start_date: null,
+      actual_end_date: null,
+      service_days: 20,
+      total_employer_self_pay_payable: null,
+    }],
+    next_cursor: null,
+    etag: (updated ? 'd' : 'c').repeat(64),
+  };
+}
+
 describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
   beforeEach(() => {
     mocks.getCoreStageTimelines.mockReset();
@@ -126,5 +159,73 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
       expect.objectContaining({ branch_type: 'normal', stage: 'matching_pool' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('候選池回讀後同時重新查詢姓名、服務期間與指派摘要，不沿用首次載入資料', async () => {
+    mocks.loadSummaries.mockResolvedValueOnce(summaries()).mockResolvedValue(summaries(true));
+    render(<OrderWorkbenchV2Page />);
+    await screen.findByText('回讀前測試客戶');
+    const originalSignal = mocks.loadSummaries.mock.calls[0]![2].signal as AbortSignal;
+    fireEvent.click(screen.getByRole('button', { name: /2 候選池 1/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '模擬 CASE-READBACK 候選池回讀完成' }));
+
+    expect(await screen.findByText('回讀後測試客戶')).toBeInTheDocument();
+    expect(screen.getByText('2026-09-10 ~ 2026-09-30')).toBeInTheDocument();
+    expect(screen.getByText('回讀後測試月嫂')).toBeInTheDocument();
+    expect(screen.queryByText('回讀前測試客戶')).not.toBeInTheDocument();
+    expect(mocks.loadSummaries).toHaveBeenCalledTimes(2);
+    expect(originalSignal.aborted).toBe(true);
+    expect(mocks.loadSummaries).toHaveBeenLastCalledWith(
+      expect.any(Function),
+      { lifecycle_scope: 'all', page_size: 200 },
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it('服務日期正式回讀完成後刷新清單上的服務期間', async () => {
+    mocks.loadSummaries.mockResolvedValueOnce(summaries()).mockResolvedValue(summaries(true));
+    render(<OrderWorkbenchV2Page />);
+    await screen.findByText('回讀前測試客戶');
+    fireEvent.click(screen.getByRole('button', { name: /^9 / }));
+    fireEvent.click(await screen.findByRole('button', { name: '模擬服務日期回讀完成' }));
+
+    expect(await screen.findByText('2026-09-10 ~ 2026-09-30')).toBeInTheDocument();
+    expect(mocks.loadSummaries).toHaveBeenCalledTimes(2);
+    expect(mocks.getCoreStageTimelines).toHaveBeenLastCalledWith(
+      expect.objectContaining({ stage: 'confirmed_service_dates' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('離開工作 Drawer 後回讀正式摘要與階段，不要求整頁重新載入', async () => {
+    mocks.loadSummaries.mockResolvedValueOnce(summaries()).mockResolvedValue(summaries(true));
+    render(<OrderWorkbenchV2Page />);
+    await screen.findByText('回讀前測試客戶');
+    fireEvent.click(screen.getByRole('button', { name: '開啟唯讀工作 Drawer' }));
+    const before = mocks.getCoreStageTimelines.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: '關閉測試工作 Drawer' }));
+
+    expect(await screen.findByText('回讀後測試客戶')).toBeInTheDocument();
+    expect(mocks.loadSummaries).toHaveBeenCalledTimes(2);
+    expect(mocks.getCoreStageTimelines.mock.calls.length).toBeGreaterThan(before);
+    expect(screen.queryByRole('button', { name: '關閉測試工作 Drawer' })).not.toBeInTheDocument();
+  });
+
+  it('舊摘要請求晚到時不覆蓋操作後回讀的新資料', async () => {
+    let resolveInitial!: (value: OrderSummaryPage) => void;
+    mocks.loadSummaries.mockImplementationOnce(() => new Promise<OrderSummaryPage>((resolve) => { resolveInitial = resolve; }));
+    mocks.loadSummaries.mockResolvedValue(summaries(true));
+    render(<OrderWorkbenchV2Page />);
+    await screen.findByRole('button', { name: /2 候選池 1/ });
+    const originalSignal = mocks.loadSummaries.mock.calls[0]![2].signal as AbortSignal;
+    fireEvent.click(screen.getByRole('button', { name: /2 候選池 1/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '模擬 CASE-READBACK 候選池回讀完成' }));
+    await screen.findByText('回讀後測試客戶');
+
+    await act(async () => { resolveInitial(summaries()); });
+
+    expect(originalSignal.aborted).toBe(true);
+    expect(screen.getByText('回讀後測試客戶')).toBeInTheDocument();
+    expect(screen.queryByText('回讀前測試客戶')).not.toBeInTheDocument();
   });
 });

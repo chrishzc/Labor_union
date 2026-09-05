@@ -151,6 +151,7 @@ export const OrderWorkbenchV2Page: FC = () => {
 
   useEffect(() => {
     let alive = true;
+    const controller = new AbortController();
     setSummaryIndex(new Map());
     setSummaryLoading(true);
     setSummaryQueryFailed(false);
@@ -158,6 +159,7 @@ export const OrderWorkbenchV2Page: FC = () => {
     void loadAllOrderSummaries(
       ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
       { lifecycle_scope: 'all', page_size: 200 },
+      { signal: controller.signal },
     )
       .then((data) => {
         if (!alive) return;
@@ -173,8 +175,11 @@ export const OrderWorkbenchV2Page: FC = () => {
         if (alive) setSummaryLoading(false);
       });
 
-    return () => { alive = false; };
-  }, []);
+    return () => {
+      alive = false;
+      controller.abort();
+    };
+  }, [projectionRefreshKey]);
 
   const selectedDefinition = coreStageDefinition(selectedStage);
   const selectedStageCount = view?.stageCounts[selectedStage] ?? 0;
@@ -476,7 +481,10 @@ export const OrderWorkbenchV2Page: FC = () => {
         <OrderWorkbenchV2Drawer
           caseNo={selectedDrawer.caseNo}
           branchType={selectedDrawer.branchType}
-          onClose={() => setSelectedDrawer(null)}
+          onClose={() => {
+            setSelectedDrawer(null);
+            setProjectionRefreshKey((current) => current + 1);
+          }}
         />
       )}
     </div>

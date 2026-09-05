@@ -20,6 +20,7 @@ import { coreStageSubstatusLabel } from '../adapters/orders/order_core_stage_pro
 import { OrderIntakeRepairPanel } from './OrderIntakeRepairPanel';
 import { OrderServiceCompletionActions } from './OrderServiceCompletionActions';
 import { OrderTermsMutationPanel } from './OrderTermsMutationPanel';
+import { OrderWorkbenchV2OwnerContext } from './OrderWorkbenchV2OwnerContext';
 import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActions';
 
 interface OrderWorkbenchV2DrawerProps {
@@ -270,6 +271,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               </article>
             </div>
           </section>
+
+          <OrderWorkbenchV2OwnerContext key={caseNo} caseNo={caseNo} revision={refreshRevision} />
 
           {branchType !== 'cancelled' && detail.status === 'ready'
             && (branchType === 'historical'
