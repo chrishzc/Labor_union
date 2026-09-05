@@ -2,7 +2,7 @@
   "contract": "labor-union-verification-scenario/v1", "scenario_id": "APX-EXPORT-DATA-001", "track": "A", "suite_id": "APX", "status": "specified", "requires_database": true,
   "coverage_scope": "supplemental", "test_kinds": ["domain_root_data", "expected_manifest"],
   "coverage_ids": ["APX-01", "APX-02", "APX-03"],
-  "source_refs": ["document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#5.3"],
+  "source_refs": ["document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#5.3"],
   "root_facts": ["Typed Staff Payables, Client Refund and subsidy-return source views with a fixed consistent-read identity."],
   "forbidden_direct_seed": ["XLSX row, export aggregation, archive receipt, hash or download state"],
   "commands": ["Build the payable export ViewModel and request export preparation without writing any business state."],

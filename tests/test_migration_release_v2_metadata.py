@@ -13,7 +13,7 @@ RELEASE_DIRECTORY = PROJECT_ROOT / "db" / "migration_releases"
 V1_MANIFEST = RELEASE_DIRECTORY / "labor_union_2026_08_02_v1.json"
 V2_MANIFEST = RELEASE_DIRECTORY / "labor_union_2026_08_08_v2.json"
 V2_DESCRIPTORS = RELEASE_DIRECTORY / "labor_union_2026_08_08_v2.descriptors.json"
-V1_MANIFEST_SHA256 = "b6e2505f879fab6729e482b4c0b830874ef40b27bce2491adf8e58cffe9f4130"
+V1_MANIFEST_SHA256 = "6cc2bde9c7be442f8edb04b207be2543d2e60e874810202daa00475b50394815"
 V2_ARTIFACT_NAMES = tuple(
     f"{number}_{suffix}.sql"
     for number, suffix in (

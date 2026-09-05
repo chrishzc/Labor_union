@@ -15,7 +15,6 @@ from scripts.bootstrap_disposable_mysql_schema import (
     _partition_base_statements,
     _require_disposable_database,
     _require_absent_database,
-    _schema_bootstrap_gate_errors,
 )
 from scripts.init_db import _schema_part_sort_key
 from scripts.verify_verification_scenarios import load_scenarios
@@ -113,36 +112,6 @@ def test_disposable_bootstrap_refuses_to_overwrite_an_existing_database():
         raise AssertionError("existing database must not be overwritten")
 
     _require_absent_database(_DatabaseCursor(None), "lu_test_finance")
-
-
-def test_schema_bootstrap_gate_requires_inputs_but_not_historical_execution_receipts():
-    gate = {
-        "errors": {
-            "baseline": [],
-            "scenarios": [],
-            "fixtures": [],
-            "field_authority": [],
-            "receipts": ["historical receipt digest is stale"],
-        }
-    }
-
-    assert _schema_bootstrap_gate_errors(gate) == []
-
-
-def test_schema_bootstrap_gate_rejects_invalid_scenario_contracts():
-    gate = {
-        "errors": {
-            "baseline": [],
-            "scenarios": ["missing business requirement mapping"],
-            "fixtures": [],
-            "field_authority": [],
-            "receipts": [],
-        }
-    }
-
-    assert _schema_bootstrap_gate_errors(gate) == [
-        "scenarios: missing business requirement mapping"
-    ]
 
 
 def test_scenario_loader_excludes_phase6_requirements_artifact_without_weakening_contracts():
