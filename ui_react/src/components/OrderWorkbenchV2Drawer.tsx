@@ -271,7 +271,10 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             </div>
           </section>
 
-          {branchType !== 'cancelled' && detail.status === 'ready' && (
+          {branchType !== 'cancelled' && detail.status === 'ready'
+            && (branchType === 'historical'
+              || detail.data.order_status === '待補件'
+              || (timeline.status === 'ready' && timeline.data.current_core_stage_code === 'intake_validation')) && (
             <OrderIntakeRepairPanel
               caseNo={caseNo}
               orderStatus={detail.data.order_status}
