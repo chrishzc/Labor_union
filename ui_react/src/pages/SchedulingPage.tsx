@@ -65,6 +65,7 @@ import {
 import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
 import { substitutionPayablesLineageClient, type SubstitutionPayablesLineage } from '../api/scheduling/substitution_payables_lineage_client';
 import { Drawer } from '../components/Drawer';
+import { OfficialHolidayCsvImport } from '../components/scheduling/OfficialHolidayCsvImport';
 
 type SchedulingTab = 'calendar' | 'leave_sub' | 'holidays';
 type StatusFilter = 'all' | 'active' | 'waiting' | 'leave';
@@ -399,6 +400,8 @@ function HolidayPolicyWorkspace() {
           <span className={`holiday-policy-state state-${machine.type}`}>{flowStateLabel(machine.type)}</span>
         </div>
       </header>
+
+      <OfficialHolidayCsvImport disabled={busy} />
 
       <div className="holiday-policy-horizon">
         <label>
