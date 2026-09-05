@@ -331,7 +331,10 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
 def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
     assembly = load_schema_assembly()
-    assembly_terminal = assembly.active_artifact_paths[-1]
+    active_paths = {
+        path.relative_to(runner.ROOT).as_posix()
+        for path in assembly.active_artifact_paths
+    }
 
     assert artifact_names.index("209_access_control_totp_root.sql") == (
         artifact_names.index("208_scheduling_rebuild_notification_invalidation.sql") + 1
@@ -339,16 +342,20 @@ def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
     assert len(artifact_names) == len(set(artifact_names))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
     preserve_terminal = runner.SCHEMA_PARTS[-1]
-    if preserve_terminal.name != assembly_terminal.name:
+    preserve_terminal_path = preserve_terminal.relative_to(runner.ROOT).as_posix()
+    if preserve_terminal_path not in active_paths:
         metadata = json.loads(
             (runner.ROOT / "db/schema_assembly/labor_union_fresh_schema_v1.json").read_text(
                 encoding="utf-8"
             )
         )
         retirement = metadata["retirement_contracts"][
-            preserve_terminal.relative_to(runner.ROOT).as_posix()
+            preserve_terminal_path
         ]
-        assert retirement["successor"] == assembly_terminal.relative_to(runner.ROOT).as_posix()
+        assert retirement["successor"] in active_paths
+        assert Path(retirement["successor"]).name.split("_", 1)[1] == (
+            preserve_terminal.name.split("_", 1)[1]
+        )
     assert runner.RELEASE_MANIFEST.release_id == (
         runner.RELEASE_MANIFEST.manifests[-1].release_id
     )

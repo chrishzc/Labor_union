@@ -8,7 +8,7 @@
   "test_kinds": ["metadata_fixture", "filesystem_artifact", "process_network_harness"],
   "coverage_ids": ["MIG-01", "MIG-02", "MIG-03", "MIG-04", "MIG-05", "MIG-06", "MIG-07", "MIG-08", "MIG-09", "MIG-10"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#MIG-01"
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
   ],
   "root_facts": [
     "Disposable source and candidate databases, migration manifest, tool identity and config-byte fixtures.",

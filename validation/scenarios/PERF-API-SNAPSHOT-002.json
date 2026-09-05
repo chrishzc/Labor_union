@@ -8,7 +8,7 @@
   "test_kinds": ["process_network_harness"],
   "coverage_ids": ["PERF-02", "PERF-03", "PERF-04", "PERF-05", "PERF-07", "PERF-08"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#PERF-02"
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
   ],
   "root_facts": [
     "An in-process FastAPI request, fixed handler latency samples and a typed system-status response fixture."

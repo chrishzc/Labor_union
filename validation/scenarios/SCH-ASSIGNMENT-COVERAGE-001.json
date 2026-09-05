@@ -2,7 +2,7 @@
   "contract": "labor-union-verification-scenario/v1", "scenario_id": "SCH-ASSIGNMENT-COVERAGE-001", "track": "A", "suite_id": "SCH", "status": "specified", "requires_database": true,
   "test_kinds": ["domain_root_data", "expected_manifest"],
   "coverage_ids": ["SCH-01", "SCH-02", "SCH-03", "SCH-04", "SSM-01", "SSM-02", "SSM-03", "SSM-04", "SSM-05", "SSM-06", "SCHEDULE-001", "SCHEDULE-002", "SCHEDULE-003", "SCHEDULE-005", "SCHEDULE-006"],
-  "source_refs": ["document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#SCH-01", "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#SSM-01"],
+  "source_refs": ["document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#SCH-01", "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#SSM-01"],
   "root_facts": ["Assignment intents, staff availability, official service-day rules, leave and substitution commands with fixed clock."],
   "forbidden_direct_seed": ["assignment status, actual hours, schedule work-day flags, calendar read model, occupancy, alert or payroll projections"],
   "commands": ["Preview/Apply assignment plans, leave and substitution; replay, use stale versions and inject overlap/coverage/buffer/lock conflicts."],

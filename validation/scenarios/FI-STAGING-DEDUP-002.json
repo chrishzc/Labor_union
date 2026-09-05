@@ -9,11 +9,11 @@
   "coverage_scope": "supplemental",
   "coverage_ids": ["FI-01", "FI-02", "FSM-01", "FSM-02", "FSM-03"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#FI-01",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#FI-02",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#FSM-01",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#FSM-02",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#FSM-03"
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FI-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FI-02",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FSM-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FSM-02",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FSM-03"
   ],
   "root_facts": [
     "Normalized bank-source rows containing source occurrence identity, date/time, debit or credit, account evidence and raw source payload.",

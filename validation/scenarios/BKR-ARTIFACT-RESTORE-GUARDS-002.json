@@ -9,7 +9,7 @@
   "coverage_scope": "supplemental",
   "coverage_ids": ["BKR-01", "BKR-02", "BKR-03", "BKR-05"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#BKR-01"
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
   ],
   "root_facts": [
     "Temporary mysqldump-shaped artifact bytes, source identity metadata and backup receipt metadata.",

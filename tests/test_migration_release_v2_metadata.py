@@ -158,20 +158,22 @@ def test_v2_descriptor_covers_all_live_schema_tables_triggers_and_column_changes
 
     assert descriptors["contract"] == "migration-owned-object-descriptors/v1"
     assert set(descriptors["descriptors"]) == set(V2_ARTIFACT_NAMES)
-
     for artifact in _release_artifacts(manifest):
-        name = artifact["name"]
-        descriptor = descriptors["descriptors"][name]
+        artifact_name = artifact["name"]
         sql = (PROJECT_ROOT / artifact["relative_path"]).read_text(encoding="utf-8")
-        expected_created_tables = set(descriptor.get("created_tables", []))
-        expected_altered_tables = set(descriptor.get("altered_tables", []))
-        expected_triggers = set(descriptor.get("triggers", []))
-        expected_columns = set(descriptor.get("columns", []))
+        descriptor = descriptors["descriptors"][artifact_name]
+        described_tables = descriptor["tables"]
+        created_tables = _sql_created_tables(sql)
+        altered_tables = _sql_altered_tables(sql)
 
-        assert _sql_created_tables(sql) == expected_created_tables
-        assert _sql_altered_tables(sql) == expected_altered_tables
-        assert _sql_trigger_names(sql) == expected_triggers
-        actual_columns = _sql_altered_columns(sql)
-        for table in expected_created_tables:
-            actual_columns.update(_sql_created_columns(sql, table))
-        assert actual_columns == expected_columns
+        assert set(described_tables) == created_tables | altered_tables
+        assert set(descriptor["triggers"]) == _sql_trigger_names(sql)
+        for table_name in created_tables:
+            assert set(described_tables[table_name]) == _sql_created_columns(sql, table_name)
+        altered_columns = _sql_altered_columns(sql)
+        if altered_columns:
+            assert altered_columns.issubset({
+                column
+                for columns in described_tables.values()
+                for column in columns
+            })

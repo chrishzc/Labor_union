@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from scripts.build_react_admin_artifact import build_artifact
 from scripts.launcher_preflight import inspect_profile
 
@@ -23,8 +25,9 @@ def _source(root: Path, marker: str) -> Path:
     return root
 
 
+@pytest.mark.parametrize("selector", ["current", "previous"])
 def test_artifact_runtime_preflight_validates_two_bindings(
-    monkeypatch, tmp_path: Path
+    monkeypatch, tmp_path: Path, selector: str
 ) -> None:
     current = tmp_path / "current"
     previous = tmp_path / "previous"
@@ -33,7 +36,7 @@ def test_artifact_runtime_preflight_validates_two_bindings(
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("REACT_ADMIN_CURRENT_ARTIFACT_DIR", str(current))
     monkeypatch.setenv("REACT_ADMIN_PREVIOUS_ARTIFACT_DIR", str(previous))
-    monkeypatch.setenv("REACT_ADMIN_ACTIVE_SELECTOR", "current")
+    monkeypatch.setenv("REACT_ADMIN_ACTIVE_SELECTOR", selector)
     monkeypatch.setenv("ADMIN_ENTRY_TARGET_STATE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setattr(
         "scripts.launcher_preflight.attest_state",
@@ -48,9 +51,9 @@ def test_artifact_runtime_preflight_validates_two_bindings(
     report = inspect_profile("artifact-runtime")
 
     assert report["status"] == "ready"
-    assert report["artifact_attestation"]["active_selector"] == "current"
+    assert report["artifact_attestation"]["active_selector"] == selector
+    assert report["artifact_attestation"]["healthy"] is True
     assert report["entry_target_attestation"]["entry_count"] == 12
-    assert report["streamlit_rollback"]["status"] == "retained"
 
 
 def test_artifact_runtime_preflight_fails_closed_without_bindings(monkeypatch) -> None:

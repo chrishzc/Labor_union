@@ -14,7 +14,7 @@
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "7b0c6e5a170ef75df17717cd5c9157ae6686878d67fa683aba12cd68c7142c86"
+    "sha256": "b036862634c1c9ed3bda50b7ad5dc4d868c7b8246b7a2719bcd5dda8bae630c6"
   },
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_v1.sql",
