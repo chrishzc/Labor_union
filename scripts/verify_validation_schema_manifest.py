@@ -42,8 +42,13 @@ def selected_schema_parts(
 ) -> list[Path]:
     assembly_ref = manifest["schema_assembly"]
     assembly_path = project_root / str(assembly_ref["path"])
-    if sha256_file(assembly_path) != assembly_ref["sha256"]:
-        raise ValueError("schema assembly digest differs from validation manifest")
+    expected_digest = str(assembly_ref["sha256"])
+    actual_digest = sha256_file(assembly_path)
+    if actual_digest != expected_digest:
+        raise ValueError(
+            "schema assembly digest differs from validation manifest: "
+            f"expected={expected_digest} actual={actual_digest}"
+        )
     assembly = load_schema_assembly(assembly_path)
     return list(assembly.active_artifact_paths)
 

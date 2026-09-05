@@ -9,7 +9,8 @@
   "test_kinds": ["domain_root_data", "expected_manifest"],
   "coverage_ids": ["APX-01", "APX-02", "APX-03"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#5.3"
+    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#5.3",
+    "document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md#3"
   ],
   "root_facts": [
     "Typed payable staff obligations and client refund/subsidy-return views with status, bank identity and source obligation IDs."
@@ -20,13 +21,13 @@
   "commands": [
     "Aggregate eligible source views, reject an inconsistent bank identity and build a workbook.",
     "Call the export workflow through a snapshot and hash-verifying archive adapter.",
-    "Call canonical query/export/archive UI API routes."
+    "Query the canonical Finance Reports accounts-payable route through the current React UI; keep export/archive verification at the backend workflow boundary."
   ],
   "expected": [
     "Eligible staff obligations aggregate by staff/bank/month with preserved source identities; completed, anomalous and non-payable rows are excluded.",
     "An inconsistent bank identity fails closed and a returned refund becomes payable again from canonical reversal state.",
     "Workbook columns are stable; archive hash mismatch fails instead of returning a forged successful export.",
-    "The UI client only uses canonical Finance Reports routes."
+    "The current React UI uses the canonical Finance Reports query route and does not expose a fake export action; backend export and archive checks remain required."
   ],
   "receipt_requirements": [
     "typed source-view assertions",
@@ -36,12 +37,14 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\staff-payables\\subsystems\\staff-payables\\integration\\test_accounts_payable_export_workflow.py tests\\domains\\staff-payables\\subsystems\\staff-payables\\integration\\test_accounts_payable_export_sources.py tests\\test_accounts_payable_export_api_client.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\staff-payables\\subsystems\\staff-payables\\integration\\test_accounts_payable_export_workflow.py tests\\domains\\staff-payables\\subsystems\\staff-payables\\integration\\test_accounts_payable_export_sources.py",
+      "npm --prefix ui_react test -- src/tests/finance_query_clients.test.ts src/tests/finance_entry_cutover.test.tsx"
     ],
     "test_paths": [
       "tests/domains/staff-payables/subsystems/staff-payables/integration/test_accounts_payable_export_workflow.py",
       "tests/domains/staff-payables/subsystems/staff-payables/integration/test_accounts_payable_export_sources.py",
-      "tests/test_accounts_payable_export_api_client.py"
+      "ui_react/src/tests/finance_query_clients.test.ts",
+      "ui_react/src/tests/finance_entry_cutover.test.tsx"
     ]
   }
 }

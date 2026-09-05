@@ -111,7 +111,8 @@ def mask_audit_details(value: Any) -> Any:
 def canonical_ip_address(ip_address: str | None) -> str | None:
     if not ip_address:
         return None
-    return str(ip_address).strip() or None
+    parts = str(ip_address).strip().split(".")
+    return ".".join([*parts[:3], "***"]) if len(parts) == 4 else "***"
 
 def list_admin_audits(
     *,

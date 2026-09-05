@@ -141,9 +141,9 @@ def test_disabled_principal_is_rejected_with_global_typed_error():
 def test_authorized_query_returns_bounded_cursor_page():
     connection = _Connection(
         [
-            {"id": 11, "name": "去敏人員甲", "phone": None},
-            {"id": 12, "name": None, "phone": "09********"},
-            {"id": 13, "name": "下一頁人員", "phone": None},
+            {"id": 11, "name": "去敏人員甲", "phone": None, "education": "護理系"},
+            {"id": 12, "name": None, "phone": "09********", "education": None},
+            {"id": 13, "name": "下一頁人員", "phone": None, "education": "幼保系"},
         ]
     )
     response = TestClient(
@@ -160,8 +160,8 @@ def test_authorized_query_returns_bounded_cursor_page():
     assert response.status_code == 200
     assert response.json()["data"] == {
         "items": [
-            {"id": 11, "name": "去敏人員甲", "phone": None},
-            {"id": 12, "name": None, "phone": "09********"},
+            {"id": 11, "name": "去敏人員甲", "phone": None, "education": "護理系"},
+            {"id": 12, "name": None, "phone": "09********", "education": None},
         ],
         "next_cursor": 12,
     }

@@ -726,7 +726,13 @@ def test_mysql_repository_uses_one_bounded_select_and_never_commits() -> None:
     connection = _Connection()
     rows = MySqlOrdersStageProjectionRepository(connection).fetch_page(after_case_no="CASE-009", page_size=50)
     assert rows == ()
-    assert connection.last_cursor.params == ("CASE-009", "all", "訂單完成", "歷史訂單－帳務完成", 51)
+    assert connection.last_cursor.params == (
+        "CASE-009",
+        "all",
+        "訂單完成",
+        "歷史訂單－帳務完成",
+        51,
+    )
     assert connection.last_cursor.sql.count("SELECT") >= 1
     assert "staff_schedule" in connection.last_cursor.sql
     assert "caregiver_candidate_contact_pools" in connection.last_cursor.sql

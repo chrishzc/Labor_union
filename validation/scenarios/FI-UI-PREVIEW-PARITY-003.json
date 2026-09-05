@@ -3,16 +3,16 @@
   "scenario_id": "FI-UI-PREVIEW-PARITY-003",
   "track": "A",
   "suite_id": "FI",
-  "status": "bound",
+  "status": "blocked",
+  "blocker": "An append-only real workbook/API/MySQL test now passes its same-run Preview output through the real React client and panel, but no configured-database execution receipt has been verified. Normal React CI skips that same-run case when its Python-produced exchange is absent; the current MySQL CI job runs historical cancellation only. Preserve blocked until the full runner passes; mocked React tests alone do not prove zero-formal-ledger deltas.",
   "requires_database": true,
   "database_execution_mode": "persistent_append_only",
   "test_kinds": ["external_input_fixture", "expected_manifest"],
   "coverage_scope": "supplemental",
   "coverage_ids": ["FI-01", "FSM-01"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#FI-01",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#FSM-01",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#5.3"
+    "document/架構重整/01_規格基線/00_Global_共同契約.md#2. 跨 Domain 不變量",
+    "document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md#3"
   ],
   "root_facts": [
     "A unique external Taishin workbook source and the API client credentials used only by the test application boundary."
@@ -35,8 +35,11 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_ui_preview_persistent_mysql_e2e.py"
+      "python -m pytest -W error tests/test_finance_import_staging_persistent_mysql_e2e.py -k test_workbook_api_preview_reaches_react_without_formal_posting"
     ],
-    "test_paths": ["tests/test_finance_import_ui_preview_persistent_mysql_e2e.py"]
+    "test_paths": [
+      "tests/test_finance_import_staging_persistent_mysql_e2e.py",
+      "ui_react/src/tests/finance_query_page.test.tsx"
+    ]
   }
 }
