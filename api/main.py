@@ -107,6 +107,7 @@ from api.routes import (
     order_terms,
     orders,
     orders_card_projection,
+    orders_core_stage_projection,
     orders_stage_projection,
     payroll,
     payroll_rebuild,
@@ -265,6 +266,7 @@ app.include_router(line_identity_management.router)
 app.include_router(orders.router)
 app.include_router(orders_card_projection.router)
 app.include_router(orders_stage_projection.router)
+app.include_router(orders_core_stage_projection.router)
 app.include_router(case_architecture_bootstrap.router)
 app.include_router(order_terms.router)
 app.include_router(order_contract_completion.router)

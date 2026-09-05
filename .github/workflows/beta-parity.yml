@@ -1,0 +1,63 @@
+name: Beta parity
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "ui_react/**"
+      - ".github/workflows/beta-parity.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  beta-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui_react/package-lock.json
+      - name: Record verified head
+        run: git rev-parse HEAD
+      - name: Install locked React dependencies
+        working-directory: ui_react
+        run: npm ci
+      - name: Run focused Beta parity and preserved legacy regressions
+        working-directory: ui_react
+        shell: bash
+        run: |
+          set +e
+          npm test -- src/tests/order_workbench_v2* src/tests/order_core_stage_projection_contract.test.ts src/tests/orders_contract_document_source.test.ts src/tests/orders_incomplete_card_actions.test.tsx src/tests/orders_service_dates_flow.test.tsx --reporter=json --outputFile=../beta-parity-results.json > ../beta-parity-console.log 2>&1
+          result=$?
+          node --input-type=module <<'JS'
+          import { existsSync, readFileSync } from 'node:fs';
+          if (!existsSync('../beta-parity-results.json')) {
+            console.log(readFileSync('../beta-parity-console.log', 'utf8').slice(-6000));
+            process.exit(1);
+          }
+          const report = JSON.parse(readFileSync('../beta-parity-results.json', 'utf8'));
+          console.log(JSON.stringify({ tests: report.numTotalTests, passed: report.numPassedTests, failed: report.numFailedTests, pending: report.numPendingTests, success: report.success }));
+          for (const suite of report.testResults ?? []) {
+            console.log(`${suite.status}: ${suite.name.replace(process.cwd() + '/', '')}`);
+            for (const test of suite.assertionResults ?? []) {
+              if (test.status !== 'passed') {
+                console.log(`${test.status}: ${test.fullName}`);
+                for (const message of test.failureMessages ?? []) console.log(message.slice(0, 1000));
+              }
+            }
+          }
+          JS
+          report_result=$?
+          if [ "$result" -ne 0 ]; then exit "$result"; fi
+          exit "$report_result"
+      - name: Build exact current head independently of test result
+        if: ${{ !cancelled() }}
+        working-directory: ui_react
+        run: npm run build
