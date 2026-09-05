@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FC } from 'react';
+import { useCallback, useEffect, useRef, useState, type FC } from 'react';
 import './OrderWorkbenchV2Drawer.css';
 import { historicalAdoptionEvidenceClient } from '../api/orders/historical_adoption_evidence_client';
 import type { HistoricalOrderAdoptionEvidence } from '../api/orders/historical_adoption_evidence_schemas';
@@ -22,11 +22,15 @@ import { OrderServiceCompletionActions } from './OrderServiceCompletionActions';
 import { OrderTermsMutationPanel } from './OrderTermsMutationPanel';
 import { OrderWorkbenchV2OwnerContext } from './OrderWorkbenchV2OwnerContext';
 import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActions';
+import { OrderCancellationPanel } from './OrderCancellationPanel';
+import { OrderControlledReopenPanel } from './OrderControlledReopenPanel';
+import { OrderActualStartPanel } from './OrderActualStartPanel';
 
 interface OrderWorkbenchV2DrawerProps {
   caseNo: string;
   branchType: CoreStageBranchType;
   onClose: () => void;
+  onObserved?: () => void;
 }
 
 type ReadState<T> =
@@ -89,6 +93,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   caseNo,
   branchType,
   onClose,
+  onObserved,
 }) => {
   const requestSequence = useRef(0);
   const [refreshRevision, setRefreshRevision] = useState(0);
@@ -107,6 +112,20 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   );
   const [historicalRestart, setHistoricalRestart] = useState<HistoricalRestartState>({ status: 'idle', message: null });
   const [replacementExpanded, setReplacementExpanded] = useState(false);
+  const [operation, setOperation] = useState<'cancellation' | 'reopen' | 'actual-start' | null>(null);
+  const [operationBusy, setOperationBusy] = useState(false);
+  const operationBusyRef = useRef(false);
+  const onOperationBusyChange = useCallback((busy: boolean) => {
+    operationBusyRef.current = busy;
+    setOperationBusy(busy);
+  }, []);
+  const refreshFacts = useCallback(() => {
+    setRefreshRevision((revision) => revision + 1);
+    onObserved?.();
+  }, [onObserved]);
+  const guardedClose = useCallback(() => {
+    if (!operationBusyRef.current) onClose();
+  }, [onClose]);
 
   useEffect(() => {
     const requestId = requestSequence.current + 1;
@@ -127,7 +146,6 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     void orderCoreStageProjectionClient.getCoreStageTimelines({
       page_size: 20,
       lifecycle_scope: 'all',
-      branch_type: branchType,
       case_no_search: caseNo,
     }, { signal: controller.signal })
       .then((page) => { if (current()) setTimeline({ status: 'ready', data: timelineForCase(page, caseNo) }); })
@@ -164,10 +182,10 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   }, [branchType, caseNo, refreshRevision]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') guardedClose(); };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, [guardedClose]);
 
   const restartHistoricalOrderIntoNormalFlow = async () => {
     if (branchType !== 'historical' || historicalRestart.status === 'applying') return;
@@ -196,6 +214,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           ? '此案件先前已重啟正常流程；正式回讀已確認為「訂單成立」。請關閉 Drawer 後從正常訂單支線繼續。'
           : '已重啟正常流程並回讀確認為「訂單成立」。請關閉 Drawer 後從正常訂單支線繼續日期／媒合／排班。',
       });
+      onObserved?.();
     } catch (error) {
       setHistoricalRestart({ status: 'error', message: errorMessage(error) });
     }
@@ -218,12 +237,13 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const currentHistoricalOwner = timeline.status === 'ready' && branchType === 'historical'
     ? historicalCurrentOwnerStage(timeline.data)
     : null;
+  const currentBranch = timeline.status === 'ready' ? timeline.data.branch_type : branchType;
 
   return (
     <div
       className="order-v2-drawer-backdrop"
       role="presentation"
-      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      onMouseDown={(event) => { if (event.target === event.currentTarget) guardedClose(); }}
     >
       <aside className="order-v2-drawer" role="dialog" aria-modal="true" aria-labelledby="order-v2-drawer-title">
         <header className="order-v2-drawer-header">
@@ -232,7 +252,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             <h2 id="order-v2-drawer-title">案件 {caseNo}</h2>
             <p>正式 owner facts、immutable historical baseline 與歷史來源 evidence 分開呈現；缺件與 owner mutation 只使用既有正式流程。</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="關閉工作 Drawer">關閉</button>
+          <button type="button" onClick={guardedClose} disabled={operationBusy} aria-label="關閉工作 Drawer">關閉</button>
         </header>
 
         <div className="order-v2-drawer-body">
@@ -274,14 +294,29 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
 
           <OrderWorkbenchV2OwnerContext key={caseNo} caseNo={caseNo} revision={refreshRevision} />
 
-          {branchType !== 'cancelled' && detail.status === 'ready'
+          <section className="order-v2-drawer-section" aria-label="案件受控操作">
+            <h3>案件受控操作</h3>
+            <p>先選擇業務操作，再依正式 owner 查詢、預覽與確認；資格與阻擋原因由各正式流程回傳。</p>
+            <div className="order-v2-drawer-actions">
+              <button type="button" disabled={operationBusy} onClick={() => setOperation('cancellation')}>取消／補登取消服務事實</button>
+              <button type="button" disabled={operationBusy} onClick={() => setOperation('reopen')}>受控重開取消案件</button>
+              <button type="button" disabled={operationBusy} onClick={() => setOperation('actual-start')}>確認／更正實際開始日</button>
+            </div>
+            {operationBusy && <p role="status">操作結果或正式回讀尚未確認，暫時不能關閉或切換操作。</p>}
+            {operation === 'cancellation' && <OrderCancellationPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
+            {operation === 'reopen' && <OrderControlledReopenPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
+            {operation === 'actual-start' && <OrderActualStartPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
+          </section>
+
+          <fieldset disabled={operationBusy} style={{ border: 0, padding: 0, margin: 0 }}>
+          {currentBranch !== 'cancelled' && detail.status === 'ready'
             && (branchType === 'historical'
               || detail.data.order_status === '待補件'
               || (timeline.status === 'ready' && timeline.data.current_core_stage_code === 'intake_validation')) && (
             <OrderIntakeRepairPanel
               caseNo={caseNo}
               orderStatus={detail.data.order_status}
-              onChanged={() => setRefreshRevision((revision) => revision + 1)}
+              onChanged={refreshFacts}
               onHistoricalRestartRequested={restartHistoricalOrderIntoNormalFlow}
             />
           )}
@@ -298,14 +333,14 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             </div>
           )}
 
-          {branchType === 'normal'
+          {currentBranch === 'normal'
             && timeline.status === 'ready'
             && timeline.data.current_core_stage_code === 'intake_validation'
             && terms.status === 'ready' && (
-            <OrderTermsMutationPanel caseNo={caseNo} query={terms.data} />
+            <OrderTermsMutationPanel caseNo={caseNo} query={terms.data} onObserved={refreshFacts} />
           )}
 
-          {branchType === 'normal' && detail.status === 'ready' && (
+          {currentBranch === 'normal' && detail.status === 'ready' && (
             <section className="order-v2-drawer-section" data-surface-id="orders.service-before-replacement.entry">
               <h3>服務前更換月嫂</h3>
               {!replacementExpanded ? (
@@ -320,7 +355,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               ) : (
                 <ServiceBeforeReplacementActions
                   caseNo={caseNo}
-                  onCommitted={() => setRefreshRevision((revision) => revision + 1)}
+                  onCommitted={refreshFacts}
                   onSubstitutionReferral={() => {
                     window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`;
                   }}
@@ -351,13 +386,14 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             )}
           </section>
 
-          {branchType === 'normal' && detail.status === 'ready' && (
+          {currentBranch === 'normal' && detail.status === 'ready' && (
             <OrderServiceCompletionActions
               caseNo={caseNo}
               orderStatus={detail.data.order_status}
-              onCompleted={() => setRefreshRevision((revision) => revision + 1)}
+              onCompleted={refreshFacts}
             />
           )}
+          </fieldset>
 
           {branchType === 'historical' && (
             <section className="order-v2-drawer-section" aria-labelledby="order-v2-historical-owner-heading">

@@ -9,6 +9,7 @@ import type { OrderTerms } from '../api/orders/order_query_schemas';
 interface OrderTermsMutationPanelProps {
   caseNo: string;
   query: OrderTerms;
+  onObserved?: () => void;
 }
 
 interface OrderTermsDraft {
@@ -60,7 +61,7 @@ function conflictMessage(error: unknown): string | null {
   return null;
 }
 
-export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ caseNo, query }) => {
+export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onObserved }) => {
   const [draft, setDraft] = useState<OrderTermsDraft>(() => draftFromQuery(query));
   const [preview, setPreview] = useState<OrderTermsPreview | null>(null);
   const [receipt, setReceipt] = useState<OrderTermsReceipt | null>(null);
@@ -68,6 +69,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   const [reason, setReason] = useState('');
   const [status, setStatus] = useState<'idle' | 'previewing' | 'applying'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const currentQuery = readback ?? query;
   const queryRevision = [
     caseNo,
@@ -144,6 +147,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     if (!preview || !reason.trim() || currentQuery.service_data_locked) return;
     setStatus('applying');
     setError(null);
+    setReadback(null);
     try {
       const nextReceipt = await orderTermsMutationClient.apply(
         caseNo,
@@ -163,8 +167,10 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
       setReason('');
       try {
         const refreshed = await orderTermsMutationClient.query(caseNo);
+        if (refreshed.case_no !== caseNo) throw new Error('條款回讀案件識別不一致。');
         setReadback(refreshed);
         setDraft(draftFromQuery(refreshed));
+        if (mounted.current) onObserved?.();
       } catch (caught) {
         setError(`條款已套用，但正式回讀失敗：${errorMessage(caught, '無法重新取得訂單條款。')}`);
       }
