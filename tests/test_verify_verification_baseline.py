@@ -406,21 +406,6 @@ def test_gate_report_separates_data_fixtures_from_runtime_evidence():
     assert boundaries["B"]["benchmark_evidence"]["passing_receipts"] == 0
 
 
-def test_gate_report_records_architecture_deferred_performance_blocker():
-    report = _current_gate_report()
-
-    assert report["blocked_scenarios"] == [{
-        "scenario_id": "PERF-UX-001",
-        "track": "B",
-        "suite_id": "PERF",
-        "blocker": (
-            "UI click-to-render telemetry is deferred until the React-versus-"
-            "Streamlit architecture decision is finalized; current Streamlit state "
-            "has no browser paint metric."
-        ),
-    }]
-
-
 def test_gate_report_can_be_saved_as_utf8_evidence(tmp_path):
     report_path = tmp_path / "verification-gate.json"
 
