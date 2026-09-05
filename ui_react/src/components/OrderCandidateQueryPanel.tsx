@@ -8,6 +8,7 @@ import {
   type MatchingFilterPolicy,
 } from '../api/scheduling/matching_candidate_workflow_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
+import { OrderMultiCaregiverPlanPanel } from './OrderMultiCaregiverPlanPanel';
 
 interface OrderCandidateQueryPanelProps {
   caseNo: string;
@@ -79,6 +80,7 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
   const [queryState, setQueryState] = useState<CandidateQueryState>({ status: 'idle' });
   const [selectedStaffIds, setSelectedStaffIds] = useState<ReadonlySet<number>>(() => new Set());
   const [addState, setAddState] = useState<CandidateAddState>({ status: 'idle' });
+  const [multiBusy, setMultiBusy] = useState(false);
 
   const updateFilter = (key: keyof MatchingFilterPolicy) => {
     setFilters((current) => ({ ...current, [key]: !current[key] }));
@@ -148,7 +150,7 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
       }));
   };
 
-  const busy = queryState.status === 'loading' || addState.status === 'saving';
+  const busy = queryState.status === 'loading' || addState.status === 'saving' || multiBusy;
 
   return (
     <section aria-label={`案件 ${caseNo} 正式候選查詢`}>
@@ -224,7 +226,7 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
                       aria-label={`選擇正式候選 ${candidate.staff_name}`}
                       checked={selectedStaffIds.has(candidate.staff_id)}
                       onChange={() => toggleCandidate(candidate.staff_id)}
-                      disabled={addState.status === 'saving'}
+                      disabled={busy}
                     />
                     <span>
                       <strong>{candidate.staff_name}</strong><br />
@@ -237,7 +239,7 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
                 type="button"
                 className="order-v2-open-drawer"
                 onClick={addSelectedCandidates}
-                disabled={selectedStaffIds.size === 0 || addState.status === 'saving'}
+                disabled={selectedStaffIds.size === 0 || busy}
               >
                 {addState.status === 'saving' ? '加入候選池中…' : `加入候選池（${selectedStaffIds.size}）`}
               </button>
@@ -271,6 +273,9 @@ export const OrderCandidateQueryPanel: FC<OrderCandidateQueryPanelProps> = ({ ca
           <span>{addState.message}</span>
         </div>
       )}
+      <fieldset disabled={queryState.status === 'loading' || addState.status === 'saving'} style={{ border: 0, padding: 0 }}>
+        <OrderMultiCaregiverPlanPanel caseNo={caseNo} filters={filters} onObserved={onPoolReadback} onBusyChange={setMultiBusy} />
+      </fieldset>
     </section>
   );
 };
