@@ -55,7 +55,7 @@ function getPageFromHash(): PageType {
   if (hashPath in PAGE_SECTION_MAP) {
     return hashPath as PageType;
   }
-  return 'order-tracker';
+  return 'order-workbench-v2';
 }
 
 export function getMobileAdminReturnPathFromHash(hash: string): string | null {
