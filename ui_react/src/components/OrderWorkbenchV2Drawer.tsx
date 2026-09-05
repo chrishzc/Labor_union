@@ -17,8 +17,10 @@ import type {
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { AssignmentPlan, OrderDetail, OrderTerms } from '../api/orders/order_query_schemas';
 import { coreStageSubstatusLabel } from '../adapters/orders/order_core_stage_projection_adapter';
+import { OrderIntakeRepairPanel } from './OrderIntakeRepairPanel';
 import { OrderServiceCompletionActions } from './OrderServiceCompletionActions';
 import { OrderTermsMutationPanel } from './OrderTermsMutationPanel';
+import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActions';
 
 interface OrderWorkbenchV2DrawerProps {
   caseNo: string;
@@ -31,6 +33,12 @@ type ReadState<T> =
   | { status: 'ready'; data: T }
   | { status: 'error'; message: string }
   | { status: 'skipped' };
+
+type HistoricalRestartState =
+  | { status: 'idle'; message: null }
+  | { status: 'applying'; message: null }
+  | { status: 'completed'; message: string }
+  | { status: 'error'; message: string };
 
 const loading = <T,>(): ReadState<T> => ({ status: 'loading' });
 
@@ -96,6 +104,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [historicalBaseline, setHistoricalBaseline] = useState<ReadState<HistoricalOperationalBaseline>>(
     () => branchType === 'historical' ? loading<HistoricalOperationalBaseline>() : { status: 'skipped' },
   );
+  const [historicalRestart, setHistoricalRestart] = useState<HistoricalRestartState>({ status: 'idle', message: null });
+  const [replacementExpanded, setReplacementExpanded] = useState(false);
 
   useEffect(() => {
     const requestId = requestSequence.current + 1;
@@ -110,6 +120,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     setHistoricalEvidence(branchType === 'historical' ? loading() : { status: 'skipped' });
     setHistoricalAccounting(branchType === 'historical' ? loading() : { status: 'skipped' });
     setHistoricalBaseline(branchType === 'historical' ? loading() : { status: 'skipped' });
+    setHistoricalRestart({ status: 'idle', message: null });
+    setReplacementExpanded(false);
 
     void orderCoreStageProjectionClient.getCoreStageTimelines({
       page_size: 20,
@@ -156,6 +168,38 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
 
+  const restartHistoricalOrderIntoNormalFlow = async () => {
+    if (branchType !== 'historical' || historicalRestart.status === 'applying') return;
+    setHistoricalRestart({ status: 'applying', message: null });
+    try {
+      const query = await historicalServiceAccountingClient.queryPrecisionRestart(caseNo);
+      if (query.blockers.length > 0) {
+        throw new Error(`目前不可重啟正常流程：${query.blockers.join('、')}`);
+      }
+      const preview = await historicalServiceAccountingClient.previewPrecisionRestart(caseNo);
+      const receipt = await historicalServiceAccountingClient.applyPrecisionRestart(
+        preview,
+        '工會人員從待辦看板 Beta 工作 Drawer 選擇重啟正常流程',
+      );
+      if (receipt.lifecycle_status !== '訂單成立') {
+        throw new Error('重啟後狀態不是正常「訂單成立」，已停止後續操作。');
+      }
+      const observed = await ordersQueryClient.getOrderDetail(caseNo);
+      if (observed.order_status !== '訂單成立') {
+        throw new Error('重啟收據已回傳，但正式案件回讀尚未觀察到「訂單成立」。');
+      }
+      setDetail({ status: 'ready', data: observed });
+      setHistoricalRestart({
+        status: 'completed',
+        message: receipt.replayed
+          ? '此案件先前已重啟正常流程；正式回讀已確認為「訂單成立」。請關閉 Drawer 後從正常訂單支線繼續。'
+          : '已重啟正常流程並回讀確認為「訂單成立」。請關閉 Drawer 後從正常訂單支線繼續日期／媒合／排班。',
+      });
+    } catch (error) {
+      setHistoricalRestart({ status: 'error', message: errorMessage(error) });
+    }
+  };
+
   const blockers = timeline.status === 'ready'
     ? timeline.data.core_stages.flatMap((stage) => stage.blockers.map((notice) => ({
       key: `${stage.code}:${notice.code}`,
@@ -185,7 +229,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           <div>
             <div className="order-v2-eyebrow">工作 Drawer</div>
             <h2 id="order-v2-drawer-title">案件 {caseNo}</h2>
-            <p>正式 owner facts、immutable historical baseline 與歷史來源 evidence 分開呈現；第 1 階進件條款可沿用既有 Preview／Apply。</p>
+            <p>正式 owner facts、immutable historical baseline 與歷史來源 evidence 分開呈現；缺件與 owner mutation 只使用既有正式流程。</p>
           </div>
           <button type="button" onClick={onClose} aria-label="關閉工作 Drawer">關閉</button>
         </header>
@@ -227,11 +271,56 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             </div>
           </section>
 
+          {branchType !== 'cancelled' && detail.status === 'ready' && (
+            <OrderIntakeRepairPanel
+              caseNo={caseNo}
+              orderStatus={detail.data.order_status}
+              onChanged={() => setRefreshRevision((revision) => revision + 1)}
+              onHistoricalRestartRequested={restartHistoricalOrderIntoNormalFlow}
+            />
+          )}
+
+          {historicalRestart.status === 'applying' && (
+            <div role="status" className="order-v2-drawer-note">正在依正式 Historical Orders Query／Preview／Apply 重啟正常流程…</div>
+          )}
+          {(historicalRestart.status === 'completed' || historicalRestart.status === 'error') && historicalRestart.message && (
+            <div
+              role={historicalRestart.status === 'error' ? 'alert' : 'status'}
+              className={historicalRestart.status === 'error' ? 'order-v2-drawer-error' : 'order-v2-drawer-note'}
+            >
+              {historicalRestart.message}
+            </div>
+          )}
+
           {branchType === 'normal'
             && timeline.status === 'ready'
             && timeline.data.current_core_stage_code === 'intake_validation'
             && terms.status === 'ready' && (
             <OrderTermsMutationPanel caseNo={caseNo} query={terms.data} />
+          )}
+
+          {branchType === 'normal' && detail.status === 'ready' && (
+            <section className="order-v2-drawer-section" data-surface-id="orders.service-before-replacement.entry">
+              <h3>服務前更換月嫂</h3>
+              {!replacementExpanded ? (
+                <button
+                  type="button"
+                  className="btn-secondary-action"
+                  data-control-id="orders.service-before-replacement.open"
+                  onClick={() => setReplacementExpanded(true)}
+                >
+                  服務前更換月嫂
+                </button>
+              ) : (
+                <ServiceBeforeReplacementActions
+                  caseNo={caseNo}
+                  onCommitted={() => setRefreshRevision((revision) => revision + 1)}
+                  onSubstitutionReferral={() => {
+                    window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`;
+                  }}
+                />
+              )}
+            </section>
           )}
 
           <section className="order-v2-drawer-section" aria-labelledby="order-v2-assignment-heading">
@@ -289,7 +378,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                   )}
                 </div>
               )}
-              <p className="order-v2-drawer-note">只顯示 server 已提供的 GET action descriptor；不補造歷史流程事件或操作入口。</p>
+              <p className="order-v2-drawer-note">只顯示 server 已提供的 GET action descriptor；正式 restart 只從上方既有 owner Q/P/A 入口執行。</p>
             </section>
           )}
 
@@ -358,6 +447,9 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
 
               <h3>歷史來源證據</h3>
               <p className="order-v2-drawer-note">以下為歷史匯入／帳務 read model 證據，不代表目前正式服務期間或目前正式派案。source period 不等於已發生 actual period，pairing evidence 不等於 formal Scheduling assignment。</p>
+              {historicalAccounting.status === 'error' && (
+                <p className="order-v2-drawer-error">歷史帳務 Query／blocker：{historicalAccounting.message}</p>
+              )}
               {historicalAccounting.status === 'ready' && (
                 <dl aria-label="既有 historical accounting read model">
                   <div><dt>來源 identity</dt><dd>{historicalAccounting.data.adoption_source_identity}</dd></div>

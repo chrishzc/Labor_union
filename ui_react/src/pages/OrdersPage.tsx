@@ -64,7 +64,6 @@ import type {
 import { Drawer } from '../components/Drawer';
 import { ContractExternalSigningActions } from '../components/ContractExternalSigningActions';
 import { ServiceBeforeReplacementActions } from '../components/ServiceBeforeReplacementActions';
-import { OrderIntakeRepairPanel } from '../components/OrderIntakeRepairPanel';
 import { MatchingScheduleAndAssignmentActions } from '../components/MatchingScheduleAndAssignmentActions';
 import { OrderServiceCompletionActions } from '../components/OrderServiceCompletionActions';
 import {
@@ -260,10 +259,7 @@ export const OrdersPage: React.FC = () => {
   const [contractCorrectionNotice, setContractCorrectionNotice] = useState<string | null>(null);
   type ContractWorkbenchTab = 'contract_terms' | 'calendar' | 'cancellation' | 'reopen';
   const [activeContractTab, setActiveContractTab] = useState<ContractWorkbenchTab>('contract_terms');
-  const [contractDocView, setContractDocView] = useState<'contract' | 'spec'>('contract');
-  const [contractDocFullscreen, setContractDocFullscreen] = useState(false);
-  const [replacementActionsExpanded, setReplacementActionsExpanded] = useState(false);
-  const [precisionMode, setPrecisionMode] = useState<'週休1日' | '週休2日' | '連續服務'>('週休1日');
+  const [precisionMode, setPrecisionMode] = useState<'週休1日' | '週休2日' | '連續服務' | null>(null);
   const [precisionCalculating, setPrecisionCalculating] = useState(false);
   const [precisionResult, setPrecisionResult] = useState<SchedulePrecisionResult | null>(null);
   const [precisionError, setPrecisionError] = useState<string | null>(null);
@@ -330,6 +326,7 @@ export const OrdersPage: React.FC = () => {
     precisionRequestRef.current += 1;
   }, []);
 
+  // Load summaries from live API
   const fetchOrderSummaries = useCallback(async () => {
     summaryControllerRef.current?.abort();
     const controller = new AbortController();
@@ -366,6 +363,8 @@ export const OrdersPage: React.FC = () => {
         const adapted = adaptOrderSummaryPage(rawPage);
         setPageData(adapted);
         if (queryText) {
+          // The stage endpoint has no query_text contract. A searched card stays operable,
+          // while stage filters remain disabled instead of treating unrelated rows as an error.
           setSelectedStage('全部');
           setStagePage(null);
           setStageIndex(new Map());
@@ -612,6 +611,12 @@ export const OrdersPage: React.FC = () => {
     )
     && normalFlowRestartedCaseNo !== activeContractOrder.id,
   );
+  const manualServiceDateSelection = Boolean(
+    activeContractOrder
+    && normalFlowRestartedCaseNo === activeContractOrder.id
+    && precisionMode === null
+    && serviceDatesDraft?.queryView,
+  );
   const reopenDraft = reopenOrder
     ? orderMutationFlowStore.getReopenDraft(reopenOrder.id)
     : undefined;
@@ -620,13 +625,10 @@ export const OrdersPage: React.FC = () => {
     serviceDatesDraft?.status === 'outcome_unknown' ||
     serviceDatesDraft?.status === 'receipt_received' ||
     serviceDatesDraft?.status === 'requery_loading';
-  const serviceDatesSelectionReady = precisionResult !== null
+  const serviceDatesSelectionReady = (precisionResult !== null || manualServiceDateSelection)
     && serviceDatesDraft?.queryView !== null
     && serviceDatesDraft?.queryView !== undefined
     && serviceDatesDraft.selectedDates.length === serviceDatesDraft.queryView.contracted_service_days;
-  const hasFormalAssignment = (cardProjection?.assignmentSegments.length ?? 0) > 0;
-  const serviceHasStarted = actualStartQuery?.current_actual_start_date !== null
-    && actualStartQuery?.current_actual_start_date !== undefined;
   const reopenLocked =
     reopenDraft?.status === 'apply_pending' ||
     reopenDraft?.status === 'outcome_unknown' ||
@@ -648,7 +650,6 @@ export const OrdersPage: React.FC = () => {
     }
     precisionRequestRef.current += 1;
     invalidateDrawerRequest();
-    setReplacementActionsExpanded(false);
     setContractOrder(null);
     setDateConfirmOrder(null);
     setReopenOrder(null);
@@ -711,6 +712,7 @@ export const OrdersPage: React.FC = () => {
     }
   };
 
+  // Handle opening Drawer 2: Matching Workbench
   const handleOpenMatchingDrawer = async (
     order: OrderSummaryCardViewModel,
     options?: { preserveCandidateAction?: boolean },
@@ -807,6 +809,9 @@ export const OrdersPage: React.FC = () => {
           assignmentPlan,
           terms,
           candidateContactPool,
+          // A failed customer-decision read must not erase the independently
+          // authoritative active plan or its waiting-deposit lock.  Keeping it
+          // visible prevents a stale UI from offering a second formal plan.
           activePlan: activePlanRes.status === 'fulfilled' ? activePlan : null,
           customerDecision: contactState?.customer_decision,
           customerProfilesStatus: contactState?.customer_profiles_manual_confirmation
@@ -1075,8 +1080,8 @@ export const OrdersPage: React.FC = () => {
     if (!matchingOrder || !matchingDetail) return '媒合資料尚未載入，無法建立正式方案。';
     if (matchingDetail.waitingLockAcquired) return '目前方案已取得等待訂金鎖，不能重新建立媒合方案。';
     if (matchingDetail.status === '已接受') return '目前方案已由客戶接受，不能重新建立媒合方案。';
-    if (matchingOrder.orderStatus !== '洽談中') {
-      return `目前訂單狀態為「${matchingOrder.orderStatus}」，僅洽談中案件可建立正式媒合方案。`;
+    if (!['洽談中', '訂單成立'].includes(matchingOrder.orderStatus)) {
+      return `目前訂單狀態為「${matchingOrder.orderStatus}」，此狀態不可建立正式媒合方案。`;
     }
     return null;
   };
@@ -1089,7 +1094,7 @@ export const OrdersPage: React.FC = () => {
     if (matchingDetail.status === '已接受') {
       return '客戶已接受正式媒合方案；候選聯繫紀錄改為唯讀，請依定金與簽約流程繼續。';
     }
-    if (matchingOrder.orderStatus !== '洽談中') {
+    if (!['洽談中', '訂單成立'].includes(matchingOrder.orderStatus)) {
       return `目前訂單狀態為「${matchingOrder.orderStatus}」；候選聯繫紀錄已改為唯讀。`;
     }
     return null;
@@ -1259,6 +1264,7 @@ export const OrdersPage: React.FC = () => {
     }
   };
 
+  // Lazy loader for Contract SSOT & Terms queries
   const loadContractTabQueries = async (order: OrderSummaryCardViewModel) => {
     const { controller, requestId } = beginDrawerRequest();
     setDrawerLoading(true);
@@ -1406,9 +1412,14 @@ export const OrdersPage: React.FC = () => {
     nextCustomWorkDates = customWorkDates,
   ) => {
     if (!caseNo) return;
+    if (precisionMode === null) {
+      setPrecisionResult(null);
+      setPrecisionError('目前未取得可信排休類型，請直接在日曆手動確認真實服務日期。');
+      return;
+    }
     const serviceDateQuery = orderMutationFlowStore.getServiceDatesDraft(caseNo)?.queryView;
     const startDate = actualStartQuery?.case_no === caseNo
-      ? actualStartQuery.current_actual_start_date ?? actualStartQuery.planned_start_date
+      ? actualStartDraft || actualStartQuery.current_actual_start_date || actualStartQuery.planned_start_date
       : null;
     if (!serviceDateQuery || serviceDateQuery.case_no !== caseNo || startDate === null) {
       setPrecisionResult(null);
@@ -1427,6 +1438,9 @@ export const OrdersPage: React.FC = () => {
     });
   };
 
+  const rerunSchedulePrecision = runSchedulePrecision;
+
+  // Lazy loader for Service Dates & Actual Start queries
   const loadCalendarTabQueries = async (
     order: OrderSummaryCardViewModel,
     allowRestartedNormalFlow = false,
@@ -1436,12 +1450,14 @@ export const OrdersPage: React.FC = () => {
       || order.orderStatus === '歷史訂單－服務中'
     ) && normalFlowRestartedCaseNo !== order.id && !allowRestartedNormalFlow;
     if (historicalRestartRequired) {
+      setPrecisionMode(null);
       setPrecisionResult(null);
       setPrecisionError(null);
       return;
     }
     const { controller, requestId } = beginDrawerRequest();
     setDrawerLoading(true);
+    setPrecisionMode(null);
     setPrecisionResult(null);
     setPrecisionError(null);
     setHolidayRestDates([]);
@@ -1463,21 +1479,31 @@ export const OrdersPage: React.FC = () => {
       }
       const serviceDates = serviceDatesRes.status === 'fulfilled' ? serviceDatesRes.value : null;
       const calendarDetail = calendarDetailRes.status === 'fulfilled' ? calendarDetailRes.value : null;
-      const restartedHistoricalServiceMode = allowRestartedNormalFlow && calendarDetail === null
-        ? '週休1日' as const
-        : null;
-      const serviceMode = calendarDetail?.service_mode ?? restartedHistoricalServiceMode;
       const startDate = actualStart?.current_actual_start_date ?? actualStart?.planned_start_date ?? null;
-      const inputsReady = actualStart?.case_no === order.id
+      const baseInputsReady = actualStart?.case_no === order.id
         && serviceDates?.case_no === order.id
-        && serviceMode !== null
-        && (calendarDetail === null || calendarDetail.case_no === order.id)
         && startDate !== null;
-      if (!inputsReady) {
+      if (!baseInputsReady) {
         selectServiceDates(order.id, []);
         setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
         return;
       }
+      if (calendarDetail === null) {
+        if (allowRestartedNormalFlow) {
+          changeServiceDateSelection(order.id, serviceDates.current_dates);
+          setPrecisionError(null);
+          return;
+        }
+        selectServiceDates(order.id, []);
+        setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
+        return;
+      }
+      if (calendarDetail.case_no !== order.id) {
+        selectServiceDates(order.id, []);
+        setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
+        return;
+      }
+      const serviceMode = calendarDetail.service_mode;
       setPrecisionMode(serviceMode);
       await calculateAndSelectServiceDates({
         caseNo: order.id,
@@ -1495,6 +1521,7 @@ export const OrdersPage: React.FC = () => {
     }
   };
 
+  // Lazy loader for Cancellation queries
   const loadCancellationTabQueries = async (order: OrderSummaryCardViewModel) => {
     const { controller, requestId } = beginDrawerRequest();
     setDrawerLoading(true);
@@ -1529,6 +1556,7 @@ export const OrdersPage: React.FC = () => {
     }
   };
 
+  // Lazy loader for Reopen preview queries
   const loadReopenTabQueries = async (order: OrderSummaryCardViewModel) => {
     reopenPreviewControllerRef.current?.abort();
     const controller = new AbortController();
@@ -1537,6 +1565,7 @@ export const OrdersPage: React.FC = () => {
     void previewReopenFlow(order.id, { signal: controller.signal }).catch(() => undefined);
   };
 
+  // Handle opening Unified Drawer: Terms, Service Dates, Contract Progress, Cancellation & Reopen
   const handleOpenContractDrawer = async (
     order: OrderSummaryCardViewModel,
     initialTab: ContractWorkbenchTab = 'contract_terms',
@@ -1547,7 +1576,6 @@ export const OrdersPage: React.FC = () => {
     }
     serviceDatesPreviewControllerRef.current?.abort();
     reopenPreviewControllerRef.current?.abort();
-    setReplacementActionsExpanded(false);
     setContractOrder(order);
     setDateConfirmOrder(order);
     setCancelOrder(order);
@@ -1583,6 +1611,7 @@ export const OrdersPage: React.FC = () => {
     setCancellationStatus('idle');
     setCancellationRetryMode(cancellationApplyAttemptRef.current?.caseNo === order.id);
     precisionRequestRef.current += 1;
+    setPrecisionMode(null);
     setPrecisionResult(null);
     setPrecisionError(null);
     setHolidayRestDates([]);
@@ -1644,21 +1673,34 @@ export const OrdersPage: React.FC = () => {
       if (receipt.lifecycle_status !== '訂單成立') {
         throw new Error('重啟後狀態不是正常「訂單成立」，已停止載入後續流程。');
       }
-      const normalOrder = { ...order, orderStatus: '訂單成立' as const };
-      setContractOrder((current) => current?.id === order.id ? normalOrder : current);
-      setDateConfirmOrder((current) => current?.id === order.id ? normalOrder : current);
-      setCancelOrder((current) => current?.id === order.id ? normalOrder : current);
-      setReopenOrder((current) => current?.id === order.id ? normalOrder : current);
       setNormalFlowRestartedCaseNo(order.id);
       setHistoricalRestartStatus('completed');
       setHistoricalRestartMessage(
         receipt.replayed
           ? '此案件已回到正常流程，已讀取原收據。'
-          : '已回到正常「訂單成立」；請依下方正常日期流程設定並確認正式服務日期。',
+          : '已回到正常「訂單成立」；請依下方原流程重新精算並確認正式服務日期。',
       );
-      await fetchOrderSummaries();
-      loadCardProjection(order.id);
-      await loadCalendarTabQueries(normalOrder, true);
+      try {
+        const refreshedRaw = await loadAllOrderSummaries(
+          ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
+          { page_size: 200, lifecycle_scope: 'all', query_text: order.id },
+        );
+        const refreshedOrder = adaptOrderSummaryPage(refreshedRaw).items.find((item) => item.id === order.id);
+        if (!refreshedOrder || refreshedOrder.orderStatus !== '訂單成立') {
+          throw new Error('伺服器尚未回傳重啟後的「訂單成立」狀態。');
+        }
+        setContractOrder((current) => current?.id === order.id ? refreshedOrder : current);
+        setDateConfirmOrder((current) => current?.id === order.id ? refreshedOrder : current);
+        setCancelOrder((current) => current?.id === order.id ? refreshedOrder : current);
+        setReopenOrder((current) => current?.id === order.id ? refreshedOrder : current);
+        await fetchOrderSummaries();
+        loadCardProjection(order.id);
+        await loadCalendarTabQueries(refreshedOrder, true);
+      } catch (refreshError) {
+        setHistoricalRestartMessage(
+          `重啟已完成，但最新狀態讀取失敗：${refreshError instanceof Error ? refreshError.message : '請重新整理後繼續。'}`,
+        );
+      }
     } catch (restartError) {
       setHistoricalRestartStatus('idle');
       setHistoricalRestartMessage(
@@ -1666,6 +1708,8 @@ export const OrdersPage: React.FC = () => {
       );
     }
   };
+
+
 
   const updateTermsDraft = <K extends keyof OrderTermsDraft>(key: K, value: OrderTermsDraft[K]) => {
     setTermsDraft((current) => ({ ...current, [key]: value }));
@@ -1955,6 +1999,7 @@ export const OrdersPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Status Filter Chips */}
       <div className="orders-filter-bar">
         {ORDER_FILTER_OPTIONS.map((filter) => {
           const projectionReady = stagePage !== null;
@@ -1996,6 +2041,7 @@ export const OrdersPage: React.FC = () => {
         </div>
       )}
 
+      {/* Loading & Error States */}
       {loading && (
         <div style={{ textAlign: 'center', padding: '40px', color: '#64748b', fontSize: '1rem', fontWeight: 600 }}>
           ⏳ 正在載入即時訂單數據...
@@ -2014,6 +2060,7 @@ export const OrdersPage: React.FC = () => {
         </div>
       )}
 
+      {/* Empty State */}
       {!loading && !error && filteredOrders.length === 0 && (
         <div style={{ textAlign: 'center', padding: '48px', backgroundColor: '#fff', borderRadius: '16px', border: '1px solid #e2e8f0', color: '#64748b' }}>
           <div style={{ fontSize: '2.5rem', marginBottom: '10px' }}>☕</div>
@@ -2022,6 +2069,7 @@ export const OrdersPage: React.FC = () => {
         </div>
       )}
 
+      {/* Orders Grid Cards */}
       {!loading && !error && (
         <div className="orders-grid">
           {filteredOrders.map((order) => (
@@ -2036,6 +2084,7 @@ export const OrdersPage: React.FC = () => {
                 <div>🪪 身分資格：{order.identityStatus}</div>
                 <div>📅 約定服務：{order.serviceRange}（{order.serviceDaysLabel}）</div>
 
+                {/* Actual Start Date Badge if exists */}
                 {order.actualStartDate && (
                   <div style={{ color: '#0f766e', fontWeight: 700, fontSize: '0.85rem' }}>
                     🗓️ 實際服務開始日：{order.actualStartDate}
@@ -2046,21 +2095,16 @@ export const OrdersPage: React.FC = () => {
                   💰 雇主自付應付額：<strong style={{ color: '#ff7f50', fontSize: '1.05rem' }}>{order.contractAmountFormatted}</strong>
                 </div>}
 
+                {/* Doula Assigned Box */}
                 {order.assignedDoulaName && <div className="order-doula-box">
                     <div>
                       <div>👩‍🍼 摘要所列月嫂：<strong>{order.assignedDoulaName}</strong></div>
                       <div style={{ fontSize: '0.8rem', color: '#74593f' }}>正式推薦與分段方案請開啟媒合工作台查看</div>
                     </div>
                 </div>}
-
-                {isOrderIntakeIncomplete(order) && (
-                  <div role="status" style={{ color: '#9a3412', fontSize: '0.82rem', marginTop: '8px' }}>
-                    案件仍待補齊姓名、服務日期等進件資料；可先開啟工作台查看現有資料與目前 blocker。
-                  </div>
-                )}
               </div>
 
-              {order.orderStatus === '訂單取消' || order.status === '訂單取消' || stageIndex.get(order.id)?.lifecycle_status === '訂單取消' ? (
+              {order.orderStatus === '訂單取消' || stageIndex.get(order.id)?.lifecycle_status === '訂單取消' ? (
                 <div className="order-card-actions">
                   <button
                     className="btn-secondary-action"
@@ -2069,6 +2113,10 @@ export const OrdersPage: React.FC = () => {
                   >
                     查看取消與受控重開
                   </button>
+                </div>
+              ) : isOrderIntakeIncomplete(order) ? (
+                <div className="order-card-actions" role="status">
+                  案件仍待補齊姓名、服務日期等進件資料；完成補件後即可操作契約、媒合、排班與取消流程。
                 </div>
               ) : (
               <div className="order-card-actions">
@@ -2094,6 +2142,7 @@ export const OrdersPage: React.FC = () => {
         </div>
       )}
 
+      {/* 2. 1280px Extra-Wide Matching Workbench (size="xl") */}
       <Drawer
         isOpen={matchingOrder !== null}
         onClose={() => { invalidateDrawerRequest(); setMatchingOrder(null); }}
@@ -2135,6 +2184,7 @@ export const OrdersPage: React.FC = () => {
               </div>
             )}
 
+            {/* Top Demand Summary Bar (4-Column Layout + Deposit Status) */}
             <div className="matching-facts-bar">
               <div className="matching-facts-col">
                 <div className="matching-facts-label">產婦與服務地點</div>
@@ -2198,6 +2248,7 @@ export const OrdersPage: React.FC = () => {
               </div>
             </section>
 
+            {/* 👥 步驟一：以既定規則查詢候選月嫂 */}
             <div className="matching-step-card">
               <div className="matching-step-header">
                 <div>
@@ -2232,6 +2283,7 @@ export const OrdersPage: React.FC = () => {
               </div>
             </div>
 
+            {/* 👥 步驟二：選擇合格月嫂並加入候選池 */}
             <div className="matching-step-card">
               <div className="matching-step-header">
                 <div>
@@ -2357,6 +2409,7 @@ export const OrdersPage: React.FC = () => {
               )}
             </div>
 
+            {/* 👥 步驟三：已選入候選池的月嫂 ➜ 寄送訂單資訊與意願管理 */}
             <div className="matching-step-card">
               <div className="matching-step-header">
                 <div>
@@ -2574,6 +2627,7 @@ export const OrdersPage: React.FC = () => {
               ) : null}
             </div>
 
+            {/* 📝 步驟四：推薦產婦、定金狀態與雙邊契約簽署 */}
             {activePlanQueryError ? (
               <div
                 role="alert"
@@ -2762,6 +2816,7 @@ export const OrdersPage: React.FC = () => {
               </div>
             )}
 
+            {/* 📋 步驟五：正式執行排班（生效成果） */}
             <div className="matching-step-card">
               <div className="matching-step-header">
                 <div>
@@ -2828,6 +2883,7 @@ export const OrdersPage: React.FC = () => {
         )}
       </Drawer>
 
+      {/* 3. Unified 1280px Workbench: Terms, Service Dates & Contract Progress (size="xl") */}
       <Drawer
         isOpen={Boolean(contractOrder || dateConfirmOrder || reopenOrder || cancelOrder)}
         onClose={closeContractDrawer}
@@ -2853,15 +2909,9 @@ export const OrdersPage: React.FC = () => {
       >
         {(contractOrder || dateConfirmOrder) && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-            <OrderIntakeRepairPanel
-              caseNo={(contractOrder || dateConfirmOrder)!.id}
-              orderStatus={(contractOrder || dateConfirmOrder)!.orderStatus}
-              onChanged={fetchOrderSummaries}
-              onHistoricalRestartRequested={() => switchContractTab('calendar')}
-            />
-
             {renderCardProjection()}
 
+            {/* Top 4-Column Fact Strip */}
             <div className="matching-facts-bar">
               <div className="matching-fact-item">
                 <div className="matching-fact-label">產婦與地點</div>
@@ -2903,6 +2953,7 @@ export const OrdersPage: React.FC = () => {
               </div>
             </div>
 
+            {/* 4-Tab Clean Navigation */}
             <div className="contract-tabs-nav">
               <button
                 type="button"
@@ -2951,8 +3002,10 @@ export const OrdersPage: React.FC = () => {
               </div>
             )}
 
+            {/* Tab 1: 契約簽署與約定條款 (Contract & Terms Consolidated) */}
             {activeContractTab === 'contract_terms' && contractDetail && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                {/* SSOT 3-Card Status Strip */}
                 <div className="contract-ssot-grid">
                   <div className="contract-ssot-card">
                     <div className="contract-ssot-header">
@@ -3013,26 +3066,13 @@ export const OrdersPage: React.FC = () => {
                 )}
 
                 {(contractOrder || dateConfirmOrder) && (
-                  <section data-surface-id="orders.service-before-replacement.entry">
-                    {!replacementActionsExpanded ? (
-                      <button
-                        type="button"
-                        className="btn-secondary-action"
-                        data-control-id="orders.service-before-replacement.open"
-                        onClick={() => setReplacementActionsExpanded(true)}
-                      >
-                        服務前更換月嫂
-                      </button>
-                    ) : (
-                      <ServiceBeforeReplacementActions
-                        caseNo={(contractOrder || dateConfirmOrder)!.id}
-                        onCommitted={() => loadContractTabQueries((contractOrder || dateConfirmOrder)!)}
-                        onSubstitutionReferral={() => {
-                          window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent((contractOrder || dateConfirmOrder)!.id)}`;
-                        }}
-                      />
-                    )}
-                  </section>
+                  <ServiceBeforeReplacementActions
+                    caseNo={(contractOrder || dateConfirmOrder)!.id}
+                    onCommitted={() => loadContractTabQueries((contractOrder || dateConfirmOrder)!)}
+                    onSubstitutionReferral={() => {
+                      window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent((contractOrder || dateConfirmOrder)!.id)}`;
+                    }}
+                  />
                 )}
 
                 {contractDetail.domainBlockers && contractDetail.domainBlockers.length > 0 ? (
@@ -3050,7 +3090,7 @@ export const OrdersPage: React.FC = () => {
                   </div>
                 )}
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: '20px', alignItems: 'start' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px', alignItems: 'start' }}>
                   <div className="terms-edit-card">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#ff7f50', margin: 0 }}>📝 編輯約定服務條款</h3>
@@ -3146,137 +3186,11 @@ export const OrdersPage: React.FC = () => {
                       {termsMutationError && <div role="alert" style={{ color: '#b91c1c', marginTop: '10px', fontSize: '0.84rem' }}>{termsMutationError}</div>}
                     </section>
                   </div>
-
-                  <div className={`contract-doc-preview-card ${contractDocFullscreen ? 'fullscreen' : ''}`}>
-                    <div className="contract-doc-toolbar">
-                      <div className="contract-doc-view-toggle">
-                        <button
-                          type="button"
-                          className={`contract-doc-toggle-btn ${contractDocView === 'contract' ? 'active' : ''}`}
-                          onClick={() => setContractDocView('contract')}
-                        >
-                          📜 契約草稿預覽（非正式）
-                        </button>
-                        <button
-                          type="button"
-                          className={`contract-doc-toggle-btn ${contractDocView === 'spec' ? 'active' : ''}`}
-                          onClick={() => setContractDocView('spec')}
-                        >
-                          📋 訂單規格摘要
-                        </button>
-                      </div>
-                      <div className="contract-doc-actions">
-                        <button
-                          type="button"
-                          className="contract-doc-tool-btn"
-                          title="列印草稿預覽（非正式 PDF）"
-                          onClick={() => window.print()}
-                        >
-                          🖨️ 列印草稿
-                        </button>
-                        <button
-                          type="button"
-                          className="contract-doc-tool-btn"
-                          title={contractDocFullscreen ? '離開全螢幕' : '全螢幕檢視'}
-                          onClick={() => setContractDocFullscreen(!contractDocFullscreen)}
-                        >
-                          {contractDocFullscreen ? '🗗 縮小' : '⛶ 全螢幕'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {contractDocView === 'contract' ? (
-                      <div className="contract-doc-sheet">
-                        <div className="contract-doc-watermark">
-                          {contractDetail.staffContractSigned && contractDetail.clientContractSigned ? 'OFFICIAL CONTRACT' : 'DRAFT PREVIEW'}
-                        </div>
-                        <div className="contract-doc-header">
-                          <h4 className="contract-doc-title">中華民國月子照護勞動工會</h4>
-                          <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#ff7f50' }}>產婦月子照護服務定型化契約書</div>
-                          <div className="contract-doc-meta-row">
-                            <span>契約字號：CT-{(contractOrder || dateConfirmOrder)?.id.slice(4)}</span>
-                            <span>訂單編號：{(contractOrder || dateConfirmOrder)?.id}</span>
-                            <span>條款來源：正式訂單資料</span>
-                          </div>
-                        </div>
-
-                        <div className="contract-doc-parties">
-                          <div><strong>甲方（委託人／產婦）：</strong>{contractDetail.clientName}</div>
-                          <div><strong>乙方（媒合服務單位）：</strong>中華民國月子照護勞動工會</div>
-                          <div><strong>丙方（服務承接月嫂）：</strong>{(contractOrder || dateConfirmOrder)?.assignedDoulaDisplay || '（正式媒合指派中）'}</div>
-                        </div>
-
-                        <div className="contract-doc-clauses">
-                          <div className="contract-doc-clause-item">
-                            <div className="contract-doc-clause-title">第一條【服務期間與地點】</div>
-                            <div className="contract-doc-clause-body">
-                              自民國 <span className="contract-doc-clause-highlight">{termsDraft.plannedStartDate || contractDetail.serviceRange.split(' ~ ')[0] || '約定日'}</span> 起，
-                              共計實質服務 <span className="contract-doc-clause-highlight">{termsDraft.serviceDays || contractDetail.serviceDays} 日整</span>。
-                              服務地點為甲方指定之居所。
-                            </div>
-                          </div>
-
-                          <div className="contract-doc-clause-item">
-                            <div className="contract-doc-clause-title">第二條【服務時段與膳食料理】</div>
-                            <div className="contract-doc-clause-body">
-                              每日服務時段為 <span className="contract-doc-clause-highlight">{termsDraft.startTime && termsDraft.endTime ? `${termsDraft.startTime} 至 ${termsDraft.endTime}` : '待確認'}</span>（每日 {termsDraft.serviceHoursPerDay || '待確認'} 小時）。
-                              膳食料理需求：<span className="contract-doc-clause-highlight">{termsDraft.requiresCooking === 'yes' ? '需要下廚料理月子餐' : termsDraft.requiresCooking === 'no' ? '不需下廚' : contractDetail.requiresCookingText}</span>。
-                            </div>
-                          </div>
-
-                          <div className="contract-doc-clause-item">
-                            <div className="contract-doc-clause-title">第三條【服務報酬與定金核銷】</div>
-                            <div className="contract-doc-clause-body">
-                              合約總報酬為新臺幣 <span className="contract-doc-clause-highlight">{contractDetail.contractAmountText}</span>。
-                              定金約定收取 20%（{contractDetail.depositSettled ? '🟢 定金已全額入帳核銷，服務檔期已正式鎖定' : '🟡 定金待收取核銷'}）。
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="contract-doc-stamps-grid">
-                          <div className="contract-doc-stamp-card">
-                            <div className="contract-doc-stamp-title">
-                              <span>甲方（產婦）簽章存證</span>
-                              <span className={`contract-doc-seal ${contractDetail.clientContractSigned ? '' : 'pending'}`}>
-                                {contractDetail.clientContractSigned ? '已簽署' : '待簽署'}
-                              </span>
-                            </div>
-                            <div style={{ color: '#74593f', marginTop: '4px' }}>簽署人：{contractDetail.clientName}</div>
-                            <div style={{ fontSize: '0.72rem', color: '#8b7169' }}>{contractDetail.clientContractSigned ? '簽署文件已由正式回讀確認' : '尚未完成簽署存證'}</div>
-                          </div>
-
-                          <div className="contract-doc-stamp-card">
-                            <div className="contract-doc-stamp-title">
-                              <span>丙方（月嫂）簽章存證</span>
-                              <span className={`contract-doc-seal ${contractDetail.staffContractSigned ? '' : 'pending'}`}>
-                                {contractDetail.staffContractSigned ? '已簽署' : '待簽署'}
-                              </span>
-                            </div>
-                            <div style={{ color: '#74593f', marginTop: '4px' }}>簽署人：{(contractOrder || dateConfirmOrder)?.assignedDoulaDisplay || '—'}</div>
-                            <div style={{ fontSize: '0.72rem', color: '#8b7169' }}>{contractDetail.staffContractSigned ? '簽署文件已由正式回讀確認' : '尚未完成簽署存證'}</div>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="contract-doc-sheet">
-                        <div style={{ fontWeight: 800, fontSize: '1rem', color: '#ff7f50', marginBottom: '12px' }}>📋 訂單完整條件規格摘要 (Order Spec)</div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '0.84rem' }}>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>訂單編號：</strong>{(contractOrder || dateConfirmOrder)?.id}</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>產婦姓名：</strong>{contractDetail.clientName}</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>預定服務起訖：</strong>{termsDraft.plannedStartDate || contractDetail.serviceRange}</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>約定服務天數：</strong>{termsDraft.serviceDays || contractDetail.serviceDays} 天</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>每日時數時段：</strong>{termsDraft.startTime && termsDraft.endTime ? `${termsDraft.startTime} ~ ${termsDraft.endTime}` : '待確認'} ({termsDraft.serviceHoursPerDay ? `${termsDraft.serviceHoursPerDay} hr` : '時數待確認'})</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>下廚需求：</strong>{termsDraft.requiresCooking === 'yes' ? '需要' : termsDraft.requiresCooking === 'no' ? '不需' : '待確認'}</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>樓層費加給：</strong>NT$ {termsDraft.floorFeeNtd || '0'}</div>
-                          <div style={{ padding: '8px 12px', background: '#fff8f6', borderRadius: '6px' }}><strong>合約總應付額：</strong>{contractDetail.contractAmountText}</div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
             )}
 
+            {/* Tab 2: 實質服務日曆與天數精算 (Service Calendar & Precision) */}
             {activeContractTab === 'calendar' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
                 {historicalRestartRequired && (
@@ -3286,13 +3200,13 @@ export const OrdersPage: React.FC = () => {
                   >
                     <h3 style={{ margin: 0, color: '#9a3412', fontSize: '1.05rem' }}>歷史訂單：重啟正常流程</h3>
                     <p style={{ margin: '8px 0 14px', color: '#7c2d12', fontSize: '0.88rem', lineHeight: 1.6 }}>
-                      重啟後，案件會回到正常「訂單成立」。歷史來源紀錄仍會保留，但目前的實際起訖、正式服務日與排班會撤銷；接著請使用本頁原有流程設定並確認服務日期、媒合排班及登錄實際開工。
+                      重啟後，案件會回到正常「訂單成立」。歷史來源紀錄仍會保留，但目前的實際起訖、正式服務日與排班會撤銷；接著請使用本頁原有流程重新精算、確認服務日期、媒合排班及登錄實際開工。
                     </p>
                     <button
                       type="button"
                       data-control-id="orders.historical.restart-normal-flow"
                       className="btn-primary-action"
-                      disabled={historicalRestartStatus === 'applying'}
+                      disabled={historicalRestartStatus !== 'idle'}
                       onClick={() => void restartHistoricalOrderIntoNormalFlow()}
                     >
                       {historicalRestartStatus === 'applying' ? '正在重啟正常流程…' : '重啟正常流程'}
@@ -3317,6 +3231,7 @@ export const OrdersPage: React.FC = () => {
                   )}
                   {serviceDatesDraft?.queryView && (
                     <>
+                      {/* Precision Controls & Metric Bar */}
                       <div style={{ backgroundColor: '#ffffff', border: '1px solid #fed9b8', borderRadius: '14px', padding: '18px 22px', marginBottom: '18px', boxShadow: '0 4px 16px rgba(255, 127, 80, 0.05)' }}>
                         <div className="service-dates-meta-row" style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', marginBottom: '14px', fontSize: '0.85rem', color: '#57423b' }}>
                           <span>合約服務天數：{serviceDatesDraft.queryView.contracted_service_days} 天</span>
@@ -3324,7 +3239,7 @@ export const OrdersPage: React.FC = () => {
                           <span>已確認日期：{serviceDatesDraft.queryView.current_dates.length > 0 ? serviceDatesDraft.queryView.current_dates.join(', ') : '無'}</span>
                         </div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', alignItems: 'flex-end', marginBottom: '14px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '14px', alignItems: 'flex-end', marginBottom: '14px' }}>
                           <div>
                             <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#57423b', marginBottom: '4px' }}>
                               實際開工基準：
@@ -3338,34 +3253,64 @@ export const OrdersPage: React.FC = () => {
                               工會排休類型：
                             </div>
                             <div aria-label="工會排休類型" style={{ padding: '8px 12px', borderRadius: '8px', backgroundColor: '#f1f5f9', border: '1px solid #dec0b6', fontSize: '0.9rem', fontWeight: 600, color: '#334155' }}>
-                              {precisionMode}
+                              {precisionMode ?? (manualServiceDateSelection ? '人工確認真實服務日期' : '尚未載入')}
                             </div>
                           </div>
+                          <button
+                            type="button"
+                            className="btn-primary-action"
+                            disabled={manualServiceDateSelection || serviceDatesLocked || precisionCalculating}
+                            onClick={() => rerunSchedulePrecision()}
+                            style={{ padding: '9px 20px', fontSize: '0.88rem' }}
+                          >
+                            {manualServiceDateSelection ? '請手動確認服務日期' : precisionCalculating ? '精算中…' : '🧮 重新依工會規則精算'}
+                          </button>
                         </div>
+
+                        {manualServiceDateSelection && (
+                          <div role="status" style={{ color: '#74593f', fontSize: '0.84rem', lineHeight: 1.6 }}>
+                            無法取得可信排休類型；系統不會假設週休模式。請直接在下方日曆點選真實服務日期，選滿合約天數後再檢查服務週次影響。
+                          </div>
+                        )}
 
                         {precisionResult && (
                           <div className="precision-stat-grid" style={{ marginBottom: 0 }}>
                             <div className="precision-stat-box">
-                              <span className="precision-stat-label">合約天數</span>
+                              <span className="precision-stat-label">合約目標天數</span>
                               <span className="precision-stat-val">{precisionResult.target_service_days} 天</span>
                             </div>
                             <div className="precision-stat-box">
-                              <span className="precision-stat-label">休假日</span>
+                              <span className="precision-stat-label">實質出勤天數</span>
+                              <span className="precision-stat-val" style={{ color: '#0f766e' }}>{precisionResult.actual_work_days_count} 天</span>
+                            </div>
+                            <div className="precision-stat-box">
+                              <span className="precision-stat-label">排休/假日記數</span>
                               <span className="precision-stat-val" style={{ color: '#9a3412' }}>{precisionResult.rest_days_count} 天</span>
                             </div>
                             <div className="precision-stat-box">
-                              <span className="precision-stat-label">建議完工日</span>
+                              <span className="precision-stat-label">總日曆跨越天</span>
+                              <span className="precision-stat-val">{precisionResult.total_calendar_days} 天</span>
+                            </div>
+                            <div className="precision-stat-box">
+                              <span className="precision-stat-label">🎯 自動順延完工日</span>
                               <span className="precision-stat-val" style={{ color: '#ff7f50' }}>{precisionResult.actual_end_date}</span>
                             </div>
                           </div>
                         )}
                       </div>
 
-                      {precisionResult && precisionResult.national_holidays_found.length > 0 && (
+                      {/* Precision Rule Explanations Banner */}
+                      {precisionResult && (
                         <div style={{ backgroundColor: '#fff8f6', border: '1px solid #fed9b8', borderRadius: '12px', padding: '14px 18px', marginBottom: '18px' }}>
                           <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#9a3412', marginBottom: '6px' }}>
-                            國定假日休假設定
+                            工會排休與出勤精算依據：
                           </div>
+                          <ul style={{ margin: 0, paddingLeft: '20px', color: '#57423b', fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <li><strong>排休服務模式</strong>：依「{precisionMode}」規則自動計算出勤與休假（排休共計 {precisionResult.rest_days_count} 天）。</li>
+                            <li><strong>國定假日／補假</strong>：系統自動比對行政院人事行政總處行事曆（偵測到 {precisionResult.national_holidays_found.length} 天國定假日）。</li>
+                            <li><strong>事前請假日</strong>：依月嫂與產婦雙方約定排除（已設定 {leaveDates.length} 天）。</li>
+                            <li><strong>目標達成保證</strong>：系統自動順延至滿足合約 {precisionResult.target_service_days} 天實質出勤為止。</li>
+                          </ul>
                           {precisionResult.national_holidays_found.map((holiday) => {
                             const restsOnHoliday = holidayRestDates.includes(holiday.date);
                             return (
@@ -3379,7 +3324,7 @@ export const OrdersPage: React.FC = () => {
                                       ? holidayRestDates.filter((date) => date !== holiday.date)
                                       : [...holidayRestDates, holiday.date].sort();
                                     setHolidayRestDates(nextHolidayRestDates);
-                                    runSchedulePrecision(nextHolidayRestDates, leaveDates, undefined, customWorkDates);
+                                    rerunSchedulePrecision(nextHolidayRestDates, leaveDates, undefined, customWorkDates);
                                   }}
                                 />
                                 {holiday.name}（{holiday.date}）列為休假日
@@ -3403,17 +3348,23 @@ export const OrdersPage: React.FC = () => {
                             }).map((_, index) => <div key={`calendar-leading-${index}`} aria-hidden="true" />)}
                             {serviceDatesDraft.queryView.selectable_dates.map((date) => {
                               const precisionDay = precisionResult?.day_by_day.find((day) => day.date === date);
-                              const selected = precisionDay?.is_work_day === true;
+                              const selected = manualServiceDateSelection
+                                ? serviceDatesDraft.selectedDates.includes(date)
+                                : precisionDay?.is_work_day === true;
                               const holiday = precisionResult?.national_holidays_found.find((h) => h.date === date);
                               const isLeave = leaveDates.includes(date);
                               const isCustomWork = customWorkDates.includes(date);
-                              const calendarActionLabel = isLeave
-                                ? `${date} 人工調整休假，點擊取消`
-                                : isCustomWork
-                                  ? `${date} 人工覆寫服務日，點擊恢復固定排休`
-                                  : selected
-                                    ? `${date} 服務日，點擊改為人工排休`
-                                    : `${date} 固定排休，點擊改為正式服務日`;
+                              const calendarActionLabel = manualServiceDateSelection
+                                ? selected
+                                  ? `${date} 已選真實服務日，點擊取消`
+                                  : `${date} 未選，點擊設為真實服務日`
+                                : isLeave
+                                  ? `${date} 人工調整休假，點擊取消`
+                                  : isCustomWork
+                                    ? `${date} 人工覆寫服務日，點擊恢復固定排休`
+                                    : selected
+                                      ? `${date} 服務日，點擊改為人工排休`
+                                      : `${date} 固定排休，點擊改為正式服務日`;
                               return (
                                 <button
                                   key={date}
@@ -3424,27 +3375,36 @@ export const OrdersPage: React.FC = () => {
                                   className={`calendar-date-cell ${selected ? 'selected' : isLeave ? 'manual-rest' : holiday ? 'holiday' : ''}`}
                                   disabled={serviceDatesLocked}
                                   onClick={() => {
+                                    if (manualServiceDateSelection) {
+                                      const caseNo = (contractOrder || dateConfirmOrder)?.id;
+                                      if (!caseNo) return;
+                                      const nextSelectedDates = selected
+                                        ? serviceDatesDraft.selectedDates.filter((value) => value !== date)
+                                        : [...serviceDatesDraft.selectedDates, date].sort();
+                                      changeServiceDateSelection(caseNo, nextSelectedDates);
+                                      return;
+                                    }
                                     if (isLeave) {
                                       const nextLeaveDates = leaveDates.filter((value) => value !== date);
                                       setLeaveDates(nextLeaveDates);
-                                      runSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
+                                      rerunSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
                                       return;
                                     }
                                     if (isCustomWork) {
                                       const nextCustomWorkDates = customWorkDates.filter((value) => value !== date);
                                       setCustomWorkDates(nextCustomWorkDates);
-                                      runSchedulePrecision(holidayRestDates, leaveDates, undefined, nextCustomWorkDates);
+                                      rerunSchedulePrecision(holidayRestDates, leaveDates, undefined, nextCustomWorkDates);
                                       return;
                                     }
                                     if (selected) {
                                       const nextLeaveDates = [...leaveDates, date].sort();
                                       setLeaveDates(nextLeaveDates);
-                                      runSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
+                                      rerunSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
                                       return;
                                     }
                                     const nextCustomWorkDates = [...customWorkDates, date].sort();
                                     setCustomWorkDates(nextCustomWorkDates);
-                                    runSchedulePrecision(holidayRestDates, leaveDates, undefined, nextCustomWorkDates);
+                                    rerunSchedulePrecision(holidayRestDates, leaveDates, undefined, nextCustomWorkDates);
                                   }}
                                 >
                                   <span>{date}</span>
@@ -3456,37 +3416,41 @@ export const OrdersPage: React.FC = () => {
                             })}
                           </div>
                         </div>
+
                       </div>
 
-                      <div className="leave-planning-box" style={{ marginTop: '12px' }}>
-                        <strong style={{ fontSize: '0.82rem', color: '#9a3412' }}>➕ 設定事前約定請假日：</strong>
-                        <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                          <input
-                            type="date"
-                            aria-label="事前請假日期"
-                            value={leaveDateDraft}
-                            disabled={serviceDatesLocked || precisionCalculating}
-                            onChange={(e) => setLeaveDateDraft(e.target.value)}
-                            style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #dec0b6', fontSize: '0.82rem', flex: 1 }}
-                          />
-                          <button
-                            type="button"
-                            className="btn-secondary-action"
-                            disabled={serviceDatesLocked || precisionCalculating || !leaveDateDraft}
-                            onClick={() => {
-                              if (!leaveDateDraft || leaveDates.includes(leaveDateDraft)) return;
-                              const nextLeaveDates = [...leaveDates, leaveDateDraft].sort();
-                              setLeaveDates(nextLeaveDates);
-                              setLeaveDateDraft('');
-                              runSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
-                            }}
-                            style={{ padding: '4px 10px', fontSize: '0.78rem' }}
-                          >
-                            新增事前請假
-                          </button>
+                      {!manualServiceDateSelection && (
+                        <div className="leave-planning-box" style={{ marginTop: '12px' }}>
+                          <strong style={{ fontSize: '0.82rem', color: '#9a3412' }}>➕ 設定事前約定請假日：</strong>
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                            <input
+                              type="date"
+                              aria-label="事前請假日期"
+                              value={leaveDateDraft}
+                              disabled={serviceDatesLocked || precisionCalculating}
+                              onChange={(e) => setLeaveDateDraft(e.target.value)}
+                              style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #dec0b6', fontSize: '0.82rem', flex: 1 }}
+                            />
+                            <button
+                              type="button"
+                              className="btn-secondary-action"
+                              disabled={serviceDatesLocked || precisionCalculating || !leaveDateDraft}
+                              onClick={() => {
+                                if (!leaveDateDraft || leaveDates.includes(leaveDateDraft)) return;
+                                const nextLeaveDates = [...leaveDates, leaveDateDraft].sort();
+                                setLeaveDates(nextLeaveDates);
+                                setLeaveDateDraft('');
+                                rerunSchedulePrecision(holidayRestDates, nextLeaveDates, undefined, customWorkDates);
+                              }}
+                              style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                            >
+                              新增事前請假
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
+                      {/* Full-width Preview / Apply workflow below the calendar */}
                       <div className="service-date-confirmation-panel">
                         <div className="service-date-confirmation-actions">
                           <button
@@ -3497,7 +3461,7 @@ export const OrdersPage: React.FC = () => {
                             disabled={serviceDatesLocked || precisionCalculating || !serviceDatesSelectionReady}
                             onClick={() => (contractOrder || dateConfirmOrder) && previewServiceDates((contractOrder || dateConfirmOrder)!.id)}
                           >
-                            {serviceDatesDraft?.status === 'preview_loading' ? '正在確認服務日期…' : '確認服務日期'}
+                            {serviceDatesDraft?.status === 'preview_loading' ? '正在精算服務週次…' : '🔍 檢查服務週次影響'}
                           </button>
 
                           {serviceDatesDraft?.previewView && (
@@ -3546,7 +3510,7 @@ export const OrdersPage: React.FC = () => {
                                   .catch(() => undefined);
                               }}
                             >
-                              {serviceDatesDraft?.status === 'apply_pending' ? '服務日期套用中…' : '確認套用服務日期'}
+                              {serviceDatesDraft?.status === 'apply_pending' ? '正在儲存排班結果…' : '儲存排班結果'}
                             </button>
                           )}
 
@@ -3584,28 +3548,26 @@ export const OrdersPage: React.FC = () => {
                         </div>
                       </div>
 
-                      {hasFormalAssignment && (
-                        <div className="leave-substitution-entry">
-                          <div>
-                            <strong>已有正式排班：處理請假／代班</strong>
-                            <p>
-                              未正式指派時只做上方事前排休；正式指派後請在代班工作台選同日指定代班，或讓原月嫂後續順延。
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            className="btn-secondary-action"
-                            onClick={() => {
-                              const caseNo = (contractOrder || dateConfirmOrder)?.id;
-                              if (caseNo) {
-                                window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`;
-                              }
-                            }}
-                          >
-                            前往請假／代班工作台
-                          </button>
+                      <div className="leave-substitution-entry">
+                        <div>
+                          <strong>已有正式排班：處理請假／代班</strong>
+                          <p>
+                            未正式指派時只做上方事前排休；正式指派後請在代班工作台選同日指定代班，或讓原月嫂後續順延。
+                          </p>
                         </div>
-                      )}
+                        <button
+                          type="button"
+                          className="btn-secondary-action"
+                          onClick={() => {
+                            const caseNo = (contractOrder || dateConfirmOrder)?.id;
+                            if (caseNo) {
+                              window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`;
+                            }
+                          }}
+                        >
+                          前往請假／代班工作台
+                        </button>
+                      </div>
                     </>
                   )}
                   {!serviceDatesDraft?.queryView && (
@@ -3623,83 +3585,82 @@ export const OrdersPage: React.FC = () => {
                   )}
                 </section>
 
-                {serviceHasStarted && (
-                  <div className="calendar-workbench-card" style={{ marginTop: '16px' }}>
-                    <div className="calendar-card-header">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span className="calendar-badge actual">實際開工</span>
-                        <h4 className="calendar-card-title">實際開工日更正與動態排盤</h4>
-                      </div>
+                {/* Actual Start Date Precision Card */}
+                <div className="calendar-workbench-card" style={{ marginTop: '16px' }}>
+                  <div className="calendar-card-header">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span className="calendar-badge actual">實際開工</span>
+                      <h4 className="calendar-card-title">實際開工日更正與動態排盤</h4>
                     </div>
-
-                    <div>
-                      <div>
-                        <label style={{ display: 'block', fontWeight: 700, fontSize: '0.85rem' }}>
-                          更正實際服務開始日
-                          <input
-                            type="date"
-                            value={actualStartDraft}
-                            disabled={actualStartLocked}
-                            onChange={(e) => setActualStartDraft(e.target.value)}
-                            style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6' }}
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          className="btn-secondary-action"
-                          style={{ marginTop: '10px', width: '100%', padding: '9px' }}
-                          disabled={actualStartLocked || actualStartDraft.trim().length === 0}
-                          onClick={() => void previewActualStart()}
-                        >
-                          {actualStartStatus === 'previewing' ? '正在產生預覽…' : '預覽實際開工日變更'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {actualStartQuery?.service_data_locked && (
-                      <div role="status" style={{ color: '#92400e', margin: '10px 0', fontSize: '0.84rem' }}>
-                        本案服務資料已鎖定；目前只能查詢，需先依既有解鎖流程處理後才能更正。
-                      </div>
-                    )}
-                    {actualStartPreview && (
-                      <div style={{ backgroundColor: '#fffdfb', border: '1px solid #fed9b8', borderRadius: '12px', padding: '16px', marginTop: '14px' }}>
-                        <strong style={{ color: '#ff7f50', fontSize: '0.92rem' }}>實際開工日影響已確認</strong>
-                        <div style={{ fontSize: '0.86rem', color: '#57423b', marginTop: '6px' }}>日期：{actualStartPreview.before_actual_start_date ?? '尚未登錄'} → {actualStartPreview.after_actual_start_date}</div>
-                        <div style={{ fontSize: '0.86rem', color: '#57423b' }}>預計結束日：{actualStartPreview.actual_end_date}</div>
-                        <div style={{ fontSize: '0.86rem', color: '#57423b' }}>正式服務日：{actualStartPreview.actual_start.official_service_dates.length} 天</div>
-                        <div style={{ fontSize: '0.86rem', color: '#57423b' }}>重建指派：{actualStartPreview.scheduling.assignments.length} 段</div>
-                        <label style={{ display: 'block', marginTop: '10px', fontWeight: 700, fontSize: '0.84rem' }}>
-                          套用原因（稽核必填）
-                          <textarea
-                            rows={2}
-                            maxLength={500}
-                            value={actualStartReason}
-                            disabled={actualStartLocked}
-                            onChange={(e) => setActualStartReason(e.target.value)}
-                            style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6' }}
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          className="btn-primary-action"
-                          style={{ marginTop: '10px', width: '100%', padding: '11px', background: '#c2410c' }}
-                          disabled={actualStartLocked || actualStartReason.trim().length === 0}
-                          onClick={() => void applyActualStart()}
-                        >
-                          {actualStartStatus === 'applying' ? '實際開工日套用中…' : '確認套用實際開工日'}
-                        </button>
-                      </div>
-                    )}
-                    {actualStartReceipt && (
-                      <div role="status" style={{ color: '#166534', fontWeight: 700, marginTop: '10px', fontSize: '0.86rem' }}>
-                        實際開工日已套用（{actualStartReceipt.official_service_day_count} 個正式服務日）
-                      </div>
-                    )}
-                    {actualStartError && <div role="alert" style={{ color: '#b91c1c', marginTop: '10px', fontSize: '0.85rem' }}>{actualStartError}</div>}
                   </div>
-                )}
 
-                {serviceHasStarted && (contractOrder || dateConfirmOrder) && (
+                  <div>
+                    <div>
+                      <label style={{ display: 'block', fontWeight: 700, fontSize: '0.85rem' }}>
+                        更正實際服務開始日
+                        <input
+                          type="date"
+                          value={actualStartDraft}
+                          disabled={actualStartLocked}
+                          onChange={(e) => setActualStartDraft(e.target.value)}
+                          style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6' }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="btn-secondary-action"
+                        style={{ marginTop: '10px', width: '100%', padding: '9px' }}
+                        disabled={actualStartLocked || actualStartDraft.trim().length === 0}
+                        onClick={() => void previewActualStart()}
+                      >
+                        {actualStartStatus === 'previewing' ? '正在產生預覽…' : '預覽實際開工日變更'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {actualStartQuery?.service_data_locked && (
+                    <div role="status" style={{ color: '#92400e', margin: '10px 0', fontSize: '0.84rem' }}>
+                      本案服務資料已鎖定；目前只能查詢，需先依既有解鎖流程處理後才能更正。
+                    </div>
+                  )}
+                  {actualStartPreview && (
+                    <div style={{ backgroundColor: '#fffdfb', border: '1px solid #fed9b8', borderRadius: '12px', padding: '16px', marginTop: '14px' }}>
+                      <strong style={{ color: '#ff7f50', fontSize: '0.92rem' }}>實際開工日影響已確認</strong>
+                      <div style={{ fontSize: '0.86rem', color: '#57423b', marginTop: '6px' }}>日期：{actualStartPreview.before_actual_start_date ?? '尚未登錄'} → {actualStartPreview.after_actual_start_date}</div>
+                      <div style={{ fontSize: '0.86rem', color: '#57423b' }}>預計結束日：{actualStartPreview.actual_end_date}</div>
+                      <div style={{ fontSize: '0.86rem', color: '#57423b' }}>正式服務日：{actualStartPreview.actual_start.official_service_dates.length} 天</div>
+                      <div style={{ fontSize: '0.86rem', color: '#57423b' }}>重建指派：{actualStartPreview.scheduling.assignments.length} 段</div>
+                      <label style={{ display: 'block', marginTop: '10px', fontWeight: 700, fontSize: '0.84rem' }}>
+                        套用原因（稽核必填）
+                        <textarea
+                          rows={2}
+                          maxLength={500}
+                          value={actualStartReason}
+                          disabled={actualStartLocked}
+                          onChange={(e) => setActualStartReason(e.target.value)}
+                          style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6' }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="btn-primary-action"
+                        style={{ marginTop: '10px', width: '100%', padding: '11px', background: '#c2410c' }}
+                        disabled={actualStartLocked || actualStartReason.trim().length === 0}
+                        onClick={() => void applyActualStart()}
+                      >
+                        {actualStartStatus === 'applying' ? '實際開工日套用中…' : '確認套用實際開工日'}
+                      </button>
+                    </div>
+                  )}
+                  {actualStartReceipt && (
+                    <div role="status" style={{ color: '#166534', fontWeight: 700, marginTop: '10px', fontSize: '0.86rem' }}>
+                      實際開工日已套用（{actualStartReceipt.official_service_day_count} 個正式服務日）
+                    </div>
+                  )}
+                  {actualStartError && <div role="alert" style={{ color: '#b91c1c', marginTop: '10px', fontSize: '0.85rem' }}>{actualStartError}</div>}
+                </div>
+
+                {(contractOrder || dateConfirmOrder) && (
                   <OrderServiceCompletionActions
                     caseNo={(contractOrder || dateConfirmOrder)!.id}
                     orderStatus={(contractOrder || dateConfirmOrder)!.orderStatus}
@@ -3711,6 +3672,8 @@ export const OrdersPage: React.FC = () => {
               </div>
             )}
 
+            {/* Tab 3: 訂單取消、退款與受控重開 (Cancellation, Refund & Reopen) */}
+            {/* Tab 3: 訂單取消與退款試算 (Cancellation & Refund) */}
             {activeContractTab === 'cancellation' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
                 <div style={{ backgroundColor: '#fffdfc', border: '1px solid #fed9b8', borderRadius: '12px', padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -3935,7 +3898,7 @@ export const OrdersPage: React.FC = () => {
                       data-control-id="orders.cancellation.apply"
                       className="btn-primary-action"
                       style={{ backgroundColor: '#9f1239', borderColor: '#9f1239', width: '100%', padding: '10px' }}
-                      disabled={!cancellationPreview || cancellationLifecycleBlocked || !cancellationReason.trim() || !cancellationConfirmed || cancellationStatus !== 'idle' || (cancellationServiceFactsAvailable && cancellationDays.length >= cancellationQuery.contracted_service_days)}
+                      disabled={!cancellationPreview || cancellationLifecycleBlocked || !cancellationReason.trim() || !cancellationConfirmed || cancellationStatus !== 'idle' || (cancellationServiceFactsAvailable && cancellationDays.length >= (cancellationQuery?.contracted_service_days ?? Number.POSITIVE_INFINITY))}
                       onClick={() => void applyCancellation()}
                     >
                       {cancellationStatus === 'applying'
@@ -3947,6 +3910,7 @@ export const OrdersPage: React.FC = () => {
               </div>
             )}
 
+            {/* Tab 4: 🔄 訂單受控重開 (Controlled Reopen) */}
             {activeContractTab === 'reopen' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
                 <div style={{ backgroundColor: '#fffdfc', border: '1px solid #fed9b8', borderRadius: '12px', padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
