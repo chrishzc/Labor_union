@@ -29,8 +29,20 @@ class MySqlHistoricalServiceAccountingRepository:
             root = cursor.fetchone()
             if root is None:
                 raise ValueError("historical_order_not_found")
+            if (
+                root["client_policy_version"] is None
+                or root["client_hourly_rate_ntd"] is None
+            ):
+                raise ValueError("historical_client_payment_terms_missing")
             cursor.execute(_ASSIGNMENTS_SQL + lock, (int(root["adoption_receipt_id"]),))
             rows = tuple(cursor.fetchall())
+            if any(
+                row["payroll_policy_version"] is None
+                or row["payroll_policy_kind"] is None
+                or row["payroll_hourly_rate_ntd"] is None
+                for row in rows
+            ):
+                raise ValueError("historical_payroll_rate_policy_missing")
             adjustment_rows = _load_adjustments(
                 cursor,
                 tuple(int(row["assignment_id"]) for row in rows),
@@ -118,6 +130,7 @@ class MySqlHistoricalServiceAccountingRepository:
         command_fingerprint = _command_fingerprint(request).value
         event_identity = f"historical-service-days:{command_fingerprint}"
         with _cursor(self._connection) as cursor:
+            _ensure_accounting_accounts(cursor, candidate.facts.case_no)
             _ensure_assignment_rate_snapshots(cursor, candidate)
             cursor.execute(
                 "INSERT INTO historical_service_day_events "
@@ -203,6 +216,16 @@ def _insert_items(cursor, event_id, candidate):
         "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         rows,
     )
+
+
+def _ensure_accounting_accounts(cursor, case_no):
+    for statement in (
+        "INSERT INTO client_finance_accounts (case_no,aggregate_version) "
+        "VALUES (%s,0) ON DUPLICATE KEY UPDATE case_no=VALUES(case_no)",
+        "INSERT INTO payroll_case_accounts (case_no,aggregate_version) "
+        "VALUES (%s,0) ON DUPLICATE KEY UPDATE case_no=VALUES(case_no)",
+    ):
+        cursor.execute(statement, (case_no,))
 
 
 def _ensure_assignment_rate_snapshots(cursor, candidate):
@@ -373,6 +396,8 @@ def _write_staff_obligations(cursor, request, candidate, source_identity, result
                 resulting_version,
             ),
         )
+
+
 def _previous_client_amount(cursor, case_no):
     cursor.execute(
         "SELECT event.client_obligation_amount_ntd "
@@ -476,14 +501,14 @@ def _cursor(connection):
 
 _ROOT_SQL = (
     "SELECT o.case_no,o.status,o.lifecycle_version,o.service_days,o.service_hours_per_day,o.floor_fee,"
-    "c.identity_status,client_account.aggregate_version AS client_finance_version,"
-    "payroll_account.aggregate_version AS payroll_version,receipt.id AS adoption_receipt_id,"
+    "c.identity_status,COALESCE(client_account.aggregate_version,0) AS client_finance_version,"
+    "COALESCE(payroll_account.aggregate_version,0) AS payroll_version,receipt.id AS adoption_receipt_id,"
     "receipt.source_event_identity,COALESCE(day_projection.day_revision,0) AS historical_day_revision,"
     "client_terms.policy_version AS client_policy_version,client_terms.client_hourly_rate_ntd "
     "FROM orders o JOIN clients c ON c.id=o.client_id "
-    "JOIN client_finance_accounts client_account ON client_account.case_no=o.case_no "
-    "JOIN payroll_case_accounts payroll_account ON payroll_account.case_no=o.case_no "
-    "JOIN client_payment_terms client_terms ON client_terms.case_no=o.case_no "
+    "LEFT JOIN client_finance_accounts client_account ON client_account.case_no=o.case_no "
+    "LEFT JOIN payroll_case_accounts payroll_account ON payroll_account.case_no=o.case_no "
+    "LEFT JOIN client_payment_terms client_terms ON client_terms.case_no=o.case_no "
     "JOIN historical_order_adoption_receipts receipt ON receipt.id=("
     "SELECT MAX(r.id) FROM historical_order_adoption_receipts r WHERE r.case_no=o.case_no AND r.outcome='adopted') "
     "LEFT JOIN historical_service_day_projections day_projection ON day_projection.case_no=o.case_no "
@@ -497,7 +522,7 @@ _ASSIGNMENTS_SQL = (
     "FROM historical_order_pairing_evidence evidence "
     "JOIN case_staff_assignments assignment ON assignment.id=evidence.assignment_id "
     "JOIN staff ON staff.id=evidence.staff_id "
-    "JOIN case_payroll_rate_policy_snapshots case_rate ON case_rate.case_no=assignment.case_no "
+    "LEFT JOIN case_payroll_rate_policy_snapshots case_rate ON case_rate.case_no=assignment.case_no "
     "LEFT JOIN assignment_payroll_rate_snapshots rate ON rate.assignment_id=evidence.assignment_id "
     "WHERE evidence.receipt_id=%s AND evidence.assignment_id IS NOT NULL "
     "ORDER BY evidence.assignment_id"

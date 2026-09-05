@@ -116,3 +116,8 @@ desktop.ini
 !**/system_map.md
 !**/*system_map.yaml
 !**/*system_map.md
+
+# Office temporary lock files
+.~lock.*#
+.~lock.*
+~$*

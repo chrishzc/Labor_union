@@ -1,4 +1,4 @@
-from domains.anomalies.current_issue import OwnerSnapshot, RecheckScope, build_owner_lock_key
+from domains.anomalies.current_issue import OwnerSnapshot, RecheckScope, build_issue_key, build_owner_lock_key
 from infrastructure.mysql.line_notification_current_issue_adapter import (
     MySqlLineNotificationCurrentIssueAdapter,
 )
@@ -33,11 +33,11 @@ def _scope():
     )
 
 
-def _readback(*, active=True, complete=True):
+def _readback(*, active=True, complete=True, owner_token="owner-token"):
     return LineNotificationFailureCurrentFactReadback(
         "CASE-006",
         REASON,
-        "owner-token",
+        owner_token,
         8,
         complete,
         1,
@@ -53,9 +53,7 @@ def _readback(*, active=True, complete=True):
 
 def test_consumer_preserves_public_case_and_notification_reason_identity() -> None:
     snapshot = OwnerSnapshot(_scope(), "snapshot", 8, (_readback(),))
-    consumer = LineNotificationCurrentIssueConsumer(
-        lambda code, subject: f"{code}:{subject['case_no']}:{subject['notification_reason']}"
-    )
+    consumer = LineNotificationCurrentIssueConsumer(build_issue_key)
 
     candidate = consumer.detect(snapshot)[0]
 
@@ -64,6 +62,9 @@ def test_consumer_preserves_public_case_and_notification_reason_identity() -> No
         "case_no": "CASE-006",
         "notification_reason": "recipient_unavailable",
     }
+    assert candidate.issue_key == build_issue_key(
+        "LINE-006", candidate.subject_identity, "owner-token"
+    )
     assert candidate.subject_id == "CASE-006"
     assert candidate.details["unresolved_reason_codes"] == (
         "exact_replay_successor_missing",
@@ -78,16 +79,24 @@ def test_consumer_preserves_public_case_and_notification_reason_identity() -> No
     }
 
 
+def test_new_owner_lifecycle_token_proposes_a_different_issue_key() -> None:
+    consumer = LineNotificationCurrentIssueConsumer(build_issue_key)
+    first = consumer.detect(OwnerSnapshot(_scope(), "snapshot-1", 8, (_readback(owner_token="owner-token-1"),)))[0]
+    second = consumer.detect(OwnerSnapshot(_scope(), "snapshot-2", 9, (_readback(owner_token="owner-token-2"),)))[0]
+
+    assert first.issue_key != second.issue_key
+
+
 def test_inactive_complete_owner_predicate_emits_no_candidate() -> None:
     snapshot = OwnerSnapshot(_scope(), "snapshot", 8, (_readback(active=False),))
-    consumer = LineNotificationCurrentIssueConsumer(lambda _code, _subject: "unused")
+    consumer = LineNotificationCurrentIssueConsumer(build_issue_key)
 
     assert consumer.detect(snapshot) == ()
 
 
 def test_incomplete_owner_readback_never_synthesizes_a_new_candidate() -> None:
     snapshot = OwnerSnapshot(_scope(), "snapshot", 8, (_readback(complete=False),), False)
-    consumer = LineNotificationCurrentIssueConsumer(lambda _code, _subject: "unused")
+    consumer = LineNotificationCurrentIssueConsumer(build_issue_key)
 
     assert consumer.detect(snapshot) == ()
 

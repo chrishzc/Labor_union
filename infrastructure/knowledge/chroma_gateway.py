@@ -58,14 +58,34 @@ class ChromaKnowledgeGateway:
         )
         return indexed_items
 
-    def answer(self, question: str, index_version: int) -> KnowledgeAnswer:
+    def answer(
+        self,
+        question: str,
+        index_version: int,
+        history: tuple[dict[str, str], ...] = (),
+    ) -> KnowledgeAnswer:
         collection = self._client().get_collection(self._collection_name(index_version))
         count = int(collection.count())
         if count < 1:
             raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
-        result = collection.query(query_texts=[question], n_results=min(5, count))
-        documents = tuple((result.get("documents") or [[]])[0])
-        metadatas = tuple((result.get("metadatas") or [[]])[0])
+        query_texts = [question]
+        if history:
+            query_texts.append(f"{history[-1]['question']} {question}")
+        result = collection.query(query_texts=query_texts, n_results=min(5, count))
+        raw_docs = result.get("documents") or []
+        raw_metas = result.get("metadatas") or []
+        documents_list: list[str] = []
+        metadatas_list: list[dict] = []
+        seen_ids = set()
+        for d_list, m_list in zip(raw_docs, raw_metas, strict=False):
+            for doc, meta in zip(d_list, m_list, strict=True):
+                cid = meta.get("candidate_id")
+                if cid not in seen_ids:
+                    seen_ids.add(cid)
+                    documents_list.append(doc)
+                    metadatas_list.append(meta)
+        documents = tuple(documents_list)
+        metadatas = tuple(metadatas_list)
         if not documents or not metadatas or len(documents) != len(metadatas):
             raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
 
@@ -78,7 +98,9 @@ class ChromaKnowledgeGateway:
         if not candidates or self._llm is None:
             raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
 
-        selected_id = str(self._llm(self._selection_prompt(question, candidates))).strip()
+        selected_id = str(
+            self._llm(self._selection_prompt(question, candidates, history=history))
+        ).strip()
         if selected_id == "UNSUPPORTED":
             raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
         selected = next(
@@ -117,7 +139,7 @@ class ChromaKnowledgeGateway:
                     raise ValueError(
                         f"knowledge_catalog_invalid:{line_number}"
                     ) from error
-                if record.get("enabled") is not True:
+                if record.get("enabled") is not True and str(record.get("status", "")).strip().lower() != "ready":
                     continue
                 catalog_id = str(record.get("id", "")).strip()
                 category = str(record.get("category", "")).strip()
@@ -223,10 +245,15 @@ class ChromaKnowledgeGateway:
             return 0.75 + (0.25 * length_ratio)
         return SequenceMatcher(None, normalized_left, normalized_right).ratio()
 
-    def _selection_prompt(self, question: str, candidates: tuple[dict, ...]) -> str:
+    @staticmethod
+    def _selection_prompt(
+        question: str,
+        candidates: tuple[dict, ...],
+        history: tuple[dict[str, str], ...] = (),
+    ) -> str:
         rows = []
         for candidate in candidates:
-            aliases = "、".join(self._aliases(candidate))
+            aliases = "、".join(ChromaKnowledgeGateway._aliases(candidate))
             rows.append(
                 " | ".join(
                     (
@@ -239,10 +266,17 @@ class ChromaKnowledgeGateway:
                 )
             )
         candidate_text = "\n".join(rows)
+        history_text = ""
+        if history:
+            h_lines = []
+            for item in history:
+                h_lines.append(f"用戶：{item['question']}")
+                h_lines.append(f"客服：{item['answer']}")
+            history_text = "最近對話紀錄（供理解語意與指代關係）：\n" + "\n".join(h_lines) + "\n\n"
         return (
-            "你是客服題庫候選選擇器。只能回傳下列候選 ID 其中之一，"
-            "若沒有足夠符合的候選只能回傳 UNSUPPORTED。不要回答問題、不要輸出其他文字。\n"
-            f"使用者問題：{question}\n"
+            "你是客服題庫候選選擇器。請參考對話紀錄並根據當前使用者問題，挑選最符合的候選 ID。\n"
+            "只能回傳下列候選 ID 其中之一，若沒有足夠符合的候選只能回傳 UNSUPPORTED。不要回答問題、不要輸出其他文字。\n\n"
+            f"{history_text}當前使用者問題：{question}\n"
             f"候選：\n{candidate_text}"
         )
 

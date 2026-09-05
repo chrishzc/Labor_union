@@ -123,11 +123,16 @@ class KnowledgeWorker:
     def _answer(self, job: dict) -> None:
         with self._unit_of_work() as unit_of_work:
             version = unit_of_work.knowledge.ready_index_version()
+            history = ()
+            if hasattr(unit_of_work.knowledge, "recent_conversation_history") and job.get("answer_request_id"):
+                history = unit_of_work.knowledge.recent_conversation_history(
+                    int(job["answer_request_id"]), limit=3
+                )
             unit_of_work.commit()
         if version is None:
             raise RuntimeError("knowledge_index_unavailable")
         try:
-            answer = self._index_gateway.answer(job["question"], version)
+            answer = self._index_gateway.answer(job["question"], version, history=history)
         except KnowledgeAnswerUnsupported:
             with self._unit_of_work() as unit_of_work:
                 unit_of_work.knowledge.complete_unsupported(

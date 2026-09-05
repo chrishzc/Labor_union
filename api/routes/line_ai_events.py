@@ -7,16 +7,23 @@ from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api.dependencies.admin_auth import require_line_configuration_reader
+from api.dependencies.admin_auth import optional_admin, require_line_configuration_reader
 from api.dependencies.line_ai_qa_catalog import (
     CATALOG_SOURCE_IDENTITY as QA_CATALOG_SOURCE_IDENTITY,
+    create_line_ai_qa_item,
+    delete_line_ai_qa_item,
     load_line_ai_qa_catalog,
+    toggle_line_ai_qa_item,
+    update_line_ai_qa_item,
 )
 from api.dependencies.line_runtime import get_line_feedback_application
 from api.schemas.base import BaseResponse
 from api.schemas.line_ai_events import (
     LineQaCatalogItemView,
     LineQaCatalogView,
+    LineQaItemCreateRequest,
+    LineQaItemToggleRequest,
+    LineQaItemUpdateRequest,
     LineRouterPreviewRequest,
     LineRouterPreviewView,
 )
@@ -42,8 +49,12 @@ router = APIRouter(prefix="/api/v1/line/ai-events", tags=["LINE AI Events"])
 
 
 @router.post("/router/preview", response_model=BaseResponse[LineRouterPreviewView])
-def preview_router(request: LineRouterPreviewRequest):
-    _require_development_router_preview()
+def preview_router(
+    request: LineRouterPreviewRequest,
+    principal: AdminPrincipal | None = Depends(optional_admin),
+):
+    if not isinstance(principal, AdminPrincipal):
+        _require_development_router_preview()
     router_outcome = DeterministicLineRouter().route(
         request.text, source_event_id=request.source_event_id, score=request.score
     )
@@ -118,6 +129,118 @@ def get_qa_catalog(
     )
 
 
+@router.put("/qa-catalog/{qa_id}", response_model=BaseResponse[LineQaCatalogItemView])
+def update_qa_item(
+    qa_id: str,
+    payload: LineQaItemUpdateRequest,
+    _: AdminPrincipal = Depends(require_line_configuration_reader),
+):
+    try:
+        item = update_line_ai_qa_item(
+            qa_id,
+            question=payload.question,
+            answer=payload.answer,
+            category=payload.category,
+            tag=payload.tag,
+            aliases=payload.aliases,
+            enabled=payload.enabled,
+            notes=payload.notes,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="qa_item_not_found")
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=500, detail=str(error))
+    return BaseResponse(
+        data=LineQaCatalogItemView(
+            id=item.id,
+            category=item.category,
+            tag=item.tag,
+            question=item.question,
+            aliases=item.aliases,
+            answer=item.answer,
+            enabled=item.enabled,
+            source_ref=item.source_ref,
+            notes=item.notes,
+        ),
+        message="QA 項目已成功更新",
+    )
+
+
+@router.patch("/qa-catalog/{qa_id}/status", response_model=BaseResponse[LineQaCatalogItemView])
+def toggle_qa_status(
+    qa_id: str,
+    payload: LineQaItemToggleRequest,
+    _: AdminPrincipal = Depends(require_line_configuration_reader),
+):
+    try:
+        item = toggle_line_ai_qa_item(qa_id, enabled=payload.enabled)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="qa_item_not_found")
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=500, detail=str(error))
+    return BaseResponse(
+        data=LineQaCatalogItemView(
+            id=item.id,
+            category=item.category,
+            tag=item.tag,
+            question=item.question,
+            aliases=item.aliases,
+            answer=item.answer,
+            enabled=item.enabled,
+            source_ref=item.source_ref,
+            notes=item.notes,
+        ),
+        message=f"QA 項目已{'啟用' if item.enabled else '停用'}",
+    )
+
+
+@router.delete("/qa-catalog/{qa_id}", response_model=BaseResponse[dict[str, str]])
+def delete_qa_catalog_item(
+    qa_id: str,
+    _: AdminPrincipal = Depends(require_line_configuration_reader),
+):
+    try:
+        delete_line_ai_qa_item(qa_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="qa_item_not_found")
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=500, detail=str(error))
+    return BaseResponse(data={"deleted_id": qa_id}, message="QA 項目已成功移除")
+
+
+@router.post("/qa-catalog", response_model=BaseResponse[LineQaCatalogItemView])
+def create_qa_catalog_item(
+    payload: LineQaItemCreateRequest,
+    _: AdminPrincipal = Depends(require_line_configuration_reader),
+):
+    try:
+        item = create_line_ai_qa_item(
+            question=payload.question,
+            answer=payload.answer,
+            category=payload.category,
+            tag=payload.tag,
+            aliases=payload.aliases,
+            enabled=payload.enabled,
+            notes=payload.notes,
+        )
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=500, detail=str(error))
+    return BaseResponse(
+        data=LineQaCatalogItemView(
+            id=item.id,
+            category=item.category,
+            tag=item.tag,
+            question=item.question,
+            aliases=item.aliases,
+            answer=item.answer,
+            enabled=item.enabled,
+            source_ref=item.source_ref,
+            notes=item.notes,
+        ),
+        message="已成功建立新 QA 題目",
+    )
+
+
 @router.get("/feedback/aggregate", response_model=BaseResponse[LineFeedbackAggregateView])
 def get_feedback_aggregate(
     _: AdminPrincipal = Depends(require_line_configuration_reader),
@@ -181,7 +304,7 @@ def _development_identity_fallback_enabled() -> bool:
     access_profile = os.getenv("ACCESS_CONTROL_PROFILE", "").strip().lower()
     required = os.getenv("LIFF_REQUIRE_ID_TOKEN", "true").strip().lower()
     return (
-        access_profile == "local_bypass"
+        access_profile in {"local_bypass", "local_auth"}
         and app_env in {"development", "dev", "local", "test"}
         and required in {"0", "false", "no", "off"}
     )

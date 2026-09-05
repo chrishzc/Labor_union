@@ -25,6 +25,7 @@ import { realisticOrderDetail } from './fixtures/orders_real_data_fixtures';
 import { buildOrdersStageProjectionFixture } from './fixtures/orders_stage_projection_fixtures';
 import { schedulePrecisionClient } from '../api/scheduling/schedule_precision_client';
 import { historicalServiceAccountingClient } from '../api/orders/historical_service_accounting_client';
+import { ApiHttpError, ApiNetworkError } from '../api/shared/typed_errors';
 
 describe('Confirmed Service Dates Component Flow Suite', () => {
   const originalFetch = globalThis.fetch;
@@ -238,7 +239,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     fireEvent.change(reasonInput, { target: { value: '客戶確認服務日期無誤' } });
 
     // 點擊確認套用
-    const applyBtn = await screen.findByRole('button', { name: /確認套用服務日期/ });
+    const applyBtn = await screen.findByRole('button', { name: /儲存排班結果/ });
     expect(applyBtn).not.toBeDisabled();
 
     await act(async () => {
@@ -716,7 +717,11 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     expect(columnOf(weeklyOneGrid, '2026-09-13 固定排休，點擊改為正式服務日')).toBe(0);
   });
 
-  it('歷史訂單重啟後無可信排休類型時改由人工確認真實服務日期', async () => {
+  it.each([
+    ['404', new ApiHttpError(404, 'calendar_detail_not_found', '找不到行事曆')],
+    ['500', new ApiHttpError(500, 'calendar_detail_failed', '行事曆服務失敗')],
+    ['network', new ApiNetworkError('行事曆網路失敗')],
+  ])('歷史訂單重啟後 calendar detail %s 時不捏造週休模式並允許人工日期', async (_kind, calendarError) => {
     const historicalPage = {
       items: [{
         case_no: 'ORD-HISTORY-1',
@@ -758,9 +763,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
         '2026-09-05', '2026-09-06', '2026-09-07',
       ],
     });
-    vi.spyOn(ordersQueryClient, 'getOrderCalendarDetail').mockRejectedValue(
-      new Error('historical source has no fixed-rest root'),
-    );
+    vi.spyOn(ordersQueryClient, 'getOrderCalendarDetail').mockRejectedValue(calendarError);
     const calculate = vi.spyOn(schedulePrecisionClient, 'calculate').mockResolvedValue(
       precisionResult(['2026-09-01', '2026-09-02', '2026-09-03']),
     );
@@ -815,6 +818,11 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       expect(screen.queryByText(/目前狀態為「歷史訂單－未服務」/)).not.toBeInTheDocument();
     });
     expect(calculate).not.toHaveBeenCalled();
+
+    const actualStartInput = screen.getByLabelText('更正實際服務開始日');
+    expect(actualStartInput).not.toBeDisabled();
+    fireEvent.change(actualStartInput, { target: { value: '2026-09-02' } });
+    expect(actualStartInput).toHaveValue('2026-09-02');
 
     fireEvent.click(screen.getByRole('button', { name: '2026-09-01 未選，點擊設為真實服務日' }));
     fireEvent.click(screen.getByRole('button', { name: '2026-09-02 未選，點擊設為真實服務日' }));

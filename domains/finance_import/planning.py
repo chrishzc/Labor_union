@@ -73,6 +73,7 @@ class FinanceImportBatchFacts:
     rows: tuple[CanonicalFinanceImportRow, ...]
     batch_completed: bool = True
     integrity_violations: tuple[str, ...] = ()
+    source_review_occurrence_count: int = 0
 
     def __post_init__(self) -> None:
         _validate_batch_identity(self)
@@ -232,7 +233,9 @@ def _batch_blocking_codes(
     if not facts.batch_completed:
         blockers.add("batch_not_completed")
     if (
-        facts.canonical_created_count + facts.duplicate_occurrence_count
+        facts.canonical_created_count
+        + facts.duplicate_occurrence_count
+        + facts.source_review_occurrence_count
         != facts.source_row_count
     ):
         blockers.add("occurrence_count_mismatch")
@@ -403,6 +406,10 @@ def _validate_batch_counts(facts: FinanceImportBatchFacts) -> None:
     require_nonnegative_integer(
         facts.duplicate_occurrence_count,
         "duplicate occurrence count",
+    )
+    require_nonnegative_integer(
+        facts.source_review_occurrence_count,
+        "source review occurrence count",
     )
 
 

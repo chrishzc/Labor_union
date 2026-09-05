@@ -54,3 +54,33 @@ class LineQaCatalogView(BaseModel):
     total_count: int = Field(ge=0)
     enabled_count: int = Field(ge=0)
     items: tuple[LineQaCatalogItemView, ...] = ()
+
+
+class LineQaItemUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=1000)
+    answer: str = Field(default="", max_length=5000)
+    category: str = Field(min_length=1, max_length=100)
+    tag: str = Field(min_length=1, max_length=100)
+    aliases: tuple[str, ...] = ()
+    enabled: bool = True
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class LineQaItemToggleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+
+
+class LineQaItemCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=1000)
+    answer: str = Field(default="", max_length=5000)
+    category: str = Field(default="一般諮詢", max_length=100)
+    tag: str = Field(default="常見問題", max_length=100)
+    aliases: tuple[str, ...] = ()
+    enabled: bool = True
+    notes: str | None = Field(default=None, max_length=2000)

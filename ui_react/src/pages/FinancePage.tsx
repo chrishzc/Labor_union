@@ -83,7 +83,11 @@ export const FinancePage: React.FC = () => {
   const [reload, setReload] = useState(0);
   const controllers = useRef(new Map<string, AbortController>());
   const sequences = useRef(new Map<string, number>());
-  const financeApplyCorrelationByPreview = useRef(new Map<string, string>());
+  const financeApplyCommandByPreview = useRef(new Map<string, { correlationId: string; reason: string }>());
+  const submittedFinanceCommand = batchPreview.kind === 'ready'
+    ? financeApplyCommandByPreview.current.get(batchPreview.data.preview_fingerprint)
+    : undefined;
+  const displayedApplyReason = submittedFinanceCommand?.reason ?? applyReason;
 
   useEffect(() => () => controllers.current.forEach((controller) => controller.abort()), []);
 
@@ -212,10 +216,10 @@ export const FinancePage: React.FC = () => {
     setApplyJob({ kind: 'loading' }); setBatchOutcome({ kind: 'idle' });
     try {
       const previewFingerprint = batchPreview.data.preview_fingerprint;
-      const correlationId = financeApplyCorrelationByPreview.current.get(previewFingerprint)
-        ?? `ui-finance-apply-${crypto.randomUUID()}`;
-      financeApplyCorrelationByPreview.current.set(previewFingerprint, correlationId);
-      const accepted = await financeImportMutationClient.apply(batchPreview.data, applyReason, { idempotencyKey: `ui-finance-apply-${previewFingerprint}`, correlationId });
+      const command = financeApplyCommandByPreview.current.get(previewFingerprint)
+        ?? { correlationId: `ui-finance-apply-${crypto.randomUUID()}`, reason: applyReason.trim() };
+      financeApplyCommandByPreview.current.set(previewFingerprint, command);
+      const accepted = await financeImportMutationClient.apply(batchPreview.data, command.reason, { idempotencyKey: `ui-finance-apply-${previewFingerprint}`, correlationId: command.correlationId });
       setApplyJob({ kind: 'ready', data: accepted });
       await observeApplyOutcome(accepted.job_id);
     } catch (error) { setApplyJob({ kind: 'error', message: financeErrorMessage(error, '正式匯入未受理，請重新預覽後再試。') }); }
@@ -715,7 +719,8 @@ export const FinancePage: React.FC = () => {
                       正式入帳原因
                       <input
                         className="finance-input"
-                        value={applyReason}
+                        value={displayedApplyReason}
+                        disabled={submittedFinanceCommand !== undefined}
                         maxLength={500}
                         onChange={(event) => {
                           setApplyReason(event.target.value);
@@ -735,7 +740,7 @@ export const FinancePage: React.FC = () => {
                       className="finance-btn-primary"
                       style={{ alignSelf: 'flex-start' }}
                       data-control-id="finance.finance-import.apply"
-                      disabled={!applyConfirmed || !applyReason.trim() || applyJob.kind === 'loading' || batchOutcome.kind === 'loading'}
+                      disabled={!applyConfirmed || !displayedApplyReason.trim() || applyJob.kind === 'loading' || batchOutcome.kind === 'loading'}
                       onClick={() => void applyImportedBatch()}
                     >
                       {applyJob.kind === 'loading' || batchOutcome.kind === 'loading' ? '正式匯入中…' : '確認匯入'}

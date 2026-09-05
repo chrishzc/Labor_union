@@ -9,39 +9,43 @@
   "test_kinds": ["typed_query_view", "expected_manifest"],
   "coverage_ids": ["ORD-QRY-01"],
   "source_refs": [
-    "document/架構重整/01_規格基線/01_Orders_Domain.md#3.1 Order Query"
+    "document/架構重整/01_規格基線/01_Orders_Domain.md#3.1 Order Query",
+    "document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md#3"
   ],
   "root_facts": [
     "A read-only repository projection harness with one declared selected-order row and a separate selected-case identity.",
     "A synthetic HTTP success or malformed response envelope used only to exercise the typed client boundary."
   ],
   "forbidden_direct_seed": [
-    "editor input dictionary before typed OrderDetailView validation",
+    "drawer presentation state before typed OrderDetailView validation",
     "query-side order mutation, lifecycle event, receipt, alert or state transition"
   ],
   "commands": [
     "Query one selected case through the declared repository projection service.",
-    "Validate the HTTP payload as OrderDetailView, then render the editor from that validated view.",
+    "Validate the HTTP payload against the current React OrderDetail schema, then derive drawer presentation from typed facts.",
     "Submit a malformed success envelope to the client boundary."
   ],
   "expected": [
     "The repository projection accepts only declared canonical fields and rejects missing, unexpected or noncanonical values.",
-    "The UI client returns a typed OrderDetailView; the overview converts only that validated view to the editor JSON shape.",
-    "A malformed successful response is reported as a typed client error and never reaches the editor."
+    "The React query client returns the typed OrderDetail payload; drawer adapters use typed facts without inventing missing business projections.",
+    "A malformed successful response is reported as a typed client error and never becomes a successful typed view for a drawer adapter."
   ],
   "receipt_requirements": [
     "query-harness and expected-manifest digests",
     "declared-field and canonical-type assertions",
-    "typed client success, malformed response and editor-boundary assertions"
+    "typed client success, malformed response and typed drawer-adapter assertions"
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_detail_query.py tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_detail_query_repository.py tests\\test_order_detail_ui_client_boundary.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_detail_query.py tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_detail_query_repository.py",
+      "npm --prefix ui_react test -- src/tests/orders_query_client.test.ts src/tests/challenger_g2_orders_client.test.ts src/tests/orders_adapter.test.ts"
     ],
     "test_paths": [
       "tests/domains/orders/subsystems/orders/integration/test_order_detail_query.py",
       "tests/domains/orders/subsystems/orders/integration/test_order_detail_query_repository.py",
-      "tests/test_order_detail_ui_client_boundary.py"
+      "ui_react/src/tests/orders_query_client.test.ts",
+      "ui_react/src/tests/challenger_g2_orders_client.test.ts",
+      "ui_react/src/tests/orders_adapter.test.ts"
     ]
   }
 }

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 from pathlib import Path
 
@@ -30,34 +29,40 @@ def test_subject_identity_and_key_are_collation_independent() -> None:
     canonical = canonical_subject_identity(subject)
     assert canonical == '{"case_no":"CASE-7","notification_reason":"recipient_unavailable"}'
     payload = json.dumps(
-        {"v": 1, "definition_code": "LINE-006", "subject_identity": subject},
+        {
+            "v": 2,
+            "definition_code": "LINE-006",
+            "subject_identity": subject,
+            "lifecycle_token": "owner-lifecycle-7",
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
-    expected = "ci_" + hmac.new(b"test-secret", payload, hashlib.sha256).hexdigest()
-    assert build_issue_key("test-secret", "LINE-006", subject) == expected
-    assert build_issue_key("test-secret", "LINE-006", dict(reversed(tuple(subject.items())))) == expected
+    expected = "ci_" + hashlib.sha256(payload).hexdigest()
+    assert build_issue_key("LINE-006", subject, "owner-lifecycle-7") == expected
+    assert build_issue_key(
+        "LINE-006", dict(reversed(tuple(subject.items()))), "owner-lifecycle-7"
+    ) == expected
 
 
-def test_issue_key_requires_injected_secret() -> None:
-    try:
-        build_issue_key("", "LINE-006", {"case_no": "CASE-7", "notification_reason": "recipient_unavailable"})
-    except ValueError as error:
-        assert str(error) == "issue identity secret is required"
-    else:  # pragma: no cover - assertion form keeps the failure explicit
-        raise AssertionError("missing issue secret must fail closed")
+def test_issue_key_changes_for_a_new_lifecycle_without_secret() -> None:
+    subject = {"case_no": "CASE-7", "notification_reason": "recipient_unavailable"}
+    first = build_issue_key("LINE-006", subject, "owner-lifecycle-7")
+    repeated = build_issue_key("LINE-006", subject, "owner-lifecycle-7")
+    next_lifecycle = build_issue_key("LINE-006", subject, "owner-lifecycle-8")
+
+    assert first == repeated
+    assert next_lifecycle != first
+    assert first.startswith("ci_") and len(first) == 67
 
 
-def test_runtime_secret_is_only_used_through_key_composition() -> None:
-    runtime = MySqlAnomalyRuntime(issue_identity_secret="test-secret")
-    assert runtime.current_issue_key("LINE-006", {"case_no": "CASE-7", "notification_reason": "recipient_unavailable"}).startswith("ci_")
-    try:
-        MySqlAnomalyRuntime().current_issue_key("LINE-006", {"case_no": "CASE-7", "notification_reason": "recipient_unavailable"})
-    except RuntimeError as error:
-        assert str(error) == "anomaly issue identity secret not composed"
-    else:  # pragma: no cover
-        raise AssertionError("runtime without a secret must fail closed")
+def test_runtime_identity_requires_only_canonical_lifecycle_facts() -> None:
+    runtime = MySqlAnomalyRuntime()
+    subject = {"case_no": "CASE-7", "notification_reason": "recipient_unavailable"}
+    assert runtime.current_issue_key("LINE-006", subject, "owner-lifecycle-7") == build_issue_key(
+        "LINE-006", subject, "owner-lifecycle-7"
+    )
 
 
 def test_subject_schema_is_closed_for_the_current_code() -> None:

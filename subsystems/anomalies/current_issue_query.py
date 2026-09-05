@@ -1,12 +1,11 @@
-"""Bounded, signed-cursor query for the canonical current anomaly projection."""
+"""Bounded deterministic query for the canonical current anomaly projection."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
 import base64
-import hashlib
-import hmac
+import binascii
 import json
 from typing import Protocol
 
@@ -70,11 +69,7 @@ class CurrentIssueQueryRepository(Protocol):
 
 
 class CurrentIssueCursorCodec:
-    def __init__(self, secret: str | bytes) -> None:
-        rendered = secret.encode("utf-8") if isinstance(secret, str) else secret
-        if not isinstance(rendered, bytes) or len(rendered) < 32:
-            raise ValueError("anomaly cursor signing key is unavailable")
-        self._secret = rendered
+    """Encode only deterministic pagination state; authorization lives outside it."""
 
     def encode(
         self,
@@ -83,7 +78,7 @@ class CurrentIssueCursorCodec:
     ) -> str:
         candidate = last.candidate
         payload = {
-            "v": 1,
+            "v": 2,
             "filters": _filter_payload(request),
             "limit": request.limit,
             "last": [
@@ -93,9 +88,7 @@ class CurrentIssueCursorCodec:
                 last.issue_key,
             ],
         }
-        encoded = _b64(_canonical_json(payload))
-        signature = _b64(hmac.new(self._secret, encoded.encode("ascii"), hashlib.sha256).digest())
-        return encoded + "." + signature
+        return _b64(_canonical_json(payload))
 
     def decode(
         self,
@@ -104,14 +97,10 @@ class CurrentIssueCursorCodec:
         if request.cursor is None:
             return None
         try:
-            encoded, supplied_signature = request.cursor.split(".", 1)
-            expected = _b64(
-                hmac.new(self._secret, encoded.encode("ascii"), hashlib.sha256).digest()
-            )
-            if not hmac.compare_digest(supplied_signature, expected):
+            payload = json.loads(_unb64(request.cursor).decode("utf-8"))
+            if not isinstance(payload, dict) or set(payload) != {"v", "filters", "limit", "last"}:
                 raise ValueError
-            payload = json.loads(_unb64(encoded).decode("utf-8"))
-            if payload.get("v") != 1:
+            if payload.get("v") != 2:
                 raise ValueError
             if payload.get("filters") != _filter_payload(request):
                 raise ValueError
@@ -123,13 +112,22 @@ class CurrentIssueCursorCodec:
             blocking, severity_rank, episode_started_at, issue_key = last
             if blocking not in (0, 1) or severity_rank not in (1, 2):
                 raise ValueError
-            if not isinstance(issue_key, str) or not issue_key.startswith("ci_"):
+            if not _valid_issue_key(issue_key):
+                raise ValueError
+            if not isinstance(episode_started_at, str):
                 raise ValueError
             parsed = datetime.fromisoformat(episode_started_at)
             if parsed.tzinfo is None:
                 raise ValueError
             return blocking, severity_rank, parsed, issue_key
-        except (AttributeError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+        except (
+            AttributeError,
+            binascii.Error,
+            UnicodeDecodeError,
+            UnicodeEncodeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as error:
             raise ValueError("anomaly_cursor_invalid") from error
 
 
@@ -192,12 +190,19 @@ def _canonical_json(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
+def _valid_issue_key(value: object) -> bool:
+    if not isinstance(value, str) or len(value) != 67 or not value.startswith("ci_"):
+        return False
+    return all(character in "0123456789abcdef" for character in value[3:])
+
+
 def _b64(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
 
 def _unb64(value: str) -> bytes:
-    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    raw = value.encode("ascii")
+    return base64.b64decode(raw + b"=" * (-len(raw) % 4), altchars=b"-_", validate=True)
 
 
 __all__ = [

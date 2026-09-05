@@ -93,4 +93,50 @@ class WeeklyOperationsReportView(_StrictModel):
     data_quality_issues: list[WeeklyReportDataQualityIssueView]
 
 
-__all__ = ["WeeklyOperationsReportView"]
+class WeeklyBatchView(_StrictModel):
+    id: int
+    year: int
+    week_code: str
+    cutoff_at: datetime
+    promotion_count: int
+    inquiry_count: int
+    notes: str | None
+    case_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class UnclosedCaseView(_StrictModel):
+    case_no: str
+    applicant_name: str
+    created_at: datetime | None
+    order_status: str | None
+    service_days: int | None
+    service_hours_per_day: int | None
+
+
+class CloseWeeklyBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    year: int = Field(..., ge=1912)
+    week_code: str = Field(..., min_length=1, max_length=20)
+    promotion_count: int = Field(0, ge=0)
+    inquiry_count: int = Field(0, ge=0)
+    case_nos: list[str] | None = None
+    notes: str | None = None
+
+
+class UpdateWeeklyBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    promotion_count: int = Field(..., ge=0)
+    inquiry_count: int = Field(..., ge=0)
+    week_code: str | None = Field(None, min_length=1, max_length=20)
+    notes: str | None = None
+
+
+__all__ = [
+    "WeeklyOperationsReportView",
+    "WeeklyBatchView",
+    "UnclosedCaseView",
+    "CloseWeeklyBatchRequest",
+    "UpdateWeeklyBatchRequest",
+]

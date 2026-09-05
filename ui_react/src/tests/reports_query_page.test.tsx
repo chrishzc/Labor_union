@@ -38,8 +38,8 @@ describe('ReportsPage query-only presentation', () => {
     expect(screen.getAllByText('NT$ 12,000').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/^\d{4}-\d{2}-\d{2}～\d{4}-\d{2}-\d{2}$/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/年初至本週/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
-    expect(screen.getByText('陳**')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '每周服務中說明' }));
+    expect(screen.getByText('王**')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '下載營運報表 XLSX' }));
     await waitFor(() => expect(weeklyOperationsReportExportClient.download).toHaveBeenCalledTimes(1));
@@ -116,5 +116,32 @@ describe('ReportsPage query-only presentation', () => {
     });
     expect(screen.queryByText('XLSX 已產生並開始下載。')).not.toBeInTheDocument();
     expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
+  });
+
+  it('可輸入推廣次數與詢問人次並於下載週報時帶入，且季度補助與年度補助無雙分頁下載按鈕', async () => {
+    render(<ReportsPage />);
+    await screen.findByText('CASE-WEEK-001');
+
+    const promoInput = screen.getByLabelText('推廣次數') as HTMLInputElement;
+    const inqInput = screen.getByLabelText('詢問人次') as HTMLInputElement;
+    fireEvent.change(promoInput, { target: { value: '15' } });
+    fireEvent.change(inqInput, { target: { value: '42' } });
+
+    fireEvent.click(screen.getByRole('button', { name: '下載營運報表 XLSX' }));
+    await waitFor(() => expect(weeklyOperationsReportExportClient.download).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({
+        promotionCount: 15,
+        inquiryCount: 42,
+        annualYtd: true,
+      }),
+      expect.any(AbortSignal),
+    ));
+
+    fireEvent.change(screen.getByLabelText('報表範圍'), { target: { value: 'quarterly' } });
+    await waitFor(() => expect(subsidyReportQueryClient.query).toHaveBeenCalledTimes(1));
+
+    expect(screen.queryByText('下載核銷含印領清冊 (雙分頁)')).not.toBeInTheDocument();
   });
 });

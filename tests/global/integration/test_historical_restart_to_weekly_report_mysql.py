@@ -14,10 +14,35 @@ from scripts.bootstrap_disposable_mysql_schema import bootstrap
 
 
 DATABASE = os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE")
+EXISTING_DATABASE_ACCEPTANCE = os.getenv(
+    "LABOR_UNION_EXISTING_DB_ACCEPTANCE"
+) == "1"
 pytestmark = pytest.mark.skipif(
-    not DATABASE,
+    not DATABASE and not EXISTING_DATABASE_ACCEPTANCE,
     reason="requires an explicitly configured disposable lu_test_* MySQL database",
 )
+
+
+class _RollbackOnlyConnection:
+    """Exercise real MySQL paths while preventing scenario commits from persisting."""
+
+    def __init__(self, connection):
+        self._connection = connection
+
+    def cursor(self, *args, **kwargs):
+        return self._connection.cursor(*args, **kwargs)
+
+    def begin(self):
+        return None
+
+    def commit(self):
+        return None
+
+    def rollback(self):
+        return self._connection.rollback()
+
+    def close(self):
+        return None
 
 
 def _arguments(database: str) -> Namespace:
@@ -367,12 +392,22 @@ def _confirm_dates(connection, case_no: str):
     dates = (date(2026, 9, 3), date(2026, 9, 4))
     preview = workflow.preview(case_no, dates)
     facts = workflow.query(case_no)
-    return workflow.apply(
-        case_no, dates, expected_order_version=facts.order_version,
+    arguments = dict(
+        expected_order_version=facts.order_version,
         expected_scheduling_version=facts.scheduling_version,
-        preview_fingerprint=preview.candidate.fingerprint.value, actor="test",
-        reason="confirm restarted dates", idempotency_key=f"{case_no}-dates",
+        preview_fingerprint=preview.candidate.fingerprint.value,
+        actor="test",
+        reason="confirm restarted dates",
+        idempotency_key=f"{case_no}-dates",
     )
+    receipt = workflow.apply(
+        case_no, dates, **arguments
+    )
+    replay = workflow.apply(
+        case_no, dates, **arguments
+    )
+    assert replay == receipt
+    return receipt
 
 
 def _confirm_matching(connection, case_no: str, plan_id: int) -> None:
@@ -421,6 +456,150 @@ def _apply_assignment(connection, case_no: str, staff_id: int):
     ))
 
 
+def _confirm_actual_start(connection, case_no: str):
+    from api.dependencies.order_actual_start import ActualStartApplication
+    from infrastructure.mysql.order_actual_start_repository import MySqlOrderActualStartRepository
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
+    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.orders.actual_start_workflow import ActualStartApplyRequest, ActualStartWorkflow
+
+    repository = MySqlOrderActualStartRepository(connection)
+    workflow = ActualStartWorkflow(
+        repository,
+        lambda: MySqlUnitOfWork(connection),
+        FixedBusinessClock(datetime(2026, 9, 3, 12, tzinfo=TAIPEI_TIME_ZONE)),
+    )
+    application = ActualStartApplication(repository, workflow)
+    preview = application.preview(case_no, date(2026, 9, 3))
+    return application.apply(ActualStartApplyRequest(
+        case_no,
+        date(2026, 9, 3),
+        ExpectedVersion(preview.order_version),
+        ExpectedVersion(preview.scheduling_version),
+        ExpectedVersion(preview.client_finance_version),
+        ExpectedVersion(preview.payroll_version),
+        preview.fingerprint,
+        IdempotencyKey(f"{case_no}-actual-start"),
+        ActorContext("test"),
+        "confirm restarted actual start",
+        CorrelationId(f"{case_no}-actual-start"),
+    ))
+
+
+@pytest.mark.skipif(
+    not EXISTING_DATABASE_ACCEPTANCE,
+    reason="requires explicit existing-database acceptance opt-in",
+)
+@pytest.mark.parametrize("historical_status", ["歷史訂單－未服務", "歷史訂單－服務中"])
+def test_existing_database_restart_writes_and_reads_canonical_schedule(
+    historical_status: str,
+) -> None:
+    from infrastructure.mysql.leave_substitution_repository import (
+        MySqlLeaveSubstitutionRepository,
+    )
+    from infrastructure.mysql.scheduling_current_projection_repository import (
+        MySqlSchedulingCurrentProjectionRepository,
+    )
+    from infrastructure.mysql.weekly_operations_report_query_adapter import (
+        MySqlWeeklyOperationsReportQueryAdapter,
+    )
+    from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
+    from subsystems.reporting.weekly_operations_report_query import WeeklyOperationsReportQuery
+    from subsystems.scheduling.current_projection_workflow import (
+        SchedulingCurrentProjectionWorkflow,
+        SchedulingCurrentQuery,
+    )
+
+    database = os.environ["DB_DATABASE"]
+    case_no = (
+        "CODEX-PR-A-20260903"
+        if historical_status.endswith("未服務")
+        else "CODEX-PR-B-20260903"
+    )
+    raw_connection = pymysql.connect(
+        host=os.environ["DB_HOST"],
+        port=int(os.environ["DB_PORT"]),
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
+        database=database,
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+        autocommit=False,
+    )
+    connection = _RollbackOnlyConnection(raw_connection)
+    try:
+        raw_connection.begin()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT DATABASE() AS database_name")
+            assert cursor.fetchone()["database_name"] == "union_db"
+            cursor.execute("SELECT COUNT(*) AS count FROM orders WHERE case_no=%s", (case_no,))
+            assert cursor.fetchone()["count"] == 0
+            staff_id, _legacy_assignment_id = _seed_owner_roots(
+                cursor, case_no, historical_status
+            )
+            _seed_settled_deposit(cursor, case_no)
+
+        report = MySqlWeeklyOperationsReportQueryAdapter(connection)
+        assert report.list_service_facts(date(2026, 9, 3), date(2026, 9, 4)) == []
+        restart = _restart(connection, case_no)
+        dates = _confirm_dates(connection, case_no)
+        assert dates.scheduling_version == restart.scheduling_version + 1
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT assignment.id FROM scheduling_aggregates aggregate "
+                "JOIN case_staff_assignments assignment "
+                "ON assignment.generation_id=aggregate.effective_generation_id "
+                "WHERE aggregate.case_no=%s AND assignment.status='planned'",
+                (case_no,),
+            )
+            assignment_id = cursor.fetchone()["id"]
+            cursor.execute(
+                "SELECT work_date FROM staff_schedule WHERE assignment_id=%s "
+                "AND effective_marker=1 AND is_work_day=1 ORDER BY work_date",
+                (assignment_id,),
+            )
+            assert [row["work_date"] for row in cursor.fetchall()] == [
+                date(2026, 9, 3), date(2026, 9, 4),
+            ]
+            cursor.execute(
+                "SELECT policy_version,policy_kind,hourly_rate_ntd,source_identity_status "
+                "FROM assignment_payroll_rate_snapshots WHERE assignment_id=%s",
+                (assignment_id,),
+            )
+            assert cursor.fetchone() == {
+                "policy_version": "approved-rates-v1",
+                "policy_kind": "citizen",
+                "hourly_rate_ntd": 300,
+                "source_identity_status": "case-policy",
+            }
+
+        current = SchedulingCurrentProjectionWorkflow(
+            MySqlSchedulingCurrentProjectionRepository(connection),
+            FixedBusinessClock(datetime(2026, 9, 3, 12, tzinfo=TAIPEI_TIME_ZONE)),
+        ).query(SchedulingCurrentQuery(staff_id, date(2026, 9, 3), date(2026, 9, 4)))
+        assert [item.assignment_id for item in current.assignments] == [assignment_id]
+        leave = MySqlLeaveSubstitutionRepository(connection).list_effective_assignments(case_no)
+        assert [item["id"] for item in leave] == [assignment_id]
+        assert [day["work_date"] for day in leave[0]["official_schedules"]] == [
+            date(2026, 9, 3), date(2026, 9, 4),
+        ]
+        weekly = WeeklyOperationsReportQuery(
+            report,
+            lambda: datetime(2026, 9, 4, 18, tzinfo=TAIPEI_TIME_ZONE),
+        ).query(date(2026, 9, 3), date(2026, 9, 4))
+        assert [
+            (row.case_no, row.weekly_work_days, row.weekly_hours)
+            for row in weekly.service_rows
+        ] == [(case_no, 2, 16)]
+        actual_start = _confirm_actual_start(connection, case_no)
+        assert actual_start.official_service_day_count == 2
+    finally:
+        raw_connection.rollback()
+        raw_connection.close()
+
+
 @pytest.mark.parametrize("historical_status", ["歷史訂單－未服務", "歷史訂單－服務中"])
 def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
     historical_status: str,
@@ -431,6 +610,9 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
     bootstrap(_arguments(database))
     from infrastructure.mysql.scheduling_current_projection_repository import (
         MySqlSchedulingCurrentProjectionRepository,
+    )
+    from infrastructure.mysql.leave_substitution_repository import (
+        MySqlLeaveSubstitutionRepository,
     )
     from infrastructure.mysql.weekly_operations_report_query_adapter import (
         MySqlWeeklyOperationsReportQueryAdapter,
@@ -475,6 +657,63 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
 
         dates = _confirm_dates(connection, case_no)
         assert dates.service_dates == (date(2026, 9, 3), date(2026, 9, 4))
+        assert dates.scheduling_version == restart.scheduling_version + 1
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT assignment.id,assignment.generation_id FROM scheduling_aggregates aggregate "
+                "JOIN case_staff_assignments assignment "
+                "ON assignment.generation_id=aggregate.effective_generation_id "
+                "WHERE aggregate.case_no=%s AND assignment.status='planned'",
+                (case_no,),
+            )
+            saved_assignment = cursor.fetchone()
+            assert saved_assignment is not None
+            cursor.execute(
+                "SELECT work_date,is_work_day,effective_marker FROM staff_schedule "
+                "WHERE assignment_id=%s ORDER BY work_date",
+                (saved_assignment["id"],),
+            )
+            assert cursor.fetchall() == [
+                {"work_date": date(2026, 9, 3), "is_work_day": 1, "effective_marker": 1},
+                {"work_date": date(2026, 9, 4), "is_work_day": 1, "effective_marker": 1},
+            ]
+
+        # The ordinary Scheduling read model must see the persisted generation
+        # immediately; an HTTP success or React draft is not the acceptance oracle.
+        saved_current = SchedulingCurrentProjectionWorkflow(
+            MySqlSchedulingCurrentProjectionRepository(connection),
+            FixedBusinessClock(datetime(2026, 9, 3, 12, tzinfo=TAIPEI_TIME_ZONE)),
+        ).query(SchedulingCurrentQuery(staff_id, date(2026, 9, 3), date(2026, 9, 4)))
+        assert len(saved_current.assignments) == 1
+        assert saved_current.assignments[0].assignment_id == saved_assignment["id"]
+        leave_assignments = MySqlLeaveSubstitutionRepository(
+            connection
+        ).list_effective_assignments(case_no)
+        assert len(leave_assignments) == 1
+        assert leave_assignments[0]["id"] == saved_assignment["id"]
+        assert [item["work_date"] for item in leave_assignments[0]["official_schedules"]] == [
+            date(2026, 9, 3), date(2026, 9, 4),
+        ]
+        saved_weekly = WeeklyOperationsReportQuery(
+            report,
+            lambda: datetime(2026, 9, 4, 18, tzinfo=TAIPEI_TIME_ZONE),
+        ).query(date(2026, 9, 3), date(2026, 9, 4))
+        assert [(row.case_no, row.weekly_work_days, row.weekly_hours) for row in saved_weekly.service_rows] == [
+            (case_no, 2, 16),
+        ]
+
+        # Before the canonical schedule existed this command failed with
+        # scheduling_assignments_required.  Restart provenance itself must not
+        # remain a blocker; the ordinary Actual Start writer still enforces
+        # settlement, service lock, versions, and all downstream impacts.
+        actual_start = _confirm_actual_start(connection, case_no)
+        assert actual_start.official_service_day_count == 2
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT actual_start_date FROM orders WHERE case_no=%s", (case_no,)
+            )
+            assert cursor.fetchone()["actual_start_date"] == date(2026, 9, 3)
+
         plan_id, segment_id = _create_matching_plan(connection, database, case_no, staff_id)
         _record_matching_acceptance(database, case_no, plan_id, segment_id)
         _confirm_matching(connection, case_no, plan_id)
@@ -538,6 +777,6 @@ def test_historical_restart_reenters_canonical_scheduling_and_weekly_report(
         assert service.service_end_date == date(2026, 9, 4)
         assert service.weekly_work_days == 2
         assert service.weekly_hours == 16
-        assert assignment.scheduling_generation == restart.scheduling_generation + 1
+        assert assignment.scheduling_generation == restart.scheduling_generation + 3
     finally:
         connection.close()

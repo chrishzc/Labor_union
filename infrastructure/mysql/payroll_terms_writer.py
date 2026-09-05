@@ -21,6 +21,56 @@ def persist_payroll_terms_impact(cursor, command) -> None:
     _append_outbox(cursor, command)
 
 
+def persist_scheduling_assignment_rate_snapshots(cursor, scheduling_command, result) -> None:
+    """Freeze Payroll rates for assignments created by a Scheduling replacement."""
+
+    cursor.execute(
+        "SELECT policy_version,policy_kind,hourly_rate_ntd,source_identity_status "
+        "FROM case_payroll_rate_policy_snapshots WHERE case_no=%s",
+        (scheduling_command.candidate.case_no,),
+    )
+    case_policy = cursor.fetchone()
+    rows = []
+    for assignment in scheduling_command.candidate.assignments:
+        source_policy = None
+        if assignment.source_assignment_id is not None:
+            cursor.execute(
+                "SELECT policy_version,policy_kind,hourly_rate_ntd,source_identity_status "
+                "FROM assignment_payroll_rate_snapshots WHERE assignment_id=%s",
+                (assignment.source_assignment_id,),
+            )
+            source_policy = cursor.fetchone()
+        policy = source_policy or case_policy
+        if policy is None:
+            raise ValueError("payroll_case_policy_bootstrap_required")
+        source_identity = (
+            f"carried-from:{assignment.source_assignment_id}"
+            if source_policy is not None
+            else "case-policy"
+        )
+        assignment_id = result.assignment_resolution.assignment_id_by_candidate_key.get(
+            assignment.candidate_key
+        )
+        if assignment_id is None:
+            raise ValueError("assignment identity resolution is incomplete")
+        rows.append(
+            (
+                assignment_id,
+                policy["policy_version"],
+                policy["policy_kind"],
+                policy["hourly_rate_ntd"],
+                source_identity,
+            )
+        )
+    if rows:
+        cursor.executemany(
+            "INSERT INTO assignment_payroll_rate_snapshots "
+            "(assignment_id,policy_version,policy_kind,hourly_rate_ntd,"
+            "source_identity_status) VALUES (%s,%s,%s,%s,%s)",
+            tuple(rows),
+        )
+
+
 def _insert_special_pay_events(cursor, command):
     for event in command.special_pay_events:
         assignment_id = _resolved_assignment_id(command, event.assignment_identity)

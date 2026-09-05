@@ -22,7 +22,7 @@ class _CaptureApplication:
 
 class _CaptureRuntime(MySqlAnomalyRuntime):
     def __init__(self, expected_reader: str, expected_consumer: str):
-        super().__init__(issue_identity_secret="runtime-composition-secret-32-bytes")
+        super().__init__()
         self.expected_reader = expected_reader
         self.expected_consumer = expected_consumer
 
@@ -35,7 +35,7 @@ class _CaptureRuntime(MySqlAnomalyRuntime):
         )
 
 
-def test_runtime_composes_line006_owner_reader_and_detector() -> None:
+def test_runtime_composes_line006_owner_reader_and_detector_without_secret() -> None:
     owner_domain = "line"
     owner_root_type = "notification_failure"
     subject_type = "recipient_unavailable"

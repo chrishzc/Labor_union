@@ -14,6 +14,7 @@
 - `historical-adoption-presentation` — historical workbook typed API client／adapter 與狀態統計呈現; path: `modules/historical-adoption-presentation.md`
 - `historical-stage-baseline` — 已採納歷史訂單的唯讀作業階段 baseline overlay; path: `modules/historical-stage-baseline.md`
 - `actual-start` — Actual Start 正式服務日重建與跨 owner projection；path: `modules/actual-start.md`
+- `service-date-confirmation` — 人工服務日期確認；Precision Restart 空 tombstone 時交由 Scheduling canonical writer 建立正式排班；path: `modules/service-date-confirmation.md`
 - `operational-stage-projection` — Orders 七階段唯讀投影；path: `modules/operational-stage-projection.md`
 - `lifecycle-authoritative-facts` — lifecycle／自動完成所需的鎖定根事實；path: `modules/lifecycle-authoritative-facts.md`
 - `historical-completion` — Orders-owned Step 11 cross-owner Query、typed referral及fresh settlement Preview／Apply; path: `modules/historical-completion.md`

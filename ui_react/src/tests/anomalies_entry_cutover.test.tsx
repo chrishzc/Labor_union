@@ -198,7 +198,7 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
     render(
       <MasterLayout
         currentSection="audit"
-        currentPage="system-status"
+        currentPage="account-management"
         onSelectSection={vi.fn()}
         onSelectPage={onSelectPage}
         onLogout={vi.fn()}

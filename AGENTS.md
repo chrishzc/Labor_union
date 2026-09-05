@@ -2,6 +2,8 @@
 
 本檔是 repository-wide 基線。最新人工明確指示優先，其次為 `document/架構重整/01_規格基線/` 的 current 正式規格與可追溯業務／欄位權威；程式碼、測試、附件與 Git history 只提供 evidence，不得反向創造需求或覆蓋正式語意。
 
+Agent 任務分級、交付與治理路由以 `document/架構重整/00_Agent任務分級與交付規範.md` 為準；本檔只提供 repository-wide routing。
+
 `.agents/AGENTS.md` 只能補充個人互動與 Git 偏好，不得覆蓋本檔或正式規格。不得 reset、clean、stash、覆蓋、搬移或刪除既有 ignored／untracked／dirty 使用者成果。
 
 ## 1. 預設導航與停止條件

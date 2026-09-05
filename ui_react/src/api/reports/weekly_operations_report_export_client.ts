@@ -17,12 +17,36 @@ function filenameFromHeader(value: string | null, fallback: string): string {
   return candidate && candidate.toLowerCase().endsWith('.xlsx') ? candidate : fallback;
 }
 
+export interface WeeklyOperationsReportExportOptions {
+  promotionCount?: number | null;
+  inquiryCount?: number | null;
+  annualYtd?: boolean;
+}
+
 export const weeklyOperationsReportExportClient = {
-  async download(startDate: string, endDate: string, signal?: AbortSignal): Promise<WeeklyOperationsReportExportArtifact> {
+  async download(
+    startDate: string,
+    endDate: string,
+    options?: WeeklyOperationsReportExportOptions,
+    signal?: AbortSignal,
+  ): Promise<WeeklyOperationsReportExportArtifact> {
     validateOperationsReportDateRange(startDate, endDate);
     const token = sessionClient.getToken();
     if (!token) throw new WeeklyOperationsReportError('WEEKLY_REPORT_UNAUTHENTICATED', '請先登入後再匯出週報。', false, 401);
-    const response = await fetch(`/api/v1/operations-reports/weekly/export?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`, {
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate,
+    });
+    if (options?.promotionCount !== undefined && options.promotionCount !== null) {
+      params.set('promotion_count', String(options.promotionCount));
+    }
+    if (options?.inquiryCount !== undefined && options.inquiryCount !== null) {
+      params.set('inquiry_count', String(options.inquiryCount));
+    }
+    if (options?.annualYtd !== undefined) {
+      params.set('annual_ytd', String(options.annualYtd));
+    }
+    const response = await fetch(`/api/v1/operations-reports/weekly/export?${params.toString()}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
       signal,

@@ -343,8 +343,13 @@ consumer 不得修改 Orders 或任何其他 Domain root；binding／menu versio
   固定週休，不能覆寫國定假日休假或事前請假。取消覆寫後必須恢復該固定週休。
 - UI 不得自行加減、重排或提交服務日；每次覆寫都必須重新取得目標合約天數完全守恆、且全數位於
   server `selectable_dates` 的結果，才可進入既有服務日期 Preview／Apply。
-- 本節只確認 Orders 的事前服務日期，不得直接切換 `staff_schedule.is_work_day`、建立 assignment
-  或替代正式請假／代班流程；正式排班後的請假與代班仍由 Scheduling 擁有。
+- 一般案件本節只確認 Orders 的事前服務日期，不得直接切換 `staff_schedule.is_work_day`、建立 assignment
+  或替代正式請假／代班流程；正式排班後的請假與代班仍由 Scheduling 擁有。完成 Precision Restart、
+  current effective generation 仍是空 tombstone 且歷史 caregiver assignment 可唯一追溯時，「儲存排班結果」
+  必須在同一交易以 Scheduling canonical generation replacement writer 建立 current `staff_schedule`，並以 server
+  read-back 為成功依據；新 assignment 同交易凍結既有 source assignment rate，若來源尚無 snapshot 則使用案件
+  已存在的 case payroll policy，不得自造費率。不得建立 historical overlay。多月嫂日期配置無法由既有正式
+  allocation 唯一決定時 fail closed。
 
 ### 3.5 Cancellation
 
