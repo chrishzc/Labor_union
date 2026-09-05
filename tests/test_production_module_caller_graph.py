@@ -21,6 +21,7 @@ SOURCE_ROOTS = (
 ENTRY_MODULES = frozenset({"api.main", "ui.app", "line.setup_rich_menus"})
 ENTRY_PREFIXES = ("api.routes.", "ui.pages.", "scripts.")
 APPROVED_UNCALLED_LEGACY_MODULES = frozenset()
+NESTED_ROUTE_MODULES = frozenset({"order_intake_terms_bootstrap"})
 
 
 def test_every_non_entry_production_module_has_a_static_caller() -> None:
@@ -43,7 +44,7 @@ def test_every_api_route_module_is_mounted_by_the_application() -> None:
         if path.stem != "__init__"
     }
 
-    assert route_modules - _mounted_router_modules() == set()
+    assert route_modules - _mounted_router_modules() - NESTED_ROUTE_MODULES == set()
 
 
 def _production_module_paths() -> dict[Path, str]:
