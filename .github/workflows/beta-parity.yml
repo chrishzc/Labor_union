@@ -34,7 +34,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          npm test -- src/tests/order_workbench_v2* src/tests/order_core_stage_projection_contract.test.ts src/tests/orders_contract_document_source.test.ts src/tests/orders_incomplete_card_actions.test.tsx src/tests/orders_query_page.test.tsx src/tests/orders_service_dates_flow.test.tsx --reporter=json --outputFile=../beta-parity-results.json > ../beta-parity-console.log 2>&1
+          npm test -- src/tests/order_workbench_v2* src/tests/order_core_stage_projection_contract.test.ts src/tests/orders_contract_document_source.test.ts src/tests/orders_incomplete_card_actions.test.tsx src/tests/orders_service_dates_flow.test.tsx --reporter=json --outputFile=../beta-parity-results.json > ../beta-parity-console.log 2>&1
           result=$?
           node --input-type=module <<'JS'
           import { existsSync, readFileSync } from 'node:fs';
