@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HistoricalOrderAdoptionEvidenceSchema } from '../api/orders/historical_adoption_evidence_schemas';
 import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS, type CoreStageCode } from '../api/orders/order_core_stage_projection_schemas';
@@ -12,6 +12,11 @@ const mocks = vi.hoisted(() => ({
   evidence: vi.fn(),
   baseline: vi.fn(),
   accounting: vi.fn(),
+  intakeCompletion: vi.fn(),
+  intakeApply: vi.fn(),
+  restartQuery: vi.fn(),
+  restartPreview: vi.fn(),
+  restartApply: vi.fn(),
 }));
 
 vi.mock('../api/orders/order_core_stage_projection_client', () => ({
@@ -31,8 +36,26 @@ vi.mock('../api/orders/historical_operational_baseline_client', () => ({
   historicalOperationalBaselineClient: { queryByCase: mocks.baseline },
 }));
 vi.mock('../api/orders/historical_service_accounting_client', () => ({
-  historicalServiceAccountingClient: { query: mocks.accounting },
+  historicalServiceAccountingClient: {
+    query: mocks.accounting,
+    queryPrecisionRestart: mocks.restartQuery,
+    previewPrecisionRestart: mocks.restartPreview,
+    applyPrecisionRestart: mocks.restartApply,
+  },
 }));
+vi.mock('../api/orders/order_intake_completion_client', async () => {
+  const actual = await vi.importActual<typeof import('../api/orders/order_intake_completion_client')>(
+    '../api/orders/order_intake_completion_client',
+  );
+  return {
+    ...actual,
+    orderIntakeCompletionClient: {
+      ...actual.orderIntakeCompletionClient,
+      previewCompletion: mocks.intakeCompletion,
+      applyCompletion: mocks.intakeApply,
+    },
+  };
+});
 
 function stage(code: CoreStageCode, index: number) {
   const baseline = index < 8;
@@ -100,6 +123,16 @@ function canonicalEvidence() {
   };
 }
 
+function orderDetail(orderStatus = '歷史訂單－未服務') {
+  return {
+    case_no: 'CASE-FUTURE', client_id: 1, staff_id: null, client_name: '正式客戶', staff_name: null,
+    order_status: orderStatus, identity_status: '一般市民', cancel_reason: null, line_group_id: null,
+    contract_identity: null, actual_start_date: null, actual_end_date: null, deposit_date: null,
+    start_date: '2026-09-03', end_date: '2026-09-22', service_days: 20, service_hours_per_day: 9,
+    deposit_service_days: null, floor_fee: 0, custom_rest_dates: null,
+  };
+}
+
 describe('historical Drawer immutable evidence boundary', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
@@ -111,13 +144,7 @@ describe('historical Drawer immutable evidence boundary', () => {
       next_cursor: null,
       etag: 'b'.repeat(64),
     });
-    mocks.detail.mockResolvedValue({
-      case_no: 'CASE-FUTURE', client_id: 1, staff_id: null, client_name: '正式客戶', staff_name: null,
-      order_status: '歷史訂單－未服務', identity_status: '一般市民', cancel_reason: null, line_group_id: null,
-      contract_identity: null, actual_start_date: null, actual_end_date: null, deposit_date: null,
-      start_date: '2026-09-03', end_date: '2026-09-22', service_days: 20, service_hours_per_day: 9,
-      deposit_service_days: null, floor_fee: 0, custom_rest_dates: null,
-    });
+    mocks.detail.mockResolvedValue(orderDetail());
     mocks.terms.mockResolvedValue({
       case_no: 'CASE-FUTURE', order_version: 12, scheduling_version: 4, scheduling_generation: 1,
       client_finance_version: 2, payroll_version: 2, service_data_locked: false,
@@ -154,6 +181,30 @@ describe('historical Drawer immutable evidence boundary', () => {
       historical_day_revision: 0, client_finance_version: 2, payroll_version: 2,
       contracted_service_days: 20, service_hours_per_day: 9, contractual_floor_fee_ntd: 0,
       client_identity_status: '一般市民', assignments: [],
+    });
+    mocks.intakeCompletion.mockResolvedValue({
+      case_no: 'CASE-FUTURE', missing_fields: ['client_name', 'start_date'],
+      blockers: ['order_lifecycle_not_intake'], apply_allowed: false,
+    });
+    const restartQuery = {
+      case_no: 'CASE-FUTURE', lifecycle_status: '歷史訂單－未服務',
+      order_version: 12, scheduling_version: 4, client_finance_version: 2, payroll_version: 2,
+      historical_day_revision: 0, confirmed_service_date_version: null,
+      planned_start_date: '2026-09-03', actual_start_date: null, contracted_service_days: 20,
+      assignments: [], blockers: [],
+    };
+    mocks.restartQuery.mockResolvedValue(restartQuery);
+    mocks.restartPreview.mockResolvedValue({
+      ...restartQuery, target_status: '訂單成立', actual_end_date: null, official_service_dates: [],
+      client_finance_resulting_version: 2, payroll_resulting_version: 2, preview_fingerprint: '1'.repeat(64),
+    });
+    mocks.restartApply.mockImplementation(async () => {
+      mocks.detail.mockResolvedValue(orderDetail('訂單成立'));
+      return {
+        case_no: 'CASE-FUTURE', lifecycle_status: '訂單成立', order_version: 13,
+        scheduling_version: 5, scheduling_generation: 2, client_finance_version: 2,
+        payroll_version: 2, historical_day_revision: 0, preview_fingerprint: '1'.repeat(64), replayed: false,
+      };
     });
   });
 
@@ -200,5 +251,77 @@ describe('historical Drawer immutable evidence boundary', () => {
       }],
     };
     expect(() => HistoricalOrderAdoptionEvidenceSchema.parse(legacy)).toThrow();
+  });
+
+  it.each(['歷史訂單－未服務', '歷史訂單－服務中'])('%s keeps the blocked intake drawer open and restarts through owner Query / Preview / Apply / readback', async (status) => {
+    mocks.detail.mockResolvedValue(orderDetail(status));
+    render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
+    const restart = await screen.findByRole('button', { name: '前往重啟正常流程' });
+    const intake = screen.getByRole('region', { name: '訂單缺件' });
+    expect(within(intake).getByText('目前不可完成補件')).toBeInTheDocument();
+    expect(within(intake).queryByRole('button', { name: '確認完成進件補齊' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.click(restart);
+    await screen.findByText(/已重啟正常流程並回讀確認為「訂單成立」/);
+    expect(mocks.restartQuery).toHaveBeenCalledWith('CASE-FUTURE');
+    expect(mocks.restartPreview).toHaveBeenCalledWith('CASE-FUTURE');
+    expect(mocks.restartApply).toHaveBeenCalledTimes(1);
+    expect(mocks.restartApply).toHaveBeenCalledWith(
+      expect.objectContaining({ case_no: 'CASE-FUTURE', preview_fingerprint: '1'.repeat(64) }),
+      expect.stringContaining('待辦看板 Beta'),
+    );
+    expect(mocks.restartQuery.mock.invocationCallOrder[0]).toBeLessThan(mocks.restartPreview.mock.invocationCallOrder[0]!);
+    expect(mocks.restartPreview.mock.invocationCallOrder[0]).toBeLessThan(mocks.restartApply.mock.invocationCallOrder[0]!);
+    expect(mocks.detail.mock.invocationCallOrder.at(-1)).toBeGreaterThan(mocks.restartApply.mock.invocationCallOrder[0]!);
+    expect(screen.queryByRole('button', { name: '前往重啟正常流程' })).not.toBeInTheDocument();
+    expect(mocks.intakeApply).not.toHaveBeenCalled();
+  });
+
+  it('stops before Preview and Apply when the restart owner returns blockers', async () => {
+    mocks.restartQuery.mockResolvedValue({ blockers: ['historical_restart_not_available'] });
+    render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '前往重啟正常流程' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('historical_restart_not_available');
+    expect(mocks.restartPreview).not.toHaveBeenCalled();
+    expect(mocks.restartApply).not.toHaveBeenCalled();
+  });
+
+  it('does not claim success when owner readback has not observed the restart receipt', async () => {
+    mocks.restartApply.mockResolvedValue({ lifecycle_status: '訂單成立', replayed: false });
+    render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '前往重啟正常流程' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('正式案件回讀尚未觀察到');
+    expect(screen.queryByText(/已重啟正常流程並回讀確認/)).not.toBeInTheDocument();
+  });
+
+  it.each(['歷史訂單－服務完成', '歷史訂單－帳務完成'])('%s never exposes intake Apply or a restart rollback', async (status) => {
+    mocks.detail.mockResolvedValue(orderDetail(status));
+    render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
+    await screen.findByText(/不提供 intake 或重啟倒退/);
+    expect(screen.queryByRole('button', { name: '前往重啟正常流程' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認完成進件補齊' })).not.toBeInTheDocument();
+    expect(mocks.restartQuery).not.toHaveBeenCalled();
+    expect(mocks.restartApply).not.toHaveBeenCalled();
+    expect(mocks.intakeApply).not.toHaveBeenCalled();
+  });
+
+  it.each(['historical_client_payment_terms_missing', 'historical_payroll_rate_policy_missing'])('shows the completed historical accounting owner blocker %s without hiding the case', async (blocker) => {
+    mocks.detail.mockResolvedValue(orderDetail('歷史訂單－服務完成'));
+    mocks.accounting.mockRejectedValue(new Error(blocker));
+    render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
+    const evidence = screen.getByRole('region', { name: '歷史來源證據' });
+    expect(await within(evidence).findByText(`歷史帳務 Query／blocker：${blocker}`)).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByText(/historical_order_not_found/)).not.toBeInTheDocument();
+    expect(mocks.accounting).toHaveBeenCalledWith('CASE-FUTURE');
+  });
+
+  it('mounts the existing replacement workflow only after the explicit business entry is selected', async () => {
+    mocks.detail.mockResolvedValue(orderDetail('訂單成立'));
+    render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="normal" onClose={vi.fn()} />);
+    const entry = await screen.findByRole('button', { name: '服務前更換月嫂' });
+    expect(screen.queryByText('R-01 候選月嫂尚未定案')).not.toBeInTheDocument();
+    fireEvent.click(entry);
+    expect(await screen.findByText('R-01 候選月嫂尚未定案')).toBeInTheDocument();
   });
 });
