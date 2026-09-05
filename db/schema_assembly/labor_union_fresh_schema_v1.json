@@ -250,8 +250,8 @@
     },
     "db/schema_parts/1030_staff_beclass_profile.sql": {
       "source_object": "preserve-data additive bridge for Staff BeClass profile storage",
-      "successor": "db/schema_parts/216_staff_beclass_profile.sql",
-      "terminal_schema_evidence": "fresh assembly uses canonical part 216; preserve chain uses 1030 for existing databases",
+      "successor": "db/schema_parts/1029_client_payment_destination_configuration.sql",
+      "terminal_schema_evidence": "fresh assembly terminal is part 1029 after canonical Staff BeClass part 216; preserve chain uses 1030 for existing databases",
       "data_effect": "schema_only; existing staff rows are preserved and no business-value backfill is inferred",
       "replay": "preserve release chain applies 1030 only when owned objects are absent or exact; partial or drift metadata blocks candidate apply",
       "rollback": "retain source backup and discard candidate before same-name replacement",
