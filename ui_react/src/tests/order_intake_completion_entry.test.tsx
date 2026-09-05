@@ -123,7 +123,8 @@ describe('Orders intake repair entry', () => {
     expect(within(region).queryByLabelText('客戶姓名')).not.toBeInTheDocument();
     expect(within(region).queryByLabelText('服務開始日')).not.toBeInTheDocument();
     expect(within(region).queryByRole('button', { name: '確認完成進件補齊' })).not.toBeInTheDocument();
-    expect(screen.getByText('完整客戶')).toBeInTheDocument();
+    expect(screen.getByText('CASE-OK').closest('.order-card')).toHaveTextContent('完整客戶');
+    expect(ordersQueryClient.getOrderDetail).toHaveBeenCalledTimes(1);
     expect(applyName).not.toHaveBeenCalled();
     expect(applyTerms).not.toHaveBeenCalled();
     expect(applyCompletion).not.toHaveBeenCalled();

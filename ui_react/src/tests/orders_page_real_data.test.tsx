@@ -9,6 +9,7 @@ import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_s
 import { sessionClient } from '../api/auth/session_client';
 import { ordersMutationClient } from '../api/orders/order_mutation_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
+import { orderIntakeCompletionClient } from '../api/orders/order_intake_completion_client';
 import { contractSigningClient } from '../api/orders/contract_signing_client';
 import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
 import type { OrdersCardProjection } from '../api/orders/order_card_projection_schemas';
@@ -98,6 +99,12 @@ describe('OrdersPage query real-data slice', () => {
     orderMutationFlowStore.clearAll();
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue(realisticOrderSummaryPage);
     vi.spyOn(ordersQueryClient, 'getOrderDetail').mockResolvedValue(realisticOrderDetail);
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockImplementation(async (caseNo) => ({
+      case_no: caseNo, lifecycle_version: 1,
+      current_status: '洽談中', target_status: '洽談中',
+      missing_fields: [], blockers: ['order_intake_completion_status_not_eligible'],
+      apply_allowed: false, preview_fingerprint: 'a'.repeat(64),
+    }));
     vi.spyOn(ordersQueryClient, 'getOrderCalendarDetail').mockResolvedValue(realisticOrderCalendarDetail);
     vi.spyOn(ordersQueryClient, 'getOrderTerms').mockResolvedValue(realisticOrderTerms);
     vi.spyOn(ordersQueryClient, 'getFormManagementContext').mockResolvedValue({

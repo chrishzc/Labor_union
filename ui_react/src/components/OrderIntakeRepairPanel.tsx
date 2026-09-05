@@ -50,18 +50,22 @@ export function OrderIntakeRepairPanel({
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
-    const [completionResult, detailResult] = await Promise.allSettled([
-      orderIntakeCompletionClient.previewCompletion(caseNo, { signal }),
-      ordersQueryClient.getOrderDetail(caseNo, { signal }),
-    ]);
-    if (completionResult.status === 'rejected') throw completionResult.reason;
+    const currentCompletion = await orderIntakeCompletionClient.previewCompletion(caseNo, { signal });
     if (signal?.aborted) return;
-    setCompletion(completionResult.value);
-    if (detailResult.status === 'fulfilled' && detailResult.value.case_no === caseNo) {
-      const detail = detailResult.value;
-      setClientName(detail.client_name.startsWith('待補姓名') ? '' : detail.client_name);
-      setStartDate(detail.start_date ?? '');
-      setServiceDays(detail.service_days > 0 ? String(detail.service_days) : '');
+    setCompletion(currentCompletion);
+    // Only editable missing fields consume detail to prefill the repair form.
+    // Blockers and completed intake are fully described by the owner preview.
+    if (currentCompletion.blockers.length === 0 && currentCompletion.missing_fields.length > 0) {
+      const [detailResult] = await Promise.allSettled([
+        ordersQueryClient.getOrderDetail(caseNo, { signal }),
+      ]);
+      if (signal?.aborted) return;
+      if (detailResult.status === 'fulfilled' && detailResult.value.case_no === caseNo) {
+        const detail = detailResult.value;
+        setClientName(detail.client_name.startsWith('待補姓名') ? '' : detail.client_name);
+        setStartDate(detail.start_date ?? '');
+        setServiceDays(detail.service_days > 0 ? String(detail.service_days) : '');
+      }
     }
     setLoading(false);
   }, [caseNo]);
@@ -73,11 +77,14 @@ export function OrderIntakeRepairPanel({
     setTermsPreview(null);
     setReason('');
     setNotice(null);
-    void refresh(controller.signal).catch((caught) => {
-      if (!controller.signal.aborted) {
-        setLoading(false);
-        setError(intakeRepairErrorMessage(caught));
-      }
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      void refresh(controller.signal).catch((caught) => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+          setError(intakeRepairErrorMessage(caught));
+        }
+      });
     });
     return () => controller.abort();
   }, [refresh]);
