@@ -31,9 +31,6 @@ DATABASE_EXECUTION_MODES = {
     "read_only_existing_database",
     "fresh_schema_bootstrap",
 }
-NONEXISTENT_HISTORICAL_SOURCE = (
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md"
-)
 
 
 def load_scenarios(directory: Path = DEFAULT_SCENARIO_DIRECTORY) -> list[dict[str, object]]:
@@ -150,13 +147,14 @@ def _scenario_errors(
         scenario_ids.add(scenario_id)
     suite_id = scenario.get("suite_id")
     track = scenario.get("track")
+    status = scenario.get("status")
     if suite_tracks.get(suite_id) != track:
         errors.append(f"scenario {scenario_id} has an unknown suite or wrong track")
-    if scenario.get("status") not in SCENARIO_STATUS:
+    if status not in SCENARIO_STATUS:
         errors.append(f"scenario {scenario_id} has an invalid status")
-    if scenario.get("status") == "blocked" and not _has_blocker(scenario.get("blocker")):
+    if status == "blocked" and not _has_blocker(scenario.get("blocker")):
         errors.append(f"scenario {scenario_id} must define a blocker")
-    if scenario.get("status") == "bound":
+    if status == "bound":
         errors.extend(_execution_binding_errors(scenario_id, scenario.get("execution")))
         errors.extend(_database_execution_mode_errors(scenario_id, scenario))
     if not isinstance(scenario.get("requires_database"), bool):
@@ -175,7 +173,8 @@ def _scenario_errors(
         expected = scenario.get("expected")
         if isinstance(expected, list) and len(expected) < len(test_kinds):
             errors.append(f"scenario {scenario_id} has incomplete acceptance criteria")
-    errors.extend(_source_reference_errors(scenario_id, scenario.get("source_refs")))
+    if status != "blocked":
+        errors.extend(_source_reference_errors(scenario_id, scenario.get("source_refs")))
     coverage_ids = scenario.get("coverage_ids")
     if not isinstance(coverage_ids, list) or not coverage_ids:
         errors.append(f"scenario {scenario_id} must define coverage_ids")
@@ -219,22 +218,10 @@ def _completeness_errors(
 def _source_reference_errors(scenario_id: object, source_refs: object) -> list[str]:
     if not isinstance(source_refs, list):
         return []
-    missing = [
-        source_ref
-        for source_ref in source_refs
-        if not _is_nonexistent_historical_source(source_ref)
-        and not _source_reference_exists(source_ref)
-    ]
+    missing = [source_ref for source_ref in source_refs if not _source_reference_exists(source_ref)]
     if missing:
         return [f"scenario {scenario_id} has a missing source reference"]
     return []
-
-
-def _is_nonexistent_historical_source(source_ref: object) -> bool:
-    return (
-        isinstance(source_ref, str)
-        and source_ref.partition("#")[0] == NONEXISTENT_HISTORICAL_SOURCE
-    )
 
 
 def _source_reference_exists(source_ref: object) -> bool:
