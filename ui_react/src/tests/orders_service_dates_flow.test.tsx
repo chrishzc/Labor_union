@@ -25,6 +25,7 @@ import { realisticOrderDetail } from './fixtures/orders_real_data_fixtures';
 import { buildOrdersStageProjectionFixture } from './fixtures/orders_stage_projection_fixtures';
 import { schedulePrecisionClient } from '../api/scheduling/schedule_precision_client';
 import { historicalServiceAccountingClient } from '../api/orders/historical_service_accounting_client';
+import { ApiHttpError, ApiNetworkError } from '../api/shared/typed_errors';
 
 describe('Confirmed Service Dates Component Flow Suite', () => {
   const originalFetch = globalThis.fetch;
@@ -55,7 +56,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       fireEvent.click(tabBtn);
     });
     await waitFor(() => {
-      expect(screen.getByText('合約天數').parentElement).toHaveTextContent(`${expectedDays} 天`);
+      expect(screen.getByText('合約目標天數').parentElement).toHaveTextContent(`${expectedDays} 天`);
     });
   };
 
@@ -218,14 +219,11 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       expect(screen.getByText(/正式服務日期確認/)).toBeInTheDocument();
     });
 
-    expect(screen.queryByRole('button', { name: /重新依工會規則精算/ })).not.toBeInTheDocument();
-    expect(screen.queryByText('已有正式排班：處理請假／代班')).not.toBeInTheDocument();
-    expect(screen.queryByText('實際開工日更正與動態排盤')).not.toBeInTheDocument();
-    expect(screen.queryByText('服務完成與結案階段')).not.toBeInTheDocument();
-
-    const previewBtn = await screen.findByRole('button', { name: '確認服務日期' });
+    // 預覽按鈕應為可點擊
+    const previewBtn = await screen.findByRole('button', { name: /檢查服務週次影響/ });
     expect(previewBtn).not.toBeDisabled();
 
+    // 點擊預覽
     await act(async () => {
       fireEvent.click(previewBtn);
     });
@@ -236,10 +234,12 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     });
     expect(previewSpy).toHaveBeenCalledTimes(1);
 
+    // 填寫原因
     const reasonInput = document.querySelector('.mutation-reason-input') as HTMLInputElement;
     fireEvent.change(reasonInput, { target: { value: '客戶確認服務日期無誤' } });
 
-    const applyBtn = await screen.findByRole('button', { name: /確認套用服務日期/ });
+    // 點擊確認套用
+    const applyBtn = await screen.findByRole('button', { name: /儲存排班結果/ });
     expect(applyBtn).not.toBeDisabled();
 
     await act(async () => {
@@ -293,6 +293,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     fireEvent.click(screen.getByRole('button', { name: '新增事前請假' }));
     await waitFor(() => expect(rerunSpy).toHaveBeenCalledTimes(1));
 
+    // 預覽結果卡片與 Apply 按鈕應消失或不可見
     expect(screen.queryByText(/服務週次精算預覽/)).toBeNull();
     expect(document.querySelector('[data-control-id="orders.date.service-date-apply"]')).toBeNull();
   });
@@ -408,6 +409,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       document.querySelector('[data-control-id="orders.date.service-date-apply"]')!
     );
 
+    // 出現 outcome_unknown 提示
     await waitFor(() => {
       expect(screen.getByText(/服務日期確認回應逾時或未明/)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /重試提交/ })).toBeInTheDocument();
@@ -421,6 +423,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
 
     const firstKey = applySpy.mock.calls[0][2].idempotencyKey;
 
+    // 點擊重試
     fireEvent.click(screen.getByRole('button', { name: /重試提交/ }));
 
     await waitFor(() => {
@@ -436,14 +439,17 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     render(React.createElement(OrdersPage));
     await waitFor(() => expect(screen.getByText('ORD-2026-0801')).toBeInTheDocument());
 
+    // 開啟抽屜並選取日期
     await openServiceCalendarTab();
     await waitFor(() => expect(screen.getByText(/正式服務日期確認/)).toBeInTheDocument());
 
     const draftBefore = orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801');
     const keyBefore = draftBefore?.idempotencyKey;
 
+    // 關閉抽屜
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
 
+    // 再次開啟抽屜
     await openServiceCalendarTab();
     await waitFor(() => expect(screen.getByText(/正式服務日期確認/)).toBeInTheDocument());
 
@@ -472,11 +478,8 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       service_mode: '週休2日',
       custom_leave_dates: [],
     });
-    expect((await screen.findByText('合約天數')).parentElement).toHaveTextContent('5 天');
-    expect(screen.getByText('休假日').parentElement).toHaveTextContent('0 天');
-    expect(screen.getByText('建議完工日').parentElement).toHaveTextContent('2026-09-05');
-    expect(screen.queryByText('實質出勤天數')).not.toBeInTheDocument();
-    expect(screen.queryByText('總日曆跨越天')).not.toBeInTheDocument();
+    expect((await screen.findByText('合約目標天數')).parentElement).toHaveTextContent('5 天');
+    expect(screen.getByText('實質出勤天數').parentElement).toHaveTextContent('5 天');
   });
 
   it('8. actual-start query 缺失時 fail closed 且不呼叫精算 API', async () => {
@@ -629,6 +632,10 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     });
     expect(orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')?.selectedDates)
       .toEqual(['2026-09-01', '2026-09-02', '2026-09-03']);
+
+    fireEvent.click(screen.getByRole('button', { name: '前往請假／代班工作台' }));
+    expect(window.location.hash).toBe('#scheduling?tab=leave_sub&case_no=ORD-2026-0801');
+    window.location.hash = '';
   });
 
   it('11. Sunday-first 日曆欄位正確呈現週休 1／2 日，不把開始日誤塞星期日欄', async () => {
@@ -710,7 +717,11 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     expect(columnOf(weeklyOneGrid, '2026-09-13 固定排休，點擊改為正式服務日')).toBe(0);
   });
 
-  it('歷史訂單必須先在原工作台重啟，完成後才顯示既有正常精算流程', async () => {
+  it.each([
+    ['404', new ApiHttpError(404, 'calendar_detail_not_found', '找不到行事曆')],
+    ['500', new ApiHttpError(500, 'calendar_detail_failed', '行事曆服務失敗')],
+    ['network', new ApiNetworkError('行事曆網路失敗')],
+  ])('歷史訂單重啟後 calendar detail %s 時不捏造週休模式並允許人工日期', async (_kind, calendarError) => {
     const historicalPage = {
       items: [{
         case_no: 'ORD-HISTORY-1',
@@ -752,9 +763,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
         '2026-09-05', '2026-09-06', '2026-09-07',
       ],
     });
-    vi.spyOn(ordersQueryClient, 'getOrderCalendarDetail').mockRejectedValue(
-      new Error('historical source has no fixed-rest root'),
-    );
+    vi.spyOn(ordersQueryClient, 'getOrderCalendarDetail').mockRejectedValue(calendarError);
     const calculate = vi.spyOn(schedulePrecisionClient, 'calculate').mockResolvedValue(
       precisionResult(['2026-09-01', '2026-09-02', '2026-09-03']),
     );
@@ -791,6 +800,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     await screen.findByText('ORD-HISTORY-1');
     fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
     fireEvent.click(await screen.findByRole('button', { name: /實質服務日曆/ }));
+
     expect(await screen.findByText('歷史訂單：重啟正常流程')).toBeInTheDocument();
     expect(screen.queryByText(/正式服務日期確認/)).not.toBeInTheDocument();
     expect(ordersQueryClient.getActualStart).not.toHaveBeenCalled();
@@ -801,16 +811,94 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       expect(applyRestart).toHaveBeenCalledTimes(1);
       expect(screen.getByText(/已回到正常「訂單成立」/)).toBeInTheDocument();
       expect(screen.getByText(/正式服務日期確認/)).toBeInTheDocument();
-      expect(screen.queryByText('實際開工日更正與動態排盤')).not.toBeInTheDocument();
-      expect(screen.queryByText('服務完成與結案階段')).not.toBeInTheDocument();
-      expect(screen.getByLabelText('工會排休類型')).toHaveTextContent('週休1日');
+      expect(screen.getByText('實際開工日更正與動態排盤')).toBeInTheDocument();
+      expect(screen.getByLabelText('工會排休類型')).toHaveTextContent('人工確認真實服務日期');
+      expect(screen.getByText(/系統不會假設週休模式/)).toBeInTheDocument();
       expect(screen.queryByText(/精算所需的開始日、合約天數或排休類型尚未載入/)).not.toBeInTheDocument();
       expect(screen.queryByText(/目前狀態為「歷史訂單－未服務」/)).not.toBeInTheDocument();
     });
-    expect(calculate).toHaveBeenCalledWith(expect.objectContaining({
-      actual_start_date: '2026-09-01',
-      target_service_days: 3,
-      service_mode: '週休1日',
-    }));
+    expect(calculate).not.toHaveBeenCalled();
+
+    const actualStartInput = screen.getByLabelText('更正實際服務開始日');
+    expect(actualStartInput).not.toBeDisabled();
+    fireEvent.change(actualStartInput, { target: { value: '2026-09-02' } });
+    expect(actualStartInput).toHaveValue('2026-09-02');
+
+    fireEvent.click(screen.getByRole('button', { name: '2026-09-01 未選，點擊設為真實服務日' }));
+    fireEvent.click(screen.getByRole('button', { name: '2026-09-02 未選，點擊設為真實服務日' }));
+    fireEvent.click(screen.getByRole('button', { name: '2026-09-03 未選，點擊設為真實服務日' }));
+
+    await waitFor(() => {
+      expect(orderMutationFlowStore.getServiceDatesDraft('ORD-HISTORY-1')?.selectedDates)
+        .toEqual(['2026-09-01', '2026-09-02', '2026-09-03']);
+      expect(screen.getByRole('button', { name: /檢查服務週次影響/ })).not.toBeDisabled();
+    });
+    expect(calculate).not.toHaveBeenCalled();
+  });
+
+  it('歷史訂單重啟已成功但伺服器狀態重讀失敗時不得重複 Apply', async () => {
+    const historicalPage = {
+      items: [{
+        case_no: 'ORD-HISTORY-REFRESH-FAIL',
+        client_name: '歷史測試客戶',
+        order_status: '歷史訂單－未服務',
+        staff_name: '月嫂甲',
+        identity_status: null,
+        start_date: '2026-09-01',
+        end_date: null,
+        actual_start_date: null,
+        actual_end_date: null,
+        service_days: 3,
+        total_employer_self_pay_payable: 0,
+      }],
+      next_cursor: null,
+      etag: 'e'.repeat(64),
+    };
+    vi.spyOn(ordersQueryClient, 'getOrderSummaries')
+      .mockResolvedValueOnce(historicalPage)
+      .mockRejectedValue(new Error('重啟後摘要讀取失敗'));
+    vi.spyOn(historicalServiceAccountingClient, 'queryPrecisionRestart').mockResolvedValue({
+      case_no: 'ORD-HISTORY-REFRESH-FAIL', lifecycle_status: '歷史訂單－未服務',
+      order_version: 1, scheduling_version: 1, client_finance_version: 1,
+      payroll_version: 1, historical_day_revision: 0,
+      confirmed_service_date_version: null,
+      planned_start_date: '2026-09-01', actual_start_date: null,
+      contracted_service_days: 3,
+      assignments: [{ assignment_identity: 'assignment:1', staff_id: 3, staff_name: '月嫂甲' }],
+      blockers: [],
+    });
+    vi.spyOn(historicalServiceAccountingClient, 'previewPrecisionRestart').mockResolvedValue({
+      case_no: 'ORD-HISTORY-REFRESH-FAIL', lifecycle_status: '歷史訂單－未服務',
+      order_version: 1, scheduling_version: 1, client_finance_version: 1,
+      payroll_version: 1, historical_day_revision: 0,
+      confirmed_service_date_version: null,
+      planned_start_date: '2026-09-01', actual_start_date: null,
+      contracted_service_days: 3,
+      assignments: [{ assignment_identity: 'assignment:1', staff_id: 3, staff_name: '月嫂甲' }],
+      blockers: [], target_status: '訂單成立', actual_end_date: null,
+      official_service_dates: [], client_finance_resulting_version: 1,
+      payroll_resulting_version: 1, preview_fingerprint: 'f'.repeat(64),
+    });
+    const applyRestart = vi.spyOn(historicalServiceAccountingClient, 'applyPrecisionRestart').mockResolvedValue({
+      case_no: 'ORD-HISTORY-REFRESH-FAIL', lifecycle_status: '訂單成立', order_version: 2,
+      scheduling_version: 2, scheduling_generation: 2, client_finance_version: 1,
+      payroll_version: 1, historical_day_revision: 0,
+      preview_fingerprint: 'f'.repeat(64), replayed: false,
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-HISTORY-REFRESH-FAIL');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /實質服務日曆/ }));
+
+    const restartButton = await screen.findByRole('button', { name: '重啟正常流程' });
+    fireEvent.click(restartButton);
+
+    expect(await screen.findByText(/重啟已完成，但最新狀態讀取失敗/)).toHaveTextContent(
+      '重啟後摘要讀取失敗',
+    );
+    expect(restartButton).toBeDisabled();
+    fireEvent.click(restartButton);
+    expect(applyRestart).toHaveBeenCalledTimes(1);
   });
 });

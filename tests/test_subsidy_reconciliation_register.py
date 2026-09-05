@@ -127,3 +127,34 @@ def test_register_caps_subsidy_hours_at_case_total_service_hours():
 
     assert row["補助時數"] == Decimal("27")
     assert row["補助款金額"] == Decimal("8100")
+
+
+def test_combined_subsidy_register_has_both_quarterly_and_annual_sheets():
+    connection = FakeConnection([
+        {
+            "case_no": "115000001",
+            "identity_status": "一般市民",
+            "actual_start_date": date(2026, 1, 10),
+            "actual_end_date": date(2026, 1, 20),
+            "service_days": 10,
+            "service_hours_per_day": 8,
+            "employer_name": "陳小姐",
+            "employer_address": "台北市信義區",
+            "staff_name": "王月嫂",
+            "survey_details": {},
+            "hc_query_no": "HC115001",
+        },
+    ])
+
+    result = register.build_combined_subsidy_register(2026, 1, lambda: connection)
+    assert result["application_year"] == 2026
+    assert result["quarter"] == 1
+    workbook = load_workbook(BytesIO(result["xlsx_bytes"]))
+    assert workbook.sheetnames == ["季核銷", "年度總表"]
+    quarter_ws = workbook["季核銷"]
+    annual_ws = workbook["年度總表"]
+    assert quarter_ws.max_row >= 3
+    assert annual_ws.max_row >= 3
+    assert result["quarterly_general_rows"][0]["hc_case_no"] == "HC115001"
+    assert "115000001" in [str(c.value) for row in quarter_ws.iter_rows() for c in row if c.value]
+

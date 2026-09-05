@@ -6,7 +6,8 @@ import { sessionClient } from '../auth/session_client';
 
 export type SubsidyReportExportQuery =
   | { kind: 'quarterly'; applicationYear: number; quarter: number }
-  | { kind: 'annual'; applicationYear: number };
+  | { kind: 'annual'; applicationYear: number }
+  | { kind: 'combined'; applicationYear: number; quarter: number };
 
 export interface SubsidyReportExportArtifact {
   blob: Blob;
@@ -25,7 +26,9 @@ export const subsidyReportExportClient = {
     if (!token) throw new Error('請先登入後再匯出補助報表。');
     const path = `/api/v1/finance-reports/subsidy-reconciliation/${query.kind}/export`;
     const params = new URLSearchParams({ application_year: String(query.applicationYear) });
-    if (query.kind === 'quarterly') params.set('quarter', String(query.quarter));
+    if (query.kind === 'quarterly' || query.kind === 'combined') {
+      params.set('quarter', String(query.quarter));
+    }
     const response = await fetch(`${path}?${params}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
@@ -40,7 +43,9 @@ export const subsidyReportExportClient = {
     if (blob.size === 0) throw new Error('補助報表匯出檔案為空。');
     const fallback = query.kind === 'quarterly'
       ? `subsidy-reconciliation-${query.applicationYear}-Q${query.quarter}.xlsx`
-      : `subsidy-reconciliation-${query.applicationYear}.xlsx`;
+      : query.kind === 'combined'
+        ? `reconciliation-and-register-${query.applicationYear}-Q${query.quarter}.xlsx`
+        : `subsidy-reconciliation-${query.applicationYear}.xlsx`;
     return { blob, filename: filenameFromHeader(response.headers.get('content-disposition'), fallback) };
   },
 };

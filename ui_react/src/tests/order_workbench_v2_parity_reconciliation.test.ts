@@ -2,10 +2,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const drawerSource = readFileSync(
-  resolve(process.cwd(), 'src/components/OrderWorkbenchV2Drawer.tsx'),
-  'utf8',
-);
+const source = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
+
+const drawerSource = source('src/components/OrderWorkbenchV2Drawer.tsx');
+const appSource = source('src/App.tsx');
+const layoutSource = source('src/components/MasterLayout.tsx');
+const ordersPageSource = source('src/pages/OrdersPage.tsx');
 
 describe('Order Workbench V2 parity reconciliation', () => {
   it('routes intake repair, historical restart, replacement, and accounting blockers through existing owner flows', () => {
@@ -18,5 +20,21 @@ describe('Order Workbench V2 parity reconciliation', () => {
     expect(drawerSource).toContain('data-surface-id="orders.service-before-replacement.entry"');
     expect(drawerSource).toContain('<ServiceBeforeReplacementActions');
     expect(drawerSource).toContain("historicalAccounting.status === 'error'");
+  });
+
+  it('preserves the existing Beta entry and legacy default without starting the #139 navigation cutover', () => {
+    expect(appSource).toContain("'order-beta': 'order-workbench-v2'");
+    expect(appSource).toContain("currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page />");
+    expect(appSource).toContain("return 'order-tracker'");
+    expect(layoutSource).toContain("| 'order-workbench-v2'");
+    expect(layoutSource).toContain("{ id: 'order-workbench-v2', icon: '🧪', label: '待辦看板 Beta'");
+    expect(layoutSource).toContain("{ id: 'order-tracker', icon: '📌', label: '待辦看板'");
+  });
+
+  it('does not reintroduce the retired handcrafted contract-document presentation', () => {
+    expect(ordersPageSource).toContain('<ContractExternalSigningActions');
+    expect(ordersPageSource).not.toContain('契約草稿預覽（非正式）');
+    expect(ordersPageSource).not.toContain('contractDocView');
+    expect(ordersPageSource).not.toContain('contractDocFullscreen');
   });
 });

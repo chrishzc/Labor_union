@@ -3,13 +3,13 @@
  * Description: 驗證實際開工日 Preview／Apply client 的 closed decode、路徑、版本與冪等標頭。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { sessionClient } from '../api/auth/session_client';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
 import {
   orderActualStartClient,
   type ActualStartApplyPayload,
-} from '../api/orders/order_actual_start_client';
-import { transport } from '../api/shared/transport';
-import { ApiDecodeError } from '../api/shared/typed_errors';
+} from '../../../../../../../api/orders/order_actual_start_client';
+import { transport } from '../../../../../../../api/shared/transport';
+import { ApiDecodeError } from '../../../../../../../api/shared/typed_errors';
 
 const fingerprint = (character: string) => character.repeat(64);
 
@@ -90,6 +90,8 @@ const previewFixture = {
       before_due_date: null,
       after_due_date: '2026-09-01',
       source_obligation_identity: null,
+      direction: 'additional_charge_due',
+      direction_amount_ntd: 1000,
     }],
     settlement: {
       deposit_settled: false,
@@ -137,6 +139,11 @@ const previewFixture = {
       direction: 'payable_to_staff',
       amount: { amount: 7200 },
       due_date: '2026-09-10',
+    }],
+    special_pay_events: [{
+      assignment_identity: 'CASE/1:g3:a1',
+      assignment_sequence: 1,
+      service_dates: ['2026-09-01', '2026-09-02', '2026-09-03'],
     }],
     blockers: [],
     fingerprint: fingerprint('e'),

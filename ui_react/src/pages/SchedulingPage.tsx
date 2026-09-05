@@ -9,6 +9,7 @@ import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_qu
 import { adaptStaffDirectoryPage } from '../adapters/staff/staff_directory_adapter';
 import type { StaffDirectoryCardViewModel } from '../adapters/staff/staff_directory_adapter';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
+import { staffMonthlyScheduleClient } from '../api/scheduling/staff_monthly_schedule_client';
 import { SchedulingCurrentError } from '../api/scheduling/scheduling_current_errors';
 import { schedulingEligibilityCollisionClient } from '../api/scheduling/eligibility_collision_client';
 import {
@@ -22,6 +23,7 @@ import {
   matchesSchedulingFilter,
   type SchedulingCalendarRowViewModel,
 } from '../adapters/scheduling/scheduling_current_adapter';
+import { adaptHistoricalAssignmentOverlays, type HistoricalAssignmentOverlay } from '../adapters/scheduling/historical_assignment_overlay_adapter';
 import {
   adaptSchedulingEligibilityCollision,
   type SchedulingEligibilityCollisionViewModel,
@@ -63,9 +65,8 @@ import {
 import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
 import { substitutionPayablesLineageClient, type SubstitutionPayablesLineage } from '../api/scheduling/substitution_payables_lineage_client';
 import { Drawer } from '../components/Drawer';
-import { MatchingCoordinationWorkbench } from '../components/MatchingCoordinationWorkbench';
 
-type SchedulingTab = 'calendar' | 'leave_sub' | 'holidays' | 'matching';
+type SchedulingTab = 'calendar' | 'leave_sub' | 'holidays';
 type StatusFilter = 'all' | 'active' | 'waiting' | 'leave';
 
 interface SchedulingDeepLink {
@@ -1721,7 +1722,7 @@ interface GanttSpan {
   id: string;
   startDay: number;
   endDay: number;
-  tone: 'active' | 'buffer' | 'leave' | 'waiting' | 'available' | 'unavailable' | 'conflict' | 'deposit-conflict' | 'free';
+  tone: 'active' | 'buffer' | 'leave' | 'waiting' | 'available' | 'unavailable' | 'conflict' | 'deposit-conflict' | 'free' | 'historical';
   icon?: string;
   caseText: string;
   statusLabel?: string;
@@ -1778,7 +1779,8 @@ function ghostCaseSpan(
 function buildGanttSpans(
   state: CalendarRowState | undefined,
   totalDays: number,
-  ghostConfig?: GhostProjectionConfig | null
+  ghostConfig?: GhostProjectionConfig | null,
+  historicalOverlays: readonly HistoricalAssignmentOverlay[] = [],
 ): GanttSpan[] {
   if (state?.kind === 'empty') {
     if (ghostConfig?.active && ghostConfig.startDay && ghostConfig.endDay) {
@@ -1786,10 +1788,20 @@ function buildGanttSpans(
       const end = Math.min(totalDays, ghostConfig.endDay);
       return [ghostCaseSpan(ghostConfig, start, end)];
     }
-    return [];
+    return historicalOverlays.map((overlay) => {
+      const startDay = Number(overlay.startDate.slice(8, 10));
+      const endDay = Number(overlay.endDate.slice(8, 10));
+      return { id: `historical-${overlay.assignmentId}-${startDay}`, startDay, endDay, tone: 'historical', icon: '🕘', caseText: `${overlay.caseNo}｜${overlay.clientName}`, statusLabel: '歷史正式指派區間（非正式工作日）' };
+    });
   }
 
-  if (!state || state.kind === 'terms_incomplete' || state.kind === 'error') return [];
+  if (!state || state.kind === 'terms_incomplete' || state.kind === 'error') {
+    return historicalOverlays.map((overlay) => {
+      const startDay = Number(overlay.startDate.slice(8, 10));
+      const endDay = Number(overlay.endDate.slice(8, 10));
+      return { id: `historical-${overlay.assignmentId}-${startDay}`, startDay, endDay, tone: 'historical', icon: '🕘', caseText: `${overlay.caseNo}｜${overlay.clientName}`, statusLabel: '歷史正式指派區間（非正式工作日）' };
+    });
+  }
 
   const row = state.row;
   const spans: GanttSpan[] = [];
@@ -1832,6 +1844,25 @@ function buildGanttSpans(
     spans.push(ghostCaseSpan(ghostConfig, ghostConfig.startDay, ghostConfig.endDay));
   }
 
+  const canonicalDays = new Set<number>();
+  spans.filter((span) => span.tone !== 'historical').forEach((span) => {
+    for (let day = span.startDay; day <= span.endDay; day += 1) canonicalDays.add(day);
+  });
+  historicalOverlays.forEach((overlay) => {
+    const startDay = Number(overlay.startDate.slice(8, 10));
+    const endDay = Number(overlay.endDate.slice(8, 10));
+    let segmentStart: number | null = null;
+    for (let day = startDay; day <= endDay + 1; day += 1) {
+      const canRender = day <= endDay && !canonicalDays.has(day);
+      if (canRender && segmentStart == null) segmentStart = day;
+      if (!canRender && segmentStart != null) {
+        const segmentEnd = day - 1;
+        spans.push({ id: `historical-${overlay.assignmentId}-${segmentStart}`, startDay: segmentStart, endDay: segmentEnd, tone: 'historical', icon: '🕘', caseText: `${overlay.caseNo}｜${overlay.clientName}`, statusLabel: '歷史正式指派區間（非正式工作日）' });
+        segmentStart = null;
+      }
+    }
+  });
+
   return spans;
 }
 
@@ -1852,6 +1883,8 @@ export const SchedulingPage: React.FC = () => {
   const [searchKeyword, setSearchKeyword] = useState<string>('');
 
   const [calendarRows, setCalendarRows] = useState<Record<number, CalendarRowState>>({});
+  const [historicalOverlaysByStaff, setHistoricalOverlaysByStaff] = useState<Record<number, HistoricalAssignmentOverlay[]>>({});
+  const [historicalOverlayErrors, setHistoricalOverlayErrors] = useState<Record<number, string>>({});
   const [calendarLoading, setCalendarLoading] = useState<boolean>(false);
   const [calendarError, setCalendarError] = useState<Error | null>(null);
   const [retryGeneration, setRetryGeneration] = useState<number>(0);
@@ -2130,26 +2163,37 @@ export const SchedulingPage: React.FC = () => {
 
     const loadRows = async () => {
       const results = await Promise.all(staffToLoad.map(async (staff) => {
+        const historicalPromise = staffMonthlyScheduleClient.query(
+          staff.id, month.year, month.month, { signal: controller.signal },
+        );
+        const canonicalPromise = schedulingCurrentClient.queryCurrentCalendar(
+          {
+            staffId: staff.id,
+            rangeStart: range.rangeStart,
+            rangeEnd: range.rangeEnd,
+          },
+          { signal: controller.signal },
+        );
+        let overlays: HistoricalAssignmentOverlay[] = [];
+        let historicalError: string | null = null;
         try {
-          const projection = await schedulingCurrentClient.queryCurrentCalendar(
-            {
-              staffId: staff.id,
-              rangeStart: range.rangeStart,
-              rangeEnd: range.rangeEnd,
-            },
-            { signal: controller.signal },
-          );
+          overlays = adaptHistoricalAssignmentOverlays(await historicalPromise);
+        } catch (caught) {
+          historicalError = caught instanceof Error ? caught.message : '歷史指派月曆載入失敗。';
+        }
+        try {
+          const projection = await canonicalPromise;
           const state: CalendarRowState = projection.days.length === 0
             ? { kind: 'empty' }
             : { kind: 'loaded', row: adaptSchedulingProjection(staff, projection) };
-          return { staffId: staff.id, state, error: null };
+          return { staffId: staff.id, state, overlays, historicalError, error: null };
         } catch (caught) {
           const error = caught instanceof Error ? caught : new Error('排班日曆查詢失敗');
           const state: CalendarRowState = caught instanceof SchedulingCurrentError
             && caught.publicCode === 'service_time_terms_incomplete'
             ? { kind: 'terms_incomplete' }
             : { kind: 'error', message: renderError(error) };
-          return { staffId: staff.id, state, error: state.kind === 'error' ? error : null };
+          return { staffId: staff.id, state, overlays, historicalError, error: state.kind === 'error' ? error : null };
         }
       }));
       if (!mountedRef.current || controller.signal.aborted || cancelled) return;
@@ -2159,6 +2203,19 @@ export const SchedulingPage: React.FC = () => {
         const next = { ...current };
         results.forEach((result) => {
           next[result.staffId] = result.state;
+        });
+        return next;
+      });
+      setHistoricalOverlaysByStaff((current) => {
+        const next = { ...current };
+        results.forEach((result) => { next[result.staffId] = result.overlays; });
+        return next;
+      });
+      setHistoricalOverlayErrors((current) => {
+        const next = { ...current };
+        results.forEach((result) => {
+          if (result.historicalError) next[result.staffId] = result.historicalError;
+          else delete next[result.staffId];
         });
         return next;
       });
@@ -2347,17 +2404,7 @@ export const SchedulingPage: React.FC = () => {
         >
           🗓️ 3. 國定假日政策
         </button>
-        <button
-          data-surface-id="scheduling.tab.matching"
-          className={`scheduling-tab-btn ${activeTab === 'matching' ? 'active' : ''}`}
-          aria-current={activeTab === 'matching' ? 'page' : undefined}
-          onClick={() => setActiveTab('matching')}
-        >
-          🤝 4. 媒合協調
-        </button>
       </nav>
-
-      {activeTab === 'matching' && <MatchingCoordinationWorkbench />}
 
       {activeTab === 'calendar' && (
         <section
@@ -2668,7 +2715,8 @@ export const SchedulingPage: React.FC = () => {
                     : null;
                   const diagnostic = getStaffDiagnosticBadge(row ?? undefined, ghostConfig);
                   const staffCode = `STF-${String(staff.id).padStart(3, '0')}`;
-                  const spans = buildGanttSpans(row ?? undefined, daysList.length, ghostConfig);
+                  const spans = buildGanttSpans(row ?? undefined, daysList.length, ghostConfig, historicalOverlaysByStaff[staff.id]);
+                  const historicalOverlayError = historicalOverlayErrors[staff.id];
 
                   return (
                     <div
@@ -2694,6 +2742,7 @@ export const SchedulingPage: React.FC = () => {
                           <strong>{staff.displayName}</strong>
                           <span className="staff-code-badge">{staffCode}</span>
                         </div>
+                        {historicalOverlayError && <small className="historical-overlay-error" role="status">歷史指派區間未載入：{historicalOverlayError}</small>}
                         <div
                           className={`staff-diagnostic-tag tag-${diagnostic.tone}`}
                           title={row?.kind === 'error' ? row.message : undefined}
@@ -2736,16 +2785,16 @@ export const SchedulingPage: React.FC = () => {
                             return (
                               <div
                                 key={sp.id}
-                                className={`gantt-span-bar span-${sp.tone} ${selectedCaseNo ? 'span-ghost-clickable' : ''}`}
+                                className={`gantt-span-bar span-${sp.tone} ${selectedCaseNo && sp.tone !== 'historical' ? 'span-ghost-clickable' : ''}`}
                                 data-start-day={sp.startDay}
                                 data-end-day={sp.endDay}
                                 style={{
                                   left: `${leftPercent}%`,
                                   width: `${widthPercent}%`,
                                 }}
-                                title={`${sp.caseText}${sp.statusLabel ? ` (${sp.statusLabel})` : ''}${selectedCaseNo ? ' — 點擊開啟詳細排查抽屜' : ''}`}
+                                title={`${sp.caseText}${sp.statusLabel ? ` (${sp.statusLabel})` : ''}${selectedCaseNo && sp.tone !== 'historical' ? ' — 點擊開啟詳細排查抽屜' : ''}`}
                                 onClick={(e) => {
-                                  if (selectedCaseNo) {
+                                  if (selectedCaseNo && sp.tone !== 'historical') {
                                     e.stopPropagation();
                                     handleOpenStaffGhostDrawer(staff);
                                   }

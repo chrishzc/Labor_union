@@ -325,6 +325,30 @@ class MySqlKnowledgeRetrievalRepository:
             row = cursor.fetchone()
         return None if not row or row["version"] is None else int(row["version"])
 
+    def recent_conversation_history(self, answer_request_id: int, limit: int = 3) -> tuple[dict[str, str], ...]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT requester_line_user_id FROM knowledge_answer_requests WHERE id=%s",
+                (answer_request_id,),
+            )
+            row = cursor.fetchone()
+            if not row or not row["requester_line_user_id"]:
+                return ()
+            user_id = row["requester_line_user_id"]
+            cursor.execute(
+                "SELECT req.question, r.answer_text "
+                "FROM knowledge_answer_receipts r "
+                "JOIN knowledge_answer_requests req ON r.answer_request_id = req.id "
+                "WHERE req.requester_line_user_id=%s AND req.id != %s "
+                "ORDER BY r.id DESC LIMIT %s",
+                (user_id, answer_request_id, limit),
+            )
+            history_rows = cursor.fetchall() or ()
+            return tuple(
+                {"question": str(h["question"]), "answer": str(h["answer_text"])}
+                for h in reversed(history_rows)
+            )
+
     def complete_index(self, job_id: int, index_version: int, content_set_digest: str):
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -504,7 +528,30 @@ class MySqlKnowledgeRetrievalRepository:
         if not line_user_id:
             return None
         citations = "\n".join(f"來源：{item.source_identity} v{item.source_version}" for item in answer.citations)
-        payload = canonical_line_payload_json({"type": "text", "text": f"{answer.answer}\n\n{citations}\n\n此內容僅供參考，非正式決策。"})
+        payload = canonical_line_payload_json({
+            "type": "text",
+            "text": f"{answer.answer}\n\n{citations}\n\n此內容僅供參考，非正式決策。",
+            "quickReply": {
+                "items": [
+                    {
+                        "type": "action",
+                        "action": {
+                            "type": "message",
+                            "label": "👍 有幫助",
+                            "text": "有幫助",
+                        },
+                    },
+                    {
+                        "type": "action",
+                        "action": {
+                            "type": "message",
+                            "label": "👎 未解決",
+                            "text": "未解決",
+                        },
+                    },
+                ]
+            },
+        })
         delivery = LineDeliveryRequest(
             LineRecipient(LineRecipientType.USER, LineUserId(str(line_user_id))),
             LineMessageKind.TEXT, payload, datetime.now(timezone.utc),

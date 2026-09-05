@@ -40,6 +40,9 @@ class MySqlWeeklyOperationsReportQueryAdapter:
                 service_hours_per_day=_optional_int(row.get("service_hours_per_day")),
                 planned_start_date=_optional_date(row.get("planned_start_date")),
                 planned_end_date=_optional_date(row.get("planned_end_date")),
+                seq_num=_optional_int(row.get("seq_num")),
+                hc_query_no=_optional_text(row.get("hc_query_no")),
+                bound_week_code=_optional_text(row.get("bound_week_code")),
             )
             for row in rows
         ]
@@ -60,6 +63,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
                 weekly_work_days=int(row["weekly_work_days"]),
                 order_status=str(row["order_status"]),
                 assignment_status=str(row["assignment_status"]),
+                weekly_rest_days=_json_rest_days(row.get("weekly_rest_days")),
             )
             for row in rows
         ]
@@ -75,14 +79,28 @@ class MySqlWeeklyOperationsReportQueryAdapter:
             subsidized=tuple(_subsidy_fact(row) for row in report["subsidized_citizen_rows"]),
         )
 
+    def list_weekly_metrics(self, year: int) -> dict[str, tuple[int, int]]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT week_code, promotion_count, inquiry_count FROM weekly_report_batches WHERE year = %s",
+                (year,),
+            )
+            return {
+                row["week_code"]: (int(row["promotion_count"]), int(row["inquiry_count"]))
+                for row in cursor.fetchall()
+            }
+
 
 def _subsidy_fact(row: dict[str, object]) -> SubsidyFact:
+    svc_end = _date(row["服務結束"])
+    quarter = (svc_end.month - 1) // 3 + 1
+    quarter_labels = {1: "第一季", 2: "第二季", 3: "第三季", 4: "第四季"}
     return SubsidyFact(
         serial_number=int(row["序號"]),
         case_no=str(row["市府訂單號碼"]),
         eligibility=str(row["補助資格"]),
         service_start=_date(row["服務開始"]),
-        service_end=_date(row["服務結束"]),
+        service_end=svc_end,
         subsidy_hours=Decimal(row["補助時數"]),
         subsidy_days=Decimal(row["補助天數"]),
         service_days=int(row["服務天數"]),
@@ -92,6 +110,11 @@ def _subsidy_fact(row: dict[str, object]) -> SubsidyFact:
         staff_name=_optional_text(row.get("服務人員")),
         identity_card=_optional_text(row.get("身分證字號")),
         address=_optional_text(row.get("地址")),
+        hc_case_no=str(row.get("hc_case_no") or row["市府訂單號碼"]),
+        annual_seq=str(row["序號"]),
+        claim_period_label=quarter_labels.get(quarter, "第一季"),
+        reconciliation_status="結案",
+        notes="",
     )
 
 
@@ -131,14 +154,35 @@ def _datetime(value: object) -> datetime | None:
     return datetime.fromisoformat(str(value))
 
 
+def _json_rest_days(value: object) -> list[int] | None:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [int(item) for item in value if isinstance(item, (int, str)) and str(item).isdigit()]
+    if isinstance(value, str):
+        try:
+            import json
+            data = json.loads(value)
+            if isinstance(data, list):
+                return [int(item) for item in data if isinstance(item, (int, str)) and str(item).isdigit()]
+        except Exception:
+            return None
+    return None
+
+
 _CASE_FACTS_SQL = """
-SELECT c.id AS client_id,c.case_no,c.created_at AS application_created_at,
+SELECT c.id AS client_id,c.seq_num,c.case_no,c.created_at AS application_created_at,
        c.name AS applicant_name,c.identity_status,c.reject_reason,c.city AS district,
        o.status AS order_status,o.service_days,o.service_hours_per_day,
-       o.start_date AS planned_start_date,o.end_date AS planned_end_date
+       o.start_date AS planned_start_date,o.end_date AS planned_end_date,
+       COALESCE(br.query_no, c.case_no) AS hc_query_no,
+       b.week_code AS bound_week_code
 FROM clients c
 LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no
-WHERE (c.created_at >= %s AND c.created_at < %s) OR c.created_at IS NULL
+LEFT JOIN beclass_records br ON (br.query_no = c.case_no OR br.bound_case_no = c.case_no)
+LEFT JOIN weekly_report_batch_cases bc ON bc.case_no = c.case_no
+LEFT JOIN weekly_report_batches b ON b.id = bc.batch_id
+WHERE c.created_at >= %s AND c.created_at < %s
 ORDER BY c.created_at,c.id
 """
 
@@ -147,7 +191,8 @@ SELECT a.id AS assignment_id,a.case_no,c.name AS client_name,s.name AS staff_nam
        a.assigned_start_date AS service_start_date,
        a.assigned_end_date AS service_end_date,o.service_hours_per_day,
        COUNT(DISTINCT ss.work_date) AS weekly_work_days,
-       o.status AS order_status,a.status AS assignment_status
+       o.status AS order_status,a.status AS assignment_status,
+       s.weekly_rest_days
 FROM case_staff_assignments a
 JOIN scheduling_generations g ON g.id=a.generation_id AND g.effective_marker=1
 JOIN staff_schedule ss ON ss.assignment_id=a.id AND ss.generation_id=a.generation_id
@@ -158,7 +203,7 @@ JOIN staff s ON s.id=a.staff_id
 WHERE a.status NOT IN ('cancelled','replaced')
   AND ss.work_date >= %s AND ss.work_date <= %s
 GROUP BY a.id,a.case_no,c.name,s.name,a.assigned_start_date,a.assigned_end_date,
-         o.service_hours_per_day,o.status,a.status
+         o.service_hours_per_day,o.status,a.status,s.weekly_rest_days
 ORDER BY a.id
 """
 

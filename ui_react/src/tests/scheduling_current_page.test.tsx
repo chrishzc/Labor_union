@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
+import { staffMonthlyScheduleClient } from '../api/scheduling/staff_monthly_schedule_client';
 import { schedulingEligibilityCollisionClient } from '../api/scheduling/eligibility_collision_client';
 import { staffAssignmentOptionsClient } from '../api/scheduling/staff_assignment_options_client';
 import { staffLeaveInboxClient } from '../api/scheduling/staff_leave_inbox_client';
@@ -70,6 +71,9 @@ describe('SchedulingPage query-only presentation', () => {
       })
     );
     vi.spyOn(staffLeaveInboxClient, 'list').mockResolvedValue([]);
+    vi.spyOn(staffMonthlyScheduleClient, 'query').mockImplementation(async (staffId, year, month) => ({
+      staff_id: staffId, year, month, days: [], schedule_map: {},
+    }));
   });
 
   it('從 allowlist deep-link 直接開啟請假代班並安全解碼案件編號', () => {
@@ -185,6 +189,72 @@ describe('SchedulingPage query-only presentation', () => {
     await waitFor(() => expect(screen.getByTitle(/typed scheduling failure/)).toBeInTheDocument());
     expect(document.querySelectorAll('.gantt-span-bar')).toHaveLength(0);
     expect(screen.getByRole('alert')).toHaveTextContent('1 位服務人員的排班資料載入失敗');
+  });
+
+  it('renders a historical interval as a display-only overlay when the canonical calendar is empty', async () => {
+    vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mockResolvedValue(SCHEDULING_PROJECTION_EMPTY);
+    vi.mocked(staffMonthlyScheduleClient.query).mockImplementation(async (staffId, year, month) => ({
+      staff_id: staffId, year, month,
+      days: [
+        { work_date: `${year}-${String(month).padStart(2, '0')}-04`, status: 'historical_assignment', assignment_id: 81, case_no: 'HIS-081', client_name: '歷史客戶', staff_id: staffId, order_status: 'completed', is_work_day: false, is_double_pay: false },
+        { work_date: `${year}-${String(month).padStart(2, '0')}-05`, status: 'historical_assignment', assignment_id: 81, case_no: 'HIS-081', client_name: '歷史客戶', staff_id: staffId, order_status: 'completed', is_work_day: false, is_double_pay: false },
+      ],
+      schedule_map: {},
+    }));
+
+    render(<SchedulingPage />);
+
+    await waitFor(() => expect(document.querySelectorAll('.gantt-span-bar.span-historical')).toHaveLength(2));
+    const overlay = document.querySelector('.gantt-span-bar.span-historical');
+    expect(overlay).toHaveAttribute('data-start-day', '4');
+    expect(overlay).toHaveAttribute('data-end-day', '5');
+    expect(overlay).toHaveTextContent('歷史正式指派區間（非正式工作日）');
+    expect(overlay).not.toHaveClass('span-ghost-clickable');
+  });
+
+  it('keeps canonical occupancy ahead on overlapping dates while retaining the remaining historical dates', async () => {
+    vi.mocked(staffMonthlyScheduleClient.query).mockImplementation(async (staffId, year, month) => ({
+      staff_id: staffId, year, month,
+      days: [
+        { work_date: `${year}-${String(month).padStart(2, '0')}-01`, status: 'historical_assignment', assignment_id: 81, case_no: 'HIS-081', client_name: '歷史客戶', staff_id: staffId, order_status: 'completed', is_work_day: false, is_double_pay: false },
+        { work_date: `${year}-${String(month).padStart(2, '0')}-02`, status: 'historical_assignment', assignment_id: 81, case_no: 'HIS-081', client_name: '歷史客戶', staff_id: staffId, order_status: 'completed', is_work_day: false, is_double_pay: false },
+        { work_date: `${year}-${String(month).padStart(2, '0')}-03`, status: 'historical_assignment', assignment_id: 81, case_no: 'HIS-081', client_name: '歷史客戶', staff_id: staffId, order_status: 'completed', is_work_day: false, is_double_pay: false },
+      ],
+      schedule_map: {},
+    }));
+
+    render(<SchedulingPage />);
+
+    await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
+    const remainingHistorical = document.querySelector('.gantt-span-bar.span-historical');
+    expect(remainingHistorical).toHaveAttribute('data-start-day', '3');
+    expect(remainingHistorical).toHaveAttribute('data-end-day', '3');
+    expect(document.querySelectorAll('.gantt-span-bar:not(.span-historical)')).not.toHaveLength(0);
+  });
+
+  it('keeps a healthy canonical calendar visible when the historical read model rejects its response', async () => {
+    vi.mocked(staffMonthlyScheduleClient.query).mockRejectedValue(new Error('歷史指派月曆回應結構異常。'));
+
+    render(<SchedulingPage />);
+
+    await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
+    expect(screen.getAllByRole('status', { name: '' })).toHaveLength(2);
+    expect(screen.getAllByText(/歷史指派區間未載入：歷史指派月曆回應結構異常/)).toHaveLength(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('still renders historical intervals when the canonical calendar query fails', async () => {
+    vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mockRejectedValue(new Error('canonical unavailable'));
+    vi.mocked(staffMonthlyScheduleClient.query).mockImplementation(async (staffId, year, month) => ({
+      staff_id: staffId, year, month,
+      days: [{ work_date: `${year}-${String(month).padStart(2, '0')}-04`, status: 'historical_assignment', assignment_id: 81, case_no: 'HIS-081', client_name: '歷史客戶', staff_id: staffId, order_status: 'completed', is_work_day: false, is_double_pay: false }],
+      schedule_map: {},
+    }));
+
+    render(<SchedulingPage />);
+
+    await waitFor(() => expect(document.querySelectorAll('.gantt-span-bar.span-historical')).toHaveLength(2));
+    expect(screen.getByRole('alert')).toHaveTextContent('2 位服務人員的排班資料載入失敗');
   });
 
   it('renders completed service from the server lifecycle without a service-in-progress label', async () => {

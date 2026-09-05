@@ -795,6 +795,19 @@
   color: #14532d;
 }
 
+.span-historical {
+  background: repeating-linear-gradient(-45deg, #e2e8f0, #e2e8f0 8px, #cbd5e1 8px, #cbd5e1 16px);
+  border: 1.5px dashed #64748b;
+  color: #334155;
+  cursor: default;
+}
+
+.historical-overlay-error {
+  display: block;
+  margin-top: 4px;
+  color: #b45309;
+}
+
 .span-buffer {
   background: repeating-linear-gradient(
     -45deg,

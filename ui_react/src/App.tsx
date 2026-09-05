@@ -31,7 +31,6 @@ import { FinancePage } from './pages/FinancePage';
 import { HistoricalServiceAccountingPage } from './pages/HistoricalServiceAccountingPage';
 import { CurrentAnomaliesPage } from './pages/CurrentAnomaliesPage';
 import { AccountManagementPage } from './pages/AccountManagementPage';
-import { SystemStatusPage } from './pages/SystemStatusPage';
 import './pages/LineManagementPage.css';
 
 export const HASH_ALIASES: Record<string, PageType> = {
@@ -172,7 +171,6 @@ export const App: React.FC = () => {
         {currentPage === 'anomalies' && <CurrentAnomaliesPage />}
         {currentPage === 'data-browser' && <DataImportPage initialTab="data-browser" />}
         {currentPage === 'account-management' && <AccountManagementPage />}
-        {currentPage === 'system-status' && <SystemStatusPage />}
       </MasterLayout>
     </ErrorBoundary>
   );
