@@ -3,7 +3,8 @@
   "scenario_id": "FI-UI-PREVIEW-PARITY-003",
   "track": "A",
   "suite_id": "FI",
-  "status": "bound",
+  "status": "blocked",
+  "blocker": "The former Streamlit persistent-MySQL UI preview test is absent. The current React finance_import_mutation_client.test.ts exercises mocked HTTP responses, not a persistent database, rendered-panel/server Preview parity or zero-formal-ledger deltas. No verified current executable binding covers this full acceptance; preserve the criteria and persistent_append_only mode until that binding exists.",
   "requires_database": true,
   "database_execution_mode": "persistent_append_only",
   "test_kinds": ["external_input_fixture", "expected_manifest"],
@@ -12,7 +13,8 @@
   "source_refs": [
     "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#FI-01",
     "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#FSM-01",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#5.3"
+    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#5.3",
+    "document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md#3"
   ],
   "root_facts": [
     "A unique external Taishin workbook source and the API client credentials used only by the test application boundary."
@@ -32,11 +34,5 @@
     "root fixture and expected-manifest digests",
     "API/client/panel versus server Preview parity assertion",
     "zero-formal-ledger delta assertion"
-  ],
-  "execution": {
-    "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_ui_preview_persistent_mysql_e2e.py"
-    ],
-    "test_paths": ["tests/test_finance_import_ui_preview_persistent_mysql_e2e.py"]
-  }
+  ]
 }
