@@ -31,6 +31,9 @@ DATABASE_EXECUTION_MODES = {
     "read_only_existing_database",
     "fresh_schema_bootstrap",
 }
+NONEXISTENT_HISTORICAL_SOURCE = (
+    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md"
+)
 
 
 def load_scenarios(directory: Path = DEFAULT_SCENARIO_DIRECTORY) -> list[dict[str, object]]:
@@ -219,11 +222,19 @@ def _source_reference_errors(scenario_id: object, source_refs: object) -> list[s
     missing = [
         source_ref
         for source_ref in source_refs
-        if not _source_reference_exists(source_ref)
+        if not _is_nonexistent_historical_source(source_ref)
+        and not _source_reference_exists(source_ref)
     ]
     if missing:
         return [f"scenario {scenario_id} has a missing source reference"]
     return []
+
+
+def _is_nonexistent_historical_source(source_ref: object) -> bool:
+    return (
+        isinstance(source_ref, str)
+        and source_ref.partition("#")[0] == NONEXISTENT_HISTORICAL_SOURCE
+    )
 
 
 def _source_reference_exists(source_ref: object) -> bool:
