@@ -8,36 +8,45 @@
   "test_kinds": ["metadata_fixture"],
   "coverage_ids": ["ENTRY-01", "ENTRY-02", "ENTRY-03"],
   "source_refs": [
-    "document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md#2",
-    "document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md#4"
+    "document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md#1",
+    "document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md#3",
+    "document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md#6"
   ],
   "root_facts": [
-    "The versioned entry-point review queue.",
-    "Static discovery output from FastAPI routes, Streamlit pages and CLI __main__ entry points."
+    "Current React NAV_ITEMS and HASH_ALIASES plus the App render boundary.",
+    "Synthetic authenticated and unauthenticated sessions and typed API response fixtures for the exercised React entries."
   ],
   "forbidden_direct_seed": [
     "runtime invocation counts",
     "business payloads or personnel identities",
-    "a synthetic active status without its operator, scenario and canonical owner"
+    "a synthetic reachable status without a current navigation identity and App render branch"
   ],
   "commands": [
-    "Run the entry-point discovery and queue validator.",
-    "Run focused regression for each retired_410, operator_only and removed entry selected by the fixture."
+    "Check unique canonical React navigation identities and compatibility hash mappings.",
+    "Exercise App route guards and the actual Finance entry through its typed query clients.",
+    "Build the current React application to load and type-check page modules."
   ],
   "expected": [
-    "Every discovered entry has exactly one queue item.",
-    "active entries include business scenario, operator, canonical owner and public or operator contract.",
-    "retired_410 is HTTP-only and returns typed 410; operator_only is CLI-only.",
-    "review_required is never treated as active and removed source paths are unreachable."
+    "Canonical navigation identities are unique and compatibility hashes do not create a duplicate navigation owner.",
+    "The exercised current React entries render through App only under the tested authenticated and unauthenticated session conditions.",
+    "Finance entry queries use canonical typed clients and do not expose retired or fake mutation controls.",
+    "Current entry verification does not depend on the retired Streamlit tree or entry-point review queue."
   ],
   "receipt_requirements": [
-    "discovery digest",
-    "queue validation result",
-    "focused regression output",
+    "navigation identity and compatibility-hash assertions",
+    "App route-guard and focused Finance entry regression output",
+    "React TypeScript and application build result",
     "entry identifiers only; no runtime telemetry or personal data"
   ],
   "execution": {
-    "runner": [".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_entrypoint_review_queue.py"],
-    "test_paths": ["tests/test_entrypoint_review_queue.py"]
+    "runner": [
+      "npm --prefix ui_react test -- src/tests/react_entrypoint_registry.test.ts src/tests/route_guard.test.tsx src/tests/finance_entry_cutover.test.tsx",
+      "npm --prefix ui_react run build"
+    ],
+    "test_paths": [
+      "ui_react/src/tests/react_entrypoint_registry.test.ts",
+      "ui_react/src/tests/route_guard.test.tsx",
+      "ui_react/src/tests/finance_entry_cutover.test.tsx"
+    ]
   }
 }

@@ -8,7 +8,9 @@
   "test_kinds": ["process_network_harness"],
   "coverage_ids": ["GERR-01", "GERR-02", "GERR-03", "GERR-05"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#GERR-01"
+    "document/架構重整/01_規格基線/00_Global_共同契約.md#2. 跨 Domain 不變量",
+    "document/架構重整/01_規格基線/00_Global_共同契約.md#4. Typed errors",
+    "document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md#3"
   ],
   "root_facts": [
     "Typed HTTP responses for unauthorized, forbidden, conflict and unavailable outcomes.",
@@ -35,12 +37,15 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_historical_reprocess_ui.py tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_auto_completion_api.py tests\\test_line_management_stage9.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_auto_completion_api.py",
+      "npm --prefix ui_react test -- src/tests/challenger_g2_orders_client_resilience.test.ts src/tests/orders_mutation_flow_store.test.ts src/tests/finance_import_mutation_client.test.ts src/tests/finance_query_page.test.tsx"
     ],
     "test_paths": [
-      "tests/test_finance_import_historical_reprocess_ui.py",
       "tests/domains/orders/subsystems/orders/integration/test_order_auto_completion_api.py",
-      "tests/test_line_management_stage9.py"
+      "ui_react/src/tests/challenger_g2_orders_client_resilience.test.ts",
+      "ui_react/src/tests/orders_mutation_flow_store.test.ts",
+      "ui_react/src/tests/finance_import_mutation_client.test.ts",
+      "ui_react/src/tests/finance_query_page.test.tsx"
     ]
   }
 }

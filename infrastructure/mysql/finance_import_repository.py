@@ -358,7 +358,12 @@ def _load_batch_facts(cursor, batch_identity, for_update):
         raise ValueError("finance_import_batch_not_found")
     cursor.execute(
         _BATCH_COUNTS_SQL,
-        (header["batch_id"], header["batch_id"], header["batch_id"]),
+        (
+            header["batch_id"],
+            header["batch_id"],
+            header["batch_id"],
+            header["batch_id"],
+        ),
     )
     counts = cursor.fetchone()
     cursor.execute(
@@ -387,6 +392,9 @@ def _load_batch_facts(cursor, batch_identity, for_update):
         rows,
         str(header["status"]) == "completed",
         issues.get(None, ()),
+        source_review_occurrence_count=int(
+            counts["source_review_occurrence_count"]
+        ),
     )
 
 
@@ -806,7 +814,10 @@ _BATCH_COUNTS_SQL = (
     "COUNT(DISTINCT CASE WHEN bank_fact.batch_id=%s "
     "THEN bank_fact.id END) "
     "AS duplicate_occurrence_count,"
-    "COUNT(DISTINCT bank_fact.id) AS canonical_member_count "
+    "COUNT(DISTINCT bank_fact.id) AS canonical_member_count,"
+    "(SELECT COUNT(*) FROM finance_import_source_review_occurrences "
+    "AS source_review_occurrence WHERE source_review_occurrence.batch_id=%s) "
+    "AS source_review_occurrence_count "
     "FROM finance_import_occurrences AS occurrence "
     "JOIN finance_import_rows AS bank_fact "
     "ON bank_fact.id=occurrence.finance_import_row_id "

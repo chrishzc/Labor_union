@@ -182,7 +182,7 @@ LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no
 LEFT JOIN beclass_records br ON (br.query_no = c.case_no OR br.bound_case_no = c.case_no)
 LEFT JOIN weekly_report_batch_cases bc ON bc.case_no = c.case_no
 LEFT JOIN weekly_report_batches b ON b.id = bc.batch_id
-WHERE (c.created_at >= %s AND c.created_at < %s) OR c.created_at IS NULL
+WHERE c.created_at >= %s AND c.created_at < %s
 ORDER BY c.created_at,c.id
 """
 

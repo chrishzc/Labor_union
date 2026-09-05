@@ -126,11 +126,11 @@ def test_reconcile_deletes_absent_issue_and_completes_intent_in_one_application_
     tx_log = []
     application = CurrentIssueApplication(repository, lambda: _Uow(tx_log), clock=lambda: NOW)
 
-    result = application.reconcile(scope, lambda _snapshot: (_candidate(),), completed_intent=_intent())
+    result = application.reconcile(scope, lambda _snapshot: (), completed_intent=_intent())
 
-    assert result.present_issue_keys == ("ci_" + "a" * 64,)
+    assert result.present_issue_keys == ()
     assert result.deleted_issue_keys == ("ci_" + "b" * 64,)
-    assert [item.issue_key for item in repository.current] == ["ci_" + "a" * 64]
+    assert repository.current == []
     assert repository.completed == ["recheck:CASE-1"]
     assert tx_log == ["begin", "commit"]
     assert repository.events[-2:] == [("delete", "ci_" + "b" * 64), ("complete_intent", "recheck:CASE-1")]

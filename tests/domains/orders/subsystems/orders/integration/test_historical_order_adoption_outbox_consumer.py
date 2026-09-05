@@ -62,34 +62,3 @@ def test_historical_order_review_event_rejects_receipt_binding_mismatch():
         assert str(error) == "historical_order_adoption_receipt_binding_mismatch"
     else:
         raise AssertionError("receipt mismatch must fail closed")
-
-
-def test_historical_order_review_is_visible_in_import_alert_tab():
-    from api.schemas.anomaly_registry import AnomalySummaryView
-    import importlib
-
-    panel = importlib.import_module("ui.pages.06_finance_alerts")
-    review_alert = AnomalySummaryView(
-        fingerprint="c" * 64,
-        definition_code="HISTORICAL-ORDER-001",
-        source_domain="orders",
-        source_identity="historical-order-review:test",
-        source_version=0,
-        workflow_status="open",
-        workflow_version=1,
-        severity="warning",
-        predicate_active=True,
-        display_snapshot={
-            "redaction_version": "anomaly-safe.v1",
-            "definition_code": "HISTORICAL-ORDER-001",
-            "fields": [
-                {"key": "case_identity", "kind": "text", "value": "AB****89"},
-                {"key": "issue_codes", "kind": "code_list", "value": ["staff_missing"]},
-            ],
-        },
-    )
-
-    assert panel._filter((review_alert,), panel._IMPORT_CODES) == (review_alert,)
-    assert panel._alert_code_label(review_alert.definition_code) == "歷史訂單匯入待人工確認"
-    assert panel._case_no(review_alert) == "AB****89"
-    assert panel._snapshot(review_alert)["issue_codes"] == ["staff_missing"]

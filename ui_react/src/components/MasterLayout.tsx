@@ -27,8 +27,7 @@ export type PageType =
   | 'historical-service-accounting'
   | 'anomalies'
   | 'data-browser'
-  | 'account-management'
-  | 'system-status';
+  | 'account-management';
 
 export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'order-tracker': 'operations',
@@ -50,7 +49,6 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'anomalies': 'audit',
   'data-browser': 'operations',
   'account-management': 'audit',
-  'system-status': 'audit',
 };
 
 export interface NavItem {
@@ -83,7 +81,6 @@ export const NAV_ITEMS: NavItem[] = [
   // Audit & System Section
   { id: 'anomalies', icon: '⚠️', label: '異常審核', section: 'audit' },
   { id: 'account-management', icon: '👤', label: '帳號權限', section: 'audit' },
-  { id: 'system-status', icon: '🩺', label: '系統狀態', section: 'audit' },
 ];
 
 export interface MasterLayoutProps {
@@ -107,11 +104,8 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
   const [latencyText, setLatencyText] = useState<string>('查詢中');
   const [isDegraded, setIsDegraded] = useState<boolean>(false);
   const [showLogoutModal, setShowLogoutModal] = useState<boolean>(false);
-  const shellOwnsSystemStatusQuery = currentPage !== 'system-status';
 
   useEffect(() => {
-    if (!shellOwnsSystemStatusQuery) return undefined;
-
     let isMounted = true;
 
     async function loadSystemStatus() {
@@ -149,7 +143,7 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [shellOwnsSystemStatusQuery]);
+  }, []);
 
   const visibleNavItems = NAV_ITEMS.filter((item) => item.section === currentSection);
   const sidebarCurrentPage = currentPage === 'data-browser' ? 'data-import' : currentPage;

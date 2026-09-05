@@ -62,11 +62,10 @@ export const AiEventStudio: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRouteKey, setSelectedRouteKey] = useState<string | null>(null);
   const [routerInput, setRouterInput] = useState('我想修改登記資料');
-  const [routerScore, setRouterScore] = useState('90');
+  const routerScore = '90';
   const [routerPreview, setRouterPreview] = useState<RouterPreview | null>(null);
   const [routerNotice, setRouterNotice] = useState<string | null>(null);
   const [liffId, setLiffId] = useState<string | null>(null);
-  const [publicBaseUrl, setPublicBaseUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -81,7 +80,6 @@ export const AiEventStudio: React.FC = () => {
       .then((payload: { data?: { liff_id?: string; public_base_url?: string } } | null) => {
         if (!active || !payload?.data) return;
         if (payload.data.liff_id) setLiffId(payload.data.liff_id);
-        if (payload.data.public_base_url) setPublicBaseUrl(payload.data.public_base_url);
       })
       .catch(() => {});
 

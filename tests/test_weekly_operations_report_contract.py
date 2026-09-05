@@ -156,8 +156,9 @@ def test_weekly_query_retains_missing_application_date_as_typed_quality_issue():
     assert "application_date_missing" in row["data_quality_codes"]
 
 
-def test_case_source_retains_rows_without_application_date_for_typed_quality_review():
-    assert "OR c.created_at IS NULL" in _CASE_FACTS_SQL
+def test_case_source_keeps_date_scoped_rows_inside_requested_window_only():
+    assert "OR c.created_at IS NULL" not in _CASE_FACTS_SQL
+    assert "c.created_at >= %s AND c.created_at < %s" in _CASE_FACTS_SQL
 
 
 def test_weekly_service_source_excludes_unrestarted_historical_overlays():
