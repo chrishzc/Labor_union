@@ -97,6 +97,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
 }) => {
   const requestSequence = useRef(0);
   const [refreshRevision, setRefreshRevision] = useState(0);
+  const [factsRefreshing, setFactsRefreshing] = useState(true);
   const [timeline, setTimeline] = useState<ReadState<OrderCoreStageTimeline>>(loading);
   const [detail, setDetail] = useState<ReadState<OrderDetail>>(loading);
   const [terms, setTerms] = useState<ReadState<OrderTerms>>(loading);
@@ -132,16 +133,24 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     requestSequence.current = requestId;
     const controller = new AbortController();
     const current = () => !controller.signal.aborted && requestSequence.current === requestId;
+    setFactsRefreshing(true);
+    let pendingReads = branchType === 'historical' ? 7 : 4;
+    const finished = () => {
+      pendingReads -= 1;
+      if (pendingReads === 0 && current()) setFactsRefreshing(false);
+    };
 
-    setTimeline(loading());
-    setDetail(loading());
-    setTerms(loading());
-    setAssignmentPlan(loading());
-    setHistoricalEvidence(branchType === 'historical' ? loading() : { status: 'skipped' });
-    setHistoricalAccounting(branchType === 'historical' ? loading() : { status: 'skipped' });
-    setHistoricalBaseline(branchType === 'historical' ? loading() : { status: 'skipped' });
-    setHistoricalRestart({ status: 'idle', message: null });
-    setReplacementExpanded(false);
+    if (refreshRevision === 0) {
+      setTimeline(loading());
+      setDetail(loading());
+      setTerms(loading());
+      setAssignmentPlan(loading());
+      setHistoricalEvidence(branchType === 'historical' ? loading() : { status: 'skipped' });
+      setHistoricalAccounting(branchType === 'historical' ? loading() : { status: 'skipped' });
+      setHistoricalBaseline(branchType === 'historical' ? loading() : { status: 'skipped' });
+      setHistoricalRestart({ status: 'idle', message: null });
+      setReplacementExpanded(false);
+    }
 
     void orderCoreStageProjectionClient.getCoreStageTimelines({
       page_size: 20,
@@ -149,30 +158,37 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       case_no_search: caseNo,
     }, { signal: controller.signal })
       .then((page) => { if (current()) setTimeline({ status: 'ready', data: timelineForCase(page, caseNo) }); })
-      .catch((error) => { if (current()) setTimeline({ status: 'error', message: errorMessage(error) }); });
+      .catch((error) => { if (current()) setTimeline({ status: 'error', message: errorMessage(error) }); })
+      .finally(finished);
 
     void ordersQueryClient.getOrderDetail(caseNo, { signal: controller.signal })
       .then((data) => { if (current()) setDetail({ status: 'ready', data }); })
-      .catch((error) => { if (current()) setDetail({ status: 'error', message: errorMessage(error) }); });
+      .catch((error) => { if (current()) setDetail({ status: 'error', message: errorMessage(error) }); })
+      .finally(finished);
 
     void ordersQueryClient.getOrderTerms(caseNo, { signal: controller.signal })
       .then((data) => { if (current()) setTerms({ status: 'ready', data }); })
-      .catch((error) => { if (current()) setTerms({ status: 'error', message: errorMessage(error) }); });
+      .catch((error) => { if (current()) setTerms({ status: 'error', message: errorMessage(error) }); })
+      .finally(finished);
 
     void ordersQueryClient.getAssignmentPlan(caseNo, { signal: controller.signal })
       .then((data) => { if (current()) setAssignmentPlan({ status: 'ready', data }); })
-      .catch((error) => { if (current()) setAssignmentPlan({ status: 'error', message: errorMessage(error) }); });
+      .catch((error) => { if (current()) setAssignmentPlan({ status: 'error', message: errorMessage(error) }); })
+      .finally(finished);
 
     if (branchType === 'historical') {
       void historicalServiceAccountingClient.query(caseNo)
         .then((data) => { if (current()) setHistoricalAccounting({ status: 'ready', data }); })
-        .catch((error) => { if (current()) setHistoricalAccounting({ status: 'error', message: errorMessage(error) }); });
+        .catch((error) => { if (current()) setHistoricalAccounting({ status: 'error', message: errorMessage(error) }); })
+        .finally(finished);
       void historicalAdoptionEvidenceClient.queryByCase(caseNo, { signal: controller.signal })
         .then((data) => { if (current()) setHistoricalEvidence({ status: 'ready', data }); })
-        .catch((error) => { if (current()) setHistoricalEvidence({ status: 'error', message: errorMessage(error) }); });
+        .catch((error) => { if (current()) setHistoricalEvidence({ status: 'error', message: errorMessage(error) }); })
+        .finally(finished);
       void historicalOperationalBaselineClient.queryByCase(caseNo, { signal: controller.signal })
         .then((data) => { if (current()) setHistoricalBaseline({ status: 'ready', data }); })
-        .catch((error) => { if (current()) setHistoricalBaseline({ status: 'error', message: errorMessage(error) }); });
+        .catch((error) => { if (current()) setHistoricalBaseline({ status: 'error', message: errorMessage(error) }); })
+        .finally(finished);
     }
 
     return () => {
@@ -256,6 +272,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
         </header>
 
         <div className="order-v2-drawer-body">
+          {factsRefreshing && <p role="status">正在更新正式案件資料；保留目前面板狀態。</p>}
           <section className="order-v2-drawer-section" aria-labelledby="order-v2-current-facts">
             <h3 id="order-v2-current-facts">正式目前 owner facts</h3>
             <div className="order-v2-drawer-fact-grid">
@@ -298,9 +315,9 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             <h3>案件受控操作</h3>
             <p>先選擇業務操作，再依正式 owner 查詢、預覽與確認；資格與阻擋原因由各正式流程回傳。</p>
             <div className="order-v2-drawer-actions">
-              <button type="button" disabled={operationBusy} onClick={() => setOperation('cancellation')}>取消／補登取消服務事實</button>
-              <button type="button" disabled={operationBusy} onClick={() => setOperation('reopen')}>受控重開取消案件</button>
-              <button type="button" disabled={operationBusy} onClick={() => setOperation('actual-start')}>確認／更正實際開始日</button>
+              <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('cancellation')}>取消／補登取消服務事實</button>
+              <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('reopen')}>受控重開取消案件</button>
+              <button type="button" disabled={operationBusy || factsRefreshing} onClick={() => setOperation('actual-start')}>確認／更正實際開始日</button>
             </div>
             {operationBusy && <p role="status">操作結果或正式回讀尚未確認，暫時不能關閉或切換操作。</p>}
             {operation === 'cancellation' && <OrderCancellationPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
@@ -308,7 +325,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             {operation === 'actual-start' && <OrderActualStartPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
           </section>
 
-          <fieldset disabled={operationBusy} style={{ border: 0, padding: 0, margin: 0 }}>
+          <fieldset disabled={operationBusy || factsRefreshing} style={{ border: 0, padding: 0, margin: 0 }}>
           {currentBranch !== 'cancelled' && detail.status === 'ready'
             && (branchType === 'historical'
               || detail.data.order_status === '待補件'

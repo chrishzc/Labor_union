@@ -46,8 +46,11 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, onObserved, onBu
   };
 
   const observe = async () => {
-    const receipt = orderMutationFlowStore.getReopenDraft(caseNo)?.receiptView;
-    if (!receipt || receipt.case_no !== caseNo) throw new Error('受控重開收據案件識別不一致。');
+    const current = orderMutationFlowStore.getReopenDraft(caseNo);
+    const receipt = current?.receiptView;
+    if (!receipt || receipt.case_no !== caseNo || receipt.preview_fingerprint !== current?.previewView?.preview_fingerprint) {
+      throw new Error('受控重開收據案件識別或 fingerprint 不一致。');
+    }
     const detail = await ordersQueryClient.getOrderDetail(caseNo);
     if (detail.case_no !== caseNo || detail.order_status !== receipt.lifecycle_status) {
       throw new Error('重開已回傳收據，但正式案件尚未觀察到收據狀態；只重試回讀，不重送重開。');

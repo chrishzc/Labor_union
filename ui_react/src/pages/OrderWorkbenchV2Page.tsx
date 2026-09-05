@@ -3,6 +3,7 @@
  * Description: 待辦看板 Beta。唯讀使用正式十三核心階段 query contract，不以前端推導階段或計數。
  */
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -72,6 +73,7 @@ function coreQueryErrorMessage(error: unknown): string {
 export const OrderWorkbenchV2Page: FC = () => {
   const [view, setView] = useState<OrderCoreStageWorkbenchViewModel | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summaryIndex, setSummaryIndex] = useState<ReadonlyMap<string, OrderSummaryCardViewModel>>(
     () => new Map(),
@@ -91,6 +93,12 @@ export const OrderWorkbenchV2Page: FC = () => {
     branchType: CoreStageBranchType;
   } | null>(null);
   const requestSequence = useRef(0);
+  const lastResolvedQuery = useRef<string | null>(null);
+  const refreshProjection = useCallback(() => setProjectionRefreshKey((current) => current + 1), []);
+  const closeDrawer = useCallback(() => {
+    setSelectedDrawer(null);
+    refreshProjection();
+  }, [refreshProjection]);
 
   const normalizedSearch = search.trim();
 
@@ -116,16 +124,23 @@ export const OrderWorkbenchV2Page: FC = () => {
           : undefined,
     };
 
-    setLoading(true);
+    const queryKey = JSON.stringify(query);
+    const readbackRefresh = lastResolvedQuery.current === queryKey;
     setError(null);
-    setView(null);
+    setRefreshing(readbackRefresh);
+    if (!readbackRefresh) {
+      setLoading(true);
+      setView(null);
+    }
 
     void orderCoreStageProjectionClient.getCoreStageTimelines(query, {
       signal: controller.signal,
     })
       .then((page) => {
         if (controller.signal.aborted || requestSequence.current !== requestId) return;
-        setView(adaptOrderCoreStageTimelinePage(page, query));
+        const nextView = adaptOrderCoreStageTimelinePage(page, query);
+        lastResolvedQuery.current = queryKey;
+        setView(nextView);
       })
       .catch((caught) => {
         if (controller.signal.aborted || requestSequence.current !== requestId) return;
@@ -134,6 +149,7 @@ export const OrderWorkbenchV2Page: FC = () => {
       .finally(() => {
         if (!controller.signal.aborted && requestSequence.current === requestId) {
           setLoading(false);
+          setRefreshing(false);
         }
       });
 
@@ -269,6 +285,7 @@ export const OrderWorkbenchV2Page: FC = () => {
           </p>
         </div>
         <div className="order-v2-toolbar-actions">
+          <button type="button" disabled={loading || refreshing} onClick={refreshProjection}>重新讀取正式清單</button>
           <input
             aria-label="搜尋案件編號"
             value={search}
@@ -344,6 +361,9 @@ export const OrderWorkbenchV2Page: FC = () => {
 
       {loading && <div className="order-v2-empty">正在查詢正式十三階段資料…</div>}
       {error && <div className="order-v2-error" role="alert">{error}</div>}
+      {!loading && view !== null && (refreshing || error !== null) && (
+        <div className="order-v2-summary-warning" role="status">正式階段刷新尚未完成；保留上次讀取內容與面板狀態，案件操作暫停。</div>
+      )}
       {!loading && !error && displayedCount === 0 && (
         <div className="order-v2-empty">目前沒有符合 server-side 條件的案件。</div>
       )}
@@ -353,7 +373,8 @@ export const OrderWorkbenchV2Page: FC = () => {
         </div>
       )}
 
-      {!loading && !error && displayedCount > 0 && (
+      {!loading && displayedCount > 0 && (
+        <fieldset disabled={refreshing || error !== null} style={{ border: 0, padding: 0, margin: 0 }}>
         <div className="order-v2-case-grid">
           {view?.items.map((item) => {
             const summary = summaryIndex.get(item.id) ?? null;
@@ -415,33 +436,35 @@ export const OrderWorkbenchV2Page: FC = () => {
                 )}
                 {branchType === 'normal' && selectedStage === 'matching_pool' && (
                   <OrderCandidateQueryPanel
+                    key={item.id}
                     caseNo={item.id}
-                    onPoolReadback={() => setProjectionRefreshKey((current) => current + 1)}
+                    onPoolReadback={refreshProjection}
                   />
                 )}
                 {branchType === 'normal' && (
                   selectedStage === 'caregiver_line_delivery'
                   || selectedStage === 'caregiver_willingness_reply'
                 ) && (
-                  <OrderCandidateContactStatusPanel caseNo={item.id} />
+                  <OrderCandidateContactStatusPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
                 )}
                 {branchType === 'normal' && selectedStage === 'formal_recommendation' && (
-                  <OrderFormalRecommendationPanel caseNo={item.id} />
+                  <OrderFormalRecommendationPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
                 )}
                 {branchType === 'normal' && selectedStage === 'caregiver_contract' && (
-                  <OrderCaregiverContractPanel caseNo={item.id} />
+                  <OrderCaregiverContractPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
                 )}
                 {branchType === 'normal' && selectedStage === 'client_contract' && (
-                  <OrderClientContractPanel caseNo={item.id} />
+                  <OrderClientContractPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
                 )}
                 {branchType === 'normal' && selectedStage === 'confirmed_service_dates' && (
                   <OrderServiceDatesPanel
+                    key={item.id}
                     caseNo={item.id}
-                    onObserved={() => setProjectionRefreshKey((current) => current + 1)}
+                    onObserved={refreshProjection}
                   />
                 )}
                 {branchType === 'normal' && selectedStage === 'formal_service' && (
-                  <OrderAssignmentPlanPanel caseNo={item.id} />
+                  <OrderAssignmentPlanPanel key={item.id} caseNo={item.id} onObserved={refreshProjection} />
                 )}
                 <button
                   type="button"
@@ -454,6 +477,7 @@ export const OrderWorkbenchV2Page: FC = () => {
             );
           })}
         </div>
+        </fieldset>
       )}
 
       <section className="order-v2-side-lanes">
@@ -479,12 +503,11 @@ export const OrderWorkbenchV2Page: FC = () => {
 
       {selectedDrawer !== null && (
         <OrderWorkbenchV2Drawer
+          key={selectedDrawer.caseNo}
           caseNo={selectedDrawer.caseNo}
           branchType={selectedDrawer.branchType}
-          onClose={() => {
-            setSelectedDrawer(null);
-            setProjectionRefreshKey((current) => current + 1);
-          }}
+          onClose={closeDrawer}
+          onObserved={refreshProjection}
         />
       )}
     </div>

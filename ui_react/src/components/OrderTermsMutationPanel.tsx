@@ -80,11 +80,20 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     query.client_finance_version,
     query.payroll_version,
   ].join(':');
+  const observedRevision = readback === null ? null : [
+    readback.case_no,
+    readback.order_version,
+    readback.scheduling_version,
+    readback.scheduling_generation,
+    readback.client_finance_version,
+    readback.payroll_version,
+  ].join(':');
   const previousQueryRevision = useRef(queryRevision);
 
   useEffect(() => {
     if (previousQueryRevision.current === queryRevision) return;
     previousQueryRevision.current = queryRevision;
+    if (queryRevision === observedRevision) return;
     setDraft(draftFromQuery(query));
     setPreview(null);
     setReceipt(null);
@@ -92,7 +101,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     setReason('');
     setError(null);
     setStatus('idle');
-  }, [query, queryRevision]);
+  }, [query, queryRevision, observedRevision]);
 
   const updateDraft = <K extends keyof OrderTermsDraft>(key: K, value: OrderTermsDraft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -167,7 +176,12 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
       setReason('');
       try {
         const refreshed = await orderTermsMutationClient.query(caseNo);
-        if (refreshed.case_no !== caseNo) throw new Error('條款回讀案件識別不一致。');
+        if (refreshed.case_no !== caseNo || refreshed.order_version < nextReceipt.order_version
+          || refreshed.scheduling_version < nextReceipt.scheduling_version
+          || refreshed.client_finance_version < nextReceipt.client_finance_version
+          || refreshed.payroll_version < nextReceipt.payroll_version) {
+          throw new Error('條款回讀案件識別或版本與收據不一致。');
+        }
         setReadback(refreshed);
         setDraft(draftFromQuery(refreshed));
         if (mounted.current) onObserved?.();

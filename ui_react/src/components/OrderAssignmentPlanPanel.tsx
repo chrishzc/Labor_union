@@ -1,10 +1,11 @@
-import { useState, type FC } from 'react';
+import { useEffect, useRef, useState, type FC } from 'react';
 import type { AssignmentPlan } from '../api/orders/order_query_schemas';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActions';
 
 interface OrderAssignmentPlanPanelProps {
   caseNo: string;
+  onObserved?: () => void;
 }
 
 type ReadState =
@@ -19,11 +20,13 @@ function errorMessage(error: unknown): string {
     : '正式指派與排班資料讀取失敗';
 }
 
-export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ caseNo }) => {
+export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ caseNo, onObserved }) => {
   const [state, setState] = useState<ReadState>({ status: 'idle' });
   const [replacementOpen, setReplacementOpen] = useState(false);
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
-  const load = async () => {
+  const load = async (notify = false) => {
     setState({ status: 'loading' });
     try {
       const data = await ordersQueryClient.getAssignmentPlan(caseNo);
@@ -31,6 +34,7 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
         throw new Error('正式指派回讀案件編號不一致。');
       }
       setState({ status: 'ready', data });
+      if (notify && mounted.current) onObserved?.();
     } catch (error) {
       setState({ status: 'error', message: errorMessage(error) });
     }
@@ -61,7 +65,7 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
       {replacementOpen && (
         <ServiceBeforeReplacementActions
           caseNo={caseNo}
-          onCommitted={() => load()}
+          onCommitted={() => load(true)}
           onSubstitutionReferral={() => {
             window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`;
           }}

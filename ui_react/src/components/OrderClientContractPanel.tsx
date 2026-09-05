@@ -1,4 +1,4 @@
-import { useRef, useState, type FC } from 'react';
+import { useEffect, useRef, useState, type FC } from 'react';
 import {
   contractSigningClient,
   type ContractSigningStatus,
@@ -10,6 +10,7 @@ import {
 
 interface OrderClientContractPanelProps {
   caseNo: string;
+  onObserved?: () => void;
 }
 
 type ReadState =
@@ -56,12 +57,14 @@ function isHttpsUrl(value: string): boolean {
   }
 }
 
-export const OrderClientContractPanel: FC<OrderClientContractPanelProps> = ({ caseNo }) => {
+export const OrderClientContractPanel: FC<OrderClientContractPanelProps> = ({ caseNo, onObserved }) => {
   const intents = useRef(new Map<string, Intent>());
   const [readState, setReadState] = useState<ReadState>({ status: 'idle' });
   const [downloadUrl, setDownloadUrl] = useState('');
   const [signedFile, setSignedFile] = useState<File | null>(null);
   const [operation, setOperation] = useState<OperationState>({ status: 'idle' });
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const currentIntent = (key: string): Intent => {
     const existing = intents.current.get(key);
@@ -88,13 +91,22 @@ export const OrderClientContractPanel: FC<OrderClientContractPanelProps> = ({ ca
     }
   };
 
-  const runOperation = async (operationTask: () => Promise<unknown>, successMessage: string) => {
+  const runOperation = async (
+    operationTask: () => Promise<unknown>,
+    successMessage: string,
+    expectedStatus: 'client_document_sent' | 'client_signed_received',
+  ) => {
     setOperation({ status: 'working' });
     try {
       await operationTask();
       const data = await contractSigningClient.query(caseNo);
+      if (data.case_no !== caseNo || !data[expectedStatus]) {
+        throw new Error('客戶契約回讀尚未觀察到本次操作結果。');
+      }
+      if (!mounted.current) return;
       setReadState({ status: 'ready', data });
       setOperation({ status: 'success', message: successMessage });
+      onObserved?.();
     } catch (error) {
       setOperation({ status: 'error', message: errorMessage(error) });
     }
@@ -162,6 +174,7 @@ export const OrderClientContractPanel: FC<OrderClientContractPanelProps> = ({ ca
                 currentIntent('send'),
               ),
               '客戶契約寄送工作已建立，並已回讀最新狀態。',
+              'client_document_sent',
             )}
           >
             建立客戶契約寄送工作
@@ -195,6 +208,7 @@ export const OrderClientContractPanel: FC<OrderClientContractPanelProps> = ({ ca
                 currentIntent('return'),
               ),
               '客戶契約簽回已記錄，並已回讀最新狀態。',
+              'client_signed_received',
             )}
           >
             記錄客戶契約簽回

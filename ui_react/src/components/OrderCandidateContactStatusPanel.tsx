@@ -1,4 +1,4 @@
-import { useState, type FC } from 'react';
+import { useEffect, useRef, useState, type FC } from 'react';
 import {
   candidateContactPoolClient,
   type CandidateContactPool,
@@ -7,6 +7,7 @@ import {
 
 interface OrderCandidateContactStatusPanelProps {
   caseNo: string;
+  onObserved?: () => void;
 }
 
 type ContactStatusState =
@@ -36,10 +37,12 @@ function deliveryStatus(
   return `${delivery.status} · ${delivery.sent_at}`;
 }
 
-export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPanelProps> = ({ caseNo }) => {
+export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPanelProps> = ({ caseNo, onObserved }) => {
   const [state, setState] = useState<ContactStatusState>({ status: 'idle' });
   const [reasonDrafts, setReasonDrafts] = useState<Record<number, string>>({});
   const [mutationStates, setMutationStates] = useState<Record<number, WillingnessMutationState>>({});
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const loadStatus = () => {
     setState({ status: 'loading' });
@@ -70,7 +73,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       .then(async (result) => {
         const readback = await candidateContactPoolClient.query(caseNo);
         const readbackCandidates = readback.candidates.filter((candidate) => candidate.id === candidateId);
-        if (readbackCandidates.length !== 1 || readbackCandidates[0]!.willingness !== willingness) {
+        if (readback.case_no !== caseNo || readbackCandidates.length !== 1 || readbackCandidates[0]!.willingness !== willingness) {
           throw new Error('人工意願回讀與本次寫入不一致。');
         }
         setState({ status: 'ready', data: readback });
@@ -78,6 +81,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
           ...current,
           [candidateId]: { status: 'success', result },
         }));
+        if (mounted.current) onObserved?.();
       })
       .catch((error) => {
         setMutationStates((current) => ({

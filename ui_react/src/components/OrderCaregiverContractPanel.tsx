@@ -1,4 +1,4 @@
-import { useRef, useState, type FC } from 'react';
+import { useEffect, useRef, useState, type FC } from 'react';
 import {
   contractSigningClient,
   type ContractSigningStatus,
@@ -10,6 +10,7 @@ import {
 
 interface OrderCaregiverContractPanelProps {
   caseNo: string;
+  onObserved?: () => void;
 }
 
 type ReadState =
@@ -57,12 +58,14 @@ function isHttpsUrl(value: string): boolean {
   }
 }
 
-export const OrderCaregiverContractPanel: FC<OrderCaregiverContractPanelProps> = ({ caseNo }) => {
+export const OrderCaregiverContractPanel: FC<OrderCaregiverContractPanelProps> = ({ caseNo, onObserved }) => {
   const intents = useRef(new Map<string, Intent>());
   const [readState, setReadState] = useState<ReadState>({ status: 'idle' });
   const [downloadUrls, setDownloadUrls] = useState<Record<number, string>>({});
   const [signedFiles, setSignedFiles] = useState<Record<number, File | null>>({});
   const [operations, setOperations] = useState<Record<number, SegmentOperationState>>({});
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const currentIntent = (key: string): Intent => {
     const existing = intents.current.get(key);
@@ -93,16 +96,22 @@ export const OrderCaregiverContractPanel: FC<OrderCaregiverContractPanelProps> =
     segmentId: number,
     operation: () => Promise<unknown>,
     successMessage: string,
+    expectedStatus: 'sent' | 'signed_received',
   ) => {
     setOperations((current) => ({ ...current, [segmentId]: { status: 'working' } }));
     try {
       await operation();
       const data = await contractSigningClient.query(caseNo);
+      if (data.case_no !== caseNo || !data.staff_segments.find((segment) => segment.segment_id === segmentId)?.[expectedStatus]) {
+        throw new Error('月嫂契約回讀尚未觀察到本次操作結果。');
+      }
+      if (!mounted.current) return;
       setReadState({ status: 'ready', data });
       setOperations((current) => ({
         ...current,
         [segmentId]: { status: 'success', message: successMessage },
       }));
+      onObserved?.();
     } catch (error) {
       setOperations((current) => ({
         ...current,
@@ -182,6 +191,7 @@ export const OrderCaregiverContractPanel: FC<OrderCaregiverContractPanelProps> =
                           currentIntent(sendIntentKey),
                         ),
                         '月嫂契約寄送工作已建立，並已回讀最新狀態。',
+                        'sent',
                       )}
                     >
                       建立月嫂契約寄送工作
@@ -220,6 +230,7 @@ export const OrderCaregiverContractPanel: FC<OrderCaregiverContractPanelProps> =
                           currentIntent(returnIntentKey),
                         ),
                         '月嫂契約簽回已記錄，並已回讀最新狀態。',
+                        'signed_received',
                       )}
                     >
                       記錄月嫂契約簽回

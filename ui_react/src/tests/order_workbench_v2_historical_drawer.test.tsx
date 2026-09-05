@@ -318,8 +318,22 @@ describe('historical Drawer immutable evidence boundary', () => {
 
   it('mounts the existing replacement workflow only after the explicit business entry is selected', async () => {
     mocks.detail.mockResolvedValue(orderDetail('訂單成立'));
+    mocks.core.mockResolvedValue({
+      items: [{
+        ...timeline(), branch_type: 'normal', lifecycle_status: '訂單成立',
+        current_core_stage_code: 'confirmed_service_dates', current_core_stage_ordinal: 9,
+        historical_current_owner_stage_code: null, historical_current_owner_stage_ordinal: null,
+        core_stages: CORE_STAGE_CODES.map((code, index) => ({
+          ...stage(code, index), owner: `owner-${code}`, warnings: [],
+          source: { owner: `owner-${code}`, identity: `${code}:CASE-FUTURE`, version: 12 },
+        })),
+      }],
+      stage_counts: Object.fromEntries(CORE_STAGE_CODES.map((code) => [code, code === 'confirmed_service_dates' ? 1 : 0])),
+      substatus_counts: {}, next_cursor: null, etag: 'b'.repeat(64),
+    });
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="normal" onClose={vi.fn()} />);
     const entry = await screen.findByRole('button', { name: '服務前更換月嫂' });
+    await waitFor(() => expect(entry).toBeEnabled());
     expect(screen.queryByText('R-01 候選月嫂尚未定案')).not.toBeInTheDocument();
     fireEvent.click(entry);
     expect(await screen.findByText('R-01 候選月嫂尚未定案')).toBeInTheDocument();

@@ -265,11 +265,15 @@ describe('待辦看板 Beta 唯讀工作 Drawer', () => {
 
     expect(clientMocks.getCoreStageTimelines).toHaveBeenCalledWith(
       expect.objectContaining({
-        branch_type: 'normal',
+        lifecycle_scope: 'all',
         case_no_search: 'CASE-DRAWER',
       }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+    const drawerQuery = clientMocks.getCoreStageTimelines.mock.calls.find(
+      ([params]) => params.case_no_search === 'CASE-DRAWER',
+    );
+    expect(drawerQuery?.[0]).not.toHaveProperty('branch_type');
     expect(clientMocks.getOrderDetail).toHaveBeenCalledWith('CASE-DRAWER', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(clientMocks.getOrderTerms).toHaveBeenCalledWith('CASE-DRAWER', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(clientMocks.getAssignmentPlan).toHaveBeenCalledWith('CASE-DRAWER', expect.objectContaining({ signal: expect.any(AbortSignal) }));

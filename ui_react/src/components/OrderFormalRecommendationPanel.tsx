@@ -49,6 +49,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const sequence = useRef(0);
+  const activeCase = useRef<string | null>(null);
   const [reason, setReason] = useState('');
   const [resumeNote, setResumeNote] = useState('');
   const [lockPreview, setLockPreview] = useState<WaitingDepositPreview | null>(null);
@@ -57,6 +58,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
 
   useEffect(() => {
     const request = ++sequence.current;
+    activeCase.current = caseNo;
     setActive({ status: 'loading' });
     setCandidates({ status: 'idle' });
     setReason('');
@@ -67,7 +69,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     void readCurrentPlan(caseNo)
       .then((data) => { if (sequence.current === request) setActive({ status: 'ready', data }); })
       .catch((caught) => { if (sequence.current === request) setActive({ status: 'error', message: errorMessage(caught) }); });
-    return () => { sequence.current += 1; };
+    return () => { activeCase.current = null; sequence.current += 1; };
   }, [caseNo]);
 
   const reload = async () => {
@@ -103,7 +105,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     && current.contact.plan.status === 'proposed' && current.contact.customer_decision === 'pending';
 
   const perform = async (operation: () => Promise<void>) => {
-    if (busyRef.current) return;
+    if (busyRef.current || activeCase.current !== caseNo) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
@@ -126,7 +128,9 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
 
   const freshVisiblePlan = async (): Promise<CurrentPlan> => {
     if (current === null) throw new Error('請先讀取目前正式方案。');
+    const request = sequence.current;
     const fresh = await readCurrentPlan(caseNo, current.plan.planId);
+    if (activeCase.current !== caseNo || sequence.current !== request) throw new Error('案件畫面已切換，未送出操作。');
     if (fresh === null || fresh.contact.plan.communication_version !== current.contact.plan.communication_version) {
       throw new Error('正式方案版本已變更，請重新讀取後確認。');
     }
@@ -134,10 +138,11 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
   };
 
   const observe = async (planId: number, validate: (data: CurrentPlan) => boolean, message: string) => {
+    if (activeCase.current !== caseNo) return;
     const request = sequence.current;
     const data = await readCurrentPlan(caseNo, planId);
     if (data === null || !validate(data)) throw new Error('操作後正式方案回讀尚未確認預期結果，請重新讀取；不重送操作。');
-    if (sequence.current !== request) return;
+    if (activeCase.current !== caseNo || sequence.current !== request) return;
     setActive({ status: 'ready', data });
     setLockPreview(null);
     setNotice(message);
@@ -146,7 +151,9 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
 
   const createPlan = (candidate: CandidateContact) => perform(async () => {
     if (!canCreate || candidate.status !== 'active' || candidate.willingness !== 'willing') return;
+    const request = sequence.current;
     const [existing, detail] = await Promise.all([readCurrentPlan(caseNo), ordersQueryClient.getOrderDetail(caseNo)]);
+    if (activeCase.current !== caseNo || sequence.current !== request) return;
     if (detail.case_no !== caseNo || !['洽談中', '訂單成立'].includes(detail.order_status)
       || (existing !== null && (existing.plan.activeLockId !== null || existing.plan.status === 'accepted'
         || existing.contact.customer_decision === 'accepted'))) {
@@ -205,9 +212,10 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     if (fresh.contact.customer_decision !== 'accepted' || fresh.plan.activeLockId !== null) {
       throw new Error('僅已接受且尚未鎖定的正式方案可建立等待訂金鎖。');
     }
+    const request = sequence.current;
     const preview = await waitingDepositLockClient.preview(caseNo, fresh.plan.planId);
     if (preview.case_no !== caseNo || preview.plan_id !== fresh.plan.planId) throw new Error('等待訂金鎖 Preview identity 不一致，已停止套用。');
-    setLockPreview(preview);
+    if (activeCase.current === caseNo && sequence.current === request) setLockPreview(preview);
   });
 
   const applyLock = () => perform(async () => {

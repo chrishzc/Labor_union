@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderControlledReopenPanel } from '../components/OrderControlledReopenPanel';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { ApiHttpError } from '../api/shared/typed_errors';
+import { OrderMutationConflictError } from '../api/orders/order_mutation_errors';
 import type { OrderReopenPreviewView, OrderReopenReceiptView } from '../api/orders/order_mutation_schemas';
 
 const mocks = vi.hoisted(() => ({ preview: vi.fn(), apply: vi.fn(), detail: vi.fn() }));
@@ -93,11 +94,23 @@ describe('Beta 沿用正式受控重開狀態機', () => {
   });
 
   it('stale conflict 由既有 flow 使 preview 失效，不再提供 Apply', async () => {
-    mocks.apply.mockRejectedValue(new ApiHttpError(409, 'stale_preview', '預覽過期'));
+    mocks.apply.mockRejectedValue(new OrderMutationConflictError({ code: 'stale_preview', message: '預覽過期' }));
     render(<OrderControlledReopenPanel caseNo={CASE} />); await check();
     fireEvent.click(screen.getByRole('button', { name: '確認受控重開' }));
     await waitFor(() => expect(orderMutationFlowStore.getReopenDraft(CASE)?.status).toBe('stale'));
     expect(screen.queryByRole('button', { name: '確認受控重開' })).not.toBeInTheDocument();
     expect(mocks.apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('receipt fingerprint 不同時連 observation retry 都不可將它視為成功', async () => {
+    mocks.apply.mockResolvedValue({ ...receipt(), preview_fingerprint: 'f'.repeat(64) });
+    const onObserved = vi.fn(); render(<OrderControlledReopenPanel caseNo={CASE} onObserved={onObserved} />);
+    await check(); fireEvent.click(screen.getByRole('button', { name: '確認受控重開' }));
+    const retry = await screen.findByRole('button', { name: '只重新讀取重開結果' });
+    fireEvent.click(retry);
+    await screen.findByText('受控重開收據案件識別或 fingerprint 不一致。');
+    expect(mocks.detail).not.toHaveBeenCalled();
+    expect(mocks.apply).toHaveBeenCalledTimes(1);
+    expect(onObserved).not.toHaveBeenCalled();
   });
 });
