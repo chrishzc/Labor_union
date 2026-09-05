@@ -22,13 +22,14 @@ describe('Order Workbench V2 parity reconciliation', () => {
     expect(drawerSource).toContain("historicalAccounting.status === 'error'");
   });
 
-  it('preserves the existing Beta entry and legacy default without starting the #139 navigation cutover', () => {
+  it('uses the workbench as the canonical navigation entry while legacy routes remain for #148', () => {
     expect(appSource).toContain("'order-beta': 'order-workbench-v2'");
     expect(appSource).toContain("currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page />");
-    expect(appSource).toContain("return 'order-tracker'");
-    expect(layoutSource).toContain("| 'order-workbench-v2'");
-    expect(layoutSource).toContain("{ id: 'order-workbench-v2', icon: '🧪', label: '待辦看板 Beta'");
-    expect(layoutSource).toContain("{ id: 'order-tracker', icon: '📌', label: '待辦看板'");
+    expect(appSource).toContain("return 'order-workbench-v2'");
+    expect(layoutSource).toContain("{ id: 'order-workbench-v2', icon: '📌', label: '待辦看板'");
+    expect(layoutSource).toContain("item.id !== 'order-tracker' && item.id !== 'orders'");
+    expect(appSource).toContain("currentPage === 'order-tracker' && <OrderTrackerPage />");
+    expect(appSource).toContain("currentPage === 'orders' && <OrdersManagementPage />");
   });
 
   it('does not reintroduce the retired handcrafted contract-document presentation', () => {
