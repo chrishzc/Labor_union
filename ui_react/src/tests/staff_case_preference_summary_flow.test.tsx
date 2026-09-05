@@ -43,9 +43,12 @@ describe('Staff case preference summary flow', () => {
 
     fireEvent.click(cardView.getByRole('button', { name: /檢視服務人員摘要/ }));
     fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
-    const drawerSummary = document.querySelector('[data-surface-id="staff.drawer.case-preference-summary"]');
-    expect(drawerSummary).not.toBeNull();
-    const drawerView = within(drawerSummary as HTMLElement);
+    const drawerSummary = await waitFor(() => {
+      const surface = document.querySelector('[data-surface-id="staff.drawer.case-preference-summary"]');
+      expect(surface).not.toBeNull();
+      return surface as HTMLElement;
+    });
+    const drawerView = within(drawerSummary);
 
     expect(drawerView.getByRole('group', { name: '希望服務地區' })).toHaveTextContent('其它：偏遠地區需先確認交通');
     expect(drawerView.getByRole('group', { name: '服務時段' })).toHaveTextContent('尚未登錄');
