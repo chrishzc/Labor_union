@@ -113,6 +113,56 @@ APPLICATION_OWNED_COMMIT_SYMBOLS = {
 }
 
 
+# Exact semantic reviews for commit boundaries audited under #149/#215.
+# These remain symbol-scoped so a sibling commit never inherits acceptance.
+REVIEWED_COMMIT_BOUNDARIES: dict[
+    tuple[str, str], tuple[str, str, str, str, str]
+] = {
+    ("api/dependencies/admin_auth.py", "ensure_development_root_admin"): (
+        "access_control", "adapter",
+        "Development-only root bootstrap fallback owns its bounded factor transaction; normal pre-created root startup does not enter this mutation path.",
+        "Retain only as a non-production bootstrap fallback while normal first-login MFA enrollment remains the canonical factor setup path.",
+        "Environment guards, existing-root short circuit, and MFA enrollment recovery remain the required focused evidence.",
+    ),
+    ("line/line_bot.py", "line_bind"): (
+        "line_identity", "adapter",
+        "Legacy rollback-only LINE bind route owns one bounded binding transaction; canonical runtime returns 410 before opening the write path.",
+        "Retain only behind the explicit legacy rollback runtime contract; canonical runtime must remain write-inaccessible.",
+        "Canonical 410-before-write and production rollback-mode guards remain the required focused evidence.",
+    ),
+    ("scripts/migrate_weekly_report_batches.py", "main"): (
+        "global_migration", "maintenance",
+        "Migration entry owns an intentional resumable schema stage; its commit is a maintenance checkpoint rather than a nested business-operation commit.",
+        "Retain the resumable operator migration boundary and preserve idempotent schema/seed behavior.",
+        "Operator-only invocation and safe rerun semantics remain the required migration evidence.",
+    ),
+    ("scripts/migrate_weekly_report_batches.py", "seed_history_from_template"): (
+        "global_migration", "maintenance",
+        "Historical seed helper commits the terminal seed stage of a resumable migration; no later database mutation follows that stage in main.",
+        "Retain as an explicit migration-stage boundary while INSERT IGNORE/idempotent rerun semantics remain intact.",
+        "Focused migration rerun evidence remains required; this acceptance grants no production request-path authority.",
+    ),
+    ("scripts/seed_line_test_fixtures.py", "seed_fixtures"): (
+        "validation", "maintenance",
+        "Disposable fixture seeder owns its validation transaction, rejects production, commits on success, and rolls back on exception.",
+        "Retain only as guarded validation tooling with explicit non-production targeting.",
+        "Production rejection and rollback-on-failure tests remain the required focused evidence.",
+    ),
+    ("subsystems/reporting/weekly_report_batch_service.py", "WeeklyReportBatchService.close_batch"): (
+        "reporting", "application",
+        "Weekly-report close is the request operation transaction owner: the route supplies one request connection and performs no sibling database mutation around the service call.",
+        "Retain the single commit after all close-batch database mutations; preserve rollback before commit on failure.",
+        "Disposable MySQL close-batch transaction tests remain the required focused evidence.",
+    ),
+    ("subsystems/reporting/weekly_report_batch_service.py", "WeeklyReportBatchService.update_batch_metrics"): (
+        "reporting", "application",
+        "Weekly-report metrics update is the request operation transaction owner: the route supplies one request connection and performs no sibling database mutation around the service call.",
+        "Retain the single commit after all metrics mutations; preserve rollback before commit on failure.",
+        "Disposable MySQL metrics transaction tests remain the required focused evidence.",
+    ),
+}
+
+
 @dataclass(frozen=True)
 class CommitLocation:
     line: int
@@ -218,6 +268,9 @@ def _locations(path: str) -> dict[tuple[str, str, int], CommitLocation]:
 
 
 def _semantic_owner(path: str, symbol: str) -> tuple[str, str]:
+    reviewed = REVIEWED_COMMIT_BOUNDARIES.get((path, symbol))
+    if reviewed is not None:
+        return reviewed[0], reviewed[1]
     if path == "scripts/generate_fake_data.py":
         return "validation", "maintenance"
     if path.startswith("scripts/"):
@@ -315,6 +368,15 @@ def _classify(
     location: CommitLocation,
 ) -> tuple[str, str, str, str]:
     path_symbol = (finding.relative_path, finding.symbol)
+    reviewed = REVIEWED_COMMIT_BOUNDARIES.get(path_symbol)
+    if reviewed is not None:
+        _owner, _layer, basis, remediation, blocker = reviewed
+        return (
+            "application_owned_legitimate_outer_uow",
+            basis,
+            remediation,
+            blocker,
+        )
     exception = MEDIA_STAGING_VIOLATIONS.get((finding.relative_path, location.line))
     if exception is not None:
         basis, remediation, blocker = exception
