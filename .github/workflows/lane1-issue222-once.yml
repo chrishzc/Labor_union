@@ -19,8 +19,8 @@ jobs:
           python-version: "3.11"
       - name: Apply minimal source patch
         run: python .github/lane1_issue222_patch.py
-      - name: Install Python project and pytest
-        run: python -m pip install -e . pytest
+      - name: Install pinned Python runtime deps and pytest
+        run: python -m pip install -r requirements.txt pytest
       - name: Fresh finance-import owner tests
         run: python -m pytest tests/domains/finance-import/subsystems/finance-import -q
       - name: Set up Node
