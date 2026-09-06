@@ -114,47 +114,48 @@ APPLICATION_OWNED_COMMIT_SYMBOLS = {
 
 
 # Exact semantic reviews for commit boundaries audited under #149/#215.
-# These remain symbol-scoped so a sibling commit never inherits acceptance.
+# Keys are scanner WriterFinding.identity values so sibling or newly added
+# commits cannot inherit a reviewed acceptance.
 REVIEWED_COMMIT_BOUNDARIES: dict[
-    tuple[str, str], tuple[str, str, str, str, str]
+    str, tuple[str, str, str, str, str]
 ] = {
-    ("api/dependencies/admin_auth.py", "ensure_development_root_admin"): (
+    "api/dependencies/admin_auth.py:ensure_development_root_admin:commit:COMMIT:-:a726d561eba65201:1": (
         "access_control", "adapter",
         "Development-only root bootstrap fallback owns its bounded factor transaction; normal pre-created root startup does not enter this mutation path.",
         "Retain only as a non-production bootstrap fallback while normal first-login MFA enrollment remains the canonical factor setup path.",
         "Environment guards, existing-root short circuit, and MFA enrollment recovery remain the required focused evidence.",
     ),
-    ("line/line_bot.py", "line_bind"): (
+    "line/line_bot.py:line_bind:commit:COMMIT:-:a726d561eba65201:1": (
         "line_identity", "adapter",
         "Legacy rollback-only LINE bind route owns one bounded binding transaction; canonical runtime returns 410 before opening the write path.",
         "Retain only behind the explicit legacy rollback runtime contract; canonical runtime must remain write-inaccessible.",
         "Canonical 410-before-write and production rollback-mode guards remain the required focused evidence.",
     ),
-    ("scripts/migrate_weekly_report_batches.py", "main"): (
+    "scripts/migrate_weekly_report_batches.py:main:commit:COMMIT:-:a726d561eba65201:1": (
         "global_migration", "maintenance",
         "Migration entry owns an intentional resumable schema stage; its commit is a maintenance checkpoint rather than a nested business-operation commit.",
         "Retain the resumable operator migration boundary and preserve idempotent schema/seed behavior.",
         "Operator-only invocation and safe rerun semantics remain the required migration evidence.",
     ),
-    ("scripts/migrate_weekly_report_batches.py", "seed_history_from_template"): (
+    "scripts/migrate_weekly_report_batches.py:seed_history_from_template:commit:COMMIT:-:a726d561eba65201:1": (
         "global_migration", "maintenance",
         "Historical seed helper commits the terminal seed stage of a resumable migration; no later database mutation follows that stage in main.",
         "Retain as an explicit migration-stage boundary while INSERT IGNORE/idempotent rerun semantics remain intact.",
         "Focused migration rerun evidence remains required; this acceptance grants no production request-path authority.",
     ),
-    ("scripts/seed_line_test_fixtures.py", "seed_fixtures"): (
+    "scripts/seed_line_test_fixtures.py:seed_fixtures:commit:COMMIT:-:a726d561eba65201:1": (
         "validation", "maintenance",
         "Disposable fixture seeder owns its validation transaction, rejects production, commits on success, and rolls back on exception.",
         "Retain only as guarded validation tooling with explicit non-production targeting.",
         "Production rejection and rollback-on-failure tests remain the required focused evidence.",
     ),
-    ("subsystems/reporting/weekly_report_batch_service.py", "WeeklyReportBatchService.close_batch"): (
+    "subsystems/reporting/weekly_report_batch_service.py:WeeklyReportBatchService.close_batch:commit:COMMIT:-:3d011c5fc6b4a404:1": (
         "reporting", "application",
         "Weekly-report close is the request operation transaction owner: the route supplies one request connection and performs no sibling database mutation around the service call.",
         "Retain the single commit after all close-batch database mutations; preserve rollback before commit on failure.",
         "Disposable MySQL close-batch transaction tests remain the required focused evidence.",
     ),
-    ("subsystems/reporting/weekly_report_batch_service.py", "WeeklyReportBatchService.update_batch_metrics"): (
+    "subsystems/reporting/weekly_report_batch_service.py:WeeklyReportBatchService.update_batch_metrics:commit:COMMIT:-:3d011c5fc6b4a404:1": (
         "reporting", "application",
         "Weekly-report metrics update is the request operation transaction owner: the route supplies one request connection and performs no sibling database mutation around the service call.",
         "Retain the single commit after all metrics mutations; preserve rollback before commit on failure.",
@@ -267,8 +268,10 @@ def _locations(path: str) -> dict[tuple[str, str, int], CommitLocation]:
     return locator.locations
 
 
-def _semantic_owner(path: str, symbol: str) -> tuple[str, str]:
-    reviewed = REVIEWED_COMMIT_BOUNDARIES.get((path, symbol))
+def _semantic_owner(finding: WriterFinding) -> tuple[str, str]:
+    path = finding.relative_path
+    symbol = finding.symbol
+    reviewed = REVIEWED_COMMIT_BOUNDARIES.get(finding.identity)
     if reviewed is not None:
         return reviewed[0], reviewed[1]
     if path == "scripts/generate_fake_data.py":
@@ -368,7 +371,7 @@ def _classify(
     location: CommitLocation,
 ) -> tuple[str, str, str, str]:
     path_symbol = (finding.relative_path, finding.symbol)
-    reviewed = REVIEWED_COMMIT_BOUNDARIES.get(path_symbol)
+    reviewed = REVIEWED_COMMIT_BOUNDARIES.get(finding.identity)
     if reviewed is not None:
         _owner, _layer, basis, remediation, blocker = reviewed
         return (
@@ -402,7 +405,7 @@ def _classify(
             "Retain only while its focused owner transaction and caller tests remain current.",
             "Fresh-clone caller evidence and focused transaction tests are required for terminal acceptance.",
         )
-    owner, layer = _semantic_owner(finding.relative_path, finding.symbol)
+    owner, layer = _semantic_owner(finding)
     if finding.relative_path.startswith("infrastructure/mysql/"):
         if finding.symbol.endswith(".commit") and _concrete_uow_commit(finding.relative_path, finding.symbol):
             return (
@@ -569,7 +572,7 @@ def build_artifact() -> dict[str, Any]:
         location = locations.get((finding.symbol, finding.fingerprint, finding.occurrence))
         if location is None:
             raise RuntimeError(f"commit location not found for {finding.identity}")
-        owner, layer = _semantic_owner(finding.relative_path, finding.symbol)
+        owner, layer = _semantic_owner(finding)
         classification, basis, remediation, blocker = _classify(finding, location)
         assert classification in CLASSIFICATIONS
         entries.append(

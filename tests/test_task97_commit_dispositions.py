@@ -5,16 +5,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
+import tempfile
+
+from shared_kernel.writer_inventory import scan_production_writers
 
 from scripts.generate_task97_commit_dispositions import (
     APPLICATION_OWNED_COMMIT_SYMBOLS,
+    CommitLocation,
     EVIDENCE_PATH,
     MEDIA_STAGING_VIOLATIONS,
     READ_ONLY_APPLICATIONS,
     REPOSITORY_ROOT,
     REVIEWED_COMMIT_BOUNDARIES,
     SOURCE_REVISION_INPUTS,
+    _classify,
     _git_revision,
+    _semantic_owner,
     build_artifact,
 )
 
@@ -112,19 +118,62 @@ def test_task97_commit_dispositions_do_not_blanket_classify_by_path() -> None:
 
 def test_task97_audited_commit_boundaries_are_exactly_accepted() -> None:
     artifact = json.loads(EVIDENCE_PATH.read_text(encoding="utf-8"))
-    entries = artifact["entries"]
-    by_symbol: dict[tuple[str, str], list[dict[str, object]]] = {}
-    for entry in entries:
-        by_symbol.setdefault((str(entry["source_path"]), str(entry["symbol"])), []).append(entry)
+    by_identity = {str(entry["identity"]): entry for entry in artifact["entries"]}
 
     for identity, review in REVIEWED_COMMIT_BOUNDARIES.items():
         owner, layer, _basis, _remediation, _blocker = review
-        matches = by_symbol.get(identity, [])
-        assert matches, identity
-        assert all(entry["classification"] == "application_owned_legitimate_outer_uow" for entry in matches)
-        assert all(entry["owner"] == owner for entry in matches)
-        assert all(entry["layer"] == layer for entry in matches)
+        entry = by_identity.get(identity)
+        assert entry is not None, identity
+        assert entry["classification"] == "application_owned_legitimate_outer_uow"
+        assert entry["owner"] == owner
+        assert entry["layer"] == layer
 
+
+def test_task97_reviewed_commit_boundaries_do_not_inherit_to_sibling_commits() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source = root / "api" / "dependencies" / "admin_auth.py"
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            "def ensure_development_root_admin(conn):\n"
+            "    conn.commit()\n"
+            "    conn.commit()\n"
+            "\n"
+            "def sibling_symbol(conn):\n"
+            "    conn.commit()\n",
+            encoding="utf-8",
+        )
+        findings = scan_production_writers(root, ("api",))
+
+    reviewed = next(
+        finding for finding in findings
+        if finding.symbol == "ensure_development_root_admin" and finding.occurrence == 1
+    )
+    sibling_occurrence = next(
+        finding for finding in findings
+        if finding.symbol == "ensure_development_root_admin" and finding.occurrence == 2
+    )
+    sibling_symbol = next(
+        finding for finding in findings
+        if finding.symbol == "sibling_symbol"
+    )
+    location = CommitLocation(
+        line=1,
+        receiver="conn",
+        has_uow_context=False,
+        has_connection_lifecycle=False,
+        has_worker_signal=False,
+    )
+
+    assert reviewed.identity in REVIEWED_COMMIT_BOUNDARIES
+    assert sibling_occurrence.identity not in REVIEWED_COMMIT_BOUNDARIES
+    assert sibling_symbol.identity not in REVIEWED_COMMIT_BOUNDARIES
+    assert _classify(reviewed, location)[0] == "application_owned_legitimate_outer_uow"
+    assert _classify(sibling_occurrence, location)[0] == "real_violation"
+    assert _classify(sibling_symbol, location)[0] == "real_violation"
+    assert _semantic_owner(reviewed) == ("access_control", "adapter")
+    assert _semantic_owner(sibling_occurrence) == ("global_operations", "adapter")
+    assert _semantic_owner(sibling_symbol) == ("global_operations", "adapter")
 
 def test_task97_commit_disposition_source_revision_is_input_bound_and_idempotent() -> None:
     expected = subprocess.run(
