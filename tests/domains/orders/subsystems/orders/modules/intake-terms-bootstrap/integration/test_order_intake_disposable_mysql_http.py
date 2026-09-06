@@ -120,6 +120,8 @@ def _seed(connection) -> str:
 
 
 def _snapshot(connection, case_no: str) -> dict[str, Any]:
+    # End the observer transaction so each acceptance readback sees current committed facts.
+    connection.commit()
     with connection.cursor() as cursor:
         cursor.execute(
             """
