@@ -1,22 +1,21 @@
 name: Task97 provenance refresh PR81
 
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: ["dry-run/order-workbench-v2"]
 
 permissions:
   contents: write
 
 jobs:
   refresh:
-    if: ${{ github.event.pull_request.number == 81 }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Regenerate and verify Task97 evidence on PR merge tree
+      - name: Regenerate and verify Task97 evidence on branch head
         shell: bash
         run: |
           set -euo pipefail
