@@ -28,7 +28,6 @@ jobs:
           import hashlib
           import json
           from pathlib import Path
-          import re
           import subprocess
           import textwrap
 
@@ -107,9 +106,8 @@ jobs:
           ) -> set[str]:
               """Read independent coverage IDs, not business authority, from the existing matrix."""
               requirement_ids = set(re.findall(
-                  r"^\\|\\s*([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\\d+)\\s*\\|",
+                  r"\\|\\s*([A-Z]+-[A-Z0-9]+)\\s*\\|",
                   matrix_path.read_text(encoding="utf-8"),
-                  re.MULTILINE,
               ))
               if not requirement_ids:
                   raise ValueError("business requirement matrix contains no coverage ids")
@@ -185,7 +183,12 @@ jobs:
 
               artifact = json.loads(reconciler.COMMIT_DISPOSITIONS.read_text(encoding="utf-8"))
               accepted = next(entry for entry in artifact["entries"] if entry["classification"] == "application_owned_legitimate_outer_uow")
-              blocked = next(entry for entry in artifact["entries"] if entry["classification"] == "real_violation")
+              # Simulate a rejected identity in the isolated receipt; the real
+              # repository need not retain any particular blocker for this test.
+              blocked = dict(accepted, identity=accepted["identity"] + ":blocked-fixture",
+                  classification="real_violation", analysis_basis="unowned transaction fixture",
+                  replacement_or_remediation="restore an explicitly owned outer boundary",
+                  blocker="unowned_commit_fixture", zero_reference_oracle="isolated exact-identity test")
               receipt = tmp_path / "commit-dispositions.json"
               receipt.write_text(json.dumps({"terminal_status": "blocked", "entries": [accepted, blocked]}), encoding="utf-8")
               monkeypatch.setattr(reconciler, "COMMIT_DISPOSITIONS", receipt)
@@ -268,7 +271,7 @@ jobs:
           from scripts.verify_verification_scenarios import canonical_business_requirement_ids, load_scenarios
           expected_ids = canonical_business_requirement_ids()
           covered_ids = {item for scenario in load_scenarios() if scenario.get("track") == "A" and scenario.get("coverage_scope", "matrix") == "matrix" for item in scenario["coverage_ids"]}
-          assert len(expected_ids) == 127 and expected_ids == covered_ids
+          assert len(expected_ids) == 127 and expected_ids == covered_ids, {"expected": len(expected_ids), "covered": len(covered_ids), "missing": sorted(expected_ids - covered_ids), "unexpected": sorted(covered_ids - expected_ids)}
           for path in (reconciler, validator, writer_tests, verification_tests):
               ast.parse(path.read_text(encoding="utf-8"))
           print("Applied A-D metadata/validator changes; independent coverage IDs=127; suite source refs restored=28")
