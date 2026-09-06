@@ -18,27 +18,67 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Inspect exact current-source commit dispositions
+      - name: Inspect bounded source, caller, test, and provenance evidence
         run: |
           python - <<'PY'
+          import ast
+          import hashlib
           import json
-          from scripts.generate_task97_commit_dispositions import EVIDENCE_PATH, build_artifact
+          from pathlib import Path
+          import subprocess
 
-          saved = json.loads(EVIDENCE_PATH.read_text(encoding="utf-8"))
-          fresh = build_artifact()
-          for label, artifact in (("saved", saved), ("fresh", fresh)):
-              print(label, json.dumps({key: value for key, value in artifact.items() if key != "entries"}, ensure_ascii=False))
-          old = {entry["identity"]: entry for entry in saved["entries"]}
-          new = {entry["identity"]: entry for entry in fresh["entries"]}
-          for identity in sorted(old.keys() - new.keys()):
-              print("REMOVED", json.dumps(old[identity], ensure_ascii=False))
-          for identity in sorted(new.keys() - old.keys()):
-              print("ADDED", json.dumps(new[identity], ensure_ascii=False))
-          for identity in sorted(old.keys() & new.keys()):
-              before, after = old[identity], new[identity]
-              if before["classification"] != after["classification"]:
-                  print("CLASSIFICATION_CHANGED", json.dumps({"before": before, "after": after}, ensure_ascii=False))
-          for entry in fresh["entries"]:
-              if entry["classification"] == "real_violation":
-                  print("REVIEW_REQUIRED", json.dumps(entry, ensure_ascii=False))
+          def git(*args):
+              result = subprocess.run(["git", *args], check=False, capture_output=True, text=True)
+              if result.returncode not in (0, 1):
+                  raise RuntimeError(result.stderr)
+              return result.stdout
+
+          print("TARGET_PATHS")
+          print(git("ls-files", "document/*新版測試*", "document/*新版驗證*", "scripts/*writer_inventory*v3*.py", "tests/*verification*.py", "tests/*lineage*.py", "tests/*data_browser*.py", "tests/*admin_auth*.py", "tests/*weekly_report*.py", "tests/*line*fixture*.py", "tests/*line_bot*.py", "tests/*historical*remediation*.py", "tests/*intake*repair*.py", "tests/*precision_restart*.py", "tests/*human_escalation*.py", "tests/*knowledge*worker*.py"))
+          print("CALLERS")
+          print(git("grep", "-n", "-E", "DataBrowserQueryRepository|ensure_development_root_admin|seed_history_from_template|WeeklyReportBatchService|HistoricalCalendarAssignmentRemediationApplication|HistoricalPrecisionRestartWorkflow|OrderIntakeClientNameRepairApplication|OrderIntakeTermsBootstrapApplication|HumanEscalationDeliveryApplication|KnowledgeWorker", "--", "api", "line", "subsystems", "tests"))
+          print("SCRIPT_CALLERS")
+          print(git("grep", "-n", "-E", "seed_line_test_fixtures|migrate_weekly_report_batches|line_bind", "--", "api", "line", "scripts", "subsystems", "tests"))
+          print("ACTIVE_DANGLING_REFERENCES")
+          print(git("grep", "-n", "28_驗證情境與測試資料正式規格", "--", "AGENTS.md", "scripts", "validation"))
+          path = Path("infrastructure/mysql/data_browser_query_repository.py")
+          print("DATA_BROWSER_SHA256", hashlib.sha256(path.read_bytes()).hexdigest())
+          selections = {
+              "api/dependencies/admin_auth.py": {"ensure_development_root_admin"},
+              "line/line_bot.py": {"line_bind"},
+              "scripts/migrate_weekly_report_batches.py": {"main", "seed_history_from_template"},
+              "scripts/seed_line_test_fixtures.py": {"seed_fixtures"},
+              "subsystems/knowledge_retrieval/application.py": {"_answer"},
+              "subsystems/orders/historical_calendar_assignment_remediation.py": {"apply"},
+              "subsystems/orders/historical_precision_restart_workflow.py": {"apply"},
+              "subsystems/orders/order_intake_client_name_repair.py": {"apply"},
+              "subsystems/orders/order_intake_terms_bootstrap.py": {"apply", "apply_completion"},
+              "subsystems/line/human_escalation_delivery.py": {"consume", "_claim_task"},
+          }
+          for name, symbols in selections.items():
+              source = Path(name).read_text(encoding="utf-8")
+              for node in ast.walk(ast.parse(source)):
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in symbols:
+                      print("SOURCE", name, node.lineno, ast.get_source_segment(source, node))
+          for name in git("ls-files", "scripts/*writer_inventory*v3*.py").splitlines():
+              source = Path(name).read_text(encoding="utf-8")
+              print("TOOL_DEFINITIONS", name)
+              for node in ast.parse(source).body:
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                      print(node.name, node.lineno, node.end_lineno)
+                      if node.name == "main":
+                          print(ast.get_source_segment(source, node))
+          previous = git("show", "5daf2672ff91ed25c3b0184ce36818b2d74a3ab1^:scripts/verify_verification_scenarios.py")
+          print("PREVIOUS_COVERAGE_SOURCE")
+          for node in ast.parse(previous).body:
+              if isinstance(node, ast.FunctionDef) and node.name == "canonical_business_requirement_ids":
+                  print(ast.get_source_segment(previous, node))
+              if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and ("MATRIX" in target.id or "REQUIREMENT" in target.id) for target in node.targets):
+                  print(ast.get_source_segment(previous, node))
+          baseline_path = "validation/verification_baseline_v1.json"
+          previous_baseline = json.loads(git("show", "b84c127098b058bbc40cb2900d7964a113a76a07^:" + baseline_path))
+          print("PREVIOUS_BASELINE_SOURCE_REFS")
+          for track in previous_baseline["tracks"]:
+              for suite in track["suites"]:
+                  print(suite["id"], json.dumps({key: value for key, value in suite.items() if "source" in key}, ensure_ascii=False))
           PY
