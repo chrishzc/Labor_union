@@ -27,7 +27,7 @@ from subsystems.orders.order_intake_terms_bootstrap import (
 )
 
 
-router = APIRouter(tags=["Orders"])
+router = APIRouter(prefix="/api/v1/orders", tags=["Orders"])
 _CorrelationHeader = Annotated[
     str,
     Header(alias="X-Correlation-ID", min_length=1, max_length=191),
