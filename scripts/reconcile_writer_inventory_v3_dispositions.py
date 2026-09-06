@@ -119,7 +119,7 @@ EXACT_SOURCE_REVIEWS: dict[
         ("staff_payables", "bounded historical baseline Staff Payables owner-fact query adapter", "HistoricalBaselineOwnerVectorV2Query", "retain_restricted:source-locked fixed owner-table reads use a borrowed connection and grant no mutation authority"),
     ),
     "infrastructure/mysql/data_browser_query_repository.py": (
-        "0a779627343558692412359372fe8682d376fa5d817046aa14e5f48ff0bb9404",
+        "0c3d425a9c03d0bdacc399c009f399014ec523f099eb0060c397d7a17e55ffc1",
         frozenset({"DataBrowserQueryRepository.query_page"}),
         ("access_control", "bounded canonical Data Browser query over fixed source allowlist", "authenticated data-browser source query API", "retain_restricted:source-locked source, columns, search, ordering, and limits are fixed; no arbitrary table or mutation authority"),
     ),
