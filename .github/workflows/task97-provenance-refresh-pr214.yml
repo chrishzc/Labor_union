@@ -1,22 +1,21 @@
 name: Task97 provenance refresh PR214
 
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: ["fix/current-regression-baseline-20260905"]
 
 permissions:
   contents: write
 
 jobs:
   refresh:
-    if: ${{ github.event.pull_request.number == 214 }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Regenerate and verify Task97 evidence on PR merge tree
+      - name: Regenerate and verify Task97 evidence on branch head
         shell: bash
         run: |
           set -euo pipefail
