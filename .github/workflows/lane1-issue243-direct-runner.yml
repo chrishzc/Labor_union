@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Apply exact unresolved decisions from reviewed patch payload
-        run: python -c "import base64,pathlib; t=pathlib.Path('.github/workflows/lane1-issue243-once.yml').read_text(); p=t.split(\"b64.b64decode('\\\"\",1)[1].split(\"')\",1)[0]; exec(base64.b64decode(p))"
+        run: python -c "import base64,pathlib,re; t=pathlib.Path('.github/workflows/lane1-issue243-once.yml').read_text(); p=re.findall(r\"b64\\.b64decode\\('([^']+)'\\)\",t)[0]; exec(base64.b64decode(p))"
       - name: Regenerate exact writer evidence
         shell: bash
         run: |
@@ -33,7 +33,7 @@ jobs:
       - name: Verify Data Browser source lock and diff
         shell: bash
         run: |
-          python -c "import base64,pathlib; t=pathlib.Path('.github/workflows/lane1-issue243-once.yml').read_text(); ps=t.split(\"b64.b64decode('\\\"\")[2].split(\"')\",1)[0]; exec(base64.b64decode(ps))"
+          python -c "import base64,pathlib,re; t=pathlib.Path('.github/workflows/lane1-issue243-once.yml').read_text(); p=re.findall(r\"b64\\.b64decode\\('([^']+)'\\)\",t)[1]; exec(base64.b64decode(p))"
           git diff --check
           git status --short
       - name: Commit convergence and remove one-time workflows
