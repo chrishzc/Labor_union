@@ -1,0 +1,36 @@
+name: Issue 220 focused verification
+
+on:
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ui_react/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: ui_react
+        run: npm ci
+      - name: Run T08-1 focused tests
+        working-directory: ui_react
+        run: >-
+          npx vitest run
+          src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx
+          src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_assignment_gate.test.tsx
+      - name: Run service-date architecture static check
+        run: >-
+          git diff --check origin/main...HEAD --
+          .arch-map/domains/orders/subsystems/orders/modules/service-date-confirmation.md
+          ui_react/src/pages/OrdersPage.tsx
+          ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/
