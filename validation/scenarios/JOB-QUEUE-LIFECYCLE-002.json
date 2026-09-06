@@ -9,7 +9,7 @@
   "test_kinds": ["process_network_harness"],
   "coverage_ids": ["JOB-02", "JOB-05", "JOB-06"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#JOB-02"
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
   ],
   "root_facts": [
     "Unique durable command identities, a transient worker error and explicit cancellation requests."

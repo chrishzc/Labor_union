@@ -9,7 +9,7 @@
   "test_kinds": ["subsystem_state_machine", "expected_manifest"],
   "coverage_ids": ["ORD-05"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#ORD-05"
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ORD-05"
   ],
   "root_facts": [
     "An authoritative, read-only cancellation workflow snapshot: order terms, assignment-owned official days, client-finance and payroll terms, lifecycle precondition and aggregate versions.",
