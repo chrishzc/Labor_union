@@ -22,13 +22,15 @@ jobs:
         run: |
           python - <<'PY'
           import json
-          from pathlib import Path
           from scripts.generate_writer_inventory_v3_candidate import main as generate_candidate
           from scripts import reconcile_writer_inventory_v3_dispositions as reconciler
 
-          saved = {item['identity']: item for item in reconciler._records(reconciler.DISPOSITION_PATH)}
+          def records(path):
+              return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line]
+
+          saved = {item['identity']: item for item in records(reconciler.RECORDS)}
           generate_candidate()
-          candidates = reconciler._records(reconciler.CANDIDATE_PATH)
+          candidates = records(reconciler.CANDIDATE)
           fresh = {item['identity']: item for item in candidates}
           for identity, review in reconciler.EXACT_IDENTITY_REVIEWS.items():
               if identity not in fresh:
