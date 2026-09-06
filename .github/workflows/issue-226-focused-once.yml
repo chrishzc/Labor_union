@@ -1,0 +1,22 @@
+name: Issue 226 focused acceptance
+
+on:
+  push:
+    branches: [test/issue-226-line-bind-boundary]
+    paths: [.github/workflows/issue-226-focused-once.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  line-bind-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install existing application dependencies and pytest
+        run: python -m pip install -r requirements.txt pytest
+      - name: Run focused issue 226 acceptance
+        run: python -m pytest -q tests/test_line_bind_legacy_boundary.py
