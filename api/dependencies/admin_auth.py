@@ -65,6 +65,7 @@ def ensure_development_root_admin() -> None:
     password = os.getenv("DEV_ROOT_PASSWORD", "").strip()
     if not username or not password:
         return
+    conn = None
     try:
         conn = get_connection()
         with conn.cursor() as cursor:
@@ -100,9 +101,14 @@ def ensure_development_root_admin() -> None:
                     conn.commit()
                 except Exception:
                     pass
-        conn.close()
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def ensure_development_line_configuration() -> None:
