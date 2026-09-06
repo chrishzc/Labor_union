@@ -1,0 +1,32 @@
+name: Issue 214 final CI dispatch
+
+on:
+  push:
+    branches:
+      - fix/current-regression-baseline-20260905
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Remove helper and publish final head
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/issue214-final-dispatch.yml
+          git commit -m "ci: remove final PR 214 dispatcher"
+          git push origin HEAD:fix/current-regression-baseline-20260905
+
+      - name: Dispatch existing Python application workflow at final head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run python-app.yml --ref fix/current-regression-baseline-20260905
