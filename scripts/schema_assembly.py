@@ -162,7 +162,10 @@ def _verify_active_digest(raw: dict[str, Any], active_paths: tuple[Path, ...]) -
     expected_digest = str(raw.get("active_artifacts_sha256") or "")
     actual_digest = _ordered_digest(active_paths)
     if actual_digest != expected_digest:
-        raise ValueError("schema assembly active artifact digest differs")
+        raise ValueError(
+            "schema assembly active artifact digest differs: "
+            f"expected={expected_digest} actual={actual_digest}"
+        )
 
 
 def _ordered_digest(paths: tuple[Path, ...]) -> str:

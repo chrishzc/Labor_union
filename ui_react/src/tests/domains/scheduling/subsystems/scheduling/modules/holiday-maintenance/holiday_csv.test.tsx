@@ -6,12 +6,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
-import { schedulingCurrentClient } from '../../../../../../../api/scheduling/scheduling_current_client';
 import { createHolidayClient, holidayClient, parseHolidayCsv } from '../../../../../../../api/scheduling/holiday_client';
-import { staffDirectoryClient } from '../../../../../../../api/staff_directory/staff_directory_client';
-import { SchedulingPage } from '../../../../../../../pages/SchedulingPage';
+import * as holidayFlow from '../../../../../../../adapters/scheduling/holiday_flow_adapter';
+import { OfficialHolidayCsvImport } from '../../../../../../../components/scheduling/OfficialHolidayCsvImport';
 import { HOLIDAY_CALENDAR, HOLIDAY_PREVIEW, HOLIDAY_RECEIPT } from '../../../../../../fixtures/holiday_contract_fixtures';
-import { SCHEDULING_PROJECTION_READY } from '../../../../../../fixtures/scheduling/scheduling_current_contract_fixtures';
+
+vi.mock('../../../../../../../adapters/scheduling/holiday_flow_adapter', async (importOriginal) => {
+  const actual = await importOriginal<typeof holidayFlow>();
+  return { ...actual, previewHolidayFlow: vi.fn(), applyHolidayFlow: vi.fn() };
+});
 
 const CSV_HEADER = '西元日期,星期,是否放假,備註';
 
@@ -198,38 +201,25 @@ describe('canonical holiday maintenance CSV', () => {
   });
 
   it('React UI 使用實際 parser，預覽顯示零寫入，Apply 後回讀失敗可觀察', async () => {
-    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({
-      items: [{ id: 11, name: '去敏人員甲', phone: null, education: null }],
-      next_cursor: null,
-    });
-    vi.spyOn(schedulingCurrentClient, 'queryCurrentCalendar').mockResolvedValue(SCHEDULING_PROJECTION_READY);
     let readbackFailure = false;
     const query = vi.spyOn(holidayClient, 'query').mockImplementation(async () => {
       if (readbackFailure) throw new Error('CSV readback unavailable');
       return HOLIDAY_CALENDAR;
     });
-    const parsed = parseHolidayCsv([CSV_HEADER, '2026-01-01,四,2,元旦'].join('\n'));
-    vi.spyOn(holidayClient, 'previewCsv').mockResolvedValue({
-      parsed, entries: [{ row: parsed.rows[0]!, preview: HOLIDAY_PREVIEW }], skipped: [], issues: [], zero_write: true,
-    });
-    vi.spyOn(holidayClient, 'applyCsv').mockResolvedValue({
-      attempted: 1, applied: 1, unchanged: 0, skipped: 0, replayed: 0, readback_status: 'not_run',
-      receipts: [HOLIDAY_RECEIPT], failures: [],
-    });
-    render(<SchedulingPage />);
-    await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
-    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
-    fireEvent.click(screen.getByRole('button', { name: '查詢國定假日政策' }));
-    await waitFor(() => expect(query).toHaveBeenCalledTimes(1));
+    const preview = vi.mocked(holidayFlow.previewHolidayFlow).mockReset().mockResolvedValue(HOLIDAY_PREVIEW);
+    const apply = vi.mocked(holidayFlow.applyHolidayFlow).mockReset().mockResolvedValue(HOLIDAY_RECEIPT);
+    render(<OfficialHolidayCsvImport />);
     const file = new File([[CSV_HEADER, '2026-01-01,四,2,元旦'].join('\n')], 'official-2026.csv', { type: 'text/csv' });
-    fireEvent.change(screen.getByLabelText('選擇國定假日 CSV'), { target: { files: [file] } });
-    await waitFor(() => expect(screen.getByText(/可匯入：1 筆/)).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '預覽 CSV 變更' }));
-    await waitFor(() => expect(screen.getByText(/CSV 預覽完成：1 筆逐筆變更/)).toBeInTheDocument());
-    expect(screen.getByText(/寫入 0 筆/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('選擇政府官方國定假日 CSV'), { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByText('可匯入：1')).toBeInTheDocument());
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(preview).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
     readbackFailure = true;
-    fireEvent.click(screen.getByRole('button', { name: '確認套用 CSV（逐筆）' }));
-    await waitFor(() => expect(screen.getAllByRole('status').some((status) => status.textContent?.includes('結果回讀失敗，請重新查詢。'))).toBe(true));
-    expect(screen.getByRole('alert')).toHaveTextContent('CSV readback unavailable');
+    fireEvent.click(screen.getByRole('button', { name: '確認匯入' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('CSV readback unavailable'));
+    expect(preview).toHaveBeenCalledTimes(1);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('匯入完成')).not.toBeInTheDocument();
   });
 });

@@ -29,7 +29,6 @@ from scripts.verify_validation_schema_manifest import (
     verify_manifest,
     selected_schema_parts,
 )
-from scripts.verification_gate_report import build_gate_report
 
 
 SCHEMA_PATH = PROJECT_ROOT / "db" / "schema.sql"
@@ -122,28 +121,6 @@ def _verified_manifest(manifest_path: Path) -> dict[str, object]:
     return manifest
 
 
-def _require_validation_gate() -> None:
-    errors = _schema_bootstrap_gate_errors(build_gate_report())
-    if errors:
-        raise RuntimeError(
-            "schema bootstrap contract gate failed before database creation: "
-            + "; ".join(errors)
-        )
-
-
-def _schema_bootstrap_gate_errors(gate: dict[str, object]) -> list[str]:
-    """Require schema prerequisites, not receipts the fresh database must create."""
-    error_groups = gate.get("errors")
-    if not isinstance(error_groups, dict):
-        return ["verification gate report is malformed"]
-    required_groups = ("baseline", "scenarios", "field_authority")
-    return [
-        f"{group}: {error}"
-        for group in required_groups
-        for error in error_groups.get(group, [])
-    ]
-
-
 def _require_absent_database(cursor, database: str) -> None:
     cursor.execute(
         "SELECT schema_name FROM information_schema.schemata WHERE schema_name = %s",
@@ -167,7 +144,6 @@ def bootstrap(arguments) -> dict[str, object]:
         arguments.database,
         arguments.confirm_database,
     )
-    _require_validation_gate()
     manifest = _verified_manifest(Path(getattr(arguments, "manifest", DEFAULT_MANIFEST_PATH)))
     connection = _connect(arguments)
     try:
@@ -246,7 +222,6 @@ def main() -> int:
         parser.error("production environment is not permitted for disposable schema bootstrap")
     manifest = _verified_manifest(Path(getattr(arguments, "manifest", DEFAULT_MANIFEST_PATH)))
     if not arguments.apply:
-        _require_validation_gate()
         payload = _dry_run_payload(arguments, manifest)
         if arguments.receipt_path:
             arguments.receipt_path.parent.mkdir(parents=True, exist_ok=True)

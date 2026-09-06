@@ -11,6 +11,8 @@
 - primary owner: subsystems/scheduling/holiday_maintenance.py
 - typed client: ui_react/src/api/scheduling/holiday_client.ts
 - presentation: ui_react/src/pages/SchedulingPage.tsx
+- CSV presentation: ui_react/src/components/scheduling/OfficialHolidayCsvImport.tsx
+- CSV import adapter: ui_react/src/adapters/scheduling/official_holiday_csv.ts
 
 ## Contracts
 - GET /api/v1/holidays
@@ -27,5 +29,5 @@
 
 ## Provenance
 - owner and workflow: source_observed from subsystems/scheduling/holiday_maintenance.py and current typed client.
-- frontend presentation: source_observed from SchedulingPage.tsx.
+- frontend presentation: source_observed from SchedulingPage.tsx and its OfficialHolidayCsvImport component.
 - canonical test placement: architecture_declared by the existing Scheduling Holiday module test root and current test routing.

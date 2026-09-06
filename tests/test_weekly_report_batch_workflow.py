@@ -5,10 +5,13 @@ Description: 驗證營運週報方案 C 結算批次封存、未結算案件順�
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from argparse import Namespace
+from datetime import date, datetime
 from io import BytesIO
+import os
 
 import openpyxl
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -18,6 +21,39 @@ from api.routes import operations_reports
 from infrastructure.mysql.mysql_adapter import get_connection
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.reporting.weekly_report_batch_service import WeeklyReportBatchService
+
+
+@pytest.fixture(scope="module")
+def weekly_report_database():
+    from scripts.bootstrap_disposable_mysql_schema import bootstrap
+    from scripts.migrate_weekly_report_batches import DDL_SQL
+    from scripts.reset_fake_database import split_sql
+
+    database = os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE", "")
+    if not database:
+        pytest.fail("weekly report integration requires explicit disposable MySQL configuration")
+    bootstrap(Namespace(
+        host=os.environ["LABOR_UNION_TEST_MYSQL_HOST"],
+        port=int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
+        user=os.environ["LABOR_UNION_TEST_MYSQL_USER"],
+        password=os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+        database=database,
+        confirm_database=database,
+    ))
+    connection = get_connection()
+    try:
+        # These reporting tables are not in the canonical fresh assembly yet.
+        # Exercise their existing DDL only inside the newly created test database.
+        with connection.cursor() as cursor:
+            for statement in split_sql(DDL_SQL):
+                cursor.execute(statement)
+        connection.commit()
+        WeeklyReportBatchService(connection).close_batch(
+            year=2026, week_code="6-1", promotion_count=20, inquiry_count=10,
+            case_nos=[], cutoff_at=datetime(2026, 6, 30, 12),
+        )
+    finally:
+        connection.close()
 
 
 def _app():
@@ -39,7 +75,8 @@ def _app():
     return app
 
 
-def test_batch_service_close_and_unclosed_cases_flow():
+@pytest.mark.integration
+def test_batch_service_close_and_unclosed_cases_flow(weekly_report_database):
     conn = get_connection()
     service = WeeklyReportBatchService(conn)
     test_year = 2027
@@ -47,22 +84,18 @@ def test_batch_service_close_and_unclosed_cases_flow():
     w2 = "27-2"
 
     with conn.cursor() as cur:
-        # 清理測試批次
-        cur.execute("DELETE FROM weekly_report_batches WHERE year = %s", (test_year,))
         # 建立測試案件
         cur.execute(
             """
             INSERT INTO clients (case_no, name, created_at, identity_status)
             VALUES ('TEST-CASE-B1', '張早', '2027-06-03 09:00:00', '一般市民'),
                    ('TEST-CASE-B2', '李午', '2027-06-03 15:00:00', '一般市民')
-            ON DUPLICATE KEY UPDATE name=VALUES(name), created_at=VALUES(created_at)
             """
         )
         cur.execute(
             """
             INSERT INTO orders (case_no, client_id, status, created_at)
             SELECT case_no, id, '訂單成立', created_at FROM clients WHERE case_no IN ('TEST-CASE-B1', 'TEST-CASE-B2')
-            ON DUPLICATE KEY UPDATE status='訂單成立'
             """
         )
     conn.commit()
@@ -110,14 +143,11 @@ def test_batch_service_close_and_unclosed_cases_flow():
         assert metrics_map[w2] == (18, 9)
 
     finally:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM weekly_report_batches WHERE year = %s", (test_year,))
-            cur.execute("DELETE FROM orders WHERE case_no IN ('TEST-CASE-B1', 'TEST-CASE-B2')")
-            cur.execute("DELETE FROM clients WHERE case_no IN ('TEST-CASE-B1', 'TEST-CASE-B2')")
-        conn.commit()
+        conn.close()
 
 
-def test_batch_api_endpoints():
+@pytest.mark.integration
+def test_batch_api_endpoints(weekly_report_database):
     app = _app()
     client = TestClient(app)
     # 測試 GET /api/v1/operations-reports/weekly/batches
@@ -126,7 +156,7 @@ def test_batch_api_endpoints():
     data = res.json()["data"]
     assert isinstance(data, list)
     assert len(data) > 0
-    # 檢查已從模板初始化的 6-1 批次
+    # 檢查 fixture 明確建立的 6-1 批次，不依賴操作環境或歷史 Excel 資料。
     batch_6_1 = next((b for b in data if b["week_code"] == "6-1"), None)
     assert batch_6_1 is not None
     assert batch_6_1["promotion_count"] == 20
@@ -210,4 +240,3 @@ def test_export_merges_dfg_columns_with_saved_weekly_metrics():
     assert ws["D8"].value == "6-2"
     assert ws["F8"].value == 10
     assert ws["G8"].value == 8
-

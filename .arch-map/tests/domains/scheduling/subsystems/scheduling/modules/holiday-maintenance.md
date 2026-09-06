@@ -11,4 +11,4 @@
 - canonical_basis: existing Holiday module test directory under the UI source tree, declared by the Scheduling production module leaf and confirmed by both current tests.
 
 ## Coverage
-The canonical Holiday module tests call the actual parser, typed transport, adapter and SchedulingPage for official 0/2 parsing, malformed and mixed-year rejection, blank-weekend filtering, preview zero-write, fresh per-date versions, double-pay preservation, identical-row skip, partial failure, replay classification, adapter retry/state transitions, and visible awaited readback failure.
+The canonical Holiday module tests call the actual parser, typed transport, adapter and OfficialHolidayCsvImport for official 0/2 parsing, malformed and mixed-year rejection, blank-weekend filtering, preview zero-write, fresh per-date versions, double-pay preservation, identical-row skip, partial failure, replay classification, adapter retry/state transitions, and visible awaited readback failure.

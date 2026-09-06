@@ -143,6 +143,7 @@ class LineBindPayload(BaseModel):
 
 @router.post("/api/line/bind")
 async def line_bind(payload: LineBindPayload):
+    _require_legacy_line_surface("/api/v1/line/identity/customer/apply")
     name = payload.name.strip()
     phone = payload.phone.strip()
     norm_phone = "".join(filter(str.isdigit, phone))

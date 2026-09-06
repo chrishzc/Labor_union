@@ -50,10 +50,10 @@ def test_real_gemini_semantic_panel_is_registered_in_ai_studio() -> None:
     ).read_text(encoding="utf-8")
 
     assert "RealLlmSemanticTestPanel" in studio
-    assert "Gemini + Knowledge 真實 M2 測試" in panel
+    assert "Gemini + Knowledge 真實 M2 智能問答工作台" in panel
     assert "testLlmSemantics" in panel
-    assert "執行真實 Gemini 測試" in panel
-    assert "不發 LINE、不建立工單、不寫入題庫" in panel
+    assert "執行真實 AI 智能解答" in panel
+    assert "通報專人客服" in panel
     assert "matched QA" in panel
 
 

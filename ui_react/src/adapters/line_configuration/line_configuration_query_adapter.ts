@@ -5,7 +5,6 @@
 import type {
   LineNotificationFrequency,
   LineNotificationPredicate,
-  LineNotificationRule,
   LineNotificationRulesCatalog,
   LineNotificationSchedule,
   LineRichMenuConfiguration,

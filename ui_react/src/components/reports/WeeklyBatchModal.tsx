@@ -241,7 +241,6 @@ export const WeeklyBatchModal: React.FC<WeeklyBatchModalProps> = ({
               <tbody>
                 {batches.map((b) => {
                   const edit = editingMetrics[b.id] ?? { promo: b.promotion_count, inq: b.inquiry_count };
-                  const isDirty = edit.promo !== b.promotion_count || edit.inq !== b.inquiry_count;
                   return (
                     <tr key={b.id}>
                       <td style={{ fontWeight: 'bold' }}>{b.week_code}</td>

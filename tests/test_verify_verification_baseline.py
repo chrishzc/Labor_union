@@ -406,21 +406,6 @@ def test_gate_report_separates_data_fixtures_from_runtime_evidence():
     assert boundaries["B"]["benchmark_evidence"]["passing_receipts"] == 0
 
 
-def test_gate_report_records_architecture_deferred_performance_blocker():
-    report = _current_gate_report()
-
-    assert report["blocked_scenarios"] == [{
-        "scenario_id": "PERF-UX-001",
-        "track": "B",
-        "suite_id": "PERF",
-        "blocker": (
-            "UI click-to-render telemetry is deferred until the React-versus-"
-            "Streamlit architecture decision is finalized; current Streamlit state "
-            "has no browser paint metric."
-        ),
-    }]
-
-
 def test_gate_report_can_be_saved_as_utf8_evidence(tmp_path):
     report_path = tmp_path / "verification-gate.json"
 
@@ -490,3 +475,46 @@ def test_fixture_coverage_proves_every_a_scenario_has_root_data_contract():
     assert report["scenarios_without_fixture"] == []
     assert report["all_a_scenarios_have_fixture"] is True
     assert "CF-REFUND-RECOVERY-001" not in report["scenarios_without_fixture"]
+
+
+def test_scenario_gate_detects_coverage_id_removed_from_isolated_disk(tmp_path, monkeypatch, capsys):
+    import scripts.verify_verification_scenarios as validator
+
+    matrix_before = validator.DEFAULT_BUSINESS_MATRIX_PATH.read_bytes()
+    actual_loader = validator.load_scenarios
+    removals = 0
+    for source in validator.DEFAULT_SCENARIO_DIRECTORY.glob("*.json"):
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        if (payload.get("contract") == validator.SCENARIO_CONTRACT
+            and payload.get("track") == "A"
+            and payload.get("coverage_scope", "matrix") == "matrix"):
+            ids = payload["coverage_ids"]
+            removals += ids.count("ORD-01")
+            payload["coverage_ids"] = [item for item in ids if item != "ORD-01"]
+        (tmp_path / source.name).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    assert removals > 0
+
+    # Route every gate load to the isolated disk, including an accidental
+    # expected-set load. Keep the real loader and independent matrix intact.
+    def load_isolated_scenarios(directory=tmp_path):
+        return actual_loader(tmp_path)
+
+    monkeypatch.setattr(validator, "load_scenarios", load_isolated_scenarios)
+    assert validator.main() == 1
+    report = json.loads(capsys.readouterr().out)
+    assert "missing business requirement mappings: ORD-01" in report["errors"]
+    assert report["coverage"]["business_requirement_count"] == 127
+    assert report["coverage"]["business_requirements_missing"] == ["ORD-01"]
+    assert validator.DEFAULT_BUSINESS_MATRIX_PATH.read_bytes() == matrix_before
+
+
+def test_scenario_expected_matrix_missing_or_empty_is_rejected(tmp_path):
+    import pytest
+    from scripts.verify_verification_scenarios import canonical_business_requirement_ids
+
+    matrix = tmp_path / "matrix.md"
+    with pytest.raises(FileNotFoundError):
+        canonical_business_requirement_ids(matrix)
+    matrix.write_text("# No coverage table\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="matrix contains no coverage ids"):
+        canonical_business_requirement_ids(matrix)

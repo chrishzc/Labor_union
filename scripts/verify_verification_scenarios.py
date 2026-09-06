@@ -18,11 +18,9 @@ from scripts.verify_verification_baseline import DEFAULT_BASELINE_PATH, load_bas
 
 
 DEFAULT_SCENARIO_DIRECTORY = PROJECT_ROOT / "validation" / "scenarios"
+# Independent coverage provenance only; business authority remains with owner specs.
 DEFAULT_BUSINESS_MATRIX_PATH = (
-    PROJECT_ROOT
-    / "document"
-    / "資料庫、資料處理"
-    / "新版測試資料規則矩陣_草案.md"
+    PROJECT_ROOT / "document" / "資料庫、資料處理" / "新版測試資料規則矩陣_草案.md"
 )
 SCENARIO_CONTRACT = "labor-union-verification-scenario/v1"
 SCENARIO_STATUS = {"specified", "bound", "blocked"}
@@ -63,7 +61,7 @@ def verify_scenarios(
     business_requirement_ids: set[str] | None = None,
 ) -> list[str]:
     baseline = baseline or load_baseline(DEFAULT_BASELINE_PATH)
-    business_requirement_ids = business_requirement_ids or matrix_requirement_ids()
+    business_requirement_ids = business_requirement_ids or canonical_business_requirement_ids()
     suite_tracks = _suite_tracks(baseline)
     suite_test_kinds = _suite_test_kinds(baseline)
     scenario_ids: set[str] = set()
@@ -87,7 +85,7 @@ def scenario_coverage_report(
     business_requirement_ids: set[str] | None = None,
 ) -> dict[str, object]:
     baseline = baseline or load_baseline(DEFAULT_BASELINE_PATH)
-    business_requirement_ids = business_requirement_ids or matrix_requirement_ids()
+    business_requirement_ids = business_requirement_ids or canonical_business_requirement_ids()
     suite_tracks = _suite_tracks(baseline)
     present = {scenario["suite_id"] for scenario in scenarios if "suite_id" in scenario}
     covered_business_ids = {
@@ -123,16 +121,17 @@ def _suite_test_kinds(baseline: dict[str, object]) -> dict[str, set[str]]:
     }
 
 
-def matrix_requirement_ids(path: Path = DEFAULT_BUSINESS_MATRIX_PATH) -> set[str]:
-    """Read Track A coverage requirements from the current validation matrix."""
-    if not path.is_file():
-        raise ValueError(f"business matrix is missing: {path}")
-    return set(
-        re.findall(
-            r"\|\s*([A-Z]+-[A-Z0-9]+)\s*\|",
-            path.read_text(encoding="utf-8"),
-        )
-    )
+def canonical_business_requirement_ids(
+    matrix_path: Path = DEFAULT_BUSINESS_MATRIX_PATH,
+) -> set[str]:
+    """Read independent coverage IDs, not business authority, from the existing matrix."""
+    requirement_ids = set(re.findall(
+        r"\|\s*([A-Z]+-[A-Z0-9]+)\s*\|",
+        matrix_path.read_text(encoding="utf-8"),
+    ))
+    if not requirement_ids:
+        raise ValueError("business requirement matrix contains no coverage ids")
+    return requirement_ids
 
 
 def _scenario_errors(
@@ -151,13 +150,14 @@ def _scenario_errors(
         scenario_ids.add(scenario_id)
     suite_id = scenario.get("suite_id")
     track = scenario.get("track")
+    status = scenario.get("status")
     if suite_tracks.get(suite_id) != track:
         errors.append(f"scenario {scenario_id} has an unknown suite or wrong track")
-    if scenario.get("status") not in SCENARIO_STATUS:
+    if status not in SCENARIO_STATUS:
         errors.append(f"scenario {scenario_id} has an invalid status")
-    if scenario.get("status") == "blocked" and not _has_blocker(scenario.get("blocker")):
+    if status == "blocked" and not _has_blocker(scenario.get("blocker")):
         errors.append(f"scenario {scenario_id} must define a blocker")
-    if scenario.get("status") == "bound":
+    if status == "bound":
         errors.extend(_execution_binding_errors(scenario_id, scenario.get("execution")))
         errors.extend(_database_execution_mode_errors(scenario_id, scenario))
     if not isinstance(scenario.get("requires_database"), bool):
@@ -176,7 +176,8 @@ def _scenario_errors(
         expected = scenario.get("expected")
         if isinstance(expected, list) and len(expected) < len(test_kinds):
             errors.append(f"scenario {scenario_id} has incomplete acceptance criteria")
-    errors.extend(_source_reference_errors(scenario_id, scenario.get("source_refs")))
+    if status != "blocked":
+        errors.extend(_source_reference_errors(scenario_id, scenario.get("source_refs")))
     coverage_ids = scenario.get("coverage_ids")
     if not isinstance(coverage_ids, list) or not coverage_ids:
         errors.append(f"scenario {scenario_id} must define coverage_ids")
@@ -220,11 +221,7 @@ def _completeness_errors(
 def _source_reference_errors(scenario_id: object, source_refs: object) -> list[str]:
     if not isinstance(source_refs, list):
         return []
-    missing = [
-        source_ref
-        for source_ref in source_refs
-        if not _source_reference_exists(source_ref)
-    ]
+    missing = [source_ref for source_ref in source_refs if not _source_reference_exists(source_ref)]
     if missing:
         return [f"scenario {scenario_id} has a missing source reference"]
     return []

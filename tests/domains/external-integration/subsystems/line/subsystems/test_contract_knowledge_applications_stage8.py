@@ -54,14 +54,16 @@ class _KnowledgeUow:
 
 
 class _Gateway:
-    def answer(self, question, version):
+    def answer(self, question, version, *, history=()):
+        assert history == ()
         return KnowledgeAnswer(
             "有來源的回答", (KnowledgeCitation("policy:test", 1, "安全摘要"),), version
         )
 
 
 class _UnsupportedGateway:
-    def answer(self, question, version):
+    def answer(self, question, version, *, history=()):
+        assert history == ()
         del question, version
         raise KnowledgeAnswerUnsupported("knowledge_answer_unsupported")
 

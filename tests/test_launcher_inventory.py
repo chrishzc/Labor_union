@@ -40,7 +40,6 @@ def test_retired_or_moved_legacy_launcher_paths_do_not_return() -> None:
         "update_DB.bat",
         "scripts/bootstrap_admin_dev_env.ps1",
         "scripts/install_durable_job_worker_task.ps1",
-        "scripts/launchers/start_fastapi_ngrok.py",
     )
 
     assert all(not (ROOT / relative_path).exists() for relative_path in legacy_paths)

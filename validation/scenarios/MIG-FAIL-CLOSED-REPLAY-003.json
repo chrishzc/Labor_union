@@ -9,7 +9,7 @@
   "coverage_scope": "supplemental",
   "coverage_ids": ["MIG-01", "MIG-04", "MIG-05", "MIG-06", "MIG-09"],
   "source_refs": [
-    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#MIG-01"
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
   ],
   "root_facts": [
     "Temporary schema-part artifacts, source/candidate identity metadata and immutable plan/operation receipt files.",

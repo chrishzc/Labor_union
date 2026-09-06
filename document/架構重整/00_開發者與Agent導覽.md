@@ -12,6 +12,8 @@
 
 ## Fast navigation
 
+任務分級與最小交付先依 [Agent 任務分級與交付規範](./00_Agent任務分級與交付規範.md)；其餘導航依下列最短路徑。
+
 只有功能或業務描述時：
 
 1. 在 `.arch-map/` 做 filename-only bounded search。

@@ -113,7 +113,6 @@ def test_draft_query_returns_action_only_through_manager_contract(monkeypatch) -
         "uri": None,
         "uri_source": "literal",
         "data": None,
-        "rich_menu_alias_id": None,
     }
 
 
