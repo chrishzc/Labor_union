@@ -168,4 +168,47 @@ describe('Orders intake repair entry', () => {
     ));
     await waitFor(() => expect(applyCompletion).toHaveBeenCalled());
   });
+
+  it.each([true, false])('shows name Preview before/after and honors owner apply_allowed=%s', async (allowed) => {
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+      missing_fields: ['client_name'], blockers: [], apply_allowed: false, preview_fingerprint: FP1,
+    });
+    vi.spyOn(orderIntakeCompletionClient, 'previewClientName').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, before_client_name: null,
+      after_client_name: '合成補件姓名', blockers: allowed ? [] : ['synthetic_name_owner_blocker'],
+      apply_allowed: allowed, preview_fingerprint: FP1,
+    });
+    const applyName = vi.spyOn(orderIntakeCompletionClient, 'applyClientName').mockResolvedValue({
+      receipt_key: 'name-receipt', case_no: 'CASE-153', lifecycle_version: 7,
+      client_name: '合成補件姓名', preview_fingerprint: FP1, replayed: false,
+    });
+    render(<OrdersIntakeRepairCard item={{ ...incompleteSummary, start_date: '2026-09-10', service_days: 5 }} onChanged={onChanged} />);
+    fireEvent.change(await screen.findByLabelText('CASE-153 客戶姓名'), { target: { value: '合成補件姓名' } });
+    fireEvent.click(screen.getByRole('button', { name: '檢查姓名補件' }));
+    const preview = await screen.findByLabelText('姓名補件前後');
+    expect(preview).toHaveTextContent('補件前姓名：未填寫');
+    expect(preview).toHaveTextContent('補件後姓名：合成補件姓名');
+    expect(applyName).not.toHaveBeenCalled();
+    const applyButton = screen.getByRole('button', { name: '確認補齊客戶姓名' });
+    expect(applyButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('CASE-153 補件原因'), { target: { value: '合成姓名補件驗收' } });
+    if (!allowed) {
+      expect(screen.getByLabelText('姓名補件阻擋原因')).toHaveTextContent('synthetic_name_owner_blocker');
+      expect(applyButton).toBeDisabled();
+      fireEvent.click(applyButton);
+      expect(applyName).not.toHaveBeenCalled();
+      expect(onChanged).not.toHaveBeenCalled();
+      return;
+    }
+    expect(applyButton).toBeEnabled();
+    fireEvent.click(applyButton);
+    await waitFor(() => expect(applyName).toHaveBeenCalledWith(
+      'CASE-153', expect.objectContaining({ apply_allowed: true, preview_fingerprint: FP1 }),
+      '合成姓名補件驗收', expect.stringContaining('orders-intake-client-name-CASE-153-'),
+    ));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  });
+
 });

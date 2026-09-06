@@ -95,6 +95,7 @@ from api.routes import (
     caregiver_availability_locks,
     capability_grants,
     order_actual_start,
+    order_intake_terms_bootstrap,
     order_auto_completion,
     order_cancellation,
     order_contract_completion,
@@ -272,6 +273,7 @@ app.include_router(order_contract_completion.router)
 app.include_router(contract_signing.router)
 app.include_router(contract_external_signing.router)
 app.include_router(order_actual_start.router)
+app.include_router(order_intake_terms_bootstrap.router)
 app.include_router(order_auto_completion.router)
 app.include_router(order_cancellation.router)
 app.include_router(order_reopen.router)

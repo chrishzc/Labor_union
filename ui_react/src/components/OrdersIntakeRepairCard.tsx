@@ -105,7 +105,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
   };
 
   const applyClientName = async () => {
-    if (!clientPreview || !hasReason) return;
+    if (!clientPreview || !clientPreview.apply_allowed || !hasReason) return;
     setBusy('client-apply');
     setError(null);
     setNotice(null);
@@ -252,8 +252,16 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
           </button>
           {clientPreview && (
             <div style={{ display: 'grid', gap: 6 }}>
-              <div>補件後姓名：<strong>{clientPreview.after_client_name}</strong></div>
-              <button type="button" disabled={busy !== null || !hasReason} onClick={() => void applyClientName()}>
+              <div aria-label="姓名補件前後">
+                <div>補件前姓名：<strong>{clientPreview.before_client_name ?? '未填寫'}</strong></div>
+                <div>補件後姓名：<strong>{clientPreview.after_client_name}</strong></div>
+              </div>
+              {clientPreview.blockers.length > 0 && (
+                <ul aria-label="姓名補件阻擋原因" style={{ margin: 0, paddingLeft: 22 }}>
+                  {clientPreview.blockers.map((blocker) => <li key={blocker}>{intakeBlockerMessage(blocker)}</li>)}
+                </ul>
+              )}
+              <button type="button" disabled={busy !== null || !clientPreview.apply_allowed || !hasReason} onClick={() => void applyClientName()}>
                 {busy === 'client-apply' ? '套用中…' : '確認補齊客戶姓名'}
               </button>
             </div>

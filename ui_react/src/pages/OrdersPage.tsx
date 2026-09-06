@@ -2232,22 +2232,13 @@ export const OrdersPage: React.FC = () => {
                     查看取消與受控重開
                   </button>
                 </div>
-              ) : isOrderIntakeIncomplete(order) ? (
-                <div className="order-card-actions">
-                  <div role="status">
-                    案件仍待補齊姓名、服務日期等進件資料；完成補件後即可操作契約、媒合、排班與取消流程。
-                  </div>
-                  <button
-                    type="button"
-                    className="btn-secondary-action"
-                    data-control-id="orders.card.intake-repair-workbench"
-                    onClick={() => void handleOpenContractDrawer(order, 'contract_terms')}
-                  >
-                    開啟補件工作台
-                  </button>
-                </div>
               ) : (
               <div className="order-card-actions">
+                {isOrderIntakeIncomplete(order) && (
+                  <div role="status" data-surface-id="orders.card.intake-incomplete">
+                    案件仍有進件缺漏，請從條款與契約查看補件區段；各操作依所屬流程的目前條件判定。
+                  </div>
+                )}
                 <button
                   className="btn-secondary-action"
                   data-control-id="orders.card.contract-workbench"

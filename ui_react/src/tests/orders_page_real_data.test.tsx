@@ -9,6 +9,7 @@ import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_s
 import { sessionClient } from '../api/auth/session_client';
 import { ordersMutationClient } from '../api/orders/order_mutation_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
+import { orderIntakeCompletionClient } from '../api/orders/order_intake_completion_client';
 import { contractSigningClient } from '../api/orders/contract_signing_client';
 import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
 import type { OrdersCardProjection } from '../api/orders/order_card_projection_schemas';
@@ -183,11 +184,36 @@ describe('OrdersPage query real-data slice', () => {
     vi.spyOn(ordersMutationClient, 'previewReopen').mockResolvedValue(realisticOrderReopenPreviewView);
   });
 
-  it('opens the existing contract drawer from an incomplete order card', async () => {
+  it.each([
+    { missing: ['client_name'] }, { missing: ['start_date'] },
+    { missing: ['service_days'] }, { missing: ['start_date', 'service_days'] },
+  ] as const)('keeps original drawer actions for missing intake fields $missing', async ({ missing }) => {
+    const missingFields: Array<'client_name' | 'start_date' | 'service_days'> = [...missing];
+    const item = {
+      ...realisticOrderSummaryPage.items[0],
+      order_status: '待補件',
+      client_name: missingFields.includes('client_name') ? '待補姓名（ORD-2026-0801）' : '合成補件客戶',
+      start_date: missingFields.includes('start_date') ? null : '2026-09-10',
+      service_days: missingFields.includes('service_days') ? null : 5,
+    };
+    const summary = { ...realisticOrderSummaryPage, items: [item], next_cursor: null };
+    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(summary);
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(buildOrdersStageProjectionFixture(summary));
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: item.case_no, lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+      missing_fields: missingFields, blockers: ['order_intake_completion_service_data_locked'],
+      apply_allowed: false, preview_fingerprint: '1'.repeat(64),
+    });
     render(<OrdersPage />);
-    await screen.findByText('ORD-2026-0801');
-    fireEvent.click(screen.getByRole('button', { name: '開啟補件工作台' }));
-    expect(await screen.findByText(/訂單條款、服務日曆與契約簽署工作台/)).toBeInTheDocument();
+    await screen.findByText(item.case_no);
+    expect(screen.getByRole('button', { name: /媒合與正式排班/ })).toBeEnabled();
+    expect(screen.queryByRole('region', { name: '訂單缺件補齊' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /條款與契約/ }));
+    expect(await screen.findByLabelText(`${item.case_no} 缺件項目`)).toBeInTheDocument();
+    expect(await screen.findByText('服務資料已鎖定，目前不能完成進件補齊。')).toBeInTheDocument();
+    await waitFor(() => expect(ordersQueryClient.getOrderTerms).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: /契約簽署與約定條款/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /實質服務日曆與天數精算/ })).toBeInTheDocument();
   });
 
   it('downloads the selected archived contract version through the existing client owner', async () => {
@@ -219,7 +245,7 @@ describe('OrdersPage query real-data slice', () => {
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0802');
-    fireEvent.click(screen.getByRole('button', { name: '開啟補件工作台' }));
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
     fireEvent.click(await screen.findByRole('button', { name: '下載／匯出此文件' }));
     await waitFor(() => expect(download).toHaveBeenCalledWith('ORD-2026-0801', 17));
   });
