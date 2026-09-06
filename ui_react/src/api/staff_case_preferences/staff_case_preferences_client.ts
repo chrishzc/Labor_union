@@ -54,4 +54,3 @@ export const staffCasePreferenceManualClient = {
     return decodeReceipt(await transport.post<unknown>(BASE + '/' + staffId + '/apply', payload, requestOptions(options, options.idempotencyKey)), staffId);
   },
 };
-

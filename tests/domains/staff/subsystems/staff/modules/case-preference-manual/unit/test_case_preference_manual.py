@@ -116,4 +116,3 @@ def test_domain_contract_is_strict_and_fingerprints_bind_before_after():
             {"value": "其他", "detail": "第一筆"},
             {"value": "其他", "detail": "第二筆"},
         ]})
-

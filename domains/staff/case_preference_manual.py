@@ -128,4 +128,3 @@ __all__ = [
     "RELATION_SPECS", "RelationKey", "RelationValue", "Relations",
     "normalize_relations", "preview_fingerprint", "snapshot_fingerprint",
 ]
-

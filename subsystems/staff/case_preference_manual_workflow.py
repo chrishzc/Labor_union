@@ -126,4 +126,3 @@ def _receipt_from_result(result: Mapping[str, Any], key: IdempotencyKey, *, repl
 
 
 __all__ = ["CasePreferenceManualApplyRequest", "CasePreferenceManualReceipt", "StaffCasePreferenceManualWorkflow"]
-

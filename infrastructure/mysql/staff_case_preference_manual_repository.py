@@ -98,4 +98,3 @@ class MySqlStaffCasePreferenceManualRepository:
 
 
 __all__ = ["MySqlStaffCasePreferenceManualRepository"]
-
