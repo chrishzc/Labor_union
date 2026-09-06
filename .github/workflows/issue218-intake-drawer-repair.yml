@@ -15,117 +15,20 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Apply bounded UI repair and tests
-        shell: bash
+      - name: Apply bounded repair
+        run: python scripts/issue218_intake_drawer_repair_tmp.py
+      - name: Verify focused React behavior
+        working-directory: ui_react
         run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          orders_path = Path('ui_react/src/pages/OrdersPage.tsx')
-          text = orders_path.read_text(encoding='utf-8')
-
-          signature = "export const OrdersPage: React.FC = () => {"
-          assert text.count(signature) == 1
-          text = text.replace(
-              signature,
-              "interface OrdersPageProps {\n"
-              "  renderIntakeRepair?: (\n"
-              "    order: OrderSummaryCardViewModel,\n"
-              "    onChanged: () => Promise<void>,\n"
-              "  ) => React.ReactNode;\n"
-              "}\n\n"
-              "export const OrdersPage: React.FC<OrdersPageProps> = ({ renderIntakeRepair }) => {",
-              1,
-          )
-
-          old_card = """              ) : isOrderIntakeIncomplete(order) ? (\n                <div className=\"order-card-actions\" role=\"status\">\n                  案件仍待補齊姓名、服務日期等進件資料；完成補件後即可操作契約、媒合、排班與取消流程。\n                </div>\n              ) : ("""
-          new_card = """              ) : isOrderIntakeIncomplete(order) ? (\n                <div className=\"order-card-actions\">\n                  <div role=\"status\">\n                    案件仍待補齊姓名、服務日期等進件資料；完成補件後即可操作契約、媒合、排班與取消流程。\n                  </div>\n                  <button\n                    type=\"button\"\n                    className=\"btn-secondary-action\"\n                    data-control-id=\"orders.card.intake-repair\"\n                    onClick={() => handleOpenContractDrawer(order, 'contract_terms')}\n                  >\n                    補齊進件資料\n                  </button>\n                </div>\n              ) : ("""
-          assert text.count(old_card) == 1
-          text = text.replace(old_card, new_card, 1)
-
-          old_loader = """    loadCardProjection(order.id);\n\n    if (initialTab === 'calendar') {"""
-          new_loader = """    if (isOrderIntakeIncomplete(order) && renderIntakeRepair) {\n      setDrawerLoading(false);\n      return;\n    }\n    loadCardProjection(order.id);\n\n    if (initialTab === 'calendar') {"""
-          assert text.count(old_loader) == 1
-          text = text.replace(old_loader, new_loader, 1)
-
-          old_drawer_start = """        {(contractOrder || dateConfirmOrder) && (\n          <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>\n            {renderCardProjection()}"""
-          new_drawer_start = """        {(contractOrder || dateConfirmOrder) && (\n          <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>\n            {isOrderIntakeIncomplete(contractOrder || dateConfirmOrder) && renderIntakeRepair ? (\n              renderIntakeRepair(contractOrder || dateConfirmOrder, async () => {\n                await fetchOrderSummaries();\n                closeContractDrawer();\n              })\n            ) : (\n              <>\n            {renderCardProjection()}"""
-          assert text.count(old_drawer_start) == 1
-          text = text.replace(old_drawer_start, new_drawer_start, 1)
-
-          old_drawer_end = """            )}\n          </div>\n        )}\n      </Drawer>\n    </div>\n  );\n};\n\nexport default OrdersPage;"""
-          new_drawer_end = """            )}\n              </>\n            )}\n          </div>\n        )}\n      </Drawer>\n    </div>\n  );\n};\n\nexport default OrdersPage;"""
-          assert text.count(old_drawer_end) == 1
-          text = text.replace(old_drawer_end, new_drawer_end, 1)
-          orders_path.write_text(text, encoding='utf-8')
-
-          management_path = Path('ui_react/src/pages/OrdersManagementPage.tsx')
-          management = management_path.read_text(encoding='utf-8')
-          marker = 'export const OrdersManagementPage: React.FC = () => {'
-          start = management.index(marker)
-          replacement = '''export const OrdersManagementPage: React.FC = () => {\n  const [repairItems, setRepairItems] = useState<OrderSummaryItem[]>([]);\n\n  useLayoutEffect(() => subscribeOrderSummarySnapshots(({ page, params }) => {\n    if (params.lifecycle_scope !== 'unfinished' || params.query_text || params.after_case_no) return;\n    setRepairItems(page.items.filter(needsIntakeRepair));\n  }), []);\n\n  return (\n    <OrdersPage\n      renderIntakeRepair={(order, onChanged) => {\n        const item = repairItems.find((candidate) => candidate.case_no === order.id);\n        return item ? (\n          <IntakeRepairCard item={item} onChanged={onChanged} />\n        ) : (\n          <div role=\"status\">正在讀取此案件的最新缺件資料…</div>\n        );\n      }}\n    />\n  );\n};\n\nexport default OrdersManagementPage;\n'''
-          management = management[:start] + replacement
-          management_path.write_text(management, encoding='utf-8')
-
-          test_path = Path('ui_react/src/tests/orders_page_real_data.test.tsx')
-          test = test_path.read_text(encoding='utf-8')
-          insertion = r'''
-
-  it('opens incomplete intake repair inside the existing Orders drawer', async () => {
-    const renderIntakeRepair = vi.fn((order: { id: string }) => (
-      <section aria-label="drawer intake repair">補件案件：{order.id}</section>
-    ));
-
-    render(<OrdersPage renderIntakeRepair={renderIntakeRepair} />);
-    await screen.findByText('ORD-2026-0801');
-
-    expect(screen.queryByRole('region', { name: '訂單缺件補齊' })).not.toBeInTheDocument();
-    const intakeButton = screen.getByRole('button', { name: '補齊進件資料' });
-    fireEvent.click(intakeButton);
-
-    expect(await screen.findByRole('region', { name: 'drawer intake repair' })).toHaveTextContent('ORD-2026-0801');
-    expect(renderIntakeRepair).toHaveBeenCalled();
-    expect(ordersQueryClient.getOrderTerms).not.toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: '📑 契約簽署與約定條款' })).not.toBeInTheDocument();
-  });
-'''
-          head, tail = test.rsplit('\n});', 1)
-          test_path.write_text(head + insertion + '\n});' + tail, encoding='utf-8')
-
-          entry_path = Path('ui_react/src/tests/order_intake_completion_entry.test.tsx')
-          entry = entry_path.read_text(encoding='utf-8')
-          old_mock = '''vi.mock('../pages/OrdersPage', async () => {\n  const ReactModule = await import('react');\n  const queryModule = await import('../api/orders/order_query_client');\n  return {\n    OrdersPage: () => {\n      ReactModule.useEffect(() => {\n        void queryModule.loadAllOrderSummaries(\n          queryModule.ordersQueryClient.getOrderSummaries.bind(queryModule.ordersQueryClient),\n          { page_size: 200, lifecycle_scope: 'unfinished' },\n        );\n      }, []);\n      return <div data-testid=\"legacy-orders-page\">legacy orders workbench</div>;\n    },\n  };\n});'''
-          new_mock = '''vi.mock('../pages/OrdersPage', async () => {\n  const ReactModule = await import('react');\n  const queryModule = await import('../api/orders/order_query_client');\n  const adapterModule = await import('../adapters/orders/order_summary_adapter');\n  return {\n    OrdersPage: ({ renderIntakeRepair }: {\n      renderIntakeRepair?: (order: ReturnType<typeof adapterModule.adaptOrderSummaryItem>, onChanged: () => Promise<void>) => ReactModule.ReactNode;\n    }) => {\n      const [activeItem, setActiveItem] = ReactModule.useState<Awaited<ReturnType<typeof queryModule.loadAllOrderSummaries>>['items'][number] | null>(null);\n      const [open, setOpen] = ReactModule.useState(false);\n      const refresh = ReactModule.useCallback(async () => {\n        const page = await queryModule.loadAllOrderSummaries(\n          queryModule.ordersQueryClient.getOrderSummaries.bind(queryModule.ordersQueryClient),\n          { page_size: 200, lifecycle_scope: 'unfinished' },\n        );\n        setActiveItem(page.items.find((item) => item.order_status === '待補件') ?? null);\n        return page;\n      }, []);\n      ReactModule.useEffect(() => {\n        void refresh();\n      }, [refresh]);\n      return (\n        <>\n          <div data-testid=\"legacy-orders-page\">legacy orders workbench</div>\n          {activeItem && (\n            <button type=\"button\" onClick={() => setOpen(true)}>補齊進件資料</button>\n          )}\n          {open && activeItem && renderIntakeRepair?.(\n            adapterModule.adaptOrderSummaryItem(activeItem),\n            async () => {\n              await refresh();\n              setOpen(false);\n            },\n          )}\n        </>\n      );\n    },\n  };\n});'''
-          assert entry.count(old_mock) == 1
-          entry = entry.replace(old_mock, new_mock, 1)
-          entry = entry.replace(
-              "    const region = await screen.findByRole('region', { name: '訂單缺件補齊' });",
-              "    expect(screen.queryByRole('region', { name: '訂單缺件補齊' })).not.toBeInTheDocument();\n"
-              "    fireEvent.click(await screen.findByRole('button', { name: '補齊進件資料' }));\n"
-              "    const region = await screen.findByRole('article');",
-              1,
-          )
-          entry = entry.replace(
-              "    render(<OrdersManagementPage />);\n\n    fireEvent.change(await screen.findByLabelText('CASE-153 約定服務開始日'), {",
-              "    render(<OrdersManagementPage />);\n\n"
-              "    fireEvent.click(await screen.findByRole('button', { name: '補齊進件資料' }));\n"
-              "    fireEvent.change(await screen.findByLabelText('CASE-153 約定服務開始日'), {",
-              1,
-          )
-          entry_path.write_text(entry, encoding='utf-8')
-
-          workflow = Path('.github/workflows/issue218-intake-drawer-repair.yml')
-          workflow.unlink()
-          PY
-          git diff --check
-          cd ui_react
           npm ci
           npm test -- --run src/tests/order_intake_completion_entry.test.tsx src/tests/orders_page_real_data.test.tsx
           npm run build
-          cd ..
+      - name: Commit verified repair
+        run: |
+          rm scripts/issue218_intake_drawer_repair_tmp.py .github/workflows/issue218-intake-drawer-repair.yml
+          git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ui_react/src/pages/OrdersPage.tsx ui_react/src/pages/OrdersManagementPage.tsx ui_react/src/tests/order_intake_completion_entry.test.tsx ui_react/src/tests/orders_page_real_data.test.tsx .github/workflows/issue218-intake-drawer-repair.yml
+          git add -A
           git commit -m "fix(orders): move intake repair into existing drawer"
           git push origin HEAD:fix/issue-218-intake-drawer-20260906
