@@ -1,7 +1,11 @@
-import importlib
+import importlib.util
 import inspect
+import sys
 import tempfile
 from pathlib import Path
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 class MonkeyPatch:
@@ -32,8 +36,19 @@ class MonkeyPatch:
         self._undo.clear()
 
 
-def run_module(name):
-    module = importlib.import_module(name)
+def load_module(name: str, relative_path: str):
+    path = REPOSITORY_ROOT / relative_path
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {relative_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def run_module(name: str, relative_path: str):
+    module = load_module(name, relative_path)
     tests = [
         (test_name, fn)
         for test_name, fn in vars(module).items()
@@ -56,19 +71,19 @@ def run_module(name):
             if unsupported:
                 raise RuntimeError(f"unsupported fixtures: {sorted(unsupported)}")
             fn(**kwargs)
-            print(f"PASS {name}::{test_name}")
+            print(f"PASS {relative_path}::{test_name}")
         except Exception as exc:
             failures.append((test_name, repr(exc)))
-            print(f"FAIL {name}::{test_name}: {exc!r}")
+            print(f"FAIL {relative_path}::{test_name}: {exc!r}")
         finally:
             if patch is not None:
                 patch.undo()
             if temp is not None:
                 temp.cleanup()
     if failures:
-        raise SystemExit(f"{name}: {len(failures)} failed: {failures}")
-    print(f"{name}: {len(tests)} passed")
+        raise SystemExit(f"{relative_path}: {len(failures)} failed: {failures}")
+    print(f"{relative_path}: {len(tests)} passed")
 
 
-run_module("tests.test_task97_commit_dispositions")
-run_module("tests.test_writer_inventory_v3_dispositions")
+run_module("lane1_task97_tests", "tests/test_task97_commit_dispositions.py")
+run_module("lane1_writer_v3_tests", "tests/test_writer_inventory_v3_dispositions.py")
