@@ -20,6 +20,7 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — idempotency/receipt/outbox
 
 ## Modules
+- `provisional-registration` — shared LINE provisional registration candidate normalization and persistence boundary；path: `modules/provisional-registration.md`
 - `pairing-current-facts` — `BECLASS-001` owner follow-up facts；`IMPORT-003`不再形成 anomaly recheck；path: `modules/pairing-current-facts.md`
 
 ## Verification routing

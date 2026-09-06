@@ -41,6 +41,10 @@ _TAIWAN_ID_LETTER_CODES = {
     "Z": 33,
 }
 
+_FULLWIDTH_ASCII_TRANSLATION = str.maketrans(
+    {chr(codepoint): chr(codepoint - 0xFEE0) for codepoint in range(0xFF01, 0xFF5F)}
+)
+
 
 class LiffIdentityContext(BaseModel):
     flow_id: str = Field(min_length=1, max_length=191)
@@ -146,7 +150,7 @@ class ProvisionalRegistrationPreviewRequest(BaseModel):
     def validate_id_number(cls, value: str | None) -> str | None:
         if value is None or not value.strip():
             return value
-        candidate = value.strip()
+        candidate = value.strip().translate(_FULLWIDTH_ASCII_TRANSLATION).upper()
         if not re.fullmatch(r"[A-Z][12]\d{8}", candidate):
             raise ValueError("id_number must be a valid Taiwan national ID number")
         letter_code = _TAIWAN_ID_LETTER_CODES[candidate[0]]
@@ -158,7 +162,7 @@ class ProvisionalRegistrationPreviewRequest(BaseModel):
         )
         if checksum % 10 != 0:
             raise ValueError("id_number must be a valid Taiwan national ID number")
-        return value
+        return candidate
 
     @field_validator("email")
     @classmethod

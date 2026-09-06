@@ -28,11 +28,13 @@
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.4.1 — 一般日期確認與 restart-specific canonical Scheduling handoff。
 
 ## Verification
+- layout_status: custom_current
+- test_root: `ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/`
 - static:
   - `git diff --check`
 - test_root: `tests/domains/orders/subsystems/orders/modules/service-date-confirmation/`
 - higher_boundary:
-  - `ui_react/src/tests/orders_service_dates_flow.test.tsx`
+  - `ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx`
 
 ## Provenance
 - Orders owns confirmed-date Q/P/A — `architecture_declared` — `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.4.1。

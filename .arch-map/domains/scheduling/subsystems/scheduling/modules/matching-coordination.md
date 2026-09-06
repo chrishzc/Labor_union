@@ -5,7 +5,7 @@
 - subsystem: `scheduling`
 
 ## Responsibility
-維護 Scheduling-owned matching coordination 的 candidate/decision/plan/package lineage 與 typed Query／Preview／Apply contract，並向 API／React 暴露可驗證的 current coordination state。
+維護 Scheduling-owned matching coordination 的 candidate/decision/plan/package lineage 與 typed Query／Preview／Apply contract，向 API 暴露可驗證的 current coordination state；React workbench 目前僅保留 isolated-tested、尚未接入 App route 的 transport/presentation。
 
 ## Implementation
 - primary:
@@ -24,14 +24,13 @@
 - entrypoints:
   - `api/routes/matching_coordination.py`
   - `api/schemas/matching_coordination.py`
-  - `ui_react/src/api/matching_coordination/matching_coordination_client.ts`
-  - `ui_react/src/components/MatchingCoordinationWorkbench.tsx`
-  - `ui_react/src/pages/SchedulingPage.tsx`
+  - `ui_react/src/api/matching_coordination/matching_coordination_client.ts` — isolated-tested transport client; no current App route consumer.
+  - `ui_react/src/components/MatchingCoordinationWorkbench.tsx` — isolated-tested workbench; no current App route consumer.
 
 ## Dependencies
 - outbound: `orders/orders` — case/lifecycle boundary.
 - outbound: `orders/historical-precision-restart` — restarted `訂單成立` 案件可進入正常媒合；已失效且沒有 generation ownership 的歷史 assignment 不再占用候選檔期。
-- inbound: Scheduling UI/LINE adapters — transport invokes typed coordination commands, not direct DB writes.
+- inbound: API transport invokes typed coordination commands, not direct DB writes. The React client/workbench are isolated-tested but have no current App route consumer; current source does not establish a live React/LINE inbound for this module.
 - inbound: `orders/historical-adoption` — 只有 discussion、開始日空白且月嫂唯一可辨識的來源列，才在同一 outer UoW 建立 proposed plan。
 - P3 handoff: committed M3 intents carry immutable `LU96-M3-*` source identity and recipient selector; P5 owns delivery task/provider consumption.
 

@@ -1,53 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ordersQueryClient } from '../api/orders/order_query_client';
-import { orderIntakeCompletionClient } from '../api/orders/order_intake_completion_client';
-import { OrdersManagementPage } from '../pages/OrdersManagementPage';
-
-vi.mock('../pages/OrdersPage', async () => {
-  const ReactModule = await import('react');
-  const queryModule = await import('../api/orders/order_query_client');
-  const adapterModule = await import('../adapters/orders/order_summary_adapter');
-  return {
-    OrdersPage: ({ renderIntakeRepair }: {
-      renderIntakeRepair?: (
-        order: ReturnType<typeof adapterModule.adaptOrderSummaryItem>,
-        onChanged: () => Promise<void>,
-      ) => import('react').ReactNode;
-    }) => {
-      const [activeItem, setActiveItem] = ReactModule.useState<
-        Awaited<ReturnType<typeof queryModule.loadAllOrderSummaries>>['items'][number] | null
-      >(null);
-      const [open, setOpen] = ReactModule.useState(false);
-      const refresh = ReactModule.useCallback(async () => {
-        const page = await queryModule.loadAllOrderSummaries(
-          queryModule.ordersQueryClient.getOrderSummaries.bind(queryModule.ordersQueryClient),
-          { page_size: 200, lifecycle_scope: 'unfinished' },
-        );
-        setActiveItem(page.items.find((item) => item.order_status === '待補件') ?? null);
-        return page;
-      }, []);
-      ReactModule.useEffect(() => {
-        void refresh();
-      }, [refresh]);
-      return (
-        <>
-          <div data-testid="legacy-orders-page">legacy orders workbench</div>
-          {activeItem && (
-            <button type="button" onClick={() => setOpen(true)}>📑 條款與契約</button>
-          )}
-          {open && activeItem && renderIntakeRepair?.(
-            adapterModule.adaptOrderSummaryItem(activeItem),
-            async () => {
-              await refresh();
-              setOpen(false);
-            },
-          )}
-        </>
-      );
-    },
-  };
-});
+import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
+import { orderIntakeCompletionClient } from '../../../../../../../api/orders/order_intake_completion_client';
+import { OrdersIntakeRepairCard } from '../../../../../../../components/OrdersIntakeRepairCard';
 
 const ETAG = 'a'.repeat(64);
 const FP1 = '1'.repeat(64);
@@ -104,19 +59,15 @@ describe('Orders intake repair entry', () => {
       preview_fingerprint: FP1,
     });
 
-    render(<OrdersManagementPage />);
+    render(<OrdersIntakeRepairCard item={incompleteSummary} onChanged={vi.fn().mockResolvedValue(undefined)} />);
 
-    expect(screen.queryByRole('region', { name: '訂單缺件補齊' })).not.toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: '📑 條款與契約' }));
-    const region = await screen.findByRole('article');
-    expect(within(region).getByText('CASE-153')).toBeInTheDocument();
-    expect(within(region).getByText('客戶姓名', { selector: 'li' })).toBeInTheDocument();
-    expect(within(region).getByText('約定服務開始日', { selector: 'li' })).toBeInTheDocument();
-    expect(within(region).getByText('服務天數', { selector: 'li' })).toBeInTheDocument();
-    expect(await within(region).findByText('服務資料已鎖定，目前不能完成進件補齊。')).toBeInTheDocument();
-    expect(within(region).getByRole('button', { name: '檢查服務資料補件' })).toBeDisabled();
-    expect(within(region).queryByText('CASE-OK')).not.toBeInTheDocument();
-    expect(screen.getByTestId('legacy-orders-page')).toBeInTheDocument();
+    expect(await screen.findByText('CASE-153')).toBeInTheDocument();
+    expect(screen.getByText('客戶姓名', { selector: 'li' })).toBeInTheDocument();
+    expect(screen.getByText('約定服務開始日', { selector: 'li' })).toBeInTheDocument();
+    expect(screen.getByText('服務天數', { selector: 'li' })).toBeInTheDocument();
+    expect(await screen.findByText('服務資料已鎖定，目前不能完成進件補齊。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '檢查服務資料補件' })).toBeDisabled();
+    expect(screen.queryByText('CASE-OK')).not.toBeInTheDocument();
   });
 
   it('applies typed terms repair, rechecks completion, restores normal status, and refreshes the list', async () => {
@@ -185,9 +136,8 @@ describe('Orders intake repair entry', () => {
       replayed: false,
     });
 
-    render(<OrdersManagementPage />);
+    render(<OrdersIntakeRepairCard item={pendingWithName} onChanged={vi.fn().mockResolvedValue(undefined)} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '📑 條款與契約' }));
     fireEvent.change(await screen.findByLabelText('CASE-153 約定服務開始日'), {
       target: { value: '2026-09-10' },
     });
@@ -200,6 +150,8 @@ describe('Orders intake repair entry', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '檢查服務資料補件' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '檢查服務資料補件' }));
     await screen.findByText('補件欄位：約定服務開始日、服務天數');
+    expect(screen.getByText('補件前：未填寫／未填寫 天')).toBeInTheDocument();
+    expect(screen.getByText('補件後：2026-09-10／30 天')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '確認補齊服務資料' }));
 
     await waitFor(() => expect(applyTerms).toHaveBeenCalledWith(
@@ -214,7 +166,49 @@ describe('Orders intake repair entry', () => {
       '補齊原始進件缺漏',
       expect.stringContaining('orders-intake-complete-CASE-153-'),
     ));
-    await waitFor(() => expect(screen.queryByRole('region', { name: '訂單缺件補齊' })).not.toBeInTheDocument());
-    expect(screen.getByTestId('legacy-orders-page')).toBeInTheDocument();
+    await waitFor(() => expect(applyCompletion).toHaveBeenCalled());
   });
+
+  it.each([true, false])('shows name Preview before/after and honors owner apply_allowed=%s', async (allowed) => {
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+      missing_fields: ['client_name'], blockers: [], apply_allowed: false, preview_fingerprint: FP1,
+    });
+    vi.spyOn(orderIntakeCompletionClient, 'previewClientName').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, before_client_name: null,
+      after_client_name: '合成補件姓名', blockers: allowed ? [] : ['synthetic_name_owner_blocker'],
+      apply_allowed: allowed, preview_fingerprint: FP1,
+    });
+    const applyName = vi.spyOn(orderIntakeCompletionClient, 'applyClientName').mockResolvedValue({
+      receipt_key: 'name-receipt', case_no: 'CASE-153', lifecycle_version: 7,
+      client_name: '合成補件姓名', preview_fingerprint: FP1, replayed: false,
+    });
+    render(<OrdersIntakeRepairCard item={{ ...incompleteSummary, start_date: '2026-09-10', service_days: 5 }} onChanged={onChanged} />);
+    fireEvent.change(await screen.findByLabelText('CASE-153 客戶姓名'), { target: { value: '合成補件姓名' } });
+    fireEvent.click(screen.getByRole('button', { name: '檢查姓名補件' }));
+    const preview = await screen.findByLabelText('姓名補件前後');
+    expect(preview).toHaveTextContent('補件前姓名：未填寫');
+    expect(preview).toHaveTextContent('補件後姓名：合成補件姓名');
+    expect(applyName).not.toHaveBeenCalled();
+    const applyButton = screen.getByRole('button', { name: '確認補齊客戶姓名' });
+    expect(applyButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('CASE-153 補件原因'), { target: { value: '合成姓名補件驗收' } });
+    if (!allowed) {
+      expect(screen.getByLabelText('姓名補件阻擋原因')).toHaveTextContent('synthetic_name_owner_blocker');
+      expect(applyButton).toBeDisabled();
+      fireEvent.click(applyButton);
+      expect(applyName).not.toHaveBeenCalled();
+      expect(onChanged).not.toHaveBeenCalled();
+      return;
+    }
+    expect(applyButton).toBeEnabled();
+    fireEvent.click(applyButton);
+    await waitFor(() => expect(applyName).toHaveBeenCalledWith(
+      'CASE-153', expect.objectContaining({ apply_allowed: true, preview_fingerprint: FP1 }),
+      '合成姓名補件驗收', expect.stringContaining('orders-intake-client-name-CASE-153-'),
+    ));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  });
+
 });

@@ -3,7 +3,7 @@
   "scenario_id": "APX-PAYABLE-VIEWMODEL-002",
   "track": "A",
   "suite_id": "APX",
-  "status": "bound",
+  "status": "specified",
   "requires_database": false,
   "coverage_scope": "supplemental",
   "test_kinds": ["domain_root_data", "expected_manifest"],

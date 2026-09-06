@@ -161,9 +161,85 @@ export const OrderOperationalTimelinePageSchema = z.strictObject({
   etag: Sha256Schema,
 });
 
+export const GovernmentSubsidyProjectionSchema = z.strictObject({
+  case_no: z.string().min(1),
+  substatus_code: z.enum([
+    'claim_lineage_missing',
+    'draft',
+    'submitted',
+    'approved',
+    'partially_paid',
+    'paid',
+    'pending_review',
+    'offset_reserved',
+    'offset_applied',
+    'return_payable',
+    'partially_returned',
+    'returned',
+  ]),
+  identity_status: z.string().nullable(),
+  source: SourceLineageSchema,
+  occurred_at: DateTimeSchema.nullable(),
+  blockers: z.array(ProjectionNoticeSchema),
+  warnings: z.array(ProjectionNoticeSchema),
+  available_read_actions: z.array(AvailableActionSchema),
+  claim_batch_id: z.number().int().positive().nullable(),
+  claim_item_count: z.number().int().nonnegative(),
+  claimed_hours: z.number().int().nonnegative(),
+  unit_price_ntd: z.number().int().nonnegative().nullable(),
+  requested_amount_ntd: z.number().int().nonnegative(),
+  approved_amount_ntd: z.number().int().nonnegative(),
+  net_allocated_ntd: z.number().int().nonnegative(),
+  overpayment_identity: z.string().nullable(),
+  overpayment_remaining_ntd: z.number().int().nonnegative().nullable(),
+});
+
+export const GovernmentSubsidyProjectionPageSchema = z.strictObject({
+  items: z.array(GovernmentSubsidyProjectionSchema),
+  substatus_counts: z.strictObject({
+    claim_lineage_missing: z.number().int().nonnegative(),
+    draft: z.number().int().nonnegative(),
+    submitted: z.number().int().nonnegative(),
+    approved: z.number().int().nonnegative(),
+    partially_paid: z.number().int().nonnegative(),
+    paid: z.number().int().nonnegative(),
+    pending_review: z.number().int().nonnegative(),
+    offset_reserved: z.number().int().nonnegative(),
+    offset_applied: z.number().int().nonnegative(),
+    return_payable: z.number().int().nonnegative(),
+    partially_returned: z.number().int().nonnegative(),
+    returned: z.number().int().nonnegative(),
+  }),
+  next_cursor: z.string().min(1).nullable(),
+  etag: Sha256Schema,
+});
+
+export const TerminalAggregateComponentSchema = z.strictObject({
+  code: z.string().min(1),
+  owner: z.string().min(1),
+  completed: z.boolean(),
+  reason: z.string().nullable(),
+});
+
+export const TerminalAggregateSchema = z.strictObject({
+  case_no: z.string().min(1),
+  applicable: z.boolean(),
+  fully_closed: z.boolean(),
+  components: z.array(TerminalAggregateComponentSchema).length(14),
+});
+
+export const TerminalAggregatePageSchema = z.strictObject({
+  items: z.array(TerminalAggregateSchema),
+  next_cursor: z.string().min(1).nullable(),
+});
+
 export type OrderLifecycleStatus = z.infer<typeof OrderLifecycleStatusSchema>;
 export type SourceLineage = z.infer<typeof SourceLineageSchema>;
 export type StageProjection = z.infer<typeof StageProjectionSchema>;
 export type SopStepProjection = z.infer<typeof SopStepProjectionSchema>;
 export type OrderOperationalTimeline = z.infer<typeof OrderOperationalTimelineSchema>;
 export type OrderOperationalTimelinePage = z.infer<typeof OrderOperationalTimelinePageSchema>;
+export type GovernmentSubsidyProjection = z.infer<typeof GovernmentSubsidyProjectionSchema>;
+export type GovernmentSubsidyProjectionPage = z.infer<typeof GovernmentSubsidyProjectionPageSchema>;
+export type TerminalAggregate = z.infer<typeof TerminalAggregateSchema>;
+export type TerminalAggregatePage = z.infer<typeof TerminalAggregatePageSchema>;

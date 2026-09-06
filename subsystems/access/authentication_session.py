@@ -37,7 +37,6 @@ from subsystems.access.totp import (
 SCRYPT_N = 2**14
 SCRYPT_R = 8
 SCRYPT_P = 1
-ADMIN_SESSION_IDLE_MINUTES = 30
 ADMIN_SESSION_MAXIMUM_MINUTES = 8 * 60
 LOGIN_ATTEMPT_WINDOW_MINUTES = 15
 LOGIN_ATTEMPT_MAXIMUM = 5
@@ -254,9 +253,8 @@ def _utc_now_naive() -> datetime:
 
 
 def _session_expiry(now: datetime, absolute_expires_at: datetime) -> datetime:
-    return min(
-        now + timedelta(minutes=ADMIN_SESSION_IDLE_MINUTES), absolute_expires_at
-    )
+    del now
+    return absolute_expires_at
 
 
 def _token_hash(token: str) -> str:
@@ -1148,7 +1146,6 @@ def get_admin_session(token: str, *, connection_factory: ConnectionFactory) -> A
                 JOIN admin_users u ON u.id=s.admin_user_id
                 WHERE s.session_token_hash=%s
                   AND s.revoked_at IS NULL
-                  AND s.expires_at > UTC_TIMESTAMP()
                   AND s.absolute_expires_at > UTC_TIMESTAMP()
                   AND u.enabled=TRUE
                 LIMIT 1
@@ -1162,10 +1159,7 @@ def get_admin_session(token: str, *, connection_factory: ConnectionFactory) -> A
             cursor.execute(
                 """
                 UPDATE admin_sessions
-                SET expires_at=LEAST(
-                        DATE_ADD(UTC_TIMESTAMP(), INTERVAL 30 MINUTE),
-                        absolute_expires_at
-                    ),
+                SET expires_at=absolute_expires_at,
                     last_seen_at=UTC_TIMESTAMP()
                 WHERE session_token_hash=%s
                   AND revoked_at IS NULL
@@ -1223,14 +1217,10 @@ def renew_admin_session(token: str, *, connection_factory: ConnectionFactory, se
                 """
                 UPDATE admin_sessions s
                 JOIN admin_users u ON u.id=s.admin_user_id
-                SET s.expires_at=LEAST(
-                        DATE_ADD(UTC_TIMESTAMP(), INTERVAL 30 MINUTE),
-                        s.absolute_expires_at
-                    ),
+                SET s.expires_at=s.absolute_expires_at,
                     s.last_seen_at=UTC_TIMESTAMP()
                 WHERE s.session_token_hash=%s
                   AND s.revoked_at IS NULL
-                  AND s.expires_at > UTC_TIMESTAMP()
                   AND s.absolute_expires_at > UTC_TIMESTAMP()
                   AND u.enabled=TRUE
                 """,

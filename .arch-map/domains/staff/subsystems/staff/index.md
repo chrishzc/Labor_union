@@ -8,6 +8,7 @@
 
 ## Modules
 - `staff-retirement` — lifecycle transition and exact LINE staff-role revocation effect; path: `modules/staff-retirement.md`
+- `case-preference-manual` — six canonical Staff relation Query／Preview／Apply owner; path: `modules/case-preference-manual.md`
 
 ## Verification routing
 - test_root: `tests/domains/staff/subsystems/staff/`

@@ -117,6 +117,7 @@ from api.routes import (
     scheduling_current,
     scheduling_eligibility_collision,
     staff_matching_preferences,
+    staff_case_preference_manual,
     staff_retirement,
     staff,
     staff_qualification_master,
@@ -295,6 +296,7 @@ app.include_router(jobs.router)
 app.include_router(scheduling_current.router)
 app.include_router(scheduling_eligibility_collision.router)
 app.include_router(staff_matching_preferences.router)
+app.include_router(staff_case_preference_manual.router)
 app.include_router(multi_caregiver_case_assignments.router)
 app.include_router(multi_caregiver_case_assignments.staff_router)
 app.include_router(multi_caregiver_schedule.router)

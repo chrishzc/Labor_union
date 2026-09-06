@@ -3,7 +3,7 @@
   "scenario_id": "ENTRY-001",
   "track": "B",
   "suite_id": "ENTRY",
-  "status": "bound",
+  "status": "specified",
   "requires_database": false,
   "test_kinds": ["metadata_fixture"],
   "coverage_ids": ["ENTRY-01", "ENTRY-02", "ENTRY-03"],

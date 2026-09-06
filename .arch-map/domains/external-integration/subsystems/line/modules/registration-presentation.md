@@ -23,7 +23,7 @@
 - `document/架構重整/01_規格基線/29_LINE服務說明、客服互動與選單角色正式規格.md` §4 — registration Preview 零正式寫入，Apply 交由 current owner contract。
 
 ## Verification
-- test_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_liff_entrypoint.py`
+- test_root: `tests/domains/external-integration/subsystems/line/modules/registration-presentation/contract/test_line_registration_presentation.py`
 
 ## Change triggers
 Reconcile when registration page、local input validation、Preview／Apply entrypoint、LIFF identity boundary 或 focused static contract test changes。

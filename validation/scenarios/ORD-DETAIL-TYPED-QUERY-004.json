@@ -38,14 +38,14 @@
   "execution": {
     "runner": [
       ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_detail_query.py tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_detail_query_repository.py",
-      "npm --prefix ui_react test -- src/tests/orders_query_client.test.ts src/tests/challenger_g2_orders_client.test.ts src/tests/orders_adapter.test.ts"
+      "npm --prefix ui_react test -- src/tests/orders_query_client.test.ts src/tests/challenger_g2_orders_client.test.ts src/tests/domains/orders/subsystems/orders/modules/order-card-projection/orders_adapter.test.ts"
     ],
     "test_paths": [
       "tests/domains/orders/subsystems/orders/integration/test_order_detail_query.py",
       "tests/domains/orders/subsystems/orders/integration/test_order_detail_query_repository.py",
       "ui_react/src/tests/orders_query_client.test.ts",
       "ui_react/src/tests/challenger_g2_orders_client.test.ts",
-      "ui_react/src/tests/orders_adapter.test.ts"
+      "ui_react/src/tests/domains/orders/subsystems/orders/modules/order-card-projection/orders_adapter.test.ts"
     ]
   }
 }

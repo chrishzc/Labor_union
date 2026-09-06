@@ -13,13 +13,14 @@ import {
   retryHolidayApplyFlow,
   retryHolidayObservationFlow,
   setHolidayDraft,
-} from '../adapters/scheduling/holiday_flow_adapter';
-import type { HolidayClient } from '../api/scheduling/holiday_client';
+} from '../../../../../../../adapters/scheduling/holiday_flow_adapter';
+import type { HolidayFlowClient } from '../../../../../../../adapters/scheduling/holiday_flow_adapter';
+import type { HolidayClient } from '../../../../../../../api/scheduling/holiday_client';
 import {
   HolidayConflictError,
   HolidayNetworkError,
   HolidayUnavailableError,
-} from '../api/scheduling/holiday_errors';
+} from '../../../../../../../api/scheduling/holiday_errors';
 import {
   HOLIDAY_APPLY_REQUEST,
   HOLIDAY_CALENDAR,
@@ -27,9 +28,9 @@ import {
   HOLIDAY_PREVIEW,
   HOLIDAY_QUERY,
   HOLIDAY_RECEIPT,
-} from './fixtures/holiday_contract_fixtures';
+} from '../../../../../../fixtures/holiday_contract_fixtures';
 
-function fakeClient(overrides?: Partial<HolidayClient>): HolidayClient {
+function fakeClient(overrides?: Partial<HolidayFlowClient>): HolidayFlowClient {
   return {
     query: vi.fn().mockResolvedValue(HOLIDAY_CALENDAR),
     queryCalendar: vi.fn().mockResolvedValue(HOLIDAY_CALENDAR),
@@ -39,7 +40,7 @@ function fakeClient(overrides?: Partial<HolidayClient>): HolidayClient {
   };
 }
 
-async function preparePreview(client: HolidayClient): Promise<void> {
+async function preparePreview(client: HolidayFlowClient): Promise<void> {
   await queryHolidayFlow(HOLIDAY_QUERY.from_date, HOLIDAY_QUERY.to_date, { client });
   setHolidayDraft(HOLIDAY_DRAFT);
   await previewHolidayFlow(HOLIDAY_DRAFT, { client });

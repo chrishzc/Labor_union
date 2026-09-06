@@ -16,6 +16,7 @@
 - `current-service-projection` — effective assignment service-period status projection；path: `modules/current-service-projection.md`
 - `waiting-deposit-lock` — waiting-deposit 檔期鎖的取得、釋放與訂單取消收斂；path: `modules/waiting-deposit-lock.md`
 - `service-day-log` — 月嫂服務日日誌與受控餐食照片的 Query／Preview／Apply；path: `modules/service-day-log.md`
+- holiday-maintenance — 官方國定假日 CSV parser 與逐筆 Query／Preview／Apply；path: modules/holiday-maintenance.md
 
 ## Dependencies
 - outbound: `orders` — order/case lifecycle boundary。
