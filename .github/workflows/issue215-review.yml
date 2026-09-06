@@ -5,80 +5,303 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   review:
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/issue-215-regression-followup-20260906'
+    if: github.event.pull_request.number == 216 && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/issue-215-regression-followup-20260906'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-          persist-credentials: false
-      - name: Inspect bounded source, caller, test, and provenance evidence
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Apply reviewed metadata and validation repairs
         run: |
           python - <<'PY'
           import ast
+          import copy
           import hashlib
           import json
           from pathlib import Path
+          import re
           import subprocess
+          import textwrap
 
-          def git(*args):
-              result = subprocess.run(["git", *args], check=False, capture_output=True, text=True)
-              if result.returncode not in (0, 1):
-                  raise RuntimeError(result.stderr)
-              return result.stdout
+          def replace_once(path, old, new):
+              source = path.read_text(encoding="utf-8")
+              assert source.count(old) == 1, (str(path), "replacement context changed")
+              path.write_text(source.replace(old, new, 1), encoding="utf-8")
 
-          print("TARGET_PATHS")
-          print(git("ls-files", "document/*新版測試*", "document/*新版驗證*", "scripts/*writer_inventory*v3*.py", "tests/*verification*.py", "tests/*lineage*.py", "tests/*data_browser*.py", "tests/*admin_auth*.py", "tests/*weekly_report*.py", "tests/*line*fixture*.py", "tests/*line_bot*.py", "tests/*historical*remediation*.py", "tests/*intake*repair*.py", "tests/*precision_restart*.py", "tests/*human_escalation*.py", "tests/*knowledge*worker*.py"))
-          print("CALLERS")
-          print(git("grep", "-n", "-E", "DataBrowserQueryRepository|ensure_development_root_admin|seed_history_from_template|WeeklyReportBatchService|HistoricalCalendarAssignmentRemediationApplication|HistoricalPrecisionRestartWorkflow|OrderIntakeClientNameRepairApplication|OrderIntakeTermsBootstrapApplication|HumanEscalationDeliveryApplication|KnowledgeWorker", "--", "api", "line", "subsystems", "tests"))
-          print("SCRIPT_CALLERS")
-          print(git("grep", "-n", "-E", "seed_line_test_fixtures|migrate_weekly_report_batches|line_bind", "--", "api", "line", "scripts", "subsystems", "tests"))
-          print("ACTIVE_DANGLING_REFERENCES")
-          print(git("grep", "-n", "28_驗證情境與測試資料正式規格", "--", "AGENTS.md", "scripts", "validation"))
-          path = Path("infrastructure/mysql/data_browser_query_repository.py")
-          print("DATA_BROWSER_SHA256", hashlib.sha256(path.read_bytes()).hexdigest())
-          selections = {
-              "api/dependencies/admin_auth.py": {"ensure_development_root_admin"},
-              "line/line_bot.py": {"line_bind"},
-              "scripts/migrate_weekly_report_batches.py": {"main", "seed_history_from_template"},
-              "scripts/seed_line_test_fixtures.py": {"seed_fixtures"},
-              "subsystems/knowledge_retrieval/application.py": {"_answer"},
-              "subsystems/orders/historical_calendar_assignment_remediation.py": {"apply"},
-              "subsystems/orders/historical_precision_restart_workflow.py": {"apply"},
-              "subsystems/orders/order_intake_client_name_repair.py": {"apply"},
-              "subsystems/orders/order_intake_terms_bootstrap.py": {"apply", "apply_completion"},
-              "subsystems/line/human_escalation_delivery.py": {"consume", "_claim_task"},
+          def replace_function(path, name, replacement):
+              source = path.read_text(encoding="utf-8")
+              matches = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == name]
+              assert len(matches) == 1, (str(path), name)
+              node = matches[0]
+              lines = source.splitlines(keepends=True)
+              lines[node.lineno - 1:node.end_lineno] = [textwrap.dedent(replacement).strip() + "\n"]
+              updated = "".join(lines)
+              ast.parse(updated)
+              path.write_text(updated, encoding="utf-8")
+
+          reconciler = Path("scripts/reconcile_writer_inventory_v3_dispositions.py")
+          reviewed_digest = "0c3d425a9c03d0bdacc399c009f399014ec523f099eb0060c397d7a17e55ffc1"
+          assert hashlib.sha256(Path("infrastructure/mysql/data_browser_query_repository.py").read_bytes()).hexdigest() == reviewed_digest
+          replace_once(reconciler, "0a779627343558692412359372fe8682d376fa5d817046aa14e5f48ff0bb9404", reviewed_digest)
+          replace_once(reconciler,
+              '    path = str(record["relative_path"])\n    identity_review =',
+              '    path = str(record["relative_path"])\n    commit_review = (\n        _commit_review(str(record["identity"]))\n        if record.get("operation") == "COMMIT" else None\n    )\n    # A current exact blocker cannot inherit an older accepted review.\n    if commit_review is not None and commit_review[3].startswith("needs_decision:"):\n        return commit_review\n    identity_review =')
+          replace_once(reconciler,
+              '    exact = _accepted_commit_review(str(record["identity"]))\n    if exact is not None:\n        return exact',
+              '    if commit_review is not None:\n        return commit_review')
+          replace_function(reconciler, "_accepted_commit_review", '''
+          def _commit_review(identity: str) -> tuple[str, str, str, str] | None:
+              """Join an exact per-identity decision without hiding aggregate blockers."""
+              if not COMMIT_DISPOSITIONS.exists():
+                  return None
+              artifact = json.loads(COMMIT_DISPOSITIONS.read_text(encoding="utf-8"))
+              if artifact.get("terminal_status") not in {"passed", "blocked"}:
+                  return None
+              entry = next(
+                  (entry for entry in artifact.get("entries", []) if entry.get("identity") == identity),
+                  None,
+              )
+              if entry is None:
+                  return None
+              owner = str(entry["owner"])
+              layer = str(entry["layer"])
+              if entry.get("classification") == "real_violation":
+                  return (
+                      owner,
+                      f"blocked Task 97 {layer} commit boundary",
+                      str(entry["zero_reference_oracle"]),
+                      f"needs_decision:{entry['analysis_basis']} "
+                      f"Remediation: {entry['replacement_or_remediation']} "
+                      f"Blocker: {entry['blocker']}",
+                  )
+              if entry.get("classification") != "application_owned_legitimate_outer_uow":
+                  return None
+              disposition = "retain_restricted" if layer in {"maintenance", "worker"} else "retain_canonical"
+              return (
+                  owner,
+                  f"exact Task 97 accepted {layer} commit boundary",
+                  f"task97_repository_commit_dispositions_v1 exact identity {identity}",
+                  f"{disposition}:exact commit fingerprint, symbol, owner, and layer are accepted by the current Task 97 receipt; no path-wide inference",
+              )
+          ''')
+          replace_once(reconciler,
+              '            identity not in existing\n',
+              '            identity not in existing\n            or candidate.get("operation") == "COMMIT"\n')
+
+          validator = Path("scripts/verify_verification_scenarios.py")
+          replace_once(validator,
+              'DEFAULT_SCENARIO_DIRECTORY = PROJECT_ROOT / "validation" / "scenarios"',
+              'DEFAULT_SCENARIO_DIRECTORY = PROJECT_ROOT / "validation" / "scenarios"\n# Independent coverage provenance only; business authority remains with owner specs.\nDEFAULT_BUSINESS_MATRIX_PATH = (\n    PROJECT_ROOT / "document" / "資料庫、資料處理" / "新版測試資料規則矩陣_草案.md"\n)')
+          replace_function(validator, "canonical_business_requirement_ids", '''
+          def canonical_business_requirement_ids(
+              matrix_path: Path = DEFAULT_BUSINESS_MATRIX_PATH,
+          ) -> set[str]:
+              """Read independent coverage IDs, not business authority, from the existing matrix."""
+              requirement_ids = set(re.findall(
+                  r"^\\|\\s*([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\\d+)\\s*\\|",
+                  matrix_path.read_text(encoding="utf-8"),
+                  re.MULTILINE,
+              ))
+              if not requirement_ids:
+                  raise ValueError("business requirement matrix contains no coverage ids")
+              return requirement_ids
+          ''')
+
+          baseline_path = Path("validation/verification_baseline_v1.json")
+          source_before = baseline_path.read_text(encoding="utf-8")
+          before = json.loads(source_before)
+          historical = json.loads(subprocess.run(
+              ["git", "show", "b84c127098b058bbc40cb2900d7964a113a76a07^:" + baseline_path.as_posix()],
+              check=True, capture_output=True, text=True,
+          ).stdout)
+          original_refs = {
+              suite["id"]: suite["source_refs"]
+              for track in historical["tracks"] for suite in track["suites"]
           }
-          for name, symbols in selections.items():
-              source = Path(name).read_text(encoding="utf-8")
-              for node in ast.walk(ast.parse(source)):
-                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in symbols:
-                      print("SOURCE", name, node.lineno, ast.get_source_segment(source, node))
-          for name in git("ls-files", "scripts/*writer_inventory*v3*.py").splitlines():
-              source = Path(name).read_text(encoding="utf-8")
-              print("TOOL_DEFINITIONS", name)
-              for node in ast.parse(source).body:
-                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                      print(node.name, node.lineno, node.end_lineno)
-                      if node.name == "main":
-                          print(ast.get_source_segment(source, node))
-          previous = git("show", "5daf2672ff91ed25c3b0184ce36818b2d74a3ab1^:scripts/verify_verification_scenarios.py")
-          print("PREVIOUS_COVERAGE_SOURCE")
-          for node in ast.parse(previous).body:
-              if isinstance(node, ast.FunctionDef) and node.name == "canonical_business_requirement_ids":
-                  print(ast.get_source_segment(previous, node))
-              if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and ("MATRIX" in target.id or "REQUIREMENT" in target.id) for target in node.targets):
-                  print(ast.get_source_segment(previous, node))
-          baseline_path = "validation/verification_baseline_v1.json"
-          previous_baseline = json.loads(git("show", "b84c127098b058bbc40cb2900d7964a113a76a07^:" + baseline_path))
-          print("PREVIOUS_BASELINE_SOURCE_REFS")
-          for track in previous_baseline["tracks"]:
+          missing = "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md"
+          lines = source_before.splitlines(keepends=True)
+          replaced = 0
+          for index, line in enumerate(lines):
+              if missing not in line:
+                  continue
+              suite = json.loads(line.strip().rstrip(","))
+              references = original_refs[suite["id"]]
+              restored = next(ref for ref in references if ref.startswith("document/資料庫、資料處理/"))
+              assert Path(restored).is_file()
+              lines[index] = line.replace(missing, restored)
+              replaced += 1
+          assert replaced == 28
+          after_source = "".join(lines)
+          after = json.loads(after_source)
+          expected = copy.deepcopy(before)
+          for track in expected["tracks"]:
               for suite in track["suites"]:
-                  print(suite["id"], json.dumps({key: value for key, value in suite.items() if "source" in key}, ensure_ascii=False))
+                  restored = next(ref for ref in original_refs[suite["id"]] if ref.startswith("document/資料庫、資料處理/"))
+                  suite["source_refs"] = [restored if ref == missing else ref for ref in suite["source_refs"]]
+          assert after == expected
+          baseline_path.write_text(after_source, encoding="utf-8")
+          replace_once(Path("AGENTS.md"),
+              '- 驗證情境、測試資料與 coverage ID：只讀 `28_驗證情境與測試資料正式規格.md` 與對應 owner spec。',
+              '- 驗證情境、測試資料與 coverage ID：沿用 `document/資料庫、資料處理/新版測試資料規則矩陣_草案.md` 與 `document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md` 追溯情境／coverage 來源；兩者仍為草案，業務語意以對應 current 正式 owner spec 為準。')
+
+          writer_tests = Path("tests/test_writer_inventory_v3_dispositions.py")
+          replace_function(writer_tests, "test_task97_exact_commit_receipts_leave_no_matching_writer_undecided", '''
+          def test_task97_exact_commit_receipts_preserve_per_identity_decisions():
+              records = {
+                  record["identity"]: record
+                  for record in _records("writer_inventory_v3_disposition.records.jsonl")
+              }
+              commit_receipt = json.loads(
+                  (EVIDENCE_DIRECTORY.parent / "task97_repository_commit_dispositions_v1.json").read_text(encoding="utf-8")
+              )
+              entries = commit_receipt["entries"]
+              assert entries
+              violations = [entry for entry in entries if entry["classification"] == "real_violation"]
+              assert commit_receipt["terminal_status"] == ("blocked" if violations else "passed")
+              assert {entry["identity"] for entry in entries} <= records.keys()
+              for entry in entries:
+                  record = records[entry["identity"]]
+                  assert record["approved_to_remove"] is False
+                  if entry["classification"] == "real_violation":
+                      assert record["final_disposition"] == "needs_decision"
+                      assert entry["blocker"] in record["replacement_evidence"]
+                  elif entry["classification"] == "application_owned_legitimate_outer_uow":
+                      assert record["final_disposition"] in {"retain_canonical", "retain_restricted"}
+          ''')
+          with writer_tests.open("a", encoding="utf-8") as output:
+              output.write(textwrap.dedent('''
+
+          def test_task97_blocked_receipt_keeps_exact_acceptance_without_overriding_blockers(tmp_path, monkeypatch):
+              import scripts.reconcile_writer_inventory_v3_dispositions as reconciler
+
+              artifact = json.loads(reconciler.COMMIT_DISPOSITIONS.read_text(encoding="utf-8"))
+              accepted = next(entry for entry in artifact["entries"] if entry["classification"] == "application_owned_legitimate_outer_uow")
+              blocked = next(entry for entry in artifact["entries"] if entry["classification"] == "real_violation")
+              receipt = tmp_path / "commit-dispositions.json"
+              receipt.write_text(json.dumps({"terminal_status": "blocked", "entries": [accepted, blocked]}), encoding="utf-8")
+              monkeypatch.setattr(reconciler, "COMMIT_DISPOSITIONS", receipt)
+
+              assert reconciler._commit_review(accepted["identity"])[3].startswith("retain_")
+              assert reconciler._commit_review(accepted["identity"] + ":new-occurrence") is None
+              monkeypatch.setitem(reconciler.EXACT_IDENTITY_REVIEWS, blocked["identity"],
+                  ("old-owner", "old-boundary", "old-review", "retain_canonical:obsolete decision"))
+              candidate = {"identity": blocked["identity"], "relative_path": blocked["source_path"],
+                  "symbol": blocked["symbol"], "operation": "COMMIT", "fingerprint": blocked["fingerprint"]}
+              result = reconciler._disposition(candidate)
+              assert result["final_disposition"] == "needs_decision"
+              assert result["approved_to_remove"] is False
+              assert blocked["blocker"] in result["replacement_evidence"]
+
+
+          def test_data_browser_exact_review_rejects_new_symbol_and_changed_source(tmp_path, monkeypatch):
+              import scripts.reconcile_writer_inventory_v3_dispositions as reconciler
+
+              path = "infrastructure/mysql/data_browser_query_repository.py"
+              symbol = "DataBrowserQueryRepository.query_page"
+              reviews = reconciler.EXACT_SOURCE_REVIEWS
+              assert reconciler._exact_source_review(path, symbol, reviews) is not None
+              assert reconciler._exact_source_review(path, symbol + "_unreviewed", reviews) is None
+              original = (reconciler.ROOT / path).read_bytes()
+              changed = tmp_path / path
+              changed.parent.mkdir(parents=True)
+              changed.write_bytes(original + b"\\n# unreviewed source change\\n")
+              monkeypatch.setattr(reconciler, "ROOT", tmp_path)
+              assert reconciler._exact_source_review(path, symbol, reviews) is None
+          '''))
+
+          verification_tests = Path("tests/test_verify_verification_baseline.py")
+          with verification_tests.open("a", encoding="utf-8") as output:
+              output.write(textwrap.dedent('''
+
+          def test_scenario_gate_detects_coverage_id_removed_from_isolated_disk(tmp_path, monkeypatch, capsys):
+              import scripts.verify_verification_scenarios as validator
+
+              matrix_before = validator.DEFAULT_BUSINESS_MATRIX_PATH.read_bytes()
+              actual_loader = validator.load_scenarios
+              removals = 0
+              for source in validator.DEFAULT_SCENARIO_DIRECTORY.glob("*.json"):
+                  payload = json.loads(source.read_text(encoding="utf-8"))
+                  if (payload.get("contract") == validator.SCENARIO_CONTRACT
+                      and payload.get("track") == "A"
+                      and payload.get("coverage_scope", "matrix") == "matrix"):
+                      ids = payload["coverage_ids"]
+                      removals += ids.count("ORD-01")
+                      payload["coverage_ids"] = [item for item in ids if item != "ORD-01"]
+                  (tmp_path / source.name).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+              assert removals > 0
+
+              # Route every gate load to the isolated disk, including an accidental
+              # expected-set load. Keep the real loader and independent matrix intact.
+              def load_isolated_scenarios(directory=tmp_path):
+                  return actual_loader(tmp_path)
+
+              monkeypatch.setattr(validator, "load_scenarios", load_isolated_scenarios)
+              assert validator.main() == 1
+              report = json.loads(capsys.readouterr().out)
+              assert "missing business requirement mappings: ORD-01" in report["errors"]
+              assert report["coverage"]["business_requirement_count"] == 127
+              assert report["coverage"]["business_requirements_missing"] == ["ORD-01"]
+              assert validator.DEFAULT_BUSINESS_MATRIX_PATH.read_bytes() == matrix_before
+
+
+          def test_scenario_expected_matrix_missing_or_empty_is_rejected(tmp_path):
+              import pytest
+              from scripts.verify_verification_scenarios import canonical_business_requirement_ids
+
+              matrix = tmp_path / "matrix.md"
+              with pytest.raises(FileNotFoundError):
+                  canonical_business_requirement_ids(matrix)
+              matrix.write_text("# No coverage table\\n", encoding="utf-8")
+              with pytest.raises(ValueError, match="matrix contains no coverage ids"):
+                  canonical_business_requirement_ids(matrix)
+          '''))
+
+          from scripts.verify_verification_scenarios import canonical_business_requirement_ids, load_scenarios
+          expected_ids = canonical_business_requirement_ids()
+          covered_ids = {item for scenario in load_scenarios() if scenario.get("track") == "A" and scenario.get("coverage_scope", "matrix") == "matrix" for item in scenario["coverage_ids"]}
+          assert len(expected_ids) == 127 and expected_ids == covered_ids
+          for path in (reconciler, validator, writer_tests, verification_tests):
+              ast.parse(path.read_text(encoding="utf-8"))
+          print("Applied A-D metadata/validator changes; independent coverage IDs=127; suite source refs restored=28")
           PY
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- AGENTS.md validation/verification_baseline_v1.json scripts/reconcile_writer_inventory_v3_dispositions.py scripts/verify_verification_scenarios.py tests/test_writer_inventory_v3_dispositions.py tests/test_verify_verification_baseline.py
+          git commit -m 'fix(validation): restore exact inventory reviews and independent coverage provenance'
+      - name: Rebuild current evidence from committed scanner inputs
+        run: |
+          python scripts/generate_task97_commit_dispositions.py
+          python scripts/generate_writer_inventory_v3_candidate.py
+          python scripts/reconcile_writer_inventory_v3_dispositions.py
+          git diff --check
+          git add -- document/架構重整/03_追蹤清單與證據/evidence/task97_repository_commit_dispositions_v1.json document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_candidate.findings.jsonl document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_candidate.manifest.json document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.records.jsonl document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.manifest.json
+          git commit -m 'fix(evidence): rebuild current writer receipts while preserving real blockers'
+      - name: Install existing test dependencies
+        run: |
+          python -m pip install pytest
+          python -m pip install -r requirements.txt
+      - name: Verify the two failed inventory test files
+        run: python -m pytest -q tests/test_task97_commit_dispositions.py tests/test_writer_inventory_v3_dispositions.py
+      - name: Verify affected provenance and source boundaries
+        run: |
+          python -m pytest -q --strict-markers -m 'not integration' tests/test_verify_verification_baseline.py tests/test_phase3_scenario_lineage.py tests/test_phase4_scenario_lineage.py tests/test_data_browser_query_contract.py tests/test_data_browser_privacy.py tests/test_line_bind_legacy_characterization.py tests/test_admin_auth_runtime.py tests/test_task97_admin_auth_logout.py
+      - name: Verify changed-identity owner evidence
+        run: |
+          python -m pytest -q --strict-markers -m 'not integration' tests/domains/external-integration/subsystems/line/subsystems/test_contract_knowledge_applications_stage8.py tests/domains/external-integration/subsystems/line/modules/complaint-ingress/contract/test_human_escalation_delivery.py tests/domains/orders/subsystems/orders/modules/historical-adoption/unit/test_historical_calendar_assignment_remediation.py tests/domains/orders/subsystems/orders/modules/historical-precision-restart/unit/test_historical_precision_restart_workflow.py tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/unit/test_order_intake_client_name_repair.py tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/unit/test_order_intake_terms_bootstrap.py
+      - name: Publish verified changes only to the new PR branch
+        run: |
+          test -z "$(git status --porcelain=v1 --untracked-files=no)"
+          git diff --check '${{ github.event.pull_request.head.sha }}'..HEAD
+          git diff --stat '${{ github.event.pull_request.head.sha }}'..HEAD
+          git push origin HEAD:refs/heads/fix/issue-215-regression-followup-20260906
+          git log -2 --format='%H %s'
