@@ -1625,10 +1625,6 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ renderIntakeRepair }) =>
     setLeaveDates([]);
     setCustomWorkDates([]);
     setLeaveDateDraft('');
-    if (isOrderIntakeIncomplete(order) && renderIntakeRepair) {
-      setDrawerLoading(false);
-      return;
-    }
     loadCardProjection(order.id);
 
     if (initialTab === 'calendar') {
@@ -2125,22 +2121,13 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ renderIntakeRepair }) =>
                     查看取消與受控重開
                   </button>
                 </div>
-              ) : isOrderIntakeIncomplete(order) ? (
-                <div className="order-card-actions">
-                  <div role="status">
-                    案件仍待補齊姓名、服務日期等進件資料；完成補件後即可操作契約、媒合、排班與取消流程。
-                  </div>
-                  <button
-                    type="button"
-                    className="btn-secondary-action"
-                    data-control-id="orders.card.intake-repair"
-                    onClick={() => handleOpenContractDrawer(order, 'contract_terms')}
-                  >
-                    補齊進件資料
-                  </button>
-                </div>
               ) : (
               <div className="order-card-actions">
+                {isOrderIntakeIncomplete(order) && (
+                  <div role="status" data-surface-id="orders.card.intake-incomplete">
+                    ⚠️ 進件資料仍有缺漏；可進入原訂單工作台查看缺件、owner blocker 與目前適用流程。
+                  </div>
+                )}
                 <button
                   className="btn-secondary-action"
                   data-control-id="orders.card.contract-workbench"
@@ -2930,13 +2917,16 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ renderIntakeRepair }) =>
       >
         {(contractOrder || dateConfirmOrder) && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-            {isOrderIntakeIncomplete((contractOrder || dateConfirmOrder)!) && renderIntakeRepair ? (
-              renderIntakeRepair((contractOrder || dateConfirmOrder)!, async () => {
-                await fetchOrderSummaries();
-                closeContractDrawer();
-              })
-            ) : (
-              <>
+            {isOrderIntakeIncomplete((contractOrder || dateConfirmOrder)!) && renderIntakeRepair && (
+              <section
+                aria-label="訂單缺件補齊"
+                data-surface-id="orders.drawer.intake-repair"
+              >
+                {renderIntakeRepair((contractOrder || dateConfirmOrder)!, async () => {
+                  await fetchOrderSummaries();
+                })}
+              </section>
+            )}
             {renderCardProjection()}
 
             {/* Top 4-Column Fact Strip */}
@@ -4052,8 +4042,6 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({ renderIntakeRepair }) =>
                   </div>
                 </div>
               </div>
-            )}
-              </>
             )}
           </div>
         )}

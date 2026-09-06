@@ -34,7 +34,7 @@ vi.mock('../pages/OrdersPage', async () => {
         <>
           <div data-testid="legacy-orders-page">legacy orders workbench</div>
           {activeItem && (
-            <button type="button" onClick={() => setOpen(true)}>補齊進件資料</button>
+            <button type="button" onClick={() => setOpen(true)}>📑 條款與契約</button>
           )}
           {open && activeItem && renderIntakeRepair?.(
             adapterModule.adaptOrderSummaryItem(activeItem),
@@ -107,7 +107,7 @@ describe('Orders intake repair entry', () => {
     render(<OrdersManagementPage />);
 
     expect(screen.queryByRole('region', { name: '訂單缺件補齊' })).not.toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: '補齊進件資料' }));
+    fireEvent.click(await screen.findByRole('button', { name: '📑 條款與契約' }));
     const region = await screen.findByRole('article');
     expect(within(region).getByText('CASE-153')).toBeInTheDocument();
     expect(within(region).getByText('客戶姓名', { selector: 'li' })).toBeInTheDocument();
@@ -187,7 +187,7 @@ describe('Orders intake repair entry', () => {
 
     render(<OrdersManagementPage />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '補齊進件資料' }));
+    fireEvent.click(await screen.findByRole('button', { name: '📑 條款與契約' }));
     fireEvent.change(await screen.findByLabelText('CASE-153 約定服務開始日'), {
       target: { value: '2026-09-10' },
     });
