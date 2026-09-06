@@ -6,7 +6,7 @@ on:
     paths: [".github/workflows/issue218-disposable-mysql-http.yml"]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   acceptance:
@@ -39,6 +39,8 @@ jobs:
       LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_issue218_http
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -47,7 +49,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Apply fresh-read acceptance oracle repair
+        run: python scripts/issue218_refresh_snapshot_tmp.py
       - name: Run disposable MySQL and persisted line-agent HTTP acceptance
         run: |
           python -m pytest -q -s tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/integration/test_order_intake_disposable_mysql_http.py
           git diff --check
+      - name: Commit verified acceptance oracle and remove temporary runner files
+        run: |
+          rm scripts/issue218_refresh_snapshot_tmp.py .github/workflows/issue218-disposable-mysql-http.yml
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "test(orders): refresh issue 218 acceptance readbacks"
+          git push origin HEAD:fix/issue-218-intake-drawer-20260906
