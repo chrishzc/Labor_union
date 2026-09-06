@@ -1,0 +1,119 @@
+name: Lane 1 issue 231 one-time repair
+
+on:
+  push:
+    branches: [ "fix/current-regression-baseline-20260905" ]
+
+permissions:
+  contents: write
+
+jobs:
+  repair-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/current-regression-baseline-20260905
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Apply exact identity repair
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, got {count}")
+              return text.replace(old, new, 1)
+
+          generator_path = Path("scripts/generate_task97_commit_dispositions.py")
+          generator = generator_path.read_text(encoding="utf-8")
+          generator = replace_once(
+              generator,
+              "# Exact semantic reviews for commit boundaries audited under #149/#215.\n# These remain symbol-scoped so a sibling commit never inherits acceptance.\nREVIEWED_COMMIT_BOUNDARIES: dict[\n    tuple[str, str], tuple[str, str, str, str, str]\n] = {",
+              "# Exact semantic reviews for commit boundaries audited under #149/#215.\n# Keys are scanner WriterFinding.identity values so sibling or newly added\n# commits cannot inherit a reviewed acceptance.\nREVIEWED_COMMIT_BOUNDARIES: dict[\n    str, tuple[str, str, str, str, str]\n] = {",
+              "review registry type",
+          )
+          replacements = {
+              '("api/dependencies/admin_auth.py", "ensure_development_root_admin"):': '"api/dependencies/admin_auth.py:ensure_development_root_admin:commit:COMMIT:-:a726d561eba65201:1":',
+              '("line/line_bot.py", "line_bind"):': '"line/line_bot.py:line_bind:commit:COMMIT:-:a726d561eba65201:1":',
+              '("scripts/migrate_weekly_report_batches.py", "main"):': '"scripts/migrate_weekly_report_batches.py:main:commit:COMMIT:-:a726d561eba65201:1":',
+              '("scripts/migrate_weekly_report_batches.py", "seed_history_from_template"):': '"scripts/migrate_weekly_report_batches.py:seed_history_from_template:commit:COMMIT:-:a726d561eba65201:1":',
+              '("scripts/seed_line_test_fixtures.py", "seed_fixtures"):': '"scripts/seed_line_test_fixtures.py:seed_fixtures:commit:COMMIT:-:a726d561eba65201:1":',
+              '("subsystems/reporting/weekly_report_batch_service.py", "WeeklyReportBatchService.close_batch"):': '"subsystems/reporting/weekly_report_batch_service.py:WeeklyReportBatchService.close_batch:commit:COMMIT:-:3d011c5fc6b4a404:1":',
+              '("subsystems/reporting/weekly_report_batch_service.py", "WeeklyReportBatchService.update_batch_metrics"):': '"subsystems/reporting/weekly_report_batch_service.py:WeeklyReportBatchService.update_batch_metrics:commit:COMMIT:-:3d011c5fc6b4a404:1":',
+          }
+          for old, new in replacements.items():
+              generator = replace_once(generator, old, new, f"review key {old}")
+          generator = replace_once(
+              generator,
+              "def _semantic_owner(path: str, symbol: str) -> tuple[str, str]:\n    reviewed = REVIEWED_COMMIT_BOUNDARIES.get((path, symbol))\n    if reviewed is not None:\n        return reviewed[0], reviewed[1]",
+              "def _semantic_owner(finding: WriterFinding) -> tuple[str, str]:\n    path = finding.relative_path\n    symbol = finding.symbol\n    reviewed = REVIEWED_COMMIT_BOUNDARIES.get(finding.identity)\n    if reviewed is not None:\n        return reviewed[0], reviewed[1]",
+              "semantic owner exact review",
+          )
+          generator = replace_once(
+              generator,
+              "    reviewed = REVIEWED_COMMIT_BOUNDARIES.get(path_symbol)\n    if reviewed is not None:",
+              "    reviewed = REVIEWED_COMMIT_BOUNDARIES.get(finding.identity)\n    if reviewed is not None:",
+              "classification exact review",
+          )
+          generator = replace_once(
+              generator,
+              "    owner, layer = _semantic_owner(finding.relative_path, finding.symbol)",
+              "    owner, layer = _semantic_owner(finding)",
+              "semantic owner caller",
+          )
+          generator_path.write_text(generator, encoding="utf-8")
+
+          test_path = Path("tests/test_task97_commit_dispositions.py")
+          test = test_path.read_text(encoding="utf-8")
+          test = replace_once(
+              test,
+              "import json\nfrom pathlib import Path\nimport subprocess",
+              "import json\nfrom pathlib import Path\nimport subprocess\nimport tempfile",
+              "test tempfile import",
+          )
+          test = replace_once(
+              test,
+              "from scripts.generate_task97_commit_dispositions import (\n    APPLICATION_OWNED_COMMIT_SYMBOLS,",
+              "from shared_kernel.writer_inventory import scan_production_writers\n\nfrom scripts.generate_task97_commit_dispositions import (\n    APPLICATION_OWNED_COMMIT_SYMBOLS,\n    CommitLocation,",
+              "test imports exact scanner",
+          )
+          test = replace_once(
+              test,
+              "    SOURCE_REVISION_INPUTS,\n    _git_revision,\n    build_artifact,",
+              "    SOURCE_REVISION_INPUTS,\n    _classify,\n    _git_revision,\n    _semantic_owner,\n    build_artifact,",
+              "test private imports",
+          )
+          old_test = '''def test_task97_audited_commit_boundaries_are_exactly_accepted() -> None:\n    artifact = json.loads(EVIDENCE_PATH.read_text(encoding="utf-8"))\n    entries = artifact["entries"]\n    by_symbol: dict[tuple[str, str], list[dict[str, object]]] = {}\n    for entry in entries:\n        by_symbol.setdefault((str(entry["source_path"]), str(entry["symbol"])), []).append(entry)\n\n    for identity, review in REVIEWED_COMMIT_BOUNDARIES.items():\n        owner, layer, _basis, _remediation, _blocker = review\n        matches = by_symbol.get(identity, [])\n        assert matches, identity\n        assert all(entry["classification"] == "application_owned_legitimate_outer_uow" for entry in matches)\n        assert all(entry["owner"] == owner for entry in matches)\n        assert all(entry["layer"] == layer for entry in matches)\n'''
+          new_test = '''def test_task97_audited_commit_boundaries_are_exactly_accepted() -> None:\n    artifact = json.loads(EVIDENCE_PATH.read_text(encoding="utf-8"))\n    by_identity = {str(entry["identity"]): entry for entry in artifact["entries"]}\n\n    for identity, review in REVIEWED_COMMIT_BOUNDARIES.items():\n        owner, layer, _basis, _remediation, _blocker = review\n        entry = by_identity.get(identity)\n        assert entry is not None, identity\n        assert entry["classification"] == "application_owned_legitimate_outer_uow"\n        assert entry["owner"] == owner\n        assert entry["layer"] == layer\n\n\ndef test_task97_reviewed_commit_boundaries_do_not_inherit_to_sibling_commits() -> None:\n    with tempfile.TemporaryDirectory() as directory:\n        root = Path(directory)\n        source = root / "api" / "dependencies" / "admin_auth.py"\n        source.parent.mkdir(parents=True)\n        source.write_text(\n            "def ensure_development_root_admin(conn):\\n"\n            "    conn.commit()\\n"\n            "    conn.commit()\\n"\n            "\\n"\n            "def sibling_symbol(conn):\\n"\n            "    conn.commit()\\n",\n            encoding="utf-8",\n        )\n        findings = scan_production_writers(root, ("api",))\n\n    reviewed = next(\n        finding for finding in findings\n        if finding.symbol == "ensure_development_root_admin" and finding.occurrence == 1\n    )\n    sibling_occurrence = next(\n        finding for finding in findings\n        if finding.symbol == "ensure_development_root_admin" and finding.occurrence == 2\n    )\n    sibling_symbol = next(\n        finding for finding in findings\n        if finding.symbol == "sibling_symbol"\n    )\n    location = CommitLocation(\n        line=1,\n        receiver="conn",\n        has_uow_context=False,\n        has_connection_lifecycle=False,\n        has_worker_signal=False,\n    )\n\n    assert reviewed.identity in REVIEWED_COMMIT_BOUNDARIES\n    assert sibling_occurrence.identity not in REVIEWED_COMMIT_BOUNDARIES\n    assert sibling_symbol.identity not in REVIEWED_COMMIT_BOUNDARIES\n    assert _classify(reviewed, location)[0] == "application_owned_legitimate_outer_uow"\n    assert _classify(sibling_occurrence, location)[0] == "real_violation"\n    assert _classify(sibling_symbol, location)[0] == "real_violation"\n    assert _semantic_owner(reviewed) == ("access_control", "adapter")\n    assert _semantic_owner(sibling_occurrence) == ("global_operations", "adapter")\n    assert _semantic_owner(sibling_symbol) == ("global_operations", "adapter")\n'''
+          test = replace_once(test, old_test, new_test, "focused exact identity test")
+          test_path.write_text(test, encoding="utf-8")
+          PY
+      - name: Verify focused contract
+        shell: bash
+        run: |
+          python -m py_compile scripts/generate_task97_commit_dispositions.py tests/test_task97_commit_dispositions.py
+          python - <<'PY'
+          from tests.test_task97_commit_dispositions import (
+              test_task97_audited_commit_boundaries_are_exactly_accepted,
+              test_task97_reviewed_commit_boundaries_do_not_inherit_to_sibling_commits,
+          )
+          test_task97_audited_commit_boundaries_are_exactly_accepted()
+          test_task97_reviewed_commit_boundaries_do_not_inherit_to_sibling_commits()
+          print("#231 focused exact-identity checks: PASS")
+          PY
+          git diff --check
+          git diff -- scripts/generate_task97_commit_dispositions.py tests/test_task97_commit_dispositions.py
+      - name: Commit verified repair and remove one-time workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/lane1-issue231-once.yml
+          git add scripts/generate_task97_commit_dispositions.py tests/test_task97_commit_dispositions.py
+          git commit -m "fix(ci): scope Task97 reviews to exact identity (#231)"
+          git push origin HEAD:fix/current-regression-baseline-20260905
