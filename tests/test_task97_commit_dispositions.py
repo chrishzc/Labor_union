@@ -12,6 +12,7 @@ from scripts.generate_task97_commit_dispositions import (
     MEDIA_STAGING_VIOLATIONS,
     READ_ONLY_APPLICATIONS,
     REPOSITORY_ROOT,
+    REVIEWED_COMMIT_BOUNDARIES,
     SOURCE_REVISION_INPUTS,
     _git_revision,
     build_artifact,
@@ -107,6 +108,22 @@ def test_task97_commit_dispositions_do_not_blanket_classify_by_path() -> None:
     by_symbol = {(entry["source_path"], entry["symbol"]): entry for entry in entries}
     for identity in APPLICATION_OWNED_COMMIT_SYMBOLS:
         assert by_symbol[identity]["classification"] == "application_owned_legitimate_outer_uow"
+
+
+def test_task97_audited_commit_boundaries_are_exactly_accepted() -> None:
+    artifact = json.loads(EVIDENCE_PATH.read_text(encoding="utf-8"))
+    entries = artifact["entries"]
+    by_symbol: dict[tuple[str, str], list[dict[str, object]]] = {}
+    for entry in entries:
+        by_symbol.setdefault((str(entry["source_path"]), str(entry["symbol"])), []).append(entry)
+
+    for identity, review in REVIEWED_COMMIT_BOUNDARIES.items():
+        owner, layer, _basis, _remediation, _blocker = review
+        matches = by_symbol.get(identity, [])
+        assert matches, identity
+        assert all(entry["classification"] == "application_owned_legitimate_outer_uow" for entry in matches)
+        assert all(entry["owner"] == owner for entry in matches)
+        assert all(entry["layer"] == layer for entry in matches)
 
 
 def test_task97_commit_disposition_source_revision_is_input_bound_and_idempotent() -> None:
