@@ -1,0 +1,269 @@
+name: Issue 218 one-time reconciliation
+
+on:
+  push:
+    branches: [fix/issue-218-intake-drawer-20260906]
+    paths: [.github/workflows/issue-218-reconcile-once.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.repair.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Resolve only the reviewed issue 218 overlap
+        id: repair
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import subprocess
+
+          MAIN = '54b1ffe08a3a9735fa65acbb5bb919eeca1af614'
+          OLD = '42f2c7e7c163b09cb0dccd2afa844ba394812973'
+          BRANCH = 'fix/issue-218-intake-drawer-20260906'
+          RUNNER = '.github/workflows/issue-218-reconcile-once.yml'
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+
+          def run(*args):
+              subprocess.run(['git', *args], check=True)
+
+          def replace_once(path, old, new):
+              file = Path(path)
+              text = file.read_text()
+              assert text.count(old) == 1, (path, 'expected exactly one patch anchor', text.count(old))
+              file.write_text(text.replace(old, new, 1))
+
+          entry = git('rev-parse', 'HEAD')
+          assert git('rev-parse', 'HEAD^') == OLD, 'PR head changed before reconciliation'
+          assert git('rev-parse', 'origin/main') == MAIN, 'main changed before reconciliation'
+          runner = Path(RUNNER).read_bytes()
+          # Reconstruct the resolved tree from the verified main, carrying the two PR-only tests.
+          # The PR changes only the nine reviewed paths; its former inline UI is superseded by main's extracted component.
+          run('read-tree', '--reset', '-u', MAIN)
+          Path(RUNNER).write_bytes(runner)
+          backend_tests = [
+              'tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/unit/test_order_intake_route_composition.py',
+              'tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/integration/test_order_intake_disposable_mysql_http.py',
+          ]
+          run('checkout', OLD, '--', *backend_tests)
+          replace_once('api/main.py', '    order_actual_start,\n', '    order_actual_start,\n    order_intake_terms_bootstrap,\n')
+          replace_once('api/main.py', 'app.include_router(order_actual_start.router)\n', 'app.include_router(order_actual_start.router)\napp.include_router(order_intake_terms_bootstrap.router)\n')
+          replace_once('api/routes/order_intake_terms_bootstrap.py', 'router = APIRouter(tags=["Orders"])', 'router = APIRouter(prefix="/api/v1/orders", tags=["Orders"])')
+
+          page = Path('ui_react/src/pages/OrdersPage.tsx')
+          text = page.read_text()
+          start_anchor = '              ) : isOrderIntakeIncomplete(order) ? (\n'
+          end_anchor = '              ) : (\n              <div className="order-card-actions">'
+          assert text.count(start_anchor) == 1
+          start = text.index(start_anchor)
+          end = text.index(end_anchor, start)
+          text = text[:start] + text[end:]
+          hint_anchor = '              <div className="order-card-actions">\n                <button\n                  className="btn-secondary-action"\n                  data-control-id="orders.card.contract-workbench"'
+          assert text.count(hint_anchor) == 1
+          text = text.replace(hint_anchor, '''              <div className="order-card-actions">
+                          {isOrderIntakeIncomplete(order) && (
+                            <div role="status" data-surface-id="orders.card.intake-incomplete">
+                              案件仍有進件缺漏，請從條款與契約查看補件區段；各操作依所屬流程的目前條件判定。
+                            </div>
+                          )}
+                          <button
+                            className="btn-secondary-action"
+                            data-control-id="orders.card.contract-workbench"''', 1)
+          page.write_text(text)
+
+          card_path = 'ui_react/src/components/OrdersIntakeRepairCard.tsx'
+          replace_once(card_path, 'if (!clientPreview || !hasReason) return;', 'if (!clientPreview || !clientPreview.apply_allowed || !hasReason) return;')
+          replace_once(card_path, '''              <div>補件後姓名：<strong>{clientPreview.after_client_name}</strong></div>
+                        <button type="button" disabled={busy !== null || !hasReason} onClick={() => void applyClientName()}>''', '''              <div aria-label="姓名補件前後">
+                          <div>補件前姓名：<strong>{clientPreview.before_client_name ?? '未填寫'}</strong></div>
+                          <div>補件後姓名：<strong>{clientPreview.after_client_name}</strong></div>
+                        </div>
+                        {clientPreview.blockers.length > 0 && (
+                          <ul aria-label="姓名補件阻擋原因" style={{ margin: 0, paddingLeft: 22 }}>
+                            {clientPreview.blockers.map((blocker) => <li key={blocker}>{intakeBlockerMessage(blocker)}</li>)}
+                          </ul>
+                        )}
+                        <button type="button" disabled={busy !== null || !clientPreview.apply_allowed || !hasReason} onClick={() => void applyClientName()}>''')
+
+          test_path = 'ui_react/src/tests/orders_page_real_data.test.tsx'
+          replace_once(test_path, "import { ordersQueryClient } from '../api/orders/order_query_client';", "import { ordersQueryClient } from '../api/orders/order_query_client';\nimport { orderIntakeCompletionClient } from '../api/orders/order_intake_completion_client';")
+          replace_once(test_path, '''  it('opens the existing contract drawer from an incomplete order card', async () => {
+              render(<OrdersPage />);
+              await screen.findByText('ORD-2026-0801');
+              fireEvent.click(screen.getByRole('button', { name: '開啟補件工作台' }));
+              expect(await screen.findByText(/訂單條款、服務日曆與契約簽署工作台/)).toBeInTheDocument();
+            });''', '''  it.each([
+              { missing: ['client_name'] }, { missing: ['start_date'] },
+              { missing: ['service_days'] }, { missing: ['start_date', 'service_days'] },
+            ] as const)('keeps original drawer actions for missing intake fields $missing', async ({ missing }) => {
+              const missingFields: Array<'client_name' | 'start_date' | 'service_days'> = [...missing];
+              const item = {
+                ...realisticOrderSummaryPage.items[0],
+                order_status: '待補件',
+                client_name: missingFields.includes('client_name') ? '待補姓名（ORD-2026-0801）' : '合成補件客戶',
+                start_date: missingFields.includes('start_date') ? null : '2026-09-10',
+                service_days: missingFields.includes('service_days') ? null : 5,
+              };
+              const summary = { ...realisticOrderSummaryPage, items: [item], next_cursor: null };
+              vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(summary);
+              vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(buildOrdersStageProjectionFixture(summary));
+              vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+                case_no: item.case_no, lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+                missing_fields: missingFields, blockers: ['order_intake_completion_service_data_locked'],
+                apply_allowed: false, preview_fingerprint: '1'.repeat(64),
+              });
+              render(<OrdersPage />);
+              await screen.findByText(item.case_no);
+              expect(screen.getByRole('button', { name: /媒合與正式排班/ })).toBeEnabled();
+              expect(screen.queryByRole('region', { name: '訂單缺件補齊' })).not.toBeInTheDocument();
+              fireEvent.click(screen.getByRole('button', { name: /條款與契約/ }));
+              expect(await screen.findByLabelText(`${item.case_no} 缺件項目`)).toBeInTheDocument();
+              expect(await screen.findByText('服務資料已鎖定，目前不能完成進件補齊。')).toBeInTheDocument();
+              await waitFor(() => expect(ordersQueryClient.getOrderTerms).toHaveBeenCalled());
+              expect(screen.getByRole('button', { name: /契約簽署與約定條款/ })).toBeInTheDocument();
+              expect(screen.getByRole('button', { name: /實質服務日曆與天數精算/ })).toBeInTheDocument();
+            });''')
+
+          component_test = Path('ui_react/src/tests/domains/orders/subsystems/orders/modules/order-card-projection/order_intake_completion_entry.test.tsx')
+          text = component_test.read_text()
+          assert text.rstrip().endswith('});')
+          new_tests = '''
+            it.each([true, false])('shows name Preview before/after and honors owner apply_allowed=%s', async (allowed) => {
+              const onChanged = vi.fn().mockResolvedValue(undefined);
+              vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+                case_no: 'CASE-153', lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+                missing_fields: ['client_name'], blockers: [], apply_allowed: false, preview_fingerprint: FP1,
+              });
+              vi.spyOn(orderIntakeCompletionClient, 'previewClientName').mockResolvedValue({
+                case_no: 'CASE-153', lifecycle_version: 7, before_client_name: null,
+                after_client_name: '合成補件姓名', blockers: allowed ? [] : ['synthetic_name_owner_blocker'],
+                apply_allowed: allowed, preview_fingerprint: FP1,
+              });
+              const applyName = vi.spyOn(orderIntakeCompletionClient, 'applyClientName').mockResolvedValue({
+                receipt_key: 'name-receipt', case_no: 'CASE-153', lifecycle_version: 7,
+                client_name: '合成補件姓名', preview_fingerprint: FP1, replayed: false,
+              });
+              render(<OrdersIntakeRepairCard item={{ ...incompleteSummary, start_date: '2026-09-10', service_days: 5 }} onChanged={onChanged} />);
+              fireEvent.change(await screen.findByLabelText('CASE-153 客戶姓名'), { target: { value: '合成補件姓名' } });
+              fireEvent.click(screen.getByRole('button', { name: '檢查姓名補件' }));
+              const preview = await screen.findByLabelText('姓名補件前後');
+              expect(preview).toHaveTextContent('補件前姓名：未填寫');
+              expect(preview).toHaveTextContent('補件後姓名：合成補件姓名');
+              expect(applyName).not.toHaveBeenCalled();
+              const applyButton = screen.getByRole('button', { name: '確認補齊客戶姓名' });
+              expect(applyButton).toBeDisabled();
+              fireEvent.change(screen.getByLabelText('CASE-153 補件原因'), { target: { value: '合成姓名補件驗收' } });
+              if (!allowed) {
+                expect(screen.getByLabelText('姓名補件阻擋原因')).toHaveTextContent('synthetic_name_owner_blocker');
+                expect(applyButton).toBeDisabled();
+                fireEvent.click(applyButton);
+                expect(applyName).not.toHaveBeenCalled();
+                expect(onChanged).not.toHaveBeenCalled();
+                return;
+              }
+              expect(applyButton).toBeEnabled();
+              fireEvent.click(applyButton);
+              await waitFor(() => expect(applyName).toHaveBeenCalledWith(
+                'CASE-153', expect.objectContaining({ apply_allowed: true, preview_fingerprint: FP1 }),
+                '合成姓名補件驗收', expect.stringContaining('orders-intake-client-name-CASE-153-'),
+              ));
+              await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+            });
+          '''
+          component_test.write_text(text.rstrip()[:-3] + new_tests + '\n});\n')
+
+          run('add', '--', RUNNER, 'api/main.py', 'api/routes/order_intake_terms_bootstrap.py', 'ui_react/src/pages/OrdersPage.tsx', card_path, test_path, str(component_test), *backend_tests)
+          allowed = {RUNNER, 'api/main.py', 'api/routes/order_intake_terms_bootstrap.py', 'ui_react/src/pages/OrdersPage.tsx', card_path, test_path, str(component_test), *backend_tests}
+          changed = set(git('diff', '--cached', '--name-only', MAIN).splitlines())
+          assert changed == allowed, ('unexpected resolved-tree diff', sorted(changed ^ allowed))
+          run('diff', '--cached', '--check', MAIN)
+          run('diff', '--cached', '--stat', MAIN)
+          run('config', 'user.name', 'github-actions[bot]')
+          run('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+          sha = git('commit-tree', git('write-tree'), '-p', entry, '-p', MAIN, '-m', 'fix(orders): reconcile #218 with current main and honor name preview blockers')
+          run('update-ref', 'HEAD', sha, entry)
+          run('push', 'origin', f'HEAD:refs/heads/{BRANCH}')
+          print(f'ISSUE218_REPAIRED_HEAD={sha}')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'sha={sha}\n')
+          PY
+
+  focused-ui-acceptance:
+    needs: reconcile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.reconcile.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing locked UI dependencies without install hooks
+        working-directory: ui_react
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify current drawer and intake Preview behavior
+        working-directory: ui_react
+        run: npm test -- src/tests/orders_page_real_data.test.tsx src/tests/domains/orders/subsystems/orders/modules/order-card-projection/order_intake_completion_entry.test.tsx
+      - name: Type-check and build the repaired UI
+        if: ${{ !cancelled() }}
+        working-directory: ui_react
+        run: npm run build
+
+  disposable-http-acceptance:
+    needs: reconcile
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_ROOT_HOST: '%'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      APP_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_USER: root
+      DB_PASSWORD: ci-root-password
+      DB_DATABASE: lu_test_issue218_reconcile
+      DB_SSL_MODE: disabled
+      LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
+      LABOR_UNION_TEST_MYSQL_PORT: '3306'
+      LABOR_UNION_TEST_MYSQL_USER: root
+      LABOR_UNION_TEST_MYSQL_PASSWORD: ci-root-password
+      LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_issue218_reconcile
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.reconcile.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install existing pinned application dependencies and pytest
+        run: python -m pip install -r requirements.txt pytest
+      - name: Verify six composed intake routes and current persisted-session MySQL HTTP behavior
+        run: >-
+          python -m pytest -q -s --strict-markers
+          tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/unit/test_order_intake_route_composition.py
+          tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/integration/test_order_intake_disposable_mysql_http.py
