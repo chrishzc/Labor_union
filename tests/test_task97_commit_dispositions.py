@@ -18,6 +18,7 @@ from scripts.generate_task97_commit_dispositions import (
     REPOSITORY_ROOT,
     REVIEWED_COMMIT_BOUNDARIES,
     SOURCE_REVISION_INPUTS,
+    UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES,
     _classify,
     _git_revision,
     _semantic_owner,
@@ -116,7 +117,7 @@ def test_task97_commit_dispositions_do_not_blanket_classify_by_path() -> None:
         assert by_symbol[identity]["classification"] == "application_owned_legitimate_outer_uow"
 
 
-def test_task97_audited_commit_boundaries_are_exactly_accepted() -> None:
+def test_task97_audited_commit_boundaries_follow_exact_current_decisions() -> None:
     artifact = json.loads(EVIDENCE_PATH.read_text(encoding="utf-8"))
     by_identity = {str(entry["identity"]): entry for entry in artifact["entries"]}
 
@@ -124,9 +125,17 @@ def test_task97_audited_commit_boundaries_are_exactly_accepted() -> None:
         owner, layer, _basis, _remediation, _blocker = review
         entry = by_identity.get(identity)
         assert entry is not None, identity
-        assert entry["classification"] == "application_owned_legitimate_outer_uow"
         assert entry["owner"] == owner
         assert entry["layer"] == layer
+        unresolved = UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES.get(identity)
+        if unresolved is None:
+            assert entry["classification"] == "application_owned_legitimate_outer_uow"
+        else:
+            basis, remediation, blocker = unresolved
+            assert entry["classification"] == "real_violation"
+            assert entry["analysis_basis"] == basis
+            assert entry["replacement_or_remediation"] == remediation
+            assert entry["blocker"] == blocker
 
 
 def test_task97_reviewed_commit_boundaries_do_not_inherit_to_sibling_commits() -> None:
@@ -166,11 +175,18 @@ def test_task97_reviewed_commit_boundaries_do_not_inherit_to_sibling_commits() -
     )
 
     assert reviewed.identity in REVIEWED_COMMIT_BOUNDARIES
+    assert reviewed.identity in UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES
     assert sibling_occurrence.identity not in REVIEWED_COMMIT_BOUNDARIES
     assert sibling_symbol.identity not in REVIEWED_COMMIT_BOUNDARIES
-    assert _classify(reviewed, location)[0] == "application_owned_legitimate_outer_uow"
-    assert _classify(sibling_occurrence, location)[0] == "real_violation"
-    assert _classify(sibling_symbol, location)[0] == "real_violation"
+    exact_result = _classify(reviewed, location)
+    sibling_occurrence_result = _classify(sibling_occurrence, location)
+    sibling_symbol_result = _classify(sibling_symbol, location)
+    assert exact_result[0] == "real_violation"
+    assert exact_result[3] == UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES[reviewed.identity][2]
+    assert sibling_occurrence_result[0] == "real_violation"
+    assert sibling_symbol_result[0] == "real_violation"
+    assert sibling_occurrence_result[3] != exact_result[3]
+    assert sibling_symbol_result[3] != exact_result[3]
     assert _semantic_owner(reviewed) == ("access_control", "adapter")
     assert _semantic_owner(sibling_occurrence) == ("global_operations", "adapter")
     assert _semantic_owner(sibling_symbol) == ("global_operations", "adapter")
