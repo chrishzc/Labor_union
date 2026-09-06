@@ -1,0 +1,59 @@
+name: Task97 provenance refresh PR81
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: ${{ github.event.pull_request.number == 81 }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Regenerate and verify Task97 evidence on PR merge tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/generate_task97_commit_dispositions.py
+          python - <<'PY'
+          import json
+          import runpy
+          from scripts.generate_task97_commit_dispositions import EVIDENCE_PATH
+          tests = runpy.run_path('tests/test_task97_commit_dispositions.py')
+          for name, test in tests.items():
+              if name.startswith('test_') and callable(test):
+                  test()
+                  print('PASS:', name)
+          artifact = json.loads(EVIDENCE_PATH.read_text(encoding='utf-8'))
+          print('source_revision:', artifact['source_revision'])
+          print('candidate_count:', artifact['candidate_count'])
+          print('classification_counts:', artifact['classification_counts'])
+          print('terminal_status:', artifact['terminal_status'])
+          print('scan_fingerprint:', artifact['scan_fingerprint'])
+          PY
+          git diff --check
+      - name: Store verified evidence blob
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+          path = Path('document/架構重整/03_追蹤清單與證據/evidence/task97_repository_commit_dispositions_v1.json')
+          raw = path.read_bytes()
+          body = json.dumps({'content': raw.decode('utf-8'), 'encoding': 'utf-8'}).encode()
+          req = Request('https://api.github.com/repos/chrishzc/Labor_union/git/blobs', data=body, method='POST', headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json'})
+          with urlopen(req, timeout=30) as response:
+              result = json.load(response)
+          expected = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+          assert result['sha'] == expected
+          print('artifact_blob_sha=' + result['sha'])
+          PY
