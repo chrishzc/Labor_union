@@ -17,6 +17,30 @@ jobs:
           fetch-depth: 0
       - name: Apply bounded repair
         run: python scripts/issue218_intake_drawer_repair_tmp.py
+      - name: Preserve explicit TypeScript narrowing
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          page = Path('ui_react/src/pages/OrdersPage.tsx')
+          text = page.read_text(encoding='utf-8')
+          text = text.replace(
+              'isOrderIntakeIncomplete(contractOrder || dateConfirmOrder) && renderIntakeRepair',
+              'isOrderIntakeIncomplete((contractOrder || dateConfirmOrder)!) && renderIntakeRepair',
+              1,
+          ).replace(
+              'renderIntakeRepair(contractOrder || dateConfirmOrder, async () => {',
+              'renderIntakeRepair((contractOrder || dateConfirmOrder)!, async () => {',
+              1,
+          )
+          page.write_text(text, encoding='utf-8')
+          test = Path('ui_react/src/tests/order_intake_completion_entry.test.tsx')
+          source = test.read_text(encoding='utf-8').replace(
+              ') => ReactModule.ReactNode;',
+              ") => import('react').ReactNode;",
+              1,
+          )
+          test.write_text(source, encoding='utf-8')
+          PY
       - name: Verify focused React behavior
         working-directory: ui_react
         run: |
