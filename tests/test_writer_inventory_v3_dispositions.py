@@ -1,4 +1,5 @@
 import json
+from hashlib import sha256
 import subprocess
 import sys
 from pathlib import Path
@@ -57,26 +58,27 @@ def test_writer_inventory_v3_candidate_scans_services():
     assert "services" in ROOTS
 
 
-def test_task97_exact_commit_receipts_leave_no_matching_writer_undecided():
+def test_task97_exact_commit_receipts_preserve_per_identity_decisions():
     records = {
         record["identity"]: record
         for record in _records("writer_inventory_v3_disposition.records.jsonl")
     }
     commit_receipt = json.loads(
-        (
-            EVIDENCE_DIRECTORY.parent
-            / "task97_repository_commit_dispositions_v1.json"
-        ).read_text(encoding="utf-8")
+        (EVIDENCE_DIRECTORY.parent / "task97_repository_commit_dispositions_v1.json").read_text(encoding="utf-8")
     )
-
-    assert commit_receipt["terminal_status"] == "passed"
-    matching = [
-        records[entry["identity"]]
-        for entry in commit_receipt["entries"]
-        if entry["identity"] in records
-    ]
-    assert matching
-    assert all(record["final_disposition"] != "needs_decision" for record in matching)
+    entries = commit_receipt["entries"]
+    assert entries
+    violations = [entry for entry in entries if entry["classification"] == "real_violation"]
+    assert commit_receipt["terminal_status"] == ("blocked" if violations else "passed")
+    assert {entry["identity"] for entry in entries} <= records.keys()
+    for entry in entries:
+        record = records[entry["identity"]]
+        assert record["approved_to_remove"] is False
+        if entry["classification"] == "real_violation":
+            assert record["final_disposition"] == "needs_decision"
+            assert entry["blocker"] in record["replacement_evidence"]
+        elif entry["classification"] == "application_owned_legitimate_outer_uow":
+            assert record["final_disposition"] in {"retain_canonical", "retain_restricted"}
 
 
 def test_task97_current_anomaly_page_query_is_exactly_read_only_restricted():
@@ -95,11 +97,18 @@ def test_task97_current_anomaly_page_query_is_exactly_read_only_restricted():
 def test_task97_source_locked_reviews_are_exact_and_fail_closed_for_new_symbols():
     records = _records("writer_inventory_v3_disposition.records.jsonl")
     by_identity = {record["identity"]: record for record in records}
+    commit_receipt = json.loads(
+        (EVIDENCE_DIRECTORY.parent / "task97_repository_commit_dispositions_v1.json").read_text(encoding="utf-8")
+    )
+    commit_decisions = {entry["identity"]: entry["classification"] for entry in commit_receipt["entries"]}
 
     for identity in EXACT_IDENTITY_REVIEWS:
-        assert by_identity[identity]["final_disposition"] != "needs_decision"
+        if commit_decisions.get(identity) == "real_violation":
+            assert by_identity[identity]["final_disposition"] == "needs_decision"
+        else:
+            assert by_identity[identity]["final_disposition"] != "needs_decision"
     for review_registry in (EXACT_SOURCE_REVIEWS, EXACT_SOURCE_RESTRICTED_REVIEWS):
-        for path, (_digest, symbols, _review) in review_registry.items():
+        for path, (digest, symbols, _review) in review_registry.items():
             selected = [
                 record
                 for record in records
@@ -107,7 +116,22 @@ def test_task97_source_locked_reviews_are_exact_and_fail_closed_for_new_symbols(
                 and str(record["identity"]).split(":", 2)[1] in symbols
             ]
             assert selected, path
-            assert all(record["final_disposition"] != "needs_decision" for record in selected)
+            source_matches = sha256((REPOSITORY_ROOT / path).read_bytes()).hexdigest() == digest
+            for record in selected:
+                identity = record["identity"]
+                commit_decision = commit_decisions.get(identity)
+                if commit_decision == "real_violation":
+                    assert record["final_disposition"] == "needs_decision", identity
+                elif (source_matches or identity in EXACT_IDENTITY_REVIEWS
+                      or _task97_exact_review(path, identity.split(":", 2)[1]) is not None
+                      or commit_decision == "application_owned_legitimate_outer_uow"):
+                    assert record["final_disposition"] != "needs_decision", identity
+                else:
+                    # Expired source reviews must reject the writer, not inherit
+                    # an old accepted snapshot. Independent exact decisions above
+                    # do not grant approval to other occurrences or symbols.
+                    assert record["final_disposition"] == "needs_decision", identity
+            assert _task97_exact_review(path, "FutureUnreviewedWriter.mutate") is None
 
 
 def test_writer_inventory_v3_receipts_close_legacy_scheduling_and_payroll_boundaries():
@@ -211,3 +235,81 @@ def _identities(filename: str) -> set[str]:
 def _records(filename: str) -> list[dict[str, str]]:
     lines = (EVIDENCE_DIRECTORY / filename).read_text(encoding="utf-8").splitlines()
     return [json.loads(line) for line in lines if line]
+
+
+def test_task97_blocked_receipt_keeps_exact_acceptance_without_overriding_blockers(tmp_path, monkeypatch):
+    import scripts.reconcile_writer_inventory_v3_dispositions as reconciler
+
+    artifact = json.loads(reconciler.COMMIT_DISPOSITIONS.read_text(encoding="utf-8"))
+    accepted = next(entry for entry in artifact["entries"] if entry["classification"] == "application_owned_legitimate_outer_uow")
+    # Simulate a rejected identity in the isolated receipt; the real
+    # repository need not retain any particular blocker for this test.
+    blocked = dict(accepted, identity=accepted["identity"] + ":blocked-fixture",
+        classification="real_violation", analysis_basis="unowned transaction fixture",
+        replacement_or_remediation="restore an explicitly owned outer boundary",
+        blocker="unowned_commit_fixture", zero_reference_oracle="isolated exact-identity test")
+    receipt = tmp_path / "commit-dispositions.json"
+    receipt.write_text(json.dumps({"terminal_status": "blocked", "entries": [accepted, blocked]}), encoding="utf-8")
+    monkeypatch.setattr(reconciler, "COMMIT_DISPOSITIONS", receipt)
+
+    assert reconciler._commit_review(accepted["identity"])[3].startswith("retain_")
+    assert reconciler._commit_review(accepted["identity"] + ":new-occurrence") is None
+    monkeypatch.setitem(reconciler.EXACT_IDENTITY_REVIEWS, blocked["identity"],
+        ("old-owner", "old-boundary", "old-review", "retain_canonical:obsolete decision"))
+    candidate = {"identity": blocked["identity"], "relative_path": blocked["source_path"],
+        "symbol": blocked["symbol"], "operation": "COMMIT", "fingerprint": blocked["fingerprint"]}
+    result = reconciler._disposition(candidate)
+    assert result["final_disposition"] == "needs_decision"
+    assert result["approved_to_remove"] is False
+    assert blocked["blocker"] in result["replacement_evidence"]
+
+
+def test_data_browser_exact_review_rejects_new_symbol_and_changed_source(tmp_path, monkeypatch):
+    import scripts.reconcile_writer_inventory_v3_dispositions as reconciler
+
+    path = "infrastructure/mysql/data_browser_query_repository.py"
+    symbol = "DataBrowserQueryRepository.query_page"
+    reviews = reconciler.EXACT_SOURCE_REVIEWS
+    assert reconciler._exact_source_review(path, symbol, reviews) is not None
+    assert reconciler._exact_source_review(path, symbol + "_unreviewed", reviews) is None
+    original = (reconciler.ROOT / path).read_bytes()
+    changed = tmp_path / path
+    changed.parent.mkdir(parents=True)
+    changed.write_bytes(original + b"\n# unreviewed source change\n")
+    monkeypatch.setattr(reconciler, "ROOT", tmp_path)
+    assert reconciler._exact_source_review(path, symbol, reviews) is None
+
+
+
+def test_reconciliation_preserves_valid_typed_receipts_and_refreshes_exact_blockers(tmp_path, monkeypatch):
+    import scripts.reconcile_writer_inventory_v3_dispositions as reconciler
+
+    candidates = {entry["identity"]: entry for entry in reconciler._load(reconciler.CANDIDATE)}
+    saved = reconciler._load(reconciler.RECORDS)
+    typed = [entry for entry in saved if entry["owner"] == "payroll"
+             and candidates[entry["identity"]]["operation"] == "COMMIT"]
+    retained, stale = typed[:2]
+    receipt = json.loads(reconciler.COMMIT_DISPOSITIONS.read_text(encoding="utf-8"))
+    exact = {entry["identity"]: entry for entry in receipt["entries"]}
+    blocked = dict(exact[stale["identity"]], classification="real_violation",
+                   analysis_basis="isolated missing-owner fixture",
+                   replacement_or_remediation="restore the owning outer transaction",
+                   blocker="isolated_unowned_commit", zero_reference_oracle="isolated test")
+    paths = {name: tmp_path / (name.lower() + ".json")
+             for name in ("CANDIDATE", "RECORDS", "MANIFEST", "COMMIT_DISPOSITIONS")}
+    paths["CANDIDATE"].write_text("".join(json.dumps(candidates[entry["identity"]]) + "\n"
+                                          for entry in (retained, stale)), encoding="utf-8")
+    paths["RECORDS"].write_text("".join(json.dumps(entry) + "\n"
+                                        for entry in (retained, stale)), encoding="utf-8")
+    paths["COMMIT_DISPOSITIONS"].write_text(json.dumps({
+        "terminal_status": "blocked", "entries": [exact[retained["identity"]], blocked]
+    }), encoding="utf-8")
+    for name, path in paths.items():
+        monkeypatch.setattr(reconciler, name, path)
+
+    assert reconciler.main() == 0
+    actual = {entry["identity"]: entry for entry in reconciler._load(paths["RECORDS"])}
+    assert actual[retained["identity"]] == retained
+    assert actual[stale["identity"]]["final_disposition"] == "needs_decision"
+    assert actual[stale["identity"]]["approved_to_remove"] is False
+    assert blocked["blocker"] in actual[stale["identity"]]["replacement_evidence"]

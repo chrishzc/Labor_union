@@ -18,6 +18,10 @@ from scripts.verify_verification_baseline import DEFAULT_BASELINE_PATH, load_bas
 
 
 DEFAULT_SCENARIO_DIRECTORY = PROJECT_ROOT / "validation" / "scenarios"
+# Independent coverage provenance only; business authority remains with owner specs.
+DEFAULT_BUSINESS_MATRIX_PATH = (
+    PROJECT_ROOT / "document" / "資料庫、資料處理" / "新版測試資料規則矩陣_草案.md"
+)
 SCENARIO_CONTRACT = "labor-union-verification-scenario/v1"
 SCENARIO_STATUS = {"specified", "bound", "blocked"}
 NON_SCENARIO_ARTIFACTS = frozenset(
@@ -118,17 +122,16 @@ def _suite_test_kinds(baseline: dict[str, object]) -> dict[str, set[str]]:
 
 
 def canonical_business_requirement_ids(
-    directory: Path = DEFAULT_SCENARIO_DIRECTORY,
+    matrix_path: Path = DEFAULT_BUSINESS_MATRIX_PATH,
 ) -> set[str]:
-    """Read Track A matrix coverage identities from checked-in scenario contracts."""
-    return {
-        coverage_id
-        for scenario in load_scenarios(directory)
-        if scenario.get("track") == "A"
-        and scenario.get("coverage_scope", "matrix") == "matrix"
-        for coverage_id in scenario.get("coverage_ids", [])
-        if isinstance(coverage_id, str)
-    }
+    """Read independent coverage IDs, not business authority, from the existing matrix."""
+    requirement_ids = set(re.findall(
+        r"\|\s*([A-Z]+-[A-Z0-9]+)\s*\|",
+        matrix_path.read_text(encoding="utf-8"),
+    ))
+    if not requirement_ids:
+        raise ValueError("business requirement matrix contains no coverage ids")
+    return requirement_ids
 
 
 def _scenario_errors(
