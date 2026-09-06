@@ -1,0 +1,44 @@
+name: Issue 215 source review
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/issue-215-regression-followup-20260906'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Inspect exact current-source commit dispositions
+        run: |
+          python - <<'PY'
+          import json
+          from scripts.generate_task97_commit_dispositions import EVIDENCE_PATH, build_artifact
+
+          saved = json.loads(EVIDENCE_PATH.read_text(encoding="utf-8"))
+          fresh = build_artifact()
+          for label, artifact in (("saved", saved), ("fresh", fresh)):
+              print(label, json.dumps({key: value for key, value in artifact.items() if key != "entries"}, ensure_ascii=False))
+          old = {entry["identity"]: entry for entry in saved["entries"]}
+          new = {entry["identity"]: entry for entry in fresh["entries"]}
+          for identity in sorted(old.keys() - new.keys()):
+              print("REMOVED", json.dumps(old[identity], ensure_ascii=False))
+          for identity in sorted(new.keys() - old.keys()):
+              print("ADDED", json.dumps(new[identity], ensure_ascii=False))
+          for identity in sorted(old.keys() & new.keys()):
+              before, after = old[identity], new[identity]
+              if before["classification"] != after["classification"]:
+                  print("CLASSIFICATION_CHANGED", json.dumps({"before": before, "after": after}, ensure_ascii=False))
+          for entry in fresh["entries"]:
+              if entry["classification"] == "real_violation":
+                  print("REVIEW_REQUIRED", json.dumps(entry, ensure_ascii=False))
+          PY
