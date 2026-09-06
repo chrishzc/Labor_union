@@ -58,6 +58,12 @@ import {
   type HolidayRow,
 } from '../adapters/scheduling/holiday_flow_adapter';
 import {
+  holidayClient,
+  type HolidayCsvBatchPreview,
+  type HolidayCsvBatchResult,
+  type HolidayCsvParseResult,
+} from '../api/scheduling/holiday_client';
+import {
   staffLeaveInboxClient,
   type LeaveInboxItem,
   type LeaveInboxStatus,
@@ -270,6 +276,14 @@ function HolidayPolicyWorkspace() {
   const [doublePay, setDoublePay] = useState(false);
   const [reason, setReason] = useState('依核准政策維護國定假日');
   const [holidayDrawerOpen, setHolidayDrawerOpen] = useState(false);
+  const [csvFileName, setCsvFileName] = useState('');
+  const [csvParsed, setCsvParsed] = useState<HolidayCsvParseResult | null>(null);
+  const [csvBatch, setCsvBatch] = useState<HolidayCsvBatchPreview | null>(null);
+  const [csvResult, setCsvResult] = useState<HolidayCsvBatchResult | null>(null);
+  const [csvReason, setCsvReason] = useState('依官方國定假日 CSV 維護');
+  const [csvBusy, setCsvBusy] = useState(false);
+  const [csvApplyKey, setCsvApplyKey] = useState('');
+  const csvSelectionSequence = useRef(0);
   const [, setStoreRevision] = useState(0);
 
   useEffect(() => {
@@ -353,6 +367,58 @@ function HolidayPolicyWorkspace() {
     setHolidayDrawerOpen(true);
   };
 
+  const handleHolidayCsvChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const selection = ++csvSelectionSequence.current;
+    setCsvFileName(file.name);
+    setCsvBatch(null);
+    setCsvResult(null);
+    setCsvApplyKey(`holiday-csv-${Date.now().toString(36)}`);
+    const text = await file.text();
+    if (selection !== csvSelectionSequence.current) return;
+    setCsvParsed(holidayClient.parseCsv(text));
+  };
+
+  const previewHolidayCsvFile = async () => {
+    if (!csvParsed || csvParsed.rows.length === 0 || csvParsed.issues.length > 0 || csvBusy) return;
+    setCsvBusy(true);
+    setCsvResult(null);
+    try {
+      setCsvBatch(await holidayClient.previewCsv(csvParsed));
+    } catch (caught) {
+      setCsvBatch({ parsed: csvParsed, entries: [], skipped: [], issues: [caught instanceof Error ? caught.message : 'CSV 預覽失敗。'], zero_write: true });
+    } finally {
+      setCsvBusy(false);
+    }
+  };
+
+  const applyHolidayCsvFile = async () => {
+    if (!csvBatch || csvBatch.entries.length === 0 || !csvReason.trim() || !csvApplyKey || csvBusy) return;
+    setCsvBusy(true);
+    try {
+      const result = await holidayClient.applyCsv(csvBatch, csvReason.trim(), { idempotencyKey: csvApplyKey });
+      if (!csvParsed?.year) {
+        setCsvResult(result);
+        return;
+      }
+      try {
+        await queryHolidayFlow({ from_date: `${csvParsed.year}-01-01`, to_date: `${csvParsed.year}-12-31` });
+        setCsvResult({ ...result, readback_status: 'observed' });
+      } catch (readbackError) {
+        setCsvResult({
+          ...result,
+          readback_status: 'failed',
+          readback_error: readbackError instanceof Error ? readbackError.message : '結果回讀失敗。',
+        });
+      }
+    } catch (caught) {
+      setCsvResult({ attempted: csvBatch.entries.length, applied: 0, unchanged: 0, skipped: csvBatch.skipped.length, replayed: 0, readback_status: 'not_run', receipts: [], failures: [{ holiday_date: 'CSV', message: caught instanceof Error ? caught.message : 'CSV 套用失敗。' }] });
+    } finally {
+      setCsvBusy(false);
+    }
+  };
+
   const currentPreviewRequest = buildPreviewRequest();
   const previewMatchesCurrentInputs = holidayPreviewRequestsMatch(
     currentPreviewRequest,
@@ -399,6 +465,56 @@ function HolidayPolicyWorkspace() {
           <span className={`holiday-policy-state state-${machine.type}`}>{flowStateLabel(machine.type)}</span>
         </div>
       </header>
+
+      <section className="holiday-policy-csv" aria-label="國定假日 CSV 匯入" style={{ marginTop: '16px', padding: '14px 16px', border: '1px solid #fed7aa', borderRadius: '10px', background: '#fffaf8', display: 'grid', gap: '10px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div>
+            <h3 style={{ margin: 0, color: '#9a3412', fontSize: '0.98rem' }}>匯入單一年度國定假日 CSV</h3>
+            <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#6b4f46' }}>每筆資料仍逐筆查詢、預覽與確認；預覽階段不寫入資料。</p>
+          </div>
+          <a href="https://data.gov.tw/dataset/14718" target="_blank" rel="noreferrer">下載官方國定假日資料</a>
+        </div>
+        <label style={{ display: 'grid', gap: '5px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
+          選擇 CSV 檔案
+          <input aria-label="選擇國定假日 CSV" type="file" accept=".csv,text/csv" onChange={(event) => void handleHolidayCsvChange(event)} disabled={csvBusy} />
+        </label>
+        {csvFileName && <small>檔案：{csvFileName}</small>}
+        {csvParsed && (
+          <div role="status" style={{ display: 'grid', gap: '7px', fontSize: '0.84rem' }}>
+            <span>年度：{csvParsed.year ?? '無法判定'} ｜ 可匯入：{csvParsed.rows.length} 筆 ｜ 空白週末：{csvParsed.blank_weekend_rows} 筆</span>
+            {csvParsed.issues.length > 0 && <ul style={{ margin: 0, paddingLeft: '20px', color: '#b91c1c' }}>{csvParsed.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button type="button" onClick={() => void previewHolidayCsvFile()} disabled={csvBusy || csvParsed.rows.length === 0 || csvParsed.issues.length > 0}>
+                {csvBusy ? '處理中…' : '預覽 CSV 變更'}
+              </button>
+            </div>
+          </div>
+        )}
+        {csvBatch && (
+          <div style={{ display: 'grid', gap: '8px', padding: '10px', background: '#f0fdf4', borderRadius: '8px' }}>
+            <strong>CSV 預覽完成：{csvBatch.entries.length} 筆逐筆變更、{csvBatch.skipped.length} 筆相同資料略過，寫入 0 筆。</strong>
+            {csvBatch.issues.length > 0 && <ul style={{ margin: 0, paddingLeft: '20px', color: '#b45309' }}>{csvBatch.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
+            <label style={{ display: 'grid', gap: '5px' }}>
+              套用原因
+              <input aria-label="CSV 套用原因" value={csvReason} maxLength={500} onChange={(event) => setCsvReason(event.target.value)} disabled={csvBusy} />
+            </label>
+            <button type="button" onClick={() => void applyHolidayCsvFile()} disabled={csvBusy || csvBatch.entries.length === 0 || !csvReason.trim()}>
+              {csvBusy ? '套用中…' : '確認套用 CSV（逐筆）'}
+            </button>
+          </div>
+        )}
+        {csvResult && (
+          <div role="status" style={{ margin: 0, color: csvResult.failures.length > 0 ? '#b45309' : '#047857' }}>
+            已處理 {csvResult.attempted} 筆：變更 {csvResult.applied} 筆、未變更 {csvResult.unchanged} 筆、相同資料略過 {csvResult.skipped} 筆、重播 {csvResult.replayed} 筆、失敗 {csvResult.failures.length} 筆；{csvResult.readback_status === 'observed' ? '已完成結果回讀。' : csvResult.readback_status === 'failed' ? '結果回讀失敗，請重新查詢。' : '尚未完成結果回讀。'}
+            {csvResult.readback_error && <div role="alert">回讀原因：{csvResult.readback_error}</div>}
+            {csvResult.failures.length > 0 && (
+              <ul style={{ margin: '6px 0 0', paddingLeft: '20px' }}>
+                {csvResult.failures.map((failure) => <li key={`${failure.holiday_date}:${failure.message}`}>{failure.holiday_date}：{failure.message}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+      </section>
 
       <div className="holiday-policy-horizon">
         <label>

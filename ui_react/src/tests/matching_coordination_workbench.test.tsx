@@ -8,6 +8,7 @@ import { matchingCoordinationClient } from '../api/matching_coordination/matchin
 import { MatchingCoordinationWorkbench } from '../components/MatchingCoordinationWorkbench';
 import {
   MATCHING_APPLY_RECEIPT,
+  MATCHING_PACKAGE,
   MATCHING_NO_CANDIDATE_PACKAGE,
   MATCHING_OPEN_PACKAGE,
   MATCHING_QUERY_DATA,
@@ -95,6 +96,53 @@ describe('M3 媒合協調操作台', () => {
     await screen.findByText(/目前仍停在步驟 2，沒有合法候選/);
     expect(screen.getByText(/不代表異常已解除/)).toBeInTheDocument();
     expect(apply).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it('首次非零 Preview 會把完整 package 帶入 caregiver Apply，完成後重新 Query', async () => {
+    const firstQuery = { ...MATCHING_QUERY_DATA, package: null };
+    const query = vi.spyOn(matchingCoordinationClient, 'query')
+      .mockResolvedValueOnce(firstQuery)
+      .mockResolvedValueOnce(MATCHING_QUERY_DATA);
+    vi.spyOn(matchingCoordinationClient, 'previewMatchingPackage')
+      .mockResolvedValue(MATCHING_PACKAGE);
+    const apply = vi.spyOn(matchingCoordinationClient, 'applyCaregiverSelection')
+      .mockResolvedValue(MATCHING_APPLY_RECEIPT);
+    render(<MatchingCoordinationWorkbench />);
+
+    fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: 'CASE-M3-FIRST' } });
+    fireEvent.click(screen.getByRole('button', { name: '查詢媒合資料' }));
+    await screen.findByText('尚未建立');
+    fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'previewMatchingPackage' } });
+    fireEvent.change(screen.getByLabelText('系統交換欄位'), {
+      target: {
+        value: JSON.stringify({
+          reason: 'confirm first package',
+          expected_source_versions: MATCHING_QUERY_DATA.source_versions,
+          criteria_snapshot_id: MATCHING_SNAPSHOT.snapshot_id,
+          required_service_dates: MATCHING_PACKAGE.required_service_dates,
+          segments: MATCHING_PACKAGE.segments,
+        }),
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '執行試算' }));
+    await screen.findByText('媒合方案');
+
+    fireEvent.change(screen.getByLabelText('目前要處理的業務'), { target: { value: 'applyCaregiverSelection' } });
+    const applyPayload = (screen.getByLabelText('系統交換欄位') as HTMLTextAreaElement).value;
+    expect(applyPayload).toContain(MATCHING_PACKAGE.package_id);
+    expect(applyPayload).toContain(MATCHING_PACKAGE.segments[0].staff_id.toString());
+    expect(applyPayload).toContain('required_service_dates');
+    fireEvent.click(screen.getByRole('checkbox', { name: '我已核對試算結果、來源版本與即將提交的決定' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認提交此業務決定' }));
+    await screen.findByText('媒合決定已完成並回讀');
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      package_id: MATCHING_PACKAGE.package_id,
+      package_version: MATCHING_PACKAGE.version,
+      segments: MATCHING_PACKAGE.segments,
+      required_service_dates: MATCHING_PACKAGE.required_service_dates,
+    }));
     expect(query).toHaveBeenCalledTimes(2);
   });
 

@@ -36,12 +36,13 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_detail_query.py tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_detail_query_repository.py tests\\test_order_detail_ui_client_boundary.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_detail_query.py tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_detail_query_repository.py",
+      "cd ui_react && npm test -- --run src/tests/orders_query_client.test.ts"
     ],
     "test_paths": [
       "tests/domains/orders/subsystems/orders/integration/test_order_detail_query.py",
       "tests/domains/orders/subsystems/orders/integration/test_order_detail_query_repository.py",
-      "tests/test_order_detail_ui_client_boundary.py"
+      "ui_react/src/tests/orders_query_client.test.ts"
     ]
   }
 }

@@ -13,6 +13,7 @@
 
 ## Modules
 - `admin-entry-target-control` — 管理端入口 target 的 file-backed state、CAS／replay 與 artifact health gate；path: `modules/admin-entry-target-control.md`
+- `authentication-session` — admin authentication/session validity, absolute expiry, revocation and enabled-actor checks；path: `modules/authentication-session.md`
 
 ## Contracts
 - `subsystems/access/` — Access workflows

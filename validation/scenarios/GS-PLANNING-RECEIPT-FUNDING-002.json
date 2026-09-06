@@ -9,11 +9,11 @@
   "coverage_scope": "supplemental",
   "coverage_ids": ["GS-01", "GS-02", "GS-03", "GSM-04", "GSM-06", "GSM-07", "GSM-08"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#GS-01",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#GS-02",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#GS-03",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#GSM-04",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#GSM-06"
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#GS-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#GS-02",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#GS-03",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#GSM-04",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#GSM-06"
   ],
   "root_facts": [
     "Eligibility-qualified official assignment service facts and a frozen subsidy unit-price policy.",

@@ -1,24 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ordersQueryClient } from '../api/orders/order_query_client';
-import { orderIntakeCompletionClient } from '../api/orders/order_intake_completion_client';
-import { OrdersManagementPage } from '../pages/OrdersManagementPage';
-
-vi.mock('../pages/OrdersPage', async () => {
-  const ReactModule = await import('react');
-  const queryModule = await import('../api/orders/order_query_client');
-  return {
-    OrdersPage: () => {
-      ReactModule.useEffect(() => {
-        void queryModule.loadAllOrderSummaries(
-          queryModule.ordersQueryClient.getOrderSummaries.bind(queryModule.ordersQueryClient),
-          { page_size: 200, lifecycle_scope: 'unfinished' },
-        );
-      }, []);
-      return <div data-testid="legacy-orders-page">legacy orders workbench</div>;
-    },
-  };
-});
+import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
+import { orderIntakeCompletionClient } from '../../../../../../../api/orders/order_intake_completion_client';
+import { OrdersIntakeRepairCard } from '../../../../../../../components/OrdersIntakeRepairCard';
 
 const ETAG = 'a'.repeat(64);
 const FP1 = '1'.repeat(64);
@@ -75,17 +59,15 @@ describe('Orders intake repair entry', () => {
       preview_fingerprint: FP1,
     });
 
-    render(<OrdersManagementPage />);
+    render(<OrdersIntakeRepairCard item={incompleteSummary} onChanged={vi.fn().mockResolvedValue(undefined)} />);
 
-    const region = await screen.findByRole('region', { name: '訂單缺件補齊' });
-    expect(within(region).getByText('CASE-153')).toBeInTheDocument();
-    expect(within(region).getByText('客戶姓名', { selector: 'li' })).toBeInTheDocument();
-    expect(within(region).getByText('約定服務開始日', { selector: 'li' })).toBeInTheDocument();
-    expect(within(region).getByText('服務天數', { selector: 'li' })).toBeInTheDocument();
-    expect(await within(region).findByText('服務資料已鎖定，目前不能完成進件補齊。')).toBeInTheDocument();
-    expect(within(region).getByRole('button', { name: '檢查服務資料補件' })).toBeDisabled();
-    expect(within(region).queryByText('CASE-OK')).not.toBeInTheDocument();
-    expect(screen.getByTestId('legacy-orders-page')).toBeInTheDocument();
+    expect(await screen.findByText('CASE-153')).toBeInTheDocument();
+    expect(screen.getByText('客戶姓名', { selector: 'li' })).toBeInTheDocument();
+    expect(screen.getByText('約定服務開始日', { selector: 'li' })).toBeInTheDocument();
+    expect(screen.getByText('服務天數', { selector: 'li' })).toBeInTheDocument();
+    expect(await screen.findByText('服務資料已鎖定，目前不能完成進件補齊。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '檢查服務資料補件' })).toBeDisabled();
+    expect(screen.queryByText('CASE-OK')).not.toBeInTheDocument();
   });
 
   it('applies typed terms repair, rechecks completion, restores normal status, and refreshes the list', async () => {
@@ -154,7 +136,7 @@ describe('Orders intake repair entry', () => {
       replayed: false,
     });
 
-    render(<OrdersManagementPage />);
+    render(<OrdersIntakeRepairCard item={pendingWithName} onChanged={vi.fn().mockResolvedValue(undefined)} />);
 
     fireEvent.change(await screen.findByLabelText('CASE-153 約定服務開始日'), {
       target: { value: '2026-09-10' },
@@ -168,6 +150,8 @@ describe('Orders intake repair entry', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '檢查服務資料補件' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '檢查服務資料補件' }));
     await screen.findByText('補件欄位：約定服務開始日、服務天數');
+    expect(screen.getByText('補件前：未填寫／未填寫 天')).toBeInTheDocument();
+    expect(screen.getByText('補件後：2026-09-10／30 天')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '確認補齊服務資料' }));
 
     await waitFor(() => expect(applyTerms).toHaveBeenCalledWith(
@@ -182,7 +166,6 @@ describe('Orders intake repair entry', () => {
       '補齊原始進件缺漏',
       expect.stringContaining('orders-intake-complete-CASE-153-'),
     ));
-    await waitFor(() => expect(screen.queryByRole('region', { name: '訂單缺件補齊' })).not.toBeInTheDocument());
-    expect(screen.getByTestId('legacy-orders-page')).toBeInTheDocument();
+    await waitFor(() => expect(applyCompletion).toHaveBeenCalled());
   });
 });

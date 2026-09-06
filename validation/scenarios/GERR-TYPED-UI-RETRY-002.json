@@ -3,12 +3,12 @@
   "scenario_id": "GERR-TYPED-UI-RETRY-002",
   "track": "B",
   "suite_id": "GERR",
-  "status": "bound",
+  "status": "specified",
   "requires_database": false,
   "test_kinds": ["process_network_harness"],
   "coverage_ids": ["GERR-01", "GERR-02", "GERR-03", "GERR-05"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#GERR-01"
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#GERR-01"
   ],
   "root_facts": [
     "Typed HTTP responses for unauthorized, forbidden, conflict and unavailable outcomes.",
@@ -35,12 +35,11 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_historical_reprocess_ui.py tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_auto_completion_api.py tests\\test_line_management_stage9.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\orders\\subsystems\\orders\\integration\\test_order_auto_completion_api.py tests\\domains\\external-integration\\subsystems\\line\\infrastructure\\test_line_management_rehearsal_stage9r.py"
     ],
     "test_paths": [
-      "tests/test_finance_import_historical_reprocess_ui.py",
       "tests/domains/orders/subsystems/orders/integration/test_order_auto_completion_api.py",
-      "tests/test_line_management_stage9.py"
+      "tests/domains/external-integration/subsystems/line/infrastructure/test_line_management_rehearsal_stage9r.py"
     ]
   }
 }

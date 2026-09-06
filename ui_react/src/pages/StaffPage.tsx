@@ -11,21 +11,8 @@ import {
 } from '../api/staff_directory/staff_directory_client';
 import { StaffDirectoryAbortedError } from '../api/staff_directory/staff_directory_errors';
 import { staffCasePreferenceSummaryClient } from '../api/staff_case_preference_summary/staff_case_preference_summary_client';
-import { staffPreferencesClient } from '../api/staff_preferences/staff_preferences_client';
-import {
-  StaffPreferencesAbortedError,
-  StaffPreferencesConflictError,
-  StaffPreferencesNetworkError,
-  StaffPreferencesTimeoutError,
-  StaffPreferencesUnavailableError,
-} from '../api/staff_preferences/staff_preferences_errors';
-import type {
-  StaffPreferenceProfile,
-  StaffPreferenceProfileApplyPayload,
-  StaffPreferenceProfileApplyReceipt,
-  StaffPreferenceProfilePreview,
-  StaffPreferenceValueInput,
-} from '../api/staff_preferences/staff_preferences_schemas';
+import { staffCasePreferenceManualClient } from '../api/staff_case_preferences/staff_case_preferences_client';
+import type { StaffCasePreferenceManualSnapshot, StaffCasePreferenceRelations } from '../api/staff_case_preferences/staff_case_preferences_schemas';
 import { staffAvailabilityClient } from '../api/staff_availability/staff_availability_client';
 import {
   StaffAvailabilityAbortedError,
@@ -60,10 +47,6 @@ import {
   adaptStaffCasePreferenceSummary,
   type StaffCasePreferenceSummaryViewModel,
 } from '../adapters/staff/staff_case_preference_summary_adapter';
-import {
-  adaptStaffPreferencesProfile,
-  type StaffPreferencesProfileViewModel,
-} from '../adapters/staff/staff_preferences_adapter';
 import {
   adaptStaffAvailabilityBlocks,
   type StaffAvailabilityBlockViewModel,
@@ -135,6 +118,85 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+const MANUAL_RELATION_KEYS = ['service_regions', 'service_periods', 'cooking_skills', 'holiday_availability', 'rest_schedule', 'baby_types'] as const;
+const MANUAL_RELATION_LABELS: Record<typeof MANUAL_RELATION_KEYS[number], string> = {
+  service_regions: '可承接區域', service_periods: '可承接時段', cooking_skills: '下廚能力',
+  holiday_availability: '特殊節日意願', rest_schedule: '週間服務／排休', baby_types: '可承接胎數／型態',
+};
+type ManualRelationKey = typeof MANUAL_RELATION_KEYS[number];
+const EMPTY_MANUAL_RELATIONS: StaffCasePreferenceRelations = {
+  service_regions: [], service_periods: [], cooking_skills: [],
+  holiday_availability: [], rest_schedule: [], baby_types: [],
+};
+
+export function updateManualDraftRow(current: StaffCasePreferenceRelations, key: ManualRelationKey, index: number, field: 'value' | 'detail', value: string): StaffCasePreferenceRelations {
+  const rows = current[key].map((item, rowIndex) => rowIndex === index ? { ...item, [field]: field === 'detail' ? (value || null) : value } : item);
+  return { ...current, [key]: rows };
+}
+
+export function appendManualDraftRow(current: StaffCasePreferenceRelations, key: ManualRelationKey): StaffCasePreferenceRelations {
+  return { ...current, [key]: [...current[key], { value: '', detail: null }] };
+}
+
+function requestRelations(draft: StaffCasePreferenceRelations): StaffCasePreferenceRelations {
+  return Object.fromEntries(MANUAL_RELATION_KEYS.map((key) => [
+    key,
+    draft[key].filter((item) => item.value.trim()).map((item) => ({ value: item.value.trim(), detail: item.detail?.trim() || null })),
+  ])) as StaffCasePreferenceRelations;
+}
+
+function displayRelations(values: readonly { value: string; detail: string | null }[]): string {
+  return values.map((item) => item.detail ? item.value + '（' + item.detail + '）' : item.value).join('、') || '（空）';
+}
+
+export function StaffCasePreferenceManualPreview({ preview }: { preview: StaffCasePreferenceManualSnapshot }) {
+  return <div data-testid="staff-case-preference-manual-preview">
+    <h4>六大接案能力變更預覽</h4>
+    {MANUAL_RELATION_KEYS.map((key) => <div key={key}>
+      <span>{MANUAL_RELATION_LABELS[key]}（變更前）: {displayRelations(preview.before[key])}</span>
+      {' '}
+      <span>{MANUAL_RELATION_LABELS[key]}（變更後）: {displayRelations(preview.after[key])}</span>
+    </div>)}
+  </div>;
+}
+
+export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.drawer.case-preference-manual' }: { staffId: number; surfaceId?: string }) {
+  const [snapshot, setSnapshot] = useState<StaffCasePreferenceManualSnapshot | null>(null);
+  const [draft, setDraft] = useState<StaffCasePreferenceRelations>(() => EMPTY_MANUAL_RELATIONS);
+  const [preview, setPreview] = useState<StaffCasePreferenceManualSnapshot | null>(null);
+  const [reason, setReason] = useState('');
+  const [status, setStatus] = useState('');
+  const loadEpoch = useRef(0);
+  const load = useCallback(async () => {
+    const epoch = ++loadEpoch.current;
+    setPreview(null);
+    const next = await staffCasePreferenceManualClient.query(staffId);
+    if (epoch !== loadEpoch.current) return;
+    setSnapshot(next);
+    setDraft(next.after);
+  }, [staffId]);
+  useEffect(() => { void load().catch((error: unknown) => setStatus(error instanceof Error ? error.message : '六大接案能力載入失敗。')); }, [load]);
+  const doPreview = async () => {
+    const epoch = loadEpoch.current;
+    setPreview(null);
+    try { const next = await staffCasePreferenceManualClient.preview(staffId, requestRelations(draft)); if (epoch === loadEpoch.current) { setPreview(next); setStatus('預覽已完成，尚未寫入。'); } } catch (error) { setStatus(error instanceof Error ? error.message : '預覽失敗。'); }
+  };
+  const doApply = async () => {
+    if (!snapshot || !preview?.preview_fingerprint || !reason.trim()) return;
+    setStatus('');
+    try { await staffCasePreferenceManualClient.apply(staffId, { ...requestRelations(draft), expected_snapshot_fingerprint: snapshot.snapshot_fingerprint, preview_fingerprint: preview.preview_fingerprint, reason: reason.trim() }, { idempotencyKey: nextIntentKey('staff-case-preference-manual') }); await load(); setStatus('已套用並重新查詢六大接案能力。'); } catch (error) { setStatus(error instanceof Error ? error.message : '套用失敗。'); }
+  };
+  return <section data-surface-id={surfaceId}>
+    <h3>六大接案能力人工維護</h3>
+    <p>只維護六個 canonical relation；交通方式仍由正式資格主檔唯讀提供。</p>
+    {MANUAL_RELATION_KEYS.map((key) => <fieldset key={key} style={{ marginBottom: '8px' }}><legend>{MANUAL_RELATION_LABELS[key]}</legend>{draft[key].map((item, index) => <div key={index}><input aria-label={MANUAL_RELATION_LABELS[key] + '值' + (index + 1)} value={item.value} onChange={(event) => { setPreview(null); setDraft((current) => updateManualDraftRow(current, key, index, 'value', event.target.value)); }} /><input aria-label={MANUAL_RELATION_LABELS[key] + '說明' + (index + 1)} value={item.detail ?? ''} onChange={(event) => { setPreview(null); setDraft((current) => updateManualDraftRow(current, key, index, 'detail', event.target.value)); }} /></div>)}<button type="button" onClick={() => { setPreview(null); setDraft((current) => appendManualDraftRow(current, key)); }}>新增一列</button></fieldset>)}
+    <label>變更原因<input aria-label="六大接案能力變更原因" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+    <div className="staff-action-pair"><button type="button" onClick={() => void doPreview()}>預覽六大能力</button><button type="button" disabled={!preview?.preview_fingerprint || !reason.trim()} onClick={() => void doApply()}>套用六大能力</button></div>
+    {preview && <StaffCasePreferenceManualPreview preview={preview} />}
+    {status && <p role="status">{status}</p>}
+  </section>;
+}
+
 function todayIsoDate(): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Taipei',
@@ -184,38 +246,12 @@ function profileItemsText(items: ReadonlyArray<{ value: string; detail: string |
     .join('、');
 }
 
-function isPreferencesOutcomeUnknown(error: unknown): boolean {
-  return error instanceof StaffPreferencesTimeoutError
-    || error instanceof StaffPreferencesNetworkError
-    || (error instanceof StaffPreferencesUnavailableError && error.retryable);
-}
-
 function isAvailabilityOutcomeUnknown(error: unknown): boolean {
   return error instanceof StaffAvailabilityUnavailableError && error.retryable;
 }
 
 function isLifecycleOutcomeUnknown(error: unknown): boolean {
   return error instanceof StaffLifecycleUnavailableError && error.retryable;
-}
-
-function preferenceText(value: StaffPreferencesProfileViewModel['preferredServiceDays']): string {
-  if (!value) return '尚未設定';
-  if (value.value.kind === 'integer_range') {
-    return `${value.value.minimum}–${value.value.maximum}`;
-  }
-  return value.value.values.join('、');
-}
-
-function preferenceRange(draft: readonly StaffPreferenceValueInput[], key: string): { minimum: number; maximum: number } | null {
-  const item = draft.find((candidate) => candidate.preference_key === key);
-  return item?.value.kind === 'integer_range'
-    ? { minimum: item.value.minimum, maximum: item.value.maximum }
-    : null;
-}
-
-function preferenceIntegerSet(draft: readonly StaffPreferenceValueInput[], key: string): readonly number[] {
-  const item = draft.find((candidate) => candidate.preference_key === key);
-  return item?.value.kind === 'integer_set' ? item.value.values : [];
 }
 
 function actionLocksNavigation(phase: ActionPhase): boolean {
@@ -244,10 +280,6 @@ export const StaffPage: React.FC = () => {
   const [directorySearch, setDirectorySearch] = useState<DirectorySearchState>({ status: 'idle', items: [] });
   const [selectedStaff, setSelectedStaff] = useState<StaffDirectoryCardViewModel | null>(null);
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
-  const [preferences, setPreferences] = useState<QueryState<StaffPreferencesProfileViewModel>>({ status: 'idle' });
-  const [preferencesRaw, setPreferencesRaw] = useState<StaffPreferenceProfile | null>(null);
-  const [preferenceDraft, setPreferenceDraft] = useState<StaffPreferenceValueInput[]>([]);
-  const [preferenceAction, setPreferenceAction] = useState<ActionState<StaffPreferenceProfilePreview, StaffPreferenceProfileApplyReceipt, StaffPreferenceProfileApplyPayload>>(initialActionState);
   const [availability, setAvailability] = useState<QueryState<StaffAvailabilityBlockViewModel[]>>({ status: 'idle' });
   const [availabilityKind, setAvailabilityKind] = useState<'create_long_leave' | 'create_pause'>('create_pause');
   const [availabilityReason, setAvailabilityReason] = useState('');
@@ -405,10 +437,6 @@ export const StaffPage: React.FC = () => {
 
   useEffect(() => {
     const { generation, controller } = beginSliceRequest();
-    setPreferences({ status: 'idle' });
-    setPreferencesRaw(null);
-    setPreferenceDraft([]);
-    setPreferenceAction(initialActionState());
     setAvailability({ status: 'idle' });
     setAvailabilityAction(initialActionState());
     setEndPauseBlockId(null);
@@ -422,22 +450,7 @@ export const StaffPage: React.FC = () => {
 
     const currentStaffId = selectedStaffId;
 
-    if (activeTab === 'preferences') {
-      setPreferences({ status: 'loading' });
-      void Promise.all([
-        staffPreferencesClient.queryDefinitions({ signal: controller.signal }),
-        staffPreferencesClient.queryProfile(currentStaffId, { signal: controller.signal }),
-      ]).then(([, profile]) => {
-        if (isCurrentSlice(generation, controller.signal)) {
-          setPreferencesRaw(profile);
-          setPreferenceDraft(profile.values.map((item) => ({ preference_key: item.preference_key, value: item.value })));
-          setPreferences({ status: 'ready', data: adaptStaffPreferencesProfile(profile) });
-        }
-      }).catch((error: unknown) => {
-        if (error instanceof StaffPreferencesAbortedError || !isCurrentSlice(generation, controller.signal)) return;
-        setPreferences({ status: 'error', message: error instanceof Error ? error.message : '偏好資料載入失敗。' });
-      });
-    } else if (activeTab === 'roster') {
+    if (activeTab === 'roster') {
       setCasePreferenceSummary({ status: 'loading' });
       void staffCasePreferenceSummaryClient.query(currentStaffId, { signal: controller.signal }).then((summary) => {
         if (isCurrentSlice(generation, controller.signal)) {
@@ -495,124 +508,6 @@ export const StaffPage: React.FC = () => {
       return () => controller.abort();
     }
   }, [selectedStaffId, drawerTab, rangeStart, rangeEnd]);
-
-  const requeryPreferences = async (staffId: number, signal?: AbortSignal, generation?: number): Promise<boolean> => {
-    const profile = await staffPreferencesClient.queryProfile(staffId, { signal });
-    if (generation !== undefined && !isCurrentSlice(generation, signal)) return false;
-    if (!mountedRef.current || signal?.aborted === true) return false;
-    setPreferencesRaw(profile);
-    setPreferenceDraft(profile.values.map((item) => ({ preference_key: item.preference_key, value: item.value })));
-    setPreferences({ status: 'ready', data: adaptStaffPreferencesProfile(profile) });
-    return true;
-  };
-
-  const updatePreferenceRange = (key: 'preferred_service_days' | 'daily_service_hours', edge: 'minimum' | 'maximum', value: string) => {
-    invalidateSlice();
-    setPreferenceAction((current) => ({ ...current, phase: 'editing', preview: null, payload: null, idempotencyKey: null, message: null }));
-    const parsed = Number(value);
-    if (!Number.isInteger(parsed) || parsed <= 0) return;
-    setPreferenceDraft((current) => {
-      const existing = current.find((item) => item.preference_key === key && item.value.kind === 'integer_range');
-      if (!existing) {
-        return [...current, {
-          preference_key: key,
-          value: { kind: 'integer_range', minimum: parsed, maximum: parsed },
-        }];
-      }
-      return current.map((item) => {
-        if (item.preference_key !== key || item.value.kind !== 'integer_range') return item;
-        return { ...item, value: { ...item.value, [edge]: parsed } };
-      });
-    });
-  };
-
-  const updatePreferenceIntegerSet = (key: 'daily_service_hours', value: string) => {
-    invalidateSlice();
-    setPreferenceAction((current) => ({ ...current, phase: 'editing', preview: null, payload: null, idempotencyKey: null, message: null }));
-    const parsed = value.split(',').map((item) => Number(item.trim()));
-    if (parsed.length === 0 || parsed.some((item) => !Number.isInteger(item) || item <= 0)) return;
-    setPreferenceDraft((current) => {
-      const existing = current.find((item) => item.preference_key === key && item.value.kind === 'integer_set');
-      if (!existing) {
-        return [...current, { preference_key: key, value: { kind: 'integer_set', values: parsed } }];
-      }
-      return current.map((item) => (
-        item.preference_key === key && item.value.kind === 'integer_set'
-          ? { ...item, value: { ...item.value, values: parsed } }
-          : item
-      ));
-    });
-  };
-
-  const refreshPreferencesAfterStale = async () => {
-    if (selectedStaffId === null) return;
-    const currentStaffId = selectedStaffId;
-    const { generation, controller } = beginSliceRequest();
-    setPreferences({ status: 'loading' });
-    try {
-      const updated = await requeryPreferences(currentStaffId, controller.signal, generation);
-      if (!updated || !isCurrentSlice(generation, controller.signal)) return;
-      setPreferenceAction(initialActionState());
-    } catch (error) {
-      if (!isCurrentSlice(generation, controller.signal)) return;
-      setPreferences({ status: 'error', message: errorMessage(error, '偏好重新查詢失敗。') });
-    }
-  };
-
-  const previewPreferences = async () => {
-    if (selectedStaffId === null || preferencesRaw === null) return;
-    const { generation, controller } = beginSliceRequest();
-    setPreferenceAction((current) => ({ ...current, phase: 'preview_loading', message: null }));
-    try {
-      const preview = await staffPreferencesClient.previewProfile(selectedStaffId, { values: preferenceDraft }, { signal: controller.signal });
-      if (!isCurrentSlice(generation, controller.signal)) return;
-      setPreferenceAction({ phase: 'preview_ready', preview, receipt: null, payload: null, idempotencyKey: null, message: null });
-    } catch (error) {
-      if (error instanceof StaffPreferencesAbortedError || !isCurrentSlice(generation, controller.signal)) return;
-      setPreferenceAction({ ...initialActionState(), phase: error instanceof StaffPreferencesConflictError ? 'stale' : 'error', message: errorMessage(error, '偏好預覽失敗。') });
-    }
-  };
-
-  const submitPreferences = async (retry = false) => {
-    if (selectedStaffId === null || preferencesRaw === null) return;
-    const currentStaffId = selectedStaffId;
-    const actionGeneration = sliceGenerationRef.current;
-    const previous = preferenceAction;
-    const preview = previous.preview;
-    const payload = retry ? previous.payload : preview ? {
-      values: preferenceDraft,
-      expected_version: preferencesRaw.version,
-      preview_fingerprint: preview.preview_fingerprint,
-      reason: '人工維護月嫂偏好',
-    } : null;
-    const idempotencyKey = retry ? previous.idempotencyKey : nextIntentKey('staff-preferences');
-    if (payload === null || idempotencyKey === null) return;
-    setPreferenceAction((current) => ({ ...current, phase: 'apply_pending', payload, idempotencyKey, message: null }));
-    try {
-      const receipt = await staffPreferencesClient.applyProfile(currentStaffId, payload, { idempotencyKey });
-      if (!isCurrentSlice(actionGeneration)) return;
-      setPreferenceAction((current) => ({ ...current, phase: 'receipt_received', receipt }));
-      const { generation, controller } = beginSliceRequest();
-      setPreferenceAction((current) => ({ ...current, phase: 'requery_loading' }));
-      try {
-        const updated = await requeryPreferences(currentStaffId, controller.signal, generation);
-        if (!updated || !isCurrentSlice(generation, controller.signal)) return;
-        setPreferenceAction((current) => ({ ...current, phase: 'observed', message: '已觀察最新偏好' }));
-      } catch (error) {
-        if (!isCurrentSlice(generation, controller.signal)) return;
-        setPreferenceAction((current) => ({ ...current, phase: 'observation_failed', message: `變更已受理，但重新查詢失敗：${errorMessage(error, '偏好資料查詢失敗。')}` }));
-      }
-    } catch (error) {
-      if (!isCurrentSlice(actionGeneration)) return;
-      if (error instanceof StaffPreferencesConflictError) {
-        setPreferenceAction((current) => ({ ...current, phase: 'stale', message: error.message, idempotencyKey: null }));
-      } else if (isPreferencesOutcomeUnknown(error)) {
-        setPreferenceAction((current) => ({ ...current, phase: 'outcome_unknown', message: `結果未知：${errorMessage(error, '請以相同內容重試。')}` }));
-      } else {
-        setPreferenceAction((current) => ({ ...current, phase: 'error', message: errorMessage(error, '偏好套用失敗。'), idempotencyKey: null }));
-      }
-    }
-  };
 
   const queryAvailability = async () => {
     if (selectedStaffId === null || !rangeStart || !rangeEnd) return;
@@ -868,14 +763,11 @@ export const StaffPage: React.FC = () => {
   };
 
   const staffItems = directory.items;
-  const preferredDaysRange = preferenceRange(preferenceDraft, 'preferred_service_days');
-  const dailyServiceHours = preferenceIntegerSet(preferenceDraft, 'daily_service_hours');
   const eligibleEndPauseBlocks = availability.status === 'ready'
     ? availability.data.filter((block) => isEligibleEndPauseBlock(block, selectedStaffId))
     : [];
   const selectedEndPauseBlock = eligibleEndPauseBlocks.find((block) => block.blockId === endPauseBlockId) ?? null;
-  const interactionLocked = actionLocksNavigation(preferenceAction.phase)
-    || actionLocksNavigation(availabilityAction.phase)
+  const interactionLocked = actionLocksNavigation(availabilityAction.phase)
     || actionLocksNavigation(lifecycleAction.phase);
   const endPauseDisabledReason = availabilityAction.phase === 'stale'
     ? '資料已變更，請先重新查詢不可服務期間。'
@@ -1148,40 +1040,10 @@ export const StaffPage: React.FC = () => {
       {activeTab === 'preferences' && (
         <section className="staff-workbench" data-surface-id="staff.preferences">
           <div className="staff-section-header">
-            <div><h2>🎯 月嫂配對偏好管理</h2><p>只編輯核准的服務天數與每日時數；預覽確認後才能套用。</p></div>
-            <div className="staff-action-pair">
-              <button type="button" className="staff-next-btn" onClick={() => { invalidateSlice(); setPreferenceAction((current) => ({ ...current, phase: 'editing', preview: null, payload: null, idempotencyKey: null, message: null })); }} disabled={preferences.status !== 'ready' || interactionLocked || preferenceAction.phase === 'stale'}>編輯核准偏好</button>
-              <button type="button" data-control-id="staff.preferences.preview" className="staff-next-btn" disabled={preferenceAction.phase !== 'editing'} onClick={() => void previewPreferences()}>預覽偏好變更</button>
-              <button type="button" data-control-id="staff.preferences.apply" className="staff-next-btn" disabled={preferenceAction.phase !== 'preview_ready'} onClick={() => void submitPreferences()}>套用偏好變更</button>
-            </div>
+            <div><h2>🎯 六大接案能力人工維護</h2><p>只維護六個 canonical relation；預覽確認後才能套用。</p></div>
           </div>
           {selectedStaffId === null && <div className="staff-directory-message">請先選擇服務人員。</div>}
-          {preferences.status === 'loading' && <div className="staff-directory-message" role="status">正在載入偏好資料…</div>}
-          {preferences.status === 'error' && <div className="staff-directory-message error" role="alert">{preferences.message}<button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((value) => value + 1)}>重試偏好資料</button></div>}
-          <div className="staff-preference-grid">
-            <div className="staff-form-card">
-              <label htmlFor="staff-preference-days">可承接服務天數範圍</label>
-              {preferenceAction.phase === 'editing' ? (
-                <div className="staff-range-query">
-                  <label>服務天數下限<input type="number" disabled={interactionLocked} value={preferredDaysRange?.minimum ?? ''} onChange={(event) => updatePreferenceRange('preferred_service_days', 'minimum', event.target.value)} /></label>
-                  <label>服務天數上限<input type="number" disabled={interactionLocked} value={preferredDaysRange?.maximum ?? ''} onChange={(event) => updatePreferenceRange('preferred_service_days', 'maximum', event.target.value)} /></label>
-                </div>
-              ) : <input id="staff-preference-days" value={preferences.status === 'ready' ? preferenceText(preferences.data.preferredServiceDays) : '—'} disabled readOnly />}
-            </div>
-            <div className="staff-form-card">
-              <label htmlFor="staff-preference-hours">可承接每日服務時數</label>
-              {preferenceAction.phase === 'editing' ? (
-                <input id="staff-preference-hours" aria-label="每日服務時數" value={dailyServiceHours.join(', ')} disabled={interactionLocked} onChange={(event) => updatePreferenceIntegerSet('daily_service_hours', event.target.value)} />
-              ) : <input id="staff-preference-hours" value={preferences.status === 'ready' ? preferenceText(preferences.data.dailyServiceHours) : '—'} disabled readOnly />}
-            </div>
-          </div>
-          {preferences.status === 'ready' && preferenceAction.phase !== 'editing' && (
-            <p className="staff-form-hint">目前為檢視模式；按「編輯核准偏好」後才能修改，預覽通過後才可套用。</p>
-          )}
-          {preferenceAction.preview && <div className="staff-action-status">預覽已完成：承接天數與每日工時變更已通過檢查，請確認後套用。</div>}
-          {preferenceAction.message && <div className={`staff-action-status ${preferenceAction.phase === 'error' || preferenceAction.phase === 'stale' ? 'error' : ''}`} role="status">{preferenceAction.message}</div>}
-          {preferenceAction.phase === 'stale' && <button type="button" className="staff-next-btn" onClick={() => void refreshPreferencesAfterStale()}>重新查詢偏好</button>}
-          {preferenceAction.phase === 'outcome_unknown' && <button type="button" className="staff-next-btn" onClick={() => void submitPreferences(true)}>以相同內容重試</button>}
+          {selectedStaffId !== null && <StaffCasePreferenceManualEditor staffId={selectedStaffId} surfaceId="staff.preferences.case-preference-manual" />}
         </section>
       )}
 
@@ -1469,48 +1331,7 @@ export const StaffPage: React.FC = () => {
                   )}
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <h3 style={{ margin: 0 }}>🎯 接案偏好與前置條件設定</h3>
-                  <div className="staff-action-pair">
-                    <button type="button" className="staff-next-btn" onClick={() => { invalidateSlice(); setPreferenceAction((current) => ({ ...current, phase: 'editing', preview: null, payload: null, idempotencyKey: null, message: null })); }} disabled={preferences.status !== 'ready' || interactionLocked || preferenceAction.phase === 'stale'}>編輯核准偏好</button>
-                    <button type="button" data-control-id="staff.preferences.preview" className="staff-next-btn" disabled={preferenceAction.phase !== 'editing'} onClick={() => void previewPreferences()}>預覽偏好變更</button>
-                    <button type="button" data-control-id="staff.preferences.apply" className="staff-next-btn" disabled={preferenceAction.phase !== 'preview_ready'} onClick={() => void submitPreferences()}>套用偏好變更</button>
-                  </div>
-                </div>
-
-                {preferences.status === 'loading' && <p role="status">正在載入偏好資料…</p>}
-                {preferences.status === 'error' && <div role="alert"><p>{preferences.message}</p><button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((v) => v + 1)}>重試偏好資料</button></div>}
-
-                <div className="staff-preference-grid">
-                  <div className="staff-form-card">
-                    <label htmlFor="staff-drawer-preference-days">📅 可承接服務天數範圍</label>
-                    {preferenceAction.phase === 'editing' ? (
-                      <div className="staff-range-query">
-                        <label>下限<input type="number" disabled={interactionLocked} value={preferredDaysRange?.minimum ?? ''} onChange={(event) => updatePreferenceRange('preferred_service_days', 'minimum', event.target.value)} /></label>
-                        <label>上限<input type="number" disabled={interactionLocked} value={preferredDaysRange?.maximum ?? ''} onChange={(event) => updatePreferenceRange('preferred_service_days', 'maximum', event.target.value)} /></label>
-                      </div>
-                    ) : <input id="staff-drawer-preference-days" value={preferences.status === 'ready' ? preferenceText(preferences.data.preferredServiceDays) : '—'} disabled readOnly />}
-                  </div>
-
-                  <div className="staff-form-card">
-                    <label htmlFor="staff-drawer-preference-hours">⏰ 可承接每日服務時數</label>
-                    {preferenceAction.phase === 'editing' ? (
-                      <input id="staff-drawer-preference-hours" aria-label="每日服務時數" value={dailyServiceHours.join(', ')} disabled={interactionLocked} onChange={(event) => updatePreferenceIntegerSet('daily_service_hours', event.target.value)} />
-                    ) : <input id="staff-drawer-preference-hours" value={preferences.status === 'ready' ? preferenceText(preferences.data.dailyServiceHours) : '—'} disabled readOnly />}
-                  </div>
-                </div>
-
-                <div className="staff-form-hint" style={{ marginTop: '12px', background: '#fff8f6', padding: '10px 14px', borderRadius: '8px', border: '1px solid #dec0b6' }}>
-                  💡 <strong>重要說明：</strong>月嫂的「🍳 下廚料理意願（葷素/藥膳）」與「👶 特殊家庭照護意願（雙胞胎/早產兒）」由【完整資格主檔】連動比對；此處可設定服務天數與每日工時區間。
-                </div>
-
-                {preferences.status === 'ready' && preferenceAction.phase !== 'editing' && (
-                  <p className="staff-form-hint">目前為檢視模式；按「編輯核准偏好」後才能修改，預覽通過後才可套用。</p>
-                )}
-                {preferenceAction.preview && <div className="staff-action-status">預覽已完成：承接天數與每日工時變更已通過檢查，請確認後套用。</div>}
-                {preferenceAction.message && <div className={`staff-action-status ${preferenceAction.phase === 'error' || preferenceAction.phase === 'stale' ? 'error' : ''}`} role="status">{preferenceAction.message}</div>}
-                {preferenceAction.phase === 'stale' && <button type="button" className="staff-next-btn" onClick={() => void refreshPreferencesAfterStale()}>重新查詢偏好</button>}
-                {preferenceAction.phase === 'outcome_unknown' && <button type="button" className="staff-next-btn" onClick={() => void submitPreferences(true)}>以相同內容重試</button>}
+                {selectedStaffId !== null && <StaffCasePreferenceManualEditor staffId={selectedStaffId} />}
               </section>
             )}
 

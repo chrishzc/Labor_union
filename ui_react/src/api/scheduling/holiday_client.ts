@@ -8,6 +8,7 @@ import { ApiDecodeError, ApiHttpError } from '../shared/typed_errors';
 import {
   HolidayApplyRequestSchema,
   HolidayCalendarSchema,
+  HolidayDateSchema,
   HolidayPreviewRequestSchema,
   HolidayPreviewResponseSchema,
   HolidayQueryResponseSchema,
@@ -54,6 +55,49 @@ export interface HolidayClient {
   ) => Promise<readonly HolidayRow[]>;
   preview(request: HolidayPreviewRequest, options?: HolidayRequestOptions): Promise<HolidayPreview>;
   apply(request: HolidayApplyRequest, options: HolidayApplyOptions): Promise<HolidayReceipt>;
+  parseCsv(csvText: string): HolidayCsvParseResult;
+  previewCsv(parsed: HolidayCsvParseResult, options?: HolidayRequestOptions): Promise<HolidayCsvBatchPreview>;
+  applyCsv(
+    batch: HolidayCsvBatchPreview,
+    reason: string,
+    options: HolidayApplyOptions,
+  ): Promise<HolidayCsvBatchResult>;
+}
+
+export interface HolidayCsvRow {
+  source_row: number;
+  holiday_date: string;
+  weekday: string;
+  is_holiday: true;
+  holiday_name: string;
+  note: string;
+}
+
+export interface HolidayCsvParseResult {
+  year: number | null;
+  rows: readonly HolidayCsvRow[];
+  blank_weekend_rows: number;
+  issues: readonly string[];
+}
+
+export interface HolidayCsvBatchPreview {
+  parsed: HolidayCsvParseResult;
+  entries: readonly { row: HolidayCsvRow; preview: HolidayPreview }[];
+  skipped: readonly { holiday_date: string; reason: string }[];
+  issues: readonly string[];
+  zero_write: true;
+}
+
+export interface HolidayCsvBatchResult {
+  attempted: number;
+  applied: number;
+  unchanged: number;
+  skipped: number;
+  replayed: number;
+  readback_status: 'not_run' | 'observed' | 'failed';
+  readback_error?: string;
+  receipts: readonly HolidayReceipt[];
+  failures: readonly { holiday_date: string; message: string }[];
 }
 
 let correlationSequence = 0;
@@ -274,6 +318,244 @@ export async function applyHolidayChange(
   }
 }
 
+function csvRecords(csvText: string): { records: string[][]; unclosed_quote: boolean } {
+  const text = csvText.replace(/^\uFEFF/, '');
+  const records: string[][] = [];
+  let record: string[] = [];
+  let field = '';
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === '"') {
+      if (quoted && text[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === ',' && !quoted) {
+      record.push(field.trim());
+      field = '';
+    } else if ((character === '\n' || character === '\r') && !quoted) {
+      if (character === '\r' && text[index + 1] === '\n') index += 1;
+      record.push(field.trim());
+      if (record.some((value) => value !== '')) records.push(record);
+      record = [];
+      field = '';
+    } else {
+      field += character;
+    }
+  }
+  if (field !== '' || record.length > 0) {
+    record.push(field.trim());
+    if (record.some((value) => value !== '')) records.push(record);
+  }
+  return { records, unclosed_quote: quoted };
+}
+
+function normalizedCsvHeader(value: string): string {
+  return value.trim().toLocaleLowerCase().replace(/[\s_\-]/g, '');
+}
+
+function csvColumn(headers: readonly string[], aliases: readonly string[]): number {
+  const normalized = headers.map(normalizedCsvHeader);
+  const normalizedAliases = aliases.map(normalizedCsvHeader);
+  return normalized.findIndex((header) => normalizedAliases.includes(header));
+}
+
+function csvValue(row: readonly string[], column: number): string {
+  return column === -1 ? '' : (row[column] ?? '').trim();
+}
+
+function parseHolidayFlag(value: string): boolean | null {
+  const normalized = value.trim().toLocaleLowerCase();
+  if (normalized === '2') return true;
+  if (normalized === '0') return false;
+  return null;
+}
+
+function isWeekend(isoDate: string): boolean {
+  const day = new Date(`${isoDate}T00:00:00Z`).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+export function parseHolidayCsv(csvText: string): HolidayCsvParseResult {
+  const parsedRecords = csvRecords(csvText);
+  if (parsedRecords.unclosed_quote) {
+    return { year: null, rows: [], blank_weekend_rows: 0, issues: ['CSV 引號未關閉，已拒絕匯入。'] };
+  }
+  const records = parsedRecords.records;
+  if (records.length === 0) {
+    return { year: null, rows: [], blank_weekend_rows: 0, issues: ['CSV 沒有資料。'] };
+  }
+  const headers = records[0];
+  const dateColumn = csvColumn(headers, ['date', '日期', '西元日期', 'holidaydate']);
+  const weekdayColumn = csvColumn(headers, ['weekday', '星期', '週']);
+  const holidayColumn = csvColumn(headers, ['isholiday', '是否放假', 'holiday', 'isrestday']);
+  const noteColumn = csvColumn(headers, ['note', '備註', '節日名稱', 'holidayname']);
+  const missing = [
+    dateColumn === -1 ? 'date/日期' : null,
+    weekdayColumn === -1 ? 'weekday/星期' : null,
+    holidayColumn === -1 ? 'is holiday/是否放假' : null,
+    noteColumn === -1 ? 'note/備註' : null,
+  ].filter((value): value is string => value !== null);
+  if (missing.length > 0) {
+    return {
+      year: null,
+      rows: [],
+      blank_weekend_rows: 0,
+      issues: [`CSV 缺少必要欄位：${missing.join('、')}。`],
+    };
+  }
+
+  const rows: HolidayCsvRow[] = [];
+  const issues: string[] = [];
+  const seen = new Set<string>();
+  let blankWeekendRows = 0;
+  let year: number | null = null;
+  records.slice(1).forEach((record, offset) => {
+    const sourceRow = offset + 2;
+    const holidayDate = csvValue(record, dateColumn);
+    const weekday = csvValue(record, weekdayColumn);
+    const flag = parseHolidayFlag(csvValue(record, holidayColumn));
+    const note = csvValue(record, noteColumn);
+    const dateResult = HolidayDateSchema.safeParse(holidayDate);
+    if (!dateResult.success) {
+      issues.push(`第 ${sourceRow} 列日期無效：${holidayDate || '(空白)'}`);
+      return;
+    }
+    const rowYear = Number(holidayDate.slice(0, 4));
+    if (year === null) year = rowYear;
+    if (rowYear !== year) {
+      issues.push(`第 ${sourceRow} 列與 CSV 其他資料不是同一年度。`);
+      return;
+    }
+    if (!weekday) {
+      issues.push(`第 ${sourceRow} 列缺少星期。`);
+      return;
+    }
+    if (flag === null) {
+      issues.push(`第 ${sourceRow} 列是否放假值無法辨識。`);
+      return;
+    }
+    if (isWeekend(holidayDate) && !note) {
+      blankWeekendRows += 1;
+      return;
+    }
+    if (!flag) return;
+    if (!note) {
+      issues.push(`第 ${sourceRow} 列國定假日缺少備註或節日名稱。`);
+      return;
+    }
+    if (seen.has(holidayDate)) {
+      issues.push(`第 ${sourceRow} 列日期重複：${holidayDate}。`);
+      return;
+    }
+    seen.add(holidayDate);
+    rows.push({
+      source_row: sourceRow,
+      holiday_date: holidayDate,
+      weekday,
+      is_holiday: true,
+      holiday_name: note,
+      note,
+    });
+  });
+  if (rows.length === 0 && issues.length === 0) issues.push('CSV 沒有可匯入的國定假日資料。');
+  return { year, rows, blank_weekend_rows: blankWeekendRows, issues };
+}
+
+export async function previewHolidayCsv(
+  parsed: HolidayCsvParseResult,
+  options?: HolidayRequestOptions,
+): Promise<HolidayCsvBatchPreview> {
+  const entries: { row: HolidayCsvRow; preview: HolidayPreview }[] = [];
+  const skipped: { holiday_date: string; reason: string }[] = [];
+  const issues = [...parsed.issues];
+  for (const row of parsed.rows) {
+    try {
+      const calendar = await queryHolidayCalendar(
+        { from_date: row.holiday_date, to_date: row.holiday_date },
+        options,
+      );
+      const existing = calendar.holidays.find((holiday) => holiday.holiday_date === row.holiday_date);
+      if (existing?.holiday_name === row.holiday_name) {
+        skipped.push({ holiday_date: row.holiday_date, reason: '既有政策相同，略過重複套用。' });
+        continue;
+      }
+      const preview = await previewHolidayChange({
+        action: 'upsert',
+        holiday_date: row.holiday_date,
+        holiday_name: row.holiday_name,
+        ...(existing ? { is_double_pay_default: existing.is_double_pay_default } : {}),
+        from_date: row.holiday_date,
+        to_date: row.holiday_date,
+      }, options);
+      if (calendar.planning_horizon.from_date !== row.holiday_date) {
+        issues.push(`${row.holiday_date} 回讀區間不一致。`);
+      }
+      entries.push({ row, preview });
+    } catch (error) {
+      issues.push(`${row.holiday_date} 預覽失敗：${error instanceof Error ? error.message : '未知錯誤'}。`);
+    }
+  }
+  return { parsed, entries, skipped, issues, zero_write: true };
+}
+
+export async function applyHolidayCsv(
+  batch: HolidayCsvBatchPreview,
+  reason: string,
+  options: HolidayApplyOptions,
+): Promise<HolidayCsvBatchResult> {
+  const baseKey = requireHeaderValue(options.idempotencyKey ?? '', 'Idempotency-Key');
+  const receipts: HolidayReceipt[] = [];
+  const failures: { holiday_date: string; message: string }[] = [];
+  const skipped = [...batch.skipped];
+  for (const entry of batch.entries) {
+    try {
+      const freshCalendar = await queryHolidayCalendar({
+        from_date: entry.row.holiday_date,
+        to_date: entry.row.holiday_date,
+      }, options);
+      const existing = freshCalendar.holidays.find((holiday) => holiday.holiday_date === entry.row.holiday_date);
+      if (existing?.holiday_name === entry.row.holiday_name) {
+        skipped.push({ holiday_date: entry.row.holiday_date, reason: '套用前回讀已相同，略過重複套用。' });
+        continue;
+      }
+      const freshPreview = await previewHolidayChange({
+        action: 'upsert',
+        holiday_date: entry.row.holiday_date,
+        holiday_name: entry.row.holiday_name,
+        ...(existing ? { is_double_pay_default: existing.is_double_pay_default } : {}),
+        from_date: freshCalendar.planning_horizon.from_date,
+        to_date: freshCalendar.planning_horizon.to_date,
+      }, options);
+      const receipt = await applyHolidayChange({
+        ...freshPreview.command,
+        expected_calendar_version: freshPreview.command.expected_calendar_version,
+        preview_fingerprint: freshPreview.preview_fingerprint,
+        reason,
+      }, { ...options, idempotencyKey: `${baseKey}-${entry.row.holiday_date}` });
+      receipts.push(receipt);
+    } catch (error) {
+      failures.push({
+        holiday_date: entry.row.holiday_date,
+        message: error instanceof Error ? error.message : '未知錯誤',
+      });
+    }
+  }
+  return {
+    attempted: batch.entries.length,
+    applied: receipts.filter((receipt) => receipt.changed).length,
+    unchanged: receipts.filter((receipt) => !receipt.changed).length,
+    skipped: skipped.length,
+    replayed: 0,
+    readback_status: 'not_run',
+    receipts,
+    failures,
+  };
+}
+
 class DefaultHolidayClient implements HolidayClient {
   public query(query: HolidayQuery, options?: HolidayRequestOptions): Promise<HolidayCalendar> {
     return queryHolidayCalendar(query, options);
@@ -289,6 +571,22 @@ class DefaultHolidayClient implements HolidayClient {
 
   public apply(request: HolidayApplyRequest, options: HolidayApplyOptions): Promise<HolidayReceipt> {
     return applyHolidayChange(request, options);
+  }
+
+  public parseCsv(csvText: string): HolidayCsvParseResult {
+    return parseHolidayCsv(csvText);
+  }
+
+  public previewCsv(parsed: HolidayCsvParseResult, options?: HolidayRequestOptions): Promise<HolidayCsvBatchPreview> {
+    return previewHolidayCsv(parsed, options);
+  }
+
+  public applyCsv(
+    batch: HolidayCsvBatchPreview,
+    reason: string,
+    options: HolidayApplyOptions,
+  ): Promise<HolidayCsvBatchResult> {
+    return applyHolidayCsv(batch, reason, options);
   }
 
   public getCalendar(fromDate: string, toDate: string, options?: HolidayRequestOptions): Promise<HolidayCalendar> {

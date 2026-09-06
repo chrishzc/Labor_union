@@ -464,6 +464,8 @@ export const ApplyCaregiverSelectionRequestSchema = z
     reason_code: identity.nullable().optional().default(null),
     affected_criteria: z.array(z.string()).optional().default([]),
     preview_fingerprint: sha256,
+    segments: z.array(MatchingPackageSegmentSelectionSchema).max(4).optional().default([]),
+    required_service_dates: z.array(isoDate).optional().default([]),
   })
   .strict();
 

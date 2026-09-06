@@ -18,7 +18,12 @@ from scripts.bootstrap_disposable_mysql_schema import (
     _schema_bootstrap_gate_errors,
 )
 from scripts.init_db import _schema_part_sort_key
-from scripts.verify_verification_scenarios import load_scenarios
+from scripts.verify_verification_scenarios import (
+    DEFAULT_BUSINESS_MATRIX_PATH,
+    load_scenarios,
+    matrix_requirement_ids,
+    verify_scenarios,
+)
 
 
 def test_connected_identity_query_uses_mapping_rows(monkeypatch):
@@ -143,6 +148,41 @@ def test_schema_bootstrap_gate_rejects_invalid_scenario_contracts():
     assert _schema_bootstrap_gate_errors(gate) == [
         "scenarios: missing business requirement mapping"
     ]
+
+
+def test_scenario_validation_uses_current_matrix_without_retired_spec_file():
+    retired_spec = Path(
+        "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md"
+    )
+    baseline = {
+        "tracks": [{
+            "id": "A",
+            "suites": [{"id": "ORD", "test_kinds": ["metadata_fixture"]}],
+        }]
+    }
+    scenario = {
+        "contract": "labor-union-verification-scenario/v1",
+        "scenario_id": "ORD-VALIDATION-001",
+        "track": "A",
+        "suite_id": "ORD",
+        "status": "specified",
+        "requires_database": False,
+        "test_kinds": ["metadata_fixture"],
+        "source_refs": [
+            f"{DEFAULT_BUSINESS_MATRIX_PATH.relative_to(Path.cwd())}#ORD-01"
+        ],
+        "coverage_ids": ["ORD-01"],
+        "root_facts": ["input"],
+        "forbidden_direct_seed": ["answer"],
+        "commands": ["validate"],
+        "expected": ["accepted"],
+        "receipt_requirements": ["result"],
+    }
+
+    assert DEFAULT_BUSINESS_MATRIX_PATH.is_file()
+    assert not retired_spec.exists()
+    assert matrix_requirement_ids()
+    assert verify_scenarios([scenario], baseline, {"ORD-01"}) == []
 
 
 def test_scenario_loader_excludes_phase6_requirements_artifact_without_weakening_contracts():

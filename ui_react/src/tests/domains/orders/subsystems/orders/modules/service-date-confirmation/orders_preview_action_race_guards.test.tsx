@@ -4,13 +4,13 @@
  */
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
-import { ordersMutationClient } from '../api/orders/order_mutation_client';
-import { ordersQueryClient } from '../api/orders/order_query_client';
-import { contractSigningClient } from '../api/orders/contract_signing_client';
-import { orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
-import { schedulePrecisionClient } from '../api/scheduling/schedule_precision_client';
-import { OrdersPage } from '../pages/OrdersPage';
+import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
+import { ordersMutationClient } from '../../../../../../../api/orders/order_mutation_client';
+import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
+import { contractSigningClient } from '../../../../../../../api/orders/contract_signing_client';
+import { orderStageProjectionClient } from '../../../../../../../api/orders/order_stage_projection_client';
+import { schedulePrecisionClient } from '../../../../../../../api/scheduling/schedule_precision_client';
+import { OrdersPage } from '../../../../../../../pages/OrdersPage';
 import {
   realisticActualStart,
   realisticOrderCalendarDetail,
@@ -18,13 +18,13 @@ import {
   realisticOrderSummaryPage,
   realisticOrderTerms,
   realisticContractCompletion,
-} from './fixtures/orders_real_data_fixtures';
-import { buildOrdersStageProjectionFixture } from './fixtures/orders_stage_projection_fixtures';
+} from '../../../../../../fixtures/orders_real_data_fixtures';
+import { buildOrdersStageProjectionFixture } from '../../../../../../fixtures/orders_stage_projection_fixtures';
 import {
   realisticOrderReopenPreviewView,
   realisticServiceDatePreviewView,
   realisticServiceDateQueryView,
-} from './fixtures/orders/order_mutation_contract_fixtures';
+} from '../../../../../../fixtures/orders/order_mutation_contract_fixtures';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -101,7 +101,7 @@ describe('Orders Preview action race guards', () => {
     });
     await waitFor(() => expect(ordersMutationClient.getServiceDates).toHaveBeenCalledTimes(1));
     await waitFor(() => {
-      const btn = screen.getByRole('button', { name: /檢查服務週次影響/ });
+      const btn = screen.getByRole('button', { name: '確認服務日期' });
       expect(btn).not.toBeDisabled();
     });
   }
@@ -111,7 +111,7 @@ describe('Orders Preview action race guards', () => {
     vi.mocked(ordersMutationClient.previewServiceDates).mockReturnValueOnce(pending.promise);
     await openServiceDates();
 
-    const previewBtn = screen.getByRole('button', { name: /檢查服務週次影響/ });
+    const previewBtn = screen.getByRole('button', { name: '確認服務日期' });
     await act(async () => {
       fireEvent.click(previewBtn);
     });
@@ -134,7 +134,7 @@ describe('Orders Preview action race guards', () => {
     vi.mocked(ordersMutationClient.previewServiceDates).mockReturnValueOnce(pending.promise);
     await openServiceDates();
 
-    const previewBtn = screen.getByRole('button', { name: /檢查服務週次影響/ });
+    const previewBtn = screen.getByRole('button', { name: '確認服務日期' });
     await act(async () => {
       fireEvent.click(previewBtn);
     });
@@ -177,7 +177,7 @@ describe('Orders Preview action race guards', () => {
     vi.mocked(ordersMutationClient.previewServiceDates).mockReturnValueOnce(pending.promise);
     await openServiceDates();
 
-    const previewBtn = screen.getByRole('button', { name: /檢查服務週次影響/ });
+    const previewBtn = screen.getByRole('button', { name: '確認服務日期' });
     await act(async () => {
       fireEvent.click(previewBtn);
     });
@@ -222,3 +222,4 @@ describe('Orders Preview action race guards', () => {
     expect(draft?.previewView).toBeNull();
   });
 });
+

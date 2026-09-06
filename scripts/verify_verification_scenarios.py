@@ -21,9 +21,8 @@ DEFAULT_SCENARIO_DIRECTORY = PROJECT_ROOT / "validation" / "scenarios"
 DEFAULT_BUSINESS_MATRIX_PATH = (
     PROJECT_ROOT
     / "document"
-    / "架構重整"
-    / "01_規格基線"
-    / "28_驗證情境與測試資料正式規格.md"
+    / "資料庫、資料處理"
+    / "新版測試資料規則矩陣_草案.md"
 )
 SCENARIO_CONTRACT = "labor-union-verification-scenario/v1"
 SCENARIO_STATUS = {"specified", "bound", "blocked"}
@@ -125,16 +124,15 @@ def _suite_test_kinds(baseline: dict[str, object]) -> dict[str, set[str]]:
 
 
 def matrix_requirement_ids(path: Path = DEFAULT_BUSINESS_MATRIX_PATH) -> set[str]:
-    """Read Track A coverage requirements from the formal verification spec."""
+    """Read Track A coverage requirements from the current validation matrix."""
     if not path.is_file():
         raise ValueError(f"business matrix is missing: {path}")
-    text = path.read_text(encoding="utf-8")
-    marker = "### 5.1"
-    boundary = "### 5.3"
-    if marker not in text or boundary not in text:
-        raise ValueError(f"business matrix section is missing: {path}")
-    business_section = text.split(marker, 1)[1].split(boundary, 1)[0]
-    return set(re.findall(r"\|\s*([A-Z]+-[A-Z0-9]+)\s*\|", business_section))
+    return set(
+        re.findall(
+            r"\|\s*([A-Z]+-[A-Z0-9]+)\s*\|",
+            path.read_text(encoding="utf-8"),
+        )
+    )
 
 
 def _scenario_errors(

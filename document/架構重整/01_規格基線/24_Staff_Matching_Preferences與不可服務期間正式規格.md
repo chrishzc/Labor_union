@@ -276,3 +276,10 @@ Case Import 的 Staff Historical BeClass adoption 只負責把已知 workbook so
 - 名冊／Matching 可以讀既有 canonical facts，但 read projection 不取得 writer ownership。
 - 六組 `[其它]` 已逐一綁定原母題；不存在共用 `other`。
 - 本節完成「包含／排除清單、每個包含主題 owner/data shape、read/write API boundary、六組 other ownership、未知不升格」五項 Issue #104 驗收；runtime、DB 與 production 均無變更。
+
+### T01-4/5 Staff 六母題人工維護邊界（2026-09-06）
+
+依最新人工裁決，六個 canonical relation facts 增加 Staff owner 的 typed Query／Preview／Apply：
+`staff_regions`、`staff_time_slots`、`staff_cooking_skills`、`staff_holiday_availability`、`staff_weekly_rest`、`staff_baby_types`。每次 Preview 綁定六關係 snapshot fingerprint；Apply 先鎖 Staff parent，再依 table name 排序鎖定六 relation rows，fresh-read 後驗證 fingerprint，並重用 `admin_command_receipts` 的新 command family。
+
+既有 numeric Staff Matching Profile QPA、各 relation 的 canonical adoption 與 transportation 的 `source_not_ready` 唯讀語意均保留；本邊界不新增 version table、schema、migration，也不把 raw workbook 或其他能力欄位升格為可寫偏好。

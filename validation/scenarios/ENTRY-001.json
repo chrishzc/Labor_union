@@ -3,7 +3,7 @@
   "scenario_id": "ENTRY-001",
   "track": "B",
   "suite_id": "ENTRY",
-  "status": "bound",
+  "status": "specified",
   "requires_database": false,
   "test_kinds": ["metadata_fixture"],
   "coverage_ids": ["ENTRY-01", "ENTRY-02", "ENTRY-03"],
@@ -35,9 +35,5 @@
     "queue validation result",
     "focused regression output",
     "entry identifiers only; no runtime telemetry or personal data"
-  ],
-  "execution": {
-    "runner": [".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_entrypoint_review_queue.py"],
-    "test_paths": ["tests/test_entrypoint_review_queue.py"]
-  }
+  ]
 }

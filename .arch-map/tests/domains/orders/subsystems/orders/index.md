@@ -6,7 +6,6 @@ test_root: tests/domains/orders/subsystems/orders/
 # Custom current presentation routing
 - Order Tracker summary/retry presentation: `modules/order-tracker-presentation.md`.
 integration_root: tests/domains/orders/subsystems/orders/integration/
-integration_root: ui_react/src/tests/orders_service_dates_flow.test.tsx
 fixtures_root: tests/fixtures/
 modules:
   historical-precision-restart:
@@ -20,7 +19,6 @@ modules:
   historical-stage-baseline:
     test_root: tests/domains/orders/subsystems/orders/modules/historical-stage-baseline/
   service-date-confirmation:
-    test_root: tests/domains/orders/subsystems/orders/modules/service-date-confirmation/
   actual-start:
     test_root: ui_react/src/tests/domains/orders/subsystems/orders/modules/actual-start/
   historical-adoption-presentation:
@@ -37,6 +35,7 @@ modules:
   order-card-projection:
     layout_status: custom_current
     test_root: ui_react/src/tests/orders_page_real_data.test.tsx
+    test_root: ui_react/src/tests/domains/orders/subsystems/orders/modules/order-card-projection/
   service-completion-presentation:
     layout_status: custom_current
     test_root: ui_react/src/tests/order_service_completion_actions.test.tsx

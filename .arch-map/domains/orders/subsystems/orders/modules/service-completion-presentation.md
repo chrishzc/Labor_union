@@ -8,7 +8,9 @@
 呈現Orders-owned服務完成的既有Preview／Confirm／Apply與完成回讀。一般畫面只顯示目前案件狀態、正式服務日、完成時刻、必要確認與closed結果；owner名稱、lifecycle controls、fingerprint、idempotency及receipt等技術資訊不得穿透。不得改寫服務完成 eligibility、Orders state machine或後續Finance／Payables結算責任。
 
 ## Implementation
-- primary: `ui_react/src/components/OrderServiceCompletionActions.tsx`
+- primary:
+  - `ui_react/src/components/OrderServiceCompletionActions.tsx`
+  - `ui_react/src/pages/OrdersPage.tsx`
 
 ## Contracts
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — Orders服務完成與lifecycle owner規則。

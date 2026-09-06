@@ -7,7 +7,9 @@ import { adaptOrderTrackerPage, type OrderTrackerPageViewModel, type TrackerOrde
 import {
   ORDER_STAGE_PROJECTION_UNAVAILABLE,
   formatProjectionTimestamp,
+  indexGovernmentSubsidyProjections,
   indexOperationalTimelines,
+  indexTerminalAggregates,
   stageByCode,
   stageAvailabilityLabel,
   stageStatusLabel,
@@ -17,8 +19,17 @@ import type { FormManagementContext } from '../api/orders/order_query_schemas';
 import { extractErrorMessage } from '../api/shared/typed_errors';
 import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
 import type { OrdersCardProjection } from '../api/orders/order_card_projection_schemas';
-import { loadAllOrderOperationalTimelines, orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
-import type { OrderOperationalTimelinePage } from '../api/orders/order_stage_projection_schemas';
+import {
+  loadAllGovernmentSubsidyProjections,
+  loadAllOrderOperationalTimelines,
+  loadAllTerminalAggregates,
+  orderStageProjectionClient,
+} from '../api/orders/order_stage_projection_client';
+import type {
+  GovernmentSubsidyProjectionPage,
+  OrderOperationalTimelinePage,
+  TerminalAggregatePage,
+} from '../api/orders/order_stage_projection_schemas';
 import { lineNotificationTimelineClient, type LineNotificationTimeline } from '../api/line/notification_timeline_client';
 import { Drawer } from '../components/Drawer';
 import { HistoricalCompletionPanel } from '../components/HistoricalCompletionPanel';
@@ -33,6 +44,16 @@ type TrackerQueryState =
 type StageProjectionQueryState =
   | { kind: 'loading' }
   | { kind: 'ready'; page: OrderOperationalTimelinePage; byCaseNo: ReadonlyMap<string, OrderOperationalTimelinePage['items'][number]> }
+  | { kind: 'unavailable'; message: string };
+
+type GovernmentSubsidyProjectionState =
+  | { kind: 'loading' }
+  | { kind: 'ready'; page: GovernmentSubsidyProjectionPage; byCaseNo: ReadonlyMap<string, GovernmentSubsidyProjectionPage['items'][number]> }
+  | { kind: 'unavailable'; message: string };
+
+type TerminalAggregateState =
+  | { kind: 'loading' }
+  | { kind: 'ready'; page: TerminalAggregatePage; byCaseNo: ReadonlyMap<string, TerminalAggregatePage['items'][number]> }
   | { kind: 'unavailable'; message: string };
 
 type CardProjectionState =
@@ -75,6 +96,27 @@ function businessOwnerLabel(owner: string): string {
     .filter(Boolean)
     .map((part) => OWNER_LABELS[part] ?? part)
     .join(' / ');
+}
+
+const GOVERNMENT_SUBSIDY_STATUS_LABELS: Readonly<Record<string, string>> = {
+  claim_lineage_missing: '缺少申請來源',
+  draft: '草稿',
+  submitted: '已送出',
+  approved: '已核准',
+  partially_paid: '部分已撥款',
+  paid: '已撥款',
+  pending_review: '待人工覆核',
+  offset_reserved: '已保留抵銷',
+  offset_applied: '已套用抵銷',
+  return_payable: '待返還',
+  partially_returned: '部分已返還',
+  returned: '已返還',
+};
+
+const ALL_SUBSIDY_STATUSES = '__all__';
+
+function governmentSubsidyStatusLabel(code: string): string {
+  return GOVERNMENT_SUBSIDY_STATUS_LABELS[code] ?? '待確認';
 }
 
 function currentStageLabel(timeline: OrderOperationalTimelinePage['items'][number]): string {
@@ -166,6 +208,8 @@ function formatFriendlyTimestamp(value: string | null): string {
 export const OrderTrackerPage: React.FC = () => {
   const [queryState, setQueryState] = useState<TrackerQueryState>({ kind: 'loading' });
   const [stageProjectionState, setStageProjectionState] = useState<StageProjectionQueryState>({ kind: 'loading' });
+  const [governmentSubsidyState, setGovernmentSubsidyState] = useState<GovernmentSubsidyProjectionState>({ kind: 'loading' });
+  const [terminalAggregateState, setTerminalAggregateState] = useState<TerminalAggregateState>({ kind: 'loading' });
   const [selectedOrder, setSelectedOrder] = useState<TrackerOrderCardViewModel | null>(null);
   const [drawerTab, setDrawerTab] = useState<'sop' | 'notifications'>('sop');
   const [cardProjectionState, setCardProjectionState] = useState<CardProjectionState>({ kind: 'idle' });
@@ -173,11 +217,13 @@ export const OrderTrackerPage: React.FC = () => {
   const [notificationTimelineState, setNotificationTimelineState] = useState<NotificationTimelineState>({ kind: 'idle' });
   const [searchQuery, setSearchQuery] = useState('');
   const [includeCompleted, setIncludeCompleted] = useState(false);
+  const [subsidySubstatusFilter, setSubsidySubstatusFilter] = useState('');
+  const subsidySubstatusFilterRef = useRef('');
   const generationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const drawerAbortRef = useRef<AbortController | null>(null);
 
-  const fetchTrackerData = useCallback(async () => {
+  const fetchTrackerData = useCallback(async (requestedSubstatusCode = subsidySubstatusFilterRef.current) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -186,17 +232,37 @@ export const OrderTrackerPage: React.FC = () => {
     setSelectedOrder(null);
     setQueryState({ kind: 'loading' });
     setStageProjectionState({ kind: 'loading' });
+    setGovernmentSubsidyState({ kind: 'loading' });
+    setTerminalAggregateState({ kind: 'loading' });
+    const subsidyModeEnabled = requestedSubstatusCode !== '';
+    const summaryLifecycleScope = subsidyModeEnabled || includeCompleted ? 'all' : 'unfinished';
+    const subsidyQuery = requestedSubstatusCode && requestedSubstatusCode !== ALL_SUBSIDY_STATUSES
+      ? { substatus_code: requestedSubstatusCode }
+      : {};
 
     try {
-      const [summaryResult, stageResult] = await Promise.allSettled([
+      const [summaryResult, stageResult, subsidyResult, terminalResult] = await Promise.allSettled([
         loadAllOrderSummaries(
           ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
-          { page_size: 200, lifecycle_scope: includeCompleted ? 'all' : 'unfinished' },
+          { page_size: 200, lifecycle_scope: summaryLifecycleScope },
           { signal: controller.signal },
         ),
         loadAllOrderOperationalTimelines(
           orderStageProjectionClient.getOperationalTimelines.bind(orderStageProjectionClient),
-          { page_size: 200, lifecycle_scope: includeCompleted ? 'all' : 'unfinished' },
+          { page_size: 200, lifecycle_scope: summaryLifecycleScope },
+          { signal: controller.signal },
+        ),
+        loadAllGovernmentSubsidyProjections(
+          orderStageProjectionClient.getGovernmentSubsidyProjections.bind(orderStageProjectionClient),
+          {
+            page_size: 200,
+            ...subsidyQuery,
+          },
+          { signal: controller.signal },
+        ),
+        loadAllTerminalAggregates(
+          orderStageProjectionClient.getTerminalAggregates.bind(orderStageProjectionClient),
+          { page_size: 200 },
           { signal: controller.signal },
         ),
       ]);
@@ -220,6 +286,32 @@ export const OrderTrackerPage: React.FC = () => {
           kind: 'unavailable',
           message: ORDER_STAGE_PROJECTION_UNAVAILABLE,
         });
+      }
+      if (subsidyResult.status === 'fulfilled') {
+        try {
+          setGovernmentSubsidyState({
+            kind: 'ready',
+            page: subsidyResult.value,
+            byCaseNo: indexGovernmentSubsidyProjections(subsidyResult.value),
+          });
+        } catch (error) {
+          setGovernmentSubsidyState({ kind: 'unavailable', message: error instanceof Error ? error.message : '政府補助投影資料無法使用。' });
+        }
+      } else {
+        setGovernmentSubsidyState({ kind: 'unavailable', message: '政府補助投影資料目前無法取得，請重新載入。' });
+      }
+      if (terminalResult.status === 'fulfilled') {
+        try {
+          setTerminalAggregateState({
+            kind: 'ready',
+            page: terminalResult.value,
+            byCaseNo: indexTerminalAggregates(terminalResult.value),
+          });
+        } catch (error) {
+          setTerminalAggregateState({ kind: 'unavailable', message: error instanceof Error ? error.message : '結案彙總資料無法使用。' });
+        }
+      } else {
+        setTerminalAggregateState({ kind: 'unavailable', message: '結案彙總資料目前無法取得，請重新載入。' });
       }
     } catch (error) {
       if (controller.signal.aborted || generation !== generationRef.current) return;
@@ -252,6 +344,12 @@ export const OrderTrackerPage: React.FC = () => {
   const selectedTimeline = selectedOrder && stageProjectionState.kind === 'ready'
     ? stageProjectionState.byCaseNo.get(selectedOrder.id) ?? null
     : null;
+  const selectedGovernmentSubsidy = selectedOrder && governmentSubsidyState.kind === 'ready'
+    ? governmentSubsidyState.byCaseNo.get(selectedOrder.id) ?? null
+    : null;
+  const selectedTerminalAggregate = selectedOrder && terminalAggregateState.kind === 'ready'
+    ? terminalAggregateState.byCaseNo.get(selectedOrder.id) ?? null
+    : null;
   const selectedCurrentStepOrdinal = selectedTimeline?.current_step_ordinal ?? undefined;
 
   const scrollToStage = (stageId: string) => {
@@ -259,6 +357,12 @@ export const OrderTrackerPage: React.FC = () => {
       behavior: 'smooth',
       block: 'start',
     });
+  };
+
+  const changeSubsidySubstatusFilter = (value: string) => {
+    subsidySubstatusFilterRef.current = value;
+    setSubsidySubstatusFilter(value);
+    void fetchTrackerData(value);
   };
 
   const trimmedQuery = searchQuery.trim().toLowerCase();
@@ -273,7 +377,16 @@ export const OrderTrackerPage: React.FC = () => {
     },
     [trimmedQuery]
   );
-  const visibleTrackerOrders = resolvedData?.unclassifiedOrders.filter(matchesSearch) ?? [];
+  const subsidyCaseNos = governmentSubsidyState.kind === 'ready'
+    ? new Set(governmentSubsidyState.page.items.map((item) => item.case_no))
+    : null;
+  const subsidyModeEnabled = subsidySubstatusFilter !== '';
+  const visibleTrackerOrders = resolvedData?.unclassifiedOrders
+    .filter(matchesSearch)
+    .filter((order) => {
+      if (!subsidyModeEnabled) return true;
+      return subsidyCaseNos?.has(order.id) ?? false;
+    }) ?? [];
   const visibleCancelledOrders = visibleTrackerOrders.filter(
     (order) => stageProjectionState.kind === 'ready'
       && stageProjectionState.byCaseNo.get(order.id)?.lifecycle_status === '訂單取消',
@@ -418,6 +531,21 @@ export const OrderTrackerPage: React.FC = () => {
               onChange={(event) => setIncludeCompleted(event.target.checked)}
             />
             <span>包含已完成案件</span>
+          </label>
+          <label className="tracker-completed-toggle" htmlFor="order-tracker-subsidy-filter">
+            <span>補助狀態</span>
+            <select
+              id="order-tracker-subsidy-filter"
+              data-control-id="order-tracker.government-subsidy.filter"
+              value={subsidySubstatusFilter}
+              onChange={(event) => changeSubsidySubstatusFilter(event.target.value)}
+            >
+              <option value="">不篩選補助</option>
+              <option value={ALL_SUBSIDY_STATUSES}>全部補助狀態</option>
+              {governmentSubsidyState.kind === 'ready' && Object.keys(governmentSubsidyState.page.substatus_counts).sort().map((code) => (
+                <option key={code} value={code}>{governmentSubsidyStatusLabel(code)}</option>
+              ))}
+            </select>
           </label>
           <button
             type="button"
@@ -776,6 +904,60 @@ export const OrderTrackerPage: React.FC = () => {
                   </dl>
                 </>
               )}
+            </section>
+
+            <section className="tracker-projection-grid" data-surface-id="order-tracker.government-subsidy-terminal">
+              <article className="tracker-summary-panel" data-surface-id="order-tracker.government-subsidy">
+                <div className="panel-header-row">
+                  <h3 className="panel-title">🏛️ 政府補助狀態</h3>
+                </div>
+                {governmentSubsidyState.kind === 'loading' && <p role="status">正在載入政府補助投影…</p>}
+                {governmentSubsidyState.kind === 'unavailable' && <p role="alert">{governmentSubsidyState.message}</p>}
+                {governmentSubsidyState.kind === 'ready' && selectedGovernmentSubsidy && (
+                  <>
+                    <dl className="tracker-drawer-facts">
+                      <div><dt>目前狀態</dt><dd>{governmentSubsidyStatusLabel(selectedGovernmentSubsidy.substatus_code)}</dd></div>
+                      <div><dt>資料負責</dt><dd>{businessOwnerLabel(selectedGovernmentSubsidy.source.owner)}</dd></div>
+                    </dl>
+                    {(selectedGovernmentSubsidy.blockers.length > 0 || selectedGovernmentSubsidy.warnings.length > 0) && (
+                      <ul>
+                        {[...selectedGovernmentSubsidy.blockers, ...selectedGovernmentSubsidy.warnings].map((notice) => (
+                          <li key={`${notice.code}:${notice.message}`}>{notice.message}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <p className="tracker-projection-counts">
+                      全部適用案件的補助統計：{Object.entries(governmentSubsidyState.page.substatus_counts).map(([code, count]) => `${governmentSubsidyStatusLabel(code)} ${count}`).join('、') || '無統計資料'}
+                    </p>
+                  </>
+                )}
+                {governmentSubsidyState.kind === 'ready' && !selectedGovernmentSubsidy && (
+                  <p>此案件目前沒有補助狀態資料。</p>
+                )}
+              </article>
+
+              <article className="tracker-summary-panel" data-surface-id="order-tracker.terminal-aggregate">
+                <div className="panel-header-row">
+                  <h3 className="panel-title">🏁 結案檢查項目</h3>
+                </div>
+                {terminalAggregateState.kind === 'loading' && <p role="status">正在載入結案彙總…</p>}
+                {terminalAggregateState.kind === 'unavailable' && <p role="alert">{terminalAggregateState.message}</p>}
+                {terminalAggregateState.kind === 'ready' && selectedTerminalAggregate && (
+                  <>
+                    <p><strong>適用：</strong>{selectedTerminalAggregate.applicable ? '是' : '否'}　<strong>完整結清：</strong>{selectedTerminalAggregate.fully_closed ? '是' : '否'}</p>
+                    <ul data-surface-id="order-tracker.terminal-aggregate.components">
+                      {selectedTerminalAggregate.components.map((component, index) => (
+                        <li key={component.code}>
+                          <strong>第 {index + 1} 項</strong> · {businessOwnerLabel(component.owner)} · {component.completed ? '已完成' : '未完成'}{component.reason ? ` · ${component.reason}` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+                {terminalAggregateState.kind === 'ready' && !selectedTerminalAggregate && (
+                  <p>此案件目前沒有結案彙總資料。</p>
+                )}
+              </article>
             </section>
 
             {/* Tabs (Underline Navigation Style) */}
