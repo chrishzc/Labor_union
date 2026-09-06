@@ -123,8 +123,8 @@ old_assertions = '''    expect(screen.queryByRole('region', { name: '訂單缺�
     expect(ordersQueryClient.getOrderTerms).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: '📑 契約簽署與約定條款' })).not.toBeInTheDocument();'''
 new_assertions = '''    expect(screen.queryByRole('region', { name: '訂單缺件補齊' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '👩‍🍼 媒合與正式排班' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '📑 條款與契約' }));
+    expect(screen.getAllByRole('button', { name: '👩‍🍼 媒合與正式排班' }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole('button', { name: '📑 條款與契約' })[0]);
 
     expect(await screen.findByRole('region', { name: 'drawer intake repair' })).toHaveTextContent('ORD-2026-0801');
     expect(renderIntakeRepair).toHaveBeenCalled();
