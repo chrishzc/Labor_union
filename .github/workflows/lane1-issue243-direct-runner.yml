@@ -20,6 +20,13 @@ jobs:
           python-version: "3.11"
       - name: Apply exact unresolved decisions
         run: python .github/lane1_issue243_patch.py
+      - name: Commit revision-locked Task97 inputs
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/generate_task97_commit_dispositions.py tests/test_task97_commit_dispositions.py
+          git commit -m "fix(ci): record current exact writer decisions (#243)"
       - name: Regenerate exact writer evidence
         shell: bash
         run: |
@@ -54,8 +61,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/lane1-issue243-once.yml .github/workflows/lane1-issue243-direct-runner.yml \
             .github/lane1_issue243_patch.py .github/lane1_issue243_direct_tests.py
-          git add scripts/generate_task97_commit_dispositions.py tests/test_task97_commit_dispositions.py \
-            document/架構重整/03_追蹤清單與證據/evidence/task97_repository_commit_dispositions_v1.json \
+          git add document/架構重整/03_追蹤清單與證據/evidence/task97_repository_commit_dispositions_v1.json \
             document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_candidate.findings.jsonl \
             document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_candidate.manifest.json \
             document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.records.jsonl \
