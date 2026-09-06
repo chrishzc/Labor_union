@@ -1,0 +1,52 @@
+name: Lane 1 issue 243 direct focused runner
+
+on:
+  push:
+    branches: [ "fix/current-regression-baseline-20260905" ]
+
+permissions:
+  contents: write
+
+jobs:
+  converge-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/current-regression-baseline-20260905
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Apply exact unresolved decisions from reviewed patch payload
+        run: python -c "import base64,pathlib; t=pathlib.Path('.github/workflows/lane1-issue243-once.yml').read_text(); p=t.split(\"b64.b64decode('\\\"\",1)[1].split(\"')\",1)[0]; exec(base64.b64decode(p))"
+      - name: Regenerate exact writer evidence
+        shell: bash
+        run: |
+          python scripts/generate_task97_commit_dispositions.py
+          python scripts/generate_writer_inventory_v3_candidate.py
+          python scripts/reconcile_writer_inventory_v3_dispositions.py
+          python scripts/validate_writer_inventory_v3_candidate.py
+          python scripts/validate_writer_inventory_v3_dispositions.py
+      - name: Run every focused test node without external installs
+        run: python -c "import base64; exec(base64.b64decode('aW1wb3J0IGltcG9ydGxpYgppbXBvcnQgaW5zcGVjdAppbXBvcnQgdGVtcGZpbGUKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpjbGFzcyBNb25rZXlQYXRjaDoKICAgIGRlZiBfX2luaXRfXyhzZWxmKToKICAgICAgICBzZWxmLl91bmRvID0gW10KCiAgICBkZWYgc2V0YXR0cihzZWxmLCBvYmosIG5hbWUsIHZhbHVlKToKICAgICAgICBvbGQgPSBnZXRhdHRyKG9iaiwgbmFtZSkKICAgICAgICBzZXRhdHRyKG9iaiwgbmFtZSwgdmFsdWUpCiAgICAgICAgc2VsZi5fdW5kby5hcHBlbmQobGFtYmRhIG9iaj1vYmosIG5hbWU9bmFtZSwgb2xkPW9sZDogc2V0YXR0cihvYmosIG5hbWUsIG9sZCkpCgogICAgZGVmIHNldGl0ZW0oc2VsZiwgbWFwcGluZywga2V5LCB2YWx1ZSk6CiAgICAgICAgZXhpc3RlZCA9IGtleSBpbiBtYXBwaW5nCiAgICAgICAgb2xkID0gbWFwcGluZy5nZXQoa2V5KQogICAgICAgIG1hcHBpbmdba2V5XSA9IHZhbHVlCiAgICAgICAgZGVmIHVuZG8obWFwcGluZz1tYXBwaW5nLCBrZXk9a2V5LCBleGlzdGVkPWV4aXN0ZWQsIG9sZD1vbGQpOgogICAgICAgICAgICBpZiBleGlzdGVkOgogICAgICAgICAgICAgICAgbWFwcGluZ1trZXldID0gb2xkCiAgICAgICAgICAgIGVsc2U6CiAgICAgICAgICAgICAgICBtYXBwaW5nLnBvcChrZXksIE5vbmUpCiAgICAgICAgc2VsZi5fdW5kby5hcHBlbmQodW5kbykKCiAgICBkZWYgdW5kbyhzZWxmKToKICAgICAgICBmb3IgYWN0aW9uIGluIHJldmVyc2VkKHNlbGYuX3VuZG8pOgogICAgICAgICAgICBhY3Rpb24oKQogICAgICAgIHNlbGYuX3VuZG8uY2xlYXIoKQoKZGVmIHJ1bl9tb2R1bGUobmFtZSk6CiAgICBtb2R1bGUgPSBpbXBvcnRsaWIuaW1wb3J0X21vZHVsZShuYW1lKQogICAgdGVzdHMgPSBbCiAgICAgICAgKHRlc3RfbmFtZSwgZm4pCiAgICAgICAgZm9yIHRlc3RfbmFtZSwgZm4gaW4gdmFycyhtb2R1bGUpLml0ZW1zKCkKICAgICAgICBpZiB0ZXN0X25hbWUuc3RhcnRzd2l0aCgidGVzdF8iKSBhbmQgY2FsbGFibGUoZm4pCiAgICBdCiAgICBmYWlsdXJlcyA9IFtdCiAgICBmb3IgdGVzdF9uYW1lLCBmbiBpbiB0ZXN0czoKICAgICAgICBzaWcgPSBpbnNwZWN0LnNpZ25hdHVyZShmbikKICAgICAgICBrd2FyZ3MgPSB7fQogICAgICAgIHBhdGNoID0gTm9uZQogICAgICAgIHRlbXAgPSBOb25lCiAgICAgICAgdHJ5OgogICAgICAgICAgICBpZiAidG1wX3BhdGgiIGluIHNpZy5wYXJhbWV0ZXJzOgogICAgICAgICAgICAgICAgdGVtcCA9IHRlbXBmaWxlLlRlbXBvcmFyeURpcmVjdG9yeSgpCiAgICAgICAgICAgICAgICBrd2FyZ3NbInRtcF9wYXRoIl0gPSBQYXRoKHRlbXAubmFtZSkKICAgICAgICAgICAgaWYgIm1vbmtleXBhdGNoIiBpbiBzaWcucGFyYW1ldGVyczoKICAgICAgICAgICAgICAgIHBhdGNoID0gTW9ua2V5UGF0Y2goKQogICAgICAgICAgICAgICAga3dhcmdzWyJtb25rZXlwYXRjaCJdID0gcGF0Y2gKICAgICAgICAgICAgdW5zdXBwb3J0ZWQgPSBzZXQoc2lnLnBhcmFtZXRlcnMpIC0gc2V0KGt3YXJncykKICAgICAgICAgICAgaWYgdW5zdXBwb3J0ZWQ6CiAgICAgICAgICAgICAgICByYWlzZSBSdW50aW1lRXJyb3IoZiJ1bnN1cHBvcnRlZCBmaXh0dXJlczoge3NvcnRlZCh1bnN1cHBvcnRlZCl9IikKICAgICAgICAgICAgZm4oKiprd2FyZ3MpCiAgICAgICAgICAgIHByaW50KGYiUEFTUyB7bmFtZX06Ont0ZXN0X25hbWV9IikKICAgICAgICBleGNlcHQgRXhjZXB0aW9uIGFzIGV4YzoKICAgICAgICAgICAgZmFpbHVyZXMuYXBwZW5kKCh0ZXN0X25hbWUsIHJlcHIoZXhjKSkpCiAgICAgICAgICAgIHByaW50KGYiRkFJTCB7bmFtZX06Ont0ZXN0X25hbWV9OiB7ZXhjIXJ9IikKICAgICAgICBmaW5hbGx5OgogICAgICAgICAgICBpZiBwYXRjaCBpcyBub3QgTm9uZToKICAgICAgICAgICAgICAgIHBhdGNoLnVuZG8oKQogICAgICAgICAgICBpZiB0ZW1wIGlzIG5vdCBOb25lOgogICAgICAgICAgICAgICAgdGVtcC5jbGVhbnVwKCkKICAgIGlmIGZhaWx1cmVzOgogICAgICAgIHJhaXNlIFN5c3RlbUV4aXQoZiJ7bmFtZX06IHtsZW4oZmFpbHVyZXMpfSBmYWlsZWQ6IHtmYWlsdXJlc30iKQogICAgcHJpbnQoZiJ7bmFtZX06IHtsZW4odGVzdHMpfSBwYXNzZWQiKQoKcnVuX21vZHVsZSgidGVzdHMudGVzdF90YXNrOTdfY29tbWl0X2Rpc3Bvc2l0aW9ucyIpCnJ1bl9tb2R1bGUoInRlc3RzLnRlc3Rfd3JpdGVyX2ludmVudG9yeV92M19kaXNwb3NpdGlvbnMiKQo='))"
+      - name: Verify Data Browser source lock and diff
+        shell: bash
+        run: |
+          python -c "import base64,pathlib; t=pathlib.Path('.github/workflows/lane1-issue243-once.yml').read_text(); ps=t.split(\"b64.b64decode('\\\"\")[2].split(\"')\",1)[0]; exec(base64.b64decode(ps))"
+          git diff --check
+          git status --short
+      - name: Commit convergence and remove one-time workflows
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/lane1-issue243-once.yml .github/workflows/lane1-issue243-direct-runner.yml
+          git add scripts/generate_task97_commit_dispositions.py tests/test_task97_commit_dispositions.py \
+            document/架構重整/03_追蹤清單與證據/evidence/task97_repository_commit_dispositions_v1.json \
+            document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_candidate.findings.jsonl \
+            document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_candidate.manifest.json \
+            document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.records.jsonl \
+            document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.manifest.json
+          git commit -m "fix(ci): converge exact writer dispositions (#243)"
+          git push origin HEAD:fix/current-regression-baseline-20260905
