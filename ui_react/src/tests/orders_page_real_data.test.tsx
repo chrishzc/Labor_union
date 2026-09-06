@@ -245,7 +245,7 @@ describe('OrdersPage query real-data slice', () => {
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0802');
-    fireEvent.click(screen.getByRole('button', { name: '開啟補件工作台' }));
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
     fireEvent.click(await screen.findByRole('button', { name: '下載／匯出此文件' }));
     await waitFor(() => expect(download).toHaveBeenCalledWith('ORD-2026-0801', 17));
   });
