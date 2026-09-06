@@ -349,47 +349,23 @@ const IntakeRepairCard: React.FC<IntakeRepairCardProps> = ({ item, onChanged }) 
 
 export const OrdersManagementPage: React.FC = () => {
   const [repairItems, setRepairItems] = useState<OrderSummaryItem[]>([]);
-  const [repairLoading, setRepairLoading] = useState(true);
-  const [repairError, setRepairError] = useState<string | null>(null);
-  const [ordersRevision, setOrdersRevision] = useState(0);
 
   useLayoutEffect(() => subscribeOrderSummarySnapshots(({ page, params }) => {
     if (params.lifecycle_scope !== 'unfinished' || params.query_text || params.after_case_no) return;
     setRepairItems(page.items.filter(needsIntakeRepair));
-    setRepairLoading(false);
-    setRepairError(null);
   }), []);
 
-  const handleChanged = async () => {
-    setRepairLoading(true);
-    setRepairError(null);
-    setOrdersRevision((current) => current + 1);
-  };
-
   return (
-    <div>
-      {(repairLoading || repairError || repairItems.length > 0) && (
-        <section
-          aria-label="訂單缺件補齊"
-          data-surface-id="orders.intake-repair"
-          style={{ marginBottom: 20, padding: 18, border: '1px solid #e7c8b5', borderRadius: 14, background: '#fffaf7' }}
-        >
-          <h2 style={{ marginTop: 0, marginBottom: 6, fontSize: '1.1rem' }}>訂單缺件補齊</h2>
-          <p style={{ marginTop: 0, color: '#6b5146' }}>
-            僅列出目前缺少必要進件資料的訂單。補件先 Preview，再以最新版本與稽核原因 Apply；完整訂單仍使用下方既有工作台。
-          </p>
-          {repairLoading && <div role="status">正在重新判定缺件…</div>}
-          {repairError && <div role="alert" style={{ color: '#991b1b' }}>{repairError}</div>}
-          {!repairLoading && !repairError && repairItems.length > 0 && (
-            <div style={{ display: 'grid', gap: 12 }}>
-              {repairItems.map((item) => <IntakeRepairCard key={item.case_no} item={item} onChanged={handleChanged} />)}
-            </div>
-          )}
-        </section>
-      )}
-
-      <OrdersPage key={ordersRevision} />
-    </div>
+    <OrdersPage
+      renderIntakeRepair={(order, onChanged) => {
+        const item = repairItems.find((candidate) => candidate.case_no === order.id);
+        return item ? (
+          <IntakeRepairCard item={item} onChanged={onChanged} />
+        ) : (
+          <div role="status">正在讀取此案件的最新缺件資料…</div>
+        );
+      }}
+    />
   );
 };
 

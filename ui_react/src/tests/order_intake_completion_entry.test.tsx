@@ -7,15 +7,44 @@ import { OrdersManagementPage } from '../pages/OrdersManagementPage';
 vi.mock('../pages/OrdersPage', async () => {
   const ReactModule = await import('react');
   const queryModule = await import('../api/orders/order_query_client');
+  const adapterModule = await import('../adapters/orders/order_summary_adapter');
   return {
-    OrdersPage: () => {
-      ReactModule.useEffect(() => {
-        void queryModule.loadAllOrderSummaries(
+    OrdersPage: ({ renderIntakeRepair }: {
+      renderIntakeRepair?: (
+        order: ReturnType<typeof adapterModule.adaptOrderSummaryItem>,
+        onChanged: () => Promise<void>,
+      ) => import('react').ReactNode;
+    }) => {
+      const [activeItem, setActiveItem] = ReactModule.useState<
+        Awaited<ReturnType<typeof queryModule.loadAllOrderSummaries>>['items'][number] | null
+      >(null);
+      const [open, setOpen] = ReactModule.useState(false);
+      const refresh = ReactModule.useCallback(async () => {
+        const page = await queryModule.loadAllOrderSummaries(
           queryModule.ordersQueryClient.getOrderSummaries.bind(queryModule.ordersQueryClient),
           { page_size: 200, lifecycle_scope: 'unfinished' },
         );
+        setActiveItem(page.items.find((item) => item.order_status === '待補件') ?? null);
+        return page;
       }, []);
-      return <div data-testid="legacy-orders-page">legacy orders workbench</div>;
+      ReactModule.useEffect(() => {
+        void refresh();
+      }, [refresh]);
+      return (
+        <>
+          <div data-testid="legacy-orders-page">legacy orders workbench</div>
+          {activeItem && (
+            <button type="button" onClick={() => setOpen(true)}>補齊進件資料</button>
+          )}
+          {open && activeItem && renderIntakeRepair?.(
+            adapterModule.adaptOrderSummaryItem(activeItem),
+            async () => {
+              await refresh();
+              setOpen(false);
+            },
+          )}
+        </>
+      );
     },
   };
 });
@@ -77,7 +106,9 @@ describe('Orders intake repair entry', () => {
 
     render(<OrdersManagementPage />);
 
-    const region = await screen.findByRole('region', { name: '訂單缺件補齊' });
+    expect(screen.queryByRole('region', { name: '訂單缺件補齊' })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '補齊進件資料' }));
+    const region = await screen.findByRole('article');
     expect(within(region).getByText('CASE-153')).toBeInTheDocument();
     expect(within(region).getByText('客戶姓名', { selector: 'li' })).toBeInTheDocument();
     expect(within(region).getByText('約定服務開始日', { selector: 'li' })).toBeInTheDocument();
@@ -156,6 +187,7 @@ describe('Orders intake repair entry', () => {
 
     render(<OrdersManagementPage />);
 
+    fireEvent.click(await screen.findByRole('button', { name: '補齊進件資料' }));
     fireEvent.change(await screen.findByLabelText('CASE-153 約定服務開始日'), {
       target: { value: '2026-09-10' },
     });

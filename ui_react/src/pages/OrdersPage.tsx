@@ -209,7 +209,14 @@ const sameCancellationApplyPayload = (
   right: OrderCancellationApplyPayload,
 ): boolean => JSON.stringify(left) === JSON.stringify(right);
 
-export const OrdersPage: React.FC = () => {
+interface OrdersPageProps {
+  renderIntakeRepair?: (
+    order: OrderSummaryCardViewModel,
+    onChanged: () => Promise<void>,
+  ) => React.ReactNode;
+}
+
+export const OrdersPage: React.FC<OrdersPageProps> = ({ renderIntakeRepair }) => {
   const [pageData, setPageData] = useState<OrderSummaryPageViewModel | null>(null);
   const [stagePage, setStagePage] = useState<OrderOperationalTimelinePage | null>(null);
   const [stageIndex, setStageIndex] = useState<ReadonlyMap<string, OrderOperationalTimeline>>(new Map());
@@ -1618,6 +1625,10 @@ export const OrdersPage: React.FC = () => {
     setLeaveDates([]);
     setCustomWorkDates([]);
     setLeaveDateDraft('');
+    if (isOrderIntakeIncomplete(order) && renderIntakeRepair) {
+      setDrawerLoading(false);
+      return;
+    }
     loadCardProjection(order.id);
 
     if (initialTab === 'calendar') {
@@ -2115,8 +2126,18 @@ export const OrdersPage: React.FC = () => {
                   </button>
                 </div>
               ) : isOrderIntakeIncomplete(order) ? (
-                <div className="order-card-actions" role="status">
-                  案件仍待補齊姓名、服務日期等進件資料；完成補件後即可操作契約、媒合、排班與取消流程。
+                <div className="order-card-actions">
+                  <div role="status">
+                    案件仍待補齊姓名、服務日期等進件資料；完成補件後即可操作契約、媒合、排班與取消流程。
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-secondary-action"
+                    data-control-id="orders.card.intake-repair"
+                    onClick={() => handleOpenContractDrawer(order, 'contract_terms')}
+                  >
+                    補齊進件資料
+                  </button>
                 </div>
               ) : (
               <div className="order-card-actions">
@@ -2909,6 +2930,13 @@ export const OrdersPage: React.FC = () => {
       >
         {(contractOrder || dateConfirmOrder) && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            {isOrderIntakeIncomplete((contractOrder || dateConfirmOrder)!) && renderIntakeRepair ? (
+              renderIntakeRepair((contractOrder || dateConfirmOrder)!, async () => {
+                await fetchOrderSummaries();
+                closeContractDrawer();
+              })
+            ) : (
+              <>
             {renderCardProjection()}
 
             {/* Top 4-Column Fact Strip */}
@@ -4024,6 +4052,8 @@ export const OrdersPage: React.FC = () => {
                   </div>
                 </div>
               </div>
+            )}
+              </>
             )}
           </div>
         )}

@@ -1265,4 +1265,23 @@ describe('OrdersPage query real-data slice', () => {
       { staff_id: 8893, start_date: '2026-08-16', end_date: '2026-08-30' },
     ]);
   });
+
+  it('opens incomplete intake repair inside the existing Orders drawer', async () => {
+    const renderIntakeRepair = vi.fn((order: { id: string }) => (
+      <section aria-label="drawer intake repair">補件案件：{order.id}</section>
+    ));
+
+    render(<OrdersPage renderIntakeRepair={renderIntakeRepair} />);
+    await screen.findByText('ORD-2026-0801');
+
+    expect(screen.queryByRole('region', { name: '訂單缺件補齊' })).not.toBeInTheDocument();
+    const intakeButton = screen.getByRole('button', { name: '補齊進件資料' });
+    fireEvent.click(intakeButton);
+
+    expect(await screen.findByRole('region', { name: 'drawer intake repair' })).toHaveTextContent('ORD-2026-0801');
+    expect(renderIntakeRepair).toHaveBeenCalled();
+    expect(ordersQueryClient.getOrderTerms).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '📑 契約簽署與約定條款' })).not.toBeInTheDocument();
+  });
+
 });
