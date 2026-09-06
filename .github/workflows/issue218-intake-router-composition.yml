@@ -1,0 +1,41 @@
+name: Issue 218 intake router composition
+
+on:
+  push:
+    branches: ["fix/issue-218-intake-drawer-20260906"]
+    paths: [".github/workflows/issue218-intake-router-composition.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Apply composition repair
+        run: python scripts/issue218_mount_intake_router_tmp.py
+      - name: Verify focused route composition
+        run: |
+          python -m pytest -q tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/unit/test_order_intake_route_composition.py
+          python -m pytest -q tests/domains/orders/subsystems/orders/modules/intake-terms-bootstrap/unit/test_order_intake_repository_boundary.py
+          git diff --check
+      - name: Commit verified repair
+        run: |
+          rm scripts/issue218_mount_intake_router_tmp.py .github/workflows/issue218-intake-router-composition.yml
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(api): mount Orders intake repair routes"
+          git push origin HEAD:fix/issue-218-intake-drawer-20260906
