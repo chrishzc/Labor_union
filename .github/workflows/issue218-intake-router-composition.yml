@@ -39,3 +39,4 @@ jobs:
           git add -A
           git commit -m "fix(api): mount Orders intake repair routes"
           git push origin HEAD:fix/issue-218-intake-drawer-20260906
+# rerun after path-only composition oracle
