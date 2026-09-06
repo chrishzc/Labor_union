@@ -8,8 +8,8 @@
   "covered_candidate_migrate_then_remove_count": 0,
   "approved_to_remove_count": 0,
   "final_disposition_counts": {
-    "needs_decision": 287,
-    "retain_canonical": 1001,
-    "retain_restricted": 188
+    "needs_decision": 292,
+    "retain_canonical": 999,
+    "retain_restricted": 185
   }
 }
