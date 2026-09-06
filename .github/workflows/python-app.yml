@@ -27,3 +27,15 @@ jobs:
       - name: Check tracked Python files for syntax errors
         shell: bash
         run: git ls-files -z -- '*.py' | xargs -0 -r python -m py_compile
+
+  issue-228-focused:
+    name: Issue 228 focused resource lifetime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Run issue 228 focused resource lifetime checks
+        run: python tests/domains/external-integration/subsystems/line/regression/test_seed_line_test_fixtures_resource_lifetime.py
