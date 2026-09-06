@@ -169,8 +169,10 @@ describe('Service Dates formal assignment gate', () => {
     });
   }
 
-  it('正式 assignment 存在時不依摘要 staff_name，仍以同案件 Actual Start 作為精算起點', async () => {
+  it('正式 assignment 存在時不依摘要 staff_name，仍以同案件 Actual Start 作為精算起點且不寫入排班', async () => {
     const calculateSpy = vi.mocked(schedulePrecisionClient.calculate);
+    const previewSpy = vi.spyOn(ordersMutationClient, 'previewServiceDates');
+    const applySpy = vi.spyOn(ordersMutationClient, 'applyServiceDates');
 
     await openCalendar();
 
@@ -181,6 +183,8 @@ describe('Service Dates formal assignment gate', () => {
       service_mode: '週休2日',
       custom_leave_dates: [],
     });
+    expect(previewSpy).not.toHaveBeenCalled();
+    expect(applySpy).not.toHaveBeenCalled();
   });
 
   it('正式 assignment 存在但 Actual Start unavailable 時 fail closed，不退回 Service Dates 起點', async () => {
