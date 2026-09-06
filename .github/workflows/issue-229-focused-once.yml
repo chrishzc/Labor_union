@@ -1,0 +1,48 @@
+name: Issue 229 focused acceptance
+
+on:
+  push:
+    branches: [test/issue-229-close-batch-transaction]
+    paths: [.github/workflows/issue-229-focused-once.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  close-batch-transaction:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_ROOT_HOST: '%'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      APP_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ci-root-password
+      DB_DATABASE: lu_test_issue229_close_batch
+      DB_SSL_MODE: disabled
+      LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
+      LABOR_UNION_TEST_MYSQL_PORT: 3306
+      LABOR_UNION_TEST_MYSQL_USER: root
+      LABOR_UNION_TEST_MYSQL_PASSWORD: ci-root-password
+      LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_issue229_close_batch
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install existing application dependencies and pytest
+        run: python -m pip install -r requirements.txt pytest
+      - name: Run focused issue 229 disposable-MySQL acceptance
+        run: python -m pytest -q --strict-markers tests/test_weekly_report_close_batch_transaction.py
