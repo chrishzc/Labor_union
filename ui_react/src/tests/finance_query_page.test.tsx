@@ -136,6 +136,49 @@ function installImportHttp(
       expect(JSON.parse(String(init?.body))).toEqual({ batch_identity: plan.batch_identity });
       return importResponse(plan);
     }
+    if (path.includes('/manifest')) {
+      return importResponse({
+        batch_id: 901,
+        batch_identity: plan.batch_identity,
+        format_id: 'fixture',
+        source_file: 'finance.xlsx',
+        sheet_name: 'Sheet1',
+        header_row: 1,
+        source_row_count: plan.counts.source_rows,
+        status: 'previewed',
+        batch_version: plan.batch_version,
+        source_content_digest: plan.source_content_digest,
+        classifier_version: plan.classifier_version,
+        fingerprint_version: plan.fingerprint_version,
+        canonical_row_count: plan.counts.canonical_created,
+        occurrence_count: plan.counts.source_rows,
+        review_count: plan.counts.manual_review,
+        dispatch_event_count: 0,
+        reconciliation_receipt_count: 0,
+        created_at: '2026-09-07T00:00:00+08:00',
+        completed_at: null,
+      });
+    }
+    if (path.includes('/review-rows')) {
+      return importResponse({
+        items: Array.from({ length: plan.counts.manual_review }, (_, offset) => ({
+          row_id: 901 + offset,
+          row_identity: `ROW-REVIEW-${901 + offset}`,
+          transaction_date: '2026-09-01',
+          direction: 'credit',
+          amount_ntd: 1000 + offset,
+          classification_type: 'client_receipt',
+          disposition: 'manual_review',
+          reconciliation_status: 'unmatched',
+          source_sheet: 'Sheet1',
+          source_row: 2 + offset,
+          occurrence_count: 1,
+          available_actions: [],
+          created_at: '2026-09-07T00:00:00+08:00',
+        })),
+        next_after_row_id: null,
+      });
+    }
     if (path.endsWith('/batches/apply')) {
       const headers = new Headers(init?.headers);
       applyRequests.push({ body: JSON.parse(String(init?.body)),
@@ -165,6 +208,10 @@ async function uploadAndPreview(file = IMPORT_FILE): Promise<void> {
   await waitFor(() => expect(screen.getByRole('button', { name: '預覽匯入結果' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '預覽匯入結果' }));
   await screen.findByText('可自動入帳', { selector: '.finance-kpi-label' });
+  await waitFor(() => {
+    const item = screen.getByText('待人工確認', { selector: '.finance-kpi-label' }).parentElement;
+    expect(item?.querySelector('.finance-kpi-value')?.textContent).not.toBe('—');
+  });
 }
 
 function assertPreviewCounts(plan: Pick<FinanceImportBatchPreview, 'counts'>): void {
