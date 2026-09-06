@@ -32,3 +32,4 @@ jobs:
           git add -A
           git commit -m "fix(orders): keep owner workflows beside intake repair"
           git push origin HEAD:fix/issue-218-intake-drawer-20260906
+# rerun after selector scoping
