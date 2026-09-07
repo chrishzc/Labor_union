@@ -58,7 +58,7 @@ describe('Finance query request lifecycle', () => {
     vi.spyOn(accountsPayableQueryClient, 'query').mockResolvedValue(ACCOUNTS_PAYABLE_RESPONSE.data);
     vi.spyOn(financeImportQueryClient, 'listBatches').mockResolvedValue(FINANCE_BATCH_RESPONSE.data);
     vi.spyOn(financeImportQueryClient, 'getManifest').mockResolvedValue(FINANCE_MANIFEST_RESPONSE.data);
-    vi.spyOn(financeImportQueryClient, 'listReviewRows').mockResolvedValue({ items: [], next_after_row_id: null });
+    vi.spyOn(financeImportQueryClient, 'listReviewRows').mockResolvedValue({ batch_identity: 'BATCH-FIN-021', source_reviews: [], next_after_source_review_id: null, items: [], next_after_row_id: null });
     vi.spyOn(financeImportQueryClient, 'listReprocessRuns').mockResolvedValue({ items: [], next_before_run_id: null });
   });
 

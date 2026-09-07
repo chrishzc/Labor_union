@@ -27,6 +27,7 @@ type FinanceImportReviewSnapshot = {
   batchIdentity: string;
   reviewCount: number;
   items: Awaited<ReturnType<typeof financeImportQueryClient.listReviewRows>>['items'];
+  sourceReviews: Awaited<ReturnType<typeof financeImportQueryClient.listReviewRows>>['source_reviews'];
 };
 const FINANCE_OUTCOME_POLL_LIMIT = 10;
 const FINANCE_OUTCOME_POLL_DELAY_MS = 500;
@@ -207,18 +208,32 @@ export const FinancePage: React.FC = () => {
     const request = start('source-review');
     setSourceReview({ kind: 'loading' });
     try {
-      const [manifest, page] = await Promise.all([
+      const [manifest, firstPage] = await Promise.all([
         financeImportQueryClient.getManifest(batchIdentity, { signal: request.controller.signal }),
         financeImportQueryClient.listReviewRows(batchIdentity, { signal: request.controller.signal }),
       ]);
       if (!current('source-review', request.sequence, request.controller)) return;
-      if (page.next_after_row_id !== null || page.items.length !== manifest.review_count) {
+      let page = firstPage;
+      const items = [...page.items];
+      const sourceReviews = [...page.source_reviews];
+      while (page.next_after_row_id !== null || page.next_after_source_review_id !== null) {
+        page = await financeImportQueryClient.listReviewRows(batchIdentity, {
+          signal: request.controller.signal,
+          afterRowId: items.at(-1)?.row_id,
+          afterSourceReviewId: sourceReviews.at(-1)?.review_id,
+        });
+        if (!current('source-review', request.sequence, request.controller)) return;
+        items.push(...page.items);
+        sourceReviews.push(...page.source_reviews);
+      }
+      if (items.length + sourceReviews.length !== manifest.review_count) {
         setSourceReview({ kind: 'error', message: '人工確認清單與批次統計不一致，請重新查詢。' });
         return;
       }
+      const manualItems = items.filter((row) => row.disposition === 'manual_review');
       setSourceReview({
         kind: 'ready',
-        data: { batchIdentity: manifest.batch_identity, reviewCount: manifest.review_count, items: page.items },
+        data: { batchIdentity: manifest.batch_identity, reviewCount: manualItems.length + sourceReviews.length, items: manualItems, sourceReviews },
       });
     } catch (error) {
       if (current('source-review', request.sequence, request.controller)) {
@@ -238,16 +253,19 @@ export const FinancePage: React.FC = () => {
   };
   const previewImportedBatch = async () => {
     if (ingestion.kind !== 'ready') return;
+    const request = start('batch-preview');
+    controllers.current.get('source-review')?.abort();
     setBatchPreview({ kind: 'loading' }); setSourceReview({ kind: 'idle' }); setApplyConfirmed(false); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
     try {
-      const preview = await financeImportMutationClient.preview(ingestion.data.batch_identity);
+      const preview = await financeImportMutationClient.preview(ingestion.data.batch_identity, request.controller.signal);
+      if (!current('batch-preview', request.sequence, request.controller)) return;
       setBatchPreview({ kind: 'ready', data: preview });
       await loadSourceReview(preview.batch_identity);
     }
-    catch (error) { setBatchPreview({ kind: 'error', message: financeErrorMessage(error, '匯入預覽未完成，請重新執行預覽。') }); }
+    catch (error) { if (current('batch-preview', request.sequence, request.controller)) setBatchPreview({ kind: 'error', message: financeErrorMessage(error, '匯入預覽未完成，請重新執行預覽。') }); }
   };
   const applyImportedBatch = async () => {
-    if (batchPreview.kind !== 'ready' || !applyConfirmed) return;
+    if (batchPreview.kind !== 'ready' || !applyConfirmed || !batchPreview.data.apply_allowed || batchPreview.data.counts.ready_dispatch <= 0) return;
     setApplyJob({ kind: 'loading' }); setBatchOutcome({ kind: 'idle' });
     try {
       const previewFingerprint = batchPreview.data.preview_fingerprint;
@@ -269,6 +287,7 @@ export const FinancePage: React.FC = () => {
         if (outcome.status === 'succeeded' || outcome.status === 'failed' || outcome.status === 'cancelled') {
           setBatchOutcome({ kind: 'ready', data: outcome });
           setReload((value) => value + 1);
+          if (batchPreview.kind === 'ready') await loadSourceReview(batchPreview.data.batch_identity);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, FINANCE_OUTCOME_POLL_DELAY_MS));
@@ -676,6 +695,10 @@ export const FinancePage: React.FC = () => {
                 aria-label="選擇銀行流水工作簿"
                 className="finance-input"
                 onChange={(event) => {
+                  controllers.current.get('batch-preview')?.abort();
+                  controllers.current.get('source-review')?.abort();
+                  controllers.current.get('batch-outcome')?.abort();
+                  setApplyConfirmed(false);
                   setFinanceWorkbook(event.target.files?.[0] ?? null);
                   setIngestion({ kind: 'idle' });
                   setBatchPreview({ kind: 'idle' });
@@ -778,6 +801,14 @@ export const FinancePage: React.FC = () => {
                             </tr>
                           </thead>
                           <tbody>
+                            {sourceReview.data.sourceReviews.map((row) => (
+                              <tr key={row.review_identity}>
+                                <td><code>{row.source_sheet}#{row.source_row}</code></td>
+                                <td colSpan={3}>來源資料未形成銀行交易</td>
+                                <td>來源資料待人工確認</td>
+                                <td>{row.issue_codes.join('、')}</td>
+                              </tr>
+                            ))}
                             {sourceReview.data.items.map((row) => (
                               <tr key={row.row_id}>
                                 <td><code>{row.source_sheet}#{row.source_row}</code></td>

@@ -319,6 +319,7 @@ def list_finance_import_review_rows(
     request: Request,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     after_row_id: Annotated[int | None, Query(ge=1)] = None,
+    after_source_review_id: Annotated[int | None, Query(ge=1)] = None,
     principal: AdminPrincipal = Depends(require_admin),
     query_service=Depends(get_finance_import_query_service),
 ):
@@ -331,6 +332,11 @@ def list_finance_import_review_rows(
                 limit=limit,
                 after_row_id=after_row_id,
             ),
+            query_service.list_source_reviews(
+                batch_identity, limit=limit,
+                after_source_review_id=after_source_review_id,
+            ),
+            batch_identity.strip(),
             limit,
         ),
         "成功載入 Finance Import 待確認資料",
@@ -933,8 +939,13 @@ def _request_correlation(request: Request) -> str:
     return value
 
 
-def _review_page(items, limit):
+def _review_page(items, source_reviews, batch_identity, limit):
     return {
+        "batch_identity": batch_identity,
+        "source_reviews": [_materialize(item) for item in source_reviews],
+        "next_after_source_review_id": (
+            source_reviews[-1].review_id if len(source_reviews) == limit else None
+        ),
         "items": [_materialize(item) for item in items],
         "next_after_row_id": items[-1].row_id if len(items) == limit else None,
     }

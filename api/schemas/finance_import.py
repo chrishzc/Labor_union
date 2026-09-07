@@ -68,7 +68,19 @@ class FinanceImportReviewRowSummaryView(_StrictModel):
     created_at: str
 
 
+class FinanceImportSourceReviewSummaryView(_StrictModel):
+    review_id: int = Field(gt=0)
+    review_identity: str
+    source_sheet: str
+    source_row: int = Field(gt=0)
+    issue_codes: list[str]
+    created_at: str
+
+
 class FinanceImportReviewRowPageView(_StrictModel):
+    batch_identity: str
+    source_reviews: list[FinanceImportSourceReviewSummaryView]
+    next_after_source_review_id: int | None = Field(default=None, gt=0)
     items: list[FinanceImportReviewRowSummaryView]
     next_after_row_id: int | None = Field(default=None, gt=0)
 
