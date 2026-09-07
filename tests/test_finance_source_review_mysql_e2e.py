@@ -135,15 +135,17 @@ def test_t11_source_review_query_apply_and_replay(tmp_path):
         staged = _counts()
         manifest = client.get(url+'/manifest')
         assert manifest.status_code == 200, manifest.text
-        assert manifest.json()['data']['review_count'] == 1, 'T11_2_SOURCE_REVIEW_OCCURRENCE_NOT_IN_QUERY'
         reviews = client.get(url+'/review-rows')
         assert reviews.status_code == 200, reviews.text
         page = reviews.json()['data']
-        assert page['batch_identity'] == batch and page['items'] == []
+        assert page['batch_identity'] == batch
+        assert manifest.json()['data']['review_count'] == len(page['items']) + len(page['source_reviews'])
+        assert len(page['items']) == 1 and page['items'][0]['disposition'] == 'business_pending'
+        assert sum(item['disposition'] == 'manual_review' for item in page['items']) + len(page['source_reviews']) == 1
         assert len(page['source_reviews']) == 1
         source = page['source_reviews'][0]
         assert source['source_sheet'] == '來源' and source['source_row'] == 3
-        assert 'invalid:transaction_amount' in source['issue_codes']
+        assert 'finance_source_field_invalid:transaction_amount' in source['issue_codes']
         assert set(source) == {'review_id', 'review_identity', 'source_sheet', 'source_row', 'issue_codes', 'created_at'}
         assert client.get(url+'/review-rows').json() == reviews.json()
         assert _counts() == staged, 'query must not create any bank/owner fact'
@@ -163,13 +165,15 @@ def test_t11_source_review_query_apply_and_replay(tmp_path):
         assert applied['finance_import_reconciliation_receipts'] == staged['finance_import_reconciliation_receipts'] + 1
         assert applied['client_ledger_entries'] == before['client_ledger_entries'] + 1
         assert applied['staff_payout_events'] == before['staff_payout_events']  # This batch contains no staff payout.
-        assert client.get(url+'/review-rows').json() == reviews.json()
+        after_apply_reviews = client.get(url+'/review-rows').json()['data']
+        assert after_apply_reviews['source_reviews'] == page['source_reviews']
+        assert sum(item['disposition'] == 'manual_review' for item in after_apply_reviews['items']) + len(after_apply_reviews['source_reviews']) == 1
         replay = ingest(headers_http['Idempotency-Key'])
         reselect = ingest(headers_http['Idempotency-Key'])
         assert replay.status_code == reselect.status_code == 200
         assert replay.json()['data']['batch_identity'] == reselect.json()['data']['batch_identity'] == batch
         assert _counts() == applied, 'replay/same-key reselect must not duplicate dispatch, receipts, payout or review occurrences'
-        assert client.get(url+'/manifest').json()['data']['review_count'] == 1
+        assert client.get(url+'/manifest').json()['data']['review_count'] == manifest.json()['data']['review_count']
         # Exact API response crosses the real typed client and page, without DB credentials in the UI process.
         exchange = tmp_path/'review-exchange.json'
         exchange.write_text(json.dumps({'ingestion': intake.json(), 'preview': preview.json(), 'manifest': manifest.json(), 'reviews': reviews.json()}), encoding='utf-8')
