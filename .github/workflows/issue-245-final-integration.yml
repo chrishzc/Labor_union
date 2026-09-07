@@ -1,0 +1,206 @@
+name: Issue 245 final bounded integration
+
+on:
+  push:
+    branches: ["dry-run/order-workbench-v2"]
+    paths: [".github/workflows/issue-245-final-integration.yml"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-245-final-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  integrate-verify-push:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.11"
+
+      - name: Verify fixed inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_parent='bb7bdadde59d9d378d253abd1b594622d10460d5'
+          expected_main='879fc64a336892fe55472a04b54aedd438b19707'
+          expected_pr214='7f7d2554de6b490395749d2d8fa146c32c8d9768'
+          git fetch --no-tags origin main fix/current-regression-baseline-20260905 dry-run/order-workbench-v2
+          test "$(git rev-parse HEAD^)" = "$expected_parent"
+          test "$(git rev-parse origin/main)" = "$expected_main"
+          test "$(git rev-parse origin/fix/current-regression-baseline-20260905)" = "$expected_pr214"
+          test "$(git rev-parse origin/dry-run/order-workbench-v2)" = "$GITHUB_SHA"
+
+      - name: Install exact focused Python dependencies from repository lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import subprocess, tomllib
+          with open('uv.lock', 'rb') as stream:
+              packages = tomllib.load(stream)['package']
+          wanted = {'pytest', 'python-dotenv', 'openpyxl', 'pymysql'}
+          selected = {package['name']: package for package in packages if package['name'] in wanted}
+          assert selected.keys() == wanted
+          specs = []
+          for name in sorted(wanted):
+              package = selected[name]
+              assert package['source'] == {'registry': 'https://pypi.org/simple'}
+              specs.append(f"{name}=={package['version']}")
+          subprocess.run(['python', '-m', 'pip', 'install', '--only-binary=:all:', *specs], check=True)
+          PY
+
+      - name: Merge latest main into Beta
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Execution Lane 3'
+          git config user.email 'execution-lane-3@example.invalid'
+          git merge --no-ff --no-edit origin/main
+          test -z "$(git diff --name-only --diff-filter=U)"
+          echo "MAIN_MERGE_HEAD=$(git rev-parse HEAD)"
+
+      - name: Extract only the verified PR214 residual source and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          task97='document/架構重整/03_追蹤清單與證據/evidence/task97_repository_commit_dispositions_v1.json'
+          writer_manifest='document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.manifest.json'
+          writer_records='document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.records.jsonl'
+          bootstrap_test='tests/domains/global/subsystems/migration/modules/local-database-fresh-reset/test_bootstrap_disposable_mysql_schema.py'
+          expected_conflicts=$(printf '%s\n' "$task97" "$writer_manifest" "$writer_records" "$bootstrap_test" | sort)
+          expected_delta=$(printf '%s\n' \
+            '.github/workflows/issue-244-final-focused.yml' \
+            '.github/workflows/python-app.yml' \
+            "$task97" \
+            "$writer_manifest" \
+            "$writer_records" \
+            'scripts/generate_task97_commit_dispositions.py' \
+            'scripts/migrate_weekly_report_batches.py' \
+            'scripts/reconcile_writer_inventory_v3_dispositions.py' \
+            "$bootstrap_test" \
+            'tests/test_task97_commit_dispositions.py' \
+            'tests/test_weekly_report_migration_target_confirmation.py' | sort)
+          selected=$(printf '%s\n' \
+            'scripts/generate_task97_commit_dispositions.py' \
+            'scripts/migrate_weekly_report_batches.py' \
+            'scripts/reconcile_writer_inventory_v3_dispositions.py' \
+            'tests/test_task97_commit_dispositions.py' \
+            'tests/test_weekly_report_migration_target_confirmation.py' | sort)
+
+          set +e
+          git merge --no-commit --no-ff origin/fix/current-regression-baseline-20260905
+          merge_rc=$?
+          set -e
+          test "$merge_rc" -eq 1
+          actual_conflicts=$(git diff --name-only --diff-filter=U | sort)
+          test "$actual_conflicts" = "$expected_conflicts"
+          actual_delta=$(git diff HEAD --name-only | sort)
+          test "$actual_delta" = "$expected_delta"
+
+          mkdir -p /tmp/issue245-selected
+          while IFS= read -r path; do
+            test -n "$path"
+            test -f "$path"
+            mkdir -p "/tmp/issue245-selected/$(dirname "$path")"
+            cp -a "$path" "/tmp/issue245-selected/$path"
+          done <<< "$selected"
+
+          git merge --abort
+          cp -a /tmp/issue245-selected/. .
+          while IFS= read -r path; do git add "$path"; done <<< "$selected"
+          actual_selected=$(git diff --cached --name-only | sort)
+          test "$actual_selected" = "$selected"
+          git diff --check --cached
+          git commit -m 'chore(beta): integrate verified PR214 residual for #245'
+
+      - name: Rebuild current Task97 and writer inventory evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_findings='document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_candidate.findings.jsonl'
+          candidate_manifest='document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_candidate.manifest.json'
+          task97='document/架構重整/03_追蹤清單與證據/evidence/task97_repository_commit_dispositions_v1.json'
+          writer_manifest='document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.manifest.json'
+          writer_records='document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.records.jsonl'
+
+          python scripts/generate_writer_inventory_v3_candidate.py
+          python scripts/validate_writer_inventory_v3_candidate.py
+          python scripts/generate_task97_commit_dispositions.py
+          python scripts/reconcile_writer_inventory_v3_dispositions.py
+          python scripts/validate_writer_inventory_v3_dispositions.py
+
+          git add "$candidate_findings" "$candidate_manifest" "$task97" "$writer_manifest" "$writer_records"
+          test -z "$(git diff --name-only)"
+          test -z "$(git ls-files --others --exclude-standard)"
+          git diff --check --cached
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore(beta): rebuild #245 current writer evidence'
+          fi
+
+      - name: Verify focused Python contracts and permanent CI boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q \
+            tests/test_task97_commit_dispositions.py \
+            tests/test_writer_inventory_v3_dispositions.py \
+            tests/test_weekly_report_migration_target_confirmation.py \
+            tests/domains/global/subsystems/migration/modules/local-database-fresh-reset/test_bootstrap_disposable_mysql_schema.py
+          python scripts/validate_writer_inventory_v3_candidate.py
+          python scripts/validate_writer_inventory_v3_dispositions.py
+          git ls-files -z -- '*.py' | xargs -0 -r python -m py_compile
+          git diff --check origin/main...HEAD
+          git diff --quiet origin/main -- .github/workflows/python-app.yml
+          test ! -e .github/workflows/issue-244-final-focused.yml
+          test ! -e .github/workflows/lane3-issue245-merge-preflight.yml
+
+      - name: Verify Beta parity and React build with install hooks disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t beta_core < <(git ls-tree -r --name-only "$GITHUB_SHA" -- ui_react | grep -Ei 'OrderWorkbenchV2|order_workbench_v2')
+          test "${#beta_core[@]}" -gt 0
+          for path in "${beta_core[@]}"; do
+            test "$(git rev-parse "$GITHUB_SHA:$path")" = "$(git rev-parse "HEAD:$path")"
+          done
+
+          cd ui_react
+          python - <<'PY'
+          import json
+          lock = json.load(open('package-lock.json', encoding='utf-8'))
+          assert lock['lockfileVersion'] == 3
+          resolved = [meta['resolved'] for meta in lock['packages'].values() if meta.get('resolved')]
+          assert resolved
+          assert all(url.startswith('https://registry.npmjs.org/') for url in resolved)
+          assert all(meta.get('integrity') for meta in lock['packages'].values() if meta.get('resolved'))
+          hooks = sorted(path for path, meta in lock['packages'].items() if meta.get('hasInstallScript'))
+          print('locked_install_hooks_disabled=', hooks)
+          PY
+          npm ci --ignore-scripts
+          npm test
+          npm run build
+
+      - name: Push final Beta only if refs are still fixed
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_main='879fc64a336892fe55472a04b54aedd438b19707'
+          expected_pr214='7f7d2554de6b490395749d2d8fa146c32c8d9768'
+          git fetch --no-tags origin main fix/current-regression-baseline-20260905 dry-run/order-workbench-v2
+          test "$(git rev-parse origin/main)" = "$expected_main"
+          test "$(git rev-parse origin/fix/current-regression-baseline-20260905)" = "$expected_pr214"
+          test "$(git rev-parse origin/dry-run/order-workbench-v2)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git rm .github/workflows/issue-245-final-integration.yml
+          git commit -m 'chore(beta): remove #245 one-time final verifier'
+          git push origin HEAD:dry-run/order-workbench-v2
+          echo "INTEGRATED_HEAD=$(git rev-parse HEAD)"
