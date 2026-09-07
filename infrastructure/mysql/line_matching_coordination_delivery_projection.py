@@ -43,6 +43,8 @@ class MySqlLineMatchingCoordinationDeliveryProjection:
         configuration = self._configuration()
         interaction = None
         if selector == "matching.request.participants":
+            # Keep the raw token only in the transient delivery envelope.  The
+            # LINE consumer stores its hash in the existing interaction owner.
             token = "p6" + hashlib.sha256(
                 f"{reference_id}:{line_user_id}".encode("utf-8")
             ).hexdigest()
@@ -78,6 +80,8 @@ class MySqlLineMatchingCoordinationDeliveryProjection:
             "configuration": configuration,
             "message_kind": "flex" if interaction is not None else "text",
             "message": message,
+            # Persist the handoff schedule so replay reconstructs the exact
+            # delivery fingerprint instead of defaulting to a new wall clock.
             "scheduled_at": datetime.now(timezone.utc).isoformat(),
             "notification_reason": "recipient_unavailable",
         }
