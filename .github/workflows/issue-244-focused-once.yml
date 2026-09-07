@@ -6,14 +6,19 @@ on:
 permissions:
   contents: read
 jobs:
-  focused-contracts:
+  focused-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [migration-target, task97, writer-inventory]
+    name: focused-${{ matrix.group }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          fetch-depth: 3
+          fetch-depth: 4
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
@@ -37,27 +42,49 @@ jobs:
           print('::notice title=Focused dependencies::' + ', '.join(specs), flush=True)
           subprocess.run(['python','-m','pip','install','--only-binary=:all:',*specs], check=True)
           PY
-      - name: Execute migration target and writer governance focused tests
+      - name: Execute focused group
+        env:
+          GROUP: ${{ matrix.group }}
         run: |
-          python -m pytest -q \
-            tests/test_weekly_report_migration_target_confirmation.py \
-            tests/test_task97_commit_dispositions.py \
-            tests/test_writer_inventory_v3_dispositions.py \
-            --junitxml=/tmp/issue-244.xml
-      - name: Publish exact receipt
+          case "$GROUP" in
+            migration-target)
+              TEST_PATH=tests/test_weekly_report_migration_target_confirmation.py
+              ;;
+            task97)
+              TEST_PATH=tests/test_task97_commit_dispositions.py
+              ;;
+            writer-inventory)
+              TEST_PATH=tests/test_writer_inventory_v3_dispositions.py
+              ;;
+            *)
+              echo "unknown group: $GROUP" >&2
+              exit 2
+              ;;
+          esac
+          python -m pytest -q "$TEST_PATH" --junitxml="/tmp/$GROUP.xml"
+      - name: Publish group receipt
         if: always()
+        env:
+          GROUP: ${{ matrix.group }}
         run: |
           python - <<'PY'
           import json, os, pathlib, subprocess, xml.etree.ElementTree as ET
-          path = pathlib.Path('/tmp/issue-244.xml')
+          group = os.environ['GROUP']
+          path = pathlib.Path('/tmp') / f'{group}.xml'
           if not path.exists():
-              raise SystemExit('Focused result NOT_RUN: no receipt')
+              raise SystemExit(f'{group}: NOT_RUN; no receipt')
           root = ET.parse(path).getroot()
           suites = list(root.iter('testsuite'))
           result = {key: sum(int(suite.get(key, 0)) for suite in suites) for key in ('tests','failures','errors','skipped')}
+          result['group'] = group
           result['head'] = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
           result['tested_product_commit'] = '7d8869de8a0c1b42c22b2c923798911b4f15702b'
-          result['cases'] = [case.get('name') for case in root.iter('testcase')]
+          failed = []
+          for case in root.iter('testcase'):
+              issue = next(iter(case.findall('failure') + case.findall('error')), None)
+              if issue is not None:
+                  failed.append({'case': case.get('name'), 'message': issue.get('message')})
+          result['failed'] = failed
           print('::notice title=Issue 244 focused receipt::' + json.dumps(result, ensure_ascii=False))
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
               stream.write('```json\n' + json.dumps(result, ensure_ascii=False, indent=2) + '\n```\n')
