@@ -1,93 +1,94 @@
-name: Issue 244 focused one-off verification
+name: Issue 244 Task97 reconciliation one-off
 on:
   push:
     branches: [fix/current-regression-baseline-20260905]
     paths: [.github/workflows/issue-244-focused-once.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  focused-contract:
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [migration-target, task97, writer-inventory]
-    name: focused-${{ matrix.group }}
+  reconcile-task97:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         with:
-          persist-credentials: false
-          fetch-depth: 4
+          fetch-depth: 8
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - name: Verify scoped baseline
+      - name: Verify product baseline plus workflow-only commits
         run: |
           git cat-file -e 7d8869de8a0c1b42c22b2c923798911b4f15702b^{commit}
           test "$(git diff --name-only 7d8869de8a0c1b42c22b2c923798911b4f15702b HEAD)" = ".github/workflows/issue-244-focused-once.yml"
-      - name: Install exact locked focused dependencies
+      - name: Install exact locked pytest
         run: |
           python - <<'PY'
           import subprocess, tomllib
-          wanted = {'pytest', 'openpyxl', 'pymysql', 'python-dotenv'}
           with open('uv.lock', 'rb') as stream:
-              packages = {p['name']: p for p in tomllib.load(stream)['package'] if p['name'] in wanted}
-          assert set(packages) == wanted, packages.keys()
-          specs = []
-          for name in sorted(wanted):
-              package = packages[name]
-              assert package['source'] == {'registry': 'https://pypi.org/simple'}, package
-              specs.append(f"{name}=={package['version']}")
-          print('::notice title=Focused dependencies::' + ', '.join(specs), flush=True)
-          subprocess.run(['python','-m','pip','install','--only-binary=:all:',*specs], check=True)
+              packages = tomllib.load(stream)['package']
+          pytest = next(package for package in packages if package['name'] == 'pytest')
+          assert pytest['source'] == {'registry': 'https://pypi.org/simple'}
+          subprocess.run(['python','-m','pip','install','--only-binary=:all:',f"pytest=={pytest['version']}"], check=True)
           PY
-      - name: Execute focused group
-        env:
-          GROUP: ${{ matrix.group }}
-        run: |
-          case "$GROUP" in
-            migration-target)
-              TEST_PATH=tests/test_weekly_report_migration_target_confirmation.py
-              ;;
-            task97)
-              TEST_PATH=tests/test_task97_commit_dispositions.py
-              ;;
-            writer-inventory)
-              TEST_PATH=tests/test_writer_inventory_v3_dispositions.py
-              ;;
-            *)
-              echo "unknown group: $GROUP" >&2
-              exit 2
-              ;;
-          esac
-          python -m pytest -q "$TEST_PATH" --junitxml="/tmp/$GROUP.xml"
-      - name: Publish group receipt
-        if: always()
-        env:
-          GROUP: ${{ matrix.group }}
+      - name: Reconcile completed Task97 reviewed decisions
         run: |
           python - <<'PY'
-          import json, os, pathlib, subprocess, xml.etree.ElementTree as ET
-          group = os.environ['GROUP']
-          path = pathlib.Path('/tmp') / f'{group}.xml'
-          if not path.exists():
-              raise SystemExit(f'{group}: NOT_RUN; no receipt')
-          root = ET.parse(path).getroot()
+          from pathlib import Path
+
+          path = Path('scripts/generate_task97_commit_dispositions.py')
+          text = path.read_text(encoding='utf-8')
+          line_bind = '''    "line/line_bot.py:line_bind:commit:COMMIT:-:a726d561eba65201:1": (\n        "line_identity", "adapter",\n        "Legacy rollback-only LINE bind route owns one bounded binding transaction; canonical runtime returns 410 before opening the write path.",\n        "Retain only behind the explicit legacy rollback runtime contract; canonical runtime must remain write-inaccessible.",\n        "Canonical 410-before-write and production rollback-mode guards remain the required focused evidence.",\n    ),\n'''
+          assert text.count(line_bind) == 1
+          text = text.replace(line_bind, '', 1)
+
+          unresolved = 'UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES: dict[str, tuple[str, str, str]] = {'
+          start = text.index(unresolved)
+          end = text.index('\n\n\n\n@dataclass', start)
+          text = text[:start] + 'UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES: dict[str, tuple[str, str, str]] = {}' + text[end:]
+
+          old = '"Operator-only invocation and safe rerun semantics remain the required migration evidence.",'
+          new = '"Exact target confirmation, live database match, and safe rerun semantics remain the required migration evidence.",'
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+          git diff --check -- scripts/generate_task97_commit_dispositions.py
+          git diff -- scripts/generate_task97_commit_dispositions.py
+      - name: Commit decision-map reconciliation locally
+        run: |
+          git config user.name "issue-244-verification"
+          git config user.email "issue-244-verification@users.noreply.github.com"
+          git add scripts/generate_task97_commit_dispositions.py
+          git commit -m "chore(governance): reconcile completed Task97 decisions"
+      - name: Rebuild Task97 evidence from committed current source
+        run: |
+          python scripts/generate_task97_commit_dispositions.py
+          git diff --check -- document/架構重整/03_追蹤清單與證據/evidence/task97_repository_commit_dispositions_v1.json
+      - name: Verify rebuilt Task97 and writer inventory contracts
+        run: |
+          python -m pytest -q \
+            tests/test_task97_commit_dispositions.py \
+            tests/test_writer_inventory_v3_dispositions.py \
+            --junitxml=/tmp/issue-244-task97.xml
+      - name: Commit rebuilt evidence locally
+        run: |
+          git add document/架構重整/03_追蹤清單與證據/evidence/task97_repository_commit_dispositions_v1.json
+          git commit -m "chore(governance): rebuild Task97 commit evidence"
+          git diff --check 7d8869de8a0c1b42c22b2c923798911b4f15702b HEAD
+      - name: Publish exact receipt
+        run: |
+          python - <<'PY'
+          import json, os, subprocess, xml.etree.ElementTree as ET
+          root = ET.parse('/tmp/issue-244-task97.xml').getroot()
           suites = list(root.iter('testsuite'))
           result = {key: sum(int(suite.get(key, 0)) for suite in suites) for key in ('tests','failures','errors','skipped')}
-          result['group'] = group
-          result['head'] = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
-          result['tested_product_commit'] = '7d8869de8a0c1b42c22b2c923798911b4f15702b'
-          failed = []
-          for case in root.iter('testcase'):
-              issue = next(iter(case.findall('failure') + case.findall('error')), None)
-              if issue is not None:
-                  failed.append({'case': case.get('name'), 'message': issue.get('message')})
-          result['failed'] = failed
-          print('::notice title=Issue 244 focused receipt::' + json.dumps(result, ensure_ascii=False))
+          result['candidate_head'] = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
+          result['source_revision'] = json.load(open('document/架構重整/03_追蹤清單與證據/evidence/task97_repository_commit_dispositions_v1.json', encoding='utf-8'))['source_revision']
+          result['cases'] = [case.get('name') for case in root.iter('testcase')]
+          print('::notice title=Issue 244 Task97 reconciled receipt::' + json.dumps(result, ensure_ascii=False))
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
               stream.write('```json\n' + json.dumps(result, ensure_ascii=False, indent=2) + '\n```\n')
-          if result['failures'] or result['errors'] or result['skipped']:
-              raise SystemExit(1)
+          assert result['failures'] == result['errors'] == result['skipped'] == 0, result
           PY
+      - name: Push only after verification succeeds
+        run: git push origin HEAD:fix/current-regression-baseline-20260905
