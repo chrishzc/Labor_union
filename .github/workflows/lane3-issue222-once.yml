@@ -36,70 +36,28 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: true
-          fetch-depth: 20
-      - name: Correct verifier assumptions and write exact candidate
+          fetch-depth: 30
+      - name: Correct synthetic source-account fixture and write exact candidate
         shell: bash
         run: |
           set -euo pipefail
           test "$(git merge-base HEAD d03551ab75de3e9cffc32ee772bdcf863181adad)" = d03551ab75de3e9cffc32ee772bdcf863181adad
-          test "$(git rev-parse HEAD^)" = fd108db7f6ebcc03066245ba8803cf58705082f8
+          test "$(git rev-parse HEAD^)" = 02f41daac2fe30b4d5dcf158213505fe9b3555b8
           python3 - <<'PY'
           from pathlib import Path
-
-          mysql_test = Path('tests/test_finance_source_review_mysql_e2e.py')
-          text = mysql_test.read_text(encoding='utf-8')
-          old = "        replay = ingest(headers_http['Idempotency-Key'])\n        reimport = ingest('t11-reimport:'+token)\n        assert replay.status_code == reimport.status_code == 200\n        assert replay.json()['data']['batch_identity'] == reimport.json()['data']['batch_identity'] == batch\n        assert _counts() == applied, 'replay/reimport must not duplicate dispatch, receipts, payout or review occurrences'\n"
-          new = "        replay = ingest(headers_http['Idempotency-Key'])\n        reselect = ingest(headers_http['Idempotency-Key'])\n        assert replay.status_code == reselect.status_code == 200\n        assert replay.json()['data']['batch_identity'] == reselect.json()['data']['batch_identity'] == batch\n        assert _counts() == applied, 'replay/same-key reselect must not duplicate dispatch, receipts, payout or review occurrences'\n"
-          assert text.count(old) == 1, 'replay verifier anchor drifted'
-          text = text.replace(old, new)
-          old = "        result = subprocess.run(['npm', '--prefix', str(root/'ui_react'), 'test', '--', 'src/tests/finance_source_review_list.test.tsx', '-t', 'same-run source-review'], cwd=root, env={'PATH': os.environ['PATH'], 'HOME': str(tmp_path), 'CI': 'true', 'FI_REVIEW_EXCHANGE': str(exchange)}, capture_output=True, text=True, timeout=60)\n        assert result.returncode == 0, result.stdout[-5000:]+result.stderr[-5000:]\n"
-          new = "        ui_report = tmp_path/'typed-ui-report.json'\n        result = subprocess.run(['npm', '--prefix', str(root/'ui_react'), 'test', '--', 'src/tests/finance_source_review_list.test.tsx', '-t', 'same-run source-review', '--reporter=json', '--outputFile', str(ui_report)], cwd=root, env={'PATH': os.environ['PATH'], 'HOME': str(tmp_path), 'CI': 'true', 'FI_REVIEW_EXCHANGE': str(exchange)}, capture_output=True, text=True, timeout=60)\n        assert result.returncode == 0, result.stdout[-5000:]+result.stderr[-5000:]\n        report = json.loads(ui_report.read_text(encoding='utf-8'))\n        assert report.get('numPassedTests') == 1 and report.get('numFailedTests') == 0, report\n"
-          assert text.count(old) == 1, 'typed UI verifier anchor drifted'
-          mysql_test.write_text(text.replace(old, new), encoding='utf-8')
-
-          ui_test = Path('ui_react/src/tests/finance_source_review_list.test.tsx')
-          text = ui_test.read_text(encoding='utf-8')
-          import_anchor = "import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';\n"
-          assert text.count(import_anchor) == 1, 'query import anchor drifted'
-          text = text.replace(import_anchor, import_anchor + "import { transport } from '../api/shared/transport';\nimport { readFileSync } from 'node:fs';\n")
-          test_block = r'''
-
-            const exchangePath = process.env.FI_REVIEW_EXCHANGE;
-            (exchangePath ? it : it.skip)('decodes same-run source-review owner envelopes through the real typed query client', async () => {
-              const raw = JSON.parse(readFileSync(exchangePath!, 'utf-8')) as Record<string, any>;
-              const batch = raw.ingestion.data.batch_identity as string;
-              const sourceReview = raw.reviews.data.source_reviews[0] as { source_sheet: string; source_row: number; issue_codes: string[] };
-              vi.restoreAllMocks();
-              vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
-              vi.spyOn(financeImportMutationClient, 'ingest').mockResolvedValue(raw.ingestion.data);
-              vi.spyOn(financeImportMutationClient, 'preview').mockResolvedValue(raw.preview.data);
-              const get = vi.spyOn(transport, 'get').mockImplementation(async (path: string) => {
-                if (path.endsWith('/manifest')) return raw.manifest;
-                if (path.endsWith('/review-rows')) return raw.reviews;
-                throw new Error(`unexpected GET ${path}`);
-              });
-
-              await showPreview();
-              await waitFor(() => expect(reviewCount()).toBe('1'));
-              expect(screen.getByText(batch)).toBeInTheDocument();
-              expect(screen.getByText(`${sourceReview.source_sheet}#${sourceReview.source_row}`)).toBeInTheDocument();
-              expect(screen.getByText(sourceReview.issue_codes[0])).toBeInTheDocument();
-              expect(get.mock.calls.some(([path]) => String(path).endsWith('/manifest'))).toBe(true);
-              expect(get.mock.calls.some(([path]) => String(path).endsWith('/review-rows'))).toBe(true);
-            });
-          '''
-          closing = '\n});'
-          index = text.rfind(closing)
-          assert index > 0 and 'decodes same-run source-review owner envelopes' not in text, 'conditional test anchor drifted'
-          text = text[:index] + test_block + text[index:]
-          ui_test.write_text(text, encoding='utf-8')
+          path = Path('tests/test_finance_source_review_mysql_e2e.py')
+          text = path.read_text(encoding='utf-8')
+          old = "    account = 'LU-TEST-SOURCE'\n"
+          new = "    account = '123456789012'\n"
+          assert text.count(old) == 1, 'source-account fixture anchor drifted'
+          path.write_text(text.replace(old, new), encoding='utf-8')
           PY
           git diff --check
-          git add tests/test_finance_source_review_mysql_e2e.py ui_react/src/tests/finance_source_review_list.test.tsx
+          git add tests/test_finance_source_review_mysql_e2e.py
           git diff --cached --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'test(finance): align #222 disposable owner readback verifier'
+          git commit -m 'test(finance): use valid synthetic source account for #222'
           VERIFIED_SHA=$(git rev-parse HEAD)
           echo "VERIFIED_SHA=$VERIFIED_SHA" >> "$GITHUB_ENV"
           git push origin HEAD:fix/issue-222-source-review-owner-readback
