@@ -161,6 +161,7 @@ function installImportHttp(
     }
     if (path.includes('/review-rows')) {
       return importResponse({
+        batch_identity: plan.batch_identity, source_reviews: [], next_after_source_review_id: null,
         items: Array.from({ length: plan.counts.manual_review }, (_, offset) => ({
           row_id: 901 + offset,
           row_identity: `ROW-REVIEW-${901 + offset}`,
@@ -347,6 +348,7 @@ describe('Finance import preview and replay boundary', () => {
     const exchange = JSON.parse(readFileSync(process.env.FI_PREVIEW_EXCHANGE!, 'utf8')) as {
       workbook_path: string; ingestion_response: { data: unknown };
       preview_response: { data: FinanceImportBatchPreview };
+      manifest_response: { data: unknown }; review_response: { data: unknown };
       expected: Pick<FinanceImportBatchPreview, 'batch_version' | 'preview_fingerprint' | 'counts' | 'blocking_codes'>;
     };
     const bytes = new Uint8Array(readFileSync(exchange.workbook_path));
@@ -359,6 +361,8 @@ describe('Finance import preview and replay boundary', () => {
       requests.push(path);
       if (path.endsWith('/workbooks/ingest')) return importResponse(exchange.ingestion_response.data);
       if (path.endsWith('/batches/preview')) return importResponse(exchange.preview_response.data);
+      if (path.includes('/manifest')) return importResponse(exchange.manifest_response.data);
+      if (path.includes('/review-rows')) return importResponse(exchange.review_response.data);
       throw new Error(`Unexpected request in Preview-only proof: ${path}`);
     }));
     const previewSpy = vi.spyOn(financeImportMutationClient, 'preview');
@@ -373,7 +377,9 @@ describe('Finance import preview and replay boundary', () => {
     if (!exchange.preview_response.data.apply_allowed) {
       expect(screen.getByText(new RegExp(financeImportBlockerMessage(exchange.expected.blocking_codes)))).toBeInTheDocument();
     }
-    expect(requests).toEqual(['/api/v1/finance-import/workbooks/ingest', '/api/v1/finance-import/batches/preview']);
+    expect(requests.slice(0, 2)).toEqual(['/api/v1/finance-import/workbooks/ingest', '/api/v1/finance-import/batches/preview']);
+    const batchPath = `/api/v1/finance-import/batches/${encodeURIComponent(exchange.preview_response.data.batch_identity)}`;
+    expect(requests.slice(2)).toEqual([`${batchPath}/manifest`, `${batchPath}/review-rows?limit=50`]);
     expect(screen.queryByText(/匯入完成：核銷/)).not.toBeInTheDocument();
   });
 });
