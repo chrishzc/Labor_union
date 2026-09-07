@@ -5,15 +5,23 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
+import tempfile
+
+from shared_kernel.writer_inventory import scan_production_writers
 
 from scripts.generate_task97_commit_dispositions import (
     APPLICATION_OWNED_COMMIT_SYMBOLS,
+    CommitLocation,
     EVIDENCE_PATH,
     MEDIA_STAGING_VIOLATIONS,
     READ_ONLY_APPLICATIONS,
     REPOSITORY_ROOT,
+    REVIEWED_COMMIT_BOUNDARIES,
     SOURCE_REVISION_INPUTS,
+    UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES,
+    _classify,
     _git_revision,
+    _semantic_owner,
     build_artifact,
 )
 
@@ -108,6 +116,79 @@ def test_task97_commit_dispositions_do_not_blanket_classify_by_path() -> None:
     for identity in APPLICATION_OWNED_COMMIT_SYMBOLS:
         assert by_symbol[identity]["classification"] == "application_owned_legitimate_outer_uow"
 
+
+def test_task97_audited_commit_boundaries_follow_exact_current_decisions() -> None:
+    artifact = json.loads(EVIDENCE_PATH.read_text(encoding="utf-8"))
+    by_identity = {str(entry["identity"]): entry for entry in artifact["entries"]}
+
+    for identity, review in REVIEWED_COMMIT_BOUNDARIES.items():
+        owner, layer, _basis, _remediation, _blocker = review
+        entry = by_identity.get(identity)
+        assert entry is not None, identity
+        assert entry["owner"] == owner
+        assert entry["layer"] == layer
+        unresolved = UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES.get(identity)
+        if unresolved is None:
+            assert entry["classification"] == "application_owned_legitimate_outer_uow"
+        else:
+            basis, remediation, blocker = unresolved
+            assert entry["classification"] == "real_violation"
+            assert entry["analysis_basis"] == basis
+            assert entry["replacement_or_remediation"] == remediation
+            assert entry["blocker"] == blocker
+
+
+def test_task97_reviewed_commit_boundaries_do_not_inherit_to_sibling_commits() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source = root / "api" / "dependencies" / "admin_auth.py"
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            "def ensure_development_root_admin(conn):\n"
+            "    conn.commit()\n"
+            "    conn.commit()\n"
+            "\n"
+            "def sibling_symbol(conn):\n"
+            "    conn.commit()\n",
+            encoding="utf-8",
+        )
+        findings = scan_production_writers(root, ("api",))
+
+    reviewed = next(
+        finding for finding in findings
+        if finding.symbol == "ensure_development_root_admin" and finding.occurrence == 1
+    )
+    sibling_occurrence = next(
+        finding for finding in findings
+        if finding.symbol == "ensure_development_root_admin" and finding.occurrence == 2
+    )
+    sibling_symbol = next(
+        finding for finding in findings
+        if finding.symbol == "sibling_symbol"
+    )
+    location = CommitLocation(
+        line=1,
+        receiver="conn",
+        has_uow_context=False,
+        has_connection_lifecycle=False,
+        has_worker_signal=False,
+    )
+
+    assert reviewed.identity in REVIEWED_COMMIT_BOUNDARIES
+    assert reviewed.identity not in UNRESOLVED_REVIEWED_COMMIT_BOUNDARIES
+    assert sibling_occurrence.identity not in REVIEWED_COMMIT_BOUNDARIES
+    assert sibling_symbol.identity not in REVIEWED_COMMIT_BOUNDARIES
+    exact_result = _classify(reviewed, location)
+    sibling_occurrence_result = _classify(sibling_occurrence, location)
+    sibling_symbol_result = _classify(sibling_symbol, location)
+    assert exact_result[0] == "application_owned_legitimate_outer_uow"
+    assert sibling_occurrence_result[0] == "real_violation"
+    assert sibling_symbol_result[0] == "real_violation"
+    assert sibling_occurrence_result[3] != exact_result[3]
+    assert sibling_symbol_result[3] != exact_result[3]
+    assert _semantic_owner(reviewed) == ("access_control", "adapter")
+    assert _semantic_owner(sibling_occurrence) == ("global_operations", "adapter")
+    assert _semantic_owner(sibling_symbol) == ("global_operations", "adapter")
 
 def test_task97_commit_disposition_source_revision_is_input_bound_and_idempotent() -> None:
     expected = subprocess.run(
