@@ -388,7 +388,11 @@ def _apply_combined_registration(application, payload, line_user_id):
             _correlation_id("registration"),
         )
     except ProvisionalRegistrationConflictError as error:
-        raise _registration_http_error(409, "registration_conflict", str(error)) from error
+        raise _registration_http_error(
+            409,
+            "registration_conflict",
+            "您目前已有一筆送出中的需求登記待處理；若需修改資料請聯絡工會專員。",
+        ) from error
     except ProvisionalRegistrationDomainError as error:
         raise _registration_http_error(422, error.issue.value, str(error)) from error
     except ProvisionalRegistrationStorageError as error:
@@ -728,6 +732,8 @@ def _preview_response(preview):
     if candidate is not None:
         candidate_response = LineIdentityCandidateResponse(
             currently_bound=candidate.currently_bound_line_user_id is not None,
+            case_no=candidate.case_no,
+            has_completed_survey=candidate.has_completed_survey,
         )
     return LineIdentityPreviewResponse(
         status=preview.status.value,

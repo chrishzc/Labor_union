@@ -39,6 +39,16 @@
 
 只看到 API、table、UI 或 unit test 存在，不得直接標 `MOBILE_PASS`。
 
+### 0.3 目前實測執行進度總表（持續更新）
+
+| 項目代碼 | 測試情境與分支 | 驗收層級 | 驗收日期 | 實測說明與結果 |
+|---|---|---|---|---|
+| **M1-01 狀態 A** | 舊客完全命中 (陳雅婷 / `0912345678`) | `MOBILE_PASS` | 2026-09-07 | ✅ **實測通過**：`bind.html` 輸入後自動完成綁定，顯示案號【`CASE-2026-M301`】，無需重填問卷。 |
+| **M1-01 狀態 B** | 有案號缺問卷 (李詩涵 / `0933111222`) | `MOBILE_PASS` | 2026-09-07 | ✅ **實測通過**：提示找到市府案號【`CASE-2026-STATE-B`】，自動預填姓名/手機/案號無縫跳轉 `register.html`，Email 必填檢核與一鍵送出均正常。 |
+| **M1-01 狀態 C** | 名冊未同步/查無案號 (訪客臨時登記) | `PREPARED` | - | 前置資料就緒，待手機實測。 |
+| **M1-01 狀態 D** | 連續失敗協處 (2 次失敗自動開工單) | `PREPARED` | - | 前置資料就緒，待手機實測。 |
+| **M1-06** | 管理後台正式解除 (Rich Menu 回復) | `PREPARED` | - | ✅ 預設 Rich Menu 發布任務記錄已補齊，解除影響檢查 blocker 已清除，待管理後台送出。 |
+
 ---
 
 # 1. 最低設備與帳號需求
@@ -242,43 +252,53 @@ Agent 已完成:
 
 - 確認 `LINE_LIFF_ID` 已配置。
 - 確認 `GET /api/v1/line/identity/runtime-config` 可正常回應。
-- 確認 public base URL 是 HTTPS（localhost 開發例外僅限本機）。
+- 確認 public base URL 是 HTTPS。
 - 確認手機測試帳號目前沒有不需要的舊 binding；有的話先走正式 revocation。
 
-### 手機操作
+### 手機操作與 4 大分支驗證
 
-1. 點 Rich Menu【服務登記】。
-2. 開啟 `gateway.html`。
-3. 測「未申請市府平台」：應導向新竹市政府平台。
-4. 回來後測「已申請市府平台」：應進 `/line-registration?flow_id=...`。
+1. 點 Rich Menu【服務登記】開啟 `gateway.html`。
+2. **分支 1（未申請市府平台）**：點選「未申請市府平台」➔ 彈窗提醒後外連新竹市政府到宅月子媒合服務平台。
+3. **分支 2（已申請市府平台 ➔ 身分先行 bind.html）**：
+   - **【狀態 A：舊客完全命中】（✅ MOBILE_PASS 2026-09-07 驗收通過）**：
+     - 輸入測試客戶 1：姓名：`陳雅婷`、手機：`0912345678`
+     - 預期效果：系統自動完成綁定，顯示案件編號【`CASE-2026-M301`】，提示無需重填問卷，回到聊天室直接啟用【客戶專屬選單】。
+     - **實測結果**：手機實測通過，點擊送出後直接成功綁定並帶出案號，無需重填問卷。
+   - **【狀態 B：有案號但缺問卷】（✅ MOBILE_PASS 2026-09-07 驗收通過）**：
+     - 輸入測試客戶 3：姓名：`李詩涵`、手機：`0933111222`
+     - 預期效果：系統識別已向市府申請並取得案號【`CASE-2026-STATE-B`】但尚未填寫工會需求問卷 ➔ 彈出提示「已為您找到案件編號【CASE-2026-STATE-B】，即將無縫載入需求調查表單...」➔ 自動跳轉 `register.html`，頂部提示已連結案件編號，鎖定姓名與電話，由產婦填寫完整 60 題需求問卷後一鍵送出！
+     - **實測結果**：手機實測通過，自動預填案號與個資，Email 欄位必填檢核生效，一鍵送出後直接建立完整登記資料與綁定。
+   - **【狀態 C：名冊未同步 / 查無案號】**：
+     - 輸入全新訪客（例如姓名：`王小明`、手機：`0988776655`）
+     - 預期效果：系統提示「市府名冊同步中，即將無縫載入工會需求調查表單...」➔ 自動預填姓名+電話無縫跳轉 `register.html` 填寫需求問卷送出建立臨時登記，後續名冊匯入時自動比對案號。
+   - **【狀態 D：連續失敗協處】**：
+     - 連續輸入格式錯誤或查核失敗 2 次 ➔ 自動於 `customer_service_tickets` 建立客服協處工單。
 
 ### Current 技術路徑
 
 ```text
 POST /api/v1/line/identity/flow/open
-POST /api/v1/line/identity/flow/validate
+POST /api/v1/line/identity/customer/preview
+POST /api/v1/line/identity/customer/apply
 ```
 
 LIFF 使用 `liff.getIDToken()`；不得由前端任意指定真實 LINE User ID。
 
 ---
 
-## M1-02 需求調查表 Preview → Apply
+## M1-02 需求調查表 一鍵送出與防呆檢核
 
 ### Agent 前置
 
-- 不先替手機帳號寫 binding。
-- 確認 registration page 可讀 current LIFF config。
-- 準備一組不會與正式資料衝突的測試姓名、電話、地址。
+- 確認 `register.html` 支援 Email、姓名、電話、地址、服務天數等必填防呆檢核。
+- 支援一鍵直接送出（背景自動完成 Preview ➔ Apply，免去手動二段確認）。
 
 ### 手機操作
 
-1. 從 M1-01 進入 `/line-registration`。
-2. 填必填欄位與需求調查。
-3. 故意輸入錯誤手機格式，確認 UI 阻擋。
-4. 填正確資料。
-5. 第一次送出只產生 preview。
-6. 確認去識別摘要後再 Apply。
+1. 從 M1-01 分支進入 `/line-registration`。
+2. **防呆檢核測試**：故意留空 Email 或輸入錯誤手機/Email 格式 ➔ 確認 UI 即時紅字提示阻擋。
+3. **正確填寫**：填寫完整資料（Email 必填、姓名、電話、地址等）並完成需求調查。
+4. **一鍵送出**：點擊「送出需求調查表」➔ 系統背景自動完成 Preview ➔ Apply 交易，直接顯示成功畫面！
 
 ### Current API
 
@@ -289,10 +309,9 @@ POST /api/v1/line/identity/registration/apply
 
 ### 驗收
 
-- Preview 不寫正式登記。
-- Apply 後可 readback `provisional_client_registrations` 對應紀錄。
-- Current implementation 可在 apply 流程建立 `clients` 與 `beclass_records` 並關聯回 registration；因此**不可再用「clients 必須完全不新增」作為舊版驗收條件**。
-- LINE confirmation 必須經 durable delivery task。
+- UI 自動驗證 Email 必填與格式。
+- 背景完成 Preview ➔ Apply 流程，直接建立客戶與登記紀錄。
+- LINE 聊天室收到登記成功確認推播。
 
 ---
 

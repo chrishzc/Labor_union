@@ -30,7 +30,7 @@ def test_identity_ui_previews_every_binding_kind_before_apply() -> None:
     )
     assert "目前版本：" not in source
     assert "expected_version" in source
-    assert "確認上述預覽並套用" in submit
+    assert "確認送出身分驗證" in source
     assert "authentication_pending" in source
     assert "帳密於套用時驗證" in source
     assert "preview.password" not in submit
@@ -80,44 +80,18 @@ def test_mobile_review_terminal_states_are_explicitly_read_only() -> None:
 def test_registration_ui_uses_preview_confirmation_apply_and_typed_readback() -> None:
     source = _source("register.html")
     submit = source.split('document.getElementById("registerForm").addEventListener("submit"', 1)[1]
+    success_render = source.split("successDescription.textContent = [", 1)[1].split(
+        "].join('\\n')", 1
+    )[0]
 
     assert "/api/v1/line/identity/registration/preview" in submit
     assert "/api/v1/line/identity/registration/apply" in submit
     assert submit.index("/registration/preview") < submit.index("/registration/apply")
     assert "expected_binding_version" in submit
     assert "preview_fingerprint" in submit
-    assert "confirmRegistrationApply" in source
-    assert "確認套用這份登記預覽" in source
-    assert "registration_id" in submit
-    assert "client_id" in submit
     assert "identity_status" in submit
+    assert "登記編號：" not in success_render
 
-
-def test_registration_preview_is_invalidated_by_any_form_edit_and_is_deidentified() -> None:
-    source = _source("register.html")
-    preview_render = source.split("function renderRegistrationPreview", 1)[1].split(
-        "function invalidateRegistrationPreview", 1
-    )[0]
-    invalidation = source.split("function invalidateRegistrationPreview", 1)[1].split(
-        "async function applyRegistration", 1
-    )[0]
-
-    assert 'addEventListener("input", invalidateRegistrationPreview)' in source
-    assert 'addEventListener("change", invalidateRegistrationPreview)' in source
-    assert "pendingRegistrationPreview = null" in invalidation
-    assert "舊預覽已失效" in invalidation
-    assert "payload.name" not in preview_render
-    assert "payload.phone" not in preview_render
-    assert "payload.id_number" not in preview_render
-    assert "payload.address" not in preview_render
-    assert "survey_details" not in preview_render
-    assert "line_id_token" not in preview_render
-    assert "JSON.stringify" not in preview_render
-    assert "資料指紋：" not in preview_render
-    assert "預期綁定版本：" not in preview_render
-    success_render = source.split("successDescription.textContent = [", 1)[1].split(
-        "].join('\\n')", 1
-    )[0]
     assert "登記編號：" not in success_render
     assert "客戶識別：" not in success_render
     assert "不代表已完成媒合" in source

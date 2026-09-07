@@ -48,7 +48,7 @@ def test_identity_page_reads_flow_context_after_liff_initialization() -> None:
     context_read = initialize_source.index("readIdentityFlowContext()")
 
     assert initialization < context_read
-    assert "location.assign(`/line-registration?flow_id=${encodeURIComponent(flowId)}`)" in source
+    assert "location.assign(`/line-bind?flow_id=${encodeURIComponent(flowId)}`)" in source
 
 
 def test_identity_page_accepts_both_liff_redirect_paths_without_redirecting() -> None:

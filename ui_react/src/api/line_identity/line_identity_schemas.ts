@@ -314,3 +314,58 @@ export type LineIdentityReviewPreviewView = z.infer<
 export type LineIdentityReviewApplyRequest = z.infer<
   typeof LineIdentityReviewApplyRequestSchema
 >;
+
+export const UnboundOrderCandidateSchema = z
+  .object({
+    case_no: z.string(),
+    client_id: z.number().int(),
+    client_name: z.string(),
+    client_phone: z.string(),
+    start_date: z.string().nullable().optional(),
+    status: z.string(),
+  })
+  .strict();
+
+export const UnboundProvisionalCandidateSchema = z
+  .object({
+    registration_id: z.number().int(),
+    name: z.string(),
+    phone: z.string(),
+    line_user_id: z.string(),
+    client_id: z.number().int().nullable().optional(),
+    submitted_at: z.string().nullable().optional(),
+  })
+  .strict();
+
+export const UnboundPairingCandidatesViewSchema = z
+  .object({
+    orders: z.array(UnboundOrderCandidateSchema),
+    provisional_registrations: z.array(UnboundProvisionalCandidateSchema),
+  })
+  .strict();
+
+export const PairProvisionalRegistrationRequestSchema = z
+  .object({
+    provisional_registration_id: z.number().int().positive(),
+    target_case_no: z.string().min(1).max(50),
+    reason: z.string().min(1).max(1000),
+    idempotency_key: z.string().min(1).max(191),
+    correlation_id: z.string().min(1).max(191),
+  })
+  .strict();
+
+export const PairProvisionalRegistrationResultViewSchema = z
+  .object({
+    case_no: z.string(),
+    client_id: z.number().int(),
+    client_name: z.string(),
+    line_user_id: z.string(),
+    status: z.string(),
+  })
+  .strict();
+
+export type UnboundOrderCandidate = z.infer<typeof UnboundOrderCandidateSchema>;
+export type UnboundProvisionalCandidate = z.infer<typeof UnboundProvisionalCandidateSchema>;
+export type UnboundPairingCandidatesView = z.infer<typeof UnboundPairingCandidatesViewSchema>;
+export type PairProvisionalRegistrationRequest = z.infer<typeof PairProvisionalRegistrationRequestSchema>;
+export type PairProvisionalRegistrationResultView = z.infer<typeof PairProvisionalRegistrationResultViewSchema>;

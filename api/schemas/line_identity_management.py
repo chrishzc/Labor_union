@@ -109,4 +109,49 @@ class LineIdentityReplacementRequest(_StrictModel):
     correlation_id: str = Field(min_length=1, max_length=191)
 
 
-__all__ = [name for name in globals() if name.startswith("LineIdentity")]
+class UnboundOrderCandidateView(_StrictModel):
+    case_no: str
+    client_id: int
+    client_name: str
+    client_phone: str
+    start_date: str | None = None
+    status: str
+
+
+class UnboundProvisionalCandidateView(_StrictModel):
+    registration_id: int
+    name: str
+    phone: str
+    line_user_id: str
+    client_id: int | None = None
+    submitted_at: str | None = None
+
+
+class UnboundPairingCandidatesResponseView(_StrictModel):
+    orders: list[UnboundOrderCandidateView]
+    provisional_registrations: list[UnboundProvisionalCandidateView]
+
+
+class PairProvisionalRegistrationRequest(_StrictModel):
+    provisional_registration_id: int = Field(gt=0)
+    target_case_no: str = Field(min_length=1, max_length=50)
+    reason: str = Field(min_length=1, max_length=1000)
+    idempotency_key: str = Field(min_length=1, max_length=191)
+    correlation_id: str = Field(min_length=1, max_length=191)
+
+
+class PairProvisionalRegistrationResultView(_StrictModel):
+    case_no: str
+    client_id: int
+    client_name: str
+    line_user_id: str
+    status: str
+
+
+__all__ = [
+    name
+    for name in globals()
+    if name.startswith("LineIdentity")
+    or name.startswith("Unbound")
+    or name.startswith("Pair")
+]

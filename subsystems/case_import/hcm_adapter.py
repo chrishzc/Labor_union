@@ -30,7 +30,11 @@ _CLOCK_PATTERN = re.compile(r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)")
 
 
 def build_hcm_case_import_intent(
-    record: Mapping[str, object], planned_end_date: date, *, requires_cooking: bool | None = None
+    record: Mapping[str, object],
+    planned_end_date: date,
+    *,
+    requires_cooking: bool | None = None,
+    provisional_registration_id: int | None = None,
 ) -> CaseImportIntent:
     case_no = _required_text(record, "case_no")
     identity_status = _required_text(record, "identity_status")
@@ -42,12 +46,28 @@ def build_hcm_case_import_intent(
     bootstrap = build_approved_case_architecture_bootstrap_intent(
         case_no, identity_status, created_at, planned_start_date
     )
-    return CaseImportIntent(case_no, _client_attributes(record), order, bootstrap)
+    return CaseImportIntent(
+        case_no,
+        _client_attributes(record),
+        order,
+        bootstrap,
+        provisional_registration_id=provisional_registration_id,
+    )
 
 
-def build_hcm_partial_case_import_intent(record: Mapping[str, object]) -> CaseImportIntent:
+def build_hcm_partial_case_import_intent(
+    record: Mapping[str, object],
+    *,
+    provisional_registration_id: int | None = None,
+) -> CaseImportIntent:
     case_no = _required_text(record, "case_no")
-    return CaseImportIntent(case_no, _client_attributes(record), None, None)
+    return CaseImportIntent(
+        case_no,
+        _client_attributes(record),
+        None,
+        None,
+        provisional_registration_id=provisional_registration_id,
+    )
 
 
 def _order_root_facts(

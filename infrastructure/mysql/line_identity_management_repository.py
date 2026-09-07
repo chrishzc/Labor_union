@@ -18,12 +18,110 @@ from subsystems.line.identity_management_contracts import (
     LineIdentityCurrentFactReadbackStatus,
     LineIdentityRevocationRequest,
     LineIdentityRevocationStatus,
+    UnboundOrderCandidate,
+    UnboundProvisionalCandidate,
+    UnboundPairingCandidatesView,
 )
 
 
 class MySqlLineIdentityManagementRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def list_unbound_pairing_candidates(self) -> UnboundPairingCandidatesView:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT o.case_no, o.client_id, c.name AS client_name, c.phone AS client_phone, "
+                "DATE_FORMAT(o.start_date, '%Y-%m-%d') AS start_date, o.status "
+                "FROM orders o JOIN clients c ON o.client_id = c.id "
+                "WHERE (c.line_user_id IS NULL OR c.line_user_id = '') AND o.status NOT IN ('訂單取消') "
+                "ORDER BY o.created_at DESC LIMIT 50"
+            )
+            order_rows = cursor.fetchall() or ()
+            orders = tuple(
+                UnboundOrderCandidate(
+                    case_no=str(r["case_no"]),
+                    client_id=int(r["client_id"]),
+                    client_name=str(r["client_name"] or "-"),
+                    client_phone=str(r["client_phone"] or "-"),
+                    start_date=str(r["start_date"]) if r.get("start_date") else None,
+                    status=str(r["status"] or "-"),
+                )
+                for r in order_rows
+            )
+
+            cursor.execute(
+                "SELECT r.id, "
+                "COALESCE(b.name, c.name, '-') AS name, "
+                "COALESCE(b.phone, c.phone, '-') AS phone, "
+                "COALESCE(r.active_line_user_id, r.line_user_id) AS line_user_id, "
+                "r.client_id, "
+                "DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at "
+                "FROM provisional_client_registrations r "
+                "LEFT JOIN beclass_records b ON r.beclass_record_id = b.id "
+                "LEFT JOIN clients c ON r.client_id = c.id "
+                "WHERE r.status = 'submitted' "
+                "ORDER BY r.id DESC LIMIT 50"
+            )
+            reg_rows = cursor.fetchall() or ()
+            provisional = tuple(
+                UnboundProvisionalCandidate(
+                    registration_id=int(r["id"]),
+                    name=str(r["name"] or "-"),
+                    phone=str(r["phone"] or "-"),
+                    line_user_id=str(r["line_user_id"]),
+                    client_id=int(r["client_id"]) if r.get("client_id") is not None else None,
+                    submitted_at=str(r["submitted_at"]) if r.get("submitted_at") else None,
+                )
+                for r in reg_rows
+                if r.get("line_user_id")
+            )
+        return UnboundPairingCandidatesView(orders, provisional)
+
+    def get_order_by_case_no(self, case_no: str) -> dict | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT o.case_no, o.client_id, c.name AS client_name, c.phone AS client_phone, "
+                "c.line_user_id AS client_line_user_id, o.status "
+                "FROM orders o JOIN clients c ON o.client_id = c.id "
+                "WHERE o.case_no = %s",
+                (case_no,),
+            )
+            return cursor.fetchone()
+
+    def get_provisional_registration(self, registration_id: int) -> dict | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT r.id, r.line_user_id, r.active_line_user_id, r.status, r.client_id, "
+                "r.beclass_record_id, COALESCE(b.name, c.name) AS name, COALESCE(b.phone, c.phone) AS phone "
+                "FROM provisional_client_registrations r "
+                "LEFT JOIN beclass_records b ON r.beclass_record_id = b.id "
+                "LEFT JOIN clients c ON r.client_id = c.id "
+                "WHERE r.id = %s",
+                (registration_id,),
+            )
+            return cursor.fetchone()
+
+    def consume_provisional_registration(
+        self,
+        registration_id: int,
+        case_no: str,
+        client_id: int,
+        beclass_record_id: int | None,
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            if beclass_record_id:
+                cursor.execute(
+                    "UPDATE beclass_records SET query_no=%s, bound_case_no=%s, client_id=%s "
+                    "WHERE id=%s",
+                    (case_no, case_no, client_id, beclass_record_id),
+                )
+            cursor.execute(
+                "UPDATE provisional_client_registrations "
+                "SET status='case_issued', active_line_user_id=NULL, client_id=%s "
+                "WHERE id=%s",
+                (client_id, registration_id),
+            )
 
     def list(self, query: LineIdentityBindingListQuery) -> LineIdentityBindingPage:
         clauses, parameters = _filters(query)

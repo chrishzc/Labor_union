@@ -172,6 +172,8 @@ class LineIdentityCandidate:
     subject_type: LineBindingSubjectType
     subject_reference: str
     currently_bound_line_user_id: LineUserId | None = None
+    case_no: str | None = None
+    has_completed_survey: bool = True
 
     def __post_init__(self) -> None:
         require_canonical_text(
@@ -179,6 +181,7 @@ class LineIdentityCandidate:
             "LINE identity candidate reference",
             191,
         )
+
 
 
 __all__ = [

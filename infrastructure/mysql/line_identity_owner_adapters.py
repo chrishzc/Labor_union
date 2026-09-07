@@ -59,6 +59,11 @@ class MySqlCustomerIdentityOwnerAdapter:
             subject_reference,
             line_user_id,
         )
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE provisional_client_registrations SET active_line_user_id=NULL WHERE active_line_user_id=%s",
+                (line_user_id.value,),
+            )
 
 
 class MySqlStaffIdentityOwnerAdapter:
@@ -172,10 +177,21 @@ def _candidate(subject_type, row):
     raw_line_user_id = row.get("line_user_id")
     if subject_type is LineBindingSubjectType.ADMIN:
         raw_line_user_id = row.get("linked_line_user_id")
+    case_no = str(row.get("case_no") or "").strip() or None
+    has_completed_survey = True
+    if subject_type is LineBindingSubjectType.CUSTOMER:
+        admin_notes = str(row.get("admin_notes") or "")
+        notes = str(row.get("notes") or "").strip()
+        baby_info = str(row.get("baby_info") or "").strip()
+        residence_type = str(row.get("residence_type") or "").strip()
+        if "STATE_B_UNFILLED_SURVEY" in admin_notes or (case_no and not (notes or baby_info or residence_type)):
+            has_completed_survey = False
     return LineIdentityCandidate(
         subject_type,
         str(row["id"]),
         _optional_line_user_id(raw_line_user_id),
+        case_no=case_no,
+        has_completed_survey=has_completed_survey,
     )
 
 
@@ -216,7 +232,7 @@ def _clear_owner_line_user(
 
 
 _CUSTOMER_RESOLVE_SQL = (
-    "SELECT id,line_user_id FROM clients WHERE name=%s AND "
+    "SELECT id,line_user_id,case_no,notes,baby_info,residence_type,admin_notes FROM clients WHERE name=%s AND "
     "REPLACE(REPLACE(phone,'-',''),' ','')=%s ORDER BY id LIMIT 2"
 )
 _CUSTOMER_LOCK_SQL = "SELECT id,line_user_id FROM clients WHERE id=%s FOR UPDATE"

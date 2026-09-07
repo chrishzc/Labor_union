@@ -262,7 +262,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             </div>
             <div class="form-group">
                 <label class="form-label">身分證字號</label>
-                <input type="text" class="form-input" id="id_number" maxlength="12" placeholder="身分證，例如: A123456789">
+                <input type="text" class="form-input" id="id_number" maxlength="12" placeholder="身分證，例如: A123456789" style="text-transform: uppercase;">
             </div>
         </div>
         <div class="grid-2">
@@ -288,8 +288,8 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             </div>
         </div>
         <div class="form-group">
-            <label class="form-label">Email</label>
-            <input type="email" class="form-input" id="email" maxlength="120" placeholder="example@gmail.com">
+            <label class="form-label required">Email</label>
+            <input type="email" class="form-input" id="email" required maxlength="120" placeholder="example@gmail.com">
         </div>
         <div class="grid-2">
             <div class="form-group">
@@ -477,7 +477,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             <div id="customFieldsContainer"></div>
         </div>
 
-        <button type="submit" class="btn-submit" id="registrationPreviewButton">預覽登記資料</button>
+        <button type="submit" class="btn-submit" id="registrationPreviewButton">送出資料</button>
         <div class="preview-card" id="registrationPreviewPanel" aria-live="polite">
             <div class="preview-summary" id="registrationPreviewSummary"></div>
             <div class="preview-actions">
@@ -561,7 +561,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             applyRuntime(appConfig);
             const liffId = await loadLiffId();
             await liff.init({liffId});
-            if (!liff.isLoggedIn()) { liff.login(); return; }
+            if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
             currentIdToken = liff.getIDToken() || '';
             if (!currentIdToken) throw new Error('無法取得 LINE 登入憑證，請重新開啟此頁。');
         } catch (error) {
@@ -597,11 +597,23 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             const caseNo = params.get('case_no');
             if (name) {
                 const nameInput = document.getElementById('name');
-                if (nameInput) nameInput.value = name;
+                if (nameInput) {
+                    nameInput.value = name;
+                    if (caseNo) {
+                        nameInput.readOnly = true;
+                        nameInput.style.backgroundColor = 'rgba(240, 244, 248, 0.8)';
+                    }
+                }
             }
             if (phone) {
                 const phoneInput = document.getElementById('phone');
-                if (phoneInput) phoneInput.value = phone;
+                if (phoneInput) {
+                    phoneInput.value = phone;
+                    if (caseNo) {
+                        phoneInput.readOnly = true;
+                        phoneInput.style.backgroundColor = 'rgba(240, 244, 248, 0.8)';
+                    }
+                }
             }
             if (caseNo) {
                 let caseNoInput = document.getElementById('case_no');
@@ -613,6 +625,25 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
                     document.getElementById('registerForm')?.appendChild(caseNoInput);
                 }
                 caseNoInput.value = caseNo;
+
+                // 顯示狀態 B (已有案號) 提示卡
+                let notice = document.getElementById('caseNotice');
+                if (!notice) {
+                    notice = document.createElement('div');
+                    notice.id = 'caseNotice';
+                    notice.className = 'status-message info';
+                    notice.style.display = 'block';
+                    notice.style.marginBottom = '20px';
+                    notice.style.background = 'rgba(74, 144, 226, 0.12)';
+                    notice.style.border = '1px solid rgba(74, 144, 226, 0.3)';
+                    notice.style.color = '#2b6cb0';
+                    notice.style.borderRadius = '10px';
+                    notice.style.padding = '12px 16px';
+                    notice.style.lineHeight = '1.5';
+                    notice.innerHTML = `<strong>【市府案件已建立】案件編號：${caseNo}</strong><br><span style="font-size:13px; color:#4a5568;">系統已為您鎖定基本身分，請繼續填寫以下 60 題需求問卷，完成後工會將即刻啟動媒合！</span>`;
+                    const form = document.getElementById('registerForm');
+                    if (form) form.insertBefore(notice, form.firstChild);
+                }
             }
         } catch (e) {
             console.warn('自動預填參數失敗:', e);
@@ -623,7 +654,35 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         initializeLiff();
         setupRefundPolicyAgreement();
         autofillFromQueryParams();
+        setupIdNumberAutoUppercase();
+        setupEmailTypoHint();
     });
+
+    function setupIdNumberAutoUppercase() {
+        const idInput = document.getElementById('id_number');
+        if (idInput) {
+            idInput.addEventListener('input', () => {
+                idInput.value = idInput.value.toUpperCase();
+            });
+        }
+    }
+
+    function setupEmailTypoHint() {
+        const emailInput = document.getElementById('email');
+        if (emailInput) {
+            emailInput.addEventListener('blur', () => {
+                const val = emailInput.value.trim();
+                if (val && isValidEmail(val)) {
+                    const typo = checkEmailDomainTypo(val);
+                    if (typo) {
+                        setFieldError(emailInput, `信箱網域疑似拼寫錯誤（您是否要輸入 @${typo}？），請確認後修正。`);
+                    } else {
+                        setFieldError(emailInput, '');
+                    }
+                }
+            });
+        }
+    }
 
     function applyRuntime(runtime) {
         const theme = runtime.theme;
@@ -638,7 +697,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         document.getElementById('pageLogo').textContent = page.content.logo || '';
         document.querySelector('.title').textContent = page.title;
         document.querySelector('.subtitle').textContent = '請詳細填寫以下資料；送出後由工會依正式流程審核與處理。';
-        document.getElementById('registrationPreviewButton').textContent = '預覽登記資料';
+        document.getElementById('registrationPreviewButton').textContent = '送出資料';
         document.querySelector('.success-title').textContent = '登記已受理';
         document.getElementById('closeButton').textContent = page.content.close_button || '關閉視窗';
         document.getElementById('loaderText').textContent = page.loading_text;
@@ -878,6 +937,43 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         return sum % 10 === 0;
     }
 
+    function isValidEmail(value) {
+        if (!value || typeof value !== 'string') return false;
+        const normalized = value.trim();
+        // RFC 5322 standard email regex with valid domain and 2+ char TLD (supports .co, .com, .tw, etc.)
+        const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
+        return emailRegex.test(normalized);
+    }
+
+    const COMMON_EMAIL_TYPOS = {
+        'gmai.com': 'gmail.com',
+        'gamil.com': 'gmail.com',
+        'gmial.com': 'gmail.com',
+        'gmaill.com': 'gmail.com',
+        'gmaik.com': 'gmail.com',
+        'gimal.com': 'gmail.com',
+        'gmail.com.tw': 'gmail.com',
+        'gmail.tw': 'gmail.com',
+        'yaho.com': 'yahoo.com',
+        'yaho.com.tw': 'yahoo.com.tw',
+        'yahooo.com': 'yahoo.com',
+        'yahooo.com.tw': 'yahoo.com.tw',
+        'yhoo.com': 'yahoo.com',
+        'yhoo.com.tw': 'yahoo.com.tw',
+        'hotmial.com': 'hotmail.com',
+        'hotmaill.com': 'hotmail.com',
+        'outlok.com': 'outlook.com',
+        'outloo.com': 'outlook.com',
+    };
+
+    function checkEmailDomainTypo(emailValue) {
+        if (!emailValue || typeof emailValue !== 'string') return null;
+        const atIndex = emailValue.lastIndexOf('@');
+        if (atIndex < 0) return null;
+        const domain = emailValue.slice(atIndex + 1).toLowerCase().trim();
+        return COMMON_EMAIL_TYPOS[domain] || null;
+    }
+
     function validateRegistrationForm() {
         clearFieldErrors();
         const errors = [];
@@ -931,8 +1027,15 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         }
 
         const emailValue = email.value.trim();
-        if (emailValue && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) {
-            addError(errors, email, 'Email 格式不正確，請確認包含 @ 與網域。');
+        if (!emailValue) {
+            addError(errors, email, '請填寫 Email 信箱。');
+        } else if (!isValidEmail(emailValue)) {
+            addError(errors, email, 'Email 格式不正確，請輸入有效信箱（例如：name@example.com 或 name@domain.co）。');
+        } else {
+            const typoSuggestion = checkEmailDomainTypo(emailValue);
+            if (typoSuggestion) {
+                addError(errors, email, `信箱網域疑似拼寫錯誤（您是否要輸入 @${typoSuggestion}？），請確認後修正。`);
+            }
         }
 
         const zipValue = zipCode.value.trim();
@@ -1004,8 +1107,15 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
                         const digits = normalizePhone(value);
                         control.value = digits;
                         if (!/^09\d{8}$/.test(digits)) addError(errors, control, `${field.label}需為 09 開頭的 10 碼手機號碼。`);
-                    } else if (field.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-                        addError(errors, control, `${field.label}的 Email 格式不正確。`);
+                    } else if (field.type === 'email') {
+                        if (!isValidEmail(value)) {
+                            addError(errors, control, `${field.label}的 Email 格式不正確。`);
+                        } else {
+                            const typo = checkEmailDomainTypo(value);
+                            if (typo) {
+                                addError(errors, control, `${field.label}網域疑似拼寫錯誤（是否為 @${typo}？）。`);
+                            }
+                        }
                     } else if (field.type === 'number' && Number.isNaN(Number(value))) {
                         addError(errors, control, `${field.label}請填寫數字。`);
                     } else if (field.type === 'date' && Number.isNaN(new Date(`${value}T00:00:00`).getTime())) {
@@ -1112,27 +1222,59 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
                 survey_details: surveyDetails
             };
 
-            const response = await fetch('/api/v1/line/identity/registration/preview', {
+            loader.style.display = "flex";
+            statusMsg.style.display = "none";
+
+            // 1. 建立背景預覽取得安全指紋與版號
+            const previewRes = await fetch('/api/v1/line/identity/registration/preview', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            const previewResult = await previewRes.json();
 
-            const result = await response.json();
-            
-            loader.style.display = "none";
-            
-            if (response.ok && result.data) {
-                const preview = requireRegistrationPreview(result.data);
-                pendingRegistrationPreview = {payload, preview};
-                renderRegistrationPreview(preview);
-                statusMsg.textContent = "登記預覽已建立；尚未寫入登記，請確認摘要後再套用。";
-                statusMsg.className = "status-message";
-                statusMsg.style.display = "block";
-            } else {
-                statusMsg.textContent = registrationErrorMessage(result);
+            if (!previewRes.ok || !previewResult.data) {
+                loader.style.display = "none";
+                statusMsg.textContent = registrationErrorMessage(previewResult);
                 statusMsg.className = "status-message error";
+                statusMsg.style.display = "block";
+                return;
             }
+
+            const preview = requireRegistrationPreview(previewResult.data);
+
+            // 2. 一鍵自動套用登記
+            const applyRes = await fetch('/api/v1/line/identity/registration/apply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ...payload,
+                    expected_binding_version: preview.expected_binding_version,
+                    preview_fingerprint: preview.preview_fingerprint
+                })
+            });
+            const applyResult = await applyRes.json();
+            loader.style.display = "none";
+
+            if (!applyRes.ok || !applyResult.data) {
+                statusMsg.textContent = registrationErrorMessage(applyResult);
+                statusMsg.className = "status-message error";
+                statusMsg.style.display = "block";
+                return;
+            }
+
+            const receipt = applyResult.data;
+            const successDescription = document.querySelector('.success-desc');
+            successDescription.style.whiteSpace = 'pre-line';
+            successDescription.textContent = [
+                '登記資料已安全提交成功！',
+                `LINE 身分狀態：${receipt.identity_status || '處理完成'}`,
+                '我們已為您完成需求調查登記，工會客服人員將儘速為您安排專屬媒合服務（提醒您：送出登記不代表已完成媒合）。',
+                '通知已排入系統佇列（不代表 LINE 訊息已送達）。'
+            ].join('\n');
+            document.getElementById('formHeader').style.display = 'none';
+            document.getElementById('registerForm').style.display = 'none';
+            document.getElementById('successCard').style.display = 'block';
         } catch (error) {
             console.error(error);
             loader.style.display = "none";
@@ -1153,86 +1295,6 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         }
         return data;
     }
-
-    function renderRegistrationPreview(preview) {
-        document.getElementById('registrationPreviewSummary').textContent = [
-            '資料已通過預覽檢查。',
-            '此處僅顯示去識別摘要；姓名、電話、身分證、地址與問卷內容不會回顯。',
-            '請確認後再套用；這份預覽尚未寫入登記。'
-        ].join('\n');
-        document.getElementById('registrationPreviewPanel').classList.add('visible');
-        document.getElementById('confirmRegistrationApply').disabled = false;
-    }
-
-    function invalidateRegistrationPreview() {
-        if (!pendingRegistrationPreview) return;
-        pendingRegistrationPreview = null;
-        document.getElementById('registrationPreviewPanel').classList.remove('visible');
-        document.getElementById('confirmRegistrationApply').disabled = true;
-        const statusMsg = document.getElementById('statusMessage');
-        statusMsg.textContent = '資料已修改，舊預覽已失效，請重新預覽。';
-        statusMsg.className = 'status-message error';
-        statusMsg.style.display = 'block';
-    }
-
-    async function applyRegistration() {
-        const state = pendingRegistrationPreview;
-        const statusMsg = document.getElementById('statusMessage');
-        if (!state) {
-            statusMsg.textContent = '登記預覽已失效，請重新預覽。';
-            statusMsg.className = 'status-message error';
-            statusMsg.style.display = 'block';
-            return;
-        }
-        const loader = document.getElementById('loaderOverlay');
-        loader.style.display = 'flex';
-        try {
-            const response = await fetch('/api/v1/line/identity/registration/apply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ...state.payload,
-                    expected_binding_version: state.preview.expected_binding_version,
-                    preview_fingerprint: state.preview.preview_fingerprint
-                })
-            });
-            const result = await response.json();
-            if (!response.ok || !result.data) throw new Error(registrationErrorMessage(result));
-            const receipt = result.data;
-            if (!Number.isInteger(receipt.registration_id) || receipt.registration_id < 1
-                || !Number.isInteger(receipt.client_id) || receipt.client_id < 1
-                || (receipt.identity_status !== null && typeof receipt.identity_status !== 'string')) {
-                throw new Error('登記結果驗證資料不完整，請勿重複送出並聯絡工會確認。');
-            }
-            pendingRegistrationPreview = null;
-            const successDescription = document.querySelector('.success-desc');
-            successDescription.style.whiteSpace = 'pre-line';
-            successDescription.textContent = [
-                '登記資料已安全提交。',
-                `LINE 身分狀態：${receipt.identity_status || '尚待處理'}`,
-                '此結果只表示登記與身分處理已提交，不代表已完成媒合，也不代表 LINE 訊息已送達。'
-            ].join('\n');
-            document.getElementById('formHeader').style.display = 'none';
-            document.getElementById('registerForm').style.display = 'none';
-            document.getElementById('successCard').style.display = 'block';
-        } catch (error) {
-            console.error(error);
-            statusMsg.textContent = error.message || '系統連線錯誤，請檢查網路狀態。';
-            statusMsg.className = 'status-message error';
-            statusMsg.style.display = 'block';
-        } finally {
-            loader.style.display = 'none';
-        }
-    }
-
-    document.getElementById('registerForm').addEventListener("input", invalidateRegistrationPreview);
-    document.getElementById('registerForm').addEventListener("change", invalidateRegistrationPreview);
-    document.getElementById('confirmRegistrationApply').addEventListener('click', applyRegistration);
-    document.getElementById('cancelRegistrationPreview').addEventListener('click', () => {
-        pendingRegistrationPreview = null;
-        document.getElementById('registrationPreviewPanel').classList.remove('visible');
-        document.getElementById('confirmRegistrationApply').disabled = true;
-    });
 
     function registrationErrorMessage(result) {
         const detail = result?.detail;

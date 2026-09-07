@@ -253,6 +253,42 @@ class LineIdentityRevocationRequest:
     last_error_message: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class UnboundOrderCandidate:
+    case_no: str
+    client_id: int
+    client_name: str
+    client_phone: str
+    start_date: str | None
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
+class UnboundProvisionalCandidate:
+    registration_id: int
+    name: str
+    phone: str
+    line_user_id: str
+    client_id: int | None
+    submitted_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class UnboundPairingCandidatesView:
+    orders: tuple[UnboundOrderCandidate, ...]
+    provisional_registrations: tuple[UnboundProvisionalCandidate, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PairProvisionalRegistrationCommand:
+    provisional_registration_id: int
+    target_case_no: str
+    actor: ActorContext
+    reason: str
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+
 __all__ = [
     "LineIdentityCurrentFactBinding",
     "LineIdentityCurrentFactFinding",
@@ -273,4 +309,8 @@ __all__ = [
     "RequestLineIdentityRevocationCommand",
     "ReplaceLineIdentitySubjectCommand",
     "SelectLineIdentityRoleCommand",
+    "UnboundOrderCandidate",
+    "UnboundProvisionalCandidate",
+    "UnboundPairingCandidatesView",
+    "PairProvisionalRegistrationCommand",
 ]

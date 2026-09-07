@@ -45,6 +45,12 @@ import {
   type LineIdentityRevocationApplyRequest,
   type LineIdentityRevocationPreviewView,
   type LineIdentityRevocationRequestView,
+  PairProvisionalRegistrationRequestSchema,
+  PairProvisionalRegistrationResultViewSchema,
+  UnboundPairingCandidatesViewSchema,
+  type PairProvisionalRegistrationRequest,
+  type PairProvisionalRegistrationResultView,
+  type UnboundPairingCandidatesView,
 } from './line_identity_schemas';
 
 export interface LineIdentityRequestOptions {
@@ -53,6 +59,13 @@ export interface LineIdentityRequestOptions {
 }
 
 export interface LineIdentityClient {
+  listUnboundCandidates(
+    options?: LineIdentityRequestOptions
+  ): Promise<UnboundPairingCandidatesView>;
+  pairProvisionalRegistration(
+    payload: PairProvisionalRegistrationRequest,
+    options?: LineIdentityRequestOptions
+  ): Promise<PairProvisionalRegistrationResultView>;
   listBindings(
     query?: LineIdentityBindingListQuery,
     options?: LineIdentityRequestOptions
@@ -193,6 +206,37 @@ function decodeEnvelope<T extends z.ZodTypeAny>(
     );
   }
   return envelope.data;
+}
+
+export async function listUnboundPairingCandidates(
+  options?: LineIdentityRequestOptions
+): Promise<UnboundPairingCandidatesView> {
+  try {
+    const raw = await transport.get(
+      '/api/v1/line/identity-bindings/unbound-candidates',
+      requestOptions(options)
+    );
+    return decodeEnvelope(UnboundPairingCandidatesViewSchema, raw);
+  } catch (error) {
+    throw mapLineIdentityError(error, 'query');
+  }
+}
+
+export async function pairProvisionalRegistration(
+  payload: PairProvisionalRegistrationRequest,
+  options?: LineIdentityRequestOptions
+): Promise<PairProvisionalRegistrationResultView> {
+  try {
+    const parsed = PairProvisionalRegistrationRequestSchema.parse(payload);
+    const raw = await transport.post(
+      '/api/v1/line/identity-bindings/pair-provisional',
+      parsed,
+      requestOptions(options)
+    );
+    return decodeEnvelope(PairProvisionalRegistrationResultViewSchema, raw);
+  } catch (error) {
+    throw mapLineIdentityError(error, 'apply');
+  }
 }
 
 export async function listLineIdentityBindings(
@@ -430,6 +474,19 @@ export async function applyLineIdentityReviewDecision(
 }
 
 class DefaultLineIdentityClient implements LineIdentityClient {
+  listUnboundCandidates(
+    options?: LineIdentityRequestOptions
+  ): Promise<UnboundPairingCandidatesView> {
+    return listUnboundPairingCandidates(options);
+  }
+
+  pairProvisionalRegistration(
+    payload: PairProvisionalRegistrationRequest,
+    options?: LineIdentityRequestOptions
+  ): Promise<PairProvisionalRegistrationResultView> {
+    return pairProvisionalRegistration(payload, options);
+  }
+
   listBindings(
     query?: LineIdentityBindingListQuery,
     options?: LineIdentityRequestOptions

@@ -107,6 +107,9 @@ class AdminIdentityBindingApplyRequest(AdminIdentityBindingRequest):
 
 class LineIdentityCandidateResponse(BaseModel):
     currently_bound: bool
+    case_no: str | None = None
+    has_completed_survey: bool = True
+
 
 
 class LineIdentityPreviewResponse(BaseModel):

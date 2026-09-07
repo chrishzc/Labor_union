@@ -33,6 +33,8 @@ from subsystems.line.identity_management_contracts import (
     RequestLineIdentityRevocationCommand,
     ReplaceLineIdentitySubjectCommand,
     SelectLineIdentityRoleCommand,
+    UnboundPairingCandidatesView,
+    PairProvisionalRegistrationCommand,
 )
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 from subsystems.line.rich_menu_binding import (
@@ -56,6 +58,90 @@ class LineIdentityManagementApplication:
     def list(self, query: LineIdentityBindingListQuery):
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.identity_management.list(query)
+
+    def unbound_pairing_candidates(self) -> UnboundPairingCandidatesView:
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.identity_management.list_unbound_pairing_candidates()
+
+    def pair_provisional_registration(self, command: PairProvisionalRegistrationCommand) -> dict:
+        require_line_capability(command.actor, LineCapability.IDENTITY_BINDING_MANAGE)
+        _require_reason(command.reason)
+        with self._unit_of_work_factory() as unit_of_work:
+            order = unit_of_work.identity_management.get_order_by_case_no(command.target_case_no)
+            if not order:
+                raise LookupError("line_unbound_order_not_found")
+            client_id = int(order["client_id"])
+            if order.get("client_line_user_id"):
+                raise RuntimeError("line_order_client_already_bound")
+            if order.get("status") == "訂單取消":
+                raise RuntimeError("line_order_already_cancelled")
+
+            provisional = unit_of_work.identity_management.get_provisional_registration(command.provisional_registration_id)
+            if not provisional:
+                raise LookupError("line_provisional_registration_not_found")
+            if provisional.get("status") != "submitted":
+                raise RuntimeError("line_provisional_registration_already_issued")
+            raw_line_uid = str(provisional.get("active_line_user_id") or provisional.get("line_user_id") or "").strip()
+            if not raw_line_uid:
+                raise RuntimeError("line_provisional_registration_missing_line_user_id")
+            line_user_id = LineUserId(raw_line_uid)
+
+            current = unit_of_work.identities.get(line_user_id, LineBindingSubjectType.CUSTOMER)
+            if current and current.status is LineIdentityBindingStatus.BOUND:
+                if current.subject_reference != str(client_id):
+                    raise RuntimeError("line_identity_already_used_by_customer")
+
+            claim = LineIdentityClaim(
+                line_user_id,
+                LineBindingSubjectType.CUSTOMER,
+                str(client_id),
+            )
+            if current and current.status is LineIdentityBindingStatus.REVOKED:
+                current = unit_of_work.identities.save_claim(claim, current.version)
+            elif current is None:
+                current = unit_of_work.identities.save_claim(claim, ExpectedVersion(0))
+
+            expected_version = current.version
+            unit_of_work.identities.bind(
+                claim,
+                expected_version,
+                command.actor.actor_id,
+                command.idempotency_key,
+                command.correlation_id.value,
+            )
+
+            unit_of_work.customers.bind_customer(
+                str(client_id),
+                line_user_id,
+                expected_current_line_user_id=None,
+            )
+
+            unit_of_work.identity_management.consume_provisional_registration(
+                registration_id=command.provisional_registration_id,
+                case_no=command.target_case_no,
+                client_id=client_id,
+                beclass_record_id=provisional.get("beclass_record_id"),
+            )
+
+            unit_of_work.audit.append(
+                LineAuditIntent(
+                    "line.identity.provisional.paired",
+                    command.actor.actor_id,
+                    "provisional_client_registration",
+                    str(command.provisional_registration_id),
+                )
+            )
+
+            schedule_resolved_identity_menu(unit_of_work, line_user_id)
+            unit_of_work.commit()
+
+            return {
+                "case_no": command.target_case_no,
+                "client_id": client_id,
+                "client_name": str(order.get("client_name") or "-"),
+                "line_user_id": line_user_id.value,
+                "status": "bound",
+            }
 
     def detail(self, line_user_id: LineUserId):
         with self._unit_of_work_factory() as unit_of_work:

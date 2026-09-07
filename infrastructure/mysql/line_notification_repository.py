@@ -979,6 +979,7 @@ _LINE006_RECHECK_TARGETS_SQL = (
     "LEFT JOIN line_notification_intents intent ON intent.decision_id=decision.id "
     "LEFT JOIN line_delivery_tasks task ON task.id=intent.delivery_task_id "
     "WHERE source.source_domain<>'manual_replay' "
+    "AND JSON_EXTRACT(source.facts_snapshot,'$.case_no') IS NOT NULL "
     "AND (decision.reason_code IN ('recipient_unavailable','template_or_schedule_invalid') "
     "OR (task.processing_status='failed' AND task.error_code IN ('recipient_unavailable','template_or_schedule_invalid'))) "
     "ORDER BY case_no,reason_code LIMIT %s"

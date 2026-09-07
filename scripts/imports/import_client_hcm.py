@@ -467,12 +467,13 @@ def _import_row(
             problem_identity = _persist_hcm_review(
                 connection, source_digest, source_sheet, ordinal, raw_row, case_no, warning_errors,
             )
-        if current_uow:
-            _reconcile_without_rolling_back_hcm(
-                connection, str(case_no), in_current_uow=True,
-            )
-        else:
-            _reconcile_without_rolling_back_hcm(connection, str(case_no))
+        if intent.is_complete:
+            if current_uow:
+                _reconcile_without_rolling_back_hcm(
+                    connection, str(case_no), in_current_uow=True,
+                )
+            else:
+                _reconcile_without_rolling_back_hcm(connection, str(case_no))
         outcome = "inserted_with_warning" if warning_errors else "inserted"
         return _row_outcome(outcome, ordinal, str(case_no), warning_errors, problem_identity, detailed)
     except CaseImportWorkflowError as error:
@@ -558,10 +559,38 @@ def _privacy_safe_hcm_evidence(raw_row, validation_errors):
     }
 
 
+def _find_matching_provisional_registration(cursor, record) -> int | None:
+    if cursor is None:
+        return None
+    name = str(record.get("name") or "").strip()
+    phone = clean_phone(record.get("phone"))
+    if not name or not phone:
+        return None
+    cursor.execute(
+        "SELECT r.id FROM provisional_client_registrations r "
+        "JOIN clients c ON c.id = r.client_id "
+        "WHERE c.name = %s "
+        "AND REPLACE(REPLACE(c.phone, '-', ''), ' ', '') = %s "
+        "AND c.case_no IS NULL "
+        "AND r.status = 'submitted' "
+        "ORDER BY r.id DESC LIMIT 2",
+        (name, phone),
+    )
+    rows = cursor.fetchall()
+    if not rows or len(rows) != 1:
+        return None
+    row = rows[0]
+    return int(row["id"] if isinstance(row, dict) else row[0])
+
+
 def _hcm_import_intent(cursor, record, validation_errors):
+    provisional_registration_id = _find_matching_provisional_registration(cursor, record)
     if validation_errors:
-        return build_hcm_partial_case_import_intent(_partial_hcm_record(record, validation_errors))
-    return _case_import_intent(cursor, record)
+        return build_hcm_partial_case_import_intent(
+            _partial_hcm_record(record, validation_errors),
+            provisional_registration_id=provisional_registration_id,
+        )
+    return _case_import_intent(cursor, record, provisional_registration_id=provisional_registration_id)
 
 
 def _partial_hcm_record(record, validation_errors):
@@ -731,7 +760,7 @@ def _normalized_record(row):
     return normalize_hcm_row(row)
 
 
-def _case_import_intent(cursor, record):
+def _case_import_intent(cursor, record, *, provisional_registration_id=None):
     start_date = record.get("service_start_date")
     service_days = record.get("service_days")
     if type(start_date) is not date or not isinstance(service_days, int):
@@ -745,10 +774,13 @@ def _case_import_intent(cursor, record):
     )
     if end_date is None:
         raise ValueError("case_import_planned_end_date_required")
+    if provisional_registration_id is None:
+        provisional_registration_id = _find_matching_provisional_registration(cursor, record)
     return build_hcm_case_import_intent(
         record,
         end_date,
         requires_cooking=None,
+        provisional_registration_id=provisional_registration_id,
     )
 
 

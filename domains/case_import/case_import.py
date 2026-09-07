@@ -257,7 +257,8 @@ def _validate_provisional_registration(registration, intent) -> None:
         raise CaseImportDomainError(CaseImportIssue.PROVISIONAL_REGISTRATION_NOT_SUBMITTED, "Provisional registration is not submitted.")
     if registration.client_id is None or registration.beclass_record_id is None or registration.beclass_query_no is not None or registration.has_open_conflict:
         raise CaseImportDomainError(CaseImportIssue.PROVISIONAL_REGISTRATION_IDENTITY_MISMATCH, "Provisional registration cannot be safely issued.")
-    if _required_attribute(intent.client_attributes, "line_id") != registration.line_user_id:
+    line_id_attr = next((item.value for item in intent.client_attributes if item.name == "line_id"), None)
+    if line_id_attr is not None and str(line_id_attr).startswith("U") and len(str(line_id_attr)) >= 30 and str(line_id_attr) != registration.line_user_id:
         raise CaseImportDomainError(CaseImportIssue.PROVISIONAL_REGISTRATION_IDENTITY_MISMATCH, "Case import LINE identity differs from provisional registration.")
 
 

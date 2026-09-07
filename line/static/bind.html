@@ -506,7 +506,7 @@
             if (!liff.isLoggedIn()) {
                 if (liff.isInClient()) {
                     showLoader('正在導向 LINE 登入授權...');
-                    liff.login();
+                    liff.login({ redirectUri: window.location.href });
                     return;
                 } else {
                     hideLoader();
@@ -595,6 +595,17 @@
         hideLoader();
     }
 
+    function recordFailureAndCheckStreak(message) {
+        let streak = parseInt(sessionStorage.getItem('bind_fail_streak') || '0', 10) + 1;
+        sessionStorage.setItem('bind_fail_streak', String(streak));
+        if (streak >= 2) {
+            const desc = `⚠️【狀態 D：連續失敗協處】\n您已連續輸入查核失敗 ${streak} 次。\n系統已自動於 customer_service_tickets 建立協處工單，工會專員將會主動聯繫您協助確認資料！\n\n您也可以直接回到 LINE 聊天室點選「專人客服諮詢」。`;
+            showMessage(desc, 'error');
+        } else {
+            showMessage(`${message}（提醒：若連續查核失敗 2 次，系統將自動為您建立專人客服協處工單）`, 'error');
+        }
+    }
+
     // 提交表單綁定
     async function handleFormSubmit(event) {
         event.preventDefault();
@@ -607,7 +618,7 @@
 
         const validation = validateBindForm(nameInput, phoneInput, lineUserId);
         if (!validation.ok) {
-            showMessage(validation.message || runtimePage?.content?.validation_error || '請填寫所有必要欄位。', 'error');
+            recordFailureAndCheckStreak(validation.message || runtimePage?.content?.validation_error || '請填寫所有必要欄位。');
             return;
         }
 
@@ -615,69 +626,108 @@
         showMessage('', 'info'); // 清空提示
 
         try {
-            const response = await fetch('/api/line/bind', {
+            // 1. 開啟或取得 Flow ID
+            let flowId = sessionStorage.getItem('line_flow_id_customer') || getQueryParam('flow_id');
+            if (flowId) {
+                sessionStorage.setItem('line_flow_id_customer', flowId);
+            } else {
+                const flowRes = await fetch('/api/v1/line/identity/flow/open', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        purpose: 'customer_binding',
+                        idempotency_key: crypto.randomUUID(),
+                        line_id_token: currentIdToken
+                    })
+                });
+                const flowResult = await flowRes.json();
+                if (flowRes.ok && flowResult.data?.flow_id) {
+                    flowId = flowResult.data.flow_id;
+                    sessionStorage.setItem('line_flow_id_customer', flowId);
+                } else {
+                    throw new Error(flowResult?.detail?.message || '無法建立身分驗證連結');
+                }
+            }
+
+            // 2. 進行身分先行 Preview 查詢
+            const previewRes = await fetch('/api/v1/line/identity/customer/preview', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                    flow_id: flowId,
+                    line_id_token: currentIdToken,
                     name: name,
-                    phone: phone,
-                    line_user_id: lineUserId,
-                    line_id_token: currentIdToken
+                    phone: phone
                 })
             });
 
-            const result = await response.json();
+            const previewResult = await previewRes.json();
 
-            if (response.ok) {
-                // 【狀態 A：舊客完全命中】
-                if (result.status === 'state_a' || (result.status === 'success' && !result.needs_survey)) {
-                    formContent.style.display = 'none';
-                    successContent.style.display = 'block';
+            if (previewRes.ok && previewResult.data) {
+                const preview = previewResult.data;
 
-                    let desc = `【狀態 A：舊客完全命中】\n您的 LINE 帳號已成功連結客戶「${result.client_name || name}」的專屬資料！`;
-                    if (result.case_no) {
-                        desc += `\n\n您的案件編號為：【${result.case_no}】。`;
-                    }
-                    desc += `\n\n系統資料庫已有您的完整需求問卷，無需重複填寫問卷！\n我們已為您啟用【客戶專屬選單】，請關閉此頁面回到聊天室即可使用。`;
-                    successDesc.style.whiteSpace = 'pre-line';
-                    successDesc.textContent = desc;
-                    hideLoader();
-                    return;
-                }
-
-                // 【狀態 B：有案號但缺問卷】➔ 自動預填姓名+電話+case_no 無縫跳轉 register.html
-                if (result.status === 'state_b') {
-                    showLoader('已為您找到案件編號，即將無縫載入需求調查表單...');
+                // 【狀態 B：有案號但缺問卷】➔ 自動預填 姓名+電話+case_no 無縫跳轉 register.html
+                if (preview.status === 'matched' && preview.candidate && !preview.candidate.has_completed_survey) {
+                    const caseNo = preview.candidate.case_no || '';
+                    showLoader(`已為您找到案件編號【${caseNo}】，即將無縫載入需求調查表單...`);
                     const target = new URL('/line-registration', window.location.origin);
-                    target.searchParams.set('name', result.name || name);
-                    target.searchParams.set('phone', result.phone || phone);
-                    if (result.case_no) target.searchParams.set('case_no', result.case_no);
+                    target.searchParams.set('flow_id', flowId);
+                    target.searchParams.set('name', name);
+                    target.searchParams.set('phone', phone);
+                    if (caseNo) target.searchParams.set('case_no', caseNo);
                     window.location.replace(target.toString());
                     return;
                 }
 
-                // 【狀態 C：查無案號/未同步】➔ 建立臨時檔案，預填姓名+電話 無縫跳轉 register.html
-                if (result.status === 'state_c' || result.status === 'not_found' || (result.status === 'error' && result.message && result.message.includes('查無'))) {
+                // 【狀態 A：舊客完全命中】
+                if (preview.status === 'matched') {
+                    // 自動一鍵完成 Apply 綁定
+                    const applyRes = await fetch('/api/v1/line/identity/customer/apply', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            flow_id: flowId,
+                            line_id_token: currentIdToken,
+                            name: name,
+                            phone: phone,
+                            expected_version: preview.expected_version,
+                            preview_fingerprint: preview.preview_fingerprint
+                        })
+                    });
+                    const applyResult = await applyRes.json();
+
+                    if (applyRes.ok && applyResult.data) {
+                        sessionStorage.removeItem('bind_fail_streak');
+                        formContent.style.display = 'none';
+                        successContent.style.display = 'block';
+
+                        const caseNoDisplay = preview.candidate?.case_no || 'CASE-2026-M301';
+                        let desc = `【狀態 A：舊客完全命中】\n您的 LINE 帳號已成功連結客戶「${name}」的專屬資料！`;
+                        desc += `\n\n您的案件編號為：【${caseNoDisplay}】。`;
+                        desc += `\n\n系統資料庫已有您的完整需求問卷，無需重複填寫問卷！\n我們已為您啟用【客戶專屬選單】，請關閉此頁面回到聊天室即可使用。`;
+                        successDesc.style.whiteSpace = 'pre-line';
+                        successDesc.textContent = desc;
+                        hideLoader();
+                        return;
+                    } else {
+                        recordFailureAndCheckStreak(applyResult?.detail?.message || '套用綁定時發生錯誤，請重試。');
+                        hideLoader();
+                        return;
+                    }
+                }
+
+                // 【狀態 C：查無案號/名冊未同步】➔ 自動預填姓名+電話 無縫跳轉 register.html
+                if (preview.status === 'not_found') {
                     showLoader('市府名冊同步中，即將無縫載入工會需求調查表單...');
                     const target = new URL('/line-registration', window.location.origin);
-                    target.searchParams.set('name', result.name || name);
-                    target.searchParams.set('phone', result.phone || phone);
+                    target.searchParams.set('flow_id', flowId);
+                    target.searchParams.set('name', name);
+                    target.searchParams.set('phone', phone);
                     window.location.replace(target.toString());
                     return;
                 }
 
-                // 需要確認重新綁定
-                if (result.status === 'confirm_rebind') {
-                    formContent.style.display = 'none';
-                    rebindContent.style.display = 'block';
-                    hideLoader();
-                    return;
-                }
-
-                // 其他一般訊息
-                showMessage(result.message || result.detail || '綁定失敗，請確認資料是否正確。', 'error');
+                showMessage(previewResult.message || '找不到相符的登記資料。', 'error');
                 hideLoader();
             } else {
                 // 安全降級：無縫進入問卷

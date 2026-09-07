@@ -118,8 +118,9 @@ class MySqlCaseImportRepository:
         registration = candidate.provisional_registration
         with _mysql_cursor(self._connection) as cursor:
             cursor.execute(
-                "UPDATE beclass_records SET query_no=%s WHERE id=%s AND query_no IS NULL",
-                (candidate.case_no, registration.beclass_record_id),
+                "UPDATE beclass_records SET query_no=%s,bound_case_no=%s,client_id=%s "
+                "WHERE id=%s AND query_no IS NULL",
+                (candidate.case_no, candidate.case_no, client_id, registration.beclass_record_id),
             )
             if int(cursor.rowcount) != 1:
                 raise CaseImportStorageError("Provisional BeClass record changed.", retryable=False)

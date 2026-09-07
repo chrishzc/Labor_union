@@ -81,6 +81,11 @@ LEGACY_ERROR_ALLOWLIST: Final[dict[str, LegacyErrorSpec]] = {
     "internal_service_operation_forbidden": LegacyErrorSpec(
         GlobalErrorCategory.FORBIDDEN, "The authenticated service cannot run this operation.", False
     ),
+    "registration_conflict": LegacyErrorSpec(
+        GlobalErrorCategory.CONFLICT,
+        "您目前已有一筆送出中的需求登記待處理；若需修改資料請聯絡工會專員。",
+        False,
+    ),
 }
 
 LEGACY_STRING_ALLOWLIST: Final[dict[str, tuple[str, str]]] = {

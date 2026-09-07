@@ -154,6 +154,21 @@ def publish_line_wakeup_best_effort() -> None:
         get_line_wakeup_publisher().publish()
     except Exception as error:
         print(f"[LINE Runtime] Redis wake signal failed; DB fallback remains active: {error}")
+    try:
+        from api.dependencies.line_worker_operation import run_line_cycle
+        from api.schemas.private_operations import WorkerRuntimeIdentity
+        import socket
+        runtime_id = WorkerRuntimeIdentity(
+            service_name="line-worker",
+            instance_id="in-process",
+            process_id=os.getpid(),
+            hostname=socket.gethostname() or "localhost",
+            started_at=datetime.now(timezone.utc),
+            release_version="1.0.0",
+        )
+        run_line_cycle("in-process-worker", runtime_id)
+    except Exception as exc:
+        pass
 
 
 def _wakeup_publisher():

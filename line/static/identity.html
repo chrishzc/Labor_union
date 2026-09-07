@@ -124,7 +124,7 @@ function buildForm(definition) {
   }
   const button = document.createElement("button");
   button.type = "submit";
-  button.textContent = "預覽資料";
+  button.textContent = "確認送出身分驗證";
   const previewBox = document.createElement("div");
   previewBox.id = "identity-preview";
   previewBox.hidden = true;
@@ -195,9 +195,9 @@ function configureCustomerChoice(definition) {
   if (registerBtn) {
     registerBtn.addEventListener("click", async () => {
       try {
-        showMessage("正在為您開啟需求調查表單…");
+        showMessage("正在為您開啟服務綁定與查詢…");
         await openIdentityFlow("customer_binding");
-        location.assign(`/line-registration?flow_id=${encodeURIComponent(flowId)}`);
+        location.assign(`/line-bind?flow_id=${encodeURIComponent(flowId)}`);
       } catch (error) {
         showIdentityError(error, "目前無法開啟需求調查表單。");
       }
@@ -251,33 +251,52 @@ function identityPreviewText(endpoint, preview) {
 
 async function submitForm(event, definition, button, previewBox, editButton) {
   event.preventDefault();
-  if (pendingIdentityPreview?.endpoint === definition.endpoint) {
-    await applyIdentityPreview(definition, button, previewBox, editButton);
-    return;
-  }
   button.disabled = true;
-  showMessage("正在建立零寫入預覽…");
+  showMessage("正在核對並綁定身分資料…");
   const values = Object.fromEntries(new FormData(event.target).entries());
   const payload = {flow_id: flowId, line_id_token: idToken, ...values};
   try {
-    const response = await fetch(`/api/v1/line/identity/${definition.endpoint}/preview`, {
+    // 1. 建立背景預覽
+    const previewRes = await fetch(`/api/v1/line/identity/${definition.endpoint}/preview`, {
       method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)
     });
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(safeIdentityErrorMessage(result, "無法建立身分預覽。"));
+    const previewResult = await previewRes.json();
+    if (!previewRes.ok || !previewResult.data) {
+      throw new Error(safeIdentityErrorMessage(previewResult, "找不到相符的身分資料，請確認輸入是否正確。"));
     }
-    const preview = requireIdentityPreview(result);
-    pendingIdentityPreview = {endpoint: definition.endpoint, values, preview};
-    event.target.querySelectorAll("input").forEach(item => item.disabled = true);
-    previewBox.textContent = identityPreviewText(definition.endpoint, preview);
+    const preview = requireIdentityPreview(previewResult);
+
+    // 2. 一鍵直接套用
+    const applyRes = await fetch(`/api/v1/line/identity/${definition.endpoint}/apply`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        ...payload,
+        expected_version: preview.expected_version,
+        preview_fingerprint: preview.preview_fingerprint
+      })
+    });
+    const applyResult = await applyRes.json();
+    if (!applyRes.ok || !applyResult.data) {
+      throw new Error(safeIdentityErrorMessage(applyResult, "身分套用失敗，請稍後再試。"));
+    }
+
+    const pending = applyResult.data.status === "pending_review";
+    const reviewReference = Number.isInteger(applyResult.data.review_request_id)
+      ? `｜審核編號：${applyResult.data.review_request_id}` : "";
+    showMessage(
+      `${pending ? "申請已送出，請等待工會人員確認。" : "✅ LINE 身分已成功完成綁定！"}${reviewReference}`,
+      false
+    );
+    previewBox.textContent = [
+      `處理結果：${pending ? "等待工會人員確認" : "LINE 身分已成功綁定"}${reviewReference}`,
+      "我們已為您切換專屬圖文選單，請關閉此頁面返回 LINE 聊天室即可開始使用！"
+    ].join("\n");
     previewBox.hidden = false;
-    editButton.hidden = false;
-    button.textContent = "確認上述預覽並套用";
-    button.disabled = false;
-    showMessage("預覽已建立；尚未變更 LINE 身分。", false);
+    button.disabled = true;
+    editButton.hidden = true;
   } catch (error) {
-    showIdentityError(error, "目前無法建立預覽，請稍後再試。");
+    showIdentityError(error, "目前無法完成身分綁定，請確認資料正確或稍後再試。");
     button.disabled = false;
   }
 }

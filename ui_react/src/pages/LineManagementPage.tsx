@@ -116,6 +116,10 @@ import {
   LineIdentityReviewWorkbench,
   type LineIdentityReviewClient,
 } from '../components/LineIdentityReviewWorkbench';
+import {
+  LineUnboundPairingWorkbench,
+  type LineUnboundPairingClient,
+} from '../components/LineUnboundPairingWorkbench';
 import { LineNotificationRulesMutationPanel } from '../components/LineNotificationRulesMutationPanel';
 import { LineRichMenuPublicationActions } from '../components/LineRichMenuPublicationActions';
 import { LineRichMenuDraftActionEditor } from '../components/LineRichMenuDraftActionEditor';
@@ -142,6 +146,8 @@ type LineIdentityPageClient = Pick<LineIdentityClient, 'listBindings' | 'getBind
     | 'getReview'
     | 'previewReviewDecision'
     | 'applyReviewDecision'
+    | 'listUnboundCandidates'
+    | 'pairProvisionalRegistration'
   >>;
 
 interface LineManagementPageProps {
@@ -257,6 +263,16 @@ function asReviewClient(client: LineIdentityPageClient): LineIdentityReviewClien
     && client.applyReviewDecision
   ) {
     return client as LineIdentityReviewClient;
+  }
+  return null;
+}
+
+function asUnboundPairingClient(client: LineIdentityPageClient): LineUnboundPairingClient | null {
+  if (
+    typeof client.listUnboundCandidates === 'function' &&
+    typeof client.pairProvisionalRegistration === 'function'
+  ) {
+    return client as LineUnboundPairingClient;
   }
   return null;
 }
@@ -1980,6 +1996,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         const total = bindingPage.value?.total ?? 0;
         const page = bindingPage.value?.page ?? 1;
         const reviewClient = asReviewClient(lineIdentity);
+        const unboundPairingClient = asUnboundPairingClient(lineIdentity) ?? lineIdentityClient;
 
         const customerCount = items.filter((i) => i.subjectType === 'customer').length;
         const staffCount = items.filter((i) => i.subjectType === 'staff').length;
@@ -2159,6 +2176,12 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               </div>
             </section>
           )}
+          <LineUnboundPairingWorkbench
+            client={unboundPairingClient}
+            onPairSuccess={() => {
+              setBindingReload((v) => v + 1);
+            }}
+          />
           </>
         );
       })()}

@@ -24,6 +24,9 @@ from api.schemas.line_identity_management import (
     LineIdentityRevocationRequestView,
     LineIdentityReplacementPreviewView,
     LineIdentityReplacementRequest,
+    PairProvisionalRegistrationRequest,
+    PairProvisionalRegistrationResultView,
+    UnboundPairingCandidatesResponseView,
 )
 from domains.line.identities import LineUserId
 from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
@@ -33,6 +36,7 @@ from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.line.identity_management_application import LineIdentityManagementApplication
 from subsystems.line.identity_management_contracts import (
     LineIdentityBindingListQuery,
+    PairProvisionalRegistrationCommand,
     RequestLineIdentityRevocationCommand,
     ReplaceLineIdentitySubjectCommand,
 )
@@ -62,6 +66,43 @@ def list_bindings(
 ):
     query = LineIdentityBindingListQuery(status, subject_type, search, page, page_size)
     return BaseResponse(data=_application().list(query))
+
+
+@router.get(
+    "/unbound-candidates",
+    response_model=BaseResponse[UnboundPairingCandidatesResponseView],
+)
+def list_unbound_candidates(
+    _: AdminPrincipal = Depends(require_line_identity_binding_reader),
+):
+    result = _call(_application().unbound_pairing_candidates)
+    return BaseResponse(data=UnboundPairingCandidatesResponseView.model_validate(result))
+
+
+@router.post(
+    "/pair-provisional",
+    response_model=BaseResponse[PairProvisionalRegistrationResultView],
+)
+def pair_provisional_registration(
+    payload: PairProvisionalRegistrationRequest,
+    request: Request,
+    principal: AdminPrincipal = Depends(require_line_identity_binding_manager),
+):
+    command = PairProvisionalRegistrationCommand(
+        provisional_registration_id=payload.provisional_registration_id,
+        target_case_no=payload.target_case_no.strip(),
+        actor=admin_actor_context(principal),
+        reason=payload.reason.strip(),
+        idempotency_key=IdempotencyKey(payload.idempotency_key.strip()),
+        correlation_id=CorrelationId(payload.correlation_id.strip()),
+    )
+    result = _call(_application().pair_provisional_registration, command)
+    _audit_request(request, "pair_provisional", f"registration:{payload.provisional_registration_id}")
+    publish_line_wakeup_best_effort()
+    return BaseResponse(
+        data=PairProvisionalRegistrationResultView.model_validate(result),
+        message="狀態 C 產婦與訂單已成功配對並綁定",
+    )
 
 
 @router.get("/{line_user_id}", response_model=BaseResponse[LineIdentityBindingView])
