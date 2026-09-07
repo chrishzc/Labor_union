@@ -166,32 +166,100 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
   const [preview, setPreview] = useState<StaffCasePreferenceManualSnapshot | null>(null);
   const [reason, setReason] = useState('');
   const [status, setStatus] = useState('');
+  const [phase, setPhase] = useState<'loading' | 'ready' | 'editing' | 'previewing' | 'preview_ready' | 'applying' | 'error'>('loading');
   const loadEpoch = useRef(0);
   const load = useCallback(async () => {
     const epoch = ++loadEpoch.current;
+    setPhase('loading');
+    setSnapshot(null);
     setPreview(null);
-    const next = await staffCasePreferenceManualClient.query(staffId);
-    if (epoch !== loadEpoch.current) return;
-    setSnapshot(next);
-    setDraft(next.after);
+    setReason('');
+    setStatus('');
+    try {
+      const next = await staffCasePreferenceManualClient.query(staffId);
+      if (epoch !== loadEpoch.current) return false;
+      setSnapshot(next);
+      setDraft(next.after);
+      setPhase('ready');
+      return true;
+    } catch (error) {
+      if (epoch === loadEpoch.current) {
+        setPhase('error');
+        setStatus(error instanceof Error ? error.message : '六大接案能力載入失敗。');
+      }
+      return false;
+    }
   }, [staffId]);
-  useEffect(() => { void load().catch((error: unknown) => setStatus(error instanceof Error ? error.message : '六大接案能力載入失敗。')); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => { loadEpoch.current += 1; };
+  }, [load]);
   const doPreview = async () => {
+    if (!snapshot || phase !== 'editing') return;
     const epoch = loadEpoch.current;
+    setPhase('previewing');
     setPreview(null);
-    try { const next = await staffCasePreferenceManualClient.preview(staffId, requestRelations(draft)); if (epoch === loadEpoch.current) { setPreview(next); setStatus('預覽已完成，尚未寫入。'); } } catch (error) { setStatus(error instanceof Error ? error.message : '預覽失敗。'); }
+    setStatus('');
+    try {
+      const next = await staffCasePreferenceManualClient.preview(staffId, requestRelations(draft));
+      if (epoch !== loadEpoch.current) return;
+      setPreview(next);
+      setPhase('preview_ready');
+      setStatus('預覽已完成，尚未寫入。');
+    } catch (error) {
+      if (epoch === loadEpoch.current) {
+        setPhase('editing');
+        setStatus(error instanceof Error ? error.message : '預覽失敗。');
+      }
+    }
   };
   const doApply = async () => {
-    if (!snapshot || !preview?.preview_fingerprint || !reason.trim()) return;
+    if (!snapshot || !preview?.preview_fingerprint || !reason.trim() || phase !== 'preview_ready') return;
+    const epoch = loadEpoch.current;
+    setPhase('applying');
     setStatus('');
-    try { await staffCasePreferenceManualClient.apply(staffId, { ...requestRelations(draft), expected_snapshot_fingerprint: snapshot.snapshot_fingerprint, preview_fingerprint: preview.preview_fingerprint, reason: reason.trim() }, { idempotencyKey: nextIntentKey('staff-case-preference-manual') }); await load(); setStatus('已套用並重新查詢六大接案能力。'); } catch (error) { setStatus(error instanceof Error ? error.message : '套用失敗。'); }
+    try {
+      await staffCasePreferenceManualClient.apply(staffId, {
+        ...requestRelations(draft),
+        expected_snapshot_fingerprint: snapshot.snapshot_fingerprint,
+        preview_fingerprint: preview.preview_fingerprint,
+        reason: reason.trim(),
+      }, { idempotencyKey: nextIntentKey('staff-case-preference-manual') });
+    } catch (error) {
+      if (epoch === loadEpoch.current) {
+        setPhase('error');
+        setStatus(error instanceof Error ? error.message : '儲存結果尚未確認，請重新查詢。');
+      }
+      return;
+    }
+    if (epoch !== loadEpoch.current) return;
+    if (await load()) setStatus('已儲存並重新查詢六大接案能力。');
   };
+  const editing = ['editing', 'previewing', 'preview_ready', 'applying'].includes(phase);
+  const locked = phase === 'loading' || phase === 'previewing' || phase === 'applying';
   return <section data-surface-id={surfaceId}>
     <h3>六大接案能力人工維護</h3>
-    <p>只維護六個 canonical relation；交通方式仍由正式資格主檔唯讀提供。</p>
-    {MANUAL_RELATION_KEYS.map((key) => <fieldset key={key} style={{ marginBottom: '8px' }}><legend>{MANUAL_RELATION_LABELS[key]}</legend>{draft[key].map((item, index) => <div key={index}><input aria-label={MANUAL_RELATION_LABELS[key] + '值' + (index + 1)} value={item.value} onChange={(event) => { setPreview(null); setDraft((current) => updateManualDraftRow(current, key, index, 'value', event.target.value)); }} /><input aria-label={MANUAL_RELATION_LABELS[key] + '說明' + (index + 1)} value={item.detail ?? ''} onChange={(event) => { setPreview(null); setDraft((current) => updateManualDraftRow(current, key, index, 'detail', event.target.value)); }} /></div>)}<button type="button" onClick={() => { setPreview(null); setDraft((current) => appendManualDraftRow(current, key)); }}>新增一列</button></fieldset>)}
-    <label>變更原因<input aria-label="六大接案能力變更原因" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-    <div className="staff-action-pair"><button type="button" onClick={() => void doPreview()}>預覽六大能力</button><button type="button" disabled={!preview?.preview_fingerprint || !reason.trim()} onClick={() => void doApply()}>套用六大能力</button></div>
+    <p>直接編輯六項接案能力，預覽後確認儲存。交通方式仍於資格主檔唯讀顯示。</p>
+    {phase === 'loading' && <p role="status">正在載入六大接案能力…</p>}
+    {phase === 'ready' && snapshot && <button type="button" className="staff-next-btn" onClick={() => { setDraft(snapshot.after); setStatus(''); setPhase('editing'); }}>編輯六項偏好</button>}
+    {snapshot && <div className="staff-qual-grid">
+      {MANUAL_RELATION_KEYS.map((key) => <div key={key} className="staff-qual-card" role="group" aria-label={MANUAL_RELATION_LABELS[key]}>
+        <h4>{MANUAL_RELATION_LABELS[key]}</h4>
+        {!editing ? <p>{displayRelations(snapshot.after[key])}</p> : <>
+          {draft[key].map((item, index) => <div key={index}>
+            <input aria-label={MANUAL_RELATION_LABELS[key] + '值' + (index + 1)} disabled={locked} value={item.value} onChange={(event) => { setPreview(null); setStatus(''); setPhase('editing'); setDraft((current) => updateManualDraftRow(current, key, index, 'value', event.target.value)); }} />
+            <input aria-label={MANUAL_RELATION_LABELS[key] + '說明' + (index + 1)} disabled={locked} value={item.detail ?? ''} onChange={(event) => { setPreview(null); setStatus(''); setPhase('editing'); setDraft((current) => updateManualDraftRow(current, key, index, 'detail', event.target.value)); }} />
+          </div>)}
+          <button type="button" disabled={locked} onClick={() => { setPreview(null); setStatus(''); setPhase('editing'); setDraft((current) => appendManualDraftRow(current, key)); }}>新增一列</button>
+        </>}
+      </div>)}
+    </div>}
+    {editing && <label>變更原因<input aria-label="六大接案能力變更原因" disabled={locked} value={reason} onChange={(event) => setReason(event.target.value)} /></label>}
+    <div className="staff-action-pair">
+      {phase === 'editing' && <button type="button" onClick={() => void doPreview()}>預覽變更</button>}
+      {phase === 'preview_ready' && <button type="button" disabled={!preview?.preview_fingerprint || !reason.trim()} onClick={() => void doApply()}>確認儲存</button>}
+      {phase === 'error' && <button type="button" onClick={() => void load()}>重新查詢</button>}
+    </div>
     {preview && <StaffCasePreferenceManualPreview preview={preview} />}
     {status && <p role="status">{status}</p>}
   </section>;
@@ -1313,24 +1381,6 @@ export const StaffPage: React.FC = () => {
             {/* Drawer Tab 2: 接案偏好設定 */}
             {drawerTab === 'preferences' && (
               <section className="staff-drawer-section" data-surface-id="staff.drawer.preferences">
-                <div data-surface-id="staff.drawer.case-preference-summary" style={{ marginBottom: '18px' }}>
-                  <h3 style={{ margin: '0 0 10px' }}>📌 接案偏好摘要</h3>
-                  {casePreferenceSummary.status === 'loading' && <p role="status">正在載入接案偏好摘要…</p>}
-                  {casePreferenceSummary.status === 'error' && <p role="alert">接案偏好摘要目前無法讀取。</p>}
-                  {casePreferenceSummary.status === 'idle' && <p>接案偏好摘要尚未查詢。</p>}
-                  {casePreferenceSummary.status === 'ready' && (
-                    <div className="staff-qual-grid">
-                      {casePreferenceSummary.data.topics.map((topic) => (
-                        <div key={topic.key} className="staff-qual-card" role="group" aria-label={topic.label}>
-                          <h4>{topic.label}</h4>
-                          <p style={{ margin: 0 }}>{topic.valuesText}</p>
-                          {topic.detailText && <small>{topic.detailText}</small>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
                 {selectedStaffId !== null && <StaffCasePreferenceManualEditor staffId={selectedStaffId} />}
               </section>
             )}
