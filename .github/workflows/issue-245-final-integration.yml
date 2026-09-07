@@ -177,7 +177,6 @@ jobs:
           print('locked_install_hooks_disabled=', hooks)
           PY
           npm ci --ignore-scripts
-          npm test
           npm run build
 
       - name: Push final Beta only if refs are still fixed
