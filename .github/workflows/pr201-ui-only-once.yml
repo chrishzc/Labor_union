@@ -1,0 +1,109 @@
+name: PR201 one-shot UI integration verification
+
+on:
+  push:
+    branches: [fix/ui-staff-case-preference-write-179]
+    paths: [.github/workflows/pr201-ui-only-once.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: cc6eba309678ff6bfa714e06000cf223f1992b6f
+          persist-credentials: false
+      - name: Prepare exact two-file integrated commit without moving any branch
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          import base64, hashlib, json, os, pathlib, subprocess, zlib
+          base = 'cc6eba309678ff6bfa714e06000cf223f1992b6f'
+          old = '7ad0a51d7a8840006307847b7d7bac488ebc34d4'
+          repo = 'chrishzc/Labor_union'
+          branch = 'fix/ui-staff-case-preference-write-179'
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          def api(path, body=None):
+              args = ['gh', 'api', 'repos/' + repo + '/' + path]
+              if body is not None:
+                  args += ['--method', 'POST', '--input', '-']
+              return json.loads(subprocess.check_output(args, input=None if body is None else json.dumps(body), text=True))
+          assert git('rev-parse', 'HEAD') == base
+          assert api('git/ref/heads/main')['object']['sha'] == base, 'MAIN_MOVED'
+          pr = api('pulls/201')
+          assert pr['state'] == 'open' and pr['head']['ref'] == branch
+          assert pr['head']['sha'] == os.environ['GITHUB_SHA'], 'PR201_HEAD_MOVED'
+          assert api('git/commits/' + os.environ['GITHUB_SHA'])['parents'][0]['sha'] == old, 'UNEXPECTED_PARENT'
+          patch = zlib.decompress(base64.b64decode('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'))
+          assert hashlib.sha256(patch).hexdigest() == '809b2b81662b2cd44922182706e966209ef1adc99efcf5b3f52bda950f2680c5'
+          patchfile = pathlib.Path(os.environ['RUNNER_TEMP']) / 'pr201-ui.patch'
+          patchfile.write_bytes(patch)
+          subprocess.run(['git', 'apply', '--check', str(patchfile)], check=True)
+          subprocess.run(['git', 'apply', '--index', str(patchfile)], check=True)
+          paths = ['ui_react/src/pages/StaffPage.tsx', 'ui_react/src/tests/staff_case_preference_summary_flow.test.tsx']
+          assert git('diff', '--cached', '--name-only').splitlines() == paths, 'UNEXPECTED_CHANGED_FILES'
+          subprocess.run(['git', 'diff', '--cached', '--check'], check=True)
+          tree = api('git/trees', {'base_tree': git('rev-parse', 'HEAD^{tree}'), 'tree': [
+              {'path': path, 'mode': '100644', 'type': 'blob', 'content': pathlib.Path(path).read_text(encoding='utf-8')} for path in paths
+          ]})['sha']
+          assert tree == git('write-tree'), 'REMOTE_TREE_MISMATCH'
+          commit = api('git/commits', {'message': 'fix(staff): reconcile PR #201 to current six-topic UI only', 'tree': tree, 'parents': [os.environ['GITHUB_SHA'], base]})['sha']
+          print('PR201_CANDIDATE_SHA=' + commit)
+          print('PR201_CANDIDATE_TREE=' + tree)
+          print('PR201_BASE_SHA=' + base)
+          print('PR201_PATCH_SHA256=809b2b81662b2cd44922182706e966209ef1adc99efcf5b3f52bda950f2680c5')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('commit=' + commit + '\ntree=' + tree + '\n')
+          PYCODE
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ steps.candidate.outputs.commit }}
+          persist-credentials: false
+      - name: Read exact candidate and restore existing locked dependencies
+        id: deps
+        working-directory: ui_react
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = '${{ steps.candidate.outputs.commit }}'
+          test "$(git rev-parse HEAD^{tree})" = '${{ steps.candidate.outputs.tree }}'
+          node --version
+          npm --version
+          python3 - <<'PYCODE'
+          import json
+          from urllib.parse import urlsplit
+          lock = json.load(open('package-lock.json'))
+          packages = lock['packages']
+          for name, package in packages.items():
+              url = package.get('resolved')
+              if url:
+                  assert urlsplit(url).hostname == 'registry.npmjs.org', 'UNEXPECTED_PACKAGE_SOURCE: ' + name
+                  assert package.get('integrity'), 'MISSING_INTEGRITY: ' + name
+          print('Existing lockfile packages:', len(packages) - 1)
+          for name, package in packages.items():
+              if package.get('hasInstallScript'):
+                  print('Install hook disabled:', name, package.get('version'))
+          PYCODE
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Focused Staff UI tests on the exact integrated commit
+        id: focused
+        working-directory: ui_react
+        run: npm test -- src/tests/staff_case_preference_summary_flow.test.tsx --reporter=verbose
+      - name: TypeScript and Vite build on the exact integrated commit
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        working-directory: ui_react
+        run: npm run build
+      - name: Verify tracked tree unchanged
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: |
+          git diff --exit-code
+          git diff --cached --exit-code
+          echo 'PR201_VERIFIED_CANDIDATE=${{ steps.candidate.outputs.commit }}'
+          echo 'PR201_VERIFIED_TREE=${{ steps.candidate.outputs.tree }}'
