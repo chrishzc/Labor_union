@@ -167,7 +167,7 @@ def _matching_pool_cascade_timeline() -> OrderOperationalTimeline:
         "staff_contract_sent_count": 1,
         "staff_contract_signed_count": 1,
         "client_contract_sent_count": 1,
-        "client_signed_count": 1,
+        "client_contract_signed_count": 1,
         "deposit_obligation_count": 1,
         "deposit_open_count": 0,
         "matching_created_at": None,
