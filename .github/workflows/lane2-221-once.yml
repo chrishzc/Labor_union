@@ -1,0 +1,64 @@
+name: Lane 2 issue 221 one-off verification
+on:
+  push:
+    branches: [lane2/issue-221-verification-20260907]
+    paths: [.github/workflows/lane2-221-once.yml]
+permissions:
+  contents: read
+jobs:
+  completion-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Verify baseline and locate existing focused owners
+        run: |
+          test "$(git rev-parse HEAD^)" = 618eb8d9dc62004cd2435b245eac5871ff3b159d
+          git diff --name-only HEAD^ HEAD
+          python - <<'PY'
+          import subprocess
+          paths = subprocess.check_output(['git','ls-files'], text=True).splitlines()
+          for path in paths:
+              if ('completion' in path.lower() and path.startswith(('tests/','api/','scripts/','subsystems/contract_signing/'))) or path == 'tests/support/disposable_mysql.py':
+                  print('::notice title=Existing completion owner::' + path)
+          PY
+      - name: Install only the existing locked pytest dependency
+        run: |
+          python - <<'PY'
+          import subprocess, tomllib
+          with open('uv.lock', 'rb') as stream:
+              packages = tomllib.load(stream)['package']
+          pytest = next(package for package in packages if package['name'] == 'pytest')
+          assert pytest['source'] == {'registry': 'https://pypi.org/simple'}
+          version = pytest['version']
+          print('::notice title=Exact pytest version::' + version, flush=True)
+          subprocess.run(['python','-m','pip','install','--only-binary=:all:','pytest==' + version], check=True)
+          PY
+      - name: Execute current contract-completion workflow tests
+        run: python -m pytest -q tests/test_contract_completion_workflow.py --junitxml=/tmp/lane2-221.xml
+      - name: Publish exact test receipt
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, subprocess, xml.etree.ElementTree as ET
+          path = pathlib.Path('/tmp/lane2-221.xml')
+          if not path.exists():
+              raise SystemExit('Focused result NOT_RUN: no test receipt')
+          root = ET.parse(path).getroot()
+          suites = list(root.iter('testsuite'))
+          result = {key: sum(int(suite.get(key, 0)) for suite in suites) for key in ('tests','failures','errors','skipped')}
+          result['head'] = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
+          result['baseline'] = '618eb8d9dc62004cd2435b245eac5871ff3b159d'
+          result['cases'] = [case.get('name') for case in root.iter('testcase')]
+          result['boundary'] = 'existing workflow tests; repository double; NOT MySQL owner acceptance'
+          text = json.dumps(result, ensure_ascii=False)
+          print('::notice title=Lane 2 issue 221 focused receipt::' + text)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write('```json\n' + json.dumps(result, ensure_ascii=False, indent=2) + '\n```\n')
+          assert result['tests'] == 6 and result['failures'] == 0 and result['errors'] == 0 and result['skipped'] == 0, result
+          PY
