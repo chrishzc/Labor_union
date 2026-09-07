@@ -13,19 +13,19 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          fetch-depth: 2
+          fetch-depth: 3
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - name: Verify scoped baseline
         run: |
-          test "$(git rev-parse HEAD^)" = 7d8869de8a0c1b42c22b2c923798911b4f15702b
-          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/issue-244-focused-once.yml"
+          git cat-file -e 7d8869de8a0c1b42c22b2c923798911b4f15702b^{commit}
+          test "$(git diff --name-only 7d8869de8a0c1b42c22b2c923798911b4f15702b HEAD)" = ".github/workflows/issue-244-focused-once.yml"
       - name: Install exact locked focused dependencies
         run: |
           python - <<'PY'
           import subprocess, tomllib
-          wanted = {'pytest', 'openpyxl', 'pymysql'}
+          wanted = {'pytest', 'openpyxl', 'pymysql', 'python-dotenv'}
           with open('uv.lock', 'rb') as stream:
               packages = {p['name']: p for p in tomllib.load(stream)['package'] if p['name'] in wanted}
           assert set(packages) == wanted, packages.keys()
@@ -56,7 +56,7 @@ jobs:
           suites = list(root.iter('testsuite'))
           result = {key: sum(int(suite.get(key, 0)) for suite in suites) for key in ('tests','failures','errors','skipped')}
           result['head'] = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
-          result['tested_product_commit'] = subprocess.check_output(['git','rev-parse','HEAD^'], text=True).strip()
+          result['tested_product_commit'] = '7d8869de8a0c1b42c22b2c923798911b4f15702b'
           result['cases'] = [case.get('name') for case in root.iter('testcase')]
           print('::notice title=Issue 244 focused receipt::' + json.dumps(result, ensure_ascii=False))
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
