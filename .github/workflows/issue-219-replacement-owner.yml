@@ -1,0 +1,32 @@
+name: Issue 219 replacement owner verification
+
+on:
+  push:
+    branches: [ "fix/issue-219-preserve-sent-lineage" ]
+
+permissions:
+  contents: read
+
+jobs:
+  replacement-owner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install focused test runner
+        run: python -m pip install pytest
+      - name: Verify replacement Query Preview Apply readback and served-case referral
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest \
+            tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/contract/test_service_before_replacement_api.py \
+            tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/integration/test_service_before_replacement_mysql_adapter.py \
+            tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/regression/test_service_before_replacement_loader.py \
+            tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/regression/test_service_before_replacement_persistence.py \
+            tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/regression/test_service_before_replacement_workflow.py \
+            tests/domains/scheduling/subsystems/scheduling/modules/service-before-replacement/unit/test_service_before_replacement.py \
+            -q
