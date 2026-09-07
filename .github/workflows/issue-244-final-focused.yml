@@ -48,7 +48,7 @@ jobs:
           import subprocess, tomllib
           with open('uv.lock', 'rb') as stream:
               packages = tomllib.load(stream)['package']
-          wanted = {'pytest', 'python-dotenv'}
+          wanted = {'pytest', 'python-dotenv', 'openpyxl'}
           selected = {package['name']: package for package in packages if package['name'] in wanted}
           assert selected.keys() == wanted
           specs = []
@@ -65,6 +65,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 3
       - name: Diff hygiene
         run: git diff --check HEAD^ HEAD
       - name: Verify validation harness is the only post-product scope
