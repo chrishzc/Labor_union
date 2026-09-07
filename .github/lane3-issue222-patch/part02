@@ -1,0 +1,80 @@
++
++
++def _arguments() -> Namespace:
++    return Namespace(
++        host=os.environ['LABOR_UNION_TEST_MYSQL_HOST'],
++        port=int(os.environ['LABOR_UNION_TEST_MYSQL_PORT']),
++        user=os.environ['LABOR_UNION_TEST_MYSQL_USER'],
++        password=os.environ['LABOR_UNION_TEST_MYSQL_PASSWORD'],
++        database=DATABASE,
++        confirm_database=DATABASE,
++    )
++
++
++@pytest.fixture(autouse=True)
++def _use_explicit_disposable_database(monkeypatch):
++    settings = {
++        'DB_HOST': os.environ['LABOR_UNION_TEST_MYSQL_HOST'],
++        'DB_PORT': os.environ['LABOR_UNION_TEST_MYSQL_PORT'],
++        'DB_USER': os.environ['LABOR_UNION_TEST_MYSQL_USER'],
++        'DB_PASSWORD': os.environ['LABOR_UNION_TEST_MYSQL_PASSWORD'],
++        'DB_DATABASE': DATABASE,
++    }
++    for name, value in settings.items():
++        monkeypatch.setenv(name, value)
++    from infrastructure.mysql import mysql_adapter
++    monkeypatch.setattr(mysql_adapter, 'DB_CONFIG', {
++        'host': settings['DB_HOST'], 'port': int(settings['DB_PORT']),
++        'user': settings['DB_USER'], 'password': settings['DB_PASSWORD'],
++        'database': settings['DB_DATABASE'], 'charset': 'utf8mb4',
++    })
++
++
++def _counts():
++    from infrastructure.mysql.mysql_adapter import get_connection
++    connection = get_connection()
++    try:
++        with connection.cursor() as cursor:
++            cursor.execute('SELECT DATABASE() AS name')
++            assert cursor.fetchone()['name'] == DATABASE
++            tables = ('finance_import_rows', 'finance_import_occurrences',
++                      'finance_import_source_reviews', 'finance_import_source_review_occurrences',
++                      'finance_import_dispatch_events', 'finance_import_reconciliation_receipts',
++                      'finance_import_apply_receipts', 'client_ledger_entries', 'staff_payout_events')
++            result = {}
++            for table in tables:
++                cursor.execute(f'SELECT COUNT(*) AS n FROM {table}')
++                result[table] = int(cursor.fetchone()['n'])
++            return result
++    finally:
++        connection.close()
++
++
++def _seed_deposit(case_no, token):
++    from infrastructure.mysql.mysql_adapter import get_connection
++    connection = get_connection()
++    try:
++        with connection.cursor() as cursor:
++            cursor.execute('INSERT INTO clients(case_no,name) VALUES (%s,%s)', (case_no, 'T11 synthetic client'))
++            client_id = int(cursor.lastrowid)
++            cursor.execute("INSERT INTO orders(case_no,client_id,status) VALUES (%s,%s,'服務中')", (case_no, client_id))
++            identity = f'deposit:{case_no}'
++            cursor.execute("INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,expected_account_version,idempotency_key,actor,reason) VALUES (%s,%s,'deposit','receivable_from_client','established',0,300,'2026-09-01',%s,0,%s,'t11-test','isolated synthetic deposit')", (identity, case_no, token, token))
++            event_id = int(cursor.lastrowid)
++            cursor.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,amount_due_ntd,due_date,status,current_event_id,projection_version) VALUES (%s,%s,'deposit','receivable_from_client',300,'2026-09-01','open',%s,0)", (identity, case_no, event_id))
++        connection.commit()
++    finally:
++        connection.close()
++
++
++def test_t11_source_review_query_apply_and_replay(tmp_path):
++    bootstrap(_arguments())
++    assert DATABASE and DATABASE.startswith('lu_test_') and os.environ['DB_DATABASE'] == DATABASE
++    from fastapi import FastAPI
++    from fastapi.testclient import TestClient
++    from api.dependencies.admin_auth import require_admin
++    from api.dependencies.finance_import import build_finance_import_application
++    from api.routes.finance_import import router
++    from infrastructure.mysql.finance_import_owning_domain_composite import MySqlFinanceImportOwningDomainComposite
++    from infrastructure.mysql.mysql_adapter import get_connection
++    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
