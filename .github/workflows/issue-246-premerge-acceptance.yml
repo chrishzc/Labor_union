@@ -57,9 +57,9 @@ jobs:
           with open('uv.lock', 'rb') as stream:
               packages = tomllib.load(stream)['package']
           wanted = {
-              'pytest', 'python-dotenv', 'openpyxl', 'pymysql', 'fastapi',
-              'pydantic', 'starlette', 'httpx', 'requests', 'jsonschema', 'pandas',
-              'cryptography'
+              'pytest', 'python-dotenv', 'python-multipart', 'openpyxl', 'pymysql',
+              'fastapi', 'pydantic', 'starlette', 'httpx', 'requests',
+              'jsonschema', 'pandas', 'cryptography'
           }
           selected = {
               package['name']: package
