@@ -59,7 +59,7 @@ jobs:
           wanted = {
               'pytest', 'python-dotenv', 'python-multipart', 'openpyxl', 'pymysql',
               'fastapi', 'pydantic', 'starlette', 'httpx', 'requests',
-              'jsonschema', 'pandas', 'cryptography'
+              'jsonschema', 'pandas', 'cryptography', 'pillow'
           }
           selected = {
               package['name']: package
