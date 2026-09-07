@@ -1,0 +1,214 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
+import { orderIntakeCompletionClient } from '../../../../../../../api/orders/order_intake_completion_client';
+import { OrdersIntakeRepairCard } from '../../../../../../../components/OrdersIntakeRepairCard';
+
+const ETAG = 'a'.repeat(64);
+const FP1 = '1'.repeat(64);
+const FP2 = '2'.repeat(64);
+
+const incompleteSummary = {
+  case_no: 'CASE-153',
+  client_name: '待補姓名（CASE-153）',
+  order_status: '待補件',
+  staff_name: null,
+  identity_status: null,
+  start_date: null,
+  end_date: null,
+  actual_start_date: null,
+  actual_end_date: null,
+  service_days: null,
+  total_employer_self_pay_payable: null,
+};
+
+const completeSummary = {
+  case_no: 'CASE-OK',
+  client_name: '完整客戶',
+  order_status: '洽談中',
+  staff_name: null,
+  identity_status: '一般',
+  start_date: '2026-09-10',
+  end_date: '2026-10-09',
+  actual_start_date: null,
+  actual_end_date: null,
+  service_days: 30,
+  total_employer_self_pay_payable: 100000,
+};
+
+describe('Orders intake repair entry', () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('lists every current missing field while leaving complete orders on the existing workbench', async () => {
+    vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({
+      items: [incompleteSummary, completeSummary],
+      next_cursor: null,
+      etag: ETAG,
+    });
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: 'CASE-153',
+      lifecycle_version: 7,
+      current_status: '待補件',
+      target_status: '洽談中',
+      missing_fields: ['client_name', 'start_date', 'service_days'],
+      blockers: ['order_intake_completion_service_data_locked'],
+      apply_allowed: false,
+      preview_fingerprint: FP1,
+    });
+
+    render(<OrdersIntakeRepairCard item={incompleteSummary} onChanged={vi.fn().mockResolvedValue(undefined)} />);
+
+    expect(await screen.findByText('CASE-153')).toBeInTheDocument();
+    expect(screen.getByText('客戶姓名', { selector: 'li' })).toBeInTheDocument();
+    expect(screen.getByText('約定服務開始日', { selector: 'li' })).toBeInTheDocument();
+    expect(screen.getByText('服務天數', { selector: 'li' })).toBeInTheDocument();
+    expect(await screen.findByText('服務資料已鎖定，目前不能完成進件補齊。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '檢查服務資料補件' })).toBeDisabled();
+    expect(screen.queryByText('CASE-OK')).not.toBeInTheDocument();
+  });
+
+  it('applies typed terms repair, rechecks completion, restores normal status, and refreshes the list', async () => {
+    const pendingWithName = {
+      ...incompleteSummary,
+      client_name: '王小明',
+    };
+    const repaired = {
+      ...pendingWithName,
+      order_status: '洽談中',
+      start_date: '2026-09-10',
+      service_days: 30,
+    };
+    vi.spyOn(ordersQueryClient, 'getOrderSummaries')
+      .mockResolvedValueOnce({ items: [pendingWithName], next_cursor: null, etag: ETAG })
+      .mockResolvedValueOnce({ items: [repaired], next_cursor: null, etag: ETAG });
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion')
+      .mockResolvedValueOnce({
+        case_no: 'CASE-153',
+        lifecycle_version: 7,
+        current_status: '待補件',
+        target_status: '洽談中',
+        missing_fields: ['start_date', 'service_days'],
+        blockers: [],
+        apply_allowed: false,
+        preview_fingerprint: FP1,
+      })
+      .mockResolvedValueOnce({
+        case_no: 'CASE-153',
+        lifecycle_version: 8,
+        current_status: '待補件',
+        target_status: '洽談中',
+        missing_fields: [],
+        blockers: [],
+        apply_allowed: true,
+        preview_fingerprint: FP2,
+      });
+    vi.spyOn(orderIntakeCompletionClient, 'previewTerms').mockResolvedValue({
+      case_no: 'CASE-153',
+      lifecycle_version: 7,
+      before_start_date: null,
+      before_service_days: null,
+      after_start_date: '2026-09-10',
+      after_service_days: 30,
+      changed_fields: ['start_date', 'service_days'],
+      blockers: [],
+      apply_allowed: true,
+      preview_fingerprint: FP1,
+    });
+    const applyTerms = vi.spyOn(orderIntakeCompletionClient, 'applyTerms').mockResolvedValue({
+      receipt_key: 'terms-receipt',
+      case_no: 'CASE-153',
+      lifecycle_version: 8,
+      start_date: '2026-09-10',
+      service_days: 30,
+      changed_fields: ['start_date', 'service_days'],
+      preview_fingerprint: FP1,
+      replayed: false,
+    });
+    const applyCompletion = vi.spyOn(orderIntakeCompletionClient, 'applyCompletion').mockResolvedValue({
+      receipt_key: 'completion-receipt',
+      case_no: 'CASE-153',
+      lifecycle_version: 9,
+      status: '洽談中',
+      preview_fingerprint: FP2,
+      replayed: false,
+    });
+
+    render(<OrdersIntakeRepairCard item={pendingWithName} onChanged={vi.fn().mockResolvedValue(undefined)} />);
+
+    fireEvent.change(await screen.findByLabelText('CASE-153 約定服務開始日'), {
+      target: { value: '2026-09-10' },
+    });
+    fireEvent.change(screen.getByLabelText('CASE-153 服務天數'), {
+      target: { value: '30' },
+    });
+    fireEvent.change(screen.getByLabelText('CASE-153 補件原因'), {
+      target: { value: '補齊原始進件缺漏' },
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: '檢查服務資料補件' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '檢查服務資料補件' }));
+    await screen.findByText('補件欄位：約定服務開始日、服務天數');
+    expect(screen.getByText('補件前：未填寫／未填寫 天')).toBeInTheDocument();
+    expect(screen.getByText('補件後：2026-09-10／30 天')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '確認補齊服務資料' }));
+
+    await waitFor(() => expect(applyTerms).toHaveBeenCalledWith(
+      'CASE-153',
+      expect.objectContaining({ lifecycle_version: 7, preview_fingerprint: FP1 }),
+      '補齊原始進件缺漏',
+      expect.stringContaining('orders-intake-terms-CASE-153-'),
+    ));
+    await waitFor(() => expect(applyCompletion).toHaveBeenCalledWith(
+      'CASE-153',
+      expect.objectContaining({ lifecycle_version: 8, preview_fingerprint: FP2 }),
+      '補齊原始進件缺漏',
+      expect.stringContaining('orders-intake-complete-CASE-153-'),
+    ));
+    await waitFor(() => expect(applyCompletion).toHaveBeenCalled());
+  });
+
+  it.each([true, false])('shows name Preview before/after and honors owner apply_allowed=%s', async (allowed) => {
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+      missing_fields: ['client_name'], blockers: [], apply_allowed: false, preview_fingerprint: FP1,
+    });
+    vi.spyOn(orderIntakeCompletionClient, 'previewClientName').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, before_client_name: null,
+      after_client_name: '合成補件姓名', blockers: allowed ? [] : ['synthetic_name_owner_blocker'],
+      apply_allowed: allowed, preview_fingerprint: FP1,
+    });
+    const applyName = vi.spyOn(orderIntakeCompletionClient, 'applyClientName').mockResolvedValue({
+      receipt_key: 'name-receipt', case_no: 'CASE-153', lifecycle_version: 7,
+      client_name: '合成補件姓名', preview_fingerprint: FP1, replayed: false,
+    });
+    render(<OrdersIntakeRepairCard item={{ ...incompleteSummary, start_date: '2026-09-10', service_days: 5 }} onChanged={onChanged} />);
+    fireEvent.change(await screen.findByLabelText('CASE-153 客戶姓名'), { target: { value: '合成補件姓名' } });
+    fireEvent.click(screen.getByRole('button', { name: '檢查姓名補件' }));
+    const preview = await screen.findByLabelText('姓名補件前後');
+    expect(preview).toHaveTextContent('補件前姓名：未填寫');
+    expect(preview).toHaveTextContent('補件後姓名：合成補件姓名');
+    expect(applyName).not.toHaveBeenCalled();
+    const applyButton = screen.getByRole('button', { name: '確認補齊客戶姓名' });
+    expect(applyButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('CASE-153 補件原因'), { target: { value: '合成姓名補件驗收' } });
+    if (!allowed) {
+      expect(screen.getByLabelText('姓名補件阻擋原因')).toHaveTextContent('synthetic_name_owner_blocker');
+      expect(applyButton).toBeDisabled();
+      fireEvent.click(applyButton);
+      expect(applyName).not.toHaveBeenCalled();
+      expect(onChanged).not.toHaveBeenCalled();
+      return;
+    }
+    expect(applyButton).toBeEnabled();
+    fireEvent.click(applyButton);
+    await waitFor(() => expect(applyName).toHaveBeenCalledWith(
+      'CASE-153', expect.objectContaining({ apply_allowed: true, preview_fingerprint: FP1 }),
+      '合成姓名補件驗收', expect.stringContaining('orders-intake-client-name-CASE-153-'),
+    ));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  });
+
+});
