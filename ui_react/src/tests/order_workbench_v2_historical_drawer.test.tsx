@@ -336,6 +336,8 @@ describe('historical Drawer immutable evidence boundary', () => {
     await waitFor(() => expect(entry).toBeEnabled());
     expect(screen.queryByText('R-01 候選月嫂尚未定案')).not.toBeInTheDocument();
     fireEvent.click(entry);
+    const replacementEntry = await screen.findByRole('button', { name: '換人' });
+    fireEvent.click(replacementEntry);
     expect(await screen.findByText('R-01 候選月嫂尚未定案')).toBeInTheDocument();
   });
 });
