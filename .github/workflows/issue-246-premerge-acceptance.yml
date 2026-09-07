@@ -143,6 +143,8 @@ jobs:
           print('locked_install_hooks_disabled=', sorted(path for path, meta in lock['packages'].items() if meta.get('hasInstallScript')))
           PY
           npm ci --ignore-scripts
+
+          set +e
           npm test -- \
             src/tests/order_workbench_v2* \
             src/tests/order_core_stage_projection_contract.test.ts \
@@ -153,13 +155,44 @@ jobs:
             src/tests/react_entrypoint_registry.test.ts \
             src/tests/route_guard.test.tsx \
             --reporter=json --outputFile=../issue246-react-results.json
+          test_rc=$?
+          set -e
+
+          set +e
           node --input-type=module <<'JS'
           import { readFileSync } from 'node:fs';
           const report = JSON.parse(readFileSync('../issue246-react-results.json', 'utf8'));
-          console.log(JSON.stringify({ tests: report.numTotalTests, passed: report.numPassedTests, failed: report.numFailedTests, pending: report.numPendingTests, success: report.success }));
+          console.log('REACT_SUMMARY', JSON.stringify({
+            tests: report.numTotalTests,
+            passed: report.numPassedTests,
+            failed: report.numFailedTests,
+            pending: report.numPendingTests,
+            success: report.success,
+          }));
+          for (const file of report.testResults ?? []) {
+            if (file.status !== 'failed') continue;
+            console.log('FAILED_FILE', file.name);
+            for (const assertion of file.assertionResults ?? []) {
+              if (assertion.status !== 'failed') continue;
+              console.log('FAILED_TEST', assertion.fullName ?? assertion.title ?? '<unknown>');
+              for (const message of assertion.failureMessages ?? []) {
+                console.log(String(message).slice(0, 6000));
+              }
+            }
+          }
           if (!report.success || report.numFailedTests !== 0 || report.numPendingTests !== 0) process.exit(1);
           JS
+          report_rc=$?
           npm run build
+          build_rc=$?
+          set -e
+
+          echo "REACT_TEST_RC=$test_rc"
+          echo "REACT_REPORT_RC=$report_rc"
+          echo "REACT_BUILD_RC=$build_rc"
+          test "$test_rc" -eq 0
+          test "$report_rc" -eq 0
+          test "$build_rc" -eq 0
 
       - name: Verify repository Python syntax boundary
         shell: bash
