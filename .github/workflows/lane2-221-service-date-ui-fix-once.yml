@@ -22,126 +22,87 @@ jobs:
           ref: ${{ github.ref_name }}
           fetch-depth: 1
 
-      - name: Apply exact bounded repair if needed
+      - name: Apply owner-boundary repair if needed
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
 
-          def replace_exact(path: str, old: str, new: str, label: str) -> None:
-              file = Path(path)
-              text = file.read_text(encoding='utf-8')
-              if new in text:
-                  print(f'{label}: already applied')
-                  return
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected one old block, found {count}')
-              file.write_text(text.replace(old, new, 1), encoding='utf-8')
-              print(f'{label}: applied')
+          source_path = Path('ui_react/src/pages/OrdersPage.tsx')
+          lines = source_path.read_text(encoding='utf-8').splitlines()
+          base_idx = next(i for i, line in enumerate(lines) if 'const baseInputsReady = serviceDates?.case_no === order.id' in line)
+          fail_idx = next(i for i in range(base_idx, min(base_idx + 30, len(lines))) if lines[i].strip() == 'if (!baseInputsReady) {')
+          early_gate = 'if (calendarDetail === null && allowRestartedNormalFlow && serviceDates?.case_no === order.id) {'
+          if not any(early_gate in lines[i] for i in range(base_idx, fail_idx + 1)):
+              indent = lines[fail_idx][:len(lines[fail_idx]) - len(lines[fail_idx].lstrip())]
+              lines[fail_idx:fail_idx] = [
+                  indent + early_gate,
+                  indent + '  changeServiceDateSelection(order.id, serviceDates.current_dates);',
+                  indent + '  setPrecisionError(null);',
+                  indent + '  return;',
+                  indent + '}',
+              ]
+              print('historical restart fallback ordering: inserted early gate')
+          else:
+              print('historical restart fallback ordering: early gate already present')
 
-          replace_exact(
-              'ui_react/src/pages/OrdersPage.tsx',
-              """      const baseInputsReady = serviceDates?.case_no === order.id
-                && startDate !== null
-                && assignmentFactsReady
-                && (!hasFormalAssignment || actualStart?.case_no === order.id);
-              if (!baseInputsReady) {
-                selectServiceDates(order.id, []);
-                setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
-                return;
-              }
-              if (calendarDetail === null) {
-                if (allowRestartedNormalFlow) {
-                  changeServiceDateSelection(order.id, serviceDates.current_dates);
-                  setPrecisionError(null);
-                  return;
-                }
-                selectServiceDates(order.id, []);
-                setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
-                return;
-              }
-          """,
-              """      const baseInputsReady = serviceDates?.case_no === order.id
-                && startDate !== null
-                && assignmentFactsReady
-                && (!hasFormalAssignment || actualStart?.case_no === order.id);
-              if (calendarDetail === null && allowRestartedNormalFlow && serviceDates?.case_no === order.id) {
-                changeServiceDateSelection(order.id, serviceDates.current_dates);
-                setPrecisionError(null);
-                return;
-              }
-              if (!baseInputsReady) {
-                selectServiceDates(order.id, []);
-                setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
-                return;
-              }
-              if (calendarDetail === null) {
-                selectServiceDates(order.id, []);
-                setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
-                return;
-              }
-          """,
-              'historical restart fallback ordering',
-          )
+          base_idx = next(i for i, line in enumerate(lines) if 'const baseInputsReady = serviceDates?.case_no === order.id' in line)
+          calendar_idx = next(i for i in range(base_idx, min(base_idx + 50, len(lines))) if lines[i].strip() == 'if (calendarDetail === null) {')
+          if lines[calendar_idx + 1].strip() == 'if (allowRestartedNormalFlow) {':
+              del lines[calendar_idx + 1:calendar_idx + 6]
+              print('historical restart fallback ordering: removed late gate')
+          source_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
-          test_path = 'ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx'
-          replace_exact(
-              test_path,
-              """    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(assignedSummaryPage);
-              vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(
-                buildOrdersStageProjectionFixture(assignedSummaryPage),
-              );
-              vi.spyOn(ordersQueryClient, 'getActualStart').mockRejectedValue(new Error('query unavailable'));
-              const calculateSpy = vi.spyOn(schedulePrecisionClient, 'calculate');
-          """,
-              """    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(assignedSummaryPage);
-              vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(
-                buildOrdersStageProjectionFixture(assignedSummaryPage),
-              );
-              const projection = await orderCardProjectionClient.getCardProjection('ORD-2026-0801');
-              projection.assignment_segments = {
-                ...projection.assignment_segments,
-                value: [{
-                  assignment_id: { ...projection.assignment_segments, value: 501 },
-                  staff_id: { ...projection.assignment_segments, value: 101 },
-                  staff_name: { ...projection.assignment_segments, value: '林月嬌' },
-                  sequence: { ...projection.assignment_segments, value: 1 },
-                  assigned_start_date: { ...projection.assignment_segments, value: '2026-09-01' },
-                  assigned_end_date: { ...projection.assignment_segments, value: '2026-09-03' },
-                  status: { ...projection.assignment_segments, value: 'active' },
-                }],
-                availability: 'available',
-              };
-              vi.mocked(orderCardProjectionClient.getCardProjection).mockResolvedValueOnce(projection);
-              vi.spyOn(ordersQueryClient, 'getActualStart').mockRejectedValue(new Error('query unavailable'));
-              const calculateSpy = vi.spyOn(schedulePrecisionClient, 'calculate');
-          """,
-              'test 8 typed formal assignment fixture',
-          )
+          test_path = Path('ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx')
+          tlines = test_path.read_text(encoding='utf-8').splitlines()
 
-          replace_exact(
-              test_path,
-              """    render(<OrdersPage />);
-              await screen.findByText(serviceOrder.case_no);
-              await openServiceCalendarTab();
+          actual_start_line = "vi.spyOn(ordersQueryClient, 'getActualStart').mockRejectedValue(new Error('query unavailable'));"
+          actual_idx = next(i for i, line in enumerate(tlines) if line.strip() == actual_start_line)
+          if not any("const projection = await orderCardProjectionClient.getCardProjection('ORD-2026-0801');" in tlines[i] for i in range(max(0, actual_idx - 25), actual_idx)):
+              indent = tlines[actual_idx][:len(tlines[actual_idx]) - len(tlines[actual_idx].lstrip())]
+              projection_block = [
+                  indent + "const projection = await orderCardProjectionClient.getCardProjection('ORD-2026-0801');",
+                  indent + 'projection.assignment_segments = {',
+                  indent + '  ...projection.assignment_segments,',
+                  indent + '  value: [{',
+                  indent + '    assignment_id: { ...projection.assignment_segments, value: 501 },',
+                  indent + '    staff_id: { ...projection.assignment_segments, value: 101 },',
+                  indent + "    staff_name: { ...projection.assignment_segments, value: '林月嬌' },",
+                  indent + '    sequence: { ...projection.assignment_segments, value: 1 },',
+                  indent + "    assigned_start_date: { ...projection.assignment_segments, value: '2026-09-01' },",
+                  indent + "    assigned_end_date: { ...projection.assignment_segments, value: '2026-09-03' },",
+                  indent + "    status: { ...projection.assignment_segments, value: 'active' },",
+                  indent + '  }],',
+                  indent + "  availability: 'available',",
+                  indent + '};',
+                  indent + 'vi.mocked(orderCardProjectionClient.getCardProjection).mockResolvedValueOnce(projection);',
+              ]
+              tlines[actual_idx:actual_idx] = projection_block
+              print('test 8 typed formal assignment fixture: inserted')
+          else:
+              print('test 8 typed formal assignment fixture: already present')
 
-              expect(screen.queryByRole('button', { name: '前往請假／代班工作台' })).not.toBeInTheDocument();
-            });
-          """,
-              """    render(<OrdersPage />);
-              await screen.findByText(serviceOrder.case_no);
-              fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
-              fireEvent.click(await screen.findByRole('button', { name: /實質服務日曆/ }));
+          eleven_idx = next(i for i, line in enumerate(tlines) if "it('11b. 服務中案件的正式指派投影缺失時 fail closed" in line)
+          next_test_idx = next(i for i in range(eleven_idx + 1, len(tlines)) if tlines[i].lstrip().startswith("it('") and i > eleven_idx)
+          helper_idx = next((i for i in range(eleven_idx, next_test_idx) if tlines[i].strip() == 'await openServiceCalendarTab();'), None)
+          if helper_idx is not None:
+              indent = tlines[helper_idx][:len(tlines[helper_idx]) - len(tlines[helper_idx].lstrip())]
+              tlines[helper_idx:helper_idx + 1] = [
+                  indent + "fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);",
+                  indent + "fireEvent.click(await screen.findByRole('button', { name: /實質服務日曆/ }));",
+              ]
+              neg_idx = next(i for i in range(helper_idx, next_test_idx + 3) if "queryByRole('button', { name: '前往請假／代班工作台' })" in tlines[i])
+              alert_line = "expect(await screen.findByText('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。'))"
+              tlines[neg_idx:neg_idx] = [
+                  indent + alert_line,
+                  indent + "  .toHaveAttribute('role', 'alert');",
+              ]
+              print('test 11b fail-closed assertion: replaced helper')
+          else:
+              print('test 11b fail-closed assertion: helper already removed')
 
-              expect(await screen.findByText('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。'))
-                .toHaveAttribute('role', 'alert');
-              expect(screen.queryByRole('button', { name: '前往請假／代班工作台' })).not.toBeInTheDocument();
-            });
-          """,
-              'test 11b fail-closed assertion',
-          )
+          test_path.write_text('\n'.join(tlines) + '\n', encoding='utf-8')
           PY
 
       - uses: actions/setup-node@v6
