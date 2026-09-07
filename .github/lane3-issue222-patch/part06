@@ -1,0 +1,80 @@
+--- a/ui_react/src/tests/finance_query_page.test.tsx
++++ b/ui_react/src/tests/finance_query_page.test.tsx
+@@ -161,6 +161,7 @@ function installImportHttp(
+     }
+     if (path.includes('/review-rows')) {
+       return importResponse({
++        batch_identity: plan.batch_identity, source_reviews: [], next_after_source_review_id: null,
+         items: Array.from({ length: plan.counts.manual_review }, (_, offset) => ({
+           row_id: 901 + offset,
+           row_identity: `ROW-REVIEW-${901 + offset}`,
+@@ -347,6 +348,7 @@ describe('Finance import preview and replay boundary', () => {
+     const exchange = JSON.parse(readFileSync(process.env.FI_PREVIEW_EXCHANGE!, 'utf8')) as {
+       workbook_path: string; ingestion_response: { data: unknown };
+       preview_response: { data: FinanceImportBatchPreview };
++      manifest_response: { data: unknown }; review_response: { data: unknown };
+       expected: Pick<FinanceImportBatchPreview, 'batch_version' | 'preview_fingerprint' | 'counts' | 'blocking_codes'>;
+     };
+     const bytes = new Uint8Array(readFileSync(exchange.workbook_path));
+@@ -359,6 +361,8 @@ describe('Finance import preview and replay boundary', () => {
+       requests.push(path);
+       if (path.endsWith('/workbooks/ingest')) return importResponse(exchange.ingestion_response.data);
+       if (path.endsWith('/batches/preview')) return importResponse(exchange.preview_response.data);
++      if (path.includes('/manifest')) return importResponse(exchange.manifest_response.data);
++      if (path.includes('/review-rows')) return importResponse(exchange.review_response.data);
+       throw new Error(`Unexpected request in Preview-only proof: ${path}`);
+     }));
+     const previewSpy = vi.spyOn(financeImportMutationClient, 'preview');
+@@ -373,7 +377,9 @@ describe('Finance import preview and replay boundary', () => {
+     if (!exchange.preview_response.data.apply_allowed) {
+       expect(screen.getByText(new RegExp(financeImportBlockerMessage(exchange.expected.blocking_codes)))).toBeInTheDocument();
+     }
+-    expect(requests).toEqual(['/api/v1/finance-import/workbooks/ingest', '/api/v1/finance-import/batches/preview']);
++    expect(requests.slice(0, 2)).toEqual(['/api/v1/finance-import/workbooks/ingest', '/api/v1/finance-import/batches/preview']);
++    const batchPath = `/api/v1/finance-import/batches/${encodeURIComponent(exchange.preview_response.data.batch_identity)}`;
++    expect(requests.slice(2)).toEqual([`${batchPath}/manifest`, `${batchPath}/review-rows?limit=50`]);
+     expect(screen.queryByText(/匯入完成：核銷/)).not.toBeInTheDocument();
+   });
+ });
+diff --git a/ui_react/src/tests/finance_request_lifecycle.test.tsx b/ui_react/src/tests/finance_request_lifecycle.test.tsx
+index 66e8fcf..3c7890b 100644
+--- a/ui_react/src/tests/finance_request_lifecycle.test.tsx
++++ b/ui_react/src/tests/finance_request_lifecycle.test.tsx
+@@ -58,7 +58,7 @@ describe('Finance query request lifecycle', () => {
+     vi.spyOn(accountsPayableQueryClient, 'query').mockResolvedValue(ACCOUNTS_PAYABLE_RESPONSE.data);
+     vi.spyOn(financeImportQueryClient, 'listBatches').mockResolvedValue(FINANCE_BATCH_RESPONSE.data);
+     vi.spyOn(financeImportQueryClient, 'getManifest').mockResolvedValue(FINANCE_MANIFEST_RESPONSE.data);
+-    vi.spyOn(financeImportQueryClient, 'listReviewRows').mockResolvedValue({ items: [], next_after_row_id: null });
++    vi.spyOn(financeImportQueryClient, 'listReviewRows').mockResolvedValue({ batch_identity: 'BATCH-FIN-021', source_reviews: [], next_after_source_review_id: null, items: [], next_after_row_id: null });
+     vi.spyOn(financeImportQueryClient, 'listReprocessRuns').mockResolvedValue({ items: [], next_before_run_id: null });
+   });
+ 
+diff --git a/ui_react/src/tests/finance_source_review_list.test.tsx b/ui_react/src/tests/finance_source_review_list.test.tsx
+index cd9096f..131d2cc 100644
+--- a/ui_react/src/tests/finance_source_review_list.test.tsx
++++ b/ui_react/src/tests/finance_source_review_list.test.tsx
+@@ -2,7 +2,7 @@
+  * File: finance_source_review_list.test.tsx
+  * Description: 驗證 Finance Import Preview 的人工確認 KPI、清單與 batch identity 共用 owner readback。
+  */
+-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
++import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ import { sessionClient } from '../api/auth/session_client';
+ import { financeImportMutationClient, type FinanceImportBatchPreview } from '../api/finance_import/finance_import_mutation_client';
+@@ -57,6 +57,9 @@ const MANIFEST = {
+ };
+ 
+ const REVIEW_PAGE = {
++  batch_identity: BATCH,
++  source_reviews: [] as { review_id: number; review_identity: string; source_sheet: string; source_row: number; issue_codes: string[]; created_at: string }[],
++  next_after_source_review_id: null as number | null,
+   items: [{
+     row_id: 301,
+     row_identity: 'ROW-REVIEW-222',
+@@ -75,6 +78,19 @@ const REVIEW_PAGE = {
+   next_after_row_id: null,
+ };
+ 
++async function showPreview() {
++  render(<FinancePage />);
