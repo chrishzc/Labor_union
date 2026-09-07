@@ -1,8 +1,6 @@
-diff --git a/ui_react/src/pages/OrdersPage.tsx b/ui_react/src/pages/OrdersPage.tsx
 --- a/ui_react/src/pages/OrdersPage.tsx
 +++ b/ui_react/src/pages/OrdersPage.tsx
-@@ -1,16 +1,21 @@
-       const baseInputsReady = serviceDates?.case_no === order.id
+@@ -2,17 +2,17 @@
          && startDate !== null
          && assignmentFactsReady
          && (!hasFormalAssignment || actualStart?.case_no === order.id);
@@ -25,12 +23,9 @@ diff --git a/ui_react/src/pages/OrdersPage.tsx b/ui_react/src/pages/OrdersPage.t
          selectServiceDates(order.id, []);
          setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
          return;
-       }
-diff --git a/ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx b/ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx
 --- a/ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx
 +++ b/ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx
-@@ -1,8 +1,24 @@
-     vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(assignedSummaryPage);
+@@ -2,5 +2,20 @@
      vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(
        buildOrdersStageProjectionFixture(assignedSummaryPage),
      );
@@ -51,10 +46,9 @@ diff --git a/ui_react/src/tests/domains/orders/subsystems/orders/modules/service
 +    vi.mocked(orderCardProjectionClient.getCardProjection).mockResolvedValueOnce(projection);
      vi.spyOn(ordersQueryClient, 'getActualStart').mockRejectedValue(new Error('query unavailable'));
      const calculateSpy = vi.spyOn(schedulePrecisionClient, 'calculate');
- 
-     render(React.createElement(OrdersPage));
-@@ -1,8 +1,11 @@
- 
+--- a/ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx
++++ b/ui_react/src/tests/domains/orders/subsystems/orders/modules/service-date-confirmation/orders_service_dates_flow.test.tsx
+@@ -1,6 +1,9 @@
      render(<OrdersPage />);
      await screen.findByText(serviceOrder.case_no);
 -    await openServiceCalendarTab();
