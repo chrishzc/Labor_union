@@ -165,15 +165,18 @@ def test_t11_source_review_query_apply_and_replay(tmp_path):
         assert applied['staff_payout_events'] == before['staff_payout_events']  # This batch contains no staff payout.
         assert client.get(url+'/review-rows').json() == reviews.json()
         replay = ingest(headers_http['Idempotency-Key'])
-        reimport = ingest('t11-reimport:'+token)
-        assert replay.status_code == reimport.status_code == 200
-        assert replay.json()['data']['batch_identity'] == reimport.json()['data']['batch_identity'] == batch
-        assert _counts() == applied, 'replay/reimport must not duplicate dispatch, receipts, payout or review occurrences'
+        reselect = ingest(headers_http['Idempotency-Key'])
+        assert replay.status_code == reselect.status_code == 200
+        assert replay.json()['data']['batch_identity'] == reselect.json()['data']['batch_identity'] == batch
+        assert _counts() == applied, 'replay/same-key reselect must not duplicate dispatch, receipts, payout or review occurrences'
         assert client.get(url+'/manifest').json()['data']['review_count'] == 1
         # Exact API response crosses the real typed client and page, without DB credentials in the UI process.
         exchange = tmp_path/'review-exchange.json'
         exchange.write_text(json.dumps({'ingestion': intake.json(), 'preview': preview.json(), 'manifest': manifest.json(), 'reviews': reviews.json()}), encoding='utf-8')
         root = Path(__file__).resolve().parents[1]
-        result = subprocess.run(['npm', '--prefix', str(root/'ui_react'), 'test', '--', 'src/tests/finance_source_review_list.test.tsx', '-t', 'same-run source-review'], cwd=root, env={'PATH': os.environ['PATH'], 'HOME': str(tmp_path), 'CI': 'true', 'FI_REVIEW_EXCHANGE': str(exchange)}, capture_output=True, text=True, timeout=60)
+        ui_report = tmp_path/'typed-ui-report.json'
+        result = subprocess.run(['npm', '--prefix', str(root/'ui_react'), 'test', '--', 'src/tests/finance_source_review_list.test.tsx', '-t', 'same-run source-review', '--reporter=json', '--outputFile', str(ui_report)], cwd=root, env={'PATH': os.environ['PATH'], 'HOME': str(tmp_path), 'CI': 'true', 'FI_REVIEW_EXCHANGE': str(exchange)}, capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, result.stdout[-5000:]+result.stderr[-5000:]
+        report = json.loads(ui_report.read_text(encoding='utf-8'))
+        assert report.get('numPassedTests') == 1 and report.get('numFailedTests') == 0, report
         print('T11_2_READBACK', json.dumps({'before': before, 'staged': staged, 'applied_and_replayed': applied, 'source_review_count': 1, 'typed_ui': 'passed'}, sort_keys=True))

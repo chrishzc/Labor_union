@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import { financeImportMutationClient, type FinanceImportBatchPreview } from '../api/finance_import/finance_import_mutation_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
+import { transport } from '../api/shared/transport';
+import { readFileSync } from 'node:fs';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { FinancePage } from '../pages/FinancePage';
 
@@ -213,4 +215,29 @@ describe('Finance source-review owner readback', () => {
     expect(screen.queryByText('可自動入帳', { selector: '.finance-kpi-label' })).not.toBeInTheDocument();
     expect(financeImportQueryClient.listReviewRows).not.toHaveBeenCalled();
   });
+
+  const exchangePath = process.env.FI_REVIEW_EXCHANGE;
+  (exchangePath ? it : it.skip)('decodes same-run source-review owner envelopes through the real typed query client', async () => {
+    const raw = JSON.parse(readFileSync(exchangePath!, 'utf-8')) as Record<string, any>;
+    const batch = raw.ingestion.data.batch_identity as string;
+    const sourceReview = raw.reviews.data.source_reviews[0] as { source_sheet: string; source_row: number; issue_codes: string[] };
+    vi.restoreAllMocks();
+    vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
+    vi.spyOn(financeImportMutationClient, 'ingest').mockResolvedValue(raw.ingestion.data);
+    vi.spyOn(financeImportMutationClient, 'preview').mockResolvedValue(raw.preview.data);
+    const get = vi.spyOn(transport, 'get').mockImplementation(async (path: string) => {
+      if (path.endsWith('/manifest')) return raw.manifest;
+      if (path.endsWith('/review-rows')) return raw.reviews;
+      throw new Error(`unexpected GET ${path}`);
+    });
+
+    await showPreview();
+    await waitFor(() => expect(reviewCount()).toBe('1'));
+    expect(screen.getByText(batch)).toBeInTheDocument();
+    expect(screen.getByText(`${sourceReview.source_sheet}#${sourceReview.source_row}`)).toBeInTheDocument();
+    expect(screen.getByText(sourceReview.issue_codes[0])).toBeInTheDocument();
+    expect(get.mock.calls.some(([path]) => String(path).endsWith('/manifest'))).toBe(true);
+    expect(get.mock.calls.some(([path]) => String(path).endsWith('/review-rows'))).toBe(true);
+  });
+
 });
