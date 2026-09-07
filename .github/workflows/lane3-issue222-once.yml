@@ -36,28 +36,24 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: true
-          fetch-depth: 40
-      - name: Align disposable assertions to current aggregate review owner contract
+          fetch-depth: 50
+      - name: Align disposable receipt readback to actual owning domains
         shell: bash
         run: |
           set -euo pipefail
           test "$(git merge-base HEAD d03551ab75de3e9cffc32ee772bdcf863181adad)" = d03551ab75de3e9cffc32ee772bdcf863181adad
-          test "$(git rev-parse HEAD^)" = 25e99f868b27d0182d6c6d80747e362ce64d8999
+          test "$(git rev-parse HEAD^)" = 1a7c3a9bce0488eba5bc72254439e2892b5db584
           python3 - <<'PY'
           from pathlib import Path
           path = Path('tests/test_finance_source_review_mysql_e2e.py')
           text = path.read_text(encoding='utf-8')
-          old = "        assert manifest.json()['data']['review_count'] == 1, 'T11_2_SOURCE_REVIEW_OCCURRENCE_NOT_IN_QUERY'\n        reviews = client.get(url+'/review-rows')\n        assert reviews.status_code == 200, reviews.text\n        page = reviews.json()['data']\n        assert page['batch_identity'] == batch and page['items'] == []\n        assert len(page['source_reviews']) == 1\n        source = page['source_reviews'][0]\n        assert source['source_sheet'] == '來源' and source['source_row'] == 3\n        assert 'invalid:transaction_amount' in source['issue_codes']\n"
-          new = "        reviews = client.get(url+'/review-rows')\n        assert reviews.status_code == 200, reviews.text\n        page = reviews.json()['data']\n        assert page['batch_identity'] == batch\n        assert manifest.json()['data']['review_count'] == len(page['items']) + len(page['source_reviews'])\n        assert len(page['items']) == 1 and page['items'][0]['disposition'] == 'business_pending'\n        assert sum(item['disposition'] == 'manual_review' for item in page['items']) + len(page['source_reviews']) == 1\n        assert len(page['source_reviews']) == 1\n        source = page['source_reviews'][0]\n        assert source['source_sheet'] == '來源' and source['source_row'] == 3\n        assert 'finance_source_field_invalid:transaction_amount' in source['issue_codes']\n"
-          assert text.count(old) == 1, 'aggregate review assertion anchor drifted'
+          old = "                      'finance_import_dispatch_events', 'finance_import_reconciliation_receipts',\n                      'finance_import_apply_receipts', 'client_ledger_entries', 'staff_payout_events')\n"
+          new = "                      'finance_import_dispatch_events', 'finance_import_apply_receipts',\n                      'client_finance_apply_receipts', 'client_ledger_entries', 'staff_payout_events')\n"
+          assert text.count(old) == 1, 'receipt table count anchor drifted'
           text = text.replace(old, new)
-          old = "        assert client.get(url+'/review-rows').json() == reviews.json()\n        replay = ingest(headers_http['Idempotency-Key'])\n"
-          new = "        after_apply_reviews = client.get(url+'/review-rows').json()['data']\n        assert after_apply_reviews['source_reviews'] == page['source_reviews']\n        assert sum(item['disposition'] == 'manual_review' for item in after_apply_reviews['items']) + len(after_apply_reviews['source_reviews']) == 1\n        replay = ingest(headers_http['Idempotency-Key'])\n"
-          assert text.count(old) == 1, 'post-apply review assertion anchor drifted'
-          text = text.replace(old, new)
-          old = "        assert client.get(url+'/manifest').json()['data']['review_count'] == 1\n"
-          new = "        assert client.get(url+'/manifest').json()['data']['review_count'] == manifest.json()['data']['review_count']\n"
-          assert text.count(old) == 1, 'post-replay manifest assertion anchor drifted'
+          old = "        assert applied['finance_import_dispatch_events'] == staged['finance_import_dispatch_events'] + 1\n        assert applied['finance_import_reconciliation_receipts'] == staged['finance_import_reconciliation_receipts'] + 1\n        assert applied['client_ledger_entries'] == before['client_ledger_entries'] + 1\n        assert applied['staff_payout_events'] == before['staff_payout_events']  # This batch contains no staff payout.\n"
+          new = "        assert applied['finance_import_dispatch_events'] == staged['finance_import_dispatch_events'] + 1\n        assert applied['finance_import_apply_receipts'] == staged['finance_import_apply_receipts'] + 1\n        assert applied['client_finance_apply_receipts'] == staged['client_finance_apply_receipts'] + 1\n        assert applied['client_ledger_entries'] == staged['client_ledger_entries'] + 1\n        assert staged['finance_import_source_review_occurrences'] == before['finance_import_source_review_occurrences'] + 1\n        assert applied['finance_import_source_review_occurrences'] == staged['finance_import_source_review_occurrences']\n        assert applied['staff_payout_events'] == staged['staff_payout_events']  # This batch contains no staff payout.\n"
+          assert text.count(old) == 1, 'receipt owner assertion anchor drifted'
           path.write_text(text.replace(old, new), encoding='utf-8')
           PY
           git diff --check
@@ -65,7 +61,7 @@ jobs:
           git diff --cached --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'test(finance): verify #222 manual KPI on aggregate owner readback'
+          git commit -m 'test(finance): verify #222 owning-domain receipts'
           VERIFIED_SHA=$(git rev-parse HEAD)
           echo "VERIFIED_SHA=$VERIFIED_SHA" >> "$GITHUB_ENV"
           git push origin HEAD:fix/issue-222-source-review-owner-readback
