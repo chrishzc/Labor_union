@@ -1,0 +1,31 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-weekly-report-batches-2026-09-06-v1",
+  "descriptors": {
+    "1031_weekly_report_batches.sql": {
+      "tables": {
+        "weekly_report_batches": ["id", "year", "week_code", "cutoff_at", "promotion_count", "inquiry_count", "notes", "created_at", "updated_at"],
+        "weekly_report_batch_cases": ["case_no", "batch_id", "bound_at"]
+      },
+      "parent_columns": {},
+      "indexes": {
+        "weekly_report_batches.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "weekly_report_batches.uk_year_week": {"non_unique": 0, "columns": ["year", "week_code"]},
+        "weekly_report_batches.idx_year": {"non_unique": 1, "columns": ["year"]},
+        "weekly_report_batch_cases.PRIMARY": {"non_unique": 0, "columns": ["case_no"]},
+        "weekly_report_batch_cases.idx_batch_id": {"non_unique": 1, "columns": ["batch_id"]}
+      },
+      "foreign_keys": {
+        "weekly_report_batch_cases.fk_batch_cases_batch": {
+          "columns": ["batch_id"],
+          "referenced_table": "weekly_report_batches",
+          "referenced_columns": ["id"],
+          "update_rule": "RESTRICT",
+          "delete_rule": "CASCADE"
+        }
+      },
+      "checks": {},
+      "triggers": []
+    }
+  }
+}

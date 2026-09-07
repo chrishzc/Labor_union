@@ -9,7 +9,7 @@
   "test_kinds": ["external_input_fixture", "expected_manifest"],
   "coverage_ids": ["CASE-01", "CISM-01"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#CISM-01"
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#CISM-01"
   ],
   "root_facts": [
     "A unique external case payload with client identity, contracted service terms and approved policy references.",

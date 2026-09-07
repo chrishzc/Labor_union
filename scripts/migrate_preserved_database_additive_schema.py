@@ -241,6 +241,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_09_01_historical_service_accounting_v1.json",
     "labor_union_2026_09_01_client_payment_destination_configuration_v1.json",
     "labor_union_2026_09_02_staff_beclass_profile_v1.json",
+    "labor_union_2026_09_06_weekly_report_batches_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(

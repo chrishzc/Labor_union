@@ -190,6 +190,72 @@ describe('OrdersPage query real-data slice', () => {
     vi.spyOn(ordersMutationClient, 'previewReopen').mockResolvedValue(realisticOrderReopenPreviewView);
   });
 
+  it.each([
+    { missing: ['client_name'] }, { missing: ['start_date'] },
+    { missing: ['service_days'] }, { missing: ['start_date', 'service_days'] },
+  ] as const)('keeps original drawer actions for missing intake fields $missing', async ({ missing }) => {
+    const missingFields: Array<'client_name' | 'start_date' | 'service_days'> = [...missing];
+    const item = {
+      ...realisticOrderSummaryPage.items[0],
+      order_status: '待補件',
+      client_name: missingFields.includes('client_name') ? '待補姓名（ORD-2026-0801）' : '合成補件客戶',
+      start_date: missingFields.includes('start_date') ? null : '2026-09-10',
+      service_days: missingFields.includes('service_days') ? null : 5,
+    };
+    const summary = { ...realisticOrderSummaryPage, items: [item], next_cursor: null };
+    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(summary);
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(buildOrdersStageProjectionFixture(summary));
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
+      case_no: item.case_no, lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+      missing_fields: missingFields, blockers: ['order_intake_completion_service_data_locked'],
+      apply_allowed: false, preview_fingerprint: '1'.repeat(64),
+    });
+    render(<OrdersPage />);
+    await screen.findByText(item.case_no);
+    expect(screen.getByRole('button', { name: /媒合與正式排班/ })).toBeEnabled();
+    expect(screen.queryByRole('region', { name: '訂單缺件補齊' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /條款與契約/ }));
+    expect(await screen.findByLabelText(`${item.case_no} 缺件項目`)).toBeInTheDocument();
+    expect(await screen.findByText('服務資料已鎖定，目前不能完成進件補齊。')).toBeInTheDocument();
+    await waitFor(() => expect(ordersQueryClient.getOrderTerms).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: /契約簽署與約定條款/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /實質服務日曆與天數精算/ })).toBeInTheDocument();
+  });
+
+  it('downloads the selected archived contract version through the existing client owner', async () => {
+    vi.mocked(contractSigningClient.query).mockResolvedValueOnce({
+      case_no: 'ORD-2026-0801',
+      staff_segments: [],
+      commitment_id: null,
+      client_document_sent: false,
+      client_signed_received: false,
+      contract_identity: 'CONTRACT-ARCHIVE-1',
+      documents: [{
+        document_version_id: 17,
+        scope: 'client',
+        role: 'template_generated',
+        target_key: 'client',
+        version_number: 2,
+        template_key: 'client-contract',
+        template_sha256: 'a'.repeat(64),
+        mapping_sha256: 'b'.repeat(64),
+        archive_sha256: 'c'.repeat(64),
+        mime_type: 'application/pdf',
+        file_size: 12,
+      }],
+    });
+    const download = vi.spyOn(contractSigningClient, 'downloadDocument').mockResolvedValue({
+      blob: new Blob(['pdf']), filename: 'contract-17.pdf', mimeType: 'application/pdf',
+    });
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:archive-17');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0802');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: '下載／匯出此文件' }));
+    await waitFor(() => expect(download).toHaveBeenCalledWith('ORD-2026-0801', 17));
+  });
+
   it('renders raw server statuses and filters with the server seven-stage projection', async () => {
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
@@ -485,6 +551,68 @@ describe('OrdersPage query real-data slice', () => {
     expect(candidateContactPoolClient.addCandidates).toHaveBeenCalledOnce();
     expect(candidateContactPoolClient.query).toHaveBeenCalledTimes(7);
     expect(matchingCandidateWorkflowClient.createSingleCaregiverPlan).toHaveBeenCalledOnce();
+  });
+
+  it('sends the current server-backed matching filter policy after an explicit toggle', async () => {
+    useOperableSummary();
+    vi.spyOn(matchingCandidateWorkflowClient, 'searchSingleCaregiver').mockResolvedValue({
+      case_no: 'ORD-2026-0801',
+      planned_start_date: '2026-08-01',
+      planned_end_date: '2026-08-30',
+      feasibility: 'partial',
+      complete_combinations: [],
+      segment_candidates: [],
+      candidate_options: [{
+        segment_index: 0,
+        staff_id: 8892,
+        staff_name: '放寬區域後可接月嫂',
+        coverage_day_count: 30,
+        available_ranges: [{ start_date: '2026-09-01', end_date: '2026-09-30' }],
+        case_period_start: '2026-09-01',
+        case_period_end: '2026-09-30',
+        required_service_dates: ['2026-09-01'],
+        supported_service_dates: ['2026-09-01'],
+        supported_ranges: [{ start_date: '2026-09-01', end_date: '2026-09-30', service_day_count: 1 }],
+        supported_day_count: 1,
+        required_day_count: 1,
+        full_case_coverage: true,
+        selected_segment_start: '2026-09-01',
+        selected_segment_end: '2026-09-30',
+        full_selected_segment_coverage: true,
+        uncovered_segment_dates: [],
+        source_scheduling_version: 4,
+        filter_results: {
+          region: false,
+          cooking: true,
+          preferred_service_days: true,
+          daily_service_hours: true,
+        },
+      }],
+      conflicts: [],
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /媒合與正式排班/ })[0]);
+    await screen.findByText('正式執行排班（非候選推薦）');
+
+    const regionFilter = screen.getByRole('checkbox', { name: '服務區域' });
+    expect(regionFilter).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '料理需求' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '承接服務天數' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '每日服務時數' })).toBeChecked();
+    fireEvent.click(regionFilter);
+    fireEvent.click(await screen.findByRole('button', { name: /重新查詢符合條件月嫂/ }));
+
+    await waitFor(() => expect(matchingCandidateWorkflowClient.searchSingleCaregiver).toHaveBeenCalledWith(
+      'ORD-2026-0801',
+      '2026-09-01',
+      '2026-09-30',
+      { region: false, cooking: true, preferred_service_days: true, daily_service_hours: true },
+    ));
+    expect(await screen.findByText('最新完整承接候選（1 位）')).toBeInTheDocument();
+    expect(screen.getByText('已依最新檔期查得 1 位可完整承接候選月嫂。')).toBeInTheDocument();
+    expect(screen.getByText(/放寬區域後可接月嫂/)).toBeInTheDocument();
   });
 
   it('disables formal-plan creation when the current plan already has a waiting-deposit lock', async () => {

@@ -15,6 +15,7 @@ from subsystems.orders.stage_projection_query import (
     SopStepProjection,
     SourceLineage,
     StageProjection,
+    _steps,
 )
 from subsystems.orders.terminal_aggregate_query import (
     TerminalAggregateContractError,
@@ -39,6 +40,11 @@ _SETTLEMENT_COMPONENT_CODES = (
     "service_completion",
     "client_settlement",
     "staff_payout",
+)
+_INDEPENDENT_GAP_CASES = (
+    *((code, "sop", f"{code}_not_complete") for code in _SOP_COMPONENT_CODES if code != "matching_pool"),
+    *((code, "settlement", f"{code}_not_complete") for code in _SETTLEMENT_COMPONENT_CODES),
+    ("government_subsidy", "subsidy", "submitted"),
 )
 
 
@@ -140,6 +146,51 @@ def _timeline(
     )
 
 
+def _matching_pool_cascade_timeline() -> OrderOperationalTimeline:
+    """Build the matching-pool gap from current owner root-fact derivation."""
+    baseline = _timeline()
+    root_facts = {
+        "matching_plan_id": 1,
+        "candidate_pool_id": None,
+        "candidate_pool_candidate_count": 0,
+        "candidate_pool_contacted_count": 0,
+        "candidate_pool_replied_count": 0,
+        "candidate_pool_contacted_at": None,
+        "candidate_pool_replied_at": None,
+        "willingness_contact_attempt_count": 0,
+        "willingness_count": 0,
+        "willingness_replied_count": 0,
+        "willingness_accepted_count": 0,
+        "resume_attempt_count": 1,
+        "resume_sent_count": 1,
+        "matching_segment_count": 1,
+        "staff_contract_sent_count": 1,
+        "staff_contract_signed_count": 1,
+        "client_contract_sent_count": 1,
+        "client_contract_signed_count": 1,
+        "deposit_obligation_count": 1,
+        "deposit_open_count": 0,
+        "matching_created_at": None,
+        "staff_contract_signed_at": _AT,
+        "staff_contract_sent_at": _AT,
+        "client_contract_signed_at": _AT,
+        "client_contract_sent_at": _AT,
+        "deposit_updated_at": _AT,
+    }
+    steps = _steps(root_facts, baseline.case_no, baseline.stages)
+    return OrderOperationalTimeline(
+        case_no=baseline.case_no,
+        base_revision=baseline.base_revision,
+        lifecycle_status=baseline.lifecycle_status,
+        replacement_resume_step_ordinal=baseline.replacement_resume_step_ordinal,
+        current_stage_code=baseline.current_stage_code,
+        current_step_ordinal=baseline.current_step_ordinal,
+        stages=baseline.stages,
+        sop_steps=steps,
+        projection_digest=baseline.projection_digest,
+    )
+
+
 def _subsidy(substatus_code: str, *, case_no: str = "CASE-TERMINAL-001") -> OrderGovernmentSubsidyProjection:
     return OrderGovernmentSubsidyProjection(
         case_no=case_no,
@@ -176,41 +227,71 @@ def test_normal_order_is_fully_closed_only_when_all_owner_components_complete():
     assert all(component.completed for component in aggregate.components)
 
 
-def test_incomplete_sop_owner_component_keeps_terminal_aggregate_open():
+@pytest.mark.parametrize(
+    ("component_code", "gap_kind", "expected_reason"),
+    _INDEPENDENT_GAP_CASES,
+)
+def test_legal_independent_owner_gap_matrix_keeps_terminal_aggregate_open(
+    component_code,
+    gap_kind,
+    expected_reason,
+):
+    timeline = _timeline(
+        blocked_step_code=component_code if gap_kind == "sop" else None,
+        blocked_settlement_code=component_code if gap_kind == "settlement" else None,
+    )
+    subsidy = _subsidy("submitted" if gap_kind == "subsidy" else "paid")
+
+    aggregate = project_terminal_aggregate(timeline, subsidy)
+
+    incomplete = tuple(item for item in aggregate.components if not item.completed)
+    assert aggregate.applicable is True
+    assert aggregate.fully_closed is False
+    assert len(aggregate.components) == 14
+    assert len(incomplete) == 1
+    component = incomplete[0]
+    assert component.code == component_code
+    assert component.reason == expected_reason
+    if gap_kind == "sop":
+        source = next(item for item in timeline.sop_steps if item.code == component_code)
+        assert component.owner == source.owner
+    elif gap_kind == "settlement":
+        settlement = next(stage for stage in timeline.stages if stage.code == "settlement_payout")
+        source = next(item for item in settlement.settlement if item.code == component_code)
+        assert component.owner == source.source.owner
+    else:
+        assert component.owner == subsidy.source.owner
+
+
+def test_matching_pool_gap_uses_current_owner_cascade_instead_of_contradictory_state():
     aggregate = project_terminal_aggregate(
-        _timeline(blocked_step_code="client_contract"),
+        _matching_pool_cascade_timeline(),
         _subsidy("paid"),
     )
 
-    component = next(item for item in aggregate.components if item.code == "client_contract")
-    assert aggregate.fully_closed is False
-    assert component.owner == "owner-client_contract"
-    assert component.completed is False
-    assert component.reason == "client_contract_not_complete"
-
-
-def test_incomplete_settlement_owner_component_keeps_terminal_aggregate_open():
-    aggregate = project_terminal_aggregate(
-        _timeline(blocked_settlement_code="client_settlement"),
-        _subsidy("paid"),
+    incomplete = tuple(
+        (item.code, item.owner, item.reason)
+        for item in aggregate.components
+        if not item.completed
     )
-
-    component = next(item for item in aggregate.components if item.code == "client_settlement")
     assert aggregate.fully_closed is False
-    assert component.owner == "owner-client_settlement"
-    assert component.completed is False
-    assert component.reason == "client_settlement_not_complete"
-
-
-def test_nonterminal_government_subsidy_status_keeps_terminal_aggregate_open():
-    aggregate = project_terminal_aggregate(_timeline(), _subsidy("submitted"))
-
-    subsidy = aggregate.components[-1]
-    assert aggregate.fully_closed is False
-    assert subsidy.code == "government_subsidy"
-    assert subsidy.owner == "Government Subsidy"
-    assert subsidy.completed is False
-    assert subsidy.reason == "submitted"
+    assert incomplete == (
+        (
+            "matching_pool",
+            "Assignments / Scheduling",
+            "matching_plan_lineage_missing",
+        ),
+        (
+            "caregiver_line_delivery",
+            "Assignments / LINE Delivery",
+            "candidate_contact_pool_missing",
+        ),
+        (
+            "caregiver_willingness_reply",
+            "Assignments / LINE",
+            "candidate_contact_pool_missing",
+        ),
+    )
 
 
 @pytest.mark.parametrize(

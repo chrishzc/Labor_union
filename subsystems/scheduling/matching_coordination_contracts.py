@@ -334,6 +334,11 @@ class ApplyCaregiverSelection(MatchingCommand):
     reason_code: str | None
     affected_criteria: tuple[str, ...]
     preview_fingerprint: PreviewFingerprint
+    # When the first package is being confirmed there is no persisted package
+    # to read back.  Carry the exact administrator-selected segments from the
+    # package Preview so Apply can rebuild and persist that package atomically.
+    segments: tuple[MatchingSegment, ...] = ()
+    required_service_dates: tuple[date, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

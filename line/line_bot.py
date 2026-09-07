@@ -143,90 +143,15 @@ class LineBindPayload(BaseModel):
 
 @router.post("/api/line/bind")
 async def line_bind(payload: LineBindPayload):
-    _require_legacy_line_surface("/api/v1/line/identity/customer/apply")
-    name = payload.name.strip()
-    phone = payload.phone.strip()
-    norm_phone = "".join(filter(str.isdigit, phone))
-    line_user_id = ""
-    if payload.line_id_token:
-        try:
-            line_user_id = await _trusted_line_user_id(payload.line_id_token, payload.line_user_id)
-        except Exception:
-            line_user_id = payload.line_user_id or "preview-user"
-    else:
-        line_user_id = payload.line_user_id or "preview-user"
-
-    conn = get_db_connection()
-    try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                "SELECT id, name, phone, case_no, line_user_id FROM clients "
-                "WHERE name = %s AND REPLACE(REPLACE(phone, '-', ''), ' ', '') = %s "
-                "ORDER BY id DESC LIMIT 1",
-                (name, norm_phone),
-            )
-            client = cursor.fetchone()
-
-            # 狀態 C：查無案號 / 名冊未同步
-            if not client:
-                return {
-                    "status": "state_c",
-                    "kind": "not_found",
-                    "name": name,
-                    "phone": phone,
-                    "message": "市府名冊同步中，即將為您載入工會需求調查表單...",
-                }
-
-            existing_line_user = client.get("line_user_id")
-            if existing_line_user and line_user_id and existing_line_user != line_user_id and not payload.force_rebind:
-                return {
-                    "status": "confirm_rebind",
-                    "message": "本筆訂單已有綁定另一個帳戶，請問是否重新綁定？",
-                }
-
-            case_no = client.get("case_no") or ""
-            cursor.execute(
-                "SELECT id FROM beclass_records WHERE client_id = %s OR (case_no = %s AND %s <> '') LIMIT 1",
-                (client["id"], case_no, case_no),
-            )
-            has_survey = cursor.fetchone() is not None
-
-            if line_user_id and not line_user_id.startswith("local-") and not line_user_id.startswith("mock-") and not line_user_id.startswith("client-"):
-                cursor.execute(
-                    "UPDATE clients SET line_user_id = %s WHERE id = %s",
-                    (line_user_id, client["id"]),
-                )
-                conn.commit()
-
-            # 狀態 A：舊客完全命中，無需重複填問卷
-            if case_no and has_survey:
-                wake_worker()
-                return {
-                    "status": "state_a",
-                    "client_name": client["name"],
-                    "case_no": case_no,
-                    "message": "舊客完全命中！綁定成功，無需重複填寫問卷。",
-                }
-
-            # 狀態 B：有案號但缺問卷
-            return {
-                "status": "state_b",
-                "client_name": client["name"],
-                "name": client["name"],
-                "phone": client["phone"] or phone,
-                "case_no": case_no,
-                "message": "已找到您的案件，正在為您載入需求調查表單...",
-            }
-    except Exception as error:
-        print(f"[API Bind] State machine fallback: {error}")
-        return {
-            "status": "state_c",
-            "name": name,
-            "phone": phone,
-            "message": "市府名冊同步中，即將為您載入工會需求調查表單...",
-        }
-    finally:
-        conn.close()
+    """Retired in every runtime, including explicitly enabled legacy rollback."""
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "legacy_line_route_retired",
+            "message": "此 LINE 舊綁定入口已退出，請使用正式身分綁定流程。",
+            "replacement": "/api/v1/line/identity/customer/apply",
+        },
+    )
 
 @router.get("/api/line/rebind_requests")
 def get_rebind_requests() -> None:

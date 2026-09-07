@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+import re
 from typing import Any, Mapping
 
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.validation import require_canonical_text, require_positive_integer
+
+
+_FULLWIDTH_ASCII_TRANSLATION = str.maketrans(
+    {chr(codepoint): chr(codepoint - 0xFEE0) for codepoint in range(0xFF01, 0xFF5F)}
+)
 
 
 class ProvisionalRegistrationIssue(StrEnum):
@@ -137,7 +143,24 @@ def _optional_payload(intent: ProvisionalRegistrationIntent) -> dict[str, str | 
         "id_number": intent.id_number,
         "liff_config_revision": intent.liff_config_revision,
     }
-    return {key: _optional(value, key) for key, value in values.items()}
+    normalized = {key: _optional(value, key) for key, value in values.items()}
+    normalized["id_number"] = _optional_id_number(intent.id_number)
+    return normalized
+
+
+def _optional_id_number(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    candidate = normalized.translate(_FULLWIDTH_ASCII_TRANSLATION).upper()
+    if not re.fullmatch(r"[A-Z][0-9]{9}", candidate):
+        raise ProvisionalRegistrationDomainError(
+            ProvisionalRegistrationIssue.INVALID_ROOT_FACTS,
+            "id_number is invalid",
+        )
+    return candidate
 
 
 def _optional(value: str | None, field_name: str) -> str | None:

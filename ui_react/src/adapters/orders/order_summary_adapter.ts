@@ -48,6 +48,8 @@ export interface OrderSummaryCardViewModel {
   identityStatus: string;
   clientPhone: string;
   serviceRange: string;
+  startDate: string | null;
+  endDate: string | null;
   serviceDays: number | null;
   serviceDaysLabel: string;
   serviceAddress: string;
@@ -89,6 +91,8 @@ export function adaptOrderSummaryItem(item: OrderSummaryItem): OrderSummaryCardV
     identityStatus: item.identity_status?.trim() || '待確認',
     clientPhone: `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（聯絡電話）`,
     serviceRange: formatServiceRange(item.start_date, item.end_date),
+    startDate: item.start_date,
+    endDate: item.end_date,
     serviceDays,
     serviceDaysLabel: serviceDays === null ? '待補服務天數' : `${serviceDays} 天`,
     serviceAddress: `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（服務地址）`,

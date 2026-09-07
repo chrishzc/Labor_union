@@ -70,6 +70,16 @@ class FinanceImportReviewRowSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class FinanceImportSourceReviewSummary:
+    review_id: int
+    review_identity: str
+    source_sheet: str
+    source_row: int
+    issue_codes: tuple[str, ...]
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class FinanceImportReprocessRunSummary:
     run_id: int
     batch_identity: str
@@ -193,6 +203,37 @@ class FinanceImportQueryService:
         rows = self._fetch_review_rows(params)
         return tuple(_review_row(row) for row in rows)
 
+    def list_source_reviews(
+        self, batch_identity: str, *, limit: int,
+        after_source_review_id: int | None = None,
+    ) -> tuple[FinanceImportSourceReviewSummary, ...]:
+        identity = _canonical_identity(batch_identity)
+        _validate_page(limit, after_source_review_id, "after_source_review_id")
+        self._require_formal_batch(identity)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT review.id AS review_id, review.review_identity,
+                       review.sheet_name AS source_sheet, review.source_row,
+                       review.issue_codes, review.created_at
+                FROM finance_import_batch_contracts contract
+                JOIN finance_import_source_review_occurrences occurrence
+                  ON occurrence.batch_id=contract.batch_id
+                JOIN finance_import_source_reviews review
+                  ON review.id=occurrence.review_id
+                WHERE contract.batch_identity=%s
+                  AND (%s IS NULL OR review.id>%s)
+                ORDER BY review.id ASC LIMIT %s
+                """,
+                (identity, after_source_review_id, after_source_review_id, limit),
+            )
+            rows = tuple(cursor.fetchall())
+        return tuple(FinanceImportSourceReviewSummary(
+            int(row["review_id"]), str(row["review_identity"]),
+            str(row["source_sheet"]), int(row["source_row"]),
+            _text_tuple(row["issue_codes"]), row["created_at"],
+        ) for row in rows)
+
     def list_reprocess_runs(
         self,
         batch_identity: str,
@@ -254,7 +295,10 @@ class FinanceImportQueryService:
                                 WHERE latest.batch_id=batch.id
                                   AND latest.finance_import_row_id=
                                       event.finance_import_row_id
-                           )) AS review_count,
+                           )) +
+                       (SELECT COUNT(*)
+                          FROM finance_import_source_review_occurrences occurrence
+                         WHERE occurrence.batch_id=batch.id) AS review_count,
                        (SELECT COUNT(*)
                           FROM finance_import_dispatch_events dispatch
                          WHERE dispatch.batch_id=batch.id)

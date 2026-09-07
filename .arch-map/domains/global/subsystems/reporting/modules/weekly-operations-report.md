@@ -23,6 +23,7 @@
 - outbound: `government-subsidy/reconciliation-register-query` — 以owner formula取得服務完成日落在selected week的補助rows。
 - outbound: `orders | client | scheduling` — selected-week案件與正式服務facts。
 - inbound: authenticated React Reports page。
+- storage: `weekly_report_batches` and `weekly_report_batch_cases` are provided by the separated fresh `217` or preserve `1031` schema release chain.
 
 ## Contracts
 - `operations-report.v2`與canonical `start_date`／`end_date` — `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` §15.1。

@@ -2,7 +2,7 @@
  * File: service_before_replacement_actions.test.tsx
  * Description: 驗證 RPRE 明確情境、收合技術證據、Apply fresh readback、實際服務轉介與同鍵結果對帳。
  */
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   decodeAndVerifyServiceBeforeReplacementApplyResponse,
@@ -188,6 +188,10 @@ describe('ServiceBeforeReplacementActions', () => {
     const onCommitted = vi.fn();
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" onCommitted={onCommitted} />);
 
+    expect(serviceBeforeReplacementClient.query).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '換人' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('heading', { name: '服務前換人人工修復', hidden: true })).not.toBeInTheDocument();
+    expandReplacementPanel();
     await screen.findByText('可以建立換人 successor');
     expect(serviceBeforeReplacementClient.query).toHaveBeenCalledWith('CASE-RPRE-001', 'R-02', expect.any(AbortSignal));
     expect(screen.getByText('步驟 2：重新建立候選池')).toBeInTheDocument();
@@ -262,6 +266,7 @@ describe('ServiceBeforeReplacementActions', () => {
     vi.mocked(serviceBeforeReplacementClient.query).mockResolvedValue(referral);
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-04" onSubstitutionReferral={onSubstitutionReferral} />);
 
+    expandReplacementPanel();
     await screen.findByText('已有實際服務，必須改走請假代班');
     expect(screen.queryByLabelText('換人原因')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '前往請假代班' }));
@@ -271,6 +276,7 @@ describe('ServiceBeforeReplacementActions', () => {
 
   it('沒有 typed anomaly binding 時不預設猜 R-01，必須由操作者選擇', async () => {
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" />);
+    expandReplacementPanel();
     await screen.findByText(/系統不會猜測 R-01/);
     expect(serviceBeforeReplacementClient.query).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('異常情境'), { target: { value: 'R-03' } });
@@ -283,6 +289,7 @@ describe('ServiceBeforeReplacementActions', () => {
       .mockRejectedValueOnce(new ApiTimeoutError(10_000))
       .mockResolvedValueOnce({ ...result, status: 'replayed' });
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" />);
+    expandReplacementPanel();
     await screen.findByText('可以建立換人 successor');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
     fireEvent.change(screen.getByLabelText('證據（每行一筆）'), { target: { value: preview.evidence.join('\n') } });
@@ -307,9 +314,12 @@ describe('ServiceBeforeReplacementActions', () => {
       .mockReturnValueOnce(oldQuery)
       .mockResolvedValueOnce({ ...readyQuery, case_no: 'CASE-RPRE-002', resume_step: 'step_4', actual_service_proof: { ...zeroServiceProof, case_no: 'CASE-RPRE-002', source_identity: 'official-schedule:CASE-RPRE-002' }, impacted_roots: [{ ...supersededRoot, case_no: 'CASE-RPRE-002' }], retained_roots: [{ ...retainedRoot, case_no: 'CASE-RPRE-002' }], root_delta: { retained: [{ ...retainedRoot, case_no: 'CASE-RPRE-002' }], superseded: [{ ...supersededRoot, case_no: 'CASE-RPRE-002' }], created: [] } });
     const view = render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" />);
+    expandReplacementPanel();
     await waitForQueryCallCount(1);
     const oldSignal = vi.mocked(serviceBeforeReplacementClient.query).mock.calls[0][2];
     view.rerender(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-002" initialScenario="R-02" />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '換人' })).toHaveAttribute('aria-expanded', 'false'));
+    expandReplacementPanel();
     await screen.findByText('步驟 4：沿用已驗證接受結果');
     expect(oldSignal?.aborted).toBe(true);
     resolveOld?.(readyQuery);
@@ -321,6 +331,7 @@ describe('ServiceBeforeReplacementActions', () => {
   it('owner refresh callback 失敗不會把已完成的 Apply 誤報為失敗', async () => {
     const onCommitted = vi.fn().mockRejectedValue(new Error('parent refresh failed'));
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" onCommitted={onCommitted} />);
+    expandReplacementPanel();
     await screen.findByText('可以建立換人 successor');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
     fireEvent.change(screen.getByLabelText('證據（每行一筆）'), { target: { value: preview.evidence.join('\n') } });
@@ -334,6 +345,7 @@ describe('ServiceBeforeReplacementActions', () => {
 
   it('Apply 後以 response 內 complete readback 顯示結果，不重查已消耗的舊 scenario', async () => {
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" />);
+    expandReplacementPanel();
     await screen.findByText('可以建立換人 successor');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
     fireEvent.change(screen.getByLabelText('證據（每行一筆）'), { target: { value: preview.evidence.join('\n') } });
@@ -361,6 +373,7 @@ describe('ServiceBeforeReplacementActions', () => {
       },
     });
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-07" />);
+    expandReplacementPanel();
     await screen.findByText('可以建立換人 successor');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
     fireEvent.change(screen.getByLabelText('證據（每行一筆）'), { target: { value: preview.evidence.join('\n') } });
@@ -376,6 +389,11 @@ describe('ServiceBeforeReplacementActions', () => {
     expect(serviceBeforeReplacementClient.query).toHaveBeenCalledTimes(1);
   });
 });
+
+function expandReplacementPanel(): void {
+  const toggle = screen.getByRole('button', { name: '換人' });
+  if (toggle.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle);
+}
 
 async function waitForQueryCallCount(count: number): Promise<void> {
   for (let attempt = 0; attempt < 20; attempt += 1) {

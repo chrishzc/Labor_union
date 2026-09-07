@@ -451,14 +451,65 @@ class MatchingCoordinationWorkflow:
                 )
             return self._receipt(request, facts, preview_fingerprint, result_state=state, candidate_id=request.candidate_id, cross_domain_request=cross_request)
         if isinstance(request, ApplyCaregiverSelection):
+            selected_package = facts.package
+            resulting_package = None
+            if selected_package is None and request.willingness == "willing":
+                if (
+                    facts.snapshot.snapshot_id != request.criteria_snapshot_id
+                    or request.package_version != 1
+                    or not request.segments
+                    or not request.required_service_dates
+                ):
+                    raise _workflow_error(request.correlation_id, "matching_package_stale")
+                selection_fingerprint = fingerprint_payload(
+                    {
+                        "case_no": request.case_no,
+                        "criteria_snapshot_id": request.criteria_snapshot_id,
+                        "required_service_dates": tuple(
+                            item.isoformat() for item in request.required_service_dates
+                        ),
+                        "segments": tuple(
+                            (
+                                item.staff_id,
+                                item.sequence,
+                                tuple(day.isoformat() for day in item.service_dates),
+                            )
+                            for item in request.segments
+                        ),
+                        "source_versions": tuple(
+                            item.as_payload() for item in facts.source_versions
+                        ),
+                    }
+                )
+                expected_package_id = (
+                    f"matching:{request.case_no}:package:{selection_fingerprint.value[:24]}"
+                )
+                if request.package_id != expected_package_id:
+                    raise _workflow_error(request.correlation_id, "matching_package_stale")
+                resulting_package = build_manual_matching_package(
+                    package_id=request.package_id,
+                    version=request.package_version,
+                    segments=request.segments,
+                    required_service_dates=request.required_service_dates,
+                    candidate_results=facts.candidates,
+                    criteria_snapshot_id=request.criteria_snapshot_id,
+                    source_versions=facts.source_versions,
+                )
+                if resulting_package.fingerprint != request.preview_fingerprint:
+                    raise _workflow_error(
+                        request.correlation_id, "matching_invalid_replay_snapshot"
+                    )
+                selected_package = resulting_package
             if (
-                facts.package is None
-                or request.package_id != facts.package.package_id
-                or request.package_version != facts.package.version
-                or request.criteria_snapshot_id != facts.package.criteria_snapshot_id
+                selected_package is None
+                or request.package_id != selected_package.package_id
+                or request.package_version != selected_package.version
+                or request.criteria_snapshot_id != selected_package.criteria_snapshot_id
             ):
                 raise _workflow_error(request.correlation_id, "matching_package_stale")
-            if request.preview_fingerprint != facts.package.fingerprint:
+            if request.segments and tuple(request.segments) != tuple(selected_package.segments):
+                raise _workflow_error(request.correlation_id, "matching_package_stale")
+            if request.preview_fingerprint != selected_package.fingerprint:
                 raise _workflow_error(request.correlation_id, "matching_invalid_replay_snapshot")
             candidate = next((item for item in facts.candidates if item.candidate_id == request.candidate_id), None)
             if candidate is None:
@@ -477,8 +528,25 @@ class MatchingCoordinationWorkflow:
                 affected_criteria = request.affected_criteria
             else:
                 raise _workflow_error(request.correlation_id, "matching_willingness_conflict")
-            lineage = build_willingness_lineage(event_id=f"{request.idempotency_key.value}:willingness", candidate_id=request.candidate_id, staff_id=candidate.staff_id, snapshot=facts.snapshot, previous_state=candidate.willingness, current_state=request.willingness, reason_code=request.reason_code, affected_criteria=affected_criteria)
-            return self._receipt(request, facts, preview_fingerprint, result_state=request.willingness, candidate_id=request.candidate_id, willingness_lineage=lineage)
+            # A package Preview only admits an already willing candidate.  On
+            # the first package Apply, confirming that same state must still
+            # persist the package but must not invent an invalid willing →
+            # willing lineage transition.
+            lineage = (
+                None
+                if resulting_package is not None and candidate.willingness == request.willingness
+                else build_willingness_lineage(
+                    event_id=f"{request.idempotency_key.value}:willingness",
+                    candidate_id=request.candidate_id,
+                    staff_id=candidate.staff_id,
+                    snapshot=facts.snapshot,
+                    previous_state=candidate.willingness,
+                    current_state=request.willingness,
+                    reason_code=request.reason_code,
+                    affected_criteria=affected_criteria,
+                )
+            )
+            return self._receipt(request, facts, preview_fingerprint, result_state=request.willingness, candidate_id=request.candidate_id, willingness_lineage=lineage, resulting_package=resulting_package)
         if isinstance(request, ApplyServiceDateChangeRematch):
             if request.criteria_snapshot_id != facts.snapshot.snapshot_id:
                 raise _workflow_error(

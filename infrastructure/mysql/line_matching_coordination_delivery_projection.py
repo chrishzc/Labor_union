@@ -124,13 +124,31 @@ class MySqlLineMatchingCoordinationDeliveryProjection:
         else:
             predicate = "r.audience_type='caregiver' AND p.staff_id=%s"
             params = (case_no, staff_id)
+        confirmation_gate = (
+            "NOT EXISTS ("
+            "SELECT 1 FROM matching_schedule_recipient_snapshots gate_r "
+            "LEFT JOIN matching_schedule_confirmation_events gate_e ON gate_e.id=("
+            "SELECT latest.id FROM matching_schedule_confirmation_events latest "
+            "WHERE latest.recipient_snapshot_id=gate_r.id "
+            "ORDER BY latest.occurred_at_utc DESC,latest.id DESC LIMIT 1) "
+            "WHERE gate_r.parent_snapshot_id=s.id "
+            "AND COALESCE(gate_e.confirmation_value,'pending') "
+            "NOT IN ('confirmed','manually_confirmed'))"
+        )
+        parent_gate = (
+            "(s.status='sent' OR (s.status='draft' AND "
+            + confirmation_gate
+            + "))"
+        )
         sql = (
-                "SELECT r.id AS snapshot_id,r.recipient_line_user_id,"
-                "r.payload_fingerprint AS snapshot_fingerprint,s.plan_id "
+            "SELECT r.id AS snapshot_id,r.recipient_line_user_id,"
+            "r.payload_fingerprint AS snapshot_fingerprint,s.plan_id "
             "FROM matching_schedule_recipient_snapshots r "
             "JOIN matching_schedule_snapshots s ON s.id=r.parent_snapshot_id "
             "LEFT JOIN caregiver_matching_plan_segments p ON p.id=r.segment_id "
-            "WHERE s.case_no=%s AND s.current_marker=1 AND s.status='sent' AND "
+            "WHERE s.case_no=%s AND s.current_marker=1 AND "
+            + parent_gate
+            + " AND "
             + predicate
             + " ORDER BY r.id DESC LIMIT 1"
         )

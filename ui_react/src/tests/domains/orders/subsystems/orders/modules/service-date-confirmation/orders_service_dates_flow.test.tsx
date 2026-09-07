@@ -5,27 +5,28 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React from 'react';
-import { OrdersPage } from '../pages/OrdersPage';
-import { ordersQueryClient } from '../api/orders/order_query_client';
-import { ordersMutationClient } from '../api/orders/order_mutation_client';
-import { contractSigningClient } from '../api/orders/contract_signing_client';
-import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
-import { orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
-import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
+import { OrdersPage } from '../../../../../../../pages/OrdersPage';
+import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
+import { ordersMutationClient } from '../../../../../../../api/orders/order_mutation_client';
+import { contractSigningClient } from '../../../../../../../api/orders/contract_signing_client';
+import { orderCardProjectionClient } from '../../../../../../../api/orders/order_card_projection_client';
+import { orderStageProjectionClient } from '../../../../../../../api/orders/order_stage_projection_client';
+import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 import {
   realisticServiceDateQueryView,
+  realisticServiceDateQueryViewConfirmed,
   realisticServiceDatePreviewView,
   realisticServiceDateReceiptView,
-} from './fixtures/orders/order_mutation_contract_fixtures';
+} from '../../../../../../fixtures/orders/order_mutation_contract_fixtures';
 import {
   OrderMutationConflictError,
   ApiTimeoutError,
-} from '../api/orders/order_mutation_errors';
-import { realisticOrderDetail } from './fixtures/orders_real_data_fixtures';
-import { buildOrdersStageProjectionFixture } from './fixtures/orders_stage_projection_fixtures';
-import { schedulePrecisionClient } from '../api/scheduling/schedule_precision_client';
-import { historicalServiceAccountingClient } from '../api/orders/historical_service_accounting_client';
-import { ApiHttpError, ApiNetworkError } from '../api/shared/typed_errors';
+} from '../../../../../../../api/orders/order_mutation_errors';
+import { realisticOrderDetail } from '../../../../../../fixtures/orders_real_data_fixtures';
+import { buildOrdersStageProjectionFixture } from '../../../../../../fixtures/orders_stage_projection_fixtures';
+import { schedulePrecisionClient } from '../../../../../../../api/scheduling/schedule_precision_client';
+import { historicalServiceAccountingClient } from '../../../../../../../api/orders/historical_service_accounting_client';
+import { ApiHttpError, ApiNetworkError } from '../../../../../../../api/shared/typed_errors';
 
 describe('Confirmed Service Dates Component Flow Suite', () => {
   const originalFetch = globalThis.fetch;
@@ -56,7 +57,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       fireEvent.click(tabBtn);
     });
     await waitFor(() => {
-      expect(screen.getByText('合約目標天數').parentElement).toHaveTextContent(`${expectedDays} 天`);
+      expect(screen.getByText('合約服務天數').parentElement).toHaveTextContent(`${expectedDays} 天`);
     });
   };
 
@@ -220,7 +221,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     });
 
     // 預覽按鈕應為可點擊
-    const previewBtn = await screen.findByRole('button', { name: /檢查服務週次影響/ });
+    const previewBtn = await screen.findByRole('button', { name: '確認服務日期' });
     expect(previewBtn).not.toBeDisabled();
 
     // 點擊預覽
@@ -478,11 +479,72 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       service_mode: '週休2日',
       custom_leave_dates: [],
     });
-    expect((await screen.findByText('合約目標天數')).parentElement).toHaveTextContent('5 天');
-    expect(screen.getByText('實質出勤天數').parentElement).toHaveTextContent('5 天');
+    expect((await screen.findByText('合約服務天數')).parentElement).toHaveTextContent('5 天');
+    expect(screen.getByText('休假日').parentElement).toHaveTextContent('0 天');
+    expect(screen.getByText('🎯 建議完工日').parentElement).toHaveTextContent('2026-09-05');
   });
 
-  it('8. actual-start query 缺失時 fail closed 且不呼叫精算 API', async () => {
+  it('7a. 變更排休模式會直接以新模式重新呼叫 server precision，主流程只保留確認服務日期', async () => {
+    const initialResult = precisionResult(['2026-09-01', '2026-09-02', '2026-09-03']);
+    const changedResult = {
+      ...precisionResult(['2026-09-01', '2026-09-03', '2026-09-04']),
+      rest_days_count: 1,
+      total_calendar_days: 4,
+    };
+    const calculateSpy = vi.spyOn(schedulePrecisionClient, 'calculate')
+      .mockResolvedValueOnce(initialResult)
+      .mockResolvedValueOnce(changedResult);
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    await openServiceCalendarTab();
+
+    fireEvent.change(screen.getByRole('combobox', { name: '工會排休類型' }), {
+      target: { value: '週休1日' },
+    });
+    await waitFor(() => expect(calculateSpy).toHaveBeenCalledTimes(2));
+    expect(calculateSpy.mock.calls[1][0]).toMatchObject({ service_mode: '週休1日' });
+    expect(screen.getByRole('button', { name: '確認服務日期' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /重新依工會規則精算/ })).not.toBeInTheDocument();
+  });
+
+  it('8. 已有正式指派時 actual-start query 缺失仍 fail closed 且不呼叫精算 API', async () => {
+    const assignedSummaryPage = {
+      items: [{
+        case_no: 'ORD-2026-0801',
+        client_name: '陳雅婷',
+        order_status: '確認實際服務日期',
+        staff_name: '林月嬌',
+        identity_status: null,
+        start_date: '2026-09-01',
+        end_date: '2026-09-30',
+        actual_start_date: null,
+        actual_end_date: null,
+        service_days: 30,
+        total_employer_self_pay_payable: 90000,
+      }],
+      next_cursor: null,
+      etag: 'a'.repeat(64),
+    };
+    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(assignedSummaryPage);
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(
+      buildOrdersStageProjectionFixture(assignedSummaryPage),
+    );
+    const projection = await orderCardProjectionClient.getCardProjection('ORD-2026-0801');
+    projection.assignment_segments = {
+      ...projection.assignment_segments,
+      value: [{
+        assignment_id: { ...projection.assignment_segments, value: 501 },
+        staff_id: { ...projection.assignment_segments, value: 101 },
+        staff_name: { ...projection.assignment_segments, value: '林月嬌' },
+        sequence: { ...projection.assignment_segments, value: 1 },
+        assigned_start_date: { ...projection.assignment_segments, value: '2026-09-01' },
+        assigned_end_date: { ...projection.assignment_segments, value: '2026-09-03' },
+        status: { ...projection.assignment_segments, value: 'active' },
+      }],
+      availability: 'available',
+    };
+    vi.mocked(orderCardProjectionClient.getCardProjection).mockResolvedValueOnce(projection);
     vi.spyOn(ordersQueryClient, 'getActualStart').mockRejectedValue(new Error('query unavailable'));
     const calculateSpy = vi.spyOn(schedulePrecisionClient, 'calculate');
 
@@ -494,6 +556,29 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
 
     expect(await screen.findByText('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。')).toHaveAttribute('role', 'alert');
     expect(calculateSpy).not.toHaveBeenCalled();
+  });
+
+  it('8a. 未正式指派時 Finance bootstrap 422 不阻擋以 service-date owner 起點精算', async () => {
+    vi.spyOn(ordersQueryClient, 'getActualStart').mockRejectedValue(
+      new ApiHttpError(422, 'client_finance_bootstrap_required', 'root missing'),
+    );
+    const calculateSpy = vi.spyOn(schedulePrecisionClient, 'calculate');
+
+    render(React.createElement(OrdersPage));
+    await waitFor(() => expect(screen.getByText('ORD-2026-0801')).toBeInTheDocument());
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /實質服務日曆/ }));
+
+    await waitFor(() => expect(orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')?.queryView).not.toBeNull());
+    await waitFor(() => expect(calculateSpy).toHaveBeenCalledTimes(1));
+    expect(calculateSpy).toHaveBeenCalledWith({
+      actual_start_date: '2026-09-01',
+      target_service_days: 3,
+      service_mode: '週休2日',
+      custom_leave_dates: [],
+    });
+    expect(screen.queryByText('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。'))
+      .not.toBeInTheDocument();
   });
 
   it('9. 國定假日與事前請假每次都由 server 重算並自動替代，服務日維持 5 天', async () => {
@@ -632,13 +717,160 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     });
     expect(orderMutationFlowStore.getServiceDatesDraft('ORD-2026-0801')?.selectedDates)
       .toEqual(['2026-09-01', '2026-09-02', '2026-09-03']);
+    expect(screen.queryByRole('button', { name: '前往請假／代班工作台' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '前往請假／代班工作台' }));
-    expect(window.location.hash).toBe('#scheduling?tab=leave_sub&case_no=ORD-2026-0801');
-    window.location.hash = '';
   });
 
-  it('11. Sunday-first 日曆欄位正確呈現週休 1／2 日，不把開始日誤塞星期日欄', async () => {
+  it('11. 洽談中案件即使已有服務日期資料，也不顯示實際開工、服務完成或請假代班入口', async () => {
+    const discussionOrder = {
+      case_no: 'ORD-2026-0801',
+      client_name: '陳雅婷',
+      order_status: '洽談中',
+      staff_name: '林月嬌',
+      identity_status: null,
+      start_date: '2026-09-01',
+      end_date: '2026-09-03',
+      actual_start_date: null,
+      actual_end_date: null,
+      service_days: 3,
+      total_employer_self_pay_payable: 90000,
+    };
+    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({
+      items: [discussionOrder], next_cursor: null, etag: 'd'.repeat(64),
+    });
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(
+      buildOrdersStageProjectionFixture({
+        items: [discussionOrder], next_cursor: null, etag: 'd'.repeat(64),
+      }),
+    );
+    vi.mocked(ordersMutationClient.getServiceDates).mockResolvedValue({
+      ...realisticServiceDateQueryViewConfirmed,
+      case_no: discussionOrder.case_no,
+    });
+    vi.mocked(ordersQueryClient.getActualStart).mockResolvedValueOnce({
+      case_no: discussionOrder.case_no,
+      planned_start_date: '2026-09-01',
+      current_actual_start_date: null,
+      service_data_locked: false,
+      order_version: 1,
+      scheduling_version: 1,
+      scheduling_generation: 1,
+      client_finance_version: 1,
+      payroll_version: 1,
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText(discussionOrder.case_no);
+    await openServiceCalendarTab();
+
+    expect(screen.queryByText('實際開工日更正與動態排盤')).not.toBeInTheDocument();
+    expect(screen.queryByText('服務完成與結案階段')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '前往請假／代班工作台' })).not.toBeInTheDocument();
+  });
+
+  it('11a. 已有 typed 正式指派的服務中案件才顯示請假／代班入口', async () => {
+    const serviceOrder = {
+      case_no: 'ORD-2026-0801',
+      client_name: '陳雅婷',
+      order_status: '服務中',
+      staff_name: '林月嬌',
+      identity_status: null,
+      start_date: '2026-09-01',
+      end_date: '2026-09-03',
+      actual_start_date: '2026-09-01',
+      actual_end_date: null,
+      service_days: 3,
+      total_employer_self_pay_payable: 90000,
+    };
+    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({
+      items: [serviceOrder], next_cursor: null, etag: 's'.repeat(64),
+    });
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(
+      buildOrdersStageProjectionFixture({
+        items: [serviceOrder], next_cursor: null, etag: 's'.repeat(64),
+      }),
+    );
+    const projection = await orderCardProjectionClient.getCardProjection('ORD-2026-0801');
+    projection.assignment_segments = {
+      ...projection.assignment_segments,
+      value: [{
+        assignment_id: { ...projection.assignment_segments, value: 501 },
+        staff_id: { ...projection.assignment_segments, value: 101 },
+        staff_name: { ...projection.assignment_segments, value: '林月嬌' },
+        sequence: { ...projection.assignment_segments, value: 1 },
+        assigned_start_date: { ...projection.assignment_segments, value: '2026-09-01' },
+        assigned_end_date: { ...projection.assignment_segments, value: '2026-09-03' },
+        status: { ...projection.assignment_segments, value: 'active' },
+      }],
+      availability: 'available',
+    };
+    vi.mocked(orderCardProjectionClient.getCardProjection).mockResolvedValueOnce(projection);
+    vi.spyOn(ordersQueryClient, 'getContractCompletion').mockResolvedValue({
+      case_no: serviceOrder.case_no,
+      order_version: 1,
+      client_finance_version: 1,
+      contract_identity: 'CONTRACT-1',
+      contract_completed: false,
+      lifecycle_status: '服務中',
+      deposit_settled: true,
+      service_time_terms_complete: true,
+      completion_available: true,
+      domain_blockers: [],
+    });
+    vi.mocked(ordersMutationClient.getServiceDates).mockResolvedValue({
+      ...realisticServiceDateQueryViewConfirmed,
+      case_no: serviceOrder.case_no,
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText(serviceOrder.case_no);
+    await openServiceCalendarTab();
+
+    expect(await screen.findByRole('button', { name: '前往請假／代班工作台' })).toBeInTheDocument();
+    expect(screen.getByText('服務完成與結案階段')).toBeInTheDocument();
+  });
+
+  it('11b. 服務中案件的正式指派投影缺失時 fail closed，不顯示請假／代班入口', async () => {
+    const serviceOrder = {
+      case_no: 'ORD-2026-0801',
+      client_name: '陳雅婷',
+      order_status: '服務中',
+      staff_name: '林月嬌',
+      identity_status: null,
+      start_date: '2026-09-01',
+      end_date: '2026-09-03',
+      actual_start_date: '2026-09-01',
+      actual_end_date: null,
+      service_days: 3,
+      total_employer_self_pay_payable: 90000,
+    };
+    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({
+      items: [serviceOrder], next_cursor: null, etag: 'u'.repeat(64),
+    });
+    vi.mocked(orderStageProjectionClient.getOperationalTimelines).mockResolvedValue(
+      buildOrdersStageProjectionFixture({
+        items: [serviceOrder], next_cursor: null, etag: 'u'.repeat(64),
+      }),
+    );
+    vi.mocked(orderCardProjectionClient.getCardProjection).mockRejectedValueOnce(
+      new Error('正式指派投影 unavailable'),
+    );
+    vi.mocked(ordersMutationClient.getServiceDates).mockResolvedValue({
+      ...realisticServiceDateQueryViewConfirmed,
+      case_no: serviceOrder.case_no,
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText(serviceOrder.case_no);
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /實質服務日曆/ }));
+
+    expect(await screen.findByText('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。'))
+      .toHaveAttribute('role', 'alert');
+    expect(screen.queryByRole('button', { name: '前往請假／代班工作台' })).not.toBeInTheDocument();
+  });
+
+  it('12. Sunday-first 日曆欄位正確呈現週休 1／2 日，不把開始日誤塞星期日欄', async () => {
     vi.spyOn(ordersQueryClient, 'getActualStart').mockResolvedValue({
       case_no: 'ORD-2026-0801',
       planned_start_date: '2026-09-10',
@@ -831,7 +1063,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
     await waitFor(() => {
       expect(orderMutationFlowStore.getServiceDatesDraft('ORD-HISTORY-1')?.selectedDates)
         .toEqual(['2026-09-01', '2026-09-02', '2026-09-03']);
-      expect(screen.getByRole('button', { name: /檢查服務週次影響/ })).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: '確認服務日期' })).not.toBeDisabled();
     });
     expect(calculate).not.toHaveBeenCalled();
   });

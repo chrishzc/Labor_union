@@ -3,6 +3,7 @@ File: test_matching_coordination_workflow.py
 Description: 驗證 M3 Phase A workflow 的唯讀、fresh source 與 accepted non-conversion 規則。
 """
 
+from dataclasses import replace
 from datetime import date, datetime, timezone
 
 import pytest
@@ -18,8 +19,10 @@ from domains.scheduling.matching_coordination import (
     SOURCE_KINDS,
     build_criteria_snapshot,
 )
+from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.scheduling.matching_coordination_contracts import (
+    ApplyCaregiverSelection,
     ApplyCustomerMatchingDecision,
     ApplyZeroCandidateAlternative,
     ApplyZeroCandidateConfirmation,
@@ -148,6 +151,136 @@ def test_preview_package_uses_explicit_admin_selected_segments() -> None:
     assert view.mode is MatchingPackageMode.MULTI_SEGMENT
     assert tuple(item.staff_name for item in view.candidate_results) == ("林小明", "王小美")
     assert view.segments == ((7, required_dates[:2], 1), (8, required_dates[2:], 2))
+
+
+def test_first_caregiver_apply_persists_previewed_nonzero_package() -> None:
+    original = _facts()
+    required_dates = (date(2026, 9, 1), date(2026, 9, 2))
+    candidate = MatchingCandidateResult(
+        "candidate-1", 7, CandidateEligibility.ELIGIBLE, (),
+        coverage_evidence=required_dates, willingness="willing",
+    )
+    facts = MatchingCoordinationFacts(
+        snapshot=original.snapshot,
+        package=None,
+        candidates=(candidate,),
+        source_versions=original.source_versions,
+    )
+    preview = MatchingCoordinationWorkflow().preview(
+        PreviewMatchingPackage(
+            **_common(),
+            criteria_snapshot_id="snapshot-1",
+            required_service_dates=required_dates,
+            segments=(MatchingSegment(7, required_dates, 1),),
+        ),
+        facts,
+    )
+    command = ApplyCaregiverSelection(
+        **_common(),
+        criteria_snapshot_id="snapshot-1",
+        package_id=preview.package_id,
+        package_version=preview.version,
+        candidate_id="candidate-1",
+        willingness="willing",
+        reason_code=None,
+        affected_criteria=(),
+        preview_fingerprint=preview.fingerprint,
+        segments=(MatchingSegment(7, required_dates, 1),),
+        required_service_dates=required_dates,
+    )
+
+    receipt = MatchingCoordinationWorkflow().apply(
+        command, facts, preview_fingerprint=preview.fingerprint
+    )
+
+    assert receipt.resulting_package is not None
+    assert receipt.resulting_package.package_id == preview.package_id
+    assert receipt.resulting_package.fingerprint == preview.fingerprint
+    assert receipt.willingness_lineage is None
+
+
+def test_first_caregiver_apply_rejects_stale_source_and_package_fingerprint() -> None:
+    original = _facts()
+    required_dates = (date(2026, 9, 1), date(2026, 9, 2))
+    candidate = MatchingCandidateResult(
+        "candidate-1", 7, CandidateEligibility.ELIGIBLE, (),
+        coverage_evidence=required_dates, willingness="willing",
+    )
+    facts = MatchingCoordinationFacts(
+        snapshot=original.snapshot, package=None, candidates=(candidate,),
+        source_versions=original.source_versions,
+    )
+    preview = MatchingCoordinationWorkflow().preview(
+        PreviewMatchingPackage(
+            **_common(), criteria_snapshot_id="snapshot-1",
+            required_service_dates=required_dates,
+            segments=(MatchingSegment(7, required_dates, 1),),
+        ), facts,
+    )
+    common = dict(
+        **_common(), criteria_snapshot_id="snapshot-1", package_id=preview.package_id,
+        package_version=preview.version, candidate_id="candidate-1", willingness="willing",
+        reason_code=None, affected_criteria=(), segments=(MatchingSegment(7, required_dates, 1),),
+        required_service_dates=required_dates,
+    )
+    common.pop("expected_source_versions")
+    stale_source = ApplyCaregiverSelection(
+        **common, expected_source_versions=_sources("d"), preview_fingerprint=preview.fingerprint,
+    )
+    with pytest.raises(MatchingCoordinationWorkflowError) as source_error:
+        MatchingCoordinationWorkflow().apply(stale_source, facts, preview_fingerprint=preview.fingerprint)
+    assert source_error.value.error.code == "matching_source_version_conflict"
+
+    stale_fingerprint = ApplyCaregiverSelection(
+        **common, expected_source_versions=facts.source_versions,
+        preview_fingerprint=fingerprint_payload({"stale": True}),
+    )
+    with pytest.raises(MatchingCoordinationWorkflowError) as fingerprint_error:
+        MatchingCoordinationWorkflow().apply(stale_fingerprint, facts, preview_fingerprint=stale_fingerprint.preview_fingerprint)
+    assert fingerprint_error.value.error.code == "matching_invalid_replay_snapshot"
+
+    forged_dates = replace(
+        stale_fingerprint, preview_fingerprint=preview.fingerprint,
+        required_service_dates=(date(2026, 9, 1),),
+    )
+    with pytest.raises(MatchingCoordinationWorkflowError) as identity_error:
+        MatchingCoordinationWorkflow().apply(
+            forged_dates, facts, preview_fingerprint=preview.fingerprint
+        )
+    assert identity_error.value.error.code == "matching_package_stale"
+
+
+def test_first_caregiver_apply_result_can_be_read_by_matching_query() -> None:
+    facts = _facts()
+    package = facts.package
+    assert package is not None
+    candidate = replace(
+        facts.candidates[0], coverage_evidence=package.required_service_dates
+    )
+    first_facts = replace(facts, package=None, candidates=(candidate,))
+    preview = MatchingCoordinationWorkflow().preview(
+        PreviewMatchingPackage(
+            **_common(), criteria_snapshot_id=facts.snapshot.snapshot_id,
+            required_service_dates=package.required_service_dates,
+            segments=package.segments,
+        ), first_facts,
+    )
+    command = ApplyCaregiverSelection(
+        **_common(), criteria_snapshot_id=facts.snapshot.snapshot_id,
+        package_id=preview.package_id, package_version=preview.version, candidate_id="candidate-1",
+        willingness="willing", reason_code=None, affected_criteria=(),
+        preview_fingerprint=preview.fingerprint, segments=package.segments,
+        required_service_dates=package.required_service_dates,
+    )
+    receipt = MatchingCoordinationWorkflow().apply(
+        command, first_facts, preview_fingerprint=preview.fingerprint,
+    )
+
+    persisted = replace(first_facts, package=receipt.resulting_package)
+    queried = MatchingCoordinationWorkflow().query("CASE-001", persisted)
+    assert queried is not None
+    assert queried.package_id == preview.package_id
+    assert queried.segments == ((7, package.required_service_dates, 1),)
 
 
 def test_customer_accepted_creates_only_conversion_reference_and_not_assignment() -> None:

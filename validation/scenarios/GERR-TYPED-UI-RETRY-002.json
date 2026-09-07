@@ -3,7 +3,7 @@
   "scenario_id": "GERR-TYPED-UI-RETRY-002",
   "track": "B",
   "suite_id": "GERR",
-  "status": "bound",
+  "status": "specified",
   "requires_database": false,
   "test_kinds": ["process_network_harness"],
   "coverage_ids": ["GERR-01", "GERR-02", "GERR-03", "GERR-05"],

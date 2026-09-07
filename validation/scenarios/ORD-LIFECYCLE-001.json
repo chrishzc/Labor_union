@@ -8,8 +8,8 @@
   "test_kinds": ["domain_root_data", "external_input_fixture", "expected_manifest"],
   "coverage_ids": ["ORD-01", "ORD-02", "ORD-03", "ORD-04", "ORD-05", "OSM-01", "OSM-02", "OSM-03", "OSM-04", "OSM-05", "OSM-06", "OSM-07", "OSM-08"],
   "source_refs": [
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#ORD-01",
-    "document/架構重整/01_規格基線/28_驗證情境與測試資料正式規格.md#OSM-01"
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ORD-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#OSM-01"
   ],
   "root_facts": [
     "Client terms, fixed clock, contract-completion command and idempotency identity.",

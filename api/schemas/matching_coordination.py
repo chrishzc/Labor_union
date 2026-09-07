@@ -581,6 +581,15 @@ class ApplyCaregiverSelectionRequest(MatchingCoordinationSchema):
     reason_code: str | None = Field(default=None, min_length=1, max_length=191)
     affected_criteria: tuple[str, ...] = ()
     preview_fingerprint: Sha256
+    segments: tuple[MatchingPackageSegmentSelection, ...] = Field(default=(), max_length=4)
+    required_service_dates: tuple[date, ...] = ()
+
+    @field_validator("required_service_dates")
+    @classmethod
+    def _apply_dates_sorted_unique(cls, value: tuple[date, ...]) -> tuple[date, ...]:
+        if value and value != tuple(sorted(set(value))):
+            raise ValueError("required_service_dates must be sorted and unique")
+        return value
 
     @model_validator(mode="after")
     def _closed_willingness_evidence(self) -> "ApplyCaregiverSelectionRequest":

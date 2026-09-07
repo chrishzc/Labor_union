@@ -42,6 +42,9 @@ const REVIEW_RESPONSE = {
   message: 'ok',
   error: null,
   data: {
+    batch_identity: 'BATCH-FIN-021',
+    source_reviews: [],
+    next_after_source_review_id: null,
     items: [{
       row_id: 301,
       row_identity: 'ROW-FIN-301',

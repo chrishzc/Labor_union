@@ -10,6 +10,8 @@ Focused Access account-center, command-safety, audit-query, security-alert-outbo
 
 `tests/domains/external-integration/subsystems/access/integration/test_access_security_alert_outbox.py` protects sink injection、delivery transaction與retry；`test_access_control_disposable_mysql_e2e.py` verifies the composed Access intent → Anomalies projection path without moving `system_alerts` ownership into Access.
 
+`tests/domains/external-integration/subsystems/access/integration/test_access_session_expiry_policy.py` protects absolute-only session expiry, refresh, revocation and enabled-actor guards.
+
 # Higher-boundary / deferred coverage
 - `tests/test_access_knowledge_disposable_mysql_e2e.py` — explicit disposable-MySQL business-flow oracle; keep at the higher boundary until a dedicated knowledge owner/root is proven.
 - `tests/test_access_control_ui_app_test.py` — protects the legacy Streamlit rollback surface; defer to Streamlit retirement.

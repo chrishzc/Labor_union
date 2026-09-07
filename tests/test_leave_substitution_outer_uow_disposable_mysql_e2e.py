@@ -14,7 +14,7 @@ import pymysql
 import pytest
 
 from scripts.bootstrap_disposable_mysql_schema import bootstrap
-from test_g13_leave_cancellation_disposable_mysql_e2e import (
+from tests.test_g13_leave_cancellation_disposable_mysql_e2e import (
     CASE_NO,
     _leave_apply_request,
     _leave_intent,

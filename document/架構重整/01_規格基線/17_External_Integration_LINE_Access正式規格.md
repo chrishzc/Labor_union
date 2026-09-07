@@ -482,7 +482,7 @@ Modules：
 - internal key 缺設定 fail closed；
 - Bearer session 必須存在、有效、未撤銷且 user enabled；
 - 原始 token 只回傳一次，DB 只保存 hash；
-- session 每次有效請求會滑動延長為 30 分鐘閒置期限，但首次登入起最多 8 小時；到達
+- session 不設閒置期限；有效請求只保留其既有 absolute deadline，首次登入起最多 8 小時；到達
   absolute deadline 後即使持續操作也必須重新輸入密碼。舊 session 缺少 absolute deadline
   時 fail closed；
 - `APP_ENV=production` 禁止 auth bypass；

@@ -8,12 +8,12 @@ import {
   adaptOrderCancellationDrawer,
   adaptOrderTermsContractDrawer,
   adaptServiceDateConfirmationDrawer,
-} from '../adapters/orders/order_detail_adapter';
+} from '../../../../../../../adapters/orders/order_detail_adapter';
 import {
   ORDERS_TYPED_PROJECTION_UNAVAILABLE,
   adaptOrderSummaryItem,
   adaptOrderSummaryPage,
-} from '../adapters/orders/order_summary_adapter';
+} from '../../../../../../../adapters/orders/order_summary_adapter';
 import {
   mockSummaryItems,
   realisticActualStart,
@@ -23,7 +23,7 @@ import {
   realisticOrderDetail,
   realisticOrderSummaryPage,
   realisticOrderTerms,
-} from './fixtures/orders_real_data_fixtures';
+} from '../../../../../../fixtures/orders_real_data_fixtures';
 
 describe('Orders summary adapter', () => {
   it('keeps the raw server status and does not create a workflow stage', () => {
@@ -38,6 +38,17 @@ describe('Orders summary adapter', () => {
   it('keeps missing identity status explicit for the client card', () => {
     const card = adaptOrderSummaryItem({ ...mockSummaryItems[0], identity_status: null });
     expect(card.identityStatus).toBe('待確認');
+  });
+
+  it('keeps typed service dates alongside the display range', () => {
+    const card = adaptOrderSummaryItem({
+      ...mockSummaryItems[0],
+      start_date: '2026-09-03',
+      end_date: '2026-10-02',
+    });
+    expect(card.startDate).toBe('2026-09-03');
+    expect(card.endDate).toBe('2026-10-02');
+    expect(card.serviceRange).toBe('2026-09-03 ~ 2026-10-02');
   });
 
   it('does not invent zero when nullable money or service days are absent', () => {

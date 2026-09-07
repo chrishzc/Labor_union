@@ -33,8 +33,10 @@ from subsystems.scheduling.matching_coordination_contracts import (
     ApplyZeroCandidateAlternative,
     ApplyZeroCandidateConfirmation,
     MatchingCriteriaRecontactIntentProjection,
+    MatchingApplyReceipt,
     MatchingNotificationIntentProjection,
     MatchingNotificationRecipientRole,
+    MatchingCommandName,
     M3_ZERO_POOL_SOURCE_ID,
     PreviewZeroCandidateAlternative,
     PreviewZeroCandidateConfirmation,
@@ -442,6 +444,32 @@ def test_willingness_history_rejects_malformed_receipt_as_typed_error() -> None:
     assert connection.commit_count == 0
 
 
+def test_willingness_history_ignores_legacy_first_package_event_without_lineage() -> None:
+    facts = _facts()
+    assert facts.package is not None
+    receipt = MatchingApplyReceipt(
+        receipt_id="matching:case-001:first-package:receipt",
+        command_name=MatchingCommandName.APPLY_CAREGIVER_SELECTION,
+        command_fingerprint=fingerprint_payload({"command": "first-package"}),
+        preview_fingerprint=facts.package.fingerprint,
+        source_versions=facts.source_versions,
+        decision_event_id="matching:case-001:first-package:decision",
+        package_id=facts.package.package_id,
+        outbox_intent_ids=(),
+        result_state="willing",
+        resulting_package=facts.package,
+    )
+    connection = _Connection(
+        [[{
+            "event_id": receipt.decision_event_id,
+            "event_payload": json.dumps(_repository_module._receipt_payload(receipt)),
+        }]]
+    )
+
+    assert _repo(connection).load_willingness_history("CASE-001") == ()
+    assert connection.commit_count == 0
+
+
 def test_current_package_round_trips_typed_bytes_without_commit() -> None:
     package = _facts().package
     assert package is not None
@@ -486,6 +514,100 @@ def test_current_package_absence_is_explicit_none() -> None:
 
     assert _repo(connection).load_current_package("CASE-001") is None
     assert connection.commit_count == 0
+
+
+def _first_package_result():
+    facts = _facts()
+    package = facts.package
+    assert package is not None
+    facts_without_package = replace(facts, package=None)
+    command = ApplyCaregiverSelection(
+        case_no="CASE-001",
+        actor=ActorContext("admin_user_id:1"),
+        reason="confirm first package",
+        correlation_id=CorrelationId("corr-first-package"),
+        idempotency_key=IdempotencyKey("matching:first-package"),
+        expected_source_versions=facts.source_versions,
+        criteria_snapshot_id=facts.snapshot.snapshot_id,
+        package_id=package.package_id,
+        package_version=package.version,
+        candidate_id="candidate-1",
+        willingness="willing",
+        reason_code=None,
+        affected_criteria=(),
+        preview_fingerprint=package.fingerprint,
+        segments=package.segments,
+        required_service_dates=package.required_service_dates,
+    )
+    receipt = MatchingApplyReceipt(
+        receipt_id="matching:first-package:receipt",
+        command_name=command.command_name,
+        command_fingerprint=fingerprint_payload({"command": "first-package"}),
+        preview_fingerprint=package.fingerprint,
+        source_versions=facts.source_versions,
+        decision_event_id=None,
+        package_id=package.package_id,
+        outbox_intent_ids=(),
+        result_state="willing",
+        resulting_package=package,
+    )
+    return facts_without_package, command, receipt, package
+
+
+def test_first_resulting_package_allows_empty_parent_and_current_package_none() -> None:
+    facts, command, receipt, package = _first_package_result()
+    connection = _Connection([None, None, {"id": 601}])
+
+    row_id = _repo(connection)._ensure_package(command, facts, receipt)
+
+    assert row_id is not None
+    insert = next(
+        params for sql, params in connection.statements
+        if sql.lstrip().upper().startswith("INSERT INTO MATCHING_COORDINATION_PACKAGE_LINEAGE")
+    )
+    assert insert[3] is None
+    assert insert[4] == package.version
+
+
+def test_first_resulting_package_rejects_unexpected_existing_parent() -> None:
+    facts, command, receipt, _ = _first_package_result()
+    connection = _Connection(
+        [None, {"id": 900, "package_id": "other-package", "package_version": 4}, {"id": 601}]
+    )
+
+    with pytest.raises(
+        _repository_module.MatchingCoordinationPersistenceError,
+        match="resulting package parent is stale",
+    ):
+        _repo(connection)._ensure_package(command, facts, receipt)
+
+
+def test_existing_package_lineage_is_digest_checked_and_unchanged() -> None:
+    facts = _facts()
+    package = facts.package
+    assert package is not None
+    command = _command(facts)
+    receipt = _accepted_receipt(facts)[1]
+    connection = _Connection([{"id": 701, "package_digest": package.fingerprint.value}])
+
+    row_id = _repo(connection)._ensure_package(command, facts, receipt)
+
+    assert row_id == 701
+    assert not any("INSERT INTO MATCHING_COORDINATION_PACKAGE_LINEAGE" in sql.upper() for sql, _ in connection.statements)
+
+
+def test_first_resulting_package_receipt_replays_with_package_payload() -> None:
+    facts, command, receipt, package = _first_package_result()
+    connection = _Connection([_receipt_row(facts, command, receipt)])
+
+    replay = _repo(connection).claim_or_replay(
+        command.idempotency_key,
+        receipt.command_fingerprint,
+        command.correlation_id,
+    )
+
+    assert replay is not None
+    assert replay.resulting_package == package
 
 
 def test_claim_exact_replay_returns_typed_receipt() -> None:
@@ -782,6 +904,42 @@ def test_every_apply_command_maps_to_a_released_matching_event_enum() -> None:
     for command_name, expected_event_type in mappings.items():
         command = type(command_name, (), {})()
         assert _repository_module._event_type(command) == expected_event_type
+
+
+def test_first_caregiver_package_apply_is_not_misclassified_as_willingness_history() -> None:
+    facts = _facts()
+    command = ApplyCaregiverSelection(
+        case_no="CASE-001",
+        actor=ActorContext("admin_user_id:1"),
+        reason="first package producer",
+        correlation_id=CorrelationId("corr-first-package"),
+        idempotency_key=IdempotencyKey("matching:case-001:first-package"),
+        expected_source_versions=facts.source_versions,
+        criteria_snapshot_id=facts.snapshot.snapshot_id,
+        package_id=facts.package.package_id,
+        package_version=facts.package.version,
+        candidate_id="candidate-1",
+        willingness="willing",
+        reason_code=None,
+        affected_criteria=(),
+        preview_fingerprint=facts.package.fingerprint,
+        segments=facts.package.segments,
+        required_service_dates=facts.package.required_service_dates,
+    )
+    receipt = MatchingApplyReceipt(
+        receipt_id="matching:case-001:first-package:receipt",
+        command_name=MatchingCommandName.APPLY_CAREGIVER_SELECTION,
+        command_fingerprint=fingerprint_payload({"command": "first-package"}),
+        preview_fingerprint=facts.package.fingerprint,
+        source_versions=facts.source_versions,
+        decision_event_id="matching:case-001:first-package:decision",
+        package_id=facts.package.package_id,
+        outbox_intent_ids=(),
+        result_state="willing",
+        resulting_package=facts.package,
+    )
+
+    assert _repository_module._event_type(command, receipt) == "package_proposed"
 
 
 def test_unsupported_matching_command_does_not_fallback_to_rematch_event() -> None:
