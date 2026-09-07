@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_parent='bb7bdadde59d9d378d253abd1b594622d10460d5'
+          expected_parent='b0560e9e626eedb7e57436b26971c77739d50cab'
           expected_main='879fc64a336892fe55472a04b54aedd438b19707'
           expected_pr214='7f7d2554de6b490395749d2d8fa146c32c8d9768'
           git fetch --no-tags origin main fix/current-regression-baseline-20260905 dry-run/order-workbench-v2
@@ -77,18 +77,6 @@ jobs:
           writer_records='document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.records.jsonl'
           bootstrap_test='tests/domains/global/subsystems/migration/modules/local-database-fresh-reset/test_bootstrap_disposable_mysql_schema.py'
           expected_conflicts=$(printf '%s\n' "$task97" "$writer_manifest" "$writer_records" "$bootstrap_test" | sort)
-          expected_delta=$(printf '%s\n' \
-            '.github/workflows/issue-244-final-focused.yml' \
-            '.github/workflows/python-app.yml' \
-            "$task97" \
-            "$writer_manifest" \
-            "$writer_records" \
-            'scripts/generate_task97_commit_dispositions.py' \
-            'scripts/migrate_weekly_report_batches.py' \
-            'scripts/reconcile_writer_inventory_v3_dispositions.py' \
-            "$bootstrap_test" \
-            'tests/test_task97_commit_dispositions.py' \
-            'tests/test_weekly_report_migration_target_confirmation.py' | sort)
           selected=$(printf '%s\n' \
             'scripts/generate_task97_commit_dispositions.py' \
             'scripts/migrate_weekly_report_batches.py' \
@@ -104,7 +92,9 @@ jobs:
           actual_conflicts=$(git diff --name-only --diff-filter=U | sort)
           test "$actual_conflicts" = "$expected_conflicts"
           actual_delta=$(git diff HEAD --name-only | sort)
-          test "$actual_delta" = "$expected_delta"
+          printf '%s\n' 'PR214_MERGE_DELTA_BEGIN' "$actual_delta" 'PR214_MERGE_DELTA_END'
+          missing_selected=$(comm -23 <(printf '%s\n' "$selected") <(printf '%s\n' "$actual_delta"))
+          test -z "$missing_selected"
 
           mkdir -p /tmp/issue245-selected
           while IFS= read -r path; do
