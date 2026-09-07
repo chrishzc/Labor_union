@@ -1,0 +1,17 @@
++
++  it('does not restore an old preview after another workbook is selected', async () => {
++    let resolve!: (value: FinanceImportBatchPreview) => void;
++    vi.mocked(financeImportMutationClient.preview).mockReturnValue(new Promise((done) => { resolve = done; }));
++    render(<FinancePage />);
++    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
++    const input = screen.getByLabelText('選擇銀行流水工作簿');
++    fireEvent.change(input, { target: { files: [new File(['first'], 'first.xlsx')] } });
++    fireEvent.click(screen.getByRole('button', { name: '上傳檔案' }));
++    await waitFor(() => expect(screen.getByRole('button', { name: '預覽匯入結果' })).toBeEnabled());
++    fireEvent.click(screen.getByRole('button', { name: '預覽匯入結果' }));
++    fireEvent.change(input, { target: { files: [new File(['second'], 'second.xlsx')] } });
++    await act(async () => { resolve(PREVIEW); });
++    expect(screen.queryByText('可自動入帳', { selector: '.finance-kpi-label' })).not.toBeInTheDocument();
++    expect(financeImportQueryClient.listReviewRows).not.toHaveBeenCalled();
++  });
+ });
