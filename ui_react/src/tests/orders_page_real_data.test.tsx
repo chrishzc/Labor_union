@@ -99,6 +99,12 @@ describe('OrdersPage query real-data slice', () => {
     orderMutationFlowStore.clearAll();
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue(realisticOrderSummaryPage);
     vi.spyOn(ordersQueryClient, 'getOrderDetail').mockResolvedValue(realisticOrderDetail);
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockImplementation(async (caseNo) => ({
+      case_no: caseNo, lifecycle_version: 1,
+      current_status: '洽談中', target_status: '洽談中',
+      missing_fields: [], blockers: ['order_intake_completion_status_not_eligible'],
+      apply_allowed: false, preview_fingerprint: 'a'.repeat(64),
+    }));
     vi.spyOn(ordersQueryClient, 'getOrderCalendarDetail').mockResolvedValue(realisticOrderCalendarDetail);
     vi.spyOn(ordersQueryClient, 'getOrderTerms').mockResolvedValue(realisticOrderTerms);
     vi.spyOn(ordersQueryClient, 'getFormManagementContext').mockResolvedValue({

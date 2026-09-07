@@ -1127,6 +1127,13 @@ def _legacy_line_bot_review(symbol: str) -> tuple[str, str, str, str]:
             "api/main.py mounts line.line_bot.router",
             f"retain_canonical:{replacements[symbol]}",
         )
+    if symbol == "line_bind":
+        return (
+            "line_identity",
+            "retired legacy LINE bind mutation boundary",
+            "current /api/line/bind returns typed 410 before any write path",
+            "migrate_then_remove:#251 retired the legacy bind mutation; keep only historical candidate evidence and do not restore runtime writer authority",
+        )
     replacement = replacements.get(symbol)
     if replacement is None:
         return _needs_decision_review("line/line_bot.py")

@@ -1,0 +1,114 @@
+"""Focused #88/#101 regression for immutable source period and canonical pairing evidence."""
+
+from datetime import date
+import json
+
+from api.schemas.historical_order_adoption_evidence import (
+    HistoricalOrderAdoptionEvidenceView,
+)
+from infrastructure.mysql.historical_order_adoption_evidence_repository import (
+    MySqlHistoricalOrderAdoptionEvidenceRepository,
+)
+from subsystems.orders.historical_adoption_evidence_query import (
+    query_historical_order_adoption_evidence,
+)
+
+
+class _Cursor:
+    def __init__(self, connection):
+        self.connection = connection
+        self.rows = ()
+        self.one = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def execute(self, sql, params):
+        self.connection.calls.append((sql, params))
+        if "historical_order_adoption_receipts" in sql:
+            self.one = self.connection.receipt
+        else:
+            self.rows = self.connection.pairings
+
+    def fetchone(self):
+        return self.one
+
+    def fetchall(self):
+        return self.rows
+
+
+class _Connection:
+    def __init__(self):
+        self.calls = []
+        self.receipt = {
+            "id": 77,
+            "case_no": "CASE-FUTURE",
+            "source_event_identity": "historical-orders:sheet:row:17",
+            "source_fingerprint": "a" * 64,
+            "preview_fingerprint": "b" * 64,
+            "result_snapshot": json.dumps({
+                "historical_source_status": "deposit_paid",
+                "operational_baseline_step": 9,
+            }),
+            "lifecycle_facts_snapshot": json.dumps({"date_patch": []}),
+        }
+        self.pairings = (
+            {
+                "caregiver_ordinal": 1,
+                "staff_name": "陳月嫂",
+                "staff_id": 42,
+                "resolution": "evidence_only",
+                "source_start_date": date(2026, 9, 3),
+                "source_end_date": date(2026, 9, 22),
+                "assignment_id": None,
+            },
+            {
+                "caregiver_ordinal": 2,
+                "staff_name": None,
+                "staff_id": None,
+                "resolution": "staff_missing",
+                "source_start_date": date(2026, 9, 3),
+                "source_end_date": date(2026, 9, 22),
+                "assignment_id": None,
+            },
+        )
+
+    def cursor(self):
+        return _Cursor(self)
+
+
+def test_future_source_period_and_evidence_only_staff_are_visible_without_becoming_formal_facts():
+    connection = _Connection()
+    repository = MySqlHistoricalOrderAdoptionEvidenceRepository(connection)
+
+    evidence = query_historical_order_adoption_evidence(repository, "CASE-FUTURE")
+
+    pairing_sql = next(
+        sql
+        for sql, _ in connection.calls
+        if "historical_order_pairing_evidence" in sql
+    )
+    assert "LEFT JOIN staff paired_staff" in pairing_sql
+    assert "masked_staff_name" not in pairing_sql
+    assert evidence.source_start_date == date(2026, 9, 3)
+    assert evidence.source_end_date == date(2026, 9, 22)
+    assert evidence.source_period_availability == "available"
+    assert evidence.operational_baseline_step == 9
+    assert evidence.receipt_identity == "historical-order-adoption-receipt:77"
+    assert [(item.staff_id, item.resolution) for item in evidence.paired_staff] == [
+        (42, "evidence_only")
+    ]
+    assert evidence.paired_staff[0].staff_name == "陳月嫂"
+    assert "*" not in evidence.paired_staff[0].staff_name
+    assert evidence.paired_staff[0].assignment_id is None
+    assert evidence.paired_staff_availability == "available"
+
+    view = HistoricalOrderAdoptionEvidenceView.model_validate(
+        evidence,
+        from_attributes=True,
+    )
+    assert view.paired_staff[0].staff_name == "陳月嫂"
+    assert "masked_staff_name" not in view.paired_staff[0].model_dump()

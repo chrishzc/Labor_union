@@ -67,6 +67,7 @@ import { Drawer } from '../components/Drawer';
 import { OrdersIntakeRepairCard } from '../components/OrdersIntakeRepairCard';
 import { ContractExternalSigningActions } from '../components/ContractExternalSigningActions';
 import { ServiceBeforeReplacementActions } from '../components/ServiceBeforeReplacementActions';
+import { OrderIntakeRepairPanel } from '../components/OrderIntakeRepairPanel';
 import { MatchingScheduleAndAssignmentActions } from '../components/MatchingScheduleAndAssignmentActions';
 import { OrderServiceCompletionActions } from '../components/OrderServiceCompletionActions';
 import {
@@ -2220,6 +2221,12 @@ export const OrdersPage: React.FC = () => {
                       <div style={{ fontSize: '0.8rem', color: '#74593f' }}>正式推薦與分段方案請開啟媒合工作台查看</div>
                     </div>
                 </div>}
+
+                {isOrderIntakeIncomplete(order) && (
+                  <div role="status" style={{ color: '#9a3412', fontSize: '0.82rem', marginTop: '8px' }}>
+                    案件仍待補齊姓名、服務日期等進件資料；可先開啟工作台查看現有資料與目前 blocker。
+                  </div>
+                )}
               </div>
 
               {order.orderStatus === '訂單取消' || stageIndex.get(order.id)?.lifecycle_status === '訂單取消' ? (
@@ -3054,6 +3061,13 @@ export const OrdersPage: React.FC = () => {
       >
         {(contractOrder || dateConfirmOrder) && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            <OrderIntakeRepairPanel
+              caseNo={(contractOrder || dateConfirmOrder)!.id}
+              orderStatus={(contractOrder || dateConfirmOrder)!.orderStatus}
+              onChanged={fetchOrderSummaries}
+              onHistoricalRestartRequested={() => switchContractTab('calendar')}
+            />
+
             {renderCardProjection()}
 
             {/* Top 4-Column Fact Strip */}

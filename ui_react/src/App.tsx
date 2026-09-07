@@ -16,6 +16,7 @@ import { LoginPage } from './pages/LoginPage';
 import { sessionClient } from './api/auth/session_client';
 import { ADMIN_SESSION_UNAUTHORIZED_EVENT } from './api/shared/transport';
 import { OrderTrackerPage } from './pages/OrderTrackerPage';
+import { OrderWorkbenchV2Page } from './pages/OrderWorkbenchV2Page';
 import { OrdersManagementPage } from './pages/OrdersManagementPage';
 import { SchedulingPage } from './pages/SchedulingPage';
 import { StaffPage } from './pages/StaffPage';
@@ -43,6 +44,7 @@ export const HASH_ALIASES: Record<string, PageType> = {
   'line-studio': 'line-liff-studio',
   'line-liff-studio': 'line-liff-studio',
   'line-security': 'line-security',
+  'order-beta': 'order-workbench-v2',
 };
 
 function getPageFromHash(): PageType {
@@ -53,7 +55,7 @@ function getPageFromHash(): PageType {
   if (hashPath in PAGE_SECTION_MAP) {
     return hashPath as PageType;
   }
-  return 'order-tracker';
+  return 'order-workbench-v2';
 }
 
 export function getMobileAdminReturnPathFromHash(hash: string): string | null {
@@ -147,6 +149,7 @@ export const App: React.FC = () => {
       >
         {/* Operations Section */}
         {currentPage === 'order-tracker' && <OrderTrackerPage />}
+        {currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page />}
         {currentPage === 'orders' && <OrdersManagementPage />}
         {currentPage === 'scheduling' && <SchedulingPage />}
         {currentPage === 'staff' && <StaffPage />}
