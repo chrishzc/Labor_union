@@ -1,51 +1,98 @@
-name: Lane3 issue222 one-time verification
+name: Lane3 issue222 correction verification
 on:
   push:
-    branches: [fix/issue-222-finance-review-list]
+    branches: [fix/issue-222-source-review-owner-readback]
     paths: [.github/workflows/lane3-issue222-once.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  baseline:
+  owner-readback:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 18
+    services:
+      mysql:
+        image: mysql:8.0.36
+        env:
+          MYSQL_ROOT_PASSWORD: lane3root
+          MYSQL_DATABASE: lu_test_issue222
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -plane3root"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=24
+    env:
+      LABOR_UNION_TEST_MYSQL_HOST: 127.0.0.1
+      LABOR_UNION_TEST_MYSQL_PORT: '3306'
+      LABOR_UNION_TEST_MYSQL_USER: root
+      LABOR_UNION_TEST_MYSQL_PASSWORD: lane3root
+      LABOR_UNION_TEST_MYSQL_DATABASE: lu_test_issue222
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_USER: root
+      DB_PASSWORD: lane3root
+      DB_DATABASE: lu_test_issue222
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          persist-credentials: false
+          persist-credentials: true
+      - name: Apply exact staged product patch and write branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git merge-base HEAD d03551ab75de3e9cffc32ee772bdcf863181adad)" = d03551ab75de3e9cffc32ee772bdcf863181adad
+          cat .github/lane3-issue222-patch/part* > /tmp/issue222.patch
+          echo '77e96090ebdbe9fe2b8c466c9e3cf2f4f4f44e6a71b0180c544968b80ce601f7  /tmp/issue222.patch' | sha256sum -c -
+          git apply --check /tmp/issue222.patch
+          git apply /tmp/issue222.patch
+          git diff --check
+          rm -rf .github/lane3-issue222-patch
+          git add api/routes/finance_import.py api/schemas/finance_import.py subsystems/finance_import/query.py tests/test_finance_source_review_mysql_e2e.py ui_react/src/api/finance_import/finance_import_query_client.ts ui_react/src/api/finance_import/finance_import_query_schemas.ts ui_react/src/pages/FinancePage.tsx ui_react/src/tests/finance_entry_cutover.test.tsx ui_react/src/tests/finance_query_page.test.tsx ui_react/src/tests/finance_request_lifecycle.test.tsx ui_react/src/tests/finance_source_review_list.test.tsx .github/lane3-issue222-patch
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(finance): expose source-review owner readback (#222)'
+          PRODUCT_SHA=$(git rev-parse HEAD)
+          echo "PRODUCT_SHA=$PRODUCT_SHA" >> "$GITHUB_ENV"
+          git push origin HEAD:fix/issue-222-source-review-owner-readback
+          echo "product_sha=$PRODUCT_SHA" | tee /tmp/issue222-product-sha.txt
+      - name: Install current Python runtime dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements.txt 'pytest>=8,<9' 'httpx2>=2.10,<3'
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '22'
           package-manager-cache: false
-      - name: Install existing lockfile without lifecycle hooks
+      - name: Install current UI lockfile without lifecycle hooks
         working-directory: ui_react
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Fresh focused UI baseline
+      - name: Focused type and UI acceptance
         working-directory: ui_react
-        run: npm test -- src/tests/finance_source_review_list.test.tsx src/tests/finance_query_page.test.tsx src/tests/finance_entry_cutover.test.tsx
-      - name: Export bounded code and locked test runtime for offline work
+        run: |
+          npx tsc -p tsconfig.app.json --noEmit
+          npm test -- src/tests/finance_source_review_list.test.tsx src/tests/finance_query_page.test.tsx src/tests/finance_entry_cutover.test.tsx src/tests/finance_request_lifecycle.test.tsx
+      - name: Disposable MySQL API owner readback and replay acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q -s tests/test_finance_source_review_mysql_e2e.py | tee /tmp/issue222-mysql-readback.log
+      - name: Record exact verification receipt
         if: always()
         shell: bash
         run: |
-          mkdir -p /tmp/issue222-evidence
-          git rev-parse HEAD > /tmp/issue222-evidence/HEAD.txt
-          python - <<'PY'
-          import pathlib, subprocess, tarfile
-          roots = ('ui_react/', 'api/', 'domains/', 'subsystems/', 'infrastructure/', 'shared_kernel/', 'tests/', 'db/', 'validation/', 'tools/', 'config/', '.arch-map/')
-          extensions = {'.py', '.ts', '.tsx', '.css', '.json', '.sql', '.toml', '.md', '.html', '.yml', '.yaml'}
-          files = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
-          with tarfile.open('/tmp/issue222-evidence/source.tar.gz', 'w:gz') as archive:
-              for name in files:
-                  path = pathlib.Path(name)
-                  if name in {'AGENTS.md', 'pyproject.toml', 'requirements.txt'} or (name.startswith(roots) and path.suffix in extensions and not path.name.startswith('.env')):
-                      archive.add(name, arcname=name, recursive=False)
-          PY
-          tar -czf /tmp/issue222-evidence/node_modules.tar.gz -C ui_react node_modules
-          sha256sum /tmp/issue222-evidence/*.tar.gz
+          {
+            echo "baseline=d03551ab75de3e9cffc32ee772bdcf863181adad"
+            echo "product_sha=${PRODUCT_SHA:-not_written}"
+            echo "event_head=$GITHUB_SHA"
+            echo "mysql_database=lu_test_issue222"
+          } | tee /tmp/issue222-receipt.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: issue222-offline-${{ github.sha }}
-          path: /tmp/issue222-evidence/
-          if-no-files-found: error
+          name: issue222-correction-${{ github.sha }}
+          path: |
+            /tmp/issue222-product-sha.txt
+            /tmp/issue222-mysql-readback.log
+            /tmp/issue222-receipt.txt
+          if-no-files-found: warn
           retention-days: 1
