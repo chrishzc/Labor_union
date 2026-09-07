@@ -29,6 +29,7 @@ const CANDIDATE_POOL_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/candidate-contact-pool
 const ACTIVE_PLAN_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/matching-plans/active`;
 const CARD_PROJECTION_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/card-projection`;
 const CONTRACT_SIGNING_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/contract-signing`;
+const INTAKE_PREVIEW_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/intake-completion/preview`;
 const CANCELLATION_QUERY_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/cancellation`;
 const SYSTEM_STATUS_ENDPOINT = '/api/v1/system/status/performance-snapshot';
 
@@ -170,6 +171,16 @@ function installFetchStub(options: FetchStubOptions = {}): FetchRecord[] {
       case_no: 'ORD-2026-0801', staff_segments: [], commitment_id: null,
       client_document_sent: false, client_signed_received: false, contract_identity: null, documents: [],
     }));
+    if (path === INTAKE_PREVIEW_ENDPOINT) {
+      expect(init?.method).toBe('POST');
+      expect(init?.body).toBeUndefined();
+      return jsonResponse(orderEnvelope({
+        case_no: 'ORD-2026-0801', lifecycle_version: 1,
+        current_status: '洽談中', target_status: '洽談中',
+        missing_fields: [], blockers: ['order_intake_completion_status_not_eligible'],
+        apply_allowed: false, preview_fingerprint: 'a'.repeat(64),
+      }));
+    }
     if (path === CANCELLATION_QUERY_ENDPOINT) return jsonResponse(orderEnvelope({
       case_no: 'ORD-2026-0801', lifecycle_status: '訂單成立', actual_start_date: null,
       contracted_service_days: 30, service_hours_per_day: 8, service_started: false,
@@ -219,7 +230,7 @@ describe('Orders #orders entry static subgate', () => {
     vi.restoreAllMocks();
   });
 
-  it('actual StrictMode 初始摘要恰好一次 GET，三個 query drawer 維持 frozen budget 且全程 GET-only', async () => {
+  it('actual StrictMode 初始摘要恰好一次 GET，三個 query drawer 維持 frozen GET budget，僅允許 owner intake Preview POST', async () => {
     authenticate();
     const requests = installFetchStub();
 
@@ -275,6 +286,7 @@ describe('Orders #orders entry static subgate', () => {
     expect(countPath(requests, ACTIVE_PLAN_ENDPOINT) - initialQueryCounts.activePlan).toBe(0);
     expect(countPath(requests, CARD_PROJECTION_ENDPOINT) - initialQueryCounts.card).toBe(1);
     expect(countPath(requests, CONTRACT_SIGNING_ENDPOINT) - initialQueryCounts.signing).toBe(1);
+    expect(countPath(requests, INTAKE_PREVIEW_ENDPOINT)).toBe(1);
     expect(screen.queryByText(/後端.*提供|未開放|未納入/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));
 
@@ -299,7 +311,11 @@ describe('Orders #orders entry static subgate', () => {
     // 驗證 5-Tab 導航按鈕完整存在
     expect(screen.getByRole('button', { name: /實質服務日曆/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /受控重開訂單/ })).toBeInTheDocument();
-    expect(requests.every((request) => request.method === 'GET')).toBe(true);
+    expect(countPath(requests, INTAKE_PREVIEW_ENDPOINT)).toBe(2);
+    expect(requests.filter((request) => request.method !== 'GET')).toEqual([
+      { path: INTAKE_PREVIEW_ENDPOINT, method: 'POST' },
+      { path: INTAKE_PREVIEW_ENDPOINT, method: 'POST' },
+    ]);
   });
 
   it('empty 與 typed unavailable 維持 fail closed，不產生假案件或成功狀態', async () => {

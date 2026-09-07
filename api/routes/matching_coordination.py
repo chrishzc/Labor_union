@@ -718,6 +718,11 @@ def apply_caregiver_selection(
         reason_code=body.reason_code,
         affected_criteria=body.affected_criteria,
         preview_fingerprint=PreviewFingerprint(body.preview_fingerprint),
+        segments=tuple(
+            MatchingSegment(item.staff_id, item.service_dates, item.sequence)
+            for item in body.segments
+        ),
+        required_service_dates=body.required_service_dates,
     )
     try:
         result = composition.application.apply(command)

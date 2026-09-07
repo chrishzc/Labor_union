@@ -14,10 +14,14 @@ fixture。
 - primary:
   - `scripts/reset_fake_database.py`
   - `scripts/bootstrap_disposable_mysql_schema.py`
+  - `scripts/verify_verification_scenarios.py`
 - entrypoints:
   - `scripts/launchers/reset_DB.bat`
 - config:
   - `db/schema_assembly/labor_union_fresh_schema_v1.json`
+  - `db/schema_parts/217_weekly_report_batches.sql` (fresh bootstrap owner)
+  - `db/cutover_releases/labor_union_validation_schema_v1.json`
+  - `db/releases/labor_union_validation_schema_v1.sql`
 
 ## Verification
 - test_root: `tests/domains/global/subsystems/migration/modules/local-database-fresh-reset/`

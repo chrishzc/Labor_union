@@ -13,6 +13,7 @@ import { sessionClient } from '../api/auth/session_client';
 export type SectionType = 'operations' | 'line' | 'finance' | 'audit';
 export type PageType = 
   | 'order-tracker'
+  | 'order-workbench-v2'
   | 'orders'
   | 'scheduling'
   | 'staff'
@@ -31,6 +32,7 @@ export type PageType =
 
 export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'order-tracker': 'operations',
+  'order-workbench-v2': 'operations',
   'orders': 'operations',
   'scheduling': 'operations',
   'staff': 'operations',
@@ -60,6 +62,7 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   // Operations Section
+  { id: 'order-workbench-v2', icon: '📌', label: '待辦看板', section: 'operations' },
   { id: 'order-tracker', icon: '📌', label: '待辦看板', section: 'operations' },
   { id: 'orders', icon: '📦', label: '訂單管理', section: 'operations' },
   { id: 'scheduling', icon: '📅', label: '排班日曆', section: 'operations' },
@@ -145,7 +148,9 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
     };
   }, []);
 
-  const visibleNavItems = NAV_ITEMS.filter((item) => item.section === currentSection);
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) => item.section === currentSection && item.id !== 'order-tracker' && item.id !== 'orders',
+  );
   const sidebarCurrentPage = currentPage === 'data-browser' ? 'data-import' : currentPage;
   const currentUser = sessionClient.getUser();
 

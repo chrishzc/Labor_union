@@ -40,9 +40,11 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
         raise RuntimeError("此腳本禁止在 production 正式環境執行！")
 
     conn = get_connection()
-    cursor = conn.cursor(pymysql.cursors.DictCursor)
+    cursor = None
 
     try:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
         # 1. 客戶資料 (Clients)
         # Client 1: 陳雅婷
         cursor.execute("SELECT id FROM clients WHERE name = '陳雅婷' AND phone = '0912345678'")
@@ -184,34 +186,43 @@ def seed_fixtures(verbose: bool = True) -> dict[str, object]:
 
         conn.commit()
     finally:
-        conn.close()
+        try:
+            if cursor is not None:
+                cursor.close()
+        finally:
+            conn.close()
 
     # 5. 跨領域架構初始化 (Case Architecture Bootstrap)
     s_gen = get_case_architecture_bootstrap_status_service()
-    status_service = next(s_gen)
-    w_gen = get_case_architecture_bootstrap_workflow()
-    workflow = next(w_gen)
+    w_gen = None
+    try:
+        status_service = next(s_gen)
+        w_gen = get_case_architecture_bootstrap_workflow()
+        workflow = next(w_gen)
 
-    cases_bootstrapped = []
-    for case_no in ["CASE-2026-M301", "CASE-2026-M302"]:
-        status = status_service.query(case_no)
-        if not status.ready and status.recommendation:
-            correlation_id = CorrelationId(f"line-seed-prev-{case_no.lower()}")
-            preview = workflow.preview(status.recommendation, correlation_id)
-            cmd = EnsureCaseArchitectureBootstrap(
-                intent=status.recommendation,
-                expected_order_version=ExpectedVersion(1),
-                preview_fingerprint=preview.fingerprint,
-                idempotency_key=IdempotencyKey(f"line-seed-idem-{case_no.lower()}"),
-                actor=ActorContext(actor_id="admin", permission_scope=("admin", "system_admin")),
-                reason="LINE 模組測試前置架構初始化",
-                correlation_id=CorrelationId(f"line-seed-corr-{case_no.lower()}"),
-            )
-            workflow.ensure(cmd)
-            cases_bootstrapped.append(case_no)
-
-    w_gen.close()
-    s_gen.close()
+        cases_bootstrapped = []
+        for case_no in ["CASE-2026-M301", "CASE-2026-M302"]:
+            status = status_service.query(case_no)
+            if not status.ready and status.recommendation:
+                correlation_id = CorrelationId(f"line-seed-prev-{case_no.lower()}")
+                preview = workflow.preview(status.recommendation, correlation_id)
+                cmd = EnsureCaseArchitectureBootstrap(
+                    intent=status.recommendation,
+                    expected_order_version=ExpectedVersion(1),
+                    preview_fingerprint=preview.fingerprint,
+                    idempotency_key=IdempotencyKey(f"line-seed-idem-{case_no.lower()}"),
+                    actor=ActorContext(actor_id="admin", permission_scope=("admin", "system_admin")),
+                    reason="LINE 模組測試前置架構初始化",
+                    correlation_id=CorrelationId(f"line-seed-corr-{case_no.lower()}"),
+                )
+                workflow.ensure(cmd)
+                cases_bootstrapped.append(case_no)
+    finally:
+        try:
+            if w_gen is not None:
+                w_gen.close()
+        finally:
+            s_gen.close()
 
     result = {
         "status": "ready",

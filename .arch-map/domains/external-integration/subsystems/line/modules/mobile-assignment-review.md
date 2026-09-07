@@ -20,6 +20,6 @@ mobile route；LINE binding不簽發或傳遞Admin token。
 ## Verification
 - layout_status: `custom_current`
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_legacy_static_surfaces.py`
-- integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_liff_entrypoint.py`
+- integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_mobile_assignment_review_entrypoint.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_mobile_admin_review_pagination.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_static_mutation_ui.py`

@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './OrdersPage.css';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import { contractSigningClient } from '../api/orders/contract_signing_client';
+import type { ContractSigningStatus } from '../api/orders/contract_signing_client';
 import {
   orderCancellationClient,
   type OrderCancellationApplyPayload,
@@ -29,11 +30,12 @@ import {
   type ActualStartReceipt,
 } from '../api/orders/order_actual_start_client';
 import { historicalServiceAccountingClient } from '../api/orders/historical_service_accounting_client';
-import type { ActualStart, FormManagementContext, OrderDetail } from '../api/orders/order_query_schemas';
+import type { ActualStart, ContractCompletion, FormManagementContext, OrderDetail } from '../api/orders/order_query_schemas';
 import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
 import {
   matchingCandidateWorkflowClient,
   defaultMatchingFilterPolicy,
+  type MatchingFilterPolicy,
   type MatchingAvailability,
 } from '../api/scheduling/matching_candidate_workflow_client';
 import {
@@ -62,8 +64,10 @@ import type {
   OrderOperationalTimelinePage,
 } from '../api/orders/order_stage_projection_schemas';
 import { Drawer } from '../components/Drawer';
+import { OrdersIntakeRepairCard } from '../components/OrdersIntakeRepairCard';
 import { ContractExternalSigningActions } from '../components/ContractExternalSigningActions';
 import { ServiceBeforeReplacementActions } from '../components/ServiceBeforeReplacementActions';
+import { OrderIntakeRepairPanel } from '../components/OrderIntakeRepairPanel';
 import { MatchingScheduleAndAssignmentActions } from '../components/MatchingScheduleAndAssignmentActions';
 import { OrderServiceCompletionActions } from '../components/OrderServiceCompletionActions';
 import {
@@ -100,8 +104,39 @@ import {
 
 function isOrderIntakeIncomplete(order: OrderSummaryCardViewModel): boolean {
   return order.orderStatus === '待補件'
+    || order.startDate === null
     || order.serviceDays === null
     || order.clientName.startsWith('待補姓名');
+}
+
+const MATCHING_FILTER_OPTIONS: ReadonlyArray<{
+  key: keyof MatchingFilterPolicy;
+  label: string;
+}> = [
+  { key: 'region', label: '服務區域' },
+  { key: 'cooking', label: '料理需求' },
+  { key: 'preferred_service_days', label: '承接服務天數' },
+  { key: 'daily_service_hours', label: '每日服務時數' },
+];
+
+function passesMatchingFilterPolicy(
+  candidate: MatchingAvailability['candidate_options'][number],
+  policy: MatchingFilterPolicy,
+): boolean {
+  return candidate.full_case_coverage
+    && MATCHING_FILTER_OPTIONS.every(({ key }) => (
+      !policy[key] || candidate.filter_results[key] === true
+    ));
+}
+
+function toIntakeRepairItem(order: OrderSummaryCardViewModel) {
+  return {
+    case_no: order.id,
+    client_name: order.clientName,
+    order_status: order.orderStatus,
+    start_date: order.startDate,
+    service_days: order.serviceDays,
+  };
 }
 
 function isClientFinanceBootstrapGap(error: unknown): boolean {
@@ -243,6 +278,7 @@ export const OrdersPage: React.FC = () => {
   const [matchingFormContext, setMatchingFormContext] = useState<FormManagementContext | null>(null);
   const [matchingFormContextError, setMatchingFormContextError] = useState(false);
   const [matchingAvailability, setMatchingAvailability] = useState<MatchingAvailability | null>(null);
+  const [matchingFilterPolicy, setMatchingFilterPolicy] = useState<MatchingFilterPolicy>(defaultMatchingFilterPolicy);
   const [multiCaregiverSegmentCount, setMultiCaregiverSegmentCount] = useState<2 | 3 | 4>(2);
   const [selectedCandidateStaffIds, setSelectedCandidateStaffIds] = useState<number[]>([]);
   const [candidateWillingnessDrafts, setCandidateWillingnessDrafts] = useState<Record<number, {
@@ -255,6 +291,7 @@ export const OrdersPage: React.FC = () => {
   const [waitingLockPreview, setWaitingLockPreview] = useState<WaitingDepositPreview | null>(null);
   const [waitingLockReceipt, setWaitingLockReceipt] = useState<WaitingDepositReceipt | null>(null);
   const [contractDetail, setContractDetail] = useState<OrderTermsContractDrawerViewModel | null>(null);
+  const [signingStatus, setSigningStatus] = useState<ContractSigningStatus | null>(null);
   const [contractQueryError, setContractQueryError] = useState<string | null>(null);
   const [contractCorrectionNotice, setContractCorrectionNotice] = useState<string | null>(null);
   type ContractWorkbenchTab = 'contract_terms' | 'calendar' | 'cancellation' | 'reopen';
@@ -284,6 +321,7 @@ export const OrdersPage: React.FC = () => {
   const [actualStartReason, setActualStartReason] = useState('');
   const [actualStartStatus, setActualStartStatus] = useState<'idle' | 'previewing' | 'applying'>('idle');
   const [actualStartError, setActualStartError] = useState<string | null>(null);
+  const [completionQuery, setCompletionQuery] = useState<ContractCompletion | null>(null);
   const [cancellationQuery, setCancellationQuery] = useState<OrderCancellationQuery | null>(null);
   const [cancellationDays, setCancellationDays] = useState<CancellationServiceDayDraft[]>([]);
   const [cancellationPreview, setCancellationPreview] = useState<OrderCancellationPreview | null>(null);
@@ -306,6 +344,7 @@ export const OrdersPage: React.FC = () => {
   const reopenPreviewControllerRef = useRef<AbortController | null>(null);
   const cardProjectionControllerRef = useRef<AbortController | null>(null);
   const currentCardProjectionRequestRef = useRef<number>(0);
+  const cardProjectionLoadRef = useRef<{ caseNo: string; promise: Promise<OrdersCardProjectionViewModel | null> } | null>(null);
   const precisionRequestRef = useRef<number>(0);
   const cancellationApplyAttemptRef = useRef<CancellationApplyAttempt | null>(null);
   const cancellationApplyInFlightRef = useRef(false);
@@ -430,7 +469,7 @@ export const OrdersPage: React.FC = () => {
     setCardProjectionLoading(false);
   };
 
-  const loadCardProjection = (caseNo: string) => {
+  const loadCardProjection = (caseNo: string): Promise<OrdersCardProjectionViewModel | null> => {
     cardProjectionControllerRef.current?.abort();
     const controller = new AbortController();
     cardProjectionControllerRef.current = controller;
@@ -438,15 +477,20 @@ export const OrdersPage: React.FC = () => {
     setCardProjection(null);
     setCardProjectionError(null);
     setCardProjectionLoading(true);
-    void orderCardProjectionClient.getCardProjection(caseNo, { signal: controller.signal }).then((raw) => {
+    const promise = orderCardProjectionClient.getCardProjection(caseNo, { signal: controller.signal }).then((raw) => {
       if (controller.signal.aborted || requestId !== currentCardProjectionRequestRef.current) return;
-      setCardProjection(adaptOrdersCardProjection(raw, caseNo));
+      const adapted = adaptOrdersCardProjection(raw, caseNo);
+      setCardProjection(adapted);
+      return adapted;
     }).catch((error: unknown) => {
       if (controller.signal.aborted || requestId !== currentCardProjectionRequestRef.current) return;
       setCardProjectionError(error instanceof Error ? error.message : ORDERS_CARD_PROJECTION_UNAVAILABLE);
     }).finally(() => {
       if (!controller.signal.aborted && requestId === currentCardProjectionRequestRef.current) setCardProjectionLoading(false);
     });
+    const trackedPromise = promise.then((projection) => projection ?? null);
+    cardProjectionLoadRef.current = { caseNo, promise: trackedPromise };
+    return trackedPromise;
   };
 
   const renderCardProjection = () => (
@@ -742,6 +786,7 @@ export const OrdersPage: React.FC = () => {
       setCandidateActionError(null);
       setCandidateActionNotice(null);
       setMatchingAvailability(null);
+      setMatchingFilterPolicy(defaultMatchingFilterPolicy);
       setSelectedCandidateStaffIds([]);
       setCandidateWillingnessDrafts({});
       setCustomerDecisionReason('');
@@ -882,14 +927,13 @@ export const OrdersPage: React.FC = () => {
         matchingOrder.id,
         startDate,
         endDate,
-        defaultMatchingFilterPolicy,
+        matchingFilterPolicy,
       );
       setMatchingAvailability(availability);
       setSelectedCandidateStaffIds([]);
       const eligibleCount = availability.candidate_options.filter(
-        (candidate) => candidate.segment_index === 0 && candidate.full_case_coverage
-          && ['region', 'cooking', 'preferred_service_days', 'daily_service_hours']
-            .every((key) => candidate.filter_results[key] === true),
+        (candidate) => candidate.segment_index === 0
+          && passesMatchingFilterPolicy(candidate, matchingFilterPolicy),
       ).length;
       setCandidateActionNotice(
         eligibleCount > 0
@@ -914,7 +958,7 @@ export const OrdersPage: React.FC = () => {
         matchingOrder.id,
         multiCaregiverSegmentCount,
         [],
-        defaultMatchingFilterPolicy,
+        matchingFilterPolicy,
       );
       setMatchingAvailability(availability);
       setSelectedCandidateStaffIds([]);
@@ -1278,6 +1322,10 @@ export const OrdersPage: React.FC = () => {
 
       if (requestId !== currentDrawerRequestRef.current) return;
 
+      if (completionRes.status === 'fulfilled' && completionRes.value.case_no === order.id) {
+        setCompletionQuery(completionRes.value);
+      }
+
       const termsHistoricalGap = termsRes.status === 'rejected' && isClientFinanceBootstrapGap(termsRes.reason);
       const completionHistoricalGap = completionRes.status === 'rejected' && isClientFinanceBootstrapGap(completionRes.reason);
       const historicalCorrectionReady =
@@ -1315,6 +1363,8 @@ export const OrdersPage: React.FC = () => {
       const signing = signingRes.value;
 
       if (requestId === currentDrawerRequestRef.current) {
+        setCompletionQuery(completion);
+        setSigningStatus(signing);
         if (terms) {
           setTermsQuery(terms);
           setTermsDraft({
@@ -1344,6 +1394,23 @@ export const OrdersPage: React.FC = () => {
       if (requestId === currentDrawerRequestRef.current) {
         setDrawerLoading(false);
       }
+    }
+  };
+
+  const downloadArchivedContractDocument = async (documentVersionId: number) => {
+    try {
+      const artifact = await contractSigningClient.downloadDocument(
+        (contractOrder || dateConfirmOrder)!.id,
+        documentVersionId,
+      );
+      const objectUrl = URL.createObjectURL(artifact.blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = artifact.filename;
+      anchor.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch (caught) {
+      setContractQueryError(caught instanceof Error ? caught.message : '封存契約文件下載失敗。');
     }
   };
 
@@ -1410,17 +1477,26 @@ export const OrdersPage: React.FC = () => {
     nextLeaveDates = leaveDates,
     caseNo = (contractOrder || dateConfirmOrder)?.id,
     nextCustomWorkDates = customWorkDates,
+    nextPrecisionMode = precisionMode,
   ) => {
     if (!caseNo) return;
-    if (precisionMode === null) {
+    if (nextPrecisionMode === null) {
       setPrecisionResult(null);
       setPrecisionError('目前未取得可信排休類型，請直接在日曆手動確認真實服務日期。');
       return;
     }
     const serviceDateQuery = orderMutationFlowStore.getServiceDatesDraft(caseNo)?.queryView;
-    const startDate = actualStartQuery?.case_no === caseNo
-      ? actualStartDraft || actualStartQuery.current_actual_start_date || actualStartQuery.planned_start_date
-      : null;
+    const assignmentFactsReady = cardProjection?.caseNo === caseNo
+      && cardProjection.assignmentSegmentsAvailability === 'available';
+    const hasFormalAssignment = assignmentFactsReady
+      && cardProjection.assignmentSegments.length > 0;
+    const startDate = hasFormalAssignment
+      ? actualStartQuery?.case_no === caseNo
+        ? actualStartDraft || actualStartQuery.current_actual_start_date || actualStartQuery.planned_start_date
+        : null
+      : assignmentFactsReady
+        ? serviceDateQuery?.selectable_dates[0] ?? null
+        : null;
     if (!serviceDateQuery || serviceDateQuery.case_no !== caseNo || startDate === null) {
       setPrecisionResult(null);
       setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
@@ -1430,7 +1506,7 @@ export const OrdersPage: React.FC = () => {
       caseNo,
       startDate,
       targetDays: serviceDateQuery.contracted_service_days,
-      serviceMode: precisionMode,
+      serviceMode: nextPrecisionMode,
       selectableDates: serviceDateQuery.selectable_dates,
       holidayRestDates: nextHolidayRestDates,
       leaveDates: nextLeaveDates,
@@ -1444,6 +1520,7 @@ export const OrdersPage: React.FC = () => {
   const loadCalendarTabQueries = async (
     order: OrderSummaryCardViewModel,
     allowRestartedNormalFlow = false,
+    assignmentProjectionPromise?: Promise<OrdersCardProjectionViewModel | null>,
   ) => {
     const historicalRestartRequired = (
       order.orderStatus === '歷史訂單－未服務'
@@ -1465,10 +1542,15 @@ export const OrdersPage: React.FC = () => {
     setCustomWorkDates([]);
     setLeaveDateDraft('');
     try {
-      const [actualStartRes, serviceDatesRes, calendarDetailRes] = await Promise.allSettled([
+      const projectionPromise = assignmentProjectionPromise
+        ?? (cardProjectionLoadRef.current?.caseNo === order.id
+          ? cardProjectionLoadRef.current.promise
+          : Promise.resolve(cardProjection?.caseNo === order.id ? cardProjection : null));
+      const [actualStartRes, serviceDatesRes, calendarDetailRes, assignmentProjectionRes] = await Promise.allSettled([
         ordersQueryClient.getActualStart(order.id, { signal: controller.signal }),
         fetchServiceDatesQuery(order.id, { signal: controller.signal }),
         ordersQueryClient.getOrderCalendarDetail(order.id, { signal: controller.signal }),
+        projectionPromise,
       ]);
       if (requestId !== currentDrawerRequestRef.current) return;
       const actualStart = actualStartRes.status === 'fulfilled' ? actualStartRes.value : null;
@@ -1479,21 +1561,34 @@ export const OrdersPage: React.FC = () => {
       }
       const serviceDates = serviceDatesRes.status === 'fulfilled' ? serviceDatesRes.value : null;
       const calendarDetail = calendarDetailRes.status === 'fulfilled' ? calendarDetailRes.value : null;
-      const startDate = actualStart?.current_actual_start_date ?? actualStart?.planned_start_date ?? null;
-      const baseInputsReady = actualStart?.case_no === order.id
-        && serviceDates?.case_no === order.id
-        && startDate !== null;
+      const assignmentProjection = assignmentProjectionRes.status === 'fulfilled'
+        ? assignmentProjectionRes.value
+        : null;
+      const assignmentFactsReady = assignmentProjection?.caseNo === order.id
+        && assignmentProjection.assignmentSegmentsAvailability === 'available';
+      const hasFormalAssignment = assignmentFactsReady
+        && assignmentProjection.assignmentSegments.length > 0;
+      const actualStartDate = actualStart?.current_actual_start_date ?? actualStart?.planned_start_date ?? null;
+      const startDate = hasFormalAssignment
+        ? actualStartDate
+        : assignmentFactsReady
+          ? serviceDates?.selectable_dates[0] ?? null
+          : null;
+      const baseInputsReady = serviceDates?.case_no === order.id
+        && startDate !== null
+        && assignmentFactsReady
+        && (!hasFormalAssignment || actualStart?.case_no === order.id);
+      if (calendarDetail === null && allowRestartedNormalFlow && serviceDates?.case_no === order.id) {
+        changeServiceDateSelection(order.id, serviceDates.current_dates);
+        setPrecisionError(null);
+        return;
+      }
       if (!baseInputsReady) {
         selectServiceDates(order.id, []);
         setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
         return;
       }
       if (calendarDetail === null) {
-        if (allowRestartedNormalFlow) {
-          changeServiceDateSelection(order.id, serviceDates.current_dates);
-          setPrecisionError(null);
-          return;
-        }
         selectServiceDates(order.id, []);
         setPrecisionError('正式服務日精算所需的開始日、合約天數或排休類型尚未載入，請關閉後重試。');
         return;
@@ -1582,6 +1677,7 @@ export const OrdersPage: React.FC = () => {
     setReopenOrder(order);
     setActiveContractTab(initialTab);
     setContractDetail(null);
+    setSigningStatus(null);
     setContractQueryError(null);
     setContractCorrectionNotice(null);
     setTermsQuery(null);
@@ -1598,6 +1694,7 @@ export const OrdersPage: React.FC = () => {
     setActualStartReason('');
     setActualStartStatus('idle');
     setActualStartError(null);
+    setCompletionQuery(null);
     setHistoricalRestartStatus('idle');
     setHistoricalRestartMessage(null);
     setNormalFlowRestartedCaseNo(null);
@@ -1949,17 +2046,39 @@ export const OrdersPage: React.FC = () => {
   const visibleMatchingCandidates = matchingDetail?.candidatePool.filter((candidate) => (
     candidateFilter === 'all' || candidate.willingness === candidateFilter
   )) ?? [];
-  const passesDefaultMatchingSafetyGate = (candidate: MatchingAvailability['candidate_options'][number]) => (
-    ['region', 'cooking', 'preferred_service_days', 'daily_service_hours']
-      .every((key) => candidate.filter_results[key] === true)
+  const activeCalendarOrder = contractOrder || dateConfirmOrder;
+  const calendarServiceDatesConfirmed = Boolean(
+    serviceDatesDraft?.queryView
+      && (serviceDatesDraft.queryView.current_version !== null || manualServiceDateSelection),
+  );
+  const actualStartWorkspaceApplicable = Boolean(
+    activeCalendarOrder
+      && ['確認實際服務日期', '訂單成立', '服務中'].includes(activeCalendarOrder.orderStatus)
+      && calendarServiceDatesConfirmed
+      && actualStartQuery?.case_no === activeCalendarOrder.id
+      && actualStartQuery.service_data_locked === false
+      && actualStartQuery.scheduling_generation > 0,
+  );
+  const completionWorkspaceApplicable = Boolean(
+    activeCalendarOrder
+      && calendarServiceDatesConfirmed
+      && completionQuery?.case_no === activeCalendarOrder.id
+      && completionQuery.completion_available,
+  );
+  const assignmentSegmentsAvailable = cardProjection?.assignmentSegmentsAvailability === 'available';
+  const assignmentSegmentsPresent = assignmentSegmentsAvailable
+    && (cardProjection?.assignmentSegments.length ?? 0) > 0;
+  const leaveSubstitutionApplicable = Boolean(
+    ['確認實際服務日期', '訂單成立', '服務中'].includes(activeCalendarOrder?.orderStatus ?? '')
+      && assignmentSegmentsPresent,
   );
   const eligibleMatchingCandidates = matchingAvailability?.candidate_options.filter(
-    (candidate) => candidate.segment_index === 0 && candidate.full_case_coverage
-      && passesDefaultMatchingSafetyGate(candidate),
+    (candidate) => candidate.segment_index === 0
+      && passesMatchingFilterPolicy(candidate, matchingFilterPolicy),
   ) ?? [];
   const diagnosticMatchingCandidates = matchingAvailability?.candidate_options.filter(
     (candidate) => candidate.segment_index === 0 && candidate.full_case_coverage
-      && !passesDefaultMatchingSafetyGate(candidate),
+      && !passesMatchingFilterPolicy(candidate, matchingFilterPolicy),
   ) ?? [];
   const completeMultiCaregiverCombinations = matchingAvailability?.complete_combinations.filter(
     (combination) => combination.length >= 2 && combination.length <= 4,
@@ -2102,6 +2221,12 @@ export const OrdersPage: React.FC = () => {
                       <div style={{ fontSize: '0.8rem', color: '#74593f' }}>正式推薦與分段方案請開啟媒合工作台查看</div>
                     </div>
                 </div>}
+
+                {isOrderIntakeIncomplete(order) && (
+                  <div role="status" style={{ color: '#9a3412', fontSize: '0.82rem', marginTop: '8px' }}>
+                    案件仍待補齊姓名、服務日期等進件資料；可先開啟工作台查看現有資料與目前 blocker。
+                  </div>
+                )}
               </div>
 
               {order.orderStatus === '訂單取消' || stageIndex.get(order.id)?.lifecycle_status === '訂單取消' ? (
@@ -2114,12 +2239,13 @@ export const OrdersPage: React.FC = () => {
                     查看取消與受控重開
                   </button>
                 </div>
-              ) : isOrderIntakeIncomplete(order) ? (
-                <div className="order-card-actions" role="status">
-                  案件仍待補齊姓名、服務日期等進件資料；完成補件後即可操作契約、媒合、排班與取消流程。
-                </div>
               ) : (
               <div className="order-card-actions">
+                {isOrderIntakeIncomplete(order) && (
+                  <div role="status" data-surface-id="orders.card.intake-incomplete">
+                    案件仍有進件缺漏，請從條款與契約查看補件區段；各操作依所屬流程的目前條件判定。
+                  </div>
+                )}
                 <button
                   className="btn-secondary-action"
                   data-control-id="orders.card.contract-workbench"
@@ -2278,8 +2404,34 @@ export const OrdersPage: React.FC = () => {
                 <div className="matching-criteria-item" role="listitem">📅 承接天數：{matchingOrder.serviceDaysLabel}</div>
                 <div className="matching-criteria-item" role="listitem">🍳 料理需求：以上方正式案件條件為準</div>
               </div>
+              <fieldset
+                style={{ border: '1px solid #ead8d1', borderRadius: '10px', marginTop: '12px', padding: '10px 12px', color: '#57423b' }}
+                aria-label="本次媒合篩選條件"
+              >
+                <legend style={{ padding: '0 6px', fontSize: '0.82rem', fontWeight: 700 }}>本次查詢納入的媒合條件</legend>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  {MATCHING_FILTER_OPTIONS.map(({ key, label }) => (
+                    <label key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}>
+                      <input
+                        type="checkbox"
+                        data-control-id={`orders.matching.filter.${key}`}
+                        checked={matchingFilterPolicy[key]}
+                        disabled={drawerLoading || candidateActionKey !== null}
+                        onChange={(event) => {
+                          setMatchingFilterPolicy((current) => ({ ...current, [key]: event.target.checked }));
+                          setMatchingAvailability(null);
+                          setSelectedCandidateStaffIds([]);
+                          setCandidateActionError(null);
+                          setCandidateActionNotice('媒合篩選條件已變更，請重新查詢以取得最新候選。');
+                        }}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
               <div role="note" style={{ border: '1px solid #ead8d1', borderRadius: '10px', marginTop: '12px', padding: '10px 12px', color: '#57423b', fontSize: '0.82rem' }}>
-                固定套用：服務區域、下廚需求、完整服務日、每日工時與目前檔期。若案件條款或服務日不正確，請回「條款與契約」修正，再重新查詢。
+                預設納入四項條件；變更後會由伺服器重新查詢並回傳各候選的條件結果。若案件條款或服務日不正確，請回「條款與契約」修正，再重新查詢。
               </div>
             </div>
 
@@ -2909,6 +3061,13 @@ export const OrdersPage: React.FC = () => {
       >
         {(contractOrder || dateConfirmOrder) && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            <OrderIntakeRepairPanel
+              caseNo={(contractOrder || dateConfirmOrder)!.id}
+              orderStatus={(contractOrder || dateConfirmOrder)!.orderStatus}
+              onChanged={fetchOrderSummaries}
+              onHistoricalRestartRequested={() => switchContractTab('calendar')}
+            />
+
             {renderCardProjection()}
 
             {/* Top 4-Column Fact Strip */}
@@ -3003,6 +3162,15 @@ export const OrdersPage: React.FC = () => {
             )}
 
             {/* Tab 1: 契約簽署與約定條款 (Contract & Terms Consolidated) */}
+            {activeContractTab === 'contract_terms' && contractOrder && isOrderIntakeIncomplete(contractOrder) && (
+              <OrdersIntakeRepairCard
+                item={toIntakeRepairItem(contractOrder)}
+                onChanged={async () => {
+                  await fetchOrderSummaries();
+                  await loadContractTabQueries(contractOrder);
+                }}
+              />
+            )}
             {activeContractTab === 'contract_terms' && contractDetail && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
                 {/* SSOT 3-Card Status Strip */}
@@ -3063,6 +3231,24 @@ export const OrdersPage: React.FC = () => {
                     caseNo={(contractOrder || dateConfirmOrder)!.id}
                     onCommitted={() => loadContractTabQueries((contractOrder || dateConfirmOrder)!)}
                   />
+                )}
+
+                {signingStatus && signingStatus.documents.length > 0 && (
+                  <section aria-label="已封存契約文件版本" style={{ display: 'grid', gap: '8px' }}>
+                    <strong>已封存契約文件版本</strong>
+                    {signingStatus.documents.map((document) => (
+                      <div key={document.document_version_id}>
+                        <span>契約第 {document.version_number} 版（{document.mime_type}）</span>
+                        <button
+                          type="button"
+                          className="btn-secondary-action"
+                          onClick={() => void downloadArchivedContractDocument(document.document_version_id)}
+                        >
+                          下載／匯出此文件
+                        </button>
+                      </div>
+                    ))}
+                  </section>
                 )}
 
                 {(contractOrder || dateConfirmOrder) && (
@@ -3200,7 +3386,7 @@ export const OrdersPage: React.FC = () => {
                   >
                     <h3 style={{ margin: 0, color: '#9a3412', fontSize: '1.05rem' }}>歷史訂單：重啟正常流程</h3>
                     <p style={{ margin: '8px 0 14px', color: '#7c2d12', fontSize: '0.88rem', lineHeight: 1.6 }}>
-                      重啟後，案件會回到正常「訂單成立」。歷史來源紀錄仍會保留，但目前的實際起訖、正式服務日與排班會撤銷；接著請使用本頁原有流程重新精算、確認服務日期、媒合排班及登錄實際開工。
+                      重啟後，案件會回到正常「訂單成立」。歷史來源紀錄仍會保留，但目前的實際起訖、正式服務日與排班會撤銷；接著請使用本頁原有流程確認服務日期、媒合排班及登錄實際開工。
                     </p>
                     <button
                       type="button"
@@ -3227,6 +3413,16 @@ export const OrdersPage: React.FC = () => {
                   {precisionError && (
                     <div role="alert" className="mutation-error-banner">
                       {precisionError}
+                      {!manualServiceDateSelection && !precisionCalculating && (
+                        <button
+                          type="button"
+                          className="btn-secondary-action"
+                          onClick={() => runSchedulePrecision()}
+                          style={{ marginLeft: '8px' }}
+                        >
+                          重試精算
+                        </button>
+                      )}
                     </div>
                   )}
                   {serviceDatesDraft?.queryView && (
@@ -3252,47 +3448,52 @@ export const OrdersPage: React.FC = () => {
                             <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#57423b', marginBottom: '4px' }}>
                               工會排休類型：
                             </div>
-                            <div aria-label="工會排休類型" style={{ padding: '8px 12px', borderRadius: '8px', backgroundColor: '#f1f5f9', border: '1px solid #dec0b6', fontSize: '0.9rem', fontWeight: 600, color: '#334155' }}>
-                              {precisionMode ?? (manualServiceDateSelection ? '人工確認真實服務日期' : '尚未載入')}
-                            </div>
+                            {manualServiceDateSelection ? (
+                              <div aria-label="工會排休類型" style={{ padding: '8px 12px', borderRadius: '8px', backgroundColor: '#f1f5f9', border: '1px solid #dec0b6', fontSize: '0.9rem', fontWeight: 600, color: '#334155' }}>
+                                人工確認真實服務日期
+                              </div>
+                            ) : (
+                              <select
+                                aria-label="工會排休類型"
+                                data-control-id="orders.date.service-mode"
+                                value={precisionMode ?? ''}
+                                disabled={serviceDatesLocked || precisionCalculating || precisionMode === null}
+                                onChange={(event) => {
+                                  const nextMode = event.target.value as NonNullable<typeof precisionMode>;
+                                  setPrecisionMode(nextMode);
+                                  setPrecisionResult(null);
+                                  setPrecisionError(null);
+                                  rerunSchedulePrecision(holidayRestDates, leaveDates, undefined, customWorkDates, nextMode);
+                                }}
+                                style={{ padding: '8px 12px', borderRadius: '8px', backgroundColor: '#fff', border: '1px solid #dec0b6', fontSize: '0.9rem', fontWeight: 600, color: '#334155', width: '100%' }}
+                              >
+                                <option value="" disabled>尚未載入</option>
+                                <option value="週休1日">週休1日</option>
+                                <option value="週休2日">週休2日</option>
+                                <option value="連續服務">連續服務</option>
+                              </select>
+                            )}
                           </div>
-                          <button
-                            type="button"
-                            className="btn-primary-action"
-                            disabled={manualServiceDateSelection || serviceDatesLocked || precisionCalculating}
-                            onClick={() => rerunSchedulePrecision()}
-                            style={{ padding: '9px 20px', fontSize: '0.88rem' }}
-                          >
-                            {manualServiceDateSelection ? '請手動確認服務日期' : precisionCalculating ? '精算中…' : '🧮 重新依工會規則精算'}
-                          </button>
                         </div>
 
                         {manualServiceDateSelection && (
                           <div role="status" style={{ color: '#74593f', fontSize: '0.84rem', lineHeight: 1.6 }}>
-                            無法取得可信排休類型；系統不會假設週休模式。請直接在下方日曆點選真實服務日期，選滿合約天數後再檢查服務週次影響。
+                            無法取得可信排休類型；系統不會假設週休模式。請直接在下方日曆點選真實服務日期，選滿合約天數後再按「確認服務日期」。
                           </div>
                         )}
 
                         {precisionResult && (
                           <div className="precision-stat-grid" style={{ marginBottom: 0 }}>
                             <div className="precision-stat-box">
-                              <span className="precision-stat-label">合約目標天數</span>
+                              <span className="precision-stat-label">合約服務天數</span>
                               <span className="precision-stat-val">{precisionResult.target_service_days} 天</span>
                             </div>
                             <div className="precision-stat-box">
-                              <span className="precision-stat-label">實質出勤天數</span>
-                              <span className="precision-stat-val" style={{ color: '#0f766e' }}>{precisionResult.actual_work_days_count} 天</span>
-                            </div>
-                            <div className="precision-stat-box">
-                              <span className="precision-stat-label">排休/假日記數</span>
+                              <span className="precision-stat-label">休假日</span>
                               <span className="precision-stat-val" style={{ color: '#9a3412' }}>{precisionResult.rest_days_count} 天</span>
                             </div>
                             <div className="precision-stat-box">
-                              <span className="precision-stat-label">總日曆跨越天</span>
-                              <span className="precision-stat-val">{precisionResult.total_calendar_days} 天</span>
-                            </div>
-                            <div className="precision-stat-box">
-                              <span className="precision-stat-label">🎯 自動順延完工日</span>
+                              <span className="precision-stat-label">🎯 建議完工日</span>
                               <span className="precision-stat-val" style={{ color: '#ff7f50' }}>{precisionResult.actual_end_date}</span>
                             </div>
                           </div>
@@ -3453,16 +3654,18 @@ export const OrdersPage: React.FC = () => {
                       {/* Full-width Preview / Apply workflow below the calendar */}
                       <div className="service-date-confirmation-panel">
                         <div className="service-date-confirmation-actions">
-                          <button
-                            type="button"
-                            data-control-id="orders.date.service-date-preview"
-                            className="btn-secondary-action"
-                            style={{ width: '100%', padding: '9px', marginBottom: '10px' }}
-                            disabled={serviceDatesLocked || precisionCalculating || !serviceDatesSelectionReady}
-                            onClick={() => (contractOrder || dateConfirmOrder) && previewServiceDates((contractOrder || dateConfirmOrder)!.id)}
-                          >
-                            {serviceDatesDraft?.status === 'preview_loading' ? '正在精算服務週次…' : '🔍 檢查服務週次影響'}
-                          </button>
+                          {serviceDatesSelectionReady && (
+                            <button
+                              type="button"
+                              data-control-id="orders.date.service-date-preview"
+                              className="btn-secondary-action"
+                              style={{ width: '100%', padding: '9px', marginBottom: '10px' }}
+                              disabled={serviceDatesLocked || precisionCalculating}
+                              onClick={() => (contractOrder || dateConfirmOrder) && previewServiceDates((contractOrder || dateConfirmOrder)!.id)}
+                            >
+                              {serviceDatesDraft?.status === 'preview_loading' ? '正在確認服務日期…' : '確認服務日期'}
+                            </button>
+                          )}
 
                           {serviceDatesDraft?.previewView && (
                             <div style={{ marginBottom: '10px', padding: '10px', background: '#fffdfb', border: '1px solid #fed9b8', borderRadius: '8px' }}>
@@ -3548,7 +3751,7 @@ export const OrdersPage: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="leave-substitution-entry">
+                      {leaveSubstitutionApplicable && <div className="leave-substitution-entry">
                         <div>
                           <strong>已有正式排班：處理請假／代班</strong>
                           <p>
@@ -3567,7 +3770,7 @@ export const OrdersPage: React.FC = () => {
                         >
                           前往請假／代班工作台
                         </button>
-                      </div>
+                      </div>}
                     </>
                   )}
                   {!serviceDatesDraft?.queryView && (
@@ -3586,7 +3789,7 @@ export const OrdersPage: React.FC = () => {
                 </section>
 
                 {/* Actual Start Date Precision Card */}
-                <div className="calendar-workbench-card" style={{ marginTop: '16px' }}>
+                {actualStartWorkspaceApplicable && <div className="calendar-workbench-card" data-surface-id="orders.date.actual-start" style={{ marginTop: '16px' }}>
                   <div className="calendar-card-header">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span className="calendar-badge actual">實際開工</span>
@@ -3658,9 +3861,9 @@ export const OrdersPage: React.FC = () => {
                     </div>
                   )}
                   {actualStartError && <div role="alert" style={{ color: '#b91c1c', marginTop: '10px', fontSize: '0.85rem' }}>{actualStartError}</div>}
-                </div>
+                </div>}
 
-                {(contractOrder || dateConfirmOrder) && (
+                {completionWorkspaceApplicable && (contractOrder || dateConfirmOrder) && (
                   <OrderServiceCompletionActions
                     caseNo={(contractOrder || dateConfirmOrder)!.id}
                     orderStatus={(contractOrder || dateConfirmOrder)!.orderStatus}

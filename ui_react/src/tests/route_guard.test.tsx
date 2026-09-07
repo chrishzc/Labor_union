@@ -160,15 +160,19 @@ describe('Route Guard & Shell Hash Navigation', () => {
       role: 'system_admin',
       capabilities: ['system.administration'],
     });
+    window.location.hash = '#scheduling';
 
     render(<App />);
 
     expect(screen.getByText('營運作業 (Operations)')).toBeInTheDocument();
+    expect(screen.getByTitle('排班日曆')).toHaveClass('active');
+    expect(screen.queryByTitle('訂單管理')).not.toBeInTheDocument();
 
-    const ordersNav = screen.getByTitle('訂單管理');
-    fireEvent.click(ordersNav);
+    const workbenchNav = screen.getByTitle('待辦看板');
+    fireEvent.click(workbenchNav);
 
-    expect(window.location.hash).toBe('#orders');
+    expect(window.location.hash).toBe('#order-workbench-v2');
+    expect(workbenchNav).toHaveClass('active');
   });
 
   it('切換頂部主作業區分頁應切換側邊欄與頁面視圖', async () => {

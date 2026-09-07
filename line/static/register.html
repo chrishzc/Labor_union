@@ -261,8 +261,8 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
                 <input type="text" class="form-input" id="name" required maxlength="30" placeholder="請填寫真實姓名">
             </div>
             <div class="form-group">
-                <label class="form-label required">身分證字號</label>
-                <input type="text" class="form-input" id="id_number" required maxlength="12" placeholder="身分證，例如: A123456789">
+                <label class="form-label">身分證字號</label>
+                <input type="text" class="form-input" id="id_number" maxlength="12" placeholder="身分證，例如: A123456789">
             </div>
         </div>
         <div class="grid-2">
@@ -854,8 +854,15 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         setFieldError(control, message);
     }
 
+    function normalizeTaiwanId(value) {
+        return String(value || '')
+            .trim()
+            .replace(/[Ａ-Ｚａ-ｚ０-９]/g, character => String.fromCharCode(character.charCodeAt(0) - 0xFEE0))
+            .toUpperCase();
+    }
+
     function isValidTaiwanId(value) {
-        const normalized = String(value || '').trim().toUpperCase();
+        const normalized = normalizeTaiwanId(value);
         if (!normalized) return true;
         if (!/^[A-Z][12]\d{8}$/.test(normalized)) return false;
         const letterMap = {
@@ -898,12 +905,10 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         const nameValue = name.value.trim();
         if (!nameValue) addError(errors, name, '請填寫產婦姓名。');
 
-        const idValue = idNumber.value.trim().toUpperCase();
+        const idValue = normalizeTaiwanId(idNumber.value);
         idNumber.value = idValue;
-        if (!idValue) {
-            addError(errors, idNumber, '請填寫身分證字號。');
-        } else if (!isValidTaiwanId(idValue)) {
-            addError(errors, idNumber, '身分證字號格式不正確，請填 1 個英文字母加 9 個數字。');
+        if (idValue && !isValidTaiwanId(idValue)) {
+            addError(errors, idNumber, '請輸入有效身分證字號');
         }
 
         if (birthDate.value) {

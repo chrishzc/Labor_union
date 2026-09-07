@@ -4,9 +4,13 @@
  */
 import type { OrderSummaryPage } from '../../api/orders/order_query_schemas';
 import type {
+  GovernmentSubsidyProjection,
+  GovernmentSubsidyProjectionPage,
   OrderOperationalTimeline,
   OrderOperationalTimelinePage,
   StageProjection,
+  TerminalAggregate,
+  TerminalAggregatePage,
 } from '../../api/orders/order_stage_projection_schemas';
 
 export const ORDER_STAGE_PROJECTION_UNAVAILABLE = '訂單階段資料載入失敗，請重新載入。';
@@ -46,6 +50,27 @@ export function indexOperationalTimelines(
 export function stageCount(page: OrderOperationalTimelinePage, code: string): number | null {
   if (!(code in page.stage_counts)) return null;
   return page.stage_counts[code as keyof typeof page.stage_counts];
+}
+
+function indexProjectionItems<T extends { case_no: string }>(items: readonly T[]): ReadonlyMap<string, T> {
+  const byCaseNo = new Map<string, T>();
+  for (const item of items) {
+    if (byCaseNo.has(item.case_no)) throw new OrderStageProjectionIdentityError('projection 案件識別重複。');
+    byCaseNo.set(item.case_no, item);
+  }
+  return byCaseNo;
+}
+
+export function indexGovernmentSubsidyProjections(
+  page: GovernmentSubsidyProjectionPage,
+): ReadonlyMap<string, GovernmentSubsidyProjection> {
+  return indexProjectionItems(page.items);
+}
+
+export function indexTerminalAggregates(
+  page: TerminalAggregatePage,
+): ReadonlyMap<string, TerminalAggregate> {
+  return indexProjectionItems(page.items);
 }
 
 export function stageByCode(timeline: OrderOperationalTimeline, code: string): StageProjection | null {

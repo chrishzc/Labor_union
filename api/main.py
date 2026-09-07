@@ -95,6 +95,7 @@ from api.routes import (
     caregiver_availability_locks,
     capability_grants,
     order_actual_start,
+    order_intake_terms_bootstrap,
     order_auto_completion,
     order_cancellation,
     order_contract_completion,
@@ -107,6 +108,7 @@ from api.routes import (
     order_terms,
     orders,
     orders_card_projection,
+    orders_core_stage_projection,
     orders_stage_projection,
     payroll,
     payroll_rebuild,
@@ -116,6 +118,7 @@ from api.routes import (
     scheduling_current,
     scheduling_eligibility_collision,
     staff_matching_preferences,
+    staff_case_preference_manual,
     staff_retirement,
     staff,
     staff_qualification_master,
@@ -265,12 +268,14 @@ app.include_router(line_identity_management.router)
 app.include_router(orders.router)
 app.include_router(orders_card_projection.router)
 app.include_router(orders_stage_projection.router)
+app.include_router(orders_core_stage_projection.router)
 app.include_router(case_architecture_bootstrap.router)
 app.include_router(order_terms.router)
 app.include_router(order_contract_completion.router)
 app.include_router(contract_signing.router)
 app.include_router(contract_external_signing.router)
 app.include_router(order_actual_start.router)
+app.include_router(order_intake_terms_bootstrap.router)
 app.include_router(order_auto_completion.router)
 app.include_router(order_cancellation.router)
 app.include_router(order_reopen.router)
@@ -293,6 +298,7 @@ app.include_router(jobs.router)
 app.include_router(scheduling_current.router)
 app.include_router(scheduling_eligibility_collision.router)
 app.include_router(staff_matching_preferences.router)
+app.include_router(staff_case_preference_manual.router)
 app.include_router(multi_caregiver_case_assignments.router)
 app.include_router(multi_caregiver_case_assignments.staff_router)
 app.include_router(multi_caregiver_schedule.router)

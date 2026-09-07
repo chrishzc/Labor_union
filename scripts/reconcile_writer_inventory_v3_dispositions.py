@@ -53,11 +53,6 @@ EXACT_SOURCE_REVIEWS: dict[
         frozenset({"_mark_failed", "consume_security_alert_outbox"}),
         ("access_control", "Access-owned security alert outbox delivery state", "central worker using an explicitly composed alert sink and bounded success and failure transactions", "retain_canonical:source-locked exact Access outbox state mutations; Access owns durable intent and delivery state without importing a concrete downstream subsystem"),
     ),
-    "infrastructure/mysql/process_reminder_anomaly_source.py": (
-        "bd957704fed37ed53057413fd38d7ba7f0f8562365ead2c02dffa21c5c65a580",
-        frozenset({"_fetch"}),
-        ("anomalies", "bounded read-only process-reminder owner-fact source", "legacy AnomalyApplication maintenance flow", "retain_restricted:source-locked _fetch callsites execute SELECT-only constants and own no persistence mutation or transaction; the enclosing legacy projector runtime cutover remains tracked separately"),
-    ),
     "subsystems/case_import/hcm_resubmission_outbox_consumer.py": (
         "4673ad8e9aa881893802efe8942b746332ade6c6c8403f179c24ac12f3a99f39",
         frozenset({"_mark_failed", "_mark_published", "_record_failure", "consume_hcm_resubmission_outbox"}),
@@ -119,7 +114,7 @@ EXACT_SOURCE_REVIEWS: dict[
         ("staff_payables", "bounded historical baseline Staff Payables owner-fact query adapter", "HistoricalBaselineOwnerVectorV2Query", "retain_restricted:source-locked fixed owner-table reads use a borrowed connection and grant no mutation authority"),
     ),
     "infrastructure/mysql/data_browser_query_repository.py": (
-        "0a779627343558692412359372fe8682d376fa5d817046aa14e5f48ff0bb9404",
+        "0c3d425a9c03d0bdacc399c009f399014ec523f099eb0060c397d7a17e55ffc1",
         frozenset({"DataBrowserQueryRepository.query_page"}),
         ("access_control", "bounded canonical Data Browser query over fixed source allowlist", "authenticated data-browser source query API", "retain_restricted:source-locked source, columns, search, ordering, and limits are fixed; no arbitrary table or mutation authority"),
     ),
@@ -643,7 +638,7 @@ EXACT_IDENTITY_REVIEWS: dict[str, tuple[str, str, str, str]] = {
     "infrastructure/mysql/finance_import_repository.py:MySqlFinanceImportRepository.save_refund_return_review_receipt:execute:INSERT:client_refund_return_review_receipts:73e41bf7b1411ef0:1": (
         "client_finance", "Client Finance refund-return review receipt inside Finance Import outer Unit of Work", "typed RefundReturnReviewWorkflow", "retain_canonical:exact Client Finance review receipt uses the caller-owned transaction"
     ),
-    "infrastructure/mysql/hcm_resubmission_repository.py:MySqlHcmResubmissionRepository.apply_field_correction:execute:INSERT:case_import_hcm_correction_events:eeb562d1b19ddf45:1": (
+    "infrastructure/mysql/hcm_resubmission_repository.py:MySqlHcmResubmissionRepository.apply_field_correction:execute:INSERT:case_import_hcm_correction_events:0ce4719365153d96:1": (
         "case_import", "Case Import HCM canonical review correction evidence inside workflow outer Unit of Work", "typed HCM Resubmission Preview/Apply", "retain_canonical:exact Case Import correction event records canonical review identity and append-only expected/resulting review versions using the caller-owned transaction"
     ),
     "infrastructure/mysql/hcm_resubmission_repository.py:MySqlHcmResubmissionRepository.load_facts:execute:DYNAMIC:unknown:8533fe213130e092:1": (
@@ -661,7 +656,7 @@ EXACT_IDENTITY_REVIEWS: dict[str, tuple[str, str, str, str]] = {
     "infrastructure/mysql/service_date_confirmation_repository.py:MySqlServiceDateConfirmationRepository.save:execute:INSERT:confirmed_service_date_receipts:b5f77edb43f88e5f:1": (
         "orders", "Orders Confirmed Service Dates receipt mutation inside workflow outer Unit of Work", "typed Service Date Confirmation Apply", "retain_canonical:exact Orders-owned receipt identity; repository never commits"
     ),
-    "infrastructure/mysql/service_date_confirmation_repository.py:MySqlServiceDateConfirmationRepository.save:execute:INSERT:confirmed_service_date_versions:c7f384818ee43ace:1": (
+    "infrastructure/mysql/service_date_confirmation_repository.py:MySqlServiceDateConfirmationRepository.save:execute:INSERT:confirmed_service_date_versions:5ba170d3e62b0dbf:1": (
         "orders", "Orders Confirmed Service Dates version mutation inside workflow outer Unit of Work", "typed Service Date Confirmation Apply", "retain_canonical:exact Orders-owned version identity; repository never commits"
     ),
     "infrastructure/mysql/service_date_confirmation_repository.py:MySqlServiceDateConfirmationRepository.save:execute:UPDATE:confirmed_service_date_versions:798e57f84b6734b1:1": (
@@ -687,15 +682,21 @@ def _load(path: Path) -> list[dict[str, object]]:
 
 def _review(record: dict[str, object]) -> tuple[str, str, str, str]:
     path = str(record["relative_path"])
+    commit_review = (
+        _commit_review(str(record["identity"]))
+        if record.get("operation") == "COMMIT" else None
+    )
+    # A current exact blocker cannot inherit an older accepted review.
+    if commit_review is not None and commit_review[3].startswith("needs_decision:"):
+        return commit_review
     identity_review = EXACT_IDENTITY_REVIEWS.get(str(record["identity"]))
     if identity_review is not None:
         return identity_review
     exact = _task97_exact_review(path, str(record["symbol"]))
     if exact is not None:
         return exact
-    exact = _accepted_commit_review(str(record["identity"]))
-    if exact is not None:
-        return exact
+    if commit_review is not None:
+        return commit_review
     exact = _exact_source_review(path, str(record["symbol"]), EXACT_SOURCE_RESTRICTED_REVIEWS)
     if exact is not None:
         return exact
@@ -744,23 +745,32 @@ def _exact_source_review(
     return disposition
 
 
-def _accepted_commit_review(identity: str) -> tuple[str, str, str, str] | None:
-    """Join only an exact identity accepted by the Task 97 commit receipt."""
+def _commit_review(identity: str) -> tuple[str, str, str, str] | None:
+    """Join an exact per-identity decision without hiding aggregate blockers."""
     if not COMMIT_DISPOSITIONS.exists():
         return None
     artifact = json.loads(COMMIT_DISPOSITIONS.read_text(encoding="utf-8"))
-    if artifact.get("terminal_status") != "passed":
+    if artifact.get("terminal_status") not in {"passed", "blocked"}:
         return None
-    accepted = {
-        str(entry["identity"]): entry
-        for entry in artifact.get("entries", [])
-        if entry.get("classification") == "application_owned_legitimate_outer_uow"
-    }
-    entry = accepted.get(identity)
+    entry = next(
+        (entry for entry in artifact.get("entries", []) if entry.get("identity") == identity),
+        None,
+    )
     if entry is None:
         return None
     owner = str(entry["owner"])
     layer = str(entry["layer"])
+    if entry.get("classification") == "real_violation":
+        return (
+            owner,
+            f"blocked Task 97 {layer} commit boundary",
+            str(entry["zero_reference_oracle"]),
+            f"needs_decision:{entry['analysis_basis']} "
+            f"Remediation: {entry['replacement_or_remediation']} "
+            f"Blocker: {entry['blocker']}",
+        )
+    if entry.get("classification") != "application_owned_legitimate_outer_uow":
+        return None
     disposition = "retain_restricted" if layer in {"maintenance", "worker"} else "retain_canonical"
     return (
         owner,
@@ -1117,6 +1127,13 @@ def _legacy_line_bot_review(symbol: str) -> tuple[str, str, str, str]:
             "api/main.py mounts line.line_bot.router",
             f"retain_canonical:{replacements[symbol]}",
         )
+    if symbol == "line_bind":
+        return (
+            "line_identity",
+            "retired legacy LINE bind mutation boundary",
+            "current /api/line/bind returns typed 410 before any write path",
+            "migrate_then_remove:#251 retired the legacy bind mutation; keep only historical candidate evidence and do not restore runtime writer authority",
+        )
     replacement = replacements.get(symbol)
     if replacement is None:
         return _needs_decision_review("line/line_bot.py")
@@ -1212,8 +1229,12 @@ def main() -> int:
         if identity in reviewed_identities:
             continue
         reviewed_identities.add(identity)
+        commit_review = (
+            _commit_review(identity) if candidate.get("operation") == "COMMIT" else None
+        )
         if (
             identity not in existing
+            or (commit_review is not None and commit_review[3].startswith("needs_decision:"))
             or existing[identity].get("final_disposition") == "needs_decision"
             or str(candidate["relative_path"]) in REVIEW_REFRESH_PATHS
             or str(candidate["relative_path"]) in EXACT_SOURCE_REVIEWS

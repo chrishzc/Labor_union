@@ -193,6 +193,12 @@ class MySqlMatchingCoordinationRepository:
         for row in rows:
             receipt = _receipt_from_payload(_json_object(row["event_payload"]))
             lineage = receipt.willingness_lineage
+            # Releases before the first-package producer fix recorded the
+            # package event under caregiver_willingness even though no
+            # willing -> willing lineage existed.  Keep that committed
+            # package readable while new writes classify it as package_proposed.
+            if lineage is None and receipt.resulting_package is not None:
+                continue
             if lineage is None or lineage.event_id != str(row["event_id"]):
                 raise MatchingCoordinationPersistenceError(
                     "matching willingness lineage is incomplete"
@@ -369,9 +375,13 @@ class MySqlMatchingCoordinationRepository:
         )
         if receipt.resulting_package is not None:
             current = facts.package
-            if (
-                current is None
-                or parent is None
+            if current is None:
+                if parent is not None:
+                    raise MatchingCoordinationPersistenceError(
+                        "matching resulting package parent is stale"
+                    )
+            elif (
+                parent is None
                 or str(parent["package_id"]) != current.package_id
                 or int(parent["package_version"]) != current.version
             ):
@@ -443,7 +453,7 @@ class MySqlMatchingCoordinationRepository:
                     command.case_no,
                     snapshot_row_id,
                     package_row_id,
-                    _event_type(command),
+                    _event_type(command, receipt),
                     max(int(resulting_version) - 1, 0),
                     resulting_version,
                     _json_dump(payload),
@@ -490,7 +500,20 @@ def _event_identity(command: MatchingCommand, receipt: MatchingApplyReceipt) -> 
     return receipt.decision_event_id or f"{command.idempotency_key.value}:event"
 
 
-def _event_type(command: MatchingCommand) -> str:
+def _event_type(
+    command: MatchingCommand,
+    receipt: MatchingApplyReceipt | None = None,
+) -> str:
+    # The first willing caregiver selection also persists the selected
+    # package.  It has no willingness transition (willing -> willing), so its
+    # event belongs to package lineage rather than willingness history.
+    if (
+        type(command).__name__ == "ApplyCaregiverSelection"
+        and receipt is not None
+        and receipt.resulting_package is not None
+        and receipt.willingness_lineage is None
+    ):
+        return "package_proposed"
     event_type_by_command = {
         "ApplyInitialCriteriaSnapshot": "criteria_snapshotted",
         "ApplyCriteriaDiffResend": "criteria_diff",

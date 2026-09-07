@@ -25,7 +25,7 @@ Agent 任務分級、交付與治理路由以 `document/架構重整/00_Agent任
 - concurrency／fingerprint：只讀 `document/架構重整/01_規格基線/00_Global_共同契約.md` 的相關段落。
 - schema／migration／preserve-data／cutover：只讀 `10_Global_保留資料Migration與Cutover_Subsystem.md` 與直接相關 owner spec。
 - entry point retirement／replacement：只讀 `19_Global_Entry_Point_Governance.md` 的相關段落。
-- 驗證情境、測試資料與 coverage ID：只讀 `28_驗證情境與測試資料正式規格.md` 與對應 owner spec。
+- 驗證情境、測試資料與 coverage ID：沿用 `document/資料庫、資料處理/新版測試資料規則矩陣_草案.md` 與 `document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md` 追溯情境／coverage 來源；兩者仍為草案，業務語意以對應 current 正式 owner spec 為準。
 - LINE 服務說明、客服分類與 Rich Menu audience：只讀 `29_LINE服務說明、客服互動與選單角色正式規格.md` 及其上位規格 17、20。
 - rollback、incident、舊 release 重現或稽核：從 Git history 精準取回必要 revision，不掃描或復活已退役文件樹。
 

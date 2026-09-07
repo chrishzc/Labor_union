@@ -41,6 +41,9 @@
   - `db/schema_parts/1028_historical_service_accounting.sql`
   - `db/migration_releases/labor_union_2026_09_01_historical_service_accounting_v1.json`
   - `db/migration_releases/labor_union_2026_09_01_historical_service_accounting_v1.descriptors.json`
+  - `db/schema_parts/1031_weekly_report_batches.sql`
+  - `db/migration_releases/labor_union_2026_09_06_weekly_report_batches_v1.json`
+  - `db/migration_releases/labor_union_2026_09_06_weekly_report_batches_v1.descriptors.json`
 
 ## Contracts
 - Source read-only、candidate identity、release classification、backup／journal／resume及

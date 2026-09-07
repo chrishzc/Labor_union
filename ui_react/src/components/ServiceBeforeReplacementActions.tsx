@@ -80,11 +80,13 @@ export function ServiceBeforeReplacementActions({
   onSubstitutionReferral,
 }: ServiceBeforeReplacementActionsProps) {
   const [scenario, setScenario] = useState<ServiceBeforeReplacementScenario | ''>(initialScenario ?? '');
+  const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState<ServiceBeforeReplacementQuery | null>(null);
   const [reason, setReason] = useState('');
   const [evidenceText, setEvidenceText] = useState('');
   const [uiState, setUiState] = useState<UiState>({ type: 'querying' });
   const operationGeneration = useRef(0);
+  const expandedCaseNo = useRef<string | null>(null);
   const queryController = useRef<AbortController | null>(null);
   const previewController = useRef<AbortController | null>(null);
   const applyController = useRef<AbortController | null>(null);
@@ -115,12 +117,14 @@ export function ServiceBeforeReplacementActions({
 
   useEffect(() => {
     setScenario(initialScenario ?? '');
+    expandedCaseNo.current = null;
+    setExpanded(false);
   }, [caseNo, initialScenario]);
 
   useEffect(() => {
     setReason('');
     setEvidenceText('');
-    if (scenario === '') {
+    if (!expanded || expandedCaseNo.current !== caseNo || scenario === '') {
       setQuery(null);
       setUiState({ type: 'ready' });
       return undefined;
@@ -132,7 +136,7 @@ export function ServiceBeforeReplacementActions({
       previewController.current?.abort();
       applyController.current?.abort();
     };
-  }, [runQuery, scenario]);
+  }, [caseNo, expanded, runQuery, scenario]);
 
   const preview = async () => {
     const trimmedReason = reason.trim();
@@ -214,11 +218,24 @@ export function ServiceBeforeReplacementActions({
   };
 
   return (
-    <section aria-label="服務前換人人工修復" style={{ display: 'grid', gap: '12px' }}>
-      <header>
-        <h3 style={{ margin: 0 }}>服務前換人人工修復</h3>
-        <p style={{ margin: '4px 0 0' }}>案件 {caseNo}。修復只建立新版 successor，不會改寫舊月嫂歷史。</p>
-      </header>
+    <section aria-label="服務前換人操作" style={{ display: 'grid', gap: '12px' }}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => {
+          const next = !value;
+          expandedCaseNo.current = next ? caseNo : null;
+          return next;
+        })}
+      >
+        {expanded ? '收合換人' : '換人'}
+      </button>
+
+      {expanded && <div>
+        <header>
+          <h3 style={{ margin: 0 }}>服務前換人人工修復</h3>
+          <p style={{ margin: '4px 0 0' }}>案件 {caseNo}。修復只建立新版 successor，不會改寫舊月嫂歷史。</p>
+        </header>
 
       <label style={{ display: 'grid', gap: '4px', maxWidth: '420px' }}>
         異常情境
@@ -417,6 +434,7 @@ export function ServiceBeforeReplacementActions({
           </details>
         </div>
       )}
+      </div>}
     </section>
   );
 }

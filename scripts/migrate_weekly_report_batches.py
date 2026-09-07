@@ -1,11 +1,12 @@
 """
 File: migrate_weekly_report_batches.py
 Description: 營運週報結算批次與案件封存表 (方案 C) 之資料庫升級與初始資料匯入腳本。
-執行方式: python scripts/migrate_weekly_report_batches.py
+執行方式: python scripts/migrate_weekly_report_batches.py --target-db <DB> --confirm-target-db <DB>
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -40,6 +41,47 @@ CREATE TABLE IF NOT EXISTS `weekly_report_batch_cases` (
     CONSTRAINT `fk_batch_cases_batch` FOREIGN KEY (`batch_id`) REFERENCES `weekly_report_batches` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 """
+
+
+class MigrationTargetConfirmationError(ValueError):
+    """Operator did not provide an exact, explicit migration target confirmation."""
+
+
+class _TargetArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise MigrationTargetConfirmationError(message)
+
+
+def _confirmed_target_database(argv: list[str] | None) -> str:
+    parser = _TargetArgumentParser(
+        description="Upgrade weekly-report batch tables only after exact DB target confirmation."
+    )
+    parser.add_argument("--target-db", required=True, help="Exact database expected from SELECT DATABASE().")
+    parser.add_argument(
+        "--confirm-target-db",
+        required=True,
+        help="Repeat the exact database name to explicitly confirm the authorized target.",
+    )
+    args = parser.parse_args(argv)
+    target = args.target_db.strip()
+    confirmation = args.confirm_target_db.strip()
+    if not target:
+        raise MigrationTargetConfirmationError("target database must not be blank")
+    if target != confirmation:
+        raise MigrationTargetConfirmationError(
+            "target database and confirmation must match exactly"
+        )
+    return target
+
+
+def _live_database_name(conn) -> str | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT DATABASE()")
+        row = cur.fetchone()
+    if row is None:
+        return None
+    value = row.get("DATABASE()") if isinstance(row, dict) else row[0]
+    return value if isinstance(value, str) and value else None
 
 
 def seed_history_from_template(conn, year: int = 2026) -> int:
@@ -87,7 +129,13 @@ def seed_history_from_template(conn, year: int = 2026) -> int:
     return inserted
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    try:
+        target_database = _confirmed_target_database(argv)
+    except MigrationTargetConfirmationError as exc:
+        print(f"[ERROR] migration target confirmation required: {exc}", file=sys.stderr)
+        return 2
+
     print("=" * 60)
     print("🚀 開始執行週報批次管理資料庫升級 (weekly_report_batches)")
     print("=" * 60)
@@ -99,6 +147,16 @@ def main() -> int:
         return 1
 
     try:
+        live_database = _live_database_name(conn)
+        if live_database != target_database:
+            print(
+                "[ERROR] migration target mismatch: "
+                f"confirmed={target_database!r}, connected={live_database!r}",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"[INFO] 已確認 migration DB target: {target_database}")
+
         with conn.cursor() as cur:
             print("[INFO] 正在建立 weekly_report_batches 與 weekly_report_batch_cases 表格...")
             for statement in DDL_SQL.strip().split(";"):
